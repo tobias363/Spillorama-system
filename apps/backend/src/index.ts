@@ -21,6 +21,7 @@ import { PlatformService } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
+import { VerifyTokenService } from "./auth/VerifyTokenService.js";
 import { EmailService } from "./integration/EmailService.js";
 import { EmailQueue } from "./integration/EmailQueue.js";
 import { SveveSmsService } from "./integration/SveveSmsService.js";
@@ -461,6 +462,13 @@ const authTokenService = new AuthTokenService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
+
+// GAP #35: kort-levd (5 min) verify-token-service for pre-action password-
+// bekreftelse på sensitive handlinger (self-exclusion, withdraw, lavere
+// loss-limits). In-memory by design — TTL er kort nok at server-restart
+// ikke er et problem.
+const verifyTokenService = new VerifyTokenService();
+verifyTokenService.start();
 
 // BIN-587 B3-aml: AML red-flag service. Bruker PaymentRequestService
 // for transaksjons-spørringer ved transaction-review.
@@ -1442,6 +1450,8 @@ app.use(createAuthRouter({
   walletAdapter,
   bankIdAdapter,
   authTokenService,
+  // GAP #35: pre-action password-verify for sensitive handlinger.
+  verifyTokenService,
   emailService,
   auditLogService,
   webBaseUrl,
@@ -1477,6 +1487,11 @@ app.use(createAdminPlayersRouter({
   // BIN-702 follow-up: velkomstmail med 7-dagers password-reset-lenke
   // for spillere importert via Excel/CSV (bulk-import).
   authTokenService,
+  // REQ-097/98 + NEW-004 (wireframe PDF 17 §17.20-§17.21): admin/agent
+  // player-row action-menu med block/unblock + add-balance.
+  engine,
+  walletAdapter,
+  emitWalletRoomUpdates,
 }));
 app.use(createAdminAmlRouter({
   platformService,
@@ -2198,7 +2213,7 @@ app.use(createAdminRouter({
   hallCashLedger,
 }));
 
-app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
+app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates, verifyTokenService }));
 // PR-W2 wallet-split: admin-correction-endepunkt med regulatorisk gate
 // mot winnings-kredit (pengespillforskriften §11).
 app.use(createAdminWalletRouter({ platformService, walletAdapter, emitWalletRoomUpdates }));
@@ -2210,7 +2225,7 @@ app.use(createPaymentsRouter({
   // fail-closed med 503 slik at ops merker det med én gang i prod.
   swedbankWebhookSecret: (process.env.SWEDBANK_WEBHOOK_SECRET ?? "").trim(),
 }));
-app.use(createPaymentRequestsRouter({ platformService, paymentRequestService, emitWalletRoomUpdates }));
+app.use(createPaymentRequestsRouter({ platformService, paymentRequestService, emitWalletRoomUpdates, verifyTokenService }));
 app.use(createGameRouter({ platformService, engine, drawScheduler, emitRoomUpdate, buildRoomUpdatePayload, assertUserCanAccessRoom, assertUserCanActAsPlayer }));
 
 // BIN-FCM: notifikasjons-endpoints. Player-facing (/api/notifications*)

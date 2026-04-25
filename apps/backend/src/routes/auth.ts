@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
 import type { AuthTokenService } from "../auth/AuthTokenService.js";
+import type { VerifyTokenService } from "../auth/VerifyTokenService.js";
 import type { EmailService } from "../integration/EmailService.js";
 import type { SveveSmsService } from "../integration/SveveSmsService.js";
 import { maskPhone } from "../integration/SveveSmsService.js";
@@ -26,6 +27,14 @@ export interface AuthRouterDeps {
   walletAdapter: WalletAdapter;
   bankIdAdapter: BankIdKycAdapter | null;
   authTokenService: AuthTokenService;
+  /**
+   * GAP #35: kort-levd verify-token-service for pre-action password-bekreftelse.
+   * Brukt av sensitive endpoints (self-exclusion, withdraw-request, lavere
+   * loss-limits). Valgfri — hvis ikke wired vil `/api/auth/verify-password`
+   * ikke svare med 200, og sensitive endpoints faller tilbake til ingen
+   * verify-gate (mot legacy-paritet anbefales å alltid wire).
+   */
+  verifyTokenService?: VerifyTokenService;
   emailService: EmailService;
   /**
    * BIN-629: when present, the login endpoint emits `auth.login` /
@@ -66,6 +75,7 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     walletAdapter,
     bankIdAdapter,
     authTokenService,
+    verifyTokenService,
     emailService,
     auditLogService,
     webBaseUrl,
@@ -341,6 +351,57 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
       const newPassword = mustBeNonEmptyString(req.body?.newPassword, "newPassword");
       await platformService.changePassword(user.id, { currentPassword, newPassword });
       apiSuccess(res, { changed: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * GAP #35: pre-action password-verify (legacy `common.js:408`
+   * `VerifyPassword`-paritet).
+   *
+   * Brukeren bekrefter passordet sitt rett før en sensitiv handling
+   * (self-exclusion, uttaks-forespørsel, senking av loss-limits, m.fl.).
+   * Ved suksess utstedes et kort-levd (5 min default) single-use token som
+   * klienten må sende i `X-Verify-Token`-header på den sensitive POST-en.
+   *
+   * Kommer aldri som 200 hvis VerifyTokenService ikke er wired (501 i stedet)
+   * — vi vil aldri lyge om at verify er på plass.
+   *
+   * Feil-passord returnerer 401 INVALID_CREDENTIALS (samme code som login).
+   * Vi rate-limites av `/api/auth`-tieren (60s/20 req) som er strengt nok
+   * for normal bruk; brute-force-vinduet er svært smalt.
+   */
+  router.post("/api/auth/verify-password", async (req, res) => {
+    try {
+      if (!verifyTokenService) {
+        res.status(501).json({
+          ok: false,
+          error: {
+            code: "VERIFY_TOKEN_NOT_CONFIGURED",
+            message: "Verify-token-service er ikke konfigurert.",
+          },
+        });
+        return;
+      }
+      const user = await getAuthenticatedUser(req);
+      const password = mustBeNonEmptyString(req.body?.password, "password");
+      const ok = await platformService.verifyUserPassword(user.id, password);
+      if (!ok) {
+        res.status(401).json({
+          ok: false,
+          error: {
+            code: "INVALID_CREDENTIALS",
+            message: "Feil passord.",
+          },
+        });
+        return;
+      }
+      const result = verifyTokenService.create(user.id);
+      apiSuccess(res, {
+        verifyToken: result.token,
+        expiresAt: result.expiresAt,
+      });
     } catch (error) {
       apiFailure(res, error);
     }

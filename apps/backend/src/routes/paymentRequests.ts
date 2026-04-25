@@ -23,6 +23,8 @@ import type {
   PaymentRequestStatus,
   PaymentRequestDestinationType,
 } from "../payments/PaymentRequestService.js";
+import type { VerifyTokenService } from "../auth/VerifyTokenService.js";
+import { requireVerifyToken } from "../middleware/verifyToken.js";
 import {
   ADMIN_ACCESS_POLICY as _ADMIN_ACCESS_POLICY,
   assertAdminPermission,
@@ -46,6 +48,12 @@ export interface PaymentRequestsRouterDeps {
   platformService: PlatformService;
   paymentRequestService: PaymentRequestService;
   emitWalletRoomUpdates: (walletIds: string[]) => Promise<void>;
+  /**
+   * GAP #35: når satt, krever uttak-forespørsel et gyldig verify-token i
+   * `X-Verify-Token`-headeren. Når undefined hopper vi over verify-gating
+   * — typisk i isolerte unit-tester. Prod wirer alltid.
+   */
+  verifyTokenService?: VerifyTokenService;
 }
 
 function parseKind(value: unknown, fieldName = "type"): PaymentRequestKind {
@@ -158,12 +166,32 @@ function parseRejectionReason(value: unknown): string {
 export function createPaymentRequestsRouter(
   deps: PaymentRequestsRouterDeps
 ): express.Router {
-  const { platformService, paymentRequestService, emitWalletRoomUpdates } = deps;
+  const {
+    platformService,
+    paymentRequestService,
+    emitWalletRoomUpdates,
+    verifyTokenService,
+  } = deps;
   const router = express.Router();
 
   async function getAuthenticatedUser(req: express.Request): Promise<PublicAppUser> {
     const accessToken = getAccessTokenFromRequest(req);
     return platformService.getUserFromAccessToken(accessToken);
+  }
+
+  // GAP #35: pre-action verify-middleware for uttak. No-op når verify-
+  // service ikke er wired — testene som ikke wirer den får baseline-flow.
+  function maybeRequireVerify(): express.RequestHandler {
+    if (!verifyTokenService) {
+      return (_req, _res, next) => next();
+    }
+    return requireVerifyToken({
+      verifyTokenService,
+      getAuthenticatedUserId: async (req) => {
+        const user = await getAuthenticatedUser(req);
+        return user.id;
+      },
+    });
   }
 
   async function requireAdminPermissionUser(
@@ -319,7 +347,8 @@ export function createPaymentRequestsRouter(
     }
   });
 
-  router.post("/api/payments/withdraw-request", async (req, res) => {
+  // GAP #35: uttak er sensitivt → krev verify-token (når wired).
+  router.post("/api/payments/withdraw-request", maybeRequireVerify(), async (req, res) => {
     try {
       const user = await getAuthenticatedUser(req);
       if (!isRecordObject(req.body)) {

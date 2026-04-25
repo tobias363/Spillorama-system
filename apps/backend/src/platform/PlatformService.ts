@@ -2264,6 +2264,39 @@ export class PlatformService {
   }
 
   /**
+   * GAP #35: pre-action password-verify for sensitive handlinger.
+   *
+   * Brukes av `/api/auth/verify-password` for å bekrefte at brukeren faktisk
+   * eier sesjonen før et kort-levd verify-token utstedes. Returnerer true
+   * hvis passordet stemmer, false ellers — ingen sesjons-mutasjon, ingen
+   * passord-rotasjon. Soft-deleted brukere behandles som ukjent konto
+   * (false return, ikke throw — kallesteder bør behandle false som "feil
+   * passord" så vi ikke lekker konto-status).
+   *
+   * Timing-safe sammenlikning er allerede implementert i `verifyPassword`
+   * (timingSafeEqual). Tom hash-rad → false (ikke throw) for å unngå
+   * enumeration via timing-feil.
+   */
+  async verifyUserPassword(
+    userIdInput: string,
+    password: string
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    this.assertLoginPassword(password);
+
+    const { rows } = await this.pool.query<{ password_hash: string }>(
+      `SELECT password_hash FROM ${this.usersTable()}
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    if (!rows[0]) {
+      return false;
+    }
+    return this.verifyPassword(password, rows[0].password_hash);
+  }
+
+  /**
    * BIN-587 B2.1: sett nytt passord uten å kreve currentPassword. Brukes
    * av reset-password-flow etter at AuthTokenService har validert tokenet.
    * Revoker alle aktive sesjoner som side-effekt så tyveri via gammel
