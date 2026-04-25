@@ -4,6 +4,8 @@ import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { SwedbankPayService } from "../payments/SwedbankPayService.js";
+import type { VerifyTokenService } from "../auth/VerifyTokenService.js";
+import { requireVerifyToken } from "../middleware/verifyToken.js";
 import { buildPlayerReport, resolvePlayerReportRange, type PlayerReportPeriod } from "../spillevett/playerReport.js";
 import { emailPlayerReport, generatePlayerReportPdf } from "../spillevett/reportExport.js";
 import type { RoomSnapshot } from "../game/types.js";
@@ -26,6 +28,13 @@ export interface WalletRouterDeps {
   walletAdapter: WalletAdapter;
   swedbankPayService: SwedbankPayService;
   emitWalletRoomUpdates: (walletIds: string[]) => Promise<void>;
+  /**
+   * GAP #35: når satt, krever sensitive endpoints (self-exclusion, og
+   * loss-limit-senking) et gyldig verify-token i `X-Verify-Token`-headeren.
+   * Når undefined hopper vi over verify-gating — for enkle integrasjons-
+   * tester og for å unngå hard runtime-avhengighet. Prod wirer alltid.
+   */
+  verifyTokenService?: VerifyTokenService;
 }
 
 export function createWalletRouter(deps: WalletRouterDeps): express.Router {
@@ -35,6 +44,7 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
     walletAdapter,
     swedbankPayService,
     emitWalletRoomUpdates,
+    verifyTokenService,
   } = deps;
 
   const router = express.Router();
@@ -42,6 +52,22 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
   async function getAuthenticatedUser(req: express.Request): Promise<PublicAppUser> {
     const accessToken = getAccessTokenFromRequest(req);
     return platformService.getUserFromAccessToken(accessToken);
+  }
+
+  // GAP #35: factory som lager pre-action verify-middleware. Returnerer en
+  // no-op middleware når verifyTokenService ikke er wired (typisk i enkle
+  // unit-tester). Prod-deploy skal alltid wire verifyTokenService.
+  function maybeRequireVerify(): express.RequestHandler {
+    if (!verifyTokenService) {
+      return (_req, _res, next) => next();
+    }
+    return requireVerifyToken({
+      verifyTokenService,
+      getAuthenticatedUserId: async (req) => {
+        const user = await getAuthenticatedUser(req);
+        return user.id;
+      },
+    });
   }
 
   async function buildAuthenticatedPlayerReport(input: {
@@ -195,7 +221,9 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
     }
   });
 
-  router.post("/api/wallet/me/self-exclusion", async (req, res) => {
+  // GAP #35: self-exclusion er en sensitiv handling (1-års-binding etter
+  // legacy-paritet). Pre-action verify-token kreves når wired.
+  router.post("/api/wallet/me/self-exclusion", maybeRequireVerify(), async (req, res) => {
     try {
       const user = await getAuthenticatedUser(req);
       const compliance = await engine.setSelfExclusion(user.walletId);
@@ -215,7 +243,70 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
     }
   });
 
-  router.put("/api/wallet/me/loss-limits", async (req, res) => {
+  /**
+   * GAP #35: senking av loss-limits krever verify-token. Økning aktiveres
+   * dag/måneds-grensen senere (ComplianceManager.setPlayerLossLimits) og er
+   * ikke "umiddelbart sensitiv", men senking aktiveres med en gang og
+   * påvirker spillerens evne til å spille — derfor pre-action-verify.
+   *
+   * Vi kjører verify-middleware kun når en faktisk senking detekteres mot
+   * gjeldende state. Nyhetsverdi: sammenligner ny verdi mot getEffective-
+   * LossLimits for hallId i ComplianceManager-snapshot. Hvis verifyTokenService
+   * ikke er wired hopper vi over verify-gate (fail-open mot legacy-paritet
+   * for manglende konfig — prod skal alltid wire).
+   */
+  router.put("/api/wallet/me/loss-limits", async (req, res, next) => {
+    // Pre-handler: oppdag senking. Vi MÅ lese current state før middleware
+    // konsumerer verify-tokenet, ellers vil et "raise"-kall feilaktig brenne
+    // brukerens token. Derfor: hvis ingen senking → skip verify; hvis senking
+    // → kall middleware manuelt og deretter handler.
+    if (!verifyTokenService) {
+      // Ingen verify-gate konfigurert; fall direkte til handler.
+      next();
+      return;
+    }
+    try {
+      const user = await getAuthenticatedUser(req);
+      const hallIdRaw =
+        typeof req.body?.hallId === "string" ? req.body.hallId.trim() : "";
+      if (!hallIdRaw) {
+        // Validering vil feile i handleren; ikke krev verify her.
+        next();
+        return;
+      }
+      const dailyLossLimit = parseOptionalNonNegativeNumber(
+        req.body?.dailyLossLimit,
+        "dailyLossLimit"
+      );
+      const monthlyLossLimit = parseOptionalNonNegativeNumber(
+        req.body?.monthlyLossLimit,
+        "monthlyLossLimit"
+      );
+      const current = engine.getPlayerCompliance(user.walletId, hallIdRaw);
+      const currentDaily = current.personalLossLimits?.daily;
+      const currentMonthly = current.personalLossLimits?.monthly;
+      const isLoweringDaily =
+        dailyLossLimit !== undefined &&
+        currentDaily !== undefined &&
+        dailyLossLimit < currentDaily;
+      const isLoweringMonthly =
+        monthlyLossLimit !== undefined &&
+        currentMonthly !== undefined &&
+        monthlyLossLimit < currentMonthly;
+      if (!isLoweringDaily && !isLoweringMonthly) {
+        next();
+        return;
+      }
+      // Senking detektert → krev verify-token.
+      const middleware = requireVerifyToken({
+        verifyTokenService,
+        getAuthenticatedUserId: async () => user.id,
+      });
+      middleware(req, res, next);
+    } catch (err) {
+      apiFailure(res, err);
+    }
+  }, async (req, res) => {
     try {
       const user = await getAuthenticatedUser(req);
       const hallId = mustBeNonEmptyString(req.body?.hallId, "hallId");

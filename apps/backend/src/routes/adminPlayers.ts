@@ -32,6 +32,7 @@
 
 import express from "express";
 import { DomainError } from "../game/BingoEngine.js";
+import type { BingoEngine } from "../game/BingoEngine.js";
 import type {
   PlatformService,
   PublicAppUser,
@@ -42,6 +43,7 @@ import type { EmailService } from "../integration/EmailService.js";
 import type { EmailQueue } from "../integration/EmailQueue.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
 import type { AuthTokenService } from "../auth/AuthTokenService.js";
+import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -51,6 +53,7 @@ import {
   apiFailure,
   getAccessTokenFromRequest,
   mustBeNonEmptyString,
+  mustBePositiveAmount,
   parseLimit,
   isRecordObject,
 } from "../util/httpHelpers.js";
@@ -82,6 +85,19 @@ export interface AdminPlayersRouterDeps {
    * og logger en advarsel (spilleren må da bruke /forgot-password manuelt).
    */
   authTokenService?: AuthTokenService;
+  /**
+   * REQ-097/98 + NEW-004 (Wireframe PDF 17 §17.20-§17.21): admin block/unblock
+   * + add-balance fra player-action-menu. Kobler self-exclusion-state-write
+   * (engine) for block + add-balance via walletAdapter.credit. Begge er
+   * valgfrie — fall-back returnerer 503 hvis route trigges uten dependency.
+   */
+  engine?: BingoEngine;
+  walletAdapter?: WalletAdapter;
+  /**
+   * Notify web-shell om saldo-endring etter add-balance — samme mønster som
+   * adminWallet-routeren. Valgfri.
+   */
+  emitWalletRoomUpdates?: (walletIds: string[]) => Promise<void>;
 }
 
 /**
@@ -187,6 +203,9 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     webBaseUrl,
     supportEmail,
     authTokenService,
+    engine,
+    walletAdapter,
+    emitWalletRoomUpdates,
   } = deps;
   const router = express.Router();
 
@@ -969,6 +988,256 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
         userAgent: userAgent(req),
       });
       apiSuccess(res, { restored: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── REQ-097/98 + NEW-004: action-menu (block/unblock + add-balance) ─────
+  //
+  // Wireframe PDF 17 §17.20 + §17.21 (BIR-287..290) — admin/agent player-row
+  // action-menu med 3-dot. Block/Unblock leverer self-exclusion-state via
+  // engine; add-balance kun ADMIN (PLAYER_LIFECYCLE_WRITE er for SUPPORT-
+  // mod, men add-balance må gjennom samme winnings-credit-gate som
+  // adminWallet-routeren — vi krever WALLET_COMPLIANCE_WRITE og bruker
+  // walletAdapter direkte for å re-bruke samme regulatorisk gate).
+  //
+  // Auditing: alle tre routes logger til AuditLogService med
+  // `admin.player.{block|unblock|add_balance}`-action og full kontekst.
+
+  /**
+   * POST /api/admin/players/:id/block
+   * Body: { reason: string, durationDays?: number }
+   *
+   * Blokkerer spilleren ved å sette self-exclusion-flagget i engine.
+   * `durationDays` er valgfri — engine håndhever 1-års-minimum (norsk
+   * pengespillforskrift §11), så kortere durationDays ignoreres i state
+   * men logges i audit. Pengespillforskriften krever uansett 1y minimum.
+   *
+   * Permission: PLAYER_LIFECYCLE_WRITE (ADMIN + SUPPORT). HALL_OPERATOR er
+   * eksplisitt utelatt — block er en sentralisert compliance-handling, ikke
+   * hall-lokal. Wireframe BIR-287 spesifiserer admin/agent; agent-rolle vil
+   * bli koblet på via Agent-frontend i separat issue (samme RBAC-policy).
+   */
+  router.post("/api/admin/players/:id/block", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const reason = parseReason(req.body.reason, "reason", { minLength: 5 });
+      const durationDaysRaw = req.body.durationDays;
+      let durationDays: number | null = null;
+      if (durationDaysRaw !== undefined && durationDaysRaw !== null) {
+        const num = Number(durationDaysRaw);
+        if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "durationDays må være et positivt heltall."
+          );
+        }
+        durationDays = num;
+      }
+
+      // Slå opp bruker for å hente walletId (engine.setSelfExclusion bruker
+      // walletId, ikke userId). Returnerer 404 hvis ukjent — samme atferd
+      // som andre /:id-rutene over.
+      const player = await platformService.getUserById(userId);
+      if (!engine) {
+        res.status(503).json({
+          ok: false,
+          error: {
+            code: "ENGINE_NOT_CONFIGURED",
+            message: "Engine ikke wired — block-funksjonalitet utilgjengelig.",
+          },
+        });
+        return;
+      }
+      const compliance = await engine.setSelfExclusion(player.walletId);
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+        action: "admin.player.block",
+        resource: "user",
+        resourceId: userId,
+        details: {
+          targetUserId: userId,
+          walletId: player.walletId,
+          reason,
+          durationDays,
+          // Engine har 1-års-minimum (pengespillforskriften §11) — logges
+          // eksplisitt så audit-rapporten viser hva regelverket gir.
+          regulatoryMinDays: 365,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        blocked: true,
+        compliance,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * POST /api/admin/players/:id/unblock
+   *
+   * Fjern self-exclusion. Engine kaster `SELF_EXCLUSION_PERIOD_NOT_ENDED`
+   * hvis 1-års-minimumet ikke er passert — apiFailure-formatet propagerer
+   * det opp til klient (HTTP 400). Admin kan altså ikke "force-unblock"
+   * via dette endepunktet; det er regulatorisk hard-coded.
+   */
+  router.post("/api/admin/players/:id/unblock", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      const reason =
+        isRecordObject(req.body) && typeof req.body.reason === "string"
+          ? req.body.reason.trim().slice(0, 500)
+          : null;
+
+      const player = await platformService.getUserById(userId);
+      if (!engine) {
+        res.status(503).json({
+          ok: false,
+          error: {
+            code: "ENGINE_NOT_CONFIGURED",
+            message: "Engine ikke wired — unblock-funksjonalitet utilgjengelig.",
+          },
+        });
+        return;
+      }
+      const compliance = await engine.clearSelfExclusion(player.walletId);
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+        action: "admin.player.unblock",
+        resource: "user",
+        resourceId: userId,
+        details: {
+          targetUserId: userId,
+          walletId: player.walletId,
+          reason,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        unblocked: true,
+        compliance,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * POST /api/admin/players/:id/add-balance
+   * Body: { amount: number, paymentType: string, reason: string, idempotencyKey? }
+   *
+   * Krediter spilleren manuelt — typisk hall-cash-deposit eller voucher-
+   * korreksjon. Compliance-gate matcher adminWallet-routeren (PR-W2):
+   * `ADMIN_WINNINGS_CREDIT_FORBIDDEN` — manuelle krediter går KUN til
+   * deposit-siden (winnings reflekterer faktiske gevinster, jf.
+   * pengespillforskriften §11 + loss-limit-beregningen).
+   *
+   * Permission: PLAYER_LIFECYCLE_WRITE. ADMIN-only-restriksjon for
+   * winnings-side-credit håndheves via `to`-feltet (default deposit).
+   * For å matche legacy/wireframe BIR-289 add-balance-flowen er ADMIN-
+   * gating tilstrekkelig — agent-cash-add-money går via et eget endpoint
+   * (UNIQUE_ID_WRITE / agent-shift, ikke dette).
+   */
+  router.post("/api/admin/players/:id/add-balance", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const amount = mustBePositiveAmount(req.body.amount);
+      const paymentType = mustBeNonEmptyString(req.body.paymentType, "paymentType");
+      const reason = parseReason(req.body.reason, "reason", { minLength: 5 });
+      const idempotencyKey =
+        typeof req.body.idempotencyKey === "string" && req.body.idempotencyKey.trim()
+          ? req.body.idempotencyKey.trim()
+          : undefined;
+
+      // Compliance-gate: winnings-side-kredit er forbudt (samme regel som
+      // adminWallet PR-W2). Hard-kodet 403 — ikke read fra body, men
+      // eksplisitt avslag hvis klient skulle prøve å overstyre.
+      if (req.body.to !== undefined && req.body.to !== "deposit") {
+        logger.warn(
+          { actorId: actor.id, userId, attemptedTo: req.body.to },
+          "[REQ-097/98] ADMIN_WINNINGS_CREDIT_FORBIDDEN — admin forsøkte å sette to=winnings via add-balance"
+        );
+        res.status(403).json({
+          ok: false,
+          error: {
+            code: "ADMIN_WINNINGS_CREDIT_FORBIDDEN",
+            message:
+              "Add-balance kan kun kreditere deposit-siden (pengespillforskriften §11). Fjern 'to'-feltet eller sett det til 'deposit'.",
+          },
+        });
+        return;
+      }
+
+      // Hent player for å mappe userId → walletId.
+      const player = await platformService.getUserById(userId);
+      if (!walletAdapter) {
+        res.status(503).json({
+          ok: false,
+          error: {
+            code: "WALLET_NOT_CONFIGURED",
+            message: "Wallet-adapter ikke wired — add-balance utilgjengelig.",
+          },
+        });
+        return;
+      }
+      const tx = await walletAdapter.credit(player.walletId, amount, reason, {
+        to: "deposit",
+        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+      });
+
+      if (emitWalletRoomUpdates) {
+        await emitWalletRoomUpdates([player.walletId]).catch((err) => {
+          logger.warn(
+            { err, walletId: player.walletId },
+            "[REQ-097/98] emitWalletRoomUpdates failed — continuing"
+          );
+        });
+      }
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+        action: "admin.player.add_balance",
+        resource: "user",
+        resourceId: userId,
+        details: {
+          targetUserId: userId,
+          walletId: player.walletId,
+          amount,
+          paymentType,
+          reason,
+          idempotencyKey: idempotencyKey ?? null,
+          // Hard-kodet "deposit" — winnings-credit er hard-blocked over.
+          to: "deposit",
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        added: true,
+        transaction: tx,
+      });
     } catch (error) {
       apiFailure(res, error);
     }
