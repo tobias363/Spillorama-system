@@ -207,6 +207,7 @@ import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminReportsGame1ManagementRouter } from "./routes/adminReportsGame1Management.js";
+import { createAdminReportsGameSpecificRouter } from "./routes/adminReportsGameSpecific.js";
 import { createAdminReportsHallSpecificRouter } from "./routes/adminReportsHallSpecific.js";
 import { createAgentReportsPastWinningRouter } from "./routes/agentReportsPastWinning.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
@@ -2034,6 +2035,14 @@ app.use(createAdminReportsGame1ManagementRouter({
   platformService,
   engine,
   hallGroupService,
+}));
+// GAP #28: per-spilltype-spesifikke rapport-shapes
+// (Spill 1 bingo / Spill 2 rocket / Spill 3 monsterbingo / SpinnGo
+// spillorama). Game 4 (themebingo) avvist — deprecated per BIN-496.
+// CSV-export via ?format=csv. HALL_OPERATOR auto-scope.
+app.use(createAdminReportsGameSpecificRouter({
+  platformService,
+  engine,
 }));
 // BIN-17.36: "Hall Specific Report" (admin) — per-hall aggregat med
 // Elvis Replacement (PM-låst Appendix B) + Game 1-5 OMS/UTD/Payout%/RES.
