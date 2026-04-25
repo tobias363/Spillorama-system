@@ -284,16 +284,33 @@
   var _gameBarWalletInterval = null;
 
   // Wallet-split: vis deposit-saldo og winnings-gevinst som separate chips.
-  // Backend /api/wallet/me returnerer { balance, depositBalance, winningsBalance }.
-  // `balance` beholdes som total for legacy-compliance; UI viser split.
+  // Backend /api/wallet/me returnerer:
+  //   { balance, depositBalance, winningsBalance,            ← brutto (inkl. reservasjoner)
+  //     reservedDeposit, reservedWinnings,                    ← låst i pre-round-bonger
+  //     availableDeposit, availableWinnings, availableBalance } ← brutto - reservert
+  //
+  // Header-chip-en SKAL vise tilgjengelig (etter reservasjoner). Forhåndskjøp
+  // på ventende runde reserverer beløpet via wallet_reservations — chip-en
+  // må reflektere dette umiddelbart, ellers ser saldoen ut som den ikke
+  // oppdateres når brukeren kjøper bonger til neste runde mens aktiv runde
+  // kjører (BIN-693 + PR #495 round-state-isolation regression-fix 2026-04-25).
+  //
+  // "Lommebok"-detalj-siden bruker fortsatt brutto-saldo (`balance`) — det
+  // er riktig regnskaps-info; det er kun chip-en som skal vise tilgjengelig.
   function applyWalletToHeader(account) {
     if (!account) return;
-    var depositAmt = (typeof account.depositBalance === 'number')
-      ? account.depositBalance
-      : account.balance; // fallback for legacy adapters
-    var winningsAmt = (typeof account.winningsBalance === 'number')
-      ? account.winningsBalance
-      : 0;
+    // Foretrekk available-felt; fall tilbake til brutto for legacy-payloads
+    // (game-client socket-events sender ikke nødvendigvis available-feltene).
+    var depositAmt = (typeof account.availableDeposit === 'number')
+      ? account.availableDeposit
+      : (typeof account.depositBalance === 'number')
+        ? account.depositBalance
+        : account.balance;
+    var winningsAmt = (typeof account.availableWinnings === 'number')
+      ? account.availableWinnings
+      : (typeof account.winningsBalance === 'number')
+        ? account.winningsBalance
+        : 0;
     var depositFormatted = formatKr(depositAmt);
     var winningsFormatted = formatKr(winningsAmt);
 

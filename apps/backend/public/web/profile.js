@@ -206,14 +206,21 @@
       if (balanceEl && wallet?.account) {
         balanceEl.textContent = formatKr(wallet.account.balance);
       }
-      // Also update lobby + game-bar header chips (saldo + gevinst)
+      // Also update lobby + game-bar header chips (saldo + gevinst).
+      // Bruk available-felt så chip-en viser tilgjengelig saldo (etter
+      // pre-round-reservasjoner) — `balance` viser fortsatt brutto i
+      // selve "Lommebok"-detalj-elementet over.
       if (wallet?.account) {
-        var depositAmt = (typeof wallet.account.depositBalance === 'number')
-          ? wallet.account.depositBalance
-          : wallet.account.balance;
-        var winningsAmt = (typeof wallet.account.winningsBalance === 'number')
-          ? wallet.account.winningsBalance
-          : 0;
+        var depositAmt = (typeof wallet.account.availableDeposit === 'number')
+          ? wallet.account.availableDeposit
+          : (typeof wallet.account.depositBalance === 'number')
+            ? wallet.account.depositBalance
+            : wallet.account.balance;
+        var winningsAmt = (typeof wallet.account.availableWinnings === 'number')
+          ? wallet.account.availableWinnings
+          : (typeof wallet.account.winningsBalance === 'number')
+            ? wallet.account.winningsBalance
+            : 0;
         var depositFormatted = formatKr(depositAmt);
         var winningsFormatted = formatKr(winningsAmt);
         var headerTargets = [

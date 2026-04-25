@@ -2,7 +2,7 @@ import express from "express";
 import { DomainError } from "../game/BingoEngine.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
-import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import type { WalletAccount, WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { SwedbankPayService } from "../payments/SwedbankPayService.js";
 import { buildPlayerReport, resolvePlayerReportRange, type PlayerReportPeriod } from "../spillevett/playerReport.js";
 import { emailPlayerReport, generatePlayerReportPdf } from "../spillevett/reportExport.js";
@@ -80,8 +80,9 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
     try {
       const user = await getAuthenticatedUser(req);
       const account = await walletAdapter.getAccount(user.walletId);
+      const augmented = await augmentAccountWithReservations(walletAdapter, account);
       const transactions = await walletAdapter.listTransactions(user.walletId, 20);
-      apiSuccess(res, { account, transactions });
+      apiSuccess(res, { account: augmented, transactions });
     } catch (error) {
       apiFailure(res, error);
     }
@@ -282,8 +283,9 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
     try {
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const account = await walletAdapter.getAccount(walletId);
+      const augmented = await augmentAccountWithReservations(walletAdapter, account);
       const transactions = await walletAdapter.listTransactions(walletId, 20);
-      apiSuccess(res, { account, transactions });
+      apiSuccess(res, { account: augmented, transactions });
     } catch (error) {
       apiFailure(res, error);
     }
@@ -374,4 +376,88 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
   });
 
   return router;
+}
+
+/**
+ * Wire-shape returnert av `GET /api/wallet/me` og `GET /api/wallets/:walletId`.
+ *
+ * Utvidelse av `WalletAccount` med reservasjons-aggregering — eksponerer hvor
+ * mye av deposit-/winnings-saldoen som er "låst" av aktive pre-round-bong-
+ * reservasjoner (BIN-693), så UI kan vise *tilgjengelig* saldo i header-chip
+ * fremfor brutto-saldo som ble forvirrende etter PR #495 round-state-isolation.
+ *
+ * Felt-semantikk:
+ * - `reserved*`           — sum av reservasjons-beløp som vil trekke fra hver side.
+ *                          Beregnet med samme winnings-first-policy som `transfer()`
+ *                          benytter ved commit, så split matcher faktisk debit.
+ * - `available*`          — `*Balance - reserved*`, klemmet til ikke-negativ.
+ * - `availableBalance`    — total tilgjengelig saldo (= `availableDeposit + availableWinnings`).
+ *
+ * Brutto-feltene (`balance`, `depositBalance`, `winningsBalance`) er uendret —
+ * "Lommebok"-detalj-siden viser fortsatt total inkl. reservasjoner som riktig
+ * regnskaps-info; det er kun header-chip-en som skal vise *tilgjengelig*.
+ */
+export interface WalletAccountWithReservations extends WalletAccount {
+  /** Sum av aktive reservasjoner som vil trekke fra deposit-siden ved commit. */
+  reservedDeposit: number;
+  /** Sum av aktive reservasjoner som vil trekke fra winnings-siden ved commit. */
+  reservedWinnings: number;
+  /** depositBalance - reservedDeposit, klemmet til ikke-negativ. */
+  availableDeposit: number;
+  /** winningsBalance - reservedWinnings, klemmet til ikke-negativ. */
+  availableWinnings: number;
+  /** availableDeposit + availableWinnings. */
+  availableBalance: number;
+}
+
+/**
+ * Aggreger aktive reservasjoner og bygg ut wallet-account med
+ * available-/reserved-felt for UI-visning.
+ *
+ * Vi simulerer winnings-first-policy fra `splitDebit()` for å forutse hvilken
+ * side reservasjonen kommer til å trekke fra ved commit:
+ *
+ *   reservedFromWinnings = min(winningsBalance, totalReserved)
+ *   reservedFromDeposit  = totalReserved - reservedFromWinnings
+ *
+ * Dette matcher `WalletAdapter.transfer()` sin avsender-side oppførsel — så
+ * UI viser samme split som faktisk debit gjør ved commit.
+ *
+ * Adaptere uten reservasjons-støtte (HttpWalletAdapter, eldre adapter-versjoner)
+ * får 0 i alle reservasjons-felt — `available*` blir lik `*Balance` og
+ * oppførselen er bakover-kompatibel.
+ */
+async function augmentAccountWithReservations(
+  walletAdapter: WalletAdapter,
+  account: WalletAccount
+): Promise<WalletAccountWithReservations> {
+  let totalReserved = 0;
+  if (typeof walletAdapter.listActiveReservations === "function") {
+    try {
+      const reservations = await walletAdapter.listActiveReservations(account.id);
+      for (const r of reservations) {
+        totalReserved += r.amount;
+      }
+    } catch {
+      // Adaptere som ikke støtter reservasjoner kaster — fall tilbake til 0.
+      totalReserved = 0;
+    }
+  }
+
+  // Winnings-first: matcher splitDebit() i InMemoryWalletAdapter.
+  const reservedFromWinnings = Math.min(account.winningsBalance, totalReserved);
+  const reservedFromDeposit = totalReserved - reservedFromWinnings;
+
+  const availableDeposit = Math.max(0, account.depositBalance - reservedFromDeposit);
+  const availableWinnings = Math.max(0, account.winningsBalance - reservedFromWinnings);
+  const availableBalance = availableDeposit + availableWinnings;
+
+  return {
+    ...account,
+    reservedDeposit: reservedFromDeposit,
+    reservedWinnings: reservedFromWinnings,
+    availableDeposit,
+    availableWinnings,
+    availableBalance,
+  };
 }
