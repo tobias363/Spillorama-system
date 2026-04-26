@@ -68,6 +68,35 @@ export function createPaymentsRouter(deps: PaymentsRouterDeps): express.Router {
     }
   });
 
+  // REQ-137: pending-deposit reminder.
+  // Returnerer åpne (ikke-fullførte) Swedbank top-up-intents for innlogget
+  // spiller, yngre enn 24 timer. Lobby-shellen poller dette ved mount og
+  // hvert 5. minutt for å vise en popup-påminnelse: "Du har et åpent
+  // innskudd på X kr — vil du fullføre?".
+  router.get("/api/payments/pending-deposit", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      const intents = await swedbankPayService.listPendingIntentsForUser(user.id);
+      apiSuccess(res, { intents });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // REQ-137: stamp last_reminded_at slik at vi får audit-trail på når
+  // klienten viste reminderen. Klient styrer 5-min-intervall selv —
+  // dette endepunktet er fire-and-forget og blokkerer ikke popup-rendering.
+  router.post("/api/payments/pending-deposit/:intentId/reminded", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      const intentId = mustBeNonEmptyString(req.params.intentId, "intentId");
+      const updated = await swedbankPayService.markIntentReminded(intentId, user.id);
+      apiSuccess(res, { reminded: updated });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   router.get("/api/payments/swedbank/intents/:intentId", async (req, res) => {
     try {
       const user = await getAuthenticatedUser(req);

@@ -221,6 +221,10 @@
     if (lobbyScreen) lobbyScreen.classList.remove('is-visible');
     const fab = document.getElementById('spillvett-fab');
     if (fab) fab.hidden = true;
+    // REQ-137: stopp deposit-reminder ved logout/utgått sesjon
+    try {
+      window.dispatchEvent(new Event('spillorama:logged-out'));
+    } catch (err) { /* ignore */ }
   }
 
   function showLobby(user) {
@@ -236,6 +240,11 @@
       window.SpilloramaLobby.init();
       window.SpilloramaLobby.load();
     }
+    // REQ-137: la pending-deposit-reminder vite at vi nettopp logget inn,
+    // så den kan starte sitt 5-min-intervall.
+    try {
+      window.dispatchEvent(new Event('spillorama:logged-in'));
+    } catch (err) { /* ignore */ }
   }
 
   function setSubmitting(isSubmitting) {

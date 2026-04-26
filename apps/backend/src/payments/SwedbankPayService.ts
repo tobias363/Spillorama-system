@@ -444,6 +444,95 @@ export class SwedbankPayService {
     return this.mapRow(row);
   }
 
+  /**
+   * REQ-137: list åpne (ikke-fullførte) deposit-intents for en bruker
+   * som er yngre enn `maxAgeHours` (default 24t). Brukes av
+   * GET /api/payments/pending-deposit til å rendre lobby-popup-reminder.
+   *
+   * Status-filter speiler `swedbankPaymentSync`-cronen: vi ignorerer
+   * intents som er PAID/CREDITED/FAILED/EXPIRED/CANCELLED. Resterende
+   * statuser (INITIALIZED, AWAITING_CONSUMER, etc.) regnes som
+   * "påbegynt men ikke fullført" og dermed reminder-kandidater.
+   */
+  async listPendingIntentsForUser(
+    userId: string,
+    maxAgeHours = 24
+  ): Promise<SwedbankTopupIntent[]> {
+    await this.ensureInitialized();
+    const trimmedUserId = userId.trim();
+    if (!trimmedUserId) {
+      throw new DomainError("INVALID_INPUT", "Mangler userId for pending-deposit-oppslag.");
+    }
+    const safeHours = Number.isFinite(maxAgeHours) && maxAgeHours > 0 ? Math.floor(maxAgeHours) : 24;
+
+    const { rows } = await this.pool.query<SwedbankIntentRow>(
+      `SELECT
+         id,
+         provider,
+         user_id,
+         wallet_id,
+         order_reference,
+         payee_reference,
+         swedbank_payment_order_id,
+         amount_minor,
+         amount_major,
+         currency,
+         status,
+         checkout_redirect_url,
+         checkout_view_url,
+         credited_transaction_id,
+         credited_at,
+         last_error,
+         created_at,
+         updated_at
+       FROM ${this.intentsTable()}
+       WHERE user_id = $1
+         AND status NOT IN ('PAID', 'CREDITED', 'FAILED', 'EXPIRED', 'CANCELLED')
+         AND created_at >= now() - ($2 || ' hours')::interval
+       ORDER BY created_at DESC`,
+      [trimmedUserId, String(safeHours)]
+    );
+
+    return rows.map((row) => this.mapRow(row));
+  }
+
+  /**
+   * REQ-137: stamp `last_reminded_at` for å markere at klient har
+   * vist reminderen. Returnerer antall rader som ble oppdatert.
+   * Tabell-kolonnen er lagt til i migration
+   * 20260902000000_swedbank_intent_last_reminded_at.sql; hvis den
+   * mangler (f.eks. dev uten migration kjørt) faller vi gracefully
+   * tilbake til 0 uten å kaste.
+   */
+  async markIntentReminded(intentId: string, userId: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const trimmedId = intentId.trim();
+    const trimmedUser = userId.trim();
+    if (!trimmedId || !trimmedUser) {
+      return false;
+    }
+    try {
+      const result = await this.pool.query(
+        `UPDATE ${this.intentsTable()}
+         SET last_reminded_at = now(),
+             updated_at = now()
+         WHERE id = $1
+           AND user_id = $2`,
+        [trimmedId, trimmedUser]
+      );
+      return (result.rowCount ?? 0) > 0;
+    } catch (error) {
+      // Hvis kolonnen ennå ikke er migrert (PG-feil 42703 undefined_column)
+      // returnerer vi false — feature degraderer trygt til klient-styrt
+      // intervall uten at endpoint feiler.
+      const code = (error as { code?: string }).code;
+      if (code === "42703") {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async reconcileIntentForUser(intentId: string, userId: string): Promise<SwedbankReconcileResult> {
     await this.ensureInitialized();
     const row = await this.getIntentRowForUser(intentId, userId);
