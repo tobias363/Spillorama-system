@@ -113,6 +113,31 @@ export interface CreditOptions extends TransactionOptions {
 }
 
 /**
+ * CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): options for
+ * `creditWithClient()` — credit-flyt som kjører i en allerede-åpen
+ * transaksjon kontrollert av caller.
+ *
+ * Brukes av Game1MiniGameOrchestrator slik at wallet-credit + UPDATE av
+ * `app_game1_mini_game_results.completed_at` skjer i samme atomiske
+ * transaksjon. Uten dette: hvis credit committet og UPDATE feilet, var
+ * payout betalt ut men `completed_at` var fortsatt NULL → audit-trail
+ * divergerte (RNG ble kalt på nytt ved retry og loggboken viste siste
+ * resultat, men payout hadde første resultat).
+ *
+ * Implementasjons-krav (per adapter):
+ * - PostgresWalletAdapter bruker passed client uten å åpne ny BEGIN/COMMIT.
+ * - InMemoryWalletAdapter ignorerer client (single-threaded JS, ingen tx-grenser).
+ * - File/Http-adaptere kan implementere som alias for `credit` (best-effort).
+ *
+ * `client` er `unknown` siden PoolClient er Postgres-spesifikk; konkrete
+ * adaptere narrower til riktig type.
+ */
+export interface CreditWithClientOptions extends CreditOptions {
+  /** Postgres PoolClient (eller equivalent). Adapter narrower til konkret type. */
+  client: unknown;
+}
+
+/**
  * PR-W3 wallet-split: options for `transfer()` — target account-side for
  * CREDIT-siden av transferen (mottaker-kontoen).
  *
@@ -216,6 +241,30 @@ export interface WalletAdapter {
    * CreditOptions-JSDoc.
    */
   credit(accountId: string, amount: number, reason: string, options?: CreditOptions): Promise<WalletTransaction>;
+  /**
+   * CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): credit som deltar i
+   * caller's allerede-åpne transaksjon. Optional — adaptere som ikke
+   * støtter dette kan utelate, og caller faller tilbake til `credit()`.
+   *
+   * Når implementert: skal IKKE åpne ny BEGIN/COMMIT — kall direkte mot
+   * den passede client. Idempotency-key respekteres som vanlig.
+   *
+   * Bruk-mønster (Game1MiniGameOrchestrator):
+   *
+   * ```ts
+   * await pool.connect().then(async (client) => {
+   *   await client.query("BEGIN");
+   *   await walletAdapter.creditWithClient?.(account, amount, reason, {
+   *     client,
+   *     idempotencyKey,
+   *     to: "winnings",
+   *   });
+   *   await client.query("UPDATE ... SET completed_at = now() ...");
+   *   await client.query("COMMIT");
+   * });
+   * ```
+   */
+  creditWithClient?(accountId: string, amount: number, reason: string, options: CreditWithClientOptions): Promise<WalletTransaction>;
   /** Topup — alltid til deposit-siden (PM-beslutning, ikke overstyrbar). */
   topUp(accountId: string, amount: number, reason?: string, options?: TransactionOptions): Promise<WalletTransaction>;
   /** Withdraw — winnings-first-policy (PM-beslutning). */

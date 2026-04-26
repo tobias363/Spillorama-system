@@ -453,13 +453,27 @@ export class Game1MiniGameOrchestrator {
         choiceJson: input.choiceJson,
       });
 
-      // Utbetal payout hvis > 0. Idempotency-key forhindrer dobbel-betaling
-      // selv hvis completedAt-UPDATE rulles tilbake og vi retry-er.
+      // CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): wallet-credit
+      // skjer i SAMME transaksjon som UPDATE av completed_at, slik at
+      // payout-rad og status er atomisk. Tidligere brukte vi
+      // walletAdapter.credit() som åpnet egen tx — hvis den committet og
+      // UPDATE feilet (DB-connection drop, lock timeout), var pengene
+      // betalt ut men completed_at fortsatt NULL. Neste retry kalte
+      // handleChoice på nytt → ulik RNG → loggboken viste siste
+      // resultat, men payout hadde første resultat. Audit-trail
+      // divergerte (regulatorisk issue).
+      //
+      // Bruker creditWithClient når adapteret støtter det (Postgres),
+      // ellers fall back til legacy credit() for InMemory/Http/File
+      // (de har ingen reelle tx-grenser, så atomicity-gapet er ikke
+      // observerbart der).
       if (result.payoutCents > 0) {
-        await this.creditPayout(context, miniGameType, result.payoutCents);
+        await this.creditPayoutWithClient(client, context, miniGameType, result.payoutCents);
       }
 
       // UPDATE: sett choice + result + payout + completed_at.
+      // Hvis denne UPDATE feiler nå, ruller hele transaksjonen tilbake
+      // — inkludert credit-en — så audit-trail forblir konsistent.
       await client.query(
         `UPDATE ${this.resultsTable()}
             SET choice_json   = $2::jsonb,
@@ -675,6 +689,61 @@ export class Game1MiniGameOrchestrator {
         idempotencyKey: IdempotencyKeys.game1MiniGame({
           resultId: context.resultId,
         }),
+        to: "winnings",
+      },
+    );
+  }
+
+  /**
+   * CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): payout som deltar i
+   * caller's allerede-åpne transaksjon. Brukes fra `handleChoice` slik
+   * at credit + UPDATE er atomisk.
+   *
+   * Faller tilbake til legacy `creditPayout` (egen tx) hvis adapteret
+   * ikke implementerer `creditWithClient`. Fallback betyr at split-tx-
+   * gapet fortsatt finnes for non-Postgres-adaptere — men InMemory/File/
+   * Http har ikke samme tx-grenser, så atomicity-issuet er ikke reelt
+   * der.
+   */
+  private async creditPayoutWithClient(
+    client: PoolClient,
+    context: MiniGameTriggerContext,
+    miniGameType: MiniGameType,
+    payoutCents: number,
+  ): Promise<void> {
+    const amountKroner = payoutCents / 100;
+    const idempotencyKey = IdempotencyKeys.game1MiniGame({
+      resultId: context.resultId,
+    });
+    const reason = `Mini-game ${miniGameType} premie`;
+
+    if (this.walletAdapter.creditWithClient) {
+      await this.walletAdapter.creditWithClient(
+        context.winnerWalletId,
+        amountKroner,
+        reason,
+        {
+          client,
+          idempotencyKey,
+          to: "winnings",
+        },
+      );
+      return;
+    }
+
+    // Fallback for adaptere uten creditWithClient (InMemory/File/Http).
+    // For disse er atomicity-gapet ikke observerbart fordi de ikke har
+    // ekte transaksjons-grenser. Vi bruker legacy `credit()`.
+    log.debug(
+      { miniGameType, resultId: context.resultId },
+      "[CRIT-5] walletAdapter har ikke creditWithClient — fall back til credit()",
+    );
+    await this.walletAdapter.credit(
+      context.winnerWalletId,
+      amountKroner,
+      reason,
+      {
+        idempotencyKey,
         to: "winnings",
       },
     );
