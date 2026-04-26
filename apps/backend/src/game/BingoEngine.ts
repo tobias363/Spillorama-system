@@ -91,6 +91,13 @@ import type { LoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js
 import { NoopLoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
 import { NoopSplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
+import type {
+  ClaimAuditTrailRecoveryPort,
+  ClaimAuditTrailFailedEvent,
+  ClaimAuditTrailStep,
+  ClaimAuditTrailSeverity,
+} from "../adapters/ClaimAuditTrailRecoveryPort.js";
+import { NoopClaimAuditTrailRecoveryPort } from "../adapters/ClaimAuditTrailRecoveryPort.js";
 // Extracted helpers (refactor/s1-bingo-engine-split — Forslag A)
 import {
   activateJackpot as activateJackpotHelper,
@@ -304,6 +311,16 @@ interface ComplianceOptions {
    * utbetales. Default: no-op.
    */
   splitRoundingAudit?: SplitRoundingAuditPort;
+  /**
+   * CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): valgfri recovery-port
+   * for audit-trail-steg som feiler etter wallet-transfer. Default: no-op
+   * (kjent kostnad — feilen er kun synlig i logger, samme som før porten).
+   *
+   * Produksjon bør wire en DB-backed implementasjon som skriver til en
+   * recovery-queue-tabell, slik at en bakgrunns-job kan re-spille
+   * stegene uten manuell SQL-intervensjon.
+   */
+  claimAuditTrailRecovery?: ClaimAuditTrailRecoveryPort;
 }
 
 
@@ -339,6 +356,11 @@ export class BingoEngine {
    * multi-winner-splittingen ikke går opp. Default no-op.
    */
   protected readonly splitRoundingAudit: SplitRoundingAuditPort;
+  /**
+   * CRIT-6: recovery-port for audit-trail-steg som feiler etter wallet-
+   * transfer. Default no-op — produksjon wire-r DB-backed implementasjon.
+   */
+  protected readonly claimAuditTrailRecovery: ClaimAuditTrailRecoveryPort;
   protected readonly prizePolicy: PrizePolicyManager;
   protected readonly payoutAudit: PayoutAuditTrail;
   protected readonly ledger: ComplianceLedger;
@@ -471,6 +493,9 @@ export class BingoEngine {
     // don't need to wire anything.
     this.loyaltyHook = options.loyaltyHook ?? new NoopLoyaltyPointsHookPort();
     this.splitRoundingAudit = options.splitRoundingAudit ?? new NoopSplitRoundingAuditPort();
+    // CRIT-6: claim-audit-trail recovery port (optional). Default no-op.
+    this.claimAuditTrailRecovery =
+      options.claimAuditTrailRecovery ?? new NoopClaimAuditTrailRecoveryPort();
   }
 
   async hydratePersistentState(): Promise<void> {
@@ -1963,12 +1988,14 @@ export class BingoEngine {
           linePatternResult.claimId = claim.id;
         }
 
-        // CRIT-6: post-transfer audit-trail. Disse er best-effort —
-        // hvis de feiler er pengene allerede betalt og state allerede
-        // mutert. Logges prominent for ops-rekonsiliering. Reell
-        // atomicity (én outer DB-tx) krever at BingoEngine får
-        // pool-tilgang — det er en større refactor utenfor K2-B.
-        await this.runPostTransferClaimAuditTrail({
+        // CRIT-6: post-transfer audit-trail. Pengene er betalt og state
+        // mutert. Hvert steg kjøres sekvensielt med try/catch + recovery-
+        // port-event ved feil (slik at en bakgrunns-job kan re-spille
+        // det feilede steget). Reell tx-atomicity (én outer DB-tx) krever
+        // pool-injeksjon i BingoEngine + client-aware variants på alle 5
+        // services — utenfor scope. Se runPostTransferClaimAuditTrail-
+        // JSDoc for fullt rasjonale.
+        const auditResult = await this.runPostTransferClaimAuditTrail({
           phase: "LINE",
           room,
           game,
@@ -1981,6 +2008,7 @@ export class BingoEngine {
           channel,
           policyVersion: cappedLinePayout.policy.id,
         });
+        claim.auditTrailStatus = auditResult.status;
       }
       const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
@@ -2056,8 +2084,10 @@ export class BingoEngine {
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
 
-        // CRIT-6: post-transfer audit-trail (best-effort).
-        await this.runPostTransferClaimAuditTrail({
+        // CRIT-6: post-transfer audit-trail. Se LINE-grenen over for
+        // detaljer. Status registreres på claim slik at klient/UI kan se
+        // om audit-trailen er degradert (ops-flagg).
+        const auditResult = await this.runPostTransferClaimAuditTrail({
           phase: "BINGO",
           room,
           game,
@@ -2070,6 +2100,7 @@ export class BingoEngine {
           channel,
           policyVersion: cappedBingoPayout.policy.id,
         });
+        claim.auditTrailStatus = auditResult.status;
       }
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
@@ -2120,22 +2151,42 @@ export class BingoEngine {
    * trail for submitClaim. Kalt KUN etter at walletAdapter.transfer er
    * committet og state er mutert.
    *
-   * Reell atomicity (én outer DB-tx på tvers av alle services) krever at
-   * BingoEngine får pool-tilgang og at hver service eksponerer en
-   * client-aware variant. Dette er en større refactor utenfor K2-B —
-   * for nå sekvensierer vi best-effort I/O og logger feil prominent
-   * for ops-rekonsiliering.
+   * **Hvorfor ikke én outer DB-tx?** Reell tx-atomicity (én transaksjon
+   * på tvers av wallet-transfer + alle 5 services) krever at:
+   *   - BingoEngine får direkte pool-tilgang
+   *   - Hver service eksponerer en `*WithClient`-variant
+   *   - Hver adapter (Postgres/InMemory/File/Http) støtter client-mode
    *
-   * Hvis en av disse kastet, var pengene allerede betalt og state
-   * mutert. Vi catcher individuelt for å unngå at en feil i ett ledd
-   * blokkerer de andre — partial audit-trail er bedre enn ingen.
+   * Det er en større refactor (5+ nye service-API-er, 4 adaptere, alle
+   * subklasser av BingoEngine) som ligger utenfor scope for K2-B
+   * (atomic-coordinator-task). I tillegg er BingoEngine ad-hoc-engine
+   * som brukes av Spill 2/3 — der er regulatorisk-skarpheten lavere
+   * (scheduled Spill 1 har egen flyt via Game1PayoutService som
+   * kjører ALT i én `runInTransaction(client => …)`).
+   *
+   * **Atomicity-pattern (denne implementasjonen — CRIT-6 K3):**
+   *   1. Hvert steg kjøres sekvensielt i sin egen try/catch.
+   *   2. Hvis et steg feiler:
+   *      - Pengene er allerede betalt — ikke reversibel.
+   *      - Engine logger prominent (eksisterende oppførsel).
+   *      - Engine kaller `claimAuditTrailRecovery.onAuditTrailStepFailed`
+   *        med en strukturert event som inneholder ALL info trengt for
+   *        replay (slik at en bakgrunns-job kan re-spille det feilede
+   *        steget uten manuell SQL).
+   *   3. `claim.auditTrailStatus` settes til `"degraded"` hvis minst
+   *      ett steg feilet, ellers `"complete"`. Tester verifiserer
+   *      dette flagget.
+   *
+   * **Default no-op:** hvis ingen `claimAuditTrailRecovery`-port er
+   * konfigurert (test-defaults og enkle deploye), faller vi tilbake
+   * til log-only — som er nøyaktig oppførselen før denne K3-oppdateringen.
    *
    * Sekvens:
-   *   1. compliance.recordLossEntry  (in-memory tracking + persist)
-   *   2. ledger.recordComplianceLedgerEvent  (compliance-ledger)
-   *   3. payoutAudit.appendPayoutAuditEvent  (audit-trail med hash-chain)
-   *   4. bingoAdapter.onCheckpoint  (BIN-48 sync checkpoint via writePayoutCheckpointWithRetry)
-   *   5. rooms.persist  (HOEY-7 in-memory state-persist)
+   *   1. compliance.recordLossEntry  (PAYOUT for netto-tap)        [REGULATORY]
+   *   2. ledger.recordComplianceLedgerEvent  (§11-rapport)          [REGULATORY]
+   *   3. payoutAudit.appendPayoutAuditEvent  (hash-chain audit)     [INTERNAL]
+   *   4. bingoAdapter.onCheckpoint  (BIN-48 crash-recovery)         [INTERNAL]
+   *   5. rooms.persist  (HOEY-7 in-memory ↔ store sync)             [INTERNAL]
    */
   private async runPostTransferClaimAuditTrail(input: {
     phase: "LINE" | "BINGO";
@@ -2149,7 +2200,7 @@ export class BingoEngine {
     gameType: LedgerGameType;
     channel: LedgerChannel;
     policyVersion: string;
-  }): Promise<void> {
+  }): Promise<{ status: "complete" | "degraded"; failedSteps: ClaimAuditTrailStep[] }> {
     const {
       phase,
       room,
@@ -2164,7 +2215,15 @@ export class BingoEngine {
       policyVersion,
     } = input;
 
+    const failedSteps: ClaimAuditTrailStep[] = [];
+
     // 1) compliance.recordLossEntry — tracker PAYOUT for netto-tap-beregning.
+    const complianceLossPayload = {
+      walletId: player.walletId,
+      hallId: room.hallId,
+      type: "PAYOUT" as const,
+      amount: payout,
+    };
     try {
       await this.compliance.recordLossEntry(player.walletId, room.hallId, {
         type: "PAYOUT",
@@ -2172,6 +2231,7 @@ export class BingoEngine {
         createdAtMs: Date.now(),
       });
     } catch (err) {
+      failedSteps.push("complianceLossEntry");
       logger.error(
         {
           err,
@@ -2184,26 +2244,40 @@ export class BingoEngine {
         },
         "[CRIT-6] post-transfer compliance.recordLossEntry feilet — ops-rekonsiliering kreves; pengene er betalt"
       );
+      await this.fireRecoveryEvent({
+        step: "complianceLossEntry",
+        severity: "REGULATORY",
+        phase,
+        room,
+        game,
+        claim,
+        player,
+        payout,
+        payload: complianceLossPayload,
+        err,
+      });
     }
 
     // 2) ledger.recordComplianceLedgerEvent — regulatorisk §11-rapport.
+    const ledgerPayload = {
+      hallId: room.hallId,
+      gameType,
+      channel,
+      eventType: "PRIZE" as const,
+      amount: payout,
+      roomCode: room.code,
+      gameId: game.id,
+      claimId: claim.id,
+      playerId: player.id,
+      walletId: player.walletId,
+      sourceAccountId: transfer.fromTx.accountId,
+      targetAccountId: transfer.toTx.accountId,
+      policyVersion,
+    };
     try {
-      await this.ledger.recordComplianceLedgerEvent({
-        hallId: room.hallId,
-        gameType,
-        channel,
-        eventType: "PRIZE",
-        amount: payout,
-        roomCode: room.code,
-        gameId: game.id,
-        claimId: claim.id,
-        playerId: player.id,
-        walletId: player.walletId,
-        sourceAccountId: transfer.fromTx.accountId,
-        targetAccountId: transfer.toTx.accountId,
-        policyVersion,
-      });
+      await this.ledger.recordComplianceLedgerEvent(ledgerPayload);
     } catch (err) {
+      failedSteps.push("complianceLedgerEvent");
       logger.error(
         {
           err,
@@ -2215,24 +2289,38 @@ export class BingoEngine {
         },
         "[CRIT-6] post-transfer ledger.recordComplianceLedgerEvent feilet — REGULATORISK rekonsiliering kreves; pengene er betalt"
       );
+      await this.fireRecoveryEvent({
+        step: "complianceLedgerEvent",
+        severity: "REGULATORY",
+        phase,
+        room,
+        game,
+        claim,
+        player,
+        payout,
+        payload: ledgerPayload,
+        err,
+      });
     }
 
     // 3) payoutAudit.appendPayoutAuditEvent — internt audit-trail.
+    const auditPayload = {
+      kind: "CLAIM_PRIZE" as const,
+      claimId: claim.id,
+      gameId: game.id,
+      roomCode: room.code,
+      hallId: room.hallId,
+      policyVersion,
+      amount: payout,
+      walletId: player.walletId,
+      playerId: player.id,
+      sourceAccountId: houseAccountId,
+      txIds: [transfer.fromTx.id, transfer.toTx.id],
+    };
     try {
-      await this.payoutAudit.appendPayoutAuditEvent({
-        kind: "CLAIM_PRIZE",
-        claimId: claim.id,
-        gameId: game.id,
-        roomCode: room.code,
-        hallId: room.hallId,
-        policyVersion,
-        amount: payout,
-        walletId: player.walletId,
-        playerId: player.id,
-        sourceAccountId: houseAccountId,
-        txIds: [transfer.fromTx.id, transfer.toTx.id],
-      });
+      await this.payoutAudit.appendPayoutAuditEvent(auditPayload);
     } catch (err) {
+      failedSteps.push("payoutAuditEvent");
       logger.error(
         {
           err,
@@ -2244,10 +2332,30 @@ export class BingoEngine {
         },
         "[CRIT-6] post-transfer payoutAudit.appendPayoutAuditEvent feilet — audit-trail har gap; pengene er betalt"
       );
+      await this.fireRecoveryEvent({
+        step: "payoutAuditEvent",
+        severity: "INTERNAL",
+        phase,
+        room,
+        game,
+        claim,
+        player,
+        payout,
+        payload: auditPayload,
+        err,
+      });
     }
 
     // 4) BIN-48 checkpoint — synkron checkpoint etter payout for crash-recovery.
     if (this.bingoAdapter.onCheckpoint) {
+      const checkpointPayload = {
+        claimId: claim.id,
+        roomCode: room.code,
+        gameId: game.id,
+        payout,
+        txIds: [transfer.fromTx.id, transfer.toTx.id],
+        phase,
+      };
       try {
         await this.writePayoutCheckpointWithRetry(
           room,
@@ -2258,6 +2366,7 @@ export class BingoEngine {
           phase,
         );
       } catch (err) {
+        failedSteps.push("checkpoint");
         logger.error(
           {
             err,
@@ -2269,6 +2378,18 @@ export class BingoEngine {
           },
           "[CRIT-6] post-transfer checkpoint feilet — crash-recovery integritet redusert; pengene er betalt"
         );
+        await this.fireRecoveryEvent({
+          step: "checkpoint",
+          severity: "INTERNAL",
+          phase,
+          room,
+          game,
+          claim,
+          player,
+          payout,
+          payload: checkpointPayload,
+          err,
+        });
       }
     }
 
@@ -2276,9 +2397,83 @@ export class BingoEngine {
     try {
       await this.rooms.persist(room.code);
     } catch (err) {
+      failedSteps.push("roomPersist");
       logger.error(
         { err, roomCode: room.code, claimId: claim.id, step: "rooms.persist" },
         "[CRIT-6] post-transfer rooms.persist feilet — in-memory og store kan divergere; pengene er betalt"
+      );
+      await this.fireRecoveryEvent({
+        step: "roomPersist",
+        severity: "INTERNAL",
+        phase,
+        room,
+        game,
+        claim,
+        player,
+        payout,
+        payload: { roomCode: room.code },
+        err,
+      });
+    }
+
+    return {
+      status: failedSteps.length === 0 ? "complete" : "degraded",
+      failedSteps,
+    };
+  }
+
+  /**
+   * CRIT-6: fire-and-forget hjelper som registrerer et feilet audit-trail-
+   * steg på recovery-porten. Selve porten må ikke kaste — hvis den gjør
+   * det, faller vi tilbake til log-only (samme som før porten var wire-t).
+   *
+   * Brukes UTELUKKENDE av {@link runPostTransferClaimAuditTrail} — caller
+   * passer eksakt payload som ville blitt sendt til den feilende
+   * service-metoden, slik at recovery-job kan re-spille kallet 1:1.
+   */
+  private async fireRecoveryEvent(input: {
+    step: ClaimAuditTrailStep;
+    severity: ClaimAuditTrailSeverity;
+    phase: "LINE" | "BINGO";
+    room: RoomState;
+    game: GameState;
+    claim: ClaimRecord;
+    player: Player;
+    payout: number;
+    payload: Record<string, unknown>;
+    err: unknown;
+  }): Promise<void> {
+    const { step, severity, phase, room, game, claim, player, payout, payload, err } = input;
+    const errAsAny = err as { message?: string; code?: string };
+    const errorMessage =
+      typeof errAsAny?.message === "string" ? errAsAny.message : String(err);
+    const errorCode = typeof errAsAny?.code === "string" ? errAsAny.code : undefined;
+    const event: ClaimAuditTrailFailedEvent = {
+      step,
+      severity,
+      phase,
+      claimId: claim.id,
+      gameId: game.id,
+      roomCode: room.code,
+      hallId: room.hallId,
+      walletId: player.walletId,
+      playerId: player.id,
+      payoutAmount: payout,
+      payload,
+      errorMessage,
+      errorCode,
+      failedAt: new Date().toISOString(),
+    };
+    try {
+      await this.claimAuditTrailRecovery.onAuditTrailStepFailed(event);
+    } catch (recoveryErr) {
+      logger.error(
+        {
+          err: recoveryErr,
+          claimId: claim.id,
+          step,
+        },
+        "[CRIT-6] claimAuditTrailRecovery.onAuditTrailStepFailed kastet — recovery-event tapt, kun log-trail igjen"
       );
     }
   }
