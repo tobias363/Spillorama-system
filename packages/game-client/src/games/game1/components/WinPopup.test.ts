@@ -118,4 +118,52 @@ describe("WinPopup", () => {
     expect(closeCount).toBe(1);
     vi.useRealTimers();
   });
+
+  // BLINK-FIX (round 6) regresjonstester.
+
+  /**
+   * Round 6 hazard #4 — `wp-amount-glow` infinite text-shadow på amount-
+   * elementet. text-shadow er paint-property og infinite-animasjon over
+   * Pixi-canvas tvinger Chrome til å re-paint regionen i hver frame.
+   * Begrenset til 2 sykluser (~4.8s) som dekker hele 4s popup-vinduet.
+   */
+  it("round 6 hazard #4: wp-amount-glow er IKKE infinite (begrenset iteration-count)", () => {
+    popup.show({ rows: 1, amount: 100 });
+    const amountEl = Array.from(parent.querySelectorAll("div")).find(
+      (d) => d.textContent?.trim().endsWith("kr"),
+    );
+    expect(amountEl).toBeDefined();
+    const animation = amountEl!.style.animation;
+    expect(
+      animation,
+      `wp-amount-glow må ha begrenset iteration-count, fant: "${animation}"`,
+    ).toContain("wp-amount-glow");
+    expect(animation).not.toContain("infinite");
+  });
+
+  /**
+   * Round 6 NEW-3 — Floating clovers (14 stk) brukte `wp-float ${dur}s
+   * infinite`. 14 partikler × continuous transform/opacity-animation =
+   * vedvarende composite-trafikk. Begrenset til 1 iteration siden popupen
+   * auto-closes etter 4s og hver partikkel har dur ≥ 5s.
+   */
+  it("round 6 NEW-3: wp-float clovers er IKKE infinite", () => {
+    popup.show({ rows: 1, amount: 100 });
+    // 14 partikler genereres i buildFloatingClovers
+    const allDivs = parent.querySelectorAll("div");
+    let cloverCount = 0;
+    let infiniteCount = 0;
+    for (const div of Array.from(allDivs)) {
+      const cssText = div.style.cssText;
+      if (cssText.includes("wp-float")) {
+        cloverCount++;
+        if (cssText.includes("infinite")) infiniteCount++;
+      }
+    }
+    expect(cloverCount, "skal finnes 14 floating clovers").toBe(14);
+    expect(
+      infiniteCount,
+      `${infiniteCount} clovers har 'infinite' i animation — skal være 0`,
+    ).toBe(0);
+  });
 });

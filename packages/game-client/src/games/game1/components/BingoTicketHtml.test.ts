@@ -325,3 +325,198 @@ describe("BingoTicketHtml — BLINK-FIX (round 3) regressions", () => {
     expect(cellKeyframe![0]).toContain("transform");
   });
 });
+
+describe("BingoTicketHtml — BLINK-FIX (round 5) regressions", () => {
+  /**
+   * Round 5 hazard #1 — `transform-style: preserve-3d` permanent på alle 30
+   * bonger har samme layer-promotion-effekt som `perspective`. PR #492 fikset
+   * perspective men preserve-3d sto fortsatt permanent → 30 composite-layers
+   * gjenstod → 1/90s blink. Default må nå være `flat`.
+   */
+  it("hazard #1: default-state har transform-style: flat på inner (ingen permanent 3D-context)", () => {
+    const t = new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+    const inner = t.root.firstChild as HTMLDivElement;
+    // Default = "flat". preserve-3d settes kun under flip-animasjonen.
+    expect(inner.style.transformStyle).toBe("flat");
+  });
+
+  it("hazard #1: flip aktiverer transform-style: preserve-3d på inner", () => {
+    const t = new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+    const inner = t.root.firstChild as HTMLDivElement;
+    t.root.click();
+    expect(inner.style.transformStyle).toBe("preserve-3d");
+    // Perspective + preserve-3d aktiveres alltid sammen i samme livssyklus.
+    expect(t.root.style.perspective).toBe("1000px");
+  });
+
+  /**
+   * Round 5 hazard #2 — `transition: background 0.12s, color 0.12s` på alle
+   * grid-celler. 30 bonger × 25 celler = 750 transitionstart-events per
+   * ball-trekk. background/color er paint-properties → re-paint i mellom-
+   * frames. Markering må nå være instant (matcher Unity-paritet).
+   */
+  it("hazard #2: grid-celler har INGEN transition på background/color", () => {
+    const t = new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+    const cells = t.root.querySelectorAll<HTMLDivElement>(".ticket-grid > div");
+    expect(cells.length).toBe(25);
+    for (const cell of Array.from(cells)) {
+      const trans = cell.style.transition;
+      // Tom string ELLER "none" er OK. background/color SKAL ikke være med.
+      expect(
+        trans,
+        `Celle ${cell.dataset.number} har transition="${trans}" — paint-property-transition er blink-hazard.`,
+      ).not.toContain("background");
+      expect(trans).not.toContain("color");
+    }
+  });
+
+  /**
+   * Round 5 hazard #3 — `.bong-pulse` `z-index: 1` skapte stacking-context
+   * per pulse-celle. Late-game 30 bonger × ~3 one-to-go-celler = 90+
+   * stacking-contexts → kandidater for layer-promotion → blink. Pulse-effekten
+   * fungerer fint uten z-index (transform: scale + outline er composite-bar).
+   */
+  it("hazard #3: .bong-pulse-klassen har INGEN z-index (ingen stacking-context per pulse-celle)", () => {
+    new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    const styleEl = document.getElementById("bong-ticket-styles") as HTMLStyleElement | null;
+    expect(styleEl).not.toBeNull();
+    const css = styleEl!.textContent ?? "";
+    const bongPulseClass = css.match(/\.bong-pulse\s*\{[^}]+\}/);
+    expect(bongPulseClass).not.toBeNull();
+    expect(
+      bongPulseClass![0],
+      "z-index på .bong-pulse skaper stacking-context per pulse-celle — blink-hazard.",
+    ).not.toContain("z-index");
+    // position: relative trengs ikke heller — fjernet sammen med z-index.
+    expect(bongPulseClass![0]).not.toContain("position");
+  });
+});
+
+describe("BingoTicketHtml — BLINK-FIX (round 6) regressions", () => {
+  /**
+   * Round 6 hazard #7 — `buildElvisBanner` rev hver gang loadTicket(ticket)
+   * ble kalt på en eksisterende Elvis-bong. Selv om ticket.color var identisk
+   * med forrige snapshot, ble banner-noden revet ned og bygget på nytt
+   * (inkluderer img-decoding → kort flash mens browseren mellomlagrer
+   * pixel-buffer). Memo via `elvisBannerColorKey` skipper rebuild når farge
+   * er uendret — 0 DOM-mutasjoner, 0 img-decoding.
+   */
+  it("hazard #7: loadTicket med samme Elvis-farge skal ikke re-bygge banner-noden", () => {
+    const t = new BingoTicketHtml({
+      ticket: {
+        id: "tkt-0",
+        grid: [
+          [1, 16, 31, 46, 61],
+          [2, 17, 32, 47, 62],
+          [3, 18, 0, 48, 63],
+          [4, 19, 33, 49, 64],
+          [5, 20, 34, 50, 65],
+        ],
+        color: "elvis2",
+        type: "elvis",
+      },
+      price: 30,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+
+    const bannerBefore = t.root.querySelector(".ticket-elvis-banner");
+    expect(bannerBefore).not.toBeNull();
+
+    // loadTicket med samme color — banner-noden skal være SAMME instans
+    // (ikke replaced).
+    t.loadTicket({
+      id: "tkt-1",
+      grid: [
+        [1, 16, 31, 46, 61],
+        [2, 17, 32, 47, 62],
+        [3, 18, 0, 48, 63],
+        [4, 19, 33, 49, 64],
+        [5, 20, 34, 50, 65],
+      ],
+      color: "elvis2",
+      type: "elvis",
+    });
+
+    const bannerAfter = t.root.querySelector(".ticket-elvis-banner");
+    expect(
+      bannerAfter,
+      "banner-node skal være SAMME instans (ikke replaceWith) når color er uendret",
+    ).toBe(bannerBefore);
+  });
+
+  it("hazard #7: loadTicket med ny Elvis-farge skal fortsatt re-bygge banner", () => {
+    const t = new BingoTicketHtml({
+      ticket: {
+        id: "tkt-0",
+        grid: [
+          [1, 16, 31, 46, 61],
+          [2, 17, 32, 47, 62],
+          [3, 18, 0, 48, 63],
+          [4, 19, 33, 49, 64],
+          [5, 20, 34, 50, 65],
+        ],
+        color: "elvis1",
+        type: "elvis",
+      },
+      price: 30,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+
+    const bannerBefore = t.root.querySelector(".ticket-elvis-banner");
+    expect(bannerBefore).not.toBeNull();
+
+    // Ny farge — banner SKAL replaces så img/label oppdateres.
+    t.loadTicket({
+      id: "tkt-1",
+      grid: [
+        [1, 16, 31, 46, 61],
+        [2, 17, 32, 47, 62],
+        [3, 18, 0, 48, 63],
+        [4, 19, 33, 49, 64],
+        [5, 20, 34, 50, 65],
+      ],
+      color: "elvis5",
+      type: "elvis",
+    });
+
+    const bannerAfter = t.root.querySelector(".ticket-elvis-banner");
+    expect(bannerAfter).not.toBeNull();
+    expect(
+      bannerAfter,
+      "banner-node skal være NY instans når color faktisk endres",
+    ).not.toBe(bannerBefore);
+  });
+});

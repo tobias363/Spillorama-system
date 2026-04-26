@@ -128,4 +128,51 @@ describe("WinScreenV2", () => {
     expect(dismissCount).toBe(1);
     vi.useRealTimers();
   });
+
+  // BLINK-FIX (round 6) regresjonstester.
+
+  /**
+   * Round 6 NEW-1 — `v2-amount-glow` brukte tidligere `infinite` i animation-
+   * shorthanden. text-shadow er paint-property → infinite-animasjon over
+   * Pixi-canvas tvinger Chrome til å re-paint regionen i hver frame. Begrenset
+   * til 5 sykluser (~11s, dekker hele 10.8s screen-vinduet).
+   */
+  it("round 6 NEW-1: v2-amount-glow er IKKE infinite (begrenset iteration-count)", async () => {
+    vi.useFakeTimers();
+    screen.show({ amount: 100 });
+    // Animasjonen settes etter FOSS_DURATION_MS (3600ms) i textActiveTimer.
+    vi.advanceTimersByTime(3601);
+    const allDivs = parent.querySelectorAll<HTMLDivElement>("div");
+    const amountEl = Array.from(allDivs).find(
+      (d) => d.style.animation && d.style.animation.includes("v2-amount-glow"),
+    );
+    expect(amountEl, "amount-element med v2-amount-glow skal eksistere").toBeDefined();
+    const animation = amountEl!.style.animation;
+    expect(
+      animation,
+      `v2-amount-glow må ha begrenset iteration-count, fant: "${animation}"`,
+    ).not.toContain("infinite");
+    vi.useRealTimers();
+  });
+
+  /**
+   * Round 6 NEW-2 — `v2-sparkle` på 50 sparkles brukte `infinite`. Paint-
+   * trafikk over 10.8s screen-vinduet × 50 elementer = vedvarende
+   * composite-recalc. Begrenset til 5 sykluser.
+   */
+  it("round 6 NEW-2: v2-sparkle på sparkle-prikker er IKKE infinite", () => {
+    screen.show({ amount: 100 });
+    const allDivs = parent.querySelectorAll<HTMLDivElement>("div");
+    const sparkles = Array.from(allDivs).filter(
+      (d) => d.style.animation && d.style.animation.includes("v2-sparkle"),
+    );
+    expect(sparkles.length, "skal finnes 50 sparkle-prikker").toBe(50);
+    for (const dot of sparkles) {
+      const animation = dot.style.animation;
+      expect(
+        animation,
+        `Sparkle har animation="${animation}" — infinite skal IKKE være med (paint over Pixi).`,
+      ).not.toContain("infinite");
+    }
+  });
 });

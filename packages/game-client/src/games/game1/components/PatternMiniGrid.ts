@@ -94,6 +94,21 @@ export class PatternMiniGrid {
   readonly root: HTMLDivElement;
   private cells: HTMLDivElement[] = [];
   private animationTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Round 6 hazard #5 — frame-aligned step-tracker. setInterval(1000) kunne
+   * fyre mid-frame relativt til Pixi-render-cyclen, så DOM-mutasjonen
+   * (classList-toggle på opp til 25 celler) konkurrerte med Pixi sin neste
+   * frame for compositing. Ved å gate step-trigger via rAF-loop sikres at
+   * mutasjonen alltid skjer på frame-grensen, like før neste paint, så
+   * Pixi-renderen ikke risikerer å se halv-applisert state.
+   *
+   * Vi beholder setInterval som backbone (testene har eksakte tids-asserts)
+   * men gater kallet til highlightLines via rAF — så DOM-write venter til
+   * frame-grensen. Hvis tab er backgrounded (rAF stopper, setInterval
+   * fortsetter), faller vi tilbake til direct-call så testene fortsatt får
+   * step ved 1s-grenser.
+   */
+  private rafScheduled: number | null = null;
   /** Indices av celler som er i hit-state akkurat nå. Brukes av highlightLines
    *  for å diffe mot neste combo — kun celler som faktisk bytter state får
    *  style-writes. Uten diffing ville alle 25 celler fått 3 style-writes per
@@ -189,19 +204,43 @@ export class PatternMiniGrid {
     cell.classList.toggle("hit", hit);
   }
 
-  /** Cycler alle kombinasjoner for gitt fase (1-4), 1 sek per frame. */
+  /** Cycler alle kombinasjoner for gitt fase (1-4), 1 sek per frame.
+   *
+   *  Round 6 hazard #5 — DOM-mutasjonen (highlightLines) blir alltid scheduled
+   *  via requestAnimationFrame så den kjører på frame-grensen. setInterval er
+   *  fortsatt backbone for 1s-tempoet (testene asserter tid via vi.advanceTimers).
+   *  Hvis tab er backgrounded (rAF stopper, setInterval fortsetter med ~1s)
+   *  faller vi tilbake til direct-kall så animasjons-stepet ikke står stille. */
   private startPhaseCycleAnimation(phase: number): void {
     const combinations = this.getPhaseCombinations(phase);
     if (combinations.length === 0) return;
     let stepIndex = 0;
 
-    const step = () => {
+    const applyStep = (): void => {
       this.highlightLines(combinations[stepIndex % combinations.length]);
       stepIndex++;
     };
 
-    step();
-    this.animationTimer = setInterval(step, 1000);
+    const scheduleStep = (): void => {
+      // I jsdom/happy-dom og test-miljøer uten window/rAF — kjør direkte.
+      if (typeof requestAnimationFrame === "undefined") {
+        applyStep();
+        return;
+      }
+      // Gate via rAF så DOM-mutasjonen alltid landerseg på frame-grensen,
+      // like før neste paint. Idempotent — flere queueing-forsøk innenfor
+      // samme frame collapser til ett.
+      if (this.rafScheduled !== null) return;
+      this.rafScheduled = requestAnimationFrame(() => {
+        this.rafScheduled = null;
+        applyStep();
+      });
+    };
+
+    // Initial step uten rAF-gate så start-state vises umiddelbart (matcher
+    // forrige oppførsel og test-forventning).
+    applyStep();
+    this.animationTimer = setInterval(scheduleStep, 1000);
   }
 
   /**
@@ -280,6 +319,13 @@ export class PatternMiniGrid {
     if (this.animationTimer !== null) {
       clearInterval(this.animationTimer);
       this.animationTimer = null;
+    }
+    // Round 6 hazard #5 — kanseller eventuell pending rAF så vi ikke får et
+    // sent DOM-write etter at fasen er avsluttet (kunne ellers gi en flash
+    // av forrige fase rett etter swap).
+    if (this.rafScheduled !== null && typeof cancelAnimationFrame !== "undefined") {
+      cancelAnimationFrame(this.rafScheduled);
+      this.rafScheduled = null;
     }
     this.clearAll();
   }

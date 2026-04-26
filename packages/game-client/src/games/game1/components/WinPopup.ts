@@ -192,7 +192,14 @@ export class WinPopup {
       lineHeight: "1",
       letterSpacing: "-0.02em",
       marginBottom: shared ? "16px" : "32px",
-      animation: "wp-amount-glow 2.4s ease-in-out infinite",
+      // BLINK-FIX (round 6, hazard #4): Begrenset iteration-count fra
+      // `infinite` til 2 sykluser (~4.8s, dekker hele 4s popup-vinduet).
+      // `text-shadow` er en paint-property — infinite-animasjon over Pixi-
+      // canvas tvinger Chrome til å re-paint regionen hver frame. Ved auto-
+      // close har animasjonen rukket 2 fulle pulse-sykluser, så visuell
+      // intensjon ("pengene gløder") er bevart. CSS-allowlist oppdateres for
+      // dette navnet siden vi ikke lenger bruker `infinite`.
+      animation: "wp-amount-glow 2.4s ease-in-out 2",
     });
     card.appendChild(amountEl);
 
@@ -305,6 +312,13 @@ export class WinPopup {
       // BLINK-FIX (round 3, hazard 4): Fjernet `will-change:transform, opacity`.
       // Chrome auto-promoterer animerte elementer; `will-change` brukte
       // unødvendig GPU-minne og bidro til layer-eviction-pressure.
+      // BLINK-FIX (round 6, NEW-3): Floating clovers `wp-float` kjørte
+       // tidligere `infinite` over hele 4s popup-vinduet. 14 elementer ×
+       // continuous transform/opacity-animation = vedvarende composite-
+       // trafikk over Pixi-canvas. WinPopup auto-closes etter 4s, og hver
+       // partikkel har duration ${dur}s (5-8s). Én iteration dekker dermed
+       // popupens levetid. Eliminerer infinite-loop uten visuelt synlig
+       // forskjell.
       item.style.cssText = [
         "position:absolute",
         "top:50%",
@@ -313,7 +327,7 @@ export class WinPopup {
         `height:${size}px`,
         `margin-left:${-size / 2}px`,
         `margin-top:${-size / 2}px`,
-        `animation:wp-float ${dur}s ease-in-out ${delay}s infinite`,
+        `animation:wp-float ${dur}s ease-in-out ${delay}s 1`,
         "filter:drop-shadow(0 4px 10px rgba(0,0,0,0.35))",
       ].join(";");
       item.style.setProperty("--sx", `${sx}px`);

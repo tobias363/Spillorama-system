@@ -59,10 +59,22 @@ export class ToastNotification {
       fontWeight: "600",
       fontFamily: "inherit",
       textAlign: "center",
-      boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+      // BLINK-FIX (round 6, hazard #6): Flatere box-shadow (8px blur, 0.25
+      // opacity) i stedet for tidligere 16px/0.4. Box-shadow er paint-
+      // property — under en transform-transition kjører Chrome re-paint av
+      // shadowen i hver mellom-frame, og en stor blur-radius koster mer GPU.
+      // Visuelt nesten identisk; brettets bunnskygge er fortsatt synlig.
+      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
       opacity: "0",
       transform: "translateY(-10px)",
-      transition: "opacity 0.3s, transform 0.3s",
+      // BLINK-FIX (round 6, hazard #6): Fjernet transform fra transition-
+      // listen. Tidligere ga `transition: opacity 0.3s, transform 0.3s`
+      // dobbelt transitionstart per toast (en for hver property), og
+      // transform-transition tvinger composite-recalc i hver mellom-frame.
+      // Toast blir fortsatt fade-in/fade-out via opacity; translateY-bevegelsen
+      // settes nå instant (ingen visuell glide) for å eliminere paint-
+      // trafikken under transitionen.
+      transition: "opacity 0.3s",
       pointerEvents: "auto",
       // BIN-696: `pre-line` bevarer `\n` i meldinger som linjeskift
       // (f.eks. "Du vant 1 Rad!\nGevinst: 15 kr"), mens normal
@@ -74,10 +86,11 @@ export class ToastNotification {
     el.textContent = message;
     this.container.appendChild(el);
 
-    // Animate in
+    // Animate in — kun opacity-fade. Transform settes instant siden vi
+    // fjernet transform fra transition-listen (round 6 hazard #6).
+    el.style.transform = "translateY(0)";
     requestAnimationFrame(() => {
       el.style.opacity = "1";
-      el.style.transform = "translateY(0)";
     });
 
     // Auto-dismiss
@@ -108,8 +121,11 @@ export class ToastNotification {
   }
 
   private dismiss(el: HTMLDivElement): void {
+    // Round 6 hazard #6 — kun opacity-fade-out. Transform-bevegelsen er
+    // fjernet (snapp til translateY(-10px) skjer ikke; elementet blir
+    // bare borte når removeEl kalles). Eliminerer paint-trafikk under
+    // dismiss-transition.
     el.style.opacity = "0";
-    el.style.transform = "translateY(-10px)";
     setTimeout(() => this.removeEl(el), 300);
   }
 

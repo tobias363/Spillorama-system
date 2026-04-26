@@ -295,7 +295,13 @@ export class WinScreenV2 {
       textCol.style.opacity = "1";
       textCol.style.pointerEvents = "auto";
       headlineEl.style.animation = "v2-text-in 0.6s cubic-bezier(.2,.9,.3,1) 0s both";
-      amountEl.style.animation = "v2-text-in 0.7s cubic-bezier(.2,.9,.3,1) 0.15s both, v2-amount-glow 2.2s ease-in-out 0.9s infinite";
+      // BLINK-FIX (round 6, NEW-1): Begrenset v2-amount-glow fra `infinite`
+      // til 5 sykluser (~11s, dekker hele 10.8s screen-vinduet inkl. count-
+      // up + dwell). text-shadow er paint-property → infinite-animasjon
+      // tvinger Chrome til å re-paint regionen hver frame. Selv om Bingo-
+      // win-skjermen er sjeldne (kun ved Fullt Hus), står den oppe lenge
+      // nok til at infinite-glow er en blink-bidragsyter mens den vises.
+      amountEl.style.animation = "v2-text-in 0.7s cubic-bezier(.2,.9,.3,1) 0.15s both, v2-amount-glow 2.2s ease-in-out 0.9s 5";
       sublineEl.style.animation = "v2-text-in 0.6s cubic-bezier(.2,.9,.3,1) 0.35s both";
       btnRow.style.animation = "v2-fade-in 0.8s ease-out 0.8s both";
       this.startCountUp(opts.amount, amountEl);
@@ -357,7 +363,12 @@ export class WinScreenV2 {
         height: `${size}px`,
         borderRadius: "999px",
         background: "#f5c842",
-        animation: `v2-sparkle 2.5s ease-in-out ${delay}s infinite`,
+        // BLINK-FIX (round 6, NEW-2): 50 sparkles × infinite v2-sparkle (2.5s)
+        // = vedvarende composite-trafikk over Fullt Hus-vinnerskjermen.
+        // 5 iterations + 3s delay-spread = 12.5s + 3s = 15.5s, dekker hele
+        // 10.8s screen-vinduet med margin. Bevarer glitter-utseendet siden
+        // partiklene fortsatt fader inn/ut individuelt.
+        animation: `v2-sparkle 2.5s ease-in-out ${delay}s 5`,
         boxShadow: "0 0 6px #f5c842",
       });
       container.appendChild(dot);
