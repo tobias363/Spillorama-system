@@ -3,10 +3,11 @@
  * Extracted from index.ts. Stateless — all mutable data is passed as arguments.
  */
 import type { RoomSnapshot, RoomSummary, Ticket } from "../game/types.js";
+import type { PatternDefinition } from "@spillorama/shared-types/game";
 import type { DrawScheduler } from "../draw-engine/DrawScheduler.js";
 import type { BingoSchedulerSettings } from "./bingoSettings.js";
 import type { GameVariantConfig, TicketTypeConfig } from "../game/variantConfig.js";
-import { expandSelectionsToTicketColors, getDefaultVariantConfig } from "../game/variantConfig.js";
+import { expandSelectionsToTicketColors, getDefaultVariantConfig, patternConfigToDefinitions } from "../game/variantConfig.js";
 import { roundCurrency } from "./currency.js";
 
 // ── Room priority ──────────────────────────────────────────────────────────────
@@ -140,6 +141,20 @@ export type RoomUpdatePayload = RoomSnapshot & {
       prize: number;
       isDisplay: boolean;
     };
+    /**
+     * Pre-game pattern preview (premie-rader bug-fix 2026-04-26).
+     *
+     * `currentGame.patterns` only exists when a round is active. Before the
+     * first round, the client had no pattern data and `CenterTopPanel`
+     * fell back to placeholder pills with `prize1: 0`. Surface the variant
+     * config's `patterns` here so the client can render real prize names
+     * + amounts in the combo panel before the game starts.
+     *
+     * Optional — older clients ignore this and continue to read patterns
+     * from `currentGame.patterns` when the round is RUNNING. New clients
+     * fall back to this when `state.patterns` is empty (pre-game).
+     */
+    patterns?: PatternDefinition[];
   };
 };
 
@@ -268,6 +283,15 @@ export function buildRoomUpdatePayload(
   const variantEntryFee = snapshot.currentGame?.entryFee && snapshot.currentGame.entryFee > 0
     ? snapshot.currentGame.entryFee
     : opts.getRoomConfiguredEntryFee(snapshot.code);
+  // Pre-game premie-rad fix (2026-04-26): expose variant patterns so the
+  // client's CenterTopPanel can show real prize amounts before the first
+  // round starts. `effectiveConfig.patterns` is `PatternConfig[]` — same
+  // shape engine reads — converted to wire-compatible `PatternDefinition[]`.
+  // Empty array when variant has no top-level patterns (e.g. patternsByColor
+  // variants); client falls back to placeholders in that case (current behaviour).
+  const variantPatterns = effectiveConfig.patterns && effectiveConfig.patterns.length > 0
+    ? patternConfigToDefinitions(effectiveConfig.patterns)
+    : undefined;
   const gameVariant = {
     gameType: effectiveGameType,
     ticketTypes: effectiveConfig.ticketTypes,
@@ -277,6 +301,8 @@ export function buildRoomUpdatePayload(
     /** Per-ticket entry fee — populated even when no game is RUNNING so the
      *  buy popup can show real prices on first render. */
     entryFee: variantEntryFee,
+    // Pre-game premie-rad fix (2026-04-26).
+    patterns: variantPatterns,
   };
 
   // ── G15 (BIN-431): Enrich tickets with detail fields for flip-to-details ───

@@ -301,6 +301,18 @@ export class GameBridge {
       this.state.serverTimestamp = payload.serverTimestamp;
     }
 
+    // Pre-game premie-rad fix (2026-04-26): same fallback as handleRoomUpdate.
+    // Pulling variant patterns into state.patterns lets CenterTopPanel render
+    // real prize amounts on the room:create / room:join ack — before any
+    // room:update push lands.
+    if (
+      this.state.patterns.length === 0
+      && payload.gameVariant?.patterns
+      && payload.gameVariant.patterns.length > 0
+    ) {
+      this.state.patterns = payload.gameVariant.patterns as GameState["patterns"];
+    }
+
     this.emit("stateChanged", this.state);
   }
 
@@ -405,6 +417,18 @@ export class GameBridge {
       this.state.gameStatus = "NONE";
       this.state.gameId = null;
       this.lastAppliedDrawIndex = -1;
+    }
+
+    // Pre-game premie-rad fix (2026-04-26): if no current game has populated
+    // `state.patterns`, fall back to the variant's pre-game preview so
+    // CenterTopPanel can render real prize amounts instead of 0-kr placeholders.
+    // Mid-round, currentGame.patterns wins (already applied by applyGameSnapshot).
+    if (
+      this.state.patterns.length === 0
+      && payload.gameVariant?.patterns
+      && payload.gameVariant.patterns.length > 0
+    ) {
+      this.state.patterns = payload.gameVariant.patterns as GameState["patterns"];
     }
 
     // Detect game lifecycle transitions

@@ -214,6 +214,15 @@ const GameVariantSchema = z.object({
    * configured fee when between rounds.
    */
   entryFee: z.number().optional(),
+  /**
+   * Pre-game pattern preview (premie-rader bug-fix 2026-04-26).
+   *
+   * `currentGame.patterns` only exists when a round is active. Surface
+   * the variant config's patterns here so the client can render real
+   * prize-amounts in CenterTopPanel before the first round. Optional;
+   * older backends omit this and clients keep their placeholder pills.
+   */
+  patterns: z.array(PatternDefinitionSchema).optional(),
 });
 
 /**

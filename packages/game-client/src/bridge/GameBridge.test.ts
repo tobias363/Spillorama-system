@@ -863,4 +863,76 @@ describe("GameBridge", () => {
       expect(events.map((e) => e.balance)).toEqual([256, 256, 256, 640, 640, 640, 256, 256]);
     });
   });
+
+  // ── Pre-game premie-rad fix (2026-04-26) ────────────────────────────
+  // Bug: client mottok room:update uten patterns før første runde startet.
+  // CenterTopPanel falt tilbake til placeholder-pills med 0 kr. Fixen er at
+  // backend serialiserer variant-config sine patterns på `gameVariant.patterns`,
+  // og bridgen bruker dem som fallback når `currentGame.patterns` er tom.
+
+  describe("gameVariant.patterns fallback (premie-rad fix 2026-04-26)", () => {
+    const variantPatterns = [
+      { id: "p0", name: "1 Rad", claimType: "LINE" as const, prizePercent: 0, order: 0, design: 1, winningType: "fixed" as const, prize1: 100 },
+      { id: "p1", name: "Full House", claimType: "BINGO" as const, prizePercent: 0, order: 1, design: 5, winningType: "fixed" as const, prize1: 1000 },
+    ];
+
+    it("populates state.patterns from gameVariant.patterns when no currentGame", () => {
+      bridge.start("player-1");
+      socket.fire("roomUpdate", makeRoomUpdate({
+        gameVariant: {
+          gameType: "bingo",
+          ticketTypes: [],
+          patterns: variantPatterns,
+        },
+      }));
+      const state = bridge.getState();
+      expect(state.patterns).toEqual(variantPatterns);
+    });
+
+    it("currentGame.patterns wins over gameVariant.patterns (mid-round)", () => {
+      bridge.start("player-1");
+      const gamePatterns = [
+        { id: "g0", name: "1 Rad", claimType: "LINE" as const, prizePercent: 30, order: 0, design: 1 },
+      ];
+      socket.fire("roomUpdate", makeRoomUpdate({
+        currentGame: makeGameSnapshot({ patterns: gamePatterns }),
+        gameVariant: {
+          gameType: "bingo",
+          ticketTypes: [],
+          patterns: variantPatterns,
+        },
+      }));
+      const state = bridge.getState();
+      // currentGame source-of-truth during a round.
+      expect(state.patterns).toEqual(gamePatterns);
+    });
+
+    it("does nothing when gameVariant.patterns is missing (back-compat)", () => {
+      bridge.start("player-1");
+      socket.fire("roomUpdate", makeRoomUpdate({
+        gameVariant: {
+          gameType: "bingo",
+          ticketTypes: [],
+          // patterns omitted — older backends behave this way.
+        },
+      }));
+      const state = bridge.getState();
+      expect(state.patterns).toEqual([]);
+    });
+
+    it("applySnapshot (room:create ack) also picks up variant patterns", () => {
+      bridge.start("player-1");
+      const snapshotWithVariant = {
+        ...makeRoomSnapshot(),
+        gameVariant: {
+          gameType: "bingo",
+          ticketTypes: [],
+          patterns: variantPatterns,
+        },
+      } as RoomSnapshot;
+      bridge.applySnapshot(snapshotWithVariant);
+      const state = bridge.getState();
+      expect(state.patterns).toEqual(variantPatterns);
+    });
+  });
 });
