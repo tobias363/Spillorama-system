@@ -226,7 +226,27 @@ export interface MiniGameRotationState {
  *
  * `rotationState.counter` mutates in place so successive calls produce the
  * rotation sequence (samme semantikk som `this.miniGameCounter += 1` tidligere).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * TESTING-OVERRIDE — backport av PR #555 til ad-hoc-engine (Tobias 2026-04-26):
+ *
+ * Inntil admin-UI for å styre per-spill mini-game-valg er på plass, bruker vi
+ * `mysteryGame` som default mini-game for ALLE Fullt Hus-vinster — uavhengig
+ * av rotasjons-counter. Scheduled-engine fikk dette fixet i PR #555
+ * (Game1MiniGameOrchestrator.maybeTriggerFor); ad-hoc-engine fikk det ikke,
+ * så Tobias' live-spill via `room:create` fortsatte å se wheel/chest/colorDraft
+ * i rotasjon.
+ *
+ * Når admin-control lander, settes `MYSTERY_FORCE_DEFAULT_FOR_TESTING` til
+ * `false` og logikken returnerer til vanlig FIFO-rotasjon basert på
+ * `MINIGAME_ROTATION`-counteren.
+ *
+ * Rollback: sett konstanten til `false` (eller fjern hele if-grenen og behold
+ * `else`-greinens body som før).
+ * ─────────────────────────────────────────────────────────────────────────────
  */
+export const MYSTERY_FORCE_DEFAULT_FOR_TESTING = true;
+
 export function activateMiniGame(
   ctx: MiniGamesContext,
   rotationState: MiniGameRotationState,
@@ -238,9 +258,19 @@ export function activateMiniGame(
   if (!game) return null;
   if (game.miniGame) return game.miniGame; // Already activated
 
-  const rotation = MINIGAME_ROTATION;
-  const type: MiniGameType = rotation[rotationState.counter % rotation.length];
-  rotationState.counter += 1;
+  let type: MiniGameType;
+  if (MYSTERY_FORCE_DEFAULT_FOR_TESTING) {
+    // Force mysteryGame — bypass rotasjons-counter. Match scheduled-engine
+    // (PR #555) som forcer "mystery" via Game1MiniGameOrchestrator.
+    type = "mysteryGame";
+    // Inkrementer counter likevel så rotasjonen ikke "henger" på samme indeks
+    // når flagget skrus av — gir deterministisk recovery til FIFO-rekkefølge.
+    rotationState.counter += 1;
+  } else {
+    const rotation = MINIGAME_ROTATION;
+    type = rotation[rotationState.counter % rotation.length];
+    rotationState.counter += 1;
+  }
 
   const miniGame: MiniGameState = {
     playerId,
