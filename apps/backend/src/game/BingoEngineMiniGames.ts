@@ -227,11 +227,28 @@ export interface MiniGameRotationState {
 }
 
 /**
- * Activate a mini-game for a player (called after BINGO win in Game 1).
- * Rotates wheelOfFortune → treasureChest → mysteryGame → colorDraft.
+ * Testing-flag: tving Mystery som default mini-game ved Fullt Hus
+ * i ad-hoc-engine. Speiler scheduled-engine sin
+ * `Game1MiniGameOrchestrator.maybeTriggerFor` (PR #555 d4a7f16a) slik at
+ * Tobias' QA-sesjoner får forutsigbar Mystery-aktivering uten å avhenge
+ * av rotasjonens posisjon. Settes til `false` for å gjenoppta
+ * wheelOfFortune → treasureChest → mysteryGame → colorDraft-rotasjonen.
  *
- * `rotationState.counter` mutates in place so successive calls produce the
- * rotation sequence (samme semantikk som `this.miniGameCounter += 1` tidligere).
+ * **Note:** ad-hoc-engine bruker legacy-unionen `"mysteryGame"` (ikke
+ * scheduled-engine sin `"mystery"`-union). Verdien er hardkodet i
+ * `MINIGAME_ROTATION` over og brukes ved string-lookup nedenfor.
+ */
+const MYSTERY_FORCE_DEFAULT_FOR_TESTING = true;
+
+/**
+ * Activate a mini-game for a player (called after BINGO win in Game 1).
+ * Default-rotasjon: wheelOfFortune → treasureChest → mysteryGame → colorDraft.
+ * Når `MYSTERY_FORCE_DEFAULT_FOR_TESTING` er aktiv → tving alltid mysteryGame
+ * (testing-only — backport av PR #555).
+ *
+ * `rotationState.counter` mutates in place så rotasjonen er stabil mellom
+ * runder også når mystery-flagget er av (samme semantikk som tidligere
+ * `this.miniGameCounter += 1`).
  */
 export function activateMiniGame(
   ctx: MiniGamesContext,
@@ -245,7 +262,18 @@ export function activateMiniGame(
   if (game.miniGame) return game.miniGame; // Already activated
 
   const rotation = MINIGAME_ROTATION;
-  const type: MiniGameType = rotation[rotationState.counter % rotation.length];
+  // Backport PR #555: tving Mystery som default ved Fullt Hus så lenge
+  // testing-flagget er aktivt. Rotasjons-counteren tikker uansett — hvis
+  // flagget slås av igjen, fortsetter rotasjonen fra forventet posisjon.
+  let type: MiniGameType;
+  if (
+    MYSTERY_FORCE_DEFAULT_FOR_TESTING &&
+    rotation.includes("mysteryGame" as MiniGameType)
+  ) {
+    type = "mysteryGame";
+  } else {
+    type = rotation[rotationState.counter % rotation.length];
+  }
   rotationState.counter += 1;
 
   const miniGame: MiniGameState = {
