@@ -758,6 +758,11 @@ const auditLogStore: AuditLogStore = platformConnectionString
   : new InMemoryAuditLogStore();
 const auditLogService = new AuditLogService(auditLogStore);
 
+// Scenario A (2026-04-26): wire audit-logger into SwedbankPayService so
+// every successful online top-up emits payment.online.completed
+// (regulatorisk pengespillforskriften-trail).
+swedbankPayService.setAuditLogger(auditLogService);
+
 // BIN-720: Profile Settings API — service (router wires mot slutten av
 // filen, sammen med andre app.use-kall). Tilgjengelig kun når
 // responsibleGamingStore er oppsatt; uten RG-persistence kan pending

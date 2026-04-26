@@ -1,7 +1,11 @@
 import express from "express";
 import { toPublicError } from "../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
-import type { SwedbankPayService } from "../payments/SwedbankPayService.js";
+import {
+  SwedbankPayService,
+  normalisePaymentMethod,
+  SUPPORTED_PAYMENT_METHODS,
+} from "../payments/SwedbankPayService.js";
 import {
   SWEDBANK_SIGNATURE_HEADER,
   verifySwedbankSignature,
@@ -14,6 +18,7 @@ import {
   mustBePositiveAmount,
   parseBooleanEnv,
 } from "../util/httpHelpers.js";
+import { DomainError } from "../game/BingoEngine.js";
 
 export interface PaymentsRouterDeps {
   platformService: PlatformService;
@@ -49,6 +54,69 @@ export function createPaymentsRouter(deps: PaymentsRouterDeps): express.Router {
         userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined
       });
       apiSuccess(res, intent);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * Scenario A (2026-04-26): unified online-deposit endpoint.
+   *
+   * Replaces the legacy `/swedbank/topup-intent` shape with explicit
+   * paymentMethod selection (Vipps / Visa Debit / MC Debit / Apple Pay /
+   * Google Pay). Returns checkoutUrl which the player-shell uses to
+   * redirect/iframe-embed the Swedbank widget.
+   *
+   * Body: { amount: number (NOK), paymentMethod: PaymentMethod,
+   *         vippsPhoneNumber?: string }
+   * Response: { checkoutUrl, intent }
+   *
+   * REGULATORY: paymentMethod is required so we can route to debit-only
+   * variants. Backend ALSO enforces debit-only at reconcile-time —
+   * see SwedbankPayService.reconcileRow.
+   */
+  router.post("/api/payments/topup-online", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      const amount = mustBePositiveAmount(req.body?.amount);
+
+      const MIN_TOPUP_NOK = 10;
+      const MAX_TOPUP_NOK = 10000;
+      if (amount < MIN_TOPUP_NOK) {
+        throw new DomainError("AMOUNT_TOO_SMALL", `Minimum innskudd er ${MIN_TOPUP_NOK} kr.`);
+      }
+      if (amount > MAX_TOPUP_NOK) {
+        throw new DomainError("AMOUNT_TOO_LARGE", `Maks innskudd per transaksjon er ${MAX_TOPUP_NOK} kr.`);
+      }
+
+      const rawMethod = req.body?.paymentMethod;
+      if (typeof rawMethod !== "string" || !rawMethod.trim()) {
+        throw new DomainError(
+          "INVALID_PAYMENT_METHOD",
+          `paymentMethod er påkrevd. Velg en av: ${SUPPORTED_PAYMENT_METHODS.join(", ")}.`
+        );
+      }
+      const paymentMethod = normalisePaymentMethod(rawMethod);
+
+      const vippsPhoneNumber =
+        typeof req.body?.vippsPhoneNumber === "string" && req.body.vippsPhoneNumber.trim().length > 0
+          ? req.body.vippsPhoneNumber.trim()
+          : undefined;
+
+      const intent = await swedbankPayService.createTopupIntent({
+        userId: user.id,
+        walletId: user.walletId,
+        amountMajor: amount,
+        userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined,
+        paymentMethod,
+        vippsPhoneNumber,
+      });
+
+      const checkoutUrl = intent.redirectUrl ?? intent.viewUrl ?? null;
+      apiSuccess(res, {
+        intent,
+        checkoutUrl,
+      });
     } catch (error) {
       apiFailure(res, error);
     }
