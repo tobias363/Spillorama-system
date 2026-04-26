@@ -61,6 +61,17 @@ export interface Game1PlayerPatternWonEvent {
   winnerCount: number;
   /** 0-basert draw-index der fasen ble vunnet. */
   drawIndex: number;
+  /**
+   * BIN-696 / Tobias 2026-04-26: per-winner split-amount i kr (uten
+   * jackpot-bonus). Kreves av klient-popup (WinPopup/WinScreenV2) for
+   * å vise faktisk credited beløp. 0 hvis ikke wired (back-compat).
+   */
+  payoutAmount: number;
+  /**
+   * BIN-696: claim-type — "LINE" for fase 1-4, "BINGO" for Fullt Hus.
+   * Brukes til popup-routing i Game1Controller.onPatternWon.
+   */
+  claimType: "LINE" | "BINGO";
 }
 
 export interface Game1PlayerBroadcaster {

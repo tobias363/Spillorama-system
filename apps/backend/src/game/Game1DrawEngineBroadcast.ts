@@ -70,7 +70,9 @@ export function emitPlayerPatternWon(
   patternName: string,
   phase: number,
   winnerIds: string[],
-  drawIndex0Based: number
+  drawIndex0Based: number,
+  payoutAmountKr: number,
+  claimType: "LINE" | "BINGO"
 ): void {
   if (!playerBroadcaster) return;
   try {
@@ -82,6 +84,8 @@ export function emitPlayerPatternWon(
       winnerIds,
       winnerCount: winnerIds.length,
       drawIndex: drawIndex0Based,
+      payoutAmount: payoutAmountKr,
+      claimType,
     });
   } catch (err) {
     log.warn(

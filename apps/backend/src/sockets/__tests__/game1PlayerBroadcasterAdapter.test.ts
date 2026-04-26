@@ -74,6 +74,11 @@ test("onPatternWon: emitter pattern:won til roomCode med winnerIds + winnerCount
     winnerIds: ["u-a", "u-b"],
     winnerCount: 2,
     drawIndex: 5,
+    // BIN-696 / Tobias 2026-04-26: per-winner split-amount (kr) + claimType
+    // — 200 kr / 2 vinnere = 100 kr per vinner. Kreves for at klient-popup
+    // skal vise faktisk credited beløp og kunne route LINE/BINGO.
+    payoutAmount: 100,
+    claimType: "LINE",
   });
 
   assert.equal(emits.length, 1);
@@ -88,6 +93,9 @@ test("onPatternWon: emitter pattern:won til roomCode med winnerIds + winnerCount
   assert.equal(payload.winnerCount, 2);
   // Legacy-kompat: `winnerId` (singular) = første winner.
   assert.equal(payload.winnerId, "u-a");
+  // BIN-696: payoutAmount + claimType skal proxies inn i payloaden.
+  assert.equal(payload.payoutAmount, 100);
+  assert.equal(payload.claimType, "LINE");
 });
 
 test("onRoomUpdate: kaller emitRoomUpdate-hooken fire-and-forget", async () => {
