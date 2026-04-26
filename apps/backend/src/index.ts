@@ -127,6 +127,7 @@ import { StubMetroniaApiClient } from "./integration/metronia/StubMetroniaApiCli
 import type { MetroniaApiClient } from "./integration/metronia/MetroniaApiClient.js";
 import { createAgentOpenDayRouter } from "./routes/agentOpenDay.js";
 import { createAdminHallReportsRouter } from "./routes/adminHallReports.js";
+import { createAdminGroupHallReportsRouter } from "./routes/adminGroupHallReports.js";
 import { AgentOpenDayService } from "./agent/AgentOpenDayService.js";
 import { HallAccountReportService } from "./compliance/HallAccountReportService.js";
 import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
@@ -2062,6 +2063,15 @@ app.use(createAgentOpenDayRouter({
 app.use(createAdminHallReportsRouter({
   platformService,
   auditLogService,
+  reportService: hallAccountReportService,
+}));
+// REQ-143: aggregert per-group-of-hall hall-account-rapport. Multi-hall-
+// operatorer (HALL_OPERATOR med medlemskap) ser kun grupper hvor egen hall
+// er medlem; ADMIN/SUPPORT ser alle grupper. Aggregerer daily/monthly/balance
+// over alle medlemshaller per (date, gameType).
+app.use(createAdminGroupHallReportsRouter({
+  platformService,
+  hallGroupService,
   reportService: hallAccountReportService,
 }));
 app.use(createAdminReportsSubgameDrillDownRouter({

@@ -1,14 +1,17 @@
 // PR-A4b (BIN-659) — hallAccountReport dispatcher.
+// REQ-143 — utvidet med /hallAccountReport/group/:groupId (aggregert).
 //
-// Handles the 3 hallAccountReport routes:
-//   - /hallAccountReport            (list of halls)
-//   - /hallAccountReport/:hallId    (per-hall daily history)
-//   - /report/settlement/:hallId    (per-hall settlement list + edit)
+// Handles the 4 hallAccountReport routes:
+//   - /hallAccountReport                  (list of halls + group-dropdown)
+//   - /hallAccountReport/:hallId          (per-hall daily history)
+//   - /hallAccountReport/group/:groupId   (group-of-hall aggregert rapport)
+//   - /report/settlement/:hallId          (per-hall settlement list + edit)
 //
 // Mirrors pages/reports/index.ts dispatcher pattern.
 
 import { renderHallAccountListPage } from "./HallAccountListPage.js";
 import { renderHallAccountReportPage } from "./HallAccountReportPage.js";
+import { renderGroupHallAccountReportPage } from "./GroupHallAccountReportPage.js";
 import { renderSettlementPage } from "./SettlementPage.js";
 
 const STATIC_ROUTES = new Set<string>(["/hallAccountReport"]);
@@ -18,6 +21,7 @@ export function isHallAccountRoute(path: string): boolean {
   const bare = path.split("?")[0] ?? path;
   if (STATIC_ROUTES.has(bare)) return true;
   return (
+    /^\/hallAccountReport\/group\/[^/]+$/.test(bare) ||
     /^\/hallAccountReport\/[^/]+$/.test(bare) ||
     /^\/report\/settlement\/[^/]+$/.test(bare)
   );
@@ -28,6 +32,13 @@ export function mountHallAccountRoute(container: HTMLElement, path: string): voi
 
   if (bare === "/hallAccountReport") {
     void renderHallAccountListPage(container);
+    return;
+  }
+  // REQ-143: group-aggregert variant — sjekk FØR per-hall regex slik at
+  // path-segmentet "group" ikke matches som hallId.
+  const groupDetail = /^\/hallAccountReport\/group\/([^/]+)$/.exec(bare);
+  if (groupDetail && groupDetail[1]) {
+    void renderGroupHallAccountReportPage(container, decodeURIComponent(groupDetail[1]));
     return;
   }
   const detail = /^\/hallAccountReport\/([^/]+)$/.exec(bare);
