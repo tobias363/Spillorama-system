@@ -37,6 +37,7 @@ import type {
 } from "./types.js";
 import type { RoomSnapshot } from "../../game/types.js";
 import type { GameEventsDeps } from "./deps.js";
+import { walletRoomKey } from "../walletStatePusher.js";
 
 /**
  * BIN-693 Option B: reserver delta-beløp for pre-round bong-kjøp.
@@ -207,6 +208,10 @@ export function registerRoomEvents(ctx: SocketContext): void {
           }
 
           socket.join(canonicalRoom.code);
+          // BIN-760: join per-wallet socket-rom så `wallet:state`-pusher
+          // når denne klienten ved hver wallet-mutasjon. Idempotent —
+          // socket.join no-op-er hvis allerede medlem.
+          socket.join(walletRoomKey(identity.walletId));
           const snapshot = await emitRoomUpdate(canonicalRoom.code);
           logger.debug({ roomCode: canonicalRoom.code }, "BIN-134: room:create → existing canonical");
           ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
@@ -242,6 +247,9 @@ export function registerRoomEvents(ctx: SocketContext): void {
         deps.bindDefaultVariantConfig?.(roomCode, requestedGameSlug?.trim() || "bingo");
       }
       socket.join(roomCode);
+      // BIN-760: join per-wallet socket-rom så `wallet:state`-pusher når
+      // denne klienten. Se kommentaren i den parallelle grenen ovenfor.
+      socket.join(walletRoomKey(identity.walletId));
       const snapshot = await emitRoomUpdate(roomCode);
       logger.debug({ roomCode }, "BIN-134: room:create SUCCESS");
       ackSuccess(callback, { roomCode, playerId, snapshot });
@@ -295,6 +303,8 @@ export function registerRoomEvents(ctx: SocketContext): void {
       if (existingPlayer) {
         engine.attachPlayerSocket(roomCode, existingPlayer.id, socket.id);
         socket.join(roomCode);
+        // BIN-760: per-wallet socket-rom for `wallet:state`-push.
+        socket.join(walletRoomKey(identity.walletId));
         const snapshot = await emitRoomUpdate(roomCode);
         ackSuccess(callback, { roomCode, playerId: existingPlayer.id, snapshot });
         return;
@@ -308,6 +318,8 @@ export function registerRoomEvents(ctx: SocketContext): void {
         socketId: socket.id
       });
       socket.join(roomCode);
+      // BIN-760: per-wallet socket-rom for `wallet:state`-push.
+      socket.join(walletRoomKey(identity.walletId));
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { roomCode, playerId, snapshot });
     } catch (error) {
@@ -321,6 +333,13 @@ export function registerRoomEvents(ctx: SocketContext): void {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
       engine.attachPlayerSocket(roomCode, playerId, socket.id);
       socket.join(roomCode);
+      // BIN-760: per-wallet socket-rom for `wallet:state`-push. Hent
+      // walletId fra room-snapshot — playerId er allerede validert mot
+      // token-eier i requireAuthenticatedPlayerAction.
+      const resumePlayer = engine.getRoomSnapshot(roomCode).players.find((p) => p.id === playerId);
+      if (resumePlayer?.walletId) {
+        socket.join(walletRoomKey(resumePlayer.walletId));
+      }
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot });
     } catch (error) {
