@@ -23,7 +23,9 @@
  * Totalt: 3.6 + 2.2 + 5.0 = 10.8s til auto-close. Tilbake-knappen overstyrer.
  */
 
-const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/lucky-clover.png";
+// Tobias 2026-04-26: byttet fra lucky-clover til spillorama-logo for
+// brand-konsistens (samme som WinPopup + sentersymbol i BingoTicketHtml).
+const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/spillorama-logo.png";
 const FOSS_DURATION_MS = 3600;
 const LOGO_COUNT = 70;
 const COUNT_UP_DURATION_MS = 2200;

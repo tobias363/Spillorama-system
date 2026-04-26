@@ -14,7 +14,13 @@
  * (claimType === "BINGO") bruker {@link WinScreenV2} i stedet.
  */
 
-const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/lucky-clover.png";
+/**
+ * Hoved-logo i WinPopup (Tobias 2026-04-26): byttet fra lucky-clover.png til
+ * Spillorama-logo for konsistens med center-cellen og brand-identitet.
+ * Beholder navnet `LUCKY_CLOVER_URL` for å unngå brede import-endringer i
+ * tester og kall-steder; semantikken er nå "popup-logo".
+ */
+const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/spillorama-logo.png";
 /** Auto-close delay for fase 1-4 WinPopup (regel-endring 2026-04-24 rev 3 Tobias: 3s→4s). */
 const AUTO_CLOSE_DELAY_MS = 4000;
 

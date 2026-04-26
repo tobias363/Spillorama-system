@@ -324,10 +324,15 @@
     if (gameWinVal)  gameWinVal.textContent  = winningsFormatted;
   }
 
-  // Immediately fetch and update balance (used on hall switch)
+  // Immediately fetch and update balance (used on hall switch + post-game-end)
+  // Tobias 2026-04-26: cache-buster query-string fordi browser-HTTP-cache
+  // returnerte stale wallet-data på etterfølgende game-ends (gevinst-konto
+  // oppdaterte 1. gang men ikke 2. gang). `?_=Date.now()` tvinger fersk
+  // round-trip uten cache-hit. Backend returnerer ikke Cache-Control: no-store
+  // så vi må håndtere det client-side.
   async function refreshBalanceNow() {
     try {
-      var wallet = await apiFetch('/api/wallet/me');
+      var wallet = await apiFetch('/api/wallet/me?_=' + Date.now());
       if (wallet?.account) {
         lobbyState.wallet = wallet;
         applyWalletToHeader(wallet.account);
@@ -339,7 +344,8 @@
     if (_gameBarWalletInterval) return; // already running
     _gameBarWalletInterval = setInterval(async function () {
       try {
-        var wallet = await apiFetch('/api/wallet/me');
+        // Cache-buster (samme som refreshBalanceNow) — Tobias 2026-04-26.
+        var wallet = await apiFetch('/api/wallet/me?_=' + Date.now());
         if (wallet?.account) {
           lobbyState.wallet = wallet;
           applyWalletToHeader(wallet.account);

@@ -63,6 +63,13 @@ const FREE_BG = "#2d7a3f";
 const FREE_TEXT = "#ffffff";
 const UNMARKED_BG = "rgba(255,255,255,0.55)";
 
+/**
+ * Logo-bilde som erstatter "FREE"-tekst i sentercellen (Tobias 2026-04-26).
+ * Source: `apps/backend/public/web/games/assets/game1/design/spillorama-logo.png`
+ * (1024×1024 PNG). Brukes også av WinPopup som hovedlogo.
+ */
+const FREE_LOGO_URL = "/web/games/assets/game1/design/spillorama-logo.png";
+
 /** Velg Bong-palett fra ticket.color. Fallback yellow for ukjente/Elvis-varianter. */
 function bongPaletteFor(colorName: string | undefined): typeof BONG_COLORS["yellow"] {
   const n = (colorName ?? "").toLowerCase();
@@ -560,23 +567,27 @@ export class BingoTicketHtml {
           transition: "background 0.12s, color 0.12s",
         });
         if (n === 0) {
-          // FREE-celle (Bong.jsx): grønn pille inne i hvit celle-ramme.
-          const freeInner = document.createElement("div");
-          Object.assign(freeInner.style, {
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "82%",
-            height: "70%",
-            background: FREE_BG,
-            color: FREE_TEXT,
-            borderRadius: "2px",
-            fontSize: "8px",
-            fontWeight: "700",
-            letterSpacing: "0.04em",
+          // FREE-celle (Tobias 2026-04-26): bytter ut tidligere "FREE"-tekst-pille
+          // med Spillorama-logo-bilde. Logoen fyller hele cellen (100% × 100%
+          // med contain-fit, så den skaleres ned hvis cellen er ikke-kvadrat).
+          // Bakgrunnen blir transparent slik at logoens egen gull/grønn-design
+          // ikke konkurrerer med en ekstra fyllfarge.
+          const freeImg = document.createElement("img");
+          freeImg.src = FREE_LOGO_URL;
+          freeImg.alt = "FREE";
+          freeImg.draggable = false;
+          Object.assign(freeImg.style, {
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            pointerEvents: "none",
+            userSelect: "none",
+            display: "block",
           });
-          freeInner.textContent = "FREE";
-          cell.appendChild(freeInner);
+          // Bruk konstantene defensivt for å unngå "unused" type-error fra strict.
+          void FREE_BG;
+          void FREE_TEXT;
+          cell.appendChild(freeImg);
         } else {
           cell.textContent = String(n);
         }
