@@ -61,11 +61,13 @@ export class Game1BuyPopup {
 
   constructor(overlay: HtmlOverlayManager) {
     this.backdrop = document.createElement("div");
+    // KRITISK: Ingen backdrop-filter (PR #468-mønster) — popup ligger over Pixi-canvas;
+    // backdrop-filter trigger composite-recompute hver Pixi-frame → blink ved ball-trekk.
+    // Mørkere semi-transparent bakgrunn alene gir tilsvarende fokus-effekt.
     Object.assign(this.backdrop.style, {
       position: "absolute",
       inset: "0",
-      background: "rgba(0, 0, 0, 0.65)",
-      backdropFilter: "blur(3px)",
+      background: "rgba(0, 0, 0, 0.78)",
       display: "none",
       alignItems: "center",
       justifyContent: "center",
