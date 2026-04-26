@@ -56,13 +56,14 @@ describe("BingoTicketHtml", () => {
   it("marks the free centre cell by default", () => {
     const cells = ticket.root.querySelectorAll(".ticket-grid > div");
     const centre = cells[12] as HTMLDivElement;
-    // Bong.jsx-port (2026-04-24): free cell renders en grønn "FREE"-pill
-    // inne i hvit celle-ramme. Verifiser via dataset-marker + at inner-
-    // divens tekst er "FREE".
+    // Tobias 2026-04-26: free-cellen rendrer nå Spillorama-logo-bilde
+    // i stedet for "FREE"-tekst-pille. Verifiser via dataset-marker +
+    // at inner-imgen peker til logoen.
     expect(centre.dataset.number).toBe("0");
-    const freeInner = centre.querySelector("div") as HTMLDivElement | null;
-    expect(freeInner).not.toBeNull();
-    expect(freeInner!.textContent).toBe("FREE");
+    const freeImg = centre.querySelector("img") as HTMLImageElement | null;
+    expect(freeImg).not.toBeNull();
+    expect(freeImg!.src).toContain("spillorama-logo.png");
+    expect(freeImg!.alt).toBe("FREE");
     // Free cell is always considered marked — remaining only counts non-free.
     expect(ticket.getRemainingCount()).toBe(24);
   });
