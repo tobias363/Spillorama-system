@@ -61,6 +61,8 @@ import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiry
 import { WalletOutboxRepo } from "./wallet/WalletOutboxRepo.js";
 import { WalletOutboxWorker } from "./wallet/WalletOutboxWorker.js";
 import { PostgresWalletAdapter } from "./adapters/PostgresWalletAdapter.js";
+import { WalletAuditVerifier } from "./wallet/WalletAuditVerifier.js";
+import { createWalletAuditVerifyJob } from "./jobs/walletAuditVerify.js";
 import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
@@ -456,6 +458,7 @@ const {
   jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
   jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
   jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
+  jobWalletAuditVerifyEnabled, jobWalletAuditVerifyIntervalMs, jobWalletAuditVerifyRunAtHour,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -1167,6 +1170,18 @@ const jobScheduler = createJobScheduler({
   lock: redisSchedulerLock,
 });
 
+// ── BIN-764: Wallet hash-chain audit-verifier ─────────────────────────────
+// Casino-grade tamper-evident audit-trail for wallet_entries. Verifies
+// SHA-256 chain pr account_id. Nightly cron + on-demand admin endpoint.
+const walletAuditVerifier = new WalletAuditVerifier({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  // onMismatch: kunne hooke til auditLogService her, men for å unngå
+  // sirkulær import før auditLogService er instansiert lar vi
+  // verifier-en kun logge til console + Prometheus inntil ops kobler
+  // til DB-alarming i en oppfølgings-PR.
+});
+
 jobScheduler.register({
   name: "swedbank-payment-sync",
   description: "Reconcile pending Swedbank top-up intents (legacy hourly cron).",
@@ -1200,6 +1215,20 @@ jobScheduler.register({
     pool: platformService.getPool(),
     schema: pgSchema,
     runAtHourLocal: jobRgCleanupRunAtHour,
+  }),
+});
+
+// BIN-764: Nightly wallet hash-chain integrity verifier. Casino-grade
+// audit-trail — re-beregner SHA-256-kjeden for alle kontoer og alarmerer
+// hvis en tidligere wallet-entry har blitt manipulert. Default ON.
+jobScheduler.register({
+  name: "wallet-audit-verify",
+  description: "Verify SHA-256 hash-chain integrity across all wallet_entries (BIN-764).",
+  intervalMs: jobWalletAuditVerifyIntervalMs,
+  enabled: jobWalletAuditVerifyEnabled,
+  run: createWalletAuditVerifyJob({
+    verifier: walletAuditVerifier,
+    runAtHourLocal: jobWalletAuditVerifyRunAtHour,
   }),
 });
 
@@ -2614,7 +2643,7 @@ app.use(createAdminRouter({
 app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
 // PR-W2 wallet-split: admin-correction-endepunkt med regulatorisk gate
 // mot winnings-kredit (pengespillforskriften §11).
-app.use(createAdminWalletRouter({ platformService, walletAdapter, emitWalletRoomUpdates }));
+app.use(createAdminWalletRouter({ platformService, walletAdapter, emitWalletRoomUpdates, walletAuditVerifier }));
 // BIN-763: nightly wallet reconciliation admin-endpoints (list/resolve/run-now).
 app.use(
   createAdminWalletReconciliationRouter({

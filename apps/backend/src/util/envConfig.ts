@@ -105,6 +105,10 @@ export interface BingoRuntimeConfig {
   jobIdempotencyCleanupRunAtHour: number;
   jobIdempotencyCleanupRetentionDays: number;
   jobIdempotencyCleanupBatchSize: number;
+  // BIN-764: nightly wallet hash-chain integrity verifier.
+  jobWalletAuditVerifyEnabled: boolean;
+  jobWalletAuditVerifyIntervalMs: number;
+  jobWalletAuditVerifyRunAtHour: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -324,6 +328,22 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     parsePositiveIntEnv(process.env.JOB_IDEMPOTENCY_CLEANUP_BATCH_SIZE, 1000),
   );
 
+  // BIN-764: nightly wallet hash-chain integrity verify. Default ON med
+  // billig polling (15 min) — selve verifieringen kjører kun én gang pr dag
+  // ved valgt time (default 02:00 lokal tid, etter daily-reports har kjørt).
+  const jobWalletAuditVerifyEnabled = parseBooleanEnv(
+    process.env.JOB_WALLET_AUDIT_VERIFY_ENABLED,
+    true,
+  );
+  const jobWalletAuditVerifyIntervalMs = Math.max(
+    60_000,
+    parsePositiveIntEnv(process.env.JOB_WALLET_AUDIT_VERIFY_INTERVAL_MS, 15 * 60 * 1000),
+  );
+  const jobWalletAuditVerifyRunAtHour = Math.min(
+    23,
+    Math.max(0, parsePositiveIntEnv(process.env.JOB_WALLET_AUDIT_VERIFY_RUN_AT_HOUR, 2)),
+  );
+
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
   const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
@@ -381,6 +401,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
     jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
     jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
+    jobWalletAuditVerifyEnabled, jobWalletAuditVerifyIntervalMs, jobWalletAuditVerifyRunAtHour,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,

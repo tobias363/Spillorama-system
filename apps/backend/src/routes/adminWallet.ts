@@ -41,6 +41,7 @@ import type {
   WalletAccountSide,
   WalletTransaction,
 } from "../adapters/WalletAdapter.js";
+import type { WalletAuditVerifier } from "../wallet/WalletAuditVerifier.js";
 import {
   apiSuccess,
   apiFailure,
@@ -81,12 +82,14 @@ export interface AdminWalletRouterDeps {
   walletAdapter: WalletAdapter;
   /** Notifiser web-shell om saldo-endring (socket-fanout). */
   emitWalletRoomUpdates?: (walletIds: string[]) => Promise<void>;
+  /** BIN-764: hash-chain-verifier for on-demand audit-endepunkt. */
+  walletAuditVerifier?: WalletAuditVerifier;
 }
 
 export function createAdminWalletRouter(
   deps: AdminWalletRouterDeps
 ): express.Router {
-  const { platformService, walletAdapter, emitWalletRoomUpdates } = deps;
+  const { platformService, walletAdapter, emitWalletRoomUpdates, walletAuditVerifier } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -167,6 +170,38 @@ export function createAdminWalletRouter(
 
       const response: AdminWalletCreditResponse = { transaction: tx };
       apiSuccess(res, response);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * BIN-764: GET /api/admin/wallet/audit-verify/:accountId
+   *
+   * On-demand verifisering av hash-chain for én konto. Returnerer detaljert
+   * resultat inkludert eventuelle mismatches. Brukes av admin-UI når en
+   * compliance-medarbeider trenger å bekrefte audit-trail-integritet før
+   * eksport til revisor.
+   *
+   * Rolle-krav: WALLET_COMPLIANCE_READ (ADMIN + SUPPORT). Read-only operasjon
+   * — ingen DB-skriving. Kan kalles vilkårlig ofte; idempotent.
+   */
+  router.get("/api/admin/wallet/audit-verify/:accountId", async (req, res) => {
+    try {
+      await requirePermission(req, "WALLET_COMPLIANCE_READ");
+      if (!walletAuditVerifier) {
+        res.status(503).json({
+          ok: false,
+          error: {
+            code: "WALLET_AUDIT_VERIFIER_NOT_CONFIGURED",
+            message: "Audit-verifier er ikke konfigurert på serveren.",
+          },
+        });
+        return;
+      }
+      const accountId = mustBeNonEmptyString(req.params.accountId, "accountId");
+      const result = await walletAuditVerifier.verifyAccount(accountId);
+      apiSuccess(res, result);
     } catch (error) {
       apiFailure(res, error);
     }

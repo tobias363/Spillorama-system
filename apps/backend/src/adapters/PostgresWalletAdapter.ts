@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
@@ -160,6 +160,60 @@ function splitDebitFromAccount(
   const fromWinnings = Math.min(account.winningsBalance, amount);
   const fromDeposit = amount - fromWinnings;
   return { fromWinnings, fromDeposit };
+}
+
+// ── BIN-764 Hash-chain audit trail ─────────────────────────────────────────
+//
+// Casino-grade tamper-evident audit-trail for wallet_entries. Hver entry får
+// `entry_hash = SHA256(previous_entry_hash + canonical_json(entry_data))`.
+// Per-konto-kjede: `previous_entry_hash` peker på forrige entry for samme
+// `account_id`. Genesis-rad (første entry per konto) bruker zero-hash.
+//
+// Lotteritilsynet-revisjon kan walke kjeden og verifisere at logger ikke er
+// manipulert post-hoc. WalletAuditVerifier kjører nightly og alarmerer på
+// mismatch. Microgaming-pattern siden 2014.
+
+/** Genesis-hash for første rad i hver konto-kjede (64 hex-zeros = SHA-256-bredde). */
+export const WALLET_HASH_CHAIN_GENESIS = "0".repeat(64);
+
+/**
+ * Felter som inngår i hash-input. Eksplisitt valgt + sortert for å garantere
+ * cross-platform/cross-version-stabilitet. Endring av disse feltene KAN ikke
+ * gjøres uten en re-hash-migration.
+ */
+export interface WalletEntryHashInput {
+  /** wallet_entries.id (BIGSERIAL → string for JSON-stabilitet). */
+  id: string;
+  operation_id: string;
+  account_id: string;
+  side: "DEBIT" | "CREDIT";
+  /** Beløp som streng — undgår JS-float-flekkete JSON-output. */
+  amount: string;
+  transaction_id: string | null;
+  account_side: "deposit" | "winnings";
+  /** ISO-8601 UTC. */
+  created_at: string;
+}
+
+/**
+ * Canonical JSON for hash-input. Sorterer nøkler alfabetisk slik at samme rad
+ * gir samme hash uavhengig av insert-rekkefølge. Bruker
+ * `JSON.stringify(value, sortedKeys)` som er deterministisk i Node.
+ */
+export function canonicalJsonForEntry(input: WalletEntryHashInput): string {
+  const keys = Object.keys(input).sort();
+  return JSON.stringify(input, keys);
+}
+
+/**
+ * SHA-256 hex over `previousHash + canonicalJson(input)`.
+ * `previousHash` er forrige rad sin entry_hash (eller GENESIS for første rad).
+ */
+export function computeEntryHash(previousHash: string, input: WalletEntryHashInput): string {
+  return createHash("sha256")
+    .update(previousHash, "utf8")
+    .update(canonicalJsonForEntry(input), "utf8")
+    .digest("hex");
 }
 
 export class PostgresWalletAdapter implements WalletAdapter {
@@ -1277,19 +1331,64 @@ export class PostgresWalletAdapter implements WalletAdapter {
       });
     }
 
+    // BIN-764: insert entry, deretter compute hash og UPDATE med hash.
+    // Vi gjør dette per entry sekvensielt fordi forrige hash trengs for å
+    // beregne neste i samme konto-kjede. Insert-INTO + RETURNING gir oss
+    // BIGSERIAL-id + created_at som er bestanddeler av hashen.
     for (const entry of input.entries) {
-      await client.query(
+      const accountSide = entry.accountSide ?? "deposit";
+      const { rows } = await client.query<{
+        id: string;
+        operation_id: string;
+        account_id: string;
+        side: "DEBIT" | "CREDIT";
+        amount: string;
+        transaction_id: string | null;
+        account_side: "deposit" | "winnings";
+        created_at: Date | string;
+      }>(
         `INSERT INTO ${this.entriesTable()}
           (operation_id, account_id, side, amount, transaction_id, account_side)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, operation_id, account_id, side, amount::text, transaction_id, account_side, created_at`,
         [
           entry.operationId,
           entry.accountId,
           entry.side,
           entry.amount,
           entry.transactionId ?? null,
-          entry.accountSide ?? "deposit"
+          accountSide,
         ]
+      );
+      const inserted = rows[0]!;
+
+      // Hent forrige hash for samme konto. Locker raden mot parallell-skriving
+      // så lenge vi er i samme transaksjon (selectAccountsForUpdate har allerede
+      // FOR UPDATE-låst kontoen, så ingen annen ledger-skriving kan smyge seg
+      // inn med høyere id i mellomtiden).
+      const previousHash = await this.selectPreviousEntryHash(
+        client,
+        inserted.account_id,
+        inserted.id
+      );
+
+      const hashInput: WalletEntryHashInput = {
+        id: String(inserted.id),
+        operation_id: inserted.operation_id,
+        account_id: inserted.account_id,
+        side: inserted.side,
+        amount: inserted.amount,
+        transaction_id: inserted.transaction_id,
+        account_side: inserted.account_side,
+        created_at: asIso(inserted.created_at),
+      };
+      const entryHash = computeEntryHash(previousHash, hashInput);
+
+      await client.query(
+        `UPDATE ${this.entriesTable()}
+            SET entry_hash = $2, previous_entry_hash = $3
+          WHERE id = $1`,
+        [inserted.id, entryHash, previousHash]
       );
     }
 
@@ -1332,6 +1431,35 @@ export class PostgresWalletAdapter implements WalletAdapter {
     }
 
     return insertedTransactions;
+  }
+
+  /**
+   * BIN-764: hent forrige rads entry_hash for samme konto. Returnerer
+   * GENESIS hvis dette er første entry. `currentId` ekskluderes for å håndtere
+   * caller-en som allerede har inserted, men ikke skrevet hash ennå.
+   *
+   * Bruker `<` på id (ikke `<=`) for å være sikker på at vi ikke får current
+   * raden tilbake. Hvis tidligere rader har NULL i entry_hash (f.eks. legacy
+   * pre-BIN-764-rader som ennå ikke er backfillet), bruker vi GENESIS — det
+   * tilsvarer at backfill vil resette kjeden ved første grace-punktet.
+   */
+  private async selectPreviousEntryHash(
+    client: PoolClient,
+    accountId: string,
+    currentId: string,
+  ): Promise<string> {
+    const { rows } = await client.query<{ entry_hash: string | null }>(
+      `SELECT entry_hash
+         FROM ${this.entriesTable()}
+        WHERE account_id = $1 AND id < $2
+        ORDER BY id DESC
+        LIMIT 1`,
+      [accountId, currentId]
+    );
+    if (rows.length === 0) {
+      return WALLET_HASH_CHAIN_GENESIS;
+    }
+    return rows[0]!.entry_hash ?? WALLET_HASH_CHAIN_GENESIS;
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -1437,6 +1565,8 @@ export class PostgresWalletAdapter implements WalletAdapter {
           account_side TEXT NOT NULL DEFAULT 'deposit'
             CHECK (account_side IN ('deposit', 'winnings')),
           currency TEXT NOT NULL DEFAULT 'NOK',
+          entry_hash TEXT NULL,
+          previous_entry_hash TEXT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`
       );
@@ -1458,6 +1588,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
         `ALTER TABLE ${this.entriesTable()}
            ADD CONSTRAINT wallet_entries_currency_nok_only CHECK (currency = 'NOK')`
       );
+      // BIN-764: hash-chain audit-felter. NULL initielt for backwards-compat;
+      // nye inserts får entry_hash + previous_entry_hash satt av executeLedger.
+      await client.query(
+        `ALTER TABLE ${this.entriesTable()}
+           ADD COLUMN IF NOT EXISTS entry_hash TEXT,
+           ADD COLUMN IF NOT EXISTS previous_entry_hash TEXT`
+      );
 
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_wallet_transactions_account_created
@@ -1474,6 +1611,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_wallet_entries_account_side
          ON ${this.entriesTable()} (account_id, account_side, created_at DESC)`
+      );
+      // BIN-764: index for chain-walking per konto (rekkefølge etter id).
+      // Brukes av WalletAuditVerifier for re-beregning og av
+      // selectPreviousEntryHash i hot-path.
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_wallet_entries_hash_chain
+         ON ${this.entriesTable()} (account_id, id)`
       );
 
       // BIN-693 Option B + PR #513 §1.1: app_wallet_reservations.
