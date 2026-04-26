@@ -67,6 +67,20 @@ export const metrics = {
     labelNames: ["name"] as const
   }),
 
+  /**
+   * HIGH-8: per-state gauge for the wallet circuit breaker. Exactly one
+   * label is `1` at any time; the others are `0`. Lets dashboards alert
+   * on time-spent in OPEN or HALF_OPEN, not just open/closed-edge.
+   *
+   * Example PromQL:
+   *   max(wallet_circuit_state{state="OPEN"}) > 0
+   */
+  walletCircuitState: new client.Gauge({
+    name: "wallet_circuit_state",
+    help: "Wallet circuit-breaker state (1 = active, 0 = inactive) per state label",
+    labelNames: ["state"] as const,
+  }),
+
   // Socket.IO
   socketConnections: new client.Gauge({
     name: "bingo_socket_connections",

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
+import { CircuitBreaker, CircuitBreakerOpenError, type CircuitState } from "../util/CircuitBreaker.js";
+import { metrics } from "../util/metrics.js";
 import type {
   CommitReservationOptions,
   CreateWalletAccountInput,
@@ -27,7 +30,35 @@ interface PostgresWalletAdapterOptions {
   schema?: string;
   ssl?: boolean;
   defaultInitialBalance?: number;
+  /**
+   * HIGH-8: tuning for the wallet circuit breaker. Defaults match
+   * Pragmatic-Play-style behavior — open after 3 consecutive failures,
+   * 30 s cool-down, half-open admits one probe. Tests override these
+   * to inject deterministic timings; production code should leave them.
+   */
+  circuitBreaker?: {
+    /** Consecutive failures before opening the circuit. Default: 3. */
+    threshold?: number;
+    /** Cool-down before transitioning OPEN → HALF_OPEN. Default: 30_000 ms. */
+    resetMs?: number;
+    /** Disable the breaker entirely (e.g. in tests that exercise raw DB code). */
+    enabled?: boolean;
+  };
 }
+
+const WALLET_CIRCUIT_NAME = "postgres-wallet";
+const WALLET_CIRCUIT_STATES: CircuitState[] = ["CLOSED", "OPEN", "HALF_OPEN"];
+
+/**
+ * HIGH-8 re-entrancy guard. AsyncLocalStorage tracks per-async-context
+ * whether we're already inside a breaker-wrapped call on this adapter.
+ * When the inner write method calls another wrapped method (e.g.
+ * `transfer` → `ensureAccount`), the inner `withBreaker` sees the
+ * marker and bypasses the breaker so a single user-visible failure
+ * isn't double-counted. Concurrent independent callers each get their
+ * own context, so they're not affected.
+ */
+const breakerContext = new AsyncLocalStorage<true>();
 
 interface AccountRow {
   id: string;
@@ -133,6 +164,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
 
   private readonly externalCashAccountId = "__system_external_cash__";
 
+  /**
+   * HIGH-8: circuit breaker around DB write paths. `null` when disabled
+   * (e.g. opt-out via constructor for unit tests that hit a real DB
+   * and need raw-error semantics).
+   */
+  private readonly breaker: CircuitBreaker | null;
+
   constructor(options: PostgresWalletAdapterOptions) {
     const connectionString = options.connectionString?.trim();
     if (!connectionString) {
@@ -149,9 +187,83 @@ export class PostgresWalletAdapter implements WalletAdapter {
       ssl: options.ssl ? { rejectUnauthorized: false } : undefined,
       ...getPoolTuning()
     });
+
+    const breakerEnabled = options.circuitBreaker?.enabled ?? true;
+    this.breaker = breakerEnabled
+      ? new CircuitBreaker({
+          name: WALLET_CIRCUIT_NAME,
+          threshold: options.circuitBreaker?.threshold ?? 3,
+          resetMs: options.circuitBreaker?.resetMs ?? 30_000,
+          onStateChange: (state) => {
+            // HIGH-8: keep wallet_circuit_state{state} in sync with
+            // the breaker. Only one label is "1" at a time so dashboards
+            // can alert on time-spent in OPEN/HALF_OPEN.
+            for (const candidate of WALLET_CIRCUIT_STATES) {
+              metrics.walletCircuitState.set({ state: candidate }, candidate === state ? 1 : 0);
+            }
+          },
+        })
+      : null;
+  }
+
+  /**
+   * HIGH-8: run a DB write through the breaker. Maps
+   * `CircuitBreakerOpenError` to a Norwegian-language `WalletError` so
+   * upstream callers (game engine, payout) can surface a friendly
+   * message instead of leaking internal breaker terminology.
+   *
+   * Re-entrancy: an inner breaker-wrapped call (e.g. `transfer`'s
+   * internal `ensureAccount`) bypasses the breaker because the outer
+   * wrap already records success/failure. AsyncLocalStorage scopes the
+   * marker to the current async chain so concurrent independent callers
+   * each go through the breaker normally.
+   *
+   * Read paths (getBalance, listAccounts, listTransactions) deliberately
+   * bypass the breaker — failing-fast on those would mask the wallet's
+   * actual state from operators looking at the admin UI. The cost of a
+   * blocked read is small; the cost of a hung write is a stuck round.
+   */
+  private async withBreaker<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.breaker) {
+      return fn();
+    }
+    if (breakerContext.getStore()) {
+      // Already inside an outer breaker call in the same async chain —
+      // don't double-count.
+      return fn();
+    }
+    try {
+      return await breakerContext.run(true, () => this.breaker!.execute(fn));
+    } catch (error) {
+      if (error instanceof CircuitBreakerOpenError) {
+        throw new WalletError(
+          "WALLET_CIRCUIT_OPEN",
+          "Lommebok midlertidig utilgjengelig. Prøv igjen om 30 sekunder.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * HIGH-8: test-only inspection hook. Returns the current breaker
+   * state for tests to assert on. `null` when the breaker is disabled.
+   */
+  getCircuitState(): CircuitState | null {
+    return this.breaker?.state ?? null;
   }
 
   async createAccount(input?: CreateWalletAccountInput): Promise<WalletAccount> {
+    return this.withBreaker(() => this.createAccountImpl(input));
+  }
+
+  /**
+   * HIGH-8: bypass-breaker variant for nested calls from other write
+   * methods (e.g. `ensureAccountImpl` reaching here on ACCOUNT_NOT_FOUND).
+   * The outer method already runs through the breaker; nesting again
+   * would double-count the same logical failure.
+   */
+  private async createAccountImpl(input?: CreateWalletAccountInput): Promise<WalletAccount> {
     await this.ensureInitialized();
     const accountId = this.normalizeUserWalletId(input?.accountId || `wallet-${randomUUID()}`);
     const initialBalance = input?.initialBalance ?? this.defaultInitialBalance;
@@ -232,7 +344,18 @@ export class PostgresWalletAdapter implements WalletAdapter {
     }
   }
 
+  /**
+   * HIGH-8: `ensureAccount` may write (via `createAccount` on the
+   * not-found path), so it goes through the breaker. The
+   * `breakerContext` AsyncLocalStorage marker prevents double-counting
+   * when an outer write method (transfer, debit, ...) already wrapped
+   * its call.
+   */
   async ensureAccount(accountId: string): Promise<WalletAccount> {
+    return this.withBreaker(() => this.ensureAccountImpl(accountId));
+  }
+
+  private async ensureAccountImpl(accountId: string): Promise<WalletAccount> {
     const normalized = this.normalizeUserWalletId(accountId);
     try {
       return await this.getAccount(normalized);
@@ -302,36 +425,40 @@ export class PostgresWalletAdapter implements WalletAdapter {
   }
 
   async debit(accountId: string, amount: number, reason: string, options?: TransactionOptions): Promise<WalletTransaction> {
-    const normalized = this.normalizeUserWalletId(accountId);
-    this.assertPositiveAmount(amount);
-    // PR-W1: debit bruker winnings-first-policy. Splitten bestemmes inne i
-    // executeLedger under SELECT FOR UPDATE (unngår race mot parallell debit).
-    const tx = await this.singleAccountMovement({
-      accountId: normalized,
-      type: "DEBIT",
-      amount,
-      reason: reason || "Debit",
-      fromAccountId: normalized,
-      toAccountId: this.houseAccountId,
-      idempotencyKey: options?.idempotencyKey,
-      splitStrategy: "winnings-first"
+    return this.withBreaker(async () => {
+      const normalized = this.normalizeUserWalletId(accountId);
+      this.assertPositiveAmount(amount);
+      // PR-W1: debit bruker winnings-first-policy. Splitten bestemmes inne i
+      // executeLedger under SELECT FOR UPDATE (unngår race mot parallell debit).
+      const tx = await this.singleAccountMovement({
+        accountId: normalized,
+        type: "DEBIT",
+        amount,
+        reason: reason || "Debit",
+        fromAccountId: normalized,
+        toAccountId: this.houseAccountId,
+        idempotencyKey: options?.idempotencyKey,
+        splitStrategy: "winnings-first"
+      });
+      return tx;
     });
-    return tx;
   }
 
   async credit(accountId: string, amount: number, reason: string, options?: CreditOptions): Promise<WalletTransaction> {
-    const normalized = this.normalizeUserWalletId(accountId);
-    this.assertPositiveAmount(amount);
-    const target: WalletAccountSide = options?.to ?? "deposit";
-    return this.singleAccountMovement({
-      accountId: normalized,
-      type: "CREDIT",
-      amount,
-      reason: reason || "Credit",
-      fromAccountId: this.houseAccountId,
-      toAccountId: normalized,
-      idempotencyKey: options?.idempotencyKey,
-      creditTarget: target
+    return this.withBreaker(async () => {
+      const normalized = this.normalizeUserWalletId(accountId);
+      this.assertPositiveAmount(amount);
+      const target: WalletAccountSide = options?.to ?? "deposit";
+      return this.singleAccountMovement({
+        accountId: normalized,
+        type: "CREDIT",
+        amount,
+        reason: reason || "Credit",
+        fromAccountId: this.houseAccountId,
+        toAccountId: normalized,
+        idempotencyKey: options?.idempotencyKey,
+        creditTarget: target
+      });
     });
   }
 
@@ -355,57 +482,63 @@ export class PostgresWalletAdapter implements WalletAdapter {
     reason: string,
     options: CreditWithClientOptions,
   ): Promise<WalletTransaction> {
-    const client = options.client as PoolClient;
-    if (!client || typeof client.query !== "function") {
-      throw new WalletError(
-        "INVALID_WALLET_CLIENT",
-        "creditWithClient krever en gyldig PoolClient via options.client.",
-      );
-    }
-    const normalized = this.normalizeUserWalletId(accountId);
-    this.assertPositiveAmount(amount);
-    const target: WalletAccountSide = options.to ?? "deposit";
-    return this.singleAccountMovementWithClient(client, {
-      accountId: normalized,
-      type: "CREDIT",
-      amount,
-      reason: reason || "Credit",
-      fromAccountId: this.houseAccountId,
-      toAccountId: normalized,
-      idempotencyKey: options.idempotencyKey,
-      creditTarget: target,
+    return this.withBreaker(async () => {
+      const client = options.client as PoolClient;
+      if (!client || typeof client.query !== "function") {
+        throw new WalletError(
+          "INVALID_WALLET_CLIENT",
+          "creditWithClient krever en gyldig PoolClient via options.client.",
+        );
+      }
+      const normalized = this.normalizeUserWalletId(accountId);
+      this.assertPositiveAmount(amount);
+      const target: WalletAccountSide = options.to ?? "deposit";
+      return this.singleAccountMovementWithClient(client, {
+        accountId: normalized,
+        type: "CREDIT",
+        amount,
+        reason: reason || "Credit",
+        fromAccountId: this.houseAccountId,
+        toAccountId: normalized,
+        idempotencyKey: options.idempotencyKey,
+        creditTarget: target,
+      });
     });
   }
 
   async topUp(accountId: string, amount: number, reason = "Manual top-up", options?: TransactionOptions): Promise<WalletTransaction> {
-    const normalized = this.normalizeUserWalletId(accountId);
-    this.assertPositiveAmount(amount);
-    // PM-beslutning: topup → ALLTID deposit-konto. Ikke overstyrbar.
-    return this.singleAccountMovement({
-      accountId: normalized,
-      type: "TOPUP",
-      amount,
-      reason,
-      fromAccountId: this.externalCashAccountId,
-      toAccountId: normalized,
-      idempotencyKey: options?.idempotencyKey,
-      creditTarget: "deposit"
+    return this.withBreaker(async () => {
+      const normalized = this.normalizeUserWalletId(accountId);
+      this.assertPositiveAmount(amount);
+      // PM-beslutning: topup → ALLTID deposit-konto. Ikke overstyrbar.
+      return this.singleAccountMovement({
+        accountId: normalized,
+        type: "TOPUP",
+        amount,
+        reason,
+        fromAccountId: this.externalCashAccountId,
+        toAccountId: normalized,
+        idempotencyKey: options?.idempotencyKey,
+        creditTarget: "deposit"
+      });
     });
   }
 
   async withdraw(accountId: string, amount: number, reason = "Manual withdrawal", options?: TransactionOptions): Promise<WalletTransaction> {
-    const normalized = this.normalizeUserWalletId(accountId);
-    this.assertPositiveAmount(amount);
-    // PM-beslutning: withdrawal → winnings-first, så deposit.
-    return this.singleAccountMovement({
-      accountId: normalized,
-      type: "WITHDRAWAL",
-      amount,
-      reason,
-      fromAccountId: normalized,
-      toAccountId: this.externalCashAccountId,
-      idempotencyKey: options?.idempotencyKey,
-      splitStrategy: "winnings-first"
+    return this.withBreaker(async () => {
+      const normalized = this.normalizeUserWalletId(accountId);
+      this.assertPositiveAmount(amount);
+      // PM-beslutning: withdrawal → winnings-first, så deposit.
+      return this.singleAccountMovement({
+        accountId: normalized,
+        type: "WITHDRAWAL",
+        amount,
+        reason,
+        fromAccountId: normalized,
+        toAccountId: this.externalCashAccountId,
+        idempotencyKey: options?.idempotencyKey,
+        splitStrategy: "winnings-first"
+      });
     });
   }
 
@@ -414,6 +547,16 @@ export class PostgresWalletAdapter implements WalletAdapter {
     toAccountId: string,
     amount: number,
     reason = "Wallet transfer",
+    options?: TransferOptions
+  ): Promise<WalletTransferResult> {
+    return this.withBreaker(() => this.transferImpl(fromAccountId, toAccountId, amount, reason, options));
+  }
+
+  private async transferImpl(
+    fromAccountId: string,
+    toAccountId: string,
+    amount: number,
+    reason: string,
     options?: TransferOptions
   ): Promise<WalletTransferResult> {
     await this.ensureInitialized();
@@ -1343,6 +1486,14 @@ export class PostgresWalletAdapter implements WalletAdapter {
     amount: number,
     options: ReserveOptions,
   ): Promise<WalletReservation> {
+    return this.withBreaker(() => this.reserveImpl(accountId, amount, options));
+  }
+
+  private async reserveImpl(
+    accountId: string,
+    amount: number,
+    options: ReserveOptions,
+  ): Promise<WalletReservation> {
     await this.ensureInitialized();
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new WalletError("INVALID_INPUT", "amount må være > 0.");
@@ -1432,6 +1583,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
     reservationId: string,
     extraAmount: number,
   ): Promise<WalletReservation> {
+    return this.withBreaker(() => this.increaseReservationImpl(reservationId, extraAmount));
+  }
+
+  private async increaseReservationImpl(
+    reservationId: string,
+    extraAmount: number,
+  ): Promise<WalletReservation> {
     await this.ensureInitialized();
     if (!Number.isFinite(extraAmount) || extraAmount <= 0) {
       throw new WalletError("INVALID_INPUT", "extraAmount må være > 0.");
@@ -1498,6 +1656,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
     reservationId: string,
     amount?: number,
   ): Promise<WalletReservation> {
+    return this.withBreaker(() => this.releaseReservationImpl(reservationId, amount));
+  }
+
+  private async releaseReservationImpl(
+    reservationId: string,
+    amount?: number,
+  ): Promise<WalletReservation> {
     await this.ensureInitialized();
     const client = await this.pool.connect();
     try {
@@ -1557,6 +1722,15 @@ export class PostgresWalletAdapter implements WalletAdapter {
   }
 
   async commitReservation(
+    reservationId: string,
+    toAccountId: string,
+    reason: string,
+    options?: CommitReservationOptions,
+  ): Promise<WalletTransferResult> {
+    return this.withBreaker(() => this.commitReservationImpl(reservationId, toAccountId, reason, options));
+  }
+
+  private async commitReservationImpl(
     reservationId: string,
     toAccountId: string,
     reason: string,
@@ -1632,16 +1806,18 @@ export class PostgresWalletAdapter implements WalletAdapter {
   }
 
   async expireStaleReservations(nowMs: number): Promise<number> {
-    await this.ensureInitialized();
-    // `nowMs` godtas for test-ergonomi — i prod bruker vi NOW() for ikke
-    // å ha clock-skew mellom app-server og DB.
-    const cutoff = new Date(nowMs).toISOString();
-    const { rowCount } = await this.pool.query(
-      `UPDATE ${this.reservationsTable()}
-         SET status = 'expired', released_at = NOW()
-         WHERE status = 'active' AND expires_at < $1`,
-      [cutoff],
-    );
-    return rowCount ?? 0;
+    return this.withBreaker(async () => {
+      await this.ensureInitialized();
+      // `nowMs` godtas for test-ergonomi — i prod bruker vi NOW() for ikke
+      // å ha clock-skew mellom app-server og DB.
+      const cutoff = new Date(nowMs).toISOString();
+      const { rowCount } = await this.pool.query(
+        `UPDATE ${this.reservationsTable()}
+           SET status = 'expired', released_at = NOW()
+           WHERE status = 'active' AND expires_at < $1`,
+        [cutoff],
+      );
+      return rowCount ?? 0;
+    });
   }
 }
