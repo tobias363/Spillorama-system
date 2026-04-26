@@ -61,6 +61,8 @@ import type { Game1TicketPurchaseService, Game1TicketPurchaseRow } from "./Game1
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutService.js";
 import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
+import type { Game1JackpotStateService } from "./Game1JackpotStateService.js";
+import { runDailyJackpotEvaluation } from "./Game1DrawEngineDailyJackpot.js";
 import {
   Game1LuckyBonusService,
   resolveLuckyBonusConfig,
@@ -187,6 +189,20 @@ export interface Game1DrawEngineServiceOptions {
    * Hvis ikke satt eller ticket_config ikke har jackpot-config → 0 jackpot.
    */
   jackpotService?: Game1JackpotService;
+  /**
+   * MASTER_PLAN §2.3 / Appendix B.9: state-service for daglig akkumulert
+   * jackpot per hall-gruppe. Når wired opp + walletAdapter satt vil engine
+   * etter Fullt Hus innen `drawThresholds[0]` (default 50) atomisk debit-
+   * and-reset state-potten og distribuere awarded amount likt mellom
+   * vinnere via wallet.credit.
+   *
+   * Fail-closed: ikke wired → no-op (bakoverkompat). Wallet-credit-feil
+   * etter award-debit propageres → draw-transaksjon ruller tilbake, men
+   * state-debiten lever videre (begrenset av at awardJackpot kjører i
+   * egen pool.connect()-transaksjon). Pragmatisk pilot-akseptert avvik;
+   * full atomicitet er post-pilot-PR.
+   */
+  jackpotStateService?: Game1JackpotStateService;
   /**
    * GAME1_SCHEDULE PR 4d.3: valgfri broadcaster for admin-namespace.
    * Fire-and-forget — engine kaller `onDrawProgressed` etter persistert
@@ -478,6 +494,12 @@ export class Game1DrawEngineService {
   private readonly config: Game1DrawEngineConfig;
   private readonly payoutService: Game1PayoutService | null;
   private readonly jackpotService: Game1JackpotService | null;
+  /**
+   * MASTER_PLAN §2.3: state-service for daglig akkumulert jackpot.
+   * Late-binding via setJackpotStateService unngår sirkulær wiring.
+   * Default null = ingen daglig-jackpot-evaluering.
+   */
+  private jackpotStateService: Game1JackpotStateService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
   /** PR-C4: broadcaster for default-namespace (spiller-klient). */
   private playerBroadcaster: Game1PlayerBroadcaster | null;
@@ -538,6 +560,7 @@ export class Game1DrawEngineService {
     };
     this.payoutService = options.payoutService ?? null;
     this.jackpotService = options.jackpotService ?? null;
+    this.jackpotStateService = options.jackpotStateService ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
     this.playerBroadcaster = options.playerBroadcaster ?? null;
     this.miniGameOrchestrator = options.miniGameOrchestrator ?? null;
@@ -564,6 +587,16 @@ export class Game1DrawEngineService {
   /** PR-T2: late-binding for Game1PotService (unngå sirkulær wiring). */
   setPotService(svc: Game1PotService): void {
     this.potService = svc;
+  }
+
+  /**
+   * MASTER_PLAN §2.3: late-binding for Game1JackpotStateService.
+   * Når wired sammen med walletAdapter vil engine etter Fullt Hus innen
+   * threshold atomisk debit-and-reset daglig-pott og distribuere til
+   * vinnere. Uten state-service er evalueringen no-op (bakoverkompat).
+   */
+  setJackpotStateService(svc: Game1JackpotStateService): void {
+    this.jackpotStateService = svc;
   }
 
   /** PR-T2: late-binding for PotDailyAccumulationTickService. */
@@ -2147,6 +2180,36 @@ export class Game1DrawEngineService {
         drawSequenceAtWin,
         winners,
         ordinaryWinCentsByHall,
+      });
+    }
+
+    // MASTER_PLAN §2.3 / Appendix B.9: daglig-akkumulert Jackpott. Kjører
+    // kun ved Fullt Hus + state-service wired + walletAdapter wired. Service-
+    // helperen er fail-closed på sin egen side (no-op hvis state mangler
+    // eller threshold ikke oppfylt). Wallet-credit-feil ETTER award-debit
+    // propagerer her — caller (drawNext) ruller tilbake DRAW-transaksjon,
+    // men state-debit lever videre i sin egen committed transaksjon (se
+    // Game1DrawEngineDailyJackpot.ts docstring for begrunnelse).
+    if (
+      currentPhase === TOTAL_PHASES &&
+      winners.length > 0 &&
+      this.jackpotStateService !== null &&
+      this.walletAdapter !== null
+    ) {
+      await runDailyJackpotEvaluation({
+        client,
+        schema: this.schema,
+        jackpotStateService: this.jackpotStateService,
+        walletAdapter: this.walletAdapter,
+        audit: this.audit,
+        scheduledGameId,
+        drawSequenceAtWin,
+        winners: winners.map((w) => ({
+          assignmentId: w.assignmentId,
+          walletId: w.walletId,
+          userId: w.userId,
+          hallId: w.hallId,
+        })),
       });
     }
 

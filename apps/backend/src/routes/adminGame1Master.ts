@@ -605,5 +605,108 @@ export function createAdminGame1MasterRouter(
     }
   });
 
+  // ── POST /jackpot/:hallGroupId/award (MASTER_PLAN §2.3) ───────────────────
+  //
+  // Manuell admin-award av jackpot-pott. Atomisk debit-and-reset via
+  // Game1JackpotStateService.awardJackpot. Returnerer beløp (cents) som
+  // admin/operator må manuelt distribuere til vinner — endepunktet selv
+  // gjør IKKE wallet-credit (regulatorisk: vinneren ID + dokumentasjon
+  // skal ligge i admin-flow før award trigges; auto-award fra DrawEngine
+  // bruker samme service direkte).
+  //
+  // Body:
+  //   { idempotencyKey: string, reason?: string }
+  //
+  // Idempotency:
+  //   Caller MÅ generere unik nøkkel per logisk award (eks. på server-tid
+  //   ved knappetrykk: `g1-jackpot-admin-{hallGroupId}-{ISO-timestamp}`).
+  //   Andre kall med samme nøkkel returnerer den eksisterende awarden uten
+  //   ny debit (idempotent=true).
+  //
+  // RBAC: GAME1_MASTER_WRITE — ADMIN + HALL_OPERATOR + AGENT. Hall-scope
+  // håndheves IKKE per hallGroupId her — operatør med tilgang til en hall
+  // i gruppen kan trigge award for hele gruppen. Tobias spørres ved tvil.
+
+  router.post("/api/admin/game1/jackpot/:hallGroupId/award", async (req, res) => {
+    try {
+      const user = await requirePermission(req, "GAME1_MASTER_WRITE");
+      const hallGroupId = mustBeNonEmptyString(req.params.hallGroupId, "hallGroupId");
+      if (!jackpotStateService) {
+        throw new DomainError(
+          "JACKPOT_NOT_CONFIGURED",
+          "Jackpot-service er ikke koblet inn på denne instansen."
+        );
+      }
+      const body = isRecordObject(req.body) ? req.body : {};
+      const idempotencyKey = mustBeNonEmptyString(
+        body.idempotencyKey,
+        "idempotencyKey"
+      );
+      const rawReason =
+        typeof body.reason === "string" && body.reason.trim().length > 0
+          ? body.reason.trim()
+          : "ADMIN_MANUAL_AWARD";
+      // Begrens reason til de tre lovlige enum-verdiene; ukjente map-pes til
+      // ADMIN_MANUAL_AWARD slik at kun typede kanaler aksepteres uten å
+      // åpne for fri-form audit-strenger.
+      const reason: "FULL_HOUSE_WITHIN_THRESHOLD" | "ADMIN_MANUAL_AWARD" | "CORRECTION" =
+        rawReason === "FULL_HOUSE_WITHIN_THRESHOLD" ||
+        rawReason === "ADMIN_MANUAL_AWARD" ||
+        rawReason === "CORRECTION"
+          ? rawReason
+          : "ADMIN_MANUAL_AWARD";
+
+      const result = await jackpotStateService.awardJackpot({
+        hallGroupId,
+        idempotencyKey,
+        reason,
+        awardedByUserId: user.id,
+      });
+
+      // Audit-log (fire-and-forget). awardJackpot logger eget service-event;
+      // her supplerer vi rolle/IP/UA-kontekst.
+      auditLogService
+        .record({
+          actorId: user.id,
+          actorType: actorTypeFromRole(user.role),
+          action: "game1_jackpot.admin_award",
+          resource: "game1_jackpot_state",
+          resourceId: hallGroupId,
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+          details: {
+            idempotencyKey,
+            reason,
+            awardId: result.awardId,
+            awardedAmountCents: result.awardedAmountCents,
+            previousAmountCents: result.previousAmountCents,
+            newAmountCents: result.newAmountCents,
+            idempotent: result.idempotent,
+            noopZeroBalance: result.noopZeroBalance,
+          },
+        })
+        .catch((err) => {
+          logger.warn(
+            { err, hallGroupId, idempotencyKey },
+            "[MASTER_PLAN §2.3] audit append failed for jackpot.admin_award"
+          );
+        });
+
+      apiSuccess(res, {
+        award: {
+          awardId: result.awardId,
+          hallGroupId: result.hallGroupId,
+          awardedAmountCents: result.awardedAmountCents,
+          previousAmountCents: result.previousAmountCents,
+          newAmountCents: result.newAmountCents,
+          idempotent: result.idempotent,
+          noopZeroBalance: result.noopZeroBalance,
+        },
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   return router;
 }
