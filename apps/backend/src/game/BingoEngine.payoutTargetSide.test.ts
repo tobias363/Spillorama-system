@@ -426,7 +426,9 @@ test("BingoEngine: buy-in + ticket replace (player → house) bruker IKKE target
   const buyIns = spy.transfers.filter((t) => t.reason.includes("buy-in"));
   assert.ok(buyIns.length >= 2, "to buy-ins (host + guest)");
   for (const b of buyIns) {
-    assert.equal(b.toAccountId, "house-hall-1-databingo-internet");
+    // K2-A CRIT-1: default gameSlug "bingo" → MAIN_GAME, så house-account
+    // er nå "house-hall-1-main_game-internet" (Spill 1 = hovedspill 15%).
+    assert.equal(b.toAccountId, "house-hall-1-main_game-internet");
     // BUY-INs skal IKKE sende targetSide='winnings' (target er system-house
     // uansett, og default deposit er trygt).
     assert.notEqual(

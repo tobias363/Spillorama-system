@@ -18,9 +18,57 @@ import {
 test("validateMachineBreakdown: tomt input gir empty breakdown", () => {
   const b = validateMachineBreakdown(undefined);
   assert.deepEqual(b.rows, {});
+  assert.equal(b.kasse_start_skift_cents, 0);
   assert.equal(b.ending_opptall_kassie_cents, 0);
   assert.equal(b.innskudd_drop_safe_cents, 0);
+  assert.equal(b.paafyll_ut_kasse_cents, 0);
+  assert.equal(b.totalt_dropsafe_paafyll_cents, 0);
   assert.equal(b.difference_in_shifts_cents, 0);
+});
+
+test("validateMachineBreakdown: K1-B felter (kasse_start, paafyll, totalt_dropsafe) parses", () => {
+  const b = validateMachineBreakdown({
+    kasse_start_skift_cents: 1_000_000,
+    ending_opptall_kassie_cents: 1_661_300,
+    innskudd_drop_safe_cents: 100_000,
+    paafyll_ut_kasse_cents: 561_300,
+    totalt_dropsafe_paafyll_cents: 661_300,
+    difference_in_shifts_cents: 1_100,
+  });
+  assert.equal(b.kasse_start_skift_cents, 1_000_000);
+  assert.equal(b.ending_opptall_kassie_cents, 1_661_300);
+  assert.equal(b.paafyll_ut_kasse_cents, 561_300);
+  assert.equal(b.totalt_dropsafe_paafyll_cents, 661_300);
+});
+
+test("validateMachineBreakdown: paafyll_ut_kasse kan være negativ (uttrekk)", () => {
+  const b = validateMachineBreakdown({
+    paafyll_ut_kasse_cents: -20_000,
+  });
+  assert.equal(b.paafyll_ut_kasse_cents, -20_000);
+});
+
+test("validateMachineBreakdown: kasse_start_skift må være ikke-negativ", () => {
+  assert.throws(
+    () => validateMachineBreakdown({ kasse_start_skift_cents: -1 }),
+    /ikke-negativt heltall/
+  );
+});
+
+test("validateMachineBreakdown: legacy K1-A input uten nye felt aksepteres (default 0)", () => {
+  // Backwards compat: rader laget før K1-B må fortsatt parses.
+  const b = validateMachineBreakdown({
+    rows: { metronia: { in_cents: 100, out_cents: 50 } },
+    ending_opptall_kassie_cents: 5000,
+    innskudd_drop_safe_cents: 2000,
+    difference_in_shifts_cents: 0,
+    // Mangler: kasse_start_skift_cents, paafyll_ut_kasse_cents,
+    //         totalt_dropsafe_paafyll_cents
+  });
+  assert.equal(b.kasse_start_skift_cents, 0);
+  assert.equal(b.paafyll_ut_kasse_cents, 0);
+  assert.equal(b.totalt_dropsafe_paafyll_cents, 0);
+  assert.equal(b.ending_opptall_kassie_cents, 5000);
 });
 
 test("validateMachineBreakdown: full 14-rad input aksepteres", () => {
@@ -28,14 +76,19 @@ test("validateMachineBreakdown: full 14-rad input aksepteres", () => {
     rows: Object.fromEntries(
       MACHINE_ROW_KEYS.map((k) => [k, { in_cents: 100, out_cents: 50 }])
     ),
+    kasse_start_skift_cents: 1000,
     ending_opptall_kassie_cents: 5000,
     innskudd_drop_safe_cents: 2000,
+    paafyll_ut_kasse_cents: 2000,
+    totalt_dropsafe_paafyll_cents: 4000,
     difference_in_shifts_cents: 0,
   };
   const b = validateMachineBreakdown(full);
   assert.equal(Object.keys(b.rows).length, MACHINE_ROW_KEYS.length);
   assert.equal(b.rows.metronia!.in_cents, 100);
+  assert.equal(b.kasse_start_skift_cents, 1000);
   assert.equal(b.ending_opptall_kassie_cents, 5000);
+  assert.equal(b.totalt_dropsafe_paafyll_cents, 4000);
 });
 
 test("validateMachineBreakdown: negativt beløp avvises", () => {

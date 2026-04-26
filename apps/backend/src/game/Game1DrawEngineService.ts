@@ -61,6 +61,8 @@ import type { Game1TicketPurchaseService, Game1TicketPurchaseRow } from "./Game1
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutService.js";
 import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
+import type { Game1JackpotStateService } from "./Game1JackpotStateService.js";
+import { runDailyJackpotEvaluation } from "./Game1DrawEngineDailyJackpot.js";
 import {
   Game1LuckyBonusService,
   resolveLuckyBonusConfig,
@@ -107,6 +109,15 @@ import {
   emitAdminAutoPaused,
 } from "./Game1DrawEngineBroadcast.js";
 import { resolvePatternsForColor } from "./spill1VariantMapper.js";
+import {
+  NoopComplianceLedgerPort,
+  type ComplianceLedgerPort,
+} from "../adapters/ComplianceLedgerPort.js";
+import {
+  NoopPrizePolicyPort,
+  type PrizePolicyPort,
+} from "../adapters/PrizePolicyPort.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import type { GameVariantConfig } from "./variantConfig.js";
 import {
   parseDrawBag,
@@ -187,6 +198,20 @@ export interface Game1DrawEngineServiceOptions {
    * Hvis ikke satt eller ticket_config ikke har jackpot-config → 0 jackpot.
    */
   jackpotService?: Game1JackpotService;
+  /**
+   * MASTER_PLAN §2.3 / Appendix B.9: state-service for daglig akkumulert
+   * jackpot per hall-gruppe. Når wired opp + walletAdapter satt vil engine
+   * etter Fullt Hus innen `drawThresholds[0]` (default 50) atomisk debit-
+   * and-reset state-potten og distribuere awarded amount likt mellom
+   * vinnere via wallet.credit.
+   *
+   * Fail-closed: ikke wired → no-op (bakoverkompat). Wallet-credit-feil
+   * etter award-debit propageres → draw-transaksjon ruller tilbake, men
+   * state-debiten lever videre (begrenset av at awardJackpot kjører i
+   * egen pool.connect()-transaksjon). Pragmatisk pilot-akseptert avvik;
+   * full atomicitet er post-pilot-PR.
+   */
+  jackpotStateService?: Game1JackpotStateService;
   /**
    * GAME1_SCHEDULE PR 4d.3: valgfri broadcaster for admin-namespace.
    * Fire-and-forget — engine kaller `onDrawProgressed` etter persistert
@@ -290,6 +315,21 @@ export interface Game1DrawEngineServiceOptions {
     roomCode: string;
     userId: string;
   }) => number | null | undefined;
+  /**
+   * K2-A CRIT-2: ComplianceLedger-port for å skrive EXTRA_PRIZE-entries
+   * for pot- og lucky-bonus-payouts. Default no-op (bakoverkompat for
+   * tester) — produksjon skal alltid wire `engine.getComplianceLedgerPort()`.
+   * Soft-fail: ledger-skrivefeil ruller IKKE tilbake wallet-credit (matcher
+   * Game1PayoutService.payoutPhase-mønsteret).
+   */
+  complianceLedgerPort?: import("../adapters/ComplianceLedgerPort.js").ComplianceLedgerPort;
+  /**
+   * K2-A CRIT-3: PrizePolicy-port for single-prize-cap (2500 kr per
+   * pengespillforskriften §11). Brukt i pot-evaluator + lucky-bonus-payout
+   * for å håndheve maks-premie. Default no-op (bakoverkompat) — produksjon
+   * skal alltid wire `engine.getPrizePolicyPort()`.
+   */
+  prizePolicyPort?: import("../adapters/PrizePolicyPort.js").PrizePolicyPort;
 }
 
 // ── Internal row shapes ─────────────────────────────────────────────────────
@@ -478,6 +518,12 @@ export class Game1DrawEngineService {
   private readonly config: Game1DrawEngineConfig;
   private readonly payoutService: Game1PayoutService | null;
   private readonly jackpotService: Game1JackpotService | null;
+  /**
+   * MASTER_PLAN §2.3: state-service for daglig akkumulert jackpot.
+   * Late-binding via setJackpotStateService unngår sirkulær wiring.
+   * Default null = ingen daglig-jackpot-evaluering.
+   */
+  private jackpotStateService: Game1JackpotStateService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
   /** PR-C4: broadcaster for default-namespace (spiller-klient). */
   private playerBroadcaster: Game1PlayerBroadcaster | null;
@@ -522,6 +568,10 @@ export class Game1DrawEngineService {
   private luckyNumberLookup:
     | ((args: { roomCode: string; userId: string }) => number | null | undefined)
     | null;
+  /** K2-A CRIT-2: compliance ledger-port for EXTRA_PRIZE-entries. */
+  private readonly complianceLedgerPort: ComplianceLedgerPort;
+  /** K2-A CRIT-3: prize policy-port for single-prize-cap (2500 kr). */
+  private readonly prizePolicyPort: PrizePolicyPort;
 
   constructor(options: Game1DrawEngineServiceOptions) {
     this.pool = options.pool;
@@ -538,6 +588,7 @@ export class Game1DrawEngineService {
     };
     this.payoutService = options.payoutService ?? null;
     this.jackpotService = options.jackpotService ?? null;
+    this.jackpotStateService = options.jackpotStateService ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
     this.playerBroadcaster = options.playerBroadcaster ?? null;
     this.miniGameOrchestrator = options.miniGameOrchestrator ?? null;
@@ -549,6 +600,13 @@ export class Game1DrawEngineService {
     this.bingoEngine = options.bingoEngine ?? null;
     this.luckyBonusService = options.luckyBonusService ?? null;
     this.luckyNumberLookup = options.luckyNumberLookup ?? null;
+    // K2-A CRIT-2 / CRIT-3: ledger + prize-policy ports. Default no-op
+    // (bakoverkompat for tester). Produksjon wires til
+    // engine.getComplianceLedgerPort() + engine.getPrizePolicyPort().
+    this.complianceLedgerPort =
+      options.complianceLedgerPort ?? new NoopComplianceLedgerPort();
+    this.prizePolicyPort =
+      options.prizePolicyPort ?? new NoopPrizePolicyPort();
     // PR-T3 Spor 4: fail-closed — hvis potService wired ved konstruksjon uten
     // walletAdapter → ugyldig konfig. (Late-binding via setters er unntak for
     // test-oppsett og sirkulær wiring; der ansvarliggjøres caller for å sette
@@ -564,6 +622,16 @@ export class Game1DrawEngineService {
   /** PR-T2: late-binding for Game1PotService (unngå sirkulær wiring). */
   setPotService(svc: Game1PotService): void {
     this.potService = svc;
+  }
+
+  /**
+   * MASTER_PLAN §2.3: late-binding for Game1JackpotStateService.
+   * Når wired sammen med walletAdapter vil engine etter Fullt Hus innen
+   * threshold atomisk debit-and-reset daglig-pott og distribuere til
+   * vinnere. Uten state-service er evalueringen no-op (bakoverkompat).
+   */
+  setJackpotStateService(svc: Game1JackpotStateService): void {
+    this.jackpotStateService = svc;
   }
 
   /** PR-T2: late-binding for PotDailyAccumulationTickService. */
@@ -2147,6 +2215,39 @@ export class Game1DrawEngineService {
         drawSequenceAtWin,
         winners,
         ordinaryWinCentsByHall,
+        // K2-A CRIT-2 / CRIT-3: thread ports gjennom til pot-evaluator.
+        complianceLedgerPort: this.complianceLedgerPort,
+        prizePolicyPort: this.prizePolicyPort,
+      });
+    }
+
+    // MASTER_PLAN §2.3 / Appendix B.9: daglig-akkumulert Jackpott. Kjører
+    // kun ved Fullt Hus + state-service wired + walletAdapter wired. Service-
+    // helperen er fail-closed på sin egen side (no-op hvis state mangler
+    // eller threshold ikke oppfylt). Wallet-credit-feil ETTER award-debit
+    // propagerer her — caller (drawNext) ruller tilbake DRAW-transaksjon,
+    // men state-debit lever videre i sin egen committed transaksjon (se
+    // Game1DrawEngineDailyJackpot.ts docstring for begrunnelse).
+    if (
+      currentPhase === TOTAL_PHASES &&
+      winners.length > 0 &&
+      this.jackpotStateService !== null &&
+      this.walletAdapter !== null
+    ) {
+      await runDailyJackpotEvaluation({
+        client,
+        schema: this.schema,
+        jackpotStateService: this.jackpotStateService,
+        walletAdapter: this.walletAdapter,
+        audit: this.audit,
+        scheduledGameId,
+        drawSequenceAtWin,
+        winners: winners.map((w) => ({
+          assignmentId: w.assignmentId,
+          walletId: w.walletId,
+          userId: w.userId,
+          hallId: w.hallId,
+        })),
       });
     }
 
@@ -2469,6 +2570,35 @@ export class Game1DrawEngineService {
 
       if (!ev.triggered) continue;
 
+      // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) på lucky bonus FØR
+      // wallet-credit. Bonus-config kan være konfigurert > 2500 → cap.
+      const requestedBonusCents = ev.bonusCents;
+      const capResult = this.prizePolicyPort.applySinglePrizeCap({
+        hallId: winner.hallId,
+        amount: requestedBonusCents / 100,
+      });
+      const cappedBonusCents = Math.floor(capResult.cappedAmount * 100);
+      const houseRetainedCents = requestedBonusCents - cappedBonusCents;
+      if (capResult.wasCapped) {
+        log.info(
+          {
+            scheduledGameId,
+            winnerId: winner.userId,
+            hallId: winner.hallId,
+            requestedBonusCents,
+            cappedBonusCents,
+            houseRetainedCents,
+            policyId: capResult.policyId,
+          },
+          "[K2-A CRIT-3] Lucky bonus single-prize-cap applied"
+        );
+      }
+
+      if (cappedBonusCents <= 0) {
+        // Cap'en trimmet til 0 — hopp over credit + ledger.
+        continue;
+      }
+
       // Wallet-credit. PR-W2: `to: "winnings"` — gevinst fra spill.
       // Wallet-feil ruller tilbake hele drawNext-transaksjonen
       // (regulatorisk §11 fail-closed).
@@ -2476,7 +2606,7 @@ export class Game1DrawEngineService {
       try {
         const tx = await this.walletAdapter.credit(
           winner.walletId,
-          ev.bonusCents / 100,
+          cappedBonusCents / 100,
           `Spill 1 Lucky Number Bonus — spill ${scheduledGameId}`,
           {
             idempotencyKey: IdempotencyKeys.game1LuckyBonus({
@@ -2494,7 +2624,7 @@ export class Game1DrawEngineService {
             scheduledGameId,
             winnerId: winner.userId,
             walletId: winner.walletId,
-            bonusCents: ev.bonusCents,
+            bonusCents: cappedBonusCents,
           },
           "[K1-C] Lucky Number Bonus wallet.credit feilet — ruller tilbake draw-transaksjon"
         );
@@ -2510,6 +2640,47 @@ export class Game1DrawEngineService {
         );
       }
 
+      // K2-A CRIT-2: skriv EXTRA_PRIZE-entry til ComplianceLedger §71 for
+      // lucky bonus. Soft-fail (matcher Game1PayoutService-mønsteret) —
+      // ledger-feil ruller IKKE tilbake credit. Idempotency-key på wallet-
+      // credit hindrer dobbel-credit ved retry.
+      try {
+        await this.complianceLedgerPort.recordComplianceLedgerEvent({
+          hallId: winner.hallId,
+          // Spill 1 (hovedspill).
+          gameType: ledgerGameTypeForSlug("bingo"),
+          channel: "INTERNET",
+          eventType: "EXTRA_PRIZE",
+          amount: cappedBonusCents / 100,
+          gameId: scheduledGameId,
+          roomCode: roomCode || undefined,
+          playerId: winner.userId,
+          walletId: winner.walletId,
+          policyVersion: capResult.policyId,
+          metadata: {
+            reason: "GAME1_LUCKY_NUMBER_BONUS",
+            luckyNumber: luckyNumber ?? null,
+            fullHouseBall: lastBall,
+            requestedBonusCents,
+            cappedBonusCents,
+            houseRetainedCents,
+            drawSequenceAtWin,
+            ticketColor: winner.ticketColor,
+          },
+        });
+      } catch (err) {
+        log.warn(
+          {
+            err,
+            scheduledGameId,
+            winnerId: winner.userId,
+            hallId: winner.hallId,
+            cappedBonusCents,
+          },
+          "[K2-A CRIT-2] complianceLedger.recordComplianceLedgerEvent EXTRA_PRIZE feilet — lucky bonus credit fortsetter uansett"
+        );
+      }
+
       // Audit (fire-and-forget). Matcher PM-spec for task K1-C:
       // action `game1.lucky_number_bonus_won` med { luckyNumber,
       // fullHouseBall, bonusCents }.
@@ -2520,7 +2691,9 @@ export class Game1DrawEngineService {
         details: {
           luckyNumber: luckyNumber ?? null,
           fullHouseBall: lastBall,
-          bonusCents: ev.bonusCents,
+          bonusCents: cappedBonusCents,
+          requestedBonusCents,
+          houseRetainedCents,
           drawSequenceAtWin,
           walletTransactionId: walletTxId,
           hallId: winner.hallId,
@@ -2534,7 +2707,8 @@ export class Game1DrawEngineService {
           winnerId: winner.userId,
           luckyNumber,
           lastBall,
-          bonusCents: ev.bonusCents,
+          bonusCents: cappedBonusCents,
+          requestedBonusCents,
           walletTxId,
         },
         "[K1-C] Lucky Number Bonus paid"

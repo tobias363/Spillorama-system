@@ -99,6 +99,10 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
   };
 
   let destroyCalledWith: string | null = null;
+  // CRIT-4: spore markRoomAsScheduled-kall så testene kan verifisere
+  // at scheduled-flyten merker rom som scheduled (defensiv guard mot
+  // dual-engine state-divergens).
+  const markScheduledCalls: Array<{ code: string; scheduledGameId: string }> = [];
   const engine = {
     assertWalletAllowedForGameplay: () => {},
     createRoom: async () => ({
@@ -120,6 +124,9 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
     }),
     destroyRoom: (code: string) => {
       destroyCalledWith = code;
+    },
+    markRoomAsScheduled: (code: string, scheduledGameId: string) => {
+      markScheduledCalls.push({ code, scheduledGameId });
     },
   };
 
@@ -166,6 +173,7 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
     poolQueries,
     emitCalls,
     bindCalls,
+    markScheduledCalls,
   };
 }
 
@@ -208,6 +216,11 @@ test("4d.2: happy path — room_code NULL → createRoom + assignRoomCode", asyn
   assert.deepEqual(stubs.bindCalls, [{ code: "ROOM-X1", slug: "bingo" }]);
   assert.deepEqual(stubs.emitCalls, ["ROOM-X1"]);
   assert.ok(sock.rooms.has("ROOM-X1"), "socket skal joine rommet");
+  // CRIT-4: rommet skal markeres som scheduled så BingoEngine.startGame /
+  // drawNextNumber / submitClaim kaster USE_SCHEDULED_API.
+  assert.deepEqual(stubs.markScheduledCalls, [
+    { code: "ROOM-X1", scheduledGameId: "sg-1" },
+  ]);
 });
 
 test("4d.2: happy path — eksisterende room_code → joinRoom (reconnect)", async () => {
@@ -230,6 +243,12 @@ test("4d.2: happy path — eksisterende room_code → joinRoom (reconnect)", asy
   assert.equal(data.playerId, "player-joined");
   // Ingen bind-call fordi rommet er allerede bundet.
   assert.equal(stubs.bindCalls.length, 0);
+  // CRIT-4: reconnect-flyten skal også markere rommet som scheduled —
+  // dekker tilfellet "Render-instance restart hydrater RoomState fra
+  // Redis-store uten å vite om scheduled-mappingen".
+  assert.deepEqual(stubs.markScheduledCalls, [
+    { code: "EXISTING", scheduledGameId: "sg-1" },
+  ]);
 });
 
 test("4d.2: race — assignRoomCode returnerer annen kode → destroyRoom + joinRoom inn i vinneren", async () => {
@@ -247,6 +266,11 @@ test("4d.2: race — assignRoomCode returnerer annen kode → destroyRoom + join
   assert.equal(data.roomCode, "ROOM-WINNER", "skal havne i vinner-rommet");
   assert.equal(data.playerId, "player-joined");
   assert.equal(stubs.getDestroyCalledWith(), "ROOM-LOSER", "taper-rom destroyes");
+  // CRIT-4: vinner-rommet skal også markeres som scheduled. Race-loser
+  // ble destroy'd før det fikk markering — det er forventet.
+  assert.deepEqual(stubs.markScheduledCalls, [
+    { code: "ROOM-WINNER", scheduledGameId: "sg-1" },
+  ]);
 });
 
 test("4d.2: multi-hall — hallId ikke i participating_halls → HALL_NOT_ALLOWED", async () => {

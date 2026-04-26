@@ -53,13 +53,21 @@ export interface AdminHallDeps {
 
 /**
  * BIN-585 PR D: the (gameType, channel) pairs we query for a hall balance.
- * Mirrors `ComplianceLedger.makeHouseAccountId`. DATABINGO is the primary
- * domain; MAIN_GAME is legacy wording and not populated in new backend.
- * If we later onboard a new game type, add the pair here.
+ * Mirrors `ComplianceLedger.makeHouseAccountId`.
+ *
+ * K2-A CRIT-1: Spill 1 (slug `bingo`) er hovedspill og skriver til
+ * MAIN_GAME-house-account. Vi MÅ derfor også summere MAIN_GAME-balansene
+ * for at admin:hall-balance skal vise korrekt total etter slug-fixen.
+ * SpinnGo og legacy ad-hoc-spill bruker fortsatt DATABINGO.
  */
-const HALL_BALANCE_ACCOUNT_PAIRS: ReadonlyArray<{ gameType: "DATABINGO"; channel: "HALL" | "INTERNET" }> = [
+const HALL_BALANCE_ACCOUNT_PAIRS: ReadonlyArray<{
+  gameType: "DATABINGO" | "MAIN_GAME";
+  channel: "HALL" | "INTERNET";
+}> = [
   { gameType: "DATABINGO", channel: "HALL" },
   { gameType: "DATABINGO", channel: "INTERNET" },
+  { gameType: "MAIN_GAME", channel: "HALL" },
+  { gameType: "MAIN_GAME", channel: "INTERNET" },
 ];
 
 /** Mirror of `ComplianceLedger.makeHouseAccountId`. */

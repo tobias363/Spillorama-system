@@ -192,10 +192,16 @@ function asMachineBreakdown(value: unknown): MachineBreakdown {
   }
   return {
     rows,
+    kasse_start_skift_cents:
+      typeof raw.kasse_start_skift_cents === "number" ? raw.kasse_start_skift_cents : 0,
     ending_opptall_kassie_cents:
       typeof raw.ending_opptall_kassie_cents === "number" ? raw.ending_opptall_kassie_cents : 0,
     innskudd_drop_safe_cents:
       typeof raw.innskudd_drop_safe_cents === "number" ? raw.innskudd_drop_safe_cents : 0,
+    paafyll_ut_kasse_cents:
+      typeof raw.paafyll_ut_kasse_cents === "number" ? raw.paafyll_ut_kasse_cents : 0,
+    totalt_dropsafe_paafyll_cents:
+      typeof raw.totalt_dropsafe_paafyll_cents === "number" ? raw.totalt_dropsafe_paafyll_cents : 0,
     difference_in_shifts_cents:
       typeof raw.difference_in_shifts_cents === "number" ? raw.difference_in_shifts_cents : 0,
   };

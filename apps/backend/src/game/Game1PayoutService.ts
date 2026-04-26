@@ -46,6 +46,7 @@ import {
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import { DomainError } from "./BingoEngine.js";
 import { IdempotencyKeys } from "./idempotency.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-payout-service" });
@@ -327,7 +328,9 @@ export class Game1PayoutService {
         try {
           await this.complianceLedgerPort.recordComplianceLedgerEvent({
             hallId: winner.hallId,
-            gameType: "DATABINGO",
+            // K2-A CRIT-1: Spill 1 er hovedspill (MAIN_GAME). Service er
+            // Spill-1-spesifikk; slug er hardkodet "bingo".
+            gameType: ledgerGameTypeForSlug("bingo"),
             channel: this.defaultLedgerChannel,
             eventType: "PRIZE",
             amount: centsToKroner(prizePerWinnerCents),
@@ -365,7 +368,8 @@ export class Game1PayoutService {
         try {
           await this.complianceLedgerPort.recordComplianceLedgerEvent({
             hallId: winner.hallId,
-            gameType: "DATABINGO",
+            // K2-A CRIT-1: Spill 1 er hovedspill (MAIN_GAME).
+            gameType: ledgerGameTypeForSlug("bingo"),
             channel: this.defaultLedgerChannel,
             eventType: "EXTRA_PRIZE",
             amount: centsToKroner(jackpotPerWinner),

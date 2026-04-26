@@ -86,6 +86,7 @@ import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
 import type { LedgerGameType, LedgerChannel, ComplianceLedgerEntry, DailyComplianceReport, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import type { LoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import { NoopLoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
@@ -590,6 +591,46 @@ export class BingoEngine {
     };
   }
 
+  /**
+   * K2-A CRIT-3: eksponer PrizePolicyManager som narrow port slik at
+   * scheduled-engine (PotEvaluator, mini-game, lucky bonus) kan håndheve
+   * single-prize-cap (2500 kr per pengespillforskriften §11) på alle payout-
+   * paths uten å ta direkte avhengighet til PrizePolicyManager-klassen.
+   *
+   * `PrizeGameType` i policy-API-et er fortsatt kun "DATABINGO" — samme
+   * 2500-cap gjelder MAIN_GAME, så vi bruker DATABINGO som policy-key
+   * inntil egen task åpner typen.
+   *
+   * Regulatorisk: alle Spill 1 payout-paths SKAL kalle dette før
+   * walletAdapter.credit. Differansen (cappedAmount - amount) audit-
+   * logges av caller (typisk via PayoutAuditTrail eller dedikert log).
+   */
+  getPrizePolicyPort(): import("../adapters/PrizePolicyPort.js").PrizePolicyPort {
+    const prizePolicy = this.prizePolicy;
+    return {
+      applySinglePrizeCap(input): {
+        cappedAmount: number;
+        wasCapped: boolean;
+        policyId: string;
+      } {
+        const result = prizePolicy.applySinglePrizeCap({
+          hallId: input.hallId,
+          // PrizeGameType-svartelist (kun DATABINGO i dag) løses i egen
+          // task — capen er identisk uansett gameType, så vi bruker
+          // DATABINGO som lookup-key.
+          gameType: "DATABINGO",
+          amount: input.amount,
+          atMs: input.atMs,
+        });
+        return {
+          cappedAmount: result.cappedAmount,
+          wasCapped: result.wasCapped,
+          policyId: result.policy.id,
+        };
+      },
+    };
+  }
+
   async createRoom(input: CreateRoomInput): Promise<{ roomCode: string; playerId: string }> {
     const hallId = this.assertHallId(input.hallId);
     const playerId = randomUUID();
@@ -678,8 +719,45 @@ export class BingoEngine {
     return { roomCode, playerId };
   }
 
+  /**
+   * CRIT-4 / HIGH-1 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26):
+   *
+   * Markér et eksisterende `bingo`-rom som scheduled. Etter dette vil
+   * `BingoEngine.startGame/drawNextNumber/evaluateActivePhase/
+   * submitClaim` kaste `DomainError("USE_SCHEDULED_API")` hvis kalt på
+   * dette rommet — defensiv guard mot dual-engine-bugs (se review CRIT-4).
+   *
+   * Kalles fra `game1ScheduledEvents.ts` etter at
+   * `Game1DrawEngineService.assignRoomCode` har persistert mappingen.
+   *
+   * No-op hvis rommets gameSlug ikke er `"bingo"` — Spill 2/3 påvirkes
+   * ikke fordi `assertNotScheduled` filtrerer på slug.
+   *
+   * Idempotent: gjentatte kall med samme `scheduledGameId` er trygt.
+   * Race-vinduer (mellom `assignRoomCode` og `markRoomAsScheduled`) er
+   * ikke mulig fordi `engine.createRoom` returnerer rom-koden synkront,
+   * og scheduled-pathen kaller `markRoomAsScheduled` umiddelbart etter
+   * vellykket assignRoomCode.
+   *
+   * @throws DomainError("ROOM_NOT_FOUND") hvis koden ikke finnes
+   */
+  markRoomAsScheduled(roomCode: string, scheduledGameId: string): void {
+    const room = this.requireRoom(roomCode);
+    const trimmedId = scheduledGameId?.trim();
+    if (!trimmedId) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "scheduledGameId må være en ikke-tom streng.",
+      );
+    }
+    room.scheduledGameId = trimmedId;
+    this.syncRoomToStore(room);
+  }
+
   async startGame(input: StartGameInput): Promise<void> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 må kjøre via Game1DrawEngineService.
+    this.assertNotScheduled(room);
     this.assertHost(room, input.actorPlayerId);
     this.assertNotRunning(room);
     this.archiveIfEnded(room);
@@ -732,7 +810,11 @@ export class BingoEngine {
       ? await this.filterEligiblePlayers(ticketCandidates, entryFee, nowMs, room.hallId)
       : [];
     const gameId = randomUUID();
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) er hovedspill
+    // (MAIN_GAME, 15%). Andre slugs (rocket/monsterbingo) returnerer fortsatt
+    // DATABINGO inntil de behandles i egen task. Resolver gjør oppslaget
+    // tolerant for null/manglende slug.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
@@ -1223,6 +1305,10 @@ export class BingoEngine {
    * Implementasjon ekstrahert til {@link BingoEnginePatternEval.evaluateActivePhase}.
    */
   private async evaluateActivePhase(room: RoomState, game: GameState): Promise<void> {
+    // CRIT-4: defensive — kalles kun fra drawNextNumber (som allerede
+    // har guard), men dobbel-sjekk siden denne også skriver wallet
+    // via auto-claim-payouts.
+    this.assertNotScheduled(room);
     await evaluateActivePhaseHelper(this.buildEvaluatePhaseCallbacks(), room, game);
   }
 
@@ -1256,13 +1342,17 @@ export class BingoEngine {
     prizePerWinner: number,
   ): Promise<void> {
     const player = this.requirePlayer(room, playerId);
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
     const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
 
     // Cap against single-prize-policy + remaining pool + RTP budget.
+    // PrizePolicy bruker fortsatt PrizeGameType (kun "DATABINGO" i dagens
+    // sentralisering). En egen task åpner PrizeGameType for MAIN_GAME — for
+    // nå behold "DATABINGO" her. K2-A scope er kun ledger-events.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
       gameType: "DATABINGO",
@@ -1392,6 +1482,9 @@ export class BingoEngine {
 
   async drawNextNumber(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 må trekkes via Game1DrawEngineService.
+    // Defensiv guard mot dual-engine state-divergens.
+    this.assertNotScheduled(room);
     this.assertHost(room, input.actorPlayerId);
     const host = this.requirePlayer(room, input.actorPlayerId);
     const nowMs = Date.now();
@@ -1576,7 +1669,8 @@ export class BingoEngine {
     if (balance < debit) {
       throw new DomainError("INSUFFICIENT_FUNDS", "Ikke nok saldo til å bytte billett.");
     }
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
@@ -1646,6 +1740,11 @@ export class BingoEngine {
 
   async submitClaim(input: SubmitClaimInput): Promise<ClaimRecord> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 har egen claim-flyt via
+    // Game1DrawEngineService.evaluateAndPayoutPhase. Hvis klient sender
+    // claim:submit på scheduled-rom risikerer vi dual-payout siden
+    // idempotency-keyene er forskjellige (g1-phase-* vs line-prize-*).
+    this.assertNotScheduled(room);
     const game = this.requireRunningGame(room);
     const player = this.requirePlayer(room, input.playerId);
     this.assertWalletAllowedForGameplay(player.walletId, Date.now());
@@ -1756,12 +1855,26 @@ export class BingoEngine {
       claim.patternIndex = winningPatternIndex;
     }
     game.claims.push(claim);
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
     if (valid && input.type === "LINE") {
-      game.lineWinnerId = player.id;
+      // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): state-mutasjoner
+      // (game.lineWinnerId, remainingPrizePool, remainingPayoutBudget,
+      // patternResults) gjøres KUN etter at walletAdapter.transfer er
+      // committet. Tidligere ble `game.lineWinnerId = player.id` satt
+      // FØR transfer — hvis transfer feilet (DB-disconnect, lock
+      // timeout) var state korrupt: spilleren så seg selv som vinner
+      // uten å ha fått pengene.
+      //
+      // Audit/ledger/persist post-transfer er fortsatt sekvensielle
+      // I/O-kall uten én outer-tx (krever pool-injeksjon i BingoEngine
+      // som er utenfor scope for K2-B). Hvis disse feiler etter transfer
+      // er pengene betalt og loggene logger feilen prominent for
+      // ops-rekonsiliering — men vi unngår nå det verste scenariet
+      // (state-mutasjon før wallet-bevegelse).
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       // Use the pattern's configured prizePercent instead of hardcoded 30%.
       // For multi-LINE variants (e.g. 4-row with 10% each), find the specific
@@ -1772,6 +1885,11 @@ export class BingoEngine {
         : game.patterns?.find((p) => p.claimType === "LINE");
       const linePrizePercent = linePattern?.prizePercent ?? 30;
       const requestedPayout = Math.floor(game.prizePool * linePrizePercent / 100);
+      // K2-A CRIT-1 note: PrizePolicyManager.PrizeGameType er fortsatt kun
+      // "DATABINGO" sentralt — egen task åpner den for MAIN_GAME. Inntil da
+      // bruker single-prize-cap-API-et "DATABINGO" som policy-key (samme
+      // 2500 kr-cap gjelder begge regulatoriske kategoriene). Ledger-event
+      // bruker korrekt MAIN_GAME via `gameType` over.
       const cappedLinePayout = this.prizePolicy.applySinglePrizeCap({
         hallId: room.hallId,
         gameType: "DATABINGO",
@@ -1783,6 +1901,10 @@ export class BingoEngine {
         game.remainingPayoutBudget
       );
       if (payout > 0) {
+        // CRIT-6: I/O FIRST — wallet transfer er den eneste rever-
+        // sible operasjonen. Hvis denne feiler kaster vi videre uten
+        // å mutere state. Idempotency-key sikrer at retry ikke
+        // dobbel-betaler.
         // BIN-239: idempotencyKey prevents double payout if client retries.
         // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
         const transfer = await this.walletAdapter.transfer(
@@ -1798,50 +1920,44 @@ export class BingoEngine {
             targetSide: "winnings",
           }
         );
+
+        // CRIT-6: state-mutasjoner skjer NÅ — etter at transfer er
+        // committet. Hvis transferen kastet over, hoppet vi over hele
+        // denne blokken og state forblir uendret.
+        game.lineWinnerId = player.id;
         player.balance += payout;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
         game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
-        await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-          type: "PAYOUT",
-          amount: payout,
-          createdAtMs: Date.now()
-        });
-        await this.ledger.recordComplianceLedgerEvent({
-          hallId: room.hallId,
-          gameType,
-          channel,
-          eventType: "PRIZE",
-          amount: payout,
-          roomCode: room.code,
-          gameId: game.id,
-          claimId: claim.id,
-          playerId: player.id,
-          walletId: player.walletId,
-          sourceAccountId: transfer.fromTx.accountId,
-          targetAccountId: transfer.toTx.accountId,
-          policyVersion: cappedLinePayout.policy.id
-        });
-        await this.payoutAudit.appendPayoutAuditEvent({
-          kind: "CLAIM_PRIZE",
-          claimId: claim.id,
-          gameId: game.id,
-          roomCode: room.code,
-          hallId: room.hallId,
-          policyVersion: cappedLinePayout.policy.id,
-          amount: payout,
-          walletId: player.walletId,
-          playerId: player.id,
-          sourceAccountId: houseAccountId,
-          txIds: [transfer.fromTx.id, transfer.toTx.id]
-        });
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-        // BIN-48: Synchronous checkpoint after payout — ensures state is persisted
-        if (this.bingoAdapter.onCheckpoint) {
-          await this.writePayoutCheckpointWithRetry(room, game, claim.id, payout, [transfer.fromTx.id, transfer.toTx.id], "LINE");
+        // Record pattern result for the first unclaimed LINE pattern
+        const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
+        if (linePatternResult) {
+          linePatternResult.isWon = true;
+          linePatternResult.winnerId = player.id;
+          linePatternResult.wonAtDraw = game.drawnNumbers.length;
+          linePatternResult.payoutAmount = payout;
+          linePatternResult.claimId = claim.id;
         }
-        // HOEY-7: Persist after LINE payout
-        await this.rooms.persist(room.code);
+
+        // CRIT-6: post-transfer audit-trail. Disse er best-effort —
+        // hvis de feiler er pengene allerede betalt og state allerede
+        // mutert. Logges prominent for ops-rekonsiliering. Reell
+        // atomicity (én outer DB-tx) krever at BingoEngine får
+        // pool-tilgang — det er en større refactor utenfor K2-B.
+        await this.runPostTransferClaimAuditTrail({
+          phase: "LINE",
+          room,
+          game,
+          claim,
+          player,
+          payout,
+          transfer,
+          houseAccountId,
+          gameType,
+          channel,
+          policyVersion: cappedLinePayout.policy.id,
+        });
       }
       const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
@@ -1854,15 +1970,6 @@ export class BingoEngine {
       if (claim.bonusTriggered) {
         claim.bonusAmount = payout;
       }
-      // Record pattern result for the first unclaimed LINE pattern
-      const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
-      if (linePatternResult) {
-        linePatternResult.isWon = true;
-        linePatternResult.winnerId = player.id;
-        linePatternResult.wonAtDraw = game.drawnNumbers.length;
-        linePatternResult.payoutAmount = payout;
-        linePatternResult.claimId = claim.id;
-      }
     }
 
     if (valid && input.type === "BINGO") {
@@ -1872,11 +1979,16 @@ export class BingoEngine {
         claim.reason = "BINGO_ALREADY_CLAIMED";
         return claim;
       }
+      // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): som LINE-grenen.
+      // game.bingoWinnerId, game.status='ENDED', endedReason — alle
+      // settes etter at transfer er committet. Idempotency-keyen
+      // sikrer at retry ikke dobbel-betaler.
       const endedAtMs = Date.now();
       const endedAt = new Date(endedAtMs);
-      game.bingoWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       const requestedPayout = game.remainingPrizePool;
+      // K2-A CRIT-1 note: same som over — PrizeGameType-svartelist åpnes
+      // i egen task. 2500-cap er identisk uansett gameType.
       const cappedBingoPayout = this.prizePolicy.applySinglePrizeCap({
         hallId: room.hallId,
         gameType: "DATABINGO",
@@ -1888,6 +2000,7 @@ export class BingoEngine {
         game.remainingPayoutBudget
       );
       if (payout > 0) {
+        // CRIT-6: wallet-transfer FIRST — single-source-of-truth.
         // BIN-239: idempotencyKey prevents double payout if client retries.
         // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
         const transfer = await this.walletAdapter.transfer(
@@ -1903,48 +2016,27 @@ export class BingoEngine {
             targetSide: "winnings",
           }
         );
+
+        // CRIT-6: state-mutasjoner kommer ETTER vellykket transfer.
+        game.bingoWinnerId = player.id;
         player.balance += payout;
-        await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-          type: "PAYOUT",
-          amount: payout,
-          createdAtMs: Date.now()
-        });
-        await this.ledger.recordComplianceLedgerEvent({
-          hallId: room.hallId,
-          gameType,
-          channel,
-          eventType: "PRIZE",
-          amount: payout,
-          roomCode: room.code,
-          gameId: game.id,
-          claimId: claim.id,
-          playerId: player.id,
-          walletId: player.walletId,
-          sourceAccountId: transfer.fromTx.accountId,
-          targetAccountId: transfer.toTx.accountId,
-          policyVersion: cappedBingoPayout.policy.id
-        });
-        await this.payoutAudit.appendPayoutAuditEvent({
-          kind: "CLAIM_PRIZE",
-          claimId: claim.id,
-          gameId: game.id,
-          roomCode: room.code,
-          hallId: room.hallId,
-          policyVersion: cappedBingoPayout.policy.id,
-          amount: payout,
-          walletId: player.walletId,
-          playerId: player.id,
-          sourceAccountId: houseAccountId,
-          txIds: [transfer.fromTx.id, transfer.toTx.id]
-        });
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-        // BIN-48: Synchronous checkpoint after payout — ensures state is persisted
-        if (this.bingoAdapter.onCheckpoint) {
-          await this.writePayoutCheckpointWithRetry(room, game, claim.id, payout, [transfer.fromTx.id, transfer.toTx.id], "BINGO");
-        }
-        // HOEY-7: Persist after BINGO payout
-        await this.rooms.persist(room.code);
+
+        // CRIT-6: post-transfer audit-trail (best-effort).
+        await this.runPostTransferClaimAuditTrail({
+          phase: "BINGO",
+          room,
+          game,
+          claim,
+          player,
+          payout,
+          transfer,
+          houseAccountId,
+          gameType,
+          channel,
+          policyVersion: cappedBingoPayout.policy.id,
+        });
       }
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
@@ -1988,6 +2080,174 @@ export class BingoEngine {
     }
 
     return claim;
+  }
+
+  /**
+   * CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): post-transfer audit-
+   * trail for submitClaim. Kalt KUN etter at walletAdapter.transfer er
+   * committet og state er mutert.
+   *
+   * Reell atomicity (én outer DB-tx på tvers av alle services) krever at
+   * BingoEngine får pool-tilgang og at hver service eksponerer en
+   * client-aware variant. Dette er en større refactor utenfor K2-B —
+   * for nå sekvensierer vi best-effort I/O og logger feil prominent
+   * for ops-rekonsiliering.
+   *
+   * Hvis en av disse kastet, var pengene allerede betalt og state
+   * mutert. Vi catcher individuelt for å unngå at en feil i ett ledd
+   * blokkerer de andre — partial audit-trail er bedre enn ingen.
+   *
+   * Sekvens:
+   *   1. compliance.recordLossEntry  (in-memory tracking + persist)
+   *   2. ledger.recordComplianceLedgerEvent  (compliance-ledger)
+   *   3. payoutAudit.appendPayoutAuditEvent  (audit-trail med hash-chain)
+   *   4. bingoAdapter.onCheckpoint  (BIN-48 sync checkpoint via writePayoutCheckpointWithRetry)
+   *   5. rooms.persist  (HOEY-7 in-memory state-persist)
+   */
+  private async runPostTransferClaimAuditTrail(input: {
+    phase: "LINE" | "BINGO";
+    room: RoomState;
+    game: GameState;
+    claim: ClaimRecord;
+    player: Player;
+    payout: number;
+    transfer: WalletTransferResult;
+    houseAccountId: string;
+    gameType: LedgerGameType;
+    channel: LedgerChannel;
+    policyVersion: string;
+  }): Promise<void> {
+    const {
+      phase,
+      room,
+      game,
+      claim,
+      player,
+      payout,
+      transfer,
+      houseAccountId,
+      gameType,
+      channel,
+      policyVersion,
+    } = input;
+
+    // 1) compliance.recordLossEntry — tracker PAYOUT for netto-tap-beregning.
+    try {
+      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: payout,
+        createdAtMs: Date.now(),
+      });
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          claimId: claim.id,
+          gameId: game.id,
+          phase,
+          payout,
+          walletId: player.walletId,
+          step: "recordLossEntry",
+        },
+        "[CRIT-6] post-transfer compliance.recordLossEntry feilet — ops-rekonsiliering kreves; pengene er betalt"
+      );
+    }
+
+    // 2) ledger.recordComplianceLedgerEvent — regulatorisk §11-rapport.
+    try {
+      await this.ledger.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: payout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion,
+      });
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          claimId: claim.id,
+          gameId: game.id,
+          phase,
+          payout,
+          step: "recordComplianceLedgerEvent",
+        },
+        "[CRIT-6] post-transfer ledger.recordComplianceLedgerEvent feilet — REGULATORISK rekonsiliering kreves; pengene er betalt"
+      );
+    }
+
+    // 3) payoutAudit.appendPayoutAuditEvent — internt audit-trail.
+    try {
+      await this.payoutAudit.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion,
+        amount: payout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id],
+      });
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          claimId: claim.id,
+          gameId: game.id,
+          phase,
+          payout,
+          step: "appendPayoutAuditEvent",
+        },
+        "[CRIT-6] post-transfer payoutAudit.appendPayoutAuditEvent feilet — audit-trail har gap; pengene er betalt"
+      );
+    }
+
+    // 4) BIN-48 checkpoint — synkron checkpoint etter payout for crash-recovery.
+    if (this.bingoAdapter.onCheckpoint) {
+      try {
+        await this.writePayoutCheckpointWithRetry(
+          room,
+          game,
+          claim.id,
+          payout,
+          [transfer.fromTx.id, transfer.toTx.id],
+          phase,
+        );
+      } catch (err) {
+        logger.error(
+          {
+            err,
+            claimId: claim.id,
+            gameId: game.id,
+            phase,
+            payout,
+            step: "writePayoutCheckpointWithRetry",
+          },
+          "[CRIT-6] post-transfer checkpoint feilet — crash-recovery integritet redusert; pengene er betalt"
+        );
+      }
+    }
+
+    // 5) HOEY-7 — persist room-state etter payout.
+    try {
+      await this.rooms.persist(room.code);
+    } catch (err) {
+      logger.error(
+        { err, roomCode: room.code, claimId: claim.id, step: "rooms.persist" },
+        "[CRIT-6] post-transfer rooms.persist feilet — in-memory og store kan divergere; pengene er betalt"
+      );
+    }
   }
 
   // ── Jackpot (Game 5 Free Spin) ──────────────────────────────────────────
@@ -2849,6 +3109,47 @@ export class BingoEngine {
     if (room.hostPlayerId !== actorPlayerId) {
       throw new DomainError("NOT_HOST", "Kun host kan utføre denne handlingen.");
     }
+  }
+
+  /**
+   * CRIT-4 / HIGH-1 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26):
+   *
+   * Defensiv runtime-guard mot at scheduled Spill 1-rom blir mutert via
+   * ad-hoc-pathen (`BingoEngine.startGame/drawNextNumber/evaluateActivePhase/
+   * submitClaim`).
+   *
+   * Per `SPILL1_ENGINE_ROLES_2026-04-23.md`: scheduled Spill 1 (slug
+   * `bingo` med `room.scheduledGameId !== null`) skal kun trekkes via
+   * `Game1DrawEngineService`. Hvis BingoEngine likevel mutere disse
+   * rommene oppstår dual-engine state-divergens og potensielt
+   * dual-payout (se review CRIT-4).
+   *
+   * Spill 2 (slug `rocket`) og Spill 3 (slug `monsterbingo`) bruker
+   * fortsatt ad-hoc engine — de påvirkes IKKE av denne guarden fordi
+   * sjekken er begrenset til `gameSlug === "bingo"`.
+   *
+   * Bruksmønster: kall ved start av alle BingoEngine-mutasjons-metoder
+   * som kan trigge wallet/state-skriv (drawNextNumber, submitClaim,
+   * startGame, evaluateActivePhase).
+   */
+  private assertNotScheduled(room: RoomState): void {
+    // Kun Spill 1 (`bingo`-slug) kan være scheduled. Spill 2/3 har egen
+    // gameSlug og er alltid ad-hoc — guard skal være no-op for dem.
+    if (room.gameSlug !== "bingo") {
+      return;
+    }
+    if (room.scheduledGameId === null || room.scheduledGameId === undefined) {
+      return;
+    }
+    throw new DomainError(
+      "USE_SCHEDULED_API",
+      "Scheduled Spill 1 må trekkes via Game1DrawEngineService — ikke BingoEngine.",
+      {
+        roomCode: room.code,
+        scheduledGameId: room.scheduledGameId,
+        gameSlug: room.gameSlug,
+      }
+    );
   }
 
   private assertNotRunning(room: RoomState): void {

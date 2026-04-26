@@ -413,11 +413,12 @@ export class AgentSettlementService {
   }
 
   /**
-   * K1 wireframe 17.40 — kalkuler shift-delta-felter:
-   *   difference_in_shifts = shift_start_to_end - innskudd_drop_safe - ending_opptall_kassie
+   * @deprecated K1-A formula — beholdt for backward-compat med eksisterende
+   * tester og frontend-kode. Bruk `calculateWireframeShiftDelta` for ny kode
+   * som matcher wireframe 16.25 / 17.10 1:1.
    *
-   * Speiler klient-kalkulasjonen i SettlementBreakdownModal. Backend-service
-   * eksponerer det så PDF-eksport og rapport-bygging kan bruke samme logikk.
+   * Beregning: difference = shift_start_to_end - innskudd_drop_safe - ending_opptall_kassie
+   *
    * Alle beløp i øre (integer) for å unngå float-feil.
    */
   static calculateShiftDelta(input: {
@@ -439,6 +440,96 @@ export class AgentSettlementService {
     return {
       differenceInShiftsCents:
         input.shiftStartToEndCents - input.innskuddDropSafeCents - input.endingOpptallKassieCents,
+    };
+  }
+
+  /**
+   * K1-B wireframe 16.25 / 17.10 — eksakt 1:1-formel for shift-delta-seksjon.
+   *
+   * Bruker den 5-felt-strukturen wireframene viser:
+   *   • Kasse start skift     (kasseStartSkift)
+   *   • Kasse endt skift      (endingOpptallKassie)
+   *   • Endring               (= ending - start, beregnet)
+   *   • Innskudd dropsafe     (innskuddDropSafe)
+   *   • Påfyll/ut kasse       (paafyllUtKasse)
+   *   • Totalt dropsafe+påfyll (= innskudd + påfyll, beregnet)
+   *   • Totalt sum kasse-fil  (totaltSumKasseFil — fra maskin-breakdown)
+   *
+   * Wireframe-formel:
+   *   difference_in_shifts =
+   *     (totalt_dropsafe_paafyll - endring) + endring - totalt_sum_kasse_fil
+   *
+   * Forenkles algebraisk til:
+   *   difference_in_shifts = totalt_dropsafe_paafyll - totalt_sum_kasse_fil
+   *
+   * (Den utvidede formen i wireframe gjør beregningen mer transparent for
+   * regnskapsfører — vi behandler `(totalt - endring)` som en sanity-check.
+   * Hvis innskudd+påfyll != endring, betyr det at skiftet har et avvik
+   * mellom kontant-flyt og dropsafe-/kasse-fordeling.)
+   *
+   * Alle beløp i øre (integer).
+   */
+  static calculateWireframeShiftDelta(input: {
+    kasseStartSkiftCents: number;
+    endingOpptallKassieCents: number;
+    innskuddDropSafeCents: number;
+    paafyllUtKasseCents: number;
+    totaltSumKasseFilCents: number;
+  }): {
+    /** Endring opptall kasse: end - start. */
+    endringCents: number;
+    /** Totalt dropsafe + påfyll: innskudd + påfyll. */
+    totaltDropsafePaafyllCents: number;
+    /** Difference in shifts: totalt_dropsafe_paafyll - totalt_sum_kasse_fil. */
+    differenceInShiftsCents: number;
+    /**
+     * Sanity-check-flag: true hvis (totalt_dropsafe_paafyll - endring) != 0.
+     * Indikerer at innskudd+påfyll ikke matcher endring fra start til slutt.
+     * UI bør vise advarsel.
+     */
+    dropsafePaafyllMismatch: boolean;
+  } {
+    if (!Number.isInteger(input.kasseStartSkiftCents) || input.kasseStartSkiftCents < 0) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "kasseStartSkiftCents må være et ikke-negativt heltall (øre)."
+      );
+    }
+    if (!Number.isInteger(input.endingOpptallKassieCents) || input.endingOpptallKassieCents < 0) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "endingOpptallKassieCents må være et ikke-negativt heltall."
+      );
+    }
+    if (!Number.isInteger(input.innskuddDropSafeCents) || input.innskuddDropSafeCents < 0) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "innskuddDropSafeCents må være et ikke-negativt heltall."
+      );
+    }
+    if (!Number.isInteger(input.paafyllUtKasseCents)) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "paafyllUtKasseCents må være et heltall (kan være negativt — ut av kasse)."
+      );
+    }
+    if (!Number.isInteger(input.totaltSumKasseFilCents)) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "totaltSumKasseFilCents må være et heltall."
+      );
+    }
+    const endring = input.endingOpptallKassieCents - input.kasseStartSkiftCents;
+    const totaltDropsafePaafyll = input.innskuddDropSafeCents + input.paafyllUtKasseCents;
+    // Wireframe-formel (utvidet form for transparens):
+    // (totalt_dropsafe_paafyll - endring) + endring - totalt_sum_kasse_fil
+    const differenceInShifts =
+      (totaltDropsafePaafyll - endring) + endring - input.totaltSumKasseFilCents;
+    return {
+      endringCents: endring,
+      totaltDropsafePaafyllCents: totaltDropsafePaafyll,
+      differenceInShiftsCents: differenceInShifts,
+      dropsafePaafyllMismatch: totaltDropsafePaafyll !== endring,
     };
   }
 

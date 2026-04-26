@@ -1244,6 +1244,11 @@ const game1DrawEngineService = new Game1DrawEngineService({
   auditLogService,
   payoutService: game1PayoutService,
   jackpotService: game1JackpotService,
+  // MASTER_PLAN §2.3 / Appendix B.9: daglig akkumulert jackpot per hall-
+  // gruppe. Når wired sammen med walletAdapter (under) vil engine etter
+  // Fullt Hus innen drawThresholds[0] (default 50) atomisk debit-and-reset
+  // state-pott og distribuere awarded amount til vinnere via wallet.credit.
+  jackpotStateService: game1JackpotStateService,
   physicalTicketPayoutService,
   // PR-T3 Spor 4: akkumulerende pot-evaluering etter Fullt Hus. Pot-payout
   // kjører INNE i draw-transaksjonen med samme fail-closed-semantikk som
@@ -1255,6 +1260,14 @@ const game1DrawEngineService = new Game1DrawEngineService({
   // `engine` her er Game3Engine ⊂ BingoEngine, som eksponerer
   // destroyRoom() arvet fra basen. Fail-closed — se destroyRoomIfPresent.
   bingoEngine: engine,
+  // K2-A CRIT-2: skriv EXTRA_PRIZE-entries for pot- og lucky-bonus-payouts
+  // til §71 ComplianceLedger. Soft-fail-mønster matcher Game1PayoutService.
+  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) på alle Spill 1
+  // payout-paths (pot, lucky-bonus, mini-game). Tidligere kunne Jackpott
+  // utbetales til 30 000 kr og mini-game-buckets til 4000 kr — ulovlig
+  // per pengespillforskriften §11.
+  prizePolicyPort: engine.getPrizePolicyPort(),
 });
 game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // GAME1_SCHEDULE PR 4d.4: inject ticket-purchase-service slik at stopGame()
@@ -1272,6 +1285,13 @@ const game1MiniGameOrchestrator = new Game1MiniGameOrchestrator({
   schema: pgSchema,
   auditLog: auditLogService,
   walletAdapter,
+  // K2-A CRIT-2: skriv EXTRA_PRIZE-entry per mini-game-payout til §71-
+  // ledger. Soft-fail (ledger-feil ruller ikke tilbake wallet-credit).
+  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) før wallet-credit.
+  // Mini-game-buckets/luker kan ha config-verdier over 2500 — capen
+  // beskytter mot ulovlig utbetaling.
+  prizePolicyPort: engine.getPrizePolicyPort(),
 });
 
 // BIN-690 M2: registrer Wheel-implementasjon. Orchestrator leser admin-
@@ -1308,6 +1328,12 @@ const miniGameOddsenEngine = new MiniGameOddsenEngine({
   schema: pgSchema,
   walletAdapter,
   auditLog: auditLogService,
+  // K2-A CRIT-2: skriv EXTRA_PRIZE-entry per Oddsen-resolve-hit til §71-
+  // ledger. Soft-fail-mønster matcher Game1PayoutService.
+  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // K2-A CRIT-3: håndhev single-prize-cap (2500 kr). Default Oddsen-config
+  // har potLarge=3000 kr → vil bli capped til 2500 (forsk. til huset).
+  prizePolicyPort: engine.getPrizePolicyPort(),
 });
 game1MiniGameOrchestrator.registerMiniGame(miniGameOddsenEngine);
 
