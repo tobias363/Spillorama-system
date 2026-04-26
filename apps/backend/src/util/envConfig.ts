@@ -23,6 +23,12 @@ export interface BingoRuntimeConfig {
   isProductionRuntime: boolean;
   bingoMinPlayersToStart: number;
   fixedAutoDrawIntervalMs: number;
+  /**
+   * Råverdien fra `AUTO_DRAW_INTERVAL_MS` env-var hvis spesifikt satt — ellers
+   * `null`. Skiller "default 2000" fra "eksplisitt satt 2000" så Spill 1
+   * kan velge å override per-game ticket_config kun når env-var er satt.
+   */
+  autoDrawIntervalEnvOverrideMs: number | null;
   allowAutoplayInProduction: boolean;
   forceAutoStart: boolean;
   forceAutoDraw: boolean;
@@ -107,7 +113,25 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const bingoMaxDrawsPerRound = Math.min(75, Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 75)));
   const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
   const bingoMinPlayersToStart = 1;
-  const fixedAutoDrawIntervalMs = 2000;
+  // AUTO_DRAW_INTERVAL_MS: global override for Bingo-rooms (Spill 2/3) +
+  // Spill 1-default. Tidligere hardkodet til 2000ms, noe som gjorde at
+  // env-vars som Tobias satte i Render ikke fikk effekt. Default 2000 ms;
+  // floor 500 ms for å hindre absurd lave verdier.
+  //
+  // `autoDrawIntervalEnvOverrideMs` er null når env-var IKKE er satt eller
+  // er ugyldig — slik at vi kan skille "default" fra "eksplisitt satt" og
+  // kun overstyre Spill 1 per-game ticket_config_json.timing.seconds når
+  // ops faktisk har valgt en verdi.
+  const rawAutoDrawIntervalEnv = (process.env.AUTO_DRAW_INTERVAL_MS ?? "").trim();
+  const parsedAutoDrawIntervalEnv =
+    rawAutoDrawIntervalEnv.length > 0
+      ? Number.parseInt(rawAutoDrawIntervalEnv, 10)
+      : Number.NaN;
+  const autoDrawIntervalEnvOverrideMs =
+    Number.isFinite(parsedAutoDrawIntervalEnv) && parsedAutoDrawIntervalEnv >= 500
+      ? parsedAutoDrawIntervalEnv
+      : null;
+  const fixedAutoDrawIntervalMs = autoDrawIntervalEnvOverrideMs ?? 2000;
   // BIN-47: Default to false in production — autoplay must be explicitly enabled
   const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, false);
   const forceAutoStart = false;
@@ -282,6 +306,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     bingoMinRoundIntervalMs, bingoDailyLossLimit, bingoMonthlyLossLimit, bingoPlaySessionLimitMs,
     bingoPauseDurationMs, bingoSelfExclusionMinMs, bingoMaxDrawsPerRound,
     isProductionRuntime, bingoMinPlayersToStart, fixedAutoDrawIntervalMs,
+    autoDrawIntervalEnvOverrideMs,
     allowAutoplayInProduction, forceAutoStart, forceAutoDraw, enforceSingleRoomPerHall,
     autoplayAllowed, schedulerTickMs, runtimeBingoSettings,
     dailyReportJobEnabled, dailyReportJobIntervalMs,

@@ -58,12 +58,17 @@ function makeFakeDrawEngine(opts: { throwOnIds?: string[] } = {}): {
   return { service, called };
 }
 
-function makeService(rows: unknown[], opts: Parameters<typeof makeFakeDrawEngine>[0] = {}) {
+function makeService(
+  rows: unknown[],
+  opts: Parameters<typeof makeFakeDrawEngine>[0] = {},
+  serviceOpts: { forceSecondsOverride?: number } = {}
+) {
   const { pool, queries } = createStubPool(rows);
   const { service: drawEngine, called } = makeFakeDrawEngine(opts);
   const service = new Game1AutoDrawTickService({
     pool: pool as never,
     drawEngine,
+    forceSecondsOverride: serviceOpts.forceSecondsOverride,
   });
   return { service, drawEngine, called, queries };
 }
@@ -482,6 +487,127 @@ test("Task 1.1: paused game filtreres bort av SELECT — ingen drawNext trigges"
     sql.includes("gs.paused = false"),
     "SELECT må filtrere på paused=false for å unngå tick på auto-paused games"
   );
+});
+
+// ── AUTO_DRAW_INTERVAL_MS bug-fix: forceSecondsOverride persisterer ─────────
+
+test("forceSecondsOverride: vinner over per-game ticket_config_json.timing.seconds", async () => {
+  // Bug-fix: tidligere ble AUTO_DRAW_INTERVAL_MS env-var aldri lest, så
+  // første runde kunne se ut til å bruke den (av tilfeldighet) mens andre
+  // runde falt tilbake til ticket_config-default. Med forceSecondsOverride=20
+  // skal ALLE runder bruke 20 sekunder uavhengig av per-game ticket_config.
+  const now = Date.now();
+  const fifteenSecAgo = new Date(now - 15_000);
+  // ticket_config sier seconds=5 — uten override ville 15s siden vært "due".
+  // Med override=20 skal det IKKE være due (15s < 20s).
+  const { service: svcWithOverride, called: c1 } = makeService(
+    [
+      {
+        id: "g-round-2",
+        ticket_config_json: { spill1: { timing: { seconds: 5 } } },
+        draws_completed: 1,
+        last_drawn_at: fifteenSecAgo,
+        engine_started_at: fifteenSecAgo,
+      },
+    ],
+    {},
+    { forceSecondsOverride: 20 }
+  );
+  const r1 = await svcWithOverride.tick();
+  assert.equal(r1.drawsTriggered, 0, "override=20s skal blokkere draw når det er gått 15s");
+  assert.equal(r1.skippedNotDue, 1);
+  assert.equal(c1.length, 0);
+
+  // Uten override skal default per-game-config (seconds=5) gjelde og 15s > 5s → due.
+  const { service: svcNoOverride, called: c2 } = makeService([
+    {
+      id: "g-round-2",
+      ticket_config_json: { spill1: { timing: { seconds: 5 } } },
+      draws_completed: 1,
+      last_drawn_at: fifteenSecAgo,
+      engine_started_at: fifteenSecAgo,
+    },
+  ]);
+  const r2 = await svcNoOverride.tick();
+  assert.equal(r2.drawsTriggered, 1, "uten override → seconds=5 < 15s → due");
+  assert.deepEqual(c2, ["g-round-2"]);
+});
+
+test("forceSecondsOverride: holder seg stabilt over flere runder med ulike ticket_configs", async () => {
+  // Regresjons-låsing: simulerer 3 påfølgende "runder" der hver runde får
+  // ulik ticket_config (typisk admin-edit mellom rundene). Override skal
+  // holde 20 sekunder for ALLE runder — bug-fixens kjerne.
+  const now = Date.now();
+  const twentyFiveSecAgo = new Date(now - 25_000);
+  const tenSecAgo = new Date(now - 10_000);
+
+  for (const config of [
+    { spill1: { timing: { seconds: 3 } } }, // runde 1: 3s
+    { timing: { seconds: 5 } }, // runde 2: 5s (generic shape)
+    { seconds: 180 }, // runde 3: 180s (worst-case "3 minutter")
+  ]) {
+    // Med override=20: 25s > 20s → due, men 10s < 20s → ikke due.
+    const { service: svcDue, called: cDue } = makeService(
+      [
+        {
+          id: "g-due",
+          ticket_config_json: config,
+          draws_completed: 1,
+          last_drawn_at: twentyFiveSecAgo,
+          engine_started_at: twentyFiveSecAgo,
+        },
+      ],
+      {},
+      { forceSecondsOverride: 20 }
+    );
+    const rDue = await svcDue.tick();
+    assert.equal(rDue.drawsTriggered, 1, `25s siden + override=20s skal trigge for config ${JSON.stringify(config)}`);
+    assert.deepEqual(cDue, ["g-due"]);
+
+    const { service: svcNotDue, called: cNotDue } = makeService(
+      [
+        {
+          id: "g-notdue",
+          ticket_config_json: config,
+          draws_completed: 1,
+          last_drawn_at: tenSecAgo,
+          engine_started_at: tenSecAgo,
+        },
+      ],
+      {},
+      { forceSecondsOverride: 20 }
+    );
+    const rNotDue = await svcNotDue.tick();
+    assert.equal(rNotDue.drawsTriggered, 0, `10s siden + override=20s skal IKKE trigge for config ${JSON.stringify(config)}`);
+    assert.equal(rNotDue.skippedNotDue, 1);
+    assert.equal(cNotDue.length, 0);
+  }
+});
+
+test("forceSecondsOverride: 0/negativ/float ignoreres (samme som ikke-satt)", async () => {
+  // Defensiv: ugyldige override-verdier skal ikke knekke tick — service
+  // skal falle tilbake til ticket_config + defaultSeconds.
+  const now = Date.now();
+  const sixSecAgo = new Date(now - 6_000);
+  for (const badOverride of [0, -1, -100, NaN, 1.5]) {
+    const { service, called } = makeService(
+      [
+        {
+          id: "g1",
+          ticket_config_json: { seconds: 3 },
+          draws_completed: 1,
+          last_drawn_at: sixSecAgo,
+          engine_started_at: sixSecAgo,
+        },
+      ],
+      {},
+      { forceSecondsOverride: badOverride as number }
+    );
+    const r = await service.tick();
+    // Bad override → ignorert → seconds=3 fra ticket_config → 6s > 3s → due.
+    assert.equal(r.drawsTriggered, 1, `ugyldig override=${badOverride} skal ignoreres`);
+    assert.deepEqual(called, ["g1"]);
+  }
 });
 
 test("Task 1.1: paused_at_phase != null endrer ikke tick-kontrakten (ekstra-defensive)", async () => {

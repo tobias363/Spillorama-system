@@ -60,6 +60,17 @@ export interface Game1AutoDrawTickServiceOptions {
    * ugyldig. Legacy standard = 5.
    */
   defaultSeconds?: number;
+  /**
+   * Globalt override som vinner over per-game ticket_config_json.timing.seconds.
+   * Når satt, brukes denne verdien for ALLE Spill 1-spill uavhengig av admin-config.
+   *
+   * Settes typisk fra `AUTO_DRAW_INTERVAL_MS` env-var slik at Tobias kan
+   * tune draw-tempo i prod uten å redigere per-game ticket_config. Når
+   * env-var er satt holder intervalet seg stabilt på tvers av runder
+   * (var bug før: runde 1 brukte env-verdien implisitt, runde 2 falt til
+   * default fordi env-var-en ikke ble lest).
+   */
+  forceSecondsOverride?: number;
 }
 
 export interface Game1AutoDrawTickResult {
@@ -90,6 +101,7 @@ export class Game1AutoDrawTickService {
   private readonly schema: string;
   private readonly drawEngine: Game1DrawEngineService;
   private readonly defaultSeconds: number;
+  private readonly forceSecondsOverride: number | null;
 
   constructor(options: Game1AutoDrawTickServiceOptions) {
     this.pool = options.pool;
@@ -100,6 +112,12 @@ export class Game1AutoDrawTickService {
     this.schema = schema;
     this.drawEngine = options.drawEngine;
     this.defaultSeconds = options.defaultSeconds ?? 5;
+    // Aksepter kun positive heltall som override; alt annet → null (= ingen override).
+    const override = options.forceSecondsOverride;
+    this.forceSecondsOverride =
+      typeof override === "number" && Number.isFinite(override) && override > 0
+        ? Math.floor(override)
+        : null;
   }
 
   /**
@@ -202,8 +220,15 @@ export class Game1AutoDrawTickService {
    *   - top-level `{ seconds: N }` (kompakt form)
    *   - nested `{ spill1: { timing: { seconds: N } } }` (admin-form)
    *   - nested `{ timing: { seconds: N } }` (generisk)
+   *
+   * `forceSecondsOverride` (typisk fra `AUTO_DRAW_INTERVAL_MS` env-var)
+   * vinner over per-game-config slik at draw-tempoet er stabilt på tvers
+   * av alle runder i prod.
    */
   private resolveSeconds(rawConfig: unknown): number {
+    if (this.forceSecondsOverride !== null) {
+      return this.forceSecondsOverride;
+    }
     let parsed: unknown = rawConfig;
     if (typeof rawConfig === "string") {
       try {

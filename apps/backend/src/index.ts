@@ -343,6 +343,7 @@ const {
   bingoMinRoundIntervalMs, bingoDailyLossLimit, bingoMonthlyLossLimit, bingoPlaySessionLimitMs,
   bingoPauseDurationMs, bingoSelfExclusionMinMs, bingoMaxDrawsPerRound,
   isProductionRuntime, bingoMinPlayersToStart, fixedAutoDrawIntervalMs,
+  autoDrawIntervalEnvOverrideMs,
   allowAutoplayInProduction, forceAutoStart, forceAutoDraw, enforceSingleRoomPerHall,
   autoplayAllowed, schedulerTickMs, dailyReportJobEnabled, dailyReportJobIntervalMs,
   jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
@@ -1355,10 +1356,20 @@ game1DrawEngineService.setOddsenEngine(miniGameOddsenEngine);
 
 // GAME1_SCHEDULE PR 4c Bolk 4: auto-draw-tick (global 1s tick, fixed
 // seconds-intervall per spill). Default OFF til PR 4d socket-flyt aktiveres.
+//
+// `forceSecondsOverride` brukes når ops setter `AUTO_DRAW_INTERVAL_MS`
+// env-var. Da brukes verdien for ALLE Spill 1-spill, slik at draw-tempoet
+// holder seg stabilt på tvers av runder (bug-fix: tidligere kunne runde 1
+// se annerledes ut enn runde 2 fordi env-var aldri ble lest av Spill 1-pathen).
+// Konvertering ms → sekunder; min 1s for å unngå at floor (Math.floor) gir 0.
 const game1AutoDrawTickService = new Game1AutoDrawTickService({
   pool: platformService.getPool(),
   schema: pgSchema,
   drawEngine: game1DrawEngineService,
+  forceSecondsOverride:
+    autoDrawIntervalEnvOverrideMs !== null
+      ? Math.max(1, Math.round(autoDrawIntervalEnvOverrideMs / 1000))
+      : undefined,
 });
 jobScheduler.register({
   name: "game1-auto-draw-tick",
@@ -2703,7 +2714,7 @@ const PORT = Number(process.env.PORT ?? 4000);
     console.log(`Bingo backend kjører på http://localhost:${PORT}`);
     console.log(`[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`);
     console.log(`[scheduler] autoStart=${runtimeBingoSettings.autoRoundStartEnabled} autoDraw=${runtimeBingoSettings.autoDrawEnabled} forceAutoStart=${forceAutoStart} forceAutoDraw=${forceAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleRoomPerHall} interval=${runtimeBingoSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeBingoSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeBingoSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeBingoSettings.autoRoundEntryFee} payoutPercent=${runtimeBingoSettings.payoutPercent}`);
-    console.log(`[scheduler] autoDraw=${runtimeBingoSettings.autoDrawEnabled} interval=${runtimeBingoSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`);
+    console.log(`[scheduler] autoDraw=${runtimeBingoSettings.autoDrawEnabled} interval=${runtimeBingoSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms envOverride=${autoDrawIntervalEnvOverrideMs ?? "none"}`);
     console.log(`[daily-report] enabled=${dailyReportJobEnabled} interval=${dailyReportJobIntervalMs}ms`);
     console.log(`[swedbank] configured=${swedbankPayService.isConfigured()}`);
   });
