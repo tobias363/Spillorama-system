@@ -133,6 +133,12 @@ import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
 import { createAgentBingoRouter } from "./routes/agentBingo.js";
 import { createAgentTicketRegistrationRouter } from "./routes/agentTicketRegistration.js";
 import { TicketRegistrationService } from "./agent/TicketRegistrationService.js";
+// REQ-101 (PDF 17 §17.24): inline Add Physical Ticket popup-flyt fra Sub Game Details.
+import { createAgentPhysicalTicketsInlineRouter } from "./routes/agentPhysicalTicketsInline.js";
+import { AgentPhysicalTicketInlineService } from "./agent/AgentPhysicalTicketInlineService.js";
+// REQ-146 (PDF 17 §17.23): agent-input for Spin/Chest/Mystery/ColorDraft mini-game-vinst.
+import { createAgentMiniGameWinningRouter } from "./routes/agentMiniGameWinning.js";
+import { AgentMiniGameWinningService } from "./agent/AgentMiniGameWinningService.js";
 import { createAgentUniqueIdsRouter } from "./routes/agentUniqueIds.js";
 import { UniqueIdService } from "./agent/UniqueIdService.js";
 import { PostgresUniqueIdStore } from "./agent/UniqueIdStore.js";
@@ -1136,6 +1142,25 @@ const ticketRegistrationService = new TicketRegistrationService({
   schema: pgSchema,
 });
 
+// REQ-101 (PDF 17 §17.24): inline Add Physical Ticket popup-flyt. Bruker
+// samme `app_ticket_ranges_per_game`-tabell som ticketRegistrationService
+// men med én-operasjons-flyt fra Sub Game Details-popup.
+const agentPhysicalTicketInlineService = new AgentPhysicalTicketInlineService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
+// REQ-146 (PDF 17 §17.23): agent-input for mini-game-winnings. Skriver til
+// `app_game1_mini_game_results` med samme idempotency-key-mønster som
+// Game1MiniGameOrchestrator (game-engine-kontekst). PRIZE-entry til
+// ComplianceLedgerPort wires senere når BingoEngine-port er tilgjengelig.
+const agentMiniGameWinningService = new AgentMiniGameWinningService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  walletAdapter,
+  defaultLedgerChannel: "HALL",
+});
+
 // GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
 // resume/stop + hall-exclude/include med regulatorisk audit (app_game1_master_audit).
 const game1MasterControlService = new Game1MasterControlService({
@@ -2123,6 +2148,27 @@ app.use(createAgentTicketRegistrationRouter({
   auditLogService,
   ticketRegistrationService,
   game1HallReadyService,
+}));
+
+// REQ-101 (PDF 17 §17.24): inline Add Physical Ticket popup.
+//   POST /api/agent/physical-tickets/inline-register
+app.use(createAgentPhysicalTicketsInlineRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  auditLogService,
+  agentPhysicalTicketInlineService,
+}));
+
+// REQ-146 (PDF 17 §17.23): agent-input for mini-game-winnings (Spin/Chest/
+// Mystery/ColorDraft) på vegne av spilleren.
+//   POST /api/agent/games/:gameId/mini-game-winning
+app.use(createAgentMiniGameWinningRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  auditLogService,
+  agentMiniGameWinningService,
 }));
 
 // Wireframe gaps #8/#10/#11 (2026-04-24): Agent Unique ID cards flow.
