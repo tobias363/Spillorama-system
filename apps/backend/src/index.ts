@@ -226,6 +226,9 @@ import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAd
 import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
+import { traceIdMiddleware } from "./middleware/traceId.js";
+import { socketTraceMiddleware, wrapSocketEventHandlers } from "./middleware/socketTraceId.js";
+import { setTraceField } from "./util/traceContext.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
@@ -273,6 +276,10 @@ if (isProduction && !corsAllowedOriginsRaw) {
 const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
   ? corsAllowedOriginsRaw.split(",").map((o) => o.trim()).filter(Boolean)
   : "*";
+// MED-1: Trace-ID propagation. Must run before any other middleware that
+// might log so the traceId is included in every log line for the request.
+// Sets the X-Trace-Id response header so clients can correlate.
+app.use(traceIdMiddleware());
 app.use(cors({ origin: corsOrigins, credentials: true }));
 // LAV-3: 100 KB for all endpoints, except registration which carries compressed photo IDs (~2 * 100KB base64)
 // PT1: static-ticket CSV-import kan ha opptil ~50k rader (~10MB raw), derfor 15mb limit.
@@ -2347,6 +2354,10 @@ const socketRateLimiter = new SocketRateLimiter();
 socketRateLimiter.start();
 
 // BIN-237/KRITISK-7: Connection-time authentication middleware.
+// MED-1: Stamp a connection-level traceId on socket.data BEFORE any other
+// middleware. This ensures auth-failure paths still log with a trace-id.
+io.use(socketTraceMiddleware);
+
 io.use(async (socket, next) => {
   // BIN-303: IP-based connection rate limit
   const xForwardedFor = socket.handshake.headers["x-forwarded-for"];
@@ -2503,6 +2514,17 @@ const miniGameSocketWire = createMiniGameSocketWire({
 game1MiniGameOrchestrator.setBroadcaster(miniGameSocketWire.broadcaster);
 
 io.on("connection", (socket: Socket) => {
+  // MED-1: Patch socket.on so every event handler runs inside an ALS
+  // trace-context. Must happen BEFORE the registerXxx() calls below so
+  // their listeners get wrapped.
+  wrapSocketEventHandlers(socket);
+
+  // MED-1: Surface the resolved walletId on the trace-context so
+  // connection-time logs (after wrapping) carry userId. Per-event traces
+  // do this themselves, but the connection-handler body itself runs
+  // outside any per-event context — falling back here is a safe no-op.
+  if (socket.data.user?.walletId) setTraceField("userId", socket.data.user.walletId);
+
   registerGameEvents(socket);
   registerAdminDisplayEvents(socket);
   registerAdminHallEvents(socket);
