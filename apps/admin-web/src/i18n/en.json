@@ -2683,6 +2683,7 @@
   "audit_log_details": "Details",
   "audit_log_ip": "IP",
   "audit_log_no_rows": "No events found.",
+  "chat_moderation_title": "Chat moderation",
   "loyalty_tier_list_title": "Loyalty tiers",
   "loyalty_tier_create": "Create loyalty tier",
   "loyalty_tier_update": "Update loyalty tier",

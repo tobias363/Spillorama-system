@@ -43,6 +43,10 @@ import { isSettingsRoute, mountSettingsRoute } from "./pages/settings/index.js";
 import { isProfileRoute, mountProfileRoute } from "./pages/profile/index.js";
 import { isSystemInformationRoute, mountSystemInformationRoute } from "./pages/systemInformation/index.js";
 import { isAuditLogRoute, mountAuditLogRoute } from "./pages/auditLog/index.js";
+import {
+  isChatModerationRoute,
+  mountChatModerationRoute,
+} from "./pages/chatModeration/index.js";
 import { isOtherGamesRoute, mountOtherGamesRoute } from "./pages/otherGames/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
 import { mountAgentDashboard, unmountAgentDashboard } from "./pages/agent-dashboard/AgentDashboardPage.js";
@@ -276,6 +280,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isAuditLogRoute(bare)) {
         mountAuditLogRoute(container, bare);
+        return;
+      }
+      if (isChatModerationRoute(bare)) {
+        mountChatModerationRoute(container, bare);
         return;
       }
       if (isOtherGamesRoute(bare)) {
@@ -570,6 +578,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isAuditLogRoute(route.path)) {
     mountAuditLogRoute(container, route.path);
+    return;
+  }
+  if (isChatModerationRoute(route.path)) {
+    mountChatModerationRoute(container, route.path);
     return;
   }
   if (isOtherGamesRoute(route.path)) {

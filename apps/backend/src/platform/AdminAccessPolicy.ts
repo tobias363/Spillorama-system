@@ -395,7 +395,20 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     utelatt (drift-rolle, ikke kasse).
    */
   UNIQUE_ID_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
-  UNIQUE_ID_WRITE: ["ADMIN", "AGENT"]
+  UNIQUE_ID_WRITE: ["ADMIN", "AGENT"],
+  /**
+   * HIGH-11: chat-moderasjon (Casino Review-finding 2026-04-26).
+   *
+   * Pengespillforskriften §13 og AML-regler krever at hall-operator kan
+   * søke i chat for compliance-relevante hendelser (mobbing, hvitvasking,
+   * child-exposure) og dokumentere sletting. Sentralisert ADMIN-rolle får
+   * cross-hall innsyn; HALL_OPERATOR får kun egen hall (hall-scope håndheves
+   * i route via resolveHallScopeFilter). SUPPORT får read-tilgang for
+   * kundestøtte ("hva sa spilleren i går?") men ikke write — sletting
+   * er en moderasjons-handling som hører til ADMIN/HALL_OPERATOR.
+   */
+  CHAT_MODERATION_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  CHAT_MODERATION_WRITE: ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

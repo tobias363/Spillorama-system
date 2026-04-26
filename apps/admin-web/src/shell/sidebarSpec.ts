@@ -267,6 +267,10 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "system-diagnostics", path: "/system/info", icon: "fa fa-heartbeat", labelKey: "system_diagnostics", superAdminOnly: true },
   // BIN-655 (alt) — audit-logg (append-only compliance-view).
   { kind: "leaf", id: "audit-log", path: "/auditLog", icon: "fa fa-history", labelKey: "audit_log_title", superAdminOnly: true },
+  // HIGH-11 — chat-moderasjon (Casino Review-finding). ADMIN + HALL_OPERATOR
+  // + SUPPORT (sistnevnte er read-only på backend; sidebar viser elementet
+  // for admin-rollene).
+  { kind: "leaf", id: "chat-moderation", path: "/admin/chat-moderation", icon: "fa fa-comments mr-20", labelKey: "chat_moderation_title", roles: ["admin", "super-admin", "hall-operator"] },
 ];
 
 // Agent sidebar — Agent-portal V1.0 (06.01.2025) + V2.0 (10.07.2024).

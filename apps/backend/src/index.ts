@@ -197,6 +197,7 @@ import { MaintenanceService } from "./admin/MaintenanceService.js";
 import { createAdminSystemInfoRouter } from "./routes/adminSystemInfo.js";
 import { createAdminTransactionsRouter } from "./routes/adminTransactions.js";
 import { createAdminAuditLogRouter } from "./routes/adminAuditLog.js";
+import { createAdminChatModerationRouter } from "./routes/adminChatModeration.js";
 import { createAdminMiniGamesRouter } from "./routes/adminMiniGames.js";
 import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
@@ -1818,6 +1819,15 @@ app.use(createAdminTransactionsRouter({
 app.use(createAdminAuditLogRouter({
   platformService,
   auditLogService,
+}));
+// HIGH-11: chat-moderasjon — søk + soft-delete av chat-meldinger for
+// hall-operator/admin (Casino Review-finding). Pengespillforskriften §13
+// + AML-regler krever at moderator kan dokumentere sletting (mobbing,
+// hvitvasking, child-exposure). Audit-action: admin.chat.delete.
+app.use(createAdminChatModerationRouter({
+  platformService,
+  auditLogService,
+  chatMessageStore,
 }));
 // BIN-676: CMS content + FAQ. 6 endepunkter — tekst-CRUD for fem slugs +
 // FAQ-CRUD. CMS_WRITE er ADMIN-only (CMS er globalt/regulatorisk-sensitivt,
