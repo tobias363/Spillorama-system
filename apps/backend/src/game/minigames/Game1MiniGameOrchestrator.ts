@@ -53,6 +53,15 @@ import type { MiniGame, MiniGameTriggerContext, MiniGameType } from "./types.js"
 import { MINI_GAME_TYPES } from "./types.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
+import {
+  NoopComplianceLedgerPort,
+  type ComplianceLedgerPort,
+} from "../../adapters/ComplianceLedgerPort.js";
+import {
+  NoopPrizePolicyPort,
+  type PrizePolicyPort,
+} from "../../adapters/PrizePolicyPort.js";
+import { ledgerGameTypeForSlug } from "../ledgerGameTypeForSlug.js";
 import { logger as rootLogger } from "../../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-mini-game-orchestrator" });
@@ -145,6 +154,26 @@ export interface Game1MiniGameOrchestratorOptions {
   readonly miniGames?: ReadonlyMap<MiniGameType, MiniGame>;
   /** Fire-and-forget socket-broadcast. Default no-op. */
   readonly broadcaster?: MiniGameBroadcaster;
+  /**
+   * K2-A CRIT-2: ComplianceLedger-port for å skrive EXTRA_PRIZE-entry
+   * for mini-game-payouts. §71 daily-rapporter må reflektere mini-game-
+   * utbetalinger som kommer i tillegg til ordinær fase-payout. Default
+   * no-op = ingen ledger-skriv (bakoverkompat for tester).
+   *
+   * Soft-fail: ledger-skrivefeil ruller IKKE tilbake wallet-credit
+   * (matcher mønsteret i Game1PayoutService.payoutPhase). Idempotency-
+   * key hindrer dobbel-credit ved retry; ledger-entry kan re-kjøres
+   * manuelt ved feil.
+   */
+  readonly complianceLedgerPort?: ComplianceLedgerPort;
+  /**
+   * K2-A CRIT-3: PrizePolicy-port for single-prize-cap (2500 kr per
+   * pengespillforskriften §11). MÅ kalles før wallet-credit slik at
+   * mini-game-payout aldri overstiger lovlig maks-premie. Default no-op
+   * = ingen cap (bakoverkompat for tester) — produksjon skal ALLTID
+   * wire `engine.getPrizePolicyPort()`.
+   */
+  readonly prizePolicyPort?: PrizePolicyPort;
 }
 
 // ── Internal row shape ───────────────────────────────────────────────────────
@@ -207,6 +236,10 @@ export class Game1MiniGameOrchestrator {
   private readonly walletAdapter: WalletAdapter;
   private readonly miniGames: Map<MiniGameType, MiniGame>;
   private broadcaster: MiniGameBroadcaster;
+  /** K2-A CRIT-2: compliance ledger-port for EXTRA_PRIZE-entries. */
+  private readonly complianceLedgerPort: ComplianceLedgerPort;
+  /** K2-A CRIT-3: prize policy-port for single-prize-cap (2500 kr). */
+  private readonly prizePolicyPort: PrizePolicyPort;
 
   constructor(options: Game1MiniGameOrchestratorOptions) {
     this.pool = options.pool;
@@ -215,6 +248,10 @@ export class Game1MiniGameOrchestrator {
     this.walletAdapter = options.walletAdapter;
     this.miniGames = new Map(options.miniGames ?? []);
     this.broadcaster = options.broadcaster ?? NoopMiniGameBroadcaster;
+    this.complianceLedgerPort =
+      options.complianceLedgerPort ?? new NoopComplianceLedgerPort();
+    this.prizePolicyPort =
+      options.prizePolicyPort ?? new NoopPrizePolicyPort();
   }
 
   /**
@@ -453,13 +490,89 @@ export class Game1MiniGameOrchestrator {
         choiceJson: input.choiceJson,
       });
 
-      // Utbetal payout hvis > 0. Idempotency-key forhindrer dobbel-betaling
-      // selv hvis completedAt-UPDATE rulles tilbake og vi retry-er.
-      if (result.payoutCents > 0) {
-        await this.creditPayout(context, miniGameType, result.payoutCents);
+      // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) FØR wallet-credit.
+      // Mini-game-payouts hadde tidligere ingen cap → Wheel-buckets på
+      // 4000 kr, Chest 4000 kr osv. kunne overstige lovlig maks-premie
+      // (pengespillforskriften §11). Cap-en bruker hall fra context.
+      const requestedCents = result.payoutCents;
+      let cappedCents = requestedCents;
+      let policyId: string | null = null;
+      let houseRetainedCents = 0;
+      if (requestedCents > 0) {
+        const capResult = this.prizePolicyPort.applySinglePrizeCap({
+          hallId: context.hallId,
+          amount: requestedCents / 100, // PrizePolicyPort tar kroner
+        });
+        cappedCents = Math.floor(capResult.cappedAmount * 100);
+        policyId = capResult.policyId;
+        if (capResult.wasCapped) {
+          houseRetainedCents = requestedCents - cappedCents;
+          log.info(
+            {
+              resultId: row.id,
+              miniGameType,
+              hallId: context.hallId,
+              requestedCents,
+              cappedCents,
+              houseRetainedCents,
+              policyId,
+            },
+            "[K2-A CRIT-3] Mini-game payout single-prize-cap applied",
+          );
+        }
       }
 
-      // UPDATE: sett choice + result + payout + completed_at.
+      // Utbetal capped payout hvis > 0. Idempotency-key forhindrer dobbel-
+      // betaling selv hvis completedAt-UPDATE rulles tilbake og vi retry-er.
+      if (cappedCents > 0) {
+        await this.creditPayout(context, miniGameType, cappedCents);
+      }
+
+      // K2-A CRIT-2: skriv EXTRA_PRIZE-entry til ComplianceLedger §71.
+      // Soft-fail: ledger-feil ruller IKKE tilbake wallet-credit
+      // (matcher Game1PayoutService.payoutPhase-mønsteret). Bruker capped-
+      // beløp slik at §71-rapport reflekterer faktisk utbetalt sum.
+      if (cappedCents > 0) {
+        try {
+          await this.complianceLedgerPort.recordComplianceLedgerEvent({
+            hallId: context.hallId,
+            // Spill 1 (hovedspill) — slug hardkodet siden orchestrator
+            // er Spill-1-spesifikk.
+            gameType: ledgerGameTypeForSlug("bingo"),
+            channel: "INTERNET",
+            eventType: "EXTRA_PRIZE",
+            amount: cappedCents / 100, // ledger forventer kroner
+            gameId: context.scheduledGameId,
+            claimId: row.id, // mini-game-result-id som claim-referanse
+            playerId: context.winnerUserId,
+            walletId: context.winnerWalletId,
+            policyVersion: policyId ?? undefined,
+            metadata: {
+              reason: "GAME1_MINI_GAME_PAYOUT",
+              miniGameType,
+              drawSequenceAtWin: context.drawSequenceAtWin,
+              requestedCents,
+              cappedCents,
+              houseRetainedCents,
+            },
+          });
+        } catch (err) {
+          log.warn(
+            {
+              err,
+              resultId: row.id,
+              miniGameType,
+              hallId: context.hallId,
+              cappedCents,
+            },
+            "[K2-A CRIT-2] complianceLedger.recordComplianceLedgerEvent EXTRA_PRIZE feilet — payout fortsetter uansett",
+          );
+        }
+      }
+
+      // UPDATE: sett choice + result + payout + completed_at. Persistert
+      // payout_cents = capped (faktisk utbetalt) — ikke requested. Dette
+      // matcher wallet_transactions så audit-rapporter ikke divergerer.
       await client.query(
         `UPDATE ${this.resultsTable()}
             SET choice_json   = $2::jsonb,
@@ -471,7 +584,7 @@ export class Game1MiniGameOrchestrator {
           row.id,
           JSON.stringify(input.choiceJson),
           JSON.stringify(result.resultJson),
-          result.payoutCents,
+          cappedCents,
         ],
       );
 
@@ -480,7 +593,7 @@ export class Game1MiniGameOrchestrator {
       return {
         resultId: row.id,
         miniGameType,
-        payoutCents: result.payoutCents,
+        payoutCents: cappedCents,
         resultJson: result.resultJson,
       };
     }).then((res) => {

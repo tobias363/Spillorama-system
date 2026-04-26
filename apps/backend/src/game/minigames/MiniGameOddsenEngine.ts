@@ -81,6 +81,15 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { DomainError } from "../BingoEngine.js";
 import { IdempotencyKeys } from "../idempotency.js";
+import {
+  NoopComplianceLedgerPort,
+  type ComplianceLedgerPort,
+} from "../../adapters/ComplianceLedgerPort.js";
+import {
+  NoopPrizePolicyPort,
+  type PrizePolicyPort,
+} from "../../adapters/PrizePolicyPort.js";
+import { ledgerGameTypeForSlug } from "../ledgerGameTypeForSlug.js";
 import type {
   MiniGame,
   MiniGameChoiceInput,
@@ -314,6 +323,19 @@ export interface MiniGameOddsenEngineOptions {
    * resolved_miss, resolved_expired).
    */
   readonly auditLog: AuditLogService;
+  /**
+   * K2-A CRIT-2: ComplianceLedger-port for å skrive EXTRA_PRIZE-entry per
+   * Oddsen-pot-utbetaling. §71 daily-rapporter må reflektere alle pengeflyt
+   * fra mini-game-resolve. Default no-op = ingen ledger-skriv (bakoverkompat
+   * for tester). Soft-fail-mønster matchet Game1PayoutService.
+   */
+  readonly complianceLedgerPort?: ComplianceLedgerPort;
+  /**
+   * K2-A CRIT-3: PrizePolicy-port for single-prize-cap (2500 kr per
+   * pengespillforskriften §11). Default no-op = ingen cap (bakoverkompat
+   * for tester). Produksjon skal ALLTID wire `engine.getPrizePolicyPort()`.
+   */
+  readonly prizePolicyPort?: PrizePolicyPort;
 }
 
 /** Svak validering av schema-navn (SQL-injection-defens). */
@@ -331,12 +353,20 @@ export class MiniGameOddsenEngine implements MiniGame {
   private readonly schema: string;
   private readonly walletAdapter: WalletAdapter;
   private readonly auditLog: AuditLogService;
+  /** K2-A CRIT-2: compliance ledger-port for EXTRA_PRIZE-entries. */
+  private readonly complianceLedgerPort: ComplianceLedgerPort;
+  /** K2-A CRIT-3: prize policy-port for single-prize-cap (2500 kr). */
+  private readonly prizePolicyPort: PrizePolicyPort;
 
   constructor(options: MiniGameOddsenEngineOptions) {
     this.pool = options.pool;
     this.schema = assertSchemaName(options.schema ?? "public");
     this.walletAdapter = options.walletAdapter;
     this.auditLog = options.auditLog;
+    this.complianceLedgerPort =
+      options.complianceLedgerPort ?? new NoopComplianceLedgerPort();
+    this.prizePolicyPort =
+      options.prizePolicyPort ?? new NoopPrizePolicyPort();
   }
 
   private oddsenStateTable(): string {
@@ -559,6 +589,11 @@ export class MiniGameOddsenEngine implements MiniGame {
     const outcome: "hit" | "miss" = isHit ? "hit" : "miss";
 
     let walletTransactionId: string | null = null;
+    // K2-A CRIT-3: cap-tracking for §11 single-prize-cap (2500 kr).
+    let cappedPotNok = potNok;
+    let cappedPotCents = potCents;
+    let policyId: string | null = null;
+    let walletIdForLedger: string | null = null;
 
     if (isHit && potCents > 0) {
       // Slå opp vinnerens wallet-ID.
@@ -575,21 +610,48 @@ export class MiniGameOddsenEngine implements MiniGame {
           `Vinnerens wallet-ID ble ikke funnet for ${state.chosen_by_player_id}.`,
         );
       }
+      walletIdForLedger = walletId;
 
-      const creditResult = await this.walletAdapter.credit(
-        walletId,
-        potNok,
-        `Oddsen-pot (tall ${state.chosen_number})`,
-        {
-          idempotencyKey: IdempotencyKeys.game1Oddsen({ stateId: state.id }),
-          to: "winnings",
-        },
-      );
-      walletTransactionId =
-        (creditResult as { id?: string } | undefined)?.id ?? null;
+      // K2-A CRIT-3: håndhev single-prize-cap FØR credit. Pot-large default
+      // 3000 kr → cap til 2500 (pengespillforskriften §11). Differansen
+      // beholdes av huset og audit-logges via metadata.
+      const capResult = this.prizePolicyPort.applySinglePrizeCap({
+        hallId: state.hall_id,
+        amount: potNok,
+      });
+      cappedPotNok = capResult.cappedAmount;
+      cappedPotCents = Math.floor(cappedPotNok * 100);
+      policyId = capResult.policyId;
+      if (capResult.wasCapped) {
+        log.info(
+          {
+            oddsenStateId: state.id,
+            hallId: state.hall_id,
+            originalPotNok: potNok,
+            cappedPotNok,
+            policyId,
+          },
+          "[K2-A CRIT-3] Oddsen-pot single-prize-cap applied",
+        );
+      }
+
+      if (cappedPotCents > 0) {
+        const creditResult = await this.walletAdapter.credit(
+          walletId,
+          cappedPotNok,
+          `Oddsen-pot (tall ${state.chosen_number})`,
+          {
+            idempotencyKey: IdempotencyKeys.game1Oddsen({ stateId: state.id }),
+            to: "winnings",
+          },
+        );
+        walletTransactionId =
+          (creditResult as { id?: string } | undefined)?.id ?? null;
+      }
     }
 
-    // UPDATE: mark resolved.
+    // UPDATE: mark resolved. Bruk capped-beløp slik at audit-trail og
+    // §71-rapport reflekterer faktisk utbetalt sum.
     await client.query(
       `UPDATE ${this.oddsenStateTable()}
           SET resolved_at           = now(),
@@ -600,10 +662,51 @@ export class MiniGameOddsenEngine implements MiniGame {
       [
         state.id,
         outcome,
-        isHit ? potCents : 0,
+        isHit ? cappedPotCents : 0,
         walletTransactionId,
       ],
     );
+
+    // K2-A CRIT-2: skriv EXTRA_PRIZE-entry til ComplianceLedger §71 ved hit.
+    // Soft-fail (matcher Game1PayoutService-mønsteret) — ledger-feil ruller
+    // IKKE tilbake credit. Idempotency-key på wallet-credit hindrer dobbel-
+    // credit ved retry; ledger-entry kan re-kjøres manuelt ved feil.
+    if (isHit && cappedPotCents > 0 && walletIdForLedger !== null) {
+      try {
+        const houseRetainedCents = potCents - cappedPotCents;
+        await this.complianceLedgerPort.recordComplianceLedgerEvent({
+          hallId: state.hall_id,
+          // Spill 1 (hovedspill) — slug hardkodet siden Oddsen er Spill-1-spesifikk.
+          gameType: ledgerGameTypeForSlug("bingo"),
+          channel: "INTERNET",
+          eventType: "EXTRA_PRIZE",
+          amount: cappedPotNok, // ledger-amount er kroner
+          gameId: scheduledGameId,
+          claimId: state.id, // oddsen-state-id som claim-referanse
+          playerId: state.chosen_by_player_id,
+          walletId: walletIdForLedger,
+          policyVersion: policyId ?? undefined,
+          metadata: {
+            reason: "GAME1_ODDSEN_PAYOUT",
+            chosenNumber: state.chosen_number,
+            ticketSizeAtWin: state.ticket_size_at_win,
+            requestedPotCents: potCents,
+            cappedPotCents,
+            houseRetainedCents,
+          },
+        });
+      } catch (err) {
+        log.warn(
+          {
+            err,
+            oddsenStateId: state.id,
+            hallId: state.hall_id,
+            cappedPotCents,
+          },
+          "[K2-A CRIT-2] complianceLedger.recordComplianceLedgerEvent EXTRA_PRIZE feilet — credit fortsetter uansett",
+        );
+      }
+    }
 
     // Audit fire-and-forget. Hit-tilfellet bruker egen action-kode slik at
     // compliance-rapporter kan aggregere hits vs misses uten LIKE-matching.

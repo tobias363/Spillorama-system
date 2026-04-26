@@ -107,6 +107,15 @@ import {
   emitAdminAutoPaused,
 } from "./Game1DrawEngineBroadcast.js";
 import { resolvePatternsForColor } from "./spill1VariantMapper.js";
+import {
+  NoopComplianceLedgerPort,
+  type ComplianceLedgerPort,
+} from "../adapters/ComplianceLedgerPort.js";
+import {
+  NoopPrizePolicyPort,
+  type PrizePolicyPort,
+} from "../adapters/PrizePolicyPort.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import type { GameVariantConfig } from "./variantConfig.js";
 import {
   parseDrawBag,
@@ -290,6 +299,21 @@ export interface Game1DrawEngineServiceOptions {
     roomCode: string;
     userId: string;
   }) => number | null | undefined;
+  /**
+   * K2-A CRIT-2: ComplianceLedger-port for å skrive EXTRA_PRIZE-entries
+   * for pot- og lucky-bonus-payouts. Default no-op (bakoverkompat for
+   * tester) — produksjon skal alltid wire `engine.getComplianceLedgerPort()`.
+   * Soft-fail: ledger-skrivefeil ruller IKKE tilbake wallet-credit (matcher
+   * Game1PayoutService.payoutPhase-mønsteret).
+   */
+  complianceLedgerPort?: import("../adapters/ComplianceLedgerPort.js").ComplianceLedgerPort;
+  /**
+   * K2-A CRIT-3: PrizePolicy-port for single-prize-cap (2500 kr per
+   * pengespillforskriften §11). Brukt i pot-evaluator + lucky-bonus-payout
+   * for å håndheve maks-premie. Default no-op (bakoverkompat) — produksjon
+   * skal alltid wire `engine.getPrizePolicyPort()`.
+   */
+  prizePolicyPort?: import("../adapters/PrizePolicyPort.js").PrizePolicyPort;
 }
 
 // ── Internal row shapes ─────────────────────────────────────────────────────
@@ -522,6 +546,10 @@ export class Game1DrawEngineService {
   private luckyNumberLookup:
     | ((args: { roomCode: string; userId: string }) => number | null | undefined)
     | null;
+  /** K2-A CRIT-2: compliance ledger-port for EXTRA_PRIZE-entries. */
+  private readonly complianceLedgerPort: ComplianceLedgerPort;
+  /** K2-A CRIT-3: prize policy-port for single-prize-cap (2500 kr). */
+  private readonly prizePolicyPort: PrizePolicyPort;
 
   constructor(options: Game1DrawEngineServiceOptions) {
     this.pool = options.pool;
@@ -549,6 +577,13 @@ export class Game1DrawEngineService {
     this.bingoEngine = options.bingoEngine ?? null;
     this.luckyBonusService = options.luckyBonusService ?? null;
     this.luckyNumberLookup = options.luckyNumberLookup ?? null;
+    // K2-A CRIT-2 / CRIT-3: ledger + prize-policy ports. Default no-op
+    // (bakoverkompat for tester). Produksjon wires til
+    // engine.getComplianceLedgerPort() + engine.getPrizePolicyPort().
+    this.complianceLedgerPort =
+      options.complianceLedgerPort ?? new NoopComplianceLedgerPort();
+    this.prizePolicyPort =
+      options.prizePolicyPort ?? new NoopPrizePolicyPort();
     // PR-T3 Spor 4: fail-closed — hvis potService wired ved konstruksjon uten
     // walletAdapter → ugyldig konfig. (Late-binding via setters er unntak for
     // test-oppsett og sirkulær wiring; der ansvarliggjøres caller for å sette
@@ -2079,6 +2114,9 @@ export class Game1DrawEngineService {
         drawSequenceAtWin,
         winners,
         ordinaryWinCentsByHall,
+        // K2-A CRIT-2 / CRIT-3: thread ports gjennom til pot-evaluator.
+        complianceLedgerPort: this.complianceLedgerPort,
+        prizePolicyPort: this.prizePolicyPort,
       });
     }
 
@@ -2400,6 +2438,35 @@ export class Game1DrawEngineService {
 
       if (!ev.triggered) continue;
 
+      // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) på lucky bonus FØR
+      // wallet-credit. Bonus-config kan være konfigurert > 2500 → cap.
+      const requestedBonusCents = ev.bonusCents;
+      const capResult = this.prizePolicyPort.applySinglePrizeCap({
+        hallId: winner.hallId,
+        amount: requestedBonusCents / 100,
+      });
+      const cappedBonusCents = Math.floor(capResult.cappedAmount * 100);
+      const houseRetainedCents = requestedBonusCents - cappedBonusCents;
+      if (capResult.wasCapped) {
+        log.info(
+          {
+            scheduledGameId,
+            winnerId: winner.userId,
+            hallId: winner.hallId,
+            requestedBonusCents,
+            cappedBonusCents,
+            houseRetainedCents,
+            policyId: capResult.policyId,
+          },
+          "[K2-A CRIT-3] Lucky bonus single-prize-cap applied"
+        );
+      }
+
+      if (cappedBonusCents <= 0) {
+        // Cap'en trimmet til 0 — hopp over credit + ledger.
+        continue;
+      }
+
       // Wallet-credit. PR-W2: `to: "winnings"` — gevinst fra spill.
       // Wallet-feil ruller tilbake hele drawNext-transaksjonen
       // (regulatorisk §11 fail-closed).
@@ -2407,7 +2474,7 @@ export class Game1DrawEngineService {
       try {
         const tx = await this.walletAdapter.credit(
           winner.walletId,
-          ev.bonusCents / 100,
+          cappedBonusCents / 100,
           `Spill 1 Lucky Number Bonus — spill ${scheduledGameId}`,
           {
             idempotencyKey: IdempotencyKeys.game1LuckyBonus({
@@ -2425,7 +2492,7 @@ export class Game1DrawEngineService {
             scheduledGameId,
             winnerId: winner.userId,
             walletId: winner.walletId,
-            bonusCents: ev.bonusCents,
+            bonusCents: cappedBonusCents,
           },
           "[K1-C] Lucky Number Bonus wallet.credit feilet — ruller tilbake draw-transaksjon"
         );
@@ -2441,6 +2508,47 @@ export class Game1DrawEngineService {
         );
       }
 
+      // K2-A CRIT-2: skriv EXTRA_PRIZE-entry til ComplianceLedger §71 for
+      // lucky bonus. Soft-fail (matcher Game1PayoutService-mønsteret) —
+      // ledger-feil ruller IKKE tilbake credit. Idempotency-key på wallet-
+      // credit hindrer dobbel-credit ved retry.
+      try {
+        await this.complianceLedgerPort.recordComplianceLedgerEvent({
+          hallId: winner.hallId,
+          // Spill 1 (hovedspill).
+          gameType: ledgerGameTypeForSlug("bingo"),
+          channel: "INTERNET",
+          eventType: "EXTRA_PRIZE",
+          amount: cappedBonusCents / 100,
+          gameId: scheduledGameId,
+          roomCode: roomCode || undefined,
+          playerId: winner.userId,
+          walletId: winner.walletId,
+          policyVersion: capResult.policyId,
+          metadata: {
+            reason: "GAME1_LUCKY_NUMBER_BONUS",
+            luckyNumber: luckyNumber ?? null,
+            fullHouseBall: lastBall,
+            requestedBonusCents,
+            cappedBonusCents,
+            houseRetainedCents,
+            drawSequenceAtWin,
+            ticketColor: winner.ticketColor,
+          },
+        });
+      } catch (err) {
+        log.warn(
+          {
+            err,
+            scheduledGameId,
+            winnerId: winner.userId,
+            hallId: winner.hallId,
+            cappedBonusCents,
+          },
+          "[K2-A CRIT-2] complianceLedger.recordComplianceLedgerEvent EXTRA_PRIZE feilet — lucky bonus credit fortsetter uansett"
+        );
+      }
+
       // Audit (fire-and-forget). Matcher PM-spec for task K1-C:
       // action `game1.lucky_number_bonus_won` med { luckyNumber,
       // fullHouseBall, bonusCents }.
@@ -2451,7 +2559,9 @@ export class Game1DrawEngineService {
         details: {
           luckyNumber: luckyNumber ?? null,
           fullHouseBall: lastBall,
-          bonusCents: ev.bonusCents,
+          bonusCents: cappedBonusCents,
+          requestedBonusCents,
+          houseRetainedCents,
           drawSequenceAtWin,
           walletTransactionId: walletTxId,
           hallId: winner.hallId,
@@ -2465,7 +2575,8 @@ export class Game1DrawEngineService {
           winnerId: winner.userId,
           luckyNumber,
           lastBall,
-          bonusCents: ev.bonusCents,
+          bonusCents: cappedBonusCents,
+          requestedBonusCents,
           walletTxId,
         },
         "[K1-C] Lucky Number Bonus paid"

@@ -216,7 +216,8 @@ test("K1: single-hall (master = kjøpe-hall) → STAKE-entry bundet til hall-a",
   assert.equal(calls.length, 1, "én STAKE-entry logget");
   assert.equal(calls[0]!.input.hallId, "hall-a");
   assert.equal(calls[0]!.input.eventType, "STAKE");
-  assert.equal(calls[0]!.input.gameType, "DATABINGO");
+  // K2-A CRIT-1: Spill 1 er hovedspill → MAIN_GAME (15%), ikke DATABINGO (30%).
+  assert.equal(calls[0]!.input.gameType, "MAIN_GAME");
   assert.equal(calls[0]!.input.channel, "INTERNET");
   assert.equal(calls[0]!.input.amount, 20); // 2000 øre = 20 NOK
   assert.equal(calls[0]!.input.playerId, "p1");
