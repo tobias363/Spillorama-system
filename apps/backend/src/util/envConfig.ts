@@ -98,6 +98,13 @@ export interface BingoRuntimeConfig {
   jobJackpotDailyIntervalMs: number;
   jobJackpotDailyRunAtHour: number;
   jobJackpotDailyRunAtMinute: number;
+  // BIN-767: Wallet idempotency-key TTL-cleanup (90-dager retention).
+  // Industri-standard for kasino-wallet — holder UNIQUE-indexen ren.
+  jobIdempotencyCleanupEnabled: boolean;
+  jobIdempotencyCleanupIntervalMs: number;
+  jobIdempotencyCleanupRunAtHour: number;
+  jobIdempotencyCleanupRetentionDays: number;
+  jobIdempotencyCleanupBatchSize: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -293,6 +300,30 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     Math.max(0, parsePositiveIntEnv(process.env.JOB_JACKPOT_DAILY_RUN_AT_MINUTE, 15)),
   );
 
+  // BIN-767: Wallet idempotency-key TTL-cleanup. Default ON — industri-
+  // standard kasino-wallet retention er 90 dager. Polling kan være lang
+  // (1 time) siden jobben uansett gater på date-key + 04:00 lokal.
+  const jobIdempotencyCleanupEnabled = parseBooleanEnv(
+    process.env.JOB_IDEMPOTENCY_CLEANUP_ENABLED,
+    true,
+  );
+  const jobIdempotencyCleanupIntervalMs = Math.max(
+    60_000,
+    parsePositiveIntEnv(process.env.JOB_IDEMPOTENCY_CLEANUP_INTERVAL_MS, 60 * 60 * 1000),
+  );
+  const jobIdempotencyCleanupRunAtHour = Math.min(
+    23,
+    Math.max(0, parsePositiveIntEnv(process.env.JOB_IDEMPOTENCY_CLEANUP_RUN_AT_HOUR, 4)),
+  );
+  const jobIdempotencyCleanupRetentionDays = Math.max(
+    1,
+    parsePositiveIntEnv(process.env.JOB_IDEMPOTENCY_CLEANUP_RETENTION_DAYS, 90),
+  );
+  const jobIdempotencyCleanupBatchSize = Math.max(
+    1,
+    parsePositiveIntEnv(process.env.JOB_IDEMPOTENCY_CLEANUP_BATCH_SIZE, 1000),
+  );
+
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
   const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
@@ -348,6 +379,8 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
     jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
     jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
+    jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
+    jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,

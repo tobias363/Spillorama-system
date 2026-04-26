@@ -104,4 +104,12 @@ export const metrics = {
     help: "Total socket reconnects by reason (client-visible disconnect cause)",
     labelNames: ["reason"] as const,
   }),
+
+  // BIN-767: Wallet idempotency-key TTL-cleanup (90-dager retention).
+  // Inkrementeres av `idempotencyKeyCleanup` cron-job per nullsatt rad.
+  // Industri-standard signal for at TTL-jobben holder UNIQUE-indexen ren.
+  walletIdempotencyKeysPrunedTotal: new client.Counter({
+    name: "wallet_idempotency_keys_pruned_total",
+    help: "Total wallet_transactions.idempotency_key columns nullified by TTL-cleanup (BIN-767)",
+  }),
 };

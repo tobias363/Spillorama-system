@@ -66,6 +66,7 @@ import { Game1TransferExpiryTickService } from "./game/Game1TransferExpiryTickSe
 import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
 import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
+import { createIdempotencyKeyCleanupJob } from "./jobs/idempotencyKeyCleanup.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
 import { createGameStartNotificationsJob } from "./jobs/gameStartNotifications.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
@@ -358,6 +359,8 @@ const {
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
   jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
   jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
+  jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
+  jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -1169,6 +1172,26 @@ jobScheduler.register({
     service: game1JackpotStateService,
     runAtHourLocal: jobJackpotDailyRunAtHour,
     runAtMinuteLocal: jobJackpotDailyRunAtMinute,
+  }),
+});
+
+// BIN-767: Wallet idempotency-key TTL-cleanup. Industri-standard kasino-
+// wallet retention er 90 dager — etter det er klient-retry-vinduer for
+// lengst utløpt og UNIQUE-indexen bør ikke holde på radene. Default ON,
+// kjøres 04:00 lokal tid (off-peak etter andre daglige cron-jobber).
+// Sletter IKKE wallet_transactions-rader; NULL-er kun idempotency_key-
+// kolonnen så audit-trail bevares fullt ut.
+jobScheduler.register({
+  name: "idempotency-key-cleanup",
+  description: "TTL-cleanup av wallet_transactions.idempotency_key (90-dager retention, BIN-767).",
+  intervalMs: jobIdempotencyCleanupIntervalMs,
+  enabled: jobIdempotencyCleanupEnabled,
+  run: createIdempotencyKeyCleanupJob({
+    pool: platformService.getPool(),
+    schema: pgSchema,
+    retentionDays: jobIdempotencyCleanupRetentionDays,
+    batchSize: jobIdempotencyCleanupBatchSize,
+    runAtHourLocal: jobIdempotencyCleanupRunAtHour,
   }),
 });
 
