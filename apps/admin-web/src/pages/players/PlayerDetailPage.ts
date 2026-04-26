@@ -56,7 +56,7 @@ export function renderPlayerDetailPage(container: HTMLElement, opts: PlayerDetai
       <section class="content">
         <div class="box box-danger"><div class="box-body">
           <p>${escapeHtml(t("player_not_found"))}</p>
-          <a class="btn btn-primary" href="#/player"><i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}</a>
+          <a class="btn btn-primary" href="#/player"><i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}</a>
         </div></div>
       </section>`;
     return;
@@ -108,7 +108,7 @@ function renderDetail(root: HTMLElement, player: PlayerSummary, mode: PlayerDeta
             </h3>
             <div class="pull-right">
               <a href="${backHref}" class="btn btn-default btn-sm">
-                <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
               </a>
             </div>
           </div>
@@ -163,36 +163,36 @@ function renderActionRow(root: HTMLElement, player: PlayerSummary): void {
   if (player.kycStatus === "PENDING") {
     buttons.push(
       `<button class="btn btn-success btn-flat" data-action="approve">
-         <i class="fa fa-check"></i> ${escapeHtml(t("approve"))}
+         <i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("approve"))}
        </button>`,
       `<button class="btn btn-danger btn-flat" data-action="reject">
-         <i class="fa fa-times"></i> ${escapeHtml(t("reject"))}
+         <i class="fa fa-times" aria-hidden="true"></i> ${escapeHtml(t("reject"))}
        </button>`
     );
   }
   if (player.kycStatus === "REJECTED") {
     buttons.push(
       `<button class="btn btn-primary btn-flat" data-action="resubmit">
-         <i class="fa fa-refresh"></i> ${escapeHtml(t("yes_resubmit_it"))}
+         <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("yes_resubmit_it"))}
        </button>`
     );
   }
   if (player.kycStatus === "VERIFIED" || player.kycStatus === "REJECTED") {
     buttons.push(
       `<button class="btn btn-warning btn-flat" data-action="bankid-reverify">
-         <i class="fa fa-id-card"></i> ${escapeHtml(t("bankid_reverify"))}
+         <i class="fa fa-id-card" aria-hidden="true"></i> ${escapeHtml(t("bankid_reverify"))}
        </button>`
     );
   }
   buttons.push(
     `<button class="btn btn-info btn-flat" data-action="edit">
-       <i class="fa fa-pencil"></i> ${escapeHtml(t("edit_player"))}
+       <i class="fa fa-pencil" aria-hidden="true"></i> ${escapeHtml(t("edit_player"))}
      </button>`,
     `<button class="btn btn-default btn-flat" data-action="soft-delete">
-       <i class="fa fa-trash"></i> ${escapeHtml(t("soft_delete_player"))}
+       <i class="fa fa-trash" aria-hidden="true"></i> ${escapeHtml(t("soft_delete_player"))}
      </button>`,
     `<button class="btn btn-default btn-flat" data-action="restore" style="display:none;">
-       <i class="fa fa-undo"></i> ${escapeHtml(t("restore_player"))}
+       <i class="fa fa-undo" aria-hidden="true"></i> ${escapeHtml(t("restore_player"))}
      </button>`
   );
 

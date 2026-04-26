@@ -39,14 +39,14 @@ export function renderCmsListPage(container: HTMLElement): void {
            class="btn btn-info btn-xs"
            data-action="cms-view"
            data-id="${row.id}">
-          <i class="fa fa-eye"></i>
+          <i class="fa fa-eye" aria-hidden="true"></i>
         </a>
         <a href="${escapeHtml(row.path)}"
            class="btn btn-warning btn-xs"
            data-action="cms-edit"
            data-id="${row.id}"
            style="margin-left:4px">
-          <i class="fa fa-pencil-square-o"></i>
+          <i class="fa fa-pencil-square-o" aria-hidden="true"></i>
         </a>
       </td>
     </tr>`

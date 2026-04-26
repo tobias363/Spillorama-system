@@ -46,7 +46,7 @@ export function renderBlockedIpsPage(container: HTMLElement): void {
             ${
               canWrite
                 ? `<button type="button" class="btn btn-primary" data-action="add-blocked-ip">
-                    <i class="fa fa-plus"></i> ${escapeHtml(t("add_blocked_ip"))}
+                    <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_blocked_ip"))}
                   </button>`
                 : ""
             }
@@ -131,8 +131,9 @@ export function renderBlockedIpsPage(container: HTMLElement): void {
     edit.className = "btn btn-warning btn-xs";
     edit.setAttribute("data-action", "edit-blocked-ip");
     edit.setAttribute("data-id", row.id);
-    edit.innerHTML = `<i class="fa fa-edit"></i>`;
+    edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
     edit.title = t("edit_blocked_ip");
+    edit.setAttribute("aria-label", t("edit_blocked_ip"));
     edit.addEventListener("click", () =>
       openAddBlockedIpModal(row, () => void refresh())
     );
@@ -143,8 +144,9 @@ export function renderBlockedIpsPage(container: HTMLElement): void {
     del.className = "btn btn-danger btn-xs";
     del.setAttribute("data-action", "delete-blocked-ip");
     del.setAttribute("data-id", row.id);
-    del.innerHTML = ` <i class="fa fa-trash"></i>`;
+    del.innerHTML = ` <i class="fa fa-trash" aria-hidden="true"></i>`;
     del.title = t("delete_button");
+    del.setAttribute("aria-label", t("delete_button"));
     del.style.marginLeft = "4px";
     del.addEventListener("click", () => openDeleteModal(row));
     wrap.append(del);

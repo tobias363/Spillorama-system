@@ -77,7 +77,7 @@ export function openRegisterSoldTicketsModal(
   body.setAttribute("data-marker", "register-sold-tickets-modal");
   body.innerHTML = `
     <div class="register-sold-tickets-loading" data-marker="loading">
-      <p><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(t("loading"))}</p>
+      <p><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ${escapeHtml(t("loading"))}</p>
     </div>
   `;
 
@@ -213,7 +213,7 @@ export function openRegisterSoldTicketsModal(
       const scanBtn = document.createElement("button");
       scanBtn.type = "button";
       scanBtn.className = "btn btn-xs btn-default";
-      scanBtn.innerHTML = `<i class="fa fa-barcode"></i> ${escapeHtml(t("scan"))}`;
+      scanBtn.innerHTML = `<i class="fa fa-barcode" aria-hidden="true"></i> ${escapeHtml(t("scan"))}`;
       scanBtn.setAttribute("data-marker", `scan-btn-${row.ticketType}`);
       scanBtn.addEventListener("click", () => openScanForRow(row));
       scanCell.append(scanBtn);

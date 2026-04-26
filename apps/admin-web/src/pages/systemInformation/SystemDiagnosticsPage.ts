@@ -32,7 +32,7 @@ export function renderSystemDiagnosticsPage(container: HTMLElement): void {
         <div class="row" style="margin-bottom:8px;">
           <div class="col-sm-12 text-right">
             <button type="button" class="btn btn-xs btn-success" data-action="refresh" data-testid="system-info-refresh">
-              <i class="fa fa-refresh"></i> ${escapeHtml(t("refresh_table"))}
+              <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh_table"))}
             </button>
           </div>
         </div>

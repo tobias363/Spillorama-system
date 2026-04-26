@@ -18,7 +18,7 @@ export function renderTrackSpendingPage(container: HTMLElement): void {
     <section class="content">
       <div class="alert alert-warning" role="alert" style="padding:16px;">
         <h4 style="margin-top:0;">
-          <i class="fa fa-exclamation-triangle"></i>
+          <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
           ${escapeHtml(t("track_spending_banner_title"))}
         </h4>
         <p>${escapeHtml(t("track_spending_banner_body"))}</p>
@@ -57,7 +57,7 @@ export function renderTrackSpendingPage(container: HTMLElement): void {
             </div>
             <button type="submit" class="btn btn-info" style="margin-left:8px;" disabled
                     title="${escapeHtml(t("track_spending_banner_body"))}">
-              <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+              <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
             </button>
           </form>
 

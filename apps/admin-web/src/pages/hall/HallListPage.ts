@@ -34,7 +34,7 @@ export function renderHallListPage(container: HTMLElement): void {
     ${contentHeader("hall_management", "hall_management")}
     <section class="content">
       <div class="callout callout-warning" data-testid="hall-deactivate-info">
-        <i class="fa fa-exclamation-triangle"></i>
+        <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
         ${escapeHtml(t("hall_deactivate_info"))}
       </div>
       ${boxOpen("hall_management", "primary")}
@@ -99,7 +99,7 @@ export function renderHallListPage(container: HTMLElement): void {
             addBtn.className = "btn btn-primary btn-sm";
             addBtn.setAttribute("data-action", "add-hall");
             addBtn.href = "#/hall/add";
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_hall"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_hall"))}`;
             host.append(addBtn);
           },
         },
@@ -158,16 +158,18 @@ function renderTvUrlCell(row: AdminHall): Node {
   openBtn.target = "_blank";
   openBtn.rel = "noopener noreferrer";
   openBtn.className = "btn btn-default btn-xs";
-  openBtn.innerHTML = `<i class="fa fa-external-link"></i>`;
+  openBtn.innerHTML = `<i class="fa fa-external-link" aria-hidden="true"></i>`;
   openBtn.title = "Åpne TV URL i ny fane";
+  openBtn.setAttribute("aria-label", "Åpne TV URL i ny fane");
   openBtn.setAttribute("data-testid", "tv-url-open");
   wrap.append(openBtn);
 
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "btn btn-default btn-xs";
-  copyBtn.innerHTML = `<i class="fa fa-clipboard"></i>`;
+  copyBtn.innerHTML = `<i class="fa fa-clipboard" aria-hidden="true"></i>`;
   copyBtn.title = "Kopier URL";
+  copyBtn.setAttribute("aria-label", "Kopier URL");
   copyBtn.setAttribute("data-testid", "tv-url-copy");
   copyBtn.addEventListener("click", () => {
     void (async () => {
@@ -209,8 +211,9 @@ function rowActions(row: AdminHall, onChange: () => void): Node {
   edit.setAttribute("data-action", "edit-hall");
   edit.setAttribute("data-id", row.id);
   edit.href = `#/hall/edit/${encodeURIComponent(row.id)}`;
-  edit.innerHTML = `<i class="fa fa-edit"></i>`;
+  edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
   edit.title = t("edit_hall");
+  edit.setAttribute("aria-label", t("edit_hall"));
   wrap.append(edit);
 
   const addMoney = document.createElement("button");
@@ -218,8 +221,9 @@ function rowActions(row: AdminHall, onChange: () => void): Node {
   addMoney.className = "btn btn-success btn-xs";
   addMoney.setAttribute("data-action", "add-money");
   addMoney.setAttribute("data-id", row.id);
-  addMoney.innerHTML = `<i class="fa fa-plus"></i>`;
+  addMoney.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i>`;
   addMoney.title = t("add_money");
+  addMoney.setAttribute("aria-label", t("add_money"));
   addMoney.style.marginLeft = "4px";
   addMoney.addEventListener("click", () => openAddMoneyModal(row, onChange));
   wrap.append(addMoney);
@@ -230,8 +234,8 @@ function rowActions(row: AdminHall, onChange: () => void): Node {
   toggle.setAttribute("data-action", "toggle-hall");
   toggle.setAttribute("data-id", row.id);
   toggle.innerHTML = row.isActive
-    ? `<i class="fa fa-ban"></i>`
-    : `<i class="fa fa-check"></i>`;
+    ? `<i class="fa fa-ban" aria-hidden="true"></i>`
+    : `<i class="fa fa-check" aria-hidden="true"></i>`;
   toggle.title = row.isActive ? t("inactive") : t("active");
   toggle.style.marginLeft = "4px";
   toggle.addEventListener("click", () => {

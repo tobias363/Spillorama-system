@@ -83,7 +83,7 @@ export function renderRangeRegisterPage(container: HTMLElement): void {
           <div class="row" style="margin-top:14px;">
             <div class="col-sm-12 text-right">
               <button type="submit" class="btn btn-success" id="rr-submit" data-action="submit">
-                <i class="fa fa-check"></i> ${escapeHtml(t("pt_range_register_submit"))}
+                <i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("pt_range_register_submit"))}
               </button>
             </div>
           </div>

@@ -5,15 +5,36 @@ import { listPendingRequests } from "../api/paymentRequests.js";
 
 export function renderHeader(container: HTMLElement, session: Session, maintenanceMode: boolean): void {
   container.innerHTML = "";
+
+  // WCAG 2.4.1 — Skip-to-main-content link (visible on focus only).
+  // The link points to #main-content which is rendered by the layout.
+  const skipLink = document.createElement("a");
+  skipLink.href = "#main-content";
+  skipLink.className = "skip-to-main";
+  skipLink.textContent = t("skip_to_main_content");
+  skipLink.setAttribute(
+    "style",
+    "position:absolute;top:-40px;left:0;background:#000;color:#fff;padding:8px 16px;z-index:100000;text-decoration:none;border-radius:0 0 6px 0;"
+  );
+  skipLink.addEventListener("focus", () => {
+    skipLink.style.top = "0";
+  });
+  skipLink.addEventListener("blur", () => {
+    skipLink.style.top = "-40px";
+  });
+  container.append(skipLink);
+
   const header = document.createElement("header");
   header.className = "main-header";
+  header.setAttribute("role", "banner");
 
   // Logo
   const logo = document.createElement("a");
   logo.href = "#/admin";
   logo.className = "logo";
   logo.setAttribute("style", "background-color: #1a2226;");
-  logo.innerHTML = `<span class="logo-mini">BG</span><span class="logo-lg">Bingo Game</span>`;
+  logo.setAttribute("aria-label", "Bingo Game — gå til dashboard");
+  logo.innerHTML = `<span class="logo-mini" aria-hidden="true">BG</span><span class="logo-lg">Bingo Game</span>`;
   header.append(logo);
 
   const nav = document.createElement("nav");
@@ -144,7 +165,7 @@ export function renderHeader(container: HTMLElement, session: Session, maintenan
 
   if (session.isSuperAdmin) {
     const gearLi = document.createElement("li");
-    gearLi.innerHTML = `<a href="#/settings"><i class="fa fa-gears"></i></a>`;
+    gearLi.innerHTML = `<a href="#/settings" aria-label="${t("settings")}" title="${t("settings")}"><i class="fa fa-gears" aria-hidden="true"></i></a>`;
     ul.append(gearLi);
   }
 

@@ -63,8 +63,11 @@ export class ChatPanelV2 {
     header.style.cssText = "display:flex;align-items:center;justify-content:flex-end;padding:14px 12px 10px;border-bottom:1px solid rgba(200,70,70,0.3);";
 
     this.toggleBtn = document.createElement("button");
+    this.toggleBtn.type = "button";
+    this.toggleBtn.setAttribute("aria-expanded", "true");
+    this.toggleBtn.setAttribute("aria-label", "Skjul chat");
     this.toggleBtn.style.cssText = "display:flex;align-items:center;gap:4px;background:none;border:none;color:#ccc;font-size:13px;cursor:pointer;font-family:inherit;";
-    this.toggleBtn.innerHTML = `Skjul chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
+    this.toggleBtn.innerHTML = `Skjul chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
     this.toggleBtn.addEventListener("click", () => this.toggleCollapse());
     header.appendChild(this.toggleBtn);
     this.root.appendChild(header);
@@ -100,6 +103,7 @@ export class ChatPanelV2 {
     this.inputEl = document.createElement("input");
     this.inputEl.type = "text";
     this.inputEl.placeholder = "Skriv Meldingen";
+    this.inputEl.setAttribute("aria-label", "Chat-melding");
     this.inputEl.maxLength = 100;
     this.inputEl.autocomplete = "off";
     Object.assign(this.inputEl.style, {
@@ -132,6 +136,10 @@ export class ChatPanelV2 {
     emojiWrapper.style.cssText = "position:relative;";
 
     const emojiBtn = document.createElement("button");
+    emojiBtn.type = "button";
+    emojiBtn.setAttribute("aria-label", "Velg emoji");
+    emojiBtn.setAttribute("aria-haspopup", "true");
+    emojiBtn.setAttribute("aria-expanded", "false");
     emojiBtn.style.cssText = "font-size:18px;cursor:pointer;background:none;border:none;";
     emojiBtn.textContent = "\u{1F60A}";
     emojiWrapper.appendChild(emojiBtn);
@@ -155,6 +163,8 @@ export class ChatPanelV2 {
                     "\u{2764}", "\u{1F60E}", "\u{1F622}", "\u{1F914}", "\u{1F4B0}", "\u{1F3C6}"];
     for (const emoji of EMOJIS) {
       const eb = document.createElement("button");
+      eb.type = "button";
+      eb.setAttribute("aria-label", `Sett inn emoji ${emoji}`);
       eb.textContent = emoji;
       eb.style.cssText = "font-size:20px;cursor:pointer;background:none;border:none;padding:4px;border-radius:4px;";
       eb.addEventListener("mouseenter", () => { eb.style.background = "rgba(255,255,255,0.1)"; });
@@ -189,7 +199,10 @@ export class ChatPanelV2 {
       fontSize: "14px",
       flexShrink: "0",
     });
-    sendBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+    sendBtn.type = "button";
+    sendBtn.setAttribute("aria-label", "Send melding");
+    sendBtn.title = "Send melding";
+    sendBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
     sendBtn.addEventListener("click", () => this.sendMessage());
     inputRow.appendChild(sendBtn);
 

@@ -22,7 +22,7 @@ export function renderSystemInformationPage(container: HTMLElement): void {
     ${contentHeader("system_information", "system_information")}
     <section class="content">
       <div class="callout callout-info" data-testid="system-info-placeholder-banner">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("system_settings_wired_banner"))}
       </div>
       ${boxOpen("system_information", "primary")}
@@ -54,7 +54,7 @@ async function mount(host: HTMLElement): Promise<void> {
       <div class="form-group">
         <div class="col-sm-offset-2 col-sm-10">
           <button type="submit" class="btn btn-primary" data-action="save-system-information">
-            <i class="fa fa-save"></i> ${escapeHtml(t("update"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("update"))}
           </button>
           <button type="button" class="btn btn-default" data-action="cancel-system-information" onclick="window.history.back()">
             ${escapeHtml(t("cancel"))}

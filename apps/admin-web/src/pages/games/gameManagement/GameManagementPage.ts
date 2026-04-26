@@ -134,7 +134,7 @@ function renderShell(): string {
         </div>
         <div id="gm-choose-type-hint" class="alert alert-info" data-testid="gm-choose-type-hint"
              style="margin-top:12px;display:none;">
-          <i class="fa fa-info-circle"></i>
+          <i class="fa fa-info-circle" aria-hidden="true"></i>
           ${escapeHtml(t("gm_choose_type_hint"))}
         </div>
       </div>
@@ -192,7 +192,7 @@ function renderAddButton(host: HTMLElement, typeId: string, types: GameType[]): 
     : `#/gameManagement/${encodeURIComponent(typeId)}/add`;
   host.innerHTML = `
     <a href="${href}" class="btn btn-primary btn-md" data-testid="gm-add-btn">
-      <i class="fa fa-plus"></i> ${escapeHtml(t("add_game"))}
+      <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_game"))}
     </a>`;
 }
 
@@ -212,11 +212,11 @@ async function renderList(
   headerHost.innerHTML = `
     <h1>${escapeHtml(gt.name)} ${escapeHtml(t("game_table"))}</h1>
     <ol class="breadcrumb pull-right">
-      <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+      <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
       <li class="active">${escapeHtml(gt.name)}</li>
     </ol>`;
 
-  tableHost.innerHTML = `<div class="text-center" data-testid="gm-loading"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  tableHost.innerHTML = `<div class="text-center" data-testid="gm-loading"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
   try {
     const rows = await fetchGameManagementList(typeId);
     renderTable(tableHost, rows, gt, typeId, types, headerHost);
@@ -305,23 +305,23 @@ function renderRowActions(gt: GameType, row: GameManagementRow): string {
   const closeDayRoute = `#/gameManagement/closeDay/${encodeURIComponent(gt._id)}/${encodeURIComponent(row._id)}`;
   return `
     <a href="${viewRoute}" class="btn btn-info btn-xs btn-rounded" title="${escapeHtml(t("view"))}">
-      <i class="fa fa-eye"></i>
+      <i class="fa fa-eye" aria-hidden="true"></i>
     </a>
     <a href="${ticketsRoute}" class="btn btn-success btn-xs btn-rounded" title="${escapeHtml(t("ticket"))}">
-      <i class="fa fa-ticket"></i>
+      <i class="fa fa-ticket" aria-hidden="true"></i>
     </a>
     <a href="${subGamesRoute}" class="btn btn-default btn-xs btn-rounded" title="${escapeHtml(t("sub_game"))}">
-      <i class="fa fa-list"></i>
+      <i class="fa fa-list" aria-hidden="true"></i>
     </a>
     <a href="${closeDayRoute}" class="btn btn-warning btn-xs btn-rounded" title="${escapeHtml(t("close_day"))}">
-      <i class="fa fa-calendar-times-o"></i>
+      <i class="fa fa-calendar-times-o" aria-hidden="true"></i>
     </a>
     <button type="button"
       class="btn btn-danger btn-xs btn-rounded"
       data-action="gm-delete"
       data-id="${escapeHtml(row._id)}"
       title="${escapeHtml(t("delete"))}">
-      <i class="fa fa-trash"></i>
+      <i class="fa fa-trash" aria-hidden="true"></i>
     </button>`;
 }
 
@@ -350,11 +350,11 @@ function renderDsActions(host: HTMLElement, typeId: string, onSaved: () => void)
   host.innerHTML = `
     <a href="#" class="btn btn-primary btn-md" id="gm-ds-special-btn"
        data-testid="gm-ds-special-btn" style="margin-right:8px;">
-      <i class="fa fa-plus"></i> ${escapeHtml(t("add_special_game"))}
+      <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_special_game"))}
     </a>
     <a href="#" class="btn btn-primary btn-md" id="gm-ds-daily-btn"
        data-testid="gm-ds-daily-btn">
-      <i class="fa fa-plus"></i> ${escapeHtml(t("create_daily_schedule"))}
+      <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("create_daily_schedule"))}
     </a>`;
 
   const specialBtn = host.querySelector<HTMLAnchorElement>("#gm-ds-special-btn");
@@ -384,7 +384,7 @@ function renderDsActions(host: HTMLElement, typeId: string, onSaved: () => void)
 }
 
 async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<void> {
-  host.innerHTML = `<div class="text-center" data-testid="gm-ds-loading"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  host.innerHTML = `<div class="text-center" data-testid="gm-ds-loading"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
   try {
     // 1) Finn alle GameManagement-ids for typen (backend filter på gameTypeId).
     const gmRows = await fetchGameManagementList(typeId);
@@ -522,27 +522,27 @@ function renderDsRowActions(row: DailyScheduleRow): string {
   return `
     <a href="${viewHref}" class="btn btn-info btn-xs btn-rounded"
        title="${escapeHtml(t("view"))}" data-testid="gm-ds-view">
-      <i class="fa fa-eye"></i>
+      <i class="fa fa-eye" aria-hidden="true"></i>
     </a>
     <button type="button" class="btn btn-warning btn-xs btn-rounded m-lr-3"
       data-action="ds-edit" data-id="${escapeHtml(row._id)}"
       title="${escapeHtml(t("edit_daily_schedule"))}"
       data-testid="gm-ds-edit">
-      <i class="fa fa-edit"></i>
+      <i class="fa fa-edit" aria-hidden="true"></i>
     </button>
     <button type="button" class="btn btn-default btn-xs btn-rounded m-lr-3"
       data-action="ds-toggle" data-id="${escapeHtml(row._id)}"
       data-status="${escapeHtml(row.status)}"
       title="${escapeHtml(toggleTitle)}"
       data-testid="gm-ds-toggle">
-      <i class="fa ${toggleIcon}"></i>
+      <i class="fa ${toggleIcon}" aria-hidden="true"></i>
     </button>
     <button type="button" class="btn btn-danger btn-xs btn-rounded"
       data-action="ds-delete" data-id="${escapeHtml(row._id)}"
       data-name="${escapeHtml(row.name)}"
       title="${escapeHtml(t("delete"))}"
       data-testid="gm-ds-delete">
-      <i class="fa fa-trash"></i>
+      <i class="fa fa-trash" aria-hidden="true"></i>
     </button>`;
 }
 

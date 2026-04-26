@@ -25,10 +25,10 @@ export function mountLegacySection(container: HTMLElement, routePath: string): v
   container.innerHTML = `
     <div class="box box-primary" style="margin-bottom: 0;">
       <div class="box-header with-border">
-        <h3 class="box-title"><i class="fa fa-bolt"></i> Spillorama Live — ${escapeHtml(t("spillorama_" + section.replace(/-/g, "_")))}</h3>
+        <h3 class="box-title"><i class="fa fa-bolt" aria-hidden="true"></i> Spillorama Live — ${escapeHtml(t("spillorama_" + section.replace(/-/g, "_")))}</h3>
         <div class="box-tools pull-right">
           <a href="${src}" target="_blank" class="btn btn-xs btn-default">
-            <i class="fa fa-external-link"></i> Åpne i ny fane
+            <i class="fa fa-external-link" aria-hidden="true"></i> Åpne i ny fane
           </a>
         </div>
       </div>

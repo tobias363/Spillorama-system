@@ -87,6 +87,9 @@ export class SettingsPanel {
     title.style.cssText = "color:#ffe83d;font-size:20px;font-weight:700;margin:0;";
     header.appendChild(title);
     const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Lukk innstillinger");
+    closeBtn.title = "Lukk";
     closeBtn.textContent = "\u2715";
     closeBtn.style.cssText = "background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:50%;width:32px;height:32px;color:#fff;font-size:16px;cursor:pointer;font-family:inherit;";
     closeBtn.addEventListener("click", () => this.hide());
@@ -163,9 +166,13 @@ export class SettingsPanel {
     row.appendChild(lbl);
 
     const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.setAttribute("role", "switch");
     let on = initialValue;
     const updateToggle = () => {
       toggle.textContent = on ? "På" : "Av";
+      toggle.setAttribute("aria-checked", String(on));
+      toggle.setAttribute("aria-label", `${label}: ${on ? "På" : "Av"}`);
       toggle.style.background = on ? "rgba(46,125,50,0.6)" : "rgba(100,100,100,0.4)";
       toggle.style.color = on ? "#81c784" : "#999";
     };

@@ -52,7 +52,7 @@ export function renderCmsTextEditPage(
       ${
         isVersioned
           ? `<div class="callout callout-info" data-testid="cms-regulatory-lock-banner">
-              <i class="fa fa-history"></i>
+              <i class="fa fa-history" aria-hidden="true"></i>
               <strong>${escapeHtml(t("cms_regulatory_locked_title"))}</strong>
               <p>${escapeHtml(t("cms_regulatory_locked_body"))}</p>
             </div>`
@@ -78,7 +78,7 @@ export function renderCmsTextEditPage(
                       class="btn btn-success"
                       data-action="save-cms-text"
                       data-testid="cms-save-btn">
-                <i class="fa fa-save"></i> ${escapeHtml(
+                <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(
                   isVersioned ? t("submit") : t("submit")
                 )}
               </button>
@@ -333,7 +333,7 @@ function mkBtn(
   b.type = "button";
   b.className = `btn ${cls} btn-xs`;
   b.setAttribute("data-testid", testId);
-  b.innerHTML = `<i class="fa ${icon}"></i> ${escapeHtml(label)}`;
+  b.innerHTML = `<i class="fa ${icon}" aria-hidden="true"></i> ${escapeHtml(label)}`;
   b.addEventListener("click", () => {
     void onClick();
   });

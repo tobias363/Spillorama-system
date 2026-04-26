@@ -99,7 +99,7 @@ async function renderCategoryList(container: HTMLElement): Promise<void> {
         title: t("actions"),
         align: "center",
         render: (r) =>
-          `<a class="btn btn-info btn-xs btn-rounded" href="#/redFlagCategory/${encodeURIComponent(r.category)}/players" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></a>`,
+          `<a class="btn btn-info btn-xs btn-rounded" href="#/redFlagCategory/${encodeURIComponent(r.category)}/players" title="${escapeHtml(t("view"))}"><i class="fa fa-eye" aria-hidden="true"></i></a>`,
       },
     ],
   });
@@ -208,7 +208,7 @@ async function renderPlayersForCategory(
         title: t("actions"),
         align: "center",
         render: (r) =>
-          `<a class="btn btn-info btn-xs btn-rounded" href="#/redFlagCategory/userTransaction/${encodeURIComponent(r.userId)}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></a>`,
+          `<a class="btn btn-info btn-xs btn-rounded" href="#/redFlagCategory/userTransaction/${encodeURIComponent(r.userId)}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye" aria-hidden="true"></i></a>`,
       },
     ],
   });

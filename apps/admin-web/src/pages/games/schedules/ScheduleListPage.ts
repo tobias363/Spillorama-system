@@ -36,7 +36,7 @@ export async function renderScheduleListPage(container: HTMLElement): Promise<vo
 async function reloadList(container: HTMLElement): Promise<void> {
   const tableHost = container.querySelector<HTMLElement>("#schedule-list-table");
   if (!tableHost) return;
-  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
   try {
     const rows = await fetchScheduleList();
     renderTable(container, tableHost, rows);
@@ -67,7 +67,7 @@ function renderShell(): string {
       <section class="content-header">
         <h1>${escapeHtml(t("schedule_management"))}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li class="active">${escapeHtml(t("schedule_management"))}</li>
         </ol>
       </section>
@@ -78,7 +78,7 @@ function renderShell(): string {
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(t("schedule_management"))}</h6></div>
               <div class="pull-right">
                 <a href="#/schedules/create" id="schedule-add-btn" class="btn btn-primary btn-md">
-                  <i class="fa fa-plus"></i> ${escapeHtml(t("add"))}
+                  <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add"))}
                 </a>
               </div>
               <div class="clearfix"></div>
@@ -133,18 +133,18 @@ function renderTable(container: HTMLElement, host: HTMLElement, rows: ScheduleRo
         render: (r) => `
           <a href="#/schedules/view/${encodeURIComponent(r._id)}"
              class="btn btn-info btn-xs btn-rounded" title="${escapeHtml(t("view"))}">
-            <i class="fa fa-eye"></i>
+            <i class="fa fa-eye" aria-hidden="true"></i>
           </a>
           <button type="button" class="btn btn-warning btn-xs btn-rounded m-lr-3"
             data-action="schedule-edit" data-id="${escapeHtml(r._id)}"
             title="${escapeHtml(t("edit_schedule"))}">
-            <i class="fa fa-edit"></i>
+            <i class="fa fa-edit" aria-hidden="true"></i>
           </button>
           <button type="button" class="btn btn-danger btn-xs btn-rounded"
             data-action="schedule-delete" data-id="${escapeHtml(r._id)}"
             data-name="${escapeHtml(r.scheduleName)}"
             title="${escapeHtml(t("delete_schedule"))}">
-            <i class="fa fa-trash"></i>
+            <i class="fa fa-trash" aria-hidden="true"></i>
           </button>`,
       },
     ],

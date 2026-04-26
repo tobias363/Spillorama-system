@@ -99,7 +99,7 @@ function renderRedirectShell(
       <section class="content-header">
         <h1>${escapeHtml(t(titleKey))}</h1>
         <ol class="breadcrumb pull-right">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/dailySchedule/view">${escapeHtml(t("daily_schedule_management"))}</a></li>
           <li class="active">${escapeHtml(t(titleKey))}</li>
         </ol>
@@ -111,7 +111,7 @@ function renderRedirectShell(
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(t(titleKey))}</h6></div>
               <div class="pull-right">
                 <a href="#/dailySchedule/view" class="btn btn-default btn-sm">
-                  <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                  <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
                 </a>
               </div>
               <div class="clearfix"></div>
@@ -133,7 +133,7 @@ function renderNotFound(container: HTMLElement, message: string): void {
       <section class="content">
         <div class="alert alert-warning">${escapeHtml(message)}</div>
         <a href="#/dailySchedule/view" class="btn btn-primary btn-sm">
-          <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+          <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
         </a>
       </section>
     </div></div>`;
@@ -146,7 +146,7 @@ async function renderSubgameView(container: HTMLElement, id: string): Promise<vo
       <section class="content-header">
         <h1>${escapeHtml(title)}</h1>
         <ol class="breadcrumb pull-right">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/dailySchedule/view">${escapeHtml(t("daily_schedule_management"))}</a></li>
           <li class="active">${escapeHtml(title)}</li>
         </ol>
@@ -158,14 +158,14 @@ async function renderSubgameView(container: HTMLElement, id: string): Promise<vo
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(title)}</h6></div>
               <div class="pull-right">
                 <a href="#/dailySchedule/view" class="btn btn-default btn-sm">
-                  <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                  <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
                 </a>
               </div>
               <div class="clearfix"></div>
             </div>
             <div class="panel-wrapper collapse in">
               <div class="panel-body" id="ds-view-body">
-                <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>
+                <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>
               </div>
             </div>
           </div>

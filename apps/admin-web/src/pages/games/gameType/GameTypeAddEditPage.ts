@@ -150,7 +150,7 @@ function renderShell(
       <section class="content-header">
         <h1>${escapeHtml(heading)}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/gameType">${escapeHtml(t("games"))}</a></li>
           <li class="active">${escapeHtml(heading)}</li>
         </ol>

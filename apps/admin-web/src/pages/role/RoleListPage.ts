@@ -33,7 +33,7 @@ export function renderRoleListPage(container: HTMLElement): void {
     ${contentHeader("role_list_title", "role_management")}
     <section class="content">
       <div class="callout callout-info" data-testid="role-info-banner">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("role_info_static_banner"))}
       </div>
       ${boxOpen("role_list_title", "primary")}
@@ -53,7 +53,7 @@ export function renderRoleListPage(container: HTMLElement): void {
                 <td>${escapeHtml(t(r.descriptionKey))}</td>
                 <td class="text-center">
                   <a class="btn btn-info btn-xs" href="#/role/matrix" data-action="view-matrix">
-                    <i class="fa fa-table"></i> ${escapeHtml(t("role_matrix_title"))}
+                    <i class="fa fa-table" aria-hidden="true"></i> ${escapeHtml(t("role_matrix_title"))}
                   </a>
                 </td>
               </tr>`
@@ -62,7 +62,7 @@ export function renderRoleListPage(container: HTMLElement): void {
         </table>
         <p>
           <a class="btn btn-primary" href="#/role/assign" data-action="assign-role">
-            <i class="fa fa-user-plus"></i> ${escapeHtml(t("assign_role_title"))}
+            <i class="fa fa-user-plus" aria-hidden="true"></i> ${escapeHtml(t("assign_role_title"))}
           </a>
         </p>
       ${boxClose()}

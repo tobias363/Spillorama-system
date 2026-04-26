@@ -62,7 +62,7 @@ function renderShell(opts: ShellOpts): string {
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(opts.title)}</h6></div>
               <div class="pull-right">
                 <a href="${escapeHtml(opts.backHref)}" class="btn btn-default btn-sm">
-                  <i class="fa fa-arrow-left"></i> ${escapeHtml(opts.backLabel)}
+                  <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(opts.backLabel)}
                 </a>
               </div>
               <div class="clearfix"></div>
@@ -79,14 +79,14 @@ function renderShell(opts: ShellOpts): string {
 function placeholderBody(issue: string, text: string): string {
   return `
     <div class="alert alert-warning" data-testid="gm-placeholder">
-      <i class="fa fa-info-circle"></i>
+      <i class="fa fa-info-circle" aria-hidden="true"></i>
       ${escapeHtml(text)}
       <strong>${escapeHtml(issue)}</strong>
     </div>`;
 }
 
 function loadingBody(): string {
-  return `<div class="text-center" data-testid="gm-detail-loading"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  return `<div class="text-center" data-testid="gm-detail-loading"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 }
 
 async function resolveGameType(typeId: string): Promise<GameType | null> {
@@ -289,7 +289,7 @@ export async function renderGameManagementSubGamesPage(
         <p><strong>${escapeHtml(t("game_name"))}:</strong> ${escapeHtml(row.name)}</p>
         ${parentRow}
         <div class="alert alert-info">
-          <i class="fa fa-info-circle"></i>
+          <i class="fa fa-info-circle" aria-hidden="true"></i>
           Sub-game-komposisjon normaliseres først når BIN-621 SubGame CRUD lander (Agent C).
           Inntil da lagres slots opaque i <code>config.subGames</code>.
         </div>
@@ -318,11 +318,11 @@ function summaryRow(label: string, value: string | number): string {
 function renderCloseDayBody(row: GameManagementRow, summary: CloseDaySummary, closeDate: string): string {
   const warn = summary.alreadyClosed
     ? `<div class="alert alert-info" data-testid="cd-already-closed">
-         <i class="fa fa-info-circle"></i>
+         <i class="fa fa-info-circle" aria-hidden="true"></i>
          ${escapeHtml(t("already_closed"))} — ${escapeHtml(summary.closedAt ?? "")}
        </div>`
     : `<div class="alert alert-warning">
-         <i class="fa fa-warning"></i>
+         <i class="fa fa-warning" aria-hidden="true"></i>
          ${escapeHtml(t("close_day_confirm_warning"))}
        </div>`;
 
@@ -347,7 +347,7 @@ function renderCloseDayBody(row: GameManagementRow, summary: CloseDaySummary, cl
         <button type="button" class="btn btn-danger btn-lg"
           data-action="confirm-close-day"
           ${summary.alreadyClosed ? "disabled" : ""}>
-          <i class="fa fa-lock"></i> ${escapeHtml(t("close_day"))}
+          <i class="fa fa-lock" aria-hidden="true"></i> ${escapeHtml(t("close_day"))}
         </button>
       </div>
     </div>`;

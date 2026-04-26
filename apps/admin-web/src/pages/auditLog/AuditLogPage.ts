@@ -63,7 +63,7 @@ export function renderAuditLogPage(container: HTMLElement): void {
           <div class="col-sm-2">
             <label style="display:block;">&nbsp;</label>
             <button type="submit" class="btn btn-info" data-testid="audit-search">
-              <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+              <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
             </button>
           </div>
         </form>

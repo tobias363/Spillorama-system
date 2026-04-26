@@ -67,6 +67,9 @@ export class LuckyNumberPicker {
     header.appendChild(title);
 
     const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Lukk velg heldig tall");
+    closeBtn.title = "Lukk";
     closeBtn.textContent = "\u2715";
     Object.assign(closeBtn.style, {
       background: "rgba(255,255,255,0.15)",
@@ -103,6 +106,8 @@ export class LuckyNumberPicker {
       for (let col = 0; col < 5; col++) {
         const num = col * 12 + row + 1;
         const btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("aria-label", `Velg tall ${num}`);
         btn.textContent = String(num);
         btn.dataset.num = String(num);
         Object.assign(btn.style, {

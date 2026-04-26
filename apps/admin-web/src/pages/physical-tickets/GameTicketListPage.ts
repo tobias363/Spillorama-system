@@ -154,7 +154,7 @@ export function renderGameTicketListPage(container: HTMLElement): void {
     reward.type = "button";
     reward.className = "btn btn-success btn-xs";
     reward.title = t("reward_all_winners");
-    reward.innerHTML = `<i class="fa fa-trophy"></i> ${escapeHtml(t("reward_all_winners"))}`;
+    reward.innerHTML = `<i class="fa fa-trophy" aria-hidden="true"></i> ${escapeHtml(t("reward_all_winners"))}`;
     reward.setAttribute("data-action", "reward-all");
     reward.setAttribute("data-game", game.gameId);
     wrap.append(reward);

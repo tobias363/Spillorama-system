@@ -62,7 +62,7 @@ export async function renderHallAccountReportPage(
       <div style="margin-top:12px">
         <a href="#/hallAccountReport" class="btn btn-default btn-sm">${escapeHtml(t("back"))}</a>
         <a href="#/report/settlement/${encodeURIComponent(hallId)}" class="btn btn-danger btn-sm">
-          <i class="fa fa-file"></i> ${escapeHtml(t("settlement_report"))}
+          <i class="fa fa-file" aria-hidden="true"></i> ${escapeHtml(t("settlement_report"))}
         </a>
       </div>`,
   });

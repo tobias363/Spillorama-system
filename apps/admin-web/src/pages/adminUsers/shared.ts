@@ -18,7 +18,7 @@ export function contentHeader(titleKey: string, moduleKey: string): string {
     <section class="content-header">
       <h1>${escapeHtml(t(titleKey))}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li>${escapeHtml(t(moduleKey))}</li>
         <li class="active">${escapeHtml(t(titleKey))}</li>
       </ol>

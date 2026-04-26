@@ -183,7 +183,7 @@ async function mount(host: HTMLElement, editId: string | null): Promise<void> {
       <div class="form-group">
         <div class="col-sm-offset-3 col-sm-9">
           <button type="submit" class="btn btn-success" data-action="save-hall">
-            <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}
           </button>
           <a class="btn btn-default" href="#/hall">${escapeHtml(t("cancel"))}</a>
         </div>

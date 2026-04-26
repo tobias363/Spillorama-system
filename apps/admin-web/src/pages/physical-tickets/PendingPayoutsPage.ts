@@ -79,10 +79,10 @@ export function renderPendingPayoutsPage(
               placeholder="${escapeHtml(t("pt_user_id_hint"))}" style="width:220px;">
           </div>
           <button type="submit" class="btn btn-primary btn-sm" data-action="search">
-            <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+            <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
           </button>
           <button type="button" class="btn btn-default btn-sm" id="pp-refresh" data-action="refresh" style="margin-left:6px;">
-            <i class="fa fa-refresh"></i> ${escapeHtml(t("refresh"))}
+            <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh"))}
           </button>
           <span id="pp-socket-state" style="margin-left:12px;font-size:12px;color:#888;"></span>
         </form>
@@ -248,24 +248,24 @@ function renderStatusCell(p: PhysicalTicketPendingPayoutRow): Node {
   const el = document.createElement("div");
   el.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:12px;";
   if (p.rejectedAt) {
-    el.innerHTML = `<span style="color:#c62828;"><i class="fa fa-ban"></i> ${escapeHtml(t("pt_pending_status_rejected"))}</span>`;
+    el.innerHTML = `<span style="color:#c62828;"><i class="fa fa-ban" aria-hidden="true"></i> ${escapeHtml(t("pt_pending_status_rejected"))}</span>`;
     return el;
   }
   if (p.paidOutAt) {
-    el.innerHTML = `<span style="color:#2e7d32;"><i class="fa fa-check"></i> ${escapeHtml(t("pt_pending_status_paid"))}</span>`;
+    el.innerHTML = `<span style="color:#2e7d32;"><i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("pt_pending_status_paid"))}</span>`;
     return el;
   }
   const parts: string[] = [];
   if (p.verifiedAt) {
-    parts.push(`<span style="color:#2e7d32;"><i class="fa fa-check"></i> ${escapeHtml(t("pt_pending_status_verified"))}</span>`);
+    parts.push(`<span style="color:#2e7d32;"><i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("pt_pending_status_verified"))}</span>`);
   } else {
-    parts.push(`<span style="color:#ef6c00;"><i class="fa fa-clock-o"></i> ${escapeHtml(t("pt_pending_status_unverified"))}</span>`);
+    parts.push(`<span style="color:#ef6c00;"><i class="fa fa-clock-o" aria-hidden="true"></i> ${escapeHtml(t("pt_pending_status_unverified"))}</span>`);
   }
   if (p.adminApprovalRequired) {
     if (p.adminApprovedAt) {
-      parts.push(`<span style="color:#2e7d32;"><i class="fa fa-shield"></i> ${escapeHtml(t("pt_pending_status_admin_approved"))}</span>`);
+      parts.push(`<span style="color:#2e7d32;"><i class="fa fa-shield" aria-hidden="true"></i> ${escapeHtml(t("pt_pending_status_admin_approved"))}</span>`);
     } else {
-      parts.push(`<span style="color:#c62828;"><i class="fa fa-shield"></i> ${escapeHtml(t("pt_pending_status_admin_required"))}</span>`);
+      parts.push(`<span style="color:#c62828;"><i class="fa fa-shield" aria-hidden="true"></i> ${escapeHtml(t("pt_pending_status_admin_required"))}</span>`);
     }
   }
   el.innerHTML = parts.join("");
@@ -288,7 +288,7 @@ function renderActionCell(
     const b = document.createElement("button");
     b.type = "button";
     b.className = `btn btn-${variant} btn-xs`;
-    b.innerHTML = `<i class="fa fa-${icon}"></i> ${escapeHtml(t(labelKey))}`;
+    b.innerHTML = `<i class="fa fa-${icon}" aria-hidden="true"></i> ${escapeHtml(t(labelKey))}`;
     b.setAttribute("data-action", action);
     b.setAttribute("data-id", p.id);
     if (disabled) b.disabled = true;

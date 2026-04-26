@@ -43,7 +43,7 @@ export function contentHeader(titleKey: string, extraCrumb?: string): string {
     <section class="content-header">
       <h1>${title}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         ${extra}
       </ol>
     </section>`;

@@ -89,7 +89,7 @@ export async function renderGameManagementAddPage(
 }
 
 function renderLoading(): string {
-  return `<div class="text-center" data-testid="gm-add-loading" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  return `<div class="text-center" data-testid="gm-add-loading" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 }
 
 function renderError(typeId: string, message: string): string {
@@ -99,7 +99,7 @@ function renderError(typeId: string, message: string): string {
       <section class="content"><div class="row"><div class="col-sm-12">
         <div class="alert alert-danger" data-testid="gm-add-error">${escapeHtml(message)}</div>
         <a href="#/gameManagement?typeId=${encodeURIComponent(typeId)}" class="btn btn-default">
-          <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+          <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
         </a>
       </div></div></section>
     </div></div>`;
@@ -119,11 +119,11 @@ function renderNotYetSupportedShell(gt: GameType): string {
       </section>
       <section class="content"><div class="row"><div class="col-sm-12">
         <div class="alert alert-info" data-testid="gm-add-unsupported">
-          <i class="fa fa-info-circle"></i>
+          <i class="fa fa-info-circle" aria-hidden="true"></i>
           ${escapeHtml(t("gm_not_yet_supported"))}
         </div>
         <a href="#/gameManagement?typeId=${encodeURIComponent(gt._id)}" class="btn btn-default">
-          <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+          <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
         </a>
       </div></div></section>
     </div></div>`;
@@ -166,7 +166,7 @@ function renderFormShell(s: FormState): string {
             <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(title)}</h6></div>
             <div class="pull-right">
               <a href="${backHref}" class="btn btn-default btn-sm">
-                <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
               </a>
             </div>
             <div class="clearfix"></div>
@@ -189,7 +189,7 @@ function renderFormShell(s: FormState): string {
                 <div style="padding-top:16px;">
                   <button type="submit" id="gm-submit" data-testid="gm-submit"
                     class="btn btn-success btn-flat">
-                    <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
+                    <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}
                   </button>
                   <a href="${backHref}" class="btn btn-danger btn-flat">${escapeHtml(t("cancel"))}</a>
                 </div>
@@ -881,7 +881,7 @@ async function handleSubmit(container: HTMLElement, state: FormState): Promise<v
   const submitBtn = container.querySelector<HTMLButtonElement>("#gm-submit");
   if (submitBtn) {
     submitBtn.disabled = true;
-    submitBtn.innerHTML = `<i class="fa fa-spinner fa-spin"></i> ${escapeHtml(t("loading"))}`;
+    submitBtn.innerHTML = `<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ${escapeHtml(t("loading"))}`;
   }
 
   let res: WriteResult;
@@ -903,7 +903,7 @@ async function handleSubmit(container: HTMLElement, state: FormState): Promise<v
     state.submitting = false;
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.innerHTML = `<i class="fa fa-save"></i> ${escapeHtml(t("submit"))}`;
+      submitBtn.innerHTML = `<i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}`;
     }
     return;
   }
@@ -911,7 +911,7 @@ async function handleSubmit(container: HTMLElement, state: FormState): Promise<v
   state.submitting = false;
   if (submitBtn) {
     submitBtn.disabled = false;
-    submitBtn.innerHTML = `<i class="fa fa-save"></i> ${escapeHtml(t("submit"))}`;
+    submitBtn.innerHTML = `<i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}`;
   }
 
   if (res.ok) {

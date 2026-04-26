@@ -71,7 +71,7 @@ export function renderFaqListPage(container: HTMLElement): void {
             addBtn.setAttribute("data-action", "add-faq");
             addBtn.setAttribute("data-testid", "faq-add-btn");
             addBtn.href = "#/addFAQ";
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_faq"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_faq"))}`;
             host.append(addBtn);
           },
         },
@@ -112,7 +112,7 @@ function rowActions(
     b.setAttribute("data-action", action);
     b.setAttribute("data-id", row.id);
     b.style.marginLeft = "4px";
-    b.innerHTML = `<i class="fa ${icon}"></i>`;
+    b.innerHTML = `<i class="fa ${icon}" aria-hidden="true"></i>`;
     b.title = title;
     if (disabled) b.disabled = true;
     if (onClick) b.addEventListener("click", onClick);
@@ -174,8 +174,9 @@ function rowActions(
   edit.setAttribute("data-action", "edit-faq");
   edit.setAttribute("data-id", row.id);
   edit.href = `#/faqEdit/${encodeURIComponent(row.id)}`;
-  edit.innerHTML = `<i class="fa fa-edit"></i>`;
+  edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
   edit.title = t("edit_faq");
+  edit.setAttribute("aria-label", t("edit_faq"));
   edit.style.marginLeft = "4px";
   wrap.append(edit);
 

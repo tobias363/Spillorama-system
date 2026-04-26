@@ -133,7 +133,7 @@ export function renderProductListPage(container: HTMLElement): void {
             addBtn.type = "button";
             addBtn.className = "btn btn-primary btn-sm";
             addBtn.setAttribute("data-action", "add-product");
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_product"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_product"))}`;
             addBtn.addEventListener("click", () => openAddEditModal(null, () => void refresh()));
             host.append(addBtn);
           },
@@ -159,8 +159,9 @@ export function renderProductListPage(container: HTMLElement): void {
     view.className = "btn btn-info btn-xs";
     view.setAttribute("data-action", "view-product");
     view.setAttribute("data-id", row.id);
-    view.innerHTML = `<i class="fa fa-eye"></i>`;
+    view.innerHTML = `<i class="fa fa-eye" aria-hidden="true"></i>`;
     view.title = t("view_product");
+    view.setAttribute("aria-label", t("view_product"));
     view.addEventListener("click", () => openViewModal(row.id));
     wrap.append(view);
 
@@ -169,8 +170,9 @@ export function renderProductListPage(container: HTMLElement): void {
     edit.className = "btn btn-warning btn-xs";
     edit.setAttribute("data-action", "edit-product");
     edit.setAttribute("data-id", row.id);
-    edit.innerHTML = ` <i class="fa fa-edit"></i>`;
+    edit.innerHTML = ` <i class="fa fa-edit" aria-hidden="true"></i>`;
     edit.title = t("edit_product");
+    edit.setAttribute("aria-label", t("edit_product"));
     edit.style.marginLeft = "4px";
     edit.addEventListener("click", () => openAddEditModal(row, onChange));
     wrap.append(edit);
@@ -180,8 +182,9 @@ export function renderProductListPage(container: HTMLElement): void {
     del.className = "btn btn-danger btn-xs";
     del.setAttribute("data-action", "delete-product");
     del.setAttribute("data-id", row.id);
-    del.innerHTML = ` <i class="fa fa-trash"></i>`;
+    del.innerHTML = ` <i class="fa fa-trash" aria-hidden="true"></i>`;
     del.title = t("delete");
+    del.setAttribute("aria-label", t("delete"));
     del.style.marginLeft = "4px";
     del.addEventListener("click", () => {
       if (!window.confirm(t("delete_message"))) return;

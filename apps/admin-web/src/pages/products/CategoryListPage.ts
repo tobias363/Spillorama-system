@@ -76,7 +76,7 @@ export function renderCategoryListPage(container: HTMLElement): void {
             addBtn.type = "button";
             addBtn.className = "btn btn-primary btn-sm";
             addBtn.setAttribute("data-action", "add-category");
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_category"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_category"))}`;
             addBtn.addEventListener("click", () =>
               openAddEditModal(null, () => void refresh())
             );
@@ -102,8 +102,9 @@ export function renderCategoryListPage(container: HTMLElement): void {
     edit.className = "btn btn-warning btn-xs";
     edit.setAttribute("data-action", "edit-category");
     edit.setAttribute("data-id", row.id);
-    edit.innerHTML = `<i class="fa fa-edit"></i>`;
+    edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
     edit.title = t("edit");
+    edit.setAttribute("aria-label", t("edit"));
     edit.addEventListener("click", () => openAddEditModal(row, onChange));
     wrap.append(edit);
 
@@ -112,8 +113,9 @@ export function renderCategoryListPage(container: HTMLElement): void {
     del.className = "btn btn-danger btn-xs";
     del.setAttribute("data-action", "delete-category");
     del.setAttribute("data-id", row.id);
-    del.innerHTML = ` <i class="fa fa-trash"></i>`;
+    del.innerHTML = ` <i class="fa fa-trash" aria-hidden="true"></i>`;
     del.title = t("delete");
+    del.setAttribute("aria-label", t("delete"));
     del.style.marginLeft = "4px";
     del.addEventListener("click", () => {
       if (!window.confirm(t("delete_message"))) return;

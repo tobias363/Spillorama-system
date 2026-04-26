@@ -63,7 +63,7 @@ export function renderAssignRolePage(container: HTMLElement): void {
               btn.className = "btn btn-primary btn-xs";
               btn.setAttribute("data-action", "update-role");
               btn.setAttribute("data-id", r.id);
-              btn.innerHTML = `<i class="fa fa-key"></i> ${escapeHtml(t("update_role"))}`;
+              btn.innerHTML = `<i class="fa fa-key" aria-hidden="true"></i> ${escapeHtml(t("update_role"))}`;
               btn.addEventListener("click", () => openModal(r, () => void refresh()));
               return btn;
             },

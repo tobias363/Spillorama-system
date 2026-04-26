@@ -29,7 +29,7 @@ export function renderMaintenanceFormPage(container: HTMLElement, id: string | n
     ${contentHeader(titleKey, "settings")}
     <section class="content">
       <div class="callout callout-info" data-testid="maintenance-wired-banner">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("maintenance_wired_banner"))}
       </div>
       ${boxOpen(titleKey, "primary")}
@@ -140,7 +140,7 @@ function renderForm(w: MaintenanceWindow | null): string {
       <div class="form-group">
         <div class="col-sm-offset-3 col-sm-9">
           <button type="submit" class="btn btn-success" data-action="save-maintenance" data-testid="btn-save-maintenance">
-            <i class="fa fa-save"></i> ${escapeHtml(w ? t("save") : t("maintenance_create"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(w ? t("save") : t("maintenance_create"))}
           </button>
           <a class="btn btn-default" href="#/maintenance">${escapeHtml(t("cancel"))}</a>
         </div>

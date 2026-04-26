@@ -29,7 +29,7 @@ export function mountAgentCashInOut(container: HTMLElement): void {
     <section class="content-header">
       <h1>${escapeHtml(t("agent_cash_in_out_management"))}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${escapeHtml(t("agent_cash_in_out_management"))}</li>
       </ol>
     </section>
@@ -46,10 +46,10 @@ export function mountAgentCashInOut(container: HTMLElement): void {
             <button type="button" class="btn btn-primary"
                     data-marker="btn-register-sold-tickets"
                     data-action="register-sold-tickets">
-              <i class="fa fa-ticket"></i> ${escapeHtml(t("register_sold_tickets_button"))}
+              <i class="fa fa-ticket" aria-hidden="true"></i> ${escapeHtml(t("register_sold_tickets_button"))}
             </button>
             <button type="button" class="btn btn-danger" data-action="shift-log-out">
-              <i class="fa fa-sign-out"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
+              <i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
             </button>
           </div>
         </div>
@@ -112,7 +112,7 @@ export function openShiftLogoutModal(): void {
     </div>
     <div style="margin:8px 0;">
       <a href="#" data-action="view-cashout-details">
-        <i class="fa fa-eye"></i> ${escapeHtml(t("agent_cash_in_out_view_cashout_details"))}
+        <i class="fa fa-eye" aria-hidden="true"></i> ${escapeHtml(t("agent_cash_in_out_view_cashout_details"))}
       </a>
     </div>`;
 

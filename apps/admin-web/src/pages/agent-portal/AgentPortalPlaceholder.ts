@@ -26,7 +26,7 @@ export function mountAgentPortalPlaceholder(
     <section class="content-header">
       <h1>${escapeHtml(title)}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${escapeHtml(title)}</li>
       </ol>
     </section>

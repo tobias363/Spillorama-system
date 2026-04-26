@@ -54,7 +54,7 @@ export function buildWithdrawForm(card: UniqueIdCard): HTMLElement {
         </div>
       </div>
       <p class="muted" data-testid="cash-only-hint">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("agent_unique_id_cash_only_hint"))}
       </p>
     </form>`;

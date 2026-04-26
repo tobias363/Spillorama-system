@@ -44,7 +44,7 @@ export async function renderViewPayoutTicketsPage(
         </div>
       </div>
       <div class="alert alert-info" role="status">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("payout_ticket_detail_backend_pending"))}
         <small>(BIN-659)</small>
       </div>

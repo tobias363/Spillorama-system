@@ -61,7 +61,7 @@ export function renderImportCsvPage(container: HTMLElement): void {
             </div>
             <div class="col-sm-4 text-right" style="padding-top:24px;">
               <button type="submit" class="btn btn-primary" id="pt-submit" data-action="submit">
-                <i class="fa fa-upload"></i> ${escapeHtml(t("pt_csv_import_upload_button"))}
+                <i class="fa fa-upload" aria-hidden="true"></i> ${escapeHtml(t("pt_csv_import_upload_button"))}
               </button>
             </div>
           </div>

@@ -88,7 +88,7 @@ export function openGroupHallEditorModal(
 
 function renderLoadingShell(): string {
   return `<div data-testid="gh-modal-loading" class="text-center" style="padding:20px;">
-    <i class="fa fa-spinner fa-spin fa-2x"></i>
+    <i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i>
   </div>`;
 }
 

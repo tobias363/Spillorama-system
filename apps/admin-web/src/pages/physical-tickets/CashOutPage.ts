@@ -42,7 +42,7 @@ export function renderCashOutPage(container: HTMLElement): void {
               autocomplete="off" autofocus placeholder="${escapeHtml(t("scan_or_type_unique_id"))}" required>
           </div>
           <button type="submit" class="btn btn-primary" data-action="scan">
-            <i class="fa fa-search"></i> ${escapeHtml(t("lookup_ticket"))}
+            <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("lookup_ticket"))}
           </button>
         </form>
         <div id="ticket-details" style="margin-top:16px;"></div>
@@ -143,7 +143,7 @@ export function renderCashOutPage(container: HTMLElement): void {
           <div class="form-group">
             <div class="col-sm-offset-3 col-sm-6">
               <button type="submit" class="btn btn-success" data-action="cashout">
-                <i class="fa fa-money"></i> ${escapeHtml(t("register_cashout"))}
+                <i class="fa fa-money" aria-hidden="true"></i> ${escapeHtml(t("register_cashout"))}
               </button>
             </div>
           </div>

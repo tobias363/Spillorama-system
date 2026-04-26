@@ -81,7 +81,7 @@ export function mountAgentCheckForBingo(container: HTMLElement): void {
     <section class="content-header">
       <h1>${escapeHtml(t("agent_check_bingo_title"))}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${escapeHtml(t("agent_check_bingo"))}</li>
       </ol>
     </section>
@@ -118,7 +118,7 @@ export function mountAgentCheckForBingo(container: HTMLElement): void {
             <div class="form-group">
               <div class="col-sm-offset-3 col-sm-9">
                 <button type="submit" class="btn btn-primary btn-lg" data-action="check">
-                  <i class="fa fa-check-circle"></i> ${escapeHtml(t("agent_check_bingo_go"))}
+                  <i class="fa fa-check-circle" aria-hidden="true"></i> ${escapeHtml(t("agent_check_bingo_go"))}
                 </button>
               </div>
             </div>
@@ -201,7 +201,7 @@ export function mountAgentCheckForBingo(container: HTMLElement): void {
               ? `<span class="badge" style="background:#5cb85c;">${escapeHtml(t("agent_physical_cashout_status_rewarded"))}</span>`
               : `<span class="badge" style="background:#f0ad4e;">${escapeHtml(t("agent_physical_cashout_status_pending"))}</span>`;
             return `<li class="list-group-item" style="display:flex;justify-content:space-between;align-items:center;">
-              <span><i class="fa fa-trophy"></i> ${escapeHtml(patternLabel(p))}</span>
+              <span><i class="fa fa-trophy" aria-hidden="true"></i> ${escapeHtml(patternLabel(p))}</span>
               ${statusBadge}
             </li>`;
           }).join("")}

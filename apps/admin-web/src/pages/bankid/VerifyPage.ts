@@ -49,7 +49,7 @@ export function renderBankIdVerifyPage(container: HTMLElement): void {
   if (!sessionId || !authUrl) {
     host.innerHTML = `
       <div class="alert alert-warning" role="alert">
-        <i class="fa fa-exclamation-triangle"></i>
+        <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
         ${escapeHtml(t("bankid_verify_missing_session"))}
       </div>`;
     return;
@@ -63,7 +63,7 @@ export function renderBankIdVerifyPage(container: HTMLElement): void {
   if (isMock || !cspAllowsFrame()) {
     host.innerHTML = `
       <div class="alert alert-warning" role="alert">
-        <i class="fa fa-exclamation-triangle"></i>
+        <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
         ${escapeHtml(t("bankid_not_configured_banner"))}
       </div>
       <p><strong>Session ID:</strong> <code>${escapeHtml(sessionId)}</code></p>

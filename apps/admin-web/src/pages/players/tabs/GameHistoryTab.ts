@@ -23,7 +23,7 @@ export function mountGameHistoryTab(host: HTMLElement, userId: string): void {
         <input type="date" id="gh-to" class="form-control">
       </div>
       <button type="submit" class="btn btn-primary" style="margin-left:8px;">
-        <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+        <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
       </button>
     </form>
     <div id="gh-table"><p class="text-muted">${escapeHtml(t("loading_ellipsis"))}</p></div>`;

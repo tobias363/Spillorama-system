@@ -16,7 +16,7 @@ export async function renderGameTypeTestPage(container: HTMLElement): Promise<vo
       <section class="content-header">
         <h1>GameType Test</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/gameType">${escapeHtml(t("games"))}</a></li>
           <li class="active">Test</li>
         </ol>
@@ -29,7 +29,7 @@ export async function renderGameTypeTestPage(container: HTMLElement): Promise<vo
                This page was not linked from the legacy sidebar and is a candidate
                for removal post-pilot.</p>
             <div id="gameType-test-thumbs" style="display:flex;gap:12px;flex-wrap:wrap;">
-              <div class="text-muted"><i class="fa fa-spinner fa-spin"></i> Loading…</div>
+              <div class="text-muted"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> Loading…</div>
             </div>
           </div>
         </div>

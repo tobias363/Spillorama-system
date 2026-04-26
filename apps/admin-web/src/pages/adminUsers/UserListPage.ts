@@ -56,7 +56,7 @@ export function renderUserListPage(container: HTMLElement): void {
             addBtn.className = "btn btn-primary btn-sm";
             addBtn.setAttribute("data-action", "add-user");
             addBtn.href = "#/user/add";
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_user"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_user"))}`;
             host.append(addBtn);
           },
         },
@@ -80,8 +80,9 @@ function rowActions(row: AdminUser, onChange: () => void): Node {
   edit.setAttribute("data-action", "edit-user");
   edit.setAttribute("data-id", row.id);
   edit.href = `#/user/edit/${encodeURIComponent(row.id)}`;
-  edit.innerHTML = `<i class="fa fa-edit"></i>`;
+  edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
   edit.title = t("edit_user");
+  edit.setAttribute("aria-label", t("edit_user"));
   wrap.append(edit);
 
   const del = document.createElement("button");
@@ -89,8 +90,9 @@ function rowActions(row: AdminUser, onChange: () => void): Node {
   del.className = "btn btn-danger btn-xs";
   del.setAttribute("data-action", "delete-user");
   del.setAttribute("data-id", row.id);
-  del.innerHTML = `<i class="fa fa-trash"></i>`;
+  del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
   del.title = t("delete");
+  del.setAttribute("aria-label", t("delete"));
   del.style.marginLeft = "4px";
   del.addEventListener("click", () => {
     if (!window.confirm(t("delete_message"))) return;

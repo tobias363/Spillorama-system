@@ -62,7 +62,7 @@ export function mountAgentUniqueId(container: HTMLElement): void {
     <section class="content-header">
       <h1>${escapeHtml(t("agent_unique_id_management"))}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${escapeHtml(t("agent_unique_id_management"))}</li>
       </ol>
     </section>
@@ -74,13 +74,13 @@ export function mountAgentUniqueId(container: HTMLElement): void {
         <div class="box-body">
           <div class="btn-group" role="group" style="margin-bottom:12px;">
             <button type="button" class="btn btn-primary" data-action="create" data-testid="btn-create-unique-id">
-              <i class="fa fa-plus"></i> ${escapeHtml(t("agent_unique_id_create"))}
+              <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("agent_unique_id_create"))}
             </button>
             <button type="button" class="btn btn-success" data-action="add-money" data-testid="btn-add-money">
-              <i class="fa fa-plus-square"></i> ${escapeHtml(t("agent_unique_id_add_money"))}
+              <i class="fa fa-plus-square" aria-hidden="true"></i> ${escapeHtml(t("agent_unique_id_add_money"))}
             </button>
             <button type="button" class="btn btn-warning" data-action="withdraw-modal" data-testid="btn-withdraw">
-              <i class="fa fa-minus-square"></i> ${escapeHtml(t("agent_unique_id_withdraw"))}
+              <i class="fa fa-minus-square" aria-hidden="true"></i> ${escapeHtml(t("agent_unique_id_withdraw"))}
             </button>
           </div>
           <div id="agent-unique-id-list"></div>

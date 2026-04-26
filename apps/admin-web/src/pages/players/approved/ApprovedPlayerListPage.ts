@@ -34,11 +34,11 @@ export function renderApprovedPlayerListPage(container: HTMLElement): void {
                    minlength="2" style="min-width:280px;">
           </div>
           <button type="submit" class="btn btn-primary" style="margin-left:8px;">
-            <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+            <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
           </button>
           <a id="approved-export-csv" href="${buildExportCsvUrl({ kycStatus: "VERIFIED" })}"
              class="btn btn-default" style="margin-left:8px;">
-            <i class="fa fa-download"></i> ${escapeHtml(t("export_csv"))}
+            <i class="fa fa-download" aria-hidden="true"></i> ${escapeHtml(t("export_csv"))}
           </a>
         </form>
       ${boxClose()}
@@ -85,7 +85,7 @@ export function renderApprovedPlayerListPage(container: HTMLElement): void {
           align: "center",
           render: (r) =>
             `<a href="${viewApprovedHash(r.id)}" class="btn btn-info btn-xs btn-rounded" title="${escapeHtml(t("view_player"))}">
-               <i class="fa fa-eye"></i>
+               <i class="fa fa-eye" aria-hidden="true"></i>
              </a>`,
         },
       ],

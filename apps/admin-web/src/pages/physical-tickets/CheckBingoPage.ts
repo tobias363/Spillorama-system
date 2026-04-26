@@ -51,7 +51,7 @@ export function renderCheckBingoPage(container: HTMLElement): void {
           <div class="form-group">
             <div class="col-sm-offset-3 col-sm-9">
               <button type="submit" class="btn btn-primary" data-action="check">
-                <i class="fa fa-check"></i> ${escapeHtml(t("check_bingo"))}
+                <i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("check_bingo"))}
               </button>
             </div>
           </div>

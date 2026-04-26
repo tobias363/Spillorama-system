@@ -74,7 +74,7 @@ export function renderWalletListPage(container: HTMLElement): void {
               const a = document.createElement("a");
               a.href = `#/wallet/view?id=${encodeURIComponent(r.id)}`;
               a.className = "btn btn-info btn-xs";
-              a.innerHTML = `<i class="fa fa-eye"></i> ${escapeHtml(t("view_wallet"))}`;
+              a.innerHTML = `<i class="fa fa-eye" aria-hidden="true"></i> ${escapeHtml(t("view_wallet"))}`;
               return a;
             },
           },

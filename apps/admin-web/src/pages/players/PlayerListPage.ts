@@ -49,13 +49,13 @@ export function renderPlayerListPage(container: HTMLElement): void {
             </label>
           </div>
           <button type="submit" class="btn btn-primary" style="margin-left:8px;">
-            <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+            <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
           </button>
           <a id="player-export-csv" href="${buildExportCsvUrl()}" class="btn btn-default" style="margin-left:8px;">
-            <i class="fa fa-download"></i> ${escapeHtml(t("export_csv"))}
+            <i class="fa fa-download" aria-hidden="true"></i> ${escapeHtml(t("export_csv"))}
           </a>
           <button type="button" id="player-create-btn" class="btn btn-success" style="margin-left:8px;">
-            <i class="fa fa-plus"></i> ${escapeHtml(t("create_player"))}
+            <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("create_player"))}
           </button>
         </form>
       ${boxClose()}

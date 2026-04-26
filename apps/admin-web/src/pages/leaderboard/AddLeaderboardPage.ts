@@ -101,7 +101,7 @@ function renderForm(tier: LeaderboardTier | null): string {
       <div class="form-group">
         <div class="col-sm-8 col-sm-offset-4">
           <button type="submit" class="btn btn-success" data-testid="btn-save-tier">
-            <i class="fa fa-save"></i>
+            <i class="fa fa-save" aria-hidden="true"></i>
             ${escapeHtml(tier ? t("leaderboard_tier_update") : t("leaderboard_tier_create"))}
           </button>
           <a href="#/leaderboard" class="btn btn-default">${escapeHtml(t("cancel"))}</a>

@@ -101,7 +101,7 @@ async function mount(host: HTMLElement, userId: string): Promise<void> {
                     const icon = granted ? "fa-check" : "fa-minus";
                     const label = granted ? t("granted") : t("denied");
                     return `<tr><td><code>${escapeHtml(perm)}</code></td>
-                      <td class="text-center"><span class="label ${cls}"><i class="fa ${icon}"></i> ${escapeHtml(label)}</span></td></tr>`;
+                      <td class="text-center"><span class="label ${cls}"><i class="fa ${icon}" aria-hidden="true"></i> ${escapeHtml(label)}</span></td></tr>`;
                   })
                   .join("")}
               </tbody>
@@ -111,7 +111,7 @@ async function mount(host: HTMLElement, userId: string): Promise<void> {
         <div class="form-group">
           <div class="col-sm-offset-3 col-sm-9">
             <button type="submit" class="btn btn-success" data-action="save-role">
-              <i class="fa fa-save"></i> ${escapeHtml(t("update_role"))}
+              <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("update_role"))}
             </button>
             <a class="btn btn-default" href="#/adminUser">${escapeHtml(t("cancel"))}</a>
           </div>

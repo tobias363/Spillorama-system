@@ -16,7 +16,7 @@ export function renderRejectedDetailPage(container: HTMLElement): void {
         <div class="box box-danger"><div class="box-body">
           <p>${escapeHtml(t("player_not_found"))}</p>
           <a class="btn btn-primary" href="#/rejectedRequests">
-            <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+            <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
           </a>
         </div></div>
       </section>`;

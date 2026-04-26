@@ -27,7 +27,7 @@ export function mountAgentPlayers(container: HTMLElement): void {
           </div>
         </div>
         <div class="box-body" id="agent-players-body">
-          <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i><br><br>${escapeHtml(t("loading"))}</div>
+          <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i><br><br>${escapeHtml(t("loading"))}</div>
         </div>
       </div>
     </section>`;
@@ -100,7 +100,7 @@ function renderRow(p: AgentPlayer): string {
       <td><small>${escapeHtml(formatDate(p.createdAt))}</small></td>
       <td>
         <button class="btn btn-sm btn-primary" data-export-id="${escapeHtml(p.id)}">
-          <i class="fa fa-download"></i> ${escapeHtml(t("agent_players_export_csv"))}
+          <i class="fa fa-download" aria-hidden="true"></i> ${escapeHtml(t("agent_players_export_csv"))}
         </button>
       </td>
     </tr>`;
@@ -110,7 +110,7 @@ async function exportRow(btn: HTMLElement, playerId: string): Promise<void> {
   const buttonEl = btn as HTMLButtonElement;
   const original = buttonEl.innerHTML;
   buttonEl.disabled = true;
-  buttonEl.innerHTML = `<i class="fa fa-spinner fa-spin"></i>`;
+  buttonEl.innerHTML = `<i class="fa fa-spinner fa-spin" aria-hidden="true"></i>`;
   try {
     await downloadAgentPlayerExport(playerId);
     Toast.success(t("agent_players_export_success"));
@@ -129,7 +129,7 @@ function contentHeader(titleKey: string): string {
     <section class="content-header">
       <h1>${title}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${title}</li>
       </ol>
     </section>`;

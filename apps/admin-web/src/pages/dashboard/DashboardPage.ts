@@ -28,7 +28,7 @@ export async function mountDashboard(container: HTMLElement, session: Session): 
   // Skeleton
   const skeleton = document.createElement("div");
   skeleton.className = "dashboard-skeleton";
-  skeleton.innerHTML = `<div class="box box-default"><div class="box-body text-center"><i class="fa fa-spinner fa-spin fa-2x"></i><br><br>${escapeHtml(t("loading"))}</div></div>`;
+  skeleton.innerHTML = `<div class="box box-default"><div class="box-body text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i><br><br>${escapeHtml(t("loading"))}</div></div>`;
   container.append(skeleton);
 
   let initial: DashboardData;

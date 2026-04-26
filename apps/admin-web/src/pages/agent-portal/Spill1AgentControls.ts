@@ -46,7 +46,7 @@ export function renderSpill1AgentControls(
         </div>
         <div class="box-body">
           <p class="text-muted" data-marker="spill1-slave-notice">
-            <i class="fa fa-info-circle"></i>
+            <i class="fa fa-info-circle" aria-hidden="true"></i>
             Din hall er deltaker i runden. Kun master-hallen (<code>${escapeHtml(currentGame.masterHallId)}</code>)
             kan starte, pause, resume eller stoppe spillet.
           </p>
@@ -61,7 +61,7 @@ export function renderSpill1AgentControls(
   const excludedNotice =
     excludedHallIds.length > 0
       ? `<p class="text-muted small" data-marker="spill1-excluded-notice">
-           <i class="fa fa-warning"></i>
+           <i class="fa fa-warning" aria-hidden="true"></i>
            Ekskluderte haller som må bekreftes: <code>${excludedHallIds
              .map((h) => escapeHtml(h))
              .join(", ")}</code>
@@ -79,14 +79,14 @@ export function renderSpill1AgentControls(
                   data-marker="spill1-start-btn"
                   data-game-id="${escapeHtml(currentGame.id)}"
                   ${canStart ? "" : "disabled"}>
-            <i class="fa fa-play"></i> Start Spill 1
+            <i class="fa fa-play" aria-hidden="true"></i> Start Spill 1
           </button>
           <button class="btn btn-info"
                   data-action="spill1-resume"
                   data-marker="spill1-resume-btn"
                   data-game-id="${escapeHtml(currentGame.id)}"
                   ${canResume ? "" : "disabled"}>
-            <i class="fa fa-play"></i> Resume
+            <i class="fa fa-play" aria-hidden="true"></i> Resume
           </button>
         </div>
         ${excludedNotice}

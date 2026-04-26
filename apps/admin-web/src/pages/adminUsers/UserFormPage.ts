@@ -146,7 +146,7 @@ async function mount(
       <div class="form-group">
         <div class="col-sm-offset-3 col-sm-9">
           <button type="submit" class="btn btn-success" data-action="save-user">
-            <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}
           </button>
           <a class="btn btn-default" href="#${opts.variant === "admin" ? "/adminUser" : "/user"}">
             ${escapeHtml(t("cancel"))}

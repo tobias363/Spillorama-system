@@ -23,14 +23,14 @@ export function renderLoyaltyManagementPage(container: HTMLElement): void {
             <a class="btn btn-default"
                href="#/loyaltyManagement/players"
                data-testid="btn-loyalty-players">
-              <i class="fa fa-users"></i> ${escapeHtml(t("loyalty_players_link"))}
+              <i class="fa fa-users" aria-hidden="true"></i> ${escapeHtml(t("loyalty_players_link"))}
             </a>
           </div>
           <div class="col-sm-6 text-right">
             <a class="btn btn-primary"
                href="#/loyaltyManagement/new"
                data-testid="btn-add-loyalty-tier">
-              <i class="fa fa-plus"></i> ${escapeHtml(t("add_loyalty_tier"))}
+              <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_loyalty_tier"))}
             </a>
           </div>
         </div>
@@ -111,14 +111,14 @@ function renderRow(tier: LoyaltyTier): string {
         <a class="btn btn-default btn-xs"
            href="#/loyaltyManagement/edit/${encodeURIComponent(tier.id)}"
            data-testid="btn-edit-loyalty-tier-${escapeHtml(tier.id)}">
-          <i class="fa fa-edit"></i> ${escapeHtml(t("edit"))}
+          <i class="fa fa-edit" aria-hidden="true"></i> ${escapeHtml(t("edit"))}
         </a>
         <button type="button"
                 class="btn btn-danger btn-xs"
                 data-action="delete-tier"
                 data-tier-id="${escapeHtml(tier.id)}"
                 data-testid="btn-delete-loyalty-tier-${escapeHtml(tier.id)}">
-          <i class="fa fa-trash"></i> ${escapeHtml(t("delete"))}
+          <i class="fa fa-trash" aria-hidden="true"></i> ${escapeHtml(t("delete"))}
         </button>
       </td>
     </tr>`;

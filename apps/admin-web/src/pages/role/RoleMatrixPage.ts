@@ -26,7 +26,7 @@ export function renderRoleMatrixPage(container: HTMLElement): void {
     ${contentHeader("role_matrix_title", "role_management")}
     <section class="content">
       <div class="callout callout-info">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("role_info_static_banner"))}
       </div>
       ${boxOpen("role_matrix_title", "primary")}
@@ -61,7 +61,7 @@ async function render(host: HTMLElement): Promise<void> {
           const icon = granted ? "fa-check" : "fa-minus";
           return `<td class="text-center" data-role="${escapeHtml(role)}" data-perm="${escapeHtml(perm)}"
                       data-granted="${granted ? "true" : "false"}">
-                    <span class="label ${cls}"><i class="fa ${icon}"></i> ${escapeHtml(label)}</span>
+                    <span class="label ${cls}"><i class="fa ${icon}" aria-hidden="true"></i> ${escapeHtml(label)}</span>
                   </td>`;
         }).join("");
         return `<tr><td><code>${escapeHtml(perm)}</code></td>${cells}</tr>`;

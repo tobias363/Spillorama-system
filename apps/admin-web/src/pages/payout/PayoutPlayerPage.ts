@@ -146,7 +146,7 @@ export async function renderPayoutPlayerPage(container: HTMLElement): Promise<vo
         render: (r) =>
           `<a class="btn btn-info btn-xs btn-rounded" href="#/payoutPlayer/view/${encodeURIComponent(
             r.playerId
-          )}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></a>`,
+          )}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye" aria-hidden="true"></i></a>`,
       },
     ],
   });

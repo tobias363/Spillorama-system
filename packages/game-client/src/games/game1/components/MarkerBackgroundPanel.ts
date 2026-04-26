@@ -84,7 +84,10 @@ export class MarkerBackgroundPanel {
     title.style.cssText = "color:#ffe83d;font-size:20px;font-weight:700;margin:0;";
     header.appendChild(title);
     const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
     closeBtn.textContent = "\u2715";
+    closeBtn.setAttribute("aria-label", "Lukk mark\u00f8r- og bakgrunnsvalg");
+    closeBtn.title = "Lukk";
     closeBtn.style.cssText = "background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:50%;width:32px;height:32px;color:#fff;font-size:16px;cursor:pointer;font-family:inherit;";
     closeBtn.addEventListener("click", () => this.hide());
     header.appendChild(closeBtn);
@@ -102,6 +105,9 @@ export class MarkerBackgroundPanel {
     markerGrid.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:10px;";
     for (const style of MARKER_STYLES) {
       const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("aria-label", `Velg markør: ${style.label}`);
+      btn.setAttribute("aria-pressed", String(style.id === this.selectedMarkerId));
       Object.assign(btn.style, {
         display: "flex",
         alignItems: "center",
@@ -116,6 +122,7 @@ export class MarkerBackgroundPanel {
         fontSize: "12px",
       });
       const swatch = document.createElement("div");
+      swatch.setAttribute("aria-hidden", "true");
       swatch.style.cssText = `width:24px;height:24px;background:${style.color};border-radius:${style.shape};flex-shrink:0;`;
       btn.appendChild(swatch);
       btn.appendChild(document.createTextNode(style.label));
@@ -141,6 +148,9 @@ export class MarkerBackgroundPanel {
     bgGrid.style.cssText = "display:grid;grid-template-columns:repeat(5,1fr);gap:8px;";
     for (const bg of BG_OPTIONS) {
       const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("aria-label", `Velg bakgrunn: ${bg.label}`);
+      btn.setAttribute("aria-pressed", String(bg.id === this.selectedBgId));
       Object.assign(btn.style, {
         width: "100%",
         aspectRatio: "1",

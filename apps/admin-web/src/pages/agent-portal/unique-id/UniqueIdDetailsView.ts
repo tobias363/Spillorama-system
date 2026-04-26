@@ -120,12 +120,12 @@ export function renderDetailsHtml(
       <div class="box-footer text-right">
         <button type="button" class="btn btn-default" data-action="reprint" data-testid="btn-reprint"
           ${canRegenerate ? "" : "disabled"}>
-          <i class="fa fa-print"></i> ${escapeHtml(t("agent_unique_id_reprint"))}
+          <i class="fa fa-print" aria-hidden="true"></i> ${escapeHtml(t("agent_unique_id_reprint"))}
           (${card.reprintedCount})
         </button>
         <button type="button" class="btn btn-warning" data-action="regenerate" data-testid="btn-regenerate"
           ${canRegenerate ? "" : "disabled"}>
-          <i class="fa fa-refresh"></i> ${escapeHtml(t("agent_unique_id_regenerate"))}
+          <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("agent_unique_id_regenerate"))}
         </button>
       </div>
     </section>`;

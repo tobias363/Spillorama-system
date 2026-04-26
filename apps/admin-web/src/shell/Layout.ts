@@ -25,7 +25,7 @@ export function mountLayout(rootSelector: string): LayoutRefs {
     <div class="wrapper">
       <div id="shellHeader"></div>
       <div id="shellSidebar"></div>
-      <div class="content-wrapper">
+      <div class="content-wrapper" id="main-content" role="main" tabindex="-1">
         <div id="shellBreadcrumb"></div>
         <section class="content">
           <div id="shellContent"></div>

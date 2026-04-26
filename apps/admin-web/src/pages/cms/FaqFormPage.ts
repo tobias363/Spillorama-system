@@ -84,7 +84,7 @@ async function mount(
       <div class="form-group">
         <div class="col-sm-offset-2 col-sm-10">
           <button type="submit" class="btn btn-success" data-action="save-faq" data-testid="faq-save-btn">
-            <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}
           </button>
           <a class="btn btn-default" href="#/faq">${escapeHtml(t("cancel"))}</a>
         </div>

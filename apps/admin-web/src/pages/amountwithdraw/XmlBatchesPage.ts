@@ -49,12 +49,12 @@ export function renderXmlBatchesPage(container: HTMLElement): void {
             ${
               canWrite
                 ? `<button type="button" class="btn btn-success" data-action="export">
-                    <i class="fa fa-download"></i> ${escapeHtml(t("withdraw_xml_generate_now"))}
+                    <i class="fa fa-download" aria-hidden="true"></i> ${escapeHtml(t("withdraw_xml_generate_now"))}
                   </button>`
                 : ""
             }
             <button type="button" class="btn btn-default btn-xs" data-action="refresh" style="margin-left:8px;">
-              <i class="fa fa-refresh"></i> ${escapeHtml(t("refresh_table"))}
+              <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh_table"))}
             </button>
           </div>
         </div>
@@ -119,7 +119,7 @@ export function renderXmlBatchesPage(container: HTMLElement): void {
     btn.className = "btn btn-primary btn-xs";
     btn.setAttribute("data-id", r.id);
     btn.setAttribute("data-action", "resend");
-    btn.innerHTML = `<i class="fa fa-envelope"></i> ${escapeHtml(t("withdraw_xml_resend_email"))}`;
+    btn.innerHTML = `<i class="fa fa-envelope" aria-hidden="true"></i> ${escapeHtml(t("withdraw_xml_resend_email"))}`;
     return btn;
   }
 

@@ -20,7 +20,7 @@ export async function renderSavedGameListPage(container: HTMLElement): Promise<v
   container.innerHTML = renderShell();
   const tableHost = container.querySelector<HTMLElement>("#saved-game-list-table");
   if (!tableHost) return;
-  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
   await loadAndRender(tableHost);
 }
 
@@ -40,7 +40,7 @@ function renderShell(): string {
       <section class="content-header">
         <h1>${escapeHtml(t("saved_game_list"))}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li class="active">${escapeHtml(t("saved_game_list"))}</li>
         </ol>
       </section>
@@ -52,7 +52,7 @@ function renderShell(): string {
               <div class="pull-right">
                 <a href="#/gameManagement" class="btn btn-primary btn-md"
                   data-action="back-to-gm">
-                  <i class="fa fa-plus"></i> ${escapeHtml(t("add_game"))}
+                  <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_game"))}
                 </a>
               </div>
               <div class="clearfix"></div>
@@ -93,7 +93,7 @@ function renderTable(host: HTMLElement, rows: SavedGameRow[]): void {
         render: (r) => `
           <a href="#/savedGameList/${encodeURIComponent(r.gameTypeId)}/view/${encodeURIComponent(r._id)}"
              class="btn btn-info btn-xs btn-rounded" title="${escapeHtml(t("view"))}">
-            <i class="fa fa-eye"></i>
+            <i class="fa fa-eye" aria-hidden="true"></i>
           </a>
           <button type="button"
             class="btn btn-success btn-xs btn-rounded m-lr-3"
@@ -101,19 +101,19 @@ function renderTable(host: HTMLElement, rows: SavedGameRow[]): void {
             data-id="${escapeHtml(r._id)}"
             data-name="${escapeHtml(r.name)}"
             title="${escapeHtml(t("load_to_game"))}">
-            <i class="fa fa-cloud-download"></i>
+            <i class="fa fa-cloud-download" aria-hidden="true"></i>
           </button>
           <a href="#/savedGameList/${encodeURIComponent(r.gameTypeId)}/edit/${encodeURIComponent(r._id)}"
              class="btn btn-warning btn-xs btn-rounded"
              title="${escapeHtml(t("edit"))}">
-            <i class="fa fa-edit"></i>
+            <i class="fa fa-edit" aria-hidden="true"></i>
           </a>
           <button type="button" class="btn btn-danger btn-xs btn-rounded m-lr-3"
             data-action="delete-saved-game"
             data-id="${escapeHtml(r._id)}"
             data-name="${escapeHtml(r.name)}"
             title="${escapeHtml(t("confirm_delete"))}">
-            <i class="fa fa-trash"></i>
+            <i class="fa fa-trash" aria-hidden="true"></i>
           </button>`,
       },
     ],

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en-us">
+<html lang="nb">
 
 <head>
   <meta charset="utf-8">
@@ -1343,6 +1343,11 @@
 </head>
 
 <body>
+  <!-- WCAG 2.4.1 — Skip-to-main-content link, visible on focus only. -->
+  <a href="#lobby-main-content" class="skip-to-main"
+     style="position:absolute;top:-40px;left:0;background:#000;color:#fff;padding:8px 16px;z-index:100000;text-decoration:none;border-radius:0 0 6px 0;"
+     onfocus="this.style.top='0'" onblur="this.style.top='-40px'">Hopp til hovedinnhold</a>
+
   <!-- ═══ 1. LOGIN OVERLAY ═══════════════════════════════════════════════ -->
   <div id="login-overlay" class="login-overlay">
     <div>
@@ -1597,43 +1602,43 @@
         </span>
 
         <!-- Lommebok -->
-        <button class="lobby-wallet-btn" type="button" id="lobby-wallet-btn" title="Lommebok">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+        <button class="lobby-wallet-btn" type="button" id="lobby-wallet-btn" title="Lommebok" aria-label="Lommebok">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
           <span>Lommebok</span>
         </button>
 
         <!-- Innskudd -->
-        <button class="lobby-deposit-btn" id="lobby-deposit-btn" type="button">
-          <span class="lobby-deposit-btn-plus">+</span>
+        <button class="lobby-deposit-btn" id="lobby-deposit-btn" type="button" aria-label="Sett inn penger (innskudd)">
+          <span class="lobby-deposit-btn-plus" aria-hidden="true">+</span>
           Innskudd
         </button>
 
         <!-- Bell -->
-        <button class="lobby-topbar-icon-btn" id="lobby-notification-btn" type="button" title="Varsler">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <button class="lobby-topbar-icon-btn" id="lobby-notification-btn" type="button" title="Varsler" aria-label="Varsler">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           <span class="notification-badge" id="notification-badge" hidden></span>
         </button>
 
         <!-- Profile -->
-        <button class="lobby-user-chip" id="lobby-profile-btn" type="button">
-          <span class="lobby-user-avatar" id="lobby-user-avatar">?</span>
+        <button class="lobby-user-chip" id="lobby-profile-btn" type="button" aria-label="Min profil">
+          <span class="lobby-user-avatar" id="lobby-user-avatar" aria-hidden="true">?</span>
           <span id="lobby-user-name">Bruker</span>
         </button>
 
         <!-- Settings -->
-        <button class="lobby-topbar-icon-btn" id="lobby-settings-btn" type="button" title="Innstillinger">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <button class="lobby-topbar-icon-btn" id="lobby-settings-btn" type="button" title="Innstillinger" aria-label="Innstillinger">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
     </div>
 
-    <div class="lobby-main">
+    <main class="lobby-main" id="lobby-main-content" role="main" tabindex="-1">
       <h2 class="lobby-heading">Velg spill</h2>
       <div id="lobby-compliance-warning" class="lobby-compliance-warning" hidden></div>
       <div id="lobby-game-grid" class="lobby-game-grid">
         <div class="lobby-loading">Laster spill...</div>
       </div>
-    </div>
+    </main>
 
     <footer class="lobby-footer">
       <button class="lobby-footer-link" type="button" onclick="SpilloramaPanels.openSchedule()">Spillplan</button>
@@ -1659,8 +1664,8 @@
         <img class="game-bar-logo-img" src="logo.png" alt="Spillorama">
       </a>
       <div class="lobby-topbar-divider"></div>
-      <button class="lobby-back-btn" type="button" onclick="window.returnToShellLobby()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      <button class="lobby-back-btn" type="button" onclick="window.returnToShellLobby()" aria-label="Tilbake til lobby">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="15 18 9 12 15 6"/></svg>
         Tilbake til lobby
       </button>
       <!-- Spill 1-spesifikke handlinger — wired til window.__gameActions
@@ -1684,10 +1689,11 @@
 
       <!-- Hall selector (interaktiv, samme logikk som lobby) -->
       <div class="lobby-topbar-hall-wrap">
-        <div class="lobby-topbar-hall-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <div class="lobby-topbar-hall-icon" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         </div>
-        <select id="game-bar-hall-select" class="lobby-topbar-hall">
+        <label for="game-bar-hall-select" class="visually-hidden" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Velg hall</label>
+        <select id="game-bar-hall-select" class="lobby-topbar-hall" aria-label="Velg hall">
           <option>Laster haller...</option>
         </select>
       </div>
@@ -1705,8 +1711,8 @@
       </span>
 
       <!-- Lommebok -->
-      <button class="lobby-wallet-btn" type="button" onclick="window.ShowSpillvettPanel && window.ShowSpillvettPanel()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+      <button class="lobby-wallet-btn" type="button" onclick="window.ShowSpillvettPanel && window.ShowSpillvettPanel()" aria-label="Lommebok og Spillvett">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         <span>Lommebok</span>
       </button>
 

@@ -48,7 +48,7 @@ export function renderActiveRangesPage(container: HTMLElement): void {
       ${boxOpen("pt_active_ranges_title", "primary")}
         <div id="ar-toolbar" style="margin-bottom:10px;">
           <button type="button" class="btn btn-default btn-sm" id="ar-refresh" data-action="refresh">
-            <i class="fa fa-refresh"></i> ${escapeHtml(t("refresh"))}
+            <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh"))}
           </button>
         </div>
         <div id="ar-table" aria-live="polite">${escapeHtml(t("loading_ellipsis"))}</div>
@@ -140,7 +140,7 @@ export function renderActiveRangesPage(container: HTMLElement): void {
       const b = document.createElement("button");
       b.type = "button";
       b.className = `btn btn-${variant} btn-xs`;
-      b.innerHTML = `<i class="fa fa-${icon}"></i> ${escapeHtml(t(labelKey))}`;
+      b.innerHTML = `<i class="fa fa-${icon}" aria-hidden="true"></i> ${escapeHtml(t(labelKey))}`;
       b.setAttribute("data-action", action);
       b.setAttribute("data-id", r.id);
       if (isClosed) b.disabled = true;

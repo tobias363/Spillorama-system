@@ -52,7 +52,7 @@ export function renderRiskCountryPage(container: HTMLElement): void {
             ${
               canWrite
                 ? `<button type="button" class="btn btn-primary" data-action="add-risk-country">
-                    <i class="fa fa-plus"></i> ${escapeHtml(t("add_risk_country"))}
+                    <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_risk_country"))}
                   </button>`
                 : ""
             }
@@ -135,8 +135,9 @@ export function renderRiskCountryPage(container: HTMLElement): void {
     del.className = "btn btn-danger btn-xs";
     del.setAttribute("data-action", "delete-risk-country");
     del.setAttribute("data-code", row.countryCode);
-    del.innerHTML = `<i class="fa fa-trash"></i>`;
+    del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
     del.title = t("risk_country_delete");
+    del.setAttribute("aria-label", t("risk_country_delete"));
     del.addEventListener("click", () => openDeleteModal(row));
     wrap.append(del);
     return wrap;

@@ -69,7 +69,7 @@ function renderCreateShell(container: HTMLElement): void {
       <section class="content-header">
         <h1>${escapeHtml(title)}</h1>
         <ol class="breadcrumb pull-right">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/schedules">${escapeHtml(t("schedule_management"))}</a></li>
           <li class="active">${escapeHtml(t("create_schedule"))}</li>
         </ol>
@@ -81,7 +81,7 @@ function renderCreateShell(container: HTMLElement): void {
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(title)}</h6></div>
               <div class="pull-right">
                 <a href="#/schedules" class="btn btn-default btn-sm">
-                  <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                  <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
                 </a>
               </div>
               <div class="clearfix"></div>
@@ -104,7 +104,7 @@ async function renderViewPage(container: HTMLElement, id: string): Promise<void>
       <section class="content-header">
         <h1>${escapeHtml(title)}</h1>
         <ol class="breadcrumb pull-right">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/schedules">${escapeHtml(t("schedule_management"))}</a></li>
           <li class="active">${escapeHtml(title)}</li>
         </ol>
@@ -116,14 +116,14 @@ async function renderViewPage(container: HTMLElement, id: string): Promise<void>
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(t("view_schedule"))}</h6></div>
               <div class="pull-right">
                 <a href="#/schedules" class="btn btn-default btn-sm">
-                  <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                  <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
                 </a>
               </div>
               <div class="clearfix"></div>
             </div>
             <div class="panel-wrapper collapse in">
               <div class="panel-body" id="schedule-view-body">
-                <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>
+                <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>
               </div>
             </div>
           </div>

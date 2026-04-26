@@ -61,6 +61,9 @@ export class LoadingOverlay {
     this.onReload = opts.onReload ?? (() => window.location.reload());
 
     this.backdrop = document.createElement("div");
+    // Live-region so screen-readers announce loading-state changes.
+    this.backdrop.setAttribute("role", "status");
+    this.backdrop.setAttribute("aria-live", "polite");
     Object.assign(this.backdrop.style, {
       position: "absolute",
       inset: "0",
@@ -77,6 +80,7 @@ export class LoadingOverlay {
 
     // Spinner
     const spinner = document.createElement("div");
+    spinner.setAttribute("aria-hidden", "true");
     spinner.style.cssText = `
       width:48px;height:48px;
       border:4px solid rgba(255,255,255,0.2);
@@ -94,6 +98,7 @@ export class LoadingOverlay {
 
     // Reload button — hidden by default, appears after stuckThresholdMs
     this.reloadBtn = document.createElement("button");
+    this.reloadBtn.type = "button";
     this.reloadBtn.textContent = "Last siden på nytt";
     this.reloadBtn.style.cssText = `
       display:none;

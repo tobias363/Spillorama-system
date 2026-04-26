@@ -49,7 +49,7 @@ export function renderHallProductsPage(container: HTMLElement): void {
         </div>
         <div style="margin-top:16px;text-align:right;">
           <button type="button" id="hp-save" class="btn btn-success" data-action="save-hall-products" disabled>
-            <i class="fa fa-save"></i> ${escapeHtml(t("save"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("save"))}
           </button>
         </div>
       ${boxClose()}

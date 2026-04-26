@@ -41,13 +41,13 @@ export function renderBankIdResponsePage(container: HTMLElement): void {
       <div class="box box-${variantMap[status]}">
         <div class="box-body text-center" style="padding:48px 16px;">
           <div style="font-size:64px; color:var(--panel-${variantMap[status]}-color, #555); margin-bottom:16px;">
-            <i class="fa fa-${iconMap[status]}"></i>
+            <i class="fa fa-${iconMap[status]}" aria-hidden="true"></i>
           </div>
           <h2>${escapeHtml(titleMap[status])}</h2>
           <p>${escapeHtml(textMap[status])}</p>
           ${message ? `<p class="text-muted">${escapeHtml(message)}</p>` : ""}
           <a href="#/player" class="btn btn-primary" style="margin-top:16px;">
-            <i class="fa fa-arrow-left"></i> ${escapeHtml(t("go_back"))}
+            <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("go_back"))}
           </a>
         </div>
       </div>

@@ -125,7 +125,7 @@ export async function renderPayoutTicketsPage(container: HTMLElement): Promise<v
         render: (r) =>
           `<a class="btn btn-info btn-xs btn-rounded" href="#/payoutTickets/view/${encodeURIComponent(
             r.ticketId
-          )}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></a>`,
+          )}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye" aria-hidden="true"></i></a>`,
       },
     ],
   });

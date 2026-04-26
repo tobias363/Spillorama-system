@@ -43,7 +43,7 @@ export function renderDepositHistoryPage(container: HTMLElement): void {
           <div class="col-sm-3">
             <label style="display:block;">&nbsp;</label>
             <button type="button" class="btn btn-info" data-action="search">
-              <i class="fa fa-search"></i> ${escapeHtml(t("search"))}
+              <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("search"))}
             </button>
           </div>
         </div>

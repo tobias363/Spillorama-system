@@ -18,7 +18,7 @@ export function renderPendingDetailPage(container: HTMLElement): void {
         <div class="box box-danger"><div class="box-body">
           <p>${escapeHtml(t("player_not_found"))}</p>
           <a class="btn btn-primary" href="#/pendingRequests">
-            <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+            <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
           </a>
         </div></div>
       </section>`;
@@ -38,7 +38,7 @@ export function renderPendingDetailPage(container: HTMLElement): void {
     btn.disabled = true;
     btn.title = t("forward_to_admin_pending_tooltip");
     btn.setAttribute("data-action", "forward-to-admin");
-    btn.innerHTML = `<i class="fa fa-share"></i> ${escapeHtml(t("forward_to_admin"))}`;
+    btn.innerHTML = `<i class="fa fa-share" aria-hidden="true"></i> ${escapeHtml(t("forward_to_admin"))}`;
     actionRow.appendChild(document.createTextNode(" "));
     actionRow.appendChild(btn);
   }, 250);

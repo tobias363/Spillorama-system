@@ -134,7 +134,7 @@ function buildColumns(opts: GameRangeReportOptions) {
                 ":id",
                 encodeURIComponent(row.hallId)
               );
-              return `<a class="btn btn-info btn-xs btn-rounded" href="#${href}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></a>`;
+              return `<a class="btn btn-info btn-xs btn-rounded" href="#${href}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye" aria-hidden="true"></i></a>`;
             },
           },
         ]

@@ -116,10 +116,10 @@ export async function renderSettlementPage(
             : escapeHtml(t("no_receipt_uploaded") || "Ingen bilag lastet opp");
           const receiptDisabled = hasReceipt ? "" : "disabled";
           return (
-            `<button type="button" class="btn btn-info btn-xs btn-rounded" data-act="view" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></button> ` +
-            `<button type="button" class="btn btn-warning btn-xs btn-rounded" data-act="edit" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("edit_settlement"))}"><i class="fa fa-pencil"></i></button> ` +
-            `<button type="button" class="btn btn-default btn-xs btn-rounded" data-act="pdf" data-shift="${escapeHtml(r.shiftId)}" title="PDF"><i class="fa fa-file-pdf-o"></i></button> ` +
-            `<button type="button" class="btn btn-success btn-xs btn-rounded" data-act="receipt" data-shift="${escapeHtml(r.shiftId)}" title="${receiptTitle}" ${receiptDisabled}><i class="fa fa-download"></i></button>`
+            `<button type="button" class="btn btn-info btn-xs btn-rounded" data-act="view" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye" aria-hidden="true"></i></button> ` +
+            `<button type="button" class="btn btn-warning btn-xs btn-rounded" data-act="edit" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("edit_settlement"))}"><i class="fa fa-pencil" aria-hidden="true"></i></button> ` +
+            `<button type="button" class="btn btn-default btn-xs btn-rounded" data-act="pdf" data-shift="${escapeHtml(r.shiftId)}" title="PDF"><i class="fa fa-file-pdf-o" aria-hidden="true"></i></button> ` +
+            `<button type="button" class="btn btn-success btn-xs btn-rounded" data-act="receipt" data-shift="${escapeHtml(r.shiftId)}" title="${receiptTitle}" ${receiptDisabled}><i class="fa fa-download" aria-hidden="true"></i></button>`
           );
         },
       },

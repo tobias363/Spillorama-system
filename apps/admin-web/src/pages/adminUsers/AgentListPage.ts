@@ -111,7 +111,7 @@ export function renderAgentListPage(container: HTMLElement): void {
             addBtn.className = "btn btn-primary btn-sm";
             addBtn.setAttribute("data-action", "add-agent");
             addBtn.href = "#/agent/add";
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_agent"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_agent"))}`;
             host.append(addBtn);
           },
         },
@@ -135,8 +135,9 @@ function rowActions(row: Agent, onChange: () => void): Node {
   edit.setAttribute("data-action", "edit-agent");
   edit.setAttribute("data-id", row.userId);
   edit.href = `#/agent/edit/${encodeURIComponent(row.userId)}`;
-  edit.innerHTML = `<i class="fa fa-edit"></i>`;
+  edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
   edit.title = t("edit_agent");
+  edit.setAttribute("aria-label", t("edit_agent"));
   wrap.append(edit);
 
   const del = document.createElement("button");
@@ -144,8 +145,9 @@ function rowActions(row: Agent, onChange: () => void): Node {
   del.className = "btn btn-danger btn-xs";
   del.setAttribute("data-action", "delete-agent");
   del.setAttribute("data-id", row.userId);
-  del.innerHTML = `<i class="fa fa-trash"></i>`;
+  del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
   del.title = t("delete");
+  del.setAttribute("aria-label", t("delete"));
   del.style.marginLeft = "4px";
   del.addEventListener("click", () => {
     if (!window.confirm(t("delete_message"))) return;

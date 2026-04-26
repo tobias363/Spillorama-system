@@ -52,12 +52,12 @@ export function renderCashInOutPage(container: HTMLElement): void {
               </div>
               <div class="col-sm-6 cashinout-actions">
                 <p class="muted"><small>${escapeHtml(t("hall_name"))}: <strong>${escapeHtml(hallName)}</strong></small></p>
-                <button class="btn btn-success" data-action="add-daily-balance"><i class="fa fa-plus"></i> ${escapeHtml(t("add_daily_balance"))}</button>
-                <button class="btn btn-primary" data-action="refresh-balance"><i class="fa fa-refresh"></i> ${escapeHtml(t("refresh_table"))}</button>
+                <button class="btn btn-success" data-action="add-daily-balance"><i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_daily_balance"))}</button>
+                <button class="btn btn-primary" data-action="refresh-balance"><i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh_table"))}</button>
                 <button class="btn btn-success" data-action="control-daily-balance">${escapeHtml(t("control_daily_balance"))}</button>
                 <hr>
                 <a class="btn btn-primary" href="#/hallSpecificReport" target="_self">${escapeHtml(t("todays_sales_report"))} (F8)</a>
-                <button class="btn btn-warning" data-action="settlement"><i class="fa fa-lock"></i> ${escapeHtml(t("settlement"))}</button>
+                <button class="btn btn-warning" data-action="settlement"><i class="fa fa-lock" aria-hidden="true"></i> ${escapeHtml(t("settlement"))}</button>
               </div>
             </div>
           ${boxClose()}

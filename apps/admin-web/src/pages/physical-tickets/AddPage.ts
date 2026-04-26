@@ -86,7 +86,7 @@ export function renderAddPage(container: HTMLElement): void {
             </div>
             <div class="col-sm-6 text-right" style="padding-top:24px;">
               <button type="submit" class="btn btn-success" data-action="submit-batch">
-                <i class="fa fa-plus"></i> ${escapeHtml(t("add_batch"))}
+                <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_batch"))}
               </button>
             </div>
           </div>
@@ -108,7 +108,7 @@ export function renderAddPage(container: HTMLElement): void {
             </div>
             <div class="col-sm-4 text-right" style="padding-top:24px;">
               <button type="submit" class="btn btn-primary" id="static-csv-submit">
-                <i class="fa fa-upload"></i> ${escapeHtml(t("pt_csv_import_upload_button"))}
+                <i class="fa fa-upload" aria-hidden="true"></i> ${escapeHtml(t("pt_csv_import_upload_button"))}
               </button>
             </div>
           </div>
@@ -222,21 +222,21 @@ export function renderAddPage(container: HTMLElement): void {
     edit.type = "button";
     edit.className = "btn btn-warning btn-xs";
     edit.title = t("edit");
-    edit.innerHTML = `<i class="fa fa-edit"></i>`;
+    edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
     edit.setAttribute("data-action", "edit");
     edit.setAttribute("data-id", b.id);
     const gen = document.createElement("button");
     gen.type = "button";
     gen.className = "btn btn-info btn-xs";
     gen.title = t("generate_tickets");
-    gen.innerHTML = `<i class="fa fa-cogs"></i>`;
+    gen.innerHTML = `<i class="fa fa-cogs" aria-hidden="true"></i>`;
     gen.setAttribute("data-action", "generate");
     gen.setAttribute("data-id", b.id);
     const del = document.createElement("button");
     del.type = "button";
     del.className = "btn btn-danger btn-xs";
     del.title = t("delete_button");
-    del.innerHTML = `<i class="fa fa-trash"></i>`;
+    del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
     del.setAttribute("data-action", "delete");
     del.setAttribute("data-id", b.id);
     wrap.append(edit, gen, del);

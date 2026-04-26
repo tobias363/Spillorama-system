@@ -53,7 +53,7 @@ function contentHeader(): string {
     <section class="content-header">
       <h1>${title}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${title}</li>
       </ol>
     </section>`;
@@ -66,7 +66,7 @@ function kpiRow(): string {
       <div class="col-md-3 col-sm-6 col-xs-12">
         <a href="#/agent/players" style="text-decoration:none;color:inherit;">
           <div class="info-box">
-            <span class="info-box-icon bg-blue"><i class="fa fa-users"></i></span>
+            <span class="info-box-icon bg-blue"><i class="fa fa-users" aria-hidden="true"></i></span>
             <div class="info-box-content">
               <span class="info-box-text" style="font-size:11px;">
                 ${escapeHtml(t("agent_dashboard_kpi_approved_players"))}

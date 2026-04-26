@@ -28,7 +28,7 @@ export function renderOtherGamesShell(
     ${contentHeader(titleKey, moduleKey)}
     <section class="content">
       <div class="callout callout-info" data-testid="${escapeHtml(testIdPrefix)}-wired-banner">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("mini_games_wired_banner"))}
       </div>
       ${boxOpen(titleKey, "primary")}
@@ -106,7 +106,7 @@ export function submitRow(backHash: string = "#/admin"): string {
     <div class="form-group">
       <div class="col-sm-offset-2 col-sm-10">
         <button type="submit" class="btn btn-success" data-action="save-prizes" data-testid="mg-submit">
-          <i class="fa fa-save"></i> ${escapeHtml(t("save"))}
+          <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("save"))}
         </button>
         <a class="btn btn-default" href="${escapeHtml(backHash)}">${escapeHtml(t("cancel"))}</a>
       </div>

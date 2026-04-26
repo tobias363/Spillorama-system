@@ -66,7 +66,7 @@ export function renderSellTicketPage(container: HTMLElement): void {
             const btn = document.createElement("button");
             btn.type = "button";
             btn.className = "btn btn-danger btn-xs";
-            btn.innerHTML = `<i class="fa fa-trash"></i>`;
+            btn.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
             btn.setAttribute("data-remove-id", row.id);
             btn.addEventListener("click", () => {
               const idx = rows.findIndex((r) => r.id === row.id);

@@ -76,14 +76,14 @@ function renderShell(gt: GameType | null, error: string | null): string {
       </div>`
     : error
       ? `<div class="alert alert-danger" style="margin:16px;">${escapeHtml(error)}</div>`
-      : `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+      : `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 
   return `
     <div class="page-wrapper"><div class="container-fluid">
       <section class="content-header">
         <h1>${escapeHtml(t("view_game"))}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/gameType">${escapeHtml(t("games"))}</a></li>
           <li class="active">${escapeHtml(t("view_game"))}</li>
         </ol>

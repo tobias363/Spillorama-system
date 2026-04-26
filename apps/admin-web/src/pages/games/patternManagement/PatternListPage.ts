@@ -82,7 +82,7 @@ function renderShell(args: ShellArgs | null, error: string | null): string {
     ? `<a href="#/patternManagement/${encodeURIComponent(args.gameType._id)}/add"
            class="btn btn-primary btn-md"
            data-action="add-pattern">
-           <i class="fa fa-plus"></i> ${escapeHtml(t("add_pattern"))} ${escapeHtml(gameName)}
+           <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_pattern"))} ${escapeHtml(gameName)}
          </a>`
     : "";
 
@@ -95,7 +95,7 @@ function renderShell(args: ShellArgs | null, error: string | null): string {
       <section class="content-header">
         <h1>${escapeHtml(title)}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li class="active">${escapeHtml(title)}</li>
         </ol>
       </section>

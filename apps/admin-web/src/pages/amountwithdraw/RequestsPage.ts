@@ -64,7 +64,7 @@ export function renderRequestsPage(
         <div class="row" style="margin-bottom:8px;">
           <div class="col-sm-12 text-right">
             <button type="button" class="btn btn-xs btn-success" data-action="refresh">
-              <i class="fa fa-refresh"></i> ${escapeHtml(t("refresh_table"))}
+              <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh_table"))}
             </button>
           </div>
         </div>
@@ -130,13 +130,13 @@ export function renderRequestsPage(
     accept.className = "btn btn-success btn-xs";
     accept.setAttribute("data-id", r.id);
     accept.setAttribute("data-action", "accept");
-    accept.innerHTML = `<i class="fa fa-check"></i> ${escapeHtml(t("acceptbtn"))}`;
+    accept.innerHTML = `<i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("acceptbtn"))}`;
     const reject = document.createElement("button");
     reject.type = "button";
     reject.className = "btn btn-danger btn-xs";
     reject.setAttribute("data-id", r.id);
     reject.setAttribute("data-action", "reject");
-    reject.innerHTML = `<i class="fa fa-times"></i> ${escapeHtml(t("rejectbtn"))}`;
+    reject.innerHTML = `<i class="fa fa-times" aria-hidden="true"></i> ${escapeHtml(t("rejectbtn"))}`;
     wrap.append(accept, reject);
     return wrap;
   }

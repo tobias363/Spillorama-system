@@ -55,7 +55,7 @@ export function mountAgentPhysicalCashout(container: HTMLElement): void {
     <section class="content-header">
       <h1>${escapeHtml(t("agent_physical_cashout_title"))}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li class="active">${escapeHtml(t("agent_physical_cashout_title"))}</li>
       </ol>
     </section>
@@ -74,7 +74,7 @@ export function mountAgentPhysicalCashout(container: HTMLElement): void {
                 style="width:280px;" required autofocus autocomplete="off">
             </div>
             <button type="submit" class="btn btn-primary" data-action="load">
-              <i class="fa fa-search"></i> ${escapeHtml(t("agent_physical_cashout_load"))}
+              <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("agent_physical_cashout_load"))}
             </button>
           </form>
           <div id="agent-cashout-results"></div>
@@ -133,7 +133,7 @@ export function mountAgentPhysicalCashout(container: HTMLElement): void {
     );
     const rewardAllBtn = pending.length > 0
       ? `<button type="button" class="btn btn-warning" data-action="reward-all">
-          <i class="fa fa-trophy"></i> ${escapeHtml(t("agent_physical_cashout_reward_all"))} (${pending.length})
+          <i class="fa fa-trophy" aria-hidden="true"></i> ${escapeHtml(t("agent_physical_cashout_reward_all"))} (${pending.length})
         </button>`
       : "";
     resultsHost.innerHTML = `
@@ -181,7 +181,7 @@ export function mountAgentPhysicalCashout(container: HTMLElement): void {
         ? `<button type="button" class="btn btn-success btn-xs" data-action="reward-ticket"
              data-unique-id="${escapeHtml(tk.uniqueId)}"
              data-default-cents="${tk.wonAmountCents ?? ""}">
-             <i class="fa fa-money"></i> ${escapeHtml(t("agent_physical_cashout_reward"))}
+             <i class="fa fa-money" aria-hidden="true"></i> ${escapeHtml(t("agent_physical_cashout_reward"))}
            </button>`
         : "";
       return `<tr>

@@ -32,7 +32,7 @@ export function renderUniqueIdLookupPage(container: HTMLElement): void {
               placeholder="${escapeHtml(t("scan_or_type_unique_id"))}" required>
           </div>
           <button type="submit" class="btn btn-primary" data-action="lookup">
-            <i class="fa fa-search"></i> ${escapeHtml(t("lookup_ticket"))}
+            <i class="fa fa-search" aria-hidden="true"></i> ${escapeHtml(t("lookup_ticket"))}
           </button>
         </form>
         <div id="lookup-result" style="margin-top:16px;"></div>

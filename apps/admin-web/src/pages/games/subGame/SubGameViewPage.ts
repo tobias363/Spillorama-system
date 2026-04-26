@@ -94,7 +94,7 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
     : error
       ? `<div class="alert alert-danger" style="margin:16px;">${escapeHtml(error)}</div>`
       : `<div class="alert alert-warning" style="margin:16px;" data-testid="subGame-not-found">
-           <i class="fa fa-info-circle"></i>
+           <i class="fa fa-info-circle" aria-hidden="true"></i>
            ${escapeHtml(t("not_found"))}
            <small style="opacity:0.75;margin-left:6px;">(BIN-621)</small>
          </div>`;
@@ -104,7 +104,7 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
       <section class="content-header">
         <h1>${escapeHtml(t("sub_game_table"))}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/subGame">${escapeHtml(t("sub_game"))}</a></li>
           <li class="active">${escapeHtml(t("view_sub_game"))}</li>
         </ol>

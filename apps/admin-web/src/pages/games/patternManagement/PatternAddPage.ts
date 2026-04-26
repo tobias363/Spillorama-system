@@ -72,7 +72,7 @@ export async function renderPatternEditPage(
 }
 
 function renderLoadingShell(): string {
-  return `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  return `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 }
 
 function renderShell(
@@ -104,7 +104,7 @@ function renderShell(
   const maxBlock =
     max !== null
       ? `<div class="alert alert-info" style="margin:8px 16px;">
-           <i class="fa fa-info-circle"></i>
+           <i class="fa fa-info-circle" aria-hidden="true"></i>
            Maks ${max} mønstre for ${escapeHtml(gameName)} (per legacy business-rule).
          </div>`
       : "";
@@ -131,7 +131,7 @@ function renderShell(
       <section class="content-header">
         <h1>${escapeHtml(heading)}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="${backHref}">${escapeHtml(gameName)} ${escapeHtml(t("pattern_management"))}</a></li>
           <li class="active">${escapeHtml(heading)}</li>
         </ol>

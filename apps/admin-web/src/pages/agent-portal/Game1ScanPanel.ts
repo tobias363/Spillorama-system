@@ -146,7 +146,7 @@ function renderPanel(container: HTMLElement): void {
 }
 
 function renderLoading(): string {
-  return `<p class="text-muted"><i class="fa fa-spinner fa-spin"></i> ...</p>`;
+  return `<p class="text-muted"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ...</p>`;
 }
 
 function renderScanBody(status: Game1HallStatus): string {
@@ -163,7 +163,7 @@ function renderScanBody(status: Game1HallStatus): string {
       </div>
       <button class="btn btn-primary" data-action="scan-start"
               data-marker="scan-start-button">
-        <i class="fa fa-barcode"></i> ${escapeHtml(t("agent_ng_scan_start_button"))}
+        <i class="fa fa-barcode" aria-hidden="true"></i> ${escapeHtml(t("agent_ng_scan_start_button"))}
       </button>`;
   }
 
@@ -186,7 +186,7 @@ function renderScanBody(status: Game1HallStatus): string {
       </div>
       <button class="btn btn-primary" data-action="scan-final"
               data-marker="scan-final-button">
-        <i class="fa fa-barcode"></i> ${escapeHtml(t("agent_ng_scan_final_button"))}
+        <i class="fa fa-barcode" aria-hidden="true"></i> ${escapeHtml(t("agent_ng_scan_final_button"))}
       </button>`;
   }
 
@@ -201,14 +201,14 @@ function renderScanBody(status: Game1HallStatus): string {
       <p>${escapeHtml(t("agent_ng_scan_ready_hint"))}</p>
       <button class="btn btn-success btn-lg" data-action="mark-ready"
               data-marker="scan-mark-ready-button">
-        <i class="fa fa-check"></i> ${escapeHtml(t("agent_ng_scan_mark_ready"))}
+        <i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("agent_ng_scan_mark_ready"))}
       </button>`;
   }
 
   // Steg d: grønn — alt klart
   return `
     <div class="alert alert-success" data-marker="scan-ready-done">
-      <i class="fa fa-check-circle"></i>
+      <i class="fa fa-check-circle" aria-hidden="true"></i>
       <strong>${escapeHtml(t("agent_ng_status_green"))}</strong>
       <br>
       <small>${escapeHtml(t("agent_ng_scan_range_label"))}:

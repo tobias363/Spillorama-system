@@ -54,7 +54,7 @@ export function renderAdminListPage(container: HTMLElement): void {
             addBtn.className = "btn btn-primary btn-sm";
             addBtn.setAttribute("data-action", "add-admin");
             addBtn.href = "#/adminUser/add";
-            addBtn.innerHTML = `<i class="fa fa-plus"></i> ${escapeHtml(t("add_admin"))}`;
+            addBtn.innerHTML = `<i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_admin"))}`;
             host.append(addBtn);
           },
         },
@@ -78,8 +78,9 @@ function rowActions(row: AdminUser, onChange: () => void): Node {
   edit.setAttribute("data-action", "edit-admin");
   edit.setAttribute("data-id", row.id);
   edit.href = `#/adminUser/edit/${encodeURIComponent(row.id)}`;
-  edit.innerHTML = `<i class="fa fa-edit"></i>`;
+  edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
   edit.title = t("edit_admin");
+  edit.setAttribute("aria-label", t("edit_admin"));
   wrap.append(edit);
 
   const role = document.createElement("a");
@@ -87,8 +88,9 @@ function rowActions(row: AdminUser, onChange: () => void): Node {
   role.setAttribute("data-action", "edit-role");
   role.setAttribute("data-id", row.id);
   role.href = `#/adminUser/editRole/${encodeURIComponent(row.id)}`;
-  role.innerHTML = `<i class="fa fa-key"></i>`;
+  role.innerHTML = `<i class="fa fa-key" aria-hidden="true"></i>`;
   role.title = t("assign_role_to_admin");
+  role.setAttribute("aria-label", t("assign_role_to_admin"));
   role.style.marginLeft = "4px";
   wrap.append(role);
 
@@ -97,8 +99,9 @@ function rowActions(row: AdminUser, onChange: () => void): Node {
   reset.className = "btn btn-default btn-xs";
   reset.setAttribute("data-action", "reset-password");
   reset.setAttribute("data-id", row.id);
-  reset.innerHTML = `<i class="fa fa-envelope"></i>`;
+  reset.innerHTML = `<i class="fa fa-envelope" aria-hidden="true"></i>`;
   reset.title = t("reset_password");
+  reset.setAttribute("aria-label", t("reset_password"));
   reset.style.marginLeft = "4px";
   reset.addEventListener("click", () => {
     if (!window.confirm(t("are_you_sure"))) return;
@@ -118,8 +121,9 @@ function rowActions(row: AdminUser, onChange: () => void): Node {
   del.className = "btn btn-danger btn-xs";
   del.setAttribute("data-action", "delete-admin");
   del.setAttribute("data-id", row.id);
-  del.innerHTML = `<i class="fa fa-trash"></i>`;
+  del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
   del.title = t("delete");
+  del.setAttribute("aria-label", t("delete"));
   del.style.marginLeft = "4px";
   del.addEventListener("click", () => {
     if (!window.confirm(t("delete_message"))) return;

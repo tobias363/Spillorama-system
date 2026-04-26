@@ -64,6 +64,9 @@ export class GamePlanPanel {
     title.style.cssText = "color:#ffe83d;font-size:20px;font-weight:700;margin:0;";
     header.appendChild(title);
     const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Lukk spilleplan");
+    closeBtn.title = "Lukk";
     closeBtn.textContent = "\u2715";
     closeBtn.style.cssText = "background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:50%;width:32px;height:32px;color:#fff;font-size:16px;cursor:pointer;font-family:inherit;";
     closeBtn.addEventListener("click", () => this.hide());

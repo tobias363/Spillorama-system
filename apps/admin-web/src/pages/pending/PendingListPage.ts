@@ -22,7 +22,7 @@ export function renderPendingListPage(container: HTMLElement): void {
       ${boxOpen("pending_requests_table", "warning")}
         <div class="box-tools pull-right" style="margin-bottom:8px;">
           <button class="btn btn-default btn-sm" id="pending-refresh">
-            <i class="fa fa-refresh"></i> ${escapeHtml(t("refresh"))}
+            <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh"))}
           </button>
         </div>
         <div id="pending-table"><p class="text-muted">${escapeHtml(t("loading_ellipsis"))}</p></div>
@@ -67,7 +67,7 @@ export function renderPendingListPage(container: HTMLElement): void {
           align: "center",
           render: (r) =>
             `<a href="${viewPendingHash(r.id)}" class="btn btn-info btn-xs btn-rounded" title="${escapeHtml(t("view_player"))}">
-               <i class="fa fa-eye"></i>
+               <i class="fa fa-eye" aria-hidden="true"></i>
              </a>`,
         },
       ],

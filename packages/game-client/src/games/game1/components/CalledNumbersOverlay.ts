@@ -67,7 +67,10 @@ export class CalledNumbersOverlay {
     header.appendChild(this.countEl);
 
     const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
     closeBtn.textContent = "\u2715";
+    closeBtn.setAttribute("aria-label", "Lukk oppleste tall");
+    closeBtn.title = "Lukk";
     Object.assign(closeBtn.style, {
       background: "rgba(255,255,255,0.15)",
       border: "1px solid rgba(255,255,255,0.3)",

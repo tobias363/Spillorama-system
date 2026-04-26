@@ -48,7 +48,7 @@ export function renderSettingsPage(container: HTMLElement): void {
     ${contentHeader("settings", "settings")}
     <section class="content">
       <div class="callout callout-info" data-testid="settings-wired-banner">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("system_settings_wired_banner"))}
         <p><small>${escapeHtml(t("system_settings_registry_description"))}</small></p>
       </div>
@@ -104,7 +104,7 @@ function renderForm(settings: SystemSettingRow[]): string {
       <div class="form-group">
         <div class="col-sm-offset-3 col-sm-9">
           <button type="submit" class="btn btn-success" data-action="save-settings">
-            <i class="fa fa-save"></i> ${escapeHtml(t("save"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("save"))}
           </button>
         </div>
       </div>
@@ -115,7 +115,7 @@ function renderCategorySection(category: string, rows: SystemSettingRow[]): stri
   const complianceInfo =
     category === "compliance"
       ? `<div class="callout callout-info" data-testid="per-hall-spillvett-override-info">
-          <i class="fa fa-info-circle"></i> ${escapeHtml(t("per_hall_spillvett_override_info"))}
+          <i class="fa fa-info-circle" aria-hidden="true"></i> ${escapeHtml(t("per_hall_spillvett_override_info"))}
         </div>`
       : "";
   const fields = rows.map((r) => renderField(r)).join("");

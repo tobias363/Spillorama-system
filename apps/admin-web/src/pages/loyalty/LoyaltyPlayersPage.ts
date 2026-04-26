@@ -22,7 +22,7 @@ export function renderLoyaltyPlayersPage(container: HTMLElement): void {
         <div class="row" style="margin-bottom:12px;">
           <div class="col-sm-6">
             <a class="btn btn-default" href="#/loyaltyManagement">
-              <i class="fa fa-arrow-left"></i> ${escapeHtml(t("loyalty_back_to_tiers"))}
+              <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("loyalty_back_to_tiers"))}
             </a>
           </div>
           <div class="col-sm-6 text-right">
@@ -104,7 +104,7 @@ function renderRow(p: LoyaltyPlayerState): string {
     ? `<span class="label label-primary">${escapeHtml(p.currentTier.name)} (rank ${p.currentTier.rank})</span>`
     : `<span class="label label-default">${escapeHtml(t("loyalty_no_tier"))}</span>`;
   const lockBadge = p.tierLocked
-    ? `<span class="label label-warning"><i class="fa fa-lock"></i> ${escapeHtml(t("loyalty_tier_lock_yes"))}</span>`
+    ? `<span class="label label-warning"><i class="fa fa-lock" aria-hidden="true"></i> ${escapeHtml(t("loyalty_tier_lock_yes"))}</span>`
     : `<span class="text-muted">${escapeHtml(t("loyalty_tier_lock_no"))}</span>`;
   const lastUpdated = p.lastUpdatedAt ? new Date(p.lastUpdatedAt).toLocaleString("nb-NO") : "";
   return `
@@ -119,7 +119,7 @@ function renderRow(p: LoyaltyPlayerState): string {
         <a class="btn btn-default btn-xs"
            href="#/loyaltyManagement/players/${encodeURIComponent(p.userId)}"
            data-testid="btn-view-loyalty-player-${escapeHtml(p.userId)}">
-          <i class="fa fa-eye"></i> ${escapeHtml(t("view"))}
+          <i class="fa fa-eye" aria-hidden="true"></i> ${escapeHtml(t("view"))}
         </a>
       </td>
     </tr>`;

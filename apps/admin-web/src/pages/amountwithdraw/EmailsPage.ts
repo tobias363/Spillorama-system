@@ -58,7 +58,7 @@ export function renderEmailsPage(container: HTMLElement): void {
             ${
               canWrite
                 ? `<button type="button" class="btn btn-success" data-action="add">
-                    <i class="fa fa-plus"></i> ${escapeHtml(t("add_email"))}
+                    <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_email"))}
                   </button>`
                 : ""
             }
@@ -119,13 +119,13 @@ export function renderEmailsPage(container: HTMLElement): void {
     edit.className = "btn btn-warning btn-xs";
     edit.setAttribute("data-id", r.id);
     edit.setAttribute("data-action", "edit");
-    edit.innerHTML = `<i class="fa fa-edit"></i>`;
+    edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
     const del = document.createElement("button");
     del.type = "button";
     del.className = "btn btn-danger btn-xs";
     del.setAttribute("data-id", r.id);
     del.setAttribute("data-action", "delete");
-    del.innerHTML = `<i class="fa fa-trash"></i>`;
+    del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
     wrap.append(edit, del);
     return wrap;
   }

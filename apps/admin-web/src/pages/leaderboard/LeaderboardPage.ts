@@ -25,7 +25,7 @@ export function renderLeaderboardPage(container: HTMLElement): void {
                href="#/addLeaderboard"
                data-action="add-leaderboard-tier"
                data-testid="btn-add-leaderboard-tier">
-              <i class="fa fa-plus"></i> ${escapeHtml(t("add_leaderboard_tier"))}
+              <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_leaderboard_tier"))}
             </a>
           </div>
         </div>
@@ -108,14 +108,14 @@ function renderRow(tier: LeaderboardTier): string {
         <a class="btn btn-default btn-xs"
            href="#/leaderboard/edit/${encodeURIComponent(tier.id)}"
            data-testid="btn-edit-tier-${escapeHtml(tier.id)}">
-          <i class="fa fa-edit"></i> ${escapeHtml(t("edit"))}
+          <i class="fa fa-edit" aria-hidden="true"></i> ${escapeHtml(t("edit"))}
         </a>
         <button type="button"
                 class="btn btn-danger btn-xs"
                 data-action="delete-tier"
                 data-tier-id="${escapeHtml(tier.id)}"
                 data-testid="btn-delete-tier-${escapeHtml(tier.id)}">
-          <i class="fa fa-trash"></i> ${escapeHtml(t("delete"))}
+          <i class="fa fa-trash" aria-hidden="true"></i> ${escapeHtml(t("delete"))}
         </button>
       </td>
     </tr>`;

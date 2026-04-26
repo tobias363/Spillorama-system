@@ -127,7 +127,7 @@ export async function renderGame1ManagementReportPage(container: HTMLElement): P
 
       noteHost.innerHTML =
         s.type === "bot"
-          ? `<div class="alert alert-info" style="margin-bottom:8px;"><i class="fa fa-info-circle"></i> ${escapeHtml(
+          ? `<div class="alert alert-info" style="margin-bottom:8px;"><i class="fa fa-info-circle" aria-hidden="true"></i> ${escapeHtml(
               t("bot_filter_not_supported_note"),
             )}</div>`
           : "";
@@ -168,7 +168,7 @@ function renderShell(): string {
   <section class="content-header rmgame1-no-print">
     <h1>${escapeHtml(title)}</h1>
     <ol class="breadcrumb">
-      <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+      <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
       <li>${escapeHtml(t("report_management"))}</li>
       <li class="active">${escapeHtml(title)}</li>
     </ol>
@@ -184,13 +184,13 @@ function renderShell(): string {
           <div class="panel-body">
             <div class="rmgame1-toolbar rmgame1-no-print">
               <button type="button" class="btn btn-default btn-sm" id="rmgame1-print-btn">
-                <i class="fa fa-print"></i> ${escapeHtml(t("print_report"))}
+                <i class="fa fa-print" aria-hidden="true"></i> ${escapeHtml(t("print_report"))}
               </button>
               <button type="button" class="btn btn-default btn-sm" id="rmgame1-csv-btn">
-                <i class="fa fa-download"></i> ${escapeHtml(t("export_csv"))}
+                <i class="fa fa-download" aria-hidden="true"></i> ${escapeHtml(t("export_csv"))}
               </button>
               <button type="button" class="btn btn-default btn-sm" id="rmgame1-xlsx-btn">
-                <i class="fa fa-file-excel-o"></i> ${escapeHtml(t("export_excel"))}
+                <i class="fa fa-file-excel-o" aria-hidden="true"></i> ${escapeHtml(t("export_excel"))}
               </button>
             </div>
             <div class="rmgame1-filters rmgame1-no-print">

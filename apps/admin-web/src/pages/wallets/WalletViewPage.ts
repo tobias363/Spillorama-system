@@ -55,14 +55,14 @@ export function renderWalletViewPage(container: HTMLElement): void {
       ${boxClose()}
       <div class="wallet-actions" style="margin-top:12px;display:flex;gap:8px;">
         <a href="#/wallet" class="btn btn-default">
-          <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back_to_wallets"))}
+          <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back_to_wallets"))}
         </a>
         <button
           type="button"
           class="btn btn-primary"
           data-testid="wallet-correction-open"
           id="wallet-correction-btn">
-          <i class="fa fa-plus"></i> ${escapeHtml(t("wallet_correction_new"))}
+          <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("wallet_correction_new"))}
         </button>
       </div>
     </section>`;

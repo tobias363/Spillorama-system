@@ -29,7 +29,7 @@ export function renderReportShell(opts: ReportShellOpts): string {
   const gap = opts.gapBanner
     ? `
     <div class="alert alert-warning" role="status" data-gap-banner="${escapeHtml(opts.gapBanner.issueId)}">
-      <strong><i class="fa fa-info-circle"></i> ${escapeHtml(t("pending_backend_endpoint"))}</strong>
+      <strong><i class="fa fa-info-circle" aria-hidden="true"></i> ${escapeHtml(t("pending_backend_endpoint"))}</strong>
       — ${escapeHtml(opts.gapBanner.message)}
       <small>(${escapeHtml(opts.gapBanner.issueId)})</small>
     </div>`
@@ -42,7 +42,7 @@ export function renderReportShell(opts: ReportShellOpts): string {
       <section class="content-header">
         <h1>${escapeHtml(opts.title)}${subtitle}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li>${escapeHtml(moduleTitle)}</li>
           <li class="active">${escapeHtml(opts.title)}</li>
         </ol>

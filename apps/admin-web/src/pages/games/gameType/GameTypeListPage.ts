@@ -24,7 +24,7 @@ export async function renderGameTypeListPage(container: HTMLElement): Promise<vo
   const tableHost = container.querySelector<HTMLElement>("#gameType-list-table");
   if (!tableHost) return;
 
-  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 
   await loadAndRender(tableHost);
 
@@ -55,7 +55,7 @@ function renderShell(): string {
       <section class="content-header">
         <h1>${escapeHtml(t("game_table"))}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li class="active">${escapeHtml(t("game_table"))}</li>
         </ol>
       </section>
@@ -68,7 +68,7 @@ function renderShell(): string {
                 <a href="#/gameType/add"
                   class="btn btn-primary btn-md"
                   data-action="add-game-type">
-                  <i class="fa fa-plus"></i> ${escapeHtml(t("add_game"))}
+                  <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_game"))}
                 </a>
               </div>
               <div class="clearfix"></div>

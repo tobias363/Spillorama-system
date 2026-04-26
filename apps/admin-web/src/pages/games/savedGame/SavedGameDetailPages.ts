@@ -74,7 +74,7 @@ export async function renderSavedGameDetailPages(
 }
 
 function loadingBody(): string {
-  return `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  return `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 }
 
 function renderShell(title: string, body: string): string {
@@ -83,7 +83,7 @@ function renderShell(title: string, body: string): string {
       <section class="content-header">
         <h1>${escapeHtml(title)}</h1>
         <ol class="breadcrumb pull-right">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="#/savedGameList">${escapeHtml(t("saved_game_list"))}</a></li>
           <li class="active">${escapeHtml(title)}</li>
         </ol>
@@ -95,7 +95,7 @@ function renderShell(title: string, body: string): string {
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(title)}</h6></div>
               <div class="pull-right">
                 <a href="#/savedGameList" class="btn btn-default btn-sm">
-                  <i class="fa fa-arrow-left"></i> ${escapeHtml(t("back"))}
+                  <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
                 </a>
               </div>
               <div class="clearfix"></div>
@@ -114,7 +114,7 @@ function renderAddShell(title: string): string {
   return renderShell(
     title,
     `<div class="alert alert-info">
-       <i class="fa fa-info-circle"></i>
+       <i class="fa fa-info-circle" aria-hidden="true"></i>
        ${escapeHtml(t("saved_game_add_via_gm_hint"))}
        <a href="#/gameManagement" class="btn btn-primary btn-sm" style="margin-left:8px;">
          ${escapeHtml(t("game_creation_management"))}
@@ -134,7 +134,7 @@ function renderViewBody(sg: SavedGameRow): string {
           <tr><th>${escapeHtml(t("created_at"))}</th><td>${escapeHtml(sg.createdAt)}</td></tr>
         </tbody>
       </table>
-      <p class="text-muted"><i class="fa fa-info-circle"></i> ${escapeHtml(t("saved_game_config_opaque_hint"))}</p>
+      <p class="text-muted"><i class="fa fa-info-circle" aria-hidden="true"></i> ${escapeHtml(t("saved_game_config_opaque_hint"))}</p>
     </div>`;
 }
 
@@ -159,7 +159,7 @@ function renderEditBody(sg: SavedGameRow): string {
       <div class="form-group">
         <div class="col-sm-offset-3 col-sm-9">
           <button type="submit" class="btn btn-success" data-action="save-saved-game">
-            <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
+            <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("submit"))}
           </button>
           <a href="#/savedGameList" class="btn btn-default">${escapeHtml(t("cancel"))}</a>
         </div>

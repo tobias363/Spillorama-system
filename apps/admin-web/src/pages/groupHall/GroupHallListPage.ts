@@ -69,7 +69,7 @@ export function renderGroupHallListPage(container: HTMLElement): void {
               class="btn btn-primary"
               data-action="gh-add"
               data-testid="gh-add-btn">
-              <i class="fa fa-plus"></i> ${escapeHtml(t("add_group_of_halls"))}
+              <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_group_of_halls"))}
             </button>
           </div>
         </div>
@@ -181,7 +181,7 @@ function rowActions(row: HallGroupRow, onChange: () => void): Node {
   edit.setAttribute("data-action", "gh-edit");
   edit.setAttribute("data-id", row.id);
   edit.setAttribute("title", t("edit"));
-  edit.innerHTML = `<i class="fa fa-edit"></i>`;
+  edit.innerHTML = `<i class="fa fa-edit" aria-hidden="true"></i>`;
   edit.addEventListener("click", () => {
     openGroupHallEditorModal({
       mode: "edit",
@@ -198,7 +198,7 @@ function rowActions(row: HallGroupRow, onChange: () => void): Node {
   del.setAttribute("data-id", row.id);
   del.setAttribute("title", t("delete"));
   del.style.marginLeft = "4px";
-  del.innerHTML = `<i class="fa fa-trash"></i>`;
+  del.innerHTML = `<i class="fa fa-trash" aria-hidden="true"></i>`;
   del.addEventListener("click", () => {
     const msg = `${t("confirm_delete")}\n\n${row.name}`;
     if (!window.confirm(msg)) return;

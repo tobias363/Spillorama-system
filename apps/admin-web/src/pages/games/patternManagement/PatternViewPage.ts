@@ -17,7 +17,7 @@ export async function renderPatternViewPage(
   typeId: string,
   patternId: string
 ): Promise<void> {
-  container.innerHTML = `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  container.innerHTML = `<div class="text-center" style="padding:24px;"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
 
   try {
     const [gameType, pattern] = await Promise.all([
@@ -90,7 +90,7 @@ function renderShell(
     : error
       ? `<div class="alert alert-danger" style="margin:16px;">${escapeHtml(error)}</div>`
       : `<div class="alert alert-warning" style="margin:16px;" data-testid="pattern-not-found">
-           <i class="fa fa-info-circle"></i>
+           <i class="fa fa-info-circle" aria-hidden="true"></i>
            ${escapeHtml(t("not_found"))}
          </div>`;
 
@@ -109,7 +109,7 @@ function renderShell(
       <section class="content-header">
         <h1>${escapeHtml(heading)}</h1>
         <ol class="breadcrumb">
-          <li><a href="#/admin"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+          <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
           <li><a href="${backHref}">${escapeHtml(gameName)}</a></li>
           <li class="active">${escapeHtml(heading)}</li>
         </ol>

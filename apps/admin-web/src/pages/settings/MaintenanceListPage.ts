@@ -25,7 +25,7 @@ export function renderMaintenanceListPage(container: HTMLElement): void {
     ${contentHeader("maintenance_list_title", "settings")}
     <section class="content">
       <div class="callout callout-info" data-testid="maintenance-wired-banner">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("maintenance_wired_banner"))}
       </div>
       ${boxOpen("maintenance_list_title", "primary")}
@@ -35,7 +35,7 @@ export function renderMaintenanceListPage(container: HTMLElement): void {
                href="#/maintenance/new"
                data-action="new-maintenance"
                data-testid="btn-new-maintenance">
-              <i class="fa fa-plus"></i> ${escapeHtml(t("maintenance_new_window"))}
+              <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("maintenance_new_window"))}
             </a>
           </div>
         </div>
@@ -99,7 +99,7 @@ function renderBody(data: MaintenanceListResponse): string {
   const activeBanner = data.active
     ? `
       <div class="callout callout-warning" data-testid="maintenance-active-banner">
-        <h4><i class="fa fa-bolt"></i> ${escapeHtml(t("maintenance_active_window"))}</h4>
+        <h4><i class="fa fa-bolt" aria-hidden="true"></i> ${escapeHtml(t("maintenance_active_window"))}</h4>
         <p><strong>${escapeHtml(data.active.message || "—")}</strong></p>
         <p>
           <code>${escapeHtml(data.active.maintenanceStart)}</code>
@@ -107,7 +107,7 @@ function renderBody(data: MaintenanceListResponse): string {
         </p>
       </div>`
     : `<div class="callout callout-success" data-testid="maintenance-no-active-banner">
-        <i class="fa fa-check"></i> ${escapeHtml(t("maintenance_no_active_window"))}
+        <i class="fa fa-check" aria-hidden="true"></i> ${escapeHtml(t("maintenance_no_active_window"))}
       </div>`;
 
   if (data.windows.length === 0) {
@@ -171,7 +171,7 @@ function renderRow(w: MaintenanceWindow): string {
         <a class="btn btn-default btn-xs"
            href="#/maintenance/edit/${encodeURIComponent(w.id)}"
            data-testid="btn-edit-${escapeHtml(w.id)}">
-          <i class="fa fa-edit"></i> ${escapeHtml(t("edit"))}
+          <i class="fa fa-edit" aria-hidden="true"></i> ${escapeHtml(t("edit"))}
         </a>
       </td>
     </tr>`;

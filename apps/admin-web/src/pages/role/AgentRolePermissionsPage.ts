@@ -60,7 +60,7 @@ export function renderAgentRolePermissionsPage(container: HTMLElement): void {
     ${contentHeader("agent_role_permissions_title", "role_management")}
     <section class="content">
       <div class="callout callout-info" data-testid="agent-perm-info">
-        <i class="fa fa-info-circle"></i>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
         ${escapeHtml(t("agent_perm_info_banner"))}
       </div>
       ${boxOpen("agent_role_permissions_title", "primary")}
@@ -157,7 +157,7 @@ function buildMatrixHtml(permissions: ModulePermission[]): string {
 
   return `
     <div class="callout callout-warning" data-testid="agent-perm-default-info">
-      <i class="fa fa-exclamation-triangle"></i>
+      <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
       ${escapeHtml(t("agent_perm_default_info"))}
     </div>
     <table class="table table-bordered table-condensed" data-testid="agent-perm-matrix-table">
@@ -178,7 +178,7 @@ function buildMatrixHtml(permissions: ModulePermission[]): string {
         ${escapeHtml(t("cancel"))}
       </button>
       <button type="button" class="btn btn-primary" data-action="submit" data-testid="agent-perm-submit">
-        <i class="fa fa-save"></i> ${escapeHtml(t("add"))}
+        <i class="fa fa-save" aria-hidden="true"></i> ${escapeHtml(t("add"))}
       </button>
     </div>`;
 }

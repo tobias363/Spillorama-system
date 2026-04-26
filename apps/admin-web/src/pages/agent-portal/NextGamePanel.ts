@@ -527,7 +527,7 @@ function renderHeader(): string {
     <section class="content-header">
       <h1>${title}</h1>
       <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard"></i> ${escapeHtml(t("dashboard"))}</a></li>
+        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
         <li><a href="#/agent/games">${escapeHtml(t("agent_game_management"))}</a></li>
         <li class="active">${title}</li>
       </ol>
@@ -627,7 +627,7 @@ function renderJackpotIndicator(): string {
   if (!state.jackpotArmed) return "";
   return `
     <span class="label label-warning" data-marker="agent-ng-jackpot-armed" style="margin-right:6px;">
-      <i class="fa fa-star"></i> ${escapeHtml(t("agent_next_game_jackpot_armed"))}
+      <i class="fa fa-star" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_jackpot_armed"))}
     </span>`;
 }
 
@@ -641,7 +641,7 @@ function renderCountdown(): string {
   const label = `${mins}:${secs.toString().padStart(2, "0")}`;
   return `
     <span class="label label-info" data-marker="agent-ng-countdown">
-      <i class="fa fa-clock-o"></i>
+      <i class="fa fa-clock-o" aria-hidden="true"></i>
       ${escapeHtml(t("agent_next_game_countdown_label"))}: ${escapeHtml(label)}
     </span>`;
 }
@@ -663,16 +663,16 @@ function renderActions(): string {
       <div class="box-body">
         <div class="btn-group" role="group" style="gap:8px;">
           <button class="btn btn-success" data-action="start-next" ${canStart ? "" : "disabled"}>
-            <i class="fa fa-play"></i> ${escapeHtml(t("agent_next_game_start"))}
+            <i class="fa fa-play" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_start"))}
           </button>
           <button class="btn btn-warning" data-action="pause" ${canPause ? "" : "disabled"}>
-            <i class="fa fa-pause"></i> ${escapeHtml(t("agent_next_game_pause"))}
+            <i class="fa fa-pause" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_pause"))}
           </button>
           <button class="btn btn-info" data-action="resume" ${canResume ? "" : "disabled"}>
-            <i class="fa fa-play"></i> ${escapeHtml(t("agent_next_game_resume"))}
+            <i class="fa fa-play" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_resume"))}
           </button>
           <button class="btn btn-danger" data-action="force-end" ${canForceEnd ? "" : "disabled"}>
-            <i class="fa fa-stop"></i> ${escapeHtml(t("agent_next_game_force_end"))}
+            <i class="fa fa-stop" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_force_end"))}
           </button>
         </div>
         <p class="text-muted small" style="margin-top:12px;">
@@ -714,7 +714,7 @@ function renderReadyPanel(): string {
               : escapeHtml(t("agent_next_game_mark_ready"))}
           </button>
           <button class="btn btn-sm btn-primary" data-action="broadcast-ready">
-            <i class="fa fa-bullhorn"></i> ${escapeHtml(t("agent_next_game_broadcast_ready"))}
+            <i class="fa fa-bullhorn" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_broadcast_ready"))}
           </button>
         </div>
         ${lastEventHtml}
@@ -959,7 +959,7 @@ function promptJackpotConfirm(): Promise<boolean> {
     body.setAttribute("data-marker", "agent-ng-jackpot-confirm");
     body.innerHTML = `
       <div class="alert alert-warning" style="margin-bottom:12px;">
-        <strong><i class="fa fa-star"></i> ${escapeHtml(t("agent_next_game_jackpot_armed"))}</strong>
+        <strong><i class="fa fa-star" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_jackpot_armed"))}</strong>
       </div>
       <p>${escapeHtml(t("agent_next_game_jackpot_confirm_body"))}</p>`;
     Modal.open({

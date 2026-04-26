@@ -53,7 +53,7 @@ export function renderLoyaltyPlayerDetailPage(
               <div class="form-group">
                 <div class="col-sm-8 col-sm-offset-4">
                   <button type="submit" class="btn btn-success" data-testid="btn-award-points">
-                    <i class="fa fa-plus-circle"></i> ${escapeHtml(t("loyalty_award_points"))}
+                    <i class="fa fa-plus-circle" aria-hidden="true"></i> ${escapeHtml(t("loyalty_award_points"))}
                   </button>
                 </div>
               </div>
@@ -79,7 +79,7 @@ export function renderLoyaltyPlayerDetailPage(
               <div class="form-group">
                 <div class="col-sm-8 col-sm-offset-4">
                   <button type="submit" class="btn btn-warning" data-testid="btn-override-tier">
-                    <i class="fa fa-lock"></i> ${escapeHtml(t("loyalty_tier_override_apply"))}
+                    <i class="fa fa-lock" aria-hidden="true"></i> ${escapeHtml(t("loyalty_tier_override_apply"))}
                   </button>
                 </div>
               </div>
@@ -136,7 +136,7 @@ function renderState(state: LoyaltyPlayerState): string {
     ? `<span class="label label-primary">${escapeHtml(state.currentTier.name)} (rank ${state.currentTier.rank})</span>`
     : `<span class="label label-default">${escapeHtml(t("loyalty_no_tier"))}</span>`;
   const lock = state.tierLocked
-    ? `<i class="fa fa-lock text-warning"></i> ${escapeHtml(t("loyalty_tier_lock_yes"))}`
+    ? `<i class="fa fa-lock text-warning" aria-hidden="true"></i> ${escapeHtml(t("loyalty_tier_lock_yes"))}`
     : `<span class="text-muted">${escapeHtml(t("loyalty_tier_lock_no"))}</span>`;
   const lastUpdated = state.lastUpdatedAt ? new Date(state.lastUpdatedAt).toLocaleString("nb-NO") : "";
   return `
