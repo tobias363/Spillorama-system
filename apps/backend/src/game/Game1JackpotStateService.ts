@@ -31,6 +31,7 @@
  * DB: app_game1_jackpot_state (migrasjon 20260821000000).
  */
 
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -61,6 +62,56 @@ export interface AccumulateDailyResult {
   cappedCount: number;
   /** Antall errors i loopen (service isolerer per-rad-feil). */
   errors: number;
+}
+
+/**
+ * Grunner som kan stå i app_game1_jackpot_awards.reason.
+ * - FULL_HOUSE_WITHIN_THRESHOLD: auto-award fra DrawEngine når Fullt Hus
+ *   vinnes på/innen draw_thresholds[0] (default 50).
+ * - ADMIN_MANUAL_AWARD: admin trigger via POST-endepunkt (force-award).
+ * - CORRECTION: senere manuell justering (audit-spor).
+ */
+export type JackpotAwardReason =
+  | "FULL_HOUSE_WITHIN_THRESHOLD"
+  | "ADMIN_MANUAL_AWARD"
+  | "CORRECTION";
+
+export interface AwardJackpotInput {
+  /** Hall-gruppe som eier potten. */
+  hallGroupId: string;
+  /**
+   * Stable nøkkel — UNIQUE i app_game1_jackpot_awards. Anbefalt format:
+   *   `g1-jackpot-{scheduledGameId}-{drawSequenceAtWin}` (auto)
+   *   `g1-jackpot-admin-{userId}-{ts}` (manuell)
+   * Brukes for safe-retry: andre kall med samme key returnerer den
+   * tidligere awarden uten dobbel-debit.
+   */
+  idempotencyKey: string;
+  /** Audit-grunn. */
+  reason: JackpotAwardReason;
+  /** Auto-award: scheduled-game som utløste vinningen. */
+  scheduledGameId?: string;
+  /** Auto-award: draw-sekvens som utløste vinningen (typisk ≤ thresholds[0]). */
+  drawSequenceAtWin?: number;
+  /** Hvis admin-trigger eller dokumentasjon: bruker som autoriserte. */
+  awardedByUserId?: string;
+}
+
+export interface AwardJackpotResult {
+  /** Award-rad-id i app_game1_jackpot_awards. */
+  awardId: string;
+  /** Hall-gruppe. */
+  hallGroupId: string;
+  /** Beløp i øre som ble debitert fra potten og som skal distribueres til vinner(e). */
+  awardedAmountCents: number;
+  /** Snapshot av current_amount_cents FØR award. */
+  previousAmountCents: number;
+  /** Snapshot av current_amount_cents ETTER award (= JACKPOT_DEFAULT_START_CENTS ved vellykket reset). */
+  newAmountCents: number;
+  /** True når denne kallet ble dedupet — eksisterende rad returnert. */
+  idempotent: boolean;
+  /** True hvis state hadde 0 saldo og ingen debit skjedde (no-op). */
+  noopZeroBalance: boolean;
 }
 
 export interface Game1JackpotStateServiceOptions {
@@ -334,5 +385,323 @@ export class Game1JackpotStateService {
       [hallGroupId, JACKPOT_DEFAULT_START_CENTS, this.todayKey()]
     );
     return this.getStateForGroup(hallGroupId);
+  }
+
+  /**
+   * Atomisk award av jackpot-potten — debiterer current_amount_cents,
+   * resetter til seed (JACKPOT_DEFAULT_START_CENTS), og logger en rad i
+   * app_game1_jackpot_awards. Returnerer beløpet som skal distribueres
+   * til vinner(e).
+   *
+   * Idempotens-modell:
+   *   * Caller leverer `idempotencyKey` (anbefalt:
+   *     `g1-jackpot-{scheduledGameId}-{drawSequenceAtWin}` for auto-award,
+   *     `g1-jackpot-admin-{userId}-{ts}` for manuell admin-award).
+   *   * Hvis raden allerede finnes i app_game1_jackpot_awards: returneres
+   *     samme awardedAmountCents med `idempotent=true` og state berøres ikke.
+   *   * Hele operasjonen gjøres i én transaksjon via en frisk PoolClient.
+   *     SELECT ... FOR UPDATE låser state-raden mens vi sjekker og
+   *     debiterer — to samtidige kall blir serialisert.
+   *
+   * Empty-state-handling:
+   *   * Hvis state-raden ikke finnes for hall-gruppen → ensureStateExists
+   *     opprettes (lazy-init), og award skjer på seed-state. Resultat:
+   *     awardedAmountCents = JACKPOT_DEFAULT_START_CENTS, ny saldo = seed.
+   *   * Hvis current_amount_cents == 0 (sjelden — kan skje hvis cap=0
+   *     eller manuell reset til 0) → no-op award med awardedAmountCents=0
+   *     og `noopZeroBalance=true`. Ingen rad i awards-tabellen, ingen
+   *     state-endring. Caller kan da hoppe over wallet-credit.
+   *
+   * Etter award er state.current_amount_cents = JACKPOT_DEFAULT_START_CENTS
+   * og last_accumulation_date = today (for å unngå dobbelt-påfyll samme dag
+   * fra cron-tick).
+   *
+   * @throws Error hvis SQL feiler. Hele transaksjonen rulles tilbake.
+   */
+  async awardJackpot(input: AwardJackpotInput): Promise<AwardJackpotResult> {
+    if (!input.hallGroupId || input.hallGroupId.trim().length === 0) {
+      throw new Error("awardJackpot: hallGroupId er påkrevd.");
+    }
+    if (!input.idempotencyKey || input.idempotencyKey.trim().length === 0) {
+      throw new Error("awardJackpot: idempotencyKey er påkrevd.");
+    }
+    if (!input.reason) {
+      throw new Error("awardJackpot: reason er påkrevd.");
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // 1) Idempotens-sjekk FØR vi tar lock på state-raden — kortere lock-
+      //    holdetid i den vanlige no-op-pathen.
+      const existing = await client.query<{
+        id: string;
+        awarded_amount_cents: string | number;
+        previous_amount_cents: string | number;
+        new_amount_cents: string | number;
+      }>(
+        `SELECT id, awarded_amount_cents, previous_amount_cents, new_amount_cents
+           FROM ${this.awardsTable()}
+          WHERE idempotency_key = $1`,
+        [input.idempotencyKey]
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0]!;
+        await client.query("COMMIT");
+        return {
+          awardId: row.id,
+          hallGroupId: input.hallGroupId,
+          awardedAmountCents: toBigIntCents(row.awarded_amount_cents, 0),
+          previousAmountCents: toBigIntCents(row.previous_amount_cents, 0),
+          newAmountCents: toBigIntCents(row.new_amount_cents, JACKPOT_DEFAULT_START_CENTS),
+          idempotent: true,
+          noopZeroBalance: false,
+        };
+      }
+
+      // 2) Sørg for at state-raden finnes (lazy-init for grupper opprettet
+      //    etter migrasjonen). ensureStateExists er ON CONFLICT DO NOTHING,
+      //    så den er trygg å kjøre i samme transaksjon.
+      await client.query(
+        `INSERT INTO ${this.table()}
+           (hall_group_id, current_amount_cents, last_accumulation_date,
+            max_cap_cents, daily_increment_cents, draw_thresholds_json)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+         ON CONFLICT (hall_group_id) DO NOTHING`,
+        [
+          input.hallGroupId,
+          JACKPOT_DEFAULT_START_CENTS,
+          this.todayKey(),
+          JACKPOT_DEFAULT_MAX_CAP_CENTS,
+          JACKPOT_DEFAULT_DAILY_INCREMENT_CENTS,
+          JSON.stringify([...JACKPOT_DEFAULT_DRAW_THRESHOLDS]),
+        ]
+      );
+
+      // 3) Lock state-raden, les nåværende saldo.
+      const lockResult = await client.query<{
+        current_amount_cents: string | number;
+      }>(
+        `SELECT current_amount_cents
+           FROM ${this.table()}
+          WHERE hall_group_id = $1
+          FOR UPDATE`,
+        [input.hallGroupId]
+      );
+      if (lockResult.rows.length === 0) {
+        // Skal ikke skje pga. ensureStateExists over, men fail-safe.
+        await client.query("ROLLBACK");
+        throw new Error(
+          `awardJackpot: state-rad ble ikke opprettet for hallGroupId=${input.hallGroupId}.`
+        );
+      }
+      const previousAmountCents = toBigIntCents(
+        lockResult.rows[0]!.current_amount_cents,
+        0
+      );
+
+      // 4) No-op-case: 0 saldo (cap=0 eller manuell reset). Returner uten
+      //    state-endring og uten audit-rad.
+      if (previousAmountCents <= 0) {
+        await client.query("COMMIT");
+        log.info(
+          {
+            hallGroupId: input.hallGroupId,
+            idempotencyKey: input.idempotencyKey,
+            reason: input.reason,
+          },
+          "jackpot.award.noop_zero_balance"
+        );
+        return {
+          awardId: "",
+          hallGroupId: input.hallGroupId,
+          awardedAmountCents: 0,
+          previousAmountCents: 0,
+          newAmountCents: 0,
+          idempotent: false,
+          noopZeroBalance: true,
+        };
+      }
+
+      // 5) Atomisk debit + reset. Bruker LEAST(seed, prev) for å håndtere
+      //    edge-case der cap < seed (defensivt; pilotscope har cap=30k > seed=2k).
+      const newAmountCents = JACKPOT_DEFAULT_START_CENTS;
+      await client.query(
+        `UPDATE ${this.table()}
+            SET current_amount_cents   = $2,
+                last_accumulation_date = $3::date,
+                updated_at             = now()
+          WHERE hall_group_id = $1`,
+        [input.hallGroupId, newAmountCents, this.todayKey()]
+      );
+
+      // 6) Skriv audit-rad. UNIQUE(idempotency_key) er allerede sjekket
+      //    over, men vi bruker fortsatt ON CONFLICT DO NOTHING som
+      //    paranoia-guard mot race i parallelle transaksjoner — hvis to
+      //    transaksjoner bestod step 1-sjekken samtidig, blir den ene
+      //    avvist her og må returnere idempotent.
+      const awardId = `g1ja-${randomUUID()}`;
+      const insertResult = await client.query<{ id: string }>(
+        `INSERT INTO ${this.awardsTable()}
+            (id, hall_group_id, idempotency_key, awarded_amount_cents,
+             previous_amount_cents, new_amount_cents,
+             scheduled_game_id, draw_sequence_at_win, reason, awarded_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (idempotency_key) DO NOTHING
+         RETURNING id`,
+        [
+          awardId,
+          input.hallGroupId,
+          input.idempotencyKey,
+          previousAmountCents,
+          previousAmountCents,
+          newAmountCents,
+          input.scheduledGameId ?? null,
+          input.drawSequenceAtWin ?? null,
+          input.reason,
+          input.awardedByUserId ?? null,
+        ]
+      );
+
+      if (insertResult.rowCount === 0) {
+        // Lost the race: en annen transaksjon committed mellom step 1 og 6.
+        // Rull tilbake state-endringen og returner den eksisterende awarden.
+        await client.query("ROLLBACK");
+        return await this.fetchExistingAwardForKey(input);
+      }
+
+      await client.query("COMMIT");
+      log.info(
+        {
+          hallGroupId: input.hallGroupId,
+          idempotencyKey: input.idempotencyKey,
+          reason: input.reason,
+          awardedAmountCents: previousAmountCents,
+          previousAmountCents,
+          newAmountCents,
+        },
+        "jackpot.award.success"
+      );
+      return {
+        awardId,
+        hallGroupId: input.hallGroupId,
+        awardedAmountCents: previousAmountCents,
+        previousAmountCents,
+        newAmountCents,
+        idempotent: false,
+        noopZeroBalance: false,
+      };
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // best-effort
+      }
+      log.error(
+        { err, hallGroupId: input.hallGroupId, idempotencyKey: input.idempotencyKey },
+        "jackpot.award.failed"
+      );
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Hent siste N awards for en hall-gruppe (admin-UI / audit). Sortert
+   * synkende på awarded_at. Default limit 50.
+   */
+  async listAwards(hallGroupId: string, limit = 50): Promise<Array<{
+    awardId: string;
+    hallGroupId: string;
+    awardedAmountCents: number;
+    previousAmountCents: number;
+    newAmountCents: number;
+    scheduledGameId: string | null;
+    drawSequenceAtWin: number | null;
+    reason: string | null;
+    awardedByUserId: string | null;
+    awardedAt: string;
+  }>> {
+    const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+    const { rows } = await this.pool.query<{
+      id: string;
+      hall_group_id: string;
+      awarded_amount_cents: string | number;
+      previous_amount_cents: string | number;
+      new_amount_cents: string | number;
+      scheduled_game_id: string | null;
+      draw_sequence_at_win: number | null;
+      reason: string | null;
+      awarded_by_user_id: string | null;
+      awarded_at: Date | string;
+    }>(
+      `SELECT id, hall_group_id, awarded_amount_cents, previous_amount_cents,
+              new_amount_cents, scheduled_game_id, draw_sequence_at_win,
+              reason, awarded_by_user_id, awarded_at
+         FROM ${this.awardsTable()}
+        WHERE hall_group_id = $1
+        ORDER BY awarded_at DESC
+        LIMIT $2`,
+      [hallGroupId, safeLimit]
+    );
+    return rows.map((row) => ({
+      awardId: row.id,
+      hallGroupId: row.hall_group_id,
+      awardedAmountCents: toBigIntCents(row.awarded_amount_cents, 0),
+      previousAmountCents: toBigIntCents(row.previous_amount_cents, 0),
+      newAmountCents: toBigIntCents(row.new_amount_cents, 0),
+      scheduledGameId: row.scheduled_game_id,
+      drawSequenceAtWin: row.draw_sequence_at_win,
+      reason: row.reason,
+      awardedByUserId: row.awarded_by_user_id,
+      awardedAt: row.awarded_at instanceof Date ? row.awarded_at.toISOString() : String(row.awarded_at ?? ""),
+    }));
+  }
+
+  /**
+   * Returnerer awards-tabell-navn (med schema-prefiks).
+   * Eksposert som metode (ikke private) av samme grunn som table().
+   */
+  private awardsTable(): string {
+    return `"${this.schema}"."app_game1_jackpot_awards"`;
+  }
+
+  /**
+   * Henter en eksisterende award via idempotency-key. Brukes som race-
+   * fallback inne i awardJackpot etter at INSERT taper en konflikt.
+   */
+  private async fetchExistingAwardForKey(
+    input: AwardJackpotInput
+  ): Promise<AwardJackpotResult> {
+    const { rows } = await this.pool.query<{
+      id: string;
+      awarded_amount_cents: string | number;
+      previous_amount_cents: string | number;
+      new_amount_cents: string | number;
+    }>(
+      `SELECT id, awarded_amount_cents, previous_amount_cents, new_amount_cents
+         FROM ${this.awardsTable()}
+        WHERE idempotency_key = $1`,
+      [input.idempotencyKey]
+    );
+    if (rows.length === 0) {
+      // Skal ikke skje — race-fallbacken kalles kun når INSERT mistet
+      // konflikten, så raden MÅ finnes. Defensivt:
+      throw new Error(
+        `awardJackpot: race-fallback fant ikke rad for key=${input.idempotencyKey}`
+      );
+    }
+    const row = rows[0]!;
+    return {
+      awardId: row.id,
+      hallGroupId: input.hallGroupId,
+      awardedAmountCents: toBigIntCents(row.awarded_amount_cents, 0),
+      previousAmountCents: toBigIntCents(row.previous_amount_cents, 0),
+      newAmountCents: toBigIntCents(row.new_amount_cents, JACKPOT_DEFAULT_START_CENTS),
+      idempotent: true,
+      noopZeroBalance: false,
+    };
   }
 }

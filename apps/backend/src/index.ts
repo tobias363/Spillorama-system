@@ -1244,6 +1244,11 @@ const game1DrawEngineService = new Game1DrawEngineService({
   auditLogService,
   payoutService: game1PayoutService,
   jackpotService: game1JackpotService,
+  // MASTER_PLAN §2.3 / Appendix B.9: daglig akkumulert jackpot per hall-
+  // gruppe. Når wired sammen med walletAdapter (under) vil engine etter
+  // Fullt Hus innen drawThresholds[0] (default 50) atomisk debit-and-reset
+  // state-pott og distribuere awarded amount til vinnere via wallet.credit.
+  jackpotStateService: game1JackpotStateService,
   physicalTicketPayoutService,
   // PR-T3 Spor 4: akkumulerende pot-evaluering etter Fullt Hus. Pot-payout
   // kjører INNE i draw-transaksjonen med samme fail-closed-semantikk som
