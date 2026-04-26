@@ -41,9 +41,7 @@ describe("MysteryGameOverlay — trigger rendering", () => {
       autoTurnFirstMoveSec: 20,
       autoTurnOtherMoveSec: 10,
     });
-    // @ts-expect-error — private.
     expect(overlay.middleBalls.length).toBe(5);
-    // @ts-expect-error — private.
     expect(overlay.prizeLadderSteps.length).toBe(6);
     overlay.destroy();
   });
@@ -51,11 +49,8 @@ describe("MysteryGameOverlay — trigger rendering", () => {
   it("faller tilbake til defaults når felter mangler", () => {
     const overlay = new MysteryGameOverlay(800, 600);
     overlay.show({});
-    // @ts-expect-error — private.
     expect(overlay.middleBalls.length).toBe(5);
-    // @ts-expect-error — private.
     expect(overlay.maxRounds).toBe(5);
-    // @ts-expect-error — private.
     expect(overlay.prizeListNok).toEqual([50, 100, 200, 400, 800, 1500]);
     overlay.destroy();
   });
@@ -81,7 +76,6 @@ describe("MysteryGameOverlay — auto-turn", () => {
     });
     // Step through 3 seconds of timer.
     vi.advanceTimersByTime(3100);
-    // @ts-expect-error — private.
     const dirs = overlay.collectedDirections;
     expect(dirs.length).toBeGreaterThanOrEqual(1);
     expect(dirs[0]).toBe("down");
@@ -231,7 +225,6 @@ describe("MysteryGameOverlay — animateResult", () => {
       },
       150000,
     );
-    // @ts-expect-error — private.
     const txt: { text: string; visible: boolean } = overlay.resultText;
     expect(txt.visible).toBe(true);
     expect(txt.text).toContain("JOKER");
@@ -257,7 +250,6 @@ describe("MysteryGameOverlay — animateResult", () => {
       },
       0,
     );
-    // @ts-expect-error — private.
     const txt: { text: string } = overlay.resultText;
     expect(txt.text).toContain("Ingen premie");
     overlay.destroy();
@@ -274,10 +266,158 @@ describe("MysteryGameOverlay — error handling", () => {
       maxRounds: 5,
     });
     overlay.showChoiceError({ code: "E_TEST", message: "dummy-feil" });
-    // @ts-expect-error — private.
     const errTxt: { text: string; visible: boolean } = overlay.errorText;
     expect(errTxt.visible).toBe(true);
     expect(errTxt.text).toContain("dummy-feil");
+    overlay.destroy();
+  });
+});
+
+// ── 2026-04-26 redesign-spesifikke tester ─────────────────────────────────
+
+describe("MysteryGameOverlay — DOM redesign", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("monter root i DOM ved show() med intro-overlay", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    const root = document.querySelector(".mj-root");
+    expect(root).not.toBeNull();
+    // Intro-overlay viser "MYSTERY JOKER"-tekst.
+    expect(root?.textContent).toContain("MYSTERY JOKER");
+    overlay.destroy();
+  });
+
+  it("etter intro (2s) → modal med arena + ladder rendrer", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    const root = document.querySelector(".mj-root");
+    // Premie-stige: 6 rader.
+    const rows = root?.querySelectorAll(".mj-prize-row");
+    expect(rows?.length).toBe(6);
+    // Beskrivelses-tekst i header.
+    expect(root?.textContent).toContain("opp eller ned");
+    overlay.destroy();
+  });
+
+  it("aktiv runde — chevron-knapper OPP/NED er disabled=false", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    const arrowBtns = document.querySelectorAll<HTMLButtonElement>(".mj-arrow-btn");
+    // Aktiv runde har 2 knapper (OPP + NED).
+    expect(arrowBtns.length).toBeGreaterThanOrEqual(2);
+    const enabled = Array.from(arrowBtns).filter((b) => !b.disabled);
+    expect(enabled.length).toBeGreaterThanOrEqual(2);
+    overlay.destroy();
+  });
+
+  it("destroy() rydder DOM-root", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    expect(document.querySelector(".mj-root")).not.toBeNull();
+    overlay.destroy();
+    expect(document.querySelector(".mj-root")).toBeNull();
+  });
+
+  it("ladder framhever aktiv priceIndex med data-active", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    // priceIndex starter på 0 → bunnraden i visuell rekkefølge (siste rad).
+    const rows = document.querySelectorAll<HTMLDivElement>(".mj-prize-row");
+    const lastRow = rows[rows.length - 1];
+    expect(lastRow?.dataset["active"]).toBe("true");
+    expect(lastRow?.textContent).toContain("50");
+    overlay.destroy();
+  });
+
+  it("animateResult med JOKER spawner confetti-burst", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67895,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    overlay.animateResult(
+      {
+        middleNumber: 12345,
+        resultNumber: 67895,
+        rounds: [],
+        finalPriceIndex: 5,
+        prizeAmountKroner: 1500,
+        jokerTriggered: true,
+      },
+      150000,
+    );
+    const confetti = document.querySelectorAll(".mj-confetti-piece");
+    expect(confetti.length).toBeGreaterThan(0);
+    // Header viser jackpot-tekst.
+    expect(document.body.textContent).toContain("JACKPOT");
+    overlay.destroy();
+  });
+
+  it("finished → 'Spill igjen'-knapp dukker opp og kaller onDismiss", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    const onDismiss = vi.fn();
+    overlay.setOnDismiss(onDismiss);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    overlay.animateResult(
+      {
+        middleNumber: 12345,
+        resultNumber: 67890,
+        rounds: [],
+        finalPriceIndex: 3,
+        prizeAmountKroner: 400,
+        jokerTriggered: false,
+      },
+      40000,
+    );
+    const cta = document.querySelector<HTMLButtonElement>(".mj-cta");
+    expect(cta).not.toBeNull();
+    expect(cta?.textContent).toContain("Spill igjen");
+    cta?.click();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
     overlay.destroy();
   });
 });

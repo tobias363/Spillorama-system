@@ -1,62 +1,52 @@
 /**
- * BIN-MYSTERY M6: Mystery Game overlay — portet 1:1 fra legacy Unity
- * MysteryGamePanel.cs (commit 5fda0f78).
+ * BIN-MYSTERY M6: Mystery Joker overlay — moderne redesign (Tobias 2026-04-26).
  *
- * Trigger payload (fra MiniGameMysteryEngine):
+ * Tidligere Pixi-only port-1:1 av Unity MysteryGamePanel.cs erstattet med
+ * DOM-basert "modern" design (smal, mørk gradient + gull-accent, intro-overlay,
+ * ModernLadder + arena med chevron-arrows). Pixi-Container-superklassen
+ * beholdes for å oppfylle MiniGameRouter-kontrakten — selve kontent renderes
+ * som HTML/CSS over canvas-parent (samme mønster som WinPopup).
+ *
+ * Trigger payload (fra MiniGameMysteryEngine — uendret):
  *   `{ middleNumber, resultNumber, prizeListNok: number[6], maxRounds: 5,
  *      autoTurnFirstMoveSec, autoTurnOtherMoveSec }`
  *
- * Choice payload: `{ directions: ("up"|"down")[] }` — 1..5 elementer.
- *   Sendes samlet etter alle runder (eller når joker terminerer).
+ * Choice payload (uendret): `{ directions: ("up"|"down")[] }` — 1..5 elementer.
  *
- * Result payload:
+ * Result payload (uendret):
  *   `{ middleNumber, resultNumber, rounds: MysteryRoundResult[],
  *      finalPriceIndex, prizeAmountKroner, jokerTriggered }`
  *
- * UX (1:1 legacy):
- *   - Spiller ser 5 middle-balls (siffer for siffer, høyre → venstre).
- *   - Aktiv runde har høy-lyst middle-ball og OPP/NED-knapper som kan klikkes.
- *   - Premie-stige i sidebar: pilen beveger seg opp/ned pr runde.
- *   - Første valg: 20s timer. Påfølgende: 10s.
- *   - Ved timeout: default = "down" (arbitrarily picked — legacy auto-turn
- *     gjorde ikke noe spesielt i Game 1-modus, bare `Is_Game_4` auto-velger).
- *   - Ved correct: +1 priceIndex, next round
- *   - Ved wrong: -1 priceIndex, next round
- *   - Ved joker (equal digits): max premie, spillet ender umiddelbart med
- *     stjerne/sparkle-animasjon på JOKER-ballen.
- *   - Etter 5 runder eller joker: viser prize-amount og auto-dismiss.
+ * UX-flyt (server-autoritativ):
+ *   - 2 sek intro-overlay viser "MYSTERY JOKER" + joker-emblem.
+ *   - Modal med 5 mystery-baller i arena, premie-stige til venstre.
+ *   - Aktiv runde: pulserende gul aura + OPP/NED-chevron over/under ballen.
+ *   - Klikk fyrer optimistisk reveal (server validerer); priceIndex-arrow
+ *     tweener til ny posisjon.
+ *   - Joker (equal digits) avslutter spillet umiddelbart.
+ *   - Etter alle runder/joker: server-result driver final-state +
+ *     "Spill igjen"-knapp (auto-dismiss etter ~6 sek).
  *
- * Server-state-visibility: `resultNumber` er med i trigger-payload (legacy
- * gjør det samme). Dette kan ikke forfalskes av klient fordi serveren alltid
- * rekonstruerer state deterministisk i handleChoice. UI kan velge å skjule
- * resultNumber fra brukeren, men vi implementerer "reveal digit for digit"
- * ved klikk — den mest autentiske spilleopplevelsen.
+ * Performance:
+ *   - Composite-friendly: kun transform/opacity-animasjoner. Ingen
+ *     backdrop-filter (PR #468-mønster). Ingen will-change.
+ *   - GSAP brukes ikke i DOM-laget — alt er CSS keyframes / transitions.
+ *
+ * Test-kompatibilitet:
+ *   - Beholder `__Mystery_getDigitAt` + `__Mystery_AUTO_DISMISS_AFTER_RESULT_SECONDS__`
+ *     for eksisterende tester.
+ *   - Private felter `middleBalls`, `prizeLadderSteps`, `collectedDirections`,
+ *     `resultText`, `errorText`, `maxRounds`, `prizeListNok` matcher tidligere
+ *     tester (selv om implementasjonen er DOM-basert nå).
  */
 
-import { Container, Graphics, Text } from "pixi.js";
-import gsap from "gsap";
+import { Container } from "pixi.js";
 
-// ── Constants (design tokens matching other overlays) ────────────────────────
-
-const MIDDLE_BALL_SIZE = 60;
-const MIDDLE_BALL_GAP = 12;
-const BUTTON_SIZE = 56;
-const BUTTON_GAP = 20;
-const PRIZE_STEP_HEIGHT = 34;
-const PRIZE_STEP_WIDTH = 120;
+const JOKER_IMG_URL = "/web/games/assets/game1/design/lucky-clover.png";
 const AUTO_DISMISS_AFTER_RESULT_SECONDS = 6;
-
-const COLOR_DEFAULT_BALL = 0x2a1d3a;
-const COLOR_ACTIVE_BALL = 0xffe83d;
-const COLOR_JOKER_BALL = 0xff6b35;
-const COLOR_CORRECT = 0x22c55e;
-const COLOR_WRONG = 0xef4444;
-const COLOR_BUTTON_BG = 0x790001;
-const COLOR_BUTTON_BORDER = 0xffe83d;
-const COLOR_PRIZE_INACTIVE = 0x444458;
-const COLOR_PRIZE_ACTIVE = 0xffe83d;
-
-// ── Types ────────────────────────────────────────────────────────────────────
+const INTRO_DURATION_MS = 2000;
+const REVEAL_DELAY_MS = 600;
+const FINAL_DELAY_MS = 800;
 
 interface MysteryTriggerPayload {
   middleNumber?: number;
@@ -84,132 +74,279 @@ interface MysteryResultJson {
   jokerTriggered?: boolean;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+interface BallInfo {
+  digit: number;
+  resultDigit: number;
+  outcome: "pending" | "correct" | "wrong" | "joker";
+  shownDigit: number;
+  reveal: { direction: "up" | "down"; value: number } | null;
+}
 
 /**
  * Hent siffer N fra et 5-sifret tall, talt fra HØYRE (N=0 er ones-sifferet).
  * Matcher backend `getDigitAt` i MiniGameMysteryEngine.ts.
  */
 function getDigitAt(n: number, index: number): number {
-  const padded = n.toString().padStart(5, "0");
-  return Number.parseInt(padded[padded.length - 1 - index]!, 10);
+  const padded = Math.max(0, n).toString().padStart(5, "0");
+  const ch = padded[padded.length - 1 - index];
+  if (ch === undefined) return 0;
+  return Number.parseInt(ch, 10);
+}
+
+/**
+ * Sentralt CSS-styles for Mystery Joker. Idempotent — appendes kun én gang.
+ * Følger Spillorama-konvensjon (jf. WinPopup.ts `ensureWinPopupStyles`).
+ *
+ * KRITISK (PR #468-mønster):
+ *   - Ingen backdrop-filter (Pixi-canvas under → composite-recompute per frame).
+ *   - Kun transform/opacity i animasjoner (composite-friendly).
+ *   - Ingen `will-change` (Chrome auto-promoterer; will-change presser GPU-mem).
+ */
+function ensureMysteryStyles(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("mystery-joker-styles")) return;
+  const s = document.createElement("style");
+  s.id = "mystery-joker-styles";
+  s.textContent = `
+@keyframes mj-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes mj-content-fade {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes mj-intro-text {
+  0%   { opacity: 0; transform: translateY(-20px) scale(0.92); }
+  20%  { opacity: 1; transform: translateY(0) scale(1); }
+  80%  { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(0) scale(1.04); }
+}
+@keyframes mj-intro-joker {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-30deg); }
+  30%  { opacity: 1; transform: scale(1.1) rotate(8deg); }
+  60%  { opacity: 1; transform: scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: scale(1.05) rotate(-4deg); }
+}
+@keyframes mj-reveal-drop {
+  from { opacity: 0; transform: translateY(-12px) scale(0.85); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes mj-active-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+@keyframes mj-active-aura {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.95; }
+}
+@keyframes mj-confetti {
+  0%   { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--mj-cx, 0px), var(--mj-cy, 220px)) rotate(var(--mj-cr, 540deg)); opacity: 0; }
+}
+@keyframes mj-amount-glow {
+  0%, 100% { text-shadow: 0 0 14px rgba(255,232,61,0.4); }
+  50%      { text-shadow: 0 0 24px rgba(255,232,61,0.7); }
+}
+.mj-arrow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,232,61,0.32);
+  border-radius: 8px;
+  color: rgba(255,232,61,0.85);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.mj-arrow-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(255,232,61,0.10);
+  border-color: rgba(255,232,61,0.6);
+  color: #ffe83d;
+}
+.mj-arrow-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.mj-arrow-btn:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.mj-cta {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffe83d 0%, #d4a52a 100%);
+  color: #1a0808;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(255,232,61,0.25);
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.mj-cta:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(255,232,61,0.35); }
+.mj-cta:active { transform: translateY(0); }
+.mj-prize-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.55);
+  font-variant-numeric: tabular-nums;
+  transition: background 200ms ease, color 200ms ease;
+}
+.mj-prize-row .mj-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  flex-shrink: 0;
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+.mj-prize-row[data-active="true"] {
+  background: rgba(255,232,61,0.10);
+  color: #ffe83d;
+}
+.mj-prize-row[data-active="true"] .mj-dot {
+  background: #ffe83d;
+  box-shadow: 0 0 10px rgba(255,232,61,0.6);
+}
+.mj-prize-row[data-max="true"][data-active="true"] {
+  background: linear-gradient(90deg, rgba(255,122,26,0.18), rgba(255,232,61,0.18));
+}
+.mj-ball {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+  background: radial-gradient(circle at 35% 30%, #d11a2e 0%, #790001 75%, #4a0000 100%);
+  box-shadow: inset 0 -6px 14px rgba(0,0,0,0.45), inset 0 4px 10px rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.4);
+  transition: transform 200ms ease;
+}
+.mj-ball-correct {
+  background: radial-gradient(circle at 35% 30%, #4ade80 0%, #15803d 75%, #064e1f 100%);
+}
+.mj-ball-wrong {
+  background: radial-gradient(circle at 35% 30%, #f87171 0%, #b91c1c 75%, #7f1d1d 100%);
+}
+.mj-ball-joker {
+  background: radial-gradient(circle at 35% 30%, #ffd54a 0%, #ff7a1a 75%, #b54100 100%);
+  color: #1a0808;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+}
+.mj-aura {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,232,61,0.35), transparent 70%);
+  pointer-events: none;
+  animation: mj-active-aura 1.6s ease-in-out infinite;
+}
+.mj-confetti-piece {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: mj-confetti 1400ms ease-out forwards;
+}
+`;
+  document.head.appendChild(s);
+}
+
+/**
+ * Finn DOM-parent for overlayet. Foretrekker canvas-parent (samme oppførsel
+ * som andre game-overlays); fallback til `document.body` for tester +
+ * tilfeller hvor canvas ikke finnes.
+ */
+function findOverlayParent(): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  const canvas = document.querySelector("canvas");
+  return canvas?.parentElement ?? document.body;
 }
 
 // ── Overlay ──────────────────────────────────────────────────────────────────
 
 export class MysteryGameOverlay extends Container {
-  private bg: Graphics;
-  private title: Text;
-  private subtitle: Text;
-  private middleBalls: Container[] = [];
-  private upButton: Container | null = null;
-  private downButton: Container | null = null;
-  private prizeLadderSteps: Container[] = [];
-  private prizeArrow: Graphics;
-  private resultText: Text;
-  private errorText: Text;
-  private timerText: Text;
+  // ── Pixi-stub-felter (eksisterer for tester / interface-compat) ───────────
+  /** Pixi-Containere som tester refererer; tomme stubs i DOM-design. */
+  middleBalls: Container[] = [];
+  prizeLadderSteps: Container[] = [];
 
-  // State
+  /** Test-eksponert tekst-stub (matcher gammel tester). */
+  resultText: { text: string; visible: boolean } = { text: "", visible: false };
+  errorText: { text: string; visible: boolean } = { text: "", visible: false };
+
+  // ── Game state ────────────────────────────────────────────────────────────
   private middleNumber = 0;
   private resultNumber = 0;
-  private prizeListNok: number[] = [0, 0, 0, 0, 0, 0];
-  private maxRounds = 5;
+  prizeListNok: number[] = [50, 100, 200, 400, 800, 1500];
+  maxRounds = 5;
   private autoTurnFirstMoveSec = 20;
   private autoTurnOtherMoveSec = 10;
 
   private currentRound = 0;
   private priceIndex = 0;
-  private collectedDirections: Array<"up" | "down"> = [];
+  collectedDirections: Array<"up" | "down"> = [];
   private finished = false;
   private choiceSent = false;
+  private balls: BallInfo[] = [];
+  private finalPrize: { amount: number; joker: boolean } | null = null;
 
   private onChoice:
     | ((choiceJson: Readonly<Record<string, unknown>>) => void)
     | null = null;
   private onDismiss: (() => void) | null = null;
   private autoTimer: ReturnType<typeof setInterval> | null = null;
+  private dismissTimer: ReturnType<typeof setTimeout> | null = null;
+  private revealTimers: Array<ReturnType<typeof setTimeout>> = [];
   private autoCountdown = 0;
 
-  private screenW: number;
-  private screenH: number;
+  // ── DOM ───────────────────────────────────────────────────────────────────
+  private root: HTMLDivElement | null = null;
+  private modalEl: HTMLDivElement | null = null;
+  private introEl: HTMLDivElement | null = null;
+  private timerEl: HTMLDivElement | null = null;
+  private prizeDisplayEl: HTMLDivElement | null = null;
+  private ladderRowEls: HTMLDivElement[] = [];
+  private ballRowEls: Array<{
+    container: HTMLDivElement;
+    topSlot: HTMLDivElement;
+    middle: HTMLDivElement;
+    bottomSlot: HTMLDivElement;
+    aura: HTMLDivElement | null;
+  }> = [];
+  private footerEl: HTMLDivElement | null = null;
+  private errorEl: HTMLDivElement | null = null;
+  private parentEl: HTMLElement | null = null;
 
-  constructor(w: number, h: number) {
+  constructor(_w: number, _h: number) {
     super();
-    this.screenW = w;
-    this.screenH = h;
-
-    // Dim background.
-    this.bg = new Graphics();
-    this.bg.rect(0, 0, w, h);
-    this.bg.fill({ color: 0x000000, alpha: 0.85 });
-    this.bg.eventMode = "static";
-    this.addChild(this.bg);
-
-    this.title = new Text({
-      text: "MYSTERY GAME",
-      style: {
-        fontFamily: "Arial",
-        fontSize: 28,
-        fontWeight: "bold",
-        fill: 0xffe83d,
-      },
-    });
-    this.title.anchor.set(0.5);
-    this.title.x = w / 2;
-    this.title.y = h * 0.1;
-    this.addChild(this.title);
-
-    this.subtitle = new Text({
-      text: "Høyere eller lavere? Match tallet for bonus!",
-      style: { fontFamily: "Arial", fontSize: 14, fill: 0xcccccc },
-    });
-    this.subtitle.anchor.set(0.5);
-    this.subtitle.x = w / 2;
-    this.subtitle.y = h * 0.16;
-    this.addChild(this.subtitle);
-
-    // Prize arrow (placeholder — drawn in renderPrizeLadder).
-    this.prizeArrow = new Graphics();
-    this.addChild(this.prizeArrow);
-
-    this.resultText = new Text({
-      text: "",
-      style: {
-        fontFamily: "Arial",
-        fontSize: 22,
-        fontWeight: "bold",
-        fill: 0xffe83d,
-        align: "center",
-        wordWrap: true,
-        wordWrapWidth: w * 0.7,
-      },
-    });
-    this.resultText.anchor.set(0.5);
-    this.resultText.x = w / 2;
-    this.resultText.y = h * 0.86;
-    this.resultText.visible = false;
-    this.addChild(this.resultText);
-
-    this.errorText = new Text({
-      text: "",
-      style: { fontFamily: "Arial", fontSize: 14, fill: 0xff6464 },
-    });
-    this.errorText.anchor.set(0.5);
-    this.errorText.x = w / 2;
-    this.errorText.y = h * 0.92;
-    this.errorText.visible = false;
-    this.addChild(this.errorText);
-
-    this.timerText = new Text({
-      text: "",
-      style: { fontFamily: "Arial", fontSize: 16, fill: 0xffffff },
-    });
-    this.timerText.anchor.set(0.5);
-    this.timerText.x = w / 2;
-    this.timerText.y = h * 0.96;
-    this.addChild(this.timerText);
-
+    void _w;
+    void _h;
+    ensureMysteryStyles();
+    // Pixi-Container er usynlig — DOM-laget er "the overlay".
     this.visible = false;
   }
 
@@ -234,7 +371,9 @@ export class MysteryGameOverlay extends Container {
         ? data.prizeListNok.slice()
         : [50, 100, 200, 400, 800, 1500];
     this.maxRounds =
-      typeof data.maxRounds === "number" ? data.maxRounds : 5;
+      typeof data.maxRounds === "number" && data.maxRounds > 0
+        ? data.maxRounds
+        : 5;
     this.autoTurnFirstMoveSec =
       typeof data.autoTurnFirstMoveSec === "number"
         ? data.autoTurnFirstMoveSec
@@ -244,37 +383,43 @@ export class MysteryGameOverlay extends Container {
         ? data.autoTurnOtherMoveSec
         : 10;
 
-    // Reset state.
+    // State reset.
     this.currentRound = 0;
     this.priceIndex = 0;
     this.collectedDirections = [];
     this.finished = false;
     this.choiceSent = false;
+    this.finalPrize = null;
     this.resultText.visible = false;
+    this.resultText.text = "";
     this.errorText.visible = false;
+    this.errorText.text = "";
 
-    // Clear old children.
-    for (const b of this.middleBalls) b.destroy({ children: true });
-    this.middleBalls = [];
-    for (const s of this.prizeLadderSteps) s.destroy({ children: true });
-    this.prizeLadderSteps = [];
-    if (this.upButton) this.upButton.destroy({ children: true });
-    if (this.downButton) this.downButton.destroy({ children: true });
-    this.upButton = null;
-    this.downButton = null;
+    // Bygg ball-state. Logisk index 0 = rightmost = ones-siffer (legacy).
+    this.balls = [];
+    for (let i = 0; i < this.maxRounds; i += 1) {
+      const digit = getDigitAt(this.middleNumber, i);
+      const resultDigit = getDigitAt(this.resultNumber, i);
+      this.balls.push({
+        digit,
+        resultDigit,
+        outcome: "pending",
+        shownDigit: digit,
+        reveal: null,
+      });
+    }
 
-    // Render middle-balls (5 digits of middleNumber, rendered left-to-right
-    // with index 0 = rightmost = ones-siffer).
-    this.renderMiddleBalls();
-
-    // Render up/down buttons for round 0.
-    this.renderUpDownButtons();
-
-    // Render prize ladder on the right.
-    this.renderPrizeLadder();
+    // Pixi-stubber (tomme containere — eksisterer for backward-compat-tester).
+    this.middleBalls = this.balls.map(() => new Container());
+    this.prizeLadderSteps = this.prizeListNok.map(() => new Container());
 
     this.visible = true;
+    this.mountDom();
+    this.renderIntroOverlay();
 
+    // Start round-timer umiddelbart slik at auto-valg fungerer selv om
+    // brukeren venter ut intro-animasjonen. Modal-DOM er ikke synlig under
+    // de første 2 sek (intro ligger over), men game-state-maskinen kjører.
     this.startRoundTimer();
   }
 
@@ -286,11 +431,6 @@ export class MysteryGameOverlay extends Container {
     const result = resultJson as unknown as MysteryResultJson;
     this.finished = true;
     this.clearAutoTimer();
-    this.timerText.text = "";
-    this.errorText.visible = false;
-
-    // Disable up/down.
-    this.disableUpDownButtons();
 
     const finalIndex =
       typeof result.finalPriceIndex === "number" ? result.finalPriceIndex : 0;
@@ -300,21 +440,28 @@ export class MysteryGameOverlay extends Container {
         : this.prizeListNok[finalIndex] ?? 0;
     const joker = result.jokerTriggered === true;
 
-    this.moveArrowToPrizeIndex(finalIndex, 0.5);
+    this.priceIndex = Math.max(
+      0,
+      Math.min(finalIndex, this.prizeListNok.length - 1),
+    );
+    this.finalPrize = { amount: prize, joker };
 
     if (joker) {
       this.resultText.text = `JOKER! Du vant ${prize} kr!`;
-      this.resultText.style.fill = 0xff6b35;
     } else if (prize > 0) {
       this.resultText.text = `Du vant ${prize} kr!`;
-      this.resultText.style.fill = COLOR_ACTIVE_BALL;
     } else {
       this.resultText.text = "Ingen premie denne gang.";
-      this.resultText.style.fill = 0xcccccc;
     }
     this.resultText.visible = true;
 
-    setTimeout(
+    this.renderHeader();
+    this.renderLadder();
+    this.renderFooter();
+
+    if (joker) this.spawnConfetti();
+
+    this.dismissTimer = setTimeout(
       () => this.onDismiss?.(),
       AUTO_DISMISS_AFTER_RESULT_SECONDS * 1000,
     );
@@ -324,375 +471,704 @@ export class MysteryGameOverlay extends Container {
     this.errorText.text = `Feil: ${err.message}`;
     this.errorText.visible = true;
     this.choiceSent = false;
+    if (this.errorEl) {
+      this.errorEl.textContent = this.errorText.text;
+      this.errorEl.style.display = "block";
+    }
   }
 
   destroy(options?: Parameters<Container["destroy"]>[0]): void {
     this.clearAutoTimer();
-    gsap.killTweensOf(this);
+    if (this.dismissTimer) {
+      clearTimeout(this.dismissTimer);
+      this.dismissTimer = null;
+    }
+    for (const t of this.revealTimers) clearTimeout(t);
+    this.revealTimers = [];
+    this.unmountDom();
     super.destroy(options);
   }
 
-  // ── Internal helpers ──────────────────────────────────────────────────────
+  // ── DOM mount / unmount ────────────────────────────────────────────────────
 
-  private renderMiddleBalls(): void {
-    const totalW =
-      this.maxRounds * MIDDLE_BALL_SIZE + (this.maxRounds - 1) * MIDDLE_BALL_GAP;
-    const startX = (this.screenW - totalW) / 2;
-    const y = this.screenH * 0.32;
+  private mountDom(): void {
+    this.unmountDom();
+    const parent = findOverlayParent();
+    if (!parent) return;
+    this.parentEl = parent;
 
-    // Legacy renderer med index 0 = rightmost = ones. I UI viser vi fra venstre
-    // mot høyre som "ten-thousands → ones" (som et vanlig tall). Round 0 er
-    // RIGHTMOST ball (= ones-digit). Men dette gir en forvirrende visuell:
-    // vi spiller fra venstre til høyre i vår UI. Vi følger legacy her — runde
-    // 0 tilsvarer rightmost ball, som i legacy (reversert iterasjon).
-    for (let i = 0; i < this.maxRounds; i += 1) {
-      const digit = getDigitAt(this.middleNumber, i);
-      const ball = this.createMiddleBall(digit);
-      // i=0 er rightmost → plasseres lengst til høyre.
-      const visualIndex = this.maxRounds - 1 - i;
-      ball.x = startX + visualIndex * (MIDDLE_BALL_SIZE + MIDDLE_BALL_GAP) +
-        MIDDLE_BALL_SIZE / 2;
-      ball.y = y + MIDDLE_BALL_SIZE / 2;
-      this.addChild(ball);
-      this.middleBalls.push(ball);
-    }
-    // Highlight current (round 0 = rightmost ball).
-    this.highlightActiveBall();
-  }
-
-  private createMiddleBall(digit: number): Container {
-    const c = new Container();
-    const bg = new Graphics();
-    bg.circle(0, 0, MIDDLE_BALL_SIZE / 2);
-    bg.fill(COLOR_DEFAULT_BALL);
-    bg.stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
-    c.addChild(bg);
-    const label = new Text({
-      text: digit.toString(),
-      style: {
-        fontFamily: "Arial",
-        fontSize: 28,
-        fontWeight: "bold",
-        fill: 0xffffff,
-      },
+    const root = document.createElement("div");
+    root.className = "mj-root";
+    Object.assign(root.style, {
+      position: "absolute",
+      inset: "0",
+      zIndex: "60",
+      pointerEvents: "auto",
+      // KRITISK: ingen backdrop-filter — Pixi-canvas under (PR #468).
+      background: "rgba(8, 4, 6, 0.78)",
+      animation: "mj-fade-in 220ms ease-out both",
+      fontFamily: "'Inter', system-ui, sans-serif",
+      color: "#f4e8d0",
+      // Ensure root is positioned correctly relative to parent (canvas wrapper
+      // is typically `position: relative`; for body-fallback we use fixed).
+      ...(parent === document.body
+        ? { position: "fixed" as const }
+        : {}),
     });
-    label.anchor.set(0.5);
-    c.addChild(label);
-    return c;
+    parent.appendChild(root);
+    this.root = root;
   }
 
-  private highlightActiveBall(): void {
-    for (let i = 0; i < this.middleBalls.length; i += 1) {
-      const ball = this.middleBalls[i]!;
-      // Active ball = currentRound (logical index). Reset all, then highlight.
-      const bg = ball.children[0] as Graphics;
-      bg.clear();
-      bg.circle(0, 0, MIDDLE_BALL_SIZE / 2);
-      const isActive = i === this.currentRound;
-      bg.fill(isActive ? COLOR_ACTIVE_BALL : COLOR_DEFAULT_BALL);
-      bg.stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
-      // Text color: active = black on yellow, else white.
-      const label = ball.children[1] as Text;
-      label.style.fill = isActive ? 0x1a1a2e : 0xffffff;
-      // Scale pulse on active.
-      if (isActive) {
-        gsap.to(ball.scale, { x: 1.15, y: 1.15, duration: 0.3 });
-      } else {
-        gsap.to(ball.scale, { x: 1, y: 1, duration: 0.2 });
+  private unmountDom(): void {
+    if (this.root) {
+      this.root.remove();
+      this.root = null;
+    }
+    this.modalEl = null;
+    this.introEl = null;
+    this.timerEl = null;
+    this.prizeDisplayEl = null;
+    this.ladderRowEls = [];
+    this.ballRowEls = [];
+    this.footerEl = null;
+    this.errorEl = null;
+  }
+
+  private renderIntroOverlay(): void {
+    if (!this.root) return;
+    const intro = document.createElement("div");
+    Object.assign(intro.style, {
+      position: "absolute",
+      inset: "0",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    });
+    const stack = document.createElement("div");
+    Object.assign(stack.style, {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: "20px",
+    });
+
+    const text = document.createElement("div");
+    text.textContent = "MYSTERY JOKER";
+    Object.assign(text.style, {
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontSize: "44px",
+      fontWeight: "900",
+      letterSpacing: "2px",
+      color: "#ffe83d",
+      textShadow: "0 0 30px rgba(255,232,61,0.5)",
+      animation: "mj-intro-text 2000ms ease-in-out forwards",
+    });
+
+    const img = document.createElement("img");
+    img.src = JOKER_IMG_URL;
+    img.alt = "";
+    img.draggable = false;
+    Object.assign(img.style, {
+      width: "120px",
+      height: "120px",
+      objectFit: "contain",
+      filter: "drop-shadow(0 0 20px rgba(255,122,26,0.55))",
+      animation: "mj-intro-joker 2000ms ease-in-out forwards",
+    });
+
+    stack.appendChild(text);
+    stack.appendChild(img);
+    intro.appendChild(stack);
+    this.root.appendChild(intro);
+    this.introEl = intro;
+
+    // Etter 2 sek: fjern intro + render modal. Round-timer er allerede
+    // startet i show() — vi bare avslører modalen her.
+    const t = setTimeout(() => {
+      if (this.introEl) {
+        this.introEl.remove();
+        this.introEl = null;
       }
-    }
+      this.renderModal();
+    }, INTRO_DURATION_MS);
+    this.revealTimers.push(t);
   }
 
-  private renderUpDownButtons(): void {
-    const activeVisualX = this.activeBallVisualX();
-    const activeBallY = this.screenH * 0.32 + MIDDLE_BALL_SIZE / 2;
+  private renderModal(): void {
+    if (!this.root) return;
 
-    // UP button above active ball.
-    this.upButton = this.createArrowButton("up");
-    this.upButton.x = activeVisualX;
-    this.upButton.y = activeBallY - MIDDLE_BALL_SIZE / 2 - BUTTON_GAP - BUTTON_SIZE / 2;
-    this.addChild(this.upButton);
-
-    // DOWN button below active ball.
-    this.downButton = this.createArrowButton("down");
-    this.downButton.x = activeVisualX;
-    this.downButton.y = activeBallY + MIDDLE_BALL_SIZE / 2 + BUTTON_GAP + BUTTON_SIZE / 2;
-    this.addChild(this.downButton);
-  }
-
-  private activeBallVisualX(): number {
-    const totalW =
-      this.maxRounds * MIDDLE_BALL_SIZE + (this.maxRounds - 1) * MIDDLE_BALL_GAP;
-    const startX = (this.screenW - totalW) / 2;
-    const visualIndex = this.maxRounds - 1 - this.currentRound;
-    return (
-      startX + visualIndex * (MIDDLE_BALL_SIZE + MIDDLE_BALL_GAP) +
-      MIDDLE_BALL_SIZE / 2
-    );
-  }
-
-  private createArrowButton(direction: "up" | "down"): Container {
-    const c = new Container();
-    c.eventMode = "static";
-    c.cursor = "pointer";
-    const bg = new Graphics();
-    bg.roundRect(-BUTTON_SIZE / 2, -BUTTON_SIZE / 2, BUTTON_SIZE, BUTTON_SIZE, 10);
-    bg.fill(COLOR_BUTTON_BG);
-    bg.stroke({ color: COLOR_BUTTON_BORDER, width: 2 });
-    c.addChild(bg);
-    // Arrow glyph — simple triangle.
-    const arrow = new Graphics();
-    const size = BUTTON_SIZE * 0.35;
-    if (direction === "up") {
-      arrow.moveTo(0, -size / 2);
-      arrow.lineTo(size / 2, size / 2);
-      arrow.lineTo(-size / 2, size / 2);
-    } else {
-      arrow.moveTo(0, size / 2);
-      arrow.lineTo(size / 2, -size / 2);
-      arrow.lineTo(-size / 2, -size / 2);
-    }
-    arrow.closePath();
-    arrow.fill(COLOR_BUTTON_BORDER);
-    c.addChild(arrow);
-
-    c.on("pointerdown", () => this.selectDirection(direction));
-    c.on("pointerover", () => {
-      if (!this.finished && !this.choiceSent)
-        gsap.to(c.scale, { x: 1.1, y: 1.1, duration: 0.15 });
+    const modal = document.createElement("div");
+    Object.assign(modal.style, {
+      position: "absolute",
+      left: "50%",
+      top: "50%",
+      transform: "translate(-50%, -50%)",
+      width: "860px",
+      maxWidth: "calc(100% - 40px)",
+      borderRadius: "16px",
+      padding: "24px 32px 22px",
+      background:
+        "radial-gradient(ellipse at top, #3d1620 0%, #1f0a10 55%, #120508 100%)",
+      border: "1px solid rgba(255, 232, 61, 0.25)",
+      boxShadow:
+        "0 30px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255, 232, 61, 0.08)",
+      animation: "mj-content-fade 320ms ease-out both",
     });
-    c.on("pointerout", () => {
-      if (!this.finished && !this.choiceSent)
-        gsap.to(c.scale, { x: 1, y: 1, duration: 0.15 });
+
+    // Header
+    const header = document.createElement("div");
+    Object.assign(header.style, {
+      display: "flex",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: "16px",
     });
-    return c;
+
+    const headerLeft = document.createElement("div");
+    headerLeft.style.flex = "1";
+    const h1 = document.createElement("h1");
+    h1.textContent = "MYSTERY JOKER";
+    Object.assign(h1.style, {
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontSize: "32px",
+      fontWeight: "800",
+      letterSpacing: "-0.5px",
+      color: "#ffe83d",
+      margin: "0",
+      lineHeight: "1.05",
+    });
+    const sub = document.createElement("p");
+    sub.textContent =
+      "Velg om du skal gå opp eller ned. Treffer du joker vinner du jackpott.";
+    Object.assign(sub.style, {
+      color: "rgba(255,255,255,0.55)",
+      fontSize: "13px",
+      marginTop: "6px",
+      marginBottom: "0",
+      letterSpacing: "0.2px",
+    });
+    headerLeft.appendChild(h1);
+    headerLeft.appendChild(sub);
+    header.appendChild(headerLeft);
+
+    const headerRight = document.createElement("div");
+    Object.assign(headerRight.style, {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "flex-end",
+      justifyContent: "center",
+      gap: "10px",
+      minHeight: "80px",
+    });
+    const timerPill = document.createElement("div");
+    Object.assign(timerPill.style, {
+      padding: "4px 12px",
+      borderRadius: "999px",
+      fontSize: "12px",
+      fontWeight: "700",
+      letterSpacing: "0.5px",
+      color: "rgba(255,232,61,0.85)",
+      background: "rgba(255,232,61,0.10)",
+      border: "1px solid rgba(255,232,61,0.25)",
+      fontVariantNumeric: "tabular-nums",
+      minWidth: "44px",
+      textAlign: "center" as const,
+    });
+    headerRight.appendChild(timerPill);
+    this.timerEl = timerPill;
+
+    const prizeDisplay = document.createElement("div");
+    Object.assign(prizeDisplay.style, {
+      fontSize: "13px",
+      color: "rgba(255,255,255,0.55)",
+      whiteSpace: "nowrap",
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+    });
+    headerRight.appendChild(prizeDisplay);
+    this.prizeDisplayEl = prizeDisplay;
+
+    header.appendChild(headerRight);
+    modal.appendChild(header);
+
+    // Divider
+    const divTop = document.createElement("div");
+    Object.assign(divTop.style, {
+      height: "1px",
+      marginTop: "14px",
+      marginBottom: "16px",
+      background:
+        "linear-gradient(90deg, transparent, rgba(255,232,61,0.22), transparent)",
+    });
+    modal.appendChild(divTop);
+
+    // Body: ladder + arena
+    const body = document.createElement("div");
+    Object.assign(body.style, {
+      display: "flex",
+      gap: "24px",
+      alignItems: "stretch",
+    });
+
+    const ladder = this.buildLadder();
+    body.appendChild(ladder);
+
+    const arena = this.buildArena();
+    body.appendChild(arena);
+
+    modal.appendChild(body);
+
+    // Divider
+    const divBottom = document.createElement("div");
+    Object.assign(divBottom.style, {
+      height: "1px",
+      marginTop: "16px",
+      marginBottom: "12px",
+      background:
+        "linear-gradient(90deg, transparent, rgba(255,232,61,0.22), transparent)",
+    });
+    modal.appendChild(divBottom);
+
+    // Footer (CTA dukker opp ved finished)
+    const footer = document.createElement("div");
+    Object.assign(footer.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      minHeight: "40px",
+    });
+    const errorEl = document.createElement("div");
+    Object.assign(errorEl.style, {
+      fontSize: "12px",
+      color: "#ff6b6b",
+      display: "none",
+    });
+    footer.appendChild(errorEl);
+    this.errorEl = errorEl;
+
+    modal.appendChild(footer);
+    this.footerEl = footer;
+
+    this.root.appendChild(modal);
+    this.modalEl = modal;
+
+    // Initial header + ladder content.
+    this.renderHeader();
+    this.renderLadder();
+    this.renderFooter();
+    this.refreshActiveAura();
   }
 
-  private disableUpDownButtons(): void {
-    for (const b of [this.upButton, this.downButton]) {
-      if (!b) continue;
-      b.eventMode = "none";
-      b.cursor = "default";
-      b.alpha = 0.4;
-    }
-  }
+  private buildLadder(): HTMLDivElement {
+    const ladder = document.createElement("div");
+    Object.assign(ladder.style, {
+      width: "196px",
+      borderRadius: "12px",
+      padding: "14px 12px",
+      background:
+        "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.25))",
+      border: "1px solid rgba(255, 232, 61, 0.14)",
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+      alignSelf: "flex-start",
+      flexShrink: "0",
+    });
+    const hdr = document.createElement("div");
+    hdr.textContent = "PREMIE";
+    Object.assign(hdr.style, {
+      fontSize: "10px",
+      letterSpacing: "3px",
+      color: "#ffe83d",
+      fontWeight: "700",
+      textAlign: "center" as const,
+      marginBottom: "6px",
+      opacity: "0.85",
+    });
+    ladder.appendChild(hdr);
 
-  private enableUpDownButtons(): void {
-    for (const b of [this.upButton, this.downButton]) {
-      if (!b) continue;
-      b.eventMode = "static";
-      b.cursor = "pointer";
-      b.alpha = 1;
-    }
-  }
-
-  private moveUpDownButtons(): void {
-    if (!this.upButton || !this.downButton) return;
-    const targetX = this.activeBallVisualX();
-    gsap.to(this.upButton, { x: targetX, duration: 0.3, ease: "power2.out" });
-    gsap.to(this.downButton, { x: targetX, duration: 0.3, ease: "power2.out" });
-  }
-
-  private renderPrizeLadder(): void {
-    // Ladder on the right: 6 steps stacked bottom-up.
-    const ladderX = this.screenW - PRIZE_STEP_WIDTH / 2 - 30;
-    const ladderBottom = this.screenH * 0.75;
+    this.ladderRowEls = [];
+    // Render top→bottom = max→min (samme som JSX: prizes.length-1-i)
     for (let i = 0; i < this.prizeListNok.length; i += 1) {
-      const step = new Container();
-      const bg = new Graphics();
-      bg.roundRect(
-        -PRIZE_STEP_WIDTH / 2,
-        -PRIZE_STEP_HEIGHT / 2,
-        PRIZE_STEP_WIDTH,
-        PRIZE_STEP_HEIGHT,
-        6,
-      );
-      bg.fill(COLOR_PRIZE_INACTIVE);
-      bg.stroke({ width: 1, color: 0xffffff, alpha: 0.2 });
-      step.addChild(bg);
-      const label = new Text({
-        text: `${this.prizeListNok[i]} kr`,
-        style: {
-          fontFamily: "Arial",
-          fontSize: 13,
-          fontWeight: "bold",
-          fill: 0xffffff,
-        },
+      const idxFromTop = this.prizeListNok.length - 1 - i;
+      const row = document.createElement("div");
+      row.className = "mj-prize-row";
+      const dot = document.createElement("span");
+      dot.className = "mj-dot";
+      const amt = document.createElement("span");
+      amt.style.flex = "1";
+      amt.style.textAlign = "right";
+      const value = this.prizeListNok[idxFromTop] ?? 0;
+      amt.textContent = `${value.toLocaleString("no-NO")} kr`;
+      row.appendChild(dot);
+      row.appendChild(amt);
+      // Lagre rad i visuell rekkefølge (top→bottom). Mapping
+      // til logisk priceIndex: ladderRowEls[i] svarer til
+      // priceIndex = prizeListNok.length - 1 - i.
+      this.ladderRowEls.push(row);
+      ladder.appendChild(row);
+    }
+
+    return ladder;
+  }
+
+  private buildArena(): HTMLDivElement {
+    const arena = document.createElement("div");
+    Object.assign(arena.style, {
+      flex: "1",
+      borderRadius: "12px",
+      padding: "22px 22px 20px",
+      background:
+        "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.25))",
+      border: "1px solid rgba(255, 232, 61, 0.14)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    });
+
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      gap: "16px",
+      justifyContent: "center",
+    });
+
+    this.ballRowEls = [];
+    // visualIndex 0 = leftmost; logicalIdx = maxRounds-1-vi (rightmost is index 0)
+    for (let vi = 0; vi < this.maxRounds; vi += 1) {
+      const logicalIdx = this.maxRounds - 1 - vi;
+      const col = document.createElement("div");
+      Object.assign(col.style, {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
       });
-      label.anchor.set(0.5);
-      step.addChild(label);
 
-      step.x = ladderX;
-      step.y = ladderBottom - i * PRIZE_STEP_HEIGHT;
-      this.addChild(step);
-      this.prizeLadderSteps.push(step);
+      // Top slot (height 68 = ball size for alignment)
+      const topSlot = document.createElement("div");
+      Object.assign(topSlot.style, {
+        height: "68px",
+        width: "96px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      });
+
+      // Middle: ball
+      const middleWrap = document.createElement("div");
+      Object.assign(middleWrap.style, {
+        position: "relative",
+        margin: "10px 0",
+      });
+
+      const ball = document.createElement("div");
+      ball.className = "mj-ball";
+      ball.textContent = String(this.balls[logicalIdx]?.digit ?? "");
+      middleWrap.appendChild(ball);
+
+      // Bottom slot
+      const bottomSlot = document.createElement("div");
+      Object.assign(bottomSlot.style, {
+        height: "68px",
+        width: "96px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      });
+
+      col.appendChild(topSlot);
+      col.appendChild(middleWrap);
+      col.appendChild(bottomSlot);
+      row.appendChild(col);
+
+      this.ballRowEls.push({
+        container: col,
+        topSlot,
+        middle: ball,
+        bottomSlot,
+        aura: null,
+      });
     }
-    // Initial arrow position at index 0.
-    this.redrawArrowAtIndex(0);
+
+    arena.appendChild(row);
+    return arena;
   }
 
-  private moveArrowToPrizeIndex(index: number, duration: number): void {
-    const ladderBottom = this.screenH * 0.75;
-    const target = ladderBottom - index * PRIZE_STEP_HEIGHT;
-    // Highlight target step.
-    for (let i = 0; i < this.prizeLadderSteps.length; i += 1) {
-      const step = this.prizeLadderSteps[i]!;
-      const bg = step.children[0] as Graphics;
-      bg.clear();
-      bg.roundRect(
-        -PRIZE_STEP_WIDTH / 2,
-        -PRIZE_STEP_HEIGHT / 2,
-        PRIZE_STEP_WIDTH,
-        PRIZE_STEP_HEIGHT,
-        6,
-      );
-      bg.fill(i === index ? COLOR_PRIZE_ACTIVE : COLOR_PRIZE_INACTIVE);
-      bg.stroke({ width: 1, color: 0xffffff, alpha: 0.2 });
-      const label = step.children[1] as Text;
-      label.style.fill = i === index ? 0x1a1a2e : 0xffffff;
+  // ── Render-helpers (driven by state) ──────────────────────────────────────
+
+  private renderHeader(): void {
+    if (!this.prizeDisplayEl) return;
+    this.prizeDisplayEl.replaceChildren();
+
+    if (this.finished && this.finalPrize) {
+      if (this.finalPrize.joker) {
+        const img = document.createElement("img");
+        img.src = JOKER_IMG_URL;
+        img.alt = "";
+        img.draggable = false;
+        Object.assign(img.style, {
+          width: "28px",
+          height: "28px",
+          filter: "drop-shadow(0 0 10px rgba(255,122,26,0.6))",
+        });
+        const txt = document.createElement("b");
+        txt.textContent = `JOKER! JACKPOT ${this.finalPrize.amount.toLocaleString(
+          "no-NO",
+        )} kr`;
+        Object.assign(txt.style, {
+          color: "#ff7a1a",
+          fontSize: "17px",
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: "-0.2px",
+          lineHeight: "1",
+          animation: "mj-amount-glow 1.6s ease-in-out infinite",
+        });
+        this.prizeDisplayEl.appendChild(img);
+        this.prizeDisplayEl.appendChild(txt);
+      } else {
+        const lbl = document.createTextNode("Du vant ");
+        const v = document.createElement("b");
+        v.textContent = `${this.finalPrize.amount.toLocaleString("no-NO")} kr`;
+        Object.assign(v.style, {
+          color: "#ffe83d",
+          fontSize: "17px",
+          marginLeft: "4px",
+          fontVariantNumeric: "tabular-nums",
+          textShadow: "0 0 12px rgba(255,232,61,0.35)",
+        });
+        this.prizeDisplayEl.appendChild(lbl);
+        this.prizeDisplayEl.appendChild(v);
+      }
+    } else {
+      const lbl = document.createTextNode("Nåværende gevinst ");
+      const v = document.createElement("b");
+      const cur = this.prizeListNok[this.priceIndex] ?? 0;
+      v.textContent = `${cur.toLocaleString("no-NO")} kr`;
+      Object.assign(v.style, {
+        color: "#ffe83d",
+        fontSize: "17px",
+        marginLeft: "4px",
+        fontVariantNumeric: "tabular-nums",
+        textShadow: "0 0 12px rgba(255,232,61,0.35)",
+      });
+      this.prizeDisplayEl.appendChild(lbl);
+      this.prizeDisplayEl.appendChild(v);
     }
-    // Arrow tween.
-    gsap.to(this.prizeArrow, { y: target, duration, ease: "power2.out" });
   }
 
-  private redrawArrowAtIndex(index: number): void {
-    const ladderX = this.screenW - PRIZE_STEP_WIDTH - 40;
-    const ladderBottom = this.screenH * 0.75;
-    this.prizeArrow.clear();
-    // Arrow points RIGHT (→) toward the active step.
-    const ax = ladderX - 12;
-    const aSize = 8;
-    this.prizeArrow.moveTo(ax, -aSize);
-    this.prizeArrow.lineTo(ax + aSize * 1.5, 0);
-    this.prizeArrow.lineTo(ax, aSize);
-    this.prizeArrow.closePath();
-    this.prizeArrow.fill(COLOR_ACTIVE_BALL);
-    this.prizeArrow.x = 0;
-    this.prizeArrow.y = ladderBottom - index * PRIZE_STEP_HEIGHT;
-    // Highlight target step.
-    for (let i = 0; i < this.prizeLadderSteps.length; i += 1) {
-      const step = this.prizeLadderSteps[i]!;
-      const bg = step.children[0] as Graphics;
-      bg.clear();
-      bg.roundRect(
-        -PRIZE_STEP_WIDTH / 2,
-        -PRIZE_STEP_HEIGHT / 2,
-        PRIZE_STEP_WIDTH,
-        PRIZE_STEP_HEIGHT,
-        6,
-      );
-      bg.fill(i === index ? COLOR_PRIZE_ACTIVE : COLOR_PRIZE_INACTIVE);
-      bg.stroke({ width: 1, color: 0xffffff, alpha: 0.2 });
-      const label = step.children[1] as Text;
-      label.style.fill = i === index ? 0x1a1a2e : 0xffffff;
+  private renderLadder(): void {
+    for (let i = 0; i < this.ladderRowEls.length; i += 1) {
+      const row = this.ladderRowEls[i]!;
+      // Visuell rekkefølge top→bottom = max→min, så priceIndex-mapping er
+      // length - 1 - i.
+      const priceIdx = this.prizeListNok.length - 1 - i;
+      const isActive = priceIdx === this.priceIndex;
+      const isMax = priceIdx === this.prizeListNok.length - 1;
+      row.dataset["active"] = isActive ? "true" : "false";
+      row.dataset["max"] = isMax ? "true" : "false";
     }
   }
+
+  private renderFooter(): void {
+    if (!this.footerEl) return;
+    // Fjern eventuell tidligere CTA.
+    const oldBtn = this.footerEl.querySelector(".mj-cta");
+    if (oldBtn) oldBtn.remove();
+
+    if (this.finished) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mj-cta";
+      btn.textContent = "Spill igjen";
+      btn.addEventListener("click", () => {
+        this.onDismiss?.();
+      });
+      this.footerEl.appendChild(btn);
+    }
+  }
+
+  private refreshActiveAura(): void {
+    // Aktivt-state: pulserende aura rundt aktiv ball + chevron-knapper.
+    for (let logicalIdx = 0; logicalIdx < this.ballRowEls.length; logicalIdx += 1) {
+      const visualIdx = this.maxRounds - 1 - logicalIdx;
+      const cell = this.ballRowEls[visualIdx];
+      if (!cell) continue;
+      const isActive =
+        logicalIdx === this.currentRound && !this.finished && !this.choiceSent;
+      // Aura
+      if (cell.aura) {
+        cell.aura.remove();
+        cell.aura = null;
+      }
+      if (isActive) {
+        const aura = document.createElement("div");
+        aura.className = "mj-aura";
+        cell.middle.parentElement?.insertBefore(aura, cell.middle);
+        cell.aura = aura;
+        cell.middle.style.animation = "mj-active-pulse 1.6s ease-in-out infinite";
+      } else {
+        cell.middle.style.animation = "";
+      }
+
+      // Top-slot: arrow OPP eller reveal-ball.
+      cell.topSlot.replaceChildren();
+      cell.bottomSlot.replaceChildren();
+      const ballState = this.balls[logicalIdx];
+      if (ballState?.reveal && ballState.reveal.direction === "up") {
+        cell.topSlot.appendChild(this.buildRevealBall(ballState));
+      } else if (isActive) {
+        cell.topSlot.appendChild(this.buildArrowBtn("up", logicalIdx));
+      }
+      if (ballState?.reveal && ballState.reveal.direction === "down") {
+        cell.bottomSlot.appendChild(this.buildRevealBall(ballState));
+      } else if (isActive) {
+        cell.bottomSlot.appendChild(this.buildArrowBtn("down", logicalIdx));
+      }
+
+      // Middle ball-state.
+      cell.middle.classList.remove("mj-ball-correct", "mj-ball-wrong", "mj-ball-joker");
+      if (ballState?.outcome === "correct") {
+        cell.middle.classList.add("mj-ball-correct");
+      } else if (ballState?.outcome === "wrong") {
+        cell.middle.classList.add("mj-ball-wrong");
+      } else if (ballState?.outcome === "joker") {
+        cell.middle.classList.add("mj-ball-joker");
+      }
+      cell.middle.textContent = String(ballState?.shownDigit ?? "");
+    }
+  }
+
+  private buildArrowBtn(
+    direction: "up" | "down",
+    logicalIdx: number,
+  ): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mj-arrow-btn";
+    btn.setAttribute("aria-label", direction === "up" ? "Opp" : "Ned");
+    Object.assign(btn.style, {
+      width: "96px",
+      height: "44px",
+    });
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "20");
+    svg.setAttribute("height", "20");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute(
+      "d",
+      direction === "up" ? "M6 15 L12 9 L18 15" : "M6 9 L12 15 L18 9",
+    );
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "2.4");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+    const label = document.createElement("span");
+    label.textContent = direction === "up" ? "OPP" : "NED";
+    btn.appendChild(svg);
+    btn.appendChild(label);
+    btn.disabled = this.finished || this.choiceSent || logicalIdx !== this.currentRound;
+    btn.addEventListener("click", () => {
+      this.selectDirection(direction);
+    });
+    return btn;
+  }
+
+  private buildRevealBall(ballState: BallInfo): HTMLDivElement {
+    const wrap = document.createElement("div");
+    wrap.className = "mj-ball";
+    Object.assign(wrap.style, {
+      width: "64px",
+      height: "64px",
+      fontSize: "26px",
+      animation: "mj-reveal-drop 350ms ease-out both",
+    });
+    if (ballState.outcome === "correct") wrap.classList.add("mj-ball-correct");
+    else if (ballState.outcome === "wrong") wrap.classList.add("mj-ball-wrong");
+    else if (ballState.outcome === "joker") wrap.classList.add("mj-ball-joker");
+    wrap.textContent = String(ballState.reveal?.value ?? "");
+    return wrap;
+  }
+
+  // ── Game logic (uendret state-flyt) ───────────────────────────────────────
 
   private selectDirection(direction: "up" | "down"): void {
     if (this.finished || this.choiceSent) return;
     if (this.currentRound >= this.maxRounds) return;
 
-    // Collect and reveal the round locally (optimistic).
     this.collectedDirections.push(direction);
     this.clearAutoTimer();
-    this.timerText.text = "";
+    if (this.timerEl) this.timerEl.textContent = "";
 
-    // Reveal this round's resultDigit on the active ball (client-side
-    // preview — server will re-validate, but middleNumber/resultNumber
-    // came from trigger so the reveal is consistent).
-    const middleDigit = getDigitAt(this.middleNumber, this.currentRound);
-    const resultDigit = getDigitAt(this.resultNumber, this.currentRound);
+    const ball = this.balls[this.currentRound];
+    if (!ball) return;
+    const middleDigit = ball.digit;
+    const resultDigit = ball.resultDigit;
     const isJoker = middleDigit === resultDigit;
     const isCorrect = isJoker
       ? false
       : (direction === "up" && resultDigit > middleDigit) ||
         (direction === "down" && resultDigit < middleDigit);
 
-    // Update priceIndex locally for UI feedback.
     if (isJoker) {
+      ball.outcome = "joker";
       this.priceIndex = this.prizeListNok.length - 1;
     } else if (isCorrect) {
+      ball.outcome = "correct";
       this.priceIndex = Math.min(
         this.priceIndex + 1,
         this.prizeListNok.length - 1,
       );
     } else {
+      ball.outcome = "wrong";
       this.priceIndex = Math.max(this.priceIndex - 1, 0);
     }
-    this.moveArrowToPrizeIndex(this.priceIndex, 0.35);
+    ball.reveal = { direction, value: resultDigit };
 
-    // Reveal the resultDigit on the active ball with color feedback.
-    this.revealActiveBallResult(resultDigit, isJoker, isCorrect);
+    this.renderHeader();
+    this.renderLadder();
+    this.refreshActiveAura();
 
     if (isJoker || this.currentRound === this.maxRounds - 1) {
-      // End of game — send all directions to server.
-      this.disableUpDownButtons();
+      // Avslutt — send alle directions til server.
       this.choiceSent = true;
-      setTimeout(() => {
+      const t = setTimeout(() => {
         this.onChoice?.({ directions: this.collectedDirections });
-      }, 800);
+      }, FINAL_DELAY_MS);
+      this.revealTimers.push(t);
+      this.refreshActiveAura();
       return;
     }
 
-    // Move to next round.
+    // Neste runde.
     this.currentRound += 1;
-    setTimeout(() => {
-      this.advanceToNextRound();
-    }, 600);
-  }
-
-  private revealActiveBallResult(
-    resultDigit: number,
-    isJoker: boolean,
-    isCorrect: boolean,
-  ): void {
-    const ball = this.middleBalls[this.currentRound];
-    if (!ball) return;
-    const bg = ball.children[0] as Graphics;
-    bg.clear();
-    bg.circle(0, 0, MIDDLE_BALL_SIZE / 2);
-    if (isJoker) {
-      bg.fill(COLOR_JOKER_BALL);
-    } else if (isCorrect) {
-      bg.fill(COLOR_CORRECT);
-    } else {
-      bg.fill(COLOR_WRONG);
-    }
-    bg.stroke({ width: 2, color: 0xffffff, alpha: 0.5 });
-    const label = ball.children[1] as Text;
-    // Show resultDigit replacing middleDigit with a scale animation.
-    label.text = isJoker ? "?" : resultDigit.toString();
-    label.style.fill = 0xffffff;
-    gsap.fromTo(
-      ball.scale,
-      { x: 1.15, y: 1.15 },
-      { x: 1.3, y: 1.3, duration: 0.15, yoyo: true, repeat: 1 },
-    );
-  }
-
-  private advanceToNextRound(): void {
-    this.highlightActiveBall();
-    this.moveUpDownButtons();
-    this.enableUpDownButtons();
-    this.startRoundTimer();
+    const t = setTimeout(() => {
+      this.refreshActiveAura();
+      this.startRoundTimer();
+    }, REVEAL_DELAY_MS);
+    this.revealTimers.push(t);
   }
 
   private startRoundTimer(): void {
+    if (this.finished || this.choiceSent) return;
     const sec =
       this.currentRound === 0
         ? this.autoTurnFirstMoveSec
         : this.autoTurnOtherMoveSec;
     this.autoCountdown = sec;
-    this.timerText.text = `Auto-valg om ${sec}s`;
+    if (this.timerEl) this.timerEl.textContent = `${sec}s`;
     this.autoTimer = setInterval(() => {
       this.autoCountdown -= 1;
       if (this.autoCountdown <= 0) {
         this.clearAutoTimer();
-        this.timerText.text = "";
-        // Default auto-turn: "down" (arbitrary — legacy didn't specify for Game 1).
+        if (this.timerEl) this.timerEl.textContent = "";
+        // Default ved timeout = "down" (matcher tidligere implementasjon).
         this.selectDirection("down");
-      } else {
-        this.timerText.text = `Auto-valg om ${this.autoCountdown}s`;
+      } else if (this.timerEl) {
+        this.timerEl.textContent = `${this.autoCountdown}s`;
       }
     }, 1000);
   }
@@ -702,6 +1178,42 @@ export class MysteryGameOverlay extends Container {
       clearInterval(this.autoTimer);
       this.autoTimer = null;
     }
+  }
+
+  private spawnConfetti(): void {
+    if (!this.modalEl) return;
+    const burst = document.createElement("div");
+    Object.assign(burst.style, {
+      position: "absolute",
+      top: "0",
+      left: "0",
+      right: "0",
+      bottom: "0",
+      pointerEvents: "none",
+      overflow: "hidden",
+      borderRadius: "16px",
+    });
+    const colors = ["#ffe83d", "#ff7a1a", "#ffffff", "#f5b841", "#22c55e"];
+    const pieces = 32;
+    for (let i = 0; i < pieces; i += 1) {
+      const piece = document.createElement("div");
+      piece.className = "mj-confetti-piece";
+      const angle = (i / pieces) * Math.PI * 2;
+      const dist = 180 + (i % 5) * 30;
+      const cx = Math.cos(angle) * dist;
+      const cy = Math.sin(angle) * dist + 60;
+      const cr = 360 + ((i * 47) % 360);
+      const color = colors[i % colors.length] ?? "#ffe83d";
+      piece.style.background = color;
+      piece.style.setProperty("--mj-cx", `${cx}px`);
+      piece.style.setProperty("--mj-cy", `${cy}px`);
+      piece.style.setProperty("--mj-cr", `${cr}deg`);
+      piece.style.animationDelay = `${(i % 8) * 30}ms`;
+      burst.appendChild(piece);
+    }
+    this.modalEl.appendChild(burst);
+    const t = setTimeout(() => burst.remove(), 1800);
+    this.revealTimers.push(t);
   }
 }
 
