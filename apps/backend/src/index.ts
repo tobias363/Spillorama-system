@@ -24,6 +24,8 @@ import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { UserPinService } from "./auth/UserPinService.js";
+import { TwoFactorService } from "./auth/TwoFactorService.js";
+import { SessionService } from "./auth/SessionService.js";
 import { EmailService } from "./integration/EmailService.js";
 import { EmailQueue } from "./integration/EmailQueue.js";
 import { SveveSmsService } from "./integration/SveveSmsService.js";
@@ -511,6 +513,20 @@ const authTokenService = new AuthTokenService({
 
 // REQ-130 (PDF 9 Frontend CR): Phone+PIN-login support.
 const userPinService = new UserPinService(platformService.getPool(), {
+  schema: pgSchema,
+});
+
+// REQ-129: TOTP/2FA. Bruker felles pool fra PlatformService.
+const twoFactorService = new TwoFactorService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  issuer: process.env.TOTP_ISSUER?.trim() || "Spillorama",
+});
+
+// REQ-132: active sessions + 30-min inactivity-timeout. 30 min er
+// hardkodet (default) men kan overstyres via env i framtiden.
+const sessionService = new SessionService({
+  pool: platformService.getPool(),
   schema: pgSchema,
 });
 
@@ -1620,6 +1636,9 @@ app.use(createAuthRouter({
   schema: pgSchema,
   // REQ-130 (PDF 9 Frontend CR): Phone+PIN-login.
   userPinService,
+  // REQ-129 + REQ-132
+  twoFactorService,
+  sessionService,
 }));
 app.use(createPlayersRouter({
   platformService,

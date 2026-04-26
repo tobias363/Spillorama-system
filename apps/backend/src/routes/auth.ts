@@ -5,6 +5,8 @@ import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
 import type { AuthTokenService } from "../auth/AuthTokenService.js";
 import type { UserPinService } from "../auth/UserPinService.js";
 import { normalizeNorwegianPhone } from "../auth/phoneValidation.js";
+import type { TwoFactorService } from "../auth/TwoFactorService.js";
+import type { SessionService } from "../auth/SessionService.js";
 import type { EmailService } from "../integration/EmailService.js";
 import type { SveveSmsService } from "../integration/SveveSmsService.js";
 import { maskPhone } from "../integration/SveveSmsService.js";
@@ -55,6 +57,10 @@ export interface AuthRouterDeps {
    * hvis ikke wired opp.
    */
   userPinService?: UserPinService;
+  /** REQ-129: TOTP-basert two-factor. Når satt aktiveres /api/auth/2fa/* endepunktene og login krever TOTP for brukere med 2FA aktivert. */
+  twoFactorService?: TwoFactorService;
+  /** REQ-132: Active sessions + 30-min inactivity-timeout. Når satt aktiveres /api/auth/sessions/* endepunktene og recordLogin kalles på login. */
+  sessionService?: SessionService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -82,6 +88,8 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     pool,
     schema,
     userPinService,
+    twoFactorService,
+    sessionService,
   } = deps;
   const router = express.Router();
 
@@ -152,6 +160,12 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
 
   async function getAuthenticatedUser(req: express.Request) {
     const accessToken = getAccessTokenFromRequest(req);
+    // REQ-132: 30-min inactivity-timeout. touchActivity revoker sesjonen
+    // og kaster SESSION_TIMED_OUT hvis grensen er overskredet — kastet
+    // før getUserFromAccessToken så klient får riktig feilkode.
+    if (sessionService) {
+      await sessionService.touchActivity(accessToken);
+    }
     return platformService.getUserFromAccessToken(accessToken);
   }
 
@@ -252,10 +266,54 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
       const email = mustBeNonEmptyString(req.body?.email, "email");
       emailForAudit = email;
       const password = mustBeNonEmptyString(req.body?.password, "password");
+
+      // REQ-129: 2FA-flyt. Hvis 2FA er aktivert, verifiser kun passordet
+      // her og returner en challenge — sesjonen opprettes først etter at
+      // klienten har sendt TOTP-koden via /api/auth/2fa/login.
+      if (twoFactorService) {
+        const { userId } = await platformService.verifyCredentialsWithoutSession({
+          email,
+          password,
+        });
+        const enabled = await twoFactorService.isEnabled(userId);
+        if (enabled) {
+          const challenge = await twoFactorService.createChallenge(userId);
+          // Skriv login-attempt-audit allerede her så vi har spor av at
+          // passordet matchet selv om TOTP ikke er fullført ennå.
+          fireLoginAudit({
+            actorId: userId,
+            actorType: "USER",
+            action: "auth.login.2fa.challenge_issued",
+            resource: "session",
+            resourceId: null,
+            ipAddress,
+            userAgent,
+          });
+          apiSuccess(res, {
+            requires2FA: true,
+            challengeId: challenge.challengeId,
+            challengeExpiresAt: challenge.expiresAt,
+          });
+          return;
+        }
+      }
+
       const session = await platformService.login({
         email,
         password
       });
+      // REQ-132: persist user-agent + IP på sesjonen.
+      if (sessionService) {
+        try {
+          await sessionService.recordLogin({
+            accessToken: session.accessToken,
+            userAgent,
+            ipAddress,
+          });
+        } catch (err) {
+          logger.warn({ err }, "[REQ-132] recordLogin feilet (ikke-fatal)");
+        }
+      }
       // BIN-629: per-spiller login-history. actorId = spiller-id så admin-
       // detaljside kan filtrere direkte i /api/admin/players/:id/login-history.
       fireLoginAudit({
@@ -704,6 +762,250 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
       apiFailure(res, error);
     }
   });
+
+  // ── REQ-129: 2FA / TOTP ─────────────────────────────────────────────────
+  //
+  // Endepunkter aktiveres kun når twoFactorService er injisert i deps.
+  // Setup-flow:
+  //   POST /api/auth/2fa/setup        — generer pending_secret + otpauth-URI
+  //   POST /api/auth/2fa/verify       — verify pending_secret + enable + 10 backup-codes
+  // Login-flow (initiert fra /api/auth/login):
+  //   POST /api/auth/2fa/login        — sender { challengeId, code } -> session
+  // Disable + status:
+  //   POST /api/auth/2fa/disable      — krever passord OG TOTP-kode
+  //   GET  /api/auth/2fa/status       — read-only status (enabled, backupCodesRemaining)
+  //   POST /api/auth/2fa/backup-codes/regenerate — krever passord; returnerer 10 nye
+
+  if (twoFactorService) {
+    const tfa = twoFactorService;
+
+    router.post("/api/auth/2fa/setup", async (req, res) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const result = await tfa.setup({
+          userId: user.id,
+          accountLabel: user.email,
+        });
+        apiSuccess(res, {
+          secret: result.secret,
+          otpauthUri: result.otpauthUri,
+        });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.post("/api/auth/2fa/verify", async (req, res) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const code = mustBeNonEmptyString(req.body?.code, "code");
+        const { backupCodes } = await tfa.verifyAndEnable({
+          userId: user.id,
+          code,
+        });
+        fireLoginAudit({
+          actorId: user.id,
+          actorType: "USER",
+          action: "auth.2fa.enabled",
+          resource: "user",
+          resourceId: user.id,
+          ipAddress: clientIp(req),
+          userAgent: requestUserAgent(req),
+        });
+        apiSuccess(res, { enabled: true, backupCodes });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.post("/api/auth/2fa/login", async (req, res) => {
+      const ipAddress = clientIp(req);
+      const userAgent = requestUserAgent(req);
+      try {
+        const challengeId = mustBeNonEmptyString(req.body?.challengeId, "challengeId");
+        const code = mustBeNonEmptyString(req.body?.code, "code");
+        const { userId } = await tfa.consumeChallenge(challengeId);
+        try {
+          await tfa.verifyTotpForLogin({ userId, code });
+        } catch (err) {
+          fireLoginAudit({
+            actorId: userId,
+            actorType: "USER",
+            action: "auth.login.2fa.failed",
+            resource: "session",
+            resourceId: null,
+            details: {
+              failureReason: err instanceof DomainError ? err.code : "UNKNOWN",
+            },
+            ipAddress,
+            userAgent,
+          });
+          throw err;
+        }
+        const session = await platformService.issueSessionForUser(userId);
+        if (sessionService) {
+          try {
+            await sessionService.recordLogin({
+              accessToken: session.accessToken,
+              userAgent,
+              ipAddress,
+            });
+          } catch (err) {
+            logger.warn({ err }, "[REQ-132] recordLogin (2fa-login) feilet");
+          }
+        }
+        fireLoginAudit({
+          actorId: userId,
+          actorType: "USER",
+          action: "auth.login",
+          resource: "session",
+          resourceId: null,
+          details: { method: "totp" },
+          ipAddress,
+          userAgent,
+        });
+        apiSuccess(res, session);
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.post("/api/auth/2fa/disable", async (req, res) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const password = mustBeNonEmptyString(req.body?.password, "password");
+        const code = mustBeNonEmptyString(req.body?.code, "code");
+        // Defense-in-depth: krever både korrekt passord og TOTP-kode.
+        const passwordOk = await platformService.verifyUserPassword(user.id, password);
+        if (!passwordOk) {
+          throw new DomainError("INVALID_CREDENTIALS", "Feil passord.");
+        }
+        await tfa.disable({ userId: user.id, code });
+        fireLoginAudit({
+          actorId: user.id,
+          actorType: "USER",
+          action: "auth.2fa.disabled",
+          resource: "user",
+          resourceId: user.id,
+          ipAddress: clientIp(req),
+          userAgent: requestUserAgent(req),
+        });
+        apiSuccess(res, { disabled: true });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.get("/api/auth/2fa/status", async (req, res) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const status = await tfa.getStatus(user.id);
+        apiSuccess(res, status);
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.post("/api/auth/2fa/backup-codes/regenerate", async (req, res) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const password = mustBeNonEmptyString(req.body?.password, "password");
+        const passwordOk = await platformService.verifyUserPassword(user.id, password);
+        if (!passwordOk) {
+          throw new DomainError("INVALID_CREDENTIALS", "Feil passord.");
+        }
+        const { backupCodes } = await tfa.regenerateBackupCodes(user.id);
+        fireLoginAudit({
+          actorId: user.id,
+          actorType: "USER",
+          action: "auth.2fa.backup_codes_regenerated",
+          resource: "user",
+          resourceId: user.id,
+          ipAddress: clientIp(req),
+          userAgent: requestUserAgent(req),
+        });
+        apiSuccess(res, { backupCodes });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+  }
+
+  // ── REQ-132: Active sessions + logout-all ──────────────────────────────
+  //
+  //   GET  /api/auth/sessions               — list aktive (med isCurrent-flagg)
+  //   POST /api/auth/sessions/logout-all    — revoke alle (beholder gjeldende default)
+  //   POST /api/auth/sessions/:id/logout    — revoke spesifikk (må eies av bruker)
+
+  if (sessionService) {
+    const sess = sessionService;
+
+    router.get("/api/auth/sessions", async (req, res) => {
+      try {
+        const accessToken = getAccessTokenFromRequest(req);
+        // Touch + auth-check inline (ikke gå via getAuthenticatedUser så vi
+        // har tilgang til accessToken for isCurrent-flagg).
+        await sess.touchActivity(accessToken);
+        const user = await platformService.getUserFromAccessToken(accessToken);
+        const sessions = await sess.listActiveSessions({
+          userId: user.id,
+          currentAccessToken: accessToken,
+        });
+        apiSuccess(res, { sessions });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.post("/api/auth/sessions/logout-all", async (req, res) => {
+      try {
+        const accessToken = getAccessTokenFromRequest(req);
+        await sess.touchActivity(accessToken);
+        const user = await platformService.getUserFromAccessToken(accessToken);
+        // Default: behold nåværende sesjon ("logout everywhere except here").
+        // Klienten kan be eksplisitt om å logge ut alle inkl. nåværende
+        // ved å sende { includeCurrent: true }.
+        const includeCurrent = req.body?.includeCurrent === true;
+        const result = await sess.logoutAll({
+          userId: user.id,
+          exceptAccessToken: includeCurrent ? null : accessToken,
+        });
+        fireLoginAudit({
+          actorId: user.id,
+          actorType: "USER",
+          action: "auth.sessions.logout_all",
+          resource: "user",
+          resourceId: user.id,
+          details: { count: result.count, includeCurrent },
+          ipAddress: clientIp(req),
+          userAgent: requestUserAgent(req),
+        });
+        apiSuccess(res, { count: result.count });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+
+    router.post("/api/auth/sessions/:id/logout", async (req, res) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const sessionId = mustBeNonEmptyString(req.params.id, "id");
+        await sess.logoutSession({ userId: user.id, sessionId });
+        fireLoginAudit({
+          actorId: user.id,
+          actorType: "USER",
+          action: "auth.sessions.logout_one",
+          resource: "session",
+          resourceId: sessionId,
+          ipAddress: clientIp(req),
+          userAgent: requestUserAgent(req),
+        });
+        apiSuccess(res, { loggedOut: true });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    });
+  }
 
   // ── Transaction history ───────────────────────────────────────────────────
 

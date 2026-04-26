@@ -678,6 +678,64 @@ export class PlatformService {
     };
   }
 
+  /**
+   * REQ-129: verifiser email+password uten å opprette en sesjon. Brukes av
+   * 2FA-login-flyten der passord-verifisering er steg 1; sesjon opprettes
+   * først etter at TOTP-kode er verifisert. Returnerer userId hvis OK,
+   * kaster INVALID_CREDENTIALS ellers (samme melding som vanlig login —
+   * ikke lekk om e-post finnes).
+   */
+  async verifyCredentialsWithoutSession(input: {
+    email: string;
+    password: string;
+  }): Promise<{ userId: string }> {
+    await this.ensureInitialized();
+    const email = normalizeEmail(input.email);
+    this.assertEmail(email);
+    this.assertLoginPassword(input.password);
+    const { rows } = await this.pool.query<{ id: string; password_hash: string }>(
+      `SELECT id, password_hash FROM ${this.usersTable()}
+       WHERE email = $1 AND deleted_at IS NULL`,
+      [email]
+    );
+    const userRow = rows[0];
+    if (!userRow) {
+      throw new DomainError("INVALID_CREDENTIALS", "Ugyldig e-post eller passord.");
+    }
+    const ok = await this.verifyPassword(input.password, userRow.password_hash);
+    if (!ok) {
+      throw new DomainError("INVALID_CREDENTIALS", "Ugyldig e-post eller passord.");
+    }
+    return { userId: userRow.id };
+  }
+
+  /**
+   * REQ-129: opprett en sesjon for en gitt userId UTEN passord-validering.
+   * Brukes av 2FA-flyten etter at både passord OG TOTP er verifisert.
+   * Skal IKKE eksponeres på offentlige routes.
+   */
+  async issueSessionForUser(userId: string): Promise<SessionInfo> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userId, "userId");
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at
+       FROM ${this.usersTable()}
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    const userRow = rows[0];
+    if (!userRow) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    const session = await this.createSession(userRow.id);
+    const user = await this.withBalance(this.mapUser(userRow));
+    return {
+      accessToken: session.accessToken,
+      expiresAt: session.expiresAt,
+      user,
+    };
+  }
+
   async logout(accessToken: string): Promise<void> {
     await this.ensureInitialized();
     const token = accessToken.trim();
@@ -2352,6 +2410,27 @@ export class PlatformService {
       throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
     }
     return this.withBalance(this.mapUser(rows[0]));
+  }
+
+  /**
+   * REQ-129 helper: verifiser at gitt passord matcher brukerens hash.
+   * Brukes som defense-in-depth ved 2FA-disable og lignende sensitive
+   * operasjoner uten at vi trenger å eksponere `verifyPassword`.
+   */
+  async verifyUserPassword(userId: string, password: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userId, "userId");
+    if (typeof password !== "string" || password.length === 0) {
+      return false;
+    }
+    const { rows } = await this.pool.query<{ password_hash: string }>(
+      `SELECT password_hash FROM ${this.usersTable()} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    if (!rows[0]) {
+      return false;
+    }
+    return this.verifyPassword(password, rows[0].password_hash);
   }
 
   async changePassword(
