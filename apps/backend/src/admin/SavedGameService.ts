@@ -88,6 +88,29 @@ export interface SavedGameLoadPayload {
   config: Record<string, unknown>;
 }
 
+/**
+ * Resultat fra applyToSchedule(). Speiler SavedGameLoadPayload — read-only
+ * snapshot som router-laget bruker for å overskrive en eksisterende
+ * DailySchedule (i motsetning til loadToGame som er ment for å opprette
+ * et helt nytt GameManagement-oppsett).
+ */
+export interface SavedGameApplyPayload {
+  savedGameId: string;
+  gameTypeId: string;
+  name: string;
+  config: Record<string, unknown>;
+}
+
+/** Input for saveFromSchedule — sub-set av CreateSavedGameInput. */
+export interface SaveFromScheduleInput {
+  templateName: string;
+  gameTypeId: string;
+  config: Record<string, unknown>;
+  createdBy: string;
+  /** Valgfri beskrivelse — embeddes i `config.description` for senere oppslag. */
+  description?: string;
+}
+
 export interface SavedGameServiceOptions {
   connectionString: string;
   schema?: string;
@@ -442,6 +465,63 @@ export class SavedGameService {
       name: saved.name,
       config: cloneConfig(saved.config),
     };
+  }
+
+  /**
+   * Forberedelse for å overskrive en eksisterende DailySchedule med en
+   * SavedGame-mal. Read-only — mutates ikke raden. Speiler
+   * `loadToGame()`-semantikken men returnerer `SavedGameApplyPayload` slik
+   * at router-laget kan koordinere oppdatering av target-schedule.
+   *
+   * Forretningsregler:
+   *   - SavedGame må ikke være slettet (deleted_at IS NULL).
+   *   - SavedGame må være active (status='active').
+   */
+  async applyToSchedule(id: string): Promise<SavedGameApplyPayload> {
+    const saved = await this.get(id);
+    if (saved.deletedAt) {
+      throw new DomainError(
+        "SAVED_GAME_DELETED",
+        "SavedGame er slettet — kan ikke brukes på en eksisterende plan."
+      );
+    }
+    if (saved.status !== "active") {
+      throw new DomainError(
+        "SAVED_GAME_INACTIVE",
+        "SavedGame må være active for å kunne brukes på en eksisterende plan."
+      );
+    }
+    return {
+      savedGameId: saved.id,
+      gameTypeId: saved.gameTypeId,
+      name: saved.name,
+      config: cloneConfig(saved.config),
+    };
+  }
+
+  /**
+   * Lagre en eksisterende DailySchedule som en gjenbrukbar SavedGame-mal.
+   * Tynn wrapper rundt `create()`. Beskrivelsen embeddes i
+   * `config.description` slik at vi ikke trenger en ny DB-kolonne i denne
+   * iterasjonen — eksisterende `config_json` er fri-form. Duplikat-navn
+   * fanges av eksisterende unique-constraint og gir SAVED_GAME_DUPLICATE.
+   */
+  async saveFromSchedule(input: SaveFromScheduleInput): Promise<SavedGame> {
+    const templateName = assertNonEmptyString(input.templateName, "templateName");
+    const gameTypeId = assertNonEmptyString(input.gameTypeId, "gameTypeId");
+    const config = assertConfig(input.config);
+    const description = input.description?.trim();
+    const mergedConfig: Record<string, unknown> = description
+      ? { ...config, description }
+      : { ...config };
+    return this.create({
+      gameTypeId,
+      name: templateName,
+      config: mergedConfig,
+      createdBy: input.createdBy,
+      isAdminSave: true,
+      status: "active",
+    });
   }
 
   /** Tell SavedGames (aktive + ikke-slettet). Brukes av dashboard-widget. */

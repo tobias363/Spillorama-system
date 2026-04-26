@@ -30,7 +30,13 @@ import type {
   UpdateSavedGameInput,
   ListSavedGameFilter,
   SavedGameLoadPayload,
+  SavedGameApplyPayload,
 } from "../../admin/SavedGameService.js";
+import type {
+  DailyScheduleService,
+  DailySchedule,
+  UpdateDailyScheduleInput,
+} from "../../admin/DailyScheduleService.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import { DomainError } from "../../game/BingoEngine.js";
 
@@ -63,9 +69,42 @@ interface Ctx {
     updates: Array<{ id: string; changed: string[] }>;
     removes: Array<{ id: string; hard: boolean }>;
     loads: Array<{ id: string }>;
+    applies: Array<{ savedGameId: string }>;
+    scheduleUpdates: Array<{ id: string; changed: string[] }>;
   };
   savedGames: Map<string, SavedGame>;
+  schedules: Map<string, DailySchedule>;
   close: () => Promise<void>;
+}
+
+function makeDailySchedule(
+  overrides: Partial<DailySchedule> & { id: string }
+): DailySchedule {
+  return {
+    id: overrides.id,
+    name: overrides.name ?? `Plan ${overrides.id}`,
+    gameManagementId: overrides.gameManagementId ?? null,
+    hallId: overrides.hallId ?? null,
+    hallIds: overrides.hallIds ?? {},
+    weekDays: overrides.weekDays ?? 0,
+    day: overrides.day ?? null,
+    startDate: overrides.startDate ?? "2026-05-01T10:00:00Z",
+    endDate: overrides.endDate ?? null,
+    startTime: overrides.startTime ?? "",
+    endTime: overrides.endTime ?? "",
+    status: overrides.status ?? "active",
+    stopGame: overrides.stopGame ?? false,
+    specialGame: overrides.specialGame ?? false,
+    isSavedGame: overrides.isSavedGame ?? false,
+    isAdminSavedGame: overrides.isAdminSavedGame ?? false,
+    innsatsenSales: overrides.innsatsenSales ?? 0,
+    subgames: overrides.subgames ?? [],
+    otherData: overrides.otherData ?? {},
+    createdBy: overrides.createdBy ?? "admin-1",
+    createdAt: overrides.createdAt ?? "2026-04-15T10:00:00Z",
+    updatedAt: overrides.updatedAt ?? "2026-04-15T10:00:00Z",
+    deletedAt: overrides.deletedAt ?? null,
+  };
 }
 
 function makeSavedGame(
@@ -91,17 +130,22 @@ function makeSavedGame(
 
 async function startServer(
   users: Record<string, PublicAppUser>,
-  seed: SavedGame[] = []
+  seed: SavedGame[] = [],
+  scheduleSeed: DailySchedule[] = []
 ): Promise<Ctx> {
   const auditStore = new InMemoryAuditLogStore();
   const auditLogService = new AuditLogService(auditStore);
   const savedGames = new Map<string, SavedGame>();
   for (const g of seed) savedGames.set(g.id, g);
+  const schedules = new Map<string, DailySchedule>();
+  for (const s of scheduleSeed) schedules.set(s.id, s);
 
   const creates: SavedGame[] = [];
   const updates: Ctx["spies"]["updates"] = [];
   const removes: Ctx["spies"]["removes"] = [];
   const loads: Ctx["spies"]["loads"] = [];
+  const applies: Ctx["spies"]["applies"] = [];
+  const scheduleUpdates: Ctx["spies"]["scheduleUpdates"] = [];
 
   const platformService = {
     async getUserFromAccessToken(token: string) {
@@ -224,7 +268,49 @@ async function startServer(
         config: JSON.parse(JSON.stringify(existing.config)),
       };
     },
+    async applyToSchedule(id: string): Promise<SavedGameApplyPayload> {
+      const existing = savedGames.get(id);
+      if (!existing) {
+        throw new DomainError("SAVED_GAME_NOT_FOUND", "not found");
+      }
+      if (existing.deletedAt) {
+        throw new DomainError("SAVED_GAME_DELETED", "deleted");
+      }
+      if (existing.status !== "active") {
+        throw new DomainError("SAVED_GAME_INACTIVE", "inactive");
+      }
+      applies.push({ savedGameId: id });
+      return {
+        savedGameId: existing.id,
+        gameTypeId: existing.gameTypeId,
+        name: existing.name,
+        config: JSON.parse(JSON.stringify(existing.config)),
+      };
+    },
   } as unknown as SavedGameService;
+
+  const dailyScheduleService = {
+    async get(id: string): Promise<DailySchedule> {
+      const r = schedules.get(id);
+      if (!r) throw new DomainError("DAILY_SCHEDULE_NOT_FOUND", "not found");
+      return r;
+    },
+    async update(
+      id: string,
+      update: UpdateDailyScheduleInput
+    ): Promise<DailySchedule> {
+      const r = schedules.get(id);
+      if (!r) throw new DomainError("DAILY_SCHEDULE_NOT_FOUND", "not found");
+      scheduleUpdates.push({ id, changed: Object.keys(update) });
+      const next: DailySchedule = { ...r };
+      if (update.subgames !== undefined) next.subgames = update.subgames;
+      if (update.otherData !== undefined) next.otherData = update.otherData;
+      if (update.isSavedGame !== undefined) next.isSavedGame = update.isSavedGame;
+      next.updatedAt = "2026-04-15T11:00:00Z";
+      schedules.set(id, next);
+      return next;
+    },
+  } as unknown as DailyScheduleService;
 
   const app = express();
   app.use(express.json());
@@ -233,6 +319,7 @@ async function startServer(
       platformService,
       auditLogService,
       savedGameService,
+      dailyScheduleService,
     })
   );
 
@@ -243,8 +330,17 @@ async function startServer(
 
   return {
     baseUrl,
-    spies: { auditStore, creates, updates, removes, loads },
+    spies: {
+      auditStore,
+      creates,
+      updates,
+      removes,
+      loads,
+      applies,
+      scheduleUpdates,
+    },
     savedGames,
+    schedules,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve()))
@@ -697,6 +793,96 @@ test("BIN-624 router: POST /load-to-game forbidden for SUPPORT", async () => {
     assert.equal(body.ok, false);
     const err = body.error as { code: string };
     assert.equal(err.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── apply-to-schedule (BIN-624 ↔ BIN-626) ───────────────────────────────────
+
+test("BIN-624 router: POST /apply-to-schedule overskriver schedule + audit applied_to_schedule", async () => {
+  const seedSaved = [
+    makeSavedGame({
+      id: "sg-1",
+      gameTypeId: "game_1",
+      name: "Lørdag-mal",
+      config: {
+        subgames: [{ index: 0, ticketPrice: 700 }],
+        otherData: { mood: "festlig" },
+      },
+    }),
+  ];
+  const seedSched = [
+    makeDailySchedule({
+      id: "ds-1",
+      hallId: "hall-a",
+      subgames: [{ index: 0, ticketPrice: 100 }],
+    }),
+  ];
+  const ctx = await startServer(
+    { "tok-admin": adminUser },
+    seedSaved,
+    seedSched
+  );
+  try {
+    const { status, body } = await jsonFetch(
+      `${ctx.baseUrl}/api/admin/saved-games/sg-1/apply-to-schedule`,
+      {
+        method: "POST",
+        headers: authHeaders("tok-admin"),
+        body: JSON.stringify({ scheduleId: "ds-1" }),
+      }
+    );
+    assert.equal(status, 200, JSON.stringify(body));
+    assert.equal(body.ok, true);
+    const data = body.data as { schedule: DailySchedule };
+    assert.equal(data.schedule.id, "ds-1");
+    assert.deepEqual(data.schedule.subgames, [
+      { index: 0, ticketPrice: 700 },
+    ]);
+    assert.deepEqual(data.schedule.otherData, { mood: "festlig" });
+    assert.equal(data.schedule.isSavedGame, true);
+
+    assert.equal(ctx.spies.applies.length, 1);
+    assert.equal(ctx.spies.scheduleUpdates.length, 1);
+    const event = await waitForAudit(
+      ctx.spies.auditStore,
+      "admin.saved_game.applied_to_schedule"
+    );
+    assert.ok(event, "audit-event mangler");
+    assert.equal(
+      (event!.details as { savedGameId: string }).savedGameId,
+      "sg-1"
+    );
+    assert.equal(
+      (event!.details as { dailyScheduleId: string }).dailyScheduleId,
+      "ds-1"
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-624 router: POST /apply-to-schedule returnerer 400 for ukjent schedule-id", async () => {
+  const seedSaved = [
+    makeSavedGame({ id: "sg-1", gameTypeId: "game_1", name: "Mal A" }),
+  ];
+  const ctx = await startServer({ "tok-admin": adminUser }, seedSaved, []);
+  try {
+    const { status, body } = await jsonFetch(
+      `${ctx.baseUrl}/api/admin/saved-games/sg-1/apply-to-schedule`,
+      {
+        method: "POST",
+        headers: authHeaders("tok-admin"),
+        body: JSON.stringify({ scheduleId: "missing" }),
+      }
+    );
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+    const err = body.error as { code: string };
+    assert.equal(err.code, "DAILY_SCHEDULE_NOT_FOUND");
+    // ScheduleUpdates skal ikke ha skjedd
+    assert.equal(ctx.spies.scheduleUpdates.length, 0);
   } finally {
     await ctx.close();
   }

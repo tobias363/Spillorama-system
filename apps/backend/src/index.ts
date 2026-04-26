@@ -1587,6 +1587,7 @@ app.use(createAdminDailySchedulesRouter({
   auditLogService,
   dailyScheduleService,
   gameManagementService,
+  savedGameService,
 }));
 // BIN-625: Schedule CRUD (gjenbrukbare spill-maler). 4 endepunkter —
 // list/detail/create/patch/delete. SCHEDULE_READ / SCHEDULE_WRITE deles
@@ -1747,6 +1748,7 @@ app.use(createAdminSavedGamesRouter({
   platformService,
   auditLogService,
   savedGameService,
+  dailyScheduleService,
 }));
 // BIN-677: System settings + maintenance. To routere — GET/PATCH /api/admin/
 // settings (key-value registry-backed) + GET/POST/PUT /api/admin/maintenance

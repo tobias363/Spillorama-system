@@ -46,6 +46,12 @@ import type {
   CreateSavedGameInput,
   UpdateSavedGameInput,
 } from "../admin/SavedGameService.js";
+import type {
+  DailyScheduleService,
+  DailySchedule,
+  UpdateDailyScheduleInput,
+  DailyScheduleSubgameSlot,
+} from "../admin/DailyScheduleService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -66,6 +72,12 @@ export interface AdminSavedGamesRouterDeps {
   platformService: PlatformService;
   auditLogService: AuditLogService;
   savedGameService: SavedGameService;
+  /**
+   * Valgfri: brukes av POST /:id/apply-to-schedule for å overskrive en
+   * eksisterende DailySchedule med template-config. Hvis ikke injisert,
+   * returnerer endpointen 503 (NOT_CONFIGURED).
+   */
+  dailyScheduleService?: DailyScheduleService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -131,10 +143,67 @@ function toWireShape(g: SavedGame): Omit<SavedGame, "deletedAt"> {
   return rest;
 }
 
+/**
+ * Hall-scope-sjekk for en DailySchedule-rad — speiler logikken i
+ * adminDailySchedules.ts. Brukes av apply-to-schedule for å verifisere at
+ * HALL_OPERATOR ikke kan bruke en SavedGame på en plan utenfor sin hall.
+ */
+function assertScheduleHallScope(
+  user: PublicAppUser,
+  row: DailySchedule
+): void {
+  if (user.role === "ADMIN" || user.role === "SUPPORT") return;
+  if (user.role !== "HALL_OPERATOR") {
+    throw new DomainError("FORBIDDEN", "Du har ikke tilgang til denne planen.");
+  }
+  if (!user.hallId) {
+    throw new DomainError(
+      "FORBIDDEN",
+      "Din bruker er ikke tildelt en hall — kontakt admin."
+    );
+  }
+  if (row.hallId && row.hallId === user.hallId) return;
+  const ids = row.hallIds;
+  if (ids.masterHallId && ids.masterHallId === user.hallId) return;
+  if (ids.hallIds?.includes(user.hallId)) return;
+  if (ids.groupHallIds?.includes(user.hallId)) return;
+  throw new DomainError("FORBIDDEN", "Du har ikke tilgang til denne planen.");
+}
+
+/**
+ * Trekker ut subgames + otherData fra en SavedGame-config slik at de kan
+ * skrives inn i target DailySchedule. Felt i config som ikke matcher
+ * DailySchedule-skjema ignoreres (template-config kan ha ekstra felter
+ * som er gameType-spesifikke).
+ */
+function extractScheduleOverridesFromConfig(
+  config: Record<string, unknown>
+): {
+  subgames: DailyScheduleSubgameSlot[] | undefined;
+  otherData: Record<string, unknown> | undefined;
+} {
+  const subgamesRaw = config.subgames;
+  const otherDataRaw = config.otherData;
+  const subgames =
+    Array.isArray(subgamesRaw) && subgamesRaw.length >= 0
+      ? (subgamesRaw as DailyScheduleSubgameSlot[])
+      : undefined;
+  const otherData =
+    otherDataRaw && typeof otherDataRaw === "object" && !Array.isArray(otherDataRaw)
+      ? (otherDataRaw as Record<string, unknown>)
+      : undefined;
+  return { subgames, otherData };
+}
+
 export function createAdminSavedGamesRouter(
   deps: AdminSavedGamesRouterDeps
 ): express.Router {
-  const { platformService, auditLogService, savedGameService } = deps;
+  const {
+    platformService,
+    auditLogService,
+    savedGameService,
+    dailyScheduleService,
+  } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -346,6 +415,74 @@ export function createAdminSavedGamesRouter(
       apiFailure(res, error);
     }
   });
+
+  // ── Write: apply-to-schedule ────────────────────────────────────────
+  //
+  // Skriv en SavedGame-template inn i en eksisterende DailySchedule. I
+  // motsetning til load-to-game (som forbereder et nytt GameManagement)
+  // overskriver dette en aktiv plan med template-config. HALL_OPERATOR må
+  // ha tilgang til target-planen via hall-scope-reglene. Kjørende planer
+  // (status='running') er låst — brukeren må stoppe spillet først.
+  router.post(
+    "/api/admin/saved-games/:id/apply-to-schedule",
+    async (req, res) => {
+      try {
+        const actor = await requirePermission(req, "SAVED_GAME_WRITE");
+        if (!dailyScheduleService) {
+          throw new DomainError(
+            "NOT_CONFIGURED",
+            "Daily-schedule-tjenesten er ikke aktivert i denne instansen."
+          );
+        }
+        const id = mustBeNonEmptyString(req.params.id, "id");
+        if (!isRecordObject(req.body)) {
+          throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+        }
+        const body = req.body;
+        const scheduleIdRaw = body.scheduleId ?? body.dailyScheduleId;
+        const scheduleId = mustBeNonEmptyString(scheduleIdRaw, "scheduleId");
+
+        const payload = await savedGameService.applyToSchedule(id);
+        const schedule = await dailyScheduleService.get(scheduleId);
+        assertScheduleHallScope(actor, schedule);
+        if (schedule.status === "running") {
+          throw new DomainError(
+            "SCHEDULE_RUNNING_LOCKED",
+            "Planen kjører nå — stopp spillet før du kan bruke en ny mal."
+          );
+        }
+
+        const overrides = extractScheduleOverridesFromConfig(payload.config);
+        const update: UpdateDailyScheduleInput = {
+          isSavedGame: true,
+        };
+        if (overrides.subgames !== undefined) update.subgames = overrides.subgames;
+        if (overrides.otherData !== undefined) {
+          update.otherData = overrides.otherData;
+        }
+
+        const updated = await dailyScheduleService.update(scheduleId, update);
+        fireAudit({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "admin.saved_game.applied_to_schedule",
+          resource: "saved_game",
+          resourceId: payload.savedGameId,
+          details: {
+            savedGameId: payload.savedGameId,
+            dailyScheduleId: updated.id,
+            gameTypeId: payload.gameTypeId,
+            templateName: payload.name,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+        apiSuccess(res, { schedule: updated });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    }
+  );
 
   return router;
 }
