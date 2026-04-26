@@ -17,6 +17,7 @@ import {
   MysteryGameOverlay,
   __Mystery_AUTO_DISMISS_AFTER_RESULT_SECONDS__,
   __Mystery_getDigitAt,
+  bestDirectionForDigit,
 } from "./MysteryGameOverlay.js";
 
 describe("MysteryGameOverlay — getDigitAt helper", () => {
@@ -64,9 +65,11 @@ describe("MysteryGameOverlay — auto-turn", () => {
     vi.useRealTimers();
   });
 
-  it("auto-timeout velger default 'down' etter autoTurnFirstMoveSec", () => {
+  it("per-round timeout velger optimal retning (digit 0 → 'up', P=9/10)", () => {
     const overlay = new MysteryGameOverlay(800, 600);
     overlay.show({
+      // middleNumber 50000 → ones-digit = 0 → optimal retning er "up"
+      // (P(opp korrekt)=9/10, P(ned korrekt)=0/10)
       middleNumber: 50000,
       resultNumber: 90000,
       prizeListNok: [50, 100, 200, 400, 800, 1500],
@@ -74,11 +77,243 @@ describe("MysteryGameOverlay — auto-turn", () => {
       autoTurnFirstMoveSec: 3,
       autoTurnOtherMoveSec: 2,
     });
-    // Step through 3 seconds of timer.
     vi.advanceTimersByTime(3100);
     const dirs = overlay.collectedDirections;
     expect(dirs.length).toBeGreaterThanOrEqual(1);
+    expect(dirs[0]).toBe("up");
+    overlay.destroy();
+  });
+
+  it("per-round timeout velger 'ned' for digit 9 (P=9/10)", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      // middleNumber 50009 → ones-digit = 9 → optimal retning er "down"
+      middleNumber: 50009,
+      resultNumber: 90008,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 3,
+      autoTurnOtherMoveSec: 2,
+    });
+    vi.advanceTimersByTime(3100);
+    const dirs = overlay.collectedDirections;
     expect(dirs[0]).toBe("down");
+    overlay.destroy();
+  });
+});
+
+describe("MysteryGameOverlay — bestDirectionForDigit", () => {
+  it("digit 0-4 → 'up' (matematisk fordel)", () => {
+    expect(bestDirectionForDigit(0)).toBe("up");
+    expect(bestDirectionForDigit(1)).toBe("up");
+    expect(bestDirectionForDigit(2)).toBe("up");
+    expect(bestDirectionForDigit(3)).toBe("up");
+    expect(bestDirectionForDigit(4)).toBe("up");
+  });
+  it("digit 5-9 → 'down' (matematisk fordel)", () => {
+    expect(bestDirectionForDigit(5)).toBe("down");
+    expect(bestDirectionForDigit(6)).toBe("down");
+    expect(bestDirectionForDigit(7)).toBe("down");
+    expect(bestDirectionForDigit(8)).toBe("down");
+    expect(bestDirectionForDigit(9)).toBe("down");
+  });
+});
+
+describe("MysteryGameOverlay — autospill", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("toggleAutospill aktiverer autospill og kjører gjennom alle runder optimalt", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    const onChoice = vi.fn();
+    overlay.setOnChoice(onChoice);
+    // middleNumber=12345 → digits (rightmost-first): [5,4,3,2,1]
+    // resultNumber=67890 → digits: [0,9,8,7,6]
+    // Ingen joker. Optimal retning per digit:
+    //   digit=5 → down (P=5/10), digit=4 → up (P=5/10),
+    //   digit=3 → up (P=6/10), digit=2 → up (P=7/10), digit=1 → up (P=8/10)
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 999,
+      autoTurnOtherMoveSec: 999,
+    });
+    // Hopp over intro så modal er montert (autospill-knapp synlig)
+    vi.advanceTimersByTime(2100);
+    overlay.toggleAutospill();
+    expect(overlay.autospillActive).toBe(true);
+    // 5 runder × (600ms step + 600ms reveal-delay) ≈ 6s + final 800ms.
+    // Vi avanserer rikelig.
+    vi.advanceTimersByTime(20000);
+    expect(onChoice).toHaveBeenCalledTimes(1);
+    const payload = onChoice.mock.calls[0]![0];
+    expect((payload as { directions: string[] }).directions).toEqual([
+      "down",
+      "up",
+      "up",
+      "up",
+      "up",
+    ]);
+    overlay.destroy();
+  });
+
+  it("toggleAutospill to ganger stopper autospill og resumér per-round timer", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 5,
+      autoTurnOtherMoveSec: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    overlay.toggleAutospill();
+    expect(overlay.autospillActive).toBe(true);
+    overlay.toggleAutospill();
+    expect(overlay.autospillActive).toBe(false);
+    overlay.destroy();
+  });
+
+  it("autospill-knapp viser 'Avslutt autospill' når aktiv", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    const btn = document.querySelector<HTMLButtonElement>(".mj-autospill-btn");
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toBe("Start autospill");
+    overlay.toggleAutospill();
+    expect(btn?.textContent).toBe("Avslutt autospill");
+    expect(btn?.dataset["active"]).toBe("true");
+    overlay.destroy();
+  });
+
+  it("timer-pill viser 2-min countdown i m:ss format og skjules ved klikk", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 9999,
+      autoTurnOtherMoveSec: 9999,
+    });
+    // Hopp over intro (2 sek) — modal monteres + timer-pill første render.
+    vi.advanceTimersByTime(2100);
+    // Etter 2 sek intro tikker pillen rundt 1:58.
+    const pill = document.querySelector<HTMLDivElement>(
+      ".mj-root .mj-root, .mj-root",
+    );
+    // Hent timer-pill via klasse-selector er upålitelig (ingen klasse satt) —
+    // bruk textContent-sjekk på root.
+    const root = document.querySelector(".mj-root");
+    expect(root?.textContent).toMatch(/[01]:\d{2}/);
+    // Bruker klikker → pill skjules.
+    // @ts-expect-error — private.
+    overlay.selectDirection("up");
+    // @ts-expect-error — private.
+    const timerEl = overlay.timerEl as HTMLDivElement | null;
+    expect(timerEl?.style.display).toBe("none");
+    void pill;
+    overlay.destroy();
+  });
+
+  it("2-min inaktivitet aktiverer autospill automatisk", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    const onChoice = vi.fn();
+    overlay.setOnChoice(onChoice);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      // Per-round timer langt utover 2 min slik at den ikke firer først
+      autoTurnFirstMoveSec: 9999,
+      autoTurnOtherMoveSec: 9999,
+    });
+    expect(overlay.autospillActive).toBe(false);
+    // Avanser 2 min — 1ms før triggerer ikke
+    vi.advanceTimersByTime(2 * 60 * 1000 - 100);
+    expect(overlay.autospillActive).toBe(false);
+    // Avanser forbi 2 min
+    vi.advanceTimersByTime(200);
+    expect(overlay.autospillActive).toBe(true);
+    overlay.destroy();
+  });
+
+  it("brukerklikk innen 2 min annullerer inaktivitets-trigger", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 9999,
+      autoTurnOtherMoveSec: 9999,
+    });
+    vi.advanceTimersByTime(2100);
+    // Bruker klikker OPP — registrerer interaksjon.
+    // @ts-expect-error — private.
+    overlay.selectDirection("up");
+    // Avanser 2 min — autospill skal IKKE kicke inn (bruker er engasjert).
+    vi.advanceTimersByTime(2 * 60 * 1000 + 1000);
+    expect(overlay.autospillActive).toBe(false);
+    overlay.destroy();
+  });
+
+  it("brukerklikk under aktiv autospill stopper autospill (manuell takeover)", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 9999,
+      autoTurnOtherMoveSec: 9999,
+    });
+    vi.advanceTimersByTime(2100);
+    overlay.toggleAutospill();
+    expect(overlay.autospillActive).toBe(true);
+    // @ts-expect-error — private.
+    overlay.selectDirection("up");
+    expect(overlay.autospillActive).toBe(false);
+    overlay.destroy();
+  });
+
+  it("autospill-knapp skjules når spillet er ferdig", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+    });
+    vi.advanceTimersByTime(2100);
+    overlay.animateResult(
+      {
+        middleNumber: 12345,
+        resultNumber: 67890,
+        rounds: [],
+        finalPriceIndex: 3,
+        prizeAmountKroner: 400,
+        jokerTriggered: false,
+      },
+      40000,
+    );
+    const btn = document.querySelector<HTMLButtonElement>(".mj-autospill-btn");
+    expect(btn?.style.display).toBe("none");
     overlay.destroy();
   });
 });
