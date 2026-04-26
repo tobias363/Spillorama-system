@@ -701,6 +701,153 @@ export class Game1MiniGameOrchestrator {
     }));
   }
 
+  /**
+   * MED-10 disconnect-recovery: liste ufullførte mini-games for én spesifikk
+   * spiller. Bruker user-private lookup (ikke per scheduled-game) — er
+   * spilleren midt i en mini-game og socket droppes, kommer den hit ved
+   * reconnect for å hente opp pending-listen.
+   *
+   * Returnerer kun rader med `completed_at IS NULL` (ikke spilt enda) +
+   * inkluderer `config_snapshot_json` slik at trigger-payload kan
+   * rekonstrueres deterministisk via implementasjonens `trigger()`-metode
+   * (som bruker resultId som RNG-seed).
+   */
+  async listPendingForUser(
+    userId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      scheduledGameId: string;
+      winnerUserId: string;
+      miniGameType: MiniGameType;
+      configSnapshot: Readonly<Record<string, unknown>>;
+      triggeredAt: Date;
+    }>
+  > {
+    const { rows } = await this.pool.query<MiniGameResultRow>(
+      `SELECT id, scheduled_game_id, mini_game_type, winner_user_id,
+              config_snapshot_json, triggered_at
+         FROM ${this.resultsTable()}
+        WHERE completed_at IS NULL AND winner_user_id = $1
+        ORDER BY triggered_at ASC`,
+      [userId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      scheduledGameId: r.scheduled_game_id,
+      winnerUserId: r.winner_user_id,
+      miniGameType: r.mini_game_type as MiniGameType,
+      configSnapshot: r.config_snapshot_json ?? {},
+      triggeredAt: r.triggered_at,
+    }));
+  }
+
+  /**
+   * MED-10 disconnect-recovery: re-emit `mini_game:trigger` for alle pending
+   * mini-games for `userId`. Kalles når klienten har reconnect-et og sender
+   * `mini_game:resume` til server.
+   *
+   * Designvalg:
+   *   - Trigger-payload er deterministisk fra resultId-seed → re-kall av
+   *     `implementation.trigger(context)` produserer EXACT samme payload som
+   *     ved første trigger (mystery: samme middleNumber/resultNumber).
+   *   - Vi rekonstruerer kun de feltene som trengs for trigger() (resultId,
+   *     scheduledGameId, winnerUserId, configSnapshot). hallId/walletId/
+   *     drawSequenceAtWin er kun relevante i handleChoice — de slås opp
+   *     fra DB der via `loadContextForResult`. For trigger() er de ikke
+   *     nødvendige, så vi sender placeholders trygt.
+   *   - Fire-and-forget per mini-game: hvis en feiler (manglende impl,
+   *     trigger-throw), logger vi warn og fortsetter med neste.
+   *   - Ingen DB-skriv: dette er ren read + re-broadcast.
+   *
+   * Returnerer antall mini-games som ble re-emittet.
+   */
+  async resumePendingForUser(userId: string): Promise<number> {
+    const pending = await this.listPendingForUser(userId);
+    if (pending.length === 0) return 0;
+
+    let resumed = 0;
+    for (const row of pending) {
+      const implementation = this.miniGames.get(row.miniGameType);
+      if (!implementation) {
+        log.warn(
+          { userId, resultId: row.id, miniGameType: row.miniGameType },
+          "[MED-10] resume: implementasjon ikke registrert — skipper",
+        );
+        continue;
+      }
+
+      // Slå opp wallet/hall/drawSeq for korrekt context. Disse felt-ene er
+      // ikke read-av trigger() i de fleste implementasjoner, men vi
+      // rekonstruerer dem trofast for å matche første-trigger-context.
+      // Faller tilbake til placeholders hvis lookup feiler — trigger() er
+      // kontrakt-festet til å være pure (ikke mutere ekstern state).
+      let winnerWalletId = "";
+      let hallId = "";
+      let drawSequenceAtWin = 0;
+      try {
+        const ctx = await this.loadContextForResume(
+          row.id,
+          row.scheduledGameId,
+          row.winnerUserId,
+        );
+        winnerWalletId = ctx.winnerWalletId;
+        hallId = ctx.hallId;
+        drawSequenceAtWin = ctx.drawSequenceAtWin;
+      } catch (err) {
+        log.debug(
+          { err, resultId: row.id },
+          "[MED-10] resume: kunne ikke laste full context — bruker placeholders",
+        );
+      }
+
+      try {
+        const context: MiniGameTriggerContext = {
+          resultId: row.id,
+          scheduledGameId: row.scheduledGameId,
+          winnerUserId: row.winnerUserId,
+          winnerWalletId,
+          hallId,
+          drawSequenceAtWin,
+          configSnapshot: row.configSnapshot,
+        };
+        const payload = implementation.trigger(context);
+
+        try {
+          this.broadcaster.onTrigger({
+            scheduledGameId: row.scheduledGameId,
+            winnerUserId: row.winnerUserId,
+            resultId: row.id,
+            miniGameType: row.miniGameType,
+            payload: payload.payload,
+            timeoutSeconds: payload.timeoutSeconds,
+          });
+          resumed += 1;
+          this.fireAudit({
+            actorId: userId,
+            action: "game1_minigame.resumed",
+            resourceId: row.id,
+            details: {
+              miniGameType: row.miniGameType,
+              scheduledGameId: row.scheduledGameId,
+            },
+          });
+        } catch (err) {
+          log.warn(
+            { err, resultId: row.id },
+            "[MED-10] resume broadcast feilet — ignorert",
+          );
+        }
+      } catch (err) {
+        log.warn(
+          { err, resultId: row.id, miniGameType: row.miniGameType },
+          "[MED-10] resume: implementation.trigger() kastet — skipper",
+        );
+      }
+    }
+    return resumed;
+  }
+
   // ── Internal helpers ────────────────────────────────────────────────────────
 
   private lastScheduledGameId: string | null = null;
@@ -803,6 +950,56 @@ export class Game1MiniGameOrchestrator {
     return {
       winnerWalletId,
       hallId: aRes.rows[0]!.hall_id,
+      drawSequenceAtWin: 0,
+    };
+  }
+
+  /**
+   * MED-10 resume-helper: les hall + draw-sekvens + walletId for et pending
+   * resultId UTEN transaction (vs `loadContextForResult` som trenger
+   * client). Brukes fra `resumePendingForUser` for å bygge trigger-context.
+   *
+   * Bruker pool direkte siden vi ikke trenger row-låsing — leser kun
+   * uforanderlig state (assignment + hall + winner-wallet).
+   */
+  private async loadContextForResume(
+    resultId: string,
+    scheduledGameId: string,
+    winnerUserId: string,
+  ): Promise<{ winnerWalletId: string; hallId: string; drawSequenceAtWin: number }> {
+    void resultId; // reservert for fremtidig debug-logging
+    const userRes = await this.pool.query<{ wallet_id: string | null }>(
+      `SELECT wallet_id FROM "${this.schema}"."app_users" WHERE id = $1 LIMIT 1`,
+      [winnerUserId],
+    );
+    const winnerWalletId = userRes.rows[0]?.wallet_id ?? "";
+
+    const pwRes = await this.pool.query<{ hall_id: string; draw_sequence_at_win: number }>(
+      `SELECT hall_id, draw_sequence_at_win
+         FROM "${this.schema}"."app_game1_phase_winners"
+        WHERE scheduled_game_id = $1 AND winner_user_id = $2
+        ORDER BY draw_sequence_at_win DESC
+        LIMIT 1`,
+      [scheduledGameId, winnerUserId],
+    );
+    if (pwRes.rows.length > 0) {
+      return {
+        winnerWalletId,
+        hallId: pwRes.rows[0]!.hall_id,
+        drawSequenceAtWin: pwRes.rows[0]!.draw_sequence_at_win,
+      };
+    }
+
+    const aRes = await this.pool.query<{ hall_id: string }>(
+      `SELECT hall_id
+         FROM "${this.schema}"."app_game1_ticket_assignments"
+        WHERE scheduled_game_id = $1 AND buyer_user_id = $2
+        LIMIT 1`,
+      [scheduledGameId, winnerUserId],
+    );
+    return {
+      winnerWalletId,
+      hallId: aRes.rows[0]?.hall_id ?? "",
       drawSequenceAtWin: 0,
     };
   }

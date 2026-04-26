@@ -364,3 +364,43 @@ describe("MiniGameRouter — dismiss + destroy", () => {
     expect(overlay.destroyed).toBe(true);
   });
 });
+
+describe("MiniGameRouter — MED-10 disconnect-recovery", () => {
+  beforeEach(() => {
+    wheelMock.mockReset();
+    chestMock.mockReset();
+    colorDraftMock.mockReset();
+    oddsenMock.mockReset();
+    mysteryMock.mockReset();
+  });
+
+  // Når socket reconnecter og server re-emitter `mini_game:trigger` for et
+  // pending resultId, skal router re-render overlay-en. Hvis det ikke
+  // finnes en aktiv overlay (fordi den ble destroyed ved disconnect)
+  // skal en ny instans bygges fra payload — IKKE droppes som "stale".
+  it("re-renders overlay when resume re-emits trigger for the same resultId", () => {
+    const { deps, root } = makeDeps();
+    const router = new MiniGameRouter(deps);
+
+    // Første trigger (før disconnect).
+    router.onTrigger(makeTrigger("mystery", { middleNumber: 12345 }, "mgr-resume-x"));
+    expect(mysteryMock).toHaveBeenCalledOnce();
+    const firstOverlay = root.children[0] as FakeOverlay;
+
+    // Simuler disconnect: overlay destroyed manuelt (matches Game1Controller-
+    // teardown ved socket-drop / round-reset).
+    router.dismiss();
+    expect(firstOverlay.destroyed).toBe(true);
+
+    // Server re-emitter trigger med SAMME resultId etter reconnect.
+    router.onTrigger(makeTrigger("mystery", { middleNumber: 12345 }, "mgr-resume-x"));
+    // Ny overlay skal bygges (overlay constructor kalt 2 ganger totalt).
+    expect(mysteryMock).toHaveBeenCalledTimes(2);
+    // Live-overlay (ikke-destroyed) skal være den nye, og dens show() ble
+    // kalt med samme payload som første trigger (deterministisk replay).
+    const live = root.children.filter((c) => !(c as FakeOverlay).destroyed) as FakeOverlay[];
+    expect(live).toHaveLength(1);
+    expect(live[0]._tag).toBe("mystery");
+    expect(live[0].show).toHaveBeenCalledWith({ middleNumber: 12345 });
+  });
+});

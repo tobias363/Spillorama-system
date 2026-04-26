@@ -191,6 +191,47 @@ export function createMiniGameSocketWire(
       }
     );
 
+    /**
+     * MED-10 disconnect-recovery: klient kaller `mini_game:resume` etter
+     * reconnect for å få re-emittet `mini_game:trigger` for alle pending
+     * mini-games (de som har `completed_at IS NULL` i DB).
+     *
+     * Server-autoritativt:
+     *   - Ack returnerer antall resumede mini-games (debug + telemetri).
+     *   - Selve re-broadcast skjer via `orchestrator.resumePendingForUser()`
+     *     som bruker den allerede-koblede `MiniGameBroadcaster.onTrigger`.
+     *     Klienten mottar dem på vanlig `mini_game:trigger`-event slik at
+     *     `MiniGameRouter.onTrigger` kan render overlay.
+     *   - Idempotent: gjentatte kall er trygge — DB-state endres ikke,
+     *     samme rad → samme deterministisk trigger-payload.
+     *
+     * Auth-modell: samme som `mini_game:join` — accessToken kreves, og
+     * resume opererer KUN på pending-rader for den autentiserte brukeren.
+     */
+    socket.on(
+      "mini_game:resume",
+      async (
+        rawPayload: JoinPayload,
+        ack?: (resp: AckResponse<{ resumedCount: number }>) => void
+      ) => {
+        try {
+          const userId = await authAndJoin(socket, rawPayload ?? {});
+          const resumedCount = await orchestrator.resumePendingForUser(userId);
+          log.debug(
+            { userId, socketId: socket.id, resumedCount },
+            "mini_game:resume — pending mini-games re-broadcast"
+          );
+          ack?.({ ok: true, data: { resumedCount } });
+        } catch (err) {
+          log.debug(
+            { err, event: "mini_game:resume", socketId: socket.id },
+            "mini-game resume rejected"
+          );
+          ack?.({ ok: false, error: toPublicError(err) });
+        }
+      }
+    );
+
     socket.on(
       "mini_game:choice",
       async (

@@ -145,6 +145,19 @@ export const SocketEvents = {
    * legacy host-room `minigame:play` event — that path is unused by M6.
    */
   MINI_GAME_CHOICE: "mini_game:choice",
+  /**
+   * MED-10 disconnect-recovery: client → server. Sent after reconnect to
+   * request that the server re-emit `mini_game:trigger` for any pending
+   * mini-games belonging to the authenticated user. Payload: `{ accessToken }`.
+   * Ack: `{ resumedCount: number }`.
+   */
+  MINI_GAME_RESUME: "mini_game:resume",
+  /**
+   * MED-10 disconnect-recovery: client → server. Sent before resume to
+   * (re)join the user-private mini-game room. Payload: `{ accessToken }`.
+   * Ack: `{ joined: true }`.
+   */
+  MINI_GAME_JOIN: "mini_game:join",
   // Server → Client (broadcast)
   ROOM_UPDATE: "room:update",
   DRAW_NEW: "draw:new",
