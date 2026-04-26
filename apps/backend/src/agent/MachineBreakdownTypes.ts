@@ -53,17 +53,50 @@ export interface MachineRow {
 }
 
 /**
- * Full breakdown — 14 rader pluss 3 calculations.
+ * Full breakdown — 14 rader pluss shift-delta-seksjon (5 felt).
+ *
+ * Shift-delta-seksjonen speiler wireframe 16.25 / 17.10 1:1:
+ *   "Endring opptall kasse"-blokk:
+ *     • Kasse start skift          (kasse_start_skift_cents)
+ *     • Kasse endt skift før dropp (ending_opptall_kassie_cents)
+ *     • Endring                    (= ending - start, beregnet)
+ *   "Fordeling av endring opptall kasse på dropsafe og kasse"-blokk:
+ *     • Innskudd dropsafe          (innskudd_drop_safe_cents)
+ *     • Påfyll/ut kasse            (paafyll_ut_kasse_cents)
+ *     • Totalt dropsafe/påfyll     (totalt_dropsafe_paafyll_cents,
+ *                                   = innskudd_drop_safe + paafyll_ut_kasse)
+ *   • Difference in shifts         (difference_in_shifts_cents)
+ *
+ * Formula (wireframe 16.25):
+ *   difference_in_shifts =
+ *     (totalt_dropsafe_paafyll - endring) + endring - totalt_sum_kasse_fil
+ *   Forenkling: difference = totalt_dropsafe_paafyll - totalt_sum_kasse_fil
+ *
+ *   `totalt_sum_kasse_fil` = sum(rows: in - out) — bordet maskin-totaler.
  *
  * `difference_in_shifts_cents` varsles i UI hvis > 10000 (100 NOK) pr
  * wireframe-regel ("Difference must be explained if > 100 NOK").
+ *
+ * Backwards compat: kasse_start_skift_cents og paafyll_ut_kasse_cents og
+ * totalt_dropsafe_paafyll_cents er nye felt (K1-B). Validering aksepterer
+ * mangler (default 0) for å støtte legacy-rader fra K1-A.
  */
 export interface MachineBreakdown {
   rows: Partial<Record<MachineRowKey, MachineRow>>;
-  /** Calculated: kasse-telling ved dag-slutt (wireframe: "Ending opptall kassie"). */
+  /** Kasse-balanse ved skift-start (wireframe: "Kasse start skift"). K1-B. */
+  kasse_start_skift_cents: number;
+  /** Kasse-telling ved skift-slutt før dropp (wireframe: "Kasse endt skift før dropp"). */
   ending_opptall_kassie_cents: number;
   /** Innskudd til drop-safe (wireframe: "Innskudd droppaskile"). */
   innskudd_drop_safe_cents: number;
+  /** Påfyll/ut av kasse — flytter penger inn/ut av kasse-skuffen. K1-B. */
+  paafyll_ut_kasse_cents: number;
+  /**
+   * Totalt dropsafe + påfyll/ut kasse. Beregnes på klient (=innskudd + påfyll)
+   * men lagres for å matche wireframe-skjema. Skal være lik Endring (= end - start)
+   * i en korrekt utfylt rapport. K1-B.
+   */
+  totalt_dropsafe_paafyll_cents: number;
   /** Diff mellom shifts ved overlevering (wireframe: "Difference in shifts"). */
   difference_in_shifts_cents: number;
 }
@@ -101,8 +134,11 @@ export const ALLOWED_BILAG_MIME = new Set<BilagReceipt["mime"]>([
 export function emptyMachineBreakdown(): MachineBreakdown {
   return {
     rows: {},
+    kasse_start_skift_cents: 0,
     ending_opptall_kassie_cents: 0,
     innskudd_drop_safe_cents: 0,
+    paafyll_ut_kasse_cents: 0,
+    totalt_dropsafe_paafyll_cents: 0,
     difference_in_shifts_cents: 0,
   };
 }
@@ -147,13 +183,19 @@ export function validateMachineBreakdown(input: unknown): MachineBreakdown {
       };
     }
   }
+  const start = toNonNegativeInt(obj.kasse_start_skift_cents, "kasse_start_skift_cents");
   const ending = toNonNegativeInt(obj.ending_opptall_kassie_cents, "ending_opptall_kassie_cents");
   const drop = toNonNegativeInt(obj.innskudd_drop_safe_cents, "innskudd_drop_safe_cents");
+  const paafyll = toInteger(obj.paafyll_ut_kasse_cents, "paafyll_ut_kasse_cents");
+  const totaltDropsafe = toInteger(obj.totalt_dropsafe_paafyll_cents, "totalt_dropsafe_paafyll_cents");
   const diff = toInteger(obj.difference_in_shifts_cents, "difference_in_shifts_cents");
   return {
     rows,
+    kasse_start_skift_cents: start,
     ending_opptall_kassie_cents: ending,
     innskudd_drop_safe_cents: drop,
+    paafyll_ut_kasse_cents: paafyll,
+    totalt_dropsafe_paafyll_cents: totaltDropsafe,
     difference_in_shifts_cents: diff,
   };
 }

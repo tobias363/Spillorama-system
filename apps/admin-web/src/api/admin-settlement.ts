@@ -49,8 +49,17 @@ export interface MachineRow {
 
 export interface MachineBreakdown {
   rows: Partial<Record<MachineRowKey, MachineRow>>;
+  /** K1-B: kasse-balanse ved skift-start (wireframe: "Kasse start skift"). */
+  kasse_start_skift_cents: number;
+  /** Kasse-telling ved skift-slutt før dropp. */
   ending_opptall_kassie_cents: number;
+  /** Innskudd til drop-safe. */
   innskudd_drop_safe_cents: number;
+  /** K1-B: påfyll/ut av kasse. Kan være negativ (uttrekk for vekslepenger). */
+  paafyll_ut_kasse_cents: number;
+  /** K1-B: totalt dropsafe + påfyll/ut kasse (= innskudd + paafyll). */
+  totalt_dropsafe_paafyll_cents: number;
+  /** Diff mellom shifts ved overlevering. */
   difference_in_shifts_cents: number;
 }
 

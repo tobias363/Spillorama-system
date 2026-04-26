@@ -96,8 +96,14 @@ export type SettlementModalMode = "create" | "edit" | "view";
 
 interface State {
   rows: Map<MachineRowKey, MachineRow>;
+  /** K1-B: kasse-balanse ved skift-start (wireframe "Kasse start skift"). */
+  kasseStartSkiftOre: number;
   endingOpptallKassieOre: number;
   innskuddDropSafeOre: number;
+  /** K1-B: påfyll/ut av kasse — kan være negativ (uttrekk). */
+  paafyllUtKasseOre: number;
+  /** K1-B: totalt dropsafe + påfyll (= innskudd + paafyll). Beregnet, lagret for paritet. */
+  totaltDropsafePaafyllOre: number;
   differenceInShiftsOre: number;
   notes: string;
   receipt: BilagReceipt | null;
@@ -106,7 +112,10 @@ interface State {
   hallName: string;
   agentName: string;
   businessDate: string; // YYYY-MM-DD
-  /** Shift-delta-felt: "Tra start til slut skill" (total IN fra start → slutt). */
+  /**
+   * @deprecated K1-A felt — beholdes for backward-compat med eldre prefill.
+   * Erstattes av `kasseStartSkiftOre` + `endingOpptallKassieOre` i wireframe-formula.
+   */
   shiftStartToEndOre: number;
   /** Editor-reason (admin edit-modus krever begrunnelse). */
   editReason: string;
@@ -127,8 +136,11 @@ function emptyState(params: {
   }
   return {
     rows,
+    kasseStartSkiftOre: 0,
     endingOpptallKassieOre: 0,
     innskuddDropSafeOre: 0,
+    paafyllUtKasseOre: 0,
+    totaltDropsafePaafyllOre: 0,
     differenceInShiftsOre: 0,
     notes: "",
     receipt: null,
@@ -161,8 +173,11 @@ function stateFromSettlement(
       state.rows.set(key, { in_cents: r.in_cents, out_cents: r.out_cents });
     }
   }
+  state.kasseStartSkiftOre = settlement.machineBreakdown?.kasse_start_skift_cents ?? 0;
   state.endingOpptallKassieOre = settlement.machineBreakdown?.ending_opptall_kassie_cents ?? 0;
   state.innskuddDropSafeOre = settlement.machineBreakdown?.innskudd_drop_safe_cents ?? 0;
+  state.paafyllUtKasseOre = settlement.machineBreakdown?.paafyll_ut_kasse_cents ?? 0;
+  state.totaltDropsafePaafyllOre = settlement.machineBreakdown?.totalt_dropsafe_paafyll_cents ?? 0;
   state.differenceInShiftsOre = settlement.machineBreakdown?.difference_in_shifts_cents ?? 0;
   state.notes = settlement.settlementNote ?? "";
   state.receipt = settlement.bilagReceipt ?? null;
@@ -173,31 +188,61 @@ function stateFromSettlement(
 }
 
 /**
- * Re-beregn shift-delta (difference_in_shifts) og oppdater DOM.
+ * Re-beregn shift-delta-felter (endring + totalt_dropsafe + difference) og
+ * oppdater DOM. Kalles ved initial-render og hver gang bruker endrer noen av:
+ *   - sb-kasse-start          (kasse_start_skift)
+ *   - sb-ending               (ending_opptall_kassie)
+ *   - sb-drop                 (innskudd_drop_safe)
+ *   - sb-paafyll              (paafyll_ut_kasse)
  *
- * Kalles ved initial-render (prefill i edit-modus) og hver gang bruker
- * endrer `sb-start-end`, `sb-drop` eller `sb-ending`. Diff-feltet (`sb-diff`)
- * er read-only og speiler kun state.
+ * Følger wireframe 16.25 formula 1:1:
+ *   endring                 = ending - start                  (read-only)
+ *   totalt_dropsafe_paafyll = innskudd + paafyll              (read-only)
+ *   total_sum_kasse_fil     = sum(rows: in - out)
+ *   difference_in_shifts    = (totalt - endring) + endring - total_sum
+ *
+ * Read-only-felt (`sb-endring`, `sb-totalt-dropsafe`, `sb-diff`) speiler kun state.
  */
 function recomputeShiftDelta(state: State, container: HTMLElement): void {
-  const { differenceInShiftsCents } = calculateShiftDelta({
-    shiftStartToEndCents: state.shiftStartToEndOre,
-    innskuddDropSafeCents: state.innskuddDropSafeOre,
-    endingOpptallKassieCents: state.endingOpptallKassieOre,
-  });
-  state.differenceInShiftsOre = differenceInShiftsCents;
+  // Compute totalt_sum_kasse_fil (sum av maskin-rader: in - out).
+  let totalSumKasseFil = 0;
+  for (const r of state.rows.values()) {
+    totalSumKasseFil += r.in_cents - r.out_cents;
+  }
+  // Wireframe 16.25 formel:
+  const endring = state.endingOpptallKassieOre - state.kasseStartSkiftOre;
+  const totaltDropsafePaafyll = state.innskuddDropSafeOre + state.paafyllUtKasseOre;
+  const differenceInShifts =
+    (totaltDropsafePaafyll - endring) + endring - totalSumKasseFil;
+
+  state.totaltDropsafePaafyllOre = totaltDropsafePaafyll;
+  state.differenceInShiftsOre = differenceInShifts;
+
+  // Update DOM read-only-felter.
+  const endringEl = container.querySelector<HTMLInputElement>("#sb-endring");
+  if (endringEl) endringEl.value = oreToNokString(endring);
+  const totaltDropsafeEl = container.querySelector<HTMLInputElement>("#sb-totalt-dropsafe");
+  if (totaltDropsafeEl) totaltDropsafeEl.value = oreToNokString(totaltDropsafePaafyll);
   const diffEl = container.querySelector<HTMLInputElement>("#sb-diff");
-  if (diffEl) diffEl.value = oreToNokString(differenceInShiftsCents);
+  if (diffEl) diffEl.value = oreToNokString(differenceInShifts);
+
+  // Mismatch-advarsel: hvis innskudd+påfyll ikke matcher endring, vis varsel.
+  const mismatchEl = container.querySelector<HTMLElement>("#sb-mismatch-warn");
+  if (mismatchEl) {
+    if (totaltDropsafePaafyll !== endring) {
+      const delta = totaltDropsafePaafyll - endring;
+      mismatchEl.style.display = "";
+      mismatchEl.textContent = `Advarsel: innskudd+påfyll (${oreToNokString(totaltDropsafePaafyll)} kr) matcher ikke endring (${oreToNokString(endring)} kr). Differanse: ${oreToNokString(delta)} kr.`;
+    } else {
+      mismatchEl.style.display = "none";
+    }
+  }
 }
 
 // ── Shift-delta beregning ───────────────────────────────────────────────────
 //
-// Wireframe 17.40 (Agent Settlement Popup) viser 4 kalkulerte felter under
-// maskin-tabellen:
-//   1. "Tra start til slut skill" (total IN akkumulert fra shift-start)
-//   2. "Innskudd droppaskile (settlement Payful kassie)" (drop-safe innskudd)
-//   3. "Total (Total dispensable)" (ending opptall kassie)
-//   4. "Difference in shifts" = 1 - 2 - 3
+// @deprecated K1-A formula — beholdt for backward-compat. Bruk
+// `calculateWireframeShiftDelta` for ny kode.
 //
 // Alt regnes i øre for å unngå float-feil.
 export function calculateShiftDelta(input: {
@@ -211,6 +256,40 @@ export function calculateShiftDelta(input: {
   };
 }
 
+/**
+ * K1-B wireframe 16.25 / 17.10 — eksakt 1:1 formel for shift-delta.
+ *
+ * Speiler `AgentSettlementService.calculateWireframeShiftDelta` på backend.
+ *
+ * Formula:
+ *   endring                 = ending - start
+ *   totalt_dropsafe_paafyll = innskudd + paafyll
+ *   difference_in_shifts    = (totalt_dropsafe_paafyll - endring) + endring - totalt_sum_kasse_fil
+ */
+export function calculateWireframeShiftDelta(input: {
+  kasseStartSkiftCents: number;
+  endingOpptallKassieCents: number;
+  innskuddDropSafeCents: number;
+  paafyllUtKasseCents: number;
+  totaltSumKasseFilCents: number;
+}): {
+  endringCents: number;
+  totaltDropsafePaafyllCents: number;
+  differenceInShiftsCents: number;
+  dropsafePaafyllMismatch: boolean;
+} {
+  const endring = input.endingOpptallKassieCents - input.kasseStartSkiftCents;
+  const totaltDropsafePaafyll = input.innskuddDropSafeCents + input.paafyllUtKasseCents;
+  const differenceInShifts =
+    (totaltDropsafePaafyll - endring) + endring - input.totaltSumKasseFilCents;
+  return {
+    endringCents: endring,
+    totaltDropsafePaafyllCents: totaltDropsafePaafyll,
+    differenceInShiftsCents: differenceInShifts,
+    dropsafePaafyllMismatch: totaltDropsafePaafyll !== endring,
+  };
+}
+
 function breakdownFromState(state: State): MachineBreakdown {
   const rows: Partial<Record<MachineRowKey, MachineRow>> = {};
   for (const [key, value] of state.rows.entries()) {
@@ -221,8 +300,11 @@ function breakdownFromState(state: State): MachineBreakdown {
   }
   return {
     rows,
+    kasse_start_skift_cents: state.kasseStartSkiftOre,
     ending_opptall_kassie_cents: state.endingOpptallKassieOre,
     innskudd_drop_safe_cents: state.innskuddDropSafeOre,
+    paafyll_ut_kasse_cents: state.paafyllUtKasseOre,
+    totalt_dropsafe_paafyll_cents: state.totaltDropsafePaafyllOre,
     difference_in_shifts_cents: state.differenceInShiftsOre,
   };
 }
@@ -295,35 +377,65 @@ function renderModalBody(state: State): string {
 
       <fieldset style="margin-top:16px;border:1px solid #ddd;padding:10px;">
         <legend style="font-size:14px;width:auto;padding:0 6px;border:0;margin:0;">
-          ${escapeHtml(t("shift_delta_section") || "Shift-delta (overlevering)")}
+          ${escapeHtml(t("shift_delta_endring_section") || "Endring opptall kasse")}
         </legend>
         <div class="row">
-          <div class="col-sm-6">
-            <label>${escapeHtml(t("shift_start_to_end") || "Tra start til slut skill")} (kr)</label>
-            <input type="number" step="0.01" class="form-control" id="sb-start-end"
-                   value="${oreToNokString(state.shiftStartToEndOre)}"
+          <div class="col-sm-4">
+            <label>${escapeHtml(t("kasse_start_skift") || "Kasse start skift")} (kr)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="sb-kasse-start"
+                   value="${oreToNokString(state.kasseStartSkiftOre)}"
                    ${state.mode === "view" ? "disabled" : ""}>
           </div>
-          <div class="col-sm-6">
-            <label>${escapeHtml(t("innskudd_drop_safe") || "Innskudd drop-safe")} (kr)</label>
-            <input type="number" step="0.01" min="0" class="form-control" id="sb-drop"
-                   value="${oreToNokString(state.innskuddDropSafeOre)}"
-                   ${state.mode === "view" ? "disabled" : ""}>
-          </div>
-        </div>
-        <div class="row" style="margin-top:8px;">
-          <div class="col-sm-6">
-            <label>${escapeHtml(t("ending_opptall_kassie") || "Total dispensable")} (kr)</label>
+          <div class="col-sm-4">
+            <label>${escapeHtml(t("kasse_endt_skift") || "Kasse endt skift (før dropp)")} (kr)</label>
             <input type="number" step="0.01" min="0" class="form-control" id="sb-ending"
                    value="${oreToNokString(state.endingOpptallKassieOre)}"
                    ${state.mode === "view" ? "disabled" : ""}>
           </div>
-          <div class="col-sm-6">
+          <div class="col-sm-4">
+            <label>${escapeHtml(t("endring") || "Endring")} (kr)</label>
+            <input type="number" step="0.01" class="form-control" id="sb-endring" readonly
+                   value="${oreToNokString(state.endingOpptallKassieOre - state.kasseStartSkiftOre)}"
+                   title="${escapeHtml(t("auto_calculated") || "Kalkulert automatisk")}"
+                   style="background-color:#f5f5f5;">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset style="margin-top:8px;border:1px solid #ddd;padding:10px;">
+        <legend style="font-size:14px;width:auto;padding:0 6px;border:0;margin:0;">
+          ${escapeHtml(t("shift_delta_dropsafe_section") || "Fordeling — dropsafe og kasse")}
+        </legend>
+        <div class="row">
+          <div class="col-sm-4">
+            <label>${escapeHtml(t("innskudd_drop_safe") || "Innskudd dropsafe")} (kr)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="sb-drop"
+                   value="${oreToNokString(state.innskuddDropSafeOre)}"
+                   ${state.mode === "view" ? "disabled" : ""}>
+          </div>
+          <div class="col-sm-4">
+            <label>${escapeHtml(t("paafyll_ut_kasse") || "Påfyll/ut kasse")} (kr)</label>
+            <input type="number" step="0.01" class="form-control" id="sb-paafyll"
+                   value="${oreToNokString(state.paafyllUtKasseOre)}"
+                   title="${escapeHtml(t("paafyll_can_be_negative") || "Negativt = uttrekk fra kasse")}"
+                   ${state.mode === "view" ? "disabled" : ""}>
+          </div>
+          <div class="col-sm-4">
+            <label>${escapeHtml(t("totalt_dropsafe_paafyll") || "Totalt dropsafe + påfyll")} (kr)</label>
+            <input type="number" step="0.01" class="form-control" id="sb-totalt-dropsafe" readonly
+                   value="${oreToNokString(state.innskuddDropSafeOre + state.paafyllUtKasseOre)}"
+                   title="${escapeHtml(t("auto_calculated") || "Kalkulert automatisk")}"
+                   style="background-color:#f5f5f5;">
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <div class="col-sm-12">
             <label>${escapeHtml(t("difference_in_shifts") || "Difference in shifts")} (kr)</label>
             <input type="number" step="0.01" class="form-control" id="sb-diff" readonly
                    value="${oreToNokString(state.differenceInShiftsOre)}"
                    title="${escapeHtml(t("auto_calculated") || "Kalkulert automatisk")}"
                    style="background-color:#f5f5f5;">
+            <div id="sb-mismatch-warn" class="alert alert-warning" style="display:none;margin-top:6px;font-size:90%;"></div>
           </div>
         </div>
       </fieldset>
@@ -537,10 +649,21 @@ export function openSettlementBreakdownModal(opts: SettlementBreakdownModalOptio
       if (tIn) tIn.textContent = formatNOK(totalIn);
       if (tOut) tOut.textContent = formatNOK(totalOut);
       if (tSum) tSum.textContent = formatNOK(totalIn - totalOut);
+      // K1-B: maskin-sum-endringer påvirker also difference_in_shifts
+      // (formelen avhenger av totalt_sum_kasse_fil = sum(rows: in-out)).
+      recomputeShiftDelta(state, container);
       return;
     }
 
     // Calculation-felter — skriv state og re-beregn difference-in-shifts
+    if (target.id === "sb-kasse-start") {
+      const n = Number(target.value);
+      if (Number.isFinite(n) && n >= 0) {
+        state.kasseStartSkiftOre = nokToOre(n);
+        recomputeShiftDelta(state, container);
+      }
+      return;
+    }
     if (target.id === "sb-ending") {
       const n = Number(target.value);
       if (Number.isFinite(n) && n >= 0) {
@@ -557,11 +680,19 @@ export function openSettlementBreakdownModal(opts: SettlementBreakdownModalOptio
       }
       return;
     }
+    if (target.id === "sb-paafyll") {
+      const n = Number(target.value);
+      if (Number.isFinite(n)) {
+        state.paafyllUtKasseOre = nokToOre(n);
+        recomputeShiftDelta(state, container);
+      }
+      return;
+    }
     if (target.id === "sb-start-end") {
+      // Backward-compat: legacy felt — beholdes for tester som fortsatt bruker det.
       const n = Number(target.value);
       if (Number.isFinite(n)) {
         state.shiftStartToEndOre = nokToOre(n);
-        recomputeShiftDelta(state, container);
       }
       return;
     }
