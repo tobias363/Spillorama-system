@@ -66,6 +66,22 @@ export type { Game1AdminPhaseWonPayload } from "./schemas.js";
 export { Game1AdminPhysicalTicketWonPayloadSchema } from "./schemas.js";
 export type { Game1AdminPhysicalTicketWonPayload } from "./schemas.js";
 
+// BIN-760: autoritativ `wallet:state` socket-event. Erstatter
+// `room:update.me.balance` som primær wallet-sync (room:update beholdes
+// for bakover-kompat). Per-walletId Socket.IO-rom: `wallet:<walletId>`.
+export {
+  WalletStateEventSchema,
+  WalletAccountWithReservationsSchema,
+  WalletStateReasonSchema,
+  WalletStateSourceSchema,
+} from "./schemas.js";
+export type {
+  WalletStateEvent,
+  WalletAccountWithReservations,
+  WalletStateReason,
+  WalletStateSource,
+} from "./schemas.js";
+
 // Task 1.1: auto-pause ved phase-won + manuell resume (Gap #1 i MASTER_HALL_DASHBOARD_GAP_2026-04-24.md).
 export {
   Game1AdminAutoPausedPayloadSchema,
@@ -180,6 +196,14 @@ export const SocketEvents = {
   G3_PATTERN_CHANGED: "g3:pattern:changed",
   /** BIN-615 / PR-C3: Game 3 — server auto-claimed a pattern for a player. */
   G3_PATTERN_AUTO_WON: "g3:pattern:auto-won",
+  /**
+   * BIN-760: autoritativ wallet-state-push. Server emitter til Socket.IO-
+   * rommet `wallet:<walletId>` etter hver wallet-commit (credit/debit/
+   * transfer/reserve/commit/release/expiry). Klient-chip oppdateres
+   * umiddelbart uten refetch. Erstatter `room:update.me.balance` som
+   * primær wallet-sync (room:update beholdes for bakover-kompat).
+   */
+  WALLET_STATE: "wallet:state",
 } as const;
 
 // ── Generic ack response ────────────────────────────────────────────────────
