@@ -456,3 +456,124 @@ test("autoCloseTicket på ukjent id → MACHINE_TICKET_NOT_FOUND", async () => {
     (err) => err instanceof DomainError && err.code === "MACHINE_TICKET_NOT_FOUND"
   );
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PR #522 hotfix — idempotency-keys + to:"winnings" for machine-payout
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("PR #522: createTicket — uniqueTransaction-key er stabil på tvers av retries (ikke fersk ticketId)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+
+  // Spy på wallet.debit-kall for å fange idempotency-keys.
+  const debitKeys: string[] = [];
+  const origDebit = ctx.wallet.debit.bind(ctx.wallet);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (ctx.wallet as any).debit = async (
+    walletId: string, amount: number, reason: string,
+    options?: { idempotencyKey?: string },
+  ) => {
+    if (options?.idempotencyKey) debitKeys.push(options.idempotencyKey);
+    return origDebit(walletId, amount, reason, options);
+  };
+
+  await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "stable-key-1",
+  });
+  // Retry — vil kaste fra Metronia-stub men idempotency-key fra første debit-
+  // kall er fanget i debitKeys.
+  await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "stable-key-1",
+  }).catch(() => { /* expected — Metronia-stub kaster DUPLICATE_TX */ });
+
+  // KRITISK: idempotency-key må være IDENTISK på tvers av retry.
+  // Før hotfix: nøkkelen inneholdt `mtkt-${randomUUID()}` så hver retry
+  // produserte ny nøkkel og dobbel-debiterte spilleren.
+  assert.equal(debitKeys.length, 2, "skal være to debit-kall (en per retry)");
+  assert.equal(debitKeys[0], debitKeys[1],
+    `idempotency-key må matche på retry — fikk ${debitKeys[0]} vs ${debitKeys[1]}`);
+  // Format-verifikasjon: ingen `mtkt-${uuid}` i keyen.
+  assert.ok(!debitKeys[0]?.startsWith("metronia:create:mtkt-"),
+    "idempotency-key må ikke inneholde fersk ticketId");
+  assert.ok(debitKeys[0]?.includes("stable-key-1"),
+    "idempotency-key må inneholde clientRequestId");
+});
+
+test("PR #522: createTicket uten clientRequestId → INVALID_INPUT", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  await assert.rejects(
+    ctx.service.createTicket({
+      agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "",
+    }),
+    (err) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+test("PR #522 compliance: closeTicket-payout krediterer winnings-siden, ikke deposit", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  // Sett opp ticket og spillet — final balance 30 NOK.
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "create-1",
+  });
+  ctx.metronia.setBalance(ticket.ticketNumber, 3000); // 30 NOK
+  // Pre-close: deposit har 400 (etter 100 ticket-debit), winnings har 0.
+  const preClose = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(preClose.deposit, 400, "før close skal kun deposit være endret");
+  assert.equal(preClose.winnings, 0);
+  await ctx.service.closeTicket({
+    agentUserId: "a1", ticketNumber: ticket.ticketNumber, clientRequestId: "close-1",
+  });
+  // Post-close: payout 30 skal lande på winnings, ikke deposit.
+  const postClose = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(postClose.deposit, 400,
+    "deposit-saldo skal være uendret etter machine-payout (kritisk for loss-limit)");
+  assert.equal(postClose.winnings, 30,
+    "winnings-saldo skal øke med payout-beløpet");
+  assert.equal(postClose.total, 430);
+});
+
+test("PR #522 compliance: autoCloseTicket-payout krediterer winnings-siden", async () => {
+  const ctx = makeSetup();
+  const { shiftId } = await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "create-1",
+  });
+  ctx.metronia.setBalance(ticket.ticketNumber, 2000); // 20 NOK auto-payout
+  // Settle shiften så cron-flyten kjører.
+  await ctx.store.markShiftSettled(shiftId, "a1");
+  await ctx.service.autoCloseTicket({
+    ticketId: ticket.id,
+    systemActorUserId: "system:auto-close-cron",
+  });
+  const balances = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(balances.deposit, 400,
+    "deposit skal være uendret (auto-payout er gevinst)");
+  assert.equal(balances.winnings, 20,
+    "winnings skal øke med auto-payout-beløpet");
+});
+
+test("PR #522 compliance: voidTicket-refund forblir på deposit-siden (refund != gevinst)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "create-1",
+  });
+  // Pre-void: deposit 400, winnings 0.
+  await ctx.service.voidTicket({
+    agentUserId: "a1", agentRole: "AGENT",
+    ticketNumber: ticket.ticketNumber,
+    reason: "Feil amount",
+  });
+  // Refund er IKKE gevinst — skal lande på deposit (default).
+  const balances = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(balances.deposit, 500,
+    "void-refund skal returnere innskudd til deposit-siden");
+  assert.equal(balances.winnings, 0);
+});

@@ -202,6 +202,37 @@ describe("IdempotencyKeys — byte-identitet mot legacy template-literals", () =
     );
   });
 
+  test("agentCashOp matcher `agent-cashop:{agent}:{player}:{clientReq}` (PR #522 hotfix)", () => {
+    assert.equal(
+      IdempotencyKeys.agentCashOp({
+        agentUserId: "a-1",
+        playerUserId: "p-9",
+        clientRequestId: "client-abc",
+      }),
+      "agent-cashop:a-1:p-9:client-abc",
+    );
+  });
+
+  test("agentCashOp: samme clientRequestId → samme key (retry-idempotency)", () => {
+    const a = IdempotencyKeys.agentCashOp({
+      agentUserId: "a-1", playerUserId: "p-9", clientRequestId: "retry-1",
+    });
+    const b = IdempotencyKeys.agentCashOp({
+      agentUserId: "a-1", playerUserId: "p-9", clientRequestId: "retry-1",
+    });
+    assert.equal(a, b);
+  });
+
+  test("agentCashOp: forskjellige clientRequestIds → forskjellige keys", () => {
+    const a = IdempotencyKeys.agentCashOp({
+      agentUserId: "a-1", playerUserId: "p-9", clientRequestId: "r-1",
+    });
+    const b = IdempotencyKeys.agentCashOp({
+      agentUserId: "a-1", playerUserId: "p-9", clientRequestId: "r-2",
+    });
+    assert.notEqual(a, b);
+  });
+
   test("agentTxCancel matcher `agent-tx:{originalTxId}:cancel`", () => {
     assert.equal(
       IdempotencyKeys.agentTxCancel({ originalTxId: "agenttx-42" }),

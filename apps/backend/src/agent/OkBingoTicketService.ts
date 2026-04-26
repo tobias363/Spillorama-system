@@ -129,6 +129,7 @@ export class OkBingoTicketService {
 
   async createTicket(input: CreateOkBingoTicketInput): Promise<MachineTicket> {
     assertAmountInRange(input.amountNok, "amountNok");
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     await this.requirePlayerInHall(input.playerUserId, shift.hallId);
     const player = await this.platform.getUserById(input.playerUserId);
@@ -138,7 +139,11 @@ export class OkBingoTicketService {
     }
     const amountCents = nokToCents(input.amountNok);
     const ticketId = `oktkt-${randomUUID()}`;
-    const uniqueTransaction = `okbingo:create:${ticketId}:${input.clientRequestId}`;
+    // PR #522 hotfix: uniqueTransaction må KEYES på clientRequestId — ikke
+    // på fersk ticketId — slik at network-retry treffer samme OK Bingo-
+    // ticket og samme wallet-debit. Speilet med MetroniaTicketService.
+    const uniqueTransaction =
+      `okbingo:create:${input.agentUserId}:${input.playerUserId}:${input.clientRequestId}`;
     const roomId = input.roomId ?? this.defaultRoomId;
 
     const walletTx = await this.wallet.debit(
@@ -211,6 +216,7 @@ export class OkBingoTicketService {
 
   async topupTicket(input: TopupOkBingoTicketInput): Promise<MachineTicket> {
     assertAmountInRange(input.amountNok, "amountNok");
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     const ticket = await this.tickets.getByTicketNumber("OK_BINGO", input.ticketNumber);
     if (!ticket) throw new DomainError("MACHINE_TICKET_NOT_FOUND", "Ukjent OK Bingo-ticket.");
@@ -279,6 +285,7 @@ export class OkBingoTicketService {
   // ── PAYOUT (close) ──────────────────────────────────────────────────────
 
   async closeTicket(input: PayoutOkBingoTicketInput): Promise<MachineTicket> {
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     const ticket = await this.tickets.getByTicketNumber("OK_BINGO", input.ticketNumber);
     if (!ticket) throw new DomainError("MACHINE_TICKET_NOT_FOUND", "Ukjent OK Bingo-ticket.");
@@ -300,11 +307,16 @@ export class OkBingoTicketService {
     let walletTxId: string | null = null;
     let afterBalance = previousBalance;
     if (payoutNok > 0) {
+      // PR #522 hotfix: machine-payout er gevinst — credit MÅ lande på
+      // winnings-siden, ikke deposit. Speilet med MetroniaTicketService.
       const walletTx = await this.wallet.credit(
         player.walletId,
         payoutNok,
         `OK Bingo payout ${ticket.id}`,
-        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
+        {
+          idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }),
+          to: "winnings",
+        }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + payoutNok;
@@ -366,11 +378,16 @@ export class OkBingoTicketService {
     let walletTxId: string | null = null;
     let afterBalance = previousBalance;
     if (payoutNok > 0) {
+      // PR #522 hotfix: auto-close-payout er like mye gevinst som manuell
+      // close — credit MÅ lande på winnings-siden.
       const walletTx = await this.wallet.credit(
         player.walletId,
         payoutNok,
         `OK Bingo auto-close payout ${ticket.id}`,
-        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
+        {
+          idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }),
+          to: "winnings",
+        }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + payoutNok;
@@ -599,6 +616,19 @@ function assertAmountInRange(nok: number, field: string): void {
   }
   if (Math.abs(nok - Math.round(nok)) > 1e-9) {
     throw new DomainError("INVALID_AMOUNT", `${field} må være et heltall (NOK).`);
+  }
+}
+
+/**
+ * PR #522 hotfix: krev `clientRequestId` som ikke-tom streng. Speilet med
+ * MetroniaTicketService.assertNonEmpty.
+ */
+function assertNonEmpty(value: string | undefined | null, field: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} er påkrevd og må være en ikke-tom streng.`
+    );
   }
 }
 

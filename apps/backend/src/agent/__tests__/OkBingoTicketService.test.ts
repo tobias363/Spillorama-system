@@ -394,3 +394,102 @@ test("autoCloseTicket bruker roomId fra ticketen (OK_BINGO-spesifikk)", async ()
   });
   assert.equal(closed.isClosed, true);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PR #522 hotfix — idempotency-keys + to:"winnings" for machine-payout
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("PR #522: createTicket — uniqueTransaction-key er stabil på tvers av retries", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+
+  const debitKeys: string[] = [];
+  const origDebit = ctx.wallet.debit.bind(ctx.wallet);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (ctx.wallet as any).debit = async (
+    walletId: string, amount: number, reason: string,
+    options?: { idempotencyKey?: string },
+  ) => {
+    if (options?.idempotencyKey) debitKeys.push(options.idempotencyKey);
+    return origDebit(walletId, amount, reason, options);
+  };
+
+  await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "stable-1",
+  });
+  await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "stable-1",
+  }).catch(() => { /* OK Bingo-stub kaster DUPLICATE_TX */ });
+
+  assert.equal(debitKeys.length, 2);
+  assert.equal(debitKeys[0], debitKeys[1],
+    "idempotency-key må matche på retry");
+  assert.ok(!debitKeys[0]?.startsWith("okbingo:create:oktkt-"),
+    "idempotency-key må ikke inneholde fersk ticketId");
+  assert.ok(debitKeys[0]?.includes("stable-1"),
+    "idempotency-key må inneholde clientRequestId");
+});
+
+test("PR #522: createTicket uten clientRequestId → INVALID_INPUT", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  await assert.rejects(
+    ctx.service.createTicket({
+      agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "",
+    }),
+    (err) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+test("PR #522 compliance: closeTicket-payout krediterer winnings-siden, ikke deposit", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "create-1",
+  });
+  ctx.okbingo.setBalance(ticket.ticketNumber, 4500);
+  await ctx.service.closeTicket({
+    agentUserId: "a1", ticketNumber: ticket.ticketNumber, clientRequestId: "close-1",
+  });
+  const balances = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(balances.deposit, 400, "deposit-saldo skal være uendret");
+  assert.equal(balances.winnings, 45, "winnings skal øke med payout-beløpet");
+});
+
+test("PR #522 compliance: autoCloseTicket-payout krediterer winnings-siden", async () => {
+  const ctx = makeSetup();
+  const { shiftId } = await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "create-1",
+  });
+  ctx.okbingo.setBalance(ticket.ticketNumber, 1500); // 15 NOK auto-payout
+  await ctx.store.markShiftSettled(shiftId, "a1");
+  await ctx.service.autoCloseTicket({
+    ticketId: ticket.id,
+    systemActorUserId: "system:auto-close-cron",
+  });
+  const balances = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(balances.deposit, 400);
+  assert.equal(balances.winnings, 15);
+});
+
+test("PR #522 compliance: voidTicket-refund forblir på deposit-siden (refund != gevinst)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "create-1",
+  });
+  await ctx.service.voidTicket({
+    agentUserId: "a1", agentRole: "AGENT",
+    ticketNumber: ticket.ticketNumber,
+    reason: "Feil amount",
+  });
+  const balances = await ctx.wallet.getBothBalances("wallet-p1");
+  assert.equal(balances.deposit, 500, "void-refund skal returnere innskudd");
+  assert.equal(balances.winnings, 0);
+});

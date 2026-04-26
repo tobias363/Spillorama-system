@@ -126,13 +126,42 @@ test("endShift feiler for annen agent som ikke eier shiften", async () => {
   );
 });
 
-test("endShift tillatt for ADMIN (force-close)", async () => {
+test("endShift tillatt for ADMIN (force-close) med reason", async () => {
   const { shiftService, agentService } = makeServices();
   const agent = await makeAgent(agentService, ["hall-a"]);
   const shift = await shiftService.startShift({ userId: agent.userId, hallId: "hall-a" });
   const ended = await shiftService.endShift({
     shiftId: shift.id,
     actor: { userId: "admin-1", role: "ADMIN" },
+    reason: "Agent crashed; ops-cleanup",
+  });
+  assert.equal(ended.isActive, false);
+  // PR #522 hotfix: force-close logger reason i logoutNotes med actor-prefix.
+  assert.match(ended.logoutNotes ?? "", /\[ADMIN_FORCE_CLOSE by admin-1\] Agent crashed; ops-cleanup/);
+});
+
+test("endShift ADMIN force-close uten reason → FORCE_CLOSE_REASON_REQUIRED", async () => {
+  const { shiftService, agentService } = makeServices();
+  const agent = await makeAgent(agentService, ["hall-a"]);
+  const shift = await shiftService.startShift({ userId: agent.userId, hallId: "hall-a" });
+  await assert.rejects(
+    shiftService.endShift({
+      shiftId: shift.id,
+      actor: { userId: "admin-1", role: "ADMIN" },
+    }),
+    (err) => err instanceof DomainError && err.code === "FORCE_CLOSE_REASON_REQUIRED",
+  );
+});
+
+test("endShift owner-flow ignorerer reason-krav (egen shift)", async () => {
+  const { shiftService, agentService } = makeServices();
+  const agent = await makeAgent(agentService, ["hall-a"]);
+  const shift = await shiftService.startShift({ userId: agent.userId, hallId: "hall-a" });
+  // Owner kan kalle med ADMIN-rolle (theoretical edge case) uten reason —
+  // force-close-kravet gjelder kun når caller != shift-eier.
+  const ended = await shiftService.endShift({
+    shiftId: shift.id,
+    actor: { userId: agent.userId, role: "ADMIN" },
   });
   assert.equal(ended.isActive, false);
 });
