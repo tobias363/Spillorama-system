@@ -22,6 +22,7 @@ import type {
   WalletTransferResult
 } from "./WalletAdapter.js";
 import { WalletError } from "./WalletAdapter.js";
+import type { WalletOutboxRepo } from "../wallet/WalletOutboxRepo.js";
 
 type EntrySide = "DEBIT" | "CREDIT";
 
@@ -30,7 +31,6 @@ interface PostgresWalletAdapterOptions {
   schema?: string;
   ssl?: boolean;
   defaultInitialBalance?: number;
-  /**
    * HIGH-8: tuning for the wallet circuit breaker. Defaults match
    * Pragmatic-Play-style behavior — open after 3 consecutive failures,
    * 30 s cool-down, half-open admits one probe. Tests override these
@@ -44,6 +44,14 @@ interface PostgresWalletAdapterOptions {
     /** Disable the breaker entirely (e.g. in tests that exercise raw DB code). */
     enabled?: boolean;
   };
+  /**
+   * BIN-761: Optional outbox repo. When set, every successful ledger
+   * execution writes one event-row per non-system inserted transaction in
+   * the SAME db-tx as ledger-INSERT. Worker (`WalletOutboxWorker`) polls
+   * and dispatches asynchronously. Atomic guarantee: ledger commit ↔
+   * outbox row. When unset, behavior is unchanged (backward-compatible).
+   */
+  outboxRepo?: WalletOutboxRepo;
 }
 
 const WALLET_CIRCUIT_NAME = "postgres-wallet";
@@ -173,6 +181,9 @@ export class PostgresWalletAdapter implements WalletAdapter {
    */
   private readonly breaker: CircuitBreaker | null;
 
+  /** BIN-761: optional outbox repo. Set via constructor or `setOutboxRepo()`. */
+  private outboxRepo: WalletOutboxRepo | undefined;
+
   constructor(options: PostgresWalletAdapterOptions) {
     const connectionString = options.connectionString?.trim();
     if (!connectionString) {
@@ -206,6 +217,8 @@ export class PostgresWalletAdapter implements WalletAdapter {
           },
         })
       : null;
+
+    this.outboxRepo = options.outboxRepo;
   }
 
   /**
@@ -253,6 +266,25 @@ export class PostgresWalletAdapter implements WalletAdapter {
    */
   getCircuitState(): CircuitState | null {
     return this.breaker?.state ?? null;
+  }
+
+  /**
+   * BIN-761: Wire up outbox-repo post-construction (lar `index.ts` opprette
+   * adapter + repo i hvilken som helst rekkefølge med samme pool). Idempotent
+   * — call multiple times if needed. Settes til `undefined` for å disable.
+   */
+  setOutboxRepo(repo: WalletOutboxRepo | undefined): void {
+    this.outboxRepo = repo;
+  }
+
+  /** BIN-761: pool-aksess for outbox-repo + observability. */
+  getPool(): Pool {
+    return this.pool;
+  }
+
+  /** BIN-761: schema-aksess slik at outbox-repo bruker samme schema. */
+  getSchema(): string {
+    return this.schema;
   }
 
   async createAccount(input?: CreateWalletAccountInput): Promise<WalletAccount> {
@@ -1143,6 +1175,44 @@ export class PostgresWalletAdapter implements WalletAdapter {
           entry.accountSide ?? "deposit"
         ]
       );
+    }
+
+    // BIN-761: outbox-enqueue MÅ skje i samme tx som ledger-INSERT-ene.
+    // Én outbox-rad per inserted non-system transaction. Worker dispatcher
+    // bruker payload til å broadcaste `wallet:state` (BIN-760) uten ekstra
+    // DB-lookup.
+    //
+    // System-kontoer (__system_house__, __system_external_cash__) får ingen
+    // outbox-rad — ingen klient abonnerer på dem, og det halvere outbox-volum.
+    if (this.outboxRepo) {
+      for (const tx of insertedTransactions) {
+        const acc = accounts.get(tx.accountId);
+        if (!acc || acc.isSystem) continue;
+        const eventType = `wallet.${tx.type.toLowerCase()}`;
+        await this.outboxRepo.enqueue(client, {
+          // operationId her = transaction.id (UUID). Idempotent dispatcher
+          // kan bruke dette som de-dup-key. Merk at flere outbox-rader kan
+          // dele samme underliggende ledger-operationId hvis en operasjon
+          // berører to spiller-kontoer (transfer) — og det er ønsket
+          // (separat broadcast per affected wallet).
+          operationId: tx.id,
+          accountId: tx.accountId,
+          eventType,
+          payload: {
+            transactionId: tx.id,
+            accountId: tx.accountId,
+            type: tx.type,
+            amount: tx.amount,
+            reason: tx.reason,
+            relatedAccountId: tx.relatedAccountId ?? null,
+            split: tx.split ?? null,
+            depositBalance: acc.depositBalance,
+            winningsBalance: acc.winningsBalance,
+            balance: acc.balance,
+            createdAt: tx.createdAt,
+          },
+        });
+      }
     }
 
     return insertedTransactions;
