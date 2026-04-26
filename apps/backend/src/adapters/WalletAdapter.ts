@@ -31,6 +31,16 @@ export interface WalletAccount {
   depositBalance: number;
   /** PR-W1: gevinster fra spill. Trekkes først ved kjøp. */
   winningsBalance: number;
+  /**
+   * BIN-766: ISO 4217-valuta for kontoen. NOK-only nå (CHECK-constraint
+   * i wallet_accounts.currency). Eksponert som additivt felt så fremtidig
+   * EUR/SEK-utvidelse blir backward-compat for eksisterende callers.
+   *
+   * Optional i typen for ikke å kreve at minimal-test-adaptere returnerer
+   * det — produksjons-adaptere (Postgres, InMemory, File, Http) skal alltid
+   * sette feltet, default 'NOK'.
+   */
+  currency?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,6 +73,12 @@ export interface WalletTransaction {
    * `undefined` på legacy-transaksjoner fra før split-aktivering (backward-compat).
    */
   split?: WalletTransactionSplit;
+  /**
+   * BIN-766: ISO 4217-valuta. Speiler tx-radens `currency`-kolonne. NOK-only
+   * nå. Optional for å bevare bakoverkompat med eksisterende test-doubles
+   * og legacy-rader uten currency-felt.
+   */
+  currency?: string;
 }
 
 /**

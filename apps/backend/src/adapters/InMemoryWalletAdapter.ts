@@ -514,7 +514,10 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       reason,
       createdAt: createdAt ?? new Date().toISOString(),
       relatedAccountId,
-      split
+      split,
+      // BIN-766: NOK-only nå (DB CHECK enforcing). Eksponert i alle tx for
+      // konsistent type-kontrakt med Postgres-adapter.
+      currency: "NOK"
     };
     if (idempotencyKey) {
       (tx as any)._idempotencyKey = idempotencyKey;
@@ -543,6 +546,9 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       balance: account.depositBalance + account.winningsBalance,
       depositBalance: account.depositBalance,
       winningsBalance: account.winningsBalance,
+      // BIN-766: NOK-only nå. Postgres-DB håndhever via CHECK-constraint.
+      // InMemoryWalletAdapter speiler verdien for konsistens i typer.
+      currency: "NOK",
       createdAt: account.createdAt,
       updatedAt: account.updatedAt
     };

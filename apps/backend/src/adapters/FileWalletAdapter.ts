@@ -639,6 +639,8 @@ export class FileWalletAdapter implements WalletAdapter {
       balance: account.depositBalance + account.winningsBalance,
       depositBalance: account.depositBalance,
       winningsBalance: account.winningsBalance,
+      // BIN-766: NOK-only nå. Speiler Postgres-CHECK-constraint.
+      currency: "NOK",
       createdAt: account.createdAt,
       updatedAt: account.updatedAt
     };

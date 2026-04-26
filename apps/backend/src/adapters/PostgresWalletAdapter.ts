@@ -35,6 +35,8 @@ interface AccountRow {
   deposit_balance: string | number;
   winnings_balance: string | number;
   is_system: boolean;
+  /** BIN-766: ISO 4217-valuta. NOK-only nå (DB CHECK-constraint). */
+  currency?: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -1020,6 +1022,23 @@ export class PostgresWalletAdapter implements WalletAdapter {
            ADD COLUMN IF NOT EXISTS winnings_balance NUMERIC(20, 6) NOT NULL DEFAULT 0`
       );
 
+      // BIN-766: multi-currency-readiness. NOK-only nå (CHECK enforcing).
+      await client.query(
+        `ALTER TABLE ${this.accountsTable()}
+           ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
+      );
+      // BIN-766: CHECK-constraint NOK-only. Idempotent — DROP først for å
+      // tåle re-bootstrap på samme schema. Når reell multi-currency
+      // aktiveres erstattes denne med `currency IN (...)` via ny migration.
+      await client.query(
+        `ALTER TABLE ${this.accountsTable()}
+           DROP CONSTRAINT IF EXISTS wallet_accounts_currency_nok_only`
+      );
+      await client.query(
+        `ALTER TABLE ${this.accountsTable()}
+           ADD CONSTRAINT wallet_accounts_currency_nok_only CHECK (currency = 'NOK')`
+      );
+
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.transactionsTable()} (
           id TEXT PRIMARY KEY,
@@ -1030,8 +1049,22 @@ export class PostgresWalletAdapter implements WalletAdapter {
           reason TEXT NOT NULL,
           related_account_id TEXT NULL,
           idempotency_key TEXT NULL,
+          currency TEXT NOT NULL DEFAULT 'NOK',
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`
+      );
+      // BIN-766: defensiv ADD COLUMN i tilfelle pre-BIN-766-DB.
+      await client.query(
+        `ALTER TABLE ${this.transactionsTable()}
+           ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
+      );
+      await client.query(
+        `ALTER TABLE ${this.transactionsTable()}
+           DROP CONSTRAINT IF EXISTS wallet_transactions_currency_nok_only`
+      );
+      await client.query(
+        `ALTER TABLE ${this.transactionsTable()}
+           ADD CONSTRAINT wallet_transactions_currency_nok_only CHECK (currency = 'NOK')`
       );
       // BIN-162: Idempotency key unique index (only for non-null keys)
       await client.query(
@@ -1049,6 +1082,7 @@ export class PostgresWalletAdapter implements WalletAdapter {
           transaction_id TEXT NULL REFERENCES ${this.transactionsTable()}(id),
           account_side TEXT NOT NULL DEFAULT 'deposit'
             CHECK (account_side IN ('deposit', 'winnings')),
+          currency TEXT NOT NULL DEFAULT 'NOK',
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`
       );
@@ -1056,6 +1090,19 @@ export class PostgresWalletAdapter implements WalletAdapter {
       await client.query(
         `ALTER TABLE ${this.entriesTable()}
            ADD COLUMN IF NOT EXISTS account_side TEXT NOT NULL DEFAULT 'deposit'`
+      );
+      // BIN-766: defensiv ADD COLUMN i tilfelle pre-BIN-766-DB.
+      await client.query(
+        `ALTER TABLE ${this.entriesTable()}
+           ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
+      );
+      await client.query(
+        `ALTER TABLE ${this.entriesTable()}
+           DROP CONSTRAINT IF EXISTS wallet_entries_currency_nok_only`
+      );
+      await client.query(
+        `ALTER TABLE ${this.entriesTable()}
+           ADD CONSTRAINT wallet_entries_currency_nok_only CHECK (currency = 'NOK')`
       );
 
       await client.query(
@@ -1173,6 +1220,10 @@ export class PostgresWalletAdapter implements WalletAdapter {
       balance: asMoney(row.balance),
       depositBalance: asMoney(row.deposit_balance),
       winningsBalance: asMoney(row.winnings_balance),
+      // BIN-766: defensiv default — eldre rader uten currency-kolonne
+      // (skulle ikke skje siden migration setter NOT NULL DEFAULT, men
+      // type-systemet tillater null hvis kolonnen mangler i SELECT).
+      currency: row.currency ?? "NOK",
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
