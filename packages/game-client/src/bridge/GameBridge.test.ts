@@ -616,7 +616,12 @@ describe("GameBridge", () => {
    * vs total balance from game-client) for ~0.5 s every ball. Bridge now
    * caches last-emitted balance and skips identical re-emits.
    */
-  describe("spillorama:balanceChanged dedup (saldo-flash fix)", () => {
+  describe("spillorama:balanceChanged emit-on-every-room-update (W1-hotfix dedup removal)", () => {
+    // W1-HOTFIX (Tobias 2026-04-26): bridge-dedup på lastEmittedBalance er
+    // fjernet for å lukke 2.-vinn-bugen. Hver room:update fyrer balanceChanged
+    // — lobby-shellen har sin egen `_lastBalanceSeen`-dedup (lobby.js:446)
+    // som filtrerer ut redundante refetch-anrop. Server-side er idempotent
+    // → duplikate events er trygge.
     let events: Array<{ balance: number }>;
     let listener: (evt: Event) => void;
 
@@ -641,17 +646,23 @@ describe("GameBridge", () => {
       expect(events).toEqual([{ balance: 100 }]);
     });
 
-    it("skips re-emit when 100 room:update events carry identical balance", () => {
+    it("emits on EVERY room:update (no dedup) — N events for N pushes med samme balance", () => {
+      // W1-hotfix: tidligere ble bare første emittet. Nå emitter alle.
+      // Lobby har egen dedup som filtrerer ut redundante refetch-anrop.
       bridge.start("player-1");
       for (let i = 0; i < 100; i++) {
         socket.fire("roomUpdate", makeRoomUpdate({ serverTimestamp: Date.now() + i }));
       }
-      // Only the first room:update produced an emit; the other 99 are deduped.
-      expect(events).toHaveLength(1);
-      expect(events[0]).toEqual({ balance: 100 });
+      expect(events).toHaveLength(100);
+      // Alle skal ha samme verdi (server pushed samme balance hver gang).
+      for (const ev of events) {
+        expect(ev).toEqual({ balance: 100 });
+      }
     });
 
-    it("re-emits when balance actually changes", () => {
+    it("emits each push when balance changes — ingen blokkering selv ved consecutive identiske verdier", () => {
+      // W1-hotfix: 2 identiske pushes mellom ulike verdier emitter ikke
+      // dedupliserte mellomverdier — alle 4 pushes gir 4 events.
       bridge.start("player-1");
       socket.fire("roomUpdate", makeRoomUpdate());
       socket.fire(
@@ -675,12 +686,12 @@ describe("GameBridge", () => {
       expect(events).toEqual([
         { balance: 100 },
         { balance: 80 },
-        // identical 80 deduped
+        { balance: 80 }, // W1-hotfix: ikke lenger dedup'et
         { balance: 60 },
       ]);
     });
 
-    it("stop() resets cache so a fresh start re-emits the first balance", () => {
+    it("stop() + start() emitter første push på nytt", () => {
       bridge.start("player-1");
       socket.fire("roomUpdate", makeRoomUpdate());
       expect(events).toHaveLength(1);
@@ -691,19 +702,65 @@ describe("GameBridge", () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toEqual({ balance: 100 });
     });
+
+    it("W1-hotfix scenario: 2 consecutive wins der server pusher SAMME balance 2 ganger — begge emitter", () => {
+      // Reproduserer Tobias' rapport: gevinst nr 2 oppdaterer ikke chip.
+      // Pre-fix: lastEmittedBalance===balance → dedup blokkerer 2. push.
+      // Post-fix: ingen dedup → begge emitter, lobby refetcher korrekt.
+      bridge.start("player-1");
+
+      // Round 1: arming → balance=590
+      socket.fire("roomUpdate", makeRoomUpdate({
+        players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 590 }],
+      }));
+      // Round 1: phase 1 vunnet → server pusher (men i pre-fix bug, samme stale 590)
+      socket.fire("roomUpdate", makeRoomUpdate({
+        players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 590 }],
+        serverTimestamp: Date.now() + 1,
+      }));
+      // Round 1: end → refetch ger ny verdi 1640
+      socket.fire("roomUpdate", makeRoomUpdate({
+        players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 1640 }],
+        serverTimestamp: Date.now() + 2,
+      }));
+      // Round 2: arming → balance=1630 (1640 - 10 reservert)
+      socket.fire("roomUpdate", makeRoomUpdate({
+        players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 1630 }],
+        serverTimestamp: Date.now() + 3,
+      }));
+      // Round 2: phase 1 vunnet → server pusher (i pre-fix-bug, samme stale 1630)
+      socket.fire("roomUpdate", makeRoomUpdate({
+        players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 1630 }],
+        serverTimestamp: Date.now() + 4,
+      }));
+
+      // Pre-fix: events = [{590}, {1640}, {1630}] (590 og 1630-andre dedup'et)
+      // Post-fix: events = [{590}, {590}, {1640}, {1630}, {1630}]
+      // Det gir lobbyen sjansen til å refetche etter HVER push, så stale
+      // balance ikke kan «låse» chip-verdien.
+      expect(events).toEqual([
+        { balance: 590 },
+        { balance: 590 },
+        { balance: 1640 },
+        { balance: 1630 },
+        { balance: 1630 },
+      ]);
+    });
   });
 
   /**
-   * Saldo-flash deep-dive (Tobias 2026-04-26):
-   * ─────────────────────────────────────────────
-   * Tobias rapporterte 256 ↔ 400-oscillering på hver ball-trekning. Disse
-   * testene dekker scenarioer som tidligere fix-forsøk (PR #512 + PR #526)
-   * ikke fanget:
-   *   - Floating-point precision på balance-verdier (1000 vs 1000.0)
-   *   - Rapid-fire room:update ved bet:arm + draw:next (5+ events under 100ms)
-   *   - Per-ball balance-mutering når payouts skjer mid-game
+   * W1-HOTFIX (Tobias 2026-04-26):
+   * ─────────────────────────────
+   * Tidligere PR #512+#526 dekket saldo-flash via bridge-dedup. Den dedup-en
+   * forårsaket Tobias' nye 2.-vinn-bug (gevinst-chip oppdaterer ikke etter
+   * runde 2). Dedup-en er nå fjernet — saldo-flash er fundamentalt fikset
+   * av PR #534 (refresh bruker getAvailableBalance overalt) + lobby har
+   * sin egen dedup på `_lastBalanceSeen`.
+   *
+   * Disse testene reflekterer NY kontrakt: hver room:update fyrer
+   * balanceChanged uavhengig av om verdien er endret.
    */
-  describe("spillorama:balanceChanged dedup — deep-dive scenarios", () => {
+  describe("spillorama:balanceChanged — alltid emit (W1-hotfix dedup-removal)", () => {
     let events: Array<{ balance: number }>;
     let listener: (evt: Event) => void;
 
@@ -722,16 +779,15 @@ describe("GameBridge", () => {
       window.removeEventListener("spillorama:balanceChanged", listener);
     });
 
-    it("ball-draw bursts (10 raske room:update med samme balance) emitter kun 1 event", () => {
+    it("ball-draw bursts (10 raske room:update med samme balance) emitter 11 events (1 initial + 10)", () => {
+      // W1-hotfix: bridge-dedup fjernet — alle pushes emitter.
+      // Lobby-dedup tar seg av redundante refetch.
       bridge.start("player-1");
 
-      // Initial — first emit
       socket.fire("roomUpdate", makeRoomUpdate({
         players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 256 }],
       }));
 
-      // Burst: 10 ball-draws i rask rekkefølge, alle med samme balance.
-      // Pre-fix var hver av disse en flash-trigger.
       for (let i = 0; i < 10; i++) {
         socket.fire("roomUpdate", makeRoomUpdate({
           players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 256 }],
@@ -739,11 +795,13 @@ describe("GameBridge", () => {
         }));
       }
 
-      expect(events).toHaveLength(1);
-      expect(events[0]).toEqual({ balance: 256 });
+      expect(events).toHaveLength(11);
+      for (const ev of events) {
+        expect(ev).toEqual({ balance: 256 });
+      }
     });
 
-    it("payout mid-game emitter ny balance, men neste ball-draws dedup'es på den", () => {
+    it("payout mid-game + 5 ball-draws: alle 7 events emittes uten dedup", () => {
       bridge.start("player-1");
 
       // Pre-payout: balance = 256
@@ -764,13 +822,17 @@ describe("GameBridge", () => {
         }));
       }
 
-      expect(events).toEqual([
-        { balance: 256 },
-        { balance: 306 },
-      ]);
+      // W1-hotfix: 1 + 1 + 5 = 7 events (ingen dedup).
+      expect(events).toHaveLength(7);
+      expect(events[0]).toEqual({ balance: 256 });
+      expect(events[1]).toEqual({ balance: 306 });
+      for (let i = 2; i < 7; i++) {
+        expect(events[i]).toEqual({ balance: 306 });
+      }
     });
 
-    it("identisk floating-point balance dedup'es korrekt (1000 vs 1000.0)", () => {
+    it("identiske floating-point balance-verdier (1000 vs 1000.0) emitter 2 events", () => {
+      // W1-hotfix: ingen dedup — selv 1000 === 1000.0 emitter på nytt.
       bridge.start("player-1");
 
       socket.fire("roomUpdate", makeRoomUpdate({
@@ -780,30 +842,25 @@ describe("GameBridge", () => {
         players: [{ id: "player-1", name: "Test", walletId: "w1", balance: 1000.0 }],
       }));
 
-      // 1000 === 1000.0 i JS — skal dedup'es.
-      expect(events).toHaveLength(1);
+      expect(events).toHaveLength(2);
     });
 
-    it("balance-flip mellom available og gross emitter to events (men dedup'er innenfor hver verdi)", () => {
-      // Edge-case: hvis backend ved et uhell flipper player.balance fra
-      // available (256) til gross (640) midt i en runde — f.eks. om
-      // refreshPlayerObjectsFromWallet kjørte med getBalance() før vår fix —
-      // skal hver verdi-overgang gi nøyaktig én emit, ikke en flash-loop.
+    it("balance-flip mellom verdier emitter alle pushes uten dedup", () => {
+      // W1-hotfix: ingen dedup — alle pushes emitter.
       bridge.start("player-1");
 
       const balanceTransitions = [256, 256, 256, 640, 640, 640, 256, 256];
-      for (const bal of balanceTransitions) {
+      for (let i = 0; i < balanceTransitions.length; i++) {
+        const bal = balanceTransitions[i]!;
         socket.fire("roomUpdate", makeRoomUpdate({
           players: [{ id: "player-1", name: "Test", walletId: "w1", balance: bal }],
-          serverTimestamp: Date.now() + balanceTransitions.indexOf(bal),
+          serverTimestamp: Date.now() + i,
         }));
       }
 
-      expect(events).toEqual([
-        { balance: 256 },
-        { balance: 640 },
-        { balance: 256 },
-      ]);
+      // Pre-fix: 3 events (256, 640, 256). Post-fix: 8 events (én per push).
+      expect(events).toHaveLength(8);
+      expect(events.map((e) => e.balance)).toEqual([256, 256, 256, 640, 640, 640, 256, 256]);
     });
   });
 });
