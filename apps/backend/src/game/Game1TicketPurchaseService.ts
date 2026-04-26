@@ -72,6 +72,7 @@ import {
   NoopComplianceLedgerPort,
   type ComplianceLedgerPort,
 } from "../adapters/ComplianceLedgerPort.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 
 const log = rootLogger.child({ module: "game1-ticket-purchase-service" });
 
@@ -489,7 +490,10 @@ export class Game1TicketPurchaseService {
       const channel = ledgerChannelForPaymentMethod(input.paymentMethod);
       await this.complianceLedgerPort.recordComplianceLedgerEvent({
         hallId: input.hallId,
-        gameType: "DATABINGO",
+        // K2-A CRIT-1: Spill 1 (slug `bingo`) er hovedspill (MAIN_GAME, 15%).
+        // Dette er en Spill-1-spesifikk service — slug er hardkodet "bingo"
+        // siden filen kun håndterer scheduled Spill 1-purchases.
+        gameType: ledgerGameTypeForSlug("bingo"),
         channel,
         eventType: "STAKE",
         amount: centsToAmount(totalAmountCents),

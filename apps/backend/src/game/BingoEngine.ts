@@ -86,6 +86,7 @@ import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
 import type { LedgerGameType, LedgerChannel, ComplianceLedgerEntry, DailyComplianceReport, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import type { LoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import { NoopLoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
@@ -590,6 +591,46 @@ export class BingoEngine {
     };
   }
 
+  /**
+   * K2-A CRIT-3: eksponer PrizePolicyManager som narrow port slik at
+   * scheduled-engine (PotEvaluator, mini-game, lucky bonus) kan håndheve
+   * single-prize-cap (2500 kr per pengespillforskriften §11) på alle payout-
+   * paths uten å ta direkte avhengighet til PrizePolicyManager-klassen.
+   *
+   * `PrizeGameType` i policy-API-et er fortsatt kun "DATABINGO" — samme
+   * 2500-cap gjelder MAIN_GAME, så vi bruker DATABINGO som policy-key
+   * inntil egen task åpner typen.
+   *
+   * Regulatorisk: alle Spill 1 payout-paths SKAL kalle dette før
+   * walletAdapter.credit. Differansen (cappedAmount - amount) audit-
+   * logges av caller (typisk via PayoutAuditTrail eller dedikert log).
+   */
+  getPrizePolicyPort(): import("../adapters/PrizePolicyPort.js").PrizePolicyPort {
+    const prizePolicy = this.prizePolicy;
+    return {
+      applySinglePrizeCap(input): {
+        cappedAmount: number;
+        wasCapped: boolean;
+        policyId: string;
+      } {
+        const result = prizePolicy.applySinglePrizeCap({
+          hallId: input.hallId,
+          // PrizeGameType-svartelist (kun DATABINGO i dag) løses i egen
+          // task — capen er identisk uansett gameType, så vi bruker
+          // DATABINGO som lookup-key.
+          gameType: "DATABINGO",
+          amount: input.amount,
+          atMs: input.atMs,
+        });
+        return {
+          cappedAmount: result.cappedAmount,
+          wasCapped: result.wasCapped,
+          policyId: result.policy.id,
+        };
+      },
+    };
+  }
+
   async createRoom(input: CreateRoomInput): Promise<{ roomCode: string; playerId: string }> {
     const hallId = this.assertHallId(input.hallId);
     const playerId = randomUUID();
@@ -732,7 +773,11 @@ export class BingoEngine {
       ? await this.filterEligiblePlayers(ticketCandidates, entryFee, nowMs, room.hallId)
       : [];
     const gameId = randomUUID();
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) er hovedspill
+    // (MAIN_GAME, 15%). Andre slugs (rocket/monsterbingo) returnerer fortsatt
+    // DATABINGO inntil de behandles i egen task. Resolver gjør oppslaget
+    // tolerant for null/manglende slug.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
@@ -1256,13 +1301,17 @@ export class BingoEngine {
     prizePerWinner: number,
   ): Promise<void> {
     const player = this.requirePlayer(room, playerId);
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
     const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
 
     // Cap against single-prize-policy + remaining pool + RTP budget.
+    // PrizePolicy bruker fortsatt PrizeGameType (kun "DATABINGO" i dagens
+    // sentralisering). En egen task åpner PrizeGameType for MAIN_GAME — for
+    // nå behold "DATABINGO" her. K2-A scope er kun ledger-events.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
       gameType: "DATABINGO",
@@ -1576,7 +1625,8 @@ export class BingoEngine {
     if (balance < debit) {
       throw new DomainError("INSUFFICIENT_FUNDS", "Ikke nok saldo til å bytte billett.");
     }
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
@@ -1756,7 +1806,8 @@ export class BingoEngine {
       claim.patternIndex = winningPatternIndex;
     }
     game.claims.push(claim);
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
@@ -1772,6 +1823,11 @@ export class BingoEngine {
         : game.patterns?.find((p) => p.claimType === "LINE");
       const linePrizePercent = linePattern?.prizePercent ?? 30;
       const requestedPayout = Math.floor(game.prizePool * linePrizePercent / 100);
+      // K2-A CRIT-1 note: PrizePolicyManager.PrizeGameType er fortsatt kun
+      // "DATABINGO" sentralt — egen task åpner den for MAIN_GAME. Inntil da
+      // bruker single-prize-cap-API-et "DATABINGO" som policy-key (samme
+      // 2500 kr-cap gjelder begge regulatoriske kategoriene). Ledger-event
+      // bruker korrekt MAIN_GAME via `gameType` over.
       const cappedLinePayout = this.prizePolicy.applySinglePrizeCap({
         hallId: room.hallId,
         gameType: "DATABINGO",
@@ -1877,6 +1933,8 @@ export class BingoEngine {
       game.bingoWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       const requestedPayout = game.remainingPrizePool;
+      // K2-A CRIT-1 note: same som over — PrizeGameType-svartelist åpnes
+      // i egen task. 2500-cap er identisk uansett gameType.
       const cappedBingoPayout = this.prizePolicy.applySinglePrizeCap({
         hallId: room.hallId,
         gameType: "DATABINGO",

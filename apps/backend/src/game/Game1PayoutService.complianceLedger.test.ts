@@ -169,7 +169,8 @@ test("K1: single-winner → PRIZE-entry bundet til winner.hallId", async () => {
   assert.equal(prizeCalls.length, 1, "én PRIZE-entry");
   assert.equal(prizeCalls[0]!.hallId, "hall-a");
   assert.equal(prizeCalls[0]!.amount, 500); // øre → kroner
-  assert.equal(prizeCalls[0]!.gameType, "DATABINGO");
+  // K2-A CRIT-1: Spill 1 er hovedspill → MAIN_GAME (15%), ikke DATABINGO (30%).
+  assert.equal(prizeCalls[0]!.gameType, "MAIN_GAME");
   assert.equal(prizeCalls[0]!.playerId, "u-1");
   assert.equal(prizeCalls[0]!.walletId, "w-1");
   assert.equal(prizeCalls[0]!.gameId, "g1");

@@ -334,6 +334,8 @@ test("BIN-585: admin:hall-balance rejects HALL_NOT_FOUND for unknown hall", asyn
 
 test("BIN-585: admin:hall-balance returns balance per (gameType, channel) + total", async () => {
   // Populate both DATABINGO channels; verify sum and account-id format.
+  // K2-A CRIT-1: hall-balance summerer nå både DATABINGO (legacy ad-hoc +
+  // SpinnGo) og MAIN_GAME (Spill 1-3) — totalt 4 (gameType, channel)-par.
   const { sock } = setup({
     knownHallIds: ["hall-a"],
     walletBalances: {
@@ -346,13 +348,31 @@ test("BIN-585: admin:hall-balance returns balance per (gameType, channel) + tota
   assert.equal(r.ok, true, `admin:hall-balance failed: ${r.error?.message}`);
   assert.equal(r.data!.hallId, "hall-a");
   assert.equal(r.data!.totalBalance, 11234.5);
-  assert.equal(r.data!.accounts.length, 2);
-  const hall = r.data!.accounts.find((a) => a.channel === "HALL");
-  const internet = r.data!.accounts.find((a) => a.channel === "INTERNET");
-  assert.equal(hall?.accountId, "house-hall-a-databingo-hall");
-  assert.equal(hall?.balance, 1234.5);
-  assert.equal(internet?.accountId, "house-hall-a-databingo-internet");
-  assert.equal(internet?.balance, 10000);
+  // K2-A CRIT-1: 4 accounts (2× DATABINGO + 2× MAIN_GAME) i stedet for 2.
+  assert.equal(r.data!.accounts.length, 4);
+  // Bruk gameType+channel for å disambiguere når både DATABINGO og MAIN_GAME
+  // returneres.
+  const databingoHall = r.data!.accounts.find(
+    (a) => a.channel === "HALL" && a.gameType === "DATABINGO",
+  );
+  const databingoInternet = r.data!.accounts.find(
+    (a) => a.channel === "INTERNET" && a.gameType === "DATABINGO",
+  );
+  assert.equal(databingoHall?.accountId, "house-hall-a-databingo-hall");
+  assert.equal(databingoHall?.balance, 1234.5);
+  assert.equal(databingoInternet?.accountId, "house-hall-a-databingo-internet");
+  assert.equal(databingoInternet?.balance, 10000);
+  // MAIN_GAME-konti er ufunderet → balance=0.
+  const mainGameHall = r.data!.accounts.find(
+    (a) => a.channel === "HALL" && a.gameType === "MAIN_GAME",
+  );
+  const mainGameInternet = r.data!.accounts.find(
+    (a) => a.channel === "INTERNET" && a.gameType === "MAIN_GAME",
+  );
+  assert.equal(mainGameHall?.accountId, "house-hall-a-main_game-hall");
+  assert.equal(mainGameHall?.balance, 0);
+  assert.equal(mainGameInternet?.accountId, "house-hall-a-main_game-internet");
+  assert.equal(mainGameInternet?.balance, 0);
   assert.ok(r.data!.at > 0, "at should be a positive timestamp");
 });
 
@@ -367,6 +387,10 @@ test("BIN-585: admin:hall-balance treats un-funded house account as zero balance
   const r = await sock.fire<HallBalanceData>("admin:hall-balance", { hallId: "hall-a" });
   assert.equal(r.ok, true);
   assert.equal(r.data!.totalBalance, 500);
-  const hall = r.data!.accounts.find((a) => a.channel === "HALL");
+  // K2-A CRIT-1: HALL-channel exists for både DATABINGO og MAIN_GAME — bruk
+  // gameType-disambiguering for å plukke databingo-hall-konto.
+  const hall = r.data!.accounts.find(
+    (a) => a.channel === "HALL" && a.gameType === "DATABINGO",
+  );
   assert.equal(hall?.balance, 0, "missing account must be reported as zero");
 });

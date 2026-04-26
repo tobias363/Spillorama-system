@@ -27,6 +27,8 @@ import type { Game1WinningAssignment } from "./Game1PayoutService.js";
 import type { Game1PotService } from "./pot/Game1PotService.js";
 import type { PotDailyAccumulationTickService } from "./pot/PotDailyAccumulationTickService.js";
 import { evaluateAccumulatingPots } from "./pot/PotEvaluator.js";
+import type { ComplianceLedgerPort } from "../adapters/ComplianceLedgerPort.js";
+import type { PrizePolicyPort } from "../adapters/PrizePolicyPort.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-pot-evaluator" });
@@ -54,6 +56,10 @@ export interface RunAccumulatingPotEvaluationParams {
    * wallet-credit-beløpet som faktisk er utbetalt til firstWinner.
    */
   ordinaryWinCentsByHall?: ReadonlyMap<string, number>;
+  /** K2-A CRIT-2: ledger-port for EXTRA_PRIZE-entries per pot-payout. */
+  complianceLedgerPort?: ComplianceLedgerPort;
+  /** K2-A CRIT-3: prize-policy-port for single-prize-cap (2500 kr). */
+  prizePolicyPort?: PrizePolicyPort;
 }
 
 /**
@@ -231,6 +237,9 @@ export async function runAccumulatingPotEvaluation(
         ordinaryWinCents,
         audit,
         potDailyTickService: potDailyTickService ?? undefined,
+        // K2-A CRIT-2 / CRIT-3: thread compliance + prize-policy ports.
+        complianceLedgerPort: params.complianceLedgerPort,
+        prizePolicyPort: params.prizePolicyPort,
       });
     } catch (err) {
       // Pot-evaluerings-feil for innsatsen/generic er regulatorisk

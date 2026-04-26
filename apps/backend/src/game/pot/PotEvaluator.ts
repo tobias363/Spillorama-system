@@ -68,6 +68,15 @@ import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import type { Game1PotService, PotRow, TryWinResult } from "./Game1PotService.js";
 import type { PotDailyAccumulationTickService } from "./PotDailyAccumulationTickService.js";
+import {
+  NoopComplianceLedgerPort,
+  type ComplianceLedgerPort,
+} from "../../adapters/ComplianceLedgerPort.js";
+import {
+  NoopPrizePolicyPort,
+  type PrizePolicyPort,
+} from "../../adapters/PrizePolicyPort.js";
+import { ledgerGameTypeForSlug } from "../ledgerGameTypeForSlug.js";
 import { IdempotencyKeys } from "../idempotency.js";
 import { logger as rootLogger } from "../../util/logger.js";
 
@@ -122,6 +131,27 @@ export interface EvaluateAccumulatingPotsInput {
    * salgs-andel (PotSalesHookPort), ikke daglig.
    */
   potDailyTickService?: PotDailyAccumulationTickService;
+  /**
+   * K2-A CRIT-2: ComplianceLedger-port for å skrive EXTRA_PRIZE-entry per
+   * pot-utbetaling. §71 daily-rapporter må reflektere alle pot-payouts
+   * (Innsatsen + Jackpott + generic). Default no-op = ingen ledger-skriv
+   * (bakoverkompat for tester).
+   *
+   * Soft-fail: ledger-skrivefeil svelges. For jackpott matcher dette
+   * eksisterende fail-policy (T2-kontrakten); for innsatsen/generic er
+   * pot allerede committed via tryWin og credit har idempotency-key, så
+   * ledger-feil er audit-issue, ikke regulatorisk pengeflyt-issue.
+   */
+  complianceLedgerPort?: ComplianceLedgerPort;
+  /**
+   * K2-A CRIT-3: PrizePolicy-port for single-prize-cap (2500 kr per
+   * pengespillforskriften §11). MÅ kalles før wallet-credit slik at pot-
+   * payout aldri overstiger lovlig maks-premie. Spesielt viktig for
+   * Jackpott som kan akkumulere til 30 000 kr (`JACKPOT_DEFAULT_MAX_CAP_CENTS`).
+   * Default no-op = ingen cap (bakoverkompat for tester) — produksjon skal
+   * ALLTID wire `engine.getPrizePolicyPort()`.
+   */
+  prizePolicyPort?: PrizePolicyPort;
 }
 
 export interface PotEvaluationResult {
@@ -178,6 +208,9 @@ export async function evaluateAccumulatingPots(
         potType,
         ordinaryWinCents,
         ...input,
+        // K2-A: thread CRIT-2 ledger-port + CRIT-3 prize-policy-port.
+        complianceLedgerPort: input.complianceLedgerPort,
+        prizePolicyPort: input.prizePolicyPort,
       });
       results.push(res);
     } catch (err) {
@@ -285,6 +318,10 @@ export async function evaluateSinglePot(params: {
   ordinaryWinCents?: number;
   audit: AuditLogService;
   potDailyTickService?: PotDailyAccumulationTickService;
+  /** K2-A CRIT-2: ledger-port for EXTRA_PRIZE-entry per pot-payout. */
+  complianceLedgerPort?: ComplianceLedgerPort;
+  /** K2-A CRIT-3: prize-policy-port for single-prize-cap (2500 kr). */
+  prizePolicyPort?: PrizePolicyPort;
 }): Promise<PotEvaluationResult> {
   const { pot, potType, firstWinner } = params;
   const ordinaryWinCents = Math.max(0, params.ordinaryWinCents ?? 0);
@@ -434,6 +471,41 @@ export async function evaluateSinglePot(params: {
     }
   }
 
+  // K2-A CRIT-3: håndhev pengespillforskriften §11 single-prize-cap (2500 kr).
+  // Spesielt viktig for Jackpott som kan akkumulere til 30 000 kr — uten cap
+  // ville hele beløpet utbetales (ulovlig). Cap legges PÅ TOPP av Agent IJ2
+  // total-cap-en: hvis IJ2 allerede trimmet til 1500 kr beholdes det; hvis
+  // IJ2 ga 5000 kr så cap'er §11 til 2500. Differansen audit-logges.
+  const prizePolicyPort = params.prizePolicyPort;
+  let policyId: string | null = null;
+  if (prizePolicyPort && payoutCents > 0) {
+    const capResult = prizePolicyPort.applySinglePrizeCap({
+      hallId: pot.hallId,
+      amount: payoutCents / 100, // port forventer kroner
+    });
+    const cappedPayoutCents = Math.floor(capResult.cappedAmount * 100);
+    policyId = capResult.policyId;
+    if (capResult.wasCapped && cappedPayoutCents < payoutCents) {
+      const additionalHouseRetained = payoutCents - cappedPayoutCents;
+      houseRetainedCents += additionalHouseRetained;
+      log.info(
+        {
+          potId: pot.id,
+          potKey: pot.potKey,
+          potType,
+          potGrossCents,
+          payoutBeforeCriticalCap: payoutCents,
+          payoutAfterCriticalCap: cappedPayoutCents,
+          additionalHouseRetained,
+          totalHouseRetained: houseRetainedCents,
+          policyId,
+        },
+        "[K2-A CRIT-3] pot single-prize-cap (2500) trimmet payout — excess beholdes av huset"
+      );
+      payoutCents = cappedPayoutCents;
+    }
+  }
+
   // Pot utløst — krediter vinner. Idempotency-key per pot + spill
   // forhindrer dobbel credit ved retry.
   const amountKr = payoutCents / 100;
@@ -554,6 +626,54 @@ export async function evaluateSinglePot(params: {
         "[PR-T3] audit.record feilet — pot-payout står, ignorert"
       );
     });
+
+  // K2-A CRIT-2: skriv EXTRA_PRIZE-entry til ComplianceLedger §71. Soft-fail
+  // (matcher eksisterende fail-policy for jackpott — pot er allerede committed
+  // via tryWin, credit har idempotency-key, ledger-entry kan re-kjøres
+  // manuelt). Bruk capped beløp slik at §71-rapport reflekterer faktisk
+  // utbetalt sum. Hopper over hvis payoutCents=0 (ingen faktisk utbetaling).
+  const ledgerPort = params.complianceLedgerPort;
+  if (ledgerPort && payoutCents > 0) {
+    try {
+      await ledgerPort.recordComplianceLedgerEvent({
+        hallId: pot.hallId,
+        // Spill 1 (hovedspill) — pot-evaluator er Spill-1-spesifikk.
+        gameType: ledgerGameTypeForSlug("bingo"),
+        channel: "INTERNET",
+        eventType: "EXTRA_PRIZE",
+        amount: payoutCents / 100, // ledger-amount er kroner
+        gameId: params.scheduledGameId,
+        claimId: winResult.eventId ?? pot.id, // pot.id som fallback hvis ingen event-id
+        playerId: firstWinner.userId,
+        walletId: firstWinner.walletId,
+        policyVersion: policyId ?? undefined,
+        metadata: {
+          reason: "GAME1_POT_PAYOUT",
+          potType,
+          potKey: pot.potKey,
+          potId: pot.id,
+          potGrossCents,
+          payoutCents,
+          houseRetainedCents,
+          ordinaryWinCents,
+          drawSequenceAtWin: params.drawSequenceAtWin,
+          ticketColor: firstWinner.ticketColor,
+        },
+      });
+    } catch (err) {
+      log.warn(
+        {
+          err,
+          potId: pot.id,
+          potKey: pot.potKey,
+          potType,
+          hallId: pot.hallId,
+          payoutCents,
+        },
+        "[K2-A CRIT-2] complianceLedger.recordComplianceLedgerEvent EXTRA_PRIZE feilet — pot-payout står, ledger-entry kan re-kjøres manuelt"
+      );
+    }
+  }
 
   log.info(
     {
