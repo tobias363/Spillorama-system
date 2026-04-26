@@ -88,6 +88,14 @@ class Game1Controller implements GameController {
   private pendingMiniGameTrigger: MiniGameTriggerPayload | null = null;
   /** True mens WinScreenV2 er synlig — hindrer mini-game-overlay i å klippe oppå. */
   private isWinScreenActive = false;
+  /**
+   * FIXED-PRIZE-FIX (Tobias 2026-04-26): akkumulert egen-vinning per
+   * runde. Reset ved gameStarted. Brukes til å vise totalbeløp i
+   * WinScreenV2 (Fullt Hus) i stedet for kun Fullt Hus-prizen.
+   * Eksempel: 1 Rad 100 + 2 Rader 200 + 3 Rader 200 + 4 Rader 200 +
+   * Fullt Hus 1000 = 1700 kr totalt vist i animasjonen.
+   */
+  private roundAccumulatedWinnings = 0;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -378,6 +386,9 @@ class Game1Controller implements GameController {
     // Clear any pending end screen auto-dismiss
     if (this.endScreenTimer) { clearTimeout(this.endScreenTimer); this.endScreenTimer = null; }
 
+    // FIXED-PRIZE-FIX: reset round-accumulated winnings ved ny runde.
+    this.roundAccumulatedWinnings = 0;
+
     this.buyMoreDisabled = false;
     // BIN-409 (D2): Ny runde — reset buy-more button til enabled state.
     // Buy popup (Game1BuyPopup) closes itself at the PLAYING transition via
@@ -471,10 +482,15 @@ class Game1Controller implements GameController {
       // fortsetter som generell annonsering (`phaseMsg` over) for alle.
       const shared = winnerCount > 1;
       const payout = result.payoutAmount ?? 0;
+      // FIXED-PRIZE-FIX: akkumuler vinningen før vi viser overlay.
+      // For Fullt Hus viser WinScreenV2 hele round-totalen — annonsert
+      // til spilleren som "1 Rad 100 + 2 Rader 200 + ... + Fullt Hus 1000
+      // = 1700 kr". Fase 1-4-popup viser fortsatt kun fase-prisen.
+      this.roundAccumulatedWinnings += payout;
       if (isFullHouse) {
         this.isWinScreenActive = true;
         this.winScreen?.show({
-          amount: payout,
+          amount: this.roundAccumulatedWinnings,
           shared,
           sharedCount: winnerCount,
           onDismiss: () => {
