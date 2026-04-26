@@ -200,7 +200,10 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
       if (actor.role === "AGENT" && settlement.agentUserId !== actor.userId) {
         throw new DomainError("FORBIDDEN", "Du har ikke tilgang til denne settlementen.");
       }
-      apiSuccess(res, settlement);
+      // K1-D: berik med resolved hallName + agentDisplayName så modal-headeren
+      // kan vise faktiske navn iht wireframe 16.25/17.10.
+      const enriched = await agentSettlementService.resolveDisplayNames(settlement);
+      apiSuccess(res, enriched);
     } catch (error) {
       apiFailure(res, error);
     }
@@ -292,7 +295,10 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
       if (typeof req.query?.fromDate === "string") filter.fromDate = req.query.fromDate;
       if (typeof req.query?.toDate === "string") filter.toDate = req.query.toDate;
       const settlements = await agentSettlementService.listSettlements(filter);
-      apiSuccess(res, { settlements, limit, offset });
+      // K1-D: berik liste-respons med hallName + agentDisplayName så
+      // SettlementPage-tabellen kan vise navn istedenfor IDs.
+      const enriched = await agentSettlementService.resolveDisplayNamesBatch(settlements);
+      apiSuccess(res, { settlements: enriched, limit, offset });
     } catch (error) {
       apiFailure(res, error);
     }
@@ -310,7 +316,9 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
       if (!settlement) {
         throw new DomainError("SETTLEMENT_NOT_FOUND", "Ingen settlement.");
       }
-      apiSuccess(res, settlement);
+      // K1-D: berik for admin-view (modal-header viser navn iht wireframe).
+      const enriched = await agentSettlementService.resolveDisplayNames(settlement);
+      apiSuccess(res, enriched);
     } catch (error) {
       apiFailure(res, error);
     }
@@ -378,6 +386,11 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
       }
       if (body.bilagReceipt !== undefined) {
         patch.bilagReceipt = body.bilagReceipt as unknown as Parameters<AgentSettlementService["editSettlement"]>[0]["patch"]["bilagReceipt"];
+      }
+      // K1-D wireframe 16.25/17.10: admin kan korrigere business-date.
+      // Service validerer YYYY-MM-DD-format og gyldighet.
+      if (typeof body.businessDate === "string") {
+        patch.businessDate = body.businessDate;
       }
 
       const edited = await agentSettlementService.editSettlement({
