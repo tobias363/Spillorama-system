@@ -259,17 +259,50 @@ export class Game1MiniGameOrchestrator {
    */
   async maybeTriggerFor(input: MaybeTriggerInput): Promise<MaybeTriggerResult> {
     const activeTypes = extractActiveMiniGameTypes(input.gameConfigJson);
-    if (activeTypes.length === 0) {
-      return { triggered: false, resultId: null, miniGameType: null, reason: "NO_MINI_GAMES_CONFIGURED" };
-    }
 
-    // Velg neste type i rotasjonen. FIFO per scheduled-game: hent antall
-    // tidligere mini-games trigget for dette spillet og bruk count % N.
-    // (Typisk kun én mini-game per spill, men rotasjon trer inn hvis
-    // Fullt Hus vinnes av flere i samme multi-winner-scenario → M2+.)
-    const nextType = activeTypes[0]!; // M1: alltid første aktive type.
-    // Merk: orchestrator støtter rotasjon senere (basert på
-    // count-of-previous-mini-games) uten framework-endring.
+    // ─────────────────────────────────────────────────────────────────────
+    // TESTING-OVERRIDE (Tobias 2026-04-26):
+    //
+    // Inntil admin-UI for å styre per-spill mini-game-valg er på plass,
+    // bruker vi Mystery som default mini-game for ALLE Fullt Hus-vinster
+    // (uavhengig av admin-config). Når admin-control lander, settes
+    // `MYSTERY_FORCE_DEFAULT_FOR_TESTING` til false og logikken under
+    // returnerer til vanlig FIFO-rotasjon basert på `extractActiveMiniGameTypes`.
+    //
+    // Hvorfor: orchestrator picker per i dag activeTypes[0]; hvis admin har
+    // konfigurert wheel + mystery vil aldri mystery trigges. For testing
+    // ønsker vi at mystery alltid kommer opp.
+    //
+    // Rollback: sett konstanten under til `false` (eller fjern hele blokken
+    // fra `if (MYSTERY_FORCE_DEFAULT_FOR_TESTING && ...)` til og med
+    // `} else {` og dropp den ekstra `}` på slutten).
+    // ─────────────────────────────────────────────────────────────────────
+    const MYSTERY_FORCE_DEFAULT_FOR_TESTING = true;
+
+    let nextType: MiniGameType;
+    if (
+      MYSTERY_FORCE_DEFAULT_FOR_TESTING &&
+      this.miniGames.has("mystery")
+    ) {
+      // Force Mystery — bypass admin-config-tom-sjekk.
+      nextType = "mystery";
+    } else {
+      if (activeTypes.length === 0) {
+        return {
+          triggered: false,
+          resultId: null,
+          miniGameType: null,
+          reason: "NO_MINI_GAMES_CONFIGURED",
+        };
+      }
+      // Velg neste type i rotasjonen. FIFO per scheduled-game: hent antall
+      // tidligere mini-games trigget for dette spillet og bruk count % N.
+      // (Typisk kun én mini-game per spill, men rotasjon trer inn hvis
+      // Fullt Hus vinnes av flere i samme multi-winner-scenario → M2+.)
+      nextType = activeTypes[0]!; // M1: alltid første aktive type.
+      // Merk: orchestrator støtter rotasjon senere (basert på
+      // count-of-previous-mini-games) uten framework-endring.
+    }
 
     const implementation = this.miniGames.get(nextType);
     if (!implementation) {
