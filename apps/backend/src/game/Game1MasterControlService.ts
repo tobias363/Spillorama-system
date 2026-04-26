@@ -65,6 +65,10 @@ export type MasterAuditAction =
   | "include_hall"
   | "timeout_detected"
   | "start_game_with_unready_override"
+  // CRIT-7 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): kompenserende
+  // rollback når drawEngine.startGame feiler etter at master-control har
+  // committet status='running'. Se Game1MasterControlService.startGame.
+  | "start_engine_failed_rollback"
   // Task 1.6: runtime master-overføring. Se Game1TransferHallService.
   | "transfer_request"
   | "transfer_approved"
@@ -80,6 +84,7 @@ export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "include_hall",
   "timeout_detected",
   "start_game_with_unready_override",
+  "start_engine_failed_rollback",
   "transfer_request",
   "transfer_approved",
   "transfer_rejected",
@@ -180,6 +185,18 @@ export interface MasterActionResult {
    * tilhører en hall-gruppe med jackpot-state.
    */
   jackpotAmountCents?: number;
+}
+
+/**
+ * CRIT-7 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): internal result-shape
+ * for `startGame`-master-tx som inneholder felt brukt for compensating
+ * rollback ved engine.startGame-feil. Disse feltene strippes før
+ * MasterActionResult returneres til caller — kun service-internt.
+ */
+interface MasterStartTxResult extends MasterActionResult {
+  _preStatus: string;
+  _groupHallId: string;
+  _readySnapshot: Record<string, { isReady: boolean; excluded: boolean }>;
 }
 
 export interface TimeoutDetectedInput {
@@ -726,12 +743,18 @@ export class Game1MasterControlService {
         "master.start"
       );
 
-      const masterResult: MasterActionResult = {
+      const masterResult: MasterStartTxResult = {
         gameId: row.id,
         status: row.status,
         actualStartTime: toIso(row.actual_start_time),
         actualEndTime: toIso(row.actual_end_time),
         auditId,
+        // CRIT-7: capture pre-update status for compensating rollback hvis
+        // drawEngine.startGame feiler etter master-commit. Strippes før
+        // public retur.
+        _preStatus: game.status,
+        _groupHallId: game.group_hall_id,
+        _readySnapshot: this.snapshotReadyRows(readyRows),
       };
       if (jackpotAmountCents !== undefined) {
         masterResult.jackpotAmountCents = jackpotAmountCents;
@@ -741,15 +764,148 @@ export class Game1MasterControlService {
 
     // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit (engine
     // bruker egen transaksjon og er idempotent — retry etter feil gir samme
-    // netto-effekt). Hvis engine kaster, propagerer vi feilen; DB-state er
-    // allerede committed men ny kall til startGame vil short-circuit i
-    // engine (idempotent) og kaste om det er reelle pre-cond-feil.
+    // netto-effekt).
+    //
+    // CRIT-7 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): hvis engine.startGame
+    // feiler etter master-control har committed status='running', er DB-
+    // state stuck — auto-draw-tick hopper over (krever game_state-rad), og
+    // master kan ikke pause/resume (engine kaster fordi state mangler).
+    // Compensating rollback: revert scheduled_games til pre-commit-status
+    // og logg compensation som audit-event. Dette er approach #2 fra
+    // K2-B-prompten. Approach #1 (én tx via injected client) ble droppet
+    // pga. dyp avhengighets-stack i drawEngine.startGame.
     if (this.drawEngine) {
-      await this.drawEngine.startGame(input.gameId, input.actor.userId);
+      try {
+        await this.drawEngine.startGame(input.gameId, input.actor.userId);
+      } catch (engineErr) {
+        log.error(
+          { err: engineErr, gameId: input.gameId, actorId: input.actor.userId },
+          "[CRIT-7] drawEngine.startGame feilet etter master-commit — kjører compensating rollback"
+        );
+        try {
+          await this.rollbackStartOnEngineFailure({
+            gameId: input.gameId,
+            actor: input.actor,
+            preStatus: result._preStatus,
+            groupHallId: result._groupHallId,
+            readySnapshot: result._readySnapshot,
+            engineError: engineErr,
+          });
+        } catch (rollbackErr) {
+          // Rollback feilet — vi kan ikke gjøre mer her. Loggen er
+          // kritisk for ops-recovery (manuell DB-edit).
+          log.error(
+            { err: rollbackErr, gameId: input.gameId, originalErr: engineErr },
+            "[CRIT-7] compensating rollback FEILET — DB-state er stuck, krever manuell intervensjon"
+          );
+        }
+        // Re-throw original engine-feil så caller får riktig signal.
+        throw engineErr;
+      }
     }
 
-    this.notifyStatusChange(result, "start", input.actor.userId);
-    return result;
+    // CRIT-7: strip private rollback-felt før vi returnerer til caller —
+    // de er rene service-internals.
+    const cleanResult: MasterActionResult = {
+      gameId: result.gameId,
+      status: result.status,
+      actualStartTime: result.actualStartTime,
+      actualEndTime: result.actualEndTime,
+      auditId: result.auditId,
+    };
+    if (result.jackpotAmountCents !== undefined) {
+      cleanResult.jackpotAmountCents = result.jackpotAmountCents;
+    }
+
+    this.notifyStatusChange(cleanResult, "start", input.actor.userId);
+    return cleanResult;
+  }
+
+  /**
+   * CRIT-7 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): kompenserende rollback
+   * når drawEngine.startGame feiler etter at master-control har committet
+   * status='running'.
+   *
+   * Reverterer scheduled_games:
+   *   - status              → preStatus
+   *   - actual_start_time   → NULL (var NULL før master-commit)
+   *   - started_by_user_id  → NULL (var NULL før master-commit)
+   *
+   * Skriver audit-event `start_engine_failed_rollback` med engine-error som
+   * metadata for ops-undersøkelse.
+   *
+   * Idempotent: trygt å kalle flere ganger — UPDATE er `WHERE status =
+   * 'running'`, så hvis status allerede er rullet tilbake gjør den ingenting.
+   */
+  private async rollbackStartOnEngineFailure(input: {
+    gameId: string;
+    actor: MasterActor;
+    preStatus: string;
+    groupHallId: string;
+    readySnapshot: Record<string, { isReady: boolean; excluded: boolean }>;
+    engineError: unknown;
+  }): Promise<void> {
+    await this.runInTransaction(async (client) => {
+      // Bare rullbar hvis vi fortsatt er i `running`-state. Hvis noen annen
+      // har gjort noe (auto-draw-tick som faktisk lyktes mot alle odds, eller
+      // master pause via separat path), aborter rollback og logg.
+      const { rows } = await client.query<{ status: string }>(
+        `SELECT status FROM ${this.scheduledGamesTable()}
+          WHERE id = $1
+          FOR UPDATE`,
+        [input.gameId]
+      );
+      const currentStatus = rows[0]?.status;
+      if (currentStatus !== "running") {
+        log.warn(
+          { gameId: input.gameId, currentStatus, preStatus: input.preStatus },
+          "[CRIT-7] rollback skipped — status er ikke lenger 'running'"
+        );
+        return;
+      }
+
+      await client.query(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET status              = $2,
+                actual_start_time   = NULL,
+                started_by_user_id  = NULL,
+                updated_at          = now()
+          WHERE id = $1 AND status = 'running'`,
+        [input.gameId, input.preStatus]
+      );
+
+      const errorMessage =
+        input.engineError instanceof Error
+          ? input.engineError.message
+          : String(input.engineError);
+      const errorCode =
+        input.engineError instanceof DomainError
+          ? input.engineError.code
+          : undefined;
+
+      await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "start_engine_failed_rollback",
+        actor: input.actor,
+        groupHallId: input.groupHallId,
+        snapshot: input.readySnapshot,
+        metadata: {
+          revertedToStatus: input.preStatus,
+          engineError: errorMessage,
+          engineErrorCode: errorCode ?? null,
+          rolledBackAt: new Date().toISOString(),
+        },
+      });
+
+      log.info(
+        {
+          gameId: input.gameId,
+          revertedTo: input.preStatus,
+          engineError: errorMessage,
+        },
+        "[CRIT-7] master-start rolled back etter engine-feil"
+      );
+    });
   }
 
   async excludeHall(input: ExcludeHallInput): Promise<MasterActionResult> {

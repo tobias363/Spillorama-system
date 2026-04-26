@@ -191,6 +191,18 @@ export function createGame1ScheduledEventHandlers(
         walletId: user.walletId,
         socketId,
       });
+      // CRIT-4: rommet kan ha blitt rebygget av en restart (Render-instans
+      // som lastet state fra Redis-store) uten at scheduledGameId ble
+      // hydrert fra DB-mappingen. Marker idempotent her så guarden
+      // dekker tilfellet "room re-joined etter restart".
+      try {
+        engine.markRoomAsScheduled(roomCode, row.id);
+      } catch (err) {
+        log.warn(
+          { err, roomCode, scheduledGameId: row.id },
+          "markRoomAsScheduled på existing-rom feilet — scheduled-engine er autoritativ"
+        );
+      }
       const snapshot = engine.getRoomSnapshot(roomCode);
       return { roomCode, playerId, snapshot };
     }
@@ -213,6 +225,19 @@ export function createGame1ScheduledEventHandlers(
     );
 
     if (actualRoomCode === created.roomCode) {
+      // CRIT-4: marker rommet som scheduled så BingoEngine.startGame /
+      // drawNextNumber / submitClaim defensivt blokkerer ad-hoc-mutasjon.
+      // Best-effort — hvis dette kaster (rommet borte etter race) er
+      // scheduled-flyten allerede ansvarlig for state via
+      // Game1DrawEngineService.
+      try {
+        engine.markRoomAsScheduled(created.roomCode, row.id);
+      } catch (err) {
+        log.warn(
+          { err, roomCode: created.roomCode, scheduledGameId: row.id },
+          "markRoomAsScheduled feilet etter assignRoomCode — fortsetter, scheduled-engine er autoritativ"
+        );
+      }
       const snapshot = engine.getRoomSnapshot(created.roomCode);
       return {
         roomCode: created.roomCode,
@@ -245,6 +270,16 @@ export function createGame1ScheduledEventHandlers(
       walletId: user.walletId,
       socketId,
     });
+    // CRIT-4: vinner-rommet kan også være "fresh" (annen race-vinner
+    // markerte det allerede), men markeringen er idempotent.
+    try {
+      engine.markRoomAsScheduled(actualRoomCode, row.id);
+    } catch (err) {
+      log.warn(
+        { err, roomCode: actualRoomCode, scheduledGameId: row.id },
+        "markRoomAsScheduled på winner-rom feilet — scheduled-engine er autoritativ"
+      );
+    }
     const snapshot = engine.getRoomSnapshot(actualRoomCode);
     return {
       roomCode: actualRoomCode,

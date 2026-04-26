@@ -227,6 +227,25 @@ export interface RoomState {
   // BIN-672: required. Every room knows its game slug — input is defaulted
   // to "bingo" in BingoEngine.createRoom if the caller didn't pass one.
   gameSlug: string;
+  /**
+   * CRIT-4 / HIGH-1 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26):
+   *
+   * Hvis satt, betyr det at dette in-memory rommet er et **scheduled
+   * Spill 1**-rom (slug `bingo`), opprettet via `game1:join-scheduled`.
+   * Per `SPILL1_ENGINE_ROLES_2026-04-23.md`: scheduled Spill 1 SKAL
+   * ALDRI bruke `BingoEngine.startGame/drawNextNumber/evaluateActivePhase/
+   * submitClaim` — autoritativ engine er `Game1DrawEngineService`.
+   *
+   * `BingoEngine.assertNotScheduled(room)` håndhever dette ved å kaste
+   * `DomainError("USE_SCHEDULED_API")` hvis BingoEngine-mutasjons-
+   * metoder kalles med dette feltet satt på et `bingo`-rom. Spill 2/3
+   * (slug `rocket` / `monsterbingo`) påvirkes ikke.
+   *
+   * Settes via `BingoEngine.markRoomAsScheduled(roomCode, scheduledGameId)`
+   * etter at scheduled-flow har persistert mappingen til DB
+   * (`assignRoomCode`).
+   */
+  scheduledGameId?: string | null;
   players: Map<string, Player>;
   currentGame?: GameState;
   gameHistory: GameSnapshot[];

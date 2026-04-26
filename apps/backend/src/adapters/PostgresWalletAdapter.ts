@@ -5,6 +5,7 @@ import type {
   CommitReservationOptions,
   CreateWalletAccountInput,
   CreditOptions,
+  CreditWithClientOptions,
   ReserveOptions,
   TransactionOptions,
   TransferOptions,
@@ -334,6 +335,48 @@ export class PostgresWalletAdapter implements WalletAdapter {
     });
   }
 
+  /**
+   * CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): credit som deltar i
+   * caller's allerede-åpne transaksjon. Brukes av
+   * Game1MiniGameOrchestrator slik at wallet-credit + UPDATE av
+   * `completed_at` skjer atomisk.
+   *
+   * Forventer at caller har kjørt `BEGIN` på passed `client` og vil
+   * `COMMIT`/`ROLLBACK` selv. Adapteret kjører IKKE BEGIN/COMMIT —
+   * bare ledger-operasjonene mot den passede client.
+   *
+   * Idempotency: hvis `idempotencyKey` allerede er brukt, returneres
+   * eksisterende transaksjon UTEN å skrive ny. Caller's tx forblir
+   * trygt — vi har bare gjort en SELECT.
+   */
+  async creditWithClient(
+    accountId: string,
+    amount: number,
+    reason: string,
+    options: CreditWithClientOptions,
+  ): Promise<WalletTransaction> {
+    const client = options.client as PoolClient;
+    if (!client || typeof client.query !== "function") {
+      throw new WalletError(
+        "INVALID_WALLET_CLIENT",
+        "creditWithClient krever en gyldig PoolClient via options.client.",
+      );
+    }
+    const normalized = this.normalizeUserWalletId(accountId);
+    this.assertPositiveAmount(amount);
+    const target: WalletAccountSide = options.to ?? "deposit";
+    return this.singleAccountMovementWithClient(client, {
+      accountId: normalized,
+      type: "CREDIT",
+      amount,
+      reason: reason || "Credit",
+      fromAccountId: this.houseAccountId,
+      toAccountId: normalized,
+      idempotencyKey: options.idempotencyKey,
+      creditTarget: target,
+    });
+  }
+
   async topUp(accountId: string, amount: number, reason = "Manual top-up", options?: TransactionOptions): Promise<WalletTransaction> {
     const normalized = this.normalizeUserWalletId(accountId);
     this.assertPositiveAmount(amount);
@@ -585,127 +628,8 @@ export class PostgresWalletAdapter implements WalletAdapter {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const operationId = randomUUID();
-      const txId = randomUUID();
-
-      // For debit: lås account-raden og beregn winnings-first-splitt atomisk.
-      let split: WalletTransactionSplit;
-      if (input.splitStrategy === "winnings-first") {
-        const locked = await this.selectAccountForUpdate(client, input.accountId);
-        if (!locked) {
-          throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${input.accountId} finnes ikke.`);
-        }
-        split = splitDebitFromAccount(
-          {
-            depositBalance: asMoney(locked.deposit_balance),
-            winningsBalance: asMoney(locked.winnings_balance)
-          },
-          input.amount
-        );
-      } else {
-        // For credit: hele beløpet lander på `creditTarget` (default deposit).
-        const target: WalletAccountSide = input.creditTarget ?? "deposit";
-        split =
-          target === "winnings"
-            ? { fromWinnings: input.amount, fromDeposit: 0 }
-            : { fromWinnings: 0, fromDeposit: input.amount };
-      }
-
-      const userSideForFromAccount: WalletAccountSide | undefined =
-        input.accountId === input.fromAccountId ? undefined : "deposit"; // system-konto ⇒ deposit
-      const userSideForToAccount: WalletAccountSide | undefined =
-        input.accountId === input.toAccountId ? undefined : "deposit";
-
-      const entries: LedgerEntryInput[] = [];
-
-      // ── DEBIT-side ─────────────────────────────────────────────────────
-      if (input.accountId === input.fromAccountId) {
-        // Bruker-wallet er DEBIT-siden — splitt mellom winnings + deposit.
-        if (split.fromWinnings > 0) {
-          entries.push({
-            operationId,
-            accountId: input.fromAccountId,
-            side: "DEBIT",
-            amount: split.fromWinnings,
-            transactionId: txId,
-            accountSide: "winnings"
-          });
-        }
-        if (split.fromDeposit > 0) {
-          entries.push({
-            operationId,
-            accountId: input.fromAccountId,
-            side: "DEBIT",
-            amount: split.fromDeposit,
-            transactionId: txId,
-            accountSide: "deposit"
-          });
-        }
-      } else {
-        // Systemkonto på DEBIT-siden — alt på deposit (system har ikke winnings).
-        entries.push({
-          operationId,
-          accountId: input.fromAccountId,
-          side: "DEBIT",
-          amount: input.amount,
-          accountSide: userSideForFromAccount ?? "deposit"
-        });
-      }
-
-      // ── CREDIT-side ────────────────────────────────────────────────────
-      if (input.accountId === input.toAccountId) {
-        // Bruker-wallet er CREDIT-siden — lander på `creditTarget` (alt eller intet).
-        if (split.fromWinnings > 0) {
-          entries.push({
-            operationId,
-            accountId: input.toAccountId,
-            side: "CREDIT",
-            amount: split.fromWinnings,
-            transactionId: txId,
-            accountSide: "winnings"
-          });
-        }
-        if (split.fromDeposit > 0) {
-          entries.push({
-            operationId,
-            accountId: input.toAccountId,
-            side: "CREDIT",
-            amount: split.fromDeposit,
-            transactionId: txId,
-            accountSide: "deposit"
-          });
-        }
-      } else {
-        // Systemkonto på CREDIT-siden — alt på deposit.
-        entries.push({
-          operationId,
-          accountId: input.toAccountId,
-          side: "CREDIT",
-          amount: input.amount,
-          accountSide: userSideForToAccount ?? "deposit"
-        });
-      }
-
-      const txRows = await this.executeLedger(client, {
-        transactions: [
-          {
-            id: txId,
-            operationId,
-            accountId: input.accountId,
-            type: input.type,
-            amount: input.amount,
-            reason: input.reason,
-            idempotencyKey: input.idempotencyKey,
-            split
-          }
-        ],
-        entries
-      });
+      const tx = await this.runSingleAccountMovementOnClient(client, input);
       await client.query("COMMIT");
-      const tx = txRows.find((row) => row.id === txId);
-      if (!tx) {
-        throw new WalletError("INVALID_WALLET_RESPONSE", "Mangler transaksjonsrad for wallet-operasjon.");
-      }
       return tx;
     } catch (error) {
       await client.query("ROLLBACK");
@@ -713,6 +637,193 @@ export class PostgresWalletAdapter implements WalletAdapter {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): variant av
+   * `singleAccountMovement` som deltar i en allerede-åpen transaksjon
+   * (caller kontrollerer BEGIN/COMMIT/ROLLBACK på passed client).
+   *
+   * Brukes av `creditWithClient` slik at Game1MiniGameOrchestrator kan
+   * koordinere wallet-credit + UPDATE i samme atomiske transaksjon.
+   *
+   * Idempotency-sjekk: bruker pool.query (egen connection) for å lese
+   * eksisterende tx — det er trygt fordi en commit-et tx er synlig fra
+   * alle connections, og vi vil ikke skrive duplikat fra denne path-en.
+   */
+  private async singleAccountMovementWithClient(
+    client: PoolClient,
+    input: {
+      accountId: string;
+      type: WalletTransaction["type"];
+      amount: number;
+      reason: string;
+      fromAccountId: string;
+      toAccountId: string;
+      idempotencyKey?: string;
+      splitStrategy?: "winnings-first";
+      creditTarget?: WalletAccountSide;
+    },
+  ): Promise<WalletTransaction> {
+    await this.ensureInitialized();
+
+    // BIN-162: Idempotency check — return existing transaction if key was already used.
+    // Bruker pool.query (egen connection) for å unngå å rote med caller's tx-state.
+    if (input.idempotencyKey) {
+      const existing = await this.findByIdempotencyKey(input.idempotencyKey);
+      if (existing) return existing;
+    }
+
+    // Sørg for at konto eksisterer før vi prøver å skrive ledger-rader.
+    // Dette må også kjøre uten å rote med caller's tx — vi bruker egen
+    // connection. ensureAccount er idempotent og uten side-effekter
+    // utover INSERT på første kall.
+    await this.ensureAccount(input.accountId);
+
+    return this.runSingleAccountMovementOnClient(client, input);
+  }
+
+  /**
+   * Felles ledger-skriving — caller har allerede åpnet client + BEGIN
+   * (eller adapteret håndterer det selv via singleAccountMovement-wrapper).
+   *
+   * Gjør IKKE BEGIN/COMMIT — kun ledger-mutasjoner.
+   */
+  private async runSingleAccountMovementOnClient(
+    client: PoolClient,
+    input: {
+      accountId: string;
+      type: WalletTransaction["type"];
+      amount: number;
+      reason: string;
+      fromAccountId: string;
+      toAccountId: string;
+      idempotencyKey?: string;
+      splitStrategy?: "winnings-first";
+      creditTarget?: WalletAccountSide;
+    },
+  ): Promise<WalletTransaction> {
+    const operationId = randomUUID();
+    const txId = randomUUID();
+
+    // For debit: lås account-raden og beregn winnings-first-splitt atomisk.
+    let split: WalletTransactionSplit;
+    if (input.splitStrategy === "winnings-first") {
+      const locked = await this.selectAccountForUpdate(client, input.accountId);
+      if (!locked) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${input.accountId} finnes ikke.`);
+      }
+      split = splitDebitFromAccount(
+        {
+          depositBalance: asMoney(locked.deposit_balance),
+          winningsBalance: asMoney(locked.winnings_balance)
+        },
+        input.amount
+      );
+    } else {
+      // For credit: hele beløpet lander på `creditTarget` (default deposit).
+      const target: WalletAccountSide = input.creditTarget ?? "deposit";
+      split =
+        target === "winnings"
+          ? { fromWinnings: input.amount, fromDeposit: 0 }
+          : { fromWinnings: 0, fromDeposit: input.amount };
+    }
+
+    const userSideForFromAccount: WalletAccountSide | undefined =
+      input.accountId === input.fromAccountId ? undefined : "deposit"; // system-konto ⇒ deposit
+    const userSideForToAccount: WalletAccountSide | undefined =
+      input.accountId === input.toAccountId ? undefined : "deposit";
+
+    const entries: LedgerEntryInput[] = [];
+
+    // ── DEBIT-side ─────────────────────────────────────────────────────
+    if (input.accountId === input.fromAccountId) {
+      // Bruker-wallet er DEBIT-siden — splitt mellom winnings + deposit.
+      if (split.fromWinnings > 0) {
+        entries.push({
+          operationId,
+          accountId: input.fromAccountId,
+          side: "DEBIT",
+          amount: split.fromWinnings,
+          transactionId: txId,
+          accountSide: "winnings"
+        });
+      }
+      if (split.fromDeposit > 0) {
+        entries.push({
+          operationId,
+          accountId: input.fromAccountId,
+          side: "DEBIT",
+          amount: split.fromDeposit,
+          transactionId: txId,
+          accountSide: "deposit"
+        });
+      }
+    } else {
+      // Systemkonto på DEBIT-siden — alt på deposit (system har ikke winnings).
+      entries.push({
+        operationId,
+        accountId: input.fromAccountId,
+        side: "DEBIT",
+        amount: input.amount,
+        accountSide: userSideForFromAccount ?? "deposit"
+      });
+    }
+
+    // ── CREDIT-side ────────────────────────────────────────────────────
+    if (input.accountId === input.toAccountId) {
+      // Bruker-wallet er CREDIT-siden — lander på `creditTarget` (alt eller intet).
+      if (split.fromWinnings > 0) {
+        entries.push({
+          operationId,
+          accountId: input.toAccountId,
+          side: "CREDIT",
+          amount: split.fromWinnings,
+          transactionId: txId,
+          accountSide: "winnings"
+        });
+      }
+      if (split.fromDeposit > 0) {
+        entries.push({
+          operationId,
+          accountId: input.toAccountId,
+          side: "CREDIT",
+          amount: split.fromDeposit,
+          transactionId: txId,
+          accountSide: "deposit"
+        });
+      }
+    } else {
+      // Systemkonto på CREDIT-siden — alt på deposit.
+      entries.push({
+        operationId,
+        accountId: input.toAccountId,
+        side: "CREDIT",
+        amount: input.amount,
+        accountSide: userSideForToAccount ?? "deposit"
+      });
+    }
+
+    const txRows = await this.executeLedger(client, {
+      transactions: [
+        {
+          id: txId,
+          operationId,
+          accountId: input.accountId,
+          type: input.type,
+          amount: input.amount,
+          reason: input.reason,
+          idempotencyKey: input.idempotencyKey,
+          split
+        }
+      ],
+      entries
+    });
+    const tx = txRows.find((row) => row.id === txId);
+    if (!tx) {
+      throw new WalletError("INVALID_WALLET_RESPONSE", "Mangler transaksjonsrad for wallet-operasjon.");
+    }
+    return tx;
   }
 
   /** BIN-162: Find an existing transaction by idempotency key. */

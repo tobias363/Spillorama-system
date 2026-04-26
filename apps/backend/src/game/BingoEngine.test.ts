@@ -104,6 +104,20 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     return this.adjustBalance(accountId, Math.abs(amount), "CREDIT", reason);
   }
 
+  /**
+   * CRIT-5 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): test-mock for
+   * tx-aware credit. InMemory har ingen reelle tx-grenser, så vi bare
+   * delegerer til `credit`. Client-parameteren ignoreres.
+   */
+  async creditWithClient(
+    accountId: string,
+    amount: number,
+    reason: string,
+    options: { client: unknown; idempotencyKey?: string; to?: "deposit" | "winnings" },
+  ): Promise<WalletTransaction> {
+    return this.credit(accountId, amount, reason, options);
+  }
+
   async topUp(accountId: string, amount: number, reason = "Top-up"): Promise<WalletTransaction> {
     return this.adjustBalance(accountId, Math.abs(amount), "TOPUP", reason);
   }
