@@ -355,12 +355,13 @@ export function buildRoomUpdatePayload(
   }
 
   function priceForTickets(tickets: Ticket[], fee: number): number {
-    return roundCurrency(
-      tickets.reduce((sum, t) => {
-        const tt = ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
-        return sum + fee * (tt?.priceMultiplier ?? 1);
-      }, 0),
-    );
+    // Hver ticket = ett brett. priceMultiplier er pakke-størrelse (antall brett per
+    // pakke), IKKE pris-multiplier per brett. Pris per brett er fee (entryFee).
+    // Pakke-prisen er fee * priceMultiplier, men det gjelder kun ved kjøp av en
+    // hel pakke (priceForSelections), ikke summering over individuelle brett.
+    // Bug 2026-04-26: priceMultiplier ble feilaktig ganget per brett →
+    // 30 brett av Large (3 brett/pakke) viste 1800 kr i stedet for 600 kr.
+    return roundCurrency(tickets.length * fee);
   }
 
   for (const player of snapshot.players) {
