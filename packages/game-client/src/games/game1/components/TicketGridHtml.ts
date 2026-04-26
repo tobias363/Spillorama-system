@@ -1,5 +1,9 @@
 import type { GameState } from "../../../bridge/GameBridge.js";
 import { activePatternFromState } from "../logic/PatternMasks.js";
+import {
+  sortPhaseFromActivePattern,
+  sortTicketsByProgress,
+} from "../logic/TicketSortByProgress.js";
 import type { Ticket } from "@spillorama/shared-types/game";
 import { BingoTicketHtml } from "./BingoTicketHtml.js";
 
@@ -143,7 +147,18 @@ export class TicketGridHtml {
     opts: { cancelable: boolean; entryFee: number; state: GameState; liveTicketCount?: number },
   ): void {
     const liveCount = opts.liveTicketCount ?? 0;
-    const signature = this.computeSignature(tickets, opts.cancelable, liveCount);
+
+    // ── Sortér live-bonger etter "nærmest å fullføre fasen" ─────────────────
+    // Tobias 2026-04-26: server sender bonger i kjøps-rekkefølge, men spillere
+    // synes det er vanskelig å se hvilken bong som er nærmest å vinne. Vi
+    // sorterer KUN live-bonger (index < liveCount). Pre-round-bonger beholder
+    // sin original-posisjon (de spiller ikke i nåværende runde).
+    //
+    // Hvis active-pattern ikke kan klassifiseres til en Spill 1-fase
+    // (Spill 3 jubilee, ukjent custom-navn), beholdes server-rekkefølge.
+    const orderedTickets = this.applyProgressSort(tickets, opts.state, liveCount);
+
+    const signature = this.computeSignature(orderedTickets, opts.cancelable, liveCount);
     const markSig = this.computeMarkStateSig(opts.state, liveCount);
 
     if (signature === this.lastSignature) {
@@ -159,13 +174,37 @@ export class TicketGridHtml {
     }
     this.cancelable = opts.cancelable;
     this.liveCount = liveCount;
-    this.rebuild(tickets, opts, liveCount);
+    this.rebuild(orderedTickets, opts, liveCount);
     // Assign signature AFTER rebuild — rebuild() calls clear() which resets
     // lastSignature, so setting it beforehand gets overwritten.
     this.lastSignature = signature;
     this.applyMarks(opts.state, liveCount);
     this.lastMarkStateSig = markSig;
     this.updateScrollMask();
+  }
+
+  /**
+   * Returnér en ny array hvor live-bongene (index < liveCount) er sortert
+   * etter closeness-til-fullføring. Pre-round-bonger (index ≥ liveCount)
+   * beholder sin relative rekkefølge bak live-bongene.
+   *
+   * Faller tilbake til input-array hvis det ikke er noen live-bonger,
+   * eller hvis active-pattern ikke kan klassifiseres til en Spill 1-fase.
+   */
+  private applyProgressSort(
+    tickets: Ticket[],
+    state: GameState,
+    liveCount: number,
+  ): Ticket[] {
+    if (liveCount <= 0 || tickets.length === 0) return tickets;
+    const activePattern = activePatternFromState(state.patterns, state.patternResults);
+    const phase = sortPhaseFromActivePattern(activePattern);
+    if (phase === null) return tickets;
+    const drawn = new Set(state.drawnNumbers ?? []);
+    const live = tickets.slice(0, liveCount);
+    const preRound = tickets.slice(liveCount);
+    const sortedLive = sortTicketsByProgress(live, drawn, phase);
+    return [...sortedLive, ...preRound];
   }
 
   /** Mark a newly-drawn number across every LIVE ticket. Returns true if at

@@ -165,13 +165,31 @@ export class GameBridge {
   private drawDuplicateCount = 0;
 
   /**
-   * Saldo-flash fix (Tobias 2026-04-26): Cache the last balance we
-   * emitted via `spillorama:balanceChanged` so we don't fire on every
-   * `room:update`. Wallet rarely changes per-ball, but `room:update` is
-   * pushed on every draw — emitting unconditionally caused the lobby
-   * shell to do an optimistic re-render with a wrong split (PR #512
-   * introduced availableDeposit/availableWinnings while we still send
-   * total balance), producing a ~0.5s flash. `null` = nothing emitted yet.
+   * W1-HOTFIX REMOVAL (Tobias 2026-04-26):
+   * ──────────────────────────────────────
+   * Tidligere lagret vi `lastEmittedBalance` for å dedup'e
+   * `spillorama:balanceChanged`-events ved identisk balance-verdi (PR #512
+   * saldo-flash-fix). Den dedup-en var en defensiv lapp mot saldo-flash som
+   * ble PROPER fikset i PR #534 (refreshPlayerObjectsFromWallet bruker
+   * getAvailableBalance overalt → me.balance reflekterer chip-verdien).
+   *
+   * Dedup-en var også årsak (sammen med stale Player.balance i
+   * Game1PayoutService) til Tobias' rapporterte 2.-vinn-bug: hvis server
+   * pusher samme stale balance 2 ganger (round 1 → round 2), blokkerer
+   * dedup-en faktisk fersk push hvis verdien tilfeldigvis matcher.
+   *
+   * Beslutning per WALLET_DEEP_REVIEW_2026-04-26.md §1.4 Option A: fjern
+   * bridge-dedup-en helt. Server-side er idempotent (duplisert push er trygt),
+   * og lobby-shellen har sin egen dedup på `_lastBalanceSeen` (lobby.js:446)
+   * som dekker «redundant event»-tilfellet uten å blokkere reelle endringer.
+   *
+   * Resultat: hver `room:update` fyrer `balanceChanged` med gjeldende
+   * me.balance. Det gir lobby muligheten til å avgjøre om refetch trengs;
+   * tidligere kunne en ekte ny verdi bli blokkert hvis den ble emittet 2
+   * ganger raskt (race med room:update + bet:arm).
+   *
+   * Field beholdt som `null` (ubrukt) for backward-compat med stop()-reset
+   * og test-symbol-imports — ikke lest noe sted etter denne hotfix-en.
    */
   private lastEmittedBalance: number | null = null;
 
@@ -297,20 +315,27 @@ export class GameBridge {
     this.state.luckyNumbers = payload.luckyNumbers;
 
     // Push balance to host page (game-bar sync)
-    // Saldo-flash fix (Tobias 2026-04-26): only emit when the balance
-    // actually changed since the last emission. `room:update` fires on
-    // every ball draw, but the wallet rarely changes per-ball, so the
-    // unconditional emit caused the lobby shell to optimistically
-    // re-render with a wrong deposit/winnings split (PR #512). The
-    // resulting ~0.5 s flash before the debounced refetch corrected the
-    // split was the visible saldo-blink bug.
+    //
+    // W1-hotfix (Tobias 2026-04-26): `lastEmittedBalance`-dedup er fjernet.
+    // ─────────────────────────────────────────────────────────────────────
+    // Tidligere blokkerte vi emit hvis `me.balance === this.lastEmittedBalance`
+    // (PR #512 saldo-flash-defensiv). Det forårsaket 2.-vinn-bugen: hvis
+    // server pusher samme stale balance 2 ganger, blokkerer dedup'en faktisk
+    // fersk push. Saldo-flash-bugen er fikset ved roten (PR #534 — refresh
+    // bruker getAvailableBalance overalt) og lobby-shellen har sin egen
+    // dedup (`_lastBalanceSeen` i lobby.js:446) som filtrerer ut redundante
+    // refetch-anrop. Server-side er idempotent → duplisert balanceChanged-
+    // event er trygt.
+    //
+    // `lastEmittedBalance` field er beholdt som no-op (lest aldri etter denne
+    // hotfix-en) for backward-compat med stop()-reset.
     if (this.myPlayerId) {
       const me = payload.players.find((p: Player) => p.id === this.myPlayerId);
       if (me && typeof me.balance === "number" && typeof window !== "undefined") {
-        if (me.balance !== this.lastEmittedBalance) {
-          this.lastEmittedBalance = me.balance;
-          window.dispatchEvent(new CustomEvent("spillorama:balanceChanged", { detail: { balance: me.balance } }));
-        }
+        this.lastEmittedBalance = me.balance;
+        window.dispatchEvent(
+          new CustomEvent("spillorama:balanceChanged", { detail: { balance: me.balance } })
+        );
       }
     }
 

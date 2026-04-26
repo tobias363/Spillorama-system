@@ -898,6 +898,15 @@ export class Game1DrawEngineService {
       winnerIds: string[];
       patternName: string;
       phase: number;
+      /**
+       * W1-hotfix (Tobias 2026-04-26): unike wallet-IDer for vinnere.
+       * Brukes POST-commit til å refreshe in-memory `Player.balance` i
+       * BingoEngine-rommet før `notifyPlayerRoomUpdate` slik at
+       * `room:update`-snapshot reflekterer faktisk wallet-state etter
+       * payout. Uten dette dedup'er GameBridge.lastEmittedBalance bort
+       * gevinst-broadcasten fordi me.balance var stale.
+       */
+      winnerWalletIds: string[];
     } | null = null;
 
     // BIN-690 M1: capture for POST-commit mini-game-trigger. Populert kun
@@ -1019,6 +1028,10 @@ export class Game1DrawEngineService {
           winnerIds: phaseResult.winnerIds,
           patternName: phaseDisplayName(state.current_phase),
           phase: state.current_phase,
+          // W1-hotfix: capture vinner-wallet-IDer slik at
+          // `notifyPlayerRoomUpdate` POST-commit kan refreshe in-memory
+          // Player.balance før broadcast. Se kommentar på field-deklarasjonen.
+          winnerWalletIds: phaseResult.winnerWalletIds,
         };
       }
 
@@ -1158,7 +1171,7 @@ export class Game1DrawEngineService {
       const updatedStatus = isFinished ? "completed" : game.status;
       const draws = await this.loadDrawsInOrder(client, scheduledGameId);
       return this.buildStateView(updatedState, updatedStatus, draws);
-    }).then((view) => {
+    }).then(async (view) => {
       // PR 4d.3: admin-broadcast etter commit. view.lastDrawnBall er alltid
       // satt her (vi har akkurat trukket og persistert), og drawsCompleted
       // avspeiler sekvensen for tell-logikk i UI.
@@ -1193,6 +1206,39 @@ export class Game1DrawEngineService {
         // uten å måtte korrelere med auto-paused-eventet.
         view.pausedAutomatically = true;
       }
+
+      // W1-hotfix (Tobias 2026-04-26 — wallet 2.-vinn-bug):
+      // ─────────────────────────────────────────────────────
+      // Refresh in-memory `Player.balance` for vinner-wallets FØR vi pusher
+      // `room:update`. Uten dette ville snapshot bygget i
+      // `notifyPlayerRoomUpdate` inneholdt stale balance (verdien fra FØR
+      // payoutPhase committed), og GameBridge.lastEmittedBalance-dedup
+      // blokkerer broadcast — symptom var Tobias' rapporterte regresjon der
+      // gevinst-chip ikke oppdaterte ved 2. vinn (round 1 fungerte ved
+      // gameEnded-refetch, round 2 mistet race-en).
+      //
+      // Vi bruker `getAvailableBalance` (via BingoEngine.refresh-helper) så
+      // chip-en (som også viser available) får konsistent verdi — dette er
+      // korrekt valg per saldo-flash-fix #534. Fail-closed: en feil her er
+      // logget men kaster ikke (payout er allerede committed; missende
+      // refresh ruller IKKE tilbake credit-en).
+      if (
+        capturedPhaseResult &&
+        capturedPhaseResult.winnerWalletIds.length > 0 &&
+        this.bingoEngine
+      ) {
+        for (const walletId of capturedPhaseResult.winnerWalletIds) {
+          try {
+            await this.bingoEngine.refreshPlayerBalancesForWallet(walletId);
+          } catch (err) {
+            log.warn(
+              { err, scheduledGameId, walletId },
+              "[W1-HOTFIX] refreshPlayerBalancesForWallet feilet — payout committed uansett, room:update kan inneholde stale balance for denne wallet"
+            );
+          }
+        }
+      }
+
       // PR-C4: spiller-broadcast til default-namespace. Samme rekkefølge som
       // admin-broadcast (draw:new → pattern:won → room:update) slik at
       // spiller-UI og admin-UI holder seg synkronisert.
@@ -1221,6 +1267,8 @@ export class Game1DrawEngineService {
         }
         // room:update push avslutter sekvensen — spilleren får oppdatert
         // player-liste / lucky-numbers / stakes samtidig med ball.
+        // W1-hotfix: balanser er allerede refresh'ed over så snapshot-
+        // building i `notifyPlayerRoomUpdate` plukker opp ny verdi.
         this.notifyPlayerRoomUpdate(capturedRoomCode);
       }
       // BIN-690 M1: fire-and-forget mini-game-trigger for Fullt Hus-vinnere.
@@ -1834,6 +1882,18 @@ export class Game1DrawEngineService {
     phaseWon: boolean;
     winnerCount: number;
     winnerIds: string[];
+    /**
+     * W1-hotfix (Tobias 2026-04-26): unique wallet-IDer for vinner-bonger.
+     * Brukes POST-commit av drawNext() for å refresh-e in-memory
+     * `Player.balance` i BingoEngine-rommet etter wallet-credit. Uten
+     * dette ville `room:update`-snapshot pushed via playerBroadcaster
+     * inneholdt stale balance og GameBridge.lastEmittedBalance-dedup
+     * blokkerer broadcast — symptom er Tobias' rapporterte 2.-vinn-bug
+     * der gevinst-chip ikke oppdaterer ved runde 2.
+     *
+     * Tomt array hvis ingen vinnere eller payoutService ikke wired.
+     */
+    winnerWalletIds: string[];
     physicalWinners: PhysicalTicketWinInfo[];
   }> {
     // PR 4b-modus: payoutService ikke wired opp → skip pattern-evaluering.
@@ -1842,6 +1902,7 @@ export class Game1DrawEngineService {
         phaseWon: false,
         winnerCount: 0,
         winnerIds: [],
+        winnerWalletIds: [],
         physicalWinners: [],
       };
     }
@@ -1881,6 +1942,7 @@ export class Game1DrawEngineService {
         phaseWon: false,
         winnerCount: 0,
         winnerIds: [],
+        winnerWalletIds: [],
         physicalWinners,
       };
     }
@@ -1909,6 +1971,7 @@ export class Game1DrawEngineService {
         phaseWon: false,
         winnerCount: 0,
         winnerIds: [],
+        winnerWalletIds: [],
         physicalWinners,
       };
     }
@@ -1916,6 +1979,11 @@ export class Game1DrawEngineService {
     // PR 4d.4: dedupliser winnerIds (én spiller kan ha flere tickets som
     // vinner samtidig — broadcast én gang per user).
     const winnerIds = Array.from(new Set(winners.map((w) => w.userId)));
+    // W1-hotfix (Tobias 2026-04-26): dedupliserte wallet-IDer til POST-commit
+    // refresh av in-memory `Player.balance`. Samme dedupliserings-rasjonale
+    // som winnerIds — én bruker kan ha flere bonger som vinner samme fase,
+    // men trenger kun én balance-refresh per wallet.
+    const winnerWalletIds = Array.from(new Set(winners.map((w) => w.walletId)));
 
     // Pot = sum av ikke-refunded purchases. Hent fra DB (felles for alle
     // farge-grupper og flat-path).
@@ -2086,6 +2154,7 @@ export class Game1DrawEngineService {
       phaseWon: true,
       winnerCount: winners.length,
       winnerIds,
+      winnerWalletIds,
       physicalWinners,
     };
   }
