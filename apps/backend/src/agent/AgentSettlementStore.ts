@@ -86,6 +86,12 @@ export interface UpdateSettlementInput {
   machineBreakdown?: MachineBreakdown;
   /** K1: tillate admin å erstatte/nullstille bilag. */
   bilagReceipt?: BilagReceipt | null;
+  /**
+   * K1-D wireframe 16.25/17.10: admin kan korrigere business_date ved edit.
+   * Brukstilfelle: agenten lukket dagen ved feil dato (f.eks. close-day rett
+   * etter midnatt for forrige drifts-dag). Format YYYY-MM-DD.
+   */
+  businessDate?: string;
 }
 
 export interface ListSettlementFilter {
@@ -341,6 +347,12 @@ export class PostgresAgentSettlementStore implements AgentSettlementStore {
         setField("bilag_receipt", patch.bilagReceipt, true);
       }
     }
+    if (patch.businessDate !== undefined) {
+      // K1-D: admin-edit kan korrigere business_date. Cast til ::date i SQL
+      // sikrer at bare gyldig dato-streng aksepteres (Postgres avviser ugyldig).
+      params.push(patch.businessDate);
+      sets.push(`business_date = $${params.length}::date`);
+    }
     if (sets.length === 0) {
       const existing = await this.getById(id);
       if (!existing) throw new Error("[BIN-583] settlement not found");
@@ -483,6 +495,7 @@ export class InMemoryAgentSettlementStore implements AgentSettlementStore {
     if (patch.otherData !== undefined) row.otherData = { ...patch.otherData };
     if (patch.machineBreakdown !== undefined) row.machineBreakdown = patch.machineBreakdown;
     if (patch.bilagReceipt !== undefined) row.bilagReceipt = patch.bilagReceipt;
+    if (patch.businessDate !== undefined) row.businessDate = patch.businessDate;
     row.editedByUserId = editedByUserId;
     row.editedAt = new Date().toISOString();
     row.editReason = reason;

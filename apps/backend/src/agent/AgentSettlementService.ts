@@ -390,6 +390,25 @@ export class AgentSettlementService {
         throw new DomainError("INVALID_INPUT", `bilagReceipt: ${msg}`);
       }
     }
+    // K1-D: valider business_date-format (YYYY-MM-DD). Postgres ::date kaster
+    // ved invalid input, men vi vil at INVALID_INPUT-DomainError skal bobles
+    // tilbake til klient, ikke en generisk DB-feil.
+    if (patch.businessDate !== undefined) {
+      if (typeof patch.businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(patch.businessDate)) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "businessDate må være en streng i format YYYY-MM-DD."
+        );
+      }
+      // Sanity-check at strengen er en faktisk valid dato (ikke 2026-13-45 etc).
+      const parsed = new Date(`${patch.businessDate}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== patch.businessDate) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `businessDate '${patch.businessDate}' er ikke en gyldig dato.`
+        );
+      }
+    }
     return this.settlements.applyEdit(input.settlementId, patch, input.editedByUserId, reason);
   }
 
@@ -547,6 +566,44 @@ export class AgentSettlementService {
 
   async listSettlements(filter: ListSettlementFilter): Promise<AgentSettlement[]> {
     return this.settlements.list(filter);
+  }
+
+  /**
+   * K1-D wireframe 16.25/17.10 — beriker en settlement-rad med resolved
+   * `hallName` + `agentDisplayName`. Brukes av JSON-route så admin-web kan
+   * vise faktiske navn ("Hall: Game of Hall" / "Agent Name: Nsongka Thomas")
+   * istedenfor IDs. Best-effort: feil ved oppslag faller tilbake til ID.
+   *
+   * Service-side berikelse beholder store-laget rent (kun rå-felter på disk)
+   * mens UI-en får et skjema som speiler wireframe-headeren.
+   */
+  async resolveDisplayNames(settlement: AgentSettlement): Promise<AgentSettlement & {
+    hallName: string;
+    agentDisplayName: string;
+  }> {
+    let hallName = settlement.hallId;
+    try {
+      const hall = await this.platform.getHall(settlement.hallId);
+      hallName = hall.name;
+    } catch {
+      // Fallback til ID
+    }
+    let agentDisplayName = settlement.agentUserId;
+    try {
+      const agent = await this.platform.getUserById(settlement.agentUserId);
+      agentDisplayName = agent.displayName || agent.email || settlement.agentUserId;
+    } catch {
+      // Fallback til ID
+    }
+    return { ...settlement, hallName, agentDisplayName };
+  }
+
+  /** K1-D: bulk-versjon — resolver navn for en liste settlements. */
+  async resolveDisplayNamesBatch(settlements: AgentSettlement[]): Promise<Array<AgentSettlement & {
+    hallName: string;
+    agentDisplayName: string;
+  }>> {
+    return Promise.all(settlements.map((s) => this.resolveDisplayNames(s)));
   }
 
   async getSettlementDateInfo(agentUserId: string): Promise<SettlementDateInfo> {
