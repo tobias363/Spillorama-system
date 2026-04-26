@@ -102,7 +102,18 @@ function ensureBongStyles(): void {
  *  - background-animasjon i bong-pulse-cell (kun transform: scale igjen)
  *  - statisk solid hvit bakgrunn + outline gir samme visuelle "one-to-go"
  *    signal uten paint-trafikk.
- * Transform er composite-bar i Chrome → kjører på GPU uten layout/paint. */
+ * Transform er composite-bar i Chrome → kjører på GPU uten layout/paint.
+ *
+ * BLINK-FIX (round 5, hazard 3): Fjernet 'z-index: 1' og 'position: relative'.
+ * Disse skapte et nytt stacking-context per pulse-celle. Late-game kan ha
+ * 30 bonger × ~3 one-to-go-celler = 90+ stacking-contexts samtidig. Hver
+ * stacking-context er kandidat for layer-promotion → GPU-pressure → blink.
+ *
+ * Outline er composite-bar (rendrer over uten å trenge stacking-context).
+ * Transform: scale-pulsen virker fortsatt utmerket uten z-index — pulsen
+ * skalerer cellen lokalt og overlapper naboceller pga. grid-gap (5px).
+ * Hvis cellen i fremtiden trenger å løfte seg over naboer, bruk en isolert
+ * pseudo-element-overlay i stedet for en hel stacking-context. */
 @keyframes bong-pulse-cell {
   0%, 100% { transform: scale(1); }
   50%      { transform: scale(1.04); }
@@ -111,8 +122,6 @@ function ensureBongStyles(): void {
   animation: bong-pulse-cell 1.3s ease-in-out infinite;
   background: rgba(255,255,255,0.95);
   outline: 2px solid #7a1a1a;
-  z-index: 1;
-  position: relative;
 }
 `;
   document.head.appendChild(s);
@@ -161,9 +170,13 @@ export class BingoTicketHtml {
       // hver bong til en permanent composite-layer. Med 30 bonger × ~12MB
       // GPU-tekstur-minne kan det utløse layer-eviction → blink. Vi aktiverer
       // `perspective` KUN under aktiv flip-animasjon i `toggleFlip()`.
-      // `transform-style: preserve-3d` beholdes på `inner` så
-      // `backface-visibility: hidden` fortsetter å skjule baksiden uten
-      // perspective (flat 3d-kontekst, ingen depth-projection).
+      //
+      // BLINK-FIX (round 5, hazard 1): `transform-style: preserve-3d` på inner
+      // har samme layer-promotion-effekt som `perspective`. PR #492 fikset
+      // bare perspective; preserve-3d sto fortsatt permanent → 30 composite-
+      // layers gjenstod → 1/90s blink. Nå aktiveres `preserve-3d` KUN under
+      // flip (samme livssyklus som perspective). Default-state = `flat`
+      // (ingen 3D-rendering-context, ingen layer-promotion).
       width: "100%",
       maxWidth: "360px",
       aspectRatio: `${this.cardWidth} / ${this.cardHeight}`,
@@ -177,7 +190,10 @@ export class BingoTicketHtml {
       position: "relative",
       width: "100%",
       height: "100%",
-      transformStyle: "preserve-3d",
+      // BLINK-FIX (round 5, hazard 1): `flat` default. `preserve-3d` settes
+      // KUN i `toggleFlip()` ved flip-start, og fjernes via setTimeout etter
+      // at transition er ferdig. Se `setFlipComposite()`-helperen.
+      transformStyle: "flat",
       transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
       transform: "rotateY(0deg)",
     });
@@ -557,7 +573,14 @@ export class BingoTicketHtml {
           // som tilpasser seg ticket-dimensjonene uten overflow.
           minWidth: "0",
           minHeight: "0",
-          transition: "background 0.12s, color 0.12s",
+          // BLINK-FIX (round 5, hazard 2): Fjernet `transition: background
+          // 0.12s, color 0.12s`. `background` og `color` er paint-properties
+          // (ikke composite-bar) → re-paint i hver mellom-frame av transition.
+          // 30 bonger × 25 celler = potensielt 750+ transitionstart-events
+          // per ball-trekk. Markering er nå instant (matcher Unity-paritet
+          // der celle-color-bytte er instant). Visuell smoothness er ikke
+          // nødvendig — markering er en diskret state-overgang, ikke en
+          // animasjon.
         });
         if (n === 0) {
           // FREE-celle (Bong.jsx): grønn pille inne i hvit celle-ramme.
@@ -703,16 +726,36 @@ export class BingoTicketHtml {
     return -1;
   }
 
+  /** Aktiver flip-composite-state: perspective på root + preserve-3d på
+   *  inner. Begge skaper layer-promotion → må kun være aktive under flip-
+   *  animasjon, ikke permanent. Idempotent — flere kall er trygge.
+   *
+   *  BLINK-FIX (round 5, hazard 1): preserve-3d har samme layer-promotion-
+   *  effekt som perspective. Begge må av/på i samme livssyklus. */
+  private enableFlipComposite(): void {
+    this.root.style.perspective = "1000px";
+    this.inner.style.transformStyle = "preserve-3d";
+  }
+
+  /** Deaktiver flip-composite-state: tilbake til ingen perspective + flat
+   *  transform-style. Frigjør GPU-laget. Kalles fra setTimeout etter at flip-
+   *  transition er ferdig. */
+  private disableFlipComposite(): void {
+    this.root.style.perspective = "";
+    this.inner.style.transformStyle = "flat";
+  }
+
   private toggleFlip(): void {
     this.flipped = !this.flipped;
 
-    // BLINK-FIX (round 3, hazard 4): Aktiver `perspective` KUN under flip.
-    // Default-state har ingen perspective på root → ingen permanent
-    // composite-layer per bong. Når vi flipper setter vi perspective på root,
-    // og fjerner det igjen 450ms etter at transition er ferdig (transition er
-    // 400ms, vi gir 50ms slack). `transform-style: preserve-3d` på inner
-    // beholdes alltid så backface-visibility fortsatt fungerer.
-    this.root.style.perspective = "1000px";
+    // BLINK-FIX (round 3, hazard 4 + round 5, hazard 1): Aktiver `perspective`
+    // OG `transform-style: preserve-3d` KUN under flip. Default-state har
+    // verken perspective på root eller preserve-3d på inner → ingen permanent
+    // composite-layer per bong. Begge er nødvendige sammen for at
+    // `backface-visibility: hidden` skal skjule baksiden under rotasjonen.
+    // Vi setter dem ved flip-start og fjerner dem 450ms etter at transition
+    // er ferdig (transition er 400ms, vi gir 50ms slack).
+    this.enableFlipComposite();
     this.inner.style.transform = this.flipped ? "rotateY(180deg)" : "rotateY(0deg)";
 
     // Refresh back-face content each time we flip TO it, so the price / bought
@@ -728,10 +771,10 @@ export class BingoTicketHtml {
         clearTimeout(this.flipTimer);
         this.flipTimer = null;
       }
-      // Tilbake til front. Fjern `perspective` når flip-transition er ferdig
+      // Tilbake til front. Fjern composite-state når flip-transition er ferdig
       // så bong-laget kan slippes fra GPU og frigjøre tekstur-minne.
       setTimeout(() => {
-        if (!this.flipped) this.root.style.perspective = "";
+        if (!this.flipped) this.disableFlipComposite();
       }, 450);
     }
   }
