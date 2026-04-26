@@ -1810,7 +1810,20 @@ export class BingoEngine {
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
     if (valid && input.type === "LINE") {
-      game.lineWinnerId = player.id;
+      // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): state-mutasjoner
+      // (game.lineWinnerId, remainingPrizePool, remainingPayoutBudget,
+      // patternResults) gjøres KUN etter at walletAdapter.transfer er
+      // committet. Tidligere ble `game.lineWinnerId = player.id` satt
+      // FØR transfer — hvis transfer feilet (DB-disconnect, lock
+      // timeout) var state korrupt: spilleren så seg selv som vinner
+      // uten å ha fått pengene.
+      //
+      // Audit/ledger/persist post-transfer er fortsatt sekvensielle
+      // I/O-kall uten én outer-tx (krever pool-injeksjon i BingoEngine
+      // som er utenfor scope for K2-B). Hvis disse feiler etter transfer
+      // er pengene betalt og loggene logger feilen prominent for
+      // ops-rekonsiliering — men vi unngår nå det verste scenariet
+      // (state-mutasjon før wallet-bevegelse).
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       // Use the pattern's configured prizePercent instead of hardcoded 30%.
       // For multi-LINE variants (e.g. 4-row with 10% each), find the specific
@@ -1832,6 +1845,10 @@ export class BingoEngine {
         game.remainingPayoutBudget
       );
       if (payout > 0) {
+        // CRIT-6: I/O FIRST — wallet transfer er den eneste rever-
+        // sible operasjonen. Hvis denne feiler kaster vi videre uten
+        // å mutere state. Idempotency-key sikrer at retry ikke
+        // dobbel-betaler.
         // BIN-239: idempotencyKey prevents double payout if client retries.
         // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
         const transfer = await this.walletAdapter.transfer(
@@ -1847,50 +1864,44 @@ export class BingoEngine {
             targetSide: "winnings",
           }
         );
+
+        // CRIT-6: state-mutasjoner skjer NÅ — etter at transfer er
+        // committet. Hvis transferen kastet over, hoppet vi over hele
+        // denne blokken og state forblir uendret.
+        game.lineWinnerId = player.id;
         player.balance += payout;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
         game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
-        await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-          type: "PAYOUT",
-          amount: payout,
-          createdAtMs: Date.now()
-        });
-        await this.ledger.recordComplianceLedgerEvent({
-          hallId: room.hallId,
-          gameType,
-          channel,
-          eventType: "PRIZE",
-          amount: payout,
-          roomCode: room.code,
-          gameId: game.id,
-          claimId: claim.id,
-          playerId: player.id,
-          walletId: player.walletId,
-          sourceAccountId: transfer.fromTx.accountId,
-          targetAccountId: transfer.toTx.accountId,
-          policyVersion: cappedLinePayout.policy.id
-        });
-        await this.payoutAudit.appendPayoutAuditEvent({
-          kind: "CLAIM_PRIZE",
-          claimId: claim.id,
-          gameId: game.id,
-          roomCode: room.code,
-          hallId: room.hallId,
-          policyVersion: cappedLinePayout.policy.id,
-          amount: payout,
-          walletId: player.walletId,
-          playerId: player.id,
-          sourceAccountId: houseAccountId,
-          txIds: [transfer.fromTx.id, transfer.toTx.id]
-        });
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-        // BIN-48: Synchronous checkpoint after payout — ensures state is persisted
-        if (this.bingoAdapter.onCheckpoint) {
-          await this.writePayoutCheckpointWithRetry(room, game, claim.id, payout, [transfer.fromTx.id, transfer.toTx.id], "LINE");
+        // Record pattern result for the first unclaimed LINE pattern
+        const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
+        if (linePatternResult) {
+          linePatternResult.isWon = true;
+          linePatternResult.winnerId = player.id;
+          linePatternResult.wonAtDraw = game.drawnNumbers.length;
+          linePatternResult.payoutAmount = payout;
+          linePatternResult.claimId = claim.id;
         }
-        // HOEY-7: Persist after LINE payout
-        await this.rooms.persist(room.code);
+
+        // CRIT-6: post-transfer audit-trail. Disse er best-effort —
+        // hvis de feiler er pengene allerede betalt og state allerede
+        // mutert. Logges prominent for ops-rekonsiliering. Reell
+        // atomicity (én outer DB-tx) krever at BingoEngine får
+        // pool-tilgang — det er en større refactor utenfor K2-B.
+        await this.runPostTransferClaimAuditTrail({
+          phase: "LINE",
+          room,
+          game,
+          claim,
+          player,
+          payout,
+          transfer,
+          houseAccountId,
+          gameType,
+          channel,
+          policyVersion: cappedLinePayout.policy.id,
+        });
       }
       const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
@@ -1903,15 +1914,6 @@ export class BingoEngine {
       if (claim.bonusTriggered) {
         claim.bonusAmount = payout;
       }
-      // Record pattern result for the first unclaimed LINE pattern
-      const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
-      if (linePatternResult) {
-        linePatternResult.isWon = true;
-        linePatternResult.winnerId = player.id;
-        linePatternResult.wonAtDraw = game.drawnNumbers.length;
-        linePatternResult.payoutAmount = payout;
-        linePatternResult.claimId = claim.id;
-      }
     }
 
     if (valid && input.type === "BINGO") {
@@ -1921,9 +1923,12 @@ export class BingoEngine {
         claim.reason = "BINGO_ALREADY_CLAIMED";
         return claim;
       }
+      // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): som LINE-grenen.
+      // game.bingoWinnerId, game.status='ENDED', endedReason — alle
+      // settes etter at transfer er committet. Idempotency-keyen
+      // sikrer at retry ikke dobbel-betaler.
       const endedAtMs = Date.now();
       const endedAt = new Date(endedAtMs);
-      game.bingoWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       const requestedPayout = game.remainingPrizePool;
       const cappedBingoPayout = this.prizePolicy.applySinglePrizeCap({
@@ -1937,6 +1942,7 @@ export class BingoEngine {
         game.remainingPayoutBudget
       );
       if (payout > 0) {
+        // CRIT-6: wallet-transfer FIRST — single-source-of-truth.
         // BIN-239: idempotencyKey prevents double payout if client retries.
         // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
         const transfer = await this.walletAdapter.transfer(
@@ -1952,48 +1958,27 @@ export class BingoEngine {
             targetSide: "winnings",
           }
         );
+
+        // CRIT-6: state-mutasjoner kommer ETTER vellykket transfer.
+        game.bingoWinnerId = player.id;
         player.balance += payout;
-        await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-          type: "PAYOUT",
-          amount: payout,
-          createdAtMs: Date.now()
-        });
-        await this.ledger.recordComplianceLedgerEvent({
-          hallId: room.hallId,
-          gameType,
-          channel,
-          eventType: "PRIZE",
-          amount: payout,
-          roomCode: room.code,
-          gameId: game.id,
-          claimId: claim.id,
-          playerId: player.id,
-          walletId: player.walletId,
-          sourceAccountId: transfer.fromTx.accountId,
-          targetAccountId: transfer.toTx.accountId,
-          policyVersion: cappedBingoPayout.policy.id
-        });
-        await this.payoutAudit.appendPayoutAuditEvent({
-          kind: "CLAIM_PRIZE",
-          claimId: claim.id,
-          gameId: game.id,
-          roomCode: room.code,
-          hallId: room.hallId,
-          policyVersion: cappedBingoPayout.policy.id,
-          amount: payout,
-          walletId: player.walletId,
-          playerId: player.id,
-          sourceAccountId: houseAccountId,
-          txIds: [transfer.fromTx.id, transfer.toTx.id]
-        });
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-        // BIN-48: Synchronous checkpoint after payout — ensures state is persisted
-        if (this.bingoAdapter.onCheckpoint) {
-          await this.writePayoutCheckpointWithRetry(room, game, claim.id, payout, [transfer.fromTx.id, transfer.toTx.id], "BINGO");
-        }
-        // HOEY-7: Persist after BINGO payout
-        await this.rooms.persist(room.code);
+
+        // CRIT-6: post-transfer audit-trail (best-effort).
+        await this.runPostTransferClaimAuditTrail({
+          phase: "BINGO",
+          room,
+          game,
+          claim,
+          player,
+          payout,
+          transfer,
+          houseAccountId,
+          gameType,
+          channel,
+          policyVersion: cappedBingoPayout.policy.id,
+        });
       }
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
@@ -2037,6 +2022,174 @@ export class BingoEngine {
     }
 
     return claim;
+  }
+
+  /**
+   * CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): post-transfer audit-
+   * trail for submitClaim. Kalt KUN etter at walletAdapter.transfer er
+   * committet og state er mutert.
+   *
+   * Reell atomicity (én outer DB-tx på tvers av alle services) krever at
+   * BingoEngine får pool-tilgang og at hver service eksponerer en
+   * client-aware variant. Dette er en større refactor utenfor K2-B —
+   * for nå sekvensierer vi best-effort I/O og logger feil prominent
+   * for ops-rekonsiliering.
+   *
+   * Hvis en av disse kastet, var pengene allerede betalt og state
+   * mutert. Vi catcher individuelt for å unngå at en feil i ett ledd
+   * blokkerer de andre — partial audit-trail er bedre enn ingen.
+   *
+   * Sekvens:
+   *   1. compliance.recordLossEntry  (in-memory tracking + persist)
+   *   2. ledger.recordComplianceLedgerEvent  (compliance-ledger)
+   *   3. payoutAudit.appendPayoutAuditEvent  (audit-trail med hash-chain)
+   *   4. bingoAdapter.onCheckpoint  (BIN-48 sync checkpoint via writePayoutCheckpointWithRetry)
+   *   5. rooms.persist  (HOEY-7 in-memory state-persist)
+   */
+  private async runPostTransferClaimAuditTrail(input: {
+    phase: "LINE" | "BINGO";
+    room: RoomState;
+    game: GameState;
+    claim: ClaimRecord;
+    player: Player;
+    payout: number;
+    transfer: WalletTransferResult;
+    houseAccountId: string;
+    gameType: LedgerGameType;
+    channel: LedgerChannel;
+    policyVersion: string;
+  }): Promise<void> {
+    const {
+      phase,
+      room,
+      game,
+      claim,
+      player,
+      payout,
+      transfer,
+      houseAccountId,
+      gameType,
+      channel,
+      policyVersion,
+    } = input;
+
+    // 1) compliance.recordLossEntry — tracker PAYOUT for netto-tap-beregning.
+    try {
+      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: payout,
+        createdAtMs: Date.now(),
+      });
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          claimId: claim.id,
+          gameId: game.id,
+          phase,
+          payout,
+          walletId: player.walletId,
+          step: "recordLossEntry",
+        },
+        "[CRIT-6] post-transfer compliance.recordLossEntry feilet — ops-rekonsiliering kreves; pengene er betalt"
+      );
+    }
+
+    // 2) ledger.recordComplianceLedgerEvent — regulatorisk §11-rapport.
+    try {
+      await this.ledger.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: payout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion,
+      });
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          claimId: claim.id,
+          gameId: game.id,
+          phase,
+          payout,
+          step: "recordComplianceLedgerEvent",
+        },
+        "[CRIT-6] post-transfer ledger.recordComplianceLedgerEvent feilet — REGULATORISK rekonsiliering kreves; pengene er betalt"
+      );
+    }
+
+    // 3) payoutAudit.appendPayoutAuditEvent — internt audit-trail.
+    try {
+      await this.payoutAudit.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion,
+        amount: payout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id],
+      });
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          claimId: claim.id,
+          gameId: game.id,
+          phase,
+          payout,
+          step: "appendPayoutAuditEvent",
+        },
+        "[CRIT-6] post-transfer payoutAudit.appendPayoutAuditEvent feilet — audit-trail har gap; pengene er betalt"
+      );
+    }
+
+    // 4) BIN-48 checkpoint — synkron checkpoint etter payout for crash-recovery.
+    if (this.bingoAdapter.onCheckpoint) {
+      try {
+        await this.writePayoutCheckpointWithRetry(
+          room,
+          game,
+          claim.id,
+          payout,
+          [transfer.fromTx.id, transfer.toTx.id],
+          phase,
+        );
+      } catch (err) {
+        logger.error(
+          {
+            err,
+            claimId: claim.id,
+            gameId: game.id,
+            phase,
+            payout,
+            step: "writePayoutCheckpointWithRetry",
+          },
+          "[CRIT-6] post-transfer checkpoint feilet — crash-recovery integritet redusert; pengene er betalt"
+        );
+      }
+    }
+
+    // 5) HOEY-7 — persist room-state etter payout.
+    try {
+      await this.rooms.persist(room.code);
+    } catch (err) {
+      logger.error(
+        { err, roomCode: room.code, claimId: claim.id, step: "rooms.persist" },
+        "[CRIT-6] post-transfer rooms.persist feilet — in-memory og store kan divergere; pengene er betalt"
+      );
+    }
   }
 
   // ── Jackpot (Game 5 Free Spin) ──────────────────────────────────────────

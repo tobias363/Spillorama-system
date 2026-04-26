@@ -190,11 +190,16 @@ test("CRIT-5: creditWithClient brukes når walletAdapter implementerer den", asy
   const legacyCreditCalls: Array<{ accountId: string; amount: number }> = [];
 
   const wallet: WalletAdapter = {
-    credit: async (accountId, amount) => {
+    credit: async (accountId: string, amount: number) => {
       legacyCreditCalls.push({ accountId, amount });
       return { id: "tx-legacy", accountId, amount } as never;
     },
-    creditWithClient: async (accountId, amount, _reason, options) => {
+    creditWithClient: async (
+      accountId: string,
+      amount: number,
+      _reason: string,
+      options: { client: unknown; idempotencyKey?: string },
+    ) => {
       creditCalls.push({
         accountId,
         amount,
@@ -328,7 +333,12 @@ test("CRIT-5: faller tilbake til legacy credit() når creditWithClient mangler",
   }> = [];
 
   const wallet: WalletAdapter = {
-    credit: async (accountId, amount, _reason, options) => {
+    credit: async (
+      accountId: string,
+      amount: number,
+      _reason: string,
+      options?: { idempotencyKey?: string },
+    ) => {
       legacyCreditCalls.push({
         accountId,
         amount,
