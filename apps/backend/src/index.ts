@@ -345,7 +345,7 @@ const {
   isProductionRuntime, bingoMinPlayersToStart, fixedAutoDrawIntervalMs,
   autoDrawIntervalEnvOverrideMs,
   allowAutoplayInProduction, forceAutoStart, forceAutoDraw, enforceSingleRoomPerHall,
-  autoplayAllowed, schedulerTickMs, dailyReportJobEnabled, dailyReportJobIntervalMs,
+  autoplayAllowed, liveRoundsIndependentOfBet, schedulerTickMs, dailyReportJobEnabled, dailyReportJobIntervalMs,
   jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
   jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
   jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
@@ -983,10 +983,14 @@ const schedulerCallbacks = createSchedulerCallbacks({
 drawScheduler = new DrawScheduler({
   tickIntervalMs: schedulerTickMs, lockTimeoutMs: 5_000, watchdogIntervalMs: 5_000, watchdogStuckMultiplier: 3,
   fixedDrawIntervalMs: fixedAutoDrawIntervalMs, enforceSingleRoomPerHall,
-  getSettings: () => toDrawSchedulerSettings(runtimeBingoSettings),
+  // Bug 1 fix: live-rounds-independent-of-bet propageres til scheduler.
+  getSettings: () => toDrawSchedulerSettings(runtimeBingoSettings, liveRoundsIndependentOfBet),
   listRoomSummaries: () => engine.listRoomSummaries(),
   getRoomSnapshot: (code) => engine.getRoomSnapshot(code),
   getAllRoomCodes: () => engine.getAllRoomCodes(),
+  // Bug 1 fix: armed-count brukt KUN når flagg er false (legacy).
+  // I default-modus (true) ignoreres callbacken av scheduleren.
+  getArmedPlayerCount: (code) => roomState.getArmedPlayerIds(code).length,
   ...schedulerCallbacks,
 });
 drawScheduler.start();
@@ -2713,7 +2717,7 @@ const PORT = Number(process.env.PORT ?? 4000);
   server.listen(PORT, () => {
     console.log(`Bingo backend kjører på http://localhost:${PORT}`);
     console.log(`[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`);
-    console.log(`[scheduler] autoStart=${runtimeBingoSettings.autoRoundStartEnabled} autoDraw=${runtimeBingoSettings.autoDrawEnabled} forceAutoStart=${forceAutoStart} forceAutoDraw=${forceAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleRoomPerHall} interval=${runtimeBingoSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeBingoSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeBingoSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeBingoSettings.autoRoundEntryFee} payoutPercent=${runtimeBingoSettings.payoutPercent}`);
+    console.log(`[scheduler] autoStart=${runtimeBingoSettings.autoRoundStartEnabled} autoDraw=${runtimeBingoSettings.autoDrawEnabled} forceAutoStart=${forceAutoStart} forceAutoDraw=${forceAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleRoomPerHall} interval=${runtimeBingoSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeBingoSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeBingoSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeBingoSettings.autoRoundEntryFee} payoutPercent=${runtimeBingoSettings.payoutPercent} liveRoundsIndependentOfBet=${liveRoundsIndependentOfBet}`);
     console.log(`[scheduler] autoDraw=${runtimeBingoSettings.autoDrawEnabled} interval=${runtimeBingoSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms envOverride=${autoDrawIntervalEnvOverrideMs ?? "none"}`);
     console.log(`[daily-report] enabled=${dailyReportJobEnabled} interval=${dailyReportJobIntervalMs}ms`);
     console.log(`[swedbank] configured=${swedbankPayService.isConfigured()}`);

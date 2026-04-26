@@ -397,6 +397,87 @@ describe("DrawScheduler", () => {
     assert.equal(scheduler.isRunning, false);
     assert.equal(scheduler.watchdog.isRunning, false);
   });
+
+  // ── Bug 1: live-rounds-independent-of-bet ────────────────────────────────
+
+  it("liveRoundsIndependentOfBet=true (default): runde starter med 0 armed brett", async () => {
+    const summaries: RoomSummary[] = [
+      { code: "R1", hallId: "h1", hostPlayerId: "host-1", playerCount: 1, createdAt: "2026-01-01", gameStatus: "NONE" },
+    ];
+    const events: Array<{ type: string; room: string }> = [];
+    const settings: SchedulerSettings = {
+      ...defaultSettings(),
+      liveRoundsIndependentOfBet: true,
+    };
+    const scheduler = new DrawScheduler({
+      tickIntervalMs: 100_000,
+      lockTimeoutMs: 5_000,
+      fixedDrawIntervalMs: 2_000,
+      getSettings: () => settings,
+      listRoomSummaries: () => summaries,
+      getRoomSnapshot: () => ({
+        currentGame: undefined,
+        hostPlayerId: "host-1",
+        players: [{ walletId: "w-tobias" }],
+      }),
+      getAllRoomCodes: () => ["R1"],
+      // 0 armed brett — runden skal likevel starte med default-flag.
+      getArmedPlayerCount: () => 0,
+      onAutoStart: async (room) => {
+        events.push({ type: "start", room });
+        return { firstDrawAtMs: Date.now() };
+      },
+      onAutoDraw: async () => ({ roundEnded: false }),
+    });
+
+    scheduler.nextAutoStartAtByRoom.set("R1", Date.now() - 1000);
+    await scheduler.tick();
+    assert.equal(events.length, 1, "runde skal starte selv om ingen er armed");
+    assert.equal(events[0]!.type, "start");
+  });
+
+  it("liveRoundsIndependentOfBet=false (legacy): runde venter på minst 1 armed brett", async () => {
+    const summaries: RoomSummary[] = [
+      { code: "R1", hallId: "h1", hostPlayerId: "host-1", playerCount: 1, createdAt: "2026-01-01", gameStatus: "NONE" },
+    ];
+    const events: Array<{ type: string; room: string }> = [];
+    let armedCount = 0;
+    const settings: SchedulerSettings = {
+      ...defaultSettings(),
+      liveRoundsIndependentOfBet: false,
+    };
+    const scheduler = new DrawScheduler({
+      tickIntervalMs: 100_000,
+      lockTimeoutMs: 5_000,
+      fixedDrawIntervalMs: 2_000,
+      getSettings: () => settings,
+      listRoomSummaries: () => summaries,
+      getRoomSnapshot: () => ({
+        currentGame: undefined,
+        hostPlayerId: "host-1",
+        players: [{ walletId: "w-tobias" }],
+      }),
+      getAllRoomCodes: () => ["R1"],
+      getArmedPlayerCount: () => armedCount,
+      onAutoStart: async (room) => {
+        events.push({ type: "start", room });
+        return { firstDrawAtMs: Date.now() };
+      },
+      onAutoDraw: async () => ({ roundEnded: false }),
+    });
+
+    // Tick 1: 0 armed → ingen start.
+    scheduler.nextAutoStartAtByRoom.set("R1", Date.now() - 1000);
+    await scheduler.tick();
+    assert.equal(events.length, 0, "ingen runde uten armed brett");
+
+    // Tick 2: 1 armed → runde starter.
+    armedCount = 1;
+    scheduler.nextAutoStartAtByRoom.set("R1", Date.now() - 1000);
+    await scheduler.tick();
+    assert.equal(events.length, 1, "runde starter når armed > 0");
+    assert.equal(events[0]!.type, "start");
+  });
 });
 
 // ── Drift-correction (absolute-time anchor) tests ────────────────

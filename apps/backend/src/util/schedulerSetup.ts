@@ -15,6 +15,13 @@ export interface SchedulerCallbackDeps {
   io: Server;
   drawScheduler: DrawScheduler;
   runtimeBingoSettings: BingoSchedulerSettings;
+  /**
+   * Bug 1 fix: når `false`, krever scheduleren minst én armed
+   * spiller (via `getArmedPlayerIds`) før runde starter — legacy-
+   * modus. Default `true` (matcher dagens implementerte oppførsel).
+   * Eksponert som env-var `BINGO_LIVE_ROUNDS_INDEPENDENT_OF_BET`.
+   */
+  liveRoundsIndependentOfBet?: boolean;
   getArmedPlayerIds: (roomCode: string) => string[];
   getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
   getArmedPlayerSelections: (roomCode: string) => Record<string, Array<{ type: string; qty: number }>>;
@@ -42,13 +49,21 @@ export interface PendingBingoSettingsUpdate {
   settings: BingoSchedulerSettings;
 }
 
-export function toDrawSchedulerSettings(s: BingoSchedulerSettings): SchedulerSettings {
+export function toDrawSchedulerSettings(
+  s: BingoSchedulerSettings,
+  liveRoundsIndependentOfBet?: boolean,
+): SchedulerSettings {
   return {
     autoRoundStartEnabled: s.autoRoundStartEnabled,
     autoRoundStartIntervalMs: s.autoRoundStartIntervalMs,
     autoRoundMinPlayers: s.autoRoundMinPlayers,
     autoDrawEnabled: s.autoDrawEnabled,
     autoDrawIntervalMs: s.autoDrawIntervalMs,
+    // Bug 1 fix: default `true` (matcher hardkodet
+    // `liveRoundsIndependentOfBet: true` i `roomHelpers.ts:74`).
+    // Sett env-var `BINGO_LIVE_ROUNDS_INDEPENDENT_OF_BET=false` for
+    // legacy-oppførsel hvor scheduleren venter på armed spiller.
+    liveRoundsIndependentOfBet: liveRoundsIndependentOfBet ?? true,
   };
 }
 

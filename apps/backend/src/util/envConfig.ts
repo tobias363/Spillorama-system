@@ -34,6 +34,23 @@ export interface BingoRuntimeConfig {
   forceAutoDraw: boolean;
   enforceSingleRoomPerHall: boolean;
   autoplayAllowed: boolean;
+  /**
+   * Bug 1 (live-rounds-independent-of-bet): når `true`, starter
+   * autoplay-runder så snart `playerCount >= autoRoundMinPlayers` —
+   * uavhengig av hvor mange som har armed brett. Spillere som ikke
+   * har kjøpt brett kan ikke vinne (compliance), men trekninger
+   * (ball-strøm) kjører for "publikum" så folk kan sitte i hallen
+   * og se mellom-runder.
+   *
+   * Default: `true` (matcher hardkoded `liveRoundsIndependentOfBet`
+   * i `roomHelpers.ts` som også returneres til klienten i
+   * `room:update`-payloaden).
+   *
+   * Sett `BINGO_LIVE_ROUNDS_INDEPENDENT_OF_BET=false` for legacy-
+   * oppførsel hvor scheduler venter på minst én armed spiller før
+   * den starter en runde.
+   */
+  liveRoundsIndependentOfBet: boolean;
   // Scheduler
   schedulerTickMs: number;
   runtimeBingoSettings: BingoSchedulerSettings;
@@ -138,6 +155,15 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const forceAutoDraw = false;
   const enforceSingleRoomPerHall = parseBooleanEnv(process.env.BINGO_SINGLE_ACTIVE_ROOM_PER_HALL, true);
   const autoplayAllowed = !isProductionRuntime || allowAutoplayInProduction;
+  // Bug 1 fix: trekninger starter uavhengig av om noen har kjøpt brett.
+  // Default true (matcher dagens implementerte oppførsel: scheduler ser
+  // kun på `playerCount`, ikke `armedPlayerCount`). Eksponert som env-
+  // var slik at oppstartslogg viser eksplisitt status og ops kan
+  // verifisere kontrakten.
+  const liveRoundsIndependentOfBet = parseBooleanEnv(
+    process.env.BINGO_LIVE_ROUNDS_INDEPENDENT_OF_BET,
+    true,
+  );
   const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
   const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
 
@@ -308,7 +334,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     isProductionRuntime, bingoMinPlayersToStart, fixedAutoDrawIntervalMs,
     autoDrawIntervalEnvOverrideMs,
     allowAutoplayInProduction, forceAutoStart, forceAutoDraw, enforceSingleRoomPerHall,
-    autoplayAllowed, schedulerTickMs, runtimeBingoSettings,
+    autoplayAllowed, liveRoundsIndependentOfBet, schedulerTickMs, runtimeBingoSettings,
     dailyReportJobEnabled, dailyReportJobIntervalMs,
     jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
     jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,

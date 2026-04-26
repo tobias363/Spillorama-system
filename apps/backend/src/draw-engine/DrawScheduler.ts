@@ -24,6 +24,16 @@ export interface SchedulerSettings {
   autoRoundMinPlayers: number;
   autoDrawEnabled: boolean;
   autoDrawIntervalMs: number;
+  /**
+   * Bug 1 fix (live-rounds-independent-of-bet): når `true` (default),
+   * starter scheduleren runder så snart `playerCount >= minPlayers`
+   * uavhengig av om noen har armed brett. Når `false` (legacy), venter
+   * scheduleren på minst én armed spiller før runde starter.
+   *
+   * Default for nye `SchedulerSettings`-instanser settes i
+   * `toDrawSchedulerSettings` (`schedulerSetup.ts`).
+   */
+  liveRoundsIndependentOfBet?: boolean;
 }
 
 export interface RoomSummary {
@@ -69,6 +79,15 @@ export interface DrawSchedulerConfig {
   getRoomSnapshot: (roomCode: string) => { currentGame?: { status: string }; hostPlayerId: string; players: Array<{ walletId: string }> };
   /** Returns all room codes (for settings sync). */
   getAllRoomCodes: () => string[];
+  /**
+   * Bug 1 fix: brukt KUN når `liveRoundsIndependentOfBet=false` (legacy
+   * modus). Returnerer antall armed brett (vektet) i rommet — runden
+   * starter ikke med mindre én eller flere armed brett finnes.
+   *
+   * I default-modus (true) ignoreres denne callback'en — runden
+   * starter på `playerCount >= minPlayers` som før.
+   */
+  getArmedPlayerCount?: (roomCode: string) => number;
 
   /**
    * Called inside the lock when it's time to start a new round.
@@ -286,6 +305,24 @@ export class DrawScheduler {
         await this.config.onRoomRescheduled?.(roomCode);
       }
       return;
+    }
+
+    // Bug 1 fix: legacy-gating på armed brett (kun når flagg er FALSE).
+    // Default-oppførselen — `liveRoundsIndependentOfBet=true` —
+    // hopper over denne sjekken så trekninger starter selv om
+    // ingen har kjøpt brett (visuell ball-strøm i hallen).
+    if (
+      settings.liveRoundsIndependentOfBet === false &&
+      this.config.getArmedPlayerCount
+    ) {
+      const armedCount = this.config.getArmedPlayerCount(roomCode);
+      if (armedCount < 1) {
+        if (scheduledStartAt <= now) {
+          this.setNextRoundForRoom(roomCode, now);
+          await this.config.onRoomRescheduled?.(roomCode);
+        }
+        return;
+      }
     }
 
     if (now < scheduledStartAt) {
