@@ -60,7 +60,7 @@ export function createAdminWalletReconciliationRouter(
   router.get("/api/admin/wallet/reconciliation-alerts", async (req, res) => {
     try {
       await requirePermission(req, "WALLET_AUDIT_READ");
-      const limit = parseLimit(req.query.limit, 100, 500);
+      const limit = parseLimit(req.query.limit, 100);
       const alerts = await reconciliationService.listOpenAlerts(limit);
       apiSuccess(res, { alerts, count: alerts.length });
     } catch (error) {
