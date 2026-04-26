@@ -678,8 +678,45 @@ export class BingoEngine {
     return { roomCode, playerId };
   }
 
+  /**
+   * CRIT-4 / HIGH-1 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26):
+   *
+   * Markér et eksisterende `bingo`-rom som scheduled. Etter dette vil
+   * `BingoEngine.startGame/drawNextNumber/evaluateActivePhase/
+   * submitClaim` kaste `DomainError("USE_SCHEDULED_API")` hvis kalt på
+   * dette rommet — defensiv guard mot dual-engine-bugs (se review CRIT-4).
+   *
+   * Kalles fra `game1ScheduledEvents.ts` etter at
+   * `Game1DrawEngineService.assignRoomCode` har persistert mappingen.
+   *
+   * No-op hvis rommets gameSlug ikke er `"bingo"` — Spill 2/3 påvirkes
+   * ikke fordi `assertNotScheduled` filtrerer på slug.
+   *
+   * Idempotent: gjentatte kall med samme `scheduledGameId` er trygt.
+   * Race-vinduer (mellom `assignRoomCode` og `markRoomAsScheduled`) er
+   * ikke mulig fordi `engine.createRoom` returnerer rom-koden synkront,
+   * og scheduled-pathen kaller `markRoomAsScheduled` umiddelbart etter
+   * vellykket assignRoomCode.
+   *
+   * @throws DomainError("ROOM_NOT_FOUND") hvis koden ikke finnes
+   */
+  markRoomAsScheduled(roomCode: string, scheduledGameId: string): void {
+    const room = this.requireRoom(roomCode);
+    const trimmedId = scheduledGameId?.trim();
+    if (!trimmedId) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "scheduledGameId må være en ikke-tom streng.",
+      );
+    }
+    room.scheduledGameId = trimmedId;
+    this.syncRoomToStore(room);
+  }
+
   async startGame(input: StartGameInput): Promise<void> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 må kjøre via Game1DrawEngineService.
+    this.assertNotScheduled(room);
     this.assertHost(room, input.actorPlayerId);
     this.assertNotRunning(room);
     this.archiveIfEnded(room);
@@ -1223,6 +1260,10 @@ export class BingoEngine {
    * Implementasjon ekstrahert til {@link BingoEnginePatternEval.evaluateActivePhase}.
    */
   private async evaluateActivePhase(room: RoomState, game: GameState): Promise<void> {
+    // CRIT-4: defensive — kalles kun fra drawNextNumber (som allerede
+    // har guard), men dobbel-sjekk siden denne også skriver wallet
+    // via auto-claim-payouts.
+    this.assertNotScheduled(room);
     await evaluateActivePhaseHelper(this.buildEvaluatePhaseCallbacks(), room, game);
   }
 
@@ -1392,6 +1433,9 @@ export class BingoEngine {
 
   async drawNextNumber(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 må trekkes via Game1DrawEngineService.
+    // Defensiv guard mot dual-engine state-divergens.
+    this.assertNotScheduled(room);
     this.assertHost(room, input.actorPlayerId);
     const host = this.requirePlayer(room, input.actorPlayerId);
     const nowMs = Date.now();
@@ -1646,6 +1690,11 @@ export class BingoEngine {
 
   async submitClaim(input: SubmitClaimInput): Promise<ClaimRecord> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 har egen claim-flyt via
+    // Game1DrawEngineService.evaluateAndPayoutPhase. Hvis klient sender
+    // claim:submit på scheduled-rom risikerer vi dual-payout siden
+    // idempotency-keyene er forskjellige (g1-phase-* vs line-prize-*).
+    this.assertNotScheduled(room);
     const game = this.requireRunningGame(room);
     const player = this.requirePlayer(room, input.playerId);
     this.assertWalletAllowedForGameplay(player.walletId, Date.now());
@@ -2849,6 +2898,47 @@ export class BingoEngine {
     if (room.hostPlayerId !== actorPlayerId) {
       throw new DomainError("NOT_HOST", "Kun host kan utføre denne handlingen.");
     }
+  }
+
+  /**
+   * CRIT-4 / HIGH-1 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26):
+   *
+   * Defensiv runtime-guard mot at scheduled Spill 1-rom blir mutert via
+   * ad-hoc-pathen (`BingoEngine.startGame/drawNextNumber/evaluateActivePhase/
+   * submitClaim`).
+   *
+   * Per `SPILL1_ENGINE_ROLES_2026-04-23.md`: scheduled Spill 1 (slug
+   * `bingo` med `room.scheduledGameId !== null`) skal kun trekkes via
+   * `Game1DrawEngineService`. Hvis BingoEngine likevel mutere disse
+   * rommene oppstår dual-engine state-divergens og potensielt
+   * dual-payout (se review CRIT-4).
+   *
+   * Spill 2 (slug `rocket`) og Spill 3 (slug `monsterbingo`) bruker
+   * fortsatt ad-hoc engine — de påvirkes IKKE av denne guarden fordi
+   * sjekken er begrenset til `gameSlug === "bingo"`.
+   *
+   * Bruksmønster: kall ved start av alle BingoEngine-mutasjons-metoder
+   * som kan trigge wallet/state-skriv (drawNextNumber, submitClaim,
+   * startGame, evaluateActivePhase).
+   */
+  private assertNotScheduled(room: RoomState): void {
+    // Kun Spill 1 (`bingo`-slug) kan være scheduled. Spill 2/3 har egen
+    // gameSlug og er alltid ad-hoc — guard skal være no-op for dem.
+    if (room.gameSlug !== "bingo") {
+      return;
+    }
+    if (room.scheduledGameId === null || room.scheduledGameId === undefined) {
+      return;
+    }
+    throw new DomainError(
+      "USE_SCHEDULED_API",
+      "Scheduled Spill 1 må trekkes via Game1DrawEngineService — ikke BingoEngine.",
+      {
+        roomCode: room.code,
+        scheduledGameId: room.scheduledGameId,
+        gameSlug: room.gameSlug,
+      }
+    );
   }
 
   private assertNotRunning(room: RoomState): void {
