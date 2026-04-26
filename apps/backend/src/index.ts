@@ -86,6 +86,8 @@ import { MiniGameMysteryEngine } from "./game/minigames/MiniGameMysteryEngine.js
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
+import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
+import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
@@ -1663,6 +1665,18 @@ app.use(createAdminGame1MasterRouter({
   drawEngine: game1DrawEngineService,
   io,
   jackpotStateService: game1JackpotStateService,
+}));
+// LOW-1: GET /api/admin/games/:gameId/replay — rekonstruert event-stream
+// for Game 1 scheduled_game. Krever GAME1_GAME_READ + PLAYER_KYC_READ.
+// PII-redacted i service-laget; audit-trail i admin.game.replay.read.
+const game1ReplayService = new Game1ReplayService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+app.use(createAdminGameReplayRouter({
+  platformService,
+  auditLogService,
+  replayService: game1ReplayService,
 }));
 // Task 1.4 (2026-04-24): foren agent-portal + master-konsoll mot
 // scheduled_games-paradigmet. 4 endepunkter under /api/agent/game1/* som
