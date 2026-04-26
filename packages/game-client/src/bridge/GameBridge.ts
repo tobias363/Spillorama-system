@@ -164,6 +164,17 @@ export class GameBridge {
   private drawGapCount = 0;
   private drawDuplicateCount = 0;
 
+  /**
+   * Saldo-flash fix (Tobias 2026-04-26): Cache the last balance we
+   * emitted via `spillorama:balanceChanged` so we don't fire on every
+   * `room:update`. Wallet rarely changes per-ball, but `room:update` is
+   * pushed on every draw — emitting unconditionally caused the lobby
+   * shell to do an optimistic re-render with a wrong split (PR #512
+   * introduced availableDeposit/availableWinnings while we still send
+   * total balance), producing a ~0.5s flash. `null` = nothing emitted yet.
+   */
+  private lastEmittedBalance: number | null = null;
+
   private events: EventMap = {
     stateChanged: new Set(),
     gameStarted: new Set(),
@@ -208,6 +219,10 @@ export class GameBridge {
     this.resyncInFlight = false;
     this.drawGapCount = 0;
     this.drawDuplicateCount = 0;
+    // Saldo-flash fix: clear cached balance so re-mounting a game
+    // re-emits the first balance update (host-side state may have
+    // been refreshed independently).
+    this.lastEmittedBalance = null;
   }
 
   getState(): GameState {
@@ -282,10 +297,20 @@ export class GameBridge {
     this.state.luckyNumbers = payload.luckyNumbers;
 
     // Push balance to host page (game-bar sync)
+    // Saldo-flash fix (Tobias 2026-04-26): only emit when the balance
+    // actually changed since the last emission. `room:update` fires on
+    // every ball draw, but the wallet rarely changes per-ball, so the
+    // unconditional emit caused the lobby shell to optimistically
+    // re-render with a wrong deposit/winnings split (PR #512). The
+    // resulting ~0.5 s flash before the debounced refetch corrected the
+    // split was the visible saldo-blink bug.
     if (this.myPlayerId) {
       const me = payload.players.find((p: Player) => p.id === this.myPlayerId);
       if (me && typeof me.balance === "number" && typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("spillorama:balanceChanged", { detail: { balance: me.balance } }));
+        if (me.balance !== this.lastEmittedBalance) {
+          this.lastEmittedBalance = me.balance;
+          window.dispatchEvent(new CustomEvent("spillorama:balanceChanged", { detail: { balance: me.balance } }));
+        }
       }
     }
 
