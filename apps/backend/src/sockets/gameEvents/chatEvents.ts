@@ -8,7 +8,11 @@
  * Persistens er fire-and-forget: chat skal fortsette å flyte selv om DB er syk
  * (store-implementasjonene logger og svelger feil internt).
  *
- * Uendret fra opprinnelig gameEvents.ts.
+ * Bølge D Issue 3 (MEDIUM, 2026-04-25): hall-scope-sjekken er fail-closed.
+ * Tidligere kode skipper sjekken når `player.hallId` er undefined — typen
+ * tillater det (`Player.hallId?: string`). Det betød at en spiller uten
+ * hall kunne sende chat på tvers av haller. Nå avvises chat-eventet med
+ * `HALL_REQUIRED` hvis spilleren mangler hallId, og anomalien logges.
  */
 import { randomUUID } from "node:crypto";
 import { DomainError } from "../../game/BingoEngine.js";
@@ -26,6 +30,7 @@ export function registerChatEvents(ctx: SocketContext): void {
     io,
     socket,
     deps,
+    logger,
     ackSuccess,
     ackFailure,
     appendChatMessage,
@@ -43,15 +48,49 @@ export function registerChatEvents(ctx: SocketContext): void {
       }
       const snapshot = engine.getRoomSnapshot(roomCode);
       const player = snapshot.players.find((p) => p.id === playerId);
+      // Bølge D Issue 3 (2026-04-25): FAIL-CLOSED hall-scope.
+      //
+      // Tidligere ble cross-hall-sjekken silent-skippet hvis `player.hallId`
+      // var undefined (typen tillater `?: string`). Da kunne en spiller uten
+      // hall sende chat på tvers av haller. Nå:
+      //   1) Mangler player → INVALID_INPUT (eksisterende — behold default).
+      //   2) Mangler player.hallId → HALL_REQUIRED + logg anomali.
+      //   3) Mangler snapshot.hallId → INVALID_STATE (skal aldri skje siden
+      //      RoomSnapshot.hallId er required, men beskyttelse mot type-drift).
+      //   4) Hall mismatch → FORBIDDEN (uendret).
+      if (!player) {
+        throw new DomainError("INVALID_INPUT", "Spilleren finnes ikke i rommet.");
+      }
+      if (!player.hallId) {
+        // Spillevett-audit: log anomalien (uautorisert tilgang fra spiller
+        // uten hall-tilhørighet). Bør aldri skje på prod siden alle joins
+        // setter hallId — men typen tillater det og fail-open her ville
+        // bypass-e cross-hall-sjekken.
+        logger.warn(
+          { event: "chat:send", playerId, roomCode, snapshotHallId: snapshot.hallId },
+          "chat fail-closed: player mangler hallId — avvist med HALL_REQUIRED",
+        );
+        throw new DomainError("HALL_REQUIRED", "Spilleren mangler hall-tilhørighet og kan ikke chatte.");
+      }
+      if (!snapshot.hallId) {
+        // RoomSnapshot.hallId er required i typen — denne grenen er en
+        // beskyttelse mot framtidig type-drift. Logg som anomali.
+        logger.error(
+          { event: "chat:send", roomCode, playerId },
+          "chat fail-closed: snapshot mangler hallId (type-drift?) — avvist",
+        );
+        throw new DomainError("INVALID_STATE", "Rommet mangler hall-tilhørighet.");
+      }
       // BIN-516 hall-scoping: a player must belong to the room's hall to chat
       // in it. Cross-hall chat is a spillevett audit hazard.
-      if (player?.hallId && snapshot.hallId && player.hallId !== snapshot.hallId) {
+      if (player.hallId !== snapshot.hallId) {
         throw new DomainError("FORBIDDEN", "Spilleren tilhører en annen hall enn rommet.");
       }
       const chatMsg: ChatMessage = {
         id: randomUUID(),
         playerId,
-        playerName: player?.name ?? "Ukjent",
+        // Bølge D Issue 3: player er garantert non-null nå (sjekken over).
+        playerName: player.name,
         message: message.slice(0, 500),
         emojiId: payload?.emojiId ?? 0,
         createdAt: new Date().toISOString()

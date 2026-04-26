@@ -20,6 +20,7 @@ import type { Server, Socket } from "socket.io";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { RoomSnapshot } from "../game/types.js";
+import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
 
 export interface AdminDisplayDeps {
   engine: BingoEngine;
@@ -38,6 +39,13 @@ export interface AdminDisplayDeps {
    * Matches legacy `Sys.Setting.{screenSaver, screenSaverTime, imageTime}`.
    */
   screensaverConfig: { enabled: boolean; timeoutMs: number; imageRotationMs: number };
+  /**
+   * Bølge D Issue 2 (MEDIUM): rate-limiter for display-events. Optional så
+   * tests kan kjøre uten — handleren faller da tilbake til "no rate-limit"
+   * (tidligere adferd). Display-events er sjeldne (login + subscribe + state-
+   * refresh), så 10/s er rikelig. Ved misbruk avvises events med RATE_LIMITED.
+   */
+  socketRateLimiter?: SocketRateLimiter;
 }
 
 interface DisplaySocketData {
@@ -71,13 +79,29 @@ interface DisplayStateSnapshot {
 }
 
 export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
-  const { engine, platformService, io, validateDisplayToken, screensaverConfig } = deps;
+  const { engine, platformService, io, validateDisplayToken, screensaverConfig, socketRateLimiter } = deps;
 
   function ackSuccess<T>(callback: ((response: AckResponse<T>) => void) | undefined, data: T): void {
     if (typeof callback === "function") callback({ ok: true, data });
   }
   function ackFailure<T>(callback: ((response: AckResponse<T>) => void) | undefined, code: string, message: string): void {
     if (typeof callback === "function") callback({ ok: false, error: { code, message } });
+  }
+
+  /**
+   * Bølge D Issue 2: per-event rate-limit for display-events. Sjekker både
+   * socket.id og hallId (etter login) — siste sikrer at en hall-display som
+   * gjør reconnect-loop ikke bypass-er limit. Returnerer false → callsite
+   * må svare RATE_LIMITED i ack.
+   */
+  function displayRateLimitOk(socket: Socket, eventName: string): boolean {
+    if (!socketRateLimiter) return true;
+    if (!socketRateLimiter.check(socket.id, eventName)) return false;
+    const data = socket.data as DisplaySocketData;
+    if (data.displayHallId && !socketRateLimiter.checkByKey(data.displayHallId, eventName)) {
+      return false;
+    }
+    return true;
   }
 
   /** Resolve the canonical (single) active room for a hall, if any. */
@@ -117,6 +141,11 @@ export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
       callback?: (response: AckResponse<{ hallId: string }>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit FØR validateDisplayToken (DB-kall).
+        if (!displayRateLimitOk(socket, "admin-display:login")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const token = (payload?.token ?? "").trim();
         if (!token) { ackFailure(callback, "MISSING_TOKEN", "token mangler."); return; }
         const { hallId } = await validateDisplayToken(token);
@@ -134,6 +163,11 @@ export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
       callback?: (response: AckResponse<DisplaySocketHandlerSnapshot>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før getHall + room-join.
+        if (!displayRateLimitOk(socket, "admin-display:subscribe")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const data = socket.data as DisplaySocketData;
         if (!data.displayHallId) { ackFailure(callback, "NOT_LOGGED_IN", "kjør admin-display:login først."); return; }
         const hall = await platformService.getHall(data.displayHallId);
@@ -161,6 +195,11 @@ export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
       callback?: (response: AckResponse<DisplaySocketHandlerSnapshot>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før getHall.
+        if (!displayRateLimitOk(socket, "admin-display:state")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const data = socket.data as DisplaySocketData;
         if (!data.displayHallId) { ackFailure(callback, "NOT_LOGGED_IN", "kjør admin-display:login først."); return; }
         const hall = await platformService.getHall(data.displayHallId);
@@ -183,6 +222,12 @@ export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
       _payload: unknown,
       callback?: (response: AckResponse<{ enabled: boolean; timeoutMs: number; imageRotationMs: number }>) => void,
     ) => {
+      // Bølge D Issue 2: rate-limit (returnerer kun statisk config men er
+      // pre-auth → uautentiserte spammere får ingen nytte men bruker CPU).
+      if (!displayRateLimitOk(socket, "admin-display:screensaver")) {
+        ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+        return;
+      }
       ackSuccess(callback, { ...screensaverConfig });
     });
   };

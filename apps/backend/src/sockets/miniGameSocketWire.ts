@@ -45,10 +45,32 @@ import type {
   MiniGameResultBroadcast,
 } from "../game/minigames/Game1MiniGameOrchestrator.js";
 import type { PlatformService } from "../platform/PlatformService.js";
+import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
 import { DomainError, toPublicError } from "../game/BingoEngine.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "mini-game-socket-wire" });
+
+/**
+ * Bølge D Issue 1 (HØY): rate-limits for `mini_game:*`-events.
+ *
+ * Mini-games har wallet-impact (handleChoice → prize-payout via
+ * Game1MiniGameOrchestrator). Uten rate-limit kan en spam-klient eller en
+ * misbruks-account flomme orchestrator-flyten og trigge race-conditions
+ * mot pending-payout-kontoen. Limits:
+ *   - `mini_game:choice`: 5/s — matcher menneskelig interaksjons-rate
+ *     (UI-knappetrykk på wheel/oddsen-direction-velg).
+ *   - `mini_game:join`   : 2/s — join er idempotent men auth-tunge (DB-
+ *     oppslag mot getUserFromAccessToken). 2/s tåler reconnect-storm
+ *     uten å flomme platform-service.
+ *
+ * Begge kontrolleres BÅDE per-socket OG per-walletId (samme mønster som
+ * gameEvents/context.ts BIN-247) slik at reconnect ikke nullstiller bucketet.
+ */
+export const MINI_GAME_RATE_LIMITS = {
+  "mini_game:choice": { windowMs: 1_000, maxEvents: 5 },
+  "mini_game:join":   { windowMs: 1_000, maxEvents: 2 },
+} as const;
 
 /**
  * Room-key-konvensjon: ett user-private rom per spiller. Mini-game-events er
@@ -63,6 +85,16 @@ export interface MiniGameSocketWireDeps {
   io: SocketServer;
   orchestrator: Game1MiniGameOrchestrator;
   platformService: PlatformService;
+  /**
+   * Bølge D Issue 1: rate-limiter for `mini_game:*`-events. Optional så
+   * eksisterende test-harnesses kan kjøre uten — handleren faller da
+   * tilbake til "no rate-limit" (matcher tidligere adferd).
+   *
+   * Kallere i prod (composition-root) SKAL alltid gi en limiter slik at
+   * spam-events blir avvist. Test-harnesses kan injisere en limiter med
+   * relax-config (samme mønster som testServer.ts).
+   */
+  socketRateLimiter?: SocketRateLimiter;
 }
 
 export interface MiniGameSocketWireHandle {
@@ -104,7 +136,32 @@ interface AckResponse<T> {
 export function createMiniGameSocketWire(
   deps: MiniGameSocketWireDeps
 ): MiniGameSocketWireHandle {
-  const { io, orchestrator, platformService } = deps;
+  const { io, orchestrator, platformService, socketRateLimiter } = deps;
+
+  /**
+   * Bølge D Issue 1: socket.id-bucket-sjekk (pre-auth-fase). Hvert event
+   * teller ÉN gang i socket.id-bucketet — incrementeres ved første sjekk.
+   * Returnerer false → handler skal avvise med RATE_LIMITED.
+   */
+  function checkRateLimitBySocket(socket: Socket, eventName: string): boolean {
+    if (!socketRateLimiter) return true;
+    return socketRateLimiter.check(socket.id, eventName);
+  }
+
+  /**
+   * Bølge D Issue 1: walletId-bucket-sjekk (post-auth-fase). BIN-247-mønster:
+   * en autentisert spiller skal ikke kunne bypass-e limit ved reconnect.
+   * Returnerer false → handler skal avvise med RATE_LIMITED.
+   *
+   * NB: Denne kalles ETTER socket.id-checken har incrementert sin bucket,
+   * så hvert event teller ÉN gang i hver bucket (ikke dobbelt-tellinger).
+   */
+  function checkRateLimitByWallet(socket: Socket, eventName: string): boolean {
+    if (!socketRateLimiter) return true;
+    const walletId = socket.data.user?.walletId;
+    if (!walletId) return true;
+    return socketRateLimiter.checkByKey(walletId, eventName);
+  }
 
   const broadcaster: MiniGameBroadcaster = {
     onTrigger(event: MiniGameTriggerBroadcast): void {
@@ -178,7 +235,26 @@ export function createMiniGameSocketWire(
         ack?: (resp: AckResponse<{ joined: true }>) => void
       ) => {
         try {
+          // Bølge D Issue 1: rate-limit FØR auth-tunge platform-kall slik at
+          // spam-clients ikke kan flomme getUserFromAccessToken. Sjekker
+          // socket.id-bucket først (uavhengig av auth-status). Inkrementerer
+          // bucket-en ÉN gang.
+          if (!checkRateLimitBySocket(socket, "mini_game:join")) {
+            throw new DomainError(
+              "RATE_LIMITED",
+              "For mange foresporsler. Vent litt."
+            );
+          }
           const userId = await authAndJoin(socket, rawPayload ?? {});
+          // BIN-247: walletId-bucket overlever reconnect → en spam-bot kan
+          // ikke bypass-e limit ved å koble til på nytt. Inkrementerer
+          // bucket-en ÉN gang etter auth.
+          if (!checkRateLimitByWallet(socket, "mini_game:join")) {
+            throw new DomainError(
+              "RATE_LIMITED",
+              "For mange foresporsler. Vent litt."
+            );
+          }
           log.debug({ userId, socketId: socket.id }, "mini_game:join — joined room");
           ack?.({ ok: true, data: { joined: true } });
         } catch (err) {
@@ -205,8 +281,25 @@ export function createMiniGameSocketWire(
         ) => void
       ) => {
         try {
+          // Bølge D Issue 1: rate-limit FØR orchestrator/handleChoice-arbeid.
+          // Mini-games har wallet-impact (prize-payout) → spam må stoppes
+          // før handleChoice for å unngå race mot pending-payout-tabellen.
+          // Sjekker socket.id-bucket (pre-auth) og walletId-bucket (post-auth)
+          // hver én gang — ingen dobbelt-tellinger.
+          if (!checkRateLimitBySocket(socket, "mini_game:choice")) {
+            throw new DomainError(
+              "RATE_LIMITED",
+              "For mange foresporsler. Vent litt."
+            );
+          }
           const payload = rawPayload ?? {};
           const userId = await authAndJoin(socket, payload);
+          if (!checkRateLimitByWallet(socket, "mini_game:choice")) {
+            throw new DomainError(
+              "RATE_LIMITED",
+              "For mange foresporsler. Vent litt."
+            );
+          }
 
           const resultId =
             typeof payload.resultId === "string" ? payload.resultId.trim() : "";

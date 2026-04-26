@@ -29,6 +29,29 @@ export const DEFAULT_RATE_LIMITS: Record<string, RateLimitConfig> = {
   "claim:submit":        { windowMs: 5_000,  maxEvents: 5 },
   "room:state":          { windowMs: 5_000,  maxEvents: 10 },
   "bet:arm":             { windowMs: 5_000,  maxEvents: 10 },
+  // Bølge D Issue 1 (HØY): mini-games har wallet-impact (handleChoice
+  // trigger prize-payout). Spam-events kan trigge race mot pending-payout.
+  // 5/s matcher menneskelig knappetrykk-rate; 2/s er nok for join (idempotent
+  // men auth-tunge — DB-oppslag mot getUserFromAccessToken).
+  "mini_game:choice":    { windowMs: 1_000,  maxEvents: 5 },
+  "mini_game:join":      { windowMs: 1_000,  maxEvents: 2 },
+  // Bølge D Issue 2 (MEDIUM): admin-namespace rate-limits. Admin-actions er
+  // sjeldne — 10/s totalt per admin-socket holder (matcher konservativ
+  // pilot-policy fra code-reviewer). Gjelder admin-namespace + admin-display
+  // + admin-game1 events. Når en admin-bug eller misbruks-account spammer
+  // events skal vi avvise med RATE_LIMITED i stedet for å flomme io.to(...).
+  "admin:room-ready":      { windowMs: 1_000, maxEvents: 10 },
+  "admin:pause-game":      { windowMs: 1_000, maxEvents: 10 },
+  "admin:resume-game":     { windowMs: 1_000, maxEvents: 10 },
+  "admin:force-end":       { windowMs: 1_000, maxEvents: 10 },
+  "admin:hall-balance":    { windowMs: 1_000, maxEvents: 10 },
+  "admin:login":           { windowMs: 1_000, maxEvents: 10 },
+  "admin-display:login":     { windowMs: 1_000, maxEvents: 10 },
+  "admin-display:subscribe": { windowMs: 1_000, maxEvents: 10 },
+  "admin-display:state":     { windowMs: 1_000, maxEvents: 10 },
+  "admin-display:screensaver": { windowMs: 1_000, maxEvents: 10 },
+  "game1:subscribe":       { windowMs: 1_000, maxEvents: 10 },
+  "game1:unsubscribe":     { windowMs: 1_000, maxEvents: 10 },
 };
 
 const DEFAULT_FALLBACK: RateLimitConfig = { windowMs: 10_000, maxEvents: 20 };

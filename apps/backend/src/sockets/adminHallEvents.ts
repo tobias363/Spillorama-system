@@ -38,6 +38,7 @@ import type { PlatformService, PublicAppUser } from "../platform/PlatformService
 import type { RoomSnapshot } from "../game/types.js";
 import type { RoomUpdatePayload } from "../util/roomHelpers.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
 import { canAccessAdminPermission } from "../platform/AdminAccessPolicy.js";
 import { AdminHallBalancePayloadSchema } from "@spillorama/shared-types/socket-events";
 
@@ -49,6 +50,16 @@ export interface AdminHallDeps {
   emitRoomUpdate: (roomCode: string) => Promise<RoomUpdatePayload>;
   /** BIN-585 PR D: wired through for `admin:hall-balance`. */
   walletAdapter: WalletAdapter;
+  /**
+   * Bølge D Issue 2 (MEDIUM): rate-limiter for admin-events. Optional så
+   * eksisterende test-harnesses kan kjøre uten — handleren faller da
+   * tilbake til "no rate-limit" (matcher tidligere adferd).
+   *
+   * Admin-actions er sjeldne; pilot-policy er 10/s per admin-socket
+   * (config i `DEFAULT_RATE_LIMITS`). Når limiter er satt sjekkes både
+   * socket.id og admin user.id (matcher BIN-247-mønsteret).
+   */
+  socketRateLimiter?: SocketRateLimiter;
 }
 
 /**
@@ -107,13 +118,30 @@ export interface AdminHallEventBroadcast {
 }
 
 export function createAdminHallHandlers(deps: AdminHallDeps) {
-  const { engine, platformService, io, emitRoomUpdate, walletAdapter } = deps;
+  const { engine, platformService, io, emitRoomUpdate, walletAdapter, socketRateLimiter } = deps;
 
   function ackSuccess<T>(cb: ((r: AckResponse<T>) => void) | undefined, data: T): void {
     if (typeof cb === "function") cb({ ok: true, data });
   }
   function ackFailure<T>(cb: ((r: AckResponse<T>) => void) | undefined, code: string, message: string): void {
     if (typeof cb === "function") cb({ ok: false, error: { code, message } });
+  }
+
+  /**
+   * Bølge D Issue 2 (MEDIUM): per-event rate-limit for admin-actions.
+   * Sjekker både socket.id (catch-all) og admin user.id (overlever
+   * reconnect — admin-portal kan ha bot-script som spammer events). Hvis
+   * ingen limiter er satt (test-harness) → tillat alt (matcher tidligere
+   * adferd). Returnerer false → callsite må svare RATE_LIMITED i ack.
+   */
+  function adminRateLimitOk(socket: Socket, eventName: string): boolean {
+    if (!socketRateLimiter) return true;
+    if (!socketRateLimiter.check(socket.id, eventName)) return false;
+    const adminUser = (socket.data as AdminSocketData).adminUser;
+    if (adminUser?.id && !socketRateLimiter.checkByKey(adminUser.id, eventName)) {
+      return false;
+    }
+    return true;
   }
 
   /** Extract validated room-code, or throw a format error the event handler can ack. */
@@ -159,6 +187,11 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       callback?: (r: AckResponse<{ userId: string; role: PublicAppUser["role"]; canControlRooms: boolean }>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit FØR auth-tunge platformService-kall.
+        if (!adminRateLimitOk(socket, "admin:login")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const token = (payload?.accessToken ?? "").trim();
         if (!token) { ackFailure(callback, "MISSING_TOKEN", "accessToken mangler."); return; }
         const user = await platformService.getUserFromAccessToken(token);
@@ -185,6 +218,11 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       callback?: (r: AckResponse<AdminHallEventBroadcast>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før engine/io-fanout.
+        if (!adminRateLimitOk(socket, "admin:room-ready")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
         // Confirm the room exists before broadcasting — avoids advertising
@@ -221,6 +259,11 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       callback?: (r: AckResponse<{ roomCode: string; snapshot: RoomSnapshot }>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før engine.pauseGame (state-mutating).
+        if (!adminRateLimitOk(socket, "admin:pause-game")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
         const message = typeof payload?.message === "string" ? payload.message.slice(0, 200) : undefined;
@@ -249,6 +292,11 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       callback?: (r: AckResponse<{ roomCode: string; snapshot: RoomSnapshot }>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før engine.resumeGame.
+        if (!adminRateLimitOk(socket, "admin:resume-game")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
         engine.resumeGame(roomCode);
@@ -275,6 +323,11 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       callback?: (r: AckResponse<{ roomCode: string; snapshot: RoomSnapshot }>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før engine.endGame (regulatorisk path).
+        if (!adminRateLimitOk(socket, "admin:force-end")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
         const reason = typeof payload?.reason === "string" && payload.reason.trim()
@@ -333,6 +386,11 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       }>) => void,
     ) => {
       try {
+        // Bølge D Issue 2: rate-limit før wallet-oppslag.
+        if (!adminRateLimitOk(socket, "admin:hall-balance")) {
+          ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+          return;
+        }
         const parsed = AdminHallBalancePayloadSchema.safeParse(payload);
         if (!parsed.success) {
           const first = parsed.error.issues[0];

@@ -31,6 +31,7 @@ import type {
   PlatformService,
   PublicAppUser,
 } from "../platform/PlatformService.js";
+import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
 import { assertAdminPermission } from "../platform/AdminAccessPolicy.js";
 import {
   Game1AdminSubscribePayloadSchema,
@@ -105,6 +106,13 @@ export interface AdminGame1NamespaceDeps {
    * uansett via eget rom).
    */
   participatingHallIdsPort?: ParticipatingHallIdsPort;
+  /**
+   * Bølge D Issue 2 (MEDIUM): rate-limiter for `/admin-game1`-namespace.
+   * Optional så tests kan kjøre uten — handleren faller da tilbake til "no
+   * rate-limit" (matcher tidligere adferd). Pilot-policy: 10/s per
+   * admin-socket + per admin user.id (overlever reconnect).
+   */
+  socketRateLimiter?: SocketRateLimiter;
 }
 
 export interface AdminGame1NamespaceHandle {
@@ -120,8 +128,24 @@ export interface AdminGame1NamespaceHandle {
 export function createAdminGame1Namespace(
   deps: AdminGame1NamespaceDeps
 ): AdminGame1NamespaceHandle {
-  const { io, platformService, participatingHallIdsPort } = deps;
+  const { io, platformService, participatingHallIdsPort, socketRateLimiter } = deps;
   const namespace = io.of("/admin-game1");
+
+  /**
+   * Bølge D Issue 2: per-event rate-limit for `/admin-game1`-namespacet.
+   * Sjekker både socket.id og admin user.id (fra JWT-handshake → socket.data.user)
+   * slik at reconnect ikke bypass-er bucketet. Returnerer false → callsite
+   * må svare med RATE_LIMITED i ack.
+   */
+  function adminRateLimitOk(socket: Socket, eventName: string): boolean {
+    if (!socketRateLimiter) return true;
+    if (!socketRateLimiter.check(socket.id, eventName)) return false;
+    const user = socket.data.user as PublicAppUser | undefined;
+    if (user?.id && !socketRateLimiter.checkByKey(user.id, eventName)) {
+      return false;
+    }
+    return true;
+  }
 
   // JWT-handshake-auth: accessToken i socket.handshake.auth.token (eller
   // `.accessToken` for test-kompat). Må være GAME1_MASTER_WRITE.
@@ -159,6 +183,13 @@ export function createAdminGame1Namespace(
       "game1:subscribe",
       (raw: unknown, ack?: (resp: { ok: boolean; error?: { code: string; message: string } }) => void) => {
         try {
+          // Bølge D Issue 2: rate-limit FØR socket.join.
+          if (!adminRateLimitOk(socket, "game1:subscribe")) {
+            throw new DomainError(
+              "RATE_LIMITED",
+              "For mange foresporsler. Vent litt."
+            );
+          }
           const parsed = Game1AdminSubscribePayloadSchema.safeParse(raw);
           if (!parsed.success) {
             throw new DomainError(
@@ -183,6 +214,13 @@ export function createAdminGame1Namespace(
       "game1:unsubscribe",
       (raw: unknown, ack?: (resp: { ok: boolean; error?: { code: string; message: string } }) => void) => {
         try {
+          // Bølge D Issue 2: rate-limit FØR socket.leave.
+          if (!adminRateLimitOk(socket, "game1:unsubscribe")) {
+            throw new DomainError(
+              "RATE_LIMITED",
+              "For mange foresporsler. Vent litt."
+            );
+          }
           const parsed = Game1AdminSubscribePayloadSchema.safeParse(raw);
           if (!parsed.success) {
             throw new DomainError(

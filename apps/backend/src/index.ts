@@ -2400,6 +2400,9 @@ const registerGameEvents = createGameEventHandlers({
 const registerAdminDisplayEvents = createAdminDisplayHandlers({
   engine, platformService, io,
   screensaverConfig: cfg.screensaverConfig,
+  // Bølge D Issue 2: rate-limit display-events (10/s per socket + per
+  // hallId). Beskytter mot bot-spam av subscribe/state-refresh.
+  socketRateLimiter,
   validateDisplayToken: async (token) => {
     const colon = token.indexOf(":");
     if (colon <= 0) throw new Error("token format ugyldig (forventer <hallSlug>:<secret>)");
@@ -2433,8 +2436,12 @@ const registerAdminDisplayEvents = createAdminDisplayHandlers({
 // BIN-515: Admin hall-event socket handlers. Authentication is the
 // existing JWT access-token path; the handler itself checks
 // ROOM_CONTROL_WRITE per event.
+//
+// Bølge D Issue 2: rate-limit per event (10/s per admin-socket + per
+// admin user.id) — admin-bug eller misbruks-account skal ikke kunne
+// flomme system med pause/resume/force-end events.
 const registerAdminHallEvents = createAdminHallHandlers({
-  engine, platformService, io, emitRoomUpdate, walletAdapter,
+  engine, platformService, io, emitRoomUpdate, walletAdapter, socketRateLimiter,
 });
 
 // GAME1_SCHEDULE PR 4d.2: Spill 1-spesifikk socket-handler — isolert fra
@@ -2458,6 +2465,10 @@ const miniGameSocketWire = createMiniGameSocketWire({
   io,
   orchestrator: game1MiniGameOrchestrator,
   platformService,
+  // Bølge D Issue 1: rate-limit `mini_game:choice` og `mini_game:join`. Uten
+  // dette kunne spam-events trigge race mot pending-payout-tabellen. Limits
+  // er definert i miniGameSocketWire.MINI_GAME_RATE_LIMITS.
+  socketRateLimiter,
 });
 game1MiniGameOrchestrator.setBroadcaster(miniGameSocketWire.broadcaster);
 
@@ -2482,6 +2493,9 @@ io.on("connection", (socket: Socket) => {
 const adminGame1Handle = createAdminGame1Namespace({
   io,
   platformService,
+  // Bølge D Issue 2: rate-limit `game1:subscribe`/`game1:unsubscribe` på
+  // /admin-game1 namespacet (10/s per admin-socket + per admin user.id).
+  socketRateLimiter,
   participatingHallIdsPort: {
     async getParticipatingHallIds(gameId: string): Promise<string[]> {
       try {
