@@ -67,6 +67,30 @@ describe("Sidebar spec", () => {
     expect(cash).toBeDefined();
   });
 
+  it("agent sidebar exposes Sell Products under cash-in-out (wireframe §17.12)", () => {
+    const cash = agentSidebar.find((n) => n.kind === "group" && n.id === "agent-cash-in-out");
+    expect(cash).toBeDefined();
+    if (cash && cash.kind === "group") {
+      const sell = cash.children.find((c) => c.id === "agent-sell-products");
+      expect(sell).toBeDefined();
+      expect(sell?.path).toBe("/agent/sellProduct");
+    }
+  });
+
+  it("agent sidebar exposes Past Game Winning History (wireframe §17.32) and Sold Tickets (wireframe §17.31)", () => {
+    const past = agentSidebar.find((n) => n.kind === "leaf" && n.id === "agent-past-winning-history");
+    expect(past).toBeDefined();
+    if (past && past.kind === "leaf") {
+      expect(past.path).toBe("/agent/past-winning-history");
+    }
+    const sold = agentSidebar.find((n) => n.kind === "leaf" && n.id === "agent-sold-tickets");
+    expect(sold).toBeDefined();
+    if (sold && sold.kind === "leaf") {
+      // Bruker /agent/-prefiks for å passere routes-guarden.
+      expect(sold.path).toBe("/agent/sold-tickets");
+    }
+  });
+
   it("sidebarFor returns admin spec for admin/super-admin and agent spec for agent", () => {
     expect(sidebarFor("admin")).toBe(adminSidebar);
     expect(sidebarFor("super-admin")).toBe(adminSidebar);

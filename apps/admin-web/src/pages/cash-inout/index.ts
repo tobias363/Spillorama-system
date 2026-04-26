@@ -22,6 +22,9 @@ const CASH_INOUT_ROUTES = new Set<string>([
   "/agent/physicalCashOut",
   "/agent/cashout-details",
   "/sold-tickets",
+  // Wireframe §17.31 — agent-alias for sold-tickets, routes-guard krever
+  // `/agent/*`-prefiks for AGENT/HALL_OPERATOR.
+  "/agent/sold-tickets",
 ]);
 
 export function isCashInOutRoute(path: string): boolean {
@@ -41,6 +44,12 @@ export function mountCashInOutRoute(container: HTMLElement, path: string): void 
       renderProductCartPage(container);
       return;
     case "/sold-tickets":
+      renderSoldTicketsPage(container);
+      return;
+    case "/agent/sold-tickets":
+      // Wireframe §17.31 — agent ser shift-scoped sold-tickets-list. Samme
+      // page som admin-routen `/sold-tickets`, men under agent-portalens
+      // route-tre slik at routes-guarden tillater AGENT/HALL_OPERATOR-tilgang.
       renderSoldTicketsPage(container);
       return;
     case "/agent/physicalCashOut":

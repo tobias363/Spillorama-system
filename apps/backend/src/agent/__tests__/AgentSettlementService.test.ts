@@ -626,8 +626,11 @@ test("K1 editSettlement: admin kan oppdatere breakdown + audit-logges", async ()
     patch: {
       machineBreakdown: {
         rows: { metronia: { in_cents: 10000, out_cents: 5000 } },
+        kasse_start_skift_cents: 0,
         ending_opptall_kassie_cents: 5000,
         innskudd_drop_safe_cents: 0,
+        paafyll_ut_kasse_cents: 0,
+        totalt_dropsafe_paafyll_cents: 0,
         difference_in_shifts_cents: 0,
       },
     },
@@ -654,8 +657,11 @@ test("K1 computeBreakdownTotals: eksponert via service", async () => {
       metronia: { in_cents: 100, out_cents: 30 },
       bank: { in_cents: 50, out_cents: 50 },
     },
+    kasse_start_skift_cents: 0,
     ending_opptall_kassie_cents: 0,
     innskudd_drop_safe_cents: 0,
+    paafyll_ut_kasse_cents: 0,
+    totalt_dropsafe_paafyll_cents: 0,
     difference_in_shifts_cents: 0,
   });
   assert.equal(totals.totalInCents, 150);

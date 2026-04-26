@@ -154,15 +154,16 @@ describe("Agent-portal placeholder-sider", () => {
     document.body.innerHTML = '<div id="c"></div>';
   });
 
-  // Flere sider har blitt løftet ut av placeholder-lista etter hvert som P0
-  // pilot-blokkere er implementert:
+  // Alle agent-portal-skeleton-sider er nå løftet ut av placeholder-lista
+  // og kobles til reelle implementasjoner. Tomme placeholder-tester er
+  // bevisst igjen for å gjøre det enkelt å re-introdusere placeholdere
+  // hvis nye agent-skjermer legges til:
   //   - /agent/games → nextGamePanel.test.ts (#431)
   //   - /agent/physical-cashout → agentBingoPages.test.ts (#433)
   //   - /agent/cash-in-out → cashInOutShiftLogout.test.ts (Wireframe Gap #9)
   //   - /agent/unique-id → agentUniqueId.test.ts (wireframe gaps #8/#10/#11)
-  const placeholders = [
-    { name: "physical-tickets", mount: mountAgentPhysicalTickets, titleKey: "add_physical_tickets" },
-  ];
+  //   - /agent/physical-tickets → renderAddPage (PR-B3 / BIN-613)
+  const placeholders: Array<{ name: string; mount: (c: HTMLElement) => void; titleKey: string }> = [];
 
   for (const p of placeholders) {
     it(`${p.name}: rendrer breadcrumb, tittel og 'Kommer snart'-merke`, () => {
@@ -177,6 +178,18 @@ describe("Agent-portal placeholder-sider", () => {
       expect(container.querySelector("section.content-header h1")).toBeTruthy();
     });
   }
+
+  it("physical-tickets: rendrer full implementation (renderAddPage, ikke placeholder)", () => {
+    const container = document.getElementById("c")!;
+    mountAgentPhysicalTickets(container);
+    // Har content-header + tittel, men IKKE coming-soon-marker.
+    expect(container.querySelector("section.content-header h1")).toBeTruthy();
+    expect(container.querySelector("[data-marker='coming-soon']")).toBeNull();
+    // Batch-form fra renderAddPage er på siden.
+    expect(container.querySelector("#batch-form")).toBeTruthy();
+    expect(container.querySelector("#rangeStart")).toBeTruthy();
+    expect(container.querySelector("#rangeEnd")).toBeTruthy();
+  });
 
   it("physical-cashout: rendrer full implementation (ikke placeholder)", () => {
     const container = document.getElementById("c")!;

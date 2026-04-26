@@ -175,6 +175,8 @@ export const routes: RouteDef[] = [
   { path: "/agent/register-user/add", titleKey: "add_money_register_user", roles: ["agent"] },
   { path: "/agent/register-user/withdraw", titleKey: "withdraw_money_register_user", roles: ["agent"] },
   { path: "/agent/cashout-details", titleKey: "cashout_details", roles: ["agent"] },
+  // Wireframe §17.31 — agent-alias for sold-tickets-list (shift-scoped).
+  { path: "/agent/sold-tickets", titleKey: "sold_tickets", roles: ["agent", "hall-operator"] },
 
   { path: "/live/dashboard", titleKey: "spillorama_live_dashboard" },
   { path: "/live/game-settings", titleKey: "spillorama_game_settings" },

@@ -58,8 +58,11 @@ function baseSettlement(): AdminSettlement {
         gevinst_overfoering_bank: { in_cents: 0, out_cents: 0 },
         annet: { in_cents: 0, out_cents: 0 },
       },
+      kasse_start_skift_cents: 0,
       ending_opptall_kassie_cents: 500_00,
       innskudd_drop_safe_cents: 200_00,
+      paafyll_ut_kasse_cents: 0,
+      totalt_dropsafe_paafyll_cents: 0,
       difference_in_shifts_cents: 0,
     },
     bilagReceipt: null,
@@ -151,9 +154,12 @@ describe("SettlementBreakdownModal — shift-delta live calculation", () => {
     expect(r.differenceInShiftsCents).toBe(-5_000);
   });
 
-  it("live oppdatering av #sb-diff når drop-safe endres", () => {
+  it("live oppdatering av #sb-diff når shift-delta-felter endres (K1-B wireframe formula)", () => {
+    // Bruk en settlement uten maskin-rader for ren formel-test (totalt_sum_kasse_fil = 0).
+    const empty = baseSettlement();
+    empty.machineBreakdown.rows = {};
     openSettlementBreakdownModal({
-      existingSettlement: baseSettlement(),
+      existingSettlement: empty,
       mode: "edit",
       shiftId: "shift-1",
       agentUserId: "agent-1",
@@ -162,23 +168,36 @@ describe("SettlementBreakdownModal — shift-delta live calculation", () => {
       businessDate: "2026-04-24",
     });
     const diffInput = document.querySelector<HTMLInputElement>("#sb-diff");
-    const dropInput = document.querySelector<HTMLInputElement>("#sb-drop");
-    const startInput = document.querySelector<HTMLInputElement>("#sb-start-end");
+    const startInput = document.querySelector<HTMLInputElement>("#sb-kasse-start");
     const endingInput = document.querySelector<HTMLInputElement>("#sb-ending");
+    const dropInput = document.querySelector<HTMLInputElement>("#sb-drop");
+    const paafyllInput = document.querySelector<HTMLInputElement>("#sb-paafyll");
+    const endringInput = document.querySelector<HTMLInputElement>("#sb-endring");
+    const totaltDropsafeInput = document.querySelector<HTMLInputElement>("#sb-totalt-dropsafe");
     expect(diffInput).not.toBeNull();
-    expect(dropInput).not.toBeNull();
     expect(startInput).not.toBeNull();
     expect(endingInput).not.toBeNull();
+    expect(dropInput).not.toBeNull();
+    expect(paafyllInput).not.toBeNull();
+    expect(endringInput).not.toBeNull();
+    expect(totaltDropsafeInput).not.toBeNull();
 
-    // Simuler bruker endrer drop-safe: start=1500 NOK, drop=300, ending=500 -> diff = 1500 - 300 - 500 = 700
-    startInput!.value = "1500.00";
+    // Simuler bruker setter wireframe-eksempel: start=10000, ending=16613 → endring=6613
+    //                                            drop=1000, paafyll=5613 → totalt=6613
+    //                                            sum-kasse-fil=0 (ingen rader)
+    //                                            diff = (6613-6613)+6613-0 = 6613
+    startInput!.value = "10000.00";
     startInput!.dispatchEvent(new Event("input", { bubbles: true }));
-    dropInput!.value = "300.00";
-    dropInput!.dispatchEvent(new Event("input", { bubbles: true }));
-    endingInput!.value = "500.00";
+    endingInput!.value = "16613.00";
     endingInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    dropInput!.value = "1000.00";
+    dropInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    paafyllInput!.value = "5613.00";
+    paafyllInput!.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(diffInput!.value).toBe("700.00");
+    expect(endringInput!.value).toBe("6613.00");
+    expect(totaltDropsafeInput!.value).toBe("6613.00");
+    expect(diffInput!.value).toBe("6613.00"); // sum-kasse-fil = 0
   });
 
   it("difference-feltet er read-only (bruker kan ikke overstyre)", () => {
