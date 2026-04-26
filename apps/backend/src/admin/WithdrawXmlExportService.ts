@@ -531,6 +531,29 @@ export class WithdrawXmlExportService {
    * er eksportert. Filtrerer på agent via app_agent_halls når
    * agentUserId er satt; ellers returneres kun rader uten agent-hall-
    * tilknytning (NULL-bucketten).
+   *
+   * Duplikat-analyse (Bølge C-review 2026-04-26):
+   *   `app_agent_halls` har n:m-cardinality (1 agent kan ha flere haller,
+   *   1 hall kan ha flere agenter). Naivt sett kan en INNER JOIN på
+   *   `ah.hall_id = wr.hall_id` produsere duplikat-rader når flere agenter
+   *   deler en hall. Det skjer IKKE her fordi:
+   *     1. Tabellen har PRIMARY KEY (user_id, hall_id) — én rad per
+   *        agent/hall-kombinasjon (se `migrations/20260418220100_agent_halls.sql`).
+   *     2. WHERE-filteret `ah.user_id = $1` reduserer til ÉN match per
+   *        wr.id: gitt en bestemt user_id og en bestemt hall_id, finnes
+   *        det maks én rad i app_agent_halls.
+   *   Resultat: hver wr-rad forekommer maks én gang i output. Ingen
+   *   DISTINCT eller subquery trengs. NULL-bucketten er tilsvarende
+   *   safe fordi `app_agent_halls.user_id` er NOT NULL — wr-rader uten
+   *   agent-tilknytning treffer LEFT JOIN med ah.user_id = NULL og
+   *   forekommer maks én gang.
+   *
+   *   Cross-agent-deling (samme wr.hall_id i 2 agenters JOIN-resultat)
+   *   håndteres av status-flip + FOR UPDATE: første batch som committer
+   *   markerer wr → EXPORTED, andre batch ser ikke raden lenger.
+   *
+   *   Regresjons-test: se "lockAcceptedBankRequests: SQL bruker
+   *   ah.user_id = $1 ..." i WithdrawXmlExportService.test.ts.
    */
   private async lockAcceptedBankRequests(
     client: PoolClient,

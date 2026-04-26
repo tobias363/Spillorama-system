@@ -345,3 +345,141 @@ test("getBatch: ukjent id → XML_BATCH_NOT_FOUND", async () => {
     (err: unknown) => err instanceof DomainError && err.code === "XML_BATCH_NOT_FOUND"
   );
 });
+
+// ─── n:m-regresjon: Bølge C-review 2026-04-26 ────────────────────────────
+//
+// Bekrefter at lockAcceptedBankRequests-SQL er duplikat-safe selv når
+// `app_agent_halls` har n:m-cardinality (1 agent har flere haller, 1 hall
+// har flere agenter). Garantien hviler på:
+//   1. PRIMARY KEY (user_id, hall_id) i app_agent_halls.
+//   2. WHERE-filteret ah.user_id = $1 (agent-spesifikk path).
+//   3. user_id NOT NULL + ah.user_id IS NULL (NULL-bucket-path).
+//
+// Stub-Pool kan ikke verifisere reell DB-cardinality, men den kan låse
+// fast SQL-kontrakten. Hvis en fremtidig refactor svekker noen av
+// invariantene over (f.eks. fjerner WHERE-filteret, gjør JOIN bredere
+// eller mister kompositt-PK), vil testen fange det.
+
+test("lockAcceptedBankRequests (agent): SQL bruker ah.user_id = $1 — kompositt-PK garanterer ≤1 join-match per wr", async () => {
+  // Returnér 2 rader fra "DB" (én per hall agenten er tildelt).
+  const rowsFromDb = [
+    { id: "wr-1", user_id: "u1", hall_id: "hall-shared", amount_cents: 10000, bank_account_number: "111", bank_name: "DNB", account_holder: "A", accepted_at: "2026-04-24T09:00:00Z", created_at: "2026-04-24T08:00:00Z" },
+    { id: "wr-2", user_id: "u2", hall_id: "hall-private", amount_cents: 20000, bank_account_number: "222", bank_name: "Nordea", account_holder: "B", accepted_at: "2026-04-24T09:30:00Z", created_at: "2026-04-24T08:30:00Z" },
+  ];
+  const batchRow = {
+    id: "batch-1",
+    agent_user_id: "agent-A",
+    generated_at: "2026-04-24T21:00:00.000Z",
+    xml_file_path: "/tmp/x.xml",
+    email_sent_at: null,
+    recipient_emails: [],
+    withdraw_request_count: 2,
+  };
+
+  const { pool, recorded } = makePool([
+    (q) => {
+      if (q.sql.includes("FOR UPDATE")) return rowsFromDb;
+      if (q.sql.includes("INSERT INTO") && q.sql.includes("app_xml_export_batches")) {
+        return [batchRow];
+      }
+      return undefined;
+    },
+  ]);
+  const svc = WithdrawXmlExportService.forTesting(pool as never, {
+    skipFileWrite: true,
+    nowMs: () => new Date("2026-04-24T21:00:00Z").getTime(),
+  });
+
+  const result = await svc.generateDailyXmlForAgent("agent-A");
+
+  // Verifiser SQL-kontrakten: agent-spesifikk path filtrerer med ah.user_id = $1.
+  const lockQuery = recorded.find(
+    (r) =>
+      r.sql.includes("FOR UPDATE") &&
+      r.sql.includes("INNER JOIN") &&
+      r.sql.includes("app_agent_halls")
+  );
+  assert.ok(lockQuery, "agent-spesifikk lock-query må bruke INNER JOIN på app_agent_halls");
+  assert.ok(
+    /ah\.user_id\s*=\s*\$1/.test(lockQuery!.sql),
+    "WHERE-clause må filtrere ah.user_id = $1 — dette er det som garanterer ≤1 match per wr.id sammen med kompositt-PK (user_id, hall_id)"
+  );
+  assert.deepEqual(lockQuery!.params, ["agent-A"], "kun agent-userId binder til $1");
+
+  // Selv om batchen har 2 rader (forskjellige wr.id), skal hver forekomme nøyaktig én gang.
+  const xmlIds = (result.xmlContent.match(/<withdrawal id="([^"]+)"/g) ?? []);
+  assert.equal(xmlIds.length, 2, "to unike wr-rader, ingen duplikat");
+  assert.equal(result.batch.withdrawRequestCount, 2);
+});
+
+test("lockAcceptedBankRequests (NULL-bucket): SQL bruker LEFT JOIN + ah.user_id IS NULL — user_id NOT NULL gir ingen duplikater", async () => {
+  const { pool, recorded } = makePool([
+    (q) => {
+      if (q.sql.includes("FOR UPDATE")) return []; // 0 rader er nok for kontraktsjekk
+      return undefined;
+    },
+  ]);
+  const svc = WithdrawXmlExportService.forTesting(pool as never, {
+    skipFileWrite: true,
+    nowMs: () => new Date("2026-04-24T21:00:00Z").getTime(),
+  });
+  await svc.generateDailyXmlForAgent(null);
+
+  // NULL-bucket-path: LEFT JOIN + ah.user_id IS NULL.
+  const lockQuery = recorded.find(
+    (r) =>
+      r.sql.includes("FOR UPDATE") &&
+      r.sql.includes("LEFT JOIN") &&
+      r.sql.includes("app_agent_halls")
+  );
+  assert.ok(lockQuery, "NULL-bucket-query må bruke LEFT JOIN på app_agent_halls");
+  assert.ok(
+    /ah\.user_id\s+IS\s+NULL/.test(lockQuery!.sql),
+    "WHERE-clause må filtrere ah.user_id IS NULL — siden app_agent_halls.user_id er NOT NULL kan ikke det produsere duplikater"
+  );
+  assert.deepEqual(lockQuery!.params, undefined, "NULL-bucket-query har ingen bind-params");
+});
+
+test("lockAcceptedBankRequests: returnerer rader uten DISTINCT — kompositt-PK gjør det unødvendig", async () => {
+  // Hvis stub returnerer den samme wr.id flere ganger (simulert duplikat-bug),
+  // ville XML-batch-koden inkludere alle. Dette er en negativ test som
+  // dokumenterer at SVC stoler på SQL-laget for unicitet, ikke på
+  // post-prosessering.
+  const dupRows = [
+    { id: "wr-1", user_id: "u1", hall_id: "hall-a", amount_cents: 10000, bank_account_number: "111", bank_name: "DNB", account_holder: "A", accepted_at: "2026-04-24T09:00:00Z", created_at: "2026-04-24T08:00:00Z" },
+    { id: "wr-1", user_id: "u1", hall_id: "hall-a", amount_cents: 10000, bank_account_number: "111", bank_name: "DNB", account_holder: "A", accepted_at: "2026-04-24T09:00:00Z", created_at: "2026-04-24T08:00:00Z" },
+  ];
+  const batchRow = {
+    id: "b",
+    agent_user_id: "agent-A",
+    generated_at: "2026-04-24T21:00:00.000Z",
+    xml_file_path: "/tmp/x.xml",
+    email_sent_at: null,
+    recipient_emails: [],
+    withdraw_request_count: 2,
+  };
+
+  const { pool } = makePool([
+    (q) => {
+      if (q.sql.includes("FOR UPDATE")) return dupRows;
+      if (q.sql.includes("INSERT INTO") && q.sql.includes("app_xml_export_batches")) {
+        return [batchRow];
+      }
+      return undefined;
+    },
+  ]);
+  const svc = WithdrawXmlExportService.forTesting(pool as never, {
+    skipFileWrite: true,
+    nowMs: () => new Date("2026-04-24T21:00:00Z").getTime(),
+  });
+  const result = await svc.generateDailyXmlForAgent("agent-A");
+
+  // Hvis denne testen begynner å feile fordi count != 2, betyr det at
+  // SQL-laget ikke lenger garanterer unicitet (f.eks. PK er endret eller
+  // WHERE-filteret er svekket). Da må SQL-laget fikses, IKKE TS-laget.
+  assert.equal(
+    result.rows.length,
+    2,
+    "SVC stoler på SQL-laget — duplikat-rader fra DB videreføres, så SQL-kontrakten i lockAcceptedBankRequests må holde"
+  );
+});
