@@ -53,6 +53,12 @@ export const MINIGAME_ROTATION: readonly MiniGameType[] = [
 /**
  * Narrow port eksponerer kun de delene av BingoEngine som mini-game-
  * modulen trenger. Holder private state (rooms-map, playerMap) innkapslet.
+ *
+ * `refreshPlayerBalancesForWallet` brukes etter wallet-transfer på
+ * payout-paths (jackpot + mini-game) for å sikre at `player.balance`
+ * reflekterer faktisk available_balance fra wallet-adapteren — ikke en
+ * optimistisk `+= payout` som taper deposit/winnings-split-info og gir
+ * stale balance på 2.+ vinn (ad-hoc-engine-paritet, Tobias 2026-04-26).
  */
 export interface MiniGamesContext {
   readonly walletAdapter: WalletAdapter;
@@ -60,6 +66,12 @@ export interface MiniGamesContext {
   readonly ledger: ComplianceLedger;
   requireRoom(roomCode: string): RoomState;
   requirePlayer(room: RoomState, playerId: string): Player;
+  /**
+   * Best-effort: oppdater `player.balance` fra wallet-adapteren etter
+   * payout. Fail-soft — caller skal logge og fortsette ved feil (vinneren
+   * er allerede betalt, kun visningen kan være stale til neste refresh).
+   */
+  refreshPlayerBalancesForWallet(walletId: string): Promise<string[]>;
 }
 
 /**
@@ -156,7 +168,22 @@ export async function spinJackpot(
         targetSide: "winnings",
       },
     );
-    player.balance += prizeAmount;
+    // Hot-fix Tobias 2026-04-26: bytt optimistisk `player.balance += prize`
+    // mot autoritativ refresh fra wallet-adapter. Optimistisk += taper
+    // deposit/winnings-split-info → stale balance i room:update på 2.+ vinn.
+    // Fail-soft: hvis refresh kaster (Postgres flap, lock-timeout) er
+    // pengene allerede transferert; logger og fortsetter.
+    try {
+      await ctx.refreshPlayerBalancesForWallet(player.walletId);
+    } catch (err) {
+      // Ikke-fatalt: vinneren er kreditert, kun lokal cache er stale.
+      // Neste room:update / wallet:update vil korrigere.
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[BingoEngineMiniGames.spinJackpot] refresh feilet (best-effort):",
+        err,
+      );
+    }
 
     await ctx.compliance.recordLossEntry(player.walletId, room.hallId, {
       type: "PAYOUT",
@@ -286,7 +313,17 @@ export async function playMiniGame(
         targetSide: "winnings",
       },
     );
-    player.balance += prizeAmount;
+    // Hot-fix Tobias 2026-04-26: autoritativ refresh i stedet for `+= prize`.
+    // Se kommentar i `spinJackpot` for begrunnelse.
+    try {
+      await ctx.refreshPlayerBalancesForWallet(player.walletId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[BingoEngineMiniGames.playMiniGame] refresh feilet (best-effort):",
+        err,
+      );
+    }
 
     await ctx.compliance.recordLossEntry(player.walletId, room.hallId, {
       type: "PAYOUT",
