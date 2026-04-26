@@ -80,6 +80,30 @@ export function lossLimitAmountFromTransfer(
   const fromDeposit = Number.isFinite(split.fromDeposit) ? split.fromDeposit : 0;
   return Math.max(0, roundCurrency(fromDeposit));
 }
+
+/**
+ * Detekter om et pattern bruker faste premier (annonserte kr-beløp som ikke
+ * skaleres med pool). Faste premier MÅ utbetales fullt ut uavhengig av pool-
+ * størrelse — huset garanterer dem (legacy spillorama-paritet, fixed-prize
+ * bingo-modell). §11 single-prize-cap (2500 kr) gjelder fortsatt.
+ *
+ * Variable premier (`winningType: "percent"` eller udefinert + `prizePercent`)
+ * er pool-gated som før.
+ *
+ * Scope: kun `winningType === "fixed"` regnes som fast for nå.
+ * `column-specific` og `ball-value-multiplier` har også faste kr-verdier,
+ * men har eksisterende cap-tester — tas i egen task hvis ønskelig.
+ */
+function isFixedPrizePattern(pattern: {
+  winningType?:
+    | "percent"
+    | "fixed"
+    | "multiplier-chain"
+    | "column-specific"
+    | "ball-value-multiplier";
+}): boolean {
+  return pattern.winningType === "fixed";
+}
 import { PrizePolicyManager } from "./PrizePolicyManager.js";
 import type { PrizeGameType, PrizePolicySnapshot, ExtraDrawDenialAudit } from "./PrizePolicyManager.js";
 import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
@@ -1379,7 +1403,16 @@ export class BingoEngine {
 
     const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
 
-    // Cap against single-prize-policy + remaining pool + RTP budget.
+    // Cap against single-prize-policy. For FASTE PREMIER (winningType="fixed")
+    // skal pool/RTP-cap IKKE gjelde — huset garanterer annonserte premier
+    // (legacy spillorama-paritet). Variable premier (winningType="percent" /
+    // "multiplier-chain") fortsetter å være pool-gated.
+    //
+    // Regulatorisk: §11 single-prize-cap (2500 kr) gjelder ALLTID.
+    // Hus-konto kan gå negativt for system-konti (PostgresWalletAdapter
+    // CHECK-constraint, InMemoryWalletAdapter pre-funded for tester) — dette
+    // er forretningsmessig korrekt for fixed-prize-bingo.
+    //
     // PrizePolicy bruker fortsatt PrizeGameType (kun "DATABINGO" i dagens
     // sentralisering). En egen task åpner PrizeGameType for MAIN_GAME — for
     // nå behold "DATABINGO" her. K2-A scope er kun ledger-events.
@@ -1388,8 +1421,13 @@ export class BingoEngine {
       gameType: "DATABINGO",
       amount: prizePerWinner,
     });
-    const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
-    const payout = Math.min(afterPoolCap, game.remainingPayoutBudget);
+    const isFixedPrize = isFixedPrizePattern(pattern);
+    const afterPoolCap = isFixedPrize
+      ? capped.cappedAmount
+      : Math.min(capped.cappedAmount, game.remainingPrizePool);
+    const payout = isFixedPrize
+      ? capped.cappedAmount
+      : Math.min(afterPoolCap, game.remainingPayoutBudget);
 
     const claim: ClaimRecord = {
       id: randomUUID(),
@@ -1430,8 +1468,17 @@ export class BingoEngine {
           "payoutPhaseWinner: wallet refresh feilet (best-effort)",
         );
       }
-      game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
-      game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
+      // Pool/RTP-budget tracking: dekreementer går aldri negativ — hus-deficit
+      // for fixed-prize-overlapp er allerede dekket via wallet-systemkonto.
+      // For audit-trail logger vi HOUSE_DEFICIT-event hvis payout > tilgjengelig
+      // pool-andel (huset finansierte differansen).
+      const poolBeforePayout = game.remainingPrizePool;
+      const budgetBeforePayout = game.remainingPayoutBudget;
+      const houseDeficit = isFixedPrize
+        ? Math.max(0, roundCurrency(payout - poolBeforePayout))
+        : 0;
+      game.remainingPrizePool = roundCurrency(Math.max(0, poolBeforePayout - payout));
+      game.remainingPayoutBudget = roundCurrency(Math.max(0, budgetBeforePayout - payout));
       await this.compliance.recordLossEntry(player.walletId, room.hallId, {
         type: "PAYOUT",
         amount: payout,
@@ -1459,6 +1506,39 @@ export class BingoEngine {
           claimType: claim.type,
         },
       });
+      // Fixed-prize hus-deficit audit (REN AUDIT — inngår ikke i §11-aggregater).
+      // Logges fire-and-forget: en feil her påvirker ikke payout som allerede
+      // er committet via wallet.transfer.
+      if (houseDeficit > 0) {
+        try {
+          await this.ledger.recordComplianceLedgerEvent({
+            hallId: room.hallId,
+            gameType,
+            channel,
+            eventType: "HOUSE_DEFICIT",
+            amount: houseDeficit,
+            roomCode: room.code,
+            gameId: game.id,
+            claimId: claim.id,
+            playerId: player.id,
+            walletId: player.walletId,
+            sourceAccountId: houseAccountId,
+            policyVersion: capped.policy.id,
+            metadata: {
+              reason: "FIXED_PRIZE_HOUSE_GUARANTEE",
+              patternName: pattern.name,
+              winningType: pattern.winningType,
+              payout,
+              poolBeforePayout,
+            },
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId: game.id, claimId: claim.id, houseDeficit },
+            "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
+          );
+        }
+      }
       await this.payoutAudit.appendPayoutAuditEvent({
         kind: "CLAIM_PRIZE",
         claimId: claim.id,
@@ -1487,7 +1567,8 @@ export class BingoEngine {
     claim.payoutWasCapped = payout < prizePerWinner;
     claim.rtpBudgetBefore = rtpBudgetBefore;
     claim.rtpBudgetAfter = rtpBudgetAfter;
-    claim.rtpCapped = payout < afterPoolCap;
+    // Faste premier er aldri pool/RTP-cappet — kun §11-cap kan slå inn.
+    claim.rtpCapped = !isFixedPrize && payout < afterPoolCap;
 
     if (this.bingoAdapter.onClaimLogged) {
       await this.bingoAdapter.onClaimLogged({
@@ -1931,8 +2012,11 @@ export class BingoEngine {
       const linePattern = nextLineResult
         ? game.patterns?.find((p) => p.id === nextLineResult.patternId)
         : game.patterns?.find((p) => p.claimType === "LINE");
-      const linePrizePercent = linePattern?.prizePercent ?? 30;
-      const requestedPayout = Math.floor(game.prizePool * linePrizePercent / 100);
+      const lineIsFixedPrize = !!linePattern && isFixedPrizePattern(linePattern);
+      // Faste premier: annonsert kr-beløp (prize1). Variable: percent av pool.
+      const requestedPayout = lineIsFixedPrize
+        ? Math.max(0, linePattern!.prize1 ?? 0)
+        : Math.floor(game.prizePool * (linePattern?.prizePercent ?? 30) / 100);
       // K2-A CRIT-1 note: PrizePolicyManager.PrizeGameType er fortsatt kun
       // "DATABINGO" sentralt — egen task åpner den for MAIN_GAME. Inntil da
       // bruker single-prize-cap-API-et "DATABINGO" som policy-key (samme
@@ -1943,11 +2027,17 @@ export class BingoEngine {
         gameType: "DATABINGO",
         amount: requestedPayout
       });
-      const requestedAfterPolicyAndPool = Math.min(cappedLinePayout.cappedAmount, game.remainingPrizePool);
-      const payout = Math.min(
-        requestedAfterPolicyAndPool,
-        game.remainingPayoutBudget
-      );
+      // FIXED-PRIZE-FIX: faste premier bypass-er pool/RTP-cap. Huset
+      // garanterer annonsert beløp; system-konto kan gå negativt.
+      const requestedAfterPolicyAndPool = lineIsFixedPrize
+        ? cappedLinePayout.cappedAmount
+        : Math.min(cappedLinePayout.cappedAmount, game.remainingPrizePool);
+      const payout = lineIsFixedPrize
+        ? cappedLinePayout.cappedAmount
+        : Math.min(
+            requestedAfterPolicyAndPool,
+            game.remainingPayoutBudget
+          );
       if (payout > 0) {
         // CRIT-6: I/O FIRST — wallet transfer er den eneste rever-
         // sible operasjonen. Hvis denne feiler kaster vi videre uten
@@ -1986,6 +2076,11 @@ export class BingoEngine {
             "submitClaim LINE: wallet refresh feilet (best-effort)",
           );
         }
+        // FIXED-PRIZE-FIX: track house-deficit for audit-event under.
+        const linePoolBeforePayout = game.remainingPrizePool;
+        const lineHouseDeficit = lineIsFixedPrize
+          ? Math.max(0, roundCurrency(payout - linePoolBeforePayout))
+          : 0;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
         game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
         // BIN-45: Store transaction IDs for idempotency tracking
@@ -1998,6 +2093,41 @@ export class BingoEngine {
           linePatternResult.wonAtDraw = game.drawnNumbers.length;
           linePatternResult.payoutAmount = payout;
           linePatternResult.claimId = claim.id;
+        }
+
+        // FIXED-PRIZE-FIX: HOUSE_DEFICIT audit-event når faste premier
+        // overgår tilgjengelig pool. Best-effort; payout er allerede
+        // committet via wallet.transfer.
+        if (lineHouseDeficit > 0) {
+          try {
+            await this.ledger.recordComplianceLedgerEvent({
+              hallId: room.hallId,
+              gameType,
+              channel,
+              eventType: "HOUSE_DEFICIT",
+              amount: lineHouseDeficit,
+              roomCode: room.code,
+              gameId: game.id,
+              claimId: claim.id,
+              playerId: player.id,
+              walletId: player.walletId,
+              sourceAccountId: houseAccountId,
+              policyVersion: cappedLinePayout.policy.id,
+              metadata: {
+                reason: "FIXED_PRIZE_HOUSE_GUARANTEE",
+                phase: "LINE",
+                patternName: linePattern?.name,
+                winningType: linePattern?.winningType,
+                payout,
+                poolBeforePayout: linePoolBeforePayout,
+              },
+            });
+          } catch (err) {
+            logger.warn(
+              { err, gameId: game.id, claimId: claim.id, lineHouseDeficit },
+              "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
+            );
+          }
         }
 
         // CRIT-6: post-transfer audit-trail. Pengene er betalt og state
@@ -2028,7 +2158,8 @@ export class BingoEngine {
       claim.payoutWasCapped = payout < requestedPayout;
       claim.rtpBudgetBefore = rtpBudgetBefore;
       claim.rtpBudgetAfter = rtpBudgetAfter;
-      claim.rtpCapped = payout < requestedAfterPolicyAndPool;
+      // FIXED-PRIZE-FIX: faste premier er aldri pool/RTP-cappet.
+      claim.rtpCapped = !lineIsFixedPrize && payout < requestedAfterPolicyAndPool;
       claim.bonusTriggered = winningPatternIndex === DEFAULT_BONUS_TRIGGER_PATTERN_INDEX;
       if (claim.bonusTriggered) {
         claim.bonusAmount = payout;
@@ -2049,7 +2180,17 @@ export class BingoEngine {
       const endedAtMs = Date.now();
       const endedAt = new Date(endedAtMs);
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
-      const requestedPayout = game.remainingPrizePool;
+      // FIXED-PRIZE-FIX: For BINGO/Fullt Hus med fixed-prize finner vi
+      // pattern-konfigurasjonen og bruker `prize1` direkte. Variable BINGO
+      // (legacy 100% av rest-pool) bruker fortsatt `game.remainingPrizePool`.
+      const nextBingoResult = game.patternResults?.find((r) => r.claimType === "BINGO" && !r.isWon);
+      const bingoPattern = nextBingoResult
+        ? game.patterns?.find((p) => p.id === nextBingoResult.patternId)
+        : game.patterns?.find((p) => p.claimType === "BINGO");
+      const bingoIsFixedPrize = !!bingoPattern && isFixedPrizePattern(bingoPattern);
+      const requestedPayout = bingoIsFixedPrize
+        ? Math.max(0, bingoPattern!.prize1 ?? 0)
+        : game.remainingPrizePool;
       // K2-A CRIT-1 note: same som over — PrizeGameType-svartelist åpnes
       // i egen task. 2500-cap er identisk uansett gameType.
       const cappedBingoPayout = this.prizePolicy.applySinglePrizeCap({
@@ -2057,11 +2198,17 @@ export class BingoEngine {
         gameType: "DATABINGO",
         amount: requestedPayout
       });
-      const requestedAfterPolicyAndPool = Math.min(cappedBingoPayout.cappedAmount, game.remainingPrizePool);
-      const payout = Math.min(
-        requestedAfterPolicyAndPool,
-        game.remainingPayoutBudget
-      );
+      // FIXED-PRIZE-FIX: faste premier bypasser pool/RTP-cap. Hus
+      // garanterer annonsert beløp.
+      const requestedAfterPolicyAndPool = bingoIsFixedPrize
+        ? cappedBingoPayout.cappedAmount
+        : Math.min(cappedBingoPayout.cappedAmount, game.remainingPrizePool);
+      const payout = bingoIsFixedPrize
+        ? cappedBingoPayout.cappedAmount
+        : Math.min(
+            requestedAfterPolicyAndPool,
+            game.remainingPayoutBudget
+          );
       if (payout > 0) {
         // CRIT-6: wallet-transfer FIRST — single-source-of-truth.
         // BIN-239: idempotencyKey prevents double payout if client retries.
@@ -2096,6 +2243,46 @@ export class BingoEngine {
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
 
+        // FIXED-PRIZE-FIX: HOUSE_DEFICIT audit-event når faste premier
+        // overgår tilgjengelig pool. Best-effort. Pool-mutasjonen for
+        // BINGO-grenen skjer etter audit (linje under), så
+        // game.remainingPrizePool er fortsatt pre-payout her.
+        const bingoPoolBeforePayout = game.remainingPrizePool;
+        const bingoHouseDeficit = bingoIsFixedPrize
+          ? Math.max(0, roundCurrency(payout - bingoPoolBeforePayout))
+          : 0;
+        if (bingoHouseDeficit > 0) {
+          try {
+            await this.ledger.recordComplianceLedgerEvent({
+              hallId: room.hallId,
+              gameType,
+              channel,
+              eventType: "HOUSE_DEFICIT",
+              amount: bingoHouseDeficit,
+              roomCode: room.code,
+              gameId: game.id,
+              claimId: claim.id,
+              playerId: player.id,
+              walletId: player.walletId,
+              sourceAccountId: houseAccountId,
+              policyVersion: cappedBingoPayout.policy.id,
+              metadata: {
+                reason: "FIXED_PRIZE_HOUSE_GUARANTEE",
+                phase: "BINGO",
+                patternName: bingoPattern?.name,
+                winningType: bingoPattern?.winningType,
+                payout,
+                poolBeforePayout: bingoPoolBeforePayout,
+              },
+            });
+          } catch (err) {
+            logger.warn(
+              { err, gameId: game.id, claimId: claim.id, bingoHouseDeficit },
+              "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
+            );
+          }
+        }
+
         // CRIT-6: post-transfer audit-trail. Se LINE-grenen over for
         // detaljer. Status registreres på claim slik at klient/UI kan se
         // om audit-trailen er degradert (ops-flagg).
@@ -2127,7 +2314,8 @@ export class BingoEngine {
       claim.payoutWasCapped = payout < requestedPayout;
       claim.rtpBudgetBefore = rtpBudgetBefore;
       claim.rtpBudgetAfter = rtpBudgetAfter;
-      claim.rtpCapped = payout < requestedAfterPolicyAndPool;
+      // FIXED-PRIZE-FIX: faste premier er aldri pool/RTP-cappet.
+      claim.rtpCapped = !bingoIsFixedPrize && payout < requestedAfterPolicyAndPool;
       // Record pattern result for the first unclaimed BINGO pattern
       const bingoPatternResult = game.patternResults?.find((r) => r.claimType === "BINGO" && !r.isWon);
       if (bingoPatternResult) {
