@@ -2,7 +2,10 @@ import { Container, Text } from "pixi.js";
 import type { GameDeps, GameController } from "../registry.js";
 import { registerGame } from "../registry.js";
 import type { GameState } from "../../bridge/GameBridge.js";
-import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
+import type {
+  MiniGameTriggerPayload,
+  PatternWonPayload,
+} from "@spillorama/shared-types/socket-events";
 import { telemetry } from "../../telemetry/Telemetry.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "../game2/screens/EndScreen.js";
@@ -73,6 +76,18 @@ class Game1Controller implements GameController {
   private miniGame: MiniGameRouter | null = null;
   private actions: Game1SocketActions | null = null;
   private reconnectFlow: Game1ReconnectFlow | null = null;
+
+  /**
+   * Mini-game-kø (Tobias 2026-04-26): backend triggerer mini-game POST-commit
+   * umiddelbart etter Fullt Hus-payout. Hvis WinScreenV2 (Fullt Hus-fontene)
+   * fortsatt vises, holder vi tilbake mini-game-overlayet og spiller det av
+   * etter at vinner-scenen er dismissed (Tilbake-klikk eller auto-close).
+   * Kun ett pending-trigger holdes; nyere trigger overskriver eldre (server-
+   * autoritativ — siste trigger vinner).
+   */
+  private pendingMiniGameTrigger: MiniGameTriggerPayload | null = null;
+  /** True mens WinScreenV2 er synlig — hindrer mini-game-overlay i å klippe oppå. */
+  private isWinScreenActive = false;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -194,7 +209,7 @@ class Game1Controller implements GameController {
       // BIN-690 PR-M6: new scheduled-games mini-game protocol.
       // Legacy `minigameActivated` is removed — router now wires to
       // `miniGameTrigger` + `miniGameResult`.
-      bridge.on("miniGameTrigger", (data) => this.miniGame?.onTrigger(data)),
+      bridge.on("miniGameTrigger", (data) => this.handleMiniGameTrigger(data)),
       bridge.on("miniGameResult", (data) => this.miniGame?.onResult(data)),
     );
 
@@ -443,11 +458,21 @@ class Game1Controller implements GameController {
       const shared = winnerCount > 1;
       const payout = result.payoutAmount ?? 0;
       if (isFullHouse) {
+        this.isWinScreenActive = true;
         this.winScreen?.show({
           amount: payout,
           shared,
           sharedCount: winnerCount,
-          onDismiss: () => { /* no-op — EndScreen transition er styrt av onGameEnded */ },
+          onDismiss: () => {
+            // Tobias 2026-04-26: Fullt Hus → Mystery (eller annet konfigurert
+            // mini-game) skal vises ETTER vinner-scenen lukkes (manuell
+            // Tilbake-knapp eller 10.8s auto-close). Backend trigger
+            // (Game1DrawEngineService.triggerMiniGamesForFullHouse) har allerede
+            // fyrt og payload kan ligge i pendingMiniGameTrigger. Flush her.
+            this.isWinScreenActive = false;
+            this.flushPendingMiniGameTrigger();
+            // EndScreen-transition er styrt av onGameEnded (uendret).
+          },
         });
       } else {
         // `rows` = fase-nummer (1-4 for linje-vinn). classifyPhaseFromPatternName
@@ -470,6 +495,29 @@ class Game1Controller implements GameController {
       payoutAmount: result.payoutAmount,
       winnerCount,
     });
+  }
+
+  /**
+   * Bridge-listener for `miniGameTrigger`. Hvis WinScreenV2 (Fullt Hus-scene)
+   * er aktiv, holder vi tilbake triggeren slik at mini-game-overlay ikke
+   * klipper over fontene-animasjonen. Frigjøres i WinScreenV2.onDismiss via
+   * flushPendingMiniGameTrigger.
+   */
+  private handleMiniGameTrigger(payload: MiniGameTriggerPayload): void {
+    if (this.isWinScreenActive) {
+      // Server-autoritativ: hvis flere triggere i køen, siste vinner.
+      this.pendingMiniGameTrigger = payload;
+      return;
+    }
+    this.miniGame?.onTrigger(payload);
+  }
+
+  /** Spill av evt. pending trigger. Kalles fra WinScreenV2.onDismiss. */
+  private flushPendingMiniGameTrigger(): void {
+    const pending = this.pendingMiniGameTrigger;
+    if (!pending) return;
+    this.pendingMiniGameTrigger = null;
+    this.miniGame?.onTrigger(pending);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
