@@ -13,6 +13,7 @@ import { Game2Engine } from "../../game/Game2Engine.js";
 import { Game3Engine } from "../../game/Game3Engine.js";
 import type { SocketContext } from "./context.js";
 import { emitG2DrawEvents, emitG3DrawEvents } from "./drawEmits.js";
+import { metrics as promMetrics } from "../../util/metrics.js";
 import type {
   AckResponse,
   ExtraDrawPayload,
@@ -93,6 +94,12 @@ export function registerDrawEvents(ctx: SocketContext): void {
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { number, snapshot });
     } catch (error) {
+      // HIGH-5: telle draw-lock-rejections så ops kan se om to admin-paneler
+      // (eller en aggressiv retry-løkke) prøver å trekke samtidig.
+      const code = (error as { code?: string } | null)?.code;
+      if (code === "DRAW_IN_PROGRESS") {
+        promMetrics.drawLockRejections.inc();
+      }
       ackFailure(callback, error);
     }
   }));

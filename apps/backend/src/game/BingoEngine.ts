@@ -364,6 +364,22 @@ export class BingoEngine {
   private readonly minRoundIntervalMs: number;
   private readonly minDrawIntervalMs: number;
   private readonly lastDrawAtByRoom = new Map<string, number>();
+  /**
+   * HIGH-5 (Casino Review): per-room draw mutex. Hindrer at to samtidige
+   * `draw:next`-events fra samme rom begge passerer `assertHost` og deretter
+   * muterer `currentGame.drawBag`/`drawnNumbers` parallelt. Per-socket-rate-
+   * limit (`socketRateLimit.ts:23`, 5/2s) er ikke nok — to ulike sockets
+   * (samme host i to faner, eller to admin-tilgangs-paneler) kan kalle
+   * samtidig.
+   *
+   * Verdien er den pågående draw-promisen. Når neste kall kommer mens en
+   * draw er in-flight, kaster vi `DRAW_IN_PROGRESS` istedenfor å vente —
+   * dette hindrer at request-køen vokser ukontrollert hvis et nettverks-
+   * tregt admin-panel sender retries før forrige har returnert.
+   *
+   * Cleared i `finally` etter hver draw og i `destroyRoom`.
+   */
+  private readonly drawLocksByRoom = new Map<string, Promise<unknown>>();
   private readonly minPlayersToStart: number;
   private readonly maxDrawsPerRound: number;
   private readonly persistence?: ResponsibleGamingPersistenceAdapter;
@@ -1610,6 +1626,38 @@ export class BingoEngine {
   }
 
   async drawNextNumber(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
+    // HIGH-5: per-room mutex. To parallelle `draw:next` mot samme rom
+    // skal aldri begge mutere `currentGame.drawBag`. Hvis lock pågår,
+    // reject med rate-limit-aktig DomainError istedenfor å queue (queue
+    // ville økt latency + risiko for back-to-back duplikat-draws hvis
+    // klienten retry'er).
+    const lockKey = input.roomCode.trim().toUpperCase();
+    const inFlight = this.drawLocksByRoom.get(lockKey);
+    if (inFlight !== undefined) {
+      throw new DomainError(
+        "DRAW_IN_PROGRESS",
+        "Et annet trekk for dette rommet pågår allerede. Vent til det er ferdig.",
+      );
+    }
+    const drawPromise = this._drawNextNumberLocked(input);
+    this.drawLocksByRoom.set(lockKey, drawPromise);
+    try {
+      return await drawPromise;
+    } finally {
+      // Kun fjern hvis det fortsatt er VÅR promise — defensiv mot
+      // teoretisk race der destroyRoom har kjørt og en ny lock kunne
+      // vært satt (kan ikke skje med dagens API, men billig å sjekke).
+      if (this.drawLocksByRoom.get(lockKey) === drawPromise) {
+        this.drawLocksByRoom.delete(lockKey);
+      }
+    }
+  }
+
+  /**
+   * HIGH-5: faktisk draw-implementasjon. Kalles kun fra
+   * {@link drawNextNumber} som holder per-room-mutex rundt dette.
+   */
+  private async _drawNextNumberLocked(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
     const room = this.requireRoom(input.roomCode);
     // CRIT-4: scheduled Spill 1 må trekkes via Game1DrawEngineService.
     // Defensiv guard mot dual-engine state-divergens.
@@ -2902,6 +2950,7 @@ export class BingoEngine {
     this.rooms.delete(code);
     this.roomLastRoundStartMs.delete(code);
     this.lastDrawAtByRoom.delete(code);
+    this.drawLocksByRoom.delete(code); // HIGH-5
     this.variantConfigByRoom.delete(code); // BIN-615 / PR-C1
     this.variantGameTypeByRoom.delete(code);
     this.luckyNumbersByPlayer.delete(code); // BIN-615 / PR-C3

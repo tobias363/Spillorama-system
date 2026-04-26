@@ -149,4 +149,23 @@ export const metrics = {
     name: "wallet_reconciliation_accounts_scanned_total",
     help: "Total number of (account, side) tuples scanned during reconciliation.",
   }),
+
+  // HIGH-4 (Casino Review): post-recovery integrity drift between
+  // in-memory RoomState (currentGame.tickets/drawnNumbers) og siste
+  // PostgreSQL-checkpoint. Inkrementeres fra
+  // BingoEngineRecoveryIntegrityCheck. WARN i logger samtidig — alert
+  // ops på `wallet_room_drift_total > 0`.
+  walletRoomDriftTotal: new client.Counter({
+    name: "wallet_room_drift_total",
+    help: "Antall recovery-inkonsistenser mellom in-memory RoomState og siste PG-checkpoint",
+    labelNames: ["room", "field"] as const,
+  }),
+
+  // HIGH-5 (Casino Review): per-room draw-lock-konflikter. Inkrementeres
+  // når DRAW_IN_PROGRESS kastes — to samtidige draw:next mot samme rom.
+  // Bør være ~0 i prod; spike → klient retry-loop eller dual-host.
+  drawLockRejections: new client.Counter({
+    name: "spillorama_draw_lock_rejections_total",
+    help: "Antall draw:next-kall avvist fordi rommet allerede har en draw in-flight",
+  }),
 };

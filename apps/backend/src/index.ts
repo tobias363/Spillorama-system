@@ -16,6 +16,7 @@ import { PostgresBingoSystemAdapter } from "./adapters/PostgresBingoSystemAdapte
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { BankIdKycAdapter } from "./adapters/BankIdKycAdapter.js";
 import { BingoEngine, DomainError } from "./game/BingoEngine.js";
+import { runRecoveryIntegrityCheck } from "./game/BingoEngineRecoveryIntegrityCheck.js";
 import { Game3Engine } from "./game/Game3Engine.js";
 import { PostgresResponsibleGamingStore } from "./game/PostgresResponsibleGamingStore.js";
 import type { GameSnapshot, Player, RoomSnapshot } from "./game/types.js";
@@ -3148,6 +3149,33 @@ const PORT = Number(process.env.PORT ?? 4000);
       }
       if (restored + ended > 0) console.warn(`[BIN-245] Recovery complete: ${restored} game(s) restored, ${ended} game(s) ended`);
     } catch (err) { console.error("[BIN-245] Crash recovery failed:", err); }
+  }
+
+  // HIGH-4 (Casino Review): integritetssjekk POST-recovery. Verifiserer at
+  // in-memory `currentGame.tickets`/`drawnNumbers`/`status` matcher siste
+  // PG-checkpoint. Kjøres ETTER BIN-245 har overskrevet rom slik at
+  // mismatch kun forteller om Redis vs PG-divergens, ikke om recovery
+  // ennå har kjørt. Drift inkrementerer `wallet_room_drift_total` og
+  // logges som WARN.
+  if (usePostgresBingoAdapter && localBingoAdapter instanceof PostgresBingoSystemAdapter) {
+    try {
+      const integrity = await runRecoveryIntegrityCheck({
+        roomStateStore,
+        bingoAdapter: localBingoAdapter,
+      });
+      if (integrity.drift > 0) {
+        console.warn(
+          `[HIGH-4] Recovery integrity: ${integrity.drift}/${integrity.inspected} rom hadde drift mot PG-checkpoint — se logg for detaljer.`,
+        );
+      } else if (integrity.inspected > 0) {
+        console.log(
+          `[HIGH-4] Recovery integrity: ${integrity.ok}/${integrity.inspected} rom OK, ${integrity.skipped} skippet, ${integrity.failures} feil.`,
+        );
+      }
+    } catch (err) {
+      // Aldri kast — integritetssjekk er best-effort defensiv layer.
+      console.error("[HIGH-4] Recovery integrity-check failed:", err);
+    }
   }
 
   // GAME1_SCHEDULE PR 5 (§3.8): Schedule-level crash recovery. Scanner
