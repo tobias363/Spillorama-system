@@ -386,6 +386,24 @@
       }
 
       if (balance === null) return;
+
+      // Saldo-flash fix (Tobias 2026-04-26): If the incoming balance is
+      // identical to what we already have in lobbyState, skip the
+      // optimistic re-render entirely. PR #512 made the header display
+      // availableDeposit/availableWinnings (with reservasjoner trukket
+      // fra), but game-client still emits `total balance` — so the
+      // ratio approximation below produces a wrong split that flashes
+      // for ~0.5 s before the debounced refetch corrects it. The bridge
+      // also caches last-emitted balance now (Tilnærming 2), but this
+      // defensive check protects against any other source firing
+      // identical-balance events as well.
+      var currentBalance = (lobbyState.wallet && lobbyState.wallet.account)
+        ? lobbyState.wallet.account.balance
+        : null;
+      if (typeof currentBalance === 'number' && balance === currentBalance) {
+        return;
+      }
+
       // Optimistic total-update so UI reflects change immediately; deposit/
       // winnings split is corrected by the debounced refetch below.
       //
