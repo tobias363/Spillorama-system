@@ -271,6 +271,7 @@ export class AgentTransactionService {
     walletDirection: "CREDIT" | "DEBIT"
   ): Promise<AgentTransaction> {
     assertPositive(input.amount, "amount");
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     await this.requirePlayerInHall(input.playerUserId, shift.hallId);
     const player = await this.platform.getUserById(input.playerUserId);
@@ -293,7 +294,14 @@ export class AgentTransactionService {
     }
 
     const txId = `agenttx-${randomUUID()}`;
-    const idempotencyKey = IdempotencyKeys.agentTxWallet({ txId });
+    // PR #522 hotfix: idempotency-key må KEYES på clientRequestId fra
+    // klienten — ikke på fresh txId — slik at network-retry treffer
+    // samme ledger-rad og unngår dobbel-debit/credit.
+    const idempotencyKey = IdempotencyKeys.agentCashOp({
+      agentUserId: input.agentUserId,
+      playerUserId: input.playerUserId,
+      clientRequestId: input.clientRequestId,
+    });
     const reason = `agent ${actionType} shift=${shift.id} clientReq=${input.clientRequestId}`;
 
     const walletTx = walletDirection === "CREDIT"
@@ -794,6 +802,20 @@ export class AgentTransactionService {
 function assertPositive(value: number, field: string): void {
   if (!Number.isFinite(value) || value <= 0) {
     throw new DomainError("INVALID_INPUT", `${field} må være et positivt tall.`);
+  }
+}
+
+/**
+ * PR #522 hotfix: krev `clientRequestId` (eller annen idempotency-bærer)
+ * som ikke-tom streng. Brukes av cash-op + machine-ticket-create/topup/
+ * close — alle steder der idempotency-key keyes på klient-request.
+ */
+function assertNonEmpty(value: string | undefined | null, field: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} er påkrevd og må være en ikke-tom streng.`
+    );
   }
 }
 

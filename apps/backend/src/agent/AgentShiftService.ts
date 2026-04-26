@@ -35,6 +35,13 @@ export interface EndShiftInput {
   actor: { userId: string; role: string };
   /** Wireframe Gap #9: opt-in flagg fra Shift Log Out-popup. */
   flags?: LogoutFlags;
+  /**
+   * PR #522 hotfix: admin-force-close audit-reason. Påkrevd når ADMIN
+   * stenger en stuck shift som ikke er deres egen — speglerer
+   * `cancelPhysicalSale.reason`-mønsteret. Lagres i shift.logoutNotes
+   * (bakoverkompatibelt) + audit-event-detaljer i route-laget.
+   */
+  reason?: string | null;
 }
 
 /**
@@ -207,7 +214,23 @@ export class AgentShiftService {
     if (!isOwner && !isAdmin) {
       throw new DomainError("FORBIDDEN", "Du kan ikke avslutte denne shiften.");
     }
-    return this.store.endShift(shift.id, input.flags);
+    // PR #522 hotfix: hvis ADMIN force-closer en annen agent's shift,
+    // krev en audit-reason og lagre i logoutNotes for sporbarhet.
+    let flags = input.flags;
+    if (isAdmin && !isOwner) {
+      const reasonText = (input.reason ?? "").trim();
+      if (reasonText.length === 0) {
+        throw new DomainError(
+          "FORCE_CLOSE_REASON_REQUIRED",
+          "Force-close av en annen agent's shift krever en begrunnelse."
+        );
+      }
+      flags = {
+        ...(input.flags ?? {}),
+        logoutNotes: `[ADMIN_FORCE_CLOSE by ${input.actor.userId}] ${reasonText}`,
+      };
+    }
+    return this.store.endShift(shift.id, flags);
   }
 
   /**

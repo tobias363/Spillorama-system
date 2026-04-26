@@ -1,17 +1,23 @@
 /**
  * BIN-583 B3.1: admin-side agent-CRUD.
  *
- *   GET    /api/admin/agents            — liste (paginert, filter)
- *   POST   /api/admin/agents            — opprett agent
- *   GET    /api/admin/agents/:id        — hent enkelt agent
- *   PUT    /api/admin/agents/:id        — oppdater agent
- *   DELETE /api/admin/agents/:id        — soft-delete agent
+ *   GET    /api/admin/agents                        — liste (paginert, filter)
+ *   POST   /api/admin/agents                        — opprett agent
+ *   GET    /api/admin/agents/:id                    — hent enkelt agent
+ *   PUT    /api/admin/agents/:id                    — oppdater agent
+ *   DELETE /api/admin/agents/:id                    — soft-delete agent
+ *   POST   /api/admin/agents/:agentId/shift/force-close
+ *                                                    — PR #522 hotfix:
+ *                                                      ADMIN force-close
+ *                                                      stuck shift
  *
  * RBAC:
  *   - AGENT_READ: ADMIN, HALL_OPERATOR, SUPPORT
  *   - AGENT_WRITE: ADMIN, HALL_OPERATOR (hall-scope gjelder ved list/edit
  *     for HALL_OPERATOR — håndheves via resolveHallScopeFilter)
  *   - AGENT_DELETE: ADMIN only
+ *   - AGENT_SHIFT_FORCE: ADMIN only — destruktiv, kun for stuck-shift
+ *     opprydding når agent ikke kan/vil logge ut selv.
  *
  * Audit: alle mutasjoner logges med actor_type avledet fra caller role.
  */
@@ -281,6 +287,63 @@ export function createAdminAgentsRouter(deps: AdminAgentsRouterDeps): express.Ro
     }
   });
 
-  logger.info("admin-agents-router initialised (5 endpoints)");
+  // ── POST /api/admin/agents/:agentId/shift/force-close ───────────────────
+  // PR #522 hotfix (Issue #3): ops force-close stuck shift uten DB-access.
+  //
+  // Body: { reason: string }
+  //
+  // Bruker eksisterende AgentShiftService.endShift med admin-actor; service-
+  // laget krever begrunnelse når ADMIN force-closer en annen agent's shift
+  // (lagres i shift.logoutNotes som "[ADMIN_FORCE_CLOSE by <id>] <reason>")
+  // og audit-event logges som `admin.agent.shift.force_close` med actor,
+  // target, og begrunnelse.
+  router.post("/api/admin/agents/:agentId/shift/force-close", async (req, res) => {
+    try {
+      const admin = await requireAdminPermissionUser(req, "AGENT_SHIFT_FORCE");
+      const targetAgentId = mustBeNonEmptyString(req.params.agentId, "agentId");
+      const body = isRecordObject(req.body) ? req.body : {};
+      const reason = mustBeNonEmptyString(body.reason, "reason");
+
+      const active = await agentShiftService.getCurrentShift(targetAgentId);
+      if (!active) {
+        throw new DomainError(
+          "NO_ACTIVE_SHIFT",
+          "Agenten har ingen aktiv shift å lukke."
+        );
+      }
+
+      const ended = await agentShiftService.endShift({
+        shiftId: active.id,
+        actor: { userId: admin.id, role: admin.role },
+        reason,
+      });
+
+      void auditLogService.record({
+        actorId: admin.id,
+        actorType: mapRoleToActorType(admin.role),
+        action: "admin.agent.shift.force_close",
+        resource: "shift",
+        resourceId: ended.id,
+        details: {
+          targetAgentId,
+          hallId: ended.hallId,
+          reason,
+          shiftStartedAt: ended.startedAt,
+          shiftEndedAt: ended.endedAt,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        shift: ended,
+        forceClosed: true,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  logger.info("admin-agents-router initialised (6 endpoints)");
   return router;
 }

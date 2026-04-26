@@ -1012,3 +1012,90 @@ test("searchUsers ekskluderer spillere i andre haller", async () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.id, "p-alfa");
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PR #522 hotfix — idempotency-keys
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("PR #522: cashIn med samme clientRequestId → samme wallet-tx (ingen dobbel-credit)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  await seedPlayerBalance(ctx, "p1", 100);
+  // Første kall.
+  const tx1 = await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 50,
+    paymentMethod: "CASH", clientRequestId: "retry-key-1",
+  });
+  // Network-retry: samme clientRequestId, samme alt — verifiser at
+  // wallet-credit IKKE dobbeltføres. (Service-laget oppretter ny
+  // agent-tx-rad med fresh txId, men idempotencyKey treffer eksisterende
+  // wallet-rad, så netto er kun én kr-mutasjon.)
+  const tx2 = await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 50,
+    paymentMethod: "CASH", clientRequestId: "retry-key-1",
+  });
+  // Wallet skal kun ha krediteret 50 én gang.
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), 150,
+    "retry må ikke dobbeltcredite");
+  // Begge agent-tx peker på samme wallet-tx (idempotency hit).
+  assert.equal(tx1.walletTxId, tx2.walletTxId,
+    "samme wallet-tx skal returneres ved retry");
+});
+
+test("PR #522: cashOut med samme clientRequestId → samme wallet-tx (ingen dobbel-debit)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  await seedPlayerBalance(ctx, "p1", 1000);
+  // Bygg opp daily-balance for cash-out.
+  await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 500,
+    paymentMethod: "CASH", clientRequestId: "seed-cash-in",
+  });
+  const balanceBefore = await ctx.wallet.getBalance("wallet-p1");
+  // Første cash-out.
+  const tx1 = await ctx.service.cashOut({
+    agentUserId: "a1", playerUserId: "p1", amount: 200,
+    paymentMethod: "CASH", clientRequestId: "retry-out-1",
+  });
+  // Retry — samme clientRequestId.
+  const tx2 = await ctx.service.cashOut({
+    agentUserId: "a1", playerUserId: "p1", amount: 200,
+    paymentMethod: "CASH", clientRequestId: "retry-out-1",
+  });
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), balanceBefore - 200,
+    "retry må ikke dobbel-debite");
+  assert.equal(tx1.walletTxId, tx2.walletTxId);
+});
+
+test("PR #522: cashIn uten clientRequestId → INVALID_INPUT", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  await assert.rejects(
+    ctx.service.cashIn({
+      agentUserId: "a1", playerUserId: "p1", amount: 50,
+      paymentMethod: "CASH", clientRequestId: "",
+    }),
+    (err) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+test("PR #522: ulike clientRequestIds → ulike wallet-tx (ingen falsk idempotency-hit)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  await seedPlayerBalance(ctx, "p1", 100);
+  const tx1 = await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 25,
+    paymentMethod: "CASH", clientRequestId: "request-a",
+  });
+  const tx2 = await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 25,
+    paymentMethod: "CASH", clientRequestId: "request-b",
+  });
+  // Begge skal være forskjellige wallet-tx; balance = 100 + 25 + 25 = 150.
+  assert.notEqual(tx1.walletTxId, tx2.walletTxId);
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), 150);
+});
