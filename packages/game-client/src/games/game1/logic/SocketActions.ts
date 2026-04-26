@@ -57,6 +57,12 @@ export class Game1SocketActions {
     // brett; the additive bet:arm merges with what's already armed so the
     // previously-purchased brett stay visible in the ticket grid.
     this.deps.getPlayScreen()?.hideBuyPopup();
+    // Tobias 2026-04-26: Reservasjon ble registrert server-side, men saldo
+    // oppdaterte først ved 30s-poll. Be lobby refetche umiddelbart så
+    // available-balance reflekterer reservasjonen.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("spillorama:balanceRefreshRequested"));
+    }
   }
 
   /** A6: Host/admin manual game start — calls game:start on the socket. */
@@ -100,6 +106,10 @@ export class Game1SocketActions {
         screen.reset();
         screen.update(this.deps.bridge.getState());
       }
+      // Tobias 2026-04-26: refund ble registrert; be lobby refetche saldo umiddelbart.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("spillorama:balanceRefreshRequested"));
+      }
     } else {
       this.deps.toast?.error(result.error?.message || "Kunne ikke avbestille");
     }
@@ -130,6 +140,10 @@ export class Game1SocketActions {
           ? "Alle brett avbestilt"
           : `Brett avbestilt (${result.data?.removedTicketIds.length ?? 1})`,
       );
+      // Tobias 2026-04-26: per-brett refund — be lobby refetche saldo umiddelbart.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("spillorama:balanceRefreshRequested"));
+      }
     } else {
       this.deps.toast?.error(result.error?.message || "Kunne ikke avbestille brett");
     }
