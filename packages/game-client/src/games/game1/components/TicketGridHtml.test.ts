@@ -207,6 +207,165 @@ describe("TicketGridHtml", () => {
     expect(toGoTexts[1]).toContain("24");
   });
 
+  describe("progress-based sortering (Tobias 2026-04-26)", () => {
+    /** Bygger et 5×5-grid med tall offset+1..offset+25, midten 0. */
+    function tightTicket(id: string, offset: number): Ticket {
+      const numbers: number[] = [];
+      for (let i = 0; i < 25; i++) {
+        numbers.push(i === 12 ? 0 : offset + i + 1);
+      }
+      const grid: number[][] = [];
+      for (let r = 0; r < 5; r++) grid.push(numbers.slice(r * 5, r * 5 + 5));
+      return { id, grid, color: "Small Yellow", type: "small" };
+    }
+
+    function pattern1Rad(): GameState["patterns"] {
+      return [
+        {
+          id: "phase-1",
+          name: "1 Rad",
+          claimType: "LINE",
+          prizePercent: 50,
+          order: 1,
+          design: 1,
+        },
+      ];
+    }
+
+    it("sorterer live-bonger etter progress (mest komplett først) under fase 1", () => {
+      // t1: kjøps-rekkefølge index 0, ingen rad nær fullføring.
+      // t2: kjøps-rekkefølge index 1, har 4/5 i rad 0 → fase 1 1-til-fullt.
+      const t1 = tightTicket("a", 0);
+      const t2 = tightTicket("b", 30);
+      const drawn = t2.grid[0].filter((n) => n !== 0).slice(0, 4); // 4 av 5 i rad 0 på t2
+
+      const state = makeState({
+        patterns: pattern1Rad(),
+        patternResults: [],
+        drawnNumbers: drawn,
+      });
+
+      grid.setTickets([t1, t2], {
+        cancelable: false,
+        entryFee: 10,
+        state,
+        liveTicketCount: 2,
+      });
+
+      // Header-rekkefølge i DOM skal nå starte med t2 (b) før t1 (a).
+      const headers = Array.from(grid.root.querySelectorAll(".ticket-header-name")).map(
+        (e) => (e as HTMLElement).textContent,
+      );
+      // Begge brettene har "Small Yellow" som farge, men header-tekst er det
+      // samme. Sjekk DOM-rekkefølge via [data-number]-første-celle: t2 sin
+      // første celle har data-number = 31 (offset 30 + 1).
+      const firstCellOfFirstTicket = grid.root.querySelector("[data-number]") as HTMLElement;
+      expect(firstCellOfFirstTicket.dataset.number).toBe("31"); // t2 først
+      expect(headers).toHaveLength(2);
+    });
+
+    it("pre-round-bonger sorteres ikke (beholder original-rekkefølge bak live-bonger)", () => {
+      const live = tightTicket("live", 0);
+      const pre1 = tightTicket("pre1", 30);
+      const pre2 = tightTicket("pre2", 50);
+
+      const state = makeState({
+        patterns: pattern1Rad(),
+        patternResults: [],
+        drawnNumbers: [],
+      });
+
+      grid.setTickets([live, pre1, pre2], {
+        cancelable: false,
+        entryFee: 10,
+        state,
+        liveTicketCount: 1,
+      });
+
+      // 3 brett rendret. Pre-round-rekkefølge skal være pre1 før pre2 (uendret).
+      const ticketRoots = Array.from(grid.root.querySelectorAll("[data-number]"))
+        .filter((_, i) => i % 25 === 0) // første celle av hver bong
+        .map((c) => (c as HTMLElement).dataset.number);
+      // live=offset 0 → første celle data-number = 1
+      // pre1=offset 30 → første celle data-number = 31
+      // pre2=offset 50 → første celle data-number = 51
+      expect(ticketRoots).toEqual(["1", "31", "51"]);
+    });
+
+    it("re-sorter ved nytt drawn number (signature endres → rebuild)", () => {
+      const t1 = tightTicket("a", 0); // ingen rad nær
+      const t2 = tightTicket("b", 30); // ingen rad nær
+
+      const state1 = makeState({
+        patterns: pattern1Rad(),
+        patternResults: [],
+        drawnNumbers: [], // Empty → original-rekkefølge.
+      });
+
+      grid.setTickets([t1, t2], {
+        cancelable: false,
+        entryFee: 10,
+        state: state1,
+        liveTicketCount: 2,
+      });
+
+      // Tom drawn → t1 først (original index 0).
+      let firstCell = grid.root.querySelector("[data-number]") as HTMLElement;
+      expect(firstCell.dataset.number).toBe("1");
+
+      // Nytt drawn-state hvor t2 har 4/5 i en rad → t2 skal flytte til front.
+      const drawn = t2.grid[0].filter((n) => n !== 0).slice(0, 4);
+      const state2 = makeState({
+        patterns: pattern1Rad(),
+        patternResults: [],
+        drawnNumbers: drawn,
+      });
+
+      grid.setTickets([t1, t2], {
+        cancelable: false,
+        entryFee: 10,
+        state: state2,
+        liveTicketCount: 2,
+      });
+
+      firstCell = grid.root.querySelector("[data-number]") as HTMLElement;
+      expect(firstCell.dataset.number).toBe("31"); // t2 nå først
+    });
+
+    it("ukjent active-pattern → server-rekkefølge bevart", () => {
+      const t1 = tightTicket("a", 0);
+      const t2 = tightTicket("b", 30);
+      const drawn = t2.grid[0].filter((n) => n !== 0).slice(0, 4);
+
+      // Custom-navn som ikke matches av classifyPhaseFromPatternName
+      // → sortering hopper over → server-rekkefølge bevart.
+      const state = makeState({
+        patterns: [
+          {
+            id: "custom",
+            name: "Stjerne",
+            claimType: "BINGO",
+            prizePercent: 50,
+            order: 1,
+            design: 0,
+          },
+        ],
+        patternResults: [],
+        drawnNumbers: drawn,
+      });
+
+      grid.setTickets([t1, t2], {
+        cancelable: false,
+        entryFee: 10,
+        state,
+        liveTicketCount: 2,
+      });
+
+      const firstCell = grid.root.querySelector("[data-number]") as HTMLElement;
+      expect(firstCell.dataset.number).toBe("1"); // t1 først (original-rekkefølge)
+    });
+  });
+
   it("clear() empties the grid", () => {
     grid.setTickets([makeTicket(0, "Small Yellow")], { cancelable: false, entryFee: 10, state: makeState() });
     grid.clear();
