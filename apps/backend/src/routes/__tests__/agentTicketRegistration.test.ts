@@ -26,6 +26,9 @@ import type {
   RecordFinalIdsInput,
   RecordFinalIdsResult,
   GetSummaryResult,
+  EditRangeInput,
+  EditRangeResult,
+  TicketRange,
 } from "../../agent/TicketRegistrationService.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import type { AgentService } from "../../agent/AgentService.js";
@@ -73,6 +76,7 @@ interface Ctx {
     recordFinalCalls: RecordFinalIdsInput[];
     summaryCalls: Array<{ gameId: string }>;
     markReadyCalls: Array<{ gameId: string; hallId: string; userId: string }>;
+    editRangeCalls: EditRangeInput[];
   };
   close: () => Promise<void>;
 }
@@ -86,6 +90,8 @@ interface ServiceBehaviour {
   summaryFail?: DomainError;
   markReadyFail?: DomainError;
   skipHallReadyService?: boolean;
+  editRangeResult?: EditRangeResult;
+  editRangeFail?: DomainError;
 }
 
 async function startServer(
@@ -100,6 +106,7 @@ async function startServer(
   const recordFinalCalls: RecordFinalIdsInput[] = [];
   const summaryCalls: Array<{ gameId: string }> = [];
   const markReadyCalls: Array<{ gameId: string; hallId: string; userId: string }> = [];
+  const editRangeCalls: EditRangeInput[] = [];
 
   const platformService = {
     async getUserFromAccessToken(token: string) {
@@ -175,6 +182,34 @@ async function startServer(
     validateRange(initial: number, final: number): boolean {
       return Number.isInteger(initial) && Number.isInteger(final) && final >= initial;
     },
+    async editRange(input: EditRangeInput): Promise<EditRangeResult> {
+      editRangeCalls.push(input);
+      if (behaviour.editRangeFail) throw behaviour.editRangeFail;
+      const now = new Date().toISOString();
+      const before: TicketRange = {
+        id: input.rangeId,
+        gameId: input.gameId,
+        hallId: input.hallId,
+        ticketType: "small_yellow",
+        initialId: 1,
+        finalId: 10,
+        soldCount: 10,
+        roundNumber: 1,
+        carriedFromGameId: null,
+        recordedByUserId: input.userId,
+        recordedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const after: TicketRange = {
+        ...before,
+        initialId: input.initialId,
+        finalId: input.finalId,
+        soldCount: input.finalId - input.initialId + 1,
+        updatedAt: now,
+      };
+      return behaviour.editRangeResult ?? { before, after };
+    },
   } as unknown as TicketRegistrationService;
 
   const game1HallReadyService = behaviour.skipHallReadyService
@@ -221,7 +256,7 @@ async function startServer(
   const port = (server.address() as AddressInfo).port;
   return {
     baseUrl: `http://127.0.0.1:${port}`,
-    spies: { auditStore, getInitialCalls, recordFinalCalls, summaryCalls, markReadyCalls },
+    spies: { auditStore, getInitialCalls, recordFinalCalls, summaryCalls, markReadyCalls, editRangeCalls },
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }
@@ -561,6 +596,129 @@ test("GET summary: HALL_OPERATOR får kun egne haller", async () => {
     assert.equal(res.json.data.ranges.length, 1);
     assert.equal(res.json.data.ranges[0].hallId, "hall-a");
     assert.equal(res.json.data.totalSoldCount, 10);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── REQ-091: PUT ticket-ranges/:rangeId ──────────────────────────────────
+
+test("PUT ticket-ranges/:rangeId: HALL_OPERATOR happy-path — 200 + audit (action=agent.ticket-range.edit)", async () => {
+  const ctx = await startServer({ "op-a-tok": operatorA });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/agent/ticket-ranges/r-1",
+      "op-a-tok",
+      { gameId: "g-1", initialId: 5, finalId: 25 },
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.ok, true);
+    assert.equal(res.json.data.range.initialId, 5);
+    assert.equal(res.json.data.range.finalId, 25);
+    assert.equal(res.json.data.range.soldCount, 21);
+    assert.equal(res.json.data.before.initialId, 1);
+
+    // Service kalt med riktig args
+    assert.equal(ctx.spies.editRangeCalls.length, 1);
+    assert.equal(ctx.spies.editRangeCalls[0]!.rangeId, "r-1");
+    assert.equal(ctx.spies.editRangeCalls[0]!.hallId, "hall-a");
+    assert.equal(ctx.spies.editRangeCalls[0]!.userId, "op-a");
+
+    // Audit-event er skrevet med korrekt action
+    const audit = await waitForAudit(ctx.spies.auditStore, "agent.ticket-range.edit");
+    assert.ok(audit, "agent.ticket-range.edit audit event mangler");
+    assert.equal(audit!.actorId, "op-a");
+    assert.equal(audit!.resourceId, "r-1");
+    const details = audit!.details as { before: { initialId: number }; after: { initialId: number } };
+    assert.equal(details.before.initialId, 1);
+    assert.equal(details.after.initialId, 5);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PUT ticket-ranges/:rangeId: invalid input (final < initial) → 409 FINAL_LESS_THAN_INITIAL", async () => {
+  const ctx = await startServer(
+    { "op-a-tok": operatorA },
+    {
+      editRangeFail: new DomainError(
+        "FINAL_LESS_THAN_INITIAL",
+        "final_id må være >= initial_id",
+      ),
+    },
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/agent/ticket-ranges/r-1",
+      "op-a-tok",
+      { gameId: "g-1", initialId: 50, finalId: 25 },
+    );
+    assert.equal(res.status, 409);
+    assert.equal(res.json.error.code, "FINAL_LESS_THAN_INITIAL");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PUT ticket-ranges/:rangeId: GAME_NOT_EDITABLE (running) → 409", async () => {
+  const ctx = await startServer(
+    { "op-a-tok": operatorA },
+    {
+      editRangeFail: new DomainError(
+        "GAME_NOT_EDITABLE",
+        "spillet kjører",
+      ),
+    },
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/agent/ticket-ranges/r-1",
+      "op-a-tok",
+      { gameId: "g-1", initialId: 5, finalId: 10 },
+    );
+    assert.equal(res.status, 409);
+    assert.equal(res.json.error.code, "GAME_NOT_EDITABLE");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PUT ticket-ranges/:rangeId: HALL_OPERATOR forsøker å overstyre hallId — 403 FORBIDDEN", async () => {
+  const ctx = await startServer({ "op-a-tok": operatorA });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/agent/ticket-ranges/r-1",
+      "op-a-tok",
+      { gameId: "g-1", initialId: 5, finalId: 25, hallId: "hall-b" },
+    );
+    assert.equal(res.status, 403);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+    assert.equal(ctx.spies.editRangeCalls.length, 0, "editRange skal ikke ha blitt kalt");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PUT ticket-ranges/:rangeId: ugyldig body (manglende gameId) → 400 INVALID_INPUT", async () => {
+  const ctx = await startServer({ "op-a-tok": operatorA });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/agent/ticket-ranges/r-1",
+      "op-a-tok",
+      { initialId: 5, finalId: 25 }, // mangler gameId
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
   } finally {
     await ctx.close();
   }

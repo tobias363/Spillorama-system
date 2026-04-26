@@ -126,6 +126,44 @@ function makeMockPool(store: MockStore): Pool {
       return { rows, rowCount: rows.length };
     }
 
+    // SELECT range by id [FOR UPDATE] — REQ-091 editRange
+    if (
+      sql.includes("FROM")
+      && sql.includes("app_ticket_ranges_per_game")
+      && sql.includes("WHERE id = $1")
+      && sql.includes("FOR UPDATE")
+    ) {
+      const [id] = params as [string];
+      const r = store.ranges.get(id);
+      const rows = r ? [mapRow(r)] : [];
+      return { rows, rowCount: rows.length };
+    }
+
+    // Overlap-sjekk for editRange: WHERE id <> $1 AND hall_id = $2 AND ticket_type = $3
+    if (
+      sql.includes("FROM")
+      && sql.includes("app_ticket_ranges_per_game")
+      && sql.includes("WHERE id <> $1")
+    ) {
+      const [excludeId, hallId, type, initialId, finalId] = params as [
+        string,
+        string,
+        TicketType,
+        number,
+        number,
+      ];
+      const overlaps = [...store.ranges.values()].filter((r) =>
+        r.id !== excludeId
+        && r.hall_id === hallId
+        && r.ticket_type === type
+        && r.final_id != null
+        && !(r.final_id < initialId || r.initial_id > finalId)
+      );
+      const r = overlaps[0];
+      const rows = r ? [{ id: r.id, game_id: r.game_id }] : [];
+      return { rows, rowCount: rows.length };
+    }
+
     // SELECT range for (game_id, hall_id, ticket_type) [FOR UPDATE]
     // Sjekkes FØR (game_id, hall_id) for å unngå prefix-match
     if (
@@ -254,7 +292,31 @@ function makeMockPool(store: MockStore): Pool {
       return { rows: [mapRow(row)], rowCount: 1 };
     }
 
-    // UPDATE range
+    // UPDATE range — editRange (REQ-091): SET initial_id = $1, final_id = $2 ...
+    if (
+      sql.includes("UPDATE")
+      && sql.includes("app_ticket_ranges_per_game")
+      && sql.includes("SET initial_id")
+    ) {
+      const [initialId, finalId, soldCount, userId, id] = params as [
+        number,
+        number,
+        number,
+        string,
+        string,
+      ];
+      const r = store.ranges.get(id);
+      if (!r) return { rows: [], rowCount: 0 };
+      r.initial_id = initialId;
+      r.final_id = finalId;
+      r.sold_count = soldCount;
+      r.recorded_by_user_id = userId;
+      r.recorded_at = new Date();
+      r.updated_at = new Date();
+      return { rows: [mapRow(r)], rowCount: 1 };
+    }
+
+    // UPDATE range — recordFinalIds: SET final_id = $1 ...
     if (
       sql.includes("UPDATE")
       && sql.includes("app_ticket_ranges_per_game")
@@ -678,6 +740,203 @@ test("recordFinalIds INVALID_INPUT når perTypeFinalIds er tom", async () => {
       perTypeFinalIds: {},
     }),
     (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+// ── REQ-091: editRange ──────────────────────────────────────────────────────
+
+test("editRange happy-path: oppdaterer initial_id og final_id, recomputed sold_count", async () => {
+  const store = newStore();
+  seedGame(store, "game-1", "purchase_open");
+  seedRange(store, {
+    id: "r1",
+    game_id: "game-1",
+    hall_id: "hall-a",
+    ticket_type: "small_yellow",
+    initial_id: 1,
+    final_id: 10,
+    sold_count: 10,
+    round_number: 1,
+  });
+  const pool = makeMockPool(store);
+  const svc = TicketRegistrationService.forTesting(pool);
+
+  const res = await svc.editRange({
+    rangeId: "r1",
+    gameId: "game-1",
+    hallId: "hall-a",
+    initialId: 5,
+    finalId: 25,
+    userId: "agent-1",
+  });
+
+  assert.equal(res.before.initialId, 1);
+  assert.equal(res.before.finalId, 10);
+  assert.equal(res.before.soldCount, 10);
+  assert.equal(res.after.initialId, 5);
+  assert.equal(res.after.finalId, 25);
+  assert.equal(res.after.soldCount, 21, "25 - 5 + 1 = 21");
+  assert.equal(res.after.id, "r1", "samme rad oppdatert");
+  // Round-number og carried_from skal IKKE endres
+  assert.equal(res.after.roundNumber, res.before.roundNumber);
+  assert.equal(store.commitCount, 1);
+});
+
+test("editRange RANGE_NOT_FOUND når rangeId ukjent", async () => {
+  const store = newStore();
+  seedGame(store, "game-1", "purchase_open");
+  const pool = makeMockPool(store);
+  const svc = TicketRegistrationService.forTesting(pool);
+
+  await assert.rejects(
+    () => svc.editRange({
+      rangeId: "ghost",
+      gameId: "game-1",
+      hallId: "hall-a",
+      initialId: 1,
+      finalId: 10,
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "RANGE_NOT_FOUND",
+  );
+  assert.equal(store.rollbackCount, 1, "rollback ved valideringsfeil");
+});
+
+test("editRange GAME_NOT_EDITABLE når spillet kjører — kan ikke endre range mens spillet kjører", async () => {
+  const store = newStore();
+  seedGame(store, "game-1", "running");
+  seedRange(store, {
+    id: "r1",
+    game_id: "game-1",
+    hall_id: "hall-a",
+    ticket_type: "small_yellow",
+    initial_id: 1,
+    final_id: 10,
+    sold_count: 10,
+    round_number: 1,
+  });
+  const pool = makeMockPool(store);
+  const svc = TicketRegistrationService.forTesting(pool);
+
+  await assert.rejects(
+    () => svc.editRange({
+      rangeId: "r1",
+      gameId: "game-1",
+      hallId: "hall-a",
+      initialId: 5,
+      finalId: 25,
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "GAME_NOT_EDITABLE",
+  );
+
+  // Verifier at raden IKKE ble endret
+  const original = store.ranges.get("r1")!;
+  assert.equal(original.initial_id, 1);
+  assert.equal(original.final_id, 10);
+  assert.equal(store.rollbackCount, 1);
+});
+
+test("editRange RANGE_OVERLAP: forhindrer overlap med annen range i samme (hall, type)", async () => {
+  const store = newStore();
+  seedGame(store, "game-1", "purchase_open");
+  seedGame(store, "game-2", "purchase_open");
+  seedRange(store, {
+    id: "r1",
+    game_id: "game-1",
+    hall_id: "hall-a",
+    ticket_type: "small_yellow",
+    initial_id: 1,
+    final_id: 10,
+    sold_count: 10,
+    round_number: 1,
+  });
+  // Annen agent har allerede registrert range [20, 50] i en annen runde
+  seedRange(store, {
+    id: "r-other",
+    game_id: "game-2",
+    hall_id: "hall-a",
+    ticket_type: "small_yellow",
+    initial_id: 20,
+    final_id: 50,
+    sold_count: 31,
+    round_number: 2,
+  });
+  const pool = makeMockPool(store);
+  const svc = TicketRegistrationService.forTesting(pool);
+
+  // Forsøk å utvide r1 til [1, 30] som overlapper med r-other [20, 50]
+  await assert.rejects(
+    () => svc.editRange({
+      rangeId: "r1",
+      gameId: "game-1",
+      hallId: "hall-a",
+      initialId: 1,
+      finalId: 30,
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "RANGE_OVERLAP",
+  );
+});
+
+test("editRange RANGE_HALL_MISMATCH: forhindrer cross-hall edit selv om rangeId-en er gyldig", async () => {
+  const store = newStore();
+  seedGame(store, "game-1", "purchase_open");
+  seedRange(store, {
+    id: "r1",
+    game_id: "game-1",
+    hall_id: "hall-a", // raden tilhører hall-a
+    ticket_type: "small_yellow",
+    initial_id: 1,
+    final_id: 10,
+    sold_count: 10,
+    round_number: 1,
+  });
+  const pool = makeMockPool(store);
+  const svc = TicketRegistrationService.forTesting(pool);
+
+  // En agent fra hall-b prøver å redigere raden som tilhører hall-a
+  await assert.rejects(
+    () => svc.editRange({
+      rangeId: "r1",
+      gameId: "game-1",
+      hallId: "hall-b", // feil hall
+      initialId: 5,
+      finalId: 20,
+      userId: "agent-from-hall-b",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "RANGE_HALL_MISMATCH",
+  );
+});
+
+test("editRange FINAL_LESS_THAN_INITIAL: avviser final < initial (uten å starte transaksjon)", async () => {
+  const store = newStore();
+  seedGame(store, "game-1", "purchase_open");
+  seedRange(store, {
+    id: "r1",
+    game_id: "game-1",
+    hall_id: "hall-a",
+    ticket_type: "small_yellow",
+    initial_id: 1,
+    final_id: 10,
+    sold_count: 10,
+    round_number: 1,
+  });
+  const pool = makeMockPool(store);
+  const svc = TicketRegistrationService.forTesting(pool);
+
+  await assert.rejects(
+    () => svc.editRange({
+      rangeId: "r1",
+      gameId: "game-1",
+      hallId: "hall-a",
+      initialId: 50,
+      finalId: 25, // 25 < 50
+      userId: "agent-1",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "FINAL_LESS_THAN_INITIAL",
   );
 });
 

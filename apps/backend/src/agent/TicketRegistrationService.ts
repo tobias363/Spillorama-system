@@ -135,6 +135,51 @@ export interface GetSummaryResult {
   totalSoldCount: number;
 }
 
+/**
+ * REQ-091 — Edit en eksisterende ticket-range mellom runder.
+ *
+ * Spec: docs/architecture/WIREFRAME_CATALOG.md § "17.13 Register More Tickets — Edit Popup"
+ *
+ * Brukstilfelle:
+ *   Agenten har allerede registrert solgte bonger, men oppdager før spillet
+ *   starter at en av rangene har feil initial- eller final-ID (f.eks. en
+ *   utdelt ekstra-bong, eller scanning-feil). Mellom runder må agenten kunne
+ *   korrigere både `initial_id` og `final_id` på en eksisterende rad.
+ *
+ * Forskjellig fra `recordFinalIds`:
+ *   - recordFinalIds bevarer ALLTID `initial_id` (carry-forward er hellig).
+ *   - editRange tillater å endre BÅDE initial_id og final_id, men kun for
+ *     en spesifikk rangeId og kun mens spillet er i editable status.
+ *
+ * Validering:
+ *   - rangeId må peke på rad som tilhører gameId + hallId (defense in depth
+ *     mot route-laget som allerede sjekker hall-scope på actor-nivå).
+ *   - Spillet må ikke være i status "running"/"completed"/"cancelled".
+ *   - finalId >= initialId, begge >= 0.
+ *   - Den nye [initialId, finalId] kan ikke overlappe en annen ranges
+ *     [initialId, finalId] for samme (hall, type) — bortsett fra raden vi
+ *     redigerer selv.
+ *   - sold_count beregnes på nytt fra (finalId - initialId + 1).
+ *
+ * Returnerer både pre- og post-state slik at audit-log kan loggføre begge.
+ */
+export interface EditRangeInput {
+  rangeId: string;
+  gameId: string;
+  hallId: string;
+  initialId: number;
+  finalId: number;
+  /** Bruker som utfører redigeringen (audit-trail). */
+  userId: string;
+}
+
+export interface EditRangeResult {
+  /** Raden slik den var før redigering. */
+  before: TicketRange;
+  /** Raden slik den er etter redigering. */
+  after: TicketRange;
+}
+
 export interface TicketRegistrationServiceOptions {
   pool: Pool;
   schema?: string;
@@ -547,6 +592,150 @@ export class TicketRegistrationService {
     const ranges = rows.map(mapRow);
     const totalSoldCount = ranges.reduce((sum, r) => sum + r.soldCount, 0);
     return { gameId, ranges, totalSoldCount };
+  }
+
+  /**
+   * REQ-091 — Endrer initial_id og/eller final_id på en eksisterende rad.
+   *
+   * Atomisk: hele operasjonen skjer i én transaksjon (BEGIN/COMMIT/ROLLBACK).
+   * Ved valideringsfeil rulles transaksjonen tilbake og raden er uendret.
+   */
+  async editRange(input: EditRangeInput): Promise<EditRangeResult> {
+    const rangeId = assertNonEmpty(input.rangeId, "rangeId");
+    const gameId = assertNonEmpty(input.gameId, "gameId");
+    const hallId = assertNonEmpty(input.hallId, "hallId");
+    const userId = assertNonEmpty(input.userId, "userId");
+    const initialId = assertInteger(input.initialId, "initialId", 0);
+    const finalId = assertInteger(input.finalId, "finalId", 0);
+
+    if (finalId < initialId) {
+      throw new DomainError(
+        "FINAL_LESS_THAN_INITIAL",
+        `final_id (${finalId}) må være >= initial_id (${initialId}).`,
+      );
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Lås raden vi redigerer.
+      const { rows: existingRows } = await client.query<RangeRow>(
+        `SELECT id, game_id, hall_id, ticket_type, initial_id, final_id,
+                sold_count, round_number, carried_from_game_id,
+                recorded_by_user_id, recorded_at, created_at, updated_at
+           FROM ${this.rangesTable()}
+          WHERE id = $1
+          FOR UPDATE`,
+        [rangeId],
+      );
+      if (existingRows.length === 0) {
+        throw new DomainError(
+          "RANGE_NOT_FOUND",
+          `Ticket-range '${rangeId}' finnes ikke.`,
+        );
+      }
+      const before = mapRow(existingRows[0]!);
+
+      // Defense-in-depth mot route-laget: rangeId må matche gameId + hallId
+      // som klienten oppgir. Hindrer cross-hall edit selv om en angriper
+      // skulle finne en gyldig range-ID i et annet hall.
+      if (before.gameId !== gameId) {
+        throw new DomainError(
+          "RANGE_GAME_MISMATCH",
+          `Ticket-range '${rangeId}' tilhører spill '${before.gameId}', ikke '${gameId}'.`,
+        );
+      }
+      if (before.hallId !== hallId) {
+        throw new DomainError(
+          "RANGE_HALL_MISMATCH",
+          `Ticket-range '${rangeId}' tilhører hall '${before.hallId}', ikke '${hallId}'.`,
+        );
+      }
+
+      // Sjekk at spillet er i en redigerbar status (samme regel som
+      // recordFinalIds). Etter at spillet starter, er ranges låst.
+      const { rows: gameRows } = await client.query<{ id: string; status: string }>(
+        `SELECT id, status FROM ${this.scheduledGamesTable()} WHERE id = $1 FOR UPDATE`,
+        [gameId],
+      );
+      if (gameRows.length === 0) {
+        throw new DomainError("GAME_NOT_FOUND", `Spillet '${gameId}' finnes ikke.`);
+      }
+      const editableStatuses = new Set([
+        "scheduled",
+        "purchase_open",
+        "ready_to_start",
+      ]);
+      if (!editableStatuses.has(gameRows[0]!.status)) {
+        throw new DomainError(
+          "GAME_NOT_EDITABLE",
+          `Spillet '${gameId}' har status '${gameRows[0]!.status}' — kan ikke redigere ticket-range.`,
+        );
+      }
+
+      // Overlapp-sjekk mot andre ranges i samme (hall, ticket_type) — vi
+      // ekskluderer raden vi redigerer selv (id != $1).
+      const { rows: overlapRows } = await client.query<{ id: string; game_id: string }>(
+        `SELECT id, game_id
+           FROM ${this.rangesTable()}
+          WHERE id <> $1
+            AND hall_id = $2
+            AND ticket_type = $3
+            AND final_id IS NOT NULL
+            AND NOT (final_id < $4 OR initial_id > $5)
+          LIMIT 1`,
+        [rangeId, hallId, before.ticketType, initialId, finalId],
+      );
+      if (overlapRows.length > 0) {
+        throw new DomainError(
+          "RANGE_OVERLAP",
+          `${TICKET_TYPE_LABELS[before.ticketType]}: range [${initialId}, ${finalId}] overlapper med en annen range for spill '${overlapRows[0]!.game_id}'.`,
+        );
+      }
+
+      const soldCount = finalId - initialId + 1;
+
+      const { rows: updatedRows } = await client.query<RangeRow>(
+        `UPDATE ${this.rangesTable()}
+            SET initial_id          = $1,
+                final_id            = $2,
+                sold_count          = $3,
+                recorded_by_user_id = $4,
+                recorded_at         = now(),
+                updated_at          = now()
+          WHERE id = $5
+          RETURNING id, game_id, hall_id, ticket_type, initial_id, final_id,
+                    sold_count, round_number, carried_from_game_id,
+                    recorded_by_user_id, recorded_at, created_at, updated_at`,
+        [initialId, finalId, soldCount, userId, rangeId],
+      );
+      const after = mapRow(updatedRows[0]!);
+
+      await client.query("COMMIT");
+
+      logger.info(
+        {
+          rangeId,
+          gameId,
+          hallId,
+          userId,
+          ticketType: before.ticketType,
+          before: { initialId: before.initialId, finalId: before.finalId, soldCount: before.soldCount },
+          after: { initialId: after.initialId, finalId: after.finalId, soldCount: after.soldCount },
+        },
+        "[REQ-091] ticket range edited",
+      );
+
+      return { before, after };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {
+        // ignorer rollback-feil
+      });
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /** Valideringshjelper: final >= initial (ikke kastende, returner bool). */

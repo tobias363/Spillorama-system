@@ -95,20 +95,25 @@ function actorTypeFromRole(role: UserRole): "ADMIN" | "HALL_OPERATOR" | "AGENT" 
 /**
  * HTTP-status mapper:
  *   - UNAUTHORIZED/FORBIDDEN          → 403
- *   - GAME_NOT_FOUND                  → 404
+ *   - GAME_NOT_FOUND
+ *   - RANGE_NOT_FOUND                 → 404
  *   - GAME_NOT_EDITABLE
  *   - FINAL_LESS_THAN_INITIAL
  *   - RANGE_OVERLAP
+ *   - RANGE_GAME_MISMATCH
+ *   - RANGE_HALL_MISMATCH
  *   - INVALID_TICKET_TYPE             → 409
  *   - alt annet (inkl. INVALID_INPUT) → 400
  */
 function statusForDomainCode(code: string): number {
   if (code === "UNAUTHORIZED" || code === "FORBIDDEN" || code === "SHIFT_NOT_ACTIVE") return 403;
-  if (code === "GAME_NOT_FOUND") return 404;
+  if (code === "GAME_NOT_FOUND" || code === "RANGE_NOT_FOUND") return 404;
   if (
     code === "GAME_NOT_EDITABLE"
     || code === "FINAL_LESS_THAN_INITIAL"
     || code === "RANGE_OVERLAP"
+    || code === "RANGE_GAME_MISMATCH"
+    || code === "RANGE_HALL_MISMATCH"
     || code === "INVALID_TICKET_TYPE"
   ) {
     return 409;
@@ -331,6 +336,89 @@ export function createAgentTicketRegistrationRouter(
         }
 
         apiSuccess(res, { ...result, hallReadyStatus });
+      } catch (error) {
+        replyFailure(res, error);
+      }
+    },
+  );
+
+  // PUT /api/agent/ticket-ranges/:rangeId
+  //
+  // REQ-091 — Edit en eksisterende ticket-range mellom runder. Body må
+  // inneholde { gameId, initialId, finalId } (hallId resolves fra actor-scope).
+  // ADMIN kan overstyre hallId via body.hallId.
+  router.put(
+    "/api/agent/ticket-ranges/:rangeId",
+    async (req, res) => {
+      try {
+        const actor = await resolveActor(req);
+        const rangeId = mustBeNonEmptyString(req.params.rangeId, "rangeId");
+        if (!isRecordObject(req.body)) {
+          throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+        }
+        const gameId = mustBeNonEmptyString(req.body.gameId, "gameId");
+        const initialIdRaw = req.body.initialId;
+        const finalIdRaw = req.body.finalId;
+        if (typeof initialIdRaw !== "number" && typeof initialIdRaw !== "string") {
+          throw new DomainError("INVALID_INPUT", "initialId må være et tall.");
+        }
+        if (typeof finalIdRaw !== "number" && typeof finalIdRaw !== "string") {
+          throw new DomainError("INVALID_INPUT", "finalId må være et tall.");
+        }
+        const initialId = Number(initialIdRaw);
+        const finalId = Number(finalIdRaw);
+        if (!Number.isFinite(initialId) || !Number.isInteger(initialId) || initialId < 0) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "initialId må være et heltall >= 0.",
+          );
+        }
+        if (!Number.isFinite(finalId) || !Number.isInteger(finalId) || finalId < 0) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "finalId må være et heltall >= 0.",
+          );
+        }
+        const bodyHallId = typeof req.body.hallId === "string" && req.body.hallId.trim()
+          ? req.body.hallId.trim()
+          : null;
+        const hallId = resolveEffectiveHallId(actor, bodyHallId);
+
+        const { before, after } = await ticketRegistrationService.editRange({
+          rangeId,
+          gameId,
+          hallId,
+          initialId,
+          finalId,
+          userId: actor.user.id,
+        });
+
+        fireAudit({
+          actorId: actor.user.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "agent.ticket-range.edit",
+          resource: "ticket_range_per_game",
+          resourceId: rangeId,
+          details: {
+            gameId,
+            hallId,
+            ticketType: after.ticketType,
+            before: {
+              initialId: before.initialId,
+              finalId: before.finalId,
+              soldCount: before.soldCount,
+            },
+            after: {
+              initialId: after.initialId,
+              finalId: after.finalId,
+              soldCount: after.soldCount,
+            },
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgentHeader(req),
+        });
+
+        apiSuccess(res, { range: after, before });
       } catch (error) {
         replyFailure(res, error);
       }
