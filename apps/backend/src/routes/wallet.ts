@@ -78,6 +78,24 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
 
   router.get("/api/wallet/me", async (req, res) => {
     try {
+      // W1-hotfix (Tobias 2026-04-26): defense-in-depth mot stale browser-
+      // cache. Kombinert med commit 4832535b (cache-buster ?_=Date.now() i
+      // lobby.js) sikrer dette at GET /api/wallet/me ALDRI kan returnere
+      // stale data. `no-store` forteller browser å aldri lagre responsen;
+      // `no-cache, must-revalidate` blokkerer mellom-cacher (proxies, CDN)
+      // fra å re-bruke gammel respons. `private` indikerer respons er
+      // bruker-spesifikk (saldo) — ikke cacheable som shared content.
+      //
+      // Backend-fix er primær mot reverse-proxy-cache; client-cache-
+      // busteren er backup. Begge bør gjelde fordi wallet-state er
+      // pengespillforskriften §11-kritisk og må aldri vises stale.
+      res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, private"
+      );
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+
       const user = await getAuthenticatedUser(req);
       const account = await walletAdapter.getAccount(user.walletId);
       const augmented = await augmentAccountWithReservations(walletAdapter, account);
@@ -281,6 +299,16 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
 
   router.get("/api/wallets/:walletId", async (req, res) => {
     try {
+      // W1-hotfix: samme cache-policy som /api/wallet/me — wallet-state
+      // er pengespillforskriften §11-kritisk og må aldri serveres stale
+      // (browser-cache eller proxy-cache).
+      res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, private"
+      );
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const account = await walletAdapter.getAccount(walletId);
       const augmented = await augmentAccountWithReservations(walletAdapter, account);
