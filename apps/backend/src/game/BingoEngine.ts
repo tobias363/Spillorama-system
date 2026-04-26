@@ -2936,12 +2936,65 @@ export class BingoEngine {
     for (const room of this.rooms.values()) {
       for (const player of room.players.values()) {
         if (player.socketId === socketId) {
+          // Bug 2 fix-strategi: vi gjør IKKE noe aggressivt her — kun
+          // markerer socketId som ubundet. Selve cleanup (fjerne stale
+          // walletId-binding fra IDLE-rom) skjer ved re-connect via
+          // `cleanupStaleWalletInIdleRooms` i `room:create`/`room:join`.
+          //
+          // Hvorfor: hvis vi fjerner spilleren her ved disconnect, mister
+          // vi armed-state, lucky-numbers og ticket-buy-in for spillere
+          // som reconnecter til samme rom mens andre spillere fortsatt
+          // er der (canonical-room-pathen i roomEvents.ts:189-215). Cleanup
+          // ved re-connect (i stedet for ved disconnect) gir robust
+          // re-join uten å miste noe state.
+          //
+          // Regulatorisk: ingen wallet-mutasjon her. Vi setter kun
+          // socketId=undefined så reconnect kan kalle attachPlayerSocket.
           player.socketId = undefined;
           return { roomCode: room.code, playerId: player.id };
         }
       }
     }
     return null;
+  }
+
+  /**
+   * Bug 2 fix (re-join robustness): rydd opp stale walletId-binding i rom
+   * som er IDLE/NONE. Brukes av `room:create`/`room:join`-handlerne før
+   * de prøver å opprette/joine et rom — slik at en spiller som er
+   * "stuck" i et gammelt ad-hoc-rom (uten aktiv runde og uten socket)
+   * ikke blokkerer ny binding via `assertWalletNotInRunningGame` eller
+   * `assertWalletNotAlreadyInRoom`.
+   *
+   * Sikkerhetsregel: vi fjerner KUN spillere uten aktiv socket fra rom
+   * hvor det IKKE pågår en runde. RUNNING/WAITING-rom rør vi aldri her
+   * — der må reconnecten gå via `attachPlayerSocket` så pågående
+   * buy-in/wallet-state er trygg.
+   *
+   * Returnerer antall rom hvor opprydding ble utført (mest for
+   * observability + tester).
+   */
+  cleanupStaleWalletInIdleRooms(walletId: string, exceptRoomCode?: string): number {
+    const normalizedWalletId = walletId.trim();
+    if (!normalizedWalletId) return 0;
+    const exceptCode = exceptRoomCode?.trim().toUpperCase();
+    let cleaned = 0;
+    for (const room of this.rooms.values()) {
+      if (exceptCode && room.code === exceptCode) continue;
+      const isIdle =
+        !room.currentGame || room.currentGame.status === "ENDED";
+      if (!isIdle) continue;
+      for (const player of [...room.players.values()]) {
+        if (player.walletId === normalizedWalletId && !player.socketId) {
+          room.players.delete(player.id);
+          cleaned += 1;
+        }
+      }
+      if (cleaned > 0) {
+        this.syncRoomToStore(room);
+      }
+    }
+    return cleaned;
   }
 
   private archiveIfEnded(room: RoomState): void {

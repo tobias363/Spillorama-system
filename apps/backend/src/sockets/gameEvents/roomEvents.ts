@@ -196,6 +196,11 @@ export function registerRoomEvents(ctx: SocketContext): void {
           if (existingPlayer) {
             engine.attachPlayerSocket(canonicalRoom.code, existingPlayer.id, socket.id);
           } else {
+            // Bug 2 fix: rydd opp stale walletId-binding i andre IDLE-rom
+            // før vi joiner canonical. Hindrer at gamle ad-hoc-rom (uten
+            // socket og uten aktiv runde) blokkerer ny join via
+            // `assertWalletNotAlreadyInRoom`/`assertWalletNotInRunningGame`.
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId, canonicalRoom.code);
             const joined = await engine.joinRoom({
               roomCode: canonicalRoom.code,
               hallId: identity.hallId,
@@ -214,6 +219,11 @@ export function registerRoomEvents(ctx: SocketContext): void {
         }
       }
 
+      // Bug 2 fix: før vi oppretter et nytt rom, rydd opp stale
+      // walletId-binding i andre IDLE-rom (ingen aktiv runde, ingen
+      // socket). Forhindrer "Spiller deltar allerede"-feil på reconnect
+      // når gammelt rom ikke ble ryddet ved disconnect.
+      engine.cleanupStaleWalletInIdleRooms(identity.walletId);
       const requestedGameSlug = typeof payload?.gameSlug === "string" ? payload.gameSlug : undefined;
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,
@@ -264,6 +274,9 @@ export function registerRoomEvents(ctx: SocketContext): void {
           } else {
             // Auto-create room for this hall if none exists
             logger.debug({ hallId: identity.hallId }, "room:join auto-creating room for hall");
+            // Bug 2 fix: rydd stale walletId-binding i andre IDLE-rom før
+            // ny rom-opprettelse, så reconnect ikke blokkeres.
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId);
             const newRoom = await engine.createRoom({
               hallId: identity.hallId,
               playerName: identity.playerName,
@@ -300,6 +313,11 @@ export function registerRoomEvents(ctx: SocketContext): void {
         return;
       }
 
+      // Bug 2 fix: rydd stale walletId-binding i andre IDLE-rom før vi
+      // joiner det aktuelle rommet. Beskytter mot
+      // PLAYER_ALREADY_IN_RUNNING_GAME / PLAYER_ALREADY_IN_ROOM-feil
+      // når klienten reconnecter etter disconnect.
+      engine.cleanupStaleWalletInIdleRooms(identity.walletId, roomCode);
       const { playerId } = await engine.joinRoom({
         roomCode,
         hallId: identity.hallId,

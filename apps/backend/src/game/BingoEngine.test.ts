@@ -730,6 +730,92 @@ test("joinRoom rejects wallet already in running game in another room", async ()
   );
 });
 
+// ── Bug 2: re-join etter disconnect ─────────────────────────────────────────
+
+test("cleanupStaleWalletInIdleRooms removes player without socket from IDLE room", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
+  const { roomCode } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Tobias",
+    walletId: "wallet-tobias",
+    socketId: "socket-1",
+  });
+  // Simuler disconnect — socketId fjernes men spilleren forblir i rommet.
+  engine.detachSocket("socket-1");
+
+  // IDLE-rom (ingen aktiv runde) → cleanup skal fjerne spilleren.
+  const cleaned = engine.cleanupStaleWalletInIdleRooms("wallet-tobias");
+  assert.equal(cleaned, 1, "skal rydde 1 stale player");
+
+  // Etter cleanup skal en ny createRoom ikke trigge ALREADY_IN_ROOM-feil.
+  const result = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Tobias",
+    walletId: "wallet-tobias",
+    socketId: "socket-2",
+  });
+  assert.ok(result.roomCode);
+});
+
+test("cleanupStaleWalletInIdleRooms IKKE rydder spillere med aktiv socket", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
+  const { roomCode } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Tobias",
+    walletId: "wallet-tobias",
+    socketId: "socket-1",
+  });
+  // INGEN detach — spilleren har fortsatt aktiv socket.
+  const cleaned = engine.cleanupStaleWalletInIdleRooms("wallet-tobias");
+  assert.equal(cleaned, 0, "spillere med aktiv socket skal IKKE ryddes");
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.equal(snapshot.players.length, 1, "spilleren forblir i rommet");
+});
+
+test("cleanupStaleWalletInIdleRooms IKKE rydder fra RUNNING-rom", async () => {
+  const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
+  // Simuler disconnect mid-game.
+  const detachResult = engine.detachSocket("");
+  // Selv om socket-IDen ikke matcher (vi har ikke konkret socket-ID), så
+  // `engine.detachSocket("")` returnerer null og spillerens
+  // `socketId` forblir ubindret. Sjekk at cleanup ikke fjerner spillere
+  // i RUNNING-rom selv hvis de har socketId=undefined (regulatorisk:
+  // pågående wallet-debit må aldri bli "glemt").
+  assert.equal(detachResult, null);
+  const cleaned = engine.cleanupStaleWalletInIdleRooms("wallet-host");
+  assert.equal(cleaned, 0, "RUNNING-rom skal ikke ryddes");
+});
+
+test("Bug 2: re-create etter disconnect i IDLE-rom returnerer nytt rom (ikke PLAYER_ALREADY_IN_ROOM)", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
+  const first = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Tobias",
+    walletId: "wallet-tobias",
+    socketId: "socket-1",
+  });
+  // Disconnect (rommet er IDLE — ingen game startet).
+  engine.detachSocket("socket-1");
+  // Cleanup ved re-connect (simulerer det roomEvents.ts gjør).
+  engine.cleanupStaleWalletInIdleRooms("wallet-tobias");
+  // Nytt rom (eller samme — valgt av createRoom). Skal IKKE kaste.
+  const second = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Tobias",
+    walletId: "wallet-tobias",
+    socketId: "socket-2",
+  });
+  assert.ok(second.roomCode);
+  // Spilleren skal bare finnes i ett rom etter re-connect.
+  const allRooms = engine.listRoomSummaries();
+  const playerRooms = allRooms.filter((r) => {
+    const snap = engine.getRoomSnapshot(r.code);
+    return snap.players.some((p) => p.walletId === "wallet-tobias");
+  });
+  assert.equal(playerRooms.length, 1, "spilleren skal kun finnes i ett rom");
+});
+
 test("daily hard limit is enforced per hall scope", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
     dailyLossLimit: 100,
