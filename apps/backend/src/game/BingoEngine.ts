@@ -1388,7 +1388,18 @@ export class BingoEngine {
           targetSide: "winnings",
         },
       );
-      player.balance += payout;
+      // Hot-fix Tobias 2026-04-26: bytt optimistisk `player.balance += payout`
+      // mot autoritativ refresh fra wallet-adapter. Optimistisk += taper
+      // deposit/winnings-split-info → stale balance i room:update på 2.+ vinn.
+      // Fail-soft: vinneren er kreditert, kun lokal cache er stale ved feil.
+      try {
+        await this.refreshPlayerBalancesForWallet(player.walletId);
+      } catch (err) {
+        logger.warn(
+          { err, walletId: player.walletId, gameId: game.id, claimId: claim.id },
+          "payoutPhaseWinner: wallet refresh feilet (best-effort)",
+        );
+      }
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
       await this.compliance.recordLossEntry(player.walletId, room.hallId, {
@@ -1925,7 +1936,19 @@ export class BingoEngine {
         // committet. Hvis transferen kastet over, hoppet vi over hele
         // denne blokken og state forblir uendret.
         game.lineWinnerId = player.id;
-        player.balance += payout;
+        // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh i stedet
+        // for optimistisk `player.balance += payout`. Optimistisk += taper
+        // deposit/winnings-split-info → stale balance på 2.+ vinn (en
+        // spiller som først har vunnet LINE og deretter BINGO/mini-game).
+        // Fail-soft: vinneren er kreditert, kun lokal cache er stale.
+        try {
+          await this.refreshPlayerBalancesForWallet(player.walletId);
+        } catch (err) {
+          logger.warn(
+            { err, walletId: player.walletId, gameId: game.id, claimId: claim.id, phase: "LINE" },
+            "submitClaim LINE: wallet refresh feilet (best-effort)",
+          );
+        }
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
         game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
         // BIN-45: Store transaction IDs for idempotency tracking
@@ -2019,7 +2042,17 @@ export class BingoEngine {
 
         // CRIT-6: state-mutasjoner kommer ETTER vellykket transfer.
         game.bingoWinnerId = player.id;
-        player.balance += payout;
+        // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh — se
+        // kommentar i LINE-grenen over for begrunnelse (stale balance
+        // på 2.+ vinn pga deposit/winnings-split). Fail-soft.
+        try {
+          await this.refreshPlayerBalancesForWallet(player.walletId);
+        } catch (err) {
+          logger.warn(
+            { err, walletId: player.walletId, gameId: game.id, claimId: claim.id, phase: "BINGO" },
+            "submitClaim BINGO: wallet refresh feilet (best-effort)",
+          );
+        }
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
 
@@ -2338,6 +2371,12 @@ export class BingoEngine {
       ledger: this.ledger,
       requireRoom: (code) => this.requireRoom(code),
       requirePlayer: (room, playerId) => this.requirePlayer(room, playerId),
+      // Hot-fix Tobias 2026-04-26: ad-hoc engine wallet-refresh-paritet.
+      // BingoEngineMiniGames.spinJackpot/playMiniGame kaller denne etter
+      // wallet-transfer i stedet for `player.balance += payout`. Bound
+      // her så modulen ikke trenger en privat ref til engine-instansen.
+      refreshPlayerBalancesForWallet: (walletId) =>
+        this.refreshPlayerBalancesForWallet(walletId),
     };
   }
 

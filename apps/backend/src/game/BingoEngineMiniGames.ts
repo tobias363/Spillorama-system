@@ -53,6 +53,12 @@ export const MINIGAME_ROTATION: readonly MiniGameType[] = [
 /**
  * Narrow port eksponerer kun de delene av BingoEngine som mini-game-
  * modulen trenger. Holder private state (rooms-map, playerMap) innkapslet.
+ *
+ * `refreshPlayerBalancesForWallet` brukes etter wallet-transfer på
+ * payout-paths (jackpot + mini-game) for å sikre at `player.balance`
+ * reflekterer faktisk available_balance fra wallet-adapteren — ikke en
+ * optimistisk `+= payout` som taper deposit/winnings-split-info og gir
+ * stale balance på 2.+ vinn (ad-hoc-engine-paritet, Tobias 2026-04-26).
  */
 export interface MiniGamesContext {
   readonly walletAdapter: WalletAdapter;
@@ -60,6 +66,12 @@ export interface MiniGamesContext {
   readonly ledger: ComplianceLedger;
   requireRoom(roomCode: string): RoomState;
   requirePlayer(room: RoomState, playerId: string): Player;
+  /**
+   * Best-effort: oppdater `player.balance` fra wallet-adapteren etter
+   * payout. Fail-soft — caller skal logge og fortsette ved feil (vinneren
+   * er allerede betalt, kun visningen kan være stale til neste refresh).
+   */
+  refreshPlayerBalancesForWallet(walletId: string): Promise<string[]>;
 }
 
 /**
@@ -156,7 +168,22 @@ export async function spinJackpot(
         targetSide: "winnings",
       },
     );
-    player.balance += prizeAmount;
+    // Hot-fix Tobias 2026-04-26: bytt optimistisk `player.balance += prize`
+    // mot autoritativ refresh fra wallet-adapter. Optimistisk += taper
+    // deposit/winnings-split-info → stale balance i room:update på 2.+ vinn.
+    // Fail-soft: hvis refresh kaster (Postgres flap, lock-timeout) er
+    // pengene allerede transferert; logger og fortsetter.
+    try {
+      await ctx.refreshPlayerBalancesForWallet(player.walletId);
+    } catch (err) {
+      // Ikke-fatalt: vinneren er kreditert, kun lokal cache er stale.
+      // Neste room:update / wallet:update vil korrigere.
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[BingoEngineMiniGames.spinJackpot] refresh feilet (best-effort):",
+        err,
+      );
+    }
 
     await ctx.compliance.recordLossEntry(player.walletId, room.hallId, {
       type: "PAYOUT",
@@ -200,11 +227,28 @@ export interface MiniGameRotationState {
 }
 
 /**
- * Activate a mini-game for a player (called after BINGO win in Game 1).
- * Rotates wheelOfFortune → treasureChest → mysteryGame → colorDraft.
+ * Testing-flag: tving Mystery som default mini-game ved Fullt Hus
+ * i ad-hoc-engine. Speiler scheduled-engine sin
+ * `Game1MiniGameOrchestrator.maybeTriggerFor` (PR #555 d4a7f16a) slik at
+ * Tobias' QA-sesjoner får forutsigbar Mystery-aktivering uten å avhenge
+ * av rotasjonens posisjon. Settes til `false` for å gjenoppta
+ * wheelOfFortune → treasureChest → mysteryGame → colorDraft-rotasjonen.
  *
- * `rotationState.counter` mutates in place so successive calls produce the
- * rotation sequence (samme semantikk som `this.miniGameCounter += 1` tidligere).
+ * **Note:** ad-hoc-engine bruker legacy-unionen `"mysteryGame"` (ikke
+ * scheduled-engine sin `"mystery"`-union). Verdien er hardkodet i
+ * `MINIGAME_ROTATION` over og brukes ved string-lookup nedenfor.
+ */
+const MYSTERY_FORCE_DEFAULT_FOR_TESTING = true;
+
+/**
+ * Activate a mini-game for a player (called after BINGO win in Game 1).
+ * Default-rotasjon: wheelOfFortune → treasureChest → mysteryGame → colorDraft.
+ * Når `MYSTERY_FORCE_DEFAULT_FOR_TESTING` er aktiv → tving alltid mysteryGame
+ * (testing-only — backport av PR #555).
+ *
+ * `rotationState.counter` mutates in place så rotasjonen er stabil mellom
+ * runder også når mystery-flagget er av (samme semantikk som tidligere
+ * `this.miniGameCounter += 1`).
  */
 export function activateMiniGame(
   ctx: MiniGamesContext,
@@ -218,7 +262,18 @@ export function activateMiniGame(
   if (game.miniGame) return game.miniGame; // Already activated
 
   const rotation = MINIGAME_ROTATION;
-  const type: MiniGameType = rotation[rotationState.counter % rotation.length];
+  // Backport PR #555: tving Mystery som default ved Fullt Hus så lenge
+  // testing-flagget er aktivt. Rotasjons-counteren tikker uansett — hvis
+  // flagget slås av igjen, fortsetter rotasjonen fra forventet posisjon.
+  let type: MiniGameType;
+  if (
+    MYSTERY_FORCE_DEFAULT_FOR_TESTING &&
+    rotation.includes("mysteryGame" as MiniGameType)
+  ) {
+    type = "mysteryGame";
+  } else {
+    type = rotation[rotationState.counter % rotation.length];
+  }
   rotationState.counter += 1;
 
   const miniGame: MiniGameState = {
@@ -286,7 +341,17 @@ export async function playMiniGame(
         targetSide: "winnings",
       },
     );
-    player.balance += prizeAmount;
+    // Hot-fix Tobias 2026-04-26: autoritativ refresh i stedet for `+= prize`.
+    // Se kommentar i `spinJackpot` for begrunnelse.
+    try {
+      await ctx.refreshPlayerBalancesForWallet(player.walletId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[BingoEngineMiniGames.playMiniGame] refresh feilet (best-effort):",
+        err,
+      );
+    }
 
     await ctx.compliance.recordLossEntry(player.walletId, room.hallId, {
       type: "PAYOUT",

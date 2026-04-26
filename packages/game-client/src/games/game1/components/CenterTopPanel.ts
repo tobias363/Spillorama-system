@@ -314,7 +314,12 @@ export class CenterTopPanel {
     { text: string; active: boolean; completed: boolean }
   >();
 
-  updatePatterns(patterns: PatternDefinition[], patternResults: PatternResult[], prizePool = 0): void {
+  updatePatterns(
+    patterns: PatternDefinition[],
+    patternResults: PatternResult[],
+    prizePool = 0,
+    gameRunning = true,
+  ): void {
     // Pre-game (ingen aktiv game) → serverens `patterns` er tom. Vis likevel
     // 5 placeholder-pills (Rad 1-4 + Full Hus, 0 kr) + mini-grid med Rad 1-
     // design, så combo-panelet aldri er tomt mens spilleren venter på start.
@@ -322,6 +327,15 @@ export class CenterTopPanel {
       patterns = CenterTopPanel.placeholderPatterns();
       patternResults = [];
     }
+
+    // Bug 2026-04-26 (Tobias): når ingen aktiv trekning kjører — server kan
+    // fortsatt sende patternResults der alle er isWon=true fra forrige runde,
+    // eller mid-state mellom runder. Pillene skal IKKE vises som overstrøket
+    // (.completed) når det ikke er aktiv trekning. Vinst-strikethrough skal
+    // KUN gjelde innen pågående runde. Vi bruker `gameRunning`-flagg under
+    // pill-rendering for å undertrykke completed/active-state utenfor runde.
+    // Merk: vi muterer ikke patternResults — currentPatternIdx-beregningen
+    // beholder sin opprinnelige logikk for konsistens med fase-progresjon.
 
     // Struktur-signatur: kun pattern-id-rekkefølge + design. prizePool
     // og patternResults håndteres via diff-oppdatering — de skal IKKE
@@ -363,9 +377,14 @@ export class CenterTopPanel {
           ? (pattern.prize1 ?? 0)
           : Math.round((pattern.prizePercent / 100) * prizePool);
       const prize = result?.payoutAmount ?? computedPrize;
-      const won = result?.isWon === true;
+      const wonRaw = result?.isWon === true;
+      // Bug-fix 2026-04-26: utenfor aktiv trekning skal pillene vises klare
+      // (ikke .completed strikethrough, ikke .active highlight) — selv om
+      // serveren fortsatt sender patternResults med isWon=true fra forrige
+      // runde. Strikethrough er en runde-intern progresjons-indikator.
+      const won = gameRunning && wonRaw;
       const displayName = CenterTopPanel.displayNameFor(pattern.name);
-      const isActive = !won && i === currentPatternIdx;
+      const isActive = gameRunning && !won && i === currentPatternIdx;
       this.applyPillState(pattern.id, displayName, prize, won, isActive);
       seenIds.add(pattern.id);
 
@@ -382,9 +401,12 @@ export class CenterTopPanel {
     }
 
     // Fase-vinn-flash: kun patterns som flippet false → true siden sist.
-    const currentWonIds = new Set(
-      patternResults.filter((r) => r.isWon).map((r) => r.patternId),
-    );
+    // Bug-fix 2026-04-26: Når runde ikke kjører, behandler vi alle som
+    // ikke-vunnet (jf. logikken over). Tom prevWonIds-set sikrer at neste
+    // runde-start trigger flash på de patterns som faktisk vinnes på nytt.
+    const currentWonIds = gameRunning
+      ? new Set(patternResults.filter((r) => r.isWon).map((r) => r.patternId))
+      : new Set<string>();
     for (const id of currentWonIds) {
       if (this.prevWonIds.has(id)) continue;
       const entry = this.patternPillById.get(id);

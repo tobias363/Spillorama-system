@@ -1802,10 +1802,15 @@ test("BIN-505/506: mini-game rotation cycles wheel → chest → mystery → col
     types.push(mg!.type);
   }
 
+  // Backport PR #555 (Tobias 2026-04-26): MYSTERY_FORCE_DEFAULT_FOR_TESTING
+  // tvinger mysteryGame for ALLE aktiveringer i ad-hoc-engine. Den
+  // opprinnelige rotasjons-asserten lever som dokumentasjon i kommentar.
+  // Når testing-flagget slås av igjen, skal asserten gå tilbake til:
+  //   ["wheelOfFortune", "treasureChest", "mysteryGame", "colorDraft", "wheelOfFortune"]
   assert.deepEqual(
     types,
-    ["wheelOfFortune", "treasureChest", "mysteryGame", "colorDraft", "wheelOfFortune"],
-    `rotation mismatch: ${JSON.stringify(types)}`,
+    ["mysteryGame", "mysteryGame", "mysteryGame", "mysteryGame", "mysteryGame"],
+    `rotation mismatch (mystery-force aktivt): ${JSON.stringify(types)}`,
   );
 });
 
@@ -1814,7 +1819,10 @@ test("BIN-505/506: mystery + colorDraft prizes flow through playMiniGame same as
     minDrawIntervalMs: 0,
   });
 
-  // Force rotation counter to the mysteryGame slot by burning two activations first.
+  // Backport PR #555: MYSTERY_FORCE_DEFAULT_FOR_TESTING gjør at alle
+  // aktiveringer returnerer mysteryGame. Vi beholder testen for å
+  // sikre at playMiniGame-payout-flyten fortsatt fungerer for type
+  // mysteryGame; colorDraft-grenen verifiseres når flagget slås av.
   for (let i = 0; i < 2; i += 1) {
     const hallId = `hall-burn-${i}`;
     const { roomCode, playerId: hostId } = await engine.createRoom({ hallId, playerName: "H", walletId: `w-burn-${i}` });
@@ -1823,7 +1831,8 @@ test("BIN-505/506: mystery + colorDraft prizes flow through playMiniGame same as
     engine.activateMiniGame(roomCode, hostId);
   }
 
-  // Third room: expect mysteryGame.
+  // Third room: expect mysteryGame (force-flag aktivt — ville vært
+  // mysteryGame uansett pga rotasjons-posisjon).
   const hallMystery = "hall-mystery";
   const { roomCode: mysteryRoom, playerId: mysteryHost } = await engine.createRoom({
     hallId: hallMystery, playerName: "MHost", walletId: "wallet-m-host",
@@ -1837,7 +1846,10 @@ test("BIN-505/506: mystery + colorDraft prizes flow through playMiniGame same as
   assert.ok(mysteryResult.prizeAmount >= 0, "prizeAmount must be non-negative");
   assert.ok(mysteryResult.prizeList.length > 0, "prizeList must be populated");
 
-  // Fourth room: expect colorDraft.
+  // Fourth room: med MYSTERY_FORCE_DEFAULT_FOR_TESTING aktivt overstyres
+  // rotasjonen — mysteryGame igjen i stedet for colorDraft. Testen
+  // verifiserer at mystery-force er konsekvent på tvers av rom og
+  // rotasjons-posisjoner. Når flagget slås av: forvent colorDraft her.
   const hallColor = "hall-color";
   const { roomCode: colorRoom, playerId: colorHost } = await engine.createRoom({
     hallId: hallColor, playerName: "CHost", walletId: "wallet-c-host",
@@ -1845,9 +1857,9 @@ test("BIN-505/506: mystery + colorDraft prizes flow through playMiniGame same as
   await engine.joinRoom({ roomCode: colorRoom, hallId: hallColor, playerName: "CGuest", walletId: "wallet-c-guest" });
   await engine.startGame({ roomCode: colorRoom, actorPlayerId: colorHost, ticketsPerPlayer: 1, payoutPercent: 80 });
   const colorState = engine.activateMiniGame(colorRoom, colorHost);
-  assert.equal(colorState?.type, "colorDraft");
+  assert.equal(colorState?.type, "mysteryGame");
   const colorResult = await engine.playMiniGame(colorRoom, colorHost, 1);
-  assert.equal(colorResult.type, "colorDraft");
+  assert.equal(colorResult.type, "mysteryGame");
   assert.ok(colorResult.prizeAmount >= 0);
 });
 

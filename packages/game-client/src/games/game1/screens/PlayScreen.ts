@@ -472,7 +472,9 @@ export class PlayScreen extends Container {
       : "";
     this.chatPanel.updatePlayerCount(state.playerCount);
     this.centerTop.setGameRunning(running);
-    this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
+    // Pass `running` til updatePatterns slik at premie-pills ikke vises
+    // overstrøket (.completed) utenfor aktiv trekning. Bug-fix 2026-04-26.
+    this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool, running);
     this.centerTop.setCanStartNow(state.canStartNow, running);
     this.centerTop.updateJackpot(state.jackpot);
     this.headerBar.update(state.jackpot); // kept for API parity (no-op render)
