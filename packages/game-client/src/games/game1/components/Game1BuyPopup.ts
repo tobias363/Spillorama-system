@@ -61,11 +61,13 @@ export class Game1BuyPopup {
 
   constructor(overlay: HtmlOverlayManager) {
     this.backdrop = document.createElement("div");
+    // KRITISK: Ingen backdrop-filter (PR #468) — popup ligger over Pixi-canvas;
+    // backdrop-filter trigger composite-recompute hver Pixi-frame → blink.
+    // Mørkere semi-transparent bakgrunn alene gir tilstrekkelig fokus-effekt.
     Object.assign(this.backdrop.style, {
       position: "absolute",
       inset: "0",
-      background: "rgba(0, 0, 0, 0.65)",
-      backdropFilter: "blur(3px)",
+      background: "rgba(0, 0, 0, 0.78)",
       display: "none",
       alignItems: "center",
       justifyContent: "center",
@@ -294,7 +296,6 @@ export class Game1BuyPopup {
       margin: "0 -10px",
       borderRadius: "8px",
       background: "transparent",
-      transition: "background .15s, box-shadow .15s",
     });
 
     // Left: brett-ikon + label + metadata
@@ -631,7 +632,6 @@ export class Game1BuyPopup {
       fontFamily: "inherit",
       cursor: "not-allowed",
       boxShadow: "none",
-      transition: "background .15s, box-shadow .15s",
     });
   }
 
@@ -648,7 +648,6 @@ export class Game1BuyPopup {
       fontFamily: "inherit",
       cursor: "pointer",
       marginTop: "8px",
-      transition: "background 0.15s",
     });
     btn.addEventListener("mouseenter", () => { btn.style.background = "rgba(255,255,255,0.05)"; });
     btn.addEventListener("mouseleave", () => { btn.style.background = "transparent"; });
