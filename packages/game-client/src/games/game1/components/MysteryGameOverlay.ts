@@ -43,6 +43,24 @@
 import { Container } from "pixi.js";
 
 const JOKER_IMG_URL = "/web/games/assets/game1/design/lucky-clover.png";
+/**
+ * Joker-crown bilde brukt i intro-animasjon og som logo-emblem ved
+ * jackpot-result. Plassert til høyre for "MYSTERY JOKER"-tekst (Tobias
+ * 2026-04-26). Source: `Nye bilder subgames spill 1/jokernord.png` →
+ * `packages/game-client/public/assets/game1/design/joker-crown.png`.
+ */
+const JOKER_CROWN_IMG_URL = "/web/games/assets/game1/design/joker-crown.png";
+/**
+ * Mystery-baller bruker samme PNG-baller som hoved-spillet (BallTube).
+ * JSX-spec viser `variant="red"` overalt, så vi bruker red.png som
+ * default for pending-state. Outcome-state (correct/wrong/joker) mapper
+ * til color-coded baller (green/red/yellow). Tekst-digit rendres som
+ * overlay over PNG-en.
+ */
+const MYSTERY_BALL_DEFAULT_URL = "/web/games/assets/game1/design/balls/red.png";
+const MYSTERY_BALL_CORRECT_URL = "/web/games/assets/game1/design/balls/green.png";
+const MYSTERY_BALL_WRONG_URL = "/web/games/assets/game1/design/balls/red.png";
+const MYSTERY_BALL_JOKER_URL = "/web/games/assets/game1/design/balls/yellow.png";
 const AUTO_DISMISS_AFTER_RESULT_SECONDS = 6;
 const INTRO_DURATION_MS = 2000;
 const REVEAL_DELAY_MS = 600;
@@ -230,26 +248,36 @@ function ensureMysteryStyles(): void {
   position: relative;
   width: 68px;
   height: 68px;
-  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 28px;
   font-weight: 800;
-  color: #fff;
-  background: radial-gradient(circle at 35% 30%, #d11a2e 0%, #790001 75%, #4a0000 100%);
-  box-shadow: inset 0 -6px 14px rgba(0,0,0,0.45), inset 0 4px 10px rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.4);
+  color: #1a0a0a;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,0.4));
   transition: transform 200ms ease;
 }
-.mj-ball-correct {
-  background: radial-gradient(circle at 35% 30%, #4ade80 0%, #15803d 75%, #064e1f 100%);
+.mj-ball-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
-.mj-ball-wrong {
-  background: radial-gradient(circle at 35% 30%, #f87171 0%, #b91c1c 75%, #7f1d1d 100%);
+.mj-ball-digit {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.4), 0 2px 4px rgba(0,0,0,0.25);
+  letter-spacing: -0.5px;
+  /* Optisk justering for å sentrere innenfor PNG-ringen (matcher
+     BallTube text.x = BALL_SIZE/2 - 2). */
+  transform: translateX(-2px);
 }
-.mj-ball-joker {
-  background: radial-gradient(circle at 35% 30%, #ffd54a 0%, #ff7a1a 75%, #b54100 100%);
+.mj-ball-joker .mj-ball-digit {
   color: #1a0808;
   text-shadow: 0 1px 0 rgba(255,255,255,0.3);
 }
@@ -334,6 +362,8 @@ export class MysteryGameOverlay extends Container {
     container: HTMLDivElement;
     topSlot: HTMLDivElement;
     middle: HTMLDivElement;
+    middleImg: HTMLImageElement;
+    middleDigit: HTMLSpanElement;
     bottomSlot: HTMLDivElement;
     aura: HTMLDivElement | null;
   }> = [];
@@ -544,12 +574,14 @@ export class MysteryGameOverlay extends Container {
       alignItems: "center",
       justifyContent: "center",
     });
+    // Tobias 2026-04-26: tekst + crown-PNG side-by-side på samme linje.
+    // Tidligere stack hadde bilde over tekst; nå er bildet til HØYRE.
     const stack = document.createElement("div");
     Object.assign(stack.style, {
       display: "flex",
-      flexDirection: "column",
+      flexDirection: "row",
       alignItems: "center",
-      gap: "20px",
+      gap: "18px",
     });
 
     const text = document.createElement("div");
@@ -562,18 +594,26 @@ export class MysteryGameOverlay extends Container {
       color: "#ffe83d",
       textShadow: "0 0 30px rgba(255,232,61,0.5)",
       animation: "mj-intro-text 2000ms ease-in-out forwards",
+      lineHeight: "1",
     });
 
     const img = document.createElement("img");
-    img.src = JOKER_IMG_URL;
+    // Joker-crown (rød/grønne tunger + gull-stjerner). Ca. 1.3× tekstens
+    // x-høyde for å matche optisk vekt uten å dominere typografien.
+    img.src = JOKER_CROWN_IMG_URL;
     img.alt = "";
     img.draggable = false;
     Object.assign(img.style, {
-      width: "120px",
-      height: "120px",
+      // ~50px høyt = matcher tekst-x-høyde + litt (44px font * 1.1 ≈ 48-50px)
+      height: "50px",
+      width: "auto",
+      maxWidth: "70px",
       objectFit: "contain",
-      filter: "drop-shadow(0 0 20px rgba(255,122,26,0.55))",
+      filter: "drop-shadow(0 0 18px rgba(255,122,26,0.55))",
       animation: "mj-intro-joker 2000ms ease-in-out forwards",
+      // Anchor for transform-basert animasjon (rotate+scale) skal være
+      // sentrert i bildet; default er fine men eksplisitt for klarhet.
+      transformOrigin: "center center",
     });
 
     stack.appendChild(text);
@@ -813,6 +853,73 @@ export class MysteryGameOverlay extends Container {
     return ladder;
   }
 
+  /**
+   * Velg ball-PNG basert på outcome-state. Default ("pending") = red
+   * (matcher tidligere `mj-ball`-gradient og JSX `variant="red"`).
+   * Tobias 2026-04-26: bruker samme PNG-baller som hoved-spillet
+   * (BallTube) for visuell konsistens.
+   */
+  private static ballAssetUrlForOutcome(
+    outcome: "pending" | "correct" | "wrong" | "joker",
+  ): string {
+    switch (outcome) {
+      case "correct":
+        return MYSTERY_BALL_CORRECT_URL;
+      case "wrong":
+        return MYSTERY_BALL_WRONG_URL;
+      case "joker":
+        return MYSTERY_BALL_JOKER_URL;
+      case "pending":
+      default:
+        return MYSTERY_BALL_DEFAULT_URL;
+    }
+  }
+
+  /**
+   * Bygg en Mystery-ball: <div class="mj-ball"> med <img> (PNG) +
+   * <span class="mj-ball-digit"> (digit-tall). Returnerer både wrap-en
+   * og inner-elementene slik at outcome-oppdatering kan bytte img-src
+   * uten å re-bygge DOM-en.
+   */
+  private buildMysteryBall(
+    digit: string,
+    outcome: "pending" | "correct" | "wrong" | "joker",
+    opts?: { size?: number; fontSize?: number },
+  ): {
+    wrap: HTMLDivElement;
+    img: HTMLImageElement;
+    digitEl: HTMLSpanElement;
+  } {
+    const size = opts?.size ?? 68;
+    const fontSize = opts?.fontSize ?? 28;
+    const wrap = document.createElement("div");
+    wrap.className = "mj-ball";
+    if (size !== 68) {
+      wrap.style.width = `${size}px`;
+      wrap.style.height = `${size}px`;
+    }
+    if (fontSize !== 28) {
+      wrap.style.fontSize = `${fontSize}px`;
+    }
+    if (outcome === "correct") wrap.classList.add("mj-ball-correct");
+    else if (outcome === "wrong") wrap.classList.add("mj-ball-wrong");
+    else if (outcome === "joker") wrap.classList.add("mj-ball-joker");
+
+    const img = document.createElement("img");
+    img.className = "mj-ball-img";
+    img.src = MysteryGameOverlay.ballAssetUrlForOutcome(outcome);
+    img.alt = "";
+    img.draggable = false;
+    wrap.appendChild(img);
+
+    const digitEl = document.createElement("span");
+    digitEl.className = "mj-ball-digit";
+    digitEl.textContent = digit;
+    wrap.appendChild(digitEl);
+
+    return { wrap, img, digitEl };
+  }
+
   private buildArena(): HTMLDivElement {
     const arena = document.createElement("div");
     Object.assign(arena.style, {
@@ -855,17 +962,19 @@ export class MysteryGameOverlay extends Container {
         justifyContent: "center",
       });
 
-      // Middle: ball
+      // Middle: ball (PNG + digit-overlay)
       const middleWrap = document.createElement("div");
       Object.assign(middleWrap.style, {
         position: "relative",
         margin: "10px 0",
       });
 
-      const ball = document.createElement("div");
-      ball.className = "mj-ball";
-      ball.textContent = String(this.balls[logicalIdx]?.digit ?? "");
-      middleWrap.appendChild(ball);
+      const ballState = this.balls[logicalIdx];
+      const built = this.buildMysteryBall(
+        String(ballState?.digit ?? ""),
+        "pending",
+      );
+      middleWrap.appendChild(built.wrap);
 
       // Bottom slot
       const bottomSlot = document.createElement("div");
@@ -885,7 +994,9 @@ export class MysteryGameOverlay extends Container {
       this.ballRowEls.push({
         container: col,
         topSlot,
-        middle: ball,
+        middle: built.wrap,
+        middleImg: built.img,
+        middleDigit: built.digitEl,
         bottomSlot,
         aura: null,
       });
@@ -1026,16 +1137,16 @@ export class MysteryGameOverlay extends Container {
         cell.bottomSlot.appendChild(this.buildArrowBtn("down", logicalIdx));
       }
 
-      // Middle ball-state.
+      // Middle ball-state — bytt PNG-asset + outcome-class. Digit-tekst
+      // settes på .mj-ball-digit (ikke wrap), slik at <img> ikke ovrshrives.
       cell.middle.classList.remove("mj-ball-correct", "mj-ball-wrong", "mj-ball-joker");
-      if (ballState?.outcome === "correct") {
-        cell.middle.classList.add("mj-ball-correct");
-      } else if (ballState?.outcome === "wrong") {
-        cell.middle.classList.add("mj-ball-wrong");
-      } else if (ballState?.outcome === "joker") {
-        cell.middle.classList.add("mj-ball-joker");
-      }
-      cell.middle.textContent = String(ballState?.shownDigit ?? "");
+      const outcome: "pending" | "correct" | "wrong" | "joker" =
+        ballState?.outcome ?? "pending";
+      if (outcome === "correct") cell.middle.classList.add("mj-ball-correct");
+      else if (outcome === "wrong") cell.middle.classList.add("mj-ball-wrong");
+      else if (outcome === "joker") cell.middle.classList.add("mj-ball-joker");
+      cell.middleImg.src = MysteryGameOverlay.ballAssetUrlForOutcome(outcome);
+      cell.middleDigit.textContent = String(ballState?.shownDigit ?? "");
     }
   }
 
@@ -1078,19 +1189,15 @@ export class MysteryGameOverlay extends Container {
   }
 
   private buildRevealBall(ballState: BallInfo): HTMLDivElement {
-    const wrap = document.createElement("div");
-    wrap.className = "mj-ball";
-    Object.assign(wrap.style, {
-      width: "64px",
-      height: "64px",
-      fontSize: "26px",
-      animation: "mj-reveal-drop 350ms ease-out both",
-    });
-    if (ballState.outcome === "correct") wrap.classList.add("mj-ball-correct");
-    else if (ballState.outcome === "wrong") wrap.classList.add("mj-ball-wrong");
-    else if (ballState.outcome === "joker") wrap.classList.add("mj-ball-joker");
-    wrap.textContent = String(ballState.reveal?.value ?? "");
-    return wrap;
+    const outcome =
+      ballState.outcome === "pending" ? "pending" : ballState.outcome;
+    const built = this.buildMysteryBall(
+      String(ballState.reveal?.value ?? ""),
+      outcome,
+      { size: 64, fontSize: 26 },
+    );
+    built.wrap.style.animation = "mj-reveal-drop 350ms ease-out both";
+    return built.wrap;
   }
 
   // ── Game logic (uendret state-flyt) ───────────────────────────────────────
