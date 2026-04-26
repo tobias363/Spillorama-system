@@ -1514,6 +1514,9 @@ app.use(createAdminPlayersRouter({
   // BIN-702 follow-up: velkomstmail med 7-dagers password-reset-lenke
   // for spillere importert via Excel/CSV (bulk-import).
   authTokenService,
+  // REQ-097/098: admin block/unblock skriver til
+  // app_user_profile_settings.blocked_until.
+  profileSettingsService,
 }));
 app.use(createAdminAmlRouter({
   platformService,

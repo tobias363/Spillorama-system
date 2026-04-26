@@ -38,6 +38,7 @@ import type {
   KycStatus,
 } from "../platform/PlatformService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
+import type { ProfileSettingsService } from "../compliance/ProfileSettingsService.js";
 import type { EmailService } from "../integration/EmailService.js";
 import type { EmailQueue } from "../integration/EmailQueue.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
@@ -82,6 +83,14 @@ export interface AdminPlayersRouterDeps {
    * og logger en advarsel (spilleren må da bruke /forgot-password manuelt).
    */
   authTokenService?: AuthTokenService;
+  /**
+   * REQ-097/098: brukes for admin block/unblock-flyt. Skriver til
+   * `app_user_profile_settings.blocked_until` slik at gameplay-gate
+   * (`assertUserNotBlocked`) fanger blokken uten ekstra integrasjon.
+   * Valgfri — hvis ikke satt returnerer endepunktene 503
+   * SERVICE_UNAVAILABLE.
+   */
+  profileSettingsService?: ProfileSettingsService;
 }
 
 /**
@@ -187,6 +196,7 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     webBaseUrl,
     supportEmail,
     authTokenService,
+    profileSettingsService,
   } = deps;
   const router = express.Router();
 
@@ -1013,5 +1023,236 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     }
   });
 
+  // ── REQ-097/098: Admin block / unblock player ───────────────────────────
+
+  /**
+   * REQ-097: Admin/SUPPORT blokkerer en spillerkonto.
+   *
+   * Body:
+   *   {
+   *     reason: string (required, 1–500 tegn),
+   *     durationDays?: number | "permanent"   // default = "permanent"
+   *   }
+   *
+   * Effekt:
+   *   - Setter `app_user_profile_settings.blocked_until` (gameplay-gate
+   *     fanger via `ProfileSettingsService.assertUserNotBlocked`).
+   *   - Audit: `admin.player.block` med `{ targetUserId, durationDays,
+   *     reason, blockedUntil }`.
+   *   - Sender norsk e-post `account-blocked` (fire-and-forget; SMTP-feil
+   *     blokkerer ikke endringen).
+   *
+   * Idempotent: gjenta-kall overskriver eksisterende blokk.
+   */
+  router.post("/api/admin/players/:id/block", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_KYC_MODERATE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      if (!profileSettingsService) {
+        throw new DomainError(
+          "SERVICE_UNAVAILABLE",
+          "Block-tjenesten er ikke konfigurert på denne serveren."
+        );
+      }
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const reason = mustBeNonEmptyString(req.body.reason, "reason");
+      if (reason.length > 500) {
+        throw new DomainError("INVALID_INPUT", "reason er for lang (maks 500 tegn).");
+      }
+
+      // Default = permanent. durationDays kan være number > 0 eller "permanent".
+      let durationDays: number | "permanent" = "permanent";
+      if (Object.prototype.hasOwnProperty.call(req.body, "durationDays")) {
+        const raw = req.body.durationDays;
+        if (raw === "permanent") {
+          durationDays = "permanent";
+        } else if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+          durationDays = Math.floor(raw);
+        } else if (typeof raw === "string" && raw.trim() !== "") {
+          // Tolerér numerisk streng fra UI (eks "30").
+          const parsed = Number(raw);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            durationDays = Math.floor(parsed);
+          } else {
+            throw new DomainError(
+              "INVALID_INPUT",
+              'durationDays må være et positivt heltall eller "permanent".'
+            );
+          }
+        } else {
+          throw new DomainError(
+            "INVALID_INPUT",
+            'durationDays må være et positivt heltall eller "permanent".'
+          );
+        }
+      }
+
+      // Hent spilleren først (404 hvis ukjent) — også brukt for e-post.
+      const target = await platformService.getUserById(userId);
+
+      const view = await profileSettingsService.adminBlock({
+        userId,
+        actor: {
+          actorId: actor.id,
+          type: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        },
+        durationDays,
+        reason,
+      });
+
+      // Send norsk e-post (fire-and-forget).
+      void sendBlockEmail(target, {
+        reason,
+        durationDays,
+        blockedUntilIso: view.block.blockedUntil,
+      });
+
+      apiSuccess(res, {
+        userId,
+        blockedUntil: view.block.blockedUntil,
+        reason,
+        durationDays,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * REQ-098: Admin/SUPPORT opphever en eksisterende blokk.
+   *
+   * Body: tomt (eller `{ reason?: string }` for audit-trail).
+   *
+   * Effekt:
+   *   - Setter `app_user_profile_settings.blocked_until = NULL`.
+   *   - Audit: `admin.player.unblock`.
+   *
+   * Idempotent: kall mot ikke-blokkert spiller logges men endrer ingenting.
+   */
+  router.post("/api/admin/players/:id/unblock", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_KYC_MODERATE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      if (!profileSettingsService) {
+        throw new DomainError(
+          "SERVICE_UNAVAILABLE",
+          "Block-tjenesten er ikke konfigurert på denne serveren."
+        );
+      }
+      // Sikre at brukeren finnes (404 ellers).
+      await platformService.getUserById(userId);
+
+      const view = await profileSettingsService.adminUnblock({
+        userId,
+        actor: {
+          actorId: actor.id,
+          type: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        },
+      });
+
+      apiSuccess(res, {
+        userId,
+        blockedUntil: view.block.blockedUntil, // forventet null
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * REQ-097: send norsk e-post til spilleren ved blokkering.
+   * Fire-and-forget — alle feil logges men kastes ikke.
+   *
+   * `blockedUntilHuman` formattes på norsk:
+   *   - permanent: "permanent inntil opphevet av support"
+   *   - dato: "DD.MM.YYYY kl. HH:mm" (Europe/Oslo)
+   */
+  async function sendBlockEmail(
+    user: { email: string; displayName: string },
+    info: {
+      reason: string;
+      durationDays: number | "permanent";
+      blockedUntilIso: string | null;
+    }
+  ): Promise<void> {
+    const isPermanent =
+      info.durationDays === "permanent" || info.blockedUntilIso === null;
+    const blockedUntilHuman = isPermanent
+      ? "permanent inntil opphevet av support"
+      : formatNorwegianDateTime(info.blockedUntilIso!);
+    const context = {
+      username: user.displayName,
+      reason: info.reason,
+      blockedUntilHuman,
+      supportEmail,
+    };
+
+    if (emailQueue) {
+      try {
+        await emailQueue.enqueue({
+          to: user.email,
+          template: "account-blocked",
+          context,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, userId: user.email },
+          "[REQ-097] account-blocked enqueue failed (non-blocking)"
+        );
+      }
+      return;
+    }
+
+    try {
+      await emailService.sendTemplate({
+        to: user.email,
+        template: "account-blocked",
+        context,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, userId: user.email },
+        "[REQ-097] account-blocked send failed (non-blocking)"
+      );
+    }
+  }
+
   return router;
+}
+
+/**
+ * Norsk dato-format: "DD.MM.YYYY kl. HH:mm". Forsøker Europe/Oslo via
+ * Intl; faller tilbake til ren ISO hvis runtime ikke har lokal-data.
+ */
+function formatNorwegianDateTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const fmt = new Intl.DateTimeFormat("nb-NO", {
+      timeZone: "Europe/Oslo",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const parts = fmt.formatToParts(d);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const day = get("day");
+    const month = get("month");
+    const year = get("year");
+    const hour = get("hour");
+    const minute = get("minute");
+    if (day && month && year && hour && minute) {
+      return `${day}.${month}.${year} kl. ${hour}:${minute}`;
+    }
+    return iso;
+  } catch {
+    return iso;
+  }
 }
