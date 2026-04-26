@@ -305,11 +305,21 @@ export const agentSidebar: SidebarNode[] = [
     labelKey: "agent_cash_in_out_management",
     children: [
       { kind: "leaf", id: "agent-cash-overview", path: "/agent/cash-in-out", icon: "fa fa-circle-o", labelKey: "cash_in_out" },
+      // Wireframe §17.12: Sell Products (kiosk-flyt — kaffe/sjokolade/ris).
+      // Wireframe §17.29: Order History — fortsatt placeholder, kobles inn
+      // i en oppfølger-PR (BIN-650).
+      { kind: "leaf", id: "agent-sell-products", path: "/agent/sellProduct", icon: "fa fa-shopping-cart", labelKey: "sell_products" },
     ],
   },
   { kind: "leaf", id: "agent-unique-id", path: "/agent/unique-id", icon: "fa fa-id-card", labelKey: "agent_unique_id_management" },
   { kind: "leaf", id: "agent-bingo-check", path: "/agent/bingo-check", icon: "fa fa-check-circle-o", labelKey: "agent_check_bingo" },
   { kind: "leaf", id: "agent-physical-cashout", path: "/agent/physical-cashout", icon: "fa fa-ticket", labelKey: "agent_physical_cashout" },
+  // Wireframe §17.32: Past Game Winning History (agent-view).
+  { kind: "leaf", id: "agent-past-winning-history", path: "/agent/past-winning-history", icon: "fa fa-history", labelKey: "past_game_winning_history" },
+  // Wireframe §17.31: Sold Ticket — shift-scoped list av billetter solgt
+  // av agent. Bruker `/agent/sold-tickets`-aliaset slik at routes-guarden
+  // tillater AGENT/HALL_OPERATOR-tilgang.
+  { kind: "leaf", id: "agent-sold-tickets", path: "/agent/sold-tickets", icon: "fa fa-list", labelKey: "sold_tickets" },
 ];
 
 export function sidebarFor(role: Role): SidebarNode[] {
