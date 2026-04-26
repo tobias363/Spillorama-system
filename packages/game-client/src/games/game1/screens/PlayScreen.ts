@@ -17,6 +17,7 @@ import { CenterBall } from "../components/CenterBall.js";
 import { ClaimButton } from "../../game2/components/ClaimButton.js";
 import { checkClaims } from "../../game2/logic/ClaimDetector.js";
 import { stakeFromState } from "../logic/StakeCalculator.js";
+import { calculateMyRoundWinnings } from "../logic/WinningsCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
 
 /**
@@ -443,16 +444,17 @@ export class PlayScreen extends Container {
     // Side panels.
     const totalStake = stakeFromState(state);
     // "Gevinst" in LeftInfoPanel = THIS player's accumulated winnings so far
-    // this round, not the total prize pool. Sum payoutAmount from every
-    // patternResult this player has won. Matches the toast copy in
-    // Game1Controller.onPatternWon and avoids shadowing Innsats when this
-    // player is the sole buyer (2026-04-21 Tobias-report).
-    const myWinnings = state.myPlayerId
-      ? state.patternResults.reduce(
-          (sum, r) => sum + (r.isWon && r.winnerId === state.myPlayerId ? (r.payoutAmount ?? 0) : 0),
-          0,
-        )
-      : 0;
+    // this round, not the total prize pool. Sum `payoutAmount` (per-winner
+    // split) from every patternResult this player has won. Matches the
+    // toast copy in Game1Controller.onPatternWon and avoids shadowing
+    // Innsats when this player is the sole buyer (2026-04-21 Tobias-report).
+    //
+    // BIN-696 / Tobias 2026-04-26 — UI-Gevinst-faktisk-bug: tidligere
+    // sjekket vi `winnerId === myPlayerId` som kun matchet FØRSTE vinner
+    // ved multi-winner-split. Helper-funksjonen `calculateMyRoundWinnings`
+    // bruker `winnerIds[]` med fallback til `[winnerId]` for legacy-events.
+    // Test-coverage: `WinningsCalculator.test.ts`.
+    const myWinnings = calculateMyRoundWinnings(state.patternResults, state.myPlayerId);
     this.leftInfo.update(
       state.playerCount,
       totalStake,

@@ -312,6 +312,74 @@ describe("GameBridge", () => {
       socket.fire("patternWon", payload);
       expect(listener).toHaveBeenCalledWith(payload, expect.any(Object));
     });
+
+    // BIN-696 / Tobias 2026-04-26 — UI-Gevinst-faktisk-bug:
+    // Bridge må speile `winnerIds[]` + `winnerCount` fra payloaden inn i
+    // patternResult-state slik at downstream-rendering (PlayScreen
+    // "Gevinst:"-summeringen) kan detektere "jeg er 2.+ vinner i split"
+    // umiddelbart, før neste room:update treffer.
+    it("multi-winner-split: speiler winnerIds + winnerCount inn i patternResult", () => {
+      const gameSnapshot = makeGameSnapshot({
+        patternResults: [
+          { patternId: "p1", patternName: "2 Rader", claimType: "LINE", isWon: false },
+        ],
+      });
+
+      bridge.start("player-2");
+      bridge.applySnapshot(makeRoomSnapshot({ currentGame: gameSnapshot }));
+
+      // Payload representerer 5-veis split: 200 kr / 5 = 40 kr per vinner.
+      // player-2 er IKKE første winner (winnerId), men er i winnerIds[].
+      const payload: PatternWonPayload = {
+        patternId: "p1",
+        patternName: "2 Rader",
+        winnerId: "player-1",
+        wonAtDraw: 12,
+        payoutAmount: 40,
+        claimType: "LINE",
+        gameId: "game-1",
+        winnerIds: ["player-1", "player-2", "player-3", "player-4", "player-5"],
+        winnerCount: 5,
+      };
+      socket.fire("patternWon", payload);
+
+      const result = bridge.getState().patternResults.find((r) => r.patternId === "p1");
+      expect(result?.isWon).toBe(true);
+      expect(result?.winnerId).toBe("player-1"); // backward-compat (første)
+      expect(result?.winnerIds).toEqual([
+        "player-1", "player-2", "player-3", "player-4", "player-5",
+      ]);
+      expect(result?.winnerCount).toBe(5);
+      expect(result?.payoutAmount).toBe(40); // per-winner split-amount
+    });
+
+    it("legacy payload uten winnerIds: bruker [winnerId] som fallback", () => {
+      const gameSnapshot = makeGameSnapshot({
+        patternResults: [
+          { patternId: "p1", patternName: "1 Rad", claimType: "LINE", isWon: false },
+        ],
+      });
+
+      bridge.start("player-1");
+      bridge.applySnapshot(makeRoomSnapshot({ currentGame: gameSnapshot }));
+
+      // Legacy event uten winnerIds[] — bridge skal fall tilbake til
+      // [winnerId] for å bevare downstream-detection.
+      const payload: PatternWonPayload = {
+        patternId: "p1",
+        patternName: "1 Rad",
+        winnerId: "player-1",
+        wonAtDraw: 7,
+        payoutAmount: 100,
+        claimType: "LINE",
+        gameId: "game-1",
+      };
+      socket.fire("patternWon", payload);
+
+      const result = bridge.getState().patternResults.find((r) => r.patternId === "p1");
+      expect(result?.winnerIds).toEqual(["player-1"]);
+      expect(result?.winnerCount).toBe(1);
+    });
   });
 
   describe("lucky numbers and pre-round tickets", () => {
