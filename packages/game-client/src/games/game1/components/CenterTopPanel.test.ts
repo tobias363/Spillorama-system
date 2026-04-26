@@ -678,3 +678,116 @@ describe("CenterTopPanel — blink prevention (DOM-mutasjons-kontrakt)", () => {
     expect(pills.length).toBe(3);
   });
 });
+
+/**
+ * Bug-fix 2026-04-26 (Tobias): premie-radene skal ALLTID vises klart
+ * (ingen .completed strikethrough, ingen .active highlight) når det
+ * IKKE er aktiv trekning. Strikethrough er en runde-intern progresjons-
+ * indikator — utenfor runde må listen "se klar ut" igjen.
+ *
+ * Bakoverkompat: når gameRunning utelates (default=true) eller eksplisitt
+ * settes til true, oppfører kode seg eksakt som før.
+ */
+describe("CenterTopPanel — gameRunning-flagg styrer .completed/.active", () => {
+  let panel: CenterTopPanel;
+  let container: HTMLElement;
+  let overlay: HtmlOverlayManager;
+
+  const PATTERNS_5: PatternDefinition[] = [
+    { id: "rad1", name: "Row 1", claimType: "LINE", design: 1, prizePercent: 15, order: 1 },
+    { id: "rad2", name: "Row 2", claimType: "LINE", design: 2, prizePercent: 15, order: 2 },
+    { id: "rad3", name: "Row 3", claimType: "LINE", design: 3, prizePercent: 15, order: 3 },
+    { id: "rad4", name: "Row 4", claimType: "LINE", design: 4, prizePercent: 15, order: 4 },
+    { id: "fullhouse", name: "Full House", claimType: "BINGO", design: 5, prizePercent: 40, order: 5 },
+  ];
+
+  function allWon(): PatternResult[] {
+    return PATTERNS_5.map((p) => ({
+      patternId: p.id,
+      patternName: p.name,
+      claimType: p.claimType,
+      isWon: true,
+      payoutAmount: 100,
+    }));
+  }
+
+  function findPill(displayNamePrefix: string): HTMLDivElement | null {
+    const pills = container.querySelectorAll(".prize-pill") as NodeListOf<HTMLDivElement>;
+    for (const p of pills) {
+      if (p.textContent?.includes(displayNamePrefix)) return p;
+    }
+    return null;
+  }
+
+  beforeEach(() => {
+    ({ panel, container, overlay } = makePanel());
+  });
+  afterEach(() => {
+    panel.destroy();
+    overlay.destroy();
+    container.remove();
+  });
+
+  it("gameRunning=false + alle isWon=true → INGEN pill får .completed (overstrøk)", () => {
+    panel.updatePatterns(PATTERNS_5, allWon(), 1000, /* gameRunning */ false);
+    for (const name of ["Rad 1", "Rad 2", "Rad 3", "Rad 4", "Full Hus"]) {
+      const pill = findPill(name)!;
+      expect(pill).not.toBeNull();
+      expect(pill.classList.contains("completed")).toBe(false);
+    }
+  });
+
+  it("gameRunning=false → ingen pill får .active (heller ikke første)", () => {
+    panel.updatePatterns(PATTERNS_5, [], 1000, /* gameRunning */ false);
+    for (const name of ["Rad 1", "Rad 2", "Rad 3", "Rad 4", "Full Hus"]) {
+      const pill = findPill(name)!;
+      expect(pill.classList.contains("active")).toBe(false);
+    }
+  });
+
+  it("gameRunning=true (default) + isWon=true → .completed beholdes (bakoverkompat)", () => {
+    // Ingen 4. parameter — default=true.
+    panel.updatePatterns(PATTERNS_5, allWon(), 1000);
+    for (const name of ["Rad 1", "Rad 2", "Rad 3", "Rad 4", "Full Hus"]) {
+      const pill = findPill(name)!;
+      expect(pill.classList.contains("completed")).toBe(true);
+    }
+  });
+
+  it("eksplisitt gameRunning=true + isWon=true → .completed beholdes", () => {
+    panel.updatePatterns(PATTERNS_5, allWon(), 1000, /* gameRunning */ true);
+    expect(findPill("Rad 1")!.classList.contains("completed")).toBe(true);
+    expect(findPill("Full Hus")!.classList.contains("completed")).toBe(true);
+  });
+
+  it("overgang gameRunning=true → false fjerner .completed fra alle pills", () => {
+    // Først kjørende runde med vunne patterns.
+    panel.updatePatterns(PATTERNS_5, allWon(), 1000, /* gameRunning */ true);
+    expect(findPill("Rad 1")!.classList.contains("completed")).toBe(true);
+    // Runde slutter → alle pills skal nullstilles.
+    panel.updatePatterns(PATTERNS_5, allWon(), 1000, /* gameRunning */ false);
+    for (const name of ["Rad 1", "Rad 2", "Rad 3", "Rad 4", "Full Hus"]) {
+      expect(findPill(name)!.classList.contains("completed")).toBe(false);
+    }
+  });
+
+  it("ny runde starter (false → true) — fase-progresjon fungerer fortsatt", () => {
+    panel.updatePatterns(PATTERNS_5, allWon(), 1000, /* gameRunning */ false);
+    // Ny runde, ingen vinnere ennå
+    panel.updatePatterns(
+      PATTERNS_5,
+      PATTERNS_5.map((p) => ({
+        patternId: p.id,
+        patternName: p.name,
+        claimType: p.claimType,
+        isWon: false,
+        payoutAmount: 100,
+      })),
+      1000,
+      /* gameRunning */ true,
+    );
+    // Rad 1 skal være aktiv som ny fase
+    expect(findPill("Rad 1")!.classList.contains("active")).toBe(true);
+    expect(findPill("Rad 1")!.classList.contains("completed")).toBe(false);
+  });
+});
