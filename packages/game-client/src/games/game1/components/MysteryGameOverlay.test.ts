@@ -182,7 +182,7 @@ describe("MysteryGameOverlay — autospill", () => {
     overlay.destroy();
   });
 
-  it("autospill-knapp viser 'Stopp autospill' når aktiv", () => {
+  it("autospill-knapp viser 'Avslutt autospill' når aktiv", () => {
     const overlay = new MysteryGameOverlay(800, 600);
     overlay.show({
       middleNumber: 12345,
@@ -195,8 +195,38 @@ describe("MysteryGameOverlay — autospill", () => {
     expect(btn).not.toBeNull();
     expect(btn?.textContent).toBe("Start autospill");
     overlay.toggleAutospill();
-    expect(btn?.textContent).toBe("Stopp autospill");
+    expect(btn?.textContent).toBe("Avslutt autospill");
     expect(btn?.dataset["active"]).toBe("true");
+    overlay.destroy();
+  });
+
+  it("timer-pill viser 2-min countdown i m:ss format og skjules ved klikk", () => {
+    const overlay = new MysteryGameOverlay(800, 600);
+    overlay.show({
+      middleNumber: 12345,
+      resultNumber: 67890,
+      prizeListNok: [50, 100, 200, 400, 800, 1500],
+      maxRounds: 5,
+      autoTurnFirstMoveSec: 9999,
+      autoTurnOtherMoveSec: 9999,
+    });
+    // Hopp over intro (2 sek) — modal monteres + timer-pill første render.
+    vi.advanceTimersByTime(2100);
+    // Etter 2 sek intro tikker pillen rundt 1:58.
+    const pill = document.querySelector<HTMLDivElement>(
+      ".mj-root .mj-root, .mj-root",
+    );
+    // Hent timer-pill via klasse-selector er upålitelig (ingen klasse satt) —
+    // bruk textContent-sjekk på root.
+    const root = document.querySelector(".mj-root");
+    expect(root?.textContent).toMatch(/[01]:\d{2}/);
+    // Bruker klikker → pill skjules.
+    // @ts-expect-error — private.
+    overlay.selectDirection("up");
+    // @ts-expect-error — private.
+    const timerEl = overlay.timerEl as HTMLDivElement | null;
+    expect(timerEl?.style.display).toBe("none");
+    void pill;
     overlay.destroy();
   });
 

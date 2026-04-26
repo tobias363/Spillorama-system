@@ -343,6 +343,7 @@ function ensureMysteryStyles(): void {
   border: 1px solid rgba(255,232,61,0.32);
   color: rgba(255,232,61,0.85);
   cursor: pointer;
+  white-space: nowrap;
   transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 .mj-autospill-btn:hover {
@@ -364,6 +365,39 @@ function ensureMysteryStyles(): void {
   border-color: rgba(255,122,26,0.8);
   color: #ffb070;
 }
+
+/* Responsive ball-row — bredde tilpasses container slik at hele
+   spillet er synlig på smale preview-rammer (Tobias 2026-04-26). */
+.mj-ball-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+.mj-ball-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 96px;
+  flex-shrink: 0;
+}
+.mj-ball-slot {
+  height: 68px;
+  width: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (max-width: 880px) {
+  .mj-ball-row { gap: 10px; }
+  .mj-ball-col, .mj-ball-slot { width: 78px; }
+}
+@media (max-width: 760px) {
+  .mj-ball-row { gap: 8px; }
+  .mj-ball-col, .mj-ball-slot { width: 64px; }
+}
+.mj-arrow-btn { width: 100% !important; }
 `;
   document.head.appendChild(s);
 }
@@ -419,8 +453,10 @@ export class MysteryGameOverlay extends Container {
   // Autospill state (Tobias 2026-04-26): manuell-toggle + 2-min inaktivitet.
   /** True når autospill kjører (manuelt eller etter 2-min inaktivitet). */
   autospillActive = false;
-  /** 2-min inaktivitets-timer; ryddes ved første brukerklikk. */
-  private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 2-min countdown-tick (1Hz) — driver UI + auto-trigger ved 0. */
+  private inactivityTimer: ReturnType<typeof setInterval> | null = null;
+  /** Sekunder igjen til autospill kicker inn. Vises i timer-pill. */
+  private inactivitySecondsLeft = 0;
   /** Pacer-timer mellom auto-valg under aktiv autospill. */
   private autospillStepTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -740,10 +776,11 @@ export class MysteryGameOverlay extends Container {
       left: "50%",
       top: "50%",
       transform: "translate(-50%, -50%)",
-      width: "860px",
-      maxWidth: "calc(100% - 40px)",
+      width: "920px",
+      maxWidth: "calc(100% - 24px)",
+      boxSizing: "border-box",
       borderRadius: "16px",
-      padding: "24px 32px 22px",
+      padding: "24px 28px 22px",
       background:
         "radial-gradient(ellipse at top, #3d1620 0%, #1f0a10 55%, #120508 100%)",
       border: "1px solid rgba(255, 232, 61, 0.25)",
@@ -797,22 +834,37 @@ export class MysteryGameOverlay extends Container {
       gap: "10px",
       minHeight: "80px",
     });
+
+    // Tobias 2026-04-26: timer-pill + autospill-knapp side-by-side øverst.
+    // Timer viser global 2-min countdown (ikke per-runde) — utløp = autospill.
+    const timerRow = document.createElement("div");
+    Object.assign(timerRow.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+    });
     const timerPill = document.createElement("div");
     Object.assign(timerPill.style, {
-      padding: "4px 12px",
+      padding: "6px 14px",
       borderRadius: "999px",
-      fontSize: "12px",
+      fontSize: "13px",
       fontWeight: "700",
       letterSpacing: "0.5px",
-      color: "rgba(255,232,61,0.85)",
-      background: "rgba(255,232,61,0.10)",
-      border: "1px solid rgba(255,232,61,0.25)",
+      color: "rgba(255,232,61,0.95)",
+      background: "rgba(255,232,61,0.12)",
+      border: "1px solid rgba(255,232,61,0.3)",
       fontVariantNumeric: "tabular-nums",
-      minWidth: "44px",
+      minWidth: "60px",
       textAlign: "center" as const,
     });
-    headerRight.appendChild(timerPill);
+    timerRow.appendChild(timerPill);
     this.timerEl = timerPill;
+
+    const autospillBtn = this.buildAutospillBtn();
+    timerRow.appendChild(autospillBtn);
+    this.autospillBtnEl = autospillBtn;
+
+    headerRight.appendChild(timerRow);
 
     const prizeDisplay = document.createElement("div");
     Object.assign(prizeDisplay.style, {
@@ -867,7 +919,8 @@ export class MysteryGameOverlay extends Container {
     });
     modal.appendChild(divBottom);
 
-    // Footer (CTA dukker opp ved finished)
+    // Footer (CTA dukker opp ved finished). Autospill-knapp er flyttet til
+    // headerRight (Tobias 2026-04-26).
     const footer = document.createElement("div");
     Object.assign(footer.style, {
       display: "flex",
@@ -876,28 +929,15 @@ export class MysteryGameOverlay extends Container {
       gap: "12px",
       minHeight: "40px",
     });
-    // Venstre side: error + autospill-toggle.
-    const footerLeft = document.createElement("div");
-    Object.assign(footerLeft.style, {
-      display: "flex",
-      alignItems: "center",
-      gap: "12px",
-      flex: "1",
-    });
     const errorEl = document.createElement("div");
     Object.assign(errorEl.style, {
       fontSize: "12px",
       color: "#ff6b6b",
       display: "none",
     });
-    footerLeft.appendChild(errorEl);
+    footer.appendChild(errorEl);
     this.errorEl = errorEl;
 
-    const autospillBtn = this.buildAutospillBtn();
-    footerLeft.appendChild(autospillBtn);
-    this.autospillBtnEl = autospillBtn;
-
-    footer.appendChild(footerLeft);
     modal.appendChild(footer);
     this.footerEl = footer;
 
@@ -910,6 +950,7 @@ export class MysteryGameOverlay extends Container {
     this.renderFooter();
     this.refreshActiveAura();
     this.refreshAutospillBtn();
+    this.updateInactivityDisplay();
   }
 
   private buildLadder(): HTMLDivElement {
@@ -1036,8 +1077,9 @@ export class MysteryGameOverlay extends Container {
     const arena = document.createElement("div");
     Object.assign(arena.style, {
       flex: "1",
+      minWidth: "0",
       borderRadius: "12px",
-      padding: "22px 22px 20px",
+      padding: "22px 18px 20px",
       background:
         "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.25))",
       border: "1px solid rgba(255, 232, 61, 0.14)",
@@ -1047,32 +1089,18 @@ export class MysteryGameOverlay extends Container {
     });
 
     const row = document.createElement("div");
-    Object.assign(row.style, {
-      display: "flex",
-      gap: "16px",
-      justifyContent: "center",
-    });
+    row.className = "mj-ball-row";
 
     this.ballRowEls = [];
     // visualIndex 0 = leftmost; logicalIdx = maxRounds-1-vi (rightmost is index 0)
     for (let vi = 0; vi < this.maxRounds; vi += 1) {
       const logicalIdx = this.maxRounds - 1 - vi;
       const col = document.createElement("div");
-      Object.assign(col.style, {
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      });
+      col.className = "mj-ball-col";
 
       // Top slot (height 68 = ball size for alignment)
       const topSlot = document.createElement("div");
-      Object.assign(topSlot.style, {
-        height: "68px",
-        width: "96px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      });
+      topSlot.className = "mj-ball-slot";
 
       // Middle: ball (PNG + digit-overlay)
       const middleWrap = document.createElement("div");
@@ -1090,13 +1118,7 @@ export class MysteryGameOverlay extends Container {
 
       // Bottom slot
       const bottomSlot = document.createElement("div");
-      Object.assign(bottomSlot.style, {
-        height: "68px",
-        width: "96px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      });
+      bottomSlot.className = "mj-ball-slot";
 
       col.appendChild(topSlot);
       col.appendChild(middleWrap);
@@ -1322,7 +1344,7 @@ export class MysteryGameOverlay extends Container {
    * og stopper autospill hvis aktiv (manuell takeover).
    */
   private selectDirection(direction: "up" | "down"): void {
-    // Brukerinteraksjon → ikke lenger "ingen valg gjort".
+    // Brukerinteraksjon → ikke lenger "ingen valg gjort". Skjul 2-min-pill.
     this.clearInactivityTimer();
     if (this.autospillActive) {
       // Manuell overstyring under autospill: stopp burst, la denne klikken
@@ -1336,6 +1358,7 @@ export class MysteryGameOverlay extends Container {
       this.refreshAutospillBtn();
     }
     this.applyDirection(direction);
+    this.updateInactivityDisplay();
   }
 
   /**
@@ -1406,30 +1429,30 @@ export class MysteryGameOverlay extends Container {
     this.revealTimers.push(t);
   }
 
+  /**
+   * Stille per-round-timer (uten UI) som faller tilbake til optimal retning
+   * etter server-konfigurerte autoTurn*-sekunder. Brukes som safety-net hvis
+   * spilleren har klikket en gang og deretter går AFK midt i spillet (2-min
+   * global timer er da allerede ryddet). Tobias 2026-04-26: tidligere viste
+   * timeren countdown per ball — det er fjernet til fordel for global
+   * 2-min-pill.
+   */
   private startRoundTimer(): void {
     if (this.finished || this.choiceSent) return;
     if (this.autospillActive) return;
-    // Defensiv: rydd evt. tidligere timer før vi starter ny.
     this.clearAutoTimer();
     const sec =
       this.currentRound === 0
         ? this.autoTurnFirstMoveSec
         : this.autoTurnOtherMoveSec;
     this.autoCountdown = sec;
-    if (this.timerEl) this.timerEl.textContent = `${sec}s`;
     this.autoTimer = setInterval(() => {
       this.autoCountdown -= 1;
       if (this.autoCountdown <= 0) {
         this.clearAutoTimer();
-        if (this.timerEl) this.timerEl.textContent = "";
-        // Per-round timeout: velg optimal retning (ikke hardkodet "down").
-        // Tobias 2026-04-26 — tidligere implementasjon var alltid "down",
-        // som er suboptimalt for sifre 0-4.
         const cur = this.balls[this.currentRound];
         const dir = cur ? bestDirectionForDigit(cur.digit) : "down";
         this.applyDirection(dir);
-      } else if (this.timerEl) {
-        this.timerEl.textContent = `${this.autoCountdown}s`;
       }
     }, 1000);
   }
@@ -1443,23 +1466,58 @@ export class MysteryGameOverlay extends Container {
 
   // ── Autospill (Tobias 2026-04-26) ─────────────────────────────────────────
 
+  /**
+   * Starter 2-min global nedtelling. Tikker hvert sek + oppdaterer
+   * `timerEl` med "m:ss"-format. Når 0 → autospill kicker inn.
+   * Ryddes ved første brukerklikk eller når autospill aktiveres manuelt.
+   */
   private startInactivityTimer(): void {
     this.clearInactivityTimer();
-    this.inactivityTimer = setTimeout(() => {
-      this.inactivityTimer = null;
-      // Kicker bare inn hvis brukeren ikke har gjort noe valg ennå og
-      // spillet fortsatt er aktivt.
-      if (this.finished || this.choiceSent) return;
-      if (this.collectedDirections.length > 0) return;
-      this.startAutospill();
-    }, AUTOSPILL_INACTIVITY_MS);
+    this.inactivitySecondsLeft = Math.floor(AUTOSPILL_INACTIVITY_MS / 1000);
+    this.updateInactivityDisplay();
+    this.inactivityTimer = setInterval(() => {
+      this.inactivitySecondsLeft -= 1;
+      if (this.inactivitySecondsLeft <= 0) {
+        this.clearInactivityTimer();
+        if (this.finished || this.choiceSent) return;
+        if (this.collectedDirections.length > 0) return;
+        this.startAutospill();
+        return;
+      }
+      this.updateInactivityDisplay();
+    }, 1000);
   }
 
   private clearInactivityTimer(): void {
     if (this.inactivityTimer) {
-      clearTimeout(this.inactivityTimer);
+      clearInterval(this.inactivityTimer);
       this.inactivityTimer = null;
     }
+    this.updateInactivityDisplay();
+  }
+
+  /**
+   * Oppdater 2-min-pill-UI. Skjult ved finished/choiceSent/autospill-aktiv
+   * eller når brukeren har klikket noe — bare synlig i "venter-på-første-valg"
+   * fasen.
+   */
+  private updateInactivityDisplay(): void {
+    if (!this.timerEl) return;
+    const shouldHide =
+      this.finished ||
+      this.choiceSent ||
+      this.autospillActive ||
+      this.collectedDirections.length > 0 ||
+      this.inactivityTimer === null;
+    if (shouldHide) {
+      this.timerEl.style.display = "none";
+      return;
+    }
+    this.timerEl.style.display = "";
+    const total = Math.max(0, this.inactivitySecondsLeft);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    this.timerEl.textContent = `${m}:${s.toString().padStart(2, "0")}`;
   }
 
   /** Eksponert for tester + UI-knapp. */
@@ -1478,7 +1536,7 @@ export class MysteryGameOverlay extends Container {
     this.autospillActive = true;
     this.clearAutoTimer();
     this.clearInactivityTimer();
-    if (this.timerEl) this.timerEl.textContent = "";
+    this.updateInactivityDisplay();
     this.refreshActiveAura();
     this.refreshAutospillBtn();
     // Schedule first step. Hvis applyDirection allerede har en pending
@@ -1540,7 +1598,7 @@ export class MysteryGameOverlay extends Container {
     }
     this.autospillBtnEl.style.display = "";
     this.autospillBtnEl.textContent = this.autospillActive
-      ? "Stopp autospill"
+      ? "Avslutt autospill"
       : "Start autospill";
     this.autospillBtnEl.dataset["active"] = this.autospillActive
       ? "true"
