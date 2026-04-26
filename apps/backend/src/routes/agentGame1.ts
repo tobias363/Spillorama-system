@@ -343,6 +343,14 @@ export function createAgentGame1Router(
             (v: unknown): v is string => typeof v === "string"
           )
         : undefined;
+      // REQ-007 (2026-04-26): master kan overstyre "agents not ready"-popup
+      // ved å sende `confirmUnreadyHalls`. Backend ekskluderer disse hallene
+      // og logger `start_game_with_unready_override`-audit.
+      const confirmUnreadyHalls = Array.isArray(body.confirmUnreadyHalls)
+        ? body.confirmUnreadyHalls.filter(
+            (v: unknown): v is string => typeof v === "string"
+          )
+        : undefined;
 
       const startInput: Parameters<Game1MasterControlService["startGame"]>[0] =
         {
@@ -351,6 +359,9 @@ export function createAgentGame1Router(
         };
       if (confirmExcludedHalls !== undefined) {
         startInput.confirmExcludedHalls = confirmExcludedHalls;
+      }
+      if (confirmUnreadyHalls !== undefined) {
+        startInput.confirmUnreadyHalls = confirmUnreadyHalls;
       }
       const result = await masterControlService.startGame(startInput);
 

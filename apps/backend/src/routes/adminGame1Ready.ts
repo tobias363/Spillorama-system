@@ -539,6 +539,73 @@ export function createAdminGame1ReadyRouter(
     }
   );
 
+  // ── REQ-007: POST /api/admin/game1/games/:gameId/halls/:hallId/force-unready
+  //
+  // Admin-only: tving en hall fra is_ready=true → false uten hall-scope-guard.
+  // Brukes når en bingovert har disconnected uten å unmark-e ready og admin
+  // må overstyre i UI. Krever påkrevd `reason` som persisteres i audit-spor.
+  // Idempotent — returnerer { reverted: false } hvis raden allerede er false.
+
+  router.post(
+    "/api/admin/game1/games/:gameId/halls/:hallId/force-unready",
+    async (req, res) => {
+      try {
+        // Force-revert er ADMIN-only — fail-closed for HALL_OPERATOR/AGENT.
+        // Vi krever GAME1_HALL_READY_WRITE pluss eksplisitt rolle-sjekk så
+        // det er klart at dette er en escalert path.
+        const actor = await requirePermission(req, "GAME1_HALL_READY_WRITE");
+        if (actor.role !== "ADMIN") {
+          throw new DomainError(
+            "FORBIDDEN",
+            "Kun ADMIN kan tvinge revert av ready-status."
+          );
+        }
+        const gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
+        const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+        if (!isRecordObject(req.body)) {
+          throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+        }
+        const reason = mustBeNonEmptyString(req.body.reason, "reason");
+
+        const result = await hallReadyService.forceUnmarkReady({
+          gameId,
+          hallId,
+          actorUserId: actor.id,
+          reason,
+        });
+
+        fireAudit({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "hall.ready.force_revert",
+          resource: "game1_scheduled_game",
+          resourceId: gameId,
+          details: {
+            hallId,
+            reason,
+            reverted: result !== null,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+
+        // Broadcast oppdatert status hvis raden faktisk ble flippet.
+        if (result !== null) {
+          await buildAndBroadcastReadyUpdate(gameId, hallId);
+        }
+
+        apiSuccess(res, {
+          gameId,
+          hallId,
+          reverted: result !== null,
+          isReady: result?.isReady ?? false,
+        });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    }
+  );
+
   // ── TASK HS: GET /api/admin/game1/games/:gameId/hall-status ──────────────
 
   router.get(

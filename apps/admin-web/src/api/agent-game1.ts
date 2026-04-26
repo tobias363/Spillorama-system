@@ -86,12 +86,26 @@ export async function fetchAgentGame1HallStatus(): Promise<Spill1HallStatusRespo
   );
 }
 
+/**
+ * REQ-007 (2026-04-26): start Spill 1 med valgfrie override-lister.
+ *
+ *   - `confirmExcludedHalls`: bekreft haller som allerede er ekskludert
+ *     (admin/master har klikket "ekskluder" tidligere).
+ *   - `confirmUnreadyHalls`: master overstyrer "agents not ready"-popup ved
+ *     å eksplisitt bekrefte at disse hallene SKAL ekskluderes selv om de
+ *     ikke har trykket klar. Backend skriver `start_game_with_unready_override`
+ *     audit-event og setter excluded_from_game=true for hver hall i listen.
+ */
 export async function startAgentGame1(
-  confirmExcludedHalls?: string[]
+  confirmExcludedHalls?: string[],
+  confirmUnreadyHalls?: string[]
 ): Promise<Spill1ActionResponse> {
   const body: Record<string, unknown> = {};
   if (confirmExcludedHalls !== undefined) {
     body.confirmExcludedHalls = confirmExcludedHalls;
+  }
+  if (confirmUnreadyHalls !== undefined) {
+    body.confirmUnreadyHalls = confirmUnreadyHalls;
   }
   return apiRequest<Spill1ActionResponse>(
     "/api/agent/game1/start",

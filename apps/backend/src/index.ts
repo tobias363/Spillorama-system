@@ -1111,9 +1111,19 @@ jobScheduler.register({
   }),
 });
 
+// GAME1_SCHEDULE PR 2: per-hall ready-flow service. Håndterer bingovert-
+// trykker-klar + master-UI getReadyStatusForGame + purchase-cutoff-helper.
+// REQ-007: konstrueres FØR scheduler-tick slik at sweepStaleReadyRows kan
+// injiseres som dep.
+const game1HallReadyService = new Game1HallReadyService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
 // GAME1_SCHEDULE PR 1+2: 15s-tick som spawner Game 1-rader fra daily_schedules,
 // flipper status 'scheduled' → 'purchase_open', 'purchase_open' →
 // 'ready_to_start' når alle haller klare, og cancel-er utløpte rader.
+// REQ-007: tick sweeper også stale ready-rader (agent-disconnect uten unmark).
 // Default OFF — feature-flag aktiveres i staging når PR 2-3 er merget.
 const game1ScheduleTickService = new Game1ScheduleTickService({
   pool: platformService.getPool(),
@@ -1121,17 +1131,13 @@ const game1ScheduleTickService = new Game1ScheduleTickService({
 });
 jobScheduler.register({
   name: "game1-schedule-tick",
-  description: "Spawn Game 1 games from daily_schedules + advance state machine (GAME1_SCHEDULE PR 1+2).",
+  description: "Spawn Game 1 games from daily_schedules + advance state machine (GAME1_SCHEDULE PR 1+2) + REQ-007 stale ready sweep.",
   intervalMs: jobGame1ScheduleTickIntervalMs,
   enabled: jobGame1ScheduleTickEnabled,
-  run: createGame1ScheduleTickJob({ service: game1ScheduleTickService }),
-});
-
-// GAME1_SCHEDULE PR 2: per-hall ready-flow service. Håndterer bingovert-
-// trykker-klar + master-UI getReadyStatusForGame + purchase-cutoff-helper.
-const game1HallReadyService = new Game1HallReadyService({
-  pool: platformService.getPool(),
-  schema: pgSchema,
+  run: createGame1ScheduleTickJob({
+    service: game1ScheduleTickService,
+    hallReadyService: game1HallReadyService,
+  }),
 });
 
 // BIN-GAP#4: Register Sold Tickets scanner (wireframe 15.2/17.15). Per-game

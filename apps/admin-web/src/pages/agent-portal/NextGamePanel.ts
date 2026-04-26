@@ -780,14 +780,115 @@ async function onSpill1Start(): Promise<void> {
     if (!ok) return;
     confirmExcludedHalls = excludedHallIds;
   }
+  // REQ-007 (2026-04-26): forsøk start. Hvis backend kaster HALLS_NOT_READY,
+  // gjenta call med confirmUnreadyHalls etter master-bekreftelse i popup.
+  await attemptSpill1Start(confirmExcludedHalls, undefined);
+}
+
+/**
+ * REQ-007: spill 1 start-call med automatisk håndtering av HALLS_NOT_READY-
+ * fra backend. Ved feil med `unreadyHalls` i details, vises Hall Info-popup
+ * der master kan velge [Avbryt] eller [Start uansett] (override).
+ */
+async function attemptSpill1Start(
+  confirmExcludedHalls: string[] | undefined,
+  confirmUnreadyHalls: string[] | undefined
+): Promise<void> {
   try {
-    await startAgentGame1(confirmExcludedHalls);
+    await startAgentGame1(confirmExcludedHalls, confirmUnreadyHalls);
     Toast.success("Spill 1 startet");
     await refreshSpill1();
   } catch (err) {
+    // ApiError fra apiRequest har `status`/`code`/`details` på instansen.
+    if (err instanceof ApiError && err.code === "HALLS_NOT_READY") {
+      const detailsObj = err.details;
+      const unreadyHalls = Array.isArray(
+        (detailsObj as { unreadyHalls?: unknown } | null)?.unreadyHalls
+      )
+        ? ((detailsObj as { unreadyHalls: unknown[] }).unreadyHalls.filter(
+            (v): v is string => typeof v === "string"
+          ))
+        : [];
+      if (unreadyHalls.length === 0) {
+        // Master-hall er ikke klar — kan ikke overstyres. Vis feil.
+        Toast.error(err.message);
+        return;
+      }
+      const proceed = await promptHallInfoOverride(unreadyHalls);
+      if (!proceed) return;
+      // Retry med override-listen.
+      await attemptSpill1Start(confirmExcludedHalls, unreadyHalls);
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     Toast.error(msg);
   }
+}
+
+/**
+ * REQ-007: Hall Info-popup som lister Ready/Not Ready-haller før start.
+ * Master kan velge [Avbryt] eller [Start uansett]. "Start uansett" sender
+ * `confirmUnreadyHalls` til backend som ekskluderer hallene fra runden.
+ *
+ * Wireframe-referanse: PDF 16/17 §17.18 ("Hall Info"-popup).
+ */
+function promptHallInfoOverride(unreadyHalls: string[]): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const spill1 = state.spill1;
+    const allHalls = spill1?.halls ?? [];
+    // Bygg ready/not-ready-lister med hallName for visning.
+    const readyList = allHalls
+      .filter(
+        (h) =>
+          h.isReady && !h.excludedFromGame && !unreadyHalls.includes(h.hallId)
+      )
+      .map((h) => h.hallName);
+    const notReadyList = allHalls
+      .filter((h) => unreadyHalls.includes(h.hallId))
+      .map((h) => h.hallName);
+
+    const body = document.createElement("div");
+    body.setAttribute("data-marker", "spill1-hall-info-override");
+    const readyHtml = readyList.length
+      ? `<div data-marker="spill1-ready-list">
+           <strong style="color:#5cb85c;">Klare:</strong>
+           <ul>${readyList.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>
+         </div>`
+      : "";
+    const notReadyHtml = `
+      <div data-marker="spill1-not-ready-list" style="margin-top:12px;">
+        <strong style="color:#f0ad4e;">Ikke klare ennå:</strong>
+        <ul>${notReadyList.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>
+      </div>`;
+    body.innerHTML = `
+      <p>Følgende haller har ikke trykket "klar". Hvis du starter likevel blir de ekskludert fra runden.</p>
+      ${readyHtml}
+      ${notReadyHtml}
+      <p class="text-muted small" style="margin-top:12px;">
+        Avbryt for å vente på at de skal trykke klar, eller start uansett for å ekskludere dem.
+      </p>`;
+    Modal.open({
+      title: "Haller ikke klare",
+      content: body,
+      backdrop: "static",
+      keyboard: true,
+      buttons: [
+        {
+          label: "Avbryt",
+          variant: "default",
+          action: "cancel",
+          onClick: () => resolve(false),
+        },
+        {
+          label: "Start uansett",
+          variant: "warning",
+          action: "confirm",
+          onClick: () => resolve(true),
+        },
+      ],
+      onClose: () => resolve(false),
+    });
+  });
 }
 
 async function onSpill1Resume(): Promise<void> {

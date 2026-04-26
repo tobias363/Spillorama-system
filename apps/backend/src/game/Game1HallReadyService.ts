@@ -123,6 +123,42 @@ export interface RecordScanInput {
   ticketId: string;
 }
 
+/**
+ * REQ-007 (2026-04-26): input til `forceUnmarkReady`. Brukes av admin
+ * eller system når en agent disconnects og ready-flagget blir stale.
+ * `reason` persisteres som audit-spor — påkrevd for å skille manuelle
+ * intervensjoner fra automatisk heartbeat-revert.
+ */
+export interface ForceUnmarkReadyInput {
+  gameId: string;
+  hallId: string;
+  /**
+   * `userId` for actor som triggerer revert. Bruk `"SYSTEM"` for
+   * automatisk heartbeat-revert (sweepStaleReadyRows). For manuell
+   * admin-revert: admin sin userId.
+   */
+  actorUserId: string;
+  /**
+   * Maskin-lesbar grunn for revert. Eksempler:
+   *   - `"agent_disconnect"` — agent har ikke vært tilkoblet > terskel
+   *   - `"admin_force_revert"` — admin overstyrer i UI
+   *   - `"heartbeat_stale"` — automatisk sweep
+   */
+  reason: string;
+}
+
+/**
+ * REQ-007: resultat-shape for `sweepStaleReadyRows`. Brukes av tick-
+ * scheduler eller admin-API for å rapportere hvor mange ready-rader
+ * som ble revertet i siste sweep.
+ */
+export interface SweepStaleReadyResult {
+  /** Antall rader som ble flippet fra is_ready=true → false. */
+  reverted: number;
+  /** game_id + hall_id-par som ble revertet (for logging/audit). */
+  revertedRows: Array<{ gameId: string; hallId: string }>;
+}
+
 export interface Game1HallReadyServiceOptions {
   pool: Pool;
   schema?: string;
@@ -545,6 +581,156 @@ export class Game1HallReadyService {
   async getGameGroupId(gameId: string): Promise<string> {
     const game = await this.loadScheduledGame(gameId);
     return game.group_hall_id;
+  }
+
+  /**
+   * REQ-007 (2026-04-26): tving en hall fra is_ready=true → false uten
+   * status-guard. Brukes når agent har disconnected eller admin må
+   * overstyre. I motsetning til `unmarkReady` aksepterer denne også
+   * `running` og `paused` — men kun hvis hallen aldri faktisk ble brukt
+   * i pågående spill (excluded_from_game settes IKKE her; ready-flagget
+   * resettes så bingoverten må bekrefte på nytt før master kan starte
+   * ny runde).
+   *
+   * Idempotent: hvis raden ikke finnes eller er allerede `is_ready=false`,
+   * returnerer null uten å kaste.
+   *
+   * Audit: caller bør skrive audit-event i tillegg (denne service
+   * lager ikke master_audit-rad selv, fordi den brukes både i admin-API
+   * og i sweep-tick — caller har riktig context for actor + metadata).
+   */
+  async forceUnmarkReady(
+    input: ForceUnmarkReadyInput
+  ): Promise<HallReadyStatusRow | null> {
+    const reason = input.reason.trim();
+    if (!reason) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "reason kreves ved force-unmark."
+      );
+    }
+    const { rows } = await this.pool.query(
+      `UPDATE ${this.hallReadyTable()}
+         SET is_ready   = false,
+             ready_at   = NULL,
+             updated_at = now()
+       WHERE game_id = $1 AND hall_id = $2 AND is_ready = true
+       RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+                 digital_tickets_sold, physical_tickets_sold,
+                 excluded_from_game, excluded_reason, created_at, updated_at,
+                 start_ticket_id, start_scanned_at,
+                 final_scan_ticket_id, final_scanned_at`,
+      [input.gameId, input.hallId]
+    );
+    const row = rows[0];
+    if (!row) {
+      // Idempotent: ingen rad ble flippet (allerede false eller mangler).
+      log.debug(
+        { gameId: input.gameId, hallId: input.hallId, reason, actor: input.actorUserId },
+        "forceUnmarkReady: no row flipped (idempotent no-op)"
+      );
+      return null;
+    }
+    log.info(
+      {
+        gameId: input.gameId,
+        hallId: input.hallId,
+        reason,
+        actor: input.actorUserId,
+      },
+      "[REQ-007] hall ready forcibly reverted"
+    );
+    return mapRowToStatus(row);
+  }
+
+  /**
+   * REQ-007: sveip alle ready-rader for purchase_open-spill og revert
+   * de som har vært stale lengre enn `staleThresholdMs`. Brukes av
+   * tick-scheduler for automatisk recovery når en bingovert har
+   * disconnected uten å unmark-e ready.
+   *
+   * Stale = `is_ready=true` AND `updated_at < (now - threshold)`. Default
+   * 60 sekunder per REQ-007-spec ("agent disconnects > 60s").
+   *
+   * Sikkerhet: vi gjør IKKE dette for spill i `running` / `paused` —
+   * der er ready-flagget historisk informasjon (snapshot ved start) og
+   * skal ikke endres.
+   */
+  async sweepStaleReadyRows(
+    nowMs: number,
+    staleThresholdMs = 60_000
+  ): Promise<SweepStaleReadyResult> {
+    const cutoff = new Date(nowMs - staleThresholdMs);
+    const { rows } = await this.pool.query<{
+      game_id: string;
+      hall_id: string;
+    }>(
+      `UPDATE ${this.hallReadyTable()} r
+         SET is_ready   = false,
+             ready_at   = NULL,
+             updated_at = now()
+       FROM ${this.scheduledGamesTable()} g
+       WHERE r.game_id = g.id
+         AND g.status = 'purchase_open'
+         AND r.is_ready = true
+         AND r.updated_at < $1::timestamptz
+       RETURNING r.game_id, r.hall_id`,
+      [cutoff.toISOString()]
+    );
+    if (rows.length > 0) {
+      log.info(
+        {
+          reverted: rows.length,
+          staleThresholdMs,
+          rows: rows.map((r) => `${r.game_id}/${r.hall_id}`),
+        },
+        "[REQ-007] heartbeat sweep reverted stale ready rows"
+      );
+    }
+    return {
+      reverted: rows.length,
+      revertedRows: rows.map((r) => ({
+        gameId: r.game_id,
+        hallId: r.hall_id,
+      })),
+    };
+  }
+
+  /**
+   * REQ-007: nullstill alle ready-rader for et game. Brukes når et
+   * spill avsluttes (status=completed/cancelled) og en NY runde skal
+   * spawnes — den nye runden får et nytt `gameId`, så strengt tatt er
+   * dette ikke nødvendig for state-isolasjon. Men når admin manuelt
+   * "restarter" en eksisterende game-rad (dev/test-flyt) trenger vi
+   * å resette.
+   *
+   * Idempotent: trygt å kalle på spill uten ready-rader.
+   *
+   * Returnerer antall rader som ble nullstilt (kan være 0 hvis ingen
+   * rader var ready i utgangspunktet).
+   */
+  async resetReadyForNextRound(gameId: string): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE ${this.hallReadyTable()}
+         SET is_ready             = false,
+             ready_at             = NULL,
+             ready_by_user_id     = NULL,
+             start_ticket_id      = NULL,
+             start_scanned_at     = NULL,
+             final_scan_ticket_id = NULL,
+             final_scanned_at     = NULL,
+             updated_at           = now()
+       WHERE game_id = $1`,
+      [gameId]
+    );
+    const reverted = rowCount ?? 0;
+    if (reverted > 0) {
+      log.info(
+        { gameId, reverted },
+        "[REQ-007] reset ready rows for next round"
+      );
+    }
+    return reverted;
   }
 
   // ── Internal helpers ───────────────────────────────────────────────────────
