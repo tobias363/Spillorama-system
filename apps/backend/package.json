@@ -16,6 +16,7 @@
     "seed:test-users": "tsx scripts/seed-test-users-hall.ts",
     "seed:demo-tv-bonus": "tsx scripts/seed-demo-tv-and-bonus.ts",
     "seed:demo-tv-minimal": "tsx scripts/seed-demo-tv-minimal.ts",
+    "import:legacy-templates": "tsx scripts/import-legacy-subgame-templates.ts",
     "spec:lint": "redocly lint openapi.yaml"
   },
   "dependencies": {
