@@ -372,7 +372,7 @@ function mapRow(r: MockRange): Record<string, unknown> {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-test("getInitialIds returnerer alle 6 typer med initial=1 + round=1 når ingen historikk", async () => {
+test("getInitialIds returnerer alle 11 typer med initial=1 + round=1 når ingen historikk (PR #639 11-color palette)", async () => {
   const store = newStore();
   seedGame(store, "game-1");
   const pool = makeMockPool(store);
@@ -382,7 +382,7 @@ test("getInitialIds returnerer alle 6 typer med initial=1 + round=1 når ingen h
 
   assert.equal(res.gameId, "game-1");
   assert.equal(res.hallId, "hall-a");
-  assert.equal(res.entries.length, 6);
+  assert.equal(res.entries.length, TICKET_TYPES.length); // 11 etter PR #639
   for (const entry of res.entries) {
     assert.equal(entry.initialId, 1);
     assert.equal(entry.roundNumber, 1);

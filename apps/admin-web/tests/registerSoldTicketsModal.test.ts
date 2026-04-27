@@ -59,7 +59,7 @@ describe("RegisterSoldTicketsModal", () => {
     window.localStorage.removeItem("bingo_admin_access_token");
   });
 
-  it("rendrer alle 6 ticket-type-rader med Initial ID fra carry-forward", async () => {
+  it("rendrer alle 11 ticket-type-rader med Initial ID fra carry-forward (PR #639 11-color palette)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(okJson(mockInitialIds())) as typeof fetch;
 
     const mod = await import("../src/pages/agent-portal/modals/RegisterSoldTicketsModal.js");
@@ -67,7 +67,8 @@ describe("RegisterSoldTicketsModal", () => {
     await flush();
 
     const rows = document.querySelectorAll('[data-marker="register-sold-tickets-table"] tbody tr');
-    expect(rows.length).toBe(6);
+    // 11-color palette etter PR #639: 6 originale + Red + Green + Blue (samt Small/Large-varianter)
+    expect(rows.length).toBe(11);
 
     // Small Yellow: initial=1
     const syInitial = document.querySelector('[data-marker="initial-small_yellow"]');

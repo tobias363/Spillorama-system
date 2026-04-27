@@ -228,11 +228,23 @@ export function getTransaction(id: string): Promise<TransactionListItem> {
 }
 
 // ───────── Products (cart + checkout) ─────────
+//
+// Backend (BIN-583 B3.6) eier:
+//   GET  /api/agent/products                  → ProductListEnvelope
+//   POST /api/agent/products/carts            → CartSummary
+//                                               (userType=ONLINE|PHYSICAL, lines)
+//   POST /api/agent/products/carts/:id/finalize → FinalizeCartResponse
+//                                               (paymentMethod, expectedTotalCents, clientRequestId)
+//   POST /api/agent/products/carts/:id/cancel → CartSummary
+//   GET  /api/agent/products/sales/current-shift → { shiftId, sales[], count }
+//
+// listProducts() mapper backend-shape (priceCents) til UI-friendly NOK.
 
 export interface ProductSummary {
   id: string;
   name: string;
   price: number;
+  description?: string;
   imageUrl?: string;
   category?: string;
   available: boolean;
@@ -240,33 +252,62 @@ export interface ProductSummary {
 
 export interface CartLine {
   productId: string;
-  name: string;
+  productName: string;
   quantity: number;
-  unitPrice: number;
-  lineTotal: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
 }
+
+export type ProductCartUserType = "ONLINE" | "PHYSICAL";
+export type ProductPaymentMethod = "CASH" | "CARD" | "CUSTOMER_NUMBER";
 
 export interface CartSummary {
   id: string;
+  orderId: string;
+  agentUserId: string;
   hallId: string;
-  userType: "registered" | "anonymous";
-  userName?: string;
-  playerId?: string;
+  shiftId: string;
+  userType: ProductCartUserType;
+  userId: string | null;
+  username: string | null;
+  totalCents: number;
+  status: "CART_CREATED" | "ORDER_PLACED" | "CANCELLED";
   lines: CartLine[];
-  totalAmount: number;
-  status: "open" | "finalized" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
 }
 
-export function listProducts(hallId?: string): Promise<ProductSummary[]> {
+interface ProductListEnvelope {
+  hallId: string;
+  products: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    priceCents: number;
+    categoryId: string | null;
+    status: "ACTIVE" | "INACTIVE";
+  }>;
+  count: number;
+}
+
+export async function listProducts(hallId?: string): Promise<ProductSummary[]> {
   const qs = hallId ? `?hallId=${encodeURIComponent(hallId)}` : "";
-  return apiRequest<ProductSummary[]>(`/api/agent/products${qs}`, { auth: true });
+  // Backend scopes to agent's active-shift hall — `hallId` query is ignored
+  // there but we keep the parameter for forward-compat.
+  const env = await apiRequest<ProductListEnvelope>(`/api/agent/products${qs}`, { auth: true });
+  return (env.products ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    price: p.priceCents / 100,
+    description: p.description ?? undefined,
+    available: p.status === "ACTIVE",
+  }));
 }
 
 export interface CreateCartRequest {
-  hallId: string;
-  userType: "registered" | "anonymous";
-  playerId?: string;
-  userName?: string;
+  userType: ProductCartUserType;
+  userId?: string | null;
+  username?: string | null;
   lines: Array<{ productId: string; quantity: number }>;
 }
 
@@ -279,11 +320,26 @@ export function getCart(id: string): Promise<CartSummary> {
 }
 
 export interface FinalizeCartRequest {
-  paymentType: PaymentType;
-  note?: string;
+  paymentMethod: ProductPaymentMethod;
+  expectedTotalCents: number;
+  clientRequestId: string;
 }
 
-export function finalizeCart(id: string, body: FinalizeCartRequest): Promise<{ orderId: string; dailyBalance: number }> {
+export interface FinalizeCartResponse {
+  sale: {
+    id: string;
+    orderId: string;
+    totalCents: number;
+    paymentMethod: ProductPaymentMethod;
+    createdAt: string;
+  };
+  cart: CartSummary;
+}
+
+export function finalizeCart(
+  id: string,
+  body: FinalizeCartRequest,
+): Promise<FinalizeCartResponse> {
   return apiRequest(`/api/agent/products/carts/${encodeURIComponent(id)}/finalize`, {
     method: "POST",
     body,
@@ -291,13 +347,26 @@ export function finalizeCart(id: string, body: FinalizeCartRequest): Promise<{ o
   });
 }
 
-export function cancelCart(id: string): Promise<{ cancelled: true }> {
-  return apiRequest(`/api/agent/products/carts/${encodeURIComponent(id)}/cancel`, {
+export function cancelCart(id: string): Promise<CartSummary> {
+  return apiRequest<CartSummary>(`/api/agent/products/carts/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
     auth: true,
   });
 }
 
-export function getCurrentShiftProductSales(): Promise<{ totalAmount: number; orderCount: number; lines: CartLine[] }> {
+export interface ShiftProductSaleRow {
+  id: string;
+  cartId: string;
+  orderId: string;
+  paymentMethod: ProductPaymentMethod;
+  totalCents: number;
+  createdAt: string;
+}
+
+export function getCurrentShiftProductSales(): Promise<{
+  shiftId: string | null;
+  sales: ShiftProductSaleRow[];
+  count: number;
+}> {
   return apiRequest("/api/agent/products/sales/current-shift", { auth: true });
 }

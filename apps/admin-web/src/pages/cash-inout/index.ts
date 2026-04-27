@@ -11,6 +11,7 @@ import { renderSellTicketPage } from "./SellTicketPage.js";
 import { renderSoldTicketsPage } from "./SoldTicketsPage.js";
 import { renderProductCartPage } from "./ProductCartPage.js";
 import { renderPhysicalCashoutPage } from "./PhysicalCashoutPage.js";
+import { renderPhysicalCashoutSubGameDetailPage } from "./PhysicalCashoutSubGameDetailPage.js";
 import { renderCashoutDetailsPage } from "./CashoutDetailsPage.js";
 
 const CASH_INOUT_ROUTES = new Set<string>([
@@ -29,12 +30,21 @@ const CASH_INOUT_ROUTES = new Set<string>([
   "/agent/sold-tickets",
 ]);
 
+// Dynamic route: `/agent/physical-cashout/sub-game/:id` (wireframe §17.34).
+// FOLLOWUP-12 — sub-game cashout detail page.
+const SUB_GAME_DETAIL_RE = /^\/agent\/physical-cashout\/sub-game\/[^/]+$/;
+
 export function isCashInOutRoute(path: string): boolean {
-  return CASH_INOUT_ROUTES.has(path);
+  if (CASH_INOUT_ROUTES.has(path)) return true;
+  return SUB_GAME_DETAIL_RE.test(path);
 }
 
 export function mountCashInOutRoute(container: HTMLElement, path: string): void {
   container.innerHTML = "";
+  if (SUB_GAME_DETAIL_RE.test(path)) {
+    renderPhysicalCashoutSubGameDetailPage(container);
+    return;
+  }
   switch (path) {
     case "/agent/cashinout":
       renderCashInOutPage(container);

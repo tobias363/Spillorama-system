@@ -7,8 +7,7 @@
  * UI-flyt:
  *   1. Agent åpner modalen med et pre-valgt gameId (eller dropdown hvis flere
  *      pågående spill).
- *   2. Tabell med 6 rader — én per ticket-type (Small Yellow, Small White,
- *      Large Yellow, Large White, Small Purple, Large Purple).
+ *   2. Tabell med 11 rader — én per ticket-type (11-color-palette etter PR #639).
  *   3. Per rad:
  *       - Initial ID (auto-fylt fra backend via carry-forward, read-only)
  *       - Final ID (input — agent scanner barcoden eller taster inn)
@@ -20,6 +19,12 @@
  *   - Final >= Initial
  *   - Final må være tall
  *   - Minst én rad må ha Final ID satt før submit tillates.
+ *
+ * Hotkeys (legacy paritet — wireframe §17.13/17.15):
+ *   - F1   : Submit modal
+ *   - F2   : Åpne Register More Tickets-popup
+ *   - Enter: I final-input → flytt fokus til neste rad (eller submit)
+ *   - Esc  : Avbryt/lukk modal
  */
 
 import { Modal, type ModalInstance } from "../../../components/Modal.js";
@@ -100,6 +105,10 @@ export function openRegisterSoldTicketsModal(
     size: "lg",
     backdrop: "static",
     keyboard: false,
+    onClose: () => {
+      // Avregistrer hotkey-handler så vi ikke lekker listeners.
+      document.removeEventListener("keydown", hotkeyHandler);
+    },
     buttons: [
       {
         label: t("cancel_button"),
@@ -119,6 +128,38 @@ export function openRegisterSoldTicketsModal(
   let rowStates: RowState[] = [];
   const rowInputs = new Map<TicketType, HTMLInputElement>();
   const rowSoldCells = new Map<TicketType, HTMLElement>();
+
+  // Hotkeys: F1 (submit), F2 (åpne Register More), Esc (cancel). Enter er
+  // per-input (se renderTable). Modal-en kjører `keyboard: false`, så Esc må
+  // håndteres eksplisitt her.
+  const hotkeyHandler = (e: KeyboardEvent): void => {
+    if (!body.isConnected) return;
+    if (e.key === "F1") {
+      e.preventDefault();
+      void submitRows();
+      return;
+    }
+    if (e.key === "F2") {
+      e.preventDefault();
+      // Lazy import for å unngå sirkulær avhengighet ved test-load.
+      void import("./RegisterMoreTicketsModal.js").then((mod) => {
+        mod.openRegisterMoreTicketsModal({
+          gameId: opts.gameId,
+          gameName: opts.gameName,
+          hallId: opts.hallId,
+          // Etter Register More — refresh så modalen viser nye ranges.
+          onSuccess: () => void loadInitialIds(),
+        });
+      });
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      instance.close("keyboard");
+      return;
+    }
+  };
+  document.addEventListener("keydown", hotkeyHandler);
 
   void loadInitialIds();
 
@@ -239,6 +280,27 @@ export function openRegisterSoldTicketsModal(
           row.finalId = Number.isFinite(n) && Number.isInteger(n) ? n : null;
         }
         updateSoldCell(row);
+      });
+      finalInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          // Hopp til neste rads final-input, eller submit ved siste rad.
+          const idx = rowStates.findIndex((r) => r.ticketType === row.ticketType);
+          const next = rowStates
+            .slice(idx + 1)
+            .map((r) => rowInputs.get(r.ticketType))
+            .find((inp): inp is HTMLInputElement => Boolean(inp));
+          if (next) {
+            next.focus();
+            next.select();
+          } else {
+            // Siste rad → submit-knappen.
+            const submitBtn = instance.root.querySelector<HTMLButtonElement>(
+              '[data-action="submit"]',
+            );
+            submitBtn?.focus();
+          }
+        }
       });
       finalCell.append(finalInput);
       rowInputs.set(row.ticketType, finalInput);
