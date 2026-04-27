@@ -22,6 +22,9 @@ import {
   type Spill1ConfigInput,
 } from "./spill1VariantMapper.js";
 import type { GameVariantConfig, PatternConfig } from "./variantConfig.js";
+// SG-G3 (2026-04-27): Konsolidert ticket-color-slug → display-navn mapping
+// til shared-types. Se ticket-colors.ts.
+import { ALL_COLOR_DISPLAY_NAMES } from "@spillorama/shared-types";
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -271,26 +274,14 @@ export function resolveJackpotConfigFromGameConfig(
 /**
  * Slug → engine-navn for ticket-colors. Admin-UI lagrer slug-form
  * ("small_yellow") mens `patternsByColor` nøkler på engine-navn
- * ("Small Yellow"). Denne tabellen speiler `COLOR_SLUG_TO_NAME` i
- * `spill1VariantMapper.ts` — holdt lokalt for å unngå å eksportere den
- * som public API fra mapperen.
+ * ("Small Yellow").
+ *
+ * SG-G3 (2026-04-27): Derivert fra
+ * `packages/shared-types/src/ticket-colors.ts:ALL_COLOR_DISPLAY_NAMES`.
+ * Tidligere var dette en lokal kopi som måtte holdes manuelt i synk med
+ * `spill1VariantMapper.COLOR_SLUG_TO_NAME` — nå er begge én sannhets-kilde.
  */
-export const SCHEDULER_COLOR_SLUG_TO_NAME: Readonly<Record<string, string>> = {
-  small_yellow: "Small Yellow",
-  large_yellow: "Large Yellow",
-  small_white: "Small White",
-  large_white: "Large White",
-  small_purple: "Small Purple",
-  large_purple: "Large Purple",
-  small_red: "Small Red",
-  small_green: "Small Green",
-  small_orange: "Small Orange",
-  elvis1: "Elvis 1",
-  elvis2: "Elvis 2",
-  elvis3: "Elvis 3",
-  elvis4: "Elvis 4",
-  elvis5: "Elvis 5",
-};
+export const SCHEDULER_COLOR_SLUG_TO_NAME: Readonly<Record<string, string>> = ALL_COLOR_DISPLAY_NAMES;
 
 export function resolveEngineColorName(ticketColor: string): string | null {
   // Hvis fargen allerede er engine-navn ("Small Yellow") returnér den.

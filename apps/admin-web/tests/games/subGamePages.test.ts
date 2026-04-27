@@ -111,15 +111,15 @@ describe("SubGameAddEditPage", () => {
     expect(submit?.disabled).toBe(false);
   });
 
-  it("add-page includes ticket-color select with 9 canonical + 8 legacy options", async () => {
+  it("add-page includes ticket-color select with 11 canonical + 8 legacy options", async () => {
     const c = document.createElement("div");
     await renderSubGameAddPage(c);
     const colorSelect = c.querySelector<HTMLSelectElement>('select[name="selectTicketColor"]');
     expect(colorSelect).not.toBeNull();
     // Enabled for BIN-621 wire-up.
     expect(colorSelect?.disabled).toBe(false);
-    // feat/schedule-8-colors-mystery: 9 canonical TICKET_COLORS + 8 legacy strings = 17.
-    expect(colorSelect?.querySelectorAll("option").length).toBe(17);
+    // SG-G3 (2026-04-27): 11 canonical TICKET_COLORS + 8 legacy strings = 19.
+    expect(colorSelect?.querySelectorAll("option").length).toBe(19);
     // Canonical codes er blant valgene.
     const values = Array.from(colorSelect!.querySelectorAll("option")).map(
       (o) => o.getAttribute("value")
@@ -127,6 +127,9 @@ describe("SubGameAddEditPage", () => {
     expect(values).toContain("SMALL_YELLOW");
     expect(values).toContain("LARGE_PURPLE");
     expect(values).toContain("BLUE");
+    // SG-G3: nye farger fra utvidelsen
+    expect(values).toContain("SMALL_RED");
+    expect(values).toContain("SMALL_GREEN");
   });
 
   it("add-page includes status select with active/inactive", async () => {

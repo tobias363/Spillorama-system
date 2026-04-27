@@ -502,9 +502,9 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
     expect(status!.style.display).toBe("block");
   });
 
-  // ── feat/schedule-8-colors-mystery (2026-04-23): 9 farger + Mystery ─────
+  // ── SG-G3 (2026-04-27): 11 legacy farger + Mystery (utvidet fra 9) ─────
 
-  it("8-colors: type-select default STANDARD viser farge-fieldset med 9 farger", async () => {
+  it("11-colors: type-select default STANDARD viser farge-fieldset med 11 farger", async () => {
     installFetch(() => successResponse({}));
     await openScheduleEditorModal({ mode: "create" });
     await flush();
@@ -524,16 +524,19 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
     const colorCheckboxes = row.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"][data-sg-color]:not([data-sg-color-field])'
     );
-    expect(colorCheckboxes.length).toBe(9);
+    // SG-G3: utvidet fra 9 → 11 farger ved å inkludere SMALL_RED + SMALL_GREEN
+    expect(colorCheckboxes.length).toBe(11);
     const codes = Array.from(colorCheckboxes).map(
       (cb) => cb.getAttribute("data-sg-color") ?? ""
     );
     expect(codes).toEqual([
       "SMALL_YELLOW",
-      "LARGE_YELLOW",
       "SMALL_WHITE",
-      "LARGE_WHITE",
       "SMALL_PURPLE",
+      "SMALL_GREEN",
+      "SMALL_RED",
+      "LARGE_YELLOW",
+      "LARGE_WHITE",
       "LARGE_PURPLE",
       "RED",
       "GREEN",

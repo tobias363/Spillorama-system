@@ -1,37 +1,210 @@
-// ── Schedule ticket-color catalog + Mystery-game wire types ──────────────────
+// ── Ticket-color catalog (single source of truth) ───────────────────────────
 //
-// feat/schedule-8-colors-mystery (2026-04-23): Legacy Admin V1.0 "Add Schedule"-
-// dialog lot admin velge billett-farger per sub-game og angi pris + rad-premier
-// per farge. Wireframene (Admin V1.0.pdf s. 4) + Mystery-oppdatering 2023-10-05
-// krever 9 distinkte farge-varianter pluss en "Mystery"-sub-game med per-player
-// prize-options. Tidligere `LEGACY_TICKET_COLOR_OPTIONS` i admin-web hadde
-// kun 8 generiske farge-strenger uten size/variant-skille.
+// SG-G3 (2026-04-27): Konsolidert ticket-color-enum til shared-types. Tidligere
+// var den splittet over 3 filer:
+//   1. `TICKET_COLORS` (admin-UI, 9 farger UPPERCASE) — Schedule-editor
+//   2. `SPILL1_TICKET_COLORS` (admin-UI, 14 farger lowercase) — Spill 1 Add-form
+//   3. `COLOR_SLUG_TO_NAME` + `SCHEDULER_COLOR_SLUG_TO_NAME` (backend, 14 farger)
 //
-// Designvalg:
-//   1. Farge-koder er STRING-enum ("SMALL_YELLOW", "LARGE_YELLOW", ...) slik
-//      at de kan deles mellom backend-validering, admin-UI og game-client
-//      uten å bryte DB-skjema (SubGame.ticket_colors_json er JSONB string[]).
-//   2. Mystery-sub-gamen er en egen variant med multiple mulige premier —
-//      ikke en ticket-color. Den stables sammen med øvrige sub-games i
-//      Schedule men har sin egen konfig-shape.
-//   3. Per-farge rad-premier serialiseres som `rowPrizesByColor`-record på
-//      `ScheduleSubgame.extra.rowPrizesByColor`. Det holder oss bakoverkom-
-//      patible med eksisterende `ticketTypesData`-field og gjør at vi kan
-//      normalisere ut senere uten ytterligere wire-brudd.
+// Risiko før konsolidering: silent fail når admin opprettet sub-game med farge X
+// i ett UI som backend-engine ikke kjente.
+//
+// Etter konsolidering eier denne filen ÉN sannhets-kilde. Andre filer
+// re-exporterer eller deriverer fra denne.
+//
+// ── Taksonomi ────────────────────────────────────────────────────────────────
+// Vi har to tier:
+//   Tier 1 — LEGACY (11 farger): Kjernen fra legacy AIS-systemet, dokumentert
+//            i docs/architecture/LEGACY_1_TO_1_MAPPING_2026-04-23.md §3.5.
+//            Disse 11 fargene er obligatoriske og MÅ støttes av alle UI-er
+//            og engines.
+//
+//   Tier 2 — SPILL 1 EXTENSION (6 farger): Spill 1-spesifikke utvidelser
+//            som ikke finnes i legacy. Inkluderer Small Orange og Elvis 1-5.
+//            Brukes av Spill 1 Add-form og variant-mapper, men ikke av den
+//            generiske Schedule-editoren.
+//
+// ── Identifier-konvensjon ────────────────────────────────────────────────────
+// To former lever side-om-side fordi de tjener ulike lag:
+//   - SLUG-form (lowercase): "small_yellow", "large_purple", "elvis1"
+//     Brukes i: backend-API-er, DB-JSON, Spill 1 admin-UI
+//   - DISPLAY-form (Title Case): "Small Yellow", "Large Purple", "Elvis 1"
+//     Brukes i: backend-engine `TicketTypeConfig.name`, UI-render
+//   - UPPERCASE-form: "SMALL_YELLOW", "LARGE_PURPLE"
+//     Legacy-form fra Schedule-editoren (SubGamesListEditor). Tilsvarer
+//     slug-form med uppercase + underscore — samme semantikk, beholdt for
+//     bakoverkompat.
+//
+// Mappings:
+//   slug ↔ display: `LEGACY_COLOR_DISPLAY_NAMES` + `SPILL1_EXTENSION_COLOR_DISPLAY_NAMES`
+//   slug ↔ uppercase: trivielt (toUpperCase / toLowerCase)
+//
+// ── Mystery Game (sub-game variant) ──────────────────────────────────────────
+// Mystery er en egen sub-game-type (ikke en ticket-color). Lever i denne filen
+// fordi den er nært knyttet til schedule-editor sub-game-config og deler
+// validation-mønster med rowPrizesByColor.
+
+// ── Tier 1: LEGACY (11 farger) ──────────────────────────────────────────────
 
 /**
- * 9 kanoniske ticket-farger for Schedule-editoren. Matcher Admin V1.0-
- * wireframene (s. 4) + det Tobias godkjente 2026-04-23.
+ * 11 legacy ticket-color-slugger fra AIS-systemet, ref.
+ * `docs/architecture/LEGACY_1_TO_1_MAPPING_2026-04-23.md` §3.5 +
+ * `docs/architecture/SUBGAME_LEGACY_PARITY_AUDIT_2026-04-27.md` §5.3.
  *
- * Verdiene er stabile string-identifikatorer som lagres i database og
- * sendes over wire. Display-navn (nb/en) lever i admin-web/i18n.
+ * Disse 11 fargene MÅ være tilgjengelige i alle UI-er og backend-engines.
+ * Slug-form er kanonisk lagring — display-navn lever i mapper-tabellene under.
+ *
+ * Stabil rekkefølge: Small-varianter (Yellow, White, Purple, Green, Red),
+ * Large-varianter (Yellow, White, Purple), så standalone-farger (Red, Green,
+ * Blue). Rekkefølgen påvirker ikke funksjonalitet, men den bevares for
+ * konsistens i UI-rendering.
+ */
+export const LEGACY_TICKET_COLOR_SLUGS = [
+  "small_yellow",
+  "small_white",
+  "small_purple",
+  "small_green",
+  "small_red",
+  "large_yellow",
+  "large_white",
+  "large_purple",
+  "red",
+  "green",
+  "blue",
+] as const;
+
+export type LegacyTicketColorSlug = (typeof LEGACY_TICKET_COLOR_SLUGS)[number];
+
+/** Slug → engine/UI display-navn for legacy farger. */
+export const LEGACY_COLOR_DISPLAY_NAMES: Readonly<Record<LegacyTicketColorSlug, string>> = {
+  small_yellow: "Small Yellow",
+  small_white: "Small White",
+  small_purple: "Small Purple",
+  small_green: "Small Green",
+  small_red: "Small Red",
+  large_yellow: "Large Yellow",
+  large_white: "Large White",
+  large_purple: "Large Purple",
+  red: "Red",
+  green: "Green",
+  blue: "Blue",
+};
+
+// ── Tier 2: SPILL 1 EXTENSION (6 farger) ────────────────────────────────────
+
+/**
+ * Spill 1-spesifikke farger som ikke er en del av legacy-katalogen.
+ * Brukes av Spill 1 Add-form (`Spill1Config.SPILL1_TICKET_COLORS`) og
+ * `spill1VariantMapper`. Schedule-editoren (multi-game) bruker IKKE disse.
+ *
+ *   - `small_orange` — historisk Spill 1 small-variant uten legacy-paritet
+ *   - `elvis1`–`elvis5` — Elvis-billett-typene; har egen replace-pris-mekanikk
+ *     i `Spill1Config.ElvisConfig`
+ */
+export const SPILL1_EXTENSION_COLOR_SLUGS = [
+  "small_orange",
+  "elvis1",
+  "elvis2",
+  "elvis3",
+  "elvis4",
+  "elvis5",
+] as const;
+
+export type Spill1ExtensionColorSlug = (typeof SPILL1_EXTENSION_COLOR_SLUGS)[number];
+
+/** Slug → engine/UI display-navn for Spill 1-extension farger. */
+export const SPILL1_EXTENSION_COLOR_DISPLAY_NAMES: Readonly<Record<Spill1ExtensionColorSlug, string>> = {
+  small_orange: "Small Orange",
+  elvis1: "Elvis 1",
+  elvis2: "Elvis 2",
+  elvis3: "Elvis 3",
+  elvis4: "Elvis 4",
+  elvis5: "Elvis 5",
+};
+
+// ── Union: ALL (17 = 11 legacy + 6 extension) ───────────────────────────────
+
+/**
+ * Hele katalogen — legacy + Spill 1 extension. Brukes av backend-mapper
+ * som må støtte begge tier.
+ */
+export const ALL_TICKET_COLOR_SLUGS = [
+  ...LEGACY_TICKET_COLOR_SLUGS,
+  ...SPILL1_EXTENSION_COLOR_SLUGS,
+] as const;
+
+export type AnyTicketColorSlug = LegacyTicketColorSlug | Spill1ExtensionColorSlug;
+
+// ── Spill 1-spesifikt subset (14) ───────────────────────────────────────────
+
+/**
+ * Tillatte billett-farger for Spill 1 (Bingo 75-ball). Subset av
+ * `ALL_TICKET_COLOR_SLUGS` — utelater standalone `red`/`green`/`blue`
+ * (de tre legacy ticket-typene har ikke Small/Large-variant og brukes
+ * kun i Schedule-editor for andre spill).
+ *
+ * Spill 1 admin-UI (`gameManagement/Spill1Config.SPILL1_TICKET_COLORS`)
+ * re-eksporterer denne listen.
+ *
+ * Stabil rekkefølge speiler legacy `SPILL1_TICKET_COLORS`:
+ *   small/large × yellow/white/purple, small_red, small_green, small_orange,
+ *   elvis1..elvis5.
+ */
+export const SPILL1_TICKET_COLOR_SLUGS = [
+  "small_yellow",
+  "large_yellow",
+  "small_white",
+  "large_white",
+  "small_purple",
+  "large_purple",
+  "small_red",
+  "small_green",
+  "small_orange",
+  "elvis1",
+  "elvis2",
+  "elvis3",
+  "elvis4",
+  "elvis5",
+] as const;
+
+export type Spill1TicketColorSlug = (typeof SPILL1_TICKET_COLOR_SLUGS)[number];
+
+/**
+ * Slug → display-navn for HELE katalogen (legacy + extension).
+ * Eneste sannhets-kilde for backend `COLOR_SLUG_TO_NAME` og
+ * `SCHEDULER_COLOR_SLUG_TO_NAME` — disse er nå derivasjoner.
+ */
+export const ALL_COLOR_DISPLAY_NAMES: Readonly<Record<AnyTicketColorSlug, string>> = {
+  ...LEGACY_COLOR_DISPLAY_NAMES,
+  ...SPILL1_EXTENSION_COLOR_DISPLAY_NAMES,
+};
+
+// ── Schedule-editor UPPERCASE-alias ─────────────────────────────────────────
+//
+// Schedule-editoren (SubGamesListEditor.ts) bruker UPPERCASE-form
+// ("SMALL_YELLOW") som identifier i lagret JSON. Dette er en legacy-konvensjon
+// vi beholder for bakoverkompat med eksisterende ScheduleSubgame-records.
+//
+// Schedule-editoren støtter KUN Tier 1 (legacy 11 farger), ikke Spill 1
+// extension-farger — disse er kun aktuelle for Spill 1 selv.
+
+/**
+ * 11 legacy farger i UPPERCASE-form for Schedule-editor. Direkte derivat av
+ * `LEGACY_TICKET_COLOR_SLUGS` (slug.toUpperCase()).
+ *
+ * BREAKING CHANGE 2026-04-27: utvidet fra 9 → 11 farger ved å inkludere
+ * `SMALL_RED` og `SMALL_GREEN` (som finnes i legacy AIS men manglet her).
+ * Eksisterende ScheduleSubgame-records er ikke påvirket — de inneholder
+ * subset av disse 11 + evt. legacy fri-form-strenger.
  */
 export const TICKET_COLORS = [
   "SMALL_YELLOW",
-  "LARGE_YELLOW",
   "SMALL_WHITE",
-  "LARGE_WHITE",
   "SMALL_PURPLE",
+  "SMALL_GREEN",
+  "SMALL_RED",
+  "LARGE_YELLOW",
+  "LARGE_WHITE",
   "LARGE_PURPLE",
   "RED",
   "GREEN",
@@ -41,14 +214,42 @@ export const TICKET_COLORS = [
 export type TicketColor = (typeof TICKET_COLORS)[number];
 
 /**
- * Type-guard for ticket-color strings. Brukes av admin-web og backend-
- * validering for å skille 9-kanoniske farger fra legacy-fri-form-strenger
- * ("Yellow", "Blue", ...). Service-laget må fortsatt akseptere legacy-
- * strenger inntil all konfig er migrert (fail-open på ukjente strenger).
+ * Type-guard for ticket-color UPPERCASE-strings (Schedule-editor-format).
+ * Brukes av admin-web og backend-validering for å skille kanoniske
+ * 11-farger fra legacy fri-form-strenger ("Yellow", "Blue", ...). Service-
+ * laget må fortsatt akseptere legacy-strenger inntil all konfig er migrert
+ * (fail-open på ukjente strenger).
  */
 export function isTicketColor(value: unknown): value is TicketColor {
   return typeof value === "string" && (TICKET_COLORS as readonly string[]).includes(value);
 }
+
+// ── Helpers: konverter mellom representasjoner ──────────────────────────────
+
+/** Slug ("small_yellow") → UPPERCASE ("SMALL_YELLOW"). */
+export function colorSlugToUppercase(slug: string): string {
+  return slug.toUpperCase();
+}
+
+/** UPPERCASE ("SMALL_YELLOW") → slug ("small_yellow"). */
+export function colorUppercaseToSlug(uppercase: string): string {
+  return uppercase.toLowerCase();
+}
+
+/**
+ * Slug → display-navn ("Small Yellow"), eller null for ukjent slug.
+ * Backend-engine bruker dette for å mappe admin-UI-input til
+ * `TicketTypeConfig.name`.
+ */
+export function colorDisplayName(slug: string): string | null {
+  const lower = slug.toLowerCase();
+  if (lower in ALL_COLOR_DISPLAY_NAMES) {
+    return ALL_COLOR_DISPLAY_NAMES[lower as AnyTicketColorSlug];
+  }
+  return null;
+}
+
+// ── RowPrizesByColor (Schedule-editor sub-game prize-matrix) ────────────────
 
 /**
  * Per-farge rad-premier for en sub-game slot. Matcher legacy
@@ -74,8 +275,8 @@ export interface TicketColorRowPrizes {
 
 /**
  * Record-form som lagres på `ScheduleSubgame.extra.rowPrizesByColor`.
- * Key er `TicketColor`; value er `TicketColorRowPrizes`. Mangel på en
- * key betyr at fargen ikke har pris-oppføring enda (admin fyller ut
+ * Key er `TicketColor` (UPPERCASE); value er `TicketColorRowPrizes`. Mangel
+ * på en key betyr at fargen ikke har pris-oppføring enda (admin fyller ut
  * progressivt).
  */
 export type RowPrizesByColor = Partial<Record<TicketColor, TicketColorRowPrizes>>;

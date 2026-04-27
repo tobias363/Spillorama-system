@@ -185,28 +185,28 @@ export function isGameNameLocallyValid(name: string): boolean {
   return trimmed.length > 0 && trimmed.length <= 40;
 }
 
+// SG-G3 (2026-04-27): Hentes fra shared-types canonical liste i stedet for
+// lokal duplisering. Re-eksporteres i samme rekkefølge som tidligere for å
+// unngå breaking change i `LEGACY_TICKET_COLOR_OPTIONS`-konsumenter.
+import { TICKET_COLORS } from "../../../../../../packages/shared-types/src/ticket-colors.js";
+
 /**
  * Ticket-color options for the SubGame multi-select.
  *
- * feat/schedule-8-colors-mystery (2026-04-23): listen nå er en union av:
- *   1. De 9 canonical TICKET_COLORS-kodene (Admin V1.0 s. 4, Tobias-godkjent
- *      2026-04-23). Disse brukes av Schedule-editor og nye Game 1-flows.
+ * Listen er en union av:
+ *   1. De 11 canonical legacy `TICKET_COLORS`-kodene (UPPERCASE-form fra
+ *      shared-types). Brukes av Schedule-editor og nye Game 1-flows.
  *   2. Legacy fri-form-strenger ("Yellow", "Blue", ...) beholdt for
  *      bakoverkompat inntil alle SubGame-maler er migrert.
+ *
+ * BREAKING CHANGE 2026-04-27 (SG-G3): utvidet fra 9 → 11 canonical farger
+ * ved å inkludere `SMALL_RED` + `SMALL_GREEN`. Total: 11 + 8 legacy = 19.
  *
  * Backend `SubGameService.assertTicketColors` tillater begge skjemaene
  * (string-dedup, fail-open på ukjente koder).
  */
 export const LEGACY_TICKET_COLOR_OPTIONS = [
-  "SMALL_YELLOW",
-  "LARGE_YELLOW",
-  "SMALL_WHITE",
-  "LARGE_WHITE",
-  "SMALL_PURPLE",
-  "LARGE_PURPLE",
-  "RED",
-  "GREEN",
-  "BLUE",
+  ...TICKET_COLORS,
   "Yellow",
   "Blue",
   "Green",

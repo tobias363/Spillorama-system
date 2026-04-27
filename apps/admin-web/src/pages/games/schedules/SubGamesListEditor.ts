@@ -48,6 +48,8 @@ const TIME_RE = /^$|^[0-9]{2}:[0-9]{2}$/;
  * Map fra canonical ticket-color-kode til i18n-nøkkel for display-navn.
  * i18n-oppslaget gjøres ved render-tid slik at admin kan bytte språk
  * uten å refreshe UI-state.
+ *
+ * SG-G3 (2026-04-27): utvidet fra 9 → 11 farger (SMALL_RED + SMALL_GREEN).
  */
 const COLOR_I18N_KEY: Record<TicketColor, string> = {
   SMALL_YELLOW: "ticket_color_small_yellow",
@@ -56,6 +58,8 @@ const COLOR_I18N_KEY: Record<TicketColor, string> = {
   LARGE_WHITE: "ticket_color_large_white",
   SMALL_PURPLE: "ticket_color_small_purple",
   LARGE_PURPLE: "ticket_color_large_purple",
+  SMALL_GREEN: "ticket_color_small_green",
+  SMALL_RED: "ticket_color_small_red",
   RED: "ticket_color_red",
   GREEN: "ticket_color_green",
   BLUE: "ticket_color_blue",

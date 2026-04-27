@@ -180,15 +180,18 @@ describe("isGameNameLocallyValid", () => {
 });
 
 describe("LEGACY_TICKET_COLOR_OPTIONS", () => {
-  it("exposes canonical 9-color codes first, legacy strings last", () => {
-    // feat/schedule-8-colors-mystery (2026-04-23): de 9 canonical TICKET_COLORS
-    // er prepended, de 8 legacy-navnene beholdes for bakoverkompat.
+  it("exposes canonical 11-color codes first, legacy strings last", () => {
+    // SG-G3 (2026-04-27): de 11 canonical TICKET_COLORS er prepended
+    // (utvidet fra 9 → 11 ved å inkludere SMALL_RED + SMALL_GREEN), de 8
+    // legacy-navnene beholdes for bakoverkompat.
     expect(LEGACY_TICKET_COLOR_OPTIONS).toEqual([
       "SMALL_YELLOW",
-      "LARGE_YELLOW",
       "SMALL_WHITE",
-      "LARGE_WHITE",
       "SMALL_PURPLE",
+      "SMALL_GREEN",
+      "SMALL_RED",
+      "LARGE_YELLOW",
+      "LARGE_WHITE",
       "LARGE_PURPLE",
       "RED",
       "GREEN",
@@ -206,6 +209,7 @@ describe("LEGACY_TICKET_COLOR_OPTIONS", () => {
 
   it("is a readonly tuple (cannot push)", () => {
     expect(Array.isArray(LEGACY_TICKET_COLOR_OPTIONS)).toBe(true);
-    expect(LEGACY_TICKET_COLOR_OPTIONS.length).toBe(17);
+    // SG-G3: 11 canonical + 8 legacy = 19
+    expect(LEGACY_TICKET_COLOR_OPTIONS.length).toBe(19);
   });
 });

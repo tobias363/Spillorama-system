@@ -40,6 +40,10 @@ import {
   type PresetPatternConfig,
   type Spill1SubVariantType,
 } from "@spillorama/shared-types";
+// SG-G3 (2026-04-27): Konsolidert ticket-color-slug → display-navn mapping
+// til shared-types. `COLOR_SLUG_TO_NAME` under er nå derivert fra
+// `ALL_COLOR_DISPLAY_NAMES`.
+import { ALL_COLOR_DISPLAY_NAMES } from "@spillorama/shared-types";
 
 // ── Public input-type (defensive shape) ─────────────────────────────────────
 
@@ -112,26 +116,12 @@ interface PatternPrizeInput {
 /**
  * Admin-UI farge-slug → engine-side `TicketTypeConfig.name`.
  *
- * Må holdes i synk med `apps/admin-web/src/pages/games/gameManagement/
- * Spill1Config.ts:SPILL1_TICKET_COLORS`. Testet via symmetri-unit-test i
- * `spill1VariantMapper.test.ts`.
+ * SG-G3 (2026-04-27): Derivert fra
+ * `packages/shared-types/src/ticket-colors.ts:ALL_COLOR_DISPLAY_NAMES`.
+ * Tidligere var dette en lokal kopi som måtte holdes manuelt i synk med
+ * admin-UI `SPILL1_TICKET_COLORS` — nå er begge sider én sannhets-kilde.
  */
-const COLOR_SLUG_TO_NAME: Readonly<Record<string, string>> = {
-  small_yellow: "Small Yellow",
-  large_yellow: "Large Yellow",
-  small_white: "Small White",
-  large_white: "Large White",
-  small_purple: "Small Purple",
-  large_purple: "Large Purple",
-  small_red: "Small Red",
-  small_green: "Small Green",
-  small_orange: "Small Orange",
-  elvis1: "Elvis 1",
-  elvis2: "Elvis 2",
-  elvis3: "Elvis 3",
-  elvis4: "Elvis 4",
-  elvis5: "Elvis 5",
-};
+const COLOR_SLUG_TO_NAME: Readonly<Record<string, string>> = ALL_COLOR_DISPLAY_NAMES;
 
 /**
  * Admin-UI pattern-slug → engine-side `PatternConfig.name`.

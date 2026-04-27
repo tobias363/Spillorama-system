@@ -11,25 +11,19 @@
 // Beløp oppgis i NOK (hele kroner) i UI-en og konverteres til øre ved
 // submission (x100) for backend-feltet `ticketPrice` (smallest currency unit).
 
-/** Tillatte billett-farger for Spill 1 (Bingo 75-ball). */
-export const SPILL1_TICKET_COLORS = [
-  "small_yellow",
-  "large_yellow",
-  "small_white",
-  "large_white",
-  "small_purple",
-  "large_purple",
-  "small_red",
-  "small_green",
-  "small_orange",
-  "elvis1",
-  "elvis2",
-  "elvis3",
-  "elvis4",
-  "elvis5",
-] as const;
+// SG-G3 (2026-04-27): Konsolidert til shared-types. Listen lever nå i
+// `packages/shared-types/src/ticket-colors.ts` som
+// `SPILL1_TICKET_COLOR_SLUGS`. Vi re-eksporterer den her under det navnet
+// admin-UI bruker for å unngå breaking change for eksisterende imports.
+import {
+  SPILL1_TICKET_COLOR_SLUGS,
+  type Spill1TicketColorSlug,
+} from "../../../../../../packages/shared-types/src/ticket-colors.js";
 
-export type Spill1TicketColor = (typeof SPILL1_TICKET_COLORS)[number];
+/** Tillatte billett-farger for Spill 1 (Bingo 75-ball). */
+export const SPILL1_TICKET_COLORS = SPILL1_TICKET_COLOR_SLUGS;
+
+export type Spill1TicketColor = Spill1TicketColorSlug;
 
 /** Pattern-linjer for norsk 5-fase bingo (BIN-694). */
 export const SPILL1_PATTERNS = ["row_1", "row_2", "row_3", "row_4", "full_house"] as const;
