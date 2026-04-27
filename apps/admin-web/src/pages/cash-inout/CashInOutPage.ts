@@ -32,6 +32,7 @@ import { getCurrentShift, getDailyBalance, type DailyBalance } from "../../api/a
 import { ApiError } from "../../api/client.js";
 import { requireSlotProvider } from "../../components/SlotProviderSwitch.js";
 import { listAgentRooms } from "../../api/agent-next-game.js";
+import { listHalls } from "../../api/admin-halls.js";
 import { openSlotMachineModal } from "./modals/SlotMachineModal.js";
 import { openSettlementBreakdownModal } from "./modals/SettlementBreakdownModal.js";
 import { openControlDailyBalanceModal } from "./modals/ControlDailyBalanceModal.js";
@@ -58,6 +59,10 @@ export function renderCashInOutPage(container: HTMLElement): void {
         <a class="btn btn-primary" href="javascript:history.back()" data-action="back">
           <i class="fa fa-arrow-left" aria-hidden="true"></i> ${escapeHtml(t("back"))}
         </a>
+        <button type="button" class="btn btn-info" data-action="open-tv-screen"
+                title="${escapeHtml(t("open_tv_screen_hint") || "Åpner TV-skjermen i nytt vindu — drag til hall-storskjerm")}">
+          <i class="fa fa-tv" aria-hidden="true"></i> ${escapeHtml(t("open_tv_screen") || "Åpne TV-skjerm")}
+        </button>
         <button type="button" class="btn btn-danger" data-action="shift-log-out">
           <i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
         </button>
@@ -336,6 +341,12 @@ function wireActions(container: HTMLElement): void {
         // en informativ "ingen aktivt rom"-toast og lukker seg selv.
         void onClickCheckForBingo();
         break;
+      case "open-tv-screen":
+        // Tobias 2026-04-27: Agent klikker "Åpne TV-skjerm" → popup-vindu
+        // åpnes med /admin/#/tv/<hallId>/<tvToken>. Agenten drar vinduet til
+        // hall-storskjerm. URL er public (kun tvToken-gated).
+        void onClickOpenTvScreen();
+        break;
       // shift-log-out, todays-sales-report, create-new-unique-id, sell-products
       // håndteres via href eller av AgentCashInOutPage (Shift Log Out).
     }
@@ -487,6 +498,63 @@ async function onClickCheckForBingo(): Promise<void> {
     // generisk "Noe gikk galt"-toast som krever manuell retry.
   }
   openCheckForBingoModal({ roomCode });
+}
+
+/**
+ * "Åpne TV-skjerm"-knapp — wireframe §16.5 + Tobias 2026-04-27.
+ *
+ * Bingoverten klikker for å åpne hall-TV-skjermen i nytt vindu (popup).
+ * Vinduet kan dras over til hall-storskjerm og viser live trekninger,
+ * pattern-status og vinnere mellom spill.
+ *
+ * Flyt:
+ *   1. Hent agentens hallId fra session.
+ *   2. Hent tvToken for denne hallen (listHalls + filter).
+ *   3. window.open med URL `/admin/#/tv/<hallId>/<tvToken>`.
+ *   4. Hvis hall mangler tvToken (ikke konfigurert): toast med admin-oppfordring.
+ *   5. Hvis popup blokkert av browser: toast med URL så bingoverten kan kopiere.
+ *
+ * URL-en er public (kun tvToken-gated) — TV-side trenger ikke admin-login,
+ * så popup-en kan dras til hall-PC uten å logge inn på admin der.
+ */
+async function onClickOpenTvScreen(): Promise<void> {
+  const session = getSession();
+  const hallId = session?.hall?.[0]?.id;
+  if (!hallId) {
+    Toast.error(
+      t("open_tv_screen_no_hall") || "Ingen hall valgt — sjekk skift-status",
+    );
+    return;
+  }
+  let tvToken: string | undefined;
+  try {
+    const halls = await listHalls();
+    const hall = halls.find((h) => h.id === hallId);
+    tvToken = hall?.tvToken;
+  } catch (err) {
+    Toast.error(
+      err instanceof ApiError
+        ? err.message
+        : t("open_tv_screen_load_error") || "Kunne ikke hente hall-data",
+    );
+    return;
+  }
+  if (!tvToken) {
+    Toast.error(
+      t("open_tv_screen_no_token") ||
+        "Hallen mangler TV-token. Be admin generere én på Hall-management.",
+    );
+    return;
+  }
+  // Bygg URL og åpne popup. window.open returnerer null hvis blokkert.
+  const tvUrl = `/admin/#/tv/${encodeURIComponent(hallId)}/${encodeURIComponent(tvToken)}`;
+  const features = "popup=yes,width=1920,height=1080,resizable=yes,scrollbars=no,status=no,location=no,toolbar=no,menubar=no";
+  const popup = window.open(tvUrl, "spillorama-tv-screen", features);
+  if (!popup) {
+    Toast.warning(
+      `${t("open_tv_screen_popup_blocked") || "Popup blokkert. Åpne manuelt:"} ${window.location.origin}${tvUrl}`,
+    );
+  }
 }
 
 /**
