@@ -393,19 +393,133 @@ interface StoredRow {
   start_time: string | null;
   end_time: string | null;
   notes: string | null;
+  recurring_pattern_id: string | null;
+}
+
+/** REQ-116: in-memory rad for recurring-patterns. */
+interface StoredPatternRow {
+  id: string;
+  game_management_id: string;
+  pattern_json: Record<string, unknown>;
+  start_date: string;
+  end_date: string | null;
+  max_occurrences: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
 }
 
 function makeStorePool(initial: StoredRow[] = []): {
   pool: StubPool;
   rows: StoredRow[];
+  patterns: StoredPatternRow[];
   insertSqls: string[];
 } {
   const rows: StoredRow[] = [...initial];
+  const patterns: StoredPatternRow[] = [];
   const insertSqls: string[] = [];
   let counter = rows.length;
   const pool: StubPool = {
     query: async (sql, params) => {
       const args = (params ?? []) as unknown[];
+
+      // ── REQ-116: app_close_day_recurring_patterns ───────────────────
+      if (sql.includes("app_close_day_recurring_patterns")) {
+        if (sql.includes("INSERT")) {
+          insertSqls.push(sql);
+          const [
+            id,
+            gameId,
+            patternJson,
+            startDate,
+            endDate,
+            maxOccurrences,
+            startTime,
+            endTime,
+            notes,
+            createdBy,
+          ] = args as [
+            string,
+            string,
+            string,
+            string,
+            string | null,
+            number | null,
+            string | null,
+            string | null,
+            string | null,
+            string,
+          ];
+          counter += 1;
+          const row: StoredPatternRow = {
+            id,
+            game_management_id: gameId,
+            pattern_json: JSON.parse(patternJson) as Record<string, unknown>,
+            start_date: startDate,
+            end_date: endDate,
+            max_occurrences: maxOccurrences,
+            start_time: startTime,
+            end_time: endTime,
+            notes,
+            created_by: createdBy,
+            created_at: `2026-04-20T12:00:00.${String(counter).padStart(3, "0")}Z`,
+            deleted_at: null,
+            deleted_by: null,
+          };
+          patterns.push(row);
+          return { rows: [row] };
+        }
+        if (sql.includes("UPDATE")) {
+          // soft-delete via UPDATE deleted_at + deleted_by
+          const [patternId, gameId, deletedBy] = args as [string, string, string];
+          const target = patterns.find(
+            (p) => p.id === patternId && p.game_management_id === gameId
+          );
+          if (!target) return { rows: [] };
+          if (target.deleted_at === null) {
+            target.deleted_at = `2026-04-21T08:00:00.${String(counter).padStart(3, "0")}Z`;
+            target.deleted_by = deletedBy;
+          }
+          return { rows: [{ ...target }] };
+        }
+        // SELECT WHERE deleted_at IS NULL
+        if (sql.includes("SELECT")) {
+          const gameId = String(args[0]);
+          const out = patterns.filter(
+            (p) => p.game_management_id === gameId && p.deleted_at === null
+          );
+          return { rows: out };
+        }
+        return { rows: [] };
+      }
+
+      // ── REQ-116: bulk DELETE FROM app_close_day_log by recurring_pattern_id ──
+      if (
+        sql.includes("DELETE FROM") &&
+        sql.includes("recurring_pattern_id = $2")
+      ) {
+        const gameId = String(args[0]);
+        const patternId = String(args[1]);
+        let removed = 0;
+        for (let i = rows.length - 1; i >= 0; i -= 1) {
+          const r = rows[i]!;
+          if (
+            r.game_management_id === gameId &&
+            r.recurring_pattern_id === patternId
+          ) {
+            rows.splice(i, 1);
+            removed += 1;
+          }
+        }
+        return { rows: [], rowCount: removed } as unknown as {
+          rows: unknown[];
+        };
+      }
+
       // SELECT bulk by ANY()
       if (sql.includes("= ANY(")) {
         const gameId = String(args[0]);
@@ -422,6 +536,11 @@ function makeStorePool(initial: StoredRow[] = []): {
         !sql.includes("ANY(")
       ) {
         const gameId = String(args[0]);
+        // listForGame har bare 1 arg; SELECT-by-date har 2.
+        if (args.length === 1) {
+          const out = rows.filter((r) => r.game_management_id === gameId);
+          return { rows: out.slice().sort((a, b) => a.close_date.localeCompare(b.close_date)) };
+        }
         const date = String(args[1]);
         const out = rows.filter(
           (r) => r.game_management_id === gameId && r.close_date === date
@@ -430,17 +549,27 @@ function makeStorePool(initial: StoredRow[] = []): {
       }
       if (sql.includes("INSERT")) {
         insertSqls.push(sql);
-        const [id, gameId, date, closedBy, summaryJson, startTime, endTime, notes] =
-          args as [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string | null,
-            string | null,
-            string | null
-          ];
+        const [
+          id,
+          gameId,
+          date,
+          closedBy,
+          summaryJson,
+          startTime,
+          endTime,
+          notes,
+          recurringPatternId,
+        ] = args as [
+          string,
+          string,
+          string,
+          string,
+          string,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+        ];
         // Idempotency: simulate UNIQUE-constraint
         const dup = rows.find(
           (r) => r.game_management_id === gameId && r.close_date === date
@@ -461,6 +590,7 @@ function makeStorePool(initial: StoredRow[] = []): {
           start_time: startTime,
           end_time: endTime,
           notes,
+          recurring_pattern_id: recurringPatternId ?? null,
         };
         rows.push(row);
         return { rows: [row] };
@@ -505,7 +635,7 @@ function makeStorePool(initial: StoredRow[] = []): {
       throw new Error("unexpected");
     },
   };
-  return { pool, rows, insertSqls };
+  return { pool, rows, patterns, insertSqls };
 }
 
 test("BIN-700 service: closeMany single → 1 rad, createdDates har den ene datoen", async () => {
@@ -931,6 +1061,7 @@ test("BIN-700 service: listForGame returnerer alle rader sortert ascending", asy
       start_time: null,
       end_time: null,
       notes: null,
+      recurring_pattern_id: null,
     },
     {
       id: "cd-1",
@@ -942,6 +1073,7 @@ test("BIN-700 service: listForGame returnerer alle rader sortert ascending", asy
       start_time: null,
       end_time: null,
       notes: null,
+      recurring_pattern_id: null,
     },
     {
       id: "cd-2",
@@ -953,6 +1085,7 @@ test("BIN-700 service: listForGame returnerer alle rader sortert ascending", asy
       start_time: null,
       end_time: null,
       notes: null,
+      recurring_pattern_id: null,
     },
   ];
   const customPool: StubPool = {
@@ -1029,4 +1162,706 @@ test("BIN-700 service: closeMany consecutive bevarer summary-snapshot per dato",
     assert.equal(summary.totalEarning, 50000);
     assert.equal(summary.gameManagementId, "gm-1");
   }
+});
+
+// ── REQ-116: Recurring patterns ──────────────────────────────────────────
+
+/**
+ * Hjelpefunksjon: cast result til CloseRecurringResult for tests. Service-
+ * laget returnerer en union, men recurring-tests vet hvilken variant kommer.
+ */
+function asRecurring<T>(result: T): T & {
+  pattern: { id: string; pattern: { type: string } };
+  expandedCount: number;
+} {
+  return result as T & {
+    pattern: { id: string; pattern: { type: string } };
+    expandedCount: number;
+  };
+}
+
+test("REQ-116 service: weekly-pattern (mandager) expanderer til riktige datoer", async () => {
+  const { pool, rows, patterns } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  // 2026-04-20 er en mandag. Range 2026-04-20 → 2026-05-11 (3 uker, 4 mandager).
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] }, // monday
+      startDate: "2026-04-20",
+      endDate: "2026-05-11",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.pattern.pattern.type, "weekly");
+  assert.equal(result.expandedCount, 4);
+  const dates = rows.map((r) => r.close_date).sort();
+  assert.deepEqual(dates, ["2026-04-20", "2026-04-27", "2026-05-04", "2026-05-11"]);
+  // Alle child-rader skal peke til pattern
+  for (const r of rows) {
+    assert.equal(r.recurring_pattern_id, result.pattern.id);
+  }
+  assert.equal(patterns.length, 1);
+  assert.equal(patterns[0]!.deleted_at, null);
+});
+
+test("REQ-116 service: weekly-pattern med flere ukedager (tir+tor) expanderer til alle", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  // 2026-04-20 = mandag. Tir = 21, tor = 23.
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [2, 4] },
+      startDate: "2026-04-20",
+      endDate: "2026-04-26",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 2);
+  const dates = rows.map((r) => r.close_date).sort();
+  assert.deepEqual(dates, ["2026-04-21", "2026-04-23"]);
+});
+
+test("REQ-116 service: monthly_dates [15] expanderer 15. hver måned", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_dates", dates: [15] },
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 12);
+  const dates = rows.map((r) => r.close_date).sort();
+  for (let m = 1; m <= 12; m += 1) {
+    const mm = String(m).padStart(2, "0");
+    assert.ok(dates.includes(`2026-${mm}-15`), `mangler 2026-${mm}-15`);
+  }
+});
+
+test("REQ-116 service: monthly_dates [31] hopper over måneder med <31 dager (feb, apr, jun, sep, nov)", async () => {
+  // 2026 har: jan31, feb28, mar31, apr30, mai31, jun30, jul31, aug31,
+  // sep30, okt31, nov30, des31 → måneder med 31 dager: 1, 3, 5, 7, 8, 10, 12 (7 datoer).
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_dates", dates: [31] },
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 7);
+  const dates = rows.map((r) => r.close_date).sort();
+  assert.deepEqual(dates, [
+    "2026-01-31",
+    "2026-03-31",
+    "2026-05-31",
+    "2026-07-31",
+    "2026-08-31",
+    "2026-10-31",
+    "2026-12-31",
+  ]);
+});
+
+test("REQ-116 service: monthly_dates [29] inkluderer feb i skuddår, hopper over i ikke-skuddår", async () => {
+  // 2024 = skuddår (har feb 29), 2025 = ikke skuddår (feb 28).
+  // For 2024: feb 29 inkluderes. For 2025: feb 29 hoppes over.
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const r1 = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_dates", dates: [29] },
+      startDate: "2024-02-01",
+      endDate: "2024-02-29",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(r1.expandedCount, 1, "skuddår → feb 29 inkludert");
+  assert.equal(rows[0]!.close_date, "2024-02-29");
+
+  // Reset
+  rows.length = 0;
+  const r2 = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_dates", dates: [29] },
+      startDate: "2025-02-01",
+      endDate: "2025-02-28",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(r2.expandedCount, 0, "ikke-skuddår → feb 29 hoppet over");
+});
+
+test("REQ-116 service: monthly_weekday — første mandag i hver måned", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_weekday", week: 1, dayOfWeek: 1 }, // første mandag
+      startDate: "2026-01-01",
+      endDate: "2026-06-30",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 6);
+  const dates = rows.map((r) => r.close_date).sort();
+  // Første mandag 2026: jan 5, feb 2, mar 2, apr 6, mai 4, jun 1.
+  assert.deepEqual(dates, [
+    "2026-01-05",
+    "2026-02-02",
+    "2026-03-02",
+    "2026-04-06",
+    "2026-05-04",
+    "2026-06-01",
+  ]);
+});
+
+test("REQ-116 service: monthly_weekday — siste fredag i hver måned", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_weekday", week: "last", dayOfWeek: 5 }, // last friday
+      startDate: "2026-01-01",
+      endDate: "2026-04-30",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 4);
+  const dates = rows.map((r) => r.close_date).sort();
+  // Siste fredag 2026: jan 30, feb 27, mar 27, apr 24.
+  assert.deepEqual(dates, ["2026-01-30", "2026-02-27", "2026-03-27", "2026-04-24"]);
+});
+
+test("REQ-116 service: monthly_weekday — fjerde tirsdag (week=4)", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_weekday", week: 4, dayOfWeek: 2 }, // 4th tuesday
+      startDate: "2026-01-01",
+      endDate: "2026-03-31",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 3);
+  const dates = rows.map((r) => r.close_date).sort();
+  // Fjerde tirsdag: jan 27, feb 24, mar 24.
+  assert.deepEqual(dates, ["2026-01-27", "2026-02-24", "2026-03-24"]);
+});
+
+test("REQ-116 service: yearly { month: 12, day: 25 } — 1. juledag årlig", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "yearly", month: 12, day: 25 },
+      startDate: "2026-01-01",
+      endDate: "2028-12-31",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 3);
+  const dates = rows.map((r) => r.close_date).sort();
+  assert.deepEqual(dates, ["2026-12-25", "2027-12-25", "2028-12-25"]);
+});
+
+test("REQ-116 service: yearly { month: 2, day: 29 } hopper over ikke-skuddår", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  // 2024 = skuddår, 2025-2027 = ikke skuddår, 2028 = skuddår
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "yearly", month: 2, day: 29 },
+      startDate: "2024-01-01",
+      endDate: "2028-12-31",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 2);
+  const dates = rows.map((r) => r.close_date).sort();
+  assert.deepEqual(dates, ["2024-02-29", "2028-02-29"]);
+});
+
+test("REQ-116 service: daily-pattern expanderer alle dager i range", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "daily" },
+      startDate: "2026-04-20",
+      endDate: "2026-04-26",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 7); // mandag..søndag
+});
+
+test("REQ-116 service: maxOccurrences cap'er expansion", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  // weekly mandager i 1 år ville gitt ~52 datoer; cap til 5.
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] },
+      startDate: "2026-01-05", // mandag
+      endDate: "2026-12-31",
+      maxOccurrences: 5,
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 5);
+  assert.equal(rows.length, 5);
+});
+
+test("REQ-116 service: end-date cap'er expansion (selv om maxOccurrences er høyere)", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] }, // monday
+      startDate: "2026-01-05", // mandag
+      endDate: "2026-01-26", // 3 uker, 4 mandager
+      maxOccurrences: 100,
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 4);
+});
+
+test("REQ-116 service: pattern lagres selv når expansion gir 0 datoer", async () => {
+  // 30. februar finnes ikke → monthly_dates[30] i kun en feb-måned = 0.
+  const { pool, rows, patterns } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const result = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "monthly_dates", dates: [30] },
+      startDate: "2025-02-01",
+      endDate: "2025-02-28",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(result.expandedCount, 0);
+  assert.equal(rows.length, 0, "ingen child-rader");
+  assert.equal(patterns.length, 1, "men pattern er fortsatt persistert");
+});
+
+test("REQ-116 service: closeMany recurring er idempotent (re-run gir 0 nye)", async () => {
+  // To recurring-create på samme spill → andre runde lager nytt pattern,
+  // men expansion-datoer som allerede er lukket hopper over (skipped).
+  const { pool, rows, patterns } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const first = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] },
+      startDate: "2026-04-20",
+      endDate: "2026-05-11",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(first.expandedCount, 4);
+  assert.equal(rows.length, 4);
+
+  const second = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] },
+      startDate: "2026-04-20",
+      endDate: "2026-05-11",
+      closedBy: "admin-2",
+    })
+  );
+  assert.equal(second.expandedCount, 4);
+  assert.equal(second.createdDates.length, 0, "ingen nye");
+  assert.equal(second.skippedDates.length, 4, "alle skipped");
+  assert.equal(rows.length, 4, "fortsatt bare 4 rader");
+  assert.equal(patterns.length, 2, "men 2 patterns lagret");
+});
+
+test("REQ-116 service: avviser ugyldig pattern.type", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "bad pattern type",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        // @ts-expect-error — bevisst ugyldig
+        pattern: { type: "fortnight" },
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser weekly med tom daysOfWeek-array", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "empty daysOfWeek",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "weekly", daysOfWeek: [] },
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser weekly med ugyldig dag (>6)", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "bad weekday",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "weekly", daysOfWeek: [7] },
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser monthly_dates med dato 0 eller 32", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "date 0",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "monthly_dates", dates: [0] },
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+  await expectDomainError(
+    "date 32",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "monthly_dates", dates: [32] },
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser monthly_weekday med ugyldig week", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "week 5",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        // @ts-expect-error — bevisst ugyldig
+        pattern: { type: "monthly_weekday", week: 5, dayOfWeek: 1 },
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser yearly med month=13", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "month 13",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "yearly", month: 13, day: 1 },
+        startDate: "2026-01-01",
+        endDate: "2026-12-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser maxOccurrences over hard cap (1000)", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "max > 1000",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "daily" },
+        startDate: "2026-01-01",
+        endDate: "2030-01-01",
+        maxOccurrences: 5000,
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser endDate < startDate", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "end < start",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "daily" },
+        startDate: "2026-04-25",
+        endDate: "2026-04-20",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: avviser slettet spill", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(
+    pool,
+    stubGameManagementService({
+      "gm-1": makeGame({ deletedAt: "2026-01-01T00:00:00Z" }),
+    })
+  );
+  await expectDomainError(
+    "deleted game",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        pattern: { type: "daily" },
+        startDate: "2026-01-01",
+        endDate: "2026-01-07",
+        closedBy: "admin-1",
+      }),
+    "GAME_MANAGEMENT_DELETED"
+  );
+});
+
+test("REQ-116 service: bevarer startTime/endTime/notes på alle child-rader", async () => {
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await svc.closeMany({
+    mode: "recurring",
+    gameManagementId: "gm-1",
+    pattern: { type: "weekly", daysOfWeek: [1] },
+    startDate: "2026-04-20",
+    endDate: "2026-05-04",
+    startTime: "10:00",
+    endTime: "14:00",
+    notes: "Lunch-pause",
+    closedBy: "admin-1",
+  });
+  for (const r of rows) {
+    assert.equal(r.start_time, "10:00");
+    assert.equal(r.end_time, "14:00");
+    assert.equal(r.notes, "Lunch-pause");
+  }
+});
+
+// ── REQ-116: listRecurringPatterns + deleteRecurringPattern ────────────
+
+test("REQ-116 service: listRecurringPatterns returnerer kun aktive (deleted_at IS NULL)", async () => {
+  const { pool, patterns } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await svc.closeMany({
+    mode: "recurring",
+    gameManagementId: "gm-1",
+    pattern: { type: "weekly", daysOfWeek: [1] },
+    startDate: "2026-04-20",
+    endDate: "2026-04-27",
+    closedBy: "admin-1",
+  });
+  await svc.closeMany({
+    mode: "recurring",
+    gameManagementId: "gm-1",
+    pattern: { type: "yearly", month: 12, day: 25 },
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    closedBy: "admin-1",
+  });
+  const list = await svc.listRecurringPatterns("gm-1");
+  assert.equal(list.length, 2);
+  // soft-delete første
+  patterns[0]!.deleted_at = "2026-04-21T08:00:00.000Z";
+  const list2 = await svc.listRecurringPatterns("gm-1");
+  assert.equal(list2.length, 1);
+});
+
+test("REQ-116 service: deleteRecurringPattern soft-deleter pattern + hard-sletter child-rader", async () => {
+  const { pool, rows, patterns } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  const created = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] },
+      startDate: "2026-04-20",
+      endDate: "2026-05-11",
+      closedBy: "admin-1",
+    })
+  );
+  assert.equal(rows.length, 4);
+  const deleted = await svc.deleteRecurringPattern({
+    gameManagementId: "gm-1",
+    patternId: created.pattern.id,
+    deletedBy: "admin-2",
+  });
+  assert.equal(deleted.deletedChildCount, 4);
+  assert.equal(rows.length, 0, "alle child-rader hard-slettet");
+  assert.notEqual(patterns[0]!.deleted_at, null, "pattern soft-deleted");
+  assert.equal(patterns[0]!.deleted_by, "admin-2");
+});
+
+test("REQ-116 service: deleteRecurringPattern på ikke-eksisterende → CLOSE_DAY_RECURRING_NOT_FOUND", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "missing pattern",
+    () =>
+      svc.deleteRecurringPattern({
+        gameManagementId: "gm-1",
+        patternId: "missing",
+        deletedBy: "admin-1",
+      }),
+    "CLOSE_DAY_RECURRING_NOT_FOUND"
+  );
+});
+
+test("REQ-116 service: deleteRecurringPattern manuell single-rad uten pattern bevares", async () => {
+  // Sjekk at en manuell (non-recurring) rad IKKE blir slettet når pattern slettes.
+  const { pool, rows } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  // Manuell single-rad
+  await svc.closeMany({
+    mode: "single",
+    gameManagementId: "gm-1",
+    closeDate: "2026-04-20", // mandag
+    closedBy: "admin-1",
+  });
+  // Nå legg til en weekly-pattern som overlapper
+  const created = asRecurring(
+    await svc.closeMany({
+      mode: "recurring",
+      gameManagementId: "gm-1",
+      pattern: { type: "weekly", daysOfWeek: [1] },
+      startDate: "2026-04-21", // dagen etter, så ingen overlapp på 04-20
+      endDate: "2026-05-04",
+      closedBy: "admin-1",
+    })
+  );
+  // 04-27 og 05-04 = 2 nye recurring child-rader
+  assert.equal(rows.length, 3);
+  const manual = rows.find((r) => r.close_date === "2026-04-20");
+  assert.ok(manual, "manuell rad eksisterer");
+  assert.equal(manual!.recurring_pattern_id, null);
+
+  await svc.deleteRecurringPattern({
+    gameManagementId: "gm-1",
+    patternId: created.pattern.id,
+    deletedBy: "admin-2",
+  });
+  // Manuell rad skal fortsatt eksistere
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.close_date, "2026-04-20");
+  assert.equal(rows[0]!.recurring_pattern_id, null);
+});
+
+test("REQ-116 service: avviser tom pattern-input", async () => {
+  const { pool } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  await expectDomainError(
+    "null pattern",
+    () =>
+      svc.closeMany({
+        mode: "recurring",
+        gameManagementId: "gm-1",
+        // @ts-expect-error — bevisst ugyldig (null pattern)
+        pattern: null,
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+        closedBy: "admin-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("REQ-116 service: default startDate (i dag) og endDate (+ 366 dager) brukes når ikke spesifisert", async () => {
+  const { pool, patterns } = makeStorePool();
+  const svc = makeService(pool, stubGameManagementService({ "gm-1": makeGame() }));
+  // Ikke spesifiser noen dato — service skal bruke defaults.
+  await svc.closeMany({
+    mode: "recurring",
+    gameManagementId: "gm-1",
+    pattern: { type: "yearly", month: 1, day: 1 }, // bare 1 forekomst i 1 år
+    closedBy: "admin-1",
+  });
+  assert.equal(patterns.length, 1);
+  // start_date skal være i dag (eller nylig — vi tester at format er korrekt)
+  assert.match(patterns[0]!.start_date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(patterns[0]!.end_date!, /^\d{4}-\d{2}-\d{2}$/);
+  // end_date = start_date + 366 dager
+  const start = Date.parse(`${patterns[0]!.start_date}T00:00:00Z`);
+  const end = Date.parse(`${patterns[0]!.end_date}T00:00:00Z`);
+  const days = Math.round((end - start) / (24 * 60 * 60 * 1000));
+  assert.equal(days, 366);
 });

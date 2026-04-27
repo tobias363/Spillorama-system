@@ -1,6 +1,7 @@
 /**
- * BIN-623 + BIN-700: CloseDay-service — regulatorisk dagsavslutning per
- * GameManagement med 3-mode-støtte (Single / Consecutive / Random).
+ * BIN-623 + BIN-700 + REQ-116: CloseDay-service — regulatorisk dagsavslutning
+ * per GameManagement med 4-mode-støtte (Single / Consecutive / Random /
+ * Recurring).
  *
  * Ansvar:
  *   1) Aggregere et summary-snapshot for et spill (totalSold / totalEarning /
@@ -22,6 +23,13 @@
  *   4) Per-dato oppdatering/sletting: `updateDate` + `deleteDate` lar hall-
  *      drifter justere tids-vinduet eller fjerne én bestemt dato uten å
  *      slette hele rangen.
+ *   5) REQ-116 — Recurring patterns (PDF 8 §8.4 / BIR-058 / BIR-059):
+ *      hall-driver setter opp permanent ukeplan ("alltid stengt mandager",
+ *      "stengt første tirsdag i måneden", "stengt 1. juledag hvert år").
+ *      Pattern lagres som parent-rad i `app_close_day_recurring_patterns`,
+ *      og service expanderer alle individuelle datoer til child-rader i
+ *      `app_close_day_log` med `recurring_pattern_id`-peker. DELETE av
+ *      pattern soft-deleter parent + alle child-rader.
  *
  * Merknader:
  *   - Audit-log-skriving ligger i router-laget (samme mønster som BIN-622
@@ -85,6 +93,8 @@ export interface CloseDayEntry {
   endTime: string | null;
   /** Hall-operatør-notater (jul, påske, etc.). */
   notes: string | null;
+  /** REQ-116: parent-pattern-id hvis raden er expanded fra recurring. NULL ellers. */
+  recurringPatternId: string | null;
   summary: CloseDaySummary;
 }
 
@@ -151,10 +161,83 @@ export interface CloseRandomInput {
   closedBy: string;
 }
 
+/**
+ * REQ-116: Recurring-mode pattern types. Discriminated union — service-laget
+ * expanderer pattern til en liste av individuelle datoer.
+ *
+ *   - weekly:          { type, daysOfWeek }       — 0=Sun .. 6=Sat (eks: [1] = mandager)
+ *   - monthly_dates:   { type, dates }            — 1..31 (31. feb hoppes over som no-op)
+ *   - monthly_weekday: { type, week, dayOfWeek }  — week=1..4 eller "last", dayOfWeek=0..6
+ *   - yearly:          { type, month, day }       — 1..12 + 1..31 (29. feb i ikke-skuddår = no-op)
+ *   - daily:           { type }                   — alle dager i tidsrom
+ */
+export type RecurringPattern =
+  | { type: "weekly"; daysOfWeek: number[] }
+  | { type: "monthly_dates"; dates: number[] }
+  | {
+      type: "monthly_weekday";
+      week: 1 | 2 | 3 | 4 | "last";
+      dayOfWeek: number;
+    }
+  | { type: "yearly"; month: number; day: number }
+  | { type: "daily" };
+
+/**
+ * REQ-116: Recurring-mode input. Pattern lagres som parent-rad og expanderes
+ * til individuelle datoer som child-rader i `app_close_day_log`. Expansion-
+ * vinduet styres av:
+ *   - `startDate` (default: i dag)
+ *   - `endDate`   (default: i dag + 366 dager)
+ *   - `maxOccurrences` (default: 365)
+ * Den minste av de tre stopper expansionen.
+ */
+export interface CloseRecurringInput {
+  mode: "recurring";
+  gameManagementId: string;
+  pattern: RecurringPattern;
+  /** YYYY-MM-DD. Default = i dag. */
+  startDate?: string;
+  /** YYYY-MM-DD. Default = i dag + 366 dager. */
+  endDate?: string;
+  /** Vindu-start brukt på alle expanderte child-rader. NULL = hele dagen. */
+  startTime?: string | null;
+  /** Vindu-slutt. NULL = hele dagen. */
+  endTime?: string | null;
+  notes?: string | null;
+  /** Default 365. Cap'ed til 1000 for å unngå ekstrem expansion. */
+  maxOccurrences?: number;
+  closedBy: string;
+}
+
+/** REQ-116: persistert recurring-pattern. */
+export interface RecurringPatternEntry {
+  id: string;
+  gameManagementId: string;
+  pattern: RecurringPattern;
+  startDate: string;
+  endDate: string | null;
+  maxOccurrences: number | null;
+  startTime: string | null;
+  endTime: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+/** REQ-116: resultat av en recurring-lukking — pattern-rad + expansion-resultat. */
+export interface CloseRecurringResult extends CloseManyResult {
+  pattern: RecurringPatternEntry;
+  /** Antall expanderte datoer (= entries.length). */
+  expandedCount: number;
+}
+
 export type CloseManyInput =
   | CloseSingleInput
   | CloseConsecutiveInput
-  | CloseRandomInput;
+  | CloseRandomInput
+  | CloseRecurringInput;
 
 /** Per-dato oppdatering: justér tids-vindu eller notes. */
 export interface UpdateDateInput {
@@ -191,6 +274,25 @@ interface CloseDayLogRow {
   start_time: string | null;
   end_time: string | null;
   notes: string | null;
+  /** REQ-116: peker til parent-pattern hvis raden er expanded fra recurring. */
+  recurring_pattern_id?: string | null;
+}
+
+/** REQ-116: rad-shape fra `app_close_day_recurring_patterns`. */
+interface RecurringPatternRow {
+  id: string;
+  game_management_id: string;
+  pattern_json: Record<string, unknown> | null;
+  start_date: Date | string;
+  end_date: Date | string | null;
+  max_occurrences: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: Date | string;
+  deleted_at: Date | string | null;
+  deleted_by: string | null;
 }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -198,6 +300,11 @@ const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const MAX_RANGE_DAYS = 366; // bevisst grense for feilbruk; ett år dekker alle pilot-cases.
 const MAX_RANDOM_DATES = 100;
 const MAX_NOTES_LEN = 500;
+// REQ-116: expansion-grenser. Default-cap er 365, hard cap (mot
+// konfigurasjonsfeil) er 1000. End-date-default er startDate + 366 dager.
+const RECURRING_DEFAULT_MAX_OCCURRENCES = 365;
+const RECURRING_HARD_CAP_OCCURRENCES = 1000;
+const RECURRING_DEFAULT_END_DATE_DAYS = 366;
 
 function assertSchemaName(schema: string): string {
   if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
@@ -246,6 +353,21 @@ function assertActor(value: unknown, field: string): string {
     throw new DomainError("INVALID_INPUT", `${field} er påkrevd.`);
   }
   return value.trim();
+}
+
+/** REQ-116: pattern-id kommer fra route-param, må være ikke-tom og rimelig. */
+function mustBePatternId(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new DomainError("INVALID_INPUT", "patternId er påkrevd.");
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > 200) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "patternId kan maksimalt være 200 tegn."
+    );
+  }
+  return trimmed;
 }
 
 /**
@@ -310,6 +432,34 @@ function asIsoTimestamp(value: Date | string): string {
 function parseSummary(value: unknown): Partial<CloseDaySummary> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Partial<CloseDaySummary>;
+}
+
+/** REQ-116: legg til N dager til en YYYY-MM-DD-dato (UTC, inga DST-drift). */
+function addDaysIso(dateIso: string, days: number): string {
+  const ms = Date.parse(`${dateIso}T00:00:00Z`);
+  if (Number.isNaN(ms)) {
+    throw new DomainError("INVALID_INPUT", `Ugyldig dato: ${dateIso}.`);
+  }
+  return isoDateFromUtcMs(ms + days * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * REQ-116: dagens dato som YYYY-MM-DD (UTC). Brukes som default for
+ * recurring-startDate. Hall-tidssone er ikke konfigurerbar pt. — UTC ≈
+ * norsk vintertid (off by 1h i sommertid). Dokumentert som kjent avvik
+ * (samme behandling som BIN-700 router-laget).
+ */
+function todayIsoUtc(): string {
+  return isoDateFromUtcMs(Date.now());
+}
+
+/** REQ-116: hent ukedag (0=Sun .. 6=Sat) for en YYYY-MM-DD-dato i UTC. */
+function dayOfWeekUtc(dateIso: string): number {
+  const ms = Date.parse(`${dateIso}T00:00:00Z`);
+  if (Number.isNaN(ms)) {
+    throw new DomainError("INVALID_INPUT", `Ugyldig dato: ${dateIso}.`);
+  }
+  return new Date(ms).getUTCDay();
 }
 
 /**
@@ -433,6 +583,333 @@ function planRandom(input: CloseRandomInput): PlanItem[] {
   return items;
 }
 
+// ── REQ-116: Recurring pattern validation + expansion ────────────────────
+
+/**
+ * Strict-validate en RecurringPattern-input. Service-laget gjør deepvalidering
+ * (avviser ugyldige felter, range-checker tall, krever non-tom array). Vi
+ * casts ikke til typen før alle felter er sjekket — `unknown`-input fra
+ * router-laget kan ikke krasje noen JS-runtime-eksepsjon.
+ */
+function assertRecurringPattern(value: unknown): RecurringPattern {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "pattern må være et objekt med discriminator-felt 'type'."
+    );
+  }
+  const obj = value as Record<string, unknown>;
+  const type = obj.type;
+  switch (type) {
+    case "weekly": {
+      const days = obj.daysOfWeek;
+      if (!Array.isArray(days) || days.length === 0) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "weekly-pattern krever en ikke-tom daysOfWeek-array (0=Sun..6=Sat)."
+        );
+      }
+      const seen = new Set<number>();
+      const out: number[] = [];
+      for (const d of days) {
+        if (typeof d !== "number" || !Number.isInteger(d) || d < 0 || d > 6) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "daysOfWeek må være integer 0..6 (0=Sun, 6=Sat)."
+          );
+        }
+        if (seen.has(d)) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            `daysOfWeek inneholder duplisert verdi: ${d}.`
+          );
+        }
+        seen.add(d);
+        out.push(d);
+      }
+      return { type: "weekly", daysOfWeek: out.sort((a, b) => a - b) };
+    }
+    case "monthly_dates": {
+      const dates = obj.dates;
+      if (!Array.isArray(dates) || dates.length === 0) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "monthly_dates-pattern krever en ikke-tom dates-array (1..31)."
+        );
+      }
+      const seen = new Set<number>();
+      const out: number[] = [];
+      for (const d of dates) {
+        if (typeof d !== "number" || !Number.isInteger(d) || d < 1 || d > 31) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "monthly_dates: hvert element må være integer 1..31."
+          );
+        }
+        if (seen.has(d)) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            `monthly_dates inneholder duplisert dato: ${d}.`
+          );
+        }
+        seen.add(d);
+        out.push(d);
+      }
+      return { type: "monthly_dates", dates: out.sort((a, b) => a - b) };
+    }
+    case "monthly_weekday": {
+      const week = obj.week;
+      const day = obj.dayOfWeek;
+      if (week !== "last" && (typeof week !== "number" || ![1, 2, 3, 4].includes(week))) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "monthly_weekday.week må være 1, 2, 3, 4 eller 'last'."
+        );
+      }
+      if (typeof day !== "number" || !Number.isInteger(day) || day < 0 || day > 6) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "monthly_weekday.dayOfWeek må være integer 0..6."
+        );
+      }
+      return {
+        type: "monthly_weekday",
+        week: week as 1 | 2 | 3 | 4 | "last",
+        dayOfWeek: day,
+      };
+    }
+    case "yearly": {
+      const month = obj.month;
+      const day = obj.day;
+      if (
+        typeof month !== "number" ||
+        !Number.isInteger(month) ||
+        month < 1 ||
+        month > 12
+      ) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "yearly.month må være integer 1..12."
+        );
+      }
+      if (typeof day !== "number" || !Number.isInteger(day) || day < 1 || day > 31) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "yearly.day må være integer 1..31."
+        );
+      }
+      return { type: "yearly", month, day };
+    }
+    case "daily":
+      return { type: "daily" };
+    default:
+      throw new DomainError(
+        "INVALID_INPUT",
+        `Ukjent recurring-pattern.type: ${String(type)}.`
+      );
+  }
+}
+
+/**
+ * REQ-116: returner en stabil "kanonisk" pattern-JSON for persistering.
+ * Sorterer arrays slik at lik input gir lik bytes-representasjon.
+ */
+function canonicalPatternJson(pattern: RecurringPattern): string {
+  // assertRecurringPattern sorterer allerede arrays. Vi bygger objektet
+  // manuelt for å få stabil property-rekkefølge.
+  switch (pattern.type) {
+    case "weekly":
+      return JSON.stringify({ type: "weekly", daysOfWeek: pattern.daysOfWeek });
+    case "monthly_dates":
+      return JSON.stringify({ type: "monthly_dates", dates: pattern.dates });
+    case "monthly_weekday":
+      return JSON.stringify({
+        type: "monthly_weekday",
+        week: pattern.week,
+        dayOfWeek: pattern.dayOfWeek,
+      });
+    case "yearly":
+      return JSON.stringify({
+        type: "yearly",
+        month: pattern.month,
+        day: pattern.day,
+      });
+    case "daily":
+      return JSON.stringify({ type: "daily" });
+    default: {
+      const exhaustive: never = pattern;
+      void exhaustive;
+      throw new DomainError("INVALID_INPUT", "Ukjent pattern.type.");
+    }
+  }
+}
+
+/**
+ * REQ-116: expansion-edge cases.
+ *
+ * monthly_dates: hvis dato 31 brukes, måneder med færre dager hopper over
+ * (29. feb i ikke-skuddår, 30/31. apr etc.) — ingen "rolle over" til neste
+ * måned. Dette matcher hall-driverens forventning ("30. hver måned, men
+ * februar har ikke 30. så hopp over").
+ *
+ * monthly_weekday: "første mandag" = den 1. dagen i måneden av angitt
+ * ukedag, regnet fra dato 1..7 i hver måned. "last fredag" = siste
+ * forekomst av angitt ukedag i måneden (regnet fra siste dag i måned
+ * og bakover, maks 7 dager tilbake).
+ *
+ * yearly: hvis pattern er { month: 2, day: 29 } i ikke-skuddår hopper
+ * vi over.
+ *
+ * Alle datoer som passer pattern OG ligger i [start, end] returneres,
+ * ascending sortert. Cap'es til `maxOccurrences`.
+ */
+function expandPattern(
+  pattern: RecurringPattern,
+  startDate: string,
+  endDate: string,
+  maxOccurrences: number
+): string[] {
+  const startMs = Date.parse(`${startDate}T00:00:00Z`);
+  const endMs = Date.parse(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    throw new DomainError("INVALID_INPUT", "Ugyldig dato i expansion-vindu.");
+  }
+  if (endMs < startMs) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "endDate må være lik eller senere enn startDate."
+    );
+  }
+  const dayMs = 24 * 60 * 60 * 1000;
+  const out: string[] = [];
+
+  switch (pattern.type) {
+    case "daily": {
+      // Iterér dag for dag, plukk alt.
+      for (let ms = startMs; ms <= endMs; ms += dayMs) {
+        out.push(isoDateFromUtcMs(ms));
+        if (out.length >= maxOccurrences) return out;
+      }
+      return out;
+    }
+    case "weekly": {
+      const days = new Set(pattern.daysOfWeek);
+      for (let ms = startMs; ms <= endMs; ms += dayMs) {
+        const dow = new Date(ms).getUTCDay();
+        if (days.has(dow)) {
+          out.push(isoDateFromUtcMs(ms));
+          if (out.length >= maxOccurrences) return out;
+        }
+      }
+      return out;
+    }
+    case "monthly_dates": {
+      const startDate0 = new Date(startMs);
+      const endDate0 = new Date(endMs);
+      let year = startDate0.getUTCFullYear();
+      let month = startDate0.getUTCMonth(); // 0..11
+      const endYear = endDate0.getUTCFullYear();
+      const endMonth = endDate0.getUTCMonth();
+      while (
+        year < endYear ||
+        (year === endYear && month <= endMonth)
+      ) {
+        const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        for (const d of pattern.dates) {
+          if (d > lastDayOfMonth) continue; // 31. feb / 31. apr → no-op
+          const candidateMs = Date.UTC(year, month, d);
+          if (candidateMs >= startMs && candidateMs <= endMs) {
+            out.push(isoDateFromUtcMs(candidateMs));
+            if (out.length >= maxOccurrences) return out;
+          }
+        }
+        // neste måned
+        if (month === 11) {
+          month = 0;
+          year += 1;
+        } else {
+          month += 1;
+        }
+      }
+      // monthly_dates kan generere en dato per måned-iterasjon i
+      // ikke-monoton rekkefølge hvis brukeren har dates=[5,1] (vi
+      // sorterer i validering, men cross-month overlapp er trygt). Sortér
+      // for å være eksplisitt.
+      out.sort();
+      return out;
+    }
+    case "monthly_weekday": {
+      const startDate0 = new Date(startMs);
+      const endDate0 = new Date(endMs);
+      let year = startDate0.getUTCFullYear();
+      let month = startDate0.getUTCMonth();
+      const endYear = endDate0.getUTCFullYear();
+      const endMonth = endDate0.getUTCMonth();
+      while (year < endYear || (year === endYear && month <= endMonth)) {
+        let candidateDay: number | null = null;
+        if (pattern.week === "last") {
+          // Siste forekomst av dayOfWeek i måneden
+          const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+          for (let d = lastDay; d >= lastDay - 6; d -= 1) {
+            const dow = new Date(Date.UTC(year, month, d)).getUTCDay();
+            if (dow === pattern.dayOfWeek) {
+              candidateDay = d;
+              break;
+            }
+          }
+        } else {
+          // n-te forekomst (n = 1..4)
+          // Finn første forekomst i måneden, legg til (n-1) uker
+          const firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay();
+          const offset = (pattern.dayOfWeek - firstDow + 7) % 7;
+          const firstOccurrenceDay = 1 + offset;
+          const candidate = firstOccurrenceDay + (pattern.week - 1) * 7;
+          const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+          if (candidate <= lastDayOfMonth) candidateDay = candidate;
+          // Hvis week=4 men måned ikke har 4 forekomster (kan ikke skje for 28+ dagers
+          // måned), candidateDay forblir null → hopp over.
+        }
+        if (candidateDay !== null) {
+          const ms = Date.UTC(year, month, candidateDay);
+          if (ms >= startMs && ms <= endMs) {
+            out.push(isoDateFromUtcMs(ms));
+            if (out.length >= maxOccurrences) return out;
+          }
+        }
+        if (month === 11) {
+          month = 0;
+          year += 1;
+        } else {
+          month += 1;
+        }
+      }
+      return out;
+    }
+    case "yearly": {
+      const startDate0 = new Date(startMs);
+      const endDate0 = new Date(endMs);
+      const startYear = startDate0.getUTCFullYear();
+      const endYear = endDate0.getUTCFullYear();
+      for (let y = startYear; y <= endYear; y += 1) {
+        // Validér at dato finnes i året (29. feb i ikke-skuddår = ugyldig)
+        const lastDayOfMonth = new Date(Date.UTC(y, pattern.month, 0)).getUTCDate();
+        if (pattern.day > lastDayOfMonth) continue; // 29. feb i ikke-skuddår
+        const ms = Date.UTC(y, pattern.month - 1, pattern.day);
+        if (ms >= startMs && ms <= endMs) {
+          out.push(isoDateFromUtcMs(ms));
+          if (out.length >= maxOccurrences) return out;
+        }
+      }
+      return out;
+    }
+    default: {
+      const exhaustive: never = pattern;
+      void exhaustive;
+      throw new DomainError("INVALID_INPUT", "Ukjent pattern.type.");
+    }
+  }
+}
+
 function planSingle(input: CloseSingleInput): PlanItem[] {
   const date = assertCloseDate(input.closeDate, "closeDate");
   // For Single-mode bruker vi det vinduet caller har spesifisert; hvis ikke
@@ -549,20 +1026,34 @@ export class CloseDayService {
       closedBy,
       startTime,
       endTime,
-      notes
+      notes,
+      null
     );
     return entry;
   }
 
   /**
-   * Lukk flere datoer i én operasjon (BIN-700). Idempotent: eksisterende
-   * datoer hopper over (rapporteres i `skippedDates`), nye persisteres.
-   * Audit-loggen til router skal skrive én entry per `createdDates`.
+   * Lukk flere datoer i én operasjon (BIN-700 + REQ-116). Idempotent:
+   * eksisterende datoer hopper over (rapporteres i `skippedDates`), nye
+   * persisteres. Audit-loggen til router skal skrive én entry per
+   * `createdDates`.
+   *
+   * REQ-116: når `mode = "recurring"` deleger til `closeRecurring` som
+   * oppretter en parent-rad (pattern) og expanderer alle individuelle
+   * datoer som child-rader. Returnerer da en `CloseRecurringResult`
+   * (super-set av CloseManyResult med `pattern` + `expandedCount`).
    */
-  async closeMany(input: CloseManyInput): Promise<CloseManyResult> {
+  async closeMany(
+    input: CloseManyInput
+  ): Promise<CloseManyResult | CloseRecurringResult> {
     await this.ensureInitialized();
     const gameId = assertGameId(input.gameManagementId);
     const closedBy = assertActor(input.closedBy, "closedBy");
+
+    if (input.mode === "recurring") {
+      return this.closeRecurring(input);
+    }
+
     let plan: PlanItem[];
     let notes: string | null;
     switch (input.mode) {
@@ -621,7 +1112,8 @@ export class CloseDayService {
           closedBy,
           item.startTime,
           item.endTime,
-          notes
+          notes,
+          null
         );
         entries.push(entry);
         createdDates.push(item.closeDate);
@@ -644,6 +1136,227 @@ export class CloseDayService {
     }
 
     return { entries, createdDates, skippedDates };
+  }
+
+  /**
+   * REQ-116: lagre en recurring-pattern + expandér alle individuelle datoer
+   * som child-rader i `app_close_day_log`. Idempotent på (gameId, dato) —
+   * datoer som allerede er lukket (manuelt eller via en annen pattern)
+   * hoppes over i `skippedDates`.
+   *
+   * Pattern-raden i `app_close_day_recurring_patterns` lagres ALLTID, selv
+   * om expansion ga 0 nye child-rader, slik at hall-driveren kan se at
+   * pattern eksisterer og slette den senere.
+   */
+  async closeRecurring(input: CloseRecurringInput): Promise<CloseRecurringResult> {
+    await this.ensureInitialized();
+    const gameId = assertGameId(input.gameManagementId);
+    const closedBy = assertActor(input.closedBy, "closedBy");
+    const pattern = assertRecurringPattern(input.pattern);
+
+    // Validér start/end-vindu — defaults dokumentert i REQ-116.
+    const startDate = input.startDate
+      ? assertCloseDate(input.startDate, "startDate")
+      : todayIsoUtc();
+    const endDate = input.endDate
+      ? assertCloseDate(input.endDate, "endDate")
+      : addDaysIso(startDate, RECURRING_DEFAULT_END_DATE_DAYS);
+
+    if (Date.parse(`${endDate}T00:00:00Z`) < Date.parse(`${startDate}T00:00:00Z`)) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "endDate må være lik eller senere enn startDate."
+      );
+    }
+
+    let maxOccurrences = RECURRING_DEFAULT_MAX_OCCURRENCES;
+    if (input.maxOccurrences !== undefined) {
+      if (
+        typeof input.maxOccurrences !== "number" ||
+        !Number.isInteger(input.maxOccurrences) ||
+        input.maxOccurrences < 1
+      ) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "maxOccurrences må være positivt heltall."
+        );
+      }
+      if (input.maxOccurrences > RECURRING_HARD_CAP_OCCURRENCES) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `maxOccurrences kan maks være ${RECURRING_HARD_CAP_OCCURRENCES}.`
+        );
+      }
+      maxOccurrences = input.maxOccurrences;
+    }
+
+    const startTime =
+      input.startTime === undefined
+        ? null
+        : assertTime(input.startTime, "startTime");
+    const endTime =
+      input.endTime === undefined ? null : assertTime(input.endTime, "endTime");
+    const notes = assertNotes(input.notes ?? null);
+
+    const game = await this.gameManagementService.get(gameId);
+    if (game.deletedAt) {
+      throw new DomainError(
+        "GAME_MANAGEMENT_DELETED",
+        "Kan ikke lukke dagen for et slettet spill."
+      );
+    }
+
+    // 1) Persistér parent-rad. Dette er regulatorisk — selv om expansion
+    //    ga 0 datoer skal pattern være synlig i admin-UI.
+    const patternId = randomUUID();
+    const patternEntry = await this.insertRecurringPattern({
+      id: patternId,
+      gameManagementId: gameId,
+      pattern,
+      startDate,
+      endDate,
+      maxOccurrences,
+      startTime,
+      endTime,
+      notes,
+      createdBy: closedBy,
+    });
+
+    // 2) Expandér.
+    const expandedDates = expandPattern(pattern, startDate, endDate, maxOccurrences);
+    if (expandedDates.length === 0) {
+      // Ingen datoer matchet — pattern lagret, men ingen child-rader.
+      return {
+        pattern: patternEntry,
+        entries: [],
+        createdDates: [],
+        skippedDates: [],
+        expandedCount: 0,
+      };
+    }
+
+    // 3) Sjekk eksisterende child-rader (idempotent).
+    const existingByDate = await this.findExistingMany(gameId, expandedDates);
+
+    const entries: CloseDayEntry[] = [];
+    const createdDates: string[] = [];
+    const skippedDates: string[] = [];
+
+    for (const date of expandedDates) {
+      const existing = existingByDate.get(date);
+      if (existing) {
+        entries.push(existing);
+        skippedDates.push(date);
+        continue;
+      }
+      try {
+        const entry = await this.insertRow(
+          game,
+          date,
+          closedBy,
+          startTime,
+          endTime,
+          notes,
+          patternId
+        );
+        entries.push(entry);
+        createdDates.push(date);
+      } catch (err) {
+        if (
+          err instanceof DomainError &&
+          err.code === "CLOSE_DAY_ALREADY_CLOSED"
+        ) {
+          const refreshed = await this.findExisting(gameId, date);
+          if (refreshed) {
+            entries.push(refreshed);
+            skippedDates.push(date);
+            continue;
+          }
+        }
+        throw err;
+      }
+    }
+
+    return {
+      pattern: patternEntry,
+      entries,
+      createdDates,
+      skippedDates,
+      expandedCount: expandedDates.length,
+    };
+  }
+
+  /**
+   * REQ-116: list aktive recurring-patterns for et spill (deleted_at IS NULL).
+   */
+  async listRecurringPatterns(gameIdRaw: string): Promise<RecurringPatternEntry[]> {
+    await this.ensureInitialized();
+    const gameId = assertGameId(gameIdRaw);
+    const { rows } = await this.pool.query<RecurringPatternRow>(
+      `SELECT id, game_management_id, pattern_json, start_date, end_date,
+              max_occurrences, start_time, end_time, notes, created_by,
+              created_at, deleted_at, deleted_by
+       FROM ${this.recurringTable()}
+       WHERE game_management_id = $1 AND deleted_at IS NULL
+       ORDER BY created_at ASC`,
+      [gameId]
+    );
+    return rows.map((r) => this.mapRecurringPattern(r));
+  }
+
+  /**
+   * REQ-116: soft-delete pattern + alle expanded child-rader. Returnerer
+   * pattern-raden + antall child-rader som ble slettet.
+   *
+   * Soft-delete på pattern bevarer regulatorisk historikk (hvem opprettet,
+   * når, hvilken pattern). Child-rader hard-slettes fordi de ikke har
+   * regulatorisk verdi separat fra pattern (lukke-dagen ble jo aldri
+   * gjennomført — dette var planlagte fremtidige stengning-dager). Skulle
+   * en child-rad allerede ha "operert" (hall var faktisk stengt på dato)
+   * skriver hall-driveren manuelt en ny single close-day-rad uten pattern-
+   * peker for å beholde sporet — det er allerede regulatorisk dokumentert
+   * via audit-loggen.
+   */
+  async deleteRecurringPattern(input: {
+    gameManagementId: string;
+    patternId: string;
+    deletedBy: string;
+  }): Promise<{ pattern: RecurringPatternEntry; deletedChildCount: number }> {
+    await this.ensureInitialized();
+    const gameId = assertGameId(input.gameManagementId);
+    const patternId = mustBePatternId(input.patternId);
+    const deletedBy = assertActor(input.deletedBy, "deletedBy");
+
+    // Soft-delete pattern. Idempotent: hvis allerede slettet, returnér uendret.
+    const { rows: patternRows } = await this.pool.query<RecurringPatternRow>(
+      `UPDATE ${this.recurringTable()}
+         SET deleted_at = COALESCE(deleted_at, now()),
+             deleted_by = COALESCE(deleted_by, $3)
+       WHERE id = $1 AND game_management_id = $2
+       RETURNING id, game_management_id, pattern_json, start_date, end_date,
+                 max_occurrences, start_time, end_time, notes, created_by,
+                 created_at, deleted_at, deleted_by`,
+      [patternId, gameId, deletedBy]
+    );
+    const patternRow = patternRows[0];
+    if (!patternRow) {
+      throw new DomainError(
+        "CLOSE_DAY_RECURRING_NOT_FOUND",
+        `Ingen recurring-pattern med id ${patternId} for spill ${gameId}.`
+      );
+    }
+
+    // Hard-slett child-rader (alle close-day-log-rader med recurring_pattern_id).
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM ${this.table()}
+       WHERE game_management_id = $1 AND recurring_pattern_id = $2`,
+      [gameId, patternId]
+    );
+
+    return {
+      pattern: this.mapRecurringPattern(patternRow),
+      deletedChildCount: rowCount ?? 0,
+    };
   }
 
   /**
@@ -691,7 +1404,7 @@ export class CloseDayService {
        SET ${sets.join(", ")}
        WHERE game_management_id = $1 AND close_date = $2::date
        RETURNING id, game_management_id, close_date, closed_by, summary_json,
-                 closed_at, start_time, end_time, notes`,
+                 closed_at, start_time, end_time, notes, recurring_pattern_id`,
       values
     );
     const row = rows[0];
@@ -718,7 +1431,7 @@ export class CloseDayService {
       `DELETE FROM ${this.table()}
        WHERE game_management_id = $1 AND close_date = $2::date
        RETURNING id, game_management_id, close_date, closed_by, summary_json,
-                 closed_at, start_time, end_time, notes`,
+                 closed_at, start_time, end_time, notes, recurring_pattern_id`,
       [gameId, closeDate]
     );
     const row = rows[0];
@@ -740,7 +1453,7 @@ export class CloseDayService {
     const gameId = assertGameId(gameIdRaw);
     const { rows } = await this.pool.query<CloseDayLogRow>(
       `SELECT id, game_management_id, close_date, closed_by, summary_json,
-              closed_at, start_time, end_time, notes
+              closed_at, start_time, end_time, notes, recurring_pattern_id
        FROM ${this.table()}
        WHERE game_management_id = $1
        ORDER BY close_date ASC`,
@@ -751,14 +1464,19 @@ export class CloseDayService {
 
   // ── Private helpers ─────────────────────────────────────────────────────
 
-  /** Insert én rad. Mapper 23505 → CLOSE_DAY_ALREADY_CLOSED. */
+  /**
+   * Insert én rad. Mapper 23505 → CLOSE_DAY_ALREADY_CLOSED.
+   * REQ-116: `recurringPatternId` (optional) peker til parent-pattern hvis
+   * raden ble generert via recurring-expansion. NULL for manuelle lukkinger.
+   */
   private async insertRow(
     game: GameManagement,
     closeDate: string,
     closedBy: string,
     startTime: string | null,
     endTime: string | null,
-    notes: string | null
+    notes: string | null,
+    recurringPatternId: string | null
   ): Promise<CloseDayEntry> {
     const summary = this.buildSummary(game, closeDate, null);
     const id = randomUUID();
@@ -766,10 +1484,10 @@ export class CloseDayService {
       const { rows } = await this.pool.query<CloseDayLogRow>(
         `INSERT INTO ${this.table()}
            (id, game_management_id, close_date, closed_by, summary_json,
-            start_time, end_time, notes)
-         VALUES ($1, $2, $3::date, $4, $5::jsonb, $6, $7, $8)
+            start_time, end_time, notes, recurring_pattern_id)
+         VALUES ($1, $2, $3::date, $4, $5::jsonb, $6, $7, $8, $9)
          RETURNING id, game_management_id, close_date, closed_by, summary_json,
-                   closed_at, start_time, end_time, notes`,
+                   closed_at, start_time, end_time, notes, recurring_pattern_id`,
         [
           id,
           game.id,
@@ -779,6 +1497,7 @@ export class CloseDayService {
           startTime,
           endTime,
           notes,
+          recurringPatternId,
         ]
       );
       const row = rows[0];
@@ -812,6 +1531,98 @@ export class CloseDayService {
     }
   }
 
+  // ── REQ-116: recurring pattern helpers ────────────────────────────────
+
+  private recurringTable(): string {
+    return `"${this.schema}"."app_close_day_recurring_patterns"`;
+  }
+
+  private async insertRecurringPattern(input: {
+    id: string;
+    gameManagementId: string;
+    pattern: RecurringPattern;
+    startDate: string;
+    endDate: string | null;
+    maxOccurrences: number | null;
+    startTime: string | null;
+    endTime: string | null;
+    notes: string | null;
+    createdBy: string;
+  }): Promise<RecurringPatternEntry> {
+    try {
+      const { rows } = await this.pool.query<RecurringPatternRow>(
+        `INSERT INTO ${this.recurringTable()}
+           (id, game_management_id, pattern_json, start_date, end_date,
+            max_occurrences, start_time, end_time, notes, created_by)
+         VALUES ($1, $2, $3::jsonb, $4::date, $5::date, $6, $7, $8, $9, $10)
+         RETURNING id, game_management_id, pattern_json, start_date, end_date,
+                   max_occurrences, start_time, end_time, notes, created_by,
+                   created_at, deleted_at, deleted_by`,
+        [
+          input.id,
+          input.gameManagementId,
+          canonicalPatternJson(input.pattern),
+          input.startDate,
+          input.endDate,
+          input.maxOccurrences,
+          input.startTime,
+          input.endTime,
+          input.notes,
+          input.createdBy,
+        ]
+      );
+      const row = rows[0];
+      if (!row) {
+        throw new DomainError(
+          "CLOSE_DAY_RECURRING_INSERT_FAILED",
+          "Kunne ikke lagre recurring-pattern."
+        );
+      }
+      return this.mapRecurringPattern(row);
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      logger.error(
+        { err, gameId: input.gameManagementId },
+        "[REQ-116] recurring-pattern insert failed"
+      );
+      throw new DomainError(
+        "CLOSE_DAY_RECURRING_INSERT_FAILED",
+        "Kunne ikke lagre recurring-pattern."
+      );
+    }
+  }
+
+  private mapRecurringPattern(row: RecurringPatternRow): RecurringPatternEntry {
+    let pattern: RecurringPattern;
+    try {
+      pattern = assertRecurringPattern(row.pattern_json);
+    } catch {
+      // Defensiv: hvis DB inneholder en pattern som ikke validerer (eks fra
+      // tidligere spec-versjon), behandle som "daily" og logg en advarsel.
+      // I praksis vil dette aldri skje fordi vi alltid skriver canonical-form.
+      logger.warn(
+        { row_id: row.id, pattern_json: row.pattern_json },
+        "[REQ-116] recurring-pattern JSON failed validation, falling back to daily"
+      );
+      pattern = { type: "daily" };
+    }
+    return {
+      id: row.id,
+      gameManagementId: row.game_management_id,
+      pattern,
+      startDate: asIsoDate(row.start_date),
+      endDate: row.end_date === null ? null : asIsoDate(row.end_date),
+      maxOccurrences: row.max_occurrences,
+      startTime: row.start_time,
+      endTime: row.end_time,
+      notes: row.notes,
+      createdBy: row.created_by,
+      createdAt: asIsoTimestamp(row.created_at),
+      deletedAt: row.deleted_at === null ? null : asIsoTimestamp(row.deleted_at),
+      deletedBy: row.deleted_by,
+    };
+  }
+
   /** Helper: hent siste lukking for (gameId, date) eller null. */
   private async findExisting(
     gameId: string,
@@ -819,7 +1630,7 @@ export class CloseDayService {
   ): Promise<CloseDayEntry | null> {
     const { rows } = await this.pool.query<CloseDayLogRow>(
       `SELECT id, game_management_id, close_date, closed_by, summary_json,
-              closed_at, start_time, end_time, notes
+              closed_at, start_time, end_time, notes, recurring_pattern_id
        FROM ${this.table()}
        WHERE game_management_id = $1 AND close_date = $2::date
        LIMIT 1`,
@@ -836,7 +1647,7 @@ export class CloseDayService {
     if (closeDates.length === 0) return new Map();
     const { rows } = await this.pool.query<CloseDayLogRow>(
       `SELECT id, game_management_id, close_date, closed_by, summary_json,
-              closed_at, start_time, end_time, notes
+              closed_at, start_time, end_time, notes, recurring_pattern_id
        FROM ${this.table()}
        WHERE game_management_id = $1
          AND close_date = ANY($2::date[])`,
@@ -920,6 +1731,7 @@ export class CloseDayService {
       startTime: row.start_time,
       endTime: row.end_time,
       notes: row.notes,
+      recurringPatternId: row.recurring_pattern_id ?? null,
       summary,
     };
   }
@@ -957,6 +1769,11 @@ export class CloseDayService {
            ADD COLUMN IF NOT EXISTS end_time   TEXT NULL,
            ADD COLUMN IF NOT EXISTS notes      TEXT NULL`
       );
+      // REQ-116: legg til recurring_pattern_id-kolonne (nullable FK).
+      await client.query(
+        `ALTER TABLE ${this.table()}
+           ADD COLUMN IF NOT EXISTS recurring_pattern_id TEXT NULL`
+      );
       await client.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS uq_${this.schema}_close_day_game_date
          ON ${this.table()}(game_management_id, close_date)`
@@ -964,6 +1781,34 @@ export class CloseDayService {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_close_day_game_recent
          ON ${this.table()}(game_management_id, closed_at DESC)`
+      );
+      // REQ-116: parent-tabell for recurring patterns + støttende indekser.
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.recurringTable()} (
+          id TEXT PRIMARY KEY,
+          game_management_id TEXT NOT NULL,
+          pattern_json JSONB NOT NULL,
+          start_date DATE NOT NULL,
+          end_date DATE NULL,
+          max_occurrences INTEGER NULL,
+          start_time TEXT NULL,
+          end_time TEXT NULL,
+          notes TEXT NULL,
+          created_by TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          deleted_at TIMESTAMPTZ NULL,
+          deleted_by TEXT NULL
+        )`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_close_day_recurring_active
+         ON ${this.recurringTable()}(game_management_id)
+         WHERE deleted_at IS NULL`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_close_day_log_recurring
+         ON ${this.table()}(recurring_pattern_id)
+         WHERE recurring_pattern_id IS NOT NULL`
       );
       await client.query("COMMIT");
     } catch (err) {

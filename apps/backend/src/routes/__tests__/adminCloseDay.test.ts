@@ -25,6 +25,8 @@ import type {
   CloseDaySummary,
   CloseManyInput,
   CloseManyResult,
+  CloseRecurringResult,
+  RecurringPatternEntry,
   UpdateDateInput,
   DeleteDateInput,
 } from "../../admin/CloseDayService.js";
@@ -62,8 +64,12 @@ interface Ctx {
     updates: UpdateDateInput[];
     deletes: DeleteDateInput[];
     lists: string[];
+    /** REQ-116: spies for nye recurring-endepunkt. */
+    recurringDeletes: Array<{ gameManagementId: string; patternId: string; deletedBy: string }>;
+    recurringLists: string[];
   };
   entries: Map<string, CloseDayEntry>;
+  patterns: Map<string, RecurringPatternEntry>;
   close: () => Promise<void>;
 }
 
@@ -109,7 +115,12 @@ async function startServer(
   const updates: Ctx["spies"]["updates"] = [];
   const deletes: Ctx["spies"]["deletes"] = [];
   const lists: Ctx["spies"]["lists"] = [];
+  const recurringDeletes: Ctx["spies"]["recurringDeletes"] = [];
+  const recurringLists: Ctx["spies"]["recurringLists"] = [];
+  /** REQ-116: in-memory recurring-pattern-store. */
+  const patterns = new Map<string, RecurringPatternEntry>();
   let idCounter = entries.size;
+  let patternCounter = 0;
 
   function makeEntry(
     gameId: string,
@@ -136,6 +147,7 @@ async function startServer(
       startTime,
       endTime,
       notes,
+      recurringPatternId: null,
       summary,
     };
     entries.set(id, entry);
@@ -225,7 +237,9 @@ async function startServer(
         input.notes ?? null
       );
     },
-    async closeMany(input: CloseManyInput): Promise<CloseManyResult> {
+    async closeMany(
+      input: CloseManyInput
+    ): Promise<CloseManyResult | CloseRecurringResult> {
       closeManys.push(input);
       if (!knownGames.includes(input.gameManagementId)) {
         throw new DomainError("GAME_MANAGEMENT_NOT_FOUND", "not found");
@@ -233,6 +247,9 @@ async function startServer(
       type Plan = { closeDate: string; startTime: string | null; endTime: string | null };
       let plan: Plan[] = [];
       const notes = (input as { notes?: string | null }).notes ?? null;
+      let recurringPatternId: string | null = null;
+      let recurringPattern: RecurringPatternEntry | null = null;
+
       switch (input.mode) {
         case "single":
           plan = [
@@ -271,8 +288,43 @@ async function startServer(
           plan.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
           break;
         }
+        case "recurring": {
+          // REQ-116: forenklet expansion-stub for router-tests. Vi
+          // verifiserer kun at router-laget bygger riktig CloseManyInput
+          // og kaller service-laget; ekte expansion testes i CloseDayService.test.ts.
+          patternCounter += 1;
+          recurringPatternId = `pat-${patternCounter}`;
+          const startDate = input.startDate ?? "2026-04-25";
+          const endDate = input.endDate ?? "2026-04-30";
+          recurringPattern = {
+            id: recurringPatternId,
+            gameManagementId: input.gameManagementId,
+            pattern: input.pattern,
+            startDate,
+            endDate,
+            maxOccurrences: input.maxOccurrences ?? 365,
+            startTime: input.startTime ?? null,
+            endTime: input.endTime ?? null,
+            notes: input.notes ?? null,
+            createdBy: input.closedBy,
+            createdAt: "2026-04-25T08:00:00.000Z",
+            deletedAt: null,
+            deletedBy: null,
+          };
+          patterns.set(recurringPatternId, recurringPattern);
+          // I stuben bygger vi 1 expansion-dato (startDate) — det holder
+          // for router-roundtrip-tester. Ekte expansion testes i service-tester.
+          plan = [
+            {
+              closeDate: startDate,
+              startTime: input.startTime ?? null,
+              endTime: input.endTime ?? null,
+            },
+          ];
+          break;
+        }
       }
-      const result: CloseManyResult = {
+      const baseResult: CloseManyResult = {
         entries: [],
         createdDates: [],
         skippedDates: [],
@@ -281,8 +333,8 @@ async function startServer(
         const key = `${input.gameManagementId}::${item.closeDate}`;
         const existing = entriesByKey.get(key);
         if (existing) {
-          result.entries.push(existing);
-          result.skippedDates.push(item.closeDate);
+          baseResult.entries.push(existing);
+          baseResult.skippedDates.push(item.closeDate);
           continue;
         }
         const e = makeEntry(
@@ -293,10 +345,63 @@ async function startServer(
           item.endTime,
           notes
         );
-        result.entries.push(e);
-        result.createdDates.push(item.closeDate);
+        // REQ-116: stamp pattern-id på child-entry hvis recurring
+        if (recurringPatternId) {
+          e.recurringPatternId = recurringPatternId;
+        }
+        baseResult.entries.push(e);
+        baseResult.createdDates.push(item.closeDate);
       }
-      return result;
+      if (recurringPattern) {
+        const recResult: CloseRecurringResult = {
+          ...baseResult,
+          pattern: recurringPattern,
+          expandedCount: plan.length,
+        };
+        return recResult;
+      }
+      return baseResult;
+    },
+    async listRecurringPatterns(gameId: string): Promise<RecurringPatternEntry[]> {
+      recurringLists.push(gameId);
+      const out: RecurringPatternEntry[] = [];
+      for (const p of patterns.values()) {
+        if (p.gameManagementId === gameId && p.deletedAt === null) {
+          out.push(p);
+        }
+      }
+      return out;
+    },
+    async deleteRecurringPattern(input: {
+      gameManagementId: string;
+      patternId: string;
+      deletedBy: string;
+    }): Promise<{ pattern: RecurringPatternEntry; deletedChildCount: number }> {
+      recurringDeletes.push(input);
+      const target = patterns.get(input.patternId);
+      if (!target || target.gameManagementId !== input.gameManagementId) {
+        throw new DomainError(
+          "CLOSE_DAY_RECURRING_NOT_FOUND",
+          "not found"
+        );
+      }
+      if (target.deletedAt === null) {
+        target.deletedAt = "2026-04-26T08:00:00.000Z";
+        target.deletedBy = input.deletedBy;
+      }
+      // Hard-slett child-rader
+      let deletedChildCount = 0;
+      for (const e of [...entries.values()]) {
+        if (
+          e.gameManagementId === input.gameManagementId &&
+          e.recurringPatternId === input.patternId
+        ) {
+          entries.delete(e.id);
+          entriesByKey.delete(`${e.gameManagementId}::${e.closeDate}`);
+          deletedChildCount += 1;
+        }
+      }
+      return { pattern: target, deletedChildCount };
     },
     async updateDate(input: UpdateDateInput): Promise<CloseDayEntry> {
       updates.push(input);
@@ -370,8 +475,11 @@ async function startServer(
       updates,
       deletes,
       lists,
+      recurringDeletes,
+      recurringLists,
     },
     entries,
+    patterns,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve()))
@@ -526,6 +634,7 @@ test("BIN-623 router: GET summary flagger alreadyClosed=true når dagen allerede
     startTime: null,
     endTime: null,
     notes: null,
+    recurringPatternId: null,
     summary: makeSummary("gm-1", "2026-04-20", {
       alreadyClosed: true,
       closedBy: "admin-1",
@@ -649,6 +758,7 @@ test("BIN-623 router: POST close-day på allerede-lukket dag → 409 CLOSE_DAY_A
     startTime: null,
     endTime: null,
     notes: null,
+    recurringPatternId: null,
     summary: makeSummary("gm-1", "2026-04-20", { alreadyClosed: true }),
   };
   const ctx = await startServer({ "t-admin": adminUser }, [seeded]);
@@ -888,6 +998,7 @@ test("BIN-700 router: PUT close-day/:closeDate som SUPPORT → 403", async () =>
     startTime: "00:00",
     endTime: "23:59",
     notes: null,
+    recurringPatternId: null,
     summary: makeSummary("gm-1", "2026-04-20", { alreadyClosed: true }),
   };
   const ctx = await startServer({ "t-sup": supportUser }, [seeded]);
@@ -916,6 +1027,7 @@ test("BIN-700 router: PUT close-day oppdaterer kun spesifikk dato", async () => 
       startTime: "00:00",
       endTime: "23:59",
       notes: null,
+      recurringPatternId: null,
       summary: makeSummary("gm-1", "2026-12-23"),
     },
     {
@@ -927,6 +1039,7 @@ test("BIN-700 router: PUT close-day oppdaterer kun spesifikk dato", async () => 
       startTime: "00:00",
       endTime: "23:59",
       notes: null,
+      recurringPatternId: null,
       summary: makeSummary("gm-1", "2026-12-24"),
     },
   ];
@@ -1002,6 +1115,7 @@ test("BIN-700 router: DELETE close-day/:closeDate fjerner kun spesifikk dato", a
       startTime: null,
       endTime: null,
       notes: null,
+      recurringPatternId: null,
       summary: makeSummary("gm-1", "2026-12-23"),
     },
     {
@@ -1013,6 +1127,7 @@ test("BIN-700 router: DELETE close-day/:closeDate fjerner kun spesifikk dato", a
       startTime: null,
       endTime: null,
       notes: null,
+      recurringPatternId: null,
       summary: makeSummary("gm-1", "2026-12-24"),
     },
   ];
@@ -1093,6 +1208,7 @@ test("BIN-700 router: GET /close-day lister alle lukkinger sortert ascending", a
       startTime: null,
       endTime: null,
       notes: null,
+      recurringPatternId: null,
       summary: makeSummary("gm-1", "2026-12-25"),
     },
     {
@@ -1104,6 +1220,7 @@ test("BIN-700 router: GET /close-day lister alle lukkinger sortert ascending", a
       startTime: null,
       endTime: null,
       notes: null,
+      recurringPatternId: null,
       summary: makeSummary("gm-1", "2026-04-01"),
     },
   ];
@@ -1181,6 +1298,260 @@ test("BIN-700 router: POST mode=single tillater notes + tids-vindu", async () =>
     assert.equal(details.mode, "single");
     assert.equal(details.startTime, "09:00");
     assert.equal(details.notes, "redusert dag");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── REQ-116: Recurring patterns — router-tester ─────────────────────────
+
+test("REQ-116 router: POST mode=recurring lager pattern + child-rad + audit-events", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/games/gm-1/close-day",
+      "t-admin",
+      {
+        mode: "recurring",
+        pattern: { type: "weekly", daysOfWeek: [1] },
+        startDate: "2026-04-20",
+        endDate: "2026-04-26",
+        notes: "Mandagsstengt",
+      }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.mode, "recurring");
+    assert.ok(res.body.data.pattern, "pattern-objekt returnert");
+    assert.equal(res.body.data.pattern.pattern.type, "weekly");
+    assert.equal(res.body.data.expandedCount, 1);
+
+    // Audit-log: 1 recurring.create + 1 close-day per child-rad
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 2);
+    const recCreate = events.find(
+      (e) => e.action === "admin.game.close-day.recurring.create"
+    );
+    const childCreate = events.find((e) => e.action === "admin.game.close-day");
+    assert.ok(recCreate, "recurring.create-event finnes");
+    assert.ok(childCreate, "child close-day-event finnes");
+    const recDetails = recCreate!.details as Record<string, unknown>;
+    assert.equal(recDetails.expandedCount, 1);
+    assert.equal(recDetails.createdCount, 1);
+    assert.ok(typeof recDetails.patternId === "string");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: POST mode=recurring som SUPPORT → 403", async () => {
+  const ctx = await startServer({ "t-sup": supportUser });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/games/gm-1/close-day",
+      "t-sup",
+      {
+        mode: "recurring",
+        pattern: { type: "daily" },
+      }
+    );
+    assert.equal(res.status, 403);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: POST mode=recurring uten pattern → 400", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/games/gm-1/close-day",
+      "t-admin",
+      {
+        mode: "recurring",
+      }
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: GET /close-day/recurring lister kun aktive patterns", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    // Opprett 2 patterns
+    await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "recurring",
+      pattern: { type: "weekly", daysOfWeek: [1] },
+      startDate: "2026-04-20",
+      endDate: "2026-04-26",
+    });
+    await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "recurring",
+      pattern: { type: "yearly", month: 12, day: 25 },
+      startDate: "2026-12-01",
+      endDate: "2026-12-31",
+    });
+    const res = await req(
+      ctx,
+      "GET",
+      "/api/admin/games/gm-1/close-day/recurring",
+      "t-admin"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.patterns.length, 2);
+    assert.equal(ctx.spies.recurringLists.length, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: GET /close-day/recurring uten token → 401", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/recurring`
+    );
+    assert.equal(res.status, 401);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: GET /close-day/recurring som PLAYER → 403", async () => {
+  const ctx = await startServer({ "t-pl": playerUser });
+  try {
+    const res = await req(
+      ctx,
+      "GET",
+      "/api/admin/games/gm-1/close-day/recurring",
+      "t-pl"
+    );
+    assert.equal(res.status, 403);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: DELETE /close-day/recurring/:patternId fjerner pattern + child-rader", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const createRes = await req(
+      ctx,
+      "POST",
+      "/api/admin/games/gm-1/close-day",
+      "t-admin",
+      {
+        mode: "recurring",
+        pattern: { type: "weekly", daysOfWeek: [1] },
+        startDate: "2026-04-20",
+        endDate: "2026-04-26",
+      }
+    );
+    const patternId = createRes.body.data.pattern.id as string;
+    assert.ok(patternId);
+    assert.equal(ctx.entries.size, 1, "1 child-rad opprettet");
+
+    const delRes = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/recurring/${patternId}`,
+      {
+        method: "DELETE",
+        headers: { authorization: "Bearer t-admin" },
+      }
+    );
+    assert.equal(delRes.status, 200);
+    const body = (await delRes.json()) as {
+      ok: boolean;
+      data: { pattern: { deletedAt: string | null }; deletedChildCount: number };
+    };
+    assert.equal(body.ok, true);
+    assert.notEqual(body.data.pattern.deletedAt, null);
+    assert.equal(body.data.deletedChildCount, 1);
+    assert.equal(ctx.entries.size, 0, "child-rader hard-slettet");
+
+    // Audit-log: skal ha en recurring.delete-event
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    const delEvent = events.find(
+      (e) => e.action === "admin.game.close-day.recurring.delete"
+    );
+    assert.ok(delEvent, "delete-event registrert");
+    const delDetails = delEvent!.details as Record<string, unknown>;
+    assert.equal(delDetails.patternId, patternId);
+    assert.equal(delDetails.deletedChildCount, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: DELETE /close-day/recurring/:patternId på ikke-eksisterende → 404", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/recurring/missing-id`,
+      {
+        method: "DELETE",
+        headers: { authorization: "Bearer t-admin" },
+      }
+    );
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    assert.equal(body.error.code, "CLOSE_DAY_RECURRING_NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: DELETE /close-day/recurring som SUPPORT → 403", async () => {
+  const ctx = await startServer({ "t-sup": supportUser });
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/recurring/any-id`,
+      {
+        method: "DELETE",
+        headers: { authorization: "Bearer t-sup" },
+      }
+    );
+    assert.equal(res.status, 403);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("REQ-116 router: POST recurring med yearly-pattern + alle valgfrie felter", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/games/gm-1/close-day",
+      "t-admin",
+      {
+        mode: "recurring",
+        pattern: { type: "yearly", month: 5, day: 17 },
+        startDate: "2026-01-01",
+        endDate: "2028-12-31",
+        startTime: "00:00",
+        endTime: "23:59",
+        notes: "Grunnlovsdag",
+        maxOccurrences: 10,
+      }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.mode, "recurring");
+    assert.equal(res.body.data.pattern.pattern.type, "yearly");
+    assert.equal(res.body.data.pattern.pattern.month, 5);
+    assert.equal(res.body.data.pattern.pattern.day, 17);
+    assert.equal(res.body.data.pattern.notes, "Grunnlovsdag");
+    assert.equal(res.body.data.pattern.maxOccurrences, 10);
   } finally {
     await ctx.close();
   }
