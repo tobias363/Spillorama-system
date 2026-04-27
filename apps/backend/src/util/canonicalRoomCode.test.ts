@@ -11,7 +11,7 @@ import { getCanonicalRoomCode } from "./canonicalRoomCode.js";
 
 test("bingo (Spill 1) + groupId → BINGO_<groupId>, hall-shared", () => {
   const r = getCanonicalRoomCode("bingo", "hall-A", "group-X");
-  assert.equal(r.roomCode, "BINGO_group-X");
+  assert.equal(r.roomCode, "BINGO_GROUP-X");
   assert.equal(r.effectiveHallId, null);
   assert.equal(r.isHallShared, true);
 });
@@ -30,20 +30,20 @@ test("bingo i ulike grupper får ulike rom", () => {
   const a = getCanonicalRoomCode("bingo", "hall-A", "group-X");
   const b = getCanonicalRoomCode("bingo", "hall-B", "group-Y");
   assert.notEqual(a.roomCode, b.roomCode);
-  assert.equal(a.roomCode, "BINGO_group-X");
-  assert.equal(b.roomCode, "BINGO_group-Y");
+  assert.equal(a.roomCode, "BINGO_GROUP-X");
+  assert.equal(b.roomCode, "BINGO_GROUP-Y");
 });
 
 test("bingo uten gruppe (groupId=null) faller tilbake til hallId", () => {
   const r = getCanonicalRoomCode("bingo", "hall-A", null);
-  assert.equal(r.roomCode, "BINGO_hall-A");
+  assert.equal(r.roomCode, "BINGO_HALL-A");
   assert.equal(r.effectiveHallId, null);
   assert.equal(r.isHallShared, true);
 });
 
 test("bingo uten gruppe (groupId=undefined) faller tilbake til hallId", () => {
   const r = getCanonicalRoomCode("bingo", "hall-A");
-  assert.equal(r.roomCode, "BINGO_hall-A");
+  assert.equal(r.roomCode, "BINGO_HALL-A");
   assert.equal(r.effectiveHallId, null);
   assert.equal(r.isHallShared, true);
 });
@@ -52,8 +52,8 @@ test("bingo: ulike haller uten gruppe får ULIKE rom", () => {
   const a = getCanonicalRoomCode("bingo", "hall-A", null);
   const b = getCanonicalRoomCode("bingo", "hall-B", null);
   assert.notEqual(a.roomCode, b.roomCode);
-  assert.equal(a.roomCode, "BINGO_hall-A");
-  assert.equal(b.roomCode, "BINGO_hall-B");
+  assert.equal(a.roomCode, "BINGO_HALL-A");
+  assert.equal(b.roomCode, "BINGO_HALL-B");
 });
 
 test("rocket (Spill 2) → ROCKET shared, hallId og groupId ignoreres", () => {
@@ -82,7 +82,7 @@ test("ukjent slug → uppercased per-hall (ikke shared, groupId ignoreres)", () 
 
 test("undefined slug defaulter til bingo (Spill 1) — bruker groupId hvis gitt", () => {
   const r = getCanonicalRoomCode(undefined, "hall-A", "group-X");
-  assert.equal(r.roomCode, "BINGO_group-X");
+  assert.equal(r.roomCode, "BINGO_GROUP-X");
   assert.equal(r.effectiveHallId, null);
   assert.equal(r.isHallShared, true);
 });

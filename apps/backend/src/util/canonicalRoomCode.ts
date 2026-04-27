@@ -63,7 +63,11 @@ export function getCanonicalRoomCode(
   if (slug === "bingo" || slug === "") {
     // Per-LINK (Group of Halls): alle haller i samme gruppe deler rom.
     // Hvis hallen ikke er i en gruppe → fallback til hallId-basert kode.
-    const linkKey = groupId ?? hallId;
+    // Uppercase for konsistens med BingoEngine.getRoomSnapshot/joinRoom som
+    // alle uppercaser lookup-input — uten denne ble pilot-haller med lowercase
+    // slugs (notodden/harstad/sortland/bodo) blokkert med ROOM_NOT_FOUND
+    // (regresjons-test 2026-04-27).
+    const linkKey = (groupId ?? hallId).toUpperCase();
     return {
       roomCode: `BINGO_${linkKey}`,
       effectiveHallId: null, // null = shared mellom haller i samme link
