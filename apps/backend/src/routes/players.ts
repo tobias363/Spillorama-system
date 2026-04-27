@@ -61,6 +61,11 @@ export function createPlayersRouter(deps: PlayersRouterDeps): express.Router {
         hallId: user.hallId,
         kycStatus: user.kycStatus,
         birthDate: user.birthDate ?? null,
+        // GAP #5: profile + BankID image-URLer. `null` når ingen upload
+        // har skjedd. Frontend prefikser med backend-base-URL ved bruk.
+        profileImageUrl: user.profileImageUrl ?? null,
+        bankidSelfieUrl: user.bankidSelfieUrl ?? null,
+        bankidDocumentUrl: user.bankidDocumentUrl ?? null,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       });
