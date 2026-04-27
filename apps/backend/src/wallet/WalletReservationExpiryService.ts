@@ -51,14 +51,25 @@ export class WalletReservationExpiryService {
 
   start(): void {
     if (this.timer) return;
-    // Første tick etter ett interval — ikke umiddelbart ved boot så vi
-    // slipper race mot andre init-stages.
+    // Første tick etter ett interval — interval-loopen.
     this.timer = setInterval(() => {
       void this.tick();
     }, this.tickIntervalMs);
     // `setInterval` holder prosessen åpen; unref så process.exit kan avslutte
     // uten å blokkeres av denne timeren.
     this.timer.unref?.();
+
+    // Boot-sweep (CHIP-DESYNC 2026-04-26): hvis serveren krasjet/restartet
+    // etter `bet:arm` men før `startGame`, ligger orphan-reservasjoner igjen
+    // i DB. Uten boot-sweep må første bruker-besøk vente opptil
+    // `tickIntervalMs` (default 5 min) før chip-saldoen blir korrekt igjen.
+    //
+    // 30s delay sikrer at vi ikke racer med andre init-stages (DB-pool,
+    // adapter-init), men er kort nok til at chip-en blir korrekt før de
+    // fleste brukere logger inn etter restart.
+    setTimeout(() => {
+      void this.tick();
+    }, 30_000).unref?.();
   }
 
   stop(): void {
