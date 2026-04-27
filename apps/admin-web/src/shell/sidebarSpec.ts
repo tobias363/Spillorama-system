@@ -21,6 +21,11 @@ export interface SidebarGroup {
   roles?: Role[];
   agentOnly?: boolean;
   superAdminOnly?: boolean;
+  /**
+   * When true, the group renders open on initial load (legacy parity for
+   * "Kontant inn/ut" which is expanded-by-default in the legacy sidebar).
+   */
+  defaultExpanded?: boolean;
   children: SidebarLeaf[];
 }
 
@@ -55,17 +60,36 @@ const spilloramaLive: SidebarGroup = {
   ],
 };
 
+// Legacy admin-sidebar layout (Hovednavigasjon-section, 16 menu-items 1:1
+// med legacy Spillorama Admin V1.0 — se docs/architecture/WIREFRAME_CATALOG.md
+// PDF #16). Rekkefølgen + grupperingen er styrt av screenshot Tobias delte
+// 2026-04-27. Eksisterende admin-extras (Spillorama Live, role-management,
+// adminUser/hall/etc.) ligger fortsatt under header'en, men etter de 16
+// legacy-elementene for å bevare 1:1-rekkefølgen øverst.
 export const adminSidebar: SidebarNode[] = [
   { kind: "header", labelKey: "main_navigation" },
 
-  spilloramaLive,
-
+  // 1. Dashboard
   { kind: "leaf", id: "dashboard", path: "/admin", icon: "fa fa-dashboard", labelKey: "dashboard" },
 
+  // 2. Kontant inn/ut (expanded by default — legacy default-state)
+  {
+    kind: "group",
+    id: "cash-inout",
+    icon: "fa fa-money",
+    labelKey: "cash_in_out",
+    defaultExpanded: true,
+    children: [
+      { kind: "leaf", id: "cash-inout-overview", path: "/agent/cashinout", icon: "fa fa-circle-o", labelKey: "cash_in_out" },
+      { kind: "leaf", id: "cash-inout-sold-tickets", path: "/sold-tickets", icon: "fa fa-circle-o", labelKey: "sold_tickets" },
+    ],
+  },
+
+  // 3. Spilleradministrasjon (expandable)
   {
     kind: "group",
     id: "player-management",
-    icon: "fa fa-bar-chart",
+    icon: "fa fa-users",
     labelKey: "player_management",
     module: "Players Management",
     children: [
@@ -74,11 +98,120 @@ export const adminSidebar: SidebarNode[] = [
       { kind: "leaf", id: "rejectedRequests", path: "/rejectedRequests", icon: "fa fa-circle-o", labelKey: "reject_requests" },
     ],
   },
+
+  // 4. Tidsplanadministrasjon
+  { kind: "leaf", id: "schedules", path: "/schedules", icon: "fa fa-calendar", labelKey: "schedule_management", module: "Schedule Management" },
+
+  // 5. Opprettelse av spill
+  { kind: "leaf", id: "gameManagement", path: "/gameManagement", icon: "fa fa-plus-square", labelKey: "game_creation_management", module: "Game Creation Management" },
+
+  // 6. Lagret spillliste
+  { kind: "leaf", id: "savedGameList", path: "/savedGameList", icon: "fa fa-list", labelKey: "saved_game_list", module: "Saved Game List" },
+
+  // 7. Legg til fysiske billetter
+  { kind: "leaf", id: "addPhysicalTickets", path: "/addPhysicalTickets", icon: "fa fa-ticket", labelKey: "add_physical_tickets", module: "Physical Tickets" },
+
+  // 8. Administrasjon av fysiske billetter
+  { kind: "leaf", id: "physicalTicketManagement", path: "/physicalTicketManagement", icon: "fa fa-th-list", labelKey: "physical_ticket_management", module: "Physical Tickets" },
+
+  // 9. Fysisk uttak
+  { kind: "leaf", id: "physicalCashOut", path: "/physical/cash-out", icon: "fa fa-money", labelKey: "physical_cash_out", module: "Physical Tickets" },
+
+  // 10. Produktadministrasjon
+  {
+    kind: "group",
+    id: "product-management",
+    icon: "fa fa-shopping-cart",
+    labelKey: "product_management",
+    module: "Product Management",
+    children: [
+      { kind: "leaf", id: "productList", path: "/productList", icon: "fa fa-circle-o", labelKey: "product_list" },
+      { kind: "leaf", id: "categoryList", path: "/categoryList", icon: "fa fa-circle-o", labelKey: "category_list" },
+      { kind: "leaf", id: "orderHistory", path: "/orderHistory", icon: "fa fa-circle-o", labelKey: "order_history" },
+    ],
+  },
+
+  // 11. Rapportadministrasjon
+  {
+    kind: "group",
+    id: "report-management",
+    icon: "fa fa-bar-chart",
+    labelKey: "report_management",
+    module: "Report Management",
+    children: [
+      { kind: "leaf", id: "reportGame1", path: "/reportGame1", icon: "fa fa-circle-o", labelKey: "game1" },
+      { kind: "leaf", id: "reportManagementGame1", path: "/reportManagement/game1", icon: "fa fa-circle-o", labelKey: "report_management_game1" },
+      { kind: "leaf", id: "reportGame2", path: "/reportGame2", icon: "fa fa-circle-o", labelKey: "game2" },
+      { kind: "leaf", id: "reportGame3", path: "/reportGame3", icon: "fa fa-circle-o", labelKey: "game3" },
+      { kind: "leaf", id: "reportGame4", path: "/reportGame4", icon: "fa fa-circle-o", labelKey: "game4" },
+      { kind: "leaf", id: "reportGame5", path: "/reportGame5", icon: "fa fa-circle-o", labelKey: "game5" },
+      { kind: "leaf", id: "physicalTicketReport", path: "/physicalTicketReport", icon: "fa fa-circle-o", labelKey: "physical_ticket" },
+      { kind: "leaf", id: "uniqueGameReport", path: "/uniqueGameReport", icon: "fa fa-circle-o", labelKey: "unique_ticket" },
+      { kind: "leaf", id: "redFlagCategory", path: "/redFlagCategory", icon: "fa fa-circle-o", labelKey: "red_flag_category" },
+      { kind: "leaf", id: "totalRevenueReport", path: "/totalRevenueReport", icon: "fa fa-circle-o", labelKey: "total_revenue_report" },
+    ],
+  },
+
+  // 12. Utbetalingsadministrasjon
+  {
+    kind: "group",
+    id: "payout-management",
+    icon: "fa fa-google-wallet",
+    labelKey: "payout_management",
+    module: "Payout Management",
+    children: [
+      { kind: "leaf", id: "payoutPlayer", path: "/payoutPlayer", icon: "fa fa-circle-o", labelKey: "payout_for_players" },
+      { kind: "leaf", id: "payoutTickets", path: "/payoutTickets", icon: "fa fa-circle-o", labelKey: "payout_for_ticket" },
+    ],
+  },
+
+  // 13. Hallspesifikke rapporter
+  { kind: "leaf", id: "hallSpecificReport", path: "/hallSpecificReport", icon: "fa fa-bank", labelKey: "hall_specific_reports" },
+
+  // 14. Lommebokadministrasjon
+  { kind: "leaf", id: "wallet", path: "/wallet", icon: "fa fa-credit-card", labelKey: "wallet_management", module: "Wallet Management" },
+
+  // 15. Transaksjonsadministrasjon (expandable)
+  {
+    kind: "group",
+    id: "transactions-management",
+    icon: "fa fa-exchange",
+    labelKey: "transactions_management",
+    module: "Transactions Management",
+    children: [
+      { kind: "leaf", id: "depositRequests", path: "/deposit/requests", icon: "fa fa-circle-o", labelKey: "deposit_request" },
+      { kind: "leaf", id: "depositHistory", path: "/deposit/history", icon: "fa fa-circle-o", labelKey: "deposit_history" },
+      // BIN-655 — generisk transaksjons-logg (wallet + agent + payment-requests).
+      { kind: "leaf", id: "transactionsLog", path: "/transactions/log", icon: "fa fa-circle-o", labelKey: "transactions_log" },
+    ],
+  },
+
+  // 16. Uttaksadministrasjon
+  {
+    kind: "group",
+    id: "withdraw-management",
+    icon: "fa fa-sign-out",
+    labelKey: "withdraw_management",
+    module: "Withdraw Management",
+    children: [
+      { kind: "leaf", id: "withdrawInHall", path: "/withdraw/requests/hall", icon: "fa fa-circle-o", labelKey: "withdraw_request_in_hall" },
+      { kind: "leaf", id: "withdrawInBank", path: "/withdraw/requests/bank", icon: "fa fa-circle-o", labelKey: "withdraw_request_in_bank" },
+      { kind: "leaf", id: "withdrawHistoryHall", path: "/withdraw/history/hall", icon: "fa fa-circle-o", labelKey: "withdraw_history_hall" },
+      { kind: "leaf", id: "withdrawHistoryBank", path: "/withdraw/history/bank", icon: "fa fa-circle-o", labelKey: "withdraw_history_bank" },
+      { kind: "leaf", id: "withdrawEmails", path: "/withdraw/list/emails", icon: "fa fa-circle-o", labelKey: "add_email_account" },
+      { kind: "leaf", id: "withdrawXmlBatches", path: "/withdraw/xml-batches", icon: "fa fa-file-code-o", labelKey: "withdraw_xml_batches" },
+    ],
+  },
+
+  // ── Tilleggselementer som ikke er i legacy-screenshotet, men som
+  //    fortsatt eies av admin-panelet (Spillorama Live, role-management,
+  //    user-management, fysiske bonger PT1-PT5 etc.). Plasseres etter de
+  //    16 legacy-elementene for å bevare 1:1-rekkefølgen øverst.
+
+  spilloramaLive,
+
   { kind: "leaf", id: "track-spending", path: "/players/track-spending", icon: "fa fa-gamepad", labelKey: "tracking_player_spending", module: "Tracking Player Spending" },
   { kind: "leaf", id: "gameType", path: "/gameType", icon: "fa fa-gamepad", labelKey: "game_type", module: "Game Type" },
-  { kind: "leaf", id: "schedules", path: "/schedules", icon: "fa fa-calendar", labelKey: "schedule_management", module: "Schedule Management" },
-  { kind: "leaf", id: "gameManagement", path: "/gameManagement", icon: "fa fa-gamepad", labelKey: "game_creation_management", module: "Game Creation Management" },
-  { kind: "leaf", id: "savedGameList", path: "/savedGameList", icon: "fa fa-gears mr-20", labelKey: "saved_game_list", module: "Saved Game List" },
 
   {
     kind: "group",
@@ -93,9 +226,6 @@ export const adminSidebar: SidebarNode[] = [
     ],
   },
 
-  { kind: "leaf", id: "addPhysicalTickets", path: "/addPhysicalTickets", icon: "fa fa-ticket", labelKey: "add_physical_tickets", module: "Physical Tickets" },
-  { kind: "leaf", id: "physicalTicketManagement", path: "/physicalTicketManagement", icon: "fa fa-gears mr-20", labelKey: "physical_ticket_management", module: "Physical Tickets" },
-  { kind: "leaf", id: "physicalCashOut", path: "/physical/cash-out", icon: "fa fa-money", labelKey: "physical_cash_out", module: "Physical Tickets" },
   { kind: "leaf", id: "physicalCheckBingo", path: "/physical/check-bingo", icon: "fa fa-check-circle-o", labelKey: "check_bingo_stamp", module: "Physical Tickets" },
   // PR-PT6 — PT1-PT5 admin-UI (CSV-import, range-registrering, aktive ranges,
   // pending payouts). Egen undergruppe under "Fysiske bonger" for å gruppere
@@ -113,12 +243,11 @@ export const adminSidebar: SidebarNode[] = [
       { kind: "leaf", id: "physical-pending-payouts", path: "/physical/payouts", icon: "fa fa-money", labelKey: "pt_pending_payouts_title", module: "Physical Tickets" },
     ],
   },
-  { kind: "leaf", id: "sold-tickets", path: "/sold-tickets", icon: "fa fa-ticket mr-20", labelKey: "sold_tickets" },
 
   {
     kind: "group",
     id: "unique-id",
-    icon: "fa fa-bar-chart",
+    icon: "fa fa-id-card",
     labelKey: "unique_id_modules",
     module: "Unique ID Modules",
     children: [
@@ -149,19 +278,6 @@ export const adminSidebar: SidebarNode[] = [
 
   {
     kind: "group",
-    id: "product-management",
-    icon: "fa fa-bar-chart",
-    labelKey: "product_management",
-    module: "Product Management",
-    children: [
-      { kind: "leaf", id: "productList", path: "/productList", icon: "fa fa-circle-o", labelKey: "product_list" },
-      { kind: "leaf", id: "categoryList", path: "/categoryList", icon: "fa fa-circle-o", labelKey: "category_list" },
-      { kind: "leaf", id: "orderHistory", path: "/orderHistory", icon: "fa fa-circle-o", labelKey: "order_history" },
-    ],
-  },
-
-  {
-    kind: "group",
     id: "role-management",
     icon: "fa fa-users mr-20",
     labelKey: "role_management",
@@ -175,73 +291,10 @@ export const adminSidebar: SidebarNode[] = [
     ],
   },
 
-  {
-    kind: "group",
-    id: "report-management",
-    icon: "fa fa-bar-chart",
-    labelKey: "report_management",
-    module: "Report Management",
-    children: [
-      { kind: "leaf", id: "reportGame1", path: "/reportGame1", icon: "fa fa-circle-o", labelKey: "game1" },
-      { kind: "leaf", id: "reportManagementGame1", path: "/reportManagement/game1", icon: "fa fa-circle-o", labelKey: "report_management_game1" },
-      { kind: "leaf", id: "reportGame2", path: "/reportGame2", icon: "fa fa-circle-o", labelKey: "game2" },
-      { kind: "leaf", id: "reportGame3", path: "/reportGame3", icon: "fa fa-circle-o", labelKey: "game3" },
-      { kind: "leaf", id: "reportGame4", path: "/reportGame4", icon: "fa fa-circle-o", labelKey: "game4" },
-      { kind: "leaf", id: "reportGame5", path: "/reportGame5", icon: "fa fa-circle-o", labelKey: "game5" },
-      { kind: "leaf", id: "hallSpecificReport", path: "/hallSpecificReport", icon: "fa fa-circle-o", labelKey: "hall_specific_reports" },
-      { kind: "leaf", id: "physicalTicketReport", path: "/physicalTicketReport", icon: "fa fa-circle-o", labelKey: "physical_ticket" },
-      { kind: "leaf", id: "uniqueGameReport", path: "/uniqueGameReport", icon: "fa fa-circle-o", labelKey: "unique_ticket" },
-      { kind: "leaf", id: "redFlagCategory", path: "/redFlagCategory", icon: "fa fa-circle-o", labelKey: "red_flag_category" },
-      { kind: "leaf", id: "totalRevenueReport", path: "/totalRevenueReport", icon: "fa fa-circle-o", labelKey: "total_revenue_report" },
-    ],
-  },
-
-  {
-    kind: "group",
-    id: "payout-management",
-    icon: "fa fa-google-wallet",
-    labelKey: "payout_management",
-    module: "Payout Management",
-    children: [
-      { kind: "leaf", id: "payoutPlayer", path: "/payoutPlayer", icon: "fa fa-circle-o", labelKey: "payout_for_players" },
-      { kind: "leaf", id: "payoutTickets", path: "/payoutTickets", icon: "fa fa-circle-o", labelKey: "payout_for_ticket" },
-    ],
-  },
-
   { kind: "leaf", id: "riskCountry", path: "/riskCountry", icon: "fa fa-users mr-20", labelKey: "risk_country", roles: ["admin", "super-admin"] },
   // PR-B6 (BIN-664) — security / blocked-IP admin.
   { kind: "leaf", id: "blockedIp", path: "/blockedIp", icon: "fa fa-ban mr-20", labelKey: "blocked_ip_table", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "hallAccountReport", path: "/hallAccountReport", icon: "fa fa-users mr-20", labelKey: "hall_account_report" },
-  { kind: "leaf", id: "wallet", path: "/wallet", icon: "fa fa-credit-card", labelKey: "wallet_management", module: "Wallet Management" },
-
-  {
-    kind: "group",
-    id: "transactions-management",
-    icon: "fa fa-money",
-    labelKey: "transactions_management",
-    module: "Transactions Management",
-    children: [
-      { kind: "leaf", id: "depositRequests", path: "/deposit/requests", icon: "fa fa-circle-o", labelKey: "deposit_request" },
-      { kind: "leaf", id: "depositHistory", path: "/deposit/history", icon: "fa fa-circle-o", labelKey: "deposit_history" },
-      // BIN-655 — generisk transaksjons-logg (wallet + agent + payment-requests).
-      { kind: "leaf", id: "transactionsLog", path: "/transactions/log", icon: "fa fa-circle-o", labelKey: "transactions_log" },
-    ],
-  },
-  {
-    kind: "group",
-    id: "withdraw-management",
-    icon: "fa fa-user-secret",
-    labelKey: "withdraw_management",
-    module: "Withdraw Management",
-    children: [
-      { kind: "leaf", id: "withdrawInHall", path: "/withdraw/requests/hall", icon: "fa fa-circle-o", labelKey: "withdraw_request_in_hall" },
-      { kind: "leaf", id: "withdrawInBank", path: "/withdraw/requests/bank", icon: "fa fa-circle-o", labelKey: "withdraw_request_in_bank" },
-      { kind: "leaf", id: "withdrawHistoryHall", path: "/withdraw/history/hall", icon: "fa fa-circle-o", labelKey: "withdraw_history_hall" },
-      { kind: "leaf", id: "withdrawHistoryBank", path: "/withdraw/history/bank", icon: "fa fa-circle-o", labelKey: "withdraw_history_bank" },
-      { kind: "leaf", id: "withdrawEmails", path: "/withdraw/list/emails", icon: "fa fa-circle-o", labelKey: "add_email_account" },
-      { kind: "leaf", id: "withdrawXmlBatches", path: "/withdraw/xml-batches", icon: "fa fa-file-code-o", labelKey: "withdraw_xml_batches" },
-    ],
-  },
 
   { kind: "leaf", id: "leaderboard", path: "/leaderboard", icon: "fa fa-credit-card-alt", labelKey: "leaderboard_management" },
   { kind: "leaf", id: "voucher", path: "/voucher", icon: "fa fa-users mr-20", labelKey: "voucher_management" },

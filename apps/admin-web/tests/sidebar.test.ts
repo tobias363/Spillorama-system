@@ -96,6 +96,74 @@ describe("Sidebar spec", () => {
     expect(sidebarFor("super-admin")).toBe(adminSidebar);
     expect(sidebarFor("agent")).toBe(agentSidebar);
   });
+
+  // Legacy 1:1 sidebar (Tobias screenshot 2026-04-27) — verify the 16
+  // top-level menu-items appear in the correct order under "Hovednavigasjon".
+  describe("legacy 1:1 layout", () => {
+    const LEGACY_ORDER: { id: string; kind: "leaf" | "group" }[] = [
+      { id: "dashboard", kind: "leaf" },
+      { id: "cash-inout", kind: "group" },
+      { id: "player-management", kind: "group" },
+      { id: "schedules", kind: "leaf" },
+      { id: "gameManagement", kind: "leaf" },
+      { id: "savedGameList", kind: "leaf" },
+      { id: "addPhysicalTickets", kind: "leaf" },
+      { id: "physicalTicketManagement", kind: "leaf" },
+      { id: "physicalCashOut", kind: "leaf" },
+      { id: "product-management", kind: "group" },
+      { id: "report-management", kind: "group" },
+      { id: "payout-management", kind: "group" },
+      { id: "hallSpecificReport", kind: "leaf" },
+      { id: "wallet", kind: "leaf" },
+      { id: "transactions-management", kind: "group" },
+      { id: "withdraw-management", kind: "group" },
+    ];
+
+    it("first node is the Hovednavigasjon-header", () => {
+      expect(adminSidebar[0]).toEqual({ kind: "header", labelKey: "main_navigation" });
+    });
+
+    it("the 16 legacy menu-items appear directly after the header in correct order", () => {
+      const after = adminSidebar.slice(1, 1 + LEGACY_ORDER.length);
+      const observed = after.map((n) => ({
+        id: n.kind === "header" ? "<header>" : n.id,
+        kind: n.kind,
+      }));
+      expect(observed).toEqual(LEGACY_ORDER);
+    });
+
+    it("Kontant inn/ut group has the 2 expected children (Kontant inn/ut, Solgte billetter)", () => {
+      const cash = adminSidebar.find((n) => n.kind === "group" && n.id === "cash-inout");
+      expect(cash).toBeDefined();
+      if (cash && cash.kind === "group") {
+        expect(cash.children.map((c) => c.id)).toEqual([
+          "cash-inout-overview",
+          "cash-inout-sold-tickets",
+        ]);
+        expect(cash.children.map((c) => c.path)).toEqual([
+          "/agent/cashinout",
+          "/sold-tickets",
+        ]);
+        expect(cash.defaultExpanded).toBe(true);
+      }
+    });
+
+    it("Spilleradministrasjon group is expandable (chevron via group-kind, not default-expanded)", () => {
+      const players = adminSidebar.find((n) => n.kind === "group" && n.id === "player-management");
+      expect(players).toBeDefined();
+      if (players && players.kind === "group") {
+        expect(players.defaultExpanded).toBeUndefined();
+      }
+    });
+
+    it("Transaksjonsadministrasjon group is expandable", () => {
+      const tx = adminSidebar.find((n) => n.kind === "group" && n.id === "transactions-management");
+      expect(tx).toBeDefined();
+      if (tx && tx.kind === "group") {
+        expect(tx.defaultExpanded).toBeUndefined();
+      }
+    });
+  });
 });
 
 describe("renderSidebar", () => {
@@ -155,5 +223,72 @@ describe("renderSidebar", () => {
     renderSidebar(host, session, "/agent/players");
     const playerGroup = host.querySelector("[data-group-id='agent-player-management']");
     expect(playerGroup).toBeTruthy();
+  });
+
+  it("admin sidebar renders Kontant inn/ut group as default-expanded (menu-open)", () => {
+    const host = document.getElementById("host")!;
+    const session = adminSession();
+    setSession(session);
+    renderSidebar(host, session, "/admin");
+    const cash = host.querySelector<HTMLLIElement>("[data-group-id='cash-inout']");
+    expect(cash).toBeTruthy();
+    expect(cash?.classList.contains("menu-open")).toBe(true);
+    const submenu = cash?.querySelector<HTMLUListElement>(":scope > ul.treeview-menu");
+    expect(submenu?.style.display).toBe("block");
+  });
+
+  it("admin sidebar renders chevron (fa-angle-left) on expandable groups", () => {
+    const host = document.getElementById("host")!;
+    const session = adminSession();
+    setSession(session);
+    renderSidebar(host, session, "/admin");
+    const playerGroup = host.querySelector<HTMLLIElement>("[data-group-id='player-management']");
+    expect(playerGroup).toBeTruthy();
+    const chevron = playerGroup?.querySelector(".pull-right-container .fa-angle-left");
+    expect(chevron).toBeTruthy();
+  });
+
+  it("admin sidebar renders all 16 legacy menu-items in sequence directly after the header", () => {
+    const host = document.getElementById("host")!;
+    const session = adminSession();
+    setSession(session);
+    renderSidebar(host, session, "/admin");
+    const ul = host.querySelector<HTMLUListElement>(".sidebar-menu");
+    expect(ul).toBeTruthy();
+    const items = Array.from(ul!.children) as HTMLLIElement[];
+    // First child is the header <li class="header">.
+    expect(items[0]?.classList.contains("header")).toBe(true);
+    // Next 16 items are the legacy menu-items. We verify each by id (leaf) or
+    // data-group-id (group).
+    const expected = [
+      { kind: "leaf", routeId: "dashboard" },
+      { kind: "group", id: "cash-inout" },
+      { kind: "group", id: "player-management" },
+      { kind: "leaf", routeId: "schedules" },
+      { kind: "leaf", routeId: "gameManagement" },
+      { kind: "leaf", routeId: "savedGameList" },
+      { kind: "leaf", routeId: "addPhysicalTickets" },
+      { kind: "leaf", routeId: "physicalTicketManagement" },
+      { kind: "leaf", routeId: "physicalCashOut" },
+      { kind: "group", id: "product-management" },
+      { kind: "group", id: "report-management" },
+      { kind: "group", id: "payout-management" },
+      { kind: "leaf", routeId: "hallSpecificReport" },
+      { kind: "leaf", routeId: "wallet" },
+      { kind: "group", id: "transactions-management" },
+      { kind: "group", id: "withdraw-management" },
+    ];
+    for (let i = 0; i < expected.length; i++) {
+      const li = items[i + 1];
+      const e = expected[i];
+      expect(li, `item ${i} (${JSON.stringify(e)})`).toBeTruthy();
+      if (!li || !e) continue;
+      if (e.kind === "leaf") {
+        const a = li.querySelector<HTMLAnchorElement>(`a[data-route-id='${e.routeId}']`);
+        expect(a, `expected leaf with data-route-id='${e.routeId}' at position ${i + 1}`).toBeTruthy();
+      } else {
+        expect(li.getAttribute("data-group-id"), `expected group ${e.id} at position ${i + 1}`).toBe(e.id);
+      }
+    }
   });
 });
