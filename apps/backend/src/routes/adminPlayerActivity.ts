@@ -2,17 +2,19 @@
  * BIN-587 B5-rest + BIN-629 + BIN-630: admin-view av spillers aktivitet.
  *
  * Endepunkter:
- *   GET /api/admin/players/:id/transactions    — wallet-transaksjoner (B5)
- *   GET /api/admin/players/:id/game-history    — ledger-entries (stakes/prizes) (B5)
- *   GET /api/admin/players/:id/chips-history   — paginert chips-historikk (BIN-630)
- *   GET /api/admin/players/:id/login-history   — auth.login* audit-rader (BIN-629)
+ *   GET /api/admin/players/:id/transactions             — wallet-transaksjoner (B5)
+ *   GET /api/admin/players/:id/game-history             — ledger-entries (stakes/prizes) (B5)
+ *   GET /api/admin/players/:id/chips-history            — paginert chips-historikk (BIN-630)
+ *   GET /api/admin/players/:id/login-history            — auth.login* audit-rader (BIN-629)
+ *   GET /api/admin/players/:userId/game-management-detail — per game-type aggregat (GAP #4)
  *
  * Alle read-only; ingen audit-logging (ikke regulatorisk — samme policy som
  * BIN-647/BIN-648). Hall-scope for HALL_OPERATOR på game-history: siden
  * spillere ikke har hall-tilhørighet per tx, gir vi ADMIN/SUPPORT tilgang
  * men krever at HALL_OPERATOR spesifiserer hall-filter som matcher egen
  * hall. chips-history og login-history er ikke hall-scoped; kun ADMIN +
- * SUPPORT (PLAYER_KYC_READ).
+ * SUPPORT (PLAYER_KYC_READ). game-management-detail aggregerer ledger-
+ * entries på samme måte som game-history; samme PLAYER_KYC_READ-gate.
  */
 
 import express from "express";
@@ -38,6 +40,26 @@ import {
   buildLoginHistoryResponse,
   decodeLoginCursor,
 } from "../admin/LoginHistoryService.js";
+import { buildPlayerGameManagementDetail } from "../admin/PlayerGameManagementDetailService.js";
+import type { LedgerGameType } from "../game/ComplianceLedgerTypes.js";
+
+const VALID_LEDGER_GAME_TYPES: ReadonlySet<LedgerGameType> = new Set<LedgerGameType>([
+  "DATABINGO",
+  "MAIN_GAME",
+]);
+
+function parseOptionalGameType(value: unknown): LedgerGameType | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!VALID_LEDGER_GAME_TYPES.has(trimmed as LedgerGameType)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `gameType må være én av: ${[...VALID_LEDGER_GAME_TYPES].join(", ")}.`
+    );
+  }
+  return trimmed as LedgerGameType;
+}
 
 export interface AdminPlayerActivityRouterDeps {
   platformService: PlatformService;
@@ -196,6 +218,75 @@ export function createAdminPlayerActivityRouter(deps: AdminPlayerActivityRouterD
         to: result.to,
         items: result.items,
         nextCursor: result.nextCursor,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * GAP #4: GET /api/admin/players/:userId/game-management-detail
+   *
+   * Per-game-type breakdown av spillerens stake/prize-historikk. Aggregeres
+   * fra ComplianceLedger (samme datakilde som §71-rapport) slik at sum-tall
+   * matcher regulatorisk daglig rapport.
+   *
+   * Query-param:
+   *   ?fromDate=ISO  inkluderende nedre grense på createdAt (valgfritt)
+   *   ?toDate=ISO    inkluderende øvre grense (valgfritt)
+   *   ?gameType=DATABINGO|MAIN_GAME  filter på enkelt-spilltype (valgfritt)
+   *
+   * Response:
+   *   { userId, walletId, rows: [{gameType, totalTickets, totalStake,
+   *     totalWinnings, winRate, lastPlayed, prizeCount, extraPrizeCount,
+   *     stakeCount}], totals: {...} }
+   *
+   * Tilgang: PLAYER_KYC_READ (ADMIN + SUPPORT). HALL_OPERATOR er bevisst
+   * utelatt — samme mønster som game-history (sentralisert spillerprofil-
+   * domain). Ingen audit-logging (read-only).
+   *
+   * Legacy: `routes/backend.js:445-446` — `GET /playerGameManagementDetailList/:id`
+   * + `/playerGetGameManagementDetailList`. Aggregert i nyere stack til ett
+   * endepunkt med deterministisk shape; UI kan ikke lenger "drill-down" via
+   * datatable-pagination, men kan heller hente raw `game-history` for det.
+   */
+  router.get("/api/admin/players/:userId/game-management-detail", async (req, res) => {
+    try {
+      await requirePermission(req, "PLAYER_KYC_READ");
+      const userId = mustBeNonEmptyString(req.params.userId, "userId");
+      const target = await platformService.getUserById(userId);
+      if (target.role !== "PLAYER") {
+        throw new DomainError("INVALID_INPUT", "Endepunktet er kun for spillere.");
+      }
+      const fromDate = parseOptionalIso(req.query.fromDate, "fromDate");
+      const toDate = parseOptionalIso(req.query.toDate, "toDate");
+      if (fromDate && toDate && Date.parse(fromDate) > Date.parse(toDate)) {
+        throw new DomainError("INVALID_INPUT", "'fromDate' må være <= 'toDate'.");
+      }
+      const gameType = parseOptionalGameType(req.query.gameType);
+      const limit = parseLimit(req.query.limit, 5_000);
+
+      const entries = engine.listComplianceLedgerEntries({
+        walletId: target.walletId,
+        dateFrom: fromDate,
+        dateTo: toDate,
+        gameType,
+        limit,
+      });
+
+      const result = buildPlayerGameManagementDetail({
+        walletId: target.walletId,
+        entries,
+        gameType,
+        fromDate,
+        toDate,
+      });
+
+      apiSuccess(res, {
+        userId: target.id,
+        walletId: result.walletId,
+        rows: result.rows,
+        totals: result.totals,
       });
     } catch (error) {
       apiFailure(res, error);
