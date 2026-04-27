@@ -364,6 +364,88 @@ describe("TicketGridHtml", () => {
       const firstCell = grid.root.querySelector("[data-number]") as HTMLElement;
       expect(firstCell.dataset.number).toBe("1"); // t1 først (original-rekkefølge)
     });
+
+    it("live-flyt: progressivt nye drawn-numbers re-sorterer korrekt mellom hver tick", () => {
+      // Regresjonstest 2026-04-27 mot rapport om "sortering virker ikke i live".
+      // Simulerer en faktisk runde: server pusher room:update ~hver 1.2s med
+      // ny ball; setTickets kalles for hver tick. Verifiserer at DOM-rekkefølge
+      // oppdateres deterministisk hver gang en bong får mer progress.
+      //
+      // Merk: alle bonger har bit 12 (free center) satt → kol 2 har 4 to-go
+      // som standard-baseline. Sortering kicker ikke inn før en bong har MER
+      // enn 4 marks samlet i én rad/kol. Det er forventet — UI-affordancen er
+      // for å vise "nesten ferdig", ikke "marginalt ledende".
+      const t1 = tightTicket("a", 0); // tall 1..25 (men 13=0 free)
+      const t2 = tightTicket("b", 30); // tall 31..55 (men 43=0 free)
+      const t3 = tightTicket("c", 60); // tall 61..85 (men 73=0 free)
+
+      // Tick 0: ingen drawn → alle har score=4 (kol 2) → original-rekkefølge.
+      grid.setTickets([t1, t2, t3], {
+        cancelable: false,
+        entryFee: 10,
+        state: makeState({
+          patterns: pattern1Rad(),
+          patternResults: [],
+          drawnNumbers: [],
+        }),
+        liveTicketCount: 3,
+      });
+      let firstCells = Array.from(grid.root.querySelectorAll("[data-number]"))
+        .filter((_, i) => i % 25 === 0)
+        .map((c) => (c as HTMLElement).dataset.number);
+      expect(firstCells).toEqual(["1", "31", "61"]);
+
+      // Tick 1: trekker tall 31, 32, 33 (3 av 5 i rad 0 av t2).
+      // t2 score: rad 0 har 3 marks → 2 missing (bedre enn kol 2 sin 4).
+      // t1+t3 score: kol 2 = 4. → t2 først.
+      grid.setTickets([t1, t2, t3], {
+        cancelable: false,
+        entryFee: 10,
+        state: makeState({
+          patterns: pattern1Rad(),
+          patternResults: [],
+          drawnNumbers: [31, 32, 33],
+        }),
+        liveTicketCount: 3,
+      });
+      firstCells = Array.from(grid.root.querySelectorAll("[data-number]"))
+        .filter((_, i) => i % 25 === 0)
+        .map((c) => (c as HTMLElement).dataset.number);
+      expect(firstCells[0]).toBe("31"); // t2 nå først
+
+      // Tick 2: trekker også 34 (t2 har 4 i rad 0 → 1 to go).
+      grid.setTickets([t1, t2, t3], {
+        cancelable: false,
+        entryFee: 10,
+        state: makeState({
+          patterns: pattern1Rad(),
+          patternResults: [],
+          drawnNumbers: [31, 32, 33, 34],
+        }),
+        liveTicketCount: 3,
+      });
+      firstCells = Array.from(grid.root.querySelectorAll("[data-number]"))
+        .filter((_, i) => i % 25 === 0)
+        .map((c) => (c as HTMLElement).dataset.number);
+      expect(firstCells[0]).toBe("31"); // t2 nesten ferdig (1 to go)
+
+      // Tick 3: trekker også 61, 62, 63 (t3 har 3 i rad 0 → 2 to go).
+      grid.setTickets([t1, t2, t3], {
+        cancelable: false,
+        entryFee: 10,
+        state: makeState({
+          patterns: pattern1Rad(),
+          patternResults: [],
+          drawnNumbers: [31, 32, 33, 34, 61, 62, 63],
+        }),
+        liveTicketCount: 3,
+      });
+      firstCells = Array.from(grid.root.querySelectorAll("[data-number]"))
+        .filter((_, i) => i % 25 === 0)
+        .map((c) => (c as HTMLElement).dataset.number);
+      // t2 = 1 to go, t3 = 2 to go, t1 = 4 to go (kol 2 free)
+      expect(firstCells).toEqual(["31", "61", "1"]);
+    });
   });
 
   it("clear() empties the grid", () => {
