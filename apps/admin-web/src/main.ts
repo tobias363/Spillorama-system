@@ -449,7 +449,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
     void renderPastGameWinningHistoryPage(container);
     return;
   }
-  if (route.path === "/agent/orders/history") {
+  if (route.path === "/agent/orders/history" || route.path === "/orderHistory") {
+    // Wireframe §17.29 + §17.30: same OrderHistoryPage serves both agent
+    // (auto-scoped to own shift) and admin / hall-operator (all sales).
+    // Backend RBAC in /api/agent/orders/history handles scope.
     void renderOrderHistoryPage(container);
     return;
   }

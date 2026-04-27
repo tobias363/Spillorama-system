@@ -343,9 +343,10 @@ export const agentSidebar: SidebarNode[] = [
     children: [
       { kind: "leaf", id: "agent-cash-overview", path: "/agent/cash-in-out", icon: "fa fa-circle-o", labelKey: "cash_in_out" },
       // Wireframe §17.12: Sell Products (kiosk-flyt — kaffe/sjokolade/ris).
-      // Wireframe §17.29: Order History — fortsatt placeholder, kobles inn
-      // i en oppfølger-PR (BIN-650).
       { kind: "leaf", id: "agent-sell-products", path: "/agent/sellProduct", icon: "fa fa-shopping-cart", labelKey: "sell_products" },
+      // Wireframe §17.29 + §17.30: Order History + View Order Details.
+      // Page is rendered by main.ts at /agent/orders/history (renderOrderHistoryPage).
+      { kind: "leaf", id: "agent-order-history", path: "/agent/orders/history", icon: "fa fa-history", labelKey: "order_history" },
     ],
   },
   { kind: "leaf", id: "agent-unique-id", path: "/agent/unique-id", icon: "fa fa-id-card", labelKey: "agent_unique_id_management" },
