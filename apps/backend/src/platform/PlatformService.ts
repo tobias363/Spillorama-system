@@ -1007,7 +1007,7 @@ export class PlatformService {
     const passwordHash = await this.hashPassword(newPassword);
     const { rowCount } = await this.pool.query(
       `UPDATE ${this.usersTable()}
-       SET password_hash = $2, updated_at = now()
+       SET password_hash = $2, password_changed_at = now(), updated_at = now()
        WHERE id = $1`,
       [userId, passwordHash]
     );
@@ -2454,8 +2454,9 @@ export class PlatformService {
     }
 
     const newHash = await this.hashPassword(input.newPassword);
+    // REQ-131: spore siste passord-endring så rotasjon-policy (90d) kan håndheves.
     await this.pool.query(
-      `UPDATE ${this.usersTable()} SET password_hash = $2, updated_at = now() WHERE id = $1`,
+      `UPDATE ${this.usersTable()} SET password_hash = $2, password_changed_at = now(), updated_at = now() WHERE id = $1`,
       [id, newHash]
     );
   }
@@ -2500,9 +2501,11 @@ export class PlatformService {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      // REQ-131: oppdater password_changed_at sammen med passord-bytte
+      // (forgot-password-flyt). Brukes til 90-dagers rotasjon-policy.
       const { rowCount } = await client.query(
         `UPDATE ${this.usersTable()}
-         SET password_hash = $2, updated_at = now()
+         SET password_hash = $2, password_changed_at = now(), updated_at = now()
          WHERE id = $1`,
         [id, newHash]
       );

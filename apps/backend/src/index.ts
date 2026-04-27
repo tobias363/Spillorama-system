@@ -27,6 +27,7 @@ import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { UserPinService } from "./auth/UserPinService.js";
 import { TwoFactorService } from "./auth/TwoFactorService.js";
 import { SessionService } from "./auth/SessionService.js";
+import { PasswordRotationService } from "./auth/PasswordRotationService.js";
 import { EmailService } from "./integration/EmailService.js";
 import { EmailQueue } from "./integration/EmailQueue.js";
 import { SveveSmsService } from "./integration/SveveSmsService.js";
@@ -584,6 +585,23 @@ const twoFactorService = new TwoFactorService({
 const sessionService = new SessionService({
   pool: platformService.getPool(),
   schema: pgSchema,
+});
+
+// REQ-131: 90-day password rotation tracking. Default 90 dager,
+// 7 dager warning før utløp. Sett PASSWORD_ROTATION_DAYS=0 for å
+// deaktivere policyen helt.
+const passwordRotationDaysRaw = (process.env.PASSWORD_ROTATION_DAYS ?? "").trim();
+const passwordRotationDays =
+  passwordRotationDaysRaw.length === 0
+    ? 90
+    : Number.isFinite(Number(passwordRotationDaysRaw)) && Number(passwordRotationDaysRaw) >= 0
+    ? Math.floor(Number(passwordRotationDaysRaw))
+    : 90;
+const passwordRotationService = new PasswordRotationService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  rotationPeriodDays: passwordRotationDays,
+  warningDays: 7,
 });
 
 // BIN-587 B3-aml: AML red-flag service. Bruker PaymentRequestService
@@ -1773,6 +1791,8 @@ app.use(createAuthRouter({
   // REQ-129 + REQ-132
   twoFactorService,
   sessionService,
+  // REQ-131: 90-day password rotation tracking
+  passwordRotationService,
 }));
 app.use(createPlayersRouter({
   platformService,

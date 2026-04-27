@@ -7,6 +7,7 @@ import type { UserPinService } from "../auth/UserPinService.js";
 import { normalizeNorwegianPhone } from "../auth/phoneValidation.js";
 import type { TwoFactorService } from "../auth/TwoFactorService.js";
 import type { SessionService } from "../auth/SessionService.js";
+import type { PasswordRotationService } from "../auth/PasswordRotationService.js";
 import type { EmailService } from "../integration/EmailService.js";
 import type { SveveSmsService } from "../integration/SveveSmsService.js";
 import { maskPhone } from "../integration/SveveSmsService.js";
@@ -61,6 +62,8 @@ export interface AuthRouterDeps {
   twoFactorService?: TwoFactorService;
   /** REQ-132: Active sessions + 30-min inactivity-timeout. Når satt aktiveres /api/auth/sessions/* endepunktene og recordLogin kalles på login. */
   sessionService?: SessionService;
+  /** REQ-131: 90-day password rotation tracking. Optional — endpoint returnerer "policy disabled" når ikke satt. */
+  passwordRotationService?: PasswordRotationService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -90,6 +93,7 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     userPinService,
     twoFactorService,
     sessionService,
+    passwordRotationService,
   } = deps;
   const router = express.Router();
 
@@ -531,6 +535,31 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     try {
       const user = await getAuthenticatedUser(req);
       apiSuccess(res, user);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // REQ-131: 90-day password rotation status. Klienten ringer denne etter
+  // login + periodisk under sesjonen. Returnerer policy-disabled-shape
+  // hvis service ikke er wired (deaktivert i miljøet).
+  router.get("/api/auth/me/password-needs-rotation", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      if (!passwordRotationService) {
+        apiSuccess(res, {
+          needsRotation: false,
+          warningDue: false,
+          daysSinceChange: null,
+          daysUntilRotation: null,
+          rotationPeriodDays: 0,
+          warningDays: 0,
+          passwordChangedAt: null,
+        });
+        return;
+      }
+      const status = await passwordRotationService.checkStatus(user.id);
+      apiSuccess(res, status);
     } catch (error) {
       apiFailure(res, error);
     }
