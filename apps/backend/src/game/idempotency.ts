@@ -238,9 +238,30 @@ export const IdempotencyKeys = {
   /**
    * AgentTransactionService cash-in/cash-out wallet-delta — én per txId.
    * Se apps/backend/src/agent/AgentTransactionService.ts.
+   *
+   * @deprecated PR #522 hotfix — bruker fresh `txId` som er fersk per
+   *   tjenestekall, så network-retry produserer ny key og dobbel-debit.
+   *   Bruk `agentCashOp` i stedet (keyer på `clientRequestId`-fra-klient).
+   *   Beholdt for byte-identitet med eksisterende ledger-rader; nye kall
+   *   skal bruke agentCashOp.
    */
   agentTxWallet: (params: { txId: string }): string =>
     `agent-tx:${params.txId}:wallet`,
+
+  /**
+   * AgentTransactionService cash-in/cash-out wallet-delta — én per
+   * `(agentUserId, playerUserId, clientRequestId)`. Erstatter `agentTxWallet`
+   * som var feilaktig keyet på fersk `txId` og brakk network-retry.
+   *
+   * Format: `agent-cashop:{agentUserId}:{playerUserId}:{clientRequestId}`.
+   * Se apps/backend/src/agent/AgentTransactionService.ts.
+   */
+  agentCashOp: (params: {
+    agentUserId: string;
+    playerUserId: string;
+    clientRequestId: string;
+  }): string =>
+    `agent-cashop:${params.agentUserId}:${params.playerUserId}:${params.clientRequestId}`,
 
   /**
    * AgentTransactionService cancel — én per originalTxId.

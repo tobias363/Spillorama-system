@@ -132,6 +132,7 @@ export class MetroniaTicketService {
 
   async createTicket(input: CreateMetroniaTicketInput): Promise<MachineTicket> {
     assertAmountInRange(input.amountNok, "amountNok");
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     await this.requirePlayerInHall(input.playerUserId, shift.hallId);
     const player = await this.platform.getUserById(input.playerUserId);
@@ -141,7 +142,13 @@ export class MetroniaTicketService {
     }
     const amountCents = nokToCents(input.amountNok);
     const ticketId = `mtkt-${randomUUID()}`;
-    const uniqueTransaction = `metronia:create:${ticketId}:${input.clientRequestId}`;
+    // PR #522 hotfix: uniqueTransaction må KEYES på clientRequestId — ikke
+    // på fersk ticketId — slik at network-retry treffer samme Metronia-
+    // ticket og samme wallet-debit, ikke en ny av hver. agentUserId og
+    // playerUserId inngår for å sikre at samme clientRequestId fra ulike
+    // agenter/spillere ikke kolliderer.
+    const uniqueTransaction =
+      `metronia:create:${input.agentUserId}:${input.playerUserId}:${input.clientRequestId}`;
 
     // 1. Debit wallet (idempotent på uniqueTransaction).
     const walletTx = await this.wallet.debit(
@@ -216,6 +223,7 @@ export class MetroniaTicketService {
 
   async topupTicket(input: TopupMetroniaTicketInput): Promise<MachineTicket> {
     assertAmountInRange(input.amountNok, "amountNok");
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     const ticket = await this.tickets.getByTicketNumber("METRONIA", input.ticketNumber);
     if (!ticket) throw new DomainError("MACHINE_TICKET_NOT_FOUND", "Ukjent Metronia-ticket.");
@@ -230,6 +238,10 @@ export class MetroniaTicketService {
       throw new DomainError("INSUFFICIENT_BALANCE", "Spilleren har ikke nok i wallet.");
     }
     const amountCents = nokToCents(input.amountNok);
+    // ticket.id er stabil her (lookup på ticketNumber), ikke fersk —
+    // så topup er allerede idempotent på (ticket.id, clientRequestId).
+    // Beholdt etter PR #522-review: bytte-til-kun-clientRequestId ville
+    // bryte byte-identitet med eksisterende ledger-rader.
     const uniqueTransaction = `metronia:topup:${ticket.id}:${input.clientRequestId}`;
 
     const walletTx = await this.wallet.debit(
@@ -284,6 +296,7 @@ export class MetroniaTicketService {
   // ── PAYOUT (close + credit) ─────────────────────────────────────────────
 
   async closeTicket(input: PayoutMetroniaTicketInput): Promise<MachineTicket> {
+    assertNonEmpty(input.clientRequestId, "clientRequestId");
     const shift = await this.requireActiveShift(input.agentUserId);
     const ticket = await this.tickets.getByTicketNumber("METRONIA", input.ticketNumber);
     if (!ticket) throw new DomainError("MACHINE_TICKET_NOT_FOUND", "Ukjent Metronia-ticket.");
@@ -305,11 +318,19 @@ export class MetroniaTicketService {
     let walletTxId: string | null = null;
     let afterBalance = previousBalance;
     if (payoutNok > 0) {
+      // PR #522 hotfix: machine-payout er gevinst — credit MÅ lande på
+      // winnings-siden, ikke deposit. Loss-limit-grunnlaget skal ikke
+      // inkludere maskin-vinnings (kun innskudd). Game-engine-prinsipp:
+      // payout-flyt fra ekstern automat er regulatorisk en gevinst og
+      // tilsvarer Game1/Game2-payout via to:"winnings".
       const walletTx = await this.wallet.credit(
         player.walletId,
         payoutNok,
         `Metronia payout ${ticket.id}`,
-        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
+        {
+          idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }),
+          to: "winnings",
+        }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + payoutNok;
@@ -376,11 +397,17 @@ export class MetroniaTicketService {
     let walletTxId: string | null = null;
     let afterBalance = previousBalance;
     if (payoutNok > 0) {
+      // PR #522 hotfix: auto-close-payout er like mye gevinst som manuell
+      // close — credit MÅ lande på winnings-siden (samme begrunnelse som
+      // closeTicket).
       const walletTx = await this.wallet.credit(
         player.walletId,
         payoutNok,
         `Metronia auto-close payout ${ticket.id}`,
-        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
+        {
+          idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }),
+          to: "winnings",
+        }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + payoutNok;
@@ -620,6 +647,20 @@ function assertAmountInRange(nok: number, field: string): void {
   // Heltall — Metronia regner i cents/heltall.
   if (Math.abs(nok - Math.round(nok)) > 1e-9) {
     throw new DomainError("INVALID_AMOUNT", `${field} må være et heltall (NOK).`);
+  }
+}
+
+/**
+ * PR #522 hotfix: krev `clientRequestId` (eller annen idempotency-bærer)
+ * som ikke-tom streng. Beskytter mot retry-bug der manglende key skulle
+ * føre til at hver retry oppretter ny ticket.
+ */
+function assertNonEmpty(value: string | undefined | null, field: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} er påkrevd og må være en ikke-tom streng.`
+    );
   }
 }
 

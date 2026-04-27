@@ -767,3 +767,161 @@ test("audit log inneholder agent.login + agent.shift.start/end", async () => {
     assert.equal(shiftStart?.actorType, "AGENT");
   } finally { await ctx.close(); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PR #522 hotfix Issue 3 — Admin force-close route
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("POST /api/admin/agents/:id/shift/force-close — ADMIN lukker stuck shift", async () => {
+  const ctx = await startServer(async ({ registerToken, seedAgentUser, store }) => {
+    seedAgentUser({
+      id: "stuck-agent", email: "stuck@x.no", displayName: "Stuck",
+      walletId: "w", role: "AGENT", hallId: null, kycStatus: "UNVERIFIED",
+      createdAt: "", updatedAt: "",
+    });
+    await store.assignHall({ userId: "stuck-agent", hallId: "hall-a" });
+    await store.insertShift({ userId: "stuck-agent", hallId: "hall-a" });
+    registerToken("admin-tok", adminUser);
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl, "POST",
+      "/api/admin/agents/stuck-agent/shift/force-close",
+      "admin-tok",
+      { reason: "Agent crashed; ops cleanup" },
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.forceClosed, true);
+    assert.equal(res.json.data.shift.isActive, false);
+    // Shift skal være lukket og logoutNotes skal inneholde force-close-prefix.
+    const shift = await ctx.store.getActiveShiftForUser("stuck-agent");
+    assert.equal(shift, null, "shift skal ikke lenger være aktiv");
+  } finally { await ctx.close(); }
+});
+
+test("POST /api/admin/agents/:id/shift/force-close — uten reason → 400", async () => {
+  const ctx = await startServer(async ({ registerToken, seedAgentUser, store }) => {
+    seedAgentUser({
+      id: "stuck-agent", email: "stuck@x.no", displayName: "Stuck",
+      walletId: "w", role: "AGENT", hallId: null, kycStatus: "UNVERIFIED",
+      createdAt: "", updatedAt: "",
+    });
+    await store.assignHall({ userId: "stuck-agent", hallId: "hall-a" });
+    await store.insertShift({ userId: "stuck-agent", hallId: "hall-a" });
+    registerToken("admin-tok", adminUser);
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl, "POST",
+      "/api/admin/agents/stuck-agent/shift/force-close",
+      "admin-tok",
+      {},
+    );
+    assert.equal(res.status, 400);
+  } finally { await ctx.close(); }
+});
+
+test("POST /api/admin/agents/:id/shift/force-close — uten aktiv shift → NO_ACTIVE_SHIFT", async () => {
+  const ctx = await startServer(async ({ registerToken, seedAgentUser }) => {
+    seedAgentUser({
+      id: "no-shift-agent", email: "ns@x.no", displayName: "NS",
+      walletId: "w", role: "AGENT", hallId: null, kycStatus: "UNVERIFIED",
+      createdAt: "", updatedAt: "",
+    });
+    registerToken("admin-tok", adminUser);
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl, "POST",
+      "/api/admin/agents/no-shift-agent/shift/force-close",
+      "admin-tok",
+      { reason: "test" },
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "NO_ACTIVE_SHIFT");
+  } finally { await ctx.close(); }
+});
+
+test("POST /api/admin/agents/:id/shift/force-close — SUPPORT får 400 FORBIDDEN", async () => {
+  const ctx = await startServer(async ({ registerToken, seedAgentUser, store }) => {
+    seedAgentUser({
+      id: "stuck-agent", email: "stuck@x.no", displayName: "Stuck",
+      walletId: "w", role: "AGENT", hallId: null, kycStatus: "UNVERIFIED",
+      createdAt: "", updatedAt: "",
+    });
+    await store.assignHall({ userId: "stuck-agent", hallId: "hall-a" });
+    await store.insertShift({ userId: "stuck-agent", hallId: "hall-a" });
+    registerToken("sup-tok", supportUser);
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl, "POST",
+      "/api/admin/agents/stuck-agent/shift/force-close",
+      "sup-tok",
+      { reason: "support cleanup" },
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+  } finally { await ctx.close(); }
+});
+
+test("POST /api/admin/agents/:id/shift/force-close — HALL_OPERATOR får 400 FORBIDDEN", async () => {
+  const ctx = await startServer(async ({ registerToken, seedAgentUser, store }) => {
+    seedAgentUser({
+      id: "stuck-agent", email: "stuck@x.no", displayName: "Stuck",
+      walletId: "w", role: "AGENT", hallId: null, kycStatus: "UNVERIFIED",
+      createdAt: "", updatedAt: "",
+    });
+    await store.assignHall({ userId: "stuck-agent", hallId: "hall-a" });
+    await store.insertShift({ userId: "stuck-agent", hallId: "hall-a" });
+    registerToken("op-tok", operatorUser);
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl, "POST",
+      "/api/admin/agents/stuck-agent/shift/force-close",
+      "op-tok",
+      { reason: "ops" },
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+  } finally { await ctx.close(); }
+});
+
+test("POST /api/admin/agents/:id/shift/force-close — audit-event admin.agent.shift.force_close skrevet", async () => {
+  const ctx = await startServer(async ({ registerToken, seedAgentUser, store }) => {
+    seedAgentUser({
+      id: "stuck-agent", email: "stuck@x.no", displayName: "Stuck",
+      walletId: "w", role: "AGENT", hallId: null, kycStatus: "UNVERIFIED",
+      createdAt: "", updatedAt: "",
+    });
+    await store.assignHall({ userId: "stuck-agent", hallId: "hall-a" });
+    await store.insertShift({ userId: "stuck-agent", hallId: "hall-a" });
+    registerToken("admin-tok", adminUser);
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl, "POST",
+      "/api/admin/agents/stuck-agent/shift/force-close",
+      "admin-tok",
+      { reason: "Agent system crash; manual cleanup" },
+    );
+    assert.equal(res.status, 200);
+    // Fire-and-forget audit; vent på flush.
+    await new Promise((r) => setTimeout(r, 50));
+    const events = await ctx.auditStore.list();
+    const evt = events.find((e) => e.action === "admin.agent.shift.force_close");
+    assert.ok(evt, "audit-event admin.agent.shift.force_close skal skrives");
+    assert.equal(evt?.actorId, "admin-1");
+    assert.equal(evt?.actorType, "ADMIN");
+    assert.equal(evt?.resource, "shift");
+    assert.equal(
+      (evt?.details as { reason?: string })?.reason,
+      "Agent system crash; manual cleanup",
+    );
+    assert.equal(
+      (evt?.details as { targetAgentId?: string })?.targetAgentId,
+      "stuck-agent",
+    );
+  } finally { await ctx.close(); }
+});
