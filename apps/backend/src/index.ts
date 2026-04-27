@@ -2876,6 +2876,19 @@ const registerGameEvents = createGameEventHandlers({
   clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
   // GAP #38: Spillvett stop-game vote service.
   spill1StopVoteService,
+  // Tobias 2026-04-27: Spill 1 canonical-room er per-LINK (Group of Halls).
+  // Slå opp gruppe-id for hallId via HallGroupService — `list({ hallId })`
+  // returnerer grupper hvor hallen er medlem. Vi bruker første aktive gruppe
+  // (første treff i name-sortert liste). Fail-soft: returnerer null på feil
+  // så canonicalRoomCode faller tilbake til hallId-basert kode.
+  getHallGroupIdForHall: async (hallId: string): Promise<string | null> => {
+    try {
+      const groups = await hallGroupService.list({ hallId, limit: 1, status: "active" });
+      return groups[0]?.id ?? null;
+    } catch {
+      return null;
+    }
+  },
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

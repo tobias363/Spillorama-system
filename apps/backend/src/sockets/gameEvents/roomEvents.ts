@@ -251,11 +251,25 @@ export function registerRoomEvents(ctx: SocketContext): void {
       engine.cleanupStaleWalletInIdleRooms(identity.walletId);
       const requestedGameSlug = typeof payload?.gameSlug === "string" ? payload.gameSlug : undefined;
       // Canonical mapping (Tobias 2026-04-27):
-      //   Spill 1 (bingo)         → BINGO1, per-hall
-      //   Spill 2 (rocket)        → ROCKET, shared (hallId=null)
-      //   Spill 3 (monsterbingo)  → MONSTERBINGO, shared (hallId=null)
+      //   Spill 1 (bingo)         → BINGO_<groupId|hallId>, per-LINK (Group of
+      //                             Halls). Alle haller i samme gruppe deler
+      //                             rom; haller uten gruppe får hallId-basert
+      //                             fallback.
+      //   Spill 2 (rocket)        → ROCKET, shared global (hallId=null)
+      //   Spill 3 (monsterbingo)  → MONSTERBINGO, shared global (hallId=null)
+      // groupId-oppslag er fire-and-fail-soft — feil eller manglende dep gir
+      // null så vi faller tilbake til hallId-basert kode (eksisterende
+      // oppførsel for haller uten gruppe).
+      let canonicalGroupId: string | null = null;
+      if (enforceSingleRoomPerHall && deps.getHallGroupIdForHall) {
+        try {
+          canonicalGroupId = await deps.getHallGroupIdForHall(identity.hallId);
+        } catch (err) {
+          logger.warn({ err, hallId: identity.hallId }, "getHallGroupIdForHall failed; falling back to hallId-based room code");
+        }
+      }
       const canonicalMapping = enforceSingleRoomPerHall
-        ? getCanonicalRoomCode(requestedGameSlug, identity.hallId)
+        ? getCanonicalRoomCode(requestedGameSlug, identity.hallId, canonicalGroupId)
         : null;
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,

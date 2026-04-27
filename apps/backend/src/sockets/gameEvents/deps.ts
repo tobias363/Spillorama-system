@@ -129,4 +129,17 @@ export interface GameEventsDeps {
    * returns NOT_SUPPORTED when missing.
    */
   spill1StopVoteService?: import("../../spillevett/Spill1StopVoteService.js").Spill1StopVoteService;
+
+  /**
+   * Tobias 2026-04-27: Spill 1 canonical-room-mapping er per-LINK (Group of
+   * Halls). Caller må slå opp hvilken hall-gruppe `hallId` tilhører for å
+   * lage `BINGO_<groupId>`-rom-koden.
+   *
+   * Returnerer `null` hvis hallen ikke er i noen gruppe — `getCanonicalRoomCode`
+   * faller da tilbake til hallId-basert kode.
+   *
+   * Optional fordi test-harnesses kan kjøre uten hallGroupService — handleren
+   * faller tilbake til hallId-basert canonical code (eksisterende oppførsel).
+   */
+  getHallGroupIdForHall?: (hallId: string) => Promise<string | null>;
 }
