@@ -270,6 +270,35 @@
       });
     }
 
+    // Scenario A: payment-method tile selector
+    var methodGrid = document.getElementById('profile-deposit-method-grid');
+    var methodHidden = document.getElementById('profile-deposit-method');
+    var vippsPhoneWrap = document.getElementById('profile-deposit-vipps-phone-wrap');
+
+    function selectDepositMethod(method) {
+      if (!methodGrid || !methodHidden) return;
+      var tiles = methodGrid.querySelectorAll('[data-method]');
+      tiles.forEach(function (t) {
+        var isMatch = t.getAttribute('data-method') === method;
+        t.setAttribute('aria-checked', isMatch ? 'true' : 'false');
+      });
+      methodHidden.value = method;
+      // Vipps phone-felt vises kun når Vipps er valgt
+      if (vippsPhoneWrap) {
+        vippsPhoneWrap.hidden = method !== 'VIPPS';
+      }
+    }
+
+    if (methodGrid) {
+      methodGrid.querySelectorAll('[data-method]').forEach(function (tile) {
+        tile.addEventListener('click', function () {
+          selectDepositMethod(tile.getAttribute('data-method'));
+        });
+      });
+      // Init state
+      selectDepositMethod(methodHidden && methodHidden.value ? methodHidden.value : 'VIPPS');
+    }
+
     if (depositForm) {
       depositForm.addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -280,18 +309,45 @@
           if (errEl) { errEl.textContent = 'Minimumsbeløp er 10 kr'; errEl.hidden = false; }
           return;
         }
+        if (amount > 10000) {
+          if (errEl) { errEl.textContent = 'Maks innskudd per transaksjon er 10 000 kr'; errEl.hidden = false; }
+          return;
+        }
 
+        var paymentMethod = (methodHidden && methodHidden.value) || 'VIPPS';
+        var vippsPhoneEl = document.getElementById('profile-deposit-vipps-phone');
+        var vippsPhone = paymentMethod === 'VIPPS' && vippsPhoneEl ? vippsPhoneEl.value.trim() : '';
+
+        var submitBtn = depositForm.querySelector('[type="submit"]');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Sender...'; }
         try {
-          await apiFetch('/api/wallet/me/topup', {
+          var res = await apiFetch('/api/payments/topup-online', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount: amount, provider: 'manual' })
+            body: JSON.stringify({
+              amount: amount,
+              paymentMethod: paymentMethod,
+              vippsPhoneNumber: vippsPhone || undefined
+            })
           });
+          // res.checkoutUrl er Swedbank-widget-URL — redirect spilleren dit
+          if (res && res.checkoutUrl) {
+            window.location.href = res.checkoutUrl;
+            return;
+          }
+          // Fallback: hvis ingen URL, bare lukk + reload wallet
           depositWrap.hidden = true;
           depositForm.reset();
           loadWallet();
         } catch (err) {
-          if (errEl) { errEl.textContent = err.message || 'Innskudd feilet'; errEl.hidden = false; }
+          var msg = err && err.message ? err.message : 'Innskudd feilet';
+          // Norsk feilmelding for credit-card-attempt (defense-in-depth)
+          if (err && err.code === 'CREDIT_CARD_FORBIDDEN') {
+            msg = 'Kun debetkort er tillatt for innskudd.';
+          }
+          if (errEl) { errEl.textContent = msg; errEl.hidden = false; }
+        } finally {
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Gå til betaling'; }
         }
       });
     }
@@ -312,6 +368,35 @@
       });
     }
 
+    // Scenario A: destination-tile selector (Pay-in-Hall vs Bank).
+    var destGrid = document.getElementById('profile-withdraw-dest-grid');
+    var destHidden = document.getElementById('profile-withdraw-dest');
+    var bankFields = document.getElementById('profile-withdraw-bank-fields');
+
+    function selectWithdrawDest(dest) {
+      if (!destGrid || !destHidden) return;
+      var tiles = destGrid.querySelectorAll('[data-dest]');
+      tiles.forEach(function (t) {
+        var isMatch = t.getAttribute('data-dest') === dest;
+        t.setAttribute('aria-checked', isMatch ? 'true' : 'false');
+      });
+      destHidden.value = dest;
+      // Bank-konto-felt vises kun for bank-uttak.
+      if (bankFields) {
+        bankFields.hidden = dest !== 'bank';
+      }
+    }
+
+    if (destGrid) {
+      destGrid.querySelectorAll('[data-dest]').forEach(function (tile) {
+        tile.addEventListener('click', function () {
+          selectWithdrawDest(tile.getAttribute('data-dest'));
+        });
+      });
+      // Init state
+      selectWithdrawDest(destHidden && destHidden.value ? destHidden.value : 'hall');
+    }
+
     if (withdrawForm) {
       withdrawForm.addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -328,17 +413,37 @@
           if (errEl) { errEl.textContent = 'Minimumsbeløp er 10 kr'; errEl.hidden = false; }
           return;
         }
+        var dest = (destHidden && destHidden.value === 'bank') ? 'bank' : 'hall';
+        // For bank-uttak: kreves enkel kontonummer-validering (11 sifre).
+        // Selve XML-eksporten bygger bankkonto fra app_withdraw_requests
+        // (admin-pipeline). Her er feltet bruker-bekreftelse.
+        if (dest === 'bank') {
+          var bankAccountEl = document.getElementById('profile-withdraw-bank-account');
+          var bankAccount = bankAccountEl ? bankAccountEl.value.replace(/\D/g, '') : '';
+          if (!bankAccount || bankAccount.length !== 11) {
+            if (errEl) { errEl.textContent = 'Kontonummer må være 11 sifre.'; errEl.hidden = false; }
+            return;
+          }
+        }
         var submitBtn = withdrawForm.querySelector('[type="submit"]');
-        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Tar ut...'; }
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Sender...'; }
         try {
-          await apiFetch('/api/wallets/' + _walletId + '/withdraw', {
+          await apiFetch('/api/payments/withdraw-request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount: amount, reason: 'Uttak til bank' })
+            body: JSON.stringify({
+              amountCents: Math.round(amount * 100),
+              destinationType: dest
+            })
           });
           withdrawWrap.hidden = true;
           withdrawForm.reset();
-          if (successEl) { successEl.textContent = formatKr(amount) + ' er tatt ut.'; successEl.hidden = false; }
+          // Reset hidden + tile state etter reset()
+          selectWithdrawDest('hall');
+          var msg = dest === 'bank'
+            ? 'Uttak til bank er sendt til behandling. Pengene er tilgjengelig innen 1-2 virkedager.'
+            : 'Uttak i hall er registrert. Du kan hente kontant hos hallpersonell.';
+          if (successEl) { successEl.textContent = msg; successEl.hidden = false; }
           loadWallet();
         } catch (err) {
           if (errEl) { errEl.textContent = err.message || 'Uttak feilet'; errEl.hidden = false; }

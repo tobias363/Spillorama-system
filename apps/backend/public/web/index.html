@@ -924,6 +924,46 @@
       border: 1px solid rgba(255,255,255,0.08);
     }
 
+    /* Payment-method-grid (Scenario A — Tobias 2026-04-26) */
+    .payment-method-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .payment-method-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 8px;
+      min-height: 70px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.03);
+      color: #f0f4f8;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .payment-method-tile:hover { background: rgba(255,255,255,0.07); }
+    .payment-method-tile[aria-checked="true"] {
+      border-color: #66d9b3;
+      background: rgba(102, 217, 179, 0.12);
+      box-shadow: 0 0 0 2px rgba(102, 217, 179, 0.25) inset;
+    }
+    .payment-method-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+    .payment-method-label {
+      text-align: center;
+      line-height: 1.15;
+    }
+
     .profile-actions {
       display: flex; flex-direction: column; gap: 8px;
       padding-top: 14px;
@@ -1871,11 +1911,44 @@
         <div id="profile-deposit-form-wrap" class="profile-deposit-form-wrap" hidden>
           <form id="profile-deposit-form">
             <div class="profile-field">
-              <label for="profile-deposit-amount">Belop (NOK)</label>
-              <input type="number" id="profile-deposit-amount" min="10" step="10" placeholder="100">
+              <label for="profile-deposit-amount">Beløp (NOK)</label>
+              <input type="number" id="profile-deposit-amount" min="10" max="10000" step="10" placeholder="100">
+            </div>
+            <div class="profile-field">
+              <label>Betalingsmetode</label>
+              <div class="payment-method-grid" id="profile-deposit-method-grid" role="radiogroup" aria-label="Betalingsmetode">
+                <button type="button" class="payment-method-tile" data-method="VIPPS" role="radio" aria-checked="true">
+                  <span class="payment-method-icon" aria-hidden="true">📱</span>
+                  <span class="payment-method-label">Vipps</span>
+                </button>
+                <button type="button" class="payment-method-tile" data-method="VISA_DEBIT" role="radio" aria-checked="false">
+                  <span class="payment-method-icon" aria-hidden="true">💳</span>
+                  <span class="payment-method-label">Visa debet</span>
+                </button>
+                <button type="button" class="payment-method-tile" data-method="MASTERCARD_DEBIT" role="radio" aria-checked="false">
+                  <span class="payment-method-icon" aria-hidden="true">💳</span>
+                  <span class="payment-method-label">Mastercard debet</span>
+                </button>
+                <button type="button" class="payment-method-tile" data-method="APPLE_PAY" role="radio" aria-checked="false">
+                  <span class="payment-method-icon" aria-hidden="true">🍎</span>
+                  <span class="payment-method-label">Apple Pay</span>
+                </button>
+                <button type="button" class="payment-method-tile" data-method="GOOGLE_PAY" role="radio" aria-checked="false">
+                  <span class="payment-method-icon" aria-hidden="true">G</span>
+                  <span class="payment-method-label">Google Pay</span>
+                </button>
+              </div>
+              <input type="hidden" id="profile-deposit-method" value="VIPPS">
+              <p class="profile-section-note" style="margin-top:8px;font-size:12px;color:#cdd5df">
+                Kun debetkort er tillatt for innskudd.
+              </p>
+            </div>
+            <div class="profile-field" id="profile-deposit-vipps-phone-wrap">
+              <label for="profile-deposit-vipps-phone">Vipps mobilnummer (valgfritt)</label>
+              <input type="tel" id="profile-deposit-vipps-phone" placeholder="+47 …" inputmode="tel" autocomplete="tel">
             </div>
             <div id="profile-deposit-error" class="profile-error" hidden></div>
-            <button type="submit" class="profile-btn">Sett inn</button>
+            <button type="submit" class="profile-btn">Gå til betaling</button>
           </form>
         </div>
         <div id="profile-transactions" style="margin-top:10px"></div>
@@ -1887,8 +1960,29 @@
           <div id="profile-withdraw-form-wrap" class="profile-deposit-form-wrap" hidden>
             <form id="profile-withdraw-form">
               <div class="profile-field">
-                <label for="profile-withdraw-amount">Belop (NOK)</label>
+                <label>Hvor vil du ta ut?</label>
+                <div class="payment-method-grid" id="profile-withdraw-dest-grid" role="radiogroup" aria-label="Uttaks-destinasjon">
+                  <button type="button" class="payment-method-tile" data-dest="hall" role="radio" aria-checked="true">
+                    <span class="payment-method-icon" aria-hidden="true">🏪</span>
+                    <span class="payment-method-label">Kontant i hall</span>
+                  </button>
+                  <button type="button" class="payment-method-tile" data-dest="bank" role="radio" aria-checked="false">
+                    <span class="payment-method-icon" aria-hidden="true">🏦</span>
+                    <span class="payment-method-label">Til bankkonto</span>
+                  </button>
+                </div>
+                <input type="hidden" id="profile-withdraw-dest" value="hall">
+              </div>
+              <div class="profile-field">
+                <label for="profile-withdraw-amount">Beløp (NOK)</label>
                 <input type="number" id="profile-withdraw-amount" min="10" step="10" placeholder="100">
+              </div>
+              <div class="profile-field" id="profile-withdraw-bank-fields" hidden>
+                <label for="profile-withdraw-bank-account">Kontonummer (11 sifre)</label>
+                <input type="text" id="profile-withdraw-bank-account" placeholder="12345678901" inputmode="numeric" autocomplete="off">
+                <p class="profile-section-note" style="margin-top:6px;font-size:12px;color:#cdd5df">
+                  Bank-uttak behandles innen 1-2 virkedager. Kun din egen konto.
+                </p>
               </div>
               <div id="profile-withdraw-error" class="profile-error" hidden></div>
               <button type="submit" class="profile-btn">Ta ut</button>
