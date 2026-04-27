@@ -94,13 +94,13 @@ Legacy-routes gruppert etter domene, med status mot ny stack. **🟢** = fullt e
 |-----------------|---------------------|--------|-----------------|
 | `GET /deposit/requests` + `/deposit/requests/get` | `GET /api/admin/payments/requests` | 🟢 | — |
 | `POST /deposit/requests/accept` + `/deposit/requests/reject` | `POST /api/admin/payments/requests/:id/accept` + `reject` | 🟢 | — |
-| `GET /deposit/history` + `/deposit/history/get` | — | 🔴 | **GAP #10**: Admin-deposit-historikk (kun request-listing finnes) |
+| `GET /deposit/history` + `/deposit/history/get` | `GET /api/admin/deposits/history` (CSV via `?format=csv`) | 🟢 | **GAP #10 LUKKET** (Agent K3-B 2026-04-25): cursor-pagination + filter (fromDate/toDate/hallId/status/type/playerId) + CSV-eksport. Hall-scope auto-tvunget for HALL_OPERATOR. |
 | `GET /withdrawAmt` + `/withdrawAmount/getAllTXN` | — | 🔴 | **GAP #11**: Admin "Withdraw Amount"-side for manual chips-action/withdrawal |
 | `POST /withdrawAmount/chipsAction` + `/withdrawAmount/getPlayerDelete` | `POST /api/admin/wallets/:walletId/credit` | 🟡 | Credit finnes, men ikke debit/chipsAction med samme shape |
 | `GET /withdraw/requests/hall` + `/withdraw/requests/hall/get` | `GET /api/admin/payments/requests` (filter=withdraw+hall) | 🟡 | Shape må verifiseres — filter-param ukjent |
 | `GET /withdraw/requests/bank` | `GET /api/admin/payments/requests` (filter=withdraw+bank) | 🟡 | Samme |
 | `POST /withdraw/requests/accept` + `/withdraw/requests/reject` | `POST /api/admin/payments/requests/:id/accept/reject` | 🟢 | — |
-| `GET /withdraw/history/hall` + `/withdraw/history/bank` + `*/get` | — | 🔴 | **GAP #12**: Admin withdraw-historikk (hall + bank separate views) |
+| `GET /withdraw/history/hall` + `/withdraw/history/bank` + `*/get` | `GET /api/admin/withdrawals/history?type=hall\|bank\|all` (CSV via `?format=csv`) | 🟢 | **GAP #12 LUKKET** (Agent K3-B 2026-04-25): konsolidert til ett endepunkt med `?type` for å skille bank/hall. Cursor-pagination + filter (fromDate/toDate/hallId/status/playerId) + CSV-eksport. Hall-scope auto-tvunget. |
 | `GET /withdraw/list/emails` + `/withdraw/add/emails` + `/withdraw/edit/emails/:id` + `/withdraw/delete/emails/` + `/withdraw/email/checkUnique` | `GET /api/admin/security/withdraw-emails` + `POST` + `DELETE` | 🟡 | Edit-endpoint mangler, og check-unique-validering må verifiseres |
 | `GET /totalRevenueReport` + `/getData` | `GET /api/admin/reports/revenue` | 🟢 | — |
 | `GET /transactionsPaymet` | — | 🔴 | **GAP #13**: Admin-legacy "transactions payment"-view (uspesifisert — sjekker om det bare er en route-alias) |

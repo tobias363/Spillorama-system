@@ -92,6 +92,49 @@ export interface ListPendingOptions {
   limit?: number;
 }
 
+/**
+ * GAP #10/#12 (BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.5): admin-history
+ * for innskudd og uttak (legacy `/deposit/history` + `/withdraw/history/{hall,bank}`).
+ *
+ * Forskjell fra ListPendingOptions:
+ *   - Default-status er ALLE (PENDING + ACCEPTED + REJECTED), ikke bare PENDING.
+ *   - Cursor-basert pagination via (created_at, id) — stabilt selv med samtidige
+ *     INSERTs på toppen av lista.
+ *   - kind kan være "deposit", "withdraw" eller undefined (begge — returnerer
+ *     blandet liste sortert nyeste først).
+ */
+export interface ListHistoryOptions {
+  kind?: PaymentRequestKind;
+  /**
+   * Begrenser til én eller flere statuser. Tom liste eller `undefined`
+   * betyr «alle statuser».
+   */
+  statuses?: PaymentRequestStatus[];
+  hallId?: string;
+  userId?: string;
+  /** ISO-date (inclusive). */
+  createdFrom?: string;
+  /** ISO-date (inclusive). */
+  createdTo?: string;
+  minAmountCents?: number;
+  /** Kun relevant for kind=withdraw (eller mixed). Filtrerer bort deposits. */
+  destinationType?: PaymentRequestDestinationType;
+  limit?: number;
+  /**
+   * Opaque cursor fra forrige svar (`nextCursor`). Format:
+   *   base64("{createdAtIso}|{id}|{kind}").
+   * Tjenesten returnerer kun rader med
+   *   (created_at, id) < (cursor.createdAt, cursor.id) i deskriptiv sortering.
+   */
+  cursor?: string;
+}
+
+export interface ListHistoryResult {
+  items: PaymentRequest[];
+  /** `null` betyr at det ikke finnes flere rader. */
+  nextCursor: string | null;
+}
+
 export interface AcceptRequestInput {
   requestId: string;
   acceptedBy: string;
@@ -225,6 +268,46 @@ function centsToMajor(amountCents: number): number {
   return Math.round(amountCents) / 100;
 }
 
+/**
+ * GAP #10/#12: cursor-helpers for `listHistory`. Cursoren kombinerer
+ * (createdAt, id) slik at pagination er stabil selv ved samtidige
+ * INSERTs. Format: base64url("{createdAtIso}|{id}").
+ *
+ * Når kallere sender en ugyldig cursor (manipulert/forfalt), feiler vi
+ * med INVALID_INPUT i stedet for å silently fall back — dette gjør debug
+ * enklere og hindrer at en korrupt cursor skjuler rader.
+ */
+function buildHistoryCursor(item: PaymentRequest): string {
+  const raw = `${item.createdAt}|${item.id}`;
+  return Buffer.from(raw, "utf8").toString("base64url");
+}
+
+function parseHistoryCursor(
+  cursor: string | undefined
+): { createdAt: string; id: string } | undefined {
+  if (cursor === undefined || cursor === null || cursor === "") return undefined;
+  let decoded: string;
+  try {
+    decoded = Buffer.from(cursor, "base64url").toString("utf8");
+  } catch {
+    throw new DomainError("INVALID_INPUT", "cursor er ugyldig.");
+  }
+  const idx = decoded.indexOf("|");
+  if (idx <= 0 || idx === decoded.length - 1) {
+    throw new DomainError("INVALID_INPUT", "cursor er ugyldig.");
+  }
+  const createdAt = decoded.slice(0, idx);
+  const id = decoded.slice(idx + 1);
+  // Valider at createdAt er en gyldig ISO-timestamp.
+  if (Number.isNaN(Date.parse(createdAt))) {
+    throw new DomainError("INVALID_INPUT", "cursor er ugyldig.");
+  }
+  if (!id.trim()) {
+    throw new DomainError("INVALID_INPUT", "cursor er ugyldig.");
+  }
+  return { createdAt, id };
+}
+
 export class PaymentRequestService {
   private readonly pool: Pool;
 
@@ -333,6 +416,102 @@ export class PaymentRequestService {
     // Blandet kind: sorter på tvers slik at nyeste kommer først.
     results.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     return results.slice(0, limit);
+  }
+
+  /**
+   * GAP #10/#12: admin-history for innskudd/uttak. Returnerer alle rader
+   * (default uten status-filter) med cursor-pagination. Brukes av
+   * `GET /api/admin/deposits/history` og `/api/admin/withdrawals/history`.
+   */
+  async listHistory(options: ListHistoryOptions = {}): Promise<ListHistoryResult> {
+    await this.ensureInitialized();
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+
+    // Default: alle statuser (history-view skal vise PENDING + ACCEPTED + REJECTED).
+    const statuses =
+      options.statuses && options.statuses.length
+        ? Array.from(new Set(options.statuses))
+        : (["PENDING", "ACCEPTED", "REJECTED"] satisfies PaymentRequestStatus[]).slice();
+
+    // Cursor: hent én ekstra rad for å avgjøre om det finnes flere.
+    const fetchLimit = limit + 1;
+    const cursor = parseHistoryCursor(options.cursor);
+
+    const kinds: PaymentRequestKind[] =
+      options.kind ? [options.kind] : ["deposit", "withdraw"];
+
+    const aggregated: PaymentRequest[] = [];
+    for (const kind of kinds) {
+      // BIN-646 (PR-B4): destination_type kun på withdraw-tabellen. Hvis
+      // brukeren ber om destinationType-filter, drop deposit-kind helt
+      // (filtreringen ville uansett gitt 0 rader).
+      if (kind === "deposit" && options.destinationType) continue;
+      const table = this.tableFor(kind);
+      const destCol = kind === "withdraw" ? ", destination_type" : "";
+      const params: unknown[] = [statuses];
+      let sql = `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                        rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                        wallet_transaction_id${destCol}, created_at, updated_at
+                 FROM ${table}
+                 WHERE status = ANY($1::text[])`;
+      if (options.hallId) {
+        params.push(options.hallId);
+        sql += ` AND hall_id = $${params.length}`;
+      }
+      if (kind === "withdraw" && options.destinationType) {
+        params.push(options.destinationType);
+        sql += ` AND destination_type = $${params.length}`;
+      }
+      if (options.userId) {
+        params.push(options.userId);
+        sql += ` AND user_id = $${params.length}`;
+      }
+      if (options.createdFrom) {
+        params.push(options.createdFrom);
+        sql += ` AND created_at >= $${params.length}::timestamptz`;
+      }
+      if (options.createdTo) {
+        params.push(options.createdTo);
+        sql += ` AND created_at <= $${params.length}::timestamptz`;
+      }
+      if (options.minAmountCents && options.minAmountCents > 0) {
+        params.push(options.minAmountCents);
+        sql += ` AND amount_cents >= $${params.length}`;
+      }
+      if (cursor) {
+        // Stabil keyset-pagination: sorter DESC på (created_at, id),
+        // hent rader strengt mindre enn cursor-paret.
+        params.push(cursor.createdAt);
+        const cAtIdx = params.length;
+        params.push(cursor.id);
+        const cIdIdx = params.length;
+        sql += ` AND (created_at, id) < ($${cAtIdx}::timestamptz, $${cIdIdx})`;
+      }
+      params.push(fetchLimit);
+      sql += ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}`;
+      const { rows } = await this.pool.query<PaymentRequestRow>(sql, params);
+      for (const row of rows) {
+        aggregated.push(mapRow(row, kind));
+      }
+    }
+
+    // Når begge kinds blandes må vi sortere på tvers og truncere.
+    aggregated.sort((a, b) => {
+      if (a.createdAt < b.createdAt) return 1;
+      if (a.createdAt > b.createdAt) return -1;
+      // Tie-break på id desc for å få deterministisk pagination.
+      if (a.id < b.id) return 1;
+      if (a.id > b.id) return -1;
+      return 0;
+    });
+
+    const hasMore = aggregated.length > limit;
+    const items = hasMore ? aggregated.slice(0, limit) : aggregated;
+    const nextCursor =
+      hasMore && items.length > 0
+        ? buildHistoryCursor(items[items.length - 1]!)
+        : null;
+    return { items, nextCursor };
   }
 
   async getRequest(kind: PaymentRequestKind, requestId: string): Promise<PaymentRequest> {
