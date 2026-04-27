@@ -602,6 +602,63 @@ export class StaticTicketService {
     return rows.map((r) => this.map(r));
   }
 
+  /**
+   * PDF 17 §17.31 "Sold Ticket UI":
+   * Lister billetter som er solgt (is_purchased=true, purchased_at i vinduet),
+   * valgfritt filtrert på hall + ticket-serial-prefix.
+   *
+   * Forskjell fra `listPaidOutInRange`:
+   *   - Inkluderer alle solgte (uavhengig av om de er utbetalt eller ikke).
+   *   - Sortert på `purchased_at DESC` så agent ser nyeste salg først.
+   *
+   * Static-tickets representerer kun "Physical"-typen i wireframe-sammenheng.
+   * "Terminal"/"Web" mappes til `app_physical_tickets` + online-flow og kan
+   * legges til i en utvidelse hvis det blir aktuelt.
+   *
+   * Max 5000 rader per oppslag — samme ops-beskyttelse som listPaidOutInRange.
+   */
+  async listSoldInRange(filter: {
+    hallId?: string;
+    from: string;
+    to: string;
+    ticketIdPrefix?: string;
+  }): Promise<StaticTicket[]> {
+    if (!filter.from?.trim()) {
+      throw new DomainError("INVALID_INPUT", "from er påkrevd.");
+    }
+    if (!filter.to?.trim()) {
+      throw new DomainError("INVALID_INPUT", "to er påkrevd.");
+    }
+    const conditions: string[] = [
+      "is_purchased = true",
+      "purchased_at IS NOT NULL",
+      "purchased_at >= $1",
+      "purchased_at <= $2",
+    ];
+    const params: unknown[] = [filter.from, filter.to];
+    if (filter.hallId?.trim()) {
+      params.push(filter.hallId.trim());
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    if (filter.ticketIdPrefix?.trim()) {
+      params.push(`%${filter.ticketIdPrefix.trim()}%`);
+      conditions.push(`ticket_serial ILIKE $${params.length}`);
+    }
+    const { rows } = await this.pool.query<StaticTicketRow>(
+      `SELECT id, hall_id, ticket_serial, ticket_color, ticket_type, card_matrix,
+              is_purchased, purchased_at, imported_at,
+              sold_by_user_id, sold_from_range_id, responsible_user_id,
+              sold_to_scheduled_game_id, reserved_by_range_id,
+              paid_out_at, paid_out_amount_cents, paid_out_by_user_id
+       FROM ${this.table()}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY purchased_at DESC
+       LIMIT 5000`,
+      params,
+    );
+    return rows.map((r) => this.map(r));
+  }
+
   // ── Mapping ──────────────────────────────────────────────────────────────
 
   private map(r: StaticTicketRow): StaticTicket {

@@ -532,6 +532,93 @@ export class AgentProductSaleService {
     return rows.map((r) => this.mapSale(r));
   }
 
+  /**
+   * PDF 17 §17.29 "Order History":
+   * Lister produktsalg innenfor et dato-vindu. Filtre:
+   *   - hallId — påkrevd hvis ikke ADMIN.
+   *   - agentUserId — kun se egne salg (AGENT). HALL_OPERATOR/ADMIN kan se
+   *     alle salg i hallen.
+   *   - paymentMethod — CASH, CARD, CUSTOMER_NUMBER.
+   *   - ticketIdPrefix gjenbrukt for å søke i orderId.
+   *
+   * Sortert nyeste først. Maks 500 rader per oppslag.
+   */
+  async listSalesForAgent(opts: {
+    hallId?: string;
+    agentUserId?: string;
+    from: string;
+    to: string;
+    paymentMethod?: ProductPaymentMethod;
+    orderIdPrefix?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ sales: ProductSale[]; total: number }> {
+    if (!opts.from?.trim()) throw new DomainError("INVALID_INPUT", "from er påkrevd.");
+    if (!opts.to?.trim()) throw new DomainError("INVALID_INPUT", "to er påkrevd.");
+    const limit = opts.limit && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 500) : 100;
+    const offset = opts.offset && opts.offset > 0 ? Math.floor(opts.offset) : 0;
+    const conditions: string[] = ["created_at >= $1", "created_at <= $2"];
+    const params: unknown[] = [opts.from, opts.to];
+    if (opts.hallId?.trim()) {
+      params.push(opts.hallId.trim());
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    if (opts.agentUserId?.trim()) {
+      params.push(opts.agentUserId.trim());
+      conditions.push(`agent_user_id = $${params.length}`);
+    }
+    if (opts.paymentMethod) {
+      params.push(opts.paymentMethod);
+      conditions.push(`payment_method = $${params.length}`);
+    }
+    if (opts.orderIdPrefix?.trim()) {
+      params.push(`%${opts.orderIdPrefix.trim()}%`);
+      conditions.push(`order_id ILIKE $${params.length}`);
+    }
+    const where = conditions.join(" AND ");
+
+    const { rows: countRows } = await this.pool.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c FROM ${this.salesTable()} WHERE ${where}`,
+      params
+    );
+    const total = Number(countRows[0]?.c ?? 0);
+
+    params.push(limit);
+    params.push(offset);
+    const { rows } = await this.pool.query<SaleRow>(
+      `SELECT id, cart_id, order_id, hall_id, shift_id, agent_user_id, player_user_id,
+              payment_method, total_cents, wallet_tx_id, agent_tx_id, created_at
+       FROM ${this.salesTable()} WHERE ${where}
+       ORDER BY created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    return { sales: rows.map((r) => this.mapSale(r)), total };
+  }
+
+  /**
+   * PDF 17 §17.30 "View Order Details":
+   * Henter et produktsalg sammen med tilhørende cart-linjer, så
+   * agent kan vise produkt-listen på order-detail.
+   */
+  async getSaleWithLines(
+    saleId: string
+  ): Promise<{ sale: ProductSale; cart: ProductCart } | null> {
+    if (!saleId?.trim()) {
+      throw new DomainError("INVALID_INPUT", "saleId er påkrevd.");
+    }
+    const { rows } = await this.pool.query<SaleRow>(
+      `SELECT id, cart_id, order_id, hall_id, shift_id, agent_user_id, player_user_id,
+              payment_method, total_cents, wallet_tx_id, agent_tx_id, created_at
+       FROM ${this.salesTable()} WHERE id = $1`,
+      [saleId.trim()]
+    );
+    const sale = rows[0];
+    if (!sale) return null;
+    const cart = await this.getCart(sale.cart_id);
+    return { sale: this.mapSale(sale), cart };
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   private async requireActiveShift(agentUserId: string) {

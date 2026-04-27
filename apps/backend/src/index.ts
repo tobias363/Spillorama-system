@@ -213,6 +213,7 @@ import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsS
 import { createAdminReportsGame1ManagementRouter } from "./routes/adminReportsGame1Management.js";
 import { createAdminReportsHallSpecificRouter } from "./routes/adminReportsHallSpecific.js";
 import { createAgentReportsPastWinningRouter } from "./routes/agentReportsPastWinning.js";
+import { createAgentHistoryListsRouter } from "./routes/agentHistoryLists.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
 import { createAdminPlayersTopRouter } from "./routes/adminPlayersTop.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
@@ -2134,6 +2135,15 @@ app.use(createAgentReportsPastWinningRouter({
   platformService,
   agentService,
   agentShiftService,
+  staticTicketService,
+}));
+// PDF 17 §17.29-§17.32: Agent history-lists — Order History (product sales),
+// Order Detail, Sold Tickets list, Winnings History (alias).
+app.use(createAgentHistoryListsRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  productSaleService: agentProductSaleService,
   staticTicketService,
 }));
 // BIN-651: red-flag players report (AML + regulatorisk AuditLog on view).

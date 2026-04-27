@@ -166,6 +166,10 @@ export const routes: RouteDef[] = [
   { path: "/agent/bingo-check", titleKey: "agent_check_bingo", roles: ["agent", "hall-operator"] },
   // BIN-17.32 — Past Game Winning History (agent-view).
   { path: "/agent/past-winning-history", titleKey: "past_game_winning_history", roles: ["agent", "hall-operator"] },
+  // PDF 17 §17.29 — Order History (agent-view, product-sales).
+  { path: "/agent/orders/history", titleKey: "order_history", roles: ["agent", "hall-operator"] },
+  // PDF 17 §17.31 — Sold Ticket UI (static-tickets, scoped per hall).
+  { path: "/agent/sold-tickets-ui", titleKey: "sold_ticket", roles: ["agent", "hall-operator"] },
   // PR-B1: cash-inout sub-pages. Exact matches only — use query string for
   // row-scoped deep-links (e.g. `#/agent/sellPhysicalTickets?gameId=X`).
   { path: "/agent/sellPhysicalTickets", titleKey: "register_sold_ticket", roles: ["agent"] },
