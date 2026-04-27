@@ -41,6 +41,11 @@ import {
   KYC_IMPORTED_WELCOME_SUBJECT,
   KYC_IMPORTED_WELCOME_TEXT,
 } from "./kyc-imported-welcome.js";
+import {
+  ACCOUNT_BLOCKED_HTML,
+  ACCOUNT_BLOCKED_SUBJECT,
+  ACCOUNT_BLOCKED_TEXT,
+} from "./account-blocked.js";
 
 export type TemplateKey =
   | "verify-email"
@@ -49,7 +54,8 @@ export type TemplateKey =
   | "role-changed"
   | "kyc-approved"
   | "kyc-rejected"
-  | "kyc-imported-welcome";
+  | "kyc-imported-welcome"
+  | "account-blocked";
 
 export interface EmailTemplate {
   subject: string;
@@ -92,6 +98,11 @@ export const EMAIL_TEMPLATES: Record<TemplateKey, EmailTemplate> = {
     subject: KYC_IMPORTED_WELCOME_SUBJECT,
     html: KYC_IMPORTED_WELCOME_HTML,
     text: KYC_IMPORTED_WELCOME_TEXT,
+  },
+  "account-blocked": {
+    subject: ACCOUNT_BLOCKED_SUBJECT,
+    html: ACCOUNT_BLOCKED_HTML,
+    text: ACCOUNT_BLOCKED_TEXT,
   },
 };
 

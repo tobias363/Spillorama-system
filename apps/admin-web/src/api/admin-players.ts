@@ -193,6 +193,43 @@ export async function restorePlayer(id: string): Promise<{ restored: boolean }> 
   );
 }
 
+// ── REQ-097/098: Admin block / unblock ──────────────────────────────────────
+
+export interface BlockPlayerInput {
+  /** 1–500 tegn. Påkrevd. */
+  reason: string;
+  /** Default = "permanent". Heltall > 0 = N dager fra nå. */
+  durationDays?: number | "permanent";
+}
+
+export interface BlockPlayerResult {
+  userId: string;
+  blockedUntil: string | null;
+  reason: string;
+  durationDays: number | "permanent";
+}
+
+export async function blockPlayer(
+  id: string,
+  input: BlockPlayerInput
+): Promise<BlockPlayerResult> {
+  return apiRequest<BlockPlayerResult>(
+    `/api/admin/players/${encodeURIComponent(id)}/block`,
+    {
+      method: "POST",
+      body: input,
+      auth: true,
+    }
+  );
+}
+
+export async function unblockPlayer(id: string): Promise<{ userId: string; blockedUntil: string | null }> {
+  return apiRequest<{ userId: string; blockedUntil: string | null }>(
+    `/api/admin/players/${encodeURIComponent(id)}/unblock`,
+    { method: "POST", body: {}, auth: true }
+  );
+}
+
 // ── Create / Update (BIN-633 + BIN-634) ─────────────────────────────────────
 
 export interface CreatePlayerInput {

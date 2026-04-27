@@ -311,6 +311,119 @@ export class ProfileSettingsService {
     return after;
   }
 
+  /**
+   * REQ-097: Admin/SUPPORT blokkerer en spiller. Bruker samme
+   * `app_user_profile_settings.blocked_until` som selv-service-block-myself
+   * slik at `assertUserNotBlocked` (gameplay-gate) fanger opp blokken
+   * uten ekstra integrasjon.
+   *
+   * `durationDays`:
+   *   - heltall > 0  → blokkert i N dager fra nå
+   *   - "permanent"  → blokkert til år 9999-12-31 (admin må eksplisitt
+   *     unblocke for å oppheve; matches "permanent"-semantikken i
+   *     selv-service-self-exclude men uten å trigge §23-1-år-regelen).
+   *
+   * `reason` skrives til `blocked_reason`-kolonnen og audit-loggen.
+   *
+   * Idempotent: et nytt admin-block-kall overskriver eksisterende
+   * blocked_until/reason. Det samme gjelder for unblock (clear).
+   *
+   * Audit `admin.player.block` med `{ durationDays, reason, blockedUntil,
+   * actorId }`. Permanent serialiseres som `"permanent"` i details for
+   * lett rapportering.
+   */
+  async adminBlock(input: {
+    userId: string;
+    actor: {
+      actorId: string;
+      type: AuditActorType;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+    durationDays: number | "permanent";
+    reason: string;
+  }): Promise<ProfileSettingsView> {
+    const user = await this.loadUser(input.userId);
+    const reason = input.reason.trim();
+    if (reason.length === 0) {
+      throw new DomainError("INVALID_INPUT", "reason er påkrevd.");
+    }
+    if (reason.length > 500) {
+      throw new DomainError("INVALID_INPUT", "reason er for lang (maks 500 tegn).");
+    }
+
+    let blockedUntil: Date;
+    if (input.durationDays === "permanent") {
+      // År 9999-12-31. Trigger ikke 1-år-§23-mekanikken
+      // (det er for ComplianceManager.setSelfExclusion). Admin må
+      // eksplisitt unblocke for å oppheve.
+      blockedUntil = new Date("9999-12-31T23:59:59Z");
+    } else {
+      if (!Number.isFinite(input.durationDays) || input.durationDays <= 0) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          'durationDays må være et positivt heltall eller "permanent".'
+        );
+      }
+      const days = Math.floor(input.durationDays);
+      blockedUntil = new Date(this.now() + days * MS_PER_DAY);
+    }
+
+    const blockedReason = `admin-block: ${reason}`;
+    await this.upsertBlockedUntil(user.id, blockedUntil, blockedReason);
+
+    const after = await this.getSettings(user.id);
+    await this.writeAuditWithActor({
+      actor: input.actor,
+      action: "admin.player.block",
+      userId: user.id,
+      details: {
+        targetUserId: user.id,
+        durationDays: input.durationDays === "permanent" ? "permanent" : Math.floor(input.durationDays),
+        reason,
+        blockedUntil: blockedUntil.toISOString(),
+      },
+    });
+    return after;
+  }
+
+  /**
+   * REQ-098: Admin/SUPPORT opphever en eksisterende blokk. Setter
+   * `blocked_until = NULL` og `blocked_reason = NULL`. Idempotent —
+   * kall mot en ikke-blokkert spiller er en no-op (men logges fortsatt
+   * for sporbarhet hvis admin tror de fjernet noe).
+   */
+  async adminUnblock(input: {
+    userId: string;
+    actor: {
+      actorId: string;
+      type: AuditActorType;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+  }): Promise<ProfileSettingsView> {
+    const user = await this.loadUser(input.userId);
+    const before = await this.loadProfileRow(user.id);
+    await this.clearBlockedUntil(user.id);
+    const after = await this.getSettings(user.id);
+    await this.writeAuditWithActor({
+      actor: input.actor,
+      action: "admin.player.unblock",
+      userId: user.id,
+      details: {
+        targetUserId: user.id,
+        previousBlockedUntil:
+          before?.blocked_until instanceof Date
+            ? before.blocked_until.toISOString()
+            : typeof before?.blocked_until === "string"
+              ? before.blocked_until
+              : null,
+        previousReason: before?.blocked_reason ?? null,
+      },
+    });
+    return after;
+  }
+
   async setLanguage(input: {
     userId: string;
     actor: { type: AuditActorType; ipAddress?: string | null; userAgent?: string | null };
@@ -578,6 +691,37 @@ export class ProfileSettingsService {
       // Audit-logger bør være fire-and-forget for å ikke blokkere
       // spillerens profil-oppdatering på audit-DB-feil.
       logger.warn({ err, action: input.action }, "profile settings audit append failed");
+    }
+  }
+
+  /**
+   * Audit-skriving for admin-actions hvor `actorId` er admin-brukeren
+   * (ikke spilleren). Brukes av `adminBlock` / `adminUnblock` (REQ-097/098).
+   */
+  private async writeAuditWithActor(input: {
+    actor: {
+      actorId: string;
+      type: AuditActorType;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+    action: string;
+    userId: string;
+    details: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      await this.audit.record({
+        actorId: input.actor.actorId,
+        actorType: input.actor.type,
+        action: input.action,
+        resource: "user",
+        resourceId: input.userId,
+        details: input.details,
+        ipAddress: input.actor.ipAddress ?? null,
+        userAgent: input.actor.userAgent ?? null,
+      });
+    } catch (err) {
+      logger.warn({ err, action: input.action }, "admin audit append failed");
     }
   }
 }

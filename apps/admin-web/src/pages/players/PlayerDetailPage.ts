@@ -24,6 +24,8 @@ import { openRejectPlayerModal } from "./modals/RejectPlayerModal.js";
 import { openResubmitPlayerModal } from "./modals/ResubmitPlayerModal.js";
 import { openBankIdReverifyModal } from "./modals/BankIdReverifyModal.js";
 import { openEditPlayerModal } from "./modals/EditPlayerModal.js";
+import { openBlockPlayerModal } from "./modals/BlockPlayerModal.js";
+import { unblockPlayer } from "../../api/admin-players.js";
 import {
   contentHeader,
   escapeHtml,
@@ -188,6 +190,16 @@ function renderActionRow(root: HTMLElement, player: PlayerSummary): void {
     `<button class="btn btn-info btn-flat" data-action="edit">
        <i class="fa fa-pencil" aria-hidden="true"></i> ${escapeHtml(t("edit_player"))}
      </button>`,
+    // REQ-097: Blokkér-knapp tilgjengelig for alle KYC-statuser. Setter
+    // app_user_profile_settings.blocked_until via admin-block-endepunktet.
+    `<button class="btn btn-warning btn-flat" data-action="block">
+       <i class="fa fa-ban"></i> ${escapeHtml(t("block_player") || "Blokkér")}
+     </button>`,
+    // REQ-098: Opphev blokk — UI viser alltid; backend er idempotent
+    // (kall mot ikke-blokkert spiller logges men endrer ingenting).
+    `<button class="btn btn-default btn-flat" data-action="unblock">
+       <i class="fa fa-unlock"></i> ${escapeHtml(t("unblock_player") || "Opphev blokk")}
+     </button>`,
     `<button class="btn btn-default btn-flat" data-action="soft-delete">
        <i class="fa fa-trash" aria-hidden="true"></i> ${escapeHtml(t("soft_delete_player"))}
      </button>`,
@@ -234,6 +246,15 @@ function renderActionRow(root: HTMLElement, player: PlayerSummary): void {
           onUpdated: () => window.location.reload(),
         });
         break;
+      case "block":
+        openBlockPlayerModal({
+          player,
+          onBlocked: () => window.location.reload(),
+        });
+        break;
+      case "unblock":
+        confirmUnblock(player.id);
+        break;
       case "soft-delete":
         confirmSoftDelete(player.id);
         break;
@@ -241,6 +262,36 @@ function renderActionRow(root: HTMLElement, player: PlayerSummary): void {
         confirmRestore(player.id);
         break;
     }
+  });
+}
+
+function confirmUnblock(id: string): void {
+  Modal.open({
+    title: t("unblock_player") || "Opphev blokk",
+    content: `<p>${escapeHtml(
+      t("unblock_confirm") || "Er du sikker på at du vil oppheve blokkeringen av denne spilleren?"
+    )}</p>`,
+    backdrop: "static",
+    keyboard: false,
+    buttons: [
+      { label: t("no_cancle"), variant: "default", action: "cancel" },
+      {
+        label: t("confirm"),
+        variant: "primary",
+        action: "confirm",
+        onClick: async () => {
+          try {
+            await unblockPlayer(id);
+            Toast.success(t("player_unblocked_success") || "Blokkering opphevet.");
+            window.location.reload();
+          } catch (err) {
+            const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+            Toast.error(msg);
+            throw err;
+          }
+        },
+      },
+    ],
   });
 }
 

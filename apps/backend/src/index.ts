@@ -91,6 +91,7 @@ import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
 import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
 import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
+import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
@@ -1603,6 +1604,9 @@ app.use(createAdminPlayersRouter({
   // BIN-702 follow-up: velkomstmail med 7-dagers password-reset-lenke
   // for spillere importert via Excel/CSV (bulk-import).
   authTokenService,
+  // REQ-097/098: admin block/unblock skriver til
+  // app_user_profile_settings.blocked_until.
+  profileSettingsService,
 }));
 app.use(createAdminAmlRouter({
   platformService,
@@ -1770,6 +1774,16 @@ app.use(createAgentGame1Router({
   platformService,
   masterControlService: game1MasterControlService,
   hallReadyService: game1HallReadyService,
+  pool: platformService.getPool(),
+}));
+// REQ-101/146: agent manuell mini-game-trigger (fallback for når
+// auto-trigger feilet eller admin endret config midt-runde).
+app.use(createAgentGame1MiniGameRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  miniGameOrchestrator: game1MiniGameOrchestrator,
+  auditLogService,
   pool: platformService.getPool(),
 }));
 // Task 1.6: runtime master-overføring — 4 endepunkter (request/approve/
