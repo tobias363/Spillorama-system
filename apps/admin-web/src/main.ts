@@ -353,15 +353,12 @@ function mountShell(_root: HTMLElement, session: Session): void {
  * Role-based route-guard. Returns the path the user should see — either
  * the requested path (if allowed) or the landing-route for their role.
  *
- * Policy:
- *   - ADMIN / super-admin: may visit everything EXCEPT the agent-portal-
- *     skeleton pages under /agent/dashboard, /agent/players, /agent/physical-
- *     tickets, /agent/games, /agent/cash-in-out, /agent/unique-id, and
- *     /agent/physical-cashout. Those are AGENT-only per spec. Other
- *     /agent/* routes (e.g. /agent management list at `/agent`, /agent/add,
- *     /agent/cashinout legacy) remain admin-accessible.
- *   - AGENT / hall-operator: may visit /agent/* only. /admin + every other
- *     legacy-admin route redirects back to the agent-portal landing.
+ * Policy (Tobias 2026-04-27 — pilot-blokker):
+ *   - ADMIN / super-admin: SUPER-USER. Får besøke ALLE ruter inkludert
+ *     agent-portal-skeleton-sider. Disse sidene rendrer en hall-velger
+ *     inline når ADMIN ikke har en primær-hall. Tidligere ble admin
+ *     redirectet til `/admin` (krasjet header "Kontant inn/ut"-knappen).
+ *   - AGENT / hall-operator: må holde seg inne i `/agent/*`.
  */
 function guardRouteForRole(path: string, session: Session): string {
   const bare = path.split("?")[0] ?? path;
@@ -375,33 +372,13 @@ function guardRouteForRole(path: string, session: Session): string {
     return "/agent/dashboard";
   }
   if (isAdminPanelRole(session.role)) {
-    // Admin/super-admin cannot visit the dedicated agent-portal-skeleton
-    // pages. They retain access to admin-side /agent routes (like /agent
-    // management).
-    if (AGENT_PORTAL_PATHS.has(bare)) return "/admin";
+    // ADMIN super-user — alle ruter åpne. Agent-portal-sider rendrer en
+    // hall-velger inline når admin har behov for hall-kontekst (se
+    // CashInOutPage.renderAdminSuperUserBanner / Session.getEffectiveHall).
     return path;
   }
   return path;
 }
-
-/**
- * Routes that belong to the agent-portal skeleton (AGENT/HALL_OPERATOR only).
- * Does NOT include legacy admin-side /agent routes like /agent (agent-
- * management list) or /agent/add.
- */
-const AGENT_PORTAL_PATHS = new Set<string>([
-  "/agent/dashboard",
-  "/agent/players",
-  "/agent/physical-tickets",
-  "/agent/games",
-  "/agent/cash-in-out",
-  "/agent/unique-id",
-  "/agent/physical-cashout",
-  "/agent/bingo-check",
-  "/agent/past-winning-history",
-  "/agent/orders/history",
-  "/agent/sold-tickets-ui",
-]);
 
 function renderPage(container: HTMLElement, route: RouteDef, session: Session): void | Promise<void> {
   container.setAttribute("data-route", route.path);
