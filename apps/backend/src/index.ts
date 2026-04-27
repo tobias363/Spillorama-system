@@ -50,6 +50,9 @@ import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload
 import { RoomStateManager } from "./util/roomState.js";
 import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportScheduler, type PendingBingoSettingsUpdate } from "./util/schedulerSetup.js";
 import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
+import { WalletOutboxRepo } from "./wallet/WalletOutboxRepo.js";
+import { WalletOutboxWorker } from "./wallet/WalletOutboxWorker.js";
+import { PostgresWalletAdapter } from "./adapters/PostgresWalletAdapter.js";
 import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
@@ -367,6 +370,42 @@ const walletStatePusher = createWalletStatePusher({
   walletAdapter: walletRuntime.adapter,
 });
 const walletAdapter = new WalletStateNotifyingAdapter(walletRuntime.adapter, walletStatePusher);
+
+// BIN-761: Wallet outbox-pattern. Når walletAdapter er postgres, opprett
+// repo + worker som poller `wallet_outbox`-tabellen og dispatcher events.
+// Dispatcher er stub initialt (logger til console); BIN-760 wirer
+// socket-pusher inn etter at io-instansen er fullført. Worker er
+// backwards-compatible: hvis postgres ikke er valgt, kjøres ingen worker.
+let walletOutboxRepo: WalletOutboxRepo | null = null;
+let walletOutboxWorker: WalletOutboxWorker | null = null;
+if (walletAdapter instanceof PostgresWalletAdapter) {
+  walletOutboxRepo = new WalletOutboxRepo({
+    pool: walletAdapter.getPool(),
+    schema: walletAdapter.getSchema(),
+  });
+  walletAdapter.setOutboxRepo(walletOutboxRepo);
+  const intervalMs = (() => {
+    const raw = process.env.WALLET_OUTBOX_TICK_MS?.trim();
+    if (!raw) return 1000;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 1000;
+  })();
+  const batchSize = (() => {
+    const raw = process.env.WALLET_OUTBOX_BATCH?.trim();
+    if (!raw) return 50;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
+  })();
+  walletOutboxWorker = new WalletOutboxWorker({
+    repo: walletOutboxRepo,
+    intervalMs,
+    batchSize,
+  });
+  walletOutboxWorker.start();
+  console.info(
+    `[wallet-outbox] worker started (interval=${intervalMs}ms, batch=${batchSize})`,
+  );
+}
 
 // External game wallet bridge (Candy/demo-backend calls these)
 const extGameWalletApiKey = (process.env.EXT_GAME_WALLET_API_KEY ?? "").trim();
@@ -3046,6 +3085,12 @@ function handleShutdown(signal: string) {
   jobScheduler.stop();
   drawScheduler.gracefulStop()
     .then(async () => {
+      // BIN-761: stopp outbox-worker før øvrig rivetning, så pågående tick får
+      // tid til å markere claimed-rader processed/failed før shutdown.
+      if (walletOutboxWorker) {
+        try { await walletOutboxWorker.stop(); }
+        catch (err) { console.warn("[shutdown] walletOutboxWorker.stop() failed:", err); }
+      }
       await roomStateStore.shutdown();
       if (redisSchedulerLock) await redisSchedulerLock.shutdown();
       if (responsibleGamingStore) await responsibleGamingStore.shutdown();
