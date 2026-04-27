@@ -250,7 +250,18 @@ export class TicketGridHtml {
   // ── Private ─────────────────────────────────────────────────────────────
 
   private computeSignature(tickets: Ticket[], cancelable: boolean, liveCount: number): string {
-    const parts = tickets.map((t) => `${t.id ?? "_"}:${t.color ?? "_"}:${t.type ?? "_"}`);
+    // BUG-FIX (Tobias 2026-04-27): in-game tickets har Ticket.id=undefined per
+    // shared-types/game.ts:9 ("Absent on in-game tickets"). Hvis flere tickets
+    // har samme color+type (typisk: 4 Small Yellow), ble signature IDENTISK
+    // uansett rekkefølge — sort-rekkefølge ble derfor aldri reflektert i DOM
+    // fordi setTickets()-shortcircuit traff lastSignature===signature.
+    //
+    // Fix: inkluder grid-fingerprint (første rad) per ticket. Hvert brett har
+    // unike numre, så grid[0] gir stabil unik identifikasjon selv uten id.
+    const parts = tickets.map((t) => {
+      const fingerprint = t.id ?? (t.grid?.[0] ? t.grid[0].join(",") : "_");
+      return `${fingerprint}:${t.color ?? "_"}:${t.type ?? "_"}`;
+    });
     parts.push(`c=${cancelable ? 1 : 0}`);
     parts.push(`l=${liveCount}`);
     return parts.join("|");
