@@ -207,6 +207,21 @@ export function createGame1ScheduledEventHandlers(
       return { roomCode, playerId, snapshot };
     }
 
+    // Demo Hall bypass (Tobias 2026-04-27): hent `isTestHall` fra hallen
+    // så `RoomState.isTestHall=true` for test-haller propageres til
+    // `BingoEnginePatternEval.evaluateActivePhase`. Uten dette slår
+    // Spill 1 auto-pause (PR #643) inn etter Phase 1 og scheduled-spillet
+    // henger til master resumer manuelt — bug rapportert 2026-04-27.
+    let isTestHall = false;
+    try {
+      const hall = await platformService.getHall(hallId);
+      isTestHall = hall.isTestHall === true;
+    } catch (err) {
+      log.warn(
+        { err, hallId },
+        "isTestHall lookup failed — defaulting to false (regular hall)"
+      );
+    }
     // Ingen room_code enda. Opprett nytt rom, persister mapping.
     const created = await engine.createRoom({
       hallId,
@@ -214,6 +229,7 @@ export function createGame1ScheduledEventHandlers(
       walletId: user.walletId,
       socketId,
       gameSlug: "bingo",
+      ...(isTestHall ? { isTestHall: true } : {}),
     });
     if (bindDefaultVariantConfig) {
       bindDefaultVariantConfig(created.roomCode, "bingo");

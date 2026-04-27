@@ -41,6 +41,32 @@ import { walletRoomKey } from "../walletStatePusher.js";
 import { getCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
 
 /**
+ * Demo Hall bypass (Tobias 2026-04-27): hent `isTestHall` fra
+ * `app_halls.is_test_hall` så `RoomState.isTestHall` propageres riktig
+ * til `BingoEnginePatternEval.evaluateActivePhase`. Uten dette slår
+ * Spill 1 auto-pause (PR #643) inn etter Phase 1 og /web/-spillet henger.
+ *
+ * Fail-soft: hvis lookup feiler (DB-feil, ukjent hall, manglende
+ * `platformService` i test-harness) returnerer vi `false` slik at
+ * eksisterende prod-haller forblir uendret. Lookup-feil logges men
+ * blokkerer ikke createRoom.
+ */
+async function lookupIsTestHall(
+  deps: Pick<GameEventsDeps, "platformService">,
+  hallId: string,
+  log: { warn: (data: unknown, msg: string) => void },
+): Promise<boolean> {
+  if (!deps.platformService?.getHall) return false;
+  try {
+    const hall = await deps.platformService.getHall(hallId);
+    return hall.isTestHall === true;
+  } catch (err) {
+    log.warn({ err, hallId }, "lookupIsTestHall failed — defaulting to false");
+    return false;
+  }
+}
+
+/**
  * BIN-693 Option B: reserver delta-beløp for pre-round bong-kjøp.
  *
  * `previousWeighted` er antall brett (vektet) allerede armed for denne spilleren
@@ -271,6 +297,10 @@ export function registerRoomEvents(ctx: SocketContext): void {
       const canonicalMapping = enforceSingleRoomPerHall
         ? getCanonicalRoomCode(requestedGameSlug, identity.hallId, canonicalGroupId)
         : null;
+      // Demo Hall bypass (Tobias 2026-04-27): propager `isTestHall` slik at
+      // `RoomState.isTestHall=true` for test-haller — ellers slår Spill 1
+      // auto-pause inn etter Phase 1 og spillet henger i /web/-flyten.
+      const isTestHall = await lookupIsTestHall(deps, identity.hallId, logger);
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,
         hallId: identity.hallId,
@@ -281,7 +311,8 @@ export function registerRoomEvents(ctx: SocketContext): void {
         // Tobias 2026-04-27: shared rooms (Spill 2/3) signaliserer dette via
         // `effectiveHallId=null` så `joinRoom` ikke kaster HALL_MISMATCH.
         effectiveHallId: canonicalMapping ? canonicalMapping.effectiveHallId : undefined,
-        gameSlug: requestedGameSlug
+        gameSlug: requestedGameSlug,
+        ...(isTestHall ? { isTestHall: true } : {}),
       });
       // BIN-694: wire DEFAULT variantConfig (5-fase Norsk bingo for Game 1)
       // immediately after room-creation. Before this, `setVariantConfig`
@@ -329,11 +360,17 @@ export function registerRoomEvents(ctx: SocketContext): void {
             // Bug 2 fix: rydd stale walletId-binding i andre IDLE-rom før
             // ny rom-opprettelse, så reconnect ikke blokkeres.
             engine.cleanupStaleWalletInIdleRooms(identity.walletId);
+            // Demo Hall bypass (Tobias 2026-04-27): propager `isTestHall` —
+            // se kommentar over første createRoom-kall i room:create.
+            const isTestHallForAutoCreate = await lookupIsTestHall(
+              deps, identity.hallId, logger,
+            );
             const newRoom = await engine.createRoom({
               hallId: identity.hallId,
               playerName: identity.playerName,
               walletId: identity.walletId,
               socketId: socket.id,
+              ...(isTestHallForAutoCreate ? { isTestHall: true } : {}),
             });
             roomCode = newRoom.roomCode;
             // BIN-694 + PR C: wire variantConfig for the auto-created room.
