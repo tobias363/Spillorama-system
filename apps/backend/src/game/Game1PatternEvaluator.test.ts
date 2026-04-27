@@ -5,9 +5,8 @@
  *   - buildTicketMask: 5x5 grid + markings → 25-bit int med centre-free-bit
  *   - evaluatePhase: alle 5 faser, happy-path + nær-miss
  *   - Fase 1 "1 Rad": horisontal ELLER vertikal
- *   - Fase 2-4: N vertikale kolonner (ikke rader, ikke diagonaler).
- *     Merk: norsk databingo Spill 1 navngir fase 2-4 "N Rader" men
- *     geometrien er kolonner — se BingoEngine.ts:1168-1170.
+ *   - Fase 2-4: N HORISONTALE RADER (2026-04-27 regelfix).
+ *     Tidligere krevde dette N vertikale kolonner — commit 8ba2d19b.
  *   - Fase 5 "Fullt Hus": alle 25 bits
  *   - remainingForPhase: "igjen"-semantikk
  */
@@ -183,121 +182,123 @@ test("Fase 1: diagonal (0, 6, 12, 18, 24) → IKKE vinner (kun rad + kolonne)", 
   assert.equal(result.isWinner, false, "diagonal teller ikke i Spill 1");
 });
 
-// ── evaluatePhase: Fase 2 "2 Rader" (= 2 vertikale kolonner) ────────────────
+// ── evaluatePhase: Fase 2 "2 Rader" (= 2 horisontale rader) ─────────────────
+// 2026-04-27 fix: regelendring 2026-04-24 byttet fra vertikale kolonner
+// til horisontale rader. Speiler shared-types/spill1-patterns.
 
-test("Fase 2: 2 vertikale kolonner → vinner", () => {
-  const grid = emptyGrid();
-  let markings = markCol(emptyMarkings(), 0);
-  markings = markCol(markings, 1);
-  const result = evaluatePhase(grid, markings, PHASE_2_TWO_ROWS);
-  assert.equal(result.isWinner, true);
-});
-
-test("Fase 2: 2 horisontale rader → IKKE vinner", () => {
+test("Fase 2: 2 horisontale rader → vinner", () => {
   const grid = emptyGrid();
   let markings = markRow(emptyMarkings(), 0);
   markings = markRow(markings, 1);
   const result = evaluatePhase(grid, markings, PHASE_2_TWO_ROWS);
-  assert.equal(
-    result.isWinner,
-    false,
-    "fase 2 krever 2 vertikale kolonner, horisontale rader teller ikke"
-  );
+  assert.equal(result.isWinner, true);
 });
 
-test("Fase 2: 1 vertikal + 1 horisontal → IKKE vinner", () => {
+test("Fase 2: 2 vertikale kolonner → IKKE vinner (regel-paritet med shared-types)", () => {
   const grid = emptyGrid();
   let markings = markCol(emptyMarkings(), 0);
-  markings = markRow(markings, 0);
+  markings = markCol(markings, 1);
   const result = evaluatePhase(grid, markings, PHASE_2_TWO_ROWS);
   assert.equal(
     result.isWinner,
     false,
-    "fase 2 krever 2 vertikale kolonner, horisontal teller ikke"
+    "fase 2 krever 2 horisontale rader, vertikale kolonner teller ikke"
   );
 });
 
-test("Fase 2: col 0 + col 4 (ikke-tilstøtende) → vinner", () => {
+test("Fase 2: 1 horisontal + 1 vertikal → IKKE vinner", () => {
   const grid = emptyGrid();
-  let markings = markCol(emptyMarkings(), 0);
-  markings = markCol(markings, 4);
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markCol(markings, 0);
+  const result = evaluatePhase(grid, markings, PHASE_2_TWO_ROWS);
+  assert.equal(
+    result.isWinner,
+    false,
+    "fase 2 krever 2 horisontale rader, vertikal teller ikke"
+  );
+});
+
+test("Fase 2: row 0 + row 4 (ikke-tilstøtende) → vinner", () => {
+  const grid = emptyGrid();
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markRow(markings, 4);
   const result = evaluatePhase(grid, markings, PHASE_2_TWO_ROWS);
   assert.equal(result.isWinner, true);
 });
 
-test("Fase 2: col 0 markert + centre-free → remaining = 4 (beste kandidat col 0 + col 2)", () => {
+test("Fase 2: row 0 markert + centre-free → remaining = 4 (beste kandidat row 0 + row 2)", () => {
   const grid = emptyGrid();
-  const markings = markCol(emptyMarkings(), 0);
-  // Beste kandidat: col 0 + col 2. Col 0 er komplett, col 2 har idx 12
-  // (centre) gratis — mangler idx 2, 7, 17, 22 = 4.
+  const markings = markRow(emptyMarkings(), 0);
+  // Beste kandidat: row 0 + row 2. Row 0 er komplett, row 2 har idx 12
+  // (centre) gratis — mangler idx 10, 11, 13, 14 = 4.
   const remaining = remainingForPhase(grid, markings, PHASE_2_TWO_ROWS);
   assert.equal(remaining, 4);
 });
 
-// ── evaluatePhase: Fase 3 "3 Rader" (= 3 vertikale kolonner) ────────────────
+// ── evaluatePhase: Fase 3 "3 Rader" (= 3 horisontale rader) ─────────────────
 
-test("Fase 3: 3 vertikale kolonner → vinner", () => {
-  const grid = emptyGrid();
-  let markings = markCol(emptyMarkings(), 0);
-  markings = markCol(markings, 2);
-  markings = markCol(markings, 4);
-  const result = evaluatePhase(grid, markings, PHASE_3_THREE_ROWS);
-  assert.equal(result.isWinner, true);
-});
-
-test("Fase 3: 2 vertikale kolonner → IKKE vinner", () => {
-  const grid = emptyGrid();
-  let markings = markCol(emptyMarkings(), 0);
-  markings = markCol(markings, 1);
-  const result = evaluatePhase(grid, markings, PHASE_3_THREE_ROWS);
-  assert.equal(result.isWinner, false);
-});
-
-test("Fase 3: 3 horisontale rader → IKKE vinner", () => {
+test("Fase 3: 3 horisontale rader → vinner", () => {
   const grid = emptyGrid();
   let markings = markRow(emptyMarkings(), 0);
   markings = markRow(markings, 2);
   markings = markRow(markings, 4);
   const result = evaluatePhase(grid, markings, PHASE_3_THREE_ROWS);
-  assert.equal(
-    result.isWinner,
-    false,
-    "fase 3 krever 3 vertikale kolonner, rader teller ikke"
-  );
-});
-
-// ── evaluatePhase: Fase 4 "4 Rader" (= 4 vertikale kolonner) ────────────────
-
-test("Fase 4: 4 vertikale kolonner → vinner", () => {
-  const grid = emptyGrid();
-  let markings = markCol(emptyMarkings(), 0);
-  markings = markCol(markings, 1);
-  markings = markCol(markings, 2);
-  markings = markCol(markings, 3);
-  const result = evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS);
   assert.equal(result.isWinner, true);
 });
 
-test("Fase 4: 3 vertikale kolonner → IKKE vinner", () => {
+test("Fase 3: 2 horisontale rader → IKKE vinner", () => {
   const grid = emptyGrid();
-  let markings = markCol(emptyMarkings(), 0);
-  markings = markCol(markings, 1);
-  markings = markCol(markings, 2);
-  const result = evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS);
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markRow(markings, 1);
+  const result = evaluatePhase(grid, markings, PHASE_3_THREE_ROWS);
   assert.equal(result.isWinner, false);
 });
 
-test("Fase 4: 4 horisontale rader → IKKE vinner", () => {
+test("Fase 3: 3 vertikale kolonner → IKKE vinner (regel-paritet)", () => {
+  const grid = emptyGrid();
+  let markings = markCol(emptyMarkings(), 0);
+  markings = markCol(markings, 2);
+  markings = markCol(markings, 4);
+  const result = evaluatePhase(grid, markings, PHASE_3_THREE_ROWS);
+  assert.equal(
+    result.isWinner,
+    false,
+    "fase 3 krever 3 horisontale rader, kolonner teller ikke"
+  );
+});
+
+// ── evaluatePhase: Fase 4 "4 Rader" (= 4 horisontale rader) ─────────────────
+
+test("Fase 4: 4 horisontale rader → vinner", () => {
   const grid = emptyGrid();
   let markings = markRow(emptyMarkings(), 0);
   markings = markRow(markings, 1);
   markings = markRow(markings, 2);
   markings = markRow(markings, 3);
   const result = evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS);
+  assert.equal(result.isWinner, true);
+});
+
+test("Fase 4: 3 horisontale rader → IKKE vinner", () => {
+  const grid = emptyGrid();
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markRow(markings, 1);
+  markings = markRow(markings, 2);
+  const result = evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS);
+  assert.equal(result.isWinner, false);
+});
+
+test("Fase 4: 4 vertikale kolonner → IKKE vinner (regel-paritet)", () => {
+  const grid = emptyGrid();
+  let markings = markCol(emptyMarkings(), 0);
+  markings = markCol(markings, 1);
+  markings = markCol(markings, 2);
+  markings = markCol(markings, 3);
+  const result = evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS);
   assert.equal(
     result.isWinner,
     false,
-    "fase 4 krever 4 vertikale kolonner, rader teller ikke"
+    "fase 4 krever 4 horisontale rader, kolonner teller ikke"
   );
 });
 
@@ -443,3 +444,60 @@ test("edge-case: remainingForPhase returnerer Infinity for ugyldig fase", () => 
     );
   }
 });
+
+// ── 2026-04-27 regresjonstester: Tobias-bug Demo Hall BINGO1 ────────────────
+//
+// Bong i prod fikk 4 horisontale rader fullført, men Game1DrawEngineService
+// (scheduled-game-stien) ventet på 2 vertikale kolonner (gammel regel) og
+// detekterte aldri vinner — spillet hang i fase "2 Rader" til ball 73/75.
+
+test("REGRESJON 2026-04-27: 1 horisontal rad → fase 1 winner, fase 2-FH ikke", () => {
+  const grid = emptyGrid();
+  const markings = markRow(emptyMarkings(), 0);
+  assert.equal(evaluatePhase(grid, markings, PHASE_1_ONE_ROW).isWinner, true);
+  assert.equal(evaluatePhase(grid, markings, PHASE_2_TWO_ROWS).isWinner, false);
+  assert.equal(evaluatePhase(grid, markings, PHASE_3_THREE_ROWS).isWinner, false);
+  assert.equal(evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS).isWinner, false);
+  assert.equal(evaluatePhase(grid, markings, PHASE_5_FULL_HOUSE).isWinner, false);
+});
+
+test("REGRESJON 2026-04-27: 2 horisontale rader → fase 1+2 winners, fase 3+ ikke", () => {
+  const grid = emptyGrid();
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markRow(markings, 1);
+  assert.equal(evaluatePhase(grid, markings, PHASE_1_ONE_ROW).isWinner, true);
+  assert.equal(
+    evaluatePhase(grid, markings, PHASE_2_TWO_ROWS).isWinner,
+    true,
+    "FAIL HER = Tobias-bug: rader 0+1 detekteres ikke som fase 2",
+  );
+  assert.equal(evaluatePhase(grid, markings, PHASE_3_THREE_ROWS).isWinner, false);
+});
+
+test("REGRESJON 2026-04-27: 4 horisontale rader (Tobias-bong) → fase 1-4 alle, FH ikke", () => {
+  // Eksakt bong-tilstand fra Demo Hall BINGO1 2026-04-27: rad 0-3 fullført,
+  // rad 4 ikke. Server detekterte ingen vinner i fase 2-4 før fix.
+  const grid = emptyGrid();
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markRow(markings, 1);
+  markings = markRow(markings, 2);
+  markings = markRow(markings, 3);
+  assert.equal(evaluatePhase(grid, markings, PHASE_1_ONE_ROW).isWinner, true);
+  assert.equal(
+    evaluatePhase(grid, markings, PHASE_2_TWO_ROWS).isWinner,
+    true,
+    "FAIL HER = Tobias-bug: 4 rader detekteres ikke som fase 2",
+  );
+  assert.equal(
+    evaluatePhase(grid, markings, PHASE_3_THREE_ROWS).isWinner,
+    true,
+    "FAIL HER = Tobias-bug: 4 rader detekteres ikke som fase 3",
+  );
+  assert.equal(
+    evaluatePhase(grid, markings, PHASE_4_FOUR_ROWS).isWinner,
+    true,
+    "FAIL HER = Tobias-bug: 4 rader detekteres ikke som fase 4",
+  );
+  assert.equal(evaluatePhase(grid, markings, PHASE_5_FULL_HOUSE).isWinner, false);
+});
+
