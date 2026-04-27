@@ -229,6 +229,41 @@ export class SpilloramaSocket {
 
     this.socket.io.on("reconnect", () => {
       this.setConnectionState("connected");
+      // MED-10 disconnect-recovery: be server om å re-emitte `mini_game:trigger`
+      // for evt pending mini-games etter at vi er reconnect-et. Vi joiner først
+      // user-rommet (det er bundet til socketId, så det forsvinner ved
+      // disconnect og må re-bindes), deretter ber om resume.
+      //
+      // Fail-silent: ack-feil logges men kaster ikke. Hvis brukeren ikke har
+      // pending mini-games er resumedCount=0 — ingen no-op-effekt på klient.
+      void this.sendMiniGameJoin()
+        .then((joinAck) => {
+          if (!joinAck.ok) {
+            console.debug(
+              "[MED-10] mini_game:join failed after reconnect",
+              joinAck.error,
+            );
+            return;
+          }
+          return this.sendMiniGameResume().then((resumeAck) => {
+            if (!resumeAck.ok) {
+              console.debug(
+                "[MED-10] mini_game:resume failed after reconnect",
+                resumeAck.error,
+              );
+              return;
+            }
+            const count = resumeAck.data?.resumedCount ?? 0;
+            if (count > 0) {
+              console.debug(
+                `[MED-10] resumed ${count} pending mini-game(s) after reconnect`,
+              );
+            }
+          });
+        })
+        .catch((err) => {
+          console.debug("[MED-10] mini-game resume threw after reconnect", err);
+        });
     });
 
     // Server → Client broadcasts. All routed through dispatchOrBuffer so
@@ -418,6 +453,30 @@ export class SpilloramaSocket {
     choiceJson: Readonly<Record<string, unknown>>;
   }): Promise<AckResponse<{ accepted: true }>> {
     return this.emit(SocketEvents.MINI_GAME_CHOICE, payload);
+  }
+
+  /**
+   * MED-10 disconnect-recovery: re-join the user-private mini-game room
+   * after a reconnect. Idempotent server-side. Should be called BEFORE
+   * `sendMiniGameResume` so the user room is re-bound to the new socket
+   * before pending triggers fire.
+   */
+  async sendMiniGameJoin(): Promise<AckResponse<{ joined: true }>> {
+    return this.emit(SocketEvents.MINI_GAME_JOIN, {});
+  }
+
+  /**
+   * MED-10 disconnect-recovery: ask the server to re-emit
+   * `mini_game:trigger` for any pending mini-games owned by the
+   * authenticated user. The triggers arrive on the standard
+   * `miniGameTrigger` channel — listeners (e.g. MiniGameRouter via the
+   * GameBridge) handle them as new triggers, idempotently rebuilding
+   * overlays from the deterministic resultId-seed.
+   *
+   * Returns the count of resumed mini-games for telemetry.
+   */
+  async sendMiniGameResume(): Promise<AckResponse<{ resumedCount: number }>> {
+    return this.emit(SocketEvents.MINI_GAME_RESUME, {});
   }
 
   // ── Private ───────────────────────────────────────────────────────────

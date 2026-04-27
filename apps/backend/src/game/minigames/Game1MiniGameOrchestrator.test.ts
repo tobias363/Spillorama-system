@@ -835,3 +835,276 @@ test("BIN-690 M1 integration: Fullt Hus → trigger → klient-choice → result
       err instanceof DomainError && err.code === "MINIGAME_ALREADY_COMPLETED",
   );
 });
+
+// ── MED-10 disconnect-recovery: listPendingForUser + resumePendingForUser ─
+
+test("MED-10: listPendingForUser returnerer KUN pending rader for gitt user", async () => {
+  // In-memory rad-store med blandet pending/completed for to brukere.
+  const fixedNow = new Date("2026-04-26T12:00:00Z");
+  const dbRows = [
+    {
+      id: "mgr-pending-a1",
+      scheduled_game_id: "sg-1",
+      mini_game_type: "mystery",
+      winner_user_id: "u-A",
+      config_snapshot_json: { prizeListNok: [10, 20, 30] },
+      choice_json: null,
+      result_json: null,
+      payout_cents: 0,
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+    {
+      id: "mgr-pending-a2",
+      scheduled_game_id: "sg-2",
+      mini_game_type: "wheel",
+      winner_user_id: "u-A",
+      config_snapshot_json: {},
+      choice_json: null,
+      result_json: null,
+      payout_cents: 0,
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+    {
+      id: "mgr-completed-a3",
+      scheduled_game_id: "sg-3",
+      mini_game_type: "wheel",
+      winner_user_id: "u-A",
+      config_snapshot_json: {},
+      choice_json: null,
+      result_json: null,
+      payout_cents: 5000,
+      triggered_at: fixedNow,
+      completed_at: fixedNow,
+    },
+    {
+      id: "mgr-pending-b1",
+      scheduled_game_id: "sg-4",
+      mini_game_type: "wheel",
+      winner_user_id: "u-B",
+      config_snapshot_json: {},
+      choice_json: null,
+      result_json: null,
+      payout_cents: 0,
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+  ];
+
+  const { pool } = makeFakePool({
+    query: async (sql, params) => {
+      if (
+        sql.includes("WHERE completed_at IS NULL AND winner_user_id = $1") &&
+        sql.includes("config_snapshot_json")
+      ) {
+        const userId = params[0] as string;
+        return {
+          rows: dbRows.filter(
+            (r) => r.completed_at === null && r.winner_user_id === userId,
+          ),
+        };
+      }
+      return { rows: [] };
+    },
+  });
+
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+
+  const pendingForA = await orchestrator.listPendingForUser("u-A");
+  assert.equal(pendingForA.length, 2);
+  assert.deepEqual(
+    pendingForA.map((r) => r.id).sort(),
+    ["mgr-pending-a1", "mgr-pending-a2"],
+  );
+  // Completed rad er ikke med.
+  assert.equal(
+    pendingForA.find((r) => r.id === "mgr-completed-a3"),
+    undefined,
+  );
+
+  // User B sin rad skal ikke leke ut til A.
+  const pendingForB = await orchestrator.listPendingForUser("u-B");
+  assert.equal(pendingForB.length, 1);
+  assert.equal(pendingForB[0]!.id, "mgr-pending-b1");
+
+  // configSnapshot eksponeres for trigger-rekonstruksjon.
+  const mysteryRow = pendingForA.find((r) => r.miniGameType === "mystery");
+  assert.ok(mysteryRow);
+  assert.deepEqual(mysteryRow.configSnapshot, { prizeListNok: [10, 20, 30] });
+});
+
+test("MED-10: resumePendingForUser re-emitter onTrigger for hver pending rad", async () => {
+  // 2 pending rader for u-A: én wheel + én mystery (begge registrert som
+  // implementasjoner). resume skal re-broadcaste BEGGE.
+  const fixedNow = new Date("2026-04-26T12:00:00Z");
+  const dbRows = [
+    {
+      id: "mgr-resume-1",
+      scheduled_game_id: "sg-resume-1",
+      mini_game_type: "wheel",
+      winner_user_id: "u-A",
+      config_snapshot_json: { configKey: "wheel-cfg" },
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+    {
+      id: "mgr-resume-2",
+      scheduled_game_id: "sg-resume-2",
+      mini_game_type: "mystery",
+      winner_user_id: "u-A",
+      config_snapshot_json: { configKey: "mystery-cfg" },
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+  ];
+
+  const { pool } = makeFakePool({
+    query: async (sql, params) => {
+      if (
+        sql.includes("WHERE completed_at IS NULL AND winner_user_id = $1") &&
+        sql.includes("config_snapshot_json")
+      ) {
+        return { rows: dbRows };
+      }
+      // app_users wallet-lookup
+      if (sql.includes("app_users") && sql.includes("wallet_id")) {
+        return { rows: [{ wallet_id: "w-A" }] };
+      }
+      // phase-winners lookup
+      if (sql.includes("app_game1_phase_winners")) {
+        const sgId = params[0] as string;
+        return {
+          rows: [{ hall_id: `h-${sgId}`, draw_sequence_at_win: 50 }],
+        };
+      }
+      return { rows: [] };
+    },
+  });
+
+  const { service: auditLog, records: auditRecords } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const { broadcaster, triggers } = makeRecordingBroadcaster();
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+    broadcaster,
+  });
+
+  const wheel = makeFakeMiniGame("wheel", 1000);
+  const mystery = makeFakeMiniGame("mystery", 2000);
+  orchestrator.registerMiniGame(wheel);
+  orchestrator.registerMiniGame(mystery);
+
+  const resumed = await orchestrator.resumePendingForUser("u-A");
+
+  assert.equal(resumed, 2, "begge pending mini-games skal re-emitteres");
+  assert.equal(triggers.length, 2);
+
+  // Trigger-rekonstruksjon kaller implementasjon.trigger() — én gang per rad.
+  assert.equal(wheel.triggerCalls, 1);
+  assert.equal(mystery.triggerCalls, 1);
+
+  // Broadcast-shape skal matche orchestrator-konvensjon: resultId + scheduledGameId
+  // + winnerUserId + miniGameType + payload kommer fra implementasjon.trigger().
+  const wheelBroadcast = triggers.find((t) => t.miniGameType === "wheel");
+  assert.ok(wheelBroadcast);
+  assert.equal(wheelBroadcast.resultId, "mgr-resume-1");
+  assert.equal(wheelBroadcast.scheduledGameId, "sg-resume-1");
+  assert.equal(wheelBroadcast.winnerUserId, "u-A");
+
+  // Audit log fanger resume-events.
+  const resumeAudits = auditRecords.filter(
+    (r) => r.action === "game1_minigame.resumed",
+  );
+  assert.equal(resumeAudits.length, 2);
+});
+
+test("MED-10: resumePendingForUser hopper over impl-mangler, kaster ikke", async () => {
+  // Pending-rad for type uten registrert implementasjon → skal ikke kaste,
+  // skal bare hoppe over og returnere lavere count.
+  const fixedNow = new Date("2026-04-26T12:00:00Z");
+  const dbRows = [
+    {
+      id: "mgr-no-impl",
+      scheduled_game_id: "sg-x",
+      mini_game_type: "colordraft",
+      winner_user_id: "u-A",
+      config_snapshot_json: {},
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+    {
+      id: "mgr-with-impl",
+      scheduled_game_id: "sg-y",
+      mini_game_type: "wheel",
+      winner_user_id: "u-A",
+      config_snapshot_json: {},
+      triggered_at: fixedNow,
+      completed_at: null,
+    },
+  ];
+
+  const { pool } = makeFakePool({
+    query: async (sql) => {
+      if (
+        sql.includes("WHERE completed_at IS NULL AND winner_user_id = $1") &&
+        sql.includes("config_snapshot_json")
+      ) {
+        return { rows: dbRows };
+      }
+      if (sql.includes("app_users") && sql.includes("wallet_id")) {
+        return { rows: [{ wallet_id: "w-A" }] };
+      }
+      return { rows: [] };
+    },
+  });
+
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const { broadcaster, triggers } = makeRecordingBroadcaster();
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+    broadcaster,
+  });
+
+  // KUN wheel registrert; colordraft mangler.
+  const wheel = makeFakeMiniGame("wheel", 1000);
+  orchestrator.registerMiniGame(wheel);
+
+  const resumed = await orchestrator.resumePendingForUser("u-A");
+  assert.equal(resumed, 1, "kun wheel skulle bli resumed");
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0]!.miniGameType, "wheel");
+});
+
+test("MED-10: resumePendingForUser returnerer 0 når ingen pending finnes", async () => {
+  const { pool } = makeFakePool({
+    query: async () => ({ rows: [] }),
+  });
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const { broadcaster, triggers } = makeRecordingBroadcaster();
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+    broadcaster,
+  });
+
+  const wheel = makeFakeMiniGame("wheel", 1000);
+  orchestrator.registerMiniGame(wheel);
+
+  const resumed = await orchestrator.resumePendingForUser("u-empty");
+  assert.equal(resumed, 0);
+  assert.equal(triggers.length, 0);
+});
