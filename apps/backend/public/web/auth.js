@@ -186,6 +186,17 @@
     return data;
   }
 
+  // REQ-130 (PDF 9 Frontend CR): Phone+PIN-login.
+  async function loginPhoneRequest(phone, pin) {
+    const data = await apiFetch('/api/auth/login-phone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, pin })
+    });
+    saveSession(data.accessToken, data.user, data.expiresAt);
+    return data;
+  }
+
   async function registerRequest(displayName, surname, email, password, phone, birthDate, complianceData) {
     const payload = { displayName, surname, email, password, birthDate };
     if (phone) payload.phone = phone;
@@ -287,14 +298,50 @@
     }
 
     // ── Login form ────────────────────────────────────────────────────
+    // REQ-130 (PDF 9 Frontend CR): metode-velger E-post / Mobil. Toggle
+    // synlighet av relaterte felter slik at HTML-validering kun gjelder
+    // den aktive metoden.
+    const methodSelect = document.getElementById('login-method');
+    function applyLoginMethod() {
+      const method = methodSelect?.value || 'email';
+      document.querySelectorAll('[data-login-method]').forEach(function (el) {
+        const elMethod = el.getAttribute('data-login-method');
+        const visible = elMethod === method;
+        el.hidden = !visible;
+        // Toggle required attr på input-er.
+        el.querySelectorAll('input').forEach(function (input) {
+          if (visible) {
+            input.setAttribute('required', 'required');
+          } else {
+            input.removeAttribute('required');
+          }
+        });
+      });
+    }
+    if (methodSelect) {
+      methodSelect.addEventListener('change', applyLoginMethod);
+      applyLoginMethod();
+    }
+
     if (form) {
       form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        const email = document.getElementById('login-email')?.value?.trim() || '';
-        const password = document.getElementById('login-password')?.value || '';
+        const method = methodSelect?.value || 'email';
         setSubmitting(true);
         try {
-          const data = await loginRequest(email, password);
+          let data;
+          if (method === 'phone') {
+            const phone = document.getElementById('login-phone')?.value?.trim() || '';
+            const pin = document.getElementById('login-pin')?.value?.trim() || '';
+            if (!/^\d{4,6}$/.test(pin)) {
+              throw new Error('PIN må være 4-6 siffer.');
+            }
+            data = await loginPhoneRequest(phone, pin);
+          } else {
+            const email = document.getElementById('login-email')?.value?.trim() || '';
+            const password = document.getElementById('login-password')?.value || '';
+            data = await loginRequest(email, password);
+          }
           sessionStorage.setItem('spillvett.token', data.accessToken);
           notifySpillvett(data.accessToken);
           showLobby(data.user);

@@ -692,6 +692,53 @@ export class PlatformService {
     );
   }
 
+  /**
+   * REQ-130 (PDF 9 Frontend CR): finn bruker via normalisert telefon-nummer.
+   * Returnerer null hvis 0 eller flere enn 1 match (dvs. ikke unik). Brukes av
+   * Phone+PIN-login flow. Soft-deleted brukere filtreres bort.
+   */
+  async findUserByPhoneE164(phoneE164: string): Promise<AppUser | null> {
+    await this.ensureInitialized();
+    const phone = phoneE164.trim();
+    if (!phone) return null;
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data
+         FROM ${this.usersTable()}
+        WHERE phone = $1 AND deleted_at IS NULL
+        LIMIT 2`,
+      [phone]
+    );
+    if (rows.length !== 1) return null;
+    return this.mapUser(rows[0]!);
+  }
+
+  /**
+   * REQ-130: lag en ny session for en bruker etter at PIN er verifisert
+   * av UserPinService. Eksponerer den private createSession via en PIN-
+   * spesifikk wrapper så vi kan binde session-creation til PIN-login uten
+   * å duplisere logikk.
+   */
+  async createSessionForPinLogin(userId: string): Promise<SessionInfo> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userId, "userId");
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data
+         FROM ${this.usersTable()}
+        WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    if (!rows[0]) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    const session = await this.createSession(id);
+    const user = await this.withBalance(this.mapUser(rows[0]));
+    return {
+      accessToken: session.accessToken,
+      expiresAt: session.expiresAt,
+      user,
+    };
+  }
+
   async getUserFromAccessToken(accessToken: string): Promise<PublicAppUser> {
     await this.ensureInitialized();
     const token = accessToken.trim();
@@ -2332,6 +2379,32 @@ export class PlatformService {
       `UPDATE ${this.usersTable()} SET password_hash = $2, updated_at = now() WHERE id = $1`,
       [id, newHash]
     );
+  }
+
+  /**
+   * REQ-130: verifiser at en gitt klartekst-passord matcher brukerens
+   * lagrede password_hash. Brukes som re-auth-steg før destruktive
+   * operasjoner som å deaktivere PIN-en.
+   *
+   * Returnerer aldri sensitiv info — kun true/false. Ved ukjent bruker
+   * returneres false (ikke kast — kalleren håndterer det).
+   */
+  async verifyCurrentPassword(userIdInput: string, password: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    if (typeof password !== "string" || !password.length) {
+      return false;
+    }
+    const { rows } = await this.pool.query<{ password_hash: string }>(
+      `SELECT password_hash FROM ${this.usersTable()} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    if (!rows[0]) return false;
+    try {
+      return await this.verifyPassword(password, rows[0].password_hash);
+    } catch {
+      return false;
+    }
   }
 
   /**

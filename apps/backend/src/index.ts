@@ -21,6 +21,7 @@ import { PlatformService } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
+import { UserPinService } from "./auth/UserPinService.js";
 import { EmailService } from "./integration/EmailService.js";
 import { EmailQueue } from "./integration/EmailQueue.js";
 import { SveveSmsService } from "./integration/SveveSmsService.js";
@@ -463,6 +464,11 @@ const paymentRequestService = new PaymentRequestService(walletAdapter, {
 // BIN-587 B2.1: single-use tokens for password-reset + e-post-verify.
 const authTokenService = new AuthTokenService({
   connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// REQ-130 (PDF 9 Frontend CR): Phone+PIN-login support.
+const userPinService = new UserPinService(platformService.getPool(), {
   schema: pgSchema,
 });
 
@@ -1495,6 +1501,8 @@ app.use(createAuthRouter({
   smsService,
   pool: platformService.getPool(),
   schema: pgSchema,
+  // REQ-130 (PDF 9 Frontend CR): Phone+PIN-login.
+  userPinService,
 }));
 app.use(createPlayersRouter({
   platformService,

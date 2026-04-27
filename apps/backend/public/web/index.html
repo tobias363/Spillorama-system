@@ -1368,13 +1368,29 @@
           <!-- Login form -->
           <form id="login-form">
             <div id="login-error" class="login-error" hidden></div>
+            <!-- REQ-130 (PDF 9 Frontend CR): metode-velger E-post / Mobil. -->
             <div class="login-field">
-              <label for="login-email">E-post</label>
-              <input type="email" id="login-email" placeholder="din@epost.no" required autocomplete="email">
+              <label for="login-method">Innlogging</label>
+              <select id="login-method" name="loginMethod" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);padding:10px 12px;border-radius:6px;width:100%;">
+                <option value="email" selected>E-post + passord</option>
+                <option value="phone">Mobil + PIN</option>
+              </select>
             </div>
-            <div class="login-field">
+            <div class="login-field" data-login-method="email">
+              <label for="login-email">E-post</label>
+              <input type="email" id="login-email" placeholder="din@epost.no" autocomplete="email">
+            </div>
+            <div class="login-field" data-login-method="email">
               <label for="login-password">Passord</label>
-              <input type="password" id="login-password" placeholder="Ditt passord" required autocomplete="current-password">
+              <input type="password" id="login-password" placeholder="Ditt passord" autocomplete="current-password">
+            </div>
+            <div class="login-field" data-login-method="phone" hidden>
+              <label for="login-phone">Mobilnummer</label>
+              <input type="tel" id="login-phone" placeholder="+47XXXXXXXX" autocomplete="tel">
+            </div>
+            <div class="login-field" data-login-method="phone" hidden>
+              <label for="login-pin">PIN (4-6 siffer)</label>
+              <input type="password" id="login-pin" placeholder="••••" inputmode="numeric" maxlength="6" pattern="\d{4,6}" autocomplete="one-time-code">
             </div>
             <button type="submit" id="login-submit" class="login-btn">Logg inn</button>
             <div style="text-align:center;margin-top:12px">
@@ -1999,6 +2015,29 @@
           <div id="profile-pw-error" class="profile-error" hidden></div>
           <div id="profile-pw-success" class="profile-success" hidden></div>
           <button type="submit" id="profile-pw-submit" class="profile-btn-outline">Bytt passord</button>
+        </form>
+      </div>
+
+      <!-- REQ-130 (PDF 9 Frontend CR): PIN-management -->
+      <div class="profile-section" id="profile-pin-section">
+        <span class="profile-section-label">PIN for innlogging med mobil</span>
+        <p class="profile-section-note" style="margin-bottom:10px">Aktiver PIN for å logge inn med mobilnummer + 4-6-sifret PIN i hallen.</p>
+        <strong class="profile-section-value" id="profile-pin-status">Laster...</strong>
+        <form id="profile-pin-setup-form" style="margin-top:12px" hidden>
+          <div class="profile-field">
+            <label for="profile-pin-input">Velg PIN (4-6 siffer)</label>
+            <input type="password" id="profile-pin-input" inputmode="numeric" maxlength="6" pattern="\d{4,6}" autocomplete="new-password" placeholder="••••">
+          </div>
+          <div id="profile-pin-error" class="profile-error" hidden></div>
+          <div id="profile-pin-success" class="profile-success" hidden></div>
+          <button type="submit" id="profile-pin-setup-submit" class="profile-btn-outline">Aktiver PIN</button>
+        </form>
+        <form id="profile-pin-disable-form" style="margin-top:12px" hidden>
+          <div class="profile-field">
+            <label for="profile-pin-disable-pw">Bekreft passord for å fjerne PIN</label>
+            <input type="password" id="profile-pin-disable-pw" autocomplete="current-password">
+          </div>
+          <button type="submit" id="profile-pin-disable-submit" class="profile-btn-outline">Fjern PIN</button>
         </form>
       </div>
 

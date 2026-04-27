@@ -25,6 +25,11 @@ export interface HttpRateLimitTier {
 export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
   // Auth: strict — brute force protection
   { prefix: "/api/auth/login",           config: { windowMs: 60_000,  maxRequests: 5  } },
+  // REQ-130: PIN brute force-vern. 5 forsøk / 15 min per IP, men service-laget
+  // har sin egen lockout per bruker (5 forsøk → admin reset).
+  { prefix: "/api/auth/login-phone",     config: { windowMs: 15 * 60_000, maxRequests: 5  } },
+  { prefix: "/api/auth/pin/disable",     config: { windowMs: 60_000,  maxRequests: 5  } },
+  { prefix: "/api/auth/pin/setup",       config: { windowMs: 60_000,  maxRequests: 10 } },
   { prefix: "/api/auth/register",        config: { windowMs: 60_000,  maxRequests: 3  } },
   { prefix: "/api/auth/forgot-password", config: { windowMs: 60_000,  maxRequests: 3  } },
   { prefix: "/api/auth/change-password", config: { windowMs: 60_000,  maxRequests: 5  } },

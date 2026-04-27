@@ -102,6 +102,51 @@ export async function resetPassword(token: string, newPassword: string): Promise
   return { reset: Boolean(result?.reset) };
 }
 
+/**
+ * REQ-130 (PDF 9 Frontend CR): Phone+PIN-login som alternativ til
+ * email+password. Backend krever norsk telefonnummer og 4-6-sifret PIN.
+ */
+export async function loginPhone(phone: string, pin: string): Promise<Session> {
+  const result = await apiRequest<LoginResponse>("/api/auth/login-phone", {
+    method: "POST",
+    body: { phone, pin },
+  });
+  setToken(result.accessToken);
+  return mapUserToSession(result.user);
+}
+
+export interface PinStatusResponse {
+  enabled: boolean;
+  locked: boolean;
+  lockedUntil: string | null;
+  failedAttempts: number;
+  lastUsedAt: string | null;
+  configured: boolean;
+}
+
+export async function getPinStatus(): Promise<PinStatusResponse> {
+  return apiRequest<PinStatusResponse>("/api/auth/pin/status", {
+    method: "GET",
+    auth: true,
+  });
+}
+
+export async function setupPin(pin: string): Promise<{ enabled: boolean }> {
+  return apiRequest<{ enabled: boolean }>("/api/auth/pin/setup", {
+    method: "POST",
+    auth: true,
+    body: { pin },
+  });
+}
+
+export async function disablePin(password: string): Promise<{ disabled: boolean }> {
+  return apiRequest<{ disabled: boolean }>("/api/auth/pin/disable", {
+    method: "POST",
+    auth: true,
+    body: { password },
+  });
+}
+
 export async function logout(): Promise<void> {
   try {
     await apiRequest("/api/auth/logout", { method: "POST", auth: true });

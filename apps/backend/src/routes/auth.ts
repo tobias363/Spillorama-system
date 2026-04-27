@@ -3,6 +3,8 @@ import type { Pool } from "pg";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
 import type { AuthTokenService } from "../auth/AuthTokenService.js";
+import type { UserPinService } from "../auth/UserPinService.js";
+import { normalizeNorwegianPhone } from "../auth/phoneValidation.js";
 import type { EmailService } from "../integration/EmailService.js";
 import type { SveveSmsService } from "../integration/SveveSmsService.js";
 import { maskPhone } from "../integration/SveveSmsService.js";
@@ -47,6 +49,12 @@ export interface AuthRouterDeps {
   /** Pool + schema needed for phone-based user lookup. Required if smsService is set. */
   pool?: Pool;
   schema?: string;
+  /**
+   * REQ-130 (PDF 9 Frontend CR): PIN-login support. Optional — endpoints
+   * /api/auth/login-phone, /api/auth/pin/* returnerer PIN_NOT_CONFIGURED
+   * hvis ikke wired opp.
+   */
+  userPinService?: UserPinService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -73,6 +81,7 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     smsService,
     pool,
     schema,
+    userPinService,
   } = deps;
   const router = express.Router();
 
@@ -284,6 +293,157 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
         ipAddress,
         userAgent,
       });
+      apiFailure(res, error);
+    }
+  });
+
+  // ── REQ-130 (PDF 9 Frontend CR): Phone+PIN-login ──────────────────────
+  //
+  // /api/auth/login-phone — alternativ til /api/auth/login som tar
+  //                          { phone, pin } i stedet for { email, password }.
+  // /api/auth/pin/setup    — auth'd: aktiver/oppdater PIN.
+  // /api/auth/pin/disable  — auth'd: krever passord, sletter PIN.
+  // /api/auth/pin/status   — auth'd: hent PIN-status (enabled/locked).
+
+  router.post("/api/auth/login-phone", async (req, res) => {
+    const ipAddress = clientIp(req);
+    const userAgent = requestUserAgent(req);
+    let phoneForAudit: string | null = null;
+    try {
+      if (!userPinService) {
+        throw new DomainError(
+          "PIN_NOT_CONFIGURED",
+          "PIN-innlogging er ikke aktivert på serveren."
+        );
+      }
+      // Phone + PIN er begge påkrevd — normaliser før vi gjør noe annet.
+      const phoneE164 = normalizeNorwegianPhone(req.body?.phone);
+      phoneForAudit = phoneE164;
+      const pinRaw = mustBeNonEmptyString(req.body?.pin, "pin");
+
+      const user = await platformService.findUserByPhoneE164(phoneE164);
+      if (!user) {
+        // Enumeration-safe: ikke skille mellom "ingen bruker" og "feil PIN"
+        // mot eksterne kallere. Logg internt slik at admin kan triage.
+        logger.warn(
+          { maskedPhone: maskPhone(phoneE164) },
+          "[REQ-130] login-phone: ukjent eller ikke-unikt telefonnummer"
+        );
+        // Selv om vi ikke har bruker, skal vi bruke fast tid for å
+        // unngå timing-avsløring. UserPinService.verifyPin kjører
+        // scrypt selv ved ukjent userId; vi simulerer kostnaden ved
+        // å kalle verifyPin med en fiktiv ID — får det til å kaste
+        // INVALID_CREDENTIALS uansett.
+        try {
+          await userPinService.verifyPin("__nonexistent__", pinRaw);
+        } catch {
+          // Bevisst suppress — vi er allerede i feil-flyt.
+        }
+        throw new DomainError("INVALID_CREDENTIALS", "Ugyldig telefon eller PIN.");
+      }
+
+      // verifyPin kaster ved feil. Hvis OK fortsetter vi til session.
+      await userPinService.verifyPin(user.id, pinRaw);
+
+      const session = await platformService.createSessionForPinLogin(user.id);
+      fireLoginAudit({
+        actorId: session.user.id,
+        actorType: "USER",
+        action: "auth.login",
+        resource: "session",
+        resourceId: null,
+        details: { method: "phone-pin" },
+        ipAddress,
+        userAgent,
+      });
+      apiSuccess(res, session);
+    } catch (error) {
+      const failureReason = error instanceof DomainError ? error.code : "UNKNOWN";
+      // Forsøk å resolve actorId hvis vi har funnet en bruker (PIN_LOCKED-
+      // tilfellet). Ved ukjent telefon hopper vi over.
+      let failedActorId: string | null = null;
+      if (phoneForAudit) {
+        try {
+          const existing = await platformService.findUserByPhoneE164(phoneForAudit);
+          failedActorId = existing?.id ?? null;
+        } catch {
+          // Audit-trail er best-effort.
+        }
+      }
+      fireLoginAudit({
+        actorId: failedActorId,
+        actorType: "USER",
+        action: "auth.login.failed",
+        resource: "session",
+        resourceId: null,
+        details: { method: "phone-pin", failureReason },
+        ipAddress,
+        userAgent,
+      });
+      apiFailure(res, error);
+    }
+  });
+
+  router.post("/api/auth/pin/setup", async (req, res) => {
+    try {
+      if (!userPinService) {
+        throw new DomainError(
+          "PIN_NOT_CONFIGURED",
+          "PIN-innlogging er ikke aktivert på serveren."
+        );
+      }
+      const user = await getAuthenticatedUser(req);
+      const pin = mustBeNonEmptyString(req.body?.pin, "pin");
+      await userPinService.setupPin(user.id, pin);
+      const status = await userPinService.getStatus(user.id);
+      apiSuccess(res, { enabled: status.enabled });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.post("/api/auth/pin/disable", async (req, res) => {
+    try {
+      if (!userPinService) {
+        throw new DomainError(
+          "PIN_NOT_CONFIGURED",
+          "PIN-innlogging er ikke aktivert på serveren."
+        );
+      }
+      const user = await getAuthenticatedUser(req);
+      const password = mustBeNonEmptyString(req.body?.password, "password");
+      const ok = await platformService.verifyCurrentPassword(user.id, password);
+      if (!ok) {
+        throw new DomainError(
+          "INVALID_CREDENTIALS",
+          "Passord er feil."
+        );
+      }
+      await userPinService.disablePin(user.id);
+      apiSuccess(res, { disabled: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.get("/api/auth/pin/status", async (req, res) => {
+    try {
+      if (!userPinService) {
+        // Ikke en feil — returner et "ikke konfigurert"-objekt.
+        apiSuccess(res, {
+          enabled: false,
+          locked: false,
+          lockedUntil: null,
+          failedAttempts: 0,
+          lastUsedAt: null,
+          configured: false,
+        });
+        return;
+      }
+      const user = await getAuthenticatedUser(req);
+      const status = await userPinService.getStatus(user.id);
+      apiSuccess(res, { ...status, configured: true });
+    } catch (error) {
       apiFailure(res, error);
     }
   });

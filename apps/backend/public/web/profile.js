@@ -489,10 +489,114 @@
     renderProfileInfo();
     initProfileEdit();
     initPasswordChange();
+    initPin();
     initWallet();
     initWithdrawal();
     initKyc();
     initAccountActions();
+    refreshPinStatus();
+  }
+
+  // ── REQ-130 (PDF 9 Frontend CR): PIN-management ────────────────────────
+
+  async function refreshPinStatus() {
+    var statusEl = document.getElementById('profile-pin-status');
+    var setupForm = document.getElementById('profile-pin-setup-form');
+    var disableForm = document.getElementById('profile-pin-disable-form');
+    if (!statusEl) return;
+    try {
+      var status = await apiFetch('/api/auth/pin/status');
+      if (!status || !status.configured) {
+        statusEl.textContent = 'PIN-innlogging er ikke tilgjengelig på denne serveren.';
+        if (setupForm) setupForm.hidden = true;
+        if (disableForm) disableForm.hidden = true;
+        return;
+      }
+      if (status.locked) {
+        statusEl.textContent = 'PIN er låst — kontakt support for å låse opp.';
+        if (setupForm) setupForm.hidden = true;
+        if (disableForm) disableForm.hidden = true;
+      } else if (status.enabled) {
+        statusEl.textContent = 'PIN er aktivert.';
+        if (setupForm) setupForm.hidden = true;
+        if (disableForm) disableForm.hidden = false;
+      } else {
+        statusEl.textContent = 'PIN er ikke aktivert.';
+        if (setupForm) setupForm.hidden = false;
+        if (disableForm) disableForm.hidden = true;
+      }
+    } catch (err) {
+      statusEl.textContent = 'Kunne ikke lese PIN-status.';
+    }
+  }
+
+  function initPin() {
+    var setupForm = document.getElementById('profile-pin-setup-form');
+    var disableForm = document.getElementById('profile-pin-disable-form');
+
+    if (setupForm) {
+      setupForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var input = document.getElementById('profile-pin-input');
+        var errEl = document.getElementById('profile-pin-error');
+        var successEl = document.getElementById('profile-pin-success');
+        var submitBtn = document.getElementById('profile-pin-setup-submit');
+        if (errEl) errEl.hidden = true;
+        if (successEl) successEl.hidden = true;
+        var pin = (input && input.value || '').trim();
+        if (!/^\d{4,6}$/.test(pin)) {
+          if (errEl) { errEl.textContent = 'PIN må være 4-6 siffer.'; errEl.hidden = false; }
+          return;
+        }
+        if (submitBtn) { submitBtn.disabled = true; }
+        try {
+          await apiFetch('/api/auth/pin/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: pin })
+          });
+          if (input) input.value = '';
+          if (successEl) { successEl.textContent = 'PIN aktivert.'; successEl.hidden = false; }
+          await refreshPinStatus();
+        } catch (err) {
+          if (errEl) { errEl.textContent = err.message || 'Kunne ikke aktivere PIN'; errEl.hidden = false; }
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+        }
+      });
+    }
+
+    if (disableForm) {
+      disableForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var pwInput = document.getElementById('profile-pin-disable-pw');
+        var errEl = document.getElementById('profile-pin-error');
+        var successEl = document.getElementById('profile-pin-success');
+        var submitBtn = document.getElementById('profile-pin-disable-submit');
+        if (errEl) errEl.hidden = true;
+        if (successEl) successEl.hidden = true;
+        var pw = (pwInput && pwInput.value) || '';
+        if (!pw) {
+          if (errEl) { errEl.textContent = 'Passord er påkrevd.'; errEl.hidden = false; }
+          return;
+        }
+        if (submitBtn) submitBtn.disabled = true;
+        try {
+          await apiFetch('/api/auth/pin/disable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pw })
+          });
+          if (pwInput) pwInput.value = '';
+          if (successEl) { successEl.textContent = 'PIN fjernet.'; successEl.hidden = false; }
+          await refreshPinStatus();
+        } catch (err) {
+          if (errEl) { errEl.textContent = err.message || 'Kunne ikke fjerne PIN'; errEl.hidden = false; }
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+        }
+      });
+    }
   }
 
   // Load wallet data when profile panel opens
