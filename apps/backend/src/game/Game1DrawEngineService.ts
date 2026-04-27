@@ -2417,12 +2417,22 @@ export class Game1DrawEngineService {
   }
 
   /**
-   * Per-farge-payout: grupperer vinnere per ticketColor og utbetaler hver
-   * farge-gruppe uavhengig (PM Option X). Hver gruppe har egen pott-andel
-   * og multi-winner-split skjer innen gruppen.
+   * Per-farge-payout (Q3=X — global pot per fase, 2026-04-27):
+   * ÉN samlet pott for hele fasen — alle vinnere deler likt uansett farge.
+   * Per-farge-config brukes KUN for å bestemme pot-størrelsen (vi tar
+   * fra første gruppes pattern), IKKE per-farge-egne pots.
    *
-   * Bug 2-fix: jackpot-routing slås opp per gruppens farge (hver gruppe
-   * har én unik farge → én korrekt jackpot-sats).
+   * Bakgrunn: regulatorisk Q3-spørsmål — pengespillforskriften krever at
+   * vinnere på samme pattern (samme fase) deler én felles pott, ikke
+   * separate per-farge-pots. Tidligere implementering ga separate pots
+   * per farge, som kunne lede til at en hvit-bong-vinner fikk hele
+   * hvit-pots, mens en gul-bong-vinner fikk hele gul-pots — selv om
+   * begge vant samtidig på samme pattern.
+   *
+   * Multi-jackpot-routing per farge bevares (siste-ball + farge-spesifikk
+   * jackpot-sats), så vi grupperer winners per jackpot-amount og emitterer
+   * én payoutPhase per unike jackpot-sats med proporsjonal andel av
+   * den globale potten.
    */
   private async payoutPerColorGroups(
     client: PoolClient,
@@ -2434,58 +2444,90 @@ export class Game1DrawEngineService {
     variantConfig: GameVariantConfig,
     jackpotCfg: Game1JackpotConfig | null
   ): Promise<void> {
-    // Gruppe-key = ticketColor.
-    const groups = new Map<string, Array<Game1WinningAssignment & { userId: string }>>();
-    for (const w of winners) {
-      const key = w.ticketColor;
-      let list = groups.get(key);
-      if (!list) {
-        list = [];
-        groups.set(key, list);
-      }
-      list.push(w);
+    if (winners.length === 0) {
+      return;
     }
 
-    for (const [color, groupWinners] of groups.entries()) {
-      // Resolve pattern-matrise for fargen (fallback til __default__).
-      const colorEngineName = resolveEngineColorName(color) ?? color;
-      const patterns = resolvePatternsForColor(
-        variantConfig,
-        colorEngineName,
-        (missingColor) => {
-          log.warn(
-            { scheduledGameId, color, engineName: colorEngineName, missingColor },
-            "[SCHEDULER_FIX] farge har ikke eksplisitt per-farge-matrise → faller til __default__"
-          );
-        }
-      );
-      const phasePattern = patterns[currentPhase - 1];
-      const totalPhasePrizeCents = phasePattern
-        ? patternPrizeToCents(phasePattern, potCents)
-        : 0;
-
-      // Jackpot per-farge: evaluér mot gruppens farge (korrekt routing).
-      let jackpotAmountCentsPerWinner = 0;
-      if (currentPhase === TOTAL_PHASES && this.jackpotService && jackpotCfg) {
-        const j = this.jackpotService.evaluate({
-          phase: currentPhase,
-          drawSequenceAtWin,
-          ticketColor: color,
-          jackpotConfig: jackpotCfg,
-        });
-        if (j.triggered) {
-          jackpotAmountCentsPerWinner = j.amountCents;
-        }
+    // Q3=X: bestem global pot fra første vinners farge-pattern. Alle
+    // vinnere deler denne potten likt uansett farge. Hvis pattern mangler
+    // (fallback til __default__), bruker vi 0.
+    const firstColor = winners[0].ticketColor;
+    const firstColorEngineName = resolveEngineColorName(firstColor) ?? firstColor;
+    const firstColorPatterns = resolvePatternsForColor(
+      variantConfig,
+      firstColorEngineName,
+      (missingColor) => {
+        log.warn(
+          {
+            scheduledGameId,
+            color: firstColor,
+            engineName: firstColorEngineName,
+            missingColor,
+          },
+          "[SCHEDULER_FIX] farge har ikke eksplisitt per-farge-matrise → faller til __default__"
+        );
       }
+    );
+    const phasePattern = firstColorPatterns[currentPhase - 1];
+    const totalPhasePrizeCents = phasePattern
+      ? patternPrizeToCents(phasePattern, potCents)
+      : 0;
 
+    // Hvis ingen jackpot-fase eller -config: ÉN payoutPhase med alle
+    // vinnere og global pott (Q3=X-semantikk).
+    if (currentPhase !== TOTAL_PHASES || !this.jackpotService || !jackpotCfg) {
       await this.payoutService!.payoutPhase(client, {
         scheduledGameId,
         phase: currentPhase,
         drawSequenceAtWin,
         roomCode: "",
         totalPhasePrizeCents,
+        winners,
+        jackpotAmountCentsPerWinner: 0,
+        phaseName: phaseDisplayName(currentPhase),
+      });
+      return;
+    }
+
+    // Fase 5 med jackpot-config: per-vinner farge-spesifikk jackpot-sats
+    // bevares, men hovedpremien deles globalt. Grupper per jackpot-amount
+    // og utbetal proporsjonal andel av global pot per gruppe.
+    const byJackpotAmount = new Map<
+      number,
+      Array<Game1WinningAssignment & { userId: string }>
+    >();
+    for (const w of winners) {
+      const j = this.jackpotService.evaluate({
+        phase: currentPhase,
+        drawSequenceAtWin,
+        ticketColor: w.ticketColor,
+        jackpotConfig: jackpotCfg,
+      });
+      const amount = j.triggered ? j.amountCents : 0;
+      let list = byJackpotAmount.get(amount);
+      if (!list) {
+        list = [];
+        byJackpotAmount.set(amount, list);
+      }
+      list.push(w);
+    }
+
+    const totalWinners = winners.length;
+    const perWinnerPrizeFromGlobalPot = Math.floor(
+      totalPhasePrizeCents / totalWinners
+    );
+
+    for (const [jackpotAmount, groupWinners] of byJackpotAmount.entries()) {
+      const groupSize = groupWinners.length;
+      const groupTotalPrize = perWinnerPrizeFromGlobalPot * groupSize;
+      await this.payoutService!.payoutPhase(client, {
+        scheduledGameId,
+        phase: currentPhase,
+        drawSequenceAtWin,
+        roomCode: "",
+        totalPhasePrizeCents: groupTotalPrize,
         winners: groupWinners,
-        jackpotAmountCentsPerWinner,
+        jackpotAmountCentsPerWinner: jackpotAmount,
         phaseName: phaseDisplayName(currentPhase),
       });
     }
