@@ -127,10 +127,21 @@ export class ComplianceLedger {
     }
 
     for (const report of snapshot.dailyReports) {
+      // HIGH-6: backwards-compat — gammel persistert rapport-JSON kan
+      // mangle houseRetained/houseRetainedCount. Defaulter til 0 ved hydrate
+      // så live-rapport-formen alltid har feltene satt.
       this.dailyReportArchive.set(report.date, {
         ...report,
-        rows: report.rows.map((row) => ({ ...row })),
-        totals: { ...report.totals }
+        rows: report.rows.map((row) => ({
+          ...row,
+          houseRetained: row.houseRetained ?? 0,
+          houseRetainedCount: row.houseRetainedCount ?? 0,
+        })),
+        totals: {
+          ...report.totals,
+          houseRetained: report.totals.houseRetained ?? 0,
+          houseRetainedCount: report.totals.houseRetainedCount ?? 0,
+        }
       });
     }
   }

@@ -80,7 +80,9 @@ export function generateDailyReport(
       net: 0,
       stakeCount: 0,
       prizeCount: 0,
-      extraPrizeCount: 0
+      extraPrizeCount: 0,
+      houseRetained: 0,
+      houseRetainedCount: 0
     };
 
     if (entry.eventType === "STAKE") {
@@ -94,6 +96,15 @@ export function generateDailyReport(
     if (entry.eventType === "EXTRA_PRIZE") {
       row.prizesPaid += entry.amount;
       row.extraPrizeCount += 1;
+    }
+    // HIGH-6: HOUSE_RETAINED er splitt-rest fra multi-winner-payout. Den
+    // INNGÅR IKKE i prizesPaid/net (bevart byte-identisk for §11-formel),
+    // men aggregeres separat så auditor kan re-konstruere dual-balance:
+    //   net = grossTurnover - prizesPaid
+    //   uavklart_margin = net - houseRetained
+    if (entry.eventType === "HOUSE_RETAINED") {
+      row.houseRetained += entry.amount;
+      row.houseRetainedCount += 1;
     }
 
     row.net = row.grossTurnover - row.prizesPaid;
@@ -120,6 +131,8 @@ export function generateDailyReport(
       acc.stakeCount += row.stakeCount;
       acc.prizeCount += row.prizeCount;
       acc.extraPrizeCount += row.extraPrizeCount;
+      acc.houseRetained += row.houseRetained;
+      acc.houseRetainedCount += row.houseRetainedCount;
       return acc;
     },
     {
@@ -128,7 +141,9 @@ export function generateDailyReport(
       net: 0,
       stakeCount: 0,
       prizeCount: 0,
-      extraPrizeCount: 0
+      extraPrizeCount: 0,
+      houseRetained: 0,
+      houseRetainedCount: 0
     }
   );
 
@@ -170,6 +185,7 @@ export function generateRangeReport(
   const totals = {
     grossTurnover: 0, prizesPaid: 0, net: 0,
     stakeCount: 0, prizeCount: 0, extraPrizeCount: 0,
+    houseRetained: 0, houseRetainedCount: 0,
   };
   let cursorMs = startRange.startMs;
   let dayCount = 0;
@@ -192,6 +208,8 @@ export function generateRangeReport(
     totals.stakeCount += day.totals.stakeCount;
     totals.prizeCount += day.totals.prizeCount;
     totals.extraPrizeCount += day.totals.extraPrizeCount;
+    totals.houseRetained += day.totals.houseRetained;
+    totals.houseRetainedCount += day.totals.houseRetainedCount;
     cursorMs += 24 * 60 * 60 * 1000;
   }
   return {
@@ -206,6 +224,8 @@ export function generateRangeReport(
       stakeCount: totals.stakeCount,
       prizeCount: totals.prizeCount,
       extraPrizeCount: totals.extraPrizeCount,
+      houseRetained: roundCurrency(totals.houseRetained),
+      houseRetainedCount: totals.houseRetainedCount,
     },
   };
 }
@@ -656,6 +676,8 @@ export function generateGameSessions(
  * med "ALL" som hall/game/channel. Brukes av admin download-endpoint.
  */
 export function exportDailyReportCsv(report: DailyComplianceReport): string {
+  // HIGH-6: house_retained + house_retained_count lagt til som nye kolonner
+  // i CSV-eksporten. Backwards-kompatible kolonner først, så nye til sist.
   const headers = [
     "date",
     "hall_id",
@@ -666,7 +688,9 @@ export function exportDailyReportCsv(report: DailyComplianceReport): string {
     "net",
     "stake_count",
     "prize_count",
-    "extra_prize_count"
+    "extra_prize_count",
+    "house_retained",
+    "house_retained_count"
   ];
   const lines = [headers.join(",")];
 
@@ -682,7 +706,9 @@ export function exportDailyReportCsv(report: DailyComplianceReport): string {
         row.net,
         row.stakeCount,
         row.prizeCount,
-        row.extraPrizeCount
+        row.extraPrizeCount,
+        row.houseRetained,
+        row.houseRetainedCount
       ].join(",")
     );
   }
@@ -698,7 +724,9 @@ export function exportDailyReportCsv(report: DailyComplianceReport): string {
       report.totals.net,
       report.totals.stakeCount,
       report.totals.prizeCount,
-      report.totals.extraPrizeCount
+      report.totals.extraPrizeCount,
+      report.totals.houseRetained,
+      report.totals.houseRetainedCount
     ].join(",")
   );
   return lines.join("\n");

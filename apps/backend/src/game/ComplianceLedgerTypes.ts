@@ -14,7 +14,24 @@ import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 
 export type LedgerGameType = "MAIN_GAME" | "DATABINGO";
 export type LedgerChannel = "HALL" | "INTERNET";
-export type LedgerEventType = "STAKE" | "PRIZE" | "EXTRA_PRIZE" | "ORG_DISTRIBUTION";
+/**
+ * HIGH-6 split-rounding-ledger: HOUSE_RETAINED dokumenterer rest-øren
+ * fra multi-winner-split-rounding (floor(totalPhasePrize / winnerCount)
+ * → rest til hus). Skrives av Game1PayoutService når houseRetainedCents > 0.
+ *
+ * Regulatorisk (§71 pengespillforskriften):
+ *   - Auditor skal kunne verifisere at husets margin matcher §11-beregningen.
+ *   - Uten HOUSE_RETAINED-entry vil daily_report.net (= stake - prize) vise
+ *     et større "hus-overskudd" enn faktisk, fordi rest-øre er en del av
+ *     pott (gjenstår for senere fase) og ikke ren retention.
+ *   - Dual-balance-sjekk: stake = prize + houseRetained + uavklart-rest.
+ */
+export type LedgerEventType =
+  | "STAKE"
+  | "PRIZE"
+  | "EXTRA_PRIZE"
+  | "ORG_DISTRIBUTION"
+  | "HOUSE_RETAINED";
 
 export interface ComplianceLedgerEntry {
   id: string;
@@ -48,6 +65,18 @@ export interface DailyComplianceReportRow {
   stakeCount: number;
   prizeCount: number;
   extraPrizeCount: number;
+  /**
+   * HIGH-6: sum av split-rounding rest-øre som ble retained i denne
+   * (hall, gameType, channel)-bucket. `net = grossTurnover - prizesPaid`
+   * er bevart byte-identisk; `houseRetained` er en separat dimensjon som
+   * lar auditor verifisere at deler av "net" er forklart av §11-rest.
+   *
+   * Dual-balance: grossTurnover - prizesPaid - houseRetained = uavklart
+   * hus-margin. Hvis = 0 betyr alt revenue er enten utbetalt eller
+   * dokumentert som split-rest.
+   */
+  houseRetained: number;
+  houseRetainedCount: number;
 }
 
 export interface DailyComplianceReport {
@@ -61,6 +90,9 @@ export interface DailyComplianceReport {
     stakeCount: number;
     prizeCount: number;
     extraPrizeCount: number;
+    /** HIGH-6: aggregert split-rounding-rest på tvers av rader. */
+    houseRetained: number;
+    houseRetainedCount: number;
   };
 }
 
@@ -79,6 +111,9 @@ export interface RangeComplianceReport {
     stakeCount: number;
     prizeCount: number;
     extraPrizeCount: number;
+    /** HIGH-6: aggregert split-rounding-rest over hele intervallet. */
+    houseRetained: number;
+    houseRetainedCount: number;
   };
 }
 

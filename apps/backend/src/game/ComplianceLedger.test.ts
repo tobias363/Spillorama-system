@@ -407,7 +407,8 @@ type InternalLedgerEntry = {
   id: string; createdAt: string; createdAtMs: number;
   hallId: string; gameType: "DATABINGO" | "MAIN_GAME";
   channel: "HALL" | "INTERNET";
-  eventType: "STAKE" | "PRIZE" | "EXTRA_PRIZE" | "ORG_DISTRIBUTION";
+  // HIGH-6: HOUSE_RETAINED lagt til.
+  eventType: "STAKE" | "PRIZE" | "EXTRA_PRIZE" | "ORG_DISTRIBUTION" | "HOUSE_RETAINED";
   amount: number; currency: "NOK";
   gameId?: string; playerId?: string;
 };
@@ -692,4 +693,135 @@ test("BIN-587 B3.1: generateGameSessions respects limit", () => {
   pushInternalEntries(ledger, entries);
   const report = ledger.generateGameSessions({ startDate: "2026-04-14", endDate: "2026-04-14", limit: 3 });
   assert.equal(report.rows.length, 3);
+});
+
+// ── HIGH-6: HOUSE_RETAINED daily-report dual-balance ───────────────────────
+//
+// Bug: ComplianceLedger.daily_report.totalStakes - totalPrizes viste et
+// større tap enn faktisk fordi rest-øre fra split-rounding ikke ble
+// compensert som houseRetained-event. Auditor kunne ikke verifisere at
+// husets margin matcher §11-beregningen.
+//
+// Fix: ny LedgerEventType "HOUSE_RETAINED" + houseRetained/houseRetainedCount
+// felt i DailyComplianceReportRow + totals. net (= grossTurnover - prizesPaid)
+// er bevart byte-identisk; HOUSE_RETAINED er en parallell dimensjon.
+
+test("HIGH-6: generateDailyReport aggregerer HOUSE_RETAINED som egen dimensjon, ikke i prizesPaid", () => {
+  // Scenario: 100 kr stake, 99.99 kr utbetalt som PRIZE, 0.01 kr som HOUSE_RETAINED.
+  // Forventet: net = 0.01, houseRetained = 0.01 → uavklart_margin = 0.
+  const { ledger } = makeLedger();
+  const date = "2026-05-01";
+  pushInternalEntries(ledger, [
+    {
+      id: randomUUID(),
+      createdAt: new Date(dayMs(date, 1)).toISOString(),
+      createdAtMs: dayMs(date, 1),
+      hallId: "hall-h6",
+      gameType: "MAIN_GAME",
+      channel: "INTERNET",
+      eventType: "STAKE",
+      amount: 100,
+      currency: "NOK",
+    },
+    {
+      id: randomUUID(),
+      createdAt: new Date(dayMs(date, 2)).toISOString(),
+      createdAtMs: dayMs(date, 2),
+      hallId: "hall-h6",
+      gameType: "MAIN_GAME",
+      channel: "INTERNET",
+      eventType: "PRIZE",
+      amount: 99.99,
+      currency: "NOK",
+    },
+    {
+      id: randomUUID(),
+      createdAt: new Date(dayMs(date, 3)).toISOString(),
+      createdAtMs: dayMs(date, 3),
+      hallId: "hall-h6",
+      gameType: "MAIN_GAME",
+      channel: "INTERNET",
+      eventType: "HOUSE_RETAINED",
+      amount: 0.01,
+      currency: "NOK",
+    },
+  ]);
+
+  const report = ledger.generateDailyReport({ date });
+  assert.equal(report.rows.length, 1);
+
+  const row = report.rows[0]!;
+  assert.equal(row.grossTurnover, 100);
+  assert.equal(row.prizesPaid, 99.99, "HOUSE_RETAINED skal IKKE telle som prize");
+  assert.equal(
+    Math.round(row.net * 100) / 100,
+    0.01,
+    "net = stake - prize bevart byte-identisk"
+  );
+  assert.equal(row.houseRetained, 0.01, "HOUSE_RETAINED aggregert som egen dimensjon");
+  assert.equal(row.houseRetainedCount, 1);
+
+  // Dual-balance: net - houseRetained = 0 (alt revenue forklart)
+  const uavklartMargin = Math.round((row.net - row.houseRetained) * 100) / 100;
+  assert.equal(uavklartMargin, 0, "dual-balance: ingen uavklart margin");
+
+  assert.equal(report.totals.houseRetained, 0.01);
+  assert.equal(report.totals.houseRetainedCount, 1);
+});
+
+test("HIGH-6: generateDailyReport — multiple HOUSE_RETAINED events i samme bucket akkumuleres", () => {
+  // 3 fase-payouts i samme runde, hver med sin lille rest. Auditor må se
+  // total rest aggregert per (hall, gameType, channel)-bucket.
+  const { ledger } = makeLedger();
+  const date = "2026-05-02";
+  pushInternalEntries(ledger, [
+    {
+      id: randomUUID(), createdAt: new Date(dayMs(date, 1)).toISOString(),
+      createdAtMs: dayMs(date, 1), hallId: "hall-x", gameType: "MAIN_GAME",
+      channel: "INTERNET", eventType: "HOUSE_RETAINED", amount: 0.01, currency: "NOK",
+    },
+    {
+      id: randomUUID(), createdAt: new Date(dayMs(date, 2)).toISOString(),
+      createdAtMs: dayMs(date, 2), hallId: "hall-x", gameType: "MAIN_GAME",
+      channel: "INTERNET", eventType: "HOUSE_RETAINED", amount: 0.04, currency: "NOK",
+    },
+    {
+      id: randomUUID(), createdAt: new Date(dayMs(date, 3)).toISOString(),
+      createdAtMs: dayMs(date, 3), hallId: "hall-x", gameType: "MAIN_GAME",
+      channel: "INTERNET", eventType: "HOUSE_RETAINED", amount: 0.02, currency: "NOK",
+    },
+  ]);
+
+  const report = ledger.generateDailyReport({ date });
+  const row = report.rows.find((r) => r.hallId === "hall-x");
+  assert.ok(row);
+  // Floating-point safety: rund til 2 desimaler.
+  assert.equal(Math.round(row!.houseRetained * 100) / 100, 0.07);
+  assert.equal(row!.houseRetainedCount, 3);
+});
+
+test("HIGH-6: backwards-compat — gammel rapport uten HOUSE_RETAINED-events gir houseRetained=0", () => {
+  // Verifiser at gamle rapporter (ingen HOUSE_RETAINED-entries på dagen)
+  // får houseRetained=0 og houseRetainedCount=0 (ikke undefined).
+  const { ledger } = makeLedger();
+  const date = "2026-05-03";
+  pushInternalEntries(ledger, [
+    {
+      id: randomUUID(), createdAt: new Date(dayMs(date, 1)).toISOString(),
+      createdAtMs: dayMs(date, 1), hallId: "hall-old", gameType: "MAIN_GAME",
+      channel: "INTERNET", eventType: "STAKE", amount: 50, currency: "NOK",
+    },
+    {
+      id: randomUUID(), createdAt: new Date(dayMs(date, 2)).toISOString(),
+      createdAtMs: dayMs(date, 2), hallId: "hall-old", gameType: "MAIN_GAME",
+      channel: "INTERNET", eventType: "PRIZE", amount: 30, currency: "NOK",
+    },
+  ]);
+
+  const report = ledger.generateDailyReport({ date });
+  const row = report.rows[0]!;
+  assert.equal(row.houseRetained, 0);
+  assert.equal(row.houseRetainedCount, 0);
+  assert.equal(report.totals.houseRetained, 0);
+  assert.equal(report.totals.houseRetainedCount, 0);
 });

@@ -74,7 +74,12 @@ export interface PersistedExtraPrizeEntry {
 
 export type PersistedLedgerGameType = "MAIN_GAME" | "DATABINGO";
 export type PersistedLedgerChannel = "HALL" | "INTERNET";
-export type PersistedLedgerEventType = "STAKE" | "PRIZE" | "EXTRA_PRIZE" | "ORG_DISTRIBUTION";
+export type PersistedLedgerEventType =
+  | "STAKE"
+  | "PRIZE"
+  | "EXTRA_PRIZE"
+  | "ORG_DISTRIBUTION"
+  | "HOUSE_RETAINED";
 
 export interface PersistedComplianceLedgerEntry {
   id: string;
@@ -128,6 +133,13 @@ export interface PersistedDailyReportRow {
   stakeCount: number;
   prizeCount: number;
   extraPrizeCount: number;
+  /**
+   * HIGH-6: split-rounding rest-øre persistert sammen med daglig rapport.
+   * Backwards-compat: gammel rapport-JSON uten dette feltet leses som
+   * `undefined` av JSON.parse — caller-koden tolker dette som 0.
+   */
+  houseRetained?: number;
+  houseRetainedCount?: number;
 }
 
 export interface PersistedDailyReport {
@@ -141,6 +153,9 @@ export interface PersistedDailyReport {
     stakeCount: number;
     prizeCount: number;
     extraPrizeCount: number;
+    /** HIGH-6: aggregert split-rounding-rest. Optional for backwards-compat. */
+    houseRetained?: number;
+    houseRetainedCount?: number;
   };
 }
 

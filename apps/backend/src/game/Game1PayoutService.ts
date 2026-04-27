@@ -211,7 +211,26 @@ export class Game1PayoutService {
       input.totalPhasePrizeCents - winnerCount * prizePerWinnerCents;
 
     // Fire split-rounding audit (fire-and-forget).
+    //
+    // HIGH-6 split-rounding-ledger: i tillegg til SplitRoundingAuditPort
+    // (eksisterende audit-event) skriver vi nå også en HOUSE_RETAINED-entry
+    // til ComplianceLedger per (hall, gameType, channel)-bucket. Dette er
+    // regulatorisk-kritisk per §71 — auditor må kunne avstemme:
+    //   net (= stake - prize) - houseRetained = uavklart_margin
+    //
+    // Bucket-binding: rest-øren dokumenteres som retained for hallen som
+    // "eier" splittet. Når alle vinnere kommer fra samme hall (typisk
+    // single-hall-runde) er dette winners[0].hallId. For multi-hall-runder
+    // hvor vinnere kommer fra ulike haller er det ingen entydig "eier" av
+    // resten — vi binder pragmatisk til winners[0].hallId og logger
+    // metadata om vinner-hallene slik at auditor kan reverse-engineer
+    // hvis det blir relevant. Master-hall er IKKE riktig binding her —
+    // §71 krever per-hall-rapportering.
     if (houseRetainedCents > 0) {
+      const restRetentionHallId = input.winners[0]!.hallId;
+      const winnerHallIds = Array.from(
+        new Set(input.winners.map((w) => w.hallId))
+      );
       const splitEvent: SplitRoundingHouseRetainedEvent = {
         amount: centsToKroner(houseRetainedCents),
         winnerCount,
@@ -220,7 +239,7 @@ export class Game1PayoutService {
         patternName: input.phaseName,
         roomCode: input.roomCode,
         gameId: input.scheduledGameId,
-        hallId: input.winners[0]!.hallId,
+        hallId: restRetentionHallId,
       };
       this.splitRoundingAudit
         .onSplitRoundingHouseRetained(splitEvent)
@@ -228,6 +247,48 @@ export class Game1PayoutService {
           log.warn(
             { err, event: splitEvent },
             "[GAME1_PR4c] split-rounding audit hook failed"
+          );
+        });
+
+      // HIGH-6: parallell HOUSE_RETAINED-entry til compliance-ledger.
+      // Soft-fail: en port-feil ruller ALDRI tilbake payout (matcher
+      // PRIZE/EXTRA_PRIZE-patternet). Wallet-credits er allerede committed
+      // for vinnere som fikk floor-andelen.
+      this.complianceLedgerPort
+        .recordComplianceLedgerEvent({
+          hallId: restRetentionHallId,
+          // K2-A CRIT-1: Spill 1 = hovedspill (MAIN_GAME, ikke DATABINGO).
+          gameType: ledgerGameTypeForSlug("bingo"),
+          channel: this.defaultLedgerChannel,
+          eventType: "HOUSE_RETAINED",
+          amount: centsToKroner(houseRetainedCents),
+          gameId: input.scheduledGameId,
+          roomCode: input.roomCode || undefined,
+          metadata: {
+            reason: "GAME1_SPLIT_ROUNDING_REST",
+            phase: input.phase,
+            phaseName: input.phaseName,
+            winnerCount,
+            totalPhasePrizeCents: input.totalPhasePrizeCents,
+            prizePerWinnerCents,
+            houseRetainedCents,
+            // Legg ved alle vinner-haller slik at multi-hall-runder kan
+            // reverse-engineeres ved auditor-spørsmål (binding til winners[0]
+            // er pragmatisk, ikke regulatorisk-strengt).
+            winnerHallIds,
+          },
+        })
+        .catch((err) => {
+          log.warn(
+            {
+              err,
+              scheduledGameId: input.scheduledGameId,
+              phase: input.phase,
+              hallId: restRetentionHallId,
+              amount: houseRetainedCents,
+              winnerHallIds,
+            },
+            "[HIGH-6] complianceLedger.recordComplianceLedgerEvent HOUSE_RETAINED feilet — payout fortsetter uansett"
           );
         });
     }
