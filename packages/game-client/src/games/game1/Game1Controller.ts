@@ -348,6 +348,24 @@ class Game1Controller implements GameController {
   // ── Bridge event handlers ─────────────────────────────────────────────
 
   private onStateChanged(state: GameState): void {
+    // ROUND-TRANSITION-FIX (Tobias 2026-04-27): defensiv recovery hvis
+    // gameStarted-event ble droppet (race med endScreenTimer eller socket-
+    // reorder): hvis state viser RUNNING men vi sitter fast i ENDED, hopp
+    // direkte til PLAYING (har tickets) eller SPECTATING (ingen tickets).
+    // Uten denne sjekken må bruker refreshe nettleseren mellom runder.
+    if (this.phase === "ENDED" && state.gameStatus === "RUNNING") {
+      if (this.endScreenTimer) {
+        clearTimeout(this.endScreenTimer);
+        this.endScreenTimer = null;
+      }
+      if (state.myTickets.length > 0) {
+        this.transitionTo("PLAYING", state);
+      } else {
+        this.transitionTo("SPECTATING", state);
+      }
+      return;
+    }
+
     // Single update() entry point. Replaces the old three-way split
     // (updateWaitingState / updateInfo / renderPreRoundTickets + UpcomingPurchase).
     // PlayScreen picks what to show from state.gameStatus + ticket arrays.
@@ -383,8 +401,14 @@ class Game1Controller implements GameController {
   }
 
   private onGameStarted(state: GameState): void {
-    // Clear any pending end screen auto-dismiss
-    if (this.endScreenTimer) { clearTimeout(this.endScreenTimer); this.endScreenTimer = null; }
+    // ROUND-TRANSITION-FIX (Tobias 2026-04-27): hvis EndScreen-timer fortsatt
+    // løper fra forrige runde, cancel den og hopp DIREKTE til ny runde —
+    // ellers henger klient i ENDED til timeren firer (5s vindu) og glipper
+    // start-events for neste runde, slik at bruker må refreshe nettleseren.
+    if (this.endScreenTimer) {
+      clearTimeout(this.endScreenTimer);
+      this.endScreenTimer = null;
+    }
 
     // FIXED-PRIZE-FIX: reset round-accumulated winnings ved ny runde.
     this.roundAccumulatedWinnings = 0;
