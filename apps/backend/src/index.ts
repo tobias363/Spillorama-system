@@ -68,6 +68,7 @@ import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
+import { createUniqueIdExpiryJob } from "./jobs/uniqueIdExpiry.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createProfilePendingLossLimitFlushJob } from "./jobs/profilePendingLossLimitFlush.js";
 import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
@@ -448,6 +449,7 @@ const {
   jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
   jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
   jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+  jobUniqueIdExpiryEnabled, jobUniqueIdExpiryIntervalMs, jobUniqueIdExpiryRunAtHour,
   jobMachineAutoCloseEnabled, jobMachineAutoCloseIntervalMs,
   jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
@@ -1230,6 +1232,21 @@ jobScheduler.register({
   run: createWalletAuditVerifyJob({
     verifier: walletAuditVerifier,
     runAtHourLocal: jobWalletAuditVerifyRunAtHour,
+  }),
+});
+
+// K1A pilot-blokker follow-up: flip Customer Unique ID cards past
+// `expiry_date` to status='EXPIRED'. Runs once per calendar day at the
+// configured hour. Skips silently if the migration hasn't been applied yet.
+jobScheduler.register({
+  name: "unique-id-expiry",
+  description: "Mark Customer Unique ID cards as EXPIRED when expiry_date is in the past.",
+  intervalMs: jobUniqueIdExpiryIntervalMs,
+  enabled: jobUniqueIdExpiryEnabled,
+  run: createUniqueIdExpiryJob({
+    pool: platformService.getPool(),
+    schema: pgSchema,
+    runAtHourLocal: jobUniqueIdExpiryRunAtHour,
   }),
 });
 

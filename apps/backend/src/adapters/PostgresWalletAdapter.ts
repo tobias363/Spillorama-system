@@ -32,6 +32,7 @@ interface PostgresWalletAdapterOptions {
   schema?: string;
   ssl?: boolean;
   defaultInitialBalance?: number;
+  /**
    * HIGH-8: tuning for the wallet circuit breaker. Defaults match
    * Pragmatic-Play-style behavior — open after 3 consecutive failures,
    * 30 s cool-down, half-open admits one probe. Tests override these

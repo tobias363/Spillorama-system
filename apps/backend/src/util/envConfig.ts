@@ -67,6 +67,10 @@ export interface BingoRuntimeConfig {
   jobRgCleanupEnabled: boolean;
   jobRgCleanupIntervalMs: number;
   jobRgCleanupRunAtHour: number;
+  // K1A pilot-blokker follow-up: Customer Unique ID expiry sweep (daily).
+  jobUniqueIdExpiryEnabled: boolean;
+  jobUniqueIdExpiryIntervalMs: number;
+  jobUniqueIdExpiryRunAtHour: number;
   // BIN-582: Metronia/OK Bingo machine-ticket auto-close (legacy 00:00-cron)
   jobMachineAutoCloseEnabled: boolean;
   jobMachineAutoCloseIntervalMs: number;
@@ -214,6 +218,13 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const jobRgCleanupEnabled = parseBooleanEnv(process.env.JOB_RG_CLEANUP_ENABLED, true);
   const jobRgCleanupIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_RG_CLEANUP_INTERVAL_MS, 15 * 60 * 1000));
   const jobRgCleanupRunAtHour = Math.min(23, Math.max(0, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_RG_CLEANUP_RUN_AT_HOUR, 0))));
+
+  // K1A pilot-blokker follow-up: Customer Unique ID expiry sweep. Without
+  // this, cards past `expiry_date` stay status='ACTIVE' forever. Default ON;
+  // polling 15 min + date-key + 01:00 local (off-peak vs. shift-end).
+  const jobUniqueIdExpiryEnabled = parseBooleanEnv(process.env.JOB_UNIQUE_ID_EXPIRY_ENABLED, true);
+  const jobUniqueIdExpiryIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_UNIQUE_ID_EXPIRY_INTERVAL_MS, 15 * 60 * 1000));
+  const jobUniqueIdExpiryRunAtHour = Math.min(23, Math.max(0, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_UNIQUE_ID_EXPIRY_RUN_AT_HOUR, 1))));
 
   // BIN-582: daglig auto-close av hengende Metronia/OK-Bingo-billetter.
   // Legacy kjørte 00:00 for å lukke alt fra forrige driftsdøgn. Bruker
@@ -390,6 +401,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
     jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
     jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+    jobUniqueIdExpiryEnabled, jobUniqueIdExpiryIntervalMs, jobUniqueIdExpiryRunAtHour,
     jobMachineAutoCloseEnabled, jobMachineAutoCloseIntervalMs,
     jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
