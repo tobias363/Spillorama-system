@@ -294,6 +294,74 @@ export class SecurityService {
     if (!rowCount) throw new DomainError("WITHDRAW_EMAIL_NOT_FOUND", "E-post finnes ikke.");
   }
 
+  /**
+   * GAP #21: Edit eksisterende withdraw-email (regnskaps-mottakere).
+   *
+   * Legacy: GET /withdraw/edit/emails/:id + POST. Vi tilbyr en idiomatisk
+   * PUT-endepunkt som oppdaterer email og/eller label. Begge er valgfrie,
+   * men minst én må være angitt.
+   *
+   * Returnerer den oppdaterte raden så kalleren kan reflektere endringen
+   * tilbake i UI uten ekstra GET.
+   */
+  async updateWithdrawEmail(
+    id: string,
+    input: { email?: string | null; label?: string | null }
+  ): Promise<WithdrawEmail> {
+    await this.ensureInitialized();
+    if (!id || typeof id !== "string") {
+      throw new DomainError("INVALID_INPUT", "id er påkrevd.");
+    }
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    if (input.email !== undefined && input.email !== null) {
+      const normalizedEmail = normalizeEmail(input.email);
+      values.push(normalizedEmail);
+      updates.push(`email = $${values.length}`);
+    }
+    if (input.label !== undefined) {
+      const label =
+        input.label === null
+          ? null
+          : typeof input.label === "string"
+          ? input.label.trim().slice(0, 200) || null
+          : null;
+      values.push(label);
+      updates.push(`label = $${values.length}`);
+    }
+    if (updates.length === 0) {
+      throw new DomainError("INVALID_INPUT", "Minst én av email eller label må angis.");
+    }
+    values.push(id);
+    try {
+      const { rows } = await this.pool.query<WithdrawEmailRow>(
+        `UPDATE ${this.emailTable()}
+         SET ${updates.join(", ")}
+         WHERE id = $${values.length}
+         RETURNING id, email, label, added_by, created_at`,
+        values
+      );
+      const r = rows[0];
+      if (!r) {
+        throw new DomainError("WITHDRAW_EMAIL_NOT_FOUND", "E-post finnes ikke.");
+      }
+      return {
+        id: r.id,
+        email: r.email,
+        label: r.label,
+        addedBy: r.added_by,
+        createdAt: asIso(r.created_at),
+      };
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      const msg = (err as { message?: string })?.message ?? "";
+      if (/duplicate key|unique/i.test(msg)) {
+        throw new DomainError("WITHDRAW_EMAIL_EXISTS", "E-post finnes allerede i allowlist.");
+      }
+      throw err;
+    }
+  }
+
   // ── Risk countries ──────────────────────────────────────────────────────
 
   async listRiskCountries(): Promise<RiskCountry[]> {

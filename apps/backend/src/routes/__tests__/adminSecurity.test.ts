@@ -85,6 +85,17 @@ async function startServer(
       if (!emails.has(id)) throw new DomainError("WITHDRAW_EMAIL_NOT_FOUND", "not found");
       emails.delete(id);
     },
+    async updateWithdrawEmail(id: string, input: { email?: string; label?: string | null }) {
+      const existing = emails.get(id);
+      if (!existing) throw new DomainError("WITHDRAW_EMAIL_NOT_FOUND", "not found");
+      const updated: WithdrawEmail = {
+        ...existing,
+        email: input.email !== undefined ? input.email.trim().toLowerCase() : existing.email,
+        label: input.label !== undefined ? input.label : existing.label,
+      };
+      emails.set(id, updated);
+      return updated;
+    },
     async listRiskCountries() { return [...countries.values()]; },
     async addRiskCountry({ countryCode, addedBy, label, reason }: { countryCode: string; addedBy: string; label: string; reason?: string | null }) {
       const code = countryCode.toUpperCase();
@@ -194,6 +205,118 @@ test("BIN-587 B3-security: POST withdraw-email — SUPPORT OK + audit logger kun
     // Personvern: full e-post skal ikke være i audit
     const serialized = JSON.stringify(event!.details);
     assert.ok(!serialized.includes("revisor@firma.no"), "Full e-post skal ikke logges i audit");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #21: PUT withdraw-email — admin oppdaterer label + audit logger kun domene", async () => {
+  const seed: WithdrawEmail = {
+    id: "email-1",
+    email: "regnskap@firma.no",
+    label: "Gammelt",
+    addedBy: "admin-1",
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+  const ctx = await startServer({ "admin-tok": adminUser }, { seedEmails: [seed] });
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-1", "admin-tok", {
+      label: "Hovedrevisor",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.id, "email-1");
+    assert.equal(res.json.data.label, "Hovedrevisor");
+    assert.equal(res.json.data.email, "regnskap@firma.no", "email skal ikke endres når kun label sendes");
+
+    const event = await waitForAudit(ctx.spies.auditStore, "security.withdraw_email.update");
+    assert.ok(event);
+    assert.equal(event!.details.emailDomain, "firma.no");
+    assert.equal(event!.details.emailChanged, false);
+    assert.equal(event!.details.labelChanged, true);
+    // Personvern: full e-post ikke i audit
+    const serialized = JSON.stringify(event!.details);
+    assert.ok(!serialized.includes("regnskap@firma.no"), "Full e-post skal ikke logges");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #21: PUT withdraw-email — endrer email + label samtidig", async () => {
+  const seed: WithdrawEmail = {
+    id: "email-2",
+    email: "old@firma.no",
+    label: null,
+    addedBy: "admin-1",
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+  const ctx = await startServer({ "admin-tok": adminUser }, { seedEmails: [seed] });
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-2", "admin-tok", {
+      email: "NY@firma.no",
+      label: "Ny revisor",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.email, "ny@firma.no", "email skal lowercases");
+    assert.equal(res.json.data.label, "Ny revisor");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #21: PUT withdraw-email — 404 hvis ID ikke finnes", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser });
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/missing", "admin-tok", {
+      label: "x",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "WITHDRAW_EMAIL_NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #21: PUT withdraw-email — INVALID_INPUT når ingen felter sendes", async () => {
+  const seed: WithdrawEmail = {
+    id: "email-3",
+    email: "x@y.no",
+    label: null,
+    addedBy: "admin-1",
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+  const ctx = await startServer({ "admin-tok": adminUser }, { seedEmails: [seed] });
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-3", "admin-tok", {});
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #21: PUT withdraw-email — HALL_OPERATOR + PLAYER blokkert (FORBIDDEN)", async () => {
+  const seed: WithdrawEmail = {
+    id: "email-4",
+    email: "x@y.no",
+    label: null,
+    addedBy: "admin-1",
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+  const ctx = await startServer(
+    { "op-tok": operatorUser, "pl-tok": playerUser },
+    { seedEmails: [seed] }
+  );
+  try {
+    const op = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-4", "op-tok", {
+      label: "x",
+    });
+    assert.equal(op.status, 400);
+    assert.equal(op.json.error.code, "FORBIDDEN");
+    const pl = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-4", "pl-tok", {
+      label: "x",
+    });
+    assert.equal(pl.status, 400);
+    assert.equal(pl.json.error.code, "FORBIDDEN");
   } finally {
     await ctx.close();
   }

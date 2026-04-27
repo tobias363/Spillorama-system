@@ -4,6 +4,7 @@
  *   Withdraw-email-allowlist (CC for uttak-notifikasjoner):
  *     GET    /api/admin/security/withdraw-emails
  *     POST   /api/admin/security/withdraw-emails
+ *     PUT    /api/admin/security/withdraw-emails/:id  (GAP #21)
  *     DELETE /api/admin/security/withdraw-emails/:id
  *
  *   Risk-countries (ISO-3166 alpha-2):
@@ -134,6 +135,55 @@ export function createAdminSecurityRouter(deps: AdminSecurityRouterDeps): expres
         userAgent: userAgent(req),
       });
       apiSuccess(res, created);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GAP #21: Edit eksisterende withdraw-email. Begge `email` og `label` er
+  // valgfrie, men minst én må angis. Audit logger kun domene + om label
+  // ble endret (personvern: full e-post lever i DB, ikke i audit-stream).
+  router.put("/api/admin/security/withdraw-emails/:id", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "SECURITY_WRITE");
+      const id = mustBeNonEmptyString(req.params.id, "id");
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const { email, label } = req.body as { email?: unknown; label?: unknown };
+      if (email === undefined && label === undefined) {
+        throw new DomainError("INVALID_INPUT", "Minst én av email eller label må angis.");
+      }
+      const updates: { email?: string; label?: string | null } = {};
+      if (email !== undefined) {
+        if (typeof email !== "string") {
+          throw new DomainError("INVALID_INPUT", "email må være en streng.");
+        }
+        updates.email = email;
+      }
+      if (label !== undefined) {
+        if (label !== null && typeof label !== "string") {
+          throw new DomainError("INVALID_INPUT", "label må være en streng eller null.");
+        }
+        updates.label = label === null ? null : (label as string);
+      }
+      const updated = await securityService.updateWithdrawEmail(id, updates);
+      fireAudit({
+        actorId: actor.id,
+        actorType: actorTypeFromRole(actor.role),
+        action: "security.withdraw_email.update",
+        resource: "withdraw_email",
+        resourceId: id,
+        details: {
+          // Kun domenet i audit for personvern — full e-post er i DB.
+          emailDomain: updated.email.includes("@") ? updated.email.split("@")[1] : null,
+          emailChanged: updates.email !== undefined,
+          labelChanged: updates.label !== undefined,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      apiSuccess(res, updated);
     } catch (error) {
       apiFailure(res, error);
     }
