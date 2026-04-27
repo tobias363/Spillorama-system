@@ -57,7 +57,12 @@ function renderGroup(group: SidebarGroup, currentPath: string): HTMLLIElement {
     }
     ul.append(childLi);
   }
-  if (hasActive) ul.setAttribute("style", "display: block;");
+  // Legacy parity: groups marked `defaultExpanded` (e.g. "Kontant inn/ut")
+  // render open on initial load — even when no child route is active.
+  if (hasActive || group.defaultExpanded) {
+    ul.setAttribute("style", "display: block;");
+    if (group.defaultExpanded) li.classList.add("menu-open");
+  }
   li.append(ul);
   return li;
 }
