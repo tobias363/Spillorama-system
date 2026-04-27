@@ -1,13 +1,27 @@
-// Agent-portal Cash In/Out Management (legacy V1.0 skjerm 17.x).
+// Agent-portal Cash In/Out Management — full V1.0 implementation per
+// MASTER_PLAN_SPILL1_PILOT_2026-04-24.md K2 (wave 2): wires the legacy-ported
+// CashInOutPage (under apps/admin-web/src/pages/cash-inout/) to
+// /agent/cash-in-out — replaces the earlier minimal placeholder.
 //
-// I V1.0-wireframe har denne siden 6 knapper (Unique ID, Registered User,
-// Sell Products, Shift Log Out, Today's Sales Report). Implementasjonen
-// vokser inn i de seks knappene gradvis:
-//   - Wireframe Gap #4 (Register Sold Tickets, PDF 15.2 / 17.15)
-//   - Wireframe Gap #9 (Shift Log Out-popup med checkboxer +
-//     "View Cashout Details"-modal per PDF 17.6).
+// What this mount does:
+//   1. Renders the full `renderCashInOutPage` UI: 7-button cash-in/out grid,
+//      daily-balance widget, Settlement / Control Daily Balance / Add Daily
+//      Balance / slot-machine modals, F5/F6/F8 hotkeys.
+//   2. Rewrites the shared cash-inout breadcrumb (which links back to the
+//      admin-dashboard `#/admin`) so it points at the agent-portal landing
+//      `#/agent/dashboard` instead. Tests assert this — see
+//      agentPortalSkeleton.test.ts.
+//   3. Appends agent-specific actions that are NOT in the admin-side
+//      CashInOutPage:
+//        - Register Sold Tickets (Wireframe Gap #4, PDF 15.2 / 17.15)
+//        - Shift Log Out modal with checkboxer + "View Cashout Details"
+//          (Wireframe Gap #9, PDF 17.6)
 //
-// De øvrige knappene fylles inn i etterfølgende PR-er.
+// The minimal placeholder version is REMOVED — `mountAgentCashInOut` now
+// always renders the full page. The legacy alias `/agent/cashinout` is
+// dispatched via `pages/cash-inout/index.ts` and keeps the admin-style
+// breadcrumb (no agent extras) so admins/operators who land there see the
+// canonical port.
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
@@ -17,6 +31,7 @@ import {
   agentShiftLogout,
   type AgentShiftLogoutFlags,
 } from "../../api/agent-shift.js";
+import { renderCashInOutPage } from "../cash-inout/CashInOutPage.js";
 import { openPendingCashoutsModal } from "./PendingCashoutsModal.js";
 import { openRegisterSoldTicketsModal } from "./modals/RegisterSoldTicketsModal.js";
 
@@ -25,44 +40,58 @@ function escapeHtml(s: string): string {
 }
 
 export function mountAgentCashInOut(container: HTMLElement): void {
-  container.innerHTML = `
-    <section class="content-header">
-      <h1>${escapeHtml(t("agent_cash_in_out_management"))}</h1>
-      <ol class="breadcrumb">
-        <li><a href="#/agent/dashboard"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
-        <li class="active">${escapeHtml(t("agent_cash_in_out_management"))}</li>
-      </ol>
-    </section>
-    <section class="content">
-      <div class="box box-primary">
-        <div class="box-header with-border">
-          <h3 class="box-title">${escapeHtml(t("agent_cash_in_out_management"))}</h3>
-        </div>
-        <div class="box-body">
-          <p>${escapeHtml(t("agent_cash_in_out_description"))}</p>
-          <div class="btn-group-vertical" role="group" aria-label="cash-in-out-actions"
-            data-marker="agent-cash-actions"
-            style="display:flex; flex-direction:column; gap:8px; max-width:360px;">
-            <button type="button" class="btn btn-primary"
-                    data-marker="btn-register-sold-tickets"
-                    data-action="register-sold-tickets">
-              <i class="fa fa-ticket" aria-hidden="true"></i> ${escapeHtml(t("register_sold_tickets_button"))}
-            </button>
-            <button type="button" class="btn btn-danger" data-action="shift-log-out">
-              <i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
-            </button>
-          </div>
+  // 1. Render the canonical, legacy-ported cash-inout page (daily balance,
+  //    settlement, slot machine, add/withdraw modals, F5/F6/F8 hotkeys).
+  renderCashInOutPage(container);
+
+  // 2. Rewrite the breadcrumb link from `#/admin` to `#/agent/dashboard`.
+  //    The shared `contentHeader` helper hard-codes the admin path; we patch
+  //    the DOM after render to keep agent-portal navigation consistent.
+  const breadcrumbLink = container.querySelector<HTMLAnchorElement>(
+    ".content-header .breadcrumb a[href='#/admin']",
+  );
+  if (breadcrumbLink) {
+    breadcrumbLink.href = "#/agent/dashboard";
+  }
+
+  // 3. Append agent-specific actions section (Register Sold Tickets +
+  //    Shift Log Out) below the existing `<section class="content">`.
+  appendAgentActionsSection(container);
+}
+
+function appendAgentActionsSection(container: HTMLElement): void {
+  const section = document.createElement("section");
+  section.className = "content";
+  section.dataset.marker = "agent-cash-in-out-extra-actions";
+  section.innerHTML = `
+    <div class="box box-primary">
+      <div class="box-header with-border">
+        <h3 class="box-title">${escapeHtml(t("agent_cash_in_out_management"))}</h3>
+      </div>
+      <div class="box-body">
+        <p>${escapeHtml(t("agent_cash_in_out_description"))}</p>
+        <div class="btn-group-vertical" role="group" aria-label="cash-in-out-actions"
+          data-marker="agent-cash-actions"
+          style="display:flex; flex-direction:column; gap:8px; max-width:360px;">
+          <button type="button" class="btn btn-primary"
+                  data-marker="btn-register-sold-tickets"
+                  data-action="register-sold-tickets">
+            <i class="fa fa-ticket" aria-hidden="true"></i> ${escapeHtml(t("register_sold_tickets_button"))}
+          </button>
+          <button type="button" class="btn btn-danger" data-action="shift-log-out">
+            <i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
+          </button>
         </div>
       </div>
-    </section>`;
+    </div>`;
+  container.appendChild(section);
 
-  const registerBtn = container.querySelector<HTMLButtonElement>(
+  const registerBtn = section.querySelector<HTMLButtonElement>(
     '[data-marker="btn-register-sold-tickets"]',
   );
   registerBtn?.addEventListener("click", () => {
-    // Hent gameId fra url-param eller prompt. Pilot: prompt.
-    // (I senere PR hentes gameId fra NextGamePanel-staten eller fra en
-    // dropdown over pågående spill.)
+    // Pilot: prompt for gameId. Senere PR henter gameId fra NextGamePanel-
+    // staten eller fra en dropdown over pågående spill.
     const gameId = window.prompt(t("enter_game_id"));
     if (!gameId || !gameId.trim()) return;
     openRegisterSoldTicketsModal({
@@ -70,7 +99,7 @@ export function mountAgentCashInOut(container: HTMLElement): void {
     });
   });
 
-  const logoutBtn = container.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
+  const logoutBtn = section.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
   logoutBtn?.addEventListener("click", () => {
     openShiftLogoutModal();
   });
