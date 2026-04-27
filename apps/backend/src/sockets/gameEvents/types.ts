@@ -48,6 +48,24 @@ export interface EndGamePayload extends RoomActionPayload {
   reason?: string;
 }
 
+/**
+ * GAP #38: Player-initiated stop-game (Spillvett-vote).
+ * Client sends this to cast a vote for stopping the running round.
+ * Idempotent — same player can re-send without double-counting.
+ */
+export interface StopGameVotePayload extends RoomActionPayload {}
+
+/**
+ * GAP #38: Server response data for `game:stop:vote`.
+ */
+export interface StopGameVoteAckData {
+  recorded: boolean;
+  voteCount: number;
+  threshold: number;
+  playerCount: number;
+  thresholdReached: boolean;
+}
+
 export interface MarkPayload extends RoomActionPayload {
   number: number;
 }
