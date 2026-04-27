@@ -1772,35 +1772,41 @@ export class BingoEngine {
     // Subclasses (Game3Engine in PR-C3) override to implement auto-claim /
     // pattern-cycling after each ball. Errors are logged but do not fail the draw.
     let variantConfigForDraw = this.variantConfigByRoom.get(room.code);
-    // VARIANT-CONFIG GUARD: defense-in-depth (Tobias 2026-04-27)
+    // VARIANT-CONFIG GUARD: defense-in-depth (Tobias 2026-04-27, narrowed 2026-04-27)
     //
     // Etter Render-restart (eller ethvert in-memory cache-tap) kan
-    // `variantConfigByRoom` være tom for et eksisterende rom som fortsatt
-    // tar imot `drawNextNumber`-call. For Spill 1 (`bingo` / `game_1`) ville
-    // dette gjort at `autoClaimPhaseMode` ikke kjørte → 3-fase auto-claim
-    // (BIN-694) ville stille feilet, og `evaluateActivePhase` ville aldri
-    // markert vinnere. Vi velger fail-loud + auto-bind:
+    // `variantConfigByRoom` være helt tom for et eksisterende rom som
+    // fortsatt tar imot `drawNextNumber`-call. For Spill 1 (`bingo` /
+    // `game_1`) ville dette gjort at `autoClaimPhaseMode` ikke kjørte →
+    // 3-fase auto-claim (BIN-694) ville stille feilet, og
+    // `evaluateActivePhase` ville aldri markert vinnere. Vi velger
+    // fail-loud + auto-bind kun ved cache-miss:
     //
     //   1. Logger CRIT-event slik at ops kan se at fallback brukes.
     //   2. Setter inn `DEFAULT_NORSK_BINGO_CONFIG` så draw-flyten kan
     //      fortsette med korrekt variant-config istedenfor å degrade
     //      til standard-mode uten fasestyring.
     //
+    // VIKTIG: guarden fyrer KUN når `variantConfigForDraw` er helt
+    // undefined (cache-miss). Hvis operator har satt en valid config
+    // med `autoClaimPhaseMode=false` (f.eks. for testing av custom
+    // mode), respekteres den — guarden skal aldri overstyre operator-
+    // satt config stille.
+    //
     // Andre spill (rocket/monsterbingo/spillorama) skipper auto-bind —
     // de har sin egen variant-config og skal ikke få Spill 1-default.
     if (
       (room.gameSlug === "bingo" || room.gameSlug === "game_1") &&
-      (!variantConfigForDraw || !variantConfigForDraw.autoClaimPhaseMode)
+      !variantConfigForDraw
     ) {
       logger.error(
         {
           roomCode: room.code,
           gameId: game.id,
           gameSlug: room.gameSlug,
-          hasConfig: Boolean(variantConfigForDraw),
-          autoClaimPhaseMode: variantConfigForDraw?.autoClaimPhaseMode,
+          hasConfig: false,
         },
-        "[CRIT] VARIANT_CONFIG_AUTO_BOUND — Spill 1 room mangler autoClaimPhaseMode, auto-binder DEFAULT_NORSK_BINGO_CONFIG",
+        "[CRIT] VARIANT_CONFIG_AUTO_BOUND — Spill 1 room mangler variantConfig (cache-miss), auto-binder DEFAULT_NORSK_BINGO_CONFIG",
       );
       this.variantConfigByRoom.set(room.code, variantConfigModule.DEFAULT_NORSK_BINGO_CONFIG);
       this.variantGameTypeByRoom.set(room.code, "bingo");

@@ -1,12 +1,17 @@
 /**
  * BingoEngine.variantConfigGuard.test.ts
  *
- * Defense-in-depth guard (Tobias 2026-04-27): hvis Spill 1-rommet har
- * mistet `variantConfigByRoom`-entry (f.eks. etter Render-restart der
- * BingoEngine-instansen ble re-instansiert mens scheduled-game-rom
- * fortsatt har klienter koblet til), skal `drawNextNumber` auto-binde
- * `DEFAULT_NORSK_BINGO_CONFIG` slik at 3-fase auto-claim (BIN-694)
- * fortsatt fungerer.
+ * Defense-in-depth guard (Tobias 2026-04-27, narrowed 2026-04-27): hvis
+ * Spill 1-rommet har mistet `variantConfigByRoom`-entry (f.eks. etter
+ * Render-restart der BingoEngine-instansen ble re-instansiert mens
+ * scheduled-game-rom fortsatt har klienter koblet til), skal
+ * `drawNextNumber` auto-binde `DEFAULT_NORSK_BINGO_CONFIG` slik at
+ * 3-fase auto-claim (BIN-694) fortsatt fungerer.
+ *
+ * Snevret 2026-04-27: guarden fyrer KUN ved cache-miss (config helt
+ * undefined). Hvis operator har satt en valid variantConfig med
+ * `autoClaimPhaseMode=false` (eks. for testing av custom mode), skal
+ * den respekteres — guarden skal aldri overstyre operator-satt config.
  *
  * Andre spill (rocket/monsterbingo/spillorama) skal IKKE få auto-bind —
  * de har sine egne variant-konfigurasjoner og må feile fail-loud
@@ -119,5 +124,60 @@ test("VARIANT-CONFIG GUARD: Non-Spill-1 (slug=rocket) skipper auto-bind", async 
     internals.variantConfigByRoom.get(roomCode),
     undefined,
     "rocket-rom skal IKKE få auto-bundet DEFAULT_NORSK_BINGO_CONFIG",
+  );
+});
+
+test("VARIANT-CONFIG GUARD: Spill 1 (slug=bingo) respekterer valid operator-config med autoClaimPhaseMode=false (ingen overskriv)", async () => {
+  const engine = new BingoEngine(
+    new FixedTicketAdapter(),
+    new InMemoryWalletAdapter(),
+    { minDrawIntervalMs: 0, minPlayersToStart: 1 },
+  );
+
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-guard-3",
+    playerName: "Carol",
+    walletId: "w-carol",
+    gameSlug: "bingo",
+  });
+
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostId!,
+    entryFee: 45,
+    ticketsPerPlayer: 1,
+    payoutPercent: 80,
+  });
+
+  // Simuler operator som har satt valid variantConfig med
+  // autoClaimPhaseMode=false (f.eks. for testing av legacy/custom mode).
+  // Guarden skal IKKE overstyre denne stille.
+  const internals = engine as unknown as {
+    variantConfigByRoom: Map<string, unknown>;
+    variantGameTypeByRoom: Map<string, string>;
+  };
+  const operatorConfig = {
+    autoClaimPhaseMode: false,
+    customMarker: "operator-set",
+  };
+  internals.variantConfigByRoom.set(roomCode, operatorConfig);
+  internals.variantGameTypeByRoom.set(roomCode, "bingo");
+
+  // Draw én ball — guarden skal IKKE kicke inn fordi configen er valid.
+  await engine.drawNextNumber({ roomCode, actorPlayerId: hostId! });
+
+  const configAfterDraw = internals.variantConfigByRoom.get(roomCode) as
+    | { autoClaimPhaseMode?: boolean; customMarker?: string }
+    | undefined;
+  assert.ok(configAfterDraw, "operator-satt config skal fortsatt være satt");
+  assert.equal(
+    configAfterDraw.autoClaimPhaseMode,
+    false,
+    "operator-satt autoClaimPhaseMode=false skal respekteres, ikke overskrives",
+  );
+  assert.equal(
+    configAfterDraw.customMarker,
+    "operator-set",
+    "operator-config skal ikke erstattes av DEFAULT_NORSK_BINGO_CONFIG",
   );
 });
