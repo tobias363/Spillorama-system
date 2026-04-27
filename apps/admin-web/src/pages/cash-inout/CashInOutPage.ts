@@ -28,16 +28,17 @@
 import { t } from "../../i18n/I18n.js";
 import { getSession } from "../../auth/Session.js";
 import { Toast } from "../../components/Toast.js";
-import { Modal } from "../../components/Modal.js";
-import { getCurrentShift, getDailyBalance, openDay, type DailyBalance } from "../../api/agent-shift.js";
+import { getCurrentShift, getDailyBalance, type DailyBalance } from "../../api/agent-shift.js";
 import { ApiError } from "../../api/client.js";
 import { requireSlotProvider } from "../../components/SlotProviderSwitch.js";
+import { listAgentRooms } from "../../api/agent-next-game.js";
 import { openSlotMachineModal } from "./modals/SlotMachineModal.js";
 import { openSettlementBreakdownModal } from "./modals/SettlementBreakdownModal.js";
 import { openControlDailyBalanceModal } from "./modals/ControlDailyBalanceModal.js";
 import { openAddDailyBalanceModal } from "./modals/AddDailyBalanceModal.js";
 import { openAddMoneyRegisteredUserModal } from "./modals/AddMoneyRegisteredUserModal.js";
 import { openWithdrawRegisteredUserModal } from "./modals/WithdrawRegisteredUserModal.js";
+import { openCheckForBingoModal } from "./modals/CheckForBingoModal.js";
 import { openAddMoneyUniqueIdModal } from "../agent-portal/unique-id/AddMoneyUniqueIdModal.js";
 import { openWithdrawUniqueIdModal } from "../agent-portal/unique-id/WithdrawUniqueIdModal.js";
 import { contentHeader, escapeHtml, formatNOK } from "./shared.js";
@@ -196,13 +197,27 @@ export function renderCashInOutPage(container: HTMLElement): void {
             </div>
           </div>
 
-          <!-- Box 4: Ingen pågående spill -->
+          <!-- Box 4: Pågående spill (med "Sjekk for Bingo"-knapp per
+               wireframe §17.16). Knappen kjører listAgentRooms() ved klikk
+               for å finne agentens RUNNING/PAUSED rom og åpner deretter
+               CheckForBingoModal med riktig roomCode. PAUSE-engine-flyten
+               (auto-pause før modal) kommer i en oppfølgings-PR — den
+               minimale modalen henter cached evaluering uten å fryse
+               trekkingen. -->
           <div class="box box-default cashinout-box-ongoing"
                data-marker="box-ongoing-games">
             <div class="box-body cashinout-empty-placeholder">
               <p class="text-muted text-center">
                 ${escapeHtml(t("no_ongoing_games_available"))}
               </p>
+              <div class="text-center" style="margin-top:12px;">
+                <button type="button" class="btn btn-primary"
+                        data-action="check-for-bingo"
+                        data-marker="check-for-bingo-btn">
+                  <i class="fa fa-search" aria-hidden="true"></i>
+                  ${escapeHtml(t("check_for_bingo"))}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -312,6 +327,14 @@ function wireActions(container: HTMLElement): void {
             });
           }
         }
+        break;
+      case "check-for-bingo":
+        // Wireframe §17.16 — agent klikker "Sjekk for Bingo", systemet
+        // finner agentens aktive rom (RUNNING først, PAUSED hvis ingen),
+        // og åpner CheckForBingoModal. Hvis ingen aktiv runde finnes
+        // åpner vi modalen likevel med roomCode=null — modalen viser da
+        // en informativ "ingen aktivt rom"-toast og lukker seg selv.
+        void onClickCheckForBingo();
         break;
       // shift-log-out, todays-sales-report, create-new-unique-id, sell-products
       // håndteres via href eller av AgentCashInOutPage (Shift Log Out).
@@ -435,6 +458,35 @@ function renderBalance(container: HTMLElement, b: DailyBalance): void {
   set("v-totalCashOut", formatNOK(b.totalCashOut));
   const dbEl = container.querySelector<HTMLElement>("#v-dailyBalance");
   if (dbEl) dbEl.innerHTML = `<strong>${escapeHtml(formatNOK(b.dailyBalance))}</strong>`;
+}
+
+/**
+ * "Sjekk for Bingo"-knappens click-handler (FOLLOWUP-13 / wireframe §17.16).
+ *
+ * Henter agentens aktive rom via /api/admin/rooms (hall-scope håndhevet av
+ * backend) og prioriterer RUNNING > PAUSED. Hvis ingen aktiv runde finnes
+ * sender vi roomCode=null inn i modalen — den viser da en advarsel-toast
+ * og lukker seg selv (modalen håndterer dette internt — se
+ * `CheckForBingoModal.ts:88-94`).
+ *
+ * Fail-soft: nettverksfeil ved listAgentRooms() resulterer i null-roomCode
+ * — agenten ser samme advarsel som ved "ingen aktiv runde", istedenfor at
+ * Cash In/Out-siden får en feilmelding-popup midt i hovedflyten.
+ */
+async function onClickCheckForBingo(): Promise<void> {
+  let roomCode: string | null = null;
+  try {
+    const rooms = await listAgentRooms();
+    // Prioriter RUNNING (live trekking) over PAUSED (operatør har allerede
+    // pauset av andre grunner). Wireframe-flyten har én aktiv runde per hall.
+    const running = rooms.find((r) => r.currentGame?.status === "RUNNING");
+    const paused = rooms.find((r) => r.currentGame?.status === "PAUSED");
+    roomCode = running?.code ?? paused?.code ?? null;
+  } catch {
+    // Behold roomCode=null og la modalen vise advarsel — bedre UX enn
+    // generisk "Noe gikk galt"-toast som krever manuell retry.
+  }
+  openCheckForBingoModal({ roomCode });
 }
 
 /**

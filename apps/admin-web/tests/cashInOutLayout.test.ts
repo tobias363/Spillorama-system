@@ -160,6 +160,21 @@ describe("CashInOutPage — 1:1 legacy layout", () => {
     expect(ongoing?.textContent).toContain("Ingen pågående spill");
   });
 
+  it("Box 4 — Sjekk for Bingo-knapp er synlig (FOLLOWUP-13 wireframe §17.16)", () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    renderCashInOutPage(root);
+    const ongoing = root.querySelector('[data-marker="box-ongoing-games"]');
+    const button = ongoing?.querySelector<HTMLButtonElement>(
+      '[data-action="check-for-bingo"]',
+    );
+    expect(button).toBeTruthy();
+    expect(button?.classList.contains("btn-primary")).toBe(true);
+    expect(button?.textContent).toContain("Sjekk for bingo");
+    // Marker for stable selector i e2e-tester
+    expect(button?.getAttribute("data-marker")).toBe("check-for-bingo-btn");
+  });
+
   it("F5/F6/F8-hotkeys og knappe-handlers fortsatt registrert (ikke regresjon)", () => {
     const root = document.createElement("div");
     document.body.appendChild(root);
