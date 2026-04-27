@@ -210,6 +210,15 @@ interface CreateRoomInput {
   roomCode?: string;
   /** Game variant slug (e.g. "bingo", "rocket"). Stored on the room. */
   gameSlug?: string;
+  /**
+   * Tobias 2026-04-27: shared hall-room (Spill 2/3).
+   *
+   * Hvis `null` markeres rommet som hall-shared via `RoomState.isHallShared=true`
+   * og `joinRoom` skipper HALL_MISMATCH-sjekken (alle haller kan joine).
+   * Hvis `undefined` er det per-hall-rom (eksisterende oppførsel).
+   * Hvis en `string` sendes brukes den som override på `hallId`.
+   */
+  effectiveHallId?: string | null;
 }
 
 interface JoinRoomInput extends CreateRoomInput {
@@ -738,6 +747,10 @@ export class BingoEngine {
     const code = input.roomCode && !existingCodes.has(input.roomCode)
       ? input.roomCode
       : makeRoomCode(existingCodes);
+    // Tobias 2026-04-27: Spill 2/3 sender `effectiveHallId: null` for shared
+    // global rooms. Vi beholder opprettende hall i `room.hallId` (audit) men
+    // setter `isHallShared=true` så `joinRoom` skipper HALL_MISMATCH.
+    const isHallShared = input.effectiveHallId === null;
     const room: RoomState = {
       code,
       hallId,
@@ -748,7 +761,8 @@ export class BingoEngine {
       gameSlug: input.gameSlug?.trim() || "bingo",
       createdAt: new Date().toISOString(),
       players: new Map([[playerId, player]]),
-      gameHistory: []
+      gameHistory: [],
+      ...(isHallShared ? { isHallShared: true } : {}),
     };
 
     this.rooms.set(code, room);
@@ -760,7 +774,9 @@ export class BingoEngine {
     const roomCode = input.roomCode.trim().toUpperCase();
     const hallId = this.assertHallId(input.hallId);
     const room = this.requireRoom(roomCode);
-    if (room.hallId !== hallId) {
+    // Tobias 2026-04-27: shared rooms (Spill 2/3 — ROCKET / MONSTERBINGO) er
+    // GLOBALE og deles av alle haller — skip HALL_MISMATCH-sjekken.
+    if (!room.isHallShared && room.hallId !== hallId) {
       throw new DomainError("HALL_MISMATCH", "Rommet tilhører en annen hall.");
     }
 

@@ -38,6 +38,7 @@ import type {
 import type { RoomSnapshot } from "../../game/types.js";
 import type { GameEventsDeps } from "./deps.js";
 import { walletRoomKey } from "../walletStatePusher.js";
+import { getCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
 
 /**
  * BIN-693 Option B: reserver delta-beløp for pre-round bong-kjøp.
@@ -249,13 +250,23 @@ export function registerRoomEvents(ctx: SocketContext): void {
       // når gammelt rom ikke ble ryddet ved disconnect.
       engine.cleanupStaleWalletInIdleRooms(identity.walletId);
       const requestedGameSlug = typeof payload?.gameSlug === "string" ? payload.gameSlug : undefined;
+      // Canonical mapping (Tobias 2026-04-27):
+      //   Spill 1 (bingo)         → BINGO1, per-hall
+      //   Spill 2 (rocket)        → ROCKET, shared (hallId=null)
+      //   Spill 3 (monsterbingo)  → MONSTERBINGO, shared (hallId=null)
+      const canonicalMapping = enforceSingleRoomPerHall
+        ? getCanonicalRoomCode(requestedGameSlug, identity.hallId)
+        : null;
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,
         hallId: identity.hallId,
         walletId: identity.walletId,
         socketId: socket.id,
-        // BIN-134: Use "BINGO1" as actual room code so SPA alias = real code
-        roomCode: enforceSingleRoomPerHall ? "BINGO1" : undefined,
+        // BIN-134: Use canonical room-code so SPA alias = real code.
+        roomCode: canonicalMapping?.roomCode,
+        // Tobias 2026-04-27: shared rooms (Spill 2/3) signaliserer dette via
+        // `effectiveHallId=null` så `joinRoom` ikke kaster HALL_MISMATCH.
+        effectiveHallId: canonicalMapping ? canonicalMapping.effectiveHallId : undefined,
         gameSlug: requestedGameSlug
       });
       // BIN-694: wire DEFAULT variantConfig (5-fase Norsk bingo for Game 1)
