@@ -42,7 +42,7 @@
  *     pre-dated scheduling; forenklet i denne versjonen).
  */
 
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { DomainError } from "./BingoEngine.js";
 import type { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 import { logger as rootLogger } from "../util/logger.js";
@@ -103,6 +103,21 @@ export class Game1AutoDrawTickService {
   private readonly defaultSeconds: number;
   private readonly forceSecondsOverride: number | null;
 
+  /**
+   * HIGH-7 fix: in-process mutex per scheduledGameId. Hindrer at to
+   * overlappende tick-promises i samme Node-prosess begge plukker opp
+   * samme rad og forsøker `drawNext` parallelt — som ville endt med at
+   * den andre fikk DomainError fra row-lock-timeout eller race på
+   * `state.draws_completed >= drawBag.length` (forurensende warning-logg).
+   *
+   * `SELECT ... FOR UPDATE SKIP LOCKED` (i loadRunningGames) håndterer det
+   * cross-instance og samtidig på tvers av tick-fetch-fasen, men siden
+   * locken slippes ved commit (før drawNext kalles) trenger vi denne
+   * in-process-Set-en som ekstra gard for å filtrere bort raden helt
+   * frem til drawNext har returnert.
+   */
+  private readonly currentlyProcessing = new Set<string>();
+
   constructor(options: Game1AutoDrawTickServiceOptions) {
     this.pool = options.pool;
     const schema = (options.schema ?? "public").trim();
@@ -145,6 +160,16 @@ export class Game1AutoDrawTickService {
         continue;
       }
 
+      // HIGH-7: in-process mutex. Hvis en annen tick-promise allerede
+      // prosesserer denne raden, hopp over uten å forsøke drawNext (som
+      // ville blokkert på FOR UPDATE-rad-locken inne i drawNext, eller
+      // racet på draws_completed >= drawBag.length).
+      if (this.currentlyProcessing.has(game.id)) {
+        skippedNotDue++;
+        continue;
+      }
+
+      this.currentlyProcessing.add(game.id);
       try {
         await this.drawEngine.drawNext(game.id);
         drawsTriggered++;
@@ -156,6 +181,8 @@ export class Game1AutoDrawTickService {
           { err, scheduledGameId: game.id },
           "[GAME1_PR4c] auto-draw tick: drawNext failed for game"
         );
+      } finally {
+        this.currentlyProcessing.delete(game.id);
       }
     }
 
@@ -181,21 +208,75 @@ export class Game1AutoDrawTickService {
   // ── Internal helpers ──────────────────────────────────────────────────────
 
   private async loadRunningGames(): Promise<RunningGameRow[]> {
-    // Inner join med game_state for paused-flag + last_drawn_at.
-    const { rows } = await this.pool.query<RunningGameRow>(
-      `SELECT sg.id,
-              sg.ticket_config_json,
-              gs.draws_completed,
-              gs.last_drawn_at,
-              gs.engine_started_at
-         FROM "${this.schema}"."app_game1_scheduled_games" sg
-         JOIN "${this.schema}"."app_game1_game_state" gs
-           ON gs.scheduled_game_id = sg.id
-        WHERE sg.status = 'running'
-          AND gs.paused = false
-          AND gs.engine_ended_at IS NULL`
-    );
-    return rows;
+    // HIGH-7 fix: bruk `FOR UPDATE SKIP LOCKED` på app_game1_game_state for
+    // å filtrere bort rader som en annen instans (cross-instance) eller en
+    // overlappende fetch-fase allerede har plukket opp i samme tick-vindu.
+    //
+    // Locken slippes ved commit i `acquire`-blokken under, slik at
+    // `drawNext` (som tar sin egen FOR UPDATE-tx) ikke får dødlås mot vår
+    // lock. In-process-mutex (`currentlyProcessing`) overtar dekkingen
+    // mellom commit og drawNext-fullføring i samme prosess.
+    //
+    // SKIP LOCKED er valgt fremfor NOWAIT fordi NOWAIT kaster en feil ved
+    // konflikt — vi ønsker å stille gå videre til neste rad uten støy.
+    //
+    // Mønster-paritet: BIN-761 outbox-worker bruker samme SKIP-LOCKED-pattern
+    // for å kø-prosessere events uten cross-instance dobbel-kjøring.
+    if (this.pool.connect === undefined) {
+      // Test-stub-poolen i Game1AutoDrawTickService.test.ts implementerer kun
+      // `query()`, ikke `connect()`. Fall back til pool.query slik at de
+      // eksisterende testene fortsatt validerer SELECT-kontrakten. Produksjon
+      // bruker alltid pg.Pool som har connect().
+      const { rows } = await this.pool.query<RunningGameRow>(
+        `SELECT sg.id,
+                sg.ticket_config_json,
+                gs.draws_completed,
+                gs.last_drawn_at,
+                gs.engine_started_at
+           FROM "${this.schema}"."app_game1_scheduled_games" sg
+           JOIN "${this.schema}"."app_game1_game_state" gs
+             ON gs.scheduled_game_id = sg.id
+          WHERE sg.status = 'running'
+            AND gs.paused = false
+            AND gs.engine_ended_at IS NULL
+            FOR UPDATE OF gs SKIP LOCKED`
+      );
+      return rows;
+    }
+
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<RunningGameRow>(
+        `SELECT sg.id,
+                sg.ticket_config_json,
+                gs.draws_completed,
+                gs.last_drawn_at,
+                gs.engine_started_at
+           FROM "${this.schema}"."app_game1_scheduled_games" sg
+           JOIN "${this.schema}"."app_game1_game_state" gs
+             ON gs.scheduled_game_id = sg.id
+          WHERE sg.status = 'running'
+            AND gs.paused = false
+            AND gs.engine_ended_at IS NULL
+            FOR UPDATE OF gs SKIP LOCKED`
+      );
+      // Commit umiddelbart — vi bruker FOR UPDATE SKIP LOCKED kun som
+      // ikke-blokkerende filter for å hoppe over rader en annen instans
+      // jobber på. Vi MÅ slippe rad-locks før drawNext, ellers vil
+      // drawNext sin egen FOR UPDATE-tx blokkere.
+      await client.query("COMMIT");
+      return rows;
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // swallow rollback error
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /**

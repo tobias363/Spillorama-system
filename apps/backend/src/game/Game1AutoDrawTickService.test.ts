@@ -200,6 +200,112 @@ test("tick: SELECT filtrerer på status='running' AND paused=false AND engine_en
   assert.ok(sql.includes("gs.engine_ended_at IS NULL"));
 });
 
+// ── HIGH-7: SKIP LOCKED + in-process mutex ─────────────────────────────────
+
+test("HIGH-7: SELECT bruker `FOR UPDATE OF gs SKIP LOCKED` for cross-instance idempotens", async () => {
+  // Cross-instance: en annen backend-instans kan parallelt fyre tick(). Uten
+  // SKIP LOCKED ville begge fetche samme rad og forsøke drawNext, som
+  // resulterer i lock-timeout-warning fra postgres FOR UPDATE inne i drawNext.
+  // Med SKIP LOCKED filtrerer DB bort rader en annen tx allerede holder.
+  const { service, queries } = makeService([]);
+  await service.tick();
+  assert.equal(queries.length, 1);
+  const sql = queries[0]!.sql;
+  assert.ok(
+    /FOR\s+UPDATE\s+OF\s+gs\s+SKIP\s+LOCKED/i.test(sql),
+    `forventet 'FOR UPDATE OF gs SKIP LOCKED' i SELECT, fikk:\n${sql}`
+  );
+});
+
+test("HIGH-7: in-process mutex skipper rad som allerede prosesseres parallelt", async () => {
+  // Simulerer to tick-promises i samme Node-prosess som overlapper på samme
+  // scheduledGameId. Den første låser raden via `currentlyProcessing`, den
+  // andre må skippe (og IKKE kalle drawNext for den raden) — ellers ville
+  // drawNext racet på FOR UPDATE-rad-locken og logget warning.
+  const now = Date.now();
+  const tenSecAgo = new Date(now - 10_000);
+  const row = {
+    id: "g-shared",
+    ticket_config_json: { seconds: 5 },
+    draws_completed: 1,
+    last_drawn_at: tenSecAgo,
+    engine_started_at: tenSecAgo,
+  };
+  const queries: RecordedQuery[] = [];
+  const pool = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push({ sql, params });
+      return { rows: [row], rowCount: 1 };
+    },
+  };
+
+  // drawNext-stub som blokkerer inntil vi løser bremsen — slik at vi kan
+  // fyre tick #2 mens tick #1 fortsatt holder mutex-en.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const calledIds: string[] = [];
+  const drawEngine = {
+    async drawNext(scheduledGameId: string) {
+      calledIds.push(scheduledGameId);
+      await gate;
+      return {};
+    },
+  } as unknown as Game1DrawEngineService;
+
+  const service = new Game1AutoDrawTickService({
+    pool: pool as never,
+    drawEngine,
+  });
+
+  // Fyr tick #1; den blokkerer i drawNext (gate ikke release-t ennå).
+  const tick1 = service.tick();
+  // Yield slik at tick #1 hinner å sette currentlyProcessing før tick #2 starter.
+  await new Promise((r) => setImmediate(r));
+
+  // Fyr tick #2 — skal skippe raden uten å kalle drawNext.
+  const r2 = await service.tick();
+  assert.equal(r2.checked, 1, "tick #2 leser raden fra DB...");
+  assert.equal(r2.drawsTriggered, 0, "...men SKAL IKKE kalle drawNext");
+  assert.equal(r2.errors, 0, "...og SKAL IKKE logge feil");
+  assert.equal(r2.skippedNotDue, 1, "...skipped-telleren bumpes");
+  assert.equal(calledIds.length, 1, "kun tick #1 har kalt drawNext");
+
+  // Slipp tick #1 fri og rydd opp.
+  release();
+  await tick1;
+});
+
+test("HIGH-7: mutex ryddes opp etter drawNext-feil (ingen permanent blokkering)", async () => {
+  // Hvis drawNext kaster, skal currentlyProcessing.delete kjøres i finally
+  // slik at neste tick kan prosessere raden på nytt.
+  const now = Date.now();
+  const tenSecAgo = new Date(now - 10_000);
+  const { service, called } = makeService(
+    [
+      {
+        id: "g-recover",
+        ticket_config_json: { seconds: 5 },
+        draws_completed: 1,
+        last_drawn_at: tenSecAgo,
+        engine_started_at: tenSecAgo,
+      },
+    ],
+    { throwOnIds: ["g-recover"] }
+  );
+
+  // Tick #1: feiler.
+  const r1 = await service.tick();
+  assert.equal(r1.errors, 1);
+  assert.equal(called.length, 1);
+
+  // Tick #2: mutex skal være ryddet → drawNext kalles igjen.
+  const r2 = await service.tick();
+  assert.equal(r2.errors, 1, "tick #2 skal også feile (samme stub-feil)");
+  assert.equal(called.length, 2, "drawNext skal være kalt på nytt — mutex ble ryddet");
+});
+
 // ── seconds-resolution ─────────────────────────────────────────────────────
 
 test("tick: seconds fra ticket_config.spill1.timing.seconds (admin-form-shape)", async () => {
