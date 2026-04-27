@@ -519,13 +519,30 @@ const amlService = new AmlService({
 // BIN-587 B3-security: sikkerhets-admin (withdraw-emails + risk-countries +
 // blocked-IPs). Blocked-IPs har in-memory cache (5 min TTL) som brukes av
 // HttpRateLimiter som pre-check.
+//
+// PR #513 §2.5: SECURITY_PILOT_MODE=true gjør init-failures fatal-på-boot
+// i stedet for å la IP-blocking være no-op uten alarm. Defaultes på i prod-
+// pilot-konfig; off i dev/test.
+const securityPilotMode = (process.env.SECURITY_PILOT_MODE ?? "").trim().toLowerCase() === "true";
 const securityService = new SecurityService({
   connectionString: platformConnectionString,
   schema: pgSchema,
+  pilotMode: securityPilotMode,
 });
 // Varm cachen asynkront — ikke blokker server-start; første sjekk
 // venter på init uansett.
 void securityService.warmBlockedIpCache().catch((err) => {
+  // PR #513 §2.5: hvis pilot-mode er på vil `initializeSchema` ha kastet
+  // og prosessen bør stoppes med samme stack-trace. Logg så crash er
+  // åpenbar i ops-feed.
+  if (securityPilotMode) {
+    console.error("[BIN-587 B3-security] CRITICAL: warm-up failed in pilot-mode — exiting", err);
+    // Eksplisitt exit slik at orkestrator restarter pod-en — bedre enn
+    // å kjøre med fail-open IP-blocking i pilot.
+    process.exitCode = 1;
+    setImmediate(() => process.exit(1));
+    return;
+  }
   console.warn("[BIN-587 B3-security] blocked-IP cache warm-up failed:", err);
 });
 

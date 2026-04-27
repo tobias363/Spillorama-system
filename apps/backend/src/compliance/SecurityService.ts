@@ -54,6 +54,25 @@ export interface SecurityServiceOptions {
   nowMs?: () => number;
   /** Overstyres i tester for å kontrollere cache-alder. */
   cacheTtlMs?: number;
+  /**
+   * PR #513 §2.5: Pilot-mode fail-fast.
+   * Når `true` kaster `initializeSchema`-feil videre til caller (så server-
+   * boot crasher med tydelig stack-trace) i stedet for å la
+   * IP-blocking være no-op stille. I prod-pilot vil vi ha dette på.
+   *
+   * Default `false` for å ikke knekke eksisterende test-harnesses som
+   * ikke har en ekte DB tilgjengelig.
+   */
+  pilotMode?: boolean;
+  /**
+   * PR #513 §2.5: Hook for at en helse-overvåker (Sentry / health-endpoint /
+   * pager) skal få beskjed når sikkerhets-init feiler. Når den returnerer
+   * (eller throwes), fortsetter SecurityService som før — caller bestemmer
+   * om feil skal bobbles videre.
+   *
+   * Default: en CRITICAL-log via pino + ingen videre side-effekter.
+   */
+  onCriticalFailure?: (event: { code: string; err: unknown; context: string }) => void;
 }
 
 interface WithdrawEmailRow {
@@ -125,6 +144,26 @@ function normalizeCountryCode(input: unknown): string {
   return code;
 }
 
+/**
+ * PR #513 §2.5: default-handler for kritiske sikkerhets-init-feil.
+ * Logger på `fatal`-nivå med en standard event-shape som ops/Sentry kan
+ * grep-e etter (`event=security_service_init_failed`).
+ *
+ * Egne handlere (eks. Sentry-capture, Slack-poster) kan injiseres via
+ * `onCriticalFailure` i constructor.
+ */
+function defaultCriticalFailureLogger(event: { code: string; err: unknown; context: string }): void {
+  logger.fatal(
+    {
+      event: "security_service_init_failed",
+      code: event.code,
+      context: event.context,
+      err: event.err,
+    },
+    `[CRITICAL] SecurityService.${event.context} feilet (${event.code}) — IP-block-sjekk fail-open uten alarm-aksjon`,
+  );
+}
+
 function normalizeIpAddress(input: unknown): string {
   if (typeof input !== "string") {
     throw new DomainError("INVALID_INPUT", "ipAddress må være en streng.");
@@ -150,7 +189,16 @@ export class SecurityService {
   private readonly schema: string;
   private readonly cacheTtlMs: number;
   private readonly nowMs: () => number;
+  private readonly pilotMode: boolean;
+  private readonly onCriticalFailure: (event: { code: string; err: unknown; context: string }) => void;
   private initPromise: Promise<void> | null = null;
+  /**
+   * PR #513 §2.5: Sett til `true` permanent når `initializeSchema()` har feilet.
+   * Brukes av `isIpBlocked()` for å logge CRITICAL hver gang en request
+   * passerer gjennom et fail-open IP-block-sjekk — slik at en stille
+   * "alle slipper inn" ikke kan skjule seg i prod uten at noen merker det.
+   */
+  private initFailed = false;
 
   // Blocked-IP in-memory cache
   private blockedIpCache: Set<string> | null = null;
@@ -163,6 +211,8 @@ export class SecurityService {
     this.schema = assertSchemaName(options.schema ?? "public");
     this.cacheTtlMs = options.cacheTtlMs ?? BLOCKED_IP_CACHE_TTL_MS;
     this.nowMs = options.nowMs ?? (() => Date.now());
+    this.pilotMode = options.pilotMode === true;
+    this.onCriticalFailure = options.onCriticalFailure ?? defaultCriticalFailureLogger;
     this.pool = new Pool({
       connectionString: options.connectionString,
       ...getPoolTuning(),
@@ -170,13 +220,23 @@ export class SecurityService {
   }
 
   /** @internal — test-hook. */
-  static forTesting(pool: Pool, opts?: { schema?: string; cacheTtlMs?: number; nowMs?: () => number }): SecurityService {
+  static forTesting(pool: Pool, opts?: {
+    schema?: string;
+    cacheTtlMs?: number;
+    nowMs?: () => number;
+    pilotMode?: boolean;
+    onCriticalFailure?: (event: { code: string; err: unknown; context: string }) => void;
+  }): SecurityService {
     const svc = Object.create(SecurityService.prototype) as SecurityService;
     (svc as unknown as { pool: Pool }).pool = pool;
     (svc as unknown as { schema: string }).schema = assertSchemaName(opts?.schema ?? "public");
     (svc as unknown as { cacheTtlMs: number }).cacheTtlMs = opts?.cacheTtlMs ?? BLOCKED_IP_CACHE_TTL_MS;
     (svc as unknown as { nowMs: () => number }).nowMs = opts?.nowMs ?? (() => Date.now());
+    (svc as unknown as { pilotMode: boolean }).pilotMode = opts?.pilotMode === true;
+    (svc as unknown as { onCriticalFailure: (e: { code: string; err: unknown; context: string }) => void }).onCriticalFailure =
+      opts?.onCriticalFailure ?? defaultCriticalFailureLogger;
     (svc as unknown as { initPromise: Promise<void> | null }).initPromise = Promise.resolve();
+    (svc as unknown as { initFailed: boolean }).initFailed = false;
     (svc as unknown as { blockedIpCache: Set<string> | null }).blockedIpCache = null;
     (svc as unknown as { blockedIpCacheLoadedAt: number }).blockedIpCacheLoadedAt = 0;
     return svc;
@@ -349,12 +409,24 @@ export class SecurityService {
    * Sjekker om en IP-adresse er blokkert. Bruker in-memory cache med
    * 5-min TTL. Middleware må kalle denne på hver request, så cache er
    * kritisk for performance.
+   *
+   * PR #513 §2.5: hvis init-en har feilet (sjeldne pilot-edge-cases) emit-er
+   * vi en CRITICAL-log per request slik at en stille fail-open ikke kan
+   * skjule seg over tid. Throttling er bevisst utelatt — samples fanges av
+   * pino-aggregator og vi vil heller ha bråk enn en silent "alle slipper inn".
    */
   async isIpBlocked(ipAddress: string): Promise<boolean> {
     if (!ipAddress) return false;
     const normalized = ipAddress.trim();
     if (!normalized) return false;
     await this.refreshBlockedIpCacheIfNeeded();
+    if (this.initFailed) {
+      this.onCriticalFailure({
+        code: "IP_BLOCK_FAIL_OPEN",
+        err: new Error("SecurityService init failed — IP-block sjekk har returnert false uten data"),
+        context: "isIpBlocked",
+      });
+    }
     return this.blockedIpCache?.has(normalized) ?? false;
   }
 
@@ -449,7 +521,35 @@ export class SecurityService {
       );
       await client.query("COMMIT");
     } catch (err) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
+      // PR #513 §2.5: KRITISK — IP-blocking blir no-op uten denne tabellen.
+      // Tidligere ble feilen wrappet som DomainError og kastet stille videre,
+      // men `refreshBlockedIpCache` swallow-er DB-feil med en `warn`-logg
+      // (fail-open). Resultat: server kjørte med tom blocked-IP-cache og
+      // en advarsel som lett kunne forsvinne i logger.
+      //
+      // Fix:
+      //   1. Marker `initFailed = true` så `isIpBlocked` emit-er CRITICAL
+      //      per request. Pager går.
+      //   2. Kall `onCriticalFailure`-hook (default: pino fatal-log).
+      //   3. Hvis pilot-mode er på → re-throw så server-boot crasher med
+      //      tydelig stack-trace i stedet for å starte med fail-open
+      //      sikkerhets-stack.
+      //   4. Ellers: fortsett oppstart — caller (warmBlockedIpCache) catch-er
+      //      og service forblir lese-only (ikke en regresjon).
+      this.initFailed = true;
+      this.onCriticalFailure({ code: "SECURITY_INIT_FAILED", err, context: "initializeSchema" });
+
+      if (this.pilotMode) {
+        // Fail-fast: server skal IKKE starte i pilot uten fungerende sikkerhets-stack.
+        if (err instanceof DomainError) throw err;
+        throw new DomainError(
+          "SECURITY_INIT_FAILED",
+          "Kunne ikke initialisere sikkerhets-tabeller (pilot-mode fail-fast).",
+        );
+      }
+
+      // Non-pilot: bevar bakoverkompatibilitet — caller bestemmer om det er fatalt.
       if (err instanceof DomainError) throw err;
       throw new DomainError("SECURITY_INIT_FAILED", "Kunne ikke initialisere sikkerhets-tabeller.");
     } finally {
