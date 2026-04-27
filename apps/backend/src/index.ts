@@ -9,6 +9,8 @@ import { Server, type Socket } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { Redis } from "ioredis";
 import { createWalletAdapter } from "./adapters/createWalletAdapter.js";
+import { WalletStateNotifyingAdapter } from "./adapters/walletStateNotifyingAdapter.js";
+import { createWalletStatePusher } from "./sockets/walletStatePusher.js";
 import { LocalBingoSystemAdapter } from "./adapters/LocalBingoSystemAdapter.js";
 import { PostgresBingoSystemAdapter } from "./adapters/PostgresBingoSystemAdapter.js";
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
@@ -339,7 +341,20 @@ const io = new Server(server, {
 });
 
 const walletRuntime = createWalletAdapter(projectDir);
-const walletAdapter = walletRuntime.adapter;
+// BIN-760: Wrap wallet-adapter med notifying-decorator slik at hver mutasjon
+// (debit/credit/transfer/reserve/...) trigger en autoritativ `wallet:state`-
+// emit til Socket.IO-rommet `wallet:<walletId>`. Pusher-en bygges over IO-
+// instansen som finnes ovenfor; underliggende adapter (Postgres/File/Http)
+// er uberørt — decorator-en fanger bare retur-veien.
+//
+// TODO BIN-761 (outbox): pusher emitter direkte etter commit i dag. Server-
+// crash mellom commit og emit kan tape én push (klient refetcher på reconnect).
+// BIN-761 vil flytte emit-en gjennom en persistent outbox-tabell.
+const walletStatePusher = createWalletStatePusher({
+  io,
+  walletAdapter: walletRuntime.adapter,
+});
+const walletAdapter = new WalletStateNotifyingAdapter(walletRuntime.adapter, walletStatePusher);
 
 // External game wallet bridge (Candy/demo-backend calls these)
 const extGameWalletApiKey = (process.env.EXT_GAME_WALLET_API_KEY ?? "").trim();

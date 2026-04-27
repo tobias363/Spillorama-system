@@ -14,3 +14,4 @@ export * from "./compliance.js";
 export * from "./system.js";
 export * from "./minigames.js";
 export * from "./game1-scheduled.js";
+export * from "./wallet-events.js";

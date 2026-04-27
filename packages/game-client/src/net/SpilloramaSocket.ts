@@ -19,6 +19,7 @@ import type {
   JackpotSpinResult,
   MiniGameTriggerPayload,
   MiniGameResultPayload,
+  WalletStateEvent,
 } from "@spillorama/shared-types/socket-events";
 import type { RoomSnapshot } from "@spillorama/shared-types/game";
 import { SocketEvents } from "@spillorama/shared-types/socket-events";
@@ -54,6 +55,15 @@ export interface SpilloramaSocketListeners {
    * terskel-draw).
    */
   miniGameResult: (payload: MiniGameResultPayload) => void;
+  /**
+   * BIN-760: autoritativ `wallet:state`-push fra server. Erstatter
+   * `room:update.me.balance` som primær wallet-sync. Klienten skal
+   * foretrekke denne over room:update for chip-rendering — ny payload
+   * inkluderer reservedAmount + availableBalance, og pusher uavhengig
+   * av room:update-cadence. `room:update` skrives fortsatt for
+   * bakover-kompat.
+   */
+  walletState: (payload: WalletStateEvent) => void;
   connectionStateChanged: ConnectionListener;
 }
 
@@ -91,6 +101,7 @@ export class SpilloramaSocket {
     jackpotActivated: new Set(),
     miniGameTrigger: new Set(),
     miniGameResult: new Set(),
+    walletState: new Set(),
     connectionStateChanged: new Set(),
   };
 
@@ -124,6 +135,7 @@ export class SpilloramaSocket {
     jackpotActivated: [],
     miniGameTrigger: [],
     miniGameResult: [],
+    walletState: [],
     connectionStateChanged: [],
   };
 
@@ -297,6 +309,13 @@ export class SpilloramaSocket {
 
     this.socket.on(SocketEvents.MINI_GAME_RESULT, (payload: MiniGameResultPayload) => {
       this.dispatchOrBuffer("miniGameResult", payload);
+    });
+
+    // BIN-760: autoritativ wallet-state-push. Replays via dispatchOrBuffer
+    // som alle andre kanaler — hvis bridge subscribes etter første push,
+    // får den replay av buffer.
+    this.socket.on(SocketEvents.WALLET_STATE, (payload: WalletStateEvent) => {
+      this.dispatchOrBuffer("walletState", payload);
     });
   }
 

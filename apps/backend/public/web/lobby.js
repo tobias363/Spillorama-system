@@ -398,6 +398,9 @@
   var _balanceRefetchTimer = null;
   var _balanceRefreshReqHandler = null;
   var _lastBalanceSeen = null; // dedup på event-nivå (gross-saldo fra socket)
+  // BIN-760: autoritativ wallet:state — preferred over `balanceChanged`.
+  var _walletStateHandler = null;
+  var _lastWalletStateTs = null; // dedup på serverTimestamp
 
   function _scheduleBalanceRefetch() {
     if (_balanceRefetchTimer) return;
@@ -464,6 +467,49 @@
     };
     window.addEventListener('spillorama:balanceChanged', _balanceSyncHandler);
     window.addEventListener('spillorama:balanceRefreshRequested', _balanceRefreshReqHandler);
+
+    // ── BIN-760: autoritativ wallet:state — preferred over balanceChanged ──
+    // Server pusher denne via dedikert 'wallet:state' socket-event etter
+    // hver wallet-mutasjon. Payload har {balance, depositBalance,
+    // winningsBalance, reservedAmount, availableBalance, ...} — alt
+    // chip-en trenger uten refetch. dedup-på-serverTimestamp slik at
+    // out-of-order replay over reconnect ikke overskriver nyere state.
+    _walletStateHandler = function (e) {
+      var ev = (e && e.detail) || null;
+      if (!ev || !ev.account) return;
+      var ts = (typeof ev.serverTimestamp === 'number') ? ev.serverTimestamp : 0;
+      if (_lastWalletStateTs !== null && ts < _lastWalletStateTs) return;
+      _lastWalletStateTs = ts;
+
+      var acct = ev.account;
+      // Bygg account-objekt i samme form som applyWalletToHeader forventer.
+      // availableDeposit/availableWinnings er optional på serveren — fall
+      // tilbake til deposit/winnings hvis ingen reservasjoner aktive.
+      var ad = (typeof acct.availableDeposit === 'number') ? acct.availableDeposit : acct.depositBalance;
+      var aw = (typeof acct.availableWinnings === 'number') ? acct.availableWinnings : acct.winningsBalance;
+      var ab = (typeof acct.availableBalance === 'number') ? acct.availableBalance : (ad + aw);
+      var availAccount = {
+        balance: acct.balance,
+        depositBalance: acct.depositBalance,
+        winningsBalance: acct.winningsBalance,
+        availableDeposit: ad,
+        availableWinnings: aw,
+        availableBalance: ab
+      };
+      applyWalletToHeader(availAccount);
+      if (lobbyState.wallet && lobbyState.wallet.account) {
+        lobbyState.wallet.account.balance = availAccount.balance;
+        lobbyState.wallet.account.depositBalance = availAccount.depositBalance;
+        lobbyState.wallet.account.winningsBalance = availAccount.winningsBalance;
+        lobbyState.wallet.account.availableDeposit = availAccount.availableDeposit;
+        lobbyState.wallet.account.availableWinnings = availAccount.availableWinnings;
+        lobbyState.wallet.account.availableBalance = availAccount.availableBalance;
+      }
+      // Synkroniser balanceChanged-dedup'en så en evt. duplikat fra
+      // room:update etter dette ikke trigger refetch.
+      _lastBalanceSeen = acct.balance;
+    };
+    window.addEventListener('spillorama:walletStateChanged', _walletStateHandler);
   }
 
   function stopGameBarSocketSync() {
@@ -475,11 +521,17 @@
       window.removeEventListener('spillorama:balanceRefreshRequested', _balanceRefreshReqHandler);
       _balanceRefreshReqHandler = null;
     }
+    // BIN-760: detach wallet:state handler.
+    if (_walletStateHandler) {
+      window.removeEventListener('spillorama:walletStateChanged', _walletStateHandler);
+      _walletStateHandler = null;
+    }
     if (_balanceRefetchTimer) {
       clearTimeout(_balanceRefetchTimer);
       _balanceRefetchTimer = null;
     }
     _lastBalanceSeen = null; // Reset event-dedup cache så ny start re-render'er korrekt.
+    _lastWalletStateTs = null; // BIN-760
   }
 
   // Called by the in-game back-button or shell when returning to lobby.

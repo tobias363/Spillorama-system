@@ -6,6 +6,7 @@ import type {
   JackpotActivatedPayload,
   MiniGameTriggerPayload,
   MiniGameResultPayload,
+  WalletStateEvent,
 } from "@spillorama/shared-types/socket-events";
 import type {
   RoomSnapshot,
@@ -134,6 +135,13 @@ export interface GameBridgeEvents {
    * (e.g. Oddsen choice-phase, losing color-draft pick).
    */
   miniGameResult: (data: MiniGameResultPayload) => void;
+  /**
+   * BIN-760: autoritativ wallet-state-push. Klient skal foretrekke
+   * denne over `room:update.me.balance` for chip-rendering — payload
+   * inkluderer reservedAmount + availableBalance og pusher uavhengig
+   * av room:update.
+   */
+  walletStateChanged: (event: WalletStateEvent) => void;
 }
 
 type EventMap = {
@@ -204,6 +212,13 @@ export class GameBridge {
    */
   private lastEmittedBalance: number | null = null;
 
+  /**
+   * BIN-760: serverTimestamp på sist mottatt `wallet:state`-event.
+   * Brukes i `handleWalletState` for å unngå out-of-order overskriving
+   * (reconnect kan replaye en eldre push før en nyere).
+   */
+  private lastWalletStateTs: number | null = null;
+
   private events: EventMap = {
     stateChanged: new Set(),
     gameStarted: new Set(),
@@ -214,6 +229,7 @@ export class GameBridge {
     jackpotActivated: new Set(),
     miniGameTrigger: new Set(),
     miniGameResult: new Set(),
+    walletStateChanged: new Set(),
   };
 
   constructor(socket: SpilloramaSocket) {
@@ -236,6 +252,10 @@ export class GameBridge {
       // BIN-690 PR-M6: new scheduled-games mini-game protocol.
       this.socket.on("miniGameTrigger", (data) => this.emit("miniGameTrigger", data)),
       this.socket.on("miniGameResult", (data) => this.emit("miniGameResult", data)),
+      // BIN-760: autoritativ wallet:state — re-emit + dispatch window-
+      // event så lobby-shell-en kan oppdatere chip uten å hoppe via
+      // room:update. Klient prefererer wallet:state over me.balance.
+      this.socket.on("walletState", (payload) => this.handleWalletState(payload)),
     );
   }
 
@@ -252,6 +272,7 @@ export class GameBridge {
     // re-emits the first balance update (host-side state may have
     // been refreshed independently).
     this.lastEmittedBalance = null;
+    this.lastWalletStateTs = null;
   }
 
   getState(): GameState {
@@ -537,6 +558,42 @@ export class GameBridge {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
+
+  /**
+   * BIN-760: handle autoritativ wallet:state-push.
+   *
+   * Hvorfor håndteres her i stedet for direkte i lobby-shell:
+   *   - Bridge eier socket-livssyklusen — én subscribe i GameBridge er
+   *     enklere enn N subscribers spredt utover.
+   *   - GameBridge kan dedupere per serverTimestamp slik at out-of-order
+   *     pushes (sjeldne, men mulig over reconnect) ikke forvirrer klienten.
+   *   - Window-event `spillorama:walletStateChanged` lar lobby-shell og
+   *     andre lyttere få samme oppdatering uten å koble seg til socket
+   *     direkte.
+   *
+   * Lobby-shell skal foretrekke denne event-en over den eldre
+   * `spillorama:balanceChanged` som var basert på room:update.
+   */
+  private handleWalletState(payload: WalletStateEvent): void {
+    // Dedup mot tidligere serverTimestamp — out-of-order push fra reconnect
+    // skal ikke overskrive nyere state. Gjeldende serverTimestamp lagres
+    // i lastWalletStateTs.
+    if (this.lastWalletStateTs !== null && payload.serverTimestamp < this.lastWalletStateTs) {
+      return;
+    }
+    this.lastWalletStateTs = payload.serverTimestamp;
+
+    // Window-event for lobby + andre window-level lyttere. Detail-payload
+    // inneholder hele event-en så lytteren kan velge hvilke felter den
+    // bryr seg om.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("spillorama:walletStateChanged", { detail: payload }),
+      );
+    }
+
+    this.emit("walletStateChanged", payload);
+  }
 
   private applyGameSnapshot(game: GameSnapshot, opts: { resetDrawIndex?: boolean } = {}): void {
     this.state.gameStatus = game.status;
