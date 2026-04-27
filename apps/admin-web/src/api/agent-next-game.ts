@@ -36,6 +36,15 @@ export interface AgentRoomSummary {
     gameSlug?: string;
     startedAt?: string;
     endsAt?: string;
+    /**
+     * Tobias 2026-04-27 (pilot-test feedback): backend sender nå disse
+     * tre feltene med basic-list-respons (uten ?includeSnapshots) slik at
+     * agent-UI kan vise "Klar for ny runde"-affordance på ENDED-rom +
+     * forklare hvorfor (BINGO_CLAIMED / MAX_DRAWS_REACHED / MANUAL_END).
+     */
+    endedAt?: string | null;
+    endedReason?: string | null;
+    isPaused?: boolean;
     ticketPrice?: number;
     minTicketCount?: number;
     luckyNumberPrize?: number;

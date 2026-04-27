@@ -584,6 +584,7 @@ function renderCurrentGame(): string {
         </div>
       </div>
       <div class="box-body">
+        ${renderEndedCallout()}
         <table class="table table-condensed" style="margin-bottom:0;">
           <tbody>
             <tr>
@@ -631,6 +632,58 @@ function renderJackpotIndicator(): string {
     </span>`;
 }
 
+/**
+ * Tobias 2026-04-27 (pilot-test feedback): tydelig "Klar for ny runde"-
+ * callout når rommet er i ENDED-state. Brukeren rapporterte under pilot
+ * 2026-04-27 at restart-flyten var uoppdagelig — selve start-knappen var
+ * synlig, men det var ikke tydelig at en runde nettopp var avsluttet.
+ * Calloutten forklarer state + reason og gir tydelig affordance til
+ * Start-knappen i action-raden.
+ */
+function renderEndedCallout(): string {
+  const game = state.activeRoom?.currentGame;
+  if (!game) return "";
+  if (game.status !== "ENDED") return "";
+  const reasonLabel = formatEndedReason(game.endedReason);
+  const endedAt = formatIso(game.endedAt);
+  return `
+    <div class="alert alert-success" data-marker="agent-ng-ended-callout"
+         style="margin-bottom:12px;border-left:4px solid #00a65a;">
+      <strong><i class="fa fa-check-circle" aria-hidden="true"></i>
+        ${escapeHtml(t("agent_next_game_ended_callout_title"))}
+      </strong>
+      <p style="margin-top:6px;margin-bottom:0;">
+        ${escapeHtml(t("agent_next_game_ended_callout_body"))}
+      </p>
+      ${reasonLabel ? `
+        <p class="text-muted small" style="margin-top:6px;margin-bottom:0;">
+          ${escapeHtml(t("agent_next_game_ended_reason"))}: ${escapeHtml(reasonLabel)}
+          ${endedAt !== "—" ? ` (${escapeHtml(endedAt)})` : ""}
+        </p>` : ""}
+    </div>`;
+}
+
+/**
+ * Map backend's machine-readable `endedReason` til norsk forklaring for
+ * sluttbruker. Kjente koder: BINGO_CLAIMED (en spiller fikk Fullt Hus),
+ * MAX_DRAWS_REACHED / DRAW_BAG_EMPTY (alle baller trukket uten Fullt Hus),
+ * MANUAL_END (admin/agent avbrøt). Ukjent kode → returner råverdi.
+ */
+function formatEndedReason(reason?: string | null): string {
+  if (!reason) return "";
+  switch (reason) {
+    case "BINGO_CLAIMED":
+      return t("agent_next_game_ended_reason_bingo");
+    case "MAX_DRAWS_REACHED":
+    case "DRAW_BAG_EMPTY":
+      return t("agent_next_game_ended_reason_max_draws");
+    case "MANUAL_END":
+      return t("agent_next_game_ended_reason_manual");
+    default:
+      return reason;
+  }
+}
+
 function renderCountdown(): string {
   if (!state.countdownEndsAt) return "";
   const remainingMs = Math.max(0, state.countdownEndsAt - Date.now());
@@ -655,6 +708,14 @@ function renderActions(): string {
   const canPause = gameStatus === "RUNNING";
   const canResume = gameStatus === "PAUSED";
   const canForceEnd = gameStatus === "RUNNING" || gameStatus === "PAUSED";
+  // Tobias 2026-04-27 (pilot-test feedback): når rommet er i ENDED-state,
+  // gi Start-knappen større visuell vekt og endre label til "Start ny runde"
+  // så det er tydelig at det starter en NY runde, ikke fortsetter forrige.
+  const isEnded = gameStatus === "ENDED";
+  const startLabel = isEnded
+    ? t("agent_next_game_start_new_round")
+    : t("agent_next_game_start");
+  const startBtnClass = isEnded ? "btn btn-success btn-lg" : "btn btn-success";
   return `
     <div class="box box-default" data-marker="agent-ng-actions">
       <div class="box-header with-border">
@@ -662,8 +723,9 @@ function renderActions(): string {
       </div>
       <div class="box-body">
         <div class="btn-group" role="group" style="gap:8px;">
-          <button class="btn btn-success" data-action="start-next" ${canStart ? "" : "disabled"}>
-            <i class="fa fa-play" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_start"))}
+          <button class="${startBtnClass}" data-action="start-next" ${canStart ? "" : "disabled"}
+                  ${isEnded ? `data-marker="agent-ng-start-new-round"` : ""}>
+            <i class="fa fa-play" aria-hidden="true"></i> ${escapeHtml(startLabel)}
           </button>
           <button class="btn btn-warning" data-action="pause" ${canPause ? "" : "disabled"}>
             <i class="fa fa-pause" aria-hidden="true"></i> ${escapeHtml(t("agent_next_game_pause"))}
@@ -931,6 +993,23 @@ async function onStartNext(): Promise<void> {
     Toast.success(t("agent_next_game_started"));
     await refresh();
   } catch (err) {
+    // Tobias 2026-04-27 (pilot-test feedback): map de nye pre-flight-
+    // feilkodene til i18n-mappede norske meldinger så bingoverten
+    // skjønner hva som mangler i admin-konfig før hun kan starte.
+    if (err instanceof ApiError) {
+      if (err.code === "HALL_NOT_IN_GROUP") {
+        Toast.error(t("agent_next_game_err_hall_not_in_group"));
+        return;
+      }
+      if (err.code === "NO_SCHEDULE_FOR_HALL_GROUP") {
+        Toast.error(t("agent_next_game_err_no_schedule"));
+        return;
+      }
+      if (err.code === "PRE_FLIGHT_DB_ERROR") {
+        Toast.error(t("agent_next_game_err_preflight_db"));
+        return;
+      }
+    }
     const msg = err instanceof Error ? err.message : String(err);
     Toast.error(msg);
   }
