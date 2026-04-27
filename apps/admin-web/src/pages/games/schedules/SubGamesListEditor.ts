@@ -554,6 +554,13 @@ export interface SubGamesListEditorHandle {
   validate(): string | null;
   /** Antall rader (0 når tom). */
   count(): number;
+  /**
+   * G1: Programmatisk reorder — flytt raden på `fromIndex` til `toIndex`.
+   * Brukes av drag-and-drop-flyten under panseret, og er også tilgjengelig
+   * for tester / fremtidig keyboard-aksessibilitet (pil-opp/-ned-flytting).
+   * Out-of-range eller likeverdige indekser er no-op.
+   */
+  moveRow(fromIndex: number, toIndex: number): void;
 }
 
 export function mountSubGamesListEditor(
@@ -561,6 +568,13 @@ export function mountSubGamesListEditor(
   initial: ScheduleSubgame[]
 ): SubGamesListEditorHandle {
   const rows: SubGameRowState[] = initial.map((sg) => subgameToRowState(sg));
+
+  // G1 (legacy paritet): native HTML5 drag-and-drop reordering av sub-game-rader.
+  // Vi sporer index på den raden brukeren drar fra her — null når ingen drag pågår.
+  // Drop-target-index bestemmes per drop-event ved å lese `data-sg-index` på
+  // det `.sg-row`-elementet eventet treffer. Vi har ingen ny library — kun
+  // native API for å holde admin-web-deps lette.
+  let dragSourceIndex: number | null = null;
 
   function render(): void {
     if (rows.length === 0) {
@@ -785,11 +799,27 @@ export function mountSubGamesListEditor(
     const title = row.name.trim()
       ? escapeHtml(row.name.trim())
       : `${escapeHtml(t("schedule_subgames_row_label"))} ${index + 1}`;
+    // G1: drag-handle. `draggable="true"` ligger på handle-elementet, ikke på
+    // hele `.sg-row` — slik at brukere kan markere/kopiere tekst i feltene
+    // uten å trigge drag. dragstart-event boblar opp og finner riktig rad
+    // via closest(".sg-row").
+    const dragHandleLabel =
+      t("schedule_subgames_drag_handle") || "Dra for å endre rekkefølge";
     return `
       <div class="sg-row" data-sg-index="${index}"
            style="border:1px solid #e5e5e5;border-radius:3px;padding:10px;margin-bottom:8px;background:#fafafa;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <strong>${title}</strong>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="sg-row-drag-handle" data-sg-drag-handle="1"
+                  draggable="true"
+                  role="button"
+                  tabindex="0"
+                  aria-label="${escapeHtml(dragHandleLabel)}"
+                  title="${escapeHtml(dragHandleLabel)}"
+                  style="cursor:grab;display:inline-block;padding:0 4px;color:#888;font-size:16px;line-height:1;user-select:none;"
+            >&#x2630;</span>
+            <strong>${title}</strong>
+          </div>
           <button type="button" class="btn btn-xs btn-danger" data-sg-action="remove"
                   aria-label="${escapeHtml(t("schedule_subgames_remove_btn"))}"
                   title="${escapeHtml(t("schedule_subgames_remove_btn"))}">×</button>
@@ -1086,6 +1116,113 @@ export function mountSubGamesListEditor(
         input.addEventListener("input", onChange);
         input.addEventListener("change", onChange);
       });
+
+    // G1 (legacy SortableJS-paritet): native HTML5 drag-and-drop på sub-game-rader.
+    //
+    // Vi setter `draggable="true"` på drag-handle (≡-spannet) — ikke på hele
+    // raden — slik at admin kan markere/kopiere tekst i feltene uten å
+    // trigge drag. dragstart leser parent .sg-row's `data-sg-index` for å
+    // finne kilde-indeksen. dragover/dragenter på en .sg-row-target gir
+    // visuell ramme. drop splicer rows-arrayen og re-rendrer; rekkefølgen
+    // persisteres via getSubGames() når admin trykker Submit.
+    //
+    // Edge cases håndtert:
+    //   - drop på samme rad (samme idx) → no-op
+    //   - drop utenfor en rad (f.eks. på empty/footer) → no-op
+    //   - tastatur-tilgjengelighet er ikke 1:1 dekket; legacy SortableJS
+    //     hadde samme begrensning. Skjermlesere kan fortsatt slette + legge
+    //     til via Add/Remove-knappene.
+    const clearDragOver = (): void => {
+      host.querySelectorAll<HTMLElement>(".sg-row").forEach((el) => {
+        el.classList.remove("sg-row--drag-over");
+        el.classList.remove("sg-row--dragging");
+      });
+    };
+
+    host
+      .querySelectorAll<HTMLElement>('[data-sg-drag-handle="1"]')
+      .forEach((handle) => {
+        handle.addEventListener("dragstart", (ev) => {
+          const dragEv = ev as DragEvent;
+          const container = (dragEv.target as HTMLElement | null)?.closest(
+            ".sg-row"
+          );
+          if (!container) return;
+          const idx = Number(container.getAttribute("data-sg-index") ?? "-1");
+          if (idx < 0 || idx >= rows.length) return;
+          dragSourceIndex = idx;
+          // Markér data slik at vi vet at dette er vår egen drag (mot
+          // f.eks. tekst-drags fra felter). Bruk index som payload —
+          // closure-state er den autoritative kilden, dataTransfer er
+          // backup for cross-frame-drop som vi ikke støtter.
+          if (dragEv.dataTransfer) {
+            dragEv.dataTransfer.effectAllowed = "move";
+            try {
+              dragEv.dataTransfer.setData("text/x-sg-row-index", String(idx));
+            } catch {
+              // Noen miljøer blokkerer setData — closure-state holder.
+            }
+          }
+          (container as HTMLElement).classList.add("sg-row--dragging");
+        });
+        handle.addEventListener("dragend", () => {
+          dragSourceIndex = null;
+          clearDragOver();
+        });
+      });
+
+    host.querySelectorAll<HTMLElement>(".sg-row").forEach((rowEl) => {
+      rowEl.addEventListener("dragover", (ev) => {
+        if (dragSourceIndex === null) return;
+        // Default-behavior på dragover er å avvise drop. preventDefault
+        // er det som forteller browseren at dette er et gyldig drop-target.
+        ev.preventDefault();
+        const dragEv = ev as DragEvent;
+        if (dragEv.dataTransfer) {
+          dragEv.dataTransfer.dropEffect = "move";
+        }
+      });
+      rowEl.addEventListener("dragenter", (ev) => {
+        if (dragSourceIndex === null) return;
+        ev.preventDefault();
+        const targetIdx = Number(rowEl.getAttribute("data-sg-index") ?? "-1");
+        if (targetIdx === dragSourceIndex) return;
+        rowEl.classList.add("sg-row--drag-over");
+      });
+      rowEl.addEventListener("dragleave", (ev) => {
+        // dragleave fyrer også når musen entrer et child-element. Vi
+        // fjerner highlight kun når vi forlater raden helt — sjekk om
+        // relatedTarget er utenfor raden.
+        const related = (ev as DragEvent).relatedTarget as Node | null;
+        if (related && rowEl.contains(related)) return;
+        rowEl.classList.remove("sg-row--drag-over");
+      });
+      rowEl.addEventListener("drop", (ev) => {
+        if (dragSourceIndex === null) return;
+        ev.preventDefault();
+        const targetIdx = Number(rowEl.getAttribute("data-sg-index") ?? "-1");
+        const sourceIdx = dragSourceIndex;
+        dragSourceIndex = null;
+        clearDragOver();
+        if (
+          targetIdx < 0 ||
+          targetIdx >= rows.length ||
+          sourceIdx < 0 ||
+          sourceIdx >= rows.length ||
+          sourceIdx === targetIdx
+        ) {
+          return;
+        }
+        // Splice ut kilde, sett inn på target-posisjon. Når kilden
+        // ligger før target og fjernes, justeres target-indeksen ned med 1
+        // — splice-operasjonen tar seg av dette implicit fordi vi splicer
+        // i to steg.
+        const moved = rows.splice(sourceIdx, 1)[0];
+        if (!moved) return;
+        rows.splice(targetIdx, 0, moved);
+        render();
+      });
+    });
   }
 
   render();
@@ -1110,6 +1247,23 @@ export function mountSubGamesListEditor(
     },
     count(): number {
       return rows.length;
+    },
+    moveRow(fromIndex: number, toIndex: number): void {
+      if (
+        !Number.isInteger(fromIndex) ||
+        !Number.isInteger(toIndex) ||
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        fromIndex >= rows.length ||
+        toIndex < 0 ||
+        toIndex >= rows.length
+      ) {
+        return;
+      }
+      const moved = rows.splice(fromIndex, 1)[0];
+      if (!moved) return;
+      rows.splice(toIndex, 0, moved);
+      render();
     },
   };
 }

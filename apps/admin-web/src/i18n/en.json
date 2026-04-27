@@ -2358,6 +2358,7 @@
   "schedule_subgames_validate_error": "JSON error",
   "schedule_subgames_add_btn": "Add sub-game",
   "schedule_subgames_remove_btn": "Remove sub-game",
+  "schedule_subgames_drag_handle": "Drag to reorder",
   "schedule_subgames_empty_hint": "No sub-games added yet. Click \"Add sub-game\" to start.",
   "schedule_subgames_row_label": "Sub-game",
   "schedule_subgames_show_json_btn": "Show JSON",

@@ -2351,6 +2351,7 @@
   "schedule_subgames_validate_error": "JSON-feil",
   "schedule_subgames_add_btn": "Legg til underspill",
   "schedule_subgames_remove_btn": "Fjern underspill",
+  "schedule_subgames_drag_handle": "Dra for å endre rekkefølge",
   "schedule_subgames_empty_hint": "Ingen underspill lagt til ennå. Klikk \"Legg til underspill\" for å starte.",
   "schedule_subgames_row_label": "Underspill",
   "schedule_subgames_show_json_btn": "Vis JSON",

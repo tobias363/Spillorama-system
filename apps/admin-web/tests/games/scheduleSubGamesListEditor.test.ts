@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { initI18n } from "../../src/i18n/I18n.js";
 import { openScheduleEditorModal } from "../../src/pages/games/schedules/ScheduleEditorModal.js";
+import { mountSubGamesListEditor } from "../../src/pages/games/schedules/SubGamesListEditor.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -1243,5 +1244,238 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
       '[data-sg-field="spill1Variant"]'
     );
     expect(select!.value).toBe("");
+  });
+
+  // ── G1 (legacy SortableJS-paritet): drag-and-drop reordering ──────────────
+
+  describe("G1: drag-and-drop reordering", () => {
+    function mountWithRows(): {
+      host: HTMLElement;
+      handle: ReturnType<typeof mountSubGamesListEditor>;
+    } {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const handle = mountSubGamesListEditor(host, [
+        { name: "Alpha", startTime: "10:00" },
+        { name: "Beta", startTime: "11:00" },
+        { name: "Gamma", startTime: "12:00" },
+      ]);
+      return { host, handle };
+    }
+
+    it("hver rad har et drag-handle med draggable=true", () => {
+      const { host } = mountWithRows();
+      const handles = host.querySelectorAll<HTMLElement>(
+        '[data-sg-drag-handle="1"]'
+      );
+      expect(handles.length).toBe(3);
+      handles.forEach((h) => {
+        expect(h.getAttribute("draggable")).toBe("true");
+        expect(h.getAttribute("aria-label")).toBeTruthy();
+      });
+    });
+
+    it("moveRow flytter rad fra index 0 til 2 og oppdaterer DOM-rekkefølgen", () => {
+      const { host, handle } = mountWithRows();
+      handle.moveRow(0, 2);
+
+      const after = handle.getSubGames();
+      expect(after.map((sg) => sg.name)).toEqual(["Beta", "Gamma", "Alpha"]);
+
+      // DOM-rekkefølgen skal også reflektere flyttingen
+      const names = Array.from(
+        host.querySelectorAll<HTMLInputElement>('[data-sg-field="name"]')
+      ).map((el) => el.value);
+      expect(names).toEqual(["Beta", "Gamma", "Alpha"]);
+    });
+
+    it("moveRow flytter rad fra index 2 til 0", () => {
+      const { handle } = mountWithRows();
+      handle.moveRow(2, 0);
+      expect(handle.getSubGames().map((sg) => sg.name)).toEqual([
+        "Gamma",
+        "Alpha",
+        "Beta",
+      ]);
+    });
+
+    it("moveRow med samme indeks er no-op", () => {
+      const { handle } = mountWithRows();
+      handle.moveRow(1, 1);
+      expect(handle.getSubGames().map((sg) => sg.name)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+      ]);
+    });
+
+    it("moveRow med out-of-range indeks er no-op", () => {
+      const { handle } = mountWithRows();
+      handle.moveRow(-1, 1);
+      handle.moveRow(0, 99);
+      handle.moveRow(99, 0);
+      expect(handle.getSubGames().map((sg) => sg.name)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+      ]);
+    });
+
+    it("dragstart + drop-event på en annen rad reordrer listen", () => {
+      const { host, handle } = mountWithRows();
+
+      const rows = host.querySelectorAll<HTMLElement>(".sg-row");
+      const handle0 = rows[0]!.querySelector<HTMLElement>(
+        '[data-sg-drag-handle="1"]'
+      )!;
+
+      // dragstart fra rad 0
+      const dragStart = new Event("dragstart", { bubbles: true });
+      handle0.dispatchEvent(dragStart);
+
+      // drop på rad 2
+      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+      rows[2]!.dispatchEvent(dropEvent);
+
+      // Etter drop skal rekkefølgen være: Beta, Gamma, Alpha (Alpha flyttet til slutt)
+      const after = handle.getSubGames();
+      expect(after.map((sg) => sg.name)).toEqual(["Beta", "Gamma", "Alpha"]);
+    });
+
+    it("drop uten forutgående dragstart er no-op", () => {
+      const { host, handle } = mountWithRows();
+      const rows = host.querySelectorAll<HTMLElement>(".sg-row");
+      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+      rows[1]!.dispatchEvent(dropEvent);
+      // Ingen drag aktiv → ingen endring
+      expect(handle.getSubGames().map((sg) => sg.name)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+      ]);
+    });
+
+    it("dragend nullstiller drag-state slik at neste drop blir no-op", () => {
+      const { host, handle } = mountWithRows();
+      const rows = host.querySelectorAll<HTMLElement>(".sg-row");
+      const handle0 = rows[0]!.querySelector<HTMLElement>(
+        '[data-sg-drag-handle="1"]'
+      )!;
+      handle0.dispatchEvent(new Event("dragstart", { bubbles: true }));
+      handle0.dispatchEvent(new Event("dragend", { bubbles: true }));
+
+      // Drop nå — uten ny dragstart — skal være no-op
+      rows[2]!.dispatchEvent(
+        new Event("drop", { bubbles: true, cancelable: true })
+      );
+      expect(handle.getSubGames().map((sg) => sg.name)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+      ]);
+    });
+
+    it("drop på samme rad er no-op", () => {
+      const { host, handle } = mountWithRows();
+      const rows = host.querySelectorAll<HTMLElement>(".sg-row");
+      const handle1 = rows[1]!.querySelector<HTMLElement>(
+        '[data-sg-drag-handle="1"]'
+      )!;
+      handle1.dispatchEvent(new Event("dragstart", { bubbles: true }));
+      rows[1]!.dispatchEvent(
+        new Event("drop", { bubbles: true, cancelable: true })
+      );
+      expect(handle.getSubGames().map((sg) => sg.name)).toEqual([
+        "Alpha",
+        "Beta",
+        "Gamma",
+      ]);
+    });
+
+    it("moveRow bevarer alle felt i raden (ikke bare navn)", () => {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const handle = mountSubGamesListEditor(host, [
+        { name: "First", startTime: "09:00", endTime: "09:30", minseconds: 5 },
+        { name: "Second", startTime: "10:00", endTime: "10:30", minseconds: 7 },
+      ]);
+      handle.moveRow(0, 1);
+      const after = handle.getSubGames();
+      expect(after).toHaveLength(2);
+      expect(after[0]).toMatchObject({ name: "Second", startTime: "10:00", minseconds: 7 });
+      expect(after[1]).toMatchObject({ name: "First", startTime: "09:00", minseconds: 5 });
+    });
+
+    it("etter moveRow + Submit i full modal-flyt: POST sender ny rekkefølge", async () => {
+      const fetchMock = installFetch((_url, init) => {
+        if (init && init.method === "POST") {
+          const body = JSON.parse(init.body as string);
+          return successResponse({
+            id: "sch-new",
+            scheduleName: body.scheduleName,
+            scheduleNumber: "SID_X",
+            scheduleType: body.scheduleType ?? "Auto",
+            luckyNumberPrize: 0,
+            status: "active",
+            isAdminSchedule: true,
+            manualStartTime: "",
+            manualEndTime: "",
+            subGames: body.subGames ?? [],
+            createdBy: null,
+            createdAt: "",
+            updatedAt: "",
+          });
+        }
+        return successResponse({});
+      });
+
+      await openScheduleEditorModal({ mode: "create" });
+      await flush();
+      document.querySelector<HTMLInputElement>("#sch-name")!.value = "DnD";
+
+      // Legg til 3 rader
+      for (let i = 0; i < 3; i++) {
+        document
+          .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+          .click();
+        await flush();
+      }
+      const rows = document.querySelectorAll<HTMLElement>(".sg-row");
+      const setName = (idx: number, name: string): void => {
+        const inp = rows[idx]!.querySelector<HTMLInputElement>(
+          '[data-sg-field="name"]'
+        )!;
+        inp.value = name;
+        inp.dispatchEvent(new Event("input"));
+      };
+      setName(0, "First");
+      setName(1, "Second");
+      setName(2, "Third");
+
+      // Drag rad 0 (First) → drop på rad 2 (Third) → ny rekkefølge: Second, Third, First
+      const liveRows = document.querySelectorAll<HTMLElement>(".sg-row");
+      const dragHandle0 = liveRows[0]!.querySelector<HTMLElement>(
+        '[data-sg-drag-handle="1"]'
+      )!;
+      dragHandle0.dispatchEvent(new Event("dragstart", { bubbles: true }));
+      liveRows[2]!.dispatchEvent(
+        new Event("drop", { bubbles: true, cancelable: true })
+      );
+      await flush();
+
+      getConfirmButton().click();
+      await flush();
+
+      const postCall = fetchMock.mock.calls.find(
+        (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+      );
+      expect(postCall).toBeTruthy();
+      const body = JSON.parse((postCall![1] as RequestInit).body as string);
+      expect(body.subGames.map((sg: { name: string }) => sg.name)).toEqual([
+        "Second",
+        "Third",
+        "First",
+      ]);
+    });
   });
 });
