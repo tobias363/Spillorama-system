@@ -354,7 +354,21 @@ class Game1Controller implements GameController {
     // for blink-effekten. Toasten gir ingen verdi når overlay uansett bare
     // var synlig i ~1s under en automatisk overgang.
     if (state.isPaused && !this.pauseOverlay?.isShowing()) {
-      this.pauseOverlay?.show(state.pauseMessage ?? undefined);
+      // MED-11: passere pauseUntil/pauseReason så overlay kan vise countdown
+      // eller en konkret norsk fallback-tekst i stedet for "Spillet er pauset".
+      this.pauseOverlay?.show({
+        message: state.pauseMessage ?? undefined,
+        pauseUntil: state.pauseUntil,
+        pauseReason: state.pauseReason,
+      });
+    } else if (state.isPaused && this.pauseOverlay?.isShowing()) {
+      // Allerede synlig — oppdater innholdet hvis backend har sendt nye
+      // verdier (f.eks. master forlenget pausen).
+      this.pauseOverlay.updateContent({
+        message: state.pauseMessage ?? undefined,
+        pauseUntil: state.pauseUntil,
+        pauseReason: state.pauseReason,
+      });
     } else if (!state.isPaused && this.pauseOverlay?.isShowing()) {
       this.pauseOverlay?.hide();
     }

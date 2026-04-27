@@ -62,6 +62,17 @@ export interface GameState {
   // BIN-460: Game pause state
   isPaused: boolean;
   pauseMessage: string | null;
+  /**
+   * MED-11: estimert resume-tidspunkt (ISO 8601, eller null hvis ukjent).
+   * Klient bruker dette til å vise countdown ("Spillet starter om 0:45").
+   */
+  pauseUntil: string | null;
+  /**
+   * MED-11: maskinlesbar grunn til pausen — `AWAITING_OPERATOR`,
+   * `MANUAL_PAUSE`, `MANUAL_PAUSE_5MIN`, `AUTO_PAUSE_PHASE_WON` osv.
+   * Brukes til å velge fallback-tekst når `pauseUntil` mangler.
+   */
+  pauseReason: string | null;
 
   // BIN-417: Active game variant info (from room:update.gameVariant)
   gameType: string;
@@ -544,6 +555,8 @@ export class GameBridge {
     this.state.patternResults = game.patternResults || [];
     this.state.isPaused = game.isPaused ?? false;
     this.state.pauseMessage = game.pauseMessage ?? null;
+    this.state.pauseUntil = game.pauseUntil ?? null;
+    this.state.pauseReason = game.pauseReason ?? null;
 
     // My tickets and marks
     if (this.myPlayerId) {
@@ -579,6 +592,8 @@ export class GameBridge {
       disableBuyAfterBalls: 0,
       isPaused: false,
       pauseMessage: null,
+      pauseUntil: null,
+      pauseReason: null,
       gameType: "standard",
       ticketTypes: [],
       replaceAmount: 0,

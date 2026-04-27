@@ -2399,13 +2399,33 @@ export class BingoEngine {
 
   // ── BIN-460: Game pause/resume ─────────────────────────────────────────────
 
-  pauseGame(roomCode: string, message?: string): void {
+  /**
+   * MED-11: pause-payload utvidet med `pauseUntil` (estimert resume-tid, ISO)
+   * og `pauseReason` (maskinlesbar grunn). Begge er valgfrie. Når `pauseUntil`
+   * er satt vil klient vise countdown; ellers viser klient en fallback-tekst
+   * basert på `pauseReason`.
+   */
+  pauseGame(
+    roomCode: string,
+    message?: string,
+    options?: { pauseUntil?: string; pauseReason?: string }
+  ): void {
     const room = this.requireRoom(roomCode);
     const game = this.requireRunningGame(room);
     if (game.isPaused) throw new DomainError("GAME_ALREADY_PAUSED", "Spillet er allerede pauset.");
     game.isPaused = true;
     game.pauseMessage = message ?? "Spillet er pauset av admin";
-    logger.info({ roomCode, gameId: game.id }, "Game paused");
+    game.pauseUntil = options?.pauseUntil;
+    game.pauseReason = options?.pauseReason;
+    logger.info(
+      {
+        roomCode,
+        gameId: game.id,
+        pauseUntil: game.pauseUntil,
+        pauseReason: game.pauseReason,
+      },
+      "Game paused"
+    );
   }
 
   resumeGame(roomCode: string): void {
@@ -2414,6 +2434,8 @@ export class BingoEngine {
     if (!game.isPaused) throw new DomainError("GAME_NOT_PAUSED", "Spillet er ikke pauset.");
     game.isPaused = false;
     game.pauseMessage = undefined;
+    game.pauseUntil = undefined;
+    game.pauseReason = undefined;
     logger.info({ roomCode, gameId: game.id }, "Game resumed");
   }
 
@@ -3440,6 +3462,8 @@ export class BingoEngine {
       participatingPlayerIds: game.participatingPlayerIds,
       isPaused: game.isPaused,
       pauseMessage: game.pauseMessage,
+      pauseUntil: game.pauseUntil,
+      pauseReason: game.pauseReason,
       isTestGame: game.isTestGame,
       startedAt: game.startedAt,
       endedAt: game.endedAt,

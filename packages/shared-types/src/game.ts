@@ -263,6 +263,25 @@ export interface GameSnapshot {
   /** BIN-460: True if admin has paused this game. */
   isPaused?: boolean;
   pauseMessage?: string;
+  /**
+   * MED-11: Estimated resume timestamp (ISO 8601). Hvis satt, skal klient vise
+   * en countdown ("Spillet starter om 0:45") i stedet for en åpen tekst.
+   * Når master ikke vet hvor lenge pausen varer, skal feltet være `undefined`
+   * og klient viser fallback-tekst basert på `pauseReason`.
+   */
+  pauseUntil?: string;
+  /**
+   * MED-11: Maskinlesbar grunn til pausen — brukes av klient til å velge
+   * passende kontekst-tekst når `pauseUntil` ikke er satt.
+   *
+   * - `AWAITING_OPERATOR`: Pause uten estimat, ofte fordi master venter på
+   *   handling fra hallvert (typisk Bingo-check).
+   * - `MANUAL_PAUSE`: Generisk manuell pause uten kjent varighet.
+   * - `MANUAL_PAUSE_5MIN`/`MANUAL_PAUSE_2MIN`/`MANUAL_PAUSE_1MIN`: Korte
+   *   manuelle pauser. Klient skal kombinere med `pauseUntil` når mulig.
+   * - `AUTO_PAUSE_PHASE_WON`: Engine auto-pauser etter en pattern-payout.
+   */
+  pauseReason?: string;
   /** BIN-463: Test game — no real money transactions. */
   isTestGame?: boolean;
   startedAt: string;

@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAdminHallHandlers } from "../adminHallEvents.js";
+import { createAdminHallHandlers, derivePauseEstimate } from "../adminHallEvents.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { PlatformService, HallDefinition } from "../../platform/PlatformService.js";
 import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
@@ -61,7 +61,11 @@ interface FakeRoom {
 }
 
 function makeEngineStub(rooms: FakeRoom[]) {
-  const calls = { pauseGame: [] as Array<{ roomCode: string; message?: string }>,
+  const calls = { pauseGame: [] as Array<{
+                    roomCode: string;
+                    message?: string;
+                    options?: { pauseUntil?: string; pauseReason?: string };
+                  }>,
                   resumeGame: [] as string[],
                   endGame: [] as Array<{ roomCode: string; reason?: string }> };
   return {
@@ -84,8 +88,12 @@ function makeEngineStub(rooms: FakeRoom[]) {
         } as unknown,
       };
     },
-    pauseGame: (code: string, message?: string) => {
-      calls.pauseGame.push({ roomCode: code, message });
+    pauseGame: (
+      code: string,
+      message?: string,
+      options?: { pauseUntil?: string; pauseReason?: string },
+    ) => {
+      calls.pauseGame.push({ roomCode: code, message, options });
       const r = rooms.find((x) => x.code === code.toUpperCase());
       if (!r) throw new Error(`unknown room ${code}`);
       r.isPaused = true;
@@ -393,4 +401,91 @@ test("BIN-585: admin:hall-balance treats un-funded house account as zero balance
     (a) => a.channel === "HALL" && a.gameType === "DATABINGO",
   );
   assert.equal(hall?.balance, 0, "missing account must be reported as zero");
+});
+
+// ── MED-11: pause-estimate context-passing ─────────────────────────────────
+
+test("MED-11 derivePauseEstimate: tom payload gir tomme felter", () => {
+  const r = derivePauseEstimate(undefined);
+  assert.equal(r.pauseUntil, undefined);
+  assert.equal(r.pauseReason, undefined);
+});
+
+test("MED-11 derivePauseEstimate: gyldig pauseUntil i fremtiden videreformidles", () => {
+  const now = Date.parse("2026-04-26T12:00:00.000Z");
+  const future = new Date(now + 45_000).toISOString();
+  const r = derivePauseEstimate({ pauseUntil: future }, now);
+  assert.equal(r.pauseUntil, future);
+});
+
+test("MED-11 derivePauseEstimate: pauseUntil i fortiden ignoreres (fail-closed)", () => {
+  const now = Date.parse("2026-04-26T12:00:00.000Z");
+  const past = new Date(now - 1000).toISOString();
+  const r = derivePauseEstimate({ pauseUntil: past }, now);
+  assert.equal(r.pauseUntil, undefined);
+});
+
+test("MED-11 derivePauseEstimate: pauseEstimatedMinutes konverteres til pauseUntil", () => {
+  const now = Date.parse("2026-04-26T12:00:00.000Z");
+  const r = derivePauseEstimate({ pauseEstimatedMinutes: 5 }, now);
+  assert.equal(r.pauseUntil, new Date(now + 5 * 60_000).toISOString());
+});
+
+test("MED-11 derivePauseEstimate: pauseEstimatedMinutes > 60 avvises (cap mot UI-typo)", () => {
+  const now = Date.parse("2026-04-26T12:00:00.000Z");
+  const r = derivePauseEstimate({ pauseEstimatedMinutes: 1440 }, now);
+  assert.equal(r.pauseUntil, undefined);
+});
+
+test("MED-11 derivePauseEstimate: pauseEstimatedMinutes <= 0 avvises", () => {
+  const now = Date.parse("2026-04-26T12:00:00.000Z");
+  assert.equal(derivePauseEstimate({ pauseEstimatedMinutes: 0 }, now).pauseUntil, undefined);
+  assert.equal(derivePauseEstimate({ pauseEstimatedMinutes: -5 }, now).pauseUntil, undefined);
+});
+
+test("MED-11 derivePauseEstimate: pauseUntil eksplisitt har forrang over pauseEstimatedMinutes", () => {
+  const now = Date.parse("2026-04-26T12:00:00.000Z");
+  const explicit = new Date(now + 30_000).toISOString();
+  const r = derivePauseEstimate({ pauseUntil: explicit, pauseEstimatedMinutes: 10 }, now);
+  assert.equal(r.pauseUntil, explicit);
+});
+
+test("MED-11 derivePauseEstimate: pauseReason normaliseres og clampes til 64 tegn", () => {
+  const long = "AWAITING_OPERATOR_VERY_LONG_REASON_THAT_WILL_BE_CLAMPED_AT_THE_LIMIT_____EXTRA_OVERFLOW";
+  const r = derivePauseEstimate({ pauseReason: long });
+  assert.ok(r.pauseReason);
+  assert.ok(r.pauseReason!.length <= 64);
+  // Tomt etter trim ignoreres
+  assert.equal(derivePauseEstimate({ pauseReason: "   " }).pauseReason, undefined);
+});
+
+test("MED-11 admin:pause-game videreformidler pauseUntil + pauseReason til engine", async () => {
+  const { sock, engine } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  // Bruk en framtidig ISO-tid så derivePauseEstimate ikke filtrerer den vekk.
+  const future = new Date(Date.now() + 60_000).toISOString();
+  const r = await sock.fire("admin:pause-game", {
+    roomCode: "ROOM-A",
+    message: "Sjekk billett",
+    pauseUntil: future,
+    pauseReason: "AWAITING_OPERATOR",
+  });
+  assert.equal(r.ok, true);
+  const calls = (engine as unknown as {
+    __calls: { pauseGame: Array<{ options?: { pauseUntil?: string; pauseReason?: string } }> };
+  }).__calls;
+  assert.equal(calls.pauseGame[0].options?.pauseUntil, future);
+  assert.equal(calls.pauseGame[0].options?.pauseReason, "AWAITING_OPERATOR");
+});
+
+test("MED-11 admin:pause-game uten estimat sender undefined options-felter (klient faller tilbake til 'Venter på hall-operatør')", async () => {
+  const { sock, engine } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire("admin:pause-game", { roomCode: "ROOM-A" });
+  assert.equal(r.ok, true);
+  const calls = (engine as unknown as {
+    __calls: { pauseGame: Array<{ options?: { pauseUntil?: string; pauseReason?: string } }> };
+  }).__calls;
+  assert.equal(calls.pauseGame[0].options?.pauseUntil, undefined);
+  assert.equal(calls.pauseGame[0].options?.pauseReason, undefined);
 });

@@ -146,6 +146,9 @@ export const GameSnapshotSchema = z.object({
   participatingPlayerIds: z.array(z.string()).optional(),
   isPaused: z.boolean().optional(),
   pauseMessage: z.string().optional(),
+  // MED-11: estimert resume + maskinlesbar grunn (se game.ts for full doc).
+  pauseUntil: IsoDateString.optional(),
+  pauseReason: z.string().optional(),
   isTestGame: z.boolean().optional(),
   startedAt: IsoDateString,
   endedAt: IsoDateString.optional(),

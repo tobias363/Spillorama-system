@@ -93,7 +93,25 @@ interface AckResponse<T> {
 
 interface AdminLoginPayload { accessToken?: string }
 interface RoomReadyPayload { roomCode?: string; countdownSeconds?: number; message?: string }
-interface PauseGamePayload { roomCode?: string; message?: string }
+/**
+ * MED-11: utvidet med valgfri `pauseUntil` (estimert resume-tidspunkt, ISO 8601)
+ * og `pauseReason` (maskinlesbar grunn — `AWAITING_OPERATOR`, `MANUAL_PAUSE_5MIN`,
+ * etc.). Begge brukes av klient til å vise countdown / kontekst-tekst i stedet
+ * for den åpne "Spillet er pauset"-meldingen.
+ */
+interface PauseGamePayload {
+  roomCode?: string;
+  message?: string;
+  pauseUntil?: string;
+  pauseReason?: string;
+  /**
+   * MED-11: alternativt til `pauseUntil` — antall minutter pausen forventes
+   * å vare. Backend regner ut `pauseUntil = now + minutes*60_000` hvis
+   * `pauseUntil` ikke er satt direkte. Begrenset til 0 < minutes <= 60 for
+   * å unngå at en typo i UI gir 24t pause-display.
+   */
+  pauseEstimatedMinutes?: number;
+}
 interface ResumeGamePayload { roomCode?: string }
 interface ForceEndPayload { roomCode?: string; reason?: string }
 
@@ -112,6 +130,45 @@ export interface AdminHallEventBroadcast {
   message?: string;
   /** Audit trail — admin who triggered the event. */
   actor: { id: string; displayName: string };
+}
+
+/**
+ * MED-11: Avled `pauseUntil` (ISO) og normalisert `pauseReason` fra payload.
+ *
+ * Eksportert for unit-test. Returnerer `undefined` for begge felter når
+ * payload ikke gir nok info, slik at klient faller tilbake til
+ * "Venter på hall-operatør".
+ *
+ * Regler:
+ *   - Hvis `pauseUntil` er en gyldig ISO-streng som er i fremtiden, brukes den.
+ *   - Ellers: hvis `pauseEstimatedMinutes` er et tall i (0, 60], regn ut
+ *     `pauseUntil = now + minutes*60_000`.
+ *   - `pauseReason` clampes til 64 tegn for å unngå at klient får en
+ *     uhåndterlig streng å vise.
+ */
+export function derivePauseEstimate(
+  payload: { pauseUntil?: string; pauseReason?: string; pauseEstimatedMinutes?: number } | null | undefined,
+  now: number = Date.now(),
+): { pauseUntil?: string; pauseReason?: string } {
+  let pauseUntil: string | undefined;
+  const rawUntil = payload?.pauseUntil;
+  if (typeof rawUntil === "string" && rawUntil.trim() !== "") {
+    const ts = Date.parse(rawUntil);
+    if (Number.isFinite(ts) && ts > now) {
+      pauseUntil = new Date(ts).toISOString();
+    }
+  }
+  if (!pauseUntil) {
+    const mins = payload?.pauseEstimatedMinutes;
+    if (typeof mins === "number" && Number.isFinite(mins) && mins > 0 && mins <= 60) {
+      pauseUntil = new Date(now + Math.floor(mins * 60_000)).toISOString();
+    }
+  }
+  let pauseReason: string | undefined;
+  if (typeof payload?.pauseReason === "string" && payload.pauseReason.trim() !== "") {
+    pauseReason = payload.pauseReason.trim().slice(0, 64);
+  }
+  return { pauseUntil, pauseReason };
 }
 
 export function createAdminHallHandlers(deps: AdminHallDeps) {
@@ -232,7 +289,8 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
         const message = typeof payload?.message === "string" ? payload.message.slice(0, 200) : undefined;
-        engine.pauseGame(roomCode, message);
+        const { pauseUntil, pauseReason } = derivePauseEstimate(payload);
+        engine.pauseGame(roomCode, message, { pauseUntil, pauseReason });
         await emitRoomUpdate(roomCode);
         const snapshot = engine.getRoomSnapshot(roomCode);
         broadcastHallEvent({

@@ -213,6 +213,17 @@ export interface GameState {
   /** BIN-460: Admin can pause a running game — freezes draws until resumed. */
   isPaused?: boolean;
   pauseMessage?: string;
+  /**
+   * MED-11: ISO 8601 timestamp for når master forventer å gjenoppta spillet.
+   * Brukes av klient til å vise countdown. `undefined` = ukjent varighet.
+   */
+  pauseUntil?: string;
+  /**
+   * MED-11: Maskinlesbar grunn til pausen (`AWAITING_OPERATOR`, `MANUAL_PAUSE`,
+   * `MANUAL_PAUSE_5MIN`, etc.). Brukes av klient til å velge fallback-tekst
+   * når `pauseUntil` ikke er satt.
+   */
+  pauseReason?: string;
   /** BIN-463: Test game — no real money transactions. */
   isTestGame?: boolean;
   startedAt: string;
@@ -279,6 +290,10 @@ export interface GameSnapshot {
   /** BIN-460: True if admin has paused this game. */
   isPaused?: boolean;
   pauseMessage?: string;
+  /** MED-11: estimert resume-tidspunkt (ISO 8601). Se GameState-doc. */
+  pauseUntil?: string;
+  /** MED-11: maskinlesbar grunn til pausen. Se GameState-doc. */
+  pauseReason?: string;
   /** BIN-463: Test game — no real money transactions. */
   isTestGame?: boolean;
   startedAt: string;
