@@ -184,17 +184,6 @@ export const routes: RouteDef[] = [
   // Wireframe §17.31 — agent-alias for sold-tickets-list (shift-scoped).
   { path: "/agent/sold-tickets", titleKey: "sold_tickets", roles: ["agent", "hall-operator"] },
 
-  { path: "/live/dashboard", titleKey: "spillorama_live_dashboard" },
-  { path: "/live/game-settings", titleKey: "spillorama_game_settings" },
-  { path: "/live/games", titleKey: "spillorama_games" },
-  { path: "/live/halls", titleKey: "spillorama_halls" },
-  { path: "/live/hall-display", titleKey: "spillorama_hall_display" },
-  { path: "/live/terminals", titleKey: "spillorama_terminals" },
-  { path: "/live/hall-rules", titleKey: "spillorama_hall_rules" },
-  { path: "/live/wallet-compliance", titleKey: "spillorama_wallet_compliance" },
-  { path: "/live/prize-policy", titleKey: "spillorama_prize_policy" },
-  { path: "/live/room-control", titleKey: "spillorama_room_control" },
-  { path: "/live/payment-requests", titleKey: "spillorama_payment_requests" },
 ];
 
 export function findRoute(path: string): RouteDef | undefined {

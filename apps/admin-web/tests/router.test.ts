@@ -52,10 +52,15 @@ describe("findRoute", () => {
   it("resolves known paths", () => {
     expect(findRoute("/admin")?.titleKey).toBe("dashboard");
     expect(findRoute("/player")?.titleKey).toBe("approved_players");
-    expect(findRoute("/live/dashboard")?.titleKey).toBe("spillorama_live_dashboard");
   });
 
   it("returns undefined for unknown", () => {
     expect(findRoute("/nope")).toBeUndefined();
+  });
+
+  it("does NOT resolve /live/* paths (Spillorama Live iframe-section fjernet 2026-04-27)", () => {
+    expect(findRoute("/live/dashboard")).toBeUndefined();
+    expect(findRoute("/live/halls")).toBeUndefined();
+    expect(findRoute("/live/payment-requests")).toBeUndefined();
   });
 });

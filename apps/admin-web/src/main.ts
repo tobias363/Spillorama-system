@@ -13,7 +13,6 @@ import { findRoute, type RouteDef } from "./router/routes.js";
 import { mountLayout, renderLayoutChrome, type LayoutRefs } from "./shell/Layout.js";
 import { renderPlaceholder, renderUnknown } from "./pages/Placeholder.js";
 import { mountPreAuthRoute, parsePreAuthRoute } from "./pages/login/index.js";
-import { mountLegacySection, isLegacySectionRoute } from "./pages/legacy-sections/LegacySectionMount.js";
 import { isCashInOutRoute, mountCashInOutRoute } from "./pages/cash-inout/index.js";
 import { isPlayerRoute, mountPlayerRoute } from "./pages/players/index.js";
 import { isPendingRoute, mountPendingRoute } from "./pages/pending/index.js";
@@ -413,10 +412,6 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   unmountDashboard();
   if (route.path !== "/agent/dashboard") {
     unmountAgentDashboard();
-  }
-  if (isLegacySectionRoute(route.path)) {
-    mountLegacySection(container, route.path);
-    return;
   }
   if (route.path === "/agent/dashboard") {
     mountAgentDashboard(container);
