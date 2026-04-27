@@ -81,6 +81,14 @@ interface CheckBingoQuickResponse {
   evaluatedAt?: string | null;
   /** Status fra room-snapshot (RUNNING/ENDED/WAITING) — null hvis spillet er borte. */
   gameStatus?: string | null;
+  /**
+   * 25 tall fra papir-bongen (kun satt når billetten ER stemplet, dvs.
+   * `requiresFullCheck=false`). Brukes av PAUSE-modalen i CashInOutPage til
+   * å rendre 5×5-grid med pattern-highlight (FOLLOWUP-12, wireframe §17.35).
+   * Index 12 (sentercelle) er konvensjonelt frittlagt — verdien kan være `0`
+   * eller annet sentinel.
+   */
+  numbersJson?: number[] | null;
 }
 
 export function createAdminRoomsCheckBingoRouter(
@@ -159,6 +167,8 @@ export function createAdminRoomsCheckBingoRouter(
       }
 
       // 5) Billetten ER stemplet — returner cached evalueringsresultat.
+      // numbersJson legges på response slik at PAUSE-modalen kan rendre
+      // 5×5-grid uten ekstra round-trip (FOLLOWUP-12, wireframe §17.35).
       const response: CheckBingoQuickResponse = {
         found: true,
         hallId: ticket.hallId,
@@ -172,6 +182,7 @@ export function createAdminRoomsCheckBingoRouter(
         gameStatus: ticket.assignedGameId
           ? findGameStatus(engine, roomCode, ticket.assignedGameId)
           : null,
+        numbersJson: ticket.numbersJson,
       };
       apiSuccess(res, response);
     } catch (error) {
