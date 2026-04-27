@@ -150,6 +150,8 @@ export const routes: RouteDef[] = [
   // BIN-655 — generisk transaksjonslogg + audit-logg.
   { path: "/transactions/log", titleKey: "transactions_log", module: "Transactions Management" },
   { path: "/auditLog", titleKey: "audit_log_title" },
+  // HIGH-11: chat-moderasjon (Casino Review). ADMIN + HALL_OPERATOR + SUPPORT.
+  { path: "/admin/chat-moderation", titleKey: "chat_moderation_title", roles: ["admin", "super-admin", "hall-operator"] },
 
   { path: "/agent/dashboard", titleKey: "agent_dashboard", roles: ["agent", "hall-operator"] },
   { path: "/agent/players", titleKey: "agent_players_title", roles: ["agent", "hall-operator"] },
