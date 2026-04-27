@@ -42,6 +42,9 @@ function escapeHtml(s: string): string {
 export function mountAgentCashInOut(container: HTMLElement): void {
   // 1. Render the canonical, legacy-ported cash-inout page (daily balance,
   //    settlement, slot machine, add/withdraw modals, F5/F6/F8 hotkeys).
+  //    The 1:1 legacy layout already includes a "Logg ut skift"-knapp i
+  //    page-actions-baren — vi wirer den her i agent-mountet, og legger
+  //    Register Sold Tickets-knappen i en separat seksjon under siden.
   renderCashInOutPage(container);
 
   // 2. Rewrite the breadcrumb link from `#/admin` to `#/agent/dashboard`.
@@ -54,8 +57,16 @@ export function mountAgentCashInOut(container: HTMLElement): void {
     breadcrumbLink.href = "#/agent/dashboard";
   }
 
-  // 3. Append agent-specific actions section (Register Sold Tickets +
-  //    Shift Log Out) below the existing `<section class="content">`.
+  // 3. Wire Shift Log Out-knappen som ligger i 1:1 page-actions-baren.
+  const shiftLogoutBtn = container.querySelector<HTMLButtonElement>(
+    '[data-action="shift-log-out"]',
+  );
+  shiftLogoutBtn?.addEventListener("click", () => {
+    openShiftLogoutModal();
+  });
+
+  // 4. Append agent-specific actions section (Register Sold Tickets) below
+  //    siden. Shift Log Out er allerede plassert i page-actions-baren.
   appendAgentActionsSection(container);
 }
 
@@ -78,9 +89,6 @@ function appendAgentActionsSection(container: HTMLElement): void {
                   data-action="register-sold-tickets">
             <i class="fa fa-ticket" aria-hidden="true"></i> ${escapeHtml(t("register_sold_tickets_button"))}
           </button>
-          <button type="button" class="btn btn-danger" data-action="shift-log-out">
-            <i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
-          </button>
         </div>
       </div>
     </div>`;
@@ -97,11 +105,6 @@ function appendAgentActionsSection(container: HTMLElement): void {
     openRegisterSoldTicketsModal({
       gameId: gameId.trim(),
     });
-  });
-
-  const logoutBtn = section.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
-  logoutBtn?.addEventListener("click", () => {
-    openShiftLogoutModal();
   });
 }
 

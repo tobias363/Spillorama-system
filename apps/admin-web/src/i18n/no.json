@@ -3097,5 +3097,13 @@
   "game5_oms": "Spill 5 OMS",
   "game5_utd": "Spill 5 UTD",
   "game5_payout_pct": "Spill 5 Payout%",
-  "game5_res": "Spill 5 RES"
+  "game5_res": "Spill 5 RES",
+  "cash_inout_standard_tab": "Standard",
+  "cash_inout_game_tab": "Spillmodul",
+  "no_upcoming_games_available": "Ingen kommende spill tilgjengelig...",
+  "no_ongoing_games_available": "Ingen pågående spill tilgjengelig...",
+  "create_new_unique_id": "Opprett Ny unik ID",
+  "withdraw_unique_id": "Ta ut Unik ID",
+  "withdraw_registered_user": "Ta ut Registrert bruker",
+  "add_money_registered_user": "Legg til penger Registrert bruker"
 }

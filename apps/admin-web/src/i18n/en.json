@@ -3102,5 +3102,13 @@
   "game5_oms": "Game 5 OMS",
   "game5_utd": "Game 5 UTD",
   "game5_payout_pct": "Game 5 Payout%",
-  "game5_res": "Game 5 RES"
+  "game5_res": "Game 5 RES",
+  "cash_inout_standard_tab": "Standard",
+  "cash_inout_game_tab": "Game module",
+  "no_upcoming_games_available": "No upcoming games available...",
+  "no_ongoing_games_available": "No ongoing games available...",
+  "create_new_unique_id": "Create New Unique ID",
+  "withdraw_unique_id": "Withdraw Unique ID",
+  "withdraw_registered_user": "Withdraw Registered User",
+  "add_money_registered_user": "Add Money Registered User"
 }
