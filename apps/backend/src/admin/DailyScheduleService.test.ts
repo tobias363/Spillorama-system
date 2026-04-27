@@ -496,6 +496,314 @@ test("BIN-626 service: createSpecial() passerer validering (pool-kall kastes ett
   }
 });
 
+// ── scheduleIdsByDay-validering (SUBGAME-PARITY P0) ─────────────────────────
+
+test("scheduleIdsByDay: gyldig 7-dagers schedule passerer create-validering", async () => {
+  const svc = makeValidatingService();
+  // Validering skal passere — pool-kall kaster etterpå med UNEXPECTED_POOL_CALL.
+  try {
+    await svc.create({
+      name: "Plan A",
+      startDate: "2026-05-01T10:00:00Z",
+      otherData: {
+        scheduleIdsByDay: {
+          monday: ["sched-1", "sched-2"],
+          tuesday: ["sched-3"],
+          wednesday: [],
+          thursday: ["sched-4"],
+          friday: ["sched-5"],
+          saturday: ["sched-6"],
+          sunday: ["sched-7"],
+        },
+      },
+      createdBy: "u-1",
+    });
+    assert.fail("forventet pool-feil");
+  } catch (err) {
+    assert.ok(err instanceof Error);
+    assert.ok(
+      !(err instanceof DomainError),
+      `validering skulle passere, fikk DomainError: ${(err as DomainError).code} - ${(err as DomainError).message}`,
+    );
+    assert.match((err as Error).message, /UNEXPECTED_POOL_CALL/);
+  }
+});
+
+test("scheduleIdsByDay: tom otherData (felt mangler) passerer create-validering", async () => {
+  const svc = makeValidatingService();
+  try {
+    await svc.create({
+      name: "Plan A",
+      startDate: "2026-05-01T10:00:00Z",
+      otherData: {},
+      createdBy: "u-1",
+    });
+    assert.fail("forventet pool-feil");
+  } catch (err) {
+    assert.ok(err instanceof Error);
+    assert.ok(
+      !(err instanceof DomainError),
+      `validering skulle passere, fikk DomainError: ${(err as DomainError).code}`,
+    );
+    assert.match((err as Error).message, /UNEXPECTED_POOL_CALL/);
+  }
+});
+
+test("scheduleIdsByDay: kun delvis ukedag-mapping (alle felt valgfri) passerer", async () => {
+  const svc = makeValidatingService();
+  try {
+    await svc.create({
+      name: "Plan A",
+      startDate: "2026-05-01T10:00:00Z",
+      otherData: {
+        scheduleIdsByDay: {
+          monday: ["sched-1"],
+        },
+      },
+      createdBy: "u-1",
+    });
+    assert.fail("forventet pool-feil");
+  } catch (err) {
+    assert.ok(err instanceof Error);
+    assert.ok(
+      !(err instanceof DomainError),
+      `validering skulle passere, fikk DomainError: ${(err as DomainError).code}`,
+    );
+  }
+});
+
+test("scheduleIdsByDay: null verdi tillates (fjerner binding)", async () => {
+  const svc = makeValidatingService();
+  try {
+    await svc.create({
+      name: "Plan A",
+      startDate: "2026-05-01T10:00:00Z",
+      otherData: { scheduleIdsByDay: null },
+      createdBy: "u-1",
+    });
+    assert.fail("forventet pool-feil");
+  } catch (err) {
+    assert.ok(err instanceof Error);
+    assert.ok(
+      !(err instanceof DomainError),
+      `validering skulle passere, fikk DomainError: ${(err as DomainError).code}`,
+    );
+  }
+});
+
+test("scheduleIdsByDay: ugyldig dag-key (holiday) → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "unknown day key",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: {
+            holiday: ["sched-1"],
+          },
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: typo i dag-navn (mondey) → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "typo day key",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: {
+            mondey: ["sched-1"],
+          },
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: duplikate IDer i samme ukedag → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "dup ids",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: {
+            monday: ["sched-1", "sched-2", "sched-1"],
+          },
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: tom string-ID → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "empty id",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: {
+            monday: [""],
+          },
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: ID som ikke er string → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "non-string id",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: {
+            monday: [123 as unknown as string],
+          },
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: array i stedet for object → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "array root",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: ["sched-1"] as unknown as never,
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: dag-verdi er ikke array (string) → INVALID_INPUT", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "non-array day value",
+    () =>
+      svc.create({
+        name: "Plan A",
+        startDate: "2026-05-01T10:00:00Z",
+        otherData: {
+          scheduleIdsByDay: {
+            monday: "sched-1" as unknown as string[],
+          },
+        },
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: update() avviser duplikate IDer", async () => {
+  const svc = makeValidatingService();
+  (svc as unknown as { get: (id: string) => Promise<unknown> }).get = async () => ({
+    id: "ds-1",
+    name: "x",
+    gameManagementId: null,
+    hallId: null,
+    hallIds: {},
+    weekDays: 0,
+    day: null,
+    startDate: "2026-05-01T10:00:00Z",
+    endDate: null,
+    startTime: "",
+    endTime: "",
+    status: "active" as const,
+    stopGame: false,
+    specialGame: false,
+    isSavedGame: false,
+    isAdminSavedGame: false,
+    innsatsenSales: 0,
+    subgames: [],
+    otherData: {},
+    createdBy: null,
+    createdAt: "2026-04-15T10:00:00Z",
+    updatedAt: "2026-04-15T10:00:00Z",
+    deletedAt: null,
+  });
+  await expectDomainError(
+    "update with dup ids",
+    () =>
+      svc.update("ds-1", {
+        otherData: {
+          scheduleIdsByDay: {
+            tuesday: ["s-1", "s-1"],
+          },
+        },
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("scheduleIdsByDay: update() avviser ugyldig dag-key", async () => {
+  const svc = makeValidatingService();
+  (svc as unknown as { get: (id: string) => Promise<unknown> }).get = async () => ({
+    id: "ds-1",
+    name: "x",
+    gameManagementId: null,
+    hallId: null,
+    hallIds: {},
+    weekDays: 0,
+    day: null,
+    startDate: "2026-05-01T10:00:00Z",
+    endDate: null,
+    startTime: "",
+    endTime: "",
+    status: "active" as const,
+    stopGame: false,
+    specialGame: false,
+    isSavedGame: false,
+    isAdminSavedGame: false,
+    innsatsenSales: 0,
+    subgames: [],
+    otherData: {},
+    createdBy: null,
+    createdAt: "2026-04-15T10:00:00Z",
+    updatedAt: "2026-04-15T10:00:00Z",
+    deletedAt: null,
+  });
+  await expectDomainError(
+    "update with bad day",
+    () =>
+      svc.update("ds-1", {
+        otherData: {
+          scheduleIdsByDay: {
+            funday: ["s-1"],
+          },
+        },
+      }),
+    "INVALID_INPUT",
+  );
+});
+
 test("BIN-626 service: remove() på slettet rad kaster DAILY_SCHEDULE_DELETED", async () => {
   const svc = makeValidatingService();
   (svc as unknown as { get: (id: string) => Promise<unknown> }).get = async () => ({

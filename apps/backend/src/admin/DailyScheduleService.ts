@@ -15,6 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { z } from "zod";
 import { DomainError } from "../game/BingoEngine.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { logger as rootLogger } from "../util/logger.js";
@@ -296,6 +297,86 @@ function assertObject(value: unknown, field: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/**
+ * SUBGAME-PARITY P0 — `scheduleIdsByDay` Zod-validering.
+ *
+ * Legacy `dailySchedule.days` hadde implicit per-ukedag-mapping av schedule-IDer.
+ * Vi lagrer dette i `other_data_json.scheduleIdsByDay` som en strukturert
+ * `Record<DayOfWeek, ScheduleId[]>`. Uten validering kan ukedag-keys være
+ * misskrevet, og ID-arrays kan ha duplikater eller tomme strenger — det vises
+ * først i produksjon når Game1ScheduleTickService mappes feil ukedag.
+ *
+ * Valideringen kjøres ved hver create/update av otherData og kaster
+ * DomainError("INVALID_INPUT") med presis melding.
+ */
+const SCHEDULE_ID_BY_DAY_KEY = "scheduleIdsByDay" as const;
+
+const scheduleIdSchema = z
+  .string({ message: "scheduleIdsByDay-ID må være en streng." })
+  .trim()
+  .min(1, { message: "scheduleIdsByDay-ID kan ikke være tom." })
+  .max(200, { message: "scheduleIdsByDay-ID kan maksimalt være 200 tegn." });
+
+const scheduleIdsByDaySchema = z
+  .object({
+    monday: z.array(scheduleIdSchema).optional(),
+    tuesday: z.array(scheduleIdSchema).optional(),
+    wednesday: z.array(scheduleIdSchema).optional(),
+    thursday: z.array(scheduleIdSchema).optional(),
+    friday: z.array(scheduleIdSchema).optional(),
+    saturday: z.array(scheduleIdSchema).optional(),
+    sunday: z.array(scheduleIdSchema).optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    for (const [day, ids] of Object.entries(data)) {
+      if (!ids) continue;
+      const seen = new Set<string>();
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i]!;
+        if (seen.has(id)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [day, i],
+            message: `scheduleIdsByDay.${day}[${i}] er duplikat ('${id}').`,
+          });
+          return;
+        }
+        seen.add(id);
+      }
+    }
+  });
+
+export type ScheduleIdsByDay = z.infer<typeof scheduleIdsByDaySchema>;
+
+/**
+ * Validerer at otherData.scheduleIdsByDay (om satt) har riktig shape.
+ * Mutere ikke input — returnerer et nytt objekt med trim'ede ID-strings hvis
+ * gyldig, eller kaster DomainError("INVALID_INPUT") med presis path-melding.
+ */
+function assertScheduleIdsByDay(otherData: Record<string, unknown>): Record<string, unknown> {
+  const raw = otherData[SCHEDULE_ID_BY_DAY_KEY];
+  if (raw === undefined) return otherData;
+  if (raw === null) {
+    // Tillatt — caller fjerner tidligere binding.
+    return otherData;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "otherData.scheduleIdsByDay må være et objekt.",
+    );
+  }
+  const parsed = scheduleIdsByDaySchema.safeParse(raw);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    const path = first?.path?.length ? `otherData.${SCHEDULE_ID_BY_DAY_KEY}.${first.path.join(".")}` : `otherData.${SCHEDULE_ID_BY_DAY_KEY}`;
+    const msg = first?.message ?? "Ugyldig scheduleIdsByDay-shape.";
+    throw new DomainError("INVALID_INPUT", `${path}: ${msg}`);
+  }
+  return { ...otherData, [SCHEDULE_ID_BY_DAY_KEY]: parsed.data };
+}
+
 function assertHallIds(value: unknown): DailyScheduleHallIds {
   if (value === undefined || value === null) return {};
   if (typeof value !== "object" || Array.isArray(value)) {
@@ -540,7 +621,9 @@ export class DailyScheduleService {
     const endTime = assertHhMm(input.endTime, "endTime");
     const status = input.status ? assertStatus(input.status) : "active";
     const subgames = assertSubgames(input.subgames);
-    const otherData = assertObject(input.otherData, "otherData");
+    const otherData = assertScheduleIdsByDay(
+      assertObject(input.otherData, "otherData"),
+    );
     if (!input.createdBy?.trim()) {
       throw new DomainError("INVALID_INPUT", "createdBy er påkrevd.");
     }
@@ -667,7 +750,11 @@ export class DailyScheduleService {
     }
     if (update.otherData !== undefined) {
       sets.push(`other_data_json = $${params.length + 1}::jsonb`);
-      params.push(JSON.stringify(assertObject(update.otherData, "otherData")));
+      params.push(
+        JSON.stringify(
+          assertScheduleIdsByDay(assertObject(update.otherData, "otherData")),
+        ),
+      );
     }
 
     if (sets.length === 0) {
