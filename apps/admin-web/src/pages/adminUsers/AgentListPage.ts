@@ -6,6 +6,7 @@
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
+import { maskPhoneForGrid } from "../../components/pii.js";
 import { DataTable } from "../../components/DataTable.js";
 import { ApiError } from "../../api/client.js";
 import {
@@ -57,7 +58,8 @@ export function renderAgentListPage(container: HTMLElement): void {
             render: (r) => escapeHtml(`${r.displayName}${r.surname ? " " + r.surname : ""}`),
           },
           { key: "email", title: t("email"), render: (r) => escapeHtml(r.email) },
-          { key: "phone", title: t("phone"), render: (r) => escapeHtml(r.phone ?? "") },
+          // REQ-005/125: mask phone i grid (full phone vises i detail-view + CSV-eksport).
+          { key: "phone", title: t("phone"), render: (r) => escapeHtml(r.phone ? maskPhoneForGrid(r.phone) : "") },
           {
             key: "halls",
             title: t("assign_halls"),
