@@ -269,6 +269,19 @@ export interface RoomState {
    * (`assignRoomCode`).
    */
   scheduledGameId?: string | null;
+  /**
+   * Tobias 2026-04-27: shared hall-room (Spill 2/3 — ROCKET / MONSTERBINGO).
+   *
+   * Når satt til `true` betyr det at rommet er en GLOBAL ressurs delt mellom
+   * alle haller — `BingoEngine.joinRoom` skipper HALL_MISMATCH-sjekken slik
+   * at alle haller kan joine samme rom-kode. `hallId` på rommet beholder
+   * verdien fra opprettende hall (av audit-hensyn) men er ikke autoritativt
+   * for tilgang.
+   *
+   * Settes av `BingoEngine.createRoom` når caller sender
+   * `effectiveHallId: null` i input.
+   */
+  isHallShared?: boolean;
   players: Map<string, Player>;
   currentGame?: GameState;
   gameHistory: GameSnapshot[];
