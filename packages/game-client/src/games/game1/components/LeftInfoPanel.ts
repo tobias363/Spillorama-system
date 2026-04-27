@@ -19,7 +19,15 @@ interface PauseAwareBridge {
 export class LeftInfoPanel {
   private root: HTMLDivElement;
   private playerCountEl: HTMLSpanElement;
+  /**
+   * Tobias 2026-04-27: hver bet-info-rad eier sin egen wrapper-div så vi kan
+   * skjule individuelt når verdi = 0. Tidligere lå begge i samme parent med
+   * <br> mellom — kunne ikke skjule én uten å bryte layout.
+   */
+  private betInfoContainer: HTMLDivElement;
+  private entryFeeRow: HTMLDivElement;
   private entryFeeEl: HTMLSpanElement;
+  private prizeRow: HTMLDivElement;
   private prizeEl: HTMLSpanElement;
   /**
    * Round-state-isolation (Tobias 2026-04-25): "Forhåndskjøp"-rad vises kun
@@ -55,18 +63,30 @@ export class LeftInfoPanel {
     playerRow.appendChild(this.playerCountEl);
     this.root.appendChild(playerRow);
 
-    // Row 2: bet info
-    const betInfo = document.createElement("div");
-    betInfo.className = "bet-info";
-    betInfo.style.cssText = "font-size:16px;color:#bbb;line-height:1.6;";
+    // Row 2: bet info — Tobias 2026-04-27: hver rad i egen wrapper-div så vi
+    // kan skjule individuelt når verdi=0. Container er bare layout-anker; selve
+    // synligheten styres på rad-nivå.
+    this.betInfoContainer = document.createElement("div");
+    this.betInfoContainer.className = "bet-info";
+    this.betInfoContainer.style.cssText = "font-size:16px;color:#bbb;line-height:1.6;";
+
+    this.entryFeeRow = document.createElement("div");
+    this.entryFeeRow.className = "bet-info-entry-fee";
+    this.entryFeeRow.style.display = "none"; // skjult inntil totalStake > 0
     this.entryFeeEl = document.createElement("span");
     this.entryFeeEl.textContent = "Innsats: 0 kr";
+    this.entryFeeRow.appendChild(this.entryFeeEl);
+    this.betInfoContainer.appendChild(this.entryFeeRow);
+
+    this.prizeRow = document.createElement("div");
+    this.prizeRow.className = "bet-info-prize";
+    this.prizeRow.style.display = "none"; // skjult inntil myWinnings > 0
     this.prizeEl = document.createElement("span");
     this.prizeEl.textContent = "Gevinst: 0 kr";
-    betInfo.appendChild(this.entryFeeEl);
-    betInfo.appendChild(document.createElement("br"));
-    betInfo.appendChild(this.prizeEl);
-    this.root.appendChild(betInfo);
+    this.prizeRow.appendChild(this.prizeEl);
+    this.betInfoContainer.appendChild(this.prizeRow);
+
+    this.root.appendChild(this.betInfoContainer);
 
     // Row 3: forhåndskjøp (next-round commitment, hidden by default).
     // Round-state-isolation: when a player has armed pre-round tickets DURING
@@ -122,11 +142,14 @@ export class LeftInfoPanel {
       this.lastPlayerCount = nextPlayerCount;
     }
 
+    // Tobias 2026-04-27: "Innsats" og "Gevinst" SKJULES når verdien er 0.
+    // Tidligere viste vi alltid "Innsats: 0 kr / Gevinst: 0 kr" som visuell støy.
     const nextEntryFee = `Innsats: ${totalStake} kr`;
     if (nextEntryFee !== this.lastEntryFee) {
       this.entryFeeEl.textContent = nextEntryFee;
       this.lastEntryFee = nextEntryFee;
     }
+    this.entryFeeRow.style.display = totalStake > 0 ? "block" : "none";
 
     // "Gevinst" = this player's accumulated winnings this round (see PlayScreen
     // summation) — not the full prize pool (2026-04-21 Tobias-report).
@@ -135,6 +158,7 @@ export class LeftInfoPanel {
       this.prizeEl.textContent = nextPrize;
       this.lastPrize = nextPrize;
     }
+    this.prizeRow.style.display = myWinnings > 0 ? "block" : "none";
 
     // Forhåndskjøp: kun vis når > 0 (mid-round arm for neste runde). Mellom
     // runder havner pre-round-arm i totalStake/Innsats, så vi unngår dobbel-
