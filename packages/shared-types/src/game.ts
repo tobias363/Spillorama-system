@@ -160,10 +160,31 @@ export interface PatternResult {
   patternName: string;
   claimType: ClaimType;
   isWon: boolean;
+  /**
+   * BIN-696: First winner id (back-compat). For multi-winner phases the
+   * full list lives in `winnerIds`. `payoutAmount` is the per-winner
+   * (split) amount, NOT the total phase prize.
+   */
   winnerId?: string;
   wonAtDraw?: number;
+  /**
+   * Per-winner split-amount (kr). Backend computes this as
+   * `Math.floor(totalPhasePrize / winnerIds.length)` and credits each
+   * winner this amount. Client must NOT confuse this with the variant's
+   * configured phase-prize (which is the pre-split total).
+   */
   payoutAmount?: number;
   claimId?: string;
+  /**
+   * BIN-696: All player-ids that won this phase on the same draw.
+   * Engine-set so client can detect "I am one of N winners" without
+   * relying on `winnerId` alone (which only points at the first winner).
+   * Used by Gevinst-display + WinPopup to credit the player when they
+   * are the 2nd+ winner in a split.
+   */
+  winnerIds?: string[];
+  /** BIN-696: count of winners on the same draw (mirrors winnerIds.length). */
+  winnerCount?: number;
 }
 
 // ── Player & Ticket ─────────────────────────────────────────────────────────

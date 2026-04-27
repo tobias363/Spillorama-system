@@ -60,6 +60,11 @@ export function createGame1PlayerBroadcaster(
 
     onPatternWon(event: Game1PlayerPatternWonEvent): void {
       try {
+        // BIN-696 / Tobias 2026-04-26: emit komplett PatternWonPayload-shape
+        // — inkluderer `payoutAmount` (per-winner kr) og `claimType` slik at
+        // klient-popup viser faktisk credited beløp og kan route LINE/BINGO
+        // korrekt. Manglet før i scheduled-Spill1-flow → undefined → 0 kr
+        // i WinPopup ved Fullt Hus + feil popup-routing.
         io.to(event.roomCode).emit("pattern:won", {
           patternId: event.patternName,
           patternName: event.patternName,
@@ -70,6 +75,8 @@ export function createGame1PlayerBroadcaster(
           // `winnerId` (singular) beholdt for legacy-kompat med Spill 2/3
           // toast-kode som fortsatt ser på første vinner.
           winnerId: event.winnerIds[0] ?? null,
+          payoutAmount: event.payoutAmount,
+          claimType: event.claimType,
         });
       } catch (err) {
         log.warn(

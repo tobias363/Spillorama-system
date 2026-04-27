@@ -101,6 +101,14 @@ export const PatternResultSchema = z.object({
   wonAtDraw: z.number().int().optional(),
   payoutAmount: z.number().optional(),
   claimId: z.string().optional(),
+  /**
+   * BIN-696: alle spiller-IDer som vant denne fasen på samme draw.
+   * Engine-satt for å støtte multi-winner-detection på klient (Gevinst-
+   * display + WinPopup). `winnerId` peker fortsatt på første vinner.
+   */
+  winnerIds: z.array(z.string()).optional(),
+  /** BIN-696: antall vinnere (mirrors winnerIds.length). */
+  winnerCount: z.number().int().optional(),
 });
 
 export const ClaimRecordSchema = z.object({

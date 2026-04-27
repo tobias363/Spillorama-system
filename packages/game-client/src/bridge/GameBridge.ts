@@ -522,6 +522,15 @@ export class GameBridge {
       existing.winnerId = payload.winnerId;
       existing.wonAtDraw = payload.wonAtDraw;
       existing.payoutAmount = payload.payoutAmount;
+      // BIN-696 / Tobias 2026-04-26: Speil multi-winner-felt fra event-
+      // payload til state-snapshotet slik at downstream-render (Gevinst-
+      // display i PlayScreen, CenterTopPanel pill-state) kan detektere
+      // "jeg er 2.+ vinner i split" umiddelbart, før neste room:update.
+      // Fall tilbake til [winnerId] hvis serveren ikke sendte winnerIds[].
+      const winnerIds =
+        payload.winnerIds ?? (payload.winnerId ? [payload.winnerId] : []);
+      existing.winnerIds = winnerIds;
+      existing.winnerCount = payload.winnerCount ?? winnerIds.length;
     }
     this.emit("patternWon", payload, this.state);
     this.emit("stateChanged", this.state);

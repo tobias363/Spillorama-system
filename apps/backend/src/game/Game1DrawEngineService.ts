@@ -89,6 +89,7 @@ import {
 import type { PhysicalTicketPayoutService } from "../compliance/PhysicalTicketPayoutService.js";
 import type { PotDailyAccumulationTickService } from "./pot/PotDailyAccumulationTickService.js";
 import { evaluatePhase, TOTAL_PHASES } from "./Game1PatternEvaluator.js";
+import type { ClaimType } from "./types.js";
 import {
   evaluatePhysicalTicketsForPhase,
   loadDrawnBallsSet as loadDrawnBallsSetHelper,
@@ -723,6 +724,13 @@ export class Game1DrawEngineService {
 
   /**
    * PR-C4: Delegate-wrapper mot `emitPlayerPatternWon`.
+   *
+   * BIN-696 / Tobias 2026-04-26: utvidet med `prizePerWinnerKr` og
+   * `claimType` slik at scheduled-Spill1 broadcast matcher event-
+   * kontrakten i `PatternWonPayload` (claim-/draw-events i ad-hoc
+   * Spill 2/3 inkluderte allerede begge feltene). Uten disse fikk
+   * klient-popupen `payoutAmount=undefined` → 0 kr ved Fullt Hus
+   * vinst, og `claimType=undefined` brøt LINE/BINGO-routing.
    */
   private notifyPlayerPatternWon(
     roomCode: string,
@@ -730,7 +738,9 @@ export class Game1DrawEngineService {
     patternName: string,
     phase: number,
     winnerIds: string[],
-    drawIndex0Based: number
+    drawIndex0Based: number,
+    prizePerWinnerKr: number,
+    claimType: ClaimType
   ): void {
     emitPlayerPatternWon(
       this.playerBroadcaster,
@@ -739,7 +749,9 @@ export class Game1DrawEngineService {
       patternName,
       phase,
       winnerIds,
-      drawIndex0Based
+      drawIndex0Based,
+      prizePerWinnerKr,
+      claimType
     );
   }
 
@@ -975,6 +987,14 @@ export class Game1DrawEngineService {
        * gevinst-broadcasten fordi me.balance var stale.
        */
       winnerWalletIds: string[];
+      /**
+       * BIN-696 / Tobias 2026-04-26: per-winner split-amount i kr for
+       * pattern:won-broadcast. Eksakt for flat-path; representativt
+       * (første color-gruppe) for per-color-path.
+       */
+      prizePerWinnerKr: number;
+      /** BIN-696: claim-type for pattern:won (LINE/BINGO). */
+      claimType: ClaimType;
     } | null = null;
 
     // BIN-690 M1: capture for POST-commit mini-game-trigger. Populert kun
@@ -1100,6 +1120,11 @@ export class Game1DrawEngineService {
           // `notifyPlayerRoomUpdate` POST-commit kan refreshe in-memory
           // Player.balance før broadcast. Se kommentar på field-deklarasjonen.
           winnerWalletIds: phaseResult.winnerWalletIds,
+          // BIN-696: capture per-winner split-amount + claimType for
+          // pattern:won-broadcast slik at klient-popup viser faktisk
+          // credited beløp og kan route LINE vs BINGO korrekt.
+          prizePerWinnerKr: phaseResult.prizePerWinnerKr,
+          claimType: phaseResult.claimType,
         };
       }
 
@@ -1330,7 +1355,12 @@ export class Game1DrawEngineService {
             capturedPhaseResult.patternName,
             capturedPhaseResult.phase,
             capturedPhaseResult.winnerIds,
-            drawIndex0Based
+            drawIndex0Based,
+            // BIN-696: per-winner split-amount + claimType slik at
+            // klient-popup (WinPopup/WinScreenV2) får faktisk credited
+            // beløp i stedet for å regne om phase-prize på egen hånd.
+            capturedPhaseResult.prizePerWinnerKr,
+            capturedPhaseResult.claimType
           );
         }
         // room:update push avslutter sekvensen — spilleren får oppdatert
@@ -1962,8 +1992,35 @@ export class Game1DrawEngineService {
      * Tomt array hvis ingen vinnere eller payoutService ikke wired.
      */
     winnerWalletIds: string[];
+    /**
+     * BIN-696 / Tobias 2026-04-26: per-winner split-amount i kroner
+     * (uten jackpot-bonus). Brukes av POST-commit `pattern:won`-broadcast
+     * slik at klient-popup kan vise faktisk credited beløp i stedet for
+     * å regne om phase-prize på egen hånd (som ga 1700 kr UI-bug ved
+     * 5-veis split der kun 144 kr var faktisk creditert).
+     *
+     * For per-color-path er dette første color-gruppes prizePerWinner —
+     * approximerer for enkle multi-color-tilfeller. `room:update` som
+     * følger pattern:won inneholder eksakt verdi i `patternResults[]`
+     * (engine setter `firstPayoutAmount` per Pattern), så LeftInfoPanel
+     * "Gevinst"-summen i klient bruker den eksakte snapshot-verdien.
+     *
+     * 0 hvis ingen vinnere eller intet å betale ut.
+     */
+    prizePerWinnerKr: number;
+    /**
+     * BIN-696: claim-type for fasen — "LINE" for fase 1-4, "BINGO" for
+     * Fullt Hus (fase 5). Klient bruker dette til å route popup
+     * (WinPopup vs WinScreenV2). Manglet før i scheduled-Spill1-broadcast.
+     */
+    claimType: ClaimType;
     physicalWinners: PhysicalTicketWinInfo[];
   }> {
+    // BIN-696: claimType utledes av fase-nummer — fase 5 (TOTAL_PHASES)
+    // er Fullt Hus = "BINGO", øvrige er rad-vinn = "LINE". Klient bruker
+    // dette til popup-routing (WinPopup vs WinScreenV2).
+    const phaseClaimType: ClaimType = currentPhase === TOTAL_PHASES ? "BINGO" : "LINE";
+
     // PR 4b-modus: payoutService ikke wired opp → skip pattern-evaluering.
     if (!this.payoutService) {
       return {
@@ -1971,6 +2028,8 @@ export class Game1DrawEngineService {
         winnerCount: 0,
         winnerIds: [],
         winnerWalletIds: [],
+        prizePerWinnerKr: 0,
+        claimType: phaseClaimType,
         physicalWinners: [],
       };
     }
@@ -2011,6 +2070,8 @@ export class Game1DrawEngineService {
         winnerCount: 0,
         winnerIds: [],
         winnerWalletIds: [],
+        prizePerWinnerKr: 0,
+        claimType: phaseClaimType,
         physicalWinners,
       };
     }
@@ -2040,6 +2101,8 @@ export class Game1DrawEngineService {
         winnerCount: 0,
         winnerIds: [],
         winnerWalletIds: [],
+        prizePerWinnerKr: 0,
+        claimType: phaseClaimType,
         physicalWinners,
       };
     }
@@ -2087,6 +2150,14 @@ export class Game1DrawEngineService {
     // under og sendes inn til pot-evaluator etterpå.
     let ordinaryWinCentsByHall: Map<string, number> | undefined;
 
+    // BIN-696 / Tobias 2026-04-26: per-winner split-amount i ØRE for
+    // pattern:won-broadcast. Settes i begge payout-grenene. For per-color-
+    // path bruker vi første color-gruppes prizePerWinner som representativ
+    // verdi (multi-color-bonger med ulik prize gir small UI-impresisjon
+    // til neste room:update-snapshot ankommer; LeftInfoPanel "Gevinst"-
+    // summen bruker uansett patternResults[].payoutAmount fra snapshot).
+    let prizePerWinnerCentsForBroadcast = 0;
+
     if (variantConfig && variantConfig.patternsByColor) {
       // Per-farge-path: gruppér vinnere per ticketColor og utbetal hver
       // gruppe uavhengig. Dette er Option X (PM-vedtak 2026-04-21).
@@ -2100,6 +2171,27 @@ export class Game1DrawEngineService {
         variantConfig,
         jackpotCfg
       );
+
+      // BIN-696: Beregn representativ prizePerWinner basert på første
+      // vinners color-gruppe (matcher engine `firstPayoutAmount`-konvensjon
+      // for snapshot-feltet `patternResult.payoutAmount`). Dette er kun
+      // for pattern:won-broadcast — eksakte per-vinner-beløp er allerede
+      // utbetalt korrekt av payoutPerColorGroups via payoutService.
+      const firstWinnerColor = winners[0]?.ticketColor;
+      if (firstWinnerColor) {
+        const firstColorGroupSize = winners.filter((w) => w.ticketColor === firstWinnerColor).length;
+        const firstColorEngineName = resolveEngineColorName(firstWinnerColor) ?? firstWinnerColor;
+        const firstColorPatterns = resolvePatternsForColor(
+          variantConfig,
+          firstColorEngineName,
+          () => {}
+        );
+        const firstColorPhasePattern = firstColorPatterns[currentPhase - 1];
+        if (firstColorPhasePattern && firstColorGroupSize > 0) {
+          const firstColorTotalPrizeCents = patternPrizeToCents(firstColorPhasePattern, potCents);
+          prizePerWinnerCentsForBroadcast = Math.floor(firstColorTotalPrizeCents / firstColorGroupSize);
+        }
+      }
 
       if (currentPhase === TOTAL_PHASES) {
         ordinaryWinCentsByHall = computeOrdinaryWinCentsByHallPerColor({
@@ -2140,6 +2232,12 @@ export class Game1DrawEngineService {
         resolved.kind === "percent"
           ? Math.floor((potCents * resolved.percent) / 100)
           : resolved.amountCents;
+
+      // BIN-696: Per-winner split-amount for pattern:won-broadcast.
+      // Floor-split — rest beholdes av huset (samme semantikk som
+      // payoutService.payoutPhase). Eksklusiv jackpot-bonus (klient-
+      // popup viser den separat hvis triggered).
+      prizePerWinnerCentsForBroadcast = Math.floor(totalPhasePrizeCents / winners.length);
 
       await this.payoutFlatPathWithPerWinnerJackpot(
         client,
@@ -2256,6 +2354,10 @@ export class Game1DrawEngineService {
       winnerCount: winners.length,
       winnerIds,
       winnerWalletIds,
+      // BIN-696: per-winner split-amount i kr (uten jackpot-bonus).
+      // Rounded down øre→kr (samme floor-konvensjon som payoutService).
+      prizePerWinnerKr: Math.floor(prizePerWinnerCentsForBroadcast / 100),
+      claimType: phaseClaimType,
       physicalWinners,
     };
   }
