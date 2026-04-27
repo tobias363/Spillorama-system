@@ -215,3 +215,55 @@ describe("PatternMiniGrid — edge cases", () => {
     grid.destroy();
   });
 });
+
+// ── BLINK-FIX (round 6) ─────────────────────────────────────────────────────
+
+describe("PatternMiniGrid — BLINK-FIX round 6 hazard #5", () => {
+  /**
+   * Round 6 hazard #5 — `setInterval(step, 1000)` triggrer DOM-mutasjonen
+   * mid-frame relativt til Pixi-render-cyclen. Mutasjonen skal nå gates
+   * via requestAnimationFrame så den landerseg på frame-grensen, like før
+   * neste paint, slik at Pixi ikke konkurrerer med half-applied state.
+   *
+   * Verifiserer at rAF-feltet finnes i instansen (sjekker ikke utilities-
+   * pattern direkte, fordi det er implementation-detail). Funksjonell
+   * test (initial step kjører umiddelbart) sikrer at start-state vises.
+   */
+  it("hazard #5: rafScheduled-felt eksisterer på instansen (rAF-gate aktiv)", () => {
+    const grid = new PatternMiniGrid();
+    grid.setDesign(1); // start phase-cycle
+    const internals = grid as unknown as { rafScheduled: number | null };
+    expect(
+      "rafScheduled" in internals,
+      "rafScheduled-feltet er round-6 mekanisme for å frame-aligne DOM-mutasjon",
+    ).toBe(true);
+    grid.destroy();
+  });
+
+  it("hazard #5: initial step kjører umiddelbart (ikke gated bak rAF)", () => {
+    const grid = new PatternMiniGrid();
+    grid.setDesign(1); // fase 1 — første kombinasjon er rad 0
+    // Initial state må vises straks, IKKE etter neste rAF-tick.
+    const internals = asInternals(grid);
+    const filled = filledCellIndices(internals.cells);
+    expect(
+      filled.length,
+      "initial step må kjøre umiddelbart (uten rAF-gate) — ellers ser bruker tomt grid før første frame",
+    ).toBeGreaterThan(0);
+    grid.destroy();
+  });
+
+  it("hazard #5: stopAnimation kanseller pending rAF (ingen sent DOM-write)", () => {
+    const grid = new PatternMiniGrid();
+    grid.setDesign(1);
+    const internals = grid as unknown as { rafScheduled: number | null };
+    // Sett en kunstig rAF-id slik at stopAnimation må rydde den opp.
+    internals.rafScheduled = 999;
+    grid.stopAnimation();
+    expect(
+      internals.rafScheduled,
+      "stopAnimation skal nullstille rafScheduled så vi unngår sent DOM-write",
+    ).toBeNull();
+    grid.destroy();
+  });
+});
