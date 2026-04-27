@@ -29,11 +29,11 @@ import { t } from "../../i18n/I18n.js";
 import { getSession } from "../../auth/Session.js";
 import { Toast } from "../../components/Toast.js";
 import { Modal } from "../../components/Modal.js";
-import { getDailyBalance, openDay, type DailyBalance } from "../../api/agent-shift.js";
+import { getCurrentShift, getDailyBalance, openDay, type DailyBalance } from "../../api/agent-shift.js";
 import { ApiError } from "../../api/client.js";
 import { requireSlotProvider } from "../../components/SlotProviderSwitch.js";
 import { openSlotMachineModal } from "./modals/SlotMachineModal.js";
-import { openSettlementModal } from "./modals/SettlementModal.js";
+import { openSettlementBreakdownModal } from "./modals/SettlementBreakdownModal.js";
 import { openControlDailyBalanceModal } from "./modals/ControlDailyBalanceModal.js";
 import { openAddMoneyRegisteredUserModal } from "./modals/AddMoneyRegisteredUserModal.js";
 import { openWithdrawRegisteredUserModal } from "./modals/WithdrawRegisteredUserModal.js";
@@ -274,7 +274,7 @@ function wireActions(container: HTMLElement): void {
         openControlDailyBalanceModal();
         break;
       case "settlement":
-        openSettlementModal();
+        openSettlementFromCashInOut(container);
         break;
       case "slot-machine": {
         const session = getSession();
@@ -329,6 +329,55 @@ function wireFunctionKeys(container: HTMLElement): void {
   if (typeof document !== "undefined" && document.body) {
     observer.observe(document.body, { childList: true, subtree: true });
   }
+}
+
+/**
+ * Åpne full Settlement-modal (1:1 legacy — 14 maskin-rader + 3 sub-seksjoner +
+ * bilag-upload + auto-calc) fra Cash In/Out-siden.
+ *
+ * Henter session-context (agent-navn, hall) + dagens dato + valgfri shift-info,
+ * og delegerer til `openSettlementBreakdownModal({ mode: "create", ... })`.
+ *
+ * Erstatter den enklere `openSettlementModal()` som kun støttet
+ * `actualCountedCash` + `note` (fjernet 2026-04-27 for full legacy-paritet).
+ *
+ * Etter vellykket innsending refresh-er vi daily-balance så agenten ser
+ * oppdatert state umiddelbart.
+ */
+function openSettlementFromCashInOut(container: HTMLElement): void {
+  const session = getSession();
+  const agentUserId = session?.id ?? "";
+  const agentName = session?.name ?? "—";
+  const hall = session?.hall?.[0];
+  const hallName = hall?.name ?? "—";
+
+  // Default business-date = i dag (YYYY-MM-DD). Modal-en er i view/edit-modus
+  // mottar dato fra eksisterende settlement; for create bruker vi dagens dato.
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Fire-and-forget: fetch shift for å få korrekt businessDate hvis tilgjengelig.
+  // Hvis fetch feiler bruker vi today som fallback (modal-en åpnes uansett).
+  void (async () => {
+    let businessDate = today;
+    try {
+      const shift = await getCurrentShift();
+      if (shift?.startedAt) {
+        businessDate = shift.startedAt.slice(0, 10);
+      }
+    } catch {
+      // Fallback: today. Modal har egen feil-håndtering ved submit.
+    }
+    openSettlementBreakdownModal({
+      mode: "create",
+      agentUserId,
+      agentName,
+      hallName,
+      businessDate,
+      onSubmitted: () => {
+        void refreshBalance(container);
+      },
+    });
+  })();
 }
 
 async function refreshBalance(container: HTMLElement): Promise<void> {
