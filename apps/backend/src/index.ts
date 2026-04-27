@@ -287,8 +287,8 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 // BIN-614: Admin web shell is a Vite SPA. `dist/` is produced by
 // `npm --prefix apps/admin-web run build`. We serve from `dist/` if it exists,
 // otherwise fall back to the pre-Vite flat `apps/admin-web/` layout so local
-// dev without a build still boots. Legacy v1 (old flat shell) lives in
-// `public/legacy-v1/` (copied by Vite) or the repo `legacy-v1/` fallback.
+// dev without a build still boots. Legacy v1 iframe-shell ble fjernet
+// 2026-04-27 — alle features er nå native i admin-Vite-bundlen.
 const adminWebDistDir = path.resolve(__dirname, "../../admin-web/dist");
 const adminWebLegacyDir = path.resolve(__dirname, "../../admin-web");
 const adminWebDir = fs.existsSync(adminWebDistDir) ? adminWebDistDir : adminWebLegacyDir;

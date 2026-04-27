@@ -36,36 +36,13 @@ export interface SidebarHeader {
 
 export type SidebarNode = SidebarLeaf | SidebarGroup | SidebarHeader;
 
-// Spillorama Live — 11 native sections (NEW, ligger over legacy)
-const spilloramaLive: SidebarGroup = {
-  kind: "group",
-  id: "spillorama-live",
-  icon: "fa fa-bolt",
-  labelKey: "spillorama_live",
-  children: [
-    { kind: "leaf", id: "live-dashboard", path: "/live/dashboard", icon: "fa fa-circle-o", labelKey: "spillorama_live_dashboard" },
-    { kind: "leaf", id: "live-game-settings", path: "/live/game-settings", icon: "fa fa-circle-o", labelKey: "spillorama_game_settings" },
-    { kind: "leaf", id: "live-games", path: "/live/games", icon: "fa fa-circle-o", labelKey: "spillorama_games" },
-    { kind: "leaf", id: "live-halls", path: "/live/halls", icon: "fa fa-circle-o", labelKey: "spillorama_halls" },
-    { kind: "leaf", id: "live-hall-display", path: "/live/hall-display", icon: "fa fa-circle-o", labelKey: "spillorama_hall_display" },
-    { kind: "leaf", id: "live-terminals", path: "/live/terminals", icon: "fa fa-circle-o", labelKey: "spillorama_terminals" },
-    { kind: "leaf", id: "live-hall-rules", path: "/live/hall-rules", icon: "fa fa-circle-o", labelKey: "spillorama_hall_rules" },
-    { kind: "leaf", id: "live-wallet-compliance", path: "/live/wallet-compliance", icon: "fa fa-circle-o", labelKey: "spillorama_wallet_compliance" },
-    { kind: "leaf", id: "live-prize-policy", path: "/live/prize-policy", icon: "fa fa-circle-o", labelKey: "spillorama_prize_policy" },
-    { kind: "leaf", id: "live-room-control", path: "/live/room-control", icon: "fa fa-circle-o", labelKey: "spillorama_room_control" },
-    { kind: "leaf", id: "live-payment-requests", path: "/live/payment-requests", icon: "fa fa-circle-o", labelKey: "spillorama_payment_requests" },
-    // GAME1_SCHEDULE PR 3: master-konsoll for Game 1 (routes til /game1/master/:gameId;
-    // liste-navigasjon kommer i oppfølger, lenken her peker til placeholder).
-    { kind: "leaf", id: "game1-master-console", path: "/game1/master/placeholder", icon: "fa fa-circle-o", labelKey: "spillorama_master_console" },
-  ],
-};
-
 // Legacy admin-sidebar layout (Hovednavigasjon-section, 16 menu-items 1:1
 // med legacy Spillorama Admin V1.0 — se docs/architecture/WIREFRAME_CATALOG.md
 // PDF #16). Rekkefølgen + grupperingen er styrt av screenshot Tobias delte
-// 2026-04-27. Eksisterende admin-extras (Spillorama Live, role-management,
-// adminUser/hall/etc.) ligger fortsatt under header'en, men etter de 16
-// legacy-elementene for å bevare 1:1-rekkefølgen øverst.
+// 2026-04-27. Eksisterende admin-extras (role-management, adminUser/hall/etc.)
+// ligger under header'en, men etter de 16 legacy-elementene for å bevare
+// 1:1-rekkefølgen øverst. Spillorama-Live-iframe-section er fjernet (PR #630)
+// — alle features er native i admin.
 export const adminSidebar: SidebarNode[] = [
   { kind: "header", labelKey: "main_navigation" },
 
@@ -84,6 +61,9 @@ export const adminSidebar: SidebarNode[] = [
       { kind: "leaf", id: "cash-inout-sold-tickets", path: "/sold-tickets", icon: "fa fa-circle-o", labelKey: "sold_tickets" },
     ],
   },
+
+  // Game 1 master-konsoll (top-level — tidligere under Spillorama Live)
+  { kind: "leaf", id: "game1-master-console", path: "/game1/master/placeholder", icon: "fa fa-bolt", labelKey: "spillorama_master_console" },
 
   // 3. Spilleradministrasjon (expandable)
   {

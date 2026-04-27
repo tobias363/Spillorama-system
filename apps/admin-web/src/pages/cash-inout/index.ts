@@ -1,7 +1,9 @@
-// Cash-in/out route dispatcher. Mirrors the `legacy-sections/LegacySectionMount`
-// pattern used by Agent A for Spillorama Live iframes: the main router calls
-// `isCashInOutRoute(path)` and, if true, dispatches into a per-page renderer.
-// See PR-B1-PLAN.md §5 (URLs) and §9 for route list.
+// Cash-in/out route dispatcher. Følger samme dispatcher-mønster som
+// admin-pages forøvrig (router kaller `isCashInOutRoute(path)` og, hvis true,
+// dispatcher inn til en per-page renderer). Tidligere referert til
+// `legacy-sections/LegacySectionMount`-iframe-mønsteret som ble fjernet
+// 2026-04-27 sammen med resten av "Spillorama Live"-section.
+// See PR-B1-PLAN.md §5 (URLs) og §9 for full rute-liste.
 
 import { renderCashInOutPage } from "./CashInOutPage.js";
 import { renderBalancePage, type BalanceAction, type BalanceMode } from "./BalancePage.js";

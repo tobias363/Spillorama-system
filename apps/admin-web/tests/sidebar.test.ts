@@ -43,21 +43,37 @@ describe("Sidebar spec", () => {
     document.body.innerHTML = "";
   });
 
-  it("admin spec includes Spillorama Live group with 12 leaves (11 native + 1 Game 1 master-konsoll)", () => {
-    // GAME1_SCHEDULE PR 3 la til master-konsoll som 12. leaf.
+  it("admin spec does NOT include Spillorama Live iframe-group (fjernet 2026-04-27)", () => {
+    // Spillorama Live var en sidebar-section som lastet legacy-v1 i iframe.
+    // Fjernet — alle features er native i admin nå.
     const live = adminSidebar.find((n) => n.kind === "group" && n.id === "spillorama-live");
-    expect(live).toBeDefined();
-    if (live && live.kind === "group") {
-      expect(live.children).toHaveLength(12);
+    expect(live).toBeUndefined();
+  });
+
+  it("admin spec exposes Game 1 master-konsoll som top-level entry", () => {
+    // Master-konsollen lå tidligere nestet i Spillorama Live-gruppen. Etter
+    // fjerning av iframe-section er den løftet til top-level.
+    const master = adminSidebar.find((n) => n.kind === "leaf" && n.id === "game1-master-console");
+    expect(master).toBeDefined();
+    if (master && master.kind === "leaf") {
+      expect(master.path).toBe("/game1/master/placeholder");
     }
   });
 
-  it("admin spec contains all 34 legacy top-level menu-items + 1 Spillorama Live + 1 header", () => {
-    // 1 header + 1 Spillorama Live group + 34 legacy entries
-    // (top-level: dashboard, 2 player-ish entries (player-management group + track-spending leaf → both count), etc.)
+  it("admin spec contains expected count of top-level menu-items + 1 header", () => {
     expect(adminSidebar.length).toBeGreaterThanOrEqual(30);
     const headers = adminSidebar.filter((n) => n.kind === "header");
     expect(headers).toHaveLength(1);
+  });
+
+  it("admin spec contains no /live/* paths (iframe-section fjernet)", () => {
+    // Sjekk rekursivt at ingen leaf har en path som starter med /live/.
+    const hasLivePath = adminSidebar.some((n) => {
+      if (n.kind === "leaf") return n.path.startsWith("/live/");
+      if (n.kind === "group") return n.children.some((c) => c.path.startsWith("/live/"));
+      return false;
+    });
+    expect(hasLivePath).toBe(false);
   });
 
   it("agent sidebar includes cash-in-out group", () => {
