@@ -1443,6 +1443,21 @@
             </div>
           </form>
 
+          <!-- REQ-129: 2FA-trinn etter passord-verifisering -->
+          <form id="login-2fa-form" hidden>
+            <div class="register-step-title">To-faktor-autentisering</div>
+            <p style="color:rgba(255,255,255,0.7);font-size:13px;margin-bottom:14px">Skriv inn 6-sifret kode fra autentiserings-appen din, eller en backup-kode (xxxxx-xxxxx).</p>
+            <div id="login-2fa-error" class="login-error" hidden></div>
+            <div class="login-field">
+              <label for="login-2fa-code">Kode</label>
+              <input type="text" id="login-2fa-code" placeholder="123456" required inputmode="numeric" autocomplete="one-time-code">
+            </div>
+            <button type="submit" id="login-2fa-submit" class="login-btn">Bekreft</button>
+            <div style="text-align:center;margin-top:12px">
+              <a href="#" id="login-2fa-back" style="color:rgba(255,255,255,0.5);font-size:13px;text-decoration:none">Tilbake</a>
+            </div>
+          </form>
+
           <!-- Forgot password form -->
           <form id="forgot-password-form" hidden>
             <div class="register-step-title">Tilbakestill passord</div>
@@ -2161,6 +2176,80 @@
             <button type="submit" class="profile-btn">Verifiser</button>
           </form>
         </div>
+      </div>
+
+      <!-- REQ-129: To-faktor-autentisering -->
+      <div class="profile-section" id="profile-2fa-section">
+        <span class="profile-section-label">To-faktor-autentisering (2FA)</span>
+        <p class="profile-section-note" style="margin-bottom:10px">Beskytt kontoen din med en autentiserings-app som Google Authenticator eller Authy.</p>
+        <strong class="profile-section-value" id="profile-2fa-status">Laster…</strong>
+
+        <div class="profile-actions" id="profile-2fa-disabled-actions" hidden>
+          <button class="profile-btn" id="profile-2fa-setup-btn" type="button">Aktiver 2FA</button>
+          <div id="profile-2fa-setup-wrap" hidden>
+            <p class="profile-section-note" style="margin-top:14px">Skann QR-koden i autentiserings-appen din.</p>
+            <p><img id="profile-2fa-qr" alt="QR-kode for 2FA" width="220" height="220" /></p>
+            <p class="profile-section-note">Eller skriv inn nøkkelen manuelt: <code id="profile-2fa-secret"></code></p>
+            <form id="profile-2fa-verify-form">
+              <div class="profile-field">
+                <label for="profile-2fa-verify-code">Skriv inn 6-sifret kode fra appen</label>
+                <input type="text" id="profile-2fa-verify-code" inputmode="numeric" pattern="\d{6}" required placeholder="123456">
+              </div>
+              <div id="profile-2fa-setup-error" class="profile-error" hidden></div>
+              <button type="submit" class="profile-btn">Verifiser og aktiver</button>
+            </form>
+            <div id="profile-2fa-backup-wrap" hidden style="margin-top:14px">
+              <p class="profile-section-note"><strong>Lagre disse backup-kodene nå</strong> — de vises kun denne ene gangen.</p>
+              <ol id="profile-2fa-backup-list" style="font-family:monospace;font-size:14px;padding-left:24px;"></ol>
+              <button type="button" class="profile-btn-outline" id="profile-2fa-backup-done">Jeg har lagret kodene</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-actions" id="profile-2fa-enabled-actions" hidden>
+          <p class="profile-section-note">Backup-koder igjen: <strong id="profile-2fa-backup-remaining">—</strong></p>
+
+          <button class="profile-btn-outline" id="profile-2fa-regen-btn" type="button">Regenerer backup-koder</button>
+          <div id="profile-2fa-regen-wrap" hidden>
+            <form id="profile-2fa-regen-form">
+              <div class="profile-field">
+                <label for="profile-2fa-regen-password">Passord</label>
+                <input type="password" id="profile-2fa-regen-password" required>
+              </div>
+              <div id="profile-2fa-regen-error" class="profile-error" hidden></div>
+              <button type="submit" class="profile-btn">Regenerer</button>
+            </form>
+            <div id="profile-2fa-regen-result" hidden style="margin-top:10px">
+              <p class="profile-section-note"><strong>Lagre nye backup-koder</strong>:</p>
+              <ol id="profile-2fa-regen-list" style="font-family:monospace;font-size:14px;padding-left:24px;"></ol>
+            </div>
+          </div>
+
+          <button class="profile-btn-danger" id="profile-2fa-disable-btn" type="button">Deaktiver 2FA</button>
+          <div id="profile-2fa-disable-wrap" hidden>
+            <form id="profile-2fa-disable-form">
+              <div class="profile-field">
+                <label for="profile-2fa-disable-password">Passord</label>
+                <input type="password" id="profile-2fa-disable-password" required>
+              </div>
+              <div class="profile-field">
+                <label for="profile-2fa-disable-code">6-sifret TOTP-kode</label>
+                <input type="text" id="profile-2fa-disable-code" inputmode="numeric" pattern="\d{6}" required>
+              </div>
+              <div id="profile-2fa-disable-error" class="profile-error" hidden></div>
+              <button type="submit" class="profile-btn-danger">Bekreft deaktivering</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- REQ-132: Aktive sesjoner -->
+      <div class="profile-section" id="profile-sessions-section">
+        <span class="profile-section-label">Aktive sesjoner</span>
+        <p class="profile-section-note" style="margin-bottom:10px">Enheter som er logget inn på kontoen din. Logg ut sesjoner du ikke kjenner igjen.</p>
+        <div id="profile-sessions-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px"></div>
+        <button class="profile-btn-outline" id="profile-sessions-logout-all-btn" type="button">Logg ut alle andre</button>
+        <div id="profile-sessions-error" class="profile-error" hidden></div>
       </div>
 
       <!-- Account actions -->

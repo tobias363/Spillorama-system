@@ -182,6 +182,21 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
+    // REQ-129: hvis 2FA er aktivert returnerer backend en challenge i stedet
+    // for full session. Kalleren håndterer challenge-flyten via twoFALogin().
+    if (data && data.requires2FA === true) {
+      return { requires2FA: true, challengeId: data.challengeId, challengeExpiresAt: data.challengeExpiresAt };
+    }
+    saveSession(data.accessToken, data.user, data.expiresAt);
+    return data;
+  }
+
+  async function twoFALoginRequest(challengeId, code) {
+    const data = await apiFetch('/api/auth/2fa/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeId: challengeId, code: code })
+    });
     saveSession(data.accessToken, data.user, data.expiresAt);
     return data;
   }
@@ -306,6 +321,67 @@
       });
     }
 
+    // ── 2FA-form (REQ-129) ────────────────────────────────────────────
+    var pendingChallengeId = null;
+    var twoFAForm = document.getElementById('login-2fa-form');
+    var twoFACodeInput = document.getElementById('login-2fa-code');
+    var twoFAErrorEl = document.getElementById('login-2fa-error');
+    var twoFABackLink = document.getElementById('login-2fa-back');
+
+    function show2FAStep(challengeId) {
+      pendingChallengeId = challengeId;
+      if (form) form.hidden = true;
+      if (twoFAForm) twoFAForm.hidden = false;
+      if (twoFAErrorEl) twoFAErrorEl.hidden = true;
+      if (twoFACodeInput) {
+        twoFACodeInput.value = '';
+        setTimeout(function () { twoFACodeInput.focus(); }, 0);
+      }
+    }
+
+    function showCredentialsStep() {
+      pendingChallengeId = null;
+      if (form) form.hidden = false;
+      if (twoFAForm) twoFAForm.hidden = true;
+      if (twoFAErrorEl) twoFAErrorEl.hidden = true;
+    }
+
+    if (twoFABackLink) {
+      twoFABackLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        showCredentialsStep();
+      });
+    }
+    if (twoFAForm) {
+      twoFAForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        if (!pendingChallengeId) { showCredentialsStep(); return; }
+        var code = (twoFACodeInput?.value || '').trim();
+        if (!code) {
+          if (twoFAErrorEl) { twoFAErrorEl.textContent = 'Skriv inn koden'; twoFAErrorEl.hidden = false; }
+          return;
+        }
+        var submitBtn = document.getElementById('login-2fa-submit');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Bekrefter…'; }
+        try {
+          var data = await twoFALoginRequest(pendingChallengeId, code);
+          sessionStorage.setItem('spillvett.token', data.accessToken);
+          notifySpillvett(data.accessToken);
+          pendingChallengeId = null;
+          showLobby(data.user);
+          // Reset login overlay til credentials-step neste gang
+          showCredentialsStep();
+        } catch (err) {
+          if (twoFAErrorEl) {
+            twoFAErrorEl.textContent = err.message || 'Ugyldig kode';
+            twoFAErrorEl.hidden = false;
+          }
+        } finally {
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Bekreft'; }
+        }
+      });
+    }
+
     // ── Login form ────────────────────────────────────────────────────
     // REQ-130 (PDF 9 Frontend CR): metode-velger E-post / Mobil. Toggle
     // synlighet av relaterte felter slik at HTML-validering kun gjelder
@@ -350,6 +426,11 @@
             const email = document.getElementById('login-email')?.value?.trim() || '';
             const password = document.getElementById('login-password')?.value || '';
             data = await loginRequest(email, password);
+            // REQ-129: hvis 2FA kreves, vis 2FA-trinn i stedet for å logge inn.
+            if (data && data.requires2FA === true) {
+              show2FAStep(data.challengeId);
+              return;
+            }
           }
           sessionStorage.setItem('spillvett.token', data.accessToken);
           notifySpillvett(data.accessToken);

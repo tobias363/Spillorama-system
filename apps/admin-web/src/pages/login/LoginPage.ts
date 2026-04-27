@@ -1,5 +1,11 @@
+// REQ-129: LoginPage handles two-step login when 2FA is enabled.
+//   Step 1: email + password -> POST /api/auth/login
+//     - Returns Session immediately if 2FA is off.
+//     - Returns { requires2FA, challengeId } if 2FA is on -> render Step 2.
+//   Step 2: 6-digit TOTP code (or 10-char backup code) -> /api/auth/2fa/login.
+
 import { t } from "../../i18n/I18n.js";
-import { login, loginPhone } from "../../api/auth.js";
+import { login, loginPhone, completeTwoFALogin } from "../../api/auth.js";
 import { setSession } from "../../auth/Session.js";
 
 type LoginMethod = "email" | "phone";
@@ -19,7 +25,7 @@ export function renderLoginPage(root: HTMLElement, onSuccess: () => void): void 
         <a href="#/admin"><b>Spillorama</b></a>
       </div>
       <div class="login-box-body">
-        <p class="login-box-msg">${escapeHtml(t("sign_in_to_start"))}</p>
+        <p class="login-box-msg" id="loginBoxMsg">${escapeHtml(t("sign_in_to_start"))}</p>
         <div class="form-group">
           <label for="loginMethod" style="font-weight:normal;">${escapeHtml(t("login_method") || "Innloggings­metode")}</label>
           <select class="form-control" id="loginMethod" name="loginMethod">
@@ -28,7 +34,7 @@ export function renderLoginPage(root: HTMLElement, onSuccess: () => void): void 
           </select>
         </div>
         <div id="loginAlert" class="alert alert-danger" style="display:none;"></div>
-        <form id="loginForm">
+        <form id="loginForm" data-testid="login-form">
           <!-- E-post + passord (default) -->
           <div class="form-group has-feedback" data-method="email">
             <span class="glyphicon glyphicon-envelope form-control-feedback" style="left: 0 !important;"></span>
@@ -72,15 +78,74 @@ export function renderLoginPage(root: HTMLElement, onSuccess: () => void): void 
             </div>
           </div>
         </form>
+
+        <!-- 2FA-trinn skjult inntil challenge er aktiv -->
+        <form id="twoFAForm" data-testid="login-2fa-form" style="display:none;">
+          <p>Skriv inn 6-sifret kode fra autentiserings-appen din, eller en backup-kode.</p>
+          <div class="form-group has-feedback">
+            <input type="text" class="form-control" id="twoFACode" name="code" required
+                   placeholder="123456 eller xxxxx-xxxxx"
+                   autocomplete="one-time-code"
+                   inputmode="numeric"
+                   data-testid="login-2fa-code"
+                   style="padding-left: 12px;">
+          </div>
+          <div class="row">
+            <div class="col-xs-12">
+              <button type="submit" id="twoFASubmit"
+                      class="btn btn-primary btn-block btn-flat"
+                      data-testid="login-2fa-submit">Bekreft kode</button>
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <div class="col-xs-12">
+              <button type="button" id="twoFACancel" class="btn btn-default btn-block btn-flat"
+                      data-testid="login-2fa-cancel">Avbryt</button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>`;
 
   const form = root.querySelector<HTMLFormElement>("#loginForm")!;
+  const twoFAForm = root.querySelector<HTMLFormElement>("#twoFAForm")!;
+  const twoFACancel = root.querySelector<HTMLButtonElement>("#twoFACancel")!;
+  const twoFACode = root.querySelector<HTMLInputElement>("#twoFACode")!;
+  const twoFASubmit = root.querySelector<HTMLButtonElement>("#twoFASubmit")!;
   const alert = root.querySelector<HTMLElement>("#loginAlert")!;
   const submit = root.querySelector<HTMLButtonElement>("#loginSubmit")!;
   const pwd = root.querySelector<HTMLInputElement>("#password")!;
   const eye = root.querySelector<HTMLElement>("#viewpassword")!;
   const methodSelect = root.querySelector<HTMLSelectElement>("#loginMethod")!;
+  const msg = root.querySelector<HTMLElement>("#loginBoxMsg")!;
+
+  let activeChallengeId: string | null = null;
+
+  function showAlert(text: string): void {
+    alert.textContent = text;
+    alert.style.display = "";
+  }
+
+  function hideAlert(): void {
+    alert.style.display = "none";
+  }
+
+  function showCredentialsStep(): void {
+    activeChallengeId = null;
+    form.style.display = "";
+    twoFAForm.style.display = "none";
+    msg.textContent = t("sign_in_to_start");
+    twoFACode.value = "";
+  }
+
+  function showTwoFAStep(challengeId: string): void {
+    activeChallengeId = challengeId;
+    form.style.display = "none";
+    twoFAForm.style.display = "";
+    msg.textContent = "Bekreft med to-faktor-autentisering";
+    twoFACode.value = "";
+    setTimeout(() => twoFACode.focus(), 0);
+  }
 
   function applyMethodVisibility(): void {
     const fields = root.querySelectorAll<HTMLElement>("[data-method]");
@@ -105,7 +170,7 @@ export function renderLoginPage(root: HTMLElement, onSuccess: () => void): void 
 
   methodSelect.addEventListener("change", () => {
     method = (methodSelect.value as LoginMethod) || "email";
-    alert.style.display = "none";
+    hideAlert();
     applyMethodVisibility();
   });
 
@@ -123,32 +188,65 @@ export function renderLoginPage(root: HTMLElement, onSuccess: () => void): void 
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    alert.style.display = "none";
+    hideAlert();
     submit.disabled = true;
     const fd = new FormData(form);
     try {
-      let session;
       if (method === "phone") {
         const phone = String(fd.get("phone") ?? "").trim();
         const pin = String(fd.get("pin") ?? "").trim();
         if (!/^\d{4,6}$/.test(pin)) {
           throw new Error(t("pin_invalid") || "PIN må være 4-6 siffer.");
         }
-        session = await loginPhone(phone, pin);
+        const session = await loginPhone(phone, pin);
+        setSession(session);
       } else {
         const email = String(fd.get("email") ?? "").trim();
         const password = String(fd.get("password") ?? "");
-        session = await login(email, password);
+        const result = await login(email, password);
+        if (result.kind === "twoFAChallenge") {
+          showTwoFAStep(result.challengeId);
+          return;
+        }
+        setSession(result.session);
       }
-      setSession(session);
       onSuccess();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : t("login_failed");
-      alert.textContent = msg;
-      alert.style.display = "";
+      const errMsg = err instanceof Error ? err.message : t("login_failed");
+      showAlert(errMsg);
     } finally {
       submit.disabled = false;
     }
+  });
+
+  twoFAForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    hideAlert();
+    if (!activeChallengeId) {
+      showCredentialsStep();
+      return;
+    }
+    const code = twoFACode.value.trim();
+    if (!code) {
+      showAlert("Skriv inn koden.");
+      return;
+    }
+    twoFASubmit.disabled = true;
+    try {
+      const session = await completeTwoFALogin(activeChallengeId, code);
+      setSession(session);
+      onSuccess();
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Ugyldig kode.";
+      showAlert(errMsg);
+    } finally {
+      twoFASubmit.disabled = false;
+    }
+  });
+
+  twoFACancel.addEventListener("click", () => {
+    hideAlert();
+    showCredentialsStep();
   });
 }
 

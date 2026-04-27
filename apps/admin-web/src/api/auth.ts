@@ -1,5 +1,6 @@
 import { apiRequest, setToken, clearToken } from "./client.js";
 import type { Session } from "../auth/Session.js";
+import { twoFALoginRaw, type TwoFALoginResponse } from "./auth-2fa.js";
 
 export interface LoginResponse {
   accessToken: string;
@@ -18,11 +19,44 @@ export interface ApiUser {
   dailyBalance?: number | null;
 }
 
-export async function login(email: string, password: string): Promise<Session> {
-  const result = await apiRequest<LoginResponse>("/api/auth/login", {
+/**
+ * REQ-129: backend kan returnere `{ requires2FA: true, challengeId, challengeExpiresAt }`
+ * i stedet for full session når brukeren har 2FA aktivert. Klienten må da
+ * vise TOTP-input og kalle `completeTwoFALogin(challengeId, code)`.
+ */
+export interface TwoFAChallengeResponse {
+  requires2FA: true;
+  challengeId: string;
+  challengeExpiresAt: string;
+}
+
+export type LoginResult =
+  | { kind: "session"; session: Session }
+  | { kind: "twoFAChallenge"; challengeId: string; challengeExpiresAt: string };
+
+export async function login(email: string, password: string): Promise<LoginResult> {
+  const result = await apiRequest<LoginResponse | TwoFAChallengeResponse>("/api/auth/login", {
     method: "POST",
     body: { email, password },
   });
+  if (result && "requires2FA" in result && result.requires2FA === true) {
+    return {
+      kind: "twoFAChallenge",
+      challengeId: result.challengeId,
+      challengeExpiresAt: result.challengeExpiresAt,
+    };
+  }
+  const loginResp = result as LoginResponse;
+  setToken(loginResp.accessToken);
+  return { kind: "session", session: mapUserToSession(loginResp.user) };
+}
+
+/**
+ * REQ-129: fullfør 2FA-login etter at `login()` returnerte `twoFAChallenge`.
+ * `code` aksepterer både 6-sifret TOTP og 10-sifret backup-kode (xxxxx-xxxxx).
+ */
+export async function completeTwoFALogin(challengeId: string, code: string): Promise<Session> {
+  const result: TwoFALoginResponse = await twoFALoginRaw({ challengeId, code });
   setToken(result.accessToken);
   return mapUserToSession(result.user);
 }

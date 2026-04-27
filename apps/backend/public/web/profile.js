@@ -588,6 +588,298 @@
     }
   }
 
+  // ── REQ-129: Two-Factor Authentication ────────────────────────────────
+
+  function showError(el, msg) {
+    if (!el) return;
+    el.textContent = msg || '';
+    el.hidden = !msg;
+  }
+
+  function renderBackupCodesList(listEl, codes) {
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    (codes || []).forEach(function (c) {
+      var li = document.createElement('li');
+      var code = document.createElement('code');
+      code.textContent = c;
+      li.appendChild(code);
+      listEl.appendChild(li);
+    });
+  }
+
+  async function load2FAStatus() {
+    var statusEl = document.getElementById('profile-2fa-status');
+    var disabledActions = document.getElementById('profile-2fa-disabled-actions');
+    var enabledActions = document.getElementById('profile-2fa-enabled-actions');
+    var remainingEl = document.getElementById('profile-2fa-backup-remaining');
+
+    if (!statusEl) return;
+    statusEl.textContent = 'Laster…';
+    try {
+      var status = await apiFetch('/api/auth/2fa/status');
+      if (status.enabled) {
+        statusEl.textContent = 'Aktivert ✓';
+        if (disabledActions) disabledActions.hidden = true;
+        if (enabledActions) enabledActions.hidden = false;
+        if (remainingEl) remainingEl.textContent = String(status.backupCodesRemaining ?? 0);
+      } else {
+        statusEl.textContent = 'Ikke aktivert';
+        if (disabledActions) disabledActions.hidden = false;
+        if (enabledActions) enabledActions.hidden = true;
+      }
+      // Reset uferdige paner ved hver refresh
+      var setupWrap = document.getElementById('profile-2fa-setup-wrap');
+      if (setupWrap) setupWrap.hidden = true;
+      var backupWrap = document.getElementById('profile-2fa-backup-wrap');
+      if (backupWrap) backupWrap.hidden = true;
+      var regenWrap = document.getElementById('profile-2fa-regen-wrap');
+      if (regenWrap) regenWrap.hidden = true;
+      var disableWrap = document.getElementById('profile-2fa-disable-wrap');
+      if (disableWrap) disableWrap.hidden = true;
+      var regenResult = document.getElementById('profile-2fa-regen-result');
+      if (regenResult) regenResult.hidden = true;
+    } catch (err) {
+      statusEl.textContent = 'Ukjent status';
+      console.warn('[2fa] status:', err);
+    }
+  }
+
+  function init2FA() {
+    var setupBtn = document.getElementById('profile-2fa-setup-btn');
+    var setupWrap = document.getElementById('profile-2fa-setup-wrap');
+    var qrImg = document.getElementById('profile-2fa-qr');
+    var secretEl = document.getElementById('profile-2fa-secret');
+    var verifyForm = document.getElementById('profile-2fa-verify-form');
+    var verifyError = document.getElementById('profile-2fa-setup-error');
+    var backupWrap = document.getElementById('profile-2fa-backup-wrap');
+    var backupList = document.getElementById('profile-2fa-backup-list');
+    var backupDoneBtn = document.getElementById('profile-2fa-backup-done');
+
+    if (setupBtn) {
+      setupBtn.addEventListener('click', async function () {
+        setupBtn.disabled = true;
+        try {
+          var res = await apiFetch('/api/auth/2fa/setup', { method: 'POST' });
+          if (qrImg) qrImg.src = 'https://chart.googleapis.com/chart?cht=qr&chs=220x220&chl=' + encodeURIComponent(res.otpauthUri);
+          if (secretEl) secretEl.textContent = res.secret;
+          if (setupWrap) setupWrap.hidden = false;
+          if (backupWrap) backupWrap.hidden = true;
+          showError(verifyError, '');
+          if (verifyForm) verifyForm.hidden = false;
+        } catch (err) {
+          showError(verifyError, err.message || 'Kunne ikke starte 2FA-setup');
+          if (setupWrap) setupWrap.hidden = false;
+        } finally {
+          setupBtn.disabled = false;
+        }
+      });
+    }
+
+    if (verifyForm) {
+      verifyForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        showError(verifyError, '');
+        var code = document.getElementById('profile-2fa-verify-code').value.trim();
+        if (!/^\d{6}$/.test(code)) { showError(verifyError, 'Ugyldig 6-sifret kode'); return; }
+        try {
+          var res = await apiFetch('/api/auth/2fa/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: code })
+          });
+          renderBackupCodesList(backupList, res.backupCodes);
+          if (backupWrap) backupWrap.hidden = false;
+          verifyForm.hidden = true;
+        } catch (err) {
+          showError(verifyError, err.message || 'Verifisering feilet');
+        }
+      });
+    }
+
+    if (backupDoneBtn) {
+      backupDoneBtn.addEventListener('click', function () { load2FAStatus(); });
+    }
+
+    // ── Regenerate backup codes ─────────────────────────────────────────
+    var regenBtn = document.getElementById('profile-2fa-regen-btn');
+    var regenWrap = document.getElementById('profile-2fa-regen-wrap');
+    var regenForm = document.getElementById('profile-2fa-regen-form');
+    var regenError = document.getElementById('profile-2fa-regen-error');
+    var regenResult = document.getElementById('profile-2fa-regen-result');
+    var regenList = document.getElementById('profile-2fa-regen-list');
+
+    if (regenBtn) {
+      regenBtn.addEventListener('click', function () {
+        if (regenWrap) regenWrap.hidden = !regenWrap.hidden;
+        showError(regenError, '');
+      });
+    }
+    if (regenForm) {
+      regenForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        showError(regenError, '');
+        var pwd = document.getElementById('profile-2fa-regen-password').value;
+        if (!pwd) { showError(regenError, 'Skriv inn passord'); return; }
+        try {
+          var res = await apiFetch('/api/auth/2fa/backup-codes/regenerate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pwd })
+          });
+          renderBackupCodesList(regenList, res.backupCodes);
+          if (regenResult) regenResult.hidden = false;
+          regenForm.reset();
+          // Last status på nytt for å oppdatere antall gjenværende koder
+          load2FAStatus().then(function () {
+            // Re-vis regen-result etter refresh siden refresh skjuler wrap-en
+            if (regenWrap) regenWrap.hidden = false;
+            if (regenResult) regenResult.hidden = false;
+          });
+        } catch (err) {
+          showError(regenError, err.message || 'Regenerering feilet');
+        }
+      });
+    }
+
+    // ── Disable 2FA ──────────────────────────────────────────────────────
+    var disableBtn = document.getElementById('profile-2fa-disable-btn');
+    var disableWrap = document.getElementById('profile-2fa-disable-wrap');
+    var disableForm = document.getElementById('profile-2fa-disable-form');
+    var disableError = document.getElementById('profile-2fa-disable-error');
+    if (disableBtn) {
+      disableBtn.addEventListener('click', function () {
+        if (disableWrap) disableWrap.hidden = !disableWrap.hidden;
+        showError(disableError, '');
+      });
+    }
+    if (disableForm) {
+      disableForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        showError(disableError, '');
+        if (!confirm('Er du sikker på at du vil deaktivere 2FA?')) return;
+        var pwd = document.getElementById('profile-2fa-disable-password').value;
+        var code = document.getElementById('profile-2fa-disable-code').value.trim();
+        if (!pwd || !/^\d{6}$/.test(code)) {
+          showError(disableError, 'Passord og 6-sifret kode kreves'); return;
+        }
+        try {
+          await apiFetch('/api/auth/2fa/disable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pwd, code: code })
+          });
+          await load2FAStatus();
+        } catch (err) {
+          showError(disableError, err.message || 'Deaktivering feilet');
+        }
+      });
+    }
+  }
+
+  // ── REQ-132: Active sessions ─────────────────────────────────────────
+
+  function abbreviateUA(ua) {
+    if (!ua) return 'Ukjent enhet';
+    var browser = ua.match(/(Chrome|Firefox|Safari|Edge|Opera)[/ ][\d.]+/i);
+    var os = ua.match(/(Windows NT [\d.]+|Mac OS X [\d_.]+|Linux|Android [\d.]+|iPhone|iPad)/i);
+    var parts = [];
+    if (browser) parts.push(browser[0].split('/')[0]);
+    if (os) parts.push(os[0]);
+    return parts.length === 0 ? ua.slice(0, 60) : parts.join(' · ');
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '—';
+    try {
+      return new Intl.DateTimeFormat('nb-NO', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      }).format(new Date(value));
+    } catch { return String(value); }
+  }
+
+  async function loadSessions() {
+    var listEl = document.getElementById('profile-sessions-list');
+    var errorEl = document.getElementById('profile-sessions-error');
+    var logoutAllBtn = document.getElementById('profile-sessions-logout-all-btn');
+    if (!listEl) return;
+    listEl.innerHTML = '<p class="profile-section-note">Laster…</p>';
+    showError(errorEl, '');
+    try {
+      var data = await apiFetch('/api/auth/sessions');
+      var sessions = data.sessions || [];
+      listEl.innerHTML = '';
+      var others = 0;
+      sessions.forEach(function (s) {
+        var card = document.createElement('div');
+        card.style.cssText = 'border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;';
+        card.dataset.sessionId = s.id;
+        var info = document.createElement('div');
+        info.style.cssText = 'flex:1;font-size:13px;line-height:1.4';
+        var device = abbreviateUA(s.deviceUserAgent);
+        var ip = s.ipAddress || '—';
+        var last = formatDateTime(s.lastActivityAt);
+        info.innerHTML = '<strong>' + escapeHtml(device) + '</strong>'
+          + (s.isCurrent ? ' <span style="color:#81c784">(denne enheten)</span>' : '')
+          + '<br><span style="color:rgba(255,255,255,0.6)">IP ' + escapeHtml(ip)
+          + ' · sist aktiv ' + escapeHtml(last) + '</span>';
+        card.appendChild(info);
+        if (!s.isCurrent) {
+          others += 1;
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'profile-btn-outline';
+          btn.textContent = 'Logg ut';
+          btn.addEventListener('click', async function () {
+            if (!confirm('Logge ut denne sesjonen?')) return;
+            btn.disabled = true;
+            try {
+              await apiFetch('/api/auth/sessions/' + encodeURIComponent(s.id) + '/logout', { method: 'POST' });
+              loadSessions();
+            } catch (err) {
+              showError(errorEl, err.message || 'Kunne ikke logge ut sesjon');
+              btn.disabled = false;
+            }
+          });
+          card.appendChild(btn);
+        } else {
+          var tag = document.createElement('span');
+          tag.style.cssText = 'color:#81c784;font-size:12px;';
+          tag.textContent = 'Aktiv';
+          card.appendChild(tag);
+        }
+        listEl.appendChild(card);
+      });
+      if (logoutAllBtn) logoutAllBtn.disabled = others === 0;
+    } catch (err) {
+      listEl.innerHTML = '';
+      showError(errorEl, err.message || 'Kunne ikke laste sesjoner');
+    }
+  }
+
+  function initSessions() {
+    var logoutAllBtn = document.getElementById('profile-sessions-logout-all-btn');
+    var errorEl = document.getElementById('profile-sessions-error');
+    if (logoutAllBtn) {
+      logoutAllBtn.addEventListener('click', async function () {
+        if (!confirm('Logge ut alle andre sesjoner?')) return;
+        logoutAllBtn.disabled = true;
+        try {
+          await apiFetch('/api/auth/sessions/logout-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ includeCurrent: false })
+          });
+          loadSessions();
+        } catch (err) {
+          showError(errorEl, err.message || 'Kunne ikke logge ut sesjoner');
+          logoutAllBtn.disabled = false;
+        }
+      });
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────
 
   function initProfile() {
@@ -600,6 +892,10 @@
     initKyc();
     initAccountActions();
     refreshPinStatus();
+    init2FA();
+    initSessions();
+    load2FAStatus();
+    loadSessions();
   }
 
   // ── REQ-130 (PDF 9 Frontend CR): PIN-management ────────────────────────
@@ -712,6 +1008,8 @@
         if (m.attributeName === 'class' && profileOverlay.classList.contains('is-open')) {
           renderProfileInfo();
           loadWallet();
+          load2FAStatus();
+          loadSessions();
         }
       });
     });
@@ -723,6 +1021,8 @@
     refresh: function () {
       renderProfileInfo();
       loadWallet();
+      load2FAStatus();
+      loadSessions();
     }
   };
 

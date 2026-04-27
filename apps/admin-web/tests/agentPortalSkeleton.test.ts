@@ -90,7 +90,8 @@ describe("mapUserToSession (backend → admin-web role-mapping)", () => {
           headers: { "Content-Type": "application/json" },
         });
       const agentSess = await login("a@x.no", "pw");
-      expect(agentSess.role).toBe("agent");
+      if (agentSess.kind !== "session") throw new Error("expected session, got 2FA challenge");
+      expect(agentSess.session.role).toBe("agent");
 
       // HALL_OPERATOR
       globalThis.fetch = async () =>
@@ -99,7 +100,8 @@ describe("mapUserToSession (backend → admin-web role-mapping)", () => {
           headers: { "Content-Type": "application/json" },
         });
       const hallOpSess = await login("h@x.no", "pw");
-      expect(hallOpSess.role).toBe("hall-operator");
+      if (hallOpSess.kind !== "session") throw new Error("expected session");
+      expect(hallOpSess.session.role).toBe("hall-operator");
 
       // ADMIN (lowercase — legacy fixtures)
       globalThis.fetch = async () =>
@@ -108,7 +110,8 @@ describe("mapUserToSession (backend → admin-web role-mapping)", () => {
           headers: { "Content-Type": "application/json" },
         });
       const adminSess = await login("admin@x.no", "pw");
-      expect(adminSess.role).toBe("admin");
+      if (adminSess.kind !== "session") throw new Error("expected session");
+      expect(adminSess.session.role).toBe("admin");
 
       // Cleanup
       setSession(null);
