@@ -212,6 +212,29 @@ export class Game1JackpotStateService {
     return `"${this.schema}"."app_hall_groups"`;
   }
 
+  private hallGroupMembersTable(): string {
+    return `"${this.schema}"."app_hall_group_members"`;
+  }
+
+  /**
+   * K1-A RBAC follow-up: hall-gruppe-medlemskap-sjekk for hall-scope-guard
+   * på admin-jackpot-endpoints. Returnerer `true` kun hvis `hallId` er
+   * eksplisitt medlem av `hallGroupId` i `app_hall_group_members`. Brukes
+   * av `assertJackpotGroupScope` i adminGame1Master-routeren for å hindre
+   * at HALL_OPERATOR for hall A leser jackpot-state for en annen gruppe.
+   */
+  async isHallInGroup(hallId: string, hallGroupId: string): Promise<boolean> {
+    if (!hallId || !hallGroupId) return false;
+    const { rows } = await this.pool.query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM ${this.hallGroupMembersTable()}
+          WHERE group_id = $1 AND hall_id = $2
+       ) AS exists`,
+      [hallGroupId, hallId]
+    );
+    return rows[0]?.exists === true;
+  }
+
   /**
    * Les nåværende jackpot-saldo for en hall-gruppe. Hvis raden ikke finnes
    * (lazy-init case), returneres start-verdi uten å skrive til DB. Kall

@@ -91,6 +91,47 @@ function actorTypeFromRole(
   return "USER";
 }
 
+/**
+ * K1-A RBAC follow-up: hall-scope-guard for jackpot-admin-GET-endpoints.
+ *
+ * GAME1_GAME_READ-permission slipper alle admin-roller (ADMIN/SUPPORT/
+ * HALL_OPERATOR/AGENT) gjennom, men jackpot-state per hall-gruppe må ekstra
+ * scopes: HALL_OPERATOR for hall A skal ikke kunne lese state for en
+ * gruppe hallA ikke er medlem av. ADMIN + SUPPORT har globalt scope.
+ *
+ * Throws `DomainError(code="FORBIDDEN_HALL_SCOPE")` ved brudd. Norsk
+ * feilmelding eksponeres til klient.
+ */
+async function assertJackpotGroupScope(
+  jackpotStateService: Game1JackpotStateService,
+  user: PublicAppUser,
+  hallGroupId: string
+): Promise<void> {
+  if (user.role === "ADMIN" || user.role === "SUPPORT") return;
+  if (user.role !== "HALL_OPERATOR" && user.role !== "AGENT") {
+    throw new DomainError(
+      "FORBIDDEN_HALL_SCOPE",
+      "Du har ikke tilgang til denne hallen."
+    );
+  }
+  if (!user.hallId) {
+    throw new DomainError(
+      "FORBIDDEN_HALL_SCOPE",
+      "Din bruker er ikke tildelt en hall — kontakt admin."
+    );
+  }
+  const inGroup = await jackpotStateService.isHallInGroup(
+    user.hallId,
+    hallGroupId
+  );
+  if (!inGroup) {
+    throw new DomainError(
+      "FORBIDDEN_HALL_SCOPE",
+      "Du har ikke tilgang til denne hallen."
+    );
+  }
+}
+
 function buildActor(
   user: PublicAppUser,
   masterHallId: string | null
@@ -476,7 +517,7 @@ export function createAdminGame1MasterRouter(
 
   router.get("/api/admin/game1/games/:gameId", async (req, res) => {
     try {
-      await requirePermission(req, "GAME1_GAME_READ");
+      const actor = await requirePermission(req, "GAME1_GAME_READ");
       const gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
       const detail = await masterControlService.getGameDetail(gameId);
 
@@ -547,6 +588,15 @@ export function createAdminGame1MasterRouter(
         | null = null;
       if (jackpotStateService && detail.game.groupHallId) {
         try {
+          // K1-A RBAC follow-up: hall-scope-guard, men SOFT-FAIL — ved
+          // FORBIDDEN_HALL_SCOPE beholdes jackpot=null mens resten av
+          // detail-payloaden serveres. (Det dedikerte
+          // GET /jackpot-state/:hallGroupId hard-failer ved samme brudd.)
+          await assertJackpotGroupScope(
+            jackpotStateService,
+            actor,
+            detail.game.groupHallId
+          );
           const state = await jackpotStateService.getStateForGroup(
             detail.game.groupHallId
           );
@@ -558,7 +608,17 @@ export function createAdminGame1MasterRouter(
             lastAccumulationDate: state.lastAccumulationDate,
           };
         } catch (err) {
-          logger.warn({ err, gameId }, "jackpot-state lookup soft-failed");
+          if (
+            err instanceof DomainError &&
+            err.code === "FORBIDDEN_HALL_SCOPE"
+          ) {
+            logger.info(
+              { gameId, role: actor.role, hallId: actor.hallId, groupHallId: detail.game.groupHallId },
+              "jackpot-state hall-scope soft-failed — jackpot=null served"
+            );
+          } else {
+            logger.warn({ err, gameId }, "jackpot-state lookup soft-failed");
+          }
         }
       }
 
@@ -583,12 +643,18 @@ export function createAdminGame1MasterRouter(
 
   router.get("/api/admin/game1/jackpot-state/:hallGroupId", async (req, res) => {
     try {
-      await requirePermission(req, "GAME1_GAME_READ");
+      const actor = await requirePermission(req, "GAME1_GAME_READ");
       const hallGroupId = mustBeNonEmptyString(req.params.hallGroupId, "hallGroupId");
       if (!jackpotStateService) {
         apiSuccess(res, { jackpot: null });
         return;
       }
+      // K1-A RBAC follow-up: HALL_OPERATOR/AGENT må være medlem av gruppen.
+      // ADMIN + SUPPORT har globalt scope. Hard-fail ved brudd — dette er
+      // det dedikerte jackpot-endepunktet, så response-shapen skal ikke
+      // serveres til uautoriserte (i motsetning til GET /:gameId som
+      // soft-failer for å bevare resten av detail-payloaden).
+      await assertJackpotGroupScope(jackpotStateService, actor, hallGroupId);
       const state = await jackpotStateService.getStateForGroup(hallGroupId);
       apiSuccess(res, {
         jackpot: {
