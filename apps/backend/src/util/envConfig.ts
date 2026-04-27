@@ -380,7 +380,12 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // PostgreSQL
   const pgSsl = parseBooleanEnv(process.env.WALLET_PG_SSL, false);
   const pgSchema = process.env.APP_PG_SCHEMA?.trim() || process.env.WALLET_PG_SCHEMA?.trim() || "public";
-  const sessionTtlHours = parsePositiveIntEnv(process.env.AUTH_SESSION_TTL_HOURS, 24 * 7);
+  // NEW-001 (PM-beslutning kreves): wireframe-spec sier 8 timer (admin) /
+  // 30 min (spillere). 30-min idle-timeout håndheves allerede av
+  // SessionService (REQ-132). Den absolutte TTL er nå default 8 timer
+  // (8h × 60m × 60s × 1000ms = 28 800 000 ms) for å matche wireframe.
+  // Override via AUTH_SESSION_TTL_HOURS hvis PM ønsker lengre default.
+  const sessionTtlHours = parsePositiveIntEnv(process.env.AUTH_SESSION_TTL_HOURS, 8);
 
   // BIN-585 PR D: hall-display screensaver config (legacy Sys.Setting
   // replacement). Pilot defaults: 5 min idle timeout, 10 s image rotation.

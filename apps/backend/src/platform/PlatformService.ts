@@ -555,7 +555,9 @@ export class PlatformService {
       throw new DomainError("INVALID_CONFIG", "Mangler connection string for plattform-database.");
     }
     this.schema = assertSchemaName(options.schema ?? "public");
-    this.sessionTtlHours = options.sessionTtlHours ?? 24 * 7;
+    // NEW-001: default 8 timer iht wireframe-spec (auth flyt PDF 9).
+    // 30-min idle-timeout håndheves separat av SessionService (REQ-132).
+    this.sessionTtlHours = options.sessionTtlHours ?? 8;
     this.minAgeYears = Math.max(18, Math.floor(options.minAgeYears ?? 18));
     this.kycAdapter = options.kycAdapter;
     this.pool = new Pool({
