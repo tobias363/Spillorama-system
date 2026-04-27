@@ -4,6 +4,7 @@
 import { t } from "../../i18n/I18n.js";
 import { DataTable } from "../../components/DataTable.js";
 import { Toast } from "../../components/Toast.js";
+import { maskPhoneForGrid } from "../../components/pii.js";
 import { ApiError } from "../../api/client.js";
 import { listPending, type PlayerSummary } from "../../api/admin-players.js";
 import {
@@ -53,7 +54,8 @@ export function renderPendingListPage(container: HTMLElement): void {
           render: (r) => escapeHtml(formatDateTime(r.createdAt)),
         },
         { key: "email", title: t("email_address"), render: (r) => escapeHtml(r.email) },
-        { key: "phone", title: t("mobile_number"), render: (r) => escapeHtml(r.phone ?? "—") },
+        // REQ-005/125: mask phone i grid (full phone vises i detail-view + CSV-eksport).
+        { key: "phone", title: t("mobile_number"), render: (r) => escapeHtml(maskPhoneForGrid(r.phone)) },
         { key: "hallId", title: t("hall_name"), render: (r) => escapeHtml(r.hallId ?? "—") },
         {
           key: "kycStatus",

@@ -23,6 +23,7 @@ import { t } from "../../i18n/I18n.js";
 import { DataTable } from "../../components/DataTable.js";
 import { Modal } from "../../components/Modal.js";
 import { Toast } from "../../components/Toast.js";
+import { maskPhoneForGrid } from "../../components/pii.js";
 import { ApiError } from "../../api/client.js";
 import {
   listRejected,
@@ -137,7 +138,8 @@ export function renderRejectedListPage(container: HTMLElement): void {
             `<a href="${viewRejectedHash(r.id)}">${escapeHtml(r.displayName || r.email)}</a>`,
         },
         { key: "email", title: t("email_address"), render: (r) => escapeHtml(r.email) },
-        { key: "phone", title: t("mobile_number"), render: (r) => escapeHtml(r.phone ?? "—") },
+        // REQ-005/125: mask phone i grid (full phone vises i detail-view + CSV-eksport).
+        { key: "phone", title: t("mobile_number"), render: (r) => escapeHtml(maskPhoneForGrid(r.phone)) },
         { key: "hallId", title: t("hall_name"), render: (r) => escapeHtml(r.hallId ?? "—") },
         {
           key: "updatedAt",
