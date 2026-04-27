@@ -305,6 +305,8 @@ function mountShell(_root: HTMLElement, session: Session): void {
     onChange: (route, path) => {
       // Stop dashboard-polling when navigating away from the dashboard route.
       if (route?.path !== "/admin" && route?.path !== "/") unmountDashboard();
+      // Dispose admin-ops socket when navigating away from /admin/ops.
+      if (route?.path !== "/admin/ops") unmountAdminOps();
       // Role-guard: redirect if the hash points to a route the current role
       // isn't allowed into (AGENT/HALL_OPERATOR into /admin, ADMIN into
       // /agent/*). The guard updates window.location.hash which re-triggers
