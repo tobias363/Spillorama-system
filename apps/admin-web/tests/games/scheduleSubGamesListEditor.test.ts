@@ -525,7 +525,8 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
     const colorCheckboxes = row.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"][data-sg-color]:not([data-sg-color-field])'
     );
-    expect(colorCheckboxes.length).toBe(9);
+    // 9 standard + 5 Elvis-farger (audit 2026-04-27, ticket-colors.ts)
+    expect(colorCheckboxes.length).toBe(14);
     const codes = Array.from(colorCheckboxes).map(
       (cb) => cb.getAttribute("data-sg-color") ?? ""
     );
@@ -539,6 +540,11 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
       "RED",
       "GREEN",
       "BLUE",
+      "ELVIS1",
+      "ELVIS2",
+      "ELVIS3",
+      "ELVIS4",
+      "ELVIS5",
     ]);
   });
 

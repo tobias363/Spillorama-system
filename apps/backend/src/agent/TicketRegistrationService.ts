@@ -39,8 +39,12 @@ import { logger as rootLogger } from "../util/logger.js";
 const logger = rootLogger.child({ module: "ticket-registration-service" });
 
 /**
- * De 6 ticket-typene fra wireframe 15.2/15.10. Rekkefølgen matcher den
- * visuelle kolonne-rekkefølgen i UI (Small Yellow først, Large Purple sist).
+ * 11-palette ticket-typer (utvidet pre-pilot 2026-10-01 fra 6 → 11, jf.
+ * master-plan §2.7). Rekkefølgen matcher den visuelle kolonne-rekkefølgen
+ * i UI: originale 6 (Small Yellow … Large Purple) først, deretter de nye
+ * fargene (Red → Green → Blue) for paritet med legacy-wireframe 17.15.
+ *
+ * DB-CHECK-constraint: migrations/20261001000000_ticket_ranges_11_color_palette.sql
  */
 export const TICKET_TYPES = [
   "small_yellow",
@@ -49,6 +53,11 @@ export const TICKET_TYPES = [
   "large_white",
   "small_purple",
   "large_purple",
+  "small_red",
+  "large_red",
+  "small_green",
+  "large_green",
+  "small_blue",
 ] as const;
 
 export type TicketType = (typeof TICKET_TYPES)[number];
@@ -66,6 +75,11 @@ export const TICKET_TYPE_LABELS: Record<TicketType, string> = {
   large_white: "Large White",
   small_purple: "Small Purple",
   large_purple: "Large Purple",
+  small_red: "Small Red",
+  large_red: "Large Red",
+  small_green: "Small Green",
+  large_green: "Large Green",
+  small_blue: "Small Blue",
 };
 
 export interface TicketRange {

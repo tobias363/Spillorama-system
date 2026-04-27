@@ -113,12 +113,15 @@ describe("Sidebar spec", () => {
     expect(sidebarFor("agent")).toBe(agentSidebar);
   });
 
-  // Legacy 1:1 sidebar (Tobias screenshot 2026-04-27) — verify the 16
-  // top-level menu-items appear in the correct order under "Hovednavigasjon".
+  // Legacy 1:1 sidebar (Tobias screenshot 2026-04-27) — verify menu-items
+  // appear in the correct order under "Hovednavigasjon". `game1-master-console`
+  // skutt inn etter cash-inout for hurtig-tilgang til BIN1-master (PR
+  // #629 + master-console-route 2026-04-27).
   describe("legacy 1:1 layout", () => {
     const LEGACY_ORDER: { id: string; kind: "leaf" | "group" }[] = [
       { id: "dashboard", kind: "leaf" },
       { id: "cash-inout", kind: "group" },
+      { id: "game1-master-console", kind: "leaf" },
       { id: "player-management", kind: "group" },
       { id: "schedules", kind: "leaf" },
       { id: "gameManagement", kind: "leaf" },
@@ -274,11 +277,13 @@ describe("renderSidebar", () => {
     const items = Array.from(ul!.children) as HTMLLIElement[];
     // First child is the header <li class="header">.
     expect(items[0]?.classList.contains("header")).toBe(true);
-    // Next 16 items are the legacy menu-items. We verify each by id (leaf) or
-    // data-group-id (group).
+    // Legacy menu-items. We verify each by id (leaf) or data-group-id (group).
+    // Game1 master-console er innskutt etter cash-inout (PR #629 +
+    // game1-master-console route 2026-04-27).
     const expected = [
       { kind: "leaf", routeId: "dashboard" },
       { kind: "group", id: "cash-inout" },
+      { kind: "leaf", routeId: "game1-master-console" },
       { kind: "group", id: "player-management" },
       { kind: "leaf", routeId: "schedules" },
       { kind: "leaf", routeId: "gameManagement" },

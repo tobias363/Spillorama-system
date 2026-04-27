@@ -9,13 +9,22 @@
 
 import { apiRequest } from "./client.js";
 
+/**
+ * 11-palette (utvidet pre-pilot 2026-10-01) — speilbilde av backend-konstantene
+ * i apps/backend/src/agent/TicketRegistrationService.ts. Hold synkronisert.
+ */
 export type TicketType =
   | "small_yellow"
   | "small_white"
   | "large_yellow"
   | "large_white"
   | "small_purple"
-  | "large_purple";
+  | "large_purple"
+  | "small_red"
+  | "large_red"
+  | "small_green"
+  | "large_green"
+  | "small_blue";
 
 export const TICKET_TYPES: readonly TicketType[] = [
   "small_yellow",
@@ -24,6 +33,11 @@ export const TICKET_TYPES: readonly TicketType[] = [
   "large_white",
   "small_purple",
   "large_purple",
+  "small_red",
+  "large_red",
+  "small_green",
+  "large_green",
+  "small_blue",
 ] as const;
 
 export const TICKET_TYPE_LABELS: Record<TicketType, string> = {
@@ -33,6 +47,11 @@ export const TICKET_TYPE_LABELS: Record<TicketType, string> = {
   large_white: "Large White",
   small_purple: "Small Purple",
   large_purple: "Large Purple",
+  small_red: "Small Red",
+  large_red: "Large Red",
+  small_green: "Small Green",
+  large_green: "Large Green",
+  small_blue: "Small Blue",
 };
 
 export interface TicketRange {

@@ -24,11 +24,21 @@ describe("hallAccountReport pages", () => {
   });
 
   it("HallAccountListPage renders table + hall rows", async () => {
-    globalThis.fetch = (async () =>
-      okJson([
-        { id: "hall-a", name: "Hall A", isActive: true },
-        { id: "hall-b", name: "Hall B", isActive: true },
-      ])) as typeof fetch;
+    // REQ-143: HallAccountListPage gjør TO fetch-calls parallelt:
+    //   1. listHalls() → /api/admin/halls
+    //   2. listReportGroups() → /api/admin/reports/groups (group-of-hall-dropdown)
+    // Mocker begge så fetch-mock-en treffer riktig respons per call.
+    let call = 0;
+    globalThis.fetch = (async () => {
+      call++;
+      if (call === 1)
+        return okJson([
+          { id: "hall-a", name: "Hall A", isActive: true },
+          { id: "hall-b", name: "Hall B", isActive: true },
+        ]);
+      // groups: tom for å ikke vise group-dropdown
+      return okJson({ groups: [], count: 0 });
+    }) as typeof fetch;
 
     const c = document.createElement("div");
     await renderHallAccountListPage(c);
