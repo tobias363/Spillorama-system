@@ -60,6 +60,21 @@ import { DomainError, ballToColumn } from "./BingoEngine.js";
 
 const logger = rootLogger.child({ module: "engine.patternEval" });
 
+/**
+ * Tobias-direktiv 2026-04-27: Spill 1 må pause etter hver fase-vinning slik
+ * at master kan starte spillet igjen ("etter hver rad som blir vunnet skal
+ * master starte spillet igjen"). Detection følger den kanoniske listen i
+ * `roomState.ts` — `bingo` / `game_1` / `norsk-bingo`.
+ *
+ * Auto-pause + recursion-stop gjelder KUN Spill 1 — Spill 2/3/SpinnGo bruker
+ * ad-hoc-flyten uten fase-pause (deres regulatoriske kontrakt er annerledes).
+ */
+export function isSpill1Slug(gameSlug: string | undefined | null): boolean {
+  if (!gameSlug) return false;
+  const trimmed = gameSlug.trim();
+  return trimmed === "bingo" || trimmed === "game_1" || trimmed === "norsk-bingo";
+}
+
 /** PR B: Sentinel-nøkkel for flat-path vinner-gruppen (én gruppe, ingen farge-skille). */
 export const FLAT_GROUP_KEY = "__flat__";
 /** PR B: Sentinel-nøkkel for brett uten ticket.color satt — bruker __default__-matrise. */
@@ -452,6 +467,29 @@ export async function evaluateActivePhase(
   // Phase 1 → mark lineWinnerId for backward-compat with existing readers.
   if (activePattern.claimType === "LINE" && !game.lineWinnerId) {
     game.lineWinnerId = firstWinnerId;
+  }
+
+  // Tobias-direktiv 2026-04-27: Spill 1 MÅ pause etter hver fase-vinning.
+  // Master skal starte spillet igjen ("etter hver rad som blir vunnet skal
+  // master starte spillet igjen, så legg inn at spillet stopper for hver
+  // rad som blir vunnet. Dette gjelder da kun for spill 1.").
+  //
+  // Implikasjon for ad-hoc-flyten (BingoEngine.drawNextNumber → her):
+  //   1) Sett `game.isPaused = true` så drawNextNumber blokkerer GAME_PAUSED
+  //      ved neste call før master eksplisitt resumer.
+  //   2) Hopp over rekursjons-fall-through til neste fase. I praksis kan
+  //      ikke et enkelt ball oppfylle både fase N og fase N+1 i Spill 1's
+  //      5-fase-config (fase 2 krever 10 numre, fase 3 14 numre osv.), men
+  //      regulatorisk kontrakten krever at vi STOPPER atomært etter én fase
+  //      uansett — fail-closed mot framtidige variant-config-endringer.
+  //
+  // For Spill 2/3/SpinnGo (egne engines / variant-configs uten fase-pause):
+  //   - Behold eksisterende rekursjons-flyt. Custom-pattern-rom (PR-P5)
+  //     kjører via `evaluateConcurrentPatterns` over og når aldri hit.
+  if (isSpill1Slug(room.gameSlug)) {
+    game.isPaused = true;
+    game.pauseMessage = `Pause etter ${activePattern.name} — master må starte spillet igjen.`;
+    return;
   }
 
   // Rare: same ball won two phases simultaneously — recurse.

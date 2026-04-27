@@ -98,6 +98,29 @@ function prioritiseDrawBag(engine: BingoEngine, roomCode: string, numbers: numbe
   bag.push(...preferred, ...rest);
 }
 
+/**
+ * Tobias-direktiv 2026-04-27: Spill 1 ad-hoc-engine auto-pauser etter fase-vinning
+ * slik at master eksplisitt må starte spillet igjen ("etter hver rad som blir
+ * vunnet skal master starte spillet igjen"). Test-helperen simulerer master-
+ * resume etter hver pause så multi-fase-tester kan iterere drawNextNumber over
+ * fase-grenser uten å måtte spre `engine.resumeGame()`-kall i hver test.
+ *
+ * Helperen er semantisk identisk med produksjonsflyten: scheduler / draw-event
+ * trigger drawNextNumber, ser auto-pause i room-state, og master klikker
+ * "Resume" som setter game.isPaused=false før neste draw.
+ */
+async function drawWithMasterResume(
+  engine: BingoEngine,
+  roomCode: string,
+  actorPlayerId: string,
+): Promise<void> {
+  const snap = engine.getRoomSnapshot(roomCode);
+  if (snap.currentGame?.isPaused) {
+    engine.resumeGame(roomCode);
+  }
+  await engine.drawNextNumber({ roomCode, actorPlayerId });
+}
+
 test("BIN-694: fase 1 vunnet av fase-1-rad → runden fortsetter (status RUNNING)", async () => {
   const { engine, roomCode, hostId } = await setupRoom();
   await engine.startGame({
@@ -133,8 +156,9 @@ test("BIN-694: fase 3 (Fullt Hus) avslutter runden", async () => {
   for (const row of PLAYER_A_GRID) for (const n of row) if (n !== 0) allAlice.push(n);
   prioritiseDrawBag(engine, roomCode, allAlice);
 
+  // Tobias-direktiv 2026-04-27: master-resume mellom fase-pauseringer.
   for (let i = 0; i < 24; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await drawWithMasterResume(engine, roomCode, hostId);
   }
 
   const snapshot = engine.getRoomSnapshot(roomCode);
@@ -199,10 +223,15 @@ test("BIN-694: regresjon — runden avsluttes IKKE ved fase 1 win (dagens bug f�
     await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
   }
 
-  // Etter fase 1 vunnet, skal vi kunne fortsette å trekke.
+  // Tobias-direktiv 2026-04-27: etter fase 1 vunnet auto-pauses Spill 1.
+  // Master må eksplisitt resume før neste draw — runden er IKKE avsluttet.
+  const snapAfterPhase1 = engine.getRoomSnapshot(roomCode);
+  assert.equal(snapAfterPhase1.currentGame?.isPaused, true, "runden skal være auto-pauset etter fase 1");
+  assert.equal(snapAfterPhase1.currentGame?.status, "RUNNING", "status skal fortsatt være RUNNING (ikke ENDED)");
+  engine.resumeGame(roomCode);
   await assert.doesNotReject(
     engine.drawNextNumber({ roomCode, actorPlayerId: hostId }),
-    "neste draw skal fungere selv etter fase 1 vunnet",
+    "neste draw skal fungere etter master-resume",
   );
 });
 
@@ -241,8 +270,9 @@ test("BIN-694: Fase 2 krever 2 HORISONTALE rader — 2 vertikale kolonner er IKK
     16, 17, 18, 19, 20,    // kol 1
   ]);
 
+  // Tobias-direktiv 2026-04-27: master-resume mellom fase-pauseringer.
   for (let i = 0; i < 10; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await drawWithMasterResume(engine, roomCode, hostId);
   }
 
   const snapshot = engine.getRoomSnapshot(roomCode);
@@ -273,9 +303,11 @@ test("BIN-694: E2E full sekvens — 1 Rad → 2 → 3 → 4 Rader → Fullt Hus,
     5, 20, 34, 50, 65,     // rad 4  → Fullt Hus
   ]);
 
+  // Tobias-direktiv 2026-04-27: drawWithMasterResume simulerer master-klikk
+  // "Resume" etter hver auto-pause (Spill 1 stopper for hver vunnet fase).
   const phaseSnapshots: Array<{ afterBall: number; wonPhases: string[]; status: string }> = [];
   for (let i = 0; i < 24; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await drawWithMasterResume(engine, roomCode, hostId);
     const snap = engine.getRoomSnapshot(roomCode);
     phaseSnapshots.push({
       afterBall: i + 1,
@@ -322,8 +354,9 @@ test("BIN-694: Fase 2 vinnes av 2 hele HORISONTALE rader", async () => {
     2, 17, 32, 47, 62,    // rad 1
   ]);
 
+  // Tobias-direktiv 2026-04-27: master-resume mellom fase-pauseringer.
   for (let i = 0; i < 10; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await drawWithMasterResume(engine, roomCode, hostId);
   }
 
   const snapshot = engine.getRoomSnapshot(roomCode);
@@ -360,8 +393,9 @@ test("fast premie — alle 5 faser betales fullt selv når pool er mindre (hus g
   const allAlice: number[] = [];
   for (const row of PLAYER_A_GRID) for (const n of row) if (n !== 0) allAlice.push(n);
   prioritiseDrawBag(engine, roomCode, allAlice);
+  // Tobias-direktiv 2026-04-27: master-resume mellom fase-pauseringer.
   for (let i = 0; i < 24; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await drawWithMasterResume(engine, roomCode, hostId);
   }
 
   const game = engine.getRoomSnapshot(roomCode).currentGame!;
@@ -463,8 +497,9 @@ test("FIXED-PRIZE-FIX: solo-spiller med liten pool får alle 5 faste premier (17
   const allAlice: number[] = [];
   for (const row of PLAYER_A_GRID) for (const n of row) if (n !== 0) allAlice.push(n);
   prioritiseDrawBag(engine, roomCode, allAlice);
+  // Tobias-direktiv 2026-04-27: master-resume mellom fase-pauseringer.
   for (let i = 0; i < 24; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId! });
+    await drawWithMasterResume(engine, roomCode, hostId!);
   }
 
   const game = engine.getRoomSnapshot(roomCode).currentGame!;
@@ -515,8 +550,9 @@ test("FIXED-PRIZE-FIX: claim.rtpCapped er false for fixed-prize claims", async (
   const allAlice: number[] = [];
   for (const row of PLAYER_A_GRID) for (const n of row) if (n !== 0) allAlice.push(n);
   prioritiseDrawBag(engine, roomCode, allAlice);
+  // Tobias-direktiv 2026-04-27: master-resume mellom fase-pauseringer.
   for (let i = 0; i < 24; i += 1) {
-    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId! });
+    await drawWithMasterResume(engine, roomCode, hostId!);
   }
   const game = engine.getRoomSnapshot(roomCode).currentGame!;
   // Alle 5 claims skal være valid + rtpCapped=false (faste premier
