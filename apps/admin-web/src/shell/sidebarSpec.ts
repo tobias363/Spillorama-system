@@ -184,11 +184,11 @@ export const adminSidebar: SidebarNode[] = [
   },
 
   // ── Tilleggselementer som ikke er i legacy-screenshotet, men som
-  //    fortsatt eies av admin-panelet (Spillorama Live, role-management,
-  //    user-management, fysiske bonger PT1-PT5 etc.). Plasseres etter de
-  //    16 legacy-elementene for å bevare 1:1-rekkefølgen øverst.
-
-  spilloramaLive,
+  //    fortsatt eies av admin-panelet (role-management, user-management,
+  //    fysiske bonger PT1-PT5 etc.). Plasseres etter de 16 legacy-
+  //    elementene for å bevare 1:1-rekkefølgen øverst.
+  //    Spillorama Live-iframe-section ble fjernet i PR #630 (alle features
+  //    er native i admin nå).
 
   { kind: "leaf", id: "track-spending", path: "/players/track-spending", icon: "fa fa-gamepad", labelKey: "tracking_player_spending", module: "Tracking Player Spending" },
   { kind: "leaf", id: "gameType", path: "/gameType", icon: "fa fa-gamepad", labelKey: "game_type", module: "Game Type" },
