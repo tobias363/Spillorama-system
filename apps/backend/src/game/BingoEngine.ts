@@ -1686,27 +1686,60 @@ export class BingoEngine {
 
     const game = this.requireRunningGame(room);
     if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
-      const endedAtMs = Date.now();
-      const endedAt = new Date(endedAtMs);
-      game.status = "ENDED";
-      game.endedAt = endedAt.toISOString();
-      game.endedReason = "MAX_DRAWS_REACHED";
-      await this.finishPlaySessionsForGame(room, game, endedAtMs);
-      // HOEY-6/BIN-248: Write GAME_END checkpoint for MAX_DRAWS_REACHED
-      await this.writeGameEndCheckpoint(room, game);
+      // PHASE3-FIX (2026-04-27): Last-chance også her, symmetri med
+      // MAX_DRAWS-grenen post-draw nedenfor. Defense-in-depth.
+      const variantConfigForPreDrawMax = this.variantConfigByRoom.get(room.code);
+      if (variantConfigForPreDrawMax?.autoClaimPhaseMode) {
+        try {
+          await this.evaluateActivePhase(room, game);
+        } catch (err) {
+          logger.error(
+            { err, gameId: game.id, roomCode: room.code },
+            "[PHASE3-FIX] last-chance evaluateActivePhase failed in pre-draw MAX_DRAWS",
+          );
+        }
+      }
+      if ((game.status as string) === "RUNNING") {
+        const endedAtMs = Date.now();
+        const endedAt = new Date(endedAtMs);
+        game.status = "ENDED";
+        game.endedAt = endedAt.toISOString();
+        game.endedReason = "MAX_DRAWS_REACHED";
+        await this.finishPlaySessionsForGame(room, game, endedAtMs);
+        // HOEY-6/BIN-248: Write GAME_END checkpoint for MAX_DRAWS_REACHED
+        await this.writeGameEndCheckpoint(room, game);
+      }
       throw new DomainError("NO_MORE_NUMBERS", `Maks antall trekk (${this.maxDrawsPerRound}) er nådd.`);
     }
 
     const nextNumber = game.drawBag.shift();
     if (!nextNumber) {
-      const endedAtMs = Date.now();
-      const endedAt = new Date(endedAtMs);
-      game.status = "ENDED";
-      game.endedAt = endedAt.toISOString();
-      game.endedReason = "DRAW_BAG_EMPTY";
-      await this.finishPlaySessionsForGame(room, game, endedAtMs);
-      // HOEY-6/BIN-248: Write GAME_END checkpoint for DRAW_BAG_EMPTY
-      await this.writeGameEndCheckpoint(room, game);
+      // PHASE3-FIX (2026-04-27): Last-chance evaluateActivePhase også her
+      // — symmetri med MAX_DRAWS_REACHED-grenen lenger ned. Hvis siste
+      // trukne ball fullførte alle phaser men recursion ble avbrutt før
+      // neste fase ble vunnet, gir vi det én siste sjanse.
+      const variantConfigForBagEmpty = this.variantConfigByRoom.get(room.code);
+      if (variantConfigForBagEmpty?.autoClaimPhaseMode) {
+        try {
+          await this.evaluateActivePhase(room, game);
+        } catch (err) {
+          logger.error(
+            { err, gameId: game.id, roomCode: room.code },
+            "[PHASE3-FIX] last-chance evaluateActivePhase failed before DRAW_BAG_EMPTY",
+          );
+        }
+      }
+      // Re-sjekk status: hvis Phase 5 vant, ikke overskriv BINGO_CLAIMED.
+      if ((game.status as string) === "RUNNING") {
+        const endedAtMs = Date.now();
+        const endedAt = new Date(endedAtMs);
+        game.status = "ENDED";
+        game.endedAt = endedAt.toISOString();
+        game.endedReason = "DRAW_BAG_EMPTY";
+        await this.finishPlaySessionsForGame(room, game, endedAtMs);
+        // HOEY-6/BIN-248: Write GAME_END checkpoint for DRAW_BAG_EMPTY
+        await this.writeGameEndCheckpoint(room, game);
+      }
       throw new DomainError("NO_MORE_NUMBERS", "Ingen tall igjen i trekken.");
     }
 
@@ -2868,14 +2901,37 @@ export class BingoEngine {
     this.assertWalletAllowedForGameplay(host.walletId, Date.now());
     const game = this.requireRunningGame(room);
 
-    const endedAtMs = Date.now();
-    const endedAt = new Date(endedAtMs);
-    game.status = "ENDED";
-    game.endedAt = endedAt.toISOString();
-    game.endedReason = input.reason?.trim() || "MANUAL_END";
-    await this.finishPlaySessionsForGame(room, game, endedAtMs);
-    // BIN-48/BIN-248: Synchronous checkpoint after game end
-    await this.writeGameEndCheckpoint(room, game);
+    // PHASE3-FIX (2026-04-27): Før vi markerer ENDED, kjør last-chance
+    // evaluateActivePhase slik at evt. fase 3+ som er fullført basert på
+    // allerede-trukne baller blir registrert. Hvis spilleren f.eks. har
+    // Fullt Hus etter siste auto-draw, men endGame kalles før recursion
+    // rakk neste fase, ville bug-rapport "1+2 vant, 3+4+FH ikke vunnet"
+    // matche scenarioet. Trygt: evaluateActivePhase er idempotent og
+    // returnerer no-op hvis ingen brett oppfyller fasen.
+    const variantConfigForEnd = this.variantConfigByRoom.get(room.code);
+    if (variantConfigForEnd?.autoClaimPhaseMode && game.status === "RUNNING") {
+      try {
+        await this.evaluateActivePhase(room, game);
+      } catch (err) {
+        logger.error(
+          { err, gameId: game.id, roomCode: room.code },
+          "[PHASE3-FIX] last-chance evaluateActivePhase failed in endGame",
+        );
+      }
+    }
+
+    // Hvis last-chance Phase 5 nettopp avsluttet runden med
+    // BINGO_CLAIMED, må vi IKKE overskrive til MANUAL_END.
+    if (game.status === "RUNNING") {
+      const endedAtMs = Date.now();
+      const endedAt = new Date(endedAtMs);
+      game.status = "ENDED";
+      game.endedAt = endedAt.toISOString();
+      game.endedReason = input.reason?.trim() || "MANUAL_END";
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      // BIN-48/BIN-248: Synchronous checkpoint after game end
+      await this.writeGameEndCheckpoint(room, game);
+    }
   }
 
   // ── BIN-460: Game pause/resume ─────────────────────────────────────────────
