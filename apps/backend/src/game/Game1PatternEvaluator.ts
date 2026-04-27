@@ -97,19 +97,19 @@ const PHASE_1_MASKS: readonly PatternMask[] = Object.freeze([
   ...VERTICAL_COLUMN_MASKS,
 ]);
 
-/** Alle 10 kombinasjoner av 2 vertikale kolonner (C(5,2) = 10). */
+/** Alle 10 kombinasjoner av 2 horisontale rader (C(5,2) = 10). 2026-04-27 fix: byttet fra vertikale kolonner — paritet med shared-types/spill1-patterns. */
 const PHASE_2_MASKS: readonly PatternMask[] = Object.freeze(
-  buildColumnCombinations(2)
+  buildRowCombinations(2)
 );
 
-/** Alle 10 kombinasjoner av 3 vertikale kolonner (C(5,3) = 10). */
+/** Alle 10 kombinasjoner av 3 horisontale rader (C(5,3) = 10). */
 const PHASE_3_MASKS: readonly PatternMask[] = Object.freeze(
-  buildColumnCombinations(3)
+  buildRowCombinations(3)
 );
 
-/** Alle 5 kombinasjoner av 4 vertikale kolonner (C(5,4) = 5). */
+/** Alle 5 kombinasjoner av 4 horisontale rader (C(5,4) = 5). */
 const PHASE_4_MASKS: readonly PatternMask[] = Object.freeze(
-  buildColumnCombinations(4)
+  buildRowCombinations(4)
 );
 
 /** Fullt Hus — alle 25 bits. */
@@ -214,14 +214,14 @@ export function remainingForPhase(
 // ── Pure internals ──────────────────────────────────────────────────────────
 
 /** Bygg alle C(5,k) kombinasjoner av vertikale kolonner OR'et sammen. */
-function buildColumnCombinations(k: number): PatternMask[] {
+function buildRowCombinations(k: number): PatternMask[] {
   const out: PatternMask[] = [];
   const n = 5;
   const indices = new Array(k).fill(0);
   for (let i = 0; i < k; i++) indices[i] = i;
   while (true) {
     let m = 0;
-    for (const c of indices) m |= VERTICAL_COLUMN_MASKS[c]!;
+    for (const r of indices) m |= HORIZONTAL_ROW_MASKS[r]!;
     out.push(m);
     // Neste kombinasjon (lexicographic).
     let i = k - 1;
