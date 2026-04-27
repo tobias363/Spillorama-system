@@ -559,8 +559,11 @@ test("editSettlement: rejects empty (whitespace) reason", async () => {
 test("computeBreakdownTotals: sums in_cents/out_cents across all rows", () => {
   const ctx = makeSetup();
   const totals = ctx.service.computeBreakdownTotals({
+    kasse_start_skift_cents: 0,
     ending_opptall_kassie_cents: 0,
     innskudd_drop_safe_cents: 0,
+    paafyll_ut_kasse_cents: 0,
+    totalt_dropsafe_paafyll_cents: 0,
     difference_in_shifts_cents: 0,
     rows: {
       metronia: { in_cents: 10000, out_cents: 5000 },

@@ -186,6 +186,15 @@ function makeStubStore(): { store: ChatMessageStore; inserts: unknown[]; recent:
     async listRecent(_roomCode: string) {
       return recent;
     },
+    async listForModeration() {
+      return { messages: [], total: 0 };
+    },
+    async getById() {
+      return null;
+    },
+    async softDelete() {
+      return null;
+    },
   };
   return { store, inserts, recent };
 }
@@ -373,6 +382,15 @@ test("chat:send — selv om store.insert er treg/asynkron, ack svarer suksess um
     },
     async listRecent() {
       return [];
+    },
+    async listForModeration() {
+      return { messages: [], total: 0 };
+    },
+    async getById() {
+      return null;
+    },
+    async softDelete() {
+      return null;
     },
   };
   const { ctx, socket } = makeCtx({ chatMessageStore: slowStore });
