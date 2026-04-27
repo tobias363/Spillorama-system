@@ -408,7 +408,19 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    * er en moderasjons-handling som hører til ADMIN/HALL_OPERATOR.
    */
   CHAT_MODERATION_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  CHAT_MODERATION_WRITE: ["ADMIN", "HALL_OPERATOR"]
+  CHAT_MODERATION_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  /**
+   * BIN-763: Wallet reconciliation audit (nightly cron-alerts).
+   *   - WALLET_AUDIT_READ : list åpne reconciliation-alerts. ADMIN +
+   *     SUPPORT — sentralt compliance-verktøy, ikke hall-lokalt.
+   *     HALL_OPERATOR er bevisst utelatt (wallet-integritet er ikke
+   *     hall-lokal beslutning).
+   *   - WALLET_AUDIT_WRITE: marker alert som resolved + trigger
+   *     run-now manuelt. ADMIN-only — mutasjoner mot reconciliation-
+   *     audit-trail er sensitivt (samme mønster som PLAYER_KYC_OVERRIDE).
+   */
+  WALLET_AUDIT_READ:  ["ADMIN", "SUPPORT"],
+  WALLET_AUDIT_WRITE: ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

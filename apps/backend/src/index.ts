@@ -44,7 +44,13 @@ import { createExternalGameWalletRouter } from "./integration/externalGameWallet
 import { InMemoryRoomStateStore, type RoomStateStore } from "./store/RoomStateStore.js";
 import { RedisRoomStateStore } from "./store/RedisRoomStateStore.js";
 import { RedisSchedulerLock } from "./store/RedisSchedulerLock.js";
-import { apiSuccess, apiFailure, mustBeNonEmptyString } from "./util/httpHelpers.js";
+import {
+  apiSuccess,
+  apiFailure,
+  mustBeNonEmptyString,
+  parseBooleanEnv,
+  parsePositiveIntEnv,
+} from "./util/httpHelpers.js";
 import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util/bingoSettings.js";
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, type RoomUpdatePayload } from "./util/roomHelpers.js";
 import { RoomStateManager } from "./util/roomState.js";
@@ -104,6 +110,11 @@ import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
 import { createAdminWalletRouter } from "./routes/adminWallet.js";
+import { createAdminWalletReconciliationRouter } from "./routes/adminWalletReconciliation.js";
+import {
+  WalletReconciliationService,
+  createWalletReconciliationJob,
+} from "./jobs/walletReconciliation.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
@@ -1337,6 +1348,43 @@ jobScheduler.register({
   }),
 });
 
+// BIN-763: Nightly wallet reconciliation. Sammenligner wallet_accounts
+// mot SUM(wallet_entries) per konto + side, alarmer ved divergens >
+// 0.01 NOK. Default 03:00 lokal tid. Polling hvert 15 min.
+const walletReconciliationService = new WalletReconciliationService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  batchSize: Math.max(1, parsePositiveIntEnv(process.env.WALLET_RECONCILIATION_BATCH_SIZE, 1000)),
+  batchPauseMs: Math.max(0, parsePositiveIntEnv(process.env.WALLET_RECONCILIATION_BATCH_PAUSE_MS, 50)),
+});
+const walletReconciliationEnabled = parseBooleanEnv(
+  process.env.JOB_WALLET_RECONCILIATION_ENABLED,
+  true,
+);
+const walletReconciliationIntervalMs = Math.max(
+  60_000,
+  parsePositiveIntEnv(process.env.JOB_WALLET_RECONCILIATION_INTERVAL_MS, 15 * 60 * 1000),
+);
+const walletReconciliationRunAtHour = Math.min(
+  23,
+  Math.max(0, parsePositiveIntEnv(process.env.JOB_WALLET_RECONCILIATION_RUN_AT_HOUR, 3)),
+);
+const walletReconciliationRunAtMinute = Math.min(
+  59,
+  Math.max(0, parsePositiveIntEnv(process.env.JOB_WALLET_RECONCILIATION_RUN_AT_MINUTE, 0)),
+);
+jobScheduler.register({
+  name: "wallet-reconciliation",
+  description: "Nightly wallet reconciliation — wallet_accounts vs SUM(wallet_entries) per konto + side (BIN-763).",
+  intervalMs: walletReconciliationIntervalMs,
+  enabled: walletReconciliationEnabled,
+  run: createWalletReconciliationJob({
+    service: walletReconciliationService,
+    runAtHourLocal: walletReconciliationRunAtHour,
+    runAtMinuteLocal: walletReconciliationRunAtMinute,
+  }),
+});
+
 // PR-T1 Spor 4: akkumulerende pot-service (Jackpott + Innsatsen). Konstrueres
 // FØR Game1TicketPurchaseService fordi sistnevnte trenger PotSalesHookPort
 // for å akkumulere andel av salg etter vellykket kjøp (PR-T3). Service
@@ -2548,6 +2596,14 @@ app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPay
 // PR-W2 wallet-split: admin-correction-endepunkt med regulatorisk gate
 // mot winnings-kredit (pengespillforskriften §11).
 app.use(createAdminWalletRouter({ platformService, walletAdapter, emitWalletRoomUpdates }));
+// BIN-763: nightly wallet reconciliation admin-endpoints (list/resolve/run-now).
+app.use(
+  createAdminWalletReconciliationRouter({
+    platformService,
+    reconciliationService: walletReconciliationService,
+    auditLogService,
+  }),
+);
 app.use(createPaymentsRouter({
   platformService,
   swedbankPayService,

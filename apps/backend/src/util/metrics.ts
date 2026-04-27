@@ -126,4 +126,27 @@ export const metrics = {
     name: "wallet_idempotency_keys_pruned_total",
     help: "Total wallet_transactions.idempotency_key columns nullified by TTL-cleanup (BIN-767)",
   }),
+
+  // BIN-763: nightly wallet reconciliation. `divergence_total` økes hver
+  // gang en wallet_account-balanse avviker fra SUM(wallet_entries.amount)
+  // for samme account_side med mer enn 0.01 NOK. `clean_total` økes når
+  // hele reconciliation-runden fant null divergenser.
+  walletReconciliationDivergence: new client.Counter({
+    name: "wallet_reconciliation_divergence_total",
+    help: "Total wallet reconciliation divergences detected (per account_id + side).",
+    labelNames: ["account_id", "side"] as const,
+  }),
+  walletReconciliationClean: new client.Counter({
+    name: "wallet_reconciliation_clean_total",
+    help: "Total nightly reconciliation runs that found zero divergences.",
+  }),
+  walletReconciliationDuration: new client.Histogram({
+    name: "wallet_reconciliation_duration_ms",
+    help: "Duration of a full nightly wallet reconciliation tick in milliseconds.",
+    buckets: [100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 120_000],
+  }),
+  walletReconciliationAccountsScanned: new client.Counter({
+    name: "wallet_reconciliation_accounts_scanned_total",
+    help: "Total number of (account, side) tuples scanned during reconciliation.",
+  }),
 };
