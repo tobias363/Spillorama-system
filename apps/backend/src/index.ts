@@ -123,6 +123,12 @@ import {
   WalletReconciliationService,
   createWalletReconciliationJob,
 } from "./jobs/walletReconciliation.js";
+import { AdminOpsService } from "./admin/AdminOpsService.js";
+import {
+  createAdminOpsRouter,
+  type AdminOpsBroadcastKind,
+} from "./routes/adminOps.js";
+import { createAdminOpsEvents } from "./sockets/adminOpsEvents.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
@@ -2705,6 +2711,46 @@ app.use(
     auditLogService,
   }),
 );
+
+// Tobias 2026-04-27: ADMIN Super-User Operations Console (`/admin/ops`).
+// Live ops-dashboard på tvers av alle haller — overvåking + intervensjon.
+//
+// HISTORIKK: Route-fil (`apps/backend/src/routes/adminOps.ts`) + service
+// (`apps/backend/src/admin/AdminOpsService.ts`) ble merget til main via
+// PR #667. Frontend (PR #668) ble merget. Wire-up til index.ts ble glemt
+// (var i PR #667-branch men ikke flyttet ved merge) — så endpoint
+// /api/admin/ops/overview returnerte SPA-fallback HTML med HTTP 200, og
+// klienten viste «Feil: HTTP 200» fordi `response.json()` ikke kunne
+// parse HTML. Denne wire-up retter feilen.
+const adminOpsService = new AdminOpsService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  platformService,
+  engine,
+  hallGroupService,
+  reconciliationService: walletReconciliationService,
+  paymentRequestService,
+});
+app.use(
+  createAdminOpsRouter({
+    platformService,
+    engine,
+    adminOpsService,
+    auditLogService,
+    emitRoomUpdate,
+    broadcastOpsUpdate: (
+      kind: AdminOpsBroadcastKind,
+      payload?: Record<string, unknown>,
+    ) => {
+      io.to("admin:ops").emit("admin:ops:update", {
+        kind,
+        payload: payload ?? {},
+        at: new Date().toISOString(),
+      });
+    },
+  }),
+);
+
 app.use(createPaymentsRouter({
   platformService,
   swedbankPayService,
@@ -3007,6 +3053,10 @@ const miniGameSocketWire = createMiniGameSocketWire({
 });
 game1MiniGameOrchestrator.setBroadcaster(miniGameSocketWire.broadcaster);
 
+// Tobias 2026-04-27: ADMIN Ops Console — socket subscribe-handler.
+// Klient subscriber via `admin:ops:subscribe` etter `admin:login`.
+const registerAdminOpsEvents = createAdminOpsEvents({ socketRateLimiter });
+
 io.on("connection", (socket: Socket) => {
   // MED-1: Patch socket.on so every event handler runs inside an ALS
   // trace-context. Must happen BEFORE the registerXxx() calls below so
@@ -3024,6 +3074,7 @@ io.on("connection", (socket: Socket) => {
   registerAdminHallEvents(socket);
   registerGame1ScheduledEvents(socket);
   miniGameSocketWire.register(socket);
+  registerAdminOpsEvents(socket);
 });
 
 // GAME1_SCHEDULE PR 4d.3: `/admin-game1`-namespace for master-konsoll
