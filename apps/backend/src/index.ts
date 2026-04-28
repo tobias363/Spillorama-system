@@ -2909,6 +2909,8 @@ const registerGameEvents = createGameEventHandlers({
   getReservationId: (code, pid) => roomState.getReservationId(code, pid),
   setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
   clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
+  // Pilot-bug fix 2026-04-27 (Tobias-rapport): per-rom arm-cycle-id.
+  getArmCycleId: (code) => roomState.getOrCreateArmCycleId(code),
   // GAP #38: Spillvett stop-game vote service.
   spill1StopVoteService,
   // Tobias 2026-04-27: Spill 1 canonical-room er per-LINK (Group of Halls).

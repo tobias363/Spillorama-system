@@ -175,8 +175,15 @@ export async function reservePreRoundDelta(
   // hvis vi vil dekke det case-et — pr i dag har vi ikke retry-deduplisering
   // der, men socket.io ack/nack gir én-gangs-levering for de fleste retry-
   // scenarioene.
+  // Pilot-bug fix 2026-04-27 (Tobias-rapport): inkluder armCycleId i keyen så
+  // pre-purchase i runde N+1 ikke kolliderer med committed reservation fra
+  // runde N. Backward-compat: faller tilbake til pre-fix-format hvis dep mangler.
+  const armCycleId = deps.getArmCycleId?.(roomCode);
+  const idempotencyKey = armCycleId
+    ? `arm-${roomCode}-${playerId}-${armCycleId}-${newTotalWeighted}`
+    : `arm-${roomCode}-${playerId}-${newTotalWeighted}`;
   const reservation = await adapter.reserve(walletId, deltaKr, {
-    idempotencyKey: `arm-${roomCode}-${playerId}-${newTotalWeighted}`,
+    idempotencyKey,
     roomCode,
   });
   deps.setReservationId(roomCode, playerId, reservation.id);

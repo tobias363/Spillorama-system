@@ -124,6 +124,12 @@ export interface GameEventsDeps {
   clearReservationId?: (roomCode: string, playerId: string) => void;
 
   /**
+   * Pilot-bug fix 2026-04-27: per-rom arm-cycle-id som inngår i bet:arm
+   * idempotency-key. Optional — fallback til pre-fix-format hvis utelatt.
+   */
+  getArmCycleId?: (roomCode: string) => string;
+
+  /**
    * GAP #38: Player-initiated stop-game (Spillvett-vote). Optional dep so
    * test harnesses can wire the handler without the full service. Handler
    * returns NOT_SUPPORTED when missing.
