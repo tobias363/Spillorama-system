@@ -412,3 +412,248 @@ describe("AdminOpsConsolePage — actions", () => {
     expect(cardB?.style.display).toBe("none");
   });
 });
+
+// ── FE-P0-005: Listener-leak regression on socket-delta ─────────────────
+//
+// Audit (2026-04-28): "AdminOps re-binds 6 event-listeners per card per
+// socket-delta. After an 8h shift with thousands of socket-deltas, heap
+// grows unboundedly because old listeners are never removed before new
+// ones are attached. ADMIN's browser will eventually slow / crash."
+//
+// Fix-strategy: event delegation on the persistent containers
+// (`hallsGrid`, `alertsList`) instead of per-card binding. With
+// delegation, listener count is constant for the life of the page —
+// independent of how many deltas fire.
+//
+// These tests assert that contract by:
+//  1. Spying on `addEventListener` for the grid + alerts containers
+//     before mount, then mounting + applying many deltas.
+//  2. Counting calls — the per-card click-listeners that the old code
+//     attached per-button (`button.addEventListener("click", …)`) must
+//     not multiply with delta volume.
+//  3. Verifying that buttons inside the re-rendered cards still
+//     trigger the correct action (delegation actually works).
+describe("AdminOpsConsolePage — FE-P0-005 listener-leak regression", () => {
+  let handle: AdminOpsConsoleHandle | null = null;
+
+  beforeEach(() => {
+    initI18n();
+    document.body.innerHTML = "";
+    setSession(adminSession());
+    window.localStorage.setItem("bingo_admin_access_token", "tok");
+  });
+
+  afterEach(() => {
+    handle?.dispose();
+    handle = null;
+    vi.restoreAllMocks();
+  });
+
+  it("does not accumulate per-card listeners across 100 socket-deltas", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const { factory } = makeFakeSocketFactory();
+    handle = renderAdminOpsConsolePage(root, {
+      _socketFactory: factory,
+      _fetchOverview: async () => makeOverview(),
+    });
+    await tick();
+
+    // Sanity: 2 hall-cards + 1 alert ack-button rendered.
+    const cards = root.querySelectorAll<HTMLElement>("[data-hall-id]");
+    expect(cards.length).toBe(2);
+
+    // Spy on addEventListener for ALL elements created after this point —
+    // simulating what would happen during applyDelta cycles.
+    //
+    // Approach: count the addEventListener("click") calls that target an
+    // element with [data-action] OR a button inside [data-hall-id] /
+    // [data-action='ack']. With delegation, this should be ZERO after
+    // the initial mount (delegated listener is on the persistent grid /
+    // alerts container, not on individual cards / buttons).
+    const originalAdd = HTMLElement.prototype.addEventListener;
+    let perCardClickAdds = 0;
+    HTMLElement.prototype.addEventListener = function patchedAdd(
+      this: HTMLElement,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ): void {
+      if (type === "click") {
+        const isCardChild =
+          (this.matches?.("[data-action]") ?? false) ||
+          (this.closest?.("[data-hall-id]") !== null && this !== root) ||
+          (this.matches?.("[data-action='ack']") ?? false);
+        // Count adds on per-card children. The delegated listener is bound
+        // to refs.hallsGrid / refs.alertsList directly (not nested under
+        // [data-hall-id]), so it does NOT match this filter.
+        if (
+          isCardChild &&
+          !this.matches?.("#ops-halls-grid") &&
+          !this.matches?.("#ops-alerts-list")
+        ) {
+          perCardClickAdds += 1;
+        }
+      }
+      return originalAdd.call(this, type, listener, options);
+    } as typeof HTMLElement.prototype.addEventListener;
+
+    try {
+      // Apply many socket-deltas. Each one used to re-bind 6 listeners per
+      // card + 1 per ack-button — with 2 cards + 1 alert that's 13/delta
+      // × 100 = 1300 listener attachments. With delegation: 0.
+      for (let i = 0; i < 100; i += 1) {
+        handle.applyDelta({
+          metrics: {
+            totalActiveRooms: 2,
+            totalPlayersOnline: 48 + i,
+          },
+        });
+      }
+    } finally {
+      HTMLElement.prototype.addEventListener = originalAdd;
+    }
+
+    // Strict assertion: no per-card listener attachments during deltas.
+    // (The delegated listeners on hallsGrid / alertsList were attached
+    // BEFORE the spy was installed — they're already in place.)
+    expect(perCardClickAdds).toBe(0);
+  });
+
+  it("delegated pause-button still triggers handler after many deltas", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const { factory } = makeFakeSocketFactory();
+    const fetchOverview = vi.fn(async () => makeOverview());
+    const fetchMock = mockApiRouter([
+      {
+        match: /\/api\/admin\/ops\/rooms\/.+\/force-pause/,
+        handler: () => ({ ok: true }),
+      },
+    ]);
+    handle = renderAdminOpsConsolePage(root, {
+      _socketFactory: factory,
+      _fetchOverview: fetchOverview,
+    });
+    await tick();
+
+    // Apply many deltas — each one re-renders innerHTML so the pause-button
+    // is a brand-new DOM node every time. With per-card binding, only the
+    // most recent generation would still be wired; with delegation, every
+    // generation is wired automatically because the listener is on the
+    // parent container.
+    for (let i = 0; i < 50; i += 1) {
+      handle.applyDelta({
+        metrics: { totalActiveRooms: 2, totalPlayersOnline: 50 + i },
+      });
+    }
+
+    // After 50 deltas, click the (newly-rendered) pause-button.
+    const card = root.querySelector("[data-testid='ops-hall-card-hall-a']");
+    const pauseBtn = card?.querySelector<HTMLButtonElement>("[data-action='pause']");
+    expect(pauseBtn).toBeTruthy();
+    pauseBtn?.click();
+
+    // Confirm-modal opens (variant=warning button).
+    const confirmBtn = document.querySelector<HTMLButtonElement>(
+      ".modal .modal-footer button.btn-warning",
+    );
+    expect(confirmBtn).toBeTruthy();
+    confirmBtn?.click();
+    await tick(10);
+
+    // API was called once for force-pause — proving delegation routed
+    // correctly even after 50 re-renders.
+    const pauseCall = fetchMock.mock.calls.find((c) =>
+      typeof c[0] === "string" && c[0].includes("force-pause"),
+    );
+    expect(pauseCall).toBeTruthy();
+  });
+
+  it("delegated ack-button still triggers handler after many deltas", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const { factory } = makeFakeSocketFactory();
+    const fetchMock = mockApiRouter([
+      {
+        match: /\/api\/admin\/ops\/alerts\/.+\/acknowledge/,
+        handler: () => ({
+          alert: {
+            id: "alert-1",
+            severity: "WARN",
+            type: "DRAW_STUCK",
+            hallId: "hall-a",
+            roomCode: "ROOM-A",
+            message: "x",
+            acknowledgedAt: new Date().toISOString(),
+            acknowledgedByUserId: "ad-1",
+            createdAt: new Date().toISOString(),
+          },
+        }),
+      },
+      {
+        match: /\/api\/admin\/ops\/overview/,
+        handler: () => makeOverview(),
+      },
+    ]);
+    handle = renderAdminOpsConsolePage(root, {
+      _socketFactory: factory,
+    });
+    await tick();
+
+    // Re-render alerts via deltas — each delta re-runs renderAlertsList
+    // which sets innerHTML (so ack-button is a fresh DOM node).
+    for (let i = 0; i < 30; i += 1) {
+      handle.applyDelta({
+        alerts: [
+          {
+            ...makeAlert("alert-1", "WARN"),
+            message: `Alert iter ${i}`,
+          },
+        ],
+      });
+    }
+
+    // Click the (re-rendered) ack-button.
+    const ackBtn = root.querySelector<HTMLButtonElement>(
+      "[data-testid='ops-alert-alert-1'] [data-action='ack']",
+    );
+    expect(ackBtn).toBeTruthy();
+    ackBtn?.click();
+    await tick(10);
+
+    const ackCall = fetchMock.mock.calls.find((c) =>
+      typeof c[0] === "string" && c[0].includes("/alerts/alert-1/acknowledge"),
+    );
+    expect(ackCall).toBeTruthy();
+  });
+
+  it("delegated drilldown still triggers on card-body click after many deltas", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const { factory } = makeFakeSocketFactory();
+    handle = renderAdminOpsConsolePage(root, {
+      _socketFactory: factory,
+      _fetchOverview: async () => makeOverview(),
+    });
+    await tick();
+
+    // Apply deltas; then click the box-body (data-action='drilldown').
+    for (let i = 0; i < 25; i += 1) {
+      handle.applyDelta({
+        metrics: { totalActiveRooms: 2, totalPlayersOnline: 48 + i },
+      });
+    }
+
+    const card = root.querySelector("[data-testid='ops-hall-card-hall-a']");
+    const drillEl = card?.querySelector<HTMLElement>(
+      "[data-action='drilldown']",
+    );
+    expect(drillEl).toBeTruthy();
+    drillEl?.click();
+
+    // Drilldown modal opens via Modal.open — find the modal in document.
+    const modal = document.querySelector(".modal [data-testid='ops-drill-hop-link']");
+    expect(modal).toBeTruthy();
+  });
+});
