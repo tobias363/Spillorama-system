@@ -738,8 +738,31 @@
   }
 
   // ── Obligatorisk pause modal ──────────────────────────────────────────
+  //
+  // Blink-elimination runde 7 (2026-04-27):
+  // - Memoize textContent-writes (countdown, loss, playtime, gamecount) — skip
+  //   write hvis verdien er uendret. Gjør at de 12+ render()-call-paths ikke
+  //   trigger composite-restart på modalen.
+  // - Skip restart av setInterval når blockedUntil er uendret. Tidligere ble
+  //   intervallet clearet og restartet på hver render(), som ga timing-jitter
+  //   som landet textContent-write mid-frame relativt til Pixi-render.
+  // - Drop tick-frekvens fra 500ms → 1000ms (countdown viser kun sekunder, så
+  //   2× ticks/sekund var sløsing — halver DOM-mutasjon-frekvens).
+  // Se docs/engineering/SPILL1_BLINK_ELIMINATION_RUNDE_7_2026-04-27.md.
 
   let _pauseCountdownInterval = null;
+  let _pauseLastBlockedUntilEpoch = 0;
+  let _pauseLastCountdownText = null;
+  let _pauseLastLossText = null;
+  let _pauseLastPlaytimeText = null;
+  let _pauseLastGamecountText = null;
+
+  function _setIfChanged(el, nextText, lastValue) {
+    if (!el) return lastValue;
+    if (lastValue === nextText) return lastValue;
+    el.textContent = nextText;
+    return nextText;
+  }
 
   function renderMandatoryPauseModal(compliance) {
     if (!els.mandatoryPauseModal) return;
@@ -749,50 +772,80 @@
 
     if (!isOnMandatoryPause) {
       els.mandatoryPauseModal.hidden = true;
-      clearInterval(_pauseCountdownInterval);
-      _pauseCountdownInterval = null;
+      if (_pauseCountdownInterval) {
+        clearInterval(_pauseCountdownInterval);
+        _pauseCountdownInterval = null;
+      }
+      _pauseLastBlockedUntilEpoch = 0;
+      _pauseLastCountdownText = null;
+      _pauseLastLossText = null;
+      _pauseLastPlaytimeText = null;
+      _pauseLastGamecountText = null;
       return;
     }
 
     els.mandatoryPauseModal.hidden = false;
 
-    // Fill in activity stats from lastMandatoryBreak
+    // Fill in activity stats from lastMandatoryBreak — memoized.
     const brk = compliance.pause && compliance.pause.lastMandatoryBreak;
     if (brk) {
-      if (els.mandatoryPauseLoss) {
-        const loss = brk.netLoss && typeof brk.netLoss.daily === "number" ? brk.netLoss.daily : 0;
-        els.mandatoryPauseLoss.textContent = formatCurrency(loss);
-      }
-      if (els.mandatoryPausePlaytime) {
-        els.mandatoryPausePlaytime.textContent = formatDuration(brk.totalPlayMs);
-      }
-      if (els.mandatoryPauseGamecount) {
-        const count = typeof brk.gamesPlayed === "number" ? brk.gamesPlayed : 0;
-        els.mandatoryPauseGamecount.textContent = count === 1 ? "1 spill" : `${count} spill`;
-      }
+      const loss = brk.netLoss && typeof brk.netLoss.daily === "number" ? brk.netLoss.daily : 0;
+      _pauseLastLossText = _setIfChanged(
+        els.mandatoryPauseLoss,
+        formatCurrency(loss),
+        _pauseLastLossText
+      );
+      _pauseLastPlaytimeText = _setIfChanged(
+        els.mandatoryPausePlaytime,
+        formatDuration(brk.totalPlayMs),
+        _pauseLastPlaytimeText
+      );
+      const count = typeof brk.gamesPlayed === "number" ? brk.gamesPlayed : 0;
+      const gamecountText = count === 1 ? "1 spill" : `${count} spill`;
+      _pauseLastGamecountText = _setIfChanged(
+        els.mandatoryPauseGamecount,
+        gamecountText,
+        _pauseLastGamecountText
+      );
     }
 
-    // Start live countdown
-    if (_pauseCountdownInterval) {
-      clearInterval(_pauseCountdownInterval);
-    }
-    _pauseCountdownInterval = setInterval(function () {
-      const blockedUntil = r.blockedUntil ? new Date(r.blockedUntil).getTime() : 0;
-      const remaining = Math.max(0, blockedUntil - Date.now());
-      if (els.mandatoryPauseCountdown) {
-        const totalSec = Math.ceil(remaining / 1000);
-        const min = Math.floor(totalSec / 60);
-        const sec = totalSec % 60;
-        els.mandatoryPauseCountdown.textContent =
-          String(min).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
-      }
+    // Live countdown — start interval kun når blockedUntil endrer seg.
+    const blockedUntilEpoch = r.blockedUntil ? new Date(r.blockedUntil).getTime() : 0;
+    const tickCountdown = function () {
+      const remaining = Math.max(0, blockedUntilEpoch - Date.now());
+      const totalSec = Math.ceil(remaining / 1000);
+      const min = Math.floor(totalSec / 60);
+      const sec = totalSec % 60;
+      const text =
+        String(min).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
+      _pauseLastCountdownText = _setIfChanged(
+        els.mandatoryPauseCountdown,
+        text,
+        _pauseLastCountdownText
+      );
       if (remaining <= 0) {
-        clearInterval(_pauseCountdownInterval);
-        _pauseCountdownInterval = null;
+        if (_pauseCountdownInterval) {
+          clearInterval(_pauseCountdownInterval);
+          _pauseCountdownInterval = null;
+        }
         // Refresh compliance once pause expires
         void refreshData({ silent: true });
       }
-    }, 500);
+    };
+
+    if (blockedUntilEpoch !== _pauseLastBlockedUntilEpoch) {
+      _pauseLastBlockedUntilEpoch = blockedUntilEpoch;
+      if (_pauseCountdownInterval) {
+        clearInterval(_pauseCountdownInterval);
+        _pauseCountdownInterval = null;
+      }
+      // Synkron tick først så countdown ikke blinker mellom forrige verdi og
+      // første interval-fyring.
+      tickCountdown();
+      if (blockedUntilEpoch > Date.now()) {
+        _pauseCountdownInterval = setInterval(tickCountdown, 1000);
+      }
+    }
   }
 
   function render() {

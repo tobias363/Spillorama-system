@@ -430,6 +430,13 @@
 
 /* ── Obligatorisk pause modal (§ 66) ────────────────────────────────────── */
 
+/*
+ * Blink-elimination runde 7 (2026-04-27): Drop backdrop-filter: blur(8px) —
+ * paint-property-recompute over hele backdrop trigget periodisk blink når
+ * Pixi-canvas eller andre layers re-promoterer composite-tre. Bruker
+ * solid mørkere alpha (0.92) i stedet, som GPU kompositer billig.
+ * Se docs/engineering/SPILL1_BLINK_ELIMINATION_RUNDE_7_2026-04-27.md.
+ */
 .mandatory-pause-modal {
   position: fixed;
   inset: 0;
@@ -437,8 +444,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.92);
   padding: 16px;
 }
 
