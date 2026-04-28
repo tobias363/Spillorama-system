@@ -3112,6 +3112,36 @@ export class BingoEngine {
   }
 
   /**
+   * PILOT-STOP-SHIP fix (Tobias 2026-04-27): refresh `RoomState.isHallShared`
+   * for et eksisterende rom. Brukes av `game1ScheduledEvents.ts` når et
+   * scheduled multi-hall-spill joines mens rommet allerede eksisterer
+   * (skapt før deploy, eller skapt av Hall A før Hall B prøver å joine).
+   *
+   * Uten denne setteren beholder rommet `room.hallId = master-hall` og
+   * `joinRoom` kaster HALL_MISMATCH for spillere fra andre haller i samme
+   * gruppe — selv om scheduled-spillet eksplisitt har dem i
+   * `participating_halls_json`.
+   *
+   * Speilbilde av {@link setRoomTestHall} — samme idempotente fail-soft-
+   * pattern. Ingen wallet- eller draw-mutasjoner her.
+   *
+   * No-op hvis verdien allerede matcher. Idempotent.
+   */
+  setRoomHallShared(roomCode: string, isHallShared: boolean): void {
+    const room = this.rooms.get(roomCode.trim().toUpperCase());
+    if (!room) return; // fail-soft: room kan være ryddet i mellomtiden
+    if (isHallShared) {
+      if (room.isHallShared !== true) {
+        room.isHallShared = true;
+        this.syncRoomToStore(room);
+      }
+    } else if (room.isHallShared === true) {
+      room.isHallShared = undefined;
+      this.syncRoomToStore(room);
+    }
+  }
+
+  /**
    * Bug B fix (Tobias 2026-04-28): finn et rom basert på eksakt rom-kode.
    * I motsetning til `getPrimaryRoomForHall` filtrerer vi IKKE på hallId —
    * canonical-flyten (Spill 1 group-of-halls, Spill 2/3 globale rom)
