@@ -147,10 +147,187 @@ test("invariant: wallet INSUFFICIENT_FUNDS kaster fail-fast (caller kan rolle ti
   assert.equal(compliance.count(), 0);
 });
 
-// PENDING (Fase 1): full PayoutService-rollback. Når PayoutService
-// eksisterer kan vi mocke walletPort.credit til å feile ETTER at
-// compliance.recordEvent har lykkes, og verifisere at PayoutService
-// ruller tilbake compliance via tx.ROLLBACK.
+// ── Fase 1 atomicity-tester (med PayoutService) ──────────────────────────────
+//
+// Disse testene bruker PayoutService for å verifisere atomicity-kontrakten:
+//   - Wallet-feil kaster PayoutWalletCreditError → caller forventes å rolle
+//     tilbake outer-tx, slik at compliance/audit ikke blir til halv-skrevet
+//     state.
+//   - Multi-winner: hvis credit feiler på vinner #2 av 3, har vinner #1
+//     allerede fått credit. Det er en bevisst del av kontrakten — outer-tx
+//     er det som garanterer atomicity. PayoutService selv lager ikke ny tx.
+
+import {
+  PayoutService,
+  PayoutWalletCreditError,
+} from "../../services/PayoutService.js";
+
+test("invariant: PayoutService — wallet-feil på første vinner → ingen partial state (compliance + audit tomme)", async () => {
+  // Strategi: mock wallet.credit til å feile umiddelbart. Verifisér at
+  // PayoutService kaster før compliance.recordEvent skrives, slik at det
+  // ikke etterlates "wallet OK + compliance OK + wallet failed på neste"-
+  // state.
+  const wallet = new InMemoryWalletPort();
+  const compliance = new InMemoryCompliancePort();
+  const audit = new InMemoryAuditPort();
+  const keys = new DefaultIdempotencyKeyPort();
+
+  // Override wallet.credit → kast WalletError ved første kall.
+  wallet.credit = async () => {
+    throw new WalletError("INVALID_INPUT", "simulert wallet-feil");
+  };
+
+  const service = new PayoutService({ wallet, compliance, audit, keys });
+
+  await assert.rejects(
+    () =>
+      service.payoutPhase({
+        gameId: "game-rollback",
+        phaseId: "phase-1",
+        phaseName: "1 Rad",
+        winners: [
+          { walletId: "wallet-1", playerId: "player-1", hallId: "hall-1", claimId: "claim-1" },
+        ],
+        totalPrizeCents: 10_000,
+        actorHallId: "hall-1",
+        isFixedPrize: true,
+        gameType: "MAIN_GAME",
+        channel: "INTERNET",
+      }),
+    (err: unknown) => err instanceof PayoutWalletCreditError,
+  );
+
+  // Verifisér: ingen compliance-entries (vi kastet før step 2).
+  assert.equal(compliance.count(), 0, "compliance skal være tom etter rollback");
+  // Verifisér: ingen audit-entries (vi kastet før step 4).
+  assert.equal(audit.count(), 0, "audit skal være tom etter rollback");
+});
+
+test("invariant: PayoutService — wallet-feil på SISTE vinner kaster, men tidligere wallet-credits er allerede committed (caller-tx-ansvar)", async () => {
+  // Strategi: tre vinnere. Wallet.credit feiler kun på den 3. (siste).
+  // Verifisér: vinner #1 og #2 fikk credit + ingen compliance/audit
+  // skrives fordi step 2-4 kommer etter ALLE step 1 wallet-credits.
+  //
+  // Dette dokumenterer at PayoutService's atomicity-kontrakt er:
+  //   - Step 1 (wallet) er sekvensiell. Hvis én feiler, er noen credits
+  //     allerede committed på wallet-laget.
+  //   - Step 2-4 (compliance/audit) kjøres KUN hvis alle wallet-credits
+  //     lykkes.
+  //   - For full atomicity må caller wrappe alt i en outer-tx slik at
+  //     wallet-credits også ruller tilbake.
+  const wallet = new InMemoryWalletPort();
+  const compliance = new InMemoryCompliancePort();
+  const audit = new InMemoryAuditPort();
+  const keys = new DefaultIdempotencyKeyPort();
+  wallet.seed("wallet-A", 0);
+  wallet.seed("wallet-B", 0);
+  wallet.seed("wallet-C", 0);
+
+  // Override wallet.credit til å feile på 3. kall.
+  let callCount = 0;
+  const originalCredit = wallet.credit.bind(wallet);
+  wallet.credit = async (input) => {
+    callCount++;
+    if (callCount === 3) {
+      throw new WalletError("INVALID_INPUT", "feilet på 3. vinner");
+    }
+    return originalCredit(input);
+  };
+
+  const service = new PayoutService({ wallet, compliance, audit, keys });
+
+  await assert.rejects(
+    () =>
+      service.payoutPhase({
+        gameId: "game-partial-fail",
+        phaseId: "phase-1",
+        phaseName: "1 Rad",
+        winners: [
+          { walletId: "wallet-A", playerId: "p-A", hallId: "h", claimId: "claim-A" },
+          { walletId: "wallet-B", playerId: "p-B", hallId: "h", claimId: "claim-B" },
+          { walletId: "wallet-C", playerId: "p-C", hallId: "h", claimId: "claim-C" },
+        ],
+        totalPrizeCents: 30_000,
+        actorHallId: "h",
+        isFixedPrize: true,
+        gameType: "MAIN_GAME",
+        channel: "INTERNET",
+      }),
+    (err: unknown) => err instanceof PayoutWalletCreditError,
+  );
+
+  // Wallet-balance verifisering: A + B fikk credit (deres credits ble
+  // committed i InMemoryWalletPort før credit #3 feilet). C fikk ikke.
+  // I prod ville en outer-tx rolle tilbake ALLE credits, men det er
+  // caller-ansvar — InMemoryWalletPort har ikke tx-semantics.
+  const balA = await wallet.getBalance("wallet-A");
+  const balB = await wallet.getBalance("wallet-B");
+  const balC = await wallet.getBalance("wallet-C");
+  assert.equal(balA.winnings, 100, "Wallet A fikk credit før failure");
+  assert.equal(balB.winnings, 100, "Wallet B fikk credit før failure");
+  assert.equal(balC.winnings, 0, "Wallet C fikk IKKE credit (kastet under)");
+
+  // Compliance og audit skal være tomme — step 2-4 ble aldri nådd fordi
+  // step 1 kastet på vinner #3.
+  assert.equal(
+    compliance.count(),
+    0,
+    "compliance skal være tom — vi nådde aldri step 2",
+  );
+  assert.equal(
+    audit.count(),
+    0,
+    "audit skal være tom — vi nådde aldri step 4",
+  );
+});
+
+test("invariant: PayoutService — soft-fail på compliance påvirker IKKE wallet eller audit", async () => {
+  // Strategi: wallet og audit er ok, men compliance.recordEvent kaster.
+  // PayoutService logger advarsel og fortsetter (soft-fail-policy).
+  // Verifisér: wallet committed, audit logget, compliance er fortsatt 0.
+  const wallet = new InMemoryWalletPort();
+  const compliance = new InMemoryCompliancePort();
+  const audit = new InMemoryAuditPort();
+  const keys = new DefaultIdempotencyKeyPort();
+  wallet.seed("wallet-1", 0);
+
+  // Override compliance.recordEvent til å kaste.
+  compliance.recordEvent = async () => {
+    throw new Error("simulert compliance-feil (DB-utilgjengelig)");
+  };
+
+  const service = new PayoutService({ wallet, compliance, audit, keys });
+
+  // Skal IKKE kaste — compliance-feil er soft-fail.
+  const result = await service.payoutPhase({
+    gameId: "game-soft-fail",
+    phaseId: "phase-1",
+    phaseName: "1 Rad",
+    winners: [
+      { walletId: "wallet-1", playerId: "p", hallId: "h", claimId: "c" },
+    ],
+    totalPrizeCents: 10_000,
+    actorHallId: "h",
+    isFixedPrize: true,
+    gameType: "MAIN_GAME",
+    channel: "INTERNET",
+  });
+
+  // Wallet committed.
+  assert.equal((await wallet.getBalance("wallet-1")).winnings, 100);
+  // Audit logget (kjøres etter compliance i sekvens, men compliance kastet
+  // ikke videre — den ble fanget og logget som warning).
+  assert.equal(audit.count(), 1, "Audit skal logges selv om compliance feilet");
+  // Result reflekterer credit.
+  assert.equal(result.prizePerWinnerCents, 10_000);
+  assert.notEqual(result.winnerRecords[0]!.walletTxId, null);
+});
+
+// PENDING (Fase 4 — outer-tx GameOrchestrator): når PayoutService kalles
+// gjennom GameOrchestrator's transaction-wrapper, kan vi verifisere FULL
+// atomicity (wallet credits + compliance + audit ruller tilbake sammen ved
+// hvilken som helst feil). Det krever PostgresWalletPort + tx-context og
+// kan ikke testes på InMemory-nivå.
 test.todo(
-  "invariant: PayoutService rollback fjerner alle ledger-entries og audit-entries (Fase 1)",
+  "invariant: PayoutService innenfor outer-tx ruller tilbake ALLE writes ved hvilken som helst step-feil (Fase 4)",
 );
