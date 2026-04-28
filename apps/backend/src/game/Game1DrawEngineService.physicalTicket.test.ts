@@ -310,7 +310,7 @@ test("PT4: digital og fysisk bong vinner begge fase 1 — digital payout + fysis
     // Digital-path: SELECT alle assignments
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [{
         id: "a-1",
         grid_numbers_json: winningRow0Grid(),
@@ -460,7 +460,7 @@ test("PT4: kun fysisk bong vinner — ingen digital assignments returnerer phase
     // Digital-path: SELECT assignments — tom (ingen digital bong)
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     // UPDATE game_state
@@ -576,7 +576,7 @@ test("PT4: flere fysiske bonger vinner samme fase — alle får pending-rows + b
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     {
@@ -644,7 +644,7 @@ test("PT4: uten physicalTicketPayoutService wired opp — ingen fysisk-evaluerin
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     {
@@ -746,7 +746,7 @@ test("PT4: fysisk bong uten pattern-match — ingen pending-row opprettet", asyn
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     {
@@ -845,7 +845,7 @@ test("PT4: fysisk bong med beløp ≥ terskel → adminApprovalRequired=true i b
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     {
@@ -937,7 +937,7 @@ test("PT4: responsible_user_id mangler → faller tilbake til sold_by_user_id", 
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     {
@@ -1026,7 +1026,7 @@ test("PT4: hverken responsible_user_id eller sold_by_user_id satt → bong skipp
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id"),
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id"),
       rows: [],
     },
     {

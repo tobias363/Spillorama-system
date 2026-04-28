@@ -251,7 +251,7 @@ function fullHouseResponses(options: {
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: assignmentRows,
     },
