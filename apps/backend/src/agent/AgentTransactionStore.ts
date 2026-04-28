@@ -258,8 +258,58 @@ export class PostgresAgentTransactionStore implements AgentTransactionStore {
   }
 
   async aggregateByShift(shiftId: string): Promise<ShiftAggregate> {
-    const all = await this.list({ shiftId, limit: 500 });
-    return aggregateRows(all);
+    // PILOT-STOP-SHIP fix (Code Review #1 P0-2): bruke direkte SQL SUM
+    // i stedet for list({ limit: 500 }) + aggregateRows. Tidligere kode
+    // truncerte stille på travle skift (>500 transaksjoner) → settlement-
+    // totals ble for lave. Aggregering skjer nå i Postgres uten grense.
+    //
+    // GROUP BY (action_type, payment_method, wallet_direction) gjør at vi
+    // i samme query kan bygge både cash/card/wallet IN/OUT-bøttene OG
+    // ticket-tellinger uten å hente raw-radene. Resultatet matcher
+    // `aggregateRows()` 1:1 (samme felt-mapping, samme datatype).
+    const { rows } = await this.pool.query<{
+      action_type: ActionType;
+      payment_method: PaymentMethod;
+      wallet_direction: WalletDirection;
+      tx_count: string | number;
+      total_amount: string | number;
+    }>(
+      `SELECT
+         action_type,
+         payment_method,
+         wallet_direction,
+         COUNT(*)::bigint AS tx_count,
+         COALESCE(SUM(amount), 0)::numeric AS total_amount
+       FROM ${this.tableName}
+       WHERE shift_id = $1
+       GROUP BY action_type, payment_method, wallet_direction`,
+      [shiftId]
+    );
+    const agg: ShiftAggregate = {
+      cashIn: 0, cashOut: 0,
+      cardIn: 0, cardOut: 0,
+      walletIn: 0, walletOut: 0,
+      ticketSaleCount: 0, ticketCancelCount: 0,
+    };
+    for (const row of rows) {
+      const total = asNumber(row.total_amount);
+      const count = asNumber(row.tx_count);
+      const isCredit = row.wallet_direction === "CREDIT";
+      const isDebit = row.wallet_direction === "DEBIT";
+      if (row.payment_method === "CASH") {
+        if (isCredit) agg.cashIn += total;
+        if (isDebit) agg.cashOut += total;
+      } else if (row.payment_method === "CARD") {
+        if (isCredit) agg.cardIn += total;
+        if (isDebit) agg.cardOut += total;
+      } else if (row.payment_method === "WALLET") {
+        if (isCredit) agg.walletIn += total;
+        if (isDebit) agg.walletOut += total;
+      }
+      if (row.action_type === "TICKET_SALE") agg.ticketSaleCount += count;
+      if (row.action_type === "TICKET_CANCEL") agg.ticketCancelCount += count;
+    }
+    return agg;
   }
 
   private map(row: Row): AgentTransaction {
