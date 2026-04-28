@@ -2227,6 +2227,14 @@ export class BingoEngine {
             requestedAfterPolicyAndPool,
             game.remainingPayoutBudget
           );
+      // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): state-mutasjonene
+      // (lineWinnerId + linePatternResult.isWon) MÅ skje uavhengig av
+      // payout-beløp. Tidligere var de inne i `if (payout > 0)` slik at en
+      // gyldig vinning med payout=0 (mode:percent + tom pool, eller
+      // unkonfigurert prizePercent) lot fasen henge i ad-hoc claim-pathen.
+      // wallet.transfer + audit-events forblir gated på payout > 0 fordi
+      // de er bare meningsfulle ved faktisk pengeoverføring.
+      let transferredTxIds: [string, string] | null = null;
       if (payout > 0) {
         // CRIT-6: I/O FIRST — wallet transfer er den eneste rever-
         // sible operasjonen. Hvis denne feiler kaster vi videre uten
@@ -2248,10 +2256,6 @@ export class BingoEngine {
           }
         );
 
-        // CRIT-6: state-mutasjoner skjer NÅ — etter at transfer er
-        // committet. Hvis transferen kastet over, hoppet vi over hele
-        // denne blokken og state forblir uendret.
-        game.lineWinnerId = player.id;
         // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh i stedet
         // for optimistisk `player.balance += payout`. Optimistisk += taper
         // deposit/winnings-split-info → stale balance på 2.+ vinn (en
@@ -2274,15 +2278,7 @@ export class BingoEngine {
         game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
         // BIN-45: Store transaction IDs for idempotency tracking
         claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-        // Record pattern result for the first unclaimed LINE pattern
-        const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
-        if (linePatternResult) {
-          linePatternResult.isWon = true;
-          linePatternResult.winnerId = player.id;
-          linePatternResult.wonAtDraw = game.drawnNumbers.length;
-          linePatternResult.payoutAmount = payout;
-          linePatternResult.claimId = claim.id;
-        }
+        transferredTxIds = [transfer.fromTx.id, transfer.toTx.id];
 
         // FIXED-PRIZE-FIX: HOUSE_DEFICIT audit-event når faste premier
         // overgår tilgjengelig pool. Best-effort; payout er allerede
@@ -2341,6 +2337,24 @@ export class BingoEngine {
         });
         claim.auditTrailStatus = auditResult.status;
       }
+      // PILOT-EMERGENCY 2026-04-28: state-mutasjoner SKAL skje uavhengig av
+      // payout-beløp. Phase-state må markeres vunnet og winnerId-pekes selv
+      // når payout=0 — ellers henger runden i samme fase fordi
+      // `patternResults[N].isWon === false` og engine fortsetter å lete
+      // etter vinnere på neste ball. Når den finner samme vinner igjen blir
+      // det ad-hoc-claim spam uten at pattern advances.
+      game.lineWinnerId = player.id;
+      const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
+      if (linePatternResult) {
+        linePatternResult.isWon = true;
+        linePatternResult.winnerId = player.id;
+        linePatternResult.wonAtDraw = game.drawnNumbers.length;
+        linePatternResult.payoutAmount = payout;
+        linePatternResult.claimId = claim.id;
+      }
+      // Unngå unused-var-warning for transferredTxIds — bruk den for å
+      // signalisere til lesere at txId-tracking kun skjer når payout > 0.
+      void transferredTxIds;
       const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
       claim.payoutPolicyVersion = cappedLinePayout.policy.id;
@@ -2398,6 +2412,11 @@ export class BingoEngine {
             requestedAfterPolicyAndPool,
             game.remainingPayoutBudget
           );
+      // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): vinner-marker
+      // (game.bingoWinnerId) MÅ settes uavhengig av payout-beløp slik at
+      // duplikat-claim-guard (linje ~2360) avviser doble innsendinger og
+      // engine vet hvem som vant. wallet.transfer + audit-events forblir
+      // gated på payout > 0.
       if (payout > 0) {
         // CRIT-6: wallet-transfer FIRST — single-source-of-truth.
         // BIN-239: idempotencyKey prevents double payout if client retries.
@@ -2416,8 +2435,6 @@ export class BingoEngine {
           }
         );
 
-        // CRIT-6: state-mutasjoner kommer ETTER vellykket transfer.
-        game.bingoWinnerId = player.id;
         // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh — se
         // kommentar i LINE-grenen over for begrunnelse (stale balance
         // på 2.+ vinn pga deposit/winnings-split). Fail-soft.
@@ -2490,6 +2507,13 @@ export class BingoEngine {
         });
         claim.auditTrailStatus = auditResult.status;
       }
+      // PILOT-EMERGENCY 2026-04-28: state-mutasjoner SKAL skje uavhengig av
+      // payout-beløp. game.bingoWinnerId, game.status="ENDED", endedReason
+      // og finishPlaySessions må kjøres slik at runden faktisk avsluttes
+      // selv ved payout=0 (mode:percent + tom pool eller unkonfigurert
+      // prizePercent). Tidligere ble bingoWinnerId-marker glemt og runden
+      // hang i RUNNING med duplikat-claim-guard som ikke fanget retries.
+      game.bingoWinnerId = player.id;
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
       game.status = "ENDED";
