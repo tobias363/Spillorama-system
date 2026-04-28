@@ -328,6 +328,13 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
 
   async insertComplianceLedgerEntry(entry: PersistedComplianceLedgerEntry): Promise<void> {
     await this.ensureInitialized();
+    // PILOT-STOP-SHIP 2026-04-28: ON CONFLICT mot UNIQUE(idempotency_key)
+    // gir retry-safe insert for soft-fail-call-sites. Format på key er
+    // bestemt av ComplianceLedger.makeComplianceLedgerIdempotencyKey og
+    // bevares deterministisk mellom retries på samme logiske event.
+    // Hvis caller ikke setter `idempotencyKey` (test-fixtures, gammel
+    // data) bruker vi `id` som fallback — DB-kolonnen har NOT NULL.
+    const idempotencyKey = entry.idempotencyKey ?? entry.id;
     await this.pool.query(
       `INSERT INTO ${this.complianceLedgerTable()} (
          id,
@@ -348,13 +355,14 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
          target_account_id,
          policy_version,
          batch_id,
-         metadata_json
+         metadata_json,
+         idempotency_key
        )
        VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-         $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb
+         $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20
        )
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (idempotency_key) DO NOTHING`,
       [
         entry.id,
         entry.createdAt,
@@ -374,7 +382,8 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
         entry.targetAccountId ?? null,
         entry.policyVersion ?? null,
         entry.batchId ?? null,
-        JSON.stringify(entry.metadata ?? null)
+        JSON.stringify(entry.metadata ?? null),
+        idempotencyKey
       ]
     );
   }

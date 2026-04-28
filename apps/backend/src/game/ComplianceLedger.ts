@@ -15,7 +15,7 @@
 // 0.30/0.15 minstegrense bevares byte-identisk. Se modul-header i
 // hver split-fil for detaljer.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DomainError } from "./BingoEngine.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
@@ -98,6 +98,65 @@ export type {
   TopPlayersReport
 } from "./ComplianceLedgerTypes.js";
 
+// ── Idempotency-key helpers (PILOT-STOP-SHIP 2026-04-28) ──────────
+//
+// Bygger en deterministisk key brukt som ON CONFLICT-target i
+// `app_rg_compliance_ledger.idempotency_key` (UNIQUE-index lagt til i
+// migrations/20260428080000_compliance_ledger_idempotency.sql).
+//
+// Format matcher reviewer-spec:
+//   `${eventType}:${gameId ?? "no-game"}:${claimId ?? playerId ?? "no-actor"}:${eventSubKey ?? ""}`
+//
+// `eventSubKey` er en eksplisitt discriminator fra call-sitet (f.eks.
+// `purchaseId` for STAKE eller `phase` for HOUSE_RETAINED). Hvis
+// call-sitet ikke kan oppgi en stabil sub-key, gir vi en `fallback-
+// Discriminator` (stabil hash av input-feltene) for å hindre at
+// distinkte logiske events kolliderer på UNIQUE-constraint og blir
+// stille forkastet av `DO NOTHING`.
+
+export function makeComplianceLedgerIdempotencyKey(input: {
+  eventType: LedgerEventType;
+  gameId?: string;
+  claimId?: string;
+  playerId?: string;
+  eventSubKey?: string;
+  fallbackDiscriminator?: string;
+}): string {
+  const eventType = input.eventType;
+  const gameId = input.gameId?.trim() || "no-game";
+  const actor = input.claimId?.trim() || input.playerId?.trim() || "no-actor";
+  const subKey = input.eventSubKey?.trim() || input.fallbackDiscriminator || "";
+  return `${eventType}:${gameId}:${actor}:${subKey}`;
+}
+
+/**
+ * Stabil 16-byte hash av entry-feltene som faktisk skiller distinkte
+ * logiske events (alt unntatt `id`/`createdAt*` som er random per call).
+ * Brukes som fallback-discriminator i idempotency-key når call-site
+ * ikke har gitt en eksplisitt eventSubKey, for å hindre kolisjon
+ * mellom distinkte legitime events. JSON.stringify er deterministisk
+ * for våre felt — ingen `Date`/`Map`-verdier her.
+ */
+export function stableEntryDiscriminatorHash(entry: ComplianceLedgerEntry): string {
+  const discriminator = {
+    hallId: entry.hallId,
+    gameType: entry.gameType,
+    channel: entry.channel,
+    amount: entry.amount,
+    roomCode: entry.roomCode ?? null,
+    walletId: entry.walletId ?? null,
+    sourceAccountId: entry.sourceAccountId ?? null,
+    targetAccountId: entry.targetAccountId ?? null,
+    policyVersion: entry.policyVersion ?? null,
+    batchId: entry.batchId ?? null,
+    metadata: entry.metadata ?? null
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(discriminator))
+    .digest("hex")
+    .slice(0, 32);
+}
+
 // ── ComplianceLedger ──────────────────────────────────────────────
 
 export class ComplianceLedger {
@@ -164,6 +223,16 @@ export class ComplianceLedger {
     policyVersion?: string;
     batchId?: string;
     metadata?: Record<string, unknown>;
+    /**
+     * PILOT-STOP-SHIP 2026-04-28: deterministisk discriminator for
+     * idempotency-key. Brukes når `claimId`/`playerId` alene ikke
+     * skiller distinkte logiske events (f.eks. flere stakes fra samme
+     * spiller i samme game, eller HOUSE_RETAINED per phase). Hvis ikke
+     * satt, faller vi tilbake til en stabil hash av input-feltene —
+     * det sikrer at retry av samme call gir samme key, mens distinkte
+     * events får distinkt key.
+     */
+    eventSubKey?: string;
   }): Promise<void> {
     const nowMs = Date.now();
     const entry: ComplianceLedgerEntry = {
@@ -192,9 +261,27 @@ export class ComplianceLedger {
       this.complianceLedger.length = 50_000;
     }
     if (this.persistence) {
+      // PILOT-STOP-SHIP 2026-04-28: bygg deterministisk idempotency-key
+      // som ON CONFLICT-target i `insertComplianceLedgerEntry`. Format
+      // matcher reviewer-spec og degraderer trygt til hash av input-
+      // feltene når call-site ikke kan gi en eksplisitt eventSubKey.
+      const idempotencyKey = makeComplianceLedgerIdempotencyKey({
+        eventType: entry.eventType,
+        gameId: entry.gameId,
+        claimId: entry.claimId,
+        playerId: entry.playerId,
+        eventSubKey: input.eventSubKey,
+        // Fallback discriminator: stabil hash av "alt unntatt id+timestamp"
+        // så retry av samme call gir samme key, mens distinkte events
+        // (forskjellig metadata, amount, accounts) får forskjellige keys.
+        // Dette sikrer at default-kallet uten eksplisitt eventSubKey
+        // ikke svelger legitime distinkte rader.
+        fallbackDiscriminator: stableEntryDiscriminatorHash(entry)
+      });
       await this.persistence.insertComplianceLedgerEntry({
         ...entry,
-        metadata: entry.metadata ? { ...entry.metadata } : undefined
+        metadata: entry.metadata ? { ...entry.metadata } : undefined,
+        idempotencyKey
       });
     }
   }

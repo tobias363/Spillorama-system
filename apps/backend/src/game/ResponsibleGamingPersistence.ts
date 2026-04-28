@@ -102,6 +102,19 @@ export interface PersistedComplianceLedgerEntry {
   policyVersion?: string;
   batchId?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * PILOT-STOP-SHIP 2026-04-28: deterministisk key for retry-safe inserts.
+   * Backed av UNIQUE-index `idx_app_rg_compliance_ledger_idempotency`
+   * (migrations/20260428080000_compliance_ledger_idempotency.sql).
+   * INSERT bruker `ON CONFLICT (idempotency_key) DO NOTHING` for å hindre
+   * dobbel-telling i §71-rapport når soft-fail-call-sites retry-er etter
+   * wallet-success.
+   *
+   * Optional på TS-nivå for backwards-compat med snapshot-loading av
+   * gammel data og test-fixtures — DB-laget krever NOT NULL og bruker
+   * `id` som backfill for legacy-rader.
+   */
+  idempotencyKey?: string;
 }
 
 export interface PersistedPayoutAuditEvent {
