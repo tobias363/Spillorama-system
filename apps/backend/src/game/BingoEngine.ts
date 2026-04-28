@@ -3272,6 +3272,26 @@ export class BingoEngine {
     this.compliance.assertWalletAllowedForGameplay(walletIdInput, nowMs);
   }
 
+  /**
+   * PILOT-STOP-SHIP fix (Code Review #5 P0-1): public wrapper rundt
+   * `ComplianceManager.wouldExceedLossLimit` slik at REST/socket-routes
+   * kan gate purchases før de når wallet-debit. `entryFeeNok` er i NOK
+   * (ikke øre) for å matche ComplianceManagers signatur. `hallId` MÅ være
+   * kjøpe-hallen (ikke master-hallen) per §71 pengespillforskriften.
+   *
+   * Brukes av `/api/game1/purchase` for å blokkere selvutestengt +
+   * frivillig pause + obligatorisk pause + loss-limit-breach FØR
+   * wallet-debit.
+   */
+  wouldExceedLossLimit(
+    walletIdInput: string,
+    entryFeeNok: number,
+    hallId: string,
+    nowMs = Date.now()
+  ): boolean {
+    return this.compliance.wouldExceedLossLimit(walletIdInput, entryFeeNok, nowMs, hallId);
+  }
+
   async upsertPrizePolicy(input: {
     gameType?: PrizeGameType;
     hallId?: string;

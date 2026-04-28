@@ -43,6 +43,7 @@
 
 import express from "express";
 import { DomainError } from "../game/BingoEngine.js";
+import type { BingoEngine } from "../game/BingoEngine.js";
 import type {
   PlatformService,
   PublicAppUser,
@@ -71,12 +72,19 @@ const logger = rootLogger.child({ module: "game1-purchase-router" });
 export interface Game1PurchaseRouterDeps {
   platformService: PlatformService;
   purchaseService: Game1TicketPurchaseService;
+  /**
+   * PILOT-STOP-SHIP fix (Code Review #5 P0-1, 2026-04-28): brukes til å
+   * gate REST-purchase mot self-exclusion / mandatory pause / timed pause
+   * (§23 + §66) og loss-limit-breach (§11) FØR wallet-debit. Speiler
+   * pattern fra socket-laget i `game1ScheduledEvents.ts`.
+   */
+  engine: BingoEngine;
 }
 
 export function createGame1PurchaseRouter(
   deps: Game1PurchaseRouterDeps
 ): express.Router {
-  const { platformService, purchaseService } = deps;
+  const { platformService, purchaseService, engine } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -151,6 +159,41 @@ export function createGame1PurchaseRouter(
             "Agent kan kun selge billetter i egen hall."
           );
         }
+      }
+
+      // PILOT-STOP-SHIP fix (Code Review #5 P0-1, 2026-04-28):
+      // Speiler socket-pattern fra game1ScheduledEvents.ts.
+      // assertWalletAllowedForGameplay kaster DomainError ved selv-
+      // utestengelse (§23), pålagt pause (§66) eller frivillig pause.
+      // wouldExceedLossLimit blokkerer kjøp som ville overstige daglig/
+      // månedlig tapsgrense per hall (§11). Begge gates kjører FØR
+      // wallet-debit slik at en self-excluded eller pauset spiller
+      // ikke kan kjøpe via REST.
+      //
+      // For PLAYER er `actor` allerede whitelisted som buyeren over.
+      // For AGENT/ADMIN må vi slå opp buyerens walletId.
+      const buyer =
+        actor.role === "PLAYER"
+          ? actor
+          : await platformService.getUserById(buyerUserId);
+      engine.assertWalletAllowedForGameplay(buyer.walletId);
+
+      // Compute totalAmountCents inline for loss-limit-gate. Det samme
+      // beregnes igjen inne i purchaseService.validateTicketSpecAgainstConfig
+      // (med katalog-validering), men her trenger vi kun summen for
+      // limit-sjekk. Hvis konfig-prisen avviker fra request-prisen,
+      // kaster purchaseService kort etter — vi feiler då på pris-
+      // validering, ikke på limit.
+      let totalAmountCents = 0;
+      for (const entry of ticketSpec) {
+        totalAmountCents += entry.count * entry.priceCentsEach;
+      }
+      const totalAmountNok = totalAmountCents / 100;
+      if (engine.wouldExceedLossLimit(buyer.walletId, totalAmountNok, hallId)) {
+        throw new DomainError(
+          "LOSS_LIMIT_EXCEEDED",
+          "Kjøpet ville overstige din daglige eller månedlige tapsgrense for denne hallen."
+        );
       }
 
       const result = await purchaseService.purchase({

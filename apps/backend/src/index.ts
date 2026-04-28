@@ -2075,6 +2075,10 @@ app.use(createAdminGame1MasterTransferRouter({
 app.use(createGame1PurchaseRouter({
   platformService,
   purchaseService: game1TicketPurchaseService,
+  // PILOT-STOP-SHIP (Code Review #5 P0-1, 2026-04-28): engine brukes til
+  // å gate REST-purchase mot self-exclusion / pause / loss-limit FØR
+  // wallet-debit. Speiler pattern fra socket-laget.
+  engine,
 }));
 // BIN-627: Pattern CRUD + dynamic-menu. Aktiverer Agent A's
 // patternManagement-placeholder-sider fra PR-A3a (3 sider) og brukes av
