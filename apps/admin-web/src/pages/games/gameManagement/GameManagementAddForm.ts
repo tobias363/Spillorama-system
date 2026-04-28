@@ -357,7 +357,12 @@ function renderSectionPatternPrizes(s: FormState): string {
     .map((tc) => {
       const cells = activePatterns.map((p) => {
         const prize = tc.prizePerPattern[p];
-        const mode = prize?.mode ?? "percent";
+        // PILOT-EMERGENCY 2026-04-28: default mode bytte fra "percent" til
+        // "fixed". Tidligere default ga prizePercent:0 i mapperen → ingen
+        // gevinster + runde-state-bug. Eksisterende lagrede configs
+        // påvirkes ikke (de har lagret mode), kun nye/ukonfigurerte celler.
+        // Refs: docs/operations/TESTBRUKER_DIAGNOSE_2026-04-28.md §6 Fix 3.
+        const mode = prize?.mode ?? "fixed";
         const amount = prize?.amount ?? 0;
         const percentSelected = mode === "percent" ? " selected" : "";
         const fixedSelected = mode === "fixed" ? " selected" : "";
@@ -675,8 +680,13 @@ function wirePatternPrizeCells(container: HTMLElement, state: FormState): void {
       const modeSelect = container.querySelector<HTMLSelectElement>(
         `.gm-prize-mode[data-color="${color}"][data-pattern="${pattern}"]`
       );
+      // PILOT-EMERGENCY 2026-04-28: fallback-mode "fixed" matcher render-
+      // default i refreshPatternPrizeTable. Hvis modeSelect mangler eller
+      // ikke har en eksplisitt verdi, antar vi "fixed" så admin-UI-en ikke
+      // tilfeldigvis skriver mode:percent + amount:N — som ville gjeninnført
+      // pre-pilot bug-en når amount:0. Refs: §6 Fix 3 i diagnose-dok.
       const mode: PatternPrizeMode =
-        modeSelect?.value === "fixed" ? "fixed" : "percent";
+        modeSelect?.value === "percent" ? "percent" : "fixed";
       if (Number.isFinite(v) && v >= 0) {
         entry.prizePerPattern[pattern] = { mode, amount: v };
       } else {
