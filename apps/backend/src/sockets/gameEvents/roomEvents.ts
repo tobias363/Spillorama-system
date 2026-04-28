@@ -38,7 +38,7 @@ import type {
 import type { RoomSnapshot } from "../../game/types.js";
 import type { GameEventsDeps } from "./deps.js";
 import { walletRoomKey } from "../walletStatePusher.js";
-import { getCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
+import { getCanonicalRoomCode, isCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
 
 /**
  * Demo Hall bypass (Tobias 2026-04-27): hent `isTestHall` fra
@@ -290,6 +290,22 @@ export function registerRoomEvents(ctx: SocketContext): void {
           // flagget) får oppdatert state. No-op hvis verdien matcher.
           engine.setRoomTestHall(existingCanonical.code, isTestHall);
 
+          // PILOT-EMERGENCY 2026-04-28 (Tobias): rydd stale wallet-binding
+          // i non-canonical legacy-rom FØR vi joiner. Disse er pre-#677
+          // 4RCQSX-leftovers som blokkerer assertWalletNotInRunningGame.
+          // Trygt fordi target er canonical og isHallShared=true tillater
+          // cross-hall reconnect.
+          const cleanedCreate = engine.cleanupStaleWalletInNonCanonicalRooms(
+            identity.walletId,
+            isCanonicalRoomCode,
+          );
+          if (cleanedCreate > 0) {
+            logger.warn(
+              { walletId: identity.walletId, cleaned: cleanedCreate, target: existingCanonical.code },
+              "[room:create] cleared stale wallet-bindings in non-canonical rooms",
+            );
+          }
+
           const canonicalSnapshot = engine.getRoomSnapshot(existingCanonical.code);
           const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
 
@@ -432,6 +448,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
           } else {
             // Auto-create canonical room for this hall + group.
             logger.debug({ hallId: identity.hallId, canonical: canonicalMapping.roomCode }, "room:join auto-creating canonical room");
+            // PILOT-EMERGENCY 2026-04-28 (Tobias): rydd legacy non-canonical
+            // rom-bindinger før vi auto-creater canonical (samme grunn som
+            // i room:create — pre-#677 4RCQSX-rester må vekk).
+            const cleanedNonCanonical = engine.cleanupStaleWalletInNonCanonicalRooms(
+              identity.walletId,
+              isCanonicalRoomCode,
+            );
+            if (cleanedNonCanonical > 0) {
+              logger.warn(
+                { walletId: identity.walletId, cleaned: cleanedNonCanonical, target: canonicalMapping.roomCode },
+                "[room:join auto-create] cleared stale wallet-bindings in non-canonical rooms",
+              );
+            }
             engine.cleanupStaleWalletInIdleRooms(identity.walletId);
             const newRoom = await engine.createRoom({
               hallId: identity.hallId,
@@ -477,6 +506,27 @@ export function registerRoomEvents(ctx: SocketContext): void {
           throw new DomainError(
             "SINGLE_ROOM_ONLY",
             `Kun ett bingo-rom er aktivt per hall. Bruk rom ${canonicalForCheck.roomCode}.`
+          );
+        }
+      }
+
+      // PILOT-EMERGENCY 2026-04-28 (Tobias): hvis target-rommet er
+      // canonical, fjern aggressivt stale walletId-binding fra alle
+      // non-canonical (legacy) rom — uansett runde-status. Disse er
+      // 4RCQSX-typen leftovers fra pre-#677-epoke som blokkerer reconnect
+      // selv etter logg-ut/inn. Boot-sweep destroyer kun IDLE/ENDED
+      // legacy-rom, så RUNNING-leftovers må ryddes opp ad-hoc her.
+      // No-op for non-canonical target-rom (admin-tooling kan fortsatt
+      // teste legacy-flyt manuelt).
+      if (isCanonicalRoomCode(roomCode)) {
+        const cleanedJoin = engine.cleanupStaleWalletInNonCanonicalRooms(
+          identity.walletId,
+          isCanonicalRoomCode,
+        );
+        if (cleanedJoin > 0) {
+          logger.warn(
+            { walletId: identity.walletId, cleaned: cleanedJoin, target: roomCode },
+            "[room:join] cleared stale wallet-bindings in non-canonical rooms",
           );
         }
       }
