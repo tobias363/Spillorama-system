@@ -82,3 +82,39 @@ export function getCanonicalRoomCode(
     isHallShared: false,
   };
 }
+
+/**
+ * Format-sjekk for kanonisk rom-kode (Tobias 2026-04-28).
+ *
+ * Returnerer `true` hvis koden matcher én av disse formene:
+ *   - `BINGO_<noe>`        — Spill 1 per-link (group-of-halls eller hallId-fallback)
+ *   - `ROCKET`             — Spill 2 global
+ *   - `MONSTERBINGO`       — Spill 3 global
+ *
+ * Brukes av boot-sweep (`index.ts`) til å identifisere LEGACY/STALE non-
+ * canonical rom som ble opprettet via tidligere kode-paths. Konkret scenario
+ * fra pilot 2026-04-27: rom `4RCQSX` (random `makeRoomCode()`-output) ble
+ * opprettet før PR #677 lukket Bug B; det forblir i `engine.rooms` etter
+ * rebooot via Redis-load eller crash-recovery, og `cleanupStaleWalletInIdleRooms`
+ * river ikke selve rommet — bare spillere uten socket. Spilleren henger
+ * igjen som player-record fordi reconnect-flyten finner stale-bindingen.
+ *
+ * Boot-sweep skal:
+ *   - hvis non-canonical + ENDED → destroyRoom (trygt, ingen aktiv runde)
+ *   - hvis non-canonical + RUNNING/PAUSED/WAITING → log warn, ikke
+ *     auto-destroy (admin må rydde manuelt)
+ *
+ * Bevisst ikke-validert: vi sjekker kun PREFIX, ikke at suffix er en
+ * gyldig hall-id eller group-id. Det matters ikke for boot-sweep — alle
+ * legacy random `4RCQSX`-koder er 6 alfanumeriske tegn uten "_".
+ *
+ * Uppercases input for konsistens med engine-lookup (`findRoomByCode`,
+ * `getRoomSnapshot` uppercaser begge).
+ */
+export function isCanonicalRoomCode(roomCode: string): boolean {
+  const code = roomCode.trim().toUpperCase();
+  if (code === "ROCKET") return true;
+  if (code === "MONSTERBINGO") return true;
+  if (code.startsWith("BINGO_") && code.length > "BINGO_".length) return true;
+  return false;
+}
