@@ -292,7 +292,20 @@ function patternConfigForPhase(
         prize1: amount,
       };
     }
-    // Default mode = percent (explicit or undefined).
+    // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): mode:percent +
+    // amount=0 produserte prizePercent:0 som ga totalPhasePrize=0 ved
+    // payout-tid (pool * 0 / 100 = 0) → ingen gevinster + runde-state
+    // korrupt. Fall tilbake til fallback-pattern (DEFAULT_NORSK_BINGO_CONFIG
+    // har winningType:"fixed" med 100/200/200/200/1000 kr) i stedet for å
+    // produsere en garantert-null-payout pattern. Admin kan eksplisitt
+    // sette mode:fixed med amount:0 om de virkelig vil ha 0 kr-pattern;
+    // mode:percent med amount=0 tolkes som "ikke konfigurert".
+    //
+    // Refs: docs/operations/TESTBRUKER_DIAGNOSE_2026-04-28.md §2.3, §6 Fix 2.
+    if (amount === 0) {
+      return { ...fallback, name, claimType, design };
+    }
+    // Default mode = percent (explicit or undefined) med ikke-null amount.
     return {
       name,
       claimType,
