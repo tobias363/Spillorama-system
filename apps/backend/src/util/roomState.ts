@@ -3,6 +3,7 @@
  * Extracted from index.ts. Owns: armed players, lucky numbers, display ticket cache,
  * per-room configured entry fees. All helpers are method wrappers around these Maps.
  */
+import { randomUUID } from "node:crypto";
 import { generateTicketForGame } from "../game/ticket.js";
 import type { Ticket } from "../game/types.js";
 import type { GameVariantConfig } from "../game/variantConfig.js";
@@ -61,6 +62,13 @@ export class RoomStateManager {
    */
   readonly reservationIdByPlayerByRoom = new Map<string, Map<string, string>>();
 
+  /**
+   * Pilot-bug fix 2026-04-27 (Tobias-rapport): per-rom arm cycle id som inngår
+   * i bet:arm idempotency-key. Bumpes ved disarmAllPlayers (game:start) så
+   * neste runde får friske keys.
+   */
+  readonly armCycleByRoom = new Map<string, string>();
+
   // ── Armed players ──────────────────────────────────────────────────────────
 
   getArmedPlayerIds(roomCode: string): string[] {
@@ -112,6 +120,21 @@ export class RoomStateManager {
     this.armedPlayerIdsByRoom.get(roomCode)?.clear();
     this.armedPlayerSelectionsByRoom.get(roomCode)?.clear();
     this.reservationIdByPlayerByRoom.get(roomCode)?.clear();
+    // Pilot-bug fix 2026-04-27: bump arm-cycle for friske keys neste runde.
+    this.armCycleByRoom.delete(roomCode);
+  }
+
+  /**
+   * Returner gjeldende arm-cycle-id for rommet, og opprett en ny UUID hvis
+   * ingen finnes. Idempotent innen samme syklus.
+   */
+  getOrCreateArmCycleId(roomCode: string): string {
+    let id = this.armCycleByRoom.get(roomCode);
+    if (!id) {
+      id = randomUUID();
+      this.armCycleByRoom.set(roomCode, id);
+    }
+    return id;
   }
 
   // ── BIN-693 Option B: Reservation tracking ───────────────────────────────
