@@ -25,6 +25,23 @@
 //   - DailySchedule-scope: backend listDailySchedules filtrerer kun på
 //     gameManagementId, ikke gameTypeId. Vi henter GM-ids for typen og
 //     filtrerer schedules client-side på membership.
+//
+// BUG-FIX (pilot-blokker 2026-04-27, slug-vs-UUID-mismatch):
+// Tidligere brukte vi `gt._id` som option-value, URL-parameter og find()-key.
+// `_id` kan være en UUID (BIN-620-path, `mapAdminGameTypeToGameType`) eller
+// en slug (legacy-path, `mapPlatformRowToGameType`) avhengig av hvilken
+// backend som svarer først. Når BIN-620 returnerte UUIDs men URL-en
+// inneholdt slug ("?typeId=bingo"), matchet ikke `selectEl.value = "bingo"`
+// noen option (alle hadde value=UUID), dropdown falt tilbake til tom default
+// → ingen Add-knapp, ingen "Lag daglig tidsplan"-knapp ble rendret → admin
+// kunne ikke opprette spilleplan.
+//
+// Fix: bruk `gt.slug` som canonical UI/URL-identifikator (slug er stabil i
+// begge data-paths). `find()` aksepterer både slug og _id for å støtte
+// gamle bookmarks. Backend-kall (renderList, reloadDailySchedules) bruker
+// fortsatt `gt._id` siden det er den faktiske
+// `app_game_management.game_type_id`-verdien (UUID i BIN-620-path, slug i
+// legacy-path).
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
@@ -83,28 +100,34 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
     return;
   }
 
-  // Populate the type-picker.
+  // Populate the type-picker. Bruk slug som option-value — se header-comment
+  // for full kontekst på slug-vs-UUID-fix.
   selectEl.innerHTML =
     `<option value="">${escapeHtml(t("choose_game_type"))}</option>` +
     types
-      .map((gt) => `<option value="${escapeHtml(gt._id)}">${escapeHtml(gt.name)}</option>`)
+      .map((gt) => `<option value="${escapeHtml(gt.slug)}">${escapeHtml(gt.name)}</option>`)
       .join("");
 
   // Pre-select from typeId query param.
   if (typeId) {
-    selectEl.value = typeId;
-    hintHost.style.display = "none";
-    renderAddButton(addBtnHost, typeId, types);
-    await renderList(typeId, types, headerHost, tableHost);
-    const gt = types.find((x) => x._id === typeId);
+    // Robust match: aksepterer både slug og legacy `_id` (UUID eller slug)
+    // slik at gamle bookmarks/URL-er fortsatt fungerer.
+    const gt = types.find((x) => x.slug === typeId || x._id === typeId);
     if (gt) {
+      selectEl.value = gt.slug;
+      hintHost.style.display = "none";
+      renderAddButton(addBtnHost, gt);
+      await renderList(gt, headerHost, tableHost);
       dsSection.style.display = "";
       renderDsHeading(dsHeadingHost, gt);
-      renderDsActions(dsActionsHost, typeId, () => {
-        void reloadDailySchedules(typeId, dsTableHost);
+      renderDsActions(dsActionsHost, gt.slug, () => {
+        void reloadDailySchedules(gt, dsTableHost);
       });
-      await reloadDailySchedules(typeId, dsTableHost);
+      await reloadDailySchedules(gt, dsTableHost);
     } else {
+      // Ukjent typeId — vis hint som om ingen var valgt.
+      addBtnHost.innerHTML = "";
+      hintHost.style.display = "";
       dsSection.style.display = "none";
     }
   } else {
@@ -117,6 +140,7 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
     const next = selectEl.value;
     if (next) {
       // Keep hash-query in sync with dropdown for shareable URLs.
+      // `next` er nå slug (option-value er gt.slug).
       window.location.hash = `#/gameManagement?typeId=${encodeURIComponent(next)}`;
     } else {
       window.location.hash = `#/gameManagement`;
@@ -184,12 +208,13 @@ function renderShell(): string {
     </div></div>`;
 }
 
-function renderAddButton(host: HTMLElement, typeId: string, types: GameType[]): void {
-  const gt = types.find((x) => x._id === typeId);
+function renderAddButton(host: HTMLElement, gt: GameType): void {
   const isG3 = isGame3Variant(gt);
+  // Bruk slug i URL — robust mot legacy/BIN-620-path. `fetchGameType(slug)`
+  // har slug-fallback i GameTypeState så detail-sider fungerer.
   const href = isG3
-    ? `#/gameManagement/${encodeURIComponent(typeId)}/add-g3`
-    : `#/gameManagement/${encodeURIComponent(typeId)}/add`;
+    ? `#/gameManagement/${encodeURIComponent(gt.slug)}/add-g3`
+    : `#/gameManagement/${encodeURIComponent(gt.slug)}/add`;
   host.innerHTML = `
     <a href="${href}" class="btn btn-primary btn-md" data-testid="gm-add-btn">
       <i class="fa fa-plus" aria-hidden="true"></i> ${escapeHtml(t("add_game"))}
@@ -197,17 +222,10 @@ function renderAddButton(host: HTMLElement, typeId: string, types: GameType[]): 
 }
 
 async function renderList(
-  typeId: string,
-  types: GameType[],
+  gt: GameType,
   headerHost: HTMLElement,
   tableHost: HTMLElement
 ): Promise<void> {
-  const gt = types.find((t) => t._id === typeId);
-  if (!gt) {
-    tableHost.innerHTML = `<div class="alert alert-warning">${escapeHtml(t("no_data_available"))}</div>`;
-    return;
-  }
-
   // Sub-header: "{game.name} Table" with breadcrumb.
   headerHost.innerHTML = `
     <h1>${escapeHtml(gt.name)} ${escapeHtml(t("game_table"))}</h1>
@@ -218,8 +236,12 @@ async function renderList(
 
   tableHost.innerHTML = `<div class="text-center" data-testid="gm-loading"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
   try {
-    const rows = await fetchGameManagementList(typeId);
-    renderTable(tableHost, rows, gt, typeId, types, headerHost);
+    // Backend filtrerer på `app_game_management.game_type_id` — bruk
+    // `gt._id` (det som faktisk er lagret) i stedet for slug. Backend lagret
+    // typisk UUID i BIN-620-path og slug i legacy-path; `_id` reflekterer
+    // begge.
+    const rows = await fetchGameManagementList(gt._id);
+    renderTable(tableHost, rows, gt, headerHost);
   } catch (err) {
     const msg = err instanceof ApiError
       ? err.status === 403
@@ -236,8 +258,6 @@ function renderTable(
   host: HTMLElement,
   rows: GameManagementRow[],
   gt: GameType,
-  typeId: string,
-  types: GameType[],
   headerHost: HTMLElement
 ): void {
   DataTable.mount(host, {
@@ -274,7 +294,7 @@ function renderTable(
       btn.disabled = true;
       const result = await deleteGameManagement(gt._id, id);
       if (result.ok) {
-        await renderList(typeId, types, headerHost, host);
+        await renderList(gt, headerHost, host);
       } else {
         const msg =
           result.reason === "PERMISSION_DENIED"
@@ -297,12 +317,14 @@ function statusBadge(s: GameManagementRow["status"]): string {
 }
 
 function renderRowActions(gt: GameType, row: GameManagementRow): string {
+  // Bruk slug i URL-segmenter — robust mot legacy/BIN-620-path. Detail-sider
+  // bruker `fetchGameType(typeId)` som har slug-fallback.
   const viewRoute = isGame3Variant(gt)
-    ? `#/gameManagement/${encodeURIComponent(gt._id)}/view-g3/${encodeURIComponent(row._id)}`
-    : `#/gameManagement/${encodeURIComponent(gt._id)}/view/${encodeURIComponent(row._id)}`;
-  const ticketsRoute = `#/gameManagement/${encodeURIComponent(gt._id)}/tickets/${encodeURIComponent(row._id)}`;
-  const subGamesRoute = `#/gameManagement/subGames/${encodeURIComponent(gt._id)}/${encodeURIComponent(row._id)}`;
-  const closeDayRoute = `#/gameManagement/closeDay/${encodeURIComponent(gt._id)}/${encodeURIComponent(row._id)}`;
+    ? `#/gameManagement/${encodeURIComponent(gt.slug)}/view-g3/${encodeURIComponent(row._id)}`
+    : `#/gameManagement/${encodeURIComponent(gt.slug)}/view/${encodeURIComponent(row._id)}`;
+  const ticketsRoute = `#/gameManagement/${encodeURIComponent(gt.slug)}/tickets/${encodeURIComponent(row._id)}`;
+  const subGamesRoute = `#/gameManagement/subGames/${encodeURIComponent(gt.slug)}/${encodeURIComponent(row._id)}`;
+  const closeDayRoute = `#/gameManagement/closeDay/${encodeURIComponent(gt.slug)}/${encodeURIComponent(row._id)}`;
   return `
     <a href="${viewRoute}" class="btn btn-info btn-xs btn-rounded" title="${escapeHtml(t("view"))}">
       <i class="fa fa-eye" aria-hidden="true"></i>
@@ -383,11 +405,12 @@ function renderDsActions(host: HTMLElement, typeId: string, onSaved: () => void)
   void typeId;
 }
 
-async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<void> {
+async function reloadDailySchedules(gt: GameType, host: HTMLElement): Promise<void> {
   host.innerHTML = `<div class="text-center" data-testid="gm-ds-loading"><i class="fa fa-spinner fa-spin fa-2x" aria-hidden="true"></i></div>`;
   try {
     // 1) Finn alle GameManagement-ids for typen (backend filter på gameTypeId).
-    const gmRows = await fetchGameManagementList(typeId);
+    //    Bruk gt._id (det som faktisk er lagret i DB), ikke slug.
+    const gmRows = await fetchGameManagementList(gt._id);
     const gmIds = new Set(gmRows.map((r) => r._id));
     // 2) Hent alle schedules (backend filtrerer kun på gameManagementId,
     //    ikke typeId). Fetch et romslig batch og filtrer klient-side.
@@ -397,7 +420,7 @@ async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<
       if (ds.gameManagementId && gmIds.has(ds.gameManagementId)) return true;
       return false;
     });
-    renderDsTable(host, typeId, rows);
+    renderDsTable(host, gt, rows);
   } catch (err) {
     const msg =
       err instanceof ApiError
@@ -413,7 +436,7 @@ async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<
 
 function renderDsTable(
   host: HTMLElement,
-  typeId: string,
+  gt: GameType,
   rows: DailyScheduleRow[]
 ): void {
   DataTable.mount(host, {
@@ -475,19 +498,19 @@ function renderDsTable(
         dailyScheduleId: id,
         onSaved: () => {
           Toast.success(t("daily_schedule_updated_success"));
-          void reloadDailySchedules(typeId, host);
+          void reloadDailySchedules(gt, host);
         },
       });
     } else if (action === "ds-delete") {
       e.preventDefault();
       const name = btn.getAttribute("data-name") ?? id;
-      confirmDsDelete(host, typeId, id, name);
+      confirmDsDelete(host, gt, id, name);
     } else if (action === "ds-toggle") {
       e.preventDefault();
       const currentStatus = btn.getAttribute("data-status");
       const nextStatus =
         currentStatus === "active" || currentStatus === "running" ? "inactive" : "active";
-      void toggleDsStatus(host, typeId, id, nextStatus);
+      void toggleDsStatus(host, gt, id, nextStatus);
     }
   });
 }
@@ -546,7 +569,7 @@ function renderDsRowActions(row: DailyScheduleRow): string {
     </button>`;
 }
 
-function confirmDsDelete(host: HTMLElement, typeId: string, id: string, name: string): void {
+function confirmDsDelete(host: HTMLElement, gt: GameType, id: string, name: string): void {
   const body = document.createElement("div");
   body.innerHTML = `
     <p>${escapeHtml(t("confirm_delete_daily_schedule_body"))}</p>
@@ -568,7 +591,7 @@ function confirmDsDelete(host: HTMLElement, typeId: string, id: string, name: st
             await deleteDailyScheduleApi(id);
             Toast.success(t("daily_schedule_deleted_success"));
             instance.close("button");
-            void reloadDailySchedules(typeId, host);
+            void reloadDailySchedules(gt, host);
           } catch (err) {
             const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
             Toast.error(msg);
@@ -581,14 +604,14 @@ function confirmDsDelete(host: HTMLElement, typeId: string, id: string, name: st
 
 async function toggleDsStatus(
   host: HTMLElement,
-  typeId: string,
+  gt: GameType,
   id: string,
   nextStatus: "active" | "inactive"
 ): Promise<void> {
   try {
     await patchDailySchedule(id, { status: nextStatus });
     Toast.success(t("daily_schedule_updated_success"));
-    void reloadDailySchedules(typeId, host);
+    void reloadDailySchedules(gt, host);
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
     Toast.error(msg);

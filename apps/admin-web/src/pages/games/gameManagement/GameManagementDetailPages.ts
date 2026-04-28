@@ -90,9 +90,14 @@ function loadingBody(): string {
 }
 
 async function resolveGameType(typeId: string): Promise<GameType | null> {
+  // Robust mot URL som inneholder enten slug ("bingo") eller `_id` (UUID i
+  // BIN-620-path / slug i legacy-path). Match på begge for å unngå
+  // breadcrumb-tap når typeId er slug men `_id` er UUID. Se kommentaren i
+  // GameManagementPage.renderGameManagementPage for full kontekst på
+  // slug-vs-UUID-fix (pilot-blokker 2026-04-27).
   try {
     const list = await fetchGameTypeList();
-    return list.find((gt) => gt._id === typeId) ?? null;
+    return list.find((gt) => gt.slug === typeId || gt._id === typeId) ?? null;
   } catch {
     return null;
   }
