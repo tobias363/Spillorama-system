@@ -234,6 +234,81 @@ export function renderAdminOpsConsolePage(
     void handlers.onPauseAll();
   });
 
+  // FE-P0-005: Event delegation on the persistent containers (hallsGrid +
+  // alertsList) instead of re-binding per card on every socket-delta.
+  //
+  // Before: renderHallsGrid set innerHTML and forEach-bound 6 listeners per
+  // card. With 4 halls and 5-20 deltas/sec across an 8h shift, that produced
+  // 60 000-300 000 listener generations — visible as GC pauses 4-6 hours
+  // into the shift, sometimes a full tab crash.
+  //
+  // After: ONE click-listener on hallsGrid routes via
+  // `event.target.closest('[data-action]')` and looks up the hall/room from
+  // current `state` at click-time. Listener-count is stable (constant) for
+  // the life of the page, regardless of delta volume.
+  refs.hallsGrid.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (!target) return;
+    const actionEl = target.closest<HTMLElement>("[data-action]");
+    if (!actionEl) return;
+    const cardEl = actionEl.closest<HTMLElement>("[data-hall-id]");
+    if (!cardEl) return;
+    const hallId = cardEl.dataset.hallId ?? "";
+    const hall = state.halls.find((h) => h.id === hallId);
+    if (!hall) return;
+    const room = roomsByHallId(state.rooms).get(hallId) ?? null;
+    const action = actionEl.dataset.action ?? "";
+
+    // Buttons inside the card-footer should not also trigger the
+    // card-body/header drilldown — the original per-card binding used
+    // ev.stopPropagation() for the same reason. With delegation we read the
+    // most-specific [data-action] (innermost via closest) which is already
+    // the button when the user clicks one — but stop propagation anyway so
+    // any future bubble-listener (e.g. analytics) sees the action verb, not
+    // a generic "drilldown" too.
+    if (action !== "drilldown") {
+      ev.stopPropagation();
+    }
+
+    switch (action) {
+      case "drilldown":
+        handlers.onDrillDownHall(hall, room);
+        return;
+      case "pause":
+        if (room) void handlers.onPauseRoom(room, hall);
+        return;
+      case "resume":
+        if (room) void handlers.onResumeRoom(room, hall);
+        return;
+      case "end":
+        if (room) void handlers.onForceEndRoom(room, hall);
+        return;
+      case "skip":
+        if (room) void handlers.onSkipBall(room, hall);
+        return;
+      case "disable":
+        void handlers.onDisableHall(hall);
+        return;
+      case "enable":
+        void handlers.onEnableHall(hall);
+        return;
+      default:
+        // Unknown action: ignore (forwards-compat for future buttons).
+        return;
+    }
+  });
+
+  refs.alertsList.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (!target) return;
+    const ackBtn = target.closest<HTMLElement>("[data-action='ack']");
+    if (!ackBtn) return;
+    const alertId = ackBtn.dataset.alertId ?? "";
+    const alert = state.alerts.find((a) => a.id === alertId);
+    if (!alert) return;
+    void handlers.onAcknowledgeAlert(alert);
+  });
+
   // Socket
   const startPolling = (): void => {
     if (pollTimer) return;
@@ -460,7 +535,7 @@ function renderAlertsBadge(refs: PageRefs, alerts: OpsAlert[]): void {
         : "badge bg-light-blue";
 }
 
-function renderHallsGrid(refs: PageRefs, state: OpsState, handlers: ActionHandlers): void {
+function renderHallsGrid(refs: PageRefs, state: OpsState, _handlers: ActionHandlers): void {
   if (state.halls.length === 0 && !state.loaded) {
     refs.hallsGrid.innerHTML = `
       <div class="col-xs-12">
@@ -487,41 +562,9 @@ function renderHallsGrid(refs: PageRefs, state: OpsState, handlers: ActionHandle
     return renderHallCard(hall, room);
   }).join("");
 
-  // Bind events for each card
-  refs.hallsGrid.querySelectorAll<HTMLElement>("[data-hall-id]").forEach((card) => {
-    const hallId = card.dataset.hallId ?? "";
-    const hall = state.halls.find((h) => h.id === hallId);
-    if (!hall) return;
-    const room = roomMap.get(hallId) ?? null;
-
-    card.querySelector<HTMLElement>("[data-action='drilldown']")?.addEventListener("click", () => {
-      handlers.onDrillDownHall(hall, room);
-    });
-    card.querySelector<HTMLButtonElement>("[data-action='pause']")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (room) void handlers.onPauseRoom(room, hall);
-    });
-    card.querySelector<HTMLButtonElement>("[data-action='resume']")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (room) void handlers.onResumeRoom(room, hall);
-    });
-    card.querySelector<HTMLButtonElement>("[data-action='end']")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (room) void handlers.onForceEndRoom(room, hall);
-    });
-    card.querySelector<HTMLButtonElement>("[data-action='skip']")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (room) void handlers.onSkipBall(room, hall);
-    });
-    card.querySelector<HTMLButtonElement>("[data-action='disable']")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      void handlers.onDisableHall(hall);
-    });
-    card.querySelector<HTMLButtonElement>("[data-action='enable']")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      void handlers.onEnableHall(hall);
-    });
-  });
+  // FE-P0-005: Per-card listener binding removed. Click-routing happens via
+  // the single delegated listener on `refs.hallsGrid` set up in
+  // `renderAdminOpsConsolePage`. See that function for the dispatch table.
 }
 
 function renderHallCard(hall: OpsHall, room: OpsRoom | null): string {
@@ -632,20 +675,15 @@ function isFullReady(agg: string): boolean {
   return m[1] === m[2];
 }
 
-function renderAlertsList(refs: PageRefs, alerts: OpsAlert[], handlers: ActionHandlers): void {
+function renderAlertsList(refs: PageRefs, alerts: OpsAlert[], _handlers: ActionHandlers): void {
   if (alerts.length === 0) {
     refs.alertsList.innerHTML = `<li class="text-muted" data-testid="ops-no-alerts" style="padding:8px;">${escape(t("ops_no_alerts"))}</li>`;
     return;
   }
   refs.alertsList.innerHTML = alerts.map((a) => renderAlertItem(a)).join("");
-  refs.alertsList.querySelectorAll<HTMLButtonElement>("[data-action='ack']").forEach((btn) => {
-    const id = btn.dataset.alertId ?? "";
-    const alert = alerts.find((a) => a.id === id);
-    if (!alert) return;
-    btn.addEventListener("click", () => {
-      void handlers.onAcknowledgeAlert(alert);
-    });
-  });
+  // FE-P0-005: Per-button listener binding removed. Ack-clicks are routed
+  // by the single delegated listener on `refs.alertsList` set up in
+  // `renderAdminOpsConsolePage`.
 }
 
 function renderAlertItem(alert: OpsAlert): string {
