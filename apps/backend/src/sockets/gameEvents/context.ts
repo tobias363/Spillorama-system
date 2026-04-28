@@ -24,6 +24,7 @@ import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import { getAccessTokenFromSocketPayload, mustBeNonEmptyString } from "../../util/httpHelpers.js";
 import { logger as rootLogger } from "../../util/logger.js";
+import { getCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
 import type { GameEventsDeps } from "./deps.js";
 import type {
   AckResponse,
@@ -232,15 +233,40 @@ export function buildSocketContext(socket: Socket, base: RegistryContext): Socke
     let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
 
     // BIN-134: SPA sends "BINGO1" as canonical room alias.
+    // Bug B fix (Tobias 2026-04-28): canonical-aware lookup.
+    // Tidligere `getPrimaryRoomForHall` filtrerte på room.hallId og misset
+    // shared canonical rooms (Spill 1 group-of-halls). Ny logikk: bruk
+    // canonical mapping direkte. Hvis rommet eksisterer → bruk det. Hvis
+    // ikke → faller tilbake til legacy `getPrimaryRoomForHall` så
+    // bet:arm/claim:submit fortsatt fungerer for non-canonical rom.
     if (roomCode === "BINGO1" && enforceSingleRoomPerHall) {
-      const hallId = (payload as unknown as Record<string, unknown>)?.hallId || "default-hall";
-      const canonicalRoom = getPrimaryRoomForHall(hallId as string);
-      if (canonicalRoom) {
-        roomCode = canonicalRoom.code;
+      const hallId = ((payload as unknown as Record<string, unknown>)?.hallId || "default-hall") as string;
+      let canonicalGroupId: string | null = null;
+      if (deps.getHallGroupIdForHall) {
+        try {
+          canonicalGroupId = await deps.getHallGroupIdForHall(hallId);
+        } catch {
+          // fail-soft
+        }
+      }
+      const canonicalMapping = getCanonicalRoomCode("bingo", hallId, canonicalGroupId);
+      const existingCanonical = engine.findRoomByCode(canonicalMapping.roomCode);
+      if (existingCanonical) {
+        roomCode = existingCanonical.code;
         logger.debug(
           { roomCode },
-          "BIN-134: requireAuthenticatedPlayerAction BINGO1 → canonical room",
+          "BIN-134: requireAuthenticatedPlayerAction BINGO1 → canonical room (canonical-aware)",
         );
+      } else {
+        // Backward-compat: fall tilbake til legacy hallId-based lookup
+        const canonicalRoom = getPrimaryRoomForHall(hallId);
+        if (canonicalRoom) {
+          roomCode = canonicalRoom.code;
+          logger.debug(
+            { roomCode },
+            "BIN-134: requireAuthenticatedPlayerAction BINGO1 → canonical room (legacy)",
+          );
+        }
       }
     }
 
