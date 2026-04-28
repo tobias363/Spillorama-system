@@ -29,6 +29,7 @@ import type {
   Game1RefundInput,
 } from "../../game/Game1TicketPurchaseService.js";
 import { DomainError } from "../../game/BingoEngine.js";
+import type { BingoEngine } from "../../game/BingoEngine.js";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,19 @@ interface StartOpts {
   ) => Promise<Game1TicketPurchaseResult>;
   refundImpl?: (input: Game1RefundInput) => Promise<void>;
   listImpl?: (scheduledGameId: string) => Promise<Game1TicketPurchaseRow[]>;
+  /**
+   * PILOT-STOP-SHIP fix (Code Review #5 P0-1): override compliance-gate
+   * for å teste self-exclusion / pause / loss-limit-paths. Hvis
+   * `assertWalletAllowedImpl` kaster, returneres feilen som DomainError
+   * fra route. Hvis `wouldExceedLossLimitImpl` returnerer true, route
+   * kaster `LOSS_LIMIT_EXCEEDED`. Default: begge no-op (gate passes).
+   */
+  assertWalletAllowedImpl?: (walletId: string) => void;
+  wouldExceedLossLimitImpl?: (
+    walletId: string,
+    entryFeeNok: number,
+    hallId: string
+  ) => boolean;
 }
 
 async function startServer(opts: StartOpts = {}): Promise<Ctx> {
@@ -94,6 +108,13 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
       const u = users[token];
       if (!u) throw new DomainError("UNAUTHORIZED", "bad token");
       return u;
+    },
+    // PILOT-STOP-SHIP fix (Code Review #5 P0-1): route slår opp buyer
+    // for AGENT/ADMIN-paths for å resolve walletId før compliance-gate.
+    async getUserById(userId: string) {
+      const found = Object.values(users).find((u) => u.id === userId);
+      if (!found) throw new DomainError("USER_NOT_FOUND", `bad user ${userId}`);
+      return found;
     },
   } as unknown as PlatformService;
 
@@ -121,12 +142,32 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
     },
   } as unknown as Game1TicketPurchaseService;
 
+  // PILOT-STOP-SHIP fix (Code Review #5 P0-1): minimal BingoEngine-stub
+  // for compliance-gate. Default: passes; tester som ønsker å exercere
+  // gate-en kan injisere via opts.assertWalletAllowedImpl /
+  // wouldExceedLossLimitImpl.
+  const engine = {
+    assertWalletAllowedForGameplay(walletId: string) {
+      if (opts.assertWalletAllowedImpl) opts.assertWalletAllowedImpl(walletId);
+    },
+    wouldExceedLossLimit(
+      walletId: string,
+      entryFeeNok: number,
+      hallId: string
+    ): boolean {
+      return opts.wouldExceedLossLimitImpl
+        ? opts.wouldExceedLossLimitImpl(walletId, entryFeeNok, hallId)
+        : false;
+    },
+  } as unknown as BingoEngine;
+
   const app = express();
   app.use(express.json());
   app.use(
     createGame1PurchaseRouter({
       platformService,
       purchaseService,
+      engine,
     })
   );
 
@@ -413,6 +454,199 @@ test("POST /api/game1/purchase ugyldig ticketSpec → 400 INVALID_TICKET_SPEC", 
     assert.equal(res.status, 400);
     const body = res.body as { ok: boolean; error: { code: string } };
     assert.equal(body.error.code, "INVALID_TICKET_SPEC");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── PILOT-STOP-SHIP fix (Code Review #5 P0-1, 2026-04-28) ───────────────────
+// Compliance-gate FØR purchaseService.purchase(): self-exclusion (§23),
+// pålagt pause + frivillig pause (§66), og loss-limit-breach (§11) skal
+// alle returnere DomainError og IKKE kalle purchaseService.purchase().
+
+test("POST /api/game1/purchase PLAYER selvutestengt → PLAYER_SELF_EXCLUDED + purchase ikke kalt", async () => {
+  const ctx = await startServer({
+    assertWalletAllowedImpl: () => {
+      throw new DomainError(
+        "PLAYER_SELF_EXCLUDED",
+        "Spiller er selvutestengt minst til 2026-12-31."
+      );
+    },
+  });
+  try {
+    const res = await http(
+      ctx.baseUrl,
+      "POST",
+      "/api/game1/purchase",
+      {
+        scheduledGameId: "g1",
+        buyerUserId: "p1",
+        hallId: "hall-a",
+        ticketSpec: [
+          { color: "yellow", size: "small", count: 1, priceCentsEach: 2000 },
+        ],
+        paymentMethod: "digital_wallet",
+        idempotencyKey: "k-self-excl",
+      },
+      "t-player"
+    );
+    assert.equal(res.status, 400);
+    const body = res.body as { ok: boolean; error: { code: string } };
+    assert.equal(body.error.code, "PLAYER_SELF_EXCLUDED");
+    assert.equal(
+      ctx.purchaseCalls.length,
+      0,
+      "purchaseService.purchase() skal IKKE kalles når compliance-gate kaster"
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /api/game1/purchase PLAYER på pålagt pause → PLAYER_REQUIRED_PAUSE", async () => {
+  const ctx = await startServer({
+    assertWalletAllowedImpl: () => {
+      throw new DomainError(
+        "PLAYER_REQUIRED_PAUSE",
+        "Spiller har pålagt pause til 2026-04-28T15:00:00Z."
+      );
+    },
+  });
+  try {
+    const res = await http(
+      ctx.baseUrl,
+      "POST",
+      "/api/game1/purchase",
+      {
+        scheduledGameId: "g1",
+        buyerUserId: "p1",
+        hallId: "hall-a",
+        ticketSpec: [
+          { color: "yellow", size: "small", count: 1, priceCentsEach: 2000 },
+        ],
+        paymentMethod: "digital_wallet",
+        idempotencyKey: "k-pause",
+      },
+      "t-player"
+    );
+    assert.equal(res.status, 400);
+    const body = res.body as { ok: boolean; error: { code: string } };
+    assert.equal(body.error.code, "PLAYER_REQUIRED_PAUSE");
+    assert.equal(ctx.purchaseCalls.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /api/game1/purchase PLAYER på frivillig pause → PLAYER_TIMED_PAUSE", async () => {
+  const ctx = await startServer({
+    assertWalletAllowedImpl: () => {
+      throw new DomainError(
+        "PLAYER_TIMED_PAUSE",
+        "Spiller er på frivillig pause til 2026-04-29T00:00:00Z."
+      );
+    },
+  });
+  try {
+    const res = await http(
+      ctx.baseUrl,
+      "POST",
+      "/api/game1/purchase",
+      {
+        scheduledGameId: "g1",
+        buyerUserId: "p1",
+        hallId: "hall-a",
+        ticketSpec: [
+          { color: "yellow", size: "small", count: 1, priceCentsEach: 2000 },
+        ],
+        paymentMethod: "digital_wallet",
+        idempotencyKey: "k-timed-pause",
+      },
+      "t-player"
+    );
+    assert.equal(res.status, 400);
+    const body = res.body as { ok: boolean; error: { code: string } };
+    assert.equal(body.error.code, "PLAYER_TIMED_PAUSE");
+    assert.equal(ctx.purchaseCalls.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /api/game1/purchase loss-limit-breach → LOSS_LIMIT_EXCEEDED", async () => {
+  let capturedHallId: string | null = null;
+  let capturedAmount: number | null = null;
+  const ctx = await startServer({
+    wouldExceedLossLimitImpl: (_walletId, amountNok, hallId) => {
+      capturedHallId = hallId;
+      capturedAmount = amountNok;
+      return true;
+    },
+  });
+  try {
+    const res = await http(
+      ctx.baseUrl,
+      "POST",
+      "/api/game1/purchase",
+      {
+        scheduledGameId: "g1",
+        buyerUserId: "p1",
+        hallId: "hall-a",
+        ticketSpec: [
+          // 3 × 5000 øre = 150 NOK
+          { color: "yellow", size: "small", count: 3, priceCentsEach: 5000 },
+        ],
+        paymentMethod: "digital_wallet",
+        idempotencyKey: "k-loss",
+      },
+      "t-player"
+    );
+    assert.equal(res.status, 400);
+    const body = res.body as { ok: boolean; error: { code: string } };
+    assert.equal(body.error.code, "LOSS_LIMIT_EXCEEDED");
+    assert.equal(ctx.purchaseCalls.length, 0);
+    // §71: hallId må være kjøpe-hallen (input.hallId), ikke master.
+    assert.equal(capturedHallId, "hall-a");
+    // 3 * 5000 øre = 15000 øre = 150 NOK
+    assert.equal(capturedAmount, 150);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /api/game1/purchase happy-path med passing compliance-gate → 200", async () => {
+  let assertCalls = 0;
+  let limitCalls = 0;
+  const ctx = await startServer({
+    assertWalletAllowedImpl: () => {
+      assertCalls++;
+    },
+    wouldExceedLossLimitImpl: () => {
+      limitCalls++;
+      return false;
+    },
+  });
+  try {
+    const res = await http(
+      ctx.baseUrl,
+      "POST",
+      "/api/game1/purchase",
+      {
+        scheduledGameId: "g1",
+        buyerUserId: "p1",
+        hallId: "hall-a",
+        ticketSpec: [
+          { color: "yellow", size: "small", count: 1, priceCentsEach: 2000 },
+        ],
+        paymentMethod: "digital_wallet",
+        idempotencyKey: "k-allowed",
+      },
+      "t-player"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(assertCalls, 1, "assertWalletAllowedForGameplay skal kalles 1x");
+    assert.equal(limitCalls, 1, "wouldExceedLossLimit skal kalles 1x");
+    assert.equal(ctx.purchaseCalls.length, 1);
   } finally {
     await ctx.close();
   }
