@@ -47,6 +47,7 @@
     "@types/pdfkit": "^0.17.3",
     "@types/pg": "^8.15.5",
     "artillery": "^2.0.30",
+    "fast-check": "^4.7.0",
     "node-pg-migrate": "^8.0.4",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.19.3",
