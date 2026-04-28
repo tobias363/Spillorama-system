@@ -25,6 +25,36 @@ body.skin-blue .wrapper {
   min-height: 100vh;
 }
 
+/* Pilot-fix 2026-04-27 (Tobias): Fjerner det svarte sidebar-elementet som
+   gikk for tett opptil/under whitebox-content på korte sider (f.eks.
+   /agent/cashinout med tomme placeholders).
+
+   Rot-årsak: AdminLTE 2 setter `.content-wrapper { min-height: 100% }`,
+   men prosent-min-height krever at parent har en eksplisitt `height` for
+   å løses (CSS-spec). `.wrapper` har bare `min-height: 100vh`, ikke
+   `height`, så `.content-wrapper.min-height: 100%` faller tilbake til 0.
+   AdminLTE-JS (`Layout.fix()`) kompenserer ved å sette inline px-verdi
+   ved `window.load`, men kjører ikke etter SPA-route-bytter. Resultat:
+   sidebar (`min-height: 100%` av wrapper, ekspanderer med menyinnhold)
+   ble taller enn content-wrapper på korte sider, og det mørke sidebar-
+   bakgrunnen vistes flush mot whitebox-content uten margin/padding.
+
+   Fix: Setter en eksplisitt CSS-basert min-height på content-wrapper
+   som dekker viewporten (minus 50px header). Da matcher content-wrapper
+   alltid sidebar når den er <= 100vh, og whitebox-content + footer fyller
+   høyden ned før sidebar-bakgrunnen kommer i syne. Robust mot SPA-
+   route-bytter siden den ikke avhenger av JS-rerun. */
+body.skin-blue .content-wrapper {
+  min-height: calc(100vh - 50px);
+}
+
+/* Sikrer at footer aldri ligger flush mot bunnen av siste content-card.
+   Legger en konsistent buffer mellom siste box og footer + sørger for at
+   footer er bottom-aligned (ikke flytende mellom card og dark sidebar). */
+.content-wrapper > .content {
+  padding-bottom: 24px;
+}
+
 #app[data-state="loading"]::before {
   content: "…";
   display: block;
