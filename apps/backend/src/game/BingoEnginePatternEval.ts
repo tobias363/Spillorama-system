@@ -81,6 +81,37 @@ export const FLAT_GROUP_KEY = "__flat__";
 export const UNCOLORED_KEY = "__uncolored__";
 
 /**
+ * PR-T1 (KRITISK 4 — casino-grade research 2026-04-28):
+ * Deterministisk tie-breaker for multi-winner-vinnere.
+ *
+ * Når flere bonger oppfyller samme fase på samme ball, må vi ha 100 %
+ * deterministisk rekkefølge for å:
+ *   - Velge `firstWinnerId` (settes som game.lineWinnerId / game.bingoWinnerId)
+ *   - Iterere `winnerIds` ved payoutPhaseWinner (rekkefølgen avgjør ledger-,
+ *     audit- og loyalty-event-rekkefølge ved retry og crash-recovery)
+ *
+ * Tobias-krav (research §6 "KRITISK 4"): "100% sikkerhet at den bongen som
+ * først fullfører en rad får gevinsten — eller minst at det er deterministisk".
+ *
+ * Begrensning for ad-hoc-engine: Ticket-objektet i game.tickets bærer ingen
+ * purchase-timestamp (alle bonger genereres samtidig ved startGame()).
+ * Vi kan derfor ikke kåre "først til mølla"-vinner. I stedet bruker vi
+ * lex-orden på playerId — fullstendig deterministisk på tvers av:
+ *   - Map-iterasjons-rekkefølge (insertion-order kan flippes ved
+ *     restoreRoomFromSnapshot etter crash-recovery)
+ *   - Set-iterasjons-rekkefølge (uniqueset i detectPhaseWinners)
+ *   - DB-rad-rekkefølge (Postgres garanterer ikke ORDER UTEN ORDER BY)
+ *
+ * Scheduled Spill 1 (Game1DrawEngineService) bruker faktisk
+ * (purchased_at ASC, assignmentId ASC) som tie-breaker fordi tabellen har
+ * `purchased_at` per kjøp — se Game1DrawEngineService.evaluatePhase
+ * SQL ORDER BY.
+ */
+export function sortWinnerIdsDeterministic(playerIds: Iterable<string>): string[] {
+  return [...playerIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
  * Callbacks som pattern-eval trenger for side-effekter (payout, recovery,
  * lifecycle-avslutning). Disse forblir på `BingoEngine` siden de er tett
  * koblet til private state (rooms, compliance, ledger).
@@ -228,8 +259,20 @@ export async function evaluateActivePhase(
     return base;
   };
 
-  for (const [groupKey, group] of winnerGroups.byColor) {
-    const winnerIds = [...group.playerIds];
+  // PR-T1 KRITISK 4: deterministisk rekkefølge på color-gruppene slik at
+  // `firstWinnerId` blir uavhengig av Map-insertion-order (per-color-pathen
+  // bruker farge-keys som kan komme i ulik rekkefølge etter crash-recovery
+  // rebuild). Sorterer på groupKey lex-orden — FLAT_GROUP_KEY er én gruppe
+  // alene og påvirkes ikke. Per-farge bruker farge-navn som groupKey.
+  const sortedColorGroups = [...winnerGroups.byColor.entries()].sort(
+    ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0),
+  );
+
+  for (const [groupKey, group] of sortedColorGroups) {
+    // PR-T1 KRITISK 4: deterministisk lex-sort på playerId så `firstWinnerId`
+    // og iterasjons-rekkefølge for payout/loyalty/audit er stabil på tvers
+    // av Map/Set-insertion-order og crash-recovery rebuild.
+    const winnerIds = sortWinnerIdsDeterministic(group.playerIds);
     if (winnerIds.length === 0) continue;
 
     // Resolve prize for this color. flat-path bruker activePattern direkte.
@@ -568,7 +611,6 @@ export async function evaluateConcurrentPatterns(
     // flat-path (uten per-farge-matrise — som er garantert fravær siden
     // startGame-validator avviser kombinasjon). Én spiller = én vinner-slot
     // per pattern (uavhengig av antall bong).
-    const winnerIds: string[] = [];
     const uniqueWinners = new Set<string>();
     const patternMask = pattern.mask;
     if (typeof patternMask !== "number") continue;
@@ -585,11 +627,16 @@ export async function evaluateConcurrentPatterns(
         const ticketMask = patternMatcherBuildTicketMask(ticket, marksSet);
         if (patternMatcherMatches(ticketMask, patternMask)) {
           uniqueWinners.add(playerId);
-          winnerIds.push(playerId);
           break;
         }
       }
     }
+
+    // PR-T1 KRITISK 4: deterministisk lex-sort på playerId så payout-
+    // rekkefølgen og `winnerIds[0]` er stabil på tvers av Map-insertion-order
+    // og crash-recovery rebuild. Custom patterns har samme tie-breaker-
+    // semantikk som standard fase-evaluering.
+    const winnerIds = sortWinnerIdsDeterministic(uniqueWinners);
 
     if (winnerIds.length === 0) continue;
 

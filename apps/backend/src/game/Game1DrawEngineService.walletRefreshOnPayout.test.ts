@@ -249,7 +249,7 @@ function buildPhase1WinResponses(opts: {
     },
     {
       match: (s: string) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [{
         id: "a-1",
@@ -393,7 +393,7 @@ test(
       },
       {
         match: (s: string) =>
-          s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+          s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
           s.includes("app_game1_ticket_assignments"),
         rows: [{
           id: "a-1",

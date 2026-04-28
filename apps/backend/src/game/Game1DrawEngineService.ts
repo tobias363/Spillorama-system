@@ -2080,6 +2080,25 @@ export class Game1DrawEngineService {
 
     // Les alle assignments etter markings-oppdatering.
     // Bruker samme client → samme transaksjon.
+    //
+    // PR-T1 KRITISK 4 (casino-grade research 2026-04-28): JOIN med purchases
+    // for `purchased_at` + ORDER BY (purchased_at ASC, assignment.id ASC) så
+    // vinner-rekkefølgen er fullstendig deterministisk.
+    //
+    // Tobias-krav: "100% sikkerhet at den bongen som først fullfører en rad
+    // får gevinsten" — bonger med tidligere `purchased_at` rangerer høyere,
+    // og ved like timestamps tie-breaker-er vi på assignment.id (UUID/TEXT,
+    // lex-sort).
+    //
+    // Uten ORDER BY garanterer Postgres ingen rekkefølge → samme draw kan
+    // gi ulik `firstWinnerId` ved retry, recovery eller ulike DB-noder.
+    //
+    // SELECT-projeksjonen er fullt-kvalifisert (a.<col>) fordi assignments
+    // og purchases overlapper i `id`, `buyer_user_id` og `hall_id` — uten
+    // alias ville Postgres kaste "column reference is ambiguous". Eksisterende
+    // unit-test-mocks som matcher på `"SELECT id, grid_numbers_json, ..."`-
+    // substring må oppdateres for å matche `"SELECT a.id, a.grid_numbers_json"`
+    // (gjøres i samme PR).
     const { rows } = await client.query<{
       id: string;
       grid_numbers_json: unknown;
@@ -2088,9 +2107,11 @@ export class Game1DrawEngineService {
       hall_id: string;
       ticket_color: string;
     }>(
-      `SELECT id, grid_numbers_json, markings_json, buyer_user_id, hall_id, ticket_color
-         FROM ${this.assignmentsTable()}
-        WHERE scheduled_game_id = $1`,
+      `SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id, a.hall_id, a.ticket_color
+         FROM ${this.assignmentsTable()} a
+         JOIN "${this.schema}"."app_game1_ticket_purchases" p ON p.id = a.purchase_id
+        WHERE a.scheduled_game_id = $1
+        ORDER BY p.purchased_at ASC, a.id ASC`,
       [scheduledGameId]
     );
 

@@ -215,7 +215,7 @@ test("perColorConfig: game_config_json med spill1.ticketColors → per-farge fix
     // evaluateAndPayoutPhase SELECT — Alice=white, Bob=yellow.
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [
         {
@@ -303,7 +303,7 @@ test("perColorConfig: game_config_json=null → flat-path (dagens atferd uendret
     { match: (s) => s.trim().startsWith("UPDATE") && s.includes("app_game1_ticket_assignments") && s.includes("markings_json"), rows: [] },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [{
         id: "a-1", grid_numbers_json: winningRow0Grid(),
@@ -389,7 +389,7 @@ test("perColorConfig / Bug 2: flat-path Fullt Hus med multi-color winners → pe
     { match: (s) => s.trim().startsWith("UPDATE") && s.includes("app_game1_ticket_assignments") && s.includes("markings_json"), rows: [], once: false },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [
         {

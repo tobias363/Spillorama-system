@@ -277,7 +277,7 @@ test("E2E: admin GM.config.spill1 → scheduler spawn → drawEngine per-farge-u
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [
         {

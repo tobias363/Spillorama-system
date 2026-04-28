@@ -207,7 +207,7 @@ test("drawNext fase 1: ball=5 fullfører rad 0 → payoutPhase kalt, phase→2",
     // evaluateAndPayoutPhase: SELECT alle assignments
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [{
         id: "a-1",
@@ -344,7 +344,7 @@ test("drawNext fase 5: Fullt Hus-vinn → engine_ended_at satt + status='complet
     // evaluateAndPayoutPhase SELECT
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [{
         id: "a-1",
@@ -477,7 +477,7 @@ test("drawNext: wallet.credit-feil i payout → ROLLBACK av hele draw", async ()
     },
     {
       match: (s) =>
-        s.includes("SELECT id, grid_numbers_json, markings_json, buyer_user_id") &&
+        s.includes("SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id") &&
         s.includes("app_game1_ticket_assignments"),
       rows: [{
         id: "a-1",
