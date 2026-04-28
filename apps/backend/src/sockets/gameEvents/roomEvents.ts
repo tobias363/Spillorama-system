@@ -240,48 +240,7 @@ export function registerRoomEvents(ctx: SocketContext): void {
     try {
       const identity = await resolveIdentityFromPayload(payload);
       logger.debug({ hallId: identity.hallId }, "BIN-134: room:create identity resolved");
-      if (enforceSingleRoomPerHall) {
-        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
-        if (canonicalRoom) {
-          const canonicalSnapshot = engine.getRoomSnapshot(canonicalRoom.code);
-          const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
 
-          let playerId = existingPlayer?.id ?? "";
-          if (existingPlayer) {
-            engine.attachPlayerSocket(canonicalRoom.code, existingPlayer.id, socket.id);
-          } else {
-            // Bug 2 fix: rydd opp stale walletId-binding i andre IDLE-rom
-            // før vi joiner canonical. Hindrer at gamle ad-hoc-rom (uten
-            // socket og uten aktiv runde) blokkerer ny join via
-            // `assertWalletNotAlreadyInRoom`/`assertWalletNotInRunningGame`.
-            engine.cleanupStaleWalletInIdleRooms(identity.walletId, canonicalRoom.code);
-            const joined = await engine.joinRoom({
-              roomCode: canonicalRoom.code,
-              hallId: identity.hallId,
-              playerName: identity.playerName,
-              walletId: identity.walletId,
-              socketId: socket.id
-            });
-            playerId = joined.playerId;
-          }
-
-          socket.join(canonicalRoom.code);
-          // BIN-760: join per-wallet socket-rom så `wallet:state`-pusher
-          // når denne klienten ved hver wallet-mutasjon. Idempotent —
-          // socket.join no-op-er hvis allerede medlem.
-          socket.join(walletRoomKey(identity.walletId));
-          const snapshot = await emitRoomUpdate(canonicalRoom.code);
-          logger.debug({ roomCode: canonicalRoom.code }, "BIN-134: room:create → existing canonical");
-          ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
-          return;
-        }
-      }
-
-      // Bug 2 fix: før vi oppretter et nytt rom, rydd opp stale
-      // walletId-binding i andre IDLE-rom (ingen aktiv runde, ingen
-      // socket). Forhindrer "Spiller deltar allerede"-feil på reconnect
-      // når gammelt rom ikke ble ryddet ved disconnect.
-      engine.cleanupStaleWalletInIdleRooms(identity.walletId);
       const requestedGameSlug = typeof payload?.gameSlug === "string" ? payload.gameSlug : undefined;
       // Canonical mapping (Tobias 2026-04-27):
       //   Spill 1 (bingo)         → BINGO_<groupId|hallId>, per-LINK (Group of
@@ -308,6 +267,94 @@ export function registerRoomEvents(ctx: SocketContext): void {
       // `RoomState.isTestHall=true` for test-haller — ellers slår Spill 1
       // auto-pause inn etter Phase 1 og spillet henger i /web/-flyten.
       const isTestHall = await lookupIsTestHall(deps, identity.hallId, logger);
+
+      // Bug B fix (Tobias 2026-04-28): canonical-aware lookup.
+      // Tidligere brukte vi `getPrimaryRoomForHall(hallId)` som filtrerer
+      // på `room.hallId === hallId`. For Spill 1 group-of-halls-rom og
+      // Spill 2/3 shared-rooms er `room.hallId` whoever opprettet rommet
+      // — ikke nødvendigvis den joinende spillerens hall. Resultat: Hall B
+      // som vil joine et rom skapt av Hall A i samme gruppe fant ingen
+      // canonical-match → fall through til random `4RCQSX`-kode-flyt og
+      // "Spiller deltar allerede i et annet aktivt spill"-feil.
+      //
+      // Ny logikk: ALLTID slå opp via `engine.findRoomByCode(canonicalCode)`
+      // når vi har en canonical mapping. Hvis rommet finnes (uansett hvem
+      // som opprettet det) → join. `RoomState.isHallShared=true` i shared
+      // rooms tillater allerede cross-hall join uten HALL_MISMATCH.
+      if (enforceSingleRoomPerHall && canonicalMapping) {
+        const existingCanonical = engine.findRoomByCode(canonicalMapping.roomCode);
+        if (existingCanonical) {
+          // Bug A fix (Tobias 2026-04-28): refresh `isTestHall` på
+          // eksisterende rom så test-haller som ble opprettet før deploy
+          // av PR #671 (eller hvis admin senere endrer `is_test_hall`-
+          // flagget) får oppdatert state. No-op hvis verdien matcher.
+          engine.setRoomTestHall(existingCanonical.code, isTestHall);
+
+          const canonicalSnapshot = engine.getRoomSnapshot(existingCanonical.code);
+          const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
+
+          let playerId = existingPlayer?.id ?? "";
+          if (existingPlayer) {
+            engine.attachPlayerSocket(existingCanonical.code, existingPlayer.id, socket.id);
+          } else {
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId, existingCanonical.code);
+            const joined = await engine.joinRoom({
+              roomCode: existingCanonical.code,
+              hallId: identity.hallId,
+              playerName: identity.playerName,
+              walletId: identity.walletId,
+              socketId: socket.id
+            });
+            playerId = joined.playerId;
+          }
+
+          socket.join(existingCanonical.code);
+          socket.join(walletRoomKey(identity.walletId));
+          const snapshot = await emitRoomUpdate(existingCanonical.code);
+          logger.debug({ roomCode: existingCanonical.code }, "BIN-134: room:create → existing canonical");
+          ackSuccess(callback, { roomCode: existingCanonical.code, playerId, snapshot });
+          return;
+        }
+      } else if (enforceSingleRoomPerHall) {
+        // Backward-compat: hvis vi IKKE har en canonical mapping (ukjent
+        // slug eller manglende mapping), fortsett med legacy hallId-basert
+        // primær-rom-lookup. Eksisterende oppførsel for ikke-Spill-1/2/3.
+        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
+        if (canonicalRoom) {
+          engine.setRoomTestHall(canonicalRoom.code, isTestHall);
+
+          const canonicalSnapshot = engine.getRoomSnapshot(canonicalRoom.code);
+          const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
+
+          let playerId = existingPlayer?.id ?? "";
+          if (existingPlayer) {
+            engine.attachPlayerSocket(canonicalRoom.code, existingPlayer.id, socket.id);
+          } else {
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId, canonicalRoom.code);
+            const joined = await engine.joinRoom({
+              roomCode: canonicalRoom.code,
+              hallId: identity.hallId,
+              playerName: identity.playerName,
+              walletId: identity.walletId,
+              socketId: socket.id
+            });
+            playerId = joined.playerId;
+          }
+
+          socket.join(canonicalRoom.code);
+          socket.join(walletRoomKey(identity.walletId));
+          const snapshot = await emitRoomUpdate(canonicalRoom.code);
+          logger.debug({ roomCode: canonicalRoom.code }, "BIN-134: room:create → existing canonical (legacy)");
+          ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
+          return;
+        }
+      }
+
+      // Bug 2 fix: før vi oppretter et nytt rom, rydd opp stale
+      // walletId-binding i andre IDLE-rom (ingen aktiv runde, ingen
+      // socket). Forhindrer "Spiller deltar allerede"-feil på reconnect
+      // når gammelt rom ikke ble ryddet ved disconnect.
+      engine.cleanupStaleWalletInIdleRooms(identity.walletId);
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,
         hallId: identity.hallId,
@@ -356,45 +403,80 @@ export function registerRoomEvents(ctx: SocketContext): void {
       let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
       const identity = await resolveIdentityFromPayload(payload);
       if (enforceSingleRoomPerHall) {
-        // BIN-134: resolve BINGO1 alias
+        // BIN-134: resolve BINGO1 alias.
+        // Bug B fix (Tobias 2026-04-28): canonical-aware lookup.
+        // Tidligere `getPrimaryRoomForHall(hallId)` filtrerte på
+        // `room.hallId === hallId` og misset shared canonical rooms
+        // (Spill 1 group-of-halls). For Hall B i samme gruppe som
+        // Hall A endte vi i auto-create-flyten med tilfeldig kode i
+        // stedet for canonical → ulike haller fikk separate rom.
         if (roomCode === "BINGO1") {
-          const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
-          if (canonicalRoom) {
-            roomCode = canonicalRoom.code;
+          let canonicalGroupId: string | null = null;
+          if (deps.getHallGroupIdForHall) {
+            try {
+              canonicalGroupId = await deps.getHallGroupIdForHall(identity.hallId);
+            } catch (err) {
+              logger.warn({ err, hallId: identity.hallId }, "getHallGroupIdForHall failed; falling back to hallId-based room code");
+            }
+          }
+          const canonicalMapping = getCanonicalRoomCode("bingo", identity.hallId, canonicalGroupId);
+          // Demo Hall bypass — hentet uansett (refresh + initial set).
+          const isTestHallForJoin = await lookupIsTestHall(
+            deps, identity.hallId, logger,
+          );
+          const existingCanonical = engine.findRoomByCode(canonicalMapping.roomCode);
+          if (existingCanonical) {
+            // Bug A fix (Tobias 2026-04-28): refresh isTestHall.
+            engine.setRoomTestHall(existingCanonical.code, isTestHallForJoin);
+            roomCode = existingCanonical.code;
           } else {
-            // Auto-create room for this hall if none exists
-            logger.debug({ hallId: identity.hallId }, "room:join auto-creating room for hall");
-            // Bug 2 fix: rydd stale walletId-binding i andre IDLE-rom før
-            // ny rom-opprettelse, så reconnect ikke blokkeres.
+            // Auto-create canonical room for this hall + group.
+            logger.debug({ hallId: identity.hallId, canonical: canonicalMapping.roomCode }, "room:join auto-creating canonical room");
             engine.cleanupStaleWalletInIdleRooms(identity.walletId);
-            // Demo Hall bypass (Tobias 2026-04-27): propager `isTestHall` —
-            // se kommentar over første createRoom-kall i room:create.
-            const isTestHallForAutoCreate = await lookupIsTestHall(
-              deps, identity.hallId, logger,
-            );
             const newRoom = await engine.createRoom({
               hallId: identity.hallId,
               playerName: identity.playerName,
               walletId: identity.walletId,
               socketId: socket.id,
-              ...(isTestHallForAutoCreate ? { isTestHall: true } : {}),
+              gameSlug: "bingo",
+              roomCode: canonicalMapping.roomCode,
+              effectiveHallId: canonicalMapping.effectiveHallId,
+              ...(isTestHallForJoin ? { isTestHall: true } : {}),
             });
             roomCode = newRoom.roomCode;
-            // BIN-694 + PR C: wire variantConfig for the auto-created room.
-            // Uses new async binder if available (forbereder admin-config
-            // wire-up), falls back til default-binder ellers.
             if (deps.bindVariantConfigForRoom) {
               await deps.bindVariantConfigForRoom(roomCode, { gameSlug: "bingo" });
             } else {
               deps.bindDefaultVariantConfig?.(roomCode, "bingo");
             }
+            // Auto-create succeeded — return ack direkte. playerId fra
+            // createRoom er hostPlayerId i det nye rommet.
+            socket.join(roomCode);
+            socket.join(walletRoomKey(identity.walletId));
+            const newSnapshot = await emitRoomUpdate(roomCode);
+            ackSuccess(callback, { roomCode, playerId: newRoom.playerId, snapshot: newSnapshot });
+            return;
           }
         }
-        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
-        if (canonicalRoom && canonicalRoom.code !== roomCode) {
+        // Bug B fix (Tobias 2026-04-28): SINGLE_ROOM_ONLY-sjekken må også
+        // være canonical-aware. Hvis spilleren prøver en kode som ikke
+        // matcher canonical (og canonical eksisterer) → throw.
+        let canonicalGroupIdForCheck: string | null = null;
+        if (deps.getHallGroupIdForHall) {
+          try {
+            canonicalGroupIdForCheck = await deps.getHallGroupIdForHall(identity.hallId);
+          } catch {
+            // fail-soft
+          }
+        }
+        const canonicalForCheck = getCanonicalRoomCode("bingo", identity.hallId, canonicalGroupIdForCheck);
+        if (
+          roomCode !== canonicalForCheck.roomCode &&
+          engine.findRoomByCode(canonicalForCheck.roomCode)
+        ) {
           throw new DomainError(
             "SINGLE_ROOM_ONLY",
-            `Kun ett bingo-rom er aktivt per hall. Bruk rom ${canonicalRoom.code}.`
+            `Kun ett bingo-rom er aktivt per hall. Bruk rom ${canonicalForCheck.roomCode}.`
           );
         }
       }
