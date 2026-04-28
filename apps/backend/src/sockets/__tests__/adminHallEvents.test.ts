@@ -115,7 +115,20 @@ function makeEngineStub(rooms: FakeRoom[]) {
 }
 
 function makePlatformStub(opts: {
-  users: Record<string, { id: string; email: string; displayName: string; role: "ADMIN" | "HALL_OPERATOR" | "SUPPORT" | "PLAYER" }>;
+  users: Record<string, {
+    id: string;
+    email: string;
+    displayName: string;
+    role: "ADMIN" | "HALL_OPERATOR" | "SUPPORT" | "PLAYER";
+    /**
+     * SEC-P0-001 (Bølge 2A 2026-04-28): hallId skal returneres på user-
+     * objektet fra `getUserFromAccessToken` så `admin:login`-handleren kan
+     * lagre den på socket-data og bruke den til hall-scope-sjekk i
+     * påfølgende events. `null` for ADMIN/SUPPORT/PLAYER og uassignet
+     * HALL_OPERATOR.
+     */
+    hallId?: string | null;
+  }>;
   knownHallIds?: string[];
 }) {
   const knownHallIds = new Set(opts.knownHallIds ?? ["hall-a", "hall-b"]);
@@ -123,7 +136,15 @@ function makePlatformStub(opts: {
     getUserFromAccessToken: async (token: string) => {
       const u = opts.users[token];
       if (!u) throw new Error("invalid access token");
-      return { ...u, walletId: `w-${u.id}`, kycStatus: "VERIFIED" as const, createdAt: "", updatedAt: "", balance: 0 };
+      return {
+        ...u,
+        walletId: `w-${u.id}`,
+        kycStatus: "VERIFIED" as const,
+        createdAt: "",
+        updatedAt: "",
+        balance: 0,
+        hallId: u.hallId ?? null,
+      };
     },
     getHall: async (hallId: string): Promise<HallDefinition> => {
       if (!knownHallIds.has(hallId)) throw new Error(`unknown hall ${hallId}`);
@@ -161,7 +182,9 @@ function setup(opts: {
   const rooms = opts.rooms ?? [{ code: "ROOM-A", hallId: "hall-a", gameStatus: "RUNNING" as const }];
   const users = opts.users ?? {
     "admin-token": { id: "u-admin", email: "a@x.no", displayName: "Admin", role: "ADMIN" as const },
-    "operator-token": { id: "u-op", email: "op@x.no", displayName: "Ops", role: "HALL_OPERATOR" as const },
+    // SEC-P0-001: default operator scoped to hall-a (matches the default
+    // ROOM-A fixture). Cross-hall scope is tested explicitly below.
+    "operator-token": { id: "u-op", email: "op@x.no", displayName: "Ops", role: "HALL_OPERATOR" as const, hallId: "hall-a" },
     "player-token": { id: "u-pl", email: "pl@x.no", displayName: "Player", role: "PLAYER" as const },
   };
   const engine = makeEngineStub(rooms);

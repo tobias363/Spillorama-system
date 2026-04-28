@@ -39,7 +39,7 @@ import type { RoomSnapshot } from "../game/types.js";
 import type { RoomUpdatePayload } from "../util/roomHelpers.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
-import { canAccessAdminPermission } from "../platform/AdminAccessPolicy.js";
+import { canAccessAdminPermission, assertUserHallScope } from "../platform/AdminAccessPolicy.js";
 import { AdminHallBalancePayloadSchema } from "@spillorama/shared-types/socket-events";
 
 export interface AdminHallDeps {
@@ -93,6 +93,16 @@ interface AdminSocketData {
     email: string;
     displayName: string;
     role: PublicAppUser["role"];
+    /**
+     * SEC-P0-001 (Bølge 2A 2026-04-28): hall-scope for HALL_OPERATOR. Mirrors
+     * `AppUser.hallId` and is used by `assertUserHallScope` in every
+     * hall-mutating event handler. `null` for ADMIN/SUPPORT (global scope)
+     * and for an unassigned HALL_OPERATOR (fail-closed at the per-event
+     * check). Without this, an operator from hall A could pause/end games
+     * in hall B via Socket.IO — the cross-hall control bypass closed by
+     * Bølge 2A. See FIN-P0-01 in docs/audit/SECURITY_AUDIT_2026-04-28.md.
+     */
+    hallId: string | null;
   };
 }
 
@@ -236,6 +246,43 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
     }
   }
 
+  /**
+   * SEC-P0-001 (Bølge 2A 2026-04-28): hall-scope guard for socket-layer
+   * admin actions. Mirrors the HTTP-layer pattern in `paymentRequests.ts`
+   * (and others) where every hall-mutating route calls
+   * `assertUserHallScope(user, existing.hallId)` before touching engine
+   * state.
+   *
+   * Behaviour:
+   *   - ADMIN / SUPPORT pass through (global scope by definition).
+   *   - HALL_OPERATOR must have `hallId === targetHallId`. An operator
+   *     without `hallId` (un-assigned) is fail-closed with FORBIDDEN —
+   *     matches `assertUserHallScope` in AdminAccessPolicy.
+   *   - Throws a `DomainError("FORBIDDEN", ...)` with `.code === "FORBIDDEN"`
+   *     so the surrounding ack-failure path returns the same shape that the
+   *     HTTP routes return for the same offence.
+   *
+   * Why we need this: pre-fix, the only check was `ROOM_CONTROL_WRITE`,
+   * which is granted to both ADMIN and HALL_OPERATOR. A hall-operator from
+   * hall A could connect, log in, and emit `admin:pause-game` for a
+   * `roomCode` belonging to hall B — the engine state-mutates in the wrong
+   * hall mid-round. In a 4-hall pilot a single rogue/compromised operator
+   * could grief every other hall.
+   *
+   * Throws if `hallId` cannot be resolved (room not found) — callsite must
+   * resolve hallId BEFORE calling this; we don't want to lookup twice.
+   */
+  function assertAdminCanActOnHall(
+    admin: NonNullable<AdminSocketData["adminUser"]>,
+    targetHallId: string,
+  ): void {
+    assertUserHallScope(
+      { role: admin.role, hallId: admin.hallId },
+      targetHallId,
+      "Du har ikke tilgang til denne hallen.",
+    );
+  }
+
   function broadcastHallEvent(event: AdminHallEventBroadcast): void {
     // Room-scoped emit reaches the host + players + any spectators.
     io.to(event.roomCode).emit("admin:hall-event", event);
@@ -265,6 +312,12 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
           email: user.email,
           displayName: user.displayName,
           role: user.role,
+          // SEC-P0-001: capture hallId so subsequent admin:* events can
+          // enforce hall-scope (assertAdminCanActOnHall). `hallId` is null
+          // for ADMIN/SUPPORT (global scope) and for HALL_OPERATOR until
+          // an admin assigns one — which is fail-closed in
+          // assertUserHallScope.
+          hallId: user.hallId ?? null,
         };
         ackSuccess(callback, {
           userId: user.id,
@@ -297,6 +350,10 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
           ackFailure(callback, "ROOM_NOT_FOUND", "Rommet finnes ikke.");
           return;
         }
+        // SEC-P0-001: verify the admin is allowed to act on this hall
+        // before we broadcast a hall-event. ADMIN/SUPPORT pass through;
+        // HALL_OPERATOR must own this hall.
+        assertAdminCanActOnHall(admin, hallId);
         const countdownSeconds = Number.isFinite(Number(payload?.countdownSeconds))
           ? Math.max(0, Math.min(300, Math.floor(Number(payload!.countdownSeconds))))
           : undefined;
@@ -331,6 +388,15 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
         }
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
+        // SEC-P0-001: resolve hallId from snapshot and verify scope BEFORE
+        // mutating engine state. Fails closed if room doesn't exist
+        // (ROOM_NOT_FOUND) or operator from different hall (FORBIDDEN).
+        const targetHallId = resolveHallId(roomCode);
+        if (targetHallId === null) {
+          ackFailure(callback, "ROOM_NOT_FOUND", "Rommet finnes ikke.");
+          return;
+        }
+        assertAdminCanActOnHall(admin, targetHallId);
         const message = typeof payload?.message === "string" ? payload.message.slice(0, 200) : undefined;
         const { pauseUntil, pauseReason } = derivePauseEstimate(payload);
         engine.pauseGame(roomCode, message, { pauseUntil, pauseReason });
@@ -365,6 +431,13 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
         }
         const admin = requireAuthenticatedAdmin(socket);
         const roomCode = requireRoomCode(payload?.roomCode);
+        // SEC-P0-001: hall-scope check before engine.resumeGame.
+        const targetHallId = resolveHallId(roomCode);
+        if (targetHallId === null) {
+          ackFailure(callback, "ROOM_NOT_FOUND", "Rommet finnes ikke.");
+          return;
+        }
+        assertAdminCanActOnHall(admin, targetHallId);
         engine.resumeGame(roomCode);
         await emitRoomUpdate(roomCode);
         const snapshot = engine.getRoomSnapshot(roomCode);
@@ -403,6 +476,20 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
         // actor so audit trail stays consistent with the host-led manual
         // end path, but log the admin as the outer actor.
         const beforeSnapshot = engine.getRoomSnapshot(roomCode);
+        // SEC-P0-001: hall-scope check before engine.endGame. Use the
+        // snapshot we already loaded so we don't double-fetch.
+        const targetHallId = beforeSnapshot.hallId ?? null;
+        if (targetHallId === null) {
+          // A room without a hallId is a legacy state that shouldn't
+          // happen post-pilot. Fail closed for HALL_OPERATOR — only
+          // ADMIN/SUPPORT may force-end an unscoped room.
+          if (admin.role !== "ADMIN" && admin.role !== "SUPPORT") {
+            ackFailure(callback, "FORBIDDEN", "Rommet har ingen hall — kun ADMIN kan force-end.");
+            return;
+          }
+        } else {
+          assertAdminCanActOnHall(admin, targetHallId);
+        }
         await engine.endGame({
           roomCode,
           actorPlayerId: beforeSnapshot.hostPlayerId,
@@ -474,6 +561,18 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
           return;
         }
         const hallId = parsed.data.hallId.trim();
+        // SEC-P0-001: hall-scope check before exposing balance data. A
+        // HALL_OPERATOR from hall A must not be able to read house-account
+        // balances for hall B (operational fingerprinting + competitive
+        // intel leak). Mirrors the HTTP-layer pattern in admin reports.
+        try {
+          assertAdminCanActOnHall(admin, hallId);
+        } catch (err) {
+          const code = (err as { code?: string }).code ?? "FORBIDDEN";
+          const message = err instanceof Error ? err.message : "Du har ikke tilgang til denne hallen.";
+          ackFailure(callback, code, message);
+          return;
+        }
         // Verify the hall exists — avoids returning zero-balance for a typo.
         try {
           await platformService.getHall(hallId);
