@@ -168,6 +168,23 @@ export function createGame1ScheduledEventHandlers(
   }
 
   /**
+   * PILOT-STOP-SHIP fix (Tobias 2026-04-27): et scheduled spill er
+   * "multi-hall" når `participating_halls_json` har flere enn én hall.
+   * I så fall skal rommet markeres som `isHallShared=true` slik at
+   * `BingoEngine.joinRoom` skipper HALL_MISMATCH-sjekken og spillere fra
+   * Hall B/C i samme gruppe kan joine rommet som Hall A opprettet.
+   *
+   * Uten dette beholder rommet `hallId = master-hall` og Hall B's spillere
+   * får HALL_MISMATCH ved join → 4-haller-link er broken.
+   */
+  function isMultiHallScheduled(row: ScheduledGameJoinRow): boolean {
+    const halls = row.participating_halls_json;
+    if (!Array.isArray(halls)) return false;
+    const stringHalls = halls.filter((h): h is string => typeof h === "string");
+    return stringHalls.length > 1;
+  }
+
+  /**
    * Hovedflyt: player-join inn i schedulert rom.
    *
    * - Hvis room_code allerede satt: joinRoom (reconnect-trygg — samme wallet
@@ -182,7 +199,25 @@ export function createGame1ScheduledEventHandlers(
     playerName: string,
     socketId: string
   ): Promise<JoinScheduledAckData> {
+    const isHallShared = isMultiHallScheduled(row);
+
     if (row.room_code) {
+      // PILOT-STOP-SHIP fix (Tobias 2026-04-27): hvis spillet er
+      // multi-hall, sett `isHallShared=true` på rommet FØR vi joiner —
+      // ellers kaster `engine.joinRoom` HALL_MISMATCH for spillere fra
+      // ikke-master-haller. Idempotent og no-op hvis allerede satt
+      // (f.eks. hvis tidligere join allerede markerte rommet).
+      if (isHallShared) {
+        try {
+          engine.setRoomHallShared(row.room_code, true);
+        } catch (err) {
+          log.warn(
+            { err, roomCode: row.room_code, scheduledGameId: row.id },
+            "setRoomHallShared på existing-rom feilet — joinRoom kan kaste HALL_MISMATCH"
+          );
+        }
+      }
+
       // Eksisterende rom — gjenta join (idempotent hvis samme wallet).
       const { roomCode, playerId } = await engine.joinRoom({
         roomCode: row.room_code,
@@ -236,6 +271,11 @@ export function createGame1ScheduledEventHandlers(
         "isTestHall lookup failed — defaulting to false (regular hall)"
       );
     }
+    // PILOT-STOP-SHIP fix (Tobias 2026-04-27): for multi-hall scheduled
+    // sender vi `effectiveHallId: null` slik at `engine.createRoom`
+    // markerer rommet som `isHallShared=true`. Uten dette får Hall B's
+    // spillere HALL_MISMATCH og 4-haller-link er broken (Pilot blokker).
+    // Single-hall scheduled holder eksisterende per-hall-flyt (undefined).
     // Ingen room_code enda. Opprett nytt rom, persister mapping.
     const created = await engine.createRoom({
       hallId,
@@ -243,6 +283,7 @@ export function createGame1ScheduledEventHandlers(
       walletId: user.walletId,
       socketId,
       gameSlug: "bingo",
+      ...(isHallShared ? { effectiveHallId: null } : {}),
       ...(isTestHall ? { isTestHall: true } : {}),
     });
     if (bindDefaultVariantConfig) {
@@ -292,6 +333,21 @@ export function createGame1ScheduledEventHandlers(
         { err, roomCode: created.roomCode },
         "destroyRoom feilet etter race — room kan bli liggende orphan"
       );
+    }
+    // PILOT-STOP-SHIP fix (Tobias 2026-04-27): vinner-rommet ble skapt av
+    // en annen request som også sender `effectiveHallId: null` for multi-
+    // hall scheduled. Idempotent setter er trygg — refresher state slik
+    // at `joinRoom` ikke kaster HALL_MISMATCH hvis race-winner krasjet
+    // før den hadde satt flagget.
+    if (isHallShared) {
+      try {
+        engine.setRoomHallShared(actualRoomCode, true);
+      } catch (err) {
+        log.warn(
+          { err, roomCode: actualRoomCode, scheduledGameId: row.id },
+          "setRoomHallShared på winner-rom feilet — joinRoom kan kaste HALL_MISMATCH"
+        );
+      }
     }
     const joined = await engine.joinRoom({
       roomCode: actualRoomCode,
