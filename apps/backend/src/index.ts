@@ -281,6 +281,7 @@ import { errorReporter } from "./middleware/errorReporter.js";
 import { traceIdMiddleware } from "./middleware/traceId.js";
 import { socketTraceMiddleware, wrapSocketEventHandlers } from "./middleware/socketTraceId.js";
 import { setTraceField } from "./util/traceContext.js";
+import { sweepStaleNonCanonicalRooms } from "./util/staleRoomBootSweep.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
@@ -3311,6 +3312,49 @@ const PORT = Number(process.env.PORT ?? 4000);
     }
   } catch (err) {
     console.error("[game1-recovery] Schedule-level recovery pass failed:", err);
+  }
+
+  // PILOT-EMERGENCY 2026-04-28 (Tobias): boot-sweep for stale non-canonical
+  // rooms. Etter PR #677 (canonical-aware lookup) lever rom-koder som
+  // 4RCQSX (random `makeRoomCode()` fra pre-fix epoke) fortsatt i Redis +
+  // PG-checkpoint og blokkerer reconnect for berørte spillere. Sweepen
+  // destroyer kun IDLE/ENDED non-canonical rom; aktive runder rør vi ikke.
+  // Kjøres ETTER alle recovery-passene over så vi ser hele rom-tilstanden.
+  try {
+    const sweepResult = sweepStaleNonCanonicalRooms({
+      engine,
+      audit: (event) => {
+        void auditLogService
+          .record({
+            actorId: null,
+            actorType: "SYSTEM",
+            action: event.action,
+            resource: event.resource,
+            resourceId: event.resourceId,
+            details: event.details,
+          })
+          .catch(() => {
+            /* fire-and-forget */
+          });
+      },
+      logger: {
+        info: (data, msg) => console.log(msg, JSON.stringify(data)),
+        warn: (data, msg) => console.warn(msg, JSON.stringify(data)),
+        error: (data, msg) => console.error(msg, JSON.stringify(data)),
+      },
+    });
+    if (sweepResult.destroyed.length > 0) {
+      console.warn(
+        `[boot-sweep] Destroyed ${sweepResult.destroyed.length} stale non-canonical rooms: ${sweepResult.destroyed.join(", ")}`,
+      );
+    }
+    if (sweepResult.preservedActive.length > 0) {
+      console.warn(
+        `[boot-sweep] Preserved ${sweepResult.preservedActive.length} active non-canonical rooms (admin must clear): ${sweepResult.preservedActive.join(", ")}`,
+      );
+    }
+  } catch (err) {
+    console.error("[boot-sweep] stale-room sweep failed:", err);
   }
 
   server.listen(PORT, () => {
