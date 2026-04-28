@@ -55,5 +55,10 @@
     "pngjs": "^7.0.0",
     "stylelint": "^17.9.0",
     "stylelint-config-standard": "^40.0.0"
+  },
+  "//overrides_rationale": "SEC-P0-003 (Bølge 2A 2026-04-28): targeted security overrides — these are NPM `overrides` entries that force vulnerable transitive deps to patched versions. We use overrides INSTEAD of `npm audit fix` because audit-fix's lockfile re-resolution bumps unrelated dev-deps (notably artillery's plugin chain) into newer @opentelemetry/* + protobufjs that have their own active CVEs. Each override is intentionally scoped to a specific CVE chain. (1) @xmldom/xmldom: pulled via pixi.js → 4 HIGH advisories (GHSA-2v35-w6hq-6mfw DoS + GHSA-f6ww-3ggp-fr8h XML-injection + GHSA-x6wf-f3px-wcqx + GHSA-j759-j44w-7fr8). (2) protobufjs ^8.0.3: GHSA-xq3m-2v4x-88gg arbitrary code exec in 8.0.0; only relevant via the same artillery+otlp chain that audit-fix wants to bump. Pinning to 8.0.3+ patches the CVE without forcing the whole otlp chain. Remove these overrides when upstream pixi.js / artillery resolve transitively. See FIN-P0-03 in docs/audit/SECURITY_AUDIT_2026-04-28.md.",
+  "overrides": {
+    "@xmldom/xmldom": "^0.8.13",
+    "protobufjs": "^8.0.3"
   }
 }

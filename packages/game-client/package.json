@@ -17,6 +17,7 @@
   "dependencies": {
     "@sentry/browser": "^8.48.0",
     "@spillorama/shared-types": "*",
+    "@xmldom/xmldom": "^0.8.13",
     "gsap": "^3.12.7",
     "howler": "^2.2.4",
     "i18next": "^24.2.2",
