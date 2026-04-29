@@ -593,10 +593,27 @@ export class SecurityService {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`
       );
+      // 2026-04-29 fix (Tobias prod-incident): Postgres rejects `now()`
+      // in index predicates because `now()` is STABLE, not IMMUTABLE.
+      // The original WHERE-clause `expires_at IS NULL OR expires_at > now()`
+      // caused `CREATE INDEX IF NOT EXISTS` to fail at parse-time on every
+      // boot — initializeSchema rolled back, `initFailed=true`, and every
+      // subsequent `isIpBlocked()` request emitted a CRITICAL log. Production
+      // saw 100+ fatals per minute.
+      //
+      // The IF-NOT-EXISTS check happens AFTER SQL parsing, so pre-creating
+      // a same-named index (without the bad predicate) doesn't help — the
+      // statement errors out before existence is checked.
+      //
+      // Fix: index only the permanent-block case (`expires_at IS NULL`).
+      // Time-bounded blocks are a small minority and a sequential scan on
+      // a small table is acceptable. The migration-level index
+      // `idx_app_blocked_ips_active` already uses this same predicate, so
+      // we converge on a single design.
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_blocked_ips_active
          ON ${this.ipsTable()}(ip_address)
-         WHERE expires_at IS NULL OR expires_at > now()`
+         WHERE expires_at IS NULL`
       );
       await client.query("COMMIT");
     } catch (err) {
