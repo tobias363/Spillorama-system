@@ -5,6 +5,8 @@ import type { GameState } from "../../bridge/GameBridge.js";
 import type {
   MiniGameTriggerPayload,
   PatternWonPayload,
+  BetRejectedEvent,
+  WalletLossStateEvent,
 } from "@spillorama/shared-types/socket-events";
 import { telemetry } from "../../telemetry/Telemetry.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
@@ -230,6 +232,14 @@ class Game1Controller implements GameController {
       // `miniGameTrigger` + `miniGameResult`.
       bridge.on("miniGameTrigger", (data) => this.handleMiniGameTrigger(data)),
       bridge.on("miniGameResult", (data) => this.miniGame?.onResult(data)),
+      // Tobias 2026-04-29 (post-orphan-fix UX): bet:rejected — server
+      // varsler at forhåndskjøp ble avvist på game-start. Vis klar
+      // feilmelding via toast og fjern pre-round-bonger via room:update
+      // (server frigir reservasjonen så bonger forsvinner ved neste push).
+      bridge.on("betRejected", (event) => this.onBetRejected(event)),
+      // Tobias 2026-04-29 (post-orphan-fix UX): wallet:loss-state push.
+      // Oppdater Kjøp Bonger-popup-headeren hvis åpen.
+      bridge.on("walletLossStateChanged", (event) => this.onWalletLossStateChanged(event)),
     );
 
     // Lucky number picker (persists across screen transitions)
@@ -570,6 +580,68 @@ class Game1Controller implements GameController {
       winnerCount,
     });
   }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): server pusher `bet:rejected` når
+   * forhåndskjøp avvises på game-start (loss-limit eller insufficient
+   * funds). Vi viser en klar Norsk feilmelding via toast.
+   *
+   * Pre-round-bongene blir automatisk fjernet via det neste `room:update`
+   * (server frigjør reservasjonen og fjerner display-cachen) — vi trenger
+   * ikke gjøre noe ekstra med tickets på klienten utover å vise meldingen.
+   */
+  private onBetRejected(event: BetRejectedEvent): void {
+    // Filtrer mot myPlayerId så vi ikke viser feilmeldinger for andre
+    // spillere i samme rom (forsvarlig defense — server emitter til
+    // wallet:<walletId>-rommet, men paranoid-sjekk koster lite).
+    if (this.myPlayerId !== null && event.playerId !== this.myPlayerId) {
+      return;
+    }
+    const norsk =
+      event.message ||
+      Game1Controller.BET_REJECTED_FALLBACK_MESSAGES[event.reason] ||
+      "Forhåndskjøp ble avvist.";
+    // Bruk error-toast (rød) for tydelig regulatorisk-varsel.
+    this.toast?.error(norsk, 6000);
+    // Hvis Kjøp Bonger-popup-en er åpen, lukk den så bruker ser
+    // toast-en og kan ta inn beskjeden uten å klikke seg ut først.
+    this.playScreen?.hideBuyPopup();
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): wallet:loss-state-push fra
+   * server etter committed buy-in. Hvis Kjøp Bonger-popup-en er åpen,
+   * oppdater "Brukt i dag: X / Y kr"-headeren live.
+   */
+  private onWalletLossStateChanged(event: WalletLossStateEvent): void {
+    // Game1BuyPopup updater seg selv via PlayScreen-helper.
+    this.playScreen?.updateBuyPopupLossState({
+      dailyUsed: event.state.dailyUsed,
+      dailyLimit: event.state.dailyLimit,
+      monthlyUsed: event.state.monthlyUsed,
+      monthlyLimit: event.state.monthlyLimit,
+      walletBalance: event.state.walletBalance,
+    });
+  }
+
+  /**
+   * Tobias 2026-04-29: Norsk-fallback for bet:rejected reason-koder.
+   * Server pleier å sende ferdig-formaterte meldinger via `event.message`,
+   * men hvis serveren mangler kontekst (eldre prod-deploy), bruker vi
+   * disse som fallback.
+   */
+  private static readonly BET_REJECTED_FALLBACK_MESSAGES: Record<string, string> = {
+    DAILY_LOSS_LIMIT_REACHED:
+      "Du nådde dagens tapsgrense. Forhåndskjøpet ble derfor avvist.",
+    MONTHLY_LOSS_LIMIT_REACHED:
+      "Du nådde månedens tapsgrense. Forhåndskjøpet ble derfor avvist.",
+    INSUFFICIENT_FUNDS:
+      "Du har ikke nok saldo for å delta i denne runden. Forhåndskjøpet ble avvist.",
+    PLAYER_TIMED_PAUSE: "Du er på frivillig pause. Forhåndskjøpet ble avvist.",
+    PLAYER_REQUIRED_PAUSE:
+      "Du har obligatorisk pause (60 min spilt). Forhåndskjøpet ble avvist.",
+    PLAYER_SELF_EXCLUDED: "Du er selvutestengt. Forhåndskjøpet ble avvist.",
+  };
 
   /**
    * Bridge-listener for `miniGameTrigger`. Hvis WinScreenV2 (Fullt Hus-scene)

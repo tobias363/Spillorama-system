@@ -20,6 +20,8 @@ import type {
   MiniGameTriggerPayload,
   MiniGameResultPayload,
   WalletStateEvent,
+  BetRejectedEvent,
+  WalletLossStateEvent,
 } from "@spillorama/shared-types/socket-events";
 import type { RoomSnapshot } from "@spillorama/shared-types/game";
 import { SocketEvents } from "@spillorama/shared-types/socket-events";
@@ -64,6 +66,21 @@ export interface SpilloramaSocketListeners {
    * bakover-kompat.
    */
   walletState: (payload: WalletStateEvent) => void;
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): server pusher denne når
+   * forhåndskjøp avvises på game-start (loss-limit eller insufficient
+   * funds). Klienten fjerner pre-round-bonger og viser klar Norsk
+   * feilmelding i stedet for å la spilleren stå med "forsvinnende
+   * brett"-UX.
+   */
+  betRejected: (payload: BetRejectedEvent) => void;
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): tap-status-push etter
+   * committed buy-in. Klient bruker det til å oppdatere
+   * "Brukt i dag: X / Y kr"-headeren i Kjøp Bonger-popup-en uten
+   * round-trip via /api/wallet/me/compliance.
+   */
+  walletLossState: (payload: WalletLossStateEvent) => void;
   connectionStateChanged: ConnectionListener;
 }
 
@@ -102,6 +119,8 @@ export class SpilloramaSocket {
     miniGameTrigger: new Set(),
     miniGameResult: new Set(),
     walletState: new Set(),
+    betRejected: new Set(),
+    walletLossState: new Set(),
     connectionStateChanged: new Set(),
   };
 
@@ -136,6 +155,8 @@ export class SpilloramaSocket {
     miniGameTrigger: [],
     miniGameResult: [],
     walletState: [],
+    betRejected: [],
+    walletLossState: [],
     connectionStateChanged: [],
   };
 
@@ -317,6 +338,20 @@ export class SpilloramaSocket {
     this.socket.on(SocketEvents.WALLET_STATE, (payload: WalletStateEvent) => {
       this.dispatchOrBuffer("walletState", payload);
     });
+
+    // Tobias 2026-04-29 (post-orphan-fix UX): bet:rejected fra server etter
+    // game-start filter dropper spilleren. Klient fjerner pre-round-bonger
+    // + viser klar feilmelding via GameBridge.
+    this.socket.on(SocketEvents.BET_REJECTED, (payload: BetRejectedEvent) => {
+      this.dispatchOrBuffer("betRejected", payload);
+    });
+
+    // Tobias 2026-04-29 (post-orphan-fix UX): wallet:loss-state push etter
+    // committed buy-in. Klient oppdaterer "Brukt i dag: X / Y kr"-header
+    // i Kjøp Bonger-popup-en.
+    this.socket.on(SocketEvents.WALLET_LOSS_STATE, (payload: WalletLossStateEvent) => {
+      this.dispatchOrBuffer("walletLossState", payload);
+    });
   }
 
   disconnect(): void {
@@ -413,7 +448,36 @@ export class SpilloramaSocket {
     return this.emit(SocketEvents.ROOM_STATE, payload);
   }
 
-  async armBet(payload: { roomCode: string; armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> }): Promise<AckResponse<{ snapshot: RoomSnapshot; armed: boolean }>> {
+  async armBet(
+    payload: {
+      roomCode: string;
+      armed?: boolean;
+      ticketCount?: number;
+      ticketSelections?: Array<{ type: string; qty: number; name?: string }>;
+    },
+  ): Promise<
+    AckResponse<{
+      snapshot: RoomSnapshot;
+      armed: boolean;
+      /**
+       * Tobias 2026-04-29 (post-orphan-fix UX): server returnerer
+       * tap-status snapshot på success-acks. Klient bruker det for å
+       * rendre "Brukt i dag: X / Y kr"-header og vise partial-buy-toast
+       * når `rejected > 0`.
+       */
+      lossLimit?: {
+        requested: number;
+        accepted: number;
+        rejected: number;
+        rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null;
+        dailyUsed: number;
+        dailyLimit: number;
+        monthlyUsed: number;
+        monthlyLimit: number;
+        walletBalance: number | null;
+      };
+    }>
+  > {
     return this.emit(SocketEvents.BET_ARM, payload);
   }
 

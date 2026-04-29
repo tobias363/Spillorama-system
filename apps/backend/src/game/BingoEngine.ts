@@ -277,6 +277,33 @@ interface StartGameInput {
    * arming changed after the last room:update).
    */
   preRoundTicketsByPlayerId?: Record<string, Ticket[]>;
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): callback fired when an
+   * armed player is filtered out at game-start (loss-limit OR low-balance).
+   * Caller (socket-laget) bruker det til å pushe `bet:rejected` til
+   * `wallet:<walletId>`-rommet for spilleren.
+   *
+   * Optional — fail-soft. Hvis caller utelater, oppfører engine seg som
+   * før (silent drop med orphan-release fra PR #723).
+   *
+   * Scope: kun de tre filter-reasons fra `filterEligiblePlayers`. Players
+   * filtrert ut tidligere (TIMED_PAUSE / SELF_EXCLUDED / REQUIRED_PAUSE)
+   * via `isPlayerBlockedByRestriction` får IKKE denne callbacken — de
+   * blokkeres allerede ved bet:arm via `assertWalletAllowedForGameplay`,
+   * så scenario-et "blokkert spiller har armed-state ved game-start" er
+   * ekstremt sjeldent (kun hvis pause aktiveres mellom arm og start).
+   * Egne kallbacks for de kan legges til senere ved behov.
+   */
+  onPlayerRejected?: (input: {
+    player: Player;
+    reason:
+      | "DAILY_LOSS_LIMIT_REACHED"
+      | "MONTHLY_LOSS_LIMIT_REACHED"
+      | "INSUFFICIENT_FUNDS";
+    rejectedTicketCount: number;
+    hallId: string;
+  }) => void | Promise<void>;
 }
 
 const DEFAULT_PATTERNS: PatternDefinition[] = [
@@ -888,8 +915,24 @@ export class BingoEngine {
       await this.refreshPlayerObjectsFromWallet(ticketCandidates);
     }
     // Filter out players who exceed loss limits or can't afford entry fee.
+    // Tobias 2026-04-29: pass the per-player drop hook + ticket-counts so
+    // socket-laget can emit `bet:rejected` til hver droppet spiller. Caller
+    // (gameLifecycleEvents) wirer onPlayerRejected — fail-soft hvis ikke.
+    const rejectedTicketCountMap = new Map<string, number>();
+    if (input.armedPlayerTicketCounts) {
+      for (const [pid, count] of Object.entries(input.armedPlayerTicketCounts)) {
+        rejectedTicketCountMap.set(pid, count);
+      }
+    }
     const eligiblePlayers = ticketCandidates.length > 0
-      ? await this.filterEligiblePlayers(ticketCandidates, entryFee, nowMs, room.hallId)
+      ? await this.filterEligiblePlayers(
+          ticketCandidates,
+          entryFee,
+          nowMs,
+          room.hallId,
+          input.onPlayerRejected,
+          rejectedTicketCountMap,
+        )
       : [];
     const gameId = randomUUID();
     // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) er hovedspill
@@ -3386,6 +3429,54 @@ export class BingoEngine {
     return this.compliance.wouldExceedLossLimit(walletIdInput, entryFeeNok, nowMs, hallId);
   }
 
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): public wrapper rundt
+   * `ComplianceManager.calculateMaxAffordableTickets` slik at socket-
+   * laget (`bet:arm`) kan beregne partial-buy uten å ta direkte
+   * avhengighet til `compliance`-feltet (som er `protected`).
+   *
+   * Pengespillforskriften §22: hall-scope-d. Caller MÅ sende kjøpe-hallen.
+   *
+   * Returnerer samme shape som ComplianceManager — se den for full doc.
+   */
+  calculateMaxAffordableTickets(
+    walletIdInput: string,
+    hallId: string,
+    ticketUnitPrices: number[],
+    nowMs: number,
+    existingReservedAmount = 0,
+  ): ReturnType<ComplianceManager["calculateMaxAffordableTickets"]> {
+    return this.compliance.calculateMaxAffordableTickets(
+      walletIdInput,
+      hallId,
+      ticketUnitPrices,
+      nowMs,
+      existingReservedAmount,
+    );
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): public read-only access til
+   * netto-tap + effektive grenser. Brukes av socket-laget for å bygge
+   * `lossState` payloads i bet:arm-acks og bet:rejected/wallet:loss-
+   * state-events.
+   */
+  getLossLimitState(walletIdInput: string, hallId: string, nowMs = Date.now()): {
+    dailyUsed: number;
+    dailyLimit: number;
+    monthlyUsed: number;
+    monthlyLimit: number;
+  } {
+    const limits = this.compliance.getEffectiveLossLimits(walletIdInput, hallId, nowMs);
+    const netLoss = this.compliance.calculateNetLoss(walletIdInput, nowMs, hallId);
+    return {
+      dailyUsed: Math.max(0, netLoss.daily),
+      dailyLimit: limits.daily,
+      monthlyUsed: Math.max(0, netLoss.monthly),
+      monthlyLimit: limits.monthly,
+    };
+  }
+
   async upsertPrizePolicy(input: {
     gameType?: PrizeGameType;
     hallId?: string;
@@ -4057,11 +4148,82 @@ export class BingoEngine {
     entryFee: number,
     nowMs: number,
     hallId: string,
+    /**
+     * Tobias 2026-04-29 (post-orphan-fix UX): per-player drop hook.
+     * Fires SYNCHRONOUSLY in iteration-order for hver spiller som
+     * filtreres ut. Caller (socket-laget) emitter `bet:rejected` til
+     * spillerens wallet-rom slik at klienten kan fjerne pre-round-bonger
+     * og vise klar feilmelding.
+     *
+     * Holdes som `() => Promise<void>` så caller kan await — men engine
+     * fanger feil og fortsetter uansett (game-start må ALDRI blokkeres
+     * av en fail-soft notification).
+     */
+    onPlayerRejected?: (input: {
+      player: Player;
+      reason:
+        | "DAILY_LOSS_LIMIT_REACHED"
+        | "MONTHLY_LOSS_LIMIT_REACHED"
+        | "INSUFFICIENT_FUNDS";
+      rejectedTicketCount: number;
+      hallId: string;
+    }) => void | Promise<void>,
+    rejectedTicketCountByPlayerId?: Map<string, number>,
   ): Promise<Player[]> {
     const eligible: Player[] = [];
     for (const player of players) {
-      if (entryFee > 0 && player.balance < entryFee) continue;
-      if (this.compliance.wouldExceedLossLimit(player.walletId, entryFee, nowMs, hallId)) continue;
+      if (entryFee > 0 && player.balance < entryFee) {
+        if (onPlayerRejected) {
+          try {
+            await onPlayerRejected({
+              player,
+              reason: "INSUFFICIENT_FUNDS",
+              rejectedTicketCount: rejectedTicketCountByPlayerId?.get(player.id) ?? 0,
+              hallId,
+            });
+          } catch (err) {
+            logger.warn(
+              { err, playerId: player.id, walletId: player.walletId },
+              "onPlayerRejected callback failed for INSUFFICIENT_FUNDS — engine continues",
+            );
+          }
+        }
+        continue;
+      }
+      if (this.compliance.wouldExceedLossLimit(player.walletId, entryFee, nowMs, hallId)) {
+        if (onPlayerRejected) {
+          // Skill daily vs monthly — caller wants to render the right
+          // norsk-feilmelding. Recompute via netLoss + limits.
+          const limits = this.compliance.getEffectiveLossLimits(
+            player.walletId,
+            hallId,
+            nowMs,
+          );
+          const netLoss = this.compliance.calculateNetLoss(
+            player.walletId,
+            nowMs,
+            hallId,
+          );
+          const reason: "DAILY_LOSS_LIMIT_REACHED" | "MONTHLY_LOSS_LIMIT_REACHED" =
+            netLoss.daily + entryFee > limits.daily
+              ? "DAILY_LOSS_LIMIT_REACHED"
+              : "MONTHLY_LOSS_LIMIT_REACHED";
+          try {
+            await onPlayerRejected({
+              player,
+              reason,
+              rejectedTicketCount: rejectedTicketCountByPlayerId?.get(player.id) ?? 0,
+              hallId,
+            });
+          } catch (err) {
+            logger.warn(
+              { err, playerId: player.id, walletId: player.walletId, reason },
+              "onPlayerRejected callback failed for loss-limit — engine continues",
+            );
+          }
+        }
+        continue;
+      }
       eligible.push(player);
     }
     return eligible;

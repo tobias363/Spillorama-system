@@ -224,6 +224,32 @@ export const SocketEvents = {
    * primær wallet-sync (room:update beholdes for bakover-kompat).
    */
   WALLET_STATE: "wallet:state",
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): server → client push når
+   * spillerens forhåndskjøp avvises i `BingoEngine.startGame` via
+   * `filterEligiblePlayers` (loss-limit traff midt i armed-vindu, eller
+   * saldo dekket ikke entry-fee lenger). Tidligere ble den armede
+   * reservasjonen frigjort i stillhet og spilleren satt igjen uten
+   * forklaring. Klient bruker payloaden til å fjerne pre-round-bonger
+   * og vise en klar Norsk feilmelding med tap-status.
+   *
+   * Emittes til `wallet:<walletId>`-rommet (ikke room-fanout) — kun
+   * den berørte spilleren skal se den.
+   *
+   * Pengespillforskriften §22: hall-scoped tap-grenser. `lossState`
+   * reflekterer hallen som filtrerte spilleren ut (kjøpe-hallen).
+   */
+  BET_REJECTED: "bet:rejected",
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): server → client push når
+   * tap-status faktisk har endret seg (etter committed buy-in). Lar
+   * Kjøp Bonger-popup-en oppdatere "Brukt i dag: X / Y kr"-headeren
+   * i sanntid uten round-trip via `/api/wallet/me/compliance`.
+   *
+   * Emittes til `wallet:<walletId>`-rommet etter
+   * `compliance.recordLossEntry` på server-siden.
+   */
+  WALLET_LOSS_STATE: "wallet:loss-state",
 } as const;
 
 // ── Generic ack response ────────────────────────────────────────────────────
@@ -580,6 +606,94 @@ export interface G3PatternAutoWonPayload {
   prizePerWinner: number;
   /** Draw index at which the pattern was won (1-based). */
   drawIndex: number;
+}
+
+// ── Tobias 2026-04-29: Bet:rejected + Wallet:loss-state ────────────────────
+
+/**
+ * Maskinlesbar grunn til at server avviste forhåndskjøpet på game-start.
+ * Klienten mapper til en bruker-vennlig norsk feilmelding (ingen "ukjent feil"-
+ * fallback — alle reasons må ha en oversettelse i `LOSS_LIMIT_MESSAGES`-
+ * katalogen).
+ */
+export type BetRejectedReason =
+  | "DAILY_LOSS_LIMIT_REACHED"
+  | "MONTHLY_LOSS_LIMIT_REACHED"
+  | "INSUFFICIENT_FUNDS"
+  | "PLAYER_TIMED_PAUSE"
+  | "PLAYER_REQUIRED_PAUSE"
+  | "PLAYER_SELF_EXCLUDED";
+
+/**
+ * Tap-status snapshot inkludert i bet-rejection og bet:arm-ack. Tall i NOK
+ * (ikke øre — bevisst valg for å unngå klient-side øre/krone-konvertering
+ * når brett-priser allerede er heltall NOK).
+ */
+export interface LossStateSnapshot {
+  /** Hall som status reflekterer (hall-scope per §22). */
+  hallId: string;
+  /** Brukt i dag på hallen, NOK. */
+  dailyUsed: number;
+  /** Effektiv daglig grense (Math.min personal/regulatory), NOK. */
+  dailyLimit: number;
+  /** Brukt i måned på hallen, NOK. */
+  monthlyUsed: number;
+  /** Effektiv månedlig grense, NOK. */
+  monthlyLimit: number;
+  /** Tilgjengelig saldo på lommebok, NOK. */
+  walletBalance: number;
+}
+
+/**
+ * Tobias 2026-04-29: Server → client push når forhåndskjøp avvises på
+ * game-start. Emittes til `wallet:<walletId>`-rommet for den berørte
+ * spilleren. Klienten bruker payloaden til:
+ *   1. Fjerne pre-round-bonger som ble vist når bet:arm aksepterte dem
+ *   2. Vise en klar feilmelding ("Du nådde dagens tapsgrense — bongene
+ *      ble ikke med i denne runden")
+ *   3. Oppdatere tap-headeren i Kjøp Bonger-popup-en hvis åpen
+ */
+export interface BetRejectedEvent {
+  /** Hvilken roomCode kjøpet gjaldt — klienten bruker for å verifisere
+   *  at avvisningen tilhører gjeldende rom (ikke et annet vindu). */
+  roomCode: string;
+  /** Hvilken spiller (room-scoped player.id) som ble avvist. Klienten
+   *  filtrerer mot myPlayerId før den fjerner brett. */
+  playerId: string;
+  /** Maskinlesbar grunn (mappes til norsk feilmelding i klient-katalog). */
+  reason: BetRejectedReason;
+  /** Antall units som ble avvist (matchet armed-set størrelse for backward-
+   *  compat — klienten regner faktisk brett-vekt selv hvis nødvendig). */
+  rejectedTicketCount: number;
+  /** Tap-status etter at reservasjonen ble frigjort. Optional fordi kun
+   *  loss-limit-årsaker har meningsfull tap-state — for selvutestengelse
+   *  kan caller utelate (klient viser tap-status fra forrige push). */
+  lossState?: LossStateSnapshot;
+  /** Bruker-vennlig norsk feilmelding fra server. Klienten kan bruke
+   *  denne hvis lokal katalog ikke har oversettelse av `reason`. */
+  message: string;
+  /** Server-tidsstempel (ms siden epoch) — out-of-order-deteksjon. */
+  serverTimestamp: number;
+}
+
+/**
+ * Tobias 2026-04-29: Server → client push av tap-status etter committed
+ * buy-in. Emittes til `wallet:<walletId>`-rommet sammen med eksisterende
+ * `wallet:state`-push så klienten får begge atomisk.
+ *
+ * Hall-scope: én event per hall — hvis en spiller har spilt i flere haller
+ * samme dag pushes per-hall-state hver gang den hallen oppdateres.
+ */
+export interface WalletLossStateEvent {
+  /** Wallet som status gjelder for. */
+  walletId: string;
+  /** Tap-state snapshot for hall + wallet. */
+  state: LossStateSnapshot;
+  /** Hva som utløste push-en — "BUYIN" for committed innsats,
+   *  "PAYOUT" for utbetaling som reduserer netto-tap. */
+  reason: "BUYIN" | "PAYOUT";
+  /** Server-tidsstempel for out-of-order-deteksjon. */
+  serverTimestamp: number;
 }
 
 // ── Scheduler settings (sent inside room:update scheduler field) ────────────

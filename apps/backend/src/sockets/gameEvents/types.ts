@@ -101,6 +101,56 @@ export interface LuckyNumberPayload extends RoomActionPayload {
   luckyNumber: number;
 }
 
+/**
+ * Tobias 2026-04-29 (post-orphan-fix UX): partial-buy info returned in
+ * `bet:arm` ack når spilleren treffer dagens/månedens tap-grense midt
+ * i bestillingen, og — på success-acks — alltid med oppdatert tap-state
+ * så Kjøp Bonger-popup-en kan rendre "Brukt i dag: X / Y kr"-headeren
+ * uten en separat `/api/wallet/me/compliance`-runde.
+ *
+ * Pengespillforskriften §22: grensene er hall-scope-d. Tallene reflekterer
+ * caller-ens effektive grense (Math.min av personal og regulatorisk) for
+ * kjøpe-hallen.
+ *
+ * Semantikk:
+ *   - `requested`  = totalt antall brett-vekt spilleren forsøkte å arme
+ *     etter merge med eksisterende armed-set (vektet — ett "Large" = 3 brett).
+ *   - `accepted`   = antall brett-vekt som faktisk ble armed (≤ requested).
+ *   - `rejected`   = `requested - accepted`, aldri negativt.
+ *   - `rejectionReason` er det første grense-treff som stoppet bestillingen,
+ *     eller `null` hvis intet ble avvist (full-buy).
+ *
+ * Klienten viser et toast "X av Y bonger kjøpt — Z avvist (DAILY_LIMIT)"
+ * når `rejected > 0` og `accepted > 0`. Hvis `accepted === 0` returneres
+ * en feil-ack (`LOSS_LIMIT_REACHED` / `MONTHLY_LIMIT_REACHED`) i stedet —
+ * bet:arm armer da ingenting og klienten holder popup-en åpen med
+ * feilmeldingen.
+ */
+export interface BetArmLossLimitInfo {
+  /** Antall brett-vekt i bestillingen (etter merge med eksisterende armed). */
+  requested: number;
+  /** Antall brett-vekt faktisk armed (≤ requested). */
+  accepted: number;
+  /** Antall brett-vekt avvist pga loss-limit (= requested - accepted). */
+  rejected: number;
+  /** Hvilken grense som først ble truffet — `null` hvis intet ble avvist. */
+  rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null;
+  /** Brukt i dag på hallen (pre-buy). NOK. */
+  dailyUsed: number;
+  /** Effektiv grense daglig (Math.min personal/regulatory). NOK. */
+  dailyLimit: number;
+  /** Brukt i måned på hallen (pre-buy). NOK. */
+  monthlyUsed: number;
+  /** Effektiv grense månedlig. NOK. */
+  monthlyLimit: number;
+  /**
+   * Tilgjengelig saldo på lommebok ETTER at reservasjonen for `accepted`
+   * brett er gjort, NOK. `null` hvis adapter ikke eksponerer
+   * `getAvailableBalance` (test-harnesses uten reservation-API).
+   */
+  walletBalance: number | null;
+}
+
 export interface LeaderboardPayload extends AuthenticatedSocketPayload {
   roomCode?: string;
 }

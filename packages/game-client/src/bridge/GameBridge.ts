@@ -7,6 +7,8 @@ import type {
   MiniGameTriggerPayload,
   MiniGameResultPayload,
   WalletStateEvent,
+  BetRejectedEvent,
+  WalletLossStateEvent,
 } from "@spillorama/shared-types/socket-events";
 import type {
   RoomSnapshot,
@@ -142,6 +144,18 @@ export interface GameBridgeEvents {
    * av room:update.
    */
   walletStateChanged: (event: WalletStateEvent) => void;
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): server pusher denne når
+   * forhåndskjøp avvises ved game-start-filter. Game1Controller lytter
+   * og fjerner pre-round-bonger + viser klar feilmelding.
+   */
+  betRejected: (event: BetRejectedEvent) => void;
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): tap-status-push etter
+   * committed buy-in. Brukes til å oppdatere "Brukt i dag: X / Y kr"-
+   * header i Kjøp Bonger-popup-en.
+   */
+  walletLossStateChanged: (event: WalletLossStateEvent) => void;
 }
 
 type EventMap = {
@@ -230,6 +244,8 @@ export class GameBridge {
     miniGameTrigger: new Set(),
     miniGameResult: new Set(),
     walletStateChanged: new Set(),
+    betRejected: new Set(),
+    walletLossStateChanged: new Set(),
   };
 
   constructor(socket: SpilloramaSocket) {
@@ -256,6 +272,15 @@ export class GameBridge {
       // event så lobby-shell-en kan oppdatere chip uten å hoppe via
       // room:update. Klient prefererer wallet:state over me.balance.
       this.socket.on("walletState", (payload) => this.handleWalletState(payload)),
+      // Tobias 2026-04-29 (post-orphan-fix UX): bet:rejected — server
+      // forteller klienten at forhåndskjøp ble avvist på game-start.
+      // Game1Controller lytter og fjerner pre-round-bonger + viser
+      // klar feilmelding.
+      this.socket.on("betRejected", (payload) => this.emit("betRejected", payload)),
+      // Tobias 2026-04-29 (post-orphan-fix UX): wallet:loss-state —
+      // tap-status-push etter committed buy-in. Brukes til å oppdatere
+      // tap-headeren i Kjøp Bonger-popup-en.
+      this.socket.on("walletLossState", (payload) => this.emit("walletLossStateChanged", payload)),
     );
   }
 

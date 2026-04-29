@@ -38,6 +38,8 @@ function makeDeps(overrides: Partial<SocketActionsDeps> = {}) {
 
   const playScreen = {
     showBuyPopupResult: vi.fn(),
+    showBuyPopupPartialResult: vi.fn(),
+    updateBuyPopupLossState: vi.fn(),
     hideBuyPopup: vi.fn(),
     reset: vi.fn(),
     update: vi.fn(),
@@ -81,20 +83,104 @@ describe("Game1SocketActions", () => {
       });
     });
 
-    it("closes the buy popup on success", async () => {
+    it("closes the buy popup on success via showBuyPopupResult(true) auto-hide", async () => {
+      // Tobias 2026-04-29: ny semantikk — showBuyPopupResult(true) auto-skjuler
+      // popup-en via setTimeout i Game1BuyPopup. Eksplisitt hideBuyPopup-kall
+      // er fjernet fra SocketActions.buy() så bruker faktisk får sett
+      // success-meldingen før popup-en lukkes.
       const { deps, playScreen } = makeDeps();
       await new Game1SocketActions(deps).buy();
-      expect(playScreen.hideBuyPopup).toHaveBeenCalledOnce();
+      expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
     });
 
-    it("reports error + keeps popup open on failure", async () => {
+    it("reports error + keeps popup open on failure (showBuyPopupResult(false))", async () => {
       const socket = {
         armBet: vi.fn().mockResolvedValue({ ok: false, error: { message: "Wallet empty" } }),
       } as unknown as SpilloramaSocket;
       const { deps, onError, playScreen } = makeDeps({ socket });
       await new Game1SocketActions(deps).buy();
       expect(onError).toHaveBeenCalledWith("Wallet empty");
+      expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(false, "Wallet empty");
       expect(playScreen.hideBuyPopup).not.toHaveBeenCalled();
+    });
+
+    it("partial-buy ack triggers showBuyPopupPartialResult med rejected/accepted", async () => {
+      // Tobias 2026-04-29: server returnerer lossLimit i ack med rejected > 0
+      // når partial-buy. SocketActions skal kalle showBuyPopupPartialResult
+      // i stedet for showBuyPopupResult(true).
+      const socket = {
+        armBet: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            armed: true,
+            snapshot: { code: "ROOM-1" },
+            lossLimit: {
+              requested: 3,
+              accepted: 2,
+              rejected: 1,
+              rejectionReason: "DAILY_LIMIT",
+              dailyUsed: 100,
+              dailyLimit: 100,
+              monthlyUsed: 200,
+              monthlyLimit: 4400,
+              walletBalance: 0,
+            },
+          },
+        }),
+      } as unknown as SpilloramaSocket;
+      const { deps, playScreen } = makeDeps({ socket });
+      await new Game1SocketActions(deps).buy([{ type: "small", qty: 3, name: "Small Yellow" }]);
+      expect(playScreen.showBuyPopupPartialResult).toHaveBeenCalledOnce();
+      expect(playScreen.showBuyPopupPartialResult).toHaveBeenCalledWith({
+        accepted: 2,
+        rejected: 1,
+        rejectionReason: "DAILY_LIMIT",
+        lossState: {
+          dailyUsed: 100,
+          dailyLimit: 100,
+          monthlyUsed: 200,
+          monthlyLimit: 4400,
+          walletBalance: 0,
+        },
+      });
+      // showBuyPopupResult skal IKKE være kalt
+      expect(playScreen.showBuyPopupResult).not.toHaveBeenCalled();
+      // updateBuyPopupLossState SKAL være kalt med ferskt tap-state
+      expect(playScreen.updateBuyPopupLossState).toHaveBeenCalled();
+    });
+
+    it("full-buy med lossLimit (rejected=0) triggers showBuyPopupResult(true) + lossState update", async () => {
+      const socket = {
+        armBet: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            armed: true,
+            snapshot: { code: "ROOM-1" },
+            lossLimit: {
+              requested: 2,
+              accepted: 2,
+              rejected: 0,
+              rejectionReason: null,
+              dailyUsed: 20,
+              dailyLimit: 900,
+              monthlyUsed: 50,
+              monthlyLimit: 4400,
+              walletBalance: 480,
+            },
+          },
+        }),
+      } as unknown as SpilloramaSocket;
+      const { deps, playScreen } = makeDeps({ socket });
+      await new Game1SocketActions(deps).buy();
+      expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
+      expect(playScreen.showBuyPopupPartialResult).not.toHaveBeenCalled();
+      expect(playScreen.updateBuyPopupLossState).toHaveBeenCalledWith({
+        dailyUsed: 20,
+        dailyLimit: 900,
+        monthlyUsed: 50,
+        monthlyLimit: 4400,
+        walletBalance: 480,
+      });
     });
   });
 

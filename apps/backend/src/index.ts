@@ -10,7 +10,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { Redis } from "ioredis";
 import { createWalletAdapter } from "./adapters/createWalletAdapter.js";
 import { WalletStateNotifyingAdapter } from "./adapters/walletStateNotifyingAdapter.js";
-import { createWalletStatePusher } from "./sockets/walletStatePusher.js";
+import { createWalletStatePusher, walletRoomKey } from "./sockets/walletStatePusher.js";
 import { LocalBingoSystemAdapter } from "./adapters/LocalBingoSystemAdapter.js";
 import { PostgresBingoSystemAdapter } from "./adapters/PostgresBingoSystemAdapter.js";
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
@@ -3092,6 +3092,62 @@ const registerGameEvents = createGameEventHandlers({
       return groups[0]?.id ?? null;
     } catch {
       return null;
+    }
+  },
+
+  // Tobias 2026-04-29 (post-orphan-fix UX): tap-state lookup brukt av
+  // bet:arm til å bygge `lossLimit` info i ack. Returnerer null fail-soft
+  // hvis adapter mangler getAvailableBalance.
+  getLossStateSnapshot: async (walletId, hallId, nowMs) => {
+    try {
+      const ls = engine.getLossLimitState(walletId, hallId, nowMs);
+      let walletBalance: number | null = null;
+      if (walletAdapter.getAvailableBalance) {
+        try {
+          walletBalance = await walletAdapter.getAvailableBalance(walletId);
+        } catch {
+          walletBalance = null;
+        }
+      }
+      return {
+        dailyUsed: ls.dailyUsed,
+        dailyLimit: ls.dailyLimit,
+        monthlyUsed: ls.monthlyUsed,
+        monthlyLimit: ls.monthlyLimit,
+        walletBalance,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  // Tobias 2026-04-29 (post-orphan-fix UX): emit `bet:rejected` til
+  // `wallet:<walletId>`-rommet for spilleren som ble droppet i game-
+  // start-filteret. Klient lytter for å fjerne pre-round-bonger og
+  // vise klar feilmelding. Eksisterer pga walletStatePusher allerede
+  // joiner sockets i wallet:<walletId>-rommet ved auth.
+  emitBetRejected: (walletId, payload) => {
+    try {
+      io.to(walletRoomKey(walletId)).emit("bet:rejected", payload);
+    } catch (err) {
+      console.warn(
+        "[bet:rejected] emit failed — game-start fortsetter, klient kan ikke vise feilmelding",
+        { walletId, err },
+      );
+    }
+  },
+
+  // Tobias 2026-04-29 (post-orphan-fix UX): emit `wallet:loss-state` etter
+  // committed buy-in (eller partial-buy partial). Klient bruker det til å
+  // oppdatere "Brukt i dag: X / Y kr"-headeren i Kjøp Bonger-popup-en.
+  emitWalletLossState: (walletId, payload) => {
+    try {
+      io.to(walletRoomKey(walletId)).emit("wallet:loss-state", payload);
+    } catch (err) {
+      console.warn(
+        "[wallet:loss-state] emit failed — klient ser stale tap-status til neste push",
+        { walletId, err },
+      );
     }
   },
 });

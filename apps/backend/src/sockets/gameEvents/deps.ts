@@ -165,4 +165,51 @@ export interface GameEventsDeps {
    * faller tilbake til hallId-basert canonical code (eksisterende oppførsel).
    */
   getHallGroupIdForHall?: (hallId: string) => Promise<string | null>;
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): hent ferskt netto-tap +
+   * effektiv grense + tilgjengelig saldo for en (walletId, hallId).
+   * Brukes av `bet:arm` til å beregne partial-buy + bygge `lossState`
+   * for ack/event-emit. Returnerer `null` hvis en avhengighet (compliance,
+   * wallet-adapter) mangler — handler-en faller tilbake til legacy-
+   * oppførsel (kun saldo-sjekk via reservation-adapter).
+   */
+  getLossStateSnapshot?: (
+    walletId: string,
+    hallId: string,
+    nowMs: number,
+  ) => Promise<{
+    dailyUsed: number;
+    dailyLimit: number;
+    monthlyUsed: number;
+    monthlyLimit: number;
+    walletBalance: number | null;
+  } | null>;
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): emit `bet:rejected` til
+   * `wallet:<walletId>`-rommet for spilleren som ble droppet i game-
+   * start-filteret (loss-limit eller insufficient-funds). Klienten
+   * lytter for å fjerne pre-round-bonger og vise klar feilmelding.
+   *
+   * Optional — test-harnesses uten Socket.IO-server kan utelate; handler-
+   * sidens fail-soft gjør at game-start fortsatt kjører selv om push feiler.
+   */
+  emitBetRejected?: (
+    walletId: string,
+    payload: import("@spillorama/shared-types/socket-events").BetRejectedEvent,
+  ) => void;
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): emit `wallet:loss-state`
+   * etter committed buy-in. Klient bruker det til å oppdatere
+   * "Brukt i dag: X / Y kr"-headeren i Kjøp Bonger-popup-en i sanntid.
+   *
+   * Optional — test-harnesses uten Socket.IO-server kan utelate;
+   * recordLossEntry-callsites fail-soft.
+   */
+  emitWalletLossState?: (
+    walletId: string,
+    payload: import("@spillorama/shared-types/socket-events").WalletLossStateEvent,
+  ) => void;
 }

@@ -30,6 +30,17 @@ export class Game1SocketActions {
    * Arm (kjøp) billetter for neste runde. Per-type-seleksjoner tillater
    * spillere å blande farger (Small Yellow + Small Purple), mens fallback-
    * `ticketCount` er beholdt for legacy single-arm-UX.
+   *
+   * Tobias 2026-04-29 (post-orphan-fix UX): server returnerer nå
+   * `lossLimit`-info på success-acks. Partial-buy (rejected > 0) viser
+   * en klar melding om hvor mange brett ble avvist og hvilken grense
+   * traff. Total avvisning (LOSS_LIMIT_REACHED-error) viser
+   * popup-feilmelding med tap-status og lar bruker prøve igjen.
+   *
+   * Bonger rendres ALDRI før server har confirmet kjøpet — popup-en er
+   * i `confirming`-state mens vi venter på ack, og pre-round-bonger
+   * vises kun etter server har lagt dem inn i armed-set (kommer i
+   * room:update etterpå).
    */
   async buy(selections: Array<{ type: string; qty: number; name?: string }> = []): Promise<void> {
     const payload: {
@@ -47,19 +58,53 @@ export class Game1SocketActions {
       payload.ticketCount = 1;
     }
     const result = await this.deps.socket.armBet(payload);
-    this.deps.getPlayScreen()?.showBuyPopupResult(result.ok, result.error?.message);
+
     if (!result.ok) {
-      this.deps.onError(result.error?.message || "Kunne ikke kjøpe billetter");
+      // Tobias 2026-04-29 (UX-fix): server-ack feilet med klar feilkode.
+      // Vis melding i popup-en og la bruker prøve igjen — ingen bonger
+      // er rendret, ingen state-endringer på klient-siden.
+      const message = result.error?.message || "Kunne ikke kjøpe billetter";
+      this.deps.getPlayScreen()?.showBuyPopupResult(false, message);
+      this.deps.onError(message);
       return;
     }
-    // Product decision 2026-04-20: every successful Kjøp closes the buy popup.
-    // Player re-opens via "Kjøp flere brett" (always at qty=0) to add more
-    // brett; the additive bet:arm merges with what's already armed so the
-    // previously-purchased brett stay visible in the ticket grid.
-    this.deps.getPlayScreen()?.hideBuyPopup();
-    // Tobias 2026-04-26: Reservasjon ble registrert server-side, men saldo
-    // oppdaterte først ved 30s-poll. Be lobby refetche umiddelbart så
-    // available-balance reflekterer reservasjonen.
+
+    // Tobias 2026-04-29 (UX-fix): success-ack — bygg lossState fra server-
+    // returnert lossLimit-info. Brukes til å rendre tap-headeren.
+    const lossLimit = result.data?.lossLimit;
+    const lossStateForUi = lossLimit
+      ? {
+          dailyUsed: lossLimit.dailyUsed,
+          dailyLimit: lossLimit.dailyLimit,
+          monthlyUsed: lossLimit.monthlyUsed,
+          monthlyLimit: lossLimit.monthlyLimit,
+          walletBalance: lossLimit.walletBalance,
+        }
+      : undefined;
+
+    // Update popup-headeren med fersk tap-status før vi viser result.
+    if (lossStateForUi) {
+      this.deps.getPlayScreen()?.updateBuyPopupLossState(lossStateForUi);
+    }
+
+    // Tobias 2026-04-29 (UX-fix): partial-buy — server aksepterte færre
+    // brett enn forespurt pga loss-limit. Vis klar melding om hva som ble
+    // kjøpt og hva som ble avvist. Popup-en auto-skjules etter 3.5 sek.
+    if (lossLimit && lossLimit.rejected > 0) {
+      this.deps.getPlayScreen()?.showBuyPopupPartialResult({
+        accepted: lossLimit.accepted,
+        rejected: lossLimit.rejected,
+        rejectionReason: lossLimit.rejectionReason,
+        lossState: lossStateForUi,
+      });
+    } else {
+      // Full-buy: standard success.
+      this.deps.getPlayScreen()?.showBuyPopupResult(true);
+    }
+
+    // Be lobby-shellen refetche saldo umiddelbart så chip-en reflekterer
+    // reservasjonen (mirroreres tidligere oppførsel — wallet:state-push
+    // dekker som sekundær path).
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("spillorama:balanceRefreshRequested"));
     }
