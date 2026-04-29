@@ -2,6 +2,7 @@
 
 import { renderBankIdVerifyPage } from "./VerifyPage.js";
 import { renderBankIdResponsePage } from "./ResponsePage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const BANKID_ROUTES = new Set<string>(["/bankid/verify", "/bankid/response"]);
 
@@ -19,6 +20,6 @@ export function mountBankIdRoute(container: HTMLElement, path: string): void {
       renderBankIdResponsePage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown bankid route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("bankid", path);
   }
 }

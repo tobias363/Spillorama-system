@@ -6,6 +6,7 @@
 
 import { renderWalletListPage } from "./WalletListPage.js";
 import { renderWalletViewPage } from "./WalletViewPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const WALLET_ROUTES = new Set<string>([
   "/wallet",
@@ -26,6 +27,6 @@ export function mountWalletRoute(container: HTMLElement, path: string): void {
       renderWalletViewPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown wallet route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("wallet", path);
   }
 }

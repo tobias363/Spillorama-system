@@ -1,6 +1,7 @@
 // PR-B2: Track-spending routes dispatcher.
 
 import { renderTrackSpendingPage } from "./TrackSpendingPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const TRACK_SPENDING_ROUTES = new Set<string>([
   "/players/track-spending",
@@ -16,5 +17,5 @@ export function mountTrackSpendingRoute(container: HTMLElement, path: string): v
     renderTrackSpendingPage(container);
     return;
   }
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown track-spending route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("track-spending", path);
 }

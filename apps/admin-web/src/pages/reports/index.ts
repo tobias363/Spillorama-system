@@ -19,6 +19,7 @@ import { renderUniqueGameReportPage } from "./uniqueGame/UniqueGameReportPage.js
 import { renderRedFlagCategoryPage } from "./redFlag/RedFlagCategoryPage.js";
 import { renderViewUserTransactionPage } from "./redFlag/ViewUserTransactionPage.js";
 import { renderTotalRevenueReportPage } from "./totalRevenue/TotalRevenueReportPage.js";
+import { escapeHtml } from "../../utils/escapeHtml.js";
 
 const STATIC_REPORT_ROUTES = new Set<string>([
   "/reportGame1",
@@ -145,12 +146,8 @@ export function mountReportRoute(container: HTMLElement, path: string): void {
     <div class="box box-danger">
       <div class="box-header with-border"><h3 class="box-title">404</h3></div>
       <div class="box-body">
-        <p>Ukjent rapport-rute: <code>${escapeAttr(path)}</code></p>
+        <p>Ukjent rapport-rute: <code>${escapeHtml(path)}</code></p>
         <a href="#/admin" class="btn btn-primary btn-sm">← Dashbord</a>
       </div>
     </div>`;
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }

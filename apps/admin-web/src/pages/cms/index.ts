@@ -20,6 +20,7 @@ import { renderFaqListPage } from "./FaqListPage.js";
 import { renderFaqFormPage } from "./FaqFormPage.js";
 import { renderCmsTextEditPage } from "./CmsTextEditPage.js";
 import type { CmsTextKey } from "../../api/admin-cms.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const FAQ_EDIT_RE = /^\/faqEdit\/[^/]+$/;
 
@@ -49,5 +50,5 @@ export function mountCmsRoute(container: HTMLElement, path: string): void {
   }
   const textKey = TEXT_ROUTE_MAP[path];
   if (textKey) return renderCmsTextEditPage(container, textKey);
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown CMS route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("CMS", path);
 }

@@ -10,6 +10,7 @@
 import { renderPlayerListPage } from "./PlayerListPage.js";
 import { renderPlayerDetailPage } from "./PlayerDetailPage.js";
 import { renderApprovedPlayerListPage } from "./approved/ApprovedPlayerListPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const PLAYER_ROUTES = new Set<string>([
   "/player",
@@ -38,6 +39,6 @@ export function mountPlayerRoute(container: HTMLElement, path: string): void {
       renderPlayerDetailPage(container, { mode: "approved" });
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown player route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("player", path);
   }
 }

@@ -15,6 +15,7 @@ import { renderLoyaltyManagementPage } from "./LoyaltyManagementPage.js";
 import { renderAddLoyaltyTierPage } from "./AddLoyaltyTierPage.js";
 import { renderLoyaltyPlayersPage } from "./LoyaltyPlayersPage.js";
 import { renderLoyaltyPlayerDetailPage } from "./LoyaltyPlayerDetailPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const LOYALTY_EDIT_RE = /^\/loyaltyManagement\/edit\/[^/]+$/;
 const LOYALTY_PLAYER_DETAIL_RE = /^\/loyaltyManagement\/players\/[^/]+$/;
@@ -52,5 +53,5 @@ export function mountLoyaltyRoute(container: HTMLElement, path: string): void {
     );
     return renderLoyaltyPlayerDetailPage(container, userId);
   }
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown loyalty route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("loyalty", path);
 }

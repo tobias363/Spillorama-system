@@ -22,6 +22,7 @@ import { renderImportCsvPage } from "./ImportCsvPage.js";
 import { renderRangeRegisterPage } from "./RangeRegisterPage.js";
 import { renderActiveRangesPage } from "./ActiveRangesPage.js";
 import { renderPendingPayoutsPage } from "./PendingPayoutsPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const PHYSICAL_TICKETS_ROUTES = new Set<string>([
   "/addPhysicalTickets",
@@ -72,6 +73,6 @@ export function mountPhysicalTicketsRoute(container: HTMLElement, path: string):
       currentCleanup = renderPendingPayoutsPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown physical-tickets route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("physical-tickets", path);
   }
 }

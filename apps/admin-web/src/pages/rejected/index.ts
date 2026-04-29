@@ -2,6 +2,7 @@
 
 import { renderRejectedListPage } from "./RejectedListPage.js";
 import { renderRejectedDetailPage } from "./RejectedDetailPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const REJECTED_ROUTES = new Set<string>(["/rejectedRequests", "/rejected/view"]);
 
@@ -19,6 +20,6 @@ export function mountRejectedRoute(container: HTMLElement, path: string): void {
       renderRejectedDetailPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown rejected route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("rejected", path);
   }
 }

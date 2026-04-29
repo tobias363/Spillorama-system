@@ -13,6 +13,7 @@ import { renderHallAccountListPage } from "./HallAccountListPage.js";
 import { renderHallAccountReportPage } from "./HallAccountReportPage.js";
 import { renderGroupHallAccountReportPage } from "./GroupHallAccountReportPage.js";
 import { renderSettlementPage } from "./SettlementPage.js";
+import { escapeHtml } from "../../utils/escapeHtml.js";
 
 const STATIC_ROUTES = new Set<string>(["/hallAccountReport"]);
 
@@ -56,14 +57,8 @@ export function mountHallAccountRoute(container: HTMLElement, path: string): voi
     <div class="box box-danger">
       <div class="box-header with-border"><h3 class="box-title">404</h3></div>
       <div class="box-body">
-        <p>Ukjent rute: <code>${escapeAttr(path)}</code></p>
+        <p>Ukjent rute: <code>${escapeHtml(path)}</code></p>
         <a href="#/admin" class="btn btn-primary btn-sm">← Dashbord</a>
       </div>
     </div>`;
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
-  );
 }

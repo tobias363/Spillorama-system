@@ -33,6 +33,7 @@ import { renderScheduleListPage } from "./schedules/ScheduleListPage.js";
 import { renderScheduleDetailPages } from "./schedules/ScheduleDetailPages.js";
 import { renderDailyScheduleDetailPages } from "./dailySchedules/DailyScheduleDetailPages.js";
 import { renderGame1MasterConsole } from "./master/Game1MasterConsole.js";
+import { escapeHtml } from "../../utils/escapeHtml.js";
 
 /** Static routes that resolve via routes.ts directly (no params). */
 const STATIC_GAMES_ROUTES = new Set<string>([
@@ -359,12 +360,8 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
     <div class="box box-danger">
       <div class="box-header with-border"><h3 class="box-title">404</h3></div>
       <div class="box-body">
-        <p>Ukjent games-rute: <code>${escapeAttr(path)}</code></p>
+        <p>Ukjent games-rute: <code>${escapeHtml(path)}</code></p>
         <a href="#/admin" class="btn btn-primary btn-sm">← Dashbord</a>
       </div>
     </div>`;
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }

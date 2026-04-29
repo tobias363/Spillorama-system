@@ -19,6 +19,7 @@ import { renderUserListPage } from "./UserListPage.js";
 import { renderAgentListPage } from "./AgentListPage.js";
 import { renderAgentFormPage } from "./AgentFormPage.js";
 import { renderAdminEditRolePage } from "./AdminEditRolePage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const STATIC_ROUTES = new Set<string>([
   "/adminUser",
@@ -80,5 +81,5 @@ export function mountAdminUsersRoute(container: HTMLElement, path: string): void
     });
   }
 
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown admin-users route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("admin-users", path);
 }

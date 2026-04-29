@@ -11,6 +11,7 @@
 
 import { renderHallListPage } from "./HallListPage.js";
 import { renderHallFormPage } from "./HallFormPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const HALL_EDIT_RE = /^\/hall\/edit\/[^/]+$/;
 
@@ -26,5 +27,5 @@ export function mountHallRoute(container: HTMLElement, path: string): void {
     const id = decodeURIComponent(path.slice("/hall/edit/".length));
     return renderHallFormPage(container, id);
   }
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown hall route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("hall", path);
 }

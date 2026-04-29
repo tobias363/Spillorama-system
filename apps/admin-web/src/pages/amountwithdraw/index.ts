@@ -16,6 +16,7 @@ import { renderRequestsPage } from "./RequestsPage.js";
 import { renderHistoryPage } from "./HistoryPage.js";
 import { renderEmailsPage } from "./EmailsPage.js";
 import { renderXmlBatchesPage } from "./XmlBatchesPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const AMOUNTWITHDRAW_ROUTES = new Set<string>([
   "/withdraw/requests/bank",
@@ -64,6 +65,6 @@ export function mountAmountwithdrawRoute(container: HTMLElement, path: string): 
       renderXmlBatchesPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown amountwithdraw route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("amountwithdraw", path);
   }
 }

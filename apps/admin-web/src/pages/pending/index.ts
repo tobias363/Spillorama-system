@@ -2,6 +2,7 @@
 
 import { renderPendingListPage } from "./PendingListPage.js";
 import { renderPendingDetailPage } from "./PendingDetailPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const PENDING_ROUTES = new Set<string>(["/pendingRequests", "/pending/view"]);
 
@@ -19,6 +20,6 @@ export function mountPendingRoute(container: HTMLElement, path: string): void {
       renderPendingDetailPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown pending route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("pending", path);
   }
 }

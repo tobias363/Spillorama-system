@@ -12,6 +12,7 @@
 
 import { renderUniqueIdLookupPage } from "./LookupPage.js";
 import { renderUniqueIdListPage } from "./ListPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const UNIQUE_ID_ROUTES = new Set<string>([
   "/uniqueId",
@@ -32,6 +33,6 @@ export function mountUniqueIdRoute(container: HTMLElement, path: string): void {
       renderUniqueIdListPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown unique-id route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("unique-id", path);
   }
 }

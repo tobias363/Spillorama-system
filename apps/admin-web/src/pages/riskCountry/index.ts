@@ -9,6 +9,7 @@
 // See docs/archive/legacy-admin-bkp/README.md for details.
 
 import { renderRiskCountryPage } from "./RiskCountryPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const RISK_COUNTRY_ROUTES = new Set<string>(["/riskCountry"]);
 
@@ -23,6 +24,6 @@ export function mountRiskCountryRoute(container: HTMLElement, path: string): voi
       renderRiskCountryPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown riskCountry route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("riskCountry", path);
   }
 }

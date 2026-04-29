@@ -6,6 +6,8 @@
 // socket cleanly. main.ts re-mounts on every navigation, so we dispose
 // the previous handle before creating a new one.
 
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
+
 import {
   renderAdminOpsConsolePage,
   type AdminOpsConsoleHandle,
@@ -24,7 +26,7 @@ export function mountAdminOpsRoute(container: HTMLElement, path: string): void {
     activeHandle = renderAdminOpsConsolePage(container);
     return;
   }
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown admin-ops route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("admin-ops", path);
 }
 
 export function unmountAdminOps(): void {

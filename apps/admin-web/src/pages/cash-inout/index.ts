@@ -13,6 +13,7 @@ import { renderProductCartPage } from "./ProductCartPage.js";
 import { renderPhysicalCashoutPage } from "./PhysicalCashoutPage.js";
 import { renderPhysicalCashoutSubGameDetailPage } from "./PhysicalCashoutSubGameDetailPage.js";
 import { renderCashoutDetailsPage } from "./CashoutDetailsPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const CASH_INOUT_ROUTES = new Set<string>([
   "/agent/cashinout",
@@ -79,7 +80,7 @@ export function mountCashInOutRoute(container: HTMLElement, path: string): void 
     case "/agent/register-user/withdraw":
       return renderBalancePageFor(container, "register-user", "withdraw");
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown cash-inout route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("cash-inout", path);
   }
 }
 

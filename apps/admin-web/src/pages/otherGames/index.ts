@@ -12,6 +12,7 @@
 
 import { renderMiniGameConfigPage } from "./MiniGameConfigPage.js";
 import type { MiniGameType } from "../../api/admin-other-games.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const ROUTE_TO_TYPE: Record<string, MiniGameType> = {
   "/wheelOfFortune": "wheel",
@@ -30,7 +31,7 @@ export function mountOtherGamesRoute(container: HTMLElement, path: string): void
   container.innerHTML = "";
   const type = ROUTE_TO_TYPE[path];
   if (!type) {
-    container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown otherGames route: ${path}</div></div>`;
+    container.innerHTML = renderUnknownRoute("otherGames", path);
     return;
   }
   renderMiniGameConfigPage(container, type);

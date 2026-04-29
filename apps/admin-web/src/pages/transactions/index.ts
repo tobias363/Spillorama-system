@@ -10,6 +10,7 @@ import { renderDepositRequestsPage } from "./DepositRequestsPage.js";
 import { renderDepositHistoryPage } from "./DepositHistoryPage.js";
 import { renderDepositTransactionPlaceholderPage } from "./DepositTransactionPlaceholderPage.js";
 import { renderTransactionsLogPage } from "./TransactionsLogPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const TRANSACTION_ROUTES = new Set<string>([
   "/deposit/requests",
@@ -38,6 +39,6 @@ export function mountTransactionRoute(container: HTMLElement, path: string): voi
       renderTransactionsLogPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown transaction route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("transaction", path);
   }
 }

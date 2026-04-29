@@ -13,6 +13,7 @@ import { renderRoleListPage } from "./RoleListPage.js";
 import { renderRoleMatrixPage } from "./RoleMatrixPage.js";
 import { renderAssignRolePage } from "./AssignRolePage.js";
 import { renderAgentRolePermissionsPage } from "./AgentRolePermissionsPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const ROLE_ROUTES = new Set<string>([
   "/role",
@@ -41,6 +42,6 @@ export function mountRoleRoute(container: HTMLElement, path: string): void {
       renderAgentRolePermissionsPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown role route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("role", path);
   }
 }

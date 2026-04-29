@@ -9,6 +9,7 @@
 
 import { renderSystemInformationPage } from "./SystemInformationPage.js";
 import { renderSystemDiagnosticsPage } from "./SystemDiagnosticsPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 export function isSystemInformationRoute(path: string): boolean {
   return path === "/system/systemInformation" || path === "/system/info";
@@ -18,5 +19,5 @@ export function mountSystemInformationRoute(container: HTMLElement, path: string
   container.innerHTML = "";
   if (path === "/system/systemInformation") return renderSystemInformationPage(container);
   if (path === "/system/info") return renderSystemDiagnosticsPage(container);
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown system route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("system", path);
 }

@@ -12,6 +12,7 @@
 // docs/archive/legacy-admin-bkp/README.md.
 
 import { renderBlockedIpsPage } from "./BlockedIpsPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const SECURITY_ROUTES = new Set<string>(["/blockedIp"]);
 
@@ -26,6 +27,6 @@ export function mountSecurityRoute(container: HTMLElement, path: string): void {
       renderBlockedIpsPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown security route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("security", path);
   }
 }

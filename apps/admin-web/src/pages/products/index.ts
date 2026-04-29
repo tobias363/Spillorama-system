@@ -11,6 +11,7 @@
 import { renderProductListPage } from "./ProductListPage.js";
 import { renderCategoryListPage } from "./CategoryListPage.js";
 import { renderHallProductsPage } from "./HallProductsPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const PRODUCTS_ROUTES = new Set<string>([
   "/productList",
@@ -35,6 +36,6 @@ export function mountProductsRoute(container: HTMLElement, path: string): void {
       renderHallProductsPage(container);
       return;
     default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown products route: ${path}</div></div>`;
+      container.innerHTML = renderUnknownRoute("products", path);
   }
 }

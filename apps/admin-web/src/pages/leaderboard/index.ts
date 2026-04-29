@@ -7,6 +7,7 @@
 
 import { renderLeaderboardPage } from "./LeaderboardPage.js";
 import { renderAddLeaderboardPage } from "./AddLeaderboardPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const LEADERBOARD_EDIT_RE = /^\/leaderboard\/edit\/[^/]+$/;
 
@@ -23,5 +24,5 @@ export function mountLeaderboardRoute(container: HTMLElement, path: string): voi
     const id = decodeURIComponent(path.slice("/leaderboard/edit/".length));
     return renderAddLeaderboardPage(container, id);
   }
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown leaderboard route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("leaderboard", path);
 }

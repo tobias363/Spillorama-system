@@ -9,6 +9,7 @@
 import { renderSettingsPage } from "./SettingsPage.js";
 import { renderMaintenanceListPage } from "./MaintenanceListPage.js";
 import { renderMaintenanceFormPage } from "./MaintenanceFormPage.js";
+import { renderUnknownRoute } from "../../utils/escapeHtml.js";
 
 const MAINTENANCE_EDIT_RE = /^\/maintenance\/edit\/[^/]+$/;
 
@@ -28,5 +29,5 @@ export function mountSettingsRoute(container: HTMLElement, path: string): void {
     const id = decodeURIComponent(path.slice("/maintenance/edit/".length));
     return renderMaintenanceFormPage(container, id);
   }
-  container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown settings route: ${path}</div></div>`;
+  container.innerHTML = renderUnknownRoute("settings", path);
 }

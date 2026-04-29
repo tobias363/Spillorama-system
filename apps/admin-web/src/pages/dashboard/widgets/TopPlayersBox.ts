@@ -46,7 +46,7 @@ export function renderTopPlayersBox(opts: TopPlayersOptions): HTMLElement {
         ? `<a class="users-list-name" href="#/player/${encodeURIComponent(p.id)}">${escapeHtml(p.username)}</a>`
         : `<span class="users-list-name">${escapeHtml(p.username)}</span>`;
       li.innerHTML = `
-        <img src="${escapeAttr(avatar)}" alt="User Image" style="border-radius:50%;max-width:100%;height:79px;">
+        <img src="${escapeHtml(avatar)}" alt="User Image" style="border-radius:50%;max-width:100%;height:79px;">
         ${nameMarkup}
         <span class="users-list-data">${Math.floor(p.walletAmount)} Kr</span>`;
       ul.append(li);
@@ -62,7 +62,4 @@ export function renderTopPlayersBox(opts: TopPlayersOptions): HTMLElement {
   }
   box.append(footer);
   return box;
-}
-function escapeAttr(s: string): string {
-  return s.replace(/["<>&]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
