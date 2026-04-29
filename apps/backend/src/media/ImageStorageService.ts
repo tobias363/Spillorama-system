@@ -29,7 +29,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export type ImageCategory = "profile" | "bankid_selfie" | "bankid_document";
 

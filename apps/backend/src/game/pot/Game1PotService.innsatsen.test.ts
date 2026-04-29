@@ -19,7 +19,7 @@ import {
   validatePotConfig,
   type PotConfig,
 } from "./Game1PotService.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Stub pool (kopiert fra Game1PotService.test.ts) ─────────────────────────
 

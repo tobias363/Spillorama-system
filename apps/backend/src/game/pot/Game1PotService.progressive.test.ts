@@ -20,7 +20,7 @@ import {
   evaluateDrawSequenceAgainstRule,
   type PotConfig,
 } from "./Game1PotService.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Stub pool (samme mønster som T1-tester) ─────────────────────────────────
 

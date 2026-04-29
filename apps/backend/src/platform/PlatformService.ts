@@ -5,7 +5,7 @@ import { getPoolTuning } from "../util/pgPool.js";
 import type { KycAdapter } from "../adapters/KycAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { SubGameManager, type PlannedChildGame, type SubGameInput } from "../game/SubGameManager.js";
 
 const scrypt = promisify(scryptCallback);

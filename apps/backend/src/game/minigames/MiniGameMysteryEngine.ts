@@ -76,7 +76,7 @@
  */
 
 import { createHash, randomInt } from "node:crypto";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type {
   MiniGame,
   MiniGameChoiceInput,

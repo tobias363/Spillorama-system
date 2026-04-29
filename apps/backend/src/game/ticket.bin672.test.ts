@@ -21,7 +21,7 @@ import {
   uses75Ball,
   usesDatabingo60,
 } from "./ticket.js";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 test("BIN-672: generateTicketForGame throws on undefined gameSlug", () => {
   assert.throws(

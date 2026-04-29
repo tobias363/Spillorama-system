@@ -33,7 +33,7 @@ import {
   type WheelRng,
 } from "./MiniGameWheelEngine.js";
 import type { MiniGameTriggerContext } from "./types.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -26,7 +26,7 @@ import type { HallGroupService, HallGroup } from "../../admin/HallGroupService.j
 import type { AgentService } from "../../agent/AgentService.js";
 import type { AgentProfile } from "../../agent/AgentStore.js";
 import type { ComplianceLedgerEntry } from "../../game/ComplianceLedger.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

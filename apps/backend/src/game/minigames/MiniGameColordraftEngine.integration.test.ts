@@ -28,7 +28,7 @@ import {
   MiniGameColordraftEngine,
   type ColordraftResultJson,
 } from "./MiniGameColordraftEngine.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

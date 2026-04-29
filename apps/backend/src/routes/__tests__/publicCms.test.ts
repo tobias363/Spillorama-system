@@ -28,7 +28,7 @@ import {
   type CmsSlug,
   type FaqEntry,
 } from "../../admin/CmsService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { randomUUID } from "node:crypto";
 
 interface Ctx {

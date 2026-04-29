@@ -16,7 +16,7 @@
  * request path.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, AppUser, UserRole } from "../platform/PlatformService.js";
 import type {
   AgentStore,

@@ -12,7 +12,7 @@ import {
   AGENT_PERMISSION_MODULES,
   type AgentPermissionModule,
 } from "./AgentPermissionService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 interface FakeRow {
   id: string;

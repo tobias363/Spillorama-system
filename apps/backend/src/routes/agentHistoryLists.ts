@@ -20,7 +20,7 @@
  */
 
 import express from "express";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, PublicAppUser, UserRole } from "../platform/PlatformService.js";
 import type { AgentService } from "../agent/AgentService.js";
 import type { AgentShiftService } from "../agent/AgentShiftService.js";

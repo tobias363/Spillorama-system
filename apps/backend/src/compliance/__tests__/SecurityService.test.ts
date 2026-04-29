@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 import { SecurityService } from "../SecurityService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface EmailRow { id: string; email: string; label: string | null; added_by: string | null; created_at: Date }
 interface CountryRow { country_code: string; label: string; reason: string | null; added_by: string | null; created_at: Date }

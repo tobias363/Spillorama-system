@@ -7,7 +7,7 @@
 
 import { Pool } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type {
   BingoSystemAdapter,
   CheckpointInput,

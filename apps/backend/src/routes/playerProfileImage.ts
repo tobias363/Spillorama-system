@@ -38,7 +38,7 @@ import {
   apiFailure,
   getAccessTokenFromRequest,
 } from "../util/httpHelpers.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   type ImageCategory,
   type ImageStorageAdapter,

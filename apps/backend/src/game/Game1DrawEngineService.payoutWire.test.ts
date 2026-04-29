@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 import { Game1PayoutService } from "./Game1PayoutService.js";
 import { Game1JackpotService } from "./Game1JackpotService.js";

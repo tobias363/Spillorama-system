@@ -20,7 +20,7 @@ import type {
   TvGameState,
   TvWinnersSummary,
 } from "../../game/TvScreenService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const validHall: HallDefinition = {
   id: "hall-1",

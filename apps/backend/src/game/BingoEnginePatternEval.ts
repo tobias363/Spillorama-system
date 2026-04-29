@@ -56,7 +56,8 @@ import type {
   RoomState,
   Ticket,
 } from "./types.js";
-import { DomainError, ballToColumn } from "./BingoEngine.js";
+import { ballToColumn } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 const logger = rootLogger.child({ module: "engine.patternEval" });
 

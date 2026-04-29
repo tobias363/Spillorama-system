@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GameTypeService } from "./GameTypeService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): GameTypeService {
   const svc = Object.create(GameTypeService.prototype) as GameTypeService;

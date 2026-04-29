@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { TwoFactorService } from "../TwoFactorService.js";
 import { generateTotpCode } from "../Totp.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface UserTwoFaRow {
   user_id: string;

@@ -19,7 +19,7 @@ import {
   PhysicalTicketsAggregateService,
   type PhysicalTicketsAggregateFilter,
 } from "./PhysicalTicketsAggregate.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 interface QueryCall {
   sql: string;

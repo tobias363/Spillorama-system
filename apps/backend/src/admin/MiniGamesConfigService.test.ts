@@ -15,7 +15,7 @@ import {
   assertMiniGameType,
   type MiniGameType,
 } from "./MiniGamesConfigService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): MiniGamesConfigService {
   const svc = Object.create(

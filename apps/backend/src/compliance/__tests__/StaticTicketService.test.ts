@@ -18,7 +18,7 @@ import {
   deriveColorFamily,
   MAX_CSV_ROWS,
 } from "../StaticTicketService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 

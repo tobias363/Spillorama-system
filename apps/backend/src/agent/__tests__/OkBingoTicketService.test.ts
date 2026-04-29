@@ -16,7 +16,7 @@ import { InMemoryMachineTicketStore } from "../MachineTicketStore.js";
 import { InMemoryWalletAdapter } from "../../adapters/InMemoryWalletAdapter.js";
 import { StubOkBingoApiClient } from "../../integration/okbingo/StubOkBingoApiClient.js";
 import type { AppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface TestCtx {
   service: OkBingoTicketService;

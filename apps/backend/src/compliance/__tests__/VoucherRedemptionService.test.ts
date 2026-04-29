@@ -14,7 +14,7 @@ import {
   VoucherRedemptionService,
   computeDiscountCents,
 } from "../VoucherRedemptionService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 type VoucherType = "PERCENTAGE" | "FLAT_AMOUNT";
 

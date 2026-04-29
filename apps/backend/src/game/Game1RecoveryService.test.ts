@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { Game1RecoveryService } from "./Game1RecoveryService.js";
 
 interface RecordedQuery {

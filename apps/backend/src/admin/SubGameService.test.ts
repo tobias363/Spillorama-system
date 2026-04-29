@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SubGameService } from "./SubGameService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): SubGameService {
   const svc = Object.create(SubGameService.prototype) as SubGameService;

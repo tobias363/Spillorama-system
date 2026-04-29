@@ -10,7 +10,7 @@
  * Returnerer normalisert form `+47XXXXXXXX` eller kaster DomainError.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 /**
  * Normaliser et norsk telefonnummer til kanonisk +47XXXXXXXX-form.

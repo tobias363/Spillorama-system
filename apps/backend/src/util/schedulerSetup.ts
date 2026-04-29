@@ -3,7 +3,7 @@
  * Extracted from index.ts. Stateless — all mutable data is passed as arguments.
  */
 import type { Server } from "socket.io";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { DrawScheduler, SchedulerSettings } from "../draw-engine/DrawScheduler.js";
 import type { BingoSchedulerSettings } from "./bingoSettings.js";

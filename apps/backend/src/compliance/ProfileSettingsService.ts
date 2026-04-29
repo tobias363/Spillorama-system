@@ -28,7 +28,7 @@
  */
 
 import type { Pool } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlayerComplianceSnapshot } from "../game/ComplianceManagerTypes.js";
 import type { ResponsibleGamingPersistenceAdapter } from "../game/ResponsibleGamingPersistence.js";

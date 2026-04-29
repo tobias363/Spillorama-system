@@ -40,7 +40,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   TICKET_TYPES,
   TICKET_TYPE_LABELS,

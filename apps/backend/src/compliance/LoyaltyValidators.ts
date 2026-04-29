@@ -6,7 +6,7 @@
  * service-klassen for input-validering, date-helpers og row-normalisering.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export function asIso(value: Date | string): string {
   return typeof value === "string" ? value : value.toISOString();

@@ -43,7 +43,7 @@ import type { MachineTicket, MachineTicketStore } from "../agent/MachineTicketSt
 import type { MetroniaTicketService } from "../agent/MetroniaTicketService.js";
 import type { OkBingoTicketService } from "../agent/OkBingoTicketService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "job:machine-ticket-auto-close" });

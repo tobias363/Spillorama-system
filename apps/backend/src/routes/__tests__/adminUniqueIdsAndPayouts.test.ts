@@ -18,7 +18,7 @@ import type {
 } from "../../compliance/PhysicalTicketService.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser, AppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1", email: "a@test.no", displayName: "Admin",

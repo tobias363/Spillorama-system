@@ -15,7 +15,7 @@ import {
   CMS_VERSION_HISTORY_REQUIRED,
   type CmsContentVersion,
 } from "./CmsService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): CmsService {
   const svc = Object.create(CmsService.prototype) as CmsService;

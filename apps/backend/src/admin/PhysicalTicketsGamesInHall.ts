@@ -28,7 +28,7 @@
  */
 
 import { Pool } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { getPoolTuning } from "../util/pgPool.js";
 
 /** Én aggregat-rad per `assigned_game_id` (inkl. `null`). */

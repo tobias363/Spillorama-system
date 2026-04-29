@@ -14,7 +14,8 @@ import {
   type WalletTransferResult
 } from "../adapters/WalletAdapter.js";
 import type { ClaimRecord, Ticket } from "./types.js";
-import { BingoEngine, DomainError } from "./BingoEngine.js";
+import { BingoEngine } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export class InMemoryWalletAdapter implements WalletAdapter {
   private readonly accounts = new Map<string, WalletAccount>();

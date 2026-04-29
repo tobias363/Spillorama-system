@@ -29,7 +29,7 @@ import type {
   HallReadyStatusRow,
   HallStatusForGame,
 } from "../../game/Game1HallReadyService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

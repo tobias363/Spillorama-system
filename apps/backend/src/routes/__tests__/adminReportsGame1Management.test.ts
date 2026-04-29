@@ -26,7 +26,7 @@ import type {
 } from "../../platform/PlatformService.js";
 import type { HallGroupService, HallGroup } from "../../admin/HallGroupService.js";
 import type { ComplianceLedgerEntry } from "../../game/ComplianceLedger.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

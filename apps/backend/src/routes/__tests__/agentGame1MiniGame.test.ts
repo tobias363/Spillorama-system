@@ -34,7 +34,7 @@ import type {
   MaybeTriggerInput,
   MaybeTriggerResult,
 } from "../../game/minigames/Game1MiniGameOrchestrator.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface ScheduledRow {
   id: string;

@@ -55,7 +55,7 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { BingoEngine } from "../game/BingoEngine.js";
 // AgentTransactionService trenger ensureAccount() — bruk adapters/-versjonen.
 // BingoEngine-testen har sin egen lighter-versjon uten ensureAccount.

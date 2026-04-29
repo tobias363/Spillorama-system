@@ -26,7 +26,8 @@
  */
 
 import type { Namespace, Server as SocketServer, Socket } from "socket.io";
-import { DomainError, toPublicError } from "../game/BingoEngine.js";
+import { toPublicError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type {
   PlatformService,
   PublicAppUser,

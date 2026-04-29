@@ -24,7 +24,7 @@ import type { MetroniaTicketService } from "../../agent/MetroniaTicketService.js
 import type { OkBingoTicketService } from "../../agent/OkBingoTicketService.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import { InMemoryAuditLogStore, AuditLogService as AuditLogServiceImpl } from "../../compliance/AuditLogService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { logger as rootLogger } from "../../util/logger.js";
 
 const silentLogger = rootLogger.child({ module: "test" });

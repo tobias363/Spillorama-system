@@ -28,7 +28,7 @@ import {
   type MysteryDirection,
   type MysteryResultJson,
 } from "./MiniGameMysteryEngine.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

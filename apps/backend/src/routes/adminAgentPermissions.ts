@@ -19,7 +19,7 @@
  */
 
 import express from "express";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, UserRole, PublicAppUser } from "../platform/PlatformService.js";
 import type { AgentService } from "../agent/AgentService.js";
 import type { AuditLogService, AuditActorType } from "../compliance/AuditLogService.js";

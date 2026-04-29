@@ -46,7 +46,8 @@ import type {
 } from "../game/minigames/Game1MiniGameOrchestrator.js";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
-import { DomainError, toPublicError } from "../game/BingoEngine.js";
+import { toPublicError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "mini-game-socket-wire" });

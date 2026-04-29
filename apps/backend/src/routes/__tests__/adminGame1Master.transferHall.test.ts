@@ -18,7 +18,7 @@ import type {
   Game1TransferHallService,
   TransferRequest,
 } from "../../game/Game1TransferHallService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

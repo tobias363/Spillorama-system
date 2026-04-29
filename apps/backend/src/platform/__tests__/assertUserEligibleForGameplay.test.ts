@@ -16,7 +16,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { PlatformService, type PublicAppUser } from "../PlatformService.js";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;

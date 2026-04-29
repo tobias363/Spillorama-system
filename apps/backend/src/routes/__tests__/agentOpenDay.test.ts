@@ -19,7 +19,7 @@ import type { AgentService } from "../../agent/AgentService.js";
 import type { AgentShiftService } from "../../agent/AgentShiftService.js";
 import type { AgentOpenDayService, OpenDayResult, DailyBalanceSnapshot } from "../../agent/AgentOpenDayService.js";
 import type { HallAccountReportService } from "../../compliance/HallAccountReportService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const agentUser: PublicAppUser = {
   id: "ag-1", email: "a@test.no", displayName: "Agent",

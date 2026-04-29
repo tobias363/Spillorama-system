@@ -16,7 +16,7 @@ import type { AgentShiftService } from "../AgentShiftService.js";
 import type { AgentStore, ShiftCashDelta } from "../AgentStore.js";
 import type { HallCashLedger, HallCashTransaction } from "../HallCashLedger.js";
 import type { AgentSettlementStore, AgentSettlement } from "../AgentSettlementStore.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface TestCtx {
   service: AgentOpenDayService;

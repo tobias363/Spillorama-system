@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 import { AuthTokenService, type AuthTokenKind } from "../AuthTokenService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface Row {
   id: string;

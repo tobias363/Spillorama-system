@@ -6,7 +6,7 @@
  * input-validering og row-parsing.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   VALID_BATCH_STATUSES,
   VALID_PHYSICAL_TICKET_PATTERNS,

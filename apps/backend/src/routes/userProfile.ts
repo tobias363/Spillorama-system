@@ -18,7 +18,7 @@ import express from "express";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { ProfileSettingsService, SelfExcludeDuration, SupportedLanguage } from "../compliance/ProfileSettingsService.js";
 import type { AuditActorType } from "../compliance/AuditLogService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   apiSuccess,
   apiFailure,

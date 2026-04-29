@@ -1,5 +1,5 @@
 import express from "express";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { UserRole } from "../platform/PlatformService.js";
 import { APP_USER_ROLES } from "../platform/PlatformService.js";
 import {

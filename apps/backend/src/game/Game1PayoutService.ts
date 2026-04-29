@@ -44,7 +44,7 @@ import {
   type ComplianceLedgerPort,
 } from "../adapters/ComplianceLedgerPort.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import { logger as rootLogger } from "../util/logger.js";

@@ -29,7 +29,7 @@ import { AGENT_PERMISSION_MODULES } from "../../platform/AgentPermissionService.
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import type { AgentService } from "../../agent/AgentService.js";
 import type { AgentProfile } from "../../agent/AgentStore.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

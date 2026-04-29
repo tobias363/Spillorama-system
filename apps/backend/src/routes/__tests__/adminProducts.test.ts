@@ -15,7 +15,7 @@ import {
 } from "../../compliance/AuditLogService.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import type { ProductService } from "../../agent/ProductService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1", email: "a@test.no", displayName: "Admin",

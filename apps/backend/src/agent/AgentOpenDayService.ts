@@ -21,7 +21,7 @@
  *   - amount må være > 0 og ≤ hall.cashBalance
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { AgentService } from "./AgentService.js";
 import type { AgentShiftService } from "./AgentShiftService.js";
 import type { AgentStore, ShiftCashDelta } from "./AgentStore.js";

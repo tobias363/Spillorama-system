@@ -33,7 +33,7 @@ import {
   type AuditLogger,
 } from "../SwedbankPayService.js";
 import type { WalletAdapter, WalletTransaction } from "../../adapters/WalletAdapter.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Mock pg.Pool ────────────────────────────────────────────────────────────
 

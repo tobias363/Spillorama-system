@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DrawScheduler, type SchedulerSettings, type RoomSummary } from "../DrawScheduler.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Shared helpers ──────────────────────────────────────────────
 

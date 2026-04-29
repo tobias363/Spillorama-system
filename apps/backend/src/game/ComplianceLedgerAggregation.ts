@@ -12,7 +12,7 @@
 //   * Sorteringsorden: hallId → gameType → channel (localeCompare)
 //   * Cap: MAX_DAYS=366, MAX_MONTHS=60 (range/timeseries-beskyttelse)
 
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { roundCurrency } from "../util/currency.js";
 import type {
   ComplianceLedgerEntry,

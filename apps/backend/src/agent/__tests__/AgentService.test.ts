@@ -13,7 +13,7 @@ import test from "node:test";
 import { AgentService } from "../AgentService.js";
 import { InMemoryAgentStore } from "../AgentStore.js";
 import type { AppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface StubCreatedUser {
   email: string;

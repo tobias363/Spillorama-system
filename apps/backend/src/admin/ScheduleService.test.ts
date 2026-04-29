@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ScheduleService } from "./ScheduleService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;
 

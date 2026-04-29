@@ -14,7 +14,7 @@
  * per room for the health endpoint.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 // ── Types ─────────────────────────────────────────────────────
 

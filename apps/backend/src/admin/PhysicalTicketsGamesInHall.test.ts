@@ -20,7 +20,7 @@ import {
   PhysicalTicketsGamesInHallService,
   type GamesInHallFilter,
 } from "./PhysicalTicketsGamesInHall.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 interface QueryCall {
   sql: string;

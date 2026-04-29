@@ -8,7 +8,7 @@ import {
   normalizeNorwegianPhone,
   isValidNorwegianPhone,
 } from "../phoneValidation.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 test("REQ-130: normalizeNorwegianPhone aksepterer +47 + 8 siffer", () => {
   assert.equal(normalizeNorwegianPhone("+4791234567"), "+4791234567");

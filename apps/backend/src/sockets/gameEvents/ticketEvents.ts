@@ -20,7 +20,7 @@ import {
   TicketSwapPayloadSchema,
   TicketCancelPayloadSchema,
 } from "@spillorama/shared-types/socket-events";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { IdempotencyKeys } from "../../game/idempotency.js";
 import type { SocketContext } from "./context.js";
 import type { AckResponse, MarkPayload } from "./types.js";

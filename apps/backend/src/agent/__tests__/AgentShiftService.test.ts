@@ -8,7 +8,7 @@ import { AgentShiftService } from "../AgentShiftService.js";
 import { AgentService } from "../AgentService.js";
 import { InMemoryAgentStore } from "../AgentStore.js";
 import type { AppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeServices() {
   const store = new InMemoryAgentStore();

@@ -18,7 +18,8 @@
  */
 import type { Server, Socket } from "socket.io";
 import type { Logger } from "pino";
-import { DomainError, toPublicError } from "../../game/BingoEngine.js";
+import { toPublicError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { addBreadcrumb, captureError } from "../../observability/sentry.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";

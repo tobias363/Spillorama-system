@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PlatformService, type HallDefinition } from "../PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
 
 function makeHall(

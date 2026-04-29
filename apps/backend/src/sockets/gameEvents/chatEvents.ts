@@ -15,7 +15,7 @@
  * `HALL_REQUIRED` hvis spilleren mangler hallId, og anomalien logges.
  */
 import { randomUUID } from "node:crypto";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { SocketContext } from "./context.js";
 import type {
   AckResponse,

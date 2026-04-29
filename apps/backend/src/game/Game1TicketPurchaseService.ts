@@ -50,7 +50,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { WalletAdapter, WalletTransaction } from "../adapters/WalletAdapter.js";

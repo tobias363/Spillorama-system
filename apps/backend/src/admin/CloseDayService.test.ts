@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CloseDayService } from "./CloseDayService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { GameManagementService, GameManagement } from "./GameManagementService.js";
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;

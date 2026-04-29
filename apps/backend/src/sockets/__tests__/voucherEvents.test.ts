@@ -18,7 +18,7 @@ import type {
 } from "../../compliance/VoucherRedemptionService.js";
 import type { GameEventsDeps } from "../gameEvents/deps.js";
 import type { PublicAppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface MockSocket extends EventEmitter {
   id: string;

@@ -19,7 +19,7 @@ import type { Socket } from "socket.io";
 import { registerMiniGameEvents } from "../gameEvents/miniGameEvents.js";
 import type { SocketContext } from "../gameEvents/context.js";
 import type { GameEventsDeps } from "../gameEvents/deps.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface MockSocket extends EventEmitter {
   id: string;

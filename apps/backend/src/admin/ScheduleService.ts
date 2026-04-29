@@ -23,7 +23,7 @@ import {
   SUB_GAME_TYPES,
   type SubGameType,
 } from "@spillorama/shared-types";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { logger as rootLogger } from "../util/logger.js";
 

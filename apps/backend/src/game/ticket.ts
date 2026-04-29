@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import type { Ticket } from "./types.js";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { buildTicketMaskFromGrid5x5 } from "@spillorama/shared-types/spill1-patterns";
 
 const BOARD_ROWS = 3;

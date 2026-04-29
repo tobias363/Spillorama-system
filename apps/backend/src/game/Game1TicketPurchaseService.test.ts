@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { Game1TicketPurchaseService } from "./Game1TicketPurchaseService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { InMemoryWalletAdapter } from "../adapters/InMemoryWalletAdapter.js";

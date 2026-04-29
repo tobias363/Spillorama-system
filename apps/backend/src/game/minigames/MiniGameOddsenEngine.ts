@@ -79,7 +79,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { IdempotencyKeys } from "../idempotency.js";
 import {
   NoopComplianceLedgerPort,

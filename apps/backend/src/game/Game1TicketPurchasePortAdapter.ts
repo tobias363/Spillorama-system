@@ -18,7 +18,7 @@
  * Game1TicketSpec og kalle servicen direkte.
  */
 
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type {
   DigitalTicketPurchaseInput,
   DigitalTicketPurchaseResult,

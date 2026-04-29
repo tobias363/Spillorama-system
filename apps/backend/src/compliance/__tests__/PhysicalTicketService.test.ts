@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 import { PhysicalTicketService } from "../PhysicalTicketService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface BatchRow {
   id: string; hall_id: string; batch_name: string; range_start: number; range_end: number;

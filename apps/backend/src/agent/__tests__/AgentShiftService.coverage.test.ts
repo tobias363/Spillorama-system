@@ -23,7 +23,7 @@ import {
 } from "../AgentStore.js";
 import { InMemoryShiftPendingPayoutPort } from "../ports/ShiftLogoutPorts.js";
 import type { AppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeServices(opts: { withPendingPayoutPort?: boolean } = {}) {
   const store = new InMemoryAgentStore();

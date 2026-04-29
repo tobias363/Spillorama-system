@@ -21,7 +21,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { HttpMetroniaApiClient } from "../HttpMetroniaApiClient.js";
-import { DomainError } from "../../../game/BingoEngine.js";
+import { DomainError } from "../../../errors/DomainError.js";
 
 interface FetchCall {
   url: string;

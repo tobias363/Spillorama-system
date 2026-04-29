@@ -53,7 +53,8 @@ import {
   mustBeNonEmptyString,
   isRecordObject,
 } from "../util/httpHelpers.js";
-import { DomainError, toPublicError } from "../game/BingoEngine.js";
+import { toPublicError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "admin-close-day" });

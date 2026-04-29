@@ -17,7 +17,7 @@
  *   - Idempotens via `UNIQUE(voucher_id, user_id)` matcher legacy one-per-player.
  */
 
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { mustBeNonEmptyString } from "../../util/httpHelpers.js";
 import type { SocketContext } from "./context.js";
 import type { AckResponse, VoucherRedeemPayload } from "./types.js";

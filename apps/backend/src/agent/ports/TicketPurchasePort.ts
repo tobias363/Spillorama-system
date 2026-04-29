@@ -18,7 +18,7 @@
  * i prod, eksisterende tester har allerede egne stubs).
  */
 
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 export interface DigitalTicketPurchaseInput {
   playerUserId: string;

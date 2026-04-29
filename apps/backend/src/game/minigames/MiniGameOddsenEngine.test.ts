@@ -29,7 +29,7 @@ import {
   type OddsenConfig,
 } from "./MiniGameOddsenEngine.js";
 import type { MiniGameTriggerContext } from "./types.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
 

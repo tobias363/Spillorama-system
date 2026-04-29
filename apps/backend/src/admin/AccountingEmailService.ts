@@ -25,7 +25,7 @@ import type {
   WithdrawXmlExportService,
   XmlExportBatch,
 } from "./WithdrawXmlExportService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "accounting-email-service" });

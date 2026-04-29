@@ -33,7 +33,8 @@ import {
   WalletError,
   type WalletTransferResult,
 } from "../../adapters/WalletAdapter.js";
-import { BingoEngine, DomainError } from "../../game/BingoEngine.js";
+import { BingoEngine } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { Ticket } from "../../game/types.js";
 import type { ResponsibleGamingPersistenceAdapter } from "../../game/ResponsibleGamingPersistence.js";
 
