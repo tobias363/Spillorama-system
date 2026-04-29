@@ -175,25 +175,24 @@ export class PhysicalTicketPayoutService {
   private readonly approvalThresholdCents: number;
 
   constructor(options: PhysicalTicketPayoutServiceOptions) {
-    if (!options.connectionString?.trim()) {
+    // DB-P0-002 fix: tillat enten injected pool ELLER connectionString.
+    // Tidligere throw'et vi UANSETT hvis connectionString var tom — det
+    // brøt sharedPool-injeksjonen som PR #715 introduserte.
+    if (!options.pool && !options.connectionString?.trim()) {
       throw new DomainError(
         "INVALID_CONFIG",
-        "Mangler connection string for PhysicalTicketPayoutService.",
+        "PhysicalTicketPayoutService krever enten pool eller connectionString.",
       );
     }
     this.schema = assertSchemaName(options.schema ?? "public");
     if (options.pool) {
       this.pool = options.pool;
-    } else if (options.connectionString && options.connectionString.trim()) {
+    } else {
+      // Fallback for legacy callsites som fortsatt sender connectionString.
       this.pool = new Pool({
-        connectionString: options.connectionString,
+        connectionString: options.connectionString!,
         ...getPoolTuning(),
       });
-    } else {
-      throw new DomainError(
-        "INVALID_CONFIG",
-        "PhysicalTicketPayoutService krever pool eller connectionString."
-      );
     }
     this.approvalThresholdCents =
       typeof options.adminApprovalThresholdCents === "number"
