@@ -528,10 +528,46 @@ export class PlayScreen extends Container {
     this.buyPopup.hide();
   }
 
-  /** Show success / error status inside the popup. On `ok`, popup auto-hides. */
+  /** Show success / error status inside the popup. On `ok`, popup auto-hides
+   *  via Game1BuyPopup's setTimeout; we no longer call `.hide()` here so
+   *  brukeren faktisk får sett success-meldingen før popup-en lukkes. */
   showBuyPopupResult(ok: boolean, errorMessage?: string): void {
     this.buyPopup.showResult(ok, errorMessage);
-    if (ok) this.buyPopup.hide();
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): vis partial-buy-melding når
+   * server aksepterte færre brett enn forespurt. Brukes ved loss-limit-
+   * traff midt i bestillingen.
+   */
+  showBuyPopupPartialResult(input: {
+    accepted: number;
+    rejected: number;
+    rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null;
+    lossState?: {
+      dailyUsed: number;
+      dailyLimit: number;
+      monthlyUsed: number;
+      monthlyLimit: number;
+      walletBalance: number | null;
+    };
+  }): void {
+    this.buyPopup.showPartialBuyResult(input);
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): proxy for wallet:loss-state-push.
+   * Lar Game1Controller oppdatere tap-headeren i Kjøp Bonger-popup-en
+   * uten å re-bygge popup-en.
+   */
+  updateBuyPopupLossState(lossState: {
+    dailyUsed: number;
+    dailyLimit: number;
+    monthlyUsed: number;
+    monthlyLimit: number;
+    walletBalance: number | null;
+  } | null): void {
+    this.buyPopup.updateLossState(lossState);
   }
 
   // ── Live-game events ────────────────────────────────────────────────────

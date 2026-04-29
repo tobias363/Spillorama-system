@@ -55,6 +55,74 @@ export function registerGameLifecycleEvents(ctx: SocketContext): void {
       // itself pushes `emitRoomUpdate` which would re-populate the
       // cache with new random grids if we read it after.
       const preRoundTicketsByPlayerId = deps.getPreRoundTicketsByPlayerId?.(roomCode);
+      // Tobias 2026-04-29 (post-orphan-fix UX): bygg onPlayerRejected-
+      // callback som emitter `bet:rejected` til hver droppet spiller.
+      // Klient lytter til wallet:<walletId>-rommet og fjerner
+      // pre-round-bonger + viser klar feilmelding ("Du nådde dagens
+      // tapsgrense — bongene ble ikke med i denne runden").
+      // Type matches BingoEngine.StartGameInput.onPlayerRejected (3 reasons —
+      // pause-states blokkeres allerede på bet:arm).
+      type RejectInput = {
+        player: import("../../game/types.js").Player;
+        reason:
+          | "DAILY_LOSS_LIMIT_REACHED"
+          | "MONTHLY_LOSS_LIMIT_REACHED"
+          | "INSUFFICIENT_FUNDS";
+        rejectedTicketCount: number;
+        hallId: string;
+      };
+      const onPlayerRejected = deps.emitBetRejected
+        ? (input: RejectInput): void => {
+            // Bygg bruker-vennlig norsk feilmelding her på server-siden
+            // så audit-log + bet:rejected har samme catalog. Klient kan
+            // lokalisere via reason-koden men har fallback til message.
+            const lossState = engine.getLossLimitState
+              ? (() => {
+                  try {
+                    const ls = engine.getLossLimitState!(
+                      input.player.walletId,
+                      input.hallId,
+                      Date.now(),
+                    );
+                    return {
+                      hallId: input.hallId,
+                      dailyUsed: ls.dailyUsed,
+                      dailyLimit: ls.dailyLimit,
+                      monthlyUsed: ls.monthlyUsed,
+                      monthlyLimit: ls.monthlyLimit,
+                      walletBalance: input.player.balance,
+                    };
+                  } catch {
+                    return undefined;
+                  }
+                })()
+              : undefined;
+            const message = (() => {
+              switch (input.reason) {
+                case "DAILY_LOSS_LIMIT_REACHED":
+                  return lossState
+                    ? `Du har nådd dagens tapsgrense (${lossState.dailyUsed} / ${lossState.dailyLimit} kr). Forhåndskjøp ble derfor avvist.`
+                    : "Du har nådd dagens tapsgrense. Forhåndskjøp ble avvist.";
+                case "MONTHLY_LOSS_LIMIT_REACHED":
+                  return lossState
+                    ? `Du har nådd månedens tapsgrense (${lossState.monthlyUsed} / ${lossState.monthlyLimit} kr). Forhåndskjøp ble derfor avvist.`
+                    : "Du har nådd månedens tapsgrense. Forhåndskjøp ble avvist.";
+                case "INSUFFICIENT_FUNDS":
+                default:
+                  return "Du har ikke nok saldo til å delta i denne runden. Forhåndskjøp ble avvist.";
+              }
+            })();
+            deps.emitBetRejected!(input.player.walletId, {
+              roomCode,
+              playerId: input.player.id,
+              reason: input.reason,
+              rejectedTicketCount: input.rejectedTicketCount,
+              ...(lossState ? { lossState } : {}),
+              message,
+              serverTimestamp: Date.now(),
+            });
+          }
+        : undefined;
       await engine.startGame({
         roomCode,
         actorPlayerId: playerId,
@@ -67,6 +135,7 @@ export function registerGameLifecycleEvents(ctx: SocketContext): void {
         gameType: variantInfo?.gameType,
         variantConfig: variantInfo?.config,
         preRoundTicketsByPlayerId,
+        ...(onPlayerRejected ? { onPlayerRejected } : {}),
       });
       disarmAllPlayers(roomCode);
       clearDisplayTicketCache(roomCode);

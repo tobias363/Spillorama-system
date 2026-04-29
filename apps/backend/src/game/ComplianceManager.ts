@@ -699,6 +699,113 @@ export class ComplianceManager {
   }
 
   /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): regn ut hvor mange brett en
+   * spiller har råd til å arme før dagens eller månedens tap-grense
+   * trigges, gitt en bestilling der `ticketUnitPrices[i]` er prisen på
+   * brett `i` (i NOK). Iterasjonen er i bestilt-rekkefølge — det første
+   * brettet hvis pris ikke får plass i remaining-budsjettet stopper
+   * løpet og rapporteres som `rejectionReason`.
+   *
+   * `existingReservedAmount` (NOK, default 0) lar caller pre-trekke
+   * allerede-armed-men-ikke-debitert-reservasjon fra remaining før
+   * vi sjekker den nye bestillingen. Use case: bet:arm ser at spilleren
+   * har 3 brett armed (180 kr reservert); når de prøver å legge til 3
+   * til, skal vi limit-sjekke mot `dailyRemaining - 180`. Uten denne
+   * pre-subtract'en ville andre bet:arm overestimere remaining.
+   *
+   * Special-cases:
+   *   - Tom bestilling → `accepted=0`, ingen rejection.
+   *   - Gratis brett (price ≤ 0) → ubetinget akseptert, påvirker ikke
+   *     remaining (matcher `wouldExceedLossLimit`s entryFee≤0).
+   *   - Allerede på grensen før kjøp → `accepted=0`, rejectionReason
+     *   set på første positive-prisede brett.
+   *
+   * `state` er den effektive tap-status (brukt + grense) for den hallen
+   * — klient kan rendre "Brukt i dag: X / Y kr" uten ekstra round-trip.
+   * Alle tall i NOK (ikke øre).
+   *
+   * Pengespillforskriften §22: hall-scope-d. Caller MÅ sende kjøpe-hallen.
+   */
+  calculateMaxAffordableTickets(
+    walletId: string,
+    hallId: string,
+    ticketUnitPrices: number[],
+    nowMs: number,
+    existingReservedAmount: number = 0,
+  ): {
+    accepted: number;
+    rejected: number;
+    rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null;
+    state: {
+      dailyUsed: number;
+      dailyLimit: number;
+      dailyRemaining: number;
+      monthlyUsed: number;
+      monthlyLimit: number;
+      monthlyRemaining: number;
+    };
+  } {
+    const limits = this.getEffectiveLossLimits(walletId, hallId, nowMs);
+    const netLoss = this.calculateNetLoss(walletId, nowMs, hallId);
+
+    const dailyUsed = Math.max(0, netLoss.daily);
+    const monthlyUsed = Math.max(0, netLoss.monthly);
+    const dailyRemaining = Math.max(0, roundCurrency(limits.daily - dailyUsed));
+    const monthlyRemaining = Math.max(0, roundCurrency(limits.monthly - monthlyUsed));
+
+    // Pre-subtract eksisterende armed-but-not-debited reservasjon. Caller
+    // skal sende ikke-negativ verdi; clamper for sikkerhetskloss så vi
+    // aldri gir spilleren MER budsjett enn matematikken tilsier.
+    const reservedClamp = Math.max(0, existingReservedAmount);
+    let runningDaily = Math.max(0, roundCurrency(dailyRemaining - reservedClamp));
+    let runningMonthly = Math.max(0, roundCurrency(monthlyRemaining - reservedClamp));
+
+    let accepted = 0;
+    let rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null = null;
+
+    for (const price of ticketUnitPrices) {
+      // Free play (price ≤ 0) bypass-er limit-sjekk. Mirroreres
+      // wouldExceedLossLimit som returnerer false for entryFee≤0.
+      if (price <= 0) {
+        accepted += 1;
+        continue;
+      }
+
+      // Daily-first matcher rekkefølgen i wouldExceedLossLimit (som også
+      // sjekker daily først). Hvis daily holder men monthly ikke gjør,
+      // rapporteres MONTHLY_LIMIT — spilleren kan kanskje vente til neste
+      // dag for daily-reset, men månedlig kan ramme tidlig i måneden også.
+      if (price > runningDaily) {
+        rejectionReason = "DAILY_LIMIT";
+        break;
+      }
+      if (price > runningMonthly) {
+        rejectionReason = "MONTHLY_LIMIT";
+        break;
+      }
+
+      runningDaily = roundCurrency(runningDaily - price);
+      runningMonthly = roundCurrency(runningMonthly - price);
+      accepted += 1;
+    }
+
+    const rejected = ticketUnitPrices.length - accepted;
+    return {
+      accepted,
+      rejected,
+      rejectionReason,
+      state: {
+        dailyUsed,
+        dailyLimit: limits.daily,
+        dailyRemaining,
+        monthlyUsed,
+        monthlyLimit: limits.monthly,
+        monthlyRemaining,
+      },
+    };
+  }
+
+  /**
    * BIN-720: eksplisitt-nowMs-variant av promote-pending-lookup brukt av
    * ProfileSettingsService.flushPendingLossLimits. Kaller
    * `resolveLossLimitState` (privat) via `getEffectiveLossLimits` slik at

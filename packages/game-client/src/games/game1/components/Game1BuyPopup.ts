@@ -40,6 +40,20 @@ interface TypeRow {
 }
 
 /**
+ * Tobias 2026-04-29 (post-orphan-fix UX): tap-status fra server.
+ * Brukes til å rendere "Brukt i dag: X / Y kr"-header og advarsel
+ * når < 25% gjenstår av grensen.
+ */
+export interface LossStateForBuyPopup {
+  dailyUsed: number;
+  dailyLimit: number;
+  monthlyUsed: number;
+  monthlyLimit: number;
+  /** Optional walletBalance fra server (NOK). Hvis null, vises ikke. */
+  walletBalance: number | null;
+}
+
+/**
  * Game 1 ticket purchase popup — KjopsModal-port (2026-04-24).
  *
  * 2-column layout med én rad per billett-type: [brett-ikon] [navn + pris] [stepper].
@@ -49,15 +63,29 @@ export class Game1BuyPopup {
   private backdrop: HTMLDivElement;
   private card: HTMLDivElement;
   private summaryEl: HTMLDivElement;
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): tap-status-header viser
+   * "Brukt i dag: X / Y kr" + advarsel ved < 25% gjenstår. Skjult
+   * når lossState ikke er gitt (legacy clients).
+   */
+  private lossStateEl: HTMLDivElement;
   private typesContainer: HTMLDivElement;
   private statusMsg: HTMLDivElement;
   private totalBrettEl: HTMLDivElement;
   private totalKrEl: HTMLDivElement;
   private buyBtn: HTMLButtonElement;
+  private cancelBtn: HTMLButtonElement;
 
   private onBuy: ((selections: Array<{ type: string; qty: number; name?: string }>) => void) | null = null;
   private alreadyPurchased = 0;
   private typeRows: TypeRow[] = [];
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): tracker hvilken state
+   * popup-en er i. `idle` → bruker velger brett. `confirming` → har
+   * sendt bet:arm, venter på ack. `error` → ack feilet, viser melding,
+   * lar bruker prøve igjen. `success` → ack ok, popup auto-skjules.
+   */
+  private uiState: "idle" | "confirming" | "error" | "success" = "idle";
 
   constructor(overlay: HtmlOverlayManager) {
     this.backdrop = document.createElement("div");
@@ -75,7 +103,11 @@ export class Game1BuyPopup {
       pointerEvents: "auto",
     });
     this.backdrop.addEventListener("click", (e) => {
-      if (e.target === this.backdrop) this.hide();
+      if (e.target !== this.backdrop) return;
+      // Tobias 2026-04-29 (UX-fix): blokk lukking under `confirming` —
+      // bruker MÅ se ack-result.
+      if (this.uiState === "confirming") return;
+      this.hide();
     });
     overlay.getRoot().appendChild(this.backdrop);
 
@@ -123,6 +155,22 @@ export class Game1BuyPopup {
     this.summaryEl = document.createElement("div");
     this.summaryEl.style.cssText = "margin-top:6px;";
     header.appendChild(this.summaryEl);
+
+    // Tobias 2026-04-29 (post-orphan-fix UX): tap-status-header.
+    // Skjult når lossState ikke er satt (legacy / tom).
+    this.lossStateEl = document.createElement("div");
+    Object.assign(this.lossStateEl.style, {
+      marginTop: "10px",
+      padding: "8px 10px",
+      background: "rgba(255, 255, 255, 0.04)",
+      border: "1px solid rgba(255, 255, 255, 0.06)",
+      borderRadius: "6px",
+      fontSize: "12px",
+      lineHeight: "1.5",
+      color: "rgba(245, 232, 216, 0.7)",
+      display: "none",
+    });
+    header.appendChild(this.lossStateEl);
 
     this.card.appendChild(header);
 
@@ -202,23 +250,35 @@ export class Game1BuyPopup {
     this.buyBtn.addEventListener("click", () => this.handleBuy());
     this.card.appendChild(this.buyBtn);
 
-    const cancelBtn = document.createElement("button");
-    cancelBtn.textContent = "Avbryt";
-    this.styleSecondaryBtn(cancelBtn);
-    cancelBtn.addEventListener("click", () => this.hide());
-    this.card.appendChild(cancelBtn);
+    this.cancelBtn = document.createElement("button");
+    this.cancelBtn.textContent = "Avbryt";
+    this.styleSecondaryBtn(this.cancelBtn);
+    this.cancelBtn.addEventListener("click", () => {
+      // Tobias 2026-04-29 (UX-fix): blokk lukking under `confirming` —
+      // bruker MÅ se ack-result. Kjøpet kan ikke avbrytes etter bet:arm.
+      if (this.uiState === "confirming") return;
+      this.hide();
+    });
+    this.card.appendChild(this.cancelBtn);
   }
 
   showWithTypes(
     entryFee: number,
     ticketTypes: Array<{ name: string; type: string; priceMultiplier: number; ticketCount: number }>,
     alreadyPurchased = 0,
+    /**
+     * Tobias 2026-04-29 (post-orphan-fix UX): tap-status fra server.
+     * Hvis ikke gitt, lossState-headeren er skjult (legacy clients
+     * eller free-play-rom uten compliance-tracking).
+     */
+    lossState?: LossStateForBuyPopup,
   ): void {
     if (ticketTypes.length === 0) return;
 
     this.alreadyPurchased = Math.max(0, alreadyPurchased);
     this.typesContainer.innerHTML = "";
     this.typeRows = [];
+    this.uiState = "idle";
 
     for (const tt of ticketTypes) {
       const price = Math.round(entryFee * tt.priceMultiplier);
@@ -227,8 +287,70 @@ export class Game1BuyPopup {
     }
 
     this.statusMsg.textContent = "";
+    this.renderLossState(lossState);
     this.updateTotal();
     this.backdrop.style.display = "flex";
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): oppdater tap-status-header
+   * dynamisk uten å gjenoppbygge popup-en. Brukes når `wallet:loss-state`
+   * push kommer mens popup-en er åpen.
+   */
+  updateLossState(lossState: LossStateForBuyPopup | null): void {
+    this.renderLossState(lossState ?? undefined);
+  }
+
+  private renderLossState(lossState?: LossStateForBuyPopup): void {
+    if (!lossState) {
+      this.lossStateEl.style.display = "none";
+      return;
+    }
+
+    const dailyRemaining = Math.max(0, lossState.dailyLimit - lossState.dailyUsed);
+    const monthlyRemaining = Math.max(0, lossState.monthlyLimit - lossState.monthlyUsed);
+    const dailyPctLeft = lossState.dailyLimit > 0 ? dailyRemaining / lossState.dailyLimit : 1;
+    const monthlyPctLeft = lossState.monthlyLimit > 0 ? monthlyRemaining / lossState.monthlyLimit : 1;
+    const lowDaily = dailyPctLeft < 0.25;
+    const lowMonthly = monthlyPctLeft < 0.25;
+    const atDailyLimit = dailyRemaining === 0;
+    const atMonthlyLimit = monthlyRemaining === 0;
+
+    // Tone: rød hvis på grensen, oransje hvis < 25 % gjenstår, ellers
+    // standard mute. Gir rolig progresjon mot regulatorisk varsel.
+    let borderColor = "rgba(255, 255, 255, 0.06)";
+    let bgColor = "rgba(255, 255, 255, 0.04)";
+    let textColor = "rgba(245, 232, 216, 0.75)";
+    if (atDailyLimit || atMonthlyLimit) {
+      borderColor = "rgba(220, 38, 38, 0.4)";
+      bgColor = "rgba(220, 38, 38, 0.08)";
+      textColor = "#ffb3b3";
+    } else if (lowDaily || lowMonthly) {
+      borderColor = "rgba(245, 158, 11, 0.4)";
+      bgColor = "rgba(245, 158, 11, 0.08)";
+      textColor = "#fbd38d";
+    }
+
+    this.lossStateEl.style.display = "block";
+    this.lossStateEl.style.borderColor = borderColor;
+    this.lossStateEl.style.background = bgColor;
+    this.lossStateEl.style.color = textColor;
+
+    const lines: string[] = [];
+    if (atDailyLimit) {
+      lines.push(`<strong>Du har nådd dagens tapsgrense (${lossState.dailyUsed} / ${lossState.dailyLimit} kr)</strong>`);
+    } else {
+      lines.push(`Brukt i dag: <strong>${lossState.dailyUsed}</strong> / ${lossState.dailyLimit} kr (${dailyRemaining} kr igjen)`);
+    }
+    if (atMonthlyLimit) {
+      lines.push(`<strong>Du har nådd månedens tapsgrense (${lossState.monthlyUsed} / ${lossState.monthlyLimit} kr)</strong>`);
+    } else {
+      lines.push(`Brukt i måned: <strong>${lossState.monthlyUsed}</strong> / ${lossState.monthlyLimit} kr (${monthlyRemaining} kr igjen)`);
+    }
+    if (typeof lossState.walletBalance === "number") {
+      lines.push(`Saldo: <strong>${Math.round(lossState.walletBalance)}</strong> kr`);
+    }
+    this.lossStateEl.innerHTML = lines.join("<br>");
   }
 
   hide(): void {
@@ -249,19 +371,56 @@ export class Game1BuyPopup {
 
   showResult(success: boolean, message?: string): void {
     if (success) {
+      this.uiState = "success";
       this.statusMsg.style.color = "#81c784";
-      this.statusMsg.textContent = "Registrert! Du er med i neste spill.";
+      this.statusMsg.textContent = message || "Registrert! Du er med i neste spill.";
       this.buyBtn.disabled = true;
       this.buyBtn.style.opacity = "0.5";
       this.buyBtn.style.cursor = "default";
       setTimeout(() => this.hide(), 1500);
     } else {
+      this.uiState = "error";
       this.statusMsg.style.color = "#ff6b6b";
       this.statusMsg.textContent = message || "Kjøp feilet. Prøv igjen.";
       this.buyBtn.disabled = false;
       this.buyBtn.style.opacity = "1";
       this.buyBtn.style.cursor = "pointer";
+      this.buyBtn.textContent = "Prøv igjen";
+      // Re-aktivér avbryt-knapp.
+      this.cancelBtn.disabled = false;
+      this.cancelBtn.style.opacity = "1";
+      this.cancelBtn.style.cursor = "pointer";
     }
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): vis partial-buy-result.
+   * Forskjell fra `showResult(true)`: her viser vi en klar melding om
+   * hva som ble avvist, ikke bare success.
+   */
+  showPartialBuyResult(input: {
+    accepted: number;
+    rejected: number;
+    rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null;
+    lossState?: LossStateForBuyPopup;
+  }): void {
+    this.uiState = "success";
+    const reasonText =
+      input.rejectionReason === "MONTHLY_LIMIT"
+        ? "månedens tapsgrense nådd"
+        : "dagens tapsgrense nådd";
+    const message = `${input.accepted} av ${input.accepted + input.rejected} bonger kjøpt — ${input.rejected} avvist (${reasonText}).`;
+    this.statusMsg.style.color = "#fbbf24"; // amber for partial — neither full success nor failure
+    this.statusMsg.textContent = message;
+    if (input.lossState) {
+      this.renderLossState(input.lossState);
+    }
+    this.buyBtn.disabled = true;
+    this.buyBtn.style.opacity = "0.5";
+    this.buyBtn.style.cursor = "default";
+    // Lengre timeout enn vanlig success — bruker trenger tid til å lese
+    // melding om hva som ble avvist.
+    setTimeout(() => this.hide(), 3500);
   }
 
   destroy(): void {
@@ -609,14 +768,31 @@ export class Game1BuyPopup {
 
   private handleBuy(): void {
     if (this.buyBtn.disabled) return;
+    // Tobias 2026-04-29 (post-orphan-fix UX): transition til `confirming`-
+    // state. Brukeren ser "Bekrefter kjøp..." mens vi venter på server-ack.
+    // Cancel-knapp + backdrop-klikk er låst til ack kommer (success eller
+    // error). Ingen bonger blir rendret før ack returneres.
+    this.uiState = "confirming";
     this.buyBtn.disabled = true;
     this.buyBtn.style.opacity = "0.6";
-    this.buyBtn.textContent = "Vennligst vent...";
-    this.statusMsg.textContent = "";
+    this.buyBtn.textContent = "Bekrefter kjøp…";
+    this.cancelBtn.disabled = true;
+    this.cancelBtn.style.opacity = "0.5";
+    this.cancelBtn.style.cursor = "not-allowed";
+    this.statusMsg.style.color = "rgba(245, 232, 216, 0.7)";
+    this.statusMsg.textContent = "Sender forespørsel til server…";
     const selections = this.typeRows
       .filter((r) => r.qty > 0)
       .map((r) => ({ type: r.type, qty: r.qty, name: r.name }));
     this.onBuy?.(selections);
+  }
+
+  /**
+   * Tobias 2026-04-29 (post-orphan-fix UX): test-helper — eksponert
+   * for unit-tests.
+   */
+  getUiState(): "idle" | "confirming" | "error" | "success" {
+    return this.uiState;
   }
 
   private stylePrimaryBtn(btn: HTMLButtonElement): void {

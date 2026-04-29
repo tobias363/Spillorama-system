@@ -28,6 +28,7 @@ import {
 import type { SocketContext } from "./context.js";
 import type {
   AckResponse,
+  BetArmLossLimitInfo,
   ConfigureRoomPayload,
   CreateRoomPayload,
   JoinRoomPayload,
@@ -671,11 +672,20 @@ export function registerRoomEvents(ctx: SocketContext): void {
 
   socket.on("bet:arm", rateLimited("bet:arm", async (
     payload: RoomActionPayload & { armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> },
-    callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean }>) => void
+    callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean; lossLimit?: BetArmLossLimitInfo }>) => void
   ) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
       const wantArmed = payload.armed !== false;
+      // Tobias 2026-04-29: lossLimit-info bygges underveis og legges på
+      // ack — alltid på success-path slik at klient kan vise
+      // "Brukt i dag: X / Y kr" i Kjøp Bonger-popup-en.
+      let lossLimitInfo: BetArmLossLimitInfo | undefined;
+      // Track om selections ble truncert (partial-buy). Brukes til å
+      // velge mellom error-ack (LOSS_LIMIT_REACHED) og success-ack med
+      // delvis-armed.
+      let partialBuyHappened = false;
+
       if (wantArmed) {
         // New path: per-type selections
         if (Array.isArray(payload.ticketSelections) && payload.ticketSelections.length > 0) {
@@ -719,17 +729,32 @@ export function registerRoomEvents(ctx: SocketContext): void {
           // Validate combined total weighted count <= 30.
           const variantInfo = deps.getVariantConfig?.(roomCode);
           const ticketTypes = variantInfo?.config?.ticketTypes ?? [];
-          let totalWeighted = 0;
-          for (const sel of merged) {
-            // BIN-693 lesson: prefer name-match for weight resolution too —
-            // two small-typed entries with different names share a weight of
-            // 1, but for Large/Elvis (same type, distinct names) the weight
-            // lives on the matching row, not the first one.
+          // Resolve weight + price-multiplier per merged-entry so partial-
+          // buy iteration kan jobbe på brett-vekt-nivå (ikke "qty"-nivå —
+          // ett "Large" = 3 brett a 1× kostnad er semantisk forskjellig fra
+          // 3 stk "Small" a 1× kostnad).
+          //
+          // weightFor / priceMultFor speiler `Game1TicketPurchaseService`
+          // og `BingoEngine.startGame`-loopen så kostnaden vi limit-sjekker
+          // her matcher kostnaden som faktisk debiteres ved game-start.
+          const weightFor = (sel: { type: string; name?: string }): number => {
             const tt =
               (sel.name ? ticketTypes.find((t) => t.name === sel.name) : undefined) ??
               ticketTypes.find((t) => t.type === sel.type);
-            const weight = tt?.ticketCount ?? 1;
-            totalWeighted += sel.qty * weight;
+            return tt?.ticketCount ?? 1;
+          };
+          const priceMultFor = (sel: { type: string; name?: string }): number => {
+            const tt =
+              (sel.name ? ticketTypes.find((t) => t.name === sel.name) : undefined) ??
+              ticketTypes.find((t) => t.type === sel.type);
+            // Default 1× hvis variant-config ikke spesifiserer (matcher
+            // BingoEngine-fallback).
+            return typeof tt?.priceMultiplier === "number" ? tt.priceMultiplier : 1;
+          };
+
+          let totalWeighted = 0;
+          for (const sel of merged) {
+            totalWeighted += sel.qty * weightFor(sel);
           }
           if (totalWeighted > 30) {
             throw new DomainError(
@@ -743,26 +768,194 @@ export function registerRoomEvents(ctx: SocketContext): void {
           // BIN-693 Option B: reserver delta-beløpet i wallet FØR vi armer
           // in-memory. Hvis reserve feiler (INSUFFICIENT_FUNDS), rulles alt
           // tilbake og spiller får feilmelding uten at armed-state endres.
-          const existingTotal = existing.reduce((acc, s) => acc + s.qty, 0); // weighted-approx
           const existingWeighted = deps.getArmedPlayerIds(roomCode).includes(playerId)
             ? (deps.getArmedPlayerTicketCounts(roomCode)[playerId] ?? 0)
             : 0;
+
+          // Tobias 2026-04-29 (UX-fix): server-side partial-buy + clear
+          // ack. Tidligere lot vi alle 3 brett bli armed uansett, og
+          // BingoEngine.startGame's filterEligiblePlayers droppet
+          // spilleren stille hvis loss-limit ble truffet. Nå avviser vi
+          // umiddelbart — enten alt eller delvis — så bonger ALDRI
+          // vises på klienten uten at server har confirmet kjøp.
+          const entryFee = deps.getRoomConfiguredEntryFee(roomCode);
+          const wId = deps.getWalletIdForPlayer?.(roomCode, playerId);
+          const hallId = engine.getRoomSnapshot(roomCode).hallId;
+          // Only consult compliance when we have a real wallet binding
+          // and a positive entryFee — free-play (entryFee=0) bypasses
+          // limit-check, matching ComplianceManager.wouldExceedLossLimit.
+          let acceptedSelections = merged;
+          let acceptedWeighted = totalWeighted;
+          let rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null = null;
+
+          if (wId && entryFee > 0 && typeof engine.calculateMaxAffordableTickets === "function") {
+            // Bygg per-brett-pris-array. Iterasjons-rekkefølge:
+            // selection-by-selection (merged-rekkefølge), brett-by-brett
+            // innenfor selection. Hver brett-vekt-unit koster
+            // `entryFee × priceMultiplier / ticketCount` for selection-en
+            // (pengen per fysisk brett). Eksempel: Large kostr `entryFee × 3`
+            // og gir 3 brett → hvert brett blir `entryFee` kr — samme som
+            // små brett, hvilket matcher legacy paritet.
+            const ticketUnitPrices: number[] = [];
+            // Tracking per merged-index: hvor mange units vi har akseptert
+            // hittil. Brukes til å re-konstruere truncated selections etterpå.
+            const acceptedCountPerSel: number[] = merged.map(() => 0);
+            for (let selIdx = 0; selIdx < merged.length; selIdx++) {
+              const sel = merged[selIdx];
+              const weight = weightFor(sel);
+              const pricePerUnit = entryFee * priceMultFor(sel);
+              const pricePerWeightedBrett = weight > 0 ? pricePerUnit / weight : pricePerUnit;
+              for (let unitIdx = 0; unitIdx < sel.qty; unitIdx++) {
+                for (let brettIdx = 0; brettIdx < weight; brettIdx++) {
+                  ticketUnitPrices.push(pricePerWeightedBrett);
+                }
+              }
+            }
+
+            // Pre-subtract existing reserved (aldri negativt). På et
+            // INCREASE-bet:arm har spilleren allerede X brett armed med
+            // reservasjon; budsjettet for de NYE brett må være `remaining
+            // - X`. `existingReservedAmount` håndterer dette i
+            // calculateMaxAffordableTickets.
+            const existingReservedAmount = existingWeighted * entryFee; // approx — assumes 1× multiplier on existing
+            const nowMs = Date.now();
+
+            const result = engine.calculateMaxAffordableTickets(
+              wId,
+              hallId,
+              ticketUnitPrices,
+              nowMs,
+              existingReservedAmount,
+            );
+
+            if (result.accepted < ticketUnitPrices.length) {
+              partialBuyHappened = true;
+              rejectionReason = result.rejectionReason;
+              if (result.accepted === 0) {
+                // Total avvisning — release ANY existing reservation før
+                // vi kaster, så saldo-state forblir konsistent.
+                if (existingWeighted > 0) {
+                  // Behold eksisterende armed (det var allerede committed
+                  // før denne arm-kallet). Bare avvis denne bestillingen.
+                }
+                const code: "LOSS_LIMIT_REACHED" | "MONTHLY_LIMIT_REACHED" =
+                  result.rejectionReason === "MONTHLY_LIMIT"
+                    ? "MONTHLY_LIMIT_REACHED"
+                    : "LOSS_LIMIT_REACHED";
+                const message =
+                  result.rejectionReason === "MONTHLY_LIMIT"
+                    ? `Du har nådd månedens tapsgrense (${result.state.monthlyUsed} / ${result.state.monthlyLimit} kr).`
+                    : `Du har nådd dagens tapsgrense (${result.state.dailyUsed} / ${result.state.dailyLimit} kr). Prøv igjen i morgen.`;
+                throw new DomainError(code, message);
+              }
+
+              // Partial: re-konstruer truncated selections. Pop brett
+              // unit-for-unit fra slutten av merged-listen til vi har
+              // ticketUnitPrices.length - result.accepted "for mange".
+              // Det betyr siste merged-entry blir potentielt redusert,
+              // og hvis dens qty går til 0, fjernet helt.
+              let toRemove = ticketUnitPrices.length - result.accepted;
+              const truncated: Array<{ type: string; qty: number; name?: string }> = [];
+              for (const sel of merged) {
+                truncated.push({ ...sel });
+              }
+              // Iterér baklengs gjennom truncated, decrementer qty per
+              // selection's brett-vekt så vi rammer hele units.
+              for (let i = truncated.length - 1; i >= 0 && toRemove > 0; i--) {
+                const sel = truncated[i];
+                const weight = weightFor(sel);
+                while (sel.qty > 0 && toRemove >= weight) {
+                  sel.qty -= 1;
+                  toRemove -= weight;
+                }
+              }
+              acceptedSelections = truncated.filter((s) => s.qty > 0);
+              acceptedWeighted = 0;
+              for (const sel of acceptedSelections) {
+                acceptedWeighted += sel.qty * weightFor(sel);
+              }
+            }
+
+            lossLimitInfo = {
+              requested: totalWeighted,
+              accepted: acceptedWeighted,
+              rejected: Math.max(0, totalWeighted - acceptedWeighted),
+              rejectionReason,
+              dailyUsed: result.state.dailyUsed,
+              dailyLimit: result.state.dailyLimit,
+              monthlyUsed: result.state.monthlyUsed,
+              monthlyLimit: result.state.monthlyLimit,
+              walletBalance: null, // populated below post-reservation
+            };
+          }
+
+          // Reserve only the accepted weighted count (delta from existing).
           await reservePreRoundDelta(
             deps,
             roomCode,
             playerId,
             existingWeighted,
-            totalWeighted,
+            acceptedWeighted,
           );
-          armPlayer(roomCode, playerId, totalWeighted, merged);
+          armPlayer(roomCode, playerId, acceptedWeighted, acceptedSelections);
         } else {
           // Backward compat: flat ticketCount
           const ticketCount = Math.min(30, Math.max(1, Math.round(payload.ticketCount ?? 1)));
           const existingWeighted = deps.getArmedPlayerIds(roomCode).includes(playerId)
             ? (deps.getArmedPlayerTicketCounts(roomCode)[playerId] ?? 0)
             : 0;
-          await reservePreRoundDelta(deps, roomCode, playerId, existingWeighted, ticketCount);
-          armPlayer(roomCode, playerId, ticketCount);
+
+          // Tobias 2026-04-29 (UX-fix): same partial-buy path for flat
+          // ticketCount — though clients sending flat are deprecated, vi
+          // dekker den så ingen oppførsels-asymmetri eksisterer.
+          const entryFee = deps.getRoomConfiguredEntryFee(roomCode);
+          const wId = deps.getWalletIdForPlayer?.(roomCode, playerId);
+          const hallId = engine.getRoomSnapshot(roomCode).hallId;
+          let acceptedTickets = ticketCount;
+          let rejectionReason: "DAILY_LIMIT" | "MONTHLY_LIMIT" | null = null;
+
+          if (wId && entryFee > 0 && typeof engine.calculateMaxAffordableTickets === "function") {
+            const ticketUnitPrices: number[] = [];
+            for (let i = 0; i < ticketCount; i++) ticketUnitPrices.push(entryFee);
+            const existingReservedAmount = existingWeighted * entryFee;
+            const result = engine.calculateMaxAffordableTickets(
+              wId,
+              hallId,
+              ticketUnitPrices,
+              Date.now(),
+              existingReservedAmount,
+            );
+            if (result.accepted < ticketCount) {
+              partialBuyHappened = true;
+              rejectionReason = result.rejectionReason;
+              if (result.accepted === 0) {
+                const code: "LOSS_LIMIT_REACHED" | "MONTHLY_LIMIT_REACHED" =
+                  result.rejectionReason === "MONTHLY_LIMIT"
+                    ? "MONTHLY_LIMIT_REACHED"
+                    : "LOSS_LIMIT_REACHED";
+                const message =
+                  result.rejectionReason === "MONTHLY_LIMIT"
+                    ? `Du har nådd månedens tapsgrense (${result.state.monthlyUsed} / ${result.state.monthlyLimit} kr).`
+                    : `Du har nådd dagens tapsgrense (${result.state.dailyUsed} / ${result.state.dailyLimit} kr). Prøv igjen i morgen.`;
+                throw new DomainError(code, message);
+              }
+              acceptedTickets = result.accepted;
+            }
+            lossLimitInfo = {
+              requested: ticketCount,
+              accepted: acceptedTickets,
+              rejected: Math.max(0, ticketCount - acceptedTickets),
+              rejectionReason,
+              dailyUsed: result.state.dailyUsed,
+              dailyLimit: result.state.dailyLimit,
+              monthlyUsed: result.state.monthlyUsed,
+              monthlyLimit: result.state.monthlyLimit,
+              walletBalance: null,
+            };
+          }
+
+          await reservePreRoundDelta(deps, roomCode, playerId, existingWeighted, acceptedTickets);
+          armPlayer(roomCode, playerId, acceptedTickets);
         }
       } else {
         // disarm: frigi reservasjon før vi nullstiller in-memory state
@@ -775,8 +968,81 @@ export function registerRoomEvents(ctx: SocketContext): void {
       if (walletId) {
         await engine.refreshPlayerBalancesForWallet(walletId);
       }
+
+      // Tobias 2026-04-29 (UX-fix): hvis vi ikke fikk lossLimit-info via
+      // partial-buy-path (entryFee=0 eller adapter mangler), forsøk likevel
+      // å hente tap-state for ack-en så klient kan vise headeren. Fail-soft
+      // — null state betyr "ingen lossLimit-info i ack".
+      if (!lossLimitInfo && wantArmed && walletId && deps.getLossStateSnapshot) {
+        try {
+          const snap = await deps.getLossStateSnapshot(
+            walletId,
+            engine.getRoomSnapshot(roomCode).hallId,
+            Date.now(),
+          );
+          if (snap) {
+            const armedNow = deps.getArmedPlayerTicketCounts(roomCode)[playerId] ?? 0;
+            lossLimitInfo = {
+              requested: armedNow,
+              accepted: armedNow,
+              rejected: 0,
+              rejectionReason: null,
+              dailyUsed: snap.dailyUsed,
+              dailyLimit: snap.dailyLimit,
+              monthlyUsed: snap.monthlyUsed,
+              monthlyLimit: snap.monthlyLimit,
+              walletBalance: snap.walletBalance,
+            };
+          }
+        } catch (snapErr) {
+          // Fail-soft: tap-state-info er nice-to-have, ikke critical-path.
+          logger.warn({ err: snapErr, roomCode, playerId }, "getLossStateSnapshot failed in bet:arm — ack uten lossLimit-info");
+        }
+      } else if (lossLimitInfo && walletId && deps.getLossStateSnapshot) {
+        // Partial-buy path: oppdater walletBalance fra ferskt snapshot etter
+        // reservasjonen er gjort.
+        try {
+          const snap = await deps.getLossStateSnapshot(
+            walletId,
+            engine.getRoomSnapshot(roomCode).hallId,
+            Date.now(),
+          );
+          if (snap) {
+            lossLimitInfo.walletBalance = snap.walletBalance;
+          }
+        } catch (snapErr) {
+          logger.warn({ err: snapErr, roomCode, playerId }, "getLossStateSnapshot post-reserve failed");
+        }
+      }
+
       const snapshot = await emitRoomUpdate(roomCode);
-      ackSuccess(callback, { snapshot, armed: wantArmed });
+      ackSuccess(callback, {
+        snapshot,
+        armed: wantArmed,
+        ...(lossLimitInfo ? { lossLimit: lossLimitInfo } : {}),
+      });
+
+      // Tobias 2026-04-29 (UX-fix): partial-buy → push wallet:loss-state
+      // umiddelbart så Kjøp Bonger-popup-en oppdaterer headeren selv
+      // om brukeren beholder popup-en åpen for et nytt forsøk.
+      if (partialBuyHappened && lossLimitInfo && walletId && deps.emitWalletLossState) {
+        deps.emitWalletLossState(walletId, {
+          walletId,
+          state: {
+            hallId: engine.getRoomSnapshot(roomCode).hallId,
+            dailyUsed: lossLimitInfo.dailyUsed,
+            dailyLimit: lossLimitInfo.dailyLimit,
+            monthlyUsed: lossLimitInfo.monthlyUsed,
+            monthlyLimit: lossLimitInfo.monthlyLimit,
+            walletBalance: lossLimitInfo.walletBalance ?? 0,
+          },
+          // Reservation isn't yet committed, but klient bruker reason for
+          // å vise riktig kontekst. Bruk BUYIN siden det er nærmest selv
+          // om commitement kommer senere.
+          reason: "BUYIN",
+          serverTimestamp: Date.now(),
+        });
+      }
     } catch (error) {
       ackFailure(callback, error);
     }

@@ -219,6 +219,14 @@ export interface CreateTestServerOptions {
   bingoAdapter?: BingoSystemAdapter;
   /** Override drawBagFactory (for G3 tests that need deterministic 1..75 draws). */
   drawBagFactory?: (size: number) => number[];
+  /**
+   * Tobias 2026-04-29: override default-relaxed loss-limits so partial-buy
+   * tests can trigger DAILY_LIMIT/MONTHLY_LIMIT-paths uten å bruke 1M kr i
+   * test-data. Default forblir 1_000_000 / 10_000_000 (relaxed) for
+   * eksisterende tester.
+   */
+  dailyLossLimit?: number;
+  monthlyLossLimit?: number;
 }
 
 export async function createTestServer(opts: CreateTestServerOptions = {}): Promise<TestServer> {
@@ -246,9 +254,10 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
     minRoundIntervalMs: 0,        // No delay between rounds in tests
     maxDrawsPerRound: 75,         // Allow draining the full 75-ball bag (5×5 bingo)
     drawBagFactory: deterministicDrawBag,
-    // Relaxed loss limits so G3 round payouts don't trip Spillvett.
-    dailyLossLimit: 1_000_000,
-    monthlyLossLimit: 10_000_000,
+    // Relaxed loss limits so G3 round payouts don't trip Spillvett — opt-out
+    // for partial-buy-tester via opts.dailyLossLimit/monthlyLossLimit.
+    dailyLossLimit: opts.dailyLossLimit ?? 1_000_000,
+    monthlyLossLimit: opts.monthlyLossLimit ?? 10_000_000,
   });
   const mockPlatform = createMockPlatformService();
   // Relaxed rate limits for integration tests — allow rapid draws
@@ -351,6 +360,25 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
     // som default-pathen (ingen DB-lookup), men socket-handlerne går
     // gjennom samme kode-path som prod.
     bindVariantConfigForRoom: (code, opts) => roomState.bindVariantConfigForRoom(code, opts),
+    // Tobias 2026-04-29: wire wallet-adapter + reservation-tracking så
+    // bet:arm partial-buy-pathen kan exerciseres i integration-tester.
+    // Tidligere var disse ikke wired og bet:arm fall-through til legacy
+    // arm-uten-reservasjon-pathen.
+    walletAdapter,
+    getWalletIdForPlayer: (roomCode, playerId) => {
+      try {
+        const snap = engine.getRoomSnapshot(roomCode);
+        const player = snap.players.find((p) => p.id === playerId);
+        return player?.walletId ?? null;
+      } catch {
+        return null;
+      }
+    },
+    getReservationId: (code, pid) => roomState.getReservationId(code, pid),
+    setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
+    clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
+    hasArmedOrReservation: (code, pid) => roomState.hasArmedOrReservation(code, pid),
+    getArmCycleId: (code) => roomState.getOrCreateArmCycleId(code),
   };
 
   const registerGameEvents = createGameEventHandlers(deps);
