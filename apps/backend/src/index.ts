@@ -62,6 +62,9 @@ import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportSch
 import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
 import { WalletOutboxRepo } from "./wallet/WalletOutboxRepo.js";
 import { WalletOutboxWorker } from "./wallet/WalletOutboxWorker.js";
+import { ComplianceOutboxRepo } from "./compliance/ComplianceOutboxRepo.js";
+import { ComplianceOutboxWorker } from "./compliance/ComplianceOutboxWorker.js";
+import { ComplianceOutboxComplianceLedgerPort } from "./compliance/ComplianceOutboxComplianceLedgerPort.js";
 import { PostgresWalletAdapter } from "./adapters/PostgresWalletAdapter.js";
 import { WalletAuditVerifier } from "./wallet/WalletAuditVerifier.js";
 import { createWalletAuditVerifyJob } from "./jobs/walletAuditVerify.js";
@@ -538,6 +541,82 @@ const platformService = new PlatformService(walletAdapter, {
   minAgeYears: kycMinAge,
   kycAdapter,
 });
+
+// COMP-P0-002: outbox-pattern for compliance-ledger-write (§71-pengespill-
+// forskriften). Erstatter direkte port-call med decorator som først
+// persisterer event-en til `app_compliance_outbox`, så best-effort inline
+// dispatch til underliggende ComplianceLedger. Hvis inline feiler →
+// `ComplianceOutboxWorker` retry-er ved neste tick. Garantien: hvis outbox-
+// INSERT lykkes, vil §71-rad eventually finnes — selv om inline dispatch
+// krasjer eller serveren restarter mellom INSERT og dispatch.
+//
+// Pattern matcher BIN-761 wallet-outbox men forskjellen er at compliance-
+// event ikke kan være i samme tx som wallet-debit (compliance-write skjer
+// POST-commit av wallet). Outbox-INSERT lykkes med høy sannsynlighet pga
+// minimalt arbeid (én enkel INSERT) — dette er nøkkelen til atomicitets-
+// ekvivalent garanti.
+//
+// Wires INN i 6 services: Game1TicketPurchaseService, Game1PayoutService,
+// Game1DrawEngineService, Game1MiniGameOrchestrator, MiniGameOddsenEngine,
+// AgentMiniGameWinningService. Alle kall via dette portinstans-en
+// gjennom outbox; worker dispatcher direkte til underliggende engine-port.
+//
+// Backwards-compat: hvis platformService ikke har postgres-pool (test/dev
+// uten DB), faller vi tilbake til direkte engine-port (pre-COMP-P0-002-
+// atferd). I prod er platformConnectionString alltid satt.
+let complianceOutboxRepo: ComplianceOutboxRepo | null = null;
+let complianceOutboxWorker: ComplianceOutboxWorker | null = null;
+const complianceLedgerPort: import("./adapters/ComplianceLedgerPort.js").ComplianceLedgerPort = (() => {
+  const innerPort = engine.getComplianceLedgerPort();
+  // Når outbox-tabellen mangler (forsinket migration eller dev-uten-DB)
+  // skal vi ikke bryte boot — fall tilbake til pre-COMP-P0-002-atferd.
+  // Migration `20260429074303_compliance_outbox.sql` opprettes som del
+  // av denne PR-en og kjøres automatisk ved deploy via Render-blueprint.
+  try {
+    complianceOutboxRepo = new ComplianceOutboxRepo({
+      pool: platformService.getPool(),
+      schema: pgSchema,
+    });
+    const intervalMs = (() => {
+      const raw = process.env.COMPLIANCE_OUTBOX_TICK_MS?.trim();
+      if (!raw) return 1000;
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : 1000;
+    })();
+    const batchSize = (() => {
+      const raw = process.env.COMPLIANCE_OUTBOX_BATCH?.trim();
+      if (!raw) return 50;
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
+    })();
+    complianceOutboxWorker = new ComplianceOutboxWorker({
+      repo: complianceOutboxRepo,
+      // Worker går DIREKTE til underliggende port — IKKE via decorator-en
+      // (det ville gi uendelig løkke gjennom outbox).
+      dispatcher: innerPort,
+      intervalMs,
+      batchSize,
+    });
+    complianceOutboxWorker.start();
+    console.info(
+      `[compliance-outbox] worker started (interval=${intervalMs}ms, batch=${batchSize})`,
+    );
+    return new ComplianceOutboxComplianceLedgerPort({
+      outboxRepo: complianceOutboxRepo,
+      inner: innerPort,
+    });
+  } catch (err) {
+    // Hvis outbox-init feilet (f.eks. pool ikke tilgjengelig i test-miljø),
+    // fall tilbake til direkte engine-port slik at boot ikke krasjer.
+    // Worker vil ikke starte, men wallet-debit + compliance-write vil
+    // fungere som før COMP-P0-002 (med soft-fail-bug).
+    console.warn(
+      "[compliance-outbox] init feilet — faller tilbake til direkte engine-port (pre-COMP-P0-002-atferd):",
+      err,
+    );
+    return innerPort;
+  }
+})();
 
 // BIN-516: chat persistence. Postgres-backed when the platform pool is up,
 // in-memory fallback for dev-without-DB so chat:history still works.
@@ -1378,12 +1457,17 @@ const agentPhysicalTicketInlineService = new AgentPhysicalTicketInlineService({
 // REQ-146 (PDF 17 §17.23): agent-input for mini-game-winnings. Skriver til
 // `app_game1_mini_game_results` med samme idempotency-key-mønster som
 // Game1MiniGameOrchestrator (game-engine-kontekst). PRIZE-entry til
-// ComplianceLedgerPort wires senere når BingoEngine-port er tilgjengelig.
+// ComplianceLedgerPort wired via outbox-decorator (COMP-P0-002) for
+// eventual delivery-garanti — agent-input er HALL-kanal.
 const agentMiniGameWinningService = new AgentMiniGameWinningService({
   pool: platformService.getPool(),
   schema: pgSchema,
   walletAdapter,
   defaultLedgerChannel: "HALL",
+  // COMP-P0-002: routes via outbox slik at PRIZE-entry persisteres selv om
+  // inline dispatch feiler. Audit-finding nevnte denne servicen ved navn
+  // (`AgentMiniGameWinningService.ts:472` er soft-fail call-site).
+  complianceLedgerPort,
 });
 
 // GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
@@ -1508,7 +1592,9 @@ const game1TicketPurchaseService = new Game1TicketPurchaseService({
   // (input.hallId) house-account. §71 pengespillforskriften krever per-hall-
   // rapport. Eksisterende entries før denne PR manglet — ingen retro-
   // rebalansering. Se Game1TicketPurchaseService K1-kommentar for detaljer.
-  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // COMP-P0-002: routes via `app_compliance_outbox` slik at compliance-
+  // event-en garantert blir persistert selv om inline dispatch feiler.
+  complianceLedgerPort,
 });
 // GAME1_SCHEDULE PR 4a: bind forward-ref slik at `ticketPurchasePort` (opprettet
 // tidligere pga. agent-service dependency) kan delegere til den nye servicen.
@@ -1535,7 +1621,8 @@ const game1PayoutService = new Game1PayoutService({
   // kjøpe-hall (winner.hallId — hentet fra app_game1_ticket_purchases.
   // hall_id), ikke master-hallens hall. §71-rapport blir riktig per hall
   // for multi-hall-runder. Soft-fail (payout fortsetter ved ledger-feil).
-  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // COMP-P0-002: routes via outbox-decorator for eventual delivery-garanti.
+  complianceLedgerPort,
 });
 const game1JackpotService = new Game1JackpotService();
 
@@ -1569,7 +1656,8 @@ const game1DrawEngineService = new Game1DrawEngineService({
   bingoEngine: engine,
   // K2-A CRIT-2: skriv EXTRA_PRIZE-entries for pot- og lucky-bonus-payouts
   // til §71 ComplianceLedger. Soft-fail-mønster matcher Game1PayoutService.
-  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // COMP-P0-002: routes via outbox-decorator for eventual delivery-garanti.
+  complianceLedgerPort,
   // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) på alle Spill 1
   // payout-paths (pot, lucky-bonus, mini-game). Tidligere kunne Jackpott
   // utbetales til 30 000 kr og mini-game-buckets til 4000 kr — ulovlig
@@ -1594,7 +1682,8 @@ const game1MiniGameOrchestrator = new Game1MiniGameOrchestrator({
   walletAdapter,
   // K2-A CRIT-2: skriv EXTRA_PRIZE-entry per mini-game-payout til §71-
   // ledger. Soft-fail (ledger-feil ruller ikke tilbake wallet-credit).
-  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // COMP-P0-002: routes via outbox-decorator for eventual delivery-garanti.
+  complianceLedgerPort,
   // K2-A CRIT-3: håndhev single-prize-cap (2500 kr) før wallet-credit.
   // Mini-game-buckets/luker kan ha config-verdier over 2500 — capen
   // beskytter mot ulovlig utbetaling.
@@ -1637,7 +1726,8 @@ const miniGameOddsenEngine = new MiniGameOddsenEngine({
   auditLog: auditLogService,
   // K2-A CRIT-2: skriv EXTRA_PRIZE-entry per Oddsen-resolve-hit til §71-
   // ledger. Soft-fail-mønster matcher Game1PayoutService.
-  complianceLedgerPort: engine.getComplianceLedgerPort(),
+  // COMP-P0-002: routes via outbox-decorator for eventual delivery-garanti.
+  complianceLedgerPort,
   // K2-A CRIT-3: håndhev single-prize-cap (2500 kr). Default Oddsen-config
   // har potLarge=3000 kr → vil bli capped til 2500 (forsk. til huset).
   prizePolicyPort: engine.getPrizePolicyPort(),
@@ -3388,6 +3478,14 @@ function handleShutdown(signal: string) {
       if (walletOutboxWorker) {
         try { await walletOutboxWorker.stop(); }
         catch (err) { console.warn("[shutdown] walletOutboxWorker.stop() failed:", err); }
+      }
+      // COMP-P0-002: samme graceful-stop for compliance-outbox-worker.
+      // Pågående tick får tid til å markere claimed compliance-rader
+      // processed/failed før shutdown — verken §71-rad eller outbox-rad
+      // kan tapes pga abrupt shutdown.
+      if (complianceOutboxWorker) {
+        try { await complianceOutboxWorker.stop(); }
+        catch (err) { console.warn("[shutdown] complianceOutboxWorker.stop() failed:", err); }
       }
       await roomStateStore.shutdown();
       if (redisSchedulerLock) await redisSchedulerLock.shutdown();
