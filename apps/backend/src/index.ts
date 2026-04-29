@@ -567,6 +567,12 @@ const engine = new Game3Engine(localBingoAdapter, walletAdapter, {
   // through engine-options so cleanup helpers can evict-with-release
   // atomically (replaces PR #724 isPreserve-callback shim).
   lifecycleStore: roomState.lifecycleStore,
+  // K3 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.1): quarantine BingoEngine
+  // for Spill 2/3 + Demo Hall/test-haller. Production retail Spill 1
+  // (gameSlug=bingo, !isTestHall, !scheduledGameId) blokkeres med
+  // USE_SCHEDULED_API — må gå via Game1DrawEngineService. Tester og dev
+  // sender NODE_ENV ≠ production og er derfor uberørt av guarden.
+  isProductionRuntime,
 });
 
 // BIN-274: Configurable KYC provider
@@ -3562,6 +3568,19 @@ const PORT = Number(process.env.PORT ?? 4000);
     console.log(`[scheduler] autoDraw=${runtimeBingoSettings.autoDrawEnabled} interval=${runtimeBingoSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms envOverride=${autoDrawIntervalEnvOverrideMs ?? "none"}`);
     console.log(`[daily-report] enabled=${dailyReportJobEnabled} interval=${dailyReportJobIntervalMs}ms`);
     console.log(`[swedbank] configured=${swedbankPayService.isConfigured()}`);
+    // K3 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.1): explicit engine-routing
+    // log. Auditor reading boot-output må kunne se hvilken engine håndterer
+    // hvilken slug. `isProductionRuntime=true` aktiverer assertSpill1NotAdHoc
+    // som tvinger retail-Spill-1 over på scheduled-engine; test-haller +
+    // dev-runtime kan fortsatt bruke ad-hoc-pathen.
+    console.log(
+      `[engine-routing] Spill 1 (bingo): ` +
+        (isProductionRuntime
+          ? "production=Game1DrawEngineService (scheduled), test-hall=BingoEngine (ad-hoc, isTestHall=true)"
+          : "dev/test=BingoEngine (ad-hoc) OR Game1DrawEngineService (scheduled), Demo Hall passes through") +
+        ` | Spill 2 (rocket): BingoEngine (ad-hoc) | Spill 3 (monsterbingo): BingoEngine (ad-hoc) | ` +
+        `quarantine=${isProductionRuntime ? "ENFORCED" : "OFF (NODE_ENV != production)"}`
+    );
   });
 })();
 
