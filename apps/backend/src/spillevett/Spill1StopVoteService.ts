@@ -42,7 +42,7 @@
  */
 
 import type { BingoEngine } from "../game/BingoEngine.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { RoomSnapshot } from "../game/types.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";

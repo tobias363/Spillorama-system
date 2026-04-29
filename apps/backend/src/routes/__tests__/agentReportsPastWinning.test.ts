@@ -23,7 +23,7 @@ import type { AgentService } from "../../agent/AgentService.js";
 import type { AgentShiftService } from "../../agent/AgentShiftService.js";
 import type { StaticTicketService } from "../../compliance/StaticTicketService.js";
 import type { StaticTicket } from "../../compliance/StaticTicketService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const baseUser: PublicAppUser = {
   id: "u-1",

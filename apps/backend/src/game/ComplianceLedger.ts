@@ -16,7 +16,7 @@
 // hver split-fil for detaljer.
 
 import { createHash, randomUUID } from "node:crypto";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";

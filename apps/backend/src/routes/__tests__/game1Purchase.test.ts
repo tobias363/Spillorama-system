@@ -28,7 +28,7 @@ import type {
   Game1TicketPurchaseInput,
   Game1RefundInput,
 } from "../../game/Game1TicketPurchaseService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────

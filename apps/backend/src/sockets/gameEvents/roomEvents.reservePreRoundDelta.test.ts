@@ -29,7 +29,7 @@ import assert from "node:assert/strict";
 import { reservePreRoundDelta } from "./roomEvents.js";
 import { InMemoryWalletAdapter } from "../../adapters/InMemoryWalletAdapter.js";
 import { WalletError } from "../../adapters/WalletAdapter.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { GameEventsDeps } from "./deps.js";
 
 interface TestDepsOpts {

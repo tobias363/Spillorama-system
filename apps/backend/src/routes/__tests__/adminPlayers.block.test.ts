@@ -29,7 +29,7 @@ import type {
   KycStatus,
 } from "../../platform/PlatformService.js";
 import type { ProfileSettingsService } from "../../compliance/ProfileSettingsService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeUser(overrides: Partial<AppUser> & { id: string }): AppUser {
   return {

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { AgentService } from "../AgentService.js";
 import { InMemoryAgentStore } from "../AgentStore.js";
 import type { AppUser } from "../../platform/PlatformService.js";

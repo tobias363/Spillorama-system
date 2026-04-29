@@ -31,7 +31,7 @@ import {
   type MysteryRng,
 } from "./MiniGameMysteryEngine.js";
 import type { MiniGameTriggerContext } from "./types.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

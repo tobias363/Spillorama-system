@@ -14,7 +14,7 @@
  * the store interface (Postgres uses a transaction; in-memory uses a Map).
  */
 import { randomUUID } from "node:crypto";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { AgentService } from "./AgentService.js";
 import type {
   UniqueIdCard,

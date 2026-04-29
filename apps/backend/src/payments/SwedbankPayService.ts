@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 /**
  * Scenario A (2026-04-26): supported payment methods.

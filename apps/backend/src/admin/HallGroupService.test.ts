@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { HallGroupService } from "./HallGroupService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 /**
  * Bygger en "service" der ensureInitialized er no-op og pool-query er

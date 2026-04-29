@@ -20,7 +20,7 @@ import type {
   PublicAppUser,
 } from "../../platform/PlatformService.js";
 import type { RoomSnapshot } from "@spillorama/shared-types";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeUser(overrides: Partial<PublicAppUser> = {}): PublicAppUser {
   return {

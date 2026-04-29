@@ -31,7 +31,7 @@ import type {
   RewardAllResult,
 } from "../../compliance/PhysicalTicketService.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1", email: "admin@test.no", displayName: "Admin",

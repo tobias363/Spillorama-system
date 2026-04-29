@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 import { VoucherService } from "../VoucherService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface VoucherRow {
   id: string; code: string; type: "PERCENTAGE" | "FLAT_AMOUNT"; value: number;

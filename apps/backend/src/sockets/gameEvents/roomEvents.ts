@@ -19,7 +19,8 @@
  *   - try/catch-strukturen rundt hvert handler-kall
  *   - Rate-limit + auth via `ctx.rateLimited` / `ctx.requireAuthenticatedPlayerAction`
  */
-import { DomainError, toPublicError } from "../../game/BingoEngine.js";
+import { toPublicError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import {
   mustBeNonEmptyString,
   parseOptionalNonNegativeNumber,

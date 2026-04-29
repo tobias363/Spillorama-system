@@ -7,7 +7,7 @@
  */
 
 import type { Pool } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export interface PhysicalTicketTableNames {
   batches: string;

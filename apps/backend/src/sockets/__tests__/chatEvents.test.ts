@@ -22,7 +22,7 @@ import type { SocketContext } from "../gameEvents/context.js";
 import type { GameEventsDeps } from "../gameEvents/deps.js";
 import type { ChatMessage } from "../gameEvents/types.js";
 import type { ChatMessageStore, PersistedChatMessage } from "../../store/ChatMessageStore.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface CapturedEmit {
   room: string;

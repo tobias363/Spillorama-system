@@ -14,7 +14,7 @@
  * Uendret fra opprinnelig gameEvents.ts.
  */
 import { ClaimSubmitPayloadSchema } from "@spillorama/shared-types/socket-events";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import { addBreadcrumb } from "../../observability/sentry.js";
 import { metrics as promMetrics } from "../../util/metrics.js";
 import type { SocketContext } from "./context.js";

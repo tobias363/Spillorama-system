@@ -181,25 +181,12 @@ export type {
   OverskuddDistributionBatch
 } from "./ComplianceLedger.js";
 
-export class DomainError extends Error {
-  public readonly code: string;
-  /**
-   * Valgfri strukturert kontekst som API-laget propagerer til klient via
-   * `toPublicError(err).details`. Brukes f.eks. av `HALLS_NOT_READY` for å
-   * returnere `{ unreadyHalls: [...] }` (Task 1.5 — agents-not-ready popup),
-   * og av `JACKPOT_CONFIRM_REQUIRED` for å returnere nåværende pot-saldo
-   * uten at klient må gjøre et ekstra API-kall (MASTER_PLAN §2.3).
-   */
-  public readonly details?: Record<string, unknown>;
-
-  constructor(code: string, message: string, details?: Record<string, unknown>) {
-    super(message);
-    this.code = code;
-    if (details !== undefined) {
-      this.details = details;
-    }
-  }
-}
+// `DomainError` ble flyttet til `apps/backend/src/errors/DomainError.ts` 2026-04-29
+// (Stage 1 quick-win — Backend Pain-Points Audit). Re-eksporten her bevarer
+// back-compat for eksisterende imports fra `BingoEngine.js` mens vi gradvis
+// flytter konsumentene over til den nye plasseringen.
+import { DomainError } from "../errors/DomainError.js";
+export { DomainError };
 
 interface CreateRoomInput {
   playerName: string;

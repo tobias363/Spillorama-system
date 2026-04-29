@@ -34,7 +34,7 @@ import type { PlatformService, PublicAppUser } from "../../platform/PlatformServ
 import type { AgentService } from "../../agent/AgentService.js";
 import type { AgentShiftService } from "../../agent/AgentShiftService.js";
 import type { Game1HallReadyService, HallReadyStatusRow } from "../../game/Game1HallReadyService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

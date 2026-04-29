@@ -30,7 +30,7 @@ import type {
   StaticTicket,
   StaticTicketService,
 } from "../../compliance/StaticTicketService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const baseUser: PublicAppUser = {
   id: "u-1",

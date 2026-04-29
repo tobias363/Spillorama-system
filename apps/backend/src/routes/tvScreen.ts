@@ -22,7 +22,7 @@
 import express from "express";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { TvScreenService } from "../game/TvScreenService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export interface TvRouterDeps {
   platformService: PlatformService;

@@ -24,7 +24,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { normalizeAbsoluteHttpUrl } from "../util/httpHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";

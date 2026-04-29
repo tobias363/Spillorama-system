@@ -22,7 +22,7 @@ import { InMemoryPhysicalTicketReadPort } from "../ports/PhysicalTicketReadPort.
 import { NotImplementedTicketPurchasePort } from "../ports/TicketPurchasePort.js";
 import { InMemoryWalletAdapter } from "../../adapters/InMemoryWalletAdapter.js";
 import type { AppUser, PublicAppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface TestCtx {
   service: AgentTransactionService;

@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import {
   makeService,
   newStore,

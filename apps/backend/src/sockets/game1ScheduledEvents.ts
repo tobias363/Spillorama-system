@@ -23,7 +23,8 @@
 import type { Pool } from "pg";
 import type { Socket } from "socket.io";
 import type { BingoEngine } from "../game/BingoEngine.js";
-import { DomainError, toPublicError } from "../game/BingoEngine.js";
+import { toPublicError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { RoomSnapshot } from "../game/types.js";
 import type { Game1DrawEngineService } from "../game/Game1DrawEngineService.js";
 import type {

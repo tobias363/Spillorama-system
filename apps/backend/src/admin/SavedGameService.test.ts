@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SavedGameService } from "./SavedGameService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): SavedGameService {
   const svc = Object.create(SavedGameService.prototype) as SavedGameService;

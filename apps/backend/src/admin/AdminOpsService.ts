@@ -28,7 +28,7 @@ import type { PlatformService, HallDefinition } from "../platform/PlatformServic
 import type { HallGroupService, HallGroup } from "./HallGroupService.js";
 import type { WalletReconciliationService } from "../jobs/walletReconciliation.js";
 import type { PaymentRequestService } from "../payments/PaymentRequestService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "admin-ops-service" });

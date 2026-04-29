@@ -2,7 +2,7 @@
  * BIN-167: Shared request validation helpers extracted from index.ts.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export function mustBeNonEmptyString(value: unknown, fieldName: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {

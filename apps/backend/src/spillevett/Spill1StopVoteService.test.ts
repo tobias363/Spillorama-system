@@ -16,7 +16,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Spill1StopVoteService } from "./Spill1StopVoteService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { RoomSnapshot, Player } from "../game/types.js";
 import type {

@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type {
   OkBingoApiClient,
   OkBingoCreateTicketInput,

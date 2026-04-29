@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AgentSettlementService } from "../AgentSettlementService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 test("calculateShiftDelta: positiv diff ved overlevering-overskudd", () => {
   const r = AgentSettlementService.calculateShiftDelta({

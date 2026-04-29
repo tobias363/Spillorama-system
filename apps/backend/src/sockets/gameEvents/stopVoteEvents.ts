@@ -9,7 +9,7 @@
  * Returns NOT_SUPPORTED when the service is not wired (test-harness
  * fallback) so the deploy is fail-fast rather than silently no-op.
  */
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import type { SocketContext } from "./context.js";
 import type {
   AckResponse,

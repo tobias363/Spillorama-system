@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ScreenSaverService } from "./ScreenSaverService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): ScreenSaverService {
   const svc = Object.create(ScreenSaverService.prototype) as ScreenSaverService;

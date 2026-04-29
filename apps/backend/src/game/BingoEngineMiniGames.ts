@@ -27,7 +27,7 @@ import type {
   Player,
   RoomState,
 } from "./types.js";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
 
 /** Default prize segments for the jackpot wheel (in kr). */

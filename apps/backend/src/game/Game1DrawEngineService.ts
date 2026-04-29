@@ -50,7 +50,7 @@
 import { randomUUID } from "node:crypto";
 import { randomInt } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { BingoEngine } from "./BingoEngine.js";
 import {
   resolveDrawBagConfig,

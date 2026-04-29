@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MaintenanceService } from "./MaintenanceService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): MaintenanceService {
   const svc = Object.create(MaintenanceService.prototype) as MaintenanceService;

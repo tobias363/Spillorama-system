@@ -20,7 +20,7 @@
  * B3.1 itself writes nothing to the wallet — lifecycle only.
  */
 
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { AgentStore, AgentShift } from "./AgentStore.js";
 import type { AgentService } from "./AgentService.js";
 

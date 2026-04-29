@@ -6,7 +6,7 @@
 // KRITISK (§11): Disse validerer input. Endring av semantikk (f.eks.
 // akseptere nye gameType-verdier) vil bryte regulatorisk kontrakt.
 
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { LedgerChannel, LedgerGameType, OrganizationAllocationInput } from "./ComplianceLedgerTypes.js";
 
 export function assertLedgerGameType(value: string): LedgerGameType {

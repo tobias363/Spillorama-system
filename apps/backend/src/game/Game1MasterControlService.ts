@@ -43,7 +43,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";

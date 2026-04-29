@@ -12,7 +12,7 @@ import test from "node:test";
 import { Pool } from "pg";
 import { AmlService, MANUAL_FLAG_SLUG } from "../AmlService.js";
 import type { PaymentRequest, PaymentRequestService } from "../../payments/PaymentRequestService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface RuleRow {
   id: string; slug: string; label: string; severity: string;

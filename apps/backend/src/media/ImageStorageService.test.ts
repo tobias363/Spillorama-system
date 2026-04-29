@@ -15,7 +15,7 @@ import {
   validateImageBase64,
   MAX_IMAGE_BYTES,
 } from "./ImageStorageService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 

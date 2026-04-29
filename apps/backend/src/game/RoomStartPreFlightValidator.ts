@@ -27,7 +27,7 @@
  */
 
 import { Pool } from "pg";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "room-start-pre-flight-validator" });

@@ -12,7 +12,7 @@ import type { EmailService } from "../integration/EmailService.js";
 import type { SveveSmsService } from "../integration/SveveSmsService.js";
 import { maskPhone } from "../integration/SveveSmsService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   apiSuccess,
   apiFailure,

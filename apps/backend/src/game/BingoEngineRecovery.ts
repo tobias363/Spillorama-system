@@ -33,7 +33,7 @@ import type {
   RoomState,
   Ticket,
 } from "./types.js";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
 
 const logger = rootLogger.child({ module: "engine.recovery" });

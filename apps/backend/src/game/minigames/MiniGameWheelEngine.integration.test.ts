@@ -22,7 +22,7 @@ import {
   type MiniGameTriggerBroadcast,
 } from "./Game1MiniGameOrchestrator.js";
 import { MiniGameWheelEngine, type WheelRng, type WheelResultJson } from "./MiniGameWheelEngine.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

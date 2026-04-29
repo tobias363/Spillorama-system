@@ -22,7 +22,7 @@
  */
 
 import express from "express";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { HallGroupService } from "../admin/HallGroupService.js";

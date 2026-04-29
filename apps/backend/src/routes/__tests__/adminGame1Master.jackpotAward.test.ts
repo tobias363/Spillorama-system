@@ -31,7 +31,7 @@ import type {
   AwardJackpotResult,
   Game1JackpotStateService,
 } from "../../game/Game1JackpotStateService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1",

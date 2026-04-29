@@ -25,7 +25,7 @@ import type {
 } from "../../platform/PlatformService.js";
 import type { BankIdKycAdapter } from "../../adapters/BankIdKycAdapter.js";
 import type { AuthTokenService } from "../../auth/AuthTokenService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeUser(overrides: Partial<AppUser> & { id: string }): AppUser {
   return {

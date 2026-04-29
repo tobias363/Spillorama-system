@@ -26,7 +26,7 @@ import type {
 } from "../../compliance/AmlService.js";
 import type { PlatformService, PublicAppUser, AppUser } from "../../platform/PlatformService.js";
 import type { PaymentRequest } from "../../payments/PaymentRequestService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeUser(overrides: Partial<AppUser> & { id: string }): AppUser {
   return {

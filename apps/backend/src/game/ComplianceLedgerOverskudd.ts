@@ -16,7 +16,7 @@
 // walletAdapter.transfer() og batchId, ellers byte-identisk.
 
 import { randomUUID } from "node:crypto";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { roundCurrency } from "../util/currency.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type {

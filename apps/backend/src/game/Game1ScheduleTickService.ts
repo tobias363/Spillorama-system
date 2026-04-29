@@ -42,7 +42,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-schedule-tick-service" });

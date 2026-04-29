@@ -38,7 +38,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { Voucher, VoucherType } from "./VoucherService.js";
 

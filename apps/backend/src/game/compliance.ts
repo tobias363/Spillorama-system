@@ -1,4 +1,4 @@
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 export function assertTicketsPerPlayerWithinHallLimit(
   ticketsPerPlayer: number | undefined,

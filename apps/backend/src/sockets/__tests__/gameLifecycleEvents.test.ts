@@ -20,7 +20,7 @@ import { registerGameLifecycleEvents } from "../gameEvents/gameLifecycleEvents.j
 import type { SocketContext } from "../gameEvents/context.js";
 import type { GameEventsDeps, BingoSchedulerSettings } from "../gameEvents/deps.js";
 import type { RoomSnapshot } from "../../game/types.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface MockSocket extends EventEmitter {
   id: string;

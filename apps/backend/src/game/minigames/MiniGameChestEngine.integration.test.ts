@@ -28,7 +28,7 @@ import {
   type ChestRng,
   type ChestResultJson,
 } from "./MiniGameChestEngine.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

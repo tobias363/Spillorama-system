@@ -23,7 +23,7 @@ import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "../game/idempotency.js";
 import { logger as rootLogger } from "../util/logger.js";
 

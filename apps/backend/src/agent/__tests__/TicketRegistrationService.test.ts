@@ -28,7 +28,7 @@ import {
   TICKET_TYPES,
   type TicketType,
 } from "../TicketRegistrationService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface MockRange {
   id: string;

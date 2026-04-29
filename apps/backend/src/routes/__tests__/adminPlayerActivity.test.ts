@@ -17,7 +17,7 @@ import type { PlatformService, PublicAppUser, AppUser } from "../../platform/Pla
 import type { WalletAdapter, WalletTransaction, WalletTransactionType } from "../../adapters/WalletAdapter.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { ComplianceLedgerEntry, LedgerEventType } from "../../game/ComplianceLedger.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 import {
   AuditLogService,
   InMemoryAuditLogStore,

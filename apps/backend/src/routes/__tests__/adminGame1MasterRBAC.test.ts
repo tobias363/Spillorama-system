@@ -29,7 +29,7 @@ import {
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import type { Game1MasterControlService } from "../../game/Game1MasterControlService.js";
 import { Game1JackpotStateService } from "../../game/Game1JackpotStateService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ─── Test users ──────────────────────────────────────────────────────────────
 

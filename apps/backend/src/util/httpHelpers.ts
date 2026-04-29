@@ -1,6 +1,7 @@
 import express from "express";
 import { URL } from "node:url";
-import { DomainError, toPublicError } from "../game/BingoEngine.js";
+import { toPublicError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlayerReportPeriod } from "../spillevett/playerReport.js";
 
 // ── Environment parsing helpers ───────────────────────────────────────────────

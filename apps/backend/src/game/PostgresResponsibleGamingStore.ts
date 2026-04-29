@@ -1,6 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type {
   PersistedComplianceLedgerEntry,
   PersistedDailyReport,

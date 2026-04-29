@@ -1,4 +1,4 @@
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { UserRole } from "./PlatformService.js";
 
 const ADMIN_ACCESS_POLICY_DEFINITION = {

@@ -16,7 +16,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { SessionService } from "../SessionService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface SessionRow {
   id: string;

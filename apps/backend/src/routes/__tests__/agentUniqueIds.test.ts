@@ -24,7 +24,7 @@ import type {
   AppUser,
   UserRole,
 } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface Ctx {
   baseUrl: string;

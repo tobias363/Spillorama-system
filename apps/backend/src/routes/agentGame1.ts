@@ -41,7 +41,7 @@
 
 import express from "express";
 import type { Pool } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type {
   PlatformService,
   PublicAppUser,

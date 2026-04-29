@@ -21,7 +21,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Pool } from "pg";
 import { SecurityService } from "../SecurityService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface CapturedEvent {
   code: string;

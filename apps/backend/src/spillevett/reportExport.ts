@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import nodemailer from "nodemailer";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlayerReport } from "./playerReport.js";
 
 function formatCurrency(value: number): string {

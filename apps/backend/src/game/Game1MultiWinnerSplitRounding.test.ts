@@ -46,7 +46,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   Game1PayoutService,
   type Game1WinningAssignment,

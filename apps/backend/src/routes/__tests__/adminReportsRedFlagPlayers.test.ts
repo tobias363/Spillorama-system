@@ -31,7 +31,7 @@ import type { AmlService, AmlRedFlag } from "../../compliance/AmlService.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { ComplianceLedgerEntry } from "../../game/ComplianceLedger.js";
 import type { PlatformService, PublicAppUser, AppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 

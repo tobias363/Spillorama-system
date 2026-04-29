@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { StubOkBingoApiClient } from "../StubOkBingoApiClient.js";
-import { DomainError } from "../../../game/BingoEngine.js";
+import { DomainError } from "../../../errors/DomainError.js";
 
 test("createTicket returnerer ticket + roomId", async () => {
   const client = new StubOkBingoApiClient();

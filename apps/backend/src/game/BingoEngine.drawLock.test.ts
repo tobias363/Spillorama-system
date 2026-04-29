@@ -17,7 +17,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BingoEngine, DomainError } from "./BingoEngine.js";
+import { BingoEngine } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { InMemoryWalletAdapter } from "./BingoEngine.test.js";
 import type { BingoSystemAdapter, CreateTicketInput } from "../adapters/BingoSystemAdapter.js";
 import type { Ticket } from "./types.js";

@@ -23,7 +23,7 @@ import type {
   ProductCart,
   ProductSale,
 } from "../../agent/AgentProductSaleService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const agentUser: PublicAppUser = {
   id: "ag-1", email: "a@test.no", displayName: "Agent",

@@ -28,7 +28,7 @@ import type {
   SwedbankTopupIntent,
   CreateSwedbankTopupIntentInput,
 } from "../SwedbankPayService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

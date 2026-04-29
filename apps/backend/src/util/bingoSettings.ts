@@ -3,7 +3,7 @@
  * Extracted from index.ts — holds no mutable state itself; mutable
  * state is the BingoSchedulerSettings object owned by index.ts.
  */
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import {
   parseOptionalBooleanInput,
   parseOptionalPositiveInteger,

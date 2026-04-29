@@ -21,7 +21,7 @@ import { registerClaimEvents } from "../gameEvents/claimEvents.js";
 import type { SocketContext } from "../gameEvents/context.js";
 import type { GameEventsDeps } from "../gameEvents/deps.js";
 import type { ClaimRecord, RoomSnapshot } from "../../game/types.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface CapturedEmit {
   channel: "room" | "socket";

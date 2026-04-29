@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Pool, QueryResult } from "pg";
-import { DomainError } from "./BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { RoomStartPreFlightValidator } from "./RoomStartPreFlightValidator.js";
 
 interface FakeQueryCall {

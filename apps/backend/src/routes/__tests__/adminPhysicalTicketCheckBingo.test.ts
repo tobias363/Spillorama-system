@@ -22,7 +22,7 @@ import type {
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { RoomSnapshot, RoomSummary } from "../../game/types.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Users ────────────────────────────────────────────────────────────────
 

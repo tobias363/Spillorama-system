@@ -16,7 +16,7 @@
  */
 
 import express from "express";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { AgentService } from "../agent/AgentService.js";
 import {

@@ -28,7 +28,7 @@ import type {
   PublicAppUser,
 } from "../../platform/PlatformService.js";
 import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Pool stub (samme pattern som authFlows.test.ts) ─────────────────────────
 

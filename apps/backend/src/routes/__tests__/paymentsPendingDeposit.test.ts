@@ -13,7 +13,7 @@ import http from "node:http";
 import express from "express";
 import { createPaymentsRouter } from "../payments.js";
 import type { SwedbankTopupIntent } from "../../payments/SwedbankPayService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // platformService-mock kaster DomainError så toPublicError mapper koden
 // til UNAUTHORIZED (samme oppførsel som ekte PlatformService).

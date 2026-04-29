@@ -19,7 +19,7 @@ import type {
   HallAccountReportService,
   ManualAdjustment,
 } from "../../compliance/HallAccountReportService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1", email: "a@test.no", displayName: "Admin",

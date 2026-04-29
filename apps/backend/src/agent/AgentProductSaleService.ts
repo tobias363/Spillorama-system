@@ -24,7 +24,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "../game/idempotency.js";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";

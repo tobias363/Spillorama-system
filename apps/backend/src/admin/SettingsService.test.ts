@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SettingsService, SYSTEM_SETTING_REGISTRY } from "./SettingsService.js";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 
 function makeValidatingService(): SettingsService {
   const svc = Object.create(SettingsService.prototype) as SettingsService;

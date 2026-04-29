@@ -27,7 +27,7 @@
 
 import express from "express";
 import type { Server as SocketServer } from "socket.io";
-import { DomainError } from "../game/BingoEngine.js";
+import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type {

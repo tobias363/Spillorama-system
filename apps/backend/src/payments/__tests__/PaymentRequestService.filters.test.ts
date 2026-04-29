@@ -22,7 +22,7 @@ import test from "node:test";
 import { Pool } from "pg";
 import { PaymentRequestService } from "../PaymentRequestService.js";
 import type { WalletAdapter, WalletTransaction } from "../../adapters/WalletAdapter.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Mock Pool with full filter support ──────────────────────────────────────
 

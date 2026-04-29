@@ -31,7 +31,7 @@ import {
   MiniGameOddsenEngine,
   type OddsenChoiceResultJson,
 } from "./MiniGameOddsenEngine.js";
-import { DomainError } from "../BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 // ── Fake DB state ────────────────────────────────────────────────────────────
 

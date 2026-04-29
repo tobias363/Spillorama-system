@@ -20,7 +20,7 @@ import {
   PIN_MAX_FAILED_ATTEMPTS,
   assertValidPin,
 } from "../UserPinService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 interface PinRow {
   user_id: string;

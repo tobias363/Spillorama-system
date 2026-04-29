@@ -19,7 +19,7 @@ import {
 import type { FcmPushService } from "../../notifications/FcmPushService.js";
 import type { NotificationPayload, SendResult, StoredNotification, UserDevice } from "../../notifications/types.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
-import { DomainError } from "../../game/BingoEngine.js";
+import { DomainError } from "../../errors/DomainError.js";
 
 function makeUser(overrides: Partial<PublicAppUser> = {}): PublicAppUser {
   return {
