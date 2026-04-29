@@ -529,6 +529,21 @@ const loyaltyService = new LoyaltyService({
 });
 const loyaltyHookAdapter = new LoyaltyPointsHookAdapter({ service: loyaltyService });
 
+// K2 (2026-04-29): Construct RoomStateManager BEFORE the engine so its
+// `lifecycleStore` (atomic state owner for armed/reservation/arm-cycle
+// state) can be passed into the engine's options. The cleanup helpers in
+// the engine route eviction through `lifecycleStore.evictPlayer`, which
+// atomically clears in-memory state AND surfaces the orphan reservation
+// id so the wallet adapter releases the row.
+//
+// The same `roomState` instance is referenced again at line ~1123 below
+// where the rest of the room-state wiring happens — it's a process-
+// singleton, defined here only because the engine needs the lifecycle
+// store.
+//
+// Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.2 + §6 K2.
+const roomState = new RoomStateManager();
+
 // BIN-615 / PR-C3b: Instantiate Game3Engine (subclass of Game2Engine ⊂
 // BingoEngine). One engine instance serves G1 / G2 / G3 rooms concurrently:
 //   - Game3Engine.onDrawCompleted guards on isGame3Round (slug + patternEvalMode
@@ -548,6 +563,10 @@ const engine = new Game3Engine(localBingoAdapter, walletAdapter, {
   // GAME1_SCHEDULE PR 5: wire loyalty-hook (fire-and-forget points-award
   // ved ticket.purchase + game.win). Default split-rounding-audit er no-op.
   loyaltyHook: loyaltyHookAdapter,
+  // K2: atomic state owner for armed/reservation/arm-cycle. Wired
+  // through engine-options so cleanup helpers can evict-with-release
+  // atomically (replaces PR #724 isPreserve-callback shim).
+  lifecycleStore: roomState.lifecycleStore,
 });
 
 // BIN-274: Configurable KYC provider
@@ -1119,8 +1138,10 @@ const webBaseUrl =
 const supportEmail = process.env.APP_SUPPORT_EMAIL?.trim() || "support@spillorama.no";
 
 // ── Shared mutable room state ─────────────────────────────────────────────────
-
-const roomState = new RoomStateManager();
+// K2 (2026-04-29): `roomState` is now constructed at line ~545, BEFORE the
+// engine, so its `lifecycleStore` can be passed into the engine for
+// atomic-eviction routing. This is the same singleton — referenced here
+// for the rest of the wiring below.
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 

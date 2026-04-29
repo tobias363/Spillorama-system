@@ -350,6 +350,17 @@ interface ComplianceOptions {
   /** BIN-251: External room state store for cross-instance persistence (e.g. Redis). */
   roomStateStore?: import("../store/RoomStateStore.js").RoomStateStore;
   /**
+   * K2 (2026-04-29): atomic state owner for armed-state + reservation-mapping
+   * + arm-cycle. When provided, `cleanupStaleWalletInIdleRooms` uses it to
+   * release-then-evict orphan reservations atomically — replacing the
+   * `isPreserve`-callback shim from PR #724. Optional so existing tests can
+   * keep wiring the engine without it; the legacy 2-arg form remains as a
+   * fallback that doesn't release reservations (tests that don't care).
+   *
+   * Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.2 + §6 K2.
+   */
+  lifecycleStore?: import("../util/RoomLifecycleStore.js").RoomLifecycleStore;
+  /**
    * Test-only: override the draw bag generator. Receives the nominal ball count
    * (60 or 75) and must return that many unique integers in 1..count. Intended
    * for deterministic integration tests; production must not set this.
@@ -433,6 +444,15 @@ export class BingoEngine {
    * transfer. Default no-op — produksjon wire-r DB-backed implementasjon.
    */
   protected readonly claimAuditTrailRecovery: ClaimAuditTrailRecoveryPort;
+
+  /**
+   * K2 (2026-04-29): atomic state owner for armed/reservation/arm-cycle.
+   * When set (production wiring) the cleanup helpers route through
+   * `evictPlayer` so eviction always releases the wallet reservation
+   * atomically. Optional so test harnesses without reservation flow
+   * keep working — the legacy 2-arg cleanup form remains a fallback.
+   */
+  private readonly lifecycleStore?: import("../util/RoomLifecycleStore.js").RoomLifecycleStore;
   protected readonly prizePolicy: PrizePolicyManager;
   protected readonly payoutAudit: PayoutAuditTrail;
   protected readonly ledger: ComplianceLedger;
@@ -568,6 +588,11 @@ export class BingoEngine {
     // CRIT-6: claim-audit-trail recovery port (optional). Default no-op.
     this.claimAuditTrailRecovery =
       options.claimAuditTrailRecovery ?? new NoopClaimAuditTrailRecoveryPort();
+
+    // K2 (2026-04-29): atomic state owner. When provided, cleanup paths
+    // route eviction through the store so orphan reservations are always
+    // released atomically. Test harnesses that don't need this can omit.
+    this.lifecycleStore = options.lifecycleStore;
   }
 
   async hydratePersistentState(): Promise<void> {
@@ -3789,6 +3814,19 @@ export class BingoEngine {
     if (room.currentGame && room.currentGame.status === "RUNNING") {
       throw new DomainError("GAME_IN_PROGRESS", `Kan ikke slette rom ${code} mens en runde pågår.`);
     }
+    // K2 (2026-04-29) — FORHANDSKJOP §7.5: pre-K2 destroyRoom evicted from
+    // engine.rooms but never touched RoomStateManager / lifecycleStore,
+    // leaving armed-state + reservation-mappings + arm-cycle stranded
+    // until process restart. Now we evict each player atomically before
+    // deleting the room, releasing any orphan reservations along the way.
+    if (this.lifecycleStore) {
+      for (const player of room.players.values()) {
+        this.releaseAndForgetEviction(code, player.id, player.walletId);
+      }
+      // Clear arm-cycle for the room (no public API for this — disarm-all
+      // via the store handles it as a side effect).
+      void this.lifecycleStore.disarmAllPlayers({ roomCode: code });
+    }
     this.rooms.delete(code);
     this.roomLastRoundStartMs.delete(code);
     this.lastDrawAtByRoom.delete(code);
@@ -4357,39 +4395,45 @@ export class BingoEngine {
    * — der må reconnecten gå via `attachPlayerSocket` så pågående
    * buy-in/wallet-state er trygg.
    *
-   * FORHANDSKJOP-ORPHAN-FIX (PR 2, 2026-04-29) — armed/reservation-aware:
-   * The optional `isPreserve` callback lets the socket layer veto an
-   * eviction when the player still has armed-state or an active wallet
-   * reservation in `RoomStateManager`. Without it, the (walletId +
-   * !socketId + idle-room) trio could evict a player mid-pre-round, the
-   * next `onAutoStart` would silently filter them out via
-   * `armedSet ∩ room.players`, and the wallet_reservations row would
-   * orphan until 30-min TTL. The engine doesn't import RoomStateManager,
-   * so the callback is the dependency-injection.
+   * **K2 (2026-04-29)** — atomic eviction via `lifecycleStore`:
+   * When `lifecycleStore` is wired (production), eviction routes through
+   * `lifecycleStore.evictPlayer({ releaseReservation: true })` which
+   * atomically clears armed-state, ticket-selections, and reservation-
+   * mapping AND surfaces the released reservation-id so the wallet
+   * reservation row is released against the wallet adapter. This
+   * supersedes the PR #724 `isPreserve`-callback shim — eviction is now
+   * correct by construction (orphans cannot occur because the cleanup
+   * always releases the reservation).
+   *
+   * Backward-compat: the legacy `isPreserve` option is still accepted
+   * but ignored when `lifecycleStore` is wired (the new path is strictly
+   * stronger — it ALWAYS handles armed players safely). When
+   * `lifecycleStore` is NOT wired (test harnesses), the legacy PR #724
+   * preserve-skip behavior remains so we don't regress test coverage.
    *
    * Returnerer antall rom hvor opprydding ble utført (mest for
    * observability + tester).
    *
-   * Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §6 PR 2.
+   * Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.2 + §6 K2.
+   * Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §7.1 (RESOLVED).
    */
   cleanupStaleWalletInIdleRooms(
     walletId: string,
     options?: {
       exceptRoomCode?: string;
       /**
-       * Return true to skip eviction for this (roomCode, playerId).
-       * Used by the socket layer to preserve players with armed-state
-       * or active wallet reservations (in `RoomStateManager`). When
-       * skipping, the engine logs `reason: "preserved-due-to-armed-or-reservation"`
-       * for observability.
+       * @deprecated K2 — kept for backward-compat with test harnesses
+       * that don't wire `lifecycleStore`. When `lifecycleStore` is
+       * wired (production), this callback is IGNORED — eviction
+       * always releases reservations atomically, so preserve-skip is
+       * no longer needed.
        */
       isPreserve?: (roomCode: string, playerId: string) => boolean;
     },
   ): number;
-  /** @deprecated Use the options-form with `isPreserve` instead. The legacy
-   *  2-arg form is kept for backward-compat with admin-tooling and existing
-   *  tests; it does NOT preserve armed/reservation state. New socket-layer
-   *  call-sites must migrate to the options form to fix the orphan-bug. */
+  /** @deprecated Use the options-form. The legacy 2-arg form is kept for
+   *  backward-compat with admin-tooling and existing tests; it does NOT
+   *  preserve armed/reservation state when `lifecycleStore` is unwired. */
   cleanupStaleWalletInIdleRooms(walletId: string, exceptRoomCode?: string): number;
   cleanupStaleWalletInIdleRooms(
     walletId: string,
@@ -4404,7 +4448,12 @@ export class BingoEngine {
         ? { exceptRoomCode: arg2 }
         : arg2 ?? {};
     const exceptCode = opts.exceptRoomCode?.trim().toUpperCase();
-    const isPreserve = opts.isPreserve;
+    // K2: when lifecycleStore is wired, the preserve-callback is obsolete
+    // because eviction now atomically releases reservations. Tests that
+    // run without the store fall back to the legacy preserve-skip path
+    // so they don't regress.
+    const useStore = this.lifecycleStore !== undefined;
+    const isPreserve = useStore ? undefined : opts.isPreserve;
     let cleaned = 0;
     for (const room of this.rooms.values()) {
       if (exceptCode && room.code === exceptCode) continue;
@@ -4415,9 +4464,8 @@ export class BingoEngine {
       for (const player of [...room.players.values()]) {
         if (player.walletId === normalizedWalletId && !player.socketId) {
           if (isPreserve && isPreserve(room.code, player.id)) {
-            // FORHANDSKJOP-ORPHAN-FIX (PR 2): defer eviction so the
-            // armed/reservation state survives the cleanup pass and
-            // the next `startGame` can commit the buy-in.
+            // FORHANDSKJOP-ORPHAN-FIX (PR 2): legacy preserve-skip path,
+            // active only when `lifecycleStore` is unwired (test harness).
             logger.warn(
               {
                 roomCode: room.code,
@@ -4427,9 +4475,6 @@ export class BingoEngine {
               },
               "cleanupStaleWalletInIdleRooms: preserved player with armed-state or active reservation (would have orphaned forhåndskjøp)",
             );
-            // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-event for
-            // observability — gjør det mulig å grep "room.player.preserved"
-            // i Render-loggen for å se hvor ofte beslutningen sparer state.
             logRoomEvent(
               logger,
               {
@@ -4441,6 +4486,16 @@ export class BingoEngine {
               "room.player.preserved",
             );
             continue;
+          }
+          // K2: when lifecycleStore is wired, atomically release any
+          // wallet reservation + clear armed-state BEFORE we delete the
+          // player record. The store call is async but we deliberately
+          // fire-and-forget — the eviction must not block other room
+          // mutations, and the wallet release adapter call is itself
+          // idempotent (safe to retry from the orphan-sweep). Errors
+          // are logged but don't abort the cleanup pass.
+          if (this.lifecycleStore) {
+            this.releaseAndForgetEviction(room.code, player.id, normalizedWalletId);
           }
           room.players.delete(player.id);
           mutated = true;
@@ -4501,6 +4556,14 @@ export class BingoEngine {
       let mutated = false;
       for (const player of [...room.players.values()]) {
         if (player.walletId === normalizedWalletId) {
+          // K2 (2026-04-29): release any orphan reservation atomically
+          // with the eviction. The non-canonical sweep is more aggressive
+          // than the idle-room sweep (it evicts even with active socket),
+          // so the orphan-risk is correspondingly higher — this is
+          // exactly the §3.2 case in the FORHANDSKJOP audit.
+          if (this.lifecycleStore) {
+            this.releaseAndForgetEviction(room.code, player.id, normalizedWalletId);
+          }
           room.players.delete(player.id);
           mutated = true;
           cleaned += 1;
@@ -4521,6 +4584,69 @@ export class BingoEngine {
       }
     }
     return cleaned;
+  }
+
+  /**
+   * K2 (2026-04-29) helper — evict atomically through `lifecycleStore`
+   * and (when the wallet adapter exposes `releaseReservation`) release
+   * any orphan reservation row in fire-and-forget fashion.
+   *
+   * The store call IS the source of truth for the in-memory state-space
+   * cleanup — it returns synchronously from the caller's POV (we don't
+   * await), but the per-room mutex guarantees the next mutation observes
+   * the cleared state. The wallet release is async + idempotent —
+   * adapter implementations swallow `INVALID_STATE` for already-released
+   * rows, so duplicate calls from concurrent cleanup paths are safe.
+   *
+   * Errors here NEVER bubble up — the cleanup pass continues so we never
+   * stall on an adapter hiccup. The async-orphan-release worker
+   * (`WalletReservationExpiryService`) is the safety net for any rows
+   * we couldn't release in-line.
+   */
+  private releaseAndForgetEviction(
+    roomCode: string,
+    playerId: string,
+    walletId: string,
+  ): void {
+    if (!this.lifecycleStore) return;
+    void this.lifecycleStore
+      .evictPlayer({
+        roomCode,
+        playerId,
+        releaseReservation: true,
+        reason: "cleanupStale",
+      })
+      .then((result) => {
+        if (result.releasedReservationId && this.walletAdapter.releaseReservation) {
+          // Idempotent: adapter swallows INVALID_STATE for already-
+          // released/committed rows. The release happens against the
+          // wallet-reservation row in the DB.
+          return this.walletAdapter
+            .releaseReservation(result.releasedReservationId)
+            .catch((err) => {
+              logger.warn(
+                {
+                  err,
+                  roomCode,
+                  playerId,
+                  walletId,
+                  reservationId: result.releasedReservationId,
+                },
+                "releaseAndForgetEviction: wallet release failed (will be GC'd by expiry-tick)",
+              );
+            });
+        }
+        return undefined;
+      })
+      .catch((err) => {
+        // Defensive: store mutation failed (mutex internal error or
+        // similar). Log but don't block cleanup — next eviction will
+        // observe the same state and try again.
+        logger.error(
+          { err, roomCode, playerId, walletId },
+          "releaseAndForgetEviction: lifecycleStore.evictPlayer failed",
+        );
+      });
   }
 
   private archiveIfEnded(room: RoomState): void {

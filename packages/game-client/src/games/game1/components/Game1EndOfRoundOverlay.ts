@@ -140,7 +140,18 @@ function formatKr(n: number): string {
 
 /**
  * Header-kopi reagerer på endedReason og om spilleren vant noe.
+ *
  * Tobias-mandate: BINGO_CLAIMED + ownTotal>0 → "Du vant".
+ *
+ * Tobias prod-incident 2026-04-29 (PR #733): subtitle MÅ skille mellom
+ * faktisk grunn for slutt slik at MAX_DRAWS-runder ikke feilaktig viser
+ * "Fullt Hus er vunnet". Bug-trigger: når Phase 5 (Fullt Hus) ikke
+ * kunne auto-claimes (f.eks. test-hall der bypass kjører videre, eller
+ * recovery-edge-case med pause-state), ble runden avsluttet på
+ * MAX_DRAWS_REACHED — overlay må da være ærlig om at fullt hus ikke
+ * ble offisielt levert. Hver `endedReason`-gren har derfor en distinkt
+ * subtitle, og tilskuer-versjonen (`ownTotal === 0`) sier aldri at
+ * Fullt Hus er vunnet med mindre `endedReason === BINGO_CLAIMED`.
  */
 function formatHeader(
   endedReason: string | undefined,

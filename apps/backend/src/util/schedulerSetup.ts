@@ -142,6 +142,12 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
           variantConfig: variantInfo?.config,
           reservationIdByPlayer: deps.getReservationIdsByPlayer?.(roomCode),
         });
+        // K2 (2026-04-29): `disarmAllPlayers` is now atomic across armed-state,
+        // ticket-selections, reservation-mapping, AND arm-cycle-id (the store
+        // mutates all four state-spaces in one mutex-protected operation).
+        // The separate `clearReservationIdsForRoom` call is redundant — kept
+        // here as a defensive idempotent fallback so test harnesses that wire
+        // a custom store-bypass-path don't regress.
         deps.disarmAllPlayers(roomCode);
         deps.clearReservationIdsForRoom?.(roomCode);
         deps.clearDisplayTicketCache(roomCode);
