@@ -388,6 +388,26 @@ interface ComplianceOptions {
    * stegene uten manuell SQL-intervensjon.
    */
   claimAuditTrailRecovery?: ClaimAuditTrailRecoveryPort;
+  /**
+   * Bølge K3 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.1): når TRUE markerer
+   * den nåværende prosess som et produksjons-runtime, og BingoEngine vil
+   * derfor REJECTE alle Spill 1-mutasjoner som ikke enten:
+   *   (a) er scheduled (har `room.scheduledGameId`), eller
+   *   (b) tilhører et test-hall (`room.isTestHall === true`).
+   *
+   * Dette quarantiner ad-hoc Spill 1 til Demo Hall + dev/test, og tvinger
+   * retail-haller til scheduled-engine-pathen (Game1DrawEngineService).
+   *
+   * Spill 2 (slug `rocket`) og Spill 3 (slug `monsterbingo`) påvirkes IKKE
+   * — guarden er begrenset til `gameSlug === "bingo"`.
+   *
+   * Default false: tester og dev-miljø beholder eksisterende ad-hoc
+   * Spill 1-funksjonalitet uendret. I production-wiring (`apps/backend/
+   * src/index.ts`) settes flagget fra `isProductionRuntime`.
+   *
+   * Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.1 + §6 K3.
+   */
+  isProductionRuntime?: boolean;
 }
 
 
@@ -453,6 +473,20 @@ export class BingoEngine {
    * keep working — the legacy 2-arg cleanup form remains a fallback.
    */
   private readonly lifecycleStore?: import("../util/RoomLifecycleStore.js").RoomLifecycleStore;
+
+  /**
+   * Bølge K3 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.1): production-runtime-flagget.
+   * Settes via `options.isProductionRuntime` ved konstruksjon.
+   *
+   * Når `true` → `assertSpill1NotAdHoc` rejecter Spill 1-mutasjoner som
+   * verken er scheduled eller tilhører et test-hall. Når `false` (tester +
+   * dev) → guarden er no-op, og BingoEngine fortsetter å håndtere ad-hoc
+   * Spill 1 som før.
+   *
+   * Spill 2 (rocket) + Spill 3 (monsterbingo) påvirkes IKKE — guarden er
+   * begrenset til `gameSlug === "bingo"`.
+   */
+  private readonly isProductionRuntime: boolean;
   protected readonly prizePolicy: PrizePolicyManager;
   protected readonly payoutAudit: PayoutAuditTrail;
   protected readonly ledger: ComplianceLedger;
@@ -593,6 +627,13 @@ export class BingoEngine {
     // route eviction through the store so orphan reservations are always
     // released atomically. Test harnesses that don't need this can omit.
     this.lifecycleStore = options.lifecycleStore;
+
+    // K3 (2026-04-29): production-runtime-flagget. Default false — tester
+    // og dev-miljø beholder eksisterende ad-hoc Spill 1-pathway. I prod
+    // wiring (index.ts) settes dette fra `isProductionRuntime` slik at
+    // assertSpill1NotAdHoc rejecter retail-haller som havner på BingoEngine
+    // istedenfor scheduled Game1DrawEngineService.
+    this.isProductionRuntime = options.isProductionRuntime === true;
   }
 
   async hydratePersistentState(): Promise<void> {
@@ -934,6 +975,9 @@ export class BingoEngine {
     const room = this.requireRoom(input.roomCode);
     // CRIT-4: scheduled Spill 1 må kjøre via Game1DrawEngineService.
     this.assertNotScheduled(room);
+    // K3: production retail Spill 1 må kjøre via scheduled-engine.
+    // Demo Hall + test-haller (isTestHall=true) får fortsette på ad-hoc.
+    this.assertSpill1NotAdHoc(room);
     this.assertHost(room, input.actorPlayerId);
     this.assertNotRunning(room);
     this.archiveIfEnded(room);
@@ -1695,6 +1739,9 @@ export class BingoEngine {
     // har guard), men dobbel-sjekk siden denne også skriver wallet
     // via auto-claim-payouts.
     this.assertNotScheduled(room);
+    // K3: defensive — drawNextNumber har allerede guard, men auto-claim
+    // payout skriver wallet og må aldri lekke i prod retail.
+    this.assertSpill1NotAdHoc(room);
     await evaluateActivePhaseHelper(this.buildEvaluatePhaseCallbacks(), room, game);
   }
 
@@ -2075,6 +2122,8 @@ export class BingoEngine {
     // CRIT-4: scheduled Spill 1 må trekkes via Game1DrawEngineService.
     // Defensiv guard mot dual-engine state-divergens.
     this.assertNotScheduled(room);
+    // K3: production retail Spill 1 må kjøre via scheduled-engine.
+    this.assertSpill1NotAdHoc(room);
     this.assertHost(room, input.actorPlayerId);
     const host = this.requirePlayer(room, input.actorPlayerId);
     const nowMs = Date.now();
@@ -2461,6 +2510,8 @@ export class BingoEngine {
     // claim:submit på scheduled-rom risikerer vi dual-payout siden
     // idempotency-keyene er forskjellige (g1-phase-* vs line-prize-*).
     this.assertNotScheduled(room);
+    // K3: production retail Spill 1 claim-flyten ligger i scheduled-engine.
+    this.assertSpill1NotAdHoc(room);
     const game = this.requireRunningGame(room);
     const player = this.requirePlayer(room, input.playerId);
     this.assertWalletAllowedForGameplay(player.walletId, Date.now());
@@ -3580,6 +3631,10 @@ export class BingoEngine {
 
   async endGame(input: EndGameInput): Promise<void> {
     const room = this.requireRoom(input.roomCode);
+    // CRIT-4: scheduled Spill 1 har egen end-flyt via Game1MasterControlService.
+    this.assertNotScheduled(room);
+    // K3: production retail Spill 1 ende-flyt ligger i scheduled-engine.
+    this.assertSpill1NotAdHoc(room);
     this.assertHost(room, input.actorPlayerId);
     const host = this.requirePlayer(room, input.actorPlayerId);
     this.assertWalletAllowedForGameplay(host.walletId, Date.now());
@@ -3632,6 +3687,10 @@ export class BingoEngine {
     options?: { pauseUntil?: string; pauseReason?: string }
   ): void {
     const room = this.requireRoom(roomCode);
+    // CRIT-4: scheduled Spill 1 har egen pause-flyt via Game1MasterControlService.
+    this.assertNotScheduled(room);
+    // K3: production retail Spill 1 pause-flyt ligger i scheduled-engine.
+    this.assertSpill1NotAdHoc(room);
     const game = this.requireRunningGame(room);
     if (game.isPaused) throw new DomainError("GAME_ALREADY_PAUSED", "Spillet er allerede pauset.");
     game.isPaused = true;
@@ -3651,6 +3710,10 @@ export class BingoEngine {
 
   resumeGame(roomCode: string): void {
     const room = this.requireRoom(roomCode);
+    // CRIT-4: scheduled Spill 1 har egen resume-flyt via Game1MasterControlService.
+    this.assertNotScheduled(room);
+    // K3: production retail Spill 1 resume-flyt ligger i scheduled-engine.
+    this.assertSpill1NotAdHoc(room);
     const game = this.requireRunningGame(room);
     if (!game.isPaused) throw new DomainError("GAME_NOT_PAUSED", "Spillet er ikke pauset.");
     game.isPaused = false;
@@ -4985,6 +5048,79 @@ export class BingoEngine {
         roomCode: room.code,
         scheduledGameId: room.scheduledGameId,
         gameSlug: room.gameSlug,
+      }
+    );
+  }
+
+  /**
+   * Bølge K3 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.1):
+   *
+   * Quarantine-guard: BingoEngine er nå Spill 2/3 + dev/test-only for
+   * Spill 1. Production retail Spill 1 MÅ kjøre via Game1DrawEngineService
+   * (scheduled-engine). Eneste unntak fra denne regelen er Demo Hall +
+   * test-haller (`room.isTestHall === true`), som beholder ad-hoc-flyten
+   * for ende-til-ende-test og demo-formål.
+   *
+   * Guard-logikk:
+   *   1. Hvis `gameSlug !== "bingo"` → no-op (Spill 2/3 er ikke berørt).
+   *   2. Hvis `isProductionRuntime === false` (tester, dev) → no-op.
+   *   3. Hvis `room.isTestHall === true` (Demo Hall, test-haller) → no-op.
+   *   4. Hvis `room.scheduledGameId` finnes → no-op (assertNotScheduled
+   *      tar dette i en annen retning, men her er kombinasjonen "Spill 1 +
+   *      ikke-scheduled + ikke-test-hall + production" som er problemet —
+   *      ikke "scheduled" i seg selv).
+   *   5. Ellers → kast `USE_SCHEDULED_API`. Den oppdagede call-paten må
+   *      flytte til scheduled-engine eller markeres som test-hall.
+   *
+   * Forskjell fra `assertNotScheduled`:
+   *   - `assertNotScheduled` blokkerer scheduled-Spill 1 fra å havne på
+   *     ad-hoc-pathen (avslår «Game1DrawEngineService kjører via BingoEngine»).
+   *   - `assertSpill1NotAdHoc` blokkerer ad-hoc-Spill 1 fra å havne på
+   *     BingoEngine i production retail (avslår «BingoEngine kjører
+   *     Spill 1 i prod uten scheduled-pathway»).
+   *
+   * Begge guarder kan fyre samtidig på et scheduled-rom — men hvis et rom
+   * IKKE er scheduled OG IKKE er test-hall i prod, er det `assertSpill1NotAdHoc`
+   * som rejekter.
+   *
+   * Bruksmønster: kall ved start av alle BingoEngine-mutasjons-metoder for
+   * Spill 1 (startGame, drawNextNumber, submitClaim, payoutPhaseWinner,
+   * pauseGame, resumeGame, endGame).
+   */
+  private assertSpill1NotAdHoc(room: RoomState): void {
+    // 1. Spill 2/3 er IKKE quarantined — fortsetter på BingoEngine som før.
+    if (room.gameSlug !== "bingo") {
+      return;
+    }
+    // 2. Tester + dev-miljø beholder eksisterende ad-hoc-funksjonalitet.
+    //    Det er kun production retail som tvinges over på scheduled.
+    if (!this.isProductionRuntime) {
+      return;
+    }
+    // 3. Demo Hall + test-haller (eksplisitt isTestHall=true) får
+    //    fortsette på ad-hoc-pathen for end-to-end-test og demo-formål.
+    if (room.isTestHall === true) {
+      return;
+    }
+    // 4. Scheduled Spill 1 håndteres av `assertNotScheduled` (kalles før
+    //    eller etter denne i metode-bodyene). Hvis room.scheduledGameId
+    //    er satt, kaller `assertNotScheduled` allerede USE_SCHEDULED_API.
+    //    Vi skipper her for å unngå dobbelt-kast og holde feilmeldingen
+    //    klar (no-op-fallback om kall-rekkefølgen endres).
+    if (room.scheduledGameId !== null && room.scheduledGameId !== undefined) {
+      return;
+    }
+    // 5. Production retail Spill 1 uten scheduled-mapping og uten
+    //    test-hall-flagg → rejekt.
+    throw new DomainError(
+      "USE_SCHEDULED_API",
+      "Production Spill 1 må kjøres via Game1DrawEngineService (scheduled-engine). " +
+        "BingoEngine er begrenset til Spill 2/3 + Demo Hall/test-haller.",
+      {
+        roomCode: room.code,
+        gameSlug: room.gameSlug,
+        hallId: room.hallId,
+        isTestHall: room.isTestHall ?? false,
       }
     );
   }
