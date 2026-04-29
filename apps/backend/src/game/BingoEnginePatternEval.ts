@@ -50,9 +50,9 @@ import {
 import { resolvePatternsForColor } from "./spill1VariantMapper.js";
 import type { GameVariantConfig, PatternConfig } from "./variantConfig.js";
 import type {
-  ClaimType,
   GameState,
   PatternDefinition,
+  PatternResult,
   RoomState,
   Ticket,
 } from "./types.js";
@@ -128,12 +128,7 @@ export interface EvaluatePhaseCallbacks {
     game: GameState,
     playerId: string,
     pattern: PatternDefinition,
-    patternResult: {
-      patternId: string;
-      patternName: string;
-      claimType: ClaimType;
-      isWon: boolean;
-    },
+    patternResult: PatternResult,
     prizePerWinner: number,
   ): Promise<void>;
   /** Avslutt play-sessions (compliance). Private helper på engine. */
@@ -476,9 +471,12 @@ export async function evaluateActivePhase(
     }
 
     // Track first payout for backward-compat patternResult fields.
+    // RTP-cap-bug-fix 2026-04-29: `payoutPhaseWinner` setter nå
+    // `activeResult.payoutAmount` til faktisk capped payout. Vi leser DERFRA
+    // (post-cap) — pre-cap `prizePerWinner` ville logget overdrevet beløp.
     if (firstWinnerId === "" && winnerIds.length > 0) {
       firstWinnerId = winnerIds[0]!;
-      firstPayoutAmount = prizePerWinner;
+      firstPayoutAmount = activeResult.payoutAmount ?? prizePerWinner;
     }
     // Aggregate winners — deduplicate hvis samme spiller vant i flere farger.
     for (const pid of winnerIds) {
@@ -490,11 +488,18 @@ export async function evaluateActivePhase(
   // first winner (backward compat with single-winner test assertions);
   // the full list lives in `winnerIds` (BIN-696) + per-winner
   // ClaimRecords on game.claims.
+  //
+  // RTP-cap-bug-fix 2026-04-29: `payoutAmount` settes IKKE her hvis
+  // `payoutPhaseWinner` allerede satt den (faktisk capped beløp).
+  // Fall tilbake til `firstPayoutAmount` (pre-cap) kun for backward-
+  // compat med eldre call-sites som ikke kallte payoutPhaseWinner.
   activeResult.isWon = true;
   activeResult.wonAtDraw = game.drawnNumbers.length;
   activeResult.winnerId = firstWinnerId;
   activeResult.winnerIds = [...allWinnerIds];
-  activeResult.payoutAmount = firstPayoutAmount;
+  if (activeResult.payoutAmount === undefined) {
+    activeResult.payoutAmount = firstPayoutAmount;
+  }
 
   // Demo Hall bypass (Tobias 2026-04-27): test-haller skal kjøre runden
   // helt igjennom uten å pause på fase-vinn eller avslutte på Fullt Hus.
@@ -685,12 +690,16 @@ export async function evaluateConcurrentPatterns(
     }
 
     // Mark pattern som vunnet + broadcast-kompatibelt snapshot.
+    // RTP-cap-bug-fix 2026-04-29: respekter post-cap payoutAmount satt av
+    // payoutPhaseWinner; ikke overwrite med pre-cap prizePerWinner.
     result.isWon = true;
     result.winnerIds = [...winnerIds];
     result.winnerId = winnerIds[0];
     result.winnerCount = winnerIds.length;
     result.wonAtDraw = game.drawnNumbers.length;
-    result.payoutAmount = prizePerWinner;
+    if (result.payoutAmount === undefined) {
+      result.payoutAmount = prizePerWinner;
+    }
   }
 
   // Spillet avsluttes når alle customPatterns er vunnet. Full-house-

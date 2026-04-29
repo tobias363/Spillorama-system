@@ -24,6 +24,10 @@ import { DomainError } from "../../errors/DomainError.js";
 import { IdempotencyKeys } from "../../game/idempotency.js";
 import type { SocketContext } from "./context.js";
 import type { AckResponse, MarkPayload } from "./types.js";
+import { logger as rootLogger } from "../../util/logger.js";
+import { logRoomEvent } from "../../util/roomLogVerbose.js";
+
+const ticketEventsLogger = rootLogger.child({ module: "socket.room" });
 
 export function registerTicketEvents(ctx: SocketContext): void {
   const {
@@ -207,6 +211,20 @@ export function registerTicketEvents(ctx: SocketContext): void {
       if (!result) {
         throw new DomainError("TICKET_NOT_FOUND", `Ingen pre-round billett med id=${ticketId}.`);
       }
+      // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-event for cancel.
+      // Ingen wallet-tx her; refund ligger i wallet-laget.
+      logRoomEvent(
+        ticketEventsLogger,
+        {
+          socketId: socket.id,
+          playerId,
+          roomCode,
+          ticketId,
+          removedTicketCount: result.removedTicketIds.length,
+          fullyDisarmed: result.fullyDisarmed,
+        },
+        "socket.ticket:cancel",
+      );
 
       // BIN-693 Option B: frigi prorata fra wallet-reservasjonen. Hvis
       // fullyDisarmed → full release (klarer reservation-mapping også).

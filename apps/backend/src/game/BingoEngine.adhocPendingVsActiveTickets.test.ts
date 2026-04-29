@@ -74,6 +74,11 @@ function snapshotPatterns(engine: BingoEngine, roomCode: string): {
 }
 
 // ── Test 1: BASELINE — happy path med 4 fulle rader ──────────────────────
+//
+// RTP-CAP-BUG-FIX 2026-04-29: pool=135 (45×3), budget=108 (80%). Faste
+// premier 100/200/200/200 = 700 kr. Kun 1 Rad fullt utbetalt; 2 Rader capet
+// til 8 kr (resterende budget); 3-4 Rader payoutSkipped. Test verifiserer
+// at fasene fortsatt markeres som vunnet selv når payout=0.
 test("BASELINE: 4 fulle rader (Norsk-config) -> phase 1-4 won + active=Fullt Hus", async () => {
   const engine = new BingoEngine(
     new FixedGridAdapter(),
@@ -127,27 +132,30 @@ test("BASELINE: 4 fulle rader (Norsk-config) -> phase 1-4 won + active=Fullt Hus
       .join(", ")}]`,
   );
 
-  assert.equal(
-    final.won.find((w) => w.name === "1 Rad")?.payoutAmount,
-    100,
+  // RTP-cap-bug-fix 2026-04-29: alle 4 faser skal være MARKERT som vunnet,
+  // selv om 3-4 Rader er capped til 0 (post-budget-exhaustion). Test
+  // verifiserer at runden fortsetter sekvensielt selv ved tomme buffere.
+  assert.ok(
+    final.won.find((w) => w.name === "1 Rad"),
     "1 Rad skal være won",
   );
-  assert.equal(
-    final.won.find((w) => w.name === "2 Rader")?.payoutAmount,
-    200,
+  assert.ok(
+    final.won.find((w) => w.name === "2 Rader"),
     "2 Rader skal være won",
   );
-  assert.equal(
-    final.won.find((w) => w.name === "3 Rader")?.payoutAmount,
-    200,
+  assert.ok(
+    final.won.find((w) => w.name === "3 Rader"),
     "3 Rader skal være won",
   );
-  assert.equal(
-    final.won.find((w) => w.name === "4 Rader")?.payoutAmount,
-    200,
+  assert.ok(
+    final.won.find((w) => w.name === "4 Rader"),
     "4 Rader skal være won",
   );
   assert.equal(final.active, "Fullt Hus", "Active skal være Fullt Hus");
+
+  // Verifiser at total payout er innenfor RTP-budget (108 kr).
+  const totalPaid = final.won.reduce((sum, w) => sum + (w.payoutAmount ?? 0), 0);
+  assert.ok(totalPaid <= 108, `Total payout ${totalPaid} skal være ≤ RTP-budget 108`);
 });
 
 // ── Test 2: ALT-HYPOTHESE (a) — UTEN autoClaimPhaseMode → 0 server-vinn ──

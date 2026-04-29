@@ -96,6 +96,22 @@ export interface PatternResult {
   winnerIds?: string[];
   /** PR-P5: antall vinnere på samme draw. Speiler `winnerIds.length`. */
   winnerCount?: number;
+  /**
+   * RTP-cap-bug-fix 2026-04-29 (Tobias-incident game `057c0502`):
+   *   true → fasen er VUNNET, men payout er capped pga RTP-budget eller
+   *   tom hus-saldo. Klient kan rendre "Fasen vunnet — ingen premie igjen".
+   *
+   * Settes både ved fixed-prize-overflow (face > remainingPayoutBudget) og
+   * ved variabel-percent som maxer ut budsjettet. Backward-compat: fraværet
+   * innebærer "betalt fullt ut" (tidligere standard).
+   */
+  payoutSkipped?: boolean;
+  /**
+   * RTP-cap-bug-fix 2026-04-29: hvorfor payout ble capped. Brukes av
+   * klient-UI for differensiering ("budsjett tomt" vs "huset har lav saldo")
+   * og av ops-dashboards for diagnose.
+   */
+  payoutSkippedReason?: "budget-exhausted" | "house-balance-low";
 }
 
 export interface Player {
@@ -154,6 +170,14 @@ export interface ClaimRecord {
   rtpBudgetBefore?: number;
   rtpBudgetAfter?: number;
   rtpCapped?: boolean;
+  /**
+   * RTP-cap-bug-fix 2026-04-29: `payoutAmount === 0` med rtpCapped=true →
+   * fasen vant, men ingen utbetaling. Speiler `PatternResult.payoutSkipped`
+   * på claim-nivå for å gjøre tabellsøk i audit-loggen enkel.
+   */
+  payoutSkipped?: boolean;
+  /** RTP-cap-bug-fix 2026-04-29: Speiler `PatternResult.payoutSkippedReason`. */
+  payoutSkippedReason?: "budget-exhausted" | "house-balance-low";
   /** BIN-45: Wallet transaction IDs for idempotency tracking. */
   payoutTransactionIds?: string[];
   /**

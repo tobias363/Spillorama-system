@@ -41,6 +41,10 @@ import type { RoomSnapshot } from "../../game/types.js";
 import type { GameEventsDeps } from "./deps.js";
 import { walletRoomKey } from "../walletStatePusher.js";
 import { getCanonicalRoomCode, isCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
+import { logger as rootLogger } from "../../util/logger.js";
+import { logRoomEvent } from "../../util/roomLogVerbose.js";
+
+const roomEventsLogger = rootLogger.child({ module: "socket.room" });
 
 /**
  * Demo Hall bypass (Tobias 2026-04-27): hent `isTestHall` fra
@@ -244,6 +248,20 @@ export function registerRoomEvents(ctx: SocketContext): void {
       logger.debug({ hallId: identity.hallId }, "BIN-134: room:create identity resolved");
 
       const requestedGameSlug = typeof payload?.gameSlug === "string" ? payload.gameSlug : undefined;
+      // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-log før we go into
+      // canonical-resolution + auto-create. Inkluderer wallet-id og hall slik
+      // at ops kan grep historikken når en spiller rapporterer "kunne ikke
+      // joine" / "stuck on loading".
+      logRoomEvent(
+        roomEventsLogger,
+        {
+          socketId: socket.id,
+          walletId: identity.walletId,
+          hallId: identity.hallId,
+          requestedSlug: requestedGameSlug ?? null,
+        },
+        "socket.room.create-request",
+      );
       // Canonical mapping (Tobias 2026-04-27):
       //   Spill 1 (bingo)         → BINGO_<groupId|hallId>, per-LINK (Group of
       //                             Halls). Alle haller i samme gruppe deler
@@ -677,6 +695,30 @@ export function registerRoomEvents(ctx: SocketContext): void {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
       const wantArmed = payload.armed !== false;
+      // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-log per
+      // bet:arm/disarm. Inkluderer totalQty fra payload for å se hvor mye
+      // spilleren prøvde å låse — kombinert med rejected-event nedenfor
+      // gir det full picture i prod-loggen.
+      const incomingTotalQty = Array.isArray(payload.ticketSelections)
+        ? payload.ticketSelections.reduce(
+            (sum, s) => sum + (typeof s?.qty === "number" ? Math.max(0, Math.round(s.qty)) : 0),
+            0,
+          )
+        : (typeof payload.ticketCount === "number" ? Math.max(0, Math.round(payload.ticketCount)) : 0);
+      logRoomEvent(
+        roomEventsLogger,
+        {
+          socketId: socket.id,
+          playerId,
+          roomCode,
+          wantArmed,
+          ticketSelectionCount: Array.isArray(payload.ticketSelections)
+            ? payload.ticketSelections.length
+            : null,
+          totalQty: incomingTotalQty,
+        },
+        "socket.bet:arm",
+      );
       // Tobias 2026-04-29: lossLimit-info bygges underveis og legges på
       // ack — alltid på success-path slik at klient kan vise
       // "Brukt i dag: X / Y kr" i Kjøp Bonger-popup-en.

@@ -89,10 +89,14 @@ function prioritiseDrawBag(engine: BingoEngine, roomCode: string, numbers: numbe
 
 test("BIN-689: Kvikkis-runde — solo vinner får 1000 kr når Fullt Hus trigges", async () => {
   const { engine, roomCode, hostId } = await setupRoom();
+  // RTP-cap-bug-fix 2026-04-29: entryFee=600 × 2 spillere = 1200 pool;
+  // budget=1140 (95%) → 1000 kr Fullt Hus ≤ budget → fullt utbetalt.
+  // (Tidligere brukte testen entryFee=500 som ga budget=950; med fixed-
+  // prize-bypass passerte testen, men nå capper vi alltid til budget.)
   await engine.startGame({
     roomCode,
     actorPlayerId: hostId,
-    entryFee: 500,
+    entryFee: 600,
     ticketsPerPlayer: 1,
     payoutPercent: 95,
     gameType: "quickbingo",

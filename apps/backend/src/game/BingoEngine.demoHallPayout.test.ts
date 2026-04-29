@@ -113,10 +113,15 @@ test(
     const initialWinnings = await wallet.getWinningsBalance("w-alice");
     assert.equal(initialWinnings, 0, "initial winnings should be 0");
 
+    // RTP-cap-bug-fix 2026-04-29: entryFee=200 → pool=200, budget=160 (80%)
+    // → 1 Rad face=100 ≤ budget → fullt utbetalt. (Tidligere brukte testen
+    // entryFee=10 som ga budget=8; med fixed-prize-bypass passerte den, men
+    // post-RTP-cap-fix måtte vi øke buy-in for å demonstrere FULL payout.)
+    // Default-balance er 1000 — entryFee 200 er innenfor.
     await engine.startGame({
       roomCode,
       actorPlayerId: hostId!,
-      entryFee: 10,
+      entryFee: 200,
       ticketsPerPlayer: 1,
       payoutPercent: 80,
       gameType: "standard",
@@ -161,9 +166,14 @@ test(
   "demo-hall payout-vakt — Spill 1 + isTestHall=true: alle 5 faser vunnet → winnings = 1700 kr",
   async () => {
     const wallet = new InMemoryWalletAdapter();
+    // RTP-cap-bug-fix 2026-04-29: høye loss-limits så test-spilleren ikke
+    // blir filtrert ut av `wouldExceedLossLimit` ved entryFee=2200.
+    // (Default 900/4400 ville ekskludert henne.)
     const engine = new BingoEngine(new FixedGridAdapter(), wallet, {
       minDrawIntervalMs: 0,
       minPlayersToStart: 1,
+      dailyLossLimit: 100000,
+      monthlyLossLimit: 100000,
     });
     const { roomCode, playerId: hostId } = await engine.createRoom({
       hallId: "hall-demo",
@@ -173,10 +183,17 @@ test(
       isTestHall: true,
     });
 
+    // RTP-cap-bug-fix 2026-04-29: top opp wallet før startGame så player
+    // har råd til entryFee=2200 (default-balance 1000 ville filtrert ut
+    // spilleren via `filterEligiblePlayers`-low-balance-sjekken).
+    await wallet.topUp("w-alice", 5000, "test-topup-for-rtp-budget");
+
+    // entryFee=2200 → pool=2200, budget=1760 (80%) → 1700 kr total fixed
+    // prizes ≤ budget → alle utbetales fullt.
     await engine.startGame({
       roomCode,
       actorPlayerId: hostId!,
-      entryFee: 10,
+      entryFee: 2200,
       ticketsPerPlayer: 1,
       payoutPercent: 80,
       gameType: "standard",

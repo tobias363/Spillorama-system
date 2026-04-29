@@ -8,8 +8,12 @@ import type { BingoEngine } from "../game/BingoEngine.js";
 import type { DrawScheduler, SchedulerSettings } from "../draw-engine/DrawScheduler.js";
 import type { BingoSchedulerSettings } from "./bingoSettings.js";
 import { yesterdayOsloKey } from "./osloTimezone.js";
+import { logger as rootLogger } from "./logger.js";
+import { logRoomEvent } from "./roomLogVerbose.js";
 import type { RoomUpdatePayload } from "./roomHelpers.js";
 import type { RoomSnapshot } from "../game/types.js";
+
+const schedulerLogger = rootLogger.child({ module: "scheduler" });
 
 export interface SchedulerCallbackDeps {
   engine: BingoEngine;
@@ -141,12 +145,27 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
         deps.disarmAllPlayers(roomCode);
         deps.clearReservationIdsForRoom?.(roomCode);
         deps.clearDisplayTicketCache(roomCode);
+        // LIVE_ROOM_OBSERVABILITY 2026-04-29: scheduler-tick INFO-event ved
+        // hver runde-start. Engine logger `game.started` selv; denne logger
+        // beslutningen ovenfor (auto-round-flow valgte å starte runden).
+        logRoomEvent(
+          schedulerLogger,
+          { roomCode, action: "started" },
+          "auto.round.tick",
+        );
       } catch (error) {
         if (error instanceof DomainError && (
           error.code === "PLAYER_ALREADY_IN_RUNNING_GAME" ||
           error.code === "ROUND_START_TOO_SOON" ||
           error.code === "NOT_ENOUGH_PLAYERS"
-        )) return { firstDrawAtMs };
+        )) {
+          logRoomEvent(
+            schedulerLogger,
+            { roomCode, action: "skipped", reason: error.code },
+            "auto.round.tick",
+          );
+          return { firstDrawAtMs };
+        }
         throw error;
       }
       await deps.emitRoomUpdate(roomCode);
@@ -155,6 +174,11 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
         const { number, drawIndex, gameId } = await deps.engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId });
         deps.io.to(roomCode).emit("draw:new", { number, source: "auto", drawIndex, gameId });
         firstDrawAtMs = Date.now();
+        logRoomEvent(
+          schedulerLogger,
+          { roomCode, gameId, action: "drew", number, drawIndex, source: "auto" },
+          "auto.round.tick",
+        );
       } catch (error) {
         if (!(error instanceof DomainError) || error.code !== "NO_MORE_NUMBERS") throw error;
       }
@@ -174,6 +198,11 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
       try {
         const { number, drawIndex, gameId } = await deps.engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId });
         deps.io.to(roomCode).emit("draw:new", { number, source: "auto", drawIndex, gameId });
+        logRoomEvent(
+          schedulerLogger,
+          { roomCode, gameId, action: "drew", number, drawIndex, source: "auto" },
+          "auto.round.tick",
+        );
       } catch (error) {
         if (!(error instanceof DomainError) || error.code !== "NO_MORE_NUMBERS") throw error;
       }
@@ -197,7 +226,19 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
           });
         }
       }
-      if (postDrawSnapshot.currentGame?.status !== "RUNNING") roundEnded = true;
+      if (postDrawSnapshot.currentGame?.status !== "RUNNING") {
+        roundEnded = true;
+        logRoomEvent(
+          schedulerLogger,
+          {
+            roomCode,
+            gameId: postDrawSnapshot.currentGame?.id,
+            action: "ended",
+            reason: postDrawSnapshot.currentGame?.endedReason ?? "UNKNOWN",
+          },
+          "auto.round.tick",
+        );
+      }
       await deps.emitRoomUpdate(roomCode);
       return { roundEnded };
     },

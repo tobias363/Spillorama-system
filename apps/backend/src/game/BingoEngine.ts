@@ -5,6 +5,7 @@ import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { logRoomEvent } from "../util/roomLogVerbose.js";
 import * as variantConfigModule from "./variantConfig.js";
 
 const logger = rootLogger.child({ module: "engine" });
@@ -795,6 +796,35 @@ export class BingoEngine {
 
     this.rooms.set(code, room);
     this.syncRoomToStore(room); // BIN-251
+    // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-log slik at ops kan
+    // grep room.created i Render-loggen og se hvem som åpnet rommet, hall,
+    // canonical-kode + om det er test-hall. Tidligere ble dette begravd bak
+    // logger.debug — useless ved post-mortem av prod-incident.
+    logRoomEvent(
+      logger,
+      {
+        roomCode: code,
+        hallId,
+        gameSlug: room.gameSlug,
+        hostPlayerId: playerId,
+        walletId,
+        isTestHall: isTestHall || undefined,
+        isHallShared: isHallShared || undefined,
+      },
+      "room.created",
+    );
+    logRoomEvent(
+      logger,
+      {
+        roomCode: code,
+        playerId,
+        walletId,
+        socketId: input.socketId ?? null,
+        hallId,
+        role: "host",
+      },
+      "room.player.joined",
+    );
     return { roomCode: code, playerId };
   }
 
@@ -825,6 +855,18 @@ export class BingoEngine {
       hallId,
     });
 
+    logRoomEvent(
+      logger,
+      {
+        roomCode,
+        playerId,
+        walletId,
+        socketId: input.socketId ?? null,
+        hallId,
+        role: "guest",
+      },
+      "room.player.joined",
+    );
     return { roomCode, playerId };
   }
 
@@ -905,12 +947,39 @@ export class BingoEngine {
     const armedSet = input.armedPlayerIds ? new Set(input.armedPlayerIds) : null;
     // Filter to eligible players for tickets — but the round ALWAYS starts.
     // This is a live room: draws happen regardless of participation.
-    const ticketCandidates = allPlayers.filter((player) => {
-      if (armedSet && !armedSet.has(player.id)) return false;
-      if (this.isPlayerInAnotherRunningGame(room.code, player)) return false;
-      if (this.isPlayerBlockedByRestriction(player, nowMs)) return false;
-      return true;
-    });
+    //
+    // LIVE_ROOM_OBSERVABILITY 2026-04-29: hver drop logges som
+    // `game.player.filtered` slik at ops ser hvorfor en spiller mistet
+    // ticket-tildeling. Tidligere var dette en stille filter-step uten
+    // forklaring i logger.
+    const ticketCandidates: Player[] = [];
+    for (const player of allPlayers) {
+      if (armedSet && !armedSet.has(player.id)) {
+        logRoomEvent(
+          logger,
+          { roomCode: room.code, playerId: player.id, walletId: player.walletId, reason: "notArmed" },
+          "game.player.filtered",
+        );
+        continue;
+      }
+      if (this.isPlayerInAnotherRunningGame(room.code, player)) {
+        logRoomEvent(
+          logger,
+          { roomCode: room.code, playerId: player.id, walletId: player.walletId, reason: "notInRoom" },
+          "game.player.filtered",
+        );
+        continue;
+      }
+      if (this.isPlayerBlockedByRestriction(player, nowMs)) {
+        logRoomEvent(
+          logger,
+          { roomCode: room.code, playerId: player.id, walletId: player.walletId, reason: "blocked" },
+          "game.player.filtered",
+        );
+        continue;
+      }
+      ticketCandidates.push(player);
+    }
     if (ticketCandidates.length > 0) {
       await this.refreshPlayerObjectsFromWallet(ticketCandidates);
     }
@@ -924,13 +993,39 @@ export class BingoEngine {
         rejectedTicketCountMap.set(pid, count);
       }
     }
+    // LIVE_ROOM_OBSERVABILITY 2026-04-29: instrument onPlayerRejected for
+    // structured INFO-log. Vi wrapper i stedet for å duplikere filter-
+    // logikken, så vi behold callerens hook (socket-laget bruker den til
+    // bet:rejected-emit til klienten).
+    const wrappedOnPlayerRejected: typeof input.onPlayerRejected = async (rejInput) => {
+      const reasonMap: Record<typeof rejInput.reason, string> = {
+        DAILY_LOSS_LIMIT_REACHED: "lossLimit",
+        MONTHLY_LOSS_LIMIT_REACHED: "lossLimit",
+        INSUFFICIENT_FUNDS: "lowBalance",
+      };
+      logRoomEvent(
+        logger,
+        {
+          roomCode: room.code,
+          playerId: rejInput.player.id,
+          walletId: rejInput.player.walletId,
+          reason: reasonMap[rejInput.reason] ?? "blocked",
+          detail: rejInput.reason,
+          rejectedTicketCount: rejInput.rejectedTicketCount,
+        },
+        "game.player.filtered",
+      );
+      if (input.onPlayerRejected) {
+        await input.onPlayerRejected(rejInput);
+      }
+    };
     const eligiblePlayers = ticketCandidates.length > 0
       ? await this.filterEligiblePlayers(
           ticketCandidates,
           entryFee,
           nowMs,
           room.hallId,
-          input.onPlayerRejected,
+          wrappedOnPlayerRejected,
           rejectedTicketCountMap,
         )
       : [];
@@ -1374,6 +1469,32 @@ export class BingoEngine {
     this.variantConfigByRoom.set(room.code, variantConfig);
     this.variantGameTypeByRoom.set(room.code, variantGameType);
 
+    // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-log med per-player
+    // ticket-count slik at ops kan se nøyaktig hvilke spillere fikk hvor mange
+    // brett, og hvordan prizePool / payoutBudget er beregnet for runden.
+    const ticketsByPlayer: Record<string, number> = {};
+    for (const player of eligiblePlayers) {
+      ticketsByPlayer[player.id] = playerTicketCountMap.get(player.id) ?? ticketsPerPlayer;
+    }
+    logRoomEvent(
+      logger,
+      {
+        roomCode: room.code,
+        gameId,
+        gameSlug: room.gameSlug,
+        hallId: room.hallId,
+        eligiblePlayerIds: eligiblePlayers.map((p) => p.id),
+        eligiblePlayerCount: eligiblePlayers.length,
+        prizePool,
+        payoutPercent: normalizedPayoutPercent,
+        maxPayoutBudget,
+        ticketsByPlayer,
+        entryFee,
+        isTestGame: isTestGame || undefined,
+      },
+      "game.started",
+    );
+
     // BIN-161/BIN-241: Log SHA-256 hash of drawBag only — full sequence is preserved in PostgreSQL checkpoint (BIN-243).
     // Plaintext drawBag removed to prevent insiders from predicting future draws via log access.
     const drawBagHash = createHash("sha256").update(JSON.stringify(game.drawBag)).digest("hex");
@@ -1551,7 +1672,7 @@ export class BingoEngine {
     game: GameState,
     playerId: string,
     pattern: PatternDefinition,
-    patternResult: { patternId: string; patternName: string; claimType: ClaimType; isWon: boolean },
+    patternResult: PatternResult,
     prizePerWinner: number,
   ): Promise<void> {
     const player = this.requirePlayer(room, playerId);
@@ -1562,31 +1683,71 @@ export class BingoEngine {
 
     const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
 
-    // Cap against single-prize-policy. For FASTE PREMIER (winningType="fixed")
-    // skal pool/RTP-cap IKKE gjelde — huset garanterer annonserte premier
-    // (legacy spillorama-paritet). Variable premier (winningType="percent" /
-    // "multiplier-chain") fortsetter å være pool-gated.
+    // RTP-cap-bug-fix 2026-04-29 (Tobias-incident game `057c0502`):
     //
-    // Regulatorisk: §11 single-prize-cap (2500 kr) gjelder ALLTID.
-    // Hus-konto kan gå negativt for system-konti (PostgresWalletAdapter
-    // CHECK-constraint, InMemoryWalletAdapter pre-funded for tester) — dette
-    // er forretningsmessig korrekt for fixed-prize-bingo.
+    // **Tidligere flyt:** fixed-prize-patterns bypass-et pool/RTP-cap
+    // ("huset garanterer annonserte premier"). Det førte til at 1 Rad
+    // face=100 kr drenerte hele round-bufferen (80 kr RTP-budget) og
+    // ladet 28 påfølgende claim-forsøk fra mini-game-rotasjonen som
+    // alle kastet "Wallet house-... mangler saldo" og endte med at
+    // runden bare betalte 1 Rad.
     //
-    // PrizePolicy bruker fortsatt PrizeGameType (kun "DATABINGO" i dagens
-    // sentralisering). En egen task åpner PrizeGameType for MAIN_GAME — for
-    // nå behold "DATABINGO" her. K2-A scope er kun ledger-events.
+    // **Ny regel (REGULATORISK fail-safe):**
+    //   payoutAmount = min(face, remainingPayoutBudget, houseBalance)
+    //
+    // Pengespillforskriften §11 har 80 % RTP cap som ABSOLUTT regulatorisk
+    // krav — vi kan ikke garantere fixed-prize-faces over RTP-budget uten
+    // å bryte loven. Hvis house-balance også er lav, capper vi til det
+    // som faktisk er trygt å betale.
+    //
+    // For `payout=0` markeres fasen som vunnet (state-mutasjoner skjer
+    // lenger ned uavhengig av payout) og `payoutSkipped: true` settes så
+    // klient kan rendre "Fasen vunnet — ingen premie igjen".
+    //
+    // Subsequent phases fortsetter å evaluere — engine STOPPER IKKE
+    // runden bare fordi budsjettet er tomt.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
       gameType: "DATABINGO",
       amount: prizePerWinner,
     });
     const isFixedPrize = isFixedPrizePattern(pattern);
-    const afterPoolCap = isFixedPrize
+    const requestedAfterPolicyAndPool = isFixedPrize
       ? capped.cappedAmount
       : Math.min(capped.cappedAmount, game.remainingPrizePool);
-    const payout = isFixedPrize
-      ? capped.cappedAmount
-      : Math.min(afterPoolCap, game.remainingPayoutBudget);
+    // RTP-budget-gating gjelder ALLTID — fixed-prize-bypass fjernet.
+    const budgetCappedPayout = Math.min(
+      requestedAfterPolicyAndPool,
+      Math.max(0, game.remainingPayoutBudget),
+    );
+    // House-balance-gating: les available house-saldo og cap mot den.
+    // Bruker getAvailableBalance når tilgjengelig (PR-W3+) ellers fall
+    // tilbake til getBalance. Best-effort — hvis lookup feiler bruker vi
+    // budgetCappedPayout uendret (defensivt: heller betal litt for mye
+    // enn å henge runden ved transient wallet-tjeneste-feil).
+    let houseAvailableBalance = Number.POSITIVE_INFINITY;
+    try {
+      houseAvailableBalance = this.walletAdapter.getAvailableBalance
+        ? await this.walletAdapter.getAvailableBalance(houseAccountId)
+        : await this.walletAdapter.getBalance(houseAccountId);
+    } catch (err) {
+      logger.warn(
+        { err, houseAccountId, gameId: game.id, roomCode: room.code },
+        "house-balance-lookup feilet under payout-cap-evaluering — fortsetter med budget-cap",
+      );
+    }
+    const payout = roundCurrency(
+      Math.max(
+        0,
+        Math.min(budgetCappedPayout, houseAvailableBalance),
+      ),
+    );
+    const payoutWasSkipped = payout === 0 && requestedAfterPolicyAndPool > 0;
+    const payoutSkippedReason: "budget-exhausted" | "house-balance-low" | undefined = payoutWasSkipped
+      ? (budgetCappedPayout === 0
+          ? "budget-exhausted"
+          : "house-balance-low")
+      : undefined;
 
     const claim: ClaimRecord = {
       id: randomUUID(),
@@ -1726,8 +1887,65 @@ export class BingoEngine {
     claim.payoutWasCapped = payout < prizePerWinner;
     claim.rtpBudgetBefore = rtpBudgetBefore;
     claim.rtpBudgetAfter = rtpBudgetAfter;
-    // Faste premier er aldri pool/RTP-cappet — kun §11-cap kan slå inn.
-    claim.rtpCapped = !isFixedPrize && payout < afterPoolCap;
+    // RTP-cap-bug-fix 2026-04-29: cap-flagget settes ALLTID når payout faktisk
+    // er capped under requestedAfterPolicyAndPool. Tidligere ble fixed-prize
+    // bypass-et — det førte til at prod-loggen viste rtpCapped=false selv når
+    // payout=100 mot et budsjett på 80 (game `057c0502`).
+    claim.rtpCapped = payout < requestedAfterPolicyAndPool;
+    // RTP-cap-bug-fix 2026-04-29: speil faktisk paid amount på patternResult
+    // og claimId-link slik at klient/audit ser korrekt payout. Tidligere
+    // skrev `evaluateActivePhase` over med `prizePerWinner` (pre-cap) etter
+    // dette kallet — vi setter her, og eval-pathen respekterer eksisterende
+    // verdi via "set kun hvis udefinert"-logikken.
+    patternResult.payoutAmount = payout;
+    patternResult.claimId = claim.id;
+    if (payoutWasSkipped) {
+      claim.payoutSkipped = true;
+      if (payoutSkippedReason) {
+        claim.payoutSkippedReason = payoutSkippedReason;
+      }
+      patternResult.payoutSkipped = true;
+      if (payoutSkippedReason) {
+        patternResult.payoutSkippedReason = payoutSkippedReason;
+      }
+      // INFO-logg så ops umiddelbart ser at fasen vant uten utbetaling.
+      logRoomEvent(
+        logger,
+        {
+          roomCode: room.code,
+          gameId: game.id,
+          patternId: patternResult.patternId,
+          patternName: pattern.name,
+          claimId: claim.id,
+          playerId: player.id,
+          configuredFaceValue: prizePerWinner,
+          requestedAfterPolicyAndPool,
+          remainingBudget: rtpBudgetBefore,
+          houseAvailableBalance: Number.isFinite(houseAvailableBalance)
+            ? houseAvailableBalance
+            : null,
+          reason: payoutSkippedReason,
+        },
+        "game.pattern.payout-skipped",
+      );
+    } else {
+      // Standard pattern.won INFO-log — én linje per fase-win for ops-grep.
+      logRoomEvent(
+        logger,
+        {
+          roomCode: room.code,
+          gameId: game.id,
+          patternId: patternResult.patternId,
+          patternName: pattern.name,
+          claimId: claim.id,
+          winnerId: player.id,
+          payoutAmount: payout,
+          rtpCapped: claim.rtpCapped,
+          faceValue: prizePerWinner,
+        },
+        "game.pattern.won",
+      );
+    }
 
     if (this.bingoAdapter.onClaimLogged) {
       await this.bingoAdapter.onClaimLogged({
@@ -1887,6 +2105,21 @@ export class BingoEngine {
     }
 
     game.drawnNumbers.push(nextNumber);
+    // LIVE_ROOM_OBSERVABILITY 2026-04-29: per-draw INFO-log. Default-på via
+    // BINGO_VERBOSE_ROOM_LOGS — kan slås AV (eks. for batch-rerun-tester) hvis
+    // log-volum blir et problem. drawIndex er 1-basert (matcher socket-payload).
+    // `source` settes på socket/scheduler-laget — engine selv vet ikke om det
+    // var auto vs manual draw.
+    logRoomEvent(
+      logger,
+      {
+        roomCode: room.code,
+        gameId: game.id,
+        drawIndex: game.drawnNumbers.length,
+        number: nextNumber,
+      },
+      "game.draw",
+    );
     if (this.bingoAdapter.onNumberDrawn) {
       await this.bingoAdapter.onNumberDrawn({
         roomCode: room.code,
@@ -2329,17 +2562,40 @@ export class BingoEngine {
         gameType: "DATABINGO",
         amount: requestedPayout
       });
-      // FIXED-PRIZE-FIX: faste premier bypass-er pool/RTP-cap. Huset
-      // garanterer annonsert beløp; system-konto kan gå negativt.
+      // RTP-cap-bug-fix 2026-04-29: payout cappes alltid mot
+      // remainingPayoutBudget OG house-balance — fixed-prize-bypass fjernet.
+      // Se kommentar i `payoutPhaseWinner` for fullt rasjonale.
       const requestedAfterPolicyAndPool = lineIsFixedPrize
         ? cappedLinePayout.cappedAmount
         : Math.min(cappedLinePayout.cappedAmount, game.remainingPrizePool);
-      const payout = lineIsFixedPrize
-        ? cappedLinePayout.cappedAmount
-        : Math.min(
-            requestedAfterPolicyAndPool,
-            game.remainingPayoutBudget
-          );
+      const budgetCappedLinePayout = Math.min(
+        requestedAfterPolicyAndPool,
+        Math.max(0, game.remainingPayoutBudget),
+      );
+      let lineHouseAvailableBalance = Number.POSITIVE_INFINITY;
+      try {
+        lineHouseAvailableBalance = this.walletAdapter.getAvailableBalance
+          ? await this.walletAdapter.getAvailableBalance(houseAccountId)
+          : await this.walletAdapter.getBalance(houseAccountId);
+      } catch (err) {
+        logger.warn(
+          { err, houseAccountId, gameId: game.id, roomCode: room.code, phase: "LINE" },
+          "house-balance-lookup feilet (LINE) — fortsetter med budget-cap",
+        );
+      }
+      const payout = roundCurrency(
+        Math.max(
+          0,
+          Math.min(budgetCappedLinePayout, lineHouseAvailableBalance),
+        ),
+      );
+      const linePayoutWasSkipped = payout === 0 && requestedAfterPolicyAndPool > 0;
+      const linePayoutSkippedReason: "budget-exhausted" | "house-balance-low" | undefined =
+        linePayoutWasSkipped
+          ? (budgetCappedLinePayout === 0
+              ? "budget-exhausted"
+              : "house-balance-low")
+          : undefined;
       // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): state-mutasjonene
       // (lineWinnerId + linePatternResult.isWon) MÅ skje uavhengig av
       // payout-beløp. Tidligere var de inne i `if (payout > 0)` slik at en
@@ -2464,6 +2720,12 @@ export class BingoEngine {
         linePatternResult.wonAtDraw = game.drawnNumbers.length;
         linePatternResult.payoutAmount = payout;
         linePatternResult.claimId = claim.id;
+        if (linePayoutWasSkipped) {
+          linePatternResult.payoutSkipped = true;
+          if (linePayoutSkippedReason) {
+            linePatternResult.payoutSkippedReason = linePayoutSkippedReason;
+          }
+        }
       }
       // Unngå unused-var-warning for transferredTxIds — bruk den for å
       // signalisere til lesere at txId-tracking kun skjer når payout > 0.
@@ -2474,8 +2736,52 @@ export class BingoEngine {
       claim.payoutWasCapped = payout < requestedPayout;
       claim.rtpBudgetBefore = rtpBudgetBefore;
       claim.rtpBudgetAfter = rtpBudgetAfter;
-      // FIXED-PRIZE-FIX: faste premier er aldri pool/RTP-cappet.
-      claim.rtpCapped = !lineIsFixedPrize && payout < requestedAfterPolicyAndPool;
+      // RTP-cap-bug-fix 2026-04-29: rtpCapped settes ALLTID når payout faktisk
+      // er capped — fixed-prize-bypass fjernet (game `057c0502`-incident).
+      claim.rtpCapped = payout < requestedAfterPolicyAndPool;
+      if (linePayoutWasSkipped) {
+        claim.payoutSkipped = true;
+        if (linePayoutSkippedReason) {
+          claim.payoutSkippedReason = linePayoutSkippedReason;
+        }
+        logRoomEvent(
+          logger,
+          {
+            roomCode: room.code,
+            gameId: game.id,
+            patternId: linePatternResult?.patternId ?? null,
+            patternName: linePattern?.name ?? null,
+            claimId: claim.id,
+            playerId: player.id,
+            phase: "LINE",
+            configuredFaceValue: requestedPayout,
+            requestedAfterPolicyAndPool,
+            remainingBudget: rtpBudgetBefore,
+            houseAvailableBalance: Number.isFinite(lineHouseAvailableBalance)
+              ? lineHouseAvailableBalance
+              : null,
+            reason: linePayoutSkippedReason,
+          },
+          "game.pattern.payout-skipped",
+        );
+      } else {
+        logRoomEvent(
+          logger,
+          {
+            roomCode: room.code,
+            gameId: game.id,
+            patternId: linePatternResult?.patternId ?? null,
+            patternName: linePattern?.name ?? null,
+            claimId: claim.id,
+            winnerId: player.id,
+            phase: "LINE",
+            payoutAmount: payout,
+            rtpCapped: claim.rtpCapped,
+            faceValue: requestedPayout,
+          },
+          "game.pattern.won",
+        );
+      }
       claim.bonusTriggered = winningPatternIndex === DEFAULT_BONUS_TRIGGER_PATTERN_INDEX;
       if (claim.bonusTriggered) {
         claim.bonusAmount = payout;
@@ -2489,9 +2795,18 @@ export class BingoEngine {
         claim.reason = "BINGO_ALREADY_CLAIMED";
         return claim;
       }
+      // RTP-cap-bug-fix 2026-04-29 (race-safe): set bingoWinnerId SYNCHRONOUSLY
+      // før vi await-er på wallet.getBalance for house-balance-cap. Uten dette
+      // ville to konkurrerende BINGO-claims begge passere guard-en (linje 2793)
+      // mens første yielder på getBalance-await — så ville begge nå
+      // wallet.transfer og dobbelt-betalt. Vi har ikke en ekte "lock" — vi
+      // bruker `game.bingoWinnerId` som mutex sammen med duplikat-guard-en.
+      // Hvis transfer feiler etter dette, vil claim-en bli ENDED men markert
+      // degraded i audit-trail (CRIT-6-mønsteret nedenfor er bevart).
+      game.bingoWinnerId = player.id;
       // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): som LINE-grenen.
-      // game.bingoWinnerId, game.status='ENDED', endedReason — alle
-      // settes etter at transfer er committet. Idempotency-keyen
+      // game.status='ENDED', endedReason — settes etter at transfer er
+      // committet (CRIT-6 partial-state-protection). Idempotency-keyen
       // sikrer at retry ikke dobbel-betaler.
       const endedAtMs = Date.now();
       const endedAt = new Date(endedAtMs);
@@ -2514,17 +2829,40 @@ export class BingoEngine {
         gameType: "DATABINGO",
         amount: requestedPayout
       });
-      // FIXED-PRIZE-FIX: faste premier bypasser pool/RTP-cap. Hus
-      // garanterer annonsert beløp.
+      // RTP-cap-bug-fix 2026-04-29: payout cappes alltid mot
+      // remainingPayoutBudget OG house-balance. Se kommentar i
+      // `payoutPhaseWinner` for fullt rasjonale.
       const requestedAfterPolicyAndPool = bingoIsFixedPrize
         ? cappedBingoPayout.cappedAmount
         : Math.min(cappedBingoPayout.cappedAmount, game.remainingPrizePool);
-      const payout = bingoIsFixedPrize
-        ? cappedBingoPayout.cappedAmount
-        : Math.min(
-            requestedAfterPolicyAndPool,
-            game.remainingPayoutBudget
-          );
+      const budgetCappedBingoPayout = Math.min(
+        requestedAfterPolicyAndPool,
+        Math.max(0, game.remainingPayoutBudget),
+      );
+      let bingoHouseAvailableBalance = Number.POSITIVE_INFINITY;
+      try {
+        bingoHouseAvailableBalance = this.walletAdapter.getAvailableBalance
+          ? await this.walletAdapter.getAvailableBalance(houseAccountId)
+          : await this.walletAdapter.getBalance(houseAccountId);
+      } catch (err) {
+        logger.warn(
+          { err, houseAccountId, gameId: game.id, roomCode: room.code, phase: "BINGO" },
+          "house-balance-lookup feilet (BINGO) — fortsetter med budget-cap",
+        );
+      }
+      const payout = roundCurrency(
+        Math.max(
+          0,
+          Math.min(budgetCappedBingoPayout, bingoHouseAvailableBalance),
+        ),
+      );
+      const bingoPayoutWasSkipped = payout === 0 && requestedAfterPolicyAndPool > 0;
+      const bingoPayoutSkippedReason: "budget-exhausted" | "house-balance-low" | undefined =
+        bingoPayoutWasSkipped
+          ? (budgetCappedBingoPayout === 0
+              ? "budget-exhausted"
+              : "house-balance-low")
+          : undefined;
       // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): vinner-marker
       // (game.bingoWinnerId) MÅ settes uavhengig av payout-beløp slik at
       // duplikat-claim-guard (linje ~2360) avviser doble innsendinger og
@@ -2534,19 +2872,33 @@ export class BingoEngine {
         // CRIT-6: wallet-transfer FIRST — single-source-of-truth.
         // BIN-239: idempotencyKey prevents double payout if client retries.
         // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
-        const transfer = await this.walletAdapter.transfer(
-          houseAccountId,
-          player.walletId,
-          payout,
-          `Bingo prize ${room.code}`,
-          {
-            idempotencyKey: IdempotencyKeys.adhocBingoPrize({
-              gameId: game.id,
-              claimId: claim.id,
-            }),
-            targetSide: "winnings",
-          }
-        );
+        //
+        // RTP-cap-bug-fix 2026-04-29: hvis transfer feiler MÅ vi rulle
+        // tilbake `game.bingoWinnerId` siden vi satte den synkront tidlig
+        // som race-mutex. CRIT-6-kontrakten lover at state forblir uendret
+        // ved transfer-feil — denne try/catch garanterer det.
+        let transfer: WalletTransferResult;
+        try {
+          transfer = await this.walletAdapter.transfer(
+            houseAccountId,
+            player.walletId,
+            payout,
+            `Bingo prize ${room.code}`,
+            {
+              idempotencyKey: IdempotencyKeys.adhocBingoPrize({
+                gameId: game.id,
+                claimId: claim.id,
+              }),
+              targetSide: "winnings",
+            }
+          );
+        } catch (err) {
+          // CRIT-6 partial-state-protection: rull tilbake mutex-låsen så
+          // retry kan komme inn, og slik at en feilet transfer ikke
+          // markerer runden som vunnet i state-snapshot.
+          game.bingoWinnerId = undefined;
+          throw err;
+        }
 
         // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh — se
         // kommentar i LINE-grenen over for begrunnelse (stale balance
@@ -2626,7 +2978,11 @@ export class BingoEngine {
       // selv ved payout=0 (mode:percent + tom pool eller unkonfigurert
       // prizePercent). Tidligere ble bingoWinnerId-marker glemt og runden
       // hang i RUNNING med duplikat-claim-guard som ikke fanget retries.
-      game.bingoWinnerId = player.id;
+      //
+      // RTP-cap-bug-fix 2026-04-29: bingoWinnerId er ALLEREDE satt synkront
+      // ovenfor (linje ~2806) som race-mutex mot duplikat-claim. Vi setter
+      // det IKKE på nytt her — fjerner double-write som kunne skjule en
+      // etterfølgende mid-flight overwrite-bug.
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
       game.status = "ENDED";
@@ -2640,8 +2996,9 @@ export class BingoEngine {
       claim.payoutWasCapped = payout < requestedPayout;
       claim.rtpBudgetBefore = rtpBudgetBefore;
       claim.rtpBudgetAfter = rtpBudgetAfter;
-      // FIXED-PRIZE-FIX: faste premier er aldri pool/RTP-cappet.
-      claim.rtpCapped = !bingoIsFixedPrize && payout < requestedAfterPolicyAndPool;
+      // RTP-cap-bug-fix 2026-04-29: rtpCapped settes ALLTID når payout faktisk
+      // er capped — fixed-prize-bypass fjernet (game `057c0502`-incident).
+      claim.rtpCapped = payout < requestedAfterPolicyAndPool;
       // Record pattern result for the first unclaimed BINGO pattern
       const bingoPatternResult = game.patternResults?.find((r) => r.claimType === "BINGO" && !r.isWon);
       if (bingoPatternResult) {
@@ -2650,6 +3007,55 @@ export class BingoEngine {
         bingoPatternResult.wonAtDraw = game.drawnNumbers.length;
         bingoPatternResult.payoutAmount = payout;
         bingoPatternResult.claimId = claim.id;
+        if (bingoPayoutWasSkipped) {
+          bingoPatternResult.payoutSkipped = true;
+          if (bingoPayoutSkippedReason) {
+            bingoPatternResult.payoutSkippedReason = bingoPayoutSkippedReason;
+          }
+        }
+      }
+      if (bingoPayoutWasSkipped) {
+        claim.payoutSkipped = true;
+        if (bingoPayoutSkippedReason) {
+          claim.payoutSkippedReason = bingoPayoutSkippedReason;
+        }
+        logRoomEvent(
+          logger,
+          {
+            roomCode: room.code,
+            gameId: game.id,
+            patternId: bingoPatternResult?.patternId ?? null,
+            patternName: bingoPattern?.name ?? null,
+            claimId: claim.id,
+            playerId: player.id,
+            phase: "BINGO",
+            configuredFaceValue: requestedPayout,
+            requestedAfterPolicyAndPool,
+            remainingBudget: rtpBudgetBefore,
+            houseAvailableBalance: Number.isFinite(bingoHouseAvailableBalance)
+              ? bingoHouseAvailableBalance
+              : null,
+            reason: bingoPayoutSkippedReason,
+          },
+          "game.pattern.payout-skipped",
+        );
+      } else {
+        logRoomEvent(
+          logger,
+          {
+            roomCode: room.code,
+            gameId: game.id,
+            patternId: bingoPatternResult?.patternId ?? null,
+            patternName: bingoPattern?.name ?? null,
+            claimId: claim.id,
+            winnerId: player.id,
+            phase: "BINGO",
+            payoutAmount: payout,
+            rtpCapped: claim.rtpCapped,
+            faceValue: requestedPayout,
+          },
+          "game.pattern.won",
+        );
       }
     }
 
@@ -3854,6 +4260,11 @@ export class BingoEngine {
     const player = this.requirePlayer(room, playerId);
     this.assertWalletAllowedForGameplay(player.walletId, Date.now());
     player.socketId = socketId;
+    logRoomEvent(
+      logger,
+      { roomCode: room.code, playerId, socketId, walletId: player.walletId },
+      "room.player.attached",
+    );
   }
 
   detachSocket(socketId: string): { roomCode: string; playerId: string } | null {
@@ -3875,6 +4286,11 @@ export class BingoEngine {
           // Regulatorisk: ingen wallet-mutasjon her. Vi setter kun
           // socketId=undefined så reconnect kan kalle attachPlayerSocket.
           player.socketId = undefined;
+          logRoomEvent(
+            logger,
+            { roomCode: room.code, playerId: player.id, socketId, walletId: player.walletId },
+            "room.player.detached",
+          );
           return { roomCode: room.code, playerId: player.id };
         }
       }
@@ -3965,11 +4381,34 @@ export class BingoEngine {
               },
               "cleanupStaleWalletInIdleRooms: preserved player with armed-state or active reservation (would have orphaned forhåndskjøp)",
             );
+            // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-event for
+            // observability — gjør det mulig å grep "room.player.preserved"
+            // i Render-loggen for å se hvor ofte beslutningen sparer state.
+            logRoomEvent(
+              logger,
+              {
+                roomCode: room.code,
+                playerId: player.id,
+                walletId: normalizedWalletId,
+                reason: "armed",
+              },
+              "room.player.preserved",
+            );
             continue;
           }
           room.players.delete(player.id);
           mutated = true;
           cleaned += 1;
+          logRoomEvent(
+            logger,
+            {
+              roomCode: room.code,
+              playerId: player.id,
+              walletId: player.walletId,
+              reason: "cleanupStale",
+            },
+            "room.player.evicted",
+          );
         }
       }
       if (mutated) {
@@ -4019,6 +4458,16 @@ export class BingoEngine {
           room.players.delete(player.id);
           mutated = true;
           cleaned += 1;
+          logRoomEvent(
+            logger,
+            {
+              roomCode: room.code,
+              playerId: player.id,
+              walletId: player.walletId,
+              reason: "cleanupNonCanonical",
+            },
+            "room.player.evicted",
+          );
         }
       }
       if (mutated) {
@@ -4257,6 +4706,28 @@ export class BingoEngine {
       }
       await this.compliance.finishPlaySession(player.walletId, room.hallId, endedAtMs);
     }
+
+    // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-log per round-end.
+    // Beregner sum(payoutAmount) over claims for å gi ops total payout-snapshot
+    // uten å måtte joine ledger.
+    const totalPayout = game.claims.reduce(
+      (sum, c) => sum + (c.payoutAmount ?? 0),
+      0,
+    );
+    logRoomEvent(
+      logger,
+      {
+        roomCode: room.code,
+        gameId: game.id,
+        hallId: room.hallId,
+        endedReason: game.endedReason ?? "UNKNOWN",
+        finalDrawCount: game.drawnNumbers.length,
+        totalPayout,
+        prizePool: game.prizePool,
+        claimCount: game.claims.length,
+      },
+      "game.ended",
+    );
 
     // Fire onGameEnded callback (non-blocking).
     if (this.bingoAdapter.onGameEnded) {
