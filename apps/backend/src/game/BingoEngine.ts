@@ -1815,10 +1815,28 @@ export class BingoEngine {
       ? capped.cappedAmount
       : Math.min(capped.cappedAmount, game.remainingPrizePool);
     // RTP-budget-gating gjelder ALLTID — fixed-prize-bypass fjernet.
-    const budgetCappedPayout = Math.min(
-      requestedAfterPolicyAndPool,
-      Math.max(0, game.remainingPayoutBudget),
-    );
+    //
+    // TEST-HALL-BYPASS 2026-04-29 (Tobias-mandate): test-haller skal alltid
+    // betale ut default-gevinster uavhengig av RTP-budget. Vi tester her
+    // kun at flyten er korrekt, ikke regulatorisk RTP-cap. Pengespill-
+    // forskriften §11 gjelder kun reelle haller; test-hallens 100k-house-
+    // saldo er dekning nok for alle default-gevinster i én runde.
+    // Single-prize-cap (2500 kr) og house-balance-cap beholdes som defens.
+    //
+    // Note: bypass-en er gated på BÅDE `room.isTestHall=true` OG env-flagget
+    // `BINGO_TEST_HALL_BYPASS_RTP_CAP=true` (default true i prod). Tester
+    // som spesifikt vil verifisere RTP-cap-oppførsel kan sette env-flagget
+    // til "false" via process.env-mock og dermed beholde isTestHall-rommets
+    // multi-phase-progression-bypass uten at RTP-cap-bypass kicker inn.
+    const isTestHallRtpBypass =
+      room.isTestHall === true
+      && process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP !== "false";
+    const budgetCappedPayout = isTestHallRtpBypass
+      ? requestedAfterPolicyAndPool
+      : Math.min(
+          requestedAfterPolicyAndPool,
+          Math.max(0, game.remainingPayoutBudget),
+        );
     // House-balance-gating: les available house-saldo og cap mot den.
     // Bruker getAvailableBalance når tilgjengelig (PR-W3+) ellers fall
     // tilbake til getBalance. Best-effort — hvis lookup feiler bruker vi
@@ -2668,13 +2686,23 @@ export class BingoEngine {
       // RTP-cap-bug-fix 2026-04-29: payout cappes alltid mot
       // remainingPayoutBudget OG house-balance — fixed-prize-bypass fjernet.
       // Se kommentar i `payoutPhaseWinner` for fullt rasjonale.
+      //
+      // TEST-HALL-BYPASS 2026-04-29: test-haller skipper RTP-budget-cap
+      // (default-gevinster utbetales uavhengig av buy-in-pool). Gated på
+      // `BINGO_TEST_HALL_BYPASS_RTP_CAP !== "false"` slik at PR #733-tester
+      // kan deaktivere bypass for å verifisere RTP-cap-oppførsel.
       const requestedAfterPolicyAndPool = lineIsFixedPrize
         ? cappedLinePayout.cappedAmount
         : Math.min(cappedLinePayout.cappedAmount, game.remainingPrizePool);
-      const budgetCappedLinePayout = Math.min(
-        requestedAfterPolicyAndPool,
-        Math.max(0, game.remainingPayoutBudget),
-      );
+      const lineIsTestHallRtpBypass =
+        room.isTestHall === true
+        && process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP !== "false";
+      const budgetCappedLinePayout = lineIsTestHallRtpBypass
+        ? requestedAfterPolicyAndPool
+        : Math.min(
+            requestedAfterPolicyAndPool,
+            Math.max(0, game.remainingPayoutBudget),
+          );
       let lineHouseAvailableBalance = Number.POSITIVE_INFINITY;
       try {
         lineHouseAvailableBalance = this.walletAdapter.getAvailableBalance
@@ -2935,13 +2963,22 @@ export class BingoEngine {
       // RTP-cap-bug-fix 2026-04-29: payout cappes alltid mot
       // remainingPayoutBudget OG house-balance. Se kommentar i
       // `payoutPhaseWinner` for fullt rasjonale.
+      //
+      // TEST-HALL-BYPASS 2026-04-29: test-haller skipper RTP-budget-cap
+      // (default-gevinster utbetales uavhengig av buy-in-pool). Gated på
+      // env-flagget som over.
       const requestedAfterPolicyAndPool = bingoIsFixedPrize
         ? cappedBingoPayout.cappedAmount
         : Math.min(cappedBingoPayout.cappedAmount, game.remainingPrizePool);
-      const budgetCappedBingoPayout = Math.min(
-        requestedAfterPolicyAndPool,
-        Math.max(0, game.remainingPayoutBudget),
-      );
+      const bingoIsTestHallRtpBypass =
+        room.isTestHall === true
+        && process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP !== "false";
+      const budgetCappedBingoPayout = bingoIsTestHallRtpBypass
+        ? requestedAfterPolicyAndPool
+        : Math.min(
+            requestedAfterPolicyAndPool,
+            Math.max(0, game.remainingPayoutBudget),
+          );
       let bingoHouseAvailableBalance = Number.POSITIVE_INFINITY;
       try {
         bingoHouseAvailableBalance = this.walletAdapter.getAvailableBalance

@@ -46,6 +46,16 @@
  *       path when payout was capped
  */
 
+// PR #736-konflikt-fix: deaktiver test-hall RTP-cap-bypass for denne
+// test-fila slik at vi kan teste at RTP-cap _faktisk_ håndheves selv
+// når isTestHall=true. (isTestHall=true er nødvendig for at testen skal
+// kunne teste multi-phase-progresjon i ett enkelt draw — bypass for
+// auto-pause-på-phase-won er separat fra RTP-cap-bypass.)
+//
+// Må settes FØR BingoEngine importeres siden engine-modulen leser
+// env-vars ved første evaluering.
+process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP = "false";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BingoEngine } from "../BingoEngine.js";

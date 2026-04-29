@@ -30,6 +30,13 @@
  * vi unngår Spill 1 auto-pause + 5-fase-auto-claim) og kontrollerer claim-
  * payout direkte via `submitClaim` i en kontrollert sekvens.
  */
+// PR #736-konflikt-fix: deaktiver test-hall RTP-cap-bypass i denne testen.
+// Denne testen verifiserer at RTP-cap håndheves selv når isTestHall=true
+// brukes for å bypassa auto-pause (samme situasjon som
+// BingoEngine.phaseProgressionWithZeroBudget.test.ts). Må settes FØR
+// BingoEngine importeres.
+process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP = "false";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BingoEngine } from "../BingoEngine.js";
