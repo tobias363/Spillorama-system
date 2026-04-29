@@ -133,7 +133,12 @@ export interface RejectWinResult {
 }
 
 export interface PhysicalTicketPayoutServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   /**
    * Optional override for fire-øyne-terskel. Default
@@ -177,10 +182,19 @@ export class PhysicalTicketPayoutService {
       );
     }
     this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "PhysicalTicketPayoutService krever pool eller connectionString."
+      );
+    }
     this.approvalThresholdCents =
       typeof options.adminApprovalThresholdCents === "number"
       && Number.isFinite(options.adminApprovalThresholdCents)

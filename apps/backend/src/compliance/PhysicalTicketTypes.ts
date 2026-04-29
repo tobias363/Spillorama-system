@@ -6,6 +6,8 @@
  * derfra slik at eksisterende imports fortsetter å fungere.
  */
 
+import type { Pool } from "pg";
+
 export type PhysicalBatchStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 export type PhysicalTicketStatus = "UNSOLD" | "SOLD" | "VOIDED";
 
@@ -200,7 +202,12 @@ export interface RewardAllResult {
 }
 
 export interface PhysicalTicketServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
 }
 

@@ -69,7 +69,12 @@ export interface GenerateBatchResult {
 }
 
 export interface WithdrawXmlExportServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   /** Rotkatalog for genererte XML-filer. Default: /tmp/spill-xml-exports. */
   exportDir?: string;
@@ -239,20 +244,23 @@ export class WithdrawXmlExportService {
   private initPromise: Promise<void> | null = null;
 
   constructor(options: WithdrawXmlExportServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError(
-        "INVALID_CONFIG",
-        "Mangler connection string for withdraw XML export service."
-      );
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
     this.exportDir = options.exportDir ?? "/tmp/spill-xml-exports";
     this.nowMs = options.nowMs ?? (() => Date.now());
     this.skipFileWrite = options.skipFileWrite ?? false;
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "WithdrawXmlExportService krever pool eller connectionString."
+      );
+    }
   }
 
   /** @internal — test-hook. */

@@ -93,7 +93,12 @@ export interface ListGameTypeFilter {
 }
 
 export interface GameTypeServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
 }
 
@@ -264,17 +269,20 @@ export class GameTypeService {
     options: GameTypeServiceOptions,
     referenceChecker: GameTypeReferenceChecker | null = null
   ) {
-    if (!options.connectionString.trim()) {
+    this.schema = assertSchemaName(options.schema ?? "public");
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
       throw new DomainError(
         "INVALID_CONFIG",
-        "Mangler connection string for GameTypeService."
+        "GameTypeService krever pool eller connectionString."
       );
     }
-    this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
     this.referenceChecker = referenceChecker;
   }
 

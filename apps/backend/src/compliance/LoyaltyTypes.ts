@@ -5,6 +5,8 @@
  * re-eksportert derfra slik at eksisterende imports fortsetter å fungere.
  */
 
+import type { Pool } from "pg";
+
 // ── Public types ────────────────────────────────────────────────────────────
 
 export interface LoyaltyTier {
@@ -118,7 +120,12 @@ export interface MonthlyResetResult {
 }
 
 export interface LoyaltyServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
 }
 

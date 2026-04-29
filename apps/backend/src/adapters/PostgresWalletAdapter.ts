@@ -28,7 +28,12 @@ import type { WalletOutboxRepo } from "../wallet/WalletOutboxRepo.js";
 type EntrySide = "DEBIT" | "CREDIT";
 
 interface PostgresWalletAdapterOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the adapter
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   ssl?: boolean;
   defaultInitialBalance?: number;
@@ -241,21 +246,23 @@ export class PostgresWalletAdapter implements WalletAdapter {
   private outboxRepo: WalletOutboxRepo | undefined;
 
   constructor(options: PostgresWalletAdapterOptions) {
-    const connectionString = options.connectionString?.trim();
-    if (!connectionString) {
-      throw new WalletError("INVALID_WALLET_CONFIG", "WALLET_PG_CONNECTION_STRING mangler.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
     this.defaultInitialBalance = options.defaultInitialBalance ?? 1000;
     if (!Number.isFinite(this.defaultInitialBalance) || this.defaultInitialBalance < 0) {
       throw new WalletError("INVALID_WALLET_CONFIG", "WALLET_DEFAULT_INITIAL_BALANCE må være 0 eller større.");
     }
 
-    this.pool = new Pool({
-      connectionString,
-      ssl: options.ssl ? { rejectUnauthorized: false } : undefined,
-      ...getPoolTuning()
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ssl: options.ssl ? { rejectUnauthorized: false } : undefined,
+        ...getPoolTuning()
+      });
+    } else {
+      throw new WalletError("INVALID_WALLET_CONFIG", "PostgresWalletAdapter krever pool eller connectionString.");
+    }
 
     const breakerEnabled = options.circuitBreaker?.enabled ?? true;
     this.breaker = breakerEnabled
@@ -1470,6 +1477,55 @@ export class PostgresWalletAdapter implements WalletAdapter {
     await this.initPromise;
   }
 
+  /**
+   * DB-P0-001: idempotent CHECK-constraint addition.
+   *
+   * Before this helper, schema-init ran `DROP CONSTRAINT IF EXISTS X` followed
+   * by `ADD CONSTRAINT X CHECK (...)` on every cold-boot. ADD CONSTRAINT
+   * triggers a full-table validation scan under EXCLUSIVE lock — wallet-writes
+   * could freeze for minutes after a Render redeploy on a populated table.
+   *
+   * The fix queries `pg_constraint` first. If the constraint already exists
+   * (the migration `20260926000000_wallet_currency_readiness.sql` created it),
+   * the ADD is skipped entirely — no lock, no validation scan.
+   *
+   * Tests with fresh `test_<uuid>` schemas hit the empty-table path: the
+   * ADD runs once on zero rows (instant). In production the table already
+   * has the constraint from migration, so this method is a fast no-op.
+   *
+   * Schema-name is matched explicitly so the same constraint name in two
+   * different schemas (test isolation) doesn't trigger a false positive.
+   */
+  private async ensureCheckConstraint(
+    client: PoolClient,
+    table: string,
+    constraintName: string,
+    checkExpr: string
+  ): Promise<void> {
+    const exists = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+        SELECT 1
+          FROM pg_constraint c
+          JOIN pg_class t  ON t.oid = c.conrelid
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE c.conname = $1
+           AND t.relname = $2
+           AND n.nspname = $3
+           AND c.contype = 'c'
+      ) AS exists`,
+      [constraintName, table, this.schema]
+    );
+    if (exists.rows[0]?.exists) {
+      // Already in place — nothing to do. Crucially, no DROP/ADD cycle and
+      // no full-table validation scan.
+      return;
+    }
+    await client.query(
+      `ALTER TABLE "${this.schema}"."${table}"
+         ADD CONSTRAINT ${constraintName} CHECK (${checkExpr})`
+    );
+  }
+
   private async initializeSchema(): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -1510,16 +1566,17 @@ export class PostgresWalletAdapter implements WalletAdapter {
         `ALTER TABLE ${this.accountsTable()}
            ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
       );
-      // BIN-766: CHECK-constraint NOK-only. Idempotent — DROP først for å
-      // tåle re-bootstrap på samme schema. Når reell multi-currency
-      // aktiveres erstattes denne med `currency IN (...)` via ny migration.
-      await client.query(
-        `ALTER TABLE ${this.accountsTable()}
-           DROP CONSTRAINT IF EXISTS wallet_accounts_currency_nok_only`
-      );
-      await client.query(
-        `ALTER TABLE ${this.accountsTable()}
-           ADD CONSTRAINT wallet_accounts_currency_nok_only CHECK (currency = 'NOK')`
+      // BIN-766 / DB-P0-001: CHECK-constraint NOK-only. Idempotent via
+      // pg_constraint lookup — ADD only fires if the constraint is absent
+      // (fresh test schema). In production the migration
+      // `20260926000000_wallet_currency_readiness.sql` already added it so
+      // this is a no-op; no DROP+RE-ADD cycle, no full-table validation
+      // scan, no EXCLUSIVE lock on cold-boot.
+      await this.ensureCheckConstraint(
+        client,
+        "wallet_accounts",
+        "wallet_accounts_currency_nok_only",
+        "currency = 'NOK'"
       );
 
       await client.query(
@@ -1541,13 +1598,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
         `ALTER TABLE ${this.transactionsTable()}
            ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
       );
-      await client.query(
-        `ALTER TABLE ${this.transactionsTable()}
-           DROP CONSTRAINT IF EXISTS wallet_transactions_currency_nok_only`
-      );
-      await client.query(
-        `ALTER TABLE ${this.transactionsTable()}
-           ADD CONSTRAINT wallet_transactions_currency_nok_only CHECK (currency = 'NOK')`
+      // DB-P0-001: idempotent via pg_constraint lookup — see comment on
+      // wallet_accounts above. Production no-op; test-schema first-boot only.
+      await this.ensureCheckConstraint(
+        client,
+        "wallet_transactions",
+        "wallet_transactions_currency_nok_only",
+        "currency = 'NOK'"
       );
       // BIN-162: Idempotency key unique index (only for non-null keys)
       await client.query(
@@ -1581,13 +1638,13 @@ export class PostgresWalletAdapter implements WalletAdapter {
         `ALTER TABLE ${this.entriesTable()}
            ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
       );
-      await client.query(
-        `ALTER TABLE ${this.entriesTable()}
-           DROP CONSTRAINT IF EXISTS wallet_entries_currency_nok_only`
-      );
-      await client.query(
-        `ALTER TABLE ${this.entriesTable()}
-           ADD CONSTRAINT wallet_entries_currency_nok_only CHECK (currency = 'NOK')`
+      // DB-P0-001: idempotent via pg_constraint lookup — see comment on
+      // wallet_accounts above. Production no-op; test-schema first-boot only.
+      await this.ensureCheckConstraint(
+        client,
+        "wallet_entries",
+        "wallet_entries_currency_nok_only",
+        "currency = 'NOK'"
       );
       // BIN-764: hash-chain audit-felter. NULL initielt for backwards-compat;
       // nye inserts får entry_hash + previous_entry_hash satt av executeLedger.

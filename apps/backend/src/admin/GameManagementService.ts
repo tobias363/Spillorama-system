@@ -96,7 +96,12 @@ export interface RepeatGameManagementInput {
 }
 
 export interface GameManagementServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
 }
 
@@ -244,17 +249,20 @@ export class GameManagementService {
   private initPromise: Promise<void> | null = null;
 
   constructor(options: GameManagementServiceOptions) {
-    if (!options.connectionString.trim()) {
+    this.schema = assertSchemaName(options.schema ?? "public");
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
       throw new DomainError(
         "INVALID_CONFIG",
-        "Mangler connection string for GameManagementService."
+        "GameManagementService krever pool eller connectionString."
       );
     }
-    this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
   }
 
   /** @internal — test-hook. */

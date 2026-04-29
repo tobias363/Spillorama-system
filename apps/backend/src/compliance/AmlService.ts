@@ -136,7 +136,12 @@ export interface AggregateCategoryCountsInput {
 }
 
 export interface AmlServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   paymentRequestService: PaymentRequestService;
 }
@@ -216,14 +221,20 @@ export class AmlService {
   private initPromise: Promise<void> | null = null;
 
   constructor(options: AmlServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string for AmlService.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "AmlService krever pool eller connectionString."
+      );
+    }
     this.paymentRequestService = options.paymentRequestService;
   }
 

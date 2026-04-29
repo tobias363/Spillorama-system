@@ -48,7 +48,12 @@ export interface BlockedIp {
 }
 
 export interface SecurityServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   /** Overstyres i tester. */
   nowMs?: () => number;
@@ -205,18 +210,24 @@ export class SecurityService {
   private blockedIpCacheLoadedAt = 0;
 
   constructor(options: SecurityServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string for SecurityService.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
     this.cacheTtlMs = options.cacheTtlMs ?? BLOCKED_IP_CACHE_TTL_MS;
     this.nowMs = options.nowMs ?? (() => Date.now());
     this.pilotMode = options.pilotMode === true;
     this.onCriticalFailure = options.onCriticalFailure ?? defaultCriticalFailureLogger;
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "SecurityService krever pool eller connectionString."
+      );
+    }
   }
 
   /** @internal — test-hook. */

@@ -336,7 +336,12 @@ export interface GameSettingsChangeLogEntry {
 }
 
 interface PlatformServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   sessionTtlHours?: number;
   minAgeYears?: number;
@@ -566,19 +571,25 @@ export class PlatformService {
     private readonly walletAdapter: WalletAdapter,
     options: PlatformServiceOptions
   ) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string for plattform-database.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
     // NEW-001: default 8 timer iht wireframe-spec (auth flyt PDF 9).
     // 30-min idle-timeout håndheves separat av SessionService (REQ-132).
     this.sessionTtlHours = options.sessionTtlHours ?? 8;
     this.minAgeYears = Math.max(18, Math.floor(options.minAgeYears ?? 18));
     this.kycAdapter = options.kycAdapter;
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning()
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "PlatformService krever pool eller connectionString."
+      );
+    }
   }
 
   /**

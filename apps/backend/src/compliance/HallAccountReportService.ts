@@ -87,7 +87,12 @@ export interface PhysicalCashoutRow {
 }
 
 export interface HallAccountReportServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   engine: BingoEngine;
 }
@@ -138,14 +143,20 @@ export class HallAccountReportService {
   private readonly engine: BingoEngine;
 
   constructor(opts: HallAccountReportServiceOptions) {
-    if (!opts.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string.");
-    }
     this.schema = assertSchemaName(opts.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: opts.connectionString,
-      ...getPoolTuning(),
-    });
+    if (opts.pool) {
+      this.pool = opts.pool;
+    } else if (opts.connectionString && opts.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: opts.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "HallAccountReportService krever pool eller connectionString."
+      );
+    }
     this.engine = opts.engine;
   }
 

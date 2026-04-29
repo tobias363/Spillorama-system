@@ -24,7 +24,13 @@ const logger = rootLogger.child({ module: "auth-token-service" });
 export type AuthTokenKind = "password-reset" | "email-verify";
 
 export interface AuthTokenServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  /** Fallback for tests / legacy callers — only used if `pool` is not set. */
+  connectionString?: string;
   schema?: string;
   /** TTL for password-reset tokens. Default 1 time. */
   passwordResetTtlMs?: number;
@@ -70,16 +76,22 @@ export class AuthTokenService {
   private initPromise: Promise<void> | null = null;
 
   constructor(options: AuthTokenServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string for AuthTokenService.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
     this.passwordResetTtlMs = options.passwordResetTtlMs ?? 60 * 60 * 1000; // 1t
     this.emailVerifyTtlMs = options.emailVerifyTtlMs ?? 48 * 60 * 60 * 1000; // 48t
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "AuthTokenService krever pool eller connectionString."
+      );
+    }
   }
 
   /** @internal — test-hook. */

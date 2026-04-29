@@ -38,8 +38,7 @@ import {
   type AuditLogStore,
 } from "./compliance/AuditLogService.js";
 import { Spill1StopVoteService } from "./spillevett/Spill1StopVoteService.js";
-import { Pool } from "pg";
-import { getPoolTuning } from "./util/pgPool.js";
+import { initSharedPool } from "./util/sharedPool.js";
 import { DrawScheduler } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { HttpRateLimiter } from "./middleware/httpRateLimit.js";
@@ -483,15 +482,37 @@ const bingoSettingsConstraints = { fixedAutoDrawIntervalMs, bingoMinRoundInterva
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 
+// DB-P0-002: process-wide shared Postgres pool. ALL services that previously
+// constructed their own `new Pool({ connectionString })` now receive this
+// shared instance instead. Reduces theoretical connection count from
+// ~75 services × 20 = 1500 down to a single pool of `PG_POOL_MAX` (default 20).
+//
+// Render Postgres starter plan caps at ~100 connections; sharing one pool
+// eliminates the cold-boot connection-storm risk that was identified in
+// `docs/audit/DATABASE_AUDIT_2026-04-28.md` (DB-P0-2).
+//
+// Also installs `statement_timeout = 30s` (default; override via
+// PG_STATEMENT_TIMEOUT_MS) on every new connection — closes DB-P1-6.
+//
+// Note: The wallet adapter still constructs its own pool via `WALLET_PG_*`
+// env-vars (constructed before this point in `createWalletAdapter`). That's
+// intentional — wallet ops are the most critical path and benefit from
+// pool isolation. In production both pools point at the same DB so the
+// total pool count is 2, not 75.
+const sharedPool = initSharedPool({
+  connectionString: platformConnectionString,
+  ssl: pgSsl,
+});
+
 const localBingoAdapter = usePostgresBingoAdapter
-  ? new PostgresBingoSystemAdapter({ connectionString: checkpointConnectionString, schema: pgSchema, ssl: pgSsl })
+  ? new PostgresBingoSystemAdapter({ pool: sharedPool, schema: pgSchema, ssl: pgSsl })
   : new LocalBingoSystemAdapter();
 
 const roomStateStore: RoomStateStore = roomStateProvider === "redis" ? new RedisRoomStateStore({ url: redisUrl }) : new InMemoryRoomStateStore();
 const redisSchedulerLock = useRedisLock ? new RedisSchedulerLock({ url: redisUrl }) : null;
 
 const responsibleGamingStore = platformConnectionString.length > 0
-  ? new PostgresResponsibleGamingStore({ connectionString: platformConnectionString, schema: pgSchema, ssl: pgSsl })
+  ? new PostgresResponsibleGamingStore({ pool: sharedPool, schema: pgSchema, ssl: pgSsl })
   : undefined;
 
 // GAME1_SCHEDULE PR 5 (BIN-700 follow-up): LoyaltyService må konstrueres
@@ -499,7 +520,7 @@ const responsibleGamingStore = platformConnectionString.length > 0
 // Hovedregistreringen + singleton-bruken nedenfor refererer til samme
 // `loyaltyService`-instans — ikke to forskjellige.
 const loyaltyService = new LoyaltyService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 const loyaltyHookAdapter = new LoyaltyPointsHookAdapter({ service: loyaltyService });
@@ -532,7 +553,7 @@ const bankIdAdapter = kycProvider === "bankid"
 const kycAdapter = bankIdAdapter ?? new LocalKycAdapter({ minAgeYears: kycMinAge });
 
 const platformService = new PlatformService(walletAdapter, {
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   sessionTtlHours,
   minAgeYears: kycMinAge,
@@ -547,7 +568,7 @@ const chatMessageStore: ChatMessageStore = new PostgresChatMessageStore({
 });
 
 const swedbankPayService = new SwedbankPayService(walletAdapter, {
-  connectionString: platformConnectionString, schema: pgSchema,
+  pool: sharedPool, schema: pgSchema,
   apiBaseUrl: process.env.SWEDBANK_PAY_API_BASE_URL,
   accessToken: process.env.SWEDBANK_PAY_ACCESS_TOKEN,
   payeeId: process.env.SWEDBANK_PAY_PAYEE_ID,
@@ -566,13 +587,13 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
 // BIN-586: manuell deposit/withdraw-kø (port fra legacy transactionController
 // og WithdrawController). Godkjennings-flyt kjøres av hall-operator/admin.
 const paymentRequestService = new PaymentRequestService(walletAdapter, {
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
 // BIN-587 B2.1: single-use tokens for password-reset + e-post-verify.
 const authTokenService = new AuthTokenService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -615,7 +636,7 @@ const passwordRotationService = new PasswordRotationService({
 // BIN-587 B3-aml: AML red-flag service. Bruker PaymentRequestService
 // for transaksjons-spørringer ved transaction-review.
 const amlService = new AmlService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   paymentRequestService,
 });
@@ -629,7 +650,7 @@ const amlService = new AmlService({
 // pilot-konfig; off i dev/test.
 const securityPilotMode = (process.env.SECURITY_PILOT_MODE ?? "").trim().toLowerCase() === "true";
 const securityService = new SecurityService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   pilotMode: securityPilotMode,
 });
@@ -654,7 +675,7 @@ void securityService.warmBlockedIpCache().catch((err) => {
 // ACCEPTED bank-uttak. `AccountingEmailService` wires til emailService
 // senere (etter at emailService er instansiert lengre ned).
 const withdrawXmlExportService = new WithdrawXmlExportService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   exportDir: (process.env.WITHDRAW_XML_EXPORT_DIR ?? "").trim() || undefined,
 });
@@ -662,7 +683,7 @@ const withdrawXmlExportService = new WithdrawXmlExportService({
 // BIN-587 B4a: physical papirbillett-admin. Agent-POS-salget (BIN-583)
 // oppdaterer samme tabell via agent-endepunkt.
 const physicalTicketService = new PhysicalTicketService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -670,7 +691,7 @@ const physicalTicketService = new PhysicalTicketService({
 // CSV-import-flyt. Lever parallelt med PhysicalTicketService — de eier
 // separate tabeller (app_static_tickets vs app_physical_tickets).
 const staticTicketService = new StaticTicketService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -678,7 +699,7 @@ const staticTicketService = new StaticTicketService({
 // og reserverer bonger via `app_static_tickets.reserved_by_range_id`. PT3
 // batch-salg vil dekrementere `current_top_serial` når bonger selges.
 const agentTicketRangeService = new AgentTicketRangeService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -686,7 +707,7 @@ const agentTicketRangeService = new AgentTicketRangeService({
 // og håndterer verifisering + utbetaling. Kobles inn i draw-engine via
 // `setPhysicalTicketPayoutService` nedenfor.
 const physicalTicketPayoutService = new PhysicalTicketPayoutService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -694,7 +715,7 @@ const physicalTicketPayoutService = new PhysicalTicketPayoutService({
 // app_agent_transactions. Egen service så SQL-aggregatet lever ved siden av
 // PhysicalTicketService (som eier skjema + CRUD).
 const physicalTicketsAggregateService = new PhysicalTicketsAggregateService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -702,13 +723,13 @@ const physicalTicketsAggregateService = new PhysicalTicketsAggregateService({
 // tabell-kilder som BIN-648 men narrowed til én hall og beriket med
 // display_name + is_active fra hall_game_schedules (LEFT JOIN).
 const physicalTicketsGamesInHallService = new PhysicalTicketsGamesInHallService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
 // BIN-587 B4b: voucher admin-CRUD (redemption-flow i G2/G3 er follow-up).
 const voucherService = new VoucherService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -721,7 +742,7 @@ const voucherRedemptionService = new VoucherRedemptionService({
 
 // BIN-622: Game Management (admin-katalog av spill-varianter).
 const gameManagementService = new GameManagementService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -747,7 +768,7 @@ async function fetchGameManagementConfigForRoomState(
 // eksisterer. Unique (game_management_id, close_date) i `app_close_day_log`
 // håndhever idempotency; dobbel-lukking returnerer 409.
 const closeDayService = new CloseDayService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   gameManagementService,
 });
@@ -755,7 +776,7 @@ const closeDayService = new CloseDayService({
 // BIN-626: DailySchedule (daglig spill-plan per hall, kobler GameManagement
 // til hall + tidspunkt + subgames).
 const dailyScheduleService = new DailyScheduleService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -765,7 +786,7 @@ const dailyScheduleService = new DailyScheduleService({
 // kolonner for scheduleName/Number/Type/luckyNumberPrize + sub_games_json
 // for fri-form subgame-bundle (normaliseres i BIN-621 SubGame-katalogen).
 const scheduleService = new ScheduleService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -774,7 +795,7 @@ const scheduleService = new ScheduleService({
 // mask-feltet direkte, så admin-katalog og engine deler samme 25-bit-
 // representasjon (shared-types PatternMask).
 const patternService = new PatternService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -785,7 +806,7 @@ const patternService = new PatternService({
 // app_daily_schedules (BIN-626) håndhever at hard-delete blokkeres når
 // gruppen er i bruk i en plan.
 const hallGroupService = new HallGroupService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -795,7 +816,7 @@ const hallGroupService = new HallGroupService({
 // range/tickets/lucky-numbers). Referenced fra app_game_management,
 // app_patterns, app_sub_games via stabil type_slug.
 const gameTypeService = new GameTypeService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -804,7 +825,7 @@ const gameTypeService = new GameTypeService({
 // schema `subGame1` til app_sub_games med JSON-lagret pattern_rows +
 // ticket_colors og game_type_id-referanse til GameType.
 const subGameService = new SubGameService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -813,7 +834,7 @@ const subGameService = new SubGameService({
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
 // Leaderboard-admin-sider i PR-B6 (placeholder inntil dette lander).
 const leaderboardTierService = new LeaderboardTierService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -827,7 +848,7 @@ const leaderboardTierService = new LeaderboardTierService({
 // wiring til å lese fra denne tabellen lander som egen PR slik at admin-UI
 // kan lande først uten runtime-risk.
 const miniGamesConfigService = new MiniGamesConfigService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -839,7 +860,7 @@ const miniGamesConfigService = new MiniGamesConfigService({
 // template-payloaden lever som config_json (ingen normalisering i v1 siden
 // malen kopieres i sin helhet).
 const savedGameService = new SavedGameService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -847,7 +868,7 @@ const savedGameService = new SavedGameService({
 // Agent V1.0 permissions). 15 moduler * 4-5 actions, én rad per (agent, modul).
 // AGENT_PERMISSION_READ (ADMIN/SUPPORT) / AGENT_PERMISSION_WRITE (ADMIN-only).
 const agentPermissionService = new AgentPermissionService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -857,7 +878,7 @@ const agentPermissionService = new AgentPermissionService({
 // gangen). Begge er sentrale ADMIN-only endepunkter; HALL_OPERATOR styrer
 // per-hall-Spillvett via adminHalls.ts.
 const settingsService = new SettingsService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 // GAP #23: Screen-saver-bilder for hall-TV. Service-laget eier KUN bildelista
@@ -865,11 +886,11 @@ const settingsService = new SettingsService({
 // global timeout-minutter ligger i SettingsService (`branding.screen_saver_*`).
 // Tabell `app_screen_saver_images` kommer fra migration 20260425125008.
 const screenSaverService = new ScreenSaverService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 const maintenanceService = new MaintenanceService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -880,7 +901,7 @@ const maintenanceService = new MaintenanceService({
 // blokkert av BIN-680). CMS_WRITE er ADMIN-only; CMS_READ inkluderer
 // HALL_OPERATOR + SUPPORT.
 const cmsService = new CmsService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 
@@ -923,10 +944,7 @@ const fcmPushService = new FcmPushService({
 });
 const auditLogStore: AuditLogStore = platformConnectionString
   ? new PostgresAuditLogStore({
-      pool: new Pool({
-        connectionString: platformConnectionString,
-        ...getPoolTuning(),
-      }),
+      pool: sharedPool,
       schema: pgSchema,
     })
   : new InMemoryAuditLogStore();
@@ -2394,11 +2412,11 @@ app.use(createAgentSettlementRouter({
 
 // BIN-583 B3.6: produkt-katalog + hall-assignment + agent sale-flyt.
 const productService = new ProductService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
 });
 const agentProductSaleService = new AgentProductSaleService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   platformService,
   walletAdapter,
@@ -2462,7 +2480,7 @@ const agentOpenDayService = new AgentOpenDayService({
   settlementStore: agentSettlementStore,
 });
 const hallAccountReportService = new HallAccountReportService({
-  connectionString: platformConnectionString,
+  pool: sharedPool,
   schema: pgSchema,
   engine,
 });

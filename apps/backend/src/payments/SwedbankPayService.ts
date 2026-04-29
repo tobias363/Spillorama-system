@@ -85,7 +85,12 @@ export interface AuditLogger {
 }
 
 export interface SwedbankPayServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema: string;
   apiBaseUrl?: string;
   accessToken?: string;
@@ -414,9 +419,6 @@ export class SwedbankPayService {
     private readonly walletAdapter: WalletAdapter,
     options: SwedbankPayServiceOptions
   ) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler APP_PG_CONNECTION_STRING for SwedbankPayService.");
-    }
 
     this.schema = assertSchemaName(options.schema || "public");
 
@@ -437,10 +439,19 @@ export class SwedbankPayService {
     this.termsOfServiceUrl = (options.termsOfServiceUrl || "").trim();
     this.requestTimeoutMs = Math.max(1000, Math.floor(options.requestTimeoutMs ?? 10000));
 
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning()
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "SwedbankPayService krever pool eller connectionString."
+      );
+    }
   }
 
   isConfigured(): boolean {

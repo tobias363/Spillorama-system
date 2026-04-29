@@ -1,5 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
+import { DomainError } from "./BingoEngine.js";
 import type {
   PersistedComplianceLedgerEntry,
   PersistedDailyReport,
@@ -18,7 +19,12 @@ import type {
 } from "./ResponsibleGamingPersistence.js";
 
 interface PostgresResponsibleGamingStoreOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   ssl?: boolean;
 }
@@ -49,11 +55,20 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
   private initPromise: Promise<void> | null = null;
 
   constructor(options: PostgresResponsibleGamingStoreOptions) {
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ssl: options.ssl ? { rejectUnauthorized: false } : false,
-      ...getPoolTuning()
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ssl: options.ssl ? { rejectUnauthorized: false } : false,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "PostgresResponsibleGamingStore krever pool eller connectionString."
+      );
+    }
     this.schema = assertSchemaName(options.schema || "public");
   }
 

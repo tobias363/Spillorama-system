@@ -92,17 +92,20 @@ export class LoyaltyService {
   private initPromise: Promise<void> | null = null;
 
   constructor(options: LoyaltyServiceOptions) {
-    if (!options.connectionString.trim()) {
+    this.schema = assertSchemaName(options.schema ?? "public");
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
       throw new DomainError(
         "INVALID_CONFIG",
-        "Mangler connection string for LoyaltyService."
+        "LoyaltyService krever pool eller connectionString."
       );
     }
-    this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
   }
 
   /** @internal — test-hook (matches LeaderboardTierService.forTesting). */

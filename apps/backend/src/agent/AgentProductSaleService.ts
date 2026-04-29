@@ -102,7 +102,12 @@ export interface ProductSale {
 }
 
 export interface AgentProductSaleServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
   platformService: PlatformService;
   walletAdapter: WalletAdapter;
@@ -178,14 +183,20 @@ export class AgentProductSaleService {
   private readonly txs: AgentTransactionStore;
 
   constructor(opts: AgentProductSaleServiceOptions) {
-    if (!opts.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string.");
-    }
     this.schema = assertSchemaName(opts.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: opts.connectionString,
-      ...getPoolTuning(),
-    });
+    if (opts.pool) {
+      this.pool = opts.pool;
+    } else if (opts.connectionString && opts.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: opts.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "AgentProductSaleService krever pool eller connectionString."
+      );
+    }
     this.platform = opts.platformService;
     this.wallet = opts.walletAdapter;
     this.agents = opts.agentService;

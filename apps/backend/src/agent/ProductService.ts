@@ -56,7 +56,12 @@ export interface HallProduct {
 }
 
 export interface ProductServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
 }
 
@@ -128,14 +133,20 @@ export class ProductService {
   private readonly schema: string;
 
   constructor(options: ProductServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string for ProductService.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "ProductService krever pool eller connectionString."
+      );
+    }
   }
 
   /** @internal — test-hook. */

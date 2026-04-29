@@ -94,14 +94,20 @@ export class PhysicalTicketService {
   private initPromise: Promise<void> | null = null;
 
   constructor(options: PhysicalTicketServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string for PhysicalTicketService.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "PhysicalTicketService krever pool eller connectionString."
+      );
+    }
   }
 
   /** @internal — test-hook. */

@@ -75,7 +75,12 @@ export interface PhysicalTicketsAggregateFilter {
 }
 
 export interface PhysicalTicketsAggregateServiceOptions {
-  connectionString: string;
+  /**
+   * DB-P0-002: shared pool injection (preferred). When set, the service
+   * does not create its own pool. `connectionString` is ignored.
+   */
+  pool?: Pool;
+  connectionString?: string;
   schema?: string;
 }
 
@@ -108,14 +113,20 @@ export class PhysicalTicketsAggregateService {
   private readonly schema: string;
 
   constructor(options: PhysicalTicketsAggregateServiceOptions) {
-    if (!options.connectionString.trim()) {
-      throw new DomainError("INVALID_CONFIG", "Mangler connection string.");
-    }
     this.schema = assertSchemaName(options.schema ?? "public");
-    this.pool = new Pool({
-      connectionString: options.connectionString,
-      ...getPoolTuning(),
-    });
+    if (options.pool) {
+      this.pool = options.pool;
+    } else if (options.connectionString && options.connectionString.trim()) {
+      this.pool = new Pool({
+        connectionString: options.connectionString,
+        ...getPoolTuning(),
+      });
+    } else {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "PhysicalTicketsAggregateService krever pool eller connectionString."
+      );
+    }
   }
 
   /** @internal — test-hook. */
