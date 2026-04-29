@@ -58,6 +58,11 @@ import {
 import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util/bingoSettings.js";
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, type RoomUpdatePayload } from "./util/roomHelpers.js";
 import { RoomStateManager } from "./util/roomState.js";
+import {
+  buildRoomLifecycleStoreSync,
+  connectRoomLifecycleStore,
+  shutdownRoomLifecycleStore,
+} from "./util/createRoomLifecycleStore.js";
 import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportScheduler, type PendingBingoSettingsUpdate } from "./util/schedulerSetup.js";
 import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
 import { WalletOutboxRepo } from "./wallet/WalletOutboxRepo.js";
@@ -541,8 +546,22 @@ const loyaltyHookAdapter = new LoyaltyPointsHookAdapter({ service: loyaltyServic
 // singleton, defined here only because the engine needs the lifecycle
 // store.
 //
-// Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.2 + §6 K2.
-const roomState = new RoomStateManager();
+// **K4 (2026-04-29):** when `ROOM_STATE_PROVIDER=redis`, swap in the
+// Redis-backed lifecycle store via the env-flag factory. The store is
+// constructed synchronously (lazyConnect) here so dependencies wire up;
+// the boot async-block calls `connectRoomLifecycleStore` to fail fast
+// if Redis is unreachable — see §3411 below. When the env-flag is
+// `memory` (default for dev/test), `RoomStateManager`'s zero-arg
+// constructor builds the in-memory impl with shared Maps the way K2
+// shipped — no behavior change for non-redis deployments.
+//
+// Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.2 + §6 K2/K4.
+console.log(`[BIN-K4] RoomLifecycleStore provider: ${roomStateProvider === "redis" ? "redis" : "memory"}`);
+const roomState = roomStateProvider === "redis"
+  ? new RoomStateManager({
+      lifecycleStore: buildRoomLifecycleStoreSync({ provider: "redis", redisUrl }),
+    })
+  : new RoomStateManager();
 
 // BIN-615 / PR-C3b: Instantiate Game3Engine (subclass of Game2Engine ⊂
 // BingoEngine). One engine instance serves G1 / G2 / G3 rooms concurrently:
@@ -3401,6 +3420,18 @@ app.use(errorReporter());
 const PORT = Number(process.env.PORT ?? 4000);
 
 (async () => {
+  // K4 (2026-04-29): connect the Redis-backed lifecycle store BEFORE any
+  // boot step that could mutate room state. No-op when provider=memory.
+  // Throws on unreachable Redis — surfacing here so the process aborts
+  // rather than serving traffic with broken room-state.
+  try {
+    await connectRoomLifecycleStore(roomState.lifecycleStore);
+  } catch (error) {
+    console.error("[BIN-K4] RoomLifecycleStore failed to connect", error);
+    process.exit(1);
+    return;
+  }
+
   try {
     await engine.hydratePersistentState();
     console.log("[responsible-gaming] persisted state hydrated");
@@ -3611,6 +3642,9 @@ function handleShutdown(signal: string) {
         catch (err) { console.warn("[shutdown] complianceOutboxWorker.stop() failed:", err); }
       }
       await roomStateStore.shutdown();
+      // K4: disconnect the room-lifecycle Redis client (no-op for memory).
+      try { await shutdownRoomLifecycleStore(roomState.lifecycleStore); }
+      catch (err) { console.warn("[shutdown] shutdownRoomLifecycleStore() failed:", err); }
       if (redisSchedulerLock) await redisSchedulerLock.shutdown();
       if (responsibleGamingStore) await responsibleGamingStore.shutdown();
       // BIN-494: close Socket.IO Redis adapter clients

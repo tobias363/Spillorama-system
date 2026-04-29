@@ -110,14 +110,46 @@ export class RoomStateManager {
    *
    * Constructed against a SHARED {@link RoomLifecycleMaps} struct so reads
    * via the deprecated Map fields above continue to see fresh data.
+   *
+   * **K4 (2026-04-29):** when an external `lifecycleStore` is injected
+   * (e.g. {@link RedisRoomLifecycleStore} from the
+   * `ROOM_STATE_PROVIDER=redis` factory), the deprecated `*ByRoom` Map
+   * fields above are NOT shared with the store — they exist as inert
+   * empty Maps, kept only for the field's type-shape contract. New code
+   * paths must go through `lifecycleStore`'s async API; legacy callers
+   * that still read the Maps directly will see empty state and SHOULD be
+   * migrated to async accessors. See
+   * docs/operations/REDIS_KEY_SCHEMA.md for the migration path.
    */
   readonly lifecycleStore: RoomLifecycleStore;
 
-  constructor() {
-    // K2: pre-allocate the four state-space Maps and pass them to the
-    // store. The store treats them as its canonical owned state; this
-    // class exposes them via the deprecated `*ByRoom` fields so legacy
-    // read callers keep working without an async hop.
+  /**
+   * K2/K4: construct the room-state surface.
+   *
+   * `lifecycleStore` (optional, K4): inject a pre-built store. When
+   *   omitted, an {@link InMemoryRoomLifecycleStore} is created that
+   *   shares Maps with the deprecated `*ByRoom` fields (current K2
+   *   behavior). When supplied (typically a `RedisRoomLifecycleStore`),
+   *   the deprecated Map fields are inert — see field-doc on
+   *   `lifecycleStore` above.
+   */
+  constructor(options: { lifecycleStore?: RoomLifecycleStore } = {}) {
+    if (options.lifecycleStore) {
+      // K4: external store owns state. The deprecated `*ByRoom` Map
+      // fields are kept as empty Maps to preserve the type contract,
+      // but they are NOT mutated by the store and any caller still
+      // reading them directly will see stale data.
+      this.armedPlayerIdsByRoom = new Map();
+      this.armedPlayerSelectionsByRoom = new Map();
+      this.reservationIdByPlayerByRoom = new Map();
+      this.armCycleByRoom = new Map();
+      this.lifecycleStore = options.lifecycleStore;
+      return;
+    }
+    // K2 default: pre-allocate the four state-space Maps and pass them
+    // to the store. The store treats them as its canonical owned state;
+    // this class exposes them via the deprecated `*ByRoom` fields so
+    // legacy read callers keep working without an async hop.
     const sharedMaps: RoomLifecycleMaps = {
       armedTicketsByRoom: new Map(),
       armedSelectionsByRoom: new Map(),

@@ -760,7 +760,7 @@ export class InMemoryRoomLifecycleStore implements RoomLifecycleStore {
 // ── Factory ─────────────────────────────────────────────────────────────
 
 export interface CreateRoomLifecycleStoreOptions {
-  /** Future: { provider: "redis", redisUrl } would route to a Redis impl. */
+  /** "memory" — the only provider this synchronous factory creates. */
   provider?: "memory";
   /**
    * Optional pre-allocated Maps to share with `RoomStateManager`. When
@@ -771,9 +771,14 @@ export interface CreateRoomLifecycleStoreOptions {
 }
 
 /**
- * Construct the canonical RoomLifecycleStore for the process. Returns the
- * in-memory impl today; a Redis impl can be plumbed in by switching on
- * `provider`. Keeps `index.ts` agnostic to the impl choice.
+ * Construct an in-memory RoomLifecycleStore synchronously. Kept for
+ * test ergonomics — production uses {@link
+ * "./createRoomLifecycleStore.js".createRoomLifecycleStore} which is
+ * async (it eagerly connects to Redis when `ROOM_STATE_PROVIDER=redis`)
+ * and returns either the in-memory or Redis impl based on env-flag.
+ *
+ * If you pass `provider: "redis"` here it will throw — use the async
+ * factory in `createRoomLifecycleStore.ts` for that.
  */
 export function createRoomLifecycleStore(
   options: CreateRoomLifecycleStoreOptions = {},
