@@ -709,40 +709,57 @@ export class MysteryGameOverlay extends Container {
     });
     // Tobias 2026-04-26: tekst + crown-PNG side-by-side på samme linje.
     // Tidligere stack hadde bilde over tekst; nå er bildet til HØYRE.
+    //
+    // Tobias 2026-04-30: stack skal ta ~80% av viewport-bredden så intro-
+    // teksten dominerer visuelt før modal-en kommer opp. fontSize settes
+    // på stack-en slik at både text og img-children arver samme baseline.
+    // img bruker em-units og matcher dermed text-høyden uavhengig av
+    // viewport. clamp() holder lesbar på små skjermer (min 48px) og
+    // hindrer absurd størrelse på 4K (max 160px).
     const stack = document.createElement("div");
     Object.assign(stack.style, {
       display: "flex",
       flexDirection: "row",
       alignItems: "center",
-      gap: "18px",
+      justifyContent: "center",
+      gap: "0.35em",
+      width: "80vw",
+      maxWidth: "1100px",
+      // 80% av viewport-bredden = ca. fontSize:11vw (13 chars * 0.55 + lit
+      // letterSpacing). clamp() holder den lesbar på små skjermer (min
+      // 48px) og hindrer at den blir absurd stor på 4K (max 160px).
+      fontSize: "clamp(48px, 11vw, 160px)",
     });
 
     const text = document.createElement("div");
     text.textContent = "MYSTERY JOKER";
     Object.assign(text.style, {
       fontFamily: "'Inter', system-ui, sans-serif",
-      fontSize: "44px",
+      // fontSize arves fra stack — ingen lokal override.
       fontWeight: "900",
-      letterSpacing: "2px",
+      letterSpacing: "0.05em",
       color: "#ffe83d",
-      textShadow: "0 0 30px rgba(255,232,61,0.5)",
+      // textShadow skaleres med em så glow-en ikke blir tynn på store fonts
+      textShadow: "0 0 0.6em rgba(255,232,61,0.55)",
       animation: "mj-intro-text 2000ms ease-in-out forwards",
       lineHeight: "1",
+      whiteSpace: "nowrap",
     });
 
     const img = document.createElement("img");
-    // Joker-crown (rød/grønne tunger + gull-stjerner). Ca. 1.3× tekstens
-    // x-høyde for å matche optisk vekt uten å dominere typografien.
+    // Joker-crown (rød/grønne tunger + gull-stjerner). Skala holdes via em
+    // slik at bildet alltid matcher tekst-høyden uavhengig av viewport.
     img.src = JOKER_CROWN_IMG_URL;
     img.alt = "";
     img.draggable = false;
     Object.assign(img.style, {
-      // ~50px høyt = matcher tekst-x-høyde + litt (44px font * 1.1 ≈ 48-50px)
-      height: "50px",
+      // 1.1em ≈ tekstens cap-høyde. Bildet skalerer dermed automatisk
+      // når font-size scales med viewport.
+      height: "1.1em",
       width: "auto",
-      maxWidth: "70px",
+      maxWidth: "1.5em",
       objectFit: "contain",
-      filter: "drop-shadow(0 0 18px rgba(255,122,26,0.55))",
+      filter: "drop-shadow(0 0 0.4em rgba(255,122,26,0.6))",
       animation: "mj-intro-joker 2000ms ease-in-out forwards",
       // Anchor for transform-basert animasjon (rotate+scale) skal være
       // sentrert i bildet; default er fine men eksplisitt for klarhet.
