@@ -124,6 +124,23 @@ export interface GameEventsDeps {
   clearReservationId?: (roomCode: string, playerId: string) => void;
 
   /**
+   * FORHANDSKJOP-ORPHAN-FIX (PR 2, 2026-04-29): introspection used by
+   * `room:create`/`room:join` handlers when calling
+   * `engine.cleanupStaleWalletInIdleRooms`. Returns true if the
+   * (roomCode, playerId) tuple has armed-state or an active wallet
+   * reservation in `RoomStateManager` — in which case the cleanup
+   * helper must skip the eviction so the next `startGame` commits the
+   * buy-in instead of orphaning the reservation.
+   *
+   * Optional so test-harnesses without a full `RoomStateManager` keep
+   * working: when undefined, the cleanup helper falls through to its
+   * legacy 2-arg semantics (no preserve-check).
+   *
+   * Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §6 PR 2.
+   */
+  hasArmedOrReservation?: (roomCode: string, playerId: string) => boolean;
+
+  /**
    * Pilot-bug fix 2026-04-27: per-rom arm-cycle-id som inngår i bet:arm
    * idempotency-key. Optional — fallback til pre-fix-format hvis utelatt.
    */

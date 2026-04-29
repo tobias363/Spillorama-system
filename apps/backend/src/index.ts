@@ -3069,6 +3069,14 @@ const registerGameEvents = createGameEventHandlers({
   getReservationId: (code, pid) => roomState.getReservationId(code, pid),
   setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
   clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
+  // FORHANDSKJOP-ORPHAN-FIX (PR 2, 2026-04-29): wire armed/reservation
+  // introspection so `room:create`/`room:join` can preserve in-flight
+  // pre-round purchases when calling `engine.cleanupStaleWalletInIdleRooms`.
+  // Without this, the cleanup pass would evict disconnected players whose
+  // wallet_reservations row is still status='active' — orphaning the
+  // forhåndskjøp until the 30-min TTL.
+  // Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §6 PR 2.
+  hasArmedOrReservation: (code, pid) => roomState.hasArmedOrReservation(code, pid),
   // Pilot-bug fix 2026-04-27 (Tobias-rapport): per-rom arm-cycle-id.
   getArmCycleId: (code) => roomState.getOrCreateArmCycleId(code),
   // GAP #38: Spillvett stop-game vote service.

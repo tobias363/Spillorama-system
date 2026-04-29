@@ -3804,26 +3804,84 @@ export class BingoEngine {
    * — der må reconnecten gå via `attachPlayerSocket` så pågående
    * buy-in/wallet-state er trygg.
    *
+   * FORHANDSKJOP-ORPHAN-FIX (PR 2, 2026-04-29) — armed/reservation-aware:
+   * The optional `isPreserve` callback lets the socket layer veto an
+   * eviction when the player still has armed-state or an active wallet
+   * reservation in `RoomStateManager`. Without it, the (walletId +
+   * !socketId + idle-room) trio could evict a player mid-pre-round, the
+   * next `onAutoStart` would silently filter them out via
+   * `armedSet ∩ room.players`, and the wallet_reservations row would
+   * orphan until 30-min TTL. The engine doesn't import RoomStateManager,
+   * so the callback is the dependency-injection.
+   *
    * Returnerer antall rom hvor opprydding ble utført (mest for
    * observability + tester).
+   *
+   * Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §6 PR 2.
    */
-  cleanupStaleWalletInIdleRooms(walletId: string, exceptRoomCode?: string): number {
+  cleanupStaleWalletInIdleRooms(
+    walletId: string,
+    options?: {
+      exceptRoomCode?: string;
+      /**
+       * Return true to skip eviction for this (roomCode, playerId).
+       * Used by the socket layer to preserve players with armed-state
+       * or active wallet reservations (in `RoomStateManager`). When
+       * skipping, the engine logs `reason: "preserved-due-to-armed-or-reservation"`
+       * for observability.
+       */
+      isPreserve?: (roomCode: string, playerId: string) => boolean;
+    },
+  ): number;
+  /** @deprecated Use the options-form with `isPreserve` instead. The legacy
+   *  2-arg form is kept for backward-compat with admin-tooling and existing
+   *  tests; it does NOT preserve armed/reservation state. New socket-layer
+   *  call-sites must migrate to the options form to fix the orphan-bug. */
+  cleanupStaleWalletInIdleRooms(walletId: string, exceptRoomCode?: string): number;
+  cleanupStaleWalletInIdleRooms(
+    walletId: string,
+    arg2?: string | { exceptRoomCode?: string; isPreserve?: (roomCode: string, playerId: string) => boolean },
+  ): number {
     const normalizedWalletId = walletId.trim();
     if (!normalizedWalletId) return 0;
-    const exceptCode = exceptRoomCode?.trim().toUpperCase();
+    // Resolve options vs. legacy-string overload. Strings remain the
+    // deprecated path (no preserve check); object form is the modern one.
+    const opts: { exceptRoomCode?: string; isPreserve?: (roomCode: string, playerId: string) => boolean } =
+      typeof arg2 === "string"
+        ? { exceptRoomCode: arg2 }
+        : arg2 ?? {};
+    const exceptCode = opts.exceptRoomCode?.trim().toUpperCase();
+    const isPreserve = opts.isPreserve;
     let cleaned = 0;
     for (const room of this.rooms.values()) {
       if (exceptCode && room.code === exceptCode) continue;
       const isIdle =
         !room.currentGame || room.currentGame.status === "ENDED";
       if (!isIdle) continue;
+      let mutated = false;
       for (const player of [...room.players.values()]) {
         if (player.walletId === normalizedWalletId && !player.socketId) {
+          if (isPreserve && isPreserve(room.code, player.id)) {
+            // FORHANDSKJOP-ORPHAN-FIX (PR 2): defer eviction so the
+            // armed/reservation state survives the cleanup pass and
+            // the next `startGame` can commit the buy-in.
+            logger.warn(
+              {
+                roomCode: room.code,
+                playerId: player.id,
+                walletId: normalizedWalletId,
+                reason: "preserved-due-to-armed-or-reservation",
+              },
+              "cleanupStaleWalletInIdleRooms: preserved player with armed-state or active reservation (would have orphaned forhåndskjøp)",
+            );
+            continue;
+          }
           room.players.delete(player.id);
+          mutated = true;
           cleaned += 1;
         }
       }
-      if (cleaned > 0) {
+      if (mutated) {
         this.syncRoomToStore(room);
       }
     }

@@ -314,7 +314,16 @@ export function registerRoomEvents(ctx: SocketContext): void {
           if (existingPlayer) {
             engine.attachPlayerSocket(existingCanonical.code, existingPlayer.id, socket.id);
           } else {
-            engine.cleanupStaleWalletInIdleRooms(identity.walletId, existingCanonical.code);
+            // FORHANDSKJOP-ORPHAN-FIX (PR 2): preserve players whose
+            // armed-state or wallet reservation is still in-flight in
+            // RoomStateManager — otherwise the cleanup pass would orphan
+            // their forhåndskjøp on the next round.
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId, {
+              exceptRoomCode: existingCanonical.code,
+              isPreserve: deps.hasArmedOrReservation
+                ? (code, pid) => deps.hasArmedOrReservation!(code, pid)
+                : undefined,
+            });
             const joined = await engine.joinRoom({
               roomCode: existingCanonical.code,
               hallId: identity.hallId,
@@ -347,7 +356,15 @@ export function registerRoomEvents(ctx: SocketContext): void {
           if (existingPlayer) {
             engine.attachPlayerSocket(canonicalRoom.code, existingPlayer.id, socket.id);
           } else {
-            engine.cleanupStaleWalletInIdleRooms(identity.walletId, canonicalRoom.code);
+            // FORHANDSKJOP-ORPHAN-FIX (PR 2): see comment at the parallel
+            // canonical-mapping branch above — preserve armed/reserved
+            // players to avoid orphaning forhåndskjøp.
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId, {
+              exceptRoomCode: canonicalRoom.code,
+              isPreserve: deps.hasArmedOrReservation
+                ? (code, pid) => deps.hasArmedOrReservation!(code, pid)
+                : undefined,
+            });
             const joined = await engine.joinRoom({
               roomCode: canonicalRoom.code,
               hallId: identity.hallId,
@@ -371,7 +388,12 @@ export function registerRoomEvents(ctx: SocketContext): void {
       // walletId-binding i andre IDLE-rom (ingen aktiv runde, ingen
       // socket). Forhindrer "Spiller deltar allerede"-feil på reconnect
       // når gammelt rom ikke ble ryddet ved disconnect.
-      engine.cleanupStaleWalletInIdleRooms(identity.walletId);
+      // FORHANDSKJOP-ORPHAN-FIX (PR 2): preserve armed/reserved players.
+      engine.cleanupStaleWalletInIdleRooms(identity.walletId, {
+        isPreserve: deps.hasArmedOrReservation
+          ? (code, pid) => deps.hasArmedOrReservation!(code, pid)
+          : undefined,
+      });
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,
         hallId: identity.hallId,
@@ -462,7 +484,12 @@ export function registerRoomEvents(ctx: SocketContext): void {
                 "[room:join auto-create] cleared stale wallet-bindings in non-canonical rooms",
               );
             }
-            engine.cleanupStaleWalletInIdleRooms(identity.walletId);
+            // FORHANDSKJOP-ORPHAN-FIX (PR 2): preserve armed/reserved players.
+            engine.cleanupStaleWalletInIdleRooms(identity.walletId, {
+              isPreserve: deps.hasArmedOrReservation
+                ? (code, pid) => deps.hasArmedOrReservation!(code, pid)
+                : undefined,
+            });
             const newRoom = await engine.createRoom({
               hallId: identity.hallId,
               playerName: identity.playerName,
@@ -548,7 +575,13 @@ export function registerRoomEvents(ctx: SocketContext): void {
       // joiner det aktuelle rommet. Beskytter mot
       // PLAYER_ALREADY_IN_RUNNING_GAME / PLAYER_ALREADY_IN_ROOM-feil
       // når klienten reconnecter etter disconnect.
-      engine.cleanupStaleWalletInIdleRooms(identity.walletId, roomCode);
+      // FORHANDSKJOP-ORPHAN-FIX (PR 2): preserve armed/reserved players.
+      engine.cleanupStaleWalletInIdleRooms(identity.walletId, {
+        exceptRoomCode: roomCode,
+        isPreserve: deps.hasArmedOrReservation
+          ? (code, pid) => deps.hasArmedOrReservation!(code, pid)
+          : undefined,
+      });
       const { playerId } = await engine.joinRoom({
         roomCode,
         hallId: identity.hallId,

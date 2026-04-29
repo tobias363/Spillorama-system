@@ -76,6 +76,28 @@ export class RoomStateManager {
     return map ? [...map.keys()] : [];
   }
 
+  /**
+   * FORHANDSKJOP-ORPHAN-FIX (PR 2) — introspection used by the socket layer
+   * before triggering `cleanupStaleWalletInIdleRooms`. Returns true if the
+   * player has armed-state OR an active wallet-reservation in the given
+   * room — i.e. any in-flight pre-round purchase that an aggressive
+   * cleanup pass would otherwise orphan.
+   *
+   * The `BingoEngine` cleanup helper does not import RoomStateManager, so
+   * the socket-layer call-sites pass a closure that consults this method
+   * via the `isPreserve` callback. The socket layer is the only place
+   * where both the engine's room map AND the RoomStateManager mappings
+   * are in scope.
+   *
+   * Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §6 PR 2.
+   */
+  hasArmedOrReservation(roomCode: string, playerId: string): boolean {
+    const armed = this.armedPlayerIdsByRoom.get(roomCode)?.has(playerId) ?? false;
+    if (armed) return true;
+    const reserved = this.reservationIdByPlayerByRoom.get(roomCode)?.has(playerId) ?? false;
+    return reserved;
+  }
+
   /** Returns per-player ticket counts (total weighted) for all armed players. */
   getArmedPlayerTicketCounts(roomCode: string): Record<string, number> {
     const map = this.armedPlayerIdsByRoom.get(roomCode);
