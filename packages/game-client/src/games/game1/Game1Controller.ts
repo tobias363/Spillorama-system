@@ -21,7 +21,6 @@ import { WinPopup } from "./components/WinPopup.js";
 import { WinScreenV2 } from "./components/WinScreenV2.js";
 import {
   Game1EndOfRoundOverlay,
-  DEFAULT_AUTO_DISMISS_MS as END_OF_ROUND_DEFAULT_MS,
   type Game1EndOfRoundSummary,
 } from "./components/Game1EndOfRoundOverlay.js";
 import { classifyPhaseFromPatternName, Spill1Phase } from "@spillorama/shared-types/spill1-patterns";
@@ -45,16 +44,14 @@ import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
 import type { Phase } from "./logic/Phase.js";
 
 /**
- * Auto-dismiss delay for end-of-round overlay before transitioning to
- * WAITING. Tobias 2026-04-29 prod-incident-fix:
- *
- *   - Tidligere `END_SCREEN_AUTO_DISMISS_MS = 5000` (Game 2-style EndScreen).
- *     Overskygget i HTML-overlay-modus av `END_OF_ROUND_DEFAULT_MS = 10000`
- *     for retail-bingo (mer leselid på oppsummeringen).
- *   - Beholder verdien for legacy-fallback-pathen (transitionTo("WAITING")
- *     timer som kjører hvis overlay ble lukket før auto-dismiss).
+ * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
+ * 2026-04-29: 3-fase fluid overlay (SUMMARY → LOADING → COUNTDOWN) auto-
+ * dismisses i overlay self når ny runde starter eller countdown utløper —
+ * controller har derfor ikke lenger en egen auto-dismiss-timer. Beholder
+ * verdien som "panic timeout" for legacy-flyter (f.eks. hvis overlay ikke
+ * blir mounted i det hele tatt og state henger i ENDED).
  */
-const END_SCREEN_AUTO_DISMISS_MS = END_OF_ROUND_DEFAULT_MS;
+const END_SCREEN_AUTO_DISMISS_MS = 10_000;
 
 /**
  * Game 1 (Classic Bingo) controller — orchestration only.
@@ -102,6 +99,21 @@ class Game1Controller implements GameController {
    * ofte før eller samtidig som ENDED-state).
    */
   private lastMiniGameResult: MiniGameResultPayload | null = null;
+  /**
+   * Tobias UX-mandate 2026-04-29 (option C, fluid 3-phase overlay):
+   * timestamp (ms epoch) for når runden endte. Overlay bruker dette for
+   * disconnect-resilience: ved reconnect midt i overlay regner overlay
+   * ut hvilken fase brukeren skal lande i basert på elapsed time.
+   * Reset i onGameStarted (ny runde).
+   */
+  private roundEndedAt: number | null = null;
+  /**
+   * Idempotent guard for buy-popup-trigger fra overlay's COUNTDOWN-fase.
+   * Settes true når overlay fyrer onCountdownNearStart, reset i
+   * onGameStarted (ny runde). Hindrer double-show av buy-popup hvis
+   * overlay re-rendres etter reconnect.
+   */
+  private buyPopupOpenedFromOverlay = false;
   private settingsPanel: SettingsPanel | null = null;
   private markerBgPanel: MarkerBackgroundPanel | null = null;
   private gamePlanPanel: GamePlanPanel | null = null;
@@ -528,6 +540,10 @@ class Game1Controller implements GameController {
     // Spilleren vil ellers se overlay-en oppå ny runde-state.
     this.endOfRoundOverlay?.hide();
     this.shouldShowEndOfRoundOnWinScreenDismiss = false;
+    // Tobias UX-mandate 2026-04-29 (fluid 3-phase): reset timestamp og
+    // buy-popup-trigger-guard for ny runde.
+    this.roundEndedAt = null;
+    this.buyPopupOpenedFromOverlay = false;
 
     // FIXED-PRIZE-FIX: reset round-accumulated winnings ved ny runde.
     this.roundAccumulatedWinnings = 0;
@@ -590,6 +606,11 @@ class Game1Controller implements GameController {
 
     if (this.phase === "PLAYING") {
       this.transitionTo("ENDED", state);
+      // Tobias UX-mandate 2026-04-29 (fluid 3-phase overlay): timestamp
+      // round-end så overlay ved reconnect kan beregne hvilken fase
+      // (SUMMARY/LOADING/COUNTDOWN) brukeren skal lande i.
+      this.roundEndedAt = Date.now();
+      this.buyPopupOpenedFromOverlay = false;
       // Tobias 2026-04-29 prod-incident-fix: vis end-of-round-overlay
       // i stedet for Pixi-EndScreen. Hvis WinScreenV2 (Fullt Hus-fontene)
       // er aktiv, holder vi tilbake overlay til den lukkes — slik at
@@ -609,41 +630,47 @@ class Game1Controller implements GameController {
   }
 
   /**
-   * Tobias 2026-04-29 prod-incident-fix: åpne end-of-round-overlay med
-   * komplett oppsummering av runden. Kalt fra `onGameEnded` (PLAYING-fase)
-   * eller fra `flushPendingMiniGameTrigger` etter at WinScreenV2 er lukket.
+   * Tobias UX-mandate 2026-04-29 (fluid 3-phase overlay): åpne end-of-
+   * round-overlay som transitions naturlig gjennom SUMMARY → LOADING →
+   * COUNTDOWN. Kalt fra `onGameEnded` (PLAYING-fase) eller fra
+   * `flushPendingMiniGameTrigger` etter at WinScreenV2 er lukket.
    *
-   * Auto-dismiss-callback transitionerer til WAITING og kjører `update()`
-   * på en ny PlayScreen — uten å auto-arme bonger (delayed-render-mønster
-   * fra PR #725). Bruker ser pre-round-buy-popup som vanlig.
+   * Phase 3 (COUNTDOWN) trigger:
+   *   - `onCountdownNearStart` fyrer ved ≤5 sek igjen → vi åpner buy-popup
+   *     ON TOP av countdown. Loss-state-header fra PR #725 forblir intakt
+   *     siden vi ikke endrer Game1BuyPopup.
+   *   - `onOverlayCompleted` fyrer hvis countdown utløper uten at ny
+   *     runde starter (manuell modus / scheduler-glipp). Brukes som
+   *     fallback for å transition til WAITING.
+   *
+   * Disconnect-resilience: `elapsedSinceEndedMs` lar overlay starte i
+   * riktig fase. En spiller som reconnecter midt i countdown ser IKKE
+   * SUMMARY igjen.
    */
   private showEndOfRoundOverlayForState(state: GameState): void {
     const overlay = this.endOfRoundOverlay;
     if (!overlay) return;
 
-    // Backend-flagg: i auto-round-modus viser server `millisUntilNextStart`
-    // i scheduler. Hvis aktiv (>0) viser vi countdown og bruker den som
-    // auto-dismiss-tidspunkt. Ellers: 10s default, og bruker MÅ klikke
-    // "Klar for neste runde" for å gå videre (non-auto-round-modus).
-    const millis = state.millisUntilNextStart ?? null;
-    const showCountdown =
-      typeof millis === "number" && millis > 0 && millis < END_SCREEN_AUTO_DISMISS_MS * 4;
-    const autoDismissMs = showCountdown
-      ? Math.max(2000, Math.min(millis, END_SCREEN_AUTO_DISMISS_MS * 4))
-      : END_SCREEN_AUTO_DISMISS_MS;
+    // Compute elapsed time since round ended for disconnect-resilience.
+    // If roundEndedAt is null (e.g. late-join via reconnect), fall back
+    // to 0 so overlay starts at SUMMARY phase 1.
+    const now = Date.now();
+    const elapsedSinceEndedMs =
+      this.roundEndedAt !== null ? Math.max(0, now - this.roundEndedAt) : 0;
 
     const summary: Game1EndOfRoundSummary = {
-      endedReason: state.gameStatus === "ENDED" ? this.endedReasonFromState(state) : "MANUAL_END",
+      endedReason:
+        state.gameStatus === "ENDED"
+          ? this.endedReasonFromState(state)
+          : "MANUAL_END",
       patternResults: state.patternResults,
       myPlayerId: this.myPlayerId,
       myTickets: state.myTickets,
       miniGameResult: this.lastMiniGameResult,
       luckyNumber: state.myLuckyNumber,
       ownRoundWinnings: this.roundAccumulatedWinnings,
-      autoDismissMs,
-      showAutoRoundCountdown: showCountdown,
-      onReadyForNextRound: () => this.dismissEndOfRoundAndReturnToWaiting(),
-      onAutoDismiss: () => this.dismissEndOfRoundAndReturnToWaiting(),
+      millisUntilNextStart: state.millisUntilNextStart ?? null,
+      elapsedSinceEndedMs,
       onBackToLobby: () => {
         // Lukk overlay + emit window-event som lobby/router kan lytte til.
         // Eksisterende lobby-shell håndterer `spillorama:returnToLobby`
@@ -654,13 +681,33 @@ class Game1Controller implements GameController {
         }
         this.dismissEndOfRoundAndReturnToWaiting();
       },
+      onCountdownNearStart: () => {
+        // Buy-popup opens ON TOP of countdown at 5s remaining. Idempotent
+        // via buyPopupOpenedFromOverlay-guard (reset i onGameStarted).
+        if (this.buyPopupOpenedFromOverlay) return;
+        this.buyPopupOpenedFromOverlay = true;
+        // PlayScreen owns the buy-popup; show it with current state so
+        // ticketTypes are populated. Loss-state-header (PR #725) updates
+        // live via wallet:loss-state-push events — no special handling
+        // here.
+        const fresh = this.deps.bridge.getState();
+        this.playScreen?.showBuyPopup(fresh);
+        telemetry.trackEvent("end_of_round_buy_popup_opened", {
+          remainingMs: 5_000,
+        });
+      },
+      onOverlayCompleted: () => {
+        // Countdown utløp uten at ny runde startet (manuell-modus eller
+        // scheduler-glipp). Transition fallback til WAITING.
+        this.dismissEndOfRoundAndReturnToWaiting();
+      },
     };
     overlay.show(summary);
     telemetry.trackEvent("end_of_round_overlay_shown", {
       endedReason: summary.endedReason ?? "UNKNOWN",
       ownTotal: this.roundAccumulatedWinnings,
-      autoDismissMs,
-      autoRoundCountdown: showCountdown,
+      millisUntilNextStart: summary.millisUntilNextStart ?? 0,
+      elapsedSinceEndedMs,
     });
   }
 
