@@ -1027,6 +1027,46 @@ export class BingoEngine {
             players: [...room.players.values()], hallId: room.hallId
           }).catch(() => { /* best-effort checkpoint */ });
         }
+
+        // FORHANDSKJOP-ORPHAN-FIX (PR 1): also release reservations of
+        // UNDEBITED-but-eligible players. `refundDebitedPlayers` covers
+        // those whose commit (commitReservation or transfer) succeeded
+        // before the throw. Players later in `eligiblePlayers` whose
+        // commit hadn't started yet still have an active reservation —
+        // release them here so the saldo isn't locked until TTL.
+        // Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md.
+        const rollbackReservationMap = input.reservationIdByPlayer ?? {};
+        const debitedIds = new Set(debitedPlayers.map((d) => d.player.id));
+        for (const player of eligiblePlayers) {
+          if (debitedIds.has(player.id)) continue;
+          const reservationId = rollbackReservationMap[player.id];
+          if (!reservationId) continue;
+          try {
+            await this.walletAdapter.releaseReservation?.(reservationId);
+            logger.warn(
+              {
+                roomCode: room.code,
+                gameId,
+                playerId: player.id,
+                reservationId,
+                reason: "rollback-undebited",
+              },
+              "Released undebited reservation during startGame partial-failure rollback",
+            );
+          } catch (releaseErr) {
+            logger.error(
+              {
+                err: releaseErr,
+                roomCode: room.code,
+                gameId,
+                playerId: player.id,
+                reservationId,
+              },
+              "Failed to release undebited reservation during startGame rollback",
+            );
+          }
+        }
+
         throw err;
       }
 
@@ -1050,6 +1090,49 @@ export class BingoEngine {
           logger.warn(
             { err, gameId, playerId: player.id },
             "loyalty ticket.purchase hook failed — engine fortsetter uansett"
+          );
+        }
+      }
+
+      // FORHANDSKJOP-ORPHAN-FIX (PR 1, defense-in-depth): release any
+      // reservation whose player did NOT make it through to eligiblePlayers
+      // (i.e. was armed but absent from the buy-in loop). Players whose
+      // record was evicted from `room.players` between bet:arm and start
+      // — typically by `cleanupStaleWalletInIdleRooms` running while the
+      // room sat idle between rounds — leave a `wallet_reservations` row
+      // at status='active' with no in-memory mapping after
+      // `disarmAllPlayers` wipes the armed-set. The 30-min TTL eventually
+      // heals it, but the player's saldo is locked until then. Releasing
+      // here closes the window immediately. Same defense covers the
+      // low-funds drop in `filterEligiblePlayers` and any future similar
+      // silent-drop sites.
+      // Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md.
+      const reservationMap = input.reservationIdByPlayer ?? {};
+      const consumedPlayerIds = new Set(eligiblePlayers.map((p) => p.id));
+      for (const [playerId, reservationId] of Object.entries(reservationMap)) {
+        if (consumedPlayerIds.has(playerId)) continue;
+        try {
+          await this.walletAdapter.releaseReservation?.(reservationId);
+          logger.warn(
+            {
+              roomCode: room.code,
+              gameId,
+              playerId,
+              reservationId,
+              reason: "orphan-armed-not-eligible",
+            },
+            "Released orphan reservation in startGame — armed player was not in eligiblePlayers (likely cleanupStaleWalletInIdleRooms race or low-funds filter)",
+          );
+        } catch (releaseErr) {
+          logger.error(
+            {
+              err: releaseErr,
+              roomCode: room.code,
+              gameId,
+              playerId,
+              reservationId,
+            },
+            "Failed to release orphan reservation in startGame",
           );
         }
       }
