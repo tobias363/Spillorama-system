@@ -1,7 +1,20 @@
 /**
  * RoomStateManager — encapsulates the shared mutable Maps for room-level state.
- * Extracted from index.ts. Owns: armed players, lucky numbers, display ticket cache,
- * per-room configured entry fees. All helpers are method wrappers around these Maps.
+ * Extracted from index.ts. Owns: lucky numbers, display ticket cache, per-room
+ * configured entry fees, chat history, variant config.
+ *
+ * **K2 (2026-04-29):** the armed-state, ticket-selections, reservation-id-mapping,
+ * and arm-cycle-id maps are now CO-OWNED with {@link RoomLifecycleStore}. The
+ * Maps are passed into the store via {@link RoomLifecycleMaps} so:
+ *   - sync getters here read directly from in-memory Maps (no mutex tick),
+ *   - atomic-mutator paths (eviction, bulk-cleanup) flow through the store's
+ *     per-room async mutex so multi-step state transitions are never half-
+ *     applied,
+ *   - the `*ByRoom` Map fields below are marked `@deprecated` and exposed only
+ *     for backward-compat with existing callers — new code paths must consult
+ *     the store directly via {@link lifecycleStore}.
+ *
+ * Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.2 + §6 K2.
  */
 import { randomUUID } from "node:crypto";
 import { generateTicketForGame } from "../game/ticket.js";
@@ -11,6 +24,11 @@ import { getDefaultVariantConfig } from "../game/variantConfig.js";
 import { buildVariantConfigFromSpill1Config } from "../game/spill1VariantMapper.js";
 import type { Spill1ConfigInput } from "../game/spill1VariantMapper.js";
 import { logger as rootLogger } from "./logger.js";
+import {
+  InMemoryRoomLifecycleStore,
+  type RoomLifecycleMaps,
+  type RoomLifecycleStore,
+} from "./RoomLifecycleStore.js";
 
 const roomStateLog = rootLogger.child({ module: "roomState" });
 
@@ -47,27 +65,71 @@ export class RoomStateManager {
   readonly chatHistoryByRoom = new Map<string, ChatMessage[]>();
   readonly luckyNumbersByRoom = new Map<string, Map<string, number>>();
   readonly roomConfiguredEntryFeeByRoom = new Map<string, number>();
-  readonly armedPlayerIdsByRoom = new Map<string, Map<string, number>>();
-  /** Per-player ticket type selections (parallel to armedPlayerIdsByRoom). */
-  readonly armedPlayerSelectionsByRoom = new Map<string, Map<string, TicketSelection[]>>();
   readonly displayTicketCache = new Map<string, Ticket[]>();
   readonly variantByRoom = new Map<string, RoomVariantInfo>();
+
   /**
+   * @deprecated K2 — direct access is preserved only for backward-compat with
+   * existing read-side callers. NEW write paths must go through
+   * {@link lifecycleStore} so the per-room mutex protects multi-step
+   * transitions. Field is exposed via the shared {@link RoomLifecycleMaps}
+   * struct so reads here see the same data the store mutators write.
+   */
+  readonly armedPlayerIdsByRoom: Map<string, Map<string, number>>;
+  /**
+   * @deprecated K2 — co-owned with `lifecycleStore`. See `armedPlayerIdsByRoom`.
+   */
+  readonly armedPlayerSelectionsByRoom: Map<string, Map<string, TicketSelection[]>>;
+  /**
+   * @deprecated K2 — co-owned with `lifecycleStore`. The store is the canonical
+   * mutator API; this Map is kept readable so legacy sync helpers that pre-date
+   * the store don't have to await mutations.
+   *
    * BIN-693 Option B: reservasjons-id per (roomCode, playerId). Opprettes ved
    * første bet:arm, økes ved påfølgende arm-calls, reduseres ved ticket:cancel,
    * commites ved startGame, frigis ved game-abort eller player-disarm.
    *
    * In-memory — hvis backend restarter mister vi mapping men ekspiry-tick
-   * sweep'er reservasjoner i DB etter TTL (30 min). Samme som armedPlayerIds.
+   * sweep'er reservasjoner i DB etter TTL (30 min).
    */
-  readonly reservationIdByPlayerByRoom = new Map<string, Map<string, string>>();
-
+  readonly reservationIdByPlayerByRoom: Map<string, Map<string, string>>;
   /**
+   * @deprecated K2 — co-owned with `lifecycleStore`.
+   *
    * Pilot-bug fix 2026-04-27 (Tobias-rapport): per-rom arm cycle id som inngår
    * i bet:arm idempotency-key. Bumpes ved disarmAllPlayers (game:start) så
    * neste runde får friske keys.
    */
-  readonly armCycleByRoom = new Map<string, string>();
+  readonly armCycleByRoom: Map<string, string>;
+
+  /**
+   * K2 (2026-04-29): atomic-mutator API for the four state-spaces above.
+   * NEW callers must go through this store rather than the deprecated
+   * direct-Map access — the store's per-room mutex prevents three-way
+   * ownership leaks like the 2026-04-29 forhåndskjøp orphan bug.
+   *
+   * Constructed against a SHARED {@link RoomLifecycleMaps} struct so reads
+   * via the deprecated Map fields above continue to see fresh data.
+   */
+  readonly lifecycleStore: RoomLifecycleStore;
+
+  constructor() {
+    // K2: pre-allocate the four state-space Maps and pass them to the
+    // store. The store treats them as its canonical owned state; this
+    // class exposes them via the deprecated `*ByRoom` fields so legacy
+    // read callers keep working without an async hop.
+    const sharedMaps: RoomLifecycleMaps = {
+      armedTicketsByRoom: new Map(),
+      armedSelectionsByRoom: new Map(),
+      reservationsByRoom: new Map(),
+      armCycleByRoom: new Map(),
+    };
+    this.armedPlayerIdsByRoom = sharedMaps.armedTicketsByRoom;
+    this.armedPlayerSelectionsByRoom = sharedMaps.armedSelectionsByRoom;
+    this.reservationIdByPlayerByRoom = sharedMaps.reservationsByRoom;
+    this.armCycleByRoom = sharedMaps.armCycleByRoom;
+    this.lifecycleStore = new InMemoryRoomLifecycleStore(sharedMaps);
+  }
 
   // ── Armed players ──────────────────────────────────────────────────────────
 
@@ -77,19 +139,13 @@ export class RoomStateManager {
   }
 
   /**
-   * FORHANDSKJOP-ORPHAN-FIX (PR 2) — introspection used by the socket layer
-   * before triggering `cleanupStaleWalletInIdleRooms`. Returns true if the
-   * player has armed-state OR an active wallet-reservation in the given
-   * room — i.e. any in-flight pre-round purchase that an aggressive
-   * cleanup pass would otherwise orphan.
-   *
-   * The `BingoEngine` cleanup helper does not import RoomStateManager, so
-   * the socket-layer call-sites pass a closure that consults this method
-   * via the `isPreserve` callback. The socket layer is the only place
-   * where both the engine's room map AND the RoomStateManager mappings
-   * are in scope.
+   * Returns true if the (roomCode, playerId) tuple has any in-flight
+   * pre-round-purchase state — armed-set membership OR an active wallet
+   * reservation. Used by socket-layer cleanup to decide whether to evict.
    *
    * Reference: docs/audit/FORHANDSKJOP_BUG_ROOT_CAUSE_2026-04-29.md §6 PR 2.
+   * Status: K2 RESOLVED — once cleanup paths use `lifecycleStore.evictPlayer`
+   * directly, the preserve-callback shim that consumed this becomes obsolete.
    */
   hasArmedOrReservation(roomCode: string, playerId: string): boolean {
     const armed = this.armedPlayerIdsByRoom.get(roomCode)?.has(playerId) ?? false;
