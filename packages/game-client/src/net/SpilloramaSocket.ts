@@ -17,6 +17,8 @@ import type {
   LeaderboardEntry,
   JackpotActivatedPayload,
   JackpotSpinResult,
+  MiniGameActivatedPayload,
+  MiniGamePlayResult,
   MiniGameTriggerPayload,
   MiniGameResultPayload,
   WalletStateEvent,
@@ -45,10 +47,23 @@ export interface SpilloramaSocketListeners {
   chatMessage: (payload: ChatMessage) => void;
   jackpotActivated: (payload: JackpotActivatedPayload) => void;
   /**
-   * BIN-690 PR-M6: scheduled-games mini-game trigger. Replaces the legacy
-   * `minigameActivated` channel (removed in M6 per PM decision — no backwards
-   * compatibility). Server fires this after Fullt Hus is won and the
-   * orchestrator has persisted a triggered-row.
+   * Tobias prod-incident 2026-04-29 (re-added): legacy `minigame:activated`
+   * channel. PR-M6 originally removed this in favor of the scheduled-games
+   * `mini_game:trigger` protocol, but Spill 1's auto-claim flow (PR #727)
+   * uses the legacy emit path — server calls `engine.activateMiniGame()` and
+   * emits `minigame:activated` to the winner's `wallet:<walletId>` socket-
+   * room. Without this listener the mini-game popup never renders for auto-
+   * round games.
+   *
+   * Coexists with `miniGameTrigger` — `minigameActivated` for auto-round /
+   * auto-claim flow (legacy server path), `miniGameTrigger` for scheduled-
+   * games orchestrator path.
+   */
+  minigameActivated: (payload: MiniGameActivatedPayload) => void;
+  /**
+   * BIN-690 PR-M6: scheduled-games mini-game trigger. Server fires this
+   * after Fullt Hus is won and the orchestrator has persisted a triggered-
+   * row. Distinct from `minigameActivated` (legacy auto-round path).
    */
   miniGameTrigger: (payload: MiniGameTriggerPayload) => void;
   /**
@@ -116,6 +131,7 @@ export class SpilloramaSocket {
     patternWon: new Set(),
     chatMessage: new Set(),
     jackpotActivated: new Set(),
+    minigameActivated: new Set(),
     miniGameTrigger: new Set(),
     miniGameResult: new Set(),
     walletState: new Set(),
@@ -152,6 +168,7 @@ export class SpilloramaSocket {
     patternWon: [],
     chatMessage: [],
     jackpotActivated: [],
+    minigameActivated: [],
     miniGameTrigger: [],
     miniGameResult: [],
     walletState: [],
@@ -322,8 +339,16 @@ export class SpilloramaSocket {
       this.dispatchOrBuffer("jackpotActivated", payload);
     });
 
-    // BIN-690 PR-M6: new scheduled-games mini-game protocol.
-    // Legacy `minigame:activated` is intentionally NOT subscribed here.
+    // Tobias prod-incident 2026-04-29 (re-added after PR-M6 removal): legacy
+    // `minigame:activated` channel. PR #727 server-side now emits this after
+    // auto-claim of Fullt Hus to `wallet:<walletId>`-room. Without this
+    // listener the popup never renders for auto-round Spill 1 games. Coexists
+    // with `mini_game:trigger` (scheduled-games path).
+    this.socket.on(SocketEvents.MINIGAME_ACTIVATED, (payload: MiniGameActivatedPayload) => {
+      this.dispatchOrBuffer("minigameActivated", payload);
+    });
+
+    // BIN-690 PR-M6: scheduled-games mini-game protocol.
     this.socket.on(SocketEvents.MINI_GAME_TRIGGER, (payload: MiniGameTriggerPayload) => {
       this.dispatchOrBuffer("miniGameTrigger", payload);
     });
@@ -523,6 +548,25 @@ export class SpilloramaSocket {
 
   async spinJackpot(payload: { roomCode: string }): Promise<AckResponse<JackpotSpinResult>> {
     return this.emit(SocketEvents.JACKPOT_SPIN, payload);
+  }
+
+  /**
+   * Tobias prod-incident 2026-04-29 (re-added after PR-M6 removal): legacy
+   * `minigame:play` emit. Used by the LegacyMiniGameAdapter to commit a
+   * choice for mini-games triggered via the legacy auto-claim path
+   * (`minigame:activated` → adapter → overlay → this emit). The M6
+   * orchestrator uses `sendMiniGameChoice` (with resultId) instead — see
+   * MiniGameRouter.
+   *
+   * `selectedIndex` is cosmetic-only for chest/colordraft; the server
+   * picks the prize from the activated `MiniGameState.prizeList`. Returns
+   * `{ type, segmentIndex, prizeAmount, prizeList }` on success.
+   */
+  async playMiniGame(payload: {
+    roomCode: string;
+    selectedIndex?: number;
+  }): Promise<AckResponse<MiniGamePlayResult>> {
+    return this.emit(SocketEvents.MINIGAME_PLAY, payload);
   }
 
   /**

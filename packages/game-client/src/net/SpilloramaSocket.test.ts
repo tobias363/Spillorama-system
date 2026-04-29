@@ -19,6 +19,7 @@ import type {
   RoomUpdatePayload,
   PatternWonPayload,
   ChatMessage,
+  MiniGameActivatedPayload,
 } from "@spillorama/shared-types/socket-events";
 
 describe("BIN-501: event-buffer on SpilloramaSocket", () => {
@@ -147,6 +148,28 @@ describe("BIN-501: event-buffer on SpilloramaSocket", () => {
     const received: number[] = [];
     socket.on("drawNew", (p) => received.push(p.number));
     expect(received).toEqual([]);
+  });
+
+  it("buffers + replays legacy `minigameActivated` (Tobias prod-incident 2026-04-29)", () => {
+    // PR #727 emits the legacy `minigame:activated` payload after auto-claim
+    // of Fullt Hus. Verify this channel goes through dispatchOrBuffer like
+    // every other broadcast — i.e. event arriving before the listener
+    // attaches gets replayed.
+    const payload: MiniGameActivatedPayload = {
+      gameId: "game-auto-1",
+      playerId: "player-1",
+      type: "mysteryGame",
+      prizeList: [50, 100, 200, 400, 800, 1500],
+    };
+
+    socket.__dispatchForTest("minigameActivated", payload);
+    expect(socket.__getBufferedCount("minigameActivated")).toBe(1);
+
+    const received: MiniGameActivatedPayload[] = [];
+    socket.on("minigameActivated", (p) => received.push(p));
+
+    expect(received).toEqual([payload]);
+    expect(socket.__getBufferedCount("minigameActivated")).toBe(0);
   });
 
   it("unsubscribe does NOT re-enable buffering (set goes back to size 0)", () => {

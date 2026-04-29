@@ -4,6 +4,7 @@ import type {
   PatternWonPayload,
   ChatMessage,
   JackpotActivatedPayload,
+  MiniGameActivatedPayload,
   MiniGameTriggerPayload,
   MiniGameResultPayload,
   WalletStateEvent,
@@ -127,6 +128,15 @@ export interface GameBridgeEvents {
   chatMessage: (message: ChatMessage) => void;
   jackpotActivated: (data: JackpotActivatedPayload) => void;
   /**
+   * Tobias prod-incident 2026-04-29 (re-added): legacy `minigame:activated`
+   * channel. PR #727 server-side now emits this after auto-claim of Fullt
+   * Hus. Game1Controller routes through `LegacyMiniGameAdapter` to render
+   * the existing M6 overlays with synthesized trigger payloads, then routes
+   * the choice via legacy `minigame:play` (NOT M6 `mini_game:choice`).
+   * Coexists with `miniGameTrigger` (scheduled-games path).
+   */
+  legacyMinigameActivated: (data: MiniGameActivatedPayload) => void;
+  /**
    * BIN-690 PR-M6: new scheduled-games mini-game protocol. `miniGameTrigger`
    * delivers `{resultId, miniGameType, payload, timeoutSeconds?}` — overlay
    * dispatch keyed on `miniGameType`.
@@ -241,6 +251,7 @@ export class GameBridge {
     patternWon: new Set(),
     chatMessage: new Set(),
     jackpotActivated: new Set(),
+    legacyMinigameActivated: new Set(),
     miniGameTrigger: new Set(),
     miniGameResult: new Set(),
     walletStateChanged: new Set(),
@@ -265,6 +276,10 @@ export class GameBridge {
       this.socket.on("patternWon", (payload) => this.handlePatternWon(payload)),
       this.socket.on("chatMessage", (msg) => this.emit("chatMessage", msg)),
       this.socket.on("jackpotActivated", (data) => this.emit("jackpotActivated", data)),
+      // Tobias prod-incident 2026-04-29 (re-added after PR-M6 removal):
+      // legacy `minigame:activated` for auto-claim Spill 1 mini-games.
+      // Game1Controller routes through LegacyMiniGameAdapter.
+      this.socket.on("minigameActivated", (data) => this.emit("legacyMinigameActivated", data)),
       // BIN-690 PR-M6: new scheduled-games mini-game protocol.
       this.socket.on("miniGameTrigger", (data) => this.emit("miniGameTrigger", data)),
       this.socket.on("miniGameResult", (data) => this.emit("miniGameResult", data)),

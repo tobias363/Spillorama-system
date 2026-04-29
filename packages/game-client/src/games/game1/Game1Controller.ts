@@ -3,6 +3,7 @@ import type { GameDeps, GameController } from "../registry.js";
 import { registerGame } from "../registry.js";
 import type { GameState } from "../../bridge/GameBridge.js";
 import type {
+  MiniGameActivatedPayload,
   MiniGameTriggerPayload,
   PatternWonPayload,
   BetRejectedEvent,
@@ -33,6 +34,7 @@ import { MarkerBackgroundPanel } from "./components/MarkerBackgroundPanel.js";
 import { GamePlanPanel } from "./components/GamePlanPanel.js";
 import { AudioManager } from "../../audio/AudioManager.js";
 import { MiniGameRouter } from "./logic/MiniGameRouter.js";
+import { LegacyMiniGameAdapter } from "./logic/LegacyMiniGameAdapter.js";
 import { Game1SocketActions } from "./logic/SocketActions.js";
 import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
 import type { Phase } from "./logic/Phase.js";
@@ -76,6 +78,20 @@ class Game1Controller implements GameController {
   private markerBgPanel: MarkerBackgroundPanel | null = null;
   private gamePlanPanel: GamePlanPanel | null = null;
   private miniGame: MiniGameRouter | null = null;
+  /**
+   * Tobias prod-incident 2026-04-29: legacy `minigame:activated` adapter for
+   * Spill 1's auto-claim path. Coexists with `miniGame` (M6 router); only
+   * one of them holds an active overlay at a time because both feed into
+   * the same `root` Container and both check `isWinScreenActive` via the
+   * controller's pendingMiniGameTrigger queue.
+   */
+  private legacyMiniGame: LegacyMiniGameAdapter | null = null;
+  /**
+   * Tobias prod-incident 2026-04-29: pending legacy trigger held while
+   * WinScreenV2 is active (mirror of `pendingMiniGameTrigger`). Released
+   * via `flushPendingMiniGameTrigger` on win-screen dismiss.
+   */
+  private pendingLegacyMiniGame: MiniGameActivatedPayload | null = null;
   private actions: Game1SocketActions | null = null;
   private reconnectFlow: Game1ReconnectFlow | null = null;
 
@@ -146,6 +162,16 @@ class Game1Controller implements GameController {
         );
         console.warn("[Game1Controller] mini-game choice lost", { resultId });
       },
+    });
+    // Tobias prod-incident 2026-04-29: legacy `minigame:activated` adapter
+    // for the auto-claim path (PR #727 emit chain). Server still emits
+    // legacy events for Spill 1 auto-rounds; this adapter wraps them onto
+    // the existing M6 overlays without changing the auto-claim protocol.
+    this.legacyMiniGame = new LegacyMiniGameAdapter({
+      root: this.root,
+      app,
+      socket,
+      bridge,
     });
     this.actions = new Game1SocketActions({
       socket,
@@ -227,11 +253,14 @@ class Game1Controller implements GameController {
       bridge.on("gameEnded", (state) => this.onGameEnded(state)),
       bridge.on("numberDrawn", (num, idx, state) => this.onNumberDrawn(num, idx, state)),
       bridge.on("patternWon", (result, state) => this.onPatternWon(result, state)),
-      // BIN-690 PR-M6: new scheduled-games mini-game protocol.
-      // Legacy `minigameActivated` is removed — router now wires to
-      // `miniGameTrigger` + `miniGameResult`.
+      // BIN-690 PR-M6: scheduled-games mini-game protocol.
       bridge.on("miniGameTrigger", (data) => this.handleMiniGameTrigger(data)),
       bridge.on("miniGameResult", (data) => this.miniGame?.onResult(data)),
+      // Tobias prod-incident 2026-04-29: legacy `minigame:activated` for
+      // auto-claim Spill 1 mini-games. Routes through LegacyMiniGameAdapter
+      // which renders the existing overlays with synthesized M6 trigger
+      // payloads, then routes the choice via legacy `minigame:play`.
+      bridge.on("legacyMinigameActivated", (data) => this.handleLegacyMiniGameActivated(data)),
       // Tobias 2026-04-29 (post-orphan-fix UX): bet:rejected — server
       // varsler at forhåndskjøp ble avvist på game-start. Vis klar
       // feilmelding via toast og fjern pre-round-bonger via room:update
@@ -311,6 +340,9 @@ class Game1Controller implements GameController {
     this.unsubs = [];
     this.miniGame?.destroy();
     this.miniGame = null;
+    this.legacyMiniGame?.destroy();
+    this.legacyMiniGame = null;
+    this.pendingLegacyMiniGame = null;
     this.actions = null;
     this.reconnectFlow = null;
     this.clearScreen();
@@ -466,6 +498,12 @@ class Game1Controller implements GameController {
     // user-visible loss window. Fire-and-forget — EndScreen / WAITING
     // transition below doesn't depend on the overlay being gone yet.
     void this.miniGame?.dismissAfterPendingChoices();
+    // Tobias prod-incident 2026-04-29: legacy adapter doesn't have a
+    // pending-choice drain (legacy `minigame:play` is fire-and-ack with no
+    // intermediate state), so a synchronous dismiss is correct. The
+    // overlay is destroyed if active.
+    this.legacyMiniGame?.dismiss();
+    this.pendingLegacyMiniGame = null;
 
     this.deps.audio.resetAnnouncedNumbers();
     this.deps.audio.stopAll();
@@ -658,12 +696,37 @@ class Game1Controller implements GameController {
     this.miniGame?.onTrigger(payload);
   }
 
+  /**
+   * Tobias prod-incident 2026-04-29: bridge-listener for legacy
+   * `minigame:activated` (Spill 1 auto-claim path, PR #727 emit chain).
+   * Same WinScreenV2-queueing logic as `handleMiniGameTrigger` so the
+   * popup doesn't clip over the Fullt Hus fontene-animasjon. Server-
+   * autoritativ: if multiple triggers arrive while WinScreenV2 is up,
+   * the last one wins.
+   */
+  private handleLegacyMiniGameActivated(payload: MiniGameActivatedPayload): void {
+    if (this.isWinScreenActive) {
+      this.pendingLegacyMiniGame = payload;
+      return;
+    }
+    this.legacyMiniGame?.onActivated(payload);
+  }
+
   /** Spill av evt. pending trigger. Kalles fra WinScreenV2.onDismiss. */
   private flushPendingMiniGameTrigger(): void {
     const pending = this.pendingMiniGameTrigger;
-    if (!pending) return;
-    this.pendingMiniGameTrigger = null;
-    this.miniGame?.onTrigger(pending);
+    if (pending) {
+      this.pendingMiniGameTrigger = null;
+      this.miniGame?.onTrigger(pending);
+    }
+    // Tobias prod-incident 2026-04-29: also flush pending legacy trigger.
+    // Both protocols share the WinScreen queue but each routes to its own
+    // overlay-manager.
+    const pendingLegacy = this.pendingLegacyMiniGame;
+    if (pendingLegacy) {
+      this.pendingLegacyMiniGame = null;
+      this.legacyMiniGame?.onActivated(pendingLegacy);
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
