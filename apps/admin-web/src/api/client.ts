@@ -5,6 +5,19 @@ export interface ApiOptions {
   body?: unknown;
   headers?: Record<string, string>;
   auth?: boolean;
+  /**
+   * FE-P0-003 (Bølge 2B pilot-blocker): optional AbortSignal so callers can
+   * cancel an in-flight request when the user navigates away, switches hall,
+   * or triggers a fresh fetch on a flaky hall-WiFi connection. Without
+   * cancellation, a slow stale fetch can land 5-10s after a quick refresh
+   * and overwrite money-data UI with pre-action state.
+   *
+   * When the signal aborts mid-fetch, fetch() rejects with a DOMException
+   * whose `name === "AbortError"`. apiRequest() lets that exception bubble
+   * to callers — they should branch on `isAbortError(err)` and skip
+   * post-fetch handling (e.g. don't render an error toast).
+   */
+  signal?: AbortSignal;
 }
 
 export class ApiError extends Error {
@@ -33,6 +46,21 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * FE-P0-003: helper for callers to detect AbortError so they can skip
+ * post-fetch handling (toast, error UI, state update) when a request is
+ * cancelled intentionally — e.g. on unmount or hall-context-change.
+ *
+ * Standard pattern in callers:
+ *   try { await apiRequest(...); ... }
+ *   catch (err) { if (isAbortError(err)) return; ... }
+ */
+export function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  return false;
+}
+
 export function getToken(): string {
   return window.localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
 }
@@ -59,12 +87,18 @@ export async function apiRequest<T = unknown>(path: string, options: ApiOptions 
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(path, {
+  // FE-P0-003: thread the optional AbortSignal through to fetch(). If the
+  // signal is already aborted we let fetch() reject immediately with the
+  // standard AbortError — no special-casing needed.
+  const fetchInit: RequestInit = {
     method: options.method ?? "GET",
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     credentials: "same-origin",
-  });
+  };
+  if (options.signal) fetchInit.signal = options.signal;
+
+  const response = await fetch(path, fetchInit);
 
   const payload = (await response.json().catch(() => null)) as
     | {

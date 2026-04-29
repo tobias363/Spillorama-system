@@ -81,6 +81,14 @@ interface ActiveInstance {
   lastState: TvGameState | null;
   /** Task 1.7: live-override på badge-farger fra socket-events. */
   liveHallColors: Map<string, TvHallColor>;
+  /**
+   * FE-P0-003 (Bølge 2B pilot-blocker): AbortController owned by this TV
+   * instance. unmountTvScreenPage() aborts it so a slow stale fetch can't
+   * land after the operator closes the popup window — and especially so
+   * we don't silently mutate a freshly-mounted instance's state from the
+   * prior instance's pending request.
+   */
+  abortController: AbortController;
 }
 
 let active: ActiveInstance | null = null;
@@ -134,6 +142,7 @@ export function mountTvScreenPage(
     bannerSequenceCounter: 0,
     lastState: null,
     liveHallColors: new Map(),
+    abortController: new AbortController(), // FE-P0-003
   };
   active = instance;
 
@@ -186,7 +195,9 @@ export function mountTvScreenPage(
   const tick = async (): Promise<void> => {
     if (instance.destroyed) return;
     try {
-      const state = await fetchTvState(hallId, tvToken);
+      const state = await fetchTvState(hallId, tvToken, {
+        signal: instance.abortController.signal,
+      });
       if (instance.destroyed) return;
       instance.lastState = state;
       // Poll reset'er live-colors (autoritativ fra server).
@@ -206,6 +217,9 @@ export function mountTvScreenPage(
       }
       instance.previousStatus = state.status;
     } catch (err) {
+      // FE-P0-003: aborts on unmount are silent — no error UI flash.
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
       if (instance.destroyed) return;
       renderError(bodyEl, err);
     }
@@ -258,6 +272,10 @@ export function mountTvScreenPage(
 export function unmountTvScreenPage(): void {
   if (!active) return;
   active.destroyed = true;
+  // FE-P0-003: abort any in-flight TV-state/winners fetch so it can't
+  // land after the popup is closed and silently mutate state on a
+  // subsequent re-mount.
+  active.abortController.abort();
   if (active.intervalId) window.clearInterval(active.intervalId);
   if (active.switchTimeoutId) window.clearTimeout(active.switchTimeoutId);
   if (active.bannerTimeoutId) window.clearTimeout(active.bannerTimeoutId);

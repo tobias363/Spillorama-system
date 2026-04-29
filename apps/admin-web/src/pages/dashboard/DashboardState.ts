@@ -35,12 +35,20 @@ export function emptyOngoingGames(): Record<GameTab, AdminRoomSummary[]> {
   return { game1: [], game2: [], game3: [], game4: [], game5: [] };
 }
 
-export async function fetchDashboardData(opts: { hallId?: string } = {}): Promise<DashboardData> {
+export async function fetchDashboardData(
+  opts: { hallId?: string; signal?: AbortSignal } = {}
+): Promise<DashboardData> {
+  const signalOpt = opts.signal ? { signal: opts.signal } : {};
   const [summary, latestRequests, topPlayers, rooms] = await Promise.all([
-    fetchSummaryCounts(),
-    listPendingRequests({ kind: "deposit", hallId: opts.hallId, limit: 5 }).catch(() => [] as PaymentRequest[]),
-    fetchTopPlayers(5).catch(() => null),
-    listRooms().catch(() => [] as AdminRoomSummary[]),
+    fetchSummaryCounts(signalOpt),
+    listPendingRequests({
+      kind: "deposit",
+      hallId: opts.hallId,
+      limit: 5,
+      ...signalOpt,
+    }).catch(() => [] as PaymentRequest[]),
+    fetchTopPlayers(5, signalOpt).catch(() => null),
+    listRooms(signalOpt).catch(() => [] as AdminRoomSummary[]),
   ]);
 
   const ongoing = emptyOngoingGames();
@@ -74,6 +82,11 @@ export function startPolling(
 ): PollController {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // FE-P0-003: AbortController owned by this poller. On stop() we abort
+  // any in-flight fetch so a slow response can't land after the page is
+  // unmounted (or the user has navigated away to a different hall) and
+  // overwrite a foreign-route's DOM.
+  const abortController = new AbortController();
 
   const tick = async (): Promise<void> => {
     if (stopped) return;
@@ -82,9 +95,16 @@ export function startPolling(
       return;
     }
     try {
-      const data = await fetchDashboardData(opts);
+      const data = await fetchDashboardData({
+        ...opts,
+        signal: abortController.signal,
+      });
       if (!stopped) onData(data);
     } catch (e) {
+      // Abort errors are expected on stop() / hall-switch — swallow them
+      // so we don't surface a fake "error" to the user.
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      if (e instanceof Error && e.name === "AbortError") return;
       if (!stopped) onError(e);
     } finally {
       schedule();
@@ -102,6 +122,7 @@ export function startPolling(
     stop: () => {
       stopped = true;
       if (timer) clearTimeout(timer);
+      abortController.abort();
     },
     refreshNow: tick,
   };

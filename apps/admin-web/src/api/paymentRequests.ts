@@ -27,13 +27,17 @@ export async function listPendingRequests(opts: {
   kind?: PaymentKind;
   hallId?: string;
   limit?: number;
+  signal?: AbortSignal;
 } = {}): Promise<PaymentRequest[]> {
   const params = new URLSearchParams();
   params.set("status", "pending");
   if (opts.kind) params.set("type", opts.kind);
   if (opts.hallId) params.set("hallId", opts.hallId);
   if (opts.limit) params.set("limit", String(opts.limit));
-  const data = await apiRequest<ListResponse>(`/api/admin/payments/requests?${params.toString()}`, { auth: true });
+  const data = await apiRequest<ListResponse>(
+    `/api/admin/payments/requests?${params.toString()}`,
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+  );
   return data.requests;
 }
 

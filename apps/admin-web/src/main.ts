@@ -356,6 +356,32 @@ function mountShell(_root: HTMLElement, session: Session): void {
     void renderPage(refs.contentHost, route ?? { path, titleKey: "dashboard" }, session);
   });
 
+  // FE-P0-004 (Bølge 2B pilot-blocker): Hall-context refresh.
+  // ADMIN super-user / HALL_OPERATOR switches between assigned halls via
+  // the impersonation banner. `setAdminActiveHall()` (Session.ts:84) fires
+  // `session:admin-active-hall-changed` — but BEFORE this listener was
+  // wired, the open admin page did NOT re-fetch its hall-scoped data.
+  //
+  // The race in audit-finding FE-P0-04: an operator on the cash-inout
+  // page switches active hall, expects the page to refresh — but the
+  // already-rendered DOM still shows Hall A's daily-balance numbers
+  // while the hall-context has flipped to Hall B underneath. Real-money
+  // downstream actions (close-day, settlement, withdraw approval) on
+  // the wrong hall.
+  //
+  // Fix: rerender the chrome AND the page. Same pattern as `i18n:changed`.
+  // Pages that use `getEffectiveHall()` at render-time (which is the
+  // pattern documented in Session.ts:133) will pick up the new hall on
+  // their next mount. The audit also recommends auditing pages that
+  // cache hallId at mount-time — those should call getEffectiveHall()
+  // each render, but the safety-net here is the full re-render.
+  window.addEventListener("session:admin-active-hall-changed", () => {
+    const path = router.currentPath();
+    const route = findRoute(path);
+    renderLayoutChrome(refs, session, route, path, MAINTENANCE_MODE);
+    void renderPage(refs.contentHost, route ?? { path, titleKey: "dashboard" }, session);
+  });
+
   // Unused but referenced for type-safety of LayoutRefs
   void (refs satisfies LayoutRefs);
 }

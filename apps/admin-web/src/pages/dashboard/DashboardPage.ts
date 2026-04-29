@@ -4,6 +4,7 @@
 import { t } from "../../i18n/I18n.js";
 import type { Session } from "../../auth/Session.js";
 import { fetchDashboardData, startPolling, type DashboardData, type PollController } from "./DashboardState.js";
+import { isAbortError } from "../../api/client.js";
 import { renderInfoBox } from "./widgets/InfoBox.js";
 import { renderLatestRequestsBox } from "./widgets/LatestRequestsBox.js";
 import { renderTopPlayersBox } from "./widgets/TopPlayersBox.js";
@@ -18,10 +19,17 @@ let activeController: PollController | null = null;
 // Without this, navigating away before the initial fetch resolves lets a stale
 // promise run renderAll() on a container now owned by another route.
 let activeMountId = 0;
+// FE-P0-003: per-mount AbortController for the initial fetch. On unmount we
+// abort it so a slow stale fetch can't land after the user has navigated.
+// (The polling controller owns its own AbortController separately.)
+let activeMountAbort: AbortController | null = null;
 
 export async function mountDashboard(container: HTMLElement, session: Session): Promise<void> {
   stopActivePolling();
   const mountId = ++activeMountId;
+  if (activeMountAbort) activeMountAbort.abort();
+  const mountAbort = new AbortController();
+  activeMountAbort = mountAbort;
   container.innerHTML = "";
   container.setAttribute("data-page", "dashboard");
 
@@ -33,8 +41,13 @@ export async function mountDashboard(container: HTMLElement, session: Session): 
 
   let initial: DashboardData;
   try {
-    initial = await fetchDashboardData({ hallId: session.hall[0]?.id });
+    initial = await fetchDashboardData({
+      hallId: session.hall[0]?.id,
+      signal: mountAbort.signal,
+    });
   } catch (err) {
+    // Aborted on unmount/replace — silent.
+    if (isAbortError(err)) return;
     // Bail if we've been unmounted/replaced while fetching — don't overwrite
     // another route's DOM with an error box.
     if (mountId !== activeMountId) return;
@@ -59,6 +72,11 @@ export async function mountDashboard(container: HTMLElement, session: Session): 
 
 export function unmountDashboard(): void {
   stopActivePolling();
+  // FE-P0-003: abort the per-mount initial fetch if still in-flight.
+  if (activeMountAbort) {
+    activeMountAbort.abort();
+    activeMountAbort = null;
+  }
   // Invalidate any pending initial-fetch promise from mountDashboard() so it
   // won't render on a container that now belongs to another route.
   activeMountId++;

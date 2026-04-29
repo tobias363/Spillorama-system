@@ -29,8 +29,11 @@ export function endShift(body: { actualCountedCash: number; note?: string }): Pr
   return apiRequest<Shift>("/api/agent/shift/end", { method: "POST", body, auth: true });
 }
 
-export function getCurrentShift(): Promise<Shift | null> {
-  return apiRequest<Shift | null>("/api/agent/shift/current", { auth: true });
+export function getCurrentShift(opts: { signal?: AbortSignal } = {}): Promise<Shift | null> {
+  return apiRequest<Shift | null>(
+    "/api/agent/shift/current",
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+  );
 }
 
 export function getShiftHistory(limit = 20): Promise<Shift[]> {
@@ -63,8 +66,11 @@ export function openDay(body: OpenDayRequest): Promise<DailyBalance> {
   return apiRequest<DailyBalance>("/api/agent/shift/open-day", { method: "POST", body, auth: true });
 }
 
-export function getDailyBalance(): Promise<DailyBalance> {
-  return apiRequest<DailyBalance>("/api/agent/shift/daily-balance", { auth: true });
+export function getDailyBalance(opts: { signal?: AbortSignal } = {}): Promise<DailyBalance> {
+  return apiRequest<DailyBalance>(
+    "/api/agent/shift/daily-balance",
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+  );
 }
 
 export interface PhysicalCashoutItem {

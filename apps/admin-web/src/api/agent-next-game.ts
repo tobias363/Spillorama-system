@@ -73,8 +73,11 @@ export interface AgentRoomReadyResult {
  * for HALL_OPERATOR som kun eksponerer egen hall — for AGENT er scope styrt
  * av JWT. Vi filtrerer ikke igjen i UI; forventer at backend gir rett subset.
  */
-export async function listAgentRooms(): Promise<AgentRoomSummary[]> {
-  const raw = await apiRequest<AgentRoomSummary[]>("/api/admin/rooms", { auth: true });
+export async function listAgentRooms(opts: { signal?: AbortSignal } = {}): Promise<AgentRoomSummary[]> {
+  const raw = await apiRequest<AgentRoomSummary[]>(
+    "/api/admin/rooms",
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+  );
   return Array.isArray(raw) ? raw : [];
 }
 

@@ -102,6 +102,12 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let hallSocket: AgentHallSocket | null = null;
 let spill1Socket: AgentGame1Socket | null = null;
+// FE-P0-003 (Bølge 2B pilot-blocker): per-mount AbortController. Aborts
+// in-flight room/game1 fetches when the panel unmounts so a slow-pending
+// fetch can't land after the user has navigated away to a different
+// page or hall — and silently overwrite state for the wrong context.
+// Especially important on flaky hall-WiFi where polls can stack up.
+let pageAbort: AbortController | null = null;
 
 function initialState(): PanelState {
   return {
@@ -129,6 +135,9 @@ export function mountNextGamePanel(container: HTMLElement): void {
   unmountNextGamePanel();
   state = initialState();
   activeContainer = container;
+  // FE-P0-003: fresh AbortController per mount. unmount() aborts it so
+  // late fetch responses can't write state after the page is gone.
+  pageAbort = new AbortController();
   render(container);
   void refresh();
   startPolling();
@@ -165,6 +174,12 @@ export function unmountNextGamePanel(): void {
   stopCountdown();
   stopSocket();
   stopSpill1Socket();
+  // FE-P0-003: abort in-flight fetches so they don't write to state after
+  // the panel is torn down.
+  if (pageAbort) {
+    pageAbort.abort();
+    pageAbort = null;
+  }
   activeContainer = null;
 }
 
@@ -417,7 +432,10 @@ async function refresh(): Promise<void> {
 
 async function refreshRooms(): Promise<void> {
   try {
-    const rooms = await listAgentRooms();
+    const rooms = await listAgentRooms(
+      pageAbort ? { signal: pageAbort.signal } : {}
+    );
+    if (!activeContainer) return; // unmounted while in-flight
     state.rooms = rooms;
     state.activeRoom = pickActiveRoom(rooms);
     state.lastFetchError = null;
@@ -425,6 +443,10 @@ async function refreshRooms(): Promise<void> {
       hallSocket.subscribe(state.activeRoom.code);
     }
   } catch (err) {
+    // FE-P0-003: aborts on unmount are silent — no error-state.
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
+    if (!activeContainer) return;
     const msg = err instanceof Error ? err.message : String(err);
     state.lastFetchError = msg;
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -435,13 +457,19 @@ async function refreshRooms(): Promise<void> {
 
 async function refreshSpill1(): Promise<void> {
   try {
-    const data = await fetchAgentGame1CurrentGame();
+    const data = await fetchAgentGame1CurrentGame(
+      pageAbort ? { signal: pageAbort.signal } : {}
+    );
+    if (!activeContainer) return; // unmounted while in-flight
     state.spill1 = data;
     state.spill1Error = null;
     if (data.currentGame && spill1Socket) {
       spill1Socket.subscribe(data.currentGame.id);
     }
   } catch (err) {
+    // FE-P0-003: aborts on unmount are silent.
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
     // Agent uten hall eller SUPPORT-rollen gir 403 — vi kveler det uten å
     // vise feil-banner (Spill 1-UI bare skjules). Andre feil lagres i
     // spill1Error-flagget for rendering.
@@ -450,6 +478,7 @@ async function refreshSpill1(): Promise<void> {
       state.spill1Error = null;
       return;
     }
+    if (!activeContainer) return;
     const msg = err instanceof Error ? err.message : String(err);
     state.spill1Error = msg;
   }

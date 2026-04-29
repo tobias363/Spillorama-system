@@ -140,15 +140,23 @@ export interface OpsOverviewDelta {
 
 // ── HTTP wrappers ────────────────────────────────────────────────────────
 
-export async function fetchOverview(): Promise<OpsOverviewResponse> {
+// FE-P0-003: optional AbortSignal so the consumer (AdminOpsConsolePage) can
+// cancel an in-flight overview fetch when the page unmounts or a new
+// fallback-poll tick supersedes a slow-pending one. Without cancellation,
+// a stale 5 s-late overview can overwrite a newer one and flicker hall
+// status backwards on the ops console — exactly the wrong UX during a
+// pilot night.
+export async function fetchOverview(opts: { signal?: AbortSignal } = {}): Promise<OpsOverviewResponse> {
   return apiRequest<OpsOverviewResponse>("/api/admin/ops/overview", {
     auth: true,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
 }
 
-export async function fetchAlerts(): Promise<{ alerts: OpsAlert[] }> {
+export async function fetchAlerts(opts: { signal?: AbortSignal } = {}): Promise<{ alerts: OpsAlert[] }> {
   return apiRequest<{ alerts: OpsAlert[] }>("/api/admin/ops/alerts", {
     auth: true,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
 }
 

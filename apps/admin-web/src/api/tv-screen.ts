@@ -95,11 +95,16 @@ function tvUrl(hallId: string, tvToken: string, suffix: "state" | "winners"): st
   return `/api/tv/${hid}/${tok}/${suffix}`;
 }
 
-async function fetchTv<T>(url: string): Promise<T> {
-  const res = await fetch(url, {
+async function fetchTv<T>(url: string, opts: { signal?: AbortSignal } = {}): Promise<T> {
+  const init: RequestInit = {
     method: "GET",
     headers: { accept: "application/json" },
-  });
+  };
+  // FE-P0-003: thread the optional AbortSignal so the TV poller can
+  // cancel a slow stale fetch when its instance is destroyed (e.g. the
+  // operator navigates the popup window away from the TV-screen URL).
+  if (opts.signal) init.signal = opts.signal;
+  const res = await fetch(url, init);
   if (!res.ok) {
     const code = res.status === 404 ? "NOT_FOUND" : "HTTP_ERROR";
     throw new TvApiError(res.status, code, `TV endpoint returned ${res.status}`);
@@ -115,12 +120,20 @@ async function fetchTv<T>(url: string): Promise<T> {
   return body.data;
 }
 
-export function fetchTvState(hallId: string, tvToken: string): Promise<TvGameState> {
-  return fetchTv<TvGameState>(tvUrl(hallId, tvToken, "state"));
+export function fetchTvState(
+  hallId: string,
+  tvToken: string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<TvGameState> {
+  return fetchTv<TvGameState>(tvUrl(hallId, tvToken, "state"), opts);
 }
 
-export function fetchTvWinners(hallId: string, tvToken: string): Promise<TvWinnersSummary> {
-  return fetchTv<TvWinnersSummary>(tvUrl(hallId, tvToken, "winners"));
+export function fetchTvWinners(
+  hallId: string,
+  tvToken: string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<TvWinnersSummary> {
+  return fetchTv<TvWinnersSummary>(tvUrl(hallId, tvToken, "winners"), opts);
 }
 
 // ── Voice-pack (wireframe PDF 14) ───────────────────────────────────────────

@@ -89,14 +89,27 @@ export function renderAdminOpsConsolePage(
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let socketHandle: AdminOpsSocketHandle | null = null;
   let disposed = false;
+  // FE-P0-003 (Bølge 2B pilot-blocker): per-page AbortController. On
+  // dispose() we abort any in-flight overview fetch so a slow stale
+  // snapshot can't land after the page is unmounted and overwrite a
+  // foreign route's DOM. Also fixes the "operator clicks Refresh on a
+  // slow page" race — calling refresh() while the previous fetch is
+  // still pending lets the older response land last and flicker hall
+  // status backwards.
+  const pageAbort = new AbortController();
 
   const refresh = async (): Promise<void> => {
     if (disposed) return;
     try {
-      const snapshot = await fetchOverviewImpl();
+      const snapshot = await fetchOverviewImpl({ signal: pageAbort.signal });
+      if (disposed) return;
       replaceSnapshot(state, snapshot);
       renderAll(state, refs, handlers);
     } catch (err) {
+      // Aborts are expected on unmount — silent.
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (disposed) return;
       const msg = err instanceof Error ? err.message : "Unknown error";
       state.lastError = msg;
       renderErrorBanner(refs, msg);
@@ -356,6 +369,9 @@ export function renderAdminOpsConsolePage(
     dispose: () => {
       disposed = true;
       stopPolling();
+      // FE-P0-003: abort any in-flight overview fetch so it can't land
+      // after the page is unmounted.
+      pageAbort.abort();
       socketHandle?.dispose();
       socketHandle = null;
     },

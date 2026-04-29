@@ -46,6 +46,18 @@ import { contentHeader, escapeHtml, formatNOK } from "./shared.js";
 
 const F5_F6_F8 = new Set(["F5", "F6", "F8"]);
 
+// FE-P0-003 (Bølge 2B pilot-blocker): module-level AbortController owned by
+// the most-recently-mounted CashInOutPage. Re-rendered or unmounted? We
+// abort the prior controller — any in-flight `refreshBalance()` /
+// `getCurrentShift()` fetch resolves into a no-op instead of overwriting
+// the new page's DOM with stale numbers (= money-data UI race).
+//
+// Critical because `refreshBalance()` mutates the visible kontant-balance
+// display directly via container.querySelector — and a slow stale fetch
+// landing 6 s after a successful settlement-submit was the exact race the
+// audit flagged on flaky hall-WiFi.
+let activePageAbort: AbortController | null = null;
+
 export function renderCashInOutPage(container: HTMLElement): void {
   const session = getSession();
   // `Agentnavn` skal vise innloggets navn — fall tilbake til hallnavn for
@@ -252,6 +264,11 @@ export function renderCashInOutPage(container: HTMLElement): void {
     </section>`;
 
   ensureLegacyStyles();
+  // FE-P0-003: abort any prior page's in-flight requests, then start a
+  // fresh controller for this mount. The wireFunctionKeys observer also
+  // aborts on container-detach (see wireFunctionKeys below).
+  if (activePageAbort) activePageAbort.abort();
+  activePageAbort = new AbortController();
   wireTabs(container);
   wireActions(container);
   wireFunctionKeys(container);
@@ -376,10 +393,17 @@ function wireFunctionKeys(container: HTMLElement): void {
   // Cleanup når container fjernes fra DOM. Bruker MutationObserver med en
   // defensive sjekk for at `document` er tilgjengelig — hvis JSDOM-miljøet
   // er revet ned (mellom tester) skal observeren bare disconnecte stille.
+  // FE-P0-003: when the container detaches we also abort any in-flight
+  // fetch so it can't write into a stale DOM (or stale module-level page
+  // state if the user has navigated to a different page).
   const observer = new MutationObserver(() => {
     if (typeof document === "undefined") return;
     if (!container.isConnected) {
       document.removeEventListener("keydown", handler);
+      if (activePageAbort) {
+        activePageAbort.abort();
+        activePageAbort = null;
+      }
       observer.disconnect();
     }
   });
@@ -438,10 +462,20 @@ function openSettlementFromCashInOut(container: HTMLElement): void {
 }
 
 async function refreshBalance(container: HTMLElement): Promise<void> {
+  // FE-P0-003: thread the per-mount AbortSignal so a slow GET can't land
+  // after the page has been unmounted (or after the user has switched
+  // hall via admin super-user mode and the page is being re-rendered
+  // with a fresh hall-context).
+  const signal = activePageAbort?.signal;
   try {
-    const balance = await getDailyBalance();
+    const balance = await getDailyBalance(signal ? { signal } : {});
+    if (!container.isConnected) return;
     renderBalance(container, balance);
   } catch (err) {
+    // Aborts are silent — a fresh render will issue its own fetch.
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
+    if (!container.isConnected) return;
     const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
     // Silent on 404 (no open day) — show zeros
     if (err instanceof ApiError && err.status === 404) {

@@ -26,6 +26,8 @@ interface ActiveInstance {
   tvToken: string;
   intervalId: number;
   destroyed: boolean;
+  /** FE-P0-003 (Bølge 2B): aborts in-flight winners-fetch on unmount. */
+  abortController: AbortController;
 }
 
 let active: ActiveInstance | null = null;
@@ -46,16 +48,22 @@ export function mountWinnersPage(root: HTMLElement, hallId: string, tvToken: str
     tvToken,
     intervalId: 0,
     destroyed: false,
+    abortController: new AbortController(), // FE-P0-003
   };
   active = instance;
 
   const tick = async (): Promise<void> => {
     if (instance.destroyed) return;
     try {
-      const summary = await fetchTvWinners(hallId, tvToken);
+      const summary = await fetchTvWinners(hallId, tvToken, {
+        signal: instance.abortController.signal,
+      });
       if (instance.destroyed) return;
       renderSummary(bodyEl, summary);
     } catch (err) {
+      // FE-P0-003: aborts on unmount silent.
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
       if (instance.destroyed) return;
       renderError(bodyEl, err);
     }
@@ -68,6 +76,8 @@ export function mountWinnersPage(root: HTMLElement, hallId: string, tvToken: str
 export function unmountWinnersPage(): void {
   if (!active) return;
   active.destroyed = true;
+  // FE-P0-003: cancel any pending winners-fetch on unmount.
+  active.abortController.abort();
   if (active.intervalId) window.clearInterval(active.intervalId);
   active = null;
 }

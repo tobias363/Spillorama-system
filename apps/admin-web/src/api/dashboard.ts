@@ -8,8 +8,11 @@ export interface AdminHall {
   isActive: boolean;
 }
 
-export async function listHalls(): Promise<AdminHall[]> {
-  const raw = await apiRequest<AdminHall[] | { halls: AdminHall[] }>("/api/admin/halls?includeInactive=true", { auth: true });
+export async function listHalls(opts: { signal?: AbortSignal } = {}): Promise<AdminHall[]> {
+  const raw = await apiRequest<AdminHall[] | { halls: AdminHall[] }>(
+    "/api/admin/halls?includeInactive=true",
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+  );
   if (Array.isArray(raw)) return raw;
   return raw.halls ?? [];
 }
@@ -46,11 +49,11 @@ interface DashboardAgentRow {
   agentStatus: "active" | "inactive";
 }
 
-export async function listAgents(): Promise<AdminUser[]> {
+export async function listAgents(opts: { signal?: AbortSignal } = {}): Promise<AdminUser[]> {
   try {
     const res = await apiRequest<{ agents: DashboardAgentRow[] }>(
       "/api/admin/agents",
-      { auth: true }
+      { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
     );
     return (res.agents ?? []).map((a) => ({
       id: a.userId,
@@ -91,8 +94,11 @@ export interface AdminRoomSummary {
   createdAt?: string;
 }
 
-export async function listRooms(): Promise<AdminRoomSummary[]> {
-  const raw = await apiRequest<AdminRoomSummary[]>("/api/admin/rooms", { auth: true });
+export async function listRooms(opts: { signal?: AbortSignal } = {}): Promise<AdminRoomSummary[]> {
+  const raw = await apiRequest<AdminRoomSummary[]>(
+    "/api/admin/rooms",
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+  );
   return Array.isArray(raw) ? raw : [];
 }
 
@@ -114,11 +120,14 @@ export interface TopPlayerRow {
   walletAmount: number;
 }
 
-export async function fetchTopPlayers(limit = 5): Promise<TopPlayerRow[] | null> {
+export async function fetchTopPlayers(
+  limit = 5,
+  opts: { signal?: AbortSignal } = {}
+): Promise<TopPlayerRow[] | null> {
   try {
     const raw = await apiRequest<{ players: TopPlayerRow[] } | TopPlayerRow[]>(
       `/api/admin/players/top?metric=wallet&limit=${limit}`,
-      { auth: true }
+      { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
     );
     if (Array.isArray(raw)) return raw;
     return raw.players ?? [];
@@ -145,9 +154,12 @@ export interface HallGroup {
   isActive: boolean;
 }
 
-export async function fetchHallGroups(): Promise<HallGroup[] | null> {
+export async function fetchHallGroups(opts: { signal?: AbortSignal } = {}): Promise<HallGroup[] | null> {
   try {
-    const raw = await apiRequest<{ groups: HallGroup[] } | HallGroup[]>("/api/admin/hall-groups", { auth: true });
+    const raw = await apiRequest<{ groups: HallGroup[] } | HallGroup[]>(
+      "/api/admin/hall-groups",
+      { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
+    );
     if (Array.isArray(raw)) return raw;
     return raw.groups ?? [];
   } catch (err) {
@@ -169,12 +181,13 @@ export interface SummaryCounts {
   activeHalls: { active: number; total: number };
 }
 
-export async function fetchSummaryCounts(): Promise<SummaryCounts> {
+export async function fetchSummaryCounts(opts: { signal?: AbortSignal } = {}): Promise<SummaryCounts> {
+  const signalOpt = opts.signal ? { signal: opts.signal } : {};
   const [players, agents, groups, halls] = await Promise.all([
     fetchApprovedPlayerCount(),
-    listAgents().catch(() => [] as AdminUser[]),
-    fetchHallGroups(),
-    listHalls().catch(() => [] as AdminHall[]),
+    listAgents(signalOpt).catch(() => [] as AdminUser[]),
+    fetchHallGroups(signalOpt),
+    listHalls(signalOpt).catch(() => [] as AdminHall[]),
   ]);
 
   const agentTotals = agents.length

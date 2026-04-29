@@ -72,10 +72,12 @@ export interface Spill1ActionResponse {
   auditId: string;
 }
 
-export async function fetchAgentGame1CurrentGame(): Promise<Spill1CurrentGameResponse> {
+export async function fetchAgentGame1CurrentGame(
+  opts: { signal?: AbortSignal } = {}
+): Promise<Spill1CurrentGameResponse> {
   return apiRequest<Spill1CurrentGameResponse>(
     "/api/agent/game1/current-game",
-    { auth: true }
+    { auth: true, ...(opts.signal ? { signal: opts.signal } : {}) }
   );
 }
 
