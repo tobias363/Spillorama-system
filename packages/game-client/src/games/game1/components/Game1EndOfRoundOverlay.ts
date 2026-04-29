@@ -101,6 +101,13 @@ function formatHeader(endedReason: string | undefined): {
   title: string;
   subtitle: string;
 } {
+  // Tobias prod-incident 2026-04-29: subtitle MÅ skille mellom faktisk
+  // grunn for slutt slik at MAX_DRAWS-runder ikke feilaktig viser
+  // "Fullt Hus er vunnet". Bug-trigger: når Phase 5 (Fullt Hus) ikke
+  // kunne auto-claimes (f.eks. test-hall der bypass kjører videre, eller
+  // recovery-edge-case med pause-state), ble runden avsluttet på
+  // MAX_DRAWS_REACHED — overlay må da være ærlig om at fullt hus ikke
+  // ble offisielt levert.
   switch (endedReason) {
     case "BINGO_CLAIMED":
       return {
@@ -111,12 +118,12 @@ function formatHeader(endedReason: string | undefined): {
     case "DRAW_BAG_EMPTY":
       return {
         title: "Spillet er ferdig",
-        subtitle: "Alle baller trukket",
+        subtitle: "Alle baller trukket — runden er slutt",
       };
     case "MANUAL_END":
       return {
         title: "Spillet er avsluttet",
-        subtitle: "Administrator avsluttet runden",
+        subtitle: "Runden ble avsluttet",
       };
     case "SYSTEM_ERROR":
       return {

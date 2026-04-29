@@ -110,6 +110,28 @@ describe("Game1EndOfRoundOverlay", () => {
     expect(parent.textContent).toContain("Alle baller trukket");
   });
 
+  // Tobias prod-incident 2026-04-29: subtitles MÅ skille mellom faktisk
+  // grunn for slutt slik at MAX_DRAWS-runder ikke feilaktig viser
+  // "Fullt Hus er vunnet"-tekst.
+  it("header: MAX_DRAWS_REACHED-subtitle inkluderer 'runden er slutt' (NOT 'Fullt Hus er vunnet')", () => {
+    overlay.show(baseSummary({ endedReason: "MAX_DRAWS_REACHED" }));
+    expect(parent.textContent).toContain("runden er slutt");
+    // Specifically, MAX_DRAWS-runder skal IKKE vise "Fullt Hus er vunnet" —
+    // det er misvisende fordi runden ble avsluttet PÅ TIDEN, ikke pga. en bingo.
+    expect(parent.textContent).not.toContain("Fullt Hus er vunnet");
+  });
+
+  it("header: MANUAL_END viser 'Runden ble avsluttet'-subtitle", () => {
+    overlay.show(baseSummary({ endedReason: "MANUAL_END" }));
+    expect(parent.textContent).toContain("Runden ble avsluttet");
+  });
+
+  it("header: DRAW_BAG_EMPTY behandles likt som MAX_DRAWS_REACHED", () => {
+    overlay.show(baseSummary({ endedReason: "DRAW_BAG_EMPTY" }));
+    expect(parent.textContent).toContain("Alle baller trukket");
+    expect(parent.textContent).toContain("runden er slutt");
+  });
+
   it("patterns-tabell: viser alle 5 phases med vinnerinfo + payout", () => {
     overlay.show(
       baseSummary({
