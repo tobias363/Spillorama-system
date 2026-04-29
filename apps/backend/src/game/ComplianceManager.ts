@@ -332,7 +332,9 @@ export class ComplianceManager {
       }
     }
 
-    this.personalLossLimitsByScope.set(this.makeLossScopeKey(walletId, hallId), nextLimits);
+    // Stage 2A (refactor/stage2a-compliance-manager-maps): persist FIRST, mutate Map ON SUCCESS.
+    // The redundant pre-mutation that used to live here is now handled inside
+    // `persistLossLimitState` (which writes to DB first, then to the Map).
     await this.persistLossLimitState(walletId, hallId, nextLimits, nextPending);
     return this.getPlayerCompliance(walletId, hallId);
   }
@@ -418,7 +420,9 @@ export class ComplianceManager {
       nextPending.monthly = { value: n, effectiveFromMs: input.monthly.effectiveFromMs };
     }
 
-    this.personalLossLimitsByScope.set(this.makeLossScopeKey(walletId, hallId), nextLimits);
+    // Stage 2A (refactor/stage2a-compliance-manager-maps): persist FIRST, mutate Map ON SUCCESS.
+    // The redundant pre-mutation that used to live here is now handled inside
+    // `persistLossLimitState` (which writes to DB first, then to the Map).
     await this.persistLossLimitState(walletId, hallId, nextLimits, nextPending);
     return this.getPlayerCompliance(walletId, hallId);
   }
@@ -556,13 +560,20 @@ export class ComplianceManager {
     if (!normalizedHallId) {
       return;
     }
+    // Stage 2A (refactor/stage2a-compliance-manager-maps): persist FIRST.
+    // If insertLossEntry throws the in-memory cache stays consistent with DB
+    // (the entry is not added to either side). Previously the Map was mutated
+    // before persisting — a DB-failure would have left calculateNetLoss
+    // returning a value that did not match the §71 hovedbok.
+    if (this.persistence) {
+      await this.persistence.insertLossEntry(toPersistedLossEntry(normalizedWalletId, normalizedHallId, entry));
+    }
+    // Persist succeeded (or no persistence configured) — safe to mutate the
+    // in-memory cache now.
     const scopeKey = this.makeLossScopeKey(normalizedWalletId, normalizedHallId);
     const existing = this.lossEntriesByScope.get(scopeKey) ?? [];
     existing.push(entry);
     this.lossEntriesByScope.set(scopeKey, existing);
-    if (this.persistence) {
-      await this.persistence.insertLossEntry(toPersistedLossEntry(normalizedWalletId, normalizedHallId, entry));
-    }
   }
 
   async incrementSessionGameCount(walletIdInput: string): Promise<void> {
@@ -922,38 +933,45 @@ export class ComplianceManager {
       return;
     }
     const scopeKey = this.makeLossScopeKey(walletId, hallId);
-    this.personalLossLimitsByScope.set(scopeKey, {
+    const normalizedLimits: LossLimits = {
       daily: Math.floor(limits.daily),
       monthly: Math.floor(limits.monthly)
-    });
-
+    };
     const hasPending = Boolean(pending.daily || pending.monthly);
-    if (hasPending) {
-      this.pendingLossLimitChangesByScope.set(scopeKey, {
-        daily: pending.daily ? { ...pending.daily } : undefined,
-        monthly: pending.monthly ? { ...pending.monthly } : undefined
+    const normalizedPending: PendingLossLimitChange = hasPending
+      ? {
+          daily: pending.daily ? { ...pending.daily } : undefined,
+          monthly: pending.monthly ? { ...pending.monthly } : undefined
+        }
+      : {};
+
+    // Stage 2A (refactor/stage2a-compliance-manager-maps): persist FIRST so a
+    // DB-write-failure leaves the in-memory cache consistent with DB. If any
+    // adapter call throws the Maps are not mutated and the next read still
+    // reflects the previously-persisted state.
+    if (this.persistence) {
+      await this.persistence.upsertLossLimit({
+        walletId,
+        hallId,
+        daily: normalizedLimits.daily,
+        monthly: normalizedLimits.monthly
       });
+      if (hasPending) {
+        await this.persistence.upsertPendingLossLimitChange(
+          toPersistedPendingLossLimitChange(walletId, hallId, normalizedPending)
+        );
+      } else {
+        await this.persistence.deletePendingLossLimitChange(walletId, hallId);
+      }
+    }
+
+    // Persist succeeded (or no persistence configured) — now mutate cache.
+    this.personalLossLimitsByScope.set(scopeKey, normalizedLimits);
+    if (hasPending) {
+      this.pendingLossLimitChangesByScope.set(scopeKey, normalizedPending);
     } else {
       this.pendingLossLimitChangesByScope.delete(scopeKey);
     }
-
-    if (!this.persistence) {
-      return;
-    }
-
-    await this.persistence.upsertLossLimit({
-      walletId,
-      hallId,
-      daily: Math.floor(limits.daily),
-      monthly: Math.floor(limits.monthly)
-    });
-    if (hasPending) {
-      await this.persistence.upsertPendingLossLimitChange(
-        toPersistedPendingLossLimitChange(walletId, hallId, pending)
-      );
-      return;
-    }
-    await this.persistence.deletePendingLossLimitChange(walletId, hallId);
   }
 
   private schedulePersistLossLimitState(
@@ -973,17 +991,19 @@ export class ComplianceManager {
       state.timedPauseSetAtMs !== undefined ||
       state.selfExcludedAtMs !== undefined ||
       state.selfExclusionMinimumUntilMs !== undefined;
+    // Stage 2A (refactor/stage2a-compliance-manager-maps): persist FIRST.
+    // If the DB-write throws the in-memory cache stays consistent with DB.
     if (!hasAnyRestriction) {
-      this.restrictionsByWallet.delete(walletId);
       if (this.persistence) {
         await this.persistence.deleteRestriction(walletId);
       }
+      this.restrictionsByWallet.delete(walletId);
       return;
     }
-    this.restrictionsByWallet.set(walletId, state);
     if (this.persistence) {
       await this.persistence.upsertRestriction(toPersistedRestrictionState(walletId, state));
     }
+    this.restrictionsByWallet.set(walletId, state);
   }
 
   private async persistPlaySessionState(walletIdInput: string, state: PlaySessionState): Promise<void> {
@@ -1016,18 +1036,23 @@ export class ComplianceManager {
       normalized.activeFromMs === undefined &&
       normalized.pauseUntilMs === undefined &&
       normalized.lastMandatoryBreak === undefined;
+
+    // Stage 2A (refactor/stage2a-compliance-manager-maps): persist FIRST.
+    // §66 mandatory-pause and play-session bookkeeping must stay consistent
+    // with the persisted state — a DB-write-failure must not leave the cache
+    // out of sync with DB.
     if (isEmpty) {
-      this.playStateByWallet.delete(walletId);
       if (this.persistence) {
         await this.persistence.deletePlaySessionState(walletId);
       }
+      this.playStateByWallet.delete(walletId);
       return;
     }
 
-    this.playStateByWallet.set(walletId, normalized);
     if (this.persistence) {
       await this.persistence.upsertPlaySessionState(toPersistedPlaySessionState(walletId, normalized));
     }
+    this.playStateByWallet.set(walletId, normalized);
   }
 
   // ── Date helpers ─────────────────────────────────────────────────
