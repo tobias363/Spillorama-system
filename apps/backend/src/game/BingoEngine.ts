@@ -10,8 +10,6 @@ import * as variantConfigModule from "./variantConfig.js";
 
 const logger = rootLogger.child({ module: "engine" });
 import {
-  findFirstCompleteLinePatternIndex,
-  hasFullBingo,
   makeRoomCode,
   ticketContainsNumber,
 } from "./ticket.js";
@@ -110,6 +108,10 @@ import type { PrizeGameType, PrizePolicySnapshot, ExtraDrawDenialAudit } from ".
 import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { PhasePayoutService } from "./PhasePayoutService.js";
+import {
+  ClaimSubmitterService,
+  type ClaimSubmitterCallbacks,
+} from "./ClaimSubmitterService.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
 import type { LedgerGameType, LedgerChannel, ComplianceLedgerEntry, DailyComplianceReport, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
 import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
@@ -119,9 +121,6 @@ import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.
 import { NoopSplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
 import type {
   ClaimAuditTrailRecoveryPort,
-  ClaimAuditTrailFailedEvent,
-  ClaimAuditTrailStep,
-  ClaimAuditTrailSeverity,
 } from "../adapters/ClaimAuditTrailRecoveryPort.js";
 import { NoopClaimAuditTrailRecoveryPort } from "../adapters/ClaimAuditTrailRecoveryPort.js";
 // Extracted helpers (refactor/s1-bingo-engine-split — Forslag A)
@@ -415,7 +414,6 @@ interface ComplianceOptions {
 const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
 const MAX_BINGO_BALLS_75 = 75;
-const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 
 export class BingoEngine {
   /** HOEY-7: Pluggable room state store (in-memory or Redis-backed). */
@@ -498,6 +496,14 @@ export class BingoEngine {
    * service. Caller still owns state mutations + ledger/audit-trail writes.
    */
   protected readonly phasePayoutService: PhasePayoutService;
+  /**
+   * F2-B (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §3.3 / HV-3): extracted the
+   * full `submitClaim` flow (validation, LINE/BINGO branches, post-transfer
+   * audit-trail, recovery-event helper) into a stand-alone service. The
+   * public `submitClaim` method on this engine is now a thin delegate so the
+   * Game2Engine/Game3Engine inheritance + Socket.IO wiring stays unchanged.
+   */
+  protected readonly claimSubmitterService: ClaimSubmitterService;
   private readonly drawBagFactory?: (size: number) => number[];
   /**
    * BIN-615 / PR-C1: Per-room variantConfig cache for hook access (e.g. onDrawCompleted
@@ -634,6 +640,20 @@ export class BingoEngine {
     // CRIT-6: claim-audit-trail recovery port (optional). Default no-op.
     this.claimAuditTrailRecovery =
       options.claimAuditTrailRecovery ?? new NoopClaimAuditTrailRecoveryPort();
+
+    // F2-B: shared claim-submission flow (validation + LINE/BINGO + audit-trail).
+    // Constructed AFTER all dependencies (compliance, ledger, payoutAudit,
+    // phasePayoutService, bingoAdapter, rooms, claimAuditTrailRecovery) are wired.
+    this.claimSubmitterService = new ClaimSubmitterService(
+      this.compliance,
+      this.ledger,
+      this.payoutAudit,
+      this.phasePayoutService,
+      this.bingoAdapter,
+      this.rooms,
+      this.claimAuditTrailRecovery,
+      this.buildClaimSubmitterCallbacks(),
+    );
 
     // K2 (2026-04-29): atomic state owner. When provided, cleanup paths
     // route eviction through the store so orphan reservations are always
@@ -1740,6 +1760,33 @@ export class BingoEngine {
   }
 
   /**
+   * F2-B: bygger callback-porten som {@link ClaimSubmitterService} trenger
+   * for å delegere engine-interne lookups (player, KYC-guard, scheduled-/
+   * Spill-1-quarantine) og post-payout helpers (wallet-refresh,
+   * play-session-close, checkpoint-write) uten å eksponere `this` direkte.
+   * Samme mønster som {@link buildEvaluatePhaseCallbacks}.
+   */
+  private buildClaimSubmitterCallbacks(): ClaimSubmitterCallbacks {
+    return {
+      requirePlayer: (room, playerId) => this.requirePlayer(room, playerId),
+      assertWalletAllowedForGameplay: (walletId, nowMs) =>
+        this.assertWalletAllowedForGameplay(walletId, nowMs),
+      assertNotScheduled: (room) => this.assertNotScheduled(room),
+      assertSpill1NotAdHoc: (room) => this.assertSpill1NotAdHoc(room),
+      meetsPhaseRequirement: (pattern, ticket, drawnSet) =>
+        this.meetsPhaseRequirement(pattern, ticket, drawnSet),
+      refreshPlayerBalancesForWallet: (walletId) =>
+        this.refreshPlayerBalancesForWallet(walletId),
+      finishPlaySessionsForGame: (room, game, endedAtMs) =>
+        this.finishPlaySessionsForGame(room, game, endedAtMs),
+      writeGameEndCheckpoint: (room, game) =>
+        this.writeGameEndCheckpoint(room, game),
+      writePayoutCheckpointWithRetry: (room, game, claimId, payout, txIds, phase) =>
+        this.writePayoutCheckpointWithRetry(room, game, claimId, payout, txIds, phase),
+    };
+  }
+
+  /**
    * BIN-694: Evaluér om aktiv fase er vunnet etter siste ball. Kalles
    * automatisk fra `drawNextNumber` når `patternEvalMode ===
    * "auto-claim-on-draw"`.
@@ -2472,977 +2519,34 @@ export class BingoEngine {
     }
   }
 
+  /**
+   * F2-B (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §3.3 / HV-3): submission-flow
+   * extracted to {@link ClaimSubmitterService.submitClaim}. This method is
+   * now a thin delegate so:
+   *   - Public API (and Game2Engine/Game3Engine inheritance) stays unchanged.
+   *   - The engine still owns `requireRoom` + `requireRunningGame` lookups so
+   *     the service receives validated references rather than a raw roomCode.
+   *
+   * The service handles validation (idempotency, armed-guard, KYC-block),
+   * pattern-match (LINE/BINGO), cap-and-transfer via PhasePayoutService,
+   * state mutations on `claim`/`game`/`patternResult`, and the post-transfer
+   * audit-trail (compliance, ledger, payoutAudit, checkpoint, rooms.persist)
+   * with CRIT-6 recovery-port event-emission on each step.
+   *
+   * Behavior is byte-identical to the pre-extraction inline implementation —
+   * same idempotency-keys, same ledger-ordering, same logging fields. PR #741
+   * test-hall semantics (LINE-bypass, BINGO ends round) and PILOT-EMERGENCY
+   * 2026-04-28 (state-mutation regardless of payout) are preserved.
+   */
   async submitClaim(input: SubmitClaimInput): Promise<ClaimRecord> {
     const room = this.requireRoom(input.roomCode);
-    // CRIT-4: scheduled Spill 1 har egen claim-flyt via
-    // Game1DrawEngineService.evaluateAndPayoutPhase. Hvis klient sender
-    // claim:submit på scheduled-rom risikerer vi dual-payout siden
-    // idempotency-keyene er forskjellige (g1-phase-* vs line-prize-*).
-    this.assertNotScheduled(room);
-    // K3: production retail Spill 1 claim-flyten ligger i scheduled-engine.
-    this.assertSpill1NotAdHoc(room);
     const game = this.requireRunningGame(room);
-    const player = this.requirePlayer(room, input.playerId);
-    this.assertWalletAllowedForGameplay(player.walletId, Date.now());
-
-    // KRITISK-8: Only players who participated (were armed + paid buy-in) can claim prizes.
-    if (game.participatingPlayerIds && !game.participatingPlayerIds.includes(player.id)) {
-      throw new DomainError(
-        "PLAYER_NOT_PARTICIPATING",
-        "Spilleren deltok ikke i denne runden og kan ikke kreve premie."
-      );
-    }
-
-    // BIN-45: Idempotency — if this player already has a paid-out claim of the
-    // same type in this game, return the existing claim instead of processing again.
-    // This prevents double payouts when the client retries after a network error.
-    const existingClaim = game.claims.find(
-      (c) =>
-        c.playerId === player.id &&
-        c.type === input.type &&
-        c.valid &&
-        c.payoutAmount !== undefined &&
-        c.payoutAmount > 0
-    );
-    if (existingClaim) {
-      return existingClaim;
-    }
-
-    // BIN-238: Explicit armed guard — only players who received tickets in this
-    // game round (i.e. paid buy-in and passed eligibility) may submit claims.
-    const playerTickets = game.tickets.get(player.id);
-    if (!playerTickets || playerTickets.length === 0) {
-      throw new DomainError("NOT_ARMED_FOR_GAME", "Spilleren deltok ikke i denne runden og kan ikke gjøre krav.");
-    }
-    const playerMarks = game.marks.get(player.id);
-    if (!playerMarks || playerMarks.length !== playerTickets.length) {
-      throw new DomainError("TICKET_NOT_FOUND", "Spiller mangler brett i aktivt spill.");
-    }
-
-    let valid = false;
-    let reason: string | undefined;
-    let winningPatternIndex: number | undefined;
-
-    if (input.type === "LINE") {
-      // BIN-694: LINE-claim dekker fase 1-4. Finn aktiv uvunnet
-      // LINE-pattern og valider via `meetsPhaseRequirement` (som
-      // håndterer navn-basert fase-oppslag — "1 Rad" = rad/kolonne,
-      // "2-4 Rader" = N kolonner). Når auto-claim-on-draw er aktiv,
-      // har denne pathen sjelden arbeid — vinneren er allerede
-      // påvist i evaluateActivePhase.
-      const activeLineResult = game.patternResults?.find(
-        (r) => r.claimType === "LINE" && !r.isWon,
-      );
-      if (!activeLineResult) {
-        reason = "LINE_ALREADY_CLAIMED";
-      } else {
-        const activeLinePattern = game.patterns?.find((p) => p.id === activeLineResult.patternId);
-        if (!activeLinePattern) {
-          reason = "NO_VALID_LINE";
-        } else {
-          for (let ticketIndex = 0; ticketIndex < playerTickets.length; ticketIndex += 1) {
-            if (this.meetsPhaseRequirement(
-              activeLinePattern,
-              playerTickets[ticketIndex],
-              playerMarks[ticketIndex],
-            )) {
-              valid = true;
-              // Historisk kontrakt: winningPatternIndex peker på første
-              // komplette linje (0-9 = rad/kolonne). Brukes av bonus-
-              // trigger-pattern-indeks og enkelte audits.
-              winningPatternIndex = findFirstCompleteLinePatternIndex(
-                playerTickets[ticketIndex],
-                playerMarks[ticketIndex],
-              );
-              if (winningPatternIndex < 0) winningPatternIndex = 0;
-              break;
-            }
-          }
-          if (!valid) {
-            reason = "NO_VALID_LINE";
-          }
-        }
-      }
-    } else if (input.type === "BINGO") {
-      // KRITISK-4/BIN-242: Guard against duplicate BINGO claims — reject if BINGO is already claimed.
-      if (game.bingoWinnerId) {
-        valid = false;
-        reason = "BINGO_ALREADY_CLAIMED";
-      } else {
-        valid = playerTickets.some((ticket, index) => hasFullBingo(ticket, playerMarks[index]));
-        if (!valid) {
-          reason = "NO_VALID_BINGO";
-        }
-      }
-    } else {
-      reason = "UNKNOWN_CLAIM_TYPE";
-    }
-
-    const claim: ClaimRecord = {
-      id: randomUUID(),
-      playerId: player.id,
-      type: input.type,
-      valid,
-      reason,
-      createdAt: new Date().toISOString()
-    };
-    if (winningPatternIndex !== undefined) {
-      claim.winningPatternIndex = winningPatternIndex;
-      claim.patternIndex = winningPatternIndex;
-    }
-    game.claims.push(claim);
-    // K2-A CRIT-1: per-spill resolver. Spill 1 (slug `bingo`) → MAIN_GAME.
-    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
-    const channel: LedgerChannel = "INTERNET";
-    const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
-
-    if (valid && input.type === "LINE") {
-      // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): state-mutasjoner
-      // (game.lineWinnerId, remainingPrizePool, remainingPayoutBudget,
-      // patternResults) gjøres KUN etter at walletAdapter.transfer er
-      // committet. Tidligere ble `game.lineWinnerId = player.id` satt
-      // FØR transfer — hvis transfer feilet (DB-disconnect, lock
-      // timeout) var state korrupt: spilleren så seg selv som vinner
-      // uten å ha fått pengene.
-      //
-      // Audit/ledger/persist post-transfer er fortsatt sekvensielle
-      // I/O-kall uten én outer-tx (krever pool-injeksjon i BingoEngine
-      // som er utenfor scope for K2-B). Hvis disse feiler etter transfer
-      // er pengene betalt og loggene logger feilen prominent for
-      // ops-rekonsiliering — men vi unngår nå det verste scenariet
-      // (state-mutasjon før wallet-bevegelse).
-      const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
-      // Use the pattern's configured prizePercent instead of hardcoded 30%.
-      // For multi-LINE variants (e.g. 4-row with 10% each), find the specific
-      // unclaimed pattern to get the correct percentage for this claim.
-      const nextLineResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
-      const linePattern = nextLineResult
-        ? game.patterns?.find((p) => p.id === nextLineResult.patternId)
-        : game.patterns?.find((p) => p.claimType === "LINE");
-      const lineIsFixedPrize = !!linePattern && isFixedPrizePattern(linePattern);
-      // Faste premier: annonsert kr-beløp (prize1). Variable: percent av pool.
-      const requestedPayout = lineIsFixedPrize
-        ? Math.max(0, linePattern!.prize1 ?? 0)
-        : Math.floor(game.prizePool * (linePattern?.prizePercent ?? 30) / 100);
-
-      // F2-A: cap calculation + wallet transfer + house-balance lookup. State
-      // mutations (game.lineWinnerId, pool decrement, ledger writes via CRIT-6
-      // audit-trail recovery) remain inline so behavior is unchanged. See
-      // PhasePayoutService.ts for the rationale.
-      //
-      // K2-A CRIT-1 note: PrizePolicyManager.PrizeGameType is currently
-      // "DATABINGO"-only (same 2500-cap applies to MAIN_GAME); ledger-event
-      // uses correct MAIN_GAME via `gameType` below.
-      const linePhaseResult = await this.phasePayoutService.computeAndPayPhase({
-        hallId: room.hallId,
-        roomCode: room.code,
-        gameId: game.id,
-        isTestHall: room.isTestHall === true,
-        // Pass a synthetic pattern-shape if linePattern is missing (legacy
-        // configurations without explicit pattern config) so the service
-        // still gets the correct fixed-prize signal.
-        pattern: linePattern ?? { winningType: undefined, name: undefined },
-        prizePerWinner: requestedPayout,
-        remainingPrizePool: game.remainingPrizePool,
-        remainingPayoutBudget: game.remainingPayoutBudget,
-        houseAccountId,
-        walletId: player.walletId,
-        transferMemo: `Line prize ${room.code}`,
-        idempotencyKey: IdempotencyKeys.adhocLinePrize({
-          gameId: game.id,
-          claimId: claim.id,
-        }),
-        phase: "LINE",
-      });
-      const {
-        payout,
-        payoutSkipped: linePayoutWasSkipped,
-        payoutSkippedReason: linePayoutSkippedReason,
-        rtpCapped: lineRtpCapped,
-        requestedAfterPolicyAndPool,
-        houseAvailableBalance: lineHouseAvailableBalance,
-        walletTransfer: transfer,
-        policy: linePolicy,
-        houseDeficit: lineHouseDeficit,
-      } = linePhaseResult;
-
-      // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): state-mutasjonene
-      // (lineWinnerId + linePatternResult.isWon) MÅ skje uavhengig av
-      // payout-beløp. Tidligere var de inne i `if (payout > 0)` slik at en
-      // gyldig vinning med payout=0 (mode:percent + tom pool, eller
-      // unkonfigurert prizePercent) lot fasen henge i ad-hoc claim-pathen.
-      // wallet.transfer + audit-events forblir gated på payout > 0 fordi
-      // de er bare meningsfulle ved faktisk pengeoverføring.
-      let transferredTxIds: [string, string] | null = null;
-      if (payout > 0 && transfer) {
-        // CRIT-6: I/O FIRST — wallet transfer is committed by the service.
-        // BIN-239 idempotencyKey prevents double payout on retry.
-        // PR-W3 wallet-split: payout is winning → credited to winnings-side.
-
-        // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh i stedet
-        // for optimistisk `player.balance += payout`. Optimistisk += taper
-        // deposit/winnings-split-info → stale balance på 2.+ vinn (en
-        // spiller som først har vunnet LINE og deretter BINGO/mini-game).
-        // Fail-soft: vinneren er kreditert, kun lokal cache er stale.
-        try {
-          await this.refreshPlayerBalancesForWallet(player.walletId);
-        } catch (err) {
-          logger.warn(
-            { err, walletId: player.walletId, gameId: game.id, claimId: claim.id, phase: "LINE" },
-            "submitClaim LINE: wallet refresh feilet (best-effort)",
-          );
-        }
-        // FIXED-PRIZE-FIX: track linePoolBeforePayout for audit-event before
-        // we mutate the pool. Service already returned `lineHouseDeficit`
-        // computed against the pre-mutation pool.
-        const linePoolBeforePayout = game.remainingPrizePool;
-        game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
-        game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
-        // BIN-45: Store transaction IDs for idempotency tracking
-        claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-        transferredTxIds = [transfer.fromTx.id, transfer.toTx.id];
-
-        // FIXED-PRIZE-FIX: HOUSE_DEFICIT audit-event når faste premier
-        // overgår tilgjengelig pool. Best-effort; payout er allerede
-        // committet via wallet.transfer.
-        if (lineHouseDeficit > 0) {
-          try {
-            await this.ledger.recordComplianceLedgerEvent({
-              hallId: room.hallId,
-              gameType,
-              channel,
-              eventType: "HOUSE_DEFICIT",
-              amount: lineHouseDeficit,
-              roomCode: room.code,
-              gameId: game.id,
-              claimId: claim.id,
-              playerId: player.id,
-              walletId: player.walletId,
-              sourceAccountId: houseAccountId,
-              policyVersion: linePolicy.id,
-              metadata: {
-                reason: "FIXED_PRIZE_HOUSE_GUARANTEE",
-                phase: "LINE",
-                patternName: linePattern?.name,
-                winningType: linePattern?.winningType,
-                payout,
-                poolBeforePayout: linePoolBeforePayout,
-              },
-            });
-          } catch (err) {
-            logger.warn(
-              { err, gameId: game.id, claimId: claim.id, lineHouseDeficit },
-              "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
-            );
-          }
-        }
-
-        // CRIT-6: post-transfer audit-trail. Pengene er betalt og state
-        // mutert. Hvert steg kjøres sekvensielt med try/catch + recovery-
-        // port-event ved feil (slik at en bakgrunns-job kan re-spille
-        // det feilede steget). Reell tx-atomicity (én outer DB-tx) krever
-        // pool-injeksjon i BingoEngine + client-aware variants på alle 5
-        // services — utenfor scope. Se runPostTransferClaimAuditTrail-
-        // JSDoc for fullt rasjonale.
-        const auditResult = await this.runPostTransferClaimAuditTrail({
-          phase: "LINE",
-          room,
-          game,
-          claim,
-          player,
-          payout,
-          transfer,
-          houseAccountId,
-          gameType,
-          channel,
-          policyVersion: linePolicy.id,
-        });
-        claim.auditTrailStatus = auditResult.status;
-      }
-      // PILOT-EMERGENCY 2026-04-28: state-mutasjoner SKAL skje uavhengig av
-      // payout-beløp. Phase-state må markeres vunnet og winnerId-pekes selv
-      // når payout=0 — ellers henger runden i samme fase fordi
-      // `patternResults[N].isWon === false` og engine fortsetter å lete
-      // etter vinnere på neste ball. Når den finner samme vinner igjen blir
-      // det ad-hoc-claim spam uten at pattern advances.
-      game.lineWinnerId = player.id;
-      const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
-      if (linePatternResult) {
-        linePatternResult.isWon = true;
-        linePatternResult.winnerId = player.id;
-        linePatternResult.wonAtDraw = game.drawnNumbers.length;
-        linePatternResult.payoutAmount = payout;
-        linePatternResult.claimId = claim.id;
-        if (linePayoutWasSkipped) {
-          linePatternResult.payoutSkipped = true;
-          if (linePayoutSkippedReason) {
-            linePatternResult.payoutSkippedReason = linePayoutSkippedReason;
-          }
-        }
-      }
-      // Unngå unused-var-warning for transferredTxIds — bruk den for å
-      // signalisere til lesere at txId-tracking kun skjer når payout > 0.
-      void transferredTxIds;
-      const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
-      claim.payoutAmount = payout;
-      claim.payoutPolicyVersion = linePolicy.id;
-      claim.payoutWasCapped = payout < requestedPayout;
-      claim.rtpBudgetBefore = rtpBudgetBefore;
-      claim.rtpBudgetAfter = rtpBudgetAfter;
-      // RTP-cap-bug-fix 2026-04-29: rtpCapped settes ALLTID når payout faktisk
-      // er capped — fixed-prize-bypass fjernet (game `057c0502`-incident).
-      claim.rtpCapped = lineRtpCapped;
-      if (linePayoutWasSkipped) {
-        claim.payoutSkipped = true;
-        if (linePayoutSkippedReason) {
-          claim.payoutSkippedReason = linePayoutSkippedReason;
-        }
-        logRoomEvent(
-          logger,
-          {
-            roomCode: room.code,
-            gameId: game.id,
-            patternId: linePatternResult?.patternId ?? null,
-            patternName: linePattern?.name ?? null,
-            claimId: claim.id,
-            playerId: player.id,
-            phase: "LINE",
-            configuredFaceValue: requestedPayout,
-            requestedAfterPolicyAndPool,
-            remainingBudget: rtpBudgetBefore,
-            houseAvailableBalance: Number.isFinite(lineHouseAvailableBalance)
-              ? lineHouseAvailableBalance
-              : null,
-            reason: linePayoutSkippedReason,
-          },
-          "game.pattern.payout-skipped",
-        );
-      } else {
-        logRoomEvent(
-          logger,
-          {
-            roomCode: room.code,
-            gameId: game.id,
-            patternId: linePatternResult?.patternId ?? null,
-            patternName: linePattern?.name ?? null,
-            claimId: claim.id,
-            winnerId: player.id,
-            phase: "LINE",
-            payoutAmount: payout,
-            rtpCapped: claim.rtpCapped,
-            faceValue: requestedPayout,
-          },
-          "game.pattern.won",
-        );
-      }
-      claim.bonusTriggered = winningPatternIndex === DEFAULT_BONUS_TRIGGER_PATTERN_INDEX;
-      if (claim.bonusTriggered) {
-        claim.bonusAmount = payout;
-      }
-    }
-
-    if (valid && input.type === "BINGO") {
-      // KRITISK-4: Double-check guard against race between validation and payout
-      if (game.bingoWinnerId) {
-        claim.valid = false;
-        claim.reason = "BINGO_ALREADY_CLAIMED";
-        return claim;
-      }
-      // RTP-cap-bug-fix 2026-04-29 (race-safe): set bingoWinnerId SYNCHRONOUSLY
-      // før vi await-er på wallet.getBalance for house-balance-cap. Uten dette
-      // ville to konkurrerende BINGO-claims begge passere guard-en (linje 2793)
-      // mens første yielder på getBalance-await — så ville begge nå
-      // wallet.transfer og dobbelt-betalt. Vi har ikke en ekte "lock" — vi
-      // bruker `game.bingoWinnerId` som mutex sammen med duplikat-guard-en.
-      // Hvis transfer feiler etter dette, vil claim-en bli ENDED men markert
-      // degraded i audit-trail (CRIT-6-mønsteret nedenfor er bevart).
-      game.bingoWinnerId = player.id;
-      // CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): som LINE-grenen.
-      // game.status='ENDED', endedReason — settes etter at transfer er
-      // committet (CRIT-6 partial-state-protection). Idempotency-keyen
-      // sikrer at retry ikke dobbel-betaler.
-      const endedAtMs = Date.now();
-      const endedAt = new Date(endedAtMs);
-      // FIXED-PRIZE-FIX: For BINGO/Fullt Hus med fixed-prize finner vi
-      // pattern-konfigurasjonen og bruker `prize1` direkte. Variable BINGO
-      // (legacy 100% av rest-pool) bruker fortsatt `game.remainingPrizePool`.
-      const nextBingoResult = game.patternResults?.find((r) => r.claimType === "BINGO" && !r.isWon);
-      const bingoPattern = nextBingoResult
-        ? game.patterns?.find((p) => p.id === nextBingoResult.patternId)
-        : game.patterns?.find((p) => p.claimType === "BINGO");
-      const bingoIsFixedPrize = !!bingoPattern && isFixedPrizePattern(bingoPattern);
-      const requestedPayout = bingoIsFixedPrize
-        ? Math.max(0, bingoPattern!.prize1 ?? 0)
-        : game.remainingPrizePool;
-
-      // F2-A: cap calculation + wallet transfer + house-balance lookup. State
-      // mutations (game.status="ENDED", game.bingoWinnerId already set as
-      // race-mutex above, pool decrement, ledger writes via CRIT-6 audit-
-      // trail recovery) remain inline so behavior is unchanged. See
-      // PhasePayoutService.ts for the rationale.
-      //
-      // RTP-cap-bug-fix 2026-04-29: hvis transfer feiler MÅ vi rulle tilbake
-      // `game.bingoWinnerId` siden vi satte den synkront tidlig som race-
-      // mutex. CRIT-6-kontrakten lover at state forblir uendret ved transfer-
-      // feil — denne try/catch garanterer det.
-      let bingoPhaseResult;
-      try {
-        bingoPhaseResult = await this.phasePayoutService.computeAndPayPhase({
-          hallId: room.hallId,
-          roomCode: room.code,
-          gameId: game.id,
-          isTestHall: room.isTestHall === true,
-          // Pass synthetic pattern-shape if bingoPattern missing (legacy)
-          // so the service still gets the correct fixed-prize signal.
-          pattern: bingoPattern ?? { winningType: undefined, name: undefined },
-          prizePerWinner: requestedPayout,
-          remainingPrizePool: game.remainingPrizePool,
-          remainingPayoutBudget: game.remainingPayoutBudget,
-          houseAccountId,
-          walletId: player.walletId,
-          transferMemo: `Bingo prize ${room.code}`,
-          idempotencyKey: IdempotencyKeys.adhocBingoPrize({
-            gameId: game.id,
-            claimId: claim.id,
-          }),
-          phase: "BINGO",
-        });
-      } catch (err) {
-        // CRIT-6 partial-state-protection: rull tilbake mutex-låsen så
-        // retry kan komme inn, og slik at en feilet transfer ikke
-        // markerer runden som vunnet i state-snapshot.
-        game.bingoWinnerId = undefined;
-        throw err;
-      }
-      const {
-        payout,
-        payoutSkipped: bingoPayoutWasSkipped,
-        payoutSkippedReason: bingoPayoutSkippedReason,
-        rtpCapped: bingoRtpCapped,
-        rtpBudgetBefore,
-        requestedAfterPolicyAndPool,
-        houseAvailableBalance: bingoHouseAvailableBalance,
-        walletTransfer: transfer,
-        policy: bingoPolicy,
-        houseDeficit: bingoHouseDeficit,
-      } = bingoPhaseResult;
-
-      // PILOT-EMERGENCY 2026-04-28 (testbruker-diagnose): vinner-marker
-      // (game.bingoWinnerId) MÅ settes uavhengig av payout-beløp slik at
-      // duplikat-claim-guard (linje ~2360) avviser doble innsendinger og
-      // engine vet hvem som vant. wallet.transfer + audit-events forblir
-      // gated på payout > 0.
-      if (payout > 0 && transfer) {
-        // CRIT-6: wallet-transfer is committed by the service.
-        // BIN-239 idempotencyKey prevents double payout on retry.
-        // PR-W3 wallet-split: payout is winning → credited to winnings-side.
-
-        // Hot-fix Tobias 2026-04-26: autoritativ wallet-refresh — se
-        // kommentar i LINE-grenen over for begrunnelse (stale balance
-        // på 2.+ vinn pga deposit/winnings-split). Fail-soft.
-        try {
-          await this.refreshPlayerBalancesForWallet(player.walletId);
-        } catch (err) {
-          logger.warn(
-            { err, walletId: player.walletId, gameId: game.id, claimId: claim.id, phase: "BINGO" },
-            "submitClaim BINGO: wallet refresh feilet (best-effort)",
-          );
-        }
-        // BIN-45: Store transaction IDs for idempotency tracking
-        claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
-
-        // FIXED-PRIZE-FIX: HOUSE_DEFICIT audit-event når faste premier
-        // overgår tilgjengelig pool. Best-effort. Pool-mutasjonen for
-        // BINGO-grenen skjer etter audit (linje under), så
-        // game.remainingPrizePool er fortsatt pre-payout her — service
-        // computed `bingoHouseDeficit` against that pre-mutation value.
-        const bingoPoolBeforePayout = game.remainingPrizePool;
-        if (bingoHouseDeficit > 0) {
-          try {
-            await this.ledger.recordComplianceLedgerEvent({
-              hallId: room.hallId,
-              gameType,
-              channel,
-              eventType: "HOUSE_DEFICIT",
-              amount: bingoHouseDeficit,
-              roomCode: room.code,
-              gameId: game.id,
-              claimId: claim.id,
-              playerId: player.id,
-              walletId: player.walletId,
-              sourceAccountId: houseAccountId,
-              policyVersion: bingoPolicy.id,
-              metadata: {
-                reason: "FIXED_PRIZE_HOUSE_GUARANTEE",
-                phase: "BINGO",
-                patternName: bingoPattern?.name,
-                winningType: bingoPattern?.winningType,
-                payout,
-                poolBeforePayout: bingoPoolBeforePayout,
-              },
-            });
-          } catch (err) {
-            logger.warn(
-              { err, gameId: game.id, claimId: claim.id, bingoHouseDeficit },
-              "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
-            );
-          }
-        }
-
-        // CRIT-6: post-transfer audit-trail. Se LINE-grenen over for
-        // detaljer. Status registreres på claim slik at klient/UI kan se
-        // om audit-trailen er degradert (ops-flagg).
-        const auditResult = await this.runPostTransferClaimAuditTrail({
-          phase: "BINGO",
-          room,
-          game,
-          claim,
-          player,
-          payout,
-          transfer,
-          houseAccountId,
-          gameType,
-          channel,
-          policyVersion: bingoPolicy.id,
-        });
-        claim.auditTrailStatus = auditResult.status;
-      }
-      // PILOT-EMERGENCY 2026-04-28: state-mutasjoner SKAL skje uavhengig av
-      // payout-beløp. game.bingoWinnerId, game.status="ENDED", endedReason
-      // og finishPlaySessions må kjøres slik at runden faktisk avsluttes
-      // selv ved payout=0 (mode:percent + tom pool eller unkonfigurert
-      // prizePercent). Tidligere ble bingoWinnerId-marker glemt og runden
-      // hang i RUNNING med duplikat-claim-guard som ikke fanget retries.
-      //
-      // RTP-cap-bug-fix 2026-04-29: bingoWinnerId er ALLEREDE satt synkront
-      // ovenfor (linje ~2806) som race-mutex mot duplikat-claim. Vi setter
-      // det IKKE på nytt her — fjerner double-write som kunne skjule en
-      // etterfølgende mid-flight overwrite-bug.
-      game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
-      game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
-      game.status = "ENDED";
-      game.endedAt = endedAt.toISOString();
-      game.endedReason = "BINGO_CLAIMED";
-      await this.finishPlaySessionsForGame(room, game, endedAtMs);
-      await this.writeGameEndCheckpoint(room, game); // BIN-248: final state after payout settled
-      const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
-      claim.payoutAmount = payout;
-      claim.payoutPolicyVersion = bingoPolicy.id;
-      claim.payoutWasCapped = payout < requestedPayout;
-      claim.rtpBudgetBefore = rtpBudgetBefore;
-      claim.rtpBudgetAfter = rtpBudgetAfter;
-      // RTP-cap-bug-fix 2026-04-29: rtpCapped settes ALLTID når payout faktisk
-      // er capped — fixed-prize-bypass fjernet (game `057c0502`-incident).
-      claim.rtpCapped = bingoRtpCapped;
-      // Record pattern result for the first unclaimed BINGO pattern
-      const bingoPatternResult = game.patternResults?.find((r) => r.claimType === "BINGO" && !r.isWon);
-      if (bingoPatternResult) {
-        bingoPatternResult.isWon = true;
-        bingoPatternResult.winnerId = player.id;
-        bingoPatternResult.wonAtDraw = game.drawnNumbers.length;
-        bingoPatternResult.payoutAmount = payout;
-        bingoPatternResult.claimId = claim.id;
-        if (bingoPayoutWasSkipped) {
-          bingoPatternResult.payoutSkipped = true;
-          if (bingoPayoutSkippedReason) {
-            bingoPatternResult.payoutSkippedReason = bingoPayoutSkippedReason;
-          }
-        }
-      }
-      if (bingoPayoutWasSkipped) {
-        claim.payoutSkipped = true;
-        if (bingoPayoutSkippedReason) {
-          claim.payoutSkippedReason = bingoPayoutSkippedReason;
-        }
-        logRoomEvent(
-          logger,
-          {
-            roomCode: room.code,
-            gameId: game.id,
-            patternId: bingoPatternResult?.patternId ?? null,
-            patternName: bingoPattern?.name ?? null,
-            claimId: claim.id,
-            playerId: player.id,
-            phase: "BINGO",
-            configuredFaceValue: requestedPayout,
-            requestedAfterPolicyAndPool,
-            remainingBudget: rtpBudgetBefore,
-            houseAvailableBalance: Number.isFinite(bingoHouseAvailableBalance)
-              ? bingoHouseAvailableBalance
-              : null,
-            reason: bingoPayoutSkippedReason,
-          },
-          "game.pattern.payout-skipped",
-        );
-      } else {
-        logRoomEvent(
-          logger,
-          {
-            roomCode: room.code,
-            gameId: game.id,
-            patternId: bingoPatternResult?.patternId ?? null,
-            patternName: bingoPattern?.name ?? null,
-            claimId: claim.id,
-            winnerId: player.id,
-            phase: "BINGO",
-            payoutAmount: payout,
-            rtpCapped: claim.rtpCapped,
-            faceValue: requestedPayout,
-          },
-          "game.pattern.won",
-        );
-      }
-    }
-
-    if (this.bingoAdapter.onClaimLogged) {
-      await this.bingoAdapter.onClaimLogged({
-        roomCode: room.code,
-        gameId: game.id,
-        playerId: player.id,
-        type: input.type,
-        valid: claim.valid,
-        reason: claim.reason
-      });
-    }
-
-    // HOEY-6: Write GAME_END checkpoint if the game ended via BINGO_CLAIMED
-    if (game.status === "ENDED" && game.endedReason === "BINGO_CLAIMED") {
-      await this.writeGameEndCheckpoint(room, game);
-    }
-
-    return claim;
-  }
-
-  /**
-   * CRIT-6 (SPILL1_CASINO_GRADE_REVIEW_2026-04-26): post-transfer audit-
-   * trail for submitClaim. Kalt KUN etter at walletAdapter.transfer er
-   * committet og state er mutert.
-   *
-   * **Hvorfor ikke én outer DB-tx?** Reell tx-atomicity (én transaksjon
-   * på tvers av wallet-transfer + alle 5 services) krever at:
-   *   - BingoEngine får direkte pool-tilgang
-   *   - Hver service eksponerer en `*WithClient`-variant
-   *   - Hver adapter (Postgres/InMemory/File/Http) støtter client-mode
-   *
-   * Det er en større refactor (5+ nye service-API-er, 4 adaptere, alle
-   * subklasser av BingoEngine) som ligger utenfor scope for K2-B
-   * (atomic-coordinator-task). I tillegg er BingoEngine ad-hoc-engine
-   * som brukes av Spill 2/3 — der er regulatorisk-skarpheten lavere
-   * (scheduled Spill 1 har egen flyt via Game1PayoutService som
-   * kjører ALT i én `runInTransaction(client => …)`).
-   *
-   * **Atomicity-pattern (denne implementasjonen — CRIT-6 K3):**
-   *   1. Hvert steg kjøres sekvensielt i sin egen try/catch.
-   *   2. Hvis et steg feiler:
-   *      - Pengene er allerede betalt — ikke reversibel.
-   *      - Engine logger prominent (eksisterende oppførsel).
-   *      - Engine kaller `claimAuditTrailRecovery.onAuditTrailStepFailed`
-   *        med en strukturert event som inneholder ALL info trengt for
-   *        replay (slik at en bakgrunns-job kan re-spille det feilede
-   *        steget uten manuell SQL).
-   *   3. `claim.auditTrailStatus` settes til `"degraded"` hvis minst
-   *      ett steg feilet, ellers `"complete"`. Tester verifiserer
-   *      dette flagget.
-   *
-   * **Default no-op:** hvis ingen `claimAuditTrailRecovery`-port er
-   * konfigurert (test-defaults og enkle deploye), faller vi tilbake
-   * til log-only — som er nøyaktig oppførselen før denne K3-oppdateringen.
-   *
-   * Sekvens:
-   *   1. compliance.recordLossEntry  (PAYOUT for netto-tap)        [REGULATORY]
-   *   2. ledger.recordComplianceLedgerEvent  (§11-rapport)          [REGULATORY]
-   *   3. payoutAudit.appendPayoutAuditEvent  (hash-chain audit)     [INTERNAL]
-   *   4. bingoAdapter.onCheckpoint  (BIN-48 crash-recovery)         [INTERNAL]
-   *   5. rooms.persist  (HOEY-7 in-memory ↔ store sync)             [INTERNAL]
-   */
-  private async runPostTransferClaimAuditTrail(input: {
-    phase: "LINE" | "BINGO";
-    room: RoomState;
-    game: GameState;
-    claim: ClaimRecord;
-    player: Player;
-    payout: number;
-    transfer: WalletTransferResult;
-    houseAccountId: string;
-    gameType: LedgerGameType;
-    channel: LedgerChannel;
-    policyVersion: string;
-  }): Promise<{ status: "complete" | "degraded"; failedSteps: ClaimAuditTrailStep[] }> {
-    const {
-      phase,
+    return this.claimSubmitterService.submitClaim({
       room,
       game,
-      claim,
-      player,
-      payout,
-      transfer,
-      houseAccountId,
-      gameType,
-      channel,
-      policyVersion,
-    } = input;
-
-    const failedSteps: ClaimAuditTrailStep[] = [];
-
-    // 1) compliance.recordLossEntry — tracker PAYOUT for netto-tap-beregning.
-    const complianceLossPayload = {
-      walletId: player.walletId,
-      hallId: room.hallId,
-      type: "PAYOUT" as const,
-      amount: payout,
-    };
-    try {
-      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-        type: "PAYOUT",
-        amount: payout,
-        createdAtMs: Date.now(),
-      });
-    } catch (err) {
-      failedSteps.push("complianceLossEntry");
-      logger.error(
-        {
-          err,
-          claimId: claim.id,
-          gameId: game.id,
-          phase,
-          payout,
-          walletId: player.walletId,
-          step: "recordLossEntry",
-        },
-        "[CRIT-6] post-transfer compliance.recordLossEntry feilet — ops-rekonsiliering kreves; pengene er betalt"
-      );
-      await this.fireRecoveryEvent({
-        step: "complianceLossEntry",
-        severity: "REGULATORY",
-        phase,
-        room,
-        game,
-        claim,
-        player,
-        payout,
-        payload: complianceLossPayload,
-        err,
-      });
-    }
-
-    // 2) ledger.recordComplianceLedgerEvent — regulatorisk §11-rapport.
-    const ledgerPayload = {
-      hallId: room.hallId,
-      gameType,
-      channel,
-      eventType: "PRIZE" as const,
-      amount: payout,
-      roomCode: room.code,
-      gameId: game.id,
-      claimId: claim.id,
-      playerId: player.id,
-      walletId: player.walletId,
-      sourceAccountId: transfer.fromTx.accountId,
-      targetAccountId: transfer.toTx.accountId,
-      policyVersion,
-    };
-    try {
-      await this.ledger.recordComplianceLedgerEvent(ledgerPayload);
-    } catch (err) {
-      failedSteps.push("complianceLedgerEvent");
-      logger.error(
-        {
-          err,
-          claimId: claim.id,
-          gameId: game.id,
-          phase,
-          payout,
-          step: "recordComplianceLedgerEvent",
-        },
-        "[CRIT-6] post-transfer ledger.recordComplianceLedgerEvent feilet — REGULATORISK rekonsiliering kreves; pengene er betalt"
-      );
-      await this.fireRecoveryEvent({
-        step: "complianceLedgerEvent",
-        severity: "REGULATORY",
-        phase,
-        room,
-        game,
-        claim,
-        player,
-        payout,
-        payload: ledgerPayload,
-        err,
-      });
-    }
-
-    // 3) payoutAudit.appendPayoutAuditEvent — internt audit-trail.
-    const auditPayload = {
-      kind: "CLAIM_PRIZE" as const,
-      claimId: claim.id,
-      gameId: game.id,
-      roomCode: room.code,
-      hallId: room.hallId,
-      policyVersion,
-      amount: payout,
-      walletId: player.walletId,
-      playerId: player.id,
-      sourceAccountId: houseAccountId,
-      txIds: [transfer.fromTx.id, transfer.toTx.id],
-    };
-    try {
-      await this.payoutAudit.appendPayoutAuditEvent(auditPayload);
-    } catch (err) {
-      failedSteps.push("payoutAuditEvent");
-      logger.error(
-        {
-          err,
-          claimId: claim.id,
-          gameId: game.id,
-          phase,
-          payout,
-          step: "appendPayoutAuditEvent",
-        },
-        "[CRIT-6] post-transfer payoutAudit.appendPayoutAuditEvent feilet — audit-trail har gap; pengene er betalt"
-      );
-      await this.fireRecoveryEvent({
-        step: "payoutAuditEvent",
-        severity: "INTERNAL",
-        phase,
-        room,
-        game,
-        claim,
-        player,
-        payout,
-        payload: auditPayload,
-        err,
-      });
-    }
-
-    // 4) BIN-48 checkpoint — synkron checkpoint etter payout for crash-recovery.
-    if (this.bingoAdapter.onCheckpoint) {
-      const checkpointPayload = {
-        claimId: claim.id,
-        roomCode: room.code,
-        gameId: game.id,
-        payout,
-        txIds: [transfer.fromTx.id, transfer.toTx.id],
-        phase,
-      };
-      try {
-        await this.writePayoutCheckpointWithRetry(
-          room,
-          game,
-          claim.id,
-          payout,
-          [transfer.fromTx.id, transfer.toTx.id],
-          phase,
-        );
-      } catch (err) {
-        failedSteps.push("checkpoint");
-        logger.error(
-          {
-            err,
-            claimId: claim.id,
-            gameId: game.id,
-            phase,
-            payout,
-            step: "writePayoutCheckpointWithRetry",
-          },
-          "[CRIT-6] post-transfer checkpoint feilet — crash-recovery integritet redusert; pengene er betalt"
-        );
-        await this.fireRecoveryEvent({
-          step: "checkpoint",
-          severity: "INTERNAL",
-          phase,
-          room,
-          game,
-          claim,
-          player,
-          payout,
-          payload: checkpointPayload,
-          err,
-        });
-      }
-    }
-
-    // 5) HOEY-7 — persist room-state etter payout.
-    try {
-      await this.rooms.persist(room.code);
-    } catch (err) {
-      failedSteps.push("roomPersist");
-      logger.error(
-        { err, roomCode: room.code, claimId: claim.id, step: "rooms.persist" },
-        "[CRIT-6] post-transfer rooms.persist feilet — in-memory og store kan divergere; pengene er betalt"
-      );
-      await this.fireRecoveryEvent({
-        step: "roomPersist",
-        severity: "INTERNAL",
-        phase,
-        room,
-        game,
-        claim,
-        player,
-        payout,
-        payload: { roomCode: room.code },
-        err,
-      });
-    }
-
-    return {
-      status: failedSteps.length === 0 ? "complete" : "degraded",
-      failedSteps,
-    };
-  }
-
-  /**
-   * CRIT-6: fire-and-forget hjelper som registrerer et feilet audit-trail-
-   * steg på recovery-porten. Selve porten må ikke kaste — hvis den gjør
-   * det, faller vi tilbake til log-only (samme som før porten var wire-t).
-   *
-   * Brukes UTELUKKENDE av {@link runPostTransferClaimAuditTrail} — caller
-   * passer eksakt payload som ville blitt sendt til den feilende
-   * service-metoden, slik at recovery-job kan re-spille kallet 1:1.
-   */
-  private async fireRecoveryEvent(input: {
-    step: ClaimAuditTrailStep;
-    severity: ClaimAuditTrailSeverity;
-    phase: "LINE" | "BINGO";
-    room: RoomState;
-    game: GameState;
-    claim: ClaimRecord;
-    player: Player;
-    payout: number;
-    payload: Record<string, unknown>;
-    err: unknown;
-  }): Promise<void> {
-    const { step, severity, phase, room, game, claim, player, payout, payload, err } = input;
-    const errAsAny = err as { message?: string; code?: string };
-    const errorMessage =
-      typeof errAsAny?.message === "string" ? errAsAny.message : String(err);
-    const errorCode = typeof errAsAny?.code === "string" ? errAsAny.code : undefined;
-    const event: ClaimAuditTrailFailedEvent = {
-      step,
-      severity,
-      phase,
-      claimId: claim.id,
-      gameId: game.id,
-      roomCode: room.code,
-      hallId: room.hallId,
-      walletId: player.walletId,
-      playerId: player.id,
-      payoutAmount: payout,
-      payload,
-      errorMessage,
-      errorCode,
-      failedAt: new Date().toISOString(),
-    };
-    try {
-      await this.claimAuditTrailRecovery.onAuditTrailStepFailed(event);
-    } catch (recoveryErr) {
-      logger.error(
-        {
-          err: recoveryErr,
-          claimId: claim.id,
-          step,
-        },
-        "[CRIT-6] claimAuditTrailRecovery.onAuditTrailStepFailed kastet — recovery-event tapt, kun log-trail igjen"
-      );
-    }
+      playerId: input.playerId,
+      type: input.type,
+    });
   }
 
   // ── Jackpot (Game 5 Free Spin) ──────────────────────────────────────────
