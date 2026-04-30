@@ -18,6 +18,7 @@
     "seed:demo-tv-minimal": "tsx scripts/seed-demo-tv-minimal.ts",
     "import:legacy-templates": "tsx scripts/import-legacy-subgame-templates.ts",
     "seed:legacy-config": "tsx scripts/seed-legacy-game-config.ts",
+    "smoke-test": "tsx scripts/e2e-smoke-test.ts",
     "spec:lint": "redocly lint openapi.yaml"
   },
   "dependencies": {
