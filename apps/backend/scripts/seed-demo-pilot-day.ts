@@ -13,12 +13,17 @@
  *   3) GameType-katalog-rad for Spill 1 (slug `bingo`) inn i
  *      `app_game_management` med 8 ticket-farger og pattern-priser per farge
  *      (Rad 1-4 + Fullt Hus).
- *   4) Sub-game "Wheel of Fortune" i `app_sub_games` med pattern-rad +
- *      8 farge-array (Small/Large × Yellow/White/Purple + Red + Green).
+ *   4) Fire sub-games i `app_sub_games` — én per mini-game-type i Game 1-
+ *      rotasjonen (Wheel of Fortune, Treasure Chest, Mystery Joker,
+ *      ColorDraft) med pattern-rad + 8 farge-array (Small/Large ×
+ *      Yellow/White/Purple + Red + Green). Stable IDs gjør re-runs
+ *      idempotente. BIN-804 F1.
  *   5) Schedule-mal i `app_schedules` (Mon-Sun 18:00-22:00) som bundler
- *      sub-gamen.
+ *      alle 4 sub-games i `sub_games_json`.
  *   6) DailySchedule for I DAG og I MORGEN status=active koblet til
- *      hall + hall-gruppe + game-management.
+ *      hall + hall-gruppe + game-management. Refererer alle 4 sub-games
+ *      i `subgames_json` slik at agenten kan rotere gjennom hele mini-
+ *      game-katalogen i én demo-dag.
  *   7) Admin-bruker `demo-admin@spillorama.no` (role=ADMIN).
  *   8) Agent-bruker `demo-agent@spillorama.no` (role=AGENT) tilknyttet
  *      demo-hallen som primaryHallId via `app_agent_halls` med is_primary.
@@ -64,12 +69,56 @@ const HALL_GROUP_ID = "demo-goh";
 const HALL_GROUP_NAME = "Demo GoH";
 
 const GAME_MANAGEMENT_ID = "demo-gm-spill1";
-const SUB_GAME_ID = "demo-sg-wof";
-const SUB_GAME_NUMBER = "SG_DEMO_WOF";
 const SCHEDULE_ID = "demo-sched-spill1";
 const SCHEDULE_NUMBER = "SID_DEMO_SPILL1";
 const DAILY_SCHEDULE_TODAY_ID = "demo-ds-today";
 const DAILY_SCHEDULE_TOMORROW_ID = "demo-ds-tomorrow";
+
+/**
+ * BIN-804 (F1): 4 sub-games — én per mini-game-type i `MINIGAME_ROTATION`
+ * (BingoEngineMiniGames.ts:47-52). Stable IDs gjør re-runs idempotente.
+ *
+ * Mini-game-rotasjonen skjer engine-side (rotasjonen leser ikke sub-game-
+ * navn), så sub-gamen er kun en label/preset for admin/agent-UI. Vi gir
+ * hvert sub-game en kjenbar tittel slik at agent kan velge presens som
+ * matcher det mini-game som planlegges spilt — i en demo-flyt der vi
+ * ønsker å rotere gjennom alle 4 mini-game-typer.
+ */
+interface DemoSubGame {
+  id: string;
+  number: string;
+  name: string;
+  // Brukes som sub-game-slug i admin-UI; matcher MiniGamesConfigService-
+  // type-feltet ("wheel"/"chest"/"mystery"/"colordraft").
+  miniGameSlug: string;
+}
+
+const SUB_GAMES: readonly DemoSubGame[] = [
+  {
+    id: "demo-sg-wheel",
+    number: "SG_DEMO_WHEEL",
+    name: "Wheel of Fortune",
+    miniGameSlug: "wheel",
+  },
+  {
+    id: "demo-sg-chest",
+    number: "SG_DEMO_CHEST",
+    name: "Treasure Chest",
+    miniGameSlug: "chest",
+  },
+  {
+    id: "demo-sg-mystery",
+    number: "SG_DEMO_MYSTERY",
+    name: "Mystery Joker",
+    miniGameSlug: "mystery",
+  },
+  {
+    id: "demo-sg-colordraft",
+    number: "SG_DEMO_COLORDRAFT",
+    name: "ColorDraft",
+    miniGameSlug: "colordraft",
+  },
+];
 
 const ADMIN_ID = "demo-user-admin";
 const ADMIN_EMAIL = "demo-admin@spillorama.no";
@@ -195,9 +244,13 @@ async function main(): Promise<void> {
     await upsertGameManagement(client, ADMIN_ID);
     console.log(`  [game-management] ${GAME_MANAGEMENT_ID} (Spill 1, slug=bingo)`);
 
-    // 7) SubGame (Wheel of Fortune) -----------------------------------------
-    await upsertSubGame(client, ADMIN_ID);
-    console.log(`  [sub-game]        ${SUB_GAME_ID} (Wheel of Fortune, 8 ticket-farger)`);
+    // 7) SubGames (4 stk — én per mini-game-type) ---------------------------
+    for (const sg of SUB_GAMES) {
+      await upsertSubGame(client, ADMIN_ID, sg);
+      console.log(
+        `  [sub-game]        ${sg.id} (${sg.name}, mini-game=${sg.miniGameSlug}, 8 ticket-farger)`,
+      );
+    }
 
     // 8) Schedule-mal (Mon-Sun 18:00-22:00) ---------------------------------
     await upsertSchedule(client, ADMIN_ID);
@@ -616,7 +669,11 @@ async function upsertGameManagement(client: Client, adminId: string): Promise<vo
   );
 }
 
-async function upsertSubGame(client: Client, adminId: string): Promise<void> {
+async function upsertSubGame(
+  client: Client,
+  adminId: string,
+  sg: DemoSubGame,
+): Promise<void> {
   const patternRows = [
     { patternId: "row-1", name: "Rad 1" },
     { patternId: "row-2", name: "Rad 2" },
@@ -625,59 +682,68 @@ async function upsertSubGame(client: Client, adminId: string): Promise<void> {
     { patternId: "full-house", name: "Fullt Hus" },
   ];
 
+  // BIN-804 F1: lagre mini-game-slug i extra_json så admin/agent-UI kan
+  // skille presens-typene (rotasjonen velger fortsatt selv hvilken type
+  // som spilles, men labelen synliggjør hva sub-gamen representerer).
+  const extraJson = { miniGameSlug: sg.miniGameSlug };
+
   await client.query(
     `INSERT INTO app_sub_games
        (id, game_type_id, game_name, name, sub_game_number,
         pattern_rows_json, ticket_colors_json, status,
         extra_json, created_by)
      VALUES
-       ($1, 'bingo', 'Spill 1', 'Wheel of Fortune', $2,
-        $3::jsonb, $4::jsonb, 'active',
-        '{}'::jsonb, $5)
+       ($1, 'bingo', 'Spill 1', $2, $3,
+        $4::jsonb, $5::jsonb, 'active',
+        $6::jsonb, $7)
      ON CONFLICT (id) DO UPDATE
        SET name = EXCLUDED.name,
            game_name = EXCLUDED.game_name,
            pattern_rows_json = EXCLUDED.pattern_rows_json,
            ticket_colors_json = EXCLUDED.ticket_colors_json,
+           extra_json = EXCLUDED.extra_json,
            status = 'active',
            updated_at = now(),
            deleted_at = NULL`,
     [
-      SUB_GAME_ID,
-      SUB_GAME_NUMBER,
+      sg.id,
+      sg.name,
+      sg.number,
       JSON.stringify(patternRows),
       JSON.stringify(TICKET_COLORS),
+      JSON.stringify(extraJson),
       adminId,
     ],
   );
 }
 
 async function upsertSchedule(client: Client, adminId: string): Promise<void> {
-  // Enkel sub-game-bundle som matcher SubGame-malen + Wheel of Fortune-config.
-  const subGames = [
-    {
-      subGameId: SUB_GAME_ID,
-      name: "Wheel of Fortune",
-      custom_game_name: "Wheel of Fortune",
-      start_time: "18:00",
-      end_time: "22:00",
-      notificationStartTime: "60s",
-      minseconds: 30,
-      maxseconds: 120,
-      seconds: 60,
-      ticketTypesData: {
-        ticketType: TICKET_COLORS,
-        ticketPrice: [1000, 2000, 1500, 3000, 2500, 4000, 1000, 1000],
-        ticketPrize: [0, 0, 0, 0, 0, 0, 0, 0],
-        options: [],
-      },
-      jackpotData: {
-        jackpotPrize: { yellow: 0, white: 0, purple: 0, red: 0, green: 0 },
-        jackpotDraw: 0,
-      },
-      elvisData: { replaceTicketPrice: 0 },
+  // BIN-804 F1: bundler alle 4 sub-games i schedule-malen slik at hele
+  // mini-game-rotasjonen er konfigurert i én plan. Hvert sub-game får
+  // identisk timing/pris-config — kun navn + subGameId varierer.
+  const subGames = SUB_GAMES.map((sg) => ({
+    subGameId: sg.id,
+    name: sg.name,
+    custom_game_name: sg.name,
+    start_time: "18:00",
+    end_time: "22:00",
+    notificationStartTime: "60s",
+    minseconds: 30,
+    maxseconds: 120,
+    seconds: 60,
+    miniGameSlug: sg.miniGameSlug,
+    ticketTypesData: {
+      ticketType: TICKET_COLORS,
+      ticketPrice: [1000, 2000, 1500, 3000, 2500, 4000, 1000, 1000],
+      ticketPrize: [0, 0, 0, 0, 0, 0, 0, 0],
+      options: [],
     },
-  ];
+    jackpotData: {
+      jackpotPrize: { yellow: 0, white: 0, purple: 0, red: 0, green: 0 },
+      jackpotDraw: 0,
+    },
+    elvisData: { replaceTicketPrice: 0 },
+  }));
 
   await client.query(
     `INSERT INTO app_schedules
@@ -716,16 +782,18 @@ async function upsertDailySchedule(
     hallIds: [HALL_ID],
     groupHallIds: [HALL_GROUP_ID],
   };
-  const subgamesJson = [
-    {
-      subGameId: SUB_GAME_ID,
-      index: 0,
-      ticketPrice: 1000,
-      prizePool: 0,
-      patternId: "full-house",
-      status: "active",
-    },
-  ];
+  // BIN-804 F1: alle 4 sub-games refereres i daily schedule-en slik at
+  // agent kan rotere gjennom hele mini-game-katalogen i én demo-dag.
+  // `index` styrer rekkefølgen i sub-game-tabellen, ikke mini-game-
+  // rotasjonen (engine-side, BingoEngineMiniGames.MINIGAME_ROTATION).
+  const subgamesJson = SUB_GAMES.map((sg, index) => ({
+    subGameId: sg.id,
+    index,
+    ticketPrice: 1000,
+    prizePool: 0,
+    patternId: "full-house",
+    status: "active",
+  }));
   // Sett end_date til 23:59:59 samme dag for stabil filtrering.
   const endDate = new Date(startDate.getTime() + 24 * 3_600_000 - 1_000);
 
