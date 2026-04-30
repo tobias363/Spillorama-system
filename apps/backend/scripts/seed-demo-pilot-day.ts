@@ -29,6 +29,11 @@
  *      demo-hallen som primaryHallId via `app_agent_halls` med is_primary.
  *   9) 3 spillere `demo-spiller-1@example.com` ... `-3@example.com` med
  *      hallId=demo-hall, KYC=VERIFIED, 500 kr i wallet (deposit_balance).
+ *  10) `app_hall_registrations`-rader (status=ACTIVE) for hver demo-spiller
+ *      slik at agentens player-lookup (`searchPlayersInHall`) faktisk finner
+ *      dem. JOIN-en i PlatformService krever `r.status = 'ACTIVE'`, så uten
+ *      dette får agent-portalen tomme søkeresultater. Stable id-er
+ *      (`reg-<userId>`) gjør re-runs idempotente.
  *
  * Bruk:
  *   cd apps/backend
@@ -221,7 +226,12 @@ async function main(): Promise<void> {
     await ensureAgentHallAssignment(client, AGENT_ID, HALL_ID, ADMIN_ID);
     console.log(`  [agent]           ${AGENT_EMAIL} (id=${AGENT_ID}) primaryHall=${HALL_ID}`);
 
-    // 5) Spillere + wallet topup --------------------------------------------
+    // 5) Spillere + wallet topup + hall-registrering ------------------------
+    // Hall-registrering (app_hall_registrations status=ACTIVE) er PÅKREVD for
+    // at agent-portalens player-lookup (`searchPlayersInHall` i
+    // PlatformService) skal finne spilleren — JOIN-en der filtrerer på
+    // `r.hall_id = X AND r.status = 'ACTIVE'`. Uten denne raden returnerer
+    // søket alltid 0 treff, selv om `app_users.hall_id` peker til hallen.
     for (const player of PLAYERS) {
       await upsertUser(client, {
         id: player.id,
@@ -238,6 +248,18 @@ async function main(): Promise<void> {
         ? `wallet=${topup.walletId} (${PLAYER_DEPOSIT_MAJOR} NOK)`
         : `wallet topup hoppet over: ${topup.reason}`;
       console.log(`  [player]          ${player.email} (id=${player.id}) ${tag}`);
+
+      // Wallet-id er stabilt: `wallet-user-<userId>` (matcher upsertUser).
+      const walletId = `wallet-user-${player.id}`;
+      const registrationId = `reg-${player.id}`;
+      await upsertHallRegistration(client, {
+        id: registrationId,
+        userId: player.id,
+        walletId,
+        hallId: HALL_ID,
+        activatedByUserId: ADMIN_ID,
+      });
+      console.log(`  [hall-reg]        ${registrationId} (user=${player.id}, hall=${HALL_ID}, status=ACTIVE)`);
     }
 
     // 6) GameManagement (Spill 1) -------------------------------------------
@@ -522,6 +544,51 @@ async function ensureAgentHallAssignment(
        SET is_primary = true,
            assigned_by_user_id = EXCLUDED.assigned_by_user_id`,
     [userId, hallId, assignedByUserId],
+  );
+}
+
+interface UpsertHallRegistrationInput {
+  id: string;
+  userId: string;
+  walletId: string;
+  hallId: string;
+  activatedByUserId: string | null;
+}
+
+/**
+ * Sørger for at en spiller har en ACTIVE hall-registrering, slik at
+ * agent-portalens player-lookup faktisk finner spilleren.
+ *
+ * Skjema (`app_hall_registrations`, BIN-583/initial_schema):
+ *   id PK, user_id FK, wallet_id, hall_id FK, status
+ *   ('PENDING'|'ACTIVE'|'INACTIVE'|'BLOCKED'), requested_at,
+ *   activated_at, activated_by_user_id FK, created_at, updated_at,
+ *   UNIQUE (user_id, hall_id).
+ *
+ * Vi bruker `ON CONFLICT (id)` for å være idempotent, og bevarer en
+ * eksisterende `activated_at` (`COALESCE`) så vi ikke ruller fram
+ * tidsstempelet på re-runs. UNIQUE (user_id, hall_id) gjør at vi heller
+ * ikke kan duplisere raden via konkurrerende kjøringer.
+ */
+async function upsertHallRegistration(
+  client: Client,
+  input: UpsertHallRegistrationInput,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO app_hall_registrations
+       (id, user_id, wallet_id, hall_id, status,
+        requested_at, activated_at, activated_by_user_id)
+     VALUES
+       ($1, $2, $3, $4, 'ACTIVE',
+        now(), now(), $5)
+     ON CONFLICT (id) DO UPDATE
+       SET wallet_id = EXCLUDED.wallet_id,
+           hall_id = EXCLUDED.hall_id,
+           status = 'ACTIVE',
+           activated_at = COALESCE(app_hall_registrations.activated_at, EXCLUDED.activated_at),
+           activated_by_user_id = COALESCE(app_hall_registrations.activated_by_user_id, EXCLUDED.activated_by_user_id),
+           updated_at = now()`,
+    [input.id, input.userId, input.walletId, input.hallId, input.activatedByUserId],
   );
 }
 
