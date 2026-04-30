@@ -1,14 +1,14 @@
 /**
- * Agent-portal skeleton-dashboard + player-list admin-UI-sider.
+ * Agent-portal dashboard + player-list admin-UI-sider.
  *
- * Agent-portal skeleton PR omskrev AgentDashboardPage til ren skjelett-
- * visning med KPI + Latest Requests + Top 5 Players + Ongoing Games tabs
- * (placeholder-bokser). Tidligere shift-info-varianten flyttes til
- * /agent/cashinout-flyten i en oppfølger-PR (se /agent/cashinout route).
+ * Real-data-wiring koblet AgentDashboardPage til /api/agent/dashboard og
+ * rendrer alle 4 wireframe-widgets med faktiske respons-felter (KPI,
+ * Latest Requests, Top 5 Players, Ongoing Games tabs Spill 1-3 + SpinnGo).
  *
  * Tester:
- *   - AgentDashboardPage rendrer KPI-boks + Latest Requests-widget + Top
- *     5 Players-widget + Ongoing Games tabs (game1-4)
+ *   - AgentDashboardPage poller /api/agent/dashboard og rendrer widgets
+ *   - Tab-bytting oppdaterer active-klasse
+ *   - unmount avbryter polling
  *   - AgentPlayersPage viser liste og export-knapp
  *   - Routes eksisterer i routes.ts med agent+hall-operator roles
  *   - Placeholder-routes for /agent/* skeleton registrert
@@ -60,7 +60,7 @@ describe("routes — agent-portal skeleton", () => {
   });
 });
 
-describe("AgentDashboardPage (skeleton)", () => {
+describe("AgentDashboardPage", () => {
   beforeEach(() => {
     initI18n();
     document.body.innerHTML = '<div id="c"></div>';
@@ -72,36 +72,131 @@ describe("AgentDashboardPage (skeleton)", () => {
     window.localStorage.removeItem("bingo_admin_access_token");
   });
 
-  it("rendrer KPI-boks, Latest Requests, Top 5 Players og Ongoing Games tabs", async () => {
+  function dashboardFixture(overrides: Record<string, unknown> = {}): unknown {
+    return {
+      agent: { userId: "agent-1", email: "agent@x.no", displayName: "Agent" },
+      shift: {
+        id: "s1",
+        hallId: "hall-a",
+        startedAt: "2026-04-30T08:00:00Z",
+        endedAt: null,
+        dailyBalance: 100,
+        totalCashIn: 0,
+        totalCashOut: 0,
+        totalCardIn: 0,
+        totalCardOut: 0,
+        sellingByCustomerNumber: 0,
+        hallCashBalance: 0,
+        settledAt: null,
+      },
+      counts: {
+        transactionsToday: 0,
+        playersInHall: 250,
+        activeShiftsInHall: 1,
+        pendingRequests: 2,
+      },
+      recentTransactions: [],
+      latestRequests: [
+        {
+          id: "req-1",
+          kind: "deposit",
+          userId: "user-1",
+          amountCents: 10000,
+          createdAt: "2026-04-30T08:30:00Z",
+        },
+        {
+          id: "req-2",
+          kind: "deposit",
+          userId: "user-2",
+          amountCents: 25000,
+          createdAt: "2026-04-30T08:45:00Z",
+        },
+      ],
+      topPlayers: [
+        { id: "p1", username: "alice", walletAmount: 1500 },
+        { id: "p2", username: "bob", walletAmount: 1200 },
+      ],
+      ongoingGames: [
+        {
+          roomCode: "rm-bingo-1",
+          hallId: "hall-a",
+          gameSlug: "bingo",
+          gameStatus: "RUNNING",
+          playerCount: 12,
+          createdAt: "2026-04-30T09:00:00Z",
+        },
+        {
+          roomCode: "rm-rocket-1",
+          hallId: "hall-a",
+          gameSlug: "rocket",
+          gameStatus: "WAITING",
+          playerCount: 5,
+          createdAt: "2026-04-30T09:30:00Z",
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("poller /api/agent/dashboard og rendrer alle 4 widgets", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(okJson(dashboardFixture()));
     const container = document.getElementById("c")!;
     const mod = await import("../src/pages/agent-dashboard/AgentDashboardPage.js");
     mod.mountAgentDashboard(container);
-    // Skeleton rendrer synkront — ingen fetch/polling
+    // Vent på initial fetch
+    await new Promise((r) => setTimeout(r, 50));
+
     expect(container.querySelector("[data-marker='agent-dashboard-kpis']")).toBeTruthy();
-    expect(container.querySelector("[data-kpi='approved-players']")).toBeTruthy();
+    expect(container.querySelector("[data-kpi='approved-players']")?.textContent).toBe("250");
     expect(container.querySelector("[data-marker='agent-dashboard-latest-requests']")).toBeTruthy();
     expect(container.querySelector("[data-marker='agent-dashboard-top-players']")).toBeTruthy();
     expect(container.querySelector("[data-marker='agent-dashboard-ongoing-games']")).toBeTruthy();
+    expect(container.querySelector("[data-marker='cash-in-out-button']")).toBeTruthy();
+    expect(container.querySelector("[data-marker='lang-toggle']")).toBeTruthy();
 
-    // Sjekk at alle 4 game-tabs finnes (Game 1-4)
+    // 4 game-tabs finnes (Spill 1-3 + SpinnGo) — game4 er deprecated
     const tabs = container.querySelectorAll("a[data-game-tab]");
     expect(tabs).toHaveLength(4);
     const tabIds = Array.from(tabs).map((a) => a.getAttribute("data-game-tab"));
-    expect(tabIds).toEqual(["game1", "game2", "game3", "game4"]);
+    expect(tabIds).toEqual(["game1", "game2", "game3", "game5"]);
 
-    // Placeholder-merke ("Kommer snart") i alle 4 panes
-    const panes = container.querySelectorAll("[data-marker='ongoing-games-pane']");
-    expect(panes).toHaveLength(4);
+    // Latest requests-rader (2 fra fixture)
+    expect(container.querySelectorAll("[data-marker='latest-request-row']")).toHaveLength(2);
+    // Top players-rader (2 fra fixture)
+    expect(container.querySelectorAll("[data-marker='top-player-row']")).toHaveLength(2);
 
-    // 5 dummy latest-request-rader og 5 top-player-rader
-    expect(container.querySelectorAll("[data-marker='latest-request-row']")).toHaveLength(5);
-    expect(container.querySelectorAll("[data-marker='top-player-row']")).toHaveLength(5);
+    mod.unmountAgentDashboard();
   });
 
-  it("tab-bytting oppdaterer active-klasse", async () => {
+  it("rendrer 'ingen forespørsler'-fallback når lister er tomme", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      okJson(
+        dashboardFixture({
+          latestRequests: [],
+          topPlayers: [],
+          ongoingGames: [],
+          counts: { transactionsToday: 0, playersInHall: 0, activeShiftsInHall: 0, pendingRequests: 0 },
+        }),
+      ),
+    );
     const container = document.getElementById("c")!;
     const mod = await import("../src/pages/agent-dashboard/AgentDashboardPage.js");
     mod.mountAgentDashboard(container);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(container.querySelectorAll("[data-marker='latest-request-row']")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-marker='top-player-row']")).toHaveLength(0);
+    expect(container.textContent?.toLowerCase()).toContain("ingen ventende");
+
+    mod.unmountAgentDashboard();
+  });
+
+  it("tab-bytting oppdaterer active-klasse", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(okJson(dashboardFixture()));
+    const container = document.getElementById("c")!;
+    const mod = await import("../src/pages/agent-dashboard/AgentDashboardPage.js");
+    mod.mountAgentDashboard(container);
+    await new Promise((r) => setTimeout(r, 50));
 
     // Default active tab er game1
     const pane1 = container.querySelector("#tab-game1");
@@ -110,16 +205,22 @@ describe("AgentDashboardPage (skeleton)", () => {
     expect(pane2?.classList.contains("active")).toBe(false);
 
     // Klikk på game2 tab
-    const tab2 = container.querySelector<HTMLAnchorElement>("a[data-game-tab='game2']");
+    const tab2 = container.querySelector<HTMLAnchorElement>(
+      "a[data-game-tab='game2']",
+    );
     tab2!.click();
     expect(pane1?.classList.contains("active")).toBe(false);
     expect(pane2?.classList.contains("active")).toBe(true);
+
+    mod.unmountAgentDashboard();
   });
 
-  it("unmountAgentDashboard er no-op (skeleton har ingen timere)", async () => {
+  it("unmountAgentDashboard avbryter polling-timeren", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(okJson(dashboardFixture()));
     const container = document.getElementById("c")!;
     const mod = await import("../src/pages/agent-dashboard/AgentDashboardPage.js");
     mod.mountAgentDashboard(container);
+    await new Promise((r) => setTimeout(r, 50));
     // Skal ikke kaste eller ha bivirkninger
     expect(() => mod.unmountAgentDashboard()).not.toThrow();
   });

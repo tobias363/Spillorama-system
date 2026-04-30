@@ -4,6 +4,30 @@
 
 import { apiRequest, getToken } from "./client.js";
 
+export interface AgentDashboardLatestRequest {
+  id: string;
+  kind: "deposit" | "withdraw";
+  userId: string;
+  amountCents: number;
+  createdAt: string;
+}
+
+export interface AgentDashboardTopPlayer {
+  id: string;
+  username: string;
+  walletAmount: number;
+  avatar?: string;
+}
+
+export interface AgentDashboardOngoingGame {
+  roomCode: string;
+  hallId: string;
+  gameSlug: string;
+  gameStatus: string;
+  playerCount: number;
+  createdAt: string;
+}
+
 export interface AgentDashboard {
   agent: {
     userId: string;
@@ -28,6 +52,7 @@ export interface AgentDashboard {
     transactionsToday: number;
     playersInHall: number | null;
     activeShiftsInHall: number | null;
+    pendingRequests: number | null;
   };
   recentTransactions: Array<{
     id: string;
@@ -36,6 +61,12 @@ export interface AgentDashboard {
     paymentMethod: string;
     createdAt: string;
   }>;
+  /** Wireframe widget — pending deposit-requests for agentens hall (max 5). */
+  latestRequests: AgentDashboardLatestRequest[];
+  /** Wireframe widget — top 5 spillere etter wallet-balanse i hallen. */
+  topPlayers: AgentDashboardTopPlayer[];
+  /** Wireframe widget — pågående spill (Spill 1-3 + SpinnGo) i hallen. */
+  ongoingGames: AgentDashboardOngoingGame[];
 }
 
 export interface AgentPlayer {
