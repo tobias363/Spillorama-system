@@ -322,7 +322,19 @@ export class TicketGridHtml {
   private computePrice(ticket: Ticket, opts: { entryFee: number; state: GameState }): number {
     if (typeof ticket.price === "number") return Math.round(ticket.price);
     const tt = opts.state.ticketTypes?.find((x) => x.type === ticket.type);
-    return Math.round(opts.entryFee * (tt?.priceMultiplier ?? 1));
+    // Per-brett pris (det som vises på hvert enkelt brett-kort), ikke bundle-pris.
+    // `priceMultiplier` skalerer bundle-pris fra base-entryFee (Small Yellow=1×,
+    // Large Yellow=3× osv.). `ticketCount` er antall brett bundlen utgjør
+    // (Small=1 brett, Large=3 brett). Deler vi bundle-pris på ticketCount får vi
+    // pris per enkelt brett:
+    //   Small Yellow:  10 × 1 / 1 = 10 kr per brett ✅
+    //   Large Yellow:  10 × 3 / 3 = 10 kr per brett ✅ (3 brett bundled, totalt 30 kr)
+    // Tidligere returnerte denne 30 kr per Large-brett — bundle-pris i stedet
+    // for per-brett-pris (verifisert live 2026-04-30 av Tobias).
+    const priceMultiplier = tt?.priceMultiplier ?? 1;
+    const ticketCount = tt?.ticketCount ?? 1;
+    const bundlePrice = opts.entryFee * priceMultiplier;
+    return Math.round(bundlePrice / ticketCount);
   }
 
   private applyMarks(state: GameState, liveCount: number): void {
