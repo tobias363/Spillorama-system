@@ -231,7 +231,6 @@ import { createAdminPhysicalTicketsGamesInHallRouter } from "./routes/adminPhysi
 import { PhysicalTicketsGamesInHallService } from "./admin/PhysicalTicketsGamesInHall.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
-import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { createAdminCloseDayRouter } from "./routes/adminCloseDay.js";
 import { CloseDayService } from "./admin/CloseDayService.js";
 import { createAdminDailySchedulesRouter } from "./routes/adminDailySchedules.js";
@@ -1126,11 +1125,10 @@ const auditLogService = new AuditLogService(auditLogStore);
 swedbankPayService.setAuditLogger(auditLogService);
 
 // HV2-B4 (2026-04-30): per-hall Spill 1 prize-floor lookup + ScheduleService
-// floor-håndhevelse. `Spill1PrizeDefaultsService` er duck-typed inn i
-// ScheduleService.setSpill1PrizeDefaults — service-instans må konstrueres
-// her etter `auditLogService` siden begge injiseres post-construction
-// (chicken-egg fra ScheduleService konstruksjon på linje ~921 før
-// auditLogService finnes).
+// floor-håndhevelse. `spill1PrizeDefaultsService` (instansiert ovenfor for
+// HV2-B1+B2 engine-overlay/fetcher-hook) duck-types inn i
+// ScheduleService.setSpill1PrizeDefaults. Wire-up gjøres her — etter
+// auditLogService er klar — siden begge injiseres post-construction.
 //
 // Validering aktiveres kun når Schedule-create/update inneholder
 // `subGames[i].spill1Overrides`-felter som mapper til 5-fase-modellen
@@ -1141,10 +1139,6 @@ swedbankPayService.setAuditLogger(auditLogService);
 // HV2-B1+B2 leverte service-klassen og engine-overlay; HV2-B3 leverer
 // admin-UI for å redigere defaults. HV2-B4 (denne endringen) lukker
 // override-grense-håndhevelsen ved schedule-opprettelse/edit.
-const spill1PrizeDefaultsService = new Spill1PrizeDefaultsService({
-  pool: sharedPool,
-  schema: pgSchema,
-});
 scheduleService.setSpill1PrizeDefaults(spill1PrizeDefaultsService);
 scheduleService.setAuditLogService(auditLogService);
 
