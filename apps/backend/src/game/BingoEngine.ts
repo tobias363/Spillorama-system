@@ -124,6 +124,15 @@ import type {
   ClaimAuditTrailSeverity,
 } from "../adapters/ClaimAuditTrailRecoveryPort.js";
 import { NoopClaimAuditTrailRecoveryPort } from "../adapters/ClaimAuditTrailRecoveryPort.js";
+import type {
+  EngineCircuitBreakerPort,
+  EngineHookName,
+} from "../adapters/EngineCircuitBreakerPort.js";
+import {
+  NoopEngineCircuitBreakerPort,
+  isWalletShortageError,
+} from "../adapters/EngineCircuitBreakerPort.js";
+import { RoomErrorCounter } from "./RoomErrorCounter.js";
 // Extracted helpers (refactor/s1-bingo-engine-split — Forslag A)
 import {
   activateJackpot as activateJackpotHelper,
@@ -409,6 +418,22 @@ interface ComplianceOptions {
    * Reference: docs/audit/REFACTOR_AUDIT_PRE_PILOT_2026-04-29.md §2.1 + §6 K3.
    */
   isProductionRuntime?: boolean;
+  /**
+   * Bølge K5 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.4 / CRIT-4): port for
+   * å varsle ops + admin-clients når engine error-handling oppdager
+   * gjentatte feil eller en wallet-shortage. Default: no-op.
+   */
+  engineCircuitBreaker?: EngineCircuitBreakerPort;
+  /**
+   * Bølge K5: terskel for hvor mange same-cause errors som må til før
+   * circuit-breakeren halter rommet. Default 3 (matcher audit-spec).
+   */
+  engineCircuitBreakerThreshold?: number;
+  /**
+   * Bølge K5: tids-vindu (ms) for telleren — feilkjeden resettes hvis
+   * siste feil var lenger enn dette siden. Default 60 000 ms (1 min).
+   */
+  engineCircuitBreakerWindowMs?: number;
 }
 
 
@@ -465,6 +490,22 @@ export class BingoEngine {
    * transfer. Default no-op — produksjon wire-r DB-backed implementasjon.
    */
   protected readonly claimAuditTrailRecovery: ClaimAuditTrailRecoveryPort;
+
+  /**
+   * Bølge K5 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.4 / CRIT-4): circuit-
+   * breaker-port. Default no-op; produksjon wirer Sentry + admin-broadcast.
+   */
+  protected readonly engineCircuitBreaker: EngineCircuitBreakerPort;
+
+  /**
+   * Bølge K5: per-room same-cause error-counter. Lever per-engine-instance
+   * (in-memory). Når threshold passeres halter `handleHookError` rommet
+   * og varsler porten. Resettes ved manuell resume / room destroy.
+   */
+  private readonly roomErrorCounter: RoomErrorCounter;
+
+  /** Bølge K5: terskel for halt-the-room (default 3 fra audit-spec). */
+  private readonly engineCircuitBreakerThreshold: number;
 
   /**
    * K2 (2026-04-29): atomic state owner for armed/reservation/arm-cycle.
@@ -646,6 +687,22 @@ export class BingoEngine {
     // assertSpill1NotAdHoc rejecter retail-haller som havner på BingoEngine
     // istedenfor scheduled Game1DrawEngineService.
     this.isProductionRuntime = options.isProductionRuntime === true;
+
+    // K5 (2026-04-29): circuit-breaker for engine-error-handling. Default
+    // no-op + threshold=3 + window=60s, alle matcher audit §2.4.
+    this.engineCircuitBreaker =
+      options.engineCircuitBreaker ?? new NoopEngineCircuitBreakerPort();
+    const rawThreshold = options.engineCircuitBreakerThreshold;
+    const threshold =
+      typeof rawThreshold === "number" &&
+      Number.isFinite(rawThreshold) &&
+      rawThreshold >= 1
+        ? Math.floor(rawThreshold)
+        : 3;
+    this.engineCircuitBreakerThreshold = threshold;
+    this.roomErrorCounter = new RoomErrorCounter({
+      windowMs: options.engineCircuitBreakerWindowMs,
+    });
   }
 
   async hydratePersistentState(): Promise<void> {
@@ -2123,10 +2180,17 @@ export class BingoEngine {
       if (variantConfigForPreDrawMax?.autoClaimPhaseMode) {
         try {
           await this.evaluateActivePhase(room, game);
+          this.roomErrorCounter.resetHook(
+            room.code,
+            "evaluateActivePhase.preDrawMaxDraws",
+          );
         } catch (err) {
-          logger.error(
-            { err, gameId: game.id, roomCode: room.code },
-            "[PHASE3-FIX] last-chance evaluateActivePhase failed in pre-draw MAX_DRAWS",
+          // K5: same-cause-tracking + halt-the-room.
+          this.handleHookError(
+            "evaluateActivePhase.preDrawMaxDraws",
+            room,
+            game,
+            err,
           );
         }
       }
@@ -2153,10 +2217,17 @@ export class BingoEngine {
       if (variantConfigForBagEmpty?.autoClaimPhaseMode) {
         try {
           await this.evaluateActivePhase(room, game);
+          this.roomErrorCounter.resetHook(
+            room.code,
+            "evaluateActivePhase.drawBagEmpty",
+          );
         } catch (err) {
-          logger.error(
-            { err, gameId: game.id, roomCode: room.code },
-            "[PHASE3-FIX] last-chance evaluateActivePhase failed before DRAW_BAG_EMPTY",
+          // K5: same-cause-tracking + halt-the-room.
+          this.handleHookError(
+            "evaluateActivePhase.drawBagEmpty",
+            room,
+            game,
+            err,
           );
         }
       }
@@ -2250,8 +2321,15 @@ export class BingoEngine {
         drawIndex: game.drawnNumbers.length,
         variantConfig: variantConfigForDraw
       });
+      // K5: hook lykkes — resett same-cause-counter så historiske feil
+      // ikke teller mot terskelen.
+      this.roomErrorCounter.resetHook(room.code, "onDrawCompleted");
     } catch (err) {
-      logger.error({ err, gameId: game.id, roomCode: room.code }, "onDrawCompleted hook failed");
+      // K5 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.4 / CRIT-4): erstatter
+      // tidligere log-then-continue-mønster. handleHookError lager same-
+      // cause-fingerprint, halter rommet ved wallet-shortage eller etter
+      // N consecutive failures, og emitterer EngineDegradedEvent.
+      this.handleHookError("onDrawCompleted", room, game, err);
     }
     // BIN-694: 3-fase norsk 75-ball bingo auto-claim. Gates bak
     // `autoClaimPhaseMode` (ny flag i variantConfig, satt kun av
@@ -2265,11 +2343,11 @@ export class BingoEngine {
     if (variantConfigForDraw?.autoClaimPhaseMode && game.status === "RUNNING") {
       try {
         await this.evaluateActivePhase(room, game);
+        this.roomErrorCounter.resetHook(room.code, "evaluateActivePhase");
       } catch (err) {
-        logger.error(
-          { err, gameId: game.id, roomCode: room.code },
-          "[BIN-694] evaluateActivePhase failed",
-        );
+        // K5: same-cause-tracking + halt-the-room. Wallet-shortage halter
+        // umiddelbart; andre feil kreves >=N consecutive innen 60s-vindu.
+        this.handleHookError("evaluateActivePhase", room, game, err);
       }
     }
     // BIN-615 / PR-C3: Fan-out lucky-number hook. Fires per-player when the
@@ -2327,10 +2405,19 @@ export class BingoEngine {
       if (variantConfigForDraw?.autoClaimPhaseMode) {
         try {
           await this.evaluateActivePhase(room, game);
+          this.roomErrorCounter.resetHook(
+            room.code,
+            "evaluateActivePhase.lastChanceMaxDraws",
+          );
         } catch (err) {
-          logger.error(
-            { err, gameId: game.id, roomCode: room.code },
-            "[FULLTHUS-FIX] last-chance evaluateActivePhase failed before MAX_DRAWS",
+          // K5: same-cause-tracking + halt-the-room. Last-chance-pathen er
+          // sjelden — terskelen passeres bare hvis evaluateActivePhase virkelig
+          // er stuck samme cause på flere draws.
+          this.handleHookError(
+            "evaluateActivePhase.lastChanceMaxDraws",
+            room,
+            game,
+            err,
           );
         }
       }
@@ -3583,10 +3670,19 @@ export class BingoEngine {
     if (variantConfigForEnd?.autoClaimPhaseMode && game.status === "RUNNING") {
       try {
         await this.evaluateActivePhase(room, game);
+        this.roomErrorCounter.resetHook(
+          room.code,
+          "evaluateActivePhase.endGame",
+        );
       } catch (err) {
-        logger.error(
-          { err, gameId: game.id, roomCode: room.code },
-          "[PHASE3-FIX] last-chance evaluateActivePhase failed in endGame",
+        // K5: same-cause-tracking + halt-the-room. endGame-pathen kalles
+        // typisk én gang per runde, så halten er kun aktuell hvis operatør
+        // gjentar endGame-kall mens samme feil vedvarer.
+        this.handleHookError(
+          "evaluateActivePhase.endGame",
+          room,
+          game,
+          err,
         );
       }
     }
@@ -3603,6 +3699,169 @@ export class BingoEngine {
       // BIN-48/BIN-248: Synchronous checkpoint after game end
       await this.writeGameEndCheckpoint(room, game);
     }
+  }
+
+  // ── Bølge K5: engine error-handling circuit-breaker (CRIT-4) ──────────────
+
+  /**
+   * Bølge K5 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.4 / CRIT-4):
+   * sentralisert feil-håndtering for engine-hooks som kjøres uavhengig av
+   * draw-mutasjon (`onDrawCompleted`, `evaluateActivePhase` og dets last-
+   * chance-varianter). Lever to atskilte beskyttelser:
+   *
+   *   1. **Wallet-shortage**: hvis underliggende feil er
+   *      `WalletError("INSUFFICIENT_FUNDS"|"ACCOUNT_NOT_FOUND")`, halter
+   *      vi rommet UMIDDELBART. Disse er ikke transiente — de reflekterer
+   *      en mis-konfigurert house-account, og videre draws vil bare
+   *      gjenta samme feil (jf. prod-incident 2026-04-29 14:18-14:19).
+   *
+   *   2. **Repeated-failure**: per (roomCode, hook) telles same-cause
+   *      errors innen 60s-vindu. Når terskelen passeres (default 3) halter
+   *      vi rommet og emitterer `EngineDegradedEvent`. Forskjellige feil
+   *      eller > 60s mellom feil resetter telleren.
+   *
+   * Halt-the-room går via `pauseGame`-pathen; for ad-hoc rom (test halls
+   * + Spill 2/3) er det BingoEngine.pauseGame, for scheduled Spill 1
+   * delegerer port-implementasjonen til Game1DrawEngineService.
+   *
+   * **Fail-soft:** denne metoden må ALDRI kaste — fanger egne feil
+   * internt slik at draw-loopen ikke bryter på en buggy
+   * circuit-breaker-port.
+   */
+  protected handleHookError(
+    hook: EngineHookName,
+    room: RoomState,
+    game: GameState | undefined,
+    err: unknown,
+  ): void {
+    try {
+      const isWalletShortage = isWalletShortageError(err);
+      const tracked = this.roomErrorCounter.track(room.code, hook, err);
+      const errMsg =
+        err instanceof Error ? err.message : String(err ?? "unknown");
+      const errCode =
+        err instanceof Error
+          ? (err as Error & { code?: unknown }).code
+          : undefined;
+      const errCodeStr = typeof errCode === "string" ? errCode : undefined;
+
+      const baseLog = {
+        err,
+        gameId: game?.id,
+        roomCode: room.code,
+        hook,
+        cause: tracked.cause,
+        errorCount: tracked.count,
+        sameCause: tracked.sameCause,
+        threshold: this.engineCircuitBreakerThreshold,
+      };
+      if (isWalletShortage) {
+        logger.error(
+          baseLog,
+          `[K5] ${hook} WALLET_SHORTAGE — halter rommet`,
+        );
+      } else if (tracked.count >= this.engineCircuitBreakerThreshold) {
+        logger.error(
+          baseLog,
+          `[K5] ${hook} REPEATED_FAILURE — terskel ${this.engineCircuitBreakerThreshold} passert, halter rommet`,
+        );
+      } else {
+        logger.error(baseLog, `[K5] ${hook} hook failed`);
+      }
+
+      const shouldHalt =
+        isWalletShortage || tracked.count >= this.engineCircuitBreakerThreshold;
+      let pauseInitiated = false;
+      if (shouldHalt) {
+        pauseInitiated = this.haltRoomFromCircuitBreaker(
+          room,
+          isWalletShortage
+            ? "wallet_shortage"
+            : "engine_evaluator_repeated_failure",
+        );
+      }
+
+      try {
+        this.engineCircuitBreaker.onEngineDegraded({
+          roomCode: room.code,
+          hook,
+          reason: isWalletShortage
+            ? "WALLET_SHORTAGE"
+            : "REPEATED_HOOK_FAILURE",
+          errorCount: tracked.count,
+          cause: tracked.cause,
+          errorMessage: errMsg.slice(0, 500),
+          errorCode: errCodeStr,
+          gameId: game?.id,
+          hallId: room.hallId,
+          at: new Date().toISOString(),
+          pauseInitiated,
+        });
+      } catch (portErr) {
+        logger.warn(
+          { err: portErr, roomCode: room.code, hook },
+          "[K5] engineCircuitBreaker.onEngineDegraded threw — ignoring",
+        );
+      }
+    } catch (selfErr) {
+      // Defense-in-depth: hvis circuit-breaker selv kaster, må engine
+      // fortsatt overleve. Logg og returner.
+      logger.error(
+        { err: selfErr, roomCode: room.code, hook },
+        "[K5] handleHookError internal failure — circuit-breaker disabled for this call",
+      );
+    }
+  }
+
+  /**
+   * Bølge K5: halt-the-room. Pauser kun ad-hoc Spill 2/3 + test-hall
+   * Spill 1 her — for scheduled Spill 1 må port-implementasjonen ta over
+   * (kan ikke kalle BingoEngine.pauseGame fordi det reject-er scheduled).
+   */
+  private haltRoomFromCircuitBreaker(
+    room: RoomState,
+    reasonCode: "wallet_shortage" | "engine_evaluator_repeated_failure",
+  ): boolean {
+    if (room.scheduledGameId) return false;
+    const game = room.currentGame;
+    if (!game || game.status !== "RUNNING") return false;
+    if (game.isPaused) return false;
+
+    try {
+      game.isPaused = true;
+      game.pauseMessage =
+        reasonCode === "wallet_shortage"
+          ? "Spillet er pauset automatisk fordi house-konto mangler saldo. Kontakt operatør."
+          : "Spillet er pauset automatisk på grunn av gjentatte tekniske feil. Kontakt operatør.";
+      game.pauseReason = reasonCode;
+      game.pauseUntil = undefined;
+      logger.warn(
+        {
+          roomCode: room.code,
+          gameId: game.id,
+          reasonCode,
+          pauseMessage: game.pauseMessage,
+        },
+        "[K5] Game auto-paused by circuit-breaker",
+      );
+      return true;
+    } catch (err) {
+      logger.error(
+        { err, roomCode: room.code, gameId: game.id },
+        "[K5] haltRoomFromCircuitBreaker failed to set pause flags",
+      );
+      return false;
+    }
+  }
+
+  /** Bølge K5: test-hook for å introspectere counter-state. Kun for tester. */
+  __getEngineErrorCounterState(
+    roomCode: string,
+    hook: EngineHookName,
+  ): { count: number; cause: string } | undefined {
+    const s = this.roomErrorCounter.getState(roomCode, hook);
+    if (!s) return undefined;
+    return { count: s.count, cause: s.cause };
   }
 
   // ── BIN-460: Game pause/resume ─────────────────────────────────────────────
@@ -3648,6 +3907,10 @@ export class BingoEngine {
     this.assertSpill1NotAdHoc(room);
     const game = this.requireRunningGame(room);
     if (!game.isPaused) throw new DomainError("GAME_NOT_PAUSED", "Spillet er ikke pauset.");
+    // Bølge K5 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.4 / CRIT-4): manuell
+    // resume betyr at operator har håndtert root-cause — resett circuit-
+    // breaker-counter for hele rommet.
+    this.roomErrorCounter.reset(roomCode);
     game.isPaused = false;
     game.pauseMessage = undefined;
     game.pauseUntil = undefined;
@@ -3830,6 +4093,7 @@ export class BingoEngine {
     this.variantGameTypeByRoom.delete(code);
     this.luckyNumbersByPlayer.delete(code); // BIN-615 / PR-C3
     this.roomStateStore?.delete(code); // BIN-251
+    this.roomErrorCounter.reset(code); // K5: clear circuit-breaker state
   }
 
   getPlayerCompliance(walletId: string, hallId?: string): PlayerComplianceSnapshot {
