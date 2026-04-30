@@ -1125,18 +1125,41 @@ export class BingoEngine {
     // HOEY-4: Track debited players for compensation if startup fails partway through.
     // BIN-250: If any transfer fails mid-loop, all previously debited players are refunded before rethrowing.
     const debitedPlayers: Array<{ player: Player; fromAccountId: string; toAccountId: string; amount: number }> = [];
-    // Per-player ticket counts: resolve each player's ticket count from armedPlayerTicketCounts, clamped to ticketsPerPlayer max.
-    const playerTicketCountMap: Map<string, number> = new Map();
-    for (const player of eligiblePlayers) {
-      const requested = input.armedPlayerTicketCounts?.[player.id] ?? ticketsPerPlayer;
-      playerTicketCountMap.set(player.id, Math.min(requested, ticketsPerPlayer));
-    }
     // BIN-437: Resolve variant config up-front — needed both for the buy-in
     // loop (per-type pricing) and the ticket-generation loop further down.
     // Declaring it here avoids a TDZ trap where the buy-in loop crashed with
     // "Cannot access 'variantConfig' before initialization".
     const variantGameType = input.gameType ?? "standard";
     const variantConfig = input.variantConfig ?? variantConfigModule.getDefaultVariantConfig(variantGameType);
+    // Per-player ticket counts: resolve each player's ticket count from armedPlayerTicketCounts.
+    //
+    // Bug B 2026-04-30 fix: when the player has per-type `armedPlayerSelections`,
+    // the actual brett count is `Σ qty × ticketCount` (weighted), which can
+    // exceed `ticketsPerPlayer` (a per-player CAP that's typically 4 from
+    // `runtimeBingoSettings.autoRoundTicketsPerPlayer`). Clamping the weighted
+    // count via `Math.min(requested, ticketsPerPlayer)` would cause the
+    // pre-round display-cache adoption to mis-align (cache=8, clamp=4 → fall
+    // through), and the legacy-fallback path (no selections) would produce
+    // only `ticketsPerPlayer` brett — losing the Large Yellow's bundled 3
+    // brett that the player paid for.
+    //
+    // The clamp IS still applied for the legacy path (no selections) where
+    // `armedPlayerTicketCounts` is the only available signal of player intent
+    // and could legitimately overshoot the per-player cap. For the
+    // selections-driven path, the cap was ALREADY enforced upstream in
+    // `roomEvents.ts:801-806` (`totalWeighted > 30` rejection at bet:arm) and
+    // by `runtimeBingoSettings.autoRoundTicketsPerPlayer` is irrelevant there
+    // — that setting governs auto-round flat-mode, not selection arming.
+    const playerTicketCountMap: Map<string, number> = new Map();
+    for (const player of eligiblePlayers) {
+      const requested = input.armedPlayerTicketCounts?.[player.id] ?? ticketsPerPlayer;
+      const playerSelections = input.armedPlayerSelections?.[player.id];
+      const hasSelections = playerSelections !== undefined && playerSelections.length > 0;
+      // Selections present → trust the weighted count (already validated upstream).
+      // Otherwise → clamp at `ticketsPerPlayer` so legacy flat-mode cannot exceed.
+      const resolved = hasSelections ? requested : Math.min(requested, ticketsPerPlayer);
+      playerTicketCountMap.set(player.id, resolved);
+    }
 
     if (entryFee > 0 && !isTestGame) {
       try {
