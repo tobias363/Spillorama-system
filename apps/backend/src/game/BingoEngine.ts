@@ -116,6 +116,10 @@ import {
   RoomLifecycleService,
   type RoomLifecycleCallbacks,
 } from "./RoomLifecycleService.js";
+import {
+  DrawOrchestrationService,
+  type DrawOrchestrationCallbacks,
+} from "./DrawOrchestrationService.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
 import type { LedgerGameType, LedgerChannel, ComplianceLedgerEntry, DailyComplianceReport, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
 import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
@@ -454,23 +458,13 @@ export class BingoEngine {
 
   private readonly minRoundIntervalMs: number;
   private readonly minDrawIntervalMs: number;
-  private readonly lastDrawAtByRoom = new Map<string, number>();
   /**
-   * HIGH-5 (Casino Review): per-room draw mutex. Hindrer at to samtidige
-   * `draw:next`-events fra samme rom begge passerer `assertHost` og deretter
-   * muterer `currentGame.drawBag`/`drawnNumbers` parallelt. Per-socket-rate-
-   * limit (`socketRateLimit.ts:23`, 5/2s) er ikke nok — to ulike sockets
-   * (samme host i to faner, eller to admin-tilgangs-paneler) kan kalle
-   * samtidig.
-   *
-   * Verdien er den pågående draw-promisen. Når neste kall kommer mens en
-   * draw er in-flight, kaster vi `DRAW_IN_PROGRESS` istedenfor å vente —
-   * dette hindrer at request-køen vokser ukontrollert hvis et nettverks-
-   * tregt admin-panel sender retries før forrige har returnert.
-   *
-   * Cleared i `finally` etter hver draw og i `destroyRoom`.
+   * F2-D: HIGH-5 per-room draw mutex (`drawLocksByRoom`) and MEDIUM-1/BIN-253
+   * `lastDrawAtByRoom` interval-tracker were moved to
+   * {@link DrawOrchestrationService}. The engine's `cleanupRoomLocalCaches`
+   * callback now invokes `drawOrchestrationService.cleanupRoomCaches(roomCode)`
+   * on `destroyRoom` so they remain leak-free.
    */
-  private readonly drawLocksByRoom = new Map<string, Promise<unknown>>();
   private readonly minPlayersToStart: number;
   private readonly maxDrawsPerRound: number;
   private readonly persistence?: ResponsibleGamingPersistenceAdapter;
@@ -557,6 +551,17 @@ export class BingoEngine {
    * Game2Engine/Game3Engine inheritance + Socket.IO wiring stays unchanged.
    */
   protected readonly roomLifecycleService: RoomLifecycleService;
+  /**
+   * F2-D (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §3.3 / HV-3): extracted the
+   * draw-orchestration flow (`drawNextNumber` + `_drawNextNumberLocked`)
+   * into a stand-alone service. The service owns the HIGH-5 per-room mutex
+   * (`drawLocksByRoom`) + MEDIUM-1/BIN-253 interval state (`lastDrawAtByRoom`).
+   * The public `drawNextNumber` method on this engine is now a thin delegate
+   * so Game2Engine/Game3Engine inheritance + Socket.IO `draw:next` handler +
+   * Game1DrawEngineService + schedulerSetup `onAutoDraw` wiring stay
+   * unchanged.
+   */
+  protected readonly drawOrchestrationService: DrawOrchestrationService;
   private readonly drawBagFactory?: (size: number) => number[];
   /**
    * BIN-615 / PR-C1: Per-room variantConfig cache for hook access (e.g. onDrawCompleted
@@ -722,6 +727,20 @@ export class BingoEngine {
       this.walletAdapter,
       this.rooms,
       this.buildRoomLifecycleCallbacks(),
+    );
+
+    // F2-D: shared draw-orchestration flow (drawNext + lock + interval
+    // tracker). Constructed AFTER bingoAdapter and the constructor-time
+    // primitives (`minDrawIntervalMs`, `maxDrawsPerRound`) are validated
+    // above. The service owns its own `drawLocksByRoom` +
+    // `lastDrawAtByRoom` Maps; the engine's `cleanupRoomLocalCaches`
+    // callback (in {@link buildRoomLifecycleCallbacks}) routes through
+    // `drawOrchestrationService.cleanupRoomCaches` on destroyRoom.
+    this.drawOrchestrationService = new DrawOrchestrationService(
+      this.bingoAdapter,
+      this.minDrawIntervalMs,
+      this.maxDrawsPerRound,
+      this.buildDrawOrchestrationCallbacks(),
     );
 
     // K3 (2026-04-29): production-runtime-flagget. Default false — tester
@@ -1810,13 +1829,74 @@ export class BingoEngine {
       },
       cleanupRoomLocalCaches: (roomCode) => {
         this.roomLastRoundStartMs.delete(roomCode);
-        this.lastDrawAtByRoom.delete(roomCode);
-        this.drawLocksByRoom.delete(roomCode); // HIGH-5
+        // F2-D: drawLocksByRoom + lastDrawAtByRoom now live on the
+        // DrawOrchestrationService — route through it so they don't leak.
+        // (HIGH-5 + MEDIUM-1/BIN-253.)
+        this.drawOrchestrationService.cleanupRoomCaches(roomCode);
         this.variantConfigByRoom.delete(roomCode); // BIN-615 / PR-C1
         this.variantGameTypeByRoom.delete(roomCode);
         this.luckyNumbersByPlayer.delete(roomCode); // BIN-615 / PR-C3
         this.roomStateStore?.delete(roomCode); // BIN-251
       },
+    };
+  }
+
+  /**
+   * F2-D: bygger callback-porten som {@link DrawOrchestrationService} trenger
+   * for å gjøre engine-internal lookups (`requireRoom` / `requirePlayer` /
+   * `requireRunningGame`), kjøre guards (`assertNotScheduled` /
+   * `assertSpill1NotAdHoc` / `assertHost` / `assertWalletAllowedForGameplay`),
+   * fyre variant-hooks (`onDrawCompleted` / `onLuckyNumberDrawn` —
+   * subclass-overrideable på engine), evaluere aktiv fase (skriver wallet
+   * + ledger så implementasjonen blir på engine), rapportere hook-feil til
+   * K5 circuit-breaker (`handleHookError` + `resetHookErrorCounter`), og
+   * skrive checkpoint + finalisere play-sessions.
+   *
+   * `getVariantConfigForRoom` + `autoBindSpill1VariantConfig` +
+   * `getLuckyNumbersForRoom` håndhever at engine eier de tre per-room-cache-
+   * mapsene (`variantConfigByRoom`, `variantGameTypeByRoom`,
+   * `luckyNumbersByPlayer`) som settes av andre engine-metoder
+   * (`startGame`, `setLuckyNumber`) og som leses av flere brukssteder.
+   * Service-en blir derfor ikke direkte koblet til Maps-strukturen —
+   * den ber bare om verdiene via callback.
+   */
+  private buildDrawOrchestrationCallbacks(): DrawOrchestrationCallbacks {
+    return {
+      requireRoom: (roomCode) => this.requireRoom(roomCode),
+      requirePlayer: (room, playerId) => this.requirePlayer(room, playerId),
+      requireRunningGame: (room) => this.requireRunningGame(room),
+      assertNotScheduled: (room) => this.assertNotScheduled(room),
+      assertSpill1NotAdHoc: (room) => this.assertSpill1NotAdHoc(room),
+      assertHost: (room, actorPlayerId) => this.assertHost(room, actorPlayerId),
+      assertWalletAllowedForGameplay: (walletId, nowMs) =>
+        this.assertWalletAllowedForGameplay(walletId, nowMs),
+      evaluateActivePhase: (room, game) => this.evaluateActivePhase(room, game),
+      onDrawCompleted: (ctx) => this.onDrawCompleted(ctx),
+      onLuckyNumberDrawn: (ctx) => this.onLuckyNumberDrawn(ctx),
+      handleHookError: (hook, room, game, err) =>
+        this.handleHookError(hook, room, game, err),
+      resetHookErrorCounter: (roomCode, hook) =>
+        this.roomErrorCounter.resetHook(roomCode, hook),
+      writeDrawCheckpoint: (room, game) => this.writeDrawCheckpoint(room, game),
+      writeGameEndCheckpoint: (room, game) =>
+        this.writeGameEndCheckpoint(room, game),
+      finishPlaySessionsForGame: (room, game, endedAtMs) =>
+        this.finishPlaySessionsForGame(room, game, endedAtMs),
+      getVariantConfigForRoom: (roomCode) =>
+        this.variantConfigByRoom.get(roomCode),
+      autoBindSpill1VariantConfig: (roomCode) => {
+        // VARIANT-CONFIG GUARD auto-bind: keep the engine-owned cache write
+        // here (engine owns the map). Service has already logged the
+        // [CRIT] event before invoking this callback.
+        this.variantConfigByRoom.set(
+          roomCode,
+          variantConfigModule.DEFAULT_NORSK_BINGO_CONFIG,
+        );
+        this.variantGameTypeByRoom.set(roomCode, "bingo");
+        return variantConfigModule.DEFAULT_NORSK_BINGO_CONFIG;
+      },
+      getLuckyNumbersForRoom: (roomCode) =>
+        this.luckyNumbersByPlayer.get(roomCode),
     };
   }
 
@@ -2135,347 +2215,19 @@ export class BingoEngine {
     // No-op by default.
   }
 
-  async drawNextNumber(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
-    // HIGH-5: per-room mutex. To parallelle `draw:next` mot samme rom
-    // skal aldri begge mutere `currentGame.drawBag`. Hvis lock pågår,
-    // reject med rate-limit-aktig DomainError istedenfor å queue (queue
-    // ville økt latency + risiko for back-to-back duplikat-draws hvis
-    // klienten retry'er).
-    const lockKey = input.roomCode.trim().toUpperCase();
-    const inFlight = this.drawLocksByRoom.get(lockKey);
-    if (inFlight !== undefined) {
-      throw new DomainError(
-        "DRAW_IN_PROGRESS",
-        "Et annet trekk for dette rommet pågår allerede. Vent til det er ferdig.",
-      );
-    }
-    const drawPromise = this._drawNextNumberLocked(input);
-    this.drawLocksByRoom.set(lockKey, drawPromise);
-    try {
-      return await drawPromise;
-    } finally {
-      // Kun fjern hvis det fortsatt er VÅR promise — defensiv mot
-      // teoretisk race der destroyRoom har kjørt og en ny lock kunne
-      // vært satt (kan ikke skje med dagens API, men billig å sjekke).
-      if (this.drawLocksByRoom.get(lockKey) === drawPromise) {
-        this.drawLocksByRoom.delete(lockKey);
-      }
-    }
-  }
-
   /**
-   * HIGH-5: faktisk draw-implementasjon. Kalles kun fra
-   * {@link drawNextNumber} som holder per-room-mutex rundt dette.
+   * F2-D: full draw-pipeline (HIGH-5 mutex, MEDIUM-1/BIN-253 interval,
+   * MAX_DRAWS_REACHED / DRAW_BAG_EMPTY end-of-round handling, post-draw
+   * hook chain `onDrawCompleted` → `evaluateActivePhase` →
+   * `onLuckyNumberDrawn`, HOEY-3 checkpoint, FULLTHUS-FIX last-chance,
+   * BIN-689 0-based `drawIndex`) extracted to
+   * {@link DrawOrchestrationService.drawNext}. This wrapper preserves
+   * the public method signature (Game2Engine + Game3Engine + Socket.IO
+   * `draw:next` + Game1DrawEngineService + schedulerSetup all keep
+   * their existing call-shape).
    */
-  private async _drawNextNumberLocked(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
-    const room = this.requireRoom(input.roomCode);
-    // CRIT-4: scheduled Spill 1 må trekkes via Game1DrawEngineService.
-    // Defensiv guard mot dual-engine state-divergens.
-    this.assertNotScheduled(room);
-    // K3: production retail Spill 1 må kjøre via scheduled-engine.
-    this.assertSpill1NotAdHoc(room);
-    this.assertHost(room, input.actorPlayerId);
-    const host = this.requirePlayer(room, input.actorPlayerId);
-    const nowMs = Date.now();
-    this.assertWalletAllowedForGameplay(host.walletId, nowMs);
-
-    // BIN-460: Block draws while game is paused
-    if (room.currentGame?.isPaused) {
-      throw new DomainError("GAME_PAUSED", "Spillet er pauset — trekking ikke tillatt.");
-    }
-
-    // MEDIUM-1/BIN-253: Enforce minimum interval between manual draws
-    if (this.minDrawIntervalMs > 0) {
-      const lastDraw = this.lastDrawAtByRoom.get(room.code);
-      if (lastDraw !== undefined) {
-        const elapsed = nowMs - lastDraw;
-        if (elapsed < this.minDrawIntervalMs) {
-          const waitSec = ((this.minDrawIntervalMs - elapsed) / 1000).toFixed(1);
-          throw new DomainError("DRAW_TOO_FAST", `Vent ${waitSec}s mellom trekninger.`);
-        }
-      }
-    }
-
-    const game = this.requireRunningGame(room);
-    if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
-      // PHASE3-FIX (2026-04-27): Last-chance også her, symmetri med
-      // MAX_DRAWS-grenen post-draw nedenfor. Defense-in-depth.
-      const variantConfigForPreDrawMax = this.variantConfigByRoom.get(room.code);
-      if (variantConfigForPreDrawMax?.autoClaimPhaseMode) {
-        try {
-          await this.evaluateActivePhase(room, game);
-          this.roomErrorCounter.resetHook(
-            room.code,
-            "evaluateActivePhase.preDrawMaxDraws",
-          );
-        } catch (err) {
-          // K5: same-cause-tracking + halt-the-room.
-          this.handleHookError(
-            "evaluateActivePhase.preDrawMaxDraws",
-            room,
-            game,
-            err,
-          );
-        }
-      }
-      if ((game.status as string) === "RUNNING") {
-        const endedAtMs = Date.now();
-        const endedAt = new Date(endedAtMs);
-        game.status = "ENDED";
-        game.endedAt = endedAt.toISOString();
-        game.endedReason = "MAX_DRAWS_REACHED";
-        await this.finishPlaySessionsForGame(room, game, endedAtMs);
-        // HOEY-6/BIN-248: Write GAME_END checkpoint for MAX_DRAWS_REACHED
-        await this.writeGameEndCheckpoint(room, game);
-      }
-      throw new DomainError("NO_MORE_NUMBERS", `Maks antall trekk (${this.maxDrawsPerRound}) er nådd.`);
-    }
-
-    const nextNumber = game.drawBag.shift();
-    if (!nextNumber) {
-      // PHASE3-FIX (2026-04-27): Last-chance evaluateActivePhase også her
-      // — symmetri med MAX_DRAWS_REACHED-grenen lenger ned. Hvis siste
-      // trukne ball fullførte alle phaser men recursion ble avbrutt før
-      // neste fase ble vunnet, gir vi det én siste sjanse.
-      const variantConfigForBagEmpty = this.variantConfigByRoom.get(room.code);
-      if (variantConfigForBagEmpty?.autoClaimPhaseMode) {
-        try {
-          await this.evaluateActivePhase(room, game);
-          this.roomErrorCounter.resetHook(
-            room.code,
-            "evaluateActivePhase.drawBagEmpty",
-          );
-        } catch (err) {
-          // K5: same-cause-tracking + halt-the-room.
-          this.handleHookError(
-            "evaluateActivePhase.drawBagEmpty",
-            room,
-            game,
-            err,
-          );
-        }
-      }
-      // Re-sjekk status: hvis Phase 5 vant, ikke overskriv BINGO_CLAIMED.
-      if ((game.status as string) === "RUNNING") {
-        const endedAtMs = Date.now();
-        const endedAt = new Date(endedAtMs);
-        game.status = "ENDED";
-        game.endedAt = endedAt.toISOString();
-        game.endedReason = "DRAW_BAG_EMPTY";
-        await this.finishPlaySessionsForGame(room, game, endedAtMs);
-        // HOEY-6/BIN-248: Write GAME_END checkpoint for DRAW_BAG_EMPTY
-        await this.writeGameEndCheckpoint(room, game);
-      }
-      throw new DomainError("NO_MORE_NUMBERS", "Ingen tall igjen i trekken.");
-    }
-
-    game.drawnNumbers.push(nextNumber);
-    // LIVE_ROOM_OBSERVABILITY 2026-04-29: per-draw INFO-log. Default-på via
-    // BINGO_VERBOSE_ROOM_LOGS — kan slås AV (eks. for batch-rerun-tester) hvis
-    // log-volum blir et problem. drawIndex er 1-basert (matcher socket-payload).
-    // `source` settes på socket/scheduler-laget — engine selv vet ikke om det
-    // var auto vs manual draw.
-    logRoomEvent(
-      logger,
-      {
-        roomCode: room.code,
-        gameId: game.id,
-        drawIndex: game.drawnNumbers.length,
-        number: nextNumber,
-      },
-      "game.draw",
-    );
-    if (this.bingoAdapter.onNumberDrawn) {
-      await this.bingoAdapter.onNumberDrawn({
-        roomCode: room.code,
-        gameId: game.id,
-        number: nextNumber,
-        drawIndex: game.drawnNumbers.length
-      });
-    }
-    // BIN-615 / PR-C1: variant-specific post-draw hook (no-op by default).
-    // Subclasses (Game3Engine in PR-C3) override to implement auto-claim /
-    // pattern-cycling after each ball. Errors are logged but do not fail the draw.
-    let variantConfigForDraw = this.variantConfigByRoom.get(room.code);
-    // VARIANT-CONFIG GUARD: defense-in-depth (Tobias 2026-04-27, narrowed 2026-04-27)
-    //
-    // Etter Render-restart (eller ethvert in-memory cache-tap) kan
-    // `variantConfigByRoom` være helt tom for et eksisterende rom som
-    // fortsatt tar imot `drawNextNumber`-call. For Spill 1 (`bingo` /
-    // `game_1`) ville dette gjort at `autoClaimPhaseMode` ikke kjørte →
-    // 3-fase auto-claim (BIN-694) ville stille feilet, og
-    // `evaluateActivePhase` ville aldri markert vinnere. Vi velger
-    // fail-loud + auto-bind kun ved cache-miss:
-    //
-    //   1. Logger CRIT-event slik at ops kan se at fallback brukes.
-    //   2. Setter inn `DEFAULT_NORSK_BINGO_CONFIG` så draw-flyten kan
-    //      fortsette med korrekt variant-config istedenfor å degrade
-    //      til standard-mode uten fasestyring.
-    //
-    // VIKTIG: guarden fyrer KUN når `variantConfigForDraw` er helt
-    // undefined (cache-miss). Hvis operator har satt en valid config
-    // med `autoClaimPhaseMode=false` (f.eks. for testing av custom
-    // mode), respekteres den — guarden skal aldri overstyre operator-
-    // satt config stille.
-    //
-    // Andre spill (rocket/monsterbingo/spillorama) skipper auto-bind —
-    // de har sin egen variant-config og skal ikke få Spill 1-default.
-    if (
-      (room.gameSlug === "bingo" || room.gameSlug === "game_1") &&
-      !variantConfigForDraw
-    ) {
-      logger.error(
-        {
-          roomCode: room.code,
-          gameId: game.id,
-          gameSlug: room.gameSlug,
-          hasConfig: false,
-        },
-        "[CRIT] VARIANT_CONFIG_AUTO_BOUND — Spill 1 room mangler variantConfig (cache-miss), auto-binder DEFAULT_NORSK_BINGO_CONFIG",
-      );
-      this.variantConfigByRoom.set(room.code, variantConfigModule.DEFAULT_NORSK_BINGO_CONFIG);
-      this.variantGameTypeByRoom.set(room.code, "bingo");
-      variantConfigForDraw = variantConfigModule.DEFAULT_NORSK_BINGO_CONFIG;
-    }
-    try {
-      await this.onDrawCompleted({
-        room,
-        game,
-        lastBall: nextNumber,
-        drawIndex: game.drawnNumbers.length,
-        variantConfig: variantConfigForDraw
-      });
-      // K5: hook lykkes — resett same-cause-counter så historiske feil
-      // ikke teller mot terskelen.
-      this.roomErrorCounter.resetHook(room.code, "onDrawCompleted");
-    } catch (err) {
-      // K5 (REFACTOR_AUDIT_PRE_PILOT_2026-04-29 §2.4 / CRIT-4): erstatter
-      // tidligere log-then-continue-mønster. handleHookError lager same-
-      // cause-fingerprint, halter rommet ved wallet-shortage eller etter
-      // N consecutive failures, og emitterer EngineDegradedEvent.
-      this.handleHookError("onDrawCompleted", room, game, err);
-    }
-    // BIN-694: 3-fase norsk 75-ball bingo auto-claim. Gates bak
-    // `autoClaimPhaseMode` (ny flag i variantConfig, satt kun av
-    // DEFAULT_NORSK_BINGO_CONFIG). G2/G3 har sin egen auto-claim via
-    // onDrawCompleted-override og skal IKKE kjøre denne pathen.
-    //
-    // Kjører etter hver ball: sjekker om noen brett oppfyller aktiv
-    // fase (1 Rad / 2 Rader / Fullt Hus), splitter premien mellom
-    // samtidige vinnere, markerer fasen som vunnet. Kun Fullt Hus-
-    // fasen avslutter runden.
-    if (variantConfigForDraw?.autoClaimPhaseMode && game.status === "RUNNING") {
-      try {
-        await this.evaluateActivePhase(room, game);
-        this.roomErrorCounter.resetHook(room.code, "evaluateActivePhase");
-      } catch (err) {
-        // K5: same-cause-tracking + halt-the-room. Wallet-shortage halter
-        // umiddelbart; andre feil kreves >=N consecutive innen 60s-vindu.
-        this.handleHookError("evaluateActivePhase", room, game, err);
-      }
-    }
-    // BIN-615 / PR-C3: Fan-out lucky-number hook. Fires per-player when the
-    // player's registered luckyNumber matches lastBall AND the variant enables
-    // lucky numbers (luckyNumberPrize > 0). Default onLuckyNumberDrawn is
-    // no-op — G1 (no luckyNumberPrize) and G2 (uses inline coupling) unchanged.
-    if (variantConfigForDraw && (variantConfigForDraw.luckyNumberPrize ?? 0) > 0) {
-      const roomLucky = this.luckyNumbersByPlayer.get(room.code);
-      if (roomLucky && roomLucky.size > 0) {
-        for (const [playerId, luckyNumber] of roomLucky) {
-          if (luckyNumber !== nextNumber) continue;
-          const player = room.players.get(playerId);
-          if (!player) continue;
-          try {
-            await this.onLuckyNumberDrawn({
-              room,
-              game,
-              player,
-              luckyNumber,
-              lastBall: nextNumber,
-              drawIndex: game.drawnNumbers.length,
-              variantConfig: variantConfigForDraw
-            });
-          } catch (err) {
-            logger.error({ err, gameId: game.id, roomCode: room.code, playerId }, "onLuckyNumberDrawn hook failed");
-          }
-        }
-      }
-    }
-    // HOEY-3: Checkpoint after each draw — persists draw sequence state
-    await this.writeDrawCheckpoint(room, game);
-    // FULLTHUS-FIX (2026-04-27): Phase 5 (Fullt Hus) MÅ vinnes hvis alle
-    // 75 baller er trukket — for 75-ball bingo dekker drawnSet alltid hele
-    // 5×5-grid (kun cell 0 er free centre). Hvis `evaluateActivePhase`
-    // over har lagt evaluering bak ENDED-flag for Phase 5, må vi IKKE
-    // overskrive `game.endedReason` med MAX_DRAWS_REACHED.
-    //
-    // ROOT CAUSE: før denne fixen overskrev MAX_DRAWS_REACHED-blokken
-    // ubetinget `game.status="ENDED"` og `game.endedReason` selv om
-    // Phase 5 nettopp hadde satt `BINGO_CLAIMED`. User-rapportert bug
-    // 2026-04-27: ad-hoc bingo der user vant 1-4 Rader, men Fullt Hus
-    // forble won=False fordi MAX_DRAWS_REACHED skrev over BINGO_CLAIMED-
-    // status fra evaluateActivePhase i samme drawNextNumber-call.
-    //
-    // Defensiv tiltak: hvis `evaluateActivePhase` ikke fikk fullført
-    // Phase 5 (f.eks. transient ledger-feil ble swallowed av try/catch
-    // over), kjør én siste evaluering FØR vi ender med MAX_DRAWS. Dette
-    // er trygt: hvis Phase 5 ikke kan vinnes (ingen tickets med fullt
-    // hus), returnerer evaluateActivePhase uten side-effekter.
-    if (game.drawnNumbers.length >= this.maxDrawsPerRound && game.status === "RUNNING") {
-      // Last-chance Phase 5 evaluation before MAX_DRAWS_REACHED. Hvis
-      // evaluateActivePhase tidligere kastet en transient feil, gir vi
-      // det én siste sjanse her — særlig viktig på ball 75 der ALL non-
-      // free celler i 5×5-grid garantert er dekket av drawnSet.
-      if (variantConfigForDraw?.autoClaimPhaseMode) {
-        try {
-          await this.evaluateActivePhase(room, game);
-          this.roomErrorCounter.resetHook(
-            room.code,
-            "evaluateActivePhase.lastChanceMaxDraws",
-          );
-        } catch (err) {
-          // K5: same-cause-tracking + halt-the-room. Last-chance-pathen er
-          // sjelden — terskelen passeres bare hvis evaluateActivePhase virkelig
-          // er stuck samme cause på flere draws.
-          this.handleHookError(
-            "evaluateActivePhase.lastChanceMaxDraws",
-            room,
-            game,
-            err,
-          );
-        }
-      }
-    }
-    // Re-sjekk status: hvis Phase 5 vant i evaluateActivePhase (enten
-    // det første kallet over eller last-chance-kallet), er game.status
-    // allerede "ENDED" med endedReason="BINGO_CLAIMED". Da MÅ vi IKKE
-    // overskrive til MAX_DRAWS_REACHED.
-    if (game.drawnNumbers.length >= this.maxDrawsPerRound && game.status === "RUNNING") {
-      const endedAtMs = Date.now();
-      const endedAt = new Date(endedAtMs);
-      game.status = "ENDED";
-      game.endedAt = endedAt.toISOString();
-      game.endedReason = "MAX_DRAWS_REACHED";
-      await this.finishPlaySessionsForGame(room, game, endedAtMs);
-      // HOEY-6/BIN-248: Write GAME_END checkpoint for MAX_DRAWS_REACHED (post-draw)
-      await this.writeGameEndCheckpoint(room, game);
-    }
-    // MEDIUM-1/BIN-253: Record draw timestamp for interval enforcement
-    this.lastDrawAtByRoom.set(room.code, Date.now());
-    // BIN-689: The **wire-level** `drawIndex` is the 0-based array index of
-    // the ball in `drawnNumbers` (i.e. `length - 1`). The client's
-    // GameBridge gap-detection contract (BIN-502) is 0-based —
-    // `lastAppliedDrawIndex = -1` means no draws yet, so the first ball is
-    // expected at drawIndex=0. Previously we returned `length`, which is
-    // 1-based (first ball drawIndex=1), causing every draw to look like a
-    // gap → infinite resync loop on staging (BallTube empty, no animation
-    // fired). Ref: GameBridge.ts:355 + GameBridge.test.ts.
-    //
-    // NB: Engine-internal hooks (`onDrawCompleted`, `onLuckyNumberDrawn`)
-    // and the `onNumberDrawn` bingoAdapter callback keep the 1-based
-    // "drawnCount" semantics above — PatternCycler.step() and
-    // GAME2_MIN_DRAWS_FOR_CHECK both depend on that.
-    return { number: nextNumber, drawIndex: game.drawnNumbers.length - 1, gameId: game.id };
+  async drawNextNumber(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
+    return this.drawOrchestrationService.drawNext(input);
   }
 
   /**
