@@ -2,7 +2,9 @@
  * Agent dashboard + player-list + player-export.
  *
  * Endpoints (AGENT-rolle):
- *   GET /api/agent/dashboard                 — aggregat: current shift, cash-totals, counts
+ *   GET /api/agent/dashboard                 — aggregat: current shift, cash-totals,
+ *                                              counts, latestRequests, topPlayers,
+ *                                              ongoingGames (alle 4 widgets)
  *   GET /api/agent/players                   — liste spillere i agentens nåværende hall
  *   GET /api/agent/players/:id/export.csv    — CSV-eksport for én spiller (regulatorisk)
  *
@@ -16,6 +18,12 @@
  * bruker `/api/admin/players` for bredere tilgang. Her vi avviser ADMIN med
  * FORBIDDEN slik at flaten står som agent-spesifikk (unngår at admin ved et uhell
  * bruker agent-endepunktene).
+ *
+ * Wireframe-paritet: dashboard-endepunktet leverer alle widget-data i ETT
+ * round-trip per WIREFRAME_CATALOG.md §17.1 (Agent Dashboard) — KPI, latest
+ * requests, top 5 players, ongoing games. AGENT-rolle har ikke tilgang til
+ * /api/admin/payments/requests eller /api/admin/players/top, så aggregerer
+ * vi her med fallbacks (try/catch) per widget. Frontend refresher hvert 30s.
  *
  * Audit: player-export logges (inneholder PII); dashboard/list er ikke-destructive read.
  */
@@ -31,6 +39,9 @@ import type { AgentService } from "../agent/AgentService.js";
 import type { AgentShiftService } from "../agent/AgentShiftService.js";
 import type { AgentTransactionStore } from "../agent/AgentTransactionStore.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
+import type { PaymentRequestService } from "../payments/PaymentRequestService.js";
+import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { buildTopPlayers } from "../admin/reports/TopPlayersLookup.js";
 import {
   apiSuccess,
   apiFailure,
@@ -43,12 +54,59 @@ import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "agent-dashboard-router" });
 
+/**
+ * Read-only port over BingoEngine.listRoomSummaries(). We only need a tiny
+ * slice of the engine surface — keeping the dep narrow makes testing easier
+ * (in-memory stub) and avoids pulling the full engine class into agent-dashboard
+ * test scaffolding.
+ */
+export interface AgentDashboardRoomReader {
+  listRoomSummaries(): Array<{
+    code: string;
+    hallId: string;
+    gameSlug?: string;
+    playerCount: number;
+    gameStatus: string;
+    createdAt: string;
+  }>;
+}
+
 export interface AgentDashboardRouterDeps {
   platformService: PlatformService;
   agentService: AgentService;
   agentShiftService: AgentShiftService;
   agentTransactionStore: AgentTransactionStore;
   auditLogService: AuditLogService;
+  /** Optional — when omitted, latestRequests-widget returnerer tom liste (graceful). */
+  paymentRequestService?: PaymentRequestService | null;
+  /** Optional — når omitted, topPlayers-widget returnerer tom liste (graceful). */
+  walletAdapter?: WalletAdapter | null;
+  /** Optional — når omitted, ongoingGames-widget returnerer tom liste (graceful). */
+  roomReader?: AgentDashboardRoomReader | null;
+}
+
+interface LatestRequestRow {
+  id: string;
+  kind: "deposit" | "withdraw";
+  userId: string;
+  amountCents: number;
+  createdAt: string;
+}
+
+interface TopPlayerRow {
+  id: string;
+  username: string;
+  walletAmount: number;
+  avatar?: string;
+}
+
+interface OngoingGameRow {
+  roomCode: string;
+  hallId: string;
+  gameSlug: string;
+  gameStatus: string;
+  playerCount: number;
+  createdAt: string;
 }
 
 interface DashboardResponse {
@@ -75,6 +133,7 @@ interface DashboardResponse {
     transactionsToday: number;
     playersInHall: number | null;
     activeShiftsInHall: number | null;
+    pendingRequests: number | null;
   };
   recentTransactions: Array<{
     id: string;
@@ -83,6 +142,12 @@ interface DashboardResponse {
     paymentMethod: string;
     createdAt: string;
   }>;
+  /** Wireframe widget — pending deposit-requests for agentens hall (max 5). */
+  latestRequests: LatestRequestRow[];
+  /** Wireframe widget — top 5 spillere etter wallet-balanse i hallen. */
+  topPlayers: TopPlayerRow[];
+  /** Wireframe widget — pågående spill (Spill 1-3 + SpinnGo) i hallen. */
+  ongoingGames: OngoingGameRow[];
 }
 
 function clientIp(req: express.Request): string | null {
@@ -105,6 +170,9 @@ export function createAgentDashboardRouter(deps: AgentDashboardRouterDeps): expr
     agentShiftService,
     agentTransactionStore,
     auditLogService,
+    paymentRequestService = null,
+    walletAdapter = null,
+    roomReader = null,
   } = deps;
   const router = express.Router();
 
@@ -131,6 +199,17 @@ export function createAgentDashboardRouter(deps: AgentDashboardRouterDeps): expr
   }
 
   // ── GET /api/agent/dashboard ────────────────────────────────────────────
+  //
+  // One-shot aggregator for all 4 wireframe-widgets (WIREFRAME_CATALOG.md §17.1):
+  //   - KPI: total approved players (counts.playersInHall)
+  //   - Latest Requests: pending deposit-requests for agentens hall
+  //   - Top 5 Players: by wallet balance i agentens hall
+  //   - Ongoing Games: pågående spill (Spill 1-3 + SpinnGo)
+  //
+  // Når en widget-kilde er utilgjengelig (svc=null eller throw) returnerer
+  // vi tom liste / null så frontend kan rendre "—" fallback uten å feile
+  // hele dashboardet. Mønsteret matcher eksisterende `playersInHall` /
+  // `activeShiftsInHall` der vi allerede har graceful-degradation.
   router.get("/api/agent/dashboard", async (req, res) => {
     try {
       const actor = await requireAgentPermission(req, "AGENT_TX_READ");
@@ -146,6 +225,10 @@ export function createAgentDashboardRouter(deps: AgentDashboardRouterDeps): expr
       }> = [];
       let playersInHall: number | null = null;
       let activeShiftsInHall: number | null = null;
+      let pendingRequests: number | null = null;
+      let latestRequests: LatestRequestRow[] = [];
+      let topPlayers: TopPlayerRow[] = [];
+      let ongoingGames: OngoingGameRow[] = [];
 
       if (shift) {
         const txs = await agentTransactionStore.list({
@@ -164,18 +247,104 @@ export function createAgentDashboardRouter(deps: AgentDashboardRouterDeps): expr
         try {
           const activeShifts = await agentShiftService.listActiveInHall(shift.hallId);
           activeShiftsInHall = activeShifts.length;
-        } catch {
-          // Ikke-kritisk — la være null hvis hall-query feiler.
+        } catch (err) {
+          logger.warn({ err, hallId: shift.hallId }, "listActiveInHall failed");
         }
 
+        // Hentes som candidate-pool for både KPI (count) og top-5 (balanse-sort).
+        // 5000 matcher /api/admin/players/top sin CANDIDATE_POOL_CAP.
+        let hallPlayers: Awaited<ReturnType<typeof platformService.listPlayersForExport>> = [];
         try {
-          const players = await platformService.listPlayersForExport({
+          hallPlayers = await platformService.listPlayersForExport({
             hallId: shift.hallId,
             limit: 5000,
           });
-          playersInHall = players.length;
-        } catch {
-          // Ikke-kritisk.
+          playersInHall = hallPlayers.length;
+        } catch (err) {
+          logger.warn({ err, hallId: shift.hallId }, "listPlayersForExport failed");
+        }
+
+        // Latest Requests-widget — pending deposits for agentens hall.
+        if (paymentRequestService) {
+          try {
+            const pending = await paymentRequestService.listPending({
+              kind: "deposit",
+              hallId: shift.hallId,
+              status: "PENDING",
+              limit: 5,
+            });
+            pendingRequests = pending.length;
+            latestRequests = pending.map((p) => ({
+              id: p.id,
+              kind: p.kind,
+              userId: p.userId,
+              amountCents: p.amountCents,
+              createdAt: p.createdAt,
+            }));
+          } catch (err) {
+            logger.warn(
+              { err, hallId: shift.hallId },
+              "paymentRequestService.listPending failed — latestRequests widget vil være tom",
+            );
+          }
+        }
+
+        // Top 5 Players-widget — bruker buildTopPlayers fra TopPlayersLookup
+        // for å holde sortering 1:1 med /api/admin/players/top.
+        if (walletAdapter && hallPlayers.length > 0) {
+          try {
+            const balances = new Map<string, number>();
+            const results = await Promise.allSettled(
+              hallPlayers.map((p) => walletAdapter.getBalance(p.walletId)),
+            );
+            results.forEach((r, idx) => {
+              const player = hallPlayers[idx]!;
+              if (r.status === "fulfilled") {
+                balances.set(player.walletId, r.value);
+              }
+            });
+            const topResp = buildTopPlayers({
+              players: hallPlayers,
+              balances,
+              limit: 5,
+            });
+            topPlayers = topResp.players.map((p) => {
+              const row: TopPlayerRow = {
+                id: p.id,
+                username: p.username,
+                walletAmount: p.walletAmount,
+              };
+              if (p.avatar) row.avatar = p.avatar;
+              return row;
+            });
+          } catch (err) {
+            logger.warn(
+              { err, hallId: shift.hallId },
+              "topPlayers-build failed — widget vil være tom",
+            );
+          }
+        }
+
+        // Ongoing Games-widget — filtrer rooms til agentens hall.
+        if (roomReader) {
+          try {
+            const rooms = roomReader.listRoomSummaries();
+            ongoingGames = rooms
+              .filter((r) => r.hallId === shift.hallId)
+              .map((r) => ({
+                roomCode: r.code,
+                hallId: r.hallId,
+                gameSlug: r.gameSlug ?? "bingo",
+                gameStatus: r.gameStatus,
+                playerCount: r.playerCount,
+                createdAt: r.createdAt,
+              }));
+          } catch (err) {
+            logger.warn(
+              { err, hallId: shift.hallId },
+              "roomReader.listRoomSummaries failed — ongoingGames widget vil være tom",
+            );
+          }
         }
       }
 
@@ -205,8 +374,12 @@ export function createAgentDashboardRouter(deps: AgentDashboardRouterDeps): expr
           transactionsToday,
           playersInHall,
           activeShiftsInHall,
+          pendingRequests,
         },
         recentTransactions,
+        latestRequests,
+        topPlayers,
+        ongoingGames,
       };
       apiSuccess(res, response);
     } catch (error) {
