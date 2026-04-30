@@ -22,14 +22,23 @@
 --     FALSE på app_agent_shifts. Eksisterende rader får false implisitt.
 --   * logout_notes er TEXT NULL for valgfri audit-kommentar fra bingovert
 --     (legacy V1.0 har et fri-tekst-felt på popup-skjermen som vi beholder).
---   * pending_for_next_agent på app_physical_ticket_pending_payouts er
---     BOOLEAN DEFAULT FALSE. Settes true når distribute-flagget sendes.
---     Partial-indeks for rask query av "pending cashouts tilgjengelig for
---     meg".
 --   * transfer_to_next_agent på app_agent_ticket_ranges er BOOLEAN DEFAULT
 --     FALSE. Settes true sammen med transferred_register_tickets på shiften.
 --     AgentTicketRangeService skal sjekke dette flagget ved neste
 --     registrering og tilby overtagelse.
+--
+-- Migrasjons-rekkefølge (BIN-778):
+--   Den opprinnelige migrasjonen ALTER-et også app_physical_ticket_pending_payouts
+--   (oppretter pending_for_next_agent + idx_pt4_pending_payouts_next_agent).
+--   Den tabellen opprettes i en SENERE migrasjon (20260608000000_physical_ticket_pending_payouts.sql),
+--   så på en frisk shadow-DB feilet schema-CI fordi denne migrasjonen kjørte
+--   først og prøvde å ALTER-e en tabell som ikke fantes ennå.
+--
+--   Fix: pending_for_next_agent + tilhørende indeks er flyttet ut til en ny
+--   migrasjon (20260608000001_pending_payouts_for_next_agent_flag.sql) med
+--   timestamp etter 06-08-tabellen. Den nye migrasjonen er idempotent
+--   (ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS), så prod-DB-er
+--   som allerede har kjørt den opprinnelige versjonen er upåvirket.
 --
 -- Forward-only (BIN-661): ingen Down-seksjon.
 
@@ -41,17 +50,6 @@ ALTER TABLE app_agent_shifts
 COMMENT ON COLUMN app_agent_shifts.distributed_winnings         IS 'Gap #9: true hvis agent krysset av for "Distribute winnings to physical players" ved logout. Pending cashouts merkes pending_for_next_agent = true.';
 COMMENT ON COLUMN app_agent_shifts.transferred_register_tickets IS 'Gap #9: true hvis agent krysset av for "Transfer register ticket to next agent" ved logout. Åpne ticket-ranges merkes transfer_to_next_agent = true.';
 COMMENT ON COLUMN app_agent_shifts.logout_notes                 IS 'Gap #9: valgfri audit-notat fra bingovert på logout-popup (legacy V1.0 fri-tekst-felt).';
-
-ALTER TABLE app_physical_ticket_pending_payouts
-  ADD COLUMN IF NOT EXISTS pending_for_next_agent BOOLEAN NOT NULL DEFAULT false;
-
-COMMENT ON COLUMN app_physical_ticket_pending_payouts.pending_for_next_agent IS 'Gap #9: true når avtroppende agent har valgt "Distribute winnings" ved logout. Neste agent ser denne raden i sin cashout-vakt. Settes false igjen ved paid_out_at / rejected_at (håndteres i service).';
-
--- Partial-indeks: "hvilke pending cashouts er overtakelses-klare i denne hallen?"
--- Brukt av neste agents dashboard ved innlogging.
-CREATE INDEX IF NOT EXISTS idx_pt4_pending_payouts_next_agent
-  ON app_physical_ticket_pending_payouts (hall_id)
-  WHERE pending_for_next_agent = true AND paid_out_at IS NULL AND rejected_at IS NULL;
 
 ALTER TABLE app_agent_ticket_ranges
   ADD COLUMN IF NOT EXISTS transfer_to_next_agent BOOLEAN NOT NULL DEFAULT false;
