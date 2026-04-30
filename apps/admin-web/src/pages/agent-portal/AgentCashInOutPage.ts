@@ -34,7 +34,13 @@ import {
 import { renderCashInOutPage } from "../cash-inout/CashInOutPage.js";
 import { openPendingCashoutsModal } from "./PendingCashoutsModal.js";
 import { openRegisterSoldTicketsModal } from "./modals/RegisterSoldTicketsModal.js";
+import { openRegisterMoreTicketsModal } from "./modals/RegisterMoreTicketsModal.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
+
+// Module-level F1 hotkey handler — registered once per mount, removed when
+// the container detaches from the DOM. We attach to `document` because the
+// cash-inout page does not own focus directly (children like inputs do).
+let f1HotkeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 export function mountAgentCashInOut(container: HTMLElement): void {
   // 1. Render the canonical, legacy-ported cash-inout page (daily balance,
@@ -62,9 +68,78 @@ export function mountAgentCashInOut(container: HTMLElement): void {
     openShiftLogoutModal();
   });
 
-  // 4. Append agent-specific actions section (Register Sold Tickets) below
-  //    siden. Shift Log Out er allerede plassert i page-actions-baren.
+  // 4. Append agent-specific actions section (Register More + Register Sold
+  //    Tickets) below siden. Shift Log Out er allerede plassert i
+  //    page-actions-baren.
   appendAgentActionsSection(container);
+
+  // 5. Wireframe PDF 17 §17.13: F1-hotkey åpner Register More Tickets-modal
+  //    direkte uten å gå via Sold-modalen først. F2 inni Sold-modalen åpner
+  //    også Register More — F1 her er den raske page-level-snarveien.
+  installF1Hotkey(container);
+}
+
+/**
+ * Page-level F1 hotkey: open Register More Tickets directly from the
+ * cash-in-out main view (Wireframe PDF 17 §17.13). Skipped when any modal
+ * is currently open so that F1 inside RegisterSoldTicketsModal (which
+ * submits its own form) is not double-handled.
+ *
+ * The handler attaches to `document` and is removed via a MutationObserver
+ * when the container detaches — same lifecycle pattern as F5/F6/F8 in
+ * `cash-inout/CashInOutPage.ts`.
+ */
+function installF1Hotkey(container: HTMLElement): void {
+  // Defensive: if a previous mount left a stale handler, remove it before
+  // installing the new one. This avoids double-firing if mountAgentCashInOut
+  // is called twice without an intermediate unmount (e.g. in tests).
+  if (f1HotkeyHandler) {
+    document.removeEventListener("keydown", f1HotkeyHandler);
+    f1HotkeyHandler = null;
+  }
+
+  const handler = (e: KeyboardEvent): void => {
+    if (e.key !== "F1") return;
+    if (!container.isConnected) return;
+    // Skip when a modal is open — RegisterSoldTicketsModal uses F1 as
+    // submit-shortcut. Modal.ts adds `modal-open` to body while any
+    // dialog is mounted, so this gate is reliable.
+    if (typeof document !== "undefined" && document.body?.classList.contains("modal-open")) {
+      return;
+    }
+    e.preventDefault();
+    openRegisterMoreTicketsFromAgent();
+  };
+  f1HotkeyHandler = handler;
+  document.addEventListener("keydown", handler);
+
+  // Cleanup when the container detaches.
+  const observer = new MutationObserver(() => {
+    if (typeof document === "undefined") return;
+    if (!container.isConnected) {
+      if (f1HotkeyHandler) {
+        document.removeEventListener("keydown", f1HotkeyHandler);
+        f1HotkeyHandler = null;
+      }
+      observer.disconnect();
+    }
+  });
+  if (typeof document !== "undefined" && document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+}
+
+/**
+ * Prompt for gameId (pilot pattern — same as Register Sold Tickets) and
+ * open the Register More Tickets-modal. Senere PR henter gameId fra
+ * NextGamePanel-staten eller en dropdown over pågående spill.
+ */
+function openRegisterMoreTicketsFromAgent(): void {
+  const gameId = window.prompt(t("enter_game_id"));
+  if (!gameId || !gameId.trim()) return;
+  openRegisterMoreTicketsModal({
+    gameId: gameId.trim(),
+  });
 }
 
 function appendAgentActionsSection(container: HTMLElement): void {
@@ -81,6 +156,12 @@ function appendAgentActionsSection(container: HTMLElement): void {
         <div class="btn-group-vertical" role="group" aria-label="cash-in-out-actions"
           data-marker="agent-cash-actions"
           style="display:flex; flex-direction:column; gap:8px; max-width:360px;">
+          <button type="button" class="btn btn-warning"
+                  data-marker="btn-register-more-tickets"
+                  data-action="register-more-tickets"
+                  title="${escapeHtml(t("register_more_tickets_hint"))}">
+            <i class="fa fa-plus-square" aria-hidden="true"></i> ${escapeHtml(t("register_more_tickets_button"))} (F1)
+          </button>
           <button type="button" class="btn btn-primary"
                   data-marker="btn-register-sold-tickets"
                   data-action="register-sold-tickets">
@@ -90,6 +171,13 @@ function appendAgentActionsSection(container: HTMLElement): void {
       </div>
     </div>`;
   container.appendChild(section);
+
+  const moreBtn = section.querySelector<HTMLButtonElement>(
+    '[data-marker="btn-register-more-tickets"]',
+  );
+  moreBtn?.addEventListener("click", () => {
+    openRegisterMoreTicketsFromAgent();
+  });
 
   const registerBtn = section.querySelector<HTMLButtonElement>(
     '[data-marker="btn-register-sold-tickets"]',

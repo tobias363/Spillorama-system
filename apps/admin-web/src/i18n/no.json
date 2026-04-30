@@ -1967,6 +1967,8 @@
   "agent_cash_in_out_description": "Her vil de 6 knappene for Unique ID, Registrert bruker, Sell Products, Shift Log Out og Today's Sales Report bli implementert per Agent V1.0-wireframe.",
   "register_sold_tickets_title": "Registrér solgte bonger",
   "register_sold_tickets_button": "Registrér solgte bonger",
+  "register_more_tickets_button": "Registrér flere bonger",
+  "register_more_tickets_hint": "Trykk F1 for å åpne raskt",
   "register_sold_tickets_initial_id": "Start-ID",
   "register_sold_tickets_final_id": "Slutt-ID",
   "register_sold_tickets_tickets_sold": "Antall solgt",
