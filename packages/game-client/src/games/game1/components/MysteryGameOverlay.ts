@@ -61,7 +61,9 @@ const MYSTERY_BALL_DEFAULT_URL = "/web/games/assets/game1/design/balls/red.png";
 const MYSTERY_BALL_CORRECT_URL = "/web/games/assets/game1/design/balls/green.png";
 const MYSTERY_BALL_WRONG_URL = "/web/games/assets/game1/design/balls/red.png";
 const MYSTERY_BALL_JOKER_URL = "/web/games/assets/game1/design/balls/yellow.png";
-const AUTO_DISMISS_AFTER_RESULT_SECONDS = 6;
+// Tobias 2026-04-30: 5s auto-close per direkte UX-input. Tidligere 6s.
+// Manuell close-knapp ("Lukk") finnes også — se renderFooter.
+const AUTO_DISMISS_AFTER_RESULT_SECONDS = 5;
 const INTRO_DURATION_MS = 2000;
 const REVEAL_DELAY_MS = 600;
 const FINAL_DELAY_MS = 800;
@@ -1242,10 +1244,15 @@ export class MysteryGameOverlay extends Container {
     this.refreshAutospillBtn();
 
     if (this.finished) {
+      // Tobias 2026-04-30: knappen het tidligere "Spill igjen" men trigger
+      // bare `onDismiss` — den starter ikke et nytt mini-game. "Lukk" er
+      // mer ærlig for spilleren og matcher UX-input: 5s auto-close +
+      // manuell close-knapp som returnerer til live-rommet.
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "mj-cta";
-      btn.textContent = "Spill igjen";
+      btn.textContent = "Lukk";
+      btn.setAttribute("aria-label", "Lukk og gå tilbake til spillerommet");
       btn.addEventListener("click", () => {
         this.onDismiss?.();
       });

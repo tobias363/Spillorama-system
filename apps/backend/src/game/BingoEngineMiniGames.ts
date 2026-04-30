@@ -302,11 +302,32 @@ export async function playMiniGame(
   prizeList: number[];
 }> {
   const room = ctx.requireRoom(roomCode);
+
+  // Tobias prod-incident 2026-04-30: to kilder for mini-game-state, i prioritet:
+  //   1. `currentGame.miniGame` — pågående runde (normal vei).
+  //   2. `room.pendingMiniGame` — uspilt mini-game flyttet hit av
+  //      `archiveIfEnded` da forrige runde ble arkivert (Mystery Joker tar
+  //      opptil 2 min med autospill — auto-round-intervallet er 3 min default,
+  //      men i edge-case kan neste runde starte før spilleren har valgt).
+  //
+  // `gameId` følger med pending-state fordi `IdempotencyKeys.adhocMiniGame`
+  // krever opprinnelses-spillets ID for å holde payouten idempotent på tvers
+  // av retries.
   const game = room.currentGame;
-  if (!game || !game.miniGame) {
+  let miniGame: MiniGameState | undefined = game?.miniGame;
+  let gameIdForKey: string | undefined = game?.id;
+  let isPending = false;
+  if (!miniGame || miniGame.isPlayed) {
+    const pending = room.pendingMiniGame;
+    if (pending && !pending.isPlayed) {
+      miniGame = pending;
+      gameIdForKey = pending.gameId;
+      isPending = true;
+    }
+  }
+  if (!miniGame || !gameIdForKey) {
     throw new DomainError("NO_MINIGAME", "Ingen aktiv mini-game.");
   }
-  const miniGame = game.miniGame;
   if (miniGame.playerId !== playerId) {
     throw new DomainError("NOT_MINIGAME_PLAYER", "Mini-game tilhører en annen spiller.");
   }
@@ -320,7 +341,11 @@ export async function playMiniGame(
   miniGame.isPlayed = true;
   miniGame.result = { segmentIndex, prizeAmount };
 
-  // Credit prize to player balance
+  // Credit prize to player balance. Spilleren kan ikke ha forlatt rommet
+  // (mini-game-tilhørighet bindes til playerId — vi har akkurat verifisert
+  // at den nåværende spilleren er eieren). Hvis det ikke finnes en aktiv
+  // spiller med denne ID-en (f.eks. spilleren disconnected før play), bruker
+  // vi `requirePlayer` som kaster — backend logger feilen og UI får ack.
   if (prizeAmount > 0) {
     const player = ctx.requirePlayer(room, playerId);
     const gameType = "DATABINGO" as const;
@@ -335,7 +360,7 @@ export async function playMiniGame(
       `Mini-game ${miniGame.type} prize ${room.code}`,
       {
         idempotencyKey: IdempotencyKeys.adhocMiniGame({
-          gameId: game.id,
+          gameId: gameIdForKey,
           miniGameType: miniGame.type,
         }),
         targetSide: "winnings",
@@ -365,14 +390,21 @@ export async function playMiniGame(
       eventType: "PRIZE",
       amount: prizeAmount,
       roomCode: room.code,
-      gameId: game.id,
-      claimId: `minigame-${game.id}-${miniGame.type}`,
+      gameId: gameIdForKey,
+      claimId: `minigame-${gameIdForKey}-${miniGame.type}`,
       playerId,
       walletId: player.walletId,
       sourceAccountId: transfer.fromTx.accountId,
       targetAccountId: transfer.toTx.accountId,
       policyVersion: "minigame-v1",
     });
+  }
+
+  // Rydd pending-feltet etter vellykket payout — slik at en ny mini-game
+  // i neste runde får ren state. Ikke rør `currentGame.miniGame` (vanlig vei
+  // — `isPlayed=true` mutasjonen over er allerede synlig der).
+  if (isPending) {
+    room.pendingMiniGame = undefined;
   }
 
   return {

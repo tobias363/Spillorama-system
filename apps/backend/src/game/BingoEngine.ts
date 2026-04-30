@@ -2619,7 +2619,11 @@ export class BingoEngine {
     const code = roomCode.trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) return null;
-    return room.currentGame?.miniGame ?? null;
+    // Tobias prod-incident 2026-04-30: fallback til `room.pendingMiniGame`
+    // dersom `currentGame` allerede er arkivert mellom aktivering og play.
+    // Pending er kun satt når mini-game ikke er spilt — hvis den IKKE er
+    // pending, betyr det at runden er ferdig OG mini-game er ferdig.
+    return room.currentGame?.miniGame ?? room.pendingMiniGame ?? null;
   }
 
   /**
@@ -3750,6 +3754,20 @@ export class BingoEngine {
 
   private archiveIfEnded(room: RoomState): void {
     if (room.currentGame?.status === "ENDED") {
+      // Tobias prod-incident 2026-04-30: hvis spilleren ikke har rukket å
+      // spille mini-game ferdig før neste runde starter, flytt den uspilte
+      // tilstanden til `room.pendingMiniGame` så `playMiniGame` finner den
+      // selv etter at `currentGame` arkivert. Mystery Joker tar opptil
+      // 2 min med autospill — auto-round-intervallet er 3 min default, så
+      // i edge-case (lang autospill, kort auto-round) blir mini-game
+      // overstyrt av neste runde uten dette.
+      const liveMiniGame = room.currentGame.miniGame;
+      if (liveMiniGame && !liveMiniGame.isPlayed) {
+        room.pendingMiniGame = {
+          ...liveMiniGame,
+          gameId: room.currentGame.id,
+        };
+      }
       room.gameHistory.push(this.serializeGame(room.currentGame));
       room.currentGame = undefined;
     }

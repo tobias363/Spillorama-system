@@ -221,6 +221,32 @@ export interface MiniGameState {
   result?: { segmentIndex: number; prizeAmount: number };
 }
 
+/**
+ * Tobias prod-incident 2026-04-30: pending mini-game som overlever runde-
+ * arkivering.
+ *
+ * `archiveIfEnded` (BingoEngine.ts) wiper `currentGame` når neste runde
+ * starter. Hvis spilleren ikke har spilt mini-game ferdig før neste runde
+ * trigges (auto-round 3 min default; Mystery Joker tar opptil 2 min med
+ * autospill), så forsvinner `currentGame.miniGame` — og `playMiniGame`
+ * får "Ingen aktiv mini-game" når spillerens valg endelig kommer inn.
+ *
+ * Løsning: før archive flyttes en uspilt mini-game til `room.pendingMiniGame`
+ * sammen med kildens `gameId` (for idempotency-keys). `playMiniGame`-stien
+ * leser fra `currentGame.miniGame` først, så fallback til `pendingMiniGame`.
+ * Etter vellykket play ryddes feltet.
+ *
+ * Per-room (ikke per-spiller) er trygt fordi vi har én aktiv runde per rom
+ * og maks én mini-game-vinner per runde (Fullt Hus). Hvis et nytt mini-game
+ * aktiveres mens et tidligere fortsatt er pending, vinner sistnevnte —
+ * tidligere er da utløpt og blir ikke kreditert (samme oppførsel som dagens
+ * `currentGame.miniGame` overskrives ved ny aktivering, dvs ingen regresjon).
+ */
+export interface PendingMiniGameState extends MiniGameState {
+  /** ID på det arkiverte spillet — brukes til idempotency-key i payout. */
+  gameId: string;
+}
+
 export interface GameState {
   id: string;
   status: GameStatus;
@@ -325,6 +351,13 @@ export interface RoomState {
   players: Map<string, Player>;
   currentGame?: GameState;
   gameHistory: GameSnapshot[];
+  /**
+   * Tobias prod-incident 2026-04-30: pending mini-game som overlever
+   * `archiveIfEnded`-wipe av `currentGame`. Se `PendingMiniGameState`-doc
+   * for full begrunnelse. Kun én pending mini-game per rom (samme garanti
+   * som `currentGame.miniGame`).
+   */
+  pendingMiniGame?: PendingMiniGameState;
   createdAt: string;
 }
 
