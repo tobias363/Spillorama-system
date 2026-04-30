@@ -24,6 +24,8 @@ import type {
   PaymentRequestStatus,
   PaymentRequestDestinationType,
 } from "../payments/PaymentRequestService.js";
+import type { HallCashWithdrawalCapService } from "../agent/HallCashWithdrawalCapService.js";
+import type { AuditLogService, AuditActorType } from "../compliance/AuditLogService.js";
 import {
   ADMIN_ACCESS_POLICY as _ADMIN_ACCESS_POLICY,
   assertAdminPermission,
@@ -48,6 +50,54 @@ export interface PaymentRequestsRouterDeps {
   platformService: PlatformService;
   paymentRequestService: PaymentRequestService;
   emitWalletRoomUpdates: (walletIds: string[]) => Promise<void>;
+  /**
+   * HV2-A / BIR-036: daglig kontant-utbetaling-cap (50 000 kr/dag/hall).
+   * Optional for backward-compat med tester som ikke bruker cap-flyten.
+   * I produksjon må denne være satt — ellers håndheves ingen cap.
+   */
+  cashWithdrawalCapService?: HallCashWithdrawalCapService;
+  /**
+   * HV2-A / BIR-036: audit-log for cap-exceeded-events.
+   * Optional for backward-compat med eksisterende tester.
+   */
+  auditLogService?: AuditLogService;
+  /**
+   * HV2-A / BIR-036: tid-injection for testbarhet (Oslo-tz business-date
+   * kalkulering). Default = Date.now.
+   */
+  now?: () => number;
+}
+
+/**
+ * BIR-036: map admin-rolle til audit-actor-type. Holder seg til den
+ * eksplisitte enumen i AuditLogService — ikke unionen "as is".
+ */
+function adminRoleToActorType(role: PublicAppUser["role"]): AuditActorType {
+  switch (role) {
+    case "ADMIN": return "ADMIN";
+    case "HALL_OPERATOR": return "HALL_OPERATOR";
+    case "SUPPORT": return "SUPPORT";
+    case "PLAYER": return "PLAYER";
+    case "AGENT": return "AGENT";
+    default: return "USER";
+  }
+}
+
+/**
+ * BIR-036: pluck client-ip fra Express-request, foretrekker
+ * X-Forwarded-For (frontend ligger bak Render's proxy).
+ */
+function pickClientIp(req: express.Request): string | null {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.trim()) {
+    return fwd.split(",")[0]!.trim();
+  }
+  return req.ip ?? null;
+}
+
+function pickUserAgent(req: express.Request): string | null {
+  const ua = req.headers["user-agent"];
+  return typeof ua === "string" && ua.trim() ? ua : null;
 }
 
 function parseKind(value: unknown, fieldName = "type"): PaymentRequestKind {
@@ -320,7 +370,14 @@ function parseFormat(value: unknown): "json" | "csv" {
 export function createPaymentRequestsRouter(
   deps: PaymentRequestsRouterDeps
 ): express.Router {
-  const { platformService, paymentRequestService, emitWalletRoomUpdates } = deps;
+  const {
+    platformService,
+    paymentRequestService,
+    emitWalletRoomUpdates,
+    cashWithdrawalCapService,
+    auditLogService,
+  } = deps;
+  const now = deps.now ?? (() => Date.now());
   const router = express.Router();
 
   async function getAuthenticatedUser(req: express.Request): Promise<PublicAppUser> {
@@ -400,6 +457,50 @@ export function createPaymentRequestsRouter(
         );
       }
 
+      // HV2-A / BIR-036: pre-flight cap-check for kontant-uttak
+      // (`destination_type = 'hall'`). Bank-uttak har ingen cap.
+      const isCashWithdraw =
+        kind === "withdraw" &&
+        existing.destinationType === "hall" &&
+        existing.hallId !== null;
+      if (isCashWithdraw && cashWithdrawalCapService && existing.hallId) {
+        try {
+          await cashWithdrawalCapService.assertWithinCap(
+            existing.hallId,
+            existing.amountCents,
+            now()
+          );
+        } catch (capErr) {
+          if (
+            capErr instanceof DomainError &&
+            capErr.code === "CASH_WITHDRAW_CAP_EXCEEDED"
+          ) {
+            // Audit-log før vi feiler ut til klient.
+            if (auditLogService) {
+              auditLogService
+                .record({
+                  actorId: adminUser.id,
+                  actorType: adminRoleToActorType(adminUser.role),
+                  action: "cash_withdrawal.cap_exceeded",
+                  resource: "payment_request",
+                  resourceId: requestId,
+                  details: {
+                    hallId: existing.hallId,
+                    requestedAmountCents: existing.amountCents,
+                    ...(capErr.details ?? {}),
+                  },
+                  ipAddress: pickClientIp(req),
+                  userAgent: pickUserAgent(req),
+                })
+                .catch(() => {
+                  // fire-and-forget — audit failure aldri blokker brukerresponsen
+                });
+            }
+          }
+          throw capErr;
+        }
+      }
+
       const result =
         kind === "deposit"
           ? await paymentRequestService.acceptDeposit({
@@ -410,6 +511,50 @@ export function createPaymentRequestsRouter(
               requestId,
               acceptedBy: adminUser.id,
             });
+
+      // HV2-A / BIR-036: registrér kontant-uttaket i daglig akkumulator
+      // ETTER vellykket wallet-debit. Hvis racen taper (en konkurrent fylte
+      // bucketen i mellomtiden) får vi CASH_WITHDRAW_CAP_EXCEEDED her —
+      // wallet er allerede debitert og må reverseres manuelt. I praksis er
+      // dette en svært sjelden race, men vi audit-logger den for ops.
+      if (isCashWithdraw && cashWithdrawalCapService && existing.hallId) {
+        try {
+          await cashWithdrawalCapService.recordWithdrawal(
+            existing.hallId,
+            existing.amountCents,
+            now()
+          );
+        } catch (capErr) {
+          if (
+            capErr instanceof DomainError &&
+            capErr.code === "CASH_WITHDRAW_CAP_EXCEEDED"
+          ) {
+            if (auditLogService) {
+              auditLogService
+                .record({
+                  actorId: adminUser.id,
+                  actorType: adminRoleToActorType(adminUser.role),
+                  action: "cash_withdrawal.cap_exceeded",
+                  resource: "payment_request",
+                  resourceId: requestId,
+                  details: {
+                    hallId: existing.hallId,
+                    requestedAmountCents: existing.amountCents,
+                    raceLossPostDebit: true,
+                    walletTransactionId: result.walletTransactionId,
+                    ...(capErr.details ?? {}),
+                  },
+                  ipAddress: pickClientIp(req),
+                  userAgent: pickUserAgent(req),
+                })
+                .catch(() => {
+                  // fire-and-forget
+                });
+            }
+          }
+          throw capErr;
+        }
+      }
 
       await emitWalletRoomUpdates([result.walletId]);
       apiSuccess(res, { request: result });

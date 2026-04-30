@@ -3653,6 +3653,14 @@ paths:
         Idempotent: the underlying wallet operation uses key
         `payment-request:{kind}:{id}`. Re-accepting an already-ACCEPTED
         request returns PAYMENT_REQUEST_ALREADY_RESOLVED.
+
+        **HV2-A / BIR-036 (kontant-utbetaling-cap):** For
+        `kind=withdraw` AND `destination_type=hall` håndheves en daglig
+        kontant-cap på **50 000 kr/hall/dag** (Europe/Oslo-tidssone).
+        Bank-overføringer (`destination_type=bank`) er **ikke** begrenset.
+        Cap-en sjekkes både før wallet-debit (pre-flight) og atomisk
+        etter (race-trygg). Audit-log-event `cash_withdrawal.cap_exceeded`
+        skrives ved hver cap-overskridelse.
       parameters:
         - in: path
           name: id
@@ -3682,7 +3690,12 @@ paths:
                           request:
                             $ref: "#/components/schemas/PaymentRequest"
         "400":
-          description: INSUFFICIENT_FUNDS (withdraw) or INVALID_INPUT
+          description: |
+            INSUFFICIENT_FUNDS (withdraw) or INVALID_INPUT or
+            **CASH_WITHDRAW_CAP_EXCEEDED** (HV2-A / BIR-036) — daglig
+            kontant-utbetaling-grense (50 000 kr/hall/dag) er nådd. Error
+            `details` inneholder `hallId`, `businessDate`,
+            `requestedAmountCents`, `remainingCapCents` og `capCents`.
           content:
             application/json:
               schema:

@@ -24,6 +24,7 @@ import type { GameSnapshot, Player, RoomSnapshot } from "./game/types.js";
 import { PlatformService } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
+import { HallCashWithdrawalCapService } from "./agent/HallCashWithdrawalCapService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { UserPinService } from "./auth/UserPinService.js";
 import { TwoFactorService } from "./auth/TwoFactorService.js";
@@ -711,6 +712,14 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
 // BIN-586: manuell deposit/withdraw-kø (port fra legacy transactionController
 // og WithdrawController). Godkjennings-flyt kjøres av hall-operator/admin.
 const paymentRequestService = new PaymentRequestService(walletAdapter, {
+  pool: sharedPool,
+  schema: pgSchema,
+});
+
+// HV2-A / BIR-036: daglig kontant-utbetaling-cap (50 000 kr/dag/hall) for
+// `Withdraw in Hall`. Bank-uttak (`Withdraw in Bank`) er IKKE begrenset.
+// Spec: docs/architecture/HV2_BIR036_SPEC_2026-04-30.md (Tobias 2026-04-30).
+const cashWithdrawalCapService = new HallCashWithdrawalCapService({
   pool: sharedPool,
   schema: pgSchema,
 });
@@ -2919,7 +2928,16 @@ app.use(createPaymentsRouter({
   // fail-closed med 503 slik at ops merker det med én gang i prod.
   swedbankWebhookSecret: (process.env.SWEDBANK_WEBHOOK_SECRET ?? "").trim(),
 }));
-app.use(createPaymentRequestsRouter({ platformService, paymentRequestService, emitWalletRoomUpdates }));
+app.use(
+  createPaymentRequestsRouter({
+    platformService,
+    paymentRequestService,
+    emitWalletRoomUpdates,
+    // HV2-A / BIR-036: 50 000 kr/dag/hall kontant-cap.
+    cashWithdrawalCapService,
+    auditLogService,
+  })
+);
 app.use(createGameRouter({ platformService, engine, drawScheduler, emitRoomUpdate, buildRoomUpdatePayload, assertUserCanAccessRoom, assertUserCanActAsPlayer }));
 
 // BIN-FCM: notifikasjons-endpoints. Player-facing (/api/notifications*)
