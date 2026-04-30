@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="nb">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spillorama systemstatus</title>
+    <meta name="description" content="Live status for Spillorama bingo-systemet — sjekk om det er problemer med innlogging, spill, wallet eller admin." />
+    <meta name="robots" content="noindex,follow" />
+    <style>
+      :root {
+        --color-bg: #f7f8fb;
+        --color-fg: #1a1a1a;
+        --color-fg-soft: #555;
+        --color-border: #e2e4eb;
+        --color-card: #ffffff;
+        --color-operational: #1f9d55;
+        --color-degraded: #ef9a3c;
+        --color-outage: #d6403d;
+        --color-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+        --radius: 8px;
+        --font-stack:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+          sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --color-bg: #14161c;
+          --color-fg: #e6e8ee;
+          --color-fg-soft: #9aa0ad;
+          --color-border: #2a2e3a;
+          --color-card: #1c1f29;
+          --color-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: var(--font-stack);
+        background: var(--color-bg);
+        color: var(--color-fg);
+        line-height: 1.5;
+        font-size: 16px;
+      }
+      .page {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        margin-bottom: 24px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      header .subtitle {
+        margin-top: 4px;
+        color: var(--color-fg-soft);
+        font-size: 14px;
+      }
+      .status-banner {
+        margin: 16px 0 24px;
+        padding: 16px 20px;
+        border-radius: var(--radius);
+        font-weight: 600;
+        font-size: 18px;
+        color: white;
+      }
+      .status-banner[data-status="operational"] {
+        background: var(--color-operational);
+      }
+      .status-banner[data-status="degraded"] {
+        background: var(--color-degraded);
+      }
+      .status-banner[data-status="outage"] {
+        background: var(--color-outage);
+      }
+      .status-banner.loading {
+        background: var(--color-fg-soft);
+      }
+      section {
+        margin: 32px 0;
+      }
+      section > h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+        font-weight: 600;
+      }
+      .card {
+        background: var(--color-card);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        padding: 0;
+        box-shadow: var(--color-shadow);
+        overflow: hidden;
+      }
+      .component-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--color-border);
+        gap: 12px;
+      }
+      .component-row:last-child {
+        border-bottom: none;
+      }
+      .component-row .name {
+        font-weight: 500;
+      }
+      .component-row .message {
+        font-size: 13px;
+        color: var(--color-fg-soft);
+        margin-top: 2px;
+      }
+      .badge {
+        font-size: 13px;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: 12px;
+        color: white;
+        white-space: nowrap;
+      }
+      .badge[data-status="operational"] {
+        background: var(--color-operational);
+      }
+      .badge[data-status="degraded"] {
+        background: var(--color-degraded);
+      }
+      .badge[data-status="outage"] {
+        background: var(--color-outage);
+      }
+      .uptime-row {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--color-border);
+      }
+      .uptime-row:last-child { border-bottom: none; }
+      .uptime-row .label {
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 6px;
+      }
+      .uptime-bar {
+        display: flex;
+        gap: 1px;
+        height: 22px;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .uptime-cell {
+        flex: 1;
+        background: var(--color-border);
+        cursor: help;
+      }
+      .uptime-cell[data-status="operational"] {
+        background: var(--color-operational);
+      }
+      .uptime-cell[data-status="degraded"] {
+        background: var(--color-degraded);
+      }
+      .uptime-cell[data-status="outage"] {
+        background: var(--color-outage);
+      }
+      .incident {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--color-border);
+      }
+      .incident:last-child { border-bottom: none; }
+      .incident h3 {
+        margin: 0 0 4px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .incident .meta {
+        font-size: 13px;
+        color: var(--color-fg-soft);
+        margin-bottom: 8px;
+      }
+      .incident .description {
+        font-size: 14px;
+        white-space: pre-wrap;
+      }
+      .empty {
+        padding: 18px;
+        color: var(--color-fg-soft);
+        font-size: 14px;
+        text-align: center;
+      }
+      .footer {
+        margin-top: 48px;
+        padding-top: 16px;
+        border-top: 1px solid var(--color-border);
+        font-size: 13px;
+        color: var(--color-fg-soft);
+        text-align: center;
+      }
+      .last-updated {
+        font-size: 13px;
+        color: var(--color-fg-soft);
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Spillorama systemstatus</h1>
+        <div class="subtitle">Live oversikt over backend, spill og wallet</div>
+      </header>
+
+      <div class="status-banner loading" id="status-banner">Laster status…</div>
+      <div class="last-updated" id="last-updated"></div>
+
+      <section>
+        <h2>Komponenter</h2>
+        <div class="card" id="components">
+          <div class="empty">Henter komponentstatus…</div>
+        </div>
+      </section>
+
+      <section id="incidents-section" hidden>
+        <h2>Aktive hendelser</h2>
+        <div class="card" id="active-incidents"></div>
+      </section>
+
+      <section>
+        <h2>Tilgjengelighet siste 24 timer</h2>
+        <div class="card" id="uptime">
+          <div class="empty">Henter historikk…</div>
+        </div>
+      </section>
+
+      <section id="recent-incidents-section" hidden>
+        <h2>Hendelseshistorikk</h2>
+        <div class="card" id="recent-incidents"></div>
+      </section>
+
+      <div class="footer">
+        Auto-refresh hvert 30. sekund. Sist oppdatert:
+        <span id="footer-time">aldri</span>.
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var STATUS_LABEL = {
+          operational: "Alt fungerer",
+          degraded: "Redusert kapasitet",
+          outage: "Tjeneste utilgjengelig",
+        };
+        var STATUS_LABEL_BADGE = {
+          operational: "OK",
+          degraded: "Redusert",
+          outage: "Nede",
+        };
+        var IMPACT_LABEL = {
+          none: "Informasjon",
+          minor: "Mindre",
+          major: "Stor",
+          critical: "Kritisk",
+        };
+        var INCIDENT_STATUS_LABEL = {
+          investigating: "Undersøker",
+          identified: "Identifisert",
+          monitoring: "Overvåker",
+          resolved: "Løst",
+        };
+
+        function setText(node, text) {
+          while (node.firstChild) node.removeChild(node.firstChild);
+          node.appendChild(document.createTextNode(text));
+        }
+
+        function fmtTime(iso) {
+          if (!iso) return "—";
+          try {
+            return new Date(iso).toLocaleString("nb-NO", {
+              dateStyle: "short",
+              timeStyle: "short",
+            });
+          } catch (err) {
+            return iso;
+          }
+        }
+
+        function renderComponents(components) {
+          var container = document.getElementById("components");
+          while (container.firstChild) container.removeChild(container.firstChild);
+          if (!components || components.length === 0) {
+            var empty = document.createElement("div");
+            empty.className = "empty";
+            setText(empty, "Ingen komponenter registrert.");
+            container.appendChild(empty);
+            return;
+          }
+          components.forEach(function (c) {
+            var row = document.createElement("div");
+            row.className = "component-row";
+            var left = document.createElement("div");
+            var name = document.createElement("div");
+            name.className = "name";
+            setText(name, c.displayName || c.component);
+            left.appendChild(name);
+            if (c.message) {
+              var msg = document.createElement("div");
+              msg.className = "message";
+              setText(msg, c.message);
+              left.appendChild(msg);
+            }
+            row.appendChild(left);
+            var badge = document.createElement("span");
+            badge.className = "badge";
+            badge.setAttribute("data-status", c.status);
+            setText(badge, STATUS_LABEL_BADGE[c.status] || c.status);
+            row.appendChild(badge);
+            container.appendChild(row);
+          });
+        }
+
+        function renderUptime(uptime) {
+          var container = document.getElementById("uptime");
+          while (container.firstChild) container.removeChild(container.firstChild);
+          if (!uptime || uptime.length === 0) {
+            var empty = document.createElement("div");
+            empty.className = "empty";
+            setText(empty, "Ingen historikk tilgjengelig ennå.");
+            container.appendChild(empty);
+            return;
+          }
+          uptime.forEach(function (entry) {
+            var row = document.createElement("div");
+            row.className = "uptime-row";
+            var label = document.createElement("div");
+            label.className = "label";
+            setText(label, entry.displayName || entry.component);
+            row.appendChild(label);
+            var bar = document.createElement("div");
+            bar.className = "uptime-bar";
+            (entry.buckets || []).forEach(function (bucket) {
+              var cell = document.createElement("div");
+              cell.className = "uptime-cell";
+              cell.setAttribute("data-status", bucket.worstStatus);
+              cell.title =
+                fmtTime(bucket.startsAt) +
+                " – " +
+                fmtTime(bucket.endsAt) +
+                " · " +
+                bucket.sampleCount +
+                " sjekk(er) · " +
+                STATUS_LABEL[bucket.worstStatus];
+              bar.appendChild(cell);
+            });
+            row.appendChild(bar);
+            container.appendChild(row);
+          });
+        }
+
+        function renderIncidentList(targetId, list) {
+          var container = document.getElementById(targetId);
+          while (container.firstChild) container.removeChild(container.firstChild);
+          if (!list || list.length === 0) {
+            var empty = document.createElement("div");
+            empty.className = "empty";
+            setText(empty, "Ingen hendelser å vise.");
+            container.appendChild(empty);
+            return;
+          }
+          list.forEach(function (incident) {
+            var item = document.createElement("div");
+            item.className = "incident";
+            var title = document.createElement("h3");
+            setText(title, incident.title);
+            item.appendChild(title);
+            var meta = document.createElement("div");
+            meta.className = "meta";
+            setText(
+              meta,
+              (INCIDENT_STATUS_LABEL[incident.status] || incident.status) +
+                " · " +
+                (IMPACT_LABEL[incident.impact] || incident.impact) +
+                " · Opprettet " +
+                fmtTime(incident.createdAt) +
+                (incident.resolvedAt
+                  ? " · Løst " + fmtTime(incident.resolvedAt)
+                  : ""),
+            );
+            item.appendChild(meta);
+            var desc = document.createElement("div");
+            desc.className = "description";
+            setText(desc, incident.description);
+            item.appendChild(desc);
+            container.appendChild(item);
+          });
+        }
+
+        function setBanner(status, generatedAt) {
+          var banner = document.getElementById("status-banner");
+          banner.classList.remove("loading");
+          banner.setAttribute("data-status", status);
+          setText(banner, STATUS_LABEL[status] || status);
+          var lastUpdated = document.getElementById("last-updated");
+          setText(lastUpdated, "Sist sjekket: " + fmtTime(generatedAt));
+          var footerTime = document.getElementById("footer-time");
+          setText(footerTime, fmtTime(new Date().toISOString()));
+        }
+
+        function fetchJson(url) {
+          return fetch(url, { credentials: "omit", cache: "no-cache" })
+            .then(function (res) {
+              if (!res.ok) throw new Error("HTTP " + res.status);
+              return res.json();
+            })
+            .then(function (json) {
+              if (!json || json.ok !== true) {
+                throw new Error(
+                  (json && json.error && json.error.message) || "API error",
+                );
+              }
+              return json.data;
+            });
+        }
+
+        function refresh() {
+          fetchJson("/api/status")
+            .then(function (data) {
+              setBanner(data.overall, data.generatedAt);
+              renderComponents(data.components);
+            })
+            .catch(function (err) {
+              var banner = document.getElementById("status-banner");
+              banner.setAttribute("data-status", "outage");
+              banner.classList.remove("loading");
+              setText(
+                banner,
+                "Kunne ikke hente status — " + (err && err.message) || "ukjent feil",
+              );
+            });
+
+          fetchJson("/api/status/uptime")
+            .then(function (data) {
+              renderUptime(data.uptime || []);
+            })
+            .catch(function (err) {
+              var container = document.getElementById("uptime");
+              while (container.firstChild) container.removeChild(container.firstChild);
+              var empty = document.createElement("div");
+              empty.className = "empty";
+              setText(empty, "Kunne ikke hente uptime: " + (err && err.message));
+              container.appendChild(empty);
+            });
+
+          fetchJson("/api/status/incidents")
+            .then(function (data) {
+              var active = data.active || [];
+              var recent = data.recent || [];
+              if (active.length > 0) {
+                document.getElementById("incidents-section").hidden = false;
+                renderIncidentList("active-incidents", active);
+              } else {
+                document.getElementById("incidents-section").hidden = true;
+              }
+              if (recent.length > 0) {
+                document.getElementById("recent-incidents-section").hidden = false;
+                renderIncidentList("recent-incidents", recent);
+              } else {
+                document.getElementById("recent-incidents-section").hidden = true;
+              }
+            })
+            .catch(function () {
+              // Incidents-API kan være nede uten at hele siden er kompromittert.
+              // Vi skjuler bare incidents-seksjonene og fortsetter.
+              document.getElementById("incidents-section").hidden = true;
+              document.getElementById("recent-incidents-section").hidden = true;
+            });
+        }
+
+        refresh();
+        setInterval(refresh, 30_000);
+      })();
+    </script>
+  </body>
+</html>

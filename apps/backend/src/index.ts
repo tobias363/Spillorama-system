@@ -266,6 +266,8 @@ import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminCmsRouter } from "./routes/adminCms.js";
 import { createPublicCmsRouter } from "./routes/publicCms.js";
+import { createPublicStatusRouter } from "./routes/publicStatus.js";
+import { bootstrapStatusPage } from "./observability/statusBootstrap.js";
 import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
@@ -2458,6 +2460,17 @@ app.use(createAdminCmsRouter({
 // ikke-regulatoriske trenger ikke-tom innhold) og legger på
 // Cache-Control: public, max-age=300 for å avlaste backenden.
 app.use(createPublicCmsRouter({ cmsService }));
+// BIN-791: Public status page — offentlig /status (HTML) + /api/status*.
+// Ingen auth — status-siden må fungere selv når andre tjenester er nede.
+const statusBootstrap = bootstrapStatusPage({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  platformService,
+  walletAdapter,
+  engine,
+});
+app.get("/status", (_req, res) => res.sendFile(path.join(publicDir, "status.html")));
+app.use(createPublicStatusRouter(statusBootstrap));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
 // BingoEngine er konstruert med (`bingoDailyLossLimit` / `bingoMonthlyLossLimit`)
