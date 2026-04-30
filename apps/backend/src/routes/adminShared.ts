@@ -18,6 +18,7 @@ import type { AuditLogService, AuditActorType } from "../compliance/AuditLogServ
 import type { EmailService } from "../integration/EmailService.js";
 import type { HallCashLedger } from "../agent/HallCashLedger.js";
 import type { PreFlightValidator } from "../game/RoomStartPreFlightValidator.js";
+import type { Spill1PrizeDefaultsService } from "../game/Spill1PrizeDefaultsService.js";
 
 // ── BIN-588 wire-up helpers ───────────────────────────────────────────────────
 
@@ -157,6 +158,17 @@ export interface AdminRouterDeps {
    * Se `RoomStartPreFlightValidator` for full kontrakt + feilkoder.
    */
   roomStartPreFlightValidator?: PreFlightValidator | null;
+  /**
+   * HV2-B3 (Tobias 2026-04-30): Per-hall Spill 1 default gevinst-floors.
+   *
+   * Brukes av `createAdminSpill1PrizeDefaultsRouter` for å eksponere
+   * service-CRUD som admin-HTTP-endpoints. Optional — tester som ikke
+   * trenger HV-2-routeren kan utelate, men prod-runtime skal alltid
+   * injisere fordi engine også konsumerer servicen via roomState-hook.
+   *
+   * Se `Spill1PrizeDefaultsService` for full kontrakt + cache-semantikk.
+   */
+  spill1PrizeDefaultsService?: Spill1PrizeDefaultsService;
 }
 
 // ── Shared helpers factory ────────────────────────────────────────────────────

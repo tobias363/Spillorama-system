@@ -52,6 +52,7 @@ import type {
 } from "./types.js";
 import type { GameVariantConfig } from "./variantConfig.js";
 import type { LedgerChannel, LedgerGameType } from "./ComplianceLedger.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 
 const logger = rootLogger.child({ module: "engine.game3" });
 
@@ -251,7 +252,11 @@ export class Game3Engine extends BingoEngine {
     const drawnSet = new Set(game.drawnNumbers);
     const ticketMasksByPlayer = this.buildTicketMasksByPlayer(room, game, drawnSet);
     const records: G3WinnerRecord[] = [];
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1 (utvidelse 2026-04-30): Spill 3 (slug `monsterbingo`) er
+    // hovedspill — bruk per-spill resolver for ledger-gameType. Resolver
+    // er tolerant for null/manglende slug; faller til DATABINGO for å
+    // bevare bakoverkompatibilitet for ukjente slugs.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 

@@ -298,6 +298,8 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "sms-advertisement", path: "/sms-advertisement", icon: "fa fa-mobile mr-20", labelKey: "sms_advertisement", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "cms", path: "/cms", icon: "fa fa-users mr-20", labelKey: "cms_management", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "settings", path: "/settings", icon: "fa fa-gears mr-20", labelKey: "settings", roles: ["admin", "super-admin"] },
+  // Fase 1 MVP §24 — Screen Saver konfig (multi-image carousel for hall-TV).
+  { kind: "leaf", id: "screen-saver", path: "/screen-saver", icon: "fa fa-television mr-20", labelKey: "screen_saver_title", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "system-information", path: "/system/systemInformation", icon: "fa fa-bar-chart", labelKey: "system_information", superAdminOnly: true },
   // BIN-678 — runtime-diagnostikk (version, build-SHA, uptime, feature-flags).
   { kind: "leaf", id: "system-diagnostics", path: "/system/info", icon: "fa fa-heartbeat", labelKey: "system_diagnostics", superAdminOnly: true },

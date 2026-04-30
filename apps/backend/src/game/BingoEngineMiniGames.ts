@@ -29,6 +29,7 @@ import type {
 } from "./types.js";
 import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 
 /** Default prize segments for the jackpot wheel (in kr). */
 export const JACKPOT_PRIZES: readonly number[] = [5, 10, 15, 20, 25, 50, 10, 15];
@@ -150,7 +151,10 @@ export async function spinJackpot(
   // Credit prize to player balance
   if (prizeAmount > 0) {
     const player = ctx.requirePlayer(room, playerId);
-    const gameType = "DATABINGO" as const;
+    // K2-A CRIT-1 (utvidelse 2026-04-30): per-spill resolver. Spill 1-3
+    // (`bingo`/`rocket`/`monsterbingo`) er hovedspill (MAIN_GAME, 15%);
+    // SpinnGo (`spillorama`) og ukjente slugs faller til DATABINGO (30%).
+    const gameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel = "INTERNET" as const;
     const houseAccountId = ctx.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
@@ -348,7 +352,10 @@ export async function playMiniGame(
   // vi `requirePlayer` som kaster — backend logger feilen og UI får ack.
   if (prizeAmount > 0) {
     const player = ctx.requirePlayer(room, playerId);
-    const gameType = "DATABINGO" as const;
+    // K2-A CRIT-1 (utvidelse 2026-04-30): per-spill resolver. Spill 1-3
+    // (`bingo`/`rocket`/`monsterbingo`) er hovedspill (MAIN_GAME, 15%);
+    // SpinnGo (`spillorama`) og ukjente slugs faller til DATABINGO (30%).
+    const gameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel = "INTERNET" as const;
     const houseAccountId = ctx.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 

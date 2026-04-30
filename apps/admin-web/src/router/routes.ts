@@ -144,6 +144,8 @@ export const routes: RouteDef[] = [
   // BIN-677 — settings sub-pages (maintenance). Edit-route via hash-regex.
   { path: "/maintenance", titleKey: "maintenance_list_title", roles: ["admin", "super-admin"] },
   { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
+  // Fase 1 MVP §24 — Screen Saver admin-config (multi-image carousel for hall-TV).
+  { path: "/screen-saver", titleKey: "screen_saver_title", roles: ["admin", "super-admin"] },
   { path: "/system/systemInformation", titleKey: "system_information", roles: ["admin", "super-admin"] },
   // BIN-678 — runtime-diagnostikk (system-info-snapshot).
   { path: "/system/info", titleKey: "system_diagnostics", roles: ["admin", "super-admin"] },
