@@ -1,0 +1,79 @@
+{
+  "_extracted_from": "https://spillorama.aistechnolabs.info/gameManagement",
+  "_extracted_at": "2026-04-30",
+  "_extracted_by": "Tobias session via Chrome MCP",
+  "_notes": "Per spilltype: liste over daglige tidsplaner (DSN-records) som er bundet til vise schedule-records (SID-records). Lynbingo har ingen daglige tidsplaner — er deprecated/ubrukt i prod. Turbomania er Game 4 som er DEPRECATED (BIN-496) i ny stack — bør ikke migreres.",
+  "spillTypes": {
+    "Papir bingo": {
+      "_legacy_id": "5f807893e86e8b18e65ed6f7",
+      "_new_slug": "bingo",
+      "_new_label": "Spill 1",
+      "dailySchedules": [
+        {
+          "id_display": "DSN_2026429_40242714",
+          "date_range": "29/04/2026-09/05/2026",
+          "time_window": "01:27 - 21:27",
+          "group_of_halls": "Oslo",
+          "master_hall": "Test Hall",
+          "type": "Normalt spill",
+          "status": "Aktiv",
+          "schedule_object_id": "69f20f824c94b23eed0148f3",
+          "links": {
+            "view_details": "/viewDailySchduleDetails/69f20f824c94b23eed0148f3",
+            "view_schedule": "/viewDailySchedule/69f20f824c94b23eed0148f3",
+            "close_day": "/closeDayGameManagement/5f807893e86e8b18e65ed6f7/69f20f824c94b23eed0148f3/game_1"
+          }
+        }
+      ]
+    },
+    "Lynbingo": {
+      "_legacy_id": "5f8078b3e86e8b18e65ed6f8",
+      "_new_slug": "rocket",
+      "_new_label": "Spill 2",
+      "dailySchedules": [],
+      "_note": "Ingen data tilgjengelig — Lynbingo er ikke i bruk i dag. Vurder om Spill 2 (rocket) skal migreres med default-konfig eller utelates."
+    },
+    "BingoBonanza": {
+      "_legacy_id": "5f8078cbe86e8b18e65ed6f9",
+      "_new_slug": "monsterbingo",
+      "_new_label": "Spill 3",
+      "dailySchedules": [
+        {
+          "id_display": "2026429_40111539_G3",
+          "label": "Game 3",
+          "date_range": "29/04/2026-09/05/2026",
+          "group_of_halls": "Oslo",
+          "status": "Aktiv",
+          "schedule_object_id": "69f20f274c94b23eed014749",
+          "links": {
+            "view_details": "/viewGameDetails/5f8078cbe86e8b18e65ed6f9/69f20f274c94b23eed014749",
+            "view_management": "/viewGameManagement/5f8078cbe86e8b18e65ed6f9/69f20f274c94b23eed014749",
+            "close_day": "/closeDayGameManagement/5f8078cbe86e8b18e65ed6f9/69f20f274c94b23eed014749/game_3"
+          }
+        }
+      ]
+    },
+    "Turbomania": {
+      "_legacy_id": "5f8078fce86e8b18e65ed6fa",
+      "_new_slug": "themebingo (DEPRECATED)",
+      "_new_label": "Game 4 (DEPRECATED BIN-496)",
+      "dailySchedules": [
+        {
+          "id_display": "2024108_20917564_G4",
+          "patterns_text": "Jackpot/Roman 2/Double H/MW/2L/Double X/Pyramid/Down Pyramid/Plus/vdown v/1L",
+          "prizes_text_compressed": "1009080807070606050504040302010",
+          "_note": "Game 4 er DEPRECATED i ny stack (BIN-496). Skal IKKE migreres til ny backend."
+        }
+      ]
+    },
+    "SpinnGo": {
+      "_legacy_id": "659bccf3bc629b04503c58ed",
+      "_new_slug": "spillorama",
+      "_new_label": "SpinnGo (Spill 4 / databingo)",
+      "dailySchedules": [],
+      "_note": "Truncated i ekstraksjon — må re-fetches separat. Drill-down ikke ferdig i denne pass."
+    }
+  },
+  "_truncated": true,
+  "_raw_full_dump_available_at": "window.__legacySpillTypes (live i Chrome-sesjonen)"
+}

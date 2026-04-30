@@ -1,0 +1,277 @@
+{
+  "schedule": {
+    "name": "Test Schedule 6th Jan",
+    "luckyNumberPrize": "100",
+    "scheduleType": "Manual",
+    "manualStartTime": "01:27",
+    "manualEndTime": "21:27"
+  },
+  "subGameCount": 8,
+  "subGames": [
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot Test Game",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ],
+        "jackpotPrizeYellow": "10000",
+        "jackpotDraw": "53"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "",
+        "][Small White": "",
+        "][Large White": "",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Tv Extra",
+        "custom_game_name": "Tv Extra Test Game",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Picture": "10",
+          "Frame": "20",
+          "Full House": "100"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Elvis",
+        "custom_game_name": "Test Elvis",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Elvis1",
+          "Small Elvis2",
+          "Small Elvis3",
+          "Small Elvis4",
+          "Small Elvis5"
+        ],
+        "replace_price": "20"
+      },
+      "prices": {
+        "][Small Elvis1": "10",
+        "][Small Elvis2": "10",
+        "][Small Elvis3": "10",
+        "][Small Elvis4": "10",
+        "][Small Elvis5": "10"
+      },
+      "prizes": {
+        "Elvis1": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        },
+        "Elvis2": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        },
+        "Elvis3": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        },
+        "Elvis4": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        },
+        "Elvis5": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "WOF Test Game",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Treasure Chest",
+        "custom_game_name": "TC Test Game",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Oddsen 56",
+        "custom_game_name": "Test Oddsen 56",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House Within 56 Balls": "1000",
+          "Full House": "100"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Mystery Test Game",
+        "notificationStartTime": "5s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Color Draft",
+        "custom_game_name": "Color Draft Test Game",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    }
+  ]
+}

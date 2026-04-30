@@ -1,0 +1,28 @@
+{
+  "_extracted_from": "https://spillorama.aistechnolabs.info/savedGameList",
+  "_extracted_at": "2026-04-30",
+  "_notes": "Lagret spilliste — saved game templates per spilltype. Kun 2 templates totalt; resten er tom.",
+  "savedGames": {
+    "Papir bingo": [],
+    "Lynbingo": [
+      {
+        "row": 1,
+        "id": "65b0b488e6ae613707dc274b",
+        "name": "Game_rocket",
+        "view_url": "/viewSaveGameManagement/65b0b488e6ae613707dc274b",
+        "edit_url": "/savedGameManagementEdit/5f8078b3e86e8b18e65ed6f8/65b0b488e6ae613707dc274b"
+      }
+    ],
+    "BingoBonanza": [
+      {
+        "row": 1,
+        "id": "690d6e6d73c1515e6e080554",
+        "name": "Testing GOH Games",
+        "view_url": "/viewSaveGameManagement/690d6e6d73c1515e6e080554",
+        "edit_url": "/savedGameManagementEdit/5f8078cbe86e8b18e65ed6f9/690d6e6d73c1515e6e080554"
+      }
+    ],
+    "Turbomania": [],
+    "SpinnGo": []
+  }
+}

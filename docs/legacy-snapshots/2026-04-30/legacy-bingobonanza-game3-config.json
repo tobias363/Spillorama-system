@@ -1,0 +1,39 @@
+{
+  "_extracted_from": "https://spillorama.aistechnolabs.info/viewGameManagement/5f8078cbe86e8b18e65ed6f9/69f20f274c94b23eed014749",
+  "_extracted_at": "2026-04-30",
+  "_legacy_spill_type": "BingoBonanza (5f8078cbe86e8b18e65ed6f9)",
+  "_new_mapping": "Spill 3 / monsterbingo",
+  "config": {
+    "mainGameName": "Game 3",
+    "start_date": "29/4/2026",
+    "end_date": "9/5/2026",
+    "schedule": {
+      "Wednesday": ["06:30", "23:30"],
+      "Thursday": ["07:30", "23:30"]
+    },
+    "isBotGame": "No",
+    "groupHalls": "Oslo",
+    "subGames": [
+      {
+        "index": 0,
+        "winningType": "cash",
+        "patterns": [
+          { "name": "Coverall", "prize_tier1": 55, "prize_tier2": 10000, "prize_tier3": 100 },
+          { "name": "Row 1", "prize_tier1": 21, "prize_tier2": 100, "prize_tier3": 100 },
+          { "name": "Row 2", "prize_tier1": 22, "prize_tier2": 100, "prize_tier3": 100 },
+          { "name": "Row 3", "prize_tier1": 33, "prize_tier2": 1002, "prize_tier3": 100 },
+          { "name": "Row 4", "prize_tier1": 45, "prize_tier2": 2000, "prize_tier3": 100 }
+        ]
+      },
+      {
+        "index": 1,
+        "name": "Game3 Sub1",
+        "ticketPrice": 10,
+        "luckyNumberPrize": 100,
+        "notificationStartTime": "10s",
+        "seconds_per_ball": 3,
+        "minTicketCount": 30
+      }
+    ]
+  }
+}

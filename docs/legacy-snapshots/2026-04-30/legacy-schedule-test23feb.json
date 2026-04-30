@@ -1,0 +1,412 @@
+{
+  "schedule": {
+    "name": "TestSchedule23Feb",
+    "luckyNumberPrize": "100",
+    "scheduleType": "Manual",
+    "manualStartTime": "01:30",
+    "manualEndTime": "23:30"
+  },
+  "subGameCount": 10,
+  "subGames": [
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "JackpotCustom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "5000",
+        "jackpotPrizeWhite": "5000",
+        "jackpotDraw": "54"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "10",
+        "][Large White": "20",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        },
+        "White": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Traffic Light",
+        "custom_game_name": "Traffic Custom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Red",
+          "Small Yellow",
+          "Small Green"
+        ]
+      },
+      "prices": {
+        "][Small Red": "30",
+        "][Small Yellow": "30",
+        "][Small Green": "30"
+      },
+      "prizes": {
+        "Red": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "100"
+        },
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "200"
+        },
+        "Green": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "300"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Elvis",
+        "custom_game_name": "elvis Custom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Elvis1",
+          "Small Elvis2",
+          "Small Elvis3",
+          "Small Elvis4",
+          "Small Elvis5"
+        ],
+        "replace_price": "5"
+      },
+      "prices": {
+        "][Small Elvis1": "10",
+        "][Small Elvis2": "10",
+        "][Small Elvis3": "10",
+        "][Small Elvis4": "10",
+        "][Small Elvis5": "10"
+      },
+      "prizes": {
+        "Elvis1": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        },
+        "Elvis2": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        },
+        "Elvis3": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        },
+        "Elvis4": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        },
+        "Elvis5": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Color Draft",
+        "custom_game_name": "color custom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "10",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Super Nils",
+        "custom_game_name": "super Custom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small White": "10",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "White": {
+          "B][Row 1": "10",
+          "B][Row 2": "20",
+          "B][Row 3": "30",
+          "B][Row 4": "40",
+          "B][Full House": "50",
+          "I][Row 1": "10",
+          "I][Row 2": "20",
+          "I][Row 3": "30",
+          "I][Row 4": "40",
+          "I][Full House": "50",
+          "N][Row 1": "10",
+          "N][Row 2": "20",
+          "N][Row 3": "30",
+          "N][Row 4": "40",
+          "N][Full House": "50",
+          "G][Row 1": "10",
+          "G][Row 2": "20",
+          "G][Row 3": "30",
+          "G][Row 4": "40",
+          "G][Full House": "50",
+          "O][Row 1": "10",
+          "O][Row 2": "20",
+          "O][Row 3": "30",
+          "O][Row 4": "40",
+          "O][Full House": "50"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Spillerness Spill 2",
+        "custom_game_name": "Spill custom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ],
+        "minimumPrize": "100"
+      },
+      "prices": {
+        "][Small White": "10",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "20",
+          "Row 4": "20",
+          "Full House": "30"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Innsatsen",
+        "custom_game_name": "innsatsen custom",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "6",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ],
+        "jackpotInnsatsenDraw": "56"
+      },
+      "prices": {
+        "][Small White": "10",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Ball X 10",
+        "custom_game_name": "Ball 10 Custom",
+        "notificationStartTime": "5s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small White"
+        ]
+      },
+      "prices": {
+        "][Small White": "10",
+        "][Large White": ""
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "50"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Super Nils",
+        "custom_game_name": "Custom Super Nils",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small White"
+        ]
+      },
+      "prices": {
+        "][Small White": "10",
+        "][Large White": ""
+      },
+      "prizes": {
+        "White": {
+          "B][Row 1": "10",
+          "B][Row 2": "20",
+          "B][Row 3": "30",
+          "B][Row 4": "40",
+          "B][Full House": "50",
+          "I][Row 1": "10",
+          "I][Row 2": "20",
+          "I][Row 3": "30",
+          "I][Row 4": "40",
+          "I][Full House": "50",
+          "N][Row 1": "10",
+          "N][Row 2": "20",
+          "N][Row 3": "30",
+          "N][Row 4": "40",
+          "N][Full House": "50",
+          "G][Row 1": "10",
+          "G][Row 2": "20",
+          "G][Row 3": "30",
+          "G][Row 4": "40",
+          "G][Full House": "50",
+          "O][Row 1": "10",
+          "O][Row 2": "20",
+          "O][Row 3": "30",
+          "O][Row 4": "40",
+          "O][Full House": "50"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Color Draft",
+        "custom_game_name": "Custom Color Draft",
+        "notificationStartTime": "10s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    }
+  ]
+}

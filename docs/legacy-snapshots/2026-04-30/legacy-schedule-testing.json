@@ -1,0 +1,222 @@
+{
+  "schedule": {
+    "name": "Testing Schedule",
+    "luckyNumberPrize": "100",
+    "scheduleType": "Manual",
+    "manualStartTime": "01:00",
+    "manualEndTime": "23:00"
+  },
+  "subGameCount": 6,
+  "subGames": [
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "WOF",
+        "notificationStartTime": "5s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "WOF",
+        "notificationStartTime": "5s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Treasure Chest",
+        "custom_game_name": "TC",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "5",
+        "][Large Yellow": "10",
+        "][Small White": "15",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "50",
+          "Row 2": "60",
+          "Row 3": "70",
+          "Row 4": "80",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Mystery",
+        "notificationStartTime": "5s",
+        "minseconds": "5",
+        "maxseconds": "15",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "200",
+          "Row 3": "300",
+          "Row 4": "400",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "25",
+          "Row 2": "50",
+          "Row 3": "75",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Color Draft",
+        "custom_game_name": "CD",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "5",
+        "][Large Yellow": "10",
+        "][Small White": "15",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "50",
+          "Row 2": "60",
+          "Row 3": "70",
+          "Row 4": "80",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Treasure Chest",
+        "custom_game_name": "TC",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "5",
+        "][Large Yellow": "10",
+        "][Small White": "15",
+        "][Large White": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "10",
+          "Row 2": "20",
+          "Row 3": "30",
+          "Row 4": "40",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "50",
+          "Row 2": "60",
+          "Row 3": "70",
+          "Row 4": "80",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    }
+  ]
+}

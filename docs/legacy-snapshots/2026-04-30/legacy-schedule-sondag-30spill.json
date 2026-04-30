@@ -1,0 +1,1043 @@
+{
+  "schedule": {
+    "name": "Spilleplan søndag 30 spill",
+    "luckyNumberPrize": "100",
+    "scheduleType": "Manual",
+    "manualStartTime": "09:00",
+    "manualEndTime": "23:00"
+  },
+  "subGameCount": 30,
+  "subGames": [
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "15000",
+        "jackpotPrizeWhite": "10000",
+        "jackpotDraw": "57"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Innsatsen",
+        "custom_game_name": "Innsatsen",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ],
+        "jackpotInnsatsenDraw": "57"
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Superjoker",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "15",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Oddsen 56",
+        "custom_game_name": "Oddsen 56",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House Within 56 Balls": "3000",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House Within 56 Balls": "1500",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "Lykkehjulet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "500 Spillet",
+        "custom_game_name": "500 Spillet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Quick",
+        "custom_game_name": "Kvikkis",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Full House": "1000"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "15000",
+        "jackpotPrizeWhite": "10000",
+        "jackpotDraw": "57"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Traffic Light",
+        "custom_game_name": "Traffic Light",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Red",
+          "Small Yellow",
+          "Small Green"
+        ]
+      },
+      "prices": {
+        "][Small Red": "15",
+        "][Small Yellow": "15",
+        "][Small Green": "15"
+      },
+      "prizes": {
+        "Red": {
+          "Row 1": "50",
+          "Row 2": "50",
+          "Row 3": "50",
+          "Row 4": "50",
+          "Full House": "500"
+        },
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "Green": {
+          "Row 1": "150",
+          "Row 2": "150",
+          "Row 3": "150",
+          "Row 4": "150",
+          "Full House": "1500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Superjoker",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "15",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "1000 Spillet",
+        "custom_game_name": "1000 Spillet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "Lykkehjulet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Oddsen 56",
+        "custom_game_name": "Oddsen 56",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House Within 56 Balls": "3000",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House Within 56 Balls": "1500",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Innsatsen",
+        "custom_game_name": "Innsatsen",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ],
+        "jackpotInnsatsenDraw": "57"
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "15000",
+        "jackpotPrizeWhite": "10000",
+        "jackpotDraw": "57"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Superjoker",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "15",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Quick",
+        "custom_game_name": "Kvikkis",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Full House": "1000"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Traffic Light",
+        "custom_game_name": "Traffic Light",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Red",
+          "Small Yellow",
+          "Small Green"
+        ]
+      },
+      "prices": {
+        "][Small Red": "15",
+        "][Small Yellow": "15",
+        "][Small Green": "15"
+      },
+      "prizes": {
+        "Red": {
+          "Row 1": "50",
+          "Row 2": "50",
+          "Row 3": "50",
+          "Row 4": "50",
+          "Full House": "500"
+        },
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "Green": {
+          "Row 1": "150",
+          "Row 2": "150",
+          "Row 3": "150",
+          "Row 4": "150",
+          "Full House": "1500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "Lykkehjulet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Innsatsen",
+        "custom_game_name": "Innsatsen",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ],
+        "jackpotInnsatsenDraw": "57"
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Color Draft",
+        "custom_game_name": "Fargekladden",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Super Nils",
+        "custom_game_name": "Super Nils",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "B][Row 1": "100",
+          "B][Row 2": "100",
+          "B][Row 3": "100",
+          "B][Row 4": "100",
+          "B][Full House": "500",
+          "I][Row 1": "100",
+          "I][Row 2": "100",
+          "I][Row 3": "100",
+          "I][Row 4": "100",
+          "I][Full House": "700",
+          "N][Row 1": "100",
+          "N][Row 2": "100",
+          "N][Row 3": "100",
+          "N][Row 4": "100",
+          "N][Full House": "1000",
+          "G][Row 1": "100",
+          "G][Row 2": "100",
+          "G][Row 3": "100",
+          "G][Row 4": "100",
+          "G][Full House": "700",
+          "O][Row 1": "100",
+          "O][Row 2": "100",
+          "O][Row 3": "100",
+          "O][Row 4": "100",
+          "O][Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Ball X 10",
+        "custom_game_name": "Ball X 10",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1250"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "15000",
+        "jackpotPrizeWhite": "10000",
+        "jackpotDraw": "57"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "1000 Spillet",
+        "custom_game_name": "1000 Spillet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Superjoker",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "15",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Wheel of Fortune",
+        "custom_game_name": "Lykkehjulet",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "10",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Oddsen 56",
+        "custom_game_name": "Oddsen 56",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House Within 56 Balls": "3000",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House Within 56 Balls": "1500",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Treasure Chest",
+        "custom_game_name": "Skattekisten",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House": "0"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "4000 Spillet",
+        "custom_game_name": "Finale",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10"
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House": "4000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "2000"
+        }
+      },
+      "ticketColors": []
+    }
+  ]
+}

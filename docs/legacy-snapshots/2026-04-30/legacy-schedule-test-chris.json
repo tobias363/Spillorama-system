@@ -1,0 +1,130 @@
+{
+  "schedule": {
+    "name": "Test Chris",
+    "luckyNumberPrize": "100",
+    "scheduleType": "Manual",
+    "manualStartTime": "00:29",
+    "manualEndTime": "23:29"
+  },
+  "subGameCount": 3,
+  "subGames": [
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "10",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "15000",
+        "jackpotPrizeWhite": "10000",
+        "jackpotDraw": "57"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Jackpot",
+        "custom_game_name": "Jackpot",
+        "notificationStartTime": "0s",
+        "minseconds": "5",
+        "maxseconds": "14",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow",
+          "Small White",
+          "Large White"
+        ],
+        "jackpotPrizeYellow": "30000",
+        "jackpotPrizeWhite": "15000",
+        "jackpotDraw": "50"
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "5",
+        "][Large White": "10",
+        "][Small Purple": "",
+        "][Large Purple": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House": "1000"
+        },
+        "White": {
+          "Row 1": "100",
+          "Row 2": "100",
+          "Row 3": "100",
+          "Row 4": "100",
+          "Full House": "500"
+        }
+      },
+      "ticketColors": []
+    },
+    {
+      "fields": {
+        "name": "Mystery",
+        "custom_game_name": "Mystery",
+        "notificationStartTime": "5s",
+        "minseconds": "5",
+        "maxseconds": "15",
+        "seconds": "5",
+        "ticketColorType][": [
+          "Small Yellow",
+          "Large Yellow"
+        ]
+      },
+      "prices": {
+        "][Small Yellow": "10",
+        "][Large Yellow": "20",
+        "][Small White": "",
+        "][Large White": ""
+      },
+      "prizes": {
+        "Yellow": {
+          "Row 1": "200",
+          "Row 2": "200",
+          "Row 3": "200",
+          "Row 4": "200",
+          "Full House": "0"
+        }
+      },
+      "ticketColors": []
+    }
+  ]
+}
