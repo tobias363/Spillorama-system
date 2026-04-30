@@ -68,6 +68,7 @@ import {
   type MiniGameType,
 } from "../game/minigames/types.js";
 import { extractActiveMiniGameTypes } from "../game/minigames/Game1MiniGameOrchestrator.js";
+import { ledgerGameTypeForSlug } from "../game/ledgerGameTypeForSlug.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "agent-mini-game-winning-service" });
@@ -444,7 +445,10 @@ export class AgentMiniGameWinningService {
       try {
         await this.complianceLedgerPort.recordComplianceLedgerEvent({
           hallId,
-          gameType: "DATABINGO",
+          // K2-A CRIT-1 (utvidelse 2026-04-30): denne servicen håndterer
+          // mini-games for Spill 1 (Wheel/Treasure/Mystery/ColorDraft —
+          // se docstring). Spill 1 er hovedspill (MAIN_GAME, 15%).
+          gameType: ledgerGameTypeForSlug("bingo"),
           channel: this.defaultLedgerChannel,
           eventType: "PRIZE",
           amount: centsToKroner(amountCents),

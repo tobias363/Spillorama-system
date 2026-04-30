@@ -289,6 +289,13 @@ export function buildHallSpecificReport(
     if (!gameSlot) {
       // Fallback: ledger-gameType-kolonnen. DATABINGO → game4, MAIN_GAME → game1
       // (mest sannsynlig match for Hovedspill 1 som er >80% av volum).
+      //
+      // K2-A CRIT-1 (utvidelse 2026-04-30): etter at Spill 2/3 også skriver
+      // gameType=MAIN_GAME blir denne fallbacken upresis (alle 3 hovedspill
+      // bucketes til `game1`). Slot-routing over er primær-stien og dekker
+      // properly-configured rooms — denne fallbacken brukes kun for entries
+      // uten gameId/slotId. Follow-up: utvid fallback med Spill 2/3-ledetråder
+      // (f.eks. metadata.reason=GAME2_*).
       if (entry.gameType === "DATABINGO") gameSlot = "game4";
       else if (entry.gameType === "MAIN_GAME") gameSlot = "game1";
     }

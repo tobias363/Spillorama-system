@@ -34,6 +34,7 @@ import {
 import type { GameState, Player, RoomState, ClaimRecord } from "./types.js";
 import type { GameVariantConfig } from "./variantConfig.js";
 import type { LedgerChannel, LedgerGameType } from "./ComplianceLedger.js";
+import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 
 const logger = rootLogger.child({ module: "engine.game2" });
 
@@ -165,7 +166,11 @@ export class Game2Engine extends BingoEngine {
     );
 
     const winnerRecords: G2WinnerRecord[] = [];
-    const gameType: LedgerGameType = "DATABINGO";
+    // K2-A CRIT-1 (utvidelse 2026-04-30): Spill 2 (slug `rocket`) er
+    // hovedspill — bruk per-spill resolver for ledger-gameType. Resolver
+    // er tolerant for null/manglende slug; faller til DATABINGO for å
+    // bevare bakoverkompatibilitet for ukjente slugs.
+    const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
