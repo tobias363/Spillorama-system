@@ -228,6 +228,19 @@ function rowActions(row: AdminHall, onChange: () => void): Node {
   addMoney.addEventListener("click", () => openAddMoneyModal(row, onChange));
   wrap.append(addMoney);
 
+  // HV2-B3: Spill 1 default-gevinster (Rad 1-4 + Fullt Hus floors).
+  // Lenker til dedikert side med form for å edite per-hall floors.
+  const prizeDefaults = document.createElement("a");
+  prizeDefaults.className = "btn btn-info btn-xs";
+  prizeDefaults.setAttribute("data-action", "spill1-prize-defaults");
+  prizeDefaults.setAttribute("data-id", row.id);
+  prizeDefaults.href = `#/hall/spill1-prize-defaults/${encodeURIComponent(row.id)}`;
+  prizeDefaults.innerHTML = `<i class="fa fa-trophy" aria-hidden="true"></i>`;
+  prizeDefaults.title = t("spill1_prize_defaults_title");
+  prizeDefaults.setAttribute("aria-label", t("spill1_prize_defaults_title"));
+  prizeDefaults.style.marginLeft = "4px";
+  wrap.append(prizeDefaults);
+
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = row.isActive ? "btn btn-danger btn-xs" : "btn btn-success btn-xs";

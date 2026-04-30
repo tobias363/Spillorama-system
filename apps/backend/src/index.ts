@@ -226,6 +226,7 @@ import { createAdminPhysicalTicketsGamesInHallRouter } from "./routes/adminPhysi
 import { PhysicalTicketsGamesInHallService } from "./admin/PhysicalTicketsGamesInHall.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
+import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { createAdminCloseDayRouter } from "./routes/adminCloseDay.js";
 import { CloseDayService } from "./admin/CloseDayService.js";
 import { createAdminDailySchedulesRouter } from "./routes/adminDailySchedules.js";
@@ -879,6 +880,16 @@ const gameManagementService = new GameManagementService({
   schema: pgSchema,
 });
 
+// HV2-B1+B2 (Tobias 2026-04-30): Per-hall Spill 1 default gevinst-floors.
+// Service eksponeres både til admin-routeren (HV2-B3 CRUD-endpoints) og til
+// roomState-binderen (engine-integrasjon via fetchSpill1HallFloors-hook).
+// Wildcard-fallback (`hall_id='*'`) seedes ved migration så getDefaults()
+// alltid har en baseline selv for haller uten eksplisitte overrides.
+const spill1PrizeDefaultsService = new Spill1PrizeDefaultsService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
+
 // PR C (variantConfig-admin-kobling): fetcher-hook som
 // `roomState.bindVariantConfigForRoom` bruker når en caller sender
 // gameManagementId. Returnerer `GameManagement.config_json` eller null
@@ -892,6 +903,27 @@ async function fetchGameManagementConfigForRoomState(
     return gm.config ?? null;
   } catch {
     // Ikke-funnet eller DB-feil → binderen faller til default.
+    return null;
+  }
+}
+
+// HV-2 fetcher-hook: gir roomState floor-defaults per hall ved variant-binding.
+// Kalles kun når `gameSlug === "bingo"` og `hallId` er satt; for Spill 2/3
+// og SpinnGo bypasser binderen denne hooken (variable-by-ticket-count uberørt).
+async function fetchSpill1HallFloorsForRoomState(
+  hallId: string,
+): Promise<{
+  phase1: number;
+  phase2: number;
+  phase3: number;
+  phase4: number;
+  phase5: number;
+} | null> {
+  try {
+    const defaults = await spill1PrizeDefaultsService.getDefaults(hallId);
+    return defaults;
+  } catch {
+    // DB-/network-feil → binderen faller til default uten floors.
     return null;
   }
 }
@@ -2854,10 +2886,13 @@ app.use(createAdminRouter({
   // GameManagement når `gameManagementId` sendes inn. Fetcher-hooken
   // holder RoomStateManager fri for service-avhengighet — her kobles
   // den til den faktiske GameManagementService-instansen.
+  // HV-2: `fetchSpill1HallFloors` injiseres så binderen kan applisere
+  // hall-default floors som baseline `minPrize` på Spill 1-patterns.
   bindVariantConfigForRoom: (code, opts) =>
     roomState.bindVariantConfigForRoom(code, {
       ...opts,
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
+      fetchSpill1HallFloors: fetchSpill1HallFloorsForRoomState,
     }),
   auditLogService,
   emailService,
@@ -2866,6 +2901,10 @@ app.use(createAdminRouter({
   // Tobias 2026-04-27 (pilot-test feedback): pre-flight validator for
   // POST /api/admin/rooms/:roomCode/start.
   roomStartPreFlightValidator,
+  // HV2-B3: per-hall Spill 1 default gevinst-floors. Service eksponeres
+  // til admin-routeren for CRUD-endpoints. Engine-integrasjonen går
+  // via `fetchSpill1HallFloors`-hooken over (samme service-instans).
+  spill1PrizeDefaultsService,
 }));
 
 app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
@@ -3111,10 +3150,13 @@ const registerGameEvents = createGameEventHandlers({
   // til default ellers. Socket-callsites (room:create, room:join-auto) bruker
   // denne foretrukne pathen i dag uten gameManagementId — plumbing-en er klar
   // for fremtidig scope der ID-en sendes inn på wire.
+  // HV-2: floor-fetcher injiseres her også slik at socket-create-paths får
+  // hall-default floors uten å måtte gå via admin-routeren.
   bindVariantConfigForRoom: (code, opts) =>
     roomState.bindVariantConfigForRoom(code, {
       ...opts,
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
+      fetchSpill1HallFloors: fetchSpill1HallFloorsForRoomState,
     }),
   chatMessageStore,
   // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.

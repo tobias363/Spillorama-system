@@ -2813,6 +2813,167 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
 
+  /api/admin/halls/{hallId}/spill1-prize-defaults:
+    get:
+      tags: [Admin — Halls]
+      summary: Get per-hall Spill 1 default gevinst-floors (HV2-B3)
+      description: |
+        **HV2-B3** (Tobias 2026-04-30): Returnerer hall-default floors for
+        Spill 1 (slug `bingo`) per fase (Rad 1, 2, 3, 4, Fullt Hus).
+        Beløp returneres i hele kroner (ikke øre).
+
+        Floor-en brukes som baseline `minPrize` på preset-patterns i
+        engine — sub-variant-presets (Wheel of Fortune, Mystery, etc.)
+        kan ØKE floor-en, men aldri senke. Wildcard-fallback (per fase)
+        for haller uten eksplisitte overrides; defaults er
+        100/200/200/200/1000 kr.
+
+        **RBAC:** `HALL_GAME_CONFIG_READ` (ADMIN, HALL_OPERATOR, SUPPORT).
+        HALL_OPERATOR auto-scope (BIN-591) — kan kun lese egen hall.
+
+        For Spill 2/3 (`rocket`, `monsterbingo`) og SpinnGo (`spillorama`)
+        er denne tabellen IKKE i bruk.
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+          description: Hall-ID eller slug. Slug→ID-mapping skjer server-side.
+      responses:
+        "200":
+          description: Floor-defaults
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [hallId, phase1, phase2, phase3, phase4, phase5]
+                        properties:
+                          hallId:
+                            type: string
+                          phase1:
+                            type: number
+                            description: Rad 1 floor (kr).
+                          phase2:
+                            type: number
+                            description: Rad 2 floor (kr).
+                          phase3:
+                            type: number
+                            description: Rad 3 floor (kr).
+                          phase4:
+                            type: number
+                            description: Rad 4 floor (kr).
+                          phase5:
+                            type: number
+                            description: Fullt Hus floor (kr).
+        "400":
+          description: FORBIDDEN (cross-hall HALL_OPERATOR) eller HALL_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      tags: [Admin — Halls]
+      summary: Update per-hall Spill 1 default gevinst-floors (HV2-B3)
+      description: |
+        **HV2-B3** (Tobias 2026-04-30): Partial update av Spill 1 floors
+        per fase. Hver fase som ikke er sendt i body beholdes uendret
+        (UPSERT skriver kun de feltene klienten faktisk har sendt).
+
+        **Validering:**
+        - Hver phase må være ≥ 0 og ≤ 2500 kr (pengespillforskriften
+          enkelt-premie-cap).
+        - Minst én av phase1-phase5 må oppgis; tom body → `INVALID_INPUT`.
+        - Numeriske strings (form-input) aksepteres og parses til number.
+
+        **RBAC:** `HALL_GAME_CONFIG_WRITE` (ADMIN, HALL_OPERATOR).
+        HALL_OPERATOR auto-scope (BIN-591) — kan kun skrive egen hall.
+        SUPPORT er eksplisitt ekskludert (read-only rolle for compliance).
+
+        **Audit:** Én `spill1.prize_defaults.update`-event skrives per
+        fase som faktisk endret seg, med `before`/`after`-verdier i
+        `details` for full Lotteritilsynet-sporbarhet. Idempotente
+        re-writes (samme verdi) skriver ingen events.
+
+        **Wire-effect:** Engine-integrasjonen leser samme service via
+        `fetchSpill1HallFloors`-hook ved variant-binding, så endringer
+        slår inn på neste runde uten restart.
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: |
+                Partial floor-patch. Minst én av phase1-phase5 må oppgis.
+                Beløpene er i kroner (ikke øre); cap 2500 kr per fase.
+              properties:
+                phase1:
+                  type: number
+                  minimum: 0
+                  maximum: 2500
+                  description: Rad 1 floor (kr).
+                phase2:
+                  type: number
+                  minimum: 0
+                  maximum: 2500
+                  description: Rad 2 floor (kr).
+                phase3:
+                  type: number
+                  minimum: 0
+                  maximum: 2500
+                  description: Rad 3 floor (kr).
+                phase4:
+                  type: number
+                  minimum: 0
+                  maximum: 2500
+                  description: Rad 4 floor (kr).
+                phase5:
+                  type: number
+                  minimum: 0
+                  maximum: 2500
+                  description: Fullt Hus floor (kr).
+      responses:
+        "200":
+          description: Updated floor-defaults (full snapshot etter update)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [hallId, phase1, phase2, phase3, phase4, phase5]
+                        properties:
+                          hallId:
+                            type: string
+                          phase1: { type: number }
+                          phase2: { type: number }
+                          phase3: { type: number }
+                          phase4: { type: number }
+                          phase5: { type: number }
+        "400":
+          description: |
+            INVALID_INPUT (negative, > 2500, non-numeric, eller tom body) /
+            FORBIDDEN (cross-hall HALL_OPERATOR) / HALL_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /api/admin/halls/{hallId}/schedule:
     get:
       tags: [Admin — Halls]

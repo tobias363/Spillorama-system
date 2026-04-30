@@ -23,6 +23,7 @@ import { createAdminRoomsRouter } from "./adminRooms.js";
 import { createAdminComplianceRouter } from "./adminCompliance.js";
 import { createAdminReportsRouter } from "./adminReports.js";
 import { createAdminOverskuddRouter } from "./adminOverskudd.js";
+import { createAdminSpill1PrizeDefaultsRouter } from "./adminSpill1PrizeDefaults.js";
 
 export type { AdminRouterDeps, BingoSchedulerSettings, PendingBingoSettingsUpdate, BingoSettingsState };
 
@@ -38,6 +39,12 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
   router.use(createAdminComplianceRouter(subRouterDeps));
   router.use(createAdminReportsRouter(subRouterDeps));
   router.use(createAdminOverskuddRouter(subRouterDeps));
+  // HV2-B3: per-hall Spill 1 default gevinst-floors. Routeren registreres
+  // kun når servicen er injisert (test-paths som ikke trenger HV-2 kan
+  // utelate uten at admin-routeren kollapser).
+  if (subRouterDeps.spill1PrizeDefaultsService) {
+    router.use(createAdminSpill1PrizeDefaultsRouter(subRouterDeps));
+  }
 
   return router;
 }
