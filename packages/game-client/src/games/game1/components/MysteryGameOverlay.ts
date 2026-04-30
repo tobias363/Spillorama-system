@@ -1086,7 +1086,39 @@ export class MysteryGameOverlay extends Container {
 
     const digitEl = document.createElement("span");
     digitEl.className = "mj-ball-digit";
-    digitEl.textContent = digit;
+    // Tobias 2026-04-30 (round 2 of joker-fix): når outcome=joker skal selve
+    // ball-en vise crown-bildet i stedet for sifferet (slik at spilleren ser
+    // tydelig at hen traff joker — gul bakgrunn alene var ikke nok). Hider
+    // digit-tekst og overlay-er crown som <img> i samme cell.
+    if (outcome === "joker") {
+      digitEl.textContent = "";
+      const crownImg = document.createElement("img");
+      crownImg.src = JOKER_CROWN_IMG_URL;
+      crownImg.alt = "Joker";
+      crownImg.draggable = false;
+      crownImg.className = "mj-ball-joker-crown";
+      Object.assign(crownImg.style, {
+        position: "absolute",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "75%",
+        height: "auto",
+        objectFit: "contain",
+        pointerEvents: "none",
+        filter: "drop-shadow(0 0 6px rgba(255,140,30,0.8))",
+        zIndex: "1",
+      });
+      // Krev at wrap er position:relative slik at crown-en er sentrert
+      // korrekt. Default for `.mj-ball` i CSS er allerede relative, men sett
+      // defensivt for å unngå regresjon ved fremtidig CSS-endring.
+      if (getComputedStyle(wrap).position === "static") {
+        wrap.style.position = "relative";
+      }
+      wrap.appendChild(crownImg);
+    } else {
+      digitEl.textContent = digit;
+    }
     wrap.appendChild(digitEl);
 
     return { wrap, img, digitEl };
@@ -1167,14 +1199,22 @@ export class MysteryGameOverlay extends Container {
 
     if (this.finished && this.finalPrize) {
       if (this.finalPrize.joker) {
+        // Tobias 2026-04-30: bytt fra lucky-clover (JOKER_IMG_URL) til
+        // joker-crown (JOKER_CROWN_IMG_URL) på joker-treff. Crown er det
+        // tematiske emblemet for Mystery Joker (samme som intro-animasjonen
+        // bruker) — clover er for vanlig "lykketall"-kontekst og var feil
+        // visuelt-match for joker-jackpot. Bredere bredde (52px) så crown
+        // blir tydelig hovedmotiv på vinning, ikke bare et lite ikon.
         const img = document.createElement("img");
-        img.src = JOKER_IMG_URL;
+        img.src = JOKER_CROWN_IMG_URL;
         img.alt = "";
         img.draggable = false;
         Object.assign(img.style, {
-          width: "28px",
-          height: "28px",
-          filter: "drop-shadow(0 0 10px rgba(255,122,26,0.6))",
+          width: "52px",
+          height: "auto",
+          objectFit: "contain",
+          filter: "drop-shadow(0 0 12px rgba(255,122,26,0.75))",
+          animation: "mj-amount-glow 1.6s ease-in-out infinite",
         });
         const txt = document.createElement("b");
         txt.textContent = `JOKER! JACKPOT ${this.finalPrize.amount.toLocaleString(
