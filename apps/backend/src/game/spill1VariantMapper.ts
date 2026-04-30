@@ -39,6 +39,7 @@ import {
   type PresetCustomPattern,
   type PresetPatternConfig,
   type Spill1SubVariantType,
+  type Spill1VariantOverrides,
 } from "@spillorama/shared-types";
 
 // ── Public input-type (defensive shape) ─────────────────────────────────────
@@ -87,6 +88,25 @@ export interface Spill1ConfigInput {
   };
   luckyNumberPrizeNok?: number;
   elvis?: { replaceTicketPriceNok?: number };
+  /**
+   * Audit 2026-04-30 (PR #748): legacy-paritet override-felter for Tv Extra,
+   * Oddsen 56 og Spillerness Spill 2. Når satt, leses verdiene FØR fallback
+   * til `SPILL1_SUB_VARIANT_DEFAULTS`. Manglende felt → defaults.
+   *
+   * Shape speiler `Spill1OverridesSchema` (Zod) i
+   * `packages/shared-types/src/schemas/admin.ts`. Engine-mapper-koblingen
+   * er deklarert via `Spill1VariantOverrides` fra `@spillorama/shared-types`.
+   *
+   * Origin:
+   * - `app_schedules.sub_games_json[].spill1Overrides` (schedule-import)
+   * - `app_game1_scheduled_games.game_config_json.spill1Overrides` (snapshot)
+   *
+   * Ingen Oddsen-overrides flyter gjennom denne mapperen — `OddsenConfig.{potSmallNok,
+   * potLargeNok}` leses av `MiniGameOddsenEngine` direkte fra
+   * `app_mini_games_config.config_json` og eventuelt schedule-snapshot.
+   * Tv Extra og Spillerness behandles av `buildSubVariantPresetPatterns`.
+   */
+  spill1Overrides?: Spill1VariantOverrides;
   // Andre felter tillates men ignoreres.
   [key: string]: unknown;
 }
@@ -368,7 +388,13 @@ export function buildVariantConfigFromSpill1Config(
   // for eksisterende tester (BIN-689 Kvikkis-test m.fl.).
   const presetVariant =
     fallback === undefined ? resolvePresetVariant(spill1?.subVariant) : null;
-  const preset = presetVariant ? buildSubVariantPresetPatterns(presetVariant) : null;
+  // Audit 2026-04-30: pass spill1Overrides slik at preset-patterns
+  // (TV Extra Picture/Frame, Spillerness phase-1 minPrize) bruker
+  // legacy-importerte verdier i stedet for hardkodede defaults.
+  // Manglende felter → defaults via `SPILL1_SUB_VARIANT_DEFAULTS`.
+  const preset = presetVariant
+    ? buildSubVariantPresetPatterns(presetVariant, spill1?.spill1Overrides)
+    : null;
 
   // BIN-689: Kvikkis-routing. Hvis `subVariant === "kvikkis"` og ingen
   // eksplisitt fallback er angitt, bruk DEFAULT_QUICKBINGO_CONFIG så

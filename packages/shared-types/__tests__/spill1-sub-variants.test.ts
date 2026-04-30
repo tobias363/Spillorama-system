@@ -17,7 +17,9 @@ import {
   SPILL1_SUB_VARIANT_DEFAULTS,
   isOverrideableVariant,
   SPILL1_SUB_VARIANT_I18N_KEYS,
+  resolveOddsen56PotOverrides,
   type Spill1SubVariantType,
+  type Spill1VariantOverrides,
 } from "../src/spill1-sub-variants.js";
 
 // ── Enum-katalog ───────────────────────────────────────────────────────────
@@ -332,4 +334,178 @@ test("buildSubVariantPresetPatterns: ukjent variant kastes ikke av TS, men er ik
   assert.equal(isSpill1SubVariantType("unknown-variant"), false);
   assert.equal(isSpill1SubVariantType("tv extra"), false); // space/case sensitiv
   assert.equal(isSpill1SubVariantType("TV-EXTRA"), false);
+});
+
+// ── Audit 2026-04-30: Spill 1 legacy-paritet override-tester ───────────────
+// PR #748 identifiserte 3 missing-prize-slots (TV1/TV2, O1/O2, SP1) som ikke
+// kunne mappes via UI. Disse testene verifiserer at override-først-fallback-
+// defaults pathen fungerer for alle 3 cases.
+
+test("audit TV1/TV2: tv-extra override.pictureYellow + frameYellow brukes når satt", () => {
+  const overrides: Spill1VariantOverrides = {
+    tvExtra: {
+      pictureYellow: 750,
+      frameYellow: 1500,
+    },
+  };
+  const p = buildSubVariantPresetPatterns("tv-extra", overrides);
+  assert.equal(p.patterns.length, 0);
+  assert.ok(p.customPatterns);
+  const byId = new Map(p.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")!.prize1, 750, "Picture override respekteres");
+  assert.equal(byId.get("ramme")!.prize1, 1500, "Frame override respekteres");
+  // Full House mangler i overrides → default brukes
+  assert.equal(
+    byId.get("full_house")!.prize1,
+    SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.fullHouse,
+    "fullHouse default når override mangler",
+  );
+});
+
+test("audit TV1/TV2: tv-extra fullHouseYellow override brukes også", () => {
+  const overrides: Spill1VariantOverrides = {
+    tvExtra: { fullHouseYellow: 5000 },
+  };
+  const p = buildSubVariantPresetPatterns("tv-extra", overrides);
+  const byId = new Map(p.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("full_house")!.prize1, 5000);
+  // Picture/Frame skal fortsatt være defaults
+  assert.equal(byId.get("bilde")!.prize1, SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.picture);
+  assert.equal(byId.get("ramme")!.prize1, SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.frame);
+});
+
+test("audit TV1/TV2: tv-extra UTEN override = identisk med pre-audit-output (regresjons-sjekk)", () => {
+  const withoutOverride = buildSubVariantPresetPatterns("tv-extra");
+  const withEmptyOverride = buildSubVariantPresetPatterns("tv-extra", {});
+  const withTvExtraButNoFields = buildSubVariantPresetPatterns("tv-extra", {
+    tvExtra: {},
+  });
+  assert.deepEqual(withoutOverride, withEmptyOverride);
+  assert.deepEqual(withoutOverride, withTvExtraButNoFields);
+});
+
+test("audit TV1/TV2: tv-extra negative/NaN override → fallback til default", () => {
+  // Defensive: negative tall ignoreres, defaults brukes.
+  const p = buildSubVariantPresetPatterns("tv-extra", {
+    tvExtra: {
+      pictureYellow: -10 as number, // type-fysisk umulig, men runtime-mulig
+      frameYellow: Number.NaN as number,
+    },
+  });
+  const byId = new Map(p.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")!.prize1, SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.picture);
+  assert.equal(byId.get("ramme")!.prize1, SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.frame);
+});
+
+test("audit SP1: spillernes-spill override.minimumPrize brukes for fase 1", () => {
+  const overrides: Spill1VariantOverrides = {
+    spillerness2: { minimumPrize: 100 },
+  };
+  const p = buildSubVariantPresetPatterns("spillernes-spill", overrides);
+  assert.equal(p.patterns.length, 5);
+  const phase1 = p.patterns[0]!;
+  assert.equal(phase1.minPrize, 100, "phase 1 minPrize bruker override");
+  // phase 1 skal fortsatt være cascade-base (ingen multiplier)
+  assert.equal(phase1.phase1Multiplier, undefined);
+  assert.equal(phase1.prizePercent, SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.phase1PercentOfPool);
+});
+
+test("audit SP1: spillernes-spill cascade-faser arver default-mins (ikke override)", () => {
+  const overrides: Spill1VariantOverrides = {
+    spillerness2: { minimumPrize: 100 },
+  };
+  const p = buildSubVariantPresetPatterns("spillernes-spill", overrides);
+  // Cascade-faser skal IKKE påvirkes av phase-1 override
+  assert.equal(p.patterns[1]!.minPrize, SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.phase2MinPrize);
+  assert.equal(p.patterns[2]!.minPrize, SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.phase3MinPrize);
+  assert.equal(p.patterns[3]!.minPrize, SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.phase4MinPrize);
+  assert.equal(p.patterns[4]!.minPrize, SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.fullHouseMinPrize);
+});
+
+test("audit SP1: spillernes-spill UTEN override = uendret default (regresjons-sjekk)", () => {
+  const without = buildSubVariantPresetPatterns("spillernes-spill");
+  const withEmpty = buildSubVariantPresetPatterns("spillernes-spill", {});
+  assert.deepEqual(without, withEmpty);
+  assert.equal(without.patterns[0]!.minPrize, SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.phase1MinPrize);
+});
+
+test("audit O1/O2: resolveOddsen56PotOverrides — yellow=large, white=small mapping", () => {
+  // Audit-mapping: Yellow.Full House Within 56 = pot-large (3000),
+  // White.Full House Within 56 = pot-small (1500).
+  const result = resolveOddsen56PotOverrides({
+    fullHouseWithin56Yellow: 3000,
+    fullHouseWithin56White: 1500,
+  });
+  assert.equal(result.potLargeNok, 3000);
+  assert.equal(result.potSmallNok, 1500);
+});
+
+test("audit O1/O2: resolveOddsen56PotOverrides — kun yellow override → small=undefined", () => {
+  const result = resolveOddsen56PotOverrides({
+    fullHouseWithin56Yellow: 4500,
+  });
+  assert.equal(result.potLargeNok, 4500);
+  assert.equal(result.potSmallNok, undefined, "white-override mangler → undefined → caller bruker engine-default");
+});
+
+test("audit O1/O2: resolveOddsen56PotOverrides — undefined input → both undefined", () => {
+  const result = resolveOddsen56PotOverrides(undefined);
+  assert.equal(result.potLargeNok, undefined);
+  assert.equal(result.potSmallNok, undefined);
+});
+
+test("audit O1/O2: resolveOddsen56PotOverrides — empty object → both undefined", () => {
+  const result = resolveOddsen56PotOverrides({});
+  assert.equal(result.potLargeNok, undefined);
+  assert.equal(result.potSmallNok, undefined);
+});
+
+test("audit O1/O2: resolveOddsen56PotOverrides — negative values → undefined (fallback)", () => {
+  const result = resolveOddsen56PotOverrides({
+    fullHouseWithin56Yellow: -100 as number,
+    fullHouseWithin56White: -50 as number,
+  });
+  assert.equal(result.potLargeNok, undefined);
+  assert.equal(result.potSmallNok, undefined);
+});
+
+test("audit: andre presets (kvikkis, ball-x-10, super-nils, standard) ignorerer override-input", () => {
+  const overrides: Spill1VariantOverrides = {
+    tvExtra: { pictureYellow: 9999 },
+    spillerness2: { minimumPrize: 9999 },
+  };
+  // Disse 4 presets skal være uendret uavhengig av overrides
+  for (const v of ["kvikkis", "ball-x-10", "super-nils", "standard"] as const) {
+    const without = buildSubVariantPresetPatterns(v);
+    const withOverrides = buildSubVariantPresetPatterns(v, overrides);
+    assert.deepEqual(
+      without,
+      withOverrides,
+      `variant ${v} skal ignorere TV/SP overrides`,
+    );
+  }
+});
+
+test("audit: deterministisk pure — override-input → identisk output på repeat", () => {
+  const overrides: Spill1VariantOverrides = {
+    tvExtra: { pictureYellow: 600, frameYellow: 1200, fullHouseYellow: 4000 },
+    spillerness2: { minimumPrize: 250 },
+  };
+  const a1 = buildSubVariantPresetPatterns("tv-extra", overrides);
+  const a2 = buildSubVariantPresetPatterns("tv-extra", overrides);
+  const b1 = buildSubVariantPresetPatterns("spillernes-spill", overrides);
+  const b2 = buildSubVariantPresetPatterns("spillernes-spill", overrides);
+  assert.deepEqual(a1, a2);
+  assert.deepEqual(b1, b2);
+});
+
+test("audit: TV Extra override prize=0 (eksplisitt nullstilt) bruker 0, ikke default", () => {
+  // Audit-grensesak: admin har eksplisitt satt picture=0 (gratis-pattern).
+  // 0 er gyldig (nonnegative), så override skal respekteres.
+  const overrides: Spill1VariantOverrides = {
+    tvExtra: { pictureYellow: 0 },
+  };
+  const p = buildSubVariantPresetPatterns("tv-extra", overrides);
+  const byId = new Map(p.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")!.prize1, 0, "explicit 0 skal respekteres");
 });

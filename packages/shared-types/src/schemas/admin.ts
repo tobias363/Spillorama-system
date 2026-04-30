@@ -826,6 +826,61 @@ const ScheduleType = z.enum(["Auto", "Manual"]);
 const ScheduleStatus = z.enum(["active", "inactive"]);
 
 /**
+ * Spill 1 legacy-paritet override-slots — audit 2026-04-30.
+ *
+ * Tre prize-slots fra legacy-schedule-snapshots har ingen typed kolonne:
+ * 1. **Tv Extra**: `Yellow.Picture` (500), `Yellow.Frame` (1000)
+ * 2. **Oddsen 56**: `Yellow/White."Full House Within 56 Balls"` (3000/1500)
+ * 3. **Spillerness Spill 2**: `minimumPrize` (100)
+ *
+ * Disse persisteres her slik at variant-mapperen leser override-først,
+ * fallback til `SPILL1_SUB_VARIANT_DEFAULTS`. Manglende felt → defaults.
+ *
+ * Alle felt optional (typed `.optional()`) så eksisterende schedules uten
+ * `spill1Overrides` fortsetter å fungere uten endringer.
+ *
+ * @audit docs/legacy-snapshots/2026-04-30/SPILL1_GAP_AUDIT.md (PR #748)
+ */
+export const Spill1OverridesSchema = z.object({
+  /**
+   * Tv Extra prize-slots (legacy `prizes.Yellow.{Picture,Frame,Full House}`).
+   * Default-verdier (når omitted): picture=500, frame=1000, fullHouse=3000.
+   * Verdier i kr (heltall, ≥ 0).
+   */
+  tvExtra: z
+    .object({
+      pictureYellow: z.number().int().nonnegative().optional(),
+      frameYellow: z.number().int().nonnegative().optional(),
+      fullHouseYellow: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+  /**
+   * Oddsen 56 pot-størrelser (legacy `prizes.{Yellow,White}."Full House
+   * Within 56 Balls"`). Mappes til `OddsenConfig.{potLargeNok,potSmallNok}`
+   * ved spawn til `app_game1_scheduled_games.game_config_json`.
+   * Yellow = large-ticket-pot (default 3000), White = small-ticket-pot
+   * (default 1500). Verdier i kr (heltall, ≥ 0).
+   */
+  oddsen56: z
+    .object({
+      fullHouseWithin56Yellow: z.number().int().nonnegative().optional(),
+      fullHouseWithin56White: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+  /**
+   * Spillerness Spill 2 phase-1-gulv (legacy `subGames[N].fields.minimumPrize`).
+   * Mappes til `PatternConfig.minPrize` på fase-1-pattern (cascade-base).
+   * Default (når omitted): 50. Verdi i kr (heltall, ≥ 0).
+   */
+  spillerness2: z
+    .object({
+      minimumPrize: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+});
+export type Spill1Overrides = z.infer<typeof Spill1OverridesSchema>;
+
+/**
  * Fri-form subgame-slot. Feltene matcher legacy scheduleController.
  * createSchedulePostData. Ukjente felter bevares via `extra` inntil
  * BIN-621 normaliserer subgame-katalogen.
@@ -849,6 +904,12 @@ export const ScheduleSubgameSchema = z.object({
    * Mystery Game-sub-game med priceOptions i `extra.mysteryConfig`.
    */
   subGameType: z.enum(["STANDARD", "MYSTERY"]).optional(),
+  /**
+   * Audit 2026-04-30: Legacy-paritet override-felter for Tv Extra,
+   * Oddsen 56 og Spillerness Spill 2. Optional — manglende felt →
+   * `SPILL1_SUB_VARIANT_DEFAULTS` brukes som fallback.
+   */
+  spill1Overrides: Spill1OverridesSchema.optional(),
 });
 export type ScheduleSubgame = z.infer<typeof ScheduleSubgameSchema>;
 

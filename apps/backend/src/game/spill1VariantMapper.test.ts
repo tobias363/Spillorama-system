@@ -710,3 +710,151 @@ test("K4 regresjon: admin-UI som ikke bruker subVariant (tom/undefined) får leg
   assert.equal(perColor.length, 5);
   assert.equal(perColor[0]!.prizePercent, 10, "percent-mode fra admin respektert");
 });
+
+// ── Audit 2026-04-30 (PR #748): Spill1Overrides override-først-fallback ───
+// Verifiserer at backend-mapperen leser `spill1Overrides` fra schedule og
+// passes til `buildSubVariantPresetPatterns`. Dekker TV1/TV2 og SP1.
+// Oddsen 56 (O1/O2) går IKKE gjennom denne mapperen — den leses direkte av
+// MiniGameOddsenEngine fra OddsenConfig.
+
+test("audit TV1/TV2: tv-extra mapper passer overrides til preset-builder", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30 }],
+    spill1Overrides: {
+      tvExtra: {
+        pictureYellow: 750,
+        frameYellow: 1500,
+      },
+    },
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  // TV Extra bruker customPatterns, ikke patternsByColor[]
+  assert.ok(vc.customPatterns);
+  const byId = new Map(vc.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")!.prize1, 750, "Picture override flow gjennom mapper");
+  assert.equal(byId.get("ramme")!.prize1, 1500, "Frame override flow gjennom mapper");
+  // Full House mangler i overrides → default fra SPILL1_SUB_VARIANT_DEFAULTS
+  assert.equal(byId.get("full_house")!.prize1, 3000);
+});
+
+test("audit TV1/TV2: tv-extra UTEN spill1Overrides bruker uendret default (regresjon)", () => {
+  const without: Spill1ConfigInput = {
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30 }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(without);
+  const byId = new Map(vc.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")!.prize1, 500);
+  assert.equal(byId.get("ramme")!.prize1, 1000);
+  assert.equal(byId.get("full_house")!.prize1, 3000);
+});
+
+test("audit SP1: spillernes-spill mapper passer minimumPrize-override", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "spillernes-spill",
+    ticketColors: [{ color: "small_yellow", priceNok: 50 }],
+    spill1Overrides: {
+      spillerness2: { minimumPrize: 100 },
+    },
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5);
+  // Phase 1 minPrize skal være override-verdien (100), ikke default (50)
+  assert.equal(perColor[0]!.minPrize, 100, "phase-1 minPrize override flow gjennom mapper");
+  // Cascade-faser arver default-mins
+  assert.equal(perColor[1]!.minPrize, 50);
+  assert.equal(perColor[2]!.minPrize, 100);
+  assert.equal(perColor[3]!.minPrize, 100);
+  assert.equal(perColor[4]!.minPrize, 500);
+});
+
+test("audit SP1: spillernes-spill UTEN override bruker default-minPrize=50 (regresjon)", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "spillernes-spill",
+    ticketColors: [{ color: "small_yellow", priceNok: 50 }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor[0]!.minPrize, 50, "default phase-1 minPrize uendret");
+});
+
+test("audit: kombinert TV Extra + Spillernes overrides (begge i samme schedule)", () => {
+  // Edge-case: én subgame kan ikke være BÅDE TV Extra og Spillernes —
+  // men vi tester at overrides for begge er strukturelt valid og at kun
+  // den relevante varianten konsumerer sine egne felt.
+  const tvInput: Spill1ConfigInput = {
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30 }],
+    spill1Overrides: {
+      tvExtra: { pictureYellow: 600 },
+      spillerness2: { minimumPrize: 200 }, // ignoreres for TV Extra
+    },
+  };
+  const vc = buildVariantConfigFromSpill1Config(tvInput);
+  const byId = new Map(vc.customPatterns!.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")!.prize1, 600, "TV Extra konsumerer kun tvExtra-override");
+});
+
+test("audit regresjon: andre presets (kvikkis, ball-x-10, super-nils) ignorerer overrides", () => {
+  const overrides = {
+    spill1Overrides: {
+      tvExtra: { pictureYellow: 9999 },
+      spillerness2: { minimumPrize: 9999 },
+    },
+  };
+  for (const variant of ["kvikkis", "ball-x-10", "super-nils"] as const) {
+    const without: Spill1ConfigInput = {
+      subVariant: variant,
+      ticketColors: [{ color: "small_yellow", priceNok: 30 }],
+    };
+    const withOverrides: Spill1ConfigInput = { ...without, ...overrides };
+    const vcWithout = buildVariantConfigFromSpill1Config(without);
+    const vcWith = buildVariantConfigFromSpill1Config(withOverrides);
+    assert.deepEqual(
+      vcWithout.patternsByColor,
+      vcWith.patternsByColor,
+      `${variant} skal ignorere TV/SP overrides`,
+    );
+  }
+});
+
+test("audit: spill1Overrides ignoreres når caller har eksplisitt fallback (test-API bakoverkompat)", () => {
+  // Eksplisitt fallback overrider preset-routing (per K4-design) — derfor
+  // skal også overrides ignoreres når caller bypasser preset-pathen.
+  const input: Spill1ConfigInput = {
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30 }],
+    spill1Overrides: {
+      tvExtra: { pictureYellow: 9999, frameYellow: 9999 },
+    },
+  };
+  const vc = buildVariantConfigFromSpill1Config(input, DEFAULT_NORSK_BINGO_CONFIG);
+  // Ingen customPatterns siden fallback-pathen aktiveres
+  assert.equal(vc.customPatterns, undefined);
+});
+
+test("audit: spill1Overrides på 'standard' eller 'norsk-bingo' ignoreres (legacy-path)", () => {
+  // Standard-varianter bruker admin-UI prizePerPattern, ikke preset-builder.
+  // Override-feltene har ingen effekt fordi preset-pathen ikke aktiveres.
+  const input: Spill1ConfigInput = {
+    subVariant: "standard",
+    ticketColors: [
+      {
+        color: "small_yellow",
+        priceNok: 20,
+        prizePerPattern: { row_1: { mode: "fixed", amount: 100 } },
+      },
+    ],
+    spill1Overrides: {
+      tvExtra: { pictureYellow: 9999 },
+      spillerness2: { minimumPrize: 9999 },
+    },
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  // Standard-preset bruker hardkodede beløp (100/200/200/200/1000)
+  assert.equal(perColor[0]!.prize1, 100);
+  assert.equal(perColor[4]!.prize1, 1000);
+});

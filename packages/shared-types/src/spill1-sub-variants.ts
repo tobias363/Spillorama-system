@@ -226,13 +226,111 @@ export interface Spill1SubVariantPreset {
 }
 
 /**
+ * Spill 1 legacy-paritet override-input til `buildSubVariantPresetPatterns`.
+ *
+ * Audit (2026-04-30) identifiserte 3 missing-prize-slots fra legacy-snapshots
+ * som ikke kunne mappes til preset-defaults via UI-input:
+ *
+ *   1. **Tv Extra** — `Yellow.Picture` + `Yellow.Frame` (TV1/TV2 i audit).
+ *   2. **Oddsen 56** — `Yellow/White."Full House Within 56 Balls"` (O1/O2).
+ *      Merk: Oddsen leses NÅ av MiniGameOddsenEngine via configSnapshot;
+ *      override-feltene her er kun for round-trip-bevaring i schedule.
+ *   3. **Spillerness Spill 2** — `minimumPrize` fra `subGames[].fields`
+ *      (SP1 i audit).
+ *
+ * Override-felter er optional. Når satt, leses de FØR fallback til
+ * `SPILL1_SUB_VARIANT_DEFAULTS`. Dette gjør at legacy-importerte schedules
+ * beholder per-hall-spesifikke beløp i stedet for å miste dem ved
+ * round-trip gjennom variant-mapperen.
+ *
+ * Wire-shape (Zod-validert via `Spill1OverridesSchema` i
+ * `packages/shared-types/src/schemas/admin.ts`):
+ *
+ * ```typescript
+ * {
+ *   tvExtra?: { pictureYellow?, frameYellow?, fullHouseYellow? },
+ *   oddsen56?: { fullHouseWithin56Yellow?, fullHouseWithin56White? },
+ *   spillerness2?: { minimumPrize? },
+ * }
+ * ```
+ *
+ * @audit docs/legacy-snapshots/2026-04-30/SPILL1_GAP_AUDIT.md (PR #748)
+ */
+export interface Spill1VariantOverrides {
+  tvExtra?: {
+    pictureYellow?: number;
+    frameYellow?: number;
+    fullHouseYellow?: number;
+  };
+  oddsen56?: {
+    fullHouseWithin56Yellow?: number;
+    fullHouseWithin56White?: number;
+  };
+  spillerness2?: {
+    minimumPrize?: number;
+  };
+}
+
+/**
+ * Resolve TV Extra prize-slots med override-først-fallback-defaults.
+ *
+ * Legacy-shape: `subGames[N].prizes.Yellow["Picture"|"Frame"]` (kr).
+ * Defaults: `SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.{picture,frame,fullHouse}`.
+ *
+ * **Order:** override → default. Manglende override-felt → default brukes.
+ */
+function resolveTvExtraPrizes(
+  override: Spill1VariantOverrides["tvExtra"] | undefined,
+): { picture: number; frame: number; fullHouse: number } {
+  return {
+    picture:
+      typeof override?.pictureYellow === "number" && override.pictureYellow >= 0
+        ? override.pictureYellow
+        : SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.picture,
+    frame:
+      typeof override?.frameYellow === "number" && override.frameYellow >= 0
+        ? override.frameYellow
+        : SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.frame,
+    fullHouse:
+      typeof override?.fullHouseYellow === "number" &&
+      override.fullHouseYellow >= 0
+        ? override.fullHouseYellow
+        : SPILL1_SUB_VARIANT_DEFAULTS.tvExtra.fullHouse,
+  };
+}
+
+/**
+ * Resolve Spillerness Spill 2 phase-1 minimumPrize med override-først-
+ * fallback-default. `phase2/3/4/fullHouse`-multipliers og deres minPrise
+ * leses uendret fra `SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill`.
+ *
+ * **Order:** override → default. Audit-feltet `minimumPrize` er fase-1-
+ * gulvet (cascade-base). Cascade-faser arver standard-defaults.
+ */
+function resolveSpillernes2Phase1MinPrize(
+  override: Spill1VariantOverrides["spillerness2"] | undefined,
+): number {
+  if (
+    typeof override?.minimumPrize === "number" &&
+    override.minimumPrize >= 0
+  ) {
+    return override.minimumPrize;
+  }
+  return SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill.phase1MinPrize;
+}
+
+/**
  * Build preset for én variant.
  *
- * @param variant Variant-type valgt av admin.
+ * @param variant   Variant-type valgt av admin.
+ * @param overrides Optional legacy-paritet override-felter (audit 2026-04-30).
+ *                  Når satt, leses verdier FØR fallback til
+ *                  `SPILL1_SUB_VARIANT_DEFAULTS`. Manglende felt → default.
  * @returns Preset med patterns + evt. customPatterns.
  */
 export function buildSubVariantPresetPatterns(
   variant: Spill1SubVariantType,
+  overrides?: Spill1VariantOverrides,
 ): Spill1SubVariantPreset {
   switch (variant) {
     case "standard": {
@@ -264,7 +362,10 @@ export function buildSubVariantPresetPatterns(
     }
 
     case "tv-extra": {
-      const d = SPILL1_SUB_VARIANT_DEFAULTS.tvExtra;
+      // Audit 2026-04-30 (TV1/TV2): override-først-fallback-defaults.
+      // Når schedule-import bringer per-hall-spesifikke `Yellow.Picture` og
+      // `Yellow.Frame`-beløp, brukes disse i stedet for hardkodede defaults.
+      const d = resolveTvExtraPrizes(overrides?.tvExtra);
       // TV Extra bruker customPatterns (concurrent). Tomt `patterns[]` —
       // mapperen sender customPatterns direkte i engine-config.
       return {
@@ -398,6 +499,10 @@ export function buildSubVariantPresetPatterns(
 
     case "spillernes-spill": {
       const d = SPILL1_SUB_VARIANT_DEFAULTS.spillernesSpill;
+      // Audit 2026-04-30 (SP1): override-først-fallback-default for fase-1
+      // minimumPrize. Legacy-feltet er `subGames[N].fields.minimumPrize`.
+      // Cascade-faser (2-Rad/3-Rad/4-Rad/Fullt Hus) arver default-mins.
+      const phase1Min = resolveSpillernes2Phase1MinPrize(overrides?.spillerness2);
       return {
         patterns: [
           {
@@ -405,7 +510,7 @@ export function buildSubVariantPresetPatterns(
             claimType: "LINE",
             prizePercent: d.phase1PercentOfPool,
             winningType: "multiplier-chain",
-            minPrize: d.phase1MinPrize,
+            minPrize: phase1Min,
             // phase1Multiplier absent → denne ER fase 1 (cascade-base).
           },
           {
@@ -455,6 +560,44 @@ export function buildSubVariantPresetPatterns(
  */
 export function isOverrideableVariant(v: Spill1SubVariantType): boolean {
   return v === "standard";
+}
+
+/**
+ * Audit 2026-04-30 (O1/O2): Resolve Oddsen 56 pot-størrelser for de to
+ * ticket-størrelsene (yellow=large, white=small) basert på override-felter
+ * fra schedule-import.
+ *
+ * Backend-engine `MiniGameOddsenEngine` leser allerede pot-størrelser fra
+ * `OddsenConfig.{potSmallNok,potLargeNok}`. Denne helperen brukes av
+ * `Game1ScheduleTickService` (eller tilsvarende mapper) for å bygge
+ * `OddsenConfig` fra schedule-snapshot. Manglende override → engine-default
+ * (1500/3000).
+ *
+ * **Order:** override → engine-default-(via undefined). Returverdiene er
+ * `undefined` hvis override mangler — caller bør fall tilbake til
+ * `MiniGameOddsenEngine.DEFAULT_ODDSEN_CONFIG.{potSmallNok,potLargeNok}`.
+ *
+ * Mapping fra audit til engine-config-felter:
+ * - `oddsen56.fullHouseWithin56Yellow` (legacy `Yellow."Full House Within 56 Balls"`)
+ *   → `OddsenConfig.potLargeNok` (large = yellow tickets)
+ * - `oddsen56.fullHouseWithin56White` (legacy `White."Full House Within 56 Balls"`)
+ *   → `OddsenConfig.potSmallNok` (small = white tickets)
+ */
+export function resolveOddsen56PotOverrides(
+  override: Spill1VariantOverrides["oddsen56"] | undefined,
+): { potLargeNok: number | undefined; potSmallNok: number | undefined } {
+  return {
+    potLargeNok:
+      typeof override?.fullHouseWithin56Yellow === "number" &&
+      override.fullHouseWithin56Yellow >= 0
+        ? override.fullHouseWithin56Yellow
+        : undefined,
+    potSmallNok:
+      typeof override?.fullHouseWithin56White === "number" &&
+      override.fullHouseWithin56White >= 0
+        ? override.fullHouseWithin56White
+        : undefined,
+  };
 }
 
 /**

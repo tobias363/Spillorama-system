@@ -38,6 +38,26 @@ const VALID_TYPE: ScheduleType[] = ["Auto", "Manual"];
 const HH_MM_RE = /^[0-9]{2}:[0-9]{2}$/;
 
 /**
+ * Audit 2026-04-30 (PR #748): Spill 1 legacy-paritet override-felter.
+ * Speiler `Spill1OverridesSchema` i `packages/shared-types/src/schemas/admin.ts`.
+ * Felt valideres via `assertSpill1Overrides` ved create/update.
+ */
+export interface ScheduleSpill1Overrides {
+  tvExtra?: {
+    pictureYellow?: number;
+    frameYellow?: number;
+    fullHouseYellow?: number;
+  };
+  oddsen56?: {
+    fullHouseWithin56Yellow?: number;
+    fullHouseWithin56White?: number;
+  };
+  spillerness2?: {
+    minimumPrize?: number;
+  };
+}
+
+/**
  * Fri-form subgame-slot i en Schedule-mal. Feltene matcher legacy
  * scheduleController.createSchedulePostData (ticketTypesData, jackpotData,
  * elvisData, timing). Ukjente felter bevares via `extra` slik at admin-UI
@@ -62,6 +82,14 @@ export interface ScheduleSubgame {
    * "MYSTERY" = Mystery Game-variant (Admin V1.0 s. 5, rev. 2023-10-05).
    */
   subGameType?: SubGameType;
+  /**
+   * Audit 2026-04-30 (PR #748): legacy-paritet override-felter for Tv Extra,
+   * Oddsen 56 og Spillerness Spill 2. Optional — manglende felt lar
+   * variant-mapper falle tilbake til `SPILL1_SUB_VARIANT_DEFAULTS`.
+   *
+   * Bevares ved create/update + round-trip via `assertSpill1Overrides`.
+   */
+  spill1Overrides?: ScheduleSpill1Overrides;
 }
 
 export interface Schedule {
@@ -242,6 +270,94 @@ function assertNonNegativeInt(value: unknown, field: string): number {
   return n;
 }
 
+/**
+ * Audit 2026-04-30 (PR #748): valider `spill1Overrides`-objekt på subgame-slot.
+ * Speiler `Spill1OverridesSchema` (Zod) i `packages/shared-types/src/schemas/admin.ts`.
+ *
+ * Returnerer typed `ScheduleSpill1Overrides` eller undefined når mangler.
+ * Kaster `INVALID_INPUT` ved strukturelle feil (negative tall, ikke-heltall etc.).
+ */
+function assertSpill1Overrides(
+  value: unknown,
+  field: string
+): ScheduleSpill1Overrides | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new DomainError("INVALID_INPUT", `${field} må være et objekt.`);
+  }
+  const v = value as Record<string, unknown>;
+  const out: ScheduleSpill1Overrides = {};
+
+  if (v.tvExtra !== undefined && v.tvExtra !== null) {
+    if (typeof v.tvExtra !== "object" || Array.isArray(v.tvExtra)) {
+      throw new DomainError("INVALID_INPUT", `${field}.tvExtra må være et objekt.`);
+    }
+    const tv = v.tvExtra as Record<string, unknown>;
+    const tvOut: ScheduleSpill1Overrides["tvExtra"] = {};
+    if (tv.pictureYellow !== undefined) {
+      tvOut.pictureYellow = assertNonNegativeInt(
+        tv.pictureYellow,
+        `${field}.tvExtra.pictureYellow`
+      );
+    }
+    if (tv.frameYellow !== undefined) {
+      tvOut.frameYellow = assertNonNegativeInt(
+        tv.frameYellow,
+        `${field}.tvExtra.frameYellow`
+      );
+    }
+    if (tv.fullHouseYellow !== undefined) {
+      tvOut.fullHouseYellow = assertNonNegativeInt(
+        tv.fullHouseYellow,
+        `${field}.tvExtra.fullHouseYellow`
+      );
+    }
+    out.tvExtra = tvOut;
+  }
+
+  if (v.oddsen56 !== undefined && v.oddsen56 !== null) {
+    if (typeof v.oddsen56 !== "object" || Array.isArray(v.oddsen56)) {
+      throw new DomainError("INVALID_INPUT", `${field}.oddsen56 må være et objekt.`);
+    }
+    const o = v.oddsen56 as Record<string, unknown>;
+    const oOut: ScheduleSpill1Overrides["oddsen56"] = {};
+    if (o.fullHouseWithin56Yellow !== undefined) {
+      oOut.fullHouseWithin56Yellow = assertNonNegativeInt(
+        o.fullHouseWithin56Yellow,
+        `${field}.oddsen56.fullHouseWithin56Yellow`
+      );
+    }
+    if (o.fullHouseWithin56White !== undefined) {
+      oOut.fullHouseWithin56White = assertNonNegativeInt(
+        o.fullHouseWithin56White,
+        `${field}.oddsen56.fullHouseWithin56White`
+      );
+    }
+    out.oddsen56 = oOut;
+  }
+
+  if (v.spillerness2 !== undefined && v.spillerness2 !== null) {
+    if (typeof v.spillerness2 !== "object" || Array.isArray(v.spillerness2)) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `${field}.spillerness2 må være et objekt.`
+      );
+    }
+    const sp = v.spillerness2 as Record<string, unknown>;
+    const spOut: ScheduleSpill1Overrides["spillerness2"] = {};
+    if (sp.minimumPrize !== undefined) {
+      spOut.minimumPrize = assertNonNegativeInt(
+        sp.minimumPrize,
+        `${field}.spillerness2.minimumPrize`
+      );
+    }
+    out.spillerness2 = spOut;
+  }
+
+  // Returner undefined hvis alle sub-objekter manglet (ingen-op).
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function assertOptionalObject(
   value: unknown,
   field: string
@@ -343,6 +459,17 @@ function assertSubgames(value: unknown): ScheduleSubgame[] {
         );
       }
       slot.subGameType = sgType;
+    }
+
+    // Audit 2026-04-30 (PR #748): valider og persister `spill1Overrides`
+    // (Tv Extra, Oddsen 56, Spillerness Spill 2). Påvirker ikke andre felt;
+    // mangler → undefined → variant-mapper bruker SPILL1_SUB_VARIANT_DEFAULTS.
+    if (r.spill1Overrides !== undefined) {
+      const overrides = assertSpill1Overrides(
+        r.spill1Overrides,
+        `subGames[${i}].spill1Overrides`
+      );
+      if (overrides !== undefined) slot.spill1Overrides = overrides;
     }
 
     // rowPrizesByColor + mysteryConfig: lagres i `extra` for bakoverkompat
@@ -722,6 +849,21 @@ export class ScheduleService {
           const sgType = s.subGameType as SubGameType;
           if ((SUB_GAME_TYPES as readonly string[]).includes(sgType)) {
             slot.subGameType = sgType;
+          }
+        }
+        // Audit 2026-04-30 (PR #748): round-trip spill1Overrides på read.
+        // Defensivt: assertSpill1Overrides for å filtrere ut korrupt data
+        // (returner undefined på feil i stedet for å kaste i map-pathen).
+        if (s.spill1Overrides !== undefined && s.spill1Overrides !== null) {
+          try {
+            const overrides = assertSpill1Overrides(
+              s.spill1Overrides,
+              "spill1Overrides"
+            );
+            if (overrides !== undefined) slot.spill1Overrides = overrides;
+          } catch {
+            // Korrupt JSONB i DB — drop felt på read i stedet for å kaste.
+            // Mapper-defaults brukes når feltet mangler.
           }
         }
         return slot;

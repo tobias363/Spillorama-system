@@ -620,3 +620,175 @@ test("BIN-625 service: map() parser subGames defensivt", async () => {
   assert.equal(row.subGames[0]!.jackpotData, undefined);
   assert.deepEqual(row.subGames[1]!.extra, { customKey: 1 });
 });
+
+// ── Audit 2026-04-30 (PR #748): spill1Overrides validation + round-trip ───
+
+test("audit (TV1/TV2/SP1): create() avviser negative tall i spill1Overrides", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "tvExtra negative pictureYellow",
+    () =>
+      svc.create({
+        scheduleName: "x",
+        createdBy: "u1",
+        subGames: [
+          {
+            name: "Tv Extra",
+            spill1Overrides: {
+              tvExtra: { pictureYellow: -10 },
+            },
+          },
+        ] as never,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("audit (TV1/TV2): create() avviser ikke-heltall i spill1Overrides", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "tvExtra non-int frameYellow",
+    () =>
+      svc.create({
+        scheduleName: "x",
+        createdBy: "u1",
+        subGames: [
+          {
+            name: "Tv Extra",
+            spill1Overrides: {
+              tvExtra: { frameYellow: 100.5 },
+            },
+          },
+        ] as never,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("audit (SP1): create() avviser negativ minimumPrize i spillerness2", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "spillerness2 negative minimumPrize",
+    () =>
+      svc.create({
+        scheduleName: "x",
+        createdBy: "u1",
+        subGames: [
+          {
+            name: "Spillerness Spill 2",
+            spill1Overrides: {
+              spillerness2: { minimumPrize: -10 },
+            },
+          },
+        ] as never,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("audit (O1/O2): create() avviser ikke-objekt oddsen56", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "oddsen56 not object",
+    () =>
+      svc.create({
+        scheduleName: "x",
+        createdBy: "u1",
+        subGames: [
+          {
+            name: "Oddsen 56",
+            spill1Overrides: {
+              oddsen56: "not-an-object",
+            },
+          },
+        ] as never,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("audit: map() round-trip spill1Overrides på read", async () => {
+  const pool: StubPool = {
+    query: async () => ({
+      rows: [
+        mockRow({
+          sub_games_json: [
+            {
+              name: "Tv Extra",
+              spill1Overrides: {
+                tvExtra: {
+                  pictureYellow: 500,
+                  frameYellow: 1000,
+                  fullHouseYellow: 3000,
+                },
+              },
+            },
+            {
+              name: "Spillerness Spill 2",
+              spill1Overrides: {
+                spillerness2: { minimumPrize: 100 },
+              },
+            },
+            {
+              name: "Oddsen 56",
+              spill1Overrides: {
+                oddsen56: {
+                  fullHouseWithin56Yellow: 3000,
+                  fullHouseWithin56White: 1500,
+                },
+              },
+            },
+          ],
+        }),
+      ],
+    }),
+    connect: async () => ({}),
+  };
+  const svc = makeService(pool);
+  const row = await svc.get("sch-1");
+  assert.equal(row.subGames.length, 3);
+  // TV Extra-override
+  assert.deepEqual(row.subGames[0]!.spill1Overrides?.tvExtra, {
+    pictureYellow: 500,
+    frameYellow: 1000,
+    fullHouseYellow: 3000,
+  });
+  // Spillerness Spill 2-override
+  assert.equal(
+    row.subGames[1]!.spill1Overrides?.spillerness2?.minimumPrize,
+    100
+  );
+  // Oddsen 56-override
+  assert.deepEqual(row.subGames[2]!.spill1Overrides?.oddsen56, {
+    fullHouseWithin56Yellow: 3000,
+    fullHouseWithin56White: 1500,
+  });
+});
+
+test("audit: map() filtrerer korrupt spill1Overrides defensivt (drop, ikke kast)", async () => {
+  // Hvis JSONB-feltet er korrupt (eks. negative tall etter manuell DB-edit),
+  // skal map() droppe feltet i stedet for å kaste — runtime fallbacker
+  // til SPILL1_SUB_VARIANT_DEFAULTS.
+  const pool: StubPool = {
+    query: async () => ({
+      rows: [
+        mockRow({
+          sub_games_json: [
+            {
+              name: "Tv Extra",
+              spill1Overrides: {
+                tvExtra: { pictureYellow: -999 }, // ugyldig
+              },
+            },
+          ],
+        }),
+      ],
+    }),
+    connect: async () => ({}),
+  };
+  const svc = makeService(pool);
+  const row = await svc.get("sch-1");
+  // Korrupt felt droppes, ingen kast
+  assert.equal(row.subGames[0]!.spill1Overrides, undefined);
+  assert.equal(row.subGames[0]!.name, "Tv Extra");
+});
