@@ -456,3 +456,257 @@ test("computeAndPayPhase prizePerWinner=0 → payout=0 + payoutSkipped=false (le
   assert.equal(result.payoutSkippedReason, undefined);
   assert.equal(result.walletTransfer, null);
 });
+
+// ── HV-2 hall-default floor + house pre-fund gap ────────────────────────────
+//
+// Tobias 2026-04-30 (HV2_BIR036_SPEC §2): Spill 1 garanterer per-fase-floor
+// uavhengig av buy-in-pool. Når pool/budget < floor og huset har balanse,
+// finansierer huset differansen og marker `houseFundedGap=true`. Når huset
+// ikke har balanse, fail-closed med `house-floor-underfunded` som
+// compliance-incident.
+
+test("HV-2: pool dekker floor → behold cap-logikk (ingen pre-fund)", async () => {
+  // Floor=100, pool=200, budget=800 → ingen guarantee, payout=100.
+  const wallet = await setupWallet(10_000);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const result = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-1",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "1 Rad", minPrize: 100 },
+    prizePerWinner: 100,
+    remainingPrizePool: 200,
+    remainingPayoutBudget: 800,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p",
+    idempotencyKey: PHASE_KEY,
+    phase: "PHASE",
+  });
+
+  assert.equal(result.payout, 100);
+  assert.equal(result.houseFundedGap, false, "floor allerede dekket av pool/budget");
+  assert.equal(result.houseFundedGapAmount, 0);
+  assert.equal(result.payoutSkipped, false);
+});
+
+test("HV-2: pool < floor + house har balanse → bypass RTP-cap, betal floor", async () => {
+  // Floor=100, pool=20, budget=20, house=10000 → pool/budget < floor, men
+  // huset har 10k → bypass RTP-cap, payout=100, houseFundedGapAmount=80.
+  const wallet = await setupWallet(10_000);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const result = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-1",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "1 Rad", minPrize: 100 },
+    prizePerWinner: 100,
+    remainingPrizePool: 20,
+    remainingPayoutBudget: 20,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p",
+    idempotencyKey: PHASE_KEY,
+    phase: "PHASE",
+  });
+
+  assert.equal(result.payout, 100, "house pre-fund kicks in → floor utbetalt fullt");
+  assert.equal(result.houseFundedGap, true, "RTP-cap bypassed via hall-floor-guarantee");
+  // Gap-amount = floor - budgetCappedPayoutPreHallFloor (20) = 80.
+  assert.equal(result.houseFundedGapAmount, 80);
+  assert.equal(result.payoutSkipped, false);
+  assert.notEqual(result.walletTransfer, null);
+});
+
+test("HV-2: pool < floor + house tom → fail-closed (house-floor-underfunded)", async () => {
+  // Floor=100, pool=20, budget=20, house=50 (< 100). Compliance-incident:
+  // payout=0, ingen wallet-transfer. Caller må surface alert.
+  const wallet = await setupWallet(50);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const result = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-1",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "1 Rad", minPrize: 100 },
+    prizePerWinner: 100,
+    remainingPrizePool: 20,
+    remainingPayoutBudget: 20,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p",
+    idempotencyKey: PHASE_KEY,
+    phase: "PHASE",
+  });
+
+  assert.equal(result.payout, 0, "fail-closed: ingen utbetaling når huset tomt");
+  assert.equal(result.houseFundedGap, false, "guarantee aktiverte ikke (huset for lav)");
+  assert.equal(result.houseFundedGapAmount, 0);
+  assert.equal(result.payoutSkipped, true);
+  assert.equal(
+    result.payoutSkippedReason,
+    "house-floor-underfunded",
+    "ny compliance-incident-grunn for fail-closed pre-fund-gap",
+  );
+  assert.equal(result.walletTransfer, null);
+});
+
+test("HV-2: Demo Hall (isTestHall=true + bypass=true) — floor-overlay irrelevant, fortsatt full payout", async () => {
+  // Demo-hall RTP-bypass aktivert → payout = full requestedAfterPolicyAndPool
+  // uansett floor. houseFundedGap skal IKKE settes selv om floor er angitt.
+  const wallet = await setupWallet(10_000);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const previous = process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP;
+  process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP = "true";
+
+  try {
+    const result = await service.computeAndPayPhase({
+      hallId: HALL_ID,
+      roomCode: "ROOM",
+      gameId: "game-1",
+      isTestHall: true,
+      pattern: { winningType: "fixed", name: "1 Rad", minPrize: 100 },
+      prizePerWinner: 200,
+      remainingPrizePool: 50,
+      remainingPayoutBudget: 50,
+      houseAccountId: HOUSE_ACCOUNT,
+      walletId: PLAYER_WALLET,
+      transferMemo: "p",
+      idempotencyKey: PHASE_KEY,
+      phase: "PHASE",
+    });
+
+    assert.equal(result.payout, 200, "test-hall bypass → face value uendret av floor");
+    assert.equal(
+      result.houseFundedGap,
+      false,
+      "HV-2 hall-floor-overlay aktiveres IKKE for test-haller (bypass dekker)",
+    );
+    assert.equal(result.houseFundedGapAmount, 0);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP;
+    } else {
+      process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP = previous;
+    }
+  }
+});
+
+test("HV-2: multi-phase — Rad 1 finansiert av pool, Rad 2 (større pool) går normalt", async () => {
+  // Simulerer to faser i sekvens:
+  //   Rad 1: pool=20, budget=20, floor=100 → pre-fund triggers, payout=100, gap=80
+  //   Rad 2: pool=500 (større buy-in-runde), budget=500, floor=200 → pool dekker
+  //          floor → ingen pre-fund, payout=200.
+  // Hver fase kjøres som separat call (caller dekreementerer pool/budget mellom).
+  const wallet = await setupWallet(10_000);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const phase1 = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-multi",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "1 Rad", minPrize: 100 },
+    prizePerWinner: 100,
+    remainingPrizePool: 20,
+    remainingPayoutBudget: 20,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p1",
+    idempotencyKey: "phase-1-key",
+    phase: "PHASE",
+  });
+
+  assert.equal(phase1.payout, 100);
+  assert.equal(phase1.houseFundedGap, true);
+  assert.equal(phase1.houseFundedGapAmount, 80);
+
+  const phase2 = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-multi",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "2 Rader", minPrize: 200 },
+    prizePerWinner: 200,
+    remainingPrizePool: 500,
+    remainingPayoutBudget: 500,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p2",
+    idempotencyKey: "phase-2-key",
+    phase: "PHASE",
+  });
+
+  assert.equal(phase2.payout, 200);
+  assert.equal(phase2.houseFundedGap, false, "floor allerede dekket av pool");
+  assert.equal(phase2.houseFundedGapAmount, 0);
+});
+
+test("HV-2: minPrize=undefined eller 0 → pre-HV-2-atferd uendret", async () => {
+  // Uten minPrize-floor: dagens cap-logikk. payout=80 (RTP-budget cap)
+  // og rtpCapped=true. houseFundedGap=false.
+  const wallet = await setupWallet(10_000);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const result = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-1",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "1 Rad" /* ingen minPrize */ },
+    prizePerWinner: 100,
+    remainingPrizePool: 20,
+    remainingPayoutBudget: 80,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p",
+    idempotencyKey: PHASE_KEY,
+    phase: "PHASE",
+  });
+
+  assert.equal(result.payout, 80, "RTP-budget cap fortsatt aktiv uten floor");
+  assert.equal(result.rtpCapped, true);
+  assert.equal(result.houseFundedGap, false);
+  assert.equal(result.houseFundedGapAmount, 0);
+  // Klassisk fixed-prize hus-deficit (payout > pool=20) — uendret oppførsel.
+  assert.equal(result.houseDeficit, 60);
+});
+
+test("HV-2: minPrize=0 eksplisitt → pre-HV-2-atferd uendret", async () => {
+  // Eksplisitt minPrize=0 skal ikke aktivere floor-guarantee.
+  const wallet = await setupWallet(10_000);
+  const policy = makePolicyManager();
+  const service = new PhasePayoutService(wallet, policy);
+
+  const result = await service.computeAndPayPhase({
+    hallId: HALL_ID,
+    roomCode: "ROOM",
+    gameId: "game-1",
+    isTestHall: false,
+    pattern: { winningType: "fixed", name: "1 Rad", minPrize: 0 },
+    prizePerWinner: 100,
+    remainingPrizePool: 20,
+    remainingPayoutBudget: 80,
+    houseAccountId: HOUSE_ACCOUNT,
+    walletId: PLAYER_WALLET,
+    transferMemo: "p",
+    idempotencyKey: PHASE_KEY,
+    phase: "PHASE",
+  });
+
+  assert.equal(result.payout, 80);
+  assert.equal(result.houseFundedGap, false);
+  assert.equal(result.houseFundedGapAmount, 0);
+});

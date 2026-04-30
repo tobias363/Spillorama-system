@@ -111,7 +111,7 @@ export interface PatternResult {
    * klient-UI for differensiering ("budsjett tomt" vs "huset har lav saldo")
    * og av ops-dashboards for diagnose.
    */
-  payoutSkippedReason?: "budget-exhausted" | "house-balance-low";
+  payoutSkippedReason?: "budget-exhausted" | "house-balance-low" | "house-floor-underfunded";
 }
 
 export interface Player {
@@ -177,7 +177,7 @@ export interface ClaimRecord {
    */
   payoutSkipped?: boolean;
   /** RTP-cap-bug-fix 2026-04-29: Speiler `PatternResult.payoutSkippedReason`. */
-  payoutSkippedReason?: "budget-exhausted" | "house-balance-low";
+  payoutSkippedReason?: "budget-exhausted" | "house-balance-low" | "house-floor-underfunded";
   /** BIN-45: Wallet transaction IDs for idempotency tracking. */
   payoutTransactionIds?: string[];
   /**

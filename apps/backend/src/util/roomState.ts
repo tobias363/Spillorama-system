@@ -21,8 +21,14 @@ import { generateTicketForGame } from "../game/ticket.js";
 import type { Ticket } from "../game/types.js";
 import type { GameVariantConfig } from "../game/variantConfig.js";
 import { getDefaultVariantConfig } from "../game/variantConfig.js";
-import { buildVariantConfigFromSpill1Config } from "../game/spill1VariantMapper.js";
-import type { Spill1ConfigInput } from "../game/spill1VariantMapper.js";
+import {
+  applySpill1HallFloors,
+  buildVariantConfigFromSpill1Config,
+} from "../game/spill1VariantMapper.js";
+import type {
+  Spill1ConfigInput,
+  Spill1HallFloorDefaults,
+} from "../game/spill1VariantMapper.js";
 import { logger as rootLogger } from "./logger.js";
 import {
   InMemoryRoomLifecycleStore,
@@ -464,11 +470,33 @@ export class RoomStateManager {
       gameSlug: string;
       gameManagementId?: string | null;
       /**
+       * HV-2 (Tobias 2026-04-30): hall-ID for floor-default lookup. Når
+       * satt og `fetchSpill1HallFloors` er gitt, applikerer mapperen
+       * hall-default floors som baseline `minPrize` på alle Spill 1-
+       * patterns. Spill 2/3 (`rocket`/`monsterbingo`) ignorerer dette
+       * feltet (kun `gameSlug==="bingo"` aktiverer floor-lookup).
+       */
+      hallId?: string;
+      /**
        * Optional DB-fetcher for GameManagement.config_json. Returnerer
        * `{spill1: ...}` eller `null` hvis ikke funnet. Kaster gjerne på
        * DB-/network-feil — bindVariantConfigForRoom fanger og fallbacker.
        */
       fetchGameManagementConfig?: (id: string) => Promise<Record<string, unknown> | null | undefined>;
+      /**
+       * HV-2: optional fetcher for hall-default Spill 1 prize-floors.
+       * Returnerer `{phase1, phase2, ..., phase5}` (kr) eller `null` hvis
+       * ikke funnet. DB-/network-feil fanges og logges; ved feil
+       * fortsetter binderen uten floor-overlay.
+       *
+       * Caller (typisk `index.ts`) injiserer denne som
+       * `(hallId) => spill1PrizeDefaultsService.getDefaults(hallId)`.
+       * Tester kan utelate hooken — da brukes ren mapper-output
+       * (matcher pre-HV-2-atferd).
+       */
+      fetchSpill1HallFloors?: (
+        hallId: string,
+      ) => Promise<Spill1HallFloorDefaults | null | undefined>;
     },
   ): Promise<void> {
     if (this.variantByRoom.has(roomCode)) return;
@@ -476,12 +504,32 @@ export class RoomStateManager {
     const gameSlug = opts.gameSlug?.trim() || "bingo";
     const isSpill1 = gameSlug === "bingo" || gameSlug === "game_1" || gameSlug === "norsk-bingo";
 
+    // HV-2: hent hall-floor-defaults før mapping så vi kan apply post-mapping.
+    // Spill 2/3 og SpinnGo: floors er IKKE relevant — kun for Spill 1.
+    let hallFloors: Spill1HallFloorDefaults | null = null;
+    if (isSpill1 && opts.hallId && opts.fetchSpill1HallFloors) {
+      try {
+        const fetched = await opts.fetchSpill1HallFloors(opts.hallId);
+        if (fetched) hallFloors = fetched;
+      } catch (err) {
+        roomStateLog.warn(
+          { err, roomCode, hallId: opts.hallId },
+          "HV-2: Spill1 hall-floor-lookup failed — fortsetter uten floor-overlay",
+        );
+      }
+    }
+
     if (opts.gameManagementId && opts.fetchGameManagementConfig && isSpill1) {
       try {
         const config = await opts.fetchGameManagementConfig(opts.gameManagementId);
         const spill1 = extractSpill1Config(config);
         if (spill1) {
-          const mapped = buildVariantConfigFromSpill1Config(spill1);
+          let mapped = buildVariantConfigFromSpill1Config(spill1);
+          // HV-2: apply hall-floor-defaults post-mapping. Hall-floor settes
+          // som `minPrize` på preset-patterns (kun når preset-floor < hall-floor).
+          if (hallFloors) {
+            mapped = applySpill1HallFloors(mapped, hallFloors);
+          }
           this.variantByRoom.set(roomCode, { gameType: gameSlug, config: mapped });
           return;
         }
@@ -498,7 +546,15 @@ export class RoomStateManager {
       }
     }
 
-    // Fallback-path: default per gameSlug (samme atferd som bindDefaultVariantConfig).
+    // Fallback-path: default per gameSlug. Apply hall-floors selv ved fallback
+    // for Spill 1 — defaultkonfigurasjonen har 100/200/200/200/1000 kr som
+    // floor, og hall-floor-overstyringen får derfor synlig effekt.
+    if (isSpill1 && hallFloors) {
+      const baseline = getDefaultVariantConfig(gameSlug);
+      const floored = applySpill1HallFloors(baseline, hallFloors);
+      this.variantByRoom.set(roomCode, { gameType: gameSlug, config: floored });
+      return;
+    }
     this.bindDefaultVariantConfig(roomCode, gameSlug);
   }
 

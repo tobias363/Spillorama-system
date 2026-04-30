@@ -462,6 +462,8 @@ export class ClaimSubmitterService {
       walletTransfer: transfer,
       policy: linePolicy,
       houseDeficit: lineHouseDeficit,
+      houseFundedGap: lineHouseFundedGap,
+      houseFundedGapAmount: lineHouseFundedGapAmount,
     } = linePhaseResult;
 
     let transferredTxIds: [string, string] | null = null;
@@ -518,6 +520,40 @@ export class ClaimSubmitterService {
           logger.warn(
             { err, gameId: game.id, claimId: claim.id, lineHouseDeficit },
             "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
+          );
+        }
+      }
+      // HV-2: hall-default floor hus-pre-fund audit (REN AUDIT). Logger
+      // gap-amount så audit kan rekonstruere hva huset la ut for å nå floor.
+      if (lineHouseFundedGap && lineHouseFundedGapAmount > 0) {
+        try {
+          await this.ledger.recordComplianceLedgerEvent({
+            hallId: room.hallId,
+            gameType,
+            channel,
+            eventType: "HOUSE_DEFICIT",
+            amount: lineHouseFundedGapAmount,
+            roomCode: room.code,
+            gameId: game.id,
+            claimId: claim.id,
+            playerId: player.id,
+            walletId: player.walletId,
+            sourceAccountId: houseAccountId,
+            policyVersion: linePolicy.id,
+            metadata: {
+              reason: "HALL_DEFAULT_FLOOR_GUARANTEE",
+              phase: "LINE",
+              patternName: linePattern?.name,
+              winningType: linePattern?.winningType,
+              payout,
+              minPrizeFloor: linePattern?.minPrize,
+              poolBeforePayout: linePoolBeforePayout,
+            },
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId: game.id, claimId: claim.id, lineHouseFundedGapAmount },
+            "HV-2 HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
           );
         }
       }
@@ -688,6 +724,8 @@ export class ClaimSubmitterService {
       walletTransfer: transfer,
       policy: bingoPolicy,
       houseDeficit: bingoHouseDeficit,
+      houseFundedGap: bingoHouseFundedGap,
+      houseFundedGapAmount: bingoHouseFundedGapAmount,
     } = bingoPhaseResult;
 
     if (payout > 0 && transfer) {
@@ -736,6 +774,41 @@ export class ClaimSubmitterService {
           logger.warn(
             { err, gameId: game.id, claimId: claim.id, bingoHouseDeficit },
             "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
+          );
+        }
+      }
+      // HV-2: hall-default floor hus-pre-fund audit (REN AUDIT). Distinkt
+      // metadata-reason fra fixed-prize hus-garanti — gjør at audit/regnskap
+      // kan skille floor-finansiering fra fixed-prize-overlapp.
+      if (bingoHouseFundedGap && bingoHouseFundedGapAmount > 0) {
+        try {
+          await this.ledger.recordComplianceLedgerEvent({
+            hallId: room.hallId,
+            gameType,
+            channel,
+            eventType: "HOUSE_DEFICIT",
+            amount: bingoHouseFundedGapAmount,
+            roomCode: room.code,
+            gameId: game.id,
+            claimId: claim.id,
+            playerId: player.id,
+            walletId: player.walletId,
+            sourceAccountId: houseAccountId,
+            policyVersion: bingoPolicy.id,
+            metadata: {
+              reason: "HALL_DEFAULT_FLOOR_GUARANTEE",
+              phase: "BINGO",
+              patternName: bingoPattern?.name,
+              winningType: bingoPattern?.winningType,
+              payout,
+              minPrizeFloor: bingoPattern?.minPrize,
+              poolBeforePayout: bingoPoolBeforePayout,
+            },
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId: game.id, claimId: claim.id, bingoHouseFundedGapAmount },
+            "HV-2 HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
           );
         }
       }

@@ -533,6 +533,149 @@ function buildJackpotFromInput(
   return { drawThreshold: draw, prize: max, isDisplay: true };
 }
 
+// ── HV-2: hall-default floor application ──────────────────────────────────
+
+/**
+ * HV-2 (Tobias 2026-04-30): per-fase floor-defaults fra hall-konfig.
+ *
+ * Shape matcher `Spill1PrizeDefaults` fra `Spill1PrizeDefaultsService.ts` men
+ * importeres ikke direkte for å holde mapperen DB-fri. Caller (typisk
+ * `roomState.bindVariantConfigForRoom`) henter defaults via tjenesten og
+ * sender dem inn som rent data.
+ *
+ * Hver fase (1-5) mappes til pattern-navn via `PHASE_INDEX_TO_PATTERN_NAME`.
+ * Verdiene er i kroner.
+ */
+export interface Spill1HallFloorDefaults {
+  phase1: number;
+  phase2: number;
+  phase3: number;
+  phase4: number;
+  phase5: number;
+}
+
+/**
+ * Map fase-index → pattern-navn (matcher `DEFAULT_NORSK_BINGO_CONFIG.patterns`
+ * og `PATTERN_SLUG_TO_NAME`). Stabil — ikke endre uten å oppdatere preset-
+ * variants og engine-pattern-classification samtidig.
+ */
+const PHASE_INDEX_TO_PATTERN_NAME: Readonly<Record<1 | 2 | 3 | 4 | 5, string>> = {
+  1: "1 Rad",
+  2: "2 Rader",
+  3: "3 Rader",
+  4: "4 Rader",
+  5: "Fullt Hus",
+};
+
+/**
+ * Hent floor-verdi (kr) for en gitt pattern basert på navnet.
+ * Returnerer `null` hvis pattern-navnet ikke matcher en av de 5 standardfasene.
+ */
+function floorForPatternName(
+  defaults: Spill1HallFloorDefaults,
+  patternName: string,
+): number | null {
+  switch (patternName) {
+    case "1 Rad":
+      return defaults.phase1;
+    case "2 Rader":
+      return defaults.phase2;
+    case "3 Rader":
+      return defaults.phase3;
+    case "4 Rader":
+      return defaults.phase4;
+    case "Fullt Hus":
+      return defaults.phase5;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Apply hall-default floors til en allerede-bygget GameVariantConfig.
+ *
+ * Semantikk (HV-2 §2):
+ *   * For hver pattern: hvis sub-variant-preset/admin-UI har satt en
+ *     `minPrize`, og den er ≥ hall-floor → behold preset-verdi (preset kan
+ *     ØKE floor men ikke senke).
+ *   * Hvis preset-`minPrize` er `undefined`/`0` eller mindre enn hall-floor,
+ *     skriv hall-floor som `minPrize`.
+ *   * Også for `winningType: "fixed"`-patterns: hvis `prize1 < hall-floor`,
+ *     `minPrize` settes til hall-floor (engine vil bruke `Math.max(prize1,
+ *     minPrize)` ved payout). Dette er nødvendig for at "Wheel of Fortune"
+ *     med høyere preset-fixed-prize ikke senker floor.
+ *   * Custom patterns (TV Extra: Bilde/Ramme/Fullt Hus) får KUN floor-applied
+ *     på "Fullt Hus" — Bilde/Ramme er konseptuelt utenfor 5-fase-modellen
+ *     og skal ikke arve hall-floor for Rad 1-4.
+ *
+ * Mutates **kopier** — caller får en ny `GameVariantConfig`-instans, original
+ * forblir uendret. Trygg å kalle flere ganger på samme input.
+ *
+ * **Scope:** kun for Spill 1 (`gameSlug === "bingo"`). Caller må sjekke
+ * gameSlug før invocation. Spill 2/3 skal IKKE få denne behandlingen.
+ *
+ * @param config    GameVariantConfig fra `buildVariantConfigFromSpill1Config`.
+ * @param defaults  Hall-default floors hentet fra Spill1PrizeDefaultsService.
+ * @returns         Ny GameVariantConfig med floor-applied minPrize.
+ */
+export function applySpill1HallFloors(
+  config: GameVariantConfig,
+  defaults: Spill1HallFloorDefaults,
+): GameVariantConfig {
+  // Helper: apply floor til én pattern (returnerer ny pattern-instans).
+  //
+  // **Scope-restriksjon (HV-2):** kun `winningType === "fixed"` får
+  // hall-floor-overlay. multiplier-chain bruker minPrize som total-phase-
+  // floor (ikke per-winner) og PhasePayoutService håndterer ikke det
+  // tilfellet — å legge hall-floor på multiplier-chain ville lage
+  // multi-winner over-payment-bug i Spillerness Spill 2.
+  const applyToPattern = (pattern: PatternConfig): PatternConfig => {
+    if (pattern.winningType !== "fixed") {
+      return pattern;
+    }
+    const floor = floorForPatternName(defaults, pattern.name);
+    if (floor === null || floor <= 0) return pattern;
+    const currentMin = typeof pattern.minPrize === "number" ? pattern.minPrize : 0;
+    if (currentMin >= floor) return pattern;
+    return { ...pattern, minPrize: floor };
+  };
+
+  // Apply til alle pattern-arrays: flat patterns, patternsByColor og customPatterns.
+  const newPatterns = config.patterns.map(applyToPattern);
+  const newPatternsByColor = config.patternsByColor
+    ? Object.fromEntries(
+        Object.entries(config.patternsByColor).map(([color, patterns]) => [
+          color,
+          patterns.map(applyToPattern),
+        ]),
+      )
+    : undefined;
+  const newCustomPatterns = config.customPatterns
+    ? config.customPatterns.map((cp) => {
+        const updated = applyToPattern(cp);
+        // Bevar custom-only-felter (mask, patternId, concurrent) — `updated`
+        // har samme felter som cp pluss potensielt høyere minPrize, men
+        // applyToPattern returnerer PatternConfig (uten custom-felter), så
+        // vi merger inn cp først for å bevare patternId/mask/concurrent og
+        // overskriver med updated for å få den nye minPrize.
+        return {
+          ...cp,
+          ...updated,
+          patternId: cp.patternId,
+          mask: cp.mask,
+          concurrent: cp.concurrent,
+        };
+      })
+    : undefined;
+
+  return {
+    ...config,
+    patterns: newPatterns,
+    ...(newPatternsByColor ? { patternsByColor: newPatternsByColor } : {}),
+    ...(newCustomPatterns ? { customPatterns: newCustomPatterns } : {}),
+  };
+}
+
 /**
  * Slå opp pattern-matrisen for en gitt ticket-color. Returnerer
  * `__default__`-matrisen hvis fargen ikke finnes i

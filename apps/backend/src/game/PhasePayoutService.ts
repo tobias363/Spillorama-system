@@ -77,8 +77,19 @@ export interface PhasePayoutInput {
   gameId: string;
   /** Whether the room is a test hall (gates RTP-bypass — see comment below). */
   isTestHall: boolean;
-  /** Pattern config; only `winningType` is consulted (for fixed-prize detection). */
-  pattern: { winningType?: PatternWinningType; name?: string };
+  /** Pattern config; `winningType` for fixed-prize detection, `minPrize` (kr) for HV-2 hall-floor. */
+  pattern: {
+    winningType?: PatternWinningType;
+    name?: string;
+    /**
+     * HV-2 (Tobias 2026-04-30): hall-default floor (kr) som huset garanterer
+     * uavhengig av buy-in-pool. Når `prizePerWinner < minPrize` og huset har
+     * nok balanse, finansierer huset differansen og skriver HOUSE_DEFICIT
+     * ledger-event med `houseFundedGap=true`. Når `minPrize` er undefined/0
+     * kjører service-en uendret pre-HV-2-logikk.
+     */
+    minPrize?: number;
+  };
   /** Pre-computed face value (already split for multi-winner). */
   prizePerWinner: number;
   /** Engine-tracked round pool. Service does NOT mutate — caller is responsible. */
@@ -100,8 +111,17 @@ export interface PhasePayoutInput {
 /**
  * Reason a payout was capped to 0 even though the requested amount was > 0.
  * Mirrors the `payoutSkippedReason` enum used by BingoEngine claim/patternResult.
+ *
+ * HV-2: `house-floor-underfunded` indicates that the hall-default floor required
+ * a house pre-fund but the house account did not have enough balance to cover
+ * it. Caller MUST surface this as a compliance-incident (not silently fall back
+ * to a 0-payout) — admin needs to add cash to the house account before the
+ * round can resume.
  */
-export type PhasePayoutSkippedReason = "budget-exhausted" | "house-balance-low";
+export type PhasePayoutSkippedReason =
+  | "budget-exhausted"
+  | "house-balance-low"
+  | "house-floor-underfunded";
 
 /**
  * Result of {@link PhasePayoutService.computeAndPayPhase}. The caller uses
@@ -142,6 +162,24 @@ export interface PhasePayoutResult {
    * pass pre-mutation value).
    */
   houseDeficit: number;
+  /**
+   * HV-2 (Tobias 2026-04-30): true when the RTP-budget cap was bypassed
+   * because the hall-default floor (`pattern.minPrize`) required a house
+   * pre-fund. Caller writes a HOUSE_DEFICIT ledger-event with metadata
+   * `reason: "HALL_DEFAULT_FLOOR_GUARANTEE"` (distinct from the existing
+   * `FIXED_PRIZE_HOUSE_GUARANTEE` reason for fixed-prize-pattern overruns).
+   *
+   * When false, pre-HV-2-atferd er bevart byte-identisk — eksisterende
+   * fixed-prize hus-garanti virker fortsatt og kan ko-eksistere.
+   */
+  houseFundedGap: boolean;
+  /**
+   * HV-2: amount the house pre-funded to bridge the gap from
+   * `requestedAfterPolicyAndPool` opp til `pattern.minPrize`. 0 når
+   * `houseFundedGap=false` eller når floor allerede dekket av pool/budget.
+   * Brukes av caller for ledger-metadata (audit-spor).
+   */
+  houseFundedGapAmount: number;
 }
 
 /**
@@ -217,12 +255,56 @@ export class PhasePayoutService {
       input.isTestHall === true
       && process.env.BINGO_TEST_HALL_BYPASS_RTP_CAP !== "false";
 
-    const budgetCappedPayout = isTestHallRtpBypass
+    const budgetCappedPayoutPreHallFloor = isTestHallRtpBypass
       ? requestedAfterPolicyAndPool
       : Math.min(
           requestedAfterPolicyAndPool,
           Math.max(0, input.remainingPayoutBudget),
         );
+
+    // ── 3b) HV-2 hall-default floor + house pre-fund gap ────────────────
+    //
+    // Spec (HV2_BIR036_SPEC §2 + Tobias 2026-04-30):
+    //   * Hvis `requestedAfterPolicyAndPool ≥ minPrize` (allerede over floor)
+    //     → behold dagens cap-logikk.
+    //   * Hvis `requestedAfterPolicyAndPool < minPrize` AND
+    //     `houseAvailableBalance ≥ minPrize` → bypass RTP-cap, betal
+    //     `minPrize`, marker `houseFundedGap = true`. Floor-en GARANTEREs
+    //     av huset uavhengig av buy-in-pool.
+    //   * Hvis `houseAvailableBalance < minPrize` → fail-closed
+    //     (`payoutSkippedReason: "house-floor-underfunded"`). Caller må
+    //     trigge alert til ops; ingen wallet-transfer skjer.
+    //
+    // Demo Hall (`isTestHall=true`) bevarer dagens RTP-bypass-atferd og
+    // hopper rett til `requestedAfterPolicyAndPool` — floor-overlay er
+    // overflødig der siden bypass allerede aktiverer max-payout. Kun for
+    // prod-haller (isTestHall=false) er HV-2-pathen aktiv.
+    //
+    // **Scope-restriksjon:** Kun `winningType === "fixed"` patterns omfattes
+    // av HV-2 floor-guarantee. Bakgrunn:
+    //   * `multiplier-chain` (Spillerness Spill) bruker minPrize som
+    //     TOTAL-phase-floor før split — engine `computeTotalPhasePrize`
+    //     applyer allerede `Math.max(rawTotal, minPrize)`. Hvis vi her
+    //     sammenligner per-winner-payout mot total-floor får hver vinner
+    //     hele floor-en (multi-winner over-payment).
+    //   * `column-specific` (Super-NILS) og `ball-value-multiplier` (Ball
+    //     × 10) henter prize fra dynamiske kilder ved siste ball — minPrize
+    //     er ikke den autoritative floor for disse modusene.
+    //   * `percent` (variable) har ingen floor i papir-spec — admin-ledet
+    //     hall-floor er ikke ment for percent-modus i pilot-versjon.
+    // Når B4 (admin-UI validering) lander, tar vi opp om scope skal utvides
+    // til andre winningType-er.
+    const minPrizeFloor =
+      input.pattern.winningType === "fixed"
+      && typeof input.pattern.minPrize === "number"
+      && input.pattern.minPrize > 0
+        ? input.pattern.minPrize
+        : 0;
+
+    const hasHallFloorGuarantee =
+      !isTestHallRtpBypass
+      && minPrizeFloor > 0
+      && budgetCappedPayoutPreHallFloor < minPrizeFloor;
 
     // ── 4) House-balance cap (defensive — wallet underfunded) ──────────
     //
@@ -248,6 +330,45 @@ export class PhasePayoutService {
       );
     }
 
+    // HV-2: når hall-floor-guarantee er aktivt OG huset har balanse,
+    // hopp over RTP-budget-cap og bruk floor som payout-target.
+    let budgetCappedPayout: number;
+    let houseFundedGap = false;
+    let houseFundedGapAmount = 0;
+    let hallFloorUnderfunded = false;
+
+    if (hasHallFloorGuarantee && houseAvailableBalance >= minPrizeFloor) {
+      // Huset finansierer differansen — payout = minPrizeFloor.
+      // `houseFundedGapAmount` = beløpet over post-pool-cap som huset legger ut.
+      budgetCappedPayout = minPrizeFloor;
+      houseFundedGap = true;
+      houseFundedGapAmount = roundCurrency(
+        minPrizeFloor - Math.max(0, budgetCappedPayoutPreHallFloor),
+      );
+    } else if (hasHallFloorGuarantee && houseAvailableBalance < minPrizeFloor) {
+      // Huset har ikke nok balanse til å dekke floor — fail-closed.
+      // Caller MÅ surface dette som en compliance-incident (alert + pause runde).
+      // Vi setter payout = 0 så ingen wallet-transfer skjer — caller kan velge
+      // å roll-back race-mutex og trigge et eskalerings-event.
+      budgetCappedPayout = 0;
+      hallFloorUnderfunded = true;
+      logger.error(
+        {
+          houseAccountId: input.houseAccountId,
+          gameId: input.gameId,
+          roomCode: input.roomCode,
+          phase: input.phase,
+          minPrizeFloor,
+          houseAvailableBalance,
+          requestedAfterPolicyAndPool,
+        },
+        "HV-2: hall-floor underfunded — house balance < minPrize floor. Fail-closed.",
+      );
+    } else {
+      // Pre-HV-2 path (eller floor allerede dekket): behold dagens cap-logikk.
+      budgetCappedPayout = budgetCappedPayoutPreHallFloor;
+    }
+
     const payout = roundCurrency(
       Math.max(
         0,
@@ -262,7 +383,11 @@ export class PhasePayoutService {
     // pool) is a legitimate zero-prize phase — NOT a skip.
     const payoutWasSkipped = payout === 0 && requestedAfterPolicyAndPool > 0;
     const payoutSkippedReason: PhasePayoutSkippedReason | undefined = payoutWasSkipped
-      ? (budgetCappedPayout === 0 ? "budget-exhausted" : "house-balance-low")
+      ? (hallFloorUnderfunded
+          ? "house-floor-underfunded"
+          : budgetCappedPayout === 0
+            ? "budget-exhausted"
+            : "house-balance-low")
       : undefined;
 
     // ── 6) Wallet transfer (only when payout > 0) ──────────────────────
@@ -313,6 +438,8 @@ export class PhasePayoutService {
       walletTransfer,
       policy: capped.policy,
       houseDeficit,
+      houseFundedGap,
+      houseFundedGapAmount,
     };
   }
 }

@@ -15,9 +15,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  applySpill1HallFloors,
   buildVariantConfigFromSpill1Config,
   resolvePatternsForColor,
   type Spill1ConfigInput,
+  type Spill1HallFloorDefaults,
 } from "./spill1VariantMapper.js";
 import {
   DEFAULT_NORSK_BINGO_CONFIG,
@@ -857,4 +859,136 @@ test("audit: spill1Overrides på 'standard' eller 'norsk-bingo' ignoreres (legac
   // Standard-preset bruker hardkodede beløp (100/200/200/200/1000)
   assert.equal(perColor[0]!.prize1, 100);
   assert.equal(perColor[4]!.prize1, 1000);
+});
+
+// ── HV-2: applySpill1HallFloors ────────────────────────────────────────────
+
+const HALL_FLOORS: Spill1HallFloorDefaults = {
+  phase1: 150, // Rad 1
+  phase2: 250, // Rad 2
+  phase3: 250, // Rad 3
+  phase4: 250, // Rad 4
+  phase5: 1500, // Fullt Hus
+};
+
+test("applySpill1HallFloors: setter minPrize på alle 5 standard-faser", () => {
+  const baseline = buildVariantConfigFromSpill1Config({
+    subVariant: "standard",
+    ticketColors: [{ color: "small_yellow" }],
+  });
+  const floored = applySpill1HallFloors(baseline, HALL_FLOORS);
+  // Per-color matrix får floor-overlay.
+  const perColor = floored.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor[0]!.minPrize, 150, "Rad 1 floor");
+  assert.equal(perColor[1]!.minPrize, 250, "Rad 2 floor");
+  assert.equal(perColor[4]!.minPrize, 1500, "Fullt Hus floor");
+  // Eksisterende prize1 (preset-fixed) er uendret — engine bruker max(prize1, minPrize) ved payout.
+  assert.equal(perColor[0]!.prize1, 100);
+  assert.equal(perColor[4]!.prize1, 1000);
+});
+
+test("applySpill1HallFloors: hall-floor høyere enn preset → hall-floor wins (fixed)", () => {
+  // For fixed-prize varianter (ball-x-10 har Rad 1-4 fixed): hall-floor over
+  // preset-fixed verdier får minPrize satt til hall-floor.
+  const baseline = buildVariantConfigFromSpill1Config({
+    subVariant: "ball-x-10",
+    ticketColors: [{ color: "small_yellow" }],
+  });
+  const highFloors: Spill1HallFloorDefaults = {
+    phase1: 10000,
+    phase2: 10000,
+    phase3: 10000,
+    phase4: 10000,
+    phase5: 10000,
+  };
+  const floored = applySpill1HallFloors(baseline, highFloors);
+  const perColor = floored.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor[0]!.minPrize, 10000, "hall-floor 10000 > fixed prize1 100");
+  // Fullt Hus i ball-x-10 er ball-value-multiplier (ikke fixed) → hopper over.
+  assert.equal(perColor[4]!.minPrize, undefined);
+});
+
+test("applySpill1HallFloors: multiplier-chain patterns (Spillernes Spill) bevarer eksisterende minPrize", () => {
+  // Spillerness Spill bruker multiplier-chain. Hall-floor skal IKKE override
+  // preset-minPrize fordi minPrize på multiplier-chain er total-phase-floor
+  // (ikke per-winner). Multi-winner-split ville ellers gi over-payment.
+  const baseline = buildVariantConfigFromSpill1Config({
+    subVariant: "spillernes-spill",
+    ticketColors: [{ color: "small_yellow" }],
+  });
+  const aggressive: Spill1HallFloorDefaults = {
+    phase1: 9999,
+    phase2: 9999,
+    phase3: 9999,
+    phase4: 9999,
+    phase5: 9999,
+  };
+  const floored = applySpill1HallFloors(baseline, aggressive);
+  const perColor = floored.patternsByColor?.["Small Yellow"]!;
+  // Spillerness preset minPrize: phase1=50, phase2=50, phase3=100, phase4=100, phase5=500
+  assert.equal(perColor[0]!.minPrize, 50, "preset minPrize beholdt for multiplier-chain");
+  assert.equal(perColor[4]!.minPrize, 500);
+});
+
+test("applySpill1HallFloors: TV Extra customPatterns får KUN floor på Fullt Hus", () => {
+  // Bilde og Ramme er custom-patterns med navn "Bilde"/"Ramme" — disse skal
+  // IKKE få minPrize satt (de matcher ikke fase 1-5 navnene).
+  const baseline = buildVariantConfigFromSpill1Config({
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow" }],
+  });
+  const floored = applySpill1HallFloors(baseline, HALL_FLOORS);
+  const customs = floored.customPatterns ?? [];
+  const bilde = customs.find((c) => c.name === "Bilde");
+  const ramme = customs.find((c) => c.name === "Ramme");
+  const fullhouse = customs.find((c) => c.name === "Fullt Hus");
+  assert.equal(bilde?.minPrize, undefined, "Bilde skal ikke få fase-floor (utenfor 5-fase-modellen)");
+  assert.equal(ramme?.minPrize, undefined, "Ramme skal ikke få fase-floor");
+  assert.equal(fullhouse?.minPrize, 1500, "Fullt Hus får phase5-floor");
+});
+
+test("applySpill1HallFloors: input ikke mutert — returnerer ny instans", () => {
+  const baseline = buildVariantConfigFromSpill1Config({
+    subVariant: "standard",
+    ticketColors: [{ color: "small_yellow" }],
+  });
+  const originalMin = baseline.patternsByColor?.["Small Yellow"]?.[0]?.minPrize;
+  const floored = applySpill1HallFloors(baseline, HALL_FLOORS);
+  // Original skal være helt uendret.
+  assert.equal(
+    baseline.patternsByColor?.["Small Yellow"]?.[0]?.minPrize,
+    originalMin,
+    "input baseline må ikke muteres",
+  );
+  assert.notStrictEqual(floored, baseline, "ny instans returnert");
+});
+
+test("applySpill1HallFloors: floor=0 hopper over (ingen overlay)", () => {
+  const baseline = buildVariantConfigFromSpill1Config({
+    subVariant: "standard",
+    ticketColors: [{ color: "small_yellow" }],
+  });
+  const zeroFloors: Spill1HallFloorDefaults = {
+    phase1: 0,
+    phase2: 0,
+    phase3: 0,
+    phase4: 0,
+    phase5: 0,
+  };
+  const floored = applySpill1HallFloors(baseline, zeroFloors);
+  const perColor = floored.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor[0]!.minPrize, undefined, "floor=0 → ingen minPrize satt");
+});
+
+test("applySpill1HallFloors: ikke-standard pattern-navn (ukjent) skal ikke krasje", () => {
+  // Ad-hoc pattern med "Custom Pattern"-navn skal ignoreres.
+  const fakeConfig: GameVariantConfig = {
+    ...DEFAULT_NORSK_BINGO_CONFIG,
+    patterns: [
+      { name: "Mystery Bonus", claimType: "LINE", prizePercent: 0, design: 0 },
+    ],
+  };
+  const floored = applySpill1HallFloors(fakeConfig, HALL_FLOORS);
+  // Ukjent pattern-navn → minPrize ikke satt.
+  assert.equal(floored.patterns[0]!.minPrize, undefined);
 });

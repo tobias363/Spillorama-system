@@ -1994,6 +1994,8 @@ export class BingoEngine {
       walletTransfer: transfer,
       policy,
       houseDeficit,
+      houseFundedGap,
+      houseFundedGapAmount,
     } = phaseResult;
 
     const claim: ClaimRecord = {
@@ -2085,6 +2087,42 @@ export class BingoEngine {
           logger.warn(
             { err, gameId: game.id, claimId: claim.id, houseDeficit },
             "HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
+          );
+        }
+      }
+      // HV-2 hall-floor hus-pre-fund audit. Distinkt fra fixed-prize hus-
+      // garanti (samme event-type, ulik metadata-reason). REN AUDIT —
+      // inngår ikke i §11-aggregater. Caller-flow: floor er guaranteed via
+      // PhasePayoutService (RTP-cap-bypass), her logger vi gap-amount.
+      if (houseFundedGap && houseFundedGapAmount > 0) {
+        try {
+          await this.ledger.recordComplianceLedgerEvent({
+            hallId: room.hallId,
+            gameType,
+            channel,
+            eventType: "HOUSE_DEFICIT",
+            amount: houseFundedGapAmount,
+            roomCode: room.code,
+            gameId: game.id,
+            claimId: claim.id,
+            playerId: player.id,
+            walletId: player.walletId,
+            sourceAccountId: houseAccountId,
+            policyVersion: policy.id,
+            metadata: {
+              reason: "HALL_DEFAULT_FLOOR_GUARANTEE",
+              patternName: pattern.name,
+              winningType: pattern.winningType,
+              payout,
+              minPrizeFloor: pattern.minPrize,
+              poolBeforePayout,
+              budgetBeforePayout,
+            },
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId: game.id, claimId: claim.id, houseFundedGapAmount },
+            "HV-2 HOUSE_DEFICIT ledger-event feilet (best-effort) — payout fortsetter",
           );
         }
       }
