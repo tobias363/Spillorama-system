@@ -1,13 +1,28 @@
 # Schema-archaeology — 2026-04-29
 
-**Owner:** Schema-archaeology agent (read-only investigation)  
-**Status:** READY FOR PM-REVIEW. Inspection-script + fix-script generated. Eksekusjon ikke utført.  
+**Owner:** Schema-archaeology agent (read-only investigation)
+**Status:** v2 (post-PM-dryrun-fixes). Inspection-script + fix-script bug-fixed. Eksekusjon fortsatt ikke utført — venter på conflict-verification i §6.1–6.4.
 **Linked:**
 - `docs/operations/schema-archaeology-inspect.sql` — read-only inspection, run first.
-- `docs/operations/schema-archaeology-fix.sql` — INSERT INTO pgmigrations, run after PM-godkjenning.
+- `docs/operations/SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md` — verification queries for §6.1–6.4, run BEFORE fix-script.
+- `docs/operations/schema-archaeology-fix.sql` — INSERT INTO pgmigrations, run after PM-godkjenning av conflict-verifications.
 - `docs/operations/MIGRATION_DEPLOY_RUNBOOK.md` — generic migration-deploy runbook.
 - `docs/audit/DATABASE_AUDIT_2026-04-28.md` — orphan tables (DB-P2-1) confirms divergence.
 - Tidligere: `ops/schema-sync-plan-2026-04-26` (branch). Ble ikke merget. Denne PR-en er en mer kirurgisk follow-up etter PR #715-incidenten.
+
+## v2-endringer (2026-04-29)
+
+PM kjørte dry-run mot prod og oppdaget at fix-scriptet hadde flere SQL-bugs. Detaljer:
+
+1. **3 missing-FROM-clause-bugs** i `WITH numbered AS (...) SELECT count(*) ...` order-check-spørringene (STEP 4 og STEP 5/5b post-backdate-checks). PostgreSQL kastet `column "pos_by_run_on" does not exist` som ABORTET hele transaksjonen (uten ON_ERROR_STOP=1 gikk feilen til stderr og forsvant fra `tee`-output). Effekt: STEP 5 backdate-UPDATE ble silent skippet, og en COMMIT-kjøring ville ha registrert STEP 2-INSERTene med `run_on = now()` — uten backdate. Det ville bevart order-feilen for neste deploy.
+
+2. **2 to_timestamp-overflow-bugs** i STEP 5 og STEP 5b parser. Original kode brukte `to_timestamp(prefix, 'YYYYMMDDHH24MISS')` som rejecter HH > 23. Men 5 migrasjoner i kode-treet har intentionally-overflowed prefiks for ordering: `20260418240000_*`, `20260418250000_*`, `20260418250100_*`, `20260418250200_*`, `20260418250300_*`. Fix: parse date som midnight + add HHMMSS som seconds-interval (250200 → 25h2m → next day 01:02).
+
+3. **Ny STEP 0 sanity-check**: verifiserer (a) connected-DB matcher expected (default `bingo_db_64tj`, override via `-v expected_db=<name>`), (b) `pgmigrations`-tabellen har 3 forventede kolonner, (c) `pgmigrations` er ikke-tom (warning hvis empty). Aborterer med tydelig feilmelding hvis (a) eller (b) feiler.
+
+4. **Ny conflicts-verification-doc** (`SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md`) som lister eksakt SELECT-only-spørring per §6.1–6.4 + decision-tree for å avgjøre om hver migrasjon er trygg å registrere.
+
+Alle endringer i `docs/operations/schema-archaeology-fix.sql` og `docs/operations/SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md`. Inspect-scriptet er uendret (det fungerte korrekt).
 
 ---
 
@@ -142,10 +157,20 @@ Notér at `run_on` settes til parsed timestamp-prefiks for å bevare order-check
 
 > **CRITICAL:** Backup prod-DB før commit. Ingen unntak.
 
+### Six-step PM playbook (overview)
+
+1. **inspect** — kjør `schema-archaeology-inspect.sql` (READ-ONLY)
+2. **verify-conflicts** — for hver §6.1–6.4 kjør queries i `SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md` + walk decision tree
+3. **decide** — basert på conflict-verifications, evt. kommentér ut rader fra fix-scriptets STEP 2 candidate-list før dry-run
+4. **re-DRY-RUN fix** — kjør fix-script med `-v ON_ERROR_STOP=1`, default ROLLBACK
+5. **review proposal** — Tobias verifiserer dry-run-loggen og signerer av
+6. **COMMIT** — flipp ROLLBACK→COMMIT, kjør for ekte, restore script, trigger Render-deploy
+
 ### 5.1 Forutsetninger
 
 - [ ] Tobias har lest dette dokumentet og §6 (kjente konflikter)
 - [ ] Tobias har lest fix-scriptet (`docs/operations/schema-archaeology-fix.sql`)
+- [ ] Tobias har lest `SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md`
 - [ ] Render auto-deploy er pauset (eller koordinert vindue avtalt)
 - [ ] Backup tatt (`pg_dump`)
 - [ ] PROD_PG_URL eksportert i terminal
@@ -160,8 +185,8 @@ pg_dump "$PROD_PG_URL" --no-owner --no-acl --format=custom \
   > /tmp/spillorama-pre-archaeology-$(date +%s).dump
 ls -lh /tmp/spillorama-pre-archaeology-*.dump  # bekreft fil > 0 B
 
-# 2. Kjør inspection-scriptet (READ-ONLY — ingen risiko)
-psql "$PROD_PG_URL" -v ON_ERROR_STOP=1 \
+# 2. STEG 1: Kjør inspection-scriptet (READ-ONLY — ingen risiko)
+psql "$PROD_PG_URL" -X -v ON_ERROR_STOP=1 \
   -f docs/operations/schema-archaeology-inspect.sql \
   | tee /tmp/schema-archaeology-inspect-$(date +%s).log
 
@@ -175,35 +200,59 @@ psql "$PROD_PG_URL" -v ON_ERROR_STOP=1 \
 # 4. Hvis Section 6-listen er overraskende lang (>50 rader) eller inneholder
 #    migrations som IKKE finnes på disk, STOPP og eskaler til Tobias.
 
-# 5. DRY-RUN av fix-scriptet (ROLLBACK er default)
-psql "$PROD_PG_URL" -v ON_ERROR_STOP=1 \
+# 5. STEG 2: Verifiser §6.1–6.4 conflicts.
+#    Kjør hver SELECT-query i SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md
+#    og walk decision-tree per § for å avgjøre Case A/B/C/etc.
+#    Eksempel:
+psql "$PROD_PG_URL" -X -v ON_ERROR_STOP=1 \
+  -f /tmp/conflicts-6.1-app-users-hall-id.sql \
+  | tee /tmp/conflicts-6.1-$(date +%s).log
+# (Tilsvarende for 6.2, 6.3, 6.4 — kopier queries fra
+#  SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md inn i egne files eller `psql -c`.)
+
+# 6. STEG 3: Beslutt. For hvert STOP-utfall i 6.1-6.4, kommentér ut den
+#    aktuelle migrasjonsraden i fix-scriptets STEP 2 candidate-list:
+#      - §6.1 Case B → kommentér ut '20260417000007_user_hall_binding'
+#                      og '20260418170000_user_hall_scope'
+#      - §6.2 Case B → kommentér ut '20260424000000_hall_groups'
+#      - §6.3 Case B/C → kommentér ut '20260417000005_regulatory_ledger'
+#      - §6.4 Case B → kommentér ut '20260926000000_wallet_currency_readiness'
+#    (Ved Case A/C der det er trygt: ingen endring, fortsett.)
+
+# 7. STEG 4: DRY-RUN av fix-scriptet (ROLLBACK er default)
+#    Default expected_db er bingo_db_64tj. Override hvis du har endret
+#    DB-navn (sjelden):
+psql "$PROD_PG_URL" -X -v ON_ERROR_STOP=1 \
   -f docs/operations/schema-archaeology-fix.sql \
   | tee /tmp/schema-archaeology-fix-dry-$(date +%s).log
 
-# 6. REVIEW dry-run-loggen:
+# 8. STEG 5: REVIEW dry-run-loggen:
+#    - STEP 0: 0.1 OK + 0.2 OK + 0.3 OK (eller WARN hvis empty)
 #    - STEP 1: pgmigrations_before viser baseline
 #    - STEP 2: RETURNING-output viser hver innsatte rad
 #    - STEP 3: pgmigrations_after = before + antall innsatte
 #    - STEP 4: rows_out_of_order > 0 = forventet (før backdate)
 #    - STEP 5: rows_out_of_order = 0 = forventet (etter backdate). HVIS != 0,
-#             STOPP — det er en deeper schema-issue scriptet ikke fanger.
+#             vurder STEP 5b (opt-in) eller eskaler til Tobias.
+#    - STEP 5b: skipped (1=0) by default, no-op
 #    - STEP 6: ROLLBACK utført — ingen permanent endring
+#    Hvis noe ser uventet ut, STOPP og eskaler.
 
-# 7. Hvis dry-run ser bra ut, flipp scriptet fra ROLLBACK til COMMIT:
+# 9. STEG 6 — del 1: flipp scriptet fra ROLLBACK til COMMIT:
 sed -i.bak 's/^ROLLBACK; -- DEFAULT/COMMIT; -- COMMITTED/' \
   docs/operations/schema-archaeology-fix.sql
 
-# 8. KJØR FOR ECHTE
-psql "$PROD_PG_URL" -v ON_ERROR_STOP=1 \
+# 10. STEG 6 — del 2: KJØR FOR ECHTE
+psql "$PROD_PG_URL" -X -v ON_ERROR_STOP=1 \
   -f docs/operations/schema-archaeology-fix.sql \
   | tee /tmp/schema-archaeology-fix-commit-$(date +%s).log
 
-# 9. Restaurer fix-scriptet (slik at git-diff viser ROLLBACK-default)
+# 11. Restaurer fix-scriptet (slik at git-diff viser ROLLBACK-default)
 mv docs/operations/schema-archaeology-fix.sql.bak \
    docs/operations/schema-archaeology-fix.sql
 
-# 10. (Optional men anbefalt) verifiser order-checken bestått
-psql "$PROD_PG_URL" -v ON_ERROR_STOP=1 -c "
+# 12. (Optional men anbefalt) verifiser order-checken bestått
+psql "$PROD_PG_URL" -X -v ON_ERROR_STOP=1 -c "
 WITH numbered AS (
   SELECT name, run_on,
     row_number() OVER (ORDER BY run_on, id) AS pos_by_run_on,
@@ -215,20 +264,25 @@ FROM numbered;
 "
 # Forventet output: rows_out_of_order = 0
 
-# 11. Trigger ny Render-deploy
+# 13. (Optional men anbefalt for §6.3/§6.4) — re-kjør conflict-verifications
+#    som post-commit smoke check. Output bør være identisk med STEG 2.
+#    (Hvis det er endret, har fix-scriptet utilsiktet rørt schema —
+#    rapportér umiddelbart.)
+
+# 14. Trigger ny Render-deploy
 # Via Render-dashboardet → Manual Deploy → "Clear build cache and deploy" på 'main'
 # (Eller via "Redeploy" på siste failed deploy)
 
-# 12. Følg deploy-loggen i Render. Forventet:
+# 15. Følg deploy-loggen i Render. Forventet:
 #     "node-pg-migrate up" kjører gjennom uten "preceding already run"-feil.
 #     For DATA-only migrations som ikke ble registrert i §3.4, vil bodyen
 #     re-kjøre. De er idempotente (UPDATE av eksisterende rader, eller
 #     INSERT med ON CONFLICT der relevant). Verifiser at de kjører grønt.
 
-# 13. Etter deploy: verifiser at ComplianceOutboxWorker logger stopper å throw
+# 16. Etter deploy: verifiser at ComplianceOutboxWorker logger stopper å throw
 # (Render-loggene → Live tail på 'spillorama-system')
 
-# 14. (Valgfritt — DATA-only registrering)
+# 17. (Valgfritt — DATA-only registrering)
 # Kjør kommandoene i §3.4 én og én etter manuell verifisering
 # av hver migrasjons data-state.
 ```
@@ -271,6 +325,10 @@ Hvis det er <10 slike, kan Tobias kjøre tilsvarende UPDATE på dem også — me
 ---
 
 ## 6. Kjente konflikter / advarsler
+
+> **VIKTIG:** Hver av §6.1–6.4 har en **eksakt SELECT-only verifiserings-spørring + decision-tree** i `SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md`. Kjør disse FØR fix-scriptet. Hvis decision-tree lander på STOP-case, kommentér ut den aktuelle migrasjonsraden i fix-scriptets STEP 2 candidate-list.
+>
+> Sammenfatning nedenfor er kontekst og rasjonale; den OPERATIVE oppskriften er i conflicts-verification-dokumentet.
 
 ### 6.1 `app_users.hall_id` lages av to migrations
 
@@ -444,7 +502,8 @@ For Spillorama-tilfellet er ulempen **lav**: de fleste indexer er `CREATE INDEX 
 ## 12. Vedlegg
 
 - `docs/operations/schema-archaeology-inspect.sql` — read-only inspection
-- `docs/operations/schema-archaeology-fix.sql` — INSERT-only fix (default ROLLBACK)
+- `docs/operations/schema-archaeology-fix.sql` — INSERT-only fix (default ROLLBACK; v2 post-PM-dryrun-fixes)
+- `docs/operations/SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md` — eksakte SELECT-only queries + decision-trees for §6.1–6.4 (kjør FØR fix-script)
 - `docs/operations/MIGRATION_DEPLOY_RUNBOOK.md` — generic migration-deploy
 - `docs/audit/DATABASE_AUDIT_2026-04-28.md` — orphan tables (DB-P2-1)
 - `apps/backend/migrations/` — 127 migration-filer

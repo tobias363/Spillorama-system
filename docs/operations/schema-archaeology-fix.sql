@@ -1,6 +1,50 @@
 -- =============================================================================
 -- Schema-archaeology fix — 2026-04-29
 -- =============================================================================
+-- ─────────────────────────────────────────────────────────────────────────────
+-- CHANGE LOG
+-- ─────────────────────────────────────────────────────────────────────────────
+--   2026-04-29 v2 (post-PM-dryrun fixes):
+--     • BUG FIX #1 (3 instances): The `WITH numbered AS (...) SELECT ... AS
+--       rows_out_of_order` order-check queries at original lines 335-346,
+--       439-450, 513-524 were missing the `FROM numbered` clause. PostgreSQL
+--       errored with `column "pos_by_run_on" does not exist`, which (with
+--       ON_ERROR_STOP=1) aborts the whole transaction — including the STEP 5
+--       backdate UPDATE that depends on running AFTER the verification.
+--       Without ON_ERROR_STOP=1 the errors went to stderr (not captured by
+--       `tee`) so dry-run output looked clean while STEP 5 was silently
+--       skipped. Effect: COMMIT mode would have committed STEP 2 INSERTs
+--       with `run_on = now()` (placing them AFTER pre-existing 2026-04-26
+--       rows in chronological order) but no backdate — node-pg-migrate's
+--       order-check would then fail on next deploy because the new rows'
+--       `name` sort places them BEFORE existing rows. Fix: add `FROM numbered`
+--       to all 3 queries.
+--
+--     • BUG FIX #2 (2 instances, STEP 5 + STEP 5b): The original
+--       `to_timestamp(substring(name, 1, 14), 'YYYYMMDDHH24MISS')` parser
+--       blows up with "date/time field value out of range" on 5 migrations
+--       in the codebase that have intentionally-overflowed timestamp
+--       prefixes for ordering — `20260418240000_agent_transactions`,
+--       `20260418240000_vouchers`, `20260418250000_agent_settlements`,
+--       `20260418250100_shift_settled_at`, `20260418250200_hall_cash_balance`,
+--       `20260418250300_hall_cash_transactions`. These were named to sort
+--       AFTER `20260418230000_*` and BEFORE `20260419*`, but `to_timestamp`
+--       rejects HH=24 and HH=25. Fix: parse date-part as midnight
+--       timestamp, then add HH*3600 + MM*60 + SS as a seconds-interval that
+--       naturally rolls forward (250200 → 25h2m → next day 01:02). This
+--       preserves alphabetical sort order while remaining valid timestamps.
+--
+--     • NEW: STEP 0 sanity-check block — verifies (a) we're connected to
+--       the expected `bingo_db_64tj` database (configurable via
+--       `-v expected_db=<name>` psql variable, default `bingo_db_64tj`),
+--       (b) `pgmigrations` table exists with expected columns (id, name,
+--       run_on), (c) `pgmigrations` is non-empty (warning if it is —
+--       fresh DB scenarios). Uses RAISE EXCEPTION in DO blocks rather
+--       than CASE+division-by-zero (which evaluates both branches and
+--       false-fires on success). Runs OUTSIDE the main transaction so a
+--       wrong-DB abort holds no LOCK and leaks nothing.
+--
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Closes the divergence between prod's `pgmigrations` and code's
 -- `apps/backend/migrations/`. ONLY does INSERT INTO pgmigrations — does NOT
 -- mutate any schema, does NOT run migration bodies, does NOT touch user data.
@@ -73,6 +117,133 @@
 \echo 'from `ROLLBACK; -- DEFAULT` to `COMMIT; -- COMMITTED` to actually'
 \echo 'persist changes.'
 \echo ''
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- STEP 0 — Sanity check (fail-fast on wrong DB or missing pgmigrations)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Runs OUTSIDE the main transaction so that pre-flight errors abort with
+-- minimal side-effect (no LOCK held, no BEGIN issued). Each check is a
+-- DO-block that RAISE EXCEPTION on failure — combined with
+-- `-v ON_ERROR_STOP=1` this halts the script immediately with a clear
+-- diagnostic message.
+--
+-- Override defaults via psql command line, e.g.:
+--   psql ... -v expected_db=bingo_dev -f ...
+-- Default behaviour: must be on `bingo_db_64tj`; pgmigrations must exist
+-- with all 3 expected columns.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+\echo ''
+\echo '═══════════════════════════════════════════════════════════════════════════'
+\echo 'STEP 0: Sanity check'
+\echo '═══════════════════════════════════════════════════════════════════════════'
+
+\set ON_ERROR_STOP on
+
+-- Default expected_db if not provided via `-v expected_db=<name>`. psql
+-- only sets the variable to its provided value when `-v` is used; without
+-- it, `:expected_db` would fail to substitute. Set a fallback here.
+\if :{?expected_db}
+\else
+  \set expected_db 'bingo_db_64tj'
+\endif
+
+\echo 'Connection details:'
+
+SELECT
+  current_database()      AS connected_db,
+  :'expected_db'          AS expected_db,
+  current_user            AS connected_role,
+  inet_server_addr()      AS server_addr,
+  version()               AS pg_version;
+
+-- 0.1 — Database name must match expected. If you intentionally point this
+-- at a non-prod DB (e.g. dev, staging, local), override with
+-- `-v expected_db=<other>`.
+--
+-- We pass the expected_db value into the DO-block via SET LOCAL on a
+-- custom GUC — then the DO-block reads it via current_setting() and
+-- RAISE EXCEPTION on mismatch. This is more robust than CASE+division-by-
+-- zero (which evaluates both branches and false-fires on success).
+
+\echo ''
+\echo '0.1: Verifying connected database matches expected …'
+
+-- Pass the psql variable into a session-level GUC that DO-blocks can read.
+SELECT set_config('schema_archaeology.expected_db', :'expected_db', false);
+
+DO $$
+DECLARE
+  expected_db TEXT := current_setting('schema_archaeology.expected_db', TRUE);
+  actual_db   TEXT := current_database();
+BEGIN
+  IF expected_db IS NULL OR expected_db = '' THEN
+    RAISE EXCEPTION 'STEP 0.1 FATAL: schema_archaeology.expected_db not set. '
+                    'Did you forget `-v expected_db=<name>`?';
+  END IF;
+  IF actual_db <> expected_db THEN
+    RAISE EXCEPTION 'STEP 0.1 FATAL: connected_db=% but expected_db=%. '
+                    'Override with `-v expected_db=<your-db>` if intentional.',
+                    actual_db, expected_db;
+  END IF;
+  RAISE NOTICE '0.1 OK: connected to %', actual_db;
+END $$;
+
+-- 0.2 — pgmigrations table must exist with the 3 expected columns.
+
+\echo ''
+\echo '0.2: Verifying pgmigrations table shape …'
+
+DO $$
+DECLARE
+  col_count   INTEGER;
+  found_cols  TEXT;
+BEGIN
+  SELECT
+    count(*),
+    string_agg(column_name, ', ' ORDER BY column_name)
+  INTO col_count, found_cols
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name   = 'pgmigrations'
+    AND column_name IN ('id', 'name', 'run_on');
+
+  IF col_count <> 3 THEN
+    RAISE EXCEPTION 'STEP 0.2 FATAL: pgmigrations has % of expected 3 columns '
+                    '(id, name, run_on). Found columns: %',
+                    col_count, COALESCE(found_cols, '(none)');
+  END IF;
+  RAISE NOTICE '0.2 OK: pgmigrations has all 3 expected columns (%)', found_cols;
+END $$;
+
+-- 0.3 — pgmigrations must have at least 1 row. An empty pgmigrations could
+-- mean a fresh DB (where the fix is a no-op anyway) but is still suspicious
+-- — we surface it as a warning rather than an error.
+
+\echo ''
+\echo '0.3: pgmigrations row count …'
+
+DO $$
+DECLARE
+  row_count INTEGER;
+BEGIN
+  SELECT count(*) INTO row_count FROM pgmigrations;
+  IF row_count = 0 THEN
+    RAISE WARNING '0.3 WARN: pgmigrations is empty. If this is intentional '
+                  '(fresh DB), proceed; otherwise abort and verify connection.';
+  ELSE
+    RAISE NOTICE '0.3 OK: pgmigrations has % rows', row_count;
+  END IF;
+END $$;
+
+\echo ''
+\echo 'STEP 0 passed. Proceeding to main transaction.'
+\echo ''
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Main transaction begins here. STEP 0 ran auto-commit; from here on we are
+-- inside an explicit transaction with EXCLUSIVE lock on pgmigrations.
+-- ─────────────────────────────────────────────────────────────────────────────
 
 BEGIN;
 
@@ -343,7 +514,8 @@ WITH numbered AS (
 SELECT
   count(*)                                                  AS total_rows,
   count(*) FILTER (WHERE pos_by_run_on = pos_by_name)       AS rows_in_agreement,
-  count(*) FILTER (WHERE pos_by_run_on <> pos_by_name)      AS rows_out_of_order;
+  count(*) FILTER (WHERE pos_by_run_on <> pos_by_name)      AS rows_out_of_order
+FROM numbered; -- BUG-FIX 2026-04-29: was missing FROM clause; aborted txn.
 
 \echo ''
 \echo 'Rows where the two sorts DISAGREE (these are the rows that will trip'
@@ -401,28 +573,42 @@ LIMIT 20;
 
 -- Update each row whose run_on is "today" (now-window) to a timestamp parsed
 -- from its name. The timestamp prefix YYYYMMDDHHMMSS gives us a parseable
--- timestamptz; we use UTC for determinism. This places the run_on in
--- chronological filename-order, matching the (name) sort.
+-- value; we strip timezone for storage simplicity. This places the run_on
+-- in chronological filename-order, matching the (name) sort.
 --
 -- For migrations sharing the same timestamp prefix (e.g.
 -- 20260418240000_agent_transactions and 20260418240000_vouchers), we add
--- a tiny per-name offset (`name`-rank * 1 millisecond) so each row's run_on
+-- a tiny per-name offset (`name`-rank * 1 microsecond) so each row's run_on
 -- is unique AND sort-aligned with the alphabetical filename order. This
 -- removes any dependency on PostgreSQL's SERIAL allocation order during
 -- INSERT...SELECT.
+--
+-- BUG-FIX 2026-04-29: original parser used `to_timestamp(.., 'YYYYMMDDHH24MISS')`
+-- which REJECTS hour values > 23 (and minute > 59, second > 59) with
+-- "date/time field value out of range". But the codebase has 5 migrations
+-- with intentionally-overflowed prefixes for ordering — e.g.
+-- `20260418240000_*` and `20260418250200_*`. Those names are valid in
+-- alphabetical-sort terms but blow up `to_timestamp`. We replace the parser
+-- with a date-part + (HHMMSS as seconds) decomposition that handles overflow
+-- by rolling forward (e.g. 20260418250200 → 2026-04-19 01:02:00).
 WITH parsed AS (
   SELECT
     id,
     name,
-    -- Parse YYYYMMDDHHMMSS prefix and add microsecond offset by full-name rank
-    -- within rows sharing the same prefix.
+    -- Date prefix as midnight, then add HH:MM:SS as a seconds-interval that
+    -- naturally rolls forward when the value exceeds 24h (e.g. 250200 →
+    -- 25 hours + 2 minutes = next day 01:02). Per-name rank within the
+    -- same prefix gets a microsecond offset for stable ordering.
     (
-      to_timestamp(substring(name FROM 1 FOR 14), 'YYYYMMDDHH24MISS') AT TIME ZONE 'UTC'
+      (substring(name, 1, 8) || ' 00:00:00')::timestamp
+      + (substring(name, 9, 2)::int * 3600 +
+         substring(name, 11, 2)::int * 60 +
+         substring(name, 13, 2)::int) * interval '1 second'
       + (row_number() OVER (
           PARTITION BY substring(name FROM 1 FOR 14)
           ORDER BY name
         ) - 1) * interval '1 microsecond'
-    )::timestamp AS synthetic_run_on
+    ) AS synthetic_run_on
   FROM pgmigrations
   -- Only rows we just inserted in this transaction (run_on within last hour).
   WHERE run_on >= now() - interval '1 hour'
@@ -447,7 +633,8 @@ WITH numbered AS (
 SELECT
   count(*)                                                  AS total_rows,
   count(*) FILTER (WHERE pos_by_run_on = pos_by_name)       AS rows_in_agreement,
-  count(*) FILTER (WHERE pos_by_run_on <> pos_by_name)      AS rows_out_of_order;
+  count(*) FILTER (WHERE pos_by_run_on <> pos_by_name)      AS rows_out_of_order
+FROM numbered; -- BUG-FIX 2026-04-29: was missing FROM clause; aborted txn.
 
 \echo ''
 \echo 'If `rows_out_of_order` is 0, node-pg-migrate''s order-check WILL PASS'
@@ -484,17 +671,24 @@ SELECT
 \echo '═══════════════════════════════════════════════════════════════════════════'
 
 -- DEFAULT: NO-OP. Uncomment to enable. To enable, change `WHERE 1=0` to `WHERE 1=1`.
+--
+-- BUG-FIX 2026-04-29: same parser fix as STEP 5 — handle overflow prefixes
+-- (e.g. 20260418240000, 20260418250200) by date+seconds decomposition rather
+-- than to_timestamp().
 WITH all_parsed AS (
   SELECT
     id,
     name,
     (
-      to_timestamp(substring(name FROM 1 FOR 14), 'YYYYMMDDHH24MISS') AT TIME ZONE 'UTC'
+      (substring(name, 1, 8) || ' 00:00:00')::timestamp
+      + (substring(name, 9, 2)::int * 3600 +
+         substring(name, 11, 2)::int * 60 +
+         substring(name, 13, 2)::int) * interval '1 second'
       + (row_number() OVER (
           PARTITION BY substring(name FROM 1 FOR 14)
           ORDER BY name
         ) - 1) * interval '1 microsecond'
-    )::timestamp AS synthetic_run_on
+    ) AS synthetic_run_on
   FROM pgmigrations
   WHERE name ~ '^[0-9]{14}_'
 )
@@ -521,7 +715,8 @@ WITH numbered AS (
 SELECT
   count(*)                                                  AS total_rows,
   count(*) FILTER (WHERE pos_by_run_on = pos_by_name)       AS rows_in_agreement,
-  count(*) FILTER (WHERE pos_by_run_on <> pos_by_name)      AS rows_out_of_order;
+  count(*) FILTER (WHERE pos_by_run_on <> pos_by_name)      AS rows_out_of_order
+FROM numbered; -- BUG-FIX 2026-04-29: was missing FROM clause; aborted txn.
 
 \echo ''
 \echo 'If rows_out_of_order is still > 0 after STEP 5b is enabled, STOP and'
