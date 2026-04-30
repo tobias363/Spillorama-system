@@ -1,4 +1,5 @@
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
+import { getBallAssetPath } from "./BallTube.js";
 
 /**
  * Maps number to CSS ball color for Bingo75 columns (5 cols × 15 balls, B-I-N-G-O):
@@ -14,6 +15,11 @@ import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
  * backend doesn't emit colour strings, so we derive colour from the ball
  * number via the canonical 75-ball column mapping. Palette matches BallTube.ts
  * to keep the tube and "Oppleste tall" overlay visually consistent.
+ *
+ * **Tobias 2026-04-30:** CSS-gradient-en er beholdt som under-laget i
+ * `render()` (bak PNG-bildet) slik at modal-en aldri viser tomme sirkler
+ * hvis PNG-en ikke laster. Hovedrendering bruker `getBallAssetPath` (samme
+ * som BallTube i spillet) for visuell paritet.
  */
 export function getBallColorCSS(n: number): string {
   if (n <= 15) return "background:radial-gradient(circle at 38% 32%,#3a7adf,#0d2f8a 70%);box-shadow:0 0 8px rgba(40,80,220,0.4);";   // Blue  (B)
@@ -169,16 +175,31 @@ export class CalledNumbersOverlay {
     this.countEl.textContent = `${this.drawnNumbers.length} tall trukket`;
 
     for (const n of this.drawnNumbers) {
+      // Tobias 2026-04-30: PNG-baller for visuell paritet med BallTube i
+      // hovedspillet. CSS-gradient-en under bildet er fall-back hvis PNG-en
+      // ikke laster (load-error → tomme-sirkler-bug unngås).
       const ball = document.createElement("div");
       ball.style.cssText = `
         width:48px;height:48px;border-radius:50%;
         display:flex;align-items:center;justify-content:center;
         font-size:18px;font-weight:700;color:#fff;
-        text-shadow:0 1px 2px rgba(0,0,0,0.5);
+        text-shadow:0 1px 2px rgba(0,0,0,0.6);
         flex-shrink:0;position:relative;
         ${getBallColorCSS(n)}
       `;
-      ball.textContent = String(n);
+      const img = document.createElement("img");
+      img.src = getBallAssetPath(n);
+      img.alt = "";
+      img.draggable = false;
+      img.style.cssText =
+        "position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover;pointer-events:none;user-select:none;";
+      ball.appendChild(img);
+
+      const numberEl = document.createElement("span");
+      numberEl.textContent = String(n);
+      numberEl.style.cssText = "position:relative;z-index:1;";
+      ball.appendChild(numberEl);
+
       this.grid.appendChild(ball);
     }
     this.dirty = false;

@@ -651,24 +651,42 @@ export class BingoTicketHtml {
     const isLucky = cell.dataset.lucky === "true";
     const palette = bongPaletteFor(this.ticket.color);
 
+    // Tobias 2026-04-30: lucky-cell skal vise firkløver-ikonet (samme asset
+    // som "Velg lykketall"-knappen i sidebar) så spilleren visuelt ser at
+    // lykketallet hen valgte er på et brett som er i spill. Tidligere kun
+    // gul ramme (`inset 0 0 0 2px #ffe83d`) — det var for diskret.
+    //
+    // Implementasjon: layered backgrounds. background-image = lucky-clover,
+    // background-color = UNMARKED_BG. Når cellen IKKE er lucky må vi nullstille
+    // backgroundImage eksplisitt så remnant ikke overlever state-transisjoner.
     if (isFree) {
       // FREE-celle har hvit base (som unmarked) med grønn inner-pille.
       cell.style.background = UNMARKED_BG;
+      cell.style.backgroundImage = "";
       cell.style.color = palette.text;
       cell.style.fontWeight = "600";
       cell.style.boxShadow = "none";
     } else if (isMarked) {
       cell.style.background = MARKED_BG;
+      cell.style.backgroundImage = "";
       cell.style.color = MARKED_TEXT;
       cell.style.fontWeight = "700";
       cell.style.boxShadow = "none";
     } else if (isLucky) {
-      cell.style.background = UNMARKED_BG;
+      // Bakgrunn = firkløver oppå hvit base. 55% size så ikonet er tydelig
+      // synlig men dekker ikke tallet (som rendres oppå via cell.textContent).
+      cell.style.backgroundColor = UNMARKED_BG;
+      cell.style.backgroundImage =
+        "url('/web/games/assets/game1/design/lucky-clover.png')";
+      cell.style.backgroundSize = "55%";
+      cell.style.backgroundPosition = "center";
+      cell.style.backgroundRepeat = "no-repeat";
       cell.style.color = palette.text;
       cell.style.fontWeight = "700";
       cell.style.boxShadow = "inset 0 0 0 2px #ffe83d";
     } else {
       cell.style.background = UNMARKED_BG;
+      cell.style.backgroundImage = "";
       cell.style.color = palette.text;
       cell.style.fontWeight = "600";
       cell.style.boxShadow = "none";

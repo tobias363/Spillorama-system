@@ -607,3 +607,36 @@
 .tv-screen-body.tv-phase-banner-active *::after {
   animation-play-state: paused !important;
 }
+
+/* ── Fase 1 MVP §24 — Screen Saver overlay ──────────────────────────────
+ * Fullscreen overlay som vises over .tv-host når TV-skjermen har vært
+ * inaktiv lenger enn idle-timeout. z-index: 10000 holder seg over alle
+ * normale TV-elementer (.tv-host er z-index: 9999) men under modal-
+ * popups om noen. Klikk på overlay markerer "active" og lukker den.
+ */
+.tv-screen-saver {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.4s ease-in-out;
+  opacity: 1;
+}
+
+.tv-screen-saver-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tv-screen-saver-image {
+  max-width: 100vw;
+  max-height: 100vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+}

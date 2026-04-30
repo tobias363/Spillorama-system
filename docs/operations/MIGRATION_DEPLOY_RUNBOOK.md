@@ -151,6 +151,13 @@ Hver migration skal være **trygg å kjøre på prod uten manuell intervensjon**
 - [ ] Testet på staging — kjør deploy mot staging, verifiser at migrate går grønt og at app starter.
 - [ ] Filnavn følger konvensjon: `<timestamp>_<beskrivelse>.sql` eller `<timestamp>_<beskrivelse>.js`.
 - [ ] Dokumenter eventuelle deploy-vinduskrav (f.eks. "kjør utenom åpningstid for haller") i PR-beskrivelsen.
+- [ ] **Migration-rekkefølge sanity-check (BIN-778):** Hvis migrasjonen ALTER-er en tabell, verifiser at tabell-CREATE har et timestamp som er TIDLIGERE enn ALTER. `node-pg-migrate` kjører lexicographisk, så filnavn-rekkefølge = run-rekkefølge på frisk DB. Sjekk:
+  ```bash
+  # Finn migrasjon som opprettet tabellen
+  grep -l "CREATE TABLE.*app_<navn>" apps/backend/migrations/*.sql
+  # Sammenlign timestamp med din egen migrasjon
+  ```
+  Hvis CREATE har senere timestamp: rename din migrasjon til timestamp ETTER CREATE, eller flytt ALTER til egen migrasjon.
 
 ### Anti-mønstre å unngå
 
@@ -158,6 +165,7 @@ Hver migration skal være **trygg å kjøre på prod uten manuell intervensjon**
 - ❌ `DELETE FROM app_xyz WHERE ...` i en migration uten dokumentert datafix-grunn.
 - ❌ Migration som forutsetter at prod-DB er i en spesifikk seed-tilstand uten å sjekke.
 - ❌ Migration som modifiserer schema **og** seeder data i samme transaksjon — split.
+- ❌ **(BIN-778)** Migration som ALTER-er en tabell som opprettes i en SENERE migrasjon (lexicographisk timestamp). Schema-CI-gate kjører på frisk shadow-DB og fanger dette, men det blokkerer PR. Når en eksisterende ALTER feilet på shadow-DB fordi tabellen opprettes senere, er fix-en å splitte ALTER-en ut til en ny migrasjon med timestamp etter CREATE — den nye migrasjonen MÅ være idempotent (`ADD COLUMN IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`) så prod (som allerede har kjørt den opprinnelige ALTER-en) ikke regresseres.
 
 ---
 

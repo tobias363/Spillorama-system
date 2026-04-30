@@ -26,8 +26,31 @@ import {
 import { DomainError } from "../errors/DomainError.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { logger as rootLogger } from "../util/logger.js";
+import type { AuditLogService, AuditActorType } from "../compliance/AuditLogService.js";
 
 const logger = rootLogger.child({ module: "schedule-service" });
+
+/**
+ * HV2-B4 (Tobias 2026-04-30): per-hall prize-floor lookup contract.
+ *
+ * Duck-typed slice av `Spill1PrizeDefaultsService` slik at ScheduleService
+ * kan injiseres med både prod-tjenesten (Postgres-basert) og
+ * `InMemorySpill1PrizeDefaultsService` i tester uten å dra inn pg-Pool i
+ * unit-test-pathen.
+ *
+ * Returverdien speiler `Spill1PrizeDefaults`: 5 faser i kroner. Caller må
+ * tåle at servicen kaster (DB-feil, network-blip) — ScheduleService logger
+ * og throw'er videre, slik at fail-closed-semantikk bevares.
+ */
+export interface Spill1PrizeDefaultsLookup {
+  getDefaults(hallId: string): Promise<{
+    phase1: number;
+    phase2: number;
+    phase3: number;
+    phase4: number;
+    phase5: number;
+  }>;
+}
 
 export type ScheduleStatus = "active" | "inactive";
 export type ScheduleType = "Auto" | "Manual";
@@ -121,6 +144,31 @@ export interface CreateScheduleInput {
   manualEndTime?: string;
   subGames?: ScheduleSubgame[];
   createdBy: string;
+  /**
+   * HV2-B4 (2026-04-30): valgfri hall-kontekst for floor-validering.
+   *
+   * Når satt OG service har `spill1PrizeDefaults` injisert, valideres alle
+   * `subGames[i].spill1Overrides`-felter mot hall-defaults via
+   * `Spill1PrizeDefaultsService.getDefaults(hallId)`. Override-verdier som
+   * er lavere enn hall-default kaster `MIN_PRIZE_BELOW_HALL_DEFAULT` med
+   * strukturert `details` (phase, attemptedNok, hallDefaultNok, ...).
+   *
+   * Når **utelatt**, faller validering tilbake til wildcard-default
+   * (`hall_id='*'`) — dette gir en hall-agnostisk "global floor"-sjekk
+   * som er trygt for templates som gjenbrukes på tvers av haller.
+   *
+   * Spill 2/3 og SpinnGo påvirkes IKKE — `spill1Overrides`-shape er
+   * Spill 1-spesifikk og valideringen kjøres kun når slot-en har overrides.
+   */
+  hallIdForFloorValidation?: string;
+  /**
+   * HV2-B4: actor-id for audit-loggen ved validation-failure. Default:
+   * `createdBy` (samme bruker som oppretter raden). Routes som vet bedre
+   * (f.eks. ADMIN som lager template på vegne av en agent) kan overstyre.
+   */
+  actorIdForAudit?: string;
+  /** HV2-B4: actor-type for audit-loggen. Default: USER. */
+  actorTypeForAudit?: AuditActorType;
 }
 
 export interface UpdateScheduleInput {
@@ -131,6 +179,12 @@ export interface UpdateScheduleInput {
   manualStartTime?: string;
   manualEndTime?: string;
   subGames?: ScheduleSubgame[];
+  /** HV2-B4: se `CreateScheduleInput.hallIdForFloorValidation`. */
+  hallIdForFloorValidation?: string;
+  /** HV2-B4: actor-id for audit-loggen ved validation-failure. */
+  actorIdForAudit?: string;
+  /** HV2-B4: actor-type for audit-loggen. Default: USER. */
+  actorTypeForAudit?: AuditActorType;
 }
 
 export interface ListScheduleFilter {
@@ -158,6 +212,25 @@ export interface ScheduleServiceOptions {
   pool?: Pool;
   connectionString?: string;
   schema?: string;
+  /**
+   * HV2-B4: optional Spill 1 prize-floor lookup. Når satt aktiveres
+   * floor-validering for `subGames[i].spill1Overrides` i create/update.
+   * Servicen er duck-typed — produksjons-wiring sender
+   * `Spill1PrizeDefaultsService`, tester kan sende
+   * `InMemorySpill1PrizeDefaultsService`.
+   *
+   * Når undefined: ScheduleService skipper floor-validering (legacy-
+   * kompatibilitet for tester og pre-HV-2-deploys).
+   */
+  spill1PrizeDefaults?: Spill1PrizeDefaultsLookup;
+  /**
+   * HV2-B4: optional audit-log-skriver. Når satt OG floor-validering
+   * feiler, skrives en `schedule.create_failed.minprize_below_default`
+   * (eller `update_failed`) audit-event FØR DomainError kastes. Audit-
+   * skriving er fail-soft — feil her blokkerer ikke selve validering-
+   * exception.
+   */
+  auditLogService?: AuditLogService;
 }
 
 interface ScheduleRow {
@@ -522,6 +595,17 @@ export class ScheduleService {
   private readonly pool: Pool;
   private readonly schema: string;
   private initPromise: Promise<void> | null = null;
+  /**
+   * HV2-B4: prize-floor lookup. Undefined → floor-validering skipper.
+   *
+   * Mutable så `index.ts` kan injisere etter konstruksjon — i prod-wiring
+   * konstrueres `Spill1PrizeDefaultsService` etter `ScheduleService` (begge
+   * trenger `sharedPool`, men `auditLogService`-trinnet ligger i mellom).
+   * Identical mønster som `SwedbankPayService.setAuditLogger`.
+   */
+  private spill1PrizeDefaults: Spill1PrizeDefaultsLookup | undefined;
+  /** HV2-B4: audit-log for validation-failure events. */
+  private auditLogService: AuditLogService | undefined;
 
   constructor(options: ScheduleServiceOptions) {
     this.schema = assertSchemaName(options.schema ?? "public");
@@ -538,15 +622,63 @@ export class ScheduleService {
         "ScheduleService krever pool eller connectionString."
       );
     }
+    this.spill1PrizeDefaults = options.spill1PrizeDefaults;
+    this.auditLogService = options.auditLogService;
   }
 
-  /** @internal — test-hook. */
+  /**
+   * HV2-B4: post-construction injection av floor-default-lookup. Brukt av
+   * `index.ts` der `Spill1PrizeDefaultsService` konstrueres etter at
+   * `ScheduleService` allerede er instansiert. Pass `null` for å koble fra
+   * (test-cleanup el.l.).
+   */
+  setSpill1PrizeDefaults(lookup: Spill1PrizeDefaultsLookup | null): void {
+    this.spill1PrizeDefaults = lookup ?? undefined;
+  }
+
+  /**
+   * HV2-B4: post-construction injection av audit-log-service. Pass `null`
+   * for å koble fra. Følger samme pattern som
+   * `SwedbankPayService.setAuditLogger`.
+   */
+  setAuditLogService(service: AuditLogService | null): void {
+    this.auditLogService = service ?? undefined;
+  }
+
+  /**
+   * @internal — test-hook.
+   *
+   * Backward-compat: signaturen tar fortsatt kun pool + schema for
+   * eksisterende test-suites. HV2-B4-tester som trenger floor-validering
+   * bruker den utvidede `forTestingWithDeps`-varianten.
+   */
   static forTesting(pool: Pool, schema = "public"): ScheduleService {
+    return ScheduleService.forTestingWithDeps({ pool, schema });
+  }
+
+  /**
+   * @internal — HV2-B4 utvidet test-hook.
+   *
+   * Tillater å injisere `spill1PrizeDefaults` og `auditLogService` i tester
+   * så floor-valideringen kan stubbes uten å snurre opp en faktisk
+   * Postgres-server. Pool og schema er alltid required (samme som
+   * `forTesting`), de andre er optional.
+   */
+  static forTestingWithDeps(opts: {
+    pool: Pool;
+    schema?: string;
+    spill1PrizeDefaults?: Spill1PrizeDefaultsLookup;
+    auditLogService?: AuditLogService;
+  }): ScheduleService {
     const svc = Object.create(ScheduleService.prototype) as ScheduleService;
-    (svc as unknown as { pool: Pool }).pool = pool;
-    (svc as unknown as { schema: string }).schema = assertSchemaName(schema);
+    (svc as unknown as { pool: Pool }).pool = opts.pool;
+    (svc as unknown as { schema: string }).schema = assertSchemaName(opts.schema ?? "public");
     (svc as unknown as { initPromise: Promise<void> | null }).initPromise =
       Promise.resolve();
+    (svc as unknown as { spill1PrizeDefaults: Spill1PrizeDefaultsLookup | undefined })
+      .spill1PrizeDefaults = opts.spill1PrizeDefaults;
+    (svc as unknown as { auditLogService: AuditLogService | undefined }).auditLogService =
+      opts.auditLogService;
     return svc;
   }
 
@@ -663,6 +795,17 @@ export class ScheduleService {
       throw new DomainError("INVALID_INPUT", "createdBy er påkrevd.");
     }
 
+    // HV2-B4: håndhev `subVariant.minPrize ≥ hall-default` før insert.
+    // Skipper hvis service ikke er konfigurert med prizeDefaults-lookup.
+    await this.validateSpill1OverridesAgainstHallFloors(subGames, {
+      operation: "create",
+      hallIdForFloorValidation: input.hallIdForFloorValidation,
+      actorId: input.actorIdForAudit ?? input.createdBy,
+      actorType: input.actorTypeForAudit ?? "USER",
+      scheduleResourceId: null,
+      scheduleName,
+    });
+
     const id = randomUUID();
     try {
       const { rows } = await this.pool.query<ScheduleRow>(
@@ -748,8 +891,21 @@ export class ScheduleService {
       params.push(assertHhMm(update.manualEndTime, "manualEndTime"));
     }
     if (update.subGames !== undefined) {
+      const validated = assertSubgames(update.subGames);
+      // HV2-B4: håndhev `subVariant.minPrize ≥ hall-default` før UPDATE.
+      // Kjører kun når subGames endres — andre felt-oppdateringer (navn,
+      // status, tidspunkter) påvirker ikke override-feltene og trenger
+      // ingen re-validering.
+      await this.validateSpill1OverridesAgainstHallFloors(validated, {
+        operation: "update",
+        hallIdForFloorValidation: update.hallIdForFloorValidation,
+        actorId: update.actorIdForAudit ?? existing.createdBy ?? null,
+        actorType: update.actorTypeForAudit ?? "USER",
+        scheduleResourceId: existing.id,
+        scheduleName: existing.scheduleName,
+      });
       sets.push(`sub_games_json = $${params.length + 1}::jsonb`);
-      params.push(JSON.stringify(assertSubgames(update.subGames)));
+      params.push(JSON.stringify(validated));
     }
 
     if (sets.length === 0) {
@@ -815,6 +971,195 @@ export class ScheduleService {
       [existing.id]
     );
     return { softDeleted: true };
+  }
+
+  /**
+   * HV2-B4 (Tobias 2026-04-30): valider `subGames[i].spill1Overrides` mot
+   * hall-default-floors. Implementerer kontrakten i
+   * `docs/architecture/HV2_BIR036_SPEC_2026-04-30.md` §2: "Per-spill-
+   * override kan ØKE floor men aldri senke under hall-default."
+   *
+   * **Skip-rules:**
+   *   * Service ikke wired med `spill1PrizeDefaults` → no-op (legacy/test).
+   *   * `subGames` har ingen `spill1Overrides`-felter → no-op (per-slot).
+   *   * Bare felter som mapper til 5-fase-modellen valideres:
+   *     - `spill1Overrides.tvExtra.fullHouseYellow` → phase 5 (Fullt Hus).
+   *     - `spill1Overrides.spillerness2.minimumPrize` → phase 1 (Rad 1).
+   *     - Picture/Frame (TV Extra) og Oddsen 56-felter ER konseptuelt
+   *       utenfor 5-fase-modellen (concurrent custom-patterns / mini-game).
+   *       De arver IKKE hall-floors. Matcher `applySpill1HallFloors` som
+   *       ekskluderer dem fra floor-overlay i runtime.
+   *
+   * **Hall-lookup:**
+   *   * `hallIdForFloorValidation` satt → hent defaults for den hallen.
+   *   * Utelatt → fall tilbake til wildcard-defaults (`hall_id='*'`) som
+   *     representerer den globale hall-default-baselinen alle haller arver.
+   *     Dette gir hall-agnostisk validering for templates som gjenbrukes.
+   *
+   * **Audit-log:**
+   *   Ved validation-failure skrives en
+   *   `schedule.create_failed.minprize_below_default` (eller `update_*`)
+   *   audit-event MED `actorId`, `hallId`, `subgameIndex`, `field`,
+   *   `phase`, `attemptedNok`, `hallDefaultNok`. Audit-skriving er
+   *   fail-soft — feil i `record(...)` blokkerer ikke selve DomainError.
+   *
+   * **Throws:** `MIN_PRIZE_BELOW_HALL_DEFAULT` med tilsvarende `details`.
+   */
+  private async validateSpill1OverridesAgainstHallFloors(
+    subGames: ScheduleSubgame[],
+    ctx: {
+      operation: "create" | "update";
+      hallIdForFloorValidation: string | undefined;
+      actorId: string | null;
+      actorType: AuditActorType;
+      scheduleResourceId: string | null;
+      scheduleName: string;
+    },
+  ): Promise<void> {
+    if (!this.spill1PrizeDefaults) return;
+
+    // Tidlig-exit hvis ingen sub-games har overrides — sparer DB-round-trip.
+    const hasAnyOverrides = subGames.some(
+      (sg) => sg.spill1Overrides !== undefined && sg.spill1Overrides !== null,
+    );
+    if (!hasAnyOverrides) return;
+
+    // Wildcard som default når caller ikke spesifiserer hall — representerer
+    // den globale baseline-floor som alle haller arver fra.
+    // `Spill1PrizeDefaultsService.SPILL1_DEFAULTS_WILDCARD_HALL` = "*".
+    const lookupHallId =
+      ctx.hallIdForFloorValidation && ctx.hallIdForFloorValidation.trim()
+        ? ctx.hallIdForFloorValidation.trim()
+        : "*";
+
+    let defaults: {
+      phase1: number;
+      phase2: number;
+      phase3: number;
+      phase4: number;
+      phase5: number;
+    };
+    try {
+      defaults = await this.spill1PrizeDefaults.getDefaults(lookupHallId);
+    } catch (err) {
+      // DB-/network-feil: fail-closed med klar melding så caller vet at
+      // valideringen ikke kunne fullføres. Dette matcher fail-closed-
+      // semantikk på compliance-pathen i resten av systemet.
+      logger.error(
+        { err, hallId: lookupHallId, operation: ctx.operation },
+        "[HV2-B4] floor-defaults lookup failed — kan ikke validere spill1Overrides",
+      );
+      throw new DomainError(
+        "SPILL1_PRIZE_DEFAULTS_UNAVAILABLE",
+        "Kunne ikke hente hall-default-grenser for floor-validering. Prøv igjen.",
+        { hallId: lookupHallId },
+      );
+    }
+
+    // Sjekk hver sub-game-slot. Stop ved første feil (én feilmelding er
+    // nok for admin-UX — admin retter feltet og prøver igjen).
+    for (let i = 0; i < subGames.length; i++) {
+      const slot = subGames[i];
+      if (!slot?.spill1Overrides) continue;
+      const overrides = slot.spill1Overrides;
+
+      // 1. Tv Extra Full House → phase 5 (Fullt Hus).
+      const tvFullHouse = overrides.tvExtra?.fullHouseYellow;
+      if (typeof tvFullHouse === "number" && tvFullHouse < defaults.phase5) {
+        await this.failFloorValidation(ctx, {
+          subgameIndex: i,
+          field: "spill1Overrides.tvExtra.fullHouseYellow",
+          phase: 5,
+          phaseLabel: "Fullt Hus",
+          attemptedNok: tvFullHouse,
+          hallDefaultNok: defaults.phase5,
+          lookupHallId,
+        });
+      }
+
+      // 2. Spillerness Spill 2 minimumPrize → phase 1 (Rad 1).
+      const sp2Min = overrides.spillerness2?.minimumPrize;
+      if (typeof sp2Min === "number" && sp2Min < defaults.phase1) {
+        await this.failFloorValidation(ctx, {
+          subgameIndex: i,
+          field: "spill1Overrides.spillerness2.minimumPrize",
+          phase: 1,
+          phaseLabel: "Rad 1",
+          attemptedNok: sp2Min,
+          hallDefaultNok: defaults.phase1,
+          lookupHallId,
+        });
+      }
+    }
+  }
+
+  /**
+   * HV2-B4 helper: skriv audit-event + kast DomainError ved floor-violation.
+   * Audit-skriving er fail-soft — feil her blokkerer ikke selve exception.
+   */
+  private async failFloorValidation(
+    ctx: {
+      operation: "create" | "update";
+      actorId: string | null;
+      actorType: AuditActorType;
+      scheduleResourceId: string | null;
+      scheduleName: string;
+    },
+    failure: {
+      subgameIndex: number;
+      field: string;
+      phase: 1 | 2 | 3 | 4 | 5;
+      phaseLabel: string;
+      attemptedNok: number;
+      hallDefaultNok: number;
+      lookupHallId: string;
+    },
+  ): Promise<never> {
+    const action =
+      ctx.operation === "create"
+        ? "schedule.create_failed.minprize_below_default"
+        : "schedule.update_failed.minprize_below_default";
+    if (this.auditLogService) {
+      try {
+        await this.auditLogService.record({
+          actorId: ctx.actorId,
+          actorType: ctx.actorType,
+          action,
+          resource: "schedule",
+          resourceId: ctx.scheduleResourceId,
+          details: {
+            scheduleName: ctx.scheduleName,
+            hallId: failure.lookupHallId,
+            subgameIndex: failure.subgameIndex,
+            field: failure.field,
+            phase: failure.phase,
+            phaseLabel: failure.phaseLabel,
+            attemptedNok: failure.attemptedNok,
+            hallDefaultNok: failure.hallDefaultNok,
+          },
+        });
+      } catch (err) {
+        logger.warn(
+          { err, action },
+          "[HV2-B4] audit-log skriving feilet — fortsetter med DomainError",
+        );
+      }
+    }
+    throw new DomainError(
+      "MIN_PRIZE_BELOW_HALL_DEFAULT",
+      `Phase ${failure.phase} (${failure.phaseLabel}): forsøkt minPrize ${failure.attemptedNok} kr ` +
+        `er under hall-default ${failure.hallDefaultNok} kr. Per-spill-override kan ikke ` +
+        `senke under hall-default. Endre hall-default først hvis du vil ha lavere floor.`,
+      {
+        hallId: failure.lookupHallId,
+        subgameIndex: failure.subgameIndex,
+        field: failure.field,
+        phase: failure.phase,
+        phaseLabel: failure.phaseLabel,
+        attemptedNok: failure.attemptedNok,
+        hallDefaultNok: failure.hallDefaultNok,
+      },
+    );
   }
 
   private map(row: ScheduleRow): Schedule {

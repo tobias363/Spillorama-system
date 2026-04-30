@@ -792,3 +792,425 @@ test("audit: map() filtrerer korrupt spill1Overrides defensivt (drop, ikke kast)
   assert.equal(row.subGames[0]!.spill1Overrides, undefined);
   assert.equal(row.subGames[0]!.name, "Tv Extra");
 });
+
+// ── HV2-B4: floor-validering mot hall-defaults ─────────────────────────────
+
+import type { Spill1PrizeDefaultsLookup } from "./ScheduleService.js";
+import {
+  AuditLogService,
+  type AuditLogInput,
+  type PersistedAuditEvent,
+  type AuditLogStore,
+} from "../compliance/AuditLogService.js";
+
+/**
+ * In-memory `Spill1PrizeDefaultsLookup` for tester. Caller seeder verdier
+ * per hall + en optional wildcard-fallback. `getDefaults("*")` brukes når
+ * caller utelater hallId — speiler prod-tjenestens wildcard-mekanikk.
+ */
+function makeFloorLookup(opts: {
+  wildcard?: { phase1: number; phase2: number; phase3: number; phase4: number; phase5: number };
+  byHall?: Record<string, { phase1: number; phase2: number; phase3: number; phase4: number; phase5: number }>;
+  throwOnce?: boolean;
+}): Spill1PrizeDefaultsLookup & { calls: string[] } {
+  const calls: string[] = [];
+  let hasThrown = false;
+  return {
+    calls,
+    async getDefaults(hallId: string) {
+      calls.push(hallId);
+      if (opts.throwOnce && !hasThrown) {
+        hasThrown = true;
+        throw new Error("DB connection lost (test)");
+      }
+      if (opts.byHall && opts.byHall[hallId]) return opts.byHall[hallId]!;
+      return (
+        opts.wildcard ?? { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 }
+      );
+    },
+  };
+}
+
+/** Stub-store så vi kan inspisere audit-events skrevet av valideringen. */
+function makeAuditCapture(): { service: AuditLogService; events: AuditLogInput[] } {
+  const events: AuditLogInput[] = [];
+  const store: AuditLogStore = {
+    async append(input) {
+      events.push(input);
+    },
+    async list(): Promise<PersistedAuditEvent[]> {
+      return [];
+    },
+    async listLoginHistory(): Promise<PersistedAuditEvent[]> {
+      return [];
+    },
+  };
+  return { service: new AuditLogService(store), events };
+}
+
+function makeServiceWithDeps(opts: {
+  pool: StubPool;
+  spill1PrizeDefaults?: Spill1PrizeDefaultsLookup;
+  auditLogService?: AuditLogService;
+}): import("./ScheduleService.js").ScheduleService {
+  return ScheduleService.forTestingWithDeps({
+    pool: opts.pool as unknown as Parameters<typeof ScheduleService.forTestingWithDeps>[0]["pool"],
+    spill1PrizeDefaults: opts.spill1PrizeDefaults,
+    auditLogService: opts.auditLogService,
+  });
+}
+
+test("HV2-B4: floor-validering skipper når spill1PrizeDefaults ikke er injisert (legacy)", async () => {
+  // Eksisterende tester bruker `makeService` (uten lookup) — bekreft at
+  // de fortsatt går igjennom selv med "for lave" overrides.
+  const captured: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool: StubPool = {
+    query: async (sql, params) => {
+      captured.push({ sql, params });
+      if (/INSERT/.test(sql)) {
+        return { rows: [mockRow()] };
+      }
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeService(pool);
+  // Sett en eksplisitt lav minPrize som ville feilet med floor-validering aktiv.
+  await svc.create({
+    scheduleName: "Pre-HV2 backward-compat",
+    createdBy: "u1",
+    subGames: [
+      {
+        name: "Spillerness 2",
+        spill1Overrides: { spillerness2: { minimumPrize: 1 } }, // 1 kr — under default 100
+      },
+    ],
+  });
+  // Skal gå igjennom uten kast.
+  assert.ok(captured.find((c) => /INSERT/.test(c.sql)));
+});
+
+test("HV2-B4: create() passerer når override er likt med hall-default", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const captured: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool: StubPool = {
+    query: async (sql, params) => {
+      captured.push({ sql, params });
+      if (/INSERT/.test(sql)) return { rows: [mockRow()] };
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup });
+  await svc.create({
+    scheduleName: "Equal floor",
+    createdBy: "u1",
+    subGames: [
+      {
+        name: "Spillerness 2",
+        spill1Overrides: { spillerness2: { minimumPrize: 100 } }, // == default
+      },
+      {
+        name: "Tv Extra",
+        spill1Overrides: { tvExtra: { fullHouseYellow: 1000 } }, // == default
+      },
+    ],
+  });
+  assert.ok(captured.find((c) => /INSERT/.test(c.sql)));
+  // Lookup ble kalt én gang (cached for hele subGames-arrayen).
+  assert.equal(lookup.calls.length, 1);
+  assert.equal(lookup.calls[0], "*"); // wildcard fordi hallIdForFloorValidation utelatt
+});
+
+test("HV2-B4: create() passerer når override er HØYERE enn hall-default", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const pool: StubPool = {
+    query: async (sql) => {
+      if (/INSERT/.test(sql)) return { rows: [mockRow()] };
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup });
+  // Override som ØKER floor (preset kan øke, ikke senke).
+  await svc.create({
+    scheduleName: "Higher floor",
+    createdBy: "u1",
+    subGames: [
+      {
+        name: "Tv Extra",
+        spill1Overrides: { tvExtra: { fullHouseYellow: 5000 } }, // > 1000 default
+      },
+    ],
+  });
+});
+
+test("HV2-B4: create() avviser tvExtra.fullHouseYellow under hall-default phase5", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const audit = makeAuditCapture();
+  const svc = makeServiceWithDeps({
+    pool: throwingPool(), // INSERT må aldri kjøres — validering må stoppe først
+    spill1PrizeDefaults: lookup,
+    auditLogService: audit.service,
+  });
+  let caught: unknown = null;
+  try {
+    await svc.create({
+      scheduleName: "Below floor",
+      createdBy: "u1",
+      subGames: [
+        {
+          name: "Tv Extra",
+          spill1Overrides: { tvExtra: { fullHouseYellow: 500 } }, // < 1000
+        },
+      ],
+    });
+    assert.fail("forventet MIN_PRIZE_BELOW_HALL_DEFAULT");
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof DomainError);
+  assert.equal((caught as DomainError).code, "MIN_PRIZE_BELOW_HALL_DEFAULT");
+  const details = (caught as DomainError).details!;
+  assert.equal(details.phase, 5);
+  assert.equal(details.attemptedNok, 500);
+  assert.equal(details.hallDefaultNok, 1000);
+  assert.equal(details.field, "spill1Overrides.tvExtra.fullHouseYellow");
+  assert.equal(details.subgameIndex, 0);
+  assert.equal(details.hallId, "*");
+  // Audit-event ble skrevet.
+  assert.equal(audit.events.length, 1);
+  assert.equal(audit.events[0]!.action, "schedule.create_failed.minprize_below_default");
+  assert.equal(audit.events[0]!.actorId, "u1"); // default = createdBy
+});
+
+test("HV2-B4: create() avviser spillerness2.minimumPrize under hall-default phase1", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const svc = makeServiceWithDeps({
+    pool: throwingPool(),
+    spill1PrizeDefaults: lookup,
+  });
+  let caught: unknown = null;
+  try {
+    await svc.create({
+      scheduleName: "SP2 below",
+      createdBy: "u1",
+      subGames: [
+        {
+          name: "Spillerness 2",
+          spill1Overrides: { spillerness2: { minimumPrize: 50 } }, // < 100
+        },
+      ],
+    });
+    assert.fail("forventet MIN_PRIZE_BELOW_HALL_DEFAULT");
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof DomainError);
+  assert.equal((caught as DomainError).code, "MIN_PRIZE_BELOW_HALL_DEFAULT");
+  const details = (caught as DomainError).details!;
+  assert.equal(details.phase, 1);
+  assert.equal(details.attemptedNok, 50);
+  assert.equal(details.hallDefaultNok, 100);
+  assert.equal(details.field, "spill1Overrides.spillerness2.minimumPrize");
+});
+
+test("HV2-B4: tvExtra Picture/Frame ignoreres (utenfor 5-fase-modellen)", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const captured: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool: StubPool = {
+    query: async (sql, params) => {
+      captured.push({ sql, params });
+      if (/INSERT/.test(sql)) return { rows: [mockRow()] };
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup });
+  // Picture/Frame er custom patterns utenfor 5-fase. De skal IKKE valideres
+  // mot phase-floor — kun fullHouseYellow for TV Extra mappes til phase 5.
+  await svc.create({
+    scheduleName: "TV Extra picture lavt OK",
+    createdBy: "u1",
+    subGames: [
+      {
+        name: "Tv Extra",
+        spill1Overrides: {
+          tvExtra: {
+            pictureYellow: 1, // veldig lavt — men ikke phase-mappet
+            frameYellow: 1,   // samme
+            fullHouseYellow: 1500, // > 1000 default — passerer
+          },
+        },
+      },
+    ],
+  });
+  assert.ok(captured.find((c) => /INSERT/.test(c.sql)));
+});
+
+test("HV2-B4: oddsen56-felter ignoreres (mini-game, utenfor 5-fase)", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const pool: StubPool = {
+    query: async (sql) => {
+      if (/INSERT/.test(sql)) return { rows: [mockRow()] };
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup });
+  // Oddsen 56 er separat mini-game som leses av MiniGameOddsenEngine.
+  // Den arver ikke 5-fase-floor.
+  await svc.create({
+    scheduleName: "Oddsen lavt OK",
+    createdBy: "u1",
+    subGames: [
+      {
+        name: "Oddsen 56",
+        spill1Overrides: {
+          oddsen56: {
+            fullHouseWithin56Yellow: 10, // veldig lavt
+            fullHouseWithin56White: 5,
+          },
+        },
+      },
+    ],
+  });
+});
+
+test("HV2-B4: create() bruker hall-spesifikke defaults når hallIdForFloorValidation er satt", async () => {
+  const lookup = makeFloorLookup({
+    wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 },
+    byHall: {
+      "hall-luxus": { phase1: 200, phase2: 300, phase3: 400, phase4: 500, phase5: 5000 },
+    },
+  });
+  const svc = makeServiceWithDeps({
+    pool: throwingPool(),
+    spill1PrizeDefaults: lookup,
+  });
+  // 2000 < hall-luxus.phase5 (5000) men ≥ wildcard.phase5 (1000).
+  // Med hall-luxus-kontekst: må feile.
+  let caught: unknown = null;
+  try {
+    await svc.create({
+      scheduleName: "Hall-luxus override",
+      createdBy: "u1",
+      hallIdForFloorValidation: "hall-luxus",
+      subGames: [
+        {
+          name: "Tv Extra",
+          spill1Overrides: { tvExtra: { fullHouseYellow: 2000 } },
+        },
+      ],
+    });
+    assert.fail("forventet MIN_PRIZE_BELOW_HALL_DEFAULT for hall-luxus");
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof DomainError);
+  assert.equal((caught as DomainError).code, "MIN_PRIZE_BELOW_HALL_DEFAULT");
+  assert.equal((caught as DomainError).details!.hallId, "hall-luxus");
+  assert.equal((caught as DomainError).details!.hallDefaultNok, 5000);
+  // Lookup-en ble kalt med hall-luxus, ikke wildcard.
+  assert.equal(lookup.calls[0], "hall-luxus");
+});
+
+test("HV2-B4: skipper validation når subGames ikke har overrides (sparer DB-roundtrip)", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const captured: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool: StubPool = {
+    query: async (sql, params) => {
+      captured.push({ sql, params });
+      if (/INSERT/.test(sql)) return { rows: [mockRow()] };
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup });
+  // Subgame uten spill1Overrides — ingen validering trengs.
+  await svc.create({
+    scheduleName: "No overrides",
+    createdBy: "u1",
+    subGames: [{ name: "Wheel of Fortune", startTime: "10:00", endTime: "10:30" }],
+  });
+  assert.equal(lookup.calls.length, 0, "lookup skal IKKE kalles uten overrides");
+});
+
+test("HV2-B4: update() avviser når subGames-overrides er under floor", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const audit = makeAuditCapture();
+  const pool: StubPool = {
+    query: async (sql) => {
+      if (/SELECT/.test(sql)) return { rows: [mockRow()] };
+      throw new Error("UPDATE skulle aldri vært kjørt — validering stopper først");
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup, auditLogService: audit.service });
+  let caught: unknown = null;
+  try {
+    await svc.update("sch-1", {
+      subGames: [
+        {
+          name: "Spillerness 2",
+          spill1Overrides: { spillerness2: { minimumPrize: 25 } }, // < 100
+        },
+      ],
+      actorIdForAudit: "admin-7",
+    });
+    assert.fail("forventet MIN_PRIZE_BELOW_HALL_DEFAULT");
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof DomainError);
+  assert.equal((caught as DomainError).code, "MIN_PRIZE_BELOW_HALL_DEFAULT");
+  // Audit-action peker på update_failed.
+  assert.equal(audit.events.length, 1);
+  assert.equal(audit.events[0]!.action, "schedule.update_failed.minprize_below_default");
+  assert.equal(audit.events[0]!.actorId, "admin-7");
+  assert.equal(audit.events[0]!.resourceId, "sch-1");
+});
+
+test("HV2-B4: update() uten subGames-endring skipper floor-validering", async () => {
+  const lookup = makeFloorLookup({ wildcard: { phase1: 100, phase2: 200, phase3: 200, phase4: 200, phase5: 1000 } });
+  const captured: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool: StubPool = {
+    query: async (sql, params) => {
+      captured.push({ sql, params });
+      if (/SELECT/.test(sql)) return { rows: [mockRow()] };
+      if (/UPDATE/.test(sql)) return { rows: [mockRow({ schedule_name: "Renamed" })] };
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeServiceWithDeps({ pool, spill1PrizeDefaults: lookup });
+  // Bare scheduleName endres, ingen subGames i update — validering skal hoppes.
+  await svc.update("sch-1", { scheduleName: "Renamed" });
+  assert.equal(lookup.calls.length, 0, "lookup skal IKKE kalles uten subGames-endring");
+});
+
+test("HV2-B4: defaults-lookup feil → SPILL1_PRIZE_DEFAULTS_UNAVAILABLE (fail-closed)", async () => {
+  const lookup = makeFloorLookup({ throwOnce: true });
+  const svc = makeServiceWithDeps({
+    pool: throwingPool(),
+    spill1PrizeDefaults: lookup,
+  });
+  let caught: unknown = null;
+  try {
+    await svc.create({
+      scheduleName: "DB nede",
+      createdBy: "u1",
+      subGames: [
+        {
+          name: "Tv Extra",
+          spill1Overrides: { tvExtra: { fullHouseYellow: 5000 } },
+        },
+      ],
+    });
+    assert.fail("forventet SPILL1_PRIZE_DEFAULTS_UNAVAILABLE");
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof DomainError);
+  assert.equal((caught as DomainError).code, "SPILL1_PRIZE_DEFAULTS_UNAVAILABLE");
+});

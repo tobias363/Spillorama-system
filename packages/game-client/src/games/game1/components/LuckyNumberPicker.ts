@@ -1,22 +1,32 @@
 /**
  * Lucky number picker popup — matches Unity's SelectLuckyNumberPanel.
  *
- * Shows a 60-number grid (1-60) organized by Databingo60 column colors.
- * Player taps a number to select it as their lucky number.
- * Selected number is sent to backend via lucky:set socket event.
+ * Tobias 2026-04-30:
+ *   - Utvidet fra 60 til 75 baller (5 col × 15 rader = Bingo75-kolonner B-I-N-G-O)
+ *     for å matche hovedspillet (Spill 1 trekker fra 1-75, ikke 1-60).
+ *     Tidligere brukte denne Databingo60-mapping (5 col × 12 rader) som var
+ *     feil for Spill 1 — spillere kunne ikke velge lucky number > 60.
+ *   - PNG-baller via `getBallAssetPath` (samme som BallTube/CalledNumbersOverlay)
+ *     for visuell paritet med selve spillet.
  *
  * - SelectLuckyNumberPanel.cs — panel with number buttons
  * - Game1GamePlayPanel.Interactions.cs — OnLuckyNumberSelection()
  * - SpilloramaSocketManager.SetLuckyNumber()
  */
 
-/** Databingo60 column color for a given number (5 cols of 12). */
+import { getBallAssetPath } from "./BallTube.js";
+
+/**
+ * Bingo75 column color for a given number (5 cols of 15, B-I-N-G-O).
+ * Beholdes som CSS-fallback bak PNG-en — samme partisjon som BallTube +
+ * CalledNumbersOverlay for å unngå tomme sirkler ved PNG-load-failure.
+ */
 function getColumnStyle(n: number): string {
-  if (n <= 12) return "background:linear-gradient(135deg,#4a90d9,#1a5ba8);"; // col 1 - blue
-  if (n <= 24) return "background:linear-gradient(135deg,#e05050,#a01818);"; // col 2 - red
-  if (n <= 36) return "background:linear-gradient(135deg,#7c50c8,#4a1a90);"; // col 3 - purple
-  if (n <= 48) return "background:linear-gradient(135deg,#4caf50,#1b5e20);"; // col 4 - green
-  return "background:linear-gradient(135deg,#f0a020,#c07000);";              // col 5 - orange/yellow
+  if (n <= 15) return "background:linear-gradient(135deg,#4a90d9,#1a5ba8);"; // B (1-15) - blue
+  if (n <= 30) return "background:linear-gradient(135deg,#e05050,#a01818);"; // I (16-30) - red
+  if (n <= 45) return "background:linear-gradient(135deg,#7c50c8,#4a1a90);"; // N (31-45) - purple
+  if (n <= 60) return "background:linear-gradient(135deg,#4caf50,#1b5e20);"; // G (46-60) - green
+  return "background:linear-gradient(135deg,#f0a020,#c07000);";              // O (61-75) - yellow
 }
 
 export class LuckyNumberPicker {
@@ -97,18 +107,19 @@ export class LuckyNumberPicker {
     }
     panel.appendChild(colHeaders);
 
-    // Number grid — 5 columns × 12 rows (Databingo60: 1-12, 13-24, 25-36, 37-48, 49-60)
+    // Number grid — 5 columns × 15 rows (Bingo75: B 1-15, I 16-30, N 31-45,
+    // G 46-60, O 61-75). Tobias 2026-04-30: tidligere 12 rader (Databingo60)
+    // — utvidet til 15 så hele Spill 1-bag-en er valgbar.
     const grid = document.createElement("div");
     grid.style.cssText = "display:grid;grid-template-columns:repeat(5,1fr);gap:4px;";
 
-    // Layout: column-first to match Databingo60 columns of 12
-    for (let row = 0; row < 12; row++) {
+    // Layout: column-first to match Bingo75 columns of 15
+    for (let row = 0; row < 15; row++) {
       for (let col = 0; col < 5; col++) {
-        const num = col * 12 + row + 1;
+        const num = col * 15 + row + 1;
         const btn = document.createElement("button");
         btn.type = "button";
         btn.setAttribute("aria-label", `Velg tall ${num}`);
-        btn.textContent = String(num);
         btn.dataset.num = String(num);
         Object.assign(btn.style, {
           width: "100%",
@@ -120,10 +131,32 @@ export class LuckyNumberPicker {
           fontWeight: "700",
           cursor: "pointer",
           fontFamily: "inherit",
-          textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+          textShadow: "0 1px 2px rgba(0,0,0,0.6)",
           transition: "transform 0.15s, border-color 0.15s",
+          position: "relative",
+          padding: "0",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         });
+        // CSS-gradient som under-lag for PNG-fallback (samme palette som BallTube).
         btn.style.cssText += getColumnStyle(num);
+
+        // PNG-ball som hovedrendering (visuell paritet med BallTube).
+        const img = document.createElement("img");
+        img.src = getBallAssetPath(num);
+        img.alt = "";
+        img.draggable = false;
+        img.style.cssText =
+          "position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover;pointer-events:none;user-select:none;";
+        btn.appendChild(img);
+
+        // Tall-tekst som span over PNG-en.
+        const numberEl = document.createElement("span");
+        numberEl.textContent = String(num);
+        numberEl.style.cssText = "position:relative;z-index:1;pointer-events:none;";
+        btn.appendChild(numberEl);
 
         btn.addEventListener("click", () => this.selectNumber(num));
         btn.addEventListener("mouseenter", () => { btn.style.transform = "scale(1.12)"; });

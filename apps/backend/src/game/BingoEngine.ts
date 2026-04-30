@@ -3155,6 +3155,14 @@ export class BingoEngine {
       );
     }
 
+    // K2-A CRIT-1 (utvidelse 2026-04-30): `awardExtraPrize` er admin-only
+    // manuell ekstra-premie og tar ikke imot game-slug. Følgelig kan vi
+    // ikke automatisk klassifisere som MAIN_GAME / DATABINGO. Beholdes
+    // som DATABINGO inntil API-en utvides med spill-kontext (follow-up).
+    // Konsekvens: ad-hoc ekstrapremier akkumulerer på `house-{hallId}-
+    // databingo-internet`-kontoen og rapporteres som DATABINGO i §11-
+    // distribusjon (30%) — overforpliktelse versus 15% er konservativt
+    // og dermed lavrisiko regulatorisk inntil follow-up lander.
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
     const sourceAccountId = this.ledger.makeHouseAccountId(hallId, gameType, channel);

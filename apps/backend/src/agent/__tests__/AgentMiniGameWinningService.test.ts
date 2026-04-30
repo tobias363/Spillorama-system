@@ -677,7 +677,10 @@ test("REQ-146: ComplianceLedger registrerer PRIZE-entry med vinnerens hall", asy
   const event = ledger.events[0]!;
   assert.equal(event.hallId, "hall-vinner");
   assert.equal(event.eventType, "PRIZE");
-  assert.equal(event.gameType, "DATABINGO");
+  // K2-A CRIT-1 (utvidelse 2026-04-30): Spill 1 mini-game vinning skrives
+  // som MAIN_GAME (15%), ikke DATABINGO (30%). AgentMiniGameWinningService
+  // er Spill-1-spesifikk per docstring; slug er hardkodet "bingo".
+  assert.equal(event.gameType, "MAIN_GAME");
   assert.equal(event.channel, "HALL");
   assert.equal(event.amount, 500, "50000 cents = 500 kr");
   assert.equal(event.playerId, "p-1");

@@ -89,7 +89,11 @@ export class TvApiError extends Error {
 }
 
 /** Bygger URL for public TV-endpoint. Base er alltid samme origin som SPA. */
-function tvUrl(hallId: string, tvToken: string, suffix: "state" | "winners"): string {
+function tvUrl(
+  hallId: string,
+  tvToken: string,
+  suffix: "state" | "winners" | "screen-saver"
+): string {
   const hid = encodeURIComponent(hallId);
   const tok = encodeURIComponent(tvToken);
   return `/api/tv/${hid}/${tok}/${suffix}`;
@@ -158,4 +162,32 @@ export async function fetchTvVoice(hallId: string): Promise<TvVoice> {
   if (voice === "voice1" || voice === "voice2" || voice === "voice3") return voice;
   // Fail-safe fallback — TV skal alltid kunne spille noe.
   return "voice1";
+}
+
+// ── Screen Saver (Fase 1 MVP §24) ──────────────────────────────────────────
+//
+// TV-klienten poller dette endepunktet ved mount + periodisk for å vite om
+// skjermsparer er aktivert + bilde-carousel for hallen. Fail-soft: ved feil
+// returner enabled=false slik at hovedvisning fortsetter uavbrutt.
+
+export interface TvScreenSaverImage {
+  id: string;
+  imageUrl: string;
+  displaySeconds: number;
+  displayOrder: number;
+  isGlobal: boolean;
+}
+
+export interface TvScreenSaverConfig {
+  enabled: boolean;
+  timeoutMinutes: number;
+  images: TvScreenSaverImage[];
+}
+
+export async function fetchTvScreenSaver(
+  hallId: string,
+  tvToken: string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<TvScreenSaverConfig> {
+  return fetchTv<TvScreenSaverConfig>(tvUrl(hallId, tvToken, "screen-saver"), opts);
 }

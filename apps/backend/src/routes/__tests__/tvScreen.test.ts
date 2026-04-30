@@ -284,3 +284,207 @@ test("GET /api/tv/:hallId/voice returns 404 for unknown hall", async () => {
     await ctx.close();
   }
 });
+
+// ── Fase 1 MVP §24: Screen Saver public endpoint ──────────────────────────
+
+interface ScreenSaverImageStubInput {
+  id: string;
+  hallId: string | null;
+  imageUrl: string;
+  displaySeconds: number;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+function makeScreenSaverStub(images: ScreenSaverImageStubInput[]): {
+  getCarouselForHall: (hallId: string) => Promise<unknown[]>;
+} {
+  return {
+    async getCarouselForHall(hallId: string) {
+      // Globale + per-hall, kun aktive (ikke deletedAt — stub-en simulerer
+      // det faktiske DB-filteret).
+      return images
+        .filter((img) => img.isActive)
+        .filter((img) => img.hallId === null || img.hallId === hallId)
+        .map((img) => ({
+          id: img.id,
+          hallId: img.hallId,
+          imageUrl: img.imageUrl,
+          displayOrder: img.displayOrder,
+          displaySeconds: img.displaySeconds,
+          isActive: img.isActive,
+          createdBy: null,
+          createdAt: "2026-04-30T12:00:00Z",
+          updatedAt: "2026-04-30T12:00:00Z",
+          deletedAt: null,
+        }));
+    },
+  };
+}
+
+function makeSettingsStub(
+  enabled: boolean,
+  timeoutMinutes: number
+): { list: () => Promise<unknown[]> } {
+  return {
+    async list() {
+      return [
+        {
+          key: "branding.screen_saver_enabled",
+          value: enabled,
+          category: "branding",
+          description: "",
+          type: "boolean",
+          isDefault: false,
+          updatedByUserId: null,
+          updatedAt: null,
+        },
+        {
+          key: "branding.screen_saver_timeout_minutes",
+          value: timeoutMinutes,
+          category: "branding",
+          description: "",
+          type: "number",
+          isDefault: false,
+          updatedByUserId: null,
+          updatedAt: null,
+        },
+      ];
+    },
+  };
+}
+
+async function startServerWithScreenSaver(
+  enabled: boolean,
+  timeoutMinutes: number,
+  images: ScreenSaverImageStubInput[]
+): Promise<Ctx> {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    createTvScreenRouter({
+      platformService: makePlatformStub(),
+      tvScreenService: makeTvStub(exampleState, exampleWinners),
+      screenSaverService: makeScreenSaverStub(images) as unknown as Parameters<
+        typeof createTvScreenRouter
+      >[0]["screenSaverService"],
+      settingsService: makeSettingsStub(enabled, timeoutMinutes) as unknown as Parameters<
+        typeof createTvScreenRouter
+      >[0]["settingsService"],
+    })
+  );
+  const server = app.listen(0);
+  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: async () =>
+      new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+test("GET /api/tv/:hallId/:tvToken/screen-saver returns enabled config + images", async () => {
+  const ctx = await startServerWithScreenSaver(true, 3, [
+    {
+      id: "img-1",
+      hallId: null,
+      imageUrl: "https://cdn.example.com/global.png",
+      displaySeconds: 10,
+      displayOrder: 0,
+      isActive: true,
+    },
+    {
+      id: "img-2",
+      hallId: validHall.id,
+      imageUrl: "https://cdn.example.com/hall.png",
+      displaySeconds: 15,
+      displayOrder: 1,
+      isActive: true,
+    },
+  ]);
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/tv/${validHall.id}/${validHall.tvToken}/screen-saver`
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      data: {
+        enabled: boolean;
+        timeoutMinutes: number;
+        images: Array<{ id: string; imageUrl: string; displaySeconds: number; isGlobal: boolean }>;
+      };
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.data.enabled, true);
+    assert.equal(body.data.timeoutMinutes, 3);
+    assert.equal(body.data.images.length, 2);
+    const ids = body.data.images.map((i) => i.id).sort();
+    assert.deepEqual(ids, ["img-1", "img-2"]);
+    const global = body.data.images.find((i) => i.id === "img-1");
+    assert.equal(global?.isGlobal, true);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /api/tv/:hallId/:tvToken/screen-saver returns enabled=false when disabled", async () => {
+  const ctx = await startServerWithScreenSaver(false, 2, [
+    {
+      id: "img-1",
+      hallId: null,
+      imageUrl: "https://cdn.example.com/global.png",
+      displaySeconds: 10,
+      displayOrder: 0,
+      isActive: true,
+    },
+  ]);
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/tv/${validHall.id}/${validHall.tvToken}/screen-saver`
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      data: { enabled: boolean; images: unknown[] };
+    };
+    // Disabled-flagg respekteres selv om bilder finnes.
+    assert.equal(body.data.enabled, false);
+    assert.equal(body.data.images.length, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /api/tv/:hallId/:tvToken/screen-saver: enabled overrides false når ingen bilder", async () => {
+  const ctx = await startServerWithScreenSaver(true, 2, []);
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/tv/${validHall.id}/${validHall.tvToken}/screen-saver`
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      data: { enabled: boolean; images: unknown[] };
+    };
+    // Tomt bildesett → enabled=false (TV skal ikke prøve å rendre tom carousel).
+    assert.equal(body.data.enabled, false);
+    assert.equal(body.data.images.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /api/tv/:hallId/:tvToken/screen-saver: 404 for invalid token", async () => {
+  const ctx = await startServerWithScreenSaver(true, 2, []);
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/tv/${validHall.id}/wrong-token/screen-saver`
+    );
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});

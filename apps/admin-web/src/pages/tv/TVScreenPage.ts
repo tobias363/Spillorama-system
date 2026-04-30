@@ -41,6 +41,11 @@ import {
   connectTvScreenSocket,
   type TvScreenSocketHandle,
 } from "./tvScreenSocket.js";
+import {
+  mountTvScreenSaver,
+  unmountTvScreenSaver,
+  notifyTvActivity,
+} from "./tvScreenSaver.js";
 
 const POLL_INTERVAL_MS = 2000;
 const WINNERS_SWITCH_DELAY_MS = 30_000;
@@ -200,14 +205,20 @@ export function mountTvScreenPage(
         signal: instance.abortController.signal,
       });
       if (instance.destroyed) return;
+      const previousLastBall = instance.lastState?.currentGame?.lastBall ?? null;
       instance.lastState = state;
       // Poll reset'er live-colors (autoritativ fra server).
       instance.liveHallColors.clear();
       renderSubHeader(subHeaderEl, state);
       renderState(bodyEl, state);
-      // Hvis vi har en ny ball (lastBall endret), spill voice-utropet.
+      // Hvis vi har en ny ball (lastBall endret), spill voice-utropet og
+      // marker aktivitet mot screensaver så overlay ikke kommer over et
+      // pågående spill.
       if (state.currentGame?.lastBall != null) {
         playBallAudio(instance, state.currentGame.lastBall);
+        if (state.currentGame.lastBall !== previousLastBall) {
+          notifyTvActivity();
+        }
       }
       renderHallsStripe(hallsStripeEl, state.participatingHalls, instance.liveHallColors);
       // Auto-switch til winners-siden når siste game er ended. Hopper bare én
@@ -268,11 +279,24 @@ export function mountTvScreenPage(
       console.warn("[tv] socket init failed — polling-only mode", err);
     }
   }
+
+  // Fase 1 MVP §24 — Screen Saver overlay (idle-mode bilder).
+  // Mountes etter hovedinnholdet så z-index-stacking blir korrekt.
+  // Wrappet i try/catch så feil i screensaver-modulen aldri tar ned TV.
+  try {
+    mountTvScreenSaver(hallId, tvToken);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[tv] screen-saver init failed", err);
+  }
 }
 
 export function unmountTvScreenPage(): void {
   if (!active) return;
   active.destroyed = true;
+  // Fase 1 MVP §24: stopp screensaver-overlay og lyttere før vi rydder
+  // resten — overlay-elementet blir fjernet fra DOM her.
+  try { unmountTvScreenSaver(); } catch { /* no-op */ }
   // FE-P0-003: abort any in-flight TV-state/winners fetch so it can't
   // land after the popup is closed and silently mutate state on a
   // subsequent re-mount.
