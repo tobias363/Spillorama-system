@@ -132,6 +132,14 @@ function initialState(): PanelState {
 let incomingTransferModal: import("../../components/Modal.js").ModalInstance | null =
   null;
 
+// 2026-05-01 (Tobias): unik marker per mount. Vi setter denne på containeren
+// ved mount, og sjekker den ved hver render/refresh. Hvis routeren har byttet
+// side (renderCashInOutPage osv. har erstattet innerHTML), er markøren borte
+// og vi auto-unmounter polling/sockets så panelet ikke fortsetter å overskrive
+// neste sides innhold hvert 5. sek.
+const PANEL_MARKER_ATTR = "data-next-game-panel-marker";
+let activePanelMarker: string | null = null;
+
 export function mountNextGamePanel(container: HTMLElement): void {
   unmountNextGamePanel();
   state = initialState();
@@ -139,6 +147,16 @@ export function mountNextGamePanel(container: HTMLElement): void {
   // FE-P0-003: fresh AbortController per mount. unmount() aborts it so
   // late fetch responses can't write state after the page is gone.
   pageAbort = new AbortController();
+
+  // Sett unik marker på container slik at vi kan oppdage at routeren har
+  // byttet ut innholdet med en annen side. crypto.randomUUID() er tilgjengelig
+  // i alle moderne nettlesere — fall-back til timestamp+random hvis ikke.
+  activePanelMarker =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  container.setAttribute(PANEL_MARKER_ATTR, activePanelMarker);
+
   render(container);
   void refresh();
   startPolling();
@@ -158,6 +176,22 @@ export function mountNextGamePanel(container: HTMLElement): void {
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
+}
+
+/**
+ * Sjekk om vår mount fortsatt eier denne containeren. Returnerer false
+ * hvis routeren har erstattet innholdet (markøren er borte eller har
+ * endret seg). Polling/refresh kaller denne før de skriver til DOM.
+ */
+function isStillMounted(): boolean {
+  if (!activeContainer || !activePanelMarker) return false;
+  const currentMarker = activeContainer.getAttribute(PANEL_MARKER_ATTR);
+  if (currentMarker !== activePanelMarker) {
+    // Routeren har overtatt containeren — auto-unmount.
+    unmountNextGamePanel();
+    return false;
+  }
+  return true;
 }
 
 async function initHallIdAndSocket(): Promise<void> {
@@ -181,12 +215,25 @@ export function unmountNextGamePanel(): void {
     pageAbort.abort();
     pageAbort = null;
   }
+  // Fjern marker fra container hvis den fortsatt er vår, slik at en ny
+  // mount av NextGamePanel på samme container starter med blank stat.
+  if (activeContainer && activePanelMarker) {
+    const currentMarker = activeContainer.getAttribute(PANEL_MARKER_ATTR);
+    if (currentMarker === activePanelMarker) {
+      activeContainer.removeAttribute(PANEL_MARKER_ATTR);
+    }
+  }
   activeContainer = null;
+  activePanelMarker = null;
 }
 
 function startPolling(): void {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
+    // Guard: auto-unmount hvis routeren har byttet side (FIX 2026-05-01).
+    // Uten dette ville polling-tick fortsette å overskrive containeren
+    // hvert 5. sek selv om brukeren har navigert til en annen side.
+    if (!isStillMounted()) return;
     void refresh();
   }, POLL_INTERVAL_MS);
 }
@@ -498,6 +545,8 @@ function pickActiveRoom(rooms: AgentRoomSummary[]): AgentRoomSummary | null {
 
 function rerender(): void {
   if (!activeContainer) return;
+  // Guard: auto-unmount hvis routeren har byttet side (FIX 2026-05-01).
+  if (!isStillMounted()) return;
   render(activeContainer);
 }
 
