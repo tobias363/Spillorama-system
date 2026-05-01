@@ -1,5 +1,5 @@
 import { t } from "../i18n/I18n.js";
-import type { Session } from "../auth/Session.js";
+import { isAgentPortalRole, type Session } from "../auth/Session.js";
 import { logout } from "../api/auth.js";
 import { listPendingRequests } from "../api/paymentRequests.js";
 import { escapeHtml } from "../utils/escapeHtml.js";
@@ -80,14 +80,21 @@ export function renderHeader(container: HTMLElement, session: Session, maintenan
     ul.append(balLi);
 
     // Cash in/out
-    const cashLi = document.createElement("li");
-    const cashA = document.createElement("a");
-    cashA.className = "btn btn-success";
-    cashA.href = "#/agent/cashinout";
-    cashA.setAttribute("style", "color:white;");
-    cashA.textContent = t("cash_in_out");
-    cashLi.append(cashA);
-    ul.append(cashLi);
+    // Bug #6 (audit 2026-05-01): tidligere ble denne knappen rendret for
+    // ALLE roller, men `#/agent/cashinout` krever AGENT/HALL_OPERATOR-rolle.
+    // ADMIN-klikk traff backend med 400 FORBIDDEN. Sidebar-leafen er allerede
+    // role-gated i sidebarSpec.ts (PR #800) — vi følger samme mønster her
+    // og skjuler hele <li>-en for admin/super-admin.
+    if (isAgentPortalRole(session.role)) {
+      const cashLi = document.createElement("li");
+      const cashA = document.createElement("a");
+      cashA.className = "btn btn-success";
+      cashA.href = "#/agent/cashinout";
+      cashA.setAttribute("style", "color:white;");
+      cashA.textContent = t("cash_in_out");
+      cashLi.append(cashA);
+      ul.append(cashLi);
+    }
 
     // Notifications bell
     const bellLi = document.createElement("li");

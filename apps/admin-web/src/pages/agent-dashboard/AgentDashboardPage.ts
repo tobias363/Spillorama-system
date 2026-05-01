@@ -35,7 +35,8 @@ import {
   type AgentDashboardTopPlayer,
 } from "../../api/agent-dashboard.js";
 import { startShift } from "../../api/agent-shift.js";
-import { getSession } from "../../auth/Session.js";
+import { fetchMe } from "../../api/auth.js";
+import { getSession, setSession } from "../../auth/Session.js";
 import { Toast } from "../../components/Toast.js";
 
 const POLL_INTERVAL_MS = 30_000;
@@ -63,6 +64,15 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let abortController: AbortController | null = null;
 let mountedContainer: HTMLElement | null = null;
 let activeTab: GameTab = DEFAULT_TAB;
+// Bug #3 (audit 2026-05-01): session.hall kan være tom ved første render
+// (login-flow i LoginPage.ts:202-212 bruker mapUserToSession(user) UTEN å
+// kalle getAgentContext, så session.hall populeres først ved senere
+// fetchMe()). Vi lytter på `session:changed`-event slik at headeren
+// re-rendres så snart fetchMe() (her eller andre steder) populerer
+// session.hall. Lytter ryddes opp i unmountAgentDashboard() for å unngå
+// leak hvis dashboard remountes flere ganger.
+let lastRenderState: PageState | null = null;
+let sessionChangedHandler: (() => void) | null = null;
 
 /**
  * Mount the agent-portal dashboard and start polling. Idempotent — calling
@@ -75,6 +85,33 @@ export function mountAgentDashboard(container: HTMLElement): void {
   activeTab = DEFAULT_TAB;
   render(container, { data: null, loading: true, error: null });
   void poll();
+  // Bug #3: re-render header når session.hall blir populert. fetchMe() i
+  // bootstrapAuth dispatcher `session:changed` via setSession(), og samme
+  // event fyrer hvis ensureSessionHallPopulated() under fyller den ut.
+  sessionChangedHandler = (): void => {
+    if (!mountedContainer || !lastRenderState) return;
+    render(mountedContainer, lastRenderState);
+  };
+  window.addEventListener("session:changed", sessionChangedHandler);
+  // Defensive: hvis vi mounter med tom session.hall (post-login-flyt der
+  // LoginPage.ts:202-212 satte session UTEN å kalle getAgentContext), kall
+  // fetchMe() for å populere hall. Resultatet trigger session:changed →
+  // re-render. Vi swallow-er feil — render-en viser bare placeholder hvis
+  // det fortsatt feiler.
+  void ensureSessionHallPopulated();
+}
+
+async function ensureSessionHallPopulated(): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+  if (session.role !== "agent" && session.role !== "hall-operator") return;
+  if (session.hall && session.hall.length > 0) return;
+  try {
+    const refreshed = await fetchMe();
+    setSession(refreshed);
+  } catch {
+    // Ignore — header-en faller tilbake til "—" hvis fetchMe feiler.
+  }
 }
 
 /**
@@ -90,6 +127,11 @@ export function unmountAgentDashboard(): void {
     abortController.abort();
     abortController = null;
   }
+  if (sessionChangedHandler) {
+    window.removeEventListener("session:changed", sessionChangedHandler);
+    sessionChangedHandler = null;
+  }
+  lastRenderState = null;
   mountedContainer = null;
 }
 
@@ -120,6 +162,9 @@ function schedule(): void {
 }
 
 function render(container: HTMLElement, state: PageState): void {
+  // Husk siste state slik at session:changed-handleren kan re-rendre
+  // headeren uten å måtte poll-e dashboardet på nytt.
+  lastRenderState = state;
   const data = state.data;
   // Bug #3 (audit 2026-05-01): header viste hall-UUID i stedet for hall-navn.
   // Etter PR #795 populerer fetchMe `session.hall[0]` med både `name` og
