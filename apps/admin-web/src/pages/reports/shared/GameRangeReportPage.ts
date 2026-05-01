@@ -1,11 +1,15 @@
 // PR-A4a (BIN-645) — generic per-game range-report page.
 //
 // Used by:
-//   - Game 1 report (ReportGameSlug: "bingo")
-//   - Game 2 report (ReportGameSlug: "rocket")
-//   - Game 3 report (ReportGameSlug: "mystery")
-//   - Game 4 report (ReportGameSlug: "wheel")
-//   - Game 5 report (ReportGameSlug: "color-draft")
+//   - Spill 1 report (gameSlug: "MAIN_GAME") — bingo, hovedspill
+//   - Spill 2 report (gameSlug: "MAIN_GAME") — rocket, hovedspill
+//   - Spill 3 report (gameSlug: "MAIN_GAME") — monsterbingo, hovedspill
+//   - SpinnGo report (gameSlug: "DATABINGO") — game5/spillorama, databingo
+//
+// Backend (`apps/backend/src/util/httpHelpers.ts:parseOptionalLedgerGameType`)
+// godtar kun "MAIN_GAME" eller "DATABINGO" som game-type-parameter.
+// Spill 4 / themebingo (legacy game4) er DEPRECATED (BIN-496) og har ingen
+// rapport-rute. Se docs/architecture/SPILLKATALOG.md for full mapping.
 //
 // Layout mirrors legacy report/gameNreports.html: date-range filter bar +
 // DataTable with hall/rounds/players/stakes/prizes/net columns + CSV export.

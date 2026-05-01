@@ -126,7 +126,7 @@ export const adminSidebar: SidebarNode[] = [
       { kind: "leaf", id: "reportManagementGame1", path: "/reportManagement/game1", icon: "fa fa-circle-o", labelKey: "report_management_game1" },
       { kind: "leaf", id: "reportGame2", path: "/reportGame2", icon: "fa fa-circle-o", labelKey: "game2" },
       { kind: "leaf", id: "reportGame3", path: "/reportGame3", icon: "fa fa-circle-o", labelKey: "game3" },
-      { kind: "leaf", id: "reportGame4", path: "/reportGame4", icon: "fa fa-circle-o", labelKey: "game4" },
+      // Game 4 (themebingo) er DEPRECATED, BIN-496 — ingen sidebar-leaf.
       { kind: "leaf", id: "reportGame5", path: "/reportGame5", icon: "fa fa-circle-o", labelKey: "game5" },
       { kind: "leaf", id: "physicalTicketReport", path: "/physicalTicketReport", icon: "fa fa-circle-o", labelKey: "physical_ticket" },
       { kind: "leaf", id: "uniqueGameReport", path: "/uniqueGameReport", icon: "fa fa-circle-o", labelKey: "unique_ticket" },
