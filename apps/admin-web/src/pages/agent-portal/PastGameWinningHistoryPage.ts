@@ -23,6 +23,10 @@ import {
   getPastWinningHistory,
   type PastWinningHistoryRow,
 } from "../../api/agent-reports.js";
+import {
+  isNoShiftError,
+  renderNoShiftBanner,
+} from "./noShiftFallback.js";
 
 export async function renderPastGameWinningHistoryPage(
   container: HTMLElement
@@ -135,6 +139,13 @@ export async function renderPastGameWinningHistoryPage(
       });
       handle.setRows(res.rows);
     } catch (err) {
+      // Bug #5: 400 SHIFT_NOT_ACTIVE → swap container med no-shift-banner.
+      if (isNoShiftError(err)) {
+        renderNoShiftBanner(container, () => {
+          void renderPastGameWinningHistoryPage(container);
+        });
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       host.insertAdjacentHTML(
         "afterbegin",

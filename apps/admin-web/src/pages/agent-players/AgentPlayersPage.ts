@@ -12,10 +12,22 @@ import {
   type AgentPlayer,
   type AgentPlayerList,
 } from "../../api/agent-dashboard.js";
+import {
+  isNoShiftError,
+  renderNoShiftBanner,
+} from "../agent-portal/noShiftFallback.js";
 
 const SEARCH_DEBOUNCE_MS = 500;
 
 export function mountAgentPlayers(container: HTMLElement): void {
+  // Bug #5: pre-flight light call — backend returnerer 400 NO_ACTIVE_SHIFT
+  // hvis agenten ikke har åpen shift. Vi catcher feilen ved første
+  // listing-kall i loadAndRender og bytter ut hele containeren med
+  // no-shift-banneret + "Åpne skift"-knappen.
+  void renderInitial(container);
+}
+
+function renderInitial(container: HTMLElement): void {
   container.innerHTML = `
     ${contentHeader("agent_players_title")}
     <section class="content">
@@ -37,13 +49,13 @@ export function mountAgentPlayers(container: HTMLElement): void {
   const body = container.querySelector<HTMLElement>("#agent-players-body");
   if (!searchInput || !body) return;
 
-  void loadAndRender(body, "");
+  void loadAndRender(container, body, "");
 
   let typingTimer: number | null = null;
   searchInput.addEventListener("input", () => {
     if (typingTimer !== null) window.clearTimeout(typingTimer);
     typingTimer = window.setTimeout(() => {
-      void loadAndRender(body, searchInput.value.trim());
+      void loadAndRender(container, body, searchInput.value.trim());
     }, SEARCH_DEBOUNCE_MS);
   });
 
@@ -57,11 +69,21 @@ export function mountAgentPlayers(container: HTMLElement): void {
   });
 }
 
-async function loadAndRender(body: HTMLElement, query: string): Promise<void> {
+async function loadAndRender(
+  container: HTMLElement,
+  body: HTMLElement,
+  query: string,
+): Promise<void> {
   try {
     const list = await listAgentPlayers(query ? { query } : undefined);
     renderList(body, list);
   } catch (err) {
+    if (isNoShiftError(err)) {
+      // Bytt ut hele siden med no-shift-banneret. Etter shift-start
+      // re-mounter vi siden via renderInitial.
+      renderNoShiftBanner(container, () => renderInitial(container));
+      return;
+    }
     const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
     body.innerHTML = `<div class="callout callout-danger"><p>${escapeHtml(msg)}</p></div>`;
   }

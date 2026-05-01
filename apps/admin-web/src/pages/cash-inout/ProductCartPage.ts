@@ -34,6 +34,10 @@ import {
   type ProductSummary,
   type ProductPaymentMethod,
 } from "../../api/agent-cash.js";
+import {
+  isNoShiftError,
+  renderNoShiftBanner,
+} from "../agent-portal/noShiftFallback.js";
 import { boxClose, boxOpen, contentHeader, escapeHtml, formatNOK } from "./shared.js";
 
 interface CartLineState {
@@ -200,6 +204,12 @@ export function renderProductCartPage(container: HTMLElement): void {
       const products = await listProducts();
       renderProducts(productGrid, products, bumpProduct);
     } catch (err) {
+      // Bug #5: NO_ACTIVE_SHIFT → bytt hele siden med no-shift-banneret
+      // (i stedet for tom katalog som ikke gir agenten et kall til action).
+      if (isNoShiftError(err)) {
+        renderNoShiftBanner(container, () => renderProductCartPage(container));
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
       Toast.error(msg);
       productGrid.innerHTML = `<p class="text-muted">${escapeHtml(t("no_products_available"))}</p>`;
