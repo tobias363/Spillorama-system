@@ -477,7 +477,7 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
     );
   }
 
-  // 8) Schedule-mal (Mon-Sun 18:00-22:00)
+  // 8) Schedule-mal (Mon-Fri 11-20 / Lør 11-16 / Søn 13-19)
   await upsertSchedule(
     client,
     SCHEDULE_ID,
@@ -485,58 +485,94 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
     "Demo Spill 1 mal",
     ADMIN_ID,
   );
-  console.log(`  [schedule]        ${SCHEDULE_NUMBER} (id=${SCHEDULE_ID}, Mon-Sun 18:00-22:00)`);
+  console.log(
+    `  [schedule]        ${SCHEDULE_NUMBER} (id=${SCHEDULE_ID}, Mon-Fri 11-20 / Lør 11-16 / Søn 13-19)`,
+  );
 
-  // 9) DailySchedule for i dag + i morgen
+  // 9) DailySchedule per ukedag-type — 3 stk per profil (jf. offisiell
+  // Spillorama-spilleplan). Hver bruker egen bitmask + åpningstider.
   const today = startOfDayUtc(new Date());
   const tomorrow = new Date(today.getTime() + 24 * 3_600_000);
+  // start_date/end_date er bare for filtrering — vi setter et stort
+  // 1-årig vindu slik at alle 3 planene er aktive parallelt og scheduler
+  // velger riktig per dag via week_days-bitmask.
+  const planStart = today;
+  const planEnd = new Date(today.getTime() + 365 * 24 * 3_600_000);
   await upsertDailySchedule(client, {
-    id: DAILY_SCHEDULE_TODAY_ID,
-    name: "Demo dagsplan (i dag)",
-    startDate: today,
+    id: DAILY_SCHEDULE_WEEKDAY_ID,
+    name: "Demo dagsplan (Mon-Fri 11-20)",
+    startDate: planStart,
     adminId: ADMIN_ID,
     gameManagementId: GAME_MANAGEMENT_ID,
     scheduleId: SCHEDULE_ID,
     masterHallId: HALL_ID,
     hallIds: [HALL_ID],
     groupHallIds: [HALL_GROUP_ID],
+    weekDaysBitmask: WEEKDAY_BITMASK,
+    startTime: WEEKDAY_HOURS.startTime,
+    endTime: WEEKDAY_HOURS.endTime,
   });
   await upsertDailySchedule(client, {
-    id: DAILY_SCHEDULE_TOMORROW_ID,
-    name: "Demo dagsplan (i morgen)",
-    startDate: tomorrow,
+    id: DAILY_SCHEDULE_SATURDAY_ID,
+    name: "Demo dagsplan (Lør 11-16)",
+    startDate: planStart,
     adminId: ADMIN_ID,
     gameManagementId: GAME_MANAGEMENT_ID,
     scheduleId: SCHEDULE_ID,
     masterHallId: HALL_ID,
     hallIds: [HALL_ID],
     groupHallIds: [HALL_GROUP_ID],
+    weekDaysBitmask: SATURDAY_BITMASK,
+    startTime: SATURDAY_HOURS.startTime,
+    endTime: SATURDAY_HOURS.endTime,
   });
+  await upsertDailySchedule(client, {
+    id: DAILY_SCHEDULE_SUNDAY_ID,
+    name: "Demo dagsplan (Søn 13-19)",
+    startDate: planStart,
+    adminId: ADMIN_ID,
+    gameManagementId: GAME_MANAGEMENT_ID,
+    scheduleId: SCHEDULE_ID,
+    masterHallId: HALL_ID,
+    hallIds: [HALL_ID],
+    groupHallIds: [HALL_GROUP_ID],
+    weekDaysBitmask: SUNDAY_BITMASK,
+    startTime: SUNDAY_HOURS.startTime,
+    endTime: SUNDAY_HOURS.endTime,
+  });
+  // planEnd er ikke per-plan — vi loggene bare den globale gyldigheten.
+  void planEnd;
   console.log(
-    `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
-      .toISOString()
-      .slice(0, 10)}`,
+    `  [daily-schedule]  3 stk: weekday(Mon-Fri 11-20), saturday(11-16), sunday(13-19)`,
   );
 
   // 9b) Pilot-day-fix 2026-05-01: pre-spawn app_game1_scheduled_games for
   // i dag + i morgen direkte (Game1ScheduleTickService cron er default OFF).
-  // Uten dette returnerer findActiveGameForHall null og hele Game1-runtime
-  // er blokkert i demo-miljø. Idempotent via UNIQUE-constraint.
+  // Hver dag bruker den daily_schedule som matcher dagens ukedag-bitmask
+  // + tilhørende åpningstid. Uten dette returnerer findActiveGameForHall
+  // null og hele Game1-runtime er blokkert i demo-miljø. Idempotent via
+  // UNIQUE-constraint.
+  const todayHours = hoursForDate(today);
+  const tomorrowHours = hoursForDate(tomorrow);
   const todaySpawn = await spawnScheduledGamesForDay(client, {
-    dailyScheduleId: DAILY_SCHEDULE_TODAY_ID,
+    dailyScheduleId: dailyScheduleIdFor(bitmaskForDate(today), "single"),
     scheduleId: SCHEDULE_ID,
     scheduledDay: today,
     masterHallId: HALL_ID,
     hallIds: [HALL_ID],
     groupHallId: HALL_GROUP_ID,
+    startTime: todayHours.startTime,
+    endTime: todayHours.endTime,
   });
   const tomorrowSpawn = await spawnScheduledGamesForDay(client, {
-    dailyScheduleId: DAILY_SCHEDULE_TOMORROW_ID,
+    dailyScheduleId: dailyScheduleIdFor(bitmaskForDate(tomorrow), "single"),
     scheduleId: SCHEDULE_ID,
     scheduledDay: tomorrow,
     masterHallId: HALL_ID,
     hallIds: [HALL_ID],
     groupHallId: HALL_GROUP_ID,
+    startTime: tomorrowHours.startTime,
+    endTime: tomorrowHours.endTime,
   });
   console.log(
     `  [scheduled-games] i dag spawned=${todaySpawn.spawned} skipped=${todaySpawn.skipped} | i morgen spawned=${tomorrowSpawn.spawned} skipped=${tomorrowSpawn.skipped}`,
@@ -659,60 +695,86 @@ async function seedFourHallProfile(client: Client): Promise<void> {
     ADMIN_ID,
   );
   console.log(
-    `  [schedule]        ${PILOT_SCHEDULE_NUMBER} (id=${PILOT_SCHEDULE_ID}, Mon-Sun 18:00-22:00)`,
+    `  [schedule]        ${PILOT_SCHEDULE_NUMBER} (id=${PILOT_SCHEDULE_ID}, Mon-Fri 11-20 / Lør 11-16 / Søn 13-19)`,
   );
 
-  // 7) Daily schedules for i dag + i morgen, med master-hall + alle 4
-  // haller i hall_ids_json og pilot-gruppen som groupHallIds.
+  // 7) Daily schedules per ukedag-type — 3 stk per pilot-gruppe, jf.
+  // offisiell Spillorama-spilleplan (Mon-Fri 11-20, Lør 11-16, Søn 13-19).
   const today = startOfDayUtc(new Date());
   const tomorrow = new Date(today.getTime() + 24 * 3_600_000);
   const allHallIds = PILOT_HALLS.map((h) => h.id);
+  const planStart = today;
 
   await upsertDailySchedule(client, {
-    id: PILOT_DAILY_SCHEDULE_TODAY_ID,
-    name: "Demo Pilot dagsplan (i dag)",
-    startDate: today,
+    id: PILOT_DAILY_SCHEDULE_WEEKDAY_ID,
+    name: "Demo Pilot dagsplan (Mon-Fri 11-20)",
+    startDate: planStart,
     adminId: ADMIN_ID,
     gameManagementId: PILOT_GAME_MANAGEMENT_ID,
     scheduleId: PILOT_SCHEDULE_ID,
     masterHallId: PILOT_MASTER_HALL_ID,
     hallIds: allHallIds,
     groupHallIds: [PILOT_HALL_GROUP_ID],
+    weekDaysBitmask: WEEKDAY_BITMASK,
+    startTime: WEEKDAY_HOURS.startTime,
+    endTime: WEEKDAY_HOURS.endTime,
   });
   await upsertDailySchedule(client, {
-    id: PILOT_DAILY_SCHEDULE_TOMORROW_ID,
-    name: "Demo Pilot dagsplan (i morgen)",
-    startDate: tomorrow,
+    id: PILOT_DAILY_SCHEDULE_SATURDAY_ID,
+    name: "Demo Pilot dagsplan (Lør 11-16)",
+    startDate: planStart,
     adminId: ADMIN_ID,
     gameManagementId: PILOT_GAME_MANAGEMENT_ID,
     scheduleId: PILOT_SCHEDULE_ID,
     masterHallId: PILOT_MASTER_HALL_ID,
     hallIds: allHallIds,
     groupHallIds: [PILOT_HALL_GROUP_ID],
+    weekDaysBitmask: SATURDAY_BITMASK,
+    startTime: SATURDAY_HOURS.startTime,
+    endTime: SATURDAY_HOURS.endTime,
+  });
+  await upsertDailySchedule(client, {
+    id: PILOT_DAILY_SCHEDULE_SUNDAY_ID,
+    name: "Demo Pilot dagsplan (Søn 13-19)",
+    startDate: planStart,
+    adminId: ADMIN_ID,
+    gameManagementId: PILOT_GAME_MANAGEMENT_ID,
+    scheduleId: PILOT_SCHEDULE_ID,
+    masterHallId: PILOT_MASTER_HALL_ID,
+    hallIds: allHallIds,
+    groupHallIds: [PILOT_HALL_GROUP_ID],
+    weekDaysBitmask: SUNDAY_BITMASK,
+    startTime: SUNDAY_HOURS.startTime,
+    endTime: SUNDAY_HOURS.endTime,
   });
   console.log(
-    `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
-      .toISOString()
-      .slice(0, 10)} (master=${PILOT_MASTER_HALL_ID})`,
+    `  [daily-schedule]  3 stk: weekday(Mon-Fri 11-20), saturday(11-16), sunday(13-19) (master=${PILOT_MASTER_HALL_ID})`,
   );
 
   // 7b) Pilot-day-fix 2026-05-01: pre-spawn app_game1_scheduled_games (se
   // Profil A for begrunnelse — cron er default OFF, vi må fylle direkte).
+  // Hver dag bruker den daily_schedule som matcher dagens ukedag-bitmask.
+  const todayHours = hoursForDate(today);
+  const tomorrowHours = hoursForDate(tomorrow);
   const pilotTodaySpawn = await spawnScheduledGamesForDay(client, {
-    dailyScheduleId: PILOT_DAILY_SCHEDULE_TODAY_ID,
+    dailyScheduleId: dailyScheduleIdFor(bitmaskForDate(today), "pilot"),
     scheduleId: PILOT_SCHEDULE_ID,
     scheduledDay: today,
     masterHallId: PILOT_MASTER_HALL_ID,
     hallIds: allHallIds,
     groupHallId: PILOT_HALL_GROUP_ID,
+    startTime: todayHours.startTime,
+    endTime: todayHours.endTime,
   });
   const pilotTomorrowSpawn = await spawnScheduledGamesForDay(client, {
-    dailyScheduleId: PILOT_DAILY_SCHEDULE_TOMORROW_ID,
+    dailyScheduleId: dailyScheduleIdFor(bitmaskForDate(tomorrow), "pilot"),
     scheduleId: PILOT_SCHEDULE_ID,
     scheduledDay: tomorrow,
     masterHallId: PILOT_MASTER_HALL_ID,
     hallIds: allHallIds,
     groupHallId: PILOT_HALL_GROUP_ID,
+    startTime: tomorrowHours.startTime,
+    endTime: tomorrowHours.endTime,
   });
   console.log(
     `  [scheduled-games] i dag spawned=${pilotTodaySpawn.spawned} skipped=${pilotTodaySpawn.skipped} | i morgen spawned=${pilotTomorrowSpawn.spawned} skipped=${pilotTomorrowSpawn.skipped}`,
@@ -1609,15 +1671,22 @@ interface UpsertDailyScheduleInput {
   masterHallId: string;
   hallIds: readonly string[];
   groupHallIds: readonly string[];
+  // Pilot-day-fix 2026-05-01: ny per-dagstype-spilleplan. Bitmask velger
+  // hvilke ukedager planen gjelder for; startTime/endTime velger
+  // åpningstid (Mon-Fri 11-20, Lør 11-16, Søn 13-19).
+  weekDaysBitmask: number;
+  startTime: string;
+  endTime: string;
 }
 
 async function upsertDailySchedule(
   client: Client,
   input: UpsertDailyScheduleInput,
 ): Promise<void> {
-  // Mon-Sun bitmask = 1+2+4+8+16+32+64 = 127. Setter samme bitmask
-  // for begge daglige planer slik at scheduler-tick kan plukke dem opp
-  // uavhengig av ukedag.
+  // Pilot-day-fix 2026-05-01: én daily_schedule per ukedag-type i stedet
+  // for én Mon-Sun-plan, jf. offisiell Spillorama-spilleplan. Bitmask
+  // og åpningstider kommer nå inn via input — caller velger riktig
+  // kombinasjon (Mon-Fri = 31, Sat = 32, Sun = 64).
   const otherData = { scheduleId: input.scheduleId };
   const hallIdsJson = {
     masterHallId: input.masterHallId,
@@ -1657,8 +1726,8 @@ async function upsertDailySchedule(
         innsatsen_sales, subgames_json, other_data_json, created_by)
      VALUES
        ($1, $2, $3, $4, $5::jsonb,
-        127, NULL, $6::timestamptz, $7::timestamptz,
-        '18:00', '22:00', 'running',
+        $11, NULL, $6::timestamptz, $7::timestamptz,
+        $12, $13, 'running',
         false, false, false, false,
         0, $8::jsonb, $9::jsonb, $10)
      ON CONFLICT (id) DO UPDATE
@@ -1688,6 +1757,9 @@ async function upsertDailySchedule(
       JSON.stringify(subgamesJson),
       JSON.stringify(otherData),
       input.adminId,
+      input.weekDaysBitmask,
+      input.startTime,
+      input.endTime,
     ],
   );
 }
@@ -1714,6 +1786,11 @@ interface SpawnScheduledGamesInput {
   hallIds: readonly string[];
   groupHallId: string;
   scheduleType?: "Auto" | "Manual";
+  // Pilot-day-fix 2026-05-01: per-dagstype-åpningstid. Caller bestemmer
+  // åpningstid (Mon-Fri 11-20, Lør 11-16, Søn 13-19) — vi stamper
+  // scheduled_start_time/end_time som UTC-timestamps mot scheduledDay.
+  startTime: string; // "HH:mm"
+  endTime: string; // "HH:mm"
 }
 
 async function spawnScheduledGamesForDay(
@@ -1733,9 +1810,11 @@ async function spawnScheduledGamesForDay(
 
   for (let i = 0; i < SUB_GAMES.length; i++) {
     const sg = SUB_GAMES[i]!;
-    // 18:00-22:00 i UTC, samme som schedule-malen og daily_schedule.
-    const startTs = new Date(`${isoDay}T18:00:00Z`);
-    const endTs = new Date(`${isoDay}T22:00:00Z`);
+    // Pilot-day-fix 2026-05-01: åpningstid bestemmes nå av caller
+    // (Mon-Fri 11-20, Lør 11-16, Søn 13-19). Mals seg 1:1 inn i
+    // scheduled_start_time/scheduled_end_time som UTC-timestamps.
+    const startTs = new Date(`${isoDay}T${input.startTime}:00Z`);
+    const endTs = new Date(`${isoDay}T${input.endTime}:00Z`);
 
     // ticket_config_json: bruk samme TICKET_COLORS-payload som
     // upsertSchedule serialiserer på sub_games_json (mirror).
