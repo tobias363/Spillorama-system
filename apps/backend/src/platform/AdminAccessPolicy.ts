@@ -2,42 +2,42 @@ import { DomainError } from "../errors/DomainError.js";
 import type { UserRole } from "./PlatformService.js";
 
 const ADMIN_ACCESS_POLICY_DEFINITION = {
-  ADMIN_PANEL_ACCESS: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  GAME_CATALOG_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  ADMIN_PANEL_ACCESS: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  GAME_CATALOG_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   GAME_CATALOG_WRITE: ["ADMIN"],
-  HALL_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  HALL_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   HALL_WRITE: ["ADMIN"],
-  TERMINAL_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  TERMINAL_WRITE: ["ADMIN", "HALL_OPERATOR"],
-  HALL_GAME_CONFIG_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  HALL_GAME_CONFIG_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  TERMINAL_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  TERMINAL_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
+  HALL_GAME_CONFIG_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  HALL_GAME_CONFIG_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   WALLET_COMPLIANCE_READ: ["ADMIN", "SUPPORT"],
   WALLET_COMPLIANCE_WRITE: ["ADMIN", "SUPPORT"],
   EXTRA_DRAW_DENIALS_READ: ["ADMIN", "SUPPORT"],
-  PRIZE_POLICY_READ: ["ADMIN", "HALL_OPERATOR"],
+  PRIZE_POLICY_READ: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   PRIZE_POLICY_WRITE: ["ADMIN"],
   EXTRA_PRIZE_AWARD: ["ADMIN"],
-  PAYOUT_AUDIT_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  LEDGER_READ: ["ADMIN", "HALL_OPERATOR"],
+  PAYOUT_AUDIT_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  LEDGER_READ: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   LEDGER_WRITE: ["ADMIN"],
-  DAILY_REPORT_RUN: ["ADMIN", "HALL_OPERATOR"],
-  DAILY_REPORT_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  GAME_SETTINGS_CHANGELOG_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  DAILY_REPORT_RUN: ["ADMIN", "HALL_OPERATOR", "AGENT"],
+  DAILY_REPORT_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  GAME_SETTINGS_CHANGELOG_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   OVERSKUDD_READ: ["ADMIN"],
   OVERSKUDD_WRITE: ["ADMIN"],
   USER_ROLE_WRITE: ["ADMIN"],
-  ROOM_CONTROL_READ: ["ADMIN", "HALL_OPERATOR"],
-  ROOM_CONTROL_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  ROOM_CONTROL_READ: ["ADMIN", "HALL_OPERATOR", "AGENT"],
+  ROOM_CONTROL_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /** BIN-586: manuell deposit/withdraw-kø (kontant i hall, uttak over terskel). */
-  PAYMENT_REQUEST_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  PAYMENT_REQUEST_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  PAYMENT_REQUEST_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  PAYMENT_REQUEST_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-587 B2.2: KYC-moderasjon. ADMIN + SUPPORT kan se pending/rejected-
    * kø og approve/reject. HALL_OPERATOR er eksplisitt utelatt — compliance
    * er sentralt, ikke delegert per hall.
    */
-  PLAYER_KYC_READ: ["ADMIN", "SUPPORT"],
-  PLAYER_KYC_MODERATE: ["ADMIN", "SUPPORT"],
+  PLAYER_KYC_READ: ["ADMIN", "SUPPORT", "AGENT"],
+  PLAYER_KYC_MODERATE: ["ADMIN", "SUPPORT", "AGENT"],
   /** PLAYER_KYC_OVERRIDE er destructive-path (forbi adapter-beslutning) — kun ADMIN. */
   PLAYER_KYC_OVERRIDE: ["ADMIN"],
   /**
@@ -73,7 +73,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     i route via assertUserHallScope).
    *   - AGENT_DELETE: destruktiv (soft-delete + aktiv-shift-blokk). Kun ADMIN.
    */
-  AGENT_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  AGENT_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   AGENT_WRITE:  ["ADMIN", "HALL_OPERATOR"],
   AGENT_DELETE: ["ADMIN"],
   /**
@@ -93,7 +93,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    * papirbillett-administrasjon er hall-lokalt. SUPPORT er bevisst
    * utelatt — er ikke hall-operativ rolle.
    */
-  PHYSICAL_TICKET_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  PHYSICAL_TICKET_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-587 B4b: voucher-konfigurasjon (rabatt-koder).
    *   - VOUCHER_READ: liste + detalj. ADMIN + HALL_OPERATOR + SUPPORT
@@ -101,7 +101,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *   - VOUCHER_WRITE: opprette, endre, deaktivere — kun ADMIN siden
    *     marketing-rabatter er sentralt.
    */
-  VOUCHER_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  VOUCHER_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   VOUCHER_WRITE: ["ADMIN"],
   /**
    * BIN-583 B3.2: agent-transaksjons-operasjoner.
@@ -164,8 +164,8 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     domain men scope-sjekken er løftet ut av første versjon siden
    *     hall-binding fortsatt lever i config_json).
    */
-  GAME_MGMT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  GAME_MGMT_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  GAME_MGMT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  GAME_MGMT_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-628: regulatorisk track-spending aggregat (pengespillforskriften §11
    * forebyggende tiltak). ADMIN + HALL_OPERATOR + SUPPORT:
@@ -177,7 +177,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     trenger fullstendig oversikt ved kundesamtaler.
    * Ingen WRITE-variant: dette er et rent aggregat-endepunkt, ingen mutasjon.
    */
-  TRACK_SPENDING_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  TRACK_SPENDING_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   /**
    * BIN-626: DailySchedule (daglig spill-plan per hall).
    *   - SCHEDULE_READ : liste + detalj + subgame-details. Alle admin-roller.
@@ -187,8 +187,8 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     HALL_OPERATOR (hall-operator styrer egen hall's plan). SUPPORT er
    *     bevisst utelatt — compliance-rolle, ikke drift.
    */
-  SCHEDULE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  SCHEDULE_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  SCHEDULE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  SCHEDULE_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-627: Pattern CRUD (25-bit bitmask mønstre for Game 1 + Game 3).
    *   - PATTERN_READ : liste + detalj + dynamic-menu. Alle admin-roller.
@@ -198,8 +198,8 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     effekter er små siden hver plan refererer eksplisitt pattern-id).
    *     SUPPORT er bevisst utelatt — kompeliance-rolle, ikke drift.
    */
-  PATTERN_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  PATTERN_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  PATTERN_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  PATTERN_WRITE: ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-665: HallGroup CRUD (cross-hall spill-grupper for Game 2 + Game 3).
    *   - HALL_GROUP_READ : liste + detalj. Alle admin-roller.
@@ -211,7 +211,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     SUPPORT er bevisst utelatt — compliance-rolle, ikke drift. Samme
    *     mønster som HALL_WRITE / PATTERN_WRITE.
    */
-  HALL_GROUP_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  HALL_GROUP_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   HALL_GROUP_WRITE: ["ADMIN", "HALL_OPERATOR"],
   /**
    * BIN-620: GameType CRUD (topp-nivå katalog av spill-typer).
@@ -224,7 +224,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     HALL_OPERATOR er bevisst utelatt — hall-operator endrer ikke
    *     globalt spill-katalog. Samme mønster som GAME_CATALOG_WRITE.
    */
-  GAME_TYPE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  GAME_TYPE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   GAME_TYPE_WRITE: ["ADMIN"],
   /**
    * BIN-621: SubGame CRUD (navngitte gjenbrukbare pattern-bundles).
@@ -235,8 +235,8 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     kan administrere egen hall's bundles — samme mønster som
    *     PATTERN_WRITE / SCHEDULE_WRITE. SUPPORT er bevisst utelatt.
    */
-  SUB_GAME_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  SUB_GAME_WRITE:  ["ADMIN", "HALL_OPERATOR"],
+  SUB_GAME_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  SUB_GAME_WRITE:  ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
    * mapping). Dette er ren ADMIN-konfigurasjon — ikke runtime-state.
@@ -248,7 +248,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     GAME_TYPE_WRITE / GAME_CATALOG_WRITE). HALL_OPERATOR er bevisst
    *     utelatt — leaderboard-tier er ikke hall-lokal konfig.
    */
-  LEADERBOARD_TIER_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  LEADERBOARD_TIER_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   LEADERBOARD_TIER_WRITE: ["ADMIN"],
   /**
    * BIN-624: SavedGame CRUD (gjenbrukbare GameManagement-templates).
@@ -259,8 +259,8 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     som SUB_GAME_WRITE. SUPPORT er bevisst utelatt (compliance-rolle,
    *     ikke drift; SUPPORT får kun READ).
    */
-  SAVED_GAME_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  SAVED_GAME_WRITE:  ["ADMIN", "HALL_OPERATOR"],
+  SAVED_GAME_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  SAVED_GAME_WRITE:  ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
    * BIN-677: System settings (system-wide config: timezone, currency, logo-
    * refs, klient-versjoner, feature-flags).
@@ -272,7 +272,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     settings er sentralt ADMIN-ansvar. Matches GAME_TYPE_WRITE /
    *     LEADERBOARD_TIER_WRITE.
    */
-  SETTINGS_READ:    ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  SETTINGS_READ:    ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   SETTINGS_WRITE:   ["ADMIN"],
   /**
    * BIN-677: Maintenance-vinduer (planlagt/aktiv vedlikeholdsmodus).
@@ -282,7 +282,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     ADMIN-only fordi vedlikeholdsmodus stopper live spill globalt
    *     — ikke en hall-operatør-beslutning.
    */
-  MAINTENANCE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  MAINTENANCE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   MAINTENANCE_WRITE: ["ADMIN"],
   /**
    * BIN-679: MiniGames config CRUD (Wheel + Chest + Mystery + Colordraft).
@@ -296,7 +296,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     mønster som GAME_CATALOG_WRITE / LEADERBOARD_TIER_WRITE).
    *     HALL_OPERATOR er bevisst utelatt — dette er ikke hall-lokal konfig.
    */
-  MINI_GAMES_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  MINI_GAMES_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   MINI_GAMES_WRITE:  ["ADMIN"],
   /**
    * BIN-676: CMS content + FAQ (aboutus, terms, support, links, responsible-
@@ -310,7 +310,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     mønster som GAME_CATALOG_WRITE / LEADERBOARD_TIER_WRITE.
    *     HALL_OPERATOR er bevisst utelatt — CMS er ikke hall-lokal konfig.
    */
-  CMS_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  CMS_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   CMS_WRITE: ["ADMIN"],
   /**
    * GAME1_SCHEDULE PR2: per-hall ready-flow i Game 1.
@@ -364,7 +364,7 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     GAME_TYPE_WRITE / LEADERBOARD_TIER_WRITE. HALL_OPERATOR er bevisst
    *     utelatt — tier-strukturen er ikke hall-lokal.
    */
-  LOYALTY_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  LOYALTY_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   LOYALTY_WRITE: ["ADMIN"],
   /**
    * Role Management — per-agent permission-matrix (Admin CR 21.02.2024 side 5
