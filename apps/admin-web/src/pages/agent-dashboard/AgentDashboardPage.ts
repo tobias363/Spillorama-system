@@ -26,7 +26,7 @@
 
 import { t } from "../../i18n/I18n.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
-import { isAbortError } from "../../api/client.js";
+import { isAbortError, ApiError } from "../../api/client.js";
 import {
   getAgentDashboard,
   type AgentDashboard,
@@ -34,6 +34,9 @@ import {
   type AgentDashboardOngoingGame,
   type AgentDashboardTopPlayer,
 } from "../../api/agent-dashboard.js";
+import { startShift } from "../../api/agent-shift.js";
+import { getSession } from "../../auth/Session.js";
+import { Toast } from "../../components/Toast.js";
 
 const POLL_INTERVAL_MS = 30_000;
 // Backend returnerer game-slug som "bingo" / "rocket" / "monsterbingo" / "spillorama".
@@ -436,10 +439,25 @@ function loadingBanner(): string {
 }
 
 function noShiftBanner(): string {
+  // 2026-05-01 (Tobias): legg til synlig "Åpne skift"-knapp inne i banneret.
+  // Tidligere viste banneret kun teksten "Åpne et skift for å se dashboard-
+  // data" uten noen knapp som faktisk gjorde jobben — UX-mangel som
+  // tvang agenten til å bruke API-et direkte. Knappen kaller
+  // `POST /api/agent/shift/start` med agentens primary-hall fra session.
+  // `data-action="open-shift"` wires til håndleren i wireHeaderActions.
   return `
-    <div class="alert alert-warning" data-marker="dashboard-no-shift" role="alert">
-      <i class="fa fa-info-circle" aria-hidden="true"></i>
-      ${escapeHtml(t("agent_dashboard_no_shift_warning"))}
+    <div class="alert alert-warning" data-marker="dashboard-no-shift" role="alert"
+         style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+      <div>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
+        ${escapeHtml(t("agent_dashboard_no_shift_warning"))}
+      </div>
+      <button class="btn btn-success" data-action="open-shift"
+              data-marker="dashboard-open-shift-button"
+              style="font-weight:600;">
+        <i class="fa fa-play" aria-hidden="true"></i>
+        ${escapeHtml(t("agent_dashboard_start_shift"))}
+      </button>
     </div>`;
 }
 
@@ -451,6 +469,43 @@ function wireHeaderActions(container: HTMLElement): void {
   if (cashBtn) {
     cashBtn.addEventListener("click", () => {
       window.location.hash = "#/agent/cash-in-out";
+    });
+  }
+  // 2026-05-01 (Tobias): "Åpne skift"-knapp i noShiftBanner. Kaller
+  // POST /api/agent/shift/start med agentens primary-hall fra session.
+  // Wireframe (PDF 17.5) sier dette egentlig hører hjemme i en
+  // Add Daily Balance-modal — men backend krever at en shift er åpen FØR
+  // openDay kan kalles, så vi splitter flyten: knappen oppretter shift,
+  // dashboard refreshes, deretter får agenten "Legg til daglig saldo"
+  // tilgjengelig på Cash In/Out-siden.
+  const openShiftBtn = container.querySelector<HTMLButtonElement>(
+    'button[data-action="open-shift"]',
+  );
+  if (openShiftBtn) {
+    openShiftBtn.addEventListener("click", async () => {
+      const session = getSession();
+      const hallId = session?.hall?.[0]?.id;
+      if (!hallId) {
+        Toast.error(t("hall_not_assigned") || "Ingen hall tildelt på sesjonen.");
+        return;
+      }
+      openShiftBtn.disabled = true;
+      try {
+        // Backend bruker bare hallId; openingBalance kreves av TS-signaturen
+        // men ignoreres serverside (se apps/backend/src/routes/agent.ts:286).
+        // Daily-balance settes separat via Add Daily Balance-modal etterpå.
+        await startShift({ hallId, openingBalance: 0 });
+        Toast.success(
+          t("shift_started_successfully") || "Skift åpnet — laster dashboard …",
+        );
+        // Trigger dashboard-poll umiddelbart slik at no-shift-banneret
+        // forsvinner uten å vente på 30s polling-tick.
+        void poll();
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+        Toast.error(msg);
+        openShiftBtn.disabled = false;
+      }
     });
   }
   const langSel = container.querySelector<HTMLSelectElement>(
