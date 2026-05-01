@@ -368,6 +368,21 @@ async function main(): Promise<void> {
 
     await client.query("COMMIT");
 
+    // Pilot-day-fix 2026-05-01: opprett bingo-rom i engine for alle haller.
+    // SQL-seedingen alene er ikke nok — `BingoEngine.listRoomSummaries()` er
+    // in-memory + Redis-lifecycle-store. Uten et eksisterende rom returnerer
+    // agent-portal-endepunktene "Ingen aktivt bingo-rom" på flere sider
+    // (cash-in/out, register-tickets osv.) inntil første spiller joiner via
+    // `game1:join-scheduled` og lazy-creater rommet.
+    //
+    // Vi løser dette ved å kalle `POST /api/admin/rooms` mot en kjørende
+    // backend etter SQL-COMMIT. Idempotent: 400 SINGLE_ROOM_ONLY behandles
+    // som suksess. Fail-soft: hvis backend ikke er nåbar (CI / migrasjon-
+    // only-mode), logg advarsel og fortsett — printInstructions går fortsatt.
+    //
+    // Skip helt med SEED_SKIP_ROOM_CREATION=1 (CI / migration-only).
+    await ensureRoomsForAllHalls();
+
     printInstructions(singleHallTvToken);
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1944,6 +1959,162 @@ function startOfDayUtc(d: Date): Date {
   const out = new Date(d);
   out.setUTCHours(0, 0, 0, 0);
   return out;
+}
+
+// ── Room-creation via backend HTTP (pilot-day-fix 2026-05-01) ───────────────
+//
+// Rooms i Spillorama bor IKKE i en SQL-tabell — de er in-memory + Redis-
+// backed via `RoomLifecycleStore` og `BingoEngine.roomLifecycleService`.
+// SQL-seedingen alene fyller `app_game1_scheduled_games` med `room_code=NULL`.
+// Engine lazy-creater rom kun når første spiller joiner via
+// `game1:join-scheduled` (apps/backend/src/sockets/game1ScheduledEvents.ts).
+//
+// Agent-portal-endepunktene leser `engine.listRoomSummaries()` direkte og
+// får "Ingen aktivt bingo-rom" inntil rommet er lazy-created. Manuell
+// workaround i kveld var å POSTe til `/api/admin/rooms` for hver hall.
+// Denne funksjonen automatiserer det inn i seed-flyten.
+//
+// Idempotent: backendens `enforceSingleRoomPerHall`-guard returnerer
+// 400 SINGLE_ROOM_ONLY hvis et canonical-rom allerede eksisterer for
+// hallen. Vi behandler det som suksess (nøyaktig oppførsel ved re-run).
+
+interface BackendApiResponse<T = unknown> {
+  ok: boolean;
+  data?: T;
+  error?: { code?: string; message?: string };
+}
+
+interface AdminLoginData {
+  accessToken?: string;
+  user?: unknown;
+}
+
+interface RoomCreateData {
+  roomCode?: string;
+  playerId?: string;
+}
+
+async function ensureRoomsForAllHalls(): Promise<void> {
+  if (process.env.SEED_SKIP_ROOM_CREATION === "1") {
+    console.log("");
+    console.log("[room]            hopper over (SEED_SKIP_ROOM_CREATION=1)");
+    return;
+  }
+
+  const baseUrl = (
+    process.env.SEED_BACKEND_URL ?? "http://localhost:4000"
+  ).replace(/\/+$/, "");
+
+  console.log("");
+  console.log(`== Engine-rom (POST ${baseUrl}/api/admin/rooms) ==`);
+
+  // Steg 1: login som demo-admin (SQL-seedet med kjent passord).
+  const token = await tryAdminLogin(baseUrl);
+  if (!token) {
+    console.warn(
+      `  [room]            hopper over — backend ikke nåbar på ${baseUrl} ` +
+        `(rommene må opprettes manuelt etter at backenden starter)`,
+    );
+    return;
+  }
+
+  // Steg 2: alle haller fra begge profiler.
+  const allHallIds = [HALL_ID, ...PILOT_HALLS.map((h) => h.id)];
+
+  // Steg 3: opprett rom (idempotent) for hver hall.
+  let createdCount = 0;
+  let existedCount = 0;
+  let failedCount = 0;
+  for (const hallId of allHallIds) {
+    const result = await upsertRoomForHall(baseUrl, token, hallId);
+    if (result.kind === "created") {
+      console.log(`  [room]            ${hallId} -> ${result.roomCode} (opprettet)`);
+      createdCount += 1;
+    } else if (result.kind === "exists") {
+      console.log(
+        `  [room]            ${hallId} -> finnes allerede (idempotent OK)`,
+      );
+      existedCount += 1;
+    } else {
+      console.warn(
+        `  [room]            ${hallId} -> FEIL: ${result.code} ${result.message}`,
+      );
+      failedCount += 1;
+    }
+  }
+  console.log(
+    `  [room]            sum: ${createdCount} opprettet, ${existedCount} eksisterte, ${failedCount} feilet`,
+  );
+}
+
+async function tryAdminLogin(baseUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ email: ADMIN_EMAIL, password: DEMO_PASSWORD }),
+    });
+    const parsed = (await res.json().catch(() => null)) as
+      | BackendApiResponse<AdminLoginData>
+      | null;
+    if (!parsed?.ok || !parsed.data?.accessToken) {
+      console.warn(
+        `  [room]            admin-login feilet (HTTP ${res.status}): ` +
+          `${parsed?.error?.code ?? "ukjent"} ${parsed?.error?.message ?? ""}`,
+      );
+      return null;
+    }
+    return parsed.data.accessToken;
+  } catch (err) {
+    // Network error — backend not running. Fail-soft.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [room]            kunne ikke nå backend: ${msg}`);
+    return null;
+  }
+}
+
+type UpsertRoomResult =
+  | { kind: "created"; roomCode: string }
+  | { kind: "exists" }
+  | { kind: "failed"; code: string; message: string };
+
+async function upsertRoomForHall(
+  baseUrl: string,
+  token: string,
+  hallId: string,
+): Promise<UpsertRoomResult> {
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/rooms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ hallId }),
+    });
+    const parsed = (await res.json().catch(() => null)) as
+      | BackendApiResponse<RoomCreateData>
+      | null;
+    if (parsed?.ok && parsed.data?.roomCode) {
+      return { kind: "created", roomCode: parsed.data.roomCode };
+    }
+    // Idempotent: rom finnes allerede i engine-state.
+    if (parsed?.error?.code === "SINGLE_ROOM_ONLY") {
+      return { kind: "exists" };
+    }
+    return {
+      kind: "failed",
+      code: parsed?.error?.code ?? `HTTP_${res.status}`,
+      message: parsed?.error?.message ?? "ukjent feil",
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { kind: "failed", code: "NETWORK_ERROR", message: msg };
+  }
 }
 
 // ── Utskrift ────────────────────────────────────────────────────────────────
