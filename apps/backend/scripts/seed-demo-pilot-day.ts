@@ -393,6 +393,11 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
     console.log(`  [player]          ${player.email} (id=${player.id}) ${tag}`);
 
     const walletId = `wallet-user-${player.id}`;
+    if (topup.ok) {
+      // Sørg for at wallet-ledger har bootstrap-entry så reconciliation
+      // ikke flagger CRITICAL-alert (BIN-763).
+      await ensureWalletBootstrapEntry(client, walletId, "deposit", PLAYER_DEPOSIT_MAJOR);
+    }
     const registrationId = `reg-${player.id}`;
     await upsertHallRegistration(client, {
       id: registrationId,
@@ -531,6 +536,9 @@ async function seedFourHallProfile(client: Client): Promise<void> {
     console.log(`  [player]          ${player.email} (id=${player.id}, hall=${player.hallId}) ${tag}`);
 
     const walletId = `wallet-user-${player.id}`;
+    if (topup.ok) {
+      await ensureWalletBootstrapEntry(client, walletId, "deposit", PLAYER_DEPOSIT_MAJOR);
+    }
     const registrationId = `reg-${player.id}`;
     await upsertHallRegistration(client, {
       id: registrationId,
@@ -975,10 +983,80 @@ async function ensureWalletAccount(client: Client, walletId: string): Promise<vo
 }
 
 /**
+ * Sørger for at wallet-ledger (`wallet_entries`) har en bootstrap-rad som
+ * matcher `deposit_balance` på kontoen. Uten denne genererer den nattlige
+ * wallet-reconciliation-jobben (BIN-763) CRITICAL-alarmer fordi
+ * SUM(wallet_entries) ≠ wallet_accounts.deposit_balance.
+ *
+ * Idempotent via stable `operation_id` (`seed-bootstrap-{walletId}-{side}`).
+ * Hvis entry-en allerede finnes, hoppes inserten over.
+ *
+ * `entry_hash NULL` markerer raden som legacy/seed (BIN-764 audit-verifier
+ * hopper over disse uten alarm — pre-BIN-764-konvensjon, dokumentert i
+ * `WalletAuditVerifier.ts` "legacy-rader uten entry_hash").
+ *
+ * Diff-beregning: differanse mellom faktisk `deposit_balance` og current
+ * SUM av credit-debit i ledger. Hvis konto allerede er balansert (f.eks.
+ * via real wallet-aktivitet), gjør funksjonen ingenting.
+ */
+async function ensureWalletBootstrapEntry(
+  client: Client,
+  walletId: string,
+  accountSide: "deposit" | "winnings",
+  targetBalanceMajor: number,
+): Promise<void> {
+  const operationId = `seed-bootstrap-${walletId}-${accountSide}`;
+
+  // Idempotency: ble bootstrap allerede skrevet?
+  const existing = await client.query<{ id: string }>(
+    "SELECT id FROM wallet_entries WHERE operation_id = $1 LIMIT 1",
+    [operationId],
+  );
+  if (existing.rows.length > 0) return;
+
+  // Diff: faktisk deposit_balance vs ledger-sum.
+  const sum = await client.query<{ net: string | null }>(
+    `SELECT COALESCE(
+       SUM(CASE WHEN side = 'CREDIT' THEN amount
+                WHEN side = 'DEBIT'  THEN -amount
+                ELSE 0 END),
+       0
+     ) AS net
+     FROM wallet_entries
+     WHERE account_id = $1 AND account_side = $2`,
+    [walletId, accountSide],
+  );
+  const ledgerNet = Number(sum.rows[0]?.net ?? 0);
+  const diff = targetBalanceMajor - ledgerNet;
+  if (Math.abs(diff) < 0.01) return; // Already balanced — no bootstrap needed.
+
+  // Skriv én bootstrap-entry. NULL entry_hash + NULL previous_entry_hash
+  // markerer raden som legacy/seed (audit-verifier hopper over).
+  await client.query(
+    `INSERT INTO wallet_entries
+       (operation_id, account_id, side, amount, account_side,
+        currency, entry_hash, previous_entry_hash)
+     VALUES
+       ($1, $2, $3, $4, $5, 'NOK', NULL, NULL)`,
+    [
+      operationId,
+      walletId,
+      diff > 0 ? "CREDIT" : "DEBIT",
+      Math.abs(diff),
+      accountSide,
+    ],
+  );
+}
+
+/**
  * Sett deposit_balance ≥ amount for spilleren. Bruker `GREATEST` så
  * re-kjøring ikke senker en allerede-større saldo (og dermed ikke utilsiktet
  * fjerner penger en operatør har topput senere). Returns ok-flag som lar
  * scriptet rapportere status uten å feile hele transaksjonen.
+ *
+ * Etter at deposit_balance er satt, kalles `ensureWalletBootstrapEntry` for
+ * å sikre at wallet-ledger (`wallet_entries`) har en matchende bootstrap-rad.
+ * Uten den vil BIN-763 wallet-reconciliation-jobben rapportere CRITICAL-alert.
  */
 async function maybeTopUpPlayerWallet(
   client: Client,
