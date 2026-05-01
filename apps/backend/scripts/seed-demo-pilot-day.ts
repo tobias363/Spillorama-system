@@ -85,6 +85,64 @@ const SCHEDULE_NUMBER = "SID_DEMO_SPILL1";
 const DAILY_SCHEDULE_TODAY_ID = "demo-ds-today";
 const DAILY_SCHEDULE_TOMORROW_ID = "demo-ds-tomorrow";
 
+// ── Spilleplan-åpningstider per ukedag (PR #821) ────────────────────────────
+//
+// Offisiell Spillorama-spilleplan per 01.11.2025:
+//   Mandag-fredag: 11:00-20:00
+//   Lørdag:        11:00-16:00
+//   Søndag:        13:00-19:00
+//
+// Bitmask-konvensjon (matches DailyScheduleRowSchema.weekDays i shared-types):
+//   1=Mandag, 2=Tirsdag, 4=Onsdag, 8=Torsdag, 16=Fredag, 32=Lørdag, 64=Søndag.
+//
+// Definert her etter at PR #825 (room-creation) merge utilsiktet droppet
+// disse fra hovedtoppen — bug funnet ved live re-seed 2026-05-01.
+const WEEKDAY_BITMASK = 1 + 2 + 4 + 8 + 16; // 31 — Mon-Fri
+const SATURDAY_BITMASK = 32;
+const SUNDAY_BITMASK = 64;
+
+const WEEKDAY_HOURS = { startTime: "11:00", endTime: "20:00" } as const;
+const SATURDAY_HOURS = { startTime: "11:00", endTime: "16:00" } as const;
+const SUNDAY_HOURS = { startTime: "13:00", endTime: "19:00" } as const;
+
+// Profil A (single-hall): tre daily-schedule-rader, én per ukedags-bucket.
+const DAILY_SCHEDULE_WEEKDAY_ID = "demo-ds-weekday";
+const DAILY_SCHEDULE_SATURDAY_ID = "demo-ds-saturday";
+const DAILY_SCHEDULE_SUNDAY_ID = "demo-ds-sunday";
+
+// Profil B (4-hall pilot): tilsvarende.
+const PILOT_DAILY_SCHEDULE_WEEKDAY_ID = "demo-ds-pilot-weekday";
+const PILOT_DAILY_SCHEDULE_SATURDAY_ID = "demo-ds-pilot-saturday";
+const PILOT_DAILY_SCHEDULE_SUNDAY_ID = "demo-ds-pilot-sunday";
+
+/** Returnerer åpningstidene for en gitt dato basert på ukedag (lokal-tz). */
+function hoursForDate(date: Date): { readonly startTime: string; readonly endTime: string } {
+  const day = date.getDay(); // 0=Søn, 1=Man, ..., 6=Lør
+  if (day === 0) return SUNDAY_HOURS;
+  if (day === 6) return SATURDAY_HOURS;
+  return WEEKDAY_HOURS;
+}
+
+/** Returnerer bitmask-bit for en gitt dato (matcher weekDays-bitmask). */
+function bitmaskForDate(date: Date): number {
+  const day = date.getDay();
+  if (day === 0) return SUNDAY_BITMASK;
+  if (day === 6) return SATURDAY_BITMASK;
+  return WEEKDAY_BITMASK;
+}
+
+/** Returnerer riktig daily-schedule-id basert på ukedags-bucket + profil. */
+function dailyScheduleIdFor(bitmask: number, profile: "single" | "pilot"): string {
+  if (profile === "pilot") {
+    if (bitmask === SUNDAY_BITMASK) return PILOT_DAILY_SCHEDULE_SUNDAY_ID;
+    if (bitmask === SATURDAY_BITMASK) return PILOT_DAILY_SCHEDULE_SATURDAY_ID;
+    return PILOT_DAILY_SCHEDULE_WEEKDAY_ID;
+  }
+  if (bitmask === SUNDAY_BITMASK) return DAILY_SCHEDULE_SUNDAY_ID;
+  if (bitmask === SATURDAY_BITMASK) return DAILY_SCHEDULE_SATURDAY_ID;
+  return DAILY_SCHEDULE_WEEKDAY_ID;
+}
+
 /**
  * BIN-804 (F1): 4 sub-games — én per mini-game-type i `MINIGAME_ROTATION`
  * (BingoEngineMiniGames.ts:47-52). Stable IDs gjør re-runs idempotente.
