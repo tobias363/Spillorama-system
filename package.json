@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "npm --prefix apps/backend run dev",
     "dev:admin": "npm -w @spillorama/admin-web run dev",
+    "dev:admin:prod": "npm -w @spillorama/admin-web run dev:prod-backend",
     "dev:games": "npm -w @spillorama/game-client run dev",
     "check": "npm --prefix apps/backend run check",
     "build": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build && npm -w @spillorama/admin-web run build && npm --prefix apps/backend run build",
