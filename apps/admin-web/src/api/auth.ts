@@ -192,7 +192,44 @@ export async function logout(): Promise<void> {
 export async function fetchMe(): Promise<Session> {
   const user = await apiRequest<ApiUser>("/api/auth/me", { auth: true });
   const permissions = await fetchPermissions();
-  return mapUserToSession(user, permissions);
+  const session = mapUserToSession(user, permissions);
+
+  // 2026-05-01 (Tobias): for AGENT/HALL_OPERATOR populerer vi `session.hall`
+  // fra `/api/agent/context.assignedHalls` siden `/api/auth/me` kun returnerer
+  // `hallId` (string) — ikke arrayet av hall-objekter med navn som UI-en
+  // forventer. Uten dette ble session.hall = [] for alle agenter, og
+  // header viser "Du er ikke tildelt en hall. Kontakt admin." selv om
+  // agenten ER linket til en hall i app_agent_halls.
+  if (session.role === "agent" || session.role === "hall-operator") {
+    try {
+      const ctxModule = await import("./agent-context.js");
+      const ctx = await ctxModule.getAgentContext();
+      // Sett primary først (fra `ctx.hall`) hvis den finnes — ellers fra
+      // `assignedHalls.find(isPrimary)`. Dette sikrer at session.hall[0]
+      // alltid er primary-hallen.
+      const primary = ctx.hall ?? ctx.assignedHalls.find((h) => h.isPrimary) ?? null;
+      const hallList: { id: string; name: string }[] = [];
+      if (primary) {
+        hallList.push({ id: primary.id, name: primary.name });
+      }
+      // Tillegg: non-primary haller (Teknobingo Pilot-flyten har 4 haller
+      // per agent — primary + 3 non-primary i samme group-of-halls).
+      for (const h of ctx.assignedHalls) {
+        if (primary && h.id === primary.id) continue;
+        hallList.push({ id: h.id, name: h.name });
+      }
+      if (hallList.length > 0) {
+        session.hall = hallList;
+      }
+    } catch (err) {
+      // Defensive: hvis /api/agent/context feiler (eks. permissions),
+      // hold session.hall som mapUserToSession satte den (oftest tom).
+      // UI-en viser deretter "ikke tildelt"-banneret som er sann fall-back.
+      // eslint-disable-next-line no-console
+      console.warn("fetchMe: getAgentContext failed", err);
+    }
+  }
+  return session;
 }
 
 async function fetchPermissions(): Promise<Record<string, { view: boolean; add: boolean; edit: boolean; delete: boolean }>> {
