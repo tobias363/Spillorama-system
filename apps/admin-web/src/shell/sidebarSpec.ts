@@ -60,13 +60,19 @@ export const adminSidebar: SidebarNode[] = [
     labelKey: "cash_in_out",
     defaultExpanded: true,
     children: [
-      { kind: "leaf", id: "cash-inout-overview", path: "/agent/cashinout", icon: "fa fa-circle-o", labelKey: "cash_in_out" },
+      // BUG #6: `/agent/cashinout` er agent-portal-rute (backend
+      // `/api/agent/shift/daily-balance` avviser ADMIN). Skjul for
+      // admin/super-admin — de bruker Live Ops-konsollen for cross-hall
+      // cash-flow.
+      { kind: "leaf", id: "cash-inout-overview", path: "/agent/cashinout", icon: "fa fa-circle-o", labelKey: "cash_in_out", roles: ["agent", "hall-operator"] },
       { kind: "leaf", id: "cash-inout-sold-tickets", path: "/sold-tickets", icon: "fa fa-circle-o", labelKey: "sold_tickets" },
     ],
   },
 
-  // Game 1 master-konsoll (top-level — tidligere under Spillorama Live)
-  { kind: "leaf", id: "game1-master-console", path: "/game1/master/placeholder", icon: "fa fa-bolt", labelKey: "spillorama_master_console" },
+  // Game 1 master-konsoll-leaf fjernet (BUG #2): hardkodet placeholder
+  // path `/game1/master/placeholder` returnerte alltid GAME_NOT_FOUND.
+  // Master-konsoll åpnes via Live Operations-konsollen når en master-runde
+  // faktisk pågår — ikke fra global sidebar.
 
   // 3. Spilleradministrasjon (expandable)
   {
@@ -326,8 +332,13 @@ export const agentSidebar: SidebarNode[] = [
     labelKey: "player_management",
     children: [
       { kind: "leaf", id: "agent-players", path: "/agent/players", icon: "fa fa-circle-o", labelKey: "approved_players" },
-      { kind: "leaf", id: "agent-pending", path: "/pendingRequests", icon: "fa fa-circle-o", labelKey: "pending_requests" },
-      { kind: "leaf", id: "agent-rejected", path: "/rejectedRequests", icon: "fa fa-circle-o", labelKey: "reject_requests" },
+      // BUG #4: Pending/Rejected er admin-ruter (`/pendingRequests`,
+      // `/rejectedRequests`) — agenter får 403/redirect. Role-gate til
+      // admin-roller; agentSidebar vises kun til AGENT/HALL_OPERATOR, så
+      // disse leaves blir effektivt skjult for dem. (Approved Players er
+      // fortsatt synlig — agenter kan lese spillere, men ikke moderate.)
+      { kind: "leaf", id: "agent-pending", path: "/pendingRequests", icon: "fa fa-circle-o", labelKey: "pending_requests", roles: ["admin", "super-admin"] },
+      { kind: "leaf", id: "agent-rejected", path: "/rejectedRequests", icon: "fa fa-circle-o", labelKey: "reject_requests", roles: ["admin", "super-admin"] },
     ],
   },
   { kind: "leaf", id: "agent-physical-tickets", path: "/agent/physical-tickets", icon: "fa fa-ticket", labelKey: "add_physical_tickets" },
