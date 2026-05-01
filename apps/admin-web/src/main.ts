@@ -405,13 +405,18 @@ function mountShell(_root: HTMLElement, session: Session): void {
 function guardRouteForRole(path: string, session: Session): string {
   const bare = path.split("?")[0] ?? path;
   if (isAgentPortalRole(session.role)) {
-    // Agent-portal users stay inside /agent/*. /admin and / redirect to
-    // their landing. Legacy /agent/* (cashinout, physicalCashOut, etc.)
-    // stays accessible since those are agent-specific anyway.
+    // Agent-portal users (AGENT, HALL_OPERATOR) — landing-redirect for `/`
+    // og `/admin`, men ALLE andre paths tillates. Sidebar (sidebarSpec.ts)
+    // filtrerer hva AGENT ser, og backend (AdminAccessPolicy + hall-scope-
+    // guards) håndhever hva de faktisk får tilgang til via RBAC.
+    //
+    // Pilot-fix 2026-05-01: tidligere bounce-back til /agent/dashboard på
+    // alle non-/agent-paths brakk navigasjon for AGENT på sidebar-leaves
+    // som peker på legacy-paths (/uniqueId, /withdraw/*, /physical/*,
+    // /sold-tickets etc.). Disse er gyldige sider AGENT skal kunne åpne
+    // — RBAC + hall-scope tar hand om autorisasjon serverside.
     if (bare === "/" || bare === "/admin") return "/agent/dashboard";
-    if (bare.startsWith("/agent/")) return path;
-    // Anything else is an admin-panel route — bounce back.
-    return "/agent/dashboard";
+    return path;
   }
   if (isAdminPanelRole(session.role)) {
     // ADMIN super-user — alle ruter åpne. Agent-portal-sider rendrer en
