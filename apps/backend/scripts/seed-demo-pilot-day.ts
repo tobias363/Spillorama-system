@@ -6,34 +6,40 @@
  * Idempotent: kan kjøres flere ganger uten å krasje. Alle INSERTs bruker
  * `ON CONFLICT DO NOTHING / DO UPDATE` eller eksisterer-sjekker.
  *
- * Seeder:
- *   1) `demo-hall` (Hall Number 999, navnet "Demo Bingohall", aktiv) med
- *      tv_token og en konservativ adresse.
- *   2) Hall-gruppe "Demo GoH" med demo-hallen som master + medlem.
- *   3) GameType-katalog-rad for Spill 1 (slug `bingo`) inn i
- *      `app_game_management` med 8 ticket-farger og pattern-priser per farge
- *      (Rad 1-4 + Fullt Hus).
- *   4) Fire sub-games i `app_sub_games` — én per mini-game-type i Game 1-
- *      rotasjonen (Wheel of Fortune, Treasure Chest, Mystery Joker,
- *      ColorDraft) med pattern-rad + 8 farge-array (Small/Large ×
- *      Yellow/White/Purple + Red + Green). Stable IDs gjør re-runs
- *      idempotente. BIN-804 F1.
- *   5) Schedule-mal i `app_schedules` (Mon-Sun 18:00-22:00) som bundler
- *      alle 4 sub-games i `sub_games_json`.
- *   6) DailySchedule for I DAG og I MORGEN status=active koblet til
- *      hall + hall-gruppe + game-management. Refererer alle 4 sub-games
- *      i `subgames_json` slik at agenten kan rotere gjennom hele mini-
- *      game-katalogen i én demo-dag.
- *   7) Admin-bruker `demo-admin@spillorama.no` (role=ADMIN).
- *   8) Agent-bruker `demo-agent@spillorama.no` (role=AGENT) tilknyttet
- *      demo-hallen som primaryHallId via `app_agent_halls` med is_primary.
- *   9) 3 spillere `demo-spiller-1@example.com` ... `-3@example.com` med
- *      hallId=demo-hall, KYC=VERIFIED, 500 kr i wallet (deposit_balance).
- *  10) `app_hall_registrations`-rader (status=ACTIVE) for hver demo-spiller
- *      slik at agentens player-lookup (`searchPlayersInHall`) faktisk finner
- *      dem. JOIN-en i PlatformService krever `r.status = 'ACTIVE'`, så uten
- *      dette får agent-portalen tomme søkeresultater. Stable id-er
- *      (`reg-<userId>`) gjør re-runs idempotente.
+ * Seeder TO profiler i samme run (begge er idempotente):
+ *
+ * Profil A — single-hall (legacy demo, beholdes for bakover-kompatibilitet):
+ *   1) `demo-hall-999` (Hall Number 999, "Demo Bingohall") med tv_token.
+ *   2) Hall-gruppe "Demo GoH" med demo-hallen som eneste medlem.
+ *   3) Admin `demo-admin@spillorama.no`.
+ *   4) Agent `demo-agent@spillorama.no` med demo-hall-999 som primary.
+ *   5) 3 spillere `demo-spiller-1..3@example.com` på demo-hall-999.
+ *   6) GameManagement (Spill 1) + 4 sub-games + schedule-mal + daily
+ *      schedules for i dag og i morgen.
+ *
+ * Profil B — 4-hall-pilot (Bølge 1: 4 sammenkoblede haller med master):
+ *   1) 4 haller `demo-hall-001..004` (Hall Number 1001-1004) med stabile
+ *      tv_token-uuid-er (hardkodet for re-run-stabilitet).
+ *   2) Hall-gruppe "Demo Pilot GoH" (id `demo-pilot-goh`) med alle 4 haller
+ *      som medlemmer; `demo-hall-001` registrert som master via daily-
+ *      schedule.hall_ids_json.masterHallId (master-konseptet bor på
+ *      runtime-nivået, ikke i app_hall_group_members som kun lagrer
+ *      medlemskap — se 20260424000000_hall_groups.sql).
+ *   3) 4 agenter `demo-agent-1..4@spillorama.no` — én per hall som
+ *      primary, øvrige 3 haller som non-primary i app_agent_halls (slik
+ *      at agenten kan se group-of-hall-data men shift-er kun i sin egen
+ *      hall via partial-unique-index på is_primary).
+ *   4) 12 spillere `demo-spiller-1..12@example.com` (3 per hall) med
+ *      app_hall_registrations status=ACTIVE og 500 kr på deposit-wallet.
+ *   5) Egen schedule-mal `demo-sched-pilot-goh` + 2 daily schedules
+ *      (i dag + i morgen) bundet til pilot-gruppen og master-hallen.
+ *      Sub-games gjenbrukes fra Profil A (mini-game-rotasjonen er
+ *      engine-side og skiller ikke per-gruppe).
+ *
+ * Begge profiler kjøres alltid — de bruker disjunkte stable IDs så
+ * re-runs er trygge. Ønsker du å skru av en profil, kommenter ut
+ * `await seedSingleHallProfile(...)` eller `await seedFourHallProfile(...)`
+ * i `main()`.
  *
  * Bruk:
  *   cd apps/backend
@@ -150,6 +156,113 @@ const PLAYERS: DemoPlayer[] = [
 const PLAYER_BIRTH_DATE = "1990-01-01";
 const PLAYER_DEPOSIT_MAJOR = 500; // 500 NOK på deposit-siden av wallet
 
+// ── Profil B: 4-hall-pilot (Bølge 1) ────────────────────────────────────────
+
+/**
+ * 4 sammenkoblede haller for pilot-demo. `demo-hall-001` er master.
+ *
+ * tv_token er hardkodet til stabile UUID-strenger slik at re-runs gir samme
+ * verdi (i motsetning til Profil A som lar Postgres generere via
+ * gen_random_uuid() ved første INSERT). Hardkoding gjør det også enklere å
+ * dele TV-URL i pilot-dokumentasjonen uten å måtte slå opp DB-en.
+ */
+interface PilotHall {
+  id: string;
+  slug: string;
+  hallNumber: number;
+  name: string;
+  address: string;
+  tvToken: string;
+}
+
+const PILOT_HALLS: readonly PilotHall[] = [
+  {
+    id: "demo-hall-001",
+    slug: "demo-pilot-hall-1",
+    hallNumber: 1001,
+    name: "Demo Bingohall 1 (Master)",
+    address: "Pilotveien 1, 0001 Demo",
+    // Stabile UUID-strenger (manuelt valgte, ikke verdifulle hemmeligheter
+    // — kun for at TV-URL-en skal være deterministisk i pilot-demo).
+    tvToken: "11111111-1111-4111-8111-111111111111",
+  },
+  {
+    id: "demo-hall-002",
+    slug: "demo-pilot-hall-2",
+    hallNumber: 1002,
+    name: "Demo Bingohall 2",
+    address: "Pilotveien 2, 0002 Demo",
+    tvToken: "22222222-2222-4222-8222-222222222222",
+  },
+  {
+    id: "demo-hall-003",
+    slug: "demo-pilot-hall-3",
+    hallNumber: 1003,
+    name: "Demo Bingohall 3",
+    address: "Pilotveien 3, 0003 Demo",
+    tvToken: "33333333-3333-4333-8333-333333333333",
+  },
+  {
+    id: "demo-hall-004",
+    slug: "demo-pilot-hall-4",
+    hallNumber: 1004,
+    name: "Demo Bingohall 4",
+    address: "Pilotveien 4, 0004 Demo",
+    tvToken: "44444444-4444-4444-8444-444444444444",
+  },
+];
+
+const PILOT_MASTER_HALL_ID = PILOT_HALLS[0].id;
+const PILOT_HALL_GROUP_ID = "demo-pilot-goh";
+const PILOT_HALL_GROUP_NAME = "Demo Pilot GoH";
+
+const PILOT_SCHEDULE_ID = "demo-sched-pilot-goh";
+const PILOT_SCHEDULE_NUMBER = "SID_DEMO_PILOT_GOH";
+const PILOT_DAILY_SCHEDULE_TODAY_ID = "demo-ds-pilot-today";
+const PILOT_DAILY_SCHEDULE_TOMORROW_ID = "demo-ds-pilot-tomorrow";
+const PILOT_GAME_MANAGEMENT_ID = "demo-gm-pilot-spill1";
+
+interface PilotAgent {
+  id: string;
+  email: string;
+  displayName: string;
+  primaryHallId: string;
+}
+
+const PILOT_AGENTS: readonly PilotAgent[] = PILOT_HALLS.map((hall, index) => ({
+  id: `demo-agent-${index + 1}`,
+  email: `demo-agent-${index + 1}@spillorama.no`,
+  displayName: `Demo Pilot Agent ${index + 1}`,
+  primaryHallId: hall.id,
+}));
+
+interface PilotPlayer {
+  id: string;
+  email: string;
+  displayName: string;
+  hallId: string;
+}
+
+// 12 spillere — 3 per hall (1-3 → hall-001, 4-6 → hall-002, ...).
+// Stable IDs `demo-pilot-spiller-N` så de ikke kolliderer med Profil A's
+// `demo-user-spiller-N`-spillere.
+const PILOT_PLAYERS: readonly PilotPlayer[] = (() => {
+  const out: PilotPlayer[] = [];
+  for (let hallIdx = 0; hallIdx < PILOT_HALLS.length; hallIdx += 1) {
+    const hall = PILOT_HALLS[hallIdx];
+    for (let p = 1; p <= 3; p += 1) {
+      const num = hallIdx * 3 + p;
+      out.push({
+        id: `demo-pilot-spiller-${num}`,
+        email: `demo-spiller-${num}@example.com`,
+        displayName: `Demo Pilot Spiller ${num}`,
+        hallId: hall.id,
+      });
+    }
+  }
+  return out;
+})();
+
 // 8 ticket-farger per Tobias-vedtak (LEGACY_1_TO_1_MAPPING_2026-04-23 §8 #3).
 // Backend matcher dem til prizes per phase per farge.
 const TICKET_COLORS = [
@@ -190,130 +303,26 @@ async function main(): Promise<void> {
   try {
     await client.query("BEGIN");
 
-    // 1) Hall ----------------------------------------------------------------
-    await upsertHall(client);
-    console.log(`  [hall]            ${HALL_SLUG} (id=${HALL_ID}, hallNumber=${HALL_NUMBER})`);
+    console.log("== Profil A: single-hall demo ==");
+    await seedSingleHallProfile(client);
 
-    // 2) Hall-gruppe + medlemskap -------------------------------------------
-    await upsertHallGroup(client);
-    await ensureHallGroupMember(client, HALL_GROUP_ID, HALL_ID);
-    console.log(`  [hall-group]      ${HALL_GROUP_NAME} (id=${HALL_GROUP_ID}) -> master ${HALL_ID}`);
+    console.log("");
+    console.log("== Profil B: 4-hall-pilot ==");
+    await seedFourHallProfile(client);
 
-    // 3) Admin-bruker --------------------------------------------------------
-    await upsertUser(client, {
-      id: ADMIN_ID,
-      email: ADMIN_EMAIL,
-      displayName: ADMIN_DISPLAY,
-      surname: ADMIN_SURNAME,
-      role: "ADMIN",
-      hallId: null,
-      birthDate: null,
-      kycStatus: "VERIFIED",
-    });
-    console.log(`  [admin]           ${ADMIN_EMAIL} (id=${ADMIN_ID})`);
-
-    // 4) Agent-bruker + hall-tildeling --------------------------------------
-    await upsertUser(client, {
-      id: AGENT_ID,
-      email: AGENT_EMAIL,
-      displayName: AGENT_DISPLAY,
-      surname: AGENT_SURNAME,
-      role: "AGENT",
-      hallId: HALL_ID, // Behold også som primary i app_users.hall_id (legacy 1:1)
-      birthDate: null,
-      kycStatus: "VERIFIED",
-    });
-    await ensureAgentHallAssignment(client, AGENT_ID, HALL_ID, ADMIN_ID);
-    console.log(`  [agent]           ${AGENT_EMAIL} (id=${AGENT_ID}) primaryHall=${HALL_ID}`);
-
-    // 5) Spillere + wallet topup + hall-registrering ------------------------
-    // Hall-registrering (app_hall_registrations status=ACTIVE) er PÅKREVD for
-    // at agent-portalens player-lookup (`searchPlayersInHall` i
-    // PlatformService) skal finne spilleren — JOIN-en der filtrerer på
-    // `r.hall_id = X AND r.status = 'ACTIVE'`. Uten denne raden returnerer
-    // søket alltid 0 treff, selv om `app_users.hall_id` peker til hallen.
-    for (const player of PLAYERS) {
-      await upsertUser(client, {
-        id: player.id,
-        email: player.email,
-        displayName: player.displayName,
-        surname: "Demo",
-        role: "PLAYER",
-        hallId: HALL_ID,
-        birthDate: PLAYER_BIRTH_DATE,
-        kycStatus: "VERIFIED",
-      });
-      const topup = await maybeTopUpPlayerWallet(client, player.id, PLAYER_DEPOSIT_MAJOR);
-      const tag = topup.ok
-        ? `wallet=${topup.walletId} (${PLAYER_DEPOSIT_MAJOR} NOK)`
-        : `wallet topup hoppet over: ${topup.reason}`;
-      console.log(`  [player]          ${player.email} (id=${player.id}) ${tag}`);
-
-      // Wallet-id er stabilt: `wallet-user-<userId>` (matcher upsertUser).
-      const walletId = `wallet-user-${player.id}`;
-      const registrationId = `reg-${player.id}`;
-      await upsertHallRegistration(client, {
-        id: registrationId,
-        userId: player.id,
-        walletId,
-        hallId: HALL_ID,
-        activatedByUserId: ADMIN_ID,
-      });
-      console.log(`  [hall-reg]        ${registrationId} (user=${player.id}, hall=${HALL_ID}, status=ACTIVE)`);
-    }
-
-    // 6) GameManagement (Spill 1) -------------------------------------------
-    await upsertGameManagement(client, ADMIN_ID);
-    console.log(`  [game-management] ${GAME_MANAGEMENT_ID} (Spill 1, slug=bingo)`);
-
-    // 7) SubGames (4 stk — én per mini-game-type) ---------------------------
-    for (const sg of SUB_GAMES) {
-      await upsertSubGame(client, ADMIN_ID, sg);
-      console.log(
-        `  [sub-game]        ${sg.id} (${sg.name}, mini-game=${sg.miniGameSlug}, 8 ticket-farger)`,
-      );
-    }
-
-    // 8) Schedule-mal (Mon-Sun 18:00-22:00) ---------------------------------
-    await upsertSchedule(client, ADMIN_ID);
-    console.log(`  [schedule]        ${SCHEDULE_NUMBER} (id=${SCHEDULE_ID}, Mon-Sun 18:00-22:00)`);
-
-    // 9) DailySchedule for i dag + i morgen ---------------------------------
-    const today = startOfDayUtc(new Date());
-    const tomorrow = new Date(today.getTime() + 24 * 3_600_000);
-    await upsertDailySchedule(
-      client,
-      DAILY_SCHEDULE_TODAY_ID,
-      "Demo dagsplan (i dag)",
-      today,
-      ADMIN_ID,
-    );
-    await upsertDailySchedule(
-      client,
-      DAILY_SCHEDULE_TOMORROW_ID,
-      "Demo dagsplan (i morgen)",
-      tomorrow,
-      ADMIN_ID,
-    );
-    console.log(
-      `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
-        .toISOString()
-        .slice(0, 10)}`,
-    );
-
-    // Hent ut tv_token for utskrift (kun hvis kolonnen finnes).
-    let tvToken = "<ikke konfigurert>";
+    // Hent ut tv_token for utskrift (kun hvis kolonnen finnes) — Profil A.
+    let singleHallTvToken = "<ikke konfigurert>";
     if (await columnExists(client, "app_halls", "tv_token")) {
       const { rows: hallRows } = await client.query<{ tv_token: string | null }>(
         "SELECT tv_token FROM app_halls WHERE id = $1",
         [HALL_ID],
       );
-      tvToken = hallRows[0]?.tv_token ?? "<MANGLER>";
+      singleHallTvToken = hallRows[0]?.tv_token ?? "<MANGLER>";
     }
 
     await client.query("COMMIT");
 
-    printInstructions(tvToken);
+    printInstructions(singleHallTvToken);
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[seed-demo-pilot-day] feilet:", err);
@@ -321,6 +330,277 @@ async function main(): Promise<void> {
   } finally {
     await client.end();
   }
+}
+
+// ── Profil A: single-hall (legacy demo) ─────────────────────────────────────
+
+async function seedSingleHallProfile(client: Client): Promise<void> {
+  // 1) Hall
+  await upsertHall(client);
+  console.log(`  [hall]            ${HALL_SLUG} (id=${HALL_ID}, hallNumber=${HALL_NUMBER})`);
+
+  // 2) Hall-gruppe + medlemskap
+  await upsertHallGroup(client);
+  await ensureHallGroupMember(client, HALL_GROUP_ID, HALL_ID);
+  console.log(`  [hall-group]      ${HALL_GROUP_NAME} (id=${HALL_GROUP_ID}) -> master ${HALL_ID}`);
+
+  // 3) Admin-bruker
+  await upsertUser(client, {
+    id: ADMIN_ID,
+    email: ADMIN_EMAIL,
+    displayName: ADMIN_DISPLAY,
+    surname: ADMIN_SURNAME,
+    role: "ADMIN",
+    hallId: null,
+    birthDate: null,
+    kycStatus: "VERIFIED",
+  });
+  console.log(`  [admin]           ${ADMIN_EMAIL} (id=${ADMIN_ID})`);
+
+  // 4) Agent-bruker + hall-tildeling
+  await upsertUser(client, {
+    id: AGENT_ID,
+    email: AGENT_EMAIL,
+    displayName: AGENT_DISPLAY,
+    surname: AGENT_SURNAME,
+    role: "AGENT",
+    hallId: HALL_ID,
+    birthDate: null,
+    kycStatus: "VERIFIED",
+  });
+  await ensureAgentHallAssignment(client, AGENT_ID, HALL_ID, ADMIN_ID, true);
+  console.log(`  [agent]           ${AGENT_EMAIL} (id=${AGENT_ID}) primaryHall=${HALL_ID}`);
+
+  // 5) Spillere + wallet topup + hall-registrering
+  for (const player of PLAYERS) {
+    await upsertUser(client, {
+      id: player.id,
+      email: player.email,
+      displayName: player.displayName,
+      surname: "Demo",
+      role: "PLAYER",
+      hallId: HALL_ID,
+      birthDate: PLAYER_BIRTH_DATE,
+      kycStatus: "VERIFIED",
+    });
+    const topup = await maybeTopUpPlayerWallet(client, player.id, PLAYER_DEPOSIT_MAJOR);
+    const tag = topup.ok
+      ? `wallet=${topup.walletId} (${PLAYER_DEPOSIT_MAJOR} NOK)`
+      : `wallet topup hoppet over: ${topup.reason}`;
+    console.log(`  [player]          ${player.email} (id=${player.id}) ${tag}`);
+
+    const walletId = `wallet-user-${player.id}`;
+    const registrationId = `reg-${player.id}`;
+    await upsertHallRegistration(client, {
+      id: registrationId,
+      userId: player.id,
+      walletId,
+      hallId: HALL_ID,
+      activatedByUserId: ADMIN_ID,
+    });
+    console.log(`  [hall-reg]        ${registrationId} (user=${player.id}, hall=${HALL_ID}, status=ACTIVE)`);
+  }
+
+  // 6) GameManagement (Spill 1)
+  await upsertGameManagement(client, GAME_MANAGEMENT_ID, "Demo Spill 1 (Wheel of Fortune)", ADMIN_ID);
+  console.log(`  [game-management] ${GAME_MANAGEMENT_ID} (Spill 1, slug=bingo)`);
+
+  // 7) SubGames (4 stk — én per mini-game-type)
+  for (const sg of SUB_GAMES) {
+    await upsertSubGame(client, ADMIN_ID, sg);
+    console.log(
+      `  [sub-game]        ${sg.id} (${sg.name}, mini-game=${sg.miniGameSlug}, 8 ticket-farger)`,
+    );
+  }
+
+  // 8) Schedule-mal (Mon-Sun 18:00-22:00)
+  await upsertSchedule(
+    client,
+    SCHEDULE_ID,
+    SCHEDULE_NUMBER,
+    "Demo Spill 1 mal",
+    ADMIN_ID,
+  );
+  console.log(`  [schedule]        ${SCHEDULE_NUMBER} (id=${SCHEDULE_ID}, Mon-Sun 18:00-22:00)`);
+
+  // 9) DailySchedule for i dag + i morgen
+  const today = startOfDayUtc(new Date());
+  const tomorrow = new Date(today.getTime() + 24 * 3_600_000);
+  await upsertDailySchedule(client, {
+    id: DAILY_SCHEDULE_TODAY_ID,
+    name: "Demo dagsplan (i dag)",
+    startDate: today,
+    adminId: ADMIN_ID,
+    gameManagementId: GAME_MANAGEMENT_ID,
+    scheduleId: SCHEDULE_ID,
+    masterHallId: HALL_ID,
+    hallIds: [HALL_ID],
+    groupHallIds: [HALL_GROUP_ID],
+  });
+  await upsertDailySchedule(client, {
+    id: DAILY_SCHEDULE_TOMORROW_ID,
+    name: "Demo dagsplan (i morgen)",
+    startDate: tomorrow,
+    adminId: ADMIN_ID,
+    gameManagementId: GAME_MANAGEMENT_ID,
+    scheduleId: SCHEDULE_ID,
+    masterHallId: HALL_ID,
+    hallIds: [HALL_ID],
+    groupHallIds: [HALL_GROUP_ID],
+  });
+  console.log(
+    `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
+      .toISOString()
+      .slice(0, 10)}`,
+  );
+}
+
+// ── Profil B: 4-hall-pilot ─────────────────────────────────────────────────
+
+async function seedFourHallProfile(client: Client): Promise<void> {
+  // 1) 4 haller med stabile tv_token-er.
+  for (const hall of PILOT_HALLS) {
+    await upsertPilotHall(client, hall);
+    console.log(
+      `  [hall]            ${hall.slug} (id=${hall.id}, hallNumber=${hall.hallNumber})`,
+    );
+  }
+
+  // 2) Hall-gruppe "Demo Pilot GoH" + 4 medlemmer.
+  // Master-konseptet bor IKKE i app_hall_group_members (kun group_id +
+  // hall_id + added_at). Master settes via daily_schedule.hall_ids_json.
+  // Vi noterer master-id-en i extra_json så admin-UI kan finne den uten
+  // å lese alle aktive daily-schedules.
+  await upsertPilotHallGroup(client);
+  for (const hall of PILOT_HALLS) {
+    await ensureHallGroupMember(client, PILOT_HALL_GROUP_ID, hall.id);
+  }
+  console.log(
+    `  [hall-group]      ${PILOT_HALL_GROUP_NAME} (id=${PILOT_HALL_GROUP_ID}) ` +
+      `-> master ${PILOT_MASTER_HALL_ID} + ${PILOT_HALLS.length - 1} non-master`,
+  );
+
+  // 3) 4 agenter — hver med sin egen hall som primary + de tre andre som
+  // non-primary. Partial unique-index på is_primary håndhever én primary
+  // per agent (se 20260418220100_agent_halls.sql).
+  for (const agent of PILOT_AGENTS) {
+    await upsertUser(client, {
+      id: agent.id,
+      email: agent.email,
+      displayName: agent.displayName,
+      surname: "Pilotvert",
+      role: "AGENT",
+      hallId: agent.primaryHallId, // legacy 1:1
+      birthDate: null,
+      kycStatus: "VERIFIED",
+    });
+
+    // Sett primary først (clearer evt. annen primary), deretter non-primary
+    // for de tre øvrige hallene.
+    await ensureAgentHallAssignment(client, agent.id, agent.primaryHallId, ADMIN_ID, true);
+    for (const hall of PILOT_HALLS) {
+      if (hall.id === agent.primaryHallId) continue;
+      await ensureAgentHallAssignment(client, agent.id, hall.id, ADMIN_ID, false);
+    }
+
+    const otherHallCount = PILOT_HALLS.length - 1;
+    console.log(
+      `  [agent]           ${agent.email} (id=${agent.id}) primary=${agent.primaryHallId} +${otherHallCount} non-primary`,
+    );
+  }
+
+  // 4) 12 spillere (3 per hall) med wallet topup + hall-registrering.
+  for (const player of PILOT_PLAYERS) {
+    await upsertUser(client, {
+      id: player.id,
+      email: player.email,
+      displayName: player.displayName,
+      surname: "Pilot",
+      role: "PLAYER",
+      hallId: player.hallId,
+      birthDate: PLAYER_BIRTH_DATE,
+      kycStatus: "VERIFIED",
+    });
+    const topup = await maybeTopUpPlayerWallet(client, player.id, PLAYER_DEPOSIT_MAJOR);
+    const tag = topup.ok
+      ? `wallet=${topup.walletId} (${PLAYER_DEPOSIT_MAJOR} NOK)`
+      : `wallet topup hoppet over: ${topup.reason}`;
+    console.log(`  [player]          ${player.email} (id=${player.id}, hall=${player.hallId}) ${tag}`);
+
+    const walletId = `wallet-user-${player.id}`;
+    const registrationId = `reg-${player.id}`;
+    await upsertHallRegistration(client, {
+      id: registrationId,
+      userId: player.id,
+      walletId,
+      hallId: player.hallId,
+      activatedByUserId: ADMIN_ID,
+    });
+    console.log(
+      `  [hall-reg]        ${registrationId} (user=${player.id}, hall=${player.hallId}, status=ACTIVE)`,
+    );
+  }
+
+  // 5) Egen GameManagement-rad for pilot-gruppen (gjenbruker samme
+  // ticket-farger og pattern-config som Profil A — det er kun navn + id
+  // som varierer).
+  await upsertGameManagement(
+    client,
+    PILOT_GAME_MANAGEMENT_ID,
+    "Demo Pilot Spill 1 (4-hall master/slave)",
+    ADMIN_ID,
+  );
+  console.log(`  [game-management] ${PILOT_GAME_MANAGEMENT_ID} (Spill 1, pilot-gruppe)`);
+
+  // SubGames og engine-mini-game-rotasjon er felles på tvers av profiler
+  // (engine leser ikke per-gruppe), så vi gjenbruker SUB_GAMES seedet i
+  // Profil A. Daily schedules under viser til disse via subgames_json.
+
+  // 6) Schedule-mal for pilot-gruppen.
+  await upsertSchedule(
+    client,
+    PILOT_SCHEDULE_ID,
+    PILOT_SCHEDULE_NUMBER,
+    "Demo Pilot Spill 1 mal",
+    ADMIN_ID,
+  );
+  console.log(
+    `  [schedule]        ${PILOT_SCHEDULE_NUMBER} (id=${PILOT_SCHEDULE_ID}, Mon-Sun 18:00-22:00)`,
+  );
+
+  // 7) Daily schedules for i dag + i morgen, med master-hall + alle 4
+  // haller i hall_ids_json og pilot-gruppen som groupHallIds.
+  const today = startOfDayUtc(new Date());
+  const tomorrow = new Date(today.getTime() + 24 * 3_600_000);
+  const allHallIds = PILOT_HALLS.map((h) => h.id);
+
+  await upsertDailySchedule(client, {
+    id: PILOT_DAILY_SCHEDULE_TODAY_ID,
+    name: "Demo Pilot dagsplan (i dag)",
+    startDate: today,
+    adminId: ADMIN_ID,
+    gameManagementId: PILOT_GAME_MANAGEMENT_ID,
+    scheduleId: PILOT_SCHEDULE_ID,
+    masterHallId: PILOT_MASTER_HALL_ID,
+    hallIds: allHallIds,
+    groupHallIds: [PILOT_HALL_GROUP_ID],
+  });
+  await upsertDailySchedule(client, {
+    id: PILOT_DAILY_SCHEDULE_TOMORROW_ID,
+    name: "Demo Pilot dagsplan (i morgen)",
+    startDate: tomorrow,
+    adminId: ADMIN_ID,
+    gameManagementId: PILOT_GAME_MANAGEMENT_ID,
+    scheduleId: PILOT_SCHEDULE_ID,
+    masterHallId: PILOT_MASTER_HALL_ID,
+    hallIds: allHallIds,
+    groupHallIds: [PILOT_HALL_GROUP_ID],
+  });
+  console.log(
+    `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
+      .toISOString()
+      .slice(0, 10)} (master=${PILOT_MASTER_HALL_ID})`,
+  );
 }
 
 // ── Steg-funksjoner ─────────────────────────────────────────────────────────
@@ -394,6 +674,77 @@ async function upsertHallGroup(client: Client): Promise<void> {
            deleted_at = NULL,
            updated_at = now()`,
     [HALL_GROUP_ID, HALL_GROUP_NAME],
+  );
+}
+
+async function upsertPilotHall(client: Client, hall: PilotHall): Promise<void> {
+  // Parameterisert variant av upsertHall for 4-hall-pilot. I motsetning til
+  // single-hall-versjonen setter vi tv_token til en hardkodet stabil verdi
+  // (fra PILOT_HALLS-arrayen) slik at TV-URL i pilot-runbook er deterministisk
+  // på tvers av re-seeds — operatører trenger ikke slå opp DB-en for å lime
+  // inn URL i kiosk-modus.
+  const tvTokenCol = await columnExists(client, "app_halls", "tv_token");
+  const hallNumberCol = await columnExists(client, "app_halls", "hall_number");
+
+  const cols = ["id", "slug", "name", "region", "address", "is_active"];
+  const placeholders = ["$1", "$2", "$3", "'NO'", "$4", "true"];
+  const values: unknown[] = [hall.id, hall.slug, hall.name, hall.address];
+  let nextIdx = values.length + 1;
+
+  if (hallNumberCol) {
+    cols.push("hall_number");
+    placeholders.push(`$${nextIdx++}`);
+    values.push(hall.hallNumber);
+  }
+  if (tvTokenCol) {
+    cols.push("tv_token");
+    placeholders.push(`$${nextIdx++}`);
+    values.push(hall.tvToken);
+  }
+
+  // ON CONFLICT (id) for idempotens. Til forskjell fra upsertHall oppdaterer
+  // vi tv_token også, slik at hardkodet stable token alltid vinner over evt.
+  // tidligere autogenerert verdi (en eldre kjøring kan ha satt en gen_random
+  // før vi byttet til stabile tokens).
+  const updateSet = [
+    "slug = EXCLUDED.slug",
+    "name = EXCLUDED.name",
+    "address = EXCLUDED.address",
+    "is_active = true",
+    "updated_at = now()",
+  ];
+  if (hallNumberCol) updateSet.push("hall_number = EXCLUDED.hall_number");
+  if (tvTokenCol) updateSet.push("tv_token = EXCLUDED.tv_token");
+
+  const sql = `
+    INSERT INTO app_halls (${cols.join(", ")})
+    VALUES (${placeholders.join(", ")})
+    ON CONFLICT (id) DO UPDATE
+      SET ${updateSet.join(", ")}
+  `;
+  await client.query(sql, values);
+}
+
+async function upsertPilotHallGroup(client: Client): Promise<void> {
+  // Pilot-gruppe (4 sammenkoblede haller). Strukturen i app_hall_groups
+  // er identisk med single-hall-gruppen — kun id + name varierer.
+  await client.query(
+    `INSERT INTO app_hall_groups (id, name, status, products_json, extra_json, created_by)
+     VALUES ($1, $2, 'active', '[]'::jsonb, $3::jsonb, NULL)
+     ON CONFLICT (id) DO UPDATE
+       SET name = EXCLUDED.name,
+           status = 'active',
+           extra_json = EXCLUDED.extra_json,
+           deleted_at = NULL,
+           updated_at = now()`,
+    [
+      PILOT_HALL_GROUP_ID,
+      PILOT_HALL_GROUP_NAME,
+      // Master-hall lagres i extra_json så admin-UI kan finne den uten å
+      // måtte joine app_daily_schedules.hall_ids_json. Runtime-master på
+      // selve game-runden bor fortsatt i daily-schedule (den er kanonisk).
+      JSON.stringify({ masterHallId: PILOT_MASTER_HALL_ID, kind: "pilot" }),
+    ],
   );
 }
 
@@ -528,22 +879,26 @@ async function ensureAgentHallAssignment(
   userId: string,
   hallId: string,
   assignedByUserId: string | null,
+  isPrimary: boolean,
 ): Promise<void> {
   // app_agent_halls: PK (user_id, hall_id), partial unique on is_primary
-  // per user. Vi setter is_primary=true her og dropper evt. annen primary
-  // for samme user først (matcher AgentStore.assignHall-logikken).
-  await client.query(
-    `UPDATE app_agent_halls SET is_primary = false
-       WHERE user_id = $1 AND is_primary AND hall_id <> $2`,
-    [userId, hallId],
-  );
+  // per user. Når vi setter is_primary=true må vi også droppe evt. annen
+  // primary for samme user (matcher AgentStore.assignHall-logikken).
+  // Når isPrimary=false er det en ren upsert uten å røre andre rader.
+  if (isPrimary) {
+    await client.query(
+      `UPDATE app_agent_halls SET is_primary = false
+         WHERE user_id = $1 AND is_primary AND hall_id <> $2`,
+      [userId, hallId],
+    );
+  }
   await client.query(
     `INSERT INTO app_agent_halls (user_id, hall_id, is_primary, assigned_by_user_id)
-     VALUES ($1, $2, true, $3)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (user_id, hall_id) DO UPDATE
-       SET is_primary = true,
-           assigned_by_user_id = EXCLUDED.assigned_by_user_id`,
-    [userId, hallId, assignedByUserId],
+       SET is_primary = EXCLUDED.is_primary,
+           assigned_by_user_id = COALESCE(EXCLUDED.assigned_by_user_id, app_agent_halls.assigned_by_user_id)`,
+    [userId, hallId, isPrimary, assignedByUserId],
   );
 }
 
@@ -676,7 +1031,12 @@ async function maybeTopUpPlayerWallet(
   }
 }
 
-async function upsertGameManagement(client: Client, adminId: string): Promise<void> {
+async function upsertGameManagement(
+  client: Client,
+  id: string,
+  name: string,
+  adminId: string,
+): Promise<void> {
   // Tickets-priser per farge i øre (10/20/30/40 kr × 1/1.5/2/2.5).
   const ticketPrices: Record<string, number> = {
     smallYellow: 1000,
@@ -721,9 +1081,9 @@ async function upsertGameManagement(client: Client, adminId: string): Promise<vo
        (id, game_type_id, name, ticket_type, ticket_price,
         start_date, end_date, status, config_json, created_by)
      VALUES
-       ($1, 'bingo', 'Demo Spill 1 (Wheel of Fortune)', 'Large', 0,
+       ($1, 'bingo', $2, 'Large', 0,
         now() - interval '1 day', now() + interval '30 days', 'active',
-        $2::jsonb, $3)
+        $3::jsonb, $4)
      ON CONFLICT (id) DO UPDATE
        SET name = EXCLUDED.name,
            config_json = EXCLUDED.config_json,
@@ -732,7 +1092,7 @@ async function upsertGameManagement(client: Client, adminId: string): Promise<vo
            end_date = EXCLUDED.end_date,
            updated_at = now(),
            deleted_at = NULL`,
-    [GAME_MANAGEMENT_ID, JSON.stringify(configJson), adminId],
+    [id, name, JSON.stringify(configJson), adminId],
   );
 }
 
@@ -784,7 +1144,13 @@ async function upsertSubGame(
   );
 }
 
-async function upsertSchedule(client: Client, adminId: string): Promise<void> {
+async function upsertSchedule(
+  client: Client,
+  id: string,
+  scheduleNumber: string,
+  scheduleName: string,
+  adminId: string,
+): Promise<void> {
   // BIN-804 F1: bundler alle 4 sub-games i schedule-malen slik at hele
   // mini-game-rotasjonen er konfigurert i én plan. Hvert sub-game får
   // identisk timing/pris-config — kun navn + subGameId varierer.
@@ -818,9 +1184,9 @@ async function upsertSchedule(client: Client, adminId: string): Promise<void> {
         lucky_number_prize, status, is_admin_schedule,
         manual_start_time, manual_end_time, sub_games_json, created_by)
      VALUES
-       ($1, 'Demo Spill 1 mal', $2, 'Manual',
+       ($1, $2, $3, 'Manual',
         0, 'active', true,
-        '18:00', '22:00', $3::jsonb, $4)
+        '18:00', '22:00', $4::jsonb, $5)
      ON CONFLICT (id) DO UPDATE
        SET schedule_name = EXCLUDED.schedule_name,
            sub_games_json = EXCLUDED.sub_games_json,
@@ -829,25 +1195,34 @@ async function upsertSchedule(client: Client, adminId: string): Promise<void> {
            manual_end_time = EXCLUDED.manual_end_time,
            updated_at = now(),
            deleted_at = NULL`,
-    [SCHEDULE_ID, SCHEDULE_NUMBER, JSON.stringify(subGames), adminId],
+    [id, scheduleName, scheduleNumber, JSON.stringify(subGames), adminId],
   );
+}
+
+interface UpsertDailyScheduleInput {
+  id: string;
+  name: string;
+  startDate: Date;
+  adminId: string;
+  gameManagementId: string;
+  scheduleId: string;
+  masterHallId: string;
+  hallIds: readonly string[];
+  groupHallIds: readonly string[];
 }
 
 async function upsertDailySchedule(
   client: Client,
-  id: string,
-  name: string,
-  startDate: Date,
-  adminId: string,
+  input: UpsertDailyScheduleInput,
 ): Promise<void> {
   // Mon-Sun bitmask = 1+2+4+8+16+32+64 = 127. Setter samme bitmask
   // for begge daglige planer slik at scheduler-tick kan plukke dem opp
   // uavhengig av ukedag.
-  const otherData = { scheduleId: SCHEDULE_ID };
+  const otherData = { scheduleId: input.scheduleId };
   const hallIdsJson = {
-    masterHallId: HALL_ID,
-    hallIds: [HALL_ID],
-    groupHallIds: [HALL_GROUP_ID],
+    masterHallId: input.masterHallId,
+    hallIds: input.hallIds,
+    groupHallIds: input.groupHallIds,
   };
   // BIN-804 F1: alle 4 sub-games refereres i daily schedule-en slik at
   // agent kan rotere gjennom hele mini-game-katalogen i én demo-dag.
@@ -862,7 +1237,7 @@ async function upsertDailySchedule(
     status: "active",
   }));
   // Sett end_date til 23:59:59 samme dag for stabil filtrering.
-  const endDate = new Date(startDate.getTime() + 24 * 3_600_000 - 1_000);
+  const endDate = new Date(input.startDate.getTime() + 24 * 3_600_000 - 1_000);
 
   await client.query(
     `INSERT INTO app_daily_schedules
@@ -894,16 +1269,16 @@ async function upsertDailySchedule(
            updated_at = now(),
            deleted_at = NULL`,
     [
-      id,
-      name,
-      GAME_MANAGEMENT_ID,
-      HALL_ID,
+      input.id,
+      input.name,
+      input.gameManagementId,
+      input.masterHallId,
       JSON.stringify(hallIdsJson),
-      startDate.toISOString(),
+      input.startDate.toISOString(),
       endDate.toISOString(),
       JSON.stringify(subgamesJson),
       JSON.stringify(otherData),
-      adminId,
+      input.adminId,
     ],
   );
 }
@@ -951,16 +1326,49 @@ function printInstructions(tvToken: string): void {
   console.log("");
   console.log("Demo pilot-day seedet — admin/agent/spillere er klare for innlogging.");
   console.log(line);
+  console.log("PROFIL A — Single-hall demo (legacy, beholdt for bakover-kompatibilitet)");
+  console.log(line);
   console.log(`Hall:           ${HALL_NAME} (slug=${HALL_SLUG}, hallNumber=${HALL_NUMBER})`);
   console.log(`Hall id:        ${HALL_ID}`);
   console.log(`Hall-gruppe:    ${HALL_GROUP_NAME} (id=${HALL_GROUP_ID})`);
   console.log(`TV-token:       ${tvToken}`);
+  console.log(`TV-URL:         http://localhost:4000/admin/#/tv/${HALL_ID}/${tvToken}`);
   console.log(line);
   console.log("Innlogginger (alle bruker passord fra DEMO_SEED_PASSWORD):");
   console.log(`  Admin login:  ${ADMIN_EMAIL} / ${DEMO_PASSWORD}`);
   console.log(`  Agent login:  ${AGENT_EMAIL} / ${DEMO_PASSWORD}`);
   for (const player of PLAYERS) {
     console.log(`  Player login: ${player.email} / ${DEMO_PASSWORD} (500 NOK på depositkonto)`);
+  }
+  console.log(line);
+  console.log(
+    `PROFIL B — 4-hall-pilot (Bølge 1: master ${PILOT_MASTER_HALL_ID} + 3 medlemmer)`,
+  );
+  console.log(line);
+  console.log(`Hall-gruppe:    ${PILOT_HALL_GROUP_NAME} (id=${PILOT_HALL_GROUP_ID})`);
+  console.log(
+    `Master-hall:    ${PILOT_MASTER_HALL_ID} (kun bingovert med utvidet ansvar — ingen egen rolle)`,
+  );
+  for (const hall of PILOT_HALLS) {
+    const masterTag = hall.id === PILOT_MASTER_HALL_ID ? " [MASTER]" : "";
+    console.log(
+      `  ${hall.id}${masterTag} (Hall #${hall.hallNumber}, ${hall.name})`,
+    );
+    console.log(
+      `    TV-URL:     http://localhost:4000/admin/#/tv/${hall.id}/${hall.tvToken}`,
+    );
+  }
+  console.log(line);
+  console.log("Pilot-innlogginger (samme passord):");
+  for (const agent of PILOT_AGENTS) {
+    console.log(
+      `  Agent login:  ${agent.email} / ${DEMO_PASSWORD} (primary=${agent.primaryHallId})`,
+    );
+  }
+  for (const player of PILOT_PLAYERS) {
+    console.log(
+      `  Player login: ${player.email} / ${DEMO_PASSWORD} (hall=${player.hallId}, 500 NOK)`,
+    );
   }
   console.log(line);
   console.log("Endpoint-test:");
