@@ -1,0 +1,6 @@
+# Test-output (screenshots + reports + result-JSON) — store local-only.
+# Spec-fil og config commits, men runtime-output gitignore-s for å holde repo lett.
+screenshots/
+playwright-report-walkthrough/
+walkthrough-results.json
+issues-classified.json
