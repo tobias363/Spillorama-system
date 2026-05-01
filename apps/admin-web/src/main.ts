@@ -197,7 +197,12 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isGamesRoute(bare)) {
         // Dynamic games-stack routes (view/:id, edit/:id, typeId-scoped).
-        mountGamesRoute(container, bare);
+        // Pass full `path` (incl. query string) — dispatcher needs `?typeId=`
+        // for /gameManagement to render the selected game-type. The dispatcher
+        // strips the query itself for route-matching. Forrige bug: `bare` ble
+        // sendt så typeId alltid var undefined → dropdown hoppet tilbake til
+        // "Velg Spilltype" når brukeren valgte en variant.
+        mountGamesRoute(container, path);
         return;
       }
       if (isPhysicalTicketsRoute(bare)) {
