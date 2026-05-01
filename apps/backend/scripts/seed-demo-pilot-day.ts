@@ -136,6 +136,15 @@ const ADMIN_EMAIL = "demo-admin@spillorama.no";
 const ADMIN_DISPLAY = "Demo Admin";
 const ADMIN_SURNAME = "Spillorama";
 
+// Pilot-day-fix 2026-05-01: tobias@nordicprofil.no er PM-tilgangs-bruker
+// som ble brukt i E2E-rapporten 2026-05-01. Manglet i seed → INVALID_CREDENTIALS
+// ved login. Vi bruker fast id `demo-user-admin-tobias` (i tillegg til den
+// generiske demo-admin) slik at PM kan logge inn med sin egen e-post.
+const TOBIAS_ADMIN_ID = "demo-user-admin-tobias";
+const TOBIAS_ADMIN_EMAIL = "tobias@nordicprofil.no";
+const TOBIAS_ADMIN_DISPLAY = "Tobias";
+const TOBIAS_ADMIN_SURNAME = "Haugen";
+
 const AGENT_ID = "demo-user-agent";
 const AGENT_EMAIL = "demo-agent@spillorama.no";
 const AGENT_DISPLAY = "Demo Agent";
@@ -296,6 +305,27 @@ async function hashScrypt(password: string): Promise<string> {
   return `scrypt:${salt.toString("hex")}:${digest.toString("hex")}`;
 }
 
+/**
+ * Pilot-day-fix 2026-05-01: tving reset av passord for en kjent seed-bruker.
+ * upsertUser preserverer eksisterende passord, men spesifikke admin-brukere
+ * (tobias@nordicprofil.no) må kunne logge inn med det dokumenterte
+ * DEMO_PASSWORD selv etter manuelle DB-endringer eller mistet passord.
+ */
+async function forceResetPassword(
+  client: Client,
+  userId: string,
+  password: string,
+): Promise<void> {
+  const hash = await hashScrypt(password);
+  await client.query(
+    `UPDATE app_users
+        SET password_hash = $2,
+            updated_at = now()
+      WHERE id = $1`,
+    [userId, hash],
+  );
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -368,6 +398,23 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
     kycStatus: "VERIFIED",
   });
   console.log(`  [admin]           ${ADMIN_EMAIL} (id=${ADMIN_ID})`);
+
+  // 3b) Pilot-day-fix 2026-05-01: PM tobias@nordicprofil.no
+  await upsertUser(client, {
+    id: TOBIAS_ADMIN_ID,
+    email: TOBIAS_ADMIN_EMAIL,
+    displayName: TOBIAS_ADMIN_DISPLAY,
+    surname: TOBIAS_ADMIN_SURNAME,
+    role: "ADMIN",
+    hallId: null,
+    birthDate: null,
+    kycStatus: "VERIFIED",
+  });
+  // upsertUser preserverer passord på eksisterende brukere — for tobias-admin
+  // tvinger vi reset til DEMO_PASSWORD slik at E2E-rapportens
+  // INVALID_CREDENTIALS-feil løses. Idempotent: roterer hver gang seed kjøres.
+  await forceResetPassword(client, TOBIAS_ADMIN_ID, DEMO_PASSWORD);
+  console.log(`  [admin]           ${TOBIAS_ADMIN_EMAIL} (id=${TOBIAS_ADMIN_ID}) [password reset]`);
 
   // 4) Agent-bruker + hall-tildeling
   await upsertUser(client, {
@@ -469,6 +516,30 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
     `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
       .toISOString()
       .slice(0, 10)}`,
+  );
+
+  // 9b) Pilot-day-fix 2026-05-01: pre-spawn app_game1_scheduled_games for
+  // i dag + i morgen direkte (Game1ScheduleTickService cron er default OFF).
+  // Uten dette returnerer findActiveGameForHall null og hele Game1-runtime
+  // er blokkert i demo-miljø. Idempotent via UNIQUE-constraint.
+  const todaySpawn = await spawnScheduledGamesForDay(client, {
+    dailyScheduleId: DAILY_SCHEDULE_TODAY_ID,
+    scheduleId: SCHEDULE_ID,
+    scheduledDay: today,
+    masterHallId: HALL_ID,
+    hallIds: [HALL_ID],
+    groupHallId: HALL_GROUP_ID,
+  });
+  const tomorrowSpawn = await spawnScheduledGamesForDay(client, {
+    dailyScheduleId: DAILY_SCHEDULE_TOMORROW_ID,
+    scheduleId: SCHEDULE_ID,
+    scheduledDay: tomorrow,
+    masterHallId: HALL_ID,
+    hallIds: [HALL_ID],
+    groupHallId: HALL_GROUP_ID,
+  });
+  console.log(
+    `  [scheduled-games] i dag spawned=${todaySpawn.spawned} skipped=${todaySpawn.skipped} | i morgen spawned=${tomorrowSpawn.spawned} skipped=${tomorrowSpawn.skipped}`,
   );
 
   // 10) Kiosk-produkter (Sell Products-flyt, wireframe 17.12).
@@ -623,6 +694,28 @@ async function seedFourHallProfile(client: Client): Promise<void> {
     `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
       .toISOString()
       .slice(0, 10)} (master=${PILOT_MASTER_HALL_ID})`,
+  );
+
+  // 7b) Pilot-day-fix 2026-05-01: pre-spawn app_game1_scheduled_games (se
+  // Profil A for begrunnelse — cron er default OFF, vi må fylle direkte).
+  const pilotTodaySpawn = await spawnScheduledGamesForDay(client, {
+    dailyScheduleId: PILOT_DAILY_SCHEDULE_TODAY_ID,
+    scheduleId: PILOT_SCHEDULE_ID,
+    scheduledDay: today,
+    masterHallId: PILOT_MASTER_HALL_ID,
+    hallIds: allHallIds,
+    groupHallId: PILOT_HALL_GROUP_ID,
+  });
+  const pilotTomorrowSpawn = await spawnScheduledGamesForDay(client, {
+    dailyScheduleId: PILOT_DAILY_SCHEDULE_TOMORROW_ID,
+    scheduleId: PILOT_SCHEDULE_ID,
+    scheduledDay: tomorrow,
+    masterHallId: PILOT_MASTER_HALL_ID,
+    hallIds: allHallIds,
+    groupHallId: PILOT_HALL_GROUP_ID,
+  });
+  console.log(
+    `  [scheduled-games] i dag spawned=${pilotTodaySpawn.spawned} skipped=${pilotTodaySpawn.skipped} | i morgen spawned=${pilotTomorrowSpawn.spawned} skipped=${pilotTomorrowSpawn.skipped}`,
   );
 
   // 8) Kiosk-produkter — bind til alle 4 pilot-haller.
@@ -1451,12 +1544,18 @@ async function upsertSchedule(
   // BIN-804 F1: bundler alle 4 sub-games i schedule-malen slik at hele
   // mini-game-rotasjonen er konfigurert i én plan. Hvert sub-game får
   // identisk timing/pris-config — kun navn + subGameId varierer.
+  //
+  // Pilot-day-fix 2026-05-01: feltnavn er camelCase (`startTime`/`endTime`)
+  // for å matche Game1ScheduleTickService.ScheduleSubGame som leser
+  // `sg.startTime` / `sg.endTime`. Tidligere snake_case (`start_time`)
+  // førte til at tick-en flagget alle sub-games som "mangler startTime"
+  // og hoppet over spawn — pilot-blokker.
   const subGames = SUB_GAMES.map((sg) => ({
     subGameId: sg.id,
     name: sg.name,
-    custom_game_name: sg.name,
-    start_time: "18:00",
-    end_time: "22:00",
+    customGameName: sg.name,
+    startTime: "18:00",
+    endTime: "22:00",
     notificationStartTime: "60s",
     minseconds: 30,
     maxseconds: 120,
@@ -1593,6 +1692,122 @@ async function upsertDailySchedule(
   );
 }
 
+// ── Pilot-day-fix 2026-05-01: spawn scheduled-games rader direkte ───────────
+//
+// Game1ScheduleTickService cron-jobben (game1ScheduleTick.ts) er som default
+// disabled (GAME1_SCHEDULE_TICK_ENABLED=false). I dev/demo betyr det at
+// app_game1_scheduled_games forblir tom selv etter at daily_schedule har
+// status='running' — Game1ScheduleTickService.findActiveGameForHall
+// returnerer null og pilot-flow blokkeres.
+//
+// Denne funksjonen replikerer INSERT-shapen fra spawnUpcomingGame1Games
+// (Game1ScheduleTickService.ts:706-737) for én daily_schedule × én dag ×
+// alle sub_games. Idempotent via UNIQUE(daily_schedule_id, scheduled_day,
+// sub_game_index) + ON CONFLICT DO NOTHING. Kjøres for "i dag" (startOfDayUtc)
+// for begge profiler, slik at E2E-rapporten kan finne et aktivt game uten
+// å måtte vente på at cron skal aktiveres.
+interface SpawnScheduledGamesInput {
+  dailyScheduleId: string;
+  scheduleId: string;
+  scheduledDay: Date; // skal være startOfDayUtc
+  masterHallId: string;
+  hallIds: readonly string[];
+  groupHallId: string;
+  scheduleType?: "Auto" | "Manual";
+}
+
+async function spawnScheduledGamesForDay(
+  client: Client,
+  input: SpawnScheduledGamesInput,
+): Promise<{ spawned: number; skipped: number }> {
+  // Sjekk at tabellen finnes (dev-miljø uten migrasjoner skal ikke krasje).
+  if (!(await tableExists(client, "app_game1_scheduled_games"))) {
+    console.log(
+      "  [scheduled-games] hopper over — tabell app_game1_scheduled_games finnes ikke",
+    );
+    return { spawned: 0, skipped: 0 };
+  }
+
+  const isoDay = input.scheduledDay.toISOString().slice(0, 10);
+  const result = { spawned: 0, skipped: 0 };
+
+  for (let i = 0; i < SUB_GAMES.length; i++) {
+    const sg = SUB_GAMES[i]!;
+    // 18:00-22:00 i UTC, samme som schedule-malen og daily_schedule.
+    const startTs = new Date(`${isoDay}T18:00:00Z`);
+    const endTs = new Date(`${isoDay}T22:00:00Z`);
+
+    // ticket_config_json: bruk samme TICKET_COLORS-payload som
+    // upsertSchedule serialiserer på sub_games_json (mirror).
+    const ticketConfigJson: Record<string, unknown> = {
+      ticketType: TICKET_COLORS,
+      ticketPrice: [
+        1000, 1500, 2000, 3000, 2500, 4000, 1000, 2000, 1000, 2000, 1000,
+      ],
+      ticketPrize: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      options: [],
+    };
+    const jackpotConfigJson: Record<string, unknown> = {
+      jackpotPrize: { yellow: 0, white: 0, purple: 0, red: 0, green: 0, blue: 0 },
+      jackpotDraw: 0,
+    };
+
+    // randomUUID() — unngå deterministisk id, ON CONFLICT håndterer
+    // re-runs via business-key (daily_schedule_id, scheduled_day, sub_game_index).
+    const id = randomBytes(16).toString("hex");
+
+    try {
+      const { rowCount } = await client.query(
+        `INSERT INTO app_game1_scheduled_games
+           (id, daily_schedule_id, schedule_id, sub_game_index, sub_game_name,
+            custom_game_name, scheduled_day, scheduled_start_time,
+            scheduled_end_time, notification_start_seconds,
+            ticket_config_json, jackpot_config_json, game_mode,
+            master_hall_id, group_hall_id, participating_halls_json,
+            status, game_config_json)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8::timestamptz,
+                 $9::timestamptz, $10, $11::jsonb, $12::jsonb, $13,
+                 $14, $15, $16::jsonb, 'scheduled', NULL)
+         ON CONFLICT (daily_schedule_id, scheduled_day, sub_game_index)
+           DO NOTHING`,
+        [
+          id,
+          input.dailyScheduleId,
+          input.scheduleId,
+          i,
+          sg.name,
+          sg.name,
+          isoDay,
+          startTs.toISOString(),
+          endTs.toISOString(),
+          60, // notificationStartSeconds — 60s default
+          JSON.stringify(ticketConfigJson),
+          JSON.stringify(jackpotConfigJson),
+          input.scheduleType ?? "Manual",
+          input.masterHallId,
+          input.groupHallId,
+          JSON.stringify(input.hallIds),
+        ],
+      );
+      if ((rowCount ?? 0) > 0) {
+        result.spawned += 1;
+      } else {
+        result.skipped += 1;
+      }
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code ?? "";
+      if (code === "23505") {
+        // UNIQUE-violation — race med en annen seed-kjøring.
+        result.skipped += 1;
+      } else {
+        // Bubbel opp; main()-tx ROLLBACK håndterer.
+        throw err;
+      }
+    }
+  }
+  return result;
+}
+
 // ── Schema-introspection helpers ────────────────────────────────────────────
 
 async function tableExists(client: Client, table: string): Promise<boolean> {
@@ -1646,6 +1861,7 @@ function printInstructions(tvToken: string): void {
   console.log(line);
   console.log("Innlogginger (alle bruker passord fra DEMO_SEED_PASSWORD):");
   console.log(`  Admin login:  ${ADMIN_EMAIL} / ${DEMO_PASSWORD}`);
+  console.log(`  Admin login:  ${TOBIAS_ADMIN_EMAIL} / ${DEMO_PASSWORD}`);
   console.log(`  Agent login:  ${AGENT_EMAIL} / ${DEMO_PASSWORD}`);
   for (const player of PLAYERS) {
     console.log(`  Player login: ${player.email} / ${DEMO_PASSWORD} (500 NOK på depositkonto)`);

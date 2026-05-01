@@ -172,11 +172,18 @@ export interface AgentStore {
    * UPDATE-en til samme PG-tx som settlement-INSERT + hall-cash-applies.
    * Uten dette ville et crash midt i closeDay etterlate shift settled
    * uten settlement-rad og uten cash-bevegelse.
+   *
+   * Pilot-day-fix 2026-05-01: tar valgfri `flags?` slik at close-day kan
+   * sette distributed_winnings / transferred_register_tickets / logout_notes
+   * atomisk sammen med settled_at. Tidligere gjorde route-laget en separat
+   * /shift/logout etter close-day, men det er ugjørbart — markShiftSettled
+   * setter is_active=false så endShift feiler etterpå.
    */
   markShiftSettled(
     shiftId: string,
     settledByUserId: string,
     client?: PoolClient,
+    flags?: EndShiftFlags,
   ): Promise<AgentShift>;
 }
 
@@ -692,22 +699,42 @@ export class PostgresAgentStore implements AgentStore {
     shiftId: string,
     settledByUserId: string,
     client?: PoolClient,
+    flags?: EndShiftFlags,
   ): Promise<AgentShift> {
     // HV-9: optional `client` lar closeDay binde UPDATE til samme tx som
     // settlement-INSERT + hall-cash-applies (atomic close-day).
     const exec = client ?? this.pool;
+    // Pilot-day-fix 2026-05-01: bygg dynamisk SET-liste for å støtte
+    // valgfri flags fra logout-popup (Wireframe Gap #9 17.6) atomisk i
+    // samme close-day-tx.
+    const sets: string[] = [
+      "settled_at = now()",
+      "settled_by_user_id = $2",
+      "is_active = false",
+      "is_logged_out = true",
+      "is_daily_balance_transferred = true",
+      "ended_at = COALESCE(ended_at, now())",
+      "updated_at = now()",
+    ];
+    const params: unknown[] = [shiftId, settledByUserId];
+    if (flags?.distributeWinnings !== undefined) {
+      params.push(flags.distributeWinnings);
+      sets.push(`distributed_winnings = $${params.length}`);
+    }
+    if (flags?.transferRegisterTickets !== undefined) {
+      params.push(flags.transferRegisterTickets);
+      sets.push(`transferred_register_tickets = $${params.length}`);
+    }
+    if (flags?.logoutNotes !== undefined) {
+      params.push(flags.logoutNotes);
+      sets.push(`logout_notes = $${params.length}`);
+    }
     const { rows } = await exec.query<ShiftRow>(
       `UPDATE ${this.shifts()}
-       SET settled_at = now(),
-           settled_by_user_id = $2,
-           is_active = false,
-           is_logged_out = true,
-           is_daily_balance_transferred = true,
-           ended_at = COALESCE(ended_at, now()),
-           updated_at = now()
+       SET ${sets.join(", ")}
        WHERE id = $1 AND settled_at IS NULL
        RETURNING *`,
-      [shiftId, settledByUserId]
+      params
     );
     if (!rows[0]) {
       // Either shift not found or already settled — caller-distinguishes via getShiftById.
@@ -1078,6 +1105,7 @@ export class InMemoryAgentStore implements AgentStore {
     shiftId: string,
     settledByUserId: string,
     _client?: PoolClient,
+    flags?: EndShiftFlags,
   ): Promise<AgentShift> {
     // HV-9: client-arg ignoreres for in-memory (single-threaded JS, ingen
     // tx-grenser). I tester kan vi simulere mid-tx-feil ved å la callback
@@ -1095,6 +1123,17 @@ export class InMemoryAgentStore implements AgentStore {
     s.isDailyBalanceTransferred = true;
     s.endedAt = s.endedAt ?? now;
     s.updatedAt = now;
+    // Pilot-day-fix 2026-05-01: persistér valgfri logout-flags atomisk
+    // sammen med settlement (matcher PostgresAgentStore-impl).
+    if (flags?.distributeWinnings !== undefined) {
+      s.distributedWinnings = flags.distributeWinnings;
+    }
+    if (flags?.transferRegisterTickets !== undefined) {
+      s.transferredRegisterTickets = flags.transferRegisterTickets;
+    }
+    if (flags?.logoutNotes !== undefined) {
+      s.logoutNotes = flags.logoutNotes;
+    }
     return { ...s };
   }
 
