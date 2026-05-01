@@ -258,6 +258,76 @@ test("BIN-591: PLAYER får FORBIDDEN på hall-scope-check", () => {
   );
 });
 
+// ── P0-3: AGENT hall-scope (PILOT_DAY_FULL_VERIFICATION_2026-05-01) ────────
+
+test("P0-3: AGENT tildelt Hall A når primary-hall matcher", () => {
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "AGENT", hallId: "hall-a" }, "hall-a")
+  );
+});
+
+test("P0-3: AGENT får FORBIDDEN ved cross-hall-mismatch", () => {
+  assert.throws(
+    () => assertUserHallScope({ role: "AGENT", hallId: "hall-a" }, "hall-b"),
+    /Du har ikke tilgang/
+  );
+});
+
+test("P0-3: AGENT uten tildelt primary-hall fail-closed", () => {
+  assert.throws(
+    () => assertUserHallScope({ role: "AGENT", hallId: null }, "hall-a"),
+    /ikke tildelt en hall/
+  );
+});
+
+test("P0-3: HALL_OPERATOR-oppførsel uendret etter AGENT-utvidelse", () => {
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "HALL_OPERATOR", hallId: "hall-x" }, "hall-x")
+  );
+  assert.throws(
+    () => assertUserHallScope({ role: "HALL_OPERATOR", hallId: "hall-x" }, "hall-y"),
+    /Du har ikke tilgang/
+  );
+});
+
+test("P0-3: ADMIN-oppførsel uendret etter AGENT-utvidelse", () => {
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "ADMIN", hallId: null }, "hall-a")
+  );
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "ADMIN", hallId: "hall-x" }, "hall-y")
+  );
+});
+
+test("P0-3: resolveHallScopeFilter tvinger AGENT til egen primary-hall", () => {
+  assert.equal(
+    resolveHallScopeFilter({ role: "AGENT", hallId: "hall-a" }),
+    "hall-a"
+  );
+  assert.equal(
+    resolveHallScopeFilter({ role: "AGENT", hallId: "hall-a" }, "hall-a"),
+    "hall-a"
+  );
+});
+
+test("P0-3: resolveHallScopeFilter avviser AGENT som prøver annen hall", () => {
+  assert.throws(
+    () =>
+      resolveHallScopeFilter(
+        { role: "AGENT", hallId: "hall-a" },
+        "hall-b"
+      ),
+    /ikke tilgang til denne hallen/
+  );
+});
+
+test("P0-3: resolveHallScopeFilter fail-closed for AGENT uten primary-hall", () => {
+  assert.throws(
+    () => resolveHallScopeFilter({ role: "AGENT", hallId: null }),
+    /ikke tildelt en hall/
+  );
+});
+
 test("BIN-591: resolveHallScopeFilter returnerer undefined for ADMIN uten filter", () => {
   assert.equal(resolveHallScopeFilter({ role: "ADMIN", hallId: null }), undefined);
 });

@@ -454,17 +454,26 @@ export function assertAdminPermission(role: UserRole, permission: AdminPermissio
 }
 
 /**
- * BIN-591: hall-scope guard for HALL_OPERATOR.
+ * BIN-591 / P0-3: hall-scope guard for HALL_OPERATOR + AGENT.
  *
  * Regler:
  *  - ADMIN: alltid tilgang (globalt scope). `targetHallId` ignoreres.
  *  - SUPPORT: tilsvarende globalt scope for read-operasjoner — kallsteder
  *    som trenger write-restriksjon må kontrollere rolle eksplisitt.
- *  - HALL_OPERATOR: må ha en `hallId` satt, og den må matche
- *    `targetHallId`. En operator uten tildelt hall (`hallId === null`)
- *    får FORBIDDEN — fail closed. En operator med annen hall får FORBIDDEN.
+ *  - HALL_OPERATOR + AGENT: må ha en `hallId` satt på user-raden (primary
+ *    hall), og den må matche `targetHallId`. En bruker uten tildelt hall
+ *    (`hallId === null`) får FORBIDDEN — fail closed. En bruker med annen
+ *    primary hall får FORBIDDEN.
  *  - PLAYER: skal ikke nå hit (dekkes av assertAdminPermission), men
  *    fall-through blir FORBIDDEN.
+ *
+ * P0-3 (PILOT_DAY_FULL_VERIFICATION_2026-05-01): AGENT-rollen må behandles
+ * som HALL_OPERATOR her. PR #797 la til AGENT i 41 hall-scopede permissions
+ * uten å oppdatere selve guard-funksjonen, så bingoverten fikk FORBIDDEN
+ * på register-physical-ticket-ranges i sin egen primary hall. Funksjonen
+ * er en synkron policy-pre-check — AGENT-er med flere haller får full
+ * multi-hall-verifisering via `AgentService.assertHallMembership` i
+ * route/service-laget der det trengs.
  */
 export function assertUserHallScope(
   user: { role: UserRole; hallId: string | null },
@@ -474,7 +483,7 @@ export function assertUserHallScope(
   if (user.role === "ADMIN" || user.role === "SUPPORT") {
     return;
   }
-  if (user.role !== "HALL_OPERATOR") {
+  if (user.role !== "HALL_OPERATOR" && user.role !== "AGENT") {
     throw new DomainError("FORBIDDEN", message ?? "Du har ikke tilgang til denne hallen.");
   }
   if (!user.hallId) {
@@ -489,15 +498,17 @@ export function assertUserHallScope(
 }
 
 /**
- * BIN-591: returner hallId-filter for list-queries. `undefined` betyr
- * «ingen filter» (ADMIN/SUPPORT ser alt). For HALL_OPERATOR tvinges
- * filter til deres hallId; operator uten hall får FORBIDDEN.
+ * BIN-591 / P0-3: returner hallId-filter for list-queries. `undefined` betyr
+ * «ingen filter» (ADMIN/SUPPORT ser alt). For HALL_OPERATOR + AGENT tvinges
+ * filter til deres primary `hallId`; bruker uten hall får FORBIDDEN.
+ *
+ * AGENT-rollen følger samme mønster som HALL_OPERATOR — see assertUserHallScope.
  */
 export function resolveHallScopeFilter(
   user: { role: UserRole; hallId: string | null },
   explicitHallId?: string
 ): string | undefined {
-  if (user.role === "HALL_OPERATOR") {
+  if (user.role === "HALL_OPERATOR" || user.role === "AGENT") {
     if (!user.hallId) {
       throw new DomainError(
         "FORBIDDEN",
