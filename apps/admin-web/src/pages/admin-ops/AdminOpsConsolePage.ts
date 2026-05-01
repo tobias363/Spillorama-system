@@ -44,9 +44,13 @@ import { t } from "../../i18n/I18n.js";
 import { computeHealthBadge, type HealthBadge } from "./healthBadge.js";
 import {
   applyDelta,
+  buildGroupSummaries,
   createInitialState,
+  hallsInGroup,
   replaceSnapshot,
   roomsByHallId,
+  UNGROUPED_GROUP_ID,
+  type OpsGroupSummary,
   type OpsState,
 } from "./opsState.js";
 import {
@@ -233,6 +237,20 @@ export function renderAdminOpsConsolePage(
       });
     },
     onDrillDownHall: (hall, room) => openDrilldownModal(hall, room),
+    onSelectGroup: (groupId) => {
+      state.view = "halls";
+      state.selectedGroupId = groupId;
+      // Clear hall-search filter when entering a new group so the user
+      // sees all halls in the group, not a filter from the previous drill.
+      refs.searchInput.value = "";
+      renderAll(state, refs, handlers);
+    },
+    onBackToGroups: () => {
+      state.view = "groups";
+      state.selectedGroupId = null;
+      refs.searchInput.value = "";
+      renderAll(state, refs, handlers);
+    },
   };
 
   // Wire toolbar
@@ -245,6 +263,33 @@ export function renderAdminOpsConsolePage(
   });
   refs.pauseAllBtn.addEventListener("click", () => {
     void handlers.onPauseAll();
+  });
+  refs.backBtn.addEventListener("click", () => {
+    handlers.onBackToGroups();
+  });
+
+  // Top-level: click on a group-card → drill down. Delegated on the
+  // persistent groupsGrid so re-renders don't accumulate listeners.
+  refs.groupsGrid.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (!target) return;
+    const cardEl = target.closest<HTMLElement>("[data-group-id]");
+    if (!cardEl) return;
+    const groupId = cardEl.dataset.groupId;
+    if (!groupId) return;
+    handlers.onSelectGroup(groupId);
+  });
+  // Keyboard accessibility: Enter / Space on focused group-card.
+  refs.groupsGrid.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const target = ev.target as HTMLElement | null;
+    if (!target) return;
+    const cardEl = target.closest<HTMLElement>("[data-group-id]");
+    if (!cardEl) return;
+    const groupId = cardEl.dataset.groupId;
+    if (!groupId) return;
+    ev.preventDefault();
+    handlers.onSelectGroup(groupId);
   });
 
   // FE-P0-005: Event delegation on the persistent containers (hallsGrid +
@@ -390,8 +435,12 @@ interface PageRefs {
   searchInput: HTMLInputElement;
   pauseAllBtn: HTMLButtonElement;
   hallsGrid: HTMLElement;
-  groupsRow: HTMLElement;
+  groupsGrid: HTMLElement;
   alertsList: HTMLElement;
+  /** Drill-down breadcrumb (back-button + group-name). */
+  breadcrumb: HTMLElement;
+  breadcrumbGroup: HTMLElement;
+  backBtn: HTMLButtonElement;
 }
 
 interface ActionHandlers {
@@ -405,6 +454,10 @@ interface ActionHandlers {
   onPauseAll: () => Promise<void> | void;
   onSearchHall: (query: string) => void;
   onDrillDownHall: (hall: OpsHall, room: OpsRoom | null) => void;
+  /** Top-level → drill into a specific Group of Halls. */
+  onSelectGroup: (groupId: string) => void;
+  /** Drill-down → return to the top-level groups view. */
+  onBackToGroups: () => void;
 }
 
 function scaffoldHtml(): string {
@@ -432,17 +485,20 @@ function scaffoldHtml(): string {
                 </div>
               </div>
               <div id="ops-error-banner" class="alert alert-danger" style="display:none;margin-top:8px;" data-testid="ops-error-banner"></div>
+              <!-- Drill-down breadcrumb: only visible when view === "halls". -->
+              <div id="ops-breadcrumb" data-testid="ops-breadcrumb" style="margin-top:8px;display:none;">
+                <button id="ops-back-btn" type="button" class="btn btn-default btn-sm" data-testid="ops-back-btn">
+                  <i class="fa fa-arrow-left"></i> ${escape(t("ops_back_to_groups"))}
+                </button>
+                <strong id="ops-breadcrumb-group" data-testid="ops-breadcrumb-group" style="margin-left:12px;font-size:16px;"></strong>
+              </div>
             </div>
 
-            <!-- Halls grid -->
+            <!-- View body: top-level groups grid + drill-down halls grid.
+                 Mutually exclusive — renderViewToggle flips display. -->
             <div class="box-body">
-              <div id="ops-halls-grid" class="row" data-testid="ops-halls-grid"></div>
-            </div>
-
-            <!-- Group aggregate row -->
-            <div class="box-footer">
-              <h4 style="margin-top:0;">${escape(t("ops_group_aggregate_title"))}</h4>
-              <div id="ops-groups-row" class="row" data-testid="ops-groups-row"></div>
+              <div id="ops-groups-grid" class="row" data-testid="ops-groups-grid"></div>
+              <div id="ops-halls-grid" class="row" data-testid="ops-halls-grid" style="display:none;"></div>
             </div>
           </div>
         </div>
@@ -486,8 +542,11 @@ function bindRefs(container: HTMLElement): PageRefs {
     searchInput: requireEl<HTMLInputElement>(container, "#ops-search-input"),
     pauseAllBtn: requireEl<HTMLButtonElement>(container, "#ops-pause-all-btn"),
     hallsGrid: requireEl(container, "#ops-halls-grid"),
-    groupsRow: requireEl(container, "#ops-groups-row"),
+    groupsGrid: requireEl(container, "#ops-groups-grid"),
     alertsList: requireEl(container, "#ops-alerts-list"),
+    breadcrumb: requireEl(container, "#ops-breadcrumb"),
+    breadcrumbGroup: requireEl(container, "#ops-breadcrumb-group"),
+    backBtn: requireEl<HTMLButtonElement>(container, "#ops-back-btn"),
   };
 }
 
@@ -505,12 +564,49 @@ function requireEl<T extends HTMLElement = HTMLElement>(
 function renderAll(state: OpsState, refs: PageRefs, handlers: ActionHandlers): void {
   renderTotals(refs, state);
   renderAlertsBadge(refs, state.alerts);
-  renderHallsGrid(refs, state, handlers);
-  renderGroupsRow(refs, state);
+  renderViewToggle(state, refs);
+  if (state.view === "groups") {
+    renderGroupsGrid(refs, state, handlers);
+  } else {
+    renderHallsGrid(refs, state, handlers);
+  }
   renderAlertsList(refs, state.alerts, handlers);
   if (!state.lastError) {
     refs.errorBanner.style.display = "none";
   }
+}
+
+/**
+ * Toggle between top-level "groups" grid and drill-down "halls" grid based
+ * on `state.view`. Also updates the breadcrumb header.
+ */
+function renderViewToggle(state: OpsState, refs: PageRefs): void {
+  if (state.view === "groups") {
+    refs.groupsGrid.style.display = "";
+    refs.hallsGrid.style.display = "none";
+    refs.breadcrumb.style.display = "none";
+    return;
+  }
+  refs.groupsGrid.style.display = "none";
+  refs.hallsGrid.style.display = "";
+  refs.breadcrumb.style.display = "";
+
+  // Resolve breadcrumb-name. Prefer backend aggregate name; fall back to
+  // the first hall's groupName, then to a localized "ungrouped" label.
+  const groupId = state.selectedGroupId ?? "";
+  let label = "";
+  if (groupId === UNGROUPED_GROUP_ID) {
+    label = t("ops_group_ungrouped");
+  } else {
+    const aggregate = state.groups.find((g) => g.id === groupId);
+    if (aggregate) {
+      label = aggregate.name;
+    } else {
+      const hall = state.halls.find((h) => h.groupOfHallsId === groupId);
+      label = hall?.groupName ?? groupId;
+    }
+  }
+  refs.breadcrumbGroup.textContent = label;
 }
 
 function renderTotals(refs: PageRefs, state: OpsState): void {
@@ -552,7 +648,15 @@ function renderAlertsBadge(refs: PageRefs, alerts: OpsAlert[]): void {
 }
 
 function renderHallsGrid(refs: PageRefs, state: OpsState, _handlers: ActionHandlers): void {
-  if (state.halls.length === 0 && !state.loaded) {
+  // Drill-down view: only the halls under the currently selected group
+  // are listed. If no group is selected (defensive — shouldn't happen now
+  // that the top-level is the groups grid), fall back to all halls so the
+  // page never goes blank.
+  const halls = state.selectedGroupId
+    ? hallsInGroup(state, state.selectedGroupId)
+    : state.halls;
+
+  if (halls.length === 0 && !state.loaded) {
     refs.hallsGrid.innerHTML = `
       <div class="col-xs-12">
         <div class="text-center text-muted" style="padding:40px;" data-testid="ops-loading-skeleton">
@@ -563,7 +667,7 @@ function renderHallsGrid(refs: PageRefs, state: OpsState, _handlers: ActionHandl
     `;
     return;
   }
-  if (state.halls.length === 0) {
+  if (halls.length === 0) {
     refs.hallsGrid.innerHTML = `
       <div class="col-xs-12">
         <p class="text-muted text-center" style="padding:40px;" data-testid="ops-empty-state">${escape(t("ops_no_halls"))}</p>
@@ -573,7 +677,7 @@ function renderHallsGrid(refs: PageRefs, state: OpsState, _handlers: ActionHandl
   }
 
   const roomMap = roomsByHallId(state.rooms);
-  refs.hallsGrid.innerHTML = state.halls.map((hall) => {
+  refs.hallsGrid.innerHTML = halls.map((hall) => {
     const room = roomMap.get(hall.id) ?? null;
     return renderHallCard(hall, room);
   }).join("");
@@ -655,34 +759,153 @@ function colorToBoxClass(color: HealthBadge["color"]): string {
   }
 }
 
-function renderGroupsRow(refs: PageRefs, state: OpsState): void {
-  if (state.groups.length === 0) {
-    refs.groupsRow.innerHTML = `<div class="col-xs-12 text-muted">${escape(t("ops_no_groups"))}</div>`;
-    return;
-  }
-  refs.groupsRow.innerHTML = state.groups.map((group) => {
-    const badgeClass =
-      group.readyAggregate === null
-        ? "label-default"
-        : group.readyAggregate.startsWith("0/")
-          ? "label-danger"
-          : group.readyAggregate.includes("/") &&
-              isFullReady(group.readyAggregate)
-            ? "label-success"
-            : "label-warning";
-    return `
-      <div class="col-md-4 col-sm-6 col-xs-12" data-testid="ops-group-${escape(group.id)}" style="margin-bottom:8px;">
-        <strong>${escape(group.name)}</strong>
-        <span class="label ${badgeClass}" style="margin-left:6px;">
-          ${escape(group.readyAggregate ?? "—")}
-        </span>
-        <span class="text-muted" style="margin-left:8px;">
-          ${escape(formatNok(group.totalPayoutToday))} kr
-        </span>
-        <small class="text-muted" style="margin-left:6px;">${group.hallCount} haller</small>
+/**
+ * Top-level Group-of-Halls grid. Each card is keyboard-focusable and
+ * click-routes (delegated) to the drill-down view. Aggregates are
+ * recomputed on every render so socket-deltas naturally bubble up.
+ */
+function renderGroupsGrid(
+  refs: PageRefs,
+  state: OpsState,
+  _handlers: ActionHandlers
+): void {
+  if (state.halls.length === 0 && !state.loaded) {
+    refs.groupsGrid.innerHTML = `
+      <div class="col-xs-12">
+        <div class="text-center text-muted" style="padding:40px;" data-testid="ops-loading-skeleton">
+          <i class="fa fa-spinner fa-spin fa-2x"></i>
+          <p style="margin-top:8px;">${escape(t("ops_loading"))}</p>
+        </div>
       </div>
     `;
-  }).join("");
+    return;
+  }
+
+  const summaries = buildGroupSummaries(state);
+  if (summaries.length === 0) {
+    refs.groupsGrid.innerHTML = `
+      <div class="col-xs-12">
+        <p class="text-muted text-center" style="padding:40px;" data-testid="ops-empty-state">${escape(t("ops_no_groups"))}</p>
+      </div>
+    `;
+    return;
+  }
+
+  refs.groupsGrid.innerHTML = summaries
+    .map((summary) => renderGroupCard(summary))
+    .join("");
+}
+
+/**
+ * Render a single Group-of-Halls card. Color-coded by group health:
+ *  - red    : at least one open alert in any hall in the group
+ *  - yellow : at least one inactive hall (partial outage)
+ *  - green  : everything operational
+ *  - default: ungrouped bucket (synthetic)
+ */
+function renderGroupCard(summary: OpsGroupSummary): string {
+  const hasAlerts = summary.openAlertsCount > 0;
+  const hasInactive = summary.activeHallCount < summary.hallCount;
+
+  let color: "green" | "yellow" | "red" | "inactive" = "green";
+  let statusLabel = t("ops_group_status_operational");
+  if (hasAlerts) {
+    color = "red";
+    statusLabel = t("ops_group_status_attention");
+  } else if (hasInactive) {
+    color = "yellow";
+    statusLabel = t("ops_group_status_partial");
+  }
+  if (summary.isUngrouped) {
+    color = "inactive";
+    statusLabel = t("ops_group_status_ungrouped");
+  }
+  const boxClass = colorToBoxClass(color);
+
+  const readyBadge = summary.readyAggregate
+    ? `<span class="label ${
+        isFullReady(summary.readyAggregate)
+          ? "label-success"
+          : summary.readyAggregate.startsWith("0/")
+            ? "label-danger"
+            : "label-warning"
+      }" style="margin-left:6px;">${escape(summary.readyAggregate)}</span>`
+    : "";
+
+  const payoutLine =
+    summary.totalPayoutToday !== null
+      ? `<p class="text-muted" style="margin:4px 0 0 0;">
+          ${escape(t("ops_group_payout_today"))}: <strong>${escape(formatNok(summary.totalPayoutToday))} kr</strong>
+        </p>`
+      : "";
+
+  const masterLine = summary.masterHallName
+    ? `<p class="text-muted" style="margin:4px 0 0 0;font-size:11px;">
+        ${escape(t("ops_group_master_hall"))}: ${escape(summary.masterHallName)}
+      </p>`
+    : "";
+
+  const displayName = summary.name || t("ops_group_ungrouped");
+
+  // Card is keyboard-focusable so ADMIN can tab between groups; role=button
+  // + aria-label expose the drill-down semantics to screen-readers. The
+  // group-id is on the outer `[data-group-id]` so the delegated click-
+  // handler in `renderAdminOpsConsolePage` resolves the id regardless of
+  // which inner element was clicked.
+  return `
+    <div class="col-lg-4 col-md-6 col-sm-12" style="margin-bottom:12px;">
+      <div class="ops-group-card box box-${boxClass}"
+        data-group-id="${escape(summary.id)}"
+        data-testid="ops-group-card-${escape(summary.id)}"
+        role="button"
+        tabindex="0"
+        aria-label="${escape(t("ops_group_open"))}: ${escape(displayName)}"
+        style="cursor:pointer;">
+        <div class="box-header with-border">
+          <h4 class="box-title">
+            <span class="ops-health-dot ops-dot-${color}" aria-hidden="true"></span>
+            ${escape(displayName)}
+            ${readyBadge}
+          </h4>
+          <div class="box-tools">
+            <small class="text-muted">${summary.hallCount} ${escape(t("ops_group_halls_short"))}</small>
+          </div>
+        </div>
+        <div class="box-body">
+          <p style="margin:0 0 6px 0;"><strong>${escape(statusLabel)}</strong></p>
+          <div class="row" style="margin:0;">
+            <div class="col-xs-4" style="padding:0;">
+              <small class="text-muted">${escape(t("ops_group_players"))}</small>
+              <div data-testid="ops-group-${escape(summary.id)}-players" style="font-size:18px;font-weight:600;">
+                ${summary.totalPlayersOnline}
+              </div>
+            </div>
+            <div class="col-xs-4" style="padding:0;">
+              <small class="text-muted">${escape(t("ops_group_running"))}</small>
+              <div data-testid="ops-group-${escape(summary.id)}-running" style="font-size:18px;font-weight:600;">
+                ${summary.runningRoomsCount}
+              </div>
+            </div>
+            <div class="col-xs-4" style="padding:0;">
+              <small class="text-muted">${escape(t("ops_group_alerts"))}</small>
+              <div data-testid="ops-group-${escape(summary.id)}-alerts" style="font-size:18px;font-weight:600;color:${
+                summary.openAlertsCount > 0 ? "#dd4b39" : "inherit"
+              };">
+                ${summary.openAlertsCount}
+              </div>
+            </div>
+          </div>
+          ${masterLine}
+          ${payoutLine}
+        </div>
+        <div class="box-footer text-right" style="padding:6px;">
+          <span class="text-muted" style="font-size:11px;">
+            ${escape(t("ops_group_drill_hint"))} <i class="fa fa-arrow-right"></i>
+          </span>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function isFullReady(agg: string): boolean {
