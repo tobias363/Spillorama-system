@@ -313,16 +313,20 @@ async function hashScrypt(password: string): Promise<string> {
  */
 async function forceResetPassword(
   client: Client,
-  userId: string,
+  email: string,
   password: string,
 ): Promise<void> {
+  // Pilot-day-fix 2026-05-01: matcher på email i stedet for userId. Samme
+  // grunn som upsertUser: PM-bruker kan ligge med annen id i prod
+  // (`tobias-admin`) enn seedens `demo-user-admin-tobias`, og UPDATE WHERE
+  // id = ... ville da treffe 0 rader og passord-reset ville ikke skje.
   const hash = await hashScrypt(password);
   await client.query(
     `UPDATE app_users
         SET password_hash = $2,
             updated_at = now()
-      WHERE id = $1`,
-    [userId, hash],
+      WHERE email = $1`,
+    [email, hash],
   );
 }
 
@@ -413,7 +417,7 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
   // upsertUser preserverer passord på eksisterende brukere — for tobias-admin
   // tvinger vi reset til DEMO_PASSWORD slik at E2E-rapportens
   // INVALID_CREDENTIALS-feil løses. Idempotent: roterer hver gang seed kjøres.
-  await forceResetPassword(client, TOBIAS_ADMIN_ID, DEMO_PASSWORD);
+  await forceResetPassword(client, TOBIAS_ADMIN_EMAIL, DEMO_PASSWORD);
   console.log(`  [admin]           ${TOBIAS_ADMIN_EMAIL} (id=${TOBIAS_ADMIN_ID}) [password reset]`);
 
   // 4) Agent-bruker + hall-tildeling
@@ -1088,6 +1092,13 @@ async function upsertUser(client: Client, input: UpsertUserInput): Promise<void>
   const kycVerifiedAt = input.kycStatus === "VERIFIED" ? "now()" : "NULL";
 
   if (existing.rows[0]) {
+    // Pilot-day-fix 2026-05-01: SELECT matcher på id ELLER email — det
+    // betyr at en bruker kan ligge i DB med en annen id enn `input.id`
+    // (f.eks. produksjons-id `tobias-admin` vs seedens
+    // `demo-user-admin-tobias`). Vi må derfor UPDATE-e på den faktiske
+    // eksisterende id-en, ellers oppdaterer vi 0 rader og seeden tror
+    // alt gikk bra.
+    const existingId = existing.rows[0].id;
     // Oppdater profil-felt + KYC-status, men la passord stå urørt.
     const sql = `UPDATE app_users
                    SET email = $2,
@@ -1101,7 +1112,7 @@ async function upsertUser(client: Client, input: UpsertUserInput): Promise<void>
                        updated_at = now()
                  WHERE id = $1`;
     await client.query(sql, [
-      input.id,
+      existingId,
       input.email,
       input.displayName,
       input.surname,
@@ -1550,12 +1561,16 @@ async function upsertSchedule(
   // `sg.startTime` / `sg.endTime`. Tidligere snake_case (`start_time`)
   // førte til at tick-en flagget alle sub-games som "mangler startTime"
   // og hoppet over spawn — pilot-blokker.
+  //
+  // Pilot-day-fix 2026-05-01 (åpningstider): malen viser ukedags-vinduet
+  // (Mon-Fri 11-20). app_schedules har bare ett manual_start/manual_end-
+  // felt, så lørdag/søndag-tidene styres på app_daily_schedules-nivå.
   const subGames = SUB_GAMES.map((sg) => ({
     subGameId: sg.id,
     name: sg.name,
     customGameName: sg.name,
-    startTime: "18:00",
-    endTime: "22:00",
+    startTime: WEEKDAY_HOURS.startTime,
+    endTime: WEEKDAY_HOURS.endTime,
     notificationStartTime: "60s",
     minseconds: 30,
     maxseconds: 120,
@@ -1586,7 +1601,7 @@ async function upsertSchedule(
      VALUES
        ($1, $2, $3, 'Manual',
         0, 'active', true,
-        '18:00', '22:00', $4::jsonb, $5)
+        $6, $7, $4::jsonb, $5)
      ON CONFLICT (id) DO UPDATE
        SET schedule_name = EXCLUDED.schedule_name,
            sub_games_json = EXCLUDED.sub_games_json,
@@ -1595,7 +1610,15 @@ async function upsertSchedule(
            manual_end_time = EXCLUDED.manual_end_time,
            updated_at = now(),
            deleted_at = NULL`,
-    [id, scheduleName, scheduleNumber, JSON.stringify(subGames), adminId],
+    [
+      id,
+      scheduleName,
+      scheduleNumber,
+      JSON.stringify(subGames),
+      adminId,
+      WEEKDAY_HOURS.startTime,
+      WEEKDAY_HOURS.endTime,
+    ],
   );
 }
 
