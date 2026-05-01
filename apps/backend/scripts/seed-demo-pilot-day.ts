@@ -266,17 +266,26 @@ const PILOT_PLAYERS: readonly PilotPlayer[] = (() => {
   return out;
 })();
 
-// 8 ticket-farger per Tobias-vedtak (LEGACY_1_TO_1_MAPPING_2026-04-23 §8 #3).
-// Backend matcher dem til prizes per phase per farge.
+// 11 ticket-farger (BIN-PILOT, master-plan §2.7). Snake_case-format som
+// matcher canonical TICKET_TYPES i `apps/backend/src/agent/TicketRegistrationService.ts:49`
+// + DB CHECK-constraint i migration 20261001000000_ticket_ranges_11_color_palette.sql.
+//
+// Tidligere brukte denne seed-en camelCase + simplified `red`/`green` —
+// dette mismatcher backend-enum og førte til at ticket-color-rendering i
+// agent-portal ble blokkert (modal-popup forventer `small_yellow` osv.,
+// ikke `smallYellow` eller `red`). Korrigert 2026-05-01 (pilot-day-seed).
 const TICKET_COLORS = [
-  "smallYellow",
-  "largeYellow",
-  "smallWhite",
-  "largeWhite",
-  "smallPurple",
-  "largePurple",
-  "red",
-  "green",
+  "small_yellow",
+  "small_white",
+  "large_yellow",
+  "large_white",
+  "small_purple",
+  "large_purple",
+  "small_red",
+  "large_red",
+  "small_green",
+  "large_green",
+  "small_blue",
 ] as const;
 
 // ── Hash helper (matcher PlatformService.hashPassword) ──────────────────────
@@ -461,6 +470,9 @@ async function seedSingleHallProfile(client: Client): Promise<void> {
       .toISOString()
       .slice(0, 10)}`,
   );
+
+  // 10) Kiosk-produkter (Sell Products-flyt, wireframe 17.12).
+  await seedKioskProducts(client, [HALL_ID], ADMIN_ID);
 }
 
 // ── Profil B: 4-hall-pilot ─────────────────────────────────────────────────
@@ -611,6 +623,186 @@ async function seedFourHallProfile(client: Client): Promise<void> {
     `  [daily-schedule]  i dag=${today.toISOString().slice(0, 10)} | i morgen=${tomorrow
       .toISOString()
       .slice(0, 10)} (master=${PILOT_MASTER_HALL_ID})`,
+  );
+
+  // 8) Kiosk-produkter — bind til alle 4 pilot-haller.
+  await seedKioskProducts(client, allHallIds, ADMIN_ID);
+}
+
+// ── Kiosk-produkter (BIN-583 B3.6 / wireframe 17.12) ────────────────────────
+
+/**
+ * 8 standard kiosk-produkter matchet mot wireframe-katalog §17.12 (Coffee /
+ * Chocolate / Rice + relaterte snacks). Stable ID-er gjør re-runs idempotente,
+ * og produktene bindes til hver hall vi seder via `app_hall_products`.
+ *
+ * Pilot-blokker fjernet 2026-05-01: `GET /api/agent/products` returnerte
+ * tom liste fordi katalogen aldri var seedet, og dermed kunne ikke
+ * "Sell Products"-flyten testes (steg 5 i pilot-dag-verifisering).
+ */
+interface DemoCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+}
+
+interface DemoProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  priceCents: number;
+  categoryId: string;
+}
+
+const DEMO_CATEGORIES: readonly DemoCategory[] = [
+  { id: "demo-cat-coffee", name: "Kaffe & varm drikke", sortOrder: 10 },
+  { id: "demo-cat-snacks", name: "Snacks & sjokolade", sortOrder: 20 },
+  { id: "demo-cat-misc", name: "Annet", sortOrder: 30 },
+];
+
+const DEMO_PRODUCTS: readonly DemoProduct[] = [
+  {
+    id: "demo-prod-coffee",
+    name: "Kaffe",
+    description: "Filterkaffe, kopp",
+    priceCents: 2000, // 20 kr
+    categoryId: "demo-cat-coffee",
+  },
+  {
+    id: "demo-prod-tea",
+    name: "Te",
+    description: "Te, kopp",
+    priceCents: 2000, // 20 kr
+    categoryId: "demo-cat-coffee",
+  },
+  {
+    id: "demo-prod-cocoa",
+    name: "Varm sjokolade",
+    description: "Kakao, kopp",
+    priceCents: 2500, // 25 kr
+    categoryId: "demo-cat-coffee",
+  },
+  {
+    id: "demo-prod-chocolate",
+    name: "Sjokolade",
+    description: "Sjokoladeplate",
+    priceCents: 3000, // 30 kr
+    categoryId: "demo-cat-snacks",
+  },
+  {
+    id: "demo-prod-chips",
+    name: "Potetgull",
+    description: "Liten pose",
+    priceCents: 2500, // 25 kr
+    categoryId: "demo-cat-snacks",
+  },
+  {
+    id: "demo-prod-rice",
+    name: "Risboller",
+    description: "Risboller, pose",
+    priceCents: 2500, // 25 kr
+    categoryId: "demo-cat-snacks",
+  },
+  {
+    id: "demo-prod-water",
+    name: "Vann",
+    description: "Flaske 0,5L",
+    priceCents: 2500, // 25 kr
+    categoryId: "demo-cat-misc",
+  },
+  {
+    id: "demo-prod-juice",
+    name: "Brus",
+    description: "Boks 0,33L",
+    priceCents: 3000, // 30 kr
+    categoryId: "demo-cat-misc",
+  },
+];
+
+async function upsertKioskCategory(
+  client: Client,
+  category: DemoCategory,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO app_product_categories (id, name, sort_order, is_active)
+     VALUES ($1, $2, $3, TRUE)
+     ON CONFLICT (id) DO UPDATE
+       SET name = EXCLUDED.name,
+           sort_order = EXCLUDED.sort_order,
+           is_active = TRUE,
+           deleted_at = NULL,
+           updated_at = NOW()`,
+    [category.id, category.name, category.sortOrder],
+  );
+}
+
+async function upsertKioskProduct(
+  client: Client,
+  product: DemoProduct,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO app_products
+       (id, name, description, price_cents, category_id, status)
+     VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
+     ON CONFLICT (id) DO UPDATE
+       SET name = EXCLUDED.name,
+           description = EXCLUDED.description,
+           price_cents = EXCLUDED.price_cents,
+           category_id = EXCLUDED.category_id,
+           status = 'ACTIVE',
+           deleted_at = NULL,
+           updated_at = NOW()`,
+    [
+      product.id,
+      product.name,
+      product.description,
+      product.priceCents,
+      product.categoryId,
+    ],
+  );
+}
+
+async function ensureHallProductBinding(
+  client: Client,
+  hallId: string,
+  productId: string,
+  addedByUserId: string | null,
+): Promise<void> {
+  // PRIMARY KEY (hall_id, product_id) sikrer idempotens.
+  await client.query(
+    `INSERT INTO app_hall_products (hall_id, product_id, is_active, added_by)
+     VALUES ($1, $2, TRUE, $3)
+     ON CONFLICT (hall_id, product_id) DO UPDATE
+       SET is_active = TRUE`,
+    [hallId, productId, addedByUserId],
+  );
+}
+
+async function seedKioskProducts(
+  client: Client,
+  hallIds: readonly string[],
+  adminId: string,
+): Promise<void> {
+  // Sjekk at tabellen finnes — products-migrasjonen er fra 2026-04-20 så
+  // dette skal alltid være sant i moderne snapshots.
+  if (!(await tableExists(client, "app_products"))) {
+    console.log("  [products]        hopper over — app_products-tabell finnes ikke");
+    return;
+  }
+  for (const category of DEMO_CATEGORIES) {
+    await upsertKioskCategory(client, category);
+  }
+  for (const product of DEMO_PRODUCTS) {
+    await upsertKioskProduct(client, product);
+  }
+  for (const hallId of hallIds) {
+    for (const product of DEMO_PRODUCTS) {
+      await ensureHallProductBinding(client, hallId, product.id, adminId);
+    }
+  }
+  console.log(
+    `  [products]        ${DEMO_CATEGORIES.length} kategorier + ${DEMO_PRODUCTS.length} produkter ` +
+      `bundet til ${hallIds.length} hall(er)`,
   );
 }
 
@@ -1119,15 +1311,19 @@ async function upsertGameManagement(
   adminId: string,
 ): Promise<void> {
   // Tickets-priser per farge i øre (10/20/30/40 kr × 1/1.5/2/2.5).
+  // Snake_case-keys matcher canonical TICKET_TYPES (11-color palette).
   const ticketPrices: Record<string, number> = {
-    smallYellow: 1000,
-    largeYellow: 2000,
-    smallWhite: 1500,
-    largeWhite: 3000,
-    smallPurple: 2500,
-    largePurple: 4000,
-    red: 1000,
-    green: 1000,
+    small_yellow: 1000,
+    small_white: 1500,
+    large_yellow: 2000,
+    large_white: 3000,
+    small_purple: 2500,
+    large_purple: 4000,
+    small_red: 1000,
+    large_red: 2000,
+    small_green: 1000,
+    large_green: 2000,
+    small_blue: 1000,
   };
 
   // Pattern-priser per farge (Rad 1-4 + Fullt Hus). Pris i kroner.
@@ -1268,12 +1464,16 @@ async function upsertSchedule(
     miniGameSlug: sg.miniGameSlug,
     ticketTypesData: {
       ticketType: TICKET_COLORS,
-      ticketPrice: [1000, 2000, 1500, 3000, 2500, 4000, 1000, 1000],
-      ticketPrize: [0, 0, 0, 0, 0, 0, 0, 0],
+      // 11 priser i øre — match TICKET_COLORS-rekkefølgen.
+      ticketPrice: [
+        1000, 1500, 2000, 3000, 2500, 4000,
+        1000, 2000, 1000, 2000, 1000,
+      ],
+      ticketPrize: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       options: [],
     },
     jackpotData: {
-      jackpotPrize: { yellow: 0, white: 0, purple: 0, red: 0, green: 0 },
+      jackpotPrize: { yellow: 0, white: 0, purple: 0, red: 0, green: 0, blue: 0 },
       jackpotDraw: 0,
     },
     elvisData: { replaceTicketPrice: 0 },
@@ -1340,6 +1540,15 @@ async function upsertDailySchedule(
   // Sett end_date til 23:59:59 samme dag for stabil filtrering.
   const endDate = new Date(input.startDate.getTime() + 24 * 3_600_000 - 1_000);
 
+  // status='running' (ikke 'active'): Game1ScheduleTickService.ts:403
+  // filtrerer kun på status='running' når den henter daily-schedules som
+  // skal spawnes til scheduled_games. 'active' er en lagret-men-ikke-aktiv
+  // tilstand som tick-en hopper over (regulatorisk: admin må eksplisitt
+  // markere planen som "kjører" før første tick spawn). For seed-formål
+  // setter vi 'running' direkte slik at scheduler-cron umiddelbart plukker
+  // opp planen og spillere ser games i lobby uten manuell aktivering.
+  // Pilot-blokker fjernet 2026-05-01: tidligere 'active' førte til at
+  // schedule-listing viste raden men ingen game ble spawnet.
   await client.query(
     `INSERT INTO app_daily_schedules
        (id, name, game_management_id, hall_id, hall_ids_json,
@@ -1350,7 +1559,7 @@ async function upsertDailySchedule(
      VALUES
        ($1, $2, $3, $4, $5::jsonb,
         127, NULL, $6::timestamptz, $7::timestamptz,
-        '18:00', '22:00', 'active',
+        '18:00', '22:00', 'running',
         false, false, false, false,
         0, $8::jsonb, $9::jsonb, $10)
      ON CONFLICT (id) DO UPDATE
@@ -1363,7 +1572,7 @@ async function upsertDailySchedule(
            end_date = EXCLUDED.end_date,
            start_time = EXCLUDED.start_time,
            end_time = EXCLUDED.end_time,
-           status = 'active',
+           status = 'running',
            stop_game = false,
            subgames_json = EXCLUDED.subgames_json,
            other_data_json = EXCLUDED.other_data_json,
