@@ -267,15 +267,27 @@ export function renderCashInOutPage(container: HTMLElement): void {
   // FE-P0-003: abort any prior page's in-flight requests, then start a
   // fresh controller for this mount. The wireFunctionKeys observer also
   // aborts on container-detach (see wireFunctionKeys below).
+  //
+  // 2026-05-01 (Tobias): event-listener-leak-fix. Router gjenbruker samme
+  // `container` på tvers av navigasjoner (apps/admin-web/src/router/Router.ts:49
+  // — `renderer(container, route)`). Tidligere la `wireActions` og
+  // `wireTabs` til en ny event-listener på containeren ved hver
+  // mount-syklus uten cleanup, så listeners stables opp. Etter 3
+  // navigasjoner til /agent/cashinout og tilbake måtte agenten klikke
+  // "Avbryt" 3 ganger på Kontroller-daglig-saldo-modalen fordi 3 listeners
+  // reagerte på samme klikk → 3 modaler stablet seg.
+  // Fix: sender `signal: activePageAbort.signal` med alle addEventListener-
+  // kall så de auto-fjernes når neste mount aborter signalet.
   if (activePageAbort) activePageAbort.abort();
   activePageAbort = new AbortController();
-  wireTabs(container);
-  wireActions(container);
+  const signal = activePageAbort.signal;
+  wireTabs(container, signal);
+  wireActions(container, signal);
   wireFunctionKeys(container);
   void refreshBalance(container);
 }
 
-function wireTabs(container: HTMLElement): void {
+function wireTabs(container: HTMLElement, signal: AbortSignal): void {
   container.querySelectorAll<HTMLAnchorElement>("#cashinout-tabs [data-tab]").forEach((a) => {
     a.addEventListener("click", () => {
       const target = a.dataset.tab!;
@@ -290,15 +302,18 @@ function wireTabs(container: HTMLElement): void {
         pane.style.display = "";
         pane.classList.add("active");
       }
-    });
+    }, { signal });
   });
 }
 
-function wireActions(container: HTMLElement): void {
+function wireActions(container: HTMLElement, signal: AbortSignal): void {
   container.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     const button = target.closest<HTMLElement>("[data-action]");
     if (!button) return;
+    // Guard: ignorer events fra utenfor denne containeren — defensive mot
+    // event-bubbling fra modaler eller portal-rendered popovers.
+    if (!container.contains(button)) return;
     const action = button.dataset.action;
     switch (action) {
       case "back":
@@ -367,7 +382,7 @@ function wireActions(container: HTMLElement): void {
       // shift-log-out, todays-sales-report, create-new-unique-id, sell-products
       // håndteres via href eller av AgentCashInOutPage (Shift Log Out).
     }
-  });
+  }, { signal });
 }
 
 function wireFunctionKeys(container: HTMLElement): void {
