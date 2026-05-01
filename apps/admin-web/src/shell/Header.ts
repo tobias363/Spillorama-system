@@ -172,6 +172,34 @@ export function renderHeader(container: HTMLElement, session: Session, maintenan
   });
   ul.append(userLi);
 
+  // 2026-05-01 (Tobias): synlig logg-ut-knapp ved siden av user-dropdown.
+  // Bootstrap-3-dropdown-toggle krever at bootstrap.js er lastet for å vise
+  // .dropdown-menu via [data-toggle="dropdown"]. Hvis bootstrap.js mangler
+  // (eller blir blokkert av strict CSP), klarer ikke brukere å logge seg ut
+  // via avatar-menyen. Denne synlige knappen er en defensiv duplikat — same
+  // logout-handler, samme `logout()`-call mot backend. Ufarlig om dropdown-en
+  // også fungerer; brukere som kjenner dropdown-flyten kan fortsatt bruke
+  // den, og brukere som ikke ser den får denne fall-back-en.
+  const logoutBtnLi = document.createElement("li");
+  const logoutBtn = document.createElement("a");
+  logoutBtn.href = "#";
+  logoutBtn.className = "btn btn-danger";
+  logoutBtn.setAttribute(
+    "style",
+    "color: white; margin: 8px 12px 0 0; font-weight: 600;",
+  );
+  logoutBtn.setAttribute("data-action", "logout-direct");
+  logoutBtn.setAttribute("aria-label", t("sign_out"));
+  logoutBtn.innerHTML = `<i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("sign_out"))}`;
+  logoutBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await logout().catch(() => undefined);
+    window.location.hash = "#/login";
+    window.location.reload();
+  });
+  logoutBtnLi.append(logoutBtn);
+  ul.append(logoutBtnLi);
+
   if (session.isSuperAdmin) {
     const gearLi = document.createElement("li");
     gearLi.innerHTML = `<a href="#/settings" aria-label="${t("settings")}" title="${t("settings")}"><i class="fa fa-gears" aria-hidden="true"></i></a>`;
