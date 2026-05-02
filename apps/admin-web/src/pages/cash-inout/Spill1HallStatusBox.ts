@@ -41,14 +41,18 @@ interface BoxState {
   errorMessage: string | null;
 }
 
-let activeMount: { container: HTMLElement; cleanup: () => void } | null = null;
+let activeMount: { container: HTMLElement; signal: AbortSignal; cleanup: () => void } | null = null;
 
 export function mountSpill1HallStatusBox(
   container: HTMLElement,
   signal: AbortSignal
 ): void {
-  // Idempotent re-mount: hvis allerede mounted i samme container, no-op.
-  if (activeMount && activeMount.container === container) {
+  // Bug-fix 2026-05-02 (Tobias): router gjenbruker samme container-DOM-node
+  // mellom navigasjoner, så vi MÅ skille på AbortSignal-identitet, ikke
+  // container-identitet. Tidligere ga "samme container" no-op selv etter
+  // at gammel signal var aborted — polling startet ikke på nytt og siden
+  // viste evig "Henter Spill 1-status…" / "Ingen kommende spill".
+  if (activeMount && activeMount.signal === signal && !signal.aborted) {
     return;
   }
   if (activeMount) {
@@ -71,6 +75,11 @@ export function mountSpill1HallStatusBox(
     if (pollTimer !== null) {
       clearInterval(pollTimer);
       pollTimer = null;
+    }
+    // Bug-fix 2026-05-02: nullstill activeMount så neste mount-kall i samme
+    // container ikke no-op-er på stale referanse.
+    if (activeMount && activeMount.signal === signal) {
+      activeMount = null;
     }
   };
 
@@ -184,7 +193,7 @@ export function mountSpill1HallStatusBox(
     }
   }
 
-  activeMount = { container, cleanup };
+  activeMount = { container, signal, cleanup };
 }
 
 export function unmountSpill1HallStatusBox(): void {
