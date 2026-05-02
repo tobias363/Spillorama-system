@@ -151,7 +151,6 @@ export async function unmarkHallReadyForGame(
     { method: "POST", auth: true, body: { gameId } }
   );
 }
-
 /**
  * 2026-05-02: bingovert markerer egen hall som "Ingen kunder" — hallen
  * ekskluderes fra runden. Master-konsollet ser hallen som rød. Agent

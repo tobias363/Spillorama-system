@@ -342,6 +342,11 @@ export const agentSidebar: SidebarNode[] = [
     ],
   },
   { kind: "leaf", id: "agent-physical-tickets", path: "/agent/physical-tickets", icon: "fa fa-ticket", labelKey: "add_physical_tickets" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 5) +
+  // legacy AGENT-sidebar "Administrasjon av fysiske billetter":
+  // GameTicketListPage gir CRUD-oversikt over fysiske billett-stacks per
+  // spill. Backend: AGENT har `PHYSICAL_TICKET_WRITE`. PR #823 audit gap #5.
+  { kind: "leaf", id: "agent-physical-ticket-management", path: "/physicalTicketManagement", icon: "fa fa-th-list", labelKey: "physical_ticket_management" },
   {
     kind: "group",
     id: "agent-game-management",
@@ -354,6 +359,12 @@ export const agentSidebar: SidebarNode[] = [
       // AGENT i AdminAccessPolicy). Eksponer leaf slik at bingoverten kan
       // åpne dagens plan uten å kjenne URL-en. (PR #823 audit, gap #2.)
       { kind: "leaf", id: "agent-schedules", path: "/schedules", icon: "fa fa-circle-o", labelKey: "schedule_management" },
+      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 3) +
+      // legacy AGENT-sidebar "Opprettelse av spill":
+      // GameManagementPage gir Game Creation Management. Backend: AGENT har
+      // `GAME_MGMT_READ/WRITE`. HALL_OPERATOR-scope filtrerer per egen hall.
+      // (PR #823 audit, gap #3.)
+      { kind: "leaf", id: "agent-game-creation", path: "/gameManagement", icon: "fa fa-plus-square", labelKey: "game_creation_management" },
       // Wireframe Role Management-matrise (PDF 8 §8.3 rad 4):
       // Saved Game List er AGENT-tilgjengelig (`SAVED_GAME_READ/WRITE` har
       // AGENT). Master-hall-agenter har default-access per legacy-spec.
@@ -384,6 +395,24 @@ export const agentSidebar: SidebarNode[] = [
   // av agent. Bruker `/agent/sold-tickets`-aliaset slik at routes-guarden
   // tillater AGENT/HALL_OPERATOR-tilgang.
   { kind: "leaf", id: "agent-sold-tickets", path: "/agent/sold-tickets", icon: "fa fa-list", labelKey: "sold_tickets" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 8) +
+  // legacy AGENT-sidebar "Lommebokadministrasjon": WalletListPage gir
+  // oversikt over spiller-wallets. /api/wallets har ingen explicit RBAC-gate
+  // (sesjons-auth holder); AGENT med URL-kjennskap rendrer allerede siden.
+  // PR #823 audit gap #8.
+  { kind: "leaf", id: "agent-wallet", path: "/wallet", icon: "fa fa-credit-card", labelKey: "wallet_management" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 9) +
+  // legacy AGENT-sidebar "Transaksjonsadministrasjon": TransactionsLogPage
+  // gir generisk transaksjons-logg på tvers av wallet/agent/deposit/withdraw.
+  // Backend: /api/admin/transactions krever PLAYER_KYC_READ — AGENT har det.
+  // PR #823 audit gap #9.
+  { kind: "leaf", id: "agent-transactions-log", path: "/transactions/log", icon: "fa fa-exchange", labelKey: "transactions_management" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 10) +
+  // legacy AGENT-sidebar "Uttaksadministrasjon": godkjenn kontant-uttak fra
+  // hall (RequestsPage med destinationType=hall). Backend: AGENT har
+  // PAYMENT_REQUEST_READ/WRITE. PR #823 audit gap #10 (kritisk for
+  // skift-flyt — XML-pipeline + kontant-utbetaling).
+  { kind: "leaf", id: "agent-withdraw-management", path: "/withdraw/requests/hall", icon: "fa fa-sign-out", labelKey: "withdraw_management" },
   // Rapport- og regnskaps-administrasjon. PR #823 audit (rad 7, 12, 14, 15):
   // backend RBAC har AGENT på `MACHINE_REPORT_READ`, `AGENT_TX_READ`,
   // `PAYOUT_AUDIT_READ`, og hall-account/specific report har ingen explicit

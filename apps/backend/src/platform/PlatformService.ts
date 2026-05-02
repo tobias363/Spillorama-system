@@ -2750,6 +2750,12 @@ export class PlatformService {
   /**
    * BIN-587 B2.2: admin approve av KYC. Setter VERIFIED og stempler
    * providerRef = "admin-override:<actorId>" så historikken er synlig.
+   *
+   * P0-1 (pilot 2026-05-02): hvis spilleren har en `hall_id` ved
+   * godkjenning, opprettes også en ACTIVE app_hall_registrations-rad så
+   * agent-portalen kan transake mot spilleren umiddelbart etter approve.
+   * Hvis hall-registrering feiler, KYC-approve står likevel — det er en
+   * fire-and-forget-kobling, ikke en blokker.
    */
   async approveKycAsAdmin(input: {
     userId: string;
@@ -2765,13 +2771,37 @@ export class PlatformService {
         "Spiller har ikke oppgitt fødselsdato — KYC kan ikke godkjennes uten denne."
       );
     }
-    return this.updateKycStatus({
+    const updated = await this.updateKycStatus({
       userId: current.id,
       status: "VERIFIED",
       birthDate: current.birthDate,
       providerRef: `admin-override:${actorId}`,
       verifiedAt: new Date().toISOString(),
     });
+
+    // P0-1 (pilot 2026-05-02): registrer i hall_registrations når
+    // spilleren har hallId. Best-effort — hvis registrering feiler
+    // (f.eks. wallet_id mangler, FK-brudd) logges det og KYC-approve
+    // returneres uansett. Audit-spor for selve approve er allerede
+    // skrevet av kalleren (route-laget).
+    if (updated.role === "PLAYER" && updated.hallId) {
+      try {
+        await this.ensureHallRegistration({
+          userId: updated.id,
+          walletId: updated.walletId,
+          hallId: updated.hallId,
+          activatedByUserId: actorId,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[approveKycAsAdmin] hall_registration backfill failed for user=${updated.id} hall=${updated.hallId}:`,
+          (err as Error).message
+        );
+      }
+    }
+
+    return updated;
   }
 
   /**
@@ -3397,10 +3427,18 @@ export class PlatformService {
   /**
    * BIN-591: tildel (eller fjern) en hall til en bruker. Kun meningsfylt
    * for HALL_OPERATOR; validerer at hallen finnes hvis ikke null.
+   *
+   * P0-1 (pilot 2026-05-02): for PLAYER-role brukere kalles også
+   * `ensureHallRegistration` for å sikre at `app_hall_registrations`
+   * får en ACTIVE-rad. Uten dette ville agent-portalens player-lookup
+   * og cash-in/out feile med PLAYER_NOT_AT_HALL fordi
+   * `isPlayerActiveInHall` leser fra hall_registrations-tabellen, ikke
+   * `app_users.hall_id`.
    */
   async updateUserHallAssignment(
     userIdInput: string,
-    hallIdInput: string | null
+    hallIdInput: string | null,
+    actorIdInput?: string | null
   ): Promise<PublicAppUser> {
     await this.ensureInitialized();
     const userId = this.assertEntityReference(userIdInput, "userId");
@@ -3408,6 +3446,10 @@ export class PlatformService {
       hallIdInput === null || hallIdInput === undefined
         ? null
         : this.assertEntityReference(hallIdInput, "hallId");
+    const actorId =
+      actorIdInput === null || actorIdInput === undefined || actorIdInput === ""
+        ? null
+        : this.assertEntityReference(actorIdInput, "actorId");
 
     if (nextHallId !== null) {
       const { rows: hallRows } = await this.pool.query(
@@ -3431,7 +3473,80 @@ export class PlatformService {
     if (!row) {
       throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
     }
-    return this.withBalance(this.mapUser(row));
+    const updated = this.mapUser(row);
+
+    // P0-1 (pilot 2026-05-02): hold app_hall_registrations i lock-step
+    // med app_users.hall_id for PLAYER. ADMIN/SUPPORT/HALL_OPERATOR/AGENT
+    // bruker app_agent_halls for hall-binding, ikke hall_registrations.
+    if (updated.role === "PLAYER" && nextHallId !== null) {
+      await this.ensureHallRegistration({
+        userId: updated.id,
+        walletId: updated.walletId,
+        hallId: nextHallId,
+        activatedByUserId: actorId,
+      });
+    }
+
+    return this.withBalance(updated);
+  }
+
+  /**
+   * P0-1 (pilot 2026-05-02): idempotent UPSERT av app_hall_registrations
+   * for en spiller-hall-kobling. Status låses til ACTIVE; eksisterende
+   * `activated_at` bevares via COALESCE så vi ikke roter tidsstempelet
+   * på re-run. UNIQUE (user_id, hall_id) sikrer at det aldri finnes
+   * mer enn én rad per kombinasjon — selv ved race-conditions.
+   *
+   * Skjema (`app_hall_registrations`, BIN-583/initial_schema):
+   *   id PK, user_id FK, wallet_id, hall_id FK, status
+   *   ('PENDING'|'ACTIVE'|'INACTIVE'|'BLOCKED'), requested_at,
+   *   activated_at, activated_by_user_id FK.
+   *
+   * Stable id-format `reg-<userId>-<hallId>` matcher seed-conventions
+   * og gjør ON CONFLICT (id) trygg på tvers av kall-sites.
+   */
+  async ensureHallRegistration(input: {
+    userId: string;
+    walletId: string;
+    hallId: string;
+    activatedByUserId: string | null;
+  }): Promise<void> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(input.userId, "userId");
+    const hallId = this.assertEntityReference(input.hallId, "hallId");
+    const walletId = input.walletId.trim();
+    if (!walletId) {
+      throw new DomainError("INVALID_INPUT", "walletId er påkrevd.");
+    }
+    const activatedByUserId =
+      input.activatedByUserId === null || input.activatedByUserId === undefined
+        ? null
+        : this.assertEntityReference(input.activatedByUserId, "activatedByUserId");
+
+    // Stable id matcher seed-conventions så seed-script og prod-writer
+    // ikke ender opp med duplikat-rader på samme (user_id, hall_id).
+    const registrationId = `reg-${userId}-${hallId}`;
+    await this.pool.query(
+      `INSERT INTO "${this.schema}"."app_hall_registrations"
+         (id, user_id, wallet_id, hall_id, status,
+          requested_at, activated_at, activated_by_user_id)
+       VALUES
+         ($1, $2, $3, $4, 'ACTIVE',
+          now(), now(), $5)
+       ON CONFLICT (user_id, hall_id) DO UPDATE
+         SET wallet_id = EXCLUDED.wallet_id,
+             status = 'ACTIVE',
+             activated_at = COALESCE(
+               "app_hall_registrations".activated_at,
+               EXCLUDED.activated_at
+             ),
+             activated_by_user_id = COALESCE(
+               "app_hall_registrations".activated_by_user_id,
+               EXCLUDED.activated_by_user_id
+             ),
+             updated_at = now()`,
+      [registrationId, userId, walletId, hallId, activatedByUserId]
+    );
   }
 
   /**
