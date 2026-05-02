@@ -166,6 +166,8 @@ function mountShell(_root: HTMLElement, session: Session): void {
     container: refs.contentHost,
     renderer: (container, route) => renderPage(container, route, session),
     onUnknown: (path, container) => {
+      const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+      if (debug) console.log("[router-onUnknown] path=%s — searching dispatchers", path);
       unmountDashboard();
       // Strip query string for routes that carry params
       // (e.g. `/agent/sellPhysicalTickets?gameId=X`, `/players/view?id=X`,
@@ -308,6 +310,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       renderUnknown(container, path);
     },
     onChange: (route, path) => {
+      const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+      if (debug) {
+        console.log("[router-onChange] path=%s route=%s found=%s", path, route?.path, route ? "YES" : "NO (will fall to onUnknown)");
+      }
       // Stop dashboard-polling when navigating away from the dashboard route.
       if (route?.path !== "/admin" && route?.path !== "/") unmountDashboard();
       // Dispose admin-ops socket when navigating away from /admin/ops.
@@ -319,9 +325,11 @@ function mountShell(_root: HTMLElement, session: Session): void {
       // page before the redirect lands.
       const redirected = guardRouteForRole(path, session);
       if (redirected !== path) {
+        if (debug) console.log("[router-onChange] GUARD REDIRECT %s → %s", path, redirected);
         window.location.hash = `#${redirected}`;
         return;
       }
+      if (debug) console.log("[router-onChange] no redirect, rendering chrome");
       renderLayoutChrome(refs, session, route, path, MAINTENANCE_MODE);
     },
   });
@@ -404,6 +412,11 @@ function mountShell(_root: HTMLElement, session: Session): void {
  */
 function guardRouteForRole(path: string, session: Session): string {
   const bare = path.split("?")[0] ?? path;
+  // Debug-logging — sett window.__SPILL_DEBUG__ = false i console for å skru av
+  const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+  if (debug) {
+    console.log("[router-guard] path=%s bare=%s role=%s", path, bare, session.role);
+  }
   if (isAgentPortalRole(session.role)) {
     // Agent-portal users (AGENT, HALL_OPERATOR) — landing-redirect for `/`
     // og `/admin`, men ALLE andre paths tillates. Sidebar (sidebarSpec.ts)
@@ -415,7 +428,11 @@ function guardRouteForRole(path: string, session: Session): string {
     // som peker på legacy-paths (/uniqueId, /withdraw/*, /physical/*,
     // /sold-tickets etc.). Disse er gyldige sider AGENT skal kunne åpne
     // — RBAC + hall-scope tar hand om autorisasjon serverside.
-    if (bare === "/" || bare === "/admin") return "/agent/dashboard";
+    if (bare === "/" || bare === "/admin") {
+      if (debug) console.log("[router-guard] AGENT root/admin → redirect to /agent/dashboard");
+      return "/agent/dashboard";
+    }
+    if (debug) console.log("[router-guard] AGENT path allowed → %s", path);
     return path;
   }
   if (isAdminPanelRole(session.role)) {
@@ -428,6 +445,11 @@ function guardRouteForRole(path: string, session: Session): string {
 }
 
 function renderPage(container: HTMLElement, route: RouteDef, session: Session): void | Promise<void> {
+  // Debug-logging — sett window.__SPILL_DEBUG__ = false i console for å skru av
+  const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+  if (debug) {
+    console.log("[render-page] route.path=%s titleKey=%s role=%s", route.path, route.titleKey, session.role);
+  }
   container.setAttribute("data-route", route.path);
   container.setAttribute("data-title", t(route.titleKey));
   if (route.path === "/admin" || route.path === "/") {
