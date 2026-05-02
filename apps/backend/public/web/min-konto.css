@@ -24,10 +24,15 @@
 }
 
 /* ── Overlay layering ─────────────────────────────────────────────────── */
+/* z-index 10800 sits above profile-overlay (5000), info-overlay (6000),
+ * spillregnskap-view (10500), and matches/overrides candy-overlay (10000),
+ * but stays below mandatory-pause-modal (99999) and the login-overlay
+ * (10000) so unauthenticated users can't bypass login by triggering Min
+ * Konto. The compliance-critical mandatory-pause modal must always win. */
 .mk-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1500;
+  z-index: 10800;
   display: none;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -201,8 +206,6 @@
 
 .mk-hall-select {
   appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
   background: rgba(247, 238, 221, 0.06);
   border: 1px solid rgba(247, 238, 221, 0.18);
   color: var(--mk-card);
@@ -831,9 +834,10 @@
     margin: 0 auto;
     box-shadow: 0 0 0 1px rgba(212, 166, 74, 0.08), 0 30px 80px rgba(0, 0, 0, 0.5);
   }
+  /* NB: backdrop-filter er forbudt over Pixi-canvas (flimmer-policy, se
+   * packages/game-client/src/games/game1/ARCHITECTURE.md). Bruker solid
+   * semi-transparent bakgrunn med alpha >= 0.85 i stedet. */
   .mk-overlay {
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: rgba(0, 0, 0, 0.88);
   }
 }

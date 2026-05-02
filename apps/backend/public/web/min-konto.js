@@ -223,9 +223,6 @@
   // ── 1. Personlig informasjon ─────────────────────────────────────────
   function renderPersonlig(sub) {
     var p = state.profile || {};
-    var pinwheel = '<div style="width:36px;height:36px;border-radius:8px;background:rgba(247,238,221,0.06);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#f7eedd">'
-      + '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="11" r="1.2" fill="currentColor"/><circle cx="15" cy="11" r="1.2" fill="currentColor"/><path d="M9 15.5c1 1 2 1.4 3 1.4s2-.4 3-1.4"/></svg>'
-      + '</div>';
 
     function infoRow(label, value, sub2, editable) {
       return '<div class="mk-info-row">'
@@ -238,11 +235,16 @@
         + '</div>';
     }
 
+    // Compose "Fullt navn" without ever producing the literal "null" or "undefined"
+    var fullName = '';
+    if (p.displayName) fullName = String(p.displayName);
+    if (p.surname) fullName = (fullName ? fullName + ' ' : '') + String(p.surname);
+
     sub.innerHTML = subHeader('Personlig informasjon', 'mk-sub-personlig')
       + '<div class="mk-sub-body">'
       + '  <div class="mk-info-card">'
-      +     infoRow('Fullt navn', p.displayName + (p.surname ? ' ' + p.surname : ''))
-      +     infoRow('Spillernummer', p.id ? p.id.slice(0, 8).toUpperCase() : '—')
+      +     infoRow('Fullt navn', fullName)
+      +     infoRow('Spillernummer', p.id ? String(p.id).slice(0, 8).toUpperCase() : '—')
       +     infoRow('E-post', p.email, null, 'email')
       +     infoRow('Telefon', p.phone, null, 'phone')
       +     infoRow('Fødselsdato', p.birthDate ? formatDateNorsk(p.birthDate) : '—')
@@ -895,6 +897,12 @@
   function bindEvents(root) {
     root.addEventListener('click', function (e) {
       var t = e.target;
+      // Backdrop click on desktop (when screen is centered) — close overlay.
+      // Only fires when click target IS the root overlay (not bubbled).
+      if (t === root) {
+        hide();
+        return;
+      }
       var back = t.closest && t.closest('[data-mk-back]');
       if (back) {
         var subId = back.getAttribute('data-mk-back');
@@ -909,7 +917,9 @@
       }
       var editEl = t.closest && t.closest('[data-mk-edit]');
       if (editEl) {
-        openPersonligEdit();
+        openSub('mk-sub-personlig', renderPersonlig);
+        // Defer edit-mode swap so the sub-screen is mounted first.
+        setTimeout(openPersonligEdit, 0);
       }
     });
 
