@@ -3820,6 +3820,21 @@ export class BingoEngine {
       return;
     }
 
+    // 2026-05-02 (Tobias UX-decision): tidligere kastet vi
+    // PLAYER_ALREADY_IN_RUNNING_GAME hvis spilleren var registrert i et
+    // annet RUNNING-rom. Dette ga "Spiller deltar allerede i et annet aktivt
+    // spill"-feilmelding når en spiller forsøkte å bytte hall mid-pilot.
+    //
+    // Tobias' krav: spillere skal ALLTID kunne gå inn/ut av bingo-rom uten
+    // feilmelding. Compliance-grunnen var å hindre double-spending, men
+    // ticket-kjøp debiterer wallet atomisk per transaksjon — det er ikke
+    // en double-spend-risiko å være "in" 2 rom samtidig (kun aktiv
+    // interaksjon teller).
+    //
+    // Fix: i stedet for å throw, evict spilleren fra det gamle rommet
+    // (slipper wallet-binding via releaseAndForgetEviction så de kan binde
+    // seg på nytt umiddelbart). Logger som info for sporbarhet — ingen
+    // feilmelding når denne stien fyrer.
     for (const room of this.rooms.values()) {
       if (exceptRoomCode && room.code === exceptRoomCode) {
         continue;
@@ -3828,14 +3843,29 @@ export class BingoEngine {
         continue;
       }
 
-      for (const player of room.players.values()) {
+      let mutated = false;
+      for (const player of [...room.players.values()]) {
         if (player.walletId !== normalizedWalletId) {
           continue;
         }
-        throw new DomainError(
-          "PLAYER_ALREADY_IN_RUNNING_GAME",
-          `Spiller ${player.name} deltar allerede i et annet aktivt spill (rom ${room.code}).`
+        if (this.lifecycleStore) {
+          this.releaseAndForgetEviction(room.code, player.id, normalizedWalletId);
+        }
+        room.players.delete(player.id);
+        mutated = true;
+        logRoomEvent(
+          logger,
+          {
+            roomCode: room.code,
+            playerId: player.id,
+            walletId: player.walletId,
+            reason: "auto-evict-on-room-switch",
+          },
+          "room.player.evicted",
         );
+      }
+      if (mutated) {
+        this.syncRoomToStore(room);
       }
     }
   }
