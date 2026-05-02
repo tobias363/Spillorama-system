@@ -160,10 +160,28 @@ export function mountSpill1HallStatusBox(
           await setHallHasCustomersForGame(ownHallId, gameId);
           Toast.info("Hallen er åpnet igjen.");
           break;
-        case "start":
-          await startAgentGame1();
-          Toast.success("Spill 1 startet.");
+        case "start": {
+          // Tobias UX 2026-05-02: master kan starte selv om noen haller ikke
+          // er klare. Hvis ikke alle er klare, vis bekreftelse + send
+          // confirmUnreadyHalls (REQ-007 backend-override).
+          const unreadyHalls = data.halls.filter(
+            (h) => !h.isReady && !h.excludedFromGame,
+          );
+          if (unreadyHalls.length > 0) {
+            const names = unreadyHalls.map((h) => h.hallName).join(", ");
+            const ok = confirm(
+              `Disse hallene har ikke trykket Klar:\n\n  ${names}\n\n` +
+              `Hvis du starter nå vil de bli ekskludert fra denne runden. Vil du fortsette?`,
+            );
+            if (!ok) return;
+            await startAgentGame1(undefined, unreadyHalls.map((h) => h.hallId));
+            Toast.success(`Spill 1 startet — ${unreadyHalls.length} hall(er) ekskludert.`);
+          } else {
+            await startAgentGame1();
+            Toast.success("Spill 1 startet.");
+          }
           break;
+        }
         case "resume":
           await resumeAgentGame1();
           Toast.success("Spill 1 gjenopptatt.");
@@ -248,24 +266,30 @@ function render(container: HTMLElement, state: BoxState): void {
   const isMaster = data.isMasterAgent;
   const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
 
-  // Master-knapper: Start (purchase_open + allReady eller ready_to_start),
-  // Resume (paused), Stopp (running/paused).
+  // Master-knapper: Start aktiv så lenge status=purchase_open eller
+  // ready_to_start. Hvis ikke alle haller er klare, klikk-handler viser
+  // bekreftelse + ekskluderer ikke-klare haller (Tobias UX 2026-05-02).
   const canStart =
     isMaster &&
-    (game.status === "ready_to_start" ||
-      (game.status === "purchase_open" && data.allReady));
+    (game.status === "ready_to_start" || game.status === "purchase_open");
   const canResume = isMaster && game.status === "paused";
   const canStop =
     isMaster && (game.status === "running" || game.status === "paused");
 
   const hallsHtml = renderHallList(data.halls, ownHallId);
   const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status);
+  // Antall ikke-klare/ikke-ekskluderte haller — vises som hint på Start-knappen
+  // så master ser umiddelbart hvor mange som vil bli ekskludert.
+  const unreadyCount = data.halls.filter(
+    (h) => !h.isReady && !h.excludedFromGame,
+  ).length;
   const masterButtonsHtml = renderMasterButtons({
     canStart,
     canResume,
     canStop,
     isMaster,
     gameStatus: game.status,
+    unreadyCount,
   });
 
   const titleParts: string[] = [];
@@ -376,8 +400,22 @@ function renderMasterButtons(opts: {
   canStop: boolean;
   isMaster: boolean;
   gameStatus: string;
+  /**
+   * Antall haller som ikke har trykket Klar og ikke er ekskludert. Hvis > 0
+   * vises en advarsel under Start-knappen — master kan fortsatt starte men
+   * får bekreftelses-popup og hallene ekskluderes fra denne runden.
+   */
+  unreadyCount: number;
 }): string {
   if (!opts.isMaster) return "";
+  const startWarning =
+    opts.canStart && opts.unreadyCount > 0
+      ? `<p class="text-muted small" style="margin-top:8px;margin-bottom:0;">
+           <i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+           ${opts.unreadyCount} hall${opts.unreadyCount === 1 ? "" : "er"}
+           ikke klar enda — start vil ekskludere ${opts.unreadyCount === 1 ? "den" : "dem"}.
+         </p>`
+      : "";
   return `
     <div class="spill1-master-actions" style="margin-top:16px;">
       <h4 style="margin:0 0 8px 0;">Master-handlinger</h4>
@@ -398,6 +436,7 @@ function renderMasterButtons(opts: {
           <i class="fa fa-stop" aria-hidden="true"></i> Stopp Spill 1
         </button>
       </div>
+      ${startWarning}
     </div>`;
 }
 
