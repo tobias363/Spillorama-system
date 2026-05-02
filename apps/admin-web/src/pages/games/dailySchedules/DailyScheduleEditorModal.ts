@@ -44,6 +44,10 @@ import {
   listHallGroups,
   type HallGroupRow,
 } from "../../../api/admin-hall-groups.js";
+import {
+  listSubGames,
+  type AdminSubGame,
+} from "../../../api/admin-sub-games.js";
 
 /**
  * GAME1_SCHEDULE PR 2: weekday-nøkler matcher backend
@@ -214,8 +218,26 @@ export async function openDailyScheduleEditorModal(
     hallGroupList = [];
   }
 
+  // Pilot UX-fix (BIN-PILOT P0): last alle aktive sub-games slik at admin
+  // kan velge fra liste i stedet for å skrive subGameId-strenger i JSON.
+  // Soft-fail — modalen faller tilbake til JSON-textarea hvis API feiler.
+  let subGameList: AdminSubGame[] = [];
+  try {
+    const res = await listSubGames({ status: "active", limit: 500 });
+    subGameList = Array.isArray(res?.subGames) ? res.subGames : [];
+  } catch {
+    subGameList = [];
+  }
+
   const otherDataInitial = (existing?.otherData ?? {}) as Record<string, unknown>;
   const scheduleIdState = readScheduleIdFromOtherData(otherDataInitial);
+
+  // Pilot UX-fix: snapshot av eksisterende subgames-slots så vi kan
+  // gjenopprette ticketPrice/prizePool/extra på sub-games som re-velges
+  // i dropdown-modus.
+  const existingSubgameSlots: DailyScheduleSubgameSlot[] = Array.isArray(existing?.subgames)
+    ? (existing!.subgames as DailyScheduleSubgameSlot[])
+    : [];
 
   const body = document.createElement("div");
   body.innerHTML = renderForm(
@@ -224,8 +246,34 @@ export async function openDailyScheduleEditorModal(
     scheduleMalList,
     scheduleIdState,
     hallList,
-    hallGroupList
+    hallGroupList,
+    subGameList
   );
+
+  // Pilot UX-fix: toggle mellom dropdown-modus (default) og JSON-modus
+  // (advanced). Når dropdown-modus er aktiv, regenereres JSON-textarea
+  // automatisk fra valgte checkbokser ved submit.
+  const toggleBtn = body.querySelector<HTMLButtonElement>("#ds-subgames-toggle");
+  const dropdownPane = body.querySelector<HTMLElement>("#ds-subgames-dropdown");
+  const jsonPane = body.querySelector<HTMLElement>("#ds-subgames-json-pane");
+  if (toggleBtn && dropdownPane && jsonPane) {
+    toggleBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const isJsonVisible = jsonPane.style.display !== "none";
+      if (isJsonVisible) {
+        // Bytt til dropdown
+        jsonPane.style.display = "none";
+        dropdownPane.style.display = "";
+        toggleBtn.textContent = t("schedule_subgames_advanced_edit_json");
+      } else {
+        // Bytt til JSON — synkroniser textarea fra checkboxes først.
+        syncSubgamesJsonFromCheckboxes(body, subGameList, existingSubgameSlots);
+        jsonPane.style.display = "";
+        dropdownPane.style.display = "none";
+        toggleBtn.textContent = t("schedule_subgames_show_dropdown");
+      }
+    });
+  }
 
   // PR 4e.2: når admin velger en hall-gruppe, pre-fyll hallIds + master-hall
   // med gruppens medlemmer (bruker kan overstyre etterpå).
@@ -342,8 +390,18 @@ export async function openDailyScheduleEditorModal(
     const stopGame = readCheckbox(body, "ds-stop-game");
     const specialGame = isSpecial ? true : readCheckbox(body, "ds-special-game");
 
-    const subRaw = readField(body, "ds-subgames");
-    const subgames = parseJsonArray<DailyScheduleSubgameSlot>(subRaw);
+    // Pilot UX-fix: hvis dropdown-modus er synlig, bygg subgames-array fra
+    // valgte checkboxes. Ellers parses JSON-textarea (advanced-modus eller
+    // fallback hvis sub-game-listen ikke kunne lastes).
+    const jsonPaneEl = body.querySelector<HTMLElement>("#ds-subgames-json-pane");
+    const isJsonMode = jsonPaneEl ? jsonPaneEl.style.display !== "none" : true;
+    let subgames: DailyScheduleSubgameSlot[] | null;
+    if (isJsonMode) {
+      const subRaw = readField(body, "ds-subgames");
+      subgames = parseJsonArray<DailyScheduleSubgameSlot>(subRaw);
+    } else {
+      subgames = collectSubgamesFromCheckboxes(body, subGameList, existingSubgameSlots);
+    }
     if (subgames === null) {
       setError(body, t("invalid_subgames_json"));
       return null;
@@ -493,6 +551,90 @@ function buildMasterHallOptions(halls: AdminHall[], selected: string): string {
   return `${emptyOpt}${opts}`;
 }
 
+/**
+ * Pilot UX-fix: bygg checkbox-liste over alle aktive sub-games. Hver row
+ * viser navn + sub-game-nummer + ticket-farger. Pre-checked basert på
+ * eksisterende daily-schedule-subgames (matchet på subGameId).
+ */
+function buildSubGameCheckboxes(
+  subGames: AdminSubGame[],
+  preSelected: Set<string>
+): string {
+  if (subGames.length === 0) {
+    return `<p class="help-block" style="color:#a94442;font-size:12px;">
+      ${escapeHtml(t("schedule_subgames_dropdown_unavailable"))}
+    </p>`;
+  }
+  return subGames
+    .map((sg) => {
+      const isChecked = preSelected.has(sg.id) ? "checked" : "";
+      const number = sg.subGameNumber ? ` · ${sg.subGameNumber}` : "";
+      const colors = Array.isArray(sg.ticketColors) && sg.ticketColors.length > 0
+        ? sg.ticketColors.join(", ")
+        : "";
+      const colorsLabel = colors ? ` · ${colors}` : "";
+      const gameName = sg.gameName ? ` (${sg.gameName})` : "";
+      return `
+        <label class="checkbox" style="display:block;margin-bottom:4px;padding:4px 8px;border:1px solid #eee;border-radius:3px;cursor:pointer;">
+          <input type="checkbox" class="ds-subgame-pick" value="${escapeHtml(sg.id)}" ${isChecked}>
+          <strong>${escapeHtml(sg.name)}</strong>${escapeHtml(gameName)}
+          <span style="color:#888;font-size:11px;">${escapeHtml(number)}${escapeHtml(colorsLabel)}</span>
+          <br>
+          <span style="color:#aaa;font-size:10px;font-family:monospace;">${escapeHtml(sg.id)}</span>
+        </label>`;
+    })
+    .join("");
+}
+
+/**
+ * Pilot UX-fix: les hvilke subGameIds som er valgt og bygg
+ * DailyScheduleSubgameSlot-array. Bevarer eksisterende slot-data (index,
+ * ticketPrice, prizePool, patternId, status, extra) for sub-games som
+ * fortsatt er valgt — slik at admin ikke mister konfigurasjon ved
+ * dropdown-toggle.
+ */
+function collectSubgamesFromCheckboxes(
+  form: HTMLElement,
+  _subGames: AdminSubGame[],
+  existingSlots: DailyScheduleSubgameSlot[]
+): DailyScheduleSubgameSlot[] {
+  const checkboxes = form.querySelectorAll<HTMLInputElement>(".ds-subgame-pick");
+  const selectedIds: string[] = [];
+  for (const cb of Array.from(checkboxes)) {
+    if (cb.checked && cb.value) selectedIds.push(cb.value);
+  }
+  return selectedIds.map((subGameId, idx) => {
+    const prior = existingSlots.find((s) => s.subGameId === subGameId);
+    if (prior) {
+      // Behold eksisterende konfig, men oppdater index til ny rekkefølge.
+      return { ...prior, subGameId, index: idx };
+    }
+    // Bygg minimal slot fra sub-game-katalogen — admin må fylle inn
+    // ticketPrice/prizePool i SubGamesListEditor (advanced) hvis ønskelig.
+    return {
+      subGameId,
+      index: idx,
+    };
+  });
+}
+
+/**
+ * Pilot UX-fix: synkroniser JSON-textarea fra valgte checkboxes når admin
+ * klikker "vis JSON". Oppdaterer textarea-verdien så advanced-modus får
+ * konsistent state.
+ */
+function syncSubgamesJsonFromCheckboxes(
+  form: HTMLElement,
+  subGames: AdminSubGame[],
+  existingSlots: DailyScheduleSubgameSlot[]
+): void {
+  const slots = collectSubgamesFromCheckboxes(form, subGames, existingSlots);
+  const ta = form.querySelector<HTMLTextAreaElement>("#ds-subgames");
+  if (ta) {
+    ta.value = JSON.stringify(slots, null, 2);
+  }
+}
+
 function renderForm(
   existing: DailyScheduleRow | null,
   isSpecial: boolean,
@@ -502,7 +644,8 @@ function renderForm(
     scheduleIdByDay: Partial<Record<DailyScheduleDay, string>>;
   },
   hallList: AdminHall[],
-  hallGroupList: HallGroupRow[]
+  hallGroupList: HallGroupRow[],
+  subGameList: AdminSubGame[]
 ): string {
   const name = existing?.name ?? "";
   const startDate = existing?.startDate ?? new Date().toISOString().slice(0, 10);
@@ -521,6 +664,16 @@ function renderForm(
   const activeMask = existing?.weekDays ?? 0;
   const activeDays = daysFromMask(activeMask);
   const subgamesJson = existing?.subgames ? JSON.stringify(existing.subgames, null, 2) : "[]";
+  // Pilot UX-fix: bygg pre-checked-set for sub-game-checkboxes basert på
+  // eksisterende subgames-slots (matchet på subGameId).
+  const preSelectedSubGameIds = new Set<string>();
+  if (Array.isArray(existing?.subgames)) {
+    for (const slot of existing!.subgames) {
+      if (slot && typeof slot === "object" && typeof slot.subGameId === "string") {
+        preSelectedSubGameIds.add(slot.subGameId);
+      }
+    }
+  }
   const dayKeys = Object.keys(WEEKDAY_MASKS) as Array<keyof typeof WEEKDAY_MASKS>;
   const weekdayCheckboxes = dayKeys
     .map((k) => {
@@ -706,10 +859,25 @@ function renderForm(
         </details>
       </fieldset>
       <div class="form-group">
-        <label for="ds-subgames">${escapeHtml(t("sub_games"))} (JSON)</label>
-        <textarea id="ds-subgames" class="form-control" rows="5"
-                  spellcheck="false" style="font-family:monospace;font-size:12px;">${escapeHtml(subgamesJson)}</textarea>
-        <p class="help-block">${escapeHtml(t("subgames_json_hint"))}</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <label style="margin-bottom:0;">${escapeHtml(t("sub_games"))}</label>
+          <button type="button" id="ds-subgames-toggle"
+                  class="btn btn-default btn-xs"
+                  style="font-size:11px;">
+            ${escapeHtml(t("schedule_subgames_advanced_edit_json"))}
+          </button>
+        </div>
+        <div id="ds-subgames-dropdown" style="max-height:240px;overflow-y:auto;border:1px solid #ddd;padding:8px;border-radius:3px;background:#fafafa;">
+          ${buildSubGameCheckboxes(subGameList, preSelectedSubGameIds)}
+        </div>
+        <p class="help-block" style="font-size:11px;">
+          ${escapeHtml(t("schedule_subgames_dropdown_hint"))}
+        </p>
+        <div id="ds-subgames-json-pane" style="display:none;margin-top:8px;">
+          <textarea id="ds-subgames" class="form-control" rows="5"
+                    spellcheck="false" style="font-family:monospace;font-size:12px;">${escapeHtml(subgamesJson)}</textarea>
+          <p class="help-block">${escapeHtml(t("subgames_json_hint"))}</p>
+        </div>
       </div>
       <p id="ds-editor-error" class="help-block"
          style="color:#a94442;display:none;margin-top:4px;"></p>
