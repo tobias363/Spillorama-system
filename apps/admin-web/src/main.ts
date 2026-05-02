@@ -56,7 +56,7 @@ import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPag
 import { mountAgentDashboard, unmountAgentDashboard } from "./pages/agent-dashboard/AgentDashboardPage.js";
 import { mountAgentPlayers } from "./pages/agent-players/AgentPlayersPage.js";
 import { mountAgentPhysicalTickets } from "./pages/agent-portal/AgentPhysicalTicketsPage.js";
-import { mountAgentGames } from "./pages/agent-portal/AgentGamesPage.js";
+import { mountAgentGames, unmountAgentGames } from "./pages/agent-portal/AgentGamesPage.js";
 import { mountAgentCashInOut } from "./pages/agent-portal/AgentCashInOutPage.js";
 import { mountAgentUniqueId } from "./pages/agent-portal/AgentUniqueIdPage.js";
 import { mountAgentPhysicalCashout } from "./pages/agent-portal/AgentPhysicalCashoutPage.js";
@@ -479,6 +479,15 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   unmountDashboard();
   if (route.path !== "/agent/dashboard") {
     unmountAgentDashboard();
+  }
+  // BUG-FIX 2026-05-02: NextGamePanel hadde polling + socket som overskrev
+  // container.innerHTML hver sekund hvis vi ikke unmountet ved nav-bytter.
+  // Symptom: AGENT klikker Tidsplan → URL endres til /schedules, ScheduleList
+  // renderer briefly, så NextGamePanel-polling fyrer rerender(activeContainer)
+  // → erstatter ScheduleList med "Ingen aktivt bingo-rom". Brukeren tror
+  // siden bouncer.
+  if (route.path !== "/agent/games") {
+    unmountAgentGames();
   }
   if (route.path === "/agent/dashboard") {
     mountAgentDashboard(container);
