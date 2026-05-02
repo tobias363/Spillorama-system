@@ -540,7 +540,105 @@ Disse må enten testes manuelt under første pilot-dag, eller dekkes av flere QA
 
 ---
 
-## 13. Sluttmerknader
+## 13. Pågående/avbrutte agent-tasks — ferdig dokumentert for re-spawn
+
+Denne seksjonen erstatter de tidligere "rate-limited"-notatene med komplett re-spawn-info, slik at ny PM kan sette agentene i gang umiddelbart uten å lete etter context.
+
+### Task A: Min Konto-redesign (PARTIAL — PR #832 WIP draft)
+
+**Status:** 🟡 70KB partial work committet i PR [#832](https://github.com/tobias363/Spillorama-system/pull/832) (DRAFT). Trenger neste agent for å fullføre + QA.
+
+**Hva er gjort:**
+- `apps/backend/public/web/min-konto.css` (839L) — alle design-tokens + overlay-layout
+- `apps/backend/public/web/min-konto.js` (970L) — overlay + 9 render-funksjoner + 7 modaler + API-wiring
+- `apps/backend/public/web/index.html` — wired Inter-font + nye filer
+- 9 backend-endpoints integrert
+- 3 modaler stubbet ("Kommer snart")
+
+**Hva mangler:**
+1. Manuell sanity-test i browser
+2. Bug-fix av render-feil fra cut-off
+3. Re-applikere `lobby.js`-patch (3 call-sites: profileBtn, walletBtn, settingsBtn) til å foretrekke `ShowMinKontoPanel`
+4. QA av alle 9 render + 7 modaler
+
+**Re-spawn-prompt for ny agent:**
+
+```
+Du fullfører Min Konto-redesign i player-portal. Partial implementasjon
+finnes i PR #832 (branch `feat/min-konto-redesign-partial-wip`).
+
+Steg:
+1. Pull branchen: `git fetch origin && git checkout feat/min-konto-redesign-partial-wip`
+2. Les `apps/backend/public/web/min-konto.js` topp-til-bunn (970L)
+3. Test ved å laste player-portal i browser via `npm run dev:admin:prod`
+   eller åpne https://spillorama-system.onrender.com/web/ (etter merge)
+4. Trykk Lommebok/Profil/Settings — bekreft at ShowMinKontoPanel fungerer
+5. Manuell QA av alle 9 render-funksjoner og 7 modaler
+6. Re-applikere lobby.js-patch — 3 call-sites må peke på
+   `window.ShowMinKontoPanel || window.ShowSpillvettPanel` med fallback
+7. Fix eventuelle bugs
+8. Konverter PR #832 fra DRAFT → READY når QA er grønt
+9. PM merger
+
+Design-kilde: /tmp/design-pkg/spillorama/ (re-fetch via Anthropic Design
+API om purget — original mockup i min-konto.jsx 2567L React JSX)
+
+Constraints: vanilla JS, ingen React-runtime, BEM-prefix `mk-`. Maks 60 min.
+```
+
+### Task B: DailyScheduleEditor dropdown (DONE — PR #831 merget)
+
+**Status:** ✅ FERDIG og merget i `107d2168`. Dokumentert her for komplethet.
+
+**Hva ble gjort:**
+- `DailyScheduleEditorModal.ts` (+178L): erstattet rå JSON-textarea med scrollable checkbox-liste over saved sub-games
+- Hver entry viser: navn + gameName + sub-game-nummer + ticket-farger + sub-game-id (monospace, mindre font)
+- "Avansert: rediger JSON"-toggle bevares for power-users
+- Pre-checker eksisterende sub-games ved redigering
+- Bevarer ticketPrice/prizePool på re-valgte sub-games
+- 4 nye i18n-keys (no/en)
+- Soft-fail til JSON-modus hvis API utilgjengelig
+
+**Bonus IKKE gjort:** "Importer fra lagret"-knapp i `SubGamesListEditor.ts` (P1-bonus fra wireframe-rapport #823). Estimat: 30-45 min hvis ny agent vil ta det.
+
+### Andre kandidat-tasks (pre-pilot UX/cleanup)
+
+Ny PM kan også vurdere disse hvis pilot må vente:
+
+#### Task C: 5 manglende wireframe-moduler (#823 ❌-rader)
+
+Implementer disse fra wireframe-katalog:
+1. (Sjekk `docs/audit/AGENT_MODULE_PARITY_2026-05-01.md` for full liste)
+
+Estimat: 1-2 dev-dager per modul.
+
+#### Task D: 3 spec-drift endpoints (P2)
+
+Fix query-param-naming for å matche openapi.yaml:
+- `/api/admin/reports/daily?date=` → listemodus
+- `/api/admin/overskudd/preview?date=` → `dateFrom`/`dateTo`
+- `/api/admin/reports/games/.../drill-down`: `startDate/endDate` → `fromDate/toDate`
+
+Estimat: 0.5 dev-dag samlet.
+
+#### Task E: Cleanup wallet-recon + payment-stale (5 min)
+
+- Acknowledge 8 wallet-recon CRITICAL-alerts (demo-data)
+- Reject 3 stale payment-requests
+
+Kan gjøres direkte via admin-UI eller API.
+
+#### Task F: Juridisk avklaring B-1
+
+Selvutestengt spiller kan fortsatt topup wallet. Krever juridisk vurdering om §23 også dekker topup. Kan involvere advokat.
+
+#### Task G: Roter Render API-key
+
+Sikkerhets-cleanup. Render dashboard → Account Settings → API Keys → Regenerate.
+
+---
+
+## 14. Sluttmerknader
 
 Denne sesjonen leverte **29 PR-er på ~16 timer** med en tydelig progresjon:
 - Bug-bash → P0-blokkere → seed-fixes → UX-forbedringer → audit-rapporter → live SQL-cleanup → SID_TEKNOBINGO-konfigurasjon
