@@ -180,8 +180,24 @@
       + '      <span class="mk-hall-select-caret">' + ICONS.caret + '</span>'
       + '    </div>'
       + '  </div>'
-      + '  <div class="mk-menu-group" id="mk-menu-konto"></div>'
-      + '  <div class="mk-menu-group" id="mk-menu-spillevett" style="margin-top:10px"></div>'
+      + '  <div class="mk-menu-group" id="mk-menu-main"></div>'
+      + '  <div class="mk-vip" id="mk-vip-callout" hidden>'
+      + '    <div class="mk-vip-pinwheel">'
+      + '      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">'
+      + '        <path d="M16 16 L16 4 A12 12 0 0 1 26.4 10 Z" fill="#c8203a"/>'
+      + '        <path d="M16 16 L26.4 10 A12 12 0 0 1 26.4 22 Z" fill="#f7eedd"/>'
+      + '        <path d="M16 16 L26.4 22 A12 12 0 0 1 16 28 Z" fill="#c8203a"/>'
+      + '        <path d="M16 16 L16 28 A12 12 0 0 1 5.6 22 Z" fill="#f7eedd"/>'
+      + '        <path d="M16 16 L5.6 22 A12 12 0 0 1 5.6 10 Z" fill="#c8203a"/>'
+      + '        <path d="M16 16 L5.6 10 A12 12 0 0 1 16 4 Z" fill="#f7eedd"/>'
+      + '        <circle cx="16" cy="16" r="2" fill="#3a1410"/>'
+      + '      </svg>'
+      + '    </div>'
+      + '    <div class="mk-vip-text">'
+      + '      <div class="mk-vip-title">VIP-medlem</div>'
+      + '      <div class="mk-vip-sub" id="mk-vip-sub">Du får 5% bonus på alle innskudd ut november</div>'
+      + '    </div>'
+      + '  </div>'
       + '  <button class="mk-logout" id="mk-logout">' + ICONS.logout + ' Logg ut</button>'
       + '</div>'
       + '<div class="mk-subscreen" id="mk-sub-personlig"></div>'
@@ -741,9 +757,22 @@
   function renderHeaderFields() {
     var p = state.profile || {};
     var w = (state.wallet && state.wallet.account) || {};
-    var n = document.getElementById('mk-name'); if (n) n.textContent = (p.displayName || p.surname || 'Spiller');
-    var k = document.getElementById('mk-kallenavn'); if (k) k.textContent = p.displayName || '—';
-    var s = document.getElementById('mk-saldo'); if (s) s.textContent = formatKr(w.balance || 0);
+    // Header shows full name (firstName + surname). Kallenavn is the
+    // displayName the player picked (often a nickname). If surname is
+    // empty we fall back to displayName for the headline.
+    var n = document.getElementById('mk-name');
+    if (n) {
+      var displayName = (p.displayName || '').trim();
+      var surname = (p.surname || '').trim();
+      var headline = '';
+      if (displayName && surname) headline = displayName + ' ' + surname;
+      else headline = displayName || surname || 'Spiller';
+      n.textContent = headline;
+    }
+    var k = document.getElementById('mk-kallenavn');
+    if (k) k.textContent = p.displayName || '—';
+    var s = document.getElementById('mk-saldo');
+    if (s) s.textContent = formatKr(w.balance || 0);
   }
 
   function renderHallCard() {
@@ -766,10 +795,12 @@
   }
 
   function renderMenu() {
-    var konto = document.getElementById('mk-menu-konto');
-    var spillevett = document.getElementById('mk-menu-spillevett');
-    if (!konto || !spillevett) return;
+    var main = document.getElementById('mk-menu-main');
+    if (!main) return;
 
+    // Master design (min-konto.jsx line 2526):
+    // ONE combined MenuGroup with kontoItems + spillevettItems concatenated,
+    // no SectionLabel separator. The visual treatment is uniform.
     var kontoItems = [
       { label: 'Personlig informasjon', sub: 'mk-sub-personlig', renderer: renderPersonlig },
       { label: 'Spillregnskap', sub: 'mk-sub-spillregnskap', renderer: renderSpillregnskap },
@@ -781,6 +812,7 @@
       { label: 'Spillepause', sub: 'mk-sub-pause', renderer: renderSpillepause },
       { label: 'Utestenging', sub: 'mk-sub-utestenging', renderer: renderUtestenging },
     ];
+    var allItems = kontoItems.concat(spillevettItems);
 
     function row(item) {
       return '<button class="mk-menu-row" data-mk-sub="' + (item.sub || '') + '"' + (item.stub ? ' data-mk-stub="1"' : '') + '>'
@@ -789,22 +821,18 @@
         + '</button>';
     }
 
-    konto.innerHTML = kontoItems.map(row).join('');
-    spillevett.innerHTML = '<div style="padding:6px 16px 0;font-size:11px;font-weight:600;color:rgba(247,238,221,0.5);letter-spacing:0.02em">Spillvett</div>'
-      + spillevettItems.map(row).join('');
+    main.innerHTML = allItems.map(row).join('');
 
-    [konto, spillevett].forEach(function (group) {
-      group.querySelectorAll('.mk-menu-row').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          if (btn.dataset.mkStub) {
-            showToast('Kommer snart');
-            return;
-          }
-          var subId = btn.dataset.mkSub;
-          if (!subId) return;
-          var item = kontoItems.concat(spillevettItems).find(function (it) { return it.sub === subId; });
-          openSub(subId, item && item.renderer);
-        });
+    main.querySelectorAll('.mk-menu-row').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.dataset.mkStub) {
+          showToast('Kommer snart');
+          return;
+        }
+        var subId = btn.dataset.mkSub;
+        if (!subId) return;
+        var item = allItems.find(function (it) { return it.sub === subId; });
+        openSub(subId, item && item.renderer);
       });
     });
   }

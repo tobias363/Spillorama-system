@@ -129,6 +129,10 @@
   color: var(--mk-card);
   flex-shrink: 0;
   font-family: inherit;
+  /* Master design (line 287-292): close button has slight top margin so
+   * its visual centre aligns with the player's name baseline rather than
+   * the top of the header block. */
+  margin-top: 4px;
 }
 
 .mk-icon-btn:hover {
@@ -142,6 +146,8 @@
   margin-bottom: 6px;
 }
 
+/* Master design: pills are content-width, NOT stretched (no flex:1).
+ * Two pills sit side-by-side with 10px gap. */
 .mk-pill {
   padding: 10px 20px;
   border-radius: 999px;
@@ -153,11 +159,14 @@
   letter-spacing: -0.005em;
   cursor: pointer;
   font-family: inherit;
-  flex: 1;
 }
 
 .mk-pill:hover {
   background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-pill:active {
+  background: rgba(247, 238, 221, 0.12);
 }
 
 /* ── Hall info card ───────────────────────────────────────────────────── */
@@ -236,7 +245,10 @@
   color: var(--mk-card);
 }
 
-/* ── Menu group ───────────────────────────────────────────────────────── */
+/* ── Menu group ───────────────────────────────────────────────────────────
+ * Master design uses ONE combined menu group containing both Konto-items
+ * AND Spillvett-items, with no SectionLabel between them.
+ * (See min-konto.jsx line 2526: <MenuGroup items={[...kontoItems, ...spillevettItems]} />) */
 .mk-menu-group {
   background: rgba(0, 0, 0, 0.22);
   border: 1px solid var(--mk-outline);
@@ -270,6 +282,14 @@
   background: rgba(247, 238, 221, 0.06);
 }
 
+.mk-menu-row.is-active {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-menu-row.is-active .mk-menu-label {
+  font-weight: 700;
+}
+
 .mk-menu-label {
   flex: 1;
   font-size: 15px;
@@ -291,6 +311,7 @@
   color: rgba(247, 238, 221, 0.5);
   letter-spacing: 0.02em;
   margin: 24px 4px 10px;
+  text-transform: none;
 }
 
 /* ── Logout button ────────────────────────────────────────────────────── */
