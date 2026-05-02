@@ -161,6 +161,27 @@ function showLogin(root: HTMLElement): void {
 export { parsePreAuthRoute };
 
 function mountShell(_root: HTMLElement, session: Session): void {
+  // DEBUG: monkey-patch window.location.hash setter for å fange opp ALL
+  // navigasjon med stack-trace. Setter window.__SPILL_DEBUG__=false for å skru av.
+  const debugMonkey = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+  if (debugMonkey) {
+    const proto = Object.getPrototypeOf(window.location) as object;
+    const origDescriptor = Object.getOwnPropertyDescriptor(proto, "hash");
+    if (origDescriptor && origDescriptor.set && origDescriptor.get) {
+      const origSet = origDescriptor.set;
+      const origGet = origDescriptor.get;
+      Object.defineProperty(window.location, "hash", {
+        get: function () { return origGet.call(this); },
+        set: function (v: string) {
+          const stack = new Error().stack?.split("\n").slice(1, 5).join("\n  ") ?? "(no stack)";
+          console.log("[hash-setter] location.hash = %o\n  %s", v, stack);
+          origSet.call(this, v);
+        },
+        configurable: true,
+      });
+      console.log("[hash-setter] monkey-patch installed — will log all location.hash writes");
+    }
+  }
   const refs = mountLayout("#app");
   const router = new Router({
     container: refs.contentHost,
