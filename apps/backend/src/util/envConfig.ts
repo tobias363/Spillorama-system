@@ -82,6 +82,10 @@ export interface BingoRuntimeConfig {
   // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1
   jobGame1ScheduleTickEnabled: boolean;
   jobGame1ScheduleTickIntervalMs: number;
+  // 2026-05-02: REQ-007 stale-ready-sweep er default OFF — uten et
+  // heartbeat-endepunkt rever sweepen Klar-flagget etter 60s, og
+  // bingoverten må re-markere. Re-aktiveres når heartbeat er på plass.
+  jobGame1StaleReadySweepEnabled: boolean;
   // GAME1_SCHEDULE PR 4c: auto-draw-tick for Game 1 (fixed seconds-intervall)
   jobGame1AutoDrawEnabled: boolean;
   jobGame1AutoDrawIntervalMs: number;
@@ -246,6 +250,14 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // "hengende" rader uten håndtering. Aktiveres via env-flag i staging først.
   const jobGame1ScheduleTickEnabled = parseBooleanEnv(process.env.GAME1_SCHEDULE_TICK_ENABLED, false);
   const jobGame1ScheduleTickIntervalMs = Math.max(5_000, parsePositiveIntEnv(process.env.GAME1_SCHEDULE_TICK_INTERVAL_MS, 15_000));
+  // 2026-05-02 (Tobias UX-decision): REQ-007 stale-ready-sweep default OFF.
+  // Sweepen reverterte Klar-flagget etter 60s siden ingen heartbeat
+  // refresher updated_at — bingoverten måtte re-markere. Re-aktiveres når
+  // heartbeat-endepunkt er på plass og driften har avtalt revert-policy.
+  const jobGame1StaleReadySweepEnabled = parseBooleanEnv(
+    process.env.GAME1_STALE_READY_SWEEP_ENABLED,
+    false,
+  );
   // GAME1_SCHEDULE PR 4c: auto-draw-tick — default OFF til PR 4d socket-flyt er inne.
   const jobGame1AutoDrawEnabled = parseBooleanEnv(process.env.GAME1_AUTO_DRAW_ENABLED, false);
   // Minimum 500 ms — auto-draw trigges hvert `seconds`-felt fra ticket_config,
@@ -411,6 +423,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
+    jobGame1StaleReadySweepEnabled,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
     jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
     jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,

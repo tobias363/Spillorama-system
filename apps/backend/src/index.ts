@@ -494,6 +494,7 @@ const {
   jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
+  jobGame1StaleReadySweepEnabled,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
   jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
@@ -1580,7 +1581,14 @@ jobScheduler.register({
   enabled: jobGame1ScheduleTickEnabled,
   run: createGame1ScheduleTickJob({
     service: game1ScheduleTickService,
-    hallReadyService: game1HallReadyService,
+    // 2026-05-02 (Tobias UX-decision): stale-ready-sweep er opt-in.
+    // Uten heartbeat-endepunkt rever sweepen Klar-flagget etter 60s og
+    // bingoverten må re-markere — noe Tobias eksplisitt har sagt nei til.
+    // Re-aktiveres ved å sette GAME1_STALE_READY_SWEEP_ENABLED=true når
+    // heartbeat er på plass.
+    ...(jobGame1StaleReadySweepEnabled
+      ? { hallReadyService: game1HallReadyService }
+      : {}),
   }),
 });
 
