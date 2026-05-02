@@ -1,0 +1,412 @@
+/**
+ * 2026-05-02 (Tobias UX-feedback): Spill 1 hall-status + handlinger inline
+ * i cash-inout-dashboardet (Box 3 — "kommende spill"). Erstatter
+ * "Ingen kommende spill"-placeholderen når det finnes en aktiv runde:
+ *
+ *  - Alle deltakende haller i runden vises som status-pillen
+ *    grønn (Klar) / oransje (Ikke klar) / rød (Ingen kunder/ekskludert).
+ *  - For agentens EGEN hall vises 2 knapper:
+ *      • "Marker hall som Klar" / "Angre Klar"
+ *      • "Ingen kunder" / "Har kunder igjen" (rød/grå)
+ *  - Master-hall får i tillegg "Start Spill 1" + "Stopp Spill 1"-
+ *    knapper i samme grid-stil som kontant-inn-/ut-knappene over.
+ *
+ * Polling: 2s tick mot `/api/agent/game1/current-game`. Stoppes på
+ * unmount via AbortSignal — caller passer inn signalet fra
+ * activePageAbort i CashInOutPage slik at samme cleanup-flyt brukes.
+ */
+
+import {
+  fetchAgentGame1CurrentGame,
+  markHallReadyForGame,
+  unmarkHallReadyForGame,
+  setHallNoCustomersForGame,
+  setHallHasCustomersForGame,
+  startAgentGame1,
+  resumeAgentGame1,
+  stopAgentGame1,
+  type Spill1CurrentGameResponse,
+  type Spill1CurrentGameHall,
+} from "../../api/agent-game1.js";
+import { Toast } from "../../components/Toast.js";
+import { ApiError } from "../../api/client.js";
+import { escapeHtml } from "./shared.js";
+
+const POLL_INTERVAL_MS = 2_000;
+
+interface BoxState {
+  loaded: boolean;
+  data: Spill1CurrentGameResponse | null;
+  busy: boolean;
+  errorMessage: string | null;
+}
+
+let activeMount: { container: HTMLElement; cleanup: () => void } | null = null;
+
+export function mountSpill1HallStatusBox(
+  container: HTMLElement,
+  signal: AbortSignal
+): void {
+  // Idempotent re-mount: hvis allerede mounted i samme container, no-op.
+  if (activeMount && activeMount.container === container) {
+    return;
+  }
+  if (activeMount) {
+    activeMount.cleanup();
+    activeMount = null;
+  }
+
+  const state: BoxState = {
+    loaded: false,
+    data: null,
+    busy: false,
+    errorMessage: null,
+  };
+
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let aborted = false;
+
+  const cleanup = (): void => {
+    aborted = true;
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  signal.addEventListener("abort", cleanup, { once: true });
+
+  // Initial render with skeleton, then async fetch.
+  render(container, state);
+  void refresh();
+
+  pollTimer = setInterval(() => {
+    if (aborted) return;
+    if (state.busy) return;
+    void refresh();
+  }, POLL_INTERVAL_MS);
+
+  container.addEventListener(
+    "click",
+    onClick,
+    signal.aborted ? undefined : { signal }
+  );
+
+  async function refresh(): Promise<void> {
+    try {
+      const res = await fetchAgentGame1CurrentGame({ signal });
+      if (aborted) return;
+      state.loaded = true;
+      state.data = res;
+      state.errorMessage = null;
+      render(container, state);
+    } catch (err) {
+      if (aborted) return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Ukjent feil";
+      state.loaded = true;
+      state.errorMessage = message;
+      render(container, state);
+    }
+  }
+
+  async function onClick(event: Event): Promise<void> {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest<HTMLElement>("[data-spill1-action]");
+    if (!button) return;
+    const action = button.dataset.spill1Action;
+    if (!action) return;
+    if (state.busy) return;
+    const data = state.data;
+    if (!data || !data.currentGame) return;
+    const gameId = data.currentGame.id;
+    const ownHallId = data.hallId;
+
+    state.busy = true;
+    setBusyState(container, true);
+
+    try {
+      switch (action) {
+        case "mark-ready":
+          await markHallReadyForGame(ownHallId, gameId);
+          Toast.success("Hallen er markert som Klar.");
+          break;
+        case "unmark-ready":
+          await unmarkHallReadyForGame(ownHallId, gameId);
+          Toast.info("Klar-markering angret.");
+          break;
+        case "no-customers":
+          await setHallNoCustomersForGame(ownHallId, gameId);
+          Toast.info("Hallen er markert som 'Ingen kunder'.");
+          break;
+        case "has-customers":
+          await setHallHasCustomersForGame(ownHallId, gameId);
+          Toast.info("Hallen er åpnet igjen.");
+          break;
+        case "start":
+          await startAgentGame1();
+          Toast.success("Spill 1 startet.");
+          break;
+        case "resume":
+          await resumeAgentGame1();
+          Toast.success("Spill 1 gjenopptatt.");
+          break;
+        case "stop":
+          if (!confirm("Er du sikker på at du vil stoppe denne runden?")) {
+            return;
+          }
+          await stopAgentGame1();
+          Toast.info("Spill 1 stoppet.");
+          break;
+        default:
+          return;
+      }
+      await refresh();
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Ukjent feil";
+      Toast.error(message);
+    } finally {
+      state.busy = false;
+      setBusyState(container, false);
+    }
+  }
+
+  activeMount = { container, cleanup };
+}
+
+export function unmountSpill1HallStatusBox(): void {
+  if (activeMount) {
+    activeMount.cleanup();
+    activeMount = null;
+  }
+}
+
+function setBusyState(container: HTMLElement, busy: boolean): void {
+  container.querySelectorAll<HTMLButtonElement>("[data-spill1-action]").forEach((btn) => {
+    if (busy) {
+      btn.setAttribute("disabled", "disabled");
+    } else if (btn.hasAttribute("data-spill1-not-disabled")) {
+      btn.removeAttribute("disabled");
+      btn.removeAttribute("data-spill1-not-disabled");
+    }
+  });
+}
+
+function render(container: HTMLElement, state: BoxState): void {
+  if (!state.loaded) {
+    container.innerHTML = `
+      <div class="box-body cashinout-empty-placeholder">
+        <p class="text-muted text-center">Henter Spill 1-status…</p>
+      </div>`;
+    return;
+  }
+
+  if (state.errorMessage) {
+    container.innerHTML = `
+      <div class="box-body cashinout-empty-placeholder">
+        <p class="text-danger text-center">
+          <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+          ${escapeHtml(state.errorMessage)}
+        </p>
+      </div>`;
+    return;
+  }
+
+  const data = state.data;
+  if (!data || !data.currentGame) {
+    container.innerHTML = `
+      <div class="box-body cashinout-empty-placeholder">
+        <p class="text-muted text-center">Ingen kommende spill tilgjengelig…</p>
+      </div>`;
+    return;
+  }
+
+  const game = data.currentGame;
+  const ownHallId = data.hallId;
+  const isMaster = data.isMasterAgent;
+  const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
+
+  // Master-knapper: Start (purchase_open + allReady eller ready_to_start),
+  // Resume (paused), Stopp (running/paused).
+  const canStart =
+    isMaster &&
+    (game.status === "ready_to_start" ||
+      (game.status === "purchase_open" && data.allReady));
+  const canResume = isMaster && game.status === "paused";
+  const canStop =
+    isMaster && (game.status === "running" || game.status === "paused");
+
+  const hallsHtml = renderHallList(data.halls, ownHallId);
+  const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status);
+  const masterButtonsHtml = renderMasterButtons({
+    canStart,
+    canResume,
+    canStop,
+    isMaster,
+    gameStatus: game.status,
+  });
+
+  const titleParts: string[] = [];
+  titleParts.push(`Spill 1 — ${escapeHtml(statusLabel(game.status))}`);
+  if (game.subGameName) {
+    titleParts.push(`Subspill: ${escapeHtml(game.customGameName ?? game.subGameName)}`);
+  }
+
+  container.innerHTML = `
+    <div class="box-header with-border">
+      <h3 class="box-title">${titleParts.join(" · ")}</h3>
+    </div>
+    <div class="box-body">
+      <div class="spill1-hall-list" data-marker="spill1-hall-list">
+        ${hallsHtml}
+      </div>
+      ${ownButtonsHtml}
+      ${masterButtonsHtml}
+    </div>`;
+}
+
+function renderHallList(halls: Spill1CurrentGameHall[], ownHallId: string): string {
+  if (halls.length === 0) {
+    return `<p class="text-muted">Ingen haller registrert i denne runden.</p>`;
+  }
+  const rows = halls
+    .map((h) => {
+      const isOwn = h.hallId === ownHallId;
+      const pill = renderStatusPill(h);
+      return `
+        <div class="spill1-hall-row${isOwn ? " spill1-hall-row-own" : ""}">
+          <span class="spill1-hall-name">
+            ${escapeHtml(h.hallName)}
+            ${isOwn ? `<small class="text-muted">(din hall)</small>` : ""}
+          </span>
+          ${pill}
+        </div>`;
+    })
+    .join("");
+  return rows;
+}
+
+function renderStatusPill(h: Spill1CurrentGameHall): string {
+  if (h.excludedFromGame) {
+    const reason = h.excludedReason ? ` (${escapeHtml(h.excludedReason)})` : "";
+    return `<span class="label label-danger" data-marker="spill1-pill-excluded">
+              <i class="fa fa-times-circle" aria-hidden="true"></i> Ekskludert${reason}
+            </span>`;
+  }
+  if (h.isReady) {
+    return `<span class="label label-success" data-marker="spill1-pill-ready">
+              <i class="fa fa-check-circle" aria-hidden="true"></i> Klar
+            </span>`;
+  }
+  return `<span class="label label-warning" data-marker="spill1-pill-not-ready">
+            <i class="fa fa-clock-o" aria-hidden="true"></i> Ikke klar
+          </span>`;
+}
+
+function renderOwnHallButtons(
+  ownHall: Spill1CurrentGameHall | null,
+  gameStatus: string
+): string {
+  if (!ownHall) {
+    return "";
+  }
+  // Knapper er kun aktive mens runden tar imot ready/exclude-endringer.
+  const editable =
+    gameStatus === "purchase_open" || gameStatus === "ready_to_start";
+
+  const readyBtn = ownHall.isReady
+    ? `<button type="button" class="btn btn-default cashinout-grid-btn"
+                data-spill1-action="unmark-ready"
+                ${editable && !ownHall.excludedFromGame ? "" : "disabled"}>
+         <i class="fa fa-undo" aria-hidden="true"></i> Angre Klar
+       </button>`
+    : `<button type="button" class="btn btn-success cashinout-grid-btn"
+                data-spill1-action="mark-ready"
+                ${editable && !ownHall.excludedFromGame ? "" : "disabled"}>
+         <i class="fa fa-check-circle" aria-hidden="true"></i> Marker Klar
+       </button>`;
+
+  const customersBtn = ownHall.excludedFromGame
+    ? `<button type="button" class="btn btn-default cashinout-grid-btn"
+                data-spill1-action="has-customers"
+                ${editable ? "" : "disabled"}>
+         <i class="fa fa-undo" aria-hidden="true"></i> Har kunder igjen
+       </button>`
+    : `<button type="button" class="btn btn-danger cashinout-grid-btn"
+                data-spill1-action="no-customers"
+                ${editable ? "" : "disabled"}>
+         <i class="fa fa-times" aria-hidden="true"></i> Ingen kunder
+       </button>`;
+
+  return `
+    <div class="spill1-self-actions" style="margin-top:16px;">
+      <h4 style="margin:0 0 8px 0;">Min hall</h4>
+      <div class="cashinout-grid">
+        ${readyBtn}
+        ${customersBtn}
+      </div>
+    </div>`;
+}
+
+function renderMasterButtons(opts: {
+  canStart: boolean;
+  canResume: boolean;
+  canStop: boolean;
+  isMaster: boolean;
+  gameStatus: string;
+}): string {
+  if (!opts.isMaster) return "";
+  return `
+    <div class="spill1-master-actions" style="margin-top:16px;">
+      <h4 style="margin:0 0 8px 0;">Master-handlinger</h4>
+      <div class="cashinout-grid">
+        <button type="button" class="btn btn-success cashinout-grid-btn"
+                data-spill1-action="start"
+                ${opts.canStart ? "" : "disabled"}>
+          <i class="fa fa-play" aria-hidden="true"></i> Start Spill 1
+        </button>
+        <button type="button" class="btn btn-info cashinout-grid-btn"
+                data-spill1-action="resume"
+                ${opts.canResume ? "" : "disabled"}>
+          <i class="fa fa-play-circle" aria-hidden="true"></i> Resume
+        </button>
+        <button type="button" class="btn btn-danger cashinout-grid-btn"
+                data-spill1-action="stop"
+                ${opts.canStop ? "" : "disabled"}>
+          <i class="fa fa-stop" aria-hidden="true"></i> Stopp Spill 1
+        </button>
+      </div>
+    </div>`;
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "purchase_open":
+      return "Salg åpent";
+    case "ready_to_start":
+      return "Klar til start";
+    case "running":
+      return "Pågår";
+    case "paused":
+      return "Pauset";
+    case "completed":
+      return "Fullført";
+    case "cancelled":
+      return "Avbrutt";
+    default:
+      return status;
+  }
+}

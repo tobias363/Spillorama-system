@@ -151,3 +151,56 @@ export async function unmarkHallReadyForGame(
     { method: "POST", auth: true, body: { gameId } }
   );
 }
+/**
+ * 2026-05-02: bingovert markerer egen hall som "Ingen kunder" — hallen
+ * ekskluderes fra runden. Master-konsollet ser hallen som rød. Agent
+ * kan re-åpne via `setHallHasCustomersForGame`.
+ *
+ * Backend-rute: POST /api/admin/game1/halls/:hallId/no-customers
+ * Permission:   GAME1_HALL_READY_WRITE + hall-scope (egen hall)
+ */
+export async function setHallNoCustomersForGame(
+  hallId: string,
+  gameId: string,
+  reason?: string
+): Promise<unknown> {
+  const body: Record<string, unknown> = { gameId };
+  if (reason && reason.trim()) {
+    body.reason = reason.trim();
+  }
+  return apiRequest<unknown>(
+    `/api/admin/game1/halls/${encodeURIComponent(hallId)}/no-customers`,
+    { method: "POST", auth: true, body }
+  );
+}
+
+/**
+ * 2026-05-02: bingovert un-ekskluderer egen hall (angrer "Ingen kunder").
+ *
+ * Backend-rute: POST /api/admin/game1/halls/:hallId/has-customers
+ */
+export async function setHallHasCustomersForGame(
+  hallId: string,
+  gameId: string
+): Promise<unknown> {
+  return apiRequest<unknown>(
+    `/api/admin/game1/halls/${encodeURIComponent(hallId)}/has-customers`,
+    { method: "POST", auth: true, body: { gameId } }
+  );
+}
+
+/**
+ * 2026-05-02: master-agent stopper aktiv runde fra cash-inout-dashboardet.
+ *
+ * Backend-rute: POST /api/agent/game1/stop
+ */
+export async function stopAgentGame1(reason?: string): Promise<Spill1ActionResponse> {
+  const body: Record<string, unknown> = {};
+  if (reason && reason.trim()) {
+    body.reason = reason.trim();
+  }
+  return apiRequest<Spill1ActionResponse>(
+    "/api/agent/game1/stop",
+    { method: "POST", auth: true, body }
+  );
+}

@@ -415,6 +415,58 @@ export function createAgentGame1Router(
     }
   });
 
+  // ── POST /api/agent/game1/stop ───────────────────────────────────────────
+  // 2026-05-02: master-agent stopper aktiv runde fra cash-inout-dashboardet.
+  // Delegerer til Game1MasterControlService.stopGame med master-actor-bygging.
+
+  router.post("/api/agent/game1/stop", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "GAME1_MASTER_WRITE");
+      const hallId = resolveHallScope(actor, undefined);
+      const active = await findActiveGameForHall(hallId);
+      if (!active) {
+        throw new DomainError(
+          "NO_ACTIVE_GAME",
+          "Ingen aktiv Spill 1-runde for din hall akkurat nå."
+        );
+      }
+
+      const isMasterAgent =
+        actor.role === "ADMIN" || hallId === active.master_hall_id;
+      if (!isMasterAgent) {
+        throw new DomainError(
+          "FORBIDDEN",
+          "Kun master-hallens agent kan stoppe runden."
+        );
+      }
+
+      const body =
+        typeof req.body === "object" && req.body !== null
+          ? (req.body as Record<string, unknown>)
+          : {};
+      const reason =
+        typeof body.reason === "string" && body.reason.trim()
+          ? body.reason.trim()
+          : "Stoppet fra cash-inout-dashboard";
+
+      const masterActor = buildAgentActor(actor);
+      const result = await masterControlService.stopGame({
+        gameId: active.id,
+        actor: masterActor,
+        reason,
+      });
+
+      apiSuccess(res, {
+        gameId: result.gameId,
+        status: result.status,
+        actualEndTime: result.actualEndTime,
+        auditId: result.auditId,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── GET /api/agent/game1/hall-status ─────────────────────────────────────
 
   router.get("/api/agent/game1/hall-status", async (req, res) => {

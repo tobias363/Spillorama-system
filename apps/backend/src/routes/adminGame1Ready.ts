@@ -344,6 +344,115 @@ export function createAdminGame1ReadyRouter(
     }
   });
 
+  // ── POST /api/admin/game1/halls/:hallId/no-customers ─────────────────────
+  // 2026-05-02: bingovert markerer egen hall som "Ingen kunder" (ekskluderer
+  // hallen fra rundet). Tilsvarer master-konsollets exclude-hall, men uten
+  // master-validering — agent ekskluderer SIN egen hall, ikke andres.
+
+  router.post("/api/admin/game1/halls/:hallId/no-customers", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "GAME1_HALL_READY_WRITE");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      assertHallScopeForReadyFlow(actor, hallId);
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const gameId = mustBeNonEmptyString(req.body.gameId, "gameId");
+      const reason =
+        typeof req.body.reason === "string" && req.body.reason.trim()
+          ? req.body.reason.trim()
+          : "Ingen kunder";
+
+      const status = await hallReadyService.setExcludedForHall({
+        gameId,
+        hallId,
+        excluded: true,
+        reason,
+        actorUserId: actor.id,
+      });
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actorTypeFromRole(actor.role),
+        action: "hall.excluded.no_customers",
+        resource: "game1_scheduled_game",
+        resourceId: gameId,
+        details: { hallId, reason },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      const { hallName, allReady } = await buildAndBroadcastReadyUpdate(
+        gameId,
+        hallId
+      );
+
+      apiSuccess(res, {
+        gameId,
+        hallId,
+        hallName,
+        isReady: status.isReady,
+        readyAt: status.readyAt,
+        excludedFromGame: status.excludedFromGame,
+        excludedReason: status.excludedReason,
+        allReady,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── POST /api/admin/game1/halls/:hallId/has-customers ────────────────────
+  // 2026-05-02: bingovert un-ekskluderer egen hall (angrer "Ingen kunder").
+
+  router.post("/api/admin/game1/halls/:hallId/has-customers", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "GAME1_HALL_READY_WRITE");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      assertHallScopeForReadyFlow(actor, hallId);
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const gameId = mustBeNonEmptyString(req.body.gameId, "gameId");
+
+      const status = await hallReadyService.setExcludedForHall({
+        gameId,
+        hallId,
+        excluded: false,
+        actorUserId: actor.id,
+      });
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actorTypeFromRole(actor.role),
+        action: "hall.included.has_customers",
+        resource: "game1_scheduled_game",
+        resourceId: gameId,
+        details: { hallId },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      const { hallName, allReady } = await buildAndBroadcastReadyUpdate(
+        gameId,
+        hallId
+      );
+
+      apiSuccess(res, {
+        gameId,
+        hallId,
+        hallName,
+        isReady: status.isReady,
+        readyAt: status.readyAt,
+        excludedFromGame: status.excludedFromGame,
+        excludedReason: status.excludedReason,
+        allReady,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── POST /api/admin/game1/halls/:hallId/unready ──────────────────────────
 
   router.post("/api/admin/game1/halls/:hallId/unready", async (req, res) => {

@@ -43,6 +43,7 @@ import { openCheckForBingoModal } from "./modals/CheckForBingoModal.js";
 import { openAddMoneyUniqueIdModal } from "../agent-portal/unique-id/AddMoneyUniqueIdModal.js";
 import { openWithdrawUniqueIdModal } from "../agent-portal/unique-id/WithdrawUniqueIdModal.js";
 import { contentHeader, escapeHtml, formatNOK } from "./shared.js";
+import { mountSpill1HallStatusBox } from "./Spill1HallStatusBox.js";
 
 const F5_F6_F8 = new Set(["F5", "F6", "F8"]);
 
@@ -204,9 +205,14 @@ export function renderCashInOutPage(container: HTMLElement): void {
             </div>
           </div>
 
-          <!-- Box 3: Ingen kommende spill -->
+          <!-- Box 3: Spill 1 hall-status + handlinger (Tobias UX 2026-05-02).
+               Mountet inn av mountSpill1HallStatusBox() — viser status-pillen
+               for alle haller i runden, Klar/Ingen kunder-knapper for egen
+               hall, og Start/Stop-knapper for master. Fall-back til legacy
+               "Ingen kommende spill"-tekst når ingen runde er aktiv. -->
           <div class="box box-default cashinout-box-upcoming"
-               data-marker="box-upcoming-games">
+               data-marker="box-upcoming-games"
+               id="spill1-hall-status-box">
             <div class="box-body cashinout-empty-placeholder">
               <p class="text-muted text-center">
                 ${escapeHtml(t("no_upcoming_games_available"))}
@@ -285,6 +291,15 @@ export function renderCashInOutPage(container: HTMLElement): void {
   wireActions(container, signal);
   wireFunctionKeys(container);
   void refreshBalance(container);
+
+  // Spill 1 hall-status-box (Tobias UX 2026-05-02). Polling stoppes ved
+  // signal.abort() — samme livstid som resten av siden.
+  const hallStatusBox = container.querySelector<HTMLElement>(
+    "#spill1-hall-status-box"
+  );
+  if (hallStatusBox) {
+    mountSpill1HallStatusBox(hallStatusBox, signal);
+  }
 }
 
 function wireTabs(container: HTMLElement, signal: AbortSignal): void {
@@ -667,6 +682,38 @@ function ensureLegacyStyles(): void {
     }
     .cashinout-1to1 .cashinout-empty-placeholder {
       padding: 32px 16px;
+    }
+    .cashinout-1to1 .spill1-hall-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .cashinout-1to1 .spill1-hall-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background-color: #f9f9f9;
+      border-radius: 4px;
+    }
+    .cashinout-1to1 .spill1-hall-row-own {
+      background-color: #f0f8ff;
+      border: 1px solid #c8e0f4;
+    }
+    .cashinout-1to1 .spill1-hall-name {
+      font-weight: 600;
+    }
+    .cashinout-1to1 .spill1-hall-name small {
+      margin-left: 6px;
+      font-weight: normal;
+    }
+    .cashinout-1to1 .spill1-self-actions h4,
+    .cashinout-1to1 .spill1-master-actions h4 {
+      font-size: 14px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     @media (max-width: 991px) {
       .cashinout-1to1 .cashinout-daily-actions { align-items: stretch; }
