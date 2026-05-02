@@ -354,7 +354,13 @@ export class ChooseTicketsScreen extends Container {
         .fill({ color: bgColor })
         .stroke({ color: borderColor, width: borderWidth });
       slot.purchasedLabel.visible = isPurchased;
-      slot.container.alpha = isPurchased ? 0.6 : 1.0;
+      // 2026-05-02 (Tobias UX, PDF 17 wireframe note): "Tickets bought by
+      // the player will not viewed to the user until the game starts."
+      // Skjul ticket-tallene på kjøpte brett — bare "KJØPT"-overlay vises.
+      for (const cell of slot.cellTexts) {
+        cell.visible = !isPurchased;
+      }
+      slot.container.alpha = isPurchased ? 0.7 : 1.0;
       slot.container.cursor = isPurchased ? "default" : "pointer";
     }
 
