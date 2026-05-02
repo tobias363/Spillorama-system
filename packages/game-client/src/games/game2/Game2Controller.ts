@@ -107,6 +107,15 @@ class Game2Controller implements GameController {
       bridge.on("patternWon", (result, state) => this.onPatternWon(result, state)),
     );
 
+    // 2026-05-02 (Tobias UX): Spill 2 jackpot-bar oppdaterer ved hver
+    // G2-trekning. Backend sender komplett 6-slot-prize-listen
+    // (9/10/11/12/13/14-21) på `g2:jackpot:list-update`-event.
+    this.unsubs.push(
+      socket.on("g2JackpotListUpdate", (payload) => {
+        this.playScreen?.updateJackpot(payload.jackpotList);
+      }),
+    );
+
     // Unlock audio on first interaction
     this.root.eventMode = "static";
     this.root.on("pointerdown", () => this.deps.audio.unlock(), { once: true });

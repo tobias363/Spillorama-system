@@ -8,7 +8,7 @@ import { TicketCard } from "../components/TicketCard.js";
 import { DrawnBallsPanel } from "../components/DrawnBallsPanel.js";
 import { ClaimButton } from "../components/ClaimButton.js";
 import { PlayerInfoBar } from "../components/PlayerInfoBar.js";
-import { RocketStack } from "../components/RocketStack.js";
+import { JackpotBar, type JackpotSlotData } from "../components/JackpotBar.js";
 import { ChatPanel } from "../../../components/ChatPanel.js";
 import { getTicketThemeByName } from "../../game1/colors/TicketColorThemes.js";
 import { checkClaims } from "../logic/ClaimDetector.js";
@@ -22,7 +22,7 @@ const CHAT_MARGIN = 12;
 export class PlayScreen extends Container {
   private scroller: TicketScroller;
   private drawnBalls: DrawnBallsPanel;
-  private rocketStack: RocketStack;
+  private jackpotBar: JackpotBar;
   private chatPanel: ChatPanel | null = null;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
@@ -72,20 +72,19 @@ export class PlayScreen extends Container {
     const chatRightEdge = screenWidth - CHAT_MARGIN;
     const chatLeftEdge = chatEnabled ? chatRightEdge - CHAT_WIDTH : screenWidth;
 
-    // Rocket-stabling — G2 signature. 60-ball range matches BingoEngine capacity.
-    const rocketWidth = 42;
-    const rocketMargin = 12;
-    const rocketTop = 110;
-    const rocketHeight = screenHeight - rocketTop - 80;
-    this.rocketStack = new RocketStack(rocketWidth, rocketHeight, 60);
-    this.rocketStack.x = (chatEnabled ? chatLeftEdge - rocketMargin : chatRightEdge) - rocketWidth;
-    this.rocketStack.y = rocketTop;
-    this.addChild(this.rocketStack);
+    // 2026-05-02 (Tobias UX): rocket-stabling fjernet (PDF 17 wireframe).
+    // I stedet rendres Jackpot-bar over ticket-grid med 6 slots
+    // (9/10/11/12/13/14-21). Data via socket-event `g2:jackpot:list-update`.
+    this.jackpotBar = new JackpotBar();
+    this.jackpotBar.x = 20;
+    this.jackpotBar.y = 85;
+    this.addChild(this.jackpotBar);
 
-    // Ticket scroller (main area) — leave room for rocket (always) and chat (optional).
-    const scrollerY = 100;
+    // Ticket scroller (main area) — leave room for chat (optional). Med
+    // jackpot-bar over scrolleren skyves toppen ned til 165 (85 + 70 + 10 gap).
+    const scrollerY = 165;
     const scrollerHeight = screenHeight - scrollerY - 80;
-    const scrollerWidth = this.rocketStack.x - rocketMargin - 20;
+    const scrollerWidth = (chatEnabled ? chatLeftEdge - CHAT_MARGIN : chatRightEdge) - 20;
     this.scroller = new TicketScroller(scrollerWidth, scrollerHeight);
     this.scroller.x = 20;
     this.scroller.y = scrollerY;
@@ -177,7 +176,7 @@ export class PlayScreen extends Container {
   /** Build ticket grids from game state. */
   buildTickets(state: GameState): void {
     this.scroller.clearCards();
-    this.rocketStack.syncTo(state.drawnNumbers.length);
+    this.jackpotBar.setCurrentDrawCount(state.drawnNumbers.length);
     this.lineAlreadyWon = false;
     this.bingoAlreadyWon = false;
 
@@ -227,11 +226,20 @@ export class PlayScreen extends Container {
   onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
     this.scroller.markNumberOnAll(number);
     this.drawnBalls.addBall(number);
-    this.rocketStack.addSegment();
+    // Jackpot-bar highlightes på matching slot (9-13 eller 14-21).
+    this.jackpotBar.setCurrentDrawCount(state.drawnNumbers.length);
     this.audio.playNumber(number);
     this.scroller.sortBestFirst();
     this.updateClaimButtons(state);
     this.updateInfo(state);
+  }
+
+  /**
+   * 2026-05-02: oppdater jackpot-bar med ny prize-liste fra backend.
+   * Kalles fra Game2Controller på `g2:jackpot:list-update`-event.
+   */
+  updateJackpot(list: JackpotSlotData[]): void {
+    this.jackpotBar.update(list);
   }
 
   /** Handle pattern won broadcast. */
@@ -263,7 +271,7 @@ export class PlayScreen extends Container {
   reset(): void {
     this.scroller.clearCards();
     this.drawnBalls.clear();
-    this.rocketStack.reset();
+    this.jackpotBar.setCurrentDrawCount(0);
     this.lineBtn.reset();
     this.bingoBtn.reset();
     this.lineAlreadyWon = false;
