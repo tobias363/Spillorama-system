@@ -125,6 +125,8 @@ import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
 import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
 import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
+import { createAgentGame2ChooseTicketsRouter } from "./routes/agentGame2ChooseTickets.js";
+import { Game2TicketPoolService } from "./game/Game2TicketPoolService.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
@@ -2285,6 +2287,20 @@ app.use(createAgentGame1Router({
   masterControlService: game1MasterControlService,
   hallReadyService: game1HallReadyService,
   pool: platformService.getPool(),
+}));
+// 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): Spill 2 Choose Tickets-side.
+const game2TicketPoolService = new Game2TicketPoolService();
+app.use(createAgentGame2ChooseTicketsRouter({
+  platformService,
+  ticketPoolService: game2TicketPoolService,
+  getCurrentGameIdForRoom: (roomCode) => {
+    try {
+      const snap = engine.getRoomSnapshot(roomCode);
+      return snap.currentGame?.id ?? null;
+    } catch {
+      return null;
+    }
+  },
 }));
 // REQ-101/146: agent manuell mini-game-trigger (fallback for når
 // auto-trigger feilet eller admin endret config midt-runde).
