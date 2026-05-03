@@ -148,6 +148,166 @@ export async function resetTestPlayers(
   const walletTransactionsTable = `"${schema}"."wallet_transactions"`;
   const walletEntriesTable = `"${schema}"."wallet_entries"`;
 
+  // 2026-05-03 (fix): split i to transaksjoner. TX1 oppretter test-brukeren
+  // FØRST — så vi har en fungerende login uavhengig av om TX2 (delete andre
+  // test-spillere) feiler på FK-RESTRICT (compliance-ledger / agent-tx /
+  // settlement-rader). Tobias' direktiv var "gi meg en ny som funker" —
+  // det er topp-prioritet, og opprydding av gamle er nice-to-have.
+
+  // ── TX1: opprett/oppdater test@spillorama.no ─────────────────────────────
+  const client = await deps.pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const passwordHashEarly = await hashPassword(TEST_PLAYER_PASSWORD);
+    const { rows: existingEarly } = await client.query<{ id: string; wallet_id: string }>(
+      `SELECT id, wallet_id FROM ${usersTable} WHERE email = $1`,
+      [TEST_PLAYER_EMAIL],
+    );
+
+    let userIdEarly: string;
+    let walletIdEarly: string;
+    let createdEarly: boolean;
+
+    if (existingEarly[0]) {
+      userIdEarly = existingEarly[0].id;
+      walletIdEarly = existingEarly[0].wallet_id;
+      createdEarly = false;
+      await client.query(
+        `UPDATE ${usersTable}
+            SET password_hash = $2,
+                display_name = $3,
+                surname = $4,
+                birth_date = $5::date,
+                kyc_status = 'VERIFIED',
+                kyc_verified_at = now(),
+                hall_id = $6,
+                role = 'PLAYER',
+                deleted_at = NULL,
+                updated_at = now()
+          WHERE id = $1`,
+        [userIdEarly, passwordHashEarly, TEST_PLAYER_DISPLAY_NAME, TEST_PLAYER_SURNAME, TEST_PLAYER_BIRTH_DATE, TEST_PLAYER_HALL_ID],
+      );
+      log.info("Oppdaterte eksisterende test-bruker (TX1)", { userId: userIdEarly, walletId: walletIdEarly });
+    } else {
+      userIdEarly = randomUUID();
+      walletIdEarly = `wallet-user-${userIdEarly}`;
+      createdEarly = true;
+      await client.query(
+        `INSERT INTO ${usersTable}
+           (id, email, display_name, surname, password_hash, wallet_id, role,
+            kyc_status, birth_date, kyc_verified_at, hall_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PLAYER',
+                 'VERIFIED', $7::date, now(), $8)`,
+        [userIdEarly, TEST_PLAYER_EMAIL, TEST_PLAYER_DISPLAY_NAME, TEST_PLAYER_SURNAME, passwordHashEarly, walletIdEarly, TEST_PLAYER_BIRTH_DATE, TEST_PLAYER_HALL_ID],
+      );
+      log.info("Opprettet ny test-bruker (TX1)", { userId: userIdEarly, walletId: walletIdEarly });
+    }
+
+    await client.query(
+      `INSERT INTO ${walletAccountsTable}
+         (id, balance, deposit_balance, winnings_balance, is_system, created_at, updated_at)
+       VALUES ($1, $2, $2, 0, false, now(), now())
+       ON CONFLICT (id) DO UPDATE
+         SET balance = EXCLUDED.balance,
+             deposit_balance = EXCLUDED.deposit_balance,
+             winnings_balance = 0,
+             updated_at = now()`,
+      [walletIdEarly, TEST_PLAYER_DEPOSIT_AMOUNT_KR],
+    );
+
+    await client.query("COMMIT");
+    log.info(`TX1 ferdig: ${createdEarly ? "opprettet" : "oppdaterte"} ${TEST_PLAYER_EMAIL} med ${TEST_PLAYER_DEPOSIT_AMOUNT_KR} kr i hall ${TEST_PLAYER_HALL_ID}`);
+
+    // ── TX2: best-effort cleanup av andre test-spillere ─────────────────────
+    let deletedCount = 0;
+    try {
+      deletedCount = await deleteOtherTestPlayersBestEffort(client, log, schema);
+    } catch (cleanupErr) {
+      log.warn(`TX2 cleanup feilet (best-effort, test-bruker er fortsatt klar): ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+    }
+
+    return {
+      deletedCount,
+      testUser: {
+        id: userIdEarly,
+        email: TEST_PLAYER_EMAIL,
+        walletId: walletIdEarly,
+        hallId: TEST_PLAYER_HALL_ID,
+        depositKr: TEST_PLAYER_DEPOSIT_AMOUNT_KR,
+        created: createdEarly,
+      },
+    };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Best-effort sletting av andre PLAYER-rader. Itererer en-og-en og swallow-er
+ * FK-RESTRICT-feil per spiller, så ÉN forurenset rad ikke stopper resten.
+ */
+async function deleteOtherTestPlayersBestEffort(
+  client: import("pg").PoolClient,
+  log: NonNullable<ResetTestPlayersDeps["logger"]>,
+  schema: string,
+): Promise<number> {
+  const usersTable = `"${schema}"."app_users"`;
+  const walletAccountsTable = `"${schema}"."wallet_accounts"`;
+  const walletTransactionsTable = `"${schema}"."wallet_transactions"`;
+  const walletEntriesTable = `"${schema}"."wallet_entries"`;
+
+  const { rows: targets } = await client.query<{ id: string; wallet_id: string; email: string }>(
+    `SELECT id, wallet_id, email FROM ${usersTable} WHERE role = 'PLAYER' AND email <> $1`,
+    [TEST_PLAYER_EMAIL],
+  );
+
+  if (targets.length === 0) {
+    log.info("Ingen andre test-spillere å rydde");
+    return 0;
+  }
+
+  log.info(`TX2: prøver å slette ${targets.length} andre PLAYER-rader (per-rad fail-soft)`);
+
+  let deleted = 0;
+  for (const target of targets) {
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM ${walletEntriesTable} WHERE account_id = $1`, [target.wallet_id]);
+      await client.query(`DELETE FROM ${walletTransactionsTable} WHERE account_id = $1 OR related_account_id = $1`, [target.wallet_id]);
+      await client.query(`DELETE FROM ${walletAccountsTable} WHERE id = $1 AND is_system = false`, [target.wallet_id]);
+      await client.query(`DELETE FROM ${usersTable} WHERE id = $1`, [target.id]);
+      await client.query("COMMIT");
+      deleted++;
+    } catch (perRowErr) {
+      await client.query("ROLLBACK").catch(() => {});
+      log.warn(`Skipper ${target.email} (FK-RESTRICT eller annen feil): ${perRowErr instanceof Error ? perRowErr.message : String(perRowErr)}`);
+    }
+  }
+
+  log.info(`TX2 ferdig: slettet ${deleted}/${targets.length} test-spillere`);
+  return deleted;
+}
+
+/**
+ * @deprecated 2026-05-03: gammel single-transaksjons-flyt erstattet av split
+ * (TX1 = create test-bruker, TX2 = best-effort delete). Bevart for backward-
+ * compat referanse hvis noen tester eller scripts importerer den direkte.
+ * Faktisk eksekverbar kode er fjernet under denne deklarasjonen.
+ */
+async function _legacyMonolithicResetUnused(
+  deps: ResetTestPlayersDeps,
+): Promise<ResetTestPlayersResult> {
+  const log = deps.logger ?? DEFAULT_LOGGER;
+  const schema = assertSchemaName(deps.schema ?? "public");
+  const usersTable = `"${schema}"."app_users"`;
+  const walletAccountsTable = `"${schema}"."wallet_accounts"`;
+  const walletTransactionsTable = `"${schema}"."wallet_transactions"`;
+  const walletEntriesTable = `"${schema}"."wallet_entries"`;
+
   const client = await deps.pool.connect();
   try {
     await client.query("BEGIN");
