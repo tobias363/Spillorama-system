@@ -1,27 +1,24 @@
 ---
 game: game3
 name: Monster Bingo / Mønsterbingo
+marketName: "Spill 3 / Mønsterbingo"
 slug: monsterbingo
-ticketGrid: 5x5
-centerCell: free  # Samme som G1
-ballRange: [1, 60]
-maxDrawsPerRound: 60
+regulatoryCategory: Hovedspill
+ticketGrid: 3x3
+centerCell: none  # Ingen fri sentercelle (kun 9 reelle tall i [1, 21])
+ballRange: [1, 21]
+maxDrawsPerRound: 21
 ticketTypes:
   - code: standard
     weight: 1
 maxTicketWeights: 30
-autoArm: false  # Fjernet 2026-04-17 — port fra G1 (commit fra denne PR-en)
+autoArm: false
 patterns:
-  - id: line
-    name: "Line"
-    claimType: LINE
-    prizePercent: 30
-    order: 1
-  - id: bingo
-    name: "Full Card"
+  - id: coverall
+    name: "Coverall"
     claimType: BINGO
-    prizePercent: 70
-    order: 2
+    prizePercent: 80
+    order: 1
 miniGames: []  # Ingen mini-games
 audioVoicePacks: []  # Ikke portet
 features:
@@ -33,6 +30,8 @@ features:
   animatedBallQueue: true  # G3-signatur: vertikal FIFO-kø
   waypointBallPath: false  # Unity BallPathRottate.cs ikke portet
   patternAnimation: false  # Ping-pong skala ikke portet
+  perpetualLoop: true  # Aldri stopper — utbetal → ny runde automatisk
+  globalRoom: true  # ETT globalt rom (MONSTERBINGO), ingen group-of-halls
 complianceModel: hall-based
 spillvettLimits:
   dailyLoss: 900
@@ -41,14 +40,17 @@ spillvettLimits:
   pauseMs: 300000
   selfExclusionMs: 31536000000
 parityStatus: MVP
-commitRef: 1efb4c93ae33b3a52c3c9c914008d08fbb6217f6
+revisionDate: 2026-05-03
 ---
 
 # Game 3 Canonical Spec — Monster Bingo / Mønsterbingo
 
-**Formål:** Frosset spesifikasjon av Game 3 per 2026-04-17. Siste per-spill canonical spec i serien G1/G2/G3/G5.
+**Formål:** Frosset spesifikasjon av Game 3 per **2026-05-03** (Tobias-direktiv:
+3×3-port). Erstatter forrige versjon fra 2026-04-17 som spesifiserte 5×5 / 1..75.
 
-> **Viktig:** Game 3 er MVP. Animert kulekø fungerer som G3-signatur, men waypoint-bane og mønster-animasjoner gjenstår. Se §11 for avvik.
+> **Viktig:** Spill 3 er en **hybrid** av Spill 2's runtime (3×3 / 1..21 / full-
+> bong-vinner) og Spill 1's visuelle stil (ball queue, chat, banner). Per Tobias:
+> "Det skal være 3x3 bonger" + "ball-range likt som Spill 2" (= 1-21).
 
 ---
 
@@ -56,11 +58,12 @@ commitRef: 1efb4c93ae33b3a52c3c9c914008d08fbb6217f6
 
 | Felt | Verdi |
 |------|-------|
-| Navn (NO) | Mønsterbingo (Monster Bingo i kodebase) |
-| Backend-slug | `monsterbingo` |
+| Markedsføringsnavn | Spill 3 / Mønsterbingo |
+| Backend-slug | `monsterbingo` (også `mønsterbingo`, `game_3`) |
 | Frontend-pakke | `packages/game-client/src/games/game3/` |
-| Backend-logikk | `apps/backend/src/game/BingoEngine.ts` (delt) |
-| Game type | Multiplayer, sanntid, hall-basert (5×5 med animert kulekø) |
+| Backend-logikk | `apps/backend/src/game/Game3Engine.ts` (subklasse av BingoEngine) |
+| Game type | Multiplayer, sanntid, ETT globalt rom (`MONSTERBINGO`) |
+| Regulatorisk kategori | Hovedspill (15 % til organisasjoner) |
 | Legacy-referanse | `legacy/unity-backend/Game/Game3/Sockets/game3.js` |
 
 ---
@@ -68,18 +71,23 @@ commitRef: 1efb4c93ae33b3a52c3c9c914008d08fbb6217f6
 ## 2. Spillflyt
 
 ```
-Lobby (spillerliste, nedtelling)
-  → Billett-kjøp (auto-arm i MVP)
+Lobby (spillerliste)
+  → Billett-kjøp (eksplisitt via BuyPopup)
   → Arming via bet:arm
-  → Nedtelling
   → RUNNING (auto-draw)
   → Per draw: kule dropper inn i AnimatedBallQueue
-  → LINE-claim
-  → BINGO-claim (Full Card)
-  → Slutt
+  → Coverall lander på en spillers brett
+    → Auto-claim + payout
+    → Round ENDED med G3_FULL_HOUSE
+    → (Perpetual restart håndteres av scheduler — scope-cut for nåværende PR)
 ```
 
-**Klient-state-maskin** (`Game3Controller.ts:11`): `LOADING` → `LOBBY` → `PLAYING` → `ENDED`. Samme mønster som G2/G5; SPECTATING-fase ikke portet fra G1.
+**Klient-state-maskin** (`Game3Controller.ts`): `LOADING` → `LOBBY` →
+`PLAYING` (eller `SPECTATING`) → `ENDED`.
+
+**Per Tobias 2026-05-03:**
+> "Spill 2 og 3 har ETT globalt rom. Ingen group-of-halls, ingen master/start/
+> stop. Aldri stopper — utbetal gevinst → fortsetter automatisk."
 
 ---
 
@@ -87,75 +95,78 @@ Lobby (spillerliste, nedtelling)
 
 | Parameter | Kilde | Default |
 |-----------|-------|---------|
-| Ball-range | `BingoEngine.ts:196` (`MAX_BINGO_BALLS_60`) | 1–60 |
-| Grid | Backend ticket-generator | 5×5 (25 celler, fri sentercelle) |
-
-G3 har **samme grid som G1** (5×5 med fri sentercelle) men bruker 60-ball range (ikke 75 som G1). Dette er en viktig forskjell: G1 er `BINGO75_SLUGS` (75 baller), G3 er ikke.
+| Ball-range | `DEFAULT_GAME3_CONFIG.maxBallValue` | 1–21 |
+| Drawbag-size | `DEFAULT_GAME3_CONFIG.drawBagSize` | 21 |
+| Grid | Backend ticket-generator (`generate3x3Ticket`) | 3×3 (9 celler) |
+| Coverall-prosent | `variantConfig.patterns[0].prizePercent` (eller default) | 80 % av pool |
+| Lucky-bonus | `variantConfig.luckyNumberPrize` | 0 (deaktivert) |
 
 ---
 
 ## 4. Ticket types
 
-Kun `standard` i dag. Ingen per-type varianter (i motsetning til G1 som har Small/Large/Elvis).
+Kun `Standard` (én type). Ingen per-type varianter (i motsetning til Spill 1
+som har 8 farger).
+
+```typescript
+ticketTypes: [
+  { name: "Standard", type: "game3-3x3", priceMultiplier: 1, ticketCount: 1 },
+]
+```
 
 ---
 
 ## 5. Win-patterns
 
-Samme default som G2/G5 (`BingoEngine.ts:142`): LINE (30 %) + Full Card (70 %).
+**KUN Coverall** (full 3×3-bong, alle 9 celler matchet). Ingen Row 1-4 eller
+delvise patterns. Ingen mini-games.
 
-**G3-navnet "Mønsterbingo"** antyder at spillet historisk hadde flere mønstre (derfor navnet "pattern bingo"). Legacy `PrefabBingoGame3Pattern.cs` hadde ping-pong animasjoner for flere mønstre, men dette er ikke portet. Utvidelse til flere patterns er egen oppfølging.
+```typescript
+patterns: []  // Tom — Game3Engine evaluerer Coverall direkte via hasFull3x3()
+```
+
+Engine-laget bruker `hasFull3x3(ticket, drawnSet)` som vinner-predicate
+(samme funksjon som Spill 2). Premie-prosent default 80 % av pool — kan
+overstyres via admin-konfig.
 
 ---
 
 ## 6. Mini-games
 
-**Game 3 har ingen mini-games.** `miniGames: []` i front-matter. Samme som G2.
+**Game 3 har ingen mini-games.** `miniGames: []` i front-matter. Samme som
+Spill 2.
 
 ---
 
-## 7. Animert kulekø (G3-signatur)
+## 7. Animert kulekø (Spill 1-stil)
 
-**Port av Unity `BingoNumberBalls` + `BallScript`:**
+Beholdt fra forrige spec — er G3's signatur og passer hybrid-modellen.
 
 - Vertikal FIFO-kø, venstre side av skjermen
 - Maks 5 synlige kuler
 - Nye kuler dropper inn fra toppen med `power2.in` (akselerasjon)
 - Skala 1.2× → 1.0× ved ankomst (matcher Unity `highlightScale`)
 - Full kø: eldste fader ut, resten skyves ned, ny dropper inn
-- Fargekodet etter tallområde (rød/oransje/gull/teal/blå)
-
-**Ikke portet (MVP-begrensninger):**
-
-- **Waypoint-bane** (Unity `BallPathRottate.cs`): Unity lerp'er kule langs waypoints med `speed modifier`. Ny klient bruker enkel vertikal drop. Kan utvides med GSAP-timeline.
-- **Pattern-animasjon** (Unity `PrefabBingoGame3Pattern.cs`): ✅ Portet via `components/PatternBanner.ts` — navn på neste un-won pattern vises i banner på toppen av gameplay-området med GSAP `sine.inOut` yoyo-pulse (1.0x ↔ 1.08x, 0.6 s). Cellnivå-preview utsatt (krever `cells`-array i `PatternDefinition`).
-
-`packages/game-client/src/games/game3/components/AnimatedBallQueue.ts` inneholder MVP-logikken.
+- Fargekodet etter tallområde — for 1..21 fordeles fargene over hele rangen
 
 ---
 
 ## 8. Socket-kontrakt
 
-Deler basis-kontrakt med G1/G2/G5. G3-unike legacy-events:
+Identisk wire-shape som forrige Spill 3-implementasjon for bakoverkompat.
+Endringer i payload-innhold:
 
-| Legacy-event | Status | Merknad |
-|--------------|--------|---------|
-| `Game3Room` | 🟡 Dekket av generisk `room:join` | — |
-| `Game3PlanList` | 🟡 Dekket av hall_game_schedules | — |
-| `GetGame3PurchaseData` | 🟡 Dekket av `room:update` gameVariant | — |
-| `PurchaseGame3Tickets` | 🟡 Dekket av generisk `bet:arm` | — |
-| `CancelGameTickets` / `CancelTicket` | 🟡 Dekket av `bet:arm` med `armed: false` | — |
-| `SelectLuckyNumber` | 🟡 Dekket av generisk `lucky-number:select` | — |
-| `SendGameChat` / `GameChatHistory` | ✅ Chat portet for G3 (i motsetning til G2/G5) | — |
-| `LeftRoom` | 🟡 Dekket av `disconnect` | — |
-
-**G3 har chat aktivt** — det skiller seg fra G2 og G5 som mangler chat. Delt implementasjon med G1.
+| Event | Nytt innhold |
+|-------|---------------|
+| `g3:pattern:changed` | `activePatterns` har KUN Coverall (singleton) |
+| `g3:pattern:auto-won` | `patternName: "Coverall"`, `isFullHouse: true` |
+| `room:state` | `currentGame.tickets` er 3×3 grids |
 
 ---
 
 ## 9. Checkpoint og recovery
 
-Samme som G1/G2/G5. Shared fra BIN-502 (drawIndex gap-deteksjon) og BIN-500 (loader-barriere er G1-only).
+Samme som G1/G2/G5. Shared infrastruktur fra BIN-502.
 
 ---
 
@@ -176,58 +187,65 @@ Samme som G1/G2/G5. Shared fra BIN-502 (drawIndex gap-deteksjon) og BIN-500 (loa
 
 ## 11. Kjente avvik fra legacy
 
-### 11.1 G3-spesifikke avvik
+### 11.1 Bevisste valg (Tobias-direktiv 2026-05-03)
 
-| Legacy-feature | Status i ny stack | Oppfølging |
-|----------------|-------------------|------------|
-| Animert kulekø (vertikal FIFO) | ✅ MVP implementert | — |
-| Waypoint-bane for kule (`BallPathRottate.cs`) | ❌ Enkel vertikal drop i stedet | Egen issue hvis fysikk kreves |
-| Pattern-animasjon (`PrefabBingoGame3Pattern.cs`) | ❌ Ping-pong skala ikke portet | Egen issue |
-| Multiple win-patterns (utover LINE + BINGO) | ❌ | Egen issue — "Mønsterbingo"-navnet tilsier dette er kjerne |
-| Audio / nummerannouncement | ❌ | Egen issue |
-| `Game3PlanList` som dedikert socket-event | 🟡 Dekket av hall_game_schedules | OK |
+| Legacy-feature | Status i ny stack | Begrunnelse |
+|----------------|-------------------|-------------|
+| 5×5 / 1..75-bonger | ❌ Erstattet med 3×3 / 1..21 | Tobias: "Det skal være 3x3 bonger" |
+| Row 1-4 patterns | ❌ Fjernet — kun Coverall | Tobias: "alt med trekning og visning av bonger er likt" som Spill 2 |
+| Master/start/stop | ❌ Fjernet | Tobias: "ETT globalt rom" |
+| Group of halls | ❌ Fjernet | Tobias: "Ingen group-of-halls" |
+| Pattern-cycler-engine | ❌ Erstattet med full-bong-predicate | Forenkling — passer perpetual-loop-modell |
 
-### 11.2 Delte avvik
+### 11.2 Scope-cuts for nåværende PR
 
-Samme som G2/G5 — se `PARITY_MATRIX.md` §2.3. Redis, load-test, observability er ✅ takket være fundament-arbeidet.
+| Feature | Status | Plan |
+|---------|--------|------|
+| Perpetual loop (auto-restart etter Coverall) | 🟡 Engine signaliserer ENDED + endedReason="G3_FULL_HOUSE", men auto-restart-tikk er ikke implementert | Egen oppfølger — krever scheduler eller cron-tick som triggerer ny `startGame` |
+| Schedule-håndtering | 🟡 Spill 3 antas å være "alltid på" — ingen schedule-restriksjon | Egen oppfølger hvis Tobias trenger schedule-vinduer |
+| Visuell pixel-paritet med Spill 1 | 🟡 Bruker Spill 1-komponenter, men ikke alle (mini-grid, full pattern-display, etc.) | Iterativ polish post-pilot |
 
-### 11.3 Avvik mot Game 1
+### 11.3 Beholdt fra Spill 1-paritet
 
-G3 mangler G1-forbedringer: SPECTATING-fase, loader-barriere, eksplisitt kjøp. Port nødvendig for full paritet.
+- AnimatedBallQueue (G3-signatur, beholdt fra forrige spec)
+- Chat-panel (delt med Spill 1)
+- Pattern-banner-konsept (nå singleton Coverall)
 
 ---
 
 ## 12. Filer
 
-**Backend (delt):**
-- `apps/backend/src/game/BingoEngine.ts`
-- `apps/backend/src/sockets/gameEvents.ts`
+**Backend:**
+- `apps/backend/src/game/Game3Engine.ts` — subklasse av BingoEngine, full-3×3-detection
+- `apps/backend/src/game/variantConfig.ts` — `DEFAULT_GAME3_CONFIG` (3×3 / 1..21)
+- `apps/backend/src/game/ticket.ts` — `generate3x3Ticket` (delt med Spill 2),
+  `uses3x3Ticket` (matcher BÅDE G2 og G3)
+- `apps/backend/src/game/ledgerGameTypeForSlug.ts` — Spill 3 → MAIN_GAME (15 %)
 
-**Klient (G3-spesifikk):**
+**Klient (Spill 3-spesifikk):**
 - `packages/game-client/src/games/game3/Game3Controller.ts` — `gameSlug: "monsterbingo"`
-- `packages/game-client/src/games/game3/screens/PlayScreen.ts` — 5×5 grids + chat + kulekø
-- `packages/game-client/src/games/game3/components/AnimatedBallQueue.ts` — G3-signatur-animasjon
+- `packages/game-client/src/games/game3/screens/PlayScreen.ts` — 3×3 grids + chat + kulekø
+- `packages/game-client/src/games/game3/components/AnimatedBallQueue.ts` — G3-signatur
+- `packages/game-client/src/games/game3/components/PatternBanner.ts` — Coverall-banner
 
-**Delt fra G1/G2:**
-- `packages/game-client/src/games/game1/components/ChatPanel.ts` (chat delt med G3)
-- `packages/game-client/src/games/game2/components/TicketCard.ts`
+**Delt fra Spill 1/Spill 2:**
+- `packages/game-client/src/components/ChatPanel.ts` (chat — delt med Spill 1)
+- `packages/game-client/src/games/game2/components/TicketCard.ts` (gridSize="3x3")
 - `packages/game-client/src/games/game2/screens/LobbyScreen.ts`
+- `packages/game-client/src/games/game2/screens/EndScreen.ts`
 - `packages/game-client/src/games/game2/logic/ClaimDetector.ts`
-
-**Legacy:**
-- `legacy/unity-backend/Game/Game3/Sockets/game3.js`
-- `legacy/unity-client/Assets/_Project/_Scripts/Panels/Game/Game 3/`
 
 ---
 
 ## 13. Redigerings-policy
 
-Samme som G1/G2/G5. PR som endrer G3-adferd MÅ oppdatere denne filen.
+PR som endrer G3-adferd MÅ oppdatere denne filen.
 
 ---
 
 ## 14. Revisjonshistorikk
 
-| Dato | Commit-ref | Endring |
-|------|-----------|---------|
-| 2026-04-17 | `1efb4c93` (state ved skriving) | Initial canonical spec per BIN-530. MVP med animert kulekø som G3-signatur. Waypoint-bane, pattern-animasjon og multiple patterns som oppfølgere. Siste i per-spill canonical spec-serien. |
+| Dato | Endring |
+|------|---------|
+| 2026-04-17 | Initial canonical spec (BIN-530). 5×5 / 1..75 / Row 1-4 + Coverall, MVP med animert kulekø som G3-signatur. |
+| 2026-05-03 | **Rewrite per Tobias-direktiv**: 3×3 / 1..21 hybrid (Spill 2-runtime + Spill 1-stil). Fjernet Row 1-4 patterns, master/start/stop, group-of-halls. Coverall som eneste vinner-pattern. ETT globalt rom. Perpetual loop-fundament (auto-restart-tikk er scope-cut). |

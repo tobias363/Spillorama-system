@@ -407,35 +407,40 @@ export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
 };
 
 /**
- * BIN-615 / PR-C3b: Game 3 (Mønsterbingo) default variant config.
+ * 2026-05-03 (Tobias-direktiv): Game 3 (Mønsterbingo / Spill 3) default
+ * variant config — **3×3 1..21**-hybrid av Spill 2's runtime + Spill 1's stil.
  *
- * - 5×5 1..75 tickets (no free centre) — see `generate5x5NoCenterTicket`
- * - maxBallValue=75, drawBagSize=75 (Helper/bingo.js:1014-1031, gamehelper/game3.js:663)
- * - patternEvalMode="auto-claim-on-draw" — Game3Engine auto-claims per draw
- * - Patterns: Row 1-4 (10% each) + Full House / Coverall (60%). Real halls
- *   override this with admin-defined patterns including custom 25-bit masks.
- * - No `jackpotNumberTable` — distinguishes G3 from G2 in the guard path.
+ * - **3×3-tickets**, 9 unike tall fra 1..21 — `generate3x3Ticket` (delt med Spill 2)
+ * - **maxBallValue=21**, drawBagSize=21 — samme range som Spill 2
+ * - **patternEvalMode="auto-claim-on-draw"** — Game3Engine auto-evaluerer per trekning
+ * - **ÉN ticket-type** ("Standard") — i kontrast til Spill 1's 8 farger
+ * - **Ingen `patterns[]`** — Spill 3 har KUN Coverall (full bong) som vinner-
+ *   krav, akkurat som Spill 2. Ingen Row 1-4 eller mini-games.
+ * - **Ingen `jackpotNumberTable`** — det skiller G3 fra G2 i guard-pathen
+ *   (`Game2Engine.isGame2Round` krever jackpotNumberTable, `Game3Engine.isGame3Round`
+ *   krever det IKKE).
  *
- * Legacy ref: gamehelper/game3.js:663-708 (`createGameData`), Helper/bingo.js:
- * 1197-1356 (per-ticket pattern pre-compute).
+ * Tidligere (BIN-615 / PR-C3, 2026-04-23): Game 3 brukte 5×5 1..75 uten fri
+ * sentercelle med 5 patterns (Row 1-4 + Full House). Den varianten er nå
+ * deprecated per Tobias-direktiv 2026-05-03.
+ *
+ * Per Tobias bekreftelse 2026-05-03:
+ *   "Det skal være 3x3 bonger" + "ball-range likt som Spill 2" (= 1-21).
+ *   "Spill 2 og 3 har ETT globalt rom. Ingen group-of-halls, ingen master/
+ *    start/stop. Aldri stopper — utbetal gevinst → fortsetter automatisk.
+ *    Kun digitale bonger."
  */
 export const DEFAULT_GAME3_CONFIG: GameVariantConfig = {
+  // Single ticket-type — alle bonger er identiske "Standard".
   ticketTypes: [
-    ...DEFAULT_TICKET_COLORS.map((name) => ({
-      name, type: "small", priceMultiplier: 1, ticketCount: 1,
-    })),
-    { name: "Large Yellow", type: "large", priceMultiplier: 3, ticketCount: 3 },
+    { name: "Standard", type: "game3-3x3", priceMultiplier: 1, ticketCount: 1 },
   ],
-  patterns: [
-    { name: "Row 1", claimType: "LINE" as const, prizePercent: 10, design: 1, ballNumberThreshold: 15 },
-    { name: "Row 2", claimType: "LINE" as const, prizePercent: 10, design: 2, ballNumberThreshold: 25 },
-    { name: "Row 3", claimType: "LINE" as const, prizePercent: 10, design: 3, ballNumberThreshold: 40 },
-    { name: "Row 4", claimType: "LINE" as const, prizePercent: 10, design: 4, ballNumberThreshold: 55 },
-    { name: "Full House", claimType: "BINGO" as const, prizePercent: 60, design: 0 },
-  ],
-  maxBallValue: 75,
-  drawBagSize: 75,
+  // Ingen patterns — auto-claim utløses kun på Coverall (hasFull3x3) i engine.
+  patterns: [],
+  maxBallValue: 21,
+  drawBagSize: 21,
   patternEvalMode: "auto-claim-on-draw",
+  // Ingen jackpotNumberTable — det er G2-markøren. G3 evaluerer kun full-bong.
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -17,9 +17,15 @@ const CHAT_WIDTH = 280;
 const BALL_QUEUE_WIDTH = 80;
 
 /**
- * Game 3 (Monster Bingo) play screen.
- * Same as Game 1 (5x5 + chat) but adds the animated ball queue
- * on the left side — the signature Game 3 visual.
+ * Game 3 (Monster Bingo / Spill 3) play screen.
+ *
+ * 2026-05-03 (Tobias-direktiv): hybrid av Spill 2's runtime og Spill 1's stil.
+ * Bonger er nå **3×3** (1..21), ikke 5×5 — samme format som Spill 2. Visuelle
+ * elementer (chat, ball queue, pattern banner) gjenbrukes fra Spill 1's
+ * komponentbibliotek.
+ *
+ * Tidligere (BIN-615 / PR-C3b, 2026-04-23): 5×5 / 1..75 med Row 1-4 + Coverall.
+ * Den varianten er erstattet — Spill 3 har nå KUN Coverall (full 3×3-bong).
  */
 export class PlayScreen extends Container {
   private scroller: TicketScroller;
@@ -129,7 +135,10 @@ export class PlayScreen extends Container {
     }
 
     for (let i = 0; i < state.myTickets.length; i++) {
-      const card = new TicketCard(i, { gridSize: "5x5", cellSize: 38 });
+      // 2026-05-03 (Tobias-direktiv): Spill 3 bruker 3×3-bonger. Større
+      // cellSize (52 vs. 38) fordi 9 celler trenger mer plass per celle for
+      // å beholde lesbarhet på samme scroller-bredde.
+      const card = new TicketCard(i, { gridSize: "3x3", cellSize: 52 });
       card.loadTicket(state.myTickets[i]);
 
       if (state.myMarks[i]) {
