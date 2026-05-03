@@ -17,8 +17,17 @@ describe("selectAssetsFor (BIN-673)", () => {
     expect(selectAssetsFor("game_1")).toContain("/web/games/assets/game1/center-ball.png");
   });
 
-  it("Game 2/3/5/6 slugs return empty list (procedural visuals)", () => {
-    expect(selectAssetsFor("rocket")).toEqual([]);
+  it("Game 2 slugs return Bong Mockup design assets (2026-05-03 Bong Mockup-redesign)", () => {
+    // Spill 2 fikk bg + lucky-clover for Bong Mockup-design (Agent E,
+    // branch feat/spill2-bong-mockup-design). Tidligere var listen tom.
+    const rocket = selectAssetsFor("rocket");
+    expect(rocket).toContain("/web/games/assets/game2/design/bong-bg.png");
+    expect(rocket).toContain("/web/games/assets/game2/design/lucky-clover.png");
+    expect(selectAssetsFor("game_2")).toEqual(rocket);
+    expect(selectAssetsFor("tallspill")).toEqual(rocket);
+  });
+
+  it("Game 3/5/6 slugs return empty list (procedural visuals)", () => {
     expect(selectAssetsFor("monsterbingo")).toEqual([]);
     expect(selectAssetsFor("spillorama")).toEqual([]);
     expect(selectAssetsFor("candy")).toEqual([]);
@@ -35,8 +44,10 @@ describe("preloadGameAssets (BIN-673)", () => {
   });
 
   it("no-ops for slugs with empty asset list", async () => {
-    // No throw, resolves quickly.
-    await expect(preloadGameAssets("rocket")).resolves.toBeUndefined();
+    // No throw, resolves quickly. Bruker `monsterbingo` (Spill 3) som
+    // har tom asset-liste — `rocket` har bg/lucky-clover etter Bong
+    // Mockup-redesign (2026-05-03).
+    await expect(preloadGameAssets("monsterbingo")).resolves.toBeUndefined();
   });
 
   it("never rejects — failed loads are caught and logged as warnings", async () => {

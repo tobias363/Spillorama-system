@@ -1,40 +1,80 @@
-import { Container, Graphics, Text } from "pixi.js";
+/**
+ * Spill 2 (Tallspill) — main gameplay screen for the Bong Mockup design
+ * (`Bong Mockup.html`).
+ *
+ * Layout (top → bottom):
+ *   1. ComboPanel: Lykketall + Hovedspill 1 + Jackpots (3 columns)
+ *   2. BallTube:   countdown + draw-counter + drawn balls
+ *   3. Bong-grid:  2×2 of BongCard (scaled 0.7 to fit)
+ *
+ * Bakgrunn rendres som `bong-bg.png` Sprite via `Assets.load`.
+ *
+ * Funksjonelt uendret kontrakt mot `Game2Controller`:
+ *   - `setOnClaim`, `buildTickets`, `updateInfo`, `onNumberDrawn`,
+ *     `onPatternWon`, `updateJackpot` — alle samme signatur som tidligere.
+ *   - Ny: `setOnLuckyNumber` + `setOnChooseTickets` — i tidligere design
+ *     ble disse håndtert av LobbyScreen, men i det nye designet er
+ *     Lykketall-grid + "Kjøp flere brett" alltid synlig under spill.
+ *   - Ny: `setOnClaim` aksepterer fortsatt LINE/BINGO men knappene er
+ *     visuelt mindre framtredende — auto-claim fortsatt drevet av
+ *     backend ved Fullt Hus (PR #855).
+ *
+ * 2026-05-03 (Agent E, branch feat/spill2-bong-mockup-design): full
+ * rewrite for Bong Mockup-design. Tidligere PlayScreen brukte
+ * TicketScroller + JackpotBar; det er erstattet med ny BallTube,
+ * ComboPanel og en 2×2 BongCard-grid.
+ */
+
+import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
-import { TicketScroller } from "../components/TicketScroller.js";
-import { TicketCard } from "../components/TicketCard.js";
-import { DrawnBallsPanel } from "../components/DrawnBallsPanel.js";
+import { BongCard } from "../components/BongCard.js";
+import { BallTube } from "../components/BallTube.js";
+import { ComboPanel } from "../components/ComboPanel.js";
+import type { JackpotSlotData } from "../components/JackpotsRow.js";
 import { ClaimButton } from "../components/ClaimButton.js";
-import { PlayerInfoBar } from "../components/PlayerInfoBar.js";
-import { JackpotBar, type JackpotSlotData } from "../components/JackpotBar.js";
 import { ChatPanel } from "../../../components/ChatPanel.js";
-import { getTicketThemeByName } from "../../game1/colors/TicketColorThemes.js";
 import { checkClaims } from "../logic/ClaimDetector.js";
 
+const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
+const STAGE_PADDING_X = 32;
+const STAGE_PADDING_TOP = 14;
+const STAGE_PADDING_BOTTOM = 18;
+const ROW_GAP = 14;
+const MAX_STAGE_WIDTH = 1100;
 const CHAT_WIDTH = 280;
 const CHAT_MARGIN = 12;
+/** Bong-grid scale matching `.grid-wrap > * { transform: scale(0.70) }`. */
+const BONG_SCALE = 0.70;
+const BONG_GAP_X = 20;
+const BONG_GAP_Y = 8;
 
-/**
- * Main gameplay screen — shown during PLAYING state.
- */
 export class PlayScreen extends Container {
-  private scroller: TicketScroller;
-  private drawnBalls: DrawnBallsPanel;
-  private jackpotBar: JackpotBar;
+  private bgSprite: Sprite | null = null;
+  private bgFallback: Graphics;
+  private comboPanel: ComboPanel;
+  private ballTube: BallTube;
+  private bongs: BongCard[] = [];
+  private bongGridContainer: Container;
   private chatPanel: ChatPanel | null = null;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
-  private infoBar: PlayerInfoBar;
-  private luckyNumberText: Text;
-  private pageIndicator: Text;
-  private prevBtn: Container;
-  private nextBtn: Container;
   private audio: AudioManager;
+  private screenW: number;
+  private screenH: number;
+  private stageW: number;
+  private stageX: number;
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
+  private onLuckyNumber: ((n: number) => void) | null = null;
+  private onChooseTickets: (() => void) | null = null;
   private lineAlreadyWon = false;
   private bingoAlreadyWon = false;
+  /** Nedtellings-driver — vi oppdaterer hvert sekund fra
+   *  `state.millisUntilNextStart` og decreases lokalt mellom snapshots. */
+  private countdownDeadline: number | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     screenWidth: number,
@@ -45,142 +85,95 @@ export class PlayScreen extends Container {
   ) {
     super();
     this.audio = audio;
+    this.screenW = screenWidth;
+    this.screenH = screenHeight;
 
-    // Info bar (top)
-    this.infoBar = new PlayerInfoBar();
-    this.infoBar.x = 20;
-    this.infoBar.y = 10;
-    this.addChild(this.infoBar);
-
-    // Lucky number display
-    this.luckyNumberText = new Text({
-      text: "",
-      style: { fontFamily: "Arial", fontSize: 16, fill: 0xffe83d },
-    });
-    this.luckyNumberText.x = screenWidth - 150;
-    this.luckyNumberText.y = 14;
-    this.addChild(this.luckyNumberText);
-
-    // Drawn balls panel
-    this.drawnBalls = new DrawnBallsPanel();
-    this.drawnBalls.x = 20;
-    this.drawnBalls.y = 45;
-    this.addChild(this.drawnBalls);
-
-    // Chat (right sidebar) — optional, enabled when socket + roomCode provided
+    // ── stage-bredde + bakgrunn ──────────────────────────────────────────
     const chatEnabled = socket != null && roomCode != null;
     const chatRightEdge = screenWidth - CHAT_MARGIN;
     const chatLeftEdge = chatEnabled ? chatRightEdge - CHAT_WIDTH : screenWidth;
+    const availableW = (chatEnabled ? chatLeftEdge - CHAT_MARGIN : screenWidth) - STAGE_PADDING_X * 2;
+    this.stageW = Math.min(MAX_STAGE_WIDTH, Math.max(640, availableW));
+    this.stageX = STAGE_PADDING_X + Math.max(0, (availableW - this.stageW) / 2);
 
-    // 2026-05-02 (Tobias UX): stabling-animasjon fjernet (PDF 17 wireframe).
-    // I stedet rendres Jackpot-bar over ticket-grid med 6 slots
-    // (9/10/11/12/13/14-21). Data via socket-event `g2:jackpot:list-update`.
-    this.jackpotBar = new JackpotBar();
-    this.jackpotBar.x = 20;
-    this.jackpotBar.y = 85;
-    this.addChild(this.jackpotBar);
+    // Fallback-bakgrunn (mørk-rød) frem til PNG laster.
+    this.bgFallback = new Graphics();
+    this.bgFallback.rect(0, 0, screenWidth, screenHeight).fill({ color: 0x2a0d0e });
+    this.addChild(this.bgFallback);
+    void this.loadBackground();
 
-    // Ticket scroller (main area) — leave room for chat (optional). Med
-    // jackpot-bar over scrolleren skyves toppen ned til 165 (85 + 70 + 10 gap).
-    const scrollerY = 165;
-    const scrollerHeight = screenHeight - scrollerY - 80;
-    const scrollerWidth = (chatEnabled ? chatLeftEdge - CHAT_MARGIN : chatRightEdge) - 20;
-    this.scroller = new TicketScroller(scrollerWidth, scrollerHeight);
-    this.scroller.x = 20;
-    this.scroller.y = scrollerY;
-    this.addChild(this.scroller);
+    // ── combo-panel ──────────────────────────────────────────────────────
+    this.comboPanel = new ComboPanel(this.stageW);
+    this.comboPanel.x = this.stageX;
+    this.comboPanel.y = STAGE_PADDING_TOP;
+    this.comboPanel.setOnLuckyNumber((n) => this.onLuckyNumber?.(n));
+    this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
+    this.addChild(this.comboPanel);
 
+    // ── glass-tube (drawn balls + counter) ───────────────────────────────
+    this.ballTube = new BallTube(this.stageW);
+    this.ballTube.x = this.stageX;
+    this.ballTube.y = this.comboPanel.y + this.comboPanel.height + ROW_GAP;
+    this.addChild(this.ballTube);
+
+    // ── bong-grid (2×2 BongCard) ─────────────────────────────────────────
+    this.bongGridContainer = new Container();
+    this.bongGridContainer.x = this.stageX;
+    this.bongGridContainer.y = this.ballTube.y + 85 + ROW_GAP + 24;
+    this.addChild(this.bongGridContainer);
+
+    // ── chat-panel (valgfritt, hvis socket+roomCode er gitt) ─────────────
     if (chatEnabled) {
-      const chatTop = 45;
-      const chatHeight = screenHeight - chatTop - 20;
+      const chatTop = STAGE_PADDING_TOP;
+      const chatHeight = screenHeight - chatTop - STAGE_PADDING_BOTTOM;
       this.chatPanel = new ChatPanel(socket, roomCode, chatHeight);
       this.chatPanel.x = chatLeftEdge;
       this.chatPanel.y = chatTop;
       this.addChild(this.chatPanel);
     }
 
-    // Claim buttons (bottom)
-    this.lineBtn = new ClaimButton("LINE", 140, 50);
-    this.lineBtn.x = screenWidth / 2 - 150;
-    this.lineBtn.y = screenHeight - 65;
+    // ── claim-knapper (LINE/BINGO) ──────────────────────────────────────
+    // Beholdt for back-compat. Mindre framtredende enn før — sitter
+    // nederst i midten, scoper kun klikk-input. Auto-claim på Fullt
+    // Hus drives av backend (PR #855).
+    this.lineBtn = new ClaimButton("LINE", 120, 42);
+    this.lineBtn.x = screenWidth / 2 - 130;
+    this.lineBtn.y = screenHeight - 56;
     this.lineBtn.setOnClaim((type) => this.onClaim?.(type));
     this.addChild(this.lineBtn);
 
-    this.bingoBtn = new ClaimButton("BINGO", 140, 50);
+    this.bingoBtn = new ClaimButton("BINGO", 120, 42);
     this.bingoBtn.x = screenWidth / 2 + 10;
-    this.bingoBtn.y = screenHeight - 65;
+    this.bingoBtn.y = screenHeight - 56;
     this.bingoBtn.setOnClaim((type) => this.onClaim?.(type));
     this.addChild(this.bingoBtn);
 
-    // Ticket pager — prev/next buttons + page indicator below scroller
-    const pagerY = scrollerY + scrollerHeight + 6;
-    this.prevBtn = this.buildPagerButton("‹");
-    this.prevBtn.x = 20;
-    this.prevBtn.y = pagerY;
-    this.prevBtn.on("pointerdown", () => {
-      this.scroller.pagePrev();
-      setTimeout(() => this.updatePageIndicator(), 270);
-    });
-    this.addChild(this.prevBtn);
-
-    this.nextBtn = this.buildPagerButton("›");
-    this.nextBtn.x = 20 + 36 + 8;
-    this.nextBtn.y = pagerY;
-    this.nextBtn.on("pointerdown", () => {
-      this.scroller.pageNext();
-      setTimeout(() => this.updatePageIndicator(), 270);
-    });
-    this.addChild(this.nextBtn);
-
-    this.pageIndicator = new Text({
-      text: "",
-      style: { fontFamily: "Arial", fontSize: 13, fill: 0xaaaaaa },
-    });
-    this.pageIndicator.x = 20 + (36 + 8) * 2;
-    this.pageIndicator.y = pagerY + 8;
-    this.addChild(this.pageIndicator);
+    // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
+    this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
   }
 
-  private buildPagerButton(glyph: string): Container {
-    const btn = new Container();
-    const bg = new Graphics();
-    bg.roundRect(0, 0, 36, 28, 6);
-    bg.fill(0x2e0000);
-    bg.stroke({ color: 0x790001, width: 1 });
-    btn.addChild(bg);
-    const label = new Text({
-      text: glyph,
-      style: { fontFamily: "Arial", fontSize: 20, fontWeight: "bold", fill: 0xffe83d },
-    });
-    label.anchor.set(0.5);
-    label.x = 18;
-    label.y = 14;
-    btn.addChild(label);
-    btn.eventMode = "static";
-    btn.cursor = "pointer";
-    return btn;
+  setOnClaim(cb: (type: "LINE" | "BINGO") => void): void {
+    this.onClaim = cb;
   }
 
-  private updatePageIndicator(): void {
-    const { current, total } = this.scroller.getPageInfo();
-    this.pageIndicator.text = total > 1 ? `Kort ${current} / ${total}` : "";
-    const show = total > 1;
-    this.prevBtn.visible = show;
-    this.nextBtn.visible = show;
+  /** Sett callback for klikk i Lykketall-grid. */
+  setOnLuckyNumber(cb: (n: number) => void): void {
+    this.onLuckyNumber = cb;
   }
 
-  setOnClaim(callback: (type: "LINE" | "BINGO") => void): void {
-    this.onClaim = callback;
+  /** Sett callback for "Kjøp flere brett"-pill. */
+  setOnChooseTickets(cb: () => void): void {
+    this.onChooseTickets = cb;
   }
 
-  /** Build ticket grids from game state. */
+  /** Bygg bong-kort fra game state. Erstatter forrige sett. */
   buildTickets(state: GameState): void {
-    this.scroller.clearCards();
-    this.jackpotBar.setCurrentDrawCount(state.drawnNumbers.length);
+    this.clearBongs();
     this.lineAlreadyWon = false;
     this.bingoAlreadyWon = false;
+    this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
 
-    // Check if patterns already won
+    // Restore won-flags fra snapshot (late-joiner support).
     for (const result of state.patternResults) {
       if (result.isWon && result.claimType === "LINE") this.lineAlreadyWon = true;
       if (result.isWon && result.claimType === "BINGO") this.bingoAlreadyWon = true;
@@ -188,61 +181,52 @@ export class PlayScreen extends Container {
 
     for (let i = 0; i < state.myTickets.length; i++) {
       const ticket = state.myTickets[i];
-      const theme = getTicketThemeByName(ticket.color, i);
-      const card = new TicketCard(i, {
-        cardBg: theme.cardBg,
-        headerBg: theme.headerBg,
-        headerText: theme.headerText,
-        toGoColor: theme.toGoColor,
-        toGoCloseColor: theme.toGoCloseColor,
-        cellColors: theme.cellColors,
+      const card = new BongCard({
+        colorKey: "yellow", // Spill 2 har kun én ticket-type per PR #856.
+        label: ticket.color ?? `Brett ${i + 1}`,
+        price: ticket.price ?? state.entryFee ?? 20,
       });
-      card.loadTicket(ticket);
-
-      // Mark already drawn numbers
-      if (state.myMarks[i]) {
-        card.markNumbers(state.myMarks[i]);
-      } else {
-        // Fallback: mark from drawn numbers
-        for (const n of state.drawnNumbers) {
-          card.markNumber(n);
-        }
-      }
-
-      // Highlight lucky number
-      if (state.myLuckyNumber) {
-        card.highlightLuckyNumber(state.myLuckyNumber);
-      }
-
-      this.scroller.addCard(card);
+      const initialMarks = state.myMarks[i] ?? state.drawnNumbers;
+      card.loadTicket(ticket, initialMarks);
+      this.bongs.push(card);
+      this.bongGridContainer.addChild(card);
     }
 
-    this.scroller.sortBestFirst();
-    this.updatePageIndicator();
+    // Last lucky-number til Lykketall-grid (for late-joiner).
+    if (state.myLuckyNumber != null) {
+      this.comboPanel.setLuckyNumber(state.myLuckyNumber);
+    } else {
+      this.comboPanel.setLuckyNumber(null);
+    }
+
+    // Last alle drawn-balls inn i tuben (snapshot-restore).
+    this.ballTube.loadBalls(state.drawnNumbers);
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+    this.startCountdown(state.millisUntilNextStart);
+
+    this.layoutBongGrid();
     this.updateClaimButtons(state);
   }
 
-  /** Handle a newly drawn number. */
-  onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
-    this.scroller.markNumberOnAll(number);
-    this.drawnBalls.addBall(number);
-    // Jackpot-bar highlightes på matching slot (9-13 eller 14-21).
-    this.jackpotBar.setCurrentDrawCount(state.drawnNumbers.length);
+  /** Håndter ny trukket ball (fra `numberDrawn`-event). */
+  onNumberDrawn(number: number, _drawIndex: number, state: GameState): void {
+    for (const card of this.bongs) {
+      card.markNumber(number);
+    }
+    this.ballTube.addBall(number);
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+    this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
     this.audio.playNumber(number);
-    this.scroller.sortBestFirst();
+    this.startCountdown(state.millisUntilNextStart);
     this.updateClaimButtons(state);
-    this.updateInfo(state);
   }
 
-  /**
-   * 2026-05-02: oppdater jackpot-bar med ny prize-liste fra backend.
-   * Kalles fra Game2Controller på `g2:jackpot:list-update`-event.
-   */
+  /** Oppdater jackpot-prizer fra socket-event. */
   updateJackpot(list: JackpotSlotData[]): void {
-    this.jackpotBar.update(list);
+    this.comboPanel.updateJackpots(list);
   }
 
-  /** Handle pattern won broadcast. */
+  /** Pattern won broadcast — kalles fra controller. */
   onPatternWon(payload: PatternWonPayload): void {
     if (payload.claimType === "LINE") {
       this.lineAlreadyWon = true;
@@ -254,28 +238,75 @@ export class PlayScreen extends Container {
     }
   }
 
-  /** Update display from game state. */
+  /** State-oppdatering (player count, prize pool osv.). */
   updateInfo(state: GameState): void {
-    this.infoBar.update(
-      state.playerCount,
-      state.drawCount,
-      state.totalDrawCapacity,
-      state.prizePool,
-    );
-    this.luckyNumberText.text = state.myLuckyNumber
-      ? `Heldig tall: ${state.myLuckyNumber}`
-      : "";
+    // Combo-panel viser ikke spillere/pot direkte — de kan vises i
+    // jackpot-rad eller header senere. Her oppdaterer vi countdown +
+    // lucky-number for å speile state-endringer fra serveren.
+    if (state.myLuckyNumber != null) {
+      this.comboPanel.setLuckyNumber(state.myLuckyNumber);
+    }
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+    this.startCountdown(state.millisUntilNextStart);
   }
 
   /** Reset for next game. */
   reset(): void {
-    this.scroller.clearCards();
-    this.drawnBalls.clear();
-    this.jackpotBar.setCurrentDrawCount(0);
+    this.clearBongs();
+    this.ballTube.clear();
     this.lineBtn.reset();
     this.bingoBtn.reset();
     this.lineAlreadyWon = false;
     this.bingoAlreadyWon = false;
+    this.countdownDeadline = null;
+    this.ballTube.setCountdown(null);
+  }
+
+  destroy(options?: Parameters<Container["destroy"]>[0]): void {
+    if (this.countdownInterval !== null) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+    this.clearBongs();
+    super.destroy(options);
+  }
+
+  // ── interne ─────────────────────────────────────────────────────────────
+
+  private clearBongs(): void {
+    for (const card of this.bongs) {
+      card.stopAllAnimations();
+      card.destroy();
+    }
+    this.bongs = [];
+    this.bongGridContainer.removeChildren();
+  }
+
+  /**
+   * Layout 4 (eller flere) BongCards i et 2-kolonne-grid med scale 0.70,
+   * matching `.grid-wrap` fra HTML-mockupen. Kortene rendres i naturlig
+   * størrelse og bruker `scale.set(0.70)` så posisjoneringen blir
+   * forutsigbar.
+   */
+  private layoutBongGrid(): void {
+    if (this.bongs.length === 0) return;
+    // Kort-bredde og høyde i naturlig størrelse (vi spør første kort).
+    const naturalW = this.bongs[0].cardWidth;
+    const naturalH = this.bongs[0].cardHeight;
+    const scaledW = naturalW * BONG_SCALE;
+    const scaledH = naturalH * BONG_SCALE;
+    const cols = 2;
+    const rowW = cols * scaledW + (cols - 1) * BONG_GAP_X;
+    const startX = Math.max(0, (this.stageW - rowW) / 2);
+
+    for (let i = 0; i < this.bongs.length; i++) {
+      const card = this.bongs[i];
+      card.scale.set(BONG_SCALE);
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      card.x = startX + col * (scaledW + BONG_GAP_X);
+      card.y = row * (scaledH + BONG_GAP_Y);
+    }
   }
 
   private updateClaimButtons(state: GameState): void {
@@ -284,12 +315,52 @@ export class PlayScreen extends Container {
       state.myMarks,
       state.drawnNumbers,
     );
-
     if (canClaimLine && !this.lineAlreadyWon) {
       this.lineBtn.setState("ready");
     }
     if (canClaimBingo && !this.bingoAlreadyWon) {
       this.bingoBtn.setState("ready");
+    }
+  }
+
+  /**
+   * Sett ny countdown-deadline. Tikker ned hvert sekund via `tickCountdown`.
+   * `null`/0 viser "—:—".
+   */
+  private startCountdown(milliseconds: number | null): void {
+    if (milliseconds == null || milliseconds <= 0) {
+      this.countdownDeadline = null;
+      this.ballTube.setCountdown(null);
+      return;
+    }
+    this.countdownDeadline = Date.now() + milliseconds;
+    this.ballTube.setCountdown(milliseconds);
+  }
+
+  private tickCountdown(): void {
+    if (this.countdownDeadline == null) return;
+    const remaining = this.countdownDeadline - Date.now();
+    if (remaining <= 0) {
+      this.countdownDeadline = null;
+      this.ballTube.setCountdown(null);
+      return;
+    }
+    this.ballTube.setCountdown(remaining);
+  }
+
+  private async loadBackground(): Promise<void> {
+    try {
+      const tex = (await Assets.load(BG_URL)) as Texture;
+      if (this.destroyed) return;
+      const sprite = new Sprite(tex);
+      sprite.width = this.screenW;
+      sprite.height = this.screenH;
+      this.bgSprite = sprite;
+      this.addChildAt(sprite, 1); // over fallback, under panels
+      // Når PNG'en er på plass kan vi tillate fallback-rektangelet å
+      // forbli som "letter-box"-fyll bak — la den stå.
+    } catch {
+      // Asset mangler — vi beholder fallback-fargen.
     }
   }
 }
