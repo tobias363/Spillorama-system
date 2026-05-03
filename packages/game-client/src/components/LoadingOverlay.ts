@@ -35,14 +35,22 @@ export type LoadingState =
   | "DISCONNECTED"
   | "READY";
 
+/**
+ * Tobias-direktiv 2026-05-03: alle loading-states viser samme tekst —
+ * "Laster spill". Tidligere state-spesifikke meldinger (Kobler til /
+ * Finner runden / Henter rundedata / Syncer / etc.) er fjernet for å
+ * gi spilleren én enhetlig opplevelse uavhengig av underliggende
+ * socket/room/asset-fase.
+ */
+const LOADING_LABEL = "Laster spill";
 const DEFAULT_MESSAGES: Record<Exclude<LoadingState, "READY">, string> = {
-  CONNECTING: "Kobler til",
-  JOINING_ROOM: "Finner runden",
-  LOADING_ASSETS: "Laster spill",
-  SYNCING: "Henter rundedata",
-  RECONNECTING: "Kobler til igjen",
-  RESYNCING: "Oppdaterer spillet",
-  DISCONNECTED: "Frakoblet",
+  CONNECTING: LOADING_LABEL,
+  JOINING_ROOM: LOADING_LABEL,
+  LOADING_ASSETS: LOADING_LABEL,
+  SYNCING: LOADING_LABEL,
+  RECONNECTING: LOADING_LABEL,
+  RESYNCING: LOADING_LABEL,
+  DISCONNECTED: LOADING_LABEL,
 };
 
 /**
@@ -303,19 +311,23 @@ export class LoadingOverlay {
 
     // DISCONNECTED is terminal — no auto-recovery is in flight, so show the
     // Tobias-direktiv error fallback immediately rather than waiting for the
-    // stuck timer. A custom message wins over the default error text.
+    // stuck timer. Error-fallback bevarer ERROR_MESSAGE_DEFAULT-teksten
+    // (klikkbar reload). customMessage ignoreres — alle loading-states bruker
+    // samme tekst per Tobias-direktiv 2026-05-03.
     if (state === "DISCONNECTED") {
       this.exitErrorState(); // reset before re-entering so role/listener are fresh
-      this.labelText.textContent = customMessage ?? ERROR_MESSAGE_DEFAULT;
+      this.labelText.textContent = ERROR_MESSAGE_DEFAULT;
       this.backdrop.style.display = "block";
       this.enterErrorState();
       return;
     }
 
     // Non-READY recoverable: ensure overlay visible and any error-state cleared.
+    // customMessage ignoreres — kun "Laster spill" vises (Tobias 2026-05-03).
     this.exitErrorState();
-    this.labelText.textContent = customMessage ?? DEFAULT_MESSAGES[state];
+    this.labelText.textContent = LOADING_LABEL;
     this.backdrop.style.display = "block";
+    void customMessage; // explicitly mark as unused
 
     // For recoverable states, schedule the stuck-timer fallback. When it
     // fires we also swap the label to the explicit error copy so the user
