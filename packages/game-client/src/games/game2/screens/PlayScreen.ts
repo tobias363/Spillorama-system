@@ -44,6 +44,7 @@ import { BallTube } from "../components/BallTube.js";
 import { ComboPanel } from "../components/ComboPanel.js";
 import type { JackpotSlotData } from "../components/JackpotsRow.js";
 import { BuyPopup } from "../components/BuyPopup.js";
+import { LykketallPopup } from "../components/LykketallPopup.js";
 
 const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
 const STAGE_PADDING_X = 32;
@@ -66,6 +67,16 @@ export class PlayScreen extends Container {
   private bongs: BongCard[] = [];
   private bongGridContainer: Container;
   private buyPopup: BuyPopup;
+  // 2026-05-03 (Agent Y): popup som åpnes ved klikk på Lykketall-kolonnen
+  // i ComboPanel. Erstatter inline LykketallGrid i ComboPanel per
+  // Tobias-direktiv ("velg lykketall skal være en popup").
+  private lykketallPopup: LykketallPopup;
+  /**
+   * Sist kjent valgt lucky-number — speilet av `state.myLuckyNumber` slik at
+   * popup-en kan vise "current selection" når den åpnes uten å re-loade
+   * fra controller.
+   */
+  private currentLuckyNumber: number | null = null;
   private audio: AudioManager;
   private screenW: number;
   private screenH: number;
@@ -126,7 +137,9 @@ export class PlayScreen extends Container {
     // Foreløpig posisjon — settes endelig i `positionComboPanelBottom`
     // etter at vi vet panel-høyden.
     this.comboPanel.y = screenHeight - STAGE_PADDING_BOTTOM - this.comboPanel.height;
-    this.comboPanel.setOnLuckyNumber((n) => this.onLuckyNumber?.(n));
+    // setOnLuckyNumber er beholdt no-op for backward-compat; popup-flyt
+    // tar over (klikk på Lykketall-kolonnen → popup → onLuckyNumber).
+    this.comboPanel.setOnLuckyClick(() => this.lykketallPopup.show(this.currentLuckyNumber));
     this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
     this.addChild(this.comboPanel);
 
@@ -141,6 +154,19 @@ export class PlayScreen extends Container {
     this.buyPopup.y = (screenHeight - popupH) / 2;
     this.buyPopup.setOnBuy((count) => this.onBuyForNextRound?.(count));
     this.addChild(this.buyPopup);
+
+    // 2026-05-03 (Agent Y): lykketall-popup. Klikk på Lykketall-kolonnen i
+    // ComboPanel åpner denne; valg av nummer fyrer onLuckyNumber-callback
+    // og auto-lukker popup-en. Mountes ETTER buyPopup så den havner over
+    // i z-order ved samtidig synlighet (sjelden, men kan skje hvis bruker
+    // klikker rett mens buyPopup fader inn).
+    this.lykketallPopup = new LykketallPopup(screenWidth, screenHeight);
+    this.lykketallPopup.setOnPick((n) => {
+      this.currentLuckyNumber = n;
+      this.comboPanel.setLuckyNumber(n);
+      this.onLuckyNumber?.(n);
+    });
+    this.addChild(this.lykketallPopup);
 
     // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
     this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
@@ -214,11 +240,8 @@ export class PlayScreen extends Container {
     }
 
     // Last lucky-number til Lykketall-grid (for late-joiner).
-    if (state.myLuckyNumber != null) {
-      this.comboPanel.setLuckyNumber(state.myLuckyNumber);
-    } else {
-      this.comboPanel.setLuckyNumber(null);
-    }
+    this.currentLuckyNumber = state.myLuckyNumber ?? null;
+    this.comboPanel.setLuckyNumber(this.currentLuckyNumber);
 
     // Last alle drawn-balls inn i tuben (snapshot-restore).
     this.ballTube.loadBalls(state.drawnNumbers);
@@ -257,6 +280,7 @@ export class PlayScreen extends Container {
   /** State-oppdatering (player count, prize pool osv.). */
   updateInfo(state: GameState): void {
     if (state.myLuckyNumber != null) {
+      this.currentLuckyNumber = state.myLuckyNumber;
       this.comboPanel.setLuckyNumber(state.myLuckyNumber);
     }
     this.comboPanel.setPlayerCount(state.playerCount ?? 0);
