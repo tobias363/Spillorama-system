@@ -51,6 +51,7 @@ import type {
   MasterActor,
 } from "../game/Game1MasterControlService.js";
 import type { Game1HallReadyService } from "../game/Game1HallReadyService.js";
+import type { HallGroupService } from "../admin/HallGroupService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -68,6 +69,7 @@ export interface AgentGame1RouterDeps {
   platformService: PlatformService;
   masterControlService: Game1MasterControlService;
   hallReadyService: Game1HallReadyService;
+  hallGroupService: HallGroupService;
   pool: Pool;
   schema?: string;
 }
@@ -173,7 +175,13 @@ function resolveHallScope(
 export function createAgentGame1Router(
   deps: AgentGame1RouterDeps
 ): express.Router {
-  const { platformService, masterControlService, hallReadyService, pool } = deps;
+  const {
+    platformService,
+    masterControlService,
+    hallReadyService,
+    hallGroupService,
+    pool,
+  } = deps;
   const schema = (deps.schema ?? "public").trim();
   if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
     throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
@@ -231,6 +239,72 @@ export function createAgentGame1Router(
     }
   }
 
+  /**
+   * 2026-05-03 (Tobias UX): finn aktivt ELLER neste planlagte spill for
+   * hallen. Inkluderer `'scheduled'`-status i tillegg til de aktive
+   * (`purchase_open`/`ready_to_start`/`running`/`paused`) så agent-portal
+   * og cash-inout-dashbord alltid kan vise hall-status for kommende
+   * runde — ikke bare når en runde er live.
+   *
+   * Sortert ASC på `scheduled_start_time`, så nærmeste-i-tid får prioritet.
+   */
+  async function findActiveOrUpcomingGameForHall(
+    hallId: string
+  ): Promise<ActiveGameRow | null> {
+    try {
+      const { rows } = await pool.query<ActiveGameRow>(
+        `SELECT id, status, master_hall_id, group_hall_id,
+                participating_halls_json, sub_game_name, custom_game_name,
+                scheduled_start_time, scheduled_end_time,
+                actual_start_time, actual_end_time
+           FROM ${scheduledGamesTable}
+           WHERE (master_hall_id = $1
+              OR participating_halls_json::jsonb @> to_jsonb($1::text))
+             AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')
+           ORDER BY scheduled_start_time ASC
+           LIMIT 1`,
+        [hallId]
+      );
+      return rows[0] ?? null;
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code ?? "";
+      if (code === "42P01" || code === "42703") {
+        logger.debug(
+          { hallId, code },
+          "scheduled-games table missing; returning null"
+        );
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * 2026-05-03 (Tobias UX): hent alle halls i agentens group-of-halls.
+   * Brukes for å vise hall-status-pillen alltid — selv før noen game er
+   * spawn'et i scheduled-tabellen. Returnerer tom liste hvis hallen
+   * ikke er medlem av noen aktiv gruppe.
+   */
+  async function getGroupHallsForHall(
+    hallId: string
+  ): Promise<{ hallId: string; hallName: string }[]> {
+    try {
+      const groups = await hallGroupService.list({
+        status: "active",
+        hallId,
+      });
+      const group = groups[0];
+      if (!group) return [];
+      return group.members.map((m) => ({
+        hallId: m.hallId,
+        hallName: m.hallName,
+      }));
+    } catch (err) {
+      logger.debug({ hallId, err }, "getGroupHallsForHall failed");
+      return [];
+    }
+  }
+
   // ── GET /api/agent/game1/current-game ────────────────────────────────────
 
   router.get("/api/agent/game1/current-game", async (req, res) => {
@@ -240,13 +314,33 @@ export function createAgentGame1Router(
         typeof req.query.hallId === "string" ? req.query.hallId : undefined;
       const hallId = resolveHallScope(actor, queryHallId);
 
-      const active = await findActiveGameForHall(hallId);
+      // 2026-05-03 (Tobias UX): inkluder upcoming `scheduled`-game.
+      const active = await findActiveOrUpcomingGameForHall(hallId);
+
+      // Alltid hent group-halls slik at hall-list rendres uavhengig av
+      // om en game-rad finnes. Etter en runde er ferdig fortsetter
+      // hallene å vises (med status oransje = ikke klar).
+      const groupHalls = await getGroupHallsForHall(hallId);
+
       if (!active) {
+        // Ingen aktiv eller upcoming game spawn'et ennå. Returner
+        // hall-list med default isReady=false så UI kan rendre status-
+        // pillen for "neste planlagte spill" (placeholder).
+        const fallbackHalls = groupHalls.map((h) => ({
+          hallId: h.hallId,
+          hallName: h.hallName,
+          isReady: false,
+          readyAt: null as string | null,
+          digitalTicketsSold: 0,
+          physicalTicketsSold: 0,
+          excludedFromGame: false,
+          excludedReason: null as string | null,
+        }));
         apiSuccess(res, {
           hallId,
           currentGame: null,
           isMasterAgent: false,
-          halls: [],
+          halls: fallbackHalls,
           allReady: false,
         });
         return;
@@ -255,30 +349,56 @@ export function createAgentGame1Router(
       const isMasterAgent =
         actor.role === "ADMIN" || hallId === active.master_hall_id;
 
-      const halls = await hallReadyService.getReadyStatusForGame(active.id);
+      const readyRows = await hallReadyService.getReadyStatusForGame(active.id);
       const allReady = await hallReadyService.allParticipatingHallsReady(
         active.id
       );
 
-      // Berik hall-list med hall-name (soft-fail hvis ukjent).
+      // Bygg merge: alle group-halls + ready-status hvis registrert,
+      // ellers default isReady=false. participating_halls_json fra
+      // game-raden er kanonisk for "deltar i denne runden" — ekstra
+      // halls fra gruppen som IKKE deltar utelates ikke (de vises som
+      // ikke-klar). Dette matcher Tobias UX-ønske: alle haller alltid
+      // synlig så lenge gruppen er aktiv.
+      const readyByHallId = new Map(readyRows.map((r) => [r.hallId, r]));
+      const participatingIds = new Set(
+        parseHallIdsArray(active.participating_halls_json)
+      );
+      // Slå sammen group-halls + alle hall-IDer fra ready-rader
+      // (dekker edge case der ready-rad finnes for hall som ikke er
+      // i gruppen lenger).
+      const allHallIds = new Set<string>([
+        ...groupHalls.map((h) => h.hallId),
+        ...readyRows.map((r) => r.hallId),
+      ]);
+
       const hallsWithName = await Promise.all(
-        halls.map(async (h) => {
-          let hallName = h.hallId;
-          try {
-            const hall = await platformService.getHall(h.hallId);
-            hallName = hall.name;
-          } catch {
-            // soft-fail
+        Array.from(allHallIds).map(async (hid) => {
+          const ready = readyByHallId.get(hid);
+          const groupHall = groupHalls.find((g) => g.hallId === hid);
+          let hallName = groupHall?.hallName ?? hid;
+          if (!groupHall) {
+            try {
+              const hall = await platformService.getHall(hid);
+              hallName = hall.name;
+            } catch {
+              // soft-fail
+            }
           }
+          // Marker som ekskludert hvis hallen ikke er i
+          // participating_halls_json for den aktive runden.
+          const inRound = participatingIds.has(hid);
           return {
-            hallId: h.hallId,
+            hallId: hid,
             hallName,
-            isReady: h.isReady,
-            readyAt: h.readyAt,
-            digitalTicketsSold: h.digitalTicketsSold,
-            physicalTicketsSold: h.physicalTicketsSold,
-            excludedFromGame: h.excludedFromGame,
-            excludedReason: h.excludedReason,
+            isReady: ready?.isReady ?? false,
+            readyAt: ready?.readyAt ?? null,
+            digitalTicketsSold: ready?.digitalTicketsSold ?? 0,
+            physicalTicketsSold: ready?.physicalTicketsSold ?? 0,
+            excludedFromGame: ready?.excludedFromGame ?? !inRound,
+            excludedReason:
+              ready?.excludedReason ??
+              (inRound ? null : "Ikke deltaker i denne runden"),
           };
         })
       );

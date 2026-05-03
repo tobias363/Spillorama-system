@@ -572,7 +572,39 @@ function render(container: HTMLElement): void {
 
 function renderSpill1Block(): string {
   const spill1 = state.spill1;
-  if (!spill1 || !spill1.currentGame) return "";
+  if (!spill1) return "";
+  // 2026-05-03 (Tobias UX): vis alltid hall-status for hallene i gruppen,
+  // selv når ingen runde er aktiv. Etter en runde ferdig fortsetter
+  // hallene å vises (oransje = ikke klar) så agenter har kontinuerlig
+  // oversikt over neste planlagte spill.
+  if (!spill1.currentGame) {
+    if (spill1.halls.length === 0) return "";
+    const hallPills = spill1.halls
+      .map((h) => {
+        const color = h.excludedFromGame
+          ? "#aaa"
+          : h.isReady
+          ? "#5cb85c"
+          : "#f0ad4e";
+        const label = escapeHtml(h.hallName);
+        return `<span style="display:inline-block;margin:4px 8px 4px 0;padding:4px 10px;border-radius:12px;background:${color};color:#fff;font-size:13px;">${label}</span>`;
+      })
+      .join("");
+    return `
+      <section data-marker="spill1-block-upcoming">
+        <div class="box box-default">
+          <div class="box-header with-border">
+            <h3 class="box-title">Spill 1 — venter på neste runde</h3>
+          </div>
+          <div class="box-body">
+            <p class="text-muted small" style="margin-bottom:8px;">
+              Hall-status for neste planlagte spill (oppdateres når runden spawnes).
+            </p>
+            <div data-marker="spill1-upcoming-hall-list">${hallPills}</div>
+          </div>
+        </div>
+      </section>`;
+  }
   const statusHtml = renderSpill1AgentStatus({
     currentGame: spill1.currentGame,
     halls: spill1.halls,

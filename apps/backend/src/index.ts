@@ -2286,6 +2286,7 @@ app.use(createAgentGame1Router({
   platformService,
   masterControlService: game1MasterControlService,
   hallReadyService: game1HallReadyService,
+  hallGroupService,
   pool: platformService.getPool(),
 }));
 // 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): Spill 2 Choose Tickets-side.

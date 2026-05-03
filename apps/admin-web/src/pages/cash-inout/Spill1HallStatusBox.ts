@@ -253,10 +253,39 @@ function render(container: HTMLElement, state: BoxState): void {
   }
 
   const data = state.data;
-  if (!data || !data.currentGame) {
+  if (!data) {
     container.innerHTML = `
       <div class="box-body cashinout-empty-placeholder">
         <p class="text-muted text-center">Ingen kommende spill tilgjengelig…</p>
+      </div>`;
+    return;
+  }
+
+  // 2026-05-03 (Tobias UX): vis alltid hall-status for hallene i gruppen,
+  // selv når ingen runde er aktiv eller spawn'et i scheduled-tabellen.
+  // Etter en runde ferdig fortsetter hallene å vises (med status oransje
+  // = ikke klar) så agentene har kontinuerlig oversikt over neste runde.
+  if (!data.currentGame) {
+    if (data.halls.length === 0) {
+      container.innerHTML = `
+        <div class="box-body cashinout-empty-placeholder">
+          <p class="text-muted text-center">Ingen kommende spill tilgjengelig…</p>
+        </div>`;
+      return;
+    }
+    const hallsHtml = renderHallList(data.halls, data.hallId);
+    container.innerHTML = `
+      <div class="box-header with-border">
+        <h3 class="box-title">Spill 1 — venter på neste runde</h3>
+      </div>
+      <div class="box-body">
+        <p class="text-muted small" style="margin-bottom: 12px;">
+          Hall-status for neste planlagte spill. Status oppdateres når
+          runden spawnes.
+        </p>
+        <div class="spill1-hall-list" data-marker="spill1-hall-list">
+          ${hallsHtml}
+        </div>
       </div>`;
     return;
   }
