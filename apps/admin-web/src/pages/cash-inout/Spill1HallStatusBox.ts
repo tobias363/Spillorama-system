@@ -295,12 +295,16 @@ function render(container: HTMLElement, state: BoxState): void {
   const isMaster = data.isMasterAgent;
   const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
 
-  // Master-knapper: Start aktiv så lenge status=purchase_open eller
-  // ready_to_start. Hvis ikke alle haller er klare, klikk-handler viser
-  // bekreftelse + ekskluderer ikke-klare haller (Tobias UX 2026-05-02).
+  // Master-knapper: Start aktiv under scheduled/purchase_open/ready_to_start.
+  // 2026-05-03 (Tobias UX): tillat 'scheduled' så master kan forsere
+  // start uten å vente på cron-promotering. Hvis ikke alle haller er
+  // klare, klikk-handler viser bekreftelse + ekskluderer ikke-klare
+  // haller (PR #847 confirmUnreadyHalls).
   const canStart =
     isMaster &&
-    (game.status === "ready_to_start" || game.status === "purchase_open");
+    (game.status === "scheduled" ||
+      game.status === "ready_to_start" ||
+      game.status === "purchase_open");
   const canResume = isMaster && game.status === "paused";
   const canStop =
     isMaster && (game.status === "running" || game.status === "paused");

@@ -79,9 +79,13 @@ export function renderSpill1AgentControls(
       </div>`;
   }
 
+  // 2026-05-03 (Tobias UX): master kan starte under scheduled / purchase_open /
+  // ready_to_start uavhengig av om alle haller er klare. Backend's
+  // confirmUnreadyHalls-flow ekskluderer ikke-klare haller automatisk.
   const canStart =
+    currentGame.status === "scheduled" ||
     currentGame.status === "ready_to_start" ||
-    (currentGame.status === "purchase_open" && allReady);
+    currentGame.status === "purchase_open";
   const canResume = currentGame.status === "paused";
   const excludedNotice =
     excludedHallIds.length > 0
