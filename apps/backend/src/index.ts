@@ -96,10 +96,14 @@ import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 // per hall-id; ScheduleService duck-typer mot Spill1PrizeDefaultsLookup.
 import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+import { Game2AutoDrawTickService } from "./game/Game2AutoDrawTickService.js";
+import { Game3AutoDrawTickService } from "./game/Game3AutoDrawTickService.js";
 import { Game1TransferHallService } from "./game/Game1TransferHallService.js";
 import { Game1TransferExpiryTickService } from "./game/Game1TransferExpiryTickService.js";
 import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
+import { createGame2AutoDrawTickJob } from "./jobs/game2AutoDrawTick.js";
+import { createGame3AutoDrawTickJob } from "./jobs/game3AutoDrawTick.js";
 import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
 import { createIdempotencyKeyCleanupJob } from "./jobs/idempotencyKeyCleanup.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
@@ -1931,6 +1935,40 @@ jobScheduler.register({
   intervalMs: jobGame1AutoDrawIntervalMs,
   enabled: jobGame1AutoDrawEnabled,
   run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
+});
+
+// Spill 2/3 auto-draw-tick (Tobias-direktiv 2026-05-03):
+//   "Spill 2/3 har perpetual auto-restart, men ingen baller ble trukket."
+// Game1AutoDrawTickService dekker kun scheduled Spill 1-spill (DB-drevet
+// via app_game1_scheduled_games). Spill 2 og 3 kjøres som in-memory
+// BingoEngine-rom og hadde ingen tilsvarende cron — så når
+// PerpetualRoundService startet en ny runde, sto den stille.
+//
+// Re-bruker `autoDrawIntervalEnvOverrideMs` (env: AUTO_DRAW_INTERVAL_MS,
+// default 30000) som draw-intervall, og samme tick-polling som Game 1
+// (`jobGame1AutoDrawIntervalMs`, default 1000 ms) som polling-rate.
+// Default ON — Spill 2/3 må trekke baller for å fungere.
+const game2AutoDrawTickService = new Game2AutoDrawTickService({
+  engine,
+  drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+});
+const game3AutoDrawTickService = new Game3AutoDrawTickService({
+  engine,
+  drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+});
+jobScheduler.register({
+  name: "game2-auto-draw-tick",
+  description: "Trigger drawNext() for running Spill 2 (rocket / game_2 / tallspill)-rom. Driver perpetual-loopen.",
+  intervalMs: jobGame1AutoDrawIntervalMs,
+  enabled: jobGame1AutoDrawEnabled,
+  run: createGame2AutoDrawTickJob({ service: game2AutoDrawTickService }),
+});
+jobScheduler.register({
+  name: "game3-auto-draw-tick",
+  description: "Trigger drawNext() for running Spill 3 (monsterbingo / mønsterbingo / game_3)-rom. Driver perpetual-loopen.",
+  intervalMs: jobGame1AutoDrawIntervalMs,
+  enabled: jobGame1AutoDrawEnabled,
+  run: createGame3AutoDrawTickJob({ service: game3AutoDrawTickService }),
 });
 
 // Task 1.6: runtime master-overføring — service + expiry-tick. Expiry-tick
