@@ -385,9 +385,12 @@ function renderOwnHallButtons(
   if (!ownHall) {
     return "";
   }
-  // Knapper er kun aktive mens runden tar imot ready/exclude-endringer.
+  // 2026-05-03 (Tobias UX): tillat også 'scheduled' så agenter kan
+  // markere klar/exclude tidlig (før cron promoter til 'purchase_open').
   const editable =
-    gameStatus === "purchase_open" || gameStatus === "ready_to_start";
+    gameStatus === "scheduled" ||
+    gameStatus === "purchase_open" ||
+    gameStatus === "ready_to_start";
 
   const readyBtn = ownHall.isReady
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
