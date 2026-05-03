@@ -57,16 +57,23 @@ export const BINGO75_SLUGS: ReadonlySet<string> = new Set(["bingo", "game_1"]);
 export const GAME2_SLUGS: ReadonlySet<string> = new Set(["game_2", "rocket", "tallspill"]);
 
 /**
- * 2026-05-03 (Tobias direktiv): Game 3 (Mønsterbingo / Spill 3) bruker nå
- * **3×3 / 1..21**-bonger — samme runtime-mekanikk som Spill 2 men med Spill 1's
- * visuelle stil. Hybrid: Spill 2's tickets/draws/ball-range + Spill 1's design.
+ * BIN-615 / PR-C3: Game slugs that use 5×5 1..75 tickets **without** free centre
+ * (Mønsterbingo / Game 3).
  *
- * Tidligere (BIN-615 / PR-C3, 2026-04-23): Game 3 brukte 5×5 / 1..75 uten fri
- * sentercelle. Den varianten er nå **deprecated** for `monsterbingo`-slug men
- * `generate5x5NoCenterTicket` beholdes som dead code i tilfelle Tobias
- * ombestemmer seg eller vi får et nytt 5×5-spill senere.
+ * 2026-05-03 (Tobias direktiv revert): Etter en kortvarig 3×3-port (PR #860)
+ * er Spill 3 nå tilbake til 5×5 / 1..75 uten fri sentercelle. Forskjellen fra
+ * Spill 1 er at Spill 3 har KUN ÉN ticket-type ("Standard") — Spill 1 har 8
+ * farger. Patterns (Row 1-4 + Coverall) og draw-mekanikk er identisk med Spill 1.
  *
- * `mønsterbingo` (med ø) er admin-UI-skrivemåten; `game_3` er legacy-formen.
+ * Per Tobias 2026-05-03: "75 baller og 5x5 bonger uten free i midten. Alt av
+ * design skal være likt [Spill 1] bare at her er det kun 1 type bonger og man
+ * spiller om mønstre."
+ *
+ * Legacy ref: `Helper/bingo.js:1014-1031` — `data.slug == 'game_3'` produces a
+ * flat array of 25 unique numbers per BINGO column (no free space). The slug
+ * `monsterbingo` is the canonical Norwegian name; `mønsterbingo` (with ø) is
+ * accepted as an alias because the admin UI may surface the native spelling.
+ * Legacy uses `slug: 'game_3'` (see gamehelper/game3.js:109).
  *
  * Disse aliasene er sentralt definert her slik at både ticket-generering
  * (`generateTicketForGame`), engine-guards (`Game3Engine.isGame3Round`) og
@@ -112,34 +119,28 @@ export function uses75Ball(gameSlug: string | null | undefined): boolean {
 /**
  * True if a room/game with this slug should use the 3×3 / 1..21 format.
  *
- * 2026-05-03: omfatter nå både Spill 2 (`rocket` / `tallspill`) og Spill 3
- * (`monsterbingo` / `mønsterbingo` / `game_3`) — begge spill bruker samme
- * 3×3 1..21-ticket-shape. Differensieringen mellom dem skjer i engine-laget
- * (Game2Engine vs. Game3Engine) og i visuell stil på klienten.
+ * Brukes KUN for Spill 2 (`rocket` / `tallspill` / `game_2`). Spill 3
+ * (`monsterbingo`) har egen 5×5-routing via `uses5x5NoCenterTicket`.
  */
 export function uses3x3Ticket(gameSlug: string | null | undefined): boolean {
-  const slug = gameSlug ?? "";
-  return GAME2_SLUGS.has(slug) || GAME3_SLUGS.has(slug);
+  return GAME2_SLUGS.has(gameSlug ?? "");
 }
 
 /**
- * **DEPRECATED 2026-05-03** — Spill 3 (Mønsterbingo) bruker ikke lenger 5×5
- * 1..75-bonger. Denne returnerer nå alltid `false` for kjente Spill 3-slugs.
+ * True if a room/game with this slug should use the 5×5 / 1..75 format
+ * **without** free centre cell (Spill 3 / Mønsterbingo).
  *
- * Beholdes som hjelper i tilfelle vi får et nytt 5×5-spill (utenfor Spill
- * 1-3) som trenger samme generator. Alle nåværende kallsteder (engine-
- * guards, integration tests) må migreres til `uses3x3Ticket`.
+ * 2026-05-03 (revert): etter PR #860 som kortvarig portet til 3×3 er
+ * Spill 3 tilbake til 5×5. Tobias-direktiv: "75 baller og 5x5 bonger
+ * uten free i midten."
  *
- * Tidligere kontrakt (BIN-615 / PR-C3, 2026-04-23): true for
- * `monsterbingo` / `mønsterbingo` / `game_3`. Det var korrekt for den gamle
- * 5×5-varianten av Mønsterbingo som nå er erstattet av 3×3 (Tobias-direktiv).
+ * Forskjell fra Spill 1: Spill 3 bruker `generate5x5NoCenterTicket` som
+ * IKKE har gratis sentercelle, mens `generateBingo75Ticket` har det.
+ * Det er den eneste strukturelle ticket-forskjellen — patterns + draws
+ * fungerer ellers identisk.
  */
 export function uses5x5NoCenterTicket(gameSlug: string | null | undefined): boolean {
-  // Eksplisitt tom — alle kjente kallsteder er migrert. Funksjonen beholdes
-  // for typescriptual safety (callere som fortsatt importerer den vil få
-  // false i stedet for ReferenceError) og for fremtidige 5×5-spill.
-  void gameSlug;
-  return false;
+  return GAME3_SLUGS.has(gameSlug ?? "");
 }
 
 /**
@@ -147,8 +148,9 @@ export function uses5x5NoCenterTicket(gameSlug: string | null | undefined): bool
  *
  * - 75-ball games (Game 1 / "bingo"): 5x5 grid with free centre cell.
  * - Game 2 (Tallspill / Spill 2): 3×3 grid with 9 unique picks from 1..21.
- * - Game 3 (Mønsterbingo / Spill 3): 3×3 grid with 9 unique picks from 1..21
- *   (2026-05-03 — Tobias-direktiv: hybrid Spill 2-runtime + Spill 1-stil).
+ * - Game 3 (Mønsterbingo / Spill 3): 5×5 grid with 25 unique picks from 1..75
+ *   in B/I/N/G/O column ranges, **WITHOUT** free centre cell. (Revertert
+ *   2026-05-03 etter PR #860 som kortvarig portet til 3×3.)
  * - Databingo60: 3x5 grid (explicit opt-in via `databingo` slug).
  *
  * BIN-672: Previously any unknown slug silently fell through to
@@ -162,9 +164,8 @@ export function uses5x5NoCenterTicket(gameSlug: string | null | undefined): bool
  * a gap — fix the caller, don't catch the error.
  *
  * Use this everywhere a ticket is created so the format stays consistent
- * with `uses75Ball` / `uses3x3Ticket` / `usesDatabingo60` and the engine's
- * draw-bag selection. `uses3x3Ticket` matches BÅDE Spill 2 og Spill 3 etter
- * 2026-05-03-endringen — engine-laget skiller mellom dem.
+ * with `uses75Ball` / `uses3x3Ticket` / `uses5x5NoCenterTicket` /
+ * `usesDatabingo60` and the engine's draw-bag selection.
  */
 export function generateTicketForGame(
   gameSlug: string,
@@ -172,6 +173,7 @@ export function generateTicketForGame(
   type?: string,
 ): Ticket {
   if (uses3x3Ticket(gameSlug)) return generate3x3Ticket(color, type);
+  if (uses5x5NoCenterTicket(gameSlug)) return generate5x5NoCenterTicket(color, type);
   if (uses75Ball(gameSlug)) return generateBingo75Ticket(color, type);
   if (usesDatabingo60(gameSlug)) return generateDatabingo60Ticket();
   throw new DomainError(
@@ -235,19 +237,16 @@ export function generate3x3Ticket(color?: string, type?: string): Ticket {
 }
 
 /**
- * **DEPRECATED 2026-05-03** — Spill 3 (Mønsterbingo) bruker ikke lenger denne
- * 5×5-varianten. Beholdt som dead code i tilfelle vi får et nytt 5×5-spill.
+ * BIN-615 / PR-C3: Game 3 (Mønsterbingo) ticket — 5×5 grid of 25 unique
+ * numbers in BINGO column ranges (B:1-15, I:16-30, N:31-45, G:46-60,
+ * O:61-75). **No free centre cell** — the (2,2) position holds a normal
+ * N-column number.
  *
- * Tidligere kontrakt (BIN-615 / PR-C3, 2026-04-23): Game 3 (Mønsterbingo)
- * ticket — 5×5 grid of 25 unique numbers in BINGO column ranges (B:1-15,
- * I:16-30, N:31-45, G:46-60, O:61-75). **No free centre cell** — the (2,2)
- * position holds a normal N-column number.
+ * 2026-05-03: revertert (etter PR #860) til denne 5×5-formen per
+ * Tobias-direktiv: "75 baller og 5x5 bonger uten free i midten."
  *
- * Per Tobias-direktiv 2026-05-03 ble Spill 3 portet til 3×3 / 1..21 (samme
- * runtime som Spill 2). Den gamle 5×5-funksjonen returnerer fortsatt et
- * gyldig 5×5-brett dersom kallet eksplisitt rutes hit, men `generateTicketForGame`
- * kaller den IKKE lenger for `monsterbingo`-slug — den ruter via
- * `uses3x3Ticket` til `generate3x3Ticket`.
+ * Forskjell fra Spill 1's `generateBingo75Ticket`: ingen gratis sentercelle
+ * — alle 25 cellene er ekte tall som må markeres for Coverall-vinst.
  */
 export function generate5x5NoCenterTicket(color?: string, type?: string): Ticket {
   const columns = [

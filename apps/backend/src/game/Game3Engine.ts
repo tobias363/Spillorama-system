@@ -1,48 +1,67 @@
 /**
- * 2026-05-03 (Tobias-direktiv): Game 3 (Mønsterbingo / Spill 3) engine —
- * **3×3 / 1..21**-hybrid av Spill 2's runtime + Spill 1's visuelle stil.
+ * BIN-615 / PR-C3b: Game 3 (Mønsterbingo / Spill 3) engine — extends BingoEngine
+ * to add pattern-driven auto-claim-on-draw behaviour for the 5×5 / 1..75 /
+ * no-free-centre variant.
  *
- * Tidligere (BIN-615 / PR-C3b, 2026-04-23) brukte Game 3 5×5 / 1..75 med
- * pattern-cycler (Row 1-4 + Coverall). Den varianten er nå **erstattet** —
- * Spill 3 har samme runtime-mekanikk som Spill 2 (full-3×3 winner predicate,
- * auto-claim-on-draw, ETT globalt rom). Forskjellen mellom G2 og G3 ligger i:
- *   - **Slug**: G3 = `monsterbingo` / `mønsterbingo` / `game_3`, G2 = `rocket` osv.
- *   - **Jackpot-tabell**: G2 har `jackpotNumberTable` (per-draw-bucket-prizes),
- *     G3 har det IKKE (bruker en fast pool-prosent for vinneren).
- *   - **Visuell stil**: G3-klient bruker Spill 1's design (egen PR-del).
+ * 2026-05-03 (revert): Spill 3 ble kortvarig portet til 3×3 / 1..21 i PR #860,
+ * men er nå **revertert** til 5×5 / 1..75-form per Tobias-direktiv. Forskjellen
+ * fra Spill 1 er at Spill 3 har KUN ÉN ticket-type ("Standard") — Spill 1 har
+ * 8 farger. Patterns (Row 1-4 + Coverall) og draw-mekanikk er identisk med
+ * Spill 1's BingoEngine-logikk for pattern-evaluering.
  *
- * Per Tobias 2026-05-03:
- *   "Spill 2 og 3 har ETT globalt rom. Ingen group-of-halls, ingen master/
- *    start/stop. Aldri stopper — utbetal gevinst → fortsetter automatisk.
- *    Kun digitale bonger."
+ * Per Tobias 2026-05-03 (revert-direktiv):
+ *   "75 baller og 5x5 bonger uten free i midten. Alt av design skal være likt
+ *    [Spill 1] bare at her er det kun 1 type bonger og man spiller om mønstre.
+ *    Logikken med å trekke baller og markere bonger er fortsatt helt lik."
  *
- * **Perpetual loop**: når Coverall vinnes utbetales gevinst og rommet
- * markeres `ENDED`. En egen scheduler/tick (utenfor engine) skal trigge ny
- * runde — engine eksponerer signal via `lastDrawEffectsByRoom`-effekten
- * (`gameEnded: true, endedReason: "G3_FULL_HOUSE"`) som socket-laget
- * konsumerer. Implementering av selve auto-restart-tikket er **scope-cut for
- * denne PR-en** — fundamentet (engine-API + ENDED-signal) er på plass.
+ * Non-G3 rooms are untouched: the override guard `isGame3Round(...)` returns
+ * early for every round that doesn't carry the G3 variantConfig + slug combo,
+ * so G1 manual-claim semantics survive unchanged. Game 2 is a sibling subclass
+ * (also extends BingoEngine) and is mutually exclusive with Game 3 at the
+ * room-slug level, so the two hooks never fire in the same process for the
+ * same room.
  *
- * Non-G3 rooms er uberørt: `isGame3Round(...)` returnerer tidlig for hver
- * runde som ikke har G3-slug-kombinasjonen. Game 2 (Spill 2) har sin egen
- * separate engine-subklasse og deler ikke kode-path med G3 — selv om begge
- * bruker `hasFull3x3` som vinner-predicate.
+ * Perpetual loop (PR #863 + #868) er fortsatt aktiv: når Coverall vinnes
+ * signaliserer engine `endedReason: "G3_FULL_HOUSE"` og PerpetualRoundService
+ * scheduler ny runde automatisk.
  *
- * Legacy 5×5-cycler-kode (PatternCycler, processG3Winners, buildPatternSpecs)
- * er fjernet i denne refaktoreringen — den var bundet til 5×5-grid og hadde
- * ingen meningsfull rolle i 3×3-modellen. Hvis Tobias ombestemmer seg eller
- * vi får et nytt 5×5-mønsterspill kan logikken hentes fra git-historikk.
+ * Legacy references:
+ *   - gamehelper/game3.js:663-708 — createGameData (flatten patterns per round)
+ *   - gamehelper/game3.js:724-848 — evaluatePatternsAndUpdateGameData (cycler)
+ *   - gamehelper/game3.js:851-867 — getPatternToCheckWinner (row priority)
+ *   - gamehelper/game3.js:870-1033 — processPatternWinners (split + payouts)
+ *   - Game/Game3/Controllers/GameProcess.js:215-375 — checkForWinners loop
+ *   - Helper/bingo.js:1197-1356 — per-ticket pattern pre-compute (replaced by
+ *     PatternMatcher bitmask on-the-fly)
+ *
+ * Socket-event emission lives in `sockets/gameEvents.ts` via
+ * {@link Game3Engine.getG3LastDrawEffects} — same atomic read-and-clear pattern
+ * as Game2Engine.
  */
 
 import { randomUUID } from "node:crypto";
 import { BingoEngine } from "./BingoEngine.js";
 import { IdempotencyKeys } from "./idempotency.js";
+import {
+  PatternCycler,
+  type PatternSpec,
+  type CyclerStep,
+} from "./PatternCycler.js";
+import {
+  buildTicketMask,
+  getBuiltInPatternMasks,
+  isFullHouse,
+  matchesAny,
+  FULL_HOUSE_MASK,
+} from "./PatternMatcher.js";
+import type { PatternMask } from "@spillorama/shared-types";
+import { uses5x5NoCenterTicket } from "./ticket.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
-import { hasFull3x3, GAME3_SLUGS } from "./ticket.js";
 import type {
   ClaimRecord,
   GameState,
+  PatternDefinition,
   Player,
   RoomState,
 } from "./types.js";
@@ -52,46 +71,41 @@ import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 
 const logger = rootLogger.child({ module: "engine.game3" });
 
-/**
- * Andel av prize-pool som utbetales til Coverall-vinneren når
- * `variantConfig.luckyNumberPrize` ikke er satt og det ikke finnes en
- * eksplisitt `patterns[].prizePercent`. Tilsvarer Spill 2's tilnærming der
- * full-bong-vinneren får (omtrent) hele potten innenfor RTP-budget og
- * single-prize-cap. Verdien er konservativ — admin kan overstyre via
- * `variantConfig.patterns[0].prizePercent` (først element brukes).
- */
-const DEFAULT_G3_COVERALL_PRIZE_PERCENT = 80;
+// ── Per-draw side-effect shape ──────────────────────────────────────────────
 
 /**
- * Per-draw G3 side-effects publisert til socket-laget.
+ * Per-draw G3 side-effects published to the socket layer.
  *
- * Populeres av {@link Game3Engine.onDrawCompleted}, drenes atomisk av
- * {@link Game3Engine.getG3LastDrawEffects}. Wire-shape er bevart fra den
- * gamle 5×5-implementasjonen for å minimere bredde-endringer i socket-
- * eventene — `patternSnapshot` inneholder nå EN entry (Coverall) i stedet
- * for opptil 5 (Row 1-4 + Full House).
+ * Populated by {@link Game3Engine.onDrawCompleted}, drained atomically by
+ * {@link Game3Engine.getG3LastDrawEffects}. The socket handler reads this AFTER
+ * `drawNextNumber` returns and emits:
+ *   - `g3:pattern:changed`  — when `patternsChanged === true`
+ *   - `g3:pattern:auto-won` — once per winning pattern (broadcast + per-winner)
+ *
+ * `gameEnded` is true iff a Full House winner was found on this draw.
  */
 export interface G3DrawEffects {
   roomCode: string;
   gameId: string;
   drawIndex: number;
   lastBall: number;
-  /** True når Coverall-pattern endret state (vunnet) på denne trekningen. */
+  /** True when the active-pattern set changed this draw (activate or deactivate). */
   patternsChanged: boolean;
-  /** Singleton-array med Coverall-snapshot — wire-kompatibilitet med eldre klienter. */
+  /** Full snapshot of all patterns after this draw — Row payloads use this. */
   patternSnapshot: G3PatternSnapshot[];
-  /** Non-empty når Coverall ble vunnet på denne trekningen. */
+  /** Non-empty when any pattern had winners this draw. */
   winners: G3WinnerRecord[];
-  /** True når Coverall vant og runden endte. */
+  /** True when a Full House was won and the round ended. */
   gameEnded: boolean;
-  /** Settes når gameEnded; "G3_FULL_HOUSE" alltid. */
+  /** Set when gameEnded; "G3_FULL_HOUSE" currently. */
   endedReason?: string;
 }
 
 /**
- * Wire-shape pattern-snapshot. Beholdes for backward-kompat med klienter som
- * leser `g3:pattern:changed`. For 3×3-Spill 3 er dette alltid en singleton
- * med Coverall (full bong) som eneste pattern.
+ * Wire-shape pattern snapshot used in `g3:pattern:changed`. Mirrors legacy
+ * `PatternChange.patterns[*]` minus the 2D-array `patternDataList`
+ * (we keep the 25-bit mask in memory and surface it as a flat 25-cell array
+ * for wire compatibility).
  */
 export interface G3PatternSnapshot {
   id: string;
@@ -100,11 +114,9 @@ export interface G3PatternSnapshot {
   isFullHouse: boolean;
   isWon: boolean;
   design: number;
-  /**
-   * Pattern-mask som flat array. For 3×3-Spill 3 er dette en 9-celle full-
-   * mask (alle 1-er). Beholder `number[]` shape for wire-kompat.
-   */
+  /** 25-cell 0/1 bitmask (row-major). For Row 1-4 the mask shown is the first in the set. */
   patternDataList: number[];
+  /** Resolved prize for this pattern at current pool state (display only). */
   amount: number;
 }
 
@@ -112,9 +124,9 @@ export interface G3WinnerRecord {
   patternId: string;
   patternName: string;
   isFullHouse: boolean;
-  /** Premie per (ticket, pattern)-vinner etter split. */
+  /** Split prize paid per (ticket, pattern) winner. */
   pricePerWinner: number;
-  /** Én entry per (player, ticket) som matchet pattern på denne trekningen. */
+  /** One entry per (player, ticket) that matched this pattern this draw. */
   ticketWinners: G3TicketWinner[];
 }
 
@@ -127,29 +139,22 @@ export interface G3TicketWinner {
   luckyBonus: number;
 }
 
-/**
- * Identifier for "Coverall"-pattern i wire-snapshots. Eksportert så socket-
- * tester kan referere stabilt navn uten magiske strenger.
- */
-export const G3_COVERALL_PATTERN_ID = "g3-coverall";
-export const G3_COVERALL_PATTERN_NAME = "Coverall";
-
-/**
- * Hele 9-celle full-bong-mask som flat array for wire-emission. Beholdes
- * eksportert for bruk i tester og potensielle integrasjoner.
- */
-export const G3_3X3_FULL_MASK_FLAT: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1];
+// ── Engine ──────────────────────────────────────────────────────────────────
 
 export class Game3Engine extends BingoEngine {
+  /** Per-room pattern cycler, built lazily on the first draw of each G3 round. */
+  private readonly cyclersByRoom = new Map<string, PatternCycler>();
+  /** Per-room gameId the cycler was built for — reset when a new round starts. */
+  private readonly cyclerGameIdByRoom = new Map<string, string>();
   /**
-   * Atomisk read-and-clear stash for per-draw G3 effekter — socket-laget
-   * konsumerer via {@link getG3LastDrawEffects} etter `drawNextNumber`.
+   * Atomic read-and-clear stash for per-draw G3 effects — socket layer consumes
+   * via {@link getG3LastDrawEffects} after `drawNextNumber` returns.
    */
   private readonly lastDrawEffectsByRoom = new Map<string, G3DrawEffects>();
 
   /**
-   * Public reader for socket-laget. Returnerer `undefined` når siste
-   * trekning ikke var en G3-trekning (eller effektene allerede er konsumert).
+   * Public reader for the socket layer. Returns undefined when the last draw
+   * was not a G3 draw (or the effects have already been consumed).
    */
   getG3LastDrawEffects(roomCode: string): G3DrawEffects | undefined {
     const effects = this.lastDrawEffectsByRoom.get(roomCode);
@@ -158,10 +163,14 @@ export class Game3Engine extends BingoEngine {
   }
 
   /**
-   * Override av BingoEngine sin draw-completed-hook:
-   *   - Non-G3 rooms → fall through (super-implementasjonen kjører normalt)
-   *   - G3 rooms     → skann tickets for full 3×3, auto-claim + split,
-   *                    avslutt rund når Coverall lander.
+   * BIN-615 / PR-C3b hook override:
+   *   - Non-G3 rooms → fall through (preserves G1 manual-claim semantics).
+   *   - G3 rooms     → step cycler, scan tickets, auto-claim + split, end on Full House.
+   *
+   * Calls `super.onDrawCompleted` so any future base-class default hook still
+   * runs. Game 2 is a sibling subclass (not a base), so its 3×3 logic is never
+   * reachable from this override — rooms must be a Game 2 OR Game 3 instance,
+   * never both.
    */
   protected async onDrawCompleted(ctx: {
     room: RoomState;
@@ -174,254 +183,310 @@ export class Game3Engine extends BingoEngine {
     const { room, game, lastBall, drawIndex, variantConfig } = ctx;
     if (!this.isGame3Round(room, variantConfig)) return;
 
-    // Spill 3 evaluerer Coverall etter HVER trekning. Det finnes ingen
-    // minste-antall-baller-grense (i motsetning til Spill 2's
-    // GAME2_MIN_DRAWS_FOR_CHECK = 9 før jackpot-evaluering kicker inn) —
-    // teoretisk sett kan en Coverall lande på allerede første trekning hvis
-    // bingo-ticket inneholder kun 1 unik tall, men praktisk vil den lande
-    // tidligst etter at alle 9 cellene er trukket.
-    const prizePercent = this.resolveCoverallPrizePercent(variantConfig!);
-    const candidates = this.findG3Winners(room, game);
-    if (candidates.length === 0) {
-      // Ingen vinnere denne trekningen — publiser snapshot uten winners.
-      this.lastDrawEffectsByRoom.set(room.code, {
-        roomCode: room.code,
-        gameId: game.id,
-        drawIndex,
-        lastBall,
-        patternsChanged: false,
-        patternSnapshot: [this.buildCoverallSnapshot(game, prizePercent, false)],
-        winners: [],
-        gameEnded: false,
-      });
-      return;
-    }
+    const cycler = this.getOrCreateCycler(room, game);
+    const step = cycler.step(drawIndex);
 
-    const winnerRecord = await this.processG3CoverallWinners({
+    const winnerRecords = await this.processG3Winners({
       room,
       game,
-      candidates,
       lastBall,
       drawIndex,
+      step,
       variantConfig: variantConfig!,
-      prizePercent,
     });
 
-    // Coverall vant → avslutt rund (perpetual restart håndteres av
-    // socket-laget / scheduler etter at endedReason er publisert).
-    const endedAtMs = Date.now();
-    game.bingoWinnerId = winnerRecord.ticketWinners[0]?.playerId;
-    game.status = "ENDED";
-    game.endedAt = new Date(endedAtMs).toISOString();
-    game.endedReason = "G3_FULL_HOUSE";
-    await this.finishPlaySessionsForGame(room, game, endedAtMs);
-    await this.writeGameEndCheckpoint(room, game);
-    await this.rooms.persist(room.code);
+    // End the round only when a Full House was awarded this draw (legacy parity).
+    const fullHouseWon = winnerRecords.some((w) => w.isFullHouse && w.ticketWinners.length > 0);
+    if (fullHouseWon) {
+      const endedAtMs = Date.now();
+      game.bingoWinnerId = winnerRecords.find((w) => w.isFullHouse)?.ticketWinners[0]?.playerId;
+      game.status = "ENDED";
+      game.endedAt = new Date(endedAtMs).toISOString();
+      game.endedReason = "G3_FULL_HOUSE";
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      await this.writeGameEndCheckpoint(room, game);
+      await this.rooms.persist(room.code);
+    }
 
     this.lastDrawEffectsByRoom.set(room.code, {
       roomCode: room.code,
       gameId: game.id,
       drawIndex,
       lastBall,
-      patternsChanged: true,
-      patternSnapshot: [this.buildCoverallSnapshot(game, prizePercent, true)],
-      winners: [winnerRecord],
-      gameEnded: true,
-      endedReason: "G3_FULL_HOUSE",
+      patternsChanged: step.changed,
+      patternSnapshot: this.buildPatternSnapshot(cycler, game),
+      winners: winnerRecords,
+      gameEnded: fullHouseWon,
+      endedReason: fullHouseWon ? "G3_FULL_HOUSE" : undefined,
     });
   }
 
+  // ── Cycler construction ──────────────────────────────────────────────────
+
   /**
-   * Resolve Coverall-prosent fra variantConfig.
-   *
-   * Prioritet:
-   *   1. `variantConfig.patterns[0].prizePercent` hvis > 0 (admin-override)
-   *   2. DEFAULT_G3_COVERALL_PRIZE_PERCENT (80%) ellers
-   *
-   * NB: Denne leser fra `variantConfig` (live config) — IKKE fra `game.patterns`,
-   * fordi BingoEngine.startGame substituerer `DEFAULT_PATTERNS` (1 Rad / Full
-   * Plate, Spill 1-defaults) når `variantConfig.patterns` er tomt. Den substitusjonen
-   * er irrelevant for Spill 3 siden vi har vår egen Coverall-prize-resolver, men
-   * vi må unngå å lese fra `game.patterns[0]` som ville gitt 30% istedenfor 80%.
+   * Build (or retrieve) the per-room cycler for this round. The cycler is
+   * snapshot-copied from `game.patterns` at first draw — legacy parity with
+   * `game.allPatternArray` being frozen at round-start (admin-edits mid-round
+   * do NOT bleed into active rounds).
    */
-  private resolveCoverallPrizePercent(variantConfig: GameVariantConfig): number {
-    const configured = variantConfig.patterns?.[0]?.prizePercent;
-    if (typeof configured === "number" && configured > 0) return configured;
-    return DEFAULT_G3_COVERALL_PRIZE_PERCENT;
+  private getOrCreateCycler(room: RoomState, game: GameState): PatternCycler {
+    const existing = this.cyclersByRoom.get(room.code);
+    const lastGameId = this.cyclerGameIdByRoom.get(room.code);
+    if (existing && lastGameId === game.id) return existing;
+
+    const specs = buildPatternSpecs(game.patterns ?? []);
+    const cycler = new PatternCycler(specs);
+    this.cyclersByRoom.set(room.code, cycler);
+    this.cyclerGameIdByRoom.set(room.code, game.id);
+    return cycler;
   }
 
-  // ── Winner detection ───────────────────────────────────────────────────────
+  // ── Winner processing ────────────────────────────────────────────────────
 
   /**
-   * Skann alle (player, ticket) for full 3×3 (9/9 trukne tall). Identisk
-   * predicate som Spill 2's {@link Game2Engine.findG2Winners} men holdes
-   * separat for å bevare separasjon mellom G2/G3-engine-paths.
+   * Scan every active pattern against every player's tickets, auto-claim each
+   * match, and split the pattern prize `round(patternPrize / winnerCount)` per
+   * (ticket, pattern) winner. Full-House is processed like any other pattern;
+   * the caller ends the round afterwards if a Full House landed.
    *
-   * Returnerer én entry per (player, ticket) som har full bong — samme
-   * spiller med flere fulle bonger får flere entries (legacy parity med
-   * G2: hver bong er en uavhengig vinner).
+   * Legacy parity: one ClaimRecord per (ticket, pattern). Same ticket winning
+   * two patterns on the same draw produces two ClaimRecords (see
+   * `gamehelper/game3.js:870-1033` + `GameProcess.js:268-275`).
    */
-  private findG3Winners(room: RoomState, game: GameState): Array<{
-    player: Player;
-    ticketIndex: number;
-    ticketId?: string;
-  }> {
-    const drawnSet = new Set(game.drawnNumbers);
-    const winners: Array<{ player: Player; ticketIndex: number; ticketId?: string }> = [];
-    for (const player of room.players.values()) {
-      const tickets = game.tickets.get(player.id);
-      if (!tickets) continue;
-      for (let i = 0; i < tickets.length; i += 1) {
-        const t = tickets[i];
-        if (hasFull3x3(t, drawnSet)) {
-          winners.push({ player, ticketIndex: i, ticketId: t.id });
-        }
-      }
-    }
-    return winners;
-  }
-
-  // ── Payout ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Utbetal Coverall-premie til alle (player, ticket)-vinnere via likedeling.
-   *
-   * Premieløsning:
-   *   1. Hvis `variantConfig.patterns[0].prizePercent` > 0 → bruk det
-   *   2. Ellers → bruk DEFAULT_G3_COVERALL_PRIZE_PERCENT (80%) av
-   *      `game.prizePool`
-   *
-   * Split: `round(totalPrize / winnerCount)` per (ticket, player), samme
-   * mønster som Spill 2's `resolveJackpotPrize`. Restbeløp etter rundings-
-   * tap havner i RTP-budgetet (ingen "phantom money").
-   */
-  private async processG3CoverallWinners(args: {
+  private async processG3Winners(args: {
     room: RoomState;
     game: GameState;
-    candidates: Array<{ player: Player; ticketIndex: number; ticketId?: string }>;
     lastBall: number;
     drawIndex: number;
+    step: CyclerStep;
     variantConfig: GameVariantConfig;
-    /** Pre-resolved av onDrawCompleted så snapshot og payout bruker samme prosent. */
-    prizePercent: number;
-  }): Promise<G3WinnerRecord> {
-    const { room, game, candidates, lastBall, drawIndex, variantConfig, prizePercent } = args;
+  }): Promise<G3WinnerRecord[]> {
+    const { room, game, lastBall, drawIndex, step, variantConfig } = args;
+    if (step.activePatterns.length === 0) return [];
 
-    const totalPrize = roundCurrency((game.prizePool * prizePercent) / 100);
-    const pricePerWinner = candidates.length > 0
-      ? Math.round(totalPrize / candidates.length)
-      : totalPrize;
-
+    const drawnSet = new Set(game.drawnNumbers);
+    const ticketMasksByPlayer = this.buildTicketMasksByPlayer(room, game, drawnSet);
+    const records: G3WinnerRecord[] = [];
     // K2-A CRIT-1 (utvidelse 2026-04-30): Spill 3 (slug `monsterbingo`) er
-    // hovedspill — bruk per-spill resolver for ledger-gameType.
+    // hovedspill — bruk per-spill resolver for ledger-gameType. Resolver
+    // er tolerant for null/manglende slug; faller til DATABINGO for å
+    // bevare bakoverkompatibilitet for ukjente slugs.
     const gameType: LedgerGameType = ledgerGameTypeForSlug(room.gameSlug);
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
-    const ticketWinners: G3TicketWinner[] = [];
-    for (const c of candidates) {
-      const claimId = randomUUID();
-      const claim: ClaimRecord = {
-        id: claimId,
-        playerId: c.player.id,
-        type: "BINGO",
-        valid: true,
-        autoGenerated: true,
-        createdAt: new Date().toISOString(),
-        payoutAmount: 0,
-      };
+    for (const pattern of step.activePatterns) {
+      const matches = this.findPatternMatches(ticketMasksByPlayer, pattern);
+      if (matches.length === 0) continue;
 
-      const paid = pricePerWinner > 0
-        ? await this.payG3CoverallShare({
-            room,
-            game,
-            player: c.player,
-            claim,
-            requestedPayout: pricePerWinner,
-            houseAccountId,
-            gameType,
-            channel,
-          })
-        : 0;
+      // round(prize / winnerCount) split — legacy game3.js:1017-1020.
+      const resolvedPrize = this.resolvePatternPrize(pattern, game);
+      const pricePerWinner = matches.length > 0
+        ? Math.round(resolvedPrize / matches.length)
+        : resolvedPrize;
 
-      // Lucky-number bonus: paid only when lastBall === player's luckyNumber
-      // AND `variantConfig.luckyNumberPrize > 0`. Samme semantics som G2.
-      let luckyPaid = 0;
-      const luckyNumber = this.luckyNumbersByPlayer.get(room.code)?.get(c.player.id);
-      const luckyPrize = variantConfig.luckyNumberPrize ?? 0;
-      if (luckyNumber !== undefined && luckyNumber === lastBall && luckyPrize > 0) {
-        luckyPaid = await this.payG3LuckyBonus({
+      const ticketWinners: G3TicketWinner[] = [];
+      for (const match of matches) {
+        const winner = await this.payG3PatternShare({
           room,
           game,
-          player: c.player,
-          claim,
-          requestedPayout: luckyPrize,
+          player: match.player,
+          ticketIndex: match.ticketIndex,
+          ticketId: match.ticketId,
+          pattern,
+          pricePerWinner,
+          lastBall,
+          drawIndex,
           houseAccountId,
           gameType,
           channel,
+          luckyPrize: variantConfig.luckyNumberPrize ?? 0,
         });
-        if (luckyPaid > 0) {
-          claim.bonusTriggered = true;
-          claim.bonusAmount = luckyPaid;
-        }
+        ticketWinners.push(winner);
       }
 
-      const totalPayout = roundCurrency(paid + luckyPaid);
-      claim.payoutAmount = totalPayout;
-      game.claims.push(claim);
+      cyclerMarkWon(this.cyclersByRoom.get(room.code), pattern.id);
 
-      if (this.bingoAdapter.onClaimLogged) {
-        try {
-          await this.bingoAdapter.onClaimLogged({
-            roomCode: room.code,
-            gameId: game.id,
-            playerId: c.player.id,
-            type: claim.type,
-            valid: claim.valid,
-            reason: claim.reason,
-          });
-        } catch (err) {
-          logger.error({ err, gameId: game.id, roomCode: room.code }, "onClaimLogged failed for G3 auto-claim");
-        }
-      }
-
-      ticketWinners.push({
-        playerId: c.player.id,
-        ticketIndex: c.ticketIndex,
-        ticketId: c.ticketId,
-        claimId,
-        payoutAmount: paid,
-        luckyBonus: luckyPaid,
-      });
-
-      logger.info({
-        event: "G3_COVERALL_PAYOUT",
-        roomCode: room.code,
-        gameId: game.id,
-        playerId: c.player.id,
-        claimId,
-        drawIndex,
+      records.push({
+        patternId: pattern.id,
+        patternName: pattern.name,
+        isFullHouse: pattern.isFullHouse,
         pricePerWinner,
-        paid,
-        luckyBonus: luckyPaid,
-      }, "Game 3 Coverall payout");
+        ticketWinners,
+      });
+    }
+    return records;
+  }
+
+  /** Build `{ playerId → Array<{ticketIndex, ticketId, mask}>}` for all room players. */
+  private buildTicketMasksByPlayer(
+    room: RoomState,
+    game: GameState,
+    drawnSet: Set<number>,
+  ): Map<string, Array<{ ticketIndex: number; ticketId?: string; mask: PatternMask }>> {
+    const out = new Map<string, Array<{ ticketIndex: number; ticketId?: string; mask: PatternMask }>>();
+    for (const player of room.players.values()) {
+      const tickets = game.tickets.get(player.id);
+      if (!tickets || tickets.length === 0) continue;
+      const entries = tickets.map((t, i) => ({
+        ticketIndex: i,
+        ticketId: t.id,
+        mask: buildTicketMask(t, drawnSet),
+      }));
+      out.set(player.id, entries);
+    }
+    return out;
+  }
+
+  /** Find every (player, ticket) whose mask satisfies the pattern. */
+  private findPatternMatches(
+    ticketMasksByPlayer: Map<string, Array<{ ticketIndex: number; ticketId?: string; mask: PatternMask }>>,
+    pattern: PatternSpec,
+  ): Array<{ player: Player; ticketIndex: number; ticketId?: string }> {
+    const matches: Array<{ player: Player; ticketIndex: number; ticketId?: string }> = [];
+    for (const [playerId, entries] of ticketMasksByPlayer) {
+      const roomPlayer = this.requirePlayerById(playerId);
+      for (const e of entries) {
+        if (matchesAny(e.mask, pattern.masks)) {
+          matches.push({ player: roomPlayer, ticketIndex: e.ticketIndex, ticketId: e.ticketId });
+        }
+      }
+    }
+    return matches;
+  }
+
+  /**
+   * Resolve prize amount for a pattern. "fixed" variants use prize1 (legacy
+   * field name), "percent" (default) uses prizePercent of the game's prizePool.
+   * Rounded to the nearest kr.
+   */
+  private resolvePatternPrize(pattern: PatternSpec, game: GameState): number {
+    if (pattern.prizeMode === "cash") {
+      return roundCurrency(Math.max(0, pattern.prize));
+    }
+    const pct = Math.max(0, Math.min(100, pattern.prize));
+    return roundCurrency((game.prizePool * pct) / 100);
+  }
+
+  // ── Payout per (ticket, pattern) winner ──────────────────────────────────
+
+  /**
+   * Create a ClaimRecord + debit house → player + update compliance ledger +
+   * apply per-policy prize cap + honour remainingPrizePool and
+   * remainingPayoutBudget. Mirrors Game2Engine.payG2JackpotShare but scoped to
+   * per-(ticket, pattern) shares. Returns the recorded TicketWinner.
+   */
+  private async payG3PatternShare(args: {
+    room: RoomState;
+    game: GameState;
+    player: Player;
+    ticketIndex: number;
+    ticketId?: string;
+    pattern: PatternSpec;
+    pricePerWinner: number;
+    lastBall: number;
+    drawIndex: number;
+    houseAccountId: string;
+    gameType: LedgerGameType;
+    channel: LedgerChannel;
+    luckyPrize: number;
+  }): Promise<G3TicketWinner> {
+    const { room, game, player, ticketIndex, ticketId, pattern, pricePerWinner, lastBall, drawIndex, houseAccountId, gameType, channel, luckyPrize } = args;
+    const claimId = randomUUID();
+    const claim: ClaimRecord = {
+      id: claimId,
+      playerId: player.id,
+      type: pattern.isFullHouse ? "BINGO" : "LINE",
+      valid: true,
+      autoGenerated: true,
+      createdAt: new Date().toISOString(),
+      payoutAmount: 0,
+    };
+
+    const paid = pricePerWinner > 0
+      ? await this.transferPrizeShare({
+          room, game, player, claim,
+          requestedPayout: pricePerWinner,
+          houseAccountId, gameType, channel,
+          label: `G3 pattern ${pattern.name} ${room.code}`,
+          idempotencyKey: IdempotencyKeys.game3Pattern({
+            gameId: game.id,
+            claimId: claim.id,
+          }),
+        })
+      : 0;
+
+    // Lucky-number bonus (legacy game3.js:945-997). Paid per winner when
+    // `lastBall === luckyNumber` for that player AND `luckyNumberPrize > 0`.
+    let luckyPaid = 0;
+    const luckyNumber = this.luckyNumbersByPlayer.get(room.code)?.get(player.id);
+    if (luckyPrize > 0 && luckyNumber !== undefined && luckyNumber === lastBall) {
+      luckyPaid = await this.transferPrizeShare({
+        room, game, player, claim,
+        requestedPayout: luckyPrize,
+        houseAccountId, gameType, channel,
+        label: `G3 lucky bonus ${room.code}`,
+        idempotencyKey: IdempotencyKeys.game3Lucky({
+          gameId: game.id,
+          claimId: claim.id,
+        }),
+      });
+      if (luckyPaid > 0) {
+        claim.bonusTriggered = true;
+        claim.bonusAmount = luckyPaid;
+      }
     }
 
-    return {
-      patternId: G3_COVERALL_PATTERN_ID,
-      patternName: G3_COVERALL_PATTERN_NAME,
-      isFullHouse: true,
+    const totalPayout = roundCurrency(paid + luckyPaid);
+    claim.payoutAmount = totalPayout;
+    game.claims.push(claim);
+
+    if (this.bingoAdapter.onClaimLogged) {
+      try {
+        await this.bingoAdapter.onClaimLogged({
+          roomCode: room.code,
+          gameId: game.id,
+          playerId: player.id,
+          type: claim.type,
+          valid: claim.valid,
+          reason: claim.reason,
+        });
+      } catch (err) {
+        logger.error({ err, gameId: game.id, roomCode: room.code }, "onClaimLogged failed for G3 auto-claim");
+      }
+    }
+
+    logger.info({
+      event: "G3_PATTERN_PAYOUT",
+      roomCode: room.code,
+      gameId: game.id,
+      playerId: player.id,
+      claimId,
+      patternId: pattern.id,
+      patternName: pattern.name,
+      isFullHouse: pattern.isFullHouse,
+      drawIndex,
       pricePerWinner,
-      ticketWinners,
+      paid,
+      luckyBonus: luckyPaid,
+    }, "Game 3 pattern auto-claim paid");
+
+    return {
+      playerId: player.id,
+      ticketIndex,
+      ticketId,
+      claimId,
+      payoutAmount: paid,
+      luckyBonus: luckyPaid,
     };
   }
 
   /**
-   * Apply single-prize cap, transfer house → player, oppdater compliance-
-   * ledger + payout-audit. Identisk shape som Game2Engine sin payG2JackpotShare
-   * — beholdes som privat metode for å unngå tett kopling mellom subklassene.
+   * Shared prize-transfer primitive: single-prize-cap + pool + budget gating,
+   * compliance-ledger + payout-audit emission, retry-safe idempotencyKey.
+   * Returns the actual credited amount (0 when capped to nothing).
    */
-  private async payG3CoverallShare(args: {
+  private async transferPrizeShare(args: {
     room: RoomState;
     game: GameState;
     player: Player;
@@ -430,8 +495,10 @@ export class Game3Engine extends BingoEngine {
     houseAccountId: string;
     gameType: LedgerGameType;
     channel: LedgerChannel;
+    label: string;
+    idempotencyKey: string;
   }): Promise<number> {
-    const { room, game, player, claim, requestedPayout, houseAccountId, gameType, channel } = args;
+    const { room, game, player, claim, requestedPayout, houseAccountId, gameType, channel, label, idempotencyKey } = args;
     const rtpBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
@@ -460,18 +527,13 @@ export class Game3Engine extends BingoEngine {
       });
       return 0;
     }
+    // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
     const transfer = await this.walletAdapter.transfer(
       houseAccountId,
       player.walletId,
       payout,
-      `G3 Coverall ${room.code}`,
-      {
-        idempotencyKey: IdempotencyKeys.game3Pattern({
-          gameId: game.id,
-          claimId: claim.id,
-        }),
-        targetSide: "winnings",
-      }
+      label,
+      { idempotencyKey, targetSide: "winnings" },
     );
     player.balance = roundCurrency(player.balance + payout);
     game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -479,7 +541,7 @@ export class Game3Engine extends BingoEngine {
     await this.compliance.recordLossEntry(player.walletId, room.hallId, {
       type: "PAYOUT",
       amount: payout,
-      createdAtMs: Date.now()
+      createdAtMs: Date.now(),
     });
     await this.ledger.recordComplianceLedgerEvent({
       hallId: room.hallId,
@@ -494,7 +556,7 @@ export class Game3Engine extends BingoEngine {
       walletId: player.walletId,
       sourceAccountId: transfer.fromTx.accountId,
       targetAccountId: transfer.toTx.accountId,
-      policyVersion: capped.policy.id
+      policyVersion: capped.policy.id,
     });
     await this.payoutAudit.appendPayoutAuditEvent({
       kind: "CLAIM_PRIZE",
@@ -507,145 +569,158 @@ export class Game3Engine extends BingoEngine {
       walletId: player.walletId,
       playerId: player.id,
       sourceAccountId: houseAccountId,
-      txIds: [transfer.fromTx.id, transfer.toTx.id]
+      txIds: [transfer.fromTx.id, transfer.toTx.id],
     });
     claim.payoutTransactionIds = [...(claim.payoutTransactionIds ?? []), transfer.fromTx.id, transfer.toTx.id];
     claim.payoutPolicyVersion = capped.policy.id;
-    claim.payoutWasCapped = payout < requestedPayout;
+    claim.payoutWasCapped = payout < requestedPayout || (claim.payoutWasCapped ?? false);
     claim.rtpBudgetBefore = rtpBefore;
     claim.rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
-    claim.rtpCapped = payout < afterPoolCap;
+    claim.rtpCapped = payout < afterPoolCap || (claim.rtpCapped ?? false);
     if (this.bingoAdapter.onCheckpoint) {
       await this.writePayoutCheckpointWithRetry(
         room, game, claim.id, payout,
         [transfer.fromTx.id, transfer.toTx.id],
-        "BINGO"
+        claim.type,
       );
     }
     return payout;
   }
 
-  /**
-   * Lucky-number bonus payout — paid on top of Coverall when lastBall ===
-   * player.luckyNumber. Identisk shape som G2's payG2LuckyBonus.
-   */
-  private async payG3LuckyBonus(args: {
-    room: RoomState;
-    game: GameState;
-    player: Player;
-    claim: ClaimRecord;
-    requestedPayout: number;
-    houseAccountId: string;
-    gameType: LedgerGameType;
-    channel: LedgerChannel;
-  }): Promise<number> {
-    const { room, game, player, claim, requestedPayout, houseAccountId, gameType, channel } = args;
-    const capped = this.prizePolicy.applySinglePrizeCap({
-      hallId: room.hallId,
-      gameType: "DATABINGO",
-      amount: requestedPayout,
-    });
-    const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
-    const payout = Math.max(0, Math.min(afterPoolCap, game.remainingPayoutBudget));
-    if (payout <= 0) return 0;
-    const transfer = await this.walletAdapter.transfer(
-      houseAccountId,
-      player.walletId,
-      payout,
-      `G3 lucky bonus ${room.code}`,
-      {
-        idempotencyKey: IdempotencyKeys.game3Lucky({
-          gameId: game.id,
-          claimId: claim.id,
-        }),
-        targetSide: "winnings",
-      }
-    );
-    player.balance = roundCurrency(player.balance + payout);
-    game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
-    game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
-    await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-      type: "PAYOUT",
-      amount: payout,
-      createdAtMs: Date.now()
-    });
-    await this.ledger.recordComplianceLedgerEvent({
-      hallId: room.hallId,
-      gameType,
-      channel,
-      eventType: "PRIZE",
-      amount: payout,
-      roomCode: room.code,
-      gameId: game.id,
-      claimId: claim.id,
-      playerId: player.id,
-      walletId: player.walletId,
-      sourceAccountId: transfer.fromTx.accountId,
-      targetAccountId: transfer.toTx.accountId,
-      policyVersion: capped.policy.id
-    });
-    await this.payoutAudit.appendPayoutAuditEvent({
-      kind: "CLAIM_PRIZE",
-      claimId: claim.id,
-      gameId: game.id,
-      roomCode: room.code,
-      hallId: room.hallId,
-      policyVersion: capped.policy.id,
-      amount: payout,
-      walletId: player.walletId,
-      playerId: player.id,
-      sourceAccountId: houseAccountId,
-      txIds: [transfer.fromTx.id, transfer.toTx.id]
-    });
-    claim.payoutTransactionIds = [...(claim.payoutTransactionIds ?? []), transfer.fromTx.id, transfer.toTx.id];
-    return payout;
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
   /**
-   * Guard predicate: true når runden er en G3 auto-claim-runde.
+   * Guard predicate: true when the round is a G3 auto-claim round.
    *
-   * Kriterier (ALLE må holde):
-   *   - room.gameSlug i GAME3_SLUGS (`monsterbingo` / `mønsterbingo` / `game_3`)
+   * Criteria (ALL must hold):
+   *   - room.gameSlug opts in via `uses5x5NoCenterTicket(...)`
    *   - variantConfig.patternEvalMode === "auto-claim-on-draw"
-   *   - variantConfig.jackpotNumberTable IKKE satt (det er G2-markøren)
+   *   - variantConfig.jackpotNumberTable is NOT set (that's G2)
    *
-   * Holder G1 (manual-claim) og G2 (jackpotNumberTable) begge utenfor hooken.
-   * Bruker direkte `GAME3_SLUGS.has(slug)` i stedet for `uses5x5NoCenterTicket`
-   * fordi den hjelperen er deprecated etter 2026-05-03 (Spill 3 → 3×3).
+   * Keeps G1 (manual-claim) and G2 (jackpotNumberTable) both out of the hook.
    */
   private isGame3Round(room: RoomState, variantConfig: GameVariantConfig | undefined): boolean {
     if (!variantConfig) return false;
     if (variantConfig.patternEvalMode !== "auto-claim-on-draw") return false;
-    if (variantConfig.jackpotNumberTable) return false; // G2-markør
-    return GAME3_SLUGS.has(room.gameSlug ?? "");
+    if (variantConfig.jackpotNumberTable) return false; // G2 opts in via jackpotNumberTable
+    if (!uses5x5NoCenterTicket(room.gameSlug)) return false;
+    return true;
+  }
+
+  /** Lookup a player across all rooms (cheap — rooms are small). */
+  private requirePlayerById(playerId: string): Player {
+    for (const room of this.rooms.values()) {
+      const p = room.players.get(playerId);
+      if (p) return p;
+    }
+    throw new Error(`player not found: ${playerId}`);
   }
 
   /**
-   * Bygg singleton Coverall-pattern-snapshot for wire-emission. Returnerer
-   * EN entry siden Spill 3 har kun ett pattern (full 3×3-bong).
-   *
-   * `prizePercent` må komme fra {@link resolveCoverallPrizePercent} så snapshot
-   * og payout bruker samme prosent (NB: `game.patterns` blir substituert med
-   * Spill 1's defaults når variantConfig.patterns er tomt — vi må IKKE lese
-   * derfra her).
+   * Build the wire-shape pattern snapshot used in `g3:pattern:changed`.
+   * Walks the cycler's internal specs so callers see deactivated entries
+   * (marked isPatternWin=true) alongside active ones.
    */
-  private buildCoverallSnapshot(
-    game: GameState,
-    prizePercent: number,
-    isWon: boolean,
-  ): G3PatternSnapshot {
-    const amount = roundCurrency((game.prizePool * prizePercent) / 100);
-    return {
-      id: G3_COVERALL_PATTERN_ID,
-      name: G3_COVERALL_PATTERN_NAME,
-      ballThreshold: 21, // Coverall kan vinnes når som helst inntil bag exhaustion
-      isFullHouse: true,
-      isWon,
-      design: 0,
-      patternDataList: [...G3_3X3_FULL_MASK_FLAT],
-      amount,
-    };
+  private buildPatternSnapshot(cycler: PatternCycler, game: GameState): G3PatternSnapshot[] {
+    const snap: G3PatternSnapshot[] = [];
+    for (const spec of cycler.snapshot()) {
+      const patternDef = game.patterns?.find((p) => p.id === spec.id);
+      const design = patternDef?.design ?? 0;
+      const firstMask = spec.masks[0] ?? 0;
+      snap.push({
+        id: spec.id,
+        name: spec.name,
+        ballThreshold: spec.ballThreshold,
+        isFullHouse: spec.isFullHouse,
+        isWon: spec.isPatternWin,
+        design,
+        patternDataList: maskToFlatArray(firstMask),
+        amount: this.resolvePatternPrize(spec, game),
+      });
+    }
+    return snap;
   }
 }
+
+// ── Free helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Safe `markWon` caller — the cycler is required for winner processing but the
+ * public cyclersByRoom Map is lookup-only from the processor's perspective.
+ * Extracted so we don't shadow `cycler` in the outer scope.
+ */
+function cyclerMarkWon(cycler: PatternCycler | undefined, patternId: string): void {
+  cycler?.markWon(patternId);
+}
+
+/**
+ * Build `PatternSpec[]` from `PatternDefinition[]` (the round-snapshot copy
+ * stashed into `game.patterns` at `startGame`).
+ *
+ * - `Row 1`..`Row 4` / `Coverall` / `Full House` → built-in mask sets.
+ * - Custom (design === 0) with `patternDataList` → single mask from the 25-cell
+ *   bitmask array.
+ * - Fallback: empty mask set (pattern will never match; logs a warning).
+ *
+ * Threshold resolution:
+ *   - `patternDefinition.ballNumberThreshold` if defined,
+ *   - else 75 (effectively "no threshold" for a 75-ball game).
+ *
+ * Full-House detection:
+ *   - name in {"Full House", "Coverall"}, OR
+ *   - patternDataList covers all 25 cells.
+ */
+export function buildPatternSpecs(patterns: readonly PatternDefinition[]): PatternSpec[] {
+  const specs: PatternSpec[] = [];
+  for (const p of patterns) {
+    const builtIn = getBuiltInPatternMasks(p.name);
+    let masks: readonly PatternMask[];
+    if (builtIn) {
+      masks = builtIn;
+    } else if (Array.isArray(p.patternDataList) && p.patternDataList.length === 25) {
+      masks = [encodeBitmaskFromDataList(p.patternDataList)];
+    } else {
+      logger.warn({ patternId: p.id, patternName: p.name }, "G3 pattern has no resolvable mask — will never match");
+      masks = [];
+    }
+    const coversAll = masks.some((m) => isFullHouse(m));
+    const nameIsFullHouse = p.name === "Full House" || p.name === "Coverall";
+    const isFH = nameIsFullHouse || coversAll;
+    const prizeMode: PatternSpec["prizeMode"] = p.winningType === "fixed" ? "cash" : "percent";
+    const prize = prizeMode === "cash"
+      ? (p.prize1 ?? 0)
+      : p.prizePercent;
+    specs.push({
+      id: p.id,
+      name: p.name,
+      ballThreshold: p.ballNumberThreshold ?? 75,
+      isFullHouse: isFH,
+      masks,
+      prize,
+      prizeMode,
+      isPatternWin: false,
+    });
+  }
+  return specs;
+}
+
+/** Convert a 25-cell 0/1 array (row-major) to a bitmask. */
+function encodeBitmaskFromDataList(dataList: readonly number[]): PatternMask {
+  let mask = 0;
+  for (let i = 0; i < 25; i += 1) {
+    if (dataList[i] === 1) mask |= 1 << i;
+  }
+  return mask;
+}
+
+/** Convert a bitmask back to a 25-cell 0/1 array for wire emission. */
+function maskToFlatArray(mask: PatternMask): number[] {
+  const out = new Array<number>(25);
+  for (let i = 0; i < 25; i += 1) {
+    out[i] = (mask & (1 << i)) !== 0 ? 1 : 0;
+  }
+  return out;
+}
+
+// Re-export for tests.
+export { FULL_HOUSE_MASK };

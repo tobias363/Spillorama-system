@@ -14,10 +14,8 @@ import {
   makeShuffledBallBag,
   makeRoomCode,
   uses75Ball,
-  uses3x3Ticket,
   uses5x5NoCenterTicket,
   generateTicketForGame,
-  generate3x3Ticket,
   generate5x5NoCenterTicket,
   BINGO75_SLUGS,
   GAME3_SLUGS,
@@ -427,137 +425,159 @@ describe("generateTicketForGame", () => {
   });
 });
 
-// ── Game 3 slug helpers — Spill 3 = 3×3 / 1..21 (Tobias 2026-05-03) ─────────
+// ── Game 3 slug helpers / 5x5-no-center ticket ──────────────────────────────
 
-describe("Spill 3 (Mønsterbingo) bruker nå 3×3 / 1..21 — Tobias 2026-05-03", () => {
-  test("uses3x3Ticket dekker monsterbingo", () => {
-    assert.equal(uses3x3Ticket("monsterbingo"), true);
-    assert.equal(uses3x3Ticket("mønsterbingo"), true);
-    assert.equal(uses3x3Ticket("game_3"), true);
+describe("uses5x5NoCenterTicket (Game 3 / Mønsterbingo)", () => {
+  test("returns true for canonical 'monsterbingo' slug", () => {
+    assert.equal(uses5x5NoCenterTicket("monsterbingo"), true);
   });
 
-  test("uses3x3Ticket dekker fortsatt Spill 2 — felles 3×3-format", () => {
-    assert.equal(uses3x3Ticket("rocket"), true);
-    assert.equal(uses3x3Ticket("tallspill"), true);
-    assert.equal(uses3x3Ticket("game_2"), true);
+  test("returns true for Norwegian spelling 'mønsterbingo'", () => {
+    assert.equal(uses5x5NoCenterTicket("mønsterbingo"), true);
   });
 
-  test("uses3x3Ticket returnerer false for Spill 1 + ukjente", () => {
-    assert.equal(uses3x3Ticket("bingo"), false);
-    assert.equal(uses3x3Ticket("game_1"), false);
-    assert.equal(uses3x3Ticket("databingo"), false);
-    assert.equal(uses3x3Ticket(undefined), false);
-    assert.equal(uses3x3Ticket(null), false);
-    assert.equal(uses3x3Ticket(""), false);
+  test("returns true for legacy numeric alias 'game_3'", () => {
+    assert.equal(uses5x5NoCenterTicket("game_3"), true);
   });
 
-  test("uses5x5NoCenterTicket er DEPRECATED og returnerer alltid false", () => {
-    // 2026-05-03: Spill 3 portet til 3×3, så denne hjelperen returnerer ikke
-    // lenger true for noen slug. Beholdt for bakoverkompat med callere som
-    // fortsatt importerer den.
-    assert.equal(uses5x5NoCenterTicket("monsterbingo"), false);
-    assert.equal(uses5x5NoCenterTicket("mønsterbingo"), false);
-    assert.equal(uses5x5NoCenterTicket("game_3"), false);
+  test("returns false for Game 1 slugs (no leak into 75-ball bucket)", () => {
     assert.equal(uses5x5NoCenterTicket("bingo"), false);
-    assert.equal(uses5x5NoCenterTicket(undefined), false);
+    assert.equal(uses5x5NoCenterTicket("game_1"), false);
   });
 
-  test("GAME3_SLUGS bevarer de tre kjente aliasene", () => {
+  test("returns false for Game 2 slugs", () => {
+    assert.equal(uses5x5NoCenterTicket("rocket"), false);
+    assert.equal(uses5x5NoCenterTicket("tallspill"), false);
+    assert.equal(uses5x5NoCenterTicket("game_2"), false);
+  });
+
+  test("returns false for nullish or empty input", () => {
+    assert.equal(uses5x5NoCenterTicket(undefined), false);
+    assert.equal(uses5x5NoCenterTicket(null), false);
+    assert.equal(uses5x5NoCenterTicket(""), false);
+  });
+
+  test("GAME3_SLUGS contains the three known aliases", () => {
     assert.deepEqual([...GAME3_SLUGS].sort(), ["game_3", "monsterbingo", "mønsterbingo"]);
   });
 
-  test("ingen leak: Spill 3-slugs ruter ikke til Spill 1's 75-ball-format", () => {
+  test("no leak: Game 3 slugs do not route into uses75Ball", () => {
+    // Game 3 uses 5×5/1-75 shape but must NOT match uses75Ball, because uses75Ball
+    // implies free-centre cell (Game 1). A leak would cause Game 3 tickets to be
+    // generated with `grid[2][2] === 0` which breaks pattern matching.
     assert.equal(uses75Ball("monsterbingo"), false);
     assert.equal(uses75Ball("mønsterbingo"), false);
     assert.equal(uses75Ball("game_3"), false);
   });
 });
 
-describe("generate3x3Ticket genererer Spill 3-bonger korrekt", () => {
-  test("produserer et 3×3-grid", () => {
-    const ticket = generate3x3Ticket();
-    assert.equal(ticket.grid.length, 3, "3 rader");
+describe("generate5x5NoCenterTicket", () => {
+  test("produces a 5x5 grid", () => {
+    const ticket = generate5x5NoCenterTicket();
+    assert.equal(ticket.grid.length, 5);
     for (const row of ticket.grid) {
-      assert.equal(row.length, 3, "3 kolonner");
+      assert.equal(row.length, 5);
     }
   });
 
-  test("alle 9 celler i [1, 21] og unike", () => {
+  test("centre cell (2,2) is a normal number, NOT the free-space 0", () => {
+    // Run 20 times — must never land on 0 in the centre.
     for (let i = 0; i < 20; i += 1) {
-      const ticket = generate3x3Ticket();
-      const flat = ticket.grid.flat();
-      assert.equal(flat.length, 9);
-      assert.equal(new Set(flat).size, 9, "alle 9 celler må være unike");
-      for (const n of flat) {
-        assert.ok(n >= 1 && n <= 21, `tall ${n} må være i [1, 21]`);
+      const ticket = generate5x5NoCenterTicket();
+      assert.notEqual(ticket.grid[2][2], 0, "centre must not be free-space 0");
+      assert.ok(ticket.grid[2][2] >= 31 && ticket.grid[2][2] <= 45,
+        `centre ${ticket.grid[2][2]} must be in N-column range 31..45`);
+    }
+  });
+
+  test("no cell is zero (unlike Game 1 free centre)", () => {
+    const ticket = generate5x5NoCenterTicket();
+    for (const row of ticket.grid) {
+      for (const cell of row) {
+        assert.notEqual(cell, 0, "Game 3 has no free space");
       }
     }
   });
 
-  test("color og type-metadata følger med", () => {
-    const ticket = generate3x3Ticket("Standard", "game3-3x3");
-    assert.equal(ticket.color, "Standard");
-    assert.equal(ticket.type, "game3-3x3");
+  test("column ranges: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75", () => {
+    const ticket = generate5x5NoCenterTicket();
+    const ranges: Array<[number, number]> = [
+      [1, 15], [16, 30], [31, 45], [46, 60], [61, 75],
+    ];
+    for (let col = 0; col < 5; col += 1) {
+      for (let row = 0; row < 5; row += 1) {
+        const val = ticket.grid[row][col];
+        assert.ok(
+          val >= ranges[col][0] && val <= ranges[col][1],
+          `grid[${row}][${col}]=${val} not in column ${col} range [${ranges[col][0]}, ${ranges[col][1]}]`,
+        );
+      }
+    }
   });
 
-  test("genererer ulike brett ved gjentatt kall", () => {
-    const tickets = Array.from({ length: 10 }, () => generate3x3Ticket());
+  test("all 25 cells are unique", () => {
+    const ticket = generate5x5NoCenterTicket();
+    const allNums = ticket.grid.flat();
+    assert.equal(new Set(allNums).size, 25);
+  });
+
+  test("color and type metadata pass through", () => {
+    const ticket = generate5x5NoCenterTicket("Monster Green", "large");
+    assert.equal(ticket.color, "Monster Green");
+    assert.equal(ticket.type, "large");
+  });
+
+  test("produces different tickets on repeated calls", () => {
+    const tickets = Array.from({ length: 10 }, () => generate5x5NoCenterTicket());
     const grids = tickets.map((t) => JSON.stringify(t.grid));
-    assert.ok(new Set(grids).size > 1, "bør produsere varierte brett");
+    assert.ok(new Set(grids).size > 1, "should produce varied tickets");
   });
 });
 
-describe("generate5x5NoCenterTicket — DEPRECATED men fortsatt funksjonell (dead code)", () => {
-  // Beholdt for bakoverkompat. Hjelperen kalles ikke fra `generateTicketForGame`
-  // for noen kjent slug etter 2026-05-03.
-  test("genererer fortsatt et gyldig 5×5-grid uten fri sentercelle hvis kalt eksplisitt", () => {
-    const ticket = generate5x5NoCenterTicket();
+describe("generateTicketForGame routes Game 3 correctly", () => {
+  test("'monsterbingo' → 5x5 grid with NO free centre (no 0)", () => {
+    const ticket = generateTicketForGame("monsterbingo");
     assert.equal(ticket.grid.length, 5);
     assert.equal(ticket.grid[0].length, 5);
     assert.notEqual(ticket.grid[2][2], 0);
-  });
-
-  test("color og type-metadata følger med", () => {
-    const ticket = generate5x5NoCenterTicket("Legacy", "deprecated");
-    assert.equal(ticket.color, "Legacy");
-    assert.equal(ticket.type, "deprecated");
-  });
-});
-
-describe("generateTicketForGame ruter Spill 3 til 3×3 (Tobias 2026-05-03)", () => {
-  test("'monsterbingo' → 3×3 grid med tall i [1, 21]", () => {
-    const ticket = generateTicketForGame("monsterbingo");
-    assert.equal(ticket.grid.length, 3);
-    assert.equal(ticket.grid[0].length, 3);
+    // Full distribution check:
     for (const row of ticket.grid) {
       for (const cell of row) {
-        assert.ok(cell >= 1 && cell <= 21, `cell ${cell} ute av range`);
+        assert.notEqual(cell, 0);
       }
     }
   });
 
-  test("'mønsterbingo' alias ruter til 3×3", () => {
+  test("'mønsterbingo' → 5x5 no-free-centre", () => {
     const ticket = generateTicketForGame("mønsterbingo");
-    assert.equal(ticket.grid.length, 3);
-    assert.equal(ticket.grid[0].length, 3);
+    assert.equal(ticket.grid.length, 5);
+    assert.notEqual(ticket.grid[2][2], 0);
   });
 
-  test("'game_3' legacy-alias ruter til 3×3", () => {
+  test("'game_3' legacy alias → 5x5 no-free-centre", () => {
     const ticket = generateTicketForGame("game_3");
-    assert.equal(ticket.grid.length, 3);
-    assert.equal(ticket.grid[0].length, 3);
+    assert.equal(ticket.grid.length, 5);
+    assert.notEqual(ticket.grid[2][2], 0);
   });
 
-  test("Spill 1 ('bingo') ruter fortsatt til 5×5 med fri sentercelle (regression guard)", () => {
+  test("Game 1 still routes to free-centre ticket (regression guard)", () => {
+    // Confirm Game 3 router placement (before Game 1) does not break Game 1.
     const ticket = generateTicketForGame("bingo");
     assert.equal(ticket.grid.length, 5);
-    assert.equal(ticket.grid[2][2], 0, "Spill 1 fri sentercelle må bevares");
+    assert.equal(ticket.grid[2][2], 0, "Game 1 free centre must be preserved");
   });
 
-  test("Spill 2 ('rocket') ruter fortsatt til 3×3 (samme format som Spill 3)", () => {
-    const ticket = generateTicketForGame("rocket");
-    assert.equal(ticket.grid.length, 3);
-    assert.equal(ticket.grid[0].length, 3);
+  test("Game 3 ticket numbers are in B-I-N-G-O column ranges", () => {
+    const ticket = generateTicketForGame("monsterbingo");
+    for (let row = 0; row < 5; row += 1) {
+      for (let col = 0; col < 5; col += 1) {
+        const n = ticket.grid[row][col];
+        const min = col * 15 + 1;
+        const max = col * 15 + 15;
+        assert.ok(n >= min && n <= max,
+          `cell [${row}][${col}]=${n} outside column ${col} range ${min}-${max}`);
+      }
+    }
   });
 });
 

@@ -97,19 +97,11 @@ test("BIN-672: 'rocket' slug produces 3×3", () => {
   assert.equal(t.grid[0].length, 3);
 });
 
-test("'monsterbingo' slug produces 3×3 (Tobias-direktiv 2026-05-03)", () => {
-  // Spill 3 portet til 3×3 / 1..21 (samme som Spill 2). Tidligere produserte
-  // monsterbingo et 5×5 uten fri sentercelle (BIN-615 / PR-C3, 2026-04-23).
+test("BIN-672: 'monsterbingo' slug produces 5×5 WITHOUT free centre", () => {
   const t = generateTicketForGame("monsterbingo");
-  assert.equal(t.grid.length, 3, "Spill 3 har nå 3 rader");
-  assert.equal(t.grid[0].length, 3, "Spill 3 har nå 3 kolonner");
-  // Alle 9 cellene skal være tall i [1, 21] og unike.
-  const flat = t.grid.flat();
-  assert.equal(flat.length, 9);
-  for (const n of flat) {
-    assert.ok(n >= 1 && n <= 21, `tall ${n} må være i [1, 21]`);
-  }
-  assert.equal(new Set(flat).size, 9, "alle 9 cellene må være unike");
+  assert.equal(t.grid.length, 5);
+  assert.equal(t.grid[0].length, 5);
+  assert.notEqual(t.grid[2][2], 0, "Game 3 has NO free centre — middle cell should be a real number");
 });
 
 test("BIN-672: slug-set predicates stay disjoint (no overlap)", () => {
