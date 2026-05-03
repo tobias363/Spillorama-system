@@ -97,7 +97,7 @@ class Game2Controller implements GameController {
     });
 
     if (!joinResult.ok || !joinResult.data) {
-      console.error("[Game2] Room join failed:", joinResult.error);
+      console.error("[Game2] Room join failed — code:", joinResult.error?.code, "message:", joinResult.error?.message, "raw:", joinResult.error);
       // Tobias-direktiv 2026-05-03: room-join failure → connection-error fallback.
       this.loader?.setError();
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");

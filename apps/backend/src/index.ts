@@ -3946,6 +3946,12 @@ const PORT = Number(process.env.PORT ?? 4000);
         warn: (msg, meta) => console.warn(msg, meta ? JSON.stringify(meta) : ""),
         error: (msg, meta) => console.error(msg, meta ? JSON.stringify(meta) : ""),
       },
+      // 2026-05-03 (Tobias): trigger perpetual-loop-spawn umiddelbart etter
+      // boot-sweep ender et stuck-rom. Uten dette må første player-join
+      // trigge spawn — som ofte ikke skjer fordi room:join feiler av
+      // andre grunner. Med dette spawnes ny ROCKET/MONSTERBINGO-runde
+      // umiddelbart ved oppstart.
+      spawnAfterEnd: (roomCode) => perpetualRoundService.spawnFirstRoundIfNeeded(roomCode),
     });
     const spill23SweepResult = await spill23SweepService.sweep();
     if (spill23SweepResult.ended.length > 0) {

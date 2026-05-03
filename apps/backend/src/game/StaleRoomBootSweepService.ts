@@ -108,6 +108,16 @@ export interface StaleRoomBootSweepEngine {
 }
 
 /**
+ * 2026-05-03 (Tobias-direktiv): valgfri callback som boot-sweep kaller etter
+ * forceEndStaleRound returnerer true. PerpetualRoundService.spawnFirstRoundIfNeeded
+ * sjekker selv om rommet har en aktiv runde (skip) eller ENDED-status (spawn).
+ * Uten denne henger ROCKET/MONSTERBINGO på status=ENDED ved oppstart inntil
+ * en spiller faktisk joiner — som de ikke kan hvis room:join feiler av
+ * andre grunner. Med denne fyrer perpetual-loopen umiddelbart ved boot.
+ */
+export type StaleRoomSpawnAfterEndCallback = (roomCode: string) => Promise<boolean>;
+
+/**
  * Logger-overflate. Vi bruker `info` for normale `[boot-sweep] ended stale
  * room ROCKET (drawn=21/21)`-meldinger, `warn` for skip-cases hvor noe
  * uventet skjedde, og `error` for forceEndStaleRound-feil.
@@ -132,6 +142,13 @@ export interface StaleRoomBootSweepResult {
 export interface StaleRoomBootSweepServiceOptions {
   engine: StaleRoomBootSweepEngine;
   logger: StaleRoomBootSweepLogger;
+  /**
+   * 2026-05-03: valgfri callback som kalles for hvert rom som ble force-
+   * endet. Skal trigge perpetual-loop-spawn (typisk
+   * `perpetualRoundService.spawnFirstRoundIfNeeded`). Fail-soft —
+   * exception bobler ikke ut av sweep().
+   */
+  spawnAfterEnd?: StaleRoomSpawnAfterEndCallback;
 }
 
 /**
@@ -156,10 +173,12 @@ export interface StaleRoomBootSweepServiceOptions {
 export class StaleRoomBootSweepService {
   private readonly engine: StaleRoomBootSweepEngine;
   private readonly logger: StaleRoomBootSweepLogger;
+  private readonly spawnAfterEnd?: StaleRoomSpawnAfterEndCallback;
 
   constructor(options: StaleRoomBootSweepServiceOptions) {
     this.engine = options.engine;
     this.logger = options.logger;
+    this.spawnAfterEnd = options.spawnAfterEnd;
   }
 
   /**
@@ -252,6 +271,28 @@ export class StaleRoomBootSweepService {
               endedReason: STALE_ROUND_END_REASON,
             },
           );
+
+          // 2026-05-03 (Tobias): trigger perpetual-loop-spawn umiddelbart
+          // etter end. Uten dette ville rommet henge på status=ENDED til
+          // første spiller-join — som ofte ikke skjer fordi den feiler
+          // i client på sync-timeout. Fail-soft: spawn-feil bobles ikke.
+          if (this.spawnAfterEnd) {
+            try {
+              const spawned = await this.spawnAfterEnd(summary.code);
+              if (spawned) {
+                this.logger.info(
+                  `[boot-sweep] spawned new round for ${summary.code} after end`,
+                  { roomCode: summary.code, slug },
+                );
+              }
+            } catch (spawnErr) {
+              const spawnMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+              this.logger.warn(
+                `[boot-sweep] spawnAfterEnd failed for ${summary.code} (best-effort, ikke fatal)`,
+                { roomCode: summary.code, slug, err: spawnMsg },
+              );
+            }
+          }
         } else {
           // forceEndStaleRound returnerer false hvis room er gone, status
           // endret seg, eller endedReason allerede er satt — alt sammen
