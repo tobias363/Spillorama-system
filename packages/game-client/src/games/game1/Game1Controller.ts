@@ -251,7 +251,9 @@ class Game1Controller implements GameController {
     });
 
     if (!connected) {
-      this.loader.hide();
+      // Tobias-direktiv 2026-05-03: connection-error fallback — vis Loading-
+      // overlayet med "Får ikke koblet til rom. Trykk her" (klikk = reload).
+      this.loader.setError();
       this.showError("Kunne ikke koble til server");
       return;
     }
@@ -289,7 +291,9 @@ class Game1Controller implements GameController {
     });
 
     if (!joinResult.ok || !joinResult.data) {
-      this.loader.hide();
+      // Tobias-direktiv 2026-05-03: room-join failure → samme connection-error
+      // fallback. Hele overlayet er klikkbart → reload.
+      this.loader.setError();
       console.error("[Game1] Room join failed:", joinResult.error);
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");
       return;

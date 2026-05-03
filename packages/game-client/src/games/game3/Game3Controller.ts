@@ -40,9 +40,10 @@ class Game3Controller implements GameController {
     app.stage.addChild(this.root);
 
     // BIN-500 port
+    // Tobias-direktiv 2026-05-03: ny Spillorama-branded Loading-overlay.
     const overlayContainer = app.app.canvas.parentElement ?? document.body;
     this.loader = new LoadingOverlay(overlayContainer);
-    this.loader.show("Kobler til...");
+    this.loader.setState("CONNECTING");
 
     console.log("[Game3] Connecting socket...");
     socket.connect();
@@ -55,14 +56,26 @@ class Game3Controller implements GameController {
       });
     });
 
-    if (!connected) { this.loader?.hide(); this.showError("Kunne ikke koble til server"); return; }
+    if (!connected) {
+      // Tobias-direktiv 2026-05-03: connection-error fallback (klikk = reload).
+      this.loader?.setError();
+      this.showError("Kunne ikke koble til server");
+      return;
+    }
     console.log("[Game3] Socket connected");
-    this.loader?.show("Joiner rom...");
+    this.loader?.setState("JOINING_ROOM");
 
+    // Tobias-direktiv 2026-05-03: vis Loading-overlay ved reconnect/disconnect.
     this.unsubs.push(
       socket.on("connectionStateChanged", (state) => {
-        if (state === "reconnecting") telemetry.trackReconnect();
-        if (state === "disconnected") telemetry.trackDisconnect("socket");
+        if (state === "reconnecting") {
+          telemetry.trackReconnect();
+          this.loader?.setState("RECONNECTING");
+        }
+        if (state === "disconnected") {
+          telemetry.trackDisconnect("socket");
+          this.loader?.setState("DISCONNECTED");
+        }
       }),
     );
 
@@ -74,7 +87,8 @@ class Game3Controller implements GameController {
 
     if (!joinResult.ok || !joinResult.data) {
       console.error("[Game3] Room join failed:", joinResult.error);
-      this.loader?.hide();
+      // Tobias-direktiv 2026-05-03: room-join failure → connection-error fallback.
+      this.loader?.setError();
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");
       return;
     }

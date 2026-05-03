@@ -46,9 +46,10 @@ class Game2Controller implements GameController {
     app.stage.addChild(this.root);
 
     // BIN-500 port: loader holdes til syncReady (se waitForSyncReady).
+    // Tobias-direktiv 2026-05-03: ny Spillorama-branded Loading-overlay.
     const overlayContainer = app.app.canvas.parentElement ?? document.body;
     this.loader = new LoadingOverlay(overlayContainer);
-    this.loader.show("Kobler til...");
+    this.loader.setState("CONNECTING");
 
     // Connect socket
     console.log("[Game2] Connecting socket...");
@@ -65,18 +66,26 @@ class Game2Controller implements GameController {
     });
 
     if (!connected) {
-      this.loader?.hide();
+      // Tobias-direktiv 2026-05-03: connection-error fallback (klikk = reload).
+      this.loader?.setError();
       this.showError("Kunne ikke koble til server");
       return;
     }
     console.log("[Game2] Socket connected");
-    this.loader?.show("Joiner rom...");
+    this.loader?.setState("JOINING_ROOM");
 
-    // Track socket stability
+    // Track socket stability + Tobias-direktiv 2026-05-03: vis Loading-overlay
+    // ved reconnect/disconnect så kunden aldri ser en frosset eller tom skjerm.
     this.unsubs.push(
       socket.on("connectionStateChanged", (state) => {
-        if (state === "reconnecting") telemetry.trackReconnect();
-        if (state === "disconnected") telemetry.trackDisconnect("socket");
+        if (state === "reconnecting") {
+          telemetry.trackReconnect();
+          this.loader?.setState("RECONNECTING");
+        }
+        if (state === "disconnected") {
+          telemetry.trackDisconnect("socket");
+          this.loader?.setState("DISCONNECTED");
+        }
       }),
     );
 
@@ -89,7 +98,8 @@ class Game2Controller implements GameController {
 
     if (!joinResult.ok || !joinResult.data) {
       console.error("[Game2] Room join failed:", joinResult.error);
-      this.loader?.hide();
+      // Tobias-direktiv 2026-05-03: room-join failure → connection-error fallback.
+      this.loader?.setError();
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");
       return;
     }
