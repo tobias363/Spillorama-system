@@ -37,11 +37,15 @@ import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js
 
 const COLS = 5;
 const ROWS = 5;
-const CELL_GAP = 6;
+// 2026-05-03 (Agent S, v2): grid-gap krympet 6→4 og panel-bredde 180→160
+// per CSS `.lykketall-col { width: 160px; }` i v2-mockup. Kløver-ikon
+// krympet fra 56→44 (CSS `.lykketall-clover`).
+const CELL_GAP = 4;
 const MAX_NUMBER = 21;
-const PANEL_WIDTH = 180;
-const HEADER_HEIGHT = 70; // clover + label
+const PANEL_WIDTH = 160;
+const HEADER_HEIGHT = 60; // clover (44) + label (16)
 const CELL_SIZE = (PANEL_WIDTH - CELL_GAP * (COLS - 1)) / COLS;
+const CLOVER_SIZE = 44;
 
 const CLOVER_URL = "/web/games/assets/game2/design/lucky-clover.png";
 
@@ -205,8 +209,8 @@ export class LykketallGrid extends Container {
       const tex = (await Assets.load(CLOVER_URL)) as Texture;
       if (this.destroyed) return;
       const sprite = new Sprite(tex);
-      sprite.width = 56;
-      sprite.height = 56;
+      sprite.width = CLOVER_SIZE;
+      sprite.height = CLOVER_SIZE;
       sprite.anchor.set(0.5, 0);
       sprite.x = PANEL_WIDTH / 2;
       sprite.y = 0;
@@ -217,9 +221,9 @@ export class LykketallGrid extends Container {
       if (this.destroyed) return;
       const fallback = new Graphics();
       fallback.x = PANEL_WIDTH / 2;
-      fallback.y = 28;
+      fallback.y = CLOVER_SIZE / 2;
       // Enkel 4-blads-kløver: 4 sirkler + en sentrum-disk.
-      const r = 12;
+      const r = CLOVER_SIZE * 0.27;
       fallback.circle(0, -r, r).fill({ color: 0x2f7a32 });
       fallback.circle(r, 0, r).fill({ color: 0x2f7a32 });
       fallback.circle(0, r, r).fill({ color: 0x2f7a32 });

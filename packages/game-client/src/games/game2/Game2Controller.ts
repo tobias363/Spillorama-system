@@ -231,17 +231,22 @@ class Game2Controller implements GameController {
         this.lobbyScreen = new LobbyScreen(w, h);
         this.lobbyScreen.setOnBuy((count) => this.handleBuy(count));
         this.lobbyScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        // 2026-05-02 (Tobias UX, PDF 17 wireframe): "Velg brett"-knapp åpner
-        // Choose Tickets-side. Spiller kan velge spesifikke brett fra
-        // 32-pool i stedet for å la systemet random-allotte.
+        // 2026-05-02 (Tobias UX, PDF 17 wireframe): "Kjøp flere brett"-pill
+        // i ComboPanel åpner Choose Tickets-side. Spiller kan velge
+        // spesifikke brett fra 32-pool i stedet for å la systemet
+        // random-allotte.
         this.lobbyScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
         this.lobbyScreen.update(state);
-        // 2026-05-03 (Agent O fix): IKKE auto-vis BuyPopup i LOBBY-fase.
-        // Per PR #866 + #867 design: LobbyScreen har egen "Velg brett for
-        // neste runde"-CTA som åpner ChooseTicketsScreen, og BuyPopup er
-        // forbeholdt mid-runde (PLAYING/SPECTATING) via
-        // `maybeShowBuyPopupForNextRound`. Tidligere `showBuyPopup`-kall
-        // her skapte en duplikat-popup oppå redesignet LobbyScreen.
+        // 2026-05-03 (Agent S, v2): Tobias-direktiv "kun disse elementene
+        // samt popup av kjøp av biletter skal være synlig". v2-LobbyScreen
+        // har INGEN egen CTA-knapp lenger (fjernet sammen med statusText
+        // og luckyPicker). BuyPopup er hovedinngangen til ticket-kjøp i
+        // lobby — vi auto-viser den her hvis spilleren ikke allerede har
+        // armed bet for neste runde.
+        if (!this.armedForNextRound) {
+          const ticketPrice = state.entryFee || 10;
+          this.lobbyScreen.showBuyPopup(ticketPrice);
+        }
         this.setScreen(this.lobbyScreen);
         break;
 
