@@ -156,7 +156,14 @@ export class Game2Engine extends BingoEngine {
       // runden med endedReason="G2_NO_WINNER" så PerpetualRoundService
       // kan spawne ny runde via onGameEnded-hooken. Tidligere hang
       // rommet på status=RUNNING for alltid og blokkerte loopen.
-      if (drawIndex >= GAME2_MAX_BALLS) {
+      //
+      // BUG-FIX 2026-05-03: drawIndex er 0-basert (BIN-689) — på siste
+      // (21.) ball er drawIndex=20. Sjekken `>= GAME2_MAX_BALLS (21)`
+      // traff aldri. Bytter til drawnNumbers.length som er antall trukne
+      // baller (1-basert teller) — på siste ball er den lik
+      // GAME2_MAX_BALLS (21). Verifisert via Agent CC Playwright-test:
+      // ROCKET-rom hadde drawnNumbers.length=21 men drawIndex=20.
+      if (game.drawnNumbers.length >= GAME2_MAX_BALLS) {
         const endedAtMs = Date.now();
         game.status = "ENDED";
         game.endedAt = new Date(endedAtMs).toISOString();
