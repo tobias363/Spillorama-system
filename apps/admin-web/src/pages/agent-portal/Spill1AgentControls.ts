@@ -32,7 +32,11 @@ export interface Spill1AgentControlsProps {
 export function renderSpill1AgentControls(
   props: Spill1AgentControlsProps
 ): string {
-  const { currentGame, isMasterAgent, allReady, excludedHallIds, selfHallReady, selfHallId } = props;
+  // allReady ekstraheres ikke lenger — etter Tobias UX 2026-05-03 kan
+  // master starte uavhengig av allReady (confirmUnreadyHalls-flow ekskluderer
+  // ikke-klare haller). Beholder feltet i interface for kallere som måtte
+  // bruke det andre steder.
+  const { currentGame, isMasterAgent, excludedHallIds, selfHallReady, selfHallId } = props;
 
   if (!isMasterAgent) {
     // 2026-05-02: Non-master agent har Klar/Ikke-klar-knapp. Status-pill
