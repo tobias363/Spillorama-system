@@ -15,7 +15,7 @@ Spillorama driver **fire interne spill** og integrerer **ett eksternt** spill vi
 | Markedsføringsnavn | Regulatorisk kategori | Trekningsmodus | Backend-slug | Legacy kodenavn | Grid | Ball-range | Spesielle mekanikker |
 |---|---|---|---|---|---|---|---|
 | **Spill 1** (Hovedspill 1) | Hovedspill | Live (hall + internett) | `bingo` | Game 1 / `game1` | 5×5 (fri sentercelle) | 1–75 | Mini-game-rotasjon: Wheel of Fortune, Treasure Chest, Mystery, ColorDraft |
-| **Spill 2** (Hovedspill 2) | Hovedspill | Live (hall + internett) | `rocket` | Game 2 / `game2` | 3×5 | 1–60 | Rakettstabling, paginering, blind ticket purchase |
+| **Spill 2** (Hovedspill 2) | Hovedspill | Live (hall + internett) | `rocket` | Game 2 / `game2` | 3×3 | 1–21 | Tallspill, Choose Tickets-side (32 brett), Jackpot-bar, Lucky Number, paginering |
 | **Spill 3** (Hovedspill 3) | Hovedspill | Live (hall + internett) | `monsterbingo` | Game 3 / `game3` | 5×5 (fri sentercelle) | 1–60 | Animert kulekø (FIFO maks 5), mønsteranimasjon, chat |
 | **SpinnGo** (Spill 4) | **Databingo** | Player-startet (forhåndstrukket) | `spillorama` | Game 5 / `game5` / "Spillorama Bingo" | 3×5 | 1–60 | Ruletthjul, Free Spin Jackpot, SwapTicket — spiller starter selv, sekvenser med 30s minimums-mellomrom |
 | **Candy** | Ekstern (tredjeparts) | Tredjeparts | `candy` | — | — | — | Iframe-integrasjon med delt lommebok; logikk ligger hos Candy-leverandør |

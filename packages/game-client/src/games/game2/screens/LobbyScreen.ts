@@ -82,7 +82,7 @@ export class LobbyScreen extends Container {
     this.addChild(this.luckyPicker);
 
     // 2026-05-02 (Tobias UX, PDF 17 wireframe side 4): "Velg brett"-knapp som
-    // åpner Choose Tickets-side. Erstatter rocket-decoration.
+    // åpner Choose Tickets-side.
     const chooseBtn = new Container();
     const chooseBg = new Graphics();
     chooseBg.roundRect(0, 0, 220, 50, 8).fill({ color: 0x1976d2 });

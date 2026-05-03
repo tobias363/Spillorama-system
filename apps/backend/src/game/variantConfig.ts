@@ -130,7 +130,7 @@ export interface GameVariantConfig {
   };
   /**
    * BIN-615 / PR-C1: Maximum ball value (inclusive) for this variant.
-   * Standard/Elvis/TrafficLight = 60, Bingo75 = 75, Game 2 Rocket/Tallspill = 21.
+   * Standard/Elvis/TrafficLight = 60, Bingo75 = 75, Game 2 (Tallspill) = 21.
    * Falls back to gameSlug-derived default when omitted (keeps existing configs valid).
    */
   maxBallValue?: number;
@@ -382,7 +382,7 @@ export const DEFAULT_TRAFFIC_LIGHT_CONFIG: GameVariantConfig = {
 };
 
 /**
- * BIN-615 / PR-C2: Game 2 (Rocket/Tallspill) default variant config.
+ * BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) default variant config.
  *
  * - Single 3×3-ticket type, priceMultiplier=1 (legacy G2 uses flat ticket price)
  * - 1..21 drawbag, max 21 draws (Helper/bingo.js:996-1012, GameProcess.js:167,175)
@@ -394,7 +394,7 @@ export const DEFAULT_TRAFFIC_LIGHT_CONFIG: GameVariantConfig = {
  */
 export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
   ticketTypes: [
-    { name: "Rocket", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 },
+    { name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 },
   ],
   patterns: [],
   maxBallValue: 21,
@@ -445,7 +445,7 @@ export function getDefaultVariantConfig(gameType: string): GameVariantConfig {
   switch (gameType) {
     case "elvis": return DEFAULT_ELVIS_CONFIG;
     case "traffic-light": return DEFAULT_TRAFFIC_LIGHT_CONFIG;
-    // BIN-615 / PR-C2: Game 2 Rocket/Tallspill — 3x3 + 1..21 drawbag
+    // BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) — 3x3 + 1..21 drawbag
     case "game_2":
     case "rocket":
     case "tallspill":

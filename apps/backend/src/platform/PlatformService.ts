@@ -4522,7 +4522,7 @@ export class PlatformService {
         // game-client. Se migration 20260421000100_set_bingo_client_engine_web.sql
         // og apps/backend/public/web/lobby.js `shouldUseWebClient`.
         ["bingo",        "Bingo",        "75-kulsbingo med flere spillvarianter",    "/bingo",        true, 1, { gameNumber: 1, clientEngine: "web" }],
-        ["rocket",       "Rocket",       "Tallspill med 3x3 brett og Lucky Number",  "/rocket",       true, 2, { gameNumber: 2 }],
+        ["rocket",       "Tallspill",    "Tallspill med 3x3 brett og Lucky Number",  "/rocket",       true, 2, { gameNumber: 2 }],
         ["monsterbingo", "Mønsterbingo", "Bingo med mønstergevinster",               "/monsterbingo", true, 3, { gameNumber: 3 }],
         // temabingo (game 4) utgår per BIN-496. isEnabled=false sikrer at fresh DB
         // ikke får aktiv temabingo. ON CONFLICT-oppdateringen under rører ikke

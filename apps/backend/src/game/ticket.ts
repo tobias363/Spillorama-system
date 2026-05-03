@@ -53,7 +53,7 @@ export function makeShuffledBallBag(maxNumber = 60): number[] {
  */
 export const BINGO75_SLUGS: ReadonlySet<string> = new Set(["bingo", "game_1"]);
 
-/** BIN-615 / PR-C2: Game slugs that use 3×3 1..21 tickets (Rocket/Tallspill). */
+/** BIN-615 / PR-C2: Game slugs that use 3×3 1..21 tickets (Tallspill / Spill 2). */
 export const GAME2_SLUGS: ReadonlySet<string> = new Set(["game_2", "rocket", "tallspill"]);
 
 /**
@@ -121,7 +121,7 @@ export function uses5x5NoCenterTicket(gameSlug: string | null | undefined): bool
  * Generate a single ticket for the given game slug.
  *
  * - 75-ball games (Game 1 / "bingo"): 5x5 grid with free centre cell.
- * - Game 2 (Rocket/Tallspill): 3×3 grid with 9 unique picks from 1..21.
+ * - Game 2 (Tallspill / Spill 2): 3×3 grid with 9 unique picks from 1..21.
  * - Game 3 (Mønsterbingo): 5x5 grid with 25 unique picks from 1..75, **no free centre**.
  * - Databingo60: 3x5 grid (explicit opt-in via `databingo` slug).
  *
@@ -189,7 +189,7 @@ export function generateBingo75Ticket(color?: string, type?: string): Ticket {
 }
 
 /**
- * BIN-615 / PR-C2: Game 2 (Rocket/Tallspill) ticket — 3×3 grid of 9 unique
+ * BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) ticket — 3×3 grid of 9 unique
  * numbers drawn from 1..21.
  *
  * Legacy ref: Helper/bingo.js:996-1012 (`data.slug == 'game_2'`) — 9 random

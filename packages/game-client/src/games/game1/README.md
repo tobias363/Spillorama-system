@@ -112,7 +112,7 @@ Etter hver trukket ball kjører serveren `evaluateActivePhase(room, game)`:
 
 ### Forskjeller fra Game 2
 
-| Aspekt | Game 2 (Rocket) | Game 1 (Classic) |
+| Aspekt | Game 2 (Tallspill) | Game 1 (Classic) |
 |--------|-----------------|------------------|
 | Grid | 3x5 (15 celler) | 5x5 (25 celler, sentercelle fri) |
 | Chat | Ingen | Sanntids chat-panel (høyreside) |

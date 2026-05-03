@@ -1,5 +1,5 @@
 /**
- * BIN-615 / PR-C1: Sub-game sequence planner for Game 2 (Rocket/Tallspill)
+ * BIN-615 / PR-C1: Sub-game sequence planner for Game 2 (Tallspill / Spill 2)
  * and Game 3 (Mønsterbingo).
  *
  * Pure planning logic — no DB I/O. PlatformService owns persistence.

@@ -1,5 +1,5 @@
 /**
- * BIN-615 / PR-C2: Game 2 (Rocket/Tallspill) engine — extends BingoEngine
+ * BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) engine — extends BingoEngine
  * to add auto-claim-on-draw behaviour for the 3×3 / 1..21 variant.
  *
  * G1 rooms are unaffected — the G2 hook path is guarded by

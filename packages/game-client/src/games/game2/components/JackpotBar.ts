@@ -1,5 +1,5 @@
 /**
- * 2026-05-02 (Tobias UX): Jackpot-bar for Spill 2 (Rocket).
+ * 2026-05-02 (Tobias UX): Jackpot-bar for Spill 2 (Tallspill).
  *
  * Wireframe `WF_F_Game 2 & 3_V1.0.pdf` side 4: horisontal bar med 6 slots
  * over ticket-grid:

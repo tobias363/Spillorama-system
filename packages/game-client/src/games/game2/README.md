@@ -1,4 +1,4 @@
-# Game 2 — Rocket Bingo (Web-implementasjon)
+# Game 2 — Spill 2 / Tallspill (Web-implementasjon)
 
 **Status:** Funksjonell MVP — gameplay-loop verifisert mot backend
 **Dato:** 2026-04-17 (opprinnelig: 2026-04-14)
@@ -73,7 +73,7 @@ Backend genererer 3x5 grids (3 rader × 5 kolonner, tall 1-60). Mønstersjekk:
 
 ### Testing
 
-Åpne `http://localhost:4000/web/?webClient=game_2`, klikk Rocket. Feature flag i URL router til web-klient.
+Åpne `http://localhost:4000/web/?webClient=game_2`, klikk Spill 2. Feature flag i URL router til web-klient.
 
 Alternativt: sett `clientEngine: "web"` i game settings via admin for permanent aktivering.
 

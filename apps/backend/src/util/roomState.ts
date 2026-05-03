@@ -423,7 +423,7 @@ export class RoomStateManager {
    * `gameSlug`. Called at every room-creation entry point in production
    * so `BingoEngine.meetsPhaseRequirement` gets the correct 5-phase
    * Norsk-bingo patterns (1 Rad / 2 Rader / … / Fullt Hus) for Game 1,
-   * Game 2 Rocket/Tallspill for rocket, and Game 3 Mønsterbingo patterns
+   * Game 2 Tallspill for rocket, and Game 3 Mønsterbingo patterns
    * for monsterbingo.
    *
    * Idempotent: does nothing when a variant is already set for the room

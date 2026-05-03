@@ -12,13 +12,13 @@ import { ChooseTicketsScreen } from "./screens/ChooseTicketsScreen.js";
 import { SpilloramaApi } from "../../net/SpilloramaApi.js";
 
 /**
- * Phase-maskin for Game 2 (Rocket).
+ * Phase-maskin for Game 2 (Spill 2 / Tallspill).
  * BIN-507 port: SPECTATING lagt til for late-joiner midt i runde.
  */
 type Phase = "LOADING" | "LOBBY" | "PLAYING" | "SPECTATING" | "ENDED";
 
 /**
- * Game 2 (Rocket Bingo) controller.
+ * Game 2 (Spill 2 / Tallspill) controller.
  * Manages the full lifecycle: join room → lobby → gameplay → end → loop.
  */
 class Game2Controller implements GameController {

@@ -72,7 +72,7 @@ export class PlayScreen extends Container {
     const chatRightEdge = screenWidth - CHAT_MARGIN;
     const chatLeftEdge = chatEnabled ? chatRightEdge - CHAT_WIDTH : screenWidth;
 
-    // 2026-05-02 (Tobias UX): rocket-stabling fjernet (PDF 17 wireframe).
+    // 2026-05-02 (Tobias UX): stabling-animasjon fjernet (PDF 17 wireframe).
     // I stedet rendres Jackpot-bar over ticket-grid med 6 slots
     // (9/10/11/12/13/14-21). Data via socket-event `g2:jackpot:list-update`.
     this.jackpotBar = new JackpotBar();
