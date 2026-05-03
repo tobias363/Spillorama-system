@@ -24,6 +24,7 @@ import type {
   WalletStateEvent,
   BetRejectedEvent,
   WalletLossStateEvent,
+  G2JackpotListUpdatePayload,
 } from "@spillorama/shared-types/socket-events";
 import type { RoomSnapshot } from "@spillorama/shared-types/game";
 import { SocketEvents } from "@spillorama/shared-types/socket-events";
@@ -96,6 +97,13 @@ export interface SpilloramaSocketListeners {
    * round-trip via /api/wallet/me/compliance.
    */
   walletLossState: (payload: WalletLossStateEvent) => void;
+  /**
+   * 2026-05-02 (Tobias UX): Spill 2 jackpot-bar oppdatering. Server pusher
+   * denne på hver G2-trekning med kompletten 6-slot-prize-listen
+   * (9/10/11/12/13/14-21). Klient (Game2Controller) forwarder til
+   * `PlayScreen.updateJackpot()`.
+   */
+  g2JackpotListUpdate: (payload: G2JackpotListUpdatePayload) => void;
   connectionStateChanged: ConnectionListener;
 }
 
@@ -137,6 +145,7 @@ export class SpilloramaSocket {
     walletState: new Set(),
     betRejected: new Set(),
     walletLossState: new Set(),
+    g2JackpotListUpdate: new Set(),
     connectionStateChanged: new Set(),
   };
 
@@ -174,6 +183,7 @@ export class SpilloramaSocket {
     walletState: [],
     betRejected: [],
     walletLossState: [],
+    g2JackpotListUpdate: [],
     connectionStateChanged: [],
   };
 
@@ -338,6 +348,14 @@ export class SpilloramaSocket {
     this.socket.on(SocketEvents.JACKPOT_ACTIVATED, (payload: JackpotActivatedPayload) => {
       this.dispatchOrBuffer("jackpotActivated", payload);
     });
+
+    // 2026-05-02 (Tobias UX): Spill 2 jackpot-bar live-update.
+    this.socket.on(
+      SocketEvents.G2_JACKPOT_LIST_UPDATE,
+      (payload: G2JackpotListUpdatePayload) => {
+        this.dispatchOrBuffer("g2JackpotListUpdate", payload);
+      },
+    );
 
     // Tobias prod-incident 2026-04-29 (re-added after PR-M6 removal): legacy
     // `minigame:activated` channel. PR #727 server-side now emits this after

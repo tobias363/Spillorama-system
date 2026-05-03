@@ -82,6 +82,10 @@ export interface BingoRuntimeConfig {
   // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1
   jobGame1ScheduleTickEnabled: boolean;
   jobGame1ScheduleTickIntervalMs: number;
+  // 2026-05-02: REQ-007 stale-ready-sweep er default OFF — uten et
+  // heartbeat-endepunkt rever sweepen Klar-flagget etter 60s, og
+  // bingoverten må re-markere. Re-aktiveres når heartbeat er på plass.
+  jobGame1StaleReadySweepEnabled: boolean;
   // GAME1_SCHEDULE PR 4c: auto-draw-tick for Game 1 (fixed seconds-intervall)
   jobGame1AutoDrawEnabled: boolean;
   jobGame1AutoDrawIntervalMs: number;
@@ -113,6 +117,12 @@ export interface BingoRuntimeConfig {
   jobWalletAuditVerifyEnabled: boolean;
   jobWalletAuditVerifyIntervalMs: number;
   jobWalletAuditVerifyRunAtHour: number;
+  // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
+  // Ny runde i ROCKET / MONSTERBINGO startes automatisk etter `delayMs`
+  // når en runde slutter naturlig (winner / max-draws / draw-bag-empty).
+  perpetualLoopEnabled: boolean;
+  perpetualLoopDelayMs: number;
+  perpetualLoopDisabledSlugs: ReadonlySet<string>;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -246,6 +256,14 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // "hengende" rader uten håndtering. Aktiveres via env-flag i staging først.
   const jobGame1ScheduleTickEnabled = parseBooleanEnv(process.env.GAME1_SCHEDULE_TICK_ENABLED, false);
   const jobGame1ScheduleTickIntervalMs = Math.max(5_000, parsePositiveIntEnv(process.env.GAME1_SCHEDULE_TICK_INTERVAL_MS, 15_000));
+  // 2026-05-02 (Tobias UX-decision): REQ-007 stale-ready-sweep default OFF.
+  // Sweepen reverterte Klar-flagget etter 60s siden ingen heartbeat
+  // refresher updated_at — bingoverten måtte re-markere. Re-aktiveres når
+  // heartbeat-endepunkt er på plass og driften har avtalt revert-policy.
+  const jobGame1StaleReadySweepEnabled = parseBooleanEnv(
+    process.env.GAME1_STALE_READY_SWEEP_ENABLED,
+    false,
+  );
   // GAME1_SCHEDULE PR 4c: auto-draw-tick — default OFF til PR 4d socket-flyt er inne.
   const jobGame1AutoDrawEnabled = parseBooleanEnv(process.env.GAME1_AUTO_DRAW_ENABLED, false);
   // Minimum 500 ms — auto-draw trigges hvert `seconds`-felt fra ticket_config,
@@ -355,6 +373,32 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     Math.max(0, parsePositiveIntEnv(process.env.JOB_WALLET_AUDIT_VERIFY_RUN_AT_HOUR, 2)),
   );
 
+  // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03):
+  // "Spill 2 og 3 har ETT globalt rom. Aldri stopper — utbetal gevinst →
+  // fortsetter automatisk." Service lytter på `bingoAdapter.onGameEnded`
+  // og starter en ny runde i ROCKET / MONSTERBINGO etter en kort delay.
+  // Default ON så perpetual-loopen kjører i prod uten ekstra konfig.
+  const perpetualLoopEnabled = parseBooleanEnv(
+    process.env.PERPETUAL_LOOP_ENABLED,
+    true,
+  );
+  // Delay før auto-restart trigges (ms). Default 5000 — gir klient tid til
+  // å vise vinner-overlay + rocket-launch før neste runde starter, men kort
+  // nok til at "aldri stopper"-følelsen bevares.
+  const perpetualLoopDelayMs = Math.max(
+    0,
+    parsePositiveIntEnv(process.env.PERPETUAL_LOOP_DELAY_MS, 5000),
+  );
+  // CSV-liste av slugs som skal ekskluderes fra perpetual-loop. Brukes
+  // for staged rollout / midlertidig deaktivering uten å slå av hele
+  // tjenesten. Eks: `PERPETUAL_LOOP_DISABLED_SLUGS=monsterbingo`.
+  const perpetualLoopDisabledSlugs = new Set<string>(
+    (process.env.PERPETUAL_LOOP_DISABLED_SLUGS ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0),
+  );
+
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
   const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
@@ -411,6 +455,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
+    jobGame1StaleReadySweepEnabled,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
     jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
     jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
@@ -419,6 +464,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
     jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
     jobWalletAuditVerifyEnabled, jobWalletAuditVerifyIntervalMs, jobWalletAuditVerifyRunAtHour,
+    perpetualLoopEnabled, perpetualLoopDelayMs, perpetualLoopDisabledSlugs,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,

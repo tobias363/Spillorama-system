@@ -398,6 +398,68 @@ Distinkt fra demo. Demo Hall har `isTestHall=true` → RTP-bypass aktivert (`Bin
 
 ---
 
+## Status-oppdatering 2026-05-01
+
+**Oppdatert av:** Audit-update-agent (Opus 4.7, 1M context)
+**Branch:** `docs/audit-update-2026-05-01`
+**Trigger:** Bølge 2 av pilot-readiness-arbeidet — re-validere de 6 røde funn fra 30. april mot main-state per 1. mai.
+**Metode:** `git log --since=2026-04-30 main` (27 commits siden audit) + `grep` i kodebasen for hvert funn.
+
+### F.1 Lukkede funn siden 30. april (3 av 6)
+
+| # | Funn (30. april) | Status 1. mai | Lukket av | Commit-SHA |
+|---|---|---|---|---|
+| 1 | **Agent Dashboard skeleton** (D.1, `AgentDashboardPage.ts:96-186`) — dummy-tall + «Kommer snart»-tabs | 🟢 LUKKET | PR #772 | `8d6aa602` — komplett wiring mot ny `/api/agent/dashboard` aggregator (180 LOC backend), polling 30s, real Top 5/Latest Requests/Ongoing Games |
+| 2 | **§11 distribusjon Spill 2/3** (E5/COMP-P0-001) — hardkodet `gameType: "DATABINGO"` ga 30 % i stedet for 15 % | 🟢 LUKKET | PR #769 | `6bdae77b` — `ledgerGameTypeForSlug` utvidet for rocket/monsterbingo, `Game2Engine.processG2Winners` + `Game3Engine.processG3Winners` + mini-game payouts oppdatert. SpinnGo beholder DATABINGO. |
+| 3 | **Screen Saver admin UI** (D.10) — backend fantes, admin-side manglet | 🟢 LUKKET | PR #768 | `8806cc1d` — `feat(admin): Screen Saver config + TV-integrasjon (Fase 1 MVP §24)` — admin-UI + TV-klient-rendering wired |
+
+### F.2 Re-validering av gjenværende røde funn (3 av 6 fortsatt åpne)
+
+| # | Funn (30. april) | Status 1. mai | Begrunnelse |
+|---|---|---|---|
+| 4 | **Spill 2 + Spill 3 PauseOverlay + ReconnectFlow** (PIXI-P0-004/005) — ikke portet fra Spill 1 | 🔴 FORTSATT ÅPEN | Ingen commits til `packages/game-client/src/games/game2/` eller `game3/` siden 30. april. Demo-vurdering uendret: ikke vis Spill 2/3 som «produksjonsklart». |
+| 5 | **Import Player (Excel xls/xlsx)** (D.11) — Fase 1 MVP §22 fra LEGACY_1_TO_1_MAPPING | 🔴 FORTSATT ÅPEN | Ingen `importPlayers`-API, ingen admin-side. Anbefalt fallback uendret: engangs migrasjons-script ved pilot-onboarding. |
+| 6 | **SpinnGo signaturfunksjoner** (Free Spin Jackpot, Billettkustomisering, Kulefysikk, DrumRotation) + **Spill 3 Unity-paritet** (Waypoint-bane, Mønster-animasjon) | 🔴 FORTSATT ÅPEN (utsatt per README) | Eksplisitt utsatt i README-er. Ikke pilot-blokker for Spill 1-only-pilot. |
+
+**Oppsummert:** 3 av 6 røde funn lukket på samme dag eller dagen etter audit. 3 utestående er enten Spill 2/3-spesifikke (kun blokker hvis pilot inkluderer disse) eller eksplisitt utsatt scope.
+
+### F.3 Nye observasjoner fra commits siden 30. april
+
+| Endring | Status | Type | Effekt på audit |
+|---|---|---|---|
+| `feat/seed-demo-pilot-day-4halls` (`fb180ec5`) — Profil B 4-hall pilot-seed | Pushed, ikke merget | Forberedelse | Forbereder multi-hall master-koordinerings-demo. Bekreftet IKKE i `main` per 1. mai. **Venter merge.** |
+| PR #774 (`8fbeedca`) — public CMS-endpoints i OpenAPI + `/api/cms/about` alias | Merget | 🟡→🟢 oppgradering | Reduserer C-rad «FAQ/Terms/Personvern» fra 🟡 til 🟢 på backend-siden. Player-shell-konsumpsjon (`backend/public/web/`) fortsatt en åpen integrasjons-task. |
+| PR #773 (`04796a9f`) — TV Screen wireframe-paritet (PDF 16 §16.5) | Merget | 🟢→🟢 polish | KPI-bokser, Hall Belongs To-kolonne, Full House-fanfare. TV-skjerm-rad i D.10 fortsatt 🟢, men nå mer wireframe-likt. |
+| PR #771 (`162717ec`) — `seed-demo-pilot-day` Profil A (1 hall) | Merget | Forberedelse | Komplementært til Profil B (4-hall, ennå ikke merget). Profil A demo-hall fungerer for single-hall-flyt. |
+| PR #768 (`8806cc1d`) — Screen Saver config | Merget | 🔴→🟢 lukker funn | Allerede registrert i F.1 over. |
+| PR #767 (`4ec7255e`) — Mystery Joker fix (joker-crown.png på joker-treff) | Merget | 🟢→🟢 polish | Spill 1 mini-game polish, ikke endring av status. |
+| PR #765/#764 (HV2-B3+B4) — admin-UI for per-hall Spill 1 default-gevinster + sub-variant.minPrize-validering | Merget | Nytt tema | Hall-defaults og prize-floor-validering. Ikke direkte adressert i 30-april-audit; nytt forberedelses-arbeid for hall-spesifikk Spill 1-konfigurasjon. **MERK:** ikke et nytt rødt funn, men nytt scope verdt å holde øye med ved neste audit. |
+| PR #758 (`1e24a5cc`) — BIR-036 50 000 kr/dag kontant-cap per hall (HV2-A) | Merget | Nytt tema | Regulatorisk cap implementert. **MERK:** nytt forretningskritisk tema — bør innlemmes i neste compliance-audit. |
+| PR #746 (`d1272820`) — K5 engine error-handling sirk.bryter (CRIT-4) | Merget | E14 lukker | Adresserer Section E §14 «engine error-handling silently swallows». Bør reklassifiseres som lukket ved neste audit. |
+| PR #756/#755 (`624ba2e5`/`a62ef53b`) — F2-D + F2-C BingoEngine refaktor (DrawOrchestrationService + RoomLifecycleService) | Merget | E1 progresjon | Inkrementell oppmykning av dual-engine-arkitekturen (E1 i Section E). Ikke fullt lukket, men progresjon. |
+| PR #775 (`6fd1c1e6`) — BIN-768 e2e smoke-test framework | Merget | Forberedelse | Nytt e2e-rammeverk for pilot-runbook. **MERK:** øker tilliten til at pilot-smoke kan kjøres regelmessig. |
+
+### F.4 Nye gaps oppdaget i diff siden 30. april
+
+Ingen nye **røde** funn oppdaget i diff. To temaer verdt å flagge for neste audit:
+
+1. **HV2-B3/B4 Spill 1 hall-defaults** (PR #765/#764): nytt scope (per-hall prize-floors med sub-variant-validering). Ikke i 30-april-audit — bør valideres mot wireframe ved neste runde.
+2. **BIR-036 kontant-cap** (PR #758): regulatorisk håndheving av 50 000 kr/dag/hall. Bør innlemmes i neste compliance-audit-runde.
+
+### F.5 Anbefalt timing for neste audit
+
+| Tidspunkt | Audit-type | Begrunnelse |
+|---|---|---|
+| **Etter pilot-demo (innen 1 uke)** | Lett retro-audit (~2 timer) | Fang opp eventuelle gaps som dukket opp under demoen + lukk Profil B 4-hall-seed når mergen lander. |
+| **Før pilot-prod (T-2 uker)** | Full re-audit (~1 dag) | Re-verifiser alle 6 funn, valider HV2-B3/B4 + BIR-036, sjekk om E14 (sirk.bryter) virkelig løser produksjons-feilene fra 14:18-snapshot, og inkluder Spill 2/3 status hvis disse er blitt scope'et inn i pilot. |
+| **Før real-money launch** | Compliance + Security re-audit | Krever revisjon av E5 (hvis Spill 2/3 medtas), E12 (BankID prod-onboarding), E13 (hash-chain backfill) + Section F pilot-blokkere. |
+
+**Konklusjon:** Lukkings-raten (3/6 på 24 timer) er oppmuntrende. Pilot-demo-vurdering fra 30. april står ved lag, og er nå *enklere* fordi Agent Dashboard ikke lenger trenger «start-utenom»-instruks. Neste full-audit anbefales T-2 uker før første pilot-hall går prod.
+
+---
+
 **Sluttdato:** 2026-04-30 (Tobias)
 **Audit-agent:** Opus 4.7 (1M context)
 **Filer verifisert:** ~150 (kode) + 5 store wireframe-dokumenter + 4 audit-rapporter
+
+**Status-oppdatering:** 2026-05-01 (Audit-update-agent, Opus 4.7 1M context)

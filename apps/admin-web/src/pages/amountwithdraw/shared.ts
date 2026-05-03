@@ -44,18 +44,13 @@ export function dateDefaultRange(): { start: string; end: string } {
 }
 
 export function contentHeader(
-  titleKey: string,
-  moduleKey = "withdraw_management"
+  _titleKey: string,
+  _moduleKey = "withdraw_management"
 ): string {
-  return `
-    <section class="content-header">
-      <h1>${escapeHtml(t(titleKey))}</h1>
-      <ol class="breadcrumb">
-        <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
-        <li>${escapeHtml(t(moduleKey))}</li>
-        <li class="active">${escapeHtml(t(titleKey))}</li>
-      </ol>
-    </section>`;
+  // 2026-05-02 (Tobias UX): no-op. Shell rendrer header+breadcrumb i
+  // `Breadcrumb.ts`; per-page contentHeader var duplikat. Beholder
+  // signaturen for bakoverkompatibilitet.
+  return "";
 }
 
 export function boxOpen(

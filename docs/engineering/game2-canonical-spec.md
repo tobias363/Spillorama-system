@@ -1,7 +1,7 @@
 ---
 game: game2
-name: Rocket Bingo
-slug: rocket
+name: Tallspill (Spill 2)
+slug: rocket  # DB-slug beholdes — kanonisk, kan ikke endres uten migrasjon
 ticketGrid: 3x5
 centerCell: none
 ballRange: [1, 60]
@@ -33,7 +33,7 @@ features:
   ticketReplace: false
   hallDisplayBroadcast: false  # BIN-498 delt
   blindTickets: false  # Legacy Game2BuyBlindTickets — BIN-511 pending
-  rocketStacking: true  # G2-signatur: rakettstabling-animasjon
+  rocketStacking: false  # Fjernet 2026-05-03 (Tobias-krav). Erstattet av Jackpot-bar, ingen rakett-tematikk.
 complianceModel: hall-based
 spillvettLimits:
   dailyLoss: 900
@@ -45,7 +45,7 @@ parityStatus: MVP  # MVP-nivå — flere features gjenstår (se §Kjente avvik)
 commitRef: de23e274855356a2755fc30b32bcc8ed1ad8d1c2
 ---
 
-# Game 2 Canonical Spec — Rocket Bingo
+# Game 2 Canonical Spec — Tallspill (Spill 2)
 
 **Formål:** Frosset spesifikasjon av Game 2 sin faktiske oppførsel i `apps/backend/` + `packages/game-client/src/games/game2/` per 2026-04-17. Referansepunkt for paritet-arbeid ([BIN-525](https://linear.app/bingosystem/issue/BIN-525) parity matrix) og release-gate mot legacy Game 2.
 
@@ -57,7 +57,7 @@ commitRef: de23e274855356a2755fc30b32bcc8ed1ad8d1c2
 
 | Felt | Verdi |
 |------|-------|
-| Navn (NO) | Rocket Bingo |
+| Navn (NO) | Tallspill / Spill 2 |
 | Backend-slug | `rocket` |
 | Frontend-pakke | `packages/game-client/src/games/game2/` |
 | Backend-logikk | `apps/backend/src/game/BingoEngine.ts` (delt) |
@@ -194,7 +194,7 @@ Referanse: `legacy/unity-backend/Game/Game2/Sockets/game2.js`
 | Chat (`SendGameChat`, `GameChatHistory`) | ✅ Portet (gjenbruker G1 `ChatPanel` + BIN-516 DB-persistens via `chat:history`) | — |
 | Lydfiler / nummerannouncement | ❌ Ikke portet | Egen issue |
 | Auto-arm ved join | ✅ Har (avviker fra G1 som eksplisitt fjernet) | Vurder om dette bør være eksplisitt kjøp som G1 |
-| Rocket-stabling polish | ✅ Levert (BIN-529 — `components/RocketStack.ts`) | Lyd + partikkel-effekter kan komme senere |
+| Rocket-stabling polish | ❌ Fjernet 2026-05-03 (Tobias-krav) — Spill 2 har ingen rakett-tematikk per PDF 17 wireframe. `RocketStack.ts` + `rocket.png` slettet. Erstattet av Jackpot-bar med 6 slots over ticket-grid. | — |
 | `LeftRocketRoom` (spesifikk leave-event) | 🟡 Dekket av generelt `disconnect`-handling | OK |
 
 ### 11.2 Delte avvik (gjelder alle spill)

@@ -1,5 +1,5 @@
 import { t } from "../i18n/I18n.js";
-import type { Session } from "../auth/Session.js";
+import { isAgentPortalRole, type Session } from "../auth/Session.js";
 import { logout } from "../api/auth.js";
 import { listPendingRequests } from "../api/paymentRequests.js";
 import { escapeHtml } from "../utils/escapeHtml.js";
@@ -80,14 +80,21 @@ export function renderHeader(container: HTMLElement, session: Session, maintenan
     ul.append(balLi);
 
     // Cash in/out
-    const cashLi = document.createElement("li");
-    const cashA = document.createElement("a");
-    cashA.className = "btn btn-success";
-    cashA.href = "#/agent/cashinout";
-    cashA.setAttribute("style", "color:white;");
-    cashA.textContent = t("cash_in_out");
-    cashLi.append(cashA);
-    ul.append(cashLi);
+    // Bug #6 (audit 2026-05-01): tidligere ble denne knappen rendret for
+    // ALLE roller, men `#/agent/cashinout` krever AGENT/HALL_OPERATOR-rolle.
+    // ADMIN-klikk traff backend med 400 FORBIDDEN. Sidebar-leafen er allerede
+    // role-gated i sidebarSpec.ts (PR #800) — vi følger samme mønster her
+    // og skjuler hele <li>-en for admin/super-admin.
+    if (isAgentPortalRole(session.role)) {
+      const cashLi = document.createElement("li");
+      const cashA = document.createElement("a");
+      cashA.className = "btn btn-success";
+      cashA.href = "#/agent/cashinout";
+      cashA.setAttribute("style", "color:white;");
+      cashA.textContent = t("cash_in_out");
+      cashLi.append(cashA);
+      ul.append(cashLi);
+    }
 
     // Notifications bell
     const bellLi = document.createElement("li");
@@ -171,6 +178,34 @@ export function renderHeader(container: HTMLElement, session: Session, maintenan
     window.location.reload();
   });
   ul.append(userLi);
+
+  // 2026-05-01 (Tobias): synlig logg-ut-knapp ved siden av user-dropdown.
+  // Bootstrap-3-dropdown-toggle krever at bootstrap.js er lastet for å vise
+  // .dropdown-menu via [data-toggle="dropdown"]. Hvis bootstrap.js mangler
+  // (eller blir blokkert av strict CSP), klarer ikke brukere å logge seg ut
+  // via avatar-menyen. Denne synlige knappen er en defensiv duplikat — same
+  // logout-handler, samme `logout()`-call mot backend. Ufarlig om dropdown-en
+  // også fungerer; brukere som kjenner dropdown-flyten kan fortsatt bruke
+  // den, og brukere som ikke ser den får denne fall-back-en.
+  const logoutBtnLi = document.createElement("li");
+  const logoutBtn = document.createElement("a");
+  logoutBtn.href = "#";
+  logoutBtn.className = "btn btn-danger";
+  logoutBtn.setAttribute(
+    "style",
+    "color: white; margin: 8px 12px 0 0; font-weight: 600;",
+  );
+  logoutBtn.setAttribute("data-action", "logout-direct");
+  logoutBtn.setAttribute("aria-label", t("sign_out"));
+  logoutBtn.innerHTML = `<i class="fa fa-sign-out" aria-hidden="true"></i> ${escapeHtml(t("sign_out"))}`;
+  logoutBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await logout().catch(() => undefined);
+    window.location.hash = "#/login";
+    window.location.reload();
+  });
+  logoutBtnLi.append(logoutBtn);
+  ul.append(logoutBtnLi);
 
   if (session.isSuperAdmin) {
     const gearLi = document.createElement("li");

@@ -126,6 +126,7 @@ async function startServer(): Promise<Ctx> {
     platformService,
     agentService,
     agentSettlementService: settlementService,
+    agentShiftService,
     auditLogService,
   }));
 
@@ -243,6 +244,36 @@ test("POST /shift/close-day — happy + audit log", async () => {
     await new Promise((r) => setTimeout(r, 30));
     const events = await ctx.auditStore.list();
     assert.ok(events.find((e) => e.action === "agent.settlement.close"));
+  } finally { await ctx.close(); }
+});
+
+test("POST /shift/close-day — logoutFlags persisteres på shift + audit (pilot-day-fix 2026-05-01)", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      distributeWinnings: true,
+      transferRegisterTickets: true,
+      logoutNotes: "End of shift",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.shiftId, shiftId);
+    // Side-effect-counts inkludert i response.
+    assert.equal(typeof res.json.data.pendingCashoutsFlagged, "number");
+    assert.equal(typeof res.json.data.ticketRangesFlagged, "number");
+    // Verifiser shift-flagg er persistert atomisk (uten egen /shift/logout-call).
+    const shift = await ctx.store.getShiftById(shiftId);
+    assert.equal(shift?.distributedWinnings, true);
+    assert.equal(shift?.transferredRegisterTickets, true);
+    assert.equal(shift?.logoutNotes, "End of shift");
+    // Audit-event har flag-detaljer.
+    await new Promise((r) => setTimeout(r, 30));
+    const events = await ctx.auditStore.list();
+    const ev = events.find((e) => e.action === "agent.settlement.close");
+    assert.ok(ev);
+    assert.equal(ev?.details?.distributeWinnings, true);
+    assert.equal(ev?.details?.transferRegisterTickets, true);
   } finally { await ctx.close(); }
 });
 

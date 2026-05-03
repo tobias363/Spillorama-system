@@ -81,7 +81,20 @@ export interface CloseDayInput {
   machineBreakdown?: unknown; // validert via validateMachineBreakdown
   /** K1: opplastet bilag (PDF/JPG) som data-URL. */
   bilagReceipt?: unknown; // validert via validateBilagReceipt
+  /**
+   * Pilot-day-fix 2026-05-01: Wireframe Gap #9 (PDF 17.6) logout-flagg.
+   * Tidligere mottatt på `/shift/logout`, men close-day setter is_active=false
+   * atomisk slik at /shift/logout etterpå feilet med NO_ACTIVE_SHIFT.
+   * Akseptert her slik at flaggene persisteres + side-effekter løper i
+   * samme tx (port-callbacks via AgentShiftService etter closeDay returnerer).
+   */
+  logoutFlags?: {
+    distributeWinnings?: boolean;
+    transferRegisterTickets?: boolean;
+    logoutNotes?: string | null;
+  };
 }
+
 
 export interface EditSettlementInput {
   settlementId: string;
@@ -280,10 +293,20 @@ export class AgentSettlementService {
     const settlement = await this.store.runInTransaction(async (client) => {
       // Step 1: mark shift settled — fail-fast hvis allerede settled
       // (ON CONFLICT-style WHERE settled_at IS NULL gir no row → throw).
+      // Pilot-day-fix 2026-05-01: pass logout-flags atomisk slik at
+      // distributed_winnings / transferred_register_tickets / logout_notes
+      // persisteres i samme tx som settled_at.
       const settledShift = await this.store.markShiftSettled(
         shift.id,
         input.agentUserId,
         client ?? undefined,
+        input.logoutFlags
+          ? {
+              distributeWinnings: input.logoutFlags.distributeWinnings,
+              transferRegisterTickets: input.logoutFlags.transferRegisterTickets,
+              logoutNotes: input.logoutFlags.logoutNotes ?? undefined,
+            }
+          : undefined,
       );
       const businessDate = new Date(settledShift.startedAt).toISOString().slice(0, 10);
 

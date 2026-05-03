@@ -1,287 +1,405 @@
-import { Container, Graphics, Text } from "pixi.js";
+/**
+ * Spill 2 (Tallspill) — main gameplay screen for Bong Mockup v2-design.
+ *
+ * Layout (top → bottom) per `Bong Mockup.html` v2:
+ *   1. BallTube:   countdown + draw-counter + drawn balls (12 visible)
+ *   2. Bong-grid:  2×2 of BongCard (scaled 0.7 to fit)
+ *   3. ComboPanel: PlayerCard + Hovedspill 1 + Lykketall + Jackpots
+ *      — sticky-bottom (matcher CSS `.panel-row { margin-top: auto }`)
+ *
+ * STRICT element-cleanup per Tobias-direktiv 2026-05-03:
+ *   "Det er da kun disse elementene samt popup av kjøp av biletter
+ *    som skal være synlig"
+ *
+ * → FJERNET fra v1:
+ *   - LINE/BINGO claim-knapper (ikke i mockup; auto-claim på Fullt Hus
+ *     drives av backend per PR #855)
+ *   - ChatPanel (ikke i mockup; chat var en lokal addition i v1)
+ *
+ * → BEHOLDT (eksplisitt fra Tobias):
+ *   - BuyPopup (mellom-runde kjøp)
+ *
+ * Bakgrunn rendres som `bong-bg.png` Sprite via `Assets.load`.
+ *
+ * Funksjonelt uendret kontrakt mot `Game2Controller`:
+ *   - `setOnClaim` BEVART (kalles fortsatt fra controller, men no-op
+ *     siden knappene er fjernet — auto-claim håndterer alt)
+ *   - `setOnLuckyNumber`, `setOnChooseTickets`, `setOnBuyForNextRound`
+ *   - `buildTickets`, `updateInfo`, `onNumberDrawn`, `onPatternWon`,
+ *     `updateJackpot`, `showBuyPopupForNextRound`, `hideBuyPopupForNextRound`,
+ *     `isBuyPopupVisible`, `reset`
+ *
+ * 2026-05-03 (Agent S, branch feat/spill2-bong-mockup-v2): full layout-
+ * rewrite for v2-design — tube først, bongs midt, combo-panel sticky-
+ * bottom. STRICT cleanup av claim-knapper + chat-panel.
+ */
+
+import { Container, Graphics, Sprite, Assets, type Texture } from "pixi.js";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
-import { TicketScroller } from "../components/TicketScroller.js";
-import { TicketCard } from "../components/TicketCard.js";
-import { DrawnBallsPanel } from "../components/DrawnBallsPanel.js";
-import { ClaimButton } from "../components/ClaimButton.js";
-import { PlayerInfoBar } from "../components/PlayerInfoBar.js";
-import { RocketStack } from "../components/RocketStack.js";
-import { ChatPanel } from "../../../components/ChatPanel.js";
-import { getTicketThemeByName } from "../../game1/colors/TicketColorThemes.js";
-import { checkClaims } from "../logic/ClaimDetector.js";
+import { BongCard } from "../components/BongCard.js";
+import { BallTube } from "../components/BallTube.js";
+import { ComboPanel } from "../components/ComboPanel.js";
+import type { JackpotSlotData } from "../components/JackpotsRow.js";
+import { BuyPopup } from "../components/BuyPopup.js";
+import { LykketallPopup } from "../components/LykketallPopup.js";
 
-const CHAT_WIDTH = 280;
-const CHAT_MARGIN = 12;
+const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
+const STAGE_PADDING_X = 32;
+const STAGE_PADDING_TOP = 14;
+const STAGE_PADDING_BOTTOM = 24;
+const ROW_GAP = 14;
+const MAX_STAGE_WIDTH = 1100;
+/** Bong-grid scale matching `.grid-wrap > * { transform: scale(0.70) }`. */
+const BONG_SCALE = 0.70;
+const BONG_GAP_X = 20;
+const BONG_GAP_Y = 8;
+/** Tube-høyde må matche `BallTube` sin interne TUBE_HEIGHT for layout. */
+const TUBE_HEIGHT = 85;
 
-/**
- * Main gameplay screen — shown during PLAYING state.
- */
 export class PlayScreen extends Container {
-  private scroller: TicketScroller;
-  private drawnBalls: DrawnBallsPanel;
-  private rocketStack: RocketStack;
-  private chatPanel: ChatPanel | null = null;
-  private lineBtn: ClaimButton;
-  private bingoBtn: ClaimButton;
-  private infoBar: PlayerInfoBar;
-  private luckyNumberText: Text;
-  private pageIndicator: Text;
-  private prevBtn: Container;
-  private nextBtn: Container;
+  private bgSprite: Sprite | null = null;
+  private bgFallback: Graphics;
+  private comboPanel: ComboPanel;
+  private ballTube: BallTube;
+  private bongs: BongCard[] = [];
+  private bongGridContainer: Container;
+  private buyPopup: BuyPopup;
+  // 2026-05-03 (Agent Y): popup som åpnes ved klikk på Lykketall-kolonnen
+  // i ComboPanel. Erstatter inline LykketallGrid i ComboPanel per
+  // Tobias-direktiv ("velg lykketall skal være en popup").
+  private lykketallPopup: LykketallPopup;
+  /**
+   * Sist kjent valgt lucky-number — speilet av `state.myLuckyNumber` slik at
+   * popup-en kan vise "current selection" når den åpnes uten å re-loade
+   * fra controller.
+   */
+  private currentLuckyNumber: number | null = null;
   private audio: AudioManager;
+  private screenW: number;
+  private screenH: number;
+  private stageW: number;
+  private stageX: number;
+  // Claim-callback bevart for kontrakt med Game2Controller, men knappene
+  // er fjernet i v2. Auto-claim på Fullt Hus drives av backend (PR #855).
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
-  private lineAlreadyWon = false;
-  private bingoAlreadyWon = false;
+  private onLuckyNumber: ((n: number) => void) | null = null;
+  private onChooseTickets: (() => void) | null = null;
+  private onBuyForNextRound: ((count: number) => void) | null = null;
+  /** Siste kjente entryFee fra state — brukes av `openBuyPopupModal` så
+   *  popup viser korrekt billettpris uavhengig av når brukeren klikker. */
+  private currentEntryFee = 20;
+  /** Nedtellings-driver — vi oppdaterer hvert sekund fra
+   *  `state.millisUntilNextStart` og decreases lokalt mellom snapshots. */
+  private countdownDeadline: number | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     screenWidth: number,
     screenHeight: number,
     audio: AudioManager,
-    socket?: SpilloramaSocket,
-    roomCode?: string,
+    _socket?: SpilloramaSocket,
+    _roomCode?: string,
   ) {
     super();
     this.audio = audio;
+    this.screenW = screenWidth;
+    this.screenH = screenHeight;
 
-    // Info bar (top)
-    this.infoBar = new PlayerInfoBar();
-    this.infoBar.x = 20;
-    this.infoBar.y = 10;
-    this.addChild(this.infoBar);
+    // ── stage-bredde (uten chat, full bredde) ────────────────────────────
+    // STRICT-cleanup per Tobias 2026-05-03: chat er fjernet fra v2-design.
+    // socket/roomCode-args er bevart for kontrakt-kompatibilitet med
+    // Game2Controller, men de brukes ikke lenger til å mounte ChatPanel.
+    const availableW = screenWidth - STAGE_PADDING_X * 2;
+    this.stageW = Math.min(MAX_STAGE_WIDTH, Math.max(640, availableW));
+    this.stageX = STAGE_PADDING_X + Math.max(0, (availableW - this.stageW) / 2);
 
-    // Lucky number display
-    this.luckyNumberText = new Text({
-      text: "",
-      style: { fontFamily: "Arial", fontSize: 16, fill: 0xffe83d },
+    // Fallback-bakgrunn (mørk-rød) frem til PNG laster.
+    this.bgFallback = new Graphics();
+    this.bgFallback.rect(0, 0, screenWidth, screenHeight).fill({ color: 0x2a0d0e });
+    this.addChild(this.bgFallback);
+    void this.loadBackground();
+
+    // ── glass-tube (drawn balls + counter) — ØVERST i v2 ────────────────
+    this.ballTube = new BallTube(this.stageW);
+    this.ballTube.x = this.stageX;
+    this.ballTube.y = STAGE_PADDING_TOP;
+    this.addChild(this.ballTube);
+
+    // ── bong-grid (2×2 BongCard) — MIDTEN ────────────────────────────────
+    this.bongGridContainer = new Container();
+    this.bongGridContainer.x = this.stageX;
+    this.bongGridContainer.y = this.ballTube.y + TUBE_HEIGHT + ROW_GAP + 24;
+    this.addChild(this.bongGridContainer);
+
+    // ── combo-panel — STICKY BOTTOM (matcher CSS margin-top: auto) ──────
+    this.comboPanel = new ComboPanel(this.stageW);
+    this.comboPanel.x = this.stageX;
+    // Foreløpig posisjon — settes endelig i `positionComboPanelBottom`
+    // etter at vi vet panel-høyden.
+    this.comboPanel.y = screenHeight - STAGE_PADDING_BOTTOM - this.comboPanel.height;
+    // setOnLuckyNumber er beholdt no-op for backward-compat; popup-flyt
+    // tar over (klikk på Lykketall-kolonnen → popup → onLuckyNumber).
+    this.comboPanel.setOnLuckyClick(() => this.lykketallPopup.show(this.currentLuckyNumber));
+    // 2026-05-03 (Agent T, PR #873): "Kjøp flere brett"-pill åpner BuyPopup
+    // som modal i stedet for å navigere til ChooseTicketsScreen.
+    this.comboPanel.setOnBuyMore(() => this.openBuyPopupModal());
+    this.addChild(this.comboPanel);
+
+    // 2026-05-03 (Agent S, v2): mellom-runde buy-popup. Vises auto når
+    // `state.millisUntilNextStart` <= 30 s mens forrige runde fortsatt
+    // pågår (PLAYING/SPECTATING). Eksplisitt beholdt per Tobias-direktiv:
+    // "kun disse elementene samt popup av kjøp av biletter".
+    const popupW = 320;
+    const popupH = 220;
+    this.buyPopup = new BuyPopup(popupW, popupH);
+    this.buyPopup.x = (screenWidth - popupW) / 2;
+    this.buyPopup.y = (screenHeight - popupH) / 2;
+    this.buyPopup.setOnBuy((count) => this.onBuyForNextRound?.(count));
+    this.addChild(this.buyPopup);
+
+    // 2026-05-03 (Agent Y): lykketall-popup. Klikk på Lykketall-kolonnen i
+    // ComboPanel åpner denne; valg av nummer fyrer onLuckyNumber-callback
+    // og auto-lukker popup-en. Mountes ETTER buyPopup så den havner over
+    // i z-order ved samtidig synlighet (sjelden, men kan skje hvis bruker
+    // klikker rett mens buyPopup fader inn).
+    this.lykketallPopup = new LykketallPopup(screenWidth, screenHeight);
+    this.lykketallPopup.setOnPick((n) => {
+      this.currentLuckyNumber = n;
+      this.comboPanel.setLuckyNumber(n);
+      this.onLuckyNumber?.(n);
     });
-    this.luckyNumberText.x = screenWidth - 150;
-    this.luckyNumberText.y = 14;
-    this.addChild(this.luckyNumberText);
+    this.addChild(this.lykketallPopup);
 
-    // Drawn balls panel
-    this.drawnBalls = new DrawnBallsPanel();
-    this.drawnBalls.x = 20;
-    this.drawnBalls.y = 45;
-    this.addChild(this.drawnBalls);
-
-    // Chat (right sidebar) — optional, enabled when socket + roomCode provided
-    const chatEnabled = socket != null && roomCode != null;
-    const chatRightEdge = screenWidth - CHAT_MARGIN;
-    const chatLeftEdge = chatEnabled ? chatRightEdge - CHAT_WIDTH : screenWidth;
-
-    // Rocket-stabling — G2 signature. 60-ball range matches BingoEngine capacity.
-    const rocketWidth = 42;
-    const rocketMargin = 12;
-    const rocketTop = 110;
-    const rocketHeight = screenHeight - rocketTop - 80;
-    this.rocketStack = new RocketStack(rocketWidth, rocketHeight, 60);
-    this.rocketStack.x = (chatEnabled ? chatLeftEdge - rocketMargin : chatRightEdge) - rocketWidth;
-    this.rocketStack.y = rocketTop;
-    this.addChild(this.rocketStack);
-
-    // Ticket scroller (main area) — leave room for rocket (always) and chat (optional).
-    const scrollerY = 100;
-    const scrollerHeight = screenHeight - scrollerY - 80;
-    const scrollerWidth = this.rocketStack.x - rocketMargin - 20;
-    this.scroller = new TicketScroller(scrollerWidth, scrollerHeight);
-    this.scroller.x = 20;
-    this.scroller.y = scrollerY;
-    this.addChild(this.scroller);
-
-    if (chatEnabled) {
-      const chatTop = 45;
-      const chatHeight = screenHeight - chatTop - 20;
-      this.chatPanel = new ChatPanel(socket, roomCode, chatHeight);
-      this.chatPanel.x = chatLeftEdge;
-      this.chatPanel.y = chatTop;
-      this.addChild(this.chatPanel);
-    }
-
-    // Claim buttons (bottom)
-    this.lineBtn = new ClaimButton("LINE", 140, 50);
-    this.lineBtn.x = screenWidth / 2 - 150;
-    this.lineBtn.y = screenHeight - 65;
-    this.lineBtn.setOnClaim((type) => this.onClaim?.(type));
-    this.addChild(this.lineBtn);
-
-    this.bingoBtn = new ClaimButton("BINGO", 140, 50);
-    this.bingoBtn.x = screenWidth / 2 + 10;
-    this.bingoBtn.y = screenHeight - 65;
-    this.bingoBtn.setOnClaim((type) => this.onClaim?.(type));
-    this.addChild(this.bingoBtn);
-
-    // Ticket pager — prev/next buttons + page indicator below scroller
-    const pagerY = scrollerY + scrollerHeight + 6;
-    this.prevBtn = this.buildPagerButton("‹");
-    this.prevBtn.x = 20;
-    this.prevBtn.y = pagerY;
-    this.prevBtn.on("pointerdown", () => {
-      this.scroller.pagePrev();
-      setTimeout(() => this.updatePageIndicator(), 270);
-    });
-    this.addChild(this.prevBtn);
-
-    this.nextBtn = this.buildPagerButton("›");
-    this.nextBtn.x = 20 + 36 + 8;
-    this.nextBtn.y = pagerY;
-    this.nextBtn.on("pointerdown", () => {
-      this.scroller.pageNext();
-      setTimeout(() => this.updatePageIndicator(), 270);
-    });
-    this.addChild(this.nextBtn);
-
-    this.pageIndicator = new Text({
-      text: "",
-      style: { fontFamily: "Arial", fontSize: 13, fill: 0xaaaaaa },
-    });
-    this.pageIndicator.x = 20 + (36 + 8) * 2;
-    this.pageIndicator.y = pagerY + 8;
-    this.addChild(this.pageIndicator);
+    // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
+    this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
   }
 
-  private buildPagerButton(glyph: string): Container {
-    const btn = new Container();
-    const bg = new Graphics();
-    bg.roundRect(0, 0, 36, 28, 6);
-    bg.fill(0x2e0000);
-    bg.stroke({ color: 0x790001, width: 1 });
-    btn.addChild(bg);
-    const label = new Text({
-      text: glyph,
-      style: { fontFamily: "Arial", fontSize: 20, fontWeight: "bold", fill: 0xffe83d },
-    });
-    label.anchor.set(0.5);
-    label.x = 18;
-    label.y = 14;
-    btn.addChild(label);
-    btn.eventMode = "static";
-    btn.cursor = "pointer";
-    return btn;
+  /**
+   * Bevart for kontrakt-kompatibilitet med `Game2Controller`. Ingen UI-
+   * elementer er knyttet til claim i v2 — auto-claim på Fullt Hus
+   * håndteres av backend (PR #855).
+   */
+  setOnClaim(cb: (type: "LINE" | "BINGO") => void): void {
+    this.onClaim = cb;
   }
 
-  private updatePageIndicator(): void {
-    const { current, total } = this.scroller.getPageInfo();
-    this.pageIndicator.text = total > 1 ? `Kort ${current} / ${total}` : "";
-    const show = total > 1;
-    this.prevBtn.visible = show;
-    this.nextBtn.visible = show;
+  /** Sett callback for klikk i Lykketall-grid. */
+  setOnLuckyNumber(cb: (n: number) => void): void {
+    this.onLuckyNumber = cb;
   }
 
-  setOnClaim(callback: (type: "LINE" | "BINGO") => void): void {
-    this.onClaim = callback;
+  /** Sett callback for "Kjøp flere brett"-pill. */
+  setOnChooseTickets(cb: () => void): void {
+    this.onChooseTickets = cb;
   }
 
-  /** Build ticket grids from game state. */
+  /**
+   * Sett callback for mellom-runde buy-popup-kjøp. Kalles når spilleren
+   * trykker "Kjøp" i popup-en — controller skal armBet for neste runde.
+   */
+  setOnBuyForNextRound(cb: (count: number) => void): void {
+    this.onBuyForNextRound = cb;
+  }
+
+  /**
+   * Vis mellom-runde buy-popup. Idempotent — gjør ingenting hvis allerede
+   * synlig. Brukes av Game2Controller når countdown < 30 s og spilleren
+   * ikke allerede har armed for neste runde.
+   */
+  showBuyPopupForNextRound(ticketPrice: number, maxTickets = 30): void {
+    if (this.buyPopup.visible) return;
+    this.buyPopup.show(ticketPrice, maxTickets);
+  }
+
+  /** Skjul mellom-runde buy-popup. Idempotent. */
+  hideBuyPopupForNextRound(): void {
+    if (!this.buyPopup.visible) return;
+    this.buyPopup.hide();
+  }
+
+  /**
+   * 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): åpne
+   * BuyPopup som modal overlay når brukeren klikker "Kjøp flere brett"
+   * i Hovedspill-kolonnen i ComboPanel. Bruker siste kjente entryFee
+   * fra `currentEntryFee` så popup viser korrekt billettpris.
+   */
+  private openBuyPopupModal(): void {
+    this.showBuyPopupForNextRound(this.currentEntryFee);
+  }
+
+  /** Returner true hvis popup er synlig. Brukes av controller for trigger-gating. */
+  isBuyPopupVisible(): boolean {
+    return this.buyPopup.visible;
+  }
+
+  /** Bygg bong-kort fra game state. Erstatter forrige sett. */
   buildTickets(state: GameState): void {
-    this.scroller.clearCards();
-    this.rocketStack.syncTo(state.drawnNumbers.length);
-    this.lineAlreadyWon = false;
-    this.bingoAlreadyWon = false;
-
-    // Check if patterns already won
-    for (const result of state.patternResults) {
-      if (result.isWon && result.claimType === "LINE") this.lineAlreadyWon = true;
-      if (result.isWon && result.claimType === "BINGO") this.bingoAlreadyWon = true;
+    this.clearBongs();
+    if (state.entryFee != null && state.entryFee > 0) {
+      this.currentEntryFee = state.entryFee;
     }
+    this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
+    this.comboPanel.setPlayerCount(state.playerCount ?? 0);
 
     for (let i = 0; i < state.myTickets.length; i++) {
       const ticket = state.myTickets[i];
-      const theme = getTicketThemeByName(ticket.color, i);
-      const card = new TicketCard(i, {
-        cardBg: theme.cardBg,
-        headerBg: theme.headerBg,
-        headerText: theme.headerText,
-        toGoColor: theme.toGoColor,
-        toGoCloseColor: theme.toGoCloseColor,
-        cellColors: theme.cellColors,
+      const card = new BongCard({
+        colorKey: "yellow", // Spill 2 har kun én ticket-type per PR #856.
+        label: ticket.color ?? `Brett ${i + 1}`,
+        price: ticket.price ?? state.entryFee ?? 20,
       });
-      card.loadTicket(ticket);
-
-      // Mark already drawn numbers
-      if (state.myMarks[i]) {
-        card.markNumbers(state.myMarks[i]);
-      } else {
-        // Fallback: mark from drawn numbers
-        for (const n of state.drawnNumbers) {
-          card.markNumber(n);
-        }
-      }
-
-      // Highlight lucky number
-      if (state.myLuckyNumber) {
-        card.highlightLuckyNumber(state.myLuckyNumber);
-      }
-
-      this.scroller.addCard(card);
+      const initialMarks = state.myMarks[i] ?? state.drawnNumbers;
+      card.loadTicket(ticket, initialMarks);
+      this.bongs.push(card);
+      this.bongGridContainer.addChild(card);
     }
 
-    this.scroller.sortBestFirst();
-    this.updatePageIndicator();
-    this.updateClaimButtons(state);
+    // Last lucky-number til Lykketall-grid (for late-joiner).
+    this.currentLuckyNumber = state.myLuckyNumber ?? null;
+    this.comboPanel.setLuckyNumber(this.currentLuckyNumber);
+
+    // Last alle drawn-balls inn i tuben (snapshot-restore).
+    this.ballTube.loadBalls(state.drawnNumbers);
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+    this.startCountdown(state.millisUntilNextStart);
+
+    this.layoutBongGrid();
   }
 
-  /** Handle a newly drawn number. */
-  onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
-    this.scroller.markNumberOnAll(number);
-    this.drawnBalls.addBall(number);
-    this.rocketStack.addSegment();
+  /** Håndter ny trukket ball (fra `numberDrawn`-event). */
+  onNumberDrawn(number: number, _drawIndex: number, state: GameState): void {
+    for (const card of this.bongs) {
+      card.markNumber(number);
+    }
+    this.ballTube.addBall(number);
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+    this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
     this.audio.playNumber(number);
-    this.scroller.sortBestFirst();
-    this.updateClaimButtons(state);
-    this.updateInfo(state);
+    this.startCountdown(state.millisUntilNextStart);
   }
 
-  /** Handle pattern won broadcast. */
-  onPatternWon(payload: PatternWonPayload): void {
-    if (payload.claimType === "LINE") {
-      this.lineAlreadyWon = true;
-      this.lineBtn.reset();
-    }
-    if (payload.claimType === "BINGO") {
-      this.bingoAlreadyWon = true;
-      this.bingoBtn.reset();
-    }
+  /** Oppdater jackpot-prizer fra socket-event. */
+  updateJackpot(list: JackpotSlotData[]): void {
+    this.comboPanel.updateJackpots(list);
   }
 
-  /** Update display from game state. */
+  /**
+   * Pattern won broadcast — kalles fra controller. v2 har ingen
+   * claim-knapper å resette; metoden beholdes som no-op for
+   * kontrakt-kompatibilitet og logging-formål.
+   */
+  onPatternWon(_payload: PatternWonPayload): void {
+    // No-op i v2 — auto-claim på Fullt Hus håndteres av backend.
+  }
+
+  /** State-oppdatering (player count, prize pool osv.). */
   updateInfo(state: GameState): void {
-    this.infoBar.update(
-      state.playerCount,
-      state.drawCount,
-      state.totalDrawCapacity,
-      state.prizePool,
-    );
-    this.luckyNumberText.text = state.myLuckyNumber
-      ? `Heldig tall: ${state.myLuckyNumber}`
-      : "";
+    if (state.myLuckyNumber != null) {
+      this.currentLuckyNumber = state.myLuckyNumber;
+      this.comboPanel.setLuckyNumber(state.myLuckyNumber);
+    }
+    if (state.entryFee != null && state.entryFee > 0) {
+      this.currentEntryFee = state.entryFee;
+    }
+    this.comboPanel.setPlayerCount(state.playerCount ?? 0);
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+    this.startCountdown(state.millisUntilNextStart);
   }
 
   /** Reset for next game. */
   reset(): void {
-    this.scroller.clearCards();
-    this.drawnBalls.clear();
-    this.rocketStack.reset();
-    this.lineBtn.reset();
-    this.bingoBtn.reset();
-    this.lineAlreadyWon = false;
-    this.bingoAlreadyWon = false;
+    this.clearBongs();
+    this.ballTube.clear();
+    this.countdownDeadline = null;
+    this.ballTube.setCountdown(null);
   }
 
-  private updateClaimButtons(state: GameState): void {
-    const { canClaimLine, canClaimBingo } = checkClaims(
-      state.myTickets,
-      state.myMarks,
-      state.drawnNumbers,
-    );
-
-    if (canClaimLine && !this.lineAlreadyWon) {
-      this.lineBtn.setState("ready");
+  destroy(options?: Parameters<Container["destroy"]>[0]): void {
+    if (this.countdownInterval !== null) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
     }
-    if (canClaimBingo && !this.bingoAlreadyWon) {
-      this.bingoBtn.setState("ready");
+    this.clearBongs();
+    super.destroy(options);
+  }
+
+  // ── interne ─────────────────────────────────────────────────────────────
+
+  private clearBongs(): void {
+    for (const card of this.bongs) {
+      card.stopAllAnimations();
+      card.destroy();
+    }
+    this.bongs = [];
+    this.bongGridContainer.removeChildren();
+  }
+
+  /**
+   * Layout 4 (eller flere) BongCards i et 2-kolonne-grid med scale 0.70,
+   * matching `.grid-wrap` fra HTML-mockupen. Kortene rendres i naturlig
+   * størrelse og bruker `scale.set(0.70)` så posisjoneringen blir
+   * forutsigbar.
+   */
+  private layoutBongGrid(): void {
+    if (this.bongs.length === 0) return;
+    // Kort-bredde og høyde i naturlig størrelse (vi spør første kort).
+    const naturalW = this.bongs[0].cardWidth;
+    const naturalH = this.bongs[0].cardHeight;
+    const scaledW = naturalW * BONG_SCALE;
+    const scaledH = naturalH * BONG_SCALE;
+    const cols = 2;
+    const rowW = cols * scaledW + (cols - 1) * BONG_GAP_X;
+    const startX = Math.max(0, (this.stageW - rowW) / 2);
+
+    for (let i = 0; i < this.bongs.length; i++) {
+      const card = this.bongs[i];
+      card.scale.set(BONG_SCALE);
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      card.x = startX + col * (scaledW + BONG_GAP_X);
+      card.y = row * (scaledH + BONG_GAP_Y);
+    }
+  }
+
+  /**
+   * Sett ny countdown-deadline. Tikker ned hvert sekund via `tickCountdown`.
+   * `null`/0 viser "—:—".
+   */
+  private startCountdown(milliseconds: number | null): void {
+    if (milliseconds == null || milliseconds <= 0) {
+      this.countdownDeadline = null;
+      this.ballTube.setCountdown(null);
+      return;
+    }
+    this.countdownDeadline = Date.now() + milliseconds;
+    this.ballTube.setCountdown(milliseconds);
+  }
+
+  private tickCountdown(): void {
+    if (this.countdownDeadline == null) return;
+    const remaining = this.countdownDeadline - Date.now();
+    if (remaining <= 0) {
+      this.countdownDeadline = null;
+      this.ballTube.setCountdown(null);
+      return;
+    }
+    this.ballTube.setCountdown(remaining);
+  }
+
+  private async loadBackground(): Promise<void> {
+    try {
+      const tex = (await Assets.load(BG_URL)) as Texture;
+      if (this.destroyed) return;
+      const sprite = new Sprite(tex);
+      sprite.width = this.screenW;
+      sprite.height = this.screenH;
+      this.bgSprite = sprite;
+      this.addChildAt(sprite, 1); // over fallback, under panels
+    } catch {
+      // Asset mangler — vi beholder fallback-fargen.
     }
   }
 }

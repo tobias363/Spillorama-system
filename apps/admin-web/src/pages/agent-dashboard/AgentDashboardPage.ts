@@ -26,7 +26,7 @@
 
 import { t } from "../../i18n/I18n.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
-import { isAbortError } from "../../api/client.js";
+import { isAbortError, ApiError } from "../../api/client.js";
 import {
   getAgentDashboard,
   type AgentDashboard,
@@ -34,6 +34,10 @@ import {
   type AgentDashboardOngoingGame,
   type AgentDashboardTopPlayer,
 } from "../../api/agent-dashboard.js";
+import { startShift } from "../../api/agent-shift.js";
+import { fetchMe } from "../../api/auth.js";
+import { getSession, setSession } from "../../auth/Session.js";
+import { Toast } from "../../components/Toast.js";
 
 const POLL_INTERVAL_MS = 30_000;
 // Backend returnerer game-slug som "bingo" / "rocket" / "monsterbingo" / "spillorama".
@@ -60,6 +64,15 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let abortController: AbortController | null = null;
 let mountedContainer: HTMLElement | null = null;
 let activeTab: GameTab = DEFAULT_TAB;
+// Bug #3 (audit 2026-05-01): session.hall kan være tom ved første render
+// (login-flow i LoginPage.ts:202-212 bruker mapUserToSession(user) UTEN å
+// kalle getAgentContext, så session.hall populeres først ved senere
+// fetchMe()). Vi lytter på `session:changed`-event slik at headeren
+// re-rendres så snart fetchMe() (her eller andre steder) populerer
+// session.hall. Lytter ryddes opp i unmountAgentDashboard() for å unngå
+// leak hvis dashboard remountes flere ganger.
+let lastRenderState: PageState | null = null;
+let sessionChangedHandler: (() => void) | null = null;
 
 /**
  * Mount the agent-portal dashboard and start polling. Idempotent — calling
@@ -72,6 +85,33 @@ export function mountAgentDashboard(container: HTMLElement): void {
   activeTab = DEFAULT_TAB;
   render(container, { data: null, loading: true, error: null });
   void poll();
+  // Bug #3: re-render header når session.hall blir populert. fetchMe() i
+  // bootstrapAuth dispatcher `session:changed` via setSession(), og samme
+  // event fyrer hvis ensureSessionHallPopulated() under fyller den ut.
+  sessionChangedHandler = (): void => {
+    if (!mountedContainer || !lastRenderState) return;
+    render(mountedContainer, lastRenderState);
+  };
+  window.addEventListener("session:changed", sessionChangedHandler);
+  // Defensive: hvis vi mounter med tom session.hall (post-login-flyt der
+  // LoginPage.ts:202-212 satte session UTEN å kalle getAgentContext), kall
+  // fetchMe() for å populere hall. Resultatet trigger session:changed →
+  // re-render. Vi swallow-er feil — render-en viser bare placeholder hvis
+  // det fortsatt feiler.
+  void ensureSessionHallPopulated();
+}
+
+async function ensureSessionHallPopulated(): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+  if (session.role !== "agent" && session.role !== "hall-operator") return;
+  if (session.hall && session.hall.length > 0) return;
+  try {
+    const refreshed = await fetchMe();
+    setSession(refreshed);
+  } catch {
+    // Ignore — header-en faller tilbake til "—" hvis fetchMe feiler.
+  }
 }
 
 /**
@@ -87,6 +127,11 @@ export function unmountAgentDashboard(): void {
     abortController.abort();
     abortController = null;
   }
+  if (sessionChangedHandler) {
+    window.removeEventListener("session:changed", sessionChangedHandler);
+    sessionChangedHandler = null;
+  }
+  lastRenderState = null;
   mountedContainer = null;
 }
 
@@ -117,9 +162,21 @@ function schedule(): void {
 }
 
 function render(container: HTMLElement, state: PageState): void {
+  // Husk siste state slik at session:changed-handleren kan re-rendre
+  // headeren uten å måtte poll-e dashboardet på nytt.
+  lastRenderState = state;
   const data = state.data;
-  const groupHallLabel = data?.shift?.hallId ?? "—";
-  const hallNameLabel = data?.shift?.hallId ?? "—";
+  // Bug #3 (audit 2026-05-01): header viste hall-UUID i stedet for hall-navn.
+  // Etter PR #795 populerer fetchMe `session.hall[0]` med både `name` og
+  // `groupName` via /api/agent/context, så vi resolver header-labels fra
+  // session i stedet for `data.shift.hallId` (som er en UUID). UUID-en
+  // beholdes som siste fallback (defensive — bør aldri trigges når session
+  // har en hall-tildeling).
+  const session = getSession();
+  const primaryHall = session?.hall?.[0];
+  const groupHallLabel =
+    primaryHall?.groupName ?? primaryHall?.name ?? data?.shift?.hallId ?? "—";
+  const hallNameLabel = primaryHall?.name ?? data?.shift?.hallId ?? "—";
 
   container.innerHTML = `
     ${contentHeader(groupHallLabel, hallNameLabel)}
@@ -436,10 +493,25 @@ function loadingBanner(): string {
 }
 
 function noShiftBanner(): string {
+  // 2026-05-01 (Tobias): legg til synlig "Åpne skift"-knapp inne i banneret.
+  // Tidligere viste banneret kun teksten "Åpne et skift for å se dashboard-
+  // data" uten noen knapp som faktisk gjorde jobben — UX-mangel som
+  // tvang agenten til å bruke API-et direkte. Knappen kaller
+  // `POST /api/agent/shift/start` med agentens primary-hall fra session.
+  // `data-action="open-shift"` wires til håndleren i wireHeaderActions.
   return `
-    <div class="alert alert-warning" data-marker="dashboard-no-shift" role="alert">
-      <i class="fa fa-info-circle" aria-hidden="true"></i>
-      ${escapeHtml(t("agent_dashboard_no_shift_warning"))}
+    <div class="alert alert-warning" data-marker="dashboard-no-shift" role="alert"
+         style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+      <div>
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
+        ${escapeHtml(t("agent_dashboard_no_shift_warning"))}
+      </div>
+      <button class="btn btn-success" data-action="open-shift"
+              data-marker="dashboard-open-shift-button"
+              style="font-weight:600;">
+        <i class="fa fa-play" aria-hidden="true"></i>
+        ${escapeHtml(t("agent_dashboard_start_shift"))}
+      </button>
     </div>`;
 }
 
@@ -451,6 +523,43 @@ function wireHeaderActions(container: HTMLElement): void {
   if (cashBtn) {
     cashBtn.addEventListener("click", () => {
       window.location.hash = "#/agent/cash-in-out";
+    });
+  }
+  // 2026-05-01 (Tobias): "Åpne skift"-knapp i noShiftBanner. Kaller
+  // POST /api/agent/shift/start med agentens primary-hall fra session.
+  // Wireframe (PDF 17.5) sier dette egentlig hører hjemme i en
+  // Add Daily Balance-modal — men backend krever at en shift er åpen FØR
+  // openDay kan kalles, så vi splitter flyten: knappen oppretter shift,
+  // dashboard refreshes, deretter får agenten "Legg til daglig saldo"
+  // tilgjengelig på Cash In/Out-siden.
+  const openShiftBtn = container.querySelector<HTMLButtonElement>(
+    'button[data-action="open-shift"]',
+  );
+  if (openShiftBtn) {
+    openShiftBtn.addEventListener("click", async () => {
+      const session = getSession();
+      const hallId = session?.hall?.[0]?.id;
+      if (!hallId) {
+        Toast.error(t("hall_not_assigned") || "Ingen hall tildelt på sesjonen.");
+        return;
+      }
+      openShiftBtn.disabled = true;
+      try {
+        // Backend bruker bare hallId; openingBalance kreves av TS-signaturen
+        // men ignoreres serverside (se apps/backend/src/routes/agent.ts:286).
+        // Daily-balance settes separat via Add Daily Balance-modal etterpå.
+        await startShift({ hallId, openingBalance: 0 });
+        Toast.success(
+          t("shift_started_successfully") || "Skift åpnet — laster dashboard …",
+        );
+        // Trigger dashboard-poll umiddelbart slik at no-shift-banneret
+        // forsvinner uten å vente på 30s polling-tick.
+        void poll();
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+        Toast.error(msg);
+        openShiftBtn.disabled = false;
+      }
     });
   }
   const langSel = container.querySelector<HTMLSelectElement>(

@@ -17,11 +17,28 @@
    AdminLTE 2 sin wrapper har ikke min-height som fyller viewporten, så body-
    bakgrunnen (hvit default) vises under footer. Vi matcher body-bakgrunnen til
    AdminLTE-temaet (#ecf0f5) og sikrer at wrapper strekker seg til bunn. */
-html, body {
+html {
+  min-height: 100%;
+  background-color: #1a2226;
+}
+body {
+  margin: 0;
   min-height: 100%;
   background-color: #ecf0f5;
 }
 body.skin-blue .wrapper {
+  min-height: 100vh;
+}
+
+/* Login-page (og register-page) skal fylle hele viewport med konsistent
+   mørk bakgrunn — ingen grå striper top/bunn. AdminLTE setter
+   `.login-page { background: #1a2226 }` allerede, men body's
+   `min-height: 100%` (av html, som ikke har eksplisitt height) faller
+   tilbake til auto/content-height. Når innholdet er kortere enn viewport
+   vises html's lyse bakgrunn. Pinning til 100vh fjerner gappen. */
+body.login-page,
+body.register-page {
+  background-color: #1a2226;
   min-height: 100vh;
 }
 

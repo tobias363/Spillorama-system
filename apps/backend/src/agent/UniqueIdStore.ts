@@ -229,7 +229,18 @@ export class PostgresUniqueIdStore implements UniqueIdStore {
   }
 
   async insertCard(input: InsertUniqueIdInput): Promise<UniqueIdCard> {
-    const hours = input.hoursValidity;
+    // P0-4 (BIN-pilot 2026-05-01): bind `hours_validity` som TEXT for
+    // `($4 || ' hours')::interval`-konstruksjonen. Hvis verdien sendes som
+    // raw JS `number`, binder `node-postgres` parameteren som integer, og
+    // PostgreSQL kaster `operator does not exist: integer || unknown` på
+    // konkateneringen — noe som blir til `INTERNAL_ERROR — "Uventet feil i
+    // server."` mot klienten (apiFailure → toPublicError fanger ikke det
+    // som DomainError). Samme mønster som SwedbankPayService.ts:666,
+    // swedbankPaymentSync.ts:61, Game1TransferHallService.ts:319 og
+    // bankIdExpiryReminder.ts:92,103 som alle bruker `String(...)`. Vi
+    // caster tilbake til INTEGER i SQL for `hours_validity`-kolonnen som
+    // har INTEGER-type i schemaet.
+    const hoursText = String(input.hoursValidity);
     const result = await this.pool.query<{
       id: string;
       hall_id: string;
@@ -253,13 +264,13 @@ export class PostgresUniqueIdStore implements UniqueIdStore {
          payment_type, created_by_agent_id, printed_at, reprinted_count, status,
          regenerated_from_id
        ) VALUES (
-         $1, $2, $3, now(), now() + ($4 || ' hours')::interval, $4, $5, $6, now(), 0, 'ACTIVE', $7
+         $1, $2, $3, now(), now() + ($4 || ' hours')::interval, $4::int, $5, $6, now(), 0, 'ACTIVE', $7
        ) RETURNING *`,
       [
         input.id,
         input.hallId,
         input.balanceCents,
-        hours,
+        hoursText,
         input.paymentType,
         input.createdByAgentId,
         input.regeneratedFromId ?? null,

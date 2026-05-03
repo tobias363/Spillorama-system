@@ -121,3 +121,86 @@ export async function resumeAgentGame1(): Promise<Spill1ActionResponse> {
     { method: "POST", auth: true, body: {} }
   );
 }
+
+/**
+ * 2026-05-02 (Tobias UX-feedback): non-master agent kan markere egen hall
+ * som klar. Backend-rute er admin-side (`/api/admin/game1/halls/:hallId/ready`)
+ * men AGENT har `GAME1_HALL_READY_WRITE`-permission + hall-scope.
+ */
+export async function markHallReadyForGame(
+  hallId: string,
+  gameId: string,
+  digitalTicketsSold?: number
+): Promise<unknown> {
+  const body: Record<string, unknown> = { gameId };
+  if (typeof digitalTicketsSold === "number") {
+    body.digitalTicketsSold = digitalTicketsSold;
+  }
+  return apiRequest<unknown>(
+    `/api/admin/game1/halls/${encodeURIComponent(hallId)}/ready`,
+    { method: "POST", auth: true, body }
+  );
+}
+
+export async function unmarkHallReadyForGame(
+  hallId: string,
+  gameId: string
+): Promise<unknown> {
+  return apiRequest<unknown>(
+    `/api/admin/game1/halls/${encodeURIComponent(hallId)}/unready`,
+    { method: "POST", auth: true, body: { gameId } }
+  );
+}
+/**
+ * 2026-05-02: bingovert markerer egen hall som "Ingen kunder" — hallen
+ * ekskluderes fra runden. Master-konsollet ser hallen som rød. Agent
+ * kan re-åpne via `setHallHasCustomersForGame`.
+ *
+ * Backend-rute: POST /api/admin/game1/halls/:hallId/no-customers
+ * Permission:   GAME1_HALL_READY_WRITE + hall-scope (egen hall)
+ */
+export async function setHallNoCustomersForGame(
+  hallId: string,
+  gameId: string,
+  reason?: string
+): Promise<unknown> {
+  const body: Record<string, unknown> = { gameId };
+  if (reason && reason.trim()) {
+    body.reason = reason.trim();
+  }
+  return apiRequest<unknown>(
+    `/api/admin/game1/halls/${encodeURIComponent(hallId)}/no-customers`,
+    { method: "POST", auth: true, body }
+  );
+}
+
+/**
+ * 2026-05-02: bingovert un-ekskluderer egen hall (angrer "Ingen kunder").
+ *
+ * Backend-rute: POST /api/admin/game1/halls/:hallId/has-customers
+ */
+export async function setHallHasCustomersForGame(
+  hallId: string,
+  gameId: string
+): Promise<unknown> {
+  return apiRequest<unknown>(
+    `/api/admin/game1/halls/${encodeURIComponent(hallId)}/has-customers`,
+    { method: "POST", auth: true, body: { gameId } }
+  );
+}
+
+/**
+ * 2026-05-02: master-agent stopper aktiv runde fra cash-inout-dashboardet.
+ *
+ * Backend-rute: POST /api/agent/game1/stop
+ */
+export async function stopAgentGame1(reason?: string): Promise<Spill1ActionResponse> {
+  const body: Record<string, unknown> = {};
+  if (reason && reason.trim()) {
+    body.reason = reason.trim();
+  }
+  return apiRequest<Spill1ActionResponse>(
+    "/api/agent/game1/stop",
+    { method: "POST", auth: true, body }
+  );
+}

@@ -28,6 +28,10 @@ import {
   type OrderPaymentMethod,
 } from "../../api/agent-history.js";
 import { Toast } from "../../components/Toast.js";
+import {
+  isNoShiftError,
+  renderNoShiftBanner,
+} from "./noShiftFallback.js";
 
 const PAYMENT_METHOD_LABELS: Record<OrderPaymentMethod, string> = {
   CASH: "Kontant",
@@ -185,6 +189,13 @@ export async function renderOrderHistoryPage(
       });
       handle.setRows(res.sales);
     } catch (err) {
+      // Bug #5: 400 SHIFT_NOT_ACTIVE → swap container med no-shift-banner.
+      if (isNoShiftError(err)) {
+        renderNoShiftBanner(container, () => {
+          void renderOrderHistoryPage(container);
+        });
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       host.insertAdjacentHTML(
         "afterbegin",

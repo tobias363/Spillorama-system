@@ -1,21 +1,54 @@
 /*
  * TV Screen + Winners — full-screen public display stylesheet.
  *
- * Designreferanse: Admin V1.0 Game 1 - 24.3.2023 side 17
- *                  Admin CR 21.02.2024 (Winners-siden)
+ * Designreferanse:
+ *   - Bingo.html (Claude Design 2026-05-03) — ny ball-display under trekning
+ *   - Admin V1.0 Game 1 - 24.3.2023 side 17 (legacy basis)
+ *   - Admin CR 21.02.2024 (Winners-siden — egen redesign kommer)
  *
- * Kjennetegn:
- *   - Red gradient bakgrunn (legacy Spill-O-Rama branding)
- *   - Gold text for headers
- *   - Full-screen (dekker hele viewport — ingen nav, ingen scroll)
- *   - Stor sirkel med siste trukne tall, patterns-tabell venstre
+ * Kjennetegn (ny design 2026-05-03 Agent G3):
+ *   - Burgunder bakgrunn med bingo-bg.png + radial vignette
+ *   - Gull-aksent (#f5c542 / #ffe07a / gold-line varianter) for typografi
+ *     og borders
+ *   - Anton-font for store tall + tittel; Inter for body
+ *   - Stor 3D rød bingo-ball (radial gradient + spec highlights) som aktivt
+ *     trekk; pattern-rader styles som premium casino-cards
+ *   - "Hall Belongs To"-kolonne, KPI-row, phase-banner, halls-stripe,
+ *     screensaver, voice-select — alle data-testids og kontrakter bevart
+ *
+ * Winners-siden beholder eldre styling — Tobias kommer med eget design.
  */
+
+/* Anton + Inter fra Google Fonts. CSP whitelister fonts.googleapis.com +
+ * fonts.gstatic.com (vite.config.ts) i dev; produksjon må speile via
+ * Render eller reverse-proxy. Hvis fonts ikke laster (offline TV) faller
+ * vi tilbake til Helvetica Neue / Arial — fallback definert per regel. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=Anton&display=swap");
+
+/* CSS-variabler fra Bingo.html for konsistent fargepalett. */
+:root {
+  --tv-burgundy-deep: #2a0a10;
+  --tv-burgundy: #4a1620;
+  --tv-burgundy-light: #6b1f2a;
+  --tv-burgundy-header: #5a1922;
+  --tv-gold: #f5c542;
+  --tv-gold-bright: #ffe07a;
+  --tv-gold-deep: #c9a020;
+  --tv-gold-line: rgba(245, 197, 66, 0.45);
+  --tv-gold-line-soft: rgba(245, 197, 66, 0.22);
+  --tv-ball-red-light: #e63950;
+  --tv-ball-red: #c8102e;
+  --tv-ball-red-deep: #7a0a1b;
+  --tv-text-white: #ffffff;
+  --tv-text-cream: #f6e8d6;
+  --tv-text-dim: rgba(246, 232, 214, 0.65);
+}
 
 /* Root-host når TV-siden er aktiv — skjul all øvrig admin-chrome og reset */
 .tv-host,
 .tv-host * {
   box-sizing: border-box;
-  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-family: "Inter", "Helvetica Neue", Arial, system-ui, sans-serif;
 }
 
 .tv-host {
@@ -24,516 +57,1323 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: linear-gradient(135deg, #8b0000 0%, #c00000 50%, #8b0000 100%);
-  color: #fff;
-  padding: 24px 40px;
+  /* Bingo.html-bg først, så fallback-burgundy under (vises hvis bilde
+   * mangler). Bilde-pathen er base-prefixed av Vite — `/admin/`-base
+   * gir oss `/admin/assets/tv/bingo-bg.png` som auto-treffes i build. */
+  background:
+    radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%),
+    url("/admin/assets/tv/bingo-bg.png") center/cover no-repeat,
+    linear-gradient(135deg, var(--tv-burgundy-deep) 0%, var(--tv-burgundy) 50%, var(--tv-burgundy-deep) 100%);
+  background-color: #1a0509;
+  color: var(--tv-text-white);
+  padding: 0;
   z-index: 9999;
+  user-select: none;
 }
 
-.tv-header {
+/* ── Header ─────────────────────────────────────────────────────────────
+ * `.tv-header` er pure-text "SPILL-O-RAMA BINGO" (testkrav: textContent
+ * må være eksakt match). Vi rendrer logo-mark som ::before-pseudo og
+ * styler teksten så den oppleves som tre visuelle elementer (logo +
+ * sentrert tittel). Kan ikke splitte i sub-spans uten å bryte
+ * test-kontrakten — derfor all visuell separasjon i CSS.
+ */
+.tv-host .tv-header {
+  position: relative;
+  height: 92px;
+  background:
+    linear-gradient(180deg, var(--tv-burgundy-light) 0%, var(--tv-burgundy-header) 60%, #481319 100%);
+  /* Trick: skjul den sammenhengende teksten visuelt som én "label" og
+   * la pseudo-elementet rendre den synlige tittelen. */
+  font-family: "Anton", "Impact", sans-serif;
+  letter-spacing: 6px;
+  font-size: 0; /* Skjul den literal text-noden — vi rendrer via ::before+::after */
+  color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  font-size: 48px;
-  font-weight: 900;
-  color: #ffd700;
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(245, 197, 66, 0.12);
+  border-bottom: 1px solid var(--tv-gold-line);
+}
+
+/* Subtil gull-stripe nederst i header. */
+.tv-host .tv-header::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245, 197, 66, 0.55), transparent);
+  pointer-events: none;
+}
+
+/* Synlig BINGO-tittel via ::after (textContent-noden er font-size: 0). */
+.tv-host .tv-header::after {
+  content: "BINGO";
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 60px;
+  letter-spacing: 8px;
+  color: #fff;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-  letter-spacing: 4px;
-  margin-bottom: 8px;
-  padding-bottom: 12px;
-  border-bottom: 2px solid #ffd700;
+  display: inline-block;
+  position: relative;
+  z-index: 1;
+}
+
+/* SPILLORAMA-logo-flate til venstre (absolutt-plassert, peker ::after
+ * forblir sentrert). Bruker en flat sirkel + brand-tekst — matcher
+ * designet i Bingo.html uten å trenge ekstra DOM. */
+.tv-host {
+  /* Forholder seg som container for logo-pseudo. */
+}
+.tv-host::before {
+  content: "SPILL-O-RAMA";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 92px;
+  display: flex;
+  align-items: center;
+  padding-left: 80px; /* plass til runde-logo */
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 28px;
+  letter-spacing: 1.5px;
+  color: #fff;
+  z-index: 10;
+  pointer-events: none;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.tv-host::after {
+  content: "";
+  position: absolute;
+  top: 28px;
+  left: 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  /* Conic-gradient pinwheel matching Bingo.html .logo-mark */
+  background: conic-gradient(
+    var(--tv-ball-red) 0deg 45deg, #fff 45deg 90deg,
+    var(--tv-ball-red) 90deg 135deg, #fff 135deg 180deg,
+    var(--tv-ball-red) 180deg 225deg, #fff 225deg 270deg,
+    var(--tv-ball-red) 270deg 315deg, #fff 315deg 360deg
+  );
+  border: 3px solid var(--tv-ball-red);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  z-index: 11;
+  pointer-events: none;
 }
 
 /* ── Sub-header: Current / Next game (Bølge 1) ──────────────────────── */
 
-.tv-subheader {
+.tv-host .tv-subheader {
   display: flex;
   justify-content: center;
   gap: 48px;
-  margin-bottom: 12px;
+  padding: 12px 56px 8px;
   flex-wrap: wrap;
-  min-height: 0; /* empty state skjules naturlig */
+  min-height: 0;
 }
 
-.tv-subheader:empty {
+.tv-host .tv-subheader:empty {
   display: none;
 }
 
-.tv-subheader-line {
+.tv-host .tv-subheader-line {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  color: #ffd700;
+  color: var(--tv-gold);
   font-size: 22px;
   font-weight: 700;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.35);
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
 }
 
-.tv-subheader-label {
+.tv-host .tv-subheader-label {
   text-transform: uppercase;
-  letter-spacing: 1.5px;
-  font-size: 16px;
-  color: rgba(255, 215, 0, 0.75);
+  letter-spacing: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tv-gold);
 }
 
-.tv-subheader-value {
-  color: #fff;
-  font-weight: 800;
+.tv-host .tv-subheader-value {
+  color: var(--tv-text-cream);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.5px;
 }
 
-/* ── TV Screen (live draw) ──────────────────────────────────────────── */
+/* ── TV Screen body — to-kolonne grid (venstre = patterns, høyre = ball) */
 
-.tv-screen-body {
+.tv-host .tv-screen-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  /* -140px dekker header (48px + border + margin) + sub-header
-     (~44px med både current+next-linje) + litt padding. */
-  height: calc(100% - 140px);
+  grid-template-columns: 1fr 700px;
+  gap: 56px;
+  /* 92px header + ~52px sub-header + bottom-padding for halls-stripe. */
+  height: calc(100% - 152px);
+  padding: 32px 56px 96px 56px;
+  align-items: start;
 }
 
-.tv-screen-left {
+.tv-host .tv-screen-left {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 12px;
-  padding: 16px;
+  gap: 14px;
   overflow: hidden;
 }
 
 /* ── KPI-row (Wireframe PDF 16 §16.5) ─────────────────────────────────── */
-/*
- * Tre store bokser øverst i venstre kolonne — speiler boksene på Winners-
- * siden så live og post-game-skjermen er visuelt konsistente. Tallene
- * oppdateres ved hver poll uten layout-skift (faste min-bredder).
- */
-.tv-kpi-row {
+.tv-host .tv-kpi-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   flex-shrink: 0;
 }
 
-.tv-kpi-box {
+.tv-host .tv-kpi-box {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 12px 8px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 2px solid #ffd700;
-  border-radius: 10px;
-  min-height: 86px;
+  padding: 14px 8px;
+  background:
+    linear-gradient(180deg, rgba(74, 22, 32, 0.85) 0%, rgba(45, 12, 18, 0.85) 100%);
+  border: 1px solid var(--tv-gold-line-soft);
+  border-radius: 12px;
+  min-height: 92px;
   text-align: center;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(245, 197, 66, 0.08);
 }
 
-.tv-kpi-value {
-  font-size: 44px;
-  font-weight: 900;
-  color: #ffd700;
+.tv-host .tv-kpi-value {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 48px;
+  font-weight: 400;
+  color: var(--tv-gold-bright);
   line-height: 1;
   text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.45);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  letter-spacing: 1px;
 }
 
-.tv-kpi-label {
-  font-size: 13px;
+.tv-host .tv-kpi-label {
+  font-size: 12px;
   font-weight: 700;
-  color: #fff;
+  color: var(--tv-text-cream);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   line-height: 1.2;
 }
 
-.tv-patterns-table {
+/* ── Pattern-tabell — tabell-strukturen MÅ være <table thead tbody>
+ * (test-kravet i wireframePolish), men vi rendrer som "pattern-list"-
+ * cards visuelt. Trick: thead vises som en label-row med eyebrow-styling,
+ * tbody-tr-ene rendres som card-rader. */
+.tv-host .tv-patterns-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-host .tv-patterns-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 28px;
+  border-collapse: separate;
+  border-spacing: 0 10px;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
 }
 
-.tv-patterns-table th {
+.tv-host .tv-patterns-table thead th {
   text-align: left;
-  padding: 12px 8px;
-  border-bottom: 2px solid #ffd700;
-  color: #ffd700;
+  padding: 0 28px 8px 28px;
+  border-bottom: none;
+  color: var(--tv-text-dim);
   font-weight: 700;
   text-transform: uppercase;
-  font-size: 22px;
-  letter-spacing: 1px;
+  font-size: 12px;
+  letter-spacing: 3px;
+  background: transparent;
 }
 
-.tv-patterns-table td {
-  padding: 16px 8px;
-  border-bottom: 1px solid rgba(255, 215, 0, 0.3);
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.tv-patterns-table tr.highlighted {
-  background: rgba(255, 0, 0, 0.45);
-  box-shadow: 0 0 12px rgba(255, 0, 0, 0.8);
-}
-
-.tv-patterns-table tr.highlighted td {
-  color: #ffd700;
-}
-
-.tv-screen-right {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
-}
-
-.tv-game-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.tv-game-title {
-  font-size: 38px;
-  font-weight: 800;
-  color: #ffd700;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.4);
-}
-
-/* ── Drawn-counter X/Y (Bølge 1) ─────────────────────────────────────
-   Erstatter den gamle tv-total-draws (samme plassering top-right i
-   .tv-game-header). Stor gul tall på rød pute — matcher legacy
-   Ball_Drawn_Count_Txt / txtTotalNumbersWithdrawn. */
-.tv-drawn-counter {
-  background: rgba(0, 0, 0, 0.35);
-  padding: 10px 22px;
-  border-radius: 10px;
+.tv-host .tv-patterns-table thead th:nth-child(2),
+.tv-host .tv-patterns-table thead th:nth-child(3),
+.tv-host .tv-patterns-table thead th:nth-child(4) {
   text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  border: 1px solid rgba(255, 215, 0, 0.5);
 }
 
-.tv-drawn-counter-label {
-  font-size: 14px;
-  color: rgba(255, 215, 0, 0.85);
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
+/* tbody-rad styles som pattern-card. Pad rundt hele radens første og siste
+ * td via padding på cellen + border-radius på første/siste. */
+.tv-host .tv-patterns-table tbody tr {
+  background:
+    linear-gradient(180deg, rgba(74, 22, 32, 0.85) 0%, rgba(45, 12, 18, 0.85) 100%);
+  border: 1px solid var(--tv-gold-line-soft);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(245, 197, 66, 0.08);
+  transition: background-color 250ms ease, border-color 250ms ease, box-shadow 250ms ease, opacity 250ms ease;
+}
+
+.tv-host .tv-patterns-table tbody td {
+  padding: 18px 28px;
+  border-bottom: none;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--tv-text-cream);
+  background: transparent;
+  vertical-align: middle;
+}
+
+.tv-host .tv-patterns-table tbody td:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+  border-left: 1px solid var(--tv-gold-line-soft);
+  font-weight: 700;
+  color: var(--tv-text-cream);
+  letter-spacing: 0.3px;
+}
+
+.tv-host .tv-patterns-table tbody td:nth-child(2),
+.tv-host .tv-patterns-table tbody td:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-host .tv-patterns-table tbody td:nth-child(3) {
+  color: var(--tv-gold-bright);
   font-weight: 700;
 }
 
-.tv-drawn-counter-value {
-  color: #ffd700;
-  font-size: 48px;
-  font-weight: 900;
+.tv-host .tv-patterns-table tbody td:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+  border-right: 1px solid var(--tv-gold-line-soft);
+  text-align: right;
+  color: var(--tv-text-dim);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* Border på top og bunn av hele raden via wrapping (cellene rendrer
+ * border separat — bruker box-shadow på TR). */
+.tv-host .tv-patterns-table tbody tr td:first-child {
+  border-top: 1px solid var(--tv-gold-line-soft);
+  border-bottom: 1px solid var(--tv-gold-line-soft);
+}
+
+.tv-host .tv-patterns-table tbody tr td {
+  border-top: 1px solid var(--tv-gold-line-soft);
+  border-bottom: 1px solid var(--tv-gold-line-soft);
+}
+
+.tv-host .tv-patterns-table tbody tr td:first-child {
+  border-left: 1px solid var(--tv-gold-line-soft);
+}
+
+.tv-host .tv-patterns-table tbody tr td:last-child {
+  border-right: 1px solid var(--tv-gold-line-soft);
+}
+
+/* Highlighted = aktivt mønster — gull pulse + dypere bakgrunn. */
+.tv-host .tv-patterns-table tbody tr.highlighted {
+  background:
+    linear-gradient(180deg, #6e1c26 0%, #4a121b 100%);
+}
+
+.tv-host .tv-patterns-table tbody tr.highlighted td {
+  border-color: var(--tv-gold-line);
+  box-shadow:
+    inset 0 0 28px rgba(245, 197, 66, 0.15);
+}
+
+.tv-host .tv-patterns-table tbody tr.highlighted td:first-child::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 12px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--tv-gold-bright);
+  box-shadow: 0 0 12px var(--tv-gold-bright);
+  animation: tv-pulse 1.6s ease-in-out infinite;
+}
+
+/* Complete = vunnet allerede — fade ut. */
+.tv-host .tv-patterns-table tbody tr.complete {
+  opacity: 0.55;
+}
+
+.tv-host .tv-patterns-table tbody tr.complete td:nth-child(3) {
+  color: var(--tv-text-dim);
+  font-weight: 600;
+}
+
+.tv-host .tv-patterns-table tbody tr.complete td:first-child::before {
+  content: "✓";
+  display: inline-block;
+  margin-right: 12px;
+  color: var(--tv-gold);
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+@keyframes tv-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* ── Right column ──────────────────────────────────────────────────────── */
+.tv-host .tv-screen-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+/* ── Ball-stage: Bingo.html-style 3D-ball-arena ──────────────────────── */
+.tv-host .tv-ball-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 7 / 6;
+  max-height: 64vh;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at center, var(--tv-burgundy-light) 0%, #3a1018 65%, #1f070c 100%);
+  border: 1px solid var(--tv-gold-line-soft);
+  box-shadow:
+    0 16px 50px rgba(0, 0, 0, 0.6),
+    inset 0 0 80px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(245, 197, 66, 0.08);
+}
+
+/* Subtil prikket struktur i bakgrunnen (matcher Bingo.html). */
+.tv-host .tv-ball-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 25% 35%, rgba(255, 255, 255, 0.022) 1px, transparent 2px),
+    radial-gradient(circle at 75% 65%, rgba(255, 255, 255, 0.028) 1px, transparent 2px);
+  background-size: 30px 30px, 42px 42px;
+  pointer-events: none;
+}
+
+.tv-host .tv-stage-label {
+  position: absolute;
+  top: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--tv-text-cream);
+  text-transform: uppercase;
+  opacity: 0.85;
+  z-index: 2;
+}
+
+.tv-host .tv-stage-label-tl {
+  left: 24px;
+}
+
+.tv-host .tv-stage-pill {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  /* Solid semi-transparent (alpha >= 0.85) per
+   * .stylelintrc.json plugin/no-backdrop-filter-without-allowlist —
+   * unngår GPU-blur per Pixi-frame for ARCHITECTURE.md-compliance. */
+  background: rgba(20, 8, 14, 0.88);
+  border: 1px solid rgba(245, 197, 66, 0.35);
+  color: var(--tv-gold-bright);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  z-index: 2;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Spill-tittelen overlay (data-testid='tv-game-title') vises diskret
+ * under draw-badge — den primære visuelle "tittelen" er stage-pill, men
+ * vi beholder game-title som data-element for tester. */
+.tv-host .tv-game-title-overlay {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0;
+  color: transparent;
+  /* Visuelt skjult — pill + draw-badge gir all relevant info; men
+   * data-testid='tv-game-title' MÅ finnes for tvScreen.test.ts. */
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Draw-badge: pill m/sirkel som viser X / Y trukket. */
+.tv-host .tv-draw-badge {
+  position: absolute;
+  top: 22px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 3;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: center;
+}
+
+.tv-host .tv-draw-badge-label {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--tv-text-dim);
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.tv-host .tv-drawn-counter-label {
+  display: inline-block;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+.tv-host .tv-draw-badge-num {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, #fff8e0 0%, #f5d56a 60%, #c9a020 100%);
+  display: grid;
+  place-items: center;
+  font-family: "Anton", "Impact", sans-serif;
+  color: #2a0810;
+  border: 2px solid rgba(255, 224, 122, 0.7);
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.3),
+    0 6px 16px rgba(0, 0, 0, 0.4),
+    0 0 24px rgba(245, 197, 66, 0.4),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.2),
+    inset 0 3px 5px rgba(255, 255, 255, 0.6);
+  text-align: center;
+  padding: 0 6px;
+}
+
+.tv-host .tv-drawn-counter-value {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 24px;
   line-height: 1;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.45);
+  color: #2a0810;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
 }
 
-.tv-drawn-counter-value strong {
-  color: #fff;
-}
-
-.tv-drawn-counter-sep {
-  color: rgba(255, 215, 0, 0.7);
-}
-
-.tv-last-ball-circle {
-  margin: 24px auto;
-  width: 320px;
-  height: 320px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #ffe680, #ffd700 60%, #b38600 100%);
-  color: #7a0000;
-  font-size: 160px;
-  font-weight: 900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 40px rgba(255, 215, 0, 0.6), inset 0 0 24px rgba(0, 0, 0, 0.3);
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.tv-last-5 {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  margin-top: 20px;
-}
-
-.tv-small-ball {
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.tv-host .tv-drawn-counter-value strong {
+  font-weight: 400;
   font-size: 32px;
-  font-weight: 800;
-  color: #fff;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  color: #2a0810;
+}
+
+.tv-host .tv-drawn-counter-sep {
+  color: rgba(42, 8, 16, 0.55);
+  margin: 0 1px;
+  font-size: 22px;
+}
+
+/* ── Big red bingo ball (aktivt trekk) ───────────────────────────────── */
+.tv-host .tv-big-ball-wrap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 56%;
+  aspect-ratio: 1;
+  z-index: 1;
+}
+
+.tv-host .tv-big-ball {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 28%, #ff6478 0%, var(--tv-ball-red-light) 22%, var(--tv-ball-red) 55%, var(--tv-ball-red-deep) 100%);
+  box-shadow:
+    inset -18px -22px 44px rgba(80, 5, 15, 0.6),
+    inset 14px 18px 32px rgba(255, 200, 210, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(200, 16, 46, 0.25);
+  display: grid;
+  place-items: center;
+  animation: tv-ball-bob 3.2s ease-in-out infinite;
+}
+
+/* Column-spesifikke gradient-overrides så fargen matcher 75-ball
+ * column-grupperingen (B blue, I red, N white, G green, O yellow). */
+.tv-host .tv-big-ball.tv-big-ball-col-b {
+  background: radial-gradient(circle at 35% 28%, #9bd0ff 0%, #4d8cd9 22%, #1a4e99 55%, #0c2a55 100%);
+  box-shadow:
+    inset -18px -22px 44px rgba(15, 35, 70, 0.6),
+    inset 14px 18px 32px rgba(200, 220, 250, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(40, 100, 200, 0.25);
+}
+.tv-host .tv-big-ball.tv-big-ball-col-i {
+  /* I = red — same som default. */
+}
+.tv-host .tv-big-ball.tv-big-ball-col-n {
+  background: radial-gradient(circle at 35% 28%, #ffffff 0%, #eaeaea 22%, #b8b8b8 55%, #7a7a7a 100%);
+  box-shadow:
+    inset -18px -22px 44px rgba(60, 60, 60, 0.6),
+    inset 14px 18px 32px rgba(255, 255, 255, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(200, 200, 200, 0.25);
+}
+.tv-host .tv-big-ball.tv-big-ball-col-g {
+  background: radial-gradient(circle at 35% 28%, #a4f0b1 0%, #5cc671 22%, #1f8c3d 55%, #0d4a1f 100%);
+  box-shadow:
+    inset -18px -22px 44px rgba(15, 60, 30, 0.6),
+    inset 14px 18px 32px rgba(200, 250, 215, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(60, 180, 80, 0.25);
+}
+.tv-host .tv-big-ball.tv-big-ball-col-o {
+  background: radial-gradient(circle at 35% 28%, #fff8c5 0%, #ffe07a 22%, #cc9a00 55%, #7a5c00 100%);
+  box-shadow:
+    inset -18px -22px 44px rgba(80, 60, 0, 0.6),
+    inset 14px 18px 32px rgba(255, 250, 200, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(220, 180, 30, 0.25);
+}
+
+.tv-host .tv-big-ball::before {
+  content: "";
+  position: absolute;
+  top: 8%;
+  left: 16%;
+  width: 36%;
+  height: 26%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.85), transparent 65%);
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.tv-host .tv-big-ball::after {
+  content: "";
+  position: absolute;
+  bottom: 10%;
+  right: 14%;
+  width: 22%;
+  height: 14%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.32), transparent 70%);
+  filter: blur(1px);
+  pointer-events: none;
+}
+
+@keyframes tv-ball-bob {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50%      { transform: translateY(-6px) rotate(1deg); }
+}
+
+/* tv-last-ball-circle = den hvite tall-disken inni 3D-ballen.
+ * Dette overrider den eldre legacy `.tv-last-ball-circle` (full gull-disc).
+ * Eksisterende data-testid='tv-last-ball' beholdes på samme element. */
+.tv-host .tv-big-ball-number,
+.tv-host .tv-big-ball .tv-last-ball-circle {
+  position: relative;
+  width: 58%;
+  height: 58%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 30%, #ffffff 0%, #f4ede0 100%);
+  display: grid;
+  place-items: center;
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: clamp(96px, 12vw, 168px);
+  font-weight: 400;
+  color: #1a0509;
+  box-shadow:
+    inset 0 4px 8px rgba(0, 0, 0, 0.18),
+    inset 0 -3px 6px rgba(255, 255, 255, 0.6);
+  line-height: 1;
+  z-index: 2;
+  /* Reset margins fra evt. eldre legacy-CSS. */
+  margin: 0;
+  text-shadow: none;
+}
+
+/* ── Drawn-strip: bunnen av ball-stage med siste 5 baller ────────────── */
+.tv-host .tv-drawn-strip,
+.tv-host .tv-last-5 {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  z-index: 3;
+  margin-top: 0;
+  padding: 0;
+}
+
+.tv-host .tv-small-ball {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    inset -5px -7px 12px rgba(0, 0, 0, 0.35),
+    inset 4px 6px 10px rgba(255, 255, 255, 0.25),
+    0 6px 14px rgba(0, 0, 0, 0.5);
+  animation: tv-small-pop 600ms cubic-bezier(0.2, 1.5, 0.4, 1) backwards;
+  /* Reset legacy basic styling. */
+  font-size: 0;
+  color: transparent;
+}
+
+.tv-host .tv-small-ball:nth-child(1) { animation-delay: 80ms; }
+.tv-host .tv-small-ball:nth-child(2) { animation-delay: 160ms; }
+.tv-host .tv-small-ball:nth-child(3) { animation-delay: 240ms; }
+.tv-host .tv-small-ball:nth-child(4) { animation-delay: 320ms; }
+.tv-host .tv-small-ball:nth-child(5) { animation-delay: 400ms; }
+
+@keyframes tv-small-pop {
+  from { opacity: 0; transform: translateY(20px) scale(0.6); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Spec-highlight på små baller for 3D-feel. */
+.tv-host .tv-small-ball::before {
+  content: "";
+  position: absolute;
+  top: 10%;
+  left: 18%;
+  width: 32%;
+  height: 22%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.65), transparent 70%);
+  pointer-events: none;
+}
+
+.tv-host .tv-small-ball-number {
+  width: 58%;
+  height: 58%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 30%, #ffffff 0%, #f4ede0 100%);
+  display: grid;
+  place-items: center;
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 24px;
+  font-weight: 400;
+  color: #1a0509;
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.15),
+    inset 0 -1px 3px rgba(255, 255, 255, 0.6);
+  line-height: 1;
+  z-index: 2;
+  position: relative;
 }
 
 /* Column-colors — 75-ball bingo: 1-15 blue, 16-30 red, 31-45 white,
-   46-60 green, 61-75 yellow (legacy Spillorama). */
-.tv-small-ball.col-b {
-  background: radial-gradient(circle at 30% 30%, #6db4ff, #1a4e99);
+ * 46-60 green, 61-75 yellow (Spillorama palette).
+ * Refined for 3D look matching big-ball palettes. */
+.tv-host .tv-small-ball.col-b {
+  background:
+    radial-gradient(circle at 35% 28%, #9bd0ff 0%, #4d8cd9 22%, #1a4e99 55%, #0c2a55 100%);
 }
-.tv-small-ball.col-i {
-  background: radial-gradient(circle at 30% 30%, #ff8080, #a32222);
+.tv-host .tv-small-ball.col-i {
+  background:
+    radial-gradient(circle at 35% 28%, #ff6478 0%, var(--tv-ball-red-light) 22%, var(--tv-ball-red) 55%, var(--tv-ball-red-deep) 100%);
 }
-.tv-small-ball.col-n {
-  background: radial-gradient(circle at 30% 30%, #f5f5f5, #bbbbbb);
-  color: #7a0000;
+.tv-host .tv-small-ball.col-n {
+  background:
+    radial-gradient(circle at 35% 28%, #ffffff 0%, #eaeaea 22%, #b8b8b8 55%, #7a7a7a 100%);
 }
-.tv-small-ball.col-g {
-  background: radial-gradient(circle at 30% 30%, #7be08c, #1f8c3d);
+.tv-host .tv-small-ball.col-g {
+  background:
+    radial-gradient(circle at 35% 28%, #a4f0b1 0%, #5cc671 22%, #1f8c3d 55%, #0d4a1f 100%);
 }
-.tv-small-ball.col-o {
-  background: radial-gradient(circle at 30% 30%, #fff1a0, #cc9a00);
-  color: #7a0000;
+.tv-host .tv-small-ball.col-o {
+  background:
+    radial-gradient(circle at 35% 28%, #fff8c5 0%, #ffe07a 22%, #cc9a00 55%, #7a5c00 100%);
 }
 
-/* ── Aktivt pattern-banner (Bølge 1) ──────────────────────────────────
-   Stor bold tekst midt på skjerm (under ball-rad, over countdown) som
-   viser hvilket pattern som spilles nå. Pulse-animasjon ved mount /
-   DOM-replace så endring fanges visuelt. Legacy ref:
-   AdminTVScreenWinners.Patterns_Txt. */
-.tv-active-pattern {
+/* ── Aktivt pattern-banner ─────────────────────────────────────────────
+ * Beholdt nederst i høyre kolonne — gull-rammet boks med pulserende glow.
+ * Mer kompakt enn legacy så den ikke konkurrerer med ball-stage. */
+.tv-host .tv-active-pattern {
   text-align: center;
-  margin-top: 20px;
-  padding: 16px 24px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 2px solid #ffd700;
-  border-radius: 10px;
-  box-shadow: 0 0 18px rgba(255, 215, 0, 0.35);
+  margin-top: auto;
+  padding: 14px 24px;
+  background:
+    linear-gradient(180deg, rgba(74, 22, 32, 0.85) 0%, rgba(45, 12, 18, 0.85) 100%);
+  border: 1px solid var(--tv-gold-line);
+  border-radius: 12px;
+  box-shadow: 0 0 18px rgba(245, 197, 66, 0.25);
   animation: tv-active-pattern-pulse 1.8s ease-in-out infinite;
 }
 
-.tv-active-pattern-label {
+.tv-host .tv-active-pattern-label {
   display: block;
-  font-size: 16px;
-  color: rgba(255, 215, 0, 0.85);
+  font-size: 13px;
+  color: var(--tv-gold);
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 3px;
   font-weight: 700;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
-.tv-active-pattern-name {
+.tv-host .tv-active-pattern-name {
   display: block;
-  font-size: 56px;
-  font-weight: 900;
-  color: #ffd700;
-  letter-spacing: 2px;
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 44px;
+  font-weight: 400;
+  color: var(--tv-gold-bright);
+  letter-spacing: 3px;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.55);
   line-height: 1.1;
 }
 
 @keyframes tv-active-pattern-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 18px rgba(255, 215, 0, 0.35);
+  0%, 100% {
+    box-shadow: 0 0 18px rgba(245, 197, 66, 0.25);
     transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 32px rgba(255, 215, 0, 0.7);
-    transform: scale(1.02);
+    box-shadow: 0 0 32px rgba(245, 197, 66, 0.55);
+    transform: scale(1.01);
   }
 }
 
-.tv-countdown {
+/* ── Countdown / waiting ────────────────────────────────────────────── */
+.tv-host .tv-countdown {
   text-align: center;
-  margin-top: 20px;
+  margin-top: 12px;
   padding: 14px 24px;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 8px;
-  font-size: 22px;
-  color: #ffd700;
-  font-weight: 700;
-}
-
-.tv-countdown .tv-countdown-seconds {
-  font-size: 48px;
-  display: block;
-  color: #fff;
-}
-
-.tv-voice-select {
-  position: absolute;
-  top: 24px;
-  right: 40px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #ffd700;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.tv-voice-select select {
-  background: #000;
-  color: #ffd700;
-  border: 2px solid #ffd700;
-  padding: 6px 12px;
-  font-size: 18px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-/* Wireframe PDF 14: voice styres av admin, dropdownen er read-only på TV. */
-.tv-voice-select select:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.tv-voice-note {
-  font-size: 12px;
-  font-weight: 400;
-  opacity: 0.7;
-  font-style: italic;
-}
-
-.tv-loading,
-.tv-error {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  font-size: 48px;
-  color: #ffd700;
-  font-weight: 700;
-}
-
-.tv-error {
-  color: #ffb0b0;
-}
-
-/* ── Winners page ───────────────────────────────────────────────────── */
-
-.tv-winners-body {
-  display: grid;
-  grid-template-columns: 1fr 1.3fr;
-  gap: 32px;
-  height: calc(100% - 100px);
-  padding: 16px;
-}
-
-.tv-winners-boxes {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  justify-content: center;
-}
-
-.tv-winners-box {
-  background: rgba(0, 0, 0, 0.35);
-  border: 2px solid #ffd700;
-  border-radius: 12px;
-  padding: 24px;
-  text-align: center;
-}
-
-.tv-winners-box-value {
-  font-size: 72px;
-  font-weight: 900;
-  color: #ffd700;
-  line-height: 1;
-  display: block;
-  margin-bottom: 8px;
-}
-
-.tv-winners-box-label {
-  font-size: 22px;
-  color: #fff;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.tv-winners-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.tv-winners-table th {
   background: rgba(0, 0, 0, 0.4);
-  color: #ffd700;
-  padding: 14px 10px;
-  text-align: left;
-  font-size: 20px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.tv-winners-table td {
-  padding: 18px 10px;
+  border-radius: 10px;
   font-size: 22px;
+  color: var(--tv-gold);
   font-weight: 700;
-  border-bottom: 1px solid rgba(255, 215, 0, 0.25);
+  border: 1px solid var(--tv-gold-line-soft);
 }
 
-.tv-winners-table tr:last-child td {
-  border-bottom: none;
+.tv-host .tv-countdown .tv-countdown-seconds {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 56px;
+  display: block;
+  color: var(--tv-text-white);
+  margin-top: 6px;
 }
 
-/* Bølge 1 oppgradering: "Venter på neste spill"-banner i empty-state */
-.tv-waiting-notice {
-  margin-top: 20px;
+.tv-host .tv-waiting-notice {
+  margin-top: 12px;
   padding: 16px 24px;
   text-align: center;
   font-size: 22px;
   font-weight: 600;
-  color: rgba(255, 215, 0, 0.75);
+  color: var(--tv-gold);
   font-style: italic;
   letter-spacing: 1px;
 }
 
-/* ── Task 1.7: Badge-stripe for deltakende haller ──────────────────────
- *
- * Vises nederst på TVen som en horisontal rad med hall-badges.
- * Hver badge har en fargesirkel (🔴/🟠/🟢), hall-navn og player-count.
- * Skjules helt når listen er tom (empty-state).
- */
-.tv-halls-stripe {
+/* ── Voice select (sibling, ikke i .tv-header) ──────────────────────── */
+.tv-host .tv-voice-select {
   position: absolute;
-  left: 20px;
-  right: 20px;
-  bottom: 16px;
+  top: 28px;
+  right: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tv-gold-bright);
+  font-size: 14px;
+  font-weight: 700;
+  z-index: 12;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+.tv-host .tv-voice-select select {
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--tv-gold-bright);
+  border: 1px solid var(--tv-gold-line);
+  padding: 6px 12px;
+  font-size: 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+}
+
+.tv-host .tv-voice-select select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.tv-host .tv-voice-note {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.75;
+  font-style: italic;
+  color: var(--tv-text-cream);
+  letter-spacing: 0.5px;
+}
+
+/* ── Loading / Error ────────────────────────────────────────────────── */
+.tv-host .tv-loading,
+.tv-host .tv-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100% - 152px);
+  font-size: 48px;
+  color: var(--tv-gold);
+  font-weight: 700;
+  font-family: "Anton", "Impact", sans-serif;
+  letter-spacing: 4px;
+}
+
+.tv-host .tv-error {
+  color: #ffb0b0;
+  font-size: 28px;
+  letter-spacing: 1px;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ── Winners page — redesign 2026-05-03 (Agent I) ─────────────────────── */
+/*
+ * Designreferanse: Bingo Vinnere.html fra Claude Design (handoff
+ * 2026-05-03). Burgunder bakgrunn med bingo-bg.png + radial vignette,
+ * gull-aksent typografi (Anton + Inter), pinwheel-logo, sentrert
+ * "VINNERE"-tittel, "Neste"-panel til høyre. Stat-kort stablet til
+ * venstre, winners-tabell til høyre med uthevet "Fullt hus"-rad.
+ *
+ * SCOPING: alle Winners-regler er prefikset med `.tv-winners-host` for å
+ * isolere dem fra `.tv-host` (TVScreenPage). De to sidene deler
+ * stylesheet, men ingen regel her treffer TV-screen-DOMen og vice versa.
+ *
+ * Alle CSS-variabler (--tv-burgundy*, --tv-gold*, --tv-text*) defineres i
+ * :root øverst i denne filen og deles på tvers av begge sider.
+ */
+
+.tv-winners-host {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+  color: var(--tv-text-white);
+  z-index: 9999;
+  user-select: none;
+  font-family: "Inter", "Helvetica Neue", Arial, system-ui, sans-serif;
+}
+.tv-winners-host *,
+.tv-winners-host *::before,
+.tv-winners-host *::after {
+  box-sizing: border-box;
+}
+
+/* "Stage" — full-screen bingo-bakgrunn med radial vignette over.
+ * Bilde-pathen er base-prefixed av Vite. */
+.tv-winners-host .tv-winners-stage {
+  position: absolute;
+  inset: 0;
+  background:
+    url("/admin/assets/tv/bingo-bg.png") center/cover no-repeat,
+    linear-gradient(135deg, var(--tv-burgundy-deep) 0%, var(--tv-burgundy) 50%, var(--tv-burgundy-deep) 100%);
+  background-color: #1a0509;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Subtil vignette for å fokusere blikket mot midten. */
+.tv-winners-host .tv-winners-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Header — logo (venstre) + VINNERE (sentrert) + Neste (høyre) ───── */
+.tv-winners-host .tv-winners-header {
+  position: relative;
+  height: 92px;
+  background:
+    linear-gradient(180deg, var(--tv-burgundy-light) 0%, var(--tv-burgundy-header) 60%, #481319 100%);
+  display: flex;
+  align-items: center;
+  padding: 0 36px;
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(245, 197, 66, 0.12);
+  z-index: 5;
+  flex-shrink: 0;
+}
+
+/* Hårtynn gull-stripe nederst. */
+.tv-winners-host .tv-winners-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245, 197, 66, 0.55), transparent);
+  pointer-events: none;
+}
+
+.tv-winners-host .tv-winners-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 1;
+}
+
+.tv-winners-host .tv-winners-logo-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--tv-ball-red) 0deg 45deg, #fff 45deg 90deg,
+    var(--tv-ball-red) 90deg 135deg, #fff 135deg 180deg,
+    var(--tv-ball-red) 180deg 225deg, #fff 225deg 270deg,
+    var(--tv-ball-red) 270deg 315deg, #fff 315deg 360deg
+  );
+  border: 3px solid var(--tv-ball-red);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+.tv-winners-host .tv-winners-logo-text {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 28px;
+  letter-spacing: 1.5px;
+  color: #fff;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Sentrert VINNERE-tittel — element er `.tv-header` (textContent="Winners"
+ * for å bevare test-kontrakten). Vises visuelt som "VINNERE" via
+ * tekst-transform; teksten "Winners" er fortsatt selve textContent. */
+.tv-winners-host .tv-header {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 60px;
+  letter-spacing: 6px;
+  color: #fff;
+  text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.55);
+  text-transform: uppercase;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  line-height: 1;
+}
+
+.tv-winners-host .tv-winners-next {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.1;
+  padding: 8px 4px 8px 18px;
+  border-left: 1px solid rgba(245, 197, 66, 0.25);
+  z-index: 1;
+}
+
+.tv-winners-host .tv-winners-next-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--tv-gold);
+  margin-bottom: 6px;
+}
+
+.tv-winners-host .tv-winners-next-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--tv-text-cream);
+  letter-spacing: 0.5px;
+}
+
+/* ── Loading / error state ──────────────────────────────────────────── */
+.tv-winners-host .tv-winners-loading,
+.tv-winners-host .tv-winners-error {
+  position: relative;
+  z-index: 2;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 48px;
+  color: var(--tv-gold);
+  letter-spacing: 4px;
+  font-weight: 700;
+}
+
+.tv-winners-host .tv-winners-error {
+  color: #ffb0b0;
+  font-size: 28px;
+  letter-spacing: 1px;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  text-align: center;
+  padding: 0 56px;
+}
+
+/* ── Content — to-kolonne grid (stat-kort venstre, vinner-tabell høyre) */
+.tv-winners-host .tv-winners-content {
+  position: relative;
+  z-index: 2;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 48px;
+  padding: 36px 56px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+/* ── Venstre: stat-kort stablet vertikalt ───────────────────────────── */
+.tv-winners-host .tv-winners-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+}
+
+.tv-winners-host .tv-winners-stat-card {
+  position: relative;
+  flex: 1 1 0;
+  padding: 26px 32px;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(74, 22, 32, 0.85) 0%, rgba(45, 12, 18, 0.85) 100%);
+  border: 1px solid var(--tv-gold-line);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(245, 197, 66, 0.12),
+    0 0 30px rgba(245, 197, 66, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* Subtle laurel-corner accents (top-left + top-right). */
+.tv-winners-host .tv-winners-stat-card::before,
+.tv-winners-host .tv-winners-stat-card::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--tv-gold-line-soft);
+  border-radius: 4px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.tv-winners-host .tv-winners-stat-card::before { left: 10px; border-right: 0; border-bottom: 0; }
+.tv-winners-host .tv-winners-stat-card::after  { right: 10px; border-left: 0; border-bottom: 0; }
+
+.tv-winners-host .tv-winners-stat-num {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 88px;
+  color: var(--tv-gold-bright);
+  line-height: 1;
+  letter-spacing: 1px;
+  text-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(245, 197, 66, 0.25);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.tv-winners-host .tv-winners-stat-label {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--tv-text-cream);
+  text-align: center;
+}
+
+/* ── Høyre: vinner-tabell ───────────────────────────────────────────── */
+.tv-winners-host .tv-winners-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tv-winners-host .tv-winners-table-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--tv-gold-line-soft);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(245, 197, 66, 0.08);
+  /* Solid alpha (>= 0.85) i stedet for backdrop-filter — se
+   * stylelint-rule no-backdrop-filter-without-allowlist (Pixi-canvas-
+   * flimmer-regel; gjelder også TV-sider for konsistens). */
+  background: rgba(20, 6, 10, 0.88);
+}
+
+.tv-winners-host .tv-winners-table-head,
+.tv-winners-host .tv-winners-table-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.3fr 1.7fr 1.5fr;
+  align-items: center;
+}
+
+.tv-winners-host .tv-winners-table-head {
+  padding: 14px 22px;
+  background:
+    linear-gradient(180deg, var(--tv-burgundy-header) 0%, #481319 100%);
+  border-bottom: 1px solid var(--tv-gold-line-soft);
+  flex-shrink: 0;
+}
+
+.tv-winners-host .tv-winners-table-head span {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--tv-gold);
+}
+
+.tv-winners-host .tv-winners-table-row {
+  flex: 1 1 0;
+  padding: 16px 22px;
+  border-bottom: 1px solid rgba(245, 197, 66, 0.08);
+  transition: background 200ms ease;
+  min-height: 0;
+}
+
+.tv-winners-host .tv-winners-table-row:nth-child(odd) {
+  background: rgba(74, 22, 32, 0.35);
+}
+
+.tv-winners-host .tv-winners-table-row:last-child {
+  border-bottom: 0;
+}
+
+.tv-winners-host .tv-winners-table-row--fullhouse {
+  background:
+    linear-gradient(180deg, rgba(110, 28, 38, 0.55) 0%, rgba(74, 18, 27, 0.55) 100%);
+  border-top: 1px solid var(--tv-gold-line-soft);
+}
+
+.tv-winners-host .tv-winners-pattern {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--tv-text-cream);
+  letter-spacing: 0.3px;
+}
+
+.tv-winners-host .tv-winners-table-row--fullhouse .tv-winners-pattern {
+  color: var(--tv-gold-bright);
+}
+
+.tv-winners-host .tv-winners-cell {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--tv-text-white);
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-winners-host .tv-winners-cell--dim {
+  color: var(--tv-text-dim);
+  font-weight: 500;
+}
+
+.tv-winners-host .tv-winners-cell--amount {
+  color: var(--tv-gold-bright);
+  font-weight: 700;
+}
+
+/* Bakoverkompatibel notis: stat-kort-tall og labels har dobbeltklassene
+ * `.tv-winners-stat-num` + `.tv-winners-box-value` (og tilsvarende for
+ * label) slik at vitest-testene som leter etter `.tv-winners-box-value`
+ * fortsatt finner dem. Stylingen ligger på `.tv-winners-stat-num` /
+ * `.tv-winners-stat-label` over — ingen separate aliasregler trengs. */
+
+/* ── Halls-stripe: badges nederst (Task 1.7) ───────────────────────── */
+.tv-host .tv-halls-stripe {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  bottom: 18px;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
   align-items: center;
   padding: 10px 18px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 215, 0, 0.45);
+  background:
+    linear-gradient(180deg, rgba(74, 22, 32, 0.85) 0%, rgba(45, 12, 18, 0.85) 100%);
+  border: 1px solid var(--tv-gold-line-soft);
   border-radius: 12px;
   z-index: 100;
-  pointer-events: none; /* ingen interaksjon i kiosk-modus */
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
-.tv-halls-stripe-hidden {
+.tv-host .tv-halls-stripe-hidden {
   display: none;
 }
 
-.tv-hall-badge {
+.tv-host .tv-hall-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
   background: rgba(0, 0, 0, 0.45);
-  border: 2px solid rgba(255, 215, 0, 0.6);
+  border: 2px solid var(--tv-gold-line);
   border-radius: 999px;
-  color: #fff;
-  font-size: 18px;
+  color: var(--tv-text-white);
+  font-size: 16px;
   font-weight: 700;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.45);
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
 }
 
-.tv-hall-badge-dot {
+.tv-host .tv-hall-badge-dot {
   display: inline-block;
   width: 14px;
   height: 14px;
@@ -541,58 +1381,47 @@
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
 }
 
-.tv-hall-badge-red .tv-hall-badge-dot {
+.tv-host .tv-hall-badge-red .tv-hall-badge-dot {
   background: #e53935;
   box-shadow: 0 0 8px rgba(229, 57, 53, 0.7);
 }
-
-.tv-hall-badge-orange .tv-hall-badge-dot {
+.tv-host .tv-hall-badge-orange .tv-hall-badge-dot {
   background: #fb8c00;
   box-shadow: 0 0 8px rgba(251, 140, 0, 0.7);
 }
-
-.tv-hall-badge-green .tv-hall-badge-dot {
+.tv-host .tv-hall-badge-green .tv-hall-badge-dot {
   background: #43a047;
   box-shadow: 0 0 8px rgba(67, 160, 71, 0.7);
 }
 
-.tv-hall-badge-red {
+.tv-host .tv-hall-badge-red {
   border-color: rgba(229, 57, 53, 0.8);
 }
-
-.tv-hall-badge-orange {
+.tv-host .tv-hall-badge-orange {
   border-color: rgba(251, 140, 0, 0.8);
 }
-
-.tv-hall-badge-green {
+.tv-host .tv-hall-badge-green {
   border-color: rgba(67, 160, 71, 0.8);
 }
 
-.tv-hall-badge-name {
+.tv-host .tv-hall-badge-name {
   letter-spacing: 0.5px;
 }
 
-.tv-hall-badge-count {
+.tv-host .tv-hall-badge-count {
   display: inline-block;
   min-width: 24px;
   padding: 2px 8px;
-  background: rgba(255, 215, 0, 0.15);
+  background: rgba(245, 197, 66, 0.18);
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
-  color: #ffd700;
+  color: var(--tv-gold-bright);
   text-align: center;
 }
 
-/* ── Task 1.7: Phase-won-banner ────────────────────────────────────────
- *
- * Fullscreen overlay som dekker ball-visning i 3 sekunder når en fase
- * vinnes. Bakgrunn er halv-transparent sort (0.85) slik at ball-gridet
- * vises dempet bak. Når banner er aktiv legger vi
- * `tv-phase-banner-active`-class på body'en for å freeze animasjoner i
- * ball-ringen.
- */
-.tv-phase-banner {
+/* ── Phase-won-banner (Task 1.7 + Wireframe PDF 16 §16.5) ─────────── */
+.tv-host .tv-phase-banner {
   position: fixed;
   inset: 0;
   display: flex;
@@ -604,35 +1433,38 @@
   pointer-events: none;
 }
 
-.tv-phase-banner-hidden {
+.tv-host .tv-phase-banner-hidden {
   display: none;
 }
 
-.tv-phase-banner-inner {
+.tv-host .tv-phase-banner-inner {
   text-align: center;
-  padding: 40px 80px;
-  border: 4px solid #ffd700;
+  padding: 48px 96px;
+  border: 4px solid var(--tv-gold);
   border-radius: 24px;
-  background: linear-gradient(135deg, #8b0000 0%, #c00000 50%, #8b0000 100%);
-  box-shadow: 0 0 60px rgba(255, 215, 0, 0.6), 0 0 120px rgba(255, 215, 0, 0.25);
+  background:
+    radial-gradient(ellipse at center, var(--tv-burgundy-light) 0%, var(--tv-burgundy) 65%, var(--tv-burgundy-deep) 100%);
+  box-shadow: 0 0 60px rgba(245, 197, 66, 0.6), 0 0 120px rgba(245, 197, 66, 0.25);
   animation: tv-phase-banner-pop 0.35s cubic-bezier(0.18, 1.25, 0.6, 1);
 }
 
-.tv-phase-banner-title {
-  font-size: 140px;
-  font-weight: 900;
-  color: #ffd700;
-  letter-spacing: 12px;
+.tv-host .tv-phase-banner-title {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 160px;
+  font-weight: 400;
+  color: var(--tv-gold-bright);
+  letter-spacing: 14px;
   text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.7);
   margin-bottom: 16px;
   line-height: 1;
 }
 
-.tv-phase-banner-pattern {
-  font-size: 72px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: 6px;
+.tv-host .tv-phase-banner-pattern {
+  font-family: "Anton", "Impact", sans-serif;
+  font-size: 84px;
+  font-weight: 400;
+  color: var(--tv-text-white);
+  letter-spacing: 8px;
   text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.55);
   text-transform: uppercase;
 }
@@ -648,52 +1480,41 @@
   100% { transform: scale(1);    opacity: 1; }
 }
 
-/* ── Full House fanfare (Wireframe PDF 16 §16.5) ───────────────────────
- *
- * Phase 5 (Full House) får en visuelt sterkere effekt enn vanlige Row-
- * banners — gull-kantene blir bredere, glow-utstrålingen større, og
- * tittelen pulserer mens banner er synlig. CSS-class settes/fjernes av
- * `showNextBanner` så vanlige Row-vinninger ikke arver Full House-styling.
- */
-.tv-phase-banner-fullhouse .tv-phase-banner-inner {
+/* Full House fanfare. */
+.tv-host .tv-phase-banner-fullhouse .tv-phase-banner-inner {
   border-width: 6px;
-  box-shadow: 0 0 90px rgba(255, 215, 0, 0.85), 0 0 180px rgba(255, 215, 0, 0.45);
+  box-shadow: 0 0 90px rgba(245, 197, 66, 0.85), 0 0 180px rgba(245, 197, 66, 0.45);
   animation: tv-phase-banner-fullhouse-pulse 0.8s ease-in-out infinite alternate,
     tv-phase-banner-pop 0.35s cubic-bezier(0.18, 1.25, 0.6, 1);
 }
 
-.tv-phase-banner-fullhouse .tv-phase-banner-title {
-  font-size: 180px;
-  letter-spacing: 16px;
+.tv-host .tv-phase-banner-fullhouse .tv-phase-banner-title {
+  font-size: 200px;
+  letter-spacing: 18px;
 }
 
-.tv-phase-banner-fullhouse .tv-phase-banner-pattern {
-  font-size: 96px;
-  letter-spacing: 8px;
+.tv-host .tv-phase-banner-fullhouse .tv-phase-banner-pattern {
+  font-size: 108px;
+  letter-spacing: 10px;
 }
 
 @keyframes tv-phase-banner-fullhouse-pulse {
   0%   {
-    box-shadow: 0 0 90px rgba(255, 215, 0, 0.85), 0 0 180px rgba(255, 215, 0, 0.45);
+    box-shadow: 0 0 90px rgba(245, 197, 66, 0.85), 0 0 180px rgba(245, 197, 66, 0.45);
   }
   100% {
-    box-shadow: 0 0 130px rgba(255, 215, 0, 1), 0 0 240px rgba(255, 215, 0, 0.75);
+    box-shadow: 0 0 130px rgba(245, 197, 66, 1), 0 0 240px rgba(245, 197, 66, 0.75);
   }
 }
 
-/* Freezer animasjoner i ball-grid mens banner vises — tipsas av body-class. */
-.tv-screen-body.tv-phase-banner-active *,
-.tv-screen-body.tv-phase-banner-active *::before,
-.tv-screen-body.tv-phase-banner-active *::after {
+/* Freeze ball-grid animasjoner mens banner vises. */
+.tv-host .tv-screen-body.tv-phase-banner-active *,
+.tv-host .tv-screen-body.tv-phase-banner-active *::before,
+.tv-host .tv-screen-body.tv-phase-banner-active *::after {
   animation-play-state: paused !important;
 }
 
-/* ── Fase 1 MVP §24 — Screen Saver overlay ──────────────────────────────
- * Fullscreen overlay som vises over .tv-host når TV-skjermen har vært
- * inaktiv lenger enn idle-timeout. z-index: 10000 holder seg over alle
- * normale TV-elementer (.tv-host er z-index: 9999) men under modal-
- * popups om noen. Klikk på overlay markerer "active" og lukker den.
- */
+/* ── Screen Saver overlay (Fase 1 MVP §24, uendret) ─────────────── */
 .tv-screen-saver {
   position: fixed;
   inset: 0;

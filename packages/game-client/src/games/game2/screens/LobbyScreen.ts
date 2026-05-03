@@ -1,105 +1,147 @@
-import { Container, Text, Sprite, Assets, Texture } from "pixi.js";
-import type { GameState } from "../../../bridge/GameBridge.js";
-import { CountdownTimer } from "../components/CountdownTimer.js";
-import { BuyPopup } from "../components/BuyPopup.js";
-import { LuckyNumberPicker } from "../components/LuckyNumberPicker.js";
-import { PlayerInfoBar } from "../components/PlayerInfoBar.js";
-
 /**
- * Lobby/waiting screen — shown between games.
- * Player can buy tickets, select lucky number, and see countdown.
+ * Spill 2 (Tallspill) — LobbyScreen i Bong Mockup v2-stil.
+ *
+ * Vises mellom runder (gameStatus !== RUNNING) når spilleren er i `LOBBY`-
+ * fase. Bruker EKSAKT samme layout som `PlayScreen` (v2-design):
+ *
+ *   1. BallTube:   countdown + draw-counter + (tom) drawn-balls-rad
+ *   2. Bong-grid:  (tom container; spilleren har ikke kjøpt brett ennå)
+ *   3. ComboPanel: PlayerCard + Hovedspill + Lykketall + Jackpots
+ *      (sticky-bottom)
+ *
+ * STRICT element-cleanup per Tobias-direktiv 2026-05-03:
+ *   "Det er da kun disse elementene samt popup av kjøp av biletter
+ *    som skal være synlig"
+ *
+ * → FJERNET fra v1-LobbyScreen:
+ *   - `statusText` ("Venter på neste runde") — ikke i mockup
+ *   - `ctaButton` ("Velg brett for neste runde") — ikke i mockup;
+ *     "Kjøp flere brett"-pill i ComboPanel + BuyPopup overtar entry-
+ *     punktet for ticket-kjøp
+ *   - `luckyPicker` (modal LuckyNumberPicker) — ikke i mockup;
+ *     LykketallGrid i ComboPanel håndterer alt lucky-number-valg
+ *
+ * → BEHOLDT (eksplisitt fra Tobias):
+ *   - BuyPopup (kjøp av billetter)
+ *
+ * Kontrakt mot `Game2Controller` er BEVART (samme metoder + signaturer):
+ *   - `setOnBuy(cb)` — fortsatt brukt av controller for `BuyPopup`-arm-bet.
+ *   - `setOnLuckyNumber(cb)` — videresendt til ComboPanel.LykketallGrid.
+ *   - `setOnChooseTickets(cb)` — kalles ved klikk på "Kjøp flere brett"-pill.
+ *   - `update(state)` — oppdaterer countdown + jackpots + player-count.
+ *   - `showBuyPopup(price)` / `hideBuyPopup()` — fortsatt tilgjengelig.
+ *   - `updateJackpot(list)` — videresender til ComboPanel.
+ *
+ * 2026-05-03 (Agent S, branch feat/spill2-bong-mockup-v2): full
+ * layout-rewrite for v2-design — speiler PlayScreen for konsistens.
+ * STRICT cleanup av status-tekst + CTA-knapp + modal lucky-picker.
  */
+
+import { Container, Graphics, Sprite, Assets, type Texture } from "pixi.js";
+import type { GameState } from "../../../bridge/GameBridge.js";
+import { BuyPopup } from "../components/BuyPopup.js";
+import { ComboPanel } from "../components/ComboPanel.js";
+import { BallTube } from "../components/BallTube.js";
+import { LykketallPopup } from "../components/LykketallPopup.js";
+import type { JackpotSlotData } from "../components/JackpotsRow.js";
+
+const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
+const STAGE_PADDING_X = 32;
+const STAGE_PADDING_TOP = 14;
+const STAGE_PADDING_BOTTOM = 24;
+const ROW_GAP = 14;
+const MAX_STAGE_WIDTH = 1100;
+const TUBE_HEIGHT = 85;
+
 export class LobbyScreen extends Container {
-  private statusText: Text;
-  private countdown: CountdownTimer;
+  private bgSprite: Sprite | null = null;
+  private bgFallback: Graphics;
+  private comboPanel: ComboPanel;
+  private ballTube: BallTube;
   private buyPopup: BuyPopup;
-  private luckyPicker: LuckyNumberPicker;
-  private infoBar: PlayerInfoBar;
-  private screenWidth: number;
-  private screenHeight: number;
+  // 2026-05-03 (Agent Y): popup som åpnes ved klikk på Lykketall-kolonnen
+  // i ComboPanel. Erstatter inline LykketallGrid-flyt (samme som i
+  // PlayScreen — speilet for konsistens mellom lobby og play-fase).
+  private lykketallPopup: LykketallPopup;
+  private currentLuckyNumber: number | null = null;
+  private screenW: number;
+  private screenH: number;
+  private stageW: number;
+  private stageX: number;
   private onBuy: ((count: number) => void) | null = null;
   private onLuckyNumber: ((number: number) => void) | null = null;
+  private onChooseTickets: (() => void) | null = null;
+  /**
+   * Lokal countdown-driver — Speilingen i `BallTube` viser MM:SS, men vi
+   * må selv tikke ned mellom snapshot-oppdateringer fra controller for å
+   * unngå at displayet "fryser" på snapshot-verdien.
+   */
+  private countdownDeadline: number | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(screenWidth: number, screenHeight: number) {
     super();
-    this.screenWidth = screenWidth;
-    this.screenHeight = screenHeight;
+    this.screenW = screenWidth;
+    this.screenH = screenHeight;
 
-    // Info bar
-    this.infoBar = new PlayerInfoBar();
-    this.infoBar.x = 20;
-    this.infoBar.y = 10;
-    this.addChild(this.infoBar);
+    // ── stage-bredde (full bredde — ingen chat) ──────────────────────────
+    const availableW = screenWidth - STAGE_PADDING_X * 2;
+    this.stageW = Math.min(MAX_STAGE_WIDTH, Math.max(640, availableW));
+    this.stageX = STAGE_PADDING_X + Math.max(0, (availableW - this.stageW) / 2);
 
-    // Status text
-    this.statusText = new Text({
-      text: "Venter på spill...",
-      style: {
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: 28,
-        fontWeight: "bold",
-        fill: 0xffe83d, // Yellow like Unity
-        align: "center",
-      },
-    });
-    this.statusText.anchor.set(0.5);
-    this.statusText.x = screenWidth / 2;
-    this.statusText.y = screenHeight / 2 - 80;
-    this.addChild(this.statusText);
+    // ── bakgrunn (samme pattern som PlayScreen) ──────────────────────────
+    this.bgFallback = new Graphics();
+    this.bgFallback.rect(0, 0, screenWidth, screenHeight).fill({ color: 0x2a0d0e });
+    this.addChild(this.bgFallback);
+    void this.loadBackground();
 
-    // Countdown timer
-    this.countdown = new CountdownTimer();
-    this.countdown.x = screenWidth / 2;
-    this.countdown.y = screenHeight / 2;
-    this.addChild(this.countdown);
+    // ── glass-tube (countdown + tom drawn-balls-rad) — ØVERST ────────────
+    this.ballTube = new BallTube(this.stageW);
+    this.ballTube.x = this.stageX;
+    this.ballTube.y = STAGE_PADDING_TOP;
+    this.addChild(this.ballTube);
 
-    // Lucky number button
-    const luckyBtn = new Container();
-    const luckyText = new Text({
-      text: "Velg heldig tall",
-      style: { fontFamily: "Arial", fontSize: 18, fill: 0xffe83d, align: "center" },
-    });
-    luckyText.anchor.set(0.5);
-    luckyBtn.addChild(luckyText);
-    luckyBtn.x = screenWidth / 2;
-    luckyBtn.y = screenHeight / 2 + 80;
-    luckyBtn.eventMode = "static";
-    luckyBtn.cursor = "pointer";
-    luckyBtn.on("pointerdown", () => this.luckyPicker.show());
-    this.addChild(luckyBtn);
+    // ── (Bong-grid plass-holder — vi rendrer ingen bonger i lobby) ──────
+    // Plassen mellom tube og combo-panel etterlates synlig bakgrunn.
+    // Når spilleren kjøper brett og spillet starter overtas denne av
+    // PlayScreen sin layout.
 
-    // Buy popup (centered)
-    this.buyPopup = new BuyPopup(320, 220);
-    this.buyPopup.x = (screenWidth - 320) / 2;
-    this.buyPopup.y = screenHeight / 2 + 120;
+    // ── combo-panel — STICKY BOTTOM ──────────────────────────────────────
+    this.comboPanel = new ComboPanel(this.stageW);
+    this.comboPanel.x = this.stageX;
+    this.comboPanel.y = screenHeight - STAGE_PADDING_BOTTOM - this.comboPanel.height;
+    // setOnLuckyNumber er beholdt no-op for backward-compat; popup-flyt
+    // tar over (klikk på Lykketall-kolonnen → popup → onLuckyNumber).
+    this.comboPanel.setOnLuckyClick(() => this.lykketallPopup.show(this.currentLuckyNumber));
+    // "Kjøp flere brett"-pill i ComboPanel åpner Choose Tickets-skjermen
+    // (samme oppførsel som PlayScreen).
+    this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
+    this.addChild(this.comboPanel);
+
+    // ── BuyPopup (eksplisitt beholdt per Tobias-direktiv) ────────────────
+    // Plassert sentrert. Controller har kontroll over når den vises:
+    // den åpnes via `showBuyPopup()` av Game2Controller når spilleren
+    // entrer LOBBY uten armed bet.
+    const popupW = 320;
+    const popupH = 220;
+    this.buyPopup = new BuyPopup(popupW, popupH);
+    this.buyPopup.x = (screenWidth - popupW) / 2;
+    this.buyPopup.y = (screenHeight - popupH) / 2;
     this.buyPopup.setOnBuy((count) => this.onBuy?.(count));
     this.addChild(this.buyPopup);
 
-    // Lucky number picker (modal overlay)
-    this.luckyPicker = new LuckyNumberPicker(screenWidth, screenHeight);
-    this.luckyPicker.setOnSelect((n) => this.onLuckyNumber?.(n));
-    this.addChild(this.luckyPicker);
+    // 2026-05-03 (Agent Y): lykketall-popup. Speiler PlayScreen — klikk
+    // på Lykketall-kolonnen åpner popup-en, valg fyrer onLuckyNumber.
+    this.lykketallPopup = new LykketallPopup(screenWidth, screenHeight);
+    this.lykketallPopup.setOnPick((n) => {
+      this.currentLuckyNumber = n;
+      this.comboPanel.setLuckyNumber(n);
+      this.onLuckyNumber?.(n);
+    });
+    this.addChild(this.lykketallPopup);
 
-    // Rocket decoration (async sprite load)
-    this.loadRocket();
-  }
-
-  private async loadRocket(): Promise<void> {
-    try {
-      const tex = await Assets.load<Texture>(import.meta.env.BASE_URL + "assets/game2/rocket.png");
-      const rocket = new Sprite(tex);
-      rocket.anchor.set(0.5);
-      const rocketHeight = this.screenHeight * 0.3;
-      const scale = rocketHeight / tex.height;
-      rocket.scale.set(scale);
-      rocket.x = this.screenWidth - 80;
-      rocket.y = this.screenHeight / 2 - 40;
-      rocket.alpha = 0.6;
-      // Insert behind UI elements
-      this.addChildAt(rocket, 1);
-    } catch {
-      // Silently fall back — rocket is decorative
-    }
+    // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
+    this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
   }
 
   setOnBuy(callback: (count: number) => void): void {
@@ -110,18 +152,40 @@ export class LobbyScreen extends Container {
     this.onLuckyNumber = callback;
   }
 
-  update(state: GameState): void {
-    this.infoBar.update(state.playerCount, state.drawCount, state.totalDrawCapacity, state.prizePool);
+  setOnChooseTickets(callback: () => void): void {
+    this.onChooseTickets = callback;
+  }
 
-    if (state.gameStatus === "RUNNING") {
-      this.statusText.text = "Spill pågår — kjøp billetter til neste runde";
-      this.countdown.stop();
-    } else if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
-      this.statusText.text = "Neste spill starter snart!";
-      this.countdown.startCountdown(state.millisUntilNextStart);
+  /**
+   * Hovedoppdatering fra controller. Speiler `state`-felter inn i
+   * Combo-panel + BallTube.
+   */
+  update(state: GameState): void {
+    // Lucky number — speilet til Combo-panel + lokal cache for popup-display.
+    this.currentLuckyNumber = state.myLuckyNumber ?? null;
+    this.comboPanel.setLuckyNumber(this.currentLuckyNumber);
+    this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
+    this.comboPanel.setPlayerCount(state.playerCount ?? 0);
+
+    // BallTube viser draw-counter selv om vi er i lobby — bruker
+    // forrige rundes verdier hvis tilgjengelig.
+    this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
+
+    // Countdown — vises hvis vi har en `millisUntilNextStart`.
+    if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
+      this.startCountdown(state.millisUntilNextStart);
     } else {
-      this.statusText.text = "Kjøp billetter for å delta";
+      this.startCountdown(null);
     }
+  }
+
+  /**
+   * Oppdater jackpot-prizer fra `g2:jackpot:list-update`. Eksponert i
+   * tilfelle controller velger å pushe også i lobby-fase (samme
+   * signatur som `PlayScreen.updateJackpot`).
+   */
+  updateJackpot(list: JackpotSlotData[]): void {
+    this.comboPanel.updateJackpots(list);
   }
 
   showBuyPopup(ticketPrice: number, maxTickets = 30): void {
@@ -130,5 +194,50 @@ export class LobbyScreen extends Container {
 
   hideBuyPopup(): void {
     this.buyPopup.hide();
+  }
+
+  destroy(options?: Parameters<Container["destroy"]>[0]): void {
+    if (this.countdownInterval !== null) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+    super.destroy(options);
+  }
+
+  // ── interne ─────────────────────────────────────────────────────────────
+
+  private startCountdown(milliseconds: number | null): void {
+    if (milliseconds == null || milliseconds <= 0) {
+      this.countdownDeadline = null;
+      this.ballTube.setCountdown(null);
+      return;
+    }
+    this.countdownDeadline = Date.now() + milliseconds;
+    this.ballTube.setCountdown(milliseconds);
+  }
+
+  private tickCountdown(): void {
+    if (this.countdownDeadline == null) return;
+    const remaining = this.countdownDeadline - Date.now();
+    if (remaining <= 0) {
+      this.countdownDeadline = null;
+      this.ballTube.setCountdown(null);
+      return;
+    }
+    this.ballTube.setCountdown(remaining);
+  }
+
+  private async loadBackground(): Promise<void> {
+    try {
+      const tex = (await Assets.load(BG_URL)) as Texture;
+      if (this.destroyed) return;
+      const sprite = new Sprite(tex);
+      sprite.width = this.screenW;
+      sprite.height = this.screenH;
+      this.bgSprite = sprite;
+      this.addChildAt(sprite, 1); // over fallback, under panels
+    } catch {
+      // Asset mangler — vi beholder fallback-fargen.
+    }
   }
 }

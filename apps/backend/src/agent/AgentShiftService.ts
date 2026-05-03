@@ -277,6 +277,33 @@ export class AgentShiftService {
     return this.pendingPayoutPort.listPendingForAgent(agentUserId);
   }
 
+  /**
+   * Pilot-day-fix 2026-05-01: kjør logout-port-side-effects etter close-day.
+   *
+   * Close-day (markShiftSettled) setter is_active=false atomisk + persisterer
+   * flag-kolonner — så denne metoden kjører kun port-callbacks
+   * (markPendingForNextAgent / markRangesForTransfer). Skiller seg fra
+   * `logout()` ved at den IKKE rører shift-raden (den er allerede settled).
+   *
+   * Fail-soft per port: hvis port ikke er injisert returneres count=0
+   * (matcher pattern fra logout()). Caller (settlement-route) bruker tallene
+   * til audit-logging.
+   */
+  async applyCloseDayLogoutSideEffects(
+    agentUserId: string,
+    flags: LogoutFlags
+  ): Promise<{ pendingCashoutsFlagged: number; ticketRangesFlagged: number }> {
+    let pendingCashoutsFlagged = 0;
+    if (flags.distributeWinnings === true && this.pendingPayoutPort) {
+      pendingCashoutsFlagged = await this.pendingPayoutPort.markPendingForNextAgent(agentUserId);
+    }
+    let ticketRangesFlagged = 0;
+    if (flags.transferRegisterTickets === true && this.ticketRangePort) {
+      ticketRangesFlagged = await this.ticketRangePort.markRangesForTransfer(agentUserId);
+    }
+    return { pendingCashoutsFlagged, ticketRangesFlagged };
+  }
+
   async getCurrentShift(userId: string): Promise<AgentShift | null> {
     return this.store.getActiveShiftForUser(userId);
   }

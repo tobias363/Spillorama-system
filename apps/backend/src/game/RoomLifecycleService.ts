@@ -438,6 +438,7 @@ export class RoomLifecycleService {
           playerCount: room.players.size,
           createdAt: room.createdAt,
           gameStatus,
+          ...(room.isHallShared ? { isHallShared: true } : {}),
         };
       })
       .sort((a, b) => a.code.localeCompare(b.code));

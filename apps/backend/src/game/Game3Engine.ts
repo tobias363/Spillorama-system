@@ -1,7 +1,18 @@
 /**
- * BIN-615 / PR-C3b: Game 3 (Mønsterbingo) engine — extends BingoEngine to add
- * pattern-driven auto-claim-on-draw behaviour for the 5×5 / 1..75 / no-free-
- * centre variant.
+ * BIN-615 / PR-C3b: Game 3 (Mønsterbingo / Spill 3) engine — extends BingoEngine
+ * to add pattern-driven auto-claim-on-draw behaviour for the 5×5 / 1..75 /
+ * no-free-centre variant.
+ *
+ * 2026-05-03 (revert): Spill 3 ble kortvarig portet til 3×3 / 1..21 i PR #860,
+ * men er nå **revertert** til 5×5 / 1..75-form per Tobias-direktiv. Forskjellen
+ * fra Spill 1 er at Spill 3 har KUN ÉN ticket-type ("Standard") — Spill 1 har
+ * 8 farger. Patterns (Row 1-4 + Coverall) og draw-mekanikk er identisk med
+ * Spill 1's BingoEngine-logikk for pattern-evaluering.
+ *
+ * Per Tobias 2026-05-03 (revert-direktiv):
+ *   "75 baller og 5x5 bonger uten free i midten. Alt av design skal være likt
+ *    [Spill 1] bare at her er det kun 1 type bonger og man spiller om mønstre.
+ *    Logikken med å trekke baller og markere bonger er fortsatt helt lik."
  *
  * Non-G3 rooms are untouched: the override guard `isGame3Round(...)` returns
  * early for every round that doesn't carry the G3 variantConfig + slug combo,
@@ -9,6 +20,10 @@
  * (also extends BingoEngine) and is mutually exclusive with Game 3 at the
  * room-slug level, so the two hooks never fire in the same process for the
  * same room.
+ *
+ * Perpetual loop (PR #863 + #868) er fortsatt aktiv: når Coverall vinnes
+ * signaliserer engine `endedReason: "G3_FULL_HOUSE"` og PerpetualRoundService
+ * scheduler ny runde automatisk.
  *
  * Legacy references:
  *   - gamehelper/game3.js:663-708 — createGameData (flatten patterns per round)

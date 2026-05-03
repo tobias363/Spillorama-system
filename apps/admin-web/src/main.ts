@@ -56,7 +56,7 @@ import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPag
 import { mountAgentDashboard, unmountAgentDashboard } from "./pages/agent-dashboard/AgentDashboardPage.js";
 import { mountAgentPlayers } from "./pages/agent-players/AgentPlayersPage.js";
 import { mountAgentPhysicalTickets } from "./pages/agent-portal/AgentPhysicalTicketsPage.js";
-import { mountAgentGames } from "./pages/agent-portal/AgentGamesPage.js";
+import { mountAgentGames, unmountAgentGames } from "./pages/agent-portal/AgentGamesPage.js";
 import { mountAgentCashInOut } from "./pages/agent-portal/AgentCashInOutPage.js";
 import { mountAgentUniqueId } from "./pages/agent-portal/AgentUniqueIdPage.js";
 import { mountAgentPhysicalCashout } from "./pages/agent-portal/AgentPhysicalCashoutPage.js";
@@ -161,11 +161,34 @@ function showLogin(root: HTMLElement): void {
 export { parsePreAuthRoute };
 
 function mountShell(_root: HTMLElement, session: Session): void {
+  // DEBUG: monkey-patch window.location.hash setter for å fange opp ALL
+  // navigasjon med stack-trace. Setter window.__SPILL_DEBUG__=false for å skru av.
+  const debugMonkey = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+  if (debugMonkey) {
+    const proto = Object.getPrototypeOf(window.location) as object;
+    const origDescriptor = Object.getOwnPropertyDescriptor(proto, "hash");
+    if (origDescriptor && origDescriptor.set && origDescriptor.get) {
+      const origSet = origDescriptor.set;
+      const origGet = origDescriptor.get;
+      Object.defineProperty(window.location, "hash", {
+        get: function () { return origGet.call(this); },
+        set: function (v: string) {
+          const stack = new Error().stack?.split("\n").slice(1, 5).join("\n  ") ?? "(no stack)";
+          console.log("[hash-setter] location.hash = %o\n  %s", v, stack);
+          origSet.call(this, v);
+        },
+        configurable: true,
+      });
+      console.log("[hash-setter] monkey-patch installed — will log all location.hash writes");
+    }
+  }
   const refs = mountLayout("#app");
   const router = new Router({
     container: refs.contentHost,
     renderer: (container, route) => renderPage(container, route, session),
     onUnknown: (path, container) => {
+      const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+      if (debug) console.log("[router-onUnknown] path=%s — searching dispatchers", path);
       unmountDashboard();
       // Strip query string for routes that carry params
       // (e.g. `/agent/sellPhysicalTickets?gameId=X`, `/players/view?id=X`,
@@ -197,7 +220,12 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isGamesRoute(bare)) {
         // Dynamic games-stack routes (view/:id, edit/:id, typeId-scoped).
-        mountGamesRoute(container, bare);
+        // Pass full `path` (incl. query string) — dispatcher needs `?typeId=`
+        // for /gameManagement to render the selected game-type. The dispatcher
+        // strips the query itself for route-matching. Forrige bug: `bare` ble
+        // sendt så typeId alltid var undefined → dropdown hoppet tilbake til
+        // "Velg Spilltype" når brukeren valgte en variant.
+        mountGamesRoute(container, path);
         return;
       }
       if (isPhysicalTicketsRoute(bare)) {
@@ -303,6 +331,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       renderUnknown(container, path);
     },
     onChange: (route, path) => {
+      const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+      if (debug) {
+        console.log("[router-onChange] path=%s route=%s found=%s", path, route?.path, route ? "YES" : "NO (will fall to onUnknown)");
+      }
       // Stop dashboard-polling when navigating away from the dashboard route.
       if (route?.path !== "/admin" && route?.path !== "/") unmountDashboard();
       // Dispose admin-ops socket when navigating away from /admin/ops.
@@ -314,9 +346,11 @@ function mountShell(_root: HTMLElement, session: Session): void {
       // page before the redirect lands.
       const redirected = guardRouteForRole(path, session);
       if (redirected !== path) {
+        if (debug) console.log("[router-onChange] GUARD REDIRECT %s → %s", path, redirected);
         window.location.hash = `#${redirected}`;
         return;
       }
+      if (debug) console.log("[router-onChange] no redirect, rendering chrome");
       renderLayoutChrome(refs, session, route, path, MAINTENANCE_MODE);
     },
   });
@@ -399,14 +433,28 @@ function mountShell(_root: HTMLElement, session: Session): void {
  */
 function guardRouteForRole(path: string, session: Session): string {
   const bare = path.split("?")[0] ?? path;
+  // Debug-logging — sett window.__SPILL_DEBUG__ = false i console for å skru av
+  const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+  if (debug) {
+    console.log("[router-guard] path=%s bare=%s role=%s", path, bare, session.role);
+  }
   if (isAgentPortalRole(session.role)) {
-    // Agent-portal users stay inside /agent/*. /admin and / redirect to
-    // their landing. Legacy /agent/* (cashinout, physicalCashOut, etc.)
-    // stays accessible since those are agent-specific anyway.
-    if (bare === "/" || bare === "/admin") return "/agent/dashboard";
-    if (bare.startsWith("/agent/")) return path;
-    // Anything else is an admin-panel route — bounce back.
-    return "/agent/dashboard";
+    // Agent-portal users (AGENT, HALL_OPERATOR) — landing-redirect for `/`
+    // og `/admin`, men ALLE andre paths tillates. Sidebar (sidebarSpec.ts)
+    // filtrerer hva AGENT ser, og backend (AdminAccessPolicy + hall-scope-
+    // guards) håndhever hva de faktisk får tilgang til via RBAC.
+    //
+    // Pilot-fix 2026-05-01: tidligere bounce-back til /agent/dashboard på
+    // alle non-/agent-paths brakk navigasjon for AGENT på sidebar-leaves
+    // som peker på legacy-paths (/uniqueId, /withdraw/*, /physical/*,
+    // /sold-tickets etc.). Disse er gyldige sider AGENT skal kunne åpne
+    // — RBAC + hall-scope tar hand om autorisasjon serverside.
+    if (bare === "/" || bare === "/admin") {
+      if (debug) console.log("[router-guard] AGENT root/admin → redirect to /agent/dashboard");
+      return "/agent/dashboard";
+    }
+    if (debug) console.log("[router-guard] AGENT path allowed → %s", path);
+    return path;
   }
   if (isAdminPanelRole(session.role)) {
     // ADMIN super-user — alle ruter åpne. Agent-portal-sider rendrer en
@@ -418,6 +466,11 @@ function guardRouteForRole(path: string, session: Session): string {
 }
 
 function renderPage(container: HTMLElement, route: RouteDef, session: Session): void | Promise<void> {
+  // Debug-logging — sett window.__SPILL_DEBUG__ = false i console for å skru av
+  const debug = (window as { __SPILL_DEBUG__?: boolean }).__SPILL_DEBUG__ !== false;
+  if (debug) {
+    console.log("[render-page] route.path=%s titleKey=%s role=%s", route.path, route.titleKey, session.role);
+  }
   container.setAttribute("data-route", route.path);
   container.setAttribute("data-title", t(route.titleKey));
   if (route.path === "/admin" || route.path === "/") {
@@ -426,6 +479,15 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   unmountDashboard();
   if (route.path !== "/agent/dashboard") {
     unmountAgentDashboard();
+  }
+  // BUG-FIX 2026-05-02: NextGamePanel hadde polling + socket som overskrev
+  // container.innerHTML hver sekund hvis vi ikke unmountet ved nav-bytter.
+  // Symptom: AGENT klikker Tidsplan → URL endres til /schedules, ScheduleList
+  // renderer briefly, så NextGamePanel-polling fyrer rerender(activeContainer)
+  // → erstatter ScheduleList med "Ingen aktivt bingo-rom". Brukeren tror
+  // siden bouncer.
+  if (route.path !== "/agent/games") {
+    unmountAgentGames();
   }
   if (route.path === "/agent/dashboard") {
     mountAgentDashboard(container);

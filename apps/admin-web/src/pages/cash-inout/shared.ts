@@ -10,17 +10,11 @@ export function formatNOK(n: number | null | undefined): string {
   return n.toFixed(2);
 }
 
-export function contentHeader(titleKey: string, extraCrumb?: string): string {
-  const title = escapeHtml(t(titleKey));
-  const extra = extraCrumb ? `<li class="active">${escapeHtml(extraCrumb)}</li>` : `<li class="active">${title}</li>`;
-  return `
-    <section class="content-header">
-      <h1>${title}</h1>
-      <ol class="breadcrumb">
-        <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
-        ${extra}
-      </ol>
-    </section>`;
+// 2026-05-02 (Tobias UX): no-op. Shell rendrer header+breadcrumb i
+// `Breadcrumb.ts`; per-page contentHeader var duplikat. Beholder
+// signaturen for bakoverkompatibilitet med eksisterende callers.
+export function contentHeader(_titleKey: string, _extraCrumb?: string): string {
+  return "";
 }
 
 export function boxOpen(titleKey: string, variant: "default" | "primary" | "info" | "danger" | "success" = "default"): string {

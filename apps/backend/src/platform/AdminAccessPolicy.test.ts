@@ -183,6 +183,24 @@ test("BIN-587 B3-security: assertAdminPermission kaster for HALL_OPERATOR", () =
   assert.throws(() => assertAdminPermission("PLAYER", "SECURITY_WRITE"));
 });
 
+// ── Withdrawal QA P1 (2026-05-01): WITHDRAW_EMAIL_{READ,WRITE} ─────────
+
+test("Withdrawal QA P1: WITHDRAW_EMAIL_READ tillatt for ADMIN + HALL_OPERATOR + AGENT", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "WITHDRAW_EMAIL_READ"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "WITHDRAW_EMAIL_READ"), true);
+  assert.equal(canAccessAdminPermission("AGENT", "WITHDRAW_EMAIL_READ"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "WITHDRAW_EMAIL_READ"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "WITHDRAW_EMAIL_READ"), false);
+});
+
+test("Withdrawal QA P1: WITHDRAW_EMAIL_WRITE tillatt for ADMIN + HALL_OPERATOR + AGENT", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "WITHDRAW_EMAIL_WRITE"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "WITHDRAW_EMAIL_WRITE"), true);
+  assert.equal(canAccessAdminPermission("AGENT", "WITHDRAW_EMAIL_WRITE"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "WITHDRAW_EMAIL_WRITE"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "WITHDRAW_EMAIL_WRITE"), false);
+});
+
 // ── BIN-587 B4a: physical-ticket permission ─────────────────────────────
 
 test("BIN-587 B4a: PHYSICAL_TICKET_WRITE tillatt for ADMIN + HALL_OPERATOR, ikke SUPPORT/PLAYER", () => {
@@ -255,6 +273,76 @@ test("BIN-591: PLAYER får FORBIDDEN på hall-scope-check", () => {
   assert.throws(
     () => assertUserHallScope({ role: "PLAYER", hallId: null }, "hall-a"),
     /ikke tilgang/
+  );
+});
+
+// ── P0-3: AGENT hall-scope (PILOT_DAY_FULL_VERIFICATION_2026-05-01) ────────
+
+test("P0-3: AGENT tildelt Hall A når primary-hall matcher", () => {
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "AGENT", hallId: "hall-a" }, "hall-a")
+  );
+});
+
+test("P0-3: AGENT får FORBIDDEN ved cross-hall-mismatch", () => {
+  assert.throws(
+    () => assertUserHallScope({ role: "AGENT", hallId: "hall-a" }, "hall-b"),
+    /Du har ikke tilgang/
+  );
+});
+
+test("P0-3: AGENT uten tildelt primary-hall fail-closed", () => {
+  assert.throws(
+    () => assertUserHallScope({ role: "AGENT", hallId: null }, "hall-a"),
+    /ikke tildelt en hall/
+  );
+});
+
+test("P0-3: HALL_OPERATOR-oppførsel uendret etter AGENT-utvidelse", () => {
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "HALL_OPERATOR", hallId: "hall-x" }, "hall-x")
+  );
+  assert.throws(
+    () => assertUserHallScope({ role: "HALL_OPERATOR", hallId: "hall-x" }, "hall-y"),
+    /Du har ikke tilgang/
+  );
+});
+
+test("P0-3: ADMIN-oppførsel uendret etter AGENT-utvidelse", () => {
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "ADMIN", hallId: null }, "hall-a")
+  );
+  assert.doesNotThrow(() =>
+    assertUserHallScope({ role: "ADMIN", hallId: "hall-x" }, "hall-y")
+  );
+});
+
+test("P0-3: resolveHallScopeFilter tvinger AGENT til egen primary-hall", () => {
+  assert.equal(
+    resolveHallScopeFilter({ role: "AGENT", hallId: "hall-a" }),
+    "hall-a"
+  );
+  assert.equal(
+    resolveHallScopeFilter({ role: "AGENT", hallId: "hall-a" }, "hall-a"),
+    "hall-a"
+  );
+});
+
+test("P0-3: resolveHallScopeFilter avviser AGENT som prøver annen hall", () => {
+  assert.throws(
+    () =>
+      resolveHallScopeFilter(
+        { role: "AGENT", hallId: "hall-a" },
+        "hall-b"
+      ),
+    /ikke tilgang til denne hallen/
+  );
+});
+
+test("P0-3: resolveHallScopeFilter fail-closed for AGENT uten primary-hall", () => {
+  assert.throws(
+    () => resolveHallScopeFilter({ role: "AGENT", hallId: null }),
+    /ikke tildelt en hall/
   );
 });
 

@@ -117,6 +117,14 @@ export interface AdminRouterDeps {
   clearDisplayTicketCache: (roomCode: string) => void;
   roomConfiguredEntryFeeByRoom: Map<string, number>;
   getPrimaryRoomForHall: (hallId: string) => { code: string; hallId: string; gameStatus: string; playerCount: number } | null;
+  /**
+   * 2026-05-02 (Tobias UX): én rom per group-of-halls. Brukes av
+   * POST /api/admin/rooms til å derivere kanonisk rom-kode + av
+   * GET-listen til å filtrere shared rooms til medlems-haller.
+   * Returnerer null hvis hallen ikke er i en gruppe (fall-back til
+   * per-hall-kode beholder eksisterende oppførsel).
+   */
+  getHallGroupIdForHall?: (hallId: string) => Promise<string | null>;
   resolveBingoHallGameConfigForRoom: (roomCode: string) => Promise<{ hallId: string; maxTicketsPerPlayer: number }>;
   /**
    * BIN-694: Bind the default variant config for a freshly created room

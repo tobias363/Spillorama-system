@@ -35,6 +35,11 @@ tags:
       About Us, Responsible Gaming, Support, Links). Player-app uses these to
       show static pages BEFORE login. GAP #22 + #33 — see
       docs/architecture/BACKEND_1TO1_GAP_AUDIT_2026-04-24.md.
+  - name: Status — Public
+    description: |
+      Public (un-authenticated) read-endpoints for the system status page
+      (`/status`). Spillere og hall-operatører kan sjekke disse ved problemer.
+      Cache 30s. BIN-791.
   - name: Payments
     description: Swedbank Pay payment intents and callbacks
   - name: Admin — Auth
@@ -73,6 +78,11 @@ tags:
     description: Metronia ekstern-maskin-integrasjon — ticket create/topup/payout/void + rapporter. BIN-583 B3.4.
   - name: Agent — OK Bingo
     description: OK Bingo ekstern-maskin-integrasjon (SQL Server polling) — ticket create/topup/payout/void + open-day + rapporter. BIN-583 B3.5.
+  - name: Security
+    description: |
+      Browser-emitted security telemetry (CSP-violation reports, etc.). These
+      endpoints are unauthenticated by design — browsers send them as a side-
+      effect of policy violations. BIN-776.
 
 components:
   securitySchemes:
@@ -860,6 +870,52 @@ components:
           description: |
             For regulatoriske slugs: live-versjonens `publishedAt`. For
             ikke-regulatoriske: `app_cms_content.updatedAt`.
+
+    # ── Status — Public (BIN-791) ─────────────────────────────────────────
+    PublicStatusIncident:
+      type: object
+      description: |
+        Admin-publisert hendelse synlig på offentlig status-side. Strippet
+        for moderator-identitet (`createdByUserId`, `updatedByUserId`
+        eksponeres ikke utad).
+      required:
+        [id, title, description, status, impact, affectedComponents, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 5000
+          description: Markdown tillatt. Vises rett under tittelen.
+        status:
+          type: string
+          enum: [investigating, identified, monitoring, resolved]
+        impact:
+          type: string
+          enum: [none, minor, major, critical]
+          description: |
+            UI-fargekode: `none` = info (grønn), `minor` = gul,
+            `major` = oransje, `critical` = rød.
+        affectedComponents:
+          type: array
+          items:
+            type: string
+          description: |
+            Component-IDer som matcher `StatusService.checks[].component`
+            (eks. `bingo`, `wallet`).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: [string, "null"]
+          format: date-time
 
 security:
   - BearerAuth: []
@@ -2268,6 +2324,169 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  # ── Status — Public (BIN-791) ─────────────────────────────────────────────
+  #
+  # Un-authenticated read-endpoints for the public status page (`/status`).
+  # Cache: `public, max-age=30` på alle 200-svar — match StatusService sin
+  # interne 30s-cache så klient og server-cache havner i synk.
+  #
+  # Implementasjon: apps/backend/src/routes/publicStatus.ts. Komponent-
+  # sjekker er DI'd via apps/backend/src/observability/statusBootstrap.ts.
+
+  /api/status:
+    get:
+      tags: [Status — Public]
+      summary: Hent komponentstatus-snapshot for hele systemet (offentlig, no auth)
+      description: |
+        Returnerer en aggregert status for alle registrerte komponenter
+        (api, database, bingo, rocket, monsterbingo, spillorama, wallet,
+        auth, admin, tv). Cachet i 30 sekunder for å avlaste backenden ved
+        store hendelser hvor mange spillere refresher samtidig.
+      security: []
+      responses:
+        "200":
+          description: Aggregert status
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=30"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [overall, generatedAt, components]
+                        properties:
+                          overall:
+                            type: string
+                            enum: [operational, degraded, outage]
+                          generatedAt:
+                            type: string
+                            format: date-time
+                          components:
+                            type: array
+                            items:
+                              type: object
+                              required:
+                                [component, displayName, status, lastCheckedAt]
+                              properties:
+                                component:
+                                  type: string
+                                displayName:
+                                  type: string
+                                status:
+                                  type: string
+                                  enum: [operational, degraded, outage]
+                                message:
+                                  type: [string, "null"]
+                                lastCheckedAt:
+                                  type: string
+                                  format: date-time
+
+  /api/status/uptime:
+    get:
+      tags: [Status — Public]
+      summary: Hent 24-timers uptime-historikk per komponent
+      description: |
+        Returnerer 24 ettime-bøtter per komponent. UI tegner disse som en
+        grønn/gul/rød tidslinje. Hver bøtte aggregerer worst-case-status
+        for samples som ble registrert i bøtte-perioden.
+      security: []
+      responses:
+        "200":
+          description: Per-komponent uptime
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=30"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [uptime]
+                        properties:
+                          uptime:
+                            type: array
+                            items:
+                              type: object
+                              required: [component, displayName, buckets]
+                              properties:
+                                component:
+                                  type: string
+                                displayName:
+                                  type: string
+                                buckets:
+                                  type: array
+                                  items:
+                                    type: object
+                                    required:
+                                      [startsAt, endsAt, worstStatus, sampleCount]
+                                    properties:
+                                      startsAt:
+                                        type: string
+                                        format: date-time
+                                      endsAt:
+                                        type: string
+                                        format: date-time
+                                      worstStatus:
+                                        type: string
+                                        enum: [operational, degraded, outage]
+                                      sampleCount:
+                                        type: integer
+                                        minimum: 0
+
+  /api/status/incidents:
+    get:
+      tags: [Status — Public]
+      summary: Hent aktive + nylige hendelser publisert av admin
+      description: |
+        Returnerer admin-publiserte incidents. `active` inneholder alle
+        ikke-løste hendelser (status != `resolved`). `recent` inneholder
+        siste 50 totalt (også løste, for historikk-tabellen).
+
+        Felter som `createdByUserId` / `updatedByUserId` er strippet fra
+        det offentlige svaret — moderatoridentitet er ikke offentlig
+        informasjon.
+      security: []
+      responses:
+        "200":
+          description: Active + recent incidents
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=30"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [active, recent]
+                        properties:
+                          active:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PublicStatusIncident"
+                          recent:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PublicStatusIncident"
 
   # ── Payments ──────────────────────────────────────────────────────────────
 
@@ -6854,3 +7073,74 @@ paths:
                           perHall:
                             type: array
                             items: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+
+  # ── Security (BIN-776) ────────────────────────────────────────────────────
+
+  /api/csp-report:
+    post:
+      tags: [Security]
+      summary: Receive CSP-violation reports from browsers (BIN-776)
+      description: |
+        Endpoint that browsers POST to when a resource violates the
+        `Content-Security-Policy` (or `-Report-Only`) header set by
+        `securityHeadersMiddleware`. Always returns 204 — the response
+        body is intentionally empty so it cannot be turned into a
+        reflected-XSS sink.
+
+        **Authentication:** none. Browsers send violation reports as a
+        side-effect and cannot include cookies/Bearer tokens for cross-
+        origin reports.
+
+        **Content types accepted:**
+          - `application/csp-report` (legacy `report-uri` shape)
+          - `application/reports+json` (modern Reporting API shape)
+          - `application/json` (developer/curl convenience)
+
+        **Body limit:** 16 KB. Any field longer than 2048 chars is
+        clipped before logging to prevent log flooding.
+
+        **Logging:** each parsed violation is emitted as a structured
+        warn-level event (`module=csp-report`, message=`csp.violation`)
+        so it shows up in Render logs and Sentry breadcrumbs.
+
+        **Rate limiting:** this route is mounted *before* the global
+        HTTP rate-limiter so violation bursts during the report-only
+        rollout are not silently dropped as 429s.
+      security: []
+      requestBody:
+        required: true
+        description: |
+          Either the legacy `{ "csp-report": {...} }` envelope or the
+          Reporting API array form `[{ type, body, ... }]`. Both are
+          parsed; malformed bodies are logged as `malformed` and still
+          return 204.
+        content:
+          application/csp-report:
+            schema:
+              type: object
+              properties:
+                csp-report:
+                  type: object
+                  additionalProperties: true
+          application/reports+json:
+            schema:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  properties:
+                    csp-report:
+                      type: object
+                      additionalProperties: true
+                - type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        "204":
+          description: Acknowledged. No response body — never echo back the
+            untrusted report payload.

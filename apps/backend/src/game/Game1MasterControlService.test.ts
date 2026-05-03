@@ -171,21 +171,36 @@ test("startGame happy path fra purchase_open + allReady", async () => {
   assert.equal(result.status, "running");
 });
 
-test("startGame avviser hvis status er scheduled", async () => {
+test("startGame tillater 'scheduled'-status (Tobias UX 2026-05-03 — master kan forsere)", async () => {
+  // 2026-05-03: tidligere ble 'scheduled' avvist med GAME_NOT_STARTABLE.
+  // Nå tillates det så master kan forsere start uten å vente på cron.
+  // Mock simulerer minimum data så startGame kommer forbi status-guard.
+  // Den vil deretter feile på en annen sjekk (manglende ready-rows osv),
+  // som er OK — vi sjekker bare at GAME_NOT_STARTABLE IKKE kastes.
   const { pool } = createStubPool([
     { match: (s) => s.startsWith("BEGIN"), rows: [] },
     {
       match: (s) => s.includes("FOR UPDATE"),
       rows: [gameRow({ status: "scheduled" })],
     },
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [],
+    },
     { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
   ]);
   const svc = Game1MasterControlService.forTesting(pool as never);
-  await assert.rejects(
-    svc.startGame({ gameId: "g1", actor: masterActor }),
-    (err: unknown) =>
-      err instanceof DomainError && err.code === "GAME_NOT_STARTABLE"
-  );
+  try {
+    await svc.startGame({ gameId: "g1", actor: masterActor });
+  } catch (err) {
+    // Hvis det kastes en feil, må det IKKE være GAME_NOT_STARTABLE.
+    assert.ok(
+      err instanceof DomainError && err.code !== "GAME_NOT_STARTABLE",
+      `Forventet at scheduled-status IKKE kaster GAME_NOT_STARTABLE, fikk: ${
+        err instanceof DomainError ? err.code : String(err)
+      }`
+    );
+  }
 });
 
 test("startGame fra purchase_open avviser hvis ikke alle haller klare", async () => {

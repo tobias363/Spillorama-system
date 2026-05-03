@@ -1,0 +1,11 @@
+{
+  "findings": [
+    {
+      "id": "bug3",
+      "status": "❌ STILL BROKEN",
+      "details": "UUID synlig: false; hall-navn synlig: false; tekst-snippet:  Hopp til hovedinnholdBGBingo GameToggle navigationDaglig saldo [ 0.00 ]Kontant inn/ut 0 Notifications "
+    }
+  ],
+  "consoleErrors": [],
+  "network400s": []
+}

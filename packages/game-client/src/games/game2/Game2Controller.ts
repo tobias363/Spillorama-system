@@ -8,15 +8,17 @@ import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "./screens/EndScreen.js";
+import { ChooseTicketsScreen } from "./screens/ChooseTicketsScreen.js";
+import { SpilloramaApi } from "../../net/SpilloramaApi.js";
 
 /**
- * Phase-maskin for Game 2 (Rocket).
+ * Phase-maskin for Game 2 (Spill 2 / Tallspill).
  * BIN-507 port: SPECTATING lagt til for late-joiner midt i runde.
  */
 type Phase = "LOADING" | "LOBBY" | "PLAYING" | "SPECTATING" | "ENDED";
 
 /**
- * Game 2 (Rocket Bingo) controller.
+ * Game 2 (Spill 2 / Tallspill) controller.
  * Manages the full lifecycle: join room → lobby → gameplay → end → loop.
  */
 class Game2Controller implements GameController {
@@ -27,6 +29,8 @@ class Game2Controller implements GameController {
   private lobbyScreen: LobbyScreen | null = null;
   private playScreen: PlayScreen | null = null;
   private endScreen: EndScreen | null = null;
+  private chooseTicketsScreen: ChooseTicketsScreen | null = null;
+  private api: SpilloramaApi = new SpilloramaApi("");
   private myPlayerId: string | null = null;
   private actualRoomCode: string = "";
   private unsubs: (() => void)[] = [];
@@ -42,9 +46,10 @@ class Game2Controller implements GameController {
     app.stage.addChild(this.root);
 
     // BIN-500 port: loader holdes til syncReady (se waitForSyncReady).
+    // Tobias-direktiv 2026-05-03: ny Spillorama-branded Loading-overlay.
     const overlayContainer = app.app.canvas.parentElement ?? document.body;
     this.loader = new LoadingOverlay(overlayContainer);
-    this.loader.show("Kobler til...");
+    this.loader.setState("CONNECTING");
 
     // Connect socket
     console.log("[Game2] Connecting socket...");
@@ -61,18 +66,26 @@ class Game2Controller implements GameController {
     });
 
     if (!connected) {
-      this.loader?.hide();
+      // Tobias-direktiv 2026-05-03: connection-error fallback (klikk = reload).
+      this.loader?.setError();
       this.showError("Kunne ikke koble til server");
       return;
     }
     console.log("[Game2] Socket connected");
-    this.loader?.show("Joiner rom...");
+    this.loader?.setState("JOINING_ROOM");
 
-    // Track socket stability
+    // Track socket stability + Tobias-direktiv 2026-05-03: vis Loading-overlay
+    // ved reconnect/disconnect så kunden aldri ser en frosset eller tom skjerm.
     this.unsubs.push(
       socket.on("connectionStateChanged", (state) => {
-        if (state === "reconnecting") telemetry.trackReconnect();
-        if (state === "disconnected") telemetry.trackDisconnect("socket");
+        if (state === "reconnecting") {
+          telemetry.trackReconnect();
+          this.loader?.setState("RECONNECTING");
+        }
+        if (state === "disconnected") {
+          telemetry.trackDisconnect("socket");
+          this.loader?.setState("DISCONNECTED");
+        }
       }),
     );
 
@@ -85,7 +98,8 @@ class Game2Controller implements GameController {
 
     if (!joinResult.ok || !joinResult.data) {
       console.error("[Game2] Room join failed:", joinResult.error);
-      this.loader?.hide();
+      // Tobias-direktiv 2026-05-03: room-join failure → connection-error fallback.
+      this.loader?.setError();
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");
       return;
     }
@@ -105,6 +119,15 @@ class Game2Controller implements GameController {
       bridge.on("gameEnded", (state) => this.onGameEnded(state)),
       bridge.on("numberDrawn", (num, idx, state) => this.onNumberDrawn(num, idx, state)),
       bridge.on("patternWon", (result, state) => this.onPatternWon(result, state)),
+    );
+
+    // 2026-05-02 (Tobias UX): Spill 2 jackpot-bar oppdaterer ved hver
+    // G2-trekning. Backend sender komplett 6-slot-prize-listen
+    // (9/10/11/12/13/14-21) på `g2:jackpot:list-update`-event.
+    this.unsubs.push(
+      socket.on("g2JackpotListUpdate", (payload) => {
+        this.playScreen?.updateJackpot(payload.jackpotList);
+      }),
     );
 
     // Unlock audio on first interaction
@@ -209,14 +232,29 @@ class Game2Controller implements GameController {
         this.lobbyScreen = new LobbyScreen(w, h);
         this.lobbyScreen.setOnBuy((count) => this.handleBuy(count));
         this.lobbyScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
+        // 2026-05-02 (Tobias UX, PDF 17 wireframe): "Kjøp flere brett"-pill
+        // i ComboPanel åpner Choose Tickets-side. Spiller kan velge
+        // spesifikke brett fra 32-pool i stedet for å la systemet
+        // random-allotte.
+        this.lobbyScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
         this.lobbyScreen.update(state);
-        this.lobbyScreen.showBuyPopup(state.entryFee || 10);
+        // 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): auto-show
+        // av BuyPopup i LOBBY fjernet per Tobias-direktiv. Designet
+        // (Bong Mockup v2) viser BallTube + bong-grid + ComboPanel uten
+        // overlay i midten. BuyPopup styres nå kun av eksplisitt klikk
+        // på "Kjøp flere brett"-pill i ComboPanel.
         this.setScreen(this.lobbyScreen);
         break;
 
       case "PLAYING":
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
+        // 2026-05-03 (Agent E, Bong Mockup-design): Lykketall + "Kjøp flere
+        // brett" lever nå inne i PlayScreen.ComboPanel (var i LobbyScreen).
+        this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
+        this.playScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
+        // 2026-05-03 (Agent L): mellom-runde buy-popup wire-up.
+        this.playScreen.setOnBuyForNextRound((count) => this.handleBuyForNextRound(count));
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
@@ -228,6 +266,11 @@ class Game2Controller implements GameController {
         // mark/claim fra spectators uansett.
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
+        this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
+        this.playScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
+        // 2026-05-03 (Agent L): mellom-runde buy-popup wire-up — også for
+        // spectators. De får mulighet til å hoppe inn i neste runde.
+        this.playScreen.setOnBuyForNextRound((count) => this.handleBuyForNextRound(count));
         this.playScreen.buildTickets(state); // tom ticket-seksjon for spectator
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
@@ -252,11 +295,20 @@ class Game2Controller implements GameController {
     }
     if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
       this.playScreen.updateInfo(state);
+      // 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): auto-vis
+      // av BuyPopup mid-runde fjernet. Per Tobias-direktiv: BuyPopup skal
+      // KUN vises når spilleren ELSPLISITT klikker "Kjøp flere brett" i
+      // ComboPanel — ingen overlay i midten av PlayScreen som dekker
+      // bong-grid og BallTube.
     }
   }
 
   private onGameStarted(state: GameState): void {
     console.log("[Game2] Game started, tickets:", state.myTickets.length);
+    // 2026-05-03 (Agent T): popup styres nå kun av eksplisitt klikk; vi
+    // skjuler likevel ved ny runde-start i tilfelle den var åpen.
+    this.playScreen?.hideBuyPopupForNextRound();
+
     if (state.myTickets.length > 0) {
       this.transitionTo("PLAYING", state);
     } else {
@@ -283,6 +335,8 @@ class Game2Controller implements GameController {
   private onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
     if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
       this.playScreen.onNumberDrawn(number, drawIndex, state);
+      // 2026-05-03 (Agent T): ingen auto-popup-trigger her — BuyPopup
+      // styres kun av eksplisitt klikk på "Kjøp flere brett".
     }
   }
 
@@ -315,12 +369,60 @@ class Game2Controller implements GameController {
     }
   }
 
+  /**
+   * 2026-05-03 (Agent L → Agent T): kjøp utløst fra BuyPopup som åpnes
+   * eksplisitt via "Kjøp flere brett"-pill i ComboPanel. Auto-trigger er
+   * fjernet — popup er nå en ren modal som spilleren selv åpner. Samme
+   * bet:arm-flyt som lobby-kjøp.
+   */
+  private async handleBuyForNextRound(_count: number): Promise<void> {
+    console.log("[Game2] Arming bet for next round (modal popup), roomCode:", this.actualRoomCode);
+    const result = await this.deps.socket.armBet({
+      roomCode: this.actualRoomCode,
+      armed: true,
+    });
+
+    if (result.ok) {
+      console.log("[Game2] Armed successfully (modal popup)");
+      this.playScreen?.hideBuyPopupForNextRound();
+    } else {
+      console.error("[Game2] Arm failed (modal popup):", result.error);
+      this.showError(result.error?.message || "Kunne ikke kjøpe billetter");
+    }
+  }
+
   private async handleLuckyNumber(number: number): Promise<void> {
     console.log("[Game2] Setting lucky number:", number);
     await this.deps.socket.setLuckyNumber({
       roomCode: this.actualRoomCode,
       luckyNumber: number,
     });
+  }
+
+  /**
+   * 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): åpne Choose Tickets-
+   * skjerm med 32 forhåndsgenererte brett. Spiller velger ønskede + Pick
+   * Any Number, Buy → tilbake til Lobby.
+   */
+  private openChooseTicketsScreen(): void {
+    const w = this.deps.app.app.screen.width;
+    const h = this.deps.app.app.screen.height;
+    const state = this.deps.bridge.getState();
+    this.chooseTicketsScreen = new ChooseTicketsScreen(w, h, {
+      api: this.api,
+      roomCode: this.actualRoomCode,
+      ticketPriceKr: state.entryFee || 10,
+      onBack: () => {
+        // Tilbake til Lobby uten kjøp.
+        this.transitionTo("LOBBY", this.deps.bridge.getState());
+      },
+      onBuyComplete: () => {
+        // Etter vellykket kjøp — naviger tilbake til Lobby. v2 vil koble
+        // dette til faktisk bet:arm i BingoEngine.
+        this.transitionTo("LOBBY", this.deps.bridge.getState());
+      },
+    });
+    this.setScreen(this.chooseTicketsScreen);
   }
 
   private async handleClaim(type: "LINE" | "BINGO"): Promise<void> {

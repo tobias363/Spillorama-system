@@ -727,7 +727,11 @@
     const profileBtn = document.getElementById('lobby-profile-btn');
     if (profileBtn) {
       profileBtn.addEventListener('click', function () {
-        if (typeof window.ShowSpillvettPanel === 'function') {
+        // Min Konto redesign (2026-05-02): prefer ShowMinKontoPanel, fall
+        // back to legacy Spillvett panel if the new overlay isn't loaded.
+        if (typeof window.ShowMinKontoPanel === 'function') {
+          window.ShowMinKontoPanel();
+        } else if (typeof window.ShowSpillvettPanel === 'function') {
           window.ShowSpillvettPanel();
         }
       });
@@ -736,8 +740,11 @@
     const depositBtn = document.getElementById('lobby-deposit-btn');
     if (depositBtn) {
       depositBtn.addEventListener('click', function () {
-        // Open profile panel to wallet/deposit section
-        if (typeof window.ShowSpillvettPanel === 'function') {
+        // Open profile panel to wallet/deposit section. Min Konto's "Overfør
+        // penger" pill replaces the legacy deposit-section scroll target.
+        if (typeof window.ShowMinKontoPanel === 'function') {
+          window.ShowMinKontoPanel();
+        } else if (typeof window.ShowSpillvettPanel === 'function') {
           window.ShowSpillvettPanel();
           // Scroll to deposit section after panel opens
           setTimeout(() => {
@@ -748,11 +755,13 @@
       });
     }
 
-    // Lommebok button — open profile/wallet panel
+    // Lommebok button — open profile/wallet panel (Min Konto preferred)
     const walletBtn = document.getElementById('lobby-wallet-btn');
     if (walletBtn) {
       walletBtn.addEventListener('click', function () {
-        if (typeof window.ShowSpillvettPanel === 'function') {
+        if (typeof window.ShowMinKontoPanel === 'function') {
+          window.ShowMinKontoPanel();
+        } else if (typeof window.ShowSpillvettPanel === 'function') {
           window.ShowSpillvettPanel();
         }
       });
@@ -771,11 +780,13 @@
       });
     }
 
-    // Settings button — open profile panel (same as profile for now)
+    // Settings button — open profile panel (Min Konto preferred)
     const settingsBtn = document.getElementById('lobby-settings-btn');
     if (settingsBtn) {
       settingsBtn.addEventListener('click', function () {
-        if (typeof window.ShowSpillvettPanel === 'function') {
+        if (typeof window.ShowMinKontoPanel === 'function') {
+          window.ShowMinKontoPanel();
+        } else if (typeof window.ShowSpillvettPanel === 'function') {
           window.ShowSpillvettPanel();
         }
       });

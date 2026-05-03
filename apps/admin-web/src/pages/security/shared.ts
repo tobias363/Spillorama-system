@@ -8,16 +8,11 @@ import { t } from "../../i18n/I18n.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
 export { escapeHtml };
 /** Content-header with breadcrumb rooted at "Security Management". */
-export function contentHeader(titleKey: string, moduleKey = "security_management"): string {
-  return `
-    <section class="content-header">
-      <h1>${escapeHtml(t(titleKey))}</h1>
-      <ol class="breadcrumb">
-        <li><a href="#/admin"><i class="fa fa-dashboard" aria-hidden="true"></i> ${escapeHtml(t("dashboard"))}</a></li>
-        <li>${escapeHtml(t(moduleKey))}</li>
-        <li class="active">${escapeHtml(t(titleKey))}</li>
-      </ol>
-    </section>`;
+export function contentHeader(_titleKey: string, _moduleKey = "security_management"): string {
+  // 2026-05-02 (Tobias UX): no-op. Shell rendrer header+breadcrumb i
+  // `Breadcrumb.ts`; per-page contentHeader var duplikat. Beholder
+  // signaturen for bakoverkompatibilitet.
+  return "";
 }
 
 export function boxOpen(

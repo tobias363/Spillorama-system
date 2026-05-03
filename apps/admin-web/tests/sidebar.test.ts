@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { initI18n } from "../src/i18n/I18n.js";
 import { renderSidebar } from "../src/shell/Sidebar.js";
 import { setSession, type Session } from "../src/auth/Session.js";
-import { adminSidebar, agentSidebar, sidebarFor } from "../src/shell/sidebarSpec.js";
+import { adminSidebar, agentSidebar, sidebarFor, type SidebarNode } from "../src/shell/sidebarSpec.js";
 
 function adminSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -91,6 +91,57 @@ describe("Sidebar spec", () => {
       expect(sell).toBeDefined();
       expect(sell?.path).toBe("/agent/sellProduct");
     }
+  });
+
+  it("agent sidebar exposes Schedule Management + Saved Game List under game-management (PR #823 audit gaps #2/#4)", () => {
+    const games = agentSidebar.find((n) => n.kind === "group" && n.id === "agent-game-management");
+    expect(games).toBeDefined();
+    if (games && games.kind === "group") {
+      const schedules = games.children.find((c) => c.id === "agent-schedules");
+      expect(schedules).toBeDefined();
+      expect(schedules?.path).toBe("/schedules");
+      expect(schedules?.labelKey).toBe("schedule_management");
+
+      const savedGames = games.children.find((c) => c.id === "agent-saved-game-list");
+      expect(savedGames).toBeDefined();
+      expect(savedGames?.path).toBe("/savedGameList");
+      expect(savedGames?.labelKey).toBe("saved_game_list");
+    }
+  });
+
+  it("agent sidebar exposes report-management group with 4 wireframe-paritets-leaves (PR #823 audit gaps #7/#12/#14/#15)", () => {
+    const reports = agentSidebar.find((n) => n.kind === "group" && n.id === "agent-report-management");
+    expect(reports).toBeDefined();
+    if (reports && reports.kind === "group") {
+      const ids = reports.children.map((c) => c.id);
+      expect(ids).toContain("agent-report-game1");
+      expect(ids).toContain("agent-hall-specific-report");
+      expect(ids).toContain("agent-hall-account-report");
+      expect(ids).toContain("agent-payout-player");
+
+      // Verifiser at paths matcher ekisterende admin-routes (router-guard
+      // tillater AGENT etter PR #824, og backend RBAC har AGENT på alle
+      // permissions per PR #797 + #807).
+      const paths = reports.children.map((c) => c.path);
+      expect(paths).toEqual([
+        "/reportGame1",
+        "/hallSpecificReport",
+        "/hallAccountReport",
+        "/payoutPlayer",
+      ]);
+    }
+  });
+
+  it("agent sidebar does NOT expose Wallet Management (RBAC blokk — WALLET_COMPLIANCE_READ er ADMIN/SUPPORT only)", () => {
+    // PR #823 audit rad 8: Wallet Management mangler AGENT i RBAC, og er
+    // bevisst ekskludert fra agent-sidebar inntil Tobias tar beslutning.
+    const findWalletLeaf = (nodes: SidebarNode[]): boolean =>
+      nodes.some((n) => {
+        if (n.kind === "leaf") return n.path === "/wallet" || n.id === "wallet";
+        if (n.kind === "group") return findWalletLeaf(n.children);
+        return false;
+      });
+    expect(findWalletLeaf(agentSidebar)).toBe(false);
   });
 
   it("agent sidebar exposes Past Game Winning History (wireframe §17.32) and Sold Tickets (wireframe §17.31)", () => {

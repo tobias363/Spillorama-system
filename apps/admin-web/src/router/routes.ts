@@ -82,7 +82,7 @@ export const routes: RouteDef[] = [
   { path: "/reportManagement/game1", titleKey: "report_management_game1", module: "Report Management" },
   { path: "/reportGame2", titleKey: "game2", module: "Report Management" },
   { path: "/reportGame3", titleKey: "game3", module: "Report Management" },
-  { path: "/reportGame4", titleKey: "game4", module: "Report Management" },
+  // /reportGame4 — Game 4 (themebingo) DEPRECATED, BIN-496.
   { path: "/reportGame5", titleKey: "game5", module: "Report Management" },
   { path: "/hallSpecificReport", titleKey: "hall_specific_reports", module: "Report Management" },
   { path: "/physicalTicketReport", titleKey: "physical_ticket", module: "Report Management" },

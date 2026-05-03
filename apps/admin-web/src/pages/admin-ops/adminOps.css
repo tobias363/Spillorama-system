@@ -46,6 +46,25 @@
 .ops-dot-red { background: #dd4b39; }
 .ops-dot-inactive { background: #d2d6de; }
 
+/* Group-of-Halls cards (top-level vy). Mirrors .ops-hall-card-stilen
+ * men tillater eksplisitt fokus-state for tab-navigering siden hele
+ * card-en er role=button. */
+.ops-group-card {
+  margin-bottom: 0;
+  transition: box-shadow 0.15s ease;
+}
+.ops-group-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.ops-group-card:focus-visible {
+  outline: 2px solid #3c8dbc;
+  outline-offset: 2px;
+}
+.ops-group-card .box-header { padding: 8px 12px; }
+.ops-group-card .box-body { padding: 12px; }
+.ops-group-card .box-footer { padding: 6px 8px; }
+
 @media (max-width: 767px) {
   .ops-hall-card .box-footer { text-align: center; }
+  .ops-group-card .box-footer { text-align: center; }
 }

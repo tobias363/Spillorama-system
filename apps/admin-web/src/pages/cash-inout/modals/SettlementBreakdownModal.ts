@@ -617,11 +617,18 @@ export function openSettlementBreakdownModal(opts: SettlementBreakdownModalOptio
       ? (t("view_settlement") || "Vis oppgjør")
       : (t("settlement") || "Oppgjør");
 
+  // 2026-05-01 (Tobias): backdrop er fortsatt static (forhindrer accidental
+  // dismiss ved click-outside under data-entry), men keyboard er nå true
+  // slik at ESC fungerer + X-close-knappen synes (Modal.ts:171 skjuler X
+  // bare når BEGGE flagg er av). Modalen er stor (XL) med 14 maskin-rader
+  // — uten ESC og uten X må agenten scrolle ned til "Avbryt"-knappen som
+  // er under fold på mindre skjermer. Tobias rapporterte 2026-05-01 at det
+  // virket umulig å lukke modalen.
   const instance = Modal.open({
     title: modalTitle,
     content: container,
     backdrop: "static",
-    keyboard: false,
+    keyboard: true,
     size: "xl",
     className: "modal-settlement-breakdown",
     buttons: modalButtons,

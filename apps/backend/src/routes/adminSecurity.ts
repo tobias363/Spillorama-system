@@ -94,9 +94,14 @@ export function createAdminSecurityRouter(deps: AdminSecurityRouterDeps): expres
 
   // ── Withdraw email allowlist ─────────────────────────────────────────
 
+  // Withdrawal QA P1 (2026-05-01): withdraw-email-allowlist bruker dedikert
+  // WITHDRAW_EMAIL_{READ,WRITE} så HALL_OPERATOR + AGENT (bingovert) kan
+  // forvalte regnskaps-mottakere for daglig XML-batch. Resten av sikkerhets-
+  // konfig (risk-countries, blocked-IPs, audit-log-search) forblir på
+  // SECURITY_READ/SECURITY_WRITE (ADMIN + SUPPORT only).
   router.get("/api/admin/security/withdraw-emails", async (req, res) => {
     try {
-      await requirePermission(req, "SECURITY_READ");
+      await requirePermission(req, "WITHDRAW_EMAIL_READ");
       const emails = await securityService.listWithdrawEmails();
       apiSuccess(res, { emails, count: emails.length });
     } catch (error) {
@@ -106,7 +111,7 @@ export function createAdminSecurityRouter(deps: AdminSecurityRouterDeps): expres
 
   router.post("/api/admin/security/withdraw-emails", async (req, res) => {
     try {
-      const actor = await requirePermission(req, "SECURITY_WRITE");
+      const actor = await requirePermission(req, "WITHDRAW_EMAIL_WRITE");
       if (!isRecordObject(req.body)) {
         throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
       }
@@ -145,7 +150,7 @@ export function createAdminSecurityRouter(deps: AdminSecurityRouterDeps): expres
   // ble endret (personvern: full e-post lever i DB, ikke i audit-stream).
   router.put("/api/admin/security/withdraw-emails/:id", async (req, res) => {
     try {
-      const actor = await requirePermission(req, "SECURITY_WRITE");
+      const actor = await requirePermission(req, "WITHDRAW_EMAIL_WRITE");
       const id = mustBeNonEmptyString(req.params.id, "id");
       if (!isRecordObject(req.body)) {
         throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
@@ -191,7 +196,7 @@ export function createAdminSecurityRouter(deps: AdminSecurityRouterDeps): expres
 
   router.delete("/api/admin/security/withdraw-emails/:id", async (req, res) => {
     try {
-      const actor = await requirePermission(req, "SECURITY_WRITE");
+      const actor = await requirePermission(req, "WITHDRAW_EMAIL_WRITE");
       const id = mustBeNonEmptyString(req.params.id, "id");
       await securityService.deleteWithdrawEmail(id);
       fireAudit({

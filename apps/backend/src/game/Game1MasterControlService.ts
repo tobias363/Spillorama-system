@@ -478,7 +478,17 @@ export class Game1MasterControlService {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
-      if (game.status !== "ready_to_start" && game.status !== "purchase_open") {
+      // 2026-05-03 (Tobias UX): tillat også 'scheduled' så master kan
+      // forsere start uten å vente på cron-promotering. Brukes når
+      // master ønsker å overstyre normal scheduled→purchase_open-flyt
+      // (f.eks. starte tidligere enn planlagt eller når oransje haller
+      // ikke er klare). confirmUnreadyHalls-flow ekskluderer ikke-klare
+      // haller automatisk.
+      if (
+        game.status !== "scheduled" &&
+        game.status !== "ready_to_start" &&
+        game.status !== "purchase_open"
+      ) {
         throw new DomainError(
           "GAME_NOT_STARTABLE",
           `Kan ikke starte spill i status '${game.status}'.`

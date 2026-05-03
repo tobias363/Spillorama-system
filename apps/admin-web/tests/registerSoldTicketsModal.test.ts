@@ -363,3 +363,85 @@ describe("AgentCashInOutPage — Register Sold Tickets button", () => {
       .toBeTruthy();
   });
 });
+
+describe("AgentCashInOutPage — Register More Tickets button (PDF 17 §17.13)", () => {
+  beforeEach(() => {
+    initI18n();
+    document.body.innerHTML = '<div id="c"></div>';
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    Modal.closeAll(true);
+    window.localStorage.removeItem("bingo_admin_access_token");
+    vi.unstubAllGlobals();
+  });
+
+  it("rendrer Register More Tickets-knappen ved siden av Register Sold", async () => {
+    const container = document.getElementById("c")!;
+    const mod = await import("../src/pages/agent-portal/AgentCashInOutPage.js");
+    mod.mountAgentCashInOut(container);
+    const moreBtn = container.querySelector('[data-marker="btn-register-more-tickets"]');
+    expect(moreBtn).toBeTruthy();
+    // Knappen skal vise (F1) for å indikere hotkey, og bruke i18n-nøkkelen.
+    expect(moreBtn?.textContent ?? "").toMatch(/Registrér flere bonger|Register More Tickets/);
+    expect(moreBtn?.textContent ?? "").toContain("F1");
+  });
+
+  it("knappen åpner Register More-modal når klikket (via prompt for gameId)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(okJson(mockInitialIds())) as typeof fetch;
+    window.localStorage.setItem("bingo_admin_access_token", "tok-test");
+    const container = document.getElementById("c")!;
+    const mod = await import("../src/pages/agent-portal/AgentCashInOutPage.js");
+    mod.mountAgentCashInOut(container);
+
+    vi.stubGlobal("prompt", () => "g-1");
+
+    const btn = container.querySelector<HTMLButtonElement>(
+      '[data-marker="btn-register-more-tickets"]',
+    )!;
+    btn.click();
+    await flush();
+
+    expect(document.querySelector('[data-marker="register-more-tickets-modal"]'))
+      .toBeTruthy();
+  });
+
+  it("F1-hotkey åpner Register More-modal når ingen modal er åpen", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(okJson(mockInitialIds())) as typeof fetch;
+    window.localStorage.setItem("bingo_admin_access_token", "tok-test");
+    const container = document.getElementById("c")!;
+    const mod = await import("../src/pages/agent-portal/AgentCashInOutPage.js");
+    mod.mountAgentCashInOut(container);
+
+    vi.stubGlobal("prompt", () => "g-1");
+
+    // F1 gjennom document — page-level hotkey.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "F1", bubbles: true }));
+    await flush();
+
+    expect(document.querySelector('[data-marker="register-more-tickets-modal"]'))
+      .toBeTruthy();
+  });
+
+  it("F1-hotkey er gated mens annen modal er åpen (modal-open class på body)", async () => {
+    const container = document.getElementById("c")!;
+    const mod = await import("../src/pages/agent-portal/AgentCashInOutPage.js");
+    mod.mountAgentCashInOut(container);
+
+    // Simuler at en modal er åpen ved å legge `modal-open`-klassen på body.
+    // (Modal.open setter denne klassen — vi simulerer her uten å åpne en
+    // ekte modal for å isolere F1-gating-logikken.)
+    document.body.classList.add("modal-open");
+
+    vi.stubGlobal("prompt", () => "should-not-be-called");
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "F1", bubbles: true }));
+    await flush();
+
+    expect(document.querySelector('[data-marker="register-more-tickets-modal"]'))
+      .toBeNull();
+
+    document.body.classList.remove("modal-open");
+  });
+});

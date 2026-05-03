@@ -8,7 +8,21 @@ import type {
   Transaction,
   PlayerComplianceSnapshot,
 } from "@spillorama/shared-types/api";
-import type { RoomSnapshot, RoomSummary } from "@spillorama/shared-types/game";
+import type { RoomSnapshot, RoomSummary, Ticket } from "@spillorama/shared-types/game";
+
+/**
+ * 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): Spill 2 Choose Tickets
+ * pool-snapshot — 32 deterministisk forhåndsgenererte 3×3-brett per
+ * (roomCode, playerId, gameId).
+ */
+export interface Game2ChooseTicketsSnapshot {
+  roomCode: string;
+  playerId: string;
+  gameId: string;
+  tickets: Ticket[];
+  purchasedIndices: number[];
+  pickAnyNumber: number | null;
+}
 
 const TOKEN_KEY = "spillorama.accessToken";
 
@@ -115,5 +129,21 @@ export class SpilloramaApi {
 
   getTransactions(limit = 50): Promise<ApiResult<Transaction[]>> {
     return this.get(`/api/wallet/me/transactions?limit=${limit}`);
+  }
+
+  // ── Spill 2 Choose Tickets (PDF 17 wireframe side 5) ──────────────────
+
+  getGame2ChooseTickets(roomCode: string): Promise<ApiResult<Game2ChooseTicketsSnapshot>> {
+    return this.get(`/api/agent/game2/choose-tickets/${encodeURIComponent(roomCode)}`);
+  }
+
+  buyGame2ChooseTickets(
+    roomCode: string,
+    indices: number[],
+    pickAnyNumber?: number | null,
+  ): Promise<ApiResult<Game2ChooseTicketsSnapshot>> {
+    const body: { indices: number[]; pickAnyNumber?: number | null } = { indices };
+    if (pickAnyNumber !== undefined) body.pickAnyNumber = pickAnyNumber;
+    return this.post(`/api/agent/game2/choose-tickets/${encodeURIComponent(roomCode)}/buy`, body);
   }
 }

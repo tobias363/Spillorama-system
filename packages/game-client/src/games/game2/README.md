@@ -1,7 +1,7 @@
-# Game 2 — Rocket Bingo (Web-implementasjon)
+# Game 2 — Spill 2 / Tallspill (Web-implementasjon)
 
-**Status:** Funksjonell MVP — gameplay-loop verifisert mot backend
-**Dato:** 2026-04-17 (opprinnelig: 2026-04-14)
+**Status:** Funksjonell MVP + Bong Mockup-design
+**Dato:** 2026-05-03 (Bong Mockup-redesign), 2026-04-17, 2026-04-14
 
 > **Autoritativ spesifikasjon:** [`docs/engineering/game2-canonical-spec.md`](../../../../../docs/engineering/game2-canonical-spec.md) (BIN-529).
 > Ved motsigelser vinner canonical spec. Denne README-filen er en teknisk oversikt over koden her; se spec §11 for kjente avvik fra legacy og fra G1-paritet.
@@ -27,21 +27,74 @@ packages/game-client/src/games/
     ├── README.md                       # ← denne filen
     ├── screens/
     │   ├── LobbyScreen.ts             # Vente/kjøp-skjerm med countdown + buy popup
-    │   ├── PlayScreen.ts              # Hovedspillskjerm med grids + kuler + claim
+    │   ├── PlayScreen.ts              # Bong Mockup-design (2026-05-03): ComboPanel + BallTube + 2×2 BongCard
+    │   ├── ChooseTicketsScreen.ts     # 32-bretts pool-velger (PR #851 + #855)
     │   └── EndScreen.ts               # Resultat-overlay etter game end
     ├── components/
-    │   ├── TicketCard.ts              # BingoGrid (3x5) + "to-go" teller
-    │   ├── TicketScroller.ts          # Horisontal scroll med mask + drag
-    │   ├── CountdownTimer.ts          # GSAP scale/color pulse nedtelling
-    │   ├── DrawnBallsPanel.ts         # Rad med NumberBall-instanser
+    │   ├── BongCard.ts                # 2026-05-03: beige bong-kort med 3×3 grid (erstatter TicketCard for Spill 2)
+    │   ├── BallTube.ts                # 2026-05-03: glass-rør med countdown + drawn-balls-rad
+    │   ├── ComboPanel.ts              # 2026-05-03: panel-rad med Lykketall + Hovedspill + Jackpots
+    │   ├── LykketallGrid.ts           # 2026-05-03: 5×5 lucky-number-grid (1-21) med kløver-ikon
+    │   ├── JackpotsRow.ts             # 2026-05-03: 6 jackpot-sirkler (erstatter forrige JackpotBar)
+    │   ├── DesignBall.ts              # 2026-05-03: Pixi-kule for Bong Mockup-design (radial gradients)
+    │   ├── TicketCard.ts              # BingoGrid (3x3/3x5) + "to-go" teller — fortsatt brukt av game3/game5
+    │   ├── TicketScroller.ts          # Horisontal scroll med mask + drag — brukt av LobbyScreen + game3/5
+    │   ├── CountdownTimer.ts          # GSAP scale/color pulse nedtelling — brukt av LobbyScreen
+    │   ├── DrawnBallsPanel.ts         # Rad med NumberBall-instanser — brukt av game3/5
     │   ├── ClaimButton.ts             # LINE/BINGO knapp med pulsering
-    │   ├── PlayerInfoBar.ts           # Spillerantall + trekk + pott
+    │   ├── PlayerInfoBar.ts           # Spillerantall + trekk + pott — brukt av LobbyScreen + game3/5
     │   ├── BuyPopup.ts                # Billettantall-velger mellom runder
-    │   └── LuckyNumberPicker.ts       # Modal tallvelger 1-21
+    │   └── LuckyNumberPicker.ts       # Modal tallvelger 1-21 — brukt av LobbyScreen
     └── logic/
         ├── ClaimDetector.ts           # Port av backend ticket.ts mønstersjekk
         └── TicketSorter.ts            # Best-card-first sortering
 ```
+
+### Bong Mockup-design (2026-05-03)
+
+Spill 2's PlayScreen er omformet etter `/tmp/spill2-design-extracted/spillorama/project/Bong Mockup.html`. Layout-oppsummering:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ComboPanel (mørk-rød panel-rad)                              │
+│  ┌────────────┬──────────────┬──────────────────────────────┐ │
+│  │ Lykketall  │ Hovedspill 1 │ Jackpots                     │ │
+│  │ 5×5 grid   │ Kjøp flere   │ ⬤ ⬤ ⬤ ⬤ ⬤ ⬤                  │ │
+│  │ + clover   │   brett      │ 9 10 11 12 13 14-21         │ │
+│  └────────────┴──────────────┴──────────────────────────────┘ │
+│                                                                │
+│  BallTube (glass-rør)                                          │
+│  ┌──────────┬──────────────────────────────────────────────┐ │
+│  │ Neste:   │  ●  ●  ●  ●  ●  ●  ●  ●  ●                   │ │
+│  │ MM:SS    │  (siste 9 trukne baller, nyeste til venstre) │ │
+│  ├──────────┤                                              │ │
+│  │ Trekk    │                                              │ │
+│  │ 04/21    │                                              │ │
+│  └──────────┴──────────────────────────────────────────────┘ │
+│                                                                │
+│  Bong-grid (4 BongCard, 2×2, scale 0.70)                       │
+│   ┌─────┐ ┌─────┐                                              │
+│   │bong │ │bong │  ← beige med 3×3 numre                       │
+│   └─────┘ └─────┘                                              │
+│   ┌─────┐ ┌─────┐                                              │
+│   │bong │ │bong │                                              │
+│   └─────┘ └─────┘                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Bakgrunn:** `bong-bg.png` lastes som full-screen Sprite. Fallback-fyll `#2a0d0e` rendres bak inntil PNG er klar.
+
+**Glass-effekt:** Pixi har ingen native `backdrop-filter: blur`. BallTube + ComboPanel kompenserer ved å bruke høyere alpha på de mørke fyll-lagene + multiple konsentriske highlights, slik at bakgrunns-bilde ikke "lekker" gjennom.
+
+**3×3 vs FREE:** HTML-mockupen viste FREE-cellen i sentrum, men backend (`Game2TicketPoolService`) genererer 3×3-grids med 9 unike tall (ingen FREE). Vi rendrer alle 9 cellene som tall — dette matcher backend-realiteten og gir spilleren én ekstra mark-mulighet. `BongCard.loadTicket` har fallback-logikk som rendrer FREE hvis backend en dag legger til 0 i sentrum.
+
+**Lucky number:** Tidligere ble lykketall valgt via en modal `LuckyNumberPicker` fra LobbyScreen. I det nye designet er 5×5-grid alltid synlig under spill (i ComboPanel), så spilleren kan velge eller endre lykketall i sanntid. Modal-pickeren beholdes på LobbyScreen for backward-compat (vises mellom runder).
+
+**Assets:**
+- `packages/game-client/public/assets/game2/design/bong-bg.png` (~1.7 MB)
+- `packages/game-client/public/assets/game2/design/lucky-clover.png` (~565 KB)
+
+Begge preloades via `preloadGameAssets("rocket")` for å unngå pop-in.
 
 ### Backend-integrasjon
 
@@ -73,7 +126,7 @@ Backend genererer 3x5 grids (3 rader × 5 kolonner, tall 1-60). Mønstersjekk:
 
 ### Testing
 
-Åpne `http://localhost:4000/web/?webClient=game_2`, klikk Rocket. Feature flag i URL router til web-klient.
+Åpne `http://localhost:4000/web/?webClient=game_2`, klikk Spill 2. Feature flag i URL router til web-klient.
 
 Alternativt: sett `clientEngine: "web"` i game settings via admin for permanent aktivering.
 

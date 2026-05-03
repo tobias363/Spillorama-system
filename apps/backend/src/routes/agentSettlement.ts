@@ -31,6 +31,7 @@ import {
 } from "../platform/AdminAccessPolicy.js";
 import type { AgentService } from "../agent/AgentService.js";
 import type { AgentSettlementService } from "../agent/AgentSettlementService.js";
+import type { AgentShiftService } from "../agent/AgentShiftService.js";
 import type { AuditLogService, AuditActorType } from "../compliance/AuditLogService.js";
 import { generateDailyCashSettlementPdf } from "../util/pdfExport.js";
 import {
@@ -49,6 +50,13 @@ export interface AgentSettlementRouterDeps {
   platformService: PlatformService;
   agentService: AgentService;
   agentSettlementService: AgentSettlementService;
+  /**
+   * Pilot-day-fix 2026-05-01: trenger agentShiftService for å kjøre
+   * logout-port-side-effects (markPendingForNextAgent / markRangesForTransfer)
+   * etter close-day. Tidligere lå disse på /shift/logout, men close-day
+   * setter is_active=false så logout etterpå feiler med NO_ACTIVE_SHIFT.
+   */
+  agentShiftService: AgentShiftService;
   auditLogService: AuditLogService;
 }
 
@@ -86,7 +94,13 @@ function mapRoleToActorType(role: UserRole): AuditActorType {
 }
 
 export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): express.Router {
-  const { platformService, agentService, agentSettlementService, auditLogService } = deps;
+  const {
+    platformService,
+    agentService,
+    agentSettlementService,
+    agentShiftService,
+    auditLogService,
+  } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -140,6 +154,29 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
       const actor = await requirePermission(req, "AGENT_SETTLEMENT_WRITE");
       const body = isRecordObject(req.body) ? req.body : {};
       const reportedCashCount = mustBeFiniteNumber(body.reportedCashCount, "reportedCashCount");
+      // Pilot-day-fix 2026-05-01: parse logout-flags som tidligere lå på
+      // /shift/logout. Etter close-day setter is_active=false er logout
+      // uoppnåelig, så vi tar imot flaggene her atomisk i samme close-tx.
+      const logoutFlags: {
+        distributeWinnings?: boolean;
+        transferRegisterTickets?: boolean;
+        logoutNotes?: string | null;
+      } = {};
+      let logoutFlagsProvided = false;
+      if (body.distributeWinnings !== undefined) {
+        logoutFlags.distributeWinnings = Boolean(body.distributeWinnings);
+        logoutFlagsProvided = true;
+      }
+      if (body.transferRegisterTickets !== undefined) {
+        logoutFlags.transferRegisterTickets = Boolean(body.transferRegisterTickets);
+        logoutFlagsProvided = true;
+      }
+      if (body.logoutNotes !== undefined) {
+        logoutFlags.logoutNotes = typeof body.logoutNotes === "string"
+          ? body.logoutNotes.slice(0, 1000)
+          : null;
+        logoutFlagsProvided = true;
+      }
       const settlement = await agentSettlementService.closeDay({
         agentUserId: actor.userId,
         agentRole: actor.role,
@@ -152,7 +189,26 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
         otherData: isRecordObject(body.otherData) ? body.otherData : undefined,
         machineBreakdown: body.machineBreakdown, // validert i service
         bilagReceipt: body.bilagReceipt,         // validert i service
+        logoutFlags: logoutFlagsProvided ? logoutFlags : undefined,
       });
+      // Pilot-day-fix 2026-05-01: kjør port-side-effects (markPendingForNextAgent
+      // / markRangesForTransfer) UTENFOR settlement-tx. closeDay har persistert
+      // shift-flag-kolonner atomisk; ports treffer egne tabeller og er
+      // idempotente. Hvis port feiler er settlement uansett komplett.
+      let pendingCashoutsFlagged = 0;
+      let ticketRangesFlagged = 0;
+      if (logoutFlagsProvided) {
+        const sideEffects = await agentShiftService.applyCloseDayLogoutSideEffects(
+          actor.userId,
+          {
+            distributeWinnings: logoutFlags.distributeWinnings,
+            transferRegisterTickets: logoutFlags.transferRegisterTickets,
+            logoutNotes: logoutFlags.logoutNotes ?? undefined,
+          },
+        );
+        pendingCashoutsFlagged = sideEffects.pendingCashoutsFlagged;
+        ticketRangesFlagged = sideEffects.ticketRangesFlagged;
+      }
       void auditLogService.record({
         actorId: actor.userId,
         actorType: mapRoleToActorType(actor.role),
@@ -164,11 +220,24 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
           hallId: settlement.hallId,
           dailyBalanceDifference: settlement.dailyBalanceDifference,
           isForced: settlement.isForced,
+          // Pilot-day-fix 2026-05-01: audit logout-flag-effekter atomisk
+          // sammen med close-day. Tidligere ble disse skrevet av separat
+          // agent.shift.logout-event som ikke kunne fyres etter close-day.
+          distributeWinnings: logoutFlags.distributeWinnings ?? false,
+          transferRegisterTickets: logoutFlags.transferRegisterTickets ?? false,
+          pendingCashoutsFlagged,
+          ticketRangesFlagged,
         },
         ipAddress: clientIp(req),
         userAgent: userAgent(req),
       });
-      apiSuccess(res, settlement);
+      // Behold backward-compat-shape: returnér settlement direkte (tidligere
+      // returshape) men inkluder side-effects i en wrapper for nye klienter.
+      apiSuccess(res, {
+        ...settlement,
+        pendingCashoutsFlagged,
+        ticketRangesFlagged,
+      });
     } catch (error) {
       apiFailure(res, error);
     }

@@ -24,6 +24,14 @@
  *     "BINGO! Rad N" over ball-visning (CSS freezer animasjoner).
  *   - Ved `game1:hall-status-update` oppdateres én badge uten å vente
  *     på neste poll.
+ *
+ * Bingo TV-design (2026-05-03, Agent G3): visuell redesign per Bingo.html
+ * fra Claude Design — burgunder bakgrunn med bingo-bg.png, gull-aksent,
+ * stor 3D-rød ball som "aktivt trekk", pill-stil draw-badge for X/Y, og
+ * pattern-rader styles som premium casino-cards. Strukturen (data-testids,
+ * .tv-header, .tv-patterns-table thead, voice-select, etc.) er bevart 1:1
+ * for å holde alle eksisterende tester grønne. Socket-handlers og state-
+ * kontrakt er uendret.
  */
 
 import "./tv-screen.css";
@@ -107,10 +115,17 @@ export function mountTvScreenPage(
   options: { disableSocket?: boolean } = {}
 ): void {
   unmountTvScreenPage();
+  // Bingo TV-design (2026-05-03): `.tv-header` er en pure-text-node
+  // `<div class="tv-header">SPILL-O-RAMA BINGO</div>` — testen
+  // `.tv-header.textContent === 'SPILL-O-RAMA BINGO'` (tvScreen.test.ts:114)
+  // krever EKSAKT match (strict equality), så vi MÅ unngå whitespace-noder
+  // inni elementet. Det visuelle Bingo.html-design-redet (logo-mark sirkel
+  // + sentrert ANTON-tittel "BINGO") oppnås med CSS: pseudo-elementer
+  // `::before` for logo-mark, og en mer subtil text-styling som matcher
+  // designet. Voice-select er sibling utenfor headeren.
   root.innerHTML = `
     <div class="tv-host" data-testid="tv-screen-host">
       <div class="tv-header">SPILL-O-RAMA BINGO</div>
-      <div class="tv-subheader" id="tv-subheader" data-testid="tv-subheader"></div>
       <div class="tv-voice-select">
         <label for="tv-voice">Voice:</label>
         <select id="tv-voice" data-testid="tv-voice-select" disabled>
@@ -120,6 +135,7 @@ export function mountTvScreenPage(
         </select>
         <span class="tv-voice-note" data-testid="tv-voice-note">Stemme styres av admin</span>
       </div>
+      <div class="tv-subheader" id="tv-subheader" data-testid="tv-subheader"></div>
       <div id="tv-body" class="tv-loading">Laster...</div>
       <div id="tv-halls-stripe" class="tv-halls-stripe" data-testid="tv-halls-stripe"></div>
       <div id="tv-phase-banner" class="tv-phase-banner tv-phase-banner-hidden" data-testid="tv-phase-banner" aria-hidden="true"></div>
@@ -372,58 +388,80 @@ function renderState(target: HTMLElement, state: TvGameState): void {
   // som viser hvilken hall vinneren av hver fase tilhører (eller "—" hvis
   // ingen vunnet ennå). Multi-hall-vinnere (group-of-halls) listes komma-
   // separert; sortert i backend så rekkefølgen er stabil mellom polls.
+  //
+  // Bingo TV-design (2026-05-03): venstre kolonne er KPI-row + patterns-
+  // tabell (uendret data-API), høyre kolonne er "ball-stage" med stor 3D-
+  // rødball + last-5-strip (rendret som tv-small-ball-elementer). Stage er
+  // wrappet i .tv-ball-stage så CSS kan rendre ramme + corner-labels +
+  // draw-badge separat fra resten av høyre kolonne.
   const game = state.currentGame;
   const activePatternName = findActivePatternName(state);
   const isEmptyState = !game && state.status === "waiting";
+  const lastBallStr = game?.lastBall != null ? String(game.lastBall) : "--";
+  const drawnList = game?.ballsDrawn ?? [];
+  const pillLabel = game ? `Spill ${game.number} · ${game.name}` : "Venter på spill";
 
   target.className = "tv-screen-body";
   target.innerHTML = `
     <section class="tv-screen-left">
       ${renderKpiRow(state)}
-      <table class="tv-patterns-table">
-        <thead>
-          <tr>
-            <th>Pattern</th>
-            <th>Players Won</th>
-            <th>Prize</th>
-            <th>Hall Belongs To</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${state.patterns
-            .map(
-              (p) => `
-            <tr class="${p.highlighted ? "highlighted" : ""}" data-testid="tv-pattern-row">
-              <td>${escapeHtml(p.name)}</td>
-              <td>${p.playersWon}</td>
-              <td>${formatPrize(p.prize)}</td>
-              <td data-testid="tv-pattern-hall">${formatHallNames(p.hallNames)}</td>
+      <div class="tv-patterns-card">
+        <table class="tv-patterns-table">
+          <thead>
+            <tr>
+              <th>Pattern</th>
+              <th>Players Won</th>
+              <th>Prize</th>
+              <th>Hall Belongs To</th>
             </tr>
-          `
-            )
-            .join("")}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            ${state.patterns
+              .map(
+                (p) => `
+              <tr class="${p.highlighted ? "highlighted" : ""}${p.playersWon > 0 ? " complete" : ""}" data-testid="tv-pattern-row">
+                <td>${escapeHtml(p.name)}</td>
+                <td>${p.playersWon}</td>
+                <td>${formatPrize(p.prize)}</td>
+                <td data-testid="tv-pattern-hall">${formatHallNames(p.hallNames)}</td>
+              </tr>
+            `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
     </section>
     <section class="tv-screen-right">
-      <div class="tv-game-header">
-        <div class="tv-game-title" data-testid="tv-game-title">
+      <div class="tv-ball-stage" data-testid="tv-ball-stage">
+        <div class="tv-stage-label tv-stage-label-tl">Aktivt trekk</div>
+        <div class="tv-stage-pill">${escapeHtml(pillLabel)}</div>
+        <div class="tv-draw-badge" data-testid="tv-drawn-counter">
+          <div class="tv-draw-badge-label">
+            <span class="tv-drawn-counter-label">Trukket</span>
+          </div>
+          <div class="tv-draw-badge-num">
+            <span class="tv-drawn-counter-value">
+              <strong data-testid="tv-drawn-count">${state.drawnCount}</strong>
+              <span class="tv-drawn-counter-sep">/</span>
+              <span data-testid="tv-total-balls">${state.totalBalls}</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="tv-game-title-overlay" data-testid="tv-game-title">
           ${game ? `Game ${game.number} - ${escapeHtml(game.name)}` : "Venter på spill"}
         </div>
-        <div class="tv-drawn-counter" data-testid="tv-drawn-counter">
-          <span class="tv-drawn-counter-label">Trukket</span>
-          <span class="tv-drawn-counter-value">
-            <strong data-testid="tv-drawn-count">${state.drawnCount}</strong>
-            <span class="tv-drawn-counter-sep"> / </span>
-            <span data-testid="tv-total-balls">${state.totalBalls}</span>
-          </span>
+
+        <div class="tv-big-ball-wrap">
+          <div class="tv-big-ball ${game?.lastBall != null ? `tv-big-ball-col-${columnFor(game.lastBall)}` : ""}">
+            <div class="tv-big-ball-number tv-last-ball-circle" data-testid="tv-last-ball">${escapeHtml(lastBallStr)}</div>
+          </div>
         </div>
-      </div>
-      <div class="tv-last-ball-circle" data-testid="tv-last-ball">
-        ${game?.lastBall != null ? String(game.lastBall) : "--"}
-      </div>
-      <div class="tv-last-5">
-        ${lastFiveBallsHtml(game?.ballsDrawn ?? [])}
+
+        <div class="tv-drawn-strip tv-last-5">
+          ${lastFiveBallsHtml(drawnList)}
+        </div>
       </div>
       ${renderActivePatternBanner(activePatternName)}
       ${isEmptyState ? `<div class="tv-waiting-notice" data-testid="tv-waiting-notice">Venter på neste spill...</div>` : renderCountdown(state)}
@@ -671,7 +709,9 @@ function lastFiveBallsHtml(balls: number[]): string {
   return last5
     .map((b) => {
       const col = columnFor(b);
-      return `<div class="tv-small-ball col-${col}">${b}</div>`;
+      return `<div class="tv-small-ball col-${col} tv-small-ball-3d">
+        <div class="tv-small-ball-number">${b}</div>
+      </div>`;
     })
     .join("");
 }

@@ -26,7 +26,9 @@
           "ball-spin",
           "ball-bounce",
           "tv-active-pattern-pulse",
-          "tv-phase-banner-fullhouse-pulse"
+          "tv-phase-banner-fullhouse-pulse",
+          "tv-pulse",
+          "tv-ball-bob"
         ]
       }
     ],

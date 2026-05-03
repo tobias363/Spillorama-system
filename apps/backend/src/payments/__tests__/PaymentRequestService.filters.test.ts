@@ -94,6 +94,10 @@ function runSelect(
   };
   const hallId = param<string>(/hall_id = \$(\d+)/);
   const destType = param<string>(/destination_type = \$(\d+)/);
+  // Withdrawal QA P1 (2026-05-01): "hall"-filter bruker
+  // `(destination_type IS NULL OR destination_type = $N)` — match både legacy
+  // NULL og eksplisitt "hall".
+  const destTypeAllowsNull = /destination_type IS NULL OR destination_type = \$\d+/.test(sql);
   const userId = param<string>(/user_id = \$(\d+)/);
   const createdFrom = param<string>(/created_at >= \$(\d+)/);
   const createdTo = param<string>(/created_at <= \$(\d+)/);
@@ -105,7 +109,14 @@ function runSelect(
   const all = Array.from(map.values())
     .filter((r) => statuses.includes(r.status))
     .filter((r) => (hallId ? r.hall_id === hallId : true))
-    .filter((r) => (destType ? r.destination_type === destType : true))
+    .filter((r) => {
+      if (!destType) return true;
+      if (destTypeAllowsNull) {
+        // "hall"-filter: matcher legacy NULL OR den eksplisitte verdien.
+        return r.destination_type === null || r.destination_type === destType;
+      }
+      return r.destination_type === destType;
+    })
     .filter((r) => (userId ? r.user_id === userId : true))
     .filter((r) => (createdFrom ? r.created_at >= new Date(createdFrom) : true))
     .filter((r) => (createdTo ? r.created_at <= new Date(createdTo) : true))
@@ -227,7 +238,12 @@ function seedRow(store: TableStore, kind: "deposit" | "withdraw", overrides: Par
     rejected_by: overrides.rejected_by ?? null,
     rejected_at: overrides.rejected_at ?? null,
     wallet_transaction_id: overrides.wallet_transaction_id ?? null,
-    destination_type: overrides.destination_type ?? (kind === "withdraw" ? "bank" : null),
+    // Skill mellom "ikke spesifisert" (default "bank" for withdraw) og
+    // "eksplisitt null" (legacy-rader fra før QA P1 default-fix).
+    destination_type:
+      "destination_type" in overrides
+        ? overrides.destination_type ?? null
+        : (kind === "withdraw" ? "bank" : null),
     created_at: overrides.created_at,
     updated_at: overrides.updated_at ?? overrides.created_at,
   };
@@ -364,12 +380,69 @@ test("BIN-646: createWithdrawRequest stores destinationType=hall", async () => {
   assert.equal(req.destinationType, "hall");
 });
 
-test("BIN-646: createWithdrawRequest with no destinationType stores null", async () => {
+test("Withdrawal QA P1 (2026-05-01): createWithdrawRequest with no destinationType defaults to 'hall'", async () => {
+  // Tidligere persisterte dette NULL, men det ekskluderte raden fra
+  // `GET /api/admin/withdrawals/history?type=hall`. Default "hall" matcher
+  // dominerende pilot-flyt; bank-uttak krever eksplisitt valg.
   const { service } = makeService();
   const req = await service.createWithdrawRequest({
     userId: "u-1", walletId: "w-1", amountCents: 10000,
   });
-  assert.equal(req.destinationType, null);
+  assert.equal(req.destinationType, "hall");
+});
+
+test("Withdrawal QA P1 (2026-05-01): listPending type=hall matcher legacy NULL-rader", async () => {
+  // Pre-default-fix kunne `destination_type = NULL` lagres på withdraw-rader.
+  // History-filteret må fortsatt vise dem under `type=hall` så regnskap ikke
+  // mister tilgang til allerede registrerte uttak.
+  const { service, store } = makeService();
+  const now = new Date();
+  seedRow(store, "withdraw", {
+    id: "legacy-null", user_id: "u-A", amount_cents: 5000,
+    created_at: now, destination_type: null,
+  });
+  seedRow(store, "withdraw", {
+    id: "explicit-hall", user_id: "u-B", amount_cents: 7500,
+    created_at: now, destination_type: "hall",
+  });
+  seedRow(store, "withdraw", {
+    id: "explicit-bank", user_id: "u-C", amount_cents: 9000,
+    created_at: now, destination_type: "bank",
+  });
+
+  const hallResults = await service.listPending({
+    kind: "withdraw", destinationType: "hall",
+  });
+  const hallIds = hallResults.map((r) => r.id).sort();
+  assert.deepEqual(hallIds, ["explicit-hall", "legacy-null"]);
+
+  const bankResults = await service.listPending({
+    kind: "withdraw", destinationType: "bank",
+  });
+  assert.deepEqual(bankResults.map((r) => r.id), ["explicit-bank"]);
+});
+
+test("Withdrawal QA P1 (2026-05-01): listHistory type=hall matcher legacy NULL-rader", async () => {
+  const { service, store } = makeService();
+  const now = new Date();
+  seedRow(store, "withdraw", {
+    id: "h-legacy", user_id: "u-A", amount_cents: 5000,
+    status: "ACCEPTED", created_at: now, destination_type: null,
+  });
+  seedRow(store, "withdraw", {
+    id: "h-hall", user_id: "u-B", amount_cents: 7500,
+    status: "ACCEPTED", created_at: now, destination_type: "hall",
+  });
+  seedRow(store, "withdraw", {
+    id: "h-bank", user_id: "u-C", amount_cents: 9000,
+    status: "ACCEPTED", created_at: now, destination_type: "bank",
+  });
+
+  const result = await service.listHistory({
+    kind: "withdraw", destinationType: "hall",
+  });
+  const ids = result.items.map((r) => r.id).sort();
+  assert.deepEqual(ids, ["h-hall", "h-legacy"]);
 });
 
 test("BIN-646: createDepositRequest IGNORES destinationType (deposit-table has no column)", async () => {

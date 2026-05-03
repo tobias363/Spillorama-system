@@ -60,13 +60,19 @@ export const adminSidebar: SidebarNode[] = [
     labelKey: "cash_in_out",
     defaultExpanded: true,
     children: [
-      { kind: "leaf", id: "cash-inout-overview", path: "/agent/cashinout", icon: "fa fa-circle-o", labelKey: "cash_in_out" },
+      // BUG #6: `/agent/cashinout` er agent-portal-rute (backend
+      // `/api/agent/shift/daily-balance` avviser ADMIN). Skjul for
+      // admin/super-admin — de bruker Live Ops-konsollen for cross-hall
+      // cash-flow.
+      { kind: "leaf", id: "cash-inout-overview", path: "/agent/cashinout", icon: "fa fa-circle-o", labelKey: "cash_in_out", roles: ["agent", "hall-operator"] },
       { kind: "leaf", id: "cash-inout-sold-tickets", path: "/sold-tickets", icon: "fa fa-circle-o", labelKey: "sold_tickets" },
     ],
   },
 
-  // Game 1 master-konsoll (top-level — tidligere under Spillorama Live)
-  { kind: "leaf", id: "game1-master-console", path: "/game1/master/placeholder", icon: "fa fa-bolt", labelKey: "spillorama_master_console" },
+  // Game 1 master-konsoll-leaf fjernet (BUG #2): hardkodet placeholder
+  // path `/game1/master/placeholder` returnerte alltid GAME_NOT_FOUND.
+  // Master-konsoll åpnes via Live Operations-konsollen når en master-runde
+  // faktisk pågår — ikke fra global sidebar.
 
   // 3. Spilleradministrasjon (expandable)
   {
@@ -126,7 +132,7 @@ export const adminSidebar: SidebarNode[] = [
       { kind: "leaf", id: "reportManagementGame1", path: "/reportManagement/game1", icon: "fa fa-circle-o", labelKey: "report_management_game1" },
       { kind: "leaf", id: "reportGame2", path: "/reportGame2", icon: "fa fa-circle-o", labelKey: "game2" },
       { kind: "leaf", id: "reportGame3", path: "/reportGame3", icon: "fa fa-circle-o", labelKey: "game3" },
-      { kind: "leaf", id: "reportGame4", path: "/reportGame4", icon: "fa fa-circle-o", labelKey: "game4" },
+      // Game 4 (themebingo) er DEPRECATED, BIN-496 — ingen sidebar-leaf.
       { kind: "leaf", id: "reportGame5", path: "/reportGame5", icon: "fa fa-circle-o", labelKey: "game5" },
       { kind: "leaf", id: "physicalTicketReport", path: "/physicalTicketReport", icon: "fa fa-circle-o", labelKey: "physical_ticket" },
       { kind: "leaf", id: "uniqueGameReport", path: "/uniqueGameReport", icon: "fa fa-circle-o", labelKey: "unique_ticket" },
@@ -326,11 +332,21 @@ export const agentSidebar: SidebarNode[] = [
     labelKey: "player_management",
     children: [
       { kind: "leaf", id: "agent-players", path: "/agent/players", icon: "fa fa-circle-o", labelKey: "approved_players" },
-      { kind: "leaf", id: "agent-pending", path: "/pendingRequests", icon: "fa fa-circle-o", labelKey: "pending_requests" },
-      { kind: "leaf", id: "agent-rejected", path: "/rejectedRequests", icon: "fa fa-circle-o", labelKey: "reject_requests" },
+      // BUG #4: Pending/Rejected er admin-ruter (`/pendingRequests`,
+      // `/rejectedRequests`) — agenter får 403/redirect. Role-gate til
+      // admin-roller; agentSidebar vises kun til AGENT/HALL_OPERATOR, så
+      // disse leaves blir effektivt skjult for dem. (Approved Players er
+      // fortsatt synlig — agenter kan lese spillere, men ikke moderate.)
+      { kind: "leaf", id: "agent-pending", path: "/pendingRequests", icon: "fa fa-circle-o", labelKey: "pending_requests", roles: ["admin", "super-admin"] },
+      { kind: "leaf", id: "agent-rejected", path: "/rejectedRequests", icon: "fa fa-circle-o", labelKey: "reject_requests", roles: ["admin", "super-admin"] },
     ],
   },
   { kind: "leaf", id: "agent-physical-tickets", path: "/agent/physical-tickets", icon: "fa fa-ticket", labelKey: "add_physical_tickets" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 5) +
+  // legacy AGENT-sidebar "Administrasjon av fysiske billetter":
+  // GameTicketListPage gir CRUD-oversikt over fysiske billett-stacks per
+  // spill. Backend: AGENT har `PHYSICAL_TICKET_WRITE`. PR #823 audit gap #5.
+  { kind: "leaf", id: "agent-physical-ticket-management", path: "/physicalTicketManagement", icon: "fa fa-th-list", labelKey: "physical_ticket_management" },
   {
     kind: "group",
     id: "agent-game-management",
@@ -338,6 +354,22 @@ export const agentSidebar: SidebarNode[] = [
     labelKey: "agent_game_management",
     children: [
       { kind: "leaf", id: "agent-games-overview", path: "/agent/games", icon: "fa fa-circle-o", labelKey: "agent_games_overview" },
+      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 2):
+      // Schedule Management er AGENT-tilgjengelig (`SCHEDULE_READ/WRITE` har
+      // AGENT i AdminAccessPolicy). Eksponer leaf slik at bingoverten kan
+      // åpne dagens plan uten å kjenne URL-en. (PR #823 audit, gap #2.)
+      { kind: "leaf", id: "agent-schedules", path: "/schedules", icon: "fa fa-circle-o", labelKey: "schedule_management" },
+      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 3) +
+      // legacy AGENT-sidebar "Opprettelse av spill":
+      // GameManagementPage gir Game Creation Management. Backend: AGENT har
+      // `GAME_MGMT_READ/WRITE`. HALL_OPERATOR-scope filtrerer per egen hall.
+      // (PR #823 audit, gap #3.)
+      { kind: "leaf", id: "agent-game-creation", path: "/gameManagement", icon: "fa fa-plus-square", labelKey: "game_creation_management" },
+      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 4):
+      // Saved Game List er AGENT-tilgjengelig (`SAVED_GAME_READ/WRITE` har
+      // AGENT). Master-hall-agenter har default-access per legacy-spec.
+      // (PR #823 audit, gap #4.)
+      { kind: "leaf", id: "agent-saved-game-list", path: "/savedGameList", icon: "fa fa-circle-o", labelKey: "saved_game_list" },
     ],
   },
   {
@@ -363,6 +395,50 @@ export const agentSidebar: SidebarNode[] = [
   // av agent. Bruker `/agent/sold-tickets`-aliaset slik at routes-guarden
   // tillater AGENT/HALL_OPERATOR-tilgang.
   { kind: "leaf", id: "agent-sold-tickets", path: "/agent/sold-tickets", icon: "fa fa-list", labelKey: "sold_tickets" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 8) +
+  // legacy AGENT-sidebar "Lommebokadministrasjon": WalletListPage gir
+  // oversikt over spiller-wallets. /api/wallets har ingen explicit RBAC-gate
+  // (sesjons-auth holder); AGENT med URL-kjennskap rendrer allerede siden.
+  // PR #823 audit gap #8.
+  { kind: "leaf", id: "agent-wallet", path: "/wallet", icon: "fa fa-credit-card", labelKey: "wallet_management" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 9) +
+  // legacy AGENT-sidebar "Transaksjonsadministrasjon": TransactionsLogPage
+  // gir generisk transaksjons-logg på tvers av wallet/agent/deposit/withdraw.
+  // Backend: /api/admin/transactions krever PLAYER_KYC_READ — AGENT har det.
+  // PR #823 audit gap #9.
+  { kind: "leaf", id: "agent-transactions-log", path: "/transactions/log", icon: "fa fa-exchange", labelKey: "transactions_management" },
+  // Wireframe Role Management-matrise (PDF 8 §8.3 rad 10) +
+  // legacy AGENT-sidebar "Uttaksadministrasjon": godkjenn kontant-uttak fra
+  // hall (RequestsPage med destinationType=hall). Backend: AGENT har
+  // PAYMENT_REQUEST_READ/WRITE. PR #823 audit gap #10 (kritisk for
+  // skift-flyt — XML-pipeline + kontant-utbetaling).
+  { kind: "leaf", id: "agent-withdraw-management", path: "/withdraw/requests/hall", icon: "fa fa-sign-out", labelKey: "withdraw_management" },
+  // Rapport- og regnskaps-administrasjon. PR #823 audit (rad 7, 12, 14, 15):
+  // backend RBAC har AGENT på `MACHINE_REPORT_READ`, `AGENT_TX_READ`,
+  // `PAYOUT_AUDIT_READ`, og hall-account/specific report har ingen explicit
+  // perm (read-flyt). Pages eksisterer (`pages/reports/*`,
+  // `hallAccountReport/*`, `payout/*`) — vi eksponerer leaves her slik at
+  // bingoverten kan avstemme uten URL-kunnskap.
+  {
+    kind: "group",
+    id: "agent-report-management",
+    icon: "fa fa-bar-chart",
+    labelKey: "report_management",
+    children: [
+      // Wireframe Role Management-matrise rad 7 (Report Management) — Spill 1
+      // er pilot-fokus, derfor eksponerer vi kun reportGame1 i agent-sidebar.
+      // Andre game-rapporter er fortsatt URL-tilgjengelige men ikke synlige.
+      { kind: "leaf", id: "agent-report-game1", path: "/reportGame1", icon: "fa fa-circle-o", labelKey: "report_management_game1" },
+      // Wireframe rad 14 — Hall Account Specific Report.
+      { kind: "leaf", id: "agent-hall-specific-report", path: "/hallSpecificReport", icon: "fa fa-circle-o", labelKey: "hall_specific_reports" },
+      // Wireframe rad 12 — Hall Account Report (skift-oversikt; pilot-blokk
+      // per audit-rapportens "kritiske gap" #1 og §17.38 wireframe).
+      { kind: "leaf", id: "agent-hall-account-report", path: "/hallAccountReport", icon: "fa fa-circle-o", labelKey: "hall_account_report" },
+      // Wireframe rad 15 — Payout Management. AGENT har `PAYOUT_AUDIT_READ`
+      // i RBAC; `EXTRA_PRIZE_AWARD` er ADMIN-only og blokkeres av backend.
+      { kind: "leaf", id: "agent-payout-player", path: "/payoutPlayer", icon: "fa fa-circle-o", labelKey: "payout_for_players" },
+    ],
+  },
 ];
 
 export function sidebarFor(role: Role): SidebarNode[] {

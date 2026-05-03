@@ -8,6 +8,10 @@
   <title>SPILLORAMA</title>
   <link rel="shortcut icon" href="logo.png">
   <link rel="stylesheet" href="spillvett.css">
+  <link rel="stylesheet" href="min-konto.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 
   <style>
     /* ── Base ──────────────────────────────────────────────────────────── */
@@ -1782,7 +1786,7 @@
       </span>
 
       <!-- Lommebok -->
-      <button class="lobby-wallet-btn" type="button" onclick="window.ShowSpillvettPanel && window.ShowSpillvettPanel()" aria-label="Lommebok og Spillvett">
+      <button class="lobby-wallet-btn" type="button" onclick="(window.ShowMinKontoPanel || window.ShowSpillvettPanel) && (window.ShowMinKontoPanel || window.ShowSpillvettPanel)()" aria-label="Min konto">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         <span>Lommebok</span>
       </button>
@@ -3082,5 +3086,7 @@
   <script src="auth.js"></script>
   <!-- REQ-137: påminn spillere om uavsluttede deposit-intents -->
   <script src="pendingDepositReminder.js"></script>
+  <!-- 2026-05-02: Min Konto redesign — overlay-basert account-side -->
+  <script src="min-konto.js"></script>
 </body>
 </html>

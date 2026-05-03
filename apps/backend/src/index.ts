@@ -19,6 +19,7 @@ import { BingoEngine } from "./game/BingoEngine.js";
 import { DomainError } from "./errors/DomainError.js";
 import { runRecoveryIntegrityCheck } from "./game/BingoEngineRecoveryIntegrityCheck.js";
 import { Game3Engine } from "./game/Game3Engine.js";
+import { PerpetualRoundService } from "./game/PerpetualRoundService.js";
 import { PostgresResponsibleGamingStore } from "./game/PostgresResponsibleGamingStore.js";
 import type { GameSnapshot, Player, RoomSnapshot } from "./game/types.js";
 import { PlatformService } from "./platform/PlatformService.js";
@@ -95,10 +96,14 @@ import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 // per hall-id; ScheduleService duck-typer mot Spill1PrizeDefaultsLookup.
 import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+import { Game2AutoDrawTickService } from "./game/Game2AutoDrawTickService.js";
+import { Game3AutoDrawTickService } from "./game/Game3AutoDrawTickService.js";
 import { Game1TransferHallService } from "./game/Game1TransferHallService.js";
 import { Game1TransferExpiryTickService } from "./game/Game1TransferExpiryTickService.js";
 import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
+import { createGame2AutoDrawTickJob } from "./jobs/game2AutoDrawTick.js";
+import { createGame3AutoDrawTickJob } from "./jobs/game3AutoDrawTick.js";
 import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
 import { createIdempotencyKeyCleanupJob } from "./jobs/idempotencyKeyCleanup.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
@@ -125,6 +130,8 @@ import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
 import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
 import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
+import { createAgentGame2ChooseTicketsRouter } from "./routes/agentGame2ChooseTickets.js";
+import { Game2TicketPoolService } from "./game/Game2TicketPoolService.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
@@ -266,6 +273,8 @@ import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminCmsRouter } from "./routes/adminCms.js";
 import { createPublicCmsRouter } from "./routes/publicCms.js";
+import { createPublicStatusRouter } from "./routes/publicStatus.js";
+import { bootstrapStatusPage } from "./observability/statusBootstrap.js";
 import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
@@ -293,9 +302,13 @@ import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { traceIdMiddleware } from "./middleware/traceId.js";
+import { securityHeadersMiddleware } from "./middleware/securityHeaders.js";
 import { socketTraceMiddleware, wrapSocketEventHandlers } from "./middleware/socketTraceId.js";
+import { createCspReportRouter } from "./routes/cspReport.js";
 import { setTraceField } from "./util/traceContext.js";
 import { sweepStaleNonCanonicalRooms } from "./util/staleRoomBootSweep.js";
+import { StaleRoomBootSweepService } from "./game/StaleRoomBootSweepService.js";
+import { bootstrapHallGroupRooms } from "./boot/bootstrapHallGroupRooms.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
@@ -347,6 +360,11 @@ const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
 // might log so the traceId is included in every log line for the request.
 // Sets the X-Trace-Id response header so clients can correlate.
 app.use(traceIdMiddleware());
+// BIN-776: Strict security headers (CSP, HSTS, COOP, etc.). Must run BEFORE
+// cors() and any router so headers are set on every response, including
+// CORS-preflight 204s. Defaults to CSP_MODE=report-only — flip to "enforce"
+// in env once the report stream is verified empty in staging.
+app.use(securityHeadersMiddleware());
 app.use(cors({ origin: corsOrigins, credentials: true }));
 // LAV-3: 100 KB for all endpoints, except registration which carries compressed photo IDs (~2 * 100KB base64)
 // PT1: static-ticket CSV-import kan ha opptil ~50k rader (~10MB raw), derfor 15mb limit.
@@ -366,6 +384,14 @@ app.use((req, _res, next) => {
     },
   })(req, _res, next);
 });
+
+// BIN-776: CSP-violation report endpoint (`POST /api/csp-report`). Mounted
+// BEFORE the global rate-limiter — browsers emit reports as a side-effect
+// of policy violations, often in bursts, and blocking them with 429s would
+// silently drop the visibility we need during the report-only rollout.
+// The router owns its own body parser scoped to `application/csp-report`
+// + `application/reports+json` content-types.
+app.use(createCspReportRouter());
 
 // BIN-277: REST API rate limiting — sliding-window per IP per route tier
 const httpRateLimiter = new HttpRateLimiter();
@@ -477,6 +503,7 @@ const {
   jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
+  jobGame1StaleReadySweepEnabled,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
   jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
@@ -485,6 +512,7 @@ const {
   jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
   jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
   jobWalletAuditVerifyEnabled, jobWalletAuditVerifyIntervalMs, jobWalletAuditVerifyRunAtHour,
+  perpetualLoopEnabled, perpetualLoopDelayMs, perpetualLoopDisabledSlugs,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -1563,7 +1591,14 @@ jobScheduler.register({
   enabled: jobGame1ScheduleTickEnabled,
   run: createGame1ScheduleTickJob({
     service: game1ScheduleTickService,
-    hallReadyService: game1HallReadyService,
+    // 2026-05-02 (Tobias UX-decision): stale-ready-sweep er opt-in.
+    // Uten heartbeat-endepunkt rever sweepen Klar-flagget etter 60s og
+    // bingoverten må re-markere — noe Tobias eksplisitt har sagt nei til.
+    // Re-aktiveres ved å sette GAME1_STALE_READY_SWEEP_ENABLED=true når
+    // heartbeat er på plass.
+    ...(jobGame1StaleReadySweepEnabled
+      ? { hallReadyService: game1HallReadyService }
+      : {}),
   }),
 });
 
@@ -1901,6 +1936,40 @@ jobScheduler.register({
   intervalMs: jobGame1AutoDrawIntervalMs,
   enabled: jobGame1AutoDrawEnabled,
   run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
+});
+
+// Spill 2/3 auto-draw-tick (Tobias-direktiv 2026-05-03):
+//   "Spill 2/3 har perpetual auto-restart, men ingen baller ble trukket."
+// Game1AutoDrawTickService dekker kun scheduled Spill 1-spill (DB-drevet
+// via app_game1_scheduled_games). Spill 2 og 3 kjøres som in-memory
+// BingoEngine-rom og hadde ingen tilsvarende cron — så når
+// PerpetualRoundService startet en ny runde, sto den stille.
+//
+// Re-bruker `autoDrawIntervalEnvOverrideMs` (env: AUTO_DRAW_INTERVAL_MS,
+// default 30000) som draw-intervall, og samme tick-polling som Game 1
+// (`jobGame1AutoDrawIntervalMs`, default 1000 ms) som polling-rate.
+// Default ON — Spill 2/3 må trekke baller for å fungere.
+const game2AutoDrawTickService = new Game2AutoDrawTickService({
+  engine,
+  drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+});
+const game3AutoDrawTickService = new Game3AutoDrawTickService({
+  engine,
+  drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+});
+jobScheduler.register({
+  name: "game2-auto-draw-tick",
+  description: "Trigger drawNext() for running Spill 2 (rocket / game_2 / tallspill)-rom. Driver perpetual-loopen.",
+  intervalMs: jobGame1AutoDrawIntervalMs,
+  enabled: jobGame1AutoDrawEnabled,
+  run: createGame2AutoDrawTickJob({ service: game2AutoDrawTickService }),
+});
+jobScheduler.register({
+  name: "game3-auto-draw-tick",
+  description: "Trigger drawNext() for running Spill 3 (monsterbingo / mønsterbingo / game_3)-rom. Driver perpetual-loopen.",
+  intervalMs: jobGame1AutoDrawIntervalMs,
+  enabled: jobGame1AutoDrawEnabled,
+  run: createGame3AutoDrawTickJob({ service: game3AutoDrawTickService }),
 });
 
 // Task 1.6: runtime master-overføring — service + expiry-tick. Expiry-tick
@@ -2258,8 +2327,102 @@ app.use(createAgentGame1Router({
   platformService,
   masterControlService: game1MasterControlService,
   hallReadyService: game1HallReadyService,
+  hallGroupService,
   pool: platformService.getPool(),
 }));
+// 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): Spill 2 Choose Tickets-side.
+// 2026-12-06 (v2/v3): pool persisteres til DB; POST /buy chainer pool → bet:arm
+// så engine.startGame henter pool-grids via getPreRoundTicketsByPlayerId-hooken
+// nedenfor. Pool slettes på game-end via engine.bingoAdapter.onGameEnded-flow.
+const game2TicketPoolService = new Game2TicketPoolService({
+  pool: platformService.getPool(),
+});
+app.use(createAgentGame2ChooseTicketsRouter({
+  platformService,
+  ticketPoolService: game2TicketPoolService,
+  getCurrentGameIdForRoom: (roomCode) => {
+    try {
+      const snap = engine.getRoomSnapshot(roomCode);
+      return snap.currentGame?.id ?? null;
+    } catch {
+      return null;
+    }
+  },
+  // 2026-12-06 (v2): chain pool → bet:arm. POST /buy speiler purchasedIndices-
+  // count inn i armed-state-mapen så `engine.startGame` ser spilleren som
+  // armed med rett count. Engine-laget plukker grids via
+  // `getPreRoundTicketsByPlayerId`-hooken (se under).
+  armRocketPlayerFromPool: (roomCode, playerId, purchasedCount) => {
+    try {
+      roomState.armPlayer(roomCode, playerId, purchasedCount);
+    } catch (err) {
+      console.warn("[agent-game2-choose-tickets] armPlayer failed in armRocketPlayerFromPool", err);
+    }
+  },
+}));
+
+// Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
+// Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og
+// schedulerer `engine.startGame` i ROCKET / MONSTERBINGO etter en kort
+// delay slik at runden "aldri stopper". Spill 1 (`bingo`-slug) er IKKE
+// perpetual og påvirkes ikke av tjenesten.
+const perpetualRoundService = new PerpetualRoundService({
+  enabled: perpetualLoopEnabled,
+  delayMs: perpetualLoopDelayMs,
+  disabledSlugs: perpetualLoopDisabledSlugs,
+  engine,
+  variantLookup: roomState,
+  defaultTicketsPerPlayer: runtimeBingoSettings.autoRoundTicketsPerPlayer,
+  defaultPayoutPercent: runtimeBingoSettings.payoutPercent,
+  defaultEntryFee: runtimeBingoSettings.autoRoundEntryFee,
+  emitRoomUpdate: async (roomCode) => {
+    await emitRoomUpdate(roomCode);
+  },
+});
+
+// 2026-12-06 (v2): game-end cleanup-hook. Slett pool fra in-memory cache + DB
+// når runden er over så vi ikke akkumulerer foreldede pools. Vi monkey-patcher
+// `localBingoAdapter.onGameEnded` her (etter pool-service er konstruert) for
+// å unngå konstruksjons-rekkefølge-problemer (engine konstrueres på linje 603,
+// før poolen finnes). Wrapping bevarer eksisterende adapter-oppførsel
+// (game_sessions UPDATE for PostgresBingoSystemAdapter, no-op for Local).
+//
+// 2026-05-03: chained perpetual-loop-trigger inn samme wrapper. Rekkefølge:
+//   1) underlying adapter (game_sessions UPDATE)
+//   2) Spill 2 ticket-pool cleanup
+//   3) PerpetualRoundService.handleGameEnded (scheduler ny runde for Spill 2/3)
+// Alle tre er fail-soft. Perpetual er sist så pool-cleanup skjer FØR vi
+// scheduler ny runde — det betyr at spillere som vil delta i neste Spill 2
+// runde må besøke Choose Tickets på nytt (forrige pool er borte).
+{
+  const originalOnGameEnded = localBingoAdapter.onGameEnded?.bind(localBingoAdapter);
+  // Always set — vi vil at hooken skal trigge selv om underlying adapter
+  // ikke har en egen onGameEnded (LocalBingoSystemAdapter har en no-op,
+  // PostgresBingoSystemAdapter har faktisk persistens).
+  localBingoAdapter.onGameEnded = async (input) => {
+    if (originalOnGameEnded) {
+      try {
+        await originalOnGameEnded(input);
+      } catch (err) {
+        console.warn("[bingoAdapter.onGameEnded] underlying adapter failed", err);
+      }
+    }
+    // Best-effort pool cleanup — fail-soft fordi adapter-cleanup ikke skal
+    // blokkeres av Spill 2-pool-state.
+    try {
+      await game2TicketPoolService.deletePoolForGame(input.gameId);
+    } catch (err) {
+      console.warn("[game2-ticket-pool] deletePoolForGame failed in onGameEnded", err);
+    }
+    // Perpetual auto-restart for Spill 2/3 — fail-soft synchronous trigger
+    // (selve restart-en er asynkron via setTimeout inni servicen).
+    try {
+      perpetualRoundService.handleGameEnded(input);
+    } catch (err) {
+      console.warn("[perpetual-round] handleGameEnded failed", err);
+    }
+  };
+}
 // REQ-101/146: agent manuell mini-game-trigger (fallback for når
 // auto-trigger feilet eller admin endret config midt-runde).
 app.use(createAgentGame1MiniGameRouter({
@@ -2458,6 +2621,17 @@ app.use(createAdminCmsRouter({
 // ikke-regulatoriske trenger ikke-tom innhold) og legger på
 // Cache-Control: public, max-age=300 for å avlaste backenden.
 app.use(createPublicCmsRouter({ cmsService }));
+// BIN-791: Public status page — offentlig /status (HTML) + /api/status*.
+// Ingen auth — status-siden må fungere selv når andre tjenester er nede.
+const statusBootstrap = bootstrapStatusPage({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  platformService,
+  walletAdapter,
+  engine,
+});
+app.get("/status", (_req, res) => res.sendFile(path.join(publicDir, "status.html")));
+app.use(createPublicStatusRouter(statusBootstrap));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
 // BingoEngine er konstruert med (`bingoDailyLossLimit` / `bingoMonthlyLossLimit`)
@@ -2511,12 +2685,12 @@ app.use(createAdminGameOversightRouter({
 }));
 
 // BIN-583 B3.1: agent auth/shift + admin agent-CRUD.
-app.use(createAgentRouter({
-  platformService,
-  agentService,
-  agentShiftService,
-  auditLogService,
-}));
+//
+// P0-2 (REGULATORISK — pengespillforskriften): `createAgentRouter` er flyttet
+// ned til etter `agentSettlementService` er konstruert (~100 linjer ned),
+// siden /shift/end + /shift/logout nå må kunne sjekke om settlement finnes
+// før termination. Søk etter "P0-2-wired createAgentRouter" for det faktiske
+// app.use-kallet. Admin-CRUD-routeren ligger her som før.
 app.use(createAdminAgentsRouter({
   platformService,
   agentService,
@@ -2611,10 +2785,26 @@ const agentSettlementService = new AgentSettlementService({
   settlementStore: agentSettlementStore,
   hallCashLedger,
 });
+
+// P0-2-wired createAgentRouter: passer `agentSettlementService` så
+// `/shift/end` og `/shift/logout` blokkerer termination dersom
+// settlement-rad mangler for inneværende skift (pengespillforskriften
+// krever Settlement Report før termination). Audit-event
+// `agent.shift.terminate_blocked_no_settlement` skrives når blokkering
+// trer i kraft (Lotteritilsynet-bevis).
+app.use(createAgentRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  agentSettlementService,
+  auditLogService,
+}));
+
 app.use(createAgentSettlementRouter({
   platformService,
   agentService,
   agentSettlementService,
+  agentShiftService,
   auditLogService,
 }));
 
@@ -2907,6 +3097,16 @@ app.use(createAdminRouter({
   clearDisplayTicketCache: (code) => roomState.clearDisplayTicketCache(code),
   roomConfiguredEntryFeeByRoom: roomState.roomConfiguredEntryFeeByRoom,
   getPrimaryRoomForHall: (hallId) => getPrimaryRoomForHall(hallId, engine.listRoomSummaries()),
+  // 2026-05-02 (Tobias UX): én rom per group-of-halls — admin-routes
+  // bruker dette til å derivere kanonisk rom-kode + filtrere shared rooms.
+  getHallGroupIdForHall: async (hallId: string): Promise<string | null> => {
+    try {
+      const groups = await hallGroupService.list({ hallId, limit: 1, status: "active" });
+      return groups[0]?.id ?? null;
+    } catch {
+      return null;
+    }
+  },
   resolveBingoHallGameConfigForRoom,
   // BIN-694: wire default variant-config (5-phase Norsk bingo for Game 1)
   // at admin room-create so `meetsPhaseRequirement` gets the correct
@@ -3168,7 +3368,38 @@ const registerGameEvents = createGameEventHandlers({
   disarmPlayer: (code, id) => roomState.disarmPlayer(code, id),
   disarmAllPlayers: (code) => roomState.disarmAllPlayers(code),
   clearDisplayTicketCache: (code) => roomState.clearDisplayTicketCache(code),
-  getPreRoundTicketsByPlayerId: (code) => roomState.getPreRoundTicketsByPlayerId(code),
+  getPreRoundTicketsByPlayerId: (code) => {
+    // 2026-12-06 (v2): for Spill 2 (rocket) override Game 1's display-cache
+    // med pool-grids fra Game2TicketPoolService. Klient har allerede valgt
+    // hvilke 3×3-brett han vil spille via Choose Tickets-siden — engine må
+    // adoptere de EXACTE tallene, ikke generere nye random.
+    //
+    // Strategy: hvis room er rocket og pool finnes for current gameId →
+    // bygg map fra pool-cache. Ellers fall tilbake til Game 1's display-
+    // cache (eksisterende oppførsel for bingo + andre slugs).
+    const base = roomState.getPreRoundTicketsByPlayerId(code);
+    try {
+      const snap = engine.getRoomSnapshot(code);
+      if (snap.gameSlug !== "rocket" && snap.gameSlug !== "game_2" && snap.gameSlug !== "tallspill") {
+        return base;
+      }
+      const gameId = snap.currentGame?.id;
+      if (!gameId) return base;
+      const playerIds = game2TicketPoolService.listPlayersWithPurchasedTickets(code, gameId);
+      if (playerIds.length === 0) return base;
+      const merged: Record<string, import("./game/types.js").Ticket[]> = { ...base };
+      for (const pid of playerIds) {
+        const grids = game2TicketPoolService.getPurchasedGridsFromCache(code, pid, gameId);
+        if (!grids || grids.length === 0) continue;
+        merged[pid] = grids.map((grid) => ({ grid: grid.map((row) => [...row]) }));
+      }
+      return merged;
+    } catch {
+      // Fail-soft: hvis snapshot eller pool feiler — bruk eksisterende
+      // base-cache så Game 1-spillere ikke regresserer.
+      return base;
+    }
+  },
   replaceDisplayTicket: (code, id, ticketId, slug) => roomState.replaceDisplayTicket(code, id, ticketId, slug),
   cancelPreRoundTicket: (code, id, ticketId, cfg) => roomState.cancelPreRoundTicket(code, id, ticketId, cfg),
   resolveBingoHallGameConfigForRoom, requireActiveHallIdFromInput, buildLeaderboard,
@@ -3286,6 +3517,14 @@ const registerGameEvents = createGameEventHandlers({
       );
     }
   },
+
+  // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn første runde
+  // ved spiller-join. Reuser PerpetualRoundService som har all idempotens-
+  // logikken, slug-filteret og default-konfigurasjonen vi trenger. Spill 1
+  // og SpinnGo gir false-return uten effekt — kun rocket / monsterbingo
+  // trigges. Fail-soft: hvis spawn kaster, fanger handler-en og logger
+  // som warn så join fortsetter normalt.
+  spawnFirstRoundIfNeeded: (roomCode) => perpetualRoundService.spawnFirstRoundIfNeeded(roomCode),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.
@@ -3680,6 +3919,87 @@ const PORT = Number(process.env.PORT ?? 4000);
     }
   } catch (err) {
     console.error("[boot-sweep] stale-room sweep failed:", err);
+  }
+
+  // PILOT-EMERGENCY 2026-05-03 (Tobias): boot-sweep for Spill 2/3-rom som
+  // har persistert i `RUNNING + drawnNumbers.length>=maxBalls + endedReason=null`.
+  // Bug-rapport: ROCKET henger på "trekk 21/21" uten ny runde, ingen
+  // nedtelling, bonger vises ikke. Root cause: prosessen krasjet/restartet
+  // ETTER siste draw men FØR engine rakk å fyre game-end. Render-restart
+  // loader stale-state tilbake fra Postgres-checkpoint. PR #876 (game-end fix)
+  // krever ny draw-event for å trigge — ballbagen er allerede tom så ingen
+  // nye draws kommer.
+  //
+  // Sweepen forcefully ender stale ROCKET/MONSTERBINGO-runder og fyrer
+  // `bingoAdapter.onGameEnded` som chain-er til PerpetualRoundService.
+  // handleGameEnded — ny runde scheduleres via vanlig perpetual-loop ~5s
+  // etter at sweepen kjører. Idempotent + fail-soft per rom.
+  //
+  // Kjøres ETTER sweepStaleNonCanonicalRooms (legacy-cleanup) men FØR
+  // bootstrapHallGroupRooms (Spill 1 hall-group-bootstrap) for å unngå
+  // race med rom som kunne bli opprettet under sweepen.
+  try {
+    const spill23SweepService = new StaleRoomBootSweepService({
+      engine,
+      logger: {
+        info: (msg, meta) => console.log(msg, meta ? JSON.stringify(meta) : ""),
+        warn: (msg, meta) => console.warn(msg, meta ? JSON.stringify(meta) : ""),
+        error: (msg, meta) => console.error(msg, meta ? JSON.stringify(meta) : ""),
+      },
+    });
+    const spill23SweepResult = await spill23SweepService.sweep();
+    if (spill23SweepResult.ended.length > 0) {
+      console.warn(
+        `[boot-sweep] Spill 2/3: forced-end ${spill23SweepResult.ended.length} stale rooms: ${spill23SweepResult.ended.join(", ")}`,
+      );
+    }
+    if (spill23SweepResult.failures.length > 0) {
+      console.warn(
+        `[boot-sweep] Spill 2/3: ${spill23SweepResult.failures.length} forceEndStaleRound failures (best-effort, see prior logs)`,
+      );
+    }
+  } catch (err) {
+    // Aldri kast — boot skal ikke feile pga sweep. StaleRoomBootSweepService
+    // er allerede fail-soft per rom; denne ytre catch er en defense-in-depth
+    // mot uventet feil i selve service-konstruksjonen.
+    console.error("[boot-sweep] Spill 2/3 stale-room sweep failed:", err);
+  }
+
+  // 2026-05-02 (Tobias UX): bootstrap kanonisk rom per aktiv group-of-halls.
+  // Sikrer at "Pågående spill"-siden viser rommet umiddelbart etter
+  // server-restart uten at admin må opprette manuelt. Idempotent + soft-fail.
+  try {
+    const bootstrapResult = await bootstrapHallGroupRooms({
+      engine,
+      hallGroupService,
+      bindVariantConfigForRoom: (code, opts) =>
+        roomState.bindVariantConfigForRoom(code, {
+          gameSlug: opts.gameSlug,
+          ...(opts.gameManagementId !== undefined
+            ? { gameManagementId: opts.gameManagementId }
+            : {}),
+        }),
+      bindDefaultVariantConfig: (code, slug) =>
+        roomState.bindDefaultVariantConfig(code, slug),
+    });
+    if (bootstrapResult.created.length > 0) {
+      console.log(
+        `[boot-bootstrap] Created ${bootstrapResult.created.length} hall-group rooms: ${bootstrapResult.created.join(", ")}`,
+      );
+    }
+    if (bootstrapResult.skipped.length > 0) {
+      console.log(
+        `[boot-bootstrap] Skipped ${bootstrapResult.skipped.length} existing rooms`,
+      );
+    }
+    if (bootstrapResult.errors.length > 0) {
+      console.warn(
+        `[boot-bootstrap] ${bootstrapResult.errors.length} hall-groups failed:`,
+        bootstrapResult.errors,
+      );
+    }
+  } catch (err) {
+    console.error("[boot-bootstrap] hall-group room bootstrap failed:", err);
   }
 
   server.listen(PORT, () => {

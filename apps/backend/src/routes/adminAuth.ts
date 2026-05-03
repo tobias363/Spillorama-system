@@ -156,6 +156,13 @@ export function createAdminAuthRouter(deps: AdminSubRouterDeps): express.Router 
 
   /**
    * BIN-591: tildel/fjern hall for HALL_OPERATOR. ADMIN-only.
+   *
+   * P0-1 (pilot 2026-05-02): for PLAYER-rollebrukere holder
+   * `updateUserHallAssignment` også `app_hall_registrations` i lock-step
+   * med `app_users.hall_id` så agent-portalens cash-in/out ikke feiler
+   * med PLAYER_NOT_AT_HALL. Actor-id videreføres for audit-spor på
+   * `activated_by_user_id`.
+   *
    * Body: { hallId: string | null }
    */
   router.put("/api/admin/users/:userId/hall", async (req, res) => {
@@ -171,7 +178,11 @@ export function createAdminAuthRouter(deps: AdminSubRouterDeps): express.Router 
             : (() => {
                 throw new DomainError("INVALID_INPUT", "hallId må være en streng eller null.");
               })();
-      const updated = await platformService.updateUserHallAssignment(userId, hallId);
+      const updated = await platformService.updateUserHallAssignment(
+        userId,
+        hallId,
+        adminUser.id,
+      );
       auditAdmin(req, adminUser, "user.hall.assign", "user", userId, { hallId });
       apiSuccess(res, updated);
     } catch (error) {

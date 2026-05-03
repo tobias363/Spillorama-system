@@ -392,9 +392,16 @@ export class PaymentRequestService {
         sql += ` AND hall_id = $${params.length}`;
       }
       // BIN-646 (PR-B4): bank/hall-filter på withdraw-kø.
+      // Withdrawal QA P1 (2026-05-01): "hall"-filter inkluderer legacy NULL
+      // rader så pre-default-fix-rader fortsatt vises. "bank" treffer kun
+      // eksplisitte bank-uttak.
       if (kind === "withdraw" && options.destinationType) {
         params.push(options.destinationType);
-        sql += ` AND destination_type = $${params.length}`;
+        if (options.destinationType === "hall") {
+          sql += ` AND (destination_type IS NULL OR destination_type = $${params.length})`;
+        } else {
+          sql += ` AND destination_type = $${params.length}`;
+        }
       }
       // BIN-587 B3-aml filters
       if (options.userId) {
@@ -466,9 +473,15 @@ export class PaymentRequestService {
         params.push(options.hallId);
         sql += ` AND hall_id = $${params.length}`;
       }
+      // Withdrawal QA P1 (2026-05-01): "hall"-filter inkluderer legacy NULL
+      // rader (history-view samme-semantikk som listPending).
       if (kind === "withdraw" && options.destinationType) {
         params.push(options.destinationType);
-        sql += ` AND destination_type = $${params.length}`;
+        if (options.destinationType === "hall") {
+          sql += ` AND (destination_type IS NULL OR destination_type = $${params.length})`;
+        } else {
+          sql += ` AND destination_type = $${params.length}`;
+        }
       }
       if (options.userId) {
         params.push(options.userId);
@@ -570,12 +583,20 @@ export class PaymentRequestService {
     const hallId = input.hallId?.trim() || null;
     const submittedBy = input.submittedBy?.trim() || null;
     // BIN-646 (PR-B4): bank/hall for withdraw. Deposit ignorerer feltet.
-    const destinationType: PaymentRequestDestinationType | null =
-      kind === "withdraw" && input.destinationType
-        ? (input.destinationType === "bank" || input.destinationType === "hall"
-            ? input.destinationType
-            : null)
-        : null;
+    //
+    // Withdrawal QA P1 (2026-05-01): default `destinationType = "hall"` når
+    // klient ikke spesifiserer. Tidligere persisterte vi NULL for slike
+    // requests, som førte til at `GET /api/admin/withdrawals/history?type=hall`
+    // ekskluderte dem. "Pay-in-hall" er den dominerende uttaks-flyten i pilot
+    // og skal være default; bank-uttak krever eksplisitt valg fra spilleren.
+    let destinationType: PaymentRequestDestinationType | null = null;
+    if (kind === "withdraw") {
+      if (input.destinationType === "bank" || input.destinationType === "hall") {
+        destinationType = input.destinationType;
+      } else {
+        destinationType = "hall";
+      }
+    }
 
     const id = randomUUID();
     let rows: PaymentRequestRow[];

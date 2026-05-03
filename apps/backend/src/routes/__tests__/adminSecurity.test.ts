@@ -168,14 +168,17 @@ async function waitForAudit(store: InMemoryAuditLogStore, action: string): Promi
 // ── Tests ────────────────────────────────────────────────────────────────
 
 test("BIN-587 B3-security: HALL_OPERATOR + PLAYER blokkert fra alle security-endepunkter", async () => {
+  // Withdrawal QA P1 (2026-05-01): /withdraw-emails er flyttet til
+  // WITHDRAW_EMAIL_{READ,WRITE} (ADMIN + HALL_OPERATOR + AGENT). De andre
+  // security-endepunktene bruker fortsatt SECURITY_READ (ADMIN + SUPPORT
+  // only) og blokkerer HALL_OPERATOR.
   const ctx = await startServer({ "op-tok": operatorUser, "pl-tok": playerUser });
   try {
-    const paths = [
-      "/api/admin/security/withdraw-emails",
+    const adminOnlyPaths = [
       "/api/admin/security/risk-countries",
       "/api/admin/security/blocked-ips",
     ];
-    for (const path of paths) {
+    for (const path of adminOnlyPaths) {
       const op = await req(ctx.baseUrl, "GET", path, "op-tok");
       assert.equal(op.status, 400);
       assert.equal(op.json.error.code, "FORBIDDEN");
@@ -183,15 +186,23 @@ test("BIN-587 B3-security: HALL_OPERATOR + PLAYER blokkert fra alle security-end
       assert.equal(pl.status, 400);
       assert.equal(pl.json.error.code, "FORBIDDEN");
     }
+    // PLAYER er fortsatt blokkert fra withdraw-emails (kun ADMIN +
+    // HALL_OPERATOR + AGENT). HALL_OPERATOR har nå tilgang.
+    const pl = await req(ctx.baseUrl, "GET", "/api/admin/security/withdraw-emails", "pl-tok");
+    assert.equal(pl.status, 400);
+    assert.equal(pl.json.error.code, "FORBIDDEN");
   } finally {
     await ctx.close();
   }
 });
 
-test("BIN-587 B3-security: POST withdraw-email — SUPPORT OK + audit logger kun domene", async () => {
-  const ctx = await startServer({ "sup-tok": supportUser });
+test("Withdrawal QA P1 (2026-05-01): POST withdraw-email — HALL_OPERATOR OK + audit logger kun domene", async () => {
+  // Withdraw-email-allowlist er nå hall-operativ (drift), ikke compliance.
+  // HALL_OPERATOR (og AGENT) har skrive-tilgang via WITHDRAW_EMAIL_WRITE;
+  // SUPPORT er bevisst fjernet (read-only compliance-rolle).
+  const ctx = await startServer({ "op-tok": operatorUser });
   try {
-    const res = await req(ctx.baseUrl, "POST", "/api/admin/security/withdraw-emails", "sup-tok", {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/security/withdraw-emails", "op-tok", {
       email: "revisor@firma.no",
       label: "Revisor",
     });
@@ -205,6 +216,20 @@ test("BIN-587 B3-security: POST withdraw-email — SUPPORT OK + audit logger kun
     // Personvern: full e-post skal ikke være i audit
     const serialized = JSON.stringify(event!.details);
     assert.ok(!serialized.includes("revisor@firma.no"), "Full e-post skal ikke logges i audit");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Withdrawal QA P1 (2026-05-01): SUPPORT er nå blokkert fra withdraw-email-mutasjon", async () => {
+  const ctx = await startServer({ "sup-tok": supportUser });
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/security/withdraw-emails", "sup-tok", {
+      email: "x@y.no",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+    assert.equal(ctx.spies.addEmailCalls.length, 0);
   } finally {
     await ctx.close();
   }
@@ -294,7 +319,9 @@ test("GAP #21: PUT withdraw-email — INVALID_INPUT når ingen felter sendes", a
   }
 });
 
-test("GAP #21: PUT withdraw-email — HALL_OPERATOR + PLAYER blokkert (FORBIDDEN)", async () => {
+test("Withdrawal QA P1 (2026-05-01): PUT withdraw-email — HALL_OPERATOR OK, PLAYER blokkert", async () => {
+  // HALL_OPERATOR har nå WITHDRAW_EMAIL_WRITE og kan oppdatere
+  // regnskaps-mottakere. PLAYER er fortsatt blokkert.
   const seed: WithdrawEmail = {
     id: "email-4",
     email: "x@y.no",
@@ -310,8 +337,7 @@ test("GAP #21: PUT withdraw-email — HALL_OPERATOR + PLAYER blokkert (FORBIDDEN
     const op = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-4", "op-tok", {
       label: "x",
     });
-    assert.equal(op.status, 400);
-    assert.equal(op.json.error.code, "FORBIDDEN");
+    assert.equal(op.status, 200);
     const pl = await req(ctx.baseUrl, "PUT", "/api/admin/security/withdraw-emails/email-4", "pl-tok", {
       label: "x",
     });
@@ -428,7 +454,7 @@ test("BIN-587 B3-security: POST validerer required fields", async () => {
   }
 });
 
-test("BIN-587 B3-security: GET lister — ADMIN + SUPPORT OK", async () => {
+test("BIN-587 B3-security: GET lister — ADMIN + SUPPORT OK (risk-countries + blocked-ips)", async () => {
   const ctx = await startServer(
     { "admin-tok": adminUser, "sup-tok": supportUser },
     {
@@ -439,14 +465,36 @@ test("BIN-587 B3-security: GET lister — ADMIN + SUPPORT OK", async () => {
   );
   try {
     for (const token of ["admin-tok", "sup-tok"]) {
-      const emails = await req(ctx.baseUrl, "GET", "/api/admin/security/withdraw-emails", token);
-      assert.equal(emails.status, 200);
-      assert.equal(emails.json.data.count, 1);
       const countries = await req(ctx.baseUrl, "GET", "/api/admin/security/risk-countries", token);
       assert.equal(countries.json.data.count, 1);
       const ips = await req(ctx.baseUrl, "GET", "/api/admin/security/blocked-ips", token);
       assert.equal(ips.json.data.count, 1);
     }
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Withdrawal QA P1 (2026-05-01): GET /withdraw-emails — ADMIN + HALL_OPERATOR + AGENT OK; SUPPORT blokkert", async () => {
+  const ctx = await startServer(
+    {
+      "admin-tok": adminUser,
+      "op-tok": operatorUser,
+      "sup-tok": supportUser,
+    },
+    {
+      seedEmails: [{ id: "e-1", email: "a@b.no", label: null, addedBy: null, createdAt: "2026-01-01T00:00:00Z" }],
+    }
+  );
+  try {
+    for (const token of ["admin-tok", "op-tok"]) {
+      const res = await req(ctx.baseUrl, "GET", "/api/admin/security/withdraw-emails", token);
+      assert.equal(res.status, 200);
+      assert.equal(res.json.data.count, 1);
+    }
+    const sup = await req(ctx.baseUrl, "GET", "/api/admin/security/withdraw-emails", "sup-tok");
+    assert.equal(sup.status, 400);
+    assert.equal(sup.json.error.code, "FORBIDDEN");
   } finally {
     await ctx.close();
   }

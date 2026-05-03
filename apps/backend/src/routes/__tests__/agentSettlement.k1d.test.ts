@@ -122,6 +122,7 @@ async function startServer(): Promise<Ctx> {
     platformService,
     agentService,
     agentSettlementService: settlementService,
+    agentShiftService,
     auditLogService,
   }));
 

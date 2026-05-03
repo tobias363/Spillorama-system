@@ -1,0 +1,864 @@
+/* ════════════════════════════════════════════════════════════════════════
+ * Min Konto — player-portal account page redesign (2026-05-02)
+ * Vanilla CSS (no build step). All classes prefixed `mk-` to avoid
+ * collisions with profile.js / spillvett.js / lobby.js.
+ * Design tokens mirror COLORS-konstant fra min-konto.jsx (line 4-18).
+ * ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --mk-bg-top: #5a1318;
+  --mk-bg-mid: #3d0d11;
+  --mk-bg-bot: #2a0a0d;
+  --mk-card: #f7eedd;
+  --mk-card-active: #efe1c9;
+  --mk-ink: #2a1a0e;
+  --mk-ink-soft: #6a4a3a;
+  --mk-divider: rgba(42, 26, 14, 0.08);
+  --mk-outline: rgba(247, 238, 221, 0.10);
+  --mk-gold-line: #d4a64a;
+  --mk-vip-bg: #3a1410;
+  --mk-vip-border: #7a4a1e;
+  --mk-vip-text: #f4d99a;
+  --mk-card-soft: rgba(247, 238, 221, 0.55);
+  --mk-card-mute: rgba(247, 238, 221, 0.7);
+}
+
+/* ── Overlay layering ─────────────────────────────────────────────────── */
+/* z-index 10800 sits above profile-overlay (5000), info-overlay (6000),
+ * spillregnskap-view (10500), and matches/overrides candy-overlay (10000),
+ * but stays below mandatory-pause-modal (99999) and the login-overlay
+ * (10000) so unauthenticated users can't bypass login by triggering Min
+ * Konto. The compliance-critical mandatory-pause modal must always win. */
+.mk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10800;
+  display: none;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.mk-overlay.is-open {
+  display: block;
+}
+
+.mk-screen {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(140% 80% at 50% 0%, var(--mk-bg-top) 0%, var(--mk-bg-mid) 45%, var(--mk-bg-bot) 100%);
+  padding: 18px 22px 32px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  color: var(--mk-card);
+}
+
+.mk-gold-strip {
+  position: absolute;
+  top: 8px;
+  left: 22px;
+  right: 22px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--mk-gold-line) 30%, var(--mk-gold-line) 70%, transparent 100%);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+.mk-account-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 4px 18px;
+}
+
+.mk-account-name {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+
+.mk-account-kallenavn {
+  font-size: 12.5px;
+  color: var(--mk-card-mute);
+  margin-top: 4px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.mk-account-kallenavn strong {
+  font-weight: 700;
+  color: var(--mk-card);
+}
+
+.mk-saldo-label {
+  font-size: 12px;
+  color: var(--mk-card-soft);
+  margin-top: 10px;
+  font-weight: 500;
+}
+
+.mk-saldo-value {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin-top: 2px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-saldo-value .mk-saldo-suffix {
+  font-size: 16px;
+  font-weight: 600;
+  margin-left: 4px;
+  color: var(--mk-card-mute);
+}
+
+.mk-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(247, 238, 221, 0.25);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--mk-card);
+  flex-shrink: 0;
+  font-family: inherit;
+  /* Master design (line 287-292): close button has slight top margin so
+   * its visual centre aligns with the player's name baseline rather than
+   * the top of the header block. */
+  margin-top: 4px;
+}
+
+.mk-icon-btn:hover {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+/* ── Pills ────────────────────────────────────────────────────────────── */
+.mk-pills {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+/* Master design: pills are content-width, NOT stretched (no flex:1).
+ * Two pills sit side-by-side with 10px gap. */
+.mk-pill {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(247, 238, 221, 0.25);
+  background: transparent;
+  color: var(--mk-card);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.mk-pill:hover {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-pill:active {
+  background: rgba(247, 238, 221, 0.12);
+}
+
+/* ── Hall info card ───────────────────────────────────────────────────── */
+.mk-hall-card {
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  border-radius: 12px;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mk-hall-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mk-hall-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mk-card-soft);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mk-hall-value {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--mk-card);
+  letter-spacing: -0.005em;
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-hall-divider {
+  height: 1px;
+  background: rgba(247, 238, 221, 0.08);
+}
+
+.mk-hall-select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.mk-hall-select {
+  appearance: none;
+  background: rgba(247, 238, 221, 0.06);
+  border: 1px solid rgba(247, 238, 221, 0.18);
+  color: var(--mk-card);
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: -0.005em;
+  padding: 11px 38px 11px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.mk-hall-select option {
+  background: #2a0a0d;
+  color: var(--mk-card);
+}
+
+.mk-hall-select-caret {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  opacity: 0.7;
+  color: var(--mk-card);
+}
+
+/* ── Menu group ───────────────────────────────────────────────────────────
+ * Master design uses ONE combined menu group containing both Konto-items
+ * AND Spillvett-items, with no SectionLabel between them.
+ * (See min-konto.jsx line 2526: <MenuGroup items={[...kontoItems, ...spillevettItems]} />) */
+.mk-menu-group {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 18px;
+}
+
+.mk-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 16px;
+  background: transparent;
+  border-bottom: 1px solid rgba(247, 238, 221, 0.08);
+  cursor: pointer;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  width: 100%;
+  text-align: left;
+  color: var(--mk-card);
+  font-family: inherit;
+}
+
+.mk-menu-row:last-child {
+  border-bottom: none;
+}
+
+.mk-menu-row:hover {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-menu-row.is-active {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-menu-row.is-active .mk-menu-label {
+  font-weight: 700;
+}
+
+.mk-menu-label {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mk-card);
+  letter-spacing: -0.005em;
+}
+
+.mk-menu-row .mk-chev {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.mk-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(247, 238, 221, 0.5);
+  letter-spacing: 0.02em;
+  margin: 24px 4px 10px;
+  text-transform: none;
+}
+
+/* ── Logout button ────────────────────────────────────────────────────── */
+.mk-logout {
+  margin-top: 18px;
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  color: var(--mk-card);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-family: inherit;
+}
+
+.mk-logout:hover {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+/* ── Sub-screen (modal full-screen) ───────────────────────────────────── */
+.mk-subscreen {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(140% 80% at 50% 0%, var(--mk-bg-top) 0%, var(--mk-bg-mid) 45%, var(--mk-bg-bot) 100%);
+  padding: 22px 22px 28px;
+  overflow-y: auto;
+  display: none;
+  flex-direction: column;
+  z-index: 60;
+  box-sizing: border-box;
+  animation: mk-fade-in 0.18s ease-out;
+}
+
+.mk-subscreen.is-open {
+  display: flex;
+}
+
+@keyframes mk-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mk-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 4px 18px;
+  gap: 12px;
+}
+
+.mk-sub-back {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(247, 238, 221, 0.25);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  color: var(--mk-card);
+  font-family: inherit;
+}
+
+.mk-sub-back:hover {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-sub-title {
+  flex: 1;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--mk-card);
+  letter-spacing: -0.015em;
+  text-align: center;
+  margin-right: 36px;
+}
+
+.mk-sub-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Centered confirmation layouts ────────────────────────────────────── */
+.mk-confirm-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px 8px 40px;
+}
+
+.mk-warning-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  border: 2px solid var(--mk-gold-line);
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 22px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(247, 238, 221, 0.06);
+  color: var(--mk-card);
+}
+
+.mk-confirm-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--mk-card);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin-bottom: 12px;
+  max-width: 320px;
+}
+
+.mk-confirm-text {
+  font-size: 14px;
+  color: var(--mk-card-mute);
+  line-height: 1.5;
+  max-width: 300px;
+  margin-bottom: 32px;
+}
+
+.mk-confirm-text strong {
+  font-weight: 700;
+  color: var(--mk-card);
+}
+
+.mk-action-btn {
+  width: 100%;
+  max-width: 320px;
+  padding: 15px 24px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  color: var(--mk-card);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  margin-bottom: 14px;
+  font-family: inherit;
+}
+
+.mk-action-btn:disabled {
+  background: rgba(247, 238, 221, 0.04);
+  color: rgba(247, 238, 221, 0.3);
+  cursor: not-allowed;
+}
+
+.mk-action-btn:hover:not(:disabled) {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+.mk-action-btn--danger {
+  background: linear-gradient(180deg, #b91c1c 0%, #ef4444 100%);
+  border-color: rgba(247, 238, 221, 0.18);
+}
+
+.mk-action-btn--danger:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.mk-link-btn {
+  background: transparent;
+  border: none;
+  color: rgba(247, 238, 221, 0.6);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 16px;
+  font-family: inherit;
+}
+
+.mk-link-btn:hover {
+  color: var(--mk-card);
+}
+
+/* ── Form inputs ──────────────────────────────────────────────────────── */
+.mk-input {
+  width: 100%;
+  max-width: 320px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(247, 238, 221, 0.25);
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--mk-card);
+  font-weight: 600;
+  margin-bottom: 22px;
+  text-align: center;
+  color-scheme: dark;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.mk-input:focus {
+  border-color: rgba(247, 238, 221, 0.5);
+}
+
+/* ── Listing rows (varslinger, transaksjoner) ─────────────────────────── */
+.mk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mk-list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  border-radius: 12px;
+}
+
+.mk-list-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(247, 238, 221, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--mk-card);
+}
+
+.mk-list-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.mk-list-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mk-card);
+  letter-spacing: -0.005em;
+}
+
+.mk-list-meta {
+  font-size: 12px;
+  color: var(--mk-card-mute);
+  margin-top: 3px;
+}
+
+.mk-list-amount {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--mk-card);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.mk-list-amount--positive {
+  color: #6cd86c;
+}
+
+.mk-list-amount--negative {
+  color: #ef6b6b;
+}
+
+/* ── Info card rows (personlig info) ──────────────────────────────────── */
+.mk-info-card {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.mk-info-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(247, 238, 221, 0.08);
+}
+
+.mk-info-row:last-child {
+  border-bottom: none;
+}
+
+.mk-info-row-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.mk-info-label {
+  font-size: 12px;
+  color: var(--mk-card-soft);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.mk-info-value {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--mk-card);
+  letter-spacing: -0.005em;
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-info-sub {
+  font-size: 12.5px;
+  color: var(--mk-card-soft);
+  margin-top: 1px;
+}
+
+.mk-info-edit-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid rgba(247, 238, 221, 0.18);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mk-card);
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.mk-info-edit-btn:hover {
+  background: rgba(247, 238, 221, 0.06);
+}
+
+/* ── Stats display (spillregnskap) ────────────────────────────────────── */
+.mk-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.mk-stat-card {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.mk-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mk-card-soft);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mk-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--mk-card);
+  letter-spacing: -0.02em;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-stat-value-sub {
+  font-size: 13px;
+  color: var(--mk-card-mute);
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+/* ── Spillegrenser sliders ────────────────────────────────────────────── */
+.mk-grense-card {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--mk-outline);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.mk-grense-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--mk-card);
+  margin-bottom: 4px;
+}
+
+.mk-grense-sub {
+  font-size: 12.5px;
+  color: var(--mk-card-mute);
+  margin-bottom: 14px;
+}
+
+.mk-grense-row {
+  margin-bottom: 14px;
+}
+
+.mk-grense-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.mk-grense-row-label {
+  font-size: 12.5px;
+  color: var(--mk-card-mute);
+  font-weight: 500;
+}
+
+.mk-grense-row-value {
+  font-size: 14px;
+  color: var(--mk-card);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-progress-bar {
+  height: 6px;
+  background: rgba(247, 238, 221, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mk-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #b91c1c 0%, #ef4444 100%);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+/* ── VIP callout ──────────────────────────────────────────────────────── */
+.mk-vip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--mk-vip-bg) 0%, #2e0d0a 100%);
+  border: 1px solid var(--mk-vip-border);
+  box-shadow: inset 0 1px 0 rgba(244, 217, 154, 0.18), 0 4px 14px rgba(0, 0, 0, 0.25);
+  margin-top: 18px;
+}
+
+.mk-vip-pinwheel {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--mk-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.mk-vip-text {
+  flex: 1;
+  line-height: 1.3;
+}
+
+.mk-vip-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mk-vip-text);
+  letter-spacing: -0.005em;
+}
+
+.mk-vip-sub {
+  font-size: 12.5px;
+  color: rgba(244, 217, 154, 0.78);
+  margin-top: 2px;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────── */
+.mk-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--mk-card-mute);
+  font-size: 14px;
+}
+
+/* ── Toast / inline error ─────────────────────────────────────────────── */
+.mk-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: var(--mk-card);
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  z-index: 2000;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  animation: mk-toast-in 0.25s ease-out;
+}
+
+@keyframes mk-toast-in {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.mk-error {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fbb;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.mk-success {
+  background: rgba(108, 216, 108, 0.14);
+  border: 1px solid rgba(108, 216, 108, 0.4);
+  color: #cfe9cf;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+/* ── Tablet/desktop centering: clamp width to 420px ───────────────────── */
+@media (min-width: 640px) {
+  .mk-screen,
+  .mk-subscreen {
+    max-width: 460px;
+    margin: 0 auto;
+    box-shadow: 0 0 0 1px rgba(212, 166, 74, 0.08), 0 30px 80px rgba(0, 0, 0, 0.5);
+  }
+  /* NB: backdrop-filter er forbudt over Pixi-canvas (flimmer-policy, se
+   * packages/game-client/src/games/game1/ARCHITECTURE.md). Bruker solid
+   * semi-transparent bakgrunn med alpha >= 0.85 i stedet. */
+  .mk-overlay {
+    background: rgba(0, 0, 0, 0.88);
+  }
+}

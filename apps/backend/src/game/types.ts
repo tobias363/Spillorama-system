@@ -432,4 +432,11 @@ export interface RoomSummary {
   playerCount: number;
   createdAt: string;
   gameStatus: GameStatus | "NONE";
+  /**
+   * 2026-05-02: shared-rom-flagg propagert fra `RoomState.isHallShared`.
+   * Når true betyr det at flere haller (typisk én group-of-halls) deler
+   * dette rommet — listing-filtere må sjekke gruppe-tilhørighet, ikke
+   * bare hall-id-likhet. Optional/undefined = per-hall-rom (legacy).
+   */
+  isHallShared?: boolean;
 }

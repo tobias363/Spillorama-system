@@ -212,4 +212,20 @@ export interface GameEventsDeps {
     walletId: string,
     payload: import("@spillorama/shared-types/socket-events").WalletLossStateEvent,
   ) => void;
+
+  /**
+   * Tobias-direktiv 2026-05-03: Spill 2/3 har ETT globalt rom og perpetual
+   * loop — runden skal starte umiddelbart når første spiller joiner.
+   * `room:join`-handler kaller denne hooken etter vellykket join så
+   * `engine.startGame` triggers for ROCKET / MONSTERBINGO uten å vente på
+   * admin-start eller scheduled-game.
+   *
+   * Returnerer `true` hvis runde faktisk ble spawnet, `false` ellers
+   * (allerede aktiv, ikke perpetual-slug, etc.). Returverdien brukes kun
+   * til logging — handler-en bryr seg ikke om utfallet.
+   *
+   * Optional fordi test-harnesses uten PerpetualRoundService kan utelate;
+   * room:join faller tilbake til pre-direktiv-flyten (ingen auto-spawn).
+   */
+  spawnFirstRoundIfNeeded?: (roomCode: string) => Promise<boolean>;
 }

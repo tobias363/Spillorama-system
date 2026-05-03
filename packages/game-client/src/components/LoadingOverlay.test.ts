@@ -1,15 +1,20 @@
 /**
  * @vitest-environment happy-dom
  *
- * LoadingOverlay state-machine tests (BIN-673).
+ * LoadingOverlay state-machine tests.
  *
- * Exercises the typed state-machine added in BIN-673 commit 1:
+ * Originally added in BIN-673. Updated 2026-05-03 (Tobias-direktiv) for the
+ * Spillorama-branded redesign + connection-error fallback:
+ *
  *   - setState("READY") hides the overlay and cancels the stuck-timer
  *   - setState("CONNECTING") / "LOADING_ASSETS" / etc show the right message
- *   - stuck-timer surfaces the reload button after `stuckThresholdMs`
- *   - DISCONNECTED shows the reload button immediately (no auto-recovery)
+ *   - stuck-timer surfaces the error-fallback after `stuckThresholdMs`
+ *   - DISCONNECTED enters the error fallback immediately (no auto-recovery)
+ *   - In the error state the WHOLE overlay is clickable → reload (Tobias)
  *   - Back-to-back setState calls reset the stuck-timer each time
  *   - Legacy show()/hide() API maps to setState() behavior
+ *   - setError(msg) is the explicit-fallback escape hatch for non-socket
+ *     paths (HTTP room-join failure etc.)
  *
  * Run: `npm --prefix packages/game-client test -- --run LoadingOverlay`
  */
@@ -17,7 +22,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { LoadingOverlay, type LoadingState } from "./LoadingOverlay.js";
 
-describe("LoadingOverlay state-machine (BIN-673)", () => {
+const ERROR_CLASS = "spillorama-loading-overlay--error";
+const ERROR_TEXT = "Får ikke koblet til rom. Trykk her";
+
+describe("LoadingOverlay state-machine", () => {
   let container: HTMLElement;
   let overlay: LoadingOverlay;
 
@@ -39,17 +47,23 @@ describe("LoadingOverlay state-machine (BIN-673)", () => {
       expect(overlay.getState()).toBe("READY");
       expect(overlay.isShowing()).toBe(false);
     });
+
+    it("renders the Spillorama wheel-logo + label scaffold in the DOM", () => {
+      overlay = new LoadingOverlay(container);
+      expect(container.querySelector("img.spillorama-loading-overlay__logo-img")).toBeTruthy();
+      expect(container.querySelector(".spillorama-loading-overlay__label")).toBeTruthy();
+      expect(container.querySelector(".spillorama-loading-overlay__dots")).toBeTruthy();
+    });
   });
 
   describe("setState transitions", () => {
     const transitions: Array<[LoadingState, string]> = [
-      ["CONNECTING", "Kobler til..."],
-      ["JOINING_ROOM", "Finner runden..."],
-      ["LOADING_ASSETS", "Laster spill..."],
-      ["SYNCING", "Henter rundedata..."],
-      ["RECONNECTING", "Kobler til igjen..."],
-      ["RESYNCING", "Oppdaterer spillet..."],
-      ["DISCONNECTED", "Frakoblet — prøver igjen..."],
+      ["CONNECTING", "Kobler til"],
+      ["JOINING_ROOM", "Finner runden"],
+      ["LOADING_ASSETS", "Laster spill"],
+      ["SYNCING", "Henter rundedata"],
+      ["RECONNECTING", "Kobler til igjen"],
+      ["RESYNCING", "Oppdaterer spillet"],
     ];
 
     it.each(transitions)("state %s shows overlay with message %s", (state, expectedMsg) => {
@@ -58,6 +72,7 @@ describe("LoadingOverlay state-machine (BIN-673)", () => {
       expect(overlay.getState()).toBe(state);
       expect(overlay.isShowing()).toBe(true);
       expect(container.textContent).toContain(expectedMsg);
+      expect(overlay.isInErrorState()).toBe(false);
     });
 
     it("setState('READY') hides overlay", () => {
@@ -76,43 +91,58 @@ describe("LoadingOverlay state-machine (BIN-673)", () => {
     });
   });
 
-  describe("stuck-timer → reload button (BIN-673 user-escape)", () => {
-    it("reload button is hidden initially", () => {
-      overlay = new LoadingOverlay(container);
-      overlay.setState("CONNECTING");
-      const btn = container.querySelector("button");
-      expect(btn?.textContent).toBe("Last siden på nytt");
-      expect(getComputedStyle(btn!).display).toBe("none");
-    });
-
-    it("reload button appears after stuckThresholdMs", () => {
-      overlay = new LoadingOverlay(container, { stuckThresholdMs: 5000 });
-      overlay.setState("RECONNECTING");
-      const btn = container.querySelector("button")!;
-
-      expect(btn.style.display).toBe("none");
-      vi.advanceTimersByTime(4999);
-      expect(btn.style.display).toBe("none");
-      vi.advanceTimersByTime(1);
-      expect(btn.style.display).toBe("inline-block");
-    });
-
-    it("DISCONNECTED shows reload button immediately (no auto-recovery)", () => {
+  describe("error fallback (Tobias 2026-05-03)", () => {
+    it("DISCONNECTED enters error state immediately with reload-on-click text", () => {
       overlay = new LoadingOverlay(container);
       overlay.setState("DISCONNECTED");
-      const btn = container.querySelector("button")!;
-      expect(btn.style.display).toBe("inline-block");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      expect(root.classList.contains(ERROR_CLASS)).toBe(true);
+      expect(overlay.isInErrorState()).toBe(true);
+      expect(container.textContent).toContain(ERROR_TEXT);
     });
 
-    it("transitioning to READY hides reload button + cancels stuck-timer", () => {
+    it("non-DISCONNECTED states do NOT immediately show error fallback", () => {
+      overlay = new LoadingOverlay(container, { stuckThresholdMs: 5000 });
+      overlay.setState("RECONNECTING");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      expect(root.classList.contains(ERROR_CLASS)).toBe(false);
+      expect(overlay.isInErrorState()).toBe(false);
+    });
+
+    it("error fallback appears after stuckThresholdMs for recoverable states", () => {
+      overlay = new LoadingOverlay(container, { stuckThresholdMs: 5000 });
+      overlay.setState("RECONNECTING");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+
+      expect(root.classList.contains(ERROR_CLASS)).toBe(false);
+      vi.advanceTimersByTime(4999);
+      expect(root.classList.contains(ERROR_CLASS)).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(root.classList.contains(ERROR_CLASS)).toBe(true);
+      expect(container.textContent).toContain(ERROR_TEXT);
+    });
+
+    it("transitioning to READY clears the error state + cancels stuck-timer", () => {
       overlay = new LoadingOverlay(container, { stuckThresholdMs: 1000 });
       overlay.setState("RECONNECTING");
       vi.advanceTimersByTime(1001);
-      const btn = container.querySelector("button")!;
-      expect(btn.style.display).toBe("inline-block");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      expect(root.classList.contains(ERROR_CLASS)).toBe(true);
 
       overlay.setState("READY");
-      expect(btn.style.display).toBe("none");
+      expect(root.classList.contains(ERROR_CLASS)).toBe(false);
+      expect(overlay.isInErrorState()).toBe(false);
+    });
+
+    it("transitioning to a recoverable state clears any prior error state", () => {
+      overlay = new LoadingOverlay(container);
+      overlay.setState("DISCONNECTED");
+      expect(overlay.isInErrorState()).toBe(true);
+
+      overlay.setState("RECONNECTING");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      expect(root.classList.contains(ERROR_CLASS)).toBe(false);
+      expect(overlay.isInErrorState()).toBe(false);
     });
 
     it("new setState resets the stuck-timer", () => {
@@ -121,19 +151,57 @@ describe("LoadingOverlay state-machine (BIN-673)", () => {
       vi.advanceTimersByTime(4000);
       overlay.setState("JOINING_ROOM"); // resets timer
       vi.advanceTimersByTime(4000); // total 8s, but only 4s into new timer
-      const btn = container.querySelector("button")!;
-      expect(btn.style.display).toBe("none");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      expect(root.classList.contains(ERROR_CLASS)).toBe(false);
       vi.advanceTimersByTime(1000); // now hits 5s
-      expect(btn.style.display).toBe("inline-block");
+      expect(root.classList.contains(ERROR_CLASS)).toBe(true);
     });
 
-    it("reload button click invokes onReload callback", () => {
+    it("clicking the overlay in error state invokes onReload", () => {
       const onReload = vi.fn();
       overlay = new LoadingOverlay(container, { stuckThresholdMs: 100, onReload });
       overlay.setState("CONNECTING");
       vi.advanceTimersByTime(101);
-      const btn = container.querySelector("button") as HTMLButtonElement;
-      btn.click();
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      root.click();
+      expect(onReload).toHaveBeenCalledOnce();
+    });
+
+    it("clicks while in non-error state do NOT trigger reload", () => {
+      const onReload = vi.fn();
+      overlay = new LoadingOverlay(container, { onReload });
+      overlay.setState("CONNECTING");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      root.click();
+      expect(onReload).not.toHaveBeenCalled();
+    });
+
+    it("setError() jumps directly to the error fallback with a custom message", () => {
+      const onReload = vi.fn();
+      overlay = new LoadingOverlay(container, { onReload });
+      overlay.setError("Tilkobling mislyktes — trykk for å laste på nytt");
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      expect(root.classList.contains(ERROR_CLASS)).toBe(true);
+      expect(container.textContent).toContain("Tilkobling mislyktes");
+      root.click();
+      expect(onReload).toHaveBeenCalledOnce();
+    });
+
+    it("setError() with no arg uses the Tobias-direktiv default message", () => {
+      overlay = new LoadingOverlay(container);
+      overlay.setError();
+      expect(container.textContent).toContain(ERROR_TEXT);
+    });
+
+    it("setError() cancels any pending stuck-timer (no double-fire)", () => {
+      const onReload = vi.fn();
+      overlay = new LoadingOverlay(container, { stuckThresholdMs: 1000, onReload });
+      overlay.setState("RECONNECTING");
+      overlay.setError();
+      vi.advanceTimersByTime(2000);
+      // Should not double-flag — just one click should still resolve to one reload.
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      root.click();
       expect(onReload).toHaveBeenCalledOnce();
     });
   });
@@ -159,9 +227,9 @@ describe("LoadingOverlay state-machine (BIN-673)", () => {
     it("destroy() removes the backdrop from DOM", () => {
       overlay = new LoadingOverlay(container);
       overlay.setState("CONNECTING");
-      expect(container.querySelector("div")).toBeTruthy();
+      expect(container.querySelector(".spillorama-loading-overlay")).toBeTruthy();
       overlay.destroy();
-      expect(container.querySelector("div")).toBeFalsy();
+      expect(container.querySelector(".spillorama-loading-overlay")).toBeFalsy();
     });
 
     it("destroy() cancels pending stuck-timer", () => {
@@ -169,9 +237,21 @@ describe("LoadingOverlay state-machine (BIN-673)", () => {
       overlay.setState("RECONNECTING");
       overlay.destroy();
       vi.advanceTimersByTime(2000); // would have fired — but destroy cancelled it
-      // No button to find since overlay was destroyed — if timer had fired it
-      // would have thrown trying to access this.reloadBtn.
-      expect(container.querySelector("button")).toBeFalsy();
+      // After destroy the overlay is gone, so we can't query it from the
+      // container — but the timer's callback would have thrown if it ran
+      // (would try to access this.backdrop after removal).
+      expect(container.querySelector(".spillorama-loading-overlay")).toBeFalsy();
+    });
+
+    it("destroy() removes the click listener so subsequent clicks no-op", () => {
+      const onReload = vi.fn();
+      overlay = new LoadingOverlay(container, { onReload });
+      overlay.setError();
+      const root = container.querySelector(".spillorama-loading-overlay") as HTMLElement;
+      overlay.destroy();
+      // Element is detached — clicking it after destroy should not reload.
+      root.click();
+      expect(onReload).not.toHaveBeenCalled();
     });
   });
 });

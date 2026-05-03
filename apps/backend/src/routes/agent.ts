@@ -10,11 +10,18 @@
  *   POST /api/agent/auth/change-avatar    — sett avatar-filnavn
  *   POST /api/agent/auth/update-language  — språk (nb/nn/en/sv/da)
  *   POST /api/agent/shift/start           — åpne shift i valgt hall
- *   POST /api/agent/shift/end             — avslutt aktiv shift
+ *   POST /api/agent/shift/end             — avslutt aktiv shift  *
  *   GET  /api/agent/shift/current         — hent aktiv shift
  *   GET  /api/agent/shift/history         — paginert shift-logg
- *   POST /api/agent/shift/logout          — Gap #9: logout med checkbox-flagg
+ *   POST /api/agent/shift/logout          — Gap #9: logout med checkbox-flagg  *
  *   GET  /api/agent/shift/pending-cashouts — Gap #9: pending cashouts for logout-modal
+ *
+ *   * P0-2 (REGULATORISK — pengespillforskriften): /shift/end OG /shift/logout
+ *     blokkerer terminering hvis det ikke finnes en `app_shift_settlements`-rad
+ *     for inneværende skift. Klienten må først kalle /shift/close-day
+ *     (createAgentSettlementRouter) for å fullføre Settlement Report. Hvis
+ *     blokkert, returneres 400 SETTLEMENT_REQUIRED_BEFORE_LOGOUT og
+ *     audit-event `agent.shift.terminate_blocked_no_settlement` skrives.
  *
  * Audit-log-hooks:
  *   - Alle handlinger logges via AuditLogService med actor_type='AGENT'
@@ -22,6 +29,8 @@
  *   - Avatar-endring i B3.1 lagrer kun filnavn; selve filopplasting er
  *     admin-flyt (SFTP/S3). Ports legacy agentChangeAvatar som "set
  *     avatar-reference", ikke multipart-upload.
+ *   - P0-2: `agent.shift.terminate_blocked_no_settlement` skrives ved hver
+ *     blokkert /shift/end- eller /shift/logout-request — Lotteritilsynet-bevis.
  */
 
 import express from "express";
@@ -29,6 +38,7 @@ import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, UserRole } from "../platform/PlatformService.js";
 import type { AgentService } from "../agent/AgentService.js";
 import type { AgentShiftService } from "../agent/AgentShiftService.js";
+import type { AgentSettlementService } from "../agent/AgentSettlementService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import {
   apiSuccess,
@@ -46,6 +56,15 @@ export interface AgentRouterDeps {
   agentService: AgentService;
   agentShiftService: AgentShiftService;
   auditLogService: AuditLogService;
+  /**
+   * P0-2 (REGULATORISK — pengespillforskriften): brukes til å verifisere at
+   * det finnes en `app_shift_settlements`-rad for inneværende skift FØR
+   * `/shift/end` eller `/shift/logout` får terminere skiftet. Optional for
+   * backwards-compat med test-rigger som ikke trenger settlement-enforcement;
+   * produksjon (apps/backend/src/index.ts) skal alltid injisere denne. Hvis
+   * `undefined`, hopp over enforcement (legacy-modus, kun i unit-tester).
+   */
+  agentSettlementService?: AgentSettlementService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -62,7 +81,13 @@ function userAgent(req: express.Request): string | null {
 }
 
 export function createAgentRouter(deps: AgentRouterDeps): express.Router {
-  const { platformService, agentService, agentShiftService, auditLogService } = deps;
+  const {
+    platformService,
+    agentService,
+    agentShiftService,
+    auditLogService,
+    agentSettlementService,
+  } = deps;
   const router = express.Router();
 
   async function requireAgent(req: express.Request): Promise<{
@@ -78,6 +103,49 @@ export function createAgentRouter(deps: AgentRouterDeps): express.Router {
     // Defense-in-depth: deaktivert agent skal ikke ha gyldig tilgang.
     await agentService.requireActiveAgent(user.id);
     return { userId: user.id, role: user.role, email: user.email };
+  }
+
+  /**
+   * P0-2 (REGULATORISK — pengespillforskriften): kontrollerer at skiftet har
+   * en `app_shift_settlements`-rad før termination tillates. Audit-logger
+   * blokkering så Lotteritilsynet kan se at vi enforcer kravet.
+   *
+   * Returnerer hvis settlement finnes ELLER hvis service ikke er injisert
+   * (legacy-modus for tester). Kaster `SETTLEMENT_REQUIRED_BEFORE_LOGOUT`
+   * hvis settlement mangler.
+   */
+  async function requireSettlementBeforeTermination(
+    req: express.Request,
+    actor: { userId: string; role: UserRole },
+    shiftId: string,
+    routeAction: string
+  ): Promise<void> {
+    if (!agentSettlementService) {
+      // Legacy-modus / test-rigg uten settlement-tjeneste — hopp over.
+      return;
+    }
+    const settlement = await agentSettlementService.getSettlementByShiftId(shiftId);
+    if (settlement) {
+      return; // settlement finnes — termination kan fortsette
+    }
+    // Audit fail-closed: regulatorisk-bevis på at vi blokkerte.
+    void auditLogService.record({
+      actorId: actor.userId,
+      actorType: "AGENT",
+      action: "agent.shift.terminate_blocked_no_settlement",
+      resource: "shift",
+      resourceId: shiftId,
+      details: {
+        attemptedRoute: routeAction,
+        reason: "settlement_required_before_logout",
+      },
+      ipAddress: clientIp(req),
+      userAgent: userAgent(req),
+    });
+    throw new DomainError(
+      "SETTLEMENT_REQUIRED_BEFORE_LOGOUT",
+      "Du må fullføre Settlement (POST /api/agent/shift/close-day) før du kan logge ut. Pengespillforskriften krever skift-oppgjør før termination."
+    );
   }
 
   // ── POST /api/agent/auth/login ──────────────────────────────────────────
@@ -308,6 +376,11 @@ export function createAgentRouter(deps: AgentRouterDeps): express.Router {
   });
 
   // ── POST /api/agent/shift/end ───────────────────────────────────────────
+  // P0-2 (REGULATORISK — pengespillforskriften): blokkerer hvis settlement
+  // mangler. Agenten må først kalle POST /api/agent/shift/close-day for å
+  // fullføre Settlement Report. Returnerer 400 SETTLEMENT_REQUIRED_BEFORE_LOGOUT
+  // og skriver audit-event `agent.shift.terminate_blocked_no_settlement` ved
+  // blokkering (Lotteritilsynet-bevis).
   router.post("/api/agent/shift/end", async (req, res) => {
     try {
       const actor = await requireAgent(req);
@@ -318,6 +391,13 @@ export function createAgentRouter(deps: AgentRouterDeps): express.Router {
       if (!active) {
         throw new DomainError("NO_ACTIVE_SHIFT", "Du har ingen aktiv shift.");
       }
+      // P0-2: blokker hvis settlement mangler.
+      await requireSettlementBeforeTermination(
+        req,
+        { userId: actor.userId, role: actor.role },
+        active.id,
+        "POST /api/agent/shift/end"
+      );
       const ended = await agentShiftService.endShift({
         shiftId: active.id,
         actor: { userId: actor.userId, role: actor.role },
@@ -380,6 +460,11 @@ export function createAgentRouter(deps: AgentRouterDeps): express.Router {
   // Uten flagg = backwards-compat med eksisterende /shift/end-flyt. Med
   // flagg = pending cashouts og/eller ticket-ranges merkes for overtagelse
   // av neste agent.
+  //
+  // P0-2 (REGULATORISK — pengespillforskriften): blokkerer hvis settlement
+  // mangler. Samme regulatoriske kontrakt som /shift/end over — agent må
+  // først kalle /shift/close-day. Audit-event
+  // `agent.shift.terminate_blocked_no_settlement` skrives ved blokkering.
   router.post("/api/agent/shift/logout", async (req, res) => {
     try {
       const actor = await requireAgent(req);
@@ -404,6 +489,19 @@ export function createAgentRouter(deps: AgentRouterDeps): express.Router {
           ? body.logoutNotes.slice(0, 1000)
           : null;
       }
+      // P0-2 (REGULATORISK): blokker hvis settlement mangler. Slår opp aktiv
+      // shift først for å få shiftId; service.logout gjør samme oppslag, men
+      // vi trenger ID for settlement-sjekken.
+      const active = await agentShiftService.getCurrentShift(actor.userId);
+      if (!active) {
+        throw new DomainError("NO_ACTIVE_SHIFT", "Du har ingen aktiv shift.");
+      }
+      await requireSettlementBeforeTermination(
+        req,
+        { userId: actor.userId, role: actor.role },
+        active.id,
+        "POST /api/agent/shift/logout"
+      );
       const result = await agentShiftService.logout(actor.userId, flags);
       void auditLogService.record({
         actorId: actor.userId,

@@ -22,12 +22,15 @@ import {
   closeAgentTicketRange,
   type AgentTicketRangeRow,
 } from "../../api/admin-physical-tickets.js";
+import { listHalls, type AdminHall } from "../../api/dashboard.js";
+import { ApiError } from "../../api/client.js";
 import { mapPhysicalTicketErrorMessage } from "./errorMap.js";
 import { boxClose, boxOpen, contentHeader, escapeHtml } from "./shared.js";
 
 interface PageState {
   ranges: AgentTicketRangeRow[];
   hallId: string | null;
+  halls: AdminHall[];
   loading: boolean;
 }
 
@@ -39,6 +42,7 @@ export function renderActiveRangesPage(container: HTMLElement): void {
   const state: PageState = {
     ranges: [],
     hallId: operatorHallId,
+    halls: [],
     loading: false,
   };
 
@@ -46,6 +50,14 @@ export function renderActiveRangesPage(container: HTMLElement): void {
     ${contentHeader("pt_active_ranges_title")}
     <section class="content">
       ${boxOpen("pt_active_ranges_title", "primary")}
+        <div class="row" style="margin-bottom:12px;">
+          <div class="col-sm-4" id="ar-hall-row" style="display:${isAdmin ? "block" : "none"};">
+            <label class="control-label" for="ar-hall">${escapeHtml(t("select_hall"))}</label>
+            <select id="ar-hall" class="form-control">
+              <option value="">${escapeHtml(t("select_hall_name"))}</option>
+            </select>
+          </div>
+        </div>
         <div id="ar-toolbar" style="margin-bottom:10px;">
           <button type="button" class="btn btn-default btn-sm" id="ar-refresh" data-action="refresh">
             <i class="fa fa-refresh" aria-hidden="true"></i> ${escapeHtml(t("refresh"))}
@@ -55,16 +67,22 @@ export function renderActiveRangesPage(container: HTMLElement): void {
       ${boxClose()}
     </section>`;
 
+  const hallSelect = container.querySelector<HTMLSelectElement>("#ar-hall");
   const tableHost = container.querySelector<HTMLElement>("#ar-table")!;
   const refreshBtn = container.querySelector<HTMLButtonElement>("#ar-refresh")!;
 
   async function refresh(): Promise<void> {
+    // ADMIN må velge hall — backend krever agentId ELLER hallId.
+    // HALL_OPERATOR har auto-scope via session.hall[0].id (operatorHallId).
+    if (!state.hallId) {
+      tableHost.innerHTML = `<div class="callout callout-info" style="margin:0;">${escapeHtml(t("hall_scope_required"))}</div>`;
+      state.ranges = [];
+      return;
+    }
     state.loading = true;
     tableHost.textContent = t("loading_ellipsis");
     try {
-      const res = await listAgentTicketRanges(
-        state.hallId ? { hallId: state.hallId } : {}
-      );
+      const res = await listAgentTicketRanges({ hallId: state.hallId });
       state.ranges = res.ranges;
       renderTable();
     } catch (err) {
@@ -171,7 +189,30 @@ export function renderActiveRangesPage(container: HTMLElement): void {
 
   refreshBtn.addEventListener("click", () => void refresh());
 
-  void refresh();
+  if (hallSelect) {
+    hallSelect.addEventListener("change", () => {
+      state.hallId = hallSelect.value || null;
+      void refresh();
+    });
+  }
+
+  void (async () => {
+    if (isAdmin && hallSelect) {
+      try {
+        state.halls = await listHalls();
+        for (const h of state.halls) {
+          const opt = document.createElement("option");
+          opt.value = h.id;
+          opt.textContent = h.name;
+          hallSelect.append(opt);
+        }
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+        Toast.error(msg);
+      }
+    }
+    await refresh();
+  })();
 }
 
 function colorKey(color: AgentTicketRangeRow["ticketColor"]): string {

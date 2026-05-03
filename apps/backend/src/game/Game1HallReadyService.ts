@@ -159,6 +159,25 @@ export interface SweepStaleReadyResult {
   revertedRows: Array<{ gameId: string; hallId: string }>;
 }
 
+/**
+ * 2026-05-02: input til `setExcludedForHall`. Bingovert markerer egen
+ * hall som "Ingen kunder" (excluded=true) eller "Har kunder igjen"
+ * (excluded=false). Master-actor-sjekken er ikke i service-laget;
+ * caller (route) er ansvarlig for permission + hall-scope.
+ */
+export interface SetExcludedForHallInput {
+  gameId: string;
+  hallId: string;
+  excluded: boolean;
+  /**
+   * Påkrevd når `excluded=true`. Kort fritekst som persistert i
+   * `excluded_reason` for audit. Default-bruk: "Ingen kunder".
+   */
+  reason?: string;
+  /** userId for actor som triggerer endringen (for logging). */
+  actorUserId: string;
+}
+
 export interface Game1HallReadyServiceOptions {
   pool: Pool;
   schema?: string;
@@ -231,10 +250,12 @@ export class Game1HallReadyService {
    */
   async markReady(input: MarkReadyInput): Promise<HallReadyStatusRow> {
     const game = await this.loadScheduledGame(input.gameId);
-    if (game.status !== "purchase_open") {
+    // 2026-05-03 (Tobias UX): tillat også 'scheduled' så agenter kan
+    // markere klar tidlig (før cron promoter til 'purchase_open').
+    if (game.status !== "scheduled" && game.status !== "purchase_open") {
       throw new DomainError(
         "GAME_NOT_READY_ELIGIBLE",
-        `Kan kun markere klar for spill i status 'purchase_open' (nåværende: '${game.status}').`
+        `Kan kun markere klar for spill i status 'scheduled' eller 'purchase_open' (nåværende: '${game.status}').`
       );
     }
     const participating = parseHallIdsArray(game.participating_halls_json);
@@ -302,10 +323,12 @@ export class Game1HallReadyService {
    */
   async unmarkReady(input: UnmarkReadyInput): Promise<HallReadyStatusRow> {
     const game = await this.loadScheduledGame(input.gameId);
-    if (game.status !== "purchase_open") {
+    // 2026-05-03 (Tobias UX): tillat også 'scheduled' så agenter kan
+    // angre klar tidlig (før cron promoter til 'purchase_open').
+    if (game.status !== "scheduled" && game.status !== "purchase_open") {
       throw new DomainError(
         "GAME_NOT_READY_ELIGIBLE",
-        `Kan kun angre klar for spill i status 'purchase_open' (nåværende: '${game.status}').`
+        `Kan kun angre klar for spill i status 'scheduled' eller 'purchase_open' (nåværende: '${game.status}').`
       );
     }
 
@@ -641,6 +664,75 @@ export class Game1HallReadyService {
       "[REQ-007] hall ready forcibly reverted"
     );
     return mapRowToStatus(row);
+  }
+
+  /**
+   * 2026-05-02: bingovert merker egen hall som "Ingen kunder" (excluded=true)
+   * eller un-eksluderer hallen ("Har kunder"). Brukes fra cash-inout-
+   * dashboardet sammen med markReady/unmarkReady. Setter også
+   * `is_ready=false` ved exclude=true (en ekskludert hall kan ikke samtidig
+   * være "klar"), og lar `is_ready` være urørt ved exclude=false (master
+   * må eksplisitt re-bekrefte ready hvis ønskelig).
+   *
+   * Caller (route-laget) er ansvarlig for permission + hall-scope. Service
+   * gjør INGEN master-validering — agent merker egen hall.
+   *
+   * Idempotent: hvis raden ikke finnes opprettes den; hvis allerede i ønsket
+   * state oppdateres updated_at men resultatet er identisk.
+   */
+  async setExcludedForHall(
+    input: SetExcludedForHallInput
+  ): Promise<HallReadyStatusRow> {
+    const reason = input.excluded ? (input.reason?.trim() || "Ingen kunder") : null;
+    if (input.excluded) {
+      const { rows } = await this.pool.query(
+        `INSERT INTO ${this.hallReadyTable()}
+           (game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+            digital_tickets_sold, physical_tickets_sold,
+            excluded_from_game, excluded_reason)
+         VALUES ($1, $2, false, NULL, NULL, 0, 0, true, $3)
+         ON CONFLICT (game_id, hall_id) DO UPDATE
+           SET is_ready             = false,
+               ready_at             = NULL,
+               ready_by_user_id     = NULL,
+               excluded_from_game   = true,
+               excluded_reason      = EXCLUDED.excluded_reason,
+               updated_at           = now()
+         RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+                   digital_tickets_sold, physical_tickets_sold,
+                   excluded_from_game, excluded_reason, created_at, updated_at,
+                   start_ticket_id, start_scanned_at,
+                   final_scan_ticket_id, final_scanned_at`,
+        [input.gameId, input.hallId, reason]
+      );
+      log.info(
+        { gameId: input.gameId, hallId: input.hallId, actor: input.actorUserId, reason },
+        "hall.excluded (no-customers)"
+      );
+      return mapRowToStatus(rows[0]!);
+    }
+    const { rows } = await this.pool.query(
+      `INSERT INTO ${this.hallReadyTable()}
+         (game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+          digital_tickets_sold, physical_tickets_sold,
+          excluded_from_game, excluded_reason)
+       VALUES ($1, $2, false, NULL, NULL, 0, 0, false, NULL)
+       ON CONFLICT (game_id, hall_id) DO UPDATE
+         SET excluded_from_game = false,
+             excluded_reason    = NULL,
+             updated_at         = now()
+       RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+                 digital_tickets_sold, physical_tickets_sold,
+                 excluded_from_game, excluded_reason, created_at, updated_at,
+                 start_ticket_id, start_scanned_at,
+                 final_scan_ticket_id, final_scanned_at`,
+      [input.gameId, input.hallId]
+    );
+    log.info(
+      { gameId: input.gameId, hallId: input.hallId, actor: input.actorUserId },
+      "hall.included (has-customers)"
+    );
+    return mapRowToStatus(rows[0]!);
   }
 
   /**

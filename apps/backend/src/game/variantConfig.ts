@@ -130,7 +130,7 @@ export interface GameVariantConfig {
   };
   /**
    * BIN-615 / PR-C1: Maximum ball value (inclusive) for this variant.
-   * Standard/Elvis/TrafficLight = 60, Bingo75 = 75, Game 2 Rocket/Tallspill = 21.
+   * Standard/Elvis/TrafficLight = 60, Bingo75 = 75, Game 2 (Tallspill) = 21.
    * Falls back to gameSlug-derived default when omitted (keeps existing configs valid).
    */
   maxBallValue?: number;
@@ -382,7 +382,7 @@ export const DEFAULT_TRAFFIC_LIGHT_CONFIG: GameVariantConfig = {
 };
 
 /**
- * BIN-615 / PR-C2: Game 2 (Rocket/Tallspill) default variant config.
+ * BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) default variant config.
  *
  * - Single 3×3-ticket type, priceMultiplier=1 (legacy G2 uses flat ticket price)
  * - 1..21 drawbag, max 21 draws (Helper/bingo.js:996-1012, GameProcess.js:167,175)
@@ -394,43 +394,77 @@ export const DEFAULT_TRAFFIC_LIGHT_CONFIG: GameVariantConfig = {
  */
 export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
   ticketTypes: [
-    { name: "Rocket", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 },
+    { name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 },
   ],
   patterns: [],
   maxBallValue: 21,
   drawBagSize: 21,
   patternEvalMode: "auto-claim-on-draw",
+  // 2026-05-03 (Tobias-direktiv): stigende-jackpot-skala portert fra
+  // legacy `seed_staging_lobby_bootstrap.js`. Filosofi: spillere belønnes
+  // for tålmodighet — sent vinst gir større jackpot. Hver hall kan
+  // overstyre via `hall_game_schedules.variant_config` JSONB.
+  // Slot-semantikk: nøkkel = exact draw-count når full plate vinnes;
+  // "1421" matcher draw-count i [14..21]-intervallet.
   jackpotNumberTable: {
-    "9":    { price: 25000, isCash: true },
-    "1421": { price: 5,     isCash: false }, // 5% of (ticketCount × ticketPrice)
+    "9":    { price: 50,   isCash: true },
+    "10":   { price: 100,  isCash: true },
+    "11":   { price: 250,  isCash: true },
+    "12":   { price: 500,  isCash: true },
+    "13":   { price: 1000, isCash: true },
+    "1421": { price: 2500, isCash: true },
   },
 };
 
 /**
- * BIN-615 / PR-C3b: Game 3 (Mønsterbingo) default variant config.
+ * 2026-05-03 (Tobias-direktiv revert): Game 3 (Mønsterbingo / Spill 3) default
+ * variant config — **5×5 1..75 uten fri sentercelle**, med Row 1-4 + Coverall
+ * patterns. Visuelt og funksjonelt likt Spill 1, MEN med kun ÉN ticket-type
+ * (ikke 8 farger).
  *
- * - 5×5 1..75 tickets (no free centre) — see `generate5x5NoCenterTicket`
- * - maxBallValue=75, drawBagSize=75 (Helper/bingo.js:1014-1031, gamehelper/game3.js:663)
- * - patternEvalMode="auto-claim-on-draw" — Game3Engine auto-claims per draw
- * - Patterns: Row 1-4 (10% each) + Full House / Coverall (60%). Real halls
- *   override this with admin-defined patterns including custom 25-bit masks.
- * - No `jackpotNumberTable` — distinguishes G3 from G2 in the guard path.
+ * - **5×5-tickets uten free-center**, 25 unike tall fra 1..75 fordelt per
+ *   B/I/N/G/O-kolonne — `generate5x5NoCenterTicket`
+ * - **maxBallValue=75**, drawBagSize=75 — samme range som Spill 1
+ * - **patternEvalMode="auto-claim-on-draw"** — Game3Engine auto-evaluerer
+ *   patterns per trekning (Row 1-4 deaktiveres ved `ballNumberThreshold`,
+ *   Coverall lukker runden)
+ * - **ÉN ticket-type** ("Standard") — i kontrast til Spill 1's 8 farger.
+ *   Per Tobias-direktiv 2026-05-03: "alt av design skal være likt bare at
+ *   her er det kun 1 type bonger og man spiller om mønstre."
+ * - **5 patterns**: Row 1 (10%), Row 2 (10%), Row 3 (10%), Row 4 (10%),
+ *   Full House / Coverall (60%). Ball-thresholds 15/25/40/55 for Row 1-4;
+ *   Full House har ingen threshold.
  *
- * Legacy ref: gamehelper/game3.js:663-708 (`createGameData`), Helper/bingo.js:
- * 1197-1356 (per-ticket pattern pre-compute).
+ * Historikk:
+ *   - BIN-615 / PR-C3b (2026-04-23): innført 5×5 + 5 patterns
+ *   - PR #860 (2026-05-03): kortvarig portet til 3×3 + Coverall-only
+ *   - Denne PR (2026-05-03): revertert til 5×5 + 75-ball + 5 patterns,
+ *     men med kun 1 ticket-type per Tobias-direktiv
+ *
+ * Perpetual loop (PR #863 + #868) er fortsatt aktiv: når Coverall vinnes
+ * signaliserer engine `endedReason: "G3_FULL_HOUSE"` og PerpetualRoundService
+ * scheduler ny runde automatisk.
+ *
+ * Per Tobias 2026-05-03 (revert-direktiv):
+ *   "Jeg ser at jeg har tatt feil for spill 3. dette er gjeldene regler:
+ *    75 baller og 5x5 bonger uten free i midten. Så det du kan gjøre her
+ *    er å duplisere spill 1 så kan vi endre når det er gjort. Alt av design
+ *    skal være likt bare at her er det kun 1 type bonger og man spiller om
+ *    mønstre. Logikken med å trekke baller og markere bonger er fortsatt
+ *    helt lik."
  */
 export const DEFAULT_GAME3_CONFIG: GameVariantConfig = {
+  // Single ticket-type — alle bonger er identiske "Standard". Dette er det
+  // ENESTE som skiller G3 fra Spill 1 (som har 8 farger). Engine + ticket
+  // generator håndterer dette via `generate5x5NoCenterTicket`.
   ticketTypes: [
-    ...DEFAULT_TICKET_COLORS.map((name) => ({
-      name, type: "small", priceMultiplier: 1, ticketCount: 1,
-    })),
-    { name: "Large Yellow", type: "large", priceMultiplier: 3, ticketCount: 3 },
+    { name: "Standard", type: "monsterbingo-5x5", priceMultiplier: 1, ticketCount: 1 },
   ],
   patterns: [
-    { name: "Row 1", claimType: "LINE" as const, prizePercent: 10, design: 1, ballNumberThreshold: 15 },
-    { name: "Row 2", claimType: "LINE" as const, prizePercent: 10, design: 2, ballNumberThreshold: 25 },
-    { name: "Row 3", claimType: "LINE" as const, prizePercent: 10, design: 3, ballNumberThreshold: 40 },
-    { name: "Row 4", claimType: "LINE" as const, prizePercent: 10, design: 4, ballNumberThreshold: 55 },
+    { name: "Row 1",      claimType: "LINE"  as const, prizePercent: 10, design: 1, ballNumberThreshold: 15 },
+    { name: "Row 2",      claimType: "LINE"  as const, prizePercent: 10, design: 2, ballNumberThreshold: 25 },
+    { name: "Row 3",      claimType: "LINE"  as const, prizePercent: 10, design: 3, ballNumberThreshold: 40 },
+    { name: "Row 4",      claimType: "LINE"  as const, prizePercent: 10, design: 4, ballNumberThreshold: 55 },
     { name: "Full House", claimType: "BINGO" as const, prizePercent: 60, design: 0 },
   ],
   maxBallValue: 75,
@@ -445,12 +479,13 @@ export function getDefaultVariantConfig(gameType: string): GameVariantConfig {
   switch (gameType) {
     case "elvis": return DEFAULT_ELVIS_CONFIG;
     case "traffic-light": return DEFAULT_TRAFFIC_LIGHT_CONFIG;
-    // BIN-615 / PR-C2: Game 2 Rocket/Tallspill — 3x3 + 1..21 drawbag
+    // BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) — 3x3 + 1..21 drawbag
     case "game_2":
     case "rocket":
     case "tallspill":
       return DEFAULT_GAME2_CONFIG;
-    // BIN-615 / PR-C3b: Game 3 Mønsterbingo — 5×5 no-centre + 1..75 drawbag
+    // BIN-615 / PR-C3b (revertert 2026-05-03): Game 3 Mønsterbingo — 5×5 no-
+    // centre + 1..75 drawbag, ÉN ticket-type ("Standard"), Row 1-4 + Full House.
     case "game_3":
     case "monsterbingo":
     case "mønsterbingo":

@@ -15,8 +15,8 @@ Spillorama driver **fire interne spill** og integrerer **ett eksternt** spill vi
 | Markedsføringsnavn | Regulatorisk kategori | Trekningsmodus | Backend-slug | Legacy kodenavn | Grid | Ball-range | Spesielle mekanikker |
 |---|---|---|---|---|---|---|---|
 | **Spill 1** (Hovedspill 1) | Hovedspill | Live (hall + internett) | `bingo` | Game 1 / `game1` | 5×5 (fri sentercelle) | 1–75 | Mini-game-rotasjon: Wheel of Fortune, Treasure Chest, Mystery, ColorDraft |
-| **Spill 2** (Hovedspill 2) | Hovedspill | Live (hall + internett) | `rocket` | Game 2 / `game2` | 3×5 | 1–60 | Rakettstabling, paginering, blind ticket purchase |
-| **Spill 3** (Hovedspill 3) | Hovedspill | Live (hall + internett) | `monsterbingo` | Game 3 / `game3` | 5×5 (fri sentercelle) | 1–60 | Animert kulekø (FIFO maks 5), mønsteranimasjon, chat |
+| **Spill 2** (Hovedspill 2) | Hovedspill | Live (hall + internett) | `rocket` | Game 2 / `game2` | 3×3 | 1–21 | Tallspill, Choose Tickets-side (32 brett), Jackpot-bar, Lucky Number, paginering |
+| **Spill 3** (Hovedspill 3) | Hovedspill | Live (internett, ETT globalt rom) | `monsterbingo` | Game 3 / `game3` | 5×5 (uten fri sentercelle) | 1–75 | Mønsterbingo: 5×5-bonger uten free, 75 baller, ÉN ticket-type ("Standard"), patterns Row 1-4 (10% hver, ball-thresholds 15/25/40/55) + Coverall (60%), perpetual loop, kulekø + chat. Visuelt likt Spill 1. Revertert 2026-05-03 etter PR #860 (Tobias-direktiv). |
 | **SpinnGo** (Spill 4) | **Databingo** | Player-startet (forhåndstrukket) | `spillorama` | Game 5 / `game5` / "Spillorama Bingo" | 3×5 | 1–60 | Ruletthjul, Free Spin Jackpot, SwapTicket — spiller starter selv, sekvenser med 30s minimums-mellomrom |
 | **Candy** | Ekstern (tredjeparts) | Tredjeparts | `candy` | — | — | — | Iframe-integrasjon med delt lommebok; logikk ligger hos Candy-leverandør |
 
@@ -127,8 +127,8 @@ Slug-er er stabile og skal ikke endres — det ville kreve DB-migrasjon av eksis
 
 ```
 Spill 1   = game1  = bingo         = Hovedspill, 75-ball 5×5
-Spill 2   = game2  = rocket        = Hovedspill, 60-ball 3×5
-Spill 3   = game3  = monsterbingo  = Hovedspill, 60-ball 5×5
+Spill 2   = game2  = rocket        = Hovedspill, 21-ball 3×3
+Spill 3   = game3  = monsterbingo  = Hovedspill, 75-ball 5×5 uten free, 1 ticket-type, Row 1-4 + Coverall (Tobias 2026-05-03 revert)
 SpinnGo   = game5  = spillorama    = Databingo, 60-ball 3×5 + rulett (player-startet)
 Candy     = —      = candy         = Ekstern iframe (tredjeparts)
 (Game 4   = game4  = themebingo    = DEPRECATED BIN-496, ikke bruk)

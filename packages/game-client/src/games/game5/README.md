@@ -49,7 +49,7 @@ Identisk med Game 2. Backend slug: `"spillorama"`.
 
 ### Hva er unikt for Game 5 vs Game 2
 
-| Aspekt | Game 2 (Rocket) | Game 5 (Spillorama) |
+| Aspekt | Game 2 (Tallspill) | Game 5 (Spillorama) |
 |--------|-----------------|---------------------|
 | Ruletthjul | Ingen | AnimatedRouletteWheel (høyreside) |
 | Layout | Tickets fullbredde | Tickets venstre, roulette høyre |

@@ -1,14 +1,15 @@
 // PR-A4a (BIN-645) — per-game report page render tests.
 //
-// Covers all 5 game reports + game history pages + subgames drill-down.
-// Uses stubbed fetch to verify DataTable mounts + filter-bar renders.
+// Covers all aktive game reports (Spill 1, 2, 3, 5/SpinnGo) + game history
+// pages + subgames drill-down. Spill 4 / themebingo (legacy game4) er
+// DEPRECATED (BIN-496) og har ingen rapport-rute. Uses stubbed fetch to
+// verify DataTable mounts + filter-bar renders.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { initI18n } from "../../src/i18n/I18n.js";
 import { renderGame1ReportPage } from "../../src/pages/reports/game1/Game1ReportPage.js";
 import { renderGame2ReportPage } from "../../src/pages/reports/game2/Game2ReportPage.js";
 import { renderGame3ReportPage } from "../../src/pages/reports/game3/Game3ReportPage.js";
-import { renderGame4ReportPage } from "../../src/pages/reports/game4/Game4ReportPage.js";
 import { renderGame5ReportPage } from "../../src/pages/reports/game5/Game5ReportPage.js";
 import { renderGame1SubgamesPage } from "../../src/pages/reports/game1/Game1SubgamesPage.js";
 import { renderGame1HistoryPage } from "../../src/pages/reports/game1/Game1HistoryPage.js";
@@ -51,12 +52,14 @@ describe("game report pages", () => {
     // Filter bar: date-range + CSV-button
     expect(c.querySelectorAll("input[type=date]").length).toBe(2);
     expect(c.querySelector(".datatable-csv-btn")).not.toBeNull();
-    // Host exists and table was mounted inside
-    expect(c.querySelector("#report-bingo-table table")).not.toBeNull();
+    // Host exists and table was mounted inside. Spill 1 sender gameSlug
+    // "MAIN_GAME" til backend (parseOptionalLedgerGameType godtar kun
+    // MAIN_GAME / DATABINGO).
+    expect(c.querySelector("#report-MAIN_GAME-table table")).not.toBeNull();
   });
 
-  it("Game2–5 report pages render with distinct titles", async () => {
-    for (const fn of [renderGame2ReportPage, renderGame3ReportPage, renderGame4ReportPage, renderGame5ReportPage]) {
+  it("Game2/3/5 report pages render with distinct titles", async () => {
+    for (const fn of [renderGame2ReportPage, renderGame3ReportPage, renderGame5ReportPage]) {
       const c = document.createElement("div");
       await fn(c);
       expect(c.querySelector(".content-header h1")).not.toBeNull();

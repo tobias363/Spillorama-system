@@ -260,6 +260,9 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
       platformService,
       masterControlService,
       hallReadyService,
+      hallGroupService: {
+        list: async () => [],
+      } as unknown as Parameters<typeof createAgentGame1Router>[0]["hallGroupService"],
       pool,
     })
   );

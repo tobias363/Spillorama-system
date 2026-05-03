@@ -581,8 +581,18 @@ export class HallGroupService {
   private async loadMembers(groupIds: string[]): Promise<Map<string, HallGroupMember[]>> {
     const map = new Map<string, HallGroupMember[]>();
     if (groupIds.length === 0) return map;
+    // BIN-665 introduserte `h.status AS hall_status` mens `app_halls`-skjemaet
+    // har `is_active` (boolean) — ikke `status`-kolonne. JOIN-en krasjet med
+    // "column h.status does not exist" så snart en gruppe faktisk hadde
+    // medlemmer (oppdaget 2026-05-01 mot prod-DB da `demo-pilot-goh` ble
+    // seedet med 4 medlemmer og /api/admin/ops/overview begynte å feile).
+    // Vi deriverer hallStatus fra is_active så HallSpecificReport/
+    // Game1ManagementReport's `member.hallStatus === "inactive"`-sjekk
+    // fortsatt fungerer.
     const { rows } = await this.pool.query<HallGroupMemberRow>(
-      `SELECT m.group_id, m.hall_id, h.name AS hall_name, h.status AS hall_status, m.added_at
+      `SELECT m.group_id, m.hall_id, h.name AS hall_name,
+              CASE WHEN h.is_active THEN 'active' ELSE 'inactive' END AS hall_status,
+              m.added_at
        FROM ${this.membersTable()} m
        INNER JOIN ${this.hallsTable()} h ON h.id = m.hall_id
        WHERE m.group_id = ANY($1::text[])

@@ -55,6 +55,8 @@ import {
   fetchAgentGame1CurrentGame,
   startAgentGame1,
   resumeAgentGame1,
+  markHallReadyForGame,
+  unmarkHallReadyForGame,
   type Spill1CurrentGameResponse,
 } from "../../api/agent-game1.js";
 import {
@@ -132,6 +134,14 @@ function initialState(): PanelState {
 let incomingTransferModal: import("../../components/Modal.js").ModalInstance | null =
   null;
 
+// 2026-05-01 (Tobias): unik marker per mount. Vi setter denne på containeren
+// ved mount, og sjekker den ved hver render/refresh. Hvis routeren har byttet
+// side (renderCashInOutPage osv. har erstattet innerHTML), er markøren borte
+// og vi auto-unmounter polling/sockets så panelet ikke fortsetter å overskrive
+// neste sides innhold hvert 5. sek.
+const PANEL_MARKER_ATTR = "data-next-game-panel-marker";
+let activePanelMarker: string | null = null;
+
 export function mountNextGamePanel(container: HTMLElement): void {
   unmountNextGamePanel();
   state = initialState();
@@ -139,6 +149,16 @@ export function mountNextGamePanel(container: HTMLElement): void {
   // FE-P0-003: fresh AbortController per mount. unmount() aborts it so
   // late fetch responses can't write state after the page is gone.
   pageAbort = new AbortController();
+
+  // Sett unik marker på container slik at vi kan oppdage at routeren har
+  // byttet ut innholdet med en annen side. crypto.randomUUID() er tilgjengelig
+  // i alle moderne nettlesere — fall-back til timestamp+random hvis ikke.
+  activePanelMarker =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  container.setAttribute(PANEL_MARKER_ATTR, activePanelMarker);
+
   render(container);
   void refresh();
   startPolling();
@@ -158,6 +178,22 @@ export function mountNextGamePanel(container: HTMLElement): void {
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
+}
+
+/**
+ * Sjekk om vår mount fortsatt eier denne containeren. Returnerer false
+ * hvis routeren har erstattet innholdet (markøren er borte eller har
+ * endret seg). Polling/refresh kaller denne før de skriver til DOM.
+ */
+function isStillMounted(): boolean {
+  if (!activeContainer || !activePanelMarker) return false;
+  const currentMarker = activeContainer.getAttribute(PANEL_MARKER_ATTR);
+  if (currentMarker !== activePanelMarker) {
+    // Routeren har overtatt containeren — auto-unmount.
+    unmountNextGamePanel();
+    return false;
+  }
+  return true;
 }
 
 async function initHallIdAndSocket(): Promise<void> {
@@ -181,12 +217,25 @@ export function unmountNextGamePanel(): void {
     pageAbort.abort();
     pageAbort = null;
   }
+  // Fjern marker fra container hvis den fortsatt er vår, slik at en ny
+  // mount av NextGamePanel på samme container starter med blank stat.
+  if (activeContainer && activePanelMarker) {
+    const currentMarker = activeContainer.getAttribute(PANEL_MARKER_ATTR);
+    if (currentMarker === activePanelMarker) {
+      activeContainer.removeAttribute(PANEL_MARKER_ATTR);
+    }
+  }
   activeContainer = null;
+  activePanelMarker = null;
 }
 
 function startPolling(): void {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
+    // Guard: auto-unmount hvis routeren har byttet side (FIX 2026-05-01).
+    // Uten dette ville polling-tick fortsette å overskrive containeren
+    // hvert 5. sek selv om brukeren har navigert til en annen side.
+    if (!isStillMounted()) return;
     void refresh();
   }, POLL_INTERVAL_MS);
 }
@@ -498,6 +547,8 @@ function pickActiveRoom(rooms: AgentRoomSummary[]): AgentRoomSummary | null {
 
 function rerender(): void {
   if (!activeContainer) return;
+  // Guard: auto-unmount hvis routeren har byttet side (FIX 2026-05-01).
+  if (!isStillMounted()) return;
   render(activeContainer);
 }
 
@@ -521,7 +572,39 @@ function render(container: HTMLElement): void {
 
 function renderSpill1Block(): string {
   const spill1 = state.spill1;
-  if (!spill1 || !spill1.currentGame) return "";
+  if (!spill1) return "";
+  // 2026-05-03 (Tobias UX): vis alltid hall-status for hallene i gruppen,
+  // selv når ingen runde er aktiv. Etter en runde ferdig fortsetter
+  // hallene å vises (oransje = ikke klar) så agenter har kontinuerlig
+  // oversikt over neste planlagte spill.
+  if (!spill1.currentGame) {
+    if (spill1.halls.length === 0) return "";
+    const hallPills = spill1.halls
+      .map((h) => {
+        const color = h.excludedFromGame
+          ? "#aaa"
+          : h.isReady
+          ? "#5cb85c"
+          : "#f0ad4e";
+        const label = escapeHtml(h.hallName);
+        return `<span style="display:inline-block;margin:4px 8px 4px 0;padding:4px 10px;border-radius:12px;background:${color};color:#fff;font-size:13px;">${label}</span>`;
+      })
+      .join("");
+    return `
+      <section data-marker="spill1-block-upcoming">
+        <div class="box box-default">
+          <div class="box-header with-border">
+            <h3 class="box-title">Spill 1 — venter på neste runde</h3>
+          </div>
+          <div class="box-body">
+            <p class="text-muted small" style="margin-bottom:8px;">
+              Hall-status for neste planlagte spill (oppdateres når runden spawnes).
+            </p>
+            <div data-marker="spill1-upcoming-hall-list">${hallPills}</div>
+          </div>
+        </div>
+      </section>`;
+  }
   const statusHtml = renderSpill1AgentStatus({
     currentGame: spill1.currentGame,
     halls: spill1.halls,
@@ -532,11 +615,16 @@ function renderSpill1Block(): string {
   const excludedHallIds = spill1.halls
     .filter((h) => h.excludedFromGame)
     .map((h) => h.hallId);
+  // 2026-05-02: Finn ready-status for agentens egen hall så Klar-knappen
+  // viser riktig label (Marker som Klar / Angre Klar).
+  const selfHall = spill1.halls.find((h) => h.hallId === spill1.hallId);
   const controlsHtml = renderSpill1AgentControls({
     currentGame: spill1.currentGame,
     isMasterAgent: spill1.isMasterAgent,
     allReady: spill1.allReady,
     excludedHallIds,
+    selfHallReady: selfHall?.isReady ?? false,
+    selfHallId: spill1.hallId,
   });
   const errorBanner = state.spill1Error
     ? `<div class="alert alert-warning" data-marker="spill1-error-banner">
@@ -584,6 +672,22 @@ function renderErrorBanner(): string {
 function renderNoRoom(): string {
   if (state.activeRoom) return "";
   if (state.lastFetchError) return "";
+  // 2026-05-02 (Tobias UX-feedback): skjul "Ingen aktivt bingo-rom"-meldingen
+  // når en scheduled Spill 1-game eksisterer i en aktiv state. Master har
+  // ikke startet rommet enda, og tomme-state-meldingen er forvirrende —
+  // brukeren ser allerede master-handlinger-boksen og venter på Start.
+  // Active states: purchase_open, ready_to_start, running, paused. Det er
+  // KUN når det ikke finnes scheduled-game OG ikke noe room at meldingen
+  // er reelt informativ ("kontakt systemansvarlig").
+  const spill1Status = state.spill1?.currentGame?.status;
+  if (
+    spill1Status === "purchase_open" ||
+    spill1Status === "ready_to_start" ||
+    spill1Status === "running" ||
+    spill1Status === "paused"
+  ) {
+    return "";
+  }
   return `
     <div class="box box-default" data-marker="agent-ng-no-room">
       <div class="box-body text-center" style="padding:32px;">
@@ -852,6 +956,41 @@ function wireSpill1Buttons(container: HTMLElement): void {
     "click",
     () => { void onSpill1Resume(); },
   );
+  // 2026-05-02: Klar/Angre-Klar-knapper for non-master agent
+  container.querySelector<HTMLButtonElement>('[data-action="spill1-mark-ready"]')?.addEventListener(
+    "click",
+    () => { void onSpill1MarkReady(); },
+  );
+  container.querySelector<HTMLButtonElement>('[data-action="spill1-unmark-ready"]')?.addEventListener(
+    "click",
+    () => { void onSpill1UnmarkReady(); },
+  );
+}
+
+async function onSpill1MarkReady(): Promise<void> {
+  const spill1 = state.spill1;
+  if (!spill1 || !spill1.currentGame || !spill1.hallId) return;
+  try {
+    await markHallReadyForGame(spill1.hallId, spill1.currentGame.id);
+    Toast.success("Hallen er nå markert som Klar.");
+    await refreshSpill1();
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+    Toast.error(`Kunne ikke markere som Klar: ${msg}`);
+  }
+}
+
+async function onSpill1UnmarkReady(): Promise<void> {
+  const spill1 = state.spill1;
+  if (!spill1 || !spill1.currentGame || !spill1.hallId) return;
+  try {
+    await unmarkHallReadyForGame(spill1.hallId, spill1.currentGame.id);
+    Toast.success("Hallen er nå markert som Ikke klar.");
+    await refreshSpill1();
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+    Toast.error(`Kunne ikke angre Klar: ${msg}`);
+  }
 }
 
 async function onSpill1Start(): Promise<void> {
