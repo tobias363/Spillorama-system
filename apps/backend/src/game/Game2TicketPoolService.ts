@@ -3,9 +3,10 @@
  * Spill 2. Hver spiller får 32 deterministiske 3×3-brett (1-21 ball-range)
  * generert med seedet PRNG basert på (roomCode + playerId + gameId).
  *
- * Persistens: in-memory Map for MVP. Pool er stabilt på tvers av page-
- * refreshes så lenge backend ikke restartes (gameId regenereres ved hver
- * BingoEngine.startGame, så pool fornyes per runde uansett).
+ * Persistens: in-memory cache + DB (`app_game2_ticket_pools`). DB er kilden
+ * — cache er kun for hot-path performance. Pool persisteres via UPSERT ved
+ * `getOrCreatePool` (initial generering) og `buy` (oppdaterte indices /
+ * pickAnyNumber). Pool-data overlever Render-restart.
  *
  * Wireframe-krav (side 5 note C):
  *   - Hver spiller får 32 forskjellige tilfeldige brett
@@ -13,13 +14,16 @@
  *   - Total max 30 brett per spiller per spill (delt grense med
  *     dropdown-kjøp i Lobby — håndheves i bet:arm-laget)
  *
- * v2-arbeid (deferred): integrasjon med BingoEngine.startGame slik at de
- * visuelt-valgte ticket-tallene faktisk matcher det som spilles. I denne
- * MVP-en vises 32 brett som deterministisk forhåndsvisning, men selve
- * spillet bruker tickets generert ved game-start. Tobias har akseptert
- * trade-off for pilot.
+ * v2/v3-arbeid (denne PR-en):
+ *   - DB-persistens via `app_game2_ticket_pools`-tabellen
+ *   - `getPurchasedGrids(roomCode, playerId, gameId)` → grids brukes som
+ *     `presetGrid` i `BingoSystemAdapter.createTicket` så de visuelt-valgte
+ *     brett MATCHER det som faktisk spilles av BingoEngine
+ *   - `deletePoolForGame(gameId)` cleanup ved spill-slutt
+ *   - `bet:arm`-kobling: POST /buy → armer player med `count = purchasedIndices.length`
  */
 
+import type { Pool as PgPool } from "pg";
 import type { Ticket } from "@spillorama/shared-types/game";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -30,7 +34,7 @@ const TICKET_CELLS = 9; // 3×3
 const BALL_MIN = 1;
 const BALL_MAX = 21;
 
-interface Pool {
+interface PoolState {
   /** 32 forhåndsgenererte 3×3-brett. */
   tickets: Ticket[];
   /** Indekser i `tickets` som er markert som kjøpt. */
@@ -60,8 +64,31 @@ export interface BuyChooseTicketsInput {
   pickAnyNumber?: number | null;
 }
 
+export interface Game2TicketPoolServiceOptions {
+  /**
+   * Optional `pg` Pool. Når satt, leses og skrives pool-state mot
+   * `app_game2_ticket_pools`. Når `undefined` (test-harness uten DB),
+   * oppfører servicen seg som rent in-memory (eksisterende oppførsel).
+   */
+  pool?: PgPool;
+}
+
+interface PoolRow {
+  room_code: string;
+  player_id: string;
+  game_id: string;
+  ticket_grids: unknown;
+  purchased_indices: number[] | null;
+  pick_any_number: number | null;
+}
+
 export class Game2TicketPoolService {
-  private pools = new Map<string, Pool>();
+  private pools = new Map<string, PoolState>();
+  private readonly pool: PgPool | null;
+
+  constructor(options: Game2TicketPoolServiceOptions = {}) {
+    this.pool = options.pool ?? null;
+  }
 
   private poolKey(roomCode: string, playerId: string, gameId: string): string {
     return `${roomCode}|${playerId}|${gameId}`;
@@ -70,29 +97,44 @@ export class Game2TicketPoolService {
   /**
    * Hent (eller generer) pool for spiller. Idempotent — samme
    * (roomCode, playerId, gameId) gir samme 32 brett.
+   *
+   * Lazy DB-load: hvis pool ikke er i in-memory cache, prøv først DB.
+   * Hvis DB-rad finnes, hydrér cache fra den. Hvis DB-rad mangler,
+   * generer ny pool, persistér i DB, og legg i cache.
    */
-  getOrCreatePool(
+  async getOrCreatePool(
     roomCode: string,
     playerId: string,
     gameId: string,
-  ): PoolSnapshot {
+  ): Promise<PoolSnapshot> {
     const key = this.poolKey(roomCode, playerId, gameId);
     let pool = this.pools.get(key);
-    if (!pool) {
-      const seed = hashSeed(`${roomCode}:${playerId}:${gameId}`);
-      const tickets = generatePool(seed, POOL_SIZE);
-      pool = {
-        tickets,
-        purchasedIndices: new Set<number>(),
-        pickAnyNumber: null,
-        updatedAt: Date.now(),
-      };
-      this.pools.set(key, pool);
-      log.info(
-        { roomCode, playerId, gameId, ticketCount: tickets.length },
-        "[choose-tickets] generated new pool",
-      );
+    if (pool) {
+      return this.toSnapshot(roomCode, playerId, gameId, pool);
     }
+
+    // Try DB-load before generating.
+    const fromDb = await this.loadFromDb(roomCode, playerId, gameId);
+    if (fromDb) {
+      this.pools.set(key, fromDb);
+      return this.toSnapshot(roomCode, playerId, gameId, fromDb);
+    }
+
+    // Not in DB — generate fresh deterministic pool and persist.
+    const seed = hashSeed(`${roomCode}:${playerId}:${gameId}`);
+    const tickets = generatePool(seed, POOL_SIZE);
+    pool = {
+      tickets,
+      purchasedIndices: new Set<number>(),
+      pickAnyNumber: null,
+      updatedAt: Date.now(),
+    };
+    this.pools.set(key, pool);
+    await this.persistToDb(roomCode, playerId, gameId, pool);
+    log.info(
+      { roomCode, playerId, gameId, ticketCount: tickets.length },
+      "[choose-tickets] generated new pool",
+    );
     return this.toSnapshot(roomCode, playerId, gameId, pool);
   }
 
@@ -100,16 +142,16 @@ export class Game2TicketPoolService {
    * Marker brett-indekser som kjøpt + lagre Lucky Number. Validerer at
    * indekser er innenfor [0, 32) og ikke allerede kjøpt. Idempotent på
    * allerede-kjøpte indekser (no-op).
+   *
+   * Persisterer til DB via UPSERT etter mutation.
    */
-  buy(input: BuyChooseTicketsInput): PoolSnapshot {
+  async buy(input: BuyChooseTicketsInput): Promise<PoolSnapshot> {
     const key = this.poolKey(input.roomCode, input.playerId, input.gameId);
     let pool = this.pools.get(key);
     if (!pool) {
-      // Pool må eksistere før kjøp — caller skal alltid hente først.
-      const snapshot = this.getOrCreatePool(input.roomCode, input.playerId, input.gameId);
+      // Pool må eksistere før kjøp — hent (eller lazy-load fra DB).
+      await this.getOrCreatePool(input.roomCode, input.playerId, input.gameId);
       pool = this.pools.get(key)!;
-      // Gjenta etter create — vi vil håndtere indeksene fra input nedenfor.
-      void snapshot;
     }
     for (const idx of input.indices) {
       if (!Number.isInteger(idx) || idx < 0 || idx >= pool.tickets.length) {
@@ -126,26 +168,157 @@ export class Game2TicketPoolService {
         throw new Error(`INVALID_PICK_ANY_NUMBER: ${input.pickAnyNumber}`);
       }
       pool.pickAnyNumber = input.pickAnyNumber;
+    } else if (input.pickAnyNumber === null) {
+      pool.pickAnyNumber = null;
     }
     pool.updatedAt = Date.now();
+    await this.persistToDb(input.roomCode, input.playerId, input.gameId, pool);
     return this.toSnapshot(input.roomCode, input.playerId, input.gameId, pool);
   }
 
   /**
-   * Slett pool — kalles ved spill-slutt for å slippe minne.
+   * Returnér grid-arrayen for hvert kjøpte brett, i samme rekkefølge som
+   * `purchasedIndices` (sortert ascending). Brukes av bet:arm-flow til å
+   * sende `presetGrid` til BingoSystemAdapter.createTicket så live-spillet
+   * matcher det visuelt-valgte.
+   *
+   * Returnerer tom array hvis pool ikke er kjøpt fra (purchasedIndices == []).
    */
-  clearPool(roomCode: string, playerId: string, gameId: string): void {
+  async getPurchasedGrids(
+    roomCode: string,
+    playerId: string,
+    gameId: string,
+  ): Promise<number[][][]> {
+    const snapshot = await this.getOrCreatePool(roomCode, playerId, gameId);
+    return snapshot.purchasedIndices.map((idx) => {
+      const ticket = snapshot.tickets[idx];
+      if (!ticket) {
+        // Beskytt mot stale state — hopp over tomme/manglende slots.
+        return [];
+      }
+      return ticket.grid.map((row) => [...row]);
+    }).filter((grid) => grid.length > 0);
+  }
+
+  /**
+   * 2026-12-06 (v2): synchronous hot-path lookup for use in `game:start`-
+   * flyten der `engine.startGame` trenger grids per spiller med en gang.
+   *
+   * Returnerer kun pool-data hvis det allerede er i in-memory cache (typisk
+   * etter at klient har kjørt GET /api/agent/game2/choose-tickets/:roomCode).
+   * Returnerer `null` hvis pool ikke er cached — i så fall faller engine
+   * tilbake til normal random-generering for spilleren (defensive: pool
+   * må eksistere før spill kan starte; om ikke har spilleren ikke kjøpt
+   * noe og bør ikke være i armed-listen).
+   *
+   * Brukt fra `getPreRoundTicketsByPlayerId`-hooken i index.ts, som lar
+   * BingoEngine adoptere disse grids gjennom det eksisterende
+   * `preRoundTicketsByPlayerId`-mekanismen.
+   */
+  getPurchasedGridsFromCache(
+    roomCode: string,
+    playerId: string,
+    gameId: string,
+  ): number[][][] | null {
+    const key = this.poolKey(roomCode, playerId, gameId);
+    const pool = this.pools.get(key);
+    if (!pool) return null;
+    const sortedIndices = [...pool.purchasedIndices].sort((a, b) => a - b);
+    if (sortedIndices.length === 0) return null;
+    const grids: number[][][] = [];
+    for (const idx of sortedIndices) {
+      const ticket = pool.tickets[idx];
+      if (!ticket) continue;
+      grids.push(ticket.grid.map((row) => [...row]));
+    }
+    return grids.length > 0 ? grids : null;
+  }
+
+  /**
+   * 2026-12-06 (v2): list player-ids that have at least one purchased
+   * ticket in the cache for (roomCode, gameId). Brukt fra
+   * `getPreRoundTicketsByPlayerId`-hooken så vi kan iterere over alle
+   * spillere uten å spørre engine om RoomSnapshot.players.
+   */
+  listPlayersWithPurchasedTickets(
+    roomCode: string,
+    gameId: string,
+  ): string[] {
+    const playerIds: string[] = [];
+    const prefix = `${roomCode}|`;
+    const suffix = `|${gameId}`;
+    for (const [key, pool] of this.pools) {
+      if (!key.startsWith(prefix) || !key.endsWith(suffix)) continue;
+      if (pool.purchasedIndices.size === 0) continue;
+      const middle = key.slice(prefix.length, key.length - suffix.length);
+      if (middle.length > 0) playerIds.push(middle);
+    }
+    return playerIds;
+  }
+
+  /**
+   * Slett pool — kalles ved spill-slutt for å slippe minne + DB-rad.
+   */
+  async clearPool(roomCode: string, playerId: string, gameId: string): Promise<void> {
     const key = this.poolKey(roomCode, playerId, gameId);
     this.pools.delete(key);
+    if (this.pool) {
+      try {
+        await this.pool.query(
+          `DELETE FROM app_game2_ticket_pools
+           WHERE room_code = $1 AND player_id = $2 AND game_id = $3`,
+          [roomCode, playerId, gameId],
+        );
+      } catch (err) {
+        log.warn({ err, roomCode, playerId, gameId }, "[choose-tickets] clearPool DB delete failed");
+      }
+    }
   }
 
   /**
    * Slett alle pools for en gameId (når runden ender for hele rommet).
+   *
+   * Synkron-alias for `deletePoolForGame` — bevart for bakoverkompatibilitet
+   * med eksisterende test-harness-oppdrag som forventer tom return.
+   * Wraps deletePoolForGame som er den nye async-public-API.
    */
   clearGame(gameId: string): void {
     for (const key of [...this.pools.keys()]) {
       if (key.endsWith(`|${gameId}`)) {
         this.pools.delete(key);
+      }
+    }
+    // Fire-and-forget DB-cleanup — caller kan velge deletePoolForGame
+    // for await-mulighet hvis det trengs.
+    if (this.pool) {
+      this.pool.query(
+        `DELETE FROM app_game2_ticket_pools WHERE game_id = $1`,
+        [gameId],
+      ).catch((err) => {
+        log.warn({ err, gameId }, "[choose-tickets] clearGame DB delete failed (background)");
+      });
+    }
+  }
+
+  /**
+   * Async cleanup for game-end. Sletter alle pools (in-memory + DB) for
+   * den gitte gameId. Kalles fra game-end-listener i index.ts så pool ikke
+   * akkumulerer over tid.
+   */
+  async deletePoolForGame(gameId: string): Promise<void> {
+    for (const key of [...this.pools.keys()]) {
+      if (key.endsWith(`|${gameId}`)) {
+        this.pools.delete(key);
+      }
+    }
+    if (this.pool) {
+      try {
+        await this.pool.query(
+          `DELETE FROM app_game2_ticket_pools WHERE game_id = $1`,
+          [gameId],
+        );
+      } catch (err) {
+        log.warn({ err, gameId }, "[choose-tickets] deletePoolForGame DB delete failed");
       }
     }
   }
@@ -154,7 +327,7 @@ export class Game2TicketPoolService {
     roomCode: string,
     playerId: string,
     gameId: string,
-    pool: Pool,
+    pool: PoolState,
   ): PoolSnapshot {
     return {
       roomCode,
@@ -165,6 +338,111 @@ export class Game2TicketPoolService {
       pickAnyNumber: pool.pickAnyNumber,
     };
   }
+
+  private async loadFromDb(
+    roomCode: string,
+    playerId: string,
+    gameId: string,
+  ): Promise<PoolState | null> {
+    if (!this.pool) return null;
+    try {
+      const { rows } = await this.pool.query<PoolRow>(
+        `SELECT room_code, player_id, game_id, ticket_grids,
+                purchased_indices, pick_any_number
+           FROM app_game2_ticket_pools
+          WHERE room_code = $1 AND player_id = $2 AND game_id = $3
+          LIMIT 1`,
+        [roomCode, playerId, gameId],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      const grids = parseTicketGridsFromDb(row.ticket_grids);
+      if (!grids) {
+        log.warn({ roomCode, playerId, gameId }, "[choose-tickets] DB row had malformed ticket_grids — regenerating pool");
+        return null;
+      }
+      const tickets: Ticket[] = grids.map((grid) => ({ grid }));
+      const rawIndices: unknown[] = Array.isArray(row.purchased_indices)
+        ? (row.purchased_indices as unknown[])
+        : [];
+      const validIndices: number[] = [];
+      for (const n of rawIndices) {
+        if (typeof n === "number" && Number.isInteger(n) && n >= 0 && n < tickets.length) {
+          validIndices.push(n);
+        }
+      }
+      const purchasedIndices = new Set<number>(validIndices);
+      return {
+        tickets,
+        purchasedIndices,
+        pickAnyNumber: typeof row.pick_any_number === "number" ? row.pick_any_number : null,
+        updatedAt: Date.now(),
+      };
+    } catch (err) {
+      log.warn({ err, roomCode, playerId, gameId }, "[choose-tickets] DB load failed — falling back to in-memory generation");
+      return null;
+    }
+  }
+
+  private async persistToDb(
+    roomCode: string,
+    playerId: string,
+    gameId: string,
+    pool: PoolState,
+  ): Promise<void> {
+    if (!this.pool) return;
+    const grids = pool.tickets.map((t) => t.grid);
+    const purchasedArr = [...pool.purchasedIndices].sort((a, b) => a - b);
+    try {
+      await this.pool.query(
+        `INSERT INTO app_game2_ticket_pools
+            (room_code, player_id, game_id, ticket_grids, purchased_indices, pick_any_number, updated_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5::int[], $6, NOW())
+         ON CONFLICT (room_code, player_id, game_id)
+         DO UPDATE SET
+           ticket_grids = EXCLUDED.ticket_grids,
+           purchased_indices = EXCLUDED.purchased_indices,
+           pick_any_number = EXCLUDED.pick_any_number,
+           updated_at = NOW()`,
+        [roomCode, playerId, gameId, JSON.stringify(grids), purchasedArr, pool.pickAnyNumber],
+      );
+    } catch (err) {
+      // Fail-soft: in-memory state forblir gyldig, men varsel logges
+      // så ops kan se DB-write-feil. Cron-cleanup vil håndtere foreldede
+      // rader hvis DB delvis er ute.
+      log.warn({ err, roomCode, playerId, gameId }, "[choose-tickets] DB upsert failed");
+    }
+  }
+}
+
+function parseTicketGridsFromDb(value: unknown): number[][][] | null {
+  // pg-driveren returnerer JSONB som allerede-parset JS-objekt for de fleste
+  // konfigurasjonene; håndter både array og string for robusthet.
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const grids: number[][][] = [];
+  for (const grid of parsed) {
+    if (!Array.isArray(grid)) return null;
+    const rows: number[][] = [];
+    for (const row of grid) {
+      if (!Array.isArray(row)) return null;
+      const cells: number[] = [];
+      for (const cell of row) {
+        if (typeof cell !== "number" || !Number.isInteger(cell)) return null;
+        cells.push(cell);
+      }
+      rows.push(cells);
+    }
+    grids.push(rows);
+  }
+  return grids;
 }
 
 /** Mulberry32 — kompakt deterministisk PRNG. */

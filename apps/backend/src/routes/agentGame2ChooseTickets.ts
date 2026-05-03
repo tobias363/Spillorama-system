@@ -11,15 +11,16 @@
  *   POST /api/agent/game2/choose-tickets/:roomCode/buy
  *     Body: { indices: number[], pickAnyNumber?: number }
  *     Markerer indeksene som kjøpt + lagrer Lucky Number. Returnerer
- *     oppdatert pool-state.
+ *     oppdatert pool-state. Etter pool-state-oppdatering armer routen
+ *     spilleren via `armRocketPlayerFromPool` (count = purchasedIndices
+ *     kumulativt) så bet:arm-state matcher pool-state. Engine.startGame
+ *     henter pool-grids via `Game2TicketPoolService.getPurchasedGrids` →
+ *     `presetGrid` på BingoSystemAdapter.createTicket — så live-spillet
+ *     bruker EXACTLY de samme tallene spilleren så på Choose Tickets-siden.
  *
  * Permissions: ingen spesiell admin-permission — vanlig spiller-token
  * (samme som annen game2-flyt). Backend resolver playerId fra access-
  * token slik at en spiller ikke kan kjøpe brett for en annen spiller.
- *
- * Wallet-debit / arming i BingoEngine: NOT YET integrert. Denne MVP-en
- * lagrer kun pool-state. v2-arbeid kobler buy → bet:arm med tilsvarende
- * count, og v3 kobler ticket-tallene til BingoEngine.startGame.
  */
 
 import express from "express";
@@ -43,12 +44,33 @@ export interface AgentGame2ChooseTicketsDeps {
    * gangen). Caller injiserer pga. circular-dep-frykt mot BingoEngine.
    */
   getCurrentGameIdForRoom: (roomCode: string) => string | null;
+  /**
+   * 2026-12-06 (v2): callback fra POST /buy → arm spilleren med samme
+   * count som purchasedIndices etter buy. Caller (index.ts) wrapper
+   * `roomState.armPlayer(roomCode, playerId, count)` så bet:arm-state
+   * matcher pool-state. Optional fordi test-harnesses uten engine kan
+   * skippe arming-laget.
+   *
+   * Returnerer void/Promise<void>. Feil i arming logges men skal IKKE
+   * blokkere POST /buy (pool er allerede committed) — armingen kan
+   * re-driftes med ny POST /buy.
+   */
+  armRocketPlayerFromPool?: (
+    roomCode: string,
+    playerId: string,
+    purchasedCount: number,
+  ) => void | Promise<void>;
 }
 
 export function createAgentGame2ChooseTicketsRouter(
   deps: AgentGame2ChooseTicketsDeps,
 ): express.Router {
-  const { platformService, ticketPoolService, getCurrentGameIdForRoom } = deps;
+  const {
+    platformService,
+    ticketPoolService,
+    getCurrentGameIdForRoom,
+    armRocketPlayerFromPool,
+  } = deps;
   const router = express.Router();
 
   async function resolvePlayerId(req: express.Request): Promise<string> {
@@ -75,7 +97,7 @@ export function createAgentGame2ChooseTicketsRouter(
       const playerId = await resolvePlayerId(req);
       const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
       const gameId = resolveGameIdOrThrow(roomCode);
-      const snapshot = ticketPoolService.getOrCreatePool(roomCode, playerId, gameId);
+      const snapshot = await ticketPoolService.getOrCreatePool(roomCode, playerId, gameId);
       apiSuccess(res, snapshot);
     } catch (error) {
       apiFailure(res, error);
@@ -139,7 +161,29 @@ export function createAgentGame2ChooseTicketsRouter(
       if (pickAnyNumber !== undefined) {
         buyInput.pickAnyNumber = pickAnyNumber;
       }
-      const snapshot = ticketPoolService.buy(buyInput);
+      const snapshot = await ticketPoolService.buy(buyInput);
+
+      // 2026-12-06 (v2): chain pool → bet:arm. Pool er nå source-of-truth
+      // for hvor mange brett spilleren skal ha i runden — speil det inn i
+      // armed-state-mapen så engine.startGame teller rett count og
+      // `getPreRoundTicketsByPlayerId` kan plukke pool-grids derfra.
+      // Fail-soft: hvis arming feiler er pool-state allerede committed;
+      // klient kan re-poste samme indices for å re-arme uten å betale 2×.
+      if (armRocketPlayerFromPool && snapshot.purchasedIndices.length > 0) {
+        try {
+          await armRocketPlayerFromPool(roomCode, playerId, snapshot.purchasedIndices.length);
+        } catch (armErr) {
+          // Logg via apiFailure ville maskert success-pool-state. I stedet
+          // returnerer vi success med snapshot — klient kan forstå at
+          // pool er committed selv om arming måtte re-driftes.
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[agent-game2-choose-tickets] armRocketPlayerFromPool failed (pool committed regardless)",
+            armErr,
+          );
+        }
+      }
+
       apiSuccess(res, snapshot);
     } catch (error) {
       apiFailure(res, error);

@@ -57,4 +57,61 @@ describe("LocalBingoSystemAdapter.createTicket", () => {
   // a missing gameSlug anywhere silently produced 3×5 tickets in a
   // Bingo75 game. generateTicketForGame now throws DomainError on
   // unknown slugs (see BIN-672 commit 6 tests).
+
+  // ── Spill 2 v2 (2026-12-06): presetGrid override ──────────────────────
+
+  test("presetGrid bruker EXACT grid uten å re-generere (rocket)", async () => {
+    const presetGrid = [
+      [3, 7, 11],
+      [5, 9, 13],
+      [1, 17, 21],
+    ];
+    const ticket = await adapter.createTicket({
+      ...input("rocket"),
+      presetGrid,
+    });
+    assert.deepEqual(ticket.grid, presetGrid);
+  });
+
+  test("presetGrid bevarer color + type", async () => {
+    const presetGrid = [
+      [1, 2, 3],
+      [4, 5, 6],
+      [7, 8, 9],
+    ];
+    const ticket = await adapter.createTicket({
+      ...input("rocket", "Small Yellow", "small"),
+      presetGrid,
+    });
+    assert.equal(ticket.color, "Small Yellow");
+    assert.equal(ticket.type, "small");
+    assert.deepEqual(ticket.grid, presetGrid);
+  });
+
+  test("presetGrid kopierer rader (mutasjoner i input lekker ikke til ticket)", async () => {
+    const presetGrid = [
+      [1, 2, 3],
+      [4, 5, 6],
+      [7, 8, 9],
+    ];
+    const ticket = await adapter.createTicket({
+      ...input("rocket"),
+      presetGrid,
+    });
+    // Muter input — ticket skal være uendret
+    presetGrid[0]![0] = 99;
+    assert.equal(ticket.grid[0]![0], 1, "ticket-grid er upåvirket av input-mutation");
+  });
+
+  test("uten presetGrid → standard generering (default-oppførsel uendret)", async () => {
+    const ticket = await adapter.createTicket(input("rocket"));
+    assert.equal(ticket.grid.length, 3);
+    assert.equal(ticket.grid[0].length, 3);
+    // Tallene skal være i 1-21 range, ikke matche en spesifikk preset
+    for (const row of ticket.grid) {
+      for (const cell of row) {
+        assert.ok(cell >= 1 && cell <= 21);
+      }
+    }
+  });
 });
