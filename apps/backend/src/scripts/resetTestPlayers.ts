@@ -157,6 +157,27 @@ export async function resetTestPlayers(
   // ── TX1: opprett/oppdater test@spillorama.no ─────────────────────────────
   const client = await deps.pool.connect();
   try {
+    // 2026-05-03 fix: hardkodet TEST_PLAYER_HALL_ID="demo-hall-001"
+    // eksisterer kanskje ikke i prod. Auto-pick første aktive hall fra DB
+    // før transaksjonen, så INSERT/UPDATE har en garantert valid FK.
+    const hallsTable = `"${schema}"."app_halls"`;
+    let resolvedHallId: string = TEST_PLAYER_HALL_ID;
+    try {
+      const { rows: hallRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${hallsTable} WHERE is_active = true ORDER BY created_at ASC LIMIT 1`,
+      );
+      if (hallRows[0]) {
+        resolvedHallId = hallRows[0].id;
+        if (resolvedHallId !== TEST_PLAYER_HALL_ID) {
+          log.info(`Bruker første aktive hall ${resolvedHallId} (default ${TEST_PLAYER_HALL_ID} fantes ikke)`);
+        }
+      } else {
+        log.warn(`Ingen aktive haller — beholder ${TEST_PLAYER_HALL_ID} (FK kan feile)`);
+      }
+    } catch (hallLookupErr) {
+      log.warn(`Hall-lookup feilet, beholder ${TEST_PLAYER_HALL_ID}: ${hallLookupErr instanceof Error ? hallLookupErr.message : String(hallLookupErr)}`);
+    }
+
     await client.query("BEGIN");
 
     const passwordHashEarly = await hashPassword(TEST_PLAYER_PASSWORD);
@@ -186,9 +207,9 @@ export async function resetTestPlayers(
                 deleted_at = NULL,
                 updated_at = now()
           WHERE id = $1`,
-        [userIdEarly, passwordHashEarly, TEST_PLAYER_DISPLAY_NAME, TEST_PLAYER_SURNAME, TEST_PLAYER_BIRTH_DATE, TEST_PLAYER_HALL_ID],
+        [userIdEarly, passwordHashEarly, TEST_PLAYER_DISPLAY_NAME, TEST_PLAYER_SURNAME, TEST_PLAYER_BIRTH_DATE, resolvedHallId],
       );
-      log.info("Oppdaterte eksisterende test-bruker (TX1)", { userId: userIdEarly, walletId: walletIdEarly });
+      log.info("Oppdaterte eksisterende test-bruker (TX1)", { userId: userIdEarly, walletId: walletIdEarly, hallId: resolvedHallId });
     } else {
       userIdEarly = randomUUID();
       walletIdEarly = `wallet-user-${userIdEarly}`;
@@ -199,9 +220,9 @@ export async function resetTestPlayers(
             kyc_status, birth_date, kyc_verified_at, hall_id)
          VALUES ($1, $2, $3, $4, $5, $6, 'PLAYER',
                  'VERIFIED', $7::date, now(), $8)`,
-        [userIdEarly, TEST_PLAYER_EMAIL, TEST_PLAYER_DISPLAY_NAME, TEST_PLAYER_SURNAME, passwordHashEarly, walletIdEarly, TEST_PLAYER_BIRTH_DATE, TEST_PLAYER_HALL_ID],
+        [userIdEarly, TEST_PLAYER_EMAIL, TEST_PLAYER_DISPLAY_NAME, TEST_PLAYER_SURNAME, passwordHashEarly, walletIdEarly, TEST_PLAYER_BIRTH_DATE, resolvedHallId],
       );
-      log.info("Opprettet ny test-bruker (TX1)", { userId: userIdEarly, walletId: walletIdEarly });
+      log.info("Opprettet ny test-bruker (TX1)", { userId: userIdEarly, walletId: walletIdEarly, hallId: resolvedHallId });
     }
 
     await client.query(
