@@ -1,36 +1,45 @@
 /**
- * Spill 2 (Tallspill) — LobbyScreen i Bong Mockup-stil.
+ * Spill 2 (Tallspill) — LobbyScreen i Bong Mockup v2-stil.
  *
  * Vises mellom runder (gameStatus !== RUNNING) når spilleren er i `LOBBY`-
- * fase. Tidligere (PR #850/#852) brukte denne en enkel "Kjøp billetter for
- * å delta"-design med gult Arial-tekst. Etter PR #862 (Bong Mockup) bytter
- * vi til samme visuelle språk som PlayScreen:
+ * fase. Bruker EKSAKT samme layout som `PlayScreen` (v2-design):
  *
- *   - `bong-bg.png` Sprite + mørk-rød fallback (#2a0d0e)
- *   - ComboPanel øverst (Lykketall + Hovedspill 1 + Jackpots)
- *   - BallTube sentrert med "Neste trekning" countdown
- *   - Stor sentrert CTA "Velg brett for neste runde"
+ *   1. BallTube:   countdown + draw-counter + (tom) drawn-balls-rad
+ *   2. Bong-grid:  (tom container; spilleren har ikke kjøpt brett ennå)
+ *   3. ComboPanel: PlayerCard + Hovedspill + Lykketall + Jackpots
+ *      (sticky-bottom)
  *
- * Kontrakt mot `Game2Controller` er BEVART (samme metoder + samme
- * signaturer):
+ * STRICT element-cleanup per Tobias-direktiv 2026-05-03:
+ *   "Det er da kun disse elementene samt popup av kjøp av biletter
+ *    som skal være synlig"
+ *
+ * → FJERNET fra v1-LobbyScreen:
+ *   - `statusText` ("Venter på neste runde") — ikke i mockup
+ *   - `ctaButton` ("Velg brett for neste runde") — ikke i mockup;
+ *     "Kjøp flere brett"-pill i ComboPanel + BuyPopup overtar entry-
+ *     punktet for ticket-kjøp
+ *   - `luckyPicker` (modal LuckyNumberPicker) — ikke i mockup;
+ *     LykketallGrid i ComboPanel håndterer alt lucky-number-valg
+ *
+ * → BEHOLDT (eksplisitt fra Tobias):
+ *   - BuyPopup (kjøp av billetter)
+ *
+ * Kontrakt mot `Game2Controller` er BEVART (samme metoder + signaturer):
  *   - `setOnBuy(cb)` — fortsatt brukt av controller for `BuyPopup`-arm-bet.
  *   - `setOnLuckyNumber(cb)` — videresendt til ComboPanel.LykketallGrid.
- *   - `setOnChooseTickets(cb)` — kalles ved klikk på CTA-en eller "Kjøp
- *     flere brett"-pill i ComboPanel.
- *   - `update(state)` — oppdaterer countdown + status-tekst + jackpot-bar.
- *   - `showBuyPopup(price)` / `hideBuyPopup()` — fortsatt tilgjengelig
- *     (Game2Controller kaller `showBuyPopup` i transitionTo("LOBBY")).
+ *   - `setOnChooseTickets(cb)` — kalles ved klikk på "Kjøp flere brett"-pill.
+ *   - `update(state)` — oppdaterer countdown + jackpots + player-count.
+ *   - `showBuyPopup(price)` / `hideBuyPopup()` — fortsatt tilgjengelig.
+ *   - `updateJackpot(list)` — videresender til ComboPanel.
  *
- * 2026-05-03 (Agent N, branch feat/spill2-lobbyscreen-redesign): redesign
- * for å matche PR #862 Bong Mockup. Gjenbruker eksisterende
- * `ComboPanel`/`BallTube`/`BuyPopup`/`LuckyNumberPicker` — ingen nye
- * komponenter skrives.
+ * 2026-05-03 (Agent S, branch feat/spill2-bong-mockup-v2): full
+ * layout-rewrite for v2-design — speiler PlayScreen for konsistens.
+ * STRICT cleanup av status-tekst + CTA-knapp + modal lucky-picker.
  */
 
-import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Assets, type Texture } from "pixi.js";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import { BuyPopup } from "../components/BuyPopup.js";
-import { LuckyNumberPicker } from "../components/LuckyNumberPicker.js";
 import { ComboPanel } from "../components/ComboPanel.js";
 import { BallTube } from "../components/BallTube.js";
 import type { JackpotSlotData } from "../components/JackpotsRow.js";
@@ -38,19 +47,17 @@ import type { JackpotSlotData } from "../components/JackpotsRow.js";
 const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
 const STAGE_PADDING_X = 32;
 const STAGE_PADDING_TOP = 14;
+const STAGE_PADDING_BOTTOM = 24;
 const ROW_GAP = 14;
 const MAX_STAGE_WIDTH = 1100;
+const TUBE_HEIGHT = 85;
 
 export class LobbyScreen extends Container {
   private bgSprite: Sprite | null = null;
   private bgFallback: Graphics;
   private comboPanel: ComboPanel;
   private ballTube: BallTube;
-  private statusText: Text;
-  private ctaButton: Container;
-  private ctaButtonBg: Graphics;
   private buyPopup: BuyPopup;
-  private luckyPicker: LuckyNumberPicker;
   private screenW: number;
   private screenH: number;
   private stageW: number;
@@ -71,109 +78,49 @@ export class LobbyScreen extends Container {
     this.screenW = screenWidth;
     this.screenH = screenHeight;
 
-    // ── stage-bredde ─────────────────────────────────────────────────────
-    // Lobby har ikke chat-panel, så vi bruker hele bredden minus padding
-    // (cap'et til MAX_STAGE_WIDTH). Matcher PlayScreen sin oppførsel når
-    // chat er av.
+    // ── stage-bredde (full bredde — ingen chat) ──────────────────────────
     const availableW = screenWidth - STAGE_PADDING_X * 2;
     this.stageW = Math.min(MAX_STAGE_WIDTH, Math.max(640, availableW));
     this.stageX = STAGE_PADDING_X + Math.max(0, (availableW - this.stageW) / 2);
 
-    // ── bakgrunn ─────────────────────────────────────────────────────────
-    // Fallback-bakgrunn (mørk-rød) frem til PNG laster — identisk pattern
-    // som PlayScreen.
+    // ── bakgrunn (samme pattern som PlayScreen) ──────────────────────────
     this.bgFallback = new Graphics();
     this.bgFallback.rect(0, 0, screenWidth, screenHeight).fill({ color: 0x2a0d0e });
     this.addChild(this.bgFallback);
     void this.loadBackground();
 
-    // ── combo-panel (Lykketall + Hovedspill + Jackpots) ─────────────────
+    // ── glass-tube (countdown + tom drawn-balls-rad) — ØVERST ────────────
+    this.ballTube = new BallTube(this.stageW);
+    this.ballTube.x = this.stageX;
+    this.ballTube.y = STAGE_PADDING_TOP;
+    this.addChild(this.ballTube);
+
+    // ── (Bong-grid plass-holder — vi rendrer ingen bonger i lobby) ──────
+    // Plassen mellom tube og combo-panel etterlates synlig bakgrunn.
+    // Når spilleren kjøper brett og spillet starter overtas denne av
+    // PlayScreen sin layout.
+
+    // ── combo-panel — STICKY BOTTOM ──────────────────────────────────────
     this.comboPanel = new ComboPanel(this.stageW);
     this.comboPanel.x = this.stageX;
-    this.comboPanel.y = STAGE_PADDING_TOP;
+    this.comboPanel.y = screenHeight - STAGE_PADDING_BOTTOM - this.comboPanel.height;
     this.comboPanel.setOnLuckyNumber((n) => this.onLuckyNumber?.(n));
-    // "Kjøp flere brett"-pill i ComboPanel går rett til Choose Tickets-
-    // skjermen — samme oppførsel som i PlayScreen.
+    // "Kjøp flere brett"-pill i ComboPanel åpner Choose Tickets-skjermen
+    // (samme oppførsel som PlayScreen).
     this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
     this.addChild(this.comboPanel);
 
-    // ── glass-tube med countdown ────────────────────────────────────────
-    this.ballTube = new BallTube(this.stageW);
-    this.ballTube.x = this.stageX;
-    this.ballTube.y = this.comboPanel.y + this.comboPanel.height + ROW_GAP;
-    this.addChild(this.ballTube);
-
-    // ── status-tekst ("Venter på neste runde") ───────────────────────────
-    // Plasseres rett under ball-tuben. Cinzel-fonten matcher hovedstilen
-    // i Bong Mockup; faller tilbake til serif hvis Cinzel ikke er lastet.
-    this.statusText = new Text({
-      text: "Venter på neste runde",
-      style: {
-        fontFamily: "Cinzel, Georgia, serif",
-        fontSize: 28,
-        fontWeight: "600",
-        fill: 0xffd97a,
-        align: "center",
-        letterSpacing: 1.2,
-      },
-    });
-    this.statusText.anchor.set(0.5, 0);
-    this.statusText.x = screenWidth / 2;
-    this.statusText.y = this.ballTube.y + 85 + 24;
-    this.addChild(this.statusText);
-
-    // ── stor sentrert CTA-knapp ──────────────────────────────────────────
-    // Pill-stil identisk med ComboPanel sin "Kjøp flere brett" — bare
-    // større og prominent for hovedhandlingen i lobby-skjermen.
-    const CTA_W = 320;
-    const CTA_H = 64;
-    this.ctaButton = new Container();
-    this.ctaButton.x = (screenWidth - CTA_W) / 2;
-    this.ctaButton.y = this.statusText.y + 60;
-    this.ctaButton.eventMode = "static";
-    this.ctaButton.cursor = "pointer";
-
-    this.ctaButtonBg = new Graphics();
-    this.drawCtaButton(false);
-    this.ctaButton.addChild(this.ctaButtonBg);
-
-    const ctaLabel = new Text({
-      text: "Velg brett for neste runde",
-      style: {
-        fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-        fontSize: 18,
-        fontWeight: "700",
-        fill: 0xffffff,
-        align: "center",
-      },
-    });
-    ctaLabel.anchor.set(0.5);
-    ctaLabel.x = CTA_W / 2;
-    ctaLabel.y = CTA_H / 2;
-    this.ctaButton.addChild(ctaLabel);
-
-    this.ctaButton.on("pointerover", () => this.drawCtaButton(true));
-    this.ctaButton.on("pointerout", () => this.drawCtaButton(false));
-    this.ctaButton.on("pointerdown", () => this.onChooseTickets?.());
-    this.addChild(this.ctaButton);
-
-    // ── BuyPopup (modal overlay) ─────────────────────────────────────────
-    // Beholdt for at controller-API skal være uendret. Vises av
-    // `Game2Controller.transitionTo("LOBBY")` via `showBuyPopup()`.
-    // Plasseres sentrert nederst.
-    this.buyPopup = new BuyPopup(320, 220);
-    this.buyPopup.x = (screenWidth - 320) / 2;
-    this.buyPopup.y = screenHeight - 260;
+    // ── BuyPopup (eksplisitt beholdt per Tobias-direktiv) ────────────────
+    // Plassert sentrert. Controller har kontroll over når den vises:
+    // den åpnes via `showBuyPopup()` av Game2Controller når spilleren
+    // entrer LOBBY uten armed bet.
+    const popupW = 320;
+    const popupH = 220;
+    this.buyPopup = new BuyPopup(popupW, popupH);
+    this.buyPopup.x = (screenWidth - popupW) / 2;
+    this.buyPopup.y = (screenHeight - popupH) / 2;
     this.buyPopup.setOnBuy((count) => this.onBuy?.(count));
     this.addChild(this.buyPopup);
-
-    // ── LuckyNumberPicker (modal overlay) ────────────────────────────────
-    // Bevart selv om ComboPanel sin LykketallGrid normalt brukes — gir
-    // controller en fallback-flyt + støtter eksisterende kall til
-    // `setOnLuckyNumber`.
-    this.luckyPicker = new LuckyNumberPicker(screenWidth, screenHeight);
-    this.luckyPicker.setOnSelect((n) => this.onLuckyNumber?.(n));
-    this.addChild(this.luckyPicker);
 
     // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
     this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
@@ -193,7 +140,7 @@ export class LobbyScreen extends Container {
 
   /**
    * Hovedoppdatering fra controller. Speiler `state`-felter inn i
-   * Combo-panel + BallTube + status-tekst.
+   * Combo-panel + BallTube.
    */
   update(state: GameState): void {
     // Lucky number — speilet til Combo-panel.
@@ -203,28 +150,24 @@ export class LobbyScreen extends Container {
       this.comboPanel.setLuckyNumber(null);
     }
     this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
+    this.comboPanel.setPlayerCount(state.playerCount ?? 0);
 
     // BallTube viser draw-counter selv om vi er i lobby — bruker
     // forrige rundes verdier hvis tilgjengelig.
     this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
 
-    // Status-tekst + countdown.
-    if (state.gameStatus === "RUNNING") {
-      this.statusText.text = "Spill pågår — kjøp brett til neste runde";
-      this.startCountdown(null);
-    } else if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
-      this.statusText.text = "Venter på neste runde";
+    // Countdown — vises hvis vi har en `millisUntilNextStart`.
+    if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
       this.startCountdown(state.millisUntilNextStart);
     } else {
-      this.statusText.text = "Venter på neste runde";
       this.startCountdown(null);
     }
   }
 
   /**
-   * Oppdater jackpot-prizer fra `g2:jackpot:list-update`. Eksponert i tilfelle
-   * controller velger å pushe også i lobby-fase (samme signatur som
-   * `PlayScreen.updateJackpot`).
+   * Oppdater jackpot-prizer fra `g2:jackpot:list-update`. Eksponert i
+   * tilfelle controller velger å pushe også i lobby-fase (samme
+   * signatur som `PlayScreen.updateJackpot`).
    */
   updateJackpot(list: JackpotSlotData[]): void {
     this.comboPanel.updateJackpots(list);
@@ -247,25 +190,6 @@ export class LobbyScreen extends Container {
   }
 
   // ── interne ─────────────────────────────────────────────────────────────
-
-  private drawCtaButton(hover: boolean): void {
-    const W = 320;
-    const H = 64;
-    const RADIUS = 32;
-    this.ctaButtonBg.clear();
-    // Pill-stil matchende ComboPanel sin "Kjøp flere brett"-pill, men
-    // høyere alpha/intensitet for å løfte den fram som hoved-CTA.
-    this.ctaButtonBg
-      .roundRect(0, 0, W, H, RADIUS)
-      .fill({ color: hover ? 0x9a2228 : 0x781e24, alpha: hover ? 0.95 : 0.85 });
-    this.ctaButtonBg
-      .roundRect(0, 0, W, H, RADIUS)
-      .stroke({ color: 0xffffff, alpha: 0.55, width: 1.5 });
-    // Indre highlight (matcher CSS `inset 0 1px 0 rgba(255,255,255,.18)`).
-    this.ctaButtonBg
-      .roundRect(2, 2, W - 4, 2, 1)
-      .fill({ color: 0xffffff, alpha: 0.18 });
-  }
 
   private startCountdown(milliseconds: number | null): void {
     if (milliseconds == null || milliseconds <= 0) {

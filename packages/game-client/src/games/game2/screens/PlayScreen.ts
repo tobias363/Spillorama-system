@@ -1,31 +1,40 @@
 /**
- * Spill 2 (Tallspill) — main gameplay screen for the Bong Mockup design
- * (`Bong Mockup.html`).
+ * Spill 2 (Tallspill) — main gameplay screen for Bong Mockup v2-design.
  *
- * Layout (top → bottom):
- *   1. ComboPanel: Lykketall + Hovedspill 1 + Jackpots (3 columns)
- *   2. BallTube:   countdown + draw-counter + drawn balls
- *   3. Bong-grid:  2×2 of BongCard (scaled 0.7 to fit)
+ * Layout (top → bottom) per `Bong Mockup.html` v2:
+ *   1. BallTube:   countdown + draw-counter + drawn balls (12 visible)
+ *   2. Bong-grid:  2×2 of BongCard (scaled 0.7 to fit)
+ *   3. ComboPanel: PlayerCard + Hovedspill 1 + Lykketall + Jackpots
+ *      — sticky-bottom (matcher CSS `.panel-row { margin-top: auto }`)
+ *
+ * STRICT element-cleanup per Tobias-direktiv 2026-05-03:
+ *   "Det er da kun disse elementene samt popup av kjøp av biletter
+ *    som skal være synlig"
+ *
+ * → FJERNET fra v1:
+ *   - LINE/BINGO claim-knapper (ikke i mockup; auto-claim på Fullt Hus
+ *     drives av backend per PR #855)
+ *   - ChatPanel (ikke i mockup; chat var en lokal addition i v1)
+ *
+ * → BEHOLDT (eksplisitt fra Tobias):
+ *   - BuyPopup (mellom-runde kjøp)
  *
  * Bakgrunn rendres som `bong-bg.png` Sprite via `Assets.load`.
  *
  * Funksjonelt uendret kontrakt mot `Game2Controller`:
- *   - `setOnClaim`, `buildTickets`, `updateInfo`, `onNumberDrawn`,
- *     `onPatternWon`, `updateJackpot` — alle samme signatur som tidligere.
- *   - Ny: `setOnLuckyNumber` + `setOnChooseTickets` — i tidligere design
- *     ble disse håndtert av LobbyScreen, men i det nye designet er
- *     Lykketall-grid + "Kjøp flere brett" alltid synlig under spill.
- *   - Ny: `setOnClaim` aksepterer fortsatt LINE/BINGO men knappene er
- *     visuelt mindre framtredende — auto-claim fortsatt drevet av
- *     backend ved Fullt Hus (PR #855).
+ *   - `setOnClaim` BEVART (kalles fortsatt fra controller, men no-op
+ *     siden knappene er fjernet — auto-claim håndterer alt)
+ *   - `setOnLuckyNumber`, `setOnChooseTickets`, `setOnBuyForNextRound`
+ *   - `buildTickets`, `updateInfo`, `onNumberDrawn`, `onPatternWon`,
+ *     `updateJackpot`, `showBuyPopupForNextRound`, `hideBuyPopupForNextRound`,
+ *     `isBuyPopupVisible`, `reset`
  *
- * 2026-05-03 (Agent E, branch feat/spill2-bong-mockup-design): full
- * rewrite for Bong Mockup-design. Tidligere PlayScreen brukte
- * TicketScroller + JackpotBar; det er erstattet med ny BallTube,
- * ComboPanel og en 2×2 BongCard-grid.
+ * 2026-05-03 (Agent S, branch feat/spill2-bong-mockup-v2): full layout-
+ * rewrite for v2-design — tube først, bongs midt, combo-panel sticky-
+ * bottom. STRICT cleanup av claim-knapper + chat-panel.
  */
 
-import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Assets, type Texture } from "pixi.js";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
@@ -34,23 +43,20 @@ import { BongCard } from "../components/BongCard.js";
 import { BallTube } from "../components/BallTube.js";
 import { ComboPanel } from "../components/ComboPanel.js";
 import type { JackpotSlotData } from "../components/JackpotsRow.js";
-import { ClaimButton } from "../components/ClaimButton.js";
 import { BuyPopup } from "../components/BuyPopup.js";
-import { ChatPanel } from "../../../components/ChatPanel.js";
-import { checkClaims } from "../logic/ClaimDetector.js";
 
 const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
 const STAGE_PADDING_X = 32;
 const STAGE_PADDING_TOP = 14;
-const STAGE_PADDING_BOTTOM = 18;
+const STAGE_PADDING_BOTTOM = 24;
 const ROW_GAP = 14;
 const MAX_STAGE_WIDTH = 1100;
-const CHAT_WIDTH = 280;
-const CHAT_MARGIN = 12;
 /** Bong-grid scale matching `.grid-wrap > * { transform: scale(0.70) }`. */
 const BONG_SCALE = 0.70;
 const BONG_GAP_X = 20;
 const BONG_GAP_Y = 8;
+/** Tube-høyde må matche `BallTube` sin interne TUBE_HEIGHT for layout. */
+const TUBE_HEIGHT = 85;
 
 export class PlayScreen extends Container {
   private bgSprite: Sprite | null = null;
@@ -59,21 +65,18 @@ export class PlayScreen extends Container {
   private ballTube: BallTube;
   private bongs: BongCard[] = [];
   private bongGridContainer: Container;
-  private chatPanel: ChatPanel | null = null;
-  private lineBtn: ClaimButton;
-  private bingoBtn: ClaimButton;
   private buyPopup: BuyPopup;
   private audio: AudioManager;
   private screenW: number;
   private screenH: number;
   private stageW: number;
   private stageX: number;
+  // Claim-callback bevart for kontrakt med Game2Controller, men knappene
+  // er fjernet i v2. Auto-claim på Fullt Hus drives av backend (PR #855).
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
   private onLuckyNumber: ((n: number) => void) | null = null;
   private onChooseTickets: (() => void) | null = null;
   private onBuyForNextRound: ((count: number) => void) | null = null;
-  private lineAlreadyWon = false;
-  private bingoAlreadyWon = false;
   /** Nedtellings-driver — vi oppdaterer hvert sekund fra
    *  `state.millisUntilNextStart` og decreases lokalt mellom snapshots. */
   private countdownDeadline: number | null = null;
@@ -83,19 +86,19 @@ export class PlayScreen extends Container {
     screenWidth: number,
     screenHeight: number,
     audio: AudioManager,
-    socket?: SpilloramaSocket,
-    roomCode?: string,
+    _socket?: SpilloramaSocket,
+    _roomCode?: string,
   ) {
     super();
     this.audio = audio;
     this.screenW = screenWidth;
     this.screenH = screenHeight;
 
-    // ── stage-bredde + bakgrunn ──────────────────────────────────────────
-    const chatEnabled = socket != null && roomCode != null;
-    const chatRightEdge = screenWidth - CHAT_MARGIN;
-    const chatLeftEdge = chatEnabled ? chatRightEdge - CHAT_WIDTH : screenWidth;
-    const availableW = (chatEnabled ? chatLeftEdge - CHAT_MARGIN : screenWidth) - STAGE_PADDING_X * 2;
+    // ── stage-bredde (uten chat, full bredde) ────────────────────────────
+    // STRICT-cleanup per Tobias 2026-05-03: chat er fjernet fra v2-design.
+    // socket/roomCode-args er bevart for kontrakt-kompatibilitet med
+    // Game2Controller, men de brukes ikke lenger til å mounte ChatPanel.
+    const availableW = screenWidth - STAGE_PADDING_X * 2;
     this.stageW = Math.min(MAX_STAGE_WIDTH, Math.max(640, availableW));
     this.stageX = STAGE_PADDING_X + Math.max(0, (availableW - this.stageW) / 2);
 
@@ -105,56 +108,32 @@ export class PlayScreen extends Container {
     this.addChild(this.bgFallback);
     void this.loadBackground();
 
-    // ── combo-panel ──────────────────────────────────────────────────────
+    // ── glass-tube (drawn balls + counter) — ØVERST i v2 ────────────────
+    this.ballTube = new BallTube(this.stageW);
+    this.ballTube.x = this.stageX;
+    this.ballTube.y = STAGE_PADDING_TOP;
+    this.addChild(this.ballTube);
+
+    // ── bong-grid (2×2 BongCard) — MIDTEN ────────────────────────────────
+    this.bongGridContainer = new Container();
+    this.bongGridContainer.x = this.stageX;
+    this.bongGridContainer.y = this.ballTube.y + TUBE_HEIGHT + ROW_GAP + 24;
+    this.addChild(this.bongGridContainer);
+
+    // ── combo-panel — STICKY BOTTOM (matcher CSS margin-top: auto) ──────
     this.comboPanel = new ComboPanel(this.stageW);
     this.comboPanel.x = this.stageX;
-    this.comboPanel.y = STAGE_PADDING_TOP;
+    // Foreløpig posisjon — settes endelig i `positionComboPanelBottom`
+    // etter at vi vet panel-høyden.
+    this.comboPanel.y = screenHeight - STAGE_PADDING_BOTTOM - this.comboPanel.height;
     this.comboPanel.setOnLuckyNumber((n) => this.onLuckyNumber?.(n));
     this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
     this.addChild(this.comboPanel);
 
-    // ── glass-tube (drawn balls + counter) ───────────────────────────────
-    this.ballTube = new BallTube(this.stageW);
-    this.ballTube.x = this.stageX;
-    this.ballTube.y = this.comboPanel.y + this.comboPanel.height + ROW_GAP;
-    this.addChild(this.ballTube);
-
-    // ── bong-grid (2×2 BongCard) ─────────────────────────────────────────
-    this.bongGridContainer = new Container();
-    this.bongGridContainer.x = this.stageX;
-    this.bongGridContainer.y = this.ballTube.y + 85 + ROW_GAP + 24;
-    this.addChild(this.bongGridContainer);
-
-    // ── chat-panel (valgfritt, hvis socket+roomCode er gitt) ─────────────
-    if (chatEnabled) {
-      const chatTop = STAGE_PADDING_TOP;
-      const chatHeight = screenHeight - chatTop - STAGE_PADDING_BOTTOM;
-      this.chatPanel = new ChatPanel(socket, roomCode, chatHeight);
-      this.chatPanel.x = chatLeftEdge;
-      this.chatPanel.y = chatTop;
-      this.addChild(this.chatPanel);
-    }
-
-    // ── claim-knapper (LINE/BINGO) ──────────────────────────────────────
-    // Beholdt for back-compat. Mindre framtredende enn før — sitter
-    // nederst i midten, scoper kun klikk-input. Auto-claim på Fullt
-    // Hus drives av backend (PR #855).
-    this.lineBtn = new ClaimButton("LINE", 120, 42);
-    this.lineBtn.x = screenWidth / 2 - 130;
-    this.lineBtn.y = screenHeight - 56;
-    this.lineBtn.setOnClaim((type) => this.onClaim?.(type));
-    this.addChild(this.lineBtn);
-
-    this.bingoBtn = new ClaimButton("BINGO", 120, 42);
-    this.bingoBtn.x = screenWidth / 2 + 10;
-    this.bingoBtn.y = screenHeight - 56;
-    this.bingoBtn.setOnClaim((type) => this.onClaim?.(type));
-    this.addChild(this.bingoBtn);
-
-    // 2026-05-03 (Agent L): Mellom-runde buy-popup. Vises auto når
+    // 2026-05-03 (Agent S, v2): mellom-runde buy-popup. Vises auto når
     // `state.millisUntilNextStart` <= 30 s mens forrige runde fortsatt
-    // pågår (PLAYING/SPECTATING). Speiler Spill 1-flow der popup-en
-    // åpner seg over selve play-screen rett før neste runde starter.
+    // pågår (PLAYING/SPECTATING). Eksplisitt beholdt per Tobias-direktiv:
+    // "kun disse elementene samt popup av kjøp av biletter".
     const popupW = 320;
     const popupH = 220;
     this.buyPopup = new BuyPopup(popupW, popupH);
@@ -167,6 +146,11 @@ export class PlayScreen extends Container {
     this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
   }
 
+  /**
+   * Bevart for kontrakt-kompatibilitet med `Game2Controller`. Ingen UI-
+   * elementer er knyttet til claim i v2 — auto-claim på Fullt Hus
+   * håndteres av backend (PR #855).
+   */
   setOnClaim(cb: (type: "LINE" | "BINGO") => void): void {
     this.onClaim = cb;
   }
@@ -213,15 +197,8 @@ export class PlayScreen extends Container {
   /** Bygg bong-kort fra game state. Erstatter forrige sett. */
   buildTickets(state: GameState): void {
     this.clearBongs();
-    this.lineAlreadyWon = false;
-    this.bingoAlreadyWon = false;
     this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
-
-    // Restore won-flags fra snapshot (late-joiner support).
-    for (const result of state.patternResults) {
-      if (result.isWon && result.claimType === "LINE") this.lineAlreadyWon = true;
-      if (result.isWon && result.claimType === "BINGO") this.bingoAlreadyWon = true;
-    }
+    this.comboPanel.setPlayerCount(state.playerCount ?? 0);
 
     for (let i = 0; i < state.myTickets.length; i++) {
       const ticket = state.myTickets[i];
@@ -249,7 +226,6 @@ export class PlayScreen extends Container {
     this.startCountdown(state.millisUntilNextStart);
 
     this.layoutBongGrid();
-    this.updateClaimButtons(state);
   }
 
   /** Håndter ny trukket ball (fra `numberDrawn`-event). */
@@ -262,7 +238,6 @@ export class PlayScreen extends Container {
     this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
     this.audio.playNumber(number);
     this.startCountdown(state.millisUntilNextStart);
-    this.updateClaimButtons(state);
   }
 
   /** Oppdater jackpot-prizer fra socket-event. */
@@ -270,26 +245,21 @@ export class PlayScreen extends Container {
     this.comboPanel.updateJackpots(list);
   }
 
-  /** Pattern won broadcast — kalles fra controller. */
-  onPatternWon(payload: PatternWonPayload): void {
-    if (payload.claimType === "LINE") {
-      this.lineAlreadyWon = true;
-      this.lineBtn.reset();
-    }
-    if (payload.claimType === "BINGO") {
-      this.bingoAlreadyWon = true;
-      this.bingoBtn.reset();
-    }
+  /**
+   * Pattern won broadcast — kalles fra controller. v2 har ingen
+   * claim-knapper å resette; metoden beholdes som no-op for
+   * kontrakt-kompatibilitet og logging-formål.
+   */
+  onPatternWon(_payload: PatternWonPayload): void {
+    // No-op i v2 — auto-claim på Fullt Hus håndteres av backend.
   }
 
   /** State-oppdatering (player count, prize pool osv.). */
   updateInfo(state: GameState): void {
-    // Combo-panel viser ikke spillere/pot direkte — de kan vises i
-    // jackpot-rad eller header senere. Her oppdaterer vi countdown +
-    // lucky-number for å speile state-endringer fra serveren.
     if (state.myLuckyNumber != null) {
       this.comboPanel.setLuckyNumber(state.myLuckyNumber);
     }
+    this.comboPanel.setPlayerCount(state.playerCount ?? 0);
     this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
     this.startCountdown(state.millisUntilNextStart);
   }
@@ -298,10 +268,6 @@ export class PlayScreen extends Container {
   reset(): void {
     this.clearBongs();
     this.ballTube.clear();
-    this.lineBtn.reset();
-    this.bingoBtn.reset();
-    this.lineAlreadyWon = false;
-    this.bingoAlreadyWon = false;
     this.countdownDeadline = null;
     this.ballTube.setCountdown(null);
   }
@@ -353,20 +319,6 @@ export class PlayScreen extends Container {
     }
   }
 
-  private updateClaimButtons(state: GameState): void {
-    const { canClaimLine, canClaimBingo } = checkClaims(
-      state.myTickets,
-      state.myMarks,
-      state.drawnNumbers,
-    );
-    if (canClaimLine && !this.lineAlreadyWon) {
-      this.lineBtn.setState("ready");
-    }
-    if (canClaimBingo && !this.bingoAlreadyWon) {
-      this.bingoBtn.setState("ready");
-    }
-  }
-
   /**
    * Sett ny countdown-deadline. Tikker ned hvert sekund via `tickCountdown`.
    * `null`/0 viser "—:—".
@@ -401,8 +353,6 @@ export class PlayScreen extends Container {
       sprite.height = this.screenH;
       this.bgSprite = sprite;
       this.addChildAt(sprite, 1); // over fallback, under panels
-      // Når PNG'en er på plass kan vi tillate fallback-rektangelet å
-      // forbli som "letter-box"-fyll bak — la den stå.
     } catch {
       // Asset mangler — vi beholder fallback-fargen.
     }
