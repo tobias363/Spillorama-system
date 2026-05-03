@@ -42,6 +42,7 @@ import type { GameState } from "../../../bridge/GameBridge.js";
 import { BuyPopup } from "../components/BuyPopup.js";
 import { ComboPanel } from "../components/ComboPanel.js";
 import { BallTube } from "../components/BallTube.js";
+import { LykketallPopup } from "../components/LykketallPopup.js";
 import type { JackpotSlotData } from "../components/JackpotsRow.js";
 
 const BG_URL = "/web/games/assets/game2/design/bong-bg.png";
@@ -58,6 +59,11 @@ export class LobbyScreen extends Container {
   private comboPanel: ComboPanel;
   private ballTube: BallTube;
   private buyPopup: BuyPopup;
+  // 2026-05-03 (Agent Y): popup som åpnes ved klikk på Lykketall-kolonnen
+  // i ComboPanel. Erstatter inline LykketallGrid-flyt (samme som i
+  // PlayScreen — speilet for konsistens mellom lobby og play-fase).
+  private lykketallPopup: LykketallPopup;
+  private currentLuckyNumber: number | null = null;
   private screenW: number;
   private screenH: number;
   private stageW: number;
@@ -104,7 +110,9 @@ export class LobbyScreen extends Container {
     this.comboPanel = new ComboPanel(this.stageW);
     this.comboPanel.x = this.stageX;
     this.comboPanel.y = screenHeight - STAGE_PADDING_BOTTOM - this.comboPanel.height;
-    this.comboPanel.setOnLuckyNumber((n) => this.onLuckyNumber?.(n));
+    // setOnLuckyNumber er beholdt no-op for backward-compat; popup-flyt
+    // tar over (klikk på Lykketall-kolonnen → popup → onLuckyNumber).
+    this.comboPanel.setOnLuckyClick(() => this.lykketallPopup.show(this.currentLuckyNumber));
     // "Kjøp flere brett"-pill i ComboPanel åpner Choose Tickets-skjermen
     // (samme oppførsel som PlayScreen).
     this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
@@ -121,6 +129,16 @@ export class LobbyScreen extends Container {
     this.buyPopup.y = (screenHeight - popupH) / 2;
     this.buyPopup.setOnBuy((count) => this.onBuy?.(count));
     this.addChild(this.buyPopup);
+
+    // 2026-05-03 (Agent Y): lykketall-popup. Speiler PlayScreen — klikk
+    // på Lykketall-kolonnen åpner popup-en, valg fyrer onLuckyNumber.
+    this.lykketallPopup = new LykketallPopup(screenWidth, screenHeight);
+    this.lykketallPopup.setOnPick((n) => {
+      this.currentLuckyNumber = n;
+      this.comboPanel.setLuckyNumber(n);
+      this.onLuckyNumber?.(n);
+    });
+    this.addChild(this.lykketallPopup);
 
     // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
     this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
@@ -143,12 +161,9 @@ export class LobbyScreen extends Container {
    * Combo-panel + BallTube.
    */
   update(state: GameState): void {
-    // Lucky number — speilet til Combo-panel.
-    if (state.myLuckyNumber != null) {
-      this.comboPanel.setLuckyNumber(state.myLuckyNumber);
-    } else {
-      this.comboPanel.setLuckyNumber(null);
-    }
+    // Lucky number — speilet til Combo-panel + lokal cache for popup-display.
+    this.currentLuckyNumber = state.myLuckyNumber ?? null;
+    this.comboPanel.setLuckyNumber(this.currentLuckyNumber);
     this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
     this.comboPanel.setPlayerCount(state.playerCount ?? 0);
 

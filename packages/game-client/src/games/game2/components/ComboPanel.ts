@@ -3,13 +3,21 @@
  *
  *   1. PlayerCard      (130px) — ikon + 2-siffer spillerantall
  *   2. Hovedspill 1    (180px) — tittel + "Kjøp flere brett"-pill
- *   3. Velg lykketall  (160px) — kløver + 5×5-grid
+ *   3. Velg lykketall  (160px) — STOR kløver-ikon + "VELG LYKKETALL"-tekst
+ *      (klikkbar — åpner LykketallPopup; valgt nummer vises som tekst)
  *   4. Jackpots        (flex)  — 6 jackpot-sirkler
  *
  * Kolonne-rekkefølgen er endret fra v1 (Lykketall→Hovedspill→Jackpots)
  * per chat2-feedback der brukeren først flyttet `player-col` til høyre,
  * så til venstre, og deretter "Swap Hovedspill and Velg lykketall
  * positions". Sluttilstanden er rekkefølgen over.
+ *
+ * 2026-05-03 (Agent Y, branch feat/spill2-lykketall-popup): inline 5×5
+ * LykketallGrid ERSTATTET med stor kløver + tekst-kolonne. Klikk åpner
+ * LykketallPopup (modal). Per Tobias-direktiv:
+ *
+ *   "designet skal være som dette … velg lykketall skal være en popup
+ *    med da alle tallene som man kan velge mellom"
  *
  * CSS-mockup (`v2 Bong Mockup.html` `.combo-panel`):
  *   - Mørk-rød bakgrunn `rgba(20,5,8,0.55)`, 1.5px white-alpha border, 18px radius
@@ -21,29 +29,23 @@
  * Pixi-implementasjon:
  *   - Container med rounded-rect bakgrunn + dividere som Graphics-rektangler.
  *   - Children (i x-rekkefølge): PlayerCard, HovedspillCol (intern),
- *     LykketallGrid, JackpotsRow.
+ *     LykketallCol (kløver+tekst), JackpotsRow.
  *   - Layout er fast-bredde for de tre første + flex-jackpots; vi tar
  *     imot total panel-bredde og fordeler proportionally.
  *
- * Kontrakt (BEVART for kompatibilitet med PlayScreen + Game2Controller):
- *   - `setOnLuckyNumber(cb)` — videresender klikk fra LykketallGrid.
+ * Kontrakt (BEVART for kompatibilitet med PlayScreen + LobbyScreen):
+ *   - `setOnLuckyClick(cb)` — NY: klikk på Lykketall-kolonnen åpner popup.
+ *   - `setOnLuckyNumber(cb)` — BEVART for backward-compat, men IKKE lenger
+ *     fyrt fra ComboPanel. PlayScreen/LobbyScreen håndterer popup-callback
+ *     direkte.
  *   - `setOnBuyMore(cb)` — kalles ved klikk på "Kjøp flere brett".
- *   - `setLuckyNumber(n)` — markér valgt lucky-number.
+ *   - `setLuckyNumber(n)` — oppdaterer tekst-displayet i Lykketall-kolonnen.
  *   - `updateJackpots(list)` — videresender til JackpotsRow.
  *   - `setCurrentDrawCount(n)` — videresender til JackpotsRow.
- *
- * NY i v2:
  *   - `setPlayerCount(n)` — oppdaterer PlayerCard sitt 2-siffer tall.
- *
- * 2026-05-03 (Agent S, branch feat/spill2-bong-mockup-v2): omstrukturert
- * for v2-design — ny PlayerCard-kolonne, kolonne-rekkefølge endret,
- * paddings/gaps/sizes krympet per CSS-mockup. ComboPanel-bakgrunn er
- * uendret (samme rounded-rect i samme stil); det er kolonnenes innhold
- * som flyttes rundt.
  */
 
-import { Container, Graphics, Text } from "pixi.js";
-import { LykketallGrid } from "./LykketallGrid.js";
+import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
 import { JackpotsRow, type JackpotSlotData } from "./JackpotsRow.js";
 import { PlayerCard, PLAYER_COL_WIDTH } from "./PlayerCard.js";
 
@@ -63,30 +65,41 @@ const LYKKETALL_COL_W = LYKKETALL_INNER_W + PANEL_PADDING_X * 2;
 // Pill-knapp dimensjoner — krympet per v2: 14px font→13, padding 12 18→9 14.
 const PILL_W = 160;
 const PILL_H = 36;
+// Lykketall-kolonne (Agent Y 2026-05-03): høyde matcher Hovedspill-kolonnen
+// så panelet ikke krymper når inline-griddet fjernes. Kløver-ikon er 70px
+// (større enn LykketallGrid sin 44px siden den nå er hovedfokus i kolonnen).
+const LYKKETALL_COL_HEIGHT = 110;
+const CLOVER_SIZE = 70;
+const CLOVER_URL = "/web/games/assets/game2/design/lucky-clover.png";
 
 export class ComboPanel extends Container {
   private bg: Graphics;
   private dividers: Graphics;
   private playerCard: PlayerCard;
-  private lykketall: LykketallGrid;
   private jackpots: JackpotsRow;
   private hovedspillTitle: Text;
   private buyButton: Container;
   private buyButtonBg: Graphics;
+  // Lykketall-kolonne (klikkbar, åpner popup).
+  private lykketallCol: Container;
+  private lykketallLabel: Text;
+  private lykketallClover: Sprite | Graphics | null = null;
   private panelW: number;
   private panelH: number;
+  private currentLuckyNumber: number | null = null;
   private onBuyMore: (() => void) | null = null;
+  private onLuckyClick: (() => void) | null = null;
 
   constructor(panelWidth: number) {
     super();
     this.panelW = panelWidth;
 
     // ── instans-children først (vi trenger dimensjonene til layout) ──────
-    this.lykketall = new LykketallGrid();
     this.jackpots = new JackpotsRow();
 
-    // Panel-høyde dikteres av Lykketall (høyeste kolonne) + 2 * padding.
-    this.panelH = this.lykketall.height + PANEL_PADDING_Y * 2;
+    // Panel-høyde dikteres av Lykketall-kolonnen (samme som før dikterte
+    // gridet) + 2 * padding. Holder samme overall panel-høyde som v1.
+    this.panelH = LYKKETALL_COL_HEIGHT + PANEL_PADDING_Y * 2;
 
     // ── bakgrunn ─────────────────────────────────────────────────────────
     this.bg = new Graphics();
@@ -156,11 +169,56 @@ export class ComboPanel extends Container {
     this.buyButton.on("pointerdown", () => this.onBuyMore?.());
     hovedspillContent.addChild(this.buyButton);
 
-    // ── kolonne 3: Velg lykketall (5×5 grid) ─────────────────────────────
+    // ── kolonne 3: Velg lykketall (kløver + tekst, KLIKKBAR) ─────────────
+    // Hele kolonnen er en Container med pointer-events; klikk åpner popup.
+    // Vi gir den en transparent hit-area som dekker hele kolonne-rektangelet
+    // så clicks også registreres mellom kløver og tekst.
     const lykketallX = PLAYER_COL_WIDTH + COL_DIVIDER_W + HOVEDSPILL_COL_W + COL_DIVIDER_W;
-    this.lykketall.x = lykketallX + PANEL_PADDING_X;
-    this.lykketall.y = (this.panelH - this.lykketall.height) / 2;
-    this.addChild(this.lykketall);
+    this.lykketallCol = new Container();
+    this.lykketallCol.x = lykketallX;
+    this.lykketallCol.y = 0;
+    this.lykketallCol.eventMode = "static";
+    this.lykketallCol.cursor = "pointer";
+
+    // Hit-area + hover-bakgrunn. Vi tegner en rounded-rect som dekker hele
+    // kolonnen, alpha 0 default, 0.08 på hover for visuell feedback.
+    const lykketallHit = new Graphics();
+    this.lykketallCol.addChild(lykketallHit);
+    const drawLykketallHit = (hover: boolean): void => {
+      lykketallHit.clear();
+      lykketallHit
+        .roundRect(4, 4, LYKKETALL_COL_W - 8, this.panelH - 8, 10)
+        .fill({ color: 0xffffff, alpha: hover ? 0.08 : 0.0001 });
+    };
+    drawLykketallHit(false);
+    this.lykketallCol.on("pointerover", () => drawLykketallHit(true));
+    this.lykketallCol.on("pointerout", () => drawLykketallHit(false));
+    this.lykketallCol.on("pointerdown", () => this.onLuckyClick?.());
+
+    // Kløver-ikon (lazy-loaded, fallback til Graphics).
+    void this.loadClover();
+
+    // Label under kløver — viser "VELG LYKKETALL" når ingen valgt, ellers
+    // "Lykketall: NN".
+    this.lykketallLabel = new Text({
+      text: "VELG LYKKETALL",
+      style: {
+        fontFamily: "Inter, system-ui, Helvetica, sans-serif",
+        fontSize: 12,
+        fontWeight: "700",
+        fill: 0xeae0d2,
+        letterSpacing: 1.2,
+        align: "center",
+      },
+    });
+    this.lykketallLabel.anchor.set(0.5, 0);
+    this.lykketallLabel.x = LYKKETALL_COL_W / 2;
+    // Posisjon settes i `layoutLykketallContent` etter at kløveren er lastet.
+    // Foreløpig posisjon: under forventet kløver-plass.
+    this.lykketallLabel.y = (this.panelH - CLOVER_SIZE) / 2 + CLOVER_SIZE + 6;
+    this.lykketallCol.addChild(this.lykketallLabel);
+
+    this.addChild(this.lykketallCol);
 
     // ── kolonne 4: Jackpots (flex til høyre) ─────────────────────────────
     const jackpotsX = lykketallX + LYKKETALL_COL_W + COL_DIVIDER_W + PANEL_PADDING_X;
@@ -187,17 +245,36 @@ export class ComboPanel extends Container {
     this.drawDividers();
   }
 
-  setOnLuckyNumber(cb: (n: number) => void): void {
-    this.lykketall.setOnSelect(cb);
+  /**
+   * BEVART for backward-compat (LobbyScreen + PlayScreen kaller den).
+   * Inline-griddet er fjernet, så denne callback fyres ALDRI fra ComboPanel
+   * lenger. PlayScreen/LobbyScreen ringer onLuckyNumber direkte fra
+   * popup-callback. Ikke fjern signaturen — andre code paths bruker den.
+   */
+  setOnLuckyNumber(_cb: (n: number) => void): void {
+    // No-op i ny design — popup-flyt eier callback-en.
+  }
+
+  /** NY: klikk på Lykketall-kolonnen åpner popup (eier av popup er parent screen). */
+  setOnLuckyClick(cb: () => void): void {
+    this.onLuckyClick = cb;
   }
 
   setOnBuyMore(cb: () => void): void {
     this.onBuyMore = cb;
   }
 
-  /** Markér valgt lucky-number — speilet til LykketallGrid. */
+  /** Markér valgt lucky-number — oppdaterer tekst-display i Lykketall-kolonnen. */
   setLuckyNumber(n: number | null): void {
-    this.lykketall.setLuckyNumber(n);
+    if (this.currentLuckyNumber === n) return;
+    this.currentLuckyNumber = n;
+    if (n != null) {
+      this.lykketallLabel.text = `LYKKETALL: ${n}`;
+      this.lykketallLabel.style.fill = 0xffe83d;
+    } else {
+      this.lykketallLabel.text = "VELG LYKKETALL";
+      this.lykketallLabel.style.fill = 0xeae0d2;
+    }
   }
 
   /** Backend-driver for jackpot-prize-listen. */
@@ -258,5 +335,43 @@ export class ComboPanel extends Container {
     this.buyButtonBg
       .roundRect(2, 2, PILL_W - 4, 2, 1)
       .fill({ color: 0xffffff, alpha: 0.18 });
+  }
+
+  /**
+   * Last kløver-asset asynkront og plasser i Lykketall-kolonnen. Sentrert
+   * horisontalt; vertikalt over labelen så hele blokken (kløver + label)
+   * er midt-stilt i kolonnen.
+   */
+  private async loadClover(): Promise<void> {
+    const blockH = CLOVER_SIZE + 6 + 14; // kløver + gap + label-h
+    const blockTop = (this.panelH - blockH) / 2;
+    try {
+      const tex = (await Assets.load(CLOVER_URL)) as Texture;
+      if (this.destroyed) return;
+      const sprite = new Sprite(tex);
+      sprite.width = CLOVER_SIZE;
+      sprite.height = CLOVER_SIZE;
+      sprite.anchor.set(0.5, 0);
+      sprite.x = LYKKETALL_COL_W / 2;
+      sprite.y = blockTop;
+      this.lykketallCol.addChild(sprite);
+      this.lykketallClover = sprite;
+      // Re-posisjoner label i forhold til faktisk kløver-bunn.
+      this.lykketallLabel.y = blockTop + CLOVER_SIZE + 6;
+    } catch {
+      if (this.destroyed) return;
+      const fallback = new Graphics();
+      fallback.x = LYKKETALL_COL_W / 2;
+      fallback.y = blockTop + CLOVER_SIZE / 2;
+      const r = CLOVER_SIZE * 0.27;
+      fallback.circle(0, -r, r).fill({ color: 0x2f7a32 });
+      fallback.circle(r, 0, r).fill({ color: 0x2f7a32 });
+      fallback.circle(0, r, r).fill({ color: 0x2f7a32 });
+      fallback.circle(-r, 0, r).fill({ color: 0x2f7a32 });
+      fallback.circle(0, 0, r * 0.8).fill({ color: 0x4a9a4a });
+      this.lykketallCol.addChild(fallback);
+      this.lykketallClover = fallback;
+      this.lykketallLabel.y = blockTop + CLOVER_SIZE + 6;
+    }
   }
 }
