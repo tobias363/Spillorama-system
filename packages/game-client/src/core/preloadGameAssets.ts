@@ -33,6 +33,18 @@ const GAME1_CRITICAL_ASSETS = [
 ];
 
 /**
+ * Spill 2 Bong Mockup-design (2026-05-03, Agent E):
+ *   - `bong-bg.png` brukes som full-screen Sprite-bakgrunn i PlayScreen.
+ *   - `lucky-clover.png` brukes som ikon over Lykketall-grid i ComboPanel.
+ * Begge er ~1.7MB hver — pre-warming hindrer pop-in når spilleren
+ * trår inn i en aktiv runde fra lobbyen.
+ */
+const GAME2_CRITICAL_ASSETS = [
+  "/web/games/assets/game2/design/bong-bg.png",
+  "/web/games/assets/game2/design/lucky-clover.png",
+];
+
+/**
  * Pre-warm Pixi's asset cache. Resolves when every URL has settled
  * (loaded OR failed). Never rejects — failure of one asset is logged
  * but not propagated.
@@ -61,7 +73,13 @@ export async function preloadGameAssets(gameSlug: string): Promise<void> {
  */
 export function selectAssetsFor(gameSlug: string): readonly string[] {
   if (gameSlug === "bingo" || gameSlug === "game_1") return GAME1_CRITICAL_ASSETS;
-  // Game 2/3/5/6 currently generate their visuals procedurally — no
+  // 2026-05-03 (Agent E): Spill 2 Bong Mockup-design henter bong-bg
+  // og lucky-clover på inngang. Tidligere returnerte vi `[]` siden
+  // visualene var prosedyrale; nå har vi PNG-bakgrunn + ikon.
+  if (gameSlug === "rocket" || gameSlug === "game_2" || gameSlug === "tallspill") {
+    return GAME2_CRITICAL_ASSETS;
+  }
+  // Game 3/5/6 genererer fortsatt sine visuelle elementer prosedyralt — no
   // external assets to preload. Returning empty is fine; the preload
   // step no-ops and LOADING_ASSETS flashes briefly.
   return [];

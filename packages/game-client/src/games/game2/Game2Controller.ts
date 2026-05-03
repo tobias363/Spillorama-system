@@ -234,6 +234,10 @@ class Game2Controller implements GameController {
       case "PLAYING":
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
+        // 2026-05-03 (Agent E, Bong Mockup-design): Lykketall + "Kjøp flere
+        // brett" lever nå inne i PlayScreen.ComboPanel (var i LobbyScreen).
+        this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
+        this.playScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
@@ -245,6 +249,8 @@ class Game2Controller implements GameController {
         // mark/claim fra spectators uansett.
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
+        this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
+        this.playScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
         this.playScreen.buildTickets(state); // tom ticket-seksjon for spectator
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
