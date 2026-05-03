@@ -2289,7 +2289,12 @@ app.use(createAgentGame1Router({
   pool: platformService.getPool(),
 }));
 // 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): Spill 2 Choose Tickets-side.
-const game2TicketPoolService = new Game2TicketPoolService();
+// 2026-12-06 (v2/v3): pool persisteres til DB; POST /buy chainer pool → bet:arm
+// så engine.startGame henter pool-grids via getPreRoundTicketsByPlayerId-hooken
+// nedenfor. Pool slettes på game-end via engine.bingoAdapter.onGameEnded-flow.
+const game2TicketPoolService = new Game2TicketPoolService({
+  pool: platformService.getPool(),
+});
 app.use(createAgentGame2ChooseTicketsRouter({
   platformService,
   ticketPoolService: game2TicketPoolService,
@@ -2301,7 +2306,47 @@ app.use(createAgentGame2ChooseTicketsRouter({
       return null;
     }
   },
+  // 2026-12-06 (v2): chain pool → bet:arm. POST /buy speiler purchasedIndices-
+  // count inn i armed-state-mapen så `engine.startGame` ser spilleren som
+  // armed med rett count. Engine-laget plukker grids via
+  // `getPreRoundTicketsByPlayerId`-hooken (se under).
+  armRocketPlayerFromPool: (roomCode, playerId, purchasedCount) => {
+    try {
+      roomState.armPlayer(roomCode, playerId, purchasedCount);
+    } catch (err) {
+      console.warn("[agent-game2-choose-tickets] armPlayer failed in armRocketPlayerFromPool", err);
+    }
+  },
 }));
+
+// 2026-12-06 (v2): game-end cleanup-hook. Slett pool fra in-memory cache + DB
+// når runden er over så vi ikke akkumulerer foreldede pools. Vi monkey-patcher
+// `localBingoAdapter.onGameEnded` her (etter pool-service er konstruert) for
+// å unngå konstruksjons-rekkefølge-problemer (engine konstrueres på linje 603,
+// før poolen finnes). Wrapping bevarer eksisterende adapter-oppførsel
+// (game_sessions UPDATE for PostgresBingoSystemAdapter, no-op for Local).
+{
+  const originalOnGameEnded = localBingoAdapter.onGameEnded?.bind(localBingoAdapter);
+  // Always set — vi vil at hooken skal trigge selv om underlying adapter
+  // ikke har en egen onGameEnded (LocalBingoSystemAdapter har en no-op,
+  // PostgresBingoSystemAdapter har faktisk persistens).
+  localBingoAdapter.onGameEnded = async (input) => {
+    if (originalOnGameEnded) {
+      try {
+        await originalOnGameEnded(input);
+      } catch (err) {
+        console.warn("[bingoAdapter.onGameEnded] underlying adapter failed", err);
+      }
+    }
+    // Best-effort pool cleanup — fail-soft fordi adapter-cleanup ikke skal
+    // blokkeres av Spill 2-pool-state.
+    try {
+      await game2TicketPoolService.deletePoolForGame(input.gameId);
+    } catch (err) {
+      console.warn("[game2-ticket-pool] deletePoolForGame failed in onGameEnded", err);
+    }
+  };
+}
 // REQ-101/146: agent manuell mini-game-trigger (fallback for når
 // auto-trigger feilet eller admin endret config midt-runde).
 app.use(createAgentGame1MiniGameRouter({
@@ -3247,7 +3292,38 @@ const registerGameEvents = createGameEventHandlers({
   disarmPlayer: (code, id) => roomState.disarmPlayer(code, id),
   disarmAllPlayers: (code) => roomState.disarmAllPlayers(code),
   clearDisplayTicketCache: (code) => roomState.clearDisplayTicketCache(code),
-  getPreRoundTicketsByPlayerId: (code) => roomState.getPreRoundTicketsByPlayerId(code),
+  getPreRoundTicketsByPlayerId: (code) => {
+    // 2026-12-06 (v2): for Spill 2 (rocket) override Game 1's display-cache
+    // med pool-grids fra Game2TicketPoolService. Klient har allerede valgt
+    // hvilke 3×3-brett han vil spille via Choose Tickets-siden — engine må
+    // adoptere de EXACTE tallene, ikke generere nye random.
+    //
+    // Strategy: hvis room er rocket og pool finnes for current gameId →
+    // bygg map fra pool-cache. Ellers fall tilbake til Game 1's display-
+    // cache (eksisterende oppførsel for bingo + andre slugs).
+    const base = roomState.getPreRoundTicketsByPlayerId(code);
+    try {
+      const snap = engine.getRoomSnapshot(code);
+      if (snap.gameSlug !== "rocket" && snap.gameSlug !== "game_2" && snap.gameSlug !== "tallspill") {
+        return base;
+      }
+      const gameId = snap.currentGame?.id;
+      if (!gameId) return base;
+      const playerIds = game2TicketPoolService.listPlayersWithPurchasedTickets(code, gameId);
+      if (playerIds.length === 0) return base;
+      const merged: Record<string, import("./game/types.js").Ticket[]> = { ...base };
+      for (const pid of playerIds) {
+        const grids = game2TicketPoolService.getPurchasedGridsFromCache(code, pid, gameId);
+        if (!grids || grids.length === 0) continue;
+        merged[pid] = grids.map((grid) => ({ grid: grid.map((row) => [...row]) }));
+      }
+      return merged;
+    } catch {
+      // Fail-soft: hvis snapshot eller pool feiler — bruk eksisterende
+      // base-cache så Game 1-spillere ikke regresserer.
+      return base;
+    }
+  },
   replaceDisplayTicket: (code, id, ticketId, slug) => roomState.replaceDisplayTicket(code, id, ticketId, slug),
   cancelPreRoundTicket: (code, id, ticketId, cfg) => roomState.cancelPreRoundTicket(code, id, ticketId, cfg),
   resolveBingoHallGameConfigForRoom, requireActiveHallIdFromInput, buildLeaderboard,
