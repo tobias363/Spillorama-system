@@ -2576,6 +2576,61 @@ export class BingoEngine {
     }
   }
 
+  /**
+   * Boot-sweep recovery for stale "RUNNING-but-exhausted" Spill 2/3-rom
+   * (Tobias 2026-05-03 — pilot-emergency-fix).
+   *
+   * Bakgrunn: ROCKET / MONSTERBINGO-rom kan i sjeldne tilfeller havne i en
+   * tilstand hvor `currentGame.status === "RUNNING"` og
+   * `drawnNumbers.length === maxBalls` men `endedReason === null`. Det
+   * skjer hvis prosessen krasjet/ble restartet ETTER at engine trakk siste
+   * ball (status fortsatt RUNNING) men FØR engine rakk å mutere status til
+   * ENDED og kjøre `finishPlaySessionsForGame`. Render-restart loader
+   * stale-state tilbake fra checkpoint og PerpetualRoundService kan ikke
+   * spawne ny runde fordi `onGameEnded` aldri ble fyrt for forrige runde.
+   *
+   * Resultat for spilleren: ROCKET henger på "trekk 21/21" uten ny runde,
+   * og PR #876 (game-end-fixen) hjelper ikke fordi den krever en ny
+   * draw-event for å trigge end-pathen — som ikke skjer når ballbagen
+   * allerede er tom.
+   *
+   * Denne metoden er bevisst minimal og bypasser host-actor-validering
+   * (`assertHost`) + scheduled-guards (`assertNotScheduled`,
+   * `assertSpill1NotAdHoc`) fordi den kalles fra system-initiert boot-sweep
+   * (`StaleRoomBootSweepService`), ikke fra brukerinteraksjon. Vi rør
+   * IKKE wallet/compliance/ledger her — finishPlaySessionsForGame +
+   * writeGameEndCheckpoint gjør det samme som den naturlige end-pathen,
+   * og fyrer `bingoAdapter.onGameEnded` slik at PerpetualRoundService
+   * kan schedulere ny runde via eksisterende chain.
+   *
+   * Idempotent — no-op hvis rommet ikke finnes, ikke har en running game,
+   * eller game allerede har `endedReason` satt.
+   *
+   * @param roomCode kanonisk rom-kode (typisk "ROCKET" eller "MONSTERBINGO")
+   * @param endedReason verdi som settes på `game.endedReason` —
+   *   typisk "BOOT_SWEEP_STALE_ROUND" så observability-pipelines kan
+   *   skille disse fra naturlige G2_WINNER/G3_FULL_HOUSE-ender.
+   * @returns true hvis runden faktisk ble end-et, false ved no-op
+   */
+  async forceEndStaleRound(roomCode: string, endedReason: string): Promise<boolean> {
+    const code = roomCode.trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) return false;
+    const game = room.currentGame;
+    if (!game) return false;
+    if (game.status !== "RUNNING") return false;
+    if (game.endedReason) return false;
+
+    const endedAtMs = Date.now();
+    game.status = "ENDED";
+    game.endedAt = new Date(endedAtMs).toISOString();
+    game.endedReason = endedReason;
+    await this.finishPlaySessionsForGame(room, game, endedAtMs);
+    await this.writeGameEndCheckpoint(room, game);
+    await this.rooms.persist(room.code);
+    return true;
+  }
+
   // ── Bølge K5: engine error-handling circuit-breaker (CRIT-4) ──────────────
 
   /**

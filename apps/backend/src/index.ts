@@ -307,6 +307,7 @@ import { socketTraceMiddleware, wrapSocketEventHandlers } from "./middleware/soc
 import { createCspReportRouter } from "./routes/cspReport.js";
 import { setTraceField } from "./util/traceContext.js";
 import { sweepStaleNonCanonicalRooms } from "./util/staleRoomBootSweep.js";
+import { StaleRoomBootSweepService } from "./game/StaleRoomBootSweepService.js";
 import { bootstrapHallGroupRooms } from "./boot/bootstrapHallGroupRooms.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
@@ -3918,6 +3919,50 @@ const PORT = Number(process.env.PORT ?? 4000);
     }
   } catch (err) {
     console.error("[boot-sweep] stale-room sweep failed:", err);
+  }
+
+  // PILOT-EMERGENCY 2026-05-03 (Tobias): boot-sweep for Spill 2/3-rom som
+  // har persistert i `RUNNING + drawnNumbers.length>=maxBalls + endedReason=null`.
+  // Bug-rapport: ROCKET henger på "trekk 21/21" uten ny runde, ingen
+  // nedtelling, bonger vises ikke. Root cause: prosessen krasjet/restartet
+  // ETTER siste draw men FØR engine rakk å fyre game-end. Render-restart
+  // loader stale-state tilbake fra Postgres-checkpoint. PR #876 (game-end fix)
+  // krever ny draw-event for å trigge — ballbagen er allerede tom så ingen
+  // nye draws kommer.
+  //
+  // Sweepen forcefully ender stale ROCKET/MONSTERBINGO-runder og fyrer
+  // `bingoAdapter.onGameEnded` som chain-er til PerpetualRoundService.
+  // handleGameEnded — ny runde scheduleres via vanlig perpetual-loop ~5s
+  // etter at sweepen kjører. Idempotent + fail-soft per rom.
+  //
+  // Kjøres ETTER sweepStaleNonCanonicalRooms (legacy-cleanup) men FØR
+  // bootstrapHallGroupRooms (Spill 1 hall-group-bootstrap) for å unngå
+  // race med rom som kunne bli opprettet under sweepen.
+  try {
+    const spill23SweepService = new StaleRoomBootSweepService({
+      engine,
+      logger: {
+        info: (msg, meta) => console.log(msg, meta ? JSON.stringify(meta) : ""),
+        warn: (msg, meta) => console.warn(msg, meta ? JSON.stringify(meta) : ""),
+        error: (msg, meta) => console.error(msg, meta ? JSON.stringify(meta) : ""),
+      },
+    });
+    const spill23SweepResult = await spill23SweepService.sweep();
+    if (spill23SweepResult.ended.length > 0) {
+      console.warn(
+        `[boot-sweep] Spill 2/3: forced-end ${spill23SweepResult.ended.length} stale rooms: ${spill23SweepResult.ended.join(", ")}`,
+      );
+    }
+    if (spill23SweepResult.failures.length > 0) {
+      console.warn(
+        `[boot-sweep] Spill 2/3: ${spill23SweepResult.failures.length} forceEndStaleRound failures (best-effort, see prior logs)`,
+      );
+    }
+  } catch (err) {
+    // Aldri kast — boot skal ikke feile pga sweep. StaleRoomBootSweepService
+    // er allerede fail-soft per rom; denne ytre catch er en defense-in-depth
+    // mot uventet feil i selve service-konstruksjonen.
+    console.error("[boot-sweep] Spill 2/3 stale-room sweep failed:", err);
   }
 
   // 2026-05-02 (Tobias UX): bootstrap kanonisk rom per aktiv group-of-halls.
