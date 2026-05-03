@@ -387,6 +387,164 @@ export class PerpetualRoundService {
   }
 
   /**
+   * Spawn first-runde for et perpetual-rom når en spiller joiner og det
+   * ikke finnes en aktiv runde. Kalles fra `room:join`-handler etter
+   * vellykket join — symmetrisk med `handleGameEnded` som schedulerer
+   * neste runde etter naturlig end.
+   *
+   * Forskjell fra `handleGameEnded`: ingen `setTimeout`-delay. First-
+   * round-spawn skjer umiddelbart slik at spilleren får se en runde
+   * starte med en gang i stedet for "Stengt" 5 sekunder etter join.
+   *
+   * No-op (returnerer false uten side-effekter) når:
+   *   - Slugen ikke er perpetual (Spill 1 / SpinnGo / ukjent)
+   *   - Slugen er disabled via env-config
+   *   - Servicen er disabled
+   *   - Rommet har allerede en RUNNING (eller WAITING) runde
+   *   - Rommet har en pending auto-restart fra forrige runde (hindrer
+   *     race der join skjer ~5s etter game-end mens timer venter)
+   *   - Rommet er tomt (men dette er sjeldent — handler-en kaller etter
+   *     at spilleren har joined)
+   *   - `getRoomSnapshot` kaster (rom destroyed mellom join og spawn)
+   *
+   * Idempotens: hvis to spillere joiner ROCKET nesten samtidig (samme
+   * tick) vil begge kall se `currentGame` som undefined. Den første
+   * kaller `engine.startGame` som setter status til RUNNING. Den andre
+   * ser `RUNNING` og no-op'er. Race-vinduet er smalt fordi
+   * `engine.startGame` er synkron-til-status-set i BingoEngine, og
+   * Node.js single-threaded event-loop sikrer at en handler kjører ferdig
+   * (modulo `await`) før neste socket-event prosesseres.
+   *
+   * Returnerer `true` hvis en runde faktisk ble spawnet, `false` ellers.
+   * Caller bruker `false`-returnen kun til logging/observability — ingen
+   * UI-konsekvens. `emitRoomUpdate` kalles internt på success så klient-
+   * siden får oppdatert `currentGame` med en gang.
+   */
+  async spawnFirstRoundIfNeeded(roomCode: string): Promise<boolean> {
+    if (!this.config.enabled) return false;
+
+    let snapshot;
+    try {
+      snapshot = this.config.engine.getRoomSnapshot(roomCode);
+    } catch (err) {
+      logger.debug({ roomCode, err }, "perpetual: room not found in spawnFirstRoundIfNeeded");
+      return false;
+    }
+
+    const slug = (snapshot.gameSlug ?? "").toLowerCase().trim();
+    if (!PERPETUAL_SLUGS.has(slug)) {
+      // Spill 1 (`bingo`) + SpinnGo (`spillorama`) + ukjente slugs faller
+      // hit. Ingen logging — kalles på alle joins så det ville flomme.
+      return false;
+    }
+    if (this.config.disabledSlugs.has(slug)) {
+      logger.info(
+        { roomCode, slug, reason: "slug_disabled" },
+        "perpetual: skip first-round spawn",
+      );
+      return false;
+    }
+
+    // Pending auto-restart fra forrige runde: hvis perpetual-tjenesten
+    // venter på å fyre `engine.startGame` etter en game-end, ikke
+    // dupliser. Ny runde kommer av seg selv.
+    if (this.pendingByRoom.has(roomCode)) {
+      logger.debug(
+        { roomCode, slug, reason: "restart_pending" },
+        "perpetual: skip first-round spawn (auto-restart pending)",
+      );
+      return false;
+    }
+
+    // Aktiv runde: WAITING (mellom rounds, sjelden i perpetual) eller
+    // RUNNING betyr at en annen handler allerede har spawnet runden.
+    // ENDED er OK — det er en arkivert runde og auto-restart skal ha
+    // ryddet før denne tilstanden får henge for lenge, men ENDED-state
+    // betyr engine.startGame vil archive den og lage ny.
+    const currentStatus = snapshot.currentGame?.status;
+    if (currentStatus === "WAITING" || currentStatus === "RUNNING") {
+      logger.debug(
+        {
+          roomCode,
+          slug,
+          currentGameId: snapshot.currentGame?.id,
+          currentStatus,
+          reason: "round_active",
+        },
+        "perpetual: skip first-round spawn (round already active)",
+      );
+      return false;
+    }
+
+    if (snapshot.players.length === 0) {
+      // Defensivt: room:join-handler kaller etter at spilleren er joined,
+      // så dette skal ikke skje. Logger som warn for å fange evt. timing-
+      // bug.
+      logger.warn(
+        { roomCode, slug, reason: "empty_room" },
+        "perpetual: skip first-round spawn (no players — unexpected at join-time)",
+      );
+      return false;
+    }
+
+    const variantInfo = this.config.variantLookup.getVariantConfig(roomCode);
+    const startInput: Parameters<PerpetualEngine["startGame"]>[0] = {
+      roomCode,
+      actorPlayerId: snapshot.hostPlayerId,
+      entryFee: this.config.defaultEntryFee,
+      ticketsPerPlayer: this.config.defaultTicketsPerPlayer,
+      payoutPercent: this.config.defaultPayoutPercent,
+      // Symmetrisk med auto-restart: ingen carry-over av armed players.
+      // Spillere må re-velge tickets for å delta i den spawned runden.
+      armedPlayerIds: [],
+      armedPlayerTicketCounts: {},
+      armedPlayerSelections: {},
+      ...(variantInfo?.gameType ? { gameType: variantInfo.gameType } : {}),
+      ...(variantInfo?.config ? { variantConfig: variantInfo.config } : {}),
+    };
+
+    try {
+      await this.config.engine.startGame(startInput);
+      logger.info(
+        {
+          roomCode,
+          slug,
+          actorPlayerId: snapshot.hostPlayerId,
+          playerCount: snapshot.players.length,
+        },
+        "perpetual: first-round spawn succeeded",
+      );
+
+      if (this.config.emitRoomUpdate) {
+        try {
+          await this.config.emitRoomUpdate(roomCode);
+        } catch (err) {
+          logger.warn(
+            { roomCode, err },
+            "perpetual: emitRoomUpdate failed after first-round spawn (best-effort)",
+          );
+        }
+      }
+      return true;
+    } catch (err) {
+      // Samme failure-paths som auto-restart — fail-soft.
+      // PLAYER_ALREADY_IN_RUNNING_GAME / NOT_ENOUGH_PLAYERS / ROUND_START_TOO_SOON
+      // er forventede skip-conditions. Logger på warn for sjelden / uventet
+      // failure (INVALID_ENTRY_FEE etc.).
+      logger.warn(
+        {
+          roomCode,
+          err: err instanceof Error
+            ? { message: err.message, code: (err as Error & { code?: string }).code }
+            : String(err),
+        },
+        "perpetual: first-round spawn failed (best-effort)",
+      );
+      return false;
+    }
+  }
+
+  /**
    * Test-helper: returner antall pending restarts. Brukes av
    * Vitest-tester for å verifisere idempotens uten å peke inn i
    * private state.

@@ -3478,6 +3478,14 @@ const registerGameEvents = createGameEventHandlers({
       );
     }
   },
+
+  // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn første runde
+  // ved spiller-join. Reuser PerpetualRoundService som har all idempotens-
+  // logikken, slug-filteret og default-konfigurasjonen vi trenger. Spill 1
+  // og SpinnGo gir false-return uten effekt — kun rocket / monsterbingo
+  // trigges. Fail-soft: hvis spawn kaster, fanger handler-en og logger
+  // som warn så join fortsetter normalt.
+  spawnFirstRoundIfNeeded: (roomCode) => perpetualRoundService.spawnFirstRoundIfNeeded(roomCode),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

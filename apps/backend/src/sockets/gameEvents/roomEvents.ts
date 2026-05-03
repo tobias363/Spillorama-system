@@ -585,6 +585,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
         socket.join(roomCode);
         // BIN-760: per-wallet socket-rom for `wallet:state`-push.
         socket.join(walletRoomKey(identity.walletId));
+        // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn.
+        // Selv på re-join må vi sjekke — hvis en spiller var alene i ROCKET
+        // og forrige runde naturlig endte (men auto-restart ble ikke
+        // schedulet fordi rommet stod tomt et øyeblikk), skal join trigge
+        // spawn. No-op for Spill 1 / SpinnGo / aktive runder. Fail-soft —
+        // ack sendes uavhengig av utfallet.
+        if (deps.spawnFirstRoundIfNeeded) {
+          try {
+            await deps.spawnFirstRoundIfNeeded(roomCode);
+          } catch (err) {
+            logger.warn({ err, roomCode }, "spawnFirstRoundIfNeeded failed (best-effort)");
+          }
+        }
         const snapshot = await emitRoomUpdate(roomCode);
         ackSuccess(callback, { roomCode, playerId: existingPlayer.id, snapshot });
         return;
@@ -611,6 +624,18 @@ export function registerRoomEvents(ctx: SocketContext): void {
       socket.join(roomCode);
       // BIN-760: per-wallet socket-rom for `wallet:state`-push.
       socket.join(walletRoomKey(identity.walletId));
+      // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn første
+      // runde ved spiller-join. Hooken sjekker selv om slug er rocket /
+      // monsterbingo — Spill 1 og SpinnGo gir false-return uten effekt.
+      // Fail-soft: hvis spawn feiler (f.eks. INSUFFICIENT_BALANCE i tom
+      // konfig) får spilleren fortsatt ack og kan vente på neste runde.
+      if (deps.spawnFirstRoundIfNeeded) {
+        try {
+          await deps.spawnFirstRoundIfNeeded(roomCode);
+        } catch (err) {
+          logger.warn({ err, roomCode }, "spawnFirstRoundIfNeeded failed (best-effort)");
+        }
+      }
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { roomCode, playerId, snapshot });
     } catch (error) {

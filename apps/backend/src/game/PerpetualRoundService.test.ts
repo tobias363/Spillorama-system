@@ -631,3 +631,314 @@ test("cancelAllForTesting tømmer pending-map", () => {
   service.cancelAllForTesting();
   assert.equal(service.pendingCountForTesting(), 0);
 });
+
+// ── spawnFirstRoundIfNeeded (Tobias-direktiv 2026-05-03) ────────────────────
+
+test("spawn: Spill 2 (rocket) første runde startes umiddelbart ved join", async () => {
+  // Ingen currentGame → fresh ROCKET-rom akkurat opprettet av room:join.
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, true, "spawn returnerer true");
+  assert.equal(
+    state.startGameCalls.length,
+    1,
+    "startGame kalles synkront — ingen setTimeout-delay",
+  );
+  assert.equal(timer.pendingCount(), 0, "ingen pending timer for first-round spawn");
+  const call = state.startGameCalls[0]!;
+  assert.equal(call.roomCode, "ROCKET");
+  assert.equal(call.actorPlayerId, "player-1");
+  assert.deepEqual(call.armedPlayerIds, [], "ingen carry-over av armed players");
+});
+
+test("spawn: Spill 3 (monsterbingo) første runde startes umiddelbart ved join", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("MONSTERBINGO");
+
+  assert.equal(spawned, true);
+  assert.equal(state.startGameCalls.length, 1);
+  assert.equal(state.startGameCalls[0]!.roomCode, "MONSTERBINGO");
+});
+
+test("spawn: emitRoomUpdate kalles etter vellykket first-round spawn", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  let emitCalls = 0;
+  const service = makeService({
+    engine,
+    timer,
+    emitRoomUpdate: async (code) => {
+      assert.equal(code, "ROCKET");
+      emitCalls += 1;
+    },
+  });
+
+  await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(emitCalls, 1, "emitRoomUpdate kalt én gang");
+});
+
+test("spawn skip: Spill 1 (slug=bingo) trigger ikke spawn", async () => {
+  const rooms = new Map([
+    ["BINGO_HALL-1", makeRoom({ code: "BINGO_HALL-1", gameSlug: "bingo" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("BINGO_HALL-1");
+
+  assert.equal(spawned, false, "Spill 1 hopper over auto-spawn");
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn skip: SpinnGo (slug=spillorama) trigger ikke spawn", async () => {
+  const rooms = new Map([
+    ["SPILLORAMA-HALL-1", makeRoom({ code: "SPILLORAMA-HALL-1", gameSlug: "spillorama" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("SPILLORAMA-HALL-1");
+
+  assert.equal(spawned, false, "SpinnGo (player-startet databingo) hopper over");
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn skip: aktiv RUNNING-runde gir no-op (idempotens)", async () => {
+  // Simulerer to spillere som joiner samtidig: første spawnet runden,
+  // andre ser RUNNING og skal ikke trigge på nytt.
+  const rooms = new Map([
+    [
+      "ROCKET",
+      makeRoom({
+        code: "ROCKET",
+        gameSlug: "rocket",
+        currentGameStatus: "RUNNING",
+        currentGameId: "game-active",
+      }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, false, "RUNNING-runde blokkerer ny spawn");
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn skip: WAITING-runde gir no-op (kort race-vindu mellom rounds)", async () => {
+  const rooms = new Map([
+    [
+      "ROCKET",
+      makeRoom({
+        code: "ROCKET",
+        gameSlug: "rocket",
+        currentGameStatus: "WAITING",
+        currentGameId: "game-waiting",
+      }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, false);
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn: ENDED-runde tillater fresh spawn (engine.archiveIfEnded rydder)", async () => {
+  // ENDED er forrige rundes arkiverte status. BingoEngine.startGame kaller
+  // archiveIfEnded() før den lager ny — så spawn skal kjøres.
+  const rooms = new Map([
+    [
+      "ROCKET",
+      makeRoom({
+        code: "ROCKET",
+        gameSlug: "rocket",
+        currentGameStatus: "ENDED",
+        currentGameId: "game-prev",
+      }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, true, "ENDED-runde blokkerer ikke spawn");
+  assert.equal(state.startGameCalls.length, 1);
+});
+
+test("spawn skip: pending auto-restart fra forrige runde blokkerer dupe-spawn", async () => {
+  // Scenario: forrige runde endte → handleGameEnded scheduler restart →
+  // ny spiller joiner ROCKET ~3s etter game-end → spawn skal IKKE
+  // trigge fordi auto-restart allerede er i kø.
+  const rooms = new Map([
+    [
+      "ROCKET",
+      makeRoom({
+        code: "ROCKET",
+        gameSlug: "rocket",
+        currentGameStatus: "ENDED",
+        currentGameId: "game-prev",
+      }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  // Først: forrige runde ender og auto-restart schedules.
+  service.handleGameEnded(
+    makeGameEndedInput({ roomCode: "ROCKET", gameId: "game-prev" }),
+  );
+  assert.equal(service.pendingCountForTesting(), 1, "auto-restart pending");
+
+  // Så: ny spiller joiner → spawnFirstRoundIfNeeded kalles av handler.
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, false, "pending auto-restart blokkerer fresh spawn");
+  assert.equal(state.startGameCalls.length, 0, "ingen duplikat startGame");
+  assert.equal(timer.pendingCount(), 1, "auto-restart timer fortsatt aktiv");
+});
+
+test("spawn skip: tomt rom returnerer false uten side-effekter", async () => {
+  // Ekstremt sjeldent (handler kaller etter player joined), men vi
+  // tester defensivt så vi ikke kaster på tom-rom-state.
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket", playerCount: 0 })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, false);
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn skip: rom som ikke eksisterer returnerer false uten å kaste", async () => {
+  const { engine, state } = makeStubEngine();
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("UNKNOWN");
+
+  assert.equal(spawned, false);
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn skip: service disabled returnerer false", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer, enabled: false });
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, false);
+  assert.equal(state.startGameCalls.length, 0);
+});
+
+test("spawn skip: per-slug disabled returnerer false for den slug-en", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+    ["MONSTERBINGO", makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({
+    engine,
+    timer,
+    disabledSlugs: new Set(["monsterbingo"]),
+  });
+
+  const rocketSpawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+  const monsterSpawned = await service.spawnFirstRoundIfNeeded("MONSTERBINGO");
+
+  assert.equal(rocketSpawned, true, "rocket spawnes");
+  assert.equal(monsterSpawned, false, "monsterbingo skipper");
+  assert.equal(state.startGameCalls.length, 1);
+  assert.equal(state.startGameCalls[0]!.roomCode, "ROCKET");
+});
+
+test("spawn fail-soft: startGame kaster → spawn returnerer false uten å kaste", async () => {
+  // F.eks. NOT_ENOUGH_PLAYERS hvis minPlayersToStart=2 i prod-config.
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+  state.startGameImpl = async () => {
+    throw Object.assign(new Error("Du trenger minst 2 spillere"), {
+      code: "NOT_ENOUGH_PLAYERS",
+    });
+  };
+
+  const spawned = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(spawned, false, "spawn returnerer false ved start-feil");
+  assert.equal(state.startGameCalls.length, 1, "startGame ble forsøkt");
+});
+
+test("spawn: dobbel-call innen samme tick — andre call no-ops på RUNNING", async () => {
+  // Race-test: to spillere joiner ROCKET nesten samtidig. Den første
+  // sin spawn-call kjører startGame som setter currentGame til
+  // RUNNING. Den andres call leser nå RUNNING og no-op'er.
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+  // Etter første startGame: oppdater room-state til RUNNING (slik
+  // BingoEngine ville gjort) før vi simulerer andre spillers join.
+  state.startGameImpl = async (input) => {
+    rooms.set(
+      input.roomCode,
+      makeRoom({
+        code: input.roomCode,
+        gameSlug: "rocket",
+        currentGameStatus: "RUNNING",
+        currentGameId: "game-just-started",
+      }),
+    );
+  };
+
+  const first = await service.spawnFirstRoundIfNeeded("ROCKET");
+  const second = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(first, true, "første spiller spawnet runden");
+  assert.equal(second, false, "andre spillers spawn no-op'et");
+  assert.equal(state.startGameCalls.length, 1, "startGame kalt KUN én gang");
+});
