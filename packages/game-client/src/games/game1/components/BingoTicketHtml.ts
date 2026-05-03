@@ -457,6 +457,41 @@ export class BingoTicketHtml {
       this.elvisBannerColorKey = this.ticket.color ?? "";
     }
 
+    // B I N G O-header (Tobias 2026-05-03): Bokstaver i mørk burgundy over
+    // hver kolonne i 5×5-grid. Bruker samme `gridTemplateColumns: repeat(cols, 1fr)`
+    // som ticket-grid → pixel-perfect kolonne-justering uavhengig av celle-bredde.
+    // For 5-kolonne-bonger viser vi "B I N G O". For andre kolonne-tellinger
+    // (f.eks. Spill 2 sin 3-kolonne) brukes første N av "BINGO" — defensiv
+    // fallback siden funksjonen i prinsippet kan kjøres med vilkårlig cols-verdi,
+    // selv om Spill 2 har egen BongCard.ts og ikke bruker denne komponenten.
+    const bingoHeader = document.createElement("div");
+    bingoHeader.className = "ticket-bingo-header";
+    Object.assign(bingoHeader.style, {
+      display: "grid",
+      gridTemplateColumns: `repeat(${this.opts.cols}, 1fr)`,
+      gap: "5px",
+      flex: "0 0 auto",
+      marginBottom: "2px",
+    });
+    const BINGO_LETTERS = "BINGO";
+    for (let i = 0; i < this.opts.cols; i++) {
+      const letter = document.createElement("div");
+      letter.textContent = BINGO_LETTERS[i % BINGO_LETTERS.length] ?? "";
+      Object.assign(letter.style, {
+        textAlign: "center",
+        fontSize: "16px",
+        fontWeight: "800",
+        // Burgundy = samme som MARKED_BG, så headeren matcher den mørke fargen
+        // markerte celler får (visuell kontinuitet med skjermbildet).
+        color: MARKED_BG,
+        letterSpacing: "0.02em",
+        lineHeight: "1",
+        fontFamily: "'Inter', system-ui, sans-serif",
+      });
+      bingoHeader.appendChild(letter);
+    }
+    face.appendChild(bingoHeader);
+
     // Grid container — 5 kolonner, 5px gap.
     const gridWrap = document.createElement("div");
     gridWrap.className = "ticket-grid";

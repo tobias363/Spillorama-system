@@ -43,6 +43,32 @@ describe("BingoTicketHtml", () => {
     expect(cells.length).toBe(25);
   });
 
+  it("renders B I N G O-header with 5 letters above the grid (Tobias 2026-05-03)", () => {
+    // Header skal eksistere som dedikert .ticket-bingo-header-node.
+    const header = ticket.root.querySelector(
+      ".ticket-bingo-header",
+    ) as HTMLDivElement | null;
+    expect(header).not.toBeNull();
+    // 5 bokstaver matcher 5 kolonner — én bokstav per grid-kolonne.
+    const letters = header!.querySelectorAll(":scope > div");
+    expect(letters.length).toBe(5);
+    expect(Array.from(letters).map((l) => l.textContent)).toEqual([
+      "B",
+      "I",
+      "N",
+      "G",
+      "O",
+    ]);
+    // Header må være plassert FØR grid-noden i DOM-rekkefølge så bokstavene
+    // står over første rad av tall.
+    const grid = ticket.root.querySelector(".ticket-grid") as HTMLDivElement;
+    const headerIdx = Array.from(header!.parentElement!.children).indexOf(header!);
+    const gridIdx = Array.from(grid.parentElement!.children).indexOf(grid);
+    expect(headerIdx).toBeLessThan(gridIdx);
+    // Samme grid-template som grid-noden → kolonne-alignment per skjermbildet.
+    expect(header!.style.gridTemplateColumns).toBe(grid.style.gridTemplateColumns);
+  });
+
   it("shows the ticket colour in the header", () => {
     const header = ticket.root.querySelector(".ticket-header-name") as HTMLDivElement;
     expect(header.textContent).toBe("Small Yellow");
