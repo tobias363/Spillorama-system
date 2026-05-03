@@ -40,6 +40,14 @@ const logger = rootLogger.child({ module: "engine.game2" });
 
 /** Minimum draws required before winner check runs (legacy: >9 balls → check). */
 export const GAME2_MIN_DRAWS_FOR_CHECK = 9;
+/**
+ * 2026-05-03: Maks antall baller i Spill 2 (1..21). Når
+ * `drawnNumbers.length >= 21` og ingen vinner ennå → runden ender med
+ * `endedReason: "G2_NO_WINNER"` så `PerpetualRoundService.handleGameEnded`
+ * kan spawne ny runde. Uten denne henger rommet på status=RUNNING for
+ * alltid og blokkerer perpetual-loopen.
+ */
+export const GAME2_MAX_BALLS = 21;
 
 /**
  * Per-draw G2 side-effects published to the socket layer.
@@ -144,6 +152,32 @@ export class Game2Engine extends BingoEngine {
     // Scan all tickets for 9/9 full-plate completion.
     const candidates = this.findG2Winners(room, game);
     if (candidates.length === 0) {
+      // 2026-05-03: hvis alle 21 baller er trukket uten vinner, ender vi
+      // runden med endedReason="G2_NO_WINNER" så PerpetualRoundService
+      // kan spawne ny runde via onGameEnded-hooken. Tidligere hang
+      // rommet på status=RUNNING for alltid og blokkerte loopen.
+      if (drawIndex >= GAME2_MAX_BALLS) {
+        const endedAtMs = Date.now();
+        game.status = "ENDED";
+        game.endedAt = new Date(endedAtMs).toISOString();
+        game.endedReason = "G2_NO_WINNER";
+        await this.finishPlaySessionsForGame(room, game, endedAtMs);
+        await this.writeGameEndCheckpoint(room, game);
+        await this.rooms.persist(room.code);
+
+        this.lastDrawEffectsByRoom.set(room.code, {
+          roomCode: room.code,
+          gameId: game.id,
+          drawIndex,
+          lastBall,
+          jackpotList,
+          winners: [],
+          gameEnded: true,
+          endedReason: "G2_NO_WINNER",
+        });
+        return;
+      }
+
       this.lastDrawEffectsByRoom.set(room.code, {
         roomCode: room.code,
         gameId: game.id,
