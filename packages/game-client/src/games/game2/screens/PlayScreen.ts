@@ -35,6 +35,7 @@ import { BallTube } from "../components/BallTube.js";
 import { ComboPanel } from "../components/ComboPanel.js";
 import type { JackpotSlotData } from "../components/JackpotsRow.js";
 import { ClaimButton } from "../components/ClaimButton.js";
+import { BuyPopup } from "../components/BuyPopup.js";
 import { ChatPanel } from "../../../components/ChatPanel.js";
 import { checkClaims } from "../logic/ClaimDetector.js";
 
@@ -61,6 +62,7 @@ export class PlayScreen extends Container {
   private chatPanel: ChatPanel | null = null;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
+  private buyPopup: BuyPopup;
   private audio: AudioManager;
   private screenW: number;
   private screenH: number;
@@ -69,6 +71,7 @@ export class PlayScreen extends Container {
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
   private onLuckyNumber: ((n: number) => void) | null = null;
   private onChooseTickets: (() => void) | null = null;
+  private onBuyForNextRound: ((count: number) => void) | null = null;
   private lineAlreadyWon = false;
   private bingoAlreadyWon = false;
   /** Nedtellings-driver — vi oppdaterer hvert sekund fra
@@ -148,6 +151,18 @@ export class PlayScreen extends Container {
     this.bingoBtn.setOnClaim((type) => this.onClaim?.(type));
     this.addChild(this.bingoBtn);
 
+    // 2026-05-03 (Agent L): Mellom-runde buy-popup. Vises auto når
+    // `state.millisUntilNextStart` <= 30 s mens forrige runde fortsatt
+    // pågår (PLAYING/SPECTATING). Speiler Spill 1-flow der popup-en
+    // åpner seg over selve play-screen rett før neste runde starter.
+    const popupW = 320;
+    const popupH = 220;
+    this.buyPopup = new BuyPopup(popupW, popupH);
+    this.buyPopup.x = (screenWidth - popupW) / 2;
+    this.buyPopup.y = (screenHeight - popupH) / 2;
+    this.buyPopup.setOnBuy((count) => this.onBuyForNextRound?.(count));
+    this.addChild(this.buyPopup);
+
     // Start lokal countdown-tikker (1Hz). Stoppes i `destroy`.
     this.countdownInterval = setInterval(() => this.tickCountdown(), 1000);
   }
@@ -164,6 +179,35 @@ export class PlayScreen extends Container {
   /** Sett callback for "Kjøp flere brett"-pill. */
   setOnChooseTickets(cb: () => void): void {
     this.onChooseTickets = cb;
+  }
+
+  /**
+   * Sett callback for mellom-runde buy-popup-kjøp. Kalles når spilleren
+   * trykker "Kjøp" i popup-en — controller skal armBet for neste runde.
+   */
+  setOnBuyForNextRound(cb: (count: number) => void): void {
+    this.onBuyForNextRound = cb;
+  }
+
+  /**
+   * Vis mellom-runde buy-popup. Idempotent — gjør ingenting hvis allerede
+   * synlig. Brukes av Game2Controller når countdown < 30 s og spilleren
+   * ikke allerede har armed for neste runde.
+   */
+  showBuyPopupForNextRound(ticketPrice: number, maxTickets = 30): void {
+    if (this.buyPopup.visible) return;
+    this.buyPopup.show(ticketPrice, maxTickets);
+  }
+
+  /** Skjul mellom-runde buy-popup. Idempotent. */
+  hideBuyPopupForNextRound(): void {
+    if (!this.buyPopup.visible) return;
+    this.buyPopup.hide();
+  }
+
+  /** Returner true hvis popup er synlig. Brukes av controller for trigger-gating. */
+  isBuyPopupVisible(): boolean {
+    return this.buyPopup.visible;
   }
 
   /** Bygg bong-kort fra game state. Erstatter forrige sett. */
