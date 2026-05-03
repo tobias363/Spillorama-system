@@ -355,6 +355,16 @@ export function registerRoomEvents(ctx: SocketContext): void {
 
           socket.join(existingCanonical.code);
           socket.join(walletRoomKey(identity.walletId));
+          // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn.
+          // room:create-paths trenger samme trigger som room:join (per
+          // Agent Q diagnose) — Spill 2-klienten emitter room:create.
+          if (deps.spawnFirstRoundIfNeeded) {
+            try {
+              await deps.spawnFirstRoundIfNeeded(existingCanonical.code);
+            } catch (err) {
+              logger.warn({ err, roomCode: existingCanonical.code }, "spawnFirstRoundIfNeeded failed (best-effort)");
+            }
+          }
           const snapshot = await emitRoomUpdate(existingCanonical.code);
           logger.debug({ roomCode: existingCanonical.code }, "BIN-134: room:create → existing canonical");
           ackSuccess(callback, { roomCode: existingCanonical.code, playerId, snapshot });
@@ -396,6 +406,14 @@ export function registerRoomEvents(ctx: SocketContext): void {
 
           socket.join(canonicalRoom.code);
           socket.join(walletRoomKey(identity.walletId));
+          // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn på room:create.
+          if (deps.spawnFirstRoundIfNeeded) {
+            try {
+              await deps.spawnFirstRoundIfNeeded(canonicalRoom.code);
+            } catch (err) {
+              logger.warn({ err, roomCode: canonicalRoom.code }, "spawnFirstRoundIfNeeded failed (best-effort)");
+            }
+          }
           const snapshot = await emitRoomUpdate(canonicalRoom.code);
           logger.debug({ roomCode: canonicalRoom.code }, "BIN-134: room:create → existing canonical (legacy)");
           ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
@@ -447,6 +465,15 @@ export function registerRoomEvents(ctx: SocketContext): void {
       // BIN-760: join per-wallet socket-rom så `wallet:state`-pusher når
       // denne klienten. Se kommentaren i den parallelle grenen ovenfor.
       socket.join(walletRoomKey(identity.walletId));
+      // Tobias-direktiv 2026-05-03: Spill 2/3 perpetual auto-spawn på room:create.
+      // Brand-new ROCKET/MONSTERBINGO-rom trenger første runde umiddelbart.
+      if (deps.spawnFirstRoundIfNeeded) {
+        try {
+          await deps.spawnFirstRoundIfNeeded(roomCode);
+        } catch (err) {
+          logger.warn({ err, roomCode }, "spawnFirstRoundIfNeeded failed (best-effort)");
+        }
+      }
       const snapshot = await emitRoomUpdate(roomCode);
       logger.debug({ roomCode }, "BIN-134: room:create SUCCESS");
       ackSuccess(callback, { roomCode, playerId, snapshot });

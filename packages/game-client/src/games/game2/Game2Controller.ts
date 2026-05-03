@@ -222,17 +222,17 @@ class Game2Controller implements GameController {
         this.lobbyScreen = new LobbyScreen(w, h);
         this.lobbyScreen.setOnBuy((count) => this.handleBuy(count));
         this.lobbyScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        // 2026-05-02 (Tobias UX, PDF 17 wireframe): "Velg brett"-knapp åpner
-        // Choose Tickets-side. Spiller kan velge spesifikke brett fra
-        // 32-pool i stedet for å la systemet random-allotte.
+        // 2026-05-02 (Tobias UX, PDF 17 wireframe): "Kjøp flere brett"-pill
+        // i ComboPanel åpner Choose Tickets-side. Spiller kan velge
+        // spesifikke brett fra 32-pool i stedet for å la systemet
+        // random-allotte.
         this.lobbyScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
         this.lobbyScreen.update(state);
-        // 2026-05-03 (Agent O fix): IKKE auto-vis BuyPopup i LOBBY-fase.
-        // Per PR #866 + #867 design: LobbyScreen har egen "Velg brett for
-        // neste runde"-CTA som åpner ChooseTicketsScreen, og BuyPopup er
-        // forbeholdt mid-runde (PLAYING/SPECTATING) via
-        // `maybeShowBuyPopupForNextRound`. Tidligere `showBuyPopup`-kall
-        // her skapte en duplikat-popup oppå redesignet LobbyScreen.
+        // 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): auto-show
+        // av BuyPopup i LOBBY fjernet per Tobias-direktiv. Designet
+        // (Bong Mockup v2) viser BallTube + bong-grid + ComboPanel uten
+        // overlay i midten. BuyPopup styres nå kun av eksplisitt klikk
+        // på "Kjøp flere brett"-pill i ComboPanel.
         this.setScreen(this.lobbyScreen);
         break;
 

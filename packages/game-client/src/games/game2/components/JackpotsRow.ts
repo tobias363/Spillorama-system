@@ -40,10 +40,13 @@ export interface JackpotSlotData {
 }
 
 const SLOT_KEYS = ["9", "10", "11", "12", "13", "14-21"] as const;
-const CIRCLE_SIZE = 64;
+// 2026-05-03 (Agent S, v2): jackpot-sirkler krympet fra 64→50 og
+// label/amount-størrelser justert ned for å matche v2-mockup
+// (`Bong Mockup.html` `.jackpot-circle { width: 50px; height: 50px; }`).
+const CIRCLE_SIZE = 50;
 const SLOT_GAP = 14;
 const LABEL_GAP = 4; // mellom label og sirkel
-const AMOUNT_GAP = 6; // mellom sirkel og beløp
+const AMOUNT_GAP = 4; // mellom sirkel og beløp (v2: redusert fra 6 → 4)
 
 interface SlotVisual {
   container: Container;
@@ -64,8 +67,9 @@ export class JackpotsRow extends Container {
   constructor() {
     super();
     this.rowWidth = SLOT_KEYS.length * CIRCLE_SIZE + (SLOT_KEYS.length - 1) * SLOT_GAP;
-    // Høyde: label (14) + gap + sirkel + gap + amount (16).
-    this.rowHeight = 14 + LABEL_GAP + CIRCLE_SIZE + AMOUNT_GAP + 16;
+    // Høyde: label (12) + gap + sirkel + gap + amount (13). v2: krympet
+    // fra 14/16-fonts til 12/13 per CSS `.jackpot-label/.jackpot-amount`.
+    this.rowHeight = 12 + LABEL_GAP + CIRCLE_SIZE + AMOUNT_GAP + 13;
     this.buildSlots();
   }
 
@@ -116,7 +120,7 @@ export class JackpotsRow extends Container {
 
       const isRange = key === "14-21";
 
-      // Label over sirkelen.
+      // Label over sirkelen. v2: 12px (uendret).
       const labelText = key === "13" || isRange ? "Gain" : "Jackpot";
       const label = new Text({
         text: labelText,
@@ -134,18 +138,18 @@ export class JackpotsRow extends Container {
       slotContainer.addChild(label);
 
       // Sirkel.
-      const circleY = 14 + LABEL_GAP;
+      const circleY = 12 + LABEL_GAP;
       const circle = new Graphics();
       circle.x = 0;
       circle.y = circleY;
       slotContainer.addChild(circle);
 
-      // Tallet midt i sirkelen.
+      // Tallet midt i sirkelen. v2: 19px (range 13px) — ned fra 22/14.
       const numberText = new Text({
         text: key,
         style: {
           fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-          fontSize: isRange ? 14 : 22,
+          fontSize: isRange ? 13 : 19,
           fontWeight: "600",
           fill: 0xffffff,
           align: "center",
@@ -156,12 +160,12 @@ export class JackpotsRow extends Container {
       numberText.y = circleY + CIRCLE_SIZE / 2;
       slotContainer.addChild(numberText);
 
-      // Beløpet under sirkelen.
+      // Beløpet under sirkelen. v2: 13px (ned fra 14).
       const amountText = new Text({
         text: "0",
         style: {
           fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-          fontSize: 14,
+          fontSize: 13,
           fontWeight: "500",
           fill: 0xffffff,
           align: "center",
