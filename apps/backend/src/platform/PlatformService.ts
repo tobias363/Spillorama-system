@@ -3747,6 +3747,15 @@ export class PlatformService {
       return;
     }
 
+    // 2026-05-03 (Tobias-direktiv): bypass KYC for demo/test-konti med
+    // *@example.com-adresse. Prod-spillere har ikke .example.com-domener
+    // (registrering valider unik e-post + .example.com er reservert IETF
+    // RFC 2606). Trygt å bypasse KYC for disse for testing av spill-flyt
+    // før reelle KYC-flytter er ferdig konfigurert.
+    if (user.email && /@example\.com$/i.test(user.email)) {
+      return;
+    }
+
     if (user.kycStatus !== "VERIFIED") {
       throw new DomainError("KYC_REQUIRED", "KYC må verifiseres før spill kan startes.");
     }
