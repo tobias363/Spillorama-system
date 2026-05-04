@@ -158,6 +158,23 @@ export interface Game2AutoDrawTickServiceOptions {
    * `index.ts` — får klientene full wire-kontrakt.
    */
   broadcaster?: Game2DrawTickBroadcaster;
+  /**
+   * Tobias-direktiv 2026-05-04 (room-uniqueness invariant): valgfri callback
+   * som kjøres hver N-te tick (default 10) for å validere at det fortsatt
+   * kun finnes ÉTT rocket-rom globalt. Brukes av
+   * {@link RoomUniquenessInvariantService} til å oppdage duplikater som
+   * eventuelt har sneket seg inn etter boot.
+   *
+   * Tick-en ignorerer return-verdi og swallow-er feil — invariant-sjekken
+   * må aldri stoppe draw-loopen.
+   *
+   * Optional + fail-soft.
+   */
+  onPeriodicValidation?: () => Promise<void> | void;
+  /**
+   * Hvor ofte (antall ticks) `onPeriodicValidation` skal trigges. Default 10.
+   */
+  periodicValidationEvery?: number;
 }
 
 export interface Game2AutoDrawTickResult {
@@ -188,6 +205,9 @@ export class Game2AutoDrawTickService {
   private readonly drawIntervalMs: number;
   private readonly onStaleRoomEnded?: (roomCode: string) => Promise<void> | void;
   private readonly broadcaster?: Game2DrawTickBroadcaster;
+  private readonly onPeriodicValidation?: () => Promise<void> | void;
+  private readonly periodicValidationEvery: number;
+  private tickCounter = 0;
 
   /**
    * In-memory throttle per rom. Setter siste-draw-timestamp etter hver
@@ -216,6 +236,14 @@ export class Game2AutoDrawTickService {
     this.engine = options.engine;
     this.onStaleRoomEnded = options.onStaleRoomEnded;
     this.broadcaster = options.broadcaster;
+    this.onPeriodicValidation = options.onPeriodicValidation;
+    const validateEvery = options.periodicValidationEvery;
+    this.periodicValidationEvery =
+      typeof validateEvery === "number" &&
+      Number.isFinite(validateEvery) &&
+      validateEvery > 0
+        ? Math.floor(validateEvery)
+        : 10;
     const interval = options.drawIntervalMs;
     // 0 er gyldig (= "ingen throttle" — engine-laget håndhever sin egen
     // minDrawIntervalMs). Negativ/NaN/undefined → default 30 000 ms.
@@ -440,6 +468,25 @@ export class Game2AutoDrawTickService {
       { checked, drawsTriggered, skipped, errors, staleRoomsEnded: staleRoomsEnded.length },
       "[game2-auto-draw] tick completed"
     );
+
+    // Tobias-direktiv 2026-05-04 (room-uniqueness invariant): periodisk
+    // sanity-check at det fortsatt er ETT globalt rocket-rom. Trigges hver
+    // `periodicValidationEvery`-te tick (default 10) for å holde overhead
+    // lav. Fail-soft: feil i validering må ALDRI ta ned draw-loopen.
+    this.tickCounter += 1;
+    if (
+      this.onPeriodicValidation !== undefined &&
+      this.tickCounter % this.periodicValidationEvery === 0
+    ) {
+      try {
+        await this.onPeriodicValidation();
+      } catch (err) {
+        log.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[game2-auto-draw] periodic invariant validation threw — swallowed"
+        );
+      }
+    }
 
     const result: Game2AutoDrawTickResult = {
       checked,

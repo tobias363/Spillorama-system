@@ -55,6 +55,7 @@ import { randomUUID } from "node:crypto";
 import { logger as rootLogger } from "../util/logger.js";
 import { logRoomEvent } from "../util/roomLogVerbose.js";
 import { makeRoomCode } from "./ticket.js";
+import { isCanonicalRoomCode } from "../util/canonicalRoomCode.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { RoomStateStore } from "../store/RoomStateStore.js";
 import type {
@@ -242,11 +243,36 @@ export class RoomLifecycleService {
       hallId,
     };
 
+    // Tobias-direktiv 2026-05-04 (room-uniqueness invariant): hvis caller
+    // har bedt om en KANONISK rom-kode (BINGO_*, ROCKET, MONSTERBINGO) og
+    // den allerede finnes i `this.rooms`, IKKE fall tilbake til en random-
+    // generert kode — det skaper duplikat-rom for samme slug-invariant.
+    // Race-eksempel: Hall A og Hall B kaller `createRoom({roomCode:"ROCKET"})`
+    // samtidig; A vinner racet og setter `ROCKET`, B faller her igjennom og
+    // havner i `makeRoomCode()` → ny random kode for samme rocket-slug.
+    // Resultat: to ROCKET-rom som spillere kan splitte seg mellom.
+    //
+    // Korrekt oppførsel: kast ROOM_ALREADY_EXISTS så caller (room:create-
+    // handler) kan re-loope tilbake til `findRoomByCode` og joine det
+    // eksisterende rommet i stedet. For non-canonical codes (legacy random,
+    // tester med eksplisitt code) beholder vi den gamle fall-back-oppførselen.
     const existingCodes = new Set(this.rooms.keys());
-    const code =
-      input.roomCode && !existingCodes.has(input.roomCode)
-        ? input.roomCode
-        : makeRoomCode(existingCodes);
+    let code: string;
+    if (input.roomCode && existingCodes.has(input.roomCode)) {
+      if (isCanonicalRoomCode(input.roomCode)) {
+        throw new DomainError(
+          "ROOM_ALREADY_EXISTS",
+          `Kanonisk rom ${input.roomCode} finnes allerede. Bruk findRoomByCode + joinRoom i stedet.`,
+        );
+      }
+      // Legacy non-canonical fallback: generer random kode (eksisterende
+      // oppførsel for tester og random-coded rom).
+      code = makeRoomCode(existingCodes);
+    } else if (input.roomCode) {
+      code = input.roomCode;
+    } else {
+      code = makeRoomCode(existingCodes);
+    }
     // Tobias 2026-04-27: Spill 2/3 sender `effectiveHallId: null` for shared
     // global rooms. Vi beholder opprettende hall i `room.hallId` (audit) men
     // setter `isHallShared=true` så `joinRoom` skipper HALL_MISMATCH.

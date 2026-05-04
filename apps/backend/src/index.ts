@@ -317,6 +317,7 @@ import { setTraceField } from "./util/traceContext.js";
 import { sweepStaleNonCanonicalRooms } from "./util/staleRoomBootSweep.js";
 import { StaleRoomBootSweepService } from "./game/StaleRoomBootSweepService.js";
 import { bootstrapHallGroupRooms } from "./boot/bootstrapHallGroupRooms.js";
+import { RoomUniquenessInvariantService } from "./game/RoomUniquenessInvariantService.js";
 import { resetTestPlayers } from "./scripts/resetTestPlayers.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
@@ -1982,16 +1983,35 @@ const game23DrawBroadcaster = createGame23DrawBroadcaster({
   emitRoomUpdate,
 });
 
+// 2026-05-04 (Tobias-direktiv): periodic room-uniqueness invariant
+// validator. Brukes av Game2/Game3-tick som callback (hver 10. tick) for
+// kontinuerlig "ETT-rom"-håndhevelse. detectOnly=true så tick ikke river
+// rom mens spillere er i dem — kun boot-sweep konsoliderer aktivt.
+const periodicRoomUniquenessValidator = new RoomUniquenessInvariantService({
+  engine,
+  logger: {
+    info: (data, msg) => console.log(msg, JSON.stringify(data)),
+    warn: (data, msg) => console.warn(msg, JSON.stringify(data)),
+    error: (data, msg) => console.error(msg, JSON.stringify(data)),
+  },
+  detectOnly: true,
+});
+const periodicRoomUniquenessValidate = async (): Promise<void> => {
+  await periodicRoomUniquenessValidator.scan();
+};
+
 const game2AutoDrawTickService = new Game2AutoDrawTickService({
   engine,
   drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
   onStaleRoomEnded: onStaleRoomEndedCallback,
   broadcaster: game23DrawBroadcaster,
+  onPeriodicValidation: periodicRoomUniquenessValidate,
 });
 const game3AutoDrawTickService = new Game3AutoDrawTickService({
   engine,
   drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
   broadcaster: game23DrawBroadcaster,
+  onPeriodicValidation: periodicRoomUniquenessValidate,
 });
 jobScheduler.register({
   name: "game2-auto-draw-tick",
@@ -4140,6 +4160,43 @@ const PORT = Number(process.env.PORT ?? 4000);
     }
   } catch (err) {
     console.error("[boot-bootstrap] hall-group room bootstrap failed:", err);
+  }
+
+  // 2026-05-04 (Tobias-direktiv): regulatorisk invariant-sweep for ETT-rom
+  // per Spill 1 group-of-halls / Spill 2 globalt / Spill 3 globalt. Kjøres
+  // SISTE i boot-sequence — etter alle eksisterende sweeps + bootstrap så
+  // vi ser endelig rom-state. Hvis tidligere passes har skapt duplikater
+  // (race i createRoom, restart-load fra Postgres-checkpoint, eller manuell
+  // admin-create) konsoliderer denne dem til ÉN rom per invariant-key.
+  //
+  // Fail-soft: catch er den ytterste defense-in-depth — service-en er
+  // selv fail-soft per rom og kaster aldri normalt.
+  try {
+    const invariantService = new RoomUniquenessInvariantService({
+      engine,
+      logger: {
+        info: (data, msg) => console.log(msg, JSON.stringify(data)),
+        warn: (data, msg) => console.warn(msg, JSON.stringify(data)),
+        error: (data, msg) => console.error(msg, JSON.stringify(data)),
+      },
+    });
+    const invariantResult = await invariantService.scan();
+    if (invariantResult.violations.length > 0) {
+      console.warn(
+        `[room-uniqueness] Boot found ${invariantResult.violations.length} invariant violations:`,
+        invariantResult.violations.map((v) => ({
+          type: v.type,
+          slug: v.slug,
+          groupId: v.groupId,
+          count: v.count,
+          kept: v.kept,
+          consolidated: v.consolidated.length,
+          preservedActive: v.preservedActive.length,
+        })),
+      );
+    }
+  } catch (err) {
+    console.error("[room-uniqueness] boot invariant scan failed:", err);
   }
 
   // 2026-05-03 (Tobias-direktiv, Agent EE): clean-slate test-spillere ved

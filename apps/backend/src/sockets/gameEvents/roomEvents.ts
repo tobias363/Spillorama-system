@@ -431,19 +431,74 @@ export function registerRoomEvents(ctx: SocketContext): void {
           ? (code, pid) => deps.hasArmedOrReservation!(code, pid)
           : undefined,
       });
-      const { roomCode, playerId } = await engine.createRoom({
-        playerName: identity.playerName,
-        hallId: identity.hallId,
-        walletId: identity.walletId,
-        socketId: socket.id,
-        // BIN-134: Use canonical room-code so SPA alias = real code.
-        roomCode: canonicalMapping?.roomCode,
-        // Tobias 2026-04-27: shared rooms (Spill 2/3) signaliserer dette via
-        // `effectiveHallId=null` så `joinRoom` ikke kaster HALL_MISMATCH.
-        effectiveHallId: canonicalMapping ? canonicalMapping.effectiveHallId : undefined,
-        gameSlug: requestedGameSlug,
-        ...(isTestHall ? { isTestHall: true } : {}),
-      });
+      let roomCode: string;
+      let playerId: string;
+      try {
+        const created = await engine.createRoom({
+          playerName: identity.playerName,
+          hallId: identity.hallId,
+          walletId: identity.walletId,
+          socketId: socket.id,
+          // BIN-134: Use canonical room-code so SPA alias = real code.
+          roomCode: canonicalMapping?.roomCode,
+          // Tobias 2026-04-27: shared rooms (Spill 2/3) signaliserer dette via
+          // `effectiveHallId=null` så `joinRoom` ikke kaster HALL_MISMATCH.
+          effectiveHallId: canonicalMapping ? canonicalMapping.effectiveHallId : undefined,
+          gameSlug: requestedGameSlug,
+          ...(isTestHall ? { isTestHall: true } : {}),
+        });
+        roomCode = created.roomCode;
+        playerId = created.playerId;
+      } catch (err) {
+        // Tobias-direktiv 2026-05-04 (room-uniqueness invariant): hvis to
+        // samtidige room:create-kall race-er på samme canonical kode, vil
+        // taperen få ROOM_ALREADY_EXISTS i stedet for en fallback random
+        // kode (som ville skapt duplikat-rom). Vi recover ved å re-loope
+        // til "join existing canonical"-pathen ovenfor — vinneren av racet
+        // har allerede satt opp rommet.
+        const errCode = (err as { code?: string } | null)?.code;
+        if (errCode === "ROOM_ALREADY_EXISTS" && canonicalMapping) {
+          const existingCanonical = engine.findRoomByCode(canonicalMapping.roomCode);
+          if (existingCanonical) {
+            logger.warn(
+              { walletId: identity.walletId, target: canonicalMapping.roomCode },
+              "[room:create] ROOM_ALREADY_EXISTS race — recovering by joining existing canonical",
+            );
+            // Refresh isTestHall same som happy-path ovenfor.
+            engine.setRoomTestHall(existingCanonical.code, isTestHall);
+            const canonicalSnapshot = engine.getRoomSnapshot(existingCanonical.code);
+            const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
+            if (existingPlayer) {
+              engine.attachPlayerSocket(existingCanonical.code, existingPlayer.id, socket.id);
+              roomCode = existingCanonical.code;
+              playerId = existingPlayer.id;
+            } else {
+              const joined = await engine.joinRoom({
+                roomCode: existingCanonical.code,
+                hallId: identity.hallId,
+                playerName: identity.playerName,
+                walletId: identity.walletId,
+                socketId: socket.id,
+              });
+              roomCode = existingCanonical.code;
+              playerId = joined.playerId;
+            }
+            socket.join(roomCode);
+            socket.join(walletRoomKey(identity.walletId));
+            if (deps.spawnFirstRoundIfNeeded) {
+              try {
+                await deps.spawnFirstRoundIfNeeded(roomCode);
+              } catch (spawnErr) {
+                logger.warn({ err: spawnErr, roomCode }, "spawnFirstRoundIfNeeded failed (best-effort)");
+              }
+            }
+            const recoverSnapshot = await emitRoomUpdate(roomCode);
+            ackSuccess(callback, { roomCode, playerId, snapshot: recoverSnapshot });
+            return;
+          }
+        }
+        throw err;
+      }
       // BIN-694: wire DEFAULT variantConfig (5-fase Norsk bingo for Game 1)
       // immediately after room-creation. Before this, `setVariantConfig`
       // was only called in tests — production rooms had no variant bound,
