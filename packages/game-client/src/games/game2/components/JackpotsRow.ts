@@ -1,23 +1,22 @@
 /**
  * Spill 2 — 6 jackpot/gain-slots i en horisontal rad. Hver slot rendres
- * som en Spill 1-stil ball-PNG med tall sentrert. Over står "Jackpot"/
- * "Gain" som label, under står beløpet.
+ * som en mørk-rød sirkel med tall sentrert + gull-border. Over står
+ * "Jackpot"/"Gain" som label, under står beløpet.
  *
- * 2026-05-04 (Tobias-direktiv): SPILL 1-PARITET PÅ DESIGN.
- *   - Erstatter `Graphics.circle().fill()`-stilen med samme PNG-ball-asset
- *     som drawn-balls i `BallTube`. Visuell unitet med trukne baller.
- *   - Slots fordeles JEVENT over tilgjengelig bredde (`setBarWidth`) så
- *     det ikke er stor tom plass til høyre for "14-21"-ballen.
+ * 2026-05-04 (Tobias-direktiv revert): tilbake til Graphics-sirkler med
+ * gull-border. Tidligere var det PNG-blue-baller (PR #915), men Tobias
+ * ville se det opprinnelige design med mørk-rød sirkel + gull/yellow
+ * border som tydelig matcher "gevinst-mønster"-styling fra mockup.
  *
  * Kontrakt:
  *   - `update(list)` — full prize-liste fra `g2:jackpot:list-update`-event.
- *   - `setCurrentDrawCount(n)` — markerer aktiv slot.
- *   - `setBarWidth(w)` — NY: distribuer slots over total bredde `w`.
+ *   - `setCurrentDrawCount(n)` — markerer aktiv slot (ekstra glow-ring).
+ *   - `setBarWidth(w)` — distribuer slots over total bredde `w` (jevn).
  *   - `barWidth` — get returnerer current allotted bredde.
- *   - `barHeight` — get returnerer total høyde (label + ball + amount).
+ *   - `barHeight` — get returnerer total høyde (label + sirkel + amount).
  */
 
-import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
+import { Container, Graphics, Text } from "pixi.js";
 
 export interface JackpotSlotData {
   /** Slot-nøkkel: "9" | "10" | "11" | "12" | "13" | "14-21". */
@@ -35,41 +34,23 @@ const AMOUNT_GAP = 4;
 const LABEL_H = 12;
 const AMOUNT_H = 13;
 
-/**
- * PNG-mapping speilet av Spill 1's `getBallAssetPath`. Slot-key parses
- * til lavest tall (range "14-21" → 14) for color-lookup. Alle slot 9-13
- * og 14 ≤ 15 mapper til blue.png — visuell unitet.
- */
-function getBallAssetPath(n: number): string {
-  if (n <= 15) return "/web/games/assets/game1/design/balls/blue.png";
-  if (n <= 30) return "/web/games/assets/game1/design/balls/red.png";
-  if (n <= 45) return "/web/games/assets/game1/design/balls/purple.png";
-  if (n <= 60) return "/web/games/assets/game1/design/balls/green.png";
-  return "/web/games/assets/game1/design/balls/yellow.png";
-}
-
-function enableMipmaps(texture: Texture): void {
-  const src = texture.source as unknown as {
-    autoGenerateMipmaps?: boolean;
-    scaleMode?: string;
-    updateMipmaps?: () => void;
-  };
-  if (src && !src.autoGenerateMipmaps) {
-    src.autoGenerateMipmaps = true;
-    src.scaleMode = "linear";
-    src.updateMipmaps?.();
-  }
-}
+/** Gull-border på alle slots (alpha=0.85). Aktiv slot får mer markert gull. */
+const BORDER_DEFAULT_COLOR = 0xffd97a;
+const BORDER_DEFAULT_ALPHA = 0.85;
+const BORDER_ACTIVE_COLOR = 0xffd97a;
+const BORDER_ACTIVE_ALPHA = 1.0;
+const FILL_DEFAULT_COLOR = 0x501216;
+const FILL_DEFAULT_ALPHA = 0.55;
+const FILL_ACTIVE_COLOR = 0xa02830;
+const FILL_ACTIVE_ALPHA = 0.85;
 
 interface SlotVisual {
   container: Container;
-  ballSprite: Sprite | null;
-  highlight: Graphics;
+  circle: Graphics;
   label: Text;
   numberText: Text;
   amountText: Text;
   isRange: boolean;
-  numericKey: number;
 }
 
 export class JackpotsRow extends Container {
@@ -101,8 +82,7 @@ export class JackpotsRow extends Container {
   /**
    * Tobias-direktiv 2026-05-04: distribuer slots JEVENT over tilgjengelig
    * bredde. Med 6 slots og kjent total-bredde plasserer vi første slot
-   * på x=0 og siste på x=(width - CIRCLE_SIZE) — like avstand mellom
-   * sentre. Eliminerer tom plass til høyre for "14-21"-ballen.
+   * på x=0 og siste på x=(width - CIRCLE_SIZE).
    *
    * Idempotent — gjør ingenting hvis bredden ikke endret.
    */
@@ -144,9 +124,8 @@ export class JackpotsRow extends Container {
       this.addChild(slotContainer);
 
       const isRange = key === "14-21";
-      const numericKey = isRange ? 14 : parseInt(key, 10);
 
-      // Label over ballen.
+      // Label over sirkelen.
       const labelText = key === "13" || isRange ? "Gain" : "Jackpot";
       const label = new Text({
         text: labelText,
@@ -163,62 +142,30 @@ export class JackpotsRow extends Container {
       label.y = 0;
       slotContainer.addChild(label);
 
-      // Ball-PNG-bakgrunn (lazy-loaded).
-      const ballY = LABEL_H + LABEL_GAP;
-      let ballSprite: Sprite | null = null;
-      const url = getBallAssetPath(numericKey);
-      const cached = Assets.cache.get(url) as Texture | undefined;
-      if (cached) {
-        enableMipmaps(cached);
-        ballSprite = new Sprite(cached);
-        ballSprite.width = CIRCLE_SIZE;
-        ballSprite.height = CIRCLE_SIZE;
-        ballSprite.x = 0;
-        ballSprite.y = ballY;
-        slotContainer.addChild(ballSprite);
-      } else {
-        void Assets.load(url)
-          .then((tex: Texture) => {
-            if (slotContainer.destroyed) return;
-            enableMipmaps(tex);
-            const sprite = new Sprite(tex);
-            sprite.width = CIRCLE_SIZE;
-            sprite.height = CIRCLE_SIZE;
-            sprite.x = 0;
-            sprite.y = ballY;
-            slotContainer.addChildAt(sprite, 1); // over label, under text
-            const slot = this.slots.get(key);
-            if (slot) slot.ballSprite = sprite;
-          })
-          .catch(() => {});
-      }
+      // Sirkel.
+      const circleY = LABEL_H + LABEL_GAP;
+      const circle = new Graphics();
+      circle.x = 0;
+      circle.y = circleY;
+      slotContainer.addChild(circle);
 
-      // Highlight-ring som tegnes OVER ballen når slot er aktiv. Tegnes
-      // som tom Graphics nå; renderActiveHighlight fyller den.
-      const highlight = new Graphics();
-      highlight.x = 0;
-      highlight.y = ballY;
-      slotContainer.addChild(highlight);
-
-      // Tallet (eller range "14-21") sentrert på ballen.
+      // Tallet midt i sirkelen.
       const numberText = new Text({
         text: key,
         style: {
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          fontFamily: "Inter, system-ui, Helvetica, sans-serif",
           fontSize: isRange ? 13 : 19,
-          fontWeight: "800",
-          fill: 0x1a0a0a,
+          fontWeight: "600",
+          fill: 0xffffff,
           align: "center",
-          letterSpacing: -0.5,
         },
       });
       numberText.anchor.set(0.5);
-      // -1px optisk forskyvning matcher Spill 1's ball-text-offset.
-      numberText.x = CIRCLE_SIZE / 2 - 1;
-      numberText.y = ballY + CIRCLE_SIZE / 2;
+      numberText.x = CIRCLE_SIZE / 2;
+      numberText.y = circleY + CIRCLE_SIZE / 2;
       slotContainer.addChild(numberText);
 
-      // Beløpet under ballen.
+      // Beløpet under sirkelen.
       const amountText = new Text({
         text: "0",
         style: {
@@ -231,18 +178,16 @@ export class JackpotsRow extends Container {
       });
       amountText.anchor.set(0.5, 0);
       amountText.x = CIRCLE_SIZE / 2;
-      amountText.y = ballY + CIRCLE_SIZE + AMOUNT_GAP;
+      amountText.y = circleY + CIRCLE_SIZE + AMOUNT_GAP;
       slotContainer.addChild(amountText);
 
       this.slots.set(key, {
         container: slotContainer,
-        ballSprite,
-        highlight,
+        circle,
         label,
         numberText,
         amountText,
         isRange,
-        numericKey,
       });
     });
     this.layoutSlots();
@@ -255,8 +200,6 @@ export class JackpotsRow extends Container {
    * siste slot ved x=(rowWidth - CIRCLE_SIZE), midlere slots interpolert.
    */
   private layoutSlots(): void {
-    // SLOT_KEYS er alltid 6 elementer; stride er trygt å beregne uten
-    // single-slot-spesialtilfelle. Stride = avstand mellom slot-sentre.
     const n = SLOT_KEYS.length;
     const stride = (this.rowWidth - CIRCLE_SIZE) / (n - 1);
     SLOT_KEYS.forEach((key, idx) => {
@@ -270,17 +213,27 @@ export class JackpotsRow extends Container {
       const slot = this.slots.get(key);
       if (!slot) continue;
       const isActive = this.activeSlotKey === key;
-      slot.highlight.clear();
-      if (isActive) {
-        // Glødende ring rundt aktiv ball — gull-aksent (matcher Spill 1's
-        // active-ball-highlight). Tegnes som ekstra ring rundt PNG-ballen.
-        slot.highlight
-          .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2 + 3)
-          .stroke({ color: 0xffd97a, alpha: 0.9, width: 2.5 });
-        slot.highlight
-          .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2 + 1)
-          .fill({ color: 0xffd97a, alpha: 0.10 });
-      }
+      slot.circle.clear();
+      // Mørk-rød base.
+      slot.circle
+        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2)
+        .fill({
+          color: isActive ? FILL_ACTIVE_COLOR : FILL_DEFAULT_COLOR,
+          alpha: isActive ? FILL_ACTIVE_ALPHA : FILL_DEFAULT_ALPHA,
+        });
+      // Indre highlight-disk (subtil hvit oversiden av sirkelen).
+      slot.circle
+        .circle(CIRCLE_SIZE * 0.5, CIRCLE_SIZE * 0.45, CIRCLE_SIZE * 0.42)
+        .fill({ color: 0xffffff, alpha: 0.10 });
+      // GULL-BORDER på ALLE slots (Tobias-direktiv 2026-05-04).
+      // Aktiv slot får tykkere + sterkere gull-stroke.
+      slot.circle
+        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2)
+        .stroke({
+          color: isActive ? BORDER_ACTIVE_COLOR : BORDER_DEFAULT_COLOR,
+          alpha: isActive ? BORDER_ACTIVE_ALPHA : BORDER_DEFAULT_ALPHA,
+          width: isActive ? 2.5 : 1.5,
+        });
     }
   }
 

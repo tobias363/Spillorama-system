@@ -192,24 +192,13 @@ export class BallTube extends Container {
     this.countdownRow.addChild(this.countdownValue);
     this.counter.addChild(this.countdownRow);
 
-    // ── "Trekk N/M"-raden ────────────────────────────────────────────────
+    // ── "Trekk: N/M"-raden ───────────────────────────────────────────────
+    // Tobias-direktiv 2026-05-04: kombinert "Trekk" (label) + "0/0"
+    // (verdi) til én Text-komponent med konsistent hvit fyll. Tidligere
+    // var label-en beige (#eae0d2) og verdien hvit — visuell uenighet.
     this.drawCountRow = new Container();
-    const drawLabel = new Text({
-      text: "Trekk",
-      style: {
-        fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-        fontSize: 14,
-        fontWeight: "500",
-        fill: 0xeae0d2,
-      },
-    });
-    drawLabel.anchor.set(0.5, 0.5);
-    drawLabel.x = COUNTER_WIDTH * 0.40;
-    drawLabel.y = counterRowH * 1.5;
-    this.drawCountRow.addChild(drawLabel);
-
     this.drawCountValue = new Text({
-      text: "0/0",
+      text: "Trekk: 0/0",
       style: {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
         fontSize: 17,
@@ -219,7 +208,7 @@ export class BallTube extends Container {
       },
     });
     this.drawCountValue.anchor.set(0.5, 0.5);
-    this.drawCountValue.x = COUNTER_WIDTH * 0.78;
+    this.drawCountValue.x = COUNTER_WIDTH * 0.5;
     this.drawCountValue.y = counterRowH * 1.5;
     this.drawCountRow.addChild(this.drawCountValue);
     this.counter.addChild(this.drawCountRow);
@@ -246,10 +235,10 @@ export class BallTube extends Container {
     this.layoutBalls(false);
   }
 
-  /** Sett "Trekk N/M". */
+  /** Sett "Trekk: N/M". Kombinert label+verdi i én Text per Tobias-direktiv. */
   setDrawCount(current: number, total: number): void {
     const totStr = total > 0 ? `${pad2(current)}/${pad2(total)}` : `${current}`;
-    this.drawCountValue.text = totStr;
+    this.drawCountValue.text = `Trekk: ${totStr}`;
   }
 
   /**
@@ -353,22 +342,23 @@ export class BallTube extends Container {
 
   private drawBg(): void {
     this.bg.clear();
+    // Tobias-direktiv 2026-05-04: fjernet top-highlight + sheen-stripe-
+    // overlay som overflowet ut av rounded corners. Pixi `roundRect` med
+    // radius > half-height kuttes til min(w,h)/2; den indre overlayens
+    // bunn-kant ble da en flat horisontal linje som krysset de buede
+    // hjørnene synlig som artefakter på topp-venstre + topp-høyre.
+    // Beholder kun: base-fill + border + bunn-skygge. Glass-effekten
+    // kommer naturlig fra den subtile alpha-gradering uansett.
     this.bg.roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT, TUBE_RADIUS).fill({
       color: 0x140508,
       alpha: 0.55,
     });
-    this.bg
-      .roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT * 0.40, TUBE_RADIUS)
-      .fill({ color: 0xffffff, alpha: 0.06 });
     this.bg
       .roundRect(2, TUBE_HEIGHT - 4, this.tubeWidth - 4, 4, 4)
       .fill({ color: 0x000000, alpha: 0.30 });
     this.bg
       .roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT, TUBE_RADIUS)
       .stroke({ color: 0xffffff, alpha: 0.55, width: 1.5 });
-    this.bg
-      .roundRect(24, 6, this.tubeWidth - 48, 14, 10)
-      .fill({ color: 0xffffff, alpha: 0.18 });
   }
 
   private drawDividers(): void {
