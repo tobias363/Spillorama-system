@@ -3326,6 +3326,88 @@ app.post("/api/_dev/reset-test-user", async (req, res) => {
   }
 });
 
+/**
+ * 2026-05-04 (Tobias): debug-endpoint som returnerer ALT om ROCKET-rommet
+ * + forsøker force-end + spawn ny runde manuelt. Gir konkret feilkode
+ * hvis noe failer. Token-protected (samme RESET_TEST_PLAYERS_TOKEN).
+ */
+app.post("/api/_dev/debug-rocket", async (req, res) => {
+  const expectedToken = process.env.RESET_TEST_PLAYERS_TOKEN ?? "";
+  const providedToken = typeof req.body?.token === "string" ? req.body.token : "";
+  if (!expectedToken || providedToken !== expectedToken) {
+    res.status(403).json({ ok: false, error: { code: "FORBIDDEN" } });
+    return;
+  }
+  const result: Record<string, unknown> = {};
+  try {
+    const summaries = engine.listRoomSummaries();
+    result.allRoomSummaries = summaries.map((s) => ({
+      code: s.code,
+      slug: s.gameSlug,
+      gameStatus: s.gameStatus,
+      hallId: s.hallId,
+    }));
+  } catch (err) {
+    result.summariesError = err instanceof Error ? err.message : String(err);
+  }
+  try {
+    const snap = engine.getRoomSnapshot("ROCKET");
+    result.snapshot = {
+      code: snap.code,
+      gameSlug: snap.gameSlug,
+      hostPlayerId: snap.hostPlayerId,
+      hallId: snap.hallId,
+      playerCount: snap.players?.length,
+      currentGame: snap.currentGame ? {
+        id: snap.currentGame.id,
+        status: snap.currentGame.status,
+        drawnCount: snap.currentGame.drawnNumbers?.length,
+        endedReason: snap.currentGame.endedReason,
+        startedAt: snap.currentGame.startedAt,
+        endedAt: snap.currentGame.endedAt,
+      } : null,
+    };
+  } catch (err) {
+    result.snapshotError = err instanceof Error ? err.message : String(err);
+  }
+  if (req.body?.action === "force-end") {
+    try {
+      const ended = await engine.forceEndStaleRound("ROCKET", "MANUAL_DEBUG_RESET");
+      result.forceEndResult = { ended };
+    } catch (err) {
+      result.forceEndError = {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.split("\n").slice(0, 8) : undefined,
+      };
+    }
+  }
+  if (req.body?.action === "spawn") {
+    try {
+      const spawned = await perpetualRoundService.spawnFirstRoundIfNeeded("ROCKET");
+      result.spawnResult = { spawned };
+    } catch (err) {
+      result.spawnError = {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.split("\n").slice(0, 8) : undefined,
+      };
+    }
+  }
+  if (req.body?.action === "end-and-spawn") {
+    try {
+      const ended = await engine.forceEndStaleRound("ROCKET", "MANUAL_DEBUG_RESET");
+      result.forceEndResult = { ended };
+      const spawned = await perpetualRoundService.spawnFirstRoundIfNeeded("ROCKET");
+      result.spawnResult = { spawned };
+    } catch (err) {
+      result.endSpawnError = {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.split("\n").slice(0, 8) : undefined,
+      };
+    }
+  }
+  res.json({ ok: true, data: result });
+});
+
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 
 // BIN-494: Redis adapter for multi-node fanout. Required for horizontal scaling —
