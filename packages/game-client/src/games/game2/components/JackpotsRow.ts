@@ -106,8 +106,27 @@ export class JackpotsRow extends Container {
     this.layoutSlots();
   }
 
-  /** Backend-driver: oppdater prize-listen. */
+  /**
+   * Backend-driver: oppdater prize-listen.
+   *
+   * Tobias-direktiv 2026-05-04: under nedtelling til ny runde sender
+   * server prize=0 for alle slots fordi forrige rundes prizePool er
+   * resetet og ny runde ikke har armed-spillere ennå. Skjul disse
+   * "alle-null"-oppdateringene så premiene fra forrige runde fortsatt
+   * vises gjennom countdown-fasen — gir bedre UX.
+   *
+   * Hvis vi ALDRI har hatt non-zero verdier (helt nytt rom), tillater
+   * vi 0-update så slots viser "0" som default.
+   */
   update(list: JackpotSlotData[]): void {
+    const allZero = list.every((entry) => !entry.prize || entry.prize <= 0);
+    const haveExistingValues = Array.from(this.latestData.values()).some(
+      (e) => e.prize > 0,
+    );
+    if (allZero && haveExistingValues) {
+      // Behold forrige rundes priser under countdown.
+      return;
+    }
     for (const entry of list) {
       this.latestData.set(entry.number, entry);
     }
