@@ -44,6 +44,16 @@ export const PatternDefinitionSchema = z.object({
   order: z.number().int(),
   design: z.number().int(),
   /**
+   * 25-cell 0/1 bitmask (row-major) for Spill 3 custom patterns. Wire-
+   * format from backend `DEFAULT_GAME3_CONFIG.patterns`. Optional —
+   * Spill 1/Spill 2 patterns leave this undefined.
+   */
+  patternDataList: z.array(z.number().int()).optional(),
+  /**
+   * BIN-615 / PR-C1: Spill 3 ball-threshold for pattern-deactivation.
+   */
+  ballNumberThreshold: z.number().int().optional(),
+  /**
    * Admin-configurable prize mode per pattern.
    * - "percent": prizePercent of pool.
    * - "fixed":   flat prize1 kr amount.

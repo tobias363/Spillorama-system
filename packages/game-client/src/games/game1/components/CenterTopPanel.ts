@@ -2,6 +2,7 @@ import gsap from "gsap";
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
 import type { PatternDefinition, PatternResult } from "@spillorama/shared-types/game";
 import { PatternMiniGrid } from "./PatternMiniGrid.js";
+import type { PatternListView, PatternListViewFactory } from "./PatternListView.js";
 
 /**
  * BIN-blink-permanent-fix 2026-04-24: all visual state for prize-piller
@@ -78,6 +79,20 @@ export interface CenterTopCallbacks {
 }
 
 /**
+ * Konfigurasjon for combo-panelets pattern-visning.
+ *
+ * Default (utelatt): Spill 1-style — én aktiv mini-grid + kolonne med
+ * tekst-pills ("Rad 1 - 100 kr").
+ *
+ * Med `patternListViewFactory` satt: combo-bodyet bygges på nytt med kun
+ * den injiserte visningen (Spill 3 bruker dette til å vise 4 mini-grids
+ * side om side i stedet for tekst-pills).
+ */
+export interface CenterTopOptions {
+  patternListViewFactory?: PatternListViewFactory;
+}
+
+/**
  * Redesign 2026-04-23 — mockup `.center-top`:
  *   [combo-panel: 5×5 mini-grid | prize pills]  [action-buttons-panel]
  *
@@ -109,9 +124,23 @@ export class CenterTopPanel {
   private activeGrid: PatternMiniGrid | null = null;
   private activePatternId: string | null = null;
 
-  constructor(overlay: HtmlOverlayManager, callbacks: CenterTopCallbacks = {}) {
+  /**
+   * Injisert pattern-listevisning fra `CenterTopOptions.patternListViewFactory`
+   * (Spill 3). Når satt, brukes denne i stedet for default tekst-pill-rad
+   * + active mini-grid. `null` = default-mode (Spill 1 / Spill 2).
+   */
+  private readonly customPatternListView: PatternListView | null;
+
+  constructor(
+    overlay: HtmlOverlayManager,
+    callbacks: CenterTopCallbacks = {},
+    options: CenterTopOptions = {},
+  ) {
     ensurePatternWonStyles();
     this.callbacks = callbacks;
+    this.customPatternListView = options.patternListViewFactory
+      ? options.patternListViewFactory()
+      : null;
 
     // Visual styling (border, gradient, shadow) moved to `top-group-wrapper`
     // in PlayScreen so player-info + combo + actions all sit inside one
@@ -153,7 +182,6 @@ export class CenterTopPanel {
       justifyContent: "center",
       flex: "0 0 auto",
     });
-    comboBody.appendChild(this.gridHostEl);
 
     // Prize pill list column
     this.prizeListEl = document.createElement("div");
@@ -165,7 +193,20 @@ export class CenterTopPanel {
       gap: "8px",
       flex: "1",
     });
-    comboBody.appendChild(this.prizeListEl);
+
+    if (this.customPatternListView) {
+      // Spill 3-mode: erstatt active-grid + pill-kolonne med den injiserte
+      // visningen (4 mini-grids horisontalt). gridHostEl/prizeListEl er
+      // fortsatt allokert som detached DOM-noder så updatePatterns/
+      // swapMiniGrid-koden kan fortsette å skrive til dem uten try/catch
+      // — de er bare ikke mountet til comboBody. updatePatterns sjekker
+      // customPatternListView og hopper over default-pillens DOM-skriving
+      // når faktoryen er aktiv.
+      comboBody.appendChild(this.customPatternListView.root);
+    } else {
+      comboBody.appendChild(this.gridHostEl);
+      comboBody.appendChild(this.prizeListEl);
+    }
 
     combo.appendChild(comboBody);
     this.root.appendChild(combo);
@@ -320,6 +361,14 @@ export class CenterTopPanel {
     prizePool = 0,
     gameRunning = true,
   ): void {
+    // Spill 3-mode: delegér til den injiserte visningen og hopp over
+    // default-pillens DOM-oppdatering. Visningen eier sin egen placeholder-
+    // logikk og diff-state.
+    if (this.customPatternListView) {
+      this.customPatternListView.update(patterns, patternResults, prizePool, gameRunning);
+      return;
+    }
+
     // Pre-game (ingen aktiv game) → serverens `patterns` er tom. Vis likevel
     // 5 placeholder-pills (Rad 1-4 + Full Hus, 0 kr) + mini-grid med Rad 1-
     // design, så combo-panelet aldri er tomt mens spilleren venter på start.
@@ -676,6 +725,12 @@ export class CenterTopPanel {
       this.activeGrid.destroy();
     }
     this.activeGrid = null;
+    // Spill 3-mode: rydd opp injisert pattern-listevisning (eier egen DOM
+    // + diff-state). Trygt å kalle uten condition fordi destroy er
+    // idempotent på vår side.
+    if (this.customPatternListView) {
+      this.customPatternListView.destroy();
+    }
     this.root.remove();
   }
 }

@@ -38,6 +38,7 @@ import { AudioManager } from "../../audio/AudioManager.js";
 import { Game1SocketActions } from "../game1/logic/SocketActions.js";
 import { Game1ReconnectFlow } from "../game1/logic/ReconnectFlow.js";
 import type { Phase } from "../game1/logic/Phase.js";
+import { Game3PatternRow } from "./components/Game3PatternRow.js";
 
 /**
  * Spill 3 (Mønsterbingo / Monster Bingo) controller.
@@ -659,7 +660,22 @@ class Game3Controller implements GameController {
 
   private buildPlayScreen(w: number, h: number): PlayScreen {
     const container = this.deps.app.app.canvas.parentElement ?? document.body;
-    const screen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container, this.deps.bridge);
+    // Spill 3-spesifikt: erstatt default tekst-pill-rad i CenterTopPanel
+    // med 4 visuelle 5×5 mini-grids — én per pattern fra
+    // DEFAULT_GAME3_CONFIG (Topp + midt / Kryss / Topp + diagonal /
+    // Pyramide). Highlightes celler kommer rett fra
+    // PatternDefinition.patternDataList over socket-snapshot, så
+    // visualiseringen er én-til-én med backendreglene.
+    const screen = new PlayScreen(
+      w,
+      h,
+      this.deps.audio,
+      this.deps.socket,
+      this.actualRoomCode,
+      container,
+      this.deps.bridge,
+      { patternListViewFactory: () => new Game3PatternRow() },
+    );
     screen.setOnClaim((type) => {
       void this.actions?.claim(type);
     });
