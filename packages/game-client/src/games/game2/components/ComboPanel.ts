@@ -59,16 +59,19 @@ const RADIUS = 16;
 /** Kobber-gull farge fra mockup `border: 1px solid #c98a3a`. */
 const BORDER_COPPER = 0xc98a3a;
 
-// Kolonne-bredder per mockup CSS:
-//   .hovedspill-col { width: 200px }
+// Kolonne-bredder.
+//   Tobias-direktiv 2026-05-04: hovedspill-col utvidet 200 → 230 for å
+//   gi plass til "Forhåndskjøp neste runde"-label inni pill-knappen
+//   (gikk tidligere ut på begge sider).
 //   .lykketall-col { width: 160px }
 //   .player-col { width: 110px }
-const HOVEDSPILL_INNER_W = 200;
+const HOVEDSPILL_INNER_W = 230;
 const HOVEDSPILL_COL_W = HOVEDSPILL_INNER_W + PANEL_PADDING_X * 2;
 const LYKKETALL_INNER_W = 160;
 const LYKKETALL_COL_W = LYKKETALL_INNER_W + PANEL_PADDING_X * 2;
-// Pill-knapp per mockup: padding 8px 16px, border-radius 6px (NOT pill).
-const PILL_W = 160;
+// Pill-knapp: padding 8px 16px, border-radius 6px. Bredden økt 160 → 210
+// så "Forhåndskjøp neste runde"-tekst (23 chars × 13px Inter) får plass.
+const PILL_W = 210;
 const PILL_H = 32;
 const PILL_RADIUS = 6;
 // Lykketall-kolonne: clover 44px + label sentrert.
