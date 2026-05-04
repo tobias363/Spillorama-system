@@ -228,7 +228,12 @@ export class ComboPanel extends Container {
     this.addChild(this.lykketallCol);
 
     // ── kolonne 4: Jackpots (flex til høyre) ─────────────────────────────
+    // Tobias-direktiv 2026-05-04: distribuer 6 slots jevnt over hele
+    // tilgjengelig bredde fra slutten av Lykketall-kolonnen til høyre
+    // panel-kant. Eliminerer tom plass til høyre for "14-21"-ballen.
     const jackpotsX = lykketallX + LYKKETALL_COL_W + COL_DIVIDER_W + PANEL_PADDING_X;
+    const jackpotsAvailW = Math.max(0, this.panelW - jackpotsX - PANEL_PADDING_X);
+    this.jackpots.setBarWidth(jackpotsAvailW);
     this.jackpots.x = jackpotsX;
     this.jackpots.y = (this.panelH - this.jackpots.barHeight) / 2;
     this.addChild(this.jackpots);
@@ -244,12 +249,17 @@ export class ComboPanel extends Container {
     return this.panelH;
   }
 
-  /** Sett bredden (f.eks. ved screen-resize). Re-tegner bakgrunn + dividere. */
+  /** Sett bredden (f.eks. ved screen-resize). Re-tegner bakgrunn + dividere
+   *  + re-distribuer jackpot-slots over ny tilgjengelig bredde. */
   setWidth(w: number): void {
     if (w === this.panelW) return;
     this.panelW = w;
     this.drawBg();
     this.drawDividers();
+    // Re-distribuer jackpot-slots så de fyller den nye tilgjengelige plassen.
+    const jackpotsX = PLAYER_COL_WIDTH + COL_DIVIDER_W + HOVEDSPILL_COL_W + COL_DIVIDER_W + LYKKETALL_COL_W + COL_DIVIDER_W + PANEL_PADDING_X;
+    const jackpotsAvailW = Math.max(0, this.panelW - jackpotsX - PANEL_PADDING_X);
+    this.jackpots.setBarWidth(jackpotsAvailW);
   }
 
   /**
@@ -314,6 +324,18 @@ export class ComboPanel extends Container {
   /** v2-only: sett antall spillere på PlayerCard (vises 2-sifret). */
   setPlayerCount(n: number): void {
     this.playerCard.setCount(n);
+  }
+
+  /** Tobias-direktiv 2026-05-04: vis "Innsats: X kr" på PlayerCard.
+   *  Skjules når 0. Speiler Spill 1's LeftInfoPanel-mønster. */
+  setPlayerStake(stake: number): void {
+    this.playerCard.setStake(stake);
+  }
+
+  /** Tobias-direktiv 2026-05-04: vis "Gevinst: Y kr" på PlayerCard.
+   *  Skjules når 0. */
+  setPlayerWinnings(winnings: number): void {
+    this.playerCard.setWinnings(winnings);
   }
 
   // ── interne tegne-rutiner ───────────────────────────────────────────────

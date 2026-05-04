@@ -2,83 +2,166 @@
  * Spill 2 Bong Mockup design — horisontalt glass-rør med countdown +
  * draw-counter på venstre side og en rad trukne baller til høyre.
  *
- * Mockup (`Bong Mockup.html`):
- *   ┌──────────────┬─────────────────────────────────────────┐
- *   │ Neste:       │ ●●●●●●●●●                              │ ← drawn balls
- *   │ MM:SS (gold) │                                          │
- *   ├──────────────┤                                          │
- *   │ Trekk        │                                          │
- *   │ 04/21        │                                          │
- *   └──────────────┴─────────────────────────────────────────┘
+ * 2026-05-04 (Tobias-direktiv): SPILL 1-PARITET PÅ DESIGN OG ANIMASJON.
+ *   - Bruker samme ball-PNG-er som Spill 1 (`/web/games/assets/game1/
+ *     design/balls/{color}.png`) i stedet for `DesignBall`-Graphics.
+ *   - "Neste trekning"-raden SKJULES under aktiv runde (RUNNING) — vises
+ *     KUN mellom runder så countdown forteller når neste trekning starter.
+ *   - MAX_VISIBLE_BALLS økt fra 9 → 12 for å fylle tuben bedre.
+ *   - Ball-pop sentrert er FJERNET i PlayScreen — ny ball plasseres
+ *     direkte i venstre slot, andre skifter høyre, eldste evicter til
+ *     høyre. Animasjon her speiler Spill 1's `addBall`-flyt.
  *
  * Pixi-implementasjon:
  *   - Ytre `Graphics` tegner glass-tuben (rounded-rect med flere
- *     overlay-fyll for å simulere CSS `linear-gradient` + `inset`
- *     skygger). `backdrop-filter: blur(2px)` finnes ikke i Pixi —
- *     vi kompenserer med høyere alpha på de mørke fyll-lagene så
- *     bakgrunnen ikke "lekker" gjennom.
- *   - Counter-seksjonen er en fast 230px Container med to rader
- *     ("Neste trekning" + countdown, "Trekk" + N/total).
- *   - Trukne baller rendres som en horisontal rad av `DesignBall`,
- *     nyeste til venstre (matcher HTML-en der `drawn[0]` står
- *     til venstre i `.tube-balls`).
+ *     overlay-fyll for å simulere CSS `linear-gradient` + `inset`).
+ *   - Counter-seksjonen er en fast 230px Container med to rader:
+ *     "Neste trekning" + countdown (SKJULES under RUNNING),
+ *     "Trekk N/M" (alltid synlig).
+ *   - Trukne baller rendres som PNG-Sprites med Text-overlay (samme
+ *     mønster som Spill 1's `BallTube.createBall`).
  *
  * Kontrakt mot `PlayScreen`:
- *   - `setSize(width, height)` setter tube-størrelse (kalles i
- *     constructor + ved evt. resize).
+ *   - `setSize(width)` setter tube-størrelse.
  *   - `setDrawCount(current, total)` oppdaterer "Trekk"-raden.
- *   - `setCountdown(milliseconds)` oppdaterer countdown-raden.
- *     Verdi `null` viser "—:—" (ingen aktiv timer).
- *   - `addBall(number)` legger ny ball til venstre, evicter eldste
- *     hvis raden er full.
- *   - `loadBalls(numbers)` rendrer hele raden fra snapshot uten
- *     animasjon (newest=siste i array, plassert til venstre).
- *   - `clear()` tømmer ball-raden og countdown.
- *
- * 2026-05-03 (Agent E, branch feat/spill2-bong-mockup-design): ny
- * komponent for Bong Mockup-redesign. Erstatter ikke G1's `BallTube` —
- * dette er en game2-spesifikk re-render.
+ *   - `setCountdown(milliseconds)` oppdaterer countdown.
+ *   - `setRunning(running)` viser/skjuler "Neste trekning"-raden.
+ *   - `addBall(number)` legger ny ball til venstre, evicter eldste til høyre.
+ *   - `loadBalls(numbers)` rendrer hele raden fra snapshot uten animasjon.
+ *   - `clear()` tømmer ball-raden.
  */
 
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Graphics, Text, Sprite, Assets, type Texture } from "pixi.js";
 import gsap from "gsap";
-import { DesignBall, DESIGN_BALL_SIZE } from "./DesignBall.js";
 
 const TUBE_HEIGHT = 85;
 const TUBE_RADIUS = 42;
 const COUNTER_WIDTH = 230;
-const BALLS_GAP = 10;
-const BALLS_PADDING_X = 24;
-const MAX_VISIBLE_BALLS = 9;
+const BALLS_GAP = 6;
+const BALLS_PADDING_X = 18;
+/** Tobias-direktiv 2026-05-04: 9 → 12 baller (tre flere) for å fylle tuben. */
+const MAX_VISIBLE_BALLS = 12;
+/** Ball-størrelse i tuben — matcher Spill 1's BallTube `BALL_SIZE` (70px)
+ *  skalert ned til tube-høyde. Tuben er 85px så vi setter 64 for litt
+ *  padding rundt og dermed plass til 12 baller jevnt fordelt. */
+const BALL_SIZE = 64;
+
+/**
+ * PNG-ball-mapping (port av Spill 1's `getBallAssetPath`). Spill 2 har
+ * range 1-21 så praktisk dekker vi 1-15=blue og 16-21=red. Inkludert
+ * fullt 75-mapping for kompatibilitet med eventuell senere bruk i
+ * Spill 3 (`monsterbingo`) som extender Game2Engine.
+ */
+function getBallAssetPath(n: number): string {
+  if (n <= 15) return "/web/games/assets/game1/design/balls/blue.png";
+  if (n <= 30) return "/web/games/assets/game1/design/balls/red.png";
+  if (n <= 45) return "/web/games/assets/game1/design/balls/purple.png";
+  if (n <= 60) return "/web/games/assets/game1/design/balls/green.png";
+  return "/web/games/assets/game1/design/balls/yellow.png";
+}
+
+/**
+ * Speilet av Spill 1's `enableMipmaps`. Uten mipmaps får skalert PNG-
+ * tekstur stygg aliasing. Pixi støtter ikke mipmaps før vi eksplisitt
+ * slår det på per-source.
+ */
+function enableMipmaps(texture: Texture): void {
+  const src = texture.source as unknown as {
+    autoGenerateMipmaps?: boolean;
+    scaleMode?: string;
+    updateMipmaps?: () => void;
+  };
+  if (src && !src.autoGenerateMipmaps) {
+    src.autoGenerateMipmaps = true;
+    src.scaleMode = "linear";
+    src.updateMipmaps?.();
+  }
+}
+
+type Ball = Container & { ballNumber: number };
+
+function createBall(number: number, size: number): Ball {
+  const ball = new Container() as Ball;
+  ball.ballNumber = number;
+
+  const url = getBallAssetPath(number);
+  const cached = Assets.cache.get(url) as Texture | undefined;
+  if (cached) {
+    enableMipmaps(cached);
+    const sprite = new Sprite(cached);
+    sprite.width = size;
+    sprite.height = size;
+    ball.addChild(sprite);
+  } else {
+    void Assets.load(url)
+      .then((tex: Texture) => {
+        if (ball.destroyed) return;
+        enableMipmaps(tex);
+        const sprite = new Sprite(tex);
+        sprite.width = size;
+        sprite.height = size;
+        ball.addChildAt(sprite, 0);
+      })
+      .catch(() => {});
+  }
+
+  const text = new Text({
+    text: String(number),
+    style: {
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      fontSize: Math.round(size * 0.34),
+      fill: 0x1a0a0a,
+      fontWeight: "800",
+      align: "center",
+      letterSpacing: -0.5,
+    },
+  });
+  text.anchor.set(0.5);
+  // Spill 1 bruker -2px optisk forskyvning av tallet inni ring-grafikken.
+  text.x = size / 2 - 2;
+  text.y = size / 2;
+  ball.addChild(text);
+
+  return ball;
+}
 
 export class BallTube extends Container {
   private bg: Graphics;
   private divider: Graphics;
   private counter: Container;
+  /** Container som holder "Neste trekning"-raden (label+verdi) — toggles
+   *  visible i `setRunning(running)` så den skjules under aktiv runde. */
+  private countdownRow: Container;
   private countdownValue: Text;
   private drawCountValue: Text;
+  /** Container som holder "Trekk N/M"-raden — sentreres når countdown-
+   *  raden er skjult, ellers står den i nedre halvdel som før. */
+  private drawCountRow: Container;
   private ballsContainer: Container;
-  private balls: DesignBall[] = [];
+  private balls: Ball[] = [];
   private tubeWidth: number;
+  /** Tobias-direktiv 2026-05-04: skjul "Neste trekning" under aktiv runde. */
+  private isRunning: boolean = false;
 
   constructor(width: number) {
     super();
     this.tubeWidth = width;
 
-    // 1) Outer tube background (glass effect) — flere lag for å
-    //    matche `linear-gradient` + `inset` highlights fra HTML.
+    // 1) Glass-tube bakgrunn.
     this.bg = new Graphics();
     this.addChild(this.bg);
     this.drawBg();
 
-    // 2) Counter section (left, fixed 230px wide).
+    // 2) Counter-seksjon (venstre, fast 230px).
     this.counter = new Container();
     this.counter.x = 0;
     this.counter.y = 0;
     this.addChild(this.counter);
 
-    // Countdown row — Neste trekning + MM:SS (gold-glow).
     const counterRowH = TUBE_HEIGHT / 2;
+
+    // ── "Neste trekning"-raden (kan skjules) ────────────────────────────
+    this.countdownRow = new Container();
     const countdownLabel = new Text({
       text: "Neste trekning:",
       style: {
@@ -91,7 +174,7 @@ export class BallTube extends Container {
     countdownLabel.anchor.set(0.5, 0.5);
     countdownLabel.x = COUNTER_WIDTH * 0.40;
     countdownLabel.y = counterRowH / 2;
-    this.counter.addChild(countdownLabel);
+    this.countdownRow.addChild(countdownLabel);
 
     this.countdownValue = new Text({
       text: "—:—",
@@ -100,17 +183,17 @@ export class BallTube extends Container {
         fontSize: 17,
         fontWeight: "600",
         fill: 0xffd97a,
-        // Pixi støtter ikke text-shadow direkte; gull-fargen + tabular-nums
-        // er nok for å lese countdown'en mot mørk bakgrunn.
         letterSpacing: 1.2,
       },
     });
     this.countdownValue.anchor.set(0.5, 0.5);
     this.countdownValue.x = COUNTER_WIDTH * 0.78;
     this.countdownValue.y = counterRowH / 2;
-    this.counter.addChild(this.countdownValue);
+    this.countdownRow.addChild(this.countdownValue);
+    this.counter.addChild(this.countdownRow);
 
-    // Draw count row — "Trekk N/M".
+    // ── "Trekk N/M"-raden ────────────────────────────────────────────────
+    this.drawCountRow = new Container();
     const drawLabel = new Text({
       text: "Trekk",
       style: {
@@ -123,7 +206,7 @@ export class BallTube extends Container {
     drawLabel.anchor.set(0.5, 0.5);
     drawLabel.x = COUNTER_WIDTH * 0.40;
     drawLabel.y = counterRowH * 1.5;
-    this.counter.addChild(drawLabel);
+    this.drawCountRow.addChild(drawLabel);
 
     this.drawCountValue = new Text({
       text: "0/0",
@@ -138,17 +221,19 @@ export class BallTube extends Container {
     this.drawCountValue.anchor.set(0.5, 0.5);
     this.drawCountValue.x = COUNTER_WIDTH * 0.78;
     this.drawCountValue.y = counterRowH * 1.5;
-    this.counter.addChild(this.drawCountValue);
+    this.drawCountRow.addChild(this.drawCountValue);
+    this.counter.addChild(this.drawCountRow);
 
-    // Divider mellom counter og balls (matcher CSS border-right + border-top).
+    // Divider mellom counter og baller (vertikal) + mellom rad-1 og rad-2
+    // (horisontal). Den horisontale skjules sammen med countdown-raden.
     this.divider = new Graphics();
     this.addChild(this.divider);
     this.drawDividers();
 
-    // 3) Drawn-balls row.
+    // 3) Ball-container.
     this.ballsContainer = new Container();
     this.ballsContainer.x = COUNTER_WIDTH + BALLS_PADDING_X;
-    this.ballsContainer.y = (TUBE_HEIGHT - DESIGN_BALL_SIZE) / 2;
+    this.ballsContainer.y = (TUBE_HEIGHT - BALL_SIZE) / 2;
     this.addChild(this.ballsContainer);
   }
 
@@ -161,7 +246,7 @@ export class BallTube extends Container {
     this.layoutBalls(false);
   }
 
-  /** Sett "Trekk N/M" — kalles fra `PlayScreen` ved hver `numberDrawn`. */
+  /** Sett "Trekk N/M". */
   setDrawCount(current: number, total: number): void {
     const totStr = total > 0 ? `${pad2(current)}/${pad2(total)}` : `${current}`;
     this.drawCountValue.text = totStr;
@@ -183,14 +268,33 @@ export class BallTube extends Container {
   }
 
   /**
+   * Tobias-direktiv 2026-05-04: skjul "Neste trekning"-raden under aktiv
+   * trekning. "Trekk N/M" sentreres vertikalt i counter-seksjonen når
+   * countdown er skjult, ellers står den i nedre halvdel.
+   *
+   * Idempotent — gjør ingenting hvis allerede i ønsket state.
+   */
+  setRunning(running: boolean): void {
+    if (running === this.isRunning) return;
+    this.isRunning = running;
+    this.countdownRow.visible = !running;
+    // Sentrer "Trekk"-raden når countdown er skjult.
+    const counterRowH = TUBE_HEIGHT / 2;
+    this.drawCountRow.y = running ? -counterRowH * 0.5 : 0;
+    // Re-tegn dividers så horisontal-divideren matcher.
+    this.drawDividers();
+  }
+
+  /**
    * Legg til ny ball til venstre i raden. Hvis raden er full
    * (>= MAX_VISIBLE_BALLS), evicter vi den eldste (helt til høyre)
-   * med en kort fade-ut.
+   * med en kort fade-ut til høyre. Andre baller skifter ETT slot
+   * til høyre.
    */
   addBall(number: number): void {
-    const ball = new DesignBall(number, DESIGN_BALL_SIZE);
+    const ball = createBall(number, BALL_SIZE);
     ball.alpha = 0;
-    ball.scale.set(0.6);
+    ball.x = -BALL_SIZE; // start utenfor venstre kant
     this.ballsContainer.addChild(ball);
     this.balls.unshift(ball);
 
@@ -199,7 +303,8 @@ export class BallTube extends Container {
       if (evicted) {
         gsap.to(evicted, {
           alpha: 0,
-          duration: 0.25,
+          x: evicted.x + BALL_SIZE * 0.6,
+          duration: 0.30,
           ease: "power1.in",
           onComplete: () => {
             if (!evicted.destroyed) evicted.destroy({ children: true });
@@ -210,18 +315,12 @@ export class BallTube extends Container {
 
     this.layoutBalls(true);
     gsap.to(ball, { alpha: 1, duration: 0.20, ease: "power1.out" });
-    gsap.to(ball.scale, {
-      x: 1,
-      y: 1,
-      duration: 0.30,
-      ease: "back.out(1.6)",
-    });
   }
 
   /**
    * Last alle baller fra snapshot — uten animasjon. `numbers` er i
-   * trekkrekkefølge (eldste først, nyeste sist) — vi reverserer for
-   * å plassere nyeste til venstre slik HTML-en gjør.
+   * trekkrekkefølge (eldste først, nyeste sist). Vi reverserer for
+   * å plassere nyeste til venstre.
    */
   loadBalls(numbers: number[]): void {
     this.clear();
@@ -229,7 +328,7 @@ export class BallTube extends Container {
     const tail = numbers.slice(-MAX_VISIBLE_BALLS);
     const reversed = [...tail].reverse();
     for (const n of reversed) {
-      const ball = new DesignBall(n, DESIGN_BALL_SIZE);
+      const ball = createBall(n, BALL_SIZE);
       this.ballsContainer.addChild(ball);
       this.balls.push(ball);
     }
@@ -254,25 +353,19 @@ export class BallTube extends Container {
 
   private drawBg(): void {
     this.bg.clear();
-    // Mørk base — matcher CSS `rgba(20,5,8,0.45)` med litt høyere alpha
-    // for å unngå at bakgrunns-bilde "lekker" gjennom uten blur.
     this.bg.roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT, TUBE_RADIUS).fill({
       color: 0x140508,
       alpha: 0.55,
     });
-    // Topp-highlight (matcher `linear-gradient` 0%→18% rgba(255,255,255,.10)).
     this.bg
       .roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT * 0.40, TUBE_RADIUS)
       .fill({ color: 0xffffff, alpha: 0.06 });
-    // Liten kantskygge nederst (matcher `inset 0 -2px 6px rgba(0,0,0,.45)`).
     this.bg
       .roundRect(2, TUBE_HEIGHT - 4, this.tubeWidth - 4, 4, 4)
       .fill({ color: 0x000000, alpha: 0.30 });
-    // Border (`1.5px solid rgba(255,255,255,.55)`).
     this.bg
       .roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT, TUBE_RADIUS)
       .stroke({ color: 0xffffff, alpha: 0.55, width: 1.5 });
-    // Topp-sheen-stripe (matcher `.tube::before` — small white stripe).
     this.bg
       .roundRect(24, 6, this.tubeWidth - 48, 14, 10)
       .fill({ color: 0xffffff, alpha: 0.18 });
@@ -284,16 +377,18 @@ export class BallTube extends Container {
     this.divider
       .rect(COUNTER_WIDTH, 6, 1.5, TUBE_HEIGHT - 12)
       .fill({ color: 0xffffff, alpha: 0.55 });
-    // Horisontal divider (mellom counter-rad 1 og rad 2).
-    this.divider
-      .rect(8, TUBE_HEIGHT / 2, COUNTER_WIDTH - 16, 1.5)
-      .fill({ color: 0xffffff, alpha: 0.55 });
+    // Horisontal divider (kun synlig når countdown-raden vises).
+    if (!this.isRunning) {
+      this.divider
+        .rect(8, TUBE_HEIGHT / 2, COUNTER_WIDTH - 16, 1.5)
+        .fill({ color: 0xffffff, alpha: 0.55 });
+    }
   }
 
   private layoutBalls(animate: boolean): void {
     for (let i = 0; i < this.balls.length; i++) {
       const target = this.balls[i];
-      const xTarget = i * (DESIGN_BALL_SIZE + BALLS_GAP);
+      const xTarget = i * (BALL_SIZE + BALLS_GAP);
       if (animate) {
         gsap.to(target, { x: xTarget, duration: 0.30, ease: "power2.out" });
       } else {
