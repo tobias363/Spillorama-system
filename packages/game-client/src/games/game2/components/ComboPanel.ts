@@ -49,27 +49,31 @@ import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js
 import { JackpotsRow, type JackpotSlotData } from "./JackpotsRow.js";
 import { PlayerCard, PLAYER_COL_WIDTH } from "./PlayerCard.js";
 
-// 2026-05-03 (Agent S, v2): paddings krympet per CSS `.combo-col {
-// padding: 12px 14px; }` (var: 18px begge retninger).
-const PANEL_PADDING_Y = 12;
-const PANEL_PADDING_X = 14;
-const COL_DIVIDER_W = 1.5;
-const RADIUS = 18;
+// Mockup-paritet (Bong Mockup.html 2026-05-04): combo-col padding
+// 16px 18px, dividers 1px solid #c98a3a, panel border 1px solid #c98a3a,
+// border-radius 16px.
+const PANEL_PADDING_Y = 16;
+const PANEL_PADDING_X = 18;
+const COL_DIVIDER_W = 1;
+const RADIUS = 16;
+/** Kobber-gull farge fra mockup `border: 1px solid #c98a3a`. */
+const BORDER_COPPER = 0xc98a3a;
 
-// v2 kolonne-bredder (eksklusiv kolonne-padding for hovedspill +
-// inklusiv kolonne-padding for player; matcher hvordan CSS gjør det).
-const HOVEDSPILL_INNER_W = 180; // CSS `.hovedspill-col { width: 180px; }`
+// Kolonne-bredder per mockup CSS:
+//   .hovedspill-col { width: 200px }
+//   .lykketall-col { width: 160px }
+//   .player-col { width: 110px }
+const HOVEDSPILL_INNER_W = 200;
 const HOVEDSPILL_COL_W = HOVEDSPILL_INNER_W + PANEL_PADDING_X * 2;
-const LYKKETALL_INNER_W = 160; // CSS `.lykketall-col { width: 160px; }`
+const LYKKETALL_INNER_W = 160;
 const LYKKETALL_COL_W = LYKKETALL_INNER_W + PANEL_PADDING_X * 2;
-// Pill-knapp dimensjoner — krympet per v2: 14px font→13, padding 12 18→9 14.
+// Pill-knapp per mockup: padding 8px 16px, border-radius 6px (NOT pill).
 const PILL_W = 160;
-const PILL_H = 36;
-// Lykketall-kolonne (Agent Y 2026-05-03): høyde matcher Hovedspill-kolonnen
-// så panelet ikke krymper når inline-griddet fjernes. Kløver-ikon er 70px
-// (større enn LykketallGrid sin 44px siden den nå er hovedfokus i kolonnen).
+const PILL_H = 32;
+const PILL_RADIUS = 6;
+// Lykketall-kolonne: clover 44px + label sentrert.
 const LYKKETALL_COL_HEIGHT = 110;
-const CLOVER_SIZE = 70;
+const CLOVER_SIZE = 44;
 const CLOVER_URL = "/web/games/assets/game2/design/lucky-clover.png";
 
 export class ComboPanel extends Container {
@@ -342,49 +346,40 @@ export class ComboPanel extends Container {
 
   private drawBg(): void {
     this.bg.clear();
+    // Mockup-paritet: rgba(20, 5, 8, 0.55) base + 1px solid #c98a3a border.
     this.bg
       .roundRect(0, 0, this.panelW, this.panelH, RADIUS)
       .fill({ color: 0x140508, alpha: 0.55 });
-    // Tobias-direktiv 2026-05-04: gull-border rundt hele bunn-panelet
-    // (matcher target-design). Tidligere hvit-alpha 0.18 — endret til
-    // gull (0xffd97a) med moderat alpha for å gi tydelig men ikke
-    // dominerende kontur.
     this.bg
       .roundRect(0, 0, this.panelW, this.panelH, RADIUS)
-      .stroke({ color: 0xffd97a, alpha: 0.40, width: 1.0 });
-    // Topp-highlight (subtil hvit på øvre kant).
-    this.bg
-      .roundRect(2, 2, this.panelW - 4, 2, 1)
-      .fill({ color: 0xffffff, alpha: 0.08 });
+      .stroke({ color: BORDER_COPPER, alpha: 1.0, width: 1 });
   }
 
   private drawDividers(): void {
     this.dividers.clear();
-    // 3 vertikale dividere mellom de 4 kolonnene.
-    const dividerY1 = PANEL_PADDING_Y * 0.4;
-    const dividerY2 = this.panelH - PANEL_PADDING_Y * 0.4;
+    // Mockup-paritet: `combo-col + combo-col { border-left: 1px solid #c98a3a }`.
+    // Strekker dividerne fra topp til bunn (panel-høyden) for å matche
+    // CSS sin border-left-strategi (full-høyde stroke).
     const x1 = PLAYER_COL_WIDTH;
     const x2 = PLAYER_COL_WIDTH + COL_DIVIDER_W + HOVEDSPILL_COL_W;
     const x3 = PLAYER_COL_WIDTH + COL_DIVIDER_W + HOVEDSPILL_COL_W + COL_DIVIDER_W + LYKKETALL_COL_W;
     for (const x of [x1, x2, x3]) {
       this.dividers
-        .rect(x, dividerY1, COL_DIVIDER_W, dividerY2 - dividerY1)
-        .fill({ color: 0xffffff, alpha: 0.18 });
+        .rect(x, 0, COL_DIVIDER_W, this.panelH)
+        .fill({ color: BORDER_COPPER, alpha: 1.0 });
     }
   }
 
   private drawBuyButton(hover: boolean): void {
+    // Mockup `.pill-btn`: transparent bg, 1px #c98a3a border, 6px radius,
+    // hover = subtle copper-tinted bg `rgba(201,138,58,0.15)`.
     this.buyButtonBg.clear();
     this.buyButtonBg
-      .roundRect(0, 0, PILL_W, PILL_H, PILL_H / 2)
-      .fill({ color: hover ? 0x781e24 : 0x501216, alpha: hover ? 0.85 : 0.55 });
+      .roundRect(0, 0, PILL_W, PILL_H, PILL_RADIUS)
+      .fill({ color: BORDER_COPPER, alpha: hover ? 0.15 : 0.0001 });
     this.buyButtonBg
-      .roundRect(0, 0, PILL_W, PILL_H, PILL_H / 2)
-      .stroke({ color: 0xffffff, alpha: 0.5, width: 1.5 });
-    // Indre highlight (matcher `inset 0 1px 0 white 0.18`).
-    this.buyButtonBg
-      .roundRect(2, 2, PILL_W - 4, 2, 1)
-      .fill({ color: 0xffffff, alpha: 0.18 });
+      .roundRect(0, 0, PILL_W, PILL_H, PILL_RADIUS)
+      .stroke({ color: BORDER_COPPER, alpha: 1.0, width: 1 });
   }
 
   /**

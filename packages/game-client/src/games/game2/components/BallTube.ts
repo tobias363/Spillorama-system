@@ -213,11 +213,16 @@ export class BallTube extends Container {
     this.drawCountRow.addChild(this.drawCountValue);
     this.counter.addChild(this.drawCountRow);
 
-    // Divider mellom counter og baller (vertikal) + mellom rad-1 og rad-2
-    // (horisontal). Den horisontale skjules sammen med countdown-raden.
+    // Divider mellom counter og baller (vertikal). Horisontal divider
+    // er borte siden vi viser kun én rad (Trekk eller Neste trekning).
     this.divider = new Graphics();
     this.addChild(this.divider);
     this.drawDividers();
+
+    // Initial state: !RUNNING (mellom runder / før første state-update).
+    // Vis countdown-rad sentrert, skjul Trekk-rad. Match setRunning(false).
+    this.drawCountRow.visible = false;
+    this.countdownRow.y = counterRowH * 0.5;
 
     // 3) Ball-container.
     this.ballsContainer = new Container();
@@ -257,20 +262,31 @@ export class BallTube extends Container {
   }
 
   /**
-   * Tobias-direktiv 2026-05-04: skjul "Neste trekning"-raden under aktiv
-   * trekning. "Trekk N/M" sentreres vertikalt i counter-seksjonen når
-   * countdown er skjult, ellers står den i nedre halvdel.
+   * Tobias-direktiv 2026-05-04 (revidert): vis kun ÉN rad om gangen.
+   *   - RUNNING:    skjul "Neste trekning", vis "Trekk N/M" sentrert
+   *   - !RUNNING:   skjul "Trekk N/M", vis "Neste trekning" sentrert
    *
-   * Idempotent — gjør ingenting hvis allerede i ønsket state.
+   * Bruker er kun interessert i countdown mellom runder; under aktiv
+   * trekning er det rådende count som teller. Begge rader sentreres når
+   * de er alene.
+   *
+   * Idempotent.
    */
   setRunning(running: boolean): void {
     if (running === this.isRunning) return;
     this.isRunning = running;
-    this.countdownRow.visible = !running;
-    // Sentrer "Trekk"-raden når countdown er skjult.
     const counterRowH = TUBE_HEIGHT / 2;
-    this.drawCountRow.y = running ? -counterRowH * 0.5 : 0;
-    // Re-tegn dividers så horisontal-divideren matcher.
+    if (running) {
+      // Aktiv runde: skjul countdown, sentrer Trekk-rad.
+      this.countdownRow.visible = false;
+      this.drawCountRow.visible = true;
+      this.drawCountRow.y = -counterRowH * 0.5;
+    } else {
+      // Mellom runder: skjul Trekk, sentrer countdown-rad.
+      this.countdownRow.visible = true;
+      this.drawCountRow.visible = false;
+      this.countdownRow.y = counterRowH * 0.5;
+    }
     this.drawDividers();
   }
 
@@ -363,16 +379,12 @@ export class BallTube extends Container {
 
   private drawDividers(): void {
     this.divider.clear();
-    // Vertikal divider (mellom counter og baller).
+    // Vertikal divider (mellom counter og baller). Horisontal divider
+    // er fjernet siden vi nå viser kun ÉN rad om gangen (Trekk under
+    // RUNNING, Neste trekning ellers).
     this.divider
       .rect(COUNTER_WIDTH, 6, 1.5, TUBE_HEIGHT - 12)
       .fill({ color: 0xffffff, alpha: 0.55 });
-    // Horisontal divider (kun synlig når countdown-raden vises).
-    if (!this.isRunning) {
-      this.divider
-        .rect(8, TUBE_HEIGHT / 2, COUNTER_WIDTH - 16, 1.5)
-        .fill({ color: 0xffffff, alpha: 0.55 });
-    }
   }
 
   private layoutBalls(animate: boolean): void {
