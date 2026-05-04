@@ -178,6 +178,11 @@ export interface PerpetualRoundServiceConfig {
  * Reasons som anses som "naturlig runde-end" og dermed trigger auto-restart.
  *
  * Spill 2: `G2_WINNER` (auto-claim på 9/9 fullt 3×3).
+ * Spill 2: `G2_NO_WINNER` (alle 21 baller trukket uten 9/9-completion —
+ *   Game2Engine.onDrawCompleted, linje 183. Pilot-bug 2026-05-04: før
+ *   denne ble lagt til hang ROCKET-rom på `endedReason=G2_NO_WINNER`
+ *   uten å spawne ny runde, fordi handleGameEnded-filteret nedenfor
+ *   slapp G2_NO_WINNER til "manual_or_unknown_end"-pathen.)
  * Spill 3: `G3_FULL_HOUSE` (auto-claim på 9/9 fullt 3×3 etter PR #860).
  * Felles fallbacks: `MAX_DRAWS_REACHED`, `DRAW_BAG_EMPTY` — runden gikk tom
  *   for trekk uten vinner. Loop fortsetter for at "aldri stopper"-prinsippet
@@ -190,6 +195,7 @@ export interface PerpetualRoundServiceConfig {
  */
 export const NATURAL_END_REASONS: ReadonlySet<string> = new Set([
   "G2_WINNER",
+  "G2_NO_WINNER",
   "G3_FULL_HOUSE",
   "MAX_DRAWS_REACHED",
   "DRAW_BAG_EMPTY",

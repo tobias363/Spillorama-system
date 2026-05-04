@@ -211,8 +211,13 @@ test("PERPETUAL_SLUGS dekker rocket og monsterbingo", () => {
   assert.ok(PERPETUAL_SLUGS.has("monsterbingo"));
 });
 
-test("NATURAL_END_REASONS inkluderer G2_WINNER og G3_FULL_HOUSE", () => {
+test("NATURAL_END_REASONS inkluderer G2_WINNER, G2_NO_WINNER og G3_FULL_HOUSE", () => {
   assert.ok(NATURAL_END_REASONS.has("G2_WINNER"));
+  // Pilot-bug 2026-05-04: G2_NO_WINNER må trigge auto-restart, ellers
+  // henger ROCKET-rommet permanent når alle 21 baller er trukket uten
+  // 9/9-completion. Game2Engine.onDrawCompleted setter denne reasonen
+  // ved max-balls-uten-vinner-pathen.
+  assert.ok(NATURAL_END_REASONS.has("G2_NO_WINNER"));
   assert.ok(NATURAL_END_REASONS.has("G3_FULL_HOUSE"));
   assert.ok(NATURAL_END_REASONS.has("MAX_DRAWS_REACHED"));
   assert.ok(NATURAL_END_REASONS.has("DRAW_BAG_EMPTY"));
@@ -247,6 +252,36 @@ test("happy path Spill 2: schedulerer og kjører auto-restart etter G2_WINNER", 
   assert.deepEqual(call.armedPlayerIds, []);
   assert.deepEqual(call.armedPlayerTicketCounts, {});
   assert.equal(service.pendingCountForTesting(), 0, "pending fjernes etter kjøring");
+});
+
+test("happy path Spill 2: schedulerer og kjører auto-restart etter G2_NO_WINNER (pilot-bug 2026-05-04)", async () => {
+  // Regresjons-test for prod-bug 2026-05-04: ROCKET-rom hang på
+  // status=ENDED med endedReason=G2_NO_WINNER fordi handleGameEnded-
+  // filteret slapp G2_NO_WINNER til "manual_or_unknown_end"-pathen.
+  // Forbedret oppførsel: G2_NO_WINNER er en naturlig runde-end (alle
+  // 21 baller trukket uten 9/9-completion) og MÅ trigge ny runde.
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({ engine, timer });
+
+  service.handleGameEnded(
+    makeGameEndedInput({ roomCode: "ROCKET", endedReason: "G2_NO_WINNER" }),
+  );
+
+  assert.equal(
+    timer.pendingCount(),
+    1,
+    "G2_NO_WINNER skal schedulere én pending restart (regresjon ville gitt 0)",
+  );
+  assert.equal(service.pendingCountForTesting(), 1);
+
+  await timer.runNext();
+
+  assert.equal(state.startGameCalls.length, 1, "startGame kalt etter delay");
+  assert.equal(state.startGameCalls[0]!.roomCode, "ROCKET");
 });
 
 test("happy path Spill 3: schedulerer og kjører auto-restart etter G3_FULL_HOUSE", async () => {
