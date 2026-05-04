@@ -1055,3 +1055,126 @@ test("uregistrert slug faller tilbake til defaultEntryFee", async () => {
   // Slug-default for "rocket" er 10 kr → vinner over defaultEntryFee=42.
   assert.equal(state.startGameCalls[0]!.entryFee, 10, "slug-default må vinne over defaultEntryFee");
 });
+
+// ── Admin-konfigurerbar runde-pace (Tobias 2026-05-04) ──────────────────────
+
+test("admin-config-round-pace: per-game roundPauseMs vinner over env-default", async () => {
+  // Tobias 2026-05-04: når variantConfig.roundPauseMs er satt skal den
+  // brukes i stedet for service-level delayMs (env-fallback).
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "rocket",
+      config: {
+        ticketTypes: [{ name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 }],
+        patterns: [],
+        roundPauseMs: 45000,
+      },
+    },
+  });
+  // Capture delayMs som timer.setTimeoutFn faktisk får.
+  const observedDelays: number[] = [];
+  const wrappingTimer: FakeTimer = {
+    setTimeoutFn: ((fn, ms) => {
+      observedDelays.push(ms);
+      return timer.setTimeoutFn(fn, ms);
+    }) as FakeTimer["setTimeoutFn"],
+    clearTimeoutFn: timer.clearTimeoutFn,
+    runNext: timer.runNext,
+    pendingCount: timer.pendingCount,
+  };
+  const service = makeService({
+    engine,
+    variantLookup,
+    timer: wrappingTimer,
+    delayMs: 5000,
+  });
+
+  service.handleGameEnded(makeGameEndedInput({ roomCode: "ROCKET" }));
+
+  assert.equal(observedDelays.length, 1);
+  assert.equal(observedDelays[0], 45000, "per-game roundPauseMs må vinne over env-default");
+});
+
+test("admin-config-round-pace: env-default brukes når variantConfig mangler roundPauseMs", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  // variantConfig finnes men har INGEN roundPauseMs → fallback til env.
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "rocket",
+      config: {
+        ticketTypes: [{ name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 }],
+        patterns: [],
+      },
+    },
+  });
+  const observedDelays: number[] = [];
+  const wrappingTimer: FakeTimer = {
+    setTimeoutFn: ((fn, ms) => {
+      observedDelays.push(ms);
+      return timer.setTimeoutFn(fn, ms);
+    }) as FakeTimer["setTimeoutFn"],
+    clearTimeoutFn: timer.clearTimeoutFn,
+    runNext: timer.runNext,
+    pendingCount: timer.pendingCount,
+  };
+  const service = makeService({
+    engine,
+    variantLookup,
+    timer: wrappingTimer,
+    delayMs: 7000,
+  });
+
+  service.handleGameEnded(makeGameEndedInput({ roomCode: "ROCKET" }));
+
+  assert.equal(observedDelays.length, 1);
+  assert.equal(observedDelays[0], 7000, "env-default må brukes når per-game ikke er satt");
+});
+
+test("admin-config-round-pace: ugyldig per-game-verdi → env-fallback (defense-in-depth)", async () => {
+  // Hvis ugyldig konfig (som admin-validator skulle ha avvist) likevel
+  // er i DB-en, faller resolveRoundPauseMs tilbake til env-default.
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket" })],
+  ]);
+  const { engine } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "rocket",
+      config: {
+        ticketTypes: [{ name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 }],
+        patterns: [],
+        roundPauseMs: 999, // < MIN (1000)
+      },
+    },
+  });
+  const observedDelays: number[] = [];
+  const wrappingTimer: FakeTimer = {
+    setTimeoutFn: ((fn, ms) => {
+      observedDelays.push(ms);
+      return timer.setTimeoutFn(fn, ms);
+    }) as FakeTimer["setTimeoutFn"],
+    clearTimeoutFn: timer.clearTimeoutFn,
+    runNext: timer.runNext,
+    pendingCount: timer.pendingCount,
+  };
+  const service = makeService({
+    engine,
+    variantLookup,
+    timer: wrappingTimer,
+    delayMs: 5000,
+  });
+
+  service.handleGameEnded(makeGameEndedInput({ roomCode: "ROCKET" }));
+
+  assert.equal(observedDelays[0], 5000, "ugyldig per-game-verdi må ignoreres → env-fallback");
+});

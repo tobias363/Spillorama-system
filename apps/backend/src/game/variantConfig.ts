@@ -206,6 +206,149 @@ export interface GameVariantConfig {
    * DomainError("CUSTOM_AND_STANDARD_EXCLUSIVE") ved startGame.
    */
   customPatterns?: CustomPatternDefinition[];
+  /**
+   * Tobias 2026-05-04: admin-konfigurerbar runde-pace.
+   *
+   * Pause (millisekunder) mellom slutten på én runde og starten på neste i
+   * perpetual-loopen for Spill 2/3 (`rocket` / `monsterbingo`). Tidligere
+   * var dette globalt via env-var `PERPETUAL_LOOP_DELAY_MS`. Per-game-
+   * verdien overstyrer env-var-en, slik at admin kan velge ulik tempo per
+   * spill (f.eks. tregere demo-spill, raskere live-spill).
+   *
+   * Resolutionsrekkefølge i {@link PerpetualRoundService.handleGameEnded}:
+   *   1. `variantConfig.roundPauseMs` (per-game admin-konfig)
+   *   2. `PERPETUAL_LOOP_DELAY_MS` env-var (globalt fallback)
+   *   3. Hardkodet 5 000 ms
+   *
+   * Validering: 1 000-300 000 ms (1 sek - 5 min). Verdier utenfor området
+   * avvises av {@link parseVariantConfig}; admin-API validerer også ved
+   * lagring så feilkonfig aldri når DB.
+   *
+   * Spill 1 (`bingo`-slug) er IKKE perpetual og påvirkes ikke av dette
+   * feltet — Spill 1 har egen schedule-drevet master-start-flyt.
+   */
+  roundPauseMs?: number;
+  /**
+   * Tobias 2026-05-04: admin-konfigurerbar ball-takt.
+   *
+   * Minimum millisekunder mellom kule-trekninger i Spill 2/3. Tidligere
+   * var dette globalt via env-var `AUTO_DRAW_INTERVAL_MS`. Per-game-
+   * verdien overstyrer env-var-en. Engine-laget håndhever sin egen
+   * `minDrawIntervalMs` (BIN-253); verdien her skal være ≥ engine sin
+   * throttle for å unngå støy fra `DRAW_TOO_SOON`.
+   *
+   * Resolutionsrekkefølge i {@link Game2AutoDrawTickService.tick} og
+   * {@link Game3AutoDrawTickService.tick}:
+   *   1. `variantConfig.ballIntervalMs` (per-game admin-konfig)
+   *   2. `AUTO_DRAW_INTERVAL_MS` env-var (globalt fallback)
+   *   3. Hardkodet 30 000 ms
+   *
+   * Validering: 1 000-10 000 ms (1-10 sek). Verdier utenfor området
+   * avvises av {@link parseVariantConfig}; admin-API validerer også ved
+   * lagring.
+   */
+  ballIntervalMs?: number;
+}
+
+// ── Admin-konfigurerbar runde-pace (Tobias 2026-05-04) ───────────────────────
+
+/**
+ * Validation bounds for admin-config-round-pace. Kept exported so admin-
+ * routes og tester deler én sannhetskilde.
+ */
+export const ROUND_PAUSE_MS_MIN = 1_000;
+export const ROUND_PAUSE_MS_MAX = 300_000;
+export const BALL_INTERVAL_MS_MIN = 1_000;
+export const BALL_INTERVAL_MS_MAX = 10_000;
+
+/**
+ * Validate admin-supplied `roundPauseMs`. Returnerer normalisert tall
+ * (Math.floor) eller kaster Error ved ugyldig verdi.
+ */
+export function validateRoundPauseMs(value: unknown): number {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    throw new Error(`roundPauseMs må være et tall, fikk ${typeof value}`);
+  }
+  const floored = Math.floor(n);
+  if (floored < ROUND_PAUSE_MS_MIN || floored > ROUND_PAUSE_MS_MAX) {
+    throw new Error(
+      `roundPauseMs må være mellom ${ROUND_PAUSE_MS_MIN} og ${ROUND_PAUSE_MS_MAX} ms`,
+    );
+  }
+  return floored;
+}
+
+/**
+ * Validate admin-supplied `ballIntervalMs`. Returnerer normalisert tall
+ * (Math.floor) eller kaster Error ved ugyldig verdi.
+ */
+export function validateBallIntervalMs(value: unknown): number {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    throw new Error(`ballIntervalMs må være et tall, fikk ${typeof value}`);
+  }
+  const floored = Math.floor(n);
+  if (floored < BALL_INTERVAL_MS_MIN || floored > BALL_INTERVAL_MS_MAX) {
+    throw new Error(
+      `ballIntervalMs må være mellom ${BALL_INTERVAL_MS_MIN} og ${BALL_INTERVAL_MS_MAX} ms`,
+    );
+  }
+  return floored;
+}
+
+/**
+ * Resolve `roundPauseMs` for et rom med fallback-rekkefølge:
+ *   1. Per-game variantConfig.roundPauseMs (admin-konfig fra DB)
+ *   2. Env-var fallback (passed in)
+ *   3. Hardkodet default 5 000 ms (siste-fallback ved env=0/undefined)
+ *
+ * Kaster aldri — ugyldig per-game-verdi (ikke tall, ute av området)
+ * faller stille tilbake til env-fallback. Adminskjemaet håndhever
+ * validation før lagring.
+ */
+export function resolveRoundPauseMs(
+  variantConfig: GameVariantConfig | null | undefined,
+  envFallbackMs: number,
+): number {
+  const perGame = variantConfig?.roundPauseMs;
+  if (
+    typeof perGame === "number" &&
+    Number.isFinite(perGame) &&
+    perGame >= ROUND_PAUSE_MS_MIN &&
+    perGame <= ROUND_PAUSE_MS_MAX
+  ) {
+    return Math.floor(perGame);
+  }
+  if (Number.isFinite(envFallbackMs) && envFallbackMs > 0) {
+    return Math.floor(envFallbackMs);
+  }
+  return 5_000;
+}
+
+/**
+ * Resolve `ballIntervalMs` for et rom med fallback-rekkefølge:
+ *   1. Per-game variantConfig.ballIntervalMs (admin-konfig fra DB)
+ *   2. Env-var fallback (passed in)
+ *   3. Hardkodet default 30 000 ms (siste-fallback ved env=0/undefined)
+ */
+export function resolveBallIntervalMs(
+  variantConfig: GameVariantConfig | null | undefined,
+  envFallbackMs: number,
+): number {
+  const perGame = variantConfig?.ballIntervalMs;
+  if (
+    typeof perGame === "number" &&
+    Number.isFinite(perGame) &&
+    perGame >= BALL_INTERVAL_MS_MIN &&
+    perGame <= BALL_INTERVAL_MS_MAX
+  ) {
+    return Math.floor(perGame);
+  }
+  if (Number.isFinite(envFallbackMs) && envFallbackMs > 0) {
+    return Math.floor(envFallbackMs);
+  }
+  return 30_000;
 }
 
 /**
@@ -555,6 +698,27 @@ export function parseVariantConfig(json: unknown, gameType: string): GameVariant
     patternsByColor: (obj.patternsByColor && typeof obj.patternsByColor === "object" && !Array.isArray(obj.patternsByColor))
       ? (obj.patternsByColor as GameVariantConfig["patternsByColor"])
       : defaults.patternsByColor,
+    // Tobias 2026-05-04: admin-konfigurerbar runde-pace. Verdier som
+    // ligger utenfor det validerte området (ROUND_PAUSE_MS_MIN/MAX,
+    // BALL_INTERVAL_MS_MIN/MAX) faller tilbake til defaults — vi vil
+    // aldri propagere ugyldig konfig fra DB-en til runtime, selv om
+    // admin-validatoren skulle ha bommet.
+    ...(typeof obj.roundPauseMs === "number" &&
+    Number.isFinite(obj.roundPauseMs) &&
+    obj.roundPauseMs >= ROUND_PAUSE_MS_MIN &&
+    obj.roundPauseMs <= ROUND_PAUSE_MS_MAX
+      ? { roundPauseMs: Math.floor(obj.roundPauseMs) }
+      : defaults.roundPauseMs !== undefined
+        ? { roundPauseMs: defaults.roundPauseMs }
+        : {}),
+    ...(typeof obj.ballIntervalMs === "number" &&
+    Number.isFinite(obj.ballIntervalMs) &&
+    obj.ballIntervalMs >= BALL_INTERVAL_MS_MIN &&
+    obj.ballIntervalMs <= BALL_INTERVAL_MS_MAX
+      ? { ballIntervalMs: Math.floor(obj.ballIntervalMs) }
+      : defaults.ballIntervalMs !== undefined
+        ? { ballIntervalMs: defaults.ballIntervalMs }
+        : {}),
   };
 }
 

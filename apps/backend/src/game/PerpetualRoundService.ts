@@ -46,6 +46,7 @@
 
 import { logger as rootLogger } from "../util/logger.js";
 import type { GameEndedInput } from "../adapters/BingoSystemAdapter.js";
+import { resolveRoundPauseMs } from "./variantConfig.js";
 
 const logger = rootLogger.child({ module: "perpetual-round" });
 
@@ -360,6 +361,17 @@ export class PerpetualRoundService {
       this.pendingByRoom.delete(input.roomCode);
     }
 
+    // Tobias 2026-05-04: per-game-konfigurerbar runde-pause. Resolusjons-
+    // rekkefølge: variantConfig.roundPauseMs (admin-konfig fra DB) → env-
+    // var-fallback (this.config.delayMs). Slik kan admin sette ulik tempo
+    // per spill uten å berøre Render-env-vars. Ugyldig per-game-verdi
+    // faller stille til env-fallback (resolveRoundPauseMs validerer).
+    const variantInfo = this.config.variantLookup.getVariantConfig(input.roomCode);
+    const delayMs = resolveRoundPauseMs(
+      variantInfo?.config,
+      this.config.delayMs,
+    );
+
     const roomCode = input.roomCode;
     const gameId = input.gameId;
     const handle = this.config.setTimeoutFn(() => {
@@ -369,16 +381,25 @@ export class PerpetualRoundService {
       // pending blokkerer fremtidige triggers.
       this.pendingByRoom.delete(roomCode);
       void this.startNextRound(roomCode, gameId);
-    }, this.config.delayMs);
+    }, delayMs);
     this.pendingByRoom.set(roomCode, { handle, gameId });
 
+    // Logger kilden så vi kan diagnose admin-config vs env-default i prod.
+    // `variantConfig` betyr at admin-konfigurert roundPauseMs ble brukt;
+    // `envFallback` betyr at variantConfig manglet feltet eller var
+    // ugyldig (resolveRoundPauseMs falt tilbake til env-default).
+    const delayMsSource =
+      delayMs === Math.floor(variantInfo?.config?.roundPauseMs ?? -1)
+        ? "variantConfig"
+        : "envFallback";
     logger.info(
       {
         roomCode,
         slug,
         endedGameId: gameId,
         endedReason: input.endedReason,
-        delayMs: this.config.delayMs,
+        delayMs,
+        delayMsSource,
       },
       "perpetual: scheduled auto-restart",
     );

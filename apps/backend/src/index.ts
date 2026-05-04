@@ -2011,6 +2011,10 @@ const periodicRoomUniquenessValidate = async (): Promise<void> => {
 const game2AutoDrawTickService = new Game2AutoDrawTickService({
   engine,
   drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+  // Tobias 2026-05-04: admin-konfigurerbar runde-pace per spill. Når
+  // variantConfig.ballIntervalMs er satt på et rom (via DB-konfig fra
+  // GameManagement) tar den presedens over `drawIntervalMs` (env-default).
+  variantLookup: roomState,
   onStaleRoomEnded: onStaleRoomEndedCallback,
   broadcaster: game23DrawBroadcaster,
   onPeriodicValidation: periodicRoomUniquenessValidate,
@@ -2018,6 +2022,9 @@ const game2AutoDrawTickService = new Game2AutoDrawTickService({
 const game3AutoDrawTickService = new Game3AutoDrawTickService({
   engine,
   drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+  // Tobias 2026-05-04: admin-konfigurerbar runde-pace per spill. Symmetrisk
+  // med Game2-tick — leser `variantConfig.ballIntervalMs` per rom.
+  variantLookup: roomState,
   broadcaster: game23DrawBroadcaster,
   onPeriodicValidation: periodicRoomUniquenessValidate,
 });

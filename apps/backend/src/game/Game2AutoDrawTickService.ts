@@ -46,6 +46,10 @@
 
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
+import {
+  resolveBallIntervalMs,
+  type GameVariantConfig,
+} from "./variantConfig.js";
 
 const log = rootLogger.child({ module: "game2-auto-draw-tick" });
 
@@ -128,6 +132,20 @@ export interface Game2DrawTickBroadcaster {
   }): void;
 }
 
+/**
+ * Tobias 2026-05-04: per-room variant-config-lookup for admin-config-
+ * round-pace. Når injected leser tick-en `variantConfig.ballIntervalMs`
+ * per rom; ellers brukes service-level `drawIntervalMs` (env-fallback).
+ *
+ * Optional på service-laget for bakoverkompat med eksisterende tester
+ * som ikke wirer roomState.
+ */
+export interface VariantConfigLookup {
+  getVariantConfig(
+    roomCode: string,
+  ): { gameType?: string; config?: GameVariantConfig } | null;
+}
+
 export interface Game2AutoDrawTickServiceOptions {
   engine: AutoDrawEngine;
   /**
@@ -137,8 +155,18 @@ export interface Game2AutoDrawTickServiceOptions {
    * Engine-laget håndhever sin egen `minDrawIntervalMs` (MEDIUM-1/BIN-253);
    * verdien her skal være ≥ engine sin throttle for å unngå støy fra
    * `DRAW_TOO_SOON`.
+   *
+   * Tobias 2026-05-04: brukes som env-fallback når
+   * `variantConfig.ballIntervalMs` ikke er satt for et rom (admin-konfig
+   * fra DB tar presedens — se {@link VariantConfigLookup}).
    */
   drawIntervalMs?: number;
+  /**
+   * Tobias 2026-05-04: per-room variant-config-lookup. Brukes til å
+   * resolve admin-konfigurert `ballIntervalMs` per rom. Når null faller
+   * tick-en tilbake til `drawIntervalMs` for alle rom (legacy-oppførsel).
+   */
+  variantLookup?: VariantConfigLookup;
   /**
    * Tobias 2026-05-04: callback som fyres etter at tick-en har force-endet
    * et stuck-rom (drawnNumbers >= 21 men status fortsatt RUNNING +
@@ -205,6 +233,7 @@ export class Game2AutoDrawTickService {
   private readonly drawIntervalMs: number;
   private readonly onStaleRoomEnded?: (roomCode: string) => Promise<void> | void;
   private readonly broadcaster?: Game2DrawTickBroadcaster;
+  private readonly variantLookup?: VariantConfigLookup;
   private readonly onPeriodicValidation?: () => Promise<void> | void;
   private readonly periodicValidationEvery: number;
   private tickCounter = 0;
@@ -236,6 +265,7 @@ export class Game2AutoDrawTickService {
     this.engine = options.engine;
     this.onStaleRoomEnded = options.onStaleRoomEnded;
     this.broadcaster = options.broadcaster;
+    this.variantLookup = options.variantLookup;
     this.onPeriodicValidation = options.onPeriodicValidation;
     const validateEvery = options.periodicValidationEvery;
     this.periodicValidationEvery =
@@ -251,6 +281,20 @@ export class Game2AutoDrawTickService {
       typeof interval === "number" && Number.isFinite(interval) && interval >= 0
         ? Math.floor(interval)
         : 30_000;
+  }
+
+  /**
+   * Tobias 2026-05-04: resolve effektivt draw-interval per rom. Per-game
+   * `variantConfig.ballIntervalMs` (admin-konfig) tar presedens over
+   * service-level `drawIntervalMs` (env-fallback).
+   *
+   * Returnerer service-default når variantLookup ikke er injected — slik
+   * at tester uten roomState fortsatt fungerer som før.
+   */
+  private resolveDrawIntervalMs(roomCode: string): number {
+    if (!this.variantLookup) return this.drawIntervalMs;
+    const variantInfo = this.variantLookup.getVariantConfig(roomCode);
+    return resolveBallIntervalMs(variantInfo?.config, this.drawIntervalMs);
   }
 
   /**
@@ -293,9 +337,12 @@ export class Game2AutoDrawTickService {
         continue;
       }
 
-      // Throttle.
+      // Throttle. Tobias 2026-05-04: per-game-konfigurerbar via
+      // `variantConfig.ballIntervalMs` (admin-konfig). Faller tilbake
+      // til service-level `drawIntervalMs` (env-default) når ikke satt.
+      const effectiveIntervalMs = this.resolveDrawIntervalMs(summary.code);
       const lastDrawAt = this.lastDrawAtByRoom.get(summary.code) ?? 0;
-      if (now - lastDrawAt < this.drawIntervalMs) {
+      if (now - lastDrawAt < effectiveIntervalMs) {
         skipped++;
         continue;
       }

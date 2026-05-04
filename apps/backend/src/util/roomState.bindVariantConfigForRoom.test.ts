@@ -110,7 +110,11 @@ test("bindVariantConfigForRoom: idempotent — andre kall er no-op", async () =>
   assert.strictEqual(second!.config, first!.config);
 });
 
-test("bindVariantConfigForRoom: ikke-Spill-1 gameSlug → fallback uten DB-lookup", async () => {
+test("bindVariantConfigForRoom: Spill 2/3 gameSlug → fetcher kalles for pace-config (admin-config-round-pace)", async () => {
+  // Tobias 2026-05-04 (admin-config-round-pace): tidligere skipset binderen
+  // fetcheren for ikke-Spill-1, men nå må Spill 2/3 også gjøre DB-oppslag
+  // for å hente `roundPauseMs`/`ballIntervalMs` fra config.spill2/spill3.
+  // Mangler pace-konfig → fortsatt default-variantConfig (verifisert under).
   const rs = fresh();
   let fetcherCalled = false;
   await rs.bindVariantConfigForRoom("R6", {
@@ -118,13 +122,83 @@ test("bindVariantConfigForRoom: ikke-Spill-1 gameSlug → fallback uten DB-looku
     gameManagementId: "gm-1",
     fetchGameManagementConfig: async () => {
       fetcherCalled = true;
+      // Ingen spill3-pace-felt → faller til default. Spill 1-config
+      // ignoreres for monsterbingo.
       return { spill1: { ticketColors: [] } };
     },
   });
-  assert.equal(fetcherCalled, false, "fetcher skal ikke kalles for ikke-Spill-1");
+  assert.equal(fetcherCalled, true, "fetcher skal kalles for Spill 2/3 så pace-config kan leses");
   const info = rs.getVariantConfig("R6");
   assert.ok(info);
   assert.equal(info!.gameType, "monsterbingo");
+  // Default-variantConfig har ingen pace-felt — admin må sette dem.
+  assert.equal(info!.config.roundPauseMs, undefined);
+  assert.equal(info!.config.ballIntervalMs, undefined);
+});
+
+test("bindVariantConfigForRoom: Spill 2 → henter pace fra config.spill2 (admin-config-round-pace)", async () => {
+  // Tobias 2026-05-04: admin-konfigurert pace overstyrer env-default. Vi
+  // verifiserer at både roundPauseMs (rocket → perpetual-pause) og
+  // ballIntervalMs (rocket → ball-interval) merges på toppen av defaults.
+  const rs = fresh();
+  await rs.bindVariantConfigForRoom("R6b", {
+    gameSlug: "rocket",
+    gameManagementId: "gm-rocket",
+    fetchGameManagementConfig: async () => ({
+      spill2: {
+        roundPauseMs: 45000,
+        ballIntervalMs: 3000,
+      },
+    }),
+  });
+  const info = rs.getVariantConfig("R6b");
+  assert.ok(info);
+  assert.equal(info!.gameType, "rocket");
+  assert.equal(info!.config.roundPauseMs, 45000);
+  assert.equal(info!.config.ballIntervalMs, 3000);
+  // Default-rocket-felt skal fortsatt være intakte.
+  assert.equal(info!.config.maxBallValue, 21);
+});
+
+test("bindVariantConfigForRoom: Spill 3 → henter pace fra config.spill3 (admin-config-round-pace)", async () => {
+  const rs = fresh();
+  await rs.bindVariantConfigForRoom("R6c", {
+    gameSlug: "monsterbingo",
+    gameManagementId: "gm-monster",
+    fetchGameManagementConfig: async () => ({
+      spill3: {
+        roundPauseMs: 60000,
+        ballIntervalMs: 5000,
+      },
+    }),
+  });
+  const info = rs.getVariantConfig("R6c");
+  assert.ok(info);
+  assert.equal(info!.gameType, "monsterbingo");
+  assert.equal(info!.config.roundPauseMs, 60000);
+  assert.equal(info!.config.ballIntervalMs, 5000);
+});
+
+test("bindVariantConfigForRoom: ugyldig pace (utenfor MIN/MAX) → ignoreres, default beholdes", async () => {
+  // Tobias 2026-05-04: defense-in-depth — admin-API validerer ved lagring,
+  // men hvis en ugyldig verdi har sluppet inn i DB skal binderen ignorere
+  // den (resolve-helperen falle til env-default i serviceanvenden).
+  const rs = fresh();
+  await rs.bindVariantConfigForRoom("R6d", {
+    gameSlug: "rocket",
+    gameManagementId: "gm-bad",
+    fetchGameManagementConfig: async () => ({
+      spill2: {
+        roundPauseMs: 999, // < MIN (1000)
+        ballIntervalMs: 99999, // > MAX (10000)
+      },
+    }),
+  });
+  const info = rs.getVariantConfig("R6d");
+  assert.ok(info);
+  // Ingen pace-felt skal være satt på config — caller faller til env.
+  assert.equal(info!.config.roundPauseMs, undefined);
+  assert.equal(info!.config.ballIntervalMs, undefined);
 });
 
 test("bindVariantConfigForRoom: direkte-shape (uten spill1-wrapper) tolkes korrekt", async () => {

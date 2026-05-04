@@ -30,7 +30,9 @@ import { logger as rootLogger } from "../util/logger.js";
 import type {
   AutoDrawEngine,
   Game2DrawTickBroadcaster,
+  VariantConfigLookup,
 } from "./Game2AutoDrawTickService.js";
+import { resolveBallIntervalMs } from "./variantConfig.js";
 
 /**
  * Re-eksport av broadcaster-flaten under Game3-spesifikt navn for
@@ -69,8 +71,18 @@ export interface Game3AutoDrawTickServiceOptions {
    * Minimum millisekunder mellom draws per rom. Default 30000 (30 s).
    * Engine-laget håndhever sin egen `minDrawIntervalMs`; verdien her
    * skal være ≥ engine sin throttle.
+   *
+   * Tobias 2026-05-04: brukes som env-fallback når
+   * `variantConfig.ballIntervalMs` ikke er satt for et rom (admin-konfig
+   * fra DB tar presedens — se {@link VariantConfigLookup}).
    */
   drawIntervalMs?: number;
+  /**
+   * Tobias 2026-05-04: per-room variant-config-lookup. Brukes til å
+   * resolve admin-konfigurert `ballIntervalMs` per rom. Når null faller
+   * tick-en tilbake til `drawIntervalMs` for alle rom (legacy-oppførsel).
+   */
+  variantLookup?: VariantConfigLookup;
   /**
    * Tobias-bug-fix 2026-05-04: broadcaster som emitterer `draw:new` +
    * G3 engine-effekter + `room:update` etter hvert vellykket draw. Når
@@ -112,6 +124,7 @@ export class Game3AutoDrawTickService {
   private readonly engine: AutoDrawEngine;
   private readonly drawIntervalMs: number;
   private readonly broadcaster?: Game3DrawTickBroadcaster;
+  private readonly variantLookup?: VariantConfigLookup;
   private readonly onPeriodicValidation?: () => Promise<void> | void;
   private readonly periodicValidationEvery: number;
   private tickCounter = 0;
@@ -122,6 +135,7 @@ export class Game3AutoDrawTickService {
   constructor(options: Game3AutoDrawTickServiceOptions) {
     this.engine = options.engine;
     this.broadcaster = options.broadcaster;
+    this.variantLookup = options.variantLookup;
     this.onPeriodicValidation = options.onPeriodicValidation;
     const validateEvery = options.periodicValidationEvery;
     this.periodicValidationEvery =
@@ -137,6 +151,16 @@ export class Game3AutoDrawTickService {
       typeof interval === "number" && Number.isFinite(interval) && interval >= 0
         ? Math.floor(interval)
         : 30_000;
+  }
+
+  /**
+   * Tobias 2026-05-04: resolve effektivt draw-interval per rom. Identisk
+   * semantikk som {@link Game2AutoDrawTickService.resolveDrawIntervalMs}.
+   */
+  private resolveDrawIntervalMs(roomCode: string): number {
+    if (!this.variantLookup) return this.drawIntervalMs;
+    const variantInfo = this.variantLookup.getVariantConfig(roomCode);
+    return resolveBallIntervalMs(variantInfo?.config, this.drawIntervalMs);
   }
 
   async tick(): Promise<Game3AutoDrawTickResult> {
@@ -160,8 +184,12 @@ export class Game3AutoDrawTickService {
         continue;
       }
 
+      // Tobias 2026-05-04: per-game-konfigurerbar via
+      // `variantConfig.ballIntervalMs` (admin-konfig). Faller tilbake
+      // til service-level `drawIntervalMs` (env-default) når ikke satt.
+      const effectiveIntervalMs = this.resolveDrawIntervalMs(summary.code);
       const lastDrawAt = this.lastDrawAtByRoom.get(summary.code) ?? 0;
-      if (now - lastDrawAt < this.drawIntervalMs) {
+      if (now - lastDrawAt < effectiveIntervalMs) {
         skipped++;
         continue;
       }
