@@ -20,7 +20,13 @@ import { randomUUID } from "node:crypto";
 import { generateTicketForGame } from "../game/ticket.js";
 import type { Ticket } from "../game/types.js";
 import type { GameVariantConfig } from "../game/variantConfig.js";
-import { getDefaultVariantConfig } from "../game/variantConfig.js";
+import {
+  BALL_INTERVAL_MS_MAX,
+  BALL_INTERVAL_MS_MIN,
+  ROUND_PAUSE_MS_MAX,
+  ROUND_PAUSE_MS_MIN,
+  getDefaultVariantConfig,
+} from "../game/variantConfig.js";
 import {
   applySpill1HallFloors,
   buildVariantConfigFromSpill1Config,
@@ -555,6 +561,37 @@ export class RoomStateManager {
       this.variantByRoom.set(roomCode, { gameType: gameSlug, config: floored });
       return;
     }
+
+    // Tobias 2026-05-04: admin-konfigurerbar runde-pace for Spill 2/3.
+    // Spill 2 (`rocket`) og Spill 3 (`monsterbingo`) har per-game-config
+    // for `roundPauseMs` + `ballIntervalMs` lagret under
+    // `config.spill2` / `config.spill3` i GameManagement. Vi merger
+    // pace-feltene over default-variantConfig så
+    // PerpetualRoundService + Game2/3AutoDrawTickService kan resolve
+    // dem via roomState.getVariantConfig.
+    const isSpill2 = gameSlug === "rocket" || gameSlug === "game_2" || gameSlug === "tallspill";
+    const isSpill3 = gameSlug === "monsterbingo" || gameSlug === "mønsterbingo" || gameSlug === "game_3";
+    if ((isSpill2 || isSpill3) && opts.gameManagementId && opts.fetchGameManagementConfig) {
+      try {
+        const config = await opts.fetchGameManagementConfig(opts.gameManagementId);
+        const subKey = isSpill2 ? "spill2" : "spill3";
+        const pace = extractPaceConfig(config, subKey);
+        if (pace) {
+          const baseline = getDefaultVariantConfig(gameSlug);
+          this.variantByRoom.set(roomCode, {
+            gameType: gameSlug,
+            config: { ...baseline, ...pace },
+          });
+          return;
+        }
+      } catch (err) {
+        roomStateLog.warn(
+          { err, roomCode, gameManagementId: opts.gameManagementId },
+          "Spill 2/3 pace-config-lookup failed — fallback til default-variantConfig",
+        );
+      }
+    }
+
     this.bindDefaultVariantConfig(roomCode, gameSlug);
   }
 
@@ -680,4 +717,42 @@ function extractSpill1Config(
     return config as Spill1ConfigInput;
   }
   return null;
+}
+
+/**
+ * Tobias 2026-05-04: pace-felter (roundPauseMs / ballIntervalMs) for
+ * Spill 2/3. Lagres under `config.spill2` (rocket) eller `config.spill3`
+ * (monsterbingo) i GameManagement.config_json. Returnerer kun feltene
+ * som er gyldige (innenfor MIN/MAX-grenser); ugyldige verdier ignoreres
+ * og lar default fra variantConfig stå.
+ *
+ * Returnerer null hvis sub-objektet mangler eller er tomt — caller
+ * faller da til default-variantConfig.
+ */
+function extractPaceConfig(
+  config: Record<string, unknown> | null | undefined,
+  subKey: "spill2" | "spill3",
+): Pick<GameVariantConfig, "roundPauseMs" | "ballIntervalMs"> | null {
+  if (!config || typeof config !== "object") return null;
+  const nested = (config as Record<string, unknown>)[subKey];
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return null;
+  const obj = nested as Record<string, unknown>;
+  const out: Pick<GameVariantConfig, "roundPauseMs" | "ballIntervalMs"> = {};
+  if (
+    typeof obj.roundPauseMs === "number" &&
+    Number.isFinite(obj.roundPauseMs) &&
+    obj.roundPauseMs >= ROUND_PAUSE_MS_MIN &&
+    obj.roundPauseMs <= ROUND_PAUSE_MS_MAX
+  ) {
+    out.roundPauseMs = Math.floor(obj.roundPauseMs);
+  }
+  if (
+    typeof obj.ballIntervalMs === "number" &&
+    Number.isFinite(obj.ballIntervalMs) &&
+    obj.ballIntervalMs >= BALL_INTERVAL_MS_MIN &&
+    obj.ballIntervalMs <= BALL_INTERVAL_MS_MAX
+  ) {
+    out.ballIntervalMs = Math.floor(obj.ballIntervalMs);
+  }
+  return out.roundPauseMs !== undefined || out.ballIntervalMs !== undefined ? out : null;
 }

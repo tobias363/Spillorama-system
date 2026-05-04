@@ -697,3 +697,77 @@ test("broadcaster: ikke injected → tick kjører uten emit (legacy-fallback for
   assert.equal(r.drawsTriggered, 1);
   assert.equal(drawCalls.length, 1);
 });
+
+// ── Admin-config-round-pace (Tobias 2026-05-04) ─────────────────────────────
+
+test("admin-config-round-pace: per-game ballIntervalMs throttler tick uavhengig av service drawIntervalMs", async () => {
+  // Tobias 2026-05-04: variantConfig.ballIntervalMs (admin-konfig) tar
+  // presedens over service-level drawIntervalMs (env-fallback). Vi verifiserer
+  // throttle-oppførselen ved to back-to-back-tick-er der per-game-throttle
+  // er 5 sekunder mens service-level er 0.
+  const { engine } = makeEngine([
+    { code: "ROCKET", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
+  ]);
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0, // service-level: ingen throttle
+    variantLookup: {
+      getVariantConfig: () => ({
+        gameType: "rocket",
+        config: {
+          ticketTypes: [{ name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 }],
+          patterns: [],
+          ballIntervalMs: 5000, // per-game: 5s throttle
+        },
+      }),
+    },
+  });
+  // Første tick: ingen forrige draw → trigger.
+  const r1 = await service.tick();
+  assert.equal(r1.drawsTriggered, 1);
+  // Andre tick rett etter: per-game-throttle (5s) skal blokkere.
+  const r2 = await service.tick();
+  assert.equal(r2.drawsTriggered, 0);
+  assert.equal(r2.skipped, 1);
+});
+
+test("admin-config-round-pace: variantLookup ikke injected → service drawIntervalMs brukes (legacy)", async () => {
+  // Bakoverkompat: tester uten roomState skal fortsette å virke.
+  const { engine } = makeEngine([
+    { code: "ROCKET", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
+  ]);
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0, // service-level: ingen throttle
+    // variantLookup: undefined
+  });
+  const r1 = await service.tick();
+  const r2 = await service.tick();
+  assert.equal(r1.drawsTriggered, 1);
+  assert.equal(r2.drawsTriggered, 1, "uten variantLookup skal service drawIntervalMs (=0) tillate begge tick-er");
+});
+
+test("admin-config-round-pace: ugyldig per-game ballIntervalMs → faller til env-default", async () => {
+  // Defense-in-depth: ugyldig DB-verdi skal ikke bypasse throttle.
+  const { engine } = makeEngine([
+    { code: "ROCKET", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
+  ]);
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 5000, // service-level: 5s
+    variantLookup: {
+      getVariantConfig: () => ({
+        gameType: "rocket",
+        config: {
+          ticketTypes: [{ name: "Standard", type: "game2-3x3", priceMultiplier: 1, ticketCount: 1 }],
+          patterns: [],
+          ballIntervalMs: 999, // < MIN
+        },
+      }),
+    },
+  });
+  const r1 = await service.tick();
+  const r2 = await service.tick();
+  assert.equal(r1.drawsTriggered, 1);
+  assert.equal(r2.drawsTriggered, 0, "ugyldig per-game-verdi → service drawIntervalMs (5000) håndhever throttle");
+});

@@ -47,6 +47,9 @@ import {
   type PatternPrizeMode,
   type ValidationError,
 } from "./Spill1Config.js";
+// Tobias 2026-05-04 (admin-config-round-pace): Spill 2/3 har egen,
+// forenklet add-form som kun konfigurerer runde-pace-feltene.
+import { isSpill23Variant, renderSpill23PaceAddPage } from "./Spill23PaceForm.js";
 
 /** Render Add-form for Spill 1. Andre gameType-varianter får en "ikke wired ennå"-placeholder. */
 export async function renderGameManagementAddPage(
@@ -64,6 +67,16 @@ export async function renderGameManagementAddPage(
   }
   if (!gt) {
     container.innerHTML = renderError(typeId, t("game_type_not_found_fallback"));
+    return;
+  }
+
+  // Spill 2 / Spill 3 (perpetual-loop-spill) bruker en forenklet form
+  // som kun eksponerer admin-konfigurerbar runde-pace (roundPauseMs +
+  // ballIntervalMs). Andre felt (mønstre, tickets, premier) er ikke
+  // implementert i Spill 2/3-skjemaet — disse spillene har faste
+  // mønster-tabeller i variantConfig-defaults.
+  if (isSpill23Variant(gt)) {
+    renderSpill23PaceAddPage(container, gt);
     return;
   }
 
