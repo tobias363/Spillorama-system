@@ -1,67 +1,54 @@
 /**
- * Spill 2 Bong Mockup v2 — player-kort som vises ytterst til venstre i
- * `ComboPanel`. Inneholder en enkel hode-skulder-ikon + et 2-siffer
- * spillerantall ("01", "02", ...).
+ * Spill 2 — player-kort ytterst til venstre i `ComboPanel`. Inneholder:
+ *   1. Hode-skulder-ikon + 2-siffer spillerantall ("01", "02", ...)
+ *   2. "Innsats: X kr"-rad (skjult når 0)  — Tobias-direktiv 2026-05-04
+ *   3. "Gevinst: Y kr"-rad (skjult når 0)
  *
- * Mockup (`Bong Mockup.html` `.player-col` + `.player-card`):
+ * Speiler Spill 1's `LeftInfoPanel` (apps/game1/components/LeftInfoPanel.ts)
+ * sin Innsats/Gevinst-flyt: rader skjules når verdien er 0, vises ellers
+ * for å unngå visuell støy.
  *
- *   ┌──────────────┐
- *   │ ◉            │   ← hode-ikon (top-left)
- *   │   01         │   ← antall spillere
- *   │              │
- *   └──────────────┘
- *
- * CSS:
- *   - `.player-col` width: 130px (hele kolonne-bredde inkl. padding 10).
- *   - `.player-card` rounded-rect 12px med mørk-rød fyll, ingen border
- *     (per chat-feedback "Remove the white border around the player card").
- *   - Ikon: 18px, top-aligned, hvit fyll.
- *   - Tall: 18px, font-weight 800, hvit, top-aligned med `marginTop: 2px`.
- *
- * Pixi-implementasjon:
- *   - `Container` med Graphics-bakgrunn + Graphics-tegnet ikon + `Text` for tall.
- *   - Eksternt-styrt antall via `setCount(n)` — vises 2-sifret med
- *     `padStart`, kan vise opptil 99.
- *
- * 2026-05-03 (Agent S, branch feat/spill2-bong-mockup-v2): ny komponent
- * for v2-redesignet. Erstatter ingen eksisterende komponent — er en
- * fjerde kolonne i ComboPanel.
+ * Pixi-implementasjon: Container med Graphics-bakgrunn + Graphics-tegnet
+ * ikon + Text-elementer for tall, Innsats og Gevinst.
  */
 
 import { Container, Graphics, Text } from "pixi.js";
 
 /** Kolonne-bredde i ComboPanel (matcher CSS `.player-col` width: 130px). */
 export const PLAYER_COL_WIDTH = 130;
-/** Card-padding inne i kolonnen (matcher CSS `.player-col` padding: 10px). */
+/** Card-padding inne i kolonnen. */
 const COL_PADDING = 10;
 /** Card-bredde = kolonne-bredde - 2 * padding. */
 const CARD_WIDTH = PLAYER_COL_WIDTH - COL_PADDING * 2;
-/** Card-radius (matcher CSS `border-radius: 12px`). */
+/** Card-radius. */
 const CARD_RADIUS = 12;
-/** Indre padding i kortet (matcher CSS `.player-card` padding: 10 12). */
+/** Indre padding i kortet. */
 const CARD_PAD_X = 12;
 const CARD_PAD_Y = 10;
-/** Ikon-størrelse (matcher CSS `.pc-icon` 18px). */
+/** Ikon-størrelse. */
 const ICON_SIZE = 18;
-/** Mellomrom mellom ikon og tall (matcher CSS `.player-card` gap: 8). */
+/** Mellomrom mellom ikon og tall. */
 const ICON_GAP = 8;
+/** Vertikal gap mellom rad 1 (count) og rad 2 (Innsats). */
+const ROW_GAP = 8;
 
 export class PlayerCard extends Container {
   private bg: Graphics;
   private icon: Graphics;
   private numText: Text;
+  /** Tobias 2026-05-04: Innsats-rad (skjult når 0). */
+  private innsatsText: Text;
+  /** Tobias 2026-05-04: Gevinst-rad (skjult når 0). */
+  private gevinstText: Text;
   private cardHeight: number;
+  private lastStake = -1;
+  private lastWinnings = -1;
 
-  /**
-   * @param colHeight  Total høyde for kolonnen (samme som panel-høyde).
-   *                   Bakgrunns-kortet fyller `colHeight - 2 * COL_PADDING`.
-   */
   constructor(colHeight: number) {
     super();
     this.cardHeight = colHeight - COL_PADDING * 2;
 
     // ── kort-bakgrunn ────────────────────────────────────────────────────
-    // Mørk-rød rounded-rect, ingen border (per v2-feedback).
     this.bg = new Graphics();
     this.bg.x = COL_PADDING;
     this.bg.y = COL_PADDING;
@@ -69,7 +56,6 @@ export class PlayerCard extends Container {
     this.addChild(this.bg);
 
     // ── ikon (hode-skulder) ──────────────────────────────────────────────
-    // Tegnes som Graphics — sirkel for hode + kurve for skulder.
     this.icon = new Graphics();
     this.icon.x = COL_PADDING + CARD_PAD_X;
     this.icon.y = COL_PADDING + CARD_PAD_Y;
@@ -88,10 +74,40 @@ export class PlayerCard extends Container {
       },
     });
     this.numText.x = COL_PADDING + CARD_PAD_X + ICON_SIZE + ICON_GAP;
-    // CSS bruker `align-items: flex-start` + `marginTop: 2` — vi tilsvarer
-    // ved å plassere tallet med top-baseline lik ikon-toppen + 2px.
     this.numText.y = COL_PADDING + CARD_PAD_Y + 2;
     this.addChild(this.numText);
+
+    // ── Innsats-rad (Tobias-direktiv 2026-05-04) ─────────────────────────
+    // Skjult som default — vises i `setStake(n)` når n > 0.
+    const row2Y = COL_PADDING + CARD_PAD_Y + ICON_SIZE + ROW_GAP;
+    this.innsatsText = new Text({
+      text: "Innsats: 0 kr",
+      style: {
+        fontFamily: "Inter, system-ui, Helvetica, sans-serif",
+        fontSize: 12,
+        fontWeight: "500",
+        fill: 0xeae0d2,
+      },
+    });
+    this.innsatsText.x = COL_PADDING + CARD_PAD_X;
+    this.innsatsText.y = row2Y;
+    this.innsatsText.visible = false;
+    this.addChild(this.innsatsText);
+
+    // ── Gevinst-rad ──────────────────────────────────────────────────────
+    this.gevinstText = new Text({
+      text: "Gevinst: 0 kr",
+      style: {
+        fontFamily: "Inter, system-ui, Helvetica, sans-serif",
+        fontSize: 12,
+        fontWeight: "600",
+        fill: 0xffe83d, // gull-aksent for Gevinst (matcher Spill 1)
+      },
+    });
+    this.gevinstText.x = COL_PADDING + CARD_PAD_X;
+    this.gevinstText.y = row2Y + 16;
+    this.gevinstText.visible = false;
+    this.addChild(this.gevinstText);
   }
 
   /** Sett antall spillere — vises 2-sifret med leading zero. */
@@ -100,6 +116,37 @@ export class PlayerCard extends Container {
     const formatted = String(clamped).padStart(2, "0");
     if (this.numText.text !== formatted) {
       this.numText.text = formatted;
+    }
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-04: oppdater Innsats-raden. Skjules når n=0
+   * (ingen aktiv stake), vises ellers. Speiler Spill 1's LeftInfoPanel-
+   * flyt for konsistent UX.
+   */
+  setStake(stake: number): void {
+    if (stake === this.lastStake) return;
+    this.lastStake = stake;
+    if (stake > 0) {
+      this.innsatsText.text = `Innsats: ${stake} kr`;
+      this.innsatsText.visible = true;
+    } else {
+      this.innsatsText.visible = false;
+    }
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-04: oppdater Gevinst-raden. Skjules når n=0
+   * (ingen vinning denne runden), vises ellers.
+   */
+  setWinnings(winnings: number): void {
+    if (winnings === this.lastWinnings) return;
+    this.lastWinnings = winnings;
+    if (winnings > 0) {
+      this.gevinstText.text = `Gevinst: ${winnings} kr`;
+      this.gevinstText.visible = true;
+    } else {
+      this.gevinstText.visible = false;
     }
   }
 
@@ -112,11 +159,9 @@ export class PlayerCard extends Container {
 
   private drawBg(): void {
     this.bg.clear();
-    // Mørk-rød fyll (matcher CSS `rgba(20, 5, 8, 0.45)`).
     this.bg
       .roundRect(0, 0, CARD_WIDTH, this.cardHeight, CARD_RADIUS)
       .fill({ color: 0x140508, alpha: 0.45 });
-    // Topp-highlight 1px (matcher `inset 0 1px 0 rgba(255,255,255,0.06)`).
     this.bg
       .roundRect(2, 2, CARD_WIDTH - 4, 1, 1)
       .fill({ color: 0xffffff, alpha: 0.06 });
@@ -124,17 +169,14 @@ export class PlayerCard extends Container {
 
   private drawIcon(): void {
     this.icon.clear();
-    // Hode (sirkel — `cx=12 cy=8 r=4` i 24×24 viewBox, skalert til 18×18).
-    const cx = ICON_SIZE / 2; // 9
-    const headY = (8 / 24) * ICON_SIZE; // 6
-    const headR = (4 / 24) * ICON_SIZE; // 3
+    const cx = ICON_SIZE / 2;
+    const headY = (8 / 24) * ICON_SIZE;
+    const headR = (4 / 24) * ICON_SIZE;
     this.icon.circle(cx, headY, headR).fill({ color: 0xffffff });
-    // Skulder-kurve (`M 4 21 c 0 -4.4 3.6 -8 8 -8 s 8 3.6 8 8`).
-    // Vi tegner et halvtall for skulder/torso ved hjelp av en bezier.
-    const torsoTopY = (13 / 24) * ICON_SIZE; // ~9.75
-    const torsoBottomY = (21 / 24) * ICON_SIZE; // ~15.75
-    const torsoLeft = (4 / 24) * ICON_SIZE; // 3
-    const torsoRight = (20 / 24) * ICON_SIZE; // 15
+    const torsoTopY = (13 / 24) * ICON_SIZE;
+    const torsoBottomY = (21 / 24) * ICON_SIZE;
+    const torsoLeft = (4 / 24) * ICON_SIZE;
+    const torsoRight = (20 / 24) * ICON_SIZE;
     this.icon
       .moveTo(torsoLeft, torsoBottomY)
       .quadraticCurveTo(cx, torsoTopY, torsoRight, torsoBottomY)
