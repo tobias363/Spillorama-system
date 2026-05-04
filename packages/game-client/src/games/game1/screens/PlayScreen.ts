@@ -9,7 +9,7 @@ import { BallTube } from "../components/BallTube.js";
 import { HeaderBar } from "../components/HeaderBar.js";
 import { HtmlOverlayManager } from "../components/HtmlOverlayManager.js";
 import { LeftInfoPanel } from "../components/LeftInfoPanel.js";
-import { CenterTopPanel } from "../components/CenterTopPanel.js";
+import { CenterTopPanel, type CenterTopOptions } from "../components/CenterTopPanel.js";
 import { ChatPanelV2 } from "../components/ChatPanelV2.js";
 import { CalledNumbersOverlay } from "../components/CalledNumbersOverlay.js";
 import { Game1BuyPopup } from "../components/Game1BuyPopup.js";
@@ -158,6 +158,13 @@ export class PlayScreen extends Container {
     roomCode: string,
     container: HTMLElement,
     pauseAwareBridge?: { getState(): { isPaused: boolean } },
+    /**
+     * Optional CenterTopPanel-options. Spill 3-controlleren bruker dette
+     * til å injisere en egen `patternListViewFactory` (4 visuelle mini-grids
+     * i stedet for default tekst-pills). Spill 1 sender ikke argumentet og
+     * får default-oppførsel.
+     */
+    centerTopOptions: CenterTopOptions = {},
   ) {
     super();
     this.audio = audio;
@@ -284,16 +291,20 @@ export class PlayScreen extends Container {
     });
     this.ticketGrid.mount(overlayRoot);
 
-    this.centerTop = new CenterTopPanel(this.overlayManager, {
-      onShowCalledNumbers: () => this.calledNumbers.toggle(),
-      onPreBuy: () => this.openBuyPopup(),
-      onBuyMoreTickets: () => this.openBuyPopup(),
-      onSelectLuckyNumber: () => this.callbacks.onLuckyNumberTap?.(),
-      onCancelTickets: () => this.callbacks.onCancelTickets?.(),
-      onOpenSettings: () => this.callbacks.onOpenSettings?.(),
-      onOpenMarkerBg: () => this.callbacks.onOpenMarkerBg?.(),
-      onStartGame: () => this.callbacks.onStartGame?.(),
-    });
+    this.centerTop = new CenterTopPanel(
+      this.overlayManager,
+      {
+        onShowCalledNumbers: () => this.calledNumbers.toggle(),
+        onPreBuy: () => this.openBuyPopup(),
+        onBuyMoreTickets: () => this.openBuyPopup(),
+        onSelectLuckyNumber: () => this.callbacks.onLuckyNumberTap?.(),
+        onCancelTickets: () => this.callbacks.onCancelTickets?.(),
+        onOpenSettings: () => this.callbacks.onOpenSettings?.(),
+        onOpenMarkerBg: () => this.callbacks.onOpenMarkerBg?.(),
+        onStartGame: () => this.callbacks.onStartGame?.(),
+      },
+      centerTopOptions,
+    );
 
     // ── Container 2: player-info + combo-panel + action-buttons ──────────
     // PM 2026-04-23: "den andre yster da resten". Bordered box with the

@@ -38,6 +38,8 @@ import { Game1BuyPopup } from "../games/game1/components/Game1BuyPopup.js";
 import { HtmlOverlayManager } from "../games/game1/components/HtmlOverlayManager.js";
 import { WinPopup } from "../games/game1/components/WinPopup.js";
 import { WinScreenV2 } from "../games/game1/components/WinScreenV2.js";
+import { Game3PatternRow } from "../games/game3/components/Game3PatternRow.js";
+import type { PatternDefinition, PatternResult } from "@spillorama/shared-types/game";
 
 /** Ball PNGs used by BallTube + CenterBall. Pre-warmed before loadBalls() so
  *  sprites render in their first frame (async Assets.load() inside BallTube
@@ -55,7 +57,8 @@ type Scenario =
   | "buy-popup"
   | "draw-active"
   | "pattern-won"
-  | "win-screen";
+  | "win-screen"
+  | "g3-pattern-row";
 
 const VALID_SCENARIOS: Readonly<Scenario[]> = [
   "idle",
@@ -63,6 +66,7 @@ const VALID_SCENARIOS: Readonly<Scenario[]> = [
   "draw-active",
   "pattern-won",
   "win-screen",
+  "g3-pattern-row",
 ];
 
 const beacon = document.getElementById("readiness-beacon");
@@ -245,6 +249,107 @@ async function runPatternWon(): Promise<void> {
   setTimeout(markReady, 900);
 }
 
+/**
+ * Spill 3 — pattern-row scenario.
+ *
+ * Mountes Game3PatternRow standalone i en CenterTopPanel-lignende
+ * containerstil for å verifisere de 4 mini-grids visuelt
+ * (T / X / 7 / Pyramide). Patterns speiler `DEFAULT_GAME3_CONFIG.patterns`
+ * 1:1, så det vi ser her er hva spilleren faktisk får i live spill.
+ */
+async function runG3PatternRow(): Promise<void> {
+  await setupBaseLayout();
+  const container = document.getElementById("game-container");
+  if (!container) throw new Error("No #game-container in DOM");
+
+  // Bygg en synlig CenterTopPanel-aktig boks rundt pattern-rad så vi ser
+  // typisk dimensjon (376px combo-bredde) og kontrast.
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = [
+    "position:absolute",
+    "top:80px",
+    "left:240px",
+    "padding:15px 26px",
+    "width:376px",
+    "background:linear-gradient(180deg, rgba(60,10,14,0.9) 0%, rgba(30,5,7,0.6) 100%)",
+    "border:1px solid rgba(255,232,61,0.2)",
+    "border-radius:6px",
+    "box-shadow:0 4px 20px rgba(0,0,0,0.6), inset 0 0 12px rgba(120,30,30,0.2)",
+    "z-index:10",
+  ].join(";");
+
+  const header = document.createElement("div");
+  header.style.cssText =
+    "color:#ffe83d;font-size:11px;font-weight:700;letter-spacing:0.6px;margin-bottom:8px;";
+  header.textContent = "SPILL 3 — MØNSTERBINGO";
+  wrapper.appendChild(header);
+
+  const cellsToBitmask = (cells: number[]): number[] => {
+    const mask = new Array(25).fill(0);
+    for (const c of cells) mask[c] = 1;
+    return mask;
+  };
+
+  const patterns: PatternDefinition[] = [
+    {
+      id: "p-topp-midt",
+      name: "Topp + midt",
+      claimType: "BINGO",
+      prizePercent: 25,
+      order: 0,
+      design: 0,
+      patternDataList: cellsToBitmask([0, 1, 2, 3, 4, 7, 12, 17, 22]),
+    },
+    {
+      id: "p-kryss",
+      name: "Kryss",
+      claimType: "BINGO",
+      prizePercent: 25,
+      order: 1,
+      design: 0,
+      patternDataList: cellsToBitmask([0, 4, 6, 8, 12, 16, 18, 20, 24]),
+    },
+    {
+      id: "p-topp-diag",
+      name: "Topp + diagonal",
+      claimType: "BINGO",
+      prizePercent: 25,
+      order: 2,
+      design: 0,
+      patternDataList: cellsToBitmask([0, 1, 2, 3, 4, 8, 12, 16, 20]),
+    },
+    {
+      id: "p-pyramide",
+      name: "Pyramide",
+      claimType: "BINGO",
+      prizePercent: 25,
+      order: 3,
+      design: 0,
+      patternDataList: cellsToBitmask([12, 16, 17, 18, 20, 21, 22, 23, 24]),
+    },
+  ];
+
+  // Vis en typisk mid-runde-state: første pattern vunnet, andre aktiv.
+  const results: PatternResult[] = [
+    {
+      patternId: "p-topp-midt",
+      patternName: "Topp + midt",
+      claimType: "BINGO",
+      isWon: true,
+      payoutAmount: 250,
+    },
+  ];
+
+  const row = new Game3PatternRow();
+  wrapper.appendChild(row.root);
+  container.appendChild(wrapper);
+
+  // 1000 kr pot → 25% = 250 kr per pattern.
+  row.update(patterns, results, 1000, true);
+
+  setTimeout(markReady, 300);
+}
+
 async function runWinScreen(): Promise<void> {
   const { container } = await setupBaseLayout();
   const win = new WinScreenV2(container);
@@ -277,6 +382,9 @@ async function runScenario(name: Scenario): Promise<void> {
       break;
     case "win-screen":
       await runWinScreen();
+      break;
+    case "g3-pattern-row":
+      await runG3PatternRow();
       break;
   }
 }

@@ -70,6 +70,24 @@ export interface PatternDefinition {
    */
   mask?: PatternMask;
   /**
+   * 25-cell 0/1 bitmask (row-major, 5×5) for custom patterns. Same data as
+   * `mask` but as a flat `number[]` of length 25 (each cell either 0 or 1)
+   * for wire-compatibility med backend Spill 3-config-en. Klient-koden
+   * bruker dette direkte til å rendre Spill 3 mønster-grids
+   * (`Game3PatternRow`).
+   *
+   * Undefined for Spill 1/Spill 2 row/full-house patterns (shape implied
+   * by `design`). Settes for Spill 3 sine 4 design-mønstre (Topp + midt /
+   * Kryss / Topp + diagonal / Pyramide) i `DEFAULT_GAME3_CONFIG`.
+   */
+  patternDataList?: number[];
+  /**
+   * BIN-615 / PR-C1: Ball-tall etter hvilket pattern deaktiveres uten
+   * winner. Brukes av Spill 3 sin pattern-cycler (`Game3Engine`).
+   * Undefined for Spill 1/Spill 2.
+   */
+  ballNumberThreshold?: number;
+  /**
    * Admin-configurable prize mode for this pattern.
    * - "percent" (default, absent): `prizePercent` of remaining pool.
    * - "fixed":           flat `prize1` kr amount, capped by RTP guards at payout.
