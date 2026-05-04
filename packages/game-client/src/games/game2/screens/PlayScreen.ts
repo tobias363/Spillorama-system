@@ -412,6 +412,38 @@ export class PlayScreen extends Container {
       : (state.preRoundTickets?.length ?? 0);
     if (expectedTickets !== this.bongs.length) {
       this.buildTickets(state);
+      return;
+    }
+
+    // 2026-05-04 (Bug 3 — fix/spill2-bug2-bug3): re-sync marks fra
+    // server-authoritative `state.myMarks` til eksisterende bonger.
+    // Tidligere oppdaterte vi marks KUN inkrementelt via
+    // `onNumberDrawn(number)` per ball-trekning, men hvis et `draw:new`-
+    // event ble misset (gap → resync → applySnapshot), oppdaterte
+    // bridge `state.myMarks` ferskt mens bongene fortsatte med stale
+    // mark-state. Resultat: enkelte celler som matchet trukne baller
+    // fikk ALDRI markert fordi `markNumber(n)` aldri ble kjørt for dem.
+    //
+    // Server-side er Game2Engine.onDrawCompleted nå kalt korrekt etter
+    // PR #906 og `autoMarkPlayerCells` populerer `game.marks` autoritativt.
+    // Vi gjør state-en til sannhetskilden i hver `updateInfo`-tikk —
+    // BongCard.markNumbers er idempotent (Set-add), så dobbeltmarkering
+    // er trygt og koster bare en re-tegne-pass uten visuell forskjell
+    // for celler som allerede er markert.
+    //
+    // Pre-round-preview-rendering (SPECTATING / non-RUNNING med kun
+    // preRoundTickets) skal IKKE re-merkes — disse bongene tilhører neste
+    // runde og forrige rundes drawnNumbers gjelder ikke for dem. Match
+    // buildTickets sin `isPreRoundPreview`-beregning for konsistens.
+    const isPreRoundPreview =
+      !running || (running && state.myTickets.length === 0);
+    if (!isPreRoundPreview) {
+      for (let i = 0; i < this.bongs.length; i++) {
+        const ticketMarks = state.myMarks[i];
+        if (ticketMarks && ticketMarks.length > 0) {
+          this.bongs[i].markNumbers(ticketMarks);
+        }
+      }
     }
   }
 
