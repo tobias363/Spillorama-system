@@ -5,9 +5,7 @@ import type { GameState } from "../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import { telemetry } from "../../telemetry/Telemetry.js";
 import { LoadingOverlay } from "../../components/LoadingOverlay.js";
-import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
-import { EndScreen } from "./screens/EndScreen.js";
 
 /**
  * Phase-maskin for Game 2 (Spill 2 / Tallspill).
@@ -24,9 +22,7 @@ class Game2Controller implements GameController {
   private root: Container;
   private phase: Phase = "LOADING";
   private currentScreen: Container | null = null;
-  private lobbyScreen: LobbyScreen | null = null;
   private playScreen: PlayScreen | null = null;
-  private endScreen: EndScreen | null = null;
   private myPlayerId: string | null = null;
   private actualRoomCode: string = "";
   private unsubs: (() => void)[] = [];
@@ -266,59 +262,30 @@ class Game2Controller implements GameController {
     const w = this.deps.app.app.screen.width;
     const h = this.deps.app.app.screen.height;
 
+    // Tobias-direktiv 2026-05-04 (Spill 1-paritet): ALLE faser bruker
+    // PlayScreen. PlayScreen sin interne `running ? myTickets :
+    // preRoundTickets`-logikk håndterer korrekt visning per state:
+    //   - LOBBY (mellom runder, !RUNNING): preRoundTickets vises (kjøpte
+    //     bonger som venter på neste runde)
+    //   - PLAYING/SPECTATING (RUNNING): myTickets vises (active markable)
+    //   - ENDED (countdown til neste runde): preRoundTickets vises
+    //
+    // Tidligere brukte LOBBY en egen LobbyScreen (uten bong-grid) og
+    // ENDED en egen EndScreen — det skjulte forhåndskjøpte bonger og
+    // brøt Innsats/Gevinst-oppdatering. Nå er PlayScreen den eneste
+    // skjermen for alle aktive game-faser, identisk med Spill 1.
     switch (phase) {
       case "LOBBY":
-        this.lobbyScreen = new LobbyScreen(w, h);
-        this.lobbyScreen.setOnBuy((count) => this.handleBuy(count));
-        this.lobbyScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        // Tobias-direktiv 2026-05-04: "Kjøp flere brett"-pill åpner BuyPopup
-        // direkte (LobbyScreen håndterer dette internt). ChooseTicketsScreen
-        // er fjernet — én popup-flyt for ticket-kjøp på tvers av faser.
-        this.lobbyScreen.update(state);
-        // 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): auto-show
-        // av BuyPopup i LOBBY fjernet per Tobias-direktiv. Designet
-        // (Bong Mockup v2) viser BallTube + bong-grid + ComboPanel uten
-        // overlay i midten. BuyPopup styres nå kun av eksplisitt klikk
-        // på "Kjøp flere brett"-pill i ComboPanel.
-        this.setScreen(this.lobbyScreen);
-        break;
-
       case "PLAYING":
+      case "SPECTATING":
+      case "ENDED":
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
-        // 2026-05-03 (Agent E, Bong Mockup-design): Lykketall + "Kjøp flere
-        // brett" lever nå inne i PlayScreen.ComboPanel (var i LobbyScreen).
         this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        // Tobias-direktiv 2026-05-04: ChooseTicketsScreen-flyten er fjernet.
-        // PlayScreen åpner BuyPopup-modal direkte ved klikk på "Kjøp flere".
         this.playScreen.setOnBuyForNextRound((count) => this.handleBuyForNextRound(count));
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
-        break;
-
-      case "SPECTATING":
-        // BIN-507 port: samme render som PLAYING men uten tickets å markere.
-        // Server-guards (MARKS_NOT_FOUND, PLAYER_NOT_PARTICIPATING) blokkerer
-        // mark/claim fra spectators uansett.
-        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
-        this.playScreen.setOnClaim((type) => this.handleClaim(type));
-        this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        // 2026-05-03 (Agent L): mellom-runde buy-popup wire-up — også for
-        // spectators. De får mulighet til å hoppe inn i neste runde.
-        this.playScreen.setOnBuyForNextRound((count) => this.handleBuyForNextRound(count));
-        this.playScreen.buildTickets(state); // tom ticket-seksjon for spectator
-        this.playScreen.updateInfo(state);
-        this.setScreen(this.playScreen);
-        break;
-
-      case "ENDED":
-        this.endScreen = new EndScreen(w, h);
-        this.endScreen.setOnDismiss(() => {
-          this.transitionTo("LOBBY", this.deps.bridge.getState());
-        });
-        this.endScreen.show(state);
-        this.setScreen(this.endScreen);
         break;
     }
   }
@@ -326,16 +293,11 @@ class Game2Controller implements GameController {
   // ── Bridge event handlers ─────────────────────────────────────────────
 
   private onStateChanged(state: GameState): void {
-    if (this.phase === "LOBBY" && this.lobbyScreen) {
-      this.lobbyScreen.update(state);
-    }
-    if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
+    // Tobias-direktiv 2026-05-04: alle faser bruker PlayScreen så bong-
+    // grid + Innsats/Gevinst oppdateres uavhengig av om vi er i LOBBY,
+    // PLAYING, SPECTATING eller ENDED. Spill 1-paritet.
+    if (this.playScreen) {
       this.playScreen.updateInfo(state);
-      // 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): auto-vis
-      // av BuyPopup mid-runde fjernet. Per Tobias-direktiv: BuyPopup skal
-      // KUN vises når spilleren ELSPLISITT klikker "Kjøp flere brett" i
-      // ComboPanel — ingen overlay i midten av PlayScreen som dekker
-      // bong-grid og BallTube.
     }
   }
 
@@ -378,15 +340,13 @@ class Game2Controller implements GameController {
   }
 
   private onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
-    if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
+    if (this.playScreen) {
       this.playScreen.onNumberDrawn(number, drawIndex, state);
-      // 2026-05-03 (Agent T): ingen auto-popup-trigger her — BuyPopup
-      // styres kun av eksplisitt klikk på "Kjøp flere brett".
     }
   }
 
   private onPatternWon(result: PatternWonPayload, _state: GameState): void {
-    if (this.phase === "PLAYING" && this.playScreen) {
+    if (this.playScreen) {
       this.playScreen.onPatternWon(result);
     }
     telemetry.trackEvent("pattern_won", {
@@ -428,7 +388,7 @@ class Game2Controller implements GameController {
 
     if (result.ok) {
       console.log("[Game2] Armed successfully");
-      this.lobbyScreen?.hideBuyPopup();
+      this.playScreen?.hideBuyPopupForNextRound();
     } else {
       console.error("[Game2] Arm failed:", result.error);
       this.showError(result.error?.message || "Kunne ikke kjøpe billetter");
@@ -491,9 +451,7 @@ class Game2Controller implements GameController {
       this.currentScreen.destroy({ children: true });
       this.currentScreen = null;
     }
-    this.lobbyScreen = null;
     this.playScreen = null;
-    this.endScreen = null;
   }
 
   private showError(message: string): void {
