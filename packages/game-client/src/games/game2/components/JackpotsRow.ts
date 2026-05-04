@@ -28,12 +28,16 @@ export interface JackpotSlotData {
 }
 
 const SLOT_KEYS = ["9", "10", "11", "12", "13", "14-21"] as const;
-// Mockup `.jackpots-col .jackpot-circle { max-width: 64px }`. Var 50 → 60.
+// Tobias-direktiv 2026-05-04 (modernisering): solid sirkel + mer luftig
+// spacing. Fjernet skumorf-gradient + drop-shadow.
 const CIRCLE_SIZE = 60;
-const LABEL_GAP = 4;
-const AMOUNT_GAP = 4;
+const LABEL_GAP = 10;     // var 4 → label løftes opp
+const AMOUNT_GAP = 10;    // var 4 → amount skyves ned
 const LABEL_H = 12;
 const AMOUNT_H = 13;
+/** Minimum-gap mellom sirkler. Garanteres uavhengig av rowWidth — hvis
+ *  satte rowWidth gir mindre stride, øker vi rowWidth lokalt. */
+const MIN_INTER_CIRCLE_GAP = 28;
 
 /**
  * Mockup-paritet (Bong Mockup.html `.jackpot-circle`):
@@ -207,12 +211,16 @@ export class JackpotsRow extends Container {
   }
 
   /**
-   * Layout: distribuer 6 slots jevnt over `rowWidth`. Første slot ved x=0,
-   * siste slot ved x=(rowWidth - CIRCLE_SIZE), midlere slots interpolert.
+   * Layout: distribuer 6 slots over `rowWidth` med minimum-gap-garanti.
+   * Hvis tilgjengelig stride er mindre enn `CIRCLE_SIZE + MIN_INTER_CIRCLE_GAP`,
+   * brukes minimum stride i stedet (slot 6 kan da overskride rowWidth — det
+   * er ComboPanel's ansvar å allokere nok bredde).
    */
   private layoutSlots(): void {
     const n = SLOT_KEYS.length;
-    const stride = (this.rowWidth - CIRCLE_SIZE) / (n - 1);
+    const evenStride = (this.rowWidth - CIRCLE_SIZE) / (n - 1);
+    const minStride = CIRCLE_SIZE + MIN_INTER_CIRCLE_GAP;
+    const stride = Math.max(evenStride, minStride);
     SLOT_KEYS.forEach((key, idx) => {
       const slot = this.slots.get(key);
       if (slot) slot.container.x = idx * stride;
@@ -225,34 +233,21 @@ export class JackpotsRow extends Container {
       if (!slot) continue;
       const isActive = this.activeSlotKey === key;
       slot.circle.clear();
-      // Drop-shadow under sirkel (mockup `0 4px 10px rgba(0,0,0,0.35)`).
-      slot.circle
-        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2 + 4, CIRCLE_SIZE / 2)
-        .fill({ color: 0x000000, alpha: 0.35 });
-      // Mørk-rød base (mockup `rgba(80, 18, 22, 0.55)`).
+      // Tobias-direktiv 2026-05-04 (modernisering): SOLID FYLL uten
+      // gradient/inset-shadows/drop-shadow. Bare flat mørk-rød + tynn
+      // hvit border. Aktiv slot får gull-aksent på border.
       slot.circle
         .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2)
         .fill({
           color: isActive ? FILL_ACTIVE_COLOR : FILL_DEFAULT_COLOR,
-          alpha: isActive ? FILL_ACTIVE_ALPHA : FILL_DEFAULT_ALPHA,
+          alpha: 1.0,
         });
-      // Inset top-highlight (mockup `inset 0 1px 0 rgba(255,255,255,0.25)`).
-      // Tegnes som en svak hvit halvbue på øvre del av sirkelen.
-      slot.circle
-        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE * 0.42, CIRCLE_SIZE * 0.42)
-        .fill({ color: 0xffffff, alpha: 0.16 });
-      // Inset bottom-shadow (mockup `inset 0 -2px 6px rgba(0,0,0,0.3)`).
-      // Tegnes som svak mørk halvbue på nedre del.
-      slot.circle
-        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE * 0.62, CIRCLE_SIZE * 0.46)
-        .fill({ color: 0x000000, alpha: 0.18 });
-      // Border 1.5px hvit (mockup `1.5px solid rgba(255,255,255,0.85)`).
       slot.circle
         .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2)
         .stroke({
           color: isActive ? BORDER_ACTIVE_COLOR : BORDER_DEFAULT_COLOR,
           alpha: isActive ? BORDER_ACTIVE_ALPHA : BORDER_DEFAULT_ALPHA,
-          width: 1.5,
+          width: isActive ? 2.0 : 1.5,
         });
     }
   }
