@@ -98,6 +98,11 @@ import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
 import { Game2AutoDrawTickService } from "./game/Game2AutoDrawTickService.js";
 import { Game3AutoDrawTickService } from "./game/Game3AutoDrawTickService.js";
+// Tobias-bug-fix 2026-05-04: Spill 2/3 cron-tick må emitte `draw:new` +
+// `room:update` ut til klientene. Adapteren wrap-er io + emitRoomUpdate +
+// engine-effekter til samme wire-kontrakt som admin-socket-handleren
+// `draw:next` allerede produserer.
+import { createGame23DrawBroadcaster } from "./sockets/game23DrawBroadcasterAdapter.js";
 import { Game1TransferHallService } from "./game/Game1TransferHallService.js";
 import { Game1TransferExpiryTickService } from "./game/Game1TransferExpiryTickService.js";
 import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick.js";
@@ -1964,14 +1969,29 @@ const onStaleRoomEndedCallback = async (roomCode: string): Promise<void> => {
   if (!svc) return;
   await svc.spawnFirstRoundIfNeeded(roomCode);
 };
+
+// Tobias-bug-fix 2026-05-04: broadcaster som sender `draw:new` +
+// engine-effekter + `room:update` til klientene etter hvert vellykket
+// auto-draw. Uten dette så server-state korrekte tall, men spiller-UI sto
+// fast på "Trekk: 00/21" (Playwright bekreftet). Samme adapter brukes for
+// Spill 2 og Spill 3 — `instanceof`-greining internt sørger for at korrekt
+// engine-effekt-stash drainerer.
+const game23DrawBroadcaster = createGame23DrawBroadcaster({
+  io,
+  engine,
+  emitRoomUpdate,
+});
+
 const game2AutoDrawTickService = new Game2AutoDrawTickService({
   engine,
   drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
   onStaleRoomEnded: onStaleRoomEndedCallback,
+  broadcaster: game23DrawBroadcaster,
 });
 const game3AutoDrawTickService = new Game3AutoDrawTickService({
   engine,
   drawIntervalMs: autoDrawIntervalEnvOverrideMs ?? 30_000,
+  broadcaster: game23DrawBroadcaster,
 });
 jobScheduler.register({
   name: "game2-auto-draw-tick",

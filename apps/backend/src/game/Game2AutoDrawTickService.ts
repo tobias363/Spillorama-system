@@ -19,10 +19,13 @@
  *      `drawnNumbers.length >= 21` (Spill 2 har maks 21 baller).
  *   4) Throttle: skip om `now - lastDrawAt[roomCode] < drawIntervalMs`.
  *   5) Kall `engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId })`.
- *      Engine selv emitterer `draw:new` via socket-laget (PerpetualRound +
- *      DrawScheduler-stien gjør samme broadcast — vi gjør IKKE eksplisitt
- *      socket-emit her for å unngå dobbel-emit; engine-laget eier den).
  *   6) Oppdater `lastDrawAt[roomCode]` til `now`.
+ *   7) Tobias-bug-fix 2026-05-04: kall `broadcaster.onDrawCompleted` om
+ *      injected — emitterer `draw:new` + engine-effekter + `room:update`
+ *      ut til klientene. Uten dette så kun server-state oppdatert tall,
+ *      mens spiller-UI sto fast på "Trekk: 00/21" (Playwright bekreftet).
+ *      Tidligere kommentar hevdet engine-laget eide emit-en — det stemte
+ *      kun for admin-trigget `draw:next`-handler, ikke for cron-stien.
  *
  * Feil-isolasjon:
  *   - `DRAW_TOO_SOON`, `NO_MORE_NUMBERS`, `GAME_PAUSED`, `GAME_NOT_RUNNING`
@@ -103,6 +106,28 @@ export interface AutoDrawEngine {
   forceEndStaleRound?(roomCode: string, endedReason: string): Promise<boolean>;
 }
 
+/**
+ * Tobias-bug-fix 2026-05-04: minimal broadcaster-flate som tick-en kaller
+ * etter en vellykket `engine.drawNextNumber(...)`. Definert her så testene
+ * kan injecte fakes uten å mounte Socket.IO eller `emitRoomUpdate`. Prod-
+ * implementasjonen ligger i
+ * `apps/backend/src/sockets/game23DrawBroadcasterAdapter.ts` og emitter
+ * `draw:new` + engine-effekter + `room:update` ut til klientene.
+ *
+ * Optional på service-laget: testene som kun verifiserer engine-call-flow
+ * trenger ikke broadcaster, og legacy-kallere uten broadcaster fortsetter
+ * å fungere uten emits (dvs. dagens default — bug forblir, men endring
+ * av eksisterende kode-stier er minimert).
+ */
+export interface Game2DrawTickBroadcaster {
+  onDrawCompleted(input: {
+    roomCode: string;
+    number: number;
+    drawIndex: number;
+    gameId: string;
+  }): void;
+}
+
 export interface Game2AutoDrawTickServiceOptions {
   engine: AutoDrawEngine;
   /**
@@ -125,6 +150,14 @@ export interface Game2AutoDrawTickServiceOptions {
    * tick-en for andre rom.
    */
   onStaleRoomEnded?: (roomCode: string) => Promise<void> | void;
+  /**
+   * Tobias-bug-fix 2026-05-04: broadcaster som emitterer `draw:new` +
+   * engine-effekter + `room:update` etter hvert vellykket draw. Når null
+   * forblir tick-en helt server-side (legacy-oppførsel, kun for tester
+   * uten socket-binding). Når injected — som i prod via
+   * `index.ts` — får klientene full wire-kontrakt.
+   */
+  broadcaster?: Game2DrawTickBroadcaster;
 }
 
 export interface Game2AutoDrawTickResult {
@@ -154,6 +187,7 @@ export class Game2AutoDrawTickService {
   private readonly engine: AutoDrawEngine;
   private readonly drawIntervalMs: number;
   private readonly onStaleRoomEnded?: (roomCode: string) => Promise<void> | void;
+  private readonly broadcaster?: Game2DrawTickBroadcaster;
 
   /**
    * In-memory throttle per rom. Setter siste-draw-timestamp etter hver
@@ -181,6 +215,7 @@ export class Game2AutoDrawTickService {
   constructor(options: Game2AutoDrawTickServiceOptions) {
     this.engine = options.engine;
     this.onStaleRoomEnded = options.onStaleRoomEnded;
+    this.broadcaster = options.broadcaster;
     const interval = options.drawIntervalMs;
     // 0 er gyldig (= "ingen throttle" — engine-laget håndhever sin egen
     // minDrawIntervalMs). Negativ/NaN/undefined → default 30 000 ms.
@@ -329,6 +364,33 @@ export class Game2AutoDrawTickService {
         });
         this.lastDrawAtByRoom.set(summary.code, Date.now());
         drawsTriggered++;
+
+        // Tobias-bug-fix 2026-05-04: broadcaster sender ut `draw:new` +
+        // G2 engine-effekter + `room:update` slik at klientene rendrer
+        // den nye ballen. Uten denne sto UI på "Trekk: 00/21" mens
+        // server-state korrekt ble oppdatert (Playwright bekreftet).
+        // Side-effekter i `Game2Engine.onDrawCompleted` (autoMarkPlayerCells)
+        // har allerede kjørt før vi når hit, så snapshot-en
+        // `emitRoomUpdate` bygger inneholder oppdaterte marks.
+        //
+        // Fail-soft: broadcaster-en sluker egne feil — vi trenger ikke
+        // ekstra try/catch her. Kall plassert FØR `lastDrawAtByRoom`-
+        // bookkeeping er allerede gjort, slik at en eventuell langsom
+        // emit ikke endrer throttle-vinduet.
+        try {
+          this.broadcaster?.onDrawCompleted({
+            roomCode: summary.code,
+            number: result.number,
+            drawIndex: result.drawIndex,
+            gameId: result.gameId,
+          });
+        } catch (broadcastErr) {
+          log.warn(
+            { err: broadcastErr, roomCode: summary.code },
+            "[game2-auto-draw] broadcaster.onDrawCompleted threw — fortsetter likevel"
+          );
+        }
+
         log.info(
           {
             roomCode: summary.code,

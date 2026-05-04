@@ -27,7 +27,20 @@
 
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
-import type { AutoDrawEngine } from "./Game2AutoDrawTickService.js";
+import type {
+  AutoDrawEngine,
+  Game2DrawTickBroadcaster,
+} from "./Game2AutoDrawTickService.js";
+
+/**
+ * Re-eksport av broadcaster-flaten under Game3-spesifikt navn for
+ * lese-vennlighet i index.ts. Strukturelt identisk med
+ * {@link Game2DrawTickBroadcaster} — samme `onDrawCompleted`-signatur,
+ * og samme adapter ({@link createGame23DrawBroadcaster}) brukes for
+ * begge. Egen alias gjør call-site-koden symmetrisk:
+ *   `new Game3AutoDrawTickService({ broadcaster, ... })`.
+ */
+export type Game3DrawTickBroadcaster = Game2DrawTickBroadcaster;
 
 const log = rootLogger.child({ module: "game3-auto-draw-tick" });
 
@@ -58,6 +71,14 @@ export interface Game3AutoDrawTickServiceOptions {
    * skal være ≥ engine sin throttle.
    */
   drawIntervalMs?: number;
+  /**
+   * Tobias-bug-fix 2026-05-04: broadcaster som emitterer `draw:new` +
+   * G3 engine-effekter + `room:update` etter hvert vellykket draw. Når
+   * null forblir tick-en helt server-side (legacy-oppførsel for tester).
+   * Når injected — som i prod via `index.ts` — får klientene full
+   * wire-kontrakt og UI rendrer de nye ballene som forventet.
+   */
+  broadcaster?: Game3DrawTickBroadcaster;
 }
 
 export interface Game3AutoDrawTickResult {
@@ -73,12 +94,14 @@ export interface Game3AutoDrawTickResult {
 export class Game3AutoDrawTickService {
   private readonly engine: AutoDrawEngine;
   private readonly drawIntervalMs: number;
+  private readonly broadcaster?: Game3DrawTickBroadcaster;
 
   private readonly lastDrawAtByRoom = new Map<string, number>();
   private readonly currentlyProcessing = new Set<string>();
 
   constructor(options: Game3AutoDrawTickServiceOptions) {
     this.engine = options.engine;
+    this.broadcaster = options.broadcaster;
     const interval = options.drawIntervalMs;
     // 0 er gyldig (= "ingen throttle" — engine-laget håndhever sin egen
     // minDrawIntervalMs). Negativ/NaN/undefined → default 30 000 ms.
@@ -147,6 +170,27 @@ export class Game3AutoDrawTickService {
         });
         this.lastDrawAtByRoom.set(summary.code, Date.now());
         drawsTriggered++;
+
+        // Tobias-bug-fix 2026-05-04: broadcaster sender ut `draw:new` +
+        // G3 engine-effekter (`g3:pattern:changed`, `g3:pattern:auto-won`)
+        // + `room:update` slik at klientene rendrer den nye ballen og
+        // pattern-tilstand. Identisk wiring som Game2-tick-en. Fail-soft:
+        // adapter-en sluker egne feil; lokal try/catch beskytter mot
+        // bugs i en evt. fremtidig broadcaster-impl.
+        try {
+          this.broadcaster?.onDrawCompleted({
+            roomCode: summary.code,
+            number: result.number,
+            drawIndex: result.drawIndex,
+            gameId: result.gameId,
+          });
+        } catch (broadcastErr) {
+          log.warn(
+            { err: broadcastErr, roomCode: summary.code },
+            "[game3-auto-draw] broadcaster.onDrawCompleted threw — fortsetter likevel"
+          );
+        }
+
         log.info(
           {
             roomCode: summary.code,

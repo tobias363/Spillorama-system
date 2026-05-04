@@ -551,3 +551,149 @@ test("getLastTickResult: callback-feil i onStaleRoomEnded krasjer ikke tick + te
   assert.equal(r.errors, 0, "callback-feil teller ikke som engine-error");
   assert.deepEqual(r.staleRoomsEnded, ["ROCKET"]);
 });
+
+// ── Tobias-bug-fix 2026-05-04: broadcaster wires `draw:new` + room:update ─
+
+test("broadcaster: kalles for HVERT vellykket draw med korrekt event-shape", async () => {
+  // Kjerne-regression-vakt for prod-bug fra 2026-05-04: cron-tick-en
+  // trakk baller server-side men emitterte ALDRI `draw:new`/`room:update`
+  // ut til klientene. Når broadcaster er injected MÅ den kalles én gang
+  // per draw med riktig payload (number/drawIndex/gameId).
+  const { engine } = makeEngine([
+    { code: "R1", hostPlayerId: "h1", gameSlug: "rocket", gameStatus: "RUNNING" },
+    { code: "R2", hostPlayerId: "h2", gameSlug: "rocket", gameStatus: "RUNNING" },
+  ]);
+  const broadcasterCalls: Array<{
+    roomCode: string;
+    number: number;
+    drawIndex: number;
+    gameId: string;
+  }> = [];
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: (input) => {
+        broadcasterCalls.push(input);
+      },
+    },
+  });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 2);
+  assert.equal(broadcasterCalls.length, 2, "broadcaster skal kalles én gang per draw");
+  // Kall-shape: matche {number, drawIndex, gameId, roomCode}.
+  assert.deepEqual(broadcasterCalls.map((c) => c.roomCode).sort(), ["R1", "R2"]);
+  for (const call of broadcasterCalls) {
+    assert.ok(
+      typeof call.number === "number" && Number.isFinite(call.number),
+      "number må være endelig number",
+    );
+    assert.ok(
+      typeof call.drawIndex === "number" && Number.isFinite(call.drawIndex),
+      "drawIndex må være endelig number",
+    );
+    assert.ok(typeof call.gameId === "string" && call.gameId.length > 0);
+  }
+});
+
+test("broadcaster: IKKE kalt når draw-en feiler (race-error)", async () => {
+  // Hvis draw kaster (DRAW_TOO_SOON, NO_MORE_NUMBERS, etc.) skal vi IKKE
+  // emitte `draw:new` — det ville lede til fantom-baller på klienten.
+  const { engine } = makeEngine(
+    [{ code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" }],
+    {
+      throwOnRoomCode: new Map([
+        ["R", new DomainError("DRAW_TOO_SOON", "for tidlig")],
+      ]),
+    }
+  );
+  let broadcasterCalled = false;
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: () => {
+        broadcasterCalled = true;
+      },
+    },
+  });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 0);
+  assert.equal(r.skipped, 1);
+  assert.equal(broadcasterCalled, false, "broadcaster må IKKE kalles ved draw-feil");
+});
+
+test("broadcaster: IKKE kalt for stuck-room (drawn=21, status=RUNNING)", async () => {
+  // Stuck-recovery-stien skal kun kalle `forceEndStaleRound` +
+  // `onStaleRoomEnded`, ikke broadcaster — det er ingen ny ball å emitte.
+  const engine: AutoDrawEngine = {
+    listRoomSummaries: () => [
+      { code: "ROCKET", gameSlug: "rocket", gameStatus: "RUNNING" },
+    ],
+    getRoomSnapshot: () => ({
+      code: "ROCKET",
+      hostPlayerId: "host",
+      gameSlug: "rocket",
+      currentGame: {
+        status: "RUNNING",
+        drawnNumbers: Array.from({ length: 21 }, (_, i) => i + 1),
+      },
+    }),
+    drawNextNumber: async () => {
+      throw new Error("not called");
+    },
+    forceEndStaleRound: async () => true,
+  };
+  let broadcasterCalled = false;
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: () => {
+        broadcasterCalled = true;
+      },
+    },
+  });
+  await service.tick();
+  assert.equal(broadcasterCalled, false);
+});
+
+test("broadcaster: kast i broadcaster.onDrawCompleted krasjer IKKE tick + teller ikke som engine-error", async () => {
+  // Broadcaster-feil skal ikke blokkere andre rom eller markere ticken som
+  // failed. Adapter-en sluker egne feil; service har egen lokal try/catch
+  // som ekstra defense.
+  const { engine } = makeEngine([
+    { code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
+    { code: "OK", hostPlayerId: "h2", gameSlug: "rocket", gameStatus: "RUNNING" },
+  ]);
+  let okCalled = false;
+  const service = new Game2AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: (input) => {
+        if (input.roomCode === "R") throw new Error("broadcaster boom");
+        okCalled = true;
+      },
+    },
+  });
+  const r = await service.tick();
+  // Engine kalles for begge rom, drawsTriggered=2 — broadcaster-feil
+  // teller ikke som engine-feil.
+  assert.equal(r.drawsTriggered, 2);
+  assert.equal(r.errors, 0, "broadcaster-kast er ikke en engine-error");
+  assert.equal(okCalled, true, "etterfølgende rom skal fortsatt få broadcaster-kall");
+});
+
+test("broadcaster: ikke injected → tick kjører uten emit (legacy-fallback for tester)", async () => {
+  // Eksisterende tester konstruerer service uten `broadcaster`. Da skal
+  // tick fortsette å virke — bare uten emit til klientene. Dette
+  // verifiserer at vi ikke har gjort broadcasteren obligatorisk.
+  const { engine, drawCalls } = makeEngine([
+    { code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
+  ]);
+  const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 1);
+  assert.equal(drawCalls.length, 1);
+});

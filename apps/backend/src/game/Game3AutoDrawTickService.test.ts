@@ -235,3 +235,97 @@ test("actorPlayerId fra hostPlayerId", async () => {
   await service.tick();
   assert.equal(drawCalls[0]!.actorPlayerId, "host-id-3");
 });
+
+// ── Tobias-bug-fix 2026-05-04: broadcaster wires `draw:new` + room:update ─
+
+test("broadcaster: kalles for HVERT vellykket draw med korrekt event-shape", async () => {
+  // Speiler Game2-testen — uten broadcaster så server-state korrekt nye
+  // tall, men spiller-UI sto fast på "Trekk: 00/75" for monsterbingo.
+  const { engine } = makeEngine([
+    { code: "M1", hostPlayerId: "h1", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    { code: "M2", hostPlayerId: "h2", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+  ]);
+  const broadcasterCalls: Array<{
+    roomCode: string;
+    number: number;
+    drawIndex: number;
+    gameId: string;
+  }> = [];
+  const service = new Game3AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: (input) => {
+        broadcasterCalls.push(input);
+      },
+    },
+  });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 2);
+  assert.equal(broadcasterCalls.length, 2);
+  assert.deepEqual(broadcasterCalls.map((c) => c.roomCode).sort(), ["M1", "M2"]);
+  for (const call of broadcasterCalls) {
+    assert.ok(typeof call.number === "number" && Number.isFinite(call.number));
+    assert.ok(typeof call.drawIndex === "number" && Number.isFinite(call.drawIndex));
+    assert.ok(typeof call.gameId === "string" && call.gameId.length > 0);
+  }
+});
+
+test("broadcaster: IKKE kalt når draw-en feiler", async () => {
+  const { engine } = makeEngine(
+    [
+      { code: "M", hostPlayerId: "h", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    ],
+    {
+      throwOnRoomCode: new Map([
+        ["M", new DomainError("NO_MORE_NUMBERS", "tom drawBag")],
+      ]),
+    }
+  );
+  let broadcasterCalled = false;
+  const service = new Game3AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: () => {
+        broadcasterCalled = true;
+      },
+    },
+  });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 0);
+  assert.equal(r.skipped, 1);
+  assert.equal(broadcasterCalled, false);
+});
+
+test("broadcaster: kast i onDrawCompleted krasjer IKKE tick + teller ikke som error", async () => {
+  const { engine } = makeEngine([
+    { code: "M", hostPlayerId: "h", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    { code: "OK", hostPlayerId: "h2", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+  ]);
+  let okCalled = false;
+  const service = new Game3AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    broadcaster: {
+      onDrawCompleted: (input) => {
+        if (input.roomCode === "M") throw new Error("broadcaster boom");
+        okCalled = true;
+      },
+    },
+  });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 2);
+  assert.equal(r.errors, 0);
+  assert.equal(okCalled, true);
+});
+
+test("broadcaster: ikke injected → tick kjører uten emit (legacy-fallback)", async () => {
+  const { engine, drawCalls } = makeEngine([
+    { code: "M", hostPlayerId: "h", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+  ]);
+  const service = new Game3AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  const r = await service.tick();
+  assert.equal(r.drawsTriggered, 1);
+  assert.equal(drawCalls.length, 1);
+});
