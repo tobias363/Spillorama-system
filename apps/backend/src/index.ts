@@ -2373,6 +2373,13 @@ const perpetualRoundService = new PerpetualRoundService({
   disabledSlugs: perpetualLoopDisabledSlugs,
   engine,
   variantLookup: roomState,
+  // 2026-05-04 (Tobias-direktiv): carry over armed players mellom runder
+  // så Spill 2/3-spillere som armer via BuyPopup faktisk får tickets.
+  armedLookup: {
+    getArmedPlayerIds: (roomCode) => roomState.getArmedPlayerIds(roomCode),
+    getArmedPlayerTicketCounts: (roomCode) => roomState.getArmedPlayerTicketCounts(roomCode),
+    getArmedPlayerSelections: (roomCode) => roomState.getArmedPlayerSelections(roomCode),
+  },
   defaultTicketsPerPlayer: runtimeBingoSettings.autoRoundTicketsPerPlayer,
   defaultPayoutPercent: runtimeBingoSettings.payoutPercent,
   defaultEntryFee: runtimeBingoSettings.autoRoundEntryFee,

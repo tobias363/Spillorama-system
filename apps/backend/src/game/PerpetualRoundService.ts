@@ -90,6 +90,23 @@ export interface VariantConfigLookup {
 }
 
 /**
+ * 2026-05-04 (Tobias-direktiv): lookup for armed-state per rom. Spillere
+ * som "armer" via BuyPopup mellom runder må carry over til neste spawn —
+ * ellers får de aldri tickets og bonger vises ikke. Denne lookup leser
+ * fra roomState.armedPlayerIdsByRoom + armedPlayerSelectionsByRoom.
+ *
+ * Returnerer tom liste hvis ingen er armed eller rommet ikke finnes.
+ */
+export interface ArmedPlayerLookup {
+  getArmedPlayerIds(roomCode: string): string[];
+  getArmedPlayerTicketCounts(roomCode: string): Record<string, number>;
+  getArmedPlayerSelections(roomCode: string): Record<
+    string,
+    Array<{ type: string; qty: number; name?: string }>
+  >;
+}
+
+/**
  * Konfig som kontrollerer perpetual-loopens oppførsel.
  *
  * Defaults speiler Tobias-direktivet "kort delay etter winner-celebration".
@@ -104,6 +121,13 @@ export interface PerpetualRoundServiceConfig {
   disabledSlugs: ReadonlySet<string>;
   engine: PerpetualEngine;
   variantLookup: VariantConfigLookup;
+  /**
+   * 2026-05-04 (Tobias): hvis satt, leser armed-state fra roomState og
+   * carry-over til ny runde. Default-fallback (undefined): tom armed-liste
+   * (legacy oppførsel). Spill 2/3 SKAL bruke denne så spillere som armer
+   * via BuyPopup mellom runder faktisk får tickets ved neste spawn.
+   */
+  armedLookup?: ArmedPlayerLookup;
   /** Default ticketsPerPlayer for ny runde (auto-rundens default). */
   defaultTicketsPerPlayer: number;
   /** Default payoutPercent for ny runde. */
@@ -159,10 +183,11 @@ export const NATURAL_END_REASONS: ReadonlySet<string> = new Set([
  * trigget bet:arm + game:start).
  */
 export class PerpetualRoundService {
-  private readonly config: Required<Omit<PerpetualRoundServiceConfig, "emitRoomUpdate" | "setTimeoutFn" | "clearTimeoutFn">> & {
+  private readonly config: Required<Omit<PerpetualRoundServiceConfig, "emitRoomUpdate" | "setTimeoutFn" | "clearTimeoutFn" | "armedLookup">> & {
     emitRoomUpdate?: PerpetualRoundServiceConfig["emitRoomUpdate"];
     setTimeoutFn: NonNullable<PerpetualRoundServiceConfig["setTimeoutFn"]>;
     clearTimeoutFn: NonNullable<PerpetualRoundServiceConfig["clearTimeoutFn"]>;
+    armedLookup?: ArmedPlayerLookup;
   };
 
   /**
@@ -187,6 +212,7 @@ export class PerpetualRoundService {
       defaultPayoutPercent: config.defaultPayoutPercent,
       defaultEntryFee: config.defaultEntryFee,
       ...(config.emitRoomUpdate ? { emitRoomUpdate: config.emitRoomUpdate } : {}),
+      ...(config.armedLookup ? { armedLookup: config.armedLookup } : {}),
       setTimeoutFn: config.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms)),
       clearTimeoutFn: config.clearTimeoutFn ?? ((h) => clearTimeout(h)),
     };
@@ -366,13 +392,14 @@ export class PerpetualRoundService {
       entryFee: this.config.defaultEntryFee,
       ticketsPerPlayer: this.config.defaultTicketsPerPlayer,
       payoutPercent: this.config.defaultPayoutPercent,
-      // Spill 2/3 perpetual: ingen carry-over av armed players. Spillere
-      // må re-velge tickets (Spill 2: Choose Tickets-side; Spill 3: bet:arm)
-      // for å delta i neste runde. Auto-runde starter likevel — det er
-      // selve spinningen som er "perpetual", ikke individuelle bonger.
-      armedPlayerIds: [],
-      armedPlayerTicketCounts: {},
-      armedPlayerSelections: {},
+      // 2026-05-04 (Tobias-direktiv): carry over armed players fra forrige
+      // runde via armedLookup. Spillere som armer via BuyPopup mellom
+      // runder skal få tickets ved neste spawn — uten dette ble bonger
+      // aldri vist fordi armed-state ble cleared. Fallback til [] hvis
+      // armedLookup ikke er satt (legacy / tests).
+      armedPlayerIds: this.config.armedLookup?.getArmedPlayerIds(roomCode) ?? [],
+      armedPlayerTicketCounts: this.config.armedLookup?.getArmedPlayerTicketCounts(roomCode) ?? {},
+      armedPlayerSelections: this.config.armedLookup?.getArmedPlayerSelections(roomCode) ?? {},
       ...(variantInfo?.gameType ? { gameType: variantInfo.gameType } : {}),
       ...(variantInfo?.config ? { variantConfig: variantInfo.config } : {}),
     };
@@ -564,11 +591,11 @@ export class PerpetualRoundService {
       entryFee: this.config.defaultEntryFee,
       ticketsPerPlayer: this.config.defaultTicketsPerPlayer,
       payoutPercent: this.config.defaultPayoutPercent,
-      // Symmetrisk med auto-restart: ingen carry-over av armed players.
-      // Spillere må re-velge tickets for å delta i den spawned runden.
-      armedPlayerIds: [],
-      armedPlayerTicketCounts: {},
-      armedPlayerSelections: {},
+      // 2026-05-04 (Tobias-direktiv): symmetrisk med auto-restart —
+      // carry over armed players via armedLookup.
+      armedPlayerIds: this.config.armedLookup?.getArmedPlayerIds(roomCode) ?? [],
+      armedPlayerTicketCounts: this.config.armedLookup?.getArmedPlayerTicketCounts(roomCode) ?? {},
+      armedPlayerSelections: this.config.armedLookup?.getArmedPlayerSelections(roomCode) ?? {},
       ...(variantInfo?.gameType ? { gameType: variantInfo.gameType } : {}),
       ...(variantInfo?.config ? { variantConfig: variantInfo.config } : {}),
     };
