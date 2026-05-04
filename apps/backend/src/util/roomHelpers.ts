@@ -53,13 +53,42 @@ export function buildRoomSchedulerState(
     schedulerTickMs: number;
     getArmedPlayerIds: (roomCode: string) => string[];
     getRoomConfiguredEntryFee: (roomCode: string) => number;
+    /**
+     * 2026-05-04 (Bug 1 fix Spill 2/3): perpetual-loop next-round-at
+     * timestamp lookup. Når DrawScheduler ikke er aktiv (Spill 2/3 har
+     * `autoRoundStartEnabled=false` og bruker PerpetualRoundService i
+     * stedet), bruk denne til å surface `millisUntilNextStart` i
+     * scheduler-payloaden. Returnerer null hvis ingen restart venter.
+     *
+     * Optional for backward-compat med tester som ikke wirer perpetual.
+     */
+    getPerpetualNextRoundAtMs?: (roomCode: string) => number | null;
   }
 ): Record<string, unknown> {
-  const { runtimeBingoSettings, drawScheduler, bingoMaxDrawsPerRound, schedulerTickMs, getArmedPlayerIds, getRoomConfiguredEntryFee } = opts;
+  const {
+    runtimeBingoSettings,
+    drawScheduler,
+    bingoMaxDrawsPerRound,
+    schedulerTickMs,
+    getArmedPlayerIds,
+    getRoomConfiguredEntryFee,
+    getPerpetualNextRoundAtMs,
+  } = opts;
 
-  const nextStartAtMs = runtimeBingoSettings.autoRoundStartEnabled
-    ? drawScheduler.normalizeNextAutoStartAt(snapshot.code, nowMs)
-    : null;
+  // 2026-05-04 (Bug 1 fix): two timing-sources kan populere
+  // `millisUntilNextStart`:
+  //   1) DrawScheduler (Spill 1) — bruker `autoRoundStartEnabled`-toggle
+  //   2) PerpetualRoundService (Spill 2/3) — egen setTimeout-loop, kjører
+  //      uavhengig av `autoRoundStartEnabled`
+  // Førstevalget er DrawScheduler hvis aktivert; ellers faller vi tilbake
+  // til perpetual-lookup hvis tilgjengelig. Begge kilder eksponerer en
+  // epoch-ms-timestamp så countdown-beregningen er identisk.
+  let nextStartAtMs: number | null = null;
+  if (runtimeBingoSettings.autoRoundStartEnabled) {
+    nextStartAtMs = drawScheduler.normalizeNextAutoStartAt(snapshot.code, nowMs);
+  } else if (getPerpetualNextRoundAtMs) {
+    nextStartAtMs = getPerpetualNextRoundAtMs(snapshot.code);
+  }
   const millisUntilNextStart = nextStartAtMs === null ? null : Math.max(0, nextStartAtMs - nowMs);
   const canStartNow =
     runtimeBingoSettings.autoRoundStartEnabled &&
@@ -196,6 +225,12 @@ export function buildRoomUpdatePayload(
      * Optional — defaults to "Spillorama" when not provided.
      */
     supplierName?: string;
+    /**
+     * 2026-05-04 (Bug 1 fix): Spill 2/3 perpetual next-round-at lookup.
+     * Forwarded til `buildRoomSchedulerState` så `millisUntilNextStart`
+     * fylles ut for perpetual-rom mellom runder.
+     */
+    getPerpetualNextRoundAtMs?: (roomCode: string) => number | null;
   }
 ): RoomUpdatePayload {
   const { getOrCreateDisplayTickets, getLuckyNumbers, runtimeBingoSettings } = opts;

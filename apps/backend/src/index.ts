@@ -1320,6 +1320,13 @@ function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): Roo
     // G15 (BIN-431): hall-name + supplier for ticket-detail flip.
     getHallName: getHallNameSync,
     supplierName: "Spillorama",
+    // 2026-05-04 (Bug 1 fix): perpetual-loop next-round-at lookup.
+    // Spill 2/3 har autoRoundStartEnabled=false (de bruker
+    // PerpetualRoundService i stedet for DrawScheduler), så denne
+    // lookupen er eneste måten `millisUntilNextStart` kan populeres
+    // for ROCKET/MONSTERBINGO. Resultat: countdown "Neste trekning:
+    // MM:SS" tikker mellom runder.
+    getPerpetualNextRoundAtMs: (code) => perpetualRoundService.getNextRoundAtMs(code),
   });
 }
 
