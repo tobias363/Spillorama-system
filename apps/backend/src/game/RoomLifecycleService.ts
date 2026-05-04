@@ -331,7 +331,15 @@ export class RoomLifecycleService {
     const room = this.requireRoom(roomCode);
     // Tobias 2026-04-27: shared rooms (Spill 2/3 — ROCKET / MONSTERBINGO) er
     // GLOBALE og deles av alle haller — skip HALL_MISMATCH-sjekken.
-    if (!room.isHallShared && room.hallId !== hallId) {
+    //
+    // 2026-05-04 (Tobias-direktiv) defense-in-depth: legacy ROCKET/MONSTERBINGO-
+    // rom på prod kan ha `isHallShared = undefined` (gammel data fra før
+    // PILOT-STOP-SHIP-fix 2026-04-27). Sjekk gameSlug i tillegg så hall-
+    // mismatch aldri kastes for rocket/monsterbingo uansett lagret state.
+    const sharedSlugs = new Set(["rocket", "game_2", "tallspill", "monsterbingo", "mønsterbingo", "game_3"]);
+    const isSharedSlug = sharedSlugs.has((room.gameSlug ?? "").toLowerCase());
+    const isShared = room.isHallShared === true || isSharedSlug;
+    if (!isShared && room.hallId !== hallId) {
       throw new DomainError("HALL_MISMATCH", "Rommet tilhører en annen hall.");
     }
 
