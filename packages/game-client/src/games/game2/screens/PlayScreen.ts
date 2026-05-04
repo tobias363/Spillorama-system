@@ -533,10 +533,17 @@ export class PlayScreen extends Container {
   }
 
   /**
-   * Tobias-direktiv 2026-05-04: 7-kolonne grid med vertikal scroll når
-   * antall bonger > 21. Speilet av Spill 1's TicketGridHtml-layout.
-   * Beregner viewport-høyde basert på combo-panel-Y så scrollingen
-   * stopper ved combo-panelet.
+   * Tobias-direktiv 2026-05-04 (Spill 1-paritet): 7-kolonne grid hvor
+   * HVER RAD sentreres basert på sitt faktiske antall bonger. Speiler
+   * Spill 1's HTML-grid med `justify-content: center` der partielle
+   * rader auto-sentreres.
+   *
+   *   - 2 bonger:  én rad med 2 bonger sentrert
+   *   - 7 bonger:  én rad full bredde
+   *   - 9 bonger:  rad 1 = 7 sentrert (full), rad 2 = 2 sentrert
+   *   - 21 bonger: 3 rader à 7 (alle full)
+   *
+   * Vertikal scroll aktiveres når content-høyde > viewport-høyde.
    */
   private layoutBongGrid(): void {
     if (this.bongs.length === 0) {
@@ -551,20 +558,27 @@ export class PlayScreen extends Container {
     const scaledW = naturalW * BONG_SCALE;
     const scaledH = naturalH * BONG_SCALE;
     const cols = BONG_COLS;
-    const rowW = cols * scaledW + (cols - 1) * BONG_GAP_X;
-    const startX = Math.max(0, (this.stageW - rowW) / 2);
+    const total = this.bongs.length;
+    const rows = Math.ceil(total / cols);
 
-    for (let i = 0; i < this.bongs.length; i++) {
-      const card = this.bongs[i];
-      card.scale.set(BONG_SCALE);
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      card.x = startX + col * (scaledW + BONG_GAP_X);
-      card.y = row * (scaledH + BONG_GAP_Y);
+    for (let row = 0; row < rows; row++) {
+      const rowStart = row * cols;
+      const rowEnd = Math.min(rowStart + cols, total);
+      const rowCount = rowEnd - rowStart;
+      // Sentrer hver rad uavhengig av andre — partielle rader auto-
+      // sentreres som i Spill 1's CSS-grid.
+      const rowW = rowCount * scaledW + Math.max(0, rowCount - 1) * BONG_GAP_X;
+      const rowStartX = Math.max(0, (this.stageW - rowW) / 2);
+      for (let i = rowStart; i < rowEnd; i++) {
+        const card = this.bongs[i];
+        card.scale.set(BONG_SCALE);
+        const col = i - rowStart;
+        card.x = rowStartX + col * (scaledW + BONG_GAP_X);
+        card.y = row * (scaledH + BONG_GAP_Y);
+      }
     }
 
     // Beregn total content-høyde + scroll-max.
-    const rows = Math.ceil(this.bongs.length / cols);
     this.bongGridContentHeight = rows * scaledH + (rows - 1) * BONG_GAP_Y;
     const viewportH = this.computeBongViewportHeight();
     this.bongScrollMaxY = Math.max(0, this.bongGridContentHeight - viewportH);
