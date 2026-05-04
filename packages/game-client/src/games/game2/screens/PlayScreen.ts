@@ -41,6 +41,7 @@ import type { AudioManager } from "../../../audio/AudioManager.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 import { BongCard } from "../components/BongCard.js";
 import { BallTube } from "../components/BallTube.js";
+import { CenterBallPop } from "../components/CenterBallPop.js";
 import { ComboPanel } from "../components/ComboPanel.js";
 import type { JackpotSlotData } from "../components/JackpotsRow.js";
 import { BuyPopup } from "../components/BuyPopup.js";
@@ -66,6 +67,13 @@ export class PlayScreen extends Container {
   private ballTube: BallTube;
   private bongs: BongCard[] = [];
   private bongGridContainer: Container;
+  /**
+   * 2026-05-04 (Agent LL, fix/spill2-ticket-render-and-ball-anim):
+   * "just-drew"-pop-ball mid-screen. Speilet av Spill 1's CenterBall.
+   * Triggres i `onNumberDrawn`; ligger over bong-grid med høy z-order
+   * så den dekker bong-tallene mens den vises.
+   */
+  private centerBallPop: CenterBallPop;
   private buyPopup: BuyPopup;
   // 2026-05-03 (Agent Y): popup som åpnes ved klikk på Lykketall-kolonnen
   // i ComboPanel. Erstatter inline LykketallGrid i ComboPanel per
@@ -133,6 +141,20 @@ export class PlayScreen extends Container {
     this.bongGridContainer.x = this.stageX;
     this.bongGridContainer.y = this.ballTube.y + TUBE_HEIGHT + ROW_GAP + 24;
     this.addChild(this.bongGridContainer);
+
+    // ── center-ball-pop ("just-drew" overlay) ────────────────────────────
+    // 2026-05-04 (Agent LL): mountes ETTER bongGridContainer så z-order
+    // legger den OVER bong-grid (Pixi rendrer i child-array-rekkefølge).
+    // Posisjonen settes til midten av bong-grid-området; pivot er på
+    // ballens senter (satt i konstruktør) så ankret holder på re-pop.
+    this.centerBallPop = new CenterBallPop();
+    const popX = this.stageX + this.stageW / 2;
+    // Plasser ~60px under tube så pop-ballen havner i en visuell "hot zone"
+    // mellom tube og bong-grid (men over bongs).
+    const popY = this.ballTube.y + TUBE_HEIGHT + 60;
+    this.centerBallPop.x = popX;
+    this.centerBallPop.y = popY;
+    this.addChild(this.centerBallPop);
 
     // ── combo-panel — STICKY BOTTOM (matcher CSS margin-top: auto) ──────
     this.comboPanel = new ComboPanel(this.stageW);
@@ -244,14 +266,40 @@ export class PlayScreen extends Container {
     this.comboPanel.setCurrentDrawCount(state.drawnNumbers.length);
     this.comboPanel.setPlayerCount(state.playerCount ?? 0);
 
-    for (let i = 0; i < state.myTickets.length; i++) {
-      const ticket = state.myTickets[i];
+    // 2026-05-04 (Agent LL, fix/spill2-ticket-render-and-ball-anim):
+    // BUG-FIX bonger rendret aldri. Tobias-rapport: "fortsatt ingen bonger
+    // som vises". Server (jf. /api/_dev/game2-state) bekreftet at spilleren
+    // hadde tickets, men `state.myTickets.length` var 0 i klient-state.
+    //
+    // Rot-årsak: under SPECTATING (RUNNING-runde, sen-joiner som har armed
+    // for NESTE runde) populerer GameBridge bare `state.preRoundTickets`,
+    // ikke `state.myTickets`. PlayScreen så bare på `state.myTickets` →
+    // tom liste → ingen render.
+    //
+    // Fix: speil Spill 1's pattern (game1/screens/PlayScreen.ts:422-425) —
+    // hvis aktive `myTickets` mangler men `preRoundTickets` finnes, vis
+    // dem i samme grid. De rendres uten marks (de starter neste runde, så
+    // ingen av currently-drawn-balls gjelder). buildTickets kalles på nytt
+    // ved hver state-change så snart aktive tickets dukker opp på round-
+    // start, vil disse erstatte preRoundTickets-previewen.
+    const activeTickets = state.myTickets.length > 0
+      ? state.myTickets
+      : (state.preRoundTickets ?? []);
+    const isPreRoundPreview = state.myTickets.length === 0 && activeTickets.length > 0;
+
+    for (let i = 0; i < activeTickets.length; i++) {
+      const ticket = activeTickets[i];
       const card = new BongCard({
         colorKey: "yellow", // Spill 2 har kun én ticket-type per PR #856.
         label: ticket.color ?? `Brett ${i + 1}`,
         price: ticket.price ?? state.entryFee ?? 20,
       });
-      const initialMarks = state.myMarks[i] ?? state.drawnNumbers;
+      // Hvis det er pre-round preview, send tom marks-array. Aktive tickets
+      // restorer marks fra snapshot eller bruker `state.drawnNumbers` som
+      // late-joiner-fallback (gammel oppførsel bevart).
+      const initialMarks = isPreRoundPreview
+        ? []
+        : (state.myMarks[i] ?? state.drawnNumbers);
       card.loadTicket(ticket, initialMarks);
       this.bongs.push(card);
       this.bongGridContainer.addChild(card);
@@ -271,6 +319,11 @@ export class PlayScreen extends Container {
 
   /** Håndter ny trukket ball (fra `numberDrawn`-event). */
   onNumberDrawn(number: number, _drawIndex: number, state: GameState): void {
+    // 2026-05-04 (Agent LL): "just-drew"-pop FØRST så animasjonen
+    // starter samtidig med tube-insert. Speilet av Spill 1's
+    // PlayScreen.onNumberDrawn (centerBall.showNumber + ballTube.addBall
+    // i samme tick).
+    this.centerBallPop.pop(number);
     for (const card of this.bongs) {
       card.markNumber(number);
     }
@@ -307,12 +360,30 @@ export class PlayScreen extends Container {
     this.comboPanel.setPlayerCount(state.playerCount ?? 0);
     this.ballTube.setDrawCount(state.drawnNumbers.length, state.totalDrawCapacity);
     this.startCountdown(state.millisUntilNextStart);
+
+    // 2026-05-04 (Agent LL, fix/spill2-ticket-render-and-ball-anim):
+    // Late-joiner / mid-round arm: hvis antall bonger som SKAL vises har
+    // endret seg siden forrige render, bygg på nytt. Dekker bl.a.
+    // SPECTATING-spiller som armer mellom trekninger og får
+    // `state.preRoundTickets` populert på neste room:update.
+    //
+    // Logikken matcher buildTickets sin valg-strategi: vis aktive tickets
+    // hvis vi har dem, ellers pre-round-preview.
+    const expectedTickets = state.myTickets.length > 0
+      ? state.myTickets.length
+      : (state.preRoundTickets?.length ?? 0);
+    if (expectedTickets !== this.bongs.length) {
+      this.buildTickets(state);
+    }
   }
 
   /** Reset for next game. */
   reset(): void {
     this.clearBongs();
     this.ballTube.clear();
+    // 2026-05-04 (Agent LL): drop pågående pop-animasjon — ny runde
+    // skal ikke vise siste trekning fra forrige.
+    this.centerBallPop.reset();
     this.countdownDeadline = null;
     this.ballTube.setCountdown(null);
   }
