@@ -8,8 +8,6 @@ import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "./screens/EndScreen.js";
-import { ChooseTicketsScreen } from "./screens/ChooseTicketsScreen.js";
-import { SpilloramaApi } from "../../net/SpilloramaApi.js";
 
 /**
  * Phase-maskin for Game 2 (Spill 2 / Tallspill).
@@ -29,8 +27,6 @@ class Game2Controller implements GameController {
   private lobbyScreen: LobbyScreen | null = null;
   private playScreen: PlayScreen | null = null;
   private endScreen: EndScreen | null = null;
-  private chooseTicketsScreen: ChooseTicketsScreen | null = null;
-  private api: SpilloramaApi = new SpilloramaApi("");
   private myPlayerId: string | null = null;
   private actualRoomCode: string = "";
   private unsubs: (() => void)[] = [];
@@ -275,11 +271,9 @@ class Game2Controller implements GameController {
         this.lobbyScreen = new LobbyScreen(w, h);
         this.lobbyScreen.setOnBuy((count) => this.handleBuy(count));
         this.lobbyScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        // 2026-05-02 (Tobias UX, PDF 17 wireframe): "Kjøp flere brett"-pill
-        // i ComboPanel åpner Choose Tickets-side. Spiller kan velge
-        // spesifikke brett fra 32-pool i stedet for å la systemet
-        // random-allotte.
-        this.lobbyScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
+        // Tobias-direktiv 2026-05-04: "Kjøp flere brett"-pill åpner BuyPopup
+        // direkte (LobbyScreen håndterer dette internt). ChooseTicketsScreen
+        // er fjernet — én popup-flyt for ticket-kjøp på tvers av faser.
         this.lobbyScreen.update(state);
         // 2026-05-03 (Agent T, fix/spill2-pixel-match-design-v2): auto-show
         // av BuyPopup i LOBBY fjernet per Tobias-direktiv. Designet
@@ -295,8 +289,8 @@ class Game2Controller implements GameController {
         // 2026-05-03 (Agent E, Bong Mockup-design): Lykketall + "Kjøp flere
         // brett" lever nå inne i PlayScreen.ComboPanel (var i LobbyScreen).
         this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        this.playScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
-        // 2026-05-03 (Agent L): mellom-runde buy-popup wire-up.
+        // Tobias-direktiv 2026-05-04: ChooseTicketsScreen-flyten er fjernet.
+        // PlayScreen åpner BuyPopup-modal direkte ved klikk på "Kjøp flere".
         this.playScreen.setOnBuyForNextRound((count) => this.handleBuyForNextRound(count));
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
@@ -310,7 +304,6 @@ class Game2Controller implements GameController {
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.setOnLuckyNumber((n) => this.handleLuckyNumber(n));
-        this.playScreen.setOnChooseTickets(() => this.openChooseTicketsScreen());
         // 2026-05-03 (Agent L): mellom-runde buy-popup wire-up — også for
         // spectators. De får mulighet til å hoppe inn i neste runde.
         this.playScreen.setOnBuyForNextRound((count) => this.handleBuyForNextRound(count));
@@ -472,32 +465,6 @@ class Game2Controller implements GameController {
       roomCode: this.actualRoomCode,
       luckyNumber: number,
     });
-  }
-
-  /**
-   * 2026-05-02 (Tobias UX, PDF 17 wireframe side 5): åpne Choose Tickets-
-   * skjerm med 32 forhåndsgenererte brett. Spiller velger ønskede + Pick
-   * Any Number, Buy → tilbake til Lobby.
-   */
-  private openChooseTicketsScreen(): void {
-    const w = this.deps.app.app.screen.width;
-    const h = this.deps.app.app.screen.height;
-    const state = this.deps.bridge.getState();
-    this.chooseTicketsScreen = new ChooseTicketsScreen(w, h, {
-      api: this.api,
-      roomCode: this.actualRoomCode,
-      ticketPriceKr: state.entryFee || 10,
-      onBack: () => {
-        // Tilbake til Lobby uten kjøp.
-        this.transitionTo("LOBBY", this.deps.bridge.getState());
-      },
-      onBuyComplete: () => {
-        // Etter vellykket kjøp — naviger tilbake til Lobby. v2 vil koble
-        // dette til faktisk bet:arm i BingoEngine.
-        this.transitionTo("LOBBY", this.deps.bridge.getState());
-      },
-    });
-    this.setScreen(this.chooseTicketsScreen);
   }
 
   private async handleClaim(type: "LINE" | "BINGO"): Promise<void> {

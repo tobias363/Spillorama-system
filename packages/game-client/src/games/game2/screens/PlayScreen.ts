@@ -105,7 +105,6 @@ export class PlayScreen extends Container {
   // er fjernet i v2. Auto-claim på Fullt Hus drives av backend (PR #855).
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
   private onLuckyNumber: ((n: number) => void) | null = null;
-  private onChooseTickets: (() => void) | null = null;
   private onBuyForNextRound: ((count: number) => void) | null = null;
   /** Siste kjente entryFee fra state — brukes av `openBuyPopupModal` så
    *  popup viser korrekt billettpris uavhengig av når brukeren klikker. */
@@ -268,11 +267,6 @@ export class PlayScreen extends Container {
   /** Sett callback for klikk i Lykketall-grid. */
   setOnLuckyNumber(cb: (n: number) => void): void {
     this.onLuckyNumber = cb;
-  }
-
-  /** Sett callback for "Kjøp flere brett"-pill. */
-  setOnChooseTickets(cb: () => void): void {
-    this.onChooseTickets = cb;
   }
 
   /**

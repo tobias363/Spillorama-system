@@ -70,7 +70,9 @@ export class LobbyScreen extends Container {
   private stageX: number;
   private onBuy: ((count: number) => void) | null = null;
   private onLuckyNumber: ((number: number) => void) | null = null;
-  private onChooseTickets: (() => void) | null = null;
+  /** Cached entryFee fra siste `update(state)` så `showBuyPopup` har korrekt
+   *  pris uten å kreve state-arg fra controller-callbacken. */
+  private lastEntryFee = 10;
   /**
    * Lokal countdown-driver — Speilingen i `BallTube` viser MM:SS, men vi
    * må selv tikke ned mellom snapshot-oppdateringer fra controller for å
@@ -113,9 +115,10 @@ export class LobbyScreen extends Container {
     // setOnLuckyNumber er beholdt no-op for backward-compat; popup-flyt
     // tar over (klikk på Lykketall-kolonnen → popup → onLuckyNumber).
     this.comboPanel.setOnLuckyClick(() => this.lykketallPopup.show(this.currentLuckyNumber));
-    // "Kjøp flere brett"-pill i ComboPanel åpner Choose Tickets-skjermen
-    // (samme oppførsel som PlayScreen).
-    this.comboPanel.setOnBuyMore(() => this.onChooseTickets?.());
+    // Tobias-direktiv 2026-05-04: "Kjøp flere brett"-pill åpner BuyPopup
+    // direkte (samme flyt som PlayScreen). ChooseTicketsScreen-flyten er
+    // fjernet — kun én popup-flyt for ticket-kjøp på tvers av faser.
+    this.comboPanel.setOnBuyMore(() => this.showBuyPopup(this.lastEntryFee));
     this.addChild(this.comboPanel);
 
     // ── BuyPopup (eksplisitt beholdt per Tobias-direktiv) ────────────────
@@ -152,15 +155,15 @@ export class LobbyScreen extends Container {
     this.onLuckyNumber = callback;
   }
 
-  setOnChooseTickets(callback: () => void): void {
-    this.onChooseTickets = callback;
-  }
-
   /**
    * Hovedoppdatering fra controller. Speiler `state`-felter inn i
    * Combo-panel + BallTube.
    */
   update(state: GameState): void {
+    // Cache entryFee så `showBuyPopup` har korrekt pris.
+    if (state.entryFee != null && state.entryFee > 0) {
+      this.lastEntryFee = state.entryFee;
+    }
     // Lucky number — speilet til Combo-panel + lokal cache for popup-display.
     this.currentLuckyNumber = state.myLuckyNumber ?? null;
     this.comboPanel.setLuckyNumber(this.currentLuckyNumber);
