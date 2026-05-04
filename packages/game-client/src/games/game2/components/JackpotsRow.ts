@@ -28,7 +28,8 @@ export interface JackpotSlotData {
 }
 
 const SLOT_KEYS = ["9", "10", "11", "12", "13", "14-21"] as const;
-const CIRCLE_SIZE = 50;
+// Mockup `.jackpots-col .jackpot-circle { max-width: 64px }`. Var 50 → 60.
+const CIRCLE_SIZE = 60;
 const LABEL_GAP = 4;
 const AMOUNT_GAP = 4;
 const LABEL_H = 12;
@@ -134,8 +135,9 @@ export class JackpotsRow extends Container {
 
       const isRange = key === "14-21";
 
-      // Label over sirkelen.
-      const labelText = key === "13" || isRange ? "Gain" : "Jackpot";
+      // Label over sirkelen. Mockup-paritet: lowercase "gain" for slot
+      // 13 og 14-21, "Jackpot" (uppercase J) for 9-12.
+      const labelText = key === "13" || isRange ? "gain" : "Jackpot";
       const label = new Text({
         text: labelText,
         style: {
