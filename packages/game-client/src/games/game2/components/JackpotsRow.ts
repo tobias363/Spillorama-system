@@ -35,12 +35,16 @@ const LABEL_H = 12;
 const AMOUNT_H = 13;
 
 /**
- * Tobias-direktiv 2026-05-04 (target-design-paritet): tynn hvit/cream
- * border på sirklene (var tykk gull etter forrige iterasjon). Gull-border
- * lever fortsatt på YTTRE panel (i ComboPanel) — sirklene har subtil
- * cream-stroke for visuell ro.
+ * Mockup-paritet (Bong Mockup.html `.jackpot-circle`):
+ *   border: 1.5px solid rgba(255, 255, 255, 0.85)
+ *   background: rgba(80, 18, 22, 0.55)
+ *   box-shadow: inset 0 1px 0 rgba(255,255,255,0.25),
+ *               inset 0 -2px 6px rgba(0,0,0,0.3),
+ *               0 4px 10px rgba(0,0,0,0.35)
+ *
+ * Pixi simulerer inset shadows med ekstra fyll-sirkler over base.
  */
-const BORDER_DEFAULT_COLOR = 0xeae0d2;
+const BORDER_DEFAULT_COLOR = 0xffffff;
 const BORDER_DEFAULT_ALPHA = 0.85;
 const BORDER_ACTIVE_COLOR = 0xffd97a; // aktiv slot beholder gull-aksent
 const BORDER_ACTIVE_ALPHA = 1.0;
@@ -219,25 +223,34 @@ export class JackpotsRow extends Container {
       if (!slot) continue;
       const isActive = this.activeSlotKey === key;
       slot.circle.clear();
-      // Mørk-rød base.
+      // Drop-shadow under sirkel (mockup `0 4px 10px rgba(0,0,0,0.35)`).
+      slot.circle
+        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2 + 4, CIRCLE_SIZE / 2)
+        .fill({ color: 0x000000, alpha: 0.35 });
+      // Mørk-rød base (mockup `rgba(80, 18, 22, 0.55)`).
       slot.circle
         .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2)
         .fill({
           color: isActive ? FILL_ACTIVE_COLOR : FILL_DEFAULT_COLOR,
           alpha: isActive ? FILL_ACTIVE_ALPHA : FILL_DEFAULT_ALPHA,
         });
-      // Indre highlight-disk (subtil hvit oversiden av sirkelen).
+      // Inset top-highlight (mockup `inset 0 1px 0 rgba(255,255,255,0.25)`).
+      // Tegnes som en svak hvit halvbue på øvre del av sirkelen.
       slot.circle
-        .circle(CIRCLE_SIZE * 0.5, CIRCLE_SIZE * 0.45, CIRCLE_SIZE * 0.42)
-        .fill({ color: 0xffffff, alpha: 0.10 });
-      // Tynn cream-border på alle slots (target-design-paritet).
-      // Aktiv slot får gull-aksent + litt tykkere stroke som highlight.
+        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE * 0.42, CIRCLE_SIZE * 0.42)
+        .fill({ color: 0xffffff, alpha: 0.16 });
+      // Inset bottom-shadow (mockup `inset 0 -2px 6px rgba(0,0,0,0.3)`).
+      // Tegnes som svak mørk halvbue på nedre del.
+      slot.circle
+        .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE * 0.62, CIRCLE_SIZE * 0.46)
+        .fill({ color: 0x000000, alpha: 0.18 });
+      // Border 1.5px hvit (mockup `1.5px solid rgba(255,255,255,0.85)`).
       slot.circle
         .circle(CIRCLE_SIZE / 2, CIRCLE_SIZE / 2, CIRCLE_SIZE / 2)
         .stroke({
           color: isActive ? BORDER_ACTIVE_COLOR : BORDER_DEFAULT_COLOR,
           alpha: isActive ? BORDER_ACTIVE_ALPHA : BORDER_DEFAULT_ALPHA,
-          width: isActive ? 1.8 : 1.0,
+          width: 1.5,
         });
     }
   }

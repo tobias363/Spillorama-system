@@ -1,85 +1,73 @@
 /**
- * Spill 2 — player-kort ytterst til venstre i `ComboPanel`. Inneholder:
- *   1. Hode-skulder-ikon + 2-siffer spillerantall ("01", "02", ...)
- *   2. "Innsats: X kr"-rad (skjult når 0)  — Tobias-direktiv 2026-05-04
- *   3. "Gevinst: Y kr"-rad (skjult når 0)
+ * Spill 2 — player-kolonne ytterst til venstre i `ComboPanel`.
  *
- * Speiler Spill 1's `LeftInfoPanel` (apps/game1/components/LeftInfoPanel.ts)
- * sin Innsats/Gevinst-flyt: rader skjules når verdien er 0, vises ellers
- * for å unngå visuell støy.
+ * 2026-05-04 (Tobias-direktiv revidert): mockup-paritet med Bong Mockup.
+ * `.player-card { background: transparent; border: none; box-shadow: none; }`
+ * — ingen kort-bakgrunn, bare icon + tall inline. Innsats/Gevinst-rader
+ * behouldes på linje 2-3 (Tobias-direktiv: "innsats når man har plassert
+ * innsats. under der må gevinst komme når man vinner noe").
  *
- * Pixi-implementasjon: Container med Graphics-bakgrunn + Graphics-tegnet
- * ikon + Text-elementer for tall, Innsats og Gevinst.
+ * Layout (mockup `.player-col`):
+ *   width: 110px
+ *   padding: 16px 18px
+ *   .player-card: gap 8px, icon 22×22, pc-num 22px font-weight 700
+ *
+ * Tobias-paritet:
+ *   - Innsats-rad (skjul når 0)
+ *   - Gevinst-rad (skjul når 0)
  */
 
 import { Container, Graphics, Text } from "pixi.js";
 
-/** Kolonne-bredde i ComboPanel (matcher CSS `.player-col` width: 130px). */
-export const PLAYER_COL_WIDTH = 130;
-/** Card-padding inne i kolonnen. */
-const COL_PADDING = 10;
-/** Card-bredde = kolonne-bredde - 2 * padding. */
-const CARD_WIDTH = PLAYER_COL_WIDTH - COL_PADDING * 2;
-/** Card-radius. */
-const CARD_RADIUS = 12;
-/** Indre padding i kortet. */
-const CARD_PAD_X = 12;
-const CARD_PAD_Y = 10;
-/** Ikon-størrelse. */
-const ICON_SIZE = 18;
-/** Mellomrom mellom ikon og tall. */
+/** Kolonne-bredde (mockup `.player-col { width: 110px }`). */
+export const PLAYER_COL_WIDTH = 110;
+/** Kolonne-padding (mockup `.player-col { padding: 16px 18px }`). */
+const COL_PAD_X = 18;
+const COL_PAD_Y = 16;
+/** Ikon-størrelse (mockup 22×22). */
+const ICON_SIZE = 22;
+/** Mellomrom mellom ikon og tall (mockup gap: 8). */
 const ICON_GAP = 8;
 /** Vertikal gap mellom rad 1 (count) og rad 2 (Innsats). */
-const ROW_GAP = 8;
+const ROW_GAP = 10;
 
 export class PlayerCard extends Container {
-  private bg: Graphics;
   private icon: Graphics;
   private numText: Text;
-  /** Tobias 2026-05-04: Innsats-rad (skjult når 0). */
   private innsatsText: Text;
-  /** Tobias 2026-05-04: Gevinst-rad (skjult når 0). */
   private gevinstText: Text;
-  private cardHeight: number;
   private lastStake = -1;
   private lastWinnings = -1;
 
-  constructor(colHeight: number) {
+  constructor(_colHeight: number) {
     super();
-    this.cardHeight = colHeight - COL_PADDING * 2;
+    // Ingen bakgrunn-kort — mockup har transparent player-card.
 
-    // ── kort-bakgrunn ────────────────────────────────────────────────────
-    this.bg = new Graphics();
-    this.bg.x = COL_PADDING;
-    this.bg.y = COL_PADDING;
-    this.drawBg();
-    this.addChild(this.bg);
-
-    // ── ikon (hode-skulder) ──────────────────────────────────────────────
+    // ── ikon (hode-skulder, 22×22) ───────────────────────────────────────
     this.icon = new Graphics();
-    this.icon.x = COL_PADDING + CARD_PAD_X;
-    this.icon.y = COL_PADDING + CARD_PAD_Y;
+    this.icon.x = COL_PAD_X;
+    this.icon.y = COL_PAD_Y;
     this.drawIcon();
     this.addChild(this.icon);
 
-    // ── tall ("01") ──────────────────────────────────────────────────────
+    // ── tall ("01") — 22px, font-weight 700, hvit ───────────────────────
     this.numText = new Text({
       text: "01",
       style: {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-        fontSize: 18,
-        fontWeight: "800",
+        fontSize: 22,
+        fontWeight: "700",
         fill: 0xffffff,
-        letterSpacing: 0.4,
+        letterSpacing: 0.2,
       },
     });
-    this.numText.x = COL_PADDING + CARD_PAD_X + ICON_SIZE + ICON_GAP;
-    this.numText.y = COL_PADDING + CARD_PAD_Y + 2;
+    this.numText.x = COL_PAD_X + ICON_SIZE + ICON_GAP;
+    // Justere y så tall-baseline matcher icon-senter (icon top-aligned).
+    this.numText.y = COL_PAD_Y + 1;
     this.addChild(this.numText);
 
     // ── Innsats-rad (Tobias-direktiv 2026-05-04) ─────────────────────────
-    // Skjult som default — vises i `setStake(n)` når n > 0.
-    const row2Y = COL_PADDING + CARD_PAD_Y + ICON_SIZE + ROW_GAP;
+    const row2Y = COL_PAD_Y + ICON_SIZE + ROW_GAP;
     this.innsatsText = new Text({
       text: "Innsats: 0 kr",
       style: {
@@ -89,7 +77,7 @@ export class PlayerCard extends Container {
         fill: 0xeae0d2,
       },
     });
-    this.innsatsText.x = COL_PADDING + CARD_PAD_X;
+    this.innsatsText.x = COL_PAD_X;
     this.innsatsText.y = row2Y;
     this.innsatsText.visible = false;
     this.addChild(this.innsatsText);
@@ -101,10 +89,10 @@ export class PlayerCard extends Container {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
         fontSize: 12,
         fontWeight: "600",
-        fill: 0xffe83d, // gull-aksent for Gevinst (matcher Spill 1)
+        fill: 0xffe83d,
       },
     });
-    this.gevinstText.x = COL_PADDING + CARD_PAD_X;
+    this.gevinstText.x = COL_PAD_X;
     this.gevinstText.y = row2Y + 16;
     this.gevinstText.visible = false;
     this.addChild(this.gevinstText);
@@ -119,11 +107,6 @@ export class PlayerCard extends Container {
     }
   }
 
-  /**
-   * Tobias-direktiv 2026-05-04: oppdater Innsats-raden. Skjules når n=0
-   * (ingen aktiv stake), vises ellers. Speiler Spill 1's LeftInfoPanel-
-   * flyt for konsistent UX.
-   */
   setStake(stake: number): void {
     if (stake === this.lastStake) return;
     this.lastStake = stake;
@@ -135,10 +118,6 @@ export class PlayerCard extends Container {
     }
   }
 
-  /**
-   * Tobias-direktiv 2026-05-04: oppdater Gevinst-raden. Skjules når n=0
-   * (ingen vinning denne runden), vises ellers.
-   */
   setWinnings(winnings: number): void {
     if (winnings === this.lastWinnings) return;
     this.lastWinnings = winnings;
@@ -150,25 +129,15 @@ export class PlayerCard extends Container {
     }
   }
 
-  /** Returnerer kolonne-bredden — for layout-beregning i ComboPanel. */
   get colWidth(): number {
     return PLAYER_COL_WIDTH;
   }
 
   // ── interne tegne-rutiner ───────────────────────────────────────────────
 
-  private drawBg(): void {
-    this.bg.clear();
-    this.bg
-      .roundRect(0, 0, CARD_WIDTH, this.cardHeight, CARD_RADIUS)
-      .fill({ color: 0x140508, alpha: 0.45 });
-    this.bg
-      .roundRect(2, 2, CARD_WIDTH - 4, 1, 1)
-      .fill({ color: 0xffffff, alpha: 0.06 });
-  }
-
   private drawIcon(): void {
     this.icon.clear();
+    // 22×22 hode-skulder-svg. Skalert opp fra mockup (22 fra 24-viewBox).
     const cx = ICON_SIZE / 2;
     const headY = (8 / 24) * ICON_SIZE;
     const headR = (4 / 24) * ICON_SIZE;
