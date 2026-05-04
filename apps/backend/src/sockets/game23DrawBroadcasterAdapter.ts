@@ -106,12 +106,16 @@ export function createGame23DrawBroadcaster(
       }
 
       // 2) Engine-spesifikke effekter — drainer atomisk fra engine-stash.
-      //    Speiler drawEvents.ts:114-127. Hver `instanceof`-greining
-      //    matcher konkret en engine-type; runtime-engine i prod er
-      //    Game3Engine (extends BingoEngine), så Game3 vil fyre, mens
-      //    Game2 forblir no-op inntil engine-arkitekturen oppdateres.
-      //    Ved å gjøre samme guarding her holder vi cron- og socket-
-      //    veiene wire-kompatible når Game2-flytene aktiveres.
+      //    Speiler drawEvents.ts:114-127.
+      //
+      //    2026-05-04: Game3Engine extends Game2Engine (ikke BingoEngine
+      //    direkte). Runtime-instansen i prod er Game3Engine, og
+      //    `instanceof Game2Engine` returnerer nå korrekt true → G2-hooken
+      //    fyrer for ROCKET-rom og auto-marks `game.marks` via Game2Engine.
+      //    onDrawCompleted. Begge `getG{2,3}LastDrawEffects`-kall er
+      //    idempotente: de returnerer undefined når aktuell runde ikke
+      //    fyrte den effekt-typen, så begge greiningene er trygge å kjøre
+      //    parallelt.
       try {
         if (engine instanceof Game2Engine) {
           const effects = engine.getG2LastDrawEffects(roomCode);

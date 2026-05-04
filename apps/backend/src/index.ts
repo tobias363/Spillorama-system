@@ -617,6 +617,14 @@ const roomState = roomStateProvider === "redis"
 //     G1 manual-claim semantics untouched.
 // Factory rule: one engine class for the whole process; per-variant behaviour
 // is composed via guarded hook overrides, not per-room instantiation.
+//
+// 2026-05-04 (Tobias bug-fix): inheritance-chainen er nå Game3Engine ⊂
+// Game2Engine ⊂ BingoEngine. Tidligere extended begge subklasser BingoEngine
+// direkte, og siden runtime-instansen er Game3Engine ble Game2Engine.onDraw
+// Completed aldri kalt for ROCKET-rom — `instanceof Game2Engine`-greiningen
+// i `game23DrawBroadcasterAdapter.ts` returnerte false, og auto-mark av
+// `game.marks` skjedde aldri. Fix: Game3Engine extends Game2Engine slik at
+// `super.onDrawCompleted(ctx)` chainer korrekt til G2-hook'en.
 const engine = new Game3Engine(localBingoAdapter, walletAdapter, {
   minRoundIntervalMs: bingoMinRoundIntervalMs, minPlayersToStart: bingoMinPlayersToStart,
   dailyLossLimit: bingoDailyLossLimit, monthlyLossLimit: bingoMonthlyLossLimit,

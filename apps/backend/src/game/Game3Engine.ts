@@ -1,5 +1,5 @@
 /**
- * BIN-615 / PR-C3b: Game 3 (Mønsterbingo / Spill 3) engine — extends BingoEngine
+ * BIN-615 / PR-C3b: Game 3 (Mønsterbingo / Spill 3) engine — extends Game2Engine
  * to add pattern-driven auto-claim-on-draw behaviour for the 5×5 / 1..75 /
  * no-free-centre variant.
  *
@@ -16,10 +16,18 @@
  *
  * Non-G3 rooms are untouched: the override guard `isGame3Round(...)` returns
  * early for every round that doesn't carry the G3 variantConfig + slug combo,
- * so G1 manual-claim semantics survive unchanged. Game 2 is a sibling subclass
- * (also extends BingoEngine) and is mutually exclusive with Game 3 at the
- * room-slug level, so the two hooks never fire in the same process for the
- * same room.
+ * so G1 manual-claim semantics survive unchanged.
+ *
+ * 2026-05-04 (Tobias-direktiv): Game3Engine extends Game2Engine (ikke
+ * BingoEngine direkte) slik at `super.onDrawCompleted(ctx)` chainer til
+ * Game2Engine.onDrawCompleted. Tidligere extend'et begge subklassene
+ * BingoEngine direkte og runtime-instansen var Game3Engine; det betød at
+ * Game2Engine.onDrawCompleted aldri kjørte for ROCKET-rom og marks ble
+ * aldri auto-merket. Med inheritance-chainen Game3Engine ⊂ Game2Engine ⊂
+ * BingoEngine treffer `instanceof Game2Engine` runtime-instansen, og
+ * Game2Engine sin onDrawCompleted-hook fyrer for G2-rom (guarded av
+ * `isGame2Round`-predikatet). G3-rom hopper over G2-logikken via samme
+ * predikat (jackpotNumberTable mangler) og kjører kun G3-evalueringen.
  *
  * Perpetual loop (PR #863 + #868) er fortsatt aktiv: når Coverall vinnes
  * signaliserer engine `endedReason: "G3_FULL_HOUSE"` og PerpetualRoundService
@@ -40,8 +48,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { BingoEngine } from "./BingoEngine.js";
-import { autoMarkPlayerCells } from "./Game2Engine.js";
+import { Game2Engine, autoMarkPlayerCells } from "./Game2Engine.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import {
   PatternCycler,
@@ -142,7 +149,7 @@ export interface G3TicketWinner {
 
 // ── Engine ──────────────────────────────────────────────────────────────────
 
-export class Game3Engine extends BingoEngine {
+export class Game3Engine extends Game2Engine {
   /** Per-room pattern cycler, built lazily on the first draw of each G3 round. */
   private readonly cyclersByRoom = new Map<string, PatternCycler>();
   /** Per-room gameId the cycler was built for — reset when a new round starts. */
@@ -150,16 +157,23 @@ export class Game3Engine extends BingoEngine {
   /**
    * Atomic read-and-clear stash for per-draw G3 effects — socket layer consumes
    * via {@link getG3LastDrawEffects} after `drawNextNumber` returns.
+   *
+   * Navnet `lastG3DrawEffectsByRoom` bevisst forskjellig fra Game2Engine sin
+   * `lastDrawEffectsByRoom` — siden Game3Engine extends Game2Engine fra
+   * 2026-05-04 ville et delt feltnavn medføre at Game3Engine sin field-
+   * initializer overskrev Game2Engine sin Map (TS `private`-keyword er
+   * compile-time only — runtime ser begge initialize'rene treffe samme
+   * property på samme instans).
    */
-  private readonly lastDrawEffectsByRoom = new Map<string, G3DrawEffects>();
+  private readonly lastG3DrawEffectsByRoom = new Map<string, G3DrawEffects>();
 
   /**
    * Public reader for the socket layer. Returns undefined when the last draw
    * was not a G3 draw (or the effects have already been consumed).
    */
   getG3LastDrawEffects(roomCode: string): G3DrawEffects | undefined {
-    const effects = this.lastDrawEffectsByRoom.get(roomCode);
-    if (effects) this.lastDrawEffectsByRoom.delete(roomCode);
+    const effects = this.lastG3DrawEffectsByRoom.get(roomCode);
+    if (effects) this.lastG3DrawEffectsByRoom.delete(roomCode);
     return effects;
   }
 
@@ -168,10 +182,15 @@ export class Game3Engine extends BingoEngine {
    *   - Non-G3 rooms → fall through (preserves G1 manual-claim semantics).
    *   - G3 rooms     → step cycler, scan tickets, auto-claim + split, end on Full House.
    *
-   * Calls `super.onDrawCompleted` so any future base-class default hook still
-   * runs. Game 2 is a sibling subclass (not a base), so its 3×3 logic is never
-   * reachable from this override — rooms must be a Game 2 OR Game 3 instance,
-   * never both.
+   * Calls `super.onDrawCompleted` (Game2Engine.onDrawCompleted) so G2-rooms
+   * fortsatt får sin auto-claim-logikk når runtime-engine er Game3Engine
+   * (single-instance-arkitektur per index.ts:619). Game2Engine guard'er på
+   * `isGame2Round` (krever `jackpotNumberTable` + `auto-claim-on-draw`), så
+   * G3-rom no-ops i super-callen og kjører kun G3-evalueringen i denne
+   * funksjonen. G1-rom faller helt gjennom — Game2Engine.isGame2Round
+   * returnerer false, og Game3Engine.isGame3Round returnerer false, og
+   * BingoEngine sin no-op-default ble kalt indirekte (Game2Engine kaller
+   * ikke selv super, men BingoEngine sin hook er en no-op uansett).
    */
   protected async onDrawCompleted(ctx: {
     room: RoomState;
@@ -217,7 +236,7 @@ export class Game3Engine extends BingoEngine {
       await this.rooms.persist(room.code);
     }
 
-    this.lastDrawEffectsByRoom.set(room.code, {
+    this.lastG3DrawEffectsByRoom.set(room.code, {
       roomCode: room.code,
       gameId: game.id,
       drawIndex,

@@ -117,10 +117,14 @@ export function registerDrawEvents(ctx: SocketContext): void {
       }
       // BIN-615 / PR-C3b: emit Game 3 wire events for any G3 draw effects
       // stashed by Game3Engine.onDrawCompleted. No-op for non-G3 rooms.
-      // Game2Engine and Game3Engine are sibling subclasses of BingoEngine
-      // — each `instanceof` branch matches exactly one engine type, and
-      // the engine concretely instantiated for a room determines which
-      // stash can be non-empty.
+      //
+      // 2026-05-04: Game3Engine extends Game2Engine (ikke BingoEngine direkte
+      // som tidligere), så et Game3Engine-instans matcher BÅDE `instanceof
+      // Game2Engine` og `instanceof Game3Engine`. Begge greiningene er
+      // idempotente og safe — hver `getG{2,3}LastDrawEffects` returnerer
+      // undefined når aktuell runde ikke fyrte den effekt-typen. For G3-rom
+      // er G2-stashen tom (Game2Engine.isGame2Round false → no-op), og for
+      // G2-rom er G3-stashen tom (Game3Engine.isGame3Round false → no-op).
       if (engine instanceof Game3Engine) {
         const g3Effects = engine.getG3LastDrawEffects(roomCode);
         if (g3Effects) emitG3DrawEvents(io, g3Effects);
