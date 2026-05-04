@@ -2368,9 +2368,35 @@ app.use(createAgentGame2ChooseTicketsRouter({
   // count inn i armed-state-mapen så `engine.startGame` ser spilleren som
   // armed med rett count. Engine-laget plukker grids via
   // `getPreRoundTicketsByPlayerId`-hooken (se under).
+  //
+  // 2026-05-04 (Tobias bug-fix #2): legg ved synthetic selections så
+  // `BingoEngine.startGame` ikke clamp-er count ned til
+  // `ticketsPerPlayer` (default 4 fra autoRoundTicketsPerPlayer). Uten
+  // selections faller engine til legacy flat-mode-pathen som har
+  // `Math.min(requested, ticketsPerPlayer)` — Spill 2-spillere som kjøpte
+  // 8 brett endte opp med 4. Med selections skipper engine clampen og
+  // bruker pool-grids via `getPreRoundTicketsByPlayerId`-hooken.
+  //
+  // Slug-aware: Spill 2 ("rocket") = "game2-3x3", Spill 3 ("monsterbingo")
+  // = "monsterbingo-5x5". Type-strings matcher `ticketTypes[].type` i
+  // DEFAULT_GAME2_CONFIG / DEFAULT_GAME3_CONFIG. Andre slugs (Spill 1
+  // bingo) skal ikke gå hit (route er Spill 2-spesifikk), men vi
+  // fail-soft til legacy-armPlayer-uten-selections som backup.
   armRocketPlayerFromPool: (roomCode, playerId, purchasedCount) => {
     try {
-      roomState.armPlayer(roomCode, playerId, purchasedCount);
+      let selections: Array<{ type: string; qty: number; name?: string }> | undefined;
+      try {
+        const snap = engine.getRoomSnapshot(roomCode);
+        const slug = (snap.gameSlug ?? "").toLowerCase().trim();
+        if (slug === "rocket" || slug === "game_2" || slug === "tallspill") {
+          selections = [{ type: "game2-3x3", qty: purchasedCount, name: "Standard" }];
+        } else if (slug === "monsterbingo" || slug === "game_3") {
+          selections = [{ type: "monsterbingo-5x5", qty: purchasedCount, name: "Standard" }];
+        }
+      } catch {
+        // Snapshot-feil → fail-soft til legacy-armPlayer-uten-selections.
+      }
+      roomState.armPlayer(roomCode, playerId, purchasedCount, selections);
     } catch (err) {
       console.warn("[agent-game2-choose-tickets] armPlayer failed in armRocketPlayerFromPool", err);
     }
