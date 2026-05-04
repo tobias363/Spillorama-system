@@ -417,41 +417,35 @@ export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
 };
 
 /**
- * 2026-05-03 (Tobias-direktiv revert): Game 3 (Mønsterbingo / Spill 3) default
- * variant config — **5×5 1..75 uten fri sentercelle**, med Row 1-4 + Coverall
- * patterns. Visuelt og funksjonelt likt Spill 1, MEN med kun ÉN ticket-type
- * (ikke 8 farger).
+ * 2026-05-04 (Tobias-direktiv): Game 3 (Mønsterbingo / Spill 3) default
+ * variant config — **5×5 1..75 uten fri sentercelle**, med 4 spesifikke
+ * mønstre (T-form, Kryss, Topp+diagonal, Pyramide) i stedet for Row 1-4 +
+ * Coverall. ÉN ticket-type ("Standard") — ikke 8 farger som Spill 1.
  *
  * - **5×5-tickets uten free-center**, 25 unike tall fra 1..75 fordelt per
  *   B/I/N/G/O-kolonne — `generate5x5NoCenterTicket`
  * - **maxBallValue=75**, drawBagSize=75 — samme range som Spill 1
  * - **patternEvalMode="auto-claim-on-draw"** — Game3Engine auto-evaluerer
- *   patterns per trekning (Row 1-4 deaktiveres ved `ballNumberThreshold`,
- *   Coverall lukker runden)
+ *   patterns per trekning. Hver pattern bruker `design: 0` med eksplisitt
+ *   `patternDataList` (25-bit bitmask, row-major) siden mønstrene ikke
+ *   matcher de innebygde row-shapes (design 1-4).
  * - **ÉN ticket-type** ("Standard") — i kontrast til Spill 1's 8 farger.
- *   Per Tobias-direktiv 2026-05-03: "alt av design skal være likt bare at
- *   her er det kun 1 type bonger og man spiller om mønstre."
- * - **5 patterns**: Row 1 (10%), Row 2 (10%), Row 3 (10%), Row 4 (10%),
- *   Full House / Coverall (60%). Ball-thresholds 15/25/40/55 for Row 1-4;
- *   Full House har ingen threshold.
+ * - **4 patterns** (alle 25% av pot for å gi 100% sum):
+ *     1. Topp + midt    (T-form):       cells [0,1,2,3,4, 7, 12, 17, 22]
+ *     2. Kryss          (X):            cells [0,4, 6,8, 12, 16,18, 20,24]
+ *     3. Topp + diagonal (7-form):      cells [0,1,2,3,4, 8, 12, 16, 20]
+ *     4. Pyramide       (trekant):      cells [12, 16,17,18, 20,21,22,23,24]
  *
  * Historikk:
- *   - BIN-615 / PR-C3b (2026-04-23): innført 5×5 + 5 patterns
+ *   - BIN-615 / PR-C3b (2026-04-23): innført 5×5 + 5 patterns (Row 1-4 + Coverall)
  *   - PR #860 (2026-05-03): kortvarig portet til 3×3 + Coverall-only
- *   - Denne PR (2026-05-03): revertert til 5×5 + 75-ball + 5 patterns,
- *     men med kun 1 ticket-type per Tobias-direktiv
+ *   - 2026-05-03 revert: tilbake til 5×5 + 75-ball + Row 1-4 + Coverall
+ *   - Denne PR (2026-05-04): byttet til 4 spesifikke designs-mønstre fra
+ *     patterns.jsx-spec
  *
- * Perpetual loop (PR #863 + #868) er fortsatt aktiv: når Coverall vinnes
- * signaliserer engine `endedReason: "G3_FULL_HOUSE"` og PerpetualRoundService
- * scheduler ny runde automatisk.
- *
- * Per Tobias 2026-05-03 (revert-direktiv):
- *   "Jeg ser at jeg har tatt feil for spill 3. dette er gjeldene regler:
- *    75 baller og 5x5 bonger uten free i midten. Så det du kan gjøre her
- *    er å duplisere spill 1 så kan vi endre når det er gjort. Alt av design
- *    skal være likt bare at her er det kun 1 type bonger og man spiller om
- *    mønstre. Logikken med å trekke baller og markere bonger er fortsatt
- *    helt lik."
+ * Perpetual loop (PR #863 + #868) er fortsatt aktiv: når siste pattern
+ * vinnes signaliserer engine `endedReason: "G3_FULL_HOUSE"` og
+ * PerpetualRoundService scheduler ny runde automatisk.
  */
 export const DEFAULT_GAME3_CONFIG: GameVariantConfig = {
   // Single ticket-type — alle bonger er identiske "Standard". Dette er det
@@ -461,16 +455,31 @@ export const DEFAULT_GAME3_CONFIG: GameVariantConfig = {
     { name: "Standard", type: "monsterbingo-5x5", priceMultiplier: 1, ticketCount: 1 },
   ],
   patterns: [
-    { name: "Row 1",      claimType: "LINE"  as const, prizePercent: 10, design: 1, ballNumberThreshold: 15 },
-    { name: "Row 2",      claimType: "LINE"  as const, prizePercent: 10, design: 2, ballNumberThreshold: 25 },
-    { name: "Row 3",      claimType: "LINE"  as const, prizePercent: 10, design: 3, ballNumberThreshold: 40 },
-    { name: "Row 4",      claimType: "LINE"  as const, prizePercent: 10, design: 4, ballNumberThreshold: 55 },
-    { name: "Full House", claimType: "BINGO" as const, prizePercent: 60, design: 0 },
+    { name: "Topp + midt",     claimType: "BINGO" as const, prizePercent: 25, design: 0, patternDataList: cellsToBitmask([0,1,2,3,4, 7, 12, 17, 22]) },
+    { name: "Kryss",           claimType: "BINGO" as const, prizePercent: 25, design: 0, patternDataList: cellsToBitmask([0,4, 6,8, 12, 16,18, 20,24]) },
+    { name: "Topp + diagonal", claimType: "BINGO" as const, prizePercent: 25, design: 0, patternDataList: cellsToBitmask([0,1,2,3,4, 8, 12, 16, 20]) },
+    { name: "Pyramide",        claimType: "BINGO" as const, prizePercent: 25, design: 0, patternDataList: cellsToBitmask([12, 16,17,18, 20,21,22,23,24]) },
   ],
   maxBallValue: 75,
   drawBagSize: 75,
   patternEvalMode: "auto-claim-on-draw",
 };
+
+/**
+ * Helper: Convert array of cell-indices (0-24, row-major) to 25-element
+ * bitmask (1=fill, 0=empty) consumed by `PatternConfig.patternDataList`.
+ *
+ * Eksempel: `cellsToBitmask([0,4,12,20,24])` →
+ *   [1,0,0,0,1, 0,0,0,0,0, 0,0,1,0,0, 0,0,0,0,0, 1,0,0,0,1] (X-form).
+ *
+ * Brukes i `DEFAULT_GAME3_CONFIG.patterns` for å definere de 4 mønstrene
+ * fra patterns.jsx-spec uten å skrive 25-element-arrays for hver pattern.
+ */
+function cellsToBitmask(cells: number[]): number[] {
+  const mask = new Array(25).fill(0);
+  for (const c of cells) mask[c] = 1;
+  return mask;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
