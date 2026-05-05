@@ -35,8 +35,7 @@ export interface HallScopedQuery extends DateRangeQuery {
 // aksepterer kun "MAIN_GAME" eller "DATABINGO" som game-type-parameter.
 // Per docs/architecture/SPILLKATALOG.md (2026-04-25): Spill 1-3 (bingo,
 // rocket, monsterbingo) er hovedspill (15%); SpinnGo (Spill 4 / game5 /
-// spillorama) er databingo (30%). Spill 4 / `themebingo` (legacy game4)
-// er DEPRECATED (BIN-496) og har ingen rapport-rute.
+// spillorama) er databingo (30%).
 export type ReportGameSlug = "MAIN_GAME" | "DATABINGO";
 
 // ── Revenue / Range totals ──────────────────────────────────────────────────
