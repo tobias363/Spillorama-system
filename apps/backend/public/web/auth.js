@@ -703,9 +703,51 @@
   // ── Public API ───────────────────────────────────────────────────────────
   window.SpilloramaAuth = { storedToken, storedUser, clearSession, authenticatedFetch };
 
+  // ── Dev-only auto-login (Tobias 2026-05-05) ─────────────────────────────
+  // Hvis URL inneholder ?dev-user=email@example.com prøver vi å auto-logge
+  // inn via /api/dev/auto-login. Backend-routen er gated bak NODE_ENV!=
+  // production + localhost-only. Hvis vi får et token, lagrer vi det og
+  // redirecter til samme URL uten ?dev-user= (så reload starter normal flow).
+  async function maybeDevAutoLogin() {
+    var params = new URLSearchParams(window.location.search);
+    var devUser = params.get('dev-user');
+    if (!devUser) return false;
+    if (storedToken()) {
+      // Allerede innlogget — ingen grunn til å auto-logge på nytt.
+      var url = new URL(window.location.href);
+      url.searchParams.delete('dev-user');
+      window.history.replaceState({}, '', url.toString());
+      return false;
+    }
+    try {
+      var res = await fetch('/api/dev/auto-login?email=' + encodeURIComponent(devUser));
+      var body = await res.json().catch(function () { return null; });
+      if (!res.ok || !body || body.ok !== true || !body.data || !body.data.accessToken) {
+        console.error('[dev:auto-login] backend returnerte ikke ok:', body);
+        return false;
+      }
+      saveSession(body.data.accessToken, body.data.user, body.data.expiresAt);
+      console.log('[dev:auto-login] success — fjerner ?dev-user= og reloader');
+      var url = new URL(window.location.href);
+      url.searchParams.delete('dev-user');
+      window.location.replace(url.toString());
+      return true;
+    } catch (err) {
+      console.error('[dev:auto-login] feil:', err);
+      return false;
+    }
+  }
+
+  function startup() {
+    maybeDevAutoLogin().then(function (didRedirect) {
+      if (didRedirect) return; // window.location.replace ble kalt
+      init();
+    });
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', startup);
   } else {
-    init();
+    startup();
   }
 })();
