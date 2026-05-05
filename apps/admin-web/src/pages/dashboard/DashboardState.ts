@@ -1,21 +1,25 @@
 import { fetchSummaryCounts, fetchTopPlayers, listRooms, type SummaryCounts, type TopPlayerRow, type AdminRoomSummary } from "../../api/dashboard.js";
 import { listPendingRequests, type PaymentRequest } from "../../api/paymentRequests.js";
 
-export type GameTab = "game1" | "game2" | "game3" | "game4" | "game5";
+export type GameTab = "game1" | "game2" | "game3" | "game5";
 
-export const GAME_TABS: GameTab[] = ["game1", "game2", "game3", "game4", "game5"];
+export const GAME_TABS: GameTab[] = ["game1", "game2", "game3", "game5"];
 
-// Mapping from the new Spillorama room-slug taxonomy to the legacy Game1-5 tabs.
-// Keeps parity with legacy /dashboard/ongoingGames/:gameType semantics.
+// Mapping from the new Spillorama room-slug taxonomy to the legacy Game1-3+5
+// tabs (game4/themebingo deprecated BIN-496). Keeps parity with legacy
+// /dashboard/ongoingGames/:gameType semantics.
 const ROOM_GAME_MAPPING: Record<string, GameTab> = {
   bingo: "game1",
   "bingo-1-75": "game1",
+  // wheel-of-fortune / treasure-chest er mini-games inne i Spill 1, ikke
+  // selvstendige spill — bucketes til game1.
+  "wheel-of-fortune": "game1",
+  wheel: "game1",
+  "treasure-chest": "game1",
+  chest: "game1",
   "bingo-90": "game2",
   jackpot: "game3",
-  "wheel-of-fortune": "game4",
-  wheel: "game4",
-  "treasure-chest": "game5",
-  chest: "game5",
+  spillorama: "game5",
 };
 
 export function classifyRoom(room: AdminRoomSummary): GameTab {
@@ -32,7 +36,7 @@ export interface DashboardData {
 }
 
 export function emptyOngoingGames(): Record<GameTab, AdminRoomSummary[]> {
-  return { game1: [], game2: [], game3: [], game4: [], game5: [] };
+  return { game1: [], game2: [], game3: [], game5: [] };
 }
 
 export async function fetchDashboardData(

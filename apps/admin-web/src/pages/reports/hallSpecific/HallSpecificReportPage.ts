@@ -6,7 +6,8 @@
 // Tidligere (BIN-645 PR-A4a) var dette et skelett basert på daily-report
 // endepunktet. Nå treffer den dedikert /api/admin/reports/hall-specific som
 // leverer per-hall aggregat med Group Of Hall Name, Hall Name, Agent,
-// Elvis Replacement Amount + per-Game (Game 1-5) OMS/UTD/Payout%/RES.
+// Elvis Replacement Amount + per-Game (Game 1-3 + Game 5) OMS/UTD/Payout%/RES.
+// Game 4 / themebingo deprecated BIN-496.
 //
 // Eksport: CSV via DataTable.csvExport (transform flater per-game ut til
 // separate kolonner for CSV-vennlighet).
@@ -25,7 +26,7 @@ import {
 } from "../shared/reportShell.js";
 import { escapeHtml } from "../../games/common/escape.js";
 
-const GAMES: HallSpecificGame[] = ["game1", "game2", "game3", "game4", "game5"];
+const GAMES: HallSpecificGame[] = ["game1", "game2", "game3", "game5"];
 
 function formatKr(value: number): string {
   return value.toLocaleString("no-NO", {

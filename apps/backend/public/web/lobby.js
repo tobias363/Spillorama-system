@@ -29,7 +29,6 @@
     { gameNumber: 1, slug: 'game_1', title: 'Bingo',         description: '75-kulsbingo med flere spillvarianter' },
     { gameNumber: 2, slug: 'game_2', title: 'Rocket',        description: 'Tallspill med 3x3 brett og Lucky Number' },
     { gameNumber: 3, slug: 'game_3', title: 'Mønsterbingo',  description: 'Bingo med mønstergevinster' },
-    { gameNumber: 4, slug: 'game_4', title: 'Temabingo',     description: 'Bingo med temaer og multiplikator' },
     { gameNumber: 5, slug: 'game_5', title: 'Spillorama',    description: 'Spillorama-bingo med bonusspill' },
     { gameNumber: 6, slug: 'candy',  title: 'Candy Mania',   description: 'Candy-spillet' }
   ];
@@ -691,14 +690,12 @@
       'bingo':        'game_thumb_1.jpg',
       'rocket':       'game_thumb_2.jpg',
       'monsterbingo': 'game_thumb_3.jpg',
-      'temabingo':    'game_thumb_4.jpg',
       'spillorama':   'game_thumb_5.jpg',
       'candy':        'game_thumb_candy.png',
       // fallback for old game_N slugs
       'game_1': 'game_thumb_1.jpg',
       'game_2': 'game_thumb_2.jpg',
       'game_3': 'game_thumb_3.jpg',
-      'game_4': 'game_thumb_4.jpg',
       'game_5': 'game_thumb_5.jpg',
     };
     var src = thumbs[slug];

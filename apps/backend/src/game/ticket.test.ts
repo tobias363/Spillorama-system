@@ -349,7 +349,6 @@ describe("uses75Ball", () => {
     assert.equal(uses75Ball("rocket"), false);
     assert.equal(uses75Ball("game_2"), false);
     assert.equal(uses75Ball("monsterbingo"), false);
-    assert.equal(uses75Ball("temabingo"), false);
     assert.equal(uses75Ball("spillorama"), false);
     assert.equal(uses75Ball("candy"), false);
   });

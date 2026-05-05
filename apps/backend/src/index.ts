@@ -3033,8 +3033,7 @@ app.use(createAdminReportsGame1ManagementRouter({
 }));
 // GAP #28: per-spilltype-spesifikke rapport-shapes
 // (Spill 1 bingo / Spill 2 rocket / Spill 3 monsterbingo / SpinnGo
-// spillorama). Game 4 (themebingo) avvist — deprecated per BIN-496.
-// CSV-export via ?format=csv. HALL_OPERATOR auto-scope.
+// spillorama). CSV-export via ?format=csv. HALL_OPERATOR auto-scope.
 app.use(createAdminReportsGameSpecificRouter({
   platformService,
   engine,

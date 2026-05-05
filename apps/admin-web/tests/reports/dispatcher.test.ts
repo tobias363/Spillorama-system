@@ -17,13 +17,13 @@ describe("reports dispatcher", () => {
       })) as typeof fetch;
   });
 
-  it("matches all 11 static routes", () => {
+  it("matches all 10 static routes", () => {
+    // Game 4 / themebingo deprecated BIN-496 — /reportGame4 finnes ikke.
     const routes = [
       "/reportGame1",
       "/reportManagement/game1",
       "/reportGame2",
       "/reportGame3",
-      "/reportGame4",
       "/reportGame5",
       "/hallSpecificReport",
       "/physicalTicketReport",

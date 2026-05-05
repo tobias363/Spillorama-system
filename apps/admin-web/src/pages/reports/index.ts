@@ -11,7 +11,6 @@ import { renderGame2ReportPage } from "./game2/Game2ReportPage.js";
 import { renderGame2HistoryPage } from "./game2/Game2HistoryPage.js";
 import { renderGame3ReportPage } from "./game3/Game3ReportPage.js";
 import { renderGame3HistoryPage } from "./game3/Game3HistoryPage.js";
-// Game 4 (themebingo) er DEPRECATED — BIN-496. Ingen rapport-rute.
 import { renderGame5ReportPage } from "./game5/Game5ReportPage.js";
 import { renderHallSpecificReportPage } from "./hallSpecific/HallSpecificReportPage.js";
 import { renderPhysicalTicketReportPage } from "./physicalTicket/PhysicalTicketReportPage.js";
@@ -26,7 +25,6 @@ const STATIC_REPORT_ROUTES = new Set<string>([
   "/reportManagement/game1",
   "/reportGame2",
   "/reportGame3",
-  // /reportGame4 — Game 4 (themebingo) DEPRECATED, BIN-496.
   "/reportGame5",
   "/hallSpecificReport",
   "/physicalTicketReport",
@@ -66,7 +64,6 @@ export function mountReportRoute(container: HTMLElement, path: string): void {
     case "/reportGame3":
       void renderGame3ReportPage(container);
       return;
-    // /reportGame4 — Game 4 (themebingo) DEPRECATED, BIN-496.
     case "/reportGame5":
       void renderGame5ReportPage(container);
       return;

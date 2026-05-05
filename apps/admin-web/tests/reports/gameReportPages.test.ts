@@ -1,9 +1,8 @@
 // PR-A4a (BIN-645) — per-game report page render tests.
 //
 // Covers all aktive game reports (Spill 1, 2, 3, 5/SpinnGo) + game history
-// pages + subgames drill-down. Spill 4 / themebingo (legacy game4) er
-// DEPRECATED (BIN-496) og har ingen rapport-rute. Uses stubbed fetch to
-// verify DataTable mounts + filter-bar renders.
+// pages + subgames drill-down. Uses stubbed fetch to verify DataTable
+// mounts + filter-bar renders.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { initI18n } from "../../src/i18n/I18n.js";

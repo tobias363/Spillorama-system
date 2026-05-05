@@ -93,9 +93,8 @@ export const GAME3_SLUGS: ReadonlySet<string> = new Set([
  * explicit slugs in this set get 3×5.
  *
  * Includes Game 5 (spillorama) which uses slot-style cosmetic tickets
- * and historically relied on the 3×5 fallback. Game 4 (temabingo) is
- * deactivated per BIN-496 and Game 6 (candy) uses an iframe — neither
- * generates tickets via this path.
+ * and historically relied on the 3×5 fallback. Game 6 (candy) uses an
+ * iframe — does not generate tickets via this path.
  */
 export const DATABINGO60_SLUGS: ReadonlySet<string> = new Set([
   "databingo",
@@ -103,7 +102,6 @@ export const DATABINGO60_SLUGS: ReadonlySet<string> = new Set([
   "bingo60",
   "spillorama",
   "game_5",
-  "temabingo",  // Game 4 — deactivated but may still appear in legacy fixtures
 ]);
 
 /** True if a room/game with this slug should use the 3×5 Databingo60 format. */
