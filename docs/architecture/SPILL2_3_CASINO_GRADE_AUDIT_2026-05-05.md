@@ -22,6 +22,26 @@
 
 ---
 
+## STATUS-OPPDATERING — fortløpende lukking av funn
+
+**Siste oppdatering:** 2026-05-06 (Wave 3b).
+
+Tabellen markerer hvilke funn som er fikset i ettertid og hvilke som fortsatt
+står åpne. Branchen `perf/wave-3b-broadcast-payload-and-pool-2026-05-06`
+inneholder de seneste fixene; PR-numrene oppdateres når PM merger.
+
+| Funn | Tittel | Severity | Status | Branch / PR |
+|---|---|---|---|---|
+| §6.1 | room:update payload size | CRITICAL | **Fixed (Wave 3b)** — per-spiller-strip i `emitRoomUpdate`, 314 KB → 0.8 KB pr. mottaker | `perf/wave-3b-broadcast-payload-and-pool-2026-05-06` |
+| §6.4 | Postgres pool exhaustion | HIGH | **Mitigated (Wave 3b)** — pool-stats-metrics + 5s→3s fail-fast timeout. Pool-størrelse holdt på 20 (Render basic_256mb-cap). | `perf/wave-3b-broadcast-payload-and-pool-2026-05-06` |
+| §5.1 | Game3 stuck-recovery missing | CRITICAL | **Fixed** (Wave 2 hot-patch) | merged `0bb012c4` |
+| §9.1 | LedgerGameType prize-cap | CRITICAL | **Fixed** (Wave 2 hot-patch) | merged `0bb012c4` |
+
+Resterende kritiske/høye funn (§2.1-§2.7, §3.4, §3.6, §6.3) er fortsatt åpne
+— se §11 implementeringsplan.
+
+---
+
 ## §0. Lese-veiledning
 
 ### Hvordan rapporten er strukturert
@@ -974,9 +994,19 @@ Path 1 lykkes. OK.
 
 ### KRITISK-6.1 — `room:update` payload-størrelse (TOP 5)
 
-**Severity:** CRITICAL
+**Severity:** CRITICAL — **Fixed in Wave 3b** (2026-05-06)
 **Kategori:** scaling-bottleneck
 **File:line:** `apps/backend/src/index.ts:1333-1337` + `apps/backend/src/util/roomHelpers.ts:235`
+
+> **WAVE 3b FIX (2026-05-06):** `emitRoomUpdate` for `rocket` / `monsterbingo`
+> sender nå én strippet payload pr. socket. Målt med 1500 spillere:
+> 314.2 KB → 0.8 KB per mottaker (401× reduksjon). Per-emit total: 460 MB
+> → 1.1 MB. Branch: `perf/wave-3b-broadcast-payload-and-pool-2026-05-06`.
+> Implementasjon: `stripPerpetualPayloadForRecipient` i
+> `apps/backend/src/util/roomHelpers.ts` + per-socket-iterasjon i
+> `emitRoomUpdate` (`apps/backend/src/index.ts`). 20 unit-tester i
+> `roomHelpers.perpetualStrip.test.ts` validerer korrekthet + payload-bound.
+> Klient-impact: 0 (Spill 2/3-klienten leste aldri andre spilleres state).
 
 `buildRoomUpdatePayload` returner `RoomSnapshot & {...}`. RoomSnapshot inneholder `players: Player[]` (linje 235 i roomHelpers.ts).
 
@@ -1062,9 +1092,20 @@ Per draw på Spill 3:
 
 ### KRITISK-6.4 — Postgres connection-pool exhaustion ved mass-payout
 
-**Severity:** HIGH
+**Severity:** HIGH — **Mitigated in Wave 3b** (2026-05-06)
 **Kategori:** scaling-bottleneck
 **File:line:** `apps/backend/src/adapters/PostgresWalletAdapter.ts` + per-vinner `walletAdapter.transfer`
+
+> **WAVE 3b FIX (2026-05-06):** Pool-utilization er nå observerbar. Nye
+> Prometheus-gauges (`spillorama_pg_pool_active_clients`, `_idle_clients`,
+> `_waiting_requests`, `_total_clients`, `_max_clients`) sample-es hvert 5s
+> fra både shared platform-pool og wallet-pool. Connection-timeout redusert
+> fra 5s → 3s (fail-fast). Admin-endpoint `GET /api/admin/observability/db-pool`
+> for live snapshot. Pool-størrelse (`max`) holdes på 20 default fordi Render
+> `basic_256mb`-plan caper på ~30 connections totalt — pilot-test med høyere
+> last vil avdekke om vi trenger plan-oppgradering. Branch:
+> `perf/wave-3b-broadcast-payload-and-pool-2026-05-06`. Batch-payout
+> (audit-anbefaling) er IKKE landet ennå — ses som Fase 3.
 
 På 1500 brett × ~5% vinnerate = 75 vinnere per draw. Hver vinner får 4-5 wallet/ledger queries med pessimistic-lock på `app_wallet_accounts.balance`. Render Postgres starter har 25 connections.
 

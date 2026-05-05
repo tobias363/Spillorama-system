@@ -69,6 +69,10 @@ Hoved-event-namespaces:
 4. **Reconnect-snapshot er authoritativ:** klient resetter state ved reconnect
 5. **Event-versjonering:** breaking changes legger til ny event-type, ikke endrer eksisterende
 6. **Event-id på alle mutating events** for klient-side dedup
+7. **Per-spiller-strip for perpetual rooms** (Wave 3b, 2026-05-06): `room:update`
+   for `rocket` / `monsterbingo` sender én strippet payload pr. socket istedenfor
+   full broadcast — sparer 460 MB → 1 MB pr. emit på 1500-spillere-skala. Se
+   ADR-011 + `apps/backend/src/util/roomHelpers.ts:stripPerpetualPayloadForRecipient`.
 
 ## Bug-testing-guide
 
@@ -106,3 +110,5 @@ Hoved-event-namespaces:
 - `docs/architecture/WIRE_CONTRACT.md` — wire-format spec
 - PR [#937](https://github.com/tobias363/Spillorama-system/pull/937) — auto-reconnect
 - ADR-001, ADR-002 (system-actor for system-driven events)
+- ADR-011 (per-spiller broadcast for perpetual rooms — Wave 3b)
+- `docs/architecture/SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05.md` §6.1
