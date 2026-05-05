@@ -1,6 +1,7 @@
 import "./styles/shell.css";
 import { initI18n, t } from "./i18n/I18n.js";
 import { bootstrapAuth } from "./auth/AuthGuard.js";
+import { maybeAutoLoginFromQueryParam } from "./auth/devAutoLogin.js";
 import {
   getSession,
   isAdminPanelRole,
@@ -95,6 +96,13 @@ async function bootstrap(): Promise<void> {
       }
     });
     return;
+  }
+
+  // Dev-only: ?dev-user=X i URL trigger auto-login og redirect. Gated bak
+  // `import.meta.env.DEV` (tree-shakes ut av prod-bundle) + backend-route
+  // som er gated bak NODE_ENV!=production + localhost.
+  if (await maybeAutoLoginFromQueryParam()) {
+    return; // window.location.replace er kalt — vi avslutter bootstrap.
   }
 
   const state = await bootstrapAuth();
