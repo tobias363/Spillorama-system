@@ -180,7 +180,18 @@ export class Game3Engine extends Game2Engine {
   /**
    * BIN-615 / PR-C3b hook override:
    *   - Non-G3 rooms → fall through (preserves G1 manual-claim semantics).
-   *   - G3 rooms     → step cycler, scan tickets, auto-claim + split, end on Full House.
+   *   - G3 rooms     → step cycler, scan tickets, auto-claim + split, end
+   *                    when all patterns are resolved (or an explicit
+   *                    Full-House pattern wins).
+   *
+   * 2026-05-05 (Tobias-direktiv): runden ender når
+   *   (a) en pattern med `isFullHouse=true` vinnes denne trekningen, eller
+   *   (b) alle mønstre er løst (cycler.allResolved()).
+   * Den siste varianten dekker dagens 4-pattern-config (Topp + midt, Kryss,
+   * Topp + diagonal, Pyramide) som ikke har noen Full-House-pattern. Begge
+   * grenene setter `endedReason: "G3_FULL_HOUSE"` slik at PerpetualRound-
+   * Service oppfatter en naturlig runde-end (NATURAL_END_REASONS inneholder
+   * `G3_FULL_HOUSE`) og scheduler ny runde automatisk.
    *
    * Calls `super.onDrawCompleted` (Game2Engine.onDrawCompleted) so G2-rooms
    * fortsatt får sin auto-claim-logikk når runtime-engine er Game3Engine
@@ -223,11 +234,38 @@ export class Game3Engine extends Game2Engine {
       variantConfig: variantConfig!,
     });
 
-    // End the round only when a Full House was awarded this draw (legacy parity).
-    const fullHouseWon = winnerRecords.some((w) => w.isFullHouse && w.ticketWinners.length > 0);
-    if (fullHouseWon) {
+    // 2026-05-05 (Tobias-direktiv): End the round when EITHER an explicit
+    // Full-House pattern was awarded this draw OR every pattern has been won
+    // (the cycler tracks `isPatternWin` per pattern; `processG3Winners` calls
+    // `cyclerMarkWon` after each pattern is paid out). Per
+    // `docs/engineering/game3-canonical-spec.md` §5: «Når alle 4 mønstre er
+    // vunnet, signaliserer engine `endedReason: "G3_FULL_HOUSE"`».
+    //
+    // The current `DEFAULT_GAME3_CONFIG` has 4 design-mønstre (Topp + midt,
+    // Kryss, Topp + diagonal, Pyramide) — none of which is flagged
+    // `isFullHouse=true` (their patternDataList covers only 9 cells each, and
+    // none is named "Full House"/"Coverall"). Without the `allPatternsWon`
+    // branch the round only ended via `DRAW_BAG_EMPTY` (75 baller) — Bølge C
+    // (PR #933) flagget dette som regression.
+    //
+    // The `explicitFullHouseWon` branch is preserved so future configs that
+    // include an explicit Coverall/Full-House pattern still end the round on
+    // the winning draw, regardless of whether other patterns are still active.
+    const explicitFullHouseWon = winnerRecords.some(
+      (w) => w.isFullHouse && w.ticketWinners.length > 0,
+    );
+    const allPatternsWon = cycler.allResolved();
+    const roundOver = explicitFullHouseWon || allPatternsWon;
+
+    if (roundOver) {
       const endedAtMs = Date.now();
-      game.bingoWinnerId = winnerRecords.find((w) => w.isFullHouse)?.ticketWinners[0]?.playerId;
+      // Prefer the explicit Full-House winner when present (legacy parity);
+      // otherwise pick the first ticketWinner from the last pattern resolved
+      // this draw — matches «vinner som lukket runden»-semantikken.
+      const closingWinner =
+        winnerRecords.find((w) => w.isFullHouse)?.ticketWinners[0]
+          ?? winnerRecords.find((w) => w.ticketWinners.length > 0)?.ticketWinners[0];
+      game.bingoWinnerId = closingWinner?.playerId;
       game.status = "ENDED";
       game.endedAt = new Date(endedAtMs).toISOString();
       game.endedReason = "G3_FULL_HOUSE";
@@ -244,8 +282,8 @@ export class Game3Engine extends Game2Engine {
       patternsChanged: step.changed,
       patternSnapshot: this.buildPatternSnapshot(cycler, game),
       winners: winnerRecords,
-      gameEnded: fullHouseWon,
-      endedReason: fullHouseWon ? "G3_FULL_HOUSE" : undefined,
+      gameEnded: roundOver,
+      endedReason: roundOver ? "G3_FULL_HOUSE" : undefined,
     });
   }
 

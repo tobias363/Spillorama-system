@@ -462,23 +462,17 @@ describe("Game3Engine — multi-winner split", () => {
   });
 });
 
-// 2026-05-05 (test-restoration): "Game3Engine — threshold deaktivering" og
-// "Full House ends the round" var begge testet mot Row 1-4 + Coverall-konfigen
-// fra før PR #895. Den nåværende DEFAULT_GAME3_CONFIG har:
+// 2026-05-05 (test-restoration): "Game3Engine — threshold deaktivering" var
+// testet mot Row 1-4-konfigen fra før PR #895. Den nåværende
+// DEFAULT_GAME3_CONFIG har:
 //   - 4 design-mønstre (Topp + midt, Kryss, Topp + diagonal, Pyramide) à 25 %
 //   - INGEN `ballNumberThreshold` på noen av dem (alle aktive til runden
 //     ender)
-//   - INGEN pattern dekker alle 25 celler → ingen pattern blir flagget som
-//     `isFullHouse` av `buildPatternSpecs`
 //
 // Threshold-tester er derfor inaktuelle med dagens konfig — Game3Engine
 // håndterer fortsatt thresholds når en pattern har `ballNumberThreshold`,
 // men det testes nå dynamisk via PatternCycler-tester (apps/backend/src/
 // game/PatternCycler.test.ts).
-//
-// "Full House ends the round" er flagget som potensiell regresjon — se
-// PR-rapport / Bølge C avsnitt om "Game3Engine ender ikke runden når alle
-// 4 patterns er vunnet".
 
 describe.skip("Game3Engine — threshold deaktivering (deprecated for current 4-pattern config)", () => {
   test("Row 1 threshold-tests skipped — DEFAULT_GAME3_CONFIG has no thresholds", () => {
@@ -486,14 +480,130 @@ describe.skip("Game3Engine — threshold deaktivering (deprecated for current 4-
   });
 });
 
-describe.skip("Game3Engine — Full House ends the round (potential regression: see PR-rapport)", () => {
-  test("Full House semantikk gjelder ikke 4-pattern-config — flagget for verifisering", () => {
-    // Game3Engine.ts:228 ender kun runden når en pattern med isFullHouse=true
-    // er vunnet. Med 4-pattern-konfig (Topp+midt/Kryss/7/Pyramide) har
-    // INGEN pattern isFullHouse=true → `endedReason: "G3_FULL_HOUSE"` fyres
-    // aldri. Per game3-canonical-spec.md skal runden ende når alle 4
-    // patterns er vunnet, men engine sjekker ikke dette. Flagget for
-    // separat fix-PR.
+// 2026-05-05 (Tobias-direktiv): "Full House ends the round" — verifiserer at
+// runden ender straks alle 4 patterns er vunnet, per game3-canonical-spec.md
+// §5: «Når alle 4 mønstre er vunnet, signaliserer engine
+// `endedReason: "G3_FULL_HOUSE"`». Med dagens 4-pattern-config (Topp + midt,
+// Kryss, Topp + diagonal, Pyramide à 25 %) har INGEN pattern
+// `isFullHouse=true`, så vi kan ikke teste via en eksplisitt Full-House-
+// pattern. Vi tester istedenfor at engine ender runden via
+// `cycler.allResolved()`-grenen når alle 4 mønstre er løst.
+describe("Game3Engine — alle 4 patterns vunnet ender runden", () => {
+  test("draw 17 fyller alle 4 mønstre → game ENDED med G3_FULL_HOUSE", async () => {
+    // Standard ticket: cells (row*5 + col) inneholder
+    //   row 0: 1,16,31,46,61   row 1: 2,17,32,47,62
+    //   row 2: 3,18,33,48,63   row 3: 4,19,34,49,64
+    //   row 4: 5,20,35,50,65
+    // Union av alle 4 patterns dekker 17 celler:
+    //   Topp + midt:     [0,1,2,3,4, 7,12,17,22]
+    //   Kryss:           [0,4, 6,8, 12, 16,18, 20,24]
+    //   Topp + diagonal: [0,1,2,3,4, 8, 12, 16, 20]
+    //   Pyramide:        [12, 16,17,18, 20,21,22,23,24]
+    // Union (17 celler): {0,1,2,3,4, 6,7,8, 12, 16,17,18, 20,21,22,23,24}
+    // Mapping celle→nummer:
+    //   0=1   1=16  2=31  3=46  4=61  6=17  7=32  8=47
+    //   12=33 16=19 17=34 18=49 20=5  21=20 22=35 23=50  24=65
+    // Drawing rekkefølgen velges slik at:
+    //   - Topp + midt fullføres først (draw 9): {1,16,31,46,61, 32,33,34,35}
+    //   - Topp + diagonal etter at celle 8/16/20 også er fylt
+    //   - Kryss etter at celle 6/8/16/18/24 er fylt
+    //   - Pyramide etter at celle 21/23/24 er fylt (siste pattern → ender runden)
+    const allCoveringBag = [
+      1, 16, 31, 46, 61, // top row → cells 0..4
+      32, 33, 34, 35,    // col 2 rows 1..4 → cells 7,12,17,22 → Topp + midt complete (draw 9)
+      17,                // cell 6
+      47,                // cell 8 → Topp + diagonal complete (cells 0..4, 8, 12, 16(?), 20(?))
+      19,                // cell 16
+      49,                // cell 18 → Kryss needs 0,4,6,8,12,16,18,20,24 — still missing 20, 24
+      5,                 // cell 20 → Topp + diagonal complete (draw 14)
+      65,                // cell 24 → Kryss complete (draw 15)
+      20,                // cell 21 → Pyramide needs 12,16,17,18, 20,21,22,23,24 — still missing 23
+      50,                // cell 23 → Pyramide complete (draw 17) → all 4 won → G3_FULL_HOUSE
+    ];
+    // Fyll resten av draw-bag (1..75) for å unngå NO_MORE_NUMBERS-throw senere.
+    const rest = DRAWBAG_1_TO_75.filter((n) => !allCoveringBag.includes(n));
+    const bag = [...allCoveringBag, ...rest];
+
+    const ctx = await buildG3Engine({
+      drawBag: bag,
+      ticketsByPlayerIndex: [
+        [buildToppMidtWinningTicket()],
+        [buildLosingPatternTicket()],
+      ],
+    });
+    await ctx.engine.startGame({
+      roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
+      entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
+      variantConfig: ctx.variantConfig,
+    });
+
+    // Draw alle 17 covering-balls; runden bør ende på siste (draw 17).
+    let lastEffects: ReturnType<typeof ctx.engine.getG3LastDrawEffects>;
+    for (let i = 0; i < allCoveringBag.length; i += 1) {
+      await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
+      lastEffects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
+      // Hvis runden er ferdig før vi har trukket alle 17 (f.eks. multi-pattern
+      // som vinnes på samme trekning), bryt ut tidlig.
+      if (lastEffects?.gameEnded) break;
+    }
+    assert.ok(lastEffects, "effects expected on every draw");
+    assert.equal(lastEffects!.gameEnded, true, "round should end when all 4 patterns are won");
+    assert.equal(lastEffects!.endedReason, "G3_FULL_HOUSE");
+
+    // Game state reflekterer ENDED.
+    const snap = ctx.engine.getRoomSnapshot(ctx.roomCode);
+    assert.equal(snap.currentGame?.status, "ENDED");
+    assert.equal(snap.currentGame?.endedReason, "G3_FULL_HOUSE");
+    assert.equal(snap.currentGame?.bingoWinnerId, ctx.hostId,
+      "winner som lukket runden er host (eneste vinner-ticket)");
+
+    // Alle 4 mønstre må være registrert som claims (én per pattern).
+    const claims = snap.currentGame?.claims ?? [];
+    const winningPatternNames = new Set(
+      (lastEffects!.patternSnapshot ?? [])
+        .filter((p) => p.isWon)
+        .map((p) => p.name),
+    );
+    assert.equal(winningPatternNames.size, 4,
+      `alle 4 patterns må være vunnet; got ${winningPatternNames.size}: ${[...winningPatternNames].join(", ")}`);
+    for (const expected of ["Topp + midt", "Kryss", "Topp + diagonal", "Pyramide"]) {
+      assert.ok(winningPatternNames.has(expected), `pattern "${expected}" må være markert som vunnet`);
+    }
+    // Minst én ClaimRecord per vunnet pattern (én ticket vant alle 4).
+    assert.ok(claims.length >= 4, `forventet ≥4 claims (én per pattern); fikk ${claims.length}`);
+    assert.ok(claims.every((c) => c.autoGenerated === true), "alle claims er auto-generated");
+  });
+
+  test("kun 1 av 4 patterns vunnet → runden fortsetter (gameEnded=false)", async () => {
+    // Verifiserer at allResolved-grenen ikke fyrer for tidlig: når kun
+    // "Topp + midt" er vunnet (de andre 3 er fortsatt aktive), skal runden
+    // FORTSETTE og IKKE markeres som ENDED.
+    const ctx = await buildG3Engine({
+      drawBag: buildToppMidtBag(),
+      ticketsByPlayerIndex: [
+        [buildToppMidtWinningTicket()],
+        [buildLosingPatternTicket()],
+      ],
+    });
+    await ctx.engine.startGame({
+      roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
+      entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
+      variantConfig: ctx.variantConfig,
+    });
+    // 9 trekninger fyller "Topp + midt" — de andre 3 patterns er fortsatt
+    // ikke fullført på den vinnende ticketen.
+    for (let i = 0; i < 9; i += 1) {
+      await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
+    }
+    const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
+    assert.ok(effects);
+    assert.equal(effects!.gameEnded, false, "kun 1 av 4 patterns vunnet → runden fortsetter");
+    assert.equal(effects!.endedReason, undefined);
+    const snap = ctx.engine.getRoomSnapshot(ctx.roomCode);
+    assert.equal(snap.currentGame?.status, "RUNNING");
+    // Bekreft at presis 1 pattern er markert som vunnet.
+    const wonNames = effects!.patternSnapshot.filter((p) => p.isWon).map((p) => p.name);
+    assert.deepEqual(wonNames.sort(), ["Topp + midt"]);
   });
 });
 
