@@ -704,41 +704,56 @@ test("joinRoom rejects duplicate wallet in same room", async () => {
   );
 });
 
-test("createRoom rejects wallet already in running game", async () => {
+// Tobias UX-decision 2026-05-02 (BingoEngine.ts:3878-3925): tidligere
+// kastet `assertWalletNotInRunningGame` `PLAYER_ALREADY_IN_RUNNING_GAME`
+// hvis en spiller forsøkte å gå inn i et nytt rom mens de fortsatt var
+// registrert i et annet RUNNING-rom. Dette ga "Spiller deltar allerede i
+// et annet aktivt spill"-feilmelding ved hall-bytte mid-pilot.
+//
+// Nå evicter engine spilleren fra det gamle rommet og slipper wallet-
+// bindingen, slik at de kan binde seg umiddelbart i det nye rommet uten
+// feilmelding. Compliance-grunnen (double-spend) gjelder ikke fordi
+// ticket-kjøp debiterer wallet atomisk per transaksjon.
+test("createRoom auto-evicts wallet from running game (Tobias 2026-05-02 UX-decision)", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
 
-  await assert.rejects(
-    async () =>
-      engine.createRoom({
-        hallId: "hall-2",
-        playerName: "Guest Again",
-        walletId: "wallet-guest"
-      }),
-    (error: unknown) => error instanceof DomainError && error.code === "PLAYER_ALREADY_IN_RUNNING_GAME"
-  );
+  // Det andre createRoom-kallet skal LYKKES nå (ikke kaste).
+  const result = await engine.createRoom({
+    hallId: "hall-2",
+    playerName: "Guest Again",
+    walletId: "wallet-guest",
+  });
+  assert.ok(result.roomCode, "createRoom should succeed after auto-evict");
+  assert.ok(result.playerId, "createRoom should assign a fresh playerId");
 });
 
-test("joinRoom rejects wallet already in running game in another room", async () => {
+test("joinRoom auto-evicts wallet from running game in another room (Tobias 2026-05-02 UX-decision)", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
 
   const { roomCode: secondRoomCode } = await engine.createRoom({
     hallId: "hall-2",
     playerName: "Second Host",
-    walletId: "wallet-second-host"
+    walletId: "wallet-second-host",
   });
 
-  await assert.rejects(
-    async () =>
-      engine.joinRoom({
-        roomCode: secondRoomCode,
-        hallId: "hall-2",
-        playerName: "Guest Again",
-        walletId: "wallet-guest"
-      }),
-    (error: unknown) => error instanceof DomainError && error.code === "PLAYER_ALREADY_IN_RUNNING_GAME"
+  // joinRoom skal lykkes — auto-evict fjerner wallet-bindingen fra
+  // det gamle running-rommet før den binder i det nye rommet.
+  const joinResult = await engine.joinRoom({
+    roomCode: secondRoomCode,
+    hallId: "hall-2",
+    playerName: "Guest Again",
+    walletId: "wallet-guest",
+  });
+  assert.ok(joinResult.playerId, "joinRoom should succeed after auto-evict");
+  // Bekreft at spilleren ikke lenger finnes i det opprinnelige rommet —
+  // dvs. wallet-bindingen ble flyttet, ikke duplisert.
+  const oldRoomSnapshot = engine.getRoomSnapshot(roomCode);
+  const stillInOld = [...(oldRoomSnapshot.players ?? [])].some(
+    (p) => p.walletId === "wallet-guest",
   );
+  assert.equal(stillInOld, false, "wallet-guest should be evicted from the original room");
 });
 
 // ── Bug 2: re-join etter disconnect ─────────────────────────────────────────
