@@ -2,15 +2,25 @@
  * BIN-615 / PR-C3b: Game3Engine test suite — full coverage for pattern-driven
  * auto-claim-on-draw behaviour of the 5×5 / 1..75 no-free-centre variant.
  *
+ * 2026-05-05 (test-restoration Bølge C): patterns updated to match the
+ * 2026-05-04 Tobias-direktiv (PR #895) — `DEFAULT_GAME3_CONFIG` har 4
+ * design-mønstre à 25 % (Topp + midt, Kryss, Topp + diagonal, Pyramide)
+ * i stedet for det forrige Row 1-4 + Coverall (10 %/60 %)-oppsettet.
+ *
  * Coverage matrix:
- *   - Happy path: single winner, single pattern → ClaimRecord + payout
+ *   - Happy path: single winner ("Topp + midt"), single pattern → ClaimRecord + payout
  *   - Multi-winner-split: N winners share pattern prize via round(prize / N)
- *   - Threshold-deaktivering: pattern deactivates when drawnCount > ballThreshold
- *   - Full House ends the round even when line wins land on the same draw
  *   - Lucky bonus: lastBall === luckyNumber → payout per winner
  *   - G1/G2 regression guard: isGame3Round returns false for non-G3 rounds
  *   - Socket-effects stash atomic read-and-clear (getG3LastDrawEffects)
  *   - cyclerGameIdByRoom resets cleanly across consecutive rounds
+ *   - patternSnapshot wire shape (4 mønstre, alle 25 %, ingen Full House)
+ *
+ * Threshold-deaktivering og "Full House ends round" er dekket i tidligere
+ * Row 1-4 + Coverall-konfig; nåværende DEFAULT_GAME3_CONFIG har ingen
+ * `ballNumberThreshold` på noen pattern og ingen pattern dekker alle 25
+ * cellene → de testene er fjernet (eller flagget som test-skip) under denne
+ * restorasjonen. Se PR-rapport for detaljer / regresjoner.
  */
 
 import assert from "node:assert/strict";
@@ -169,34 +179,38 @@ class InMemoryWalletAdapter implements WalletAdapter {
 // All engineered tickets below are 5×5 with **no free-centre** so they match
 // the Game 3 generator exactly. Row numbers (1..15), (16..30), (31..45),
 // (46..60), (61..75) follow the BINGO column ranges used by the real generator.
+//
+// 2026-05-05: ticket fixtures rewritten to target the new 4-pattern config
+// (Topp + midt, Kryss, Topp + diagonal, Pyramide). The `Topp + midt` pattern
+// covers row 0 (cells 0-4) + col 2 (cells 7,12,17,22) — total 9 cells from
+// the union of the top row and the entire N-column.
 
 /**
- * Ticket where row 0 (top row) contains [1, 16, 31, 46, 61] — the BINGO column
- * minima. Drawing 1, 16, 31, 46, 61 completes horizontal row 0 → Row 1 wins.
- * Matching fills the top-left 5 cells → `ticketMask & ROW_1_MASKS[0] === ROW_1_MASKS[0]`.
- *
- * Rows 1..4 use disjoint, higher numbers so they are NOT satisfied by the
- * Row-1 draw sequence alone. Drawing numbers 1..75 in order completes every
- * row by draw 75 → Full House landed.
+ * Ticket where row 0 contains [1, 16, 31, 46, 61] (B/I/N/G/O minima) and
+ * column 2 (N) contains [31, 32, 33, 34, 35]. Drawing the 9 unique numbers
+ * `{1, 16, 31, 32, 33, 34, 35, 46, 61}` covers all "Topp + midt" cells →
+ * pattern wins. With the 4-pattern config (Topp+midt, Kryss, Topp+diagonal,
+ * Pyramide) only "Topp + midt" matches in those 9 draws (verified by hand).
  */
-function buildRow1WinningTicket(): Ticket {
+function buildToppMidtWinningTicket(): Ticket {
   return {
     grid: [
-      [ 1, 16, 31, 46, 61], // row 0 — Row 1 mask
-      [ 2, 17, 32, 47, 62],
-      [ 3, 18, 33, 48, 63],
-      [ 4, 19, 34, 49, 64],
-      [ 5, 20, 35, 50, 65],
+      [ 1, 16, 31, 46, 61], // row 0 — required by Topp + midt
+      [ 2, 17, 32, 47, 62], // col 2 = 32
+      [ 3, 18, 33, 48, 63], // col 2 = 33
+      [ 4, 19, 34, 49, 64], // col 2 = 34
+      [ 5, 20, 35, 50, 65], // col 2 = 35
     ],
   };
 }
 
 /**
- * Ticket that cannot win Row 1 on the draw sequence used for {@link buildRow1WinningTicket}
- * (all cells are outside the first-5 draws) but WILL win Full House once
- * numbers 1..75 are exhausted. Used for non-winner baseline.
+ * Ticket whose cells do NOT overlap with the 9-ball "Topp + midt" win-set
+ * `{1, 16, 31, 32, 33, 34, 35, 46, 61}` enough to satisfy any of the 4
+ * patterns at draw 9. Used as a non-winner baseline. Note: BINGO column
+ * ranges still apply (1-15, 16-30, 31-45, 46-60, 61-75).
  */
-function buildLosingRow1Ticket(): Ticket {
+function buildLosingPatternTicket(): Ticket {
   return {
     grid: [
       [ 6, 21, 36, 51, 66],
@@ -204,26 +218,6 @@ function buildLosingRow1Ticket(): Ticket {
       [ 8, 23, 38, 53, 68],
       [ 9, 24, 39, 54, 69],
       [10, 25, 40, 55, 70],
-    ],
-  };
-}
-
-/**
- * A "no-win" ticket — even after 75 draws, would match Full House because
- * all 5×5 games with 25 distinct numbers from 1..75 always contain exactly
- * those 25, so Full House ALWAYS lands eventually. For tests that assert
- * "line threshold deactivates before Full House", we draw fewer balls.
- */
-function buildNonRow1Ticket(): Ticket {
-  // Uses numbers that don't align with any full horizontal row for the given
-  // early draw sequences — cells span multiple rows of the target draws.
-  return {
-    grid: [
-      [ 1, 17, 33, 49, 65],
-      [ 2, 18, 34, 50, 66],
-      [ 3, 19, 35, 51, 67],
-      [ 4, 20, 36, 52, 68],
-      [ 5, 21, 37, 53, 69],
     ],
   };
 }
@@ -276,7 +270,7 @@ async function buildG3Engine(opts: BuildEngineOpts = {}) {
   for (const wid of walletIds) {
     await wallet.createAccount({ accountId: wid, initialBalance: 20000 });
   }
-  const defaultTicket = opts.defaultTicket ?? buildRow1WinningTicket();
+  const defaultTicket = opts.defaultTicket ?? buildToppMidtWinningTicket();
   const drawBagFactory = opts.drawBag
     ? () => [...opts.drawBag!]
     : undefined;
@@ -333,19 +327,31 @@ async function buildG3Engine(opts: BuildEngineOpts = {}) {
   };
 }
 
-// Deterministic 1..75 draw-bag for Row 1 scenarios: ball `n` at draw index `n`.
+// Deterministic 1..75 draw-bag for line scenarios: ball `n` at draw index `n`.
 const DRAWBAG_1_TO_75 = Array.from({ length: 75 }, (_, i) => i + 1);
+
+// 9-ball "Topp + midt" winning sequence — ticket cells 0..4 (top row) + 7,12,17,22
+// (col 2 from row 1..4). Last ball drawn (61) triggers the win.
+const TOPP_MIDT_BALLS = [1, 16, 31, 32, 33, 34, 35, 46, 61];
+
+/** Build a 75-ball bag that draws TOPP_MIDT_BALLS first (in that order),
+ * then fills the rest of 1..75 in ascending order. Used to make "Topp + midt"
+ * complete exactly at draw 9 with the {@link buildToppMidtWinningTicket}. */
+function buildToppMidtBag(): number[] {
+  const rest = DRAWBAG_1_TO_75.filter((n) => !TOPP_MIDT_BALLS.includes(n));
+  return [...TOPP_MIDT_BALLS, ...rest];
+}
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("Game3Engine — happy path: single winner, single pattern", () => {
-  test("draw 1..5 → only Row 1 winner fires, ClaimRecord + payout + G3 effects published", async () => {
-    // Host: Row-1 winner. Guest: losing ticket (no row-0 completion on 1..5).
+  test("Topp + midt wins at draw 9 → one winner, 25% pool paid", async () => {
+    // Bag: draws TOPP_MIDT_BALLS first → "Topp + midt" completed at draw 9.
     const ctx = await buildG3Engine({
-      drawBag: DRAWBAG_1_TO_75,
+      drawBag: buildToppMidtBag(),
       ticketsByPlayerIndex: [
-        [buildRow1WinningTicket()],
-        [buildLosingRow1Ticket()],
+        [buildToppMidtWinningTicket()],
+        [buildLosingPatternTicket()],
       ],
     });
     await ctx.engine.startGame({
@@ -353,87 +359,54 @@ describe("Game3Engine — happy path: single winner, single pattern", () => {
       entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
       variantConfig: ctx.variantConfig,
     });
-    // Draw 5 balls — 1, 16, 31, 46, 61 (balls 1-4 are not row-0-completing)
-    // but once ball 61 is drawn, ticket mask satisfies Row 1 mask 0.
-    // Wait: with 1..75 sequential bag, ball 1 first, then 2, then 3 — NOT 16.
-    // The Row 1 horizontal row 0 needs ALL of {1, 16, 31, 46, 61}.
-    // That means draw sequence must include all five before a match. Ball 61
-    // is the last needed → draw 61 fires the win.
-    //
-    // With bag [1,2,3,...,75], ball 61 is drawn on turn 61. Patterns 1-4 have
-    // thresholds 15/25/40/55 so by draw 61 ONLY Full House is still active.
-    // To properly test Row 1 winner, we need a bag that draws the 5 required
-    // numbers within the threshold-15 window.
-    //
-    // Use a custom bag: [1, 16, 31, 46, 61, 2, 3, ...] so Row 1 completes at draw 5.
-    // Re-enter with that bag.
-    //
-    // Keep-going: instead of asserting here, see the next test for the real flow.
-    assert.ok(ctx.engine.getRoomSnapshot(ctx.roomCode).currentGame?.status === "RUNNING");
-  });
-
-  test("Row 1 wins at draw 5 (within threshold 15) → one winner, 10% pool paid", async () => {
-    // Bag: draws 1, 16, 31, 46, 61 first → Row 1 completed at draw 5.
-    // After that, fill remaining 70 balls in any order (unused here).
-    const rest = DRAWBAG_1_TO_75.filter((n) => ![1, 16, 31, 46, 61].includes(n));
-    const bag = [1, 16, 31, 46, 61, ...rest];
-    const ctx = await buildG3Engine({
-      drawBag: bag,
-      ticketsByPlayerIndex: [
-        [buildRow1WinningTicket()],
-        [buildLosingRow1Ticket()],
-      ],
-    });
-    await ctx.engine.startGame({
-      roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
-      entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
-      variantConfig: ctx.variantConfig,
-    });
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
-    assert.ok(effects, "effects expected on Row 1 win");
-    assert.equal(effects!.drawIndex, 5);
+    assert.ok(effects, "effects expected on Topp + midt win");
+    assert.equal(effects!.drawIndex, 9);
     assert.equal(effects!.lastBall, 61);
-    assert.equal(effects!.winners.length, 1, "exactly one Row-1 winner");
+    assert.equal(effects!.winners.length, 1, "exactly one Topp + midt winner");
     const w = effects!.winners[0];
-    assert.equal(w.patternName, "Row 1");
+    assert.equal(w.patternName, "Topp + midt");
     assert.equal(w.isFullHouse, false);
-    // Row 1 = 10% of 200 pool = 20 kr; single winner → full 20 kr.
-    assert.equal(w.pricePerWinner, 20, `Row 1 prize should be 20 kr; got ${w.pricePerWinner}`);
+    // Topp + midt = 25% of 200 pool = 50 kr; single winner → full 50 kr.
+    assert.equal(w.pricePerWinner, 50, `Topp + midt prize should be 50 kr; got ${w.pricePerWinner}`);
     assert.equal(w.ticketWinners.length, 1);
     assert.equal(w.ticketWinners[0].playerId, ctx.hostId);
-    assert.equal(w.ticketWinners[0].payoutAmount, 20);
+    assert.equal(w.ticketWinners[0].payoutAmount, 50);
     assert.equal(w.ticketWinners[0].luckyBonus, 0);
-    // Game NOT ended (Full House not yet won).
+    // Game NOT ended (no Full-House pattern in current G3 config).
     assert.equal(effects!.gameEnded, false);
-    // Claim recorded, type LINE, autoGenerated.
+    // Claim recorded. Note: Game3Engine.ts:427 setter `type: pattern.isFullHouse
+    // ? "BINGO" : "LINE"`. Med dagens 4-pattern-konfig har INGEN av mønstrene
+    // `isFullHouse=true` (de er definert med `claimType: "BINGO"` i config,
+    // men `buildPatternSpecs` overstyrer kun navn-basert "Full House"/"Coverall"
+    // eller `coversAll`-detektoren — ingen av disse trigger). Derfor blir
+    // claim-typen LINE for alle 4 mønstre. Se §6 i PR-rapporten.
     const snap = ctx.engine.getRoomSnapshot(ctx.roomCode);
     const claims = snap.currentGame?.claims ?? [];
     assert.equal(claims.length, 1);
     assert.equal(claims[0].type, "LINE");
     assert.equal(claims[0].autoGenerated, true);
-    assert.equal(claims[0].payoutAmount, 20);
-    // Wallet credited: paid 100 entry, received 20 prize.
+    assert.equal(claims[0].payoutAmount, 50);
+    // Wallet credited: paid 100 entry, received 50 prize.
     const hostBal = (await ctx.wallet.getAccount(ctx.walletIds[0])).balance;
-    assert.equal(hostBal, 20000 - 100 + 20);
+    assert.equal(hostBal, 20000 - 100 + 50);
   });
 });
 
 describe("Game3Engine — multi-winner split", () => {
-  test("3 winners share Row 1 prize round(prize/3) each", async () => {
-    // 3 players, all with Row 1 winning tickets. Row 1 prize = 10% × (3×100) = 30.
-    // Split: round(30/3) = 10 each.
-    const rest = DRAWBAG_1_TO_75.filter((n) => ![1, 16, 31, 46, 61].includes(n));
-    const bag = [1, 16, 31, 46, 61, ...rest];
+  test("3 winners share Topp + midt prize round(prize/3) each", async () => {
+    // 3 players, all with Topp + midt winning tickets. Pool = 3×100 = 300.
+    // Prize = 25% × 300 = 75 kr; split round(75/3) = 25 each.
     const ctx = await buildG3Engine({
-      drawBag: bag,
+      drawBag: buildToppMidtBag(),
       playerCount: 3,
       ticketsByPlayerIndex: [
-        [buildRow1WinningTicket()],
-        [buildRow1WinningTicket()],
-        [buildRow1WinningTicket()],
+        [buildToppMidtWinningTicket()],
+        [buildToppMidtWinningTicket()],
+        [buildToppMidtWinningTicket()],
       ],
     });
     await ctx.engine.startGame({
@@ -441,19 +414,19 @@ describe("Game3Engine — multi-winner split", () => {
       entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
       variantConfig: ctx.variantConfig,
     });
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
     assert.ok(effects, "effects expected");
     assert.equal(effects!.winners.length, 1, "single pattern matched by 3 tickets");
     const w = effects!.winners[0];
-    assert.equal(w.patternName, "Row 1");
+    assert.equal(w.patternName, "Topp + midt");
     assert.equal(w.ticketWinners.length, 3, "three (ticket,pattern) winners");
-    // prize = 10% of 300 = 30 kr; round(30/3) = 10 per winner.
-    assert.equal(w.pricePerWinner, 10, `expected round(30/3)=10; got ${w.pricePerWinner}`);
+    // prize = 25% of 300 = 75 kr; round(75/3) = 25 per winner.
+    assert.equal(w.pricePerWinner, 25, `expected round(75/3)=25; got ${w.pricePerWinner}`);
     for (const tw of w.ticketWinners) {
-      assert.equal(tw.payoutAmount, 10);
+      assert.equal(tw.payoutAmount, 25);
     }
     // Three ClaimRecords recorded.
     const snap = ctx.engine.getRoomSnapshot(ctx.roomCode);
@@ -462,227 +435,85 @@ describe("Game3Engine — multi-winner split", () => {
     assert.ok(claims.every((c) => c.autoGenerated === true));
   });
 
-  test("round() rounding: 5 winners share 20 kr → round(4)=4 each (no overspend)", async () => {
-    // 5 players, Row 1 prize = 10% × (5×40) = 20 kr; split round(20/5) = 4 each.
-    const rest = DRAWBAG_1_TO_75.filter((n) => ![1, 16, 31, 46, 61].includes(n));
-    const bag = [1, 16, 31, 46, 61, ...rest];
+  test("round() rounding: 5 winners share 50 kr → round(10)=10 each (no overspend)", async () => {
+    // 5 players × 40 entry → pool = 200. Prize = 25% × 200 = 50 kr.
+    // Split round(50/5) = 10 each. Total distributed = 5×10 = 50 ≤ 50 (exact).
     const ctx = await buildG3Engine({
-      drawBag: bag,
+      drawBag: buildToppMidtBag(),
       playerCount: 5,
       entryFee: 40,
-      ticketsByPlayerIndex: Array.from({ length: 5 }, () => [buildRow1WinningTicket()]),
+      ticketsByPlayerIndex: Array.from({ length: 5 }, () => [buildToppMidtWinningTicket()]),
     });
     await ctx.engine.startGame({
       roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
       entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
       variantConfig: ctx.variantConfig,
     });
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
     assert.ok(effects);
     const w = effects!.winners[0];
-    assert.equal(w.pricePerWinner, 4, `round(20/5)=4; got ${w.pricePerWinner}`);
+    assert.equal(w.pricePerWinner, 10, `round(50/5)=10; got ${w.pricePerWinner}`);
     // Total distributed ≤ original prize (no phantom money).
     const total = w.ticketWinners.reduce((s, tw) => s + tw.payoutAmount, 0);
-    assert.ok(total <= 20, `total paid (${total}) must not exceed pattern prize (20)`);
+    assert.ok(total <= 50, `total paid (${total}) must not exceed pattern prize (50)`);
   });
 });
 
-describe("Game3Engine — threshold deaktivering", () => {
-  test("Row 1 not winnable after draw 16 (threshold 15 exceeded)", async () => {
-    // Design a ticket where NO row/column of the 5×5 grid completes within
-    // the first 15 draws of bag [1..75]. Every Row 1 mask requires 5 cells
-    // from the drawn-set; by spreading each row/column over the range 11..60
-    // (all above 15 for at least one cell) we guarantee no line completes in
-    // the first 15 draws.
-    //
-    // Grid layout (row-major): cells chosen so that every horizontal row and
-    // every vertical column contains at least one number ≥ 16, so Row 1 (the
-    // "any single line" pattern, horizontal OR vertical) cannot complete
-    // before ball 16 drops. After threshold (drawnCount > 15), Row 1 gets
-    // deactivated permanently even if a line completes later.
-    // Both tickets: col 0 uses values 12..16 (completes at draw 16, NOT before).
-    // No horizontal row completes early because each contains a cell ≥ 16.
-    // Col 1..4 use values 16..20 (completes at 20), 31..35, 46..50, 61..65 —
-    // all > 15 so can't complete within threshold.
-    const noEarlyLineTicketA: Ticket = {
-      grid: [
-        [12, 16, 31, 46, 61],
-        [13, 17, 32, 47, 62],
-        [14, 18, 33, 48, 63],
-        [15, 19, 34, 49, 64],
-        [16, 20, 35, 50, 65],
-      ],
-    };
-    const noEarlyLineTicketB: Ticket = {
-      grid: [
-        [12, 16, 31, 46, 61],
-        [13, 17, 32, 47, 62],
-        [14, 18, 33, 48, 63],
-        [15, 19, 34, 49, 64],
-        [16, 20, 35, 50, 65],
-      ],
-    };
-    const ctx = await buildG3Engine({
-      drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [
-        [noEarlyLineTicketA],
-        [noEarlyLineTicketB],
-      ],
-    });
-    await ctx.engine.startGame({
-      roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
-      entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
-      variantConfig: ctx.variantConfig,
-    });
-    // Draw balls 1..16. After draw 16 (ball 16), cycler.step(16) sees
-    // drawnCount 16 > threshold 15 → Row 1 deactivates this step. And the
-    // ticket col-0 mask is only satisfied once ball 16 is drawn (values 12..16).
-    // So Row 1 deactivates BEFORE a winner can be found on the same step,
-    // because the cycler filters activePatterns before processG3Winners runs.
-    let lastEffects;
-    for (let i = 0; i < 16; i += 1) {
-      await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
-      lastEffects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
-    }
-    assert.ok(lastEffects, "effects expected");
-    const row1Snap = lastEffects!.patternSnapshot.find((p) => p.name === "Row 1");
-    assert.ok(row1Snap, "Row 1 must appear in snapshot");
-    assert.equal(row1Snap!.isWon, true, "Row 1 should be closed (isPatternWin=true) after threshold exceeded");
-    // No Row 1 claim recorded on draw 16 (pattern already deactivated).
-    const snap = ctx.engine.getRoomSnapshot(ctx.roomCode);
-    const lineClaimsForRow1 = (snap.currentGame?.claims ?? [])
-      .filter((c) => c.type === "LINE");
-    assert.equal(lineClaimsForRow1.length, 0, "no LINE claim should exist — Row 1 deactivated before win was possible");
-  });
+// 2026-05-05 (test-restoration): "Game3Engine — threshold deaktivering" og
+// "Full House ends the round" var begge testet mot Row 1-4 + Coverall-konfigen
+// fra før PR #895. Den nåværende DEFAULT_GAME3_CONFIG har:
+//   - 4 design-mønstre (Topp + midt, Kryss, Topp + diagonal, Pyramide) à 25 %
+//   - INGEN `ballNumberThreshold` på noen av dem (alle aktive til runden
+//     ender)
+//   - INGEN pattern dekker alle 25 celler → ingen pattern blir flagget som
+//     `isFullHouse` av `buildPatternSpecs`
+//
+// Threshold-tester er derfor inaktuelle med dagens konfig — Game3Engine
+// håndterer fortsatt thresholds når en pattern har `ballNumberThreshold`,
+// men det testes nå dynamisk via PatternCycler-tester (apps/backend/src/
+// game/PatternCycler.test.ts).
+//
+// "Full House ends the round" er flagget som potensiell regresjon — se
+// PR-rapport / Bølge C avsnitt om "Game3Engine ender ikke runden når alle
+// 4 patterns er vunnet".
 
-  test("Full House has no threshold → always active even after 74 draws", async () => {
-    // Draw 74 balls; Full House still in active set, not deactivated.
-    const ctx = await buildG3Engine({
-      drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [
-        [buildNonRow1Ticket()],
-        [buildLosingRow1Ticket()],
-      ],
-    });
-    await ctx.engine.startGame({
-      roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
-      entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
-      variantConfig: ctx.variantConfig,
-    });
-    let lastEffects;
-    for (let i = 0; i < 74; i += 1) {
-      await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
-      lastEffects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
-      if (lastEffects?.gameEnded) break;
-    }
-    // Full House may or may not have won already depending on the deterministic
-    // bag (it's likely to win at some earlier draw when 25 cells are covered).
-    // If it did, gameEnded=true. If not, snapshot shows Full House still active.
-    if (lastEffects && !lastEffects.gameEnded) {
-      const fh = lastEffects.patternSnapshot.find((p) => p.isFullHouse);
-      assert.ok(fh, "Full House in snapshot");
-      assert.equal(fh!.isWon, false, "Full House should still be active (no threshold)");
-    } else {
-      // Sanity: Full House WAS won somewhere — game status is ENDED.
-      assert.equal(ctx.engine.getRoomSnapshot(ctx.roomCode).currentGame?.status, "ENDED");
-    }
+describe.skip("Game3Engine — threshold deaktivering (deprecated for current 4-pattern config)", () => {
+  test("Row 1 threshold-tests skipped — DEFAULT_GAME3_CONFIG has no thresholds", () => {
+    // Behold-skall for å markere historisk testdekning.
   });
 });
 
-describe("Game3Engine — Full House ends the round", () => {
-  test("Full House on the same draw as line win → game ENDED with G3_FULL_HOUSE", async () => {
-    // Construct a 5-cell "ticket" that is Full House AFTER just 5 draws? Not
-    // possible for a 25-cell ticket. Instead, engineer a scenario where both
-    // Row 1 AND Full House land on the same draw by using a 5×5 where every
-    // cell happens to be in the 25 distinct draws up to that point — i.e.
-    // with bag [1,2,3,...] and ticket containing exactly {1..25}, Full House
-    // lands at draw 25 (coverage of all 25 cells).
-    //
-    // At draw 25 with bag 1..25: ticket [[1..5],[6..10],...] completes Row 1
-    // at draw 5 (already won in another test). To land both on draw 25,
-    // design a ticket whose row-0 completes ONLY on the 25th draw.
-    //
-    // Ticket row 0 = [21, 22, 23, 24, 25] — all completed exactly when ball 25
-    // drawn. Then rows 1..4 contain 1..20 so Full House also lands at draw 25.
-    const tricky: Ticket = {
-      grid: [
-        [21, 22, 23, 24, 25], // row 0 — completes at draw 25
-        [ 1,  2,  3,  4,  5],
-        [ 6,  7,  8,  9, 10],
-        [11, 12, 13, 14, 15],
-        [16, 17, 18, 19, 20],
-      ],
-    };
-    const ctx = await buildG3Engine({
-      drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [
-        [tricky],
-        [buildLosingRow1Ticket()],
-      ],
-    });
-    await ctx.engine.startGame({
-      roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
-      entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
-      variantConfig: ctx.variantConfig,
-    });
-    // Draw 25 — Row 1, Row 2, Row 3, Row 4 all close before the first win?
-    // Row 2 threshold=25, so at draw 25 it's still active (25 <= 25).
-    // Row 3 threshold=40 — still active. Row 4 threshold=55 — still active.
-    // Row 1 threshold=15 — deactivated by draw 16.
-    // Coverall (Full House) no threshold — active.
-    //
-    // Row 1 top-row completes at draw 25 too (ball 25 was last missing number).
-    // BUT Row 1 deactivated at draw 16 → Row 1 cannot claim.
-    // Row 2/3/4 involve multiple horizontal rows — let's walk through:
-    // - Row 2 = any 2 horizontal rows. At draw 25, rows 1..5 of ticket are all
-    //   complete (cells 1..25 drawn). So Row 2 matches (e.g. rows 1+2 = {1..10}).
-    // - Row 3 = any 3 rows. Also matches.
-    // - Row 4 = any 4 rows. Also matches.
-    // - Full House = all 25 cells. Matches.
-    //
-    // Engine processes activePatterns in the cycler order (Row 1 first but
-    // deactivated, then Row 2, Row 3, Row 4, Full House). Full House wins
-    // → fullHouseWon=true → game ENDED.
-    for (let i = 0; i < 25; i += 1) {
-      await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
-    }
-    const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
-    assert.ok(effects, "effects must exist on draw 25");
-    assert.equal(effects!.gameEnded, true);
-    assert.equal(effects!.endedReason, "G3_FULL_HOUSE");
-    assert.ok(
-      effects!.winners.some((w) => w.isFullHouse && w.ticketWinners.length > 0),
-      "at least one Full House winner recorded",
-    );
-    // Game state reflects the end.
-    const snap = ctx.engine.getRoomSnapshot(ctx.roomCode);
-    assert.equal(snap.currentGame?.status, "ENDED");
-    assert.equal(snap.currentGame?.endedReason, "G3_FULL_HOUSE");
-    assert.equal(snap.currentGame?.bingoWinnerId, ctx.hostId);
-    // Row 2+3+4 also paid: multiple claim records (LINE + BINGO).
-    const claims = snap.currentGame?.claims ?? [];
-    assert.ok(claims.length >= 1, "at least one claim recorded");
-    const bingoClaims = claims.filter((c) => c.type === "BINGO");
-    assert.ok(bingoClaims.length >= 1, "at least one BINGO claim for Full House");
+describe.skip("Game3Engine — Full House ends the round (potential regression: see PR-rapport)", () => {
+  test("Full House semantikk gjelder ikke 4-pattern-config — flagget for verifisering", () => {
+    // Game3Engine.ts:228 ender kun runden når en pattern med isFullHouse=true
+    // er vunnet. Med 4-pattern-konfig (Topp+midt/Kryss/7/Pyramide) har
+    // INGEN pattern isFullHouse=true → `endedReason: "G3_FULL_HOUSE"` fyres
+    // aldri. Per game3-canonical-spec.md skal runden ende når alle 4
+    // patterns er vunnet, men engine sjekker ikke dette. Flagget for
+    // separat fix-PR.
   });
 });
 
+// Lucky-number-bonus mekanikken er fortsatt i Game3Engine for parity med
+// legacy `game3.js:945-997`, selv om `game3-canonical-spec.md` (2026-05-04)
+// sier at Spill 3 ikke skal eksponere lucky number i UI. Tester verifiserer
+// at engine fortsatt utbetaler bonus når `luckyNumberPrize > 0` og spillerens
+// `setLuckyNumber` matcher `lastBall`. Bag-sekvensen er bygget slik at
+// "Topp + midt" wins på draw 9 med ball 61 = lucky.
 describe("Game3Engine — lucky-number bonus", () => {
-  test("lucky=61, lastBall=61 → bonus paid on top of Row 1 payout for host only", async () => {
-    const rest = DRAWBAG_1_TO_75.filter((n) => ![1, 16, 31, 46, 61].includes(n));
-    const bag = [1, 16, 31, 46, 61, ...rest];
+  test("lucky=61, lastBall=61 → bonus paid on top of Topp + midt payout for host only", async () => {
     const cfgWithLucky = {
       ...DEFAULT_GAME3_CONFIG,
       luckyNumberPrize: 5,
     };
     const ctx = await buildG3Engine({
-      drawBag: bag,
+      drawBag: buildToppMidtBag(),
       ticketsByPlayerIndex: [
-        [buildRow1WinningTicket()],
-        [buildRow1WinningTicket()],
+        [buildToppMidtWinningTicket()],
+        [buildToppMidtWinningTicket()],
       ],
       variantConfig: cfgWithLucky,
     });
@@ -692,21 +523,21 @@ describe("Game3Engine — lucky-number bonus", () => {
       variantConfig: cfgWithLucky,
     });
     ctx.engine.setLuckyNumber(ctx.roomCode, ctx.hostId, 61);
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
     assert.ok(effects);
-    const w = effects!.winners.find((x) => x.patternName === "Row 1")!;
-    assert.ok(w, "Row 1 winner record");
+    const w = effects!.winners.find((x) => x.patternName === "Topp + midt")!;
+    assert.ok(w, "Topp + midt winner record");
     const hostShare = w.ticketWinners.find((tw) => tw.playerId === ctx.hostId)!;
     assert.ok(hostShare, "host is a winner");
     assert.equal(hostShare.luckyBonus, 5, "host should receive lucky bonus 5");
     const guestShare = w.ticketWinners.find((tw) => tw.playerId !== ctx.hostId)!;
     assert.ok(guestShare, "guest is a winner");
     assert.equal(guestShare.luckyBonus, 0, "guest has no lucky number set");
-    // Wallet delta: host and guest both won Row 1 (same prize share), but host
-    // got +5 extra bonus → host balance > guest balance by 5 kr.
+    // Wallet delta: host and guest both won Topp + midt (same prize share),
+    // but host got +5 extra bonus → host balance > guest balance by 5 kr.
     const hostBal  = (await ctx.wallet.getAccount(ctx.walletIds[0])).balance;
     const guestBal = (await ctx.wallet.getAccount(ctx.walletIds[1])).balance;
     assert.equal(hostBal - guestBal, 5, `host-guest delta should be lucky bonus; host=${hostBal}, guest=${guestBal}`);
@@ -720,13 +551,11 @@ describe("Game3Engine — lucky-number bonus", () => {
   });
 
   test("luckyNumberPrize=0 → lucky hook never fires even when lastBall matches", async () => {
-    const rest = DRAWBAG_1_TO_75.filter((n) => ![1, 16, 31, 46, 61].includes(n));
-    const bag = [1, 16, 31, 46, 61, ...rest];
     const ctx = await buildG3Engine({
-      drawBag: bag,
+      drawBag: buildToppMidtBag(),
       ticketsByPlayerIndex: [
-        [buildRow1WinningTicket()],
-        [buildLosingRow1Ticket()],
+        [buildToppMidtWinningTicket()],
+        [buildLosingPatternTicket()],
       ],
       variantConfig: DEFAULT_GAME3_CONFIG, // no luckyNumberPrize
     });
@@ -736,7 +565,7 @@ describe("Game3Engine — lucky-number bonus", () => {
       variantConfig: DEFAULT_GAME3_CONFIG,
     });
     ctx.engine.setLuckyNumber(ctx.roomCode, ctx.hostId, 61);
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
@@ -750,7 +579,7 @@ describe("Game3Engine — G1/G2 regression guard", () => {
   test("patternEvalMode=manual-claim → onDrawCompleted is a no-op (G1 regression)", async () => {
     const ctx = await buildG3Engine({
       drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [[buildRow1WinningTicket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildToppMidtWinningTicket()], [buildLosingPatternTicket()]],
       variantConfig: { ...DEFAULT_GAME3_CONFIG, patternEvalMode: "manual-claim" },
     });
     await ctx.engine.startGame({
@@ -775,7 +604,7 @@ describe("Game3Engine — G1/G2 regression guard", () => {
     };
     const ctx = await buildG3Engine({
       drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [[buildRow1WinningTicket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildToppMidtWinningTicket()], [buildLosingPatternTicket()]],
       variantConfig: cfg,
     });
     await ctx.engine.startGame({
@@ -793,7 +622,7 @@ describe("Game3Engine — G1/G2 regression guard", () => {
   test("gameSlug not in GAME3_SLUGS → isGame3Round returns false (G1 regression)", async () => {
     const ctx = await buildG3Engine({
       drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [[buildRow1WinningTicket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildToppMidtWinningTicket()], [buildLosingPatternTicket()]],
       gameSlug: "bingo", // G1 slug — Game3Engine should not engage
     });
     await ctx.engine.startGame({
@@ -815,7 +644,7 @@ describe("Game3Engine — atomic read-and-clear of G3 effects", () => {
     const bag = [1, 16, 31, 46, 61, ...rest];
     const ctx = await buildG3Engine({
       drawBag: bag,
-      ticketsByPlayerIndex: [[buildRow1WinningTicket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildToppMidtWinningTicket()], [buildLosingPatternTicket()]],
     });
     await ctx.engine.startGame({
       roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
@@ -832,7 +661,7 @@ describe("Game3Engine — atomic read-and-clear of G3 effects", () => {
   test("no G3 effects before first draw", async () => {
     const ctx = await buildG3Engine({
       drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [[buildRow1WinningTicket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildToppMidtWinningTicket()], [buildLosingPatternTicket()]],
     });
     await ctx.engine.startGame({
       roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
@@ -845,22 +674,24 @@ describe("Game3Engine — atomic read-and-clear of G3 effects", () => {
 
 describe("Game3Engine — cyclerGameIdByRoom reset across rounds", () => {
   test("new game.id rebuilds cycler (snapshot state not leaked between rounds)", async () => {
-    // Run round 1 to deactivate Row 1 (draw 16 draws).
+    // Round 1: losing tickets — drain the bag fully so round naturally ENDS
+    // (no Full-House signal in current 4-pattern config, so we hit
+    // MAX_DRAWS_REACHED via NO_MORE_NUMBERS).
     const ctx = await buildG3Engine({
       drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [[buildLosingRow1Ticket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildLosingPatternTicket()], [buildLosingPatternTicket()]],
     });
     await ctx.engine.startGame({
       roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
       entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
       variantConfig: ctx.variantConfig,
     });
-    for (let i = 0; i < 16; i += 1) {
+    // Bare ett par draws for å få cycler bygget for round 1.
+    for (let i = 0; i < 5; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects1 = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
-    const row1AfterRound1 = effects1!.patternSnapshot.find((p) => p.name === "Row 1");
-    assert.equal(row1AfterRound1!.isWon, true, "round 1: Row 1 deactivated after threshold");
+    assert.ok(effects1, "round 1 effects must fire after 5 draws");
     const round1GameId = effects1!.gameId;
 
     // Peek at internal cycler state — the room's cycler-gameId is round 1's id.
@@ -871,8 +702,8 @@ describe("Game3Engine — cyclerGameIdByRoom reset across rounds", () => {
     assert.equal(internals.cyclerGameIdByRoom.get(ctx.roomCode), round1GameId);
 
     // End round 1 manually via the draw-bag exhaustion path — keep drawing
-    // until max-draws-per-round hits (75) or Full House lands. Either way,
-    // game status becomes ENDED.
+    // until max-draws-per-round (75) hits. With no Full House in current
+    // 4-pattern config, the round only ENDS via bag exhaustion.
     try {
       while (ctx.engine.getRoomSnapshot(ctx.roomCode).currentGame?.status === "RUNNING") {
         await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
@@ -887,42 +718,38 @@ describe("Game3Engine — cyclerGameIdByRoom reset across rounds", () => {
     }).roomLastRoundStartMs;
     lastStart.set(ctx.roomCode, Date.now() - 40_000); // 40s ago > 30s interval
 
-    // Start round 2 — fresh cycler should be built with Row 1 active again.
-    const rest = DRAWBAG_1_TO_75.filter((n) => ![1, 16, 31, 46, 61].includes(n));
-    const bag2 = [1, 16, 31, 46, 61, ...rest];
-    // Swap drawBagFactory to deliver bag2 for round 2. Because the engine was
-    // built with a closure-over-opts.drawBag, reinstall a matching factory.
+    // Start round 2 — fresh cycler should be built with Topp + midt active again.
     (ctx.engine as unknown as { drawBagFactory: (size: number) => number[] }).drawBagFactory =
-      () => [...bag2];
+      () => buildToppMidtBag();
 
     // Winning ticket for round 2.
     (ctx.engine as unknown as { bingoAdapter: BingoSystemAdapter }).bingoAdapter =
-      new QueuedTicketAdapter(buildRow1WinningTicket());
+      new QueuedTicketAdapter(buildToppMidtWinningTicket());
 
     await ctx.engine.startGame({
       roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
       entryFee: ctx.entryFee, ticketsPerPlayer: 1, payoutPercent: ctx.payoutPercent,
       variantConfig: ctx.variantConfig,
     });
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       await ctx.engine.drawNextNumber({ roomCode: ctx.roomCode, actorPlayerId: ctx.hostId });
     }
     const effects2 = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
     assert.ok(effects2, "round 2 effects must fire");
     assert.notEqual(effects2!.gameId, round1GameId, "round 2 has a new gameId");
-    // Row 1 wins in round 2 — proves cycler was rebuilt (fresh Row 1 state).
-    const row1Winner = effects2!.winners.find((w) => w.patternName === "Row 1");
-    assert.ok(row1Winner, "Row 1 winner in round 2 proves cycler reset");
+    // Topp + midt wins in round 2 — proves cycler was rebuilt (fresh state).
+    const winner = effects2!.winners.find((w) => w.patternName === "Topp + midt");
+    assert.ok(winner, "Topp + midt winner in round 2 proves cycler reset");
     // Internal cycler-gameId updated to round 2.
     assert.equal(internals.cyclerGameIdByRoom.get(ctx.roomCode), effects2!.gameId);
   });
 });
 
 describe("Game3Engine — patternSnapshot wire shape", () => {
-  test("snapshot contains patternDataList (25 cells), isWon, amount", async () => {
+  test("snapshot contains patternDataList (25 cells), isWon, amount for the 4 design patterns", async () => {
     const ctx = await buildG3Engine({
       drawBag: DRAWBAG_1_TO_75,
-      ticketsByPlayerIndex: [[buildLosingRow1Ticket()], [buildLosingRow1Ticket()]],
+      ticketsByPlayerIndex: [[buildLosingPatternTicket()], [buildLosingPatternTicket()]],
     });
     await ctx.engine.startGame({
       roomCode: ctx.roomCode, actorPlayerId: ctx.hostId,
@@ -933,16 +760,24 @@ describe("Game3Engine — patternSnapshot wire shape", () => {
     const effects = ctx.engine.getG3LastDrawEffects(ctx.roomCode);
     assert.ok(effects);
     const snap = effects!.patternSnapshot;
-    assert.ok(snap.length >= 5, "expected 5 default patterns (Row 1-4 + Full House)");
+    assert.equal(snap.length, 4, "expected 4 default patterns (Topp + midt, Kryss, Topp + diagonal, Pyramide)");
+    const expectedNames = new Set(["Topp + midt", "Kryss", "Topp + diagonal", "Pyramide"]);
+    const seenNames = new Set(snap.map((p) => p.name));
+    for (const expected of expectedNames) {
+      assert.ok(seenNames.has(expected), `expected pattern "${expected}" in snapshot`);
+    }
     for (const p of snap) {
       assert.equal(p.patternDataList.length, 25, "25-cell data list");
       assert.ok(p.patternDataList.every((v) => v === 0 || v === 1), "0/1 only");
       assert.ok(typeof p.amount === "number" && p.amount >= 0, "amount non-negative");
       assert.ok(typeof p.isWon === "boolean");
+      // Hver pattern dekker 9 av 25 celler (T/X/7/Pyramide).
+      const filled = p.patternDataList.filter((v) => v === 1).length;
+      assert.equal(filled, 9, `${p.name} should fill exactly 9 cells; got ${filled}`);
+      // Pool = 200 (2 spillere × 100). 25% × 200 = 50 kr per pattern.
+      assert.equal(p.amount, 50, `${p.name} amount; expected 50 kr (25% × 200), got ${p.amount}`);
+      // None of the 4 patterns covers Full House (all 25 cells).
+      assert.equal(p.isFullHouse, false, `${p.name} should NOT be flagged isFullHouse with 9-cell mask`);
     }
-    const fh = snap.find((p) => p.isFullHouse);
-    assert.ok(fh, "Full House in snapshot");
-    // Full House prize = 60% × 200 = 120 kr.
-    assert.equal(fh!.amount, 120, `Full House amount; expected 120, got ${fh!.amount}`);
   });
 });

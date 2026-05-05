@@ -56,10 +56,15 @@ function makeEngine(
       }
       const room = rooms.find((r) => r.code === roomCode);
       if (!room) throw new Error(`room ${roomCode} not found`);
+      // Tobias 2026-05-04 (host-fallback fix, Game2AutoDrawTickService.ts:441-460):
+      // tick-en henter `snapshot.players` for å sjekke om host fortsatt er
+      // i rommet. Dersom listen er tom hopper tick-en over uten å trigge
+      // draw, så hvert mock-rom må ha minst én spiller (hosten).
       return {
         code: room.code,
         hostPlayerId: room.hostPlayerId,
         gameSlug: room.gameSlug,
+        players: [{ id: room.hostPlayerId }],
         currentGame:
           room.gameStatus === "NONE"
             ? undefined

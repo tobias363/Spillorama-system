@@ -57,21 +57,26 @@ describe("LoadingOverlay state-machine", () => {
   });
 
   describe("setState transitions", () => {
-    const transitions: Array<[LoadingState, string]> = [
-      ["CONNECTING", "Kobler til"],
-      ["JOINING_ROOM", "Finner runden"],
-      ["LOADING_ASSETS", "Laster spill"],
-      ["SYNCING", "Henter rundedata"],
-      ["RECONNECTING", "Kobler til igjen"],
-      ["RESYNCING", "Oppdaterer spillet"],
+    // Tobias-direktiv 2026-05-03: alle loading-states viser "Laster spill"
+    // (LoadingOverlay.ts:45-54). Tidligere state-spesifikke meldinger er
+    // fjernet for å gi spilleren én enhetlig opplevelse uavhengig av
+    // underliggende socket/room/asset-fase. Tester ovenfor holder fortsatt
+    // mer-spesifikke kontrakter (DISCONNECTED → ERROR_TEXT, error fallback).
+    const recoverableStates: LoadingState[] = [
+      "CONNECTING",
+      "JOINING_ROOM",
+      "LOADING_ASSETS",
+      "SYNCING",
+      "RECONNECTING",
+      "RESYNCING",
     ];
 
-    it.each(transitions)("state %s shows overlay with message %s", (state, expectedMsg) => {
+    it.each(recoverableStates)("state %s shows overlay with unified 'Laster spill' message", (state) => {
       overlay = new LoadingOverlay(container);
       overlay.setState(state);
       expect(overlay.getState()).toBe(state);
       expect(overlay.isShowing()).toBe(true);
-      expect(container.textContent).toContain(expectedMsg);
+      expect(container.textContent).toContain("Laster spill");
       expect(overlay.isInErrorState()).toBe(false);
     });
 
@@ -83,11 +88,13 @@ describe("LoadingOverlay state-machine", () => {
       expect(overlay.isShowing()).toBe(false);
     });
 
-    it("custom message overrides the default for the state", () => {
+    it("custom message is intentionally ignored (Tobias 2026-05-03 unified copy)", () => {
+      // setState ignorerer customMessage og viser alltid "Laster spill"
+      // i ikke-error-tilstander (LoadingOverlay.ts:326-330).
       overlay = new LoadingOverlay(container);
       overlay.setState("CONNECTING", "Egendefinert melding");
-      expect(container.textContent).toContain("Egendefinert melding");
-      expect(container.textContent).not.toContain("Kobler til...");
+      expect(container.textContent).toContain("Laster spill");
+      expect(container.textContent).not.toContain("Egendefinert melding");
     });
   });
 
@@ -207,11 +214,15 @@ describe("LoadingOverlay state-machine", () => {
   });
 
   describe("legacy show()/hide() API", () => {
-    it("show(msg) displays overlay with the message", () => {
+    it("show(msg) displays overlay (msg arg ignored — unified copy per Tobias 2026-05-03)", () => {
+      // show() forwarder til setState("SYNCING", message), men setState
+      // ignorerer customMessage og viser alltid "Laster spill" i ikke-error-
+      // tilstander. Behold show()/hide() for backward-compat med eldre
+      // call-sites, men dokumenter at `message`-argumentet er no-op.
       overlay = new LoadingOverlay(container);
       overlay.show("Egendefinert");
       expect(overlay.isShowing()).toBe(true);
-      expect(container.textContent).toContain("Egendefinert");
+      expect(container.textContent).toContain("Laster spill");
     });
 
     it("hide() returns to READY", () => {

@@ -626,7 +626,10 @@ describe("MysteryGameOverlay — DOM redesign", () => {
     overlay.destroy();
   });
 
-  it("finished → 'Spill igjen'-knapp dukker opp og kaller onDismiss", () => {
+  it("finished → 'Lukk'-knapp dukker opp og kaller onDismiss", () => {
+    // Tobias 2026-04-30: knappen het tidligere "Spill igjen" men trigger
+    // bare `onDismiss` (ingen ny runde). Endret til "Lukk" for ærlighet.
+    // Se MysteryGameOverlay.ts:1287-1295.
     const overlay = new MysteryGameOverlay(800, 600);
     const onDismiss = vi.fn();
     overlay.setOnDismiss(onDismiss);
@@ -650,7 +653,7 @@ describe("MysteryGameOverlay — DOM redesign", () => {
     );
     const cta = document.querySelector<HTMLButtonElement>(".mj-cta");
     expect(cta).not.toBeNull();
-    expect(cta?.textContent).toContain("Spill igjen");
+    expect(cta?.textContent).toContain("Lukk");
     cta?.click();
     expect(onDismiss).toHaveBeenCalledTimes(1);
     overlay.destroy();
