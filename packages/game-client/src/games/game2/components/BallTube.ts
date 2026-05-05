@@ -2,6 +2,15 @@
  * Spill 2 Bong Mockup design — horisontalt glass-rør med countdown +
  * draw-counter på venstre side og en rad trukne baller til høyre.
  *
+ * 2026-05-05 (Tobias-direktiv): TUBE-PNG-ASSET ERSTATTER GRAPHICS.
+ *   Bakgrunnen er nå en `Sprite` av `tube.png` (1993×231) i stedet for
+ *   prosedural Graphics. PNG-en har innebygd gull-ramme + rødt
+ *   glass-fyll og er mockup-paritet med Tobias-leveransen. Sprite-en
+ *   strekkes til (`width`, TUBE_HEIGHT) — aspect-distortion er
+ *   akseptabelt for et glass-tube-effekt og var beslutning av Tobias.
+ *   Hvis PNG ikke kan lastes faller vi tilbake til en transparent
+ *   placeholder så testene fortsatt kan instansiere komponenten.
+ *
  * 2026-05-04 (Tobias-direktiv): SPILL 1-PARITET PÅ DESIGN OG ANIMASJON.
  *   - Bruker samme ball-PNG-er som Spill 1 (`/web/games/assets/game1/
  *     design/balls/{color}.png`) i stedet for `DesignBall`-Graphics.
@@ -13,8 +22,10 @@
  *     høyre. Animasjon her speiler Spill 1's `addBall`-flyt.
  *
  * Pixi-implementasjon:
- *   - Ytre `Graphics` tegner glass-tuben (rounded-rect med flere
- *     overlay-fyll for å simulere CSS `linear-gradient` + `inset`).
+ *   - Bakgrunnen er en `Sprite` av `tube.png`-asset, lazy-loadet via
+ *     `Assets.load()`. Mens vi venter på texture-load er det ingen
+ *     synlig bakgrunn (transparent) så ball-raden + counter er likevel
+ *     synlig.
  *   - Counter-seksjonen er en fast 230px Container med to rader:
  *     "Neste trekning" + countdown (SKJULES under RUNNING),
  *     "Trekk N/M" (alltid synlig).
@@ -35,7 +46,6 @@ import { Container, Graphics, Text, Sprite, Assets, type Texture } from "pixi.js
 import gsap from "gsap";
 
 const TUBE_HEIGHT = 85;
-const TUBE_RADIUS = 42;
 const COUNTER_WIDTH = 230;
 const BALLS_GAP = 6;
 const BALLS_PADDING_X = 18;
@@ -45,6 +55,11 @@ const MAX_VISIBLE_BALLS = 12;
  *  skalert ned til tube-høyde. Tuben er 85px så vi setter 64 for litt
  *  padding rundt og dermed plass til 12 baller jevnt fordelt. */
 const BALL_SIZE = 64;
+/** Tobias-direktiv 2026-05-05: PNG-asset (gull-rammet rødt glass-rør)
+ *  erstatter prosedural Graphics-tube. PNG er 1993×231 (aspect 8.63);
+ *  strekkes til runtime-bredde × TUBE_HEIGHT med akseptabel horisontal
+ *  distortion (gull-rim-illusjon holder seg). */
+const TUBE_PNG_URL = "/web/games/assets/game2/design/tube.png";
 
 /**
  * PNG-ball-mapping (port av Spill 1's `getBallAssetPath`). Spill 2 har
@@ -126,7 +141,9 @@ function createBall(number: number, size: number): Ball {
 }
 
 export class BallTube extends Container {
-  private bg: Graphics;
+  /** PNG-bakgrunn (Sprite av tube.png). Erstatter forrige Graphics-tegnede
+   *  rounded-rect glass-tube per Tobias-direktiv 2026-05-05. */
+  private bgSprite: Sprite | null = null;
   private divider: Graphics;
   private counter: Container;
   /** Container som holder "Neste trekning"-raden (label+verdi) — toggles
@@ -147,10 +164,13 @@ export class BallTube extends Container {
     super();
     this.tubeWidth = width;
 
-    // 1) Glass-tube bakgrunn.
-    this.bg = new Graphics();
-    this.addChild(this.bg);
-    this.drawBg();
+    // 1) Glass-tube bakgrunn — PNG-Sprite (Tobias 2026-05-05).
+    //    Lazy-loadet via `Assets.load` så Pixi-cache deler texture på
+    //    tvers av flere instanser (LobbyScreen + PlayScreen). Bruker
+    //    ikke Graphics-fallback — testene konstruerer komponenten i
+    //    miljø uten WebGL og det skal stadig fungere så lenge ingen
+    //    rendering oppstår.
+    this.loadTubeBackground();
 
     // 2) Counter-seksjon (venstre, fast 230px).
     this.counter = new Container();
@@ -235,7 +255,7 @@ export class BallTube extends Container {
   setSize(width: number): void {
     if (width === this.tubeWidth) return;
     this.tubeWidth = width;
-    this.drawBg();
+    this.applyTubeSize();
     this.drawDividers();
     this.layoutBalls(false);
   }
@@ -356,25 +376,51 @@ export class BallTube extends Container {
 
   // ── interne tegne-rutiner ───────────────────────────────────────────────
 
-  private drawBg(): void {
-    this.bg.clear();
-    // Tobias-direktiv 2026-05-04: fjernet top-highlight + sheen-stripe-
-    // overlay som overflowet ut av rounded corners. Pixi `roundRect` med
-    // radius > half-height kuttes til min(w,h)/2; den indre overlayens
-    // bunn-kant ble da en flat horisontal linje som krysset de buede
-    // hjørnene synlig som artefakter på topp-venstre + topp-høyre.
-    // Beholder kun: base-fill + border + bunn-skygge. Glass-effekten
-    // kommer naturlig fra den subtile alpha-gradering uansett.
-    this.bg.roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT, TUBE_RADIUS).fill({
-      color: 0x140508,
-      alpha: 0.55,
-    });
-    this.bg
-      .roundRect(2, TUBE_HEIGHT - 4, this.tubeWidth - 4, 4, 4)
-      .fill({ color: 0x000000, alpha: 0.30 });
-    this.bg
-      .roundRect(0, 0, this.tubeWidth, TUBE_HEIGHT, TUBE_RADIUS)
-      .stroke({ color: 0xffffff, alpha: 0.55, width: 1.5 });
+  /**
+   * Last `tube.png` lazy og plasser som Sprite-bakgrunn. Hvis texture
+   * allerede er i cachen (typisk for andre BallTube-instanser i samme
+   * sesjon) hopper vi over `Assets.load` og bruker cachen direkte.
+   *
+   * Pixi støtter ikke direkte mipmaps på Sprite-skalering — vi kaller
+   * `enableMipmaps` for å unngå aliasing når PNG-en strekkes til
+   * runtime-bredde × 85.
+   */
+  private loadTubeBackground(): void {
+    const cached = Assets.cache.get(TUBE_PNG_URL) as Texture | undefined;
+    if (cached) {
+      this.attachBgSprite(cached);
+      return;
+    }
+    void Assets.load(TUBE_PNG_URL)
+      .then((tex: Texture) => {
+        if (this.destroyed) return;
+        this.attachBgSprite(tex);
+      })
+      .catch(() => {
+        // Stille fallback — uten bakgrunn vises kun counter + ball-rad.
+        // Dette skjer i test-miljø (jsdom uten Pixi-renderer) og er ok.
+      });
+  }
+
+  private attachBgSprite(texture: Texture): void {
+    enableMipmaps(texture);
+    const sprite = new Sprite(texture);
+    this.bgSprite = sprite;
+    // PNG-bakgrunnen skal ligge bak alle andre children. Sett som
+    // første child uten å rive opp existing layout.
+    this.addChildAt(sprite, 0);
+    this.applyTubeSize();
+  }
+
+  /** Sett størrelsen på tube-PNG til (tubeWidth × TUBE_HEIGHT). Strekker
+   *  PNG-en horisontalt — gull-rammen og glass-effekten holder seg
+   *  visuelt akseptabelt for typiske runtime-bredder (1000–1700px). */
+  private applyTubeSize(): void {
+    if (!this.bgSprite) return;
+    this.bgSprite.x = 0;
+    this.bgSprite.y = 0;
+    this.bgSprite.width = this.tubeWidth;
+    this.bgSprite.height = TUBE_HEIGHT;
   }
 
   private drawDividers(): void {
@@ -382,9 +428,15 @@ export class BallTube extends Container {
     // Vertikal divider (mellom counter og baller). Horisontal divider
     // er fjernet siden vi nå viser kun ÉN rad om gangen (Trekk under
     // RUNNING, Neste trekning ellers).
+    //
+    // Tobias-direktiv 2026-05-05: PNG-bakgrunnen har innebygd faint
+    // vertikal gull-aksent ved venstre 9% av bredden. Vår overlay-
+    // divider sitter ved COUNTER_WIDTH (typisk 19% av bredden) — mellom
+    // PNG-aksenten og ball-raden. Senket alpha 0.55 → 0.35 så den
+    // harmoniserer med PNG i stedet for å kreve oppmerksomhet.
     this.divider
       .rect(COUNTER_WIDTH, 6, 1.5, TUBE_HEIGHT - 12)
-      .fill({ color: 0xffffff, alpha: 0.55 });
+      .fill({ color: 0xffffff, alpha: 0.35 });
   }
 
   private layoutBalls(animate: boolean): void {
