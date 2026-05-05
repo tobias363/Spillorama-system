@@ -92,6 +92,22 @@ export interface Game3AutoDrawTickServiceOptions {
    */
   broadcaster?: Game3DrawTickBroadcaster;
   /**
+   * 2026-05-06 (audit §5.1): callback som fyres etter at tick-en har
+   * force-endet et stuck-rom (drawnNumbers >= 75 men status fortsatt
+   * RUNNING + endedReason null). Caller kan bruke dette til å trigge
+   * `PerpetualRoundService.spawnFirstRoundIfNeeded(roomCode)` så ny runde
+   * spawnes umiddelbart i stedet for å vente på neste player-join.
+   *
+   * Speiler {@link Game2AutoDrawTickServiceOptions.onStaleRoomEnded}.
+   * MONSTERBINGO henger permanent uten denne hvis hook-en feiler på
+   * siste ball (75) — Spill 3-versjonen av samme bug Game2 fikset i
+   * PR #876.
+   *
+   * Optional + fail-soft — feil i callbacken logges men avbryter ikke
+   * tick-en for andre rom.
+   */
+  onStaleRoomEnded?: (roomCode: string) => Promise<void> | void;
+  /**
    * Tobias-direktiv 2026-05-04 (room-uniqueness invariant): valgfri callback
    * som kjøres hver N-te tick (default 10) for å validere at det fortsatt
    * kun finnes ÉTT monsterbingo-rom globalt. Brukes av
@@ -116,6 +132,13 @@ export interface Game3AutoDrawTickResult {
   skipped: number;
   errors: number;
   errorMessages?: string[];
+  /**
+   * 2026-05-06 (audit §5.1): rom som ble force-endet i denne ticken etter
+   * at de havnet i stuck-state (drawn=75, status=RUNNING, endedReason=null).
+   * Tom array når ingen rom var stuck. Speiler
+   * {@link Game2AutoDrawTickResult.staleRoomsEnded}.
+   */
+  staleRoomsEnded?: string[];
 }
 
 // ── Service ─────────────────────────────────────────────────────────────────
@@ -125,6 +148,7 @@ export class Game3AutoDrawTickService {
   private readonly drawIntervalMs: number;
   private readonly broadcaster?: Game3DrawTickBroadcaster;
   private readonly variantLookup?: VariantConfigLookup;
+  private readonly onStaleRoomEnded?: (roomCode: string) => Promise<void> | void;
   private readonly onPeriodicValidation?: () => Promise<void> | void;
   private readonly periodicValidationEvery: number;
   private tickCounter = 0;
@@ -136,6 +160,7 @@ export class Game3AutoDrawTickService {
     this.engine = options.engine;
     this.broadcaster = options.broadcaster;
     this.variantLookup = options.variantLookup;
+    this.onStaleRoomEnded = options.onStaleRoomEnded;
     this.onPeriodicValidation = options.onPeriodicValidation;
     const validateEvery = options.periodicValidationEvery;
     this.periodicValidationEvery =
@@ -171,6 +196,7 @@ export class Game3AutoDrawTickService {
     let skipped = 0;
     let errors = 0;
     const errorMessages: string[] = [];
+    const staleRoomsEnded: string[] = [];
 
     for (const summary of summaries) {
       const slug = (summary.gameSlug ?? "").toLowerCase();
@@ -214,7 +240,66 @@ export class Game3AutoDrawTickService {
         continue;
       }
       if (game.drawnNumbers.length >= GAME3_MAX_BALLS) {
+        // 2026-05-06 (audit §5.1): rom som er status=RUNNING men har
+        // trukket alle 75 baller er STUCK. Dette skjer når
+        // `Game3Engine.onDrawCompleted` ikke fikk satt status=ENDED på
+        // siste draw — typisk av to grunner:
+        //   1) Hook-feil i `onDrawCompleted` (f.eks. wallet-shortage på
+        //      sist-draw payout) ble fanget av `handleHookError` etter at
+        //      draw-bagen var tom, slik at status aldri ble mutert.
+        //   2) Process-restart etter at draw-bagen ble tømt men før
+        //      checkpoint-en ble persistert.
+        //
+        // Pre-fix (Spill 2 fikset i PR #876, men Spill 3 fikk det aldri)
+        // skippet bare slike rom — det blokkerte perpetual-loopen for
+        // alltid (PerpetualRoundService.handleGameEnded fyres kun når
+        // `endedReason` settes). Nå force-ender vi runden via engine-
+        // callback og lar `onStaleRoomEnded` trigge en ny runde.
+        //
+        // Bevarer dagens `skipped++` for konsistens med tidligere
+        // observability — men i tillegg flagges rommet i staleRoomsEnded
+        // og logges på warn så ops ser at recovery skjedde.
         skipped++;
+
+        if (typeof this.engine.forceEndStaleRound === "function") {
+          try {
+            const ended = await this.engine.forceEndStaleRound(
+              summary.code,
+              "STUCK_AT_MAX_BALLS_AUTO_RECOVERY",
+            );
+            if (ended) {
+              staleRoomsEnded.push(summary.code);
+              log.warn(
+                {
+                  roomCode: summary.code,
+                  drawnCount: game.drawnNumbers.length,
+                },
+                "[game3-auto-draw] auto-recovered stuck room (drawn=75, status=RUNNING, endedReason=null)",
+              );
+
+              if (this.onStaleRoomEnded) {
+                try {
+                  await this.onStaleRoomEnded(summary.code);
+                } catch (cbErr) {
+                  log.warn(
+                    { err: cbErr, roomCode: summary.code },
+                    "[game3-auto-draw] onStaleRoomEnded callback failed",
+                  );
+                }
+              }
+            }
+          } catch (err) {
+            errors++;
+            const msg = `${summary.code}: forceEndStaleRound failed: ${(err as Error).message ?? "unknown"}`;
+            if (errorMessages.length < 10) errorMessages.push(msg);
+            log.warn(
+              { err, roomCode: summary.code },
+              "[game3-auto-draw] forceEndStaleRound failed",
+            );
+          }
+        }
+        // Engine støtter ikke recovery (typisk i tester med fake-engine):
+        // skip stille — same som tidligere oppførsel.
         continue;
       }
 
@@ -315,7 +400,7 @@ export class Game3AutoDrawTickService {
     }
 
     log.debug(
-      { checked, drawsTriggered, skipped, errors },
+      { checked, drawsTriggered, skipped, errors, staleRoomsEnded: staleRoomsEnded.length },
       "[game3-auto-draw] tick completed"
     );
 
@@ -344,6 +429,7 @@ export class Game3AutoDrawTickService {
       skipped,
       errors,
       errorMessages: errorMessages.length > 0 ? errorMessages : undefined,
+      staleRoomsEnded: staleRoomsEnded.length > 0 ? staleRoomsEnded : undefined,
     };
   }
 }
