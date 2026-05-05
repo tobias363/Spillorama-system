@@ -1,3 +1,13 @@
+/**
+ * @deprecated for Spill 2 (rocket) per PR #923 + #926.
+ * BEHOLDES kun for Game5Controller (SpinnGo, post-pilot scope).
+ * Slett i Bølge D når Game5 enten flyttes til games/game5/-mappe
+ * eller fjernes fra registry.
+ *
+ * Se docs/architecture/CLEANUP_AUDIT_2026-05-05.md §3 (Kategori B)
+ * og §6 (Kategori E.1) for full kontekst.
+ */
+
 import { Container, Graphics, Text } from "pixi.js";
 import gsap from "gsap";
 

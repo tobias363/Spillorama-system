@@ -1,3 +1,15 @@
+/**
+ * Manuell LINE/BINGO-claim-knapp.
+ *
+ * Brukes av:
+ *   - Spill 1 PlayScreen (game1/screens/PlayScreen.ts) — synlig knapp,
+ *     men auto-claim-on-draw siden BIN-689 betyr knappen sjelden trigges
+ *   - Game5 PlayScreen (post-pilot)
+ *
+ * Status: åpent spørsmål om Spill 1 fortsatt skal vise denne. Se
+ * CLEANUP_AUDIT_2026-05-05 §3.B.6 + §8 åpent spørsmål 2.
+ */
+
 import { Container, Graphics, Text } from "pixi.js";
 import gsap from "gsap";
 
