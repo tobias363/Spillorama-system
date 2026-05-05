@@ -2036,6 +2036,12 @@ const game3AutoDrawTickService = new Game3AutoDrawTickService({
   // med Game2-tick — leser `variantConfig.ballIntervalMs` per rom.
   variantLookup: roomState,
   broadcaster: game23DrawBroadcaster,
+  // 2026-05-06 (audit §5.1): stuck-recovery for monsterbingo. Speiler
+  // PR #876-mønsteret fra Spill 2: når engine.onDrawCompleted feiler på
+  // ball 75 og `endedReason` aldri settes, vil tick-en force-ende rommet
+  // og spawne ny runde umiddelbart via PerpetualRoundService. Uten
+  // denne henger MONSTERBINGO permanent.
+  onStaleRoomEnded: onStaleRoomEndedCallback,
   onPeriodicValidation: periodicRoomUniquenessValidate,
 });
 jobScheduler.register({
@@ -2449,6 +2455,8 @@ const perpetualRoundService = new PerpetualRoundService({
 // Tobias 2026-05-04: late-bind for game2AutoDrawTickService.onStaleRoomEnded
 // (definert lenger oppe i fila, før perpetualRoundService finnes). Når tick-en
 // auto-recovers et stuck Spill 2-rom kan den nå spawne ny runde med en gang.
+// 2026-05-06 (audit §5.1): same late-bind dekker også Game3-tick-en, som nå
+// har samme onStaleRoomEnded-callback for monsterbingo-recovery.
 _perpetualRoundServiceLateBind = perpetualRoundService;
 
 // 2026-05-03: perpetual-loop-trigger på `localBingoAdapter.onGameEnded`.

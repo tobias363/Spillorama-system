@@ -334,3 +334,210 @@ test("broadcaster: ikke injected → tick kjører uten emit (legacy-fallback)", 
   assert.equal(r.drawsTriggered, 1);
   assert.equal(drawCalls.length, 1);
 });
+
+// ── 2026-05-06 (audit §5.1): stuck-room auto-recovery — paritet med PR #876 ─
+
+test("stuck-room recovery: drawn=75 + status=RUNNING + forceEndStaleRound wired → ender + callback fyrer", async () => {
+  // Replikerer prod-bug-mønsteret for monsterbingo: rom på status=RUNNING med
+  // 75 baller trukket, men endedReason=null. Med forceEndStaleRound-callback
+  // wired skal tick-en force-ende rommet OG kalle onStaleRoomEnded så
+  // perpetual-loopen kan spawne ny runde.
+  const forceEndCalls: Array<{ roomCode: string; reason: string }> = [];
+  const onStaleCalls: string[] = [];
+  const drawCalls: Array<{ roomCode: string; actorPlayerId: string }> = [];
+
+  const engine: AutoDrawEngine = {
+    listRoomSummaries: () => [
+      { code: "MB", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    ],
+    getRoomSnapshot: () => ({
+      code: "MB",
+      hostPlayerId: "host",
+      gameSlug: "monsterbingo",
+      players: [{ id: "host" }],
+      currentGame: {
+        status: "RUNNING",
+        drawnNumbers: Array.from({ length: 75 }, (_, i) => i + 1),
+      },
+    }),
+    drawNextNumber: async (input) => {
+      drawCalls.push(input);
+      return { number: 76, drawIndex: 75, gameId: "g" };
+    },
+    forceEndStaleRound: async (roomCode, reason) => {
+      forceEndCalls.push({ roomCode, reason });
+      return true;
+    },
+  };
+
+  const service = new Game3AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    onStaleRoomEnded: async (roomCode) => {
+      onStaleCalls.push(roomCode);
+    },
+  });
+  const r = await service.tick();
+
+  assert.equal(drawCalls.length, 0, "stuck rom skal IKKE trigge drawNextNumber");
+  assert.equal(forceEndCalls.length, 1);
+  assert.equal(forceEndCalls[0]!.roomCode, "MB");
+  assert.equal(forceEndCalls[0]!.reason, "STUCK_AT_MAX_BALLS_AUTO_RECOVERY");
+  assert.equal(onStaleCalls.length, 1);
+  assert.equal(onStaleCalls[0], "MB");
+  assert.equal(r.skipped, 1, "stuck rom telles fortsatt som skipped (bevart obs)");
+  assert.deepEqual(r.staleRoomsEnded, ["MB"]);
+});
+
+test("stuck-room recovery: forceEndStaleRound MANGLER på engine → faller til legacy skip-only", async () => {
+  // Backward-compat: fake-engine i eksisterende tester har ikke
+  // forceEndStaleRound. Da skal vi bare skippe (gammel oppførsel).
+  const { engine, drawCalls } = makeEngine([
+    {
+      code: "FULL",
+      hostPlayerId: "h",
+      gameSlug: "monsterbingo",
+      gameStatus: "RUNNING",
+      drawnNumbers: Array.from({ length: 75 }, (_, i) => i + 1),
+    },
+  ]);
+  const service = new Game3AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  const r = await service.tick();
+  assert.equal(r.skipped, 1);
+  assert.equal(drawCalls.length, 0);
+  assert.equal(r.staleRoomsEnded, undefined);
+});
+
+test("stuck-room recovery: forceEndStaleRound returnerer false (allerede endet) → ingen callback", async () => {
+  let forceEndCallCount = 0;
+  let onStaleCallCount = 0;
+  const engine: AutoDrawEngine = {
+    listRoomSummaries: () => [
+      { code: "MB", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    ],
+    getRoomSnapshot: () => ({
+      code: "MB",
+      hostPlayerId: "host",
+      gameSlug: "monsterbingo",
+      players: [{ id: "host" }],
+      currentGame: {
+        status: "RUNNING",
+        drawnNumbers: Array.from({ length: 75 }, (_, i) => i + 1),
+      },
+    }),
+    drawNextNumber: async () => {
+      throw new Error("should not be called");
+    },
+    forceEndStaleRound: async () => {
+      forceEndCallCount++;
+      return false; // no-op (e.g., room already had endedReason)
+    },
+  };
+  const service = new Game3AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    onStaleRoomEnded: async () => {
+      onStaleCallCount++;
+    },
+  });
+  const r = await service.tick();
+  assert.equal(forceEndCallCount, 1);
+  assert.equal(onStaleCallCount, 0, "callback skal ikke fyre når force-end returnerer false");
+  assert.equal(r.staleRoomsEnded, undefined);
+});
+
+test("stuck-room recovery: forceEndStaleRound kaster → telles som error, krasjer ikke tick", async () => {
+  const engine: AutoDrawEngine = {
+    listRoomSummaries: () => [
+      { code: "MB", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    ],
+    getRoomSnapshot: () => ({
+      code: "MB",
+      hostPlayerId: "host",
+      gameSlug: "monsterbingo",
+      players: [{ id: "host" }],
+      currentGame: {
+        status: "RUNNING",
+        drawnNumbers: Array.from({ length: 75 }, (_, i) => i + 1),
+      },
+    }),
+    drawNextNumber: async () => {
+      throw new Error("not called");
+    },
+    forceEndStaleRound: async () => {
+      throw new Error("forceEnd boom");
+    },
+  };
+  const service = new Game3AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  const r = await service.tick();
+  assert.equal(r.errors, 1);
+  assert.ok(r.errorMessages?.[0]?.includes("forceEndStaleRound failed"));
+});
+
+test("stuck-room recovery: callback-feil i onStaleRoomEnded krasjer ikke tick + telles ikke som error", async () => {
+  const engine: AutoDrawEngine = {
+    listRoomSummaries: () => [
+      { code: "MB", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    ],
+    getRoomSnapshot: () => ({
+      code: "MB",
+      hostPlayerId: "host",
+      gameSlug: "monsterbingo",
+      players: [{ id: "host" }],
+      currentGame: {
+        status: "RUNNING",
+        drawnNumbers: Array.from({ length: 75 }, (_, i) => i + 1),
+      },
+    }),
+    drawNextNumber: async () => {
+      throw new Error("not called");
+    },
+    forceEndStaleRound: async () => true,
+  };
+  const service = new Game3AutoDrawTickService({
+    engine,
+    drawIntervalMs: 0,
+    onStaleRoomEnded: async () => {
+      throw new Error("callback boom");
+    },
+  });
+  const r = await service.tick();
+  assert.equal(r.errors, 0, "callback-feil teller ikke som engine-error");
+  assert.deepEqual(r.staleRoomsEnded, ["MB"]);
+});
+
+test("stuck-room recovery: drawn=74 → IKKE recovery (under threshold), trigge normal draw", async () => {
+  // Regresjon-vakt: kun rom med drawnNumbers >= 75 skal trigge recovery.
+  // Rom på 74 har 1 ball igjen — normal draw-flyt.
+  const forceEndCalls: string[] = [];
+  const drawCalls: Array<{ roomCode: string }> = [];
+
+  const engine: AutoDrawEngine = {
+    listRoomSummaries: () => [
+      { code: "MB", gameSlug: "monsterbingo", gameStatus: "RUNNING" },
+    ],
+    getRoomSnapshot: () => ({
+      code: "MB",
+      hostPlayerId: "host",
+      gameSlug: "monsterbingo",
+      players: [{ id: "host" }],
+      currentGame: {
+        status: "RUNNING",
+        drawnNumbers: Array.from({ length: 74 }, (_, i) => i + 1),
+      },
+    }),
+    drawNextNumber: async (input) => {
+      drawCalls.push({ roomCode: input.roomCode });
+      return { number: 75, drawIndex: 74, gameId: "g" };
+    },
+    forceEndStaleRound: async (roomCode) => {
+      forceEndCalls.push(roomCode);
+      return true;
+    },
+  };
+  const service = new Game3AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  const r = await service.tick();
+  assert.equal(drawCalls.length, 1, "draw skal kjøre normalt på 74 baller");
+  assert.equal(forceEndCalls.length, 0, "forceEndStaleRound skal IKKE kalles på 74 baller");
+  assert.equal(r.staleRoomsEnded, undefined);
+});

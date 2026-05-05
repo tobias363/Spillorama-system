@@ -51,7 +51,14 @@ export interface PersistedLossEntry {
   createdAtMs: number;
 }
 
-export type PersistedPrizeGameType = "DATABINGO";
+/**
+ * Persistert spill-kategori for premiepolicy. Speiler {@link PrizeGameType}.
+ * 2026-05-06: utvidet til `"DATABINGO" | "MAIN_GAME"` så MAIN_GAME-policy-er
+ * kan persisteres for Spill 1-3 (audit §9.1). Eksisterende rader med
+ * gameType="DATABINGO" beholder semantikk; nye MAIN_GAME-rader skrives
+ * når admin oppdaterer policy med eksplisitt gameType.
+ */
+export type PersistedPrizeGameType = "DATABINGO" | "MAIN_GAME";
 
 export interface PersistedPrizePolicy {
   id: string;

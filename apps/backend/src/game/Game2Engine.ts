@@ -374,9 +374,13 @@ export class Game2Engine extends BingoEngine {
   }): Promise<number> {
     const { room, game, player, claim, requestedPayout, drawIndex, houseAccountId, gameType, channel } = args;
     const rtpBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    // 2026-05-06 (audit §9.1): bind prize-cap mot per-spill `PrizeGameType`
+    // resolved fra `room.gameSlug`. Spill 2 (rocket) er hovedspill → MAIN_GAME;
+    // pre-fix hardkodet "DATABINGO" som var regulatorisk inkonsistent med
+    // ledger-events (PR #769) som allerede skrev MAIN_GAME for Spill 2/3.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
-      gameType: "DATABINGO",
+      gameType: ledgerGameTypeForSlug(room.gameSlug),
       amount: requestedPayout,
     });
     const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
@@ -498,9 +502,12 @@ export class Game2Engine extends BingoEngine {
     channel: LedgerChannel;
   }): Promise<number> {
     const { room, game, player, claim, requestedPayout, houseAccountId, gameType, channel } = args;
+    // 2026-05-06 (audit §9.1): se kommentar i `payG2JackpotShare` —
+    // bind prize-cap mot per-spill resolver i stedet for hardkodet
+    // "DATABINGO".
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
-      gameType: "DATABINGO",
+      gameType: ledgerGameTypeForSlug(room.gameSlug),
       amount: requestedPayout,
     });
     const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);

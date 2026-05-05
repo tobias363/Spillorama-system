@@ -891,9 +891,13 @@ export class BingoEngine {
    * single-prize-cap (2500 kr per pengespillforskriften §11) på alle payout-
    * paths uten å ta direkte avhengighet til PrizePolicyManager-klassen.
    *
-   * `PrizeGameType` i policy-API-et er fortsatt kun "DATABINGO" — samme
-   * 2500-cap gjelder MAIN_GAME, så vi bruker DATABINGO som policy-key
-   * inntil egen task åpner typen.
+   * 2026-05-06 (audit §9.1): port-en bruker nå `MAIN_GAME` som lookup-key
+   * fordi alle dagens consumere er Spill 1-tjenester (PotEvaluator, lucky
+   * bonus, mini-games). Spill 1 er hovedspill per SPILLKATALOG.md.
+   * `PrizePolicyManager` registrerer både MAIN_GAME- og DATABINGO-default-
+   * policy-er med identisk cap (2500), så bytte er semantisk no-op men
+   * gjør prize-cap-bindingen regulatorisk konsistent med ledger-events
+   * for Spill 1.
    *
    * Regulatorisk: alle Spill 1 payout-paths SKAL kalle dette før
    * walletAdapter.credit. Differansen (cappedAmount - amount) audit-
@@ -909,10 +913,10 @@ export class BingoEngine {
       } {
         const result = prizePolicy.applySinglePrizeCap({
           hallId: input.hallId,
-          // PrizeGameType-svartelist (kun DATABINGO i dag) løses i egen
-          // task — capen er identisk uansett gameType, så vi bruker
-          // DATABINGO som lookup-key.
-          gameType: "DATABINGO",
+          // 2026-05-06 (audit §9.1): port-en brukes per i dag kun av
+          // Spill 1-tjenester (PotEvaluator, MiniGameOddsen, lucky bonus,
+          // Game1MiniGameOrchestrator). Spill 1 = hovedspill → MAIN_GAME.
+          gameType: "MAIN_GAME",
           amount: input.amount,
           atMs: input.atMs,
         });
@@ -1982,6 +1986,10 @@ export class BingoEngine {
         playerId: player.id,
       }),
       phase: "PHASE",
+      // 2026-05-06 (audit §9.1): bind prize-cap mot per-spill PrizeGameType
+      // (Spill 1-3 → MAIN_GAME, SpinnGo → DATABINGO). `gameType` ovenfor er
+      // allerede resolved fra `room.gameSlug` via `ledgerGameTypeForSlug`.
+      prizeGameType: gameType,
     });
     const {
       payout,

@@ -40,7 +40,7 @@ import type {
   WalletTransferResult,
 } from "../adapters/WalletAdapter.js";
 import { PrizePolicyManager } from "./PrizePolicyManager.js";
-import type { PrizePolicyVersion } from "./PrizePolicyManager.js";
+import type { PrizeGameType, PrizePolicyVersion } from "./PrizePolicyManager.js";
 
 const logger = rootLogger.child({ module: "phase-payout-service" });
 
@@ -106,6 +106,17 @@ export interface PhasePayoutInput {
   idempotencyKey: string;
   /** Phase identifier (logging + result wiring). */
   phase: "LINE" | "BINGO" | "PHASE";
+  /**
+   * 2026-05-06 (audit §9.1): valgfri prize-policy-scope-key. Når caller har
+   * resolved per-spill `LedgerGameType` fra `room.gameSlug` (via
+   * `ledgerGameTypeForSlug`) kan den passes inn her så prize-cap binder
+   * mot riktig policy-bucket. Default `"DATABINGO"` for bakoverkompatibilitet
+   * — caps er per i dag identiske (2500 kr) og policy-default for begge
+   * registreres i `PrizePolicyManager` constructor.
+   *
+   * Spill 1-3 → "MAIN_GAME"; SpinnGo → "DATABINGO".
+   */
+  prizeGameType?: PrizeGameType;
 }
 
 /**
@@ -214,13 +225,15 @@ export class PhasePayoutService {
 
     // ── 1) Single-prize-cap (§11 regulatorisk 2500 kr) ─────────────────
     //
-    // K2-A CRIT-1 note: PrizePolicyManager.PrizeGameType is currently
-    // `DATABINGO`-only. Same 2500-cap applies to MAIN_GAME until policy-
-    // service is updated. Callers pass game-type for ledger writes
-    // separately (out of scope here).
+    // 2026-05-06 (audit §9.1): bind prize-cap mot per-spill PrizeGameType
+    // når caller har resolved den. Default forblir DATABINGO for
+    // bakoverkompatibilitet — caps er identiske (2500 kr) og policy-
+    // default for begge registreres i PrizePolicyManager. Spill 1-3
+    // (caller passer `prizeGameType: "MAIN_GAME"`) skiller seg nå
+    // korrekt fra SpinnGo (DATABINGO) på cap-bindingen.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: input.hallId,
-      gameType: "DATABINGO",
+      gameType: input.prizeGameType ?? "DATABINGO",
       amount: input.prizePerWinner,
     });
 
