@@ -543,6 +543,12 @@ async function mountSpill2PlayScreen(): Promise<{
     audio,
   );
   pixi.stage.addChild(screen);
+  // Tobias-direktiv 2026-05-05: mount HTML "Jackpot"/"Gain"-labels over
+  // jackpot-ballene. Ekvivalent til Game2Controller.handlePhaseChange
+  // sin `attachJackpotLabels`-kall — uten dette ville visual-harness
+  // snapshot-ene mangle labels og snapshot-paritet med produksjon ville
+  // brukke.
+  screen.attachJackpotLabels(pixi.canvas as HTMLCanvasElement);
   Object.assign(window as unknown as Record<string, unknown>, {
     __harnessSpill2: screen,
   });

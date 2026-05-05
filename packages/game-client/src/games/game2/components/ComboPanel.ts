@@ -48,6 +48,7 @@
 import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
 import { JackpotsRow, type JackpotSlotData } from "./JackpotsRow.js";
 import { PlayerCard, PLAYER_COL_WIDTH } from "./PlayerCard.js";
+import type { HtmlOverlayManager } from "../../game1/components/HtmlOverlayManager.js";
 
 // Mockup-paritet (Bong Mockup.html 2026-05-04): combo-col padding
 // 16px 18px, dividers 1px solid #c98a3a, panel border 1px solid #c98a3a,
@@ -326,6 +327,21 @@ export class ComboPanel extends Container {
   /** Markér aktiv jackpot-slot. */
   setCurrentDrawCount(n: number): void {
     this.jackpots.setCurrentDrawCount(n);
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-05: mount HTML "Jackpot"/"Gain"-labels over
+   * jackpot-ballene. Pass-through til JackpotsRow. Kalles av PlayScreen/
+   * LobbyScreen etter at panel er lagt til Pixi-stage.
+   */
+  attachJackpotLabels(canvas: HTMLCanvasElement, overlayManager: HtmlOverlayManager): void {
+    this.jackpots.attachLabels(canvas, overlayManager);
+  }
+
+  /** Pass-through detach (typisk kalt automatisk via destroy-cascade,
+   *  men eksponert for ekspl. unmount-flyt). */
+  detachJackpotLabels(): void {
+    this.jackpots.detachLabels();
   }
 
   /** v2-only: sett antall spillere på PlayerCard (vises 2-sifret). */

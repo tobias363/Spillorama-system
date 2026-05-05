@@ -286,6 +286,11 @@ class Game2Controller implements GameController {
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
+        // Tobias-direktiv 2026-05-05: mount HTML "Jackpot"/"Gain"-labels
+        // over jackpot-ballene ETTER `setScreen` så `getGlobalPosition`
+        // returnerer korrekte stage-koordinater. JackpotsRow-children er
+        // i panel-layout men trenger global-pos for DOM-koord-beregning.
+        this.playScreen.attachJackpotLabels(this.deps.app.app.canvas);
         break;
     }
   }

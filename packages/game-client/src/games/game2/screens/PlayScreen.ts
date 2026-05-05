@@ -301,6 +301,20 @@ export class PlayScreen extends Container {
   }
 
   /**
+   * Tobias-direktiv 2026-05-05: mount "Jackpot"/"Gain"-labels over
+   * jackpot-ballene som HTML-overlay (CSS-stylet). Kalles av
+   * Game2Controller etter at PlayScreen er lagt til Pixi-stage så
+   * `getGlobalPosition` returnerer korrekte koordinater. Pass-through
+   * via ComboPanel → JackpotsRow.
+   *
+   * Visual-harness kan også kalle dette etter `mountSpill2PlayScreen`
+   * for å verifisere label-rendering uten full controller-stack.
+   */
+  attachJackpotLabels(canvas: HTMLCanvasElement): void {
+    this.comboPanel.attachJackpotLabels(canvas, this.overlayManager);
+  }
+
+  /**
    * Vis mellom-runde buy-popup. Idempotent — gjør ingenting hvis allerede
    * synlig. Brukes av Game2Controller når countdown < 30 s og spilleren
    * ikke allerede har armed for neste runde.
