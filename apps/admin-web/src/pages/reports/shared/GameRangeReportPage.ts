@@ -8,8 +8,7 @@
 //
 // Backend (`apps/backend/src/util/httpHelpers.ts:parseOptionalLedgerGameType`)
 // godtar kun "MAIN_GAME" eller "DATABINGO" som game-type-parameter.
-// Spill 4 / themebingo (legacy game4) er DEPRECATED (BIN-496) og har ingen
-// rapport-rute. Se docs/architecture/SPILLKATALOG.md for full mapping.
+// Se docs/architecture/SPILLKATALOG.md for full mapping.
 //
 // Layout mirrors legacy report/gameNreports.html: date-range filter bar +
 // DataTable with hall/rounds/players/stakes/prizes/net columns + CSV export.

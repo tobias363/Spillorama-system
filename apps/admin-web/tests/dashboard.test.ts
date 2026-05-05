@@ -18,18 +18,24 @@ describe("DashboardState — classifyRoom", () => {
     expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "bingo-90" } } as never)).toBe("game2");
   });
 
-  it("maps wheel/chest to game4/game5", () => {
-    expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "wheel-of-fortune" } } as never)).toBe("game4");
-    expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "treasure-chest" } } as never)).toBe("game5");
+  it("maps mini-games (wheel/chest) to game1 — Spill 1 sub-games, ikke standalone spill", () => {
+    // game4/themebingo deprecated BIN-496; wheel-of-fortune og treasure-chest
+    // er mini-games inne i Spill 1, ikke selvstendige spill.
+    expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "wheel-of-fortune" } } as never)).toBe("game1");
+    expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "treasure-chest" } } as never)).toBe("game1");
+  });
+
+  it("maps spillorama to game5", () => {
+    expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "spillorama" } } as never)).toBe("game5");
   });
 
   it("defaults unknown slug to game1", () => {
     expect(classifyRoom({ code: "R", hallId: "h", currentGame: { id: "g", status: "RUNNING", gameSlug: "unknown" } } as never)).toBe("game1");
   });
 
-  it("emptyOngoingGames returns all 5 tabs with empty arrays", () => {
+  it("emptyOngoingGames returns 4 tabs with empty arrays (game4/themebingo deprecated)", () => {
     const e = emptyOngoingGames();
-    expect(Object.keys(e)).toEqual(["game1", "game2", "game3", "game4", "game5"]);
+    expect(Object.keys(e)).toEqual(["game1", "game2", "game3", "game5"]);
     for (const tab of Object.values(e)) expect(tab).toEqual([]);
   });
 });
@@ -59,7 +65,7 @@ describe("DashboardState — fetchDashboardData", () => {
       }
       if (u.includes("/api/admin/rooms")) return okJson([
         { code: "R1", hallId: "h1", hallName: "Hall 1", currentGame: { id: "g1", status: "RUNNING", gameSlug: "bingo" } },
-        { code: "R2", hallId: "h2", hallName: "Hall 2", currentGame: { id: "g2", status: "RUNNING", gameSlug: "wheel-of-fortune" } },
+        { code: "R2", hallId: "h2", hallName: "Hall 2", currentGame: { id: "g2", status: "RUNNING", gameSlug: "spillorama" } },
       ]);
       return notImpl();
     }) as unknown as typeof fetch;
@@ -72,7 +78,7 @@ describe("DashboardState — fetchDashboardData", () => {
     expect(data.latestRequests).toHaveLength(1);
     expect(data.topPlayers).toBeNull();
     expect(data.ongoingGames.game1).toHaveLength(1);
-    expect(data.ongoingGames.game4).toHaveLength(1);
+    expect(data.ongoingGames.game5).toHaveLength(1);
     expect(data.ongoingGames.game2).toHaveLength(0);
   });
 });
@@ -165,10 +171,10 @@ describe("TopPlayersBox", () => {
 describe("OngoingGamesTabs", () => {
   beforeEach(() => initI18n());
 
-  it("renders 5 tab headers with Game2 active by default", () => {
+  it("renders 4 tab headers with Game2 active by default (game4 deprecated BIN-496)", () => {
     const el = renderOngoingGamesTabs({ games: emptyOngoingGames() });
     const tabs = el.querySelectorAll(".nav-tabs > li");
-    expect(tabs).toHaveLength(5);
+    expect(tabs).toHaveLength(4);
     expect(tabs[1]?.classList.contains("active")).toBe(true);
   });
 

@@ -1,5 +1,6 @@
-// Ongoing games tabs (Game 1-5) — legacy dashboard.html:600-830 (box-info).
-// Bootstrap 3 nav-tabs; Game 2 is active by default (matches legacy).
+// Ongoing games tabs (Game 1-3 + Game 5) — legacy dashboard.html:600-830
+// (box-info). Bootstrap 3 nav-tabs; Game 2 is active by default (matches
+// legacy). Game 4 / themebingo deprecated BIN-496.
 
 import { t } from "../../../i18n/I18n.js";
 import { GAME_TABS, type GameTab } from "../DashboardState.js";
@@ -32,15 +33,6 @@ const COLUMNS: Record<GameTab, Array<{ key: string; titleKey: string; render?: (
     { key: "id", titleKey: "main_game_id", render: (r) => shortId(r.currentGame?.id) },
     { key: "name", titleKey: "game_name", render: (r) => r.currentGame?.gameSlug ?? "—" },
     { key: "dates", titleKey: "start_date_end_date", render: (r) => formatStartEnd(r) },
-    { key: "hall", titleKey: "group_of_halls", render: (r) => r.hallName ?? r.hallId },
-    { key: "status", titleKey: "status", render: (r) => r.currentGame?.status ?? "—" },
-  ],
-  game4: [
-    { key: "id", titleKey: "main_game_id", render: (r) => shortId(r.currentGame?.id) },
-    { key: "name", titleKey: "game_name", render: (r) => r.currentGame?.gameSlug ?? "—" },
-    { key: "start", titleKey: "start_date", render: (r) => formatDate(r.currentGame?.startedAt) },
-    { key: "end", titleKey: "end_date", render: (r) => formatDate(r.currentGame?.endsAt) },
-    { key: "ticketPrice", titleKey: "prize_of_lucky_number", render: (r) => formatNumber(r.currentGame?.ticketPrice) },
     { key: "hall", titleKey: "group_of_halls", render: (r) => r.hallName ?? r.hallId },
     { key: "status", titleKey: "status", render: (r) => r.currentGame?.status ?? "—" },
   ],

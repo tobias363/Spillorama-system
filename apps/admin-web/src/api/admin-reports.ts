@@ -323,10 +323,11 @@ export async function getGame1ManagementReport(
 }
 
 // ── 12. /api/admin/reports/hall-specific — Hall Specific Report (17.36) ────
-// BIN-17.36: per-hall aggregate med Elvis Replacement + Game 1-5 kolonner.
+// BIN-17.36: per-hall aggregate med Elvis Replacement + Game 1-3 + Game 5
+// kolonner (game4/themebingo deprecated BIN-496).
 // PM-låst (Appendix B): Elvis Replacement-kolonne må beholdes.
 
-export type HallSpecificGame = "game1" | "game2" | "game3" | "game4" | "game5";
+export type HallSpecificGame = "game1" | "game2" | "game3" | "game5";
 
 export interface HallSpecificGameAggregate {
   oms: number;
