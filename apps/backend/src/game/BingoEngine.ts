@@ -4164,7 +4164,36 @@ export class BingoEngine {
     return room.currentGame;
   }
 
+  /**
+   * Tobias-pilot-fix 2026-05-05: Spill 2 (`rocket`) og Spill 3
+   * (`monsterbingo`) har ETT globalt rom uten master/host-konsept (per
+   * `game2-canonical-spec` og `game3-canonical-spec`: «Ingen master/start/
+   * stop, ETT globalt rom»). Host-rollen i RoomState er en teknisk arv
+   * fra Spill 1's master-flow og settes kun ved `RoomLifecycleService.
+   * createRoom` — den reassignes ALDRI når original-host disconnecter.
+   *
+   * Hvis original-host fane-refresher / mister Wi-Fi / lukker fanen, blir
+   * `room.hostPlayerId` stale. Auto-draw-tick (Game2/3AutoDrawTickService)
+   * detekterer dette og faller tilbake til `players[0]` som actor — men
+   * engine sin `assertHost` kastet uansett `NOT_HOST` fordi `actorPlayerId
+   * !== room.hostPlayerId`. Resultat: ROCKET sto stuck på prod 2026-05-05
+   * (`drawnCount=19, prizePool=0, errors=1`) til manuelt force-end.
+   *
+   * Fix: skip `assertHost` for perpetual-spill (Spill 2/3). Sikkerheten
+   * ivaretas av at draw-pipeline likevel kaller `requirePlayer(room,
+   * actorPlayerId)` umiddelbart etterpå — ondsinnet/buggy actorId som
+   * ikke er i rommet feiler fortsatt med PLAYER_NOT_FOUND.
+   *
+   * Spill 1 (`bingo`-slug) er IKKE påvirket — master-flow har fortsatt
+   * full assertHost-håndhevelse for startGame/drawNextNumber/endGame.
+   */
   private assertHost(room: RoomState, actorPlayerId: string): void {
+    // Perpetual-spill (Spill 2/3) har ingen master-rolle — host-feltet er
+    // bare en teknisk kontekst, ikke en regulatorisk gate.
+    const slug = room.gameSlug?.toLowerCase();
+    if (slug === "rocket" || slug === "monsterbingo") {
+      return;
+    }
     if (room.hostPlayerId !== actorPlayerId) {
       throw new DomainError("NOT_HOST", "Kun host kan utføre denne handlingen.");
     }

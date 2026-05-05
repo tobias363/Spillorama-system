@@ -378,12 +378,87 @@ test("F2-D: assertSpill1NotAdHoc fires for production retail Spill 1 (non-test-h
   );
 });
 
-test("F2-D: assertHost denies non-host actors with NOT_HOST", async () => {
-  const { engine, roomCode, guestId } = await makeEngineWithStartedRound();
+test("F2-D: assertHost denies non-host actors with NOT_HOST (Spill 1 / bingo)", async () => {
+  // Tobias-pilot-fix 2026-05-05: assertHost gjelder kun Spill 1 (`bingo`-slug)
+  // master-flow. Spill 2 (`rocket`) og Spill 3 (`monsterbingo`) har ingen
+  // master-rolle og skipper guarden — actor-validering skjer via requirePlayer.
+  // Engine må kjøres som test-hall så assertSpill1NotAdHoc ikke fanger først.
+  const { engine, roomCode, guestId } = await makeEngineWithStartedRound({
+    gameSlug: "bingo",
+  });
+  const internal = engine as unknown as {
+    rooms: Map<string, { isTestHall?: boolean }>;
+  };
+  const room = internal.rooms.get(roomCode);
+  if (room) room.isTestHall = true;
 
   await assert.rejects(
     () => engine.drawNextNumber({ roomCode, actorPlayerId: guestId }),
     (err: unknown) => err instanceof DomainError && err.code === "NOT_HOST",
+  );
+});
+
+test("Tobias-pilot-fix 2026-05-05: rocket skips assertHost — fallback actor accepted", async () => {
+  // Spill 2 (`rocket`) har ETT globalt rom uten master-rolle. Når
+  // original-host disconnecter, faller Game2AutoDrawTickService tilbake
+  // til players[0] som actor. Engine MÅ akseptere denne fallback-actoren
+  // — ellers blir rommet permanent stuck (pilot-blokker 2026-05-05).
+  const { engine, roomCode, guestId, hostId } = await makeEngineWithStartedRound({
+    gameSlug: "rocket",
+  });
+
+  // Simulér at original-host disconnectet ved å mutere hostPlayerId til
+  // en player-id som ikke lenger er i rommet. Tick-laget ville da velge
+  // guestId som fallback actor — engine skal akseptere det.
+  const internal = engine as unknown as {
+    rooms: Map<string, { hostPlayerId: string }>;
+  };
+  const room = internal.rooms.get(roomCode);
+  if (room) room.hostPlayerId = `${hostId}-stale`;
+
+  // Skal IKKE kaste NOT_HOST. Engine bruker requirePlayer for actor-
+  // validering, og guestId er fortsatt en gyldig player i rommet.
+  const result = await engine.drawNextNumber({
+    roomCode,
+    actorPlayerId: guestId,
+  });
+  assert.ok(typeof result.number === "number", "draw should succeed");
+});
+
+test("Tobias-pilot-fix 2026-05-05: monsterbingo skips assertHost — fallback actor accepted", async () => {
+  // Samme som rocket-testen, men for Spill 3 (`monsterbingo`).
+  const { engine, roomCode, guestId, hostId } = await makeEngineWithStartedRound({
+    gameSlug: "monsterbingo",
+  });
+  const internal = engine as unknown as {
+    rooms: Map<string, { hostPlayerId: string }>;
+  };
+  const room = internal.rooms.get(roomCode);
+  if (room) room.hostPlayerId = `${hostId}-stale`;
+
+  const result = await engine.drawNextNumber({
+    roomCode,
+    actorPlayerId: guestId,
+  });
+  assert.ok(typeof result.number === "number", "draw should succeed");
+});
+
+test("Tobias-pilot-fix 2026-05-05: rocket actor still requires player-in-room (PLAYER_NOT_FOUND)", async () => {
+  // assertHost-skip for perpetual-spill MÅ ikke skape sikkerhetshull —
+  // engine kaller requirePlayer rett etter, så ondsinnet/ukjent actorId
+  // skal fortsatt avvises med PLAYER_NOT_FOUND.
+  const { engine, roomCode } = await makeEngineWithStartedRound({
+    gameSlug: "rocket",
+  });
+
+  await assert.rejects(
+    () =>
+      engine.drawNextNumber({
+        roomCode,
+        actorPlayerId: "definitely-not-in-room",
+      }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "PLAYER_NOT_FOUND",
   );
 });
 
