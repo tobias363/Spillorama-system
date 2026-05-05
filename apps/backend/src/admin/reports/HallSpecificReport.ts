@@ -5,22 +5,21 @@
  *   - `docs/wireframes/WF_B_Spillorama_Agent_V1.0_14-10-2024.pdf` §17.36
  *   - Appendix B (PM-låst): Elvis Replacement Amount-kolonne må beholdes.
  *
- * Kolonner per wireframe + Appendix B:
+ * Kolonner (4 game-slots etter game4/themebingo-deprecation BIN-496):
  *   Group Of Hall Name | Hall Name | Agent | Elvis Replacement Amount |
- *   Game1 OMS/UTD/Payout%/RES | Game2 ... | Game3 ... | Game4 ... | Game5 ...
+ *   Game1 OMS/UTD/Payout%/RES | Game2 ... | Game3 ... | Game5 ...
  *
  * Data-kilder:
  *   - `app_rg_compliance_ledger` (STAKE/PRIZE/EXTRA_PRIZE entries) for
  *     OMS/UTD per hall. Entry.metadata.isReplacement = true brukes for
  *     Elvis Replacement-aggregat (set i BingoEngine.chargeTicketReplacement).
  *   - `hall_schedule_log` + `hall_game_schedules` for å kategorisere hvilket
- *     Game 1-5 en ledger-entry tilhører (via gameSessionId → scheduleSlotId →
+ *     Game 1-3/5 en ledger-entry tilhører (via gameSessionId → scheduleSlotId →
  *     slot.gameType → slug-mapping).
  *
- * Per Spillkatalog (project_spillkatalog.md): Game 1 = bingo, Game 2 =
- * rocket, Game 3 = mystery, Game 4 = wheel, Game 5 = spillorama. Alle interne
- * spill er "Hovedspill" i ledger (MAIN_GAME), bortsett fra Spill 4 data-bingo
- * (DATABINGO).
+ * Per docs/architecture/SPILLKATALOG.md (2026-04-25): Spill 1-3 (bingo,
+ * rocket, monsterbingo) er hovedspill (MAIN_GAME); SpinnGo (game5/spillorama)
+ * er databingo (DATABINGO). Game 4 / themebingo deprecated BIN-496.
  */
 
 import type {
@@ -32,8 +31,11 @@ import type { HallGroup } from "../HallGroupService.js";
 import type { AgentProfile } from "../../agent/AgentStore.js";
 import type { ComplianceLedgerEntry } from "../../game/ComplianceLedger.js";
 
-/** Game-slots slik de vises i rapporten. Spill 1-5. */
-export const HALL_SPECIFIC_GAMES = ["game1", "game2", "game3", "game4", "game5"] as const;
+/**
+ * Game-slots slik de vises i rapporten. Game4 (themebingo) deprecated
+ * BIN-496 og fjernet fra rapport-layouten.
+ */
+export const HALL_SPECIFIC_GAMES = ["game1", "game2", "game3", "game5"] as const;
 export type HallSpecificGame = (typeof HALL_SPECIFIC_GAMES)[number];
 
 export interface GameAggregate {
@@ -110,7 +112,6 @@ function emptyGamesRecord(): Record<HallSpecificGame, GameAggregate> {
     game1: emptyGameAggregate(),
     game2: emptyGameAggregate(),
     game3: emptyGameAggregate(),
-    game4: emptyGameAggregate(),
     game5: emptyGameAggregate(),
   };
 }
@@ -133,14 +134,17 @@ export function deriveGameSlotFromSchedule(slot: ScheduleSlot): HallSpecificGame
   const slug = (slugRaw ?? slot.gameType ?? "").toLowerCase();
 
   // Game 1 = Spill 1 (Bingo Norsk / Elvis / Traffic Light / Bingo75 — alle
-  // "standard"-varianter under Hovedspill 1).
+  // "standard"-varianter under Hovedspill 1; mini-games som wheel-of-fortune
+  // er ikke selvstendige spill men sub-games inne i Spill 1).
   if (
     slug === "bingo" ||
     slug === "standard" ||
     slug === "elvis" ||
     slug === "trafficlight" ||
     slug === "traffic-light" ||
-    slug === "bingo75"
+    slug === "bingo75" ||
+    slug === "wheel" ||
+    slug === "wheel-of-fortune"
   ) {
     return "game1";
   }
@@ -148,12 +152,16 @@ export function deriveGameSlotFromSchedule(slot: ScheduleSlot): HallSpecificGame
   if (slug === "rocket" || slug === "tallspill") return "game2";
   // Game 3 = Mystery.
   if (slug === "mystery") return "game3";
-  // Game 4 = Data-bingo / wheel (legacy Game 4 DataBingo).
-  if (slug === "wheel" || slug === "wheel-of-fortune" || slug === "databingo" || slug === "data-bingo") {
-    return "game4";
-  }
-  // Game 5 = SpinnGo / Spillorama.
-  if (slug === "spillorama" || slug === "spinngo" || slug === "spin-go" || slug === "color-draft") {
+  // Game 5 = SpinnGo / Spillorama (Databingo). Inkluderer "databingo"-slug
+  // som legacy-mapping siden SpinnGo er den eneste databingo-varianten.
+  if (
+    slug === "spillorama" ||
+    slug === "spinngo" ||
+    slug === "spin-go" ||
+    slug === "color-draft" ||
+    slug === "databingo" ||
+    slug === "data-bingo"
+  ) {
     return "game5";
   }
   return null;
@@ -253,7 +261,6 @@ export function buildHallSpecificReport(
           game1: { stakeSum: 0, prizeSum: 0 },
           game2: { stakeSum: 0, prizeSum: 0 },
           game3: { stakeSum: 0, prizeSum: 0 },
-          game4: { stakeSum: 0, prizeSum: 0 },
           game5: { stakeSum: 0, prizeSum: 0 },
         },
       };
@@ -287,8 +294,9 @@ export function buildHallSpecificReport(
       }
     }
     if (!gameSlot) {
-      // Fallback: ledger-gameType-kolonnen. DATABINGO → game4, MAIN_GAME → game1
-      // (mest sannsynlig match for Hovedspill 1 som er >80% av volum).
+      // Fallback: ledger-gameType-kolonnen. DATABINGO → game5 (SpinnGo, eneste
+      // databingo per SPILLKATALOG.md), MAIN_GAME → game1 (mest sannsynlig
+      // match for Hovedspill 1 som er >80% av volum).
       //
       // K2-A CRIT-1 (utvidelse 2026-04-30): etter at Spill 2/3 også skriver
       // gameType=MAIN_GAME blir denne fallbacken upresis (alle 3 hovedspill
@@ -296,7 +304,7 @@ export function buildHallSpecificReport(
       // properly-configured rooms — denne fallbacken brukes kun for entries
       // uten gameId/slotId. Follow-up: utvid fallback med Spill 2/3-ledetråder
       // (f.eks. metadata.reason=GAME2_*).
-      if (entry.gameType === "DATABINGO") gameSlot = "game4";
+      if (entry.gameType === "DATABINGO") gameSlot = "game5";
       else if (entry.gameType === "MAIN_GAME") gameSlot = "game1";
     }
     if (!gameSlot) continue;

@@ -4533,11 +4533,6 @@ export class PlatformService {
         ["bingo",        "Bingo",        "75-kulsbingo med flere spillvarianter",    "/bingo",        true, 1, { gameNumber: 1, clientEngine: "web" }],
         ["rocket",       "Tallspill",    "Tallspill med 3x3 brett og Lucky Number",  "/rocket",       true, 2, { gameNumber: 2 }],
         ["monsterbingo", "Mønsterbingo", "Bingo med mønstergevinster",               "/monsterbingo", true, 3, { gameNumber: 3 }],
-        // temabingo (game 4) utgår per BIN-496. isEnabled=false sikrer at fresh DB
-        // ikke får aktiv temabingo. ON CONFLICT-oppdateringen under rører ikke
-        // is_enabled, så eksisterende DB-verdier (styrt av migration
-        // 20260417120000_deactivate_game4_temabingo.sql) beholdes.
-        ["temabingo",    "Temabingo",    "Bingo med temaer og multiplikator (utgått, BIN-496)", "/temabingo", false, 4, { gameNumber: 4, deprecated: true }],
         ["spillorama",   "Spillorama",   "Spillorama-bingo med bonusspill",           "/spillorama",   true, 5, { gameNumber: 5 }],
         ["candy",        "Candy Mania",  "Candy-spillet",                             "/candy",        true, 6, { gameNumber: 6 }],
       ];

@@ -4,8 +4,9 @@
  * Dekker:
  *   - Per-hall rad med Group Of Hall + Agent-displayName.
  *   - Elvis Replacement aggregeres kun fra entries med metadata.isReplacement=true.
- *   - OMS/UTD/Payout%/RES beregnes per Game 1-5 via slot→game-mapping.
- *   - Fallback-mapping når slot ikke finnes: DATABINGO → game4, MAIN_GAME → game1.
+ *   - OMS/UTD/Payout%/RES beregnes per Game 1-3+5 via slot→game-mapping
+ *     (game4/themebingo deprecated BIN-496).
+ *   - Fallback-mapping når slot ikke finnes: DATABINGO → game5, MAIN_GAME → game1.
  *   - hallIds-filter begrenser radene.
  *   - Tom input gir 0-rader per hall (ingen aktivitet ≠ ingen rad).
  *   - Ugyldig vindu kaster.
@@ -245,7 +246,7 @@ test("buildHallSpecificReport: hallIds-filter begrenser rader", () => {
   assert.deepEqual(ids, ["a", "c"]);
 });
 
-test("buildHallSpecificReport: fallback gameType DATABINGO → game4, MAIN_GAME → game1", () => {
+test("buildHallSpecificReport: fallback gameType DATABINGO → game5, MAIN_GAME → game1", () => {
   const halls = [hall("hall-1", "Hall 1")];
   const entries: ComplianceLedgerEntry[] = [
     entry({ eventType: "STAKE", amount: 100, hallId: "hall-1", gameType: "MAIN_GAME" }),
@@ -264,7 +265,7 @@ test("buildHallSpecificReport: fallback gameType DATABINGO → game4, MAIN_GAME 
   const row = result.rows[0];
   assert.ok(row);
   assert.equal(row.games.game1.oms, 100);
-  assert.equal(row.games.game4.oms, 200);
+  assert.equal(row.games.game5.oms, 200);
 });
 
 test("buildHallSpecificReport: tom aktivitet gir rad per hall med 0-tall", () => {
@@ -282,7 +283,7 @@ test("buildHallSpecificReport: tom aktivitet gir rad per hall med 0-tall", () =>
   assert.equal(result.rows.length, 2);
   for (const row of result.rows) {
     assert.equal(row.elvisReplacementAmount, 0);
-    for (const g of ["game1", "game2", "game3", "game4", "game5"] as const) {
+    for (const g of ["game1", "game2", "game3", "game5"] as const) {
       assert.equal(row.games[g].oms, 0);
       assert.equal(row.games[g].utd, 0);
       assert.equal(row.games[g].payoutPct, 0);
@@ -329,10 +330,12 @@ test("buildHallSpecificReport: sortering — groupName asc, deretter hallName as
 test("deriveGameSlotFromSchedule: maps ulike gameType-verdier", () => {
   assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "standard")), "game1");
   assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "elvis")), "game1");
+  // wheel-of-fortune er en mini-game inne i Spill 1 — bucketes til game1.
+  assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "wheel")), "game1");
   assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "rocket")), "game2");
   assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "mystery")), "game3");
-  assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "wheel")), "game4");
   assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "spillorama")), "game5");
+  assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "databingo")), "game5");
   assert.equal(deriveGameSlotFromSchedule(slot("x", "h", "unknown-game")), null);
   // gameSlug in variantConfig overrides gameType.
   assert.equal(
