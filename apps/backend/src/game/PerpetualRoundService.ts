@@ -47,8 +47,12 @@
 import { logger as rootLogger } from "../util/logger.js";
 import type { GameEndedInput } from "../adapters/BingoSystemAdapter.js";
 import { resolveRoundPauseMs } from "./variantConfig.js";
+// Fase 2A (2026-05-05): structured-logger for error-code-tagging på BIN-RKT-
+// {006,007,008}. PoC — eksisterende info/debug-calls beholdes.
+import { logWarn } from "../observability/structuredLogger.js";
 
 const logger = rootLogger.child({ module: "perpetual-round" });
+const MODULE_NAME = "PerpetualRoundService";
 
 /**
  * Slugs som er perpetual. Match (case-insensitive) mot `room.gameSlug` —
@@ -510,9 +514,18 @@ export class PerpetualRoundService {
         try {
           await this.config.emitRoomUpdate(roomCode);
         } catch (err) {
-          logger.warn(
-            { roomCode, prevGameId, err },
-            "perpetual: emitRoomUpdate failed (best-effort, continuing)",
+          // Fase 2A: BIN-RKT-006 — emitRoomUpdate fail. MEDIUM, best-effort.
+          // Klient ser ikke ny runde umiddelbart men neste tick eller
+          // socket-event vil rette opp i UI; ingen game-state-tap.
+          logWarn(
+            {
+              module: MODULE_NAME,
+              errorCode: "BIN-RKT-006",
+              roomCode,
+              gameId: prevGameId,
+            },
+            "emitRoomUpdate failed efter auto-restart (best-effort, continuing)",
+            err,
           );
         }
       }
@@ -525,13 +538,20 @@ export class PerpetualRoundService {
       //   - INVALID_ENTRY_FEE: konfig-feil — synlig i logs
       // I ALLE tilfeller logger vi og lar være å re-throwe — perpetual
       // er en convenience, ikke source of truth.
-      logger.warn(
+      // Fase 2A: BIN-RKT-007 — auto-restart fail. HIGH severity for at vi
+      // skal måle rate (ofte race-conditions); ikke til Sentry siden de
+      // forventede kodene over er normale.
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      logWarn(
         {
+          module: MODULE_NAME,
+          errorCode: "BIN-RKT-007",
           roomCode,
-          prevGameId,
-          err: err instanceof Error ? { message: err.message, code: (err as Error & { code?: string }).code } : String(err),
+          gameId: prevGameId,
+          domainErrorCode: code,
         },
-        "perpetual: auto-restart failed (best-effort)",
+        "auto-restart failed (best-effort) — perpetual loop pauset til neste join eller manual restart",
+        err,
       );
     }
   }

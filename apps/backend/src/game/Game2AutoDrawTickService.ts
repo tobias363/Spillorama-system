@@ -46,12 +46,18 @@
 
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
+// Fase 2A (2026-05-05): structured-logger for error-code-tagging. PoC-
+// migrasjon — kun error/warn-paths som korresponderer til BIN-RKT-{001..008}.
+// Eksisterende info/debug-calls beholdes på rootLogger for å minimere diff.
+import { logError, logInfo, logWarn } from "../observability/structuredLogger.js";
+import { incrementErrorCounter } from "../observability/errorMetrics.js";
 import {
   resolveBallIntervalMs,
   type GameVariantConfig,
 } from "./variantConfig.js";
 
 const log = rootLogger.child({ module: "game2-auto-draw-tick" });
+const MODULE_NAME = "Game2AutoDrawTickService";
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -362,9 +368,18 @@ export class Game2AutoDrawTickService {
         errors++;
         const msg = `${summary.code}: getRoomSnapshot failed: ${(err as Error).message ?? "unknown"}`;
         if (errorMessages.length < 10) errorMessages.push(msg);
-        log.warn(
-          { err, roomCode: summary.code },
-          "[game2-auto-draw] getRoomSnapshot failed"
+        // Fase 2A: BIN-RKT-003 (race-condition — room destroyed mid-tick).
+        // Forventet sjelden race med room:leave-handler; logges som warn
+        // med structured metadata så ops kan måle rate.
+        logWarn(
+          {
+            module: MODULE_NAME,
+            errorCode: "BIN-RKT-003",
+            roomCode: summary.code,
+            gameSlug: slug,
+          },
+          "getRoomSnapshot failed mid-tick — rom destroyed mellom listRoomSummaries og snapshot",
+          err,
         );
         continue;
       }
@@ -403,21 +418,35 @@ export class Game2AutoDrawTickService {
             );
             if (ended) {
               staleRoomsEnded.push(summary.code);
-              log.warn(
+              // Fase 2A: BIN-RKT-004 — stuck-room recovery. HIGH severity
+              // fordi det indikerer en bug i `onDrawCompleted` eller
+              // checkpoint-persistens; vi vil måle rate så vi kan fixe
+              // root-cause.
+              logWarn(
                 {
+                  module: MODULE_NAME,
+                  errorCode: "BIN-RKT-004",
                   roomCode: summary.code,
                   drawnCount: game.drawnNumbers.length,
                 },
-                "[game2-auto-draw] auto-recovered stuck room (drawn=21, status=RUNNING, endedReason=null)"
+                "auto-recovered stuck room (drawn=21, status=RUNNING, endedReason=null)",
               );
 
               if (this.onStaleRoomEnded) {
                 try {
                   await this.onStaleRoomEnded(summary.code);
                 } catch (cbErr) {
-                  log.warn(
-                    { err: cbErr, roomCode: summary.code },
-                    "[game2-auto-draw] onStaleRoomEnded callback failed"
+                  // Fase 2A: BIN-RKT-008 — onStaleRoomEnded callback feil.
+                  // MEDIUM severity, ikke-fatal for tick-en. Caller-en eier
+                  // fail-soft contract; vi logger og fortsetter.
+                  logWarn(
+                    {
+                      module: MODULE_NAME,
+                      errorCode: "BIN-RKT-008",
+                      roomCode: summary.code,
+                    },
+                    "onStaleRoomEnded callback failed — recovery completed but follow-up callback threw",
+                    cbErr,
                   );
                 }
               }
@@ -426,9 +455,18 @@ export class Game2AutoDrawTickService {
             errors++;
             const msg = `${summary.code}: forceEndStaleRound failed: ${(err as Error).message ?? "unknown"}`;
             if (errorMessages.length < 10) errorMessages.push(msg);
-            log.warn(
-              { err, roomCode: summary.code },
-              "[game2-auto-draw] forceEndStaleRound failed"
+            // forceEndStaleRound feil er HIGH — vi har en stuck room som
+            // forblir stuck. Bruk BIN-RKT-002 (engine-error) for å løfte
+            // til Sentry siden ikke-fail betyr at perpetual-loop sitter
+            // fast permanent.
+            logError(
+              {
+                module: MODULE_NAME,
+                errorCode: "BIN-RKT-002",
+                roomCode: summary.code,
+              },
+              "forceEndStaleRound threw — stuck room kan ikke recovery-es",
+              err,
             );
           }
         } else {
@@ -459,15 +497,21 @@ export class Game2AutoDrawTickService {
         continue;
       }
       if (!hostStillPresent) {
-        log.info(
+        // Fase 2A: BIN-RKT-001 — host fallback applied. Recovery-event,
+        // forventet ved fane-refresh / Wi-Fi-blip. Counter måler rate så
+        // vi kan se trender; severity MEDIUM fordi spill fortsetter normalt.
+        logInfo(
           {
-            event: "auto_draw_host_fallback",
+            module: MODULE_NAME,
+            errorCode: "BIN-RKT-001",
             roomCode: summary.code,
+            hostPlayerId: snapshot.hostPlayerId,
+            event: "auto_draw_host_fallback",
             oldHostId: snapshot.hostPlayerId,
             newHostId: actorId,
             reason: "host_disconnected",
           },
-          "[game2-auto-draw] host fallback — original host not in players list",
+          "host fallback — original host not in players list, fortsetter med første tilgjengelige spiller",
         );
       }
 
@@ -500,9 +544,19 @@ export class Game2AutoDrawTickService {
             gameId: result.gameId,
           });
         } catch (broadcastErr) {
-          log.warn(
-            { err: broadcastErr, roomCode: summary.code },
-            "[game2-auto-draw] broadcaster.onDrawCompleted threw — fortsetter likevel"
+          // Fase 2A: BIN-RKT-005 — broadcaster threw. HIGH severity fordi
+          // klient-UI er nå out-of-sync med server-state (bekreftet via
+          // Playwright). Sendes til Sentry så ops får alert.
+          logError(
+            {
+              module: MODULE_NAME,
+              errorCode: "BIN-RKT-005",
+              roomCode: summary.code,
+              gameId: result.gameId,
+              drawIndex: result.drawIndex,
+            },
+            "broadcaster.onDrawCompleted threw — server-state oppdatert men klient-UI kan være stale",
+            broadcastErr,
           );
         }
 
@@ -533,6 +587,19 @@ export class Game2AutoDrawTickService {
           if (code === "DRAW_TOO_SOON") {
             this.lastDrawAtByRoom.set(summary.code, Date.now());
           }
+          // Fase 2A: tell forventede race-condition events i counter slik
+          // at dashboards kan vise rate-trender uten å spamme log på warn.
+          // BIN-DRW-001 (DRAW_TOO_SOON), BIN-DRW-002 (NO_MORE_NUMBERS),
+          // BIN-DRW-003 (GAME_NOT_RUNNING/PAUSED/ENDED). Bruk increment
+          // direkte (ikke logDebug) fordi vi vil at debug-level kan styres
+          // separat via LOG_LEVEL uten å miste counter-tall.
+          if (code === "DRAW_TOO_SOON") {
+            incrementErrorCounter("BIN-DRW-001");
+          } else if (code === "NO_MORE_NUMBERS") {
+            incrementErrorCounter("BIN-DRW-002");
+          } else {
+            incrementErrorCounter("BIN-DRW-003");
+          }
           log.debug(
             { roomCode: summary.code, code },
             "[game2-auto-draw] expected race — skipping"
@@ -541,9 +608,19 @@ export class Game2AutoDrawTickService {
           errors++;
           const msg = `${summary.code}: ${(err as Error).message ?? "unknown"}`;
           if (errorMessages.length < 10) errorMessages.push(msg);
-          log.warn(
-            { err, roomCode: summary.code },
-            "[game2-auto-draw] drawNextNumber failed"
+          // Fase 2A: BIN-RKT-002 — uventet engine-feil. HIGH severity, sendes
+          // til Sentry for å trigge alert. Inkluderer drawIndex og host-info
+          // i context så ops kan reproduce.
+          logError(
+            {
+              module: MODULE_NAME,
+              errorCode: "BIN-RKT-002",
+              roomCode: summary.code,
+              drawIndex: snapshot.currentGame?.drawnNumbers.length,
+              hostPlayerId: actorId,
+            },
+            "drawNextNumber failed — uventet engine-error",
+            err,
           );
         }
       } finally {

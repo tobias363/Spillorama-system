@@ -66,3 +66,31 @@ test("DomainError: re-eksport fra BingoEngine.js peker på samme klasse (back-co
   const err = new DomainErrorViaBingoEngine("X", "y");
   assert.ok(err instanceof DomainError);
 });
+
+// ── Fase 2A (2026-05-05): errorCode-utvidelse ──────────────────────────────
+
+test("DomainError: errorCode er undefined når ikke satt (backwards-compat)", () => {
+  const err = new DomainError("X", "y");
+  assert.equal(err.errorCode, undefined);
+});
+
+test("DomainError: errorCode kan settes via 4-arg-form (med details)", () => {
+  const err = new DomainError("NOT_HOST", "Kun host", { roomCode: "X" }, "BIN-RUM-001");
+  assert.equal(err.errorCode, "BIN-RUM-001");
+  assert.deepEqual(err.details, { roomCode: "X" });
+});
+
+test("DomainError: errorCode kan settes via 3-arg shorthand (uten details)", () => {
+  // Vanlig migrering: `new DomainError("NOT_HOST", "Kun host", "BIN-RUM-001")`.
+  const err = new DomainError("NOT_HOST", "Kun host", "BIN-RUM-001");
+  assert.equal(err.errorCode, "BIN-RUM-001");
+  assert.equal(err.details, undefined);
+});
+
+test("DomainError: 3-arg med object beholder details-semantikk (no regression)", () => {
+  // Eksisterende 3-arg-form: `new DomainError(code, msg, details)`. Skal
+  // fortsette å fungere uendret — details settes, errorCode forblir undefined.
+  const err = new DomainError("HALLS_NOT_READY", "...", { unreadyHalls: ["A"] });
+  assert.equal(err.errorCode, undefined);
+  assert.deepEqual(err.details, { unreadyHalls: ["A"] });
+});
