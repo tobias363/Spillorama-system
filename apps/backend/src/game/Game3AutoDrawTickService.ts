@@ -33,6 +33,7 @@ import type {
   VariantConfigLookup,
 } from "./Game2AutoDrawTickService.js";
 import { resolveBallIntervalMs } from "./variantConfig.js";
+import { SYSTEM_ACTOR_ID } from "./SystemActor.js";
 
 /**
  * Re-eksport av broadcaster-flaten under Game3-spesifikt navn for
@@ -303,32 +304,29 @@ export class Game3AutoDrawTickService {
         continue;
       }
 
-      // Tobias 2026-05-04 (host-fallback fix — pilot-blokker):
-      // `snapshot.hostPlayerId` reassignes ALDRI når original-host
-      // disconnecter. Auto-draw-cron-en feilet derfor 100% med
-      // "Spiller finnes ikke i rommet." og rommet ble permanent stuck.
-      // Samme bug som Spill 2 — fix delt mønster.
+      // Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.6):
+      // Bruker SYSTEM_ACTOR_ID istedenfor hostPlayerId-fallback til player[0].
+      // Auto-draw-tick er server-driven — det er IKKE en spiller-handling.
+      // Identisk pattern som Game2AutoDrawTickService.
+      //
+      // Tidligere (PR #911 host-fallback): `snapshot.hostPlayerId` reassignes
+      // ALDRI når original-host disconnecter. Auto-draw-cron feilet 100%
+      // med "Spiller finnes ikke i rommet." Vi løste det først med
+      // players[0]?.id-fallback, men system-actor er semantisk mer korrekt.
       const players = snapshot.players ?? [];
-      const hostStillPresent = players.some((p) => p.id === snapshot.hostPlayerId);
-      const actorId = hostStillPresent
-        ? snapshot.hostPlayerId
-        : players[0]?.id ?? null;
-      if (!actorId) {
+      if (players.length === 0) {
+        log.info(
+          {
+            event: "auto_draw_skip_empty_room",
+            roomCode: summary.code,
+            slug: snapshot.gameSlug,
+          },
+          "[game3-auto-draw] skip — empty room (no players to receive draw)",
+        );
         skipped++;
         continue;
       }
-      if (!hostStillPresent) {
-        log.info(
-          {
-            event: "auto_draw_host_fallback",
-            roomCode: summary.code,
-            oldHostId: snapshot.hostPlayerId,
-            newHostId: actorId,
-            reason: "host_disconnected",
-          },
-          "[game3-auto-draw] host fallback — original host not in players list",
-        );
-      }
+      const actorId: string = SYSTEM_ACTOR_ID;
 
       this.currentlyProcessing.add(summary.code);
       try {

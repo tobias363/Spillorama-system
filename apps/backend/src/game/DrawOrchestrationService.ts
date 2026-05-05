@@ -74,6 +74,8 @@ import { logger as rootLogger } from "../util/logger.js";
 import { logRoomEvent } from "../util/roomLogVerbose.js";
 import * as variantConfigModule from "./variantConfig.js";
 import { DomainError } from "../errors/DomainError.js";
+import { isPerpetualSlug } from "./PerpetualRoundService.js";
+import { isSystemActor } from "./SystemActor.js";
 import type {
   GameState,
   Player,
@@ -301,9 +303,21 @@ export class DrawOrchestrationService {
     // K3: production retail Spill 1 må kjøre via scheduled-engine.
     this.callbacks.assertSpill1NotAdHoc(room);
     this.callbacks.assertHost(room, input.actorPlayerId);
-    const host = this.callbacks.requirePlayer(room, input.actorPlayerId);
+
+    // Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.6):
+    // For system-driven kall til perpetual-rom (auto-draw-tick) er det
+    // ingen spesifikk spiller å validere — actor er sentinel-en
+    // SYSTEM_ACTOR_ID. Skip requirePlayer + wallet-check; assertHost
+    // har allerede tillatt dette via slug-guard. Spill 1 (master-flow)
+    // tillater IKKE system-actor (assertHost ville kastet NOT_HOST før
+    // vi når hit), så denne grenen er strikt scoped til Spill 2/3.
+    const isSystemDriven =
+      isSystemActor(input.actorPlayerId) && isPerpetualSlug(room.gameSlug);
+    if (!isSystemDriven) {
+      const host = this.callbacks.requirePlayer(room, input.actorPlayerId);
+      this.callbacks.assertWalletAllowedForGameplay(host.walletId, Date.now());
+    }
     const nowMs = Date.now();
-    this.callbacks.assertWalletAllowedForGameplay(host.walletId, nowMs);
 
     // BIN-460: Block draws while game is paused
     if (room.currentGame?.isPaused) {

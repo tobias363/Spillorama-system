@@ -205,10 +205,17 @@ function makeService(args: {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-test("PERPETUAL_SLUGS dekker rocket og monsterbingo", () => {
-  assert.equal(PERPETUAL_SLUGS.size, 2);
+test("PERPETUAL_SLUGS dekker alle Spill 2/3-aliaser (audit §2.7)", () => {
+  // Etter audit §2.7-fixen (2026-05-05) inkluderer PERPETUAL_SLUGS alle
+  // aliaser fra GAME2_SLUGS + GAME3_SLUGS — ikke bare canonical-slug.
+  // 3 aliaser per spill × 2 spill = 6 totalt.
+  assert.equal(PERPETUAL_SLUGS.size, 6);
   assert.ok(PERPETUAL_SLUGS.has("rocket"));
+  assert.ok(PERPETUAL_SLUGS.has("game_2"));
+  assert.ok(PERPETUAL_SLUGS.has("tallspill"));
   assert.ok(PERPETUAL_SLUGS.has("monsterbingo"));
+  assert.ok(PERPETUAL_SLUGS.has("mønsterbingo"));
+  assert.ok(PERPETUAL_SLUGS.has("game_3"));
 });
 
 test("NATURAL_END_REASONS inkluderer G2_WINNER, G2_NO_WINNER og G3_FULL_HOUSE", () => {
@@ -246,7 +253,13 @@ test("happy path Spill 2: schedulerer og kjører auto-restart etter G2_WINNER", 
   assert.equal(state.startGameCalls.length, 1, "startGame kalt én gang");
   const call = state.startGameCalls[0]!;
   assert.equal(call.roomCode, "ROCKET");
-  assert.equal(call.actorPlayerId, "player-1");
+  // Audit-fix 2026-05-06 (audit §2.6): perpetual-loop bruker SYSTEM_ACTOR_ID
+  // istedenfor potensielt-stale `room.hostPlayerId`. Tidligere asserterte vi
+  // "player-1" (snapshot-host), men hostPlayerId reassignes ALDRI ved
+  // disconnect — så vi ville fått stale id og PLAYER_NOT_FOUND når original-
+  // host hadde forlatt rommet. SYSTEM_ACTOR_ID er semantisk korrekt:
+  // server-driven, ikke en spiller-handling.
+  assert.equal(call.actorPlayerId, "__system_actor__");
   assert.equal(call.payoutPercent, 80);
   assert.equal(call.ticketsPerPlayer, 4);
   assert.deepEqual(call.armedPlayerIds, []);
@@ -690,7 +703,10 @@ test("spawn: Spill 2 (rocket) første runde startes umiddelbart ved join", async
   assert.equal(timer.pendingCount(), 0, "ingen pending timer for first-round spawn");
   const call = state.startGameCalls[0]!;
   assert.equal(call.roomCode, "ROCKET");
-  assert.equal(call.actorPlayerId, "player-1");
+  // Audit-fix 2026-05-06 (audit §2.6): symmetrisk med startNextRound —
+  // first-round-spawn er server-driven (kalles fra room:join-handler) og
+  // bruker SYSTEM_ACTOR_ID istedenfor potensielt-stale hostPlayerId.
+  assert.equal(call.actorPlayerId, "__system_actor__");
   assert.deepEqual(call.armedPlayerIds, [], "ingen carry-over av armed players");
 });
 
@@ -981,11 +997,18 @@ test("spawn: dobbel-call innen samme tick — andre call no-ops på RUNNING", as
 
 // ── Slug-aware entry-fee resolution (Tobias bug-fix 2026-05-04) ────────────────
 
-test("PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG har 10 kr for rocket og monsterbingo", () => {
-  // Sanity: konstanten må eksportere riktige verdier for begge perpetual-slugs.
+test("PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG har 10 kr for alle Spill 2/3-slug-aliaser", () => {
+  // Sanity: konstanten må eksportere riktige verdier for alle perpetual-
+  // slugs inkludert aliaser. Audit §2.7 (2026-05-05) — slug-bypass må dekke
+  // ALLE aliaser, ikke bare canonical-slug.
   assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.get("rocket"), 10);
+  assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.get("game_2"), 10);
+  assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.get("tallspill"), 10);
   assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.get("monsterbingo"), 10);
-  assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.size, 2);
+  assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.get("mønsterbingo"), 10);
+  assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.get("game_3"), 10);
+  // 3 aliaser per spill × 2 spill = 6 totalt.
+  assert.equal(PERPETUAL_DEFAULT_ENTRY_FEE_BY_SLUG.size, 6);
 });
 
 test("auto-restart Spill 2: entryFee=10 selv når defaultEntryFee=0 (slug-default)", async () => {

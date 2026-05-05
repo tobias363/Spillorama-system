@@ -308,7 +308,12 @@ test("ingen rom: returnerer 0 telles", async () => {
 
 // ── ActorPlayerId fra hostPlayerId ──────────────────────────────────────────
 
-test("actorPlayerId settes til hostPlayerId fra room snapshot", async () => {
+test("actorPlayerId settes til SYSTEM_ACTOR_ID (audit §2.6)", async () => {
+  // Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.6):
+  // auto-draw-tick er server-driven, ikke spiller-handling. Tidligere
+  // brukte vi hostPlayerId-fallback til players[0]?.id når host hadde
+  // disconnected, men SYSTEM_ACTOR_ID er semantisk mer korrekt og
+  // dekker tom-rom-kanttilfelle.
   const { engine, drawCalls } = makeEngine([
     {
       code: "R",
@@ -319,7 +324,7 @@ test("actorPlayerId settes til hostPlayerId fra room snapshot", async () => {
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
   await service.tick();
-  assert.equal(drawCalls[0]!.actorPlayerId, "the-host-id-42");
+  assert.equal(drawCalls[0]!.actorPlayerId, "__system_actor__");
 });
 
 // ── Snapshot-filtrert RUNNING-mismatch ──────────────────────────────────────

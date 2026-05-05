@@ -227,7 +227,10 @@ test("ingen rom: 0 telles", async () => {
   assert.equal(r.drawsTriggered, 0);
 });
 
-test("actorPlayerId fra hostPlayerId", async () => {
+test("actorPlayerId settes til SYSTEM_ACTOR_ID (audit §2.6)", async () => {
+  // Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.6):
+  // identisk pattern som Game2AutoDrawTickService — auto-draw er
+  // server-driven, ikke spiller-handling.
   const { engine, drawCalls } = makeEngine([
     {
       code: "R",
@@ -238,7 +241,7 @@ test("actorPlayerId fra hostPlayerId", async () => {
   ]);
   const service = new Game3AutoDrawTickService({ engine, drawIntervalMs: 0 });
   await service.tick();
-  assert.equal(drawCalls[0]!.actorPlayerId, "host-id-3");
+  assert.equal(drawCalls[0]!.actorPlayerId, "__system_actor__");
 });
 
 // ── Tobias-bug-fix 2026-05-04: broadcaster wires `draw:new` + room:update ─

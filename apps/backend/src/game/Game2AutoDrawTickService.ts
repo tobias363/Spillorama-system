@@ -55,6 +55,7 @@ import {
   resolveBallIntervalMs,
   type GameVariantConfig,
 } from "./variantConfig.js";
+import { SYSTEM_ACTOR_ID } from "./SystemActor.js";
 
 const log = rootLogger.child({ module: "game2-auto-draw-tick" });
 const MODULE_NAME = "Game2AutoDrawTickService";
@@ -476,30 +477,47 @@ export class Game2AutoDrawTickService {
         continue;
       }
 
-      // Tobias 2026-05-04 (host-fallback fix — pilot-blokker):
-      // `snapshot.hostPlayerId` settes kun ved `RoomLifecycleService.createRoom`
-      // og reassignes ALDRI når original-host disconnecter (fane-refresh,
-      // Wi-Fi-blip, fanelukking). Auto-draw-cron-en feilet derfor 100% med
-      // "Spiller finnes ikke i rommet." og rommet ble permanent stuck til
-      // manuelt force-end. Verifisert av E2E-test 2026-05-04.
+      // Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.6):
+      // Bruker SYSTEM_ACTOR_ID istedenfor hostPlayerId-fallback til player[0].
+      // Auto-draw-tick er server-driven — det er IKKE en spiller-handling.
+      // assertHost (BingoEngine) tillater sentinel-en for perpetual-rom, og
+      // _drawNextLocked (DrawOrchestrationService) skipper requirePlayer +
+      // wallet-check når actor er system og rommet er perpetual.
       //
-      // Fix: sjekk om host fortsatt er i rommet. Hvis ikke, velg første
-      // tilgjengelige player som actor for denne ticken. Hvis ingen er
-      // connected (helt tomt rom), skip ticken stille — det finnes ingen
-      // spillere som kan motta `draw:new`-event uansett.
+      // Tidligere (PR #911 host-fallback): `snapshot.hostPlayerId` settes kun
+      // ved `RoomLifecycleService.createRoom` og reassignes ALDRI når
+      // original-host disconnecter (fane-refresh, Wi-Fi-blip). Auto-draw-cron
+      // feilet 100% med "Spiller finnes ikke i rommet." og rommet ble
+      // permanent stuck til manuelt force-end. Vi løste det først med
+      // players[0]?.id-fallback (PR #911), men system-actor er semantisk mer
+      // korrekt + dekker kanttilfellet hvor rommet var helt tomt.
+      //
+      // Skip-conditions hvis rommet er tomt: vi trekker fortsatt ikke baller,
+      // men det blir nå håndhevet av engine-internal sjekker og vi unngår
+      // null-kontroll i denne handler-en.
       const players = snapshot.players ?? [];
-      const hostStillPresent = players.some((p) => p.id === snapshot.hostPlayerId);
-      const actorId = hostStillPresent
-        ? snapshot.hostPlayerId
-        : players[0]?.id ?? null;
-      if (!actorId) {
+      if (players.length === 0) {
+        // Helt tomt rom: ingen mottakere for `draw:new`-event uansett. Skip
+        // synlig så ops kan se "tom rom"-pattern i logs (info, ikke debug).
+        log.info(
+          {
+            event: "auto_draw_skip_empty_room",
+            roomCode: summary.code,
+            slug: snapshot.gameSlug,
+          },
+          "[game2-auto-draw] skip — empty room (no players to receive draw)",
+        );
         skipped++;
         continue;
       }
-      if (!hostStillPresent) {
-        // Fase 2A: BIN-RKT-001 — host fallback applied. Recovery-event,
-        // forventet ved fane-refresh / Wi-Fi-blip. Counter måler rate så
-        // vi kan se trender; severity MEDIUM fordi spill fortsetter normalt.
+      // Fase 2A observability: logg når original host ikke er i players-
+      // listen så vi kan se host-disconnect-rate i metrics (BIN-RKT-001).
+      // System-actor brukes uansett — system-actor er semantisk korrekt
+      // og dekker kanttilfellet hvor rommet er helt tomt.
+      const hostStillPresent =
+        snapshot.hostPlayerId != null &&
+        players.some((p) => p.id === snapshot.hostPlayerId);
+      if (snapshot.hostPlayerId != null && !hostStillPresent) {
         logInfo(
           {
             module: MODULE_NAME,
@@ -508,12 +526,13 @@ export class Game2AutoDrawTickService {
             hostPlayerId: snapshot.hostPlayerId,
             event: "auto_draw_host_fallback",
             oldHostId: snapshot.hostPlayerId,
-            newHostId: actorId,
-            reason: "host_disconnected",
+            newHostId: SYSTEM_ACTOR_ID,
+            reason: "host_disconnected_using_system_actor",
           },
-          "host fallback — original host not in players list, fortsetter med første tilgjengelige spiller",
+          "host fallback — using system-actor since original host not in players list",
         );
       }
+      const actorId: string = SYSTEM_ACTOR_ID;
 
       this.currentlyProcessing.add(summary.code);
       try {

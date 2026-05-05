@@ -26,6 +26,7 @@ import type { PlatformService, PublicAppUser } from "../../platform/PlatformServ
 import { getAccessTokenFromSocketPayload, mustBeNonEmptyString } from "../../util/httpHelpers.js";
 import { logger as rootLogger } from "../../util/logger.js";
 import { getCanonicalRoomCode } from "../../util/canonicalRoomCode.js";
+import { isSystemActor } from "../../game/SystemActor.js";
 import type { GameEventsDeps } from "./deps.js";
 import type {
   AckResponse,
@@ -226,6 +227,30 @@ export function buildSocketContext(socket: Socket, base: RegistryContext): Socke
   async function requireAuthenticatedPlayerAction(
     payload: RoomActionPayload,
   ): Promise<{ roomCode: string; playerId: string }> {
+    // Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.1):
+    // defense-in-depth — avvis SYSTEM_ACTOR_ID i klient-payload eksplisitt.
+    // I praksis utleder vi `playerId` fra wallet-token uansett (linje ~280
+    // under), så en klient kan IKKE faktisk styre playerId — men hvis en
+    // ondsinnet klient sender `playerId: "__system_actor__"` i payload bør
+    // vi feile høyt, ikke bare ignorere det. Beskytter også mot framtidige
+    // refaktor som kan komme til å lese fra payload direkte.
+    const clientPlayerIdRaw =
+      typeof payload?.playerId === "string" ? payload.playerId.trim() : "";
+    if (clientPlayerIdRaw && isSystemActor(clientPlayerIdRaw)) {
+      logger.warn(
+        {
+          event: "system_actor_spoof_attempt",
+          payloadPlayerId: clientPlayerIdRaw,
+          socketId: socket.id,
+        },
+        "SECURITY: client tried to send SYSTEM_ACTOR_ID as playerId — rejected",
+      );
+      throw new DomainError(
+        "FORBIDDEN",
+        "Klient kan ikke utgi seg som system.",
+      );
+    }
+
     const user = await base.getAuthenticatedSocketUser(payload);
     // BIN-720 follow-up: assertUserEligibleForGameplay is now async (it
     // gates on blocked_until via ProfileSettingsService).
