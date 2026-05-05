@@ -36,6 +36,8 @@ import type {
   ResponsibleGamingPersistenceAdapter
 } from "./ResponsibleGamingPersistence.js";
 import { ComplianceManager } from "./ComplianceManager.js";
+import { isPerpetualSlug } from "./PerpetualRoundService.js";
+import { isSystemActor } from "./SystemActor.js";
 import type {
   LossLimits,
   PlayerComplianceSnapshot
@@ -4187,21 +4189,52 @@ export class BingoEngine {
    * !== room.hostPlayerId`. Resultat: ROCKET sto stuck på prod 2026-05-05
    * (`drawnCount=19, prizePool=0, errors=1`) til manuelt force-end.
    *
-   * Fix: skip `assertHost` for perpetual-spill (Spill 2/3). Sikkerheten
-   * ivaretas av at draw-pipeline likevel kaller `requirePlayer(room,
-   * actorPlayerId)` umiddelbart etterpå — ondsinnet/buggy actorId som
-   * ikke er i rommet feiler fortsatt med PLAYER_NOT_FOUND.
+   * Audit-fix 2026-05-06 (SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §2.1, §2.7):
+   *   - System-driven kall (auto-draw-tick, perpetual-loop, boot-sweep,
+   *     admin-routes) bruker `SYSTEM_ACTOR_ID` (semantisk korrekt — det er
+   *     IKKE en spiller-handling). For perpetual-rom tillater vi denne
+   *     sentinel-en uten host-check.
+   *   - PR #942's slug-bypass beholdes i en parallel mekanisme: hvis
+   *     actor IKKE er system-actor men rommet er perpetual, skipper vi
+   *     fortsatt host-check (eksisterende oppførsel — fjernes i Fase 3 når
+   *     alle call-sites bruker systemActor-flagget).
+   *   - Slug-match dekker nå alle aliaser (`rocket`/`game_2`/`tallspill`,
+   *     `monsterbingo`/`mønsterbingo`/`game_3`) via `isPerpetualSlug` —
+   *     audit §2.7. Tidligere matchet vi kun de to canonical-formene, så
+   *     legacy-rom eller seed-data med alias-slug ville falt tilbake til
+   *     master-flow og kastet NOT_HOST.
+   *
+   * Sikkerheten på socket-/HTTP-laget:
+   *   - Klient kan ikke sende `SYSTEM_ACTOR_ID` som actorPlayerId — alle
+   *     handlers som leser actor fra payload avviser denne eksplisitt
+   *     (FORBIDDEN), uavhengig av rommets slug.
+   *   - For perpetual-rom blokkerer socket-handlers `game:start/end/draw:next`
+   *     uansett (PERPETUAL_NO_MANUAL_*), så slug-bypassen kan ikke
+   *     misbrukes via standard event-routene.
    *
    * Spill 1 (`bingo`-slug) er IKKE påvirket — master-flow har fortsatt
    * full assertHost-håndhevelse for startGame/drawNextNumber/endGame.
+   * System-actor er KUN gyldig for perpetual-rom.
    */
   private assertHost(room: RoomState, actorPlayerId: string): void {
-    // Perpetual-spill (Spill 2/3) har ingen master-rolle — host-feltet er
-    // bare en teknisk kontekst, ikke en regulatorisk gate.
-    const slug = room.gameSlug?.toLowerCase();
-    if (slug === "rocket" || slug === "monsterbingo") {
+    const isPerpetual = isPerpetualSlug(room.gameSlug);
+
+    // System-actor: tillatt for perpetual-rom (audit §2.1). For Spill 1
+    // skal system-actor IKKE skip host-check — det betyr en bug i call-
+    // siten eller en ondsinnet payload.
+    if (isPerpetual && isSystemActor(actorPlayerId)) {
       return;
     }
+
+    // Eksisterende slug-bypass (PR #942) — beholdes som parallel mekanisme
+    // inntil alle perpetual-call-sites bruker systemActor-flagget. Dette
+    // dekker nå ALLE Spill 2/3-aliaser via isPerpetualSlug (audit §2.7).
+    // Perpetual-spill har ingen master-rolle, så host-feltet er bare en
+    // teknisk kontekst, ikke en regulatorisk gate.
+    if (isPerpetual) {
+      return;
+    }
+
     if (room.hostPlayerId !== actorPlayerId) {
       throw new DomainError("NOT_HOST", "Kun host kan utføre denne handlingen.");
     }
