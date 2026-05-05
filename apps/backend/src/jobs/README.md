@@ -1,9 +1,30 @@
-# Background jobs (BIN-582)
+# Module: `apps/backend/src/jobs` — Background jobs (BIN-582)
+
+**Sist oppdatert:** 2026-05-06
+**Eier:** Tobias Haugen
+**LOC:** ~2 419
+
+## Ansvar
 
 Periodic tasks driven by the `createJobScheduler` helper — same
 `setInterval` + date-key pattern already used by
 `createDailyReportScheduler`, plus an optional Redis lock so only one
 instance runs each tick in multi-node deploys.
+
+Inkluderer cron-jobber for:
+- Game1 schedule-tick (auto-eskalering)
+- Outbox-delivery (ADR-004)
+- Reconciliation (wallet, compliance-ledger)
+- Audit-anchor (ADR-003)
+- Self-exclusion-cleanup, BankID-expiry-reminder
+- Machine-ticket auto-close (Metronia, OK Bingo)
+
+## Public API
+
+`createJobScheduler(...)` plus per-job-modules under `apps/backend/src/jobs/`.
+Configurable via env-vars:
+- `JOBS_ENABLED=true` (master kill-switch)
+- Per-job: `JOB_<NAME>_ENABLED=true|false`
 
 ## Registered jobs
 
@@ -111,3 +132,11 @@ unconditionally — acceptable because the jobs are idempotent.
   after the first successful run of the day.
 - Jobs are registered in `src/index.ts` after `dailyReportScheduler` and
   stopped from the shutdown handler before the DB pool closes.
+
+## Referanser
+
+- BIN-582 (Background jobs)
+- BIN-587 (Self-exclusion cleanup)
+- ADR-003 (Hash-chain audit)
+- ADR-004 (Outbox pattern)
+- `docs/operations/MIGRATION_DEPLOY_RUNBOOK.md`

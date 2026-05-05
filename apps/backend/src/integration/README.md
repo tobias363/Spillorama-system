@@ -1,6 +1,22 @@
-# Integration
+# Module: `apps/backend/src/integration`
 
-External-service adapters used by the backend.
+**Sist oppdatert:** 2026-05-06
+**Eier:** Tobias Haugen
+**LOC:** ~4 114
+
+## Ansvar
+
+External-service adapters used by the backend. Inneholder integrasjoner mot:
+- EmailService (transactional emails via nodemailer/SMTP)
+- SmsService (Sveve REST)
+- BankID (KYC-handshake)
+- Cloudinary (image storage)
+- Sentry (error reporting)
+
+## Public API
+
+Hver integrasjon eksporterer en service-klasse med dependency-injectable
+config. Se per-fil dokumentasjon under for shape og environment-variabler.
 
 ## EmailService (BIN-588)
 
@@ -116,3 +132,10 @@ idempotent og admin kan re-trigge manuelt via "Resend email"-knapp (BIN-704).
 
 Adapter for the external-game wallet integration. Unrelated to
 `EmailService` — documented elsewhere.
+
+## Referanser
+
+- BIN-588 (EmailService)
+- BIN-582 (BankID expiry reminder)
+- `docs/operations/FCM_PUSH_NOTIFICATIONS.md`
+- ADR-010 (observability)
