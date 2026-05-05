@@ -141,6 +141,7 @@ import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
+import { createDevAutoLoginRouter } from "./dev/devAutoLoginRoute.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { RoomStartPreFlightValidator } from "./game/RoomStartPreFlightValidator.js";
 import { createWalletRouter } from "./routes/wallet.js";
@@ -2177,6 +2178,16 @@ app.use(createPlayersRouter({
   platformService,
   auditLogService,
 }));
+
+// Dev-only auto-login route. Returns null when NODE_ENV=production, so the
+// route never even gets mounted in prod. Defense-in-depth: the router itself
+// also re-checks NODE_ENV per request and only allows localhost. See
+// `src/dev/devAutoLoginRoute.ts`.
+const devAutoLoginRouter = createDevAutoLoginRouter({ platformService });
+if (devAutoLoginRouter) {
+  app.use(devAutoLoginRouter);
+  console.log("[dev] /api/dev/auto-login route mounted (NODE_ENV != production)");
+}
 
 // GAP #5: profile + BankID image upload. Lokal storage som default —
 // Cloudinary-bytte er TODO. Mappen serveres via express.static-mounten
