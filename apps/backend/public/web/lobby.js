@@ -650,6 +650,13 @@
     }
   }
 
+  // 2026-05-05: Spill 2 (rocket) + Spill 3 (monsterbingo) er perpetual-loop-spill
+  // som spawner ny runde først ved første join (PerpetualRoundService). Hvis rommet
+  // er ENDED med 0 spillere → /api/games/status returnerer "CLOSED", men spillet
+  // er faktisk klar til å åpne så snart noen klikker. Vis "Klar til start" istedenfor
+  // "Stengt" så spillere ikke tror spillet er nede (E2E v2 catch-22-funn).
+  var PERPETUAL_LOOP_SLUGS = { rocket: true, monsterbingo: true };
+
   // BIN-265: Status badge — reflects live state from GET /api/games/status
   function buildStatusBadge(slug) {
     var s = lobbyState.gameStatus[slug];
@@ -666,6 +673,12 @@
         } catch { /* ignore */ }
       }
       return '<span class="lobby-tile-status lobby-tile-status--starting">&#9679; ' + escapeHtml(label) + '</span>';
+    }
+    // Perpetual-spill (Spill 2/3) i CLOSED-state betyr "venter på første spiller" —
+    // ikke faktisk stengt. Klikk vil spawne ny runde. Vis derfor "Klar til start"
+    // for å unngå at spillere tror spillet er nede.
+    if (PERPETUAL_LOOP_SLUGS[slug]) {
+      return '<span class="lobby-tile-status lobby-tile-status--open">&#9679; Klar til start</span>';
     }
     return '<span class="lobby-tile-status lobby-tile-status--closed">Stengt</span>';
   }
