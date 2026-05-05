@@ -566,9 +566,14 @@ export class Game3Engine extends Game2Engine {
   }): Promise<number> {
     const { room, game, player, claim, requestedPayout, houseAccountId, gameType, channel, label, idempotencyKey } = args;
     const rtpBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    // 2026-05-06 (audit §9.1): bind prize-cap mot per-spill `PrizeGameType`
+    // resolved fra `room.gameSlug`. Spill 3 (monsterbingo / mønsterbingo /
+    // game_3) er hovedspill → MAIN_GAME. Pre-fix hardkodet "DATABINGO" som
+    // var regulatorisk inkonsistent med ledger-events (PR #769) som
+    // allerede skrev MAIN_GAME for Spill 2/3.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: room.hallId,
-      gameType: "DATABINGO",
+      gameType: ledgerGameTypeForSlug(room.gameSlug),
       amount: requestedPayout,
     });
     const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);

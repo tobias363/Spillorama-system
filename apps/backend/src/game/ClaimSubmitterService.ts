@@ -451,6 +451,10 @@ export class ClaimSubmitterService {
         claimId: claim.id,
       }),
       phase: "LINE",
+      // 2026-05-06 (audit §9.1): bind prize-cap mot per-spill PrizeGameType
+      // (Spill 1-3 → MAIN_GAME, SpinnGo → DATABINGO). `gameType` her er
+      // allerede resolved fra `room.gameSlug` via `ledgerGameTypeForSlug`.
+      prizeGameType: gameType,
     });
     const {
       payout,
@@ -706,6 +710,8 @@ export class ClaimSubmitterService {
           claimId: claim.id,
         }),
         phase: "BINGO",
+        // 2026-05-06 (audit §9.1): se kommentar i LINE-phase ovenfor.
+        prizeGameType: gameType,
       });
     } catch (err) {
       // CRIT-6 partial-state-protection: roll back the mutex-lock so retry

@@ -14,7 +14,25 @@ const POLICY_WILDCARD = "*";
 
 // ── Exported types ────────────────────────────────────────────────
 
-export type PrizeGameType = "DATABINGO";
+/**
+ * Spill-kategori brukt som lookup-key for premiepolicy-resolveren.
+ *
+ * Pre-2026-05-06 var typen kun `"DATABINGO"`; alle hovedspill (Spill 1-3)
+ * måtte gjenbruke databingo-policy-en fordi cap-en (2500 kr per
+ * pengespillforskriften §11) er identisk uansett gameType. Dette skapte
+ * en regulatorisk inkonsistens: ledger-events brukte korrekt
+ * `MAIN_GAME` for Spill 2/3 (PR #769), men prize-cap-call-sites
+ * hardkodet `"DATABINGO"` (Game2Engine.ts:379/503, Game3Engine.ts:571).
+ *
+ * 2026-05-06 (audit §9.1): typen utvides til union så Spill 2/3 kan
+ * binde prize-cap mot MAIN_GAME-policy. Caps er fortsatt 2500 for begge
+ * inntil Lotteritilsynet eventuelt differensierer dem.
+ *
+ * Spillkategorisering (docs/architecture/SPILLKATALOG.md, PM-låst 2026-04-25):
+ *   - Spill 1-3 (bingo / rocket / monsterbingo + aliaser) → MAIN_GAME
+ *   - SpinnGo (spillorama / game_5) → DATABINGO
+ */
+export type PrizeGameType = "DATABINGO" | "MAIN_GAME";
 
 export interface PrizePolicyVersion {
   id: string;
@@ -81,14 +99,23 @@ export class PrizePolicyManager {
   constructor(config: PrizePolicyManagerConfig) {
     this.persistence = config.persistence;
 
-    this.applyPrizePolicy({
-      gameType: "DATABINGO",
-      hallId: POLICY_WILDCARD,
-      linkId: POLICY_WILDCARD,
-      effectiveFrom: new Date(0).toISOString(),
-      singlePrizeCap: 2500,
-      dailyExtraPrizeCap: 12000
-    });
+    // 2026-05-06 (audit §9.1): default-policies registreres for BÅDE
+    // DATABINGO og MAIN_GAME. Caps er identiske (2500 kr enkelt-premie
+    // per pengespillforskriften §11) men separate scope-keys lar
+    // Spill 1-3 binde mot MAIN_GAME mens SpinnGo (databingo) fortsatt
+    // går mot DATABINGO. Hvis Lotteritilsynet senere differensierer
+    // capene kan de oppdateres uavhengig via `upsertPrizePolicy`.
+    const defaultPolicyTypes: PrizeGameType[] = ["DATABINGO", "MAIN_GAME"];
+    for (const gameType of defaultPolicyTypes) {
+      this.applyPrizePolicy({
+        gameType,
+        hallId: POLICY_WILDCARD,
+        linkId: POLICY_WILDCARD,
+        effectiveFrom: new Date(0).toISOString(),
+        singlePrizeCap: 2500,
+        dailyExtraPrizeCap: 12000,
+      });
+    }
   }
 
   // ── Hydration ───────────────────────────────────────────────────
