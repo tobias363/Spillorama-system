@@ -3,6 +3,19 @@
 **Forfatter:** Anthropic Claude (Opus 4.7, 1M context).
 **Mandat:** Tobias 2026-05-05 — "samme robusthet som Evolution Gaming."
 **Pilot-skala:** 24 haller × ~1500 spillere = **36 000 samtidige WebSocket-tilkoblinger** på ETT globalt rom (`ROCKET` for Spill 2, `MONSTERBINGO` for Spill 3).
+
+
+> **🟢 STATUS-OPPDATERING 2026-05-06 (Tobias-direktiv):** 5 av 9 KRITISKE pilot-blokkere fikset og verifisert live på prod:
+> - **§2.1 endGame ACL bypass** — Fixed i [PR #950](https://github.com/tobias363/Spillorama-system/pull/950) (system-actor)
+> - **§2.6 PerpetualRoundService stale host** — Fixed i [PR #950](https://github.com/tobias363/Spillorama-system/pull/950)
+> - **§2.7 Slug-aliaser** — Fixed i [PR #950](https://github.com/tobias363/Spillorama-system/pull/950)
+> - **§5.1 Game3 stuck-recovery** — Fixed i [PR #948](https://github.com/tobias363/Spillorama-system/pull/948)
+> - **§9.1 DATABINGO regulatorisk** — Fixed i [PR #948](https://github.com/tobias363/Spillorama-system/pull/948) (MAIN_GAME for Spill 2/3)
+>
+> Verifisert prod 2026-05-06: ROCKET `autoDraw.errors=0`, MONSTERBINGO 75/75 ENDED + perpetual-restart scheduled. Trekninger faktisk skjer (drawsTriggered>0).
+>
+> Resterende 4 KRITISKE er performance-engineering (Wave 3): §3.1, §3.4, §6.1, §6.4.
+
 **Scope:** Backend engine + sockets + klient + shared-types — kun Spill 2 (`rocket`) og Spill 3 (`monsterbingo`). Spill 1 har egen audit.
 
 ---

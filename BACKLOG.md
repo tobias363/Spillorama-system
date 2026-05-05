@@ -39,38 +39,47 @@ Status: ✅ Lukket. Customer Unique ID (PR #464), agent-portal cash-inout, ticke
 ### K3 - Hall-binding (alle merget)
 Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 
-### Faktisk gjenværende kritiske
+### Pilot-blokkere lukket 2026-05-06 (Wave 1+2)
 
-| ID | Tema | Beskrivelse | Status |
+| § | Tema | Fix |
+|---|---|---|
+| §2.1 | endGame ACL bypass (én spiller kunne brikke 1500-rom) | ✅ [PR #950](https://github.com/tobias363/Spillorama-system/pull/950) — system-actor sentinel |
+| §2.6 | PerpetualRoundService stale host | ✅ [PR #950](https://github.com/tobias363/Spillorama-system/pull/950) |
+| §2.7 | Slug-aliaser (`tallspill`/`game_2`/`mønsterbingo`/`game_3`) | ✅ [PR #950](https://github.com/tobias363/Spillorama-system/pull/950) — `isPerpetualSlug` |
+| §5.1 | Game3 stuck-recovery (henging på ball #75) | ✅ [PR #948](https://github.com/tobias363/Spillorama-system/pull/948) |
+| §9.1 | DATABINGO hardkodet for Spill 2/3 (regulatorisk §11) | ✅ [PR #948](https://github.com/tobias363/Spillorama-system/pull/948) — MAIN_GAME-paritet |
+
+**Verifisert prod 2026-05-06:** ROCKET `autoDraw.errors=0`, MONSTERBINGO 75/75 ENDED + perpetual-restart scheduled. Trekninger faktisk skjer.
+
+### Wave 3 — gjenstående pilot-blokkere (performance-engineering)
+
+| § | Tema | Beskrivelse | Estimat |
 |---|---|---|---|
-| W1 | Engine-refactor for system-actor | Fjern hardkodet system-player-id, bruk eksplisitt actorType=SYSTEM | Wave 1 i fremdrift |
-| 2A | Strukturerte error-codes | Migrere alle `throw new Error(...)` til `BingoError(code, ...)` | Fase 2A, 60% migrert |
-| MED-1 | Trace-ID propagering | Klient → HTTP → Socket.IO → DB samme trace_id | Delvis (klient ✅, backend ⚠️) |
-| 2B | Klient-debug-suite | Ring-buffer + debug-overlay + bug-rapport-knapp | Fase 2B, basis på plass |
+| §3.1 | onDrawCompleted slow at scale | Mass-payout (100+ winners) tar 15s+ blokkerer 30s tick | ~2 t |
+| §3.4 | room.players mutex missing | `assertWalletNotInRunningGame` muterer Map for RUNNING rom uten draw-lock — korrumperer iterator daglig ved 1500 spillere | ~3 t |
+| §6.1 | room:update payload size | 300 KB × 1500 sockets = 450 MB per emit; bandwidth-issue | ~4 t |
+| §6.4 | Postgres pool exhaustion | Sekvensielle wallet-transfers serialiserer gjennom 25-connection pool | ~3 t |
+
+**Wave 3-prioritet:** disse er performance-engineering snarere enn bug-fixes. Krever load-testing-infrastruktur (`npm run dev:stress` finnes via PR #946) før refaktor.
+
+### Andre åpne saker
+
+| ID | Tema | Status |
+|---|---|---|
+| MED-1 | Trace-ID full-stack (klient → DB) | Klient ✅, HTTP ✅, Socket.IO ⚠️, DB-queries ⚠️ |
+| Wave 4 | Outbox-bredkast for compliance + game-events | Ikke startet — avhengig av Wave 3 |
 
 ---
 
-## Pågående waves
+## Tidligere wave-status (referanse)
 
-### Wave 1 — Engine-refactor (Spill 2/3)
-**Mål:** ren separasjon mellom Spill 1 (master-styrt) og Spill 2/3 (perpetual). Fjerne hardkodet
-system-player-id. Eksplisitt actorType-felt.
+### Wave 1 — system-actor for Spill 2/3 ✅ LUKKET 2026-05-06
+- PR #950 — `SystemActor.ts` sentinel + `isPerpetualSlug` + assertHost + AutoDrawTickServices
+- Engine-refaktor for separasjon Spill 1 (master) vs Spill 2/3 (perpetual)
 
-**Trigger:** ADR-001 + ADR-002 + audit-rapport 2026-05-05
-
-**Status:** I fremdrift. Påfølgende PR-er.
-
-**Output:** ren engine-API, færre subtle bugs, audit-trail sannferdig.
-
-### Wave 2 — Outbox-bredkast for compliance og game-events
-**Mål:** ADR-004 outbox-pattern for compliance og game-events (wallet er ferdig).
-
-**Status:** Ikke startet. Avhengig av Wave 1 stabilitet.
-
-### Wave 3 — Trace-ID full-stack
-**Mål:** klient til DB, samme trace_id alle steder.
-
-**Status:** Klient ✅, backend HTTP ✅, Socket.IO og DB-queries ⚠️.
+### Wave 2 — MAIN_GAME-paritet + Game3-recovery ✅ LUKKET 2026-05-06
+- PR #948 — prize-cap binder MAIN_GAME for Spill 2/3 (regulatorisk §11)
+- Game3AutoDrawTickService stuck-recovery paritet med PR #876
 
 ---
 
