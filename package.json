@@ -25,6 +25,7 @@
     "build:visual-harness": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build:visual-harness",
     "serve:visual-harness": "npm -w @spillorama/game-client run serve:visual-harness",
     "check:all": "npm run check && npm run build && npm run test:compliance",
+    "docs:check": "node scripts/docs/validate-docs.mjs",
     "deploy:backend": "bash infra/deploy-backend.sh",
     "import:legacy-templates": "npm --prefix apps/backend run import:legacy-templates --",
     "matrix:generate": "tsx scripts/generate-parity-matrix.ts",
