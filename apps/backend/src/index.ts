@@ -283,6 +283,10 @@ import { createPublicStatusRouter } from "./routes/publicStatus.js";
 import { bootstrapStatusPage } from "./observability/statusBootstrap.js";
 import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
+// Fase 2A (2026-05-05): error-code observability admin-routes (rate-snapshot
+// + registry-lookup). Wires GET /api/admin/observability/error-rates +
+// /api/admin/observability/error-codes brukt av dashboards og on-call-UI.
+import { createAdminObservabilityRouter } from "./routes/adminObservability.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminReportsGame1ManagementRouter } from "./routes/adminReportsGame1Management.js";
 import { createAdminReportsGameSpecificRouter } from "./routes/adminReportsGameSpecific.js";
@@ -2676,6 +2680,10 @@ const statusBootstrap = bootstrapStatusPage({
 });
 app.get("/status", (_req, res) => res.sendFile(path.join(publicDir, "status.html")));
 app.use(createPublicStatusRouter(statusBootstrap));
+// Fase 2A (2026-05-05): admin observability — error-rates + registry. Mounts
+// `/api/admin/observability/error-rates` + `/api/admin/observability/error-codes`.
+// Bearer-auth + ADMIN_PANEL_ACCESS — driver dashboards og on-call-UI.
+app.use(createAdminObservabilityRouter({ platformService }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
 // BingoEngine er konstruert med (`bingoDailyLossLimit` / `bingoMonthlyLossLimit`)
