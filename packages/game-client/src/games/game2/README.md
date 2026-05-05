@@ -34,17 +34,14 @@ packages/game-client/src/games/
     │   ├── BongCard.ts                # 2026-05-03: beige bong-kort med 3×3 grid (erstatter TicketCard for Spill 2)
     │   ├── BallTube.ts                # 2026-05-03: glass-rør med countdown + drawn-balls-rad
     │   ├── ComboPanel.ts              # 2026-05-03: panel-rad med Lykketall + Hovedspill + Jackpots
-    │   ├── LykketallGrid.ts           # 2026-05-03: 5×5 lucky-number-grid (1-21) med kløver-ikon
     │   ├── JackpotsRow.ts             # 2026-05-03: 6 jackpot-sirkler (erstatter forrige JackpotBar)
     │   ├── DesignBall.ts              # 2026-05-03: Pixi-kule for Bong Mockup-design (radial gradients)
     │   ├── TicketCard.ts              # BingoGrid (3x3/3x5) + "to-go" teller — fortsatt brukt av game3/game5
     │   ├── TicketScroller.ts          # Horisontal scroll med mask + drag — brukt av LobbyScreen + game3/5
-    │   ├── CountdownTimer.ts          # GSAP scale/color pulse nedtelling — brukt av LobbyScreen
     │   ├── DrawnBallsPanel.ts         # Rad med NumberBall-instanser — brukt av game3/5
     │   ├── ClaimButton.ts             # LINE/BINGO knapp med pulsering
     │   ├── PlayerInfoBar.ts           # Spillerantall + trekk + pott — brukt av LobbyScreen + game3/5
-    │   ├── BuyPopup.ts                # Billettantall-velger mellom runder
-    │   └── LuckyNumberPicker.ts       # Modal tallvelger 1-21 — brukt av LobbyScreen
+    │   └── BuyPopup.ts                # Billettantall-velger mellom runder
     └── logic/
         ├── ClaimDetector.ts           # Port av backend ticket.ts mønstersjekk
         └── TicketSorter.ts            # Best-card-first sortering
@@ -88,7 +85,7 @@ Spill 2's PlayScreen er omformet etter `/tmp/spill2-design-extracted/spillorama/
 
 **3×3 vs FREE:** HTML-mockupen viste FREE-cellen i sentrum, men backend (`Game2TicketPoolService`) genererer 3×3-grids med 9 unike tall (ingen FREE). Vi rendrer alle 9 cellene som tall — dette matcher backend-realiteten og gir spilleren én ekstra mark-mulighet. `BongCard.loadTicket` har fallback-logikk som rendrer FREE hvis backend en dag legger til 0 i sentrum.
 
-**Lucky number:** Tidligere ble lykketall valgt via en modal `LuckyNumberPicker` fra LobbyScreen. I det nye designet er 5×5-grid alltid synlig under spill (i ComboPanel), så spilleren kan velge eller endre lykketall i sanntid. Modal-pickeren beholdes på LobbyScreen for backward-compat (vises mellom runder).
+**Lucky number:** Tidligere ble lykketall valgt via en modal Pixi-picker fra LobbyScreen. I det nye designet åpnes en HTML-modal (`LykketallPopup`) ved klikk på Lykketall-kolonnen i ComboPanel — både i lobby- og play-fase — så spilleren kan velge eller endre lykketall i sanntid.
 
 **Assets:**
 - `packages/game-client/public/assets/game2/design/bong-bg.png` (~1.7 MB)

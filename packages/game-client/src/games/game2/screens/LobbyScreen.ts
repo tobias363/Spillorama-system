@@ -28,15 +28,15 @@
  *   - `ctaButton` ("Velg brett for neste runde") — ikke i mockup;
  *     "Kjøp flere brett"-pill i ComboPanel + BuyPopup overtar entry-
  *     punktet for ticket-kjøp
- *   - `luckyPicker` (modal LuckyNumberPicker) — ikke i mockup;
- *     LykketallGrid i ComboPanel håndterer alt lucky-number-valg
+ *   - `luckyPicker` (gammel modal Pixi-picker) — ikke i mockup;
+ *     ComboPanel-kløveren + LykketallPopup håndterer alt lucky-number-valg
  *
  * → BEHOLDT (eksplisitt fra Tobias):
  *   - BuyPopup (kjøp av billetter)
  *
  * Kontrakt mot `Game2Controller` er BEVART (samme metoder + signaturer):
  *   - `setOnBuy(cb)` — fortsatt brukt av controller for `BuyPopup`-arm-bet.
- *   - `setOnLuckyNumber(cb)` — videresendt til ComboPanel.LykketallGrid.
+ *   - `setOnLuckyNumber(cb)` — videresendt til ComboPanel-kløveren.
  *   - `setOnChooseTickets(cb)` — kalles ved klikk på "Kjøp flere brett"-pill.
  *   - `update(state)` — oppdaterer countdown + jackpots + player-count.
  *   - `showBuyPopup(price)` / `hideBuyPopup()` — fortsatt tilgjengelig.
@@ -70,8 +70,8 @@ export class LobbyScreen extends Container {
   private ballTube: BallTube;
   private buyPopup: BuyPopup;
   // 2026-05-03 (Agent Y): popup som åpnes ved klikk på Lykketall-kolonnen
-  // i ComboPanel. Erstatter inline LykketallGrid-flyt (samme som i
-  // PlayScreen — speilet for konsistens mellom lobby og play-fase).
+  // i ComboPanel. Erstatter tidligere inline lucky-number-grid-flyt
+  // (samme som i PlayScreen — speilet for konsistens mellom lobby og play).
   private lykketallPopup: LykketallPopup;
   private currentLuckyNumber: number | null = null;
   private screenW: number;

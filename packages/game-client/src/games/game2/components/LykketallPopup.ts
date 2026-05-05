@@ -1,7 +1,7 @@
 /**
  * Spill 2 — Modal popup for lucky-number-valg.
  *
- * Erstatter inline LykketallGrid i ComboPanel per Tobias-direktiv 2026-05-03:
+ * Erstatter tidligere inline lucky-number-grid i ComboPanel per Tobias-direktiv 2026-05-03:
  *
  *   "velg lykketall skal være en popup
  *    med da alle tallene som man kan velge mellom"
@@ -34,8 +34,8 @@
  *   - `isVisible()` — for trigger-gating i parent screens
  *
  * 2026-05-03 (Agent Y, branch feat/spill2-lykketall-popup): ny komponent.
- * Tegning av valgt-celle (gull-fyll + grønn dot) speiler LykketallGrid for
- * visuell konsistens — spilleren skal kjenne seg igjen.
+ * Tegning av valgt-celle (gull-fyll + grønn dot) følger forrige inline
+ * grid-design for visuell konsistens — spilleren skal kjenne seg igjen.
  */
 
 import { Container, Graphics, Sprite, Text, Assets, type Texture } from "pixi.js";
@@ -309,7 +309,7 @@ export class LykketallPopup extends Container {
       this.clover = sprite;
     } catch {
       if (this.destroyed) return;
-      // Fallback: enkel 4-blads-kløver med Graphics (samme som LykketallGrid).
+      // Fallback: enkel 4-blads-kløver med Graphics (samme stil som tidligere inline grid).
       const fallback = new Graphics();
       const panelW = COLS * CELL_SIZE + (COLS - 1) * CELL_GAP + PANEL_PADDING * 2;
       fallback.x = panelW / 2;

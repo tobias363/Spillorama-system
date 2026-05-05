@@ -12,9 +12,9 @@
  * så til venstre, og deretter "Swap Hovedspill and Velg lykketall
  * positions". Sluttilstanden er rekkefølgen over.
  *
- * 2026-05-03 (Agent Y, branch feat/spill2-lykketall-popup): inline 5×5
- * LykketallGrid ERSTATTET med stor kløver + tekst-kolonne. Klikk åpner
- * LykketallPopup (modal). Per Tobias-direktiv:
+ * 2026-05-03 (Agent Y, branch feat/spill2-lykketall-popup): tidligere
+ * inline 5×5 lucky-number-grid ERSTATTET med stor kløver + tekst-kolonne.
+ * Klikk åpner LykketallPopup (modal). Per Tobias-direktiv:
  *
  *   "designet skal være som dette … velg lykketall skal være en popup
  *    med da alle tallene som man kan velge mellom"

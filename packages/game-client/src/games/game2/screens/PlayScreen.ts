@@ -14,7 +14,7 @@
  * → FJERNET fra v1:
  *   - LINE/BINGO claim-knapper (ikke i mockup; auto-claim på Fullt Hus
  *     drives av backend per PR #855)
- *   - ChatPanel (ikke i mockup; chat var en lokal addition i v1)
+ *   - chat-panel (ikke i mockup; chat var en lokal addition i v1)
  *
  * → BEHOLDT (eksplisitt fra Tobias):
  *   - BuyPopup (mellom-runde kjøp)
@@ -155,7 +155,7 @@ export class PlayScreen extends Container {
     // ── stage-bredde (uten chat, full bredde) ────────────────────────────
     // STRICT-cleanup per Tobias 2026-05-03: chat er fjernet fra v2-design.
     // socket/roomCode-args er bevart for kontrakt-kompatibilitet med
-    // Game2Controller, men de brukes ikke lenger til å mounte ChatPanel.
+    // Game2Controller, men de brukes ikke lenger til chat-mounting.
     const availableW = screenWidth - STAGE_PADDING_X * 2;
     this.stageW = Math.min(MAX_STAGE_WIDTH, Math.max(640, availableW));
     this.stageX = STAGE_PADDING_X + Math.max(0, (availableW - this.stageW) / 2);
