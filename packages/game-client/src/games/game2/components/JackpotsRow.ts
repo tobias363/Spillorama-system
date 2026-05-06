@@ -122,7 +122,7 @@ const RECT_HEIGHT_RATIO = 0.250;     // rektangel-høyde ratio
  * 60-70px buffer). Hvis labels klippes, øk panelH-padding eller
  * reduser LABEL_GAP_PX.
  */
-const LABEL_GAP_PX = 50;
+const LABEL_GAP_PX = 110;
 
 /** Active-slot glow-ring stroke-farger (gull). */
 const ACTIVE_GLOW_COLOR = 0xffd97a;
