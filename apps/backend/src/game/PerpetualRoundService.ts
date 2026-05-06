@@ -280,6 +280,37 @@ export class PerpetualRoundService {
     { handle: ReturnType<typeof setTimeout>; gameId: string; nextRoundAtMs: number }
   >();
 
+  /**
+   * Tobias-direktiv 2026-05-06 (Phase 4): min-tickets-gate.
+   *
+   * Når `variantConfig.minTicketsBeforeCountdown > 0` venter vi på at
+   * `sum(armedPlayerTicketCounts)` >= threshold før vi schedulerer
+   * countdown for ny runde. Polling skjer hver 2 sekund via setInterval.
+   *
+   * Sikkerhets-timeout: 30 min max. Hvis threshold ikke nås innen det,
+   * starter vi runden uansett (forhindrer evig hengende rom).
+   *
+   * In-memory state: tap ved restart håndteres av `spawnFirstRoundIfNeeded`
+   * som re-evaluerer threshold når neste spiller joiner et tomt perpetual-rom.
+   */
+  private readonly waitingForTicketsByRoom = new Map<
+    string,
+    {
+      pollHandle: ReturnType<typeof setInterval>;
+      timeoutHandle: ReturnType<typeof setTimeout>;
+      prevGameId: string;
+      slug: string;
+      minTickets: number;
+      waitingSince: number;
+    }
+  >();
+
+  /** Polling-intervall (ms) for ticket-count-sjekk under WAITING_FOR_TICKETS. */
+  private static readonly THRESHOLD_POLL_INTERVAL_MS = 2_000;
+
+  /** Max ventetid før vi starter runden uansett (sikkerhet mot stuck rooms). */
+  private static readonly THRESHOLD_MAX_WAIT_MS = 30 * 60 * 1_000;
+
   constructor(config: PerpetualRoundServiceConfig) {
     this.config = {
       enabled: config.enabled,
@@ -423,6 +454,29 @@ export class PerpetualRoundService {
       this.config.delayMs,
     );
 
+    // Tobias-direktiv 2026-05-06 (Phase 4): min-tickets-gate.
+    // Hvis admin har satt `minTicketsBeforeCountdown > 0` i config.spill2/3,
+    // vent på at totalt ticket-count i rommet når threshold før vi
+    // schedulerer countdown. Default 0 = ingen gating (fortsett som før).
+    const minTicketsRaw = variantInfo?.config?.minTicketsBeforeCountdown;
+    const minTickets =
+      typeof minTicketsRaw === "number" && Number.isFinite(minTicketsRaw) && minTicketsRaw > 0
+        ? Math.floor(minTicketsRaw)
+        : 0;
+
+    if (minTickets > 0) {
+      // Aktiver waiting-for-tickets-gate. Først rydd eventuell pending fra
+      // forrige runde (idempotens), så start polling.
+      this.clearWaitingForTickets(input.roomCode);
+      this.startWaitingForTickets({
+        roomCode: input.roomCode,
+        prevGameId: input.gameId,
+        slug,
+        minTickets,
+      });
+      return;
+    }
+
     const roomCode = input.roomCode;
     const gameId = input.gameId;
     // 2026-05-04 (Bug 1 fix): record the scheduled-fire-at timestamp so
@@ -461,6 +515,184 @@ export class PerpetualRoundService {
       },
       "perpetual: scheduled auto-restart",
     );
+  }
+
+  // ── Phase 4: Min-tickets-gate ─────────────────────────────────────────────
+
+  /**
+   * Tobias-direktiv 2026-05-06: start polling for ticket-count-threshold.
+   * Når threshold nådd → schedule normal countdown via startScheduledCountdown.
+   */
+  private startWaitingForTickets(input: {
+    roomCode: string;
+    prevGameId: string;
+    slug: string;
+    minTickets: number;
+  }): void {
+    const { roomCode, prevGameId, slug, minTickets } = input;
+    const waitingSince = Date.now();
+
+    // Polling-tick: sjekk ticket-count hvert 2. sekund.
+    const pollHandle = setInterval(() => {
+      this.checkThresholdAndProceed(roomCode);
+    }, PerpetualRoundService.THRESHOLD_POLL_INTERVAL_MS);
+
+    // Sikkerhets-timeout: max 30 min ventetid. Etter det starter vi
+    // runden uansett — bedre enn evig hengende rom.
+    const timeoutHandle = setTimeout(() => {
+      logger.warn(
+        {
+          roomCode,
+          slug,
+          minTickets,
+          waitedMs: Date.now() - waitingSince,
+        },
+        "perpetual: threshold-wait timeout — starting round anyway",
+      );
+      void this.proceedToCountdown(roomCode, "TIMEOUT");
+    }, PerpetualRoundService.THRESHOLD_MAX_WAIT_MS);
+
+    this.waitingForTicketsByRoom.set(roomCode, {
+      pollHandle,
+      timeoutHandle,
+      prevGameId,
+      slug,
+      minTickets,
+      waitingSince,
+    });
+
+    logger.info(
+      {
+        roomCode,
+        slug,
+        prevGameId,
+        minTickets,
+        pollIntervalMs: PerpetualRoundService.THRESHOLD_POLL_INTERVAL_MS,
+        maxWaitMs: PerpetualRoundService.THRESHOLD_MAX_WAIT_MS,
+      },
+      "perpetual: waiting for tickets threshold",
+    );
+  }
+
+  /**
+   * Sjekk om current ticket-count >= threshold. Hvis ja, fortsett til
+   * countdown-scheduling. Hvis rommet er tomt (ingen spillere), avbryt
+   * waiting (ingen vits å vente i tomt rom).
+   */
+  private checkThresholdAndProceed(roomCode: string): void {
+    const waiting = this.waitingForTicketsByRoom.get(roomCode);
+    if (!waiting) return;
+
+    // Hvis ingen armed-lookup, kan vi ikke telle — bare fortsett (0 = pass).
+    if (!this.config.armedLookup) {
+      void this.proceedToCountdown(roomCode, "NO_LOOKUP");
+      return;
+    }
+
+    // Sjekk om rommet fortsatt har spillere. Tom rom = avbryt.
+    let snapshot;
+    try {
+      snapshot = this.config.engine.getRoomSnapshot(roomCode);
+    } catch {
+      // Rommet er borte. Rydd waiting-state.
+      this.clearWaitingForTickets(roomCode);
+      logger.info(
+        { roomCode },
+        "perpetual: threshold-wait aborted — room destroyed",
+      );
+      return;
+    }
+    if (snapshot.players.length === 0) {
+      this.clearWaitingForTickets(roomCode);
+      logger.info(
+        { roomCode, reason: "empty_room" },
+        "perpetual: threshold-wait aborted — no players",
+      );
+      return;
+    }
+
+    // Tell totale armed-tickets i rommet.
+    const counts = this.config.armedLookup.getArmedPlayerTicketCounts(roomCode);
+    const totalTickets = Object.values(counts).reduce((sum, n) => sum + n, 0);
+
+    if (totalTickets >= waiting.minTickets) {
+      logger.info(
+        {
+          roomCode,
+          slug: waiting.slug,
+          totalTickets,
+          minTickets: waiting.minTickets,
+          waitedMs: Date.now() - waiting.waitingSince,
+        },
+        "perpetual: threshold reached — proceeding to countdown",
+      );
+      void this.proceedToCountdown(roomCode, "THRESHOLD_REACHED");
+    }
+  }
+
+  /**
+   * Threshold er nådd (eller bypass via NO_LOOKUP/TIMEOUT) — rydd
+   * waiting-state og schedule normal countdown via samme delayMs som
+   * `handleGameEnded` ville brukt.
+   */
+  private async proceedToCountdown(
+    roomCode: string,
+    triggerReason: "THRESHOLD_REACHED" | "TIMEOUT" | "NO_LOOKUP",
+  ): Promise<void> {
+    const waiting = this.waitingForTicketsByRoom.get(roomCode);
+    if (!waiting) return;
+    const { prevGameId, slug } = waiting;
+    this.clearWaitingForTickets(roomCode);
+
+    // Hent variantConfig for å resolve riktig delayMs.
+    const variantInfo = this.config.variantLookup.getVariantConfig(roomCode);
+    const delayMs = resolveRoundPauseMs(
+      variantInfo?.config,
+      this.config.delayMs,
+    );
+    const nextRoundAtMs = Date.now() + delayMs;
+
+    const handle = this.config.setTimeoutFn(() => {
+      this.pendingByRoom.delete(roomCode);
+      void this.startNextRound(roomCode, prevGameId);
+    }, delayMs);
+    this.pendingByRoom.set(roomCode, {
+      handle,
+      gameId: prevGameId,
+      nextRoundAtMs,
+    });
+
+    logger.info(
+      {
+        roomCode,
+        slug,
+        prevGameId,
+        delayMs,
+        triggerReason,
+      },
+      "perpetual: scheduled countdown after threshold",
+    );
+
+    // Send room:update så klient ser at countdown nå begynner. Best-effort.
+    if (this.config.emitRoomUpdate) {
+      try {
+        await this.config.emitRoomUpdate(roomCode);
+      } catch (err) {
+        logger.warn(
+          { roomCode, err },
+          "perpetual: emitRoomUpdate after threshold-met failed (best-effort)",
+        );
+      }
+    }
+  }
+
+  /** Rydd waiting-for-tickets-state for et rom (idempotent). */
+  private clearWaitingForTickets(roomCode: string): void {
+    const waiting = this.waitingForTicketsByRoom.get(roomCode);
+    if (!waiting) return;
+    clearInterval(waiting.pollHandle);
+    clearTimeout(waiting.timeoutHandle);
+    this.waitingForTicketsByRoom.delete(roomCode);
   }
 
   /**
@@ -866,5 +1098,11 @@ export class PerpetualRoundService {
       this.config.clearTimeoutFn(handle);
     }
     this.pendingByRoom.clear();
+    // Phase 4: rydd også waiting-for-tickets-state.
+    for (const { pollHandle, timeoutHandle } of this.waitingForTicketsByRoom.values()) {
+      clearInterval(pollHandle);
+      clearTimeout(timeoutHandle);
+    }
+    this.waitingForTicketsByRoom.clear();
   }
 }
