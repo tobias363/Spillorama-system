@@ -98,21 +98,31 @@ const RECT_Y_RATIO = 0.872;          // rektangel-senter ratio
 const RECT_WIDTH_RATIO = 0.131;      // rektangel-bredde ratio (per slot)
 const RECT_HEIGHT_RATIO = 0.250;     // rektangel-høyde ratio
 /**
- * Label-y-ratio relativt til PNG-høyde. Tobias-direktiv 2026-05-06:
- * label skal stå tydelig OVER ballene med synlig luft mellom (matcher
- * referansebilde). Tidligere -0.125 ga kun ~10px gap mellom label-bunn
- * og ball-topp, som visuelt ble "ved siden av ballen" på lav-DPI-skjermer.
+ * Label posisjon-offset over ball-topp. Tobias-direktiv 2026-05-06
+ * (referansebilde 2): label skal være TYDELIG over ballene med
+ * konsistent visuell luft, uavhengig av spriteH-skalering.
  *
- * Ny ratio -0.30 plasserer label-senter `0.30 * spriteH` (~39px ved
- * spriteH=130) over JackpotsRow's top → clear visual separation av
- * ~30-35px mellom label-bunn og ball-topp.
+ * Tidligere ratio-baserte tilnærming (-0.125, -0.30) ga inkonsistent
+ * gap fordi spriteH varierer med viewport-bredde. Live-debug 2026-05-06
+ * via chrome-devtools-mcp viste at -0.30 plasserte labels OPPÅ ballene
+ * (label-y=780, ball-top=~775), mens manuell +80px-offset ga riktig
+ * visuell plassering (label-y=700).
  *
- * Formel: `cy = LABEL_Y_RATIO * spriteH`. Negativ ratio betyr "over
- * PNG top edge", dvs. label-senter ligger `|ratio| * spriteH` over
- * JackpotsRow's top. ComboPanel reserverer plass over JackpotsRow for
- * label-overflow (panelH=142px, JackpotsRow takes max 130px).
+ * Ny tilnærming: regn ut label-y direkte fra ball-topp + fixed gap.
+ * Dette gir samme visuelle gap uansett spriteH.
+ *
+ *   ball_top = (BALL_Y_RATIO - BALL_RADIUS_RATIO) * spriteH ≈ 0.019 * spriteH
+ *   label_y_local = ball_top - LABEL_GAP_PX - labelHalfHeight
+ *
+ * `LABEL_GAP_PX = 50` gir ~50px ren luft mellom label-bunn og ball-topp,
+ * matcher referansebildets visuelle proporsjoner.
+ *
+ * NB: Dette overflower JackpotsRow's top-edge med ~50-60px. ComboPanel
+ * må reservere plass over JackpotsRow for label-overflow (typisk
+ * 60-70px buffer). Hvis labels klippes, øk panelH-padding eller
+ * reduser LABEL_GAP_PX.
  */
-const LABEL_Y_RATIO = -0.30;
+const LABEL_GAP_PX = 50;
 
 /** Active-slot glow-ring stroke-farger (gull). */
 const ACTIVE_GLOW_COLOR = 0xffd97a;
@@ -559,12 +569,19 @@ export class JackpotsRow extends Container {
     const slotW = spriteW * 0.163; // ball-spacing approx
     const fontSize = Math.max(10, Math.min(18, Math.round(slotW * 0.22)));
 
+    // Beregn ball-topp-posisjon i lokal sprite-space:
+    // `ball_top = (BALL_Y_RATIO - BALL_RADIUS_RATIO) * spriteH ≈ 0.019 * spriteH`
+    // Label-bunn skal sitte LABEL_GAP_PX over ball-topp; siden labels
+    // bruker `transform: translate(-50%, -50%)` er positionsy = label-senter.
+    // Vi trekker derfor halv label-høyde (≈ fontSize / 2) i tillegg.
+    const ballTopLocal = (BALL_Y_RATIO - BALL_RADIUS_RATIO) * spriteH;
+    const labelHalfHeight = fontSize * 0.6; // ≈ font-size × line-height-half
+    const localY = ballTopLocal - LABEL_GAP_PX - labelHalfHeight;
     SLOT_KEYS.forEach((key, idx) => {
       const slot = this.slots.get(key);
       if (!slot || !slot.labelEl) return;
       // Lokal x i JackpotsRow-space.
       const localX = spriteX + BALL_X_RATIOS[idx] * spriteW;
-      const localY = LABEL_Y_RATIO * spriteH;
       // DOM-koordinat = page-offset + canvas-offset + global-pos + local.
       const domX = pageOffsetX + globalPos.x + localX;
       const domY = pageOffsetY + globalPos.y + localY;
