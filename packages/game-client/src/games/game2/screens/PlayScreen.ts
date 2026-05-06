@@ -55,12 +55,27 @@ const STAGE_PADDING_TOP = 14;
 const STAGE_PADDING_BOTTOM = 24;
 const ROW_GAP = 14;
 const MAX_STAGE_WIDTH = 1100;
-/** Tobias-direktiv 2026-05-04: 7×3 bong-grid (matcher screenshot-mockup).
- *  Skala krympet fra 0.70 → 0.55 for å få plass til 7 kolonner over stage-W. */
-const BONG_SCALE = 0.55;
+/**
+ * Bong-grid konfigurasjon. Tobias-direktiv 2026-05-06: responsive layout —
+ * få bonger vises STORE i 5-kolonne-grid, mange bonger krymper til
+ * 7-kolonne-grid med scroll for overskudd.
+ *
+ *   1-10 bonger:  5 kolonner × opp til 2 rader, STOR skala (0.85)
+ *   11-21 bonger: 7 kolonner × opp til 3 rader, MINDRE skala (0.55)
+ *   22+ bonger:   7×n grid med scroll (samme som Spill 1)
+ */
+const BONG_GRID_LARGE_COLS = 5;
+const BONG_GRID_LARGE_SCALE = 0.85;
+const BONG_GRID_SMALL_COLS = 7;
+const BONG_GRID_SMALL_SCALE = 0.55;
+/** Threshold (inclusive) for å bytte fra LARGE til SMALL grid. */
+const BONG_GRID_LARGE_MAX = 10;
 const BONG_GAP_X = 10;
 const BONG_GAP_Y = 8;
-const BONG_COLS = 7;
+/** Backward-compat: legacy konstanter beholdt så referanser fra øvrig
+ *  kode ikke brekker. Bruker SMALL-verdiene som default. */
+const BONG_SCALE = BONG_GRID_SMALL_SCALE;
+const BONG_COLS = BONG_GRID_SMALL_COLS;
 // Tube-høyde leses dynamisk via `this.ballTube.getHeight()` etter at
 // BallTube ble oppdatert til å bevare PNG-ens 1:1 aspect-ratio
 // (Tobias-direktiv 2026-05-05). Hardkodet TUBE_HEIGHT-konstant er
@@ -633,10 +648,14 @@ export class PlayScreen extends Container {
     }
     const naturalW = this.bongs[0].cardWidth;
     const naturalH = this.bongs[0].cardHeight;
-    const scaledW = naturalW * BONG_SCALE;
-    const scaledH = naturalH * BONG_SCALE;
-    const cols = BONG_COLS;
     const total = this.bongs.length;
+    // Tobias-direktiv 2026-05-06: responsive grid — få bonger = stor skala
+    // i 5-kolonne-grid, mange bonger = mindre skala i 7-kolonne-grid.
+    const useLargeGrid = total <= BONG_GRID_LARGE_MAX;
+    const scale = useLargeGrid ? BONG_GRID_LARGE_SCALE : BONG_GRID_SMALL_SCALE;
+    const cols = useLargeGrid ? BONG_GRID_LARGE_COLS : BONG_GRID_SMALL_COLS;
+    const scaledW = naturalW * scale;
+    const scaledH = naturalH * scale;
     const rows = Math.ceil(total / cols);
 
     for (let row = 0; row < rows; row++) {
@@ -649,7 +668,7 @@ export class PlayScreen extends Container {
       const rowStartX = Math.max(0, (this.stageW - rowW) / 2);
       for (let i = rowStart; i < rowEnd; i++) {
         const card = this.bongs[i];
-        card.scale.set(BONG_SCALE);
+        card.scale.set(scale);
         const col = i - rowStart;
         card.x = rowStartX + col * (scaledW + BONG_GAP_X);
         card.y = row * (scaledH + BONG_GAP_Y);
