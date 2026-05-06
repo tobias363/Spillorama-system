@@ -75,8 +75,10 @@ const LYKKETALL_COL_W = LYKKETALL_INNER_W + PANEL_PADDING_X * 2;
 const PILL_W = 210;
 const PILL_H = 32;
 const PILL_RADIUS = 6;
-// Lykketall-kolonne: clover 44px + label sentrert.
-const LYKKETALL_COL_HEIGHT = 110;
+// Lykketall-kolonne: clover 44px + label sentrert. Tobias-direktiv 2026-05-06:
+// økt fra 110 → 220 så ComboPanel blir høyere og JackpotsRow med
+// MAX_RENDERED_HEIGHT=200 + label-overflow får plass innenfor panelet.
+const LYKKETALL_COL_HEIGHT = 220;
 const CLOVER_SIZE = 44;
 const CLOVER_URL = "/web/games/assets/game2/design/lucky-clover.png";
 

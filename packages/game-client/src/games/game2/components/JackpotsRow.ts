@@ -79,13 +79,13 @@ const PNG_ORIG_H = 398;
 const PNG_ASPECT = PNG_ORIG_W / PNG_ORIG_H; // ~4.201
 
 /**
- * Maksimal rendret høyde for jackpots-raden. Tobias-direktiv 2026-05-06:
- * krympet fra 130 → 80 for å gi plass til "Jackpot/Gain"-labels OVER
- * ballene innenfor ComboPanel-rammen (panelH=142px, label trenger
- * ~30-40px buffer). Mindre PNG = mindre baller = bedre proporsjon
- * mellom label og ball, matcher referansebildets layout.
+ * Maksimal rendret høyde for jackpots-raden. Tobias-direktiv 2026-05-06
+ * (3. iterasjon): balls skal FYLLE hele containeren — referansebildet
+ * viser store balls som dominerer panel-høyden. Settes til 200 så
+ * width-bound vinner i typiske layouts (rowWidth/aspect ≈ 167-200).
+ * ComboPanel auto-tilpasser via LYKKETALL_COL_HEIGHT-økning.
  */
-const MAX_RENDERED_HEIGHT = 80;
+const MAX_RENDERED_HEIGHT = 200;
 
 /**
  * Slot-koordinater (ratio av PNG-dimensjoner) — håndmålt med en alpha-
