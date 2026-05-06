@@ -440,6 +440,16 @@ export class PlayScreen extends Container {
       ? state.myTickets
       : (state.preRoundTickets ?? []);
     const isPreRoundPreview = !running && activeTickets.length > 0;
+    // Tobias-direktiv 2026-05-06: "FORHÅNDSKJØP NESTE RUNDE"-banner skal
+    // KUN vises når spilleren har aktivt armed for neste runde (gameStatus
+    // === "WAITING"). I ENDED-state viser vi spilte bonger uten banner —
+    // de kan bli stående til neste kjøp eller automatisk timeout (30 min,
+    // post-pilot).
+    //
+    // Tidligere logikk satte banner i alle !running tilfeller, inkludert
+    // umiddelbart etter at runde 21/21 var ferdig — det forvirret spilleren
+    // siden bongene fra forrige runde virket dedikert til neste runde.
+    const showPreRoundBanner = state.gameStatus === "WAITING" && isPreRoundPreview;
 
     for (let i = 0; i < activeTickets.length; i++) {
       const ticket = activeTickets[i];
@@ -455,11 +465,8 @@ export class PlayScreen extends Container {
         ? []
         : (state.myMarks[i] ?? state.drawnNumbers);
       card.loadTicket(ticket, initialMarks);
-      // Tobias-direktiv 2026-05-04 (Bug 2 — fix/spill2-bug2-bug3): merk
-      // pre-round-bongen visuelt så den ikke forveksles med aktive bonger
-      // i pågående runde. `isPreRoundPreview` er true når vi viser
-      // preRoundTickets i stedet for live myTickets.
-      if (isPreRoundPreview) {
+      // Banner kun for WAITING-state (ikke ENDED).
+      if (showPreRoundBanner) {
         card.setPreRound(true);
       }
       this.bongs.push(card);
