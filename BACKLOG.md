@@ -1,6 +1,6 @@
 # Spillorama Backlog
 
-**Sist oppdatert:** 2026-05-06
+**Sist oppdatert:** 2026-05-06 (MED-2 lukket: migrasjons-rekkefølge fix)
 **Eier:** Tobias Haugen
 **Formål:** Oversikt over åpne pilot-blokkere, pågående waves, og post-pilot-arbeid.
 
@@ -67,6 +67,7 @@ Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 | ID | Tema | Status |
 |---|---|---|
 | MED-1 | Trace-ID full-stack (klient → DB) | Klient ✅, HTTP ✅, Socket.IO ⚠️, DB-queries ⚠️ |
+| MED-2 | Migrasjons-rekkefølge bug (`20260425` ALTER før `20260724` CREATE) | ✅ Lukket 2026-05-06 — idempotent CREATE+ALTER. Se ADR-012. |
 | Wave 4 | Outbox-bredkast for compliance + game-events | Ikke startet — avhengig av Wave 3 |
 
 ---

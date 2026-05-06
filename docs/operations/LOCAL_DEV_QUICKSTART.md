@@ -1,6 +1,6 @@
 # Local Dev Quickstart
 
-**Dato:** 2026-05-05  
+**Dato:** 2026-05-06 (oppdatert med MED-2 troubleshooting)  
 **Direktiv:** Tobias — redusere iterasjon fra 5-7 min Render-deploy til 2-sek hot-reload.  
 **Mål:** fra `git clone` til "spillet kjører lokalt med demo-data" på under 10 minutter.
 
@@ -292,6 +292,45 @@ Migrasjoner ikke kjørt:
 cd apps/backend && npm run migrate
 ```
 
+### `npm run migrate` feiler på fersk DB med `relation "X" does not exist`
+
+Hvis migrate-en krasjer med en feil som
+`ERROR: relation "app_wallet_reservations" does not exist` (eller en annen
+tabell), betyr det at en ALTER-migrasjon har lavere timestamp enn den
+CREATE-migrasjonen som skaper tabellen. På prod fungerer det fordi tabellen
+allerede eksisterer; på fersk DB krasjer rekkefølgen.
+
+Mønsteret for å fikse det er beskrevet i [ADR-012](../decisions/ADR-012-idempotent-migrations.md):
+legg til en defensiv `CREATE TABLE IF NOT EXISTS` øverst i ALTER-migrasjonen
+med post-ALTER-skjemaet, slik at fersk DB skaper tabellen direkte med
+endelig form.
+
+For den konkrete `app_wallet_reservations`-bug-en ble dette fikset 2026-05-06
+(MED-2). Hvis du ser en lignende feil for en annen tabell, sjekk om det er
+samme rekkefølge-bug og bruk samme mønster.
+
+Sjekk for nye lignende bugs:
+```bash
+python3 - <<'EOF'
+import os, re, glob
+files = sorted(glob.glob("apps/backend/migrations/*.sql"))
+table_create, table_alter = {}, {}
+for f in files:
+    fname = os.path.basename(f)
+    content = re.sub(r'--[^\n]*', '', open(f).read())
+    for m in re.finditer(r'CREATE TABLE(?:\s+IF NOT EXISTS)?\s+(\w+)', content, re.I):
+        table_create.setdefault(m.group(1).lower(), fname)
+    for m in re.finditer(r'ALTER TABLE(?:\s+IF EXISTS)?\s+(\w+)', content, re.I):
+        t = m.group(1).lower()
+        if t in ('if', 'foo'): continue
+        table_alter.setdefault(t, fname)
+issues = [(t, a, table_create[t]) for t, a in table_alter.items() if t in table_create and table_create[t] > a]
+print("BUGS:" if issues else "OK")
+for t, a, c in issues:
+    print(f"  {t}: ALTER {a} before CREATE {c}")
+EOF
+```
+
 ### dev:auto-login returnerer 404
 
 Backend kjører i prod-modus (NODE_ENV=production). Sjekk:
@@ -351,4 +390,4 @@ Alle dev-only features er gated:
 - Ønsker en ny workflow? Send PR mot dette dokumentet med en ny seksjon under "Vanlige workflows".
 - Sikkerhetsspørsmål om dev-routes: spør Tobias direkte før du eksponerer noe.
 
-Sist oppdatert: 2026-05-05.
+Sist oppdatert: 2026-05-06 (MED-2 — migrasjons-rekkefølge troubleshooting).
