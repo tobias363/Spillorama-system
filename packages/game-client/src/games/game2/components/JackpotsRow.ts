@@ -145,7 +145,10 @@ const ACTIVE_GLOW_ALPHA = 1.0;
 const LABEL_BASE_STYLES: Partial<CSSStyleDeclaration> = {
   position: "absolute",
   fontFamily: "Inter, system-ui, sans-serif",
-  fontStyle: "italic",
+  // Tobias-direktiv 2026-05-06 (referansebilde 2): UPRIGHT (ikke italic).
+  // Tidligere iterasjon hadde italic for dynamikk, men referansen viser
+  // ren bold sans-serif uten slant — matcher klassisk casino-jackpot-look.
+  fontStyle: "normal",
   fontWeight: "800",
   letterSpacing: "0.02em",
   // Gull-gradient: lysere topp, mørkere bunn (matcher Tobias' referanse).
