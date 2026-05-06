@@ -335,9 +335,21 @@ export class PlayScreen extends Container {
     // Spill 2 har KUN én ticket-type ("Standard" / "game2-3x3"). Hvis
     // server ikke har sendt ticketTypes ennå, bygg en synthetic så
     // popup-en kan vises uten å vente på initial state-update.
+    //
+    // BUG-FIX 2026-05-06 (Tobias smoke-test, MED-5):
+    // `Game1BuyPopup.showWithTypes` (game1/components/Game1BuyPopup.ts:267)
+    // forventer `priceMultiplier: number`, ikke `price: number`. Legacy
+    // synthetic brukte `price: fee` → `Math.round(entryFee * undefined) =
+    // NaN` ved row-bygging (Game1BuyPopup.ts:284) → popup åpnet med tom/NaN
+    // pris og virket "broken". Pre-fix manifesterte seg som "ingenting skjer
+    // når jeg trykker forhåndskjøp" på late-join SPECTATING der server-
+    // sendt `ticketTypes` ennå ikke var ankommet.
+    //
+    // Fix: bytt til `priceMultiplier: 1` så `Math.round(fee * 1) = fee` —
+    // identisk visningsverdi som forventet for Spill 2 Standard.
     const types = ref.ticketTypes && ref.ticketTypes.length > 0
       ? ref.ticketTypes
-      : [{ type: "game2-3x3", name: "Standard", price: fee, ticketCount: 1 }];
+      : [{ type: "game2-3x3", name: "Standard", priceMultiplier: 1, ticketCount: 1 }];
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
     this.buyPopup.showWithTypes(fee, types as Parameters<Game1BuyPopup["showWithTypes"]>[1], alreadyPurchased);
     this.buyPopupVisible = true;
