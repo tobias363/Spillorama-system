@@ -703,21 +703,38 @@
   // ── Public API ───────────────────────────────────────────────────────────
   window.SpilloramaAuth = { storedToken, storedUser, clearSession, authenticatedFetch };
 
-  // ── Dev-only auto-login (Tobias 2026-05-05) ─────────────────────────────
+  // ── Dev-only auto-login (Tobias 2026-05-05, fix 2026-05-06) ─────────────
   // Hvis URL inneholder ?dev-user=email@example.com prøver vi å auto-logge
   // inn via /api/dev/auto-login. Backend-routen er gated bak NODE_ENV!=
   // production + localhost-only. Hvis vi får et token, lagrer vi det og
   // redirecter til samme URL uten ?dev-user= (så reload starter normal flow).
+  //
+  // BUG-FIX 2026-05-06 (MED-6): tidligere skippet vi auto-login hvis det
+  // fantes ANY storedToken — selv hvis det var fra en annen bruker (eks.
+  // anonym fallback eller forrige demo-bruker). Det låste utvikleren til
+  // den eksisterende sesjonen og gjorde "bytt bruker raskt"-flyten umulig
+  // uten manuell sessionStorage.clear(). Nå sammenligner vi e-post: hvis
+  // dev-user matcher allerede-innlogget bruker, skip auto-login og fjern
+  // bare ?dev-user=. Hvis dev-user er en ANNEN bruker, clear session og
+  // start auto-login på nytt.
   async function maybeDevAutoLogin() {
     var params = new URLSearchParams(window.location.search);
     var devUser = params.get('dev-user');
     if (!devUser) return false;
-    if (storedToken()) {
-      // Allerede innlogget — ingen grunn til å auto-logge på nytt.
+    var requestedEmail = devUser.trim().toLowerCase();
+    var existingUser = storedUser();
+    var existingEmail = existingUser && existingUser.email ? String(existingUser.email).toLowerCase() : null;
+    if (storedToken() && existingEmail === requestedEmail) {
+      // Allerede innlogget som samme bruker — bare fjern ?dev-user=.
       var url = new URL(window.location.href);
       url.searchParams.delete('dev-user');
       window.history.replaceState({}, '', url.toString());
       return false;
+    }
+    if (storedToken()) {
+      // Switching brukere — clear gammel session før vi henter ny.
+      console.log('[dev:auto-login] bytter bruker:', existingEmail || '(anonym)', '→', requestedEmail);
+      clearSession();
     }
     try {
       var res = await fetch('/api/dev/auto-login?email=' + encodeURIComponent(devUser));
