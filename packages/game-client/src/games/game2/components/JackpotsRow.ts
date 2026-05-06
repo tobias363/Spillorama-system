@@ -79,12 +79,13 @@ const PNG_ORIG_H = 398;
 const PNG_ASPECT = PNG_ORIG_W / PNG_ORIG_H; // ~4.201
 
 /**
- * Maksimal rendret høyde for jackpots-raden. ComboPanel.panelH er 142px;
- * vi cap'er på 130 så raden får ~6px luft over og under. Ved bar-bredder
- * der `width / aspect > 130` skaleres PNG-en til 130 høyde og bredden
- * krymper proporsjonalt.
+ * Maksimal rendret høyde for jackpots-raden. Tobias-direktiv 2026-05-06:
+ * krympet fra 130 → 80 for å gi plass til "Jackpot/Gain"-labels OVER
+ * ballene innenfor ComboPanel-rammen (panelH=142px, label trenger
+ * ~30-40px buffer). Mindre PNG = mindre baller = bedre proporsjon
+ * mellom label og ball, matcher referansebildets layout.
  */
-const MAX_RENDERED_HEIGHT = 130;
+const MAX_RENDERED_HEIGHT = 80;
 
 /**
  * Slot-koordinater (ratio av PNG-dimensjoner) — håndmålt med en alpha-
