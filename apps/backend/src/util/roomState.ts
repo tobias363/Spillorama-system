@@ -23,10 +23,14 @@ import type { GameVariantConfig } from "../game/variantConfig.js";
 import {
   BALL_INTERVAL_MS_MAX,
   BALL_INTERVAL_MS_MIN,
+  JACKPOT_TABLE_KEYS,
+  MIN_TICKETS_BEFORE_COUNTDOWN_MAX,
+  MIN_TICKETS_BEFORE_COUNTDOWN_MIN,
   ROUND_PAUSE_MS_MAX,
   ROUND_PAUSE_MS_MIN,
   getDefaultVariantConfig,
 } from "../game/variantConfig.js";
+import type { JackpotTableKey } from "../game/variantConfig.js";
 import {
   applySpill1HallFloors,
   buildVariantConfigFromSpill1Config,
@@ -720,24 +724,40 @@ function extractSpill1Config(
 }
 
 /**
- * Tobias 2026-05-04: pace-felter (roundPauseMs / ballIntervalMs) for
- * Spill 2/3. Lagres under `config.spill2` (rocket) eller `config.spill3`
- * (monsterbingo) i GameManagement.config_json. Returnerer kun feltene
- * som er gyldige (innenfor MIN/MAX-grenser); ugyldige verdier ignoreres
- * og lar default fra variantConfig stå.
+ * Tobias 2026-05-04 + 2026-05-06: full Spill 2/3-config-extract fra
+ * `config.spill2` (rocket) eller `config.spill3` (monsterbingo) i
+ * GameManagement.config_json. Returnerer kun feltene som er gyldige;
+ * ugyldige verdier ignoreres stille og lar default fra variantConfig stå.
  *
- * Returnerer null hvis sub-objektet mangler eller er tomt — caller
- * faller da til default-variantConfig.
+ * Felter som leses (alle valgfrie):
+ *   - `roundPauseMs` (1 000-300 000 ms) — pause mellom runder
+ *   - `ballIntervalMs` (1 000-10 000 ms) — pause mellom baller
+ *   - `jackpotNumberTable` — 6 prize-tier mapping (Spill 2 only;
+ *     Spill 3 har egen pattern-prize-skala håndtert via patterns[])
+ *   - `minTicketsBeforeCountdown` (0-500) — hvor mange bonger må selges
+ *     før countdown starter (Tobias-direktiv 2026-05-06; Phase 4
+ *     implementerer faktisk gating-logikk i PerpetualRoundService)
+ *
+ * Returnerer null hvis ingen gyldig felt finnes — caller faller da til
+ * full default-variantConfig.
  */
 function extractPaceConfig(
   config: Record<string, unknown> | null | undefined,
   subKey: "spill2" | "spill3",
-): Pick<GameVariantConfig, "roundPauseMs" | "ballIntervalMs"> | null {
+): Pick<
+  GameVariantConfig,
+  "roundPauseMs" | "ballIntervalMs" | "jackpotNumberTable" | "minTicketsBeforeCountdown"
+> | null {
   if (!config || typeof config !== "object") return null;
   const nested = (config as Record<string, unknown>)[subKey];
   if (!nested || typeof nested !== "object" || Array.isArray(nested)) return null;
   const obj = nested as Record<string, unknown>;
-  const out: Pick<GameVariantConfig, "roundPauseMs" | "ballIntervalMs"> = {};
+  const out: Pick<
+    GameVariantConfig,
+    "roundPauseMs" | "ballIntervalMs" | "jackpotNumberTable" | "minTicketsBeforeCountdown"
+  > = {};
+
+  // roundPauseMs (1-300 sek)
   if (
     typeof obj.roundPauseMs === "number" &&
     Number.isFinite(obj.roundPauseMs) &&
@@ -746,6 +766,8 @@ function extractPaceConfig(
   ) {
     out.roundPauseMs = Math.floor(obj.roundPauseMs);
   }
+
+  // ballIntervalMs (1-10 sek)
   if (
     typeof obj.ballIntervalMs === "number" &&
     Number.isFinite(obj.ballIntervalMs) &&
@@ -754,5 +776,54 @@ function extractPaceConfig(
   ) {
     out.ballIntervalMs = Math.floor(obj.ballIntervalMs);
   }
-  return out.roundPauseMs !== undefined || out.ballIntervalMs !== undefined ? out : null;
+
+  // minTicketsBeforeCountdown (0-500)
+  if (
+    typeof obj.minTicketsBeforeCountdown === "number" &&
+    Number.isFinite(obj.minTicketsBeforeCountdown) &&
+    obj.minTicketsBeforeCountdown >= MIN_TICKETS_BEFORE_COUNTDOWN_MIN &&
+    obj.minTicketsBeforeCountdown <= MIN_TICKETS_BEFORE_COUNTDOWN_MAX
+  ) {
+    out.minTicketsBeforeCountdown = Math.floor(obj.minTicketsBeforeCountdown);
+  }
+
+  // jackpotNumberTable — KUN for Spill 2 (Spill 3 bruker patterns[]).
+  // Krever alle 6 nøkler ("9","10","11","12","13","1421") + valid shape.
+  if (subKey === "spill2") {
+    const rawTable = obj.jackpotNumberTable;
+    if (rawTable && typeof rawTable === "object" && !Array.isArray(rawTable)) {
+      const tableObj = rawTable as Record<string, unknown>;
+      const validatedTable: Record<JackpotTableKey, { price: number; isCash: boolean }> = {} as Record<
+        JackpotTableKey,
+        { price: number; isCash: boolean }
+      >;
+      let allKeysValid = true;
+      for (const key of JACKPOT_TABLE_KEYS) {
+        const entry = tableObj[key];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          allKeysValid = false;
+          break;
+        }
+        const e = entry as Record<string, unknown>;
+        const price =
+          typeof e.price === "string" ? Number(e.price) : e.price;
+        if (
+          typeof price !== "number" ||
+          !Number.isFinite(price) ||
+          price < 0 ||
+          typeof e.isCash !== "boolean" ||
+          (!e.isCash && price > 100)
+        ) {
+          allKeysValid = false;
+          break;
+        }
+        validatedTable[key] = { price: Math.floor(price), isCash: e.isCash };
+      }
+      if (allKeysValid) {
+        out.jackpotNumberTable = validatedTable;
+      }
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
 }

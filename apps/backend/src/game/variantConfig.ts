@@ -248,6 +248,20 @@ export interface GameVariantConfig {
    * lagring.
    */
   ballIntervalMs?: number;
+  /**
+   * Tobias-direktiv 2026-05-06: Spill 2/3 venter på X solgte bonger før
+   * countdown for ny runde starter. Når X er nådd → countdown teller ned
+   * (admin-konfigurerbar via `roundPauseMs`). Ved countdown=0 → runde
+   * starter, premie-skala for prosent-baserte tiers (12/13/14-21)
+   * beregnes fra solgt-omsetning.
+   *
+   * Settes globalt for Spill 2/3 (ETT globalt rom — alle haller deler
+   * samme verdi). Default = 0 (ingen gating, runde starter umiddelbart
+   * etter forrige rundes pause).
+   *
+   * Validering: 0-500 (0 = av, max 500 for sikkerhetsmargin).
+   */
+  minTicketsBeforeCountdown?: number;
 }
 
 // ── Admin-konfigurerbar runde-pace (Tobias 2026-05-04) ───────────────────────
@@ -260,6 +274,75 @@ export const ROUND_PAUSE_MS_MIN = 1_000;
 export const ROUND_PAUSE_MS_MAX = 300_000;
 export const BALL_INTERVAL_MS_MIN = 1_000;
 export const BALL_INTERVAL_MS_MAX = 10_000;
+export const MIN_TICKETS_BEFORE_COUNTDOWN_MIN = 0;
+export const MIN_TICKETS_BEFORE_COUNTDOWN_MAX = 500;
+
+/** Whitelistede draw-keys i jackpotNumberTable (Spill 2/3). */
+export const JACKPOT_TABLE_KEYS = ["9", "10", "11", "12", "13", "1421"] as const;
+export type JackpotTableKey = (typeof JACKPOT_TABLE_KEYS)[number];
+
+/**
+ * Validate admin-supplied `minTicketsBeforeCountdown`. Returns normalisert tall
+ * (Math.floor) eller kaster Error ved ugyldig verdi.
+ */
+export function validateMinTicketsBeforeCountdown(value: unknown): number {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    throw new Error(`minTicketsBeforeCountdown må være et tall, fikk ${typeof value}`);
+  }
+  const floored = Math.floor(n);
+  if (floored < MIN_TICKETS_BEFORE_COUNTDOWN_MIN || floored > MIN_TICKETS_BEFORE_COUNTDOWN_MAX) {
+    throw new Error(
+      `minTicketsBeforeCountdown må være mellom ${MIN_TICKETS_BEFORE_COUNTDOWN_MIN} og ${MIN_TICKETS_BEFORE_COUNTDOWN_MAX}`,
+    );
+  }
+  return floored;
+}
+
+/**
+ * Validate admin-supplied jackpot-table-entry (Spill 2/3).
+ *   { price: number, isCash: boolean }
+ * Kaster Error ved ugyldig shape eller verdier.
+ */
+export function validateJackpotEntry(value: unknown): { price: number; isCash: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("jackpot-entry må være et objekt { price, isCash }");
+  }
+  const obj = value as Record<string, unknown>;
+  const priceN = typeof obj.price === "string" ? Number(obj.price) : obj.price;
+  if (typeof priceN !== "number" || !Number.isFinite(priceN) || priceN < 0) {
+    throw new Error(`jackpot price må være ≥ 0, fikk ${obj.price}`);
+  }
+  if (typeof obj.isCash !== "boolean") {
+    throw new Error(`jackpot isCash må være boolean, fikk ${typeof obj.isCash}`);
+  }
+  // For prosent-modus (isCash=false) er fornuftig range 0-100.
+  if (!obj.isCash && (priceN > 100)) {
+    throw new Error(`jackpot prosent må være ≤ 100, fikk ${priceN}`);
+  }
+  return { price: Math.floor(priceN), isCash: obj.isCash };
+}
+
+/**
+ * Validate hele jackpotNumberTable (alle 6 nøkler kreves).
+ * Returnerer normalisert tabell eller kaster Error ved ugyldig data.
+ */
+export function validateJackpotNumberTable(
+  value: unknown,
+): Record<JackpotTableKey, { price: number; isCash: boolean }> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("jackpotNumberTable må være et objekt");
+  }
+  const input = value as Record<string, unknown>;
+  const out = {} as Record<JackpotTableKey, { price: number; isCash: boolean }>;
+  for (const key of JACKPOT_TABLE_KEYS) {
+    if (!(key in input)) {
+      throw new Error(`jackpotNumberTable mangler nøkkel "${key}"`);
+    }
+    out[key] = validateJackpotEntry(input[key]);
+  }
+  return out;
+}
 
 /**
  * Validate admin-supplied `roundPauseMs`. Returnerer normalisert tall

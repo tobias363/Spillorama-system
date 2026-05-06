@@ -35,10 +35,50 @@ const ROUND_PAUSE_SECONDS_MIN = 1;
 const ROUND_PAUSE_SECONDS_MAX = 300;
 const BALL_INTERVAL_SECONDS_MIN = 1;
 const BALL_INTERVAL_SECONDS_MAX = 10;
+/** Tobias-direktiv 2026-05-06: min-bonger-threshold for round-start. */
+const MIN_TICKETS_BEFORE_COUNTDOWN_MIN_UI = 0;
+const MIN_TICKETS_BEFORE_COUNTDOWN_MAX_UI = 500;
 
 /** Default-verdier i UI hvis admin oppretter helt nytt spill. */
 const ROUND_PAUSE_SECONDS_DEFAULT = 30;
 const BALL_INTERVAL_SECONDS_DEFAULT = 2;
+const MIN_TICKETS_BEFORE_COUNTDOWN_DEFAULT = 0;
+
+/**
+ * Tobias-direktiv 2026-05-06: Spill 2 jackpot-skala — 6 prize-tiers.
+ *
+ * Draws 9-11 = fast cash (isCash=true). Draws 12-13-14_21 = prosent
+ * av omsetning (isCash=false, price = 1-100 = prosent).
+ *
+ * Default = Variant 1 (matcher backend DEFAULT_GAME2_CONFIG).
+ */
+type JackpotEntry = { price: number; isCash: boolean };
+type JackpotTable = {
+  "9": JackpotEntry;
+  "10": JackpotEntry;
+  "11": JackpotEntry;
+  "12": JackpotEntry;
+  "13": JackpotEntry;
+  "1421": JackpotEntry;
+};
+
+const JACKPOT_DEFAULT_VARIANT_1: JackpotTable = {
+  "9": { price: 5000, isCash: true },
+  "10": { price: 2500, isCash: true },
+  "11": { price: 1000, isCash: true },
+  "12": { price: 100, isCash: false },
+  "13": { price: 75, isCash: false },
+  "1421": { price: 50, isCash: false },
+};
+
+const JACKPOT_ROW_LABELS: Array<{ key: keyof JackpotTable; label: string }> = [
+  { key: "9", label: "Trekk 9" },
+  { key: "10", label: "Trekk 10" },
+  { key: "11", label: "Trekk 11" },
+  { key: "12", label: "Trekk 12" },
+  { key: "13", label: "Trekk 13" },
+  { key: "1421", label: "Trekk 14–21" },
+];
 
 /**
  * Mapper internt slug ("rocket"/"monsterbingo"/"game_2"/"game_5") til
@@ -63,12 +103,22 @@ export function isSpill23Variant(gt: Pick<GameType, "type"> | null | undefined):
   return gt.type === "game_2" || gt.type === "game_3";
 }
 
+/** True når dette formet rendrer for Spill 2 (rocket). Brukes til å vise
+ *  jackpot-tabell som kun gjelder Spill 2 — Spill 3 har egen pattern-prize. */
+function isSpill2Form(s: FormState): boolean {
+  return configSubKeyForSlug(s.gameType.type ?? s.gameType.slug ?? "") === "spill2";
+}
+
 interface FormState {
   gameType: GameType;
   name: string;
   startDateIso: string;
   roundPauseSeconds: number;
   ballIntervalSeconds: number;
+  /** Tobias 2026-05-06: min-bonger før countdown (gjelder Spill 2 + Spill 3). */
+  minTicketsBeforeCountdown: number;
+  /** Tobias 2026-05-06: Spill 2 jackpot-table (kun Spill 2). */
+  jackpotTable: JackpotTable;
   submitting: boolean;
 }
 
@@ -88,10 +138,66 @@ export function renderSpill23PaceAddPage(container: HTMLElement, gt: GameType): 
     startDateIso: todayIso(),
     roundPauseSeconds: ROUND_PAUSE_SECONDS_DEFAULT,
     ballIntervalSeconds: BALL_INTERVAL_SECONDS_DEFAULT,
+    minTicketsBeforeCountdown: MIN_TICKETS_BEFORE_COUNTDOWN_DEFAULT,
+    // Deep-copy så state-mutasjoner ikke deler ref med konstanten.
+    jackpotTable: JSON.parse(JSON.stringify(JACKPOT_DEFAULT_VARIANT_1)),
     submitting: false,
   };
   container.innerHTML = renderShell(state);
   wireForm(container, state);
+}
+
+/** Bygg jackpot-tabell-fieldset (kun Spill 2). */
+function renderJackpotTableFieldset(s: FormState): string {
+  const rows = JACKPOT_ROW_LABELS.map(({ key, label }) => {
+    const entry = s.jackpotTable[key];
+    const cashChecked = entry.isCash ? "checked" : "";
+    const percentChecked = !entry.isCash ? "checked" : "";
+    return `
+      <tr data-testid="gm-jackpot-row-${key}">
+        <td style="padding:6px 8px;font-weight:bold;">${escapeHtml(label)}</td>
+        <td style="padding:6px 8px;">
+          <input type="number" class="form-control" id="gm-jackpot-price-${key}"
+            data-testid="gm-jackpot-price-${key}"
+            min="0" max="999999" step="1" required
+            value="${entry.price}"
+            style="width:120px;display:inline-block;">
+        </td>
+        <td style="padding:6px 8px;">
+          <label style="margin-right:12px;">
+            <input type="radio" name="gm-jackpot-mode-${key}"
+              data-testid="gm-jackpot-cash-${key}"
+              value="cash" ${cashChecked}>
+            kr
+          </label>
+          <label>
+            <input type="radio" name="gm-jackpot-mode-${key}"
+              data-testid="gm-jackpot-percent-${key}"
+              value="percent" ${percentChecked}>
+            % av omsetning
+          </label>
+        </td>
+      </tr>`;
+  }).join("");
+  return `
+    <fieldset class="form-group" style="border:1px solid #eee;padding:12px;margin-bottom:12px;">
+      <legend style="font-size:14px;font-weight:bold;padding:0 8px;width:auto;border:0;">
+        Jackpot-skala (Spill 2)
+      </legend>
+      <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
+        Premie for full plate. Trekk 9-11: fast kontant. Trekk 12-21:
+        prosent av rundens omsetning (beregnes ved round-start).
+        Multi-vinnere ved samme trekk: premien deles likt.
+      </p>
+      <table class="table table-bordered" style="margin-bottom:0;">
+        <thead><tr>
+          <th style="width:120px;">Trekk-nivå</th>
+          <th style="width:160px;">Beløp / Prosent</th>
+          <th>Modus</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </fieldset>`;
 }
 
 function renderShell(s: FormState): string {
@@ -179,8 +285,26 @@ function renderShell(s: FormState): string {
                         Default: ${BALL_INTERVAL_SECONDS_DEFAULT} sek.
                       </p>
                     </div>
+                    <div class="col-sm-6">
+                      <label for="gm-min-tickets">
+                        Min bonger før countdown
+                      </label>
+                      <input type="number" class="form-control" id="gm-min-tickets"
+                        data-testid="gm-min-tickets"
+                        min="${MIN_TICKETS_BEFORE_COUNTDOWN_MIN_UI}"
+                        max="${MIN_TICKETS_BEFORE_COUNTDOWN_MAX_UI}"
+                        step="1"
+                        value="${s.minTicketsBeforeCountdown}">
+                      <p class="text-muted" style="font-size:12px;margin-top:4px;">
+                        Antall bonger som må selges totalt før countdown
+                        for ny runde starter. 0 = ingen gating (runde
+                        starter umiddelbart etter pause).
+                        Område: ${MIN_TICKETS_BEFORE_COUNTDOWN_MIN_UI}-${MIN_TICKETS_BEFORE_COUNTDOWN_MAX_UI}.
+                      </p>
+                    </div>
                   </div>
                 </fieldset>
+                ${isSpill2Form(s) ? renderJackpotTableFieldset(s) : ""}
                 <div id="gm-pace-errors" data-testid="gm-pace-errors" style="margin-bottom:12px;"></div>
                 <div style="padding-top:8px;">
                   <button type="submit" id="gm-pace-submit" data-testid="gm-pace-submit"
@@ -228,6 +352,7 @@ async function handleSubmit(container: HTMLElement, state: FormState): Promise<v
   const startDate = getInputValue(container, "gm-pace-start-date").trim();
   const roundPauseRaw = getInputValue(container, "gm-round-pause").trim();
   const ballIntervalRaw = getInputValue(container, "gm-ball-interval").trim();
+  const minTicketsRaw = getInputValue(container, "gm-min-tickets").trim();
 
   if (!name) errors.push("Navn er påkrevd.");
   if (!startDate) errors.push("Startdato er påkrevd.");
@@ -244,6 +369,52 @@ async function handleSubmit(container: HTMLElement, state: FormState): Promise<v
       `Pause mellom baller må være ${BALL_INTERVAL_SECONDS_MIN}-${BALL_INTERVAL_SECONDS_MAX} sekunder.`,
     );
   }
+  // Min-tickets (valgfri — tom = 0 default).
+  let minTicketsValue = MIN_TICKETS_BEFORE_COUNTDOWN_DEFAULT;
+  if (minTicketsRaw !== "") {
+    const n = Number(minTicketsRaw);
+    if (
+      !Number.isFinite(n) ||
+      n < MIN_TICKETS_BEFORE_COUNTDOWN_MIN_UI ||
+      n > MIN_TICKETS_BEFORE_COUNTDOWN_MAX_UI
+    ) {
+      errors.push(
+        `Min bonger må være ${MIN_TICKETS_BEFORE_COUNTDOWN_MIN_UI}-${MIN_TICKETS_BEFORE_COUNTDOWN_MAX_UI}.`,
+      );
+    } else {
+      minTicketsValue = Math.floor(n);
+    }
+  }
+
+  // Jackpot-tabell — KUN for Spill 2.
+  let jackpotTablePayload: JackpotTable | null = null;
+  if (isSpill2Form(state)) {
+    const collected: Partial<JackpotTable> = {};
+    let allValid = true;
+    for (const { key, label } of JACKPOT_ROW_LABELS) {
+      const priceRaw = getInputValue(container, `gm-jackpot-price-${key}`).trim();
+      const priceN = Number(priceRaw);
+      const modeEl = container.querySelector<HTMLInputElement>(
+        `input[name="gm-jackpot-mode-${key}"]:checked`,
+      );
+      const isCash = modeEl?.value === "cash";
+      if (!Number.isFinite(priceN) || priceN < 0) {
+        errors.push(`${label}: beløp må være ≥ 0.`);
+        allValid = false;
+        continue;
+      }
+      if (!isCash && priceN > 100) {
+        errors.push(`${label}: prosent må være ≤ 100.`);
+        allValid = false;
+        continue;
+      }
+      collected[key] = { price: Math.floor(priceN), isCash };
+    }
+    if (allValid) {
+      jackpotTablePayload = collected as JackpotTable;
+    }
+  }
+
   if (errors.length > 0) {
     setErrorBlock(container, errors);
     return;
@@ -251,14 +422,17 @@ async function handleSubmit(container: HTMLElement, state: FormState): Promise<v
   setErrorBlock(container, []);
 
   const subKey = configSubKeyForSlug(state.gameType.type ?? state.gameType.slug ?? "");
-  const config: Record<string, unknown> = {
-    [subKey]: {
-      // Lagres som ms i DB så backend kan validere mot variantConfig-grenser
-      // direkte. UI viser sekunder for menneskelig lesbarhet.
-      roundPauseMs: Math.floor(roundPauseSec) * 1000,
-      ballIntervalMs: Math.floor(ballIntervalSec) * 1000,
-    },
+  const subConfig: Record<string, unknown> = {
+    // Lagres som ms i DB så backend kan validere mot variantConfig-grenser
+    // direkte. UI viser sekunder for menneskelig lesbarhet.
+    roundPauseMs: Math.floor(roundPauseSec) * 1000,
+    ballIntervalMs: Math.floor(ballIntervalSec) * 1000,
+    minTicketsBeforeCountdown: minTicketsValue,
   };
+  if (jackpotTablePayload) {
+    subConfig.jackpotNumberTable = jackpotTablePayload;
+  }
+  const config: Record<string, unknown> = { [subKey]: subConfig };
 
   state.submitting = true;
   const submitBtn = container.querySelector<HTMLButtonElement>("#gm-pace-submit");
