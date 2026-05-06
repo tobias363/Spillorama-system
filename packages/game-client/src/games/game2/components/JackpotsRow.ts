@@ -169,8 +169,9 @@ const LABEL_BASE_STYLES: Partial<CSSStyleDeclaration> = {
   webkitBackgroundClip: "text",
   webkitTextFillColor: "transparent",
   color: "transparent",
-  // Mørk-rød tekst-stroke for kontrast (synlig kontur rundt glyf).
-  webkitTextStroke: "1px #4a0a0a",
+  // Tobias-direktiv 2026-05-06: rød tekst-stroke fjernet — glyfene
+  // skal være rent gull uten kontur. Drop-shadow gir nok kontrast
+  // mot mørk bakgrunn.
   // Drop-shadow på glyf-pikslene (ikke bounding-box).
   filter: "drop-shadow(2px 2px 3px rgba(0,0,0,0.7))",
   // Beskytt mot å fange klikk/scroll — labels er rent dekorative.
