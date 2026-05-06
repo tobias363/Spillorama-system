@@ -98,46 +98,56 @@ const RECT_Y_RATIO = 0.872;          // rektangel-senter ratio
 const RECT_WIDTH_RATIO = 0.131;      // rektangel-bredde ratio (per slot)
 const RECT_HEIGHT_RATIO = 0.250;     // rektangel-høyde ratio
 /**
- * Label-y-ratio relativt til PNG-høyde. Tobias-direktiv 2026-05-05:
- * label sitter en halv ball-radius OVER toppen av ballen, dvs. ~1.5
- * ball-radii over ball-senter. Dette plasserer label visuelt UNDER
- * ComboPanel-toppen men OVER ballen — overflow-en mot panel-padding
- * tolereres for å gi labelen synlig størrelse mot mørk bakgrunn.
+ * Label-y-ratio relativt til PNG-høyde. Tobias-direktiv 2026-05-06:
+ * label skal stå tydelig OVER ballene med synlig luft mellom (matcher
+ * referansebilde). Tidligere -0.125 ga kun ~10px gap mellom label-bunn
+ * og ball-topp, som visuelt ble "ved siden av ballen" på lav-DPI-skjermer.
  *
- * Formel: `cy = (BALL_Y_RATIO - BALL_RADIUS_RATIO * 1.5) * spriteH`.
- * Med BALL_Y_RATIO=0.307 og BALL_RADIUS_RATIO=0.288 → ratio = -0.125.
- * Negativ ratio betyr "over PNG top edge", dvs. label-senter ligger
- * `0.125 * spriteH` over JackpotsRow's top.
+ * Ny ratio -0.30 plasserer label-senter `0.30 * spriteH` (~39px ved
+ * spriteH=130) over JackpotsRow's top → clear visual separation av
+ * ~30-35px mellom label-bunn og ball-topp.
+ *
+ * Formel: `cy = LABEL_Y_RATIO * spriteH`. Negativ ratio betyr "over
+ * PNG top edge", dvs. label-senter ligger `|ratio| * spriteH` over
+ * JackpotsRow's top. ComboPanel reserverer plass over JackpotsRow for
+ * label-overflow (panelH=142px, JackpotsRow takes max 130px).
  */
-const LABEL_Y_RATIO = -0.125;
+const LABEL_Y_RATIO = -0.30;
 
 /** Active-slot glow-ring stroke-farger (gull). */
 const ACTIVE_GLOW_COLOR = 0xffd97a;
 const ACTIVE_GLOW_ALPHA = 1.0;
 
 /**
- * CSS-stil for "Jackpot"/"Gain"-labels. Tobias-direktiv 2026-05-05:
- * gull-italic-bold med drop-shadow + tekst-stroke for kontrast mot
- * mørk bakgrunn. Stilen matcher referanse-bilde fra Tobias —
- * ikke 100% likt PNG-mockupen (som ikke har labels) men matcher det
- * visuelle uttrykket han eksplisitt bestilte.
+ * CSS-stil for "Jackpot"/"Gain"-labels. Tobias-direktiv 2026-05-06
+ * (oppdatert):
+ * Bold sans-serif gull (ikke serif italic) — matcher referansebilde
+ * Tobias sendte 2026-05-06 med tydeligere/feitere typografi enn
+ * forrige Georgia-italic-iterasjon. Bevart gull-gradient,
+ * drop-shadow og text-stroke som tidligere.
  *
  * Implementeres som DIV-overlay over Pixi-canvas via `HtmlOverlayManager`
  * (samme mønster som `Game1BuyPopup`). Plasseres med `position: absolute`
- * på root-DIV-en (som er body-relativ via `inset: 0`); koordinater
- * regnes som document-pixler.
+ * på root-DIV-en (som ligger inne i `web-game-container` etter MED-7-fix);
+ * koordinater regnes som document-pixler.
  *
  * Gull-gradient bruker `background-clip: text` med transparent fill
  * så glyfene viser gradienten. `filter: drop-shadow` gir skygge på
  * faktiske glyf-pikslene (ikke bounding-box). `-webkit-text-stroke`
- * gir mørk-rød kontur for ekstra lesbarhet — fall-back: regulær
- * text-shadow når browser ikke støtter text-stroke.
+ * gir mørk-rød kontur for ekstra lesbarhet.
+ *
+ * Font-valg: Inter er allerede preloaded fra Google Fonts via
+ * `index.html` (vekter 400/500/600/700/800), så vi unngår en ekstra
+ * font-fetch ved bruk av "Inter, system-ui, sans-serif". Vekt 800
+ * gir tydelig "casino-jackpot"-uttrykk uten å være cartoon-tykk.
+ * Italic beholdt for å beholde dynamikk i utrykket.
  */
 const LABEL_BASE_STYLES: Partial<CSSStyleDeclaration> = {
   position: "absolute",
-  fontFamily: "Georgia, 'Times New Roman', serif",
+  fontFamily: "Inter, system-ui, sans-serif",
   fontStyle: "italic",
-  fontWeight: "700",
+  fontWeight: "800",
+  letterSpacing: "0.02em",
   // Gull-gradient: lysere topp, mørkere bunn (matcher Tobias' referanse).
   background: "linear-gradient(180deg, #ffe066 0%, #ffd700 50%, #b8860b 100%)",
   backgroundClip: "text",
