@@ -525,15 +525,36 @@ export const DEFAULT_TRAFFIC_LIGHT_CONFIG: GameVariantConfig = {
 };
 
 /**
- * BIN-615 / PR-C2: Game 2 (Tallspill / Spill 2) default variant config.
+ * Game 2 (Tallspill / Spill 2) default variant config.
  *
  * - Single 3×3-ticket type, priceMultiplier=1 (legacy G2 uses flat ticket price)
  * - 1..21 drawbag, max 21 draws (Helper/bingo.js:996-1012, GameProcess.js:167,175)
  * - No patterns (full-plate-only winner predicate via hasFull3x3)
  * - patternEvalMode="auto-claim-on-draw" — Game2Engine auto-checks after each draw
- * - jackpotNumberTable matches PM-approved values:
- *     Draw 9 → 25 000 kr fixed
- *     Draw 14-21 → 5% of pool (ticketCount × ticketPrice)
+ *
+ * Premie-skala (Tobias-direktiv 2026-05-06):
+ *   Draws 9-11 = FAST kontant (isCash: true) — UAVHENGIG av omsetning
+ *   Draws 12-13-14_21 = PROSENT av omsetning (isCash: false) — beregnes
+ *   ved round-start basert på solgt-omsetning (ticketCount × ticketPrice).
+ *
+ * Default (Variant 1) — admin kan overstyre alle 6 verdier globalt via
+ * `config.spill2.jackpotNumberTable` i GameManagement.config_json:
+ *
+ *   Draw 9   → 5 000 kr (fast)
+ *   Draw 10  → 2 500 kr (fast)
+ *   Draw 11  → 1 000 kr (fast)
+ *   Draw 12  → 100 % av omsetning
+ *   Draw 13  → 75  % av omsetning
+ *   Draw 14-21 → 50 % av omsetning
+ *
+ * Variant 2 (eksempel — admin kan sette via override):
+ *   Draw 9-11 = 10 000 / 5 000 / 2 000 kr (faste, høyere)
+ *   Draw 12-13-14_21 = 100 / 75 / 50 % (samme som Variant 1)
+ *
+ * Multi-winner-deling: pricePerWinner = Math.round(totalPrice / winnerCount).
+ *
+ * Slot-semantikk: nøkkel = exact draw-count når full plate vinnes;
+ * "1421" matcher draw-count i [14..21]-intervallet.
  */
 export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
   ticketTypes: [
@@ -543,19 +564,13 @@ export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
   maxBallValue: 21,
   drawBagSize: 21,
   patternEvalMode: "auto-claim-on-draw",
-  // 2026-05-03 (Tobias-direktiv): stigende-jackpot-skala portert fra
-  // legacy `seed_staging_lobby_bootstrap.js`. Filosofi: spillere belønnes
-  // for tålmodighet — sent vinst gir større jackpot. Hver hall kan
-  // overstyre via `hall_game_schedules.variant_config` JSONB.
-  // Slot-semantikk: nøkkel = exact draw-count når full plate vinnes;
-  // "1421" matcher draw-count i [14..21]-intervallet.
   jackpotNumberTable: {
-    "9":    { price: 50,   isCash: true },
-    "10":   { price: 100,  isCash: true },
-    "11":   { price: 250,  isCash: true },
-    "12":   { price: 500,  isCash: true },
-    "13":   { price: 1000, isCash: true },
-    "1421": { price: 2500, isCash: true },
+    "9":    { price: 5000, isCash: true },   // 5 000 kr fast
+    "10":   { price: 2500, isCash: true },   // 2 500 kr fast
+    "11":   { price: 1000, isCash: true },   // 1 000 kr fast
+    "12":   { price: 100,  isCash: false },  // 100 % av omsetning
+    "13":   { price: 75,   isCash: false },  // 75 % av omsetning
+    "1421": { price: 50,   isCash: false },  // 50 % av omsetning
   },
 };
 
