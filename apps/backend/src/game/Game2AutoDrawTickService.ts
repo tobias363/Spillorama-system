@@ -341,7 +341,16 @@ export class Game2AutoDrawTickService {
 
       // Status-filter: kun RUNNING (engine sin gameStatus enum: "WAITING" |
       // "RUNNING" | "ENDED" | "NONE"). Vi skipper "NONE"/WAITING/ENDED.
-      if (summary.gameStatus !== "RUNNING") continue;
+      if (summary.gameStatus !== "RUNNING") {
+        // BUG-1 fix 2026-05-06: rydd lastDrawAtByRoom når runde ikke er
+        // RUNNING. Da blir entry undefined ved neste round-start, og
+        // vår initialiseringssjekk under (`lastDrawAt === undefined`)
+        // setter throttle-vinduet riktig så countdown rekkes før første
+        // ball trekkes. Uten dette ville en stale lastDrawAt fra forrige
+        // runde la første ball i ny runde trekkes umiddelbart.
+        this.lastDrawAtByRoom.delete(summary.code);
+        continue;
+      }
 
       checked++;
 
@@ -355,7 +364,24 @@ export class Game2AutoDrawTickService {
       // `variantConfig.ballIntervalMs` (admin-konfig). Faller tilbake
       // til service-level `drawIntervalMs` (env-default) når ikke satt.
       const effectiveIntervalMs = this.resolveDrawIntervalMs(summary.code);
-      const lastDrawAt = this.lastDrawAtByRoom.get(summary.code) ?? 0;
+      // BUG-1 fix 2026-05-06 (Tobias-direktiv): forrige `?? 0` førte til
+      // at første tick etter status-bytte til RUNNING trakk ball
+      // umiddelbart fordi throttle-vinduet startet "i evigheten siden".
+      // Dette gjorde at klient-countdown fortsatt viste tall mens ball
+      // allerede ble trukket.
+      //
+      // Fix: hvis lastDrawAt er undefined (første tick etter RUNNING),
+      // initier den til `now` slik at throttle-perioden starter NÅ. Da
+      // kommer første ball først etter `effectiveIntervalMs` — gir
+      // klienten tid til å reagere på state-overgangen.
+      let lastDrawAt = this.lastDrawAtByRoom.get(summary.code);
+      if (lastDrawAt === undefined) {
+        // Første tick etter RUNNING — initier throttle og hopp over
+        // denne ticken så countdown-overgangen er konsistent.
+        this.lastDrawAtByRoom.set(summary.code, now);
+        skipped++;
+        continue;
+      }
       if (now - lastDrawAt < effectiveIntervalMs) {
         skipped++;
         continue;
