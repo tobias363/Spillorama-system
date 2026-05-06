@@ -66,6 +66,12 @@ import type { PatternMask } from "@spillorama/shared-types";
 import { uses5x5NoCenterTicket } from "./ticket.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { metrics } from "../util/metrics.js";
+import {
+  MASS_PAYOUT_BATCH_SIZE,
+  MASS_PAYOUT_PARALLEL_THRESHOLD,
+} from "./Game2Engine.js";
+import type { PrizePolicyVersion } from "./PrizePolicyManager.js";
 import type {
   ClaimRecord,
   GameState,
@@ -330,6 +336,13 @@ export class Game3Engine extends Game2Engine {
     const { room, game, lastBall, drawIndex, step, variantConfig } = args;
     if (step.activePatterns.length === 0) return [];
 
+    // 2026-05-06 (audit §3.1 fix): track total time spent in
+    // processG3Winners for histogram-metric. Slug = "monsterbingo" siden
+    // dette er Spill 3-pathen.
+    const onDrawStartMs = Date.now();
+    let totalMatches = 0;
+    let anyPartialOutcome = false;
+
     const drawnSet = new Set(game.drawnNumbers);
     const ticketMasksByPlayer = this.buildTicketMasksByPlayer(room, game, drawnSet);
     const records: G3WinnerRecord[] = [];
@@ -345,21 +358,36 @@ export class Game3Engine extends Game2Engine {
       const matches = this.findPatternMatches(ticketMasksByPlayer, pattern);
       if (matches.length === 0) continue;
 
+      totalMatches += matches.length;
+
       // round(prize / winnerCount) split — legacy game3.js:1017-1020.
       const resolvedPrize = this.resolvePatternPrize(pattern, game);
       const pricePerWinner = matches.length > 0
         ? Math.round(resolvedPrize / matches.length)
         : resolvedPrize;
 
-      const ticketWinners: G3TicketWinner[] = [];
-      for (const match of matches) {
-        const winner = await this.payG3PatternShare({
+      // 2026-05-06 (audit §3.1 fix): batched parallel mass-payout-path når
+      // antall match-vinnere for ett pattern overstiger
+      // MASS_PAYOUT_PARALLEL_THRESHOLD. Pre-fix sequential-pathen tok
+      // ~250-500ms per match × N matches = blokkerte auto-draw-tick på
+      // 1500-spillere-skala der hvert pattern kunne ha 100+ vinnere.
+      //
+      // Strategi (regulatorisk-trygg):
+      //   1. Pre-pass (sync): allokér payout per match deterministic iht
+      //      budget/pool/cap. Decrement game.remainingPayoutBudget +
+      //      remainingPrizePool synkront. Identisk verdi-mønster som
+      //      sequential-pathen gjør per match.
+      //   2. I/O-pass (parallel batches av MASS_PAYOUT_BATCH_SIZE): spawn
+      //      walletAdapter.transfer + compliance + ledger + audit +
+      //      checkpoint via Promise.allSettled.
+      const useBatchedPath = matches.length > MASS_PAYOUT_PARALLEL_THRESHOLD;
+      let ticketWinners: G3TicketWinner[];
+      if (useBatchedPath) {
+        const result = await this.processG3PatternMatchesBatched({
           room,
           game,
-          player: match.player,
-          ticketIndex: match.ticketIndex,
-          ticketId: match.ticketId,
           pattern,
+          matches,
           pricePerWinner,
           lastBall,
           drawIndex,
@@ -368,7 +396,28 @@ export class Game3Engine extends Game2Engine {
           channel,
           luckyPrize: variantConfig.luckyNumberPrize ?? 0,
         });
-        ticketWinners.push(winner);
+        ticketWinners = result.ticketWinners;
+        if (result.partial) anyPartialOutcome = true;
+      } else {
+        ticketWinners = [];
+        for (const match of matches) {
+          const winner = await this.payG3PatternShare({
+            room,
+            game,
+            player: match.player,
+            ticketIndex: match.ticketIndex,
+            ticketId: match.ticketId,
+            pattern,
+            pricePerWinner,
+            lastBall,
+            drawIndex,
+            houseAccountId,
+            gameType,
+            channel,
+            luckyPrize: variantConfig.luckyNumberPrize ?? 0,
+          });
+          ticketWinners.push(winner);
+        }
       }
 
       cyclerMarkWon(this.cyclersByRoom.get(room.code), pattern.id);
@@ -381,17 +430,500 @@ export class Game3Engine extends Game2Engine {
         ticketWinners,
       });
     }
+
+    // 2026-05-06 (audit §3.1 fix): observability for total processG3Winners
+    // duration. `winnersBucket` aggregerer over alle patterns slik at p95
+    // segmenteres på faktisk arbeids-mengde uten cardinality-eksplosjon.
+    try {
+      const winnersBucket: "0-9" | "10-49" | "50-99" | "100+" =
+        totalMatches < 10
+          ? "0-9"
+          : totalMatches < 50
+            ? "10-49"
+            : totalMatches < 100
+              ? "50-99"
+              : "100+";
+      metrics.spill23OnDrawCompletedDuration.observe(
+        { slug: "monsterbingo", winnersBucket },
+        Date.now() - onDrawStartMs,
+      );
+      if (totalMatches > MASS_PAYOUT_PARALLEL_THRESHOLD) {
+        metrics.spill23MassPayoutOutcome.inc({
+          slug: "monsterbingo",
+          outcome: anyPartialOutcome ? "partial" : "success",
+        });
+      }
+    } catch {
+      // Metric-failure er aldri kritisk for game-flow.
+    }
+
     return records;
   }
 
-  /** Build `{ playerId → Array<{ticketIndex, ticketId, mask}>}` for all room players. */
+  /**
+   * 2026-05-06 (audit §3.1 fix): parallel mass-payout for ett G3-pattern
+   * når matches.length > MASS_PAYOUT_PARALLEL_THRESHOLD.
+   *
+   * Speil av Game2Engine.processG2WinnersBatched — se den for full
+   * dokumentasjon av strategien (Phase A sync allocation, Phase B parallel
+   * I/O, Phase C sequential claim-publishing).
+   *
+   * Forskjell fra G2: G3 har per-(ticket, pattern) ClaimRecords, så hvert
+   * match får én claim. G2 har per-vinner ClaimRecord (én per spiller-
+   * ticket-kombo som er 9/9). Strukturelt lik nok at samme batched-
+   * mønster fungerer.
+   */
+  private async processG3PatternMatchesBatched(args: {
+    room: RoomState;
+    game: GameState;
+    pattern: PatternSpec;
+    matches: Array<{ player: Player; ticketIndex: number; ticketId?: string }>;
+    pricePerWinner: number;
+    lastBall: number;
+    drawIndex: number;
+    houseAccountId: string;
+    gameType: LedgerGameType;
+    channel: LedgerChannel;
+    luckyPrize: number;
+  }): Promise<{ ticketWinners: G3TicketWinner[]; partial: boolean }> {
+    const {
+      room,
+      game,
+      pattern,
+      matches,
+      pricePerWinner,
+      lastBall,
+      drawIndex,
+      houseAccountId,
+      gameType,
+      channel,
+      luckyPrize,
+    } = args;
+
+    type CapResult = { cappedAmount: number; wasCapped: boolean; policy: PrizePolicyVersion };
+    interface AllocatedG3Match {
+      match: { player: Player; ticketIndex: number; ticketId?: string };
+      claim: ClaimRecord;
+      patternPayout: number;
+      patternCappedPolicy: CapResult | null;
+      patternRequested: number;
+      patternAfterPoolCap: number;
+      luckyPayout: number;
+      luckyCappedPolicy: CapResult | null;
+      luckyRequested: number;
+      luckyAfterPoolCap: number;
+      rtpBefore: number;
+    }
+
+    const cappedGameType = ledgerGameTypeForSlug(room.gameSlug);
+
+    // ── Phase A (sync): allocate budget per match deterministically ──
+    const allocations: AllocatedG3Match[] = [];
+    for (const match of matches) {
+      const claimId = randomUUID();
+      const claim: ClaimRecord = {
+        id: claimId,
+        playerId: match.player.id,
+        type: pattern.isFullHouse ? "BINGO" : "LINE",
+        valid: true,
+        autoGenerated: true,
+        createdAt: new Date().toISOString(),
+        payoutAmount: 0,
+      };
+      const rtpBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
+
+      // Pattern share allocation
+      let patternPayout = 0;
+      let patternCappedPolicy: CapResult | null = null;
+      let patternRequested = 0;
+      let patternAfterPoolCap = 0;
+      if (pricePerWinner > 0) {
+        patternRequested = pricePerWinner;
+        const capped = this.prizePolicy.applySinglePrizeCap({
+          hallId: room.hallId,
+          gameType: cappedGameType,
+          amount: patternRequested,
+        });
+        patternCappedPolicy = capped;
+        patternAfterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
+        patternPayout = Math.max(0, Math.min(patternAfterPoolCap, game.remainingPayoutBudget));
+        if (patternPayout > 0) {
+          game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - patternPayout));
+          game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - patternPayout));
+        } else {
+          claim.payoutWasCapped = patternRequested > 0;
+          claim.rtpCapped = patternAfterPoolCap > 0 && game.remainingPayoutBudget <= 0;
+          claim.rtpBudgetBefore = rtpBefore;
+          claim.rtpBudgetAfter = rtpBefore;
+        }
+      }
+
+      // Lucky bonus allocation (per match)
+      let luckyPayout = 0;
+      let luckyCappedPolicy: CapResult | null = null;
+      let luckyRequested = 0;
+      let luckyAfterPoolCap = 0;
+      const luckyNumber = this.luckyNumbersByPlayer.get(room.code)?.get(match.player.id);
+      if (luckyPrize > 0 && luckyNumber !== undefined && luckyNumber === lastBall) {
+        luckyRequested = luckyPrize;
+        const capped = this.prizePolicy.applySinglePrizeCap({
+          hallId: room.hallId,
+          gameType: cappedGameType,
+          amount: luckyRequested,
+        });
+        luckyCappedPolicy = capped;
+        luckyAfterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
+        luckyPayout = Math.max(0, Math.min(luckyAfterPoolCap, game.remainingPayoutBudget));
+        if (luckyPayout > 0) {
+          game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - luckyPayout));
+          game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - luckyPayout));
+        }
+      }
+
+      allocations.push({
+        match,
+        claim,
+        patternPayout,
+        patternCappedPolicy,
+        patternRequested,
+        patternAfterPoolCap,
+        luckyPayout,
+        luckyCappedPolicy,
+        luckyRequested,
+        luckyAfterPoolCap,
+        rtpBefore,
+      });
+    }
+
+    // ── Phase B (parallel batches): I/O ──
+    let partial = false;
+    const totalBatches = Math.ceil(allocations.length / MASS_PAYOUT_BATCH_SIZE);
+    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx += 1) {
+      const start = batchIdx * MASS_PAYOUT_BATCH_SIZE;
+      const end = Math.min(start + MASS_PAYOUT_BATCH_SIZE, allocations.length);
+      const batch = allocations.slice(start, end);
+
+      const settled = await Promise.allSettled(
+        batch.map((alloc) =>
+          this.transferG3PreallocatedPayout({
+            room,
+            game,
+            pattern,
+            allocation: alloc,
+            houseAccountId,
+            gameType,
+            channel,
+            drawIndex,
+          }),
+        ),
+      );
+
+      for (let i = 0; i < settled.length; i += 1) {
+        const result = settled[i];
+        const alloc = batch[i];
+        if (result.status === "rejected") {
+          partial = true;
+          logger.error(
+            {
+              err: result.reason,
+              event: "G3_MASS_PAYOUT_FAILED",
+              roomCode: room.code,
+              gameId: game.id,
+              playerId: alloc.match.player.id,
+              claimId: alloc.claim.id,
+              patternId: pattern.id,
+              patternPayout: alloc.patternPayout,
+              luckyPayout: alloc.luckyPayout,
+            },
+            "G3 mass-payout: parallel transfer/ledger failed for one match — retry from recovery",
+          );
+        }
+      }
+    }
+
+    // ── Phase C (sequential): build ticketWinners + onClaimLogged ──
+    const ticketWinners: G3TicketWinner[] = [];
+    for (const alloc of allocations) {
+      const totalPayout = roundCurrency(alloc.patternPayout + alloc.luckyPayout);
+      alloc.claim.payoutAmount = totalPayout;
+      if (alloc.luckyPayout > 0) {
+        alloc.claim.bonusTriggered = true;
+        alloc.claim.bonusAmount = alloc.luckyPayout;
+      }
+      game.claims.push(alloc.claim);
+
+      if (this.bingoAdapter.onClaimLogged) {
+        try {
+          await this.bingoAdapter.onClaimLogged({
+            roomCode: room.code,
+            gameId: game.id,
+            playerId: alloc.match.player.id,
+            type: alloc.claim.type,
+            valid: alloc.claim.valid,
+            reason: alloc.claim.reason,
+          });
+        } catch (err) {
+          logger.error({ err, gameId: game.id, roomCode: room.code }, "onClaimLogged failed for G3 auto-claim (batched)");
+        }
+      }
+
+      logger.info({
+        event: "G3_PATTERN_PAYOUT_BATCHED",
+        roomCode: room.code,
+        gameId: game.id,
+        playerId: alloc.match.player.id,
+        claimId: alloc.claim.id,
+        patternId: pattern.id,
+        patternName: pattern.name,
+        isFullHouse: pattern.isFullHouse,
+        drawIndex,
+        pricePerWinner,
+        paid: alloc.patternPayout,
+        luckyBonus: alloc.luckyPayout,
+      }, "Game 3 pattern auto-claim paid (batched)");
+
+      ticketWinners.push({
+        playerId: alloc.match.player.id,
+        ticketIndex: alloc.match.ticketIndex,
+        ticketId: alloc.match.ticketId,
+        claimId: alloc.claim.id,
+        payoutAmount: alloc.patternPayout,
+        luckyBonus: alloc.luckyPayout,
+      });
+    }
+
+    return { ticketWinners, partial };
+  }
+
+  /**
+   * 2026-05-06 (audit §3.1 fix): I/O-pass for én pre-allokert G3-match.
+   *
+   * Brukes kun fra `processG3PatternMatchesBatched` — alle budget-decrements
+   * er allerede gjort i caller. Kjører i parallel (Promise.allSettled).
+   */
+  private async transferG3PreallocatedPayout(args: {
+    room: RoomState;
+    game: GameState;
+    pattern: PatternSpec;
+    allocation: {
+      match: { player: Player; ticketIndex: number; ticketId?: string };
+      claim: ClaimRecord;
+      patternPayout: number;
+      patternCappedPolicy: { cappedAmount: number; wasCapped: boolean; policy: PrizePolicyVersion } | null;
+      patternRequested: number;
+      patternAfterPoolCap: number;
+      luckyPayout: number;
+      luckyCappedPolicy: { cappedAmount: number; wasCapped: boolean; policy: PrizePolicyVersion } | null;
+      luckyRequested: number;
+      luckyAfterPoolCap: number;
+      rtpBefore: number;
+    };
+    houseAccountId: string;
+    gameType: LedgerGameType;
+    channel: LedgerChannel;
+    drawIndex: number;
+  }): Promise<void> {
+    const { room, game, pattern, allocation, houseAccountId, gameType, channel } = args;
+    const {
+      match,
+      claim,
+      patternPayout,
+      patternCappedPolicy,
+      patternRequested,
+      patternAfterPoolCap,
+      luckyPayout,
+      luckyCappedPolicy,
+      rtpBefore,
+    } = allocation;
+    const player = match.player;
+    const txIds: string[] = [];
+
+    // ── Pattern transfer + ledger ──
+    if (patternPayout > 0 && patternCappedPolicy) {
+      const transfer = await this.walletAdapter.transfer(
+        houseAccountId,
+        player.walletId,
+        patternPayout,
+        `G3 pattern ${pattern.name} ${room.code}`,
+        {
+          idempotencyKey: IdempotencyKeys.game3Pattern({
+            gameId: game.id,
+            claimId: claim.id,
+          }),
+          targetSide: "winnings",
+        },
+      );
+      player.balance = roundCurrency(player.balance + patternPayout);
+      txIds.push(transfer.fromTx.id, transfer.toTx.id);
+
+      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: patternPayout,
+        createdAtMs: Date.now(),
+      });
+      await this.ledger.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: patternPayout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion: patternCappedPolicy.policy.id,
+      });
+      await this.payoutAudit.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion: patternCappedPolicy.policy.id,
+        amount: patternPayout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id],
+      });
+      claim.payoutPolicyVersion = patternCappedPolicy.policy.id;
+      claim.payoutWasCapped = patternPayout < patternRequested;
+      claim.rtpCapped = patternPayout < patternAfterPoolCap;
+      claim.rtpBudgetBefore = rtpBefore;
+      claim.rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    } else if (patternCappedPolicy) {
+      // 0-payout audit-event (matches sequential-path).
+      await this.payoutAudit.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion: patternCappedPolicy.policy.id,
+        amount: 0,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [],
+      });
+    }
+
+    // ── Lucky transfer + ledger ──
+    if (luckyPayout > 0 && luckyCappedPolicy) {
+      const transfer = await this.walletAdapter.transfer(
+        houseAccountId,
+        player.walletId,
+        luckyPayout,
+        `G3 lucky bonus ${room.code}`,
+        {
+          idempotencyKey: IdempotencyKeys.game3Lucky({
+            gameId: game.id,
+            claimId: claim.id,
+          }),
+          targetSide: "winnings",
+        },
+      );
+      player.balance = roundCurrency(player.balance + luckyPayout);
+      txIds.push(transfer.fromTx.id, transfer.toTx.id);
+
+      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: luckyPayout,
+        createdAtMs: Date.now(),
+      });
+      await this.ledger.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: luckyPayout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion: luckyCappedPolicy.policy.id,
+      });
+      await this.payoutAudit.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion: luckyCappedPolicy.policy.id,
+        amount: luckyPayout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id],
+      });
+    }
+
+    if (txIds.length > 0) {
+      claim.payoutTransactionIds = [...(claim.payoutTransactionIds ?? []), ...txIds];
+    }
+
+    if (this.bingoAdapter.onCheckpoint && txIds.length > 0) {
+      await this.writePayoutCheckpointWithRetry(
+        room,
+        game,
+        claim.id,
+        roundCurrency(patternPayout + luckyPayout),
+        txIds,
+        claim.type,
+      );
+    }
+  }
+
+  /**
+   * Build `{ playerId → Array<{ticketIndex, ticketId, mask}>}` for all room
+   * players.
+   *
+   * 2026-05-06 (audit §3.4 fix): snapshot iterator FØR vi går inn i payout-
+   * loopen. Pre-fix muterte parallell `room:join`-handler `room.players` Map
+   * via `assertWalletNotInRunningGame` mens denne iteratoren kjørte. På
+   * 1500-spillere-skala med ~50 join/min ≈ 100% sannsynlighet daglig.
+   * Defensiv `room.players.has(...)`-sjekk + race-detector-metric.
+   */
   private buildTicketMasksByPlayer(
     room: RoomState,
     game: GameState,
     drawnSet: Set<number>,
   ): Map<string, Array<{ ticketIndex: number; ticketId?: string; mask: PatternMask }>> {
     const out = new Map<string, Array<{ ticketIndex: number; ticketId?: string; mask: PatternMask }>>();
-    for (const player of room.players.values()) {
+
+    // 2026-05-06 (audit §3.4): snapshot iterator FØR await-er. Selv om
+    // mask-bygging er synkron, beskytter dette mot fremtidig refaktor som
+    // legger inn await + er konsistent med findG2Winners.
+    const playerSnapshot = [...room.players.values()];
+
+    for (const player of playerSnapshot) {
+      // Defense-in-depth: re-sjekk player er fortsatt i rommet. Hvis evicted
+      // mellom snapshot og denne iterasjonen, skip + log race-event.
+      if (!room.players.has(player.id)) {
+        try {
+          metrics.spill23RoomPlayersRaceDetected.inc({ slug: "monsterbingo" });
+        } catch {
+          // metric-failure er aldri kritisk for game-flow
+        }
+        logger.warn(
+          {
+            event: "G3_ROOM_PLAYERS_RACE_DETECTED",
+            roomCode: room.code,
+            gameId: game.id,
+            playerId: player.id,
+            walletId: player.walletId,
+          },
+          "Player evicted between snapshot and buildTicketMasksByPlayer iteration — skipping",
+        );
+        continue;
+      }
+
       const tickets = game.tickets.get(player.id);
       if (!tickets || tickets.length === 0) continue;
       const entries = tickets.map((t, i) => ({
@@ -404,14 +936,43 @@ export class Game3Engine extends Game2Engine {
     return out;
   }
 
-  /** Find every (player, ticket) whose mask satisfies the pattern. */
+  /**
+   * Find every (player, ticket) whose mask satisfies the pattern.
+   *
+   * 2026-05-06 (audit §3.4 fix): defensive lookup for players who may have
+   * been evicted between mask-build and pattern-evaluation. Pre-fix
+   * `requirePlayerById` ville thrown og krasjet hele Spill 3 onDrawCompleted
+   * for runden — nå skipper vi den evicted spilleren og inkrementerer
+   * race-detector-metric.
+   */
   private findPatternMatches(
     ticketMasksByPlayer: Map<string, Array<{ ticketIndex: number; ticketId?: string; mask: PatternMask }>>,
     pattern: PatternSpec,
   ): Array<{ player: Player; ticketIndex: number; ticketId?: string }> {
     const matches: Array<{ player: Player; ticketIndex: number; ticketId?: string }> = [];
     for (const [playerId, entries] of ticketMasksByPlayer) {
-      const roomPlayer = this.requirePlayerById(playerId);
+      let roomPlayer: Player;
+      try {
+        roomPlayer = this.requirePlayerById(playerId);
+      } catch {
+        // Player evicted mellom mask-build og pattern-eval — skip uten
+        // å krasje hele runden. Logger via metric så vi kan tracke
+        // hyppighet i prod.
+        try {
+          metrics.spill23RoomPlayersRaceDetected.inc({ slug: "monsterbingo" });
+        } catch {
+          // metric-failure er aldri kritisk for game-flow
+        }
+        logger.warn(
+          {
+            event: "G3_PATTERN_MATCH_PLAYER_EVICTED",
+            playerId,
+            patternId: pattern.id,
+          },
+          "Player no longer found in any room during pattern matching — skipping (race with assertWalletNotInRunningGame)",
+        );
+        continue;
+      }
       for (const e of entries) {
         if (matchesAny(e.mask, pattern.masks)) {
           matches.push({ player: roomPlayer, ticketIndex: e.ticketIndex, ticketId: e.ticketId });

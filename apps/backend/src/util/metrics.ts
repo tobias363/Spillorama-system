@@ -168,4 +168,37 @@ export const metrics = {
     name: "spillorama_draw_lock_rejections_total",
     help: "Antall draw:next-kall avvist fordi rommet allerede har en draw in-flight",
   }),
+
+  // SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §3.1: mass-payout duration
+  // observability. Counted per Spill 2/3 onDrawCompleted-hook execution.
+  // Buckets aligned with audit-recommended 5s/10s alert thresholds.
+  // `winnersBucket` label dimensjonerer på antall vinnere så p95 kan
+  // segmenteres ("0-9 vinnere" vs "100+ vinnere") for kapasitets-planlegging.
+  spill23OnDrawCompletedDuration: new client.Histogram({
+    name: "spill23_ondrawcompleted_duration_ms",
+    help: "Time spent in Spill 2/3 onDrawCompleted hook including mass-payout (ms)",
+    labelNames: ["slug", "winnersBucket"] as const,
+    buckets: [10, 50, 100, 500, 1_000, 5_000, 10_000, 30_000],
+  }),
+
+  // SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §3.1: mass-payout success/failure
+  // counter. `outcome` = "success" | "partial" (Promise.allSettled rejected
+  // some entries — investigate ledger-divergence) | "error" (whole batch
+  // rejected). Alert: increase(...{outcome="partial"}[5m]) > 0.
+  spill23MassPayoutOutcome: new client.Counter({
+    name: "spill23_mass_payout_outcome_total",
+    help: "Mass-payout batch outcomes (success/partial/error)",
+    labelNames: ["slug", "outcome"] as const,
+  }),
+
+  // SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05 §3.4: race-detector. Inkrementeres
+  // hver gang findG2Winners / buildTicketMasksByPlayer detekterer at en
+  // spiller-record har blitt evicted MELLOM iterator-snapshot og payout.
+  // Bør være ~0 — om denne tikker > 0 er det signal at parallel join-handler
+  // muterer room.players uten å respektere snapshot-pattern.
+  spill23RoomPlayersRaceDetected: new client.Counter({
+    name: "spill23_room_players_race_total",
+    help: "room.players mutated mid-iteration (defensive snapshot detected stale entry)",
+    labelNames: ["slug"] as const,
+  }),
 };

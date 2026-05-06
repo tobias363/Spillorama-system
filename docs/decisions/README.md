@@ -63,6 +63,7 @@ som refererer til den gamle og forklarer hvorfor vi snur.
 | [008](./ADR-008-pm-centralized-git-flow.md) | PM-sentralisert git-flyt | Accepted | 2026-04-21 |
 | [009](./ADR-009-done-policy-legacy-avkobling.md) | Done-policy for legacy-avkobling | Accepted | 2026-04-17 |
 | [010](./ADR-010-casino-grade-observability.md) | Casino-grade observability | Accepted | 2026-04-28 |
+| [011](./ADR-011-batched-mass-payout.md) | Batched parallel mass-payout for Spill 2/3 (Wave 3a) | Accepted | 2026-05-06 |
 
 ---
 

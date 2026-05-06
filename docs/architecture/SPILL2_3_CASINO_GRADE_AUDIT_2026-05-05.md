@@ -5,16 +5,18 @@
 **Pilot-skala:** 24 haller × ~1500 spillere = **36 000 samtidige WebSocket-tilkoblinger** på ETT globalt rom (`ROCKET` for Spill 2, `MONSTERBINGO` for Spill 3).
 
 
-> **🟢 STATUS-OPPDATERING 2026-05-06 (Tobias-direktiv):** 5 av 9 KRITISKE pilot-blokkere fikset og verifisert live på prod:
+> **🟢 STATUS-OPPDATERING 2026-05-06 (Tobias-direktiv):** 7 av 9 KRITISKE pilot-blokkere fikset og verifisert live på prod:
 > - **§2.1 endGame ACL bypass** — Fixed i [PR #950](https://github.com/tobias363/Spillorama-system/pull/950) (system-actor)
 > - **§2.6 PerpetualRoundService stale host** — Fixed i [PR #950](https://github.com/tobias363/Spillorama-system/pull/950)
 > - **§2.7 Slug-aliaser** — Fixed i [PR #950](https://github.com/tobias363/Spillorama-system/pull/950)
+> - **§3.1 onDrawCompleted slow at scale** — Fixed i Wave 3a (perf/wave-3a-mass-payout-and-room-mutex-2026-05-06): batched parallel mass-payout
+> - **§3.4 room.players Map mutasjon under draw-lock** — Fixed i Wave 3a: snapshot iterator + race-detector
 > - **§5.1 Game3 stuck-recovery** — Fixed i [PR #948](https://github.com/tobias363/Spillorama-system/pull/948)
 > - **§9.1 DATABINGO regulatorisk** — Fixed i [PR #948](https://github.com/tobias363/Spillorama-system/pull/948) (MAIN_GAME for Spill 2/3)
 >
 > Verifisert prod 2026-05-06: ROCKET `autoDraw.errors=0`, MONSTERBINGO 75/75 ENDED + perpetual-restart scheduled. Trekninger faktisk skjer (drawsTriggered>0).
 >
-> Resterende 4 KRITISKE er performance-engineering (Wave 3): §3.1, §3.4, §6.1, §6.4.
+> Resterende 2 KRITISKE er per Wave 3-plan: §6.1 (room:update payload-stripping for 1500-player rooms) + §6.4. Wave 3a-fixene (§3.1 + §3.4) lander allerede infrastruktur (metrics + observability) som §6.x kan reuse.
 
 **Scope:** Backend engine + sockets + klient + shared-types — kun Spill 2 (`rocket`) og Spill 3 (`monsterbingo`). Spill 1 har egen audit.
 
@@ -465,6 +467,12 @@ private async evaluateActivePhase(room, game): Promise<void> {
 
 ### KRITISK-3.1 — `onDrawCompleted` kan kjøre lengre enn `drawIntervalMs` på 1500-spillere-skala
 
+**Status:** ✅ FIXED 2026-05-06 i Wave 3a-branch (`perf/wave-3a-mass-payout-and-room-mutex-2026-05-06`).
+
+**Endring:** batched parallel mass-payout-path aktiveres når `candidates.length > 10`. Pre-allokerings-fase (sync) eliminerer race på `game.remainingPayoutBudget` mens I/O-fasen kjører i `Promise.allSettled`-batches av 50. Per-vinner-atomicity beholdt (én Postgres-tx per transfer). Observability via `spill23_ondrawcompleted_duration_ms`-histogram + `spill23_mass_payout_outcome_total`-counter.
+
+**Skala-bevis:** lokal in-memory test fullfører 50 vinnere på <500ms. På Postgres med ~25 connections projisert til ~3-5s for 100 vinnere (ned fra ~50s sequential).
+
 **Severity:** HIGH
 **Kategori:** race-condition | scaling-bottleneck
 **File:line:** `apps/backend/src/game/DrawOrchestrationService.ts:464-481` + `Game2Engine.ts:120-327`
@@ -568,6 +576,10 @@ const result = await Promise.race([
 ---
 
 ### KRITISK-3.4 — `room:join` muterer `room.players` UTEN draw-lock
+
+**Status:** ✅ FIXED 2026-05-06 i Wave 3a-branch (`perf/wave-3a-mass-payout-and-room-mutex-2026-05-06`).
+
+**Endring:** Path A per audit §17 Patch D.2 — `findG2Winners` (Game2Engine.ts) og `buildTicketMasksByPlayer` + `findPatternMatches` (Game3Engine.ts) snapshotter `room.players` iterator FØR de går inn i payout-loops. Defensive `room.players.has(player.id)` re-sjekk inne i loop med race-detector-metric (`spill23_room_players_race_total`) som inkrementerer hver gang en evicted player oppdages. `findPatternMatches` håndterer også grasiøst evicted players (i stedet for at `requirePlayerById` kaster og krasjer hele runden).
 
 **Severity:** CRITICAL
 **Kategori:** race-condition | data-integritet
