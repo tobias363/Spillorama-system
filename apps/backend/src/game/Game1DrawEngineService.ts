@@ -132,6 +132,12 @@ import {
   resolveEngineColorName,
   patternPrizeToCents,
   parseMarkings,
+  // Pot-per-bongstørrelse-fix (2026-05-08, §9 i SPILL_REGLER_OG_PAYOUT.md):
+  // resolveOddsenVariantConfig leser top-level Fullt Hus HIGH/LOW-config
+  // for Oddsen-katalog-rader; bongMultiplierForColorSlug mapper slug-form
+  // (small_yellow / large_purple / ...) til vekt for pot-skalering.
+  resolveOddsenVariantConfig,
+  bongMultiplierForColorSlug,
 } from "./Game1DrawEngineHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -2224,8 +2230,11 @@ export class Game1DrawEngineService {
     let prizePerWinnerCentsForBroadcast = 0;
 
     if (variantConfig && variantConfig.patternsByColor) {
-      // Per-farge-path: gruppér vinnere per ticketColor og utbetal hver
-      // gruppe uavhengig. Dette er Option X (PM-vedtak 2026-04-21).
+      // Pot-per-bongstørrelse-path (2026-05-08, §9 i SPILL_REGLER_OG_PAYOUT.md):
+      // For hver fase deles ÉN pot per bongstørrelse mellom vinnerne av den
+      // størrelsen. Hver pot skalerer med bong-multiplier (hvit×1, gul×2,
+      // lilla×3 — small/large × 2 utover det). En spiller får summen av
+      // sine bongers andeler innenfor sin størrelse.
       await this.payoutPerColorGroups(
         client,
         scheduledGameId,
@@ -2234,7 +2243,9 @@ export class Game1DrawEngineService {
         winners,
         potCents,
         variantConfig,
-        jackpotCfg
+        jackpotCfg,
+        ticketConfigJson,
+        gameConfigJson,
       );
 
       // BIN-696: Beregn representativ prizePerWinner basert på første
@@ -2242,6 +2253,12 @@ export class Game1DrawEngineService {
       // for snapshot-feltet `patternResult.payoutAmount`). Dette er kun
       // for pattern:won-broadcast — eksakte per-vinner-beløp er allerede
       // utbetalt korrekt av payoutPerColorGroups via payoutService.
+      //
+      // Pot-per-bongstørrelse-fix (2026-05-08): første vinners FAKTISKE
+      // andel er pot[firstSize] / antall_vinnere_i_firstSize, ikke en
+      // global-pot-andel. Vi bruker firstColor's pot direkte (som er
+      // base × bongMultiplier via patternPrizeToCents) og deler på
+      // firstColor-gruppe-størrelse.
       const firstWinnerColor = winners[0]?.ticketColor;
       if (firstWinnerColor) {
         const firstColorGroupSize = winners.filter((w) => w.ticketColor === firstWinnerColor).length;
@@ -2253,18 +2270,55 @@ export class Game1DrawEngineService {
         );
         const firstColorPhasePattern = firstColorPatterns[currentPhase - 1];
         if (firstColorPhasePattern && firstColorGroupSize > 0) {
-          const firstColorTotalPrizeCents = patternPrizeToCents(firstColorPhasePattern, potCents);
+          let firstColorTotalPrizeCents = patternPrizeToCents(firstColorPhasePattern, potCents);
+
+          // Oddsen Fullt Hus override (samme bucket-logikk som payoutPerColorGroups).
+          if (currentPhase === TOTAL_PHASES) {
+            const oddsenCfg =
+              resolveOddsenVariantConfig(ticketConfigJson) ??
+              resolveOddsenVariantConfig(gameConfigJson);
+            if (oddsenCfg) {
+              const bucket =
+                drawSequenceAtWin <= oddsenCfg.targetDraw ? "high" : "low";
+              const baseForBucket =
+                bucket === "high" ? oddsenCfg.bingoBaseHigh : oddsenCfg.bingoBaseLow;
+              const multiplier = bongMultiplierForColorSlug(firstWinnerColor);
+              if (multiplier !== null) {
+                firstColorTotalPrizeCents = baseForBucket * multiplier;
+              }
+            }
+          }
+
           prizePerWinnerCentsForBroadcast = Math.floor(firstColorTotalPrizeCents / firstColorGroupSize);
         }
       }
 
       if (currentPhase === TOTAL_PHASES) {
+        // Pot-per-bongstørrelse-fix (2026-05-08): for Oddsen Fullt Hus
+        // overstyres pot-en med HIGH/LOW bucket × bongMultiplier. Resolved
+        // én gang her og brukt i patternsForColor-callback.
+        const oddsenCfgForCap =
+          resolveOddsenVariantConfig(ticketConfigJson) ??
+          resolveOddsenVariantConfig(gameConfigJson);
         ordinaryWinCentsByHall = computeOrdinaryWinCentsByHallPerColor({
           winners,
           phase: currentPhase,
           drawSequenceAtWin,
           potCents,
           patternsForColor: (color) => {
+            // Oddsen Fullt Hus: HIGH/LOW × multiplier overstyrer pattern.
+            if (oddsenCfgForCap) {
+              const bucket =
+                drawSequenceAtWin <= oddsenCfgForCap.targetDraw ? "high" : "low";
+              const baseForBucket =
+                bucket === "high"
+                  ? oddsenCfgForCap.bingoBaseHigh
+                  : oddsenCfgForCap.bingoBaseLow;
+              const multiplier = bongMultiplierForColorSlug(color);
+              if (multiplier !== null) {
+                return { totalPhasePrizeCents: baseForBucket * multiplier };
+              }
+            }
             const engineName = resolveEngineColorName(color) ?? color;
             const patterns = resolvePatternsForColor(
               variantConfig!,
@@ -2482,22 +2536,45 @@ export class Game1DrawEngineService {
   }
 
   /**
-   * Per-farge-payout (Q3=X — global pot per fase, 2026-04-27):
-   * ÉN samlet pott for hele fasen — alle vinnere deler likt uansett farge.
-   * Per-farge-config brukes KUN for å bestemme pot-størrelsen (vi tar
-   * fra første gruppes pattern), IKKE per-farge-egne pots.
+   * Pot-per-bongstørrelse-payout (2026-05-08, §9 i SPILL_REGLER_OG_PAYOUT.md):
    *
-   * Bakgrunn: regulatorisk Q3-spørsmål — pengespillforskriften krever at
-   * vinnere på samme pattern (samme fase) deler én felles pott, ikke
-   * separate per-farge-pots. Tidligere implementering ga separate pots
-   * per farge, som kunne lede til at en hvit-bong-vinner fikk hele
-   * hvit-pots, mens en gul-bong-vinner fikk hele gul-pots — selv om
-   * begge vant samtidig på samme pattern.
+   * For hver fase (Rad 1, ..., Fullt Hus) er det SEPARATE potter per
+   * bongstørrelse. Hver pot deles likt mellom bongene som vant innenfor
+   * samme bongstørrelse. En spiller får summen av sine bongers andeler.
    *
-   * Multi-jackpot-routing per farge bevares (siste-ball + farge-spesifikk
-   * jackpot-sats), så vi grupperer winners per jackpot-amount og emitterer
-   * én payoutPhase per unike jackpot-sats med proporsjonal andel av
-   * den globale potten.
+   * Algoritme (§9.7):
+   * ```
+   * for each bongstørrelse (slug = ticketColor, eks. small_yellow, large_purple):
+   *   winning_tickets = winners with that ticketColor
+   *   if empty: continue (ingen pot for denne størrelsen)
+   *   pot_cents = patternPrizeToCents(patternForColor[phase])
+   *              (allerede auto-multiplisert via bridge — base × bongMultiplier)
+   *   floor-split blant winning_tickets via payoutService.payoutPhase
+   *   rest tilfaller huset (HOUSE_RETAINED via splitRoundingAudit + complianceLedger)
+   * ```
+   *
+   * **Oddsen Fullt Hus-overstyring (§9.5):**
+   * Hvis `currentPhase === TOTAL_PHASES` OG `spill1.oddsen` er satt i
+   * config, overstyrer vi Fullt Hus-poten basert på `drawSequenceAtWin <=
+   * targetDraw` (HIGH-bucket) eller > (LOW-bucket). Pot for HIGH/LOW =
+   * `bingoBaseHigh/Low × bongMultiplier`. Rad 1-4 i Oddsen følger
+   * standard auto-mult (uendret).
+   *
+   * **Multi-jackpot-routing per farge:** bevares for Fullt Hus med
+   * Game1JackpotService — innenfor hver bongstørrelse-gruppe kan det
+   * fortsatt være jackpot-bonus per vinner (basert på vinnerens egen
+   * farge). Vi henter jackpot per vinner og legger den til gruppens
+   * `jackpotAmountCentsPerWinner` — siden alle bonger i samme gruppe har
+   * samme `ticketColor` (slug), får alle samme jackpot-sats.
+   *
+   * **Verifisering mot §9.3 test-matrise:**
+   * - 1 lilla solo: lilla-pot 300 / 1 = 300 ✅
+   * - 2 hvit: hvit-pot 100 / 2 = 50 hver ✅
+   * - 1 hvit + 1 lilla: hvit-pot 100 → hvit får 100; lilla-pot 300 →
+   *   lilla får 300 ✅
+   * - 1 spiller med 3 lilla: lilla-pot 300 / 3 = 100 per bong → spilleren
+   *   får 100 + 100 + 100 = 300 ✅
+   * - 7 lilla: lilla-pot 300 / 7 = floor 42 per bong, rest 6 → HOUSE_RETAINED
    */
   private async payoutPerColorGroups(
     client: PoolClient,
@@ -2507,93 +2584,139 @@ export class Game1DrawEngineService {
     winners: Array<Game1WinningAssignment & { userId: string }>,
     potCents: number,
     variantConfig: GameVariantConfig,
-    jackpotCfg: Game1JackpotConfig | null
+    jackpotCfg: Game1JackpotConfig | null,
+    ticketConfigJson: unknown,
+    gameConfigJson: unknown,
   ): Promise<void> {
     if (winners.length === 0) {
       return;
     }
 
-    // Q3=X: bestem global pot fra første vinners farge-pattern. Alle
-    // vinnere deler denne potten likt uansett farge. Hvis pattern mangler
-    // (fallback til __default__), bruker vi 0.
-    const firstColor = winners[0].ticketColor;
-    const firstColorEngineName = resolveEngineColorName(firstColor) ?? firstColor;
-    const firstColorPatterns = resolvePatternsForColor(
-      variantConfig,
-      firstColorEngineName,
-      (missingColor) => {
-        log.warn(
-          {
-            scheduledGameId,
-            color: firstColor,
-            engineName: firstColorEngineName,
-            missingColor,
-          },
-          "[SCHEDULER_FIX] farge har ikke eksplisitt per-farge-matrise → faller til __default__"
-        );
-      }
-    );
-    const phasePattern = firstColorPatterns[currentPhase - 1];
-    const totalPhasePrizeCents = phasePattern
-      ? patternPrizeToCents(phasePattern, potCents)
-      : 0;
+    // Resolve oddsen-config (gjelder kun Fullt Hus-fase). Ledser fra
+    // spill1.oddsen i ticket_config_json eller game_config_json.
+    const oddsenCfg =
+      currentPhase === TOTAL_PHASES
+        ? resolveOddsenVariantConfig(ticketConfigJson) ??
+          resolveOddsenVariantConfig(gameConfigJson)
+        : null;
 
-    // Hvis ingen jackpot-fase eller -config: ÉN payoutPhase med alle
-    // vinnere og global pott (Q3=X-semantikk).
-    if (currentPhase !== TOTAL_PHASES || !this.jackpotService || !jackpotCfg) {
-      await this.payoutService!.payoutPhase(client, {
-        scheduledGameId,
-        phase: currentPhase,
-        drawSequenceAtWin,
-        roomCode: "",
-        totalPhasePrizeCents,
-        winners,
-        jackpotAmountCentsPerWinner: 0,
-        phaseName: phaseDisplayName(currentPhase),
-      });
-      return;
-    }
-
-    // Fase 5 med jackpot-config: per-vinner farge-spesifikk jackpot-sats
-    // bevares, men hovedpremien deles globalt. Grupper per jackpot-amount
-    // og utbetal proporsjonal andel av global pot per gruppe.
-    const byJackpotAmount = new Map<
-      number,
+    // Grupper winners per ticketColor (= bongstørrelse-slug). En spiller
+    // med 3 lilla-bonger havner i samme gruppe; en spiller med 1 hvit + 1
+    // lilla havner i to grupper.
+    const winnersByColor = new Map<
+      string,
       Array<Game1WinningAssignment & { userId: string }>
     >();
+    // Bevar farge-rekkefølge så ledger-events får deterministisk orden
+    // (basert på første-vinner-rekkefølgen fra purchase_at-sortering i
+    // evaluateAndPayoutPhase).
+    const colorOrder: string[] = [];
     for (const w of winners) {
-      const j = this.jackpotService.evaluate({
-        phase: currentPhase,
-        drawSequenceAtWin,
-        ticketColor: w.ticketColor,
-        jackpotConfig: jackpotCfg,
-      });
-      const amount = j.triggered ? j.amountCents : 0;
-      let list = byJackpotAmount.get(amount);
+      let list = winnersByColor.get(w.ticketColor);
       if (!list) {
         list = [];
-        byJackpotAmount.set(amount, list);
+        winnersByColor.set(w.ticketColor, list);
+        colorOrder.push(w.ticketColor);
       }
       list.push(w);
     }
 
-    const totalWinners = winners.length;
-    const perWinnerPrizeFromGlobalPot = Math.floor(
-      totalPhasePrizeCents / totalWinners
-    );
+    for (const color of colorOrder) {
+      const groupWinners = winnersByColor.get(color)!;
+      const engineName = resolveEngineColorName(color) ?? color;
+      const colorPatterns = resolvePatternsForColor(
+        variantConfig,
+        engineName,
+        (missingColor) => {
+          log.warn(
+            {
+              scheduledGameId,
+              color,
+              engineName,
+              missingColor,
+            },
+            "[POT_PER_BONGSIZE] farge mangler i patternsByColor → faller til __default__",
+          );
+        },
+      );
+      const phasePattern = colorPatterns[currentPhase - 1];
 
-    for (const [jackpotAmount, groupWinners] of byJackpotAmount.entries()) {
-      const groupSize = groupWinners.length;
-      const groupTotalPrize = perWinnerPrizeFromGlobalPot * groupSize;
+      // Pot-størrelse for denne bongstørrelsen.
+      // - Standard / Trafikklys: patternPrizeToCents(pattern, pot) — bridge
+      //   har allerede skalert basen × bongMultiplier per (color, size)
+      //   via auto-mult.
+      // - Oddsen Fullt Hus: HIGH/LOW base × bongMultiplier. Bestemmes per
+      //   gruppe basert på drawSequenceAtWin vs targetDraw.
+      let potForBongSizeCents = phasePattern
+        ? patternPrizeToCents(phasePattern, potCents)
+        : 0;
+
+      let oddsenBucket: "low" | "high" | undefined;
+      if (oddsenCfg) {
+        oddsenBucket =
+          drawSequenceAtWin <= oddsenCfg.targetDraw ? "high" : "low";
+        const baseForBucket =
+          oddsenBucket === "high" ? oddsenCfg.bingoBaseHigh : oddsenCfg.bingoBaseLow;
+        // Beregn bongMultiplier basert på pris fra første winning-bong i
+        // gruppen. Alle bonger i samme `ticketColor`-gruppe (slug-form
+        // small_yellow / large_purple / etc.) har samme størrelse OG
+        // dermed samme pris, så vi kan utlede multiplier fra pattern-
+        // prisen. Trygg fallback: bruk patternPrizeToCents.
+        const multiplier = bongMultiplierForColorSlug(color);
+        if (multiplier !== null) {
+          potForBongSizeCents = baseForBucket * multiplier;
+        } else if (phasePattern) {
+          // Hvis vi ikke kan utlede multiplier (ukjent slug), behold
+          // pattern-basert pot — sikrere enn 0-payout.
+          potForBongSizeCents = patternPrizeToCents(phasePattern, potCents);
+        }
+      }
+
+      // Multi-jackpot-routing per gruppe. Alle bonger i samme color-slug
+      // har samme `ticketColor` → jackpotService gir samme amount for
+      // hele gruppen. Vi tar første vinner som representativ.
+      let jackpotAmountCentsPerWinner = 0;
+      if (
+        currentPhase === TOTAL_PHASES &&
+        this.jackpotService &&
+        jackpotCfg &&
+        groupWinners.length > 0
+      ) {
+        const j = this.jackpotService.evaluate({
+          phase: currentPhase,
+          drawSequenceAtWin,
+          ticketColor: groupWinners[0]!.ticketColor,
+          jackpotConfig: jackpotCfg,
+        });
+        jackpotAmountCentsPerWinner = j.triggered ? j.amountCents : 0;
+      }
+
+      // §9.6 audit-felter for compliance-ledger.
+      const uniquePlayerIds = new Set(groupWinners.map((w) => w.userId));
+      const multiplier = bongMultiplierForColorSlug(color);
+      const gameVariant: "standard" | "oddsen" =
+        oddsenBucket !== undefined ? "oddsen" : "standard";
+
       await this.payoutService!.payoutPhase(client, {
         scheduledGameId,
         phase: currentPhase,
         drawSequenceAtWin,
         roomCode: "",
-        totalPhasePrizeCents: groupTotalPrize,
+        totalPhasePrizeCents: potForBongSizeCents,
         winners: groupWinners,
-        jackpotAmountCentsPerWinner: jackpotAmount,
+        jackpotAmountCentsPerWinner,
         phaseName: phaseDisplayName(currentPhase),
+        potMetadata: {
+          bongMultiplier: multiplier ?? undefined,
+          potCentsForBongSize: potForBongSizeCents,
+          winningTicketsInSameSize: groupWinners.length,
+          winningPlayersInSameSize: uniquePlayerIds.size,
+          gameVariant,
+          ...(oddsenBucket !== undefined && {
+            oddsenBucket,
+            oddsenTargetDraw: oddsenCfg!.targetDraw,
+          }),
+        },
       });
     }
   }

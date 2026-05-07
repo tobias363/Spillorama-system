@@ -66,6 +66,50 @@ export interface Game1WinningAssignment {
   ticketColor: string;
 }
 
+/**
+ * Pot-per-bongstørrelse-fix (2026-05-08, §9.6 i SPILL_REGLER_OG_PAYOUT.md):
+ *
+ * Audit-felter som engine kan sende til payoutPhase når det utbetales en
+ * pot-per-bongstørrelse (f.eks. når 3 lilla-spillere deler lilla-poten på
+ * 300 kr). Auditor må kunne reprodusere utbetalingen fra ledger-data alene
+ * per pengespillforskriften §71. Felter:
+ *
+ *   - `bongMultiplier`: vekt brukt for poten (1 for hvit/5 kr, 2 for gul,
+ *     3 for lilla). Ved per-bongstørrelse-pot er pot-størrelsen
+ *     `base × bongMultiplier`.
+ *   - `potCentsForBongSize`: størrelsen på poten i øre (`base × multiplier`).
+ *     Vises i audit-rapporten side om side med `prizeAmountCents`.
+ *   - `winningTicketsInSameSize`: antall bonger som vant samme pot
+ *     (= `input.winners.length`).
+ *   - `winningPlayersInSameSize`: antall UNIKE spillere blant disse
+ *     bongene (multi-bong/same-player teller som 1 spiller).
+ *   - `gameVariant`: "standard" / "trafikklys" / "oddsen" — auditor kan
+ *     filtrere på variant.
+ *   - `oddsenBucket`: "low" / "high" når Oddsen Fullt Hus, ellers omitted.
+ *   - `oddsenTargetDraw`: Oddsen targetDraw-verdi når relevant.
+ *
+ * Alle felter er optional — eksisterende paths (Innsatsen-pot, mini-games)
+ * trenger ikke sende dem.
+ */
+export interface Game1PhasePotMetadata {
+  /** Vekt brukt for poten (1 for hvit/5 kr, 2 for gul/10 kr, 3 for lilla/15 kr). */
+  bongMultiplier?: number;
+  /** Pot-størrelse i øre for denne bongstørrelsen (base × multiplier). */
+  potCentsForBongSize?: number;
+  /** Antall vinnende bonger i samme pot (= input.winners.length). */
+  winningTicketsInSameSize?: number;
+  /** Antall unike spillere blant vinner-bongene. */
+  winningPlayersInSameSize?: number;
+  /** Variant-tag for audit-filtrering. */
+  gameVariant?: "standard" | "trafikklys" | "oddsen";
+  /** Oddsen Fullt Hus bucket (LOW når draw > targetDraw, HIGH ellers). */
+  oddsenBucket?: "low" | "high";
+  /** Oddsen targetDraw-verdi (eks. 55 for Oddsen-55). */
+  oddsenTargetDraw?: number;
+  /** Trafikklys rad-farge ("rød"/"grønn"/"gul") når relevant. */
+  trafikklysRowColor?: string;
+}
+
 export interface Game1PhasePayoutInput {
   scheduledGameId: string;
   phase: number; // 1..5
@@ -84,6 +128,12 @@ export interface Game1PhasePayoutInput {
   jackpotAmountCentsPerWinner?: number;
   /** Fase-navn for audit ("1 Rad", "Fullt Hus", …). */
   phaseName: string;
+  /**
+   * Pot-per-bongstørrelse-audit (2026-05-08, §9.6). Optional. Når satt
+   * skrives feltene inn i `metadata` på PRIZE-entries så auditor kan
+   * reprodusere utbetalingen fra ledger-data alene.
+   */
+  potMetadata?: Game1PhasePotMetadata;
 }
 
 export interface Game1PhasePayoutResult {
@@ -387,6 +437,11 @@ export class Game1PayoutService {
       // audit-logging som kan re-kjøres manuelt ved behov.
       if (prizePerWinnerCents > 0) {
         try {
+          // Pot-per-bongstørrelse-audit (2026-05-08, §9.6): legg ved
+          // pot-metadata-felter når caller har sendt dem. Felter er
+          // optional; fallback gir bakoverkompat med tidligere
+          // metadata-shape (kun phase/phaseName/etc.).
+          const potMd = input.potMetadata ?? {};
           await this.complianceLedgerPort.recordComplianceLedgerEvent({
             hallId: winner.hallId,
             // K2-A CRIT-1: Spill 1 er hovedspill (MAIN_GAME). Service er
@@ -408,6 +463,33 @@ export class Game1PayoutService {
               ticketColor: winner.ticketColor,
               winnerCount,
               drawSequenceAtWin: input.drawSequenceAtWin,
+              // Pot-per-bongstørrelse-audit-felter (§9.6). Spread av
+              // optional-felter — undefined-verdier filtreres bort av
+              // JSON-encode i ledger-port.
+              ...(potMd.bongMultiplier !== undefined && {
+                bongMultiplier: potMd.bongMultiplier,
+              }),
+              ...(potMd.potCentsForBongSize !== undefined && {
+                potCentsForBongSize: potMd.potCentsForBongSize,
+              }),
+              ...(potMd.winningTicketsInSameSize !== undefined && {
+                winningTicketsInSameSize: potMd.winningTicketsInSameSize,
+              }),
+              ...(potMd.winningPlayersInSameSize !== undefined && {
+                winningPlayersInSameSize: potMd.winningPlayersInSameSize,
+              }),
+              ...(potMd.gameVariant !== undefined && {
+                gameVariant: potMd.gameVariant,
+              }),
+              ...(potMd.oddsenBucket !== undefined && {
+                oddsenBucket: potMd.oddsenBucket,
+              }),
+              ...(potMd.oddsenTargetDraw !== undefined && {
+                oddsenTargetDraw: potMd.oddsenTargetDraw,
+              }),
+              ...(potMd.trafikklysRowColor !== undefined && {
+                trafikklysRowColor: potMd.trafikklysRowColor,
+              }),
             },
           });
         } catch (err) {
