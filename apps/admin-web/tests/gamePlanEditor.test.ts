@@ -195,6 +195,7 @@ describe("GamePlanEditorPage — edit", () => {
               planId: "plan-1",
               position: 1,
               gameCatalogId: "cat-jackpot",
+              bonusGameOverride: null,
               notes: null,
               createdAt: "",
               catalogEntry: {
@@ -227,6 +228,7 @@ describe("GamePlanEditorPage — edit", () => {
               planId: "plan-1",
               position: 2,
               gameCatalogId: "cat-innsatsen",
+              bonusGameOverride: "wheel_of_fortune",
               notes: null,
               createdAt: "",
               catalogEntry: {
@@ -358,7 +360,7 @@ describe("GamePlanEditorPage — edit", () => {
     expect(catalogItems.length).toBe(2);
   });
 
-  it("Save-rekkefølge sender PUT /items med catalog-IDs i riktig rekkefølge", async () => {
+  it("Save-rekkefølge sender PUT /items med catalog-IDs + bonus-overrides", async () => {
     const { calls } = setupEditMocks();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -377,9 +379,19 @@ describe("GamePlanEditorPage — edit", () => {
     expect(putItems).toBeTruthy();
     expect(putItems?.method).toBe("PUT");
     const body = JSON.parse(putItems!.body!);
+    // Tolkning A (2026-05-07): payload inkluderer bonusGameOverride per item.
+    // item-1 hadde null, item-2 hadde "wheel_of_fortune" i seed-data.
     expect(body.items).toEqual([
-      { gameCatalogId: "cat-jackpot", notes: null },
-      { gameCatalogId: "cat-innsatsen", notes: null },
+      {
+        gameCatalogId: "cat-jackpot",
+        bonusGameOverride: null,
+        notes: null,
+      },
+      {
+        gameCatalogId: "cat-innsatsen",
+        bonusGameOverride: "wheel_of_fortune",
+        notes: null,
+      },
     ]);
   });
 
@@ -419,5 +431,62 @@ describe("GamePlanEditorPage — edit", () => {
       "#sequence-list .seq-item",
     );
     expect(seqItemsAfter.length).toBe(1);
+  });
+
+  // ── Tolkning A (2026-05-07): per-item bonus-override ──────────────────
+
+  it("Tolkning A: bonus-dropdown viser 5 alternativer (Ingen + 4 bonus)", async () => {
+    setupEditMocks();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGamePlanEditPage(container, "plan-1");
+    await flushMicrotasks();
+
+    const dropdowns = container.querySelectorAll<HTMLSelectElement>(
+      "#sequence-list .seq-bonus-select",
+    );
+    expect(dropdowns.length).toBe(2);
+    const firstDd = dropdowns[0]!;
+    const opts = firstDd.querySelectorAll("option");
+    expect(opts.length).toBe(5);
+    const values = Array.from(opts).map((o) => o.value);
+    expect(values).toEqual([
+      "",
+      "mystery",
+      "wheel_of_fortune",
+      "treasure_chest",
+      "color_draft",
+    ]);
+    expect(firstDd.value).toBe("");
+    expect(dropdowns[1]!.value).toBe("wheel_of_fortune");
+  });
+
+  it("Tolkning A: endring i bonus-dropdown reflekteres i save-payload", async () => {
+    const { calls } = setupEditMocks();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGamePlanEditPage(container, "plan-1");
+    await flushMicrotasks();
+
+    const dropdowns = container.querySelectorAll<HTMLSelectElement>(
+      "#sequence-list .seq-bonus-select",
+    );
+    const firstDd = dropdowns[0]!;
+    firstDd.value = "color_draft";
+    firstDd.dispatchEvent(new Event("change"));
+
+    const saveBtn = container.querySelector<HTMLButtonElement>(
+      'button[data-action="save-sequence"]',
+    );
+    saveBtn!.click();
+    await flushMicrotasks();
+
+    const putItems = calls.find((c) =>
+      c.url.endsWith("/api/admin/game-plans/plan-1/items"),
+    );
+    expect(putItems).toBeTruthy();
+    const body = JSON.parse(putItems!.body!);
+    expect(body.items[0].bonusGameOverride).toBe("color_draft");
+    expect(body.items[1].bonusGameOverride).toBe("wheel_of_fortune");
   });
 });
