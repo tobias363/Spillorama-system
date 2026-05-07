@@ -327,6 +327,18 @@ I dag bruker `GamePlanEngineBridge.buildEngineTicketConfig`:
 
 I dag har 13 hovedspill korrekte priser men premiene er fortsatt i gammel explicit-format på flere standard-spill. Migration #20261210010300 har konvertert til auto-mode med `bingoBase` kopiert fra `bingo.hvit`. **Verifiser** at dette ble korrekt for hver spill — Tobias bør gå gjennom katalog-editor manuelt.
 
+✅ **Landet 2026-05-08** (`fix/bridge-row-payout-auto-mult-2026-05-08`):
+   bridge skriver nå kanonisk `spill1.ticketColors[]` med slug-form-keys
+   (small_yellow / large_white / etc.) i både `ticket_config_json` og
+   `game_config_json`. Auto-multiplikator (hvit×1, gul×2, lilla×3) +
+   small/large-skalering (×2) er bakt inn via `calculateActualPrize`.
+   Engine sin per-color-payout-pipeline finner riktig pattern via
+   `resolvePatternsForColor`-mapper. Dette lukker pilot-blokker #1:
+   Rad 1-4 + Fullt Hus utbetales nå korrekt for alle catalog-spill.
+   Trafikklys-rad-farge (rød/grønn/gul) og Oddsen target-draw er
+   FORTSATT ikke implementert — det er separat path via
+   `rules.gameVariant` + `rules.prizesPerRowColor` / `rules.targetDraw`.
+
 ### 5. Bonus-spill display-navn for "Mystery Joker"
 
 I dag bruker vi slug `mystery` i whitelist (`BONUS_GAME_SLUG_VALUES`). Display-navn "Mystery Joker" leveres via `BONUS_GAME_DISPLAY_NAMES`. Hvis Tobias vil ha separat slug `mystery_joker`, må whitelist utvides.

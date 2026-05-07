@@ -2,6 +2,20 @@
  * Fase 4 (2026-05-07): GamePlanEngineBridge — bro mellom katalog-modellen
  * (Fase 1) og legacy draw-engine (Game1MasterControlService.startGame).
  *
+ * Pilot-fix (2026-05-08, Rad 1-4 + auto-mult): bridgen skriver nå en
+ * kanonisk `spill1.ticketColors[]`-blokk i både `ticket_config_json` og
+ * `game_config_json`. Dette er PÅKREVD for at engine sin payout-pipeline
+ * (`Game1DrawEngineService.payoutPerColorGroups`) skal returnere riktig
+ * Rad 1-4 + Fullt Hus-beløp. Før fix-en falt engine til flat-path
+ * (`resolvePhaseConfig` som leser `prizePerPattern[row_X]` AS PERCENT) og
+ * vinnerne fikk 0 kr på Rad 1-4. Auto-multiplikator (hvit 5kr×1, gul
+ * 10kr×2, lilla 15kr×3) er bakt inn via `calculateActualPrize`, og
+ * slug-form-keys (small_yellow / large_white / etc.) er PÅKREVD fordi
+ * `spill1VariantMapper.ts:ticketTypeFromSlug` skipper familienavn alene
+ * ("yellow"). Se
+ * `apps/backend/src/game/__tests__/GamePlanEngineBridge.rowPayout.test.ts`
+ * for full kontrakt-spesifikasjon.
+ *
  * Bakgrunn (Fase 4-spec §1):
  * Game1MasterControlService.startGame leser en eksisterende rad i
  * `app_game1_scheduled_games` og kjører engine basert på:
@@ -99,12 +113,42 @@ function assertSchemaName(schema: string): string {
  * Catalog bruker norsk farge-vokabular ("gul"/"hvit"/"lilla"); engine
  * forventer engelsk ("yellow"/"white"/"purple"). Bridgen oversetter
  * her, ikke i engine.
+ *
+ * Pilot-fix (2026-05-08, ticket Rad 1-4 + auto-mult): bridgen skriver i
+ * tillegg en KANONISK `spill1.ticketColors[]`-blokk i samme JSON som
+ * engine sin variant-mapper (`buildVariantConfigFromGameConfigJson` i
+ * apps/backend/src/game/Game1DrawEngineHelpers.ts:205) konsumerer fra
+ * `game_config_json`. Den blokken bruker SLUG-FORM-nøkler
+ * (`small_yellow` / `large_yellow` / `small_white` / `large_white` /
+ * `small_purple` / `large_purple`) fordi `spill1VariantMapper.ts`
+ * (`COLOR_SLUG_TO_NAME`) kun aksepterer slug-input. Engine-payout-pathen
+ * (`Game1DrawEngineService.payoutPerColorGroups`) plukker første-vinners
+ * pattern via `resolvePatternsForColor` som mapper fra slug → engine-navn
+ * ("Small Yellow"). Dette er nødvendig for at Rad 1-4 og Fullt Hus skal
+ * bli faktisk utbetalt med riktige beløp i øre — uten denne blokken
+ * faller engine til flat-path som leser `prizePerPattern[row_X]` som
+ * PROSENT av pot, og catalog-base-beløp gir 0-payout for alle faser.
  */
 const NORWEGIAN_TO_ENGLISH_COLOR: Record<TicketColor, string> = {
   gul: "yellow",
   hvit: "white",
   lilla: "purple",
 };
+
+/**
+ * Slug-prefix for engine-konsumert `spill1.ticketColors[].color`. Map
+ * fra (engelsk farge-familie, størrelse) → slug ("small_yellow",
+ * "large_purple", ...). Må holdes i synk med `COLOR_SLUG_TO_NAME` i
+ * `apps/backend/src/game/spill1VariantMapper.ts`.
+ */
+const SIZE_PREFIX: Readonly<Record<"small" | "large", string>> = {
+  small: "small",
+  large: "large",
+};
+
+function colorSlugFor(englishFamily: string, size: "small" | "large"): string {
+  return `${SIZE_PREFIX[size]}_${englishFamily}`;
+}
 
 /**
  * Multiplikator for "large"-bong-pris over "small". Legacy-konvensjon
@@ -178,24 +222,152 @@ export function buildTicketConfigFromCatalog(
     }
   }
 
+  // Pilot-fix (2026-05-08): kanonisk `spill1.ticketColors[]`-blokk slik
+  // at `Game1DrawEngineHelpers.buildVariantConfigFromGameConfigJson` kan
+  // bygge en GameVariantConfig med `patternsByColor[]`. Engine-payout-
+  // pathen (`Game1DrawEngineService.payoutPerColorGroups`) bruker første
+  // vinners farge-pattern som global-pot-prize per Q3=X-regulatorisk
+  // valg (alle vinnere deler likt uansett farge).
+  //
+  // Hver entry har:
+  //   - color: slug-form (`small_yellow`/`large_white`/etc.) — slug-form
+  //     er påkrevd fordi `spill1VariantMapper.ts:ticketTypeFromSlug`
+  //     skipper ukjente slugs (familienavn som "yellow" alene godtas
+  //     ikke). Color matcher dermed `app_game1_ticket_assignments
+  //     .ticket_color` etter at purchase-flow stores slug-form.
+  //   - priceNok: pris i hele kroner (kr, ikke øre).
+  //   - prizePerPattern: per-fase, per (color, size) auto-multiplisert
+  //     beløp i `{ mode: "fixed", amount: <kr> }`-form. Mode "fixed"
+  //     mapper i `spill1VariantMapper.ts:patternConfigForPhase` til
+  //     `winningType: "fixed"` + `prize1: <kr>` som engine konverterer
+  //     til øre via `patternPrizeToCents` (kr × 100).
+  //
+  // For "auto"-modus skaleres alle 5 faser (Rad 1-4 + Fullt Hus) med
+  // `calculateActualPrize(catalog, base, ticketPriceCents)`. For
+  // "explicit_per_color" (Trafikklys) leses Rad 1-4 fra
+  // `catalog.prizesCents.radN` direkte (ingen skalering — flat 15 kr-bong)
+  // og Fullt Hus fra `catalog.prizesCents.bingo[color]`. Trafikklys'
+  // rad-farge-spesifikke beløp (rød/grønn/gul) håndteres i en separat
+  // path i engine via `rules.prizesPerRowColor` og er IKKE bridge-bridgens
+  // ansvar her.
+  const spill1TicketColors: Array<{
+    color: string;
+    priceNok: number;
+    prizePerPattern: Record<string, { mode: "fixed"; amount: number }>;
+  }> = [];
+
+  for (const color of catalog.ticketColors) {
+    const englishFamily = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
+    const smallPriceCents = catalog.ticketPricesCents[color] ?? 0;
+    if (smallPriceCents <= 0) continue;
+    const sizes: Array<{ size: "small" | "large"; priceCents: number }> = [
+      { size: "small", priceCents: smallPriceCents },
+      {
+        size: "large",
+        priceCents: smallPriceCents * LARGE_TICKET_PRICE_MULTIPLIER,
+      },
+    ];
+    for (const { size, priceCents } of sizes) {
+      // Auto-multipliser per-fase Rad-base (catalog.prizesCents.radN).
+      // I "explicit_per_color" returnerer `calculateActualPrize` base-
+      // beløpet uendret — perfekt for Trafikklys flat-15-kr-bong-modus.
+      const rad1Cents = calculateActualPrize(
+        catalog,
+        catalog.prizesCents.rad1,
+        priceCents,
+      );
+      const rad2Cents = calculateActualPrize(
+        catalog,
+        catalog.prizesCents.rad2,
+        priceCents,
+      );
+      const rad3Cents = calculateActualPrize(
+        catalog,
+        catalog.prizesCents.rad3,
+        priceCents,
+      );
+      const rad4Cents = calculateActualPrize(
+        catalog,
+        catalog.prizesCents.rad4,
+        priceCents,
+      );
+
+      // Fullt hus: i "auto" → bingoBase auto-skaleres. I
+      // "explicit_per_color" → catalog.prizesCents.bingo[color] per
+      // (norsk) farge — IKKE skalert (flat-bong-modus).
+      let fullHouseCents = 0;
+      if (catalog.prizeMultiplierMode === "auto") {
+        const bingoBase = catalog.prizesCents.bingoBase ?? 0;
+        if (bingoBase > 0) {
+          fullHouseCents = calculateActualPrize(catalog, bingoBase, priceCents);
+        }
+      } else {
+        fullHouseCents = catalog.prizesCents.bingo[color] ?? 0;
+      }
+
+      // Bygg prizePerPattern. Hopper over faser med 0-base så
+      // `spill1VariantMapper.patternConfigForPhase` faller til fallback-
+      // pattern (DEFAULT_NORSK_BINGO_CONFIG-default 100/200/200/200/1000).
+      // Det er TRYGGERE enn å skrive amount=0 i fixed-mode — admin kan
+      // eksplisitt sette 0 hvis de virkelig ønsker det.
+      const prizePerPattern: Record<
+        string,
+        { mode: "fixed"; amount: number }
+      > = {};
+      // Konverter øre → kr (catalog stores i øre, mapper forventer kr).
+      if (rad1Cents > 0)
+        prizePerPattern.row_1 = { mode: "fixed", amount: rad1Cents / 100 };
+      if (rad2Cents > 0)
+        prizePerPattern.row_2 = { mode: "fixed", amount: rad2Cents / 100 };
+      if (rad3Cents > 0)
+        prizePerPattern.row_3 = { mode: "fixed", amount: rad3Cents / 100 };
+      if (rad4Cents > 0)
+        prizePerPattern.row_4 = { mode: "fixed", amount: rad4Cents / 100 };
+      if (fullHouseCents > 0)
+        prizePerPattern.full_house = {
+          mode: "fixed",
+          amount: fullHouseCents / 100,
+        };
+
+      spill1TicketColors.push({
+        color: colorSlugFor(englishFamily, size),
+        priceNok: priceCents / 100,
+        prizePerPattern,
+      });
+    }
+  }
+
   const config: Record<string, unknown> = {
     catalogId: catalog.id,
     catalogSlug: catalog.slug,
     prizeMultiplierMode: catalog.prizeMultiplierMode,
     // Engine-leselig nøkkel — array-of-objects med {color, size, pricePerTicket}.
+    // Brukt av `Game1TicketPurchaseService.extractTicketCatalog` for
+    // pris-validering. Family-form colors (yellow/white/purple) bevares
+    // for backward-compat med eksisterende C2-kontrakt.
     ticketTypesData,
     rowPrizes: {
+      // Audit/debug: base-verdier (i øre, ikke skalert per farge). Rad 1-4
+      // sin auto-skalerte premie ligger i spill1.ticketColors[].prizePerPattern.
       row1: catalog.prizesCents.rad1,
       row2: catalog.prizesCents.rad2,
       row3: catalog.prizesCents.rad3,
       row4: catalog.prizesCents.rad4,
     },
-    // Bingo-premie per (engelsk) farge — engine bruker dette for fullt-hus.
+    // Bingo-premie per (engelsk family-name) farge — beholdes for tester
+    // og legacy-tooling som leser top-level `bingoPrizes`. Engine bruker
+    // `spill1.ticketColors[].prizePerPattern.full_house` (slug-keyed).
     bingoPrizes,
     // Tobias 2026-05-07: rules-objektet beholdes som "extra" så engine kan
     // lese spill-spesifikk config (mini-game-rotation, lucky number osv.)
     // hvis admin har lagt til detaljer.
     rules: catalog.rules,
+    // Pilot-fix (2026-05-08): kanonisk per-farge-pattern-blokk for
+    // engine sin variant-mapper. Slug-form keys (small_yellow/large_yellow/
+    // etc.) er PÅKREVD — `COLOR_SLUG_TO_NAME` skipper familienavn alene.
+    spill1: {
+      ticketColors: spill1TicketColors,
+    },
   };
 
   // bingoBase eksponeres separat så engine/audit-tooling kan se base-
@@ -272,6 +444,11 @@ export function buildJackpotConfigFromOverride(
  * Tolkning A (2026-05-07): per-item bonus-override videreformidles til
  * `buildTicketConfigFromCatalog`. Når override er null faller vi tilbake
  * til catalog-default uendret.
+ *
+ * Pilot-fix (2026-05-08): `buildTicketConfigFromCatalog` skriver nå en
+ * `spill1.ticketColors[]`-blokk for engine sin per-farge-pattern-mapper.
+ * Vi merger jackpot inn i samme `spill1`-objekt i stedet for å overskrive
+ * det — ellers ville Rad 1-4-pattern-fixet gå tapt for jackpot-spill.
  */
 export function buildEngineTicketConfig(
   catalog: GameCatalogEntry,
@@ -281,9 +458,15 @@ export function buildEngineTicketConfig(
   const base = buildTicketConfigFromCatalog(catalog, bonusGameOverride);
   const jackpot = buildJackpotConfigFromOverride(jackpotOverride);
   if (Object.keys(jackpot).length === 0) return base;
+  // Merge jackpot inn i eksisterende spill1-objekt (som inneholder
+  // ticketColors[] fra buildTicketConfigFromCatalog). Spread-semantikk
+  // bevarer ticketColors-arrayet uendret.
+  const existingSpill1 =
+    (base.spill1 as Record<string, unknown> | undefined) ?? {};
   return {
     ...base,
     spill1: {
+      ...existingSpill1,
       jackpot: {
         prizeByColor: jackpot.prizeByColor,
         draw: jackpot.draw,
@@ -584,6 +767,22 @@ export class GamePlanEngineBridge {
     );
     const jackpotConfig = buildJackpotConfigFromOverride(jackpotOverride);
 
+    // Pilot-fix (2026-05-08): `game_config_json` må bære
+    // `spill1.ticketColors[]`-blokken slik at engine sin variant-mapper
+    // (`buildVariantConfigFromGameConfigJson`) bygger en `patternsByColor[]`
+    // og payout-pathen returnerer faktisk øre-beløp via Q3=X-pot per
+    // første-vinners-farge. NULL/missing → engine faller til flat-path
+    // (`resolvePhaseConfig`-percent), som gir 0-payout for catalog-spill.
+    //
+    // Vi bruker ticketConfig direkte: den inneholder allerede
+    // `spill1.ticketColors[]` og `spill1.jackpot` (om relevant).
+    // game_config_json er tradisjonelt en KOPI av
+    // GameManagement.config_json — for catalog-spill er bridgen den
+    // autoritative kilden, så vi peker game_config_json til samme
+    // struktur. Engine vil hente jackpot fra ticket_config_json eller
+    // game_config_json, så de er funksjonelt ekvivalente per fil.
+    const gameConfigJson = JSON.stringify(ticketConfig);
+
     // Bygg participating_halls = bare run.hall_id (single-hall i Fase 4).
     // Multi-hall via groupOfHalls støttes når app_groups-tabellen lander.
     const participatingHalls = [run.hall_id];
@@ -628,7 +827,7 @@ export class GamePlanEngineBridge {
             plan_position)
          VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
                  $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
-                 'ready_to_start', NULL, $15, $16, $17)`,
+                 'ready_to_start', $15::jsonb, $16, $17, $18)`,
         [
           newId,
           // sub_game_index — vi bruker plan_position-1 (0-basert)
@@ -648,6 +847,9 @@ export class GamePlanEngineBridge {
           run.hall_id,
           groupHallId,
           JSON.stringify(participatingHalls),
+          // Pilot-fix (2026-05-08): game_config_json bærer
+          // spill1.ticketColors[]-blokken så engine bygger patternsByColor.
+          gameConfigJson,
           catalog.id,
           run.id,
           position,
