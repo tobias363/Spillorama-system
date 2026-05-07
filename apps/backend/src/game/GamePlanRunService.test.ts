@@ -165,6 +165,15 @@ function makeRunService(
       if (/INSERT INTO\s+"public"\."app_game_plan_run"/i.test(sql)) {
         insertCount += 1;
         if (options.insertThrowsUnique) {
+          // H2-fix (2026-05-07): simuler at en annen caller "vant" race-en
+          // og opprettet en rad mens vi var midt i finn-eller-opprett-flow.
+          // Når raceCondition er satt, plasserer vi den i runRow så
+          // findForDay() i catch-blokken finner den. Hvis raceCondition
+          // er null/undefined betyr det at unique-violation kommer fra
+          // et annet problem og caller skal re-throw.
+          if (options.raceCondition) {
+            runRow = options.raceCondition;
+          }
           // Simulerer pg unique-violation (code 23505).
           const e = new Error("duplicate key");
           (e as unknown as { code: string }).code = "23505";
@@ -348,6 +357,58 @@ test("Fase 1 run: getOrCreateForToday kaster NO_MATCHING_PLAN hvis ingen plan de
     "no plan matches",
     () => service.getOrCreateForToday("hall-1", todayStr()),
     "NO_MATCHING_PLAN",
+  );
+});
+
+// H2-fix (2026-05-07, code-review): race-condition-håndtering i
+// getOrCreateForToday var implementert (try/catch på unique-violation
+// → re-fetch) men utestet. Test verifiserer at to samtidige callere
+// ikke begge oppretter en run; den andre re-fetcher og returnerer
+// den første sin rad.
+test("Fase 1 run: getOrCreateForToday resolverer race-condition ved unique-violation re-fetch", async () => {
+  const racyRow = makeRunRow({
+    id: "racy-run-by-other",
+    status: "idle",
+  });
+  const plan = makePlanWithItems([
+    { gameCatalogId: "gc-1", catalogEntry: makeCatalogEntry() },
+  ]);
+  const { service } = makeRunService({
+    runRow: null, // første findForDay returnerer null (ingen rad)
+    plan,
+    insertThrowsUnique: true, // INSERT kaster 23505 (annen caller vant)
+    raceCondition: racyRow, // andre findForDay (i catch-blokk) returnerer racyRow
+  });
+  const run = await service.getOrCreateForToday("hall-1", todayStr());
+  assert.equal(
+    run.id,
+    "racy-run-by-other",
+    "race-fallback skal returnere den andre callerens rad",
+  );
+  assert.equal(run.status, "idle");
+});
+
+test("Fase 1 run: getOrCreateForToday re-throw når unique-violation IKKE fra race", async () => {
+  // Hvis INSERT kaster unique-violation men ingen rad finnes ved
+  // re-fetch, betyr det at unique-violation kommer fra et annet
+  // problem (f.eks. id-kollisjon). Vi skal re-throw, ikke returnere
+  // null eller en feil-resolved race.
+  const plan = makePlanWithItems([
+    { gameCatalogId: "gc-1", catalogEntry: makeCatalogEntry() },
+  ]);
+  const { service } = makeRunService({
+    runRow: null,
+    plan,
+    insertThrowsUnique: true,
+    // Ingen raceCondition satt — re-fetch gir fortsatt null
+  });
+  await assert.rejects(
+    () => service.getOrCreateForToday("hall-1", todayStr()),
+    (err: unknown) => {
+      const e = err as { code?: string };
+      assert.equal(e.code, "23505");
+      return true;
+    },
   );
 });
 

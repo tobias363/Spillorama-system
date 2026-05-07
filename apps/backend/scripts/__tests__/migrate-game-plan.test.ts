@@ -13,6 +13,9 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import {
   MIGRATION_PREFIX,
@@ -215,4 +218,122 @@ test("idempotens-mig: rollback fjerner KUN rader med MIGRATION_PREFIX", () => {
   // ID-er som ikke matcher prefix skal IKKE plukkes opp
   const ekteId = "abc-123-456";
   assert.ok(!ekteId.startsWith(MIGRATION_PREFIX));
+});
+
+// ── C1-fix-tester (2026-05-07, code-review) ──────────────────────────────
+//
+// app_audit_log.id er BIGSERIAL (apps/backend/migrations/
+// 20260418160000_app_audit_log.sql:17). Forrige migrasjons-skript prøvde
+// å INSERT-e med en `randomUUID()`-streng som $1, som krasjer med
+// "invalid input syntax for type bigint". Fikset ved å droppe id-feltet
+// fra INSERT-listen og la BIGSERIAL auto-tildele.
+
+function readMigrationScript(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const scriptPath = join(here, "..", "migrate-game-plan-2026-05-07.ts");
+  return readFileSync(scriptPath, "utf8");
+}
+
+test("C1: migrasjons-skript INSERT INTO app_audit_log inkluderer IKKE id-felt", () => {
+  // BIGSERIAL auto-tildeler id; å forsøke å sette id=randomUUID-streng
+  // krasjer med "invalid input syntax for type bigint". Vi verifiserer at
+  // begge audit-log-INSERT-er (execute + rollback) lar id-feltet være
+  // implisitt.
+  const source = readMigrationScript();
+  const auditInserts = source.match(
+    /INSERT INTO \$\{schema\}\.app_audit_log[\s\S]*?\)`/g,
+  );
+  assert.ok(
+    auditInserts && auditInserts.length === 2,
+    `forventet 2 audit-log-INSERTer (execute + rollback), fant ${auditInserts?.length ?? 0}`,
+  );
+  for (const sql of auditInserts) {
+    // Skal IKKE inneholde "id," i kolonne-listen rett etter app_audit_log.
+    // Old buggy-pattern: "(id, actor_id, actor_type, ...".
+    assert.ok(
+      !/\(\s*id\s*,\s*actor_id/i.test(sql),
+      `audit-log-INSERT inkluderer id i kolonneliste:\n${sql}`,
+    );
+    // VALUES-blokken skal IKKE starte med "$1, NULL, 'SYSTEM'"-pattern
+    // (den gamle buggy stilen brukte $1 for randomUUID-id).
+    assert.ok(
+      !/VALUES\s*\(\s*\$1\s*,\s*NULL\s*,\s*'SYSTEM'/i.test(sql),
+      `audit-log-INSERT bruker $1=randomUUID-streng som id (gammel buggy pattern):\n${sql}`,
+    );
+    // Skal starte VALUES med NULL (actor_id=null) — BIGSERIAL auto-id.
+    assert.ok(
+      /VALUES\s*\(\s*NULL\s*,\s*'SYSTEM'/i.test(sql),
+      `audit-log-INSERT skal starte VALUES med NULL (actor_id), BIGSERIAL gir id:\n${sql}`,
+    );
+  }
+});
+
+test("C1: migrasjons-skript importerer IKKE randomUUID lenger (audit-log auto-id)", () => {
+  // randomUUID ble brukt KUN for audit-log-id som BIGSERIAL (krasj-bug).
+  // Etter C1-fixen skal importen være fjernet så TypeScript fanger
+  // eventuelle re-introduksjoner av buggen.
+  const source = readMigrationScript();
+  assert.ok(
+    !/import\s+\{\s*randomUUID\s*\}/.test(source),
+    "randomUUID-importen skal være fjernet etter C1-fix",
+  );
+  assert.ok(
+    !/\brandomUUID\(\)/.test(source),
+    "randomUUID()-call-sites skal være fjernet etter C1-fix",
+  );
+});
+
+test("C1: migrasjons-skript bevarer COMMIT-rekkefølge så audit + data persisteres atomisk", () => {
+  const source = readMigrationScript();
+  // executeMigration: BEGIN → INSERT/audit → COMMIT må holdes så audit
+  // + dataen committes som én transaksjon. Hvis audit hadde vært
+  // utenfor transaksjonen, ville en commit-feil etterlate audit men
+  // ingen data — eller motsatt — og rapportere uriktige tall.
+  const executeBlock = source.match(
+    /async function executeMigration[\s\S]+?async function/,
+  );
+  assert.ok(executeBlock, "executeMigration-funksjon ikke funnet i skriptet");
+  const exec = executeBlock![0];
+  const beginIdx = exec.search(/await client\.query\("BEGIN"\)/);
+  const auditIdx = exec.search(/INSERT INTO \$\{schema\}\.app_audit_log/);
+  const commitIdx = exec.search(/await client\.query\("COMMIT"\)/);
+  assert.ok(beginIdx >= 0, "BEGIN må finnes i executeMigration");
+  assert.ok(auditIdx >= 0, "audit-INSERT må finnes i executeMigration");
+  assert.ok(commitIdx >= 0, "COMMIT må finnes i executeMigration");
+  assert.ok(
+    beginIdx < auditIdx && auditIdx < commitIdx,
+    "executeMigration: BEGIN → audit-INSERT → COMMIT-rekkefølge må bevares",
+  );
+
+  // rollbackMigration: samme krav for atomicitet.
+  const rollbackBlock = source.match(/async function rollbackMigration[\s\S]+/);
+  assert.ok(rollbackBlock);
+  const roll = rollbackBlock![0];
+  const beginIdx2 = roll.search(/await client\.query\("BEGIN"\)/);
+  const auditIdx2 = roll.search(/INSERT INTO \$\{schema\}\.app_audit_log/);
+  const commitIdx2 = roll.search(/await client\.query\("COMMIT"\)/);
+  assert.ok(beginIdx2 >= 0 && auditIdx2 >= 0 && commitIdx2 >= 0);
+  assert.ok(
+    beginIdx2 < auditIdx2 && auditIdx2 < commitIdx2,
+    "rollbackMigration: BEGIN → audit-INSERT → COMMIT må bevares",
+  );
+});
+
+test("C1: BIGSERIAL-skjema bekreftet — app_audit_log.id er auto-incrementing", () => {
+  // Sanity-check at skjemaet vi bygger på faktisk bruker BIGSERIAL.
+  // Hvis dette endrer seg (f.eks. til UUID), må migrasjons-skriptet
+  // oppdateres tilsvarende.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const schemaPath = join(
+    here,
+    "..",
+    "..",
+    "migrations",
+    "20260418160000_app_audit_log.sql",
+  );
+  const schema = readFileSync(schemaPath, "utf8");
+  assert.ok(
+    /id\s+BIGSERIAL\s+PRIMARY KEY/i.test(schema),
+    "app_audit_log.id må fortsatt være BIGSERIAL — ellers er C1-fix utdatert",
+  );
 });
