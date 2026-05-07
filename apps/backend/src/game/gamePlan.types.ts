@@ -3,7 +3,7 @@
  *
  * Disse typene speiler `app_game_plan`, `app_game_plan_item` og
  * `app_game_plan_run` i
- * `migrations/20260507120000_app_game_catalog_and_plan.sql`.
+ * `migrations/20261210000000_app_game_catalog_and_plan.sql`.
  */
 
 import type { GameCatalogEntry, TicketColor } from "./gameCatalog.types.js";

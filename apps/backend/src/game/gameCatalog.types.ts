@@ -2,7 +2,7 @@
  * Fase 1 (2026-05-07): type-definisjoner for game-catalog.
  *
  * Disse typene speiler `app_game_catalog`-tabellen i
- * `migrations/20260507120000_app_game_catalog_and_plan.sql` og brukes
+ * `migrations/20261210000000_app_game_catalog_and_plan.sql` og brukes
  * av `GameCatalogService` + framtidige routes/admin-UI.
  *
  * Whitelist:
