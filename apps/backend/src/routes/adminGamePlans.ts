@@ -319,6 +319,21 @@ export function createAdminGamePlansRouter(
           }
           out.notes = raw.notes as string | null;
         }
+        // Tolkning A (2026-05-07): bonusGameOverride er valgfri streng eller
+        // null. Whitelist-validering skjer i service-laget — her aksepterer
+        // vi bare at typen er korrekt og delegerer slug-sjekk videre.
+        if (raw.bonusGameOverride !== undefined) {
+          const bonus = raw.bonusGameOverride;
+          if (bonus !== null && typeof bonus !== "string") {
+            throw new DomainError(
+              "INVALID_INPUT",
+              `items[${idx}].bonusGameOverride må være streng eller null.`,
+            );
+          }
+          // Service-laget kaster INVALID_INPUT for ugyldig slug-verdier.
+          out.bonusGameOverride =
+            bonus as SetGamePlanItemsInput["bonusGameOverride"];
+        }
         return out;
       });
 

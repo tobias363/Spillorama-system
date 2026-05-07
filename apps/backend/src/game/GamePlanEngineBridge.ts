@@ -54,6 +54,7 @@ import type { GameCatalogService } from "./GameCatalogService.js";
 import type { GamePlanService } from "./GamePlanService.js";
 import type { GamePlanRunService } from "./GamePlanRunService.js";
 import type {
+  BonusGameSlug,
   GameCatalogEntry,
   TicketColor,
 } from "./gameCatalog.types.js";
@@ -112,8 +113,21 @@ const NORWEGIAN_TO_ENGLISH_COLOR: Record<TicketColor, string> = {
  */
 const LARGE_TICKET_PRICE_MULTIPLIER = 2;
 
+/**
+ * Tolkning A (2026-05-07): per-item bonus-override.
+ *
+ * `bonusGameOverride` overstyrer `catalog.bonusGameSlug` per plan-item
+ * når den er satt. Forrang-regelen er:
+ *
+ *   override (ikke null/undefined) > catalog.bonusGameSlug > ingen bonus
+ *
+ * `catalog.bonusGameEnabled` brukes fortsatt som on/off-switch — hvis
+ * bonus er disabled på catalog-nivå, slipper vi bonus selv om override
+ * er satt.
+ */
 export function buildTicketConfigFromCatalog(
   catalog: GameCatalogEntry,
+  bonusGameOverride: BonusGameSlug | null = null,
 ): Record<string, unknown> {
   const ticketTypesData: Array<{
     color: string;
@@ -162,11 +176,20 @@ export function buildTicketConfigFromCatalog(
     rules: catalog.rules,
   };
 
-  if (catalog.bonusGameEnabled && catalog.bonusGameSlug) {
-    config.bonusGame = {
-      slug: catalog.bonusGameSlug,
-      enabled: true,
-    };
+  // Tolkning A (2026-05-07): override > catalog. catalog.bonusGameEnabled
+  // er fortsatt master-switch — hvis bonus er disabled på catalog-nivå,
+  // slipper vi bonus uavhengig av override.
+  if (catalog.bonusGameEnabled) {
+    const effectiveSlug = bonusGameOverride ?? catalog.bonusGameSlug;
+    if (effectiveSlug) {
+      config.bonusGame = {
+        slug: effectiveSlug,
+        enabled: true,
+        // Diagnostikk: lagre om override ble brukt — admin/audit-tooling
+        // kan se hvilken kilde som vant ved feilsøking.
+        overrideApplied: bonusGameOverride !== null,
+      };
+    }
   }
 
   return config;
@@ -214,12 +237,17 @@ export function buildJackpotConfigFromOverride(
  * engine kan parse direkte. Plasserer jackpot under `spill1.jackpot`-
  * pathen så `Game1DrawEngineHelpers.resolveJackpotConfig` finner den
  * (den leter både på `obj.spill1.jackpot` og fallback `obj.jackpot`).
+ *
+ * Tolkning A (2026-05-07): per-item bonus-override videreformidles til
+ * `buildTicketConfigFromCatalog`. Når override er null faller vi tilbake
+ * til catalog-default uendret.
  */
 export function buildEngineTicketConfig(
   catalog: GameCatalogEntry,
   jackpotOverride: JackpotOverride | null,
+  bonusGameOverride: BonusGameSlug | null = null,
 ): Record<string, unknown> {
-  const base = buildTicketConfigFromCatalog(catalog);
+  const base = buildTicketConfigFromCatalog(catalog, bonusGameOverride);
   const jackpot = buildJackpotConfigFromOverride(jackpotOverride);
   if (Object.keys(jackpot).length === 0) return base;
   return {
@@ -514,7 +542,15 @@ export class GamePlanEngineBridge {
     // `resolveJackpotConfig` finner det. Jackpot-config-kolonnen får
     // fortsatt en kopi for backward-compat med admin-tooling, men engine
     // konsumerer den ikke.
-    const ticketConfig = buildEngineTicketConfig(catalog, jackpotOverride);
+    //
+    // Tolkning A (2026-05-07): per-item bonus-override fra plan-item
+    // overstyrer catalog.bonusGameSlug. NULL → fallback til catalog.
+    const bonusOverride = item.bonusGameOverride;
+    const ticketConfig = buildEngineTicketConfig(
+      catalog,
+      jackpotOverride,
+      bonusOverride,
+    );
     const jackpotConfig = buildJackpotConfigFromOverride(jackpotOverride);
 
     // Bygg participating_halls = bare run.hall_id (single-hall i Fase 4).

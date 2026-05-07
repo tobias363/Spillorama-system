@@ -87,6 +87,7 @@ function makePlanWithItems(
       planId: "gp-1",
       position: idx + 1,
       gameCatalogId: it.gameCatalogId,
+      bonusGameOverride: null,
       notes: null,
       createdAt: "2026-05-07T12:00:00Z",
       catalogEntry: it.catalogEntry,

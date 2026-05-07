@@ -67,7 +67,10 @@ function makeCatalogEntry(
 }
 
 function makePlanWithItems(
-  items: { catalogEntry: GameCatalogEntry }[],
+  items: {
+    catalogEntry: GameCatalogEntry;
+    bonusGameOverride?: import("./gameCatalog.types.js").BonusGameSlug | null;
+  }[],
 ): GamePlanWithItems {
   return {
     id: "gp-1",
@@ -87,6 +90,7 @@ function makePlanWithItems(
       planId: "gp-1",
       position: idx + 1,
       gameCatalogId: it.catalogEntry.id,
+      bonusGameOverride: it.bonusGameOverride ?? null,
       notes: null,
       createdAt: "2026-05-07T12:00:00Z",
       catalogEntry: it.catalogEntry,
@@ -357,9 +361,11 @@ test("buildTicketConfigFromCatalog: bonus-spill aktivert legges på", () => {
     bonusGameEnabled: true,
   });
   const cfg = buildTicketConfigFromCatalog(catalog);
+  // Tolkning A (2026-05-07): bonus-shape inkluderer overrideApplied-flagg.
   assert.deepEqual(cfg.bonusGame, {
     slug: "wheel_of_fortune",
     enabled: true,
+    overrideApplied: false,
   });
 });
 
@@ -711,6 +717,137 @@ test("getJackpotConfigForPosition: returnerer override når den finnes", async (
   assert.ok(result);
   assert.equal(result!.draw, 60);
   assert.equal(result!.prizesCents.gul, 50000);
+});
+
+// ── Tolkning A (2026-05-07): per-item bonus-override forrang ────────────
+
+test("Tolkning A: bonus_game_override forrang over catalog.bonusGameSlug", async () => {
+  const catalog = makeCatalogEntry({
+    bonusGameSlug: "treasure_chest",
+    bonusGameEnabled: true,
+  });
+  const plan = makePlanWithItems([
+    { catalogEntry: catalog, bonusGameOverride: "wheel_of_fortune" },
+  ]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-1",
+      business_date: "2026-05-07",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "hg-1",
+  });
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+  const insertQ = queries.find((q) =>
+    /INSERT INTO\s+"public"\."app_game1_scheduled_games"/i.test(q.sql),
+  );
+  assert.ok(insertQ, "INSERT skal kjøres");
+  const ticketCfg = JSON.parse(insertQ!.params![8] as string);
+  assert.deepEqual(ticketCfg.bonusGame, {
+    slug: "wheel_of_fortune",
+    enabled: true,
+    overrideApplied: true,
+  });
+});
+
+test("Tolkning A: bonus_game_override null faller tilbake til catalog.bonusGameSlug", async () => {
+  const catalog = makeCatalogEntry({
+    bonusGameSlug: "color_draft",
+    bonusGameEnabled: true,
+  });
+  const plan = makePlanWithItems([
+    { catalogEntry: catalog, bonusGameOverride: null },
+  ]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-1",
+      business_date: "2026-05-07",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "hg-1",
+  });
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+  const insertQ = queries.find((q) =>
+    /INSERT INTO\s+"public"\."app_game1_scheduled_games"/i.test(q.sql),
+  );
+  const ticketCfg = JSON.parse(insertQ!.params![8] as string);
+  assert.deepEqual(ticketCfg.bonusGame, {
+    slug: "color_draft",
+    enabled: true,
+    overrideApplied: false,
+  });
+});
+
+test("Tolkning A: ingen bonus i catalog OG ingen override → bonusGame fraværende", async () => {
+  const catalog = makeCatalogEntry({
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+  });
+  const plan = makePlanWithItems([
+    { catalogEntry: catalog, bonusGameOverride: null },
+  ]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-1",
+      business_date: "2026-05-07",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "hg-1",
+  });
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+  const insertQ = queries.find((q) =>
+    /INSERT INTO\s+"public"\."app_game1_scheduled_games"/i.test(q.sql),
+  );
+  const ticketCfg = JSON.parse(insertQ!.params![8] as string);
+  assert.equal(
+    ticketCfg.bonusGame,
+    undefined,
+    "bonusGame skal være fraværende når begge kilder er null",
+  );
+});
+
+test("Tolkning A: catalog.bonusGameEnabled=false overstyrer override (off-switch)", async () => {
+  const catalog = makeCatalogEntry({
+    bonusGameSlug: "mystery",
+    bonusGameEnabled: false,
+  });
+  const plan = makePlanWithItems([
+    { catalogEntry: catalog, bonusGameOverride: "wheel_of_fortune" },
+  ]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-1",
+      business_date: "2026-05-07",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "hg-1",
+  });
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+  const insertQ = queries.find((q) =>
+    /INSERT INTO\s+"public"\."app_game1_scheduled_games"/i.test(q.sql),
+  );
+  const ticketCfg = JSON.parse(insertQ!.params![8] as string);
+  assert.equal(
+    ticketCfg.bonusGame,
+    undefined,
+    "catalog-disabled skal vinne over override (off-switch-semantikk)",
+  );
 });
 
 test("getJackpotConfigForPosition: tolererer snake_case prizes_cents fra DB", async () => {

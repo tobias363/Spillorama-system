@@ -471,6 +471,116 @@ test("Fase 1 plan: setItems() avviser inactive catalog-entry", async () => {
   );
 });
 
+// ── Tolkning A (2026-05-07): per-item bonus-override ────────────────────
+
+test("Tolkning A: setItems() persisterer bonusGameOverride i INSERT", async () => {
+  const catalogMap = new Map<string, GameCatalogEntry>();
+  catalogMap.set("gc-bingo", makeCatalogEntry({ id: "gc-bingo" }));
+  const catalogSvc = makeStubCatalogService({ entries: catalogMap });
+  const { service, queries } = makeCapturingService({
+    existingPlanRow: makeMinimalPlanRow(),
+    catalogService: catalogSvc,
+  });
+  (service as unknown as { getById: () => Promise<unknown> }).getById = async () =>
+    planEntryWithItems();
+  await service.setItems("gp-1", [
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "wheel_of_fortune" },
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "color_draft" },
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "treasure_chest" },
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "mystery" },
+  ]);
+  const inserts = queries.filter((q) =>
+    /INSERT INTO\s+"public"\."app_game_plan_item"/i.test(q.sql),
+  );
+  assert.equal(inserts.length, 4);
+  for (const ins of inserts) {
+    assert.match(
+      ins.sql,
+      /bonus_game_override/i,
+      "INSERT må inkludere bonus_game_override-kolonnen",
+    );
+  }
+  // Param-rekkefølge: id, plan_id, position, game_catalog_id, bonus_game_override, notes.
+  assert.equal(inserts[0].params?.[4], "wheel_of_fortune");
+  assert.equal(inserts[1].params?.[4], "color_draft");
+  assert.equal(inserts[2].params?.[4], "treasure_chest");
+  assert.equal(inserts[3].params?.[4], "mystery");
+});
+
+test("Tolkning A: setItems() håndterer mix av items med og uten bonus-override", async () => {
+  const catalogMap = new Map<string, GameCatalogEntry>();
+  catalogMap.set("gc-bingo", makeCatalogEntry({ id: "gc-bingo" }));
+  const catalogSvc = makeStubCatalogService({ entries: catalogMap });
+  const { service, queries } = makeCapturingService({
+    existingPlanRow: makeMinimalPlanRow(),
+    catalogService: catalogSvc,
+  });
+  (service as unknown as { getById: () => Promise<unknown> }).getById = async () =>
+    planEntryWithItems();
+  await service.setItems("gp-1", [
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "wheel_of_fortune" },
+    { gameCatalogId: "gc-bingo" },
+    { gameCatalogId: "gc-bingo", bonusGameOverride: null },
+  ]);
+  const inserts = queries.filter((q) =>
+    /INSERT INTO\s+"public"\."app_game_plan_item"/i.test(q.sql),
+  );
+  assert.equal(inserts.length, 3);
+  assert.equal(inserts[0].params?.[4], "wheel_of_fortune");
+  assert.equal(inserts[1].params?.[4], null);
+  assert.equal(inserts[2].params?.[4], null);
+});
+
+test("Tolkning A: setItems() avviser ugyldig bonus-slug", async () => {
+  const catalogMap = new Map<string, GameCatalogEntry>();
+  catalogMap.set("gc-bingo", makeCatalogEntry({ id: "gc-bingo" }));
+  const catalogSvc = makeStubCatalogService({ entries: catalogMap });
+  const svc = makeValidatingService(catalogSvc);
+  (svc as unknown as { getById: () => Promise<unknown> }).getById = async () =>
+    planEntryWithItems();
+  await expectDomainError(
+    "invalid bonus slug",
+    () =>
+      svc.setItems("gp-1", [
+        {
+          gameCatalogId: "gc-bingo",
+          bonusGameOverride: "not_a_real_slug" as unknown as
+            | "wheel_of_fortune"
+            | null,
+        },
+      ]),
+    "INVALID_INPUT",
+  );
+});
+
+test("Tolkning A: setItems() atomic replace bevarer/erstatter bonus-data", async () => {
+  const catalogMap = new Map<string, GameCatalogEntry>();
+  catalogMap.set("gc-bingo", makeCatalogEntry({ id: "gc-bingo" }));
+  const catalogSvc = makeStubCatalogService({ entries: catalogMap });
+  const { service, queries } = makeCapturingService({
+    existingPlanRow: makeMinimalPlanRow(),
+    catalogService: catalogSvc,
+  });
+  (service as unknown as { getById: () => Promise<unknown> }).getById = async () =>
+    planEntryWithItems();
+  await service.setItems("gp-1", [
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "wheel_of_fortune" },
+    { gameCatalogId: "gc-bingo", bonusGameOverride: "treasure_chest" },
+  ]);
+  const beginIdx = queries.findIndex((q) => /^BEGIN/i.test(q.sql.trim()));
+  const deleteIdx = queries.findIndex((q) =>
+    /DELETE FROM\s+"public"\."app_game_plan_item"/i.test(q.sql),
+  );
+  const firstInsertIdx = queries.findIndex((q) =>
+    /INSERT INTO\s+"public"\."app_game_plan_item"/i.test(q.sql),
+  );
+  const commitIdx = queries.findIndex((q) => /^COMMIT/i.test(q.sql.trim()));
+  assert.ok(beginIdx >= 0, "BEGIN må kjøre");
+  assert.ok(deleteIdx > beginIdx, "DELETE må komme etter BEGIN");
+  assert.ok(firstInsertIdx > deleteIdx, "INSERT må komme etter DELETE");
+  assert.ok(commitIdx > firstInsertIdx, "COMMIT må komme etter INSERTs");
+});
+
 test("Fase 1 plan: setItems() ALLOWS duplicates (Spill 2 og 14 begge Innsatsen)", async () => {
   const catalogMap = new Map<string, GameCatalogEntry>();
   catalogMap.set("gc-innsatsen", makeCatalogEntry({ id: "gc-innsatsen" }));
