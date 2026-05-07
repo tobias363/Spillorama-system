@@ -487,6 +487,7 @@ Før du skriver eller endrer kode i payout-pathen, gå gjennom denne sjekklisten
 
 ## 16. Referanser
 
+- [docs/architecture/SPILL_DETALJER_PER_SPILL.md](./SPILL_DETALJER_PER_SPILL.md) — komplett per-spill-spec for alle 13 katalog-varianter + Spill 2/3/4 + bonus-mini-spill
 - [docs/architecture/SPILLKATALOG.md](./SPILLKATALOG.md) — markedsføringsnavn vs slug, regulatoriske kategorier
 - [docs/operations/PM_HANDOFF_2026-05-07.md](../operations/PM_HANDOFF_2026-05-07.md) — opprinnelig kilde for spilleplan-redesign-detaljer
 - [docs/architecture/GAME_PLAN_REDESIGN_DEPRECATION_PLAN_2026-05-07.md](./GAME_PLAN_REDESIGN_DEPRECATION_PLAN_2026-05-07.md) — utrullings-plan for ny modell

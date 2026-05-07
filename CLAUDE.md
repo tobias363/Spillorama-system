@@ -360,6 +360,8 @@ These are decisions baked in by the Spillorama team — not auto-detectable from
 
 See @docs/architecture/SPILL_REGLER_OG_PAYOUT.md for autoritative regler om bongpriser, auto-multiplikator, single-prize cap (databingo only), spesialspill (Trafikklys + Oddsen), bonus-spill, multi-vinner, og engine-bridge ticket-config-shape. Hvis du finner kode som motsier doc-en, **doc-en vinner** og koden må fikses.
 
+For per-spill-detaljer (mekanikk, premier, bonus-defaults for hvert av de 13 katalog-spillene + Spill 2/3/4 + bonus-mini-spill): se @docs/architecture/SPILL_DETALJER_PER_SPILL.md.
+
 ### Game catalog (master truth)
 
 See @docs/architecture/SPILLKATALOG.md for the definitive game catalog. Quick mapping:
