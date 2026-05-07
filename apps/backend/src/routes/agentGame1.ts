@@ -280,6 +280,64 @@ export function createAgentGame1Router(
   }
 
   /**
+   * 2026-05-07 (Tobias UX): finn neste game i `'scheduled'`-status for
+   * hallen, dvs. en runde som ENDA ikke har åpnet for kjøp. Brukes av
+   * `/start`-endepunktet for å gi en presis feilmelding når master-agent
+   * trykker Start mens runden fortsatt venter på cron-promotering til
+   * `'purchase_open'`. Skiller `GAME_NOT_STARTABLE_YET` fra `NO_ACTIVE_GAME`
+   * (= ingen runde i det hele tatt).
+   *
+   * Sortert ASC på `scheduled_start_time` for å returnere nærmeste-i-tid.
+   */
+  async function findScheduledGameForHall(
+    hallId: string
+  ): Promise<ActiveGameRow | null> {
+    try {
+      const { rows } = await pool.query<ActiveGameRow>(
+        `SELECT id, status, master_hall_id, group_hall_id,
+                participating_halls_json, sub_game_name, custom_game_name,
+                scheduled_start_time, scheduled_end_time,
+                actual_start_time, actual_end_time
+           FROM ${scheduledGamesTable}
+           WHERE (master_hall_id = $1
+              OR participating_halls_json::jsonb @> to_jsonb($1::text))
+             AND status = 'scheduled'
+           ORDER BY scheduled_start_time ASC
+           LIMIT 1`,
+        [hallId]
+      );
+      return rows[0] ?? null;
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code ?? "";
+      if (code === "42P01" || code === "42703") {
+        logger.debug(
+          { hallId, code },
+          "scheduled-games table missing; returning null"
+        );
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * 2026-05-07: format timestamp som "HH:MM" i Europe/Oslo-tidssone.
+   * Brukes i `GAME_NOT_STARTABLE_YET`-feilmeldingen så master-agent ser
+   * når purchase-vinduet åpner for kommende runde.
+   */
+  function formatOsloTimeHHMM(value: Date | string): string {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    return date.toLocaleTimeString("nb-NO", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Oslo",
+    });
+  }
+
+  /**
    * 2026-05-03 (Tobias UX): hent alle halls i agentens group-of-halls.
    * Brukes for å vise hall-status-pillen alltid — selv før noen game er
    * spawn'et i scheduled-tabellen. Returnerer tom liste hvis hallen
@@ -438,6 +496,18 @@ export function createAgentGame1Router(
       const hallId = resolveHallScope(actor, undefined);
       const active = await findActiveGameForHall(hallId);
       if (!active) {
+        // 2026-05-07 (Tobias UX): skill mellom "ingen runde i det hele tatt"
+        // og "runden er planlagt, men purchase-vinduet er ikke åpnet enda".
+        // Master-agent i sistnevnte tilfelle får tid for når kjøp åpner så
+        // de vet når Start-knappen blir aktiv.
+        const scheduled = await findScheduledGameForHall(hallId);
+        if (scheduled) {
+          const ts = formatOsloTimeHHMM(scheduled.scheduled_start_time);
+          throw new DomainError(
+            "GAME_NOT_STARTABLE_YET",
+            `Spillet er planlagt og åpner for kjøp kl ${ts}. Du kan ikke starte før da.`
+          );
+        }
         throw new DomainError(
           "NO_ACTIVE_GAME",
           "Ingen aktiv Spill 1-runde for din hall akkurat nå."

@@ -295,16 +295,13 @@ function render(container: HTMLElement, state: BoxState): void {
   const isMaster = data.isMasterAgent;
   const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
 
-  // Master-knapper: Start aktiv under scheduled/purchase_open/ready_to_start.
-  // 2026-05-03 (Tobias UX): tillat 'scheduled' så master kan forsere
-  // start uten å vente på cron-promotering. Hvis ikke alle haller er
-  // klare, klikk-handler viser bekreftelse + ekskluderer ikke-klare
-  // haller (PR #847 confirmUnreadyHalls).
+  // 2026-05-07 (Tobias UX): Start kun aktiv når purchase-vinduet ER åpnet
+  // (`purchase_open` / `ready_to_start`). I `'scheduled'` venter vi på cron-
+  // promotering — backend returnerer GAME_NOT_STARTABLE_YET hvis vi prøver,
+  // så vi disable-r knappen i UI med tooltip som matcher backend-meldingen.
   const canStart =
     isMaster &&
-    (game.status === "scheduled" ||
-      game.status === "ready_to_start" ||
-      game.status === "purchase_open");
+    (game.status === "ready_to_start" || game.status === "purchase_open");
   const canResume = isMaster && game.status === "paused";
   const canStop =
     isMaster && (game.status === "running" || game.status === "paused");
@@ -322,6 +319,7 @@ function render(container: HTMLElement, state: BoxState): void {
     canStop,
     isMaster,
     gameStatus: game.status,
+    scheduledStartTime: game.scheduledStartTime,
     unreadyCount,
   });
 
@@ -437,6 +435,11 @@ function renderMasterButtons(opts: {
   isMaster: boolean;
   gameStatus: string;
   /**
+   * 2026-05-07: scheduled-start-tid for runden. Brukes til tooltip på
+   * Start-knappen når status='scheduled' så master ser når den blir aktiv.
+   */
+  scheduledStartTime: string | null;
+  /**
    * Antall haller som ikke har trykket Klar og ikke er ekskludert. Hvis > 0
    * vises en advarsel under Start-knappen — master kan fortsatt starte men
    * får bekreftelses-popup og hallene ekskluderes fra denne runden.
@@ -444,6 +447,14 @@ function renderMasterButtons(opts: {
   unreadyCount: number;
 }): string {
   if (!opts.isMaster) return "";
+  const startTooltip = buildStartTooltip(
+    opts.canStart,
+    opts.gameStatus,
+    opts.scheduledStartTime
+  );
+  const startTooltipAttr = startTooltip
+    ? ` title="${escapeHtml(startTooltip)}"`
+    : "";
   const startWarning =
     opts.canStart && opts.unreadyCount > 0
       ? `<p class="text-muted small" style="margin-top:8px;margin-bottom:0;">
@@ -458,7 +469,7 @@ function renderMasterButtons(opts: {
       <div class="cashinout-grid">
         <button type="button" class="btn btn-success cashinout-grid-btn"
                 data-spill1-action="start"
-                ${opts.canStart ? "" : "disabled"}>
+                ${opts.canStart ? "" : "disabled"}${startTooltipAttr}>
           <i class="fa fa-play" aria-hidden="true"></i> Start Spill 1
         </button>
         <button type="button" class="btn btn-info cashinout-grid-btn"
@@ -476,8 +487,58 @@ function renderMasterButtons(opts: {
     </div>`;
 }
 
+/**
+ * 2026-05-07: bygg tooltip-tekst for Start-knappen i cash-inout-dashboardet.
+ * Speiler `Spill1AgentControls.buildStartButtonTooltip` slik at master-agent
+ * får samme forklaring uansett hvor de kommer fra.
+ */
+function buildStartTooltip(
+  canStart: boolean,
+  status: string,
+  scheduledStartTime: string | null
+): string | null {
+  if (canStart) return null;
+  if (status === "scheduled") {
+    const ts = formatScheduledStartHHMM(scheduledStartTime);
+    if (ts) {
+      return `Start blir tilgjengelig når purchase-vinduet åpner (kl ${ts} norsk tid)`;
+    }
+    return "Start blir tilgjengelig når purchase-vinduet åpner";
+  }
+  if (status === "running") {
+    return "Spillet kjører allerede";
+  }
+  if (status === "paused") {
+    return "Spillet er pauset — bruk Resume i stedet";
+  }
+  if (status === "completed") {
+    return "Spillet er fullført";
+  }
+  if (status === "cancelled") {
+    return "Spillet er avbrutt";
+  }
+  return null;
+}
+
+/**
+ * 2026-05-07: format scheduled_start_time som HH:MM i Europe/Oslo. Returnerer
+ * null hvis input er null eller invalid.
+ */
+function formatScheduledStartHHMM(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+  });
+}
+
 function statusLabel(status: string): string {
   switch (status) {
+    case "scheduled":
+      return "Planlagt";
     case "purchase_open":
       return "Salg åpent";
     case "ready_to_start":

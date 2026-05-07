@@ -229,7 +229,10 @@ describe("NextGamePanel — Spill 1 unified-view", () => {
     expect(resumeBtn?.disabled).toBe(true); // ikke paused
   });
 
-  it("slave-agent viser 'kun master'-melding uten knapper", async () => {
+  it("slave-agent viser klar/angre-knapp, ingen master-knapper", async () => {
+    // 2026-05-02 (PR #831): non-master agent får Klar/Angre-Klar-knapp i
+    // stedet for ren "kun master"-text. `spill1-slave-notice` data-marker
+    // ble fjernet samtidig.
     const container = document.getElementById("c")!;
     const { __test } = await import("../src/pages/agent-portal/NextGamePanel.js");
     const spill1 = spill1MasterFixture();
@@ -251,7 +254,15 @@ describe("NextGamePanel — Spill 1 unified-view", () => {
     } as never);
     __test.render(container);
     expect(container.querySelector("[data-marker='spill1-role-slave']")).toBeTruthy();
-    expect(container.querySelector("[data-marker='spill1-slave-notice']")).toBeTruthy();
+    // Klar/Angre-Klar-knapp finnes i stedet for slave-notice.
+    const markReadyBtn = container.querySelector<HTMLButtonElement>(
+      "[data-marker='spill1-mark-ready-btn']"
+    );
+    const unmarkReadyBtn = container.querySelector<HTMLButtonElement>(
+      "[data-marker='spill1-unmark-ready-btn']"
+    );
+    // Én av de to skal være rendret (avhengig av selfHallReady-state).
+    expect(markReadyBtn || unmarkReadyBtn).toBeTruthy();
     expect(
       container.querySelector<HTMLButtonElement>('[data-action="spill1-start"]')
     ).toBeNull();
@@ -285,7 +296,11 @@ describe("NextGamePanel — Spill 1 unified-view", () => {
     expect(startBtn?.disabled).toBe(false);
   });
 
-  it("status=purchase_open + allReady=false → Start disabled", async () => {
+  it("status=purchase_open + allReady=false → Start enabled (REQ-007 confirmUnreadyHalls-flyt overstyrer)", async () => {
+    // 2026-05-03 (Tobias UX): master kan starte selv om noen haller ikke
+    // er klare; backend ekskluderer ikke-klare haller automatisk via
+    // confirmUnreadyHalls. allReady-feltet er beholdt i interface men
+    // brukes ikke lenger som disable-gate.
     const container = document.getElementById("c")!;
     const { __test } = await import("../src/pages/agent-portal/NextGamePanel.js");
     const spill1 = spill1MasterFixture();
@@ -307,7 +322,35 @@ describe("NextGamePanel — Spill 1 unified-view", () => {
     } as never);
     __test.render(container);
     const startBtn = container.querySelector<HTMLButtonElement>('[data-action="spill1-start"]');
+    expect(startBtn?.disabled).toBe(false);
+  });
+
+  it("status=scheduled → Start disabled + tooltip viser purchase-vinduet (Tobias 2026-05-07)", async () => {
+    const container = document.getElementById("c")!;
+    const { __test } = await import("../src/pages/agent-portal/NextGamePanel.js");
+    const spill1 = spill1MasterFixture();
+    spill1.allReady = true;
+    spill1.currentGame!.status = "scheduled";
+    spill1.currentGame!.scheduledStartTime = "2026-05-07T16:30:00Z";
+    __test.setState({
+      rooms: [],
+      activeRoom: null,
+      lastFetchError: null,
+      lastHallEvent: null,
+      socketFallback: false,
+      countdownEndsAt: null,
+      countdownTick: 0,
+      selfReady: false,
+      jackpotArmed: false,
+      spill1,
+      spill1Error: null,
+      spill1LastStatusEvent: null,
+    } as never);
+    __test.render(container);
+    const startBtn = container.querySelector<HTMLButtonElement>('[data-action="spill1-start"]');
     expect(startBtn?.disabled).toBe(true);
+    const tooltip = startBtn?.getAttribute("title") ?? "";
+    expect(tooltip).toContain("purchase-vinduet");
   });
 
   it("status=paused → Resume enabled, Start disabled", async () => {
