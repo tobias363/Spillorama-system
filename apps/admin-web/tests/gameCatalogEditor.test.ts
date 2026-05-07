@@ -280,9 +280,9 @@ describe("GameCatalogEditorPage — prizeMultiplierMode", () => {
 // ── Editor edit ─────────────────────────────────────────────────────────
 
 describe("GameCatalogEditorPage — edit", () => {
-  it("pre-fills form fra eksisterende entry", async () => {
+  it("pre-fills form fra eksisterende entry (explicit_per_color, tom rules → standard variant)", async () => {
     // Mock GET /api/admin/game-catalog/cat-1 — explicit_per_color-modus
-    // (Trafikklys-stil) for å verifisere edit-flyten
+    // (Trafikklys-stil) + tomme rules-blob for å verifisere edit-flyten
     mockFetch({
       id: "cat-1",
       slug: "innsatsen",
@@ -332,5 +332,352 @@ describe("GameCatalogEditorPage — edit", () => {
     expect(
       (container.querySelector<HTMLSelectElement>("#cat-bonusSlug")!).value,
     ).toBe("wheel_of_fortune");
+  });
+});
+
+// ── Special game variants — Trafikklys + Oddsen ─────────────────────────
+
+describe("GameCatalogEditorPage — special variants", () => {
+  it("variant-velger toggler synlighet mellom standard/trafikklys/oddsen", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    // Default: standard variant — trafikklys/oddsen-blokker er skjult
+    const trafikklysFlat = container.querySelector<HTMLElement>(
+      ".cat-trafikklys-flat-price",
+    );
+    const trafikklysPrizes = container.querySelector<HTMLElement>(
+      ".cat-trafikklys-prizes",
+    );
+    const oddsen = container.querySelector<HTMLElement>(".cat-oddsen");
+    expect(trafikklysFlat?.style.display).toBe("none");
+    expect(trafikklysPrizes?.style.display).toBe("none");
+    expect(oddsen?.style.display).toBe("none");
+
+    // Velg trafikklys-variant
+    const trafikklysRadio = container.querySelector<HTMLInputElement>(
+      'input[name="gameVariant"][value="trafikklys"]',
+    );
+    trafikklysRadio!.checked = true;
+    trafikklysRadio!.dispatchEvent(new Event("change"));
+    expect(trafikklysFlat?.style.display).toBe("");
+    expect(trafikklysPrizes?.style.display).toBe("");
+    expect(oddsen?.style.display).toBe("none");
+
+    // Velg oddsen-variant
+    const oddsenRadio = container.querySelector<HTMLInputElement>(
+      'input[name="gameVariant"][value="oddsen"]',
+    );
+    oddsenRadio!.checked = true;
+    oddsenRadio!.dispatchEvent(new Event("change"));
+    expect(trafikklysFlat?.style.display).toBe("none");
+    expect(trafikklysPrizes?.style.display).toBe("none");
+    expect(oddsen?.style.display).toBe("");
+
+    // Tilbake til standard
+    const standardRadio = container.querySelector<HTMLInputElement>(
+      'input[name="gameVariant"][value="standard"]',
+    );
+    standardRadio!.checked = true;
+    standardRadio!.dispatchEvent(new Event("change"));
+    expect(trafikklysFlat?.style.display).toBe("none");
+    expect(trafikklysPrizes?.style.display).toBe("none");
+    expect(oddsen?.style.display).toBe("none");
+  });
+
+  it("trafikklys: rad-farge-chips + prize/bingo-rader rendres", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    // 3 rad-farge-chips eksisterer
+    const rcCbs = container.querySelectorAll<HTMLInputElement>(
+      'input[name="trafikklysRowColor"]',
+    );
+    expect(rcCbs.length).toBe(3);
+    const values = Array.from(rcCbs).map((cb) => cb.value).sort();
+    expect(values).toEqual(["grønn", "gul", "rød"]);
+    // Default er alle 3 sjekket
+    expect(Array.from(rcCbs).every((cb) => cb.checked)).toBe(true);
+
+    // Premie + bingo-rader per rad-farge eksisterer
+    expect(
+      container.querySelector('input[name="trafikklysPrize-grønn"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="trafikklysPrize-gul"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="trafikklysPrize-rød"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="trafikklysBingo-grønn"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="trafikklysBingo-gul"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="trafikklysBingo-rød"]'),
+    ).toBeTruthy();
+
+    // Flat-pris-input
+    expect(
+      container.querySelector('input[name="trafikklysTicketPrice"]'),
+    ).toBeTruthy();
+  });
+
+  it("trafikklys: chip-toggle skjuler/viser tilhørende prize/bingo-rad", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    const rødCb = container.querySelector<HTMLInputElement>(
+      'input[name="trafikklysRowColor"][value="rød"]',
+    );
+    const rødPrizeRow = container.querySelector<HTMLElement>(
+      '.trafikklys-prize-row[data-row-color="rød"]',
+    );
+    const rødBingoRow = container.querySelector<HTMLElement>(
+      '.trafikklys-bingo-row[data-row-color="rød"]',
+    );
+    // Default: alle 3 er sjekket → rad er synlig
+    expect(rødPrizeRow?.style.display).toBe("");
+    expect(rødBingoRow?.style.display).toBe("");
+    // Hak av rød
+    rødCb!.checked = false;
+    rødCb!.dispatchEvent(new Event("change"));
+    expect(rødPrizeRow?.style.display).toBe("none");
+    expect(rødBingoRow?.style.display).toBe("none");
+    // Hak på igjen
+    rødCb!.checked = true;
+    rødCb!.dispatchEvent(new Event("change"));
+    expect(rødPrizeRow?.style.display).toBe("");
+    expect(rødBingoRow?.style.display).toBe("");
+  });
+
+  it("trafikklys: submit sender riktig rules-shape med per-rad-farge premier", async () => {
+    const fetchMock = mockFetch({
+      id: "cat-tk",
+      slug: "trafikklys",
+      displayName: "Trafikklys",
+      rules: { gameVariant: "trafikklys" },
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    // Velg trafikklys-variant
+    const trafikklysRadio = container.querySelector<HTMLInputElement>(
+      'input[name="gameVariant"][value="trafikklys"]',
+    );
+    trafikklysRadio!.checked = true;
+    trafikklysRadio!.dispatchEvent(new Event("change"));
+
+    // Fyll inn slug + name
+    (container.querySelector<HTMLInputElement>("#cat-displayName")!).value =
+      "Trafikklys";
+    (container.querySelector<HTMLInputElement>("#cat-slug")!).value =
+      "trafikklys";
+
+    // Submit
+    const form = container.querySelector<HTMLFormElement>(
+      "#game-catalog-form",
+    )!;
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushMicrotasks();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/admin/game-catalog");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body as string);
+
+    // rules-blob har gameVariant + per-rad-farge premier (i øre)
+    expect(body.rules.gameVariant).toBe("trafikklys");
+    expect(body.rules.ticketPriceCents).toBe(1500); // 15 kr default
+    expect(body.rules.rowColors).toEqual(["grønn", "gul", "rød"]);
+    // 100/150/50 kr default → 10000/15000/5000 øre
+    expect(body.rules.prizesPerRowColor.grønn).toBe(10000);
+    expect(body.rules.prizesPerRowColor.gul).toBe(15000);
+    expect(body.rules.prizesPerRowColor.rød).toBe(5000);
+    // 1000/1500/500 kr default → 100000/150000/50000 øre
+    expect(body.rules.bingoPerRowColor.grønn).toBe(100000);
+    expect(body.rules.bingoPerRowColor.gul).toBe(150000);
+    expect(body.rules.bingoPerRowColor.rød).toBe(50000);
+
+    // Standard ticket-pris faner ut til alle valgte bongfarger med samme verdi
+    expect(body.ticketPricesCents.gul).toBe(1500);
+    expect(body.ticketPricesCents.hvit).toBe(1500);
+  });
+
+  it("oddsen: target-trekk + base-low + base-high inputs rendres med preview-tabell", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    expect(
+      container.querySelector('input[name="oddsenTargetDraw"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="oddsenBingoBaseLow"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('input[name="oddsenBingoBaseHigh"]'),
+    ).toBeTruthy();
+    expect(container.querySelector("#cat-oddsen-preview")).toBeTruthy();
+  });
+
+  it("oddsen: submit sender riktig rules-shape med target-draw + low/high", async () => {
+    const fetchMock = mockFetch({
+      id: "cat-od",
+      slug: "oddsen",
+      displayName: "Oddsen",
+      rules: { gameVariant: "oddsen" },
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    // Velg oddsen-variant
+    const oddsenRadio = container.querySelector<HTMLInputElement>(
+      'input[name="gameVariant"][value="oddsen"]',
+    );
+    oddsenRadio!.checked = true;
+    oddsenRadio!.dispatchEvent(new Event("change"));
+
+    (container.querySelector<HTMLInputElement>("#cat-displayName")!).value =
+      "Oddsen";
+    (container.querySelector<HTMLInputElement>("#cat-slug")!).value = "oddsen";
+
+    // Submit
+    const form = container.querySelector<HTMLFormElement>(
+      "#game-catalog-form",
+    )!;
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushMicrotasks();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init.body as string);
+
+    // rules: gameVariant + targetDraw + base-low + base-high (i øre)
+    expect(body.rules.gameVariant).toBe("oddsen");
+    expect(body.rules.targetDraw).toBe(55); // default
+    expect(body.rules.bingoBaseLow).toBe(50000); // 500 kr
+    expect(body.rules.bingoBaseHigh).toBe(150000); // 1500 kr
+
+    // Per-farge low/high regnet ut via multiplikator (default ticketColors=gul+hvit)
+    // hvit=5kr → ×1 → low 50000, high 150000
+    // gul=10kr → ×2 → low 100000, high 300000
+    expect(body.rules.bingoLowPerColor.hvit).toBe(50000);
+    expect(body.rules.bingoLowPerColor.gul).toBe(100000);
+    expect(body.rules.bingoHighPerColor.hvit).toBe(150000);
+    expect(body.rules.bingoHighPerColor.gul).toBe(300000);
+
+    // Standard ticket-priser uendret (oddsen bruker standard bongpriser)
+    expect(body.ticketPricesCents.gul).toBe(1000);
+    expect(body.ticketPricesCents.hvit).toBe(500);
+  });
+
+  it("standard variant: ingen rules-felter (tom rules-blob)", async () => {
+    const fetchMock = mockFetch({
+      id: "cat-std",
+      slug: "standard",
+      displayName: "Standard",
+      rules: {},
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    (container.querySelector<HTMLInputElement>("#cat-displayName")!).value =
+      "Standard";
+    (container.querySelector<HTMLInputElement>("#cat-slug")!).value = "standard";
+
+    const form = container.querySelector<HTMLFormElement>(
+      "#game-catalog-form",
+    )!;
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushMicrotasks();
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init.body as string);
+    // Standard-variant gir tom rules
+    expect(body.rules).toEqual({});
+  });
+
+  it("edit: trafikklys-entry pre-fills variant-radio + per-rad-farge-felt fra rules", async () => {
+    mockFetch({
+      id: "cat-tk",
+      slug: "trafikklys",
+      displayName: "Trafikklys",
+      description: null,
+      rules: {
+        gameVariant: "trafikklys",
+        ticketPriceCents: 2000, // 20 kr
+        rowColors: ["grønn", "gul"],
+        prizesPerRowColor: { grønn: 8000, gul: 12000 }, // 80 + 120 kr
+        bingoPerRowColor: { grønn: 80000, gul: 120000 }, // 800 + 1200 kr
+      },
+      ticketColors: ["gul", "hvit", "lilla"],
+      ticketPricesCents: { gul: 2000, hvit: 2000, lilla: 2000 },
+      prizesCents: {
+        rad1: 10000,
+        rad2: 10000,
+        rad3: 10000,
+        rad4: 10000,
+        bingo: { gul: 100, hvit: 100, lilla: 100 },
+      },
+      bonusGameSlug: null,
+      bonusGameEnabled: false,
+      requiresJackpotSetup: false,
+      isActive: true,
+      sortOrder: 0,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+      createdByUserId: "admin-1",
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogEditPage(container, "cat-tk");
+    await flushMicrotasks();
+
+    // Trafikklys-radio er checked
+    const trafikklysRadio = container.querySelector<HTMLInputElement>(
+      'input[name="gameVariant"][value="trafikklys"]',
+    );
+    expect(trafikklysRadio?.checked).toBe(true);
+    // Flat-pris-felt har 20 (kr)
+    const flatEl = container.querySelector<HTMLInputElement>(
+      'input[name="trafikklysTicketPrice"]',
+    );
+    expect(Number(flatEl?.value)).toBe(20);
+    // Per-rad-farge premier er pre-fylt (kr)
+    const grønnPrize = container.querySelector<HTMLInputElement>(
+      'input[name="trafikklysPrize-grønn"]',
+    );
+    const gulPrize = container.querySelector<HTMLInputElement>(
+      'input[name="trafikklysPrize-gul"]',
+    );
+    expect(Number(grønnPrize?.value)).toBe(80);
+    expect(Number(gulPrize?.value)).toBe(120);
+    // grønn + gul row-colors er sjekket; rød er IKKE
+    const rødCb = container.querySelector<HTMLInputElement>(
+      'input[name="trafikklysRowColor"][value="rød"]',
+    );
+    expect(rødCb?.checked).toBe(false);
+    // Trafikklys-blokker er synlige; oddsen er skjult
+    expect(
+      (
+        container.querySelector<HTMLElement>(".cat-trafikklys-flat-price")
+      )?.style.display,
+    ).toBe("");
+    expect(
+      (
+        container.querySelector<HTMLElement>(".cat-oddsen")
+      )?.style.display,
+    ).toBe("none");
   });
 });
