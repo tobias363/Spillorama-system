@@ -33,6 +33,17 @@ import { renderScheduleListPage } from "./schedules/ScheduleListPage.js";
 import { renderScheduleDetailPages } from "./schedules/ScheduleDetailPages.js";
 import { renderDailyScheduleDetailPages } from "./dailySchedules/DailyScheduleDetailPages.js";
 import { renderGame1MasterConsole } from "./master/Game1MasterConsole.js";
+// Fase 2 (2026-05-07): GameCatalog + GamePlan admin-UI.
+import { renderGameCatalogListPage } from "./catalog/GameCatalogListPage.js";
+import {
+  renderGameCatalogNewPage,
+  renderGameCatalogEditPage,
+} from "./catalog/GameCatalogEditorPage.js";
+import { renderGamePlanListPage } from "./plans/GamePlanListPage.js";
+import {
+  renderGamePlanNewPage,
+  renderGamePlanEditPage,
+} from "./plans/GamePlanEditorPage.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
 
 /** Static routes that resolve via routes.ts directly (no params). */
@@ -52,6 +63,11 @@ const STATIC_GAMES_ROUTES = new Set<string>([
   "/schedules",
   "/schedules/create",
   // dailySchedules — bolk 7 (PR-A3b) — all dynamic/typeId-scoped.
+  // Fase 2 (2026-05-07): GameCatalog + GamePlans (spilleplan-redesign).
+  "/games/catalog",
+  "/games/catalog/new",
+  "/games/plans",
+  "/games/plans/new",
 ]);
 
 /**
@@ -95,7 +111,10 @@ export function isGamesRoute(path: string): boolean {
     /^\/dailySchedule\/subgame\/edit\/[^/]+$/.test(bare) ||
     /^\/dailySchedule\/subgame\/view\/[^/]+$/.test(bare) ||
     // GAME1_SCHEDULE PR 3: master-konsoll for Game 1
-    /^\/game1\/master\/[^/]+$/.test(bare)
+    /^\/game1\/master\/[^/]+$/.test(bare) ||
+    // Fase 2 (2026-05-07): catalog/plan dynamic routes
+    /^\/games\/catalog\/[^/]+$/.test(bare) ||
+    /^\/games\/plans\/[^/]+$/.test(bare)
   );
 }
 
@@ -141,6 +160,19 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
       return;
     case "/dailySchedule/view":
       void renderDailyScheduleDetailPages(container, { kind: "view" });
+      return;
+    // Fase 2 (2026-05-07): GameCatalog + GamePlans
+    case "/games/catalog":
+      void renderGameCatalogListPage(container);
+      return;
+    case "/games/catalog/new":
+      void renderGameCatalogNewPage(container);
+      return;
+    case "/games/plans":
+      void renderGamePlanListPage(container);
+      return;
+    case "/games/plans/new":
+      void renderGamePlanNewPage(container);
       return;
   }
 
@@ -352,6 +384,26 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
   const masterMatch = /^\/game1\/master\/([^/]+)$/.exec(bare);
   if (masterMatch && masterMatch[1]) {
     void renderGame1MasterConsole(container, decodeURIComponent(masterMatch[1]));
+    return;
+  }
+
+  // --- Fase 2: GameCatalog edit by id (NB: /games/catalog/new er allerede static-handled) ---
+  const catalogEditMatch = /^\/games\/catalog\/([^/]+)$/.exec(bare);
+  if (catalogEditMatch && catalogEditMatch[1] && catalogEditMatch[1] !== "new") {
+    void renderGameCatalogEditPage(
+      container,
+      decodeURIComponent(catalogEditMatch[1]),
+    );
+    return;
+  }
+
+  // --- Fase 2: GamePlan edit by id ---
+  const planEditMatch = /^\/games\/plans\/([^/]+)$/.exec(bare);
+  if (planEditMatch && planEditMatch[1] && planEditMatch[1] !== "new") {
+    void renderGamePlanEditPage(
+      container,
+      decodeURIComponent(planEditMatch[1]),
+    );
     return;
   }
 

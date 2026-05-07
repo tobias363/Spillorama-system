@@ -97,6 +97,21 @@ export const adminSidebar: SidebarNode[] = [
   // 6. Lagret spillliste
   { kind: "leaf", id: "savedGameList", path: "/savedGameList", icon: "fa fa-list", labelKey: "saved_game_list", module: "Saved Game List" },
 
+  // Fase 2 (2026-05-07): spilleplan-redesign — ny katalog + plan-builder.
+  // Plassert under "saved game list" så de fanges i samme mentale gruppe
+  // ("hva spilles, og når"). Ren admin-flow inntil Fase 3 kobler runtime.
+  {
+    kind: "group",
+    id: "spilleplan-redesign",
+    icon: "fa fa-puzzle-piece",
+    labelKey: "game_management",
+    module: "Game Catalog",
+    children: [
+      { kind: "leaf", id: "game-catalog", path: "/games/catalog", icon: "fa fa-circle-o", labelKey: "game_catalog_title", module: "Game Catalog" },
+      { kind: "leaf", id: "game-plans", path: "/games/plans", icon: "fa fa-circle-o", labelKey: "game_plans_title", module: "Game Plans" },
+    ],
+  },
+
   // 7. Legg til fysiske billetter
   { kind: "leaf", id: "addPhysicalTickets", path: "/addPhysicalTickets", icon: "fa fa-ticket", labelKey: "add_physical_tickets", module: "Physical Tickets" },
 

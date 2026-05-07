@@ -33,6 +33,14 @@ export const routes: RouteDef[] = [
   { path: "/gameManagement", titleKey: "game_creation_management", module: "Game Creation Management" },
   { path: "/savedGameList", titleKey: "saved_game_list", module: "Saved Game List" },
 
+  // Fase 2 (2026-05-07): spilleplan-redesign — GameCatalog + GamePlans.
+  // Dynamic edit-routes (/games/catalog/:id, /games/plans/:id) resolves via
+  // games-dispatcher (hash-regex match, mirrors gameType pattern).
+  { path: "/games/catalog", titleKey: "game_catalog_title", module: "Game Catalog", roles: ["admin", "super-admin", "agent", "hall-operator"] },
+  { path: "/games/catalog/new", titleKey: "game_catalog_new_title", module: "Game Catalog", roles: ["admin", "super-admin"] },
+  { path: "/games/plans", titleKey: "game_plans_title", module: "Game Plans", roles: ["admin", "super-admin", "agent", "hall-operator"] },
+  { path: "/games/plans/new", titleKey: "game_plans_new_title", module: "Game Plans", roles: ["admin", "super-admin"] },
+
   { path: "/wheelOfFortune", titleKey: "wheel_of_fortune" },
   { path: "/treasureChest", titleKey: "treasure_chest" },
   { path: "/mystery", titleKey: "mystery_game" },
