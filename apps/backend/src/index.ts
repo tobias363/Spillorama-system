@@ -262,6 +262,12 @@ import { createAdminGameTypesRouter } from "./routes/adminGameTypes.js";
 import { GameTypeService } from "./admin/GameTypeService.js";
 import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
 import { SubGameService } from "./admin/SubGameService.js";
+// Spilleplan-redesign Fase 1+2 (2026-05-07): GameCatalog + GamePlan service
+// + admin-routes. Erstatter 9-tabell schedule-stack med 4 tabeller.
+import { GameCatalogService } from "./game/GameCatalogService.js";
+import { GamePlanService } from "./game/GamePlanService.js";
+import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
+import { createAdminGamePlansRouter } from "./routes/adminGamePlans.js";
 import { createAdminGame1PotsRouter } from "./routes/adminGame1Pots.js";
 import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
 import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
@@ -1077,6 +1083,21 @@ const subGameService = new SubGameService({
   schema: pgSchema,
 });
 
+// Spilleplan-redesign Fase 1 (2026-05-07): GameCatalogService + GamePlanService.
+// Tabeller: app_game_catalog, app_game_plan, app_game_plan_item.
+// Erstatter 9-tabell schedule-stack med 4. Audit-log injiseres post-
+// construction (samme mønster som ScheduleService) når auditLogService
+// er klar.
+const gameCatalogService = new GameCatalogService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
+const gamePlanService = new GamePlanService({
+  pool: sharedPool,
+  schema: pgSchema,
+  catalogService: gameCatalogService,
+});
+
 // BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
 // mapping). Ren admin-katalog — runtime /api/leaderboard (routes/game.ts)
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
@@ -1302,6 +1323,12 @@ app.use(async (req, _res, next) => {
 // override-grense-håndhevelsen ved schedule-opprettelse/edit.
 scheduleService.setSpill1PrizeDefaults(spill1PrizeDefaultsService);
 scheduleService.setAuditLogService(auditLogService);
+
+// Spilleplan-redesign Fase 1+2: koble auditLogService inn i nye services.
+// Service-laget håndterer egen feiltoleranse (audit-feil blokkerer ikke
+// domain-operasjoner) — samme mønster som ScheduleService.
+gameCatalogService.setAuditLogService(auditLogService);
+gamePlanService.setAuditLogService(auditLogService);
 
 // BIN-720: Profile Settings API — service (router wires mot slutten av
 // filen, sammen med andre app.use-kall). Tilgjengelig kun når
@@ -2742,6 +2769,21 @@ app.use(createAdminSubGamesRouter({
   platformService,
   auditLogService,
   subGameService,
+}));
+// Spilleplan-redesign Fase 2 (2026-05-07): GameCatalog + GamePlans.
+// 5 endepunkter pr. router. Erstatter 9-tabell schedule-stack med 4.
+// GAME_CATALOG_WRITE er ADMIN-only; READ er åpent for alle admin-roller.
+// GamePlan list-filter scopes til hall for HALL_OPERATOR/AGENT via
+// resolveHallScopeFilter.
+app.use(createAdminGameCatalogRouter({
+  platformService,
+  auditLogService,
+  catalogService: gameCatalogService,
+}));
+app.use(createAdminGamePlansRouter({
+  platformService,
+  auditLogService,
+  planService: gamePlanService,
 }));
 // Agent IJ — Innsatsen-jackpot: per-hall pot-administrasjon (Game1PotService).
 // 5 endepunkter — list/detail/init/patch-config/reset. HALL_GAME_CONFIG_READ/WRITE.
