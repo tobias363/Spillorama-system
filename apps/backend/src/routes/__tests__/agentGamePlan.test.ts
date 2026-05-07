@@ -162,12 +162,24 @@ interface Ctx {
   runs: Map<string, GamePlanRun>;
   plans: Map<string, GamePlanWithItems>;
   close: () => Promise<void>;
+  /** Fase 4: spawn-tracking når bridge er injisert. */
+  bridgeSpawns: Array<{ runId: string; position: number; result: unknown }>;
+}
+
+interface BridgeStubOptions {
+  /** Hvis satt, returner denne ved create. Default: ny UUID-streng. */
+  scheduledGameId?: string;
+  /** Throw denne error-en på create. */
+  throwError?: Error | DomainError;
+  /** Eksisterende rad — returnerer reused=true. */
+  reuseExisting?: boolean;
 }
 
 async function startServer(
   users: Record<string, PublicAppUser>,
   initialPlans: GamePlanWithItems[] = [],
   initialRuns: GamePlanRun[] = [],
+  bridgeOptions?: BridgeStubOptions | null,
 ): Promise<Ctx> {
   const plans = new Map<string, GamePlanWithItems>();
   for (const p of initialPlans) plans.set(p.id, p);
@@ -373,6 +385,32 @@ async function startServer(
     },
   } as unknown as GamePlanRunService;
 
+  // Fase 4 (2026-05-07): valgfri bridge-stub.
+  const bridgeSpawns: Array<{ runId: string; position: number; result: unknown }> = [];
+  let engineBridge: import("../../game/GamePlanEngineBridge.js").GamePlanEngineBridge | null = null;
+  if (bridgeOptions) {
+    engineBridge = {
+      async createScheduledGameForPlanRunPosition(
+        runId: string,
+        position: number,
+      ) {
+        if (bridgeOptions.throwError) throw bridgeOptions.throwError;
+        const result = {
+          scheduledGameId: bridgeOptions.scheduledGameId ?? `sg-${runId}-${position}`,
+          catalogEntry: {
+            id: "cat-stub",
+          } as GameCatalogEntry,
+          reused: bridgeOptions.reuseExisting ?? false,
+        };
+        bridgeSpawns.push({ runId, position, result });
+        return result;
+      },
+      async getJackpotConfigForPosition() {
+        return null;
+      },
+    } as unknown as import("../../game/GamePlanEngineBridge.js").GamePlanEngineBridge;
+  }
+
   const app = express();
   app.use(express.json());
   app.use(
@@ -380,6 +418,7 @@ async function startServer(
       platformService,
       planRunService,
       planService,
+      engineBridge,
     }),
   );
   const server = app.listen(0);
@@ -389,6 +428,7 @@ async function startServer(
     baseUrl: `http://127.0.0.1:${port}`,
     runs,
     plans,
+    bridgeSpawns,
     close: () => new Promise((r) => server.close(() => r())),
   };
 }
@@ -973,6 +1013,272 @@ test("Fase 3 plan-runtime: pause + resume status-overgang", async () => {
     );
     assert.equal(resumeRes.status, 200);
     assert.equal(resumeRes.json.data.run.status, "running");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── Fase 4 (2026-05-07): bridge-integrasjon ──────────────────────────────
+
+test("Fase 4 bridge: /start uten bridge → scheduledGameId=null", async () => {
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], [], null);
+  try {
+    const start = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/start", "tok");
+    assert.equal(start.status, 200);
+    assert.equal(start.json.data.run.status, "running");
+    assert.equal(start.json.data.scheduledGameId, null);
+    assert.equal(ctx.bridgeSpawns.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 4 bridge: /start med bridge → scheduledGameId returneres", async () => {
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], [], {
+    scheduledGameId: "sg-test-1",
+  });
+  try {
+    const start = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/start", "tok");
+    assert.equal(start.status, 200);
+    assert.equal(start.json.data.run.status, "running");
+    assert.equal(start.json.data.scheduledGameId, "sg-test-1");
+    assert.equal(start.json.data.bridgeError, null);
+    assert.equal(ctx.bridgeSpawns.length, 1);
+    assert.equal(ctx.bridgeSpawns[0].position, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 4 bridge: /start propagerer JACKPOT_SETUP_REQUIRED som domain-error", async () => {
+  const cat = makeCatalog("cat-jp", { requiresJackpotSetup: true });
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], [], {
+    throwError: new DomainError(
+      "JACKPOT_SETUP_REQUIRED",
+      "Jackpot-override mangler",
+    ),
+  });
+  try {
+    const start = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/start", "tok");
+    assert.equal(start.status, 400);
+    assert.equal(start.json.error.code, "JACKPOT_SETUP_REQUIRED");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 4 bridge: /start logger uventet bridge-feil men returnerer success", async () => {
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], [], {
+    throwError: new DomainError(
+      "GAME_PLAN_RUN_CORRUPT",
+      "FK-violation på hall-group",
+    ),
+  });
+  try {
+    const start = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/start", "tok");
+    // Run-state ble fortsatt oppdatert; bare bridge-feil ble strippet
+    assert.equal(start.status, 200);
+    assert.equal(start.json.data.run.status, "running");
+    assert.equal(start.json.data.scheduledGameId, null);
+    assert.equal(start.json.data.bridgeError, "GAME_PLAN_RUN_CORRUPT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 4 bridge: /advance returnerer scheduledGameId for ny posisjon", async () => {
+  const cat1 = makeCatalog("cat-1");
+  const cat2 = makeCatalog("cat-2");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat1.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat1,
+      },
+      {
+        id: "i-2",
+        planId: "plan-master",
+        position: 2,
+        gameCatalogId: cat2.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat2,
+      },
+    ],
+  };
+  const run = makeRun({
+    id: "run-1",
+    planId: "plan-master",
+    hallId: "hall-master",
+    status: "running",
+    currentPosition: 1,
+  });
+  const ctx = await startServer({ tok: masterAgent }, [plan], [run], {
+    scheduledGameId: "sg-advance",
+  });
+  try {
+    const adv = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/advance", "tok");
+    assert.equal(adv.status, 200);
+    assert.equal(adv.json.data.run.currentPosition, 2);
+    assert.equal(adv.json.data.scheduledGameId, "sg-advance");
+    assert.equal(adv.json.data.jackpotSetupRequired, false);
+    assert.equal(ctx.bridgeSpawns.length, 1);
+    assert.equal(ctx.bridgeSpawns[0].position, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 4 bridge: /advance kaller IKKE bridge når jackpotSetupRequired=true", async () => {
+  const cat1 = makeCatalog("cat-1");
+  const cat2 = makeCatalog("cat-jp", { requiresJackpotSetup: true });
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat1.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat1,
+      },
+      {
+        id: "i-2",
+        planId: "plan-master",
+        position: 2,
+        gameCatalogId: cat2.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat2,
+      },
+    ],
+  };
+  const run = makeRun({
+    id: "run-1",
+    planId: "plan-master",
+    hallId: "hall-master",
+    status: "running",
+    currentPosition: 1,
+    // Jackpot-override mangler for posisjon 2
+    jackpotOverrides: {},
+  });
+  const ctx = await startServer({ tok: masterAgent }, [plan], [run], {
+    scheduledGameId: "should-not-be-called",
+  });
+  try {
+    const adv = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/advance", "tok");
+    assert.equal(adv.status, 200);
+    assert.equal(adv.json.data.jackpotSetupRequired, true);
+    assert.equal(adv.json.data.scheduledGameId, null);
+    // Bridge skal IKKE være kalt
+    assert.equal(ctx.bridgeSpawns.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 4 bridge: /advance til siste posisjon (finished) gir scheduledGameId=null", async () => {
+  const cat = makeCatalog("cat-only");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const run = makeRun({
+    id: "run-1",
+    planId: "plan-master",
+    hallId: "hall-master",
+    status: "running",
+    currentPosition: 1,
+  });
+  const ctx = await startServer({ tok: masterAgent }, [plan], [run], {
+    scheduledGameId: "should-not-be-called",
+  });
+  try {
+    const adv = await req(ctx.baseUrl, "POST", "/api/agent/game-plan/advance", "tok");
+    assert.equal(adv.status, 200);
+    // Vi forventer at advance forbi siste posisjon → finished
+    assert.equal(adv.json.data.run.status, "finished");
+    assert.equal(adv.json.data.nextGame, null);
+    assert.equal(adv.json.data.scheduledGameId, null);
+    // Bridge skal IKKE kalles på finished
+    assert.equal(ctx.bridgeSpawns.length, 0);
   } finally {
     await ctx.close();
   }
