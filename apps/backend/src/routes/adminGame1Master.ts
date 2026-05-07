@@ -37,6 +37,7 @@ import type {
 } from "../game/Game1MasterControlService.js";
 import type { Game1DrawEngineService } from "../game/Game1DrawEngineService.js";
 import type { Game1JackpotStateService } from "../game/Game1JackpotStateService.js";
+import type { Game1RescheduleService } from "../game/Game1RescheduleService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -68,6 +69,13 @@ export interface AdminGame1MasterRouterDeps {
    * routeren GET /jackpot-state og legger jackpot-amount i detail-responsen.
    */
   jackpotStateService?: Game1JackpotStateService;
+  /**
+   * 2026-05-07 PM-direktiv — valgfri reschedule-service som driver
+   * `POST /api/admin/game1/games/:gameId/reschedule`. Når udefinert
+   * returnerer endepunktet `RESCHEDULE_NOT_CONFIGURED` slik at minimal-
+   * test-mounts uten full DI-stakk fortsatt kan instansiere routeren.
+   */
+  rescheduleService?: Game1RescheduleService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -194,8 +202,44 @@ export function createAdminGame1MasterRouter(
     drawEngine,
     io,
     jackpotStateService,
+    rescheduleService,
   } = deps;
   const router = express.Router();
+
+  /**
+   * Hall-scope-guard for reschedule-flow. Speil av
+   * `assertHallScopeForReadyFlow` i adminGame1Ready.ts: ADMIN + SUPPORT har
+   * globalt scope; HALL_OPERATOR + AGENT må ha `user.hallId` lik
+   * `targetHallId` (= game.master_hall_id). Caller løser opp master-hall-id
+   * før kallet.
+   */
+  function assertHallScopeForReschedule(
+    user: PublicAppUser,
+    targetHallId: string
+  ): void {
+    if (user.role === "ADMIN" || user.role === "SUPPORT") {
+      return;
+    }
+    if (user.role === "HALL_OPERATOR" || user.role === "AGENT") {
+      if (!user.hallId) {
+        throw new DomainError(
+          "FORBIDDEN",
+          "Din bruker er ikke tildelt en hall — kontakt admin."
+        );
+      }
+      if (user.hallId !== targetHallId) {
+        throw new DomainError(
+          "FORBIDDEN",
+          "Du har ikke tilgang til denne hallen."
+        );
+      }
+      return;
+    }
+    throw new DomainError(
+      "FORBIDDEN",
+      "Rollen din har ikke tilgang til reschedule."
+    );
+  }
 
   async function requirePermission(
     req: express.Request,
@@ -317,6 +361,161 @@ export function createAdminGame1MasterRouter(
           const actor = await requirePermission(req, "GAME1_MASTER_WRITE").catch(() => null);
           if (actor) logForbiddenAudit(req, actor, gameId, "start", error);
         } catch { /* soft */ }
+      }
+      apiFailure(res, error);
+    }
+  });
+
+  // ── POST /reschedule (2026-05-07 PM-direktiv) ────────────────────────────
+  //
+  // Runtime-justering av `scheduled_start_time` (+ valgfri `scheduled_end_time`)
+  // for et eksisterende `app_game1_scheduled_games`-rad. Driver pilot-
+  // testing der master må flytte starttidspunktet uten direct DB-tilgang.
+  // Cron `Game1ScheduleTickService.openPurchaseForImminentGames` flipper
+  // `scheduled` → `purchase_open` på neste tick — denne ruten oppdaterer
+  // kun tidspunktene.
+  //
+  // Body:
+  //   {
+  //     scheduledStartTime: string;  // ISO-8601 UTC, > now() - 60s
+  //     scheduledEndTime?:  string;  // ISO-8601 UTC, > start, ≤ now() + 24h
+  //     reason: string;              // 1-500 tegn (audit-trail)
+  //   }
+  //
+  // Pre-conditions:
+  //   - Game eksisterer (404 → GAME_NOT_FOUND).
+  //   - Game.status ∈ ('scheduled', 'purchase_open'); ellers
+  //     RESCHEDULE_NOT_ALLOWED.
+  //   - newStart > now() - 60s (klokke-skew); newEnd > newStart hvis sendt.
+  //
+  // RBAC: GAME1_MASTER_WRITE (ADMIN + HALL_OPERATOR + AGENT). Hall-scope
+  // håndheves for HALL_OPERATOR/AGENT mot game.master_hall_id.
+  //
+  // Audit-event: `game1.reschedule` med oldStart/newStart/oldEnd/newEnd +
+  // reason + hallId i details. Skrives via `fireAudit` (fire-and-forget).
+
+  router.post("/api/admin/game1/games/:gameId/reschedule", async (req, res) => {
+    let gameId = "";
+    try {
+      const actor = await requirePermission(req, "GAME1_MASTER_WRITE");
+      gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
+      if (!rescheduleService) {
+        throw new DomainError(
+          "RESCHEDULE_NOT_CONFIGURED",
+          "Reschedule-service er ikke koblet inn på denne instansen."
+        );
+      }
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+
+      // Validering av body — ISO-strenger parses og roundtrip-sjekkes.
+      const startRaw = req.body.scheduledStartTime;
+      if (typeof startRaw !== "string" || !startRaw.trim()) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "scheduledStartTime kreves som ISO-8601 streng."
+        );
+      }
+      const newStart = new Date(startRaw.trim());
+      if (!Number.isFinite(newStart.getTime())) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "scheduledStartTime må være en gyldig ISO-8601 dato/tid."
+        );
+      }
+
+      const endRaw = req.body.scheduledEndTime;
+      let newEnd: Date | undefined;
+      if (endRaw !== undefined && endRaw !== null && endRaw !== "") {
+        if (typeof endRaw !== "string") {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "scheduledEndTime må være en ISO-8601 streng."
+          );
+        }
+        const parsedEnd = new Date(endRaw.trim());
+        if (!Number.isFinite(parsedEnd.getTime())) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            "scheduledEndTime må være en gyldig ISO-8601 dato/tid."
+          );
+        }
+        newEnd = parsedEnd;
+      }
+
+      const reason = mustBeNonEmptyString(req.body.reason, "reason");
+
+      // Hall-scope: hent master-hall-id og håndhev for HALL_OPERATOR/AGENT
+      // FØR vi kaller service'n. Om gameId er ukjent kaster getGameDetail
+      // GAME_NOT_FOUND, som vi propagerer uendret.
+      const { masterHallId, groupHallId } = await loadMasterHallId(gameId);
+      assertHallScopeForReschedule(actor, masterHallId);
+
+      const result = await rescheduleService.reschedule({
+        gameId,
+        newStartTime: newStart,
+        newEndTime: newEnd,
+        reason,
+      });
+
+      auditLogService
+        .record({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "game1.reschedule",
+          resource: "game1_scheduled_game",
+          resourceId: gameId,
+          details: {
+            hallId: masterHallId,
+            reason,
+            oldScheduledStartTime: result.oldStartTime,
+            newScheduledStartTime: result.newStartTime,
+            oldScheduledEndTime: result.oldEndTime,
+            newScheduledEndTime: result.newEndTime,
+            statusAtReschedule: result.status,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        })
+        .catch((err) => {
+          logger.warn(
+            { err, gameId },
+            "[reschedule] audit append failed"
+          );
+        });
+
+      // Broadcast som standard master-action slik at admin-UI får
+      // sanntids-oppdatering uten ekstra round-trip.
+      broadcastAction(io, {
+        gameId,
+        groupHallId,
+        action: "reschedule",
+        status: result.status,
+        // Reschedule har ingen master_audit-rad (ikke registrert som
+        // master-action), så vi sender ingen auditId her.
+        auditId: "",
+        actorUserId: actor.id,
+      });
+
+      apiSuccess(res, {
+        gameId,
+        status: result.status,
+        oldScheduledStartTime: result.oldStartTime,
+        newScheduledStartTime: result.newStartTime,
+        newScheduledEndTime: result.newEndTime,
+        reason,
+      });
+    } catch (error) {
+      if (error instanceof DomainError && error.code === "FORBIDDEN" && gameId) {
+        try {
+          const actor = await requirePermission(req, "GAME1_MASTER_WRITE").catch(
+            () => null
+          );
+          if (actor) logForbiddenAudit(req, actor, gameId, "reschedule", error);
+        } catch {
+          /* soft */
+        }
       }
       apiFailure(res, error);
     }

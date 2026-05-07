@@ -3032,6 +3032,127 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
 
+  /api/admin/game1/games/{gameId}/reschedule:
+    post:
+      tags: [Admin — Games]
+      summary: Reschedule a Spill 1 scheduled-game (move start/end time)
+      description: |
+        Runtime-justering av `scheduled_start_time` (og valgfri
+        `scheduled_end_time`) på en eksisterende rad i
+        `app_game1_scheduled_games`. Driver pilot-testing der master-agent
+        eller admin må flytte starttidspunkt uten direct DB-tilgang.
+
+        Cron `Game1ScheduleTickService.openPurchaseForImminentGames`
+        flipper automatisk `scheduled` → `purchase_open` på neste tick
+        etter justering — denne ruten oppdaterer kun tidspunktene.
+
+        **RBAC:** `GAME1_MASTER_WRITE` (ADMIN, HALL_OPERATOR, AGENT).
+        Hall-scope håndheves for HALL_OPERATOR/AGENT mot
+        `game.master_hall_id`.
+
+        **Pre-conditions:**
+        - Game eksisterer (404 → `GAME_NOT_FOUND`).
+        - `game.status` ∈ ('scheduled', 'purchase_open'); ellers
+          `RESCHEDULE_NOT_ALLOWED`.
+        - `scheduledStartTime` > `now() - 60s` (klokke-skew-slack).
+        - `scheduledEndTime`, hvis sendt, må være etter `scheduledStartTime`
+          og maks 24t fram i tid (typo-safety).
+
+        **Audit:** `game1.reschedule`-event med før/etter-snapshot, `reason`,
+        `hallId`, og status-ved-reschedule i `details` (regulatorisk
+        Lotteritilsynet-sporbarhet).
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheduledStartTime, reason]
+              properties:
+                scheduledStartTime:
+                  type: string
+                  format: date-time
+                  description: ISO-8601 UTC. Må være > now() - 60s.
+                scheduledEndTime:
+                  type: [string, "null"]
+                  format: date-time
+                  description: |
+                    Valgfri ISO-8601 UTC. Når satt må den være etter
+                    `scheduledStartTime` og innen 24 timer fram i tid.
+                    Når udefinert beholdes eksisterende
+                    `scheduled_end_time`.
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Påkrevd audit-trail for compliance.
+      responses:
+        "200":
+          description: Reschedule applied
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required:
+                          [
+                            gameId,
+                            status,
+                            oldScheduledStartTime,
+                            newScheduledStartTime,
+                            newScheduledEndTime,
+                            reason,
+                          ]
+                        properties:
+                          gameId: { type: string }
+                          status:
+                            type: string
+                            description: Status før reschedule (scheduled | purchase_open).
+                          oldScheduledStartTime:
+                            type: string
+                            format: date-time
+                          newScheduledStartTime:
+                            type: string
+                            format: date-time
+                          newScheduledEndTime:
+                            type: string
+                            format: date-time
+                          reason: { type: string }
+        "400":
+          description: |
+            INVALID_INPUT (body validering / dato-cap-brudd) /
+            RESCHEDULE_NOT_ALLOWED (status ikke i 'scheduled'/'purchase_open',
+            eller race der status flippes mellom SELECT og UPDATE) /
+            RESCHEDULE_NOT_CONFIGURED (service ikke koblet inn på instansen).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: |
+            FORBIDDEN — caller mangler GAME1_MASTER_WRITE eller bryter
+            hall-scope (HALL_OPERATOR/AGENT må eie `game.master_hall_id`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   # ── Admin — Halls ─────────────────────────────────────────────────────────
 
   /api/admin/halls:
