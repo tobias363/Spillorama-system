@@ -22,14 +22,16 @@ import {
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
   setHallHasCustomersForGame,
-  startAgentGame1,
-  resumeAgentGame1,
   stopAgentGame1,
   type Spill1CurrentGameResponse,
   type Spill1CurrentGameHall,
 } from "../../api/agent-game1.js";
 import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
 import { adaptGamePlanToLegacyShape } from "../../api/agent-game-plan-adapter.js";
+import {
+  startSpill1MasterAction,
+  resumeSpill1MasterAction,
+} from "../../api/agent-master-actions.js";
 import { isFeatureEnabled } from "../../utils/featureFlags.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
@@ -178,6 +180,10 @@ export function mountSpill1HallStatusBox(
           // Tobias UX 2026-05-02: master kan starte selv om noen haller ikke
           // er klare. Hvis ikke alle er klare, vis bekreftelse + send
           // confirmUnreadyHalls (REQ-007 backend-override).
+          //
+          // Fase 4 (2026-05-07): `startSpill1MasterAction` er feature-flag-
+          // aware — kaller plan-API + engine-API når `useNewGamePlan=true`,
+          // ellers ren legacy-flyt. UI er identisk uansett.
           const unreadyHalls = data.halls.filter(
             (h) => !h.isReady && !h.excludedFromGame,
           );
@@ -188,16 +194,22 @@ export function mountSpill1HallStatusBox(
               `Hvis du starter nå vil de bli ekskludert fra denne runden. Vil du fortsette?`,
             );
             if (!ok) return;
-            await startAgentGame1(undefined, unreadyHalls.map((h) => h.hallId));
+            await startSpill1MasterAction(
+              undefined,
+              unreadyHalls.map((h) => h.hallId),
+            );
             Toast.success(`Spill 1 startet — ${unreadyHalls.length} hall(er) ekskludert.`);
           } else {
-            await startAgentGame1();
+            await startSpill1MasterAction();
             Toast.success("Spill 1 startet.");
           }
           break;
         }
         case "resume":
-          await resumeAgentGame1();
+          // Fase 4: resume går via plan-API først (state-overgang i plan)
+          // og deretter legacy-API for å resume engine. Når feature-flag
+          // er av, kun legacy.
+          await resumeSpill1MasterAction();
           Toast.success("Spill 1 gjenopptatt.");
           break;
         case "stop":

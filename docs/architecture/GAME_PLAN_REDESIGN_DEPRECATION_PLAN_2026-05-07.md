@@ -27,7 +27,7 @@ Engine-en (Game1MasterControlService.startGame) leser fortsatt `app_game1_schedu
 
 - **Mål:** Tobias og QA-personalet tester ny flow internt.
 - **Aktivt:** Begge modeller side om side. Feature flag `useNewGamePlan` av per default.
-- **Activate flag:** `localStorage.setItem('useNewGamePlan', 'true')` i nettleseren.
+- **Activate flag:** `localStorage.setItem('ff:useNewGamePlan', 'true')` i nettleseren. (Prefix `ff:` settes av `featureFlags.ts` — uten det er flagget ikke aktiv.)
 - **Verifiser:**
   - Master-dashbord rendrer identisk med begge flagg-states.
   - Start/Advance-flow oppretter korrekt scheduledGameId via bridgen.
@@ -127,9 +127,9 @@ Pengespillforskriften krever 7 år audit-historikk:
 - Fase 2: PR #981 — Admin-UI for catalog + plan
 - Fase 3: PR #982 — Runtime-kobling med feature flag
 - Fase 4: (denne — engine-bridge + data-migrasjon)
-- `apps/backend/migrations/20260507120000_app_game_catalog_and_plan.sql`
-- `apps/backend/migrations/20260507130000_app_game1_scheduled_games_catalog_link.sql`
-- `apps/backend/migrations/20260507130100_app_game1_scheduled_games_nullable_legacy_fks.sql`
+- `apps/backend/migrations/20261210000000_app_game_catalog_and_plan.sql`
+- `apps/backend/migrations/20261210010000_app_game1_scheduled_games_catalog_link.sql`
+- `apps/backend/migrations/20261210010100_app_game1_scheduled_games_nullable_legacy_fks.sql`
 - `apps/backend/src/game/GamePlanEngineBridge.ts`
 - `apps/backend/scripts/migrate-game-plan-2026-05-07.ts`
 - `apps/backend/scripts/verify-game-plan-migration.ts`

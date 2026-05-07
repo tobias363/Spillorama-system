@@ -53,14 +53,16 @@ import {
 } from "./agentHallSocket.js";
 import {
   fetchAgentGame1CurrentGame,
-  startAgentGame1,
-  resumeAgentGame1,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   type Spill1CurrentGameResponse,
 } from "../../api/agent-game1.js";
 import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
 import { adaptGamePlanToLegacyShape } from "../../api/agent-game-plan-adapter.js";
+import {
+  startSpill1MasterAction,
+  resumeSpill1MasterAction,
+} from "../../api/agent-master-actions.js";
 import { isFeatureEnabled } from "../../utils/featureFlags.js";
 import {
   AgentGame1Socket,
@@ -1042,7 +1044,12 @@ async function attemptSpill1Start(
   confirmUnreadyHalls: string[] | undefined
 ): Promise<void> {
   try {
-    await startAgentGame1(confirmExcludedHalls, confirmUnreadyHalls);
+    // Fase 4 (2026-05-07): `startSpill1MasterAction` driver enten plan+
+    // engine-flyt eller ren legacy basert på `useNewGamePlan`-feature-flag.
+    // UI/feilhåndtering nedenfor er uendret — alle 3 error-koder i
+    // catch-blokken nedenfor stammer fra legacy `/api/agent/game1/start`
+    // og propageres uendret av wrapperen.
+    await startSpill1MasterAction(confirmExcludedHalls, confirmUnreadyHalls);
     Toast.success("Spill 1 startet");
     await refreshSpill1();
   } catch (err) {
@@ -1146,7 +1153,8 @@ async function onSpill1Resume(): Promise<void> {
     return;
   }
   try {
-    await resumeAgentGame1();
+    // Fase 4 (2026-05-07): plan-API → engine-API når feature-flag er på.
+    await resumeSpill1MasterAction();
     Toast.success("Spill 1 fortsatt");
     await refreshSpill1();
   } catch (err) {

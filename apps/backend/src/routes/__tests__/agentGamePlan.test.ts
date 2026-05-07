@@ -940,6 +940,95 @@ test("Fase 3 plan-runtime: jackpot-setup avslår negativt beløp", async () => {
   }
 });
 
+test("Hotfix 2 (MEDIUM #6): jackpot-setup avslår draw > 90 i route-laget", async () => {
+  // Spill 1 har maks 90 baller. draw=999 må fanges allerede i route-validering
+  // før vi runtripper til service-laget. Sjekker både draw=91 (akkurat over)
+  // og draw=999 (langt over).
+  const cat = makeCatalog("cat-jp", {
+    requiresJackpotSetup: true,
+    ticketColors: ["gul"],
+  });
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const run = makeRun({
+    id: "run-1",
+    planId: "plan-master",
+    hallId: "hall-master",
+    status: "running",
+    currentPosition: 1,
+  });
+  const ctx = await startServer({ "tok": masterAgent }, [plan], [run]);
+  try {
+    // draw=999 → INVALID_INPUT
+    const r1 = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/jackpot-setup",
+      "tok",
+      { position: 1, draw: 999, prizesCents: { gul: 100000 } },
+    );
+    assert.equal(r1.status, 400);
+    assert.equal(r1.json.error.code, "INVALID_INPUT");
+    assert.match(r1.json.error.message, /1 og 90/);
+
+    // draw=91 (boundary) → INVALID_INPUT
+    const r2 = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/jackpot-setup",
+      "tok",
+      { position: 1, draw: 91, prizesCents: { gul: 100000 } },
+    );
+    assert.equal(r2.status, 400);
+    assert.equal(r2.json.error.code, "INVALID_INPUT");
+
+    // draw=90 (max valid) → success
+    const r3 = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/jackpot-setup",
+      "tok",
+      { position: 1, draw: 90, prizesCents: { gul: 100000 } },
+    );
+    assert.equal(r3.status, 200);
+
+    // draw=1 (min valid) → success
+    const r4 = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/jackpot-setup",
+      "tok",
+      { position: 1, draw: 1, prizesCents: { gul: 100000 } },
+    );
+    assert.equal(r4.status, 200);
+
+    // draw=0 (under min) → INVALID_INPUT
+    const r5 = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/jackpot-setup",
+      "tok",
+      { position: 1, draw: 0, prizesCents: { gul: 100000 } },
+    );
+    assert.equal(r5.status, 400);
+    assert.equal(r5.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
 test("Fase 3 plan-runtime: ADMIN kan operere på vegne av master-hall via ?hallId", async () => {
   const cat = makeCatalog("cat-1");
   const plan: GamePlanWithItems = {
