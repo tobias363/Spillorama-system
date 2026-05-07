@@ -1,9 +1,19 @@
 import { t } from "../i18n/I18n.js";
 import type { Session } from "../auth/Session.js";
 import { hasPermission } from "../auth/permissions.js";
+import { isFeatureEnabled } from "../utils/featureFlags.js";
 import { type SidebarLeaf, type SidebarGroup, sidebarFor } from "./sidebarSpec.js";
 
 function isVisible(node: SidebarLeaf | SidebarGroup, session: Session): boolean {
+  // Cleanup 2026-05-07: feature-flag-gate evalueres FØRST, før role/module-
+  // gates. Dette lar oss skjule legacy-oppføringer (`useNewGamePlan=false`)
+  // og nye oppføringer (`useNewGamePlan=true`) symmetrisk uten å påvirke
+  // resten av visibility-logikken. Default flag-verdi = false, så når
+  // flagget ikke er satt forblir legacy-oppføringene synlige.
+  if (node.featureFlag) {
+    const actual = isFeatureEnabled(node.featureFlag.name);
+    if (actual !== node.featureFlag.expectedValue) return false;
+  }
   if (node.roles && node.roles.length > 0 && !node.roles.includes(session.role)) return false;
   if (node.kind === "leaf") {
     if (node.superAdminOnly && !session.isSuperAdmin) return false;
