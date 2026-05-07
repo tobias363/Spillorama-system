@@ -133,6 +133,7 @@ export const adminSidebar: SidebarNode[] = [
     children: [
       { kind: "leaf", id: "game-catalog", path: "/games/catalog", icon: "fa fa-circle-o", labelKey: "game_catalog_title", module: "Game Catalog" },
       { kind: "leaf", id: "game-plans", path: "/games/plans", icon: "fa fa-circle-o", labelKey: "game_plans_title", module: "Game Plans" },
+      { kind: "leaf", id: "groupHall", path: "/groupHall", icon: "fa fa-circle-o", labelKey: "group_of_halls_management", roles: ["admin", "super-admin"] },
     ],
   },
 
@@ -301,7 +302,6 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "adminUser", path: "/adminUser", icon: "fa fa-users mr-20", labelKey: "admin_management", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "agent", path: "/agent", icon: "fa fa-users mr-20", labelKey: "agent_management", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "hall", path: "/hall", icon: "fa fa-bank", labelKey: "hall_management", roles: ["admin", "super-admin"] },
-  { kind: "leaf", id: "groupHall", path: "/groupHall", icon: "fa fa-bank", labelKey: "group_of_halls_management", roles: ["admin", "super-admin"] },
 
   {
     kind: "group",
