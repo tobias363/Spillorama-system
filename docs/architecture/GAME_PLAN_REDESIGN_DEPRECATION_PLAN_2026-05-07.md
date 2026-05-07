@@ -21,6 +21,16 @@ Spilleplan-redesignen (Fase 1-4) erstatter dagens 9-tabells schedule-stack med 4
 
 Engine-en (Game1MasterControlService.startGame) leser fortsatt `app_game1_scheduled_games`. Fase 4-bridge spawn-er rader i denne tabellen fra plan-runs slik at engine kjører uendret.
 
+### Multi-hall via group-of-halls (2026-05-08)
+
+Bridgen ekspanderer `participating_halls_json` til ALLE aktive haller i masterens hall-gruppe (ikke bare masteren). Denne endringen var nødvendig for pilot-bruken (Teknobingo Årnes som master + Bodø/Brumunddal/Fauske som deltagere) — uten den ble cross-hall-spill brutt fordi `participatingHalls` var hardkodet til `[run.hall_id]`.
+
+- `app_hall_groups` + `app_hall_group_members` (BIN-665) leveres som kilde til medlemskap
+- `is_active = true` på `app_halls` filtrerer bort deaktiverte haller
+- Master-hallen plasseres alltid først i listen (forutsigbart for engine + audit)
+- Solo-grupper (kun masteren) returnerer `[masterHallId]` — ingen regresjon for single-hall planer
+- `Game1MasterControlService` + `Game1HallReadyService` er allerede multi-hall-aware, så ingen engine-endringer var nødvendig
+
 ## Tidsplan
 
 ### T+0 → T+7 dager (uke 1)
