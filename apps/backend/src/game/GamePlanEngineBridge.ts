@@ -115,6 +115,78 @@ const NORWEGIAN_TO_ENGLISH_COLOR: Record<TicketColor, string> = {
 const LARGE_TICKET_PRICE_MULTIPLIER = 2;
 
 /**
+ * Oddsen-spesifikk-helper (2026-05-08): bygg per-bongfarge low/high prizes
+ * fra `rules.bingoBaseLow` + `rules.bingoBaseHigh` ved auto-multiplikator.
+ *
+ * Flyt:
+ *   - Spec: `bingoBaseLow`/`bingoBaseHigh` i øre gjelder billigste bong
+ *     (5 kr = 500 øre). Multiplikator: `actualPrize = base × (price / 500)`.
+ *   - Hvit 5 kr: low 500 → 500, high 1500 → 1500
+ *   - Gul 10 kr: low 500 × 2 = 1000, high 1500 × 2 = 3000
+ *   - Lilla 15 kr: low 500 × 3 = 1500, high 1500 × 3 = 4500
+ *
+ * `rules.bingoLowPerColor` / `bingoHighPerColor` finnes i prod-data som
+ * forhåndsutregnede per-farge-kart fra Trafikklys-stil-modellen, men vi
+ * stoler IKKE på dem — vi rederiverer alltid via auto-multiplikator for
+ * å holde shape konsistent og auditerbar (samme kilde-of-truth som
+ * `bingoPrizes` i auto-modus).
+ *
+ * Returnerer null hvis Oddsen-rules mangler eller er invalide.
+ */
+function buildOddsenSection(
+  catalog: GameCatalogEntry,
+): {
+  targetDraw: number;
+  bingoLowPrizes: Record<string, number>;
+  bingoHighPrizes: Record<string, number>;
+} | null {
+  const rules = catalog.rules;
+  if (!rules || typeof rules !== "object") return null;
+  if (rules.gameVariant !== "oddsen") return null;
+  const targetDrawRaw = rules.targetDraw;
+  const targetDraw = Number(targetDrawRaw);
+  if (
+    !Number.isFinite(targetDraw) ||
+    !Number.isInteger(targetDraw) ||
+    targetDraw < 1
+  ) {
+    return null;
+  }
+  const bingoBaseLow = Number(rules.bingoBaseLow);
+  const bingoBaseHigh = Number(rules.bingoBaseHigh);
+  if (
+    !Number.isFinite(bingoBaseLow) ||
+    !Number.isFinite(bingoBaseHigh) ||
+    bingoBaseLow <= 0 ||
+    bingoBaseHigh <= 0
+  ) {
+    return null;
+  }
+
+  const bingoLowPrizes: Record<string, number> = {};
+  const bingoHighPrizes: Record<string, number> = {};
+  for (const color of catalog.ticketColors) {
+    const englishKey = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
+    const ticketPrice = catalog.ticketPricesCents[color] ?? 0;
+    if (ticketPrice <= 0) continue;
+    // Auto-multiplikator: bruk `calculateActualPrize` så vi treffer
+    // samme avrunding (Math.round) som `bingoPrizes`-grenen i
+    // `buildTicketConfigFromCatalog`. catalog.prizeMultiplierMode er
+    // "auto" for Oddsen i prod (migration #20261210010300).
+    const low = calculateActualPrize(catalog, bingoBaseLow, ticketPrice);
+    const high = calculateActualPrize(catalog, bingoBaseHigh, ticketPrice);
+    if (low > 0) bingoLowPrizes[englishKey] = low;
+    if (high > 0) bingoHighPrizes[englishKey] = high;
+  }
+
+  // Sanity: minst én farge må ha både low og high.
+  const colorCount = Object.keys(bingoLowPrizes).length;
+  if (colorCount === 0) return null;
+
+  return { targetDraw, bingoLowPrizes, bingoHighPrizes };
+}
+
+/**
  * Tolkning A (2026-05-07): per-item bonus-override.
  *
  * `bonusGameOverride` overstyrer `catalog.bonusGameSlug` per plan-item
@@ -223,6 +295,29 @@ export function buildTicketConfigFromCatalog(
     }
   }
 
+  // Oddsen (2026-05-08): målspill-payout med target-draw-mekanikk.
+  //
+  // Når `catalog.rules.gameVariant === "oddsen"` skriver vi en
+  // strukturert `spill1.oddsen`-seksjon med:
+  //   - targetDraw: trekk-grensen som skiller HIGH/LOW payout
+  //   - bingoLowPrizes:  per-bongfarge premie ved Fullt Hus > targetDraw
+  //   - bingoHighPrizes: per-bongfarge premie ved Fullt Hus ≤ targetDraw
+  //
+  // Auto-multiplikator anvendes på `bingoBaseLow`/`bingoBaseHigh` i øre.
+  // Engine (Game1DrawEngineService) leser `spill1.oddsen` ved Fullt Hus
+  // og bruker enten high- eller low-tabellen avhengig av drawSequenceAtWin.
+  //
+  // `bingoPrizes` (gamle key) settes fortsatt — den brukes som LOW-fallback
+  // dersom engine-koden ikke har Oddsen-pathen (bakoverkompat / fail-safe).
+  // Faktisk Fullt-Hus-payout-path bruker `spill1.oddsen` når den er satt.
+  const oddsen = buildOddsenSection(catalog);
+  if (oddsen) {
+    config.spill1 = {
+      ...((config.spill1 as Record<string, unknown> | undefined) ?? {}),
+      oddsen,
+    };
+  }
+
   return config;
 }
 
@@ -281,9 +376,19 @@ export function buildEngineTicketConfig(
   const base = buildTicketConfigFromCatalog(catalog, bonusGameOverride);
   const jackpot = buildJackpotConfigFromOverride(jackpotOverride);
   if (Object.keys(jackpot).length === 0) return base;
+  // Bevare eksisterende spill1-felt (bla. `spill1.oddsen` for Oddsen-
+  // varianter) — uten denne merge-en ville jackpot-spread overskrive
+  // hele spill1-objektet og fjerne oddsen-konfigen.
+  const existingSpill1 =
+    (base as Record<string, unknown>).spill1 &&
+    typeof (base as Record<string, unknown>).spill1 === "object" &&
+    !Array.isArray((base as Record<string, unknown>).spill1)
+      ? ((base as Record<string, unknown>).spill1 as Record<string, unknown>)
+      : {};
   return {
     ...base,
     spill1: {
+      ...existingSpill1,
       jackpot: {
         prizeByColor: jackpot.prizeByColor,
         draw: jackpot.draw,

@@ -121,6 +121,19 @@ Pengespillforskriften krever 7 år audit-historikk:
 - [ ] Backup av prod-DB tatt < 7 dager før rollout
 - [ ] Rollback-prosedyre verifisert i staging
 
+## Engine-bridge oppdateringer post-Fase 4
+
+- **2026-05-08 — Oddsen-runtime (Agent 1, branch `feat/oddsen-engine-bridge-runtime-2026-05-08`):**
+  Bridge skriver `spill1.oddsen` med per-bongfarge `bingoLow/HighPrizes`
+  når `catalog.rules.gameVariant === "oddsen"`. Engine
+  (`Game1DrawEngineService.payoutOddsenFullHouse` via
+  `Game1DrawEngineHelpers.planOddsenFullHousePayout`) velger HIGH/LOW
+  basert på `drawSequenceAtWin <= rules.targetDraw`. Fallback til
+  standard pattern-payouts hvis `spill1.oddsen` mangler. Tester:
+  `apps/backend/src/game/__tests__/GamePlanEngineBridge.oddsen.test.ts`,
+  `Game1DrawEngineHelpers.oddsen.test.ts`,
+  `Game1PayoutService.oddsen.test.ts`. Trafikklys-runtime gjenstår.
+
 ## Referanser
 
 - Fase 1: PR #980 — DB-modell + service-layer

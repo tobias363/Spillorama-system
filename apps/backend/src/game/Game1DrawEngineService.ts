@@ -127,12 +127,16 @@ import {
   phaseDisplayName,
   resolvePhaseConfig,
   resolveJackpotConfig,
+  resolveOddsenConfig,
+  planOddsenFullHousePayout,
   buildVariantConfigFromGameConfigJson,
   resolveJackpotConfigFromGameConfig,
   resolveEngineColorName,
   patternPrizeToCents,
   parseMarkings,
+  type Game1OddsenConfig,
 } from "./Game1DrawEngineHelpers.js";
+import { resolveColorFamily } from "./Game1JackpotService.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-service" });
@@ -2223,7 +2227,33 @@ export class Game1DrawEngineService {
     // summen bruker uansett patternResults[].payoutAmount fra snapshot).
     let prizePerWinnerCentsForBroadcast = 0;
 
-    if (variantConfig && variantConfig.patternsByColor) {
+    // Oddsen (2026-05-08): Spill 1-katalog-varianter `oddsen-55/56/57` har
+    // egen Fullt-Hus-payout-mekanikk:
+    //   - drawSequenceAtWin <= rules.targetDraw  → HIGH per-bongfarge
+    //   - drawSequenceAtWin >  rules.targetDraw  → LOW  per-bongfarge
+    // Auto-multiplikator (5/10/15 kr × 1/2/3) er allerede anvendt i
+    // bridge-output (`spill1.oddsen.bingoLow/HighPrizes`). Oddsen overstyrer
+    // BÅDE per-color- OG flat-path for fase 5; Rad 1-4 følger normal
+    // pattern-baserte payouts (auto-multiplikator-pattern fra default-
+    // variant).
+    const oddsenCfg =
+      currentPhase === TOTAL_PHASES
+        ? resolveOddsenConfig(ticketConfigJson)
+        : null;
+
+    if (oddsenCfg) {
+      const result = await this.payoutOddsenFullHouse(
+        client,
+        scheduledGameId,
+        currentPhase,
+        drawSequenceAtWin,
+        winners,
+        oddsenCfg,
+        jackpotCfg,
+      );
+      prizePerWinnerCentsForBroadcast = result.prizePerWinnerCentsForBroadcast;
+      ordinaryWinCentsByHall = result.ordinaryWinCentsByHall;
+    } else if (variantConfig && variantConfig.patternsByColor) {
       // Per-farge-path: gruppér vinnere per ticketColor og utbetal hver
       // gruppe uavhengig. Dette er Option X (PM-vedtak 2026-04-21).
       await this.payoutPerColorGroups(
@@ -2596,6 +2626,190 @@ export class Game1DrawEngineService {
         phaseName: phaseDisplayName(currentPhase),
       });
     }
+  }
+
+  /**
+   * Oddsen Fullt-Hus-payout (2026-05-08).
+   *
+   * Aktiveres kun for Spill 1-katalog-varianter `oddsen-55/56/57` der
+   * `ticket_config_json.spill1.oddsen` er satt av `GamePlanEngineBridge`.
+   * Skiller seg fra normal per-color/flat-path-payout fordi premien er
+   * ABSOLUTT per bongfarge (ikke en andel av en pot):
+   *
+   *   - drawSequenceAtWin <= rules.targetDraw → bruk `bingoHighPrizes[colorFamily]`
+   *   - drawSequenceAtWin >  rules.targetDraw → bruk `bingoLowPrizes[colorFamily]`
+   *
+   * Auto-multiplikator (5 kr × 1, 10 kr × 2, 15 kr × 3) er allerede anvendt
+   * av bridge-en på `bingoBaseLow`/`bingoBaseHigh`. Engine multipliserer
+   * IKKE ytterligere — nøkler er per-farge-familie ("yellow"/"white"/"purple")
+   * uavhengig av small/large-størrelse.
+   *
+   * Multi-winner: hver vinner i samme color-group får samme prize. Vi
+   * sender `totalPhasePrize = perColorPrize × groupSize` til
+   * `payoutService.payoutPhase` så split-rounding produserer eksakt
+   * `perColorPrize` per vinner.
+   *
+   * Jackpot-add-on (hvis `jackpotCfg` er satt): per-vinner jackpot via
+   * eksisterende `Game1JackpotService` legges på TOPP av Oddsen-prize.
+   * Dette er konservativ atferd — ingen Oddsen-rad i prod har jackpot
+   * konfigurert per dato, men vi unngår å bryte eksisterende kontrakter.
+   *
+   * Returnerer broadcast-info + ordinary-win-by-hall så pot-evaluator
+   * og pattern:won-broadcast får samme datakilder som standard-pathene.
+   */
+  private async payoutOddsenFullHouse(
+    client: PoolClient,
+    scheduledGameId: string,
+    currentPhase: number,
+    drawSequenceAtWin: number,
+    winners: Array<Game1WinningAssignment & { userId: string }>,
+    oddsenCfg: Game1OddsenConfig,
+    jackpotCfg: Game1JackpotConfig | null,
+  ): Promise<{
+    prizePerWinnerCentsForBroadcast: number;
+    ordinaryWinCentsByHall: Map<string, number>;
+  }> {
+    // Pure-helper: planlegg per-color-family-grupper med riktig prize-tabell.
+    // Gjør bucket-valg + family-aggregat + skip-handling testbart isolert.
+    const plan = planOddsenFullHousePayout({
+      oddsenCfg,
+      drawSequenceAtWin,
+      winners,
+      resolveColorFamily,
+    });
+
+    log.info(
+      {
+        scheduledGameId,
+        drawSequenceAtWin,
+        targetDraw: plan.targetDraw,
+        bucket: plan.bucket,
+        winnerCount: winners.length,
+        groupCount: plan.groups.length,
+        skippedCount: plan.skippedColorFamilies.length,
+      },
+      "[ODDSEN] Fullt Hus payout — bucket valgt basert på drawSequenceAtWin",
+    );
+
+    for (const skipped of plan.skippedColorFamilies) {
+      log.warn(
+        {
+          scheduledGameId,
+          drawSequenceAtWin,
+          family: skipped.colorFamily,
+          bucket: plan.bucket,
+          winnerCount: skipped.winnerCount,
+        },
+        "[ODDSEN] Mangler prize for color-family — hopper over gruppe",
+      );
+    }
+
+    const ordinaryWinCentsByHall = new Map<string, number>();
+    let firstGroupPrizePerWinnerCents = 0;
+
+    // Re-grupper engine-vinnere per family (planen har bare counts).
+    const byFamily = new Map<
+      string,
+      Array<Game1WinningAssignment & { userId: string }>
+    >();
+    for (const w of winners) {
+      const family = resolveColorFamily(w.ticketColor);
+      let list = byFamily.get(family);
+      if (!list) {
+        list = [];
+        byFamily.set(family, list);
+      }
+      list.push(w);
+    }
+
+    for (const group of plan.groups) {
+      const groupWinners = byFamily.get(group.colorFamily) ?? [];
+      if (groupWinners.length === 0) continue;
+      const perWinnerPrize = group.perWinnerPrizeCents;
+      const groupSize = group.winnerCount;
+      const groupTotalPrize = group.totalPhasePrizeCents;
+
+      // Per-winner jackpot (sjeldent for Oddsen, men respekter
+      // pre-eksisterende jackpot-config hvis satt). Vi grupperer på
+      // jackpot-beløp så payoutService får én call per unik
+      // jackpot-sats (samme pattern som flat-pathen).
+      const byJackpotAmount = new Map<
+        number,
+        Array<Game1WinningAssignment & { userId: string }>
+      >();
+      for (const w of groupWinners) {
+        let amount = 0;
+        if (this.jackpotService && jackpotCfg) {
+          const j = this.jackpotService.evaluate({
+            phase: currentPhase,
+            drawSequenceAtWin,
+            ticketColor: w.ticketColor,
+            jackpotConfig: jackpotCfg,
+          });
+          if (j.triggered) amount = j.amountCents;
+        }
+        let list = byJackpotAmount.get(amount);
+        if (!list) {
+          list = [];
+          byJackpotAmount.set(amount, list);
+        }
+        list.push(w);
+      }
+
+      for (const [jackpotAmount, jackpotWinners] of byJackpotAmount.entries()) {
+        const jpGroupSize = jackpotWinners.length;
+        const jpGroupTotalPrize = perWinnerPrize * jpGroupSize;
+        await this.payoutService!.payoutPhase(client, {
+          scheduledGameId,
+          phase: currentPhase,
+          drawSequenceAtWin,
+          roomCode: "",
+          totalPhasePrizeCents: jpGroupTotalPrize,
+          winners: jackpotWinners,
+          jackpotAmountCentsPerWinner: jackpotAmount,
+          phaseName: phaseDisplayName(currentPhase),
+        });
+      }
+
+      // Aggreger per-hall ordinary win-cents (uten jackpot) for pot-
+      // evaluator-input. Hver vinner i gruppa får samme `perWinnerPrize`.
+      for (const w of groupWinners) {
+        const cur = ordinaryWinCentsByHall.get(w.hallId) ?? 0;
+        ordinaryWinCentsByHall.set(w.hallId, cur + perWinnerPrize);
+      }
+
+      // Bruk første gruppes prize som broadcast-representativ verdi
+      // (matcher konvensjonen i per-color-pathen).
+      if (firstGroupPrizePerWinnerCents === 0) {
+        firstGroupPrizePerWinnerCents = perWinnerPrize;
+      }
+
+      // Audit per gruppe — bevis for Lotteritilsynet at riktig bucket
+      // ble brukt og hvilken farge-familie som vant. Compliance-ledger
+      // skrives indirekte av payoutService.payoutPhase via PRIZE-entries
+      // (per vinner) — vi har derfor ikke strengt behov for ekstra entry
+      // her, men audit-log gir kjapp diagnose.
+      this.fireAudit({
+        actorId: null,
+        action: "game1_engine.oddsen_payout",
+        resourceId: scheduledGameId,
+        details: {
+          phase: currentPhase,
+          drawSequenceAtWin,
+          targetDraw: plan.targetDraw,
+          bucket: plan.bucket,
+          colorFamily: group.colorFamily,
+          groupSize,
+          perWinnerPrizeCents: perWinnerPrize,
+          groupTotalPrizeCents: groupTotalPrize,
+        },
+      });
+    }
+
+    return {
+      prizePerWinnerCentsForBroadcast: firstGroupPrizePerWinnerCents,
+      ordinaryWinCentsByHall,
+    };
   }
 
   /**

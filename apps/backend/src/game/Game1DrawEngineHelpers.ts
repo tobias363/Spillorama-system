@@ -144,6 +144,217 @@ export function resolvePhaseConfig(
 }
 
 /**
+ * Oddsen target-draw config for Spill 1-katalog-varianter (oddsen-55/56/57).
+ *
+ * Kilde: `ticket_config_json.spill1.oddsen` skrevet av
+ * `GamePlanEngineBridge.buildTicketConfigFromCatalog` når
+ * `catalog.rules.gameVariant === "oddsen"`.
+ *
+ * Engine-regel ved Fullt Hus (drawSequenceAtWin = `nextSequence`):
+ *   - drawSequenceAtWin <= targetDraw → bruk HIGH-tabellen for vinnerens farge
+ *   - drawSequenceAtWin >  targetDraw → bruk LOW-tabellen for vinnerens farge
+ *
+ * Tabellene er per-bongfarge (engelsk: "yellow"/"white"/"purple") og
+ * inneholder allerede auto-multiplikator (5 kr × 1, 10 kr × 2, 15 kr × 3
+ * for low/high-base). Engine multiplikatorer dette IKKE ytterligere.
+ */
+export interface Game1OddsenConfig {
+  targetDraw: number;
+  bingoLowPrizes: Record<string, number>;
+  bingoHighPrizes: Record<string, number>;
+}
+
+/**
+ * Pure helper (2026-05-08): velg HIGH eller LOW prize-tabell for Oddsen
+ * basert på `drawSequenceAtWin` mot `targetDraw`. Returnerer
+ * `{ bucket, prizesTable }` så caller kan logge bucket-valget for audit.
+ *
+ * Regel: `drawSequenceAtWin <= targetDraw → "high"` (Fullt Hus innen
+ * måltrekk gir høy premie); ellers `"low"`.
+ */
+export function selectOddsenBucket(
+  oddsenCfg: Game1OddsenConfig,
+  drawSequenceAtWin: number,
+): { bucket: "high" | "low"; prizesTable: Record<string, number> } {
+  const isHigh = drawSequenceAtWin <= oddsenCfg.targetDraw;
+  return {
+    bucket: isHigh ? "high" : "low",
+    prizesTable: isHigh
+      ? oddsenCfg.bingoHighPrizes
+      : oddsenCfg.bingoLowPrizes,
+  };
+}
+
+/**
+ * Plan-shape for Oddsen Fullt-Hus-payout (testbar uten å kjøre wallet).
+ *
+ * Hver rad i `groups` representerer ÉN `payoutService.payoutPhase`-kall
+ * som blir gjort av `Game1DrawEngineService.payoutOddsenFullHouse`.
+ *
+ * Multi-vinner-semantikk: hver vinner i en color-group får `perWinnerPrize`.
+ * `totalPhasePrizeCents = perWinnerPrize × winnerCount` så split-rounding
+ * i `payoutService.payoutPhase` produserer eksakt `perWinnerPrize` per
+ * vinner.
+ */
+export interface OddsenPayoutPlanGroup {
+  /** Color-family lookup-key ("yellow"/"white"/"purple"/etc.). */
+  colorFamily: string;
+  /** Antall vinner-bonger i gruppen. */
+  winnerCount: number;
+  /** Premie per vinner i øre (fra HIGH/LOW-tabellen). */
+  perWinnerPrizeCents: number;
+  /** `perWinnerPrize × winnerCount` — input til payoutPhase. */
+  totalPhasePrizeCents: number;
+}
+
+export interface OddsenPayoutPlan {
+  /** "high" eller "low" — hvilken tabell ble valgt for utbetaling. */
+  bucket: "high" | "low";
+  /** drawSequenceAtWin sammenlignet med targetDraw for diagnostikk. */
+  drawSequenceAtWin: number;
+  /** Effektiv targetDraw fra config. */
+  targetDraw: number;
+  /** Per-color-family payout-rader (én per gruppe med ≥1 vinner og prize > 0). */
+  groups: OddsenPayoutPlanGroup[];
+  /** Vinnere som ikke fikk gruppe (manglet prize for color-family). */
+  skippedColorFamilies: Array<{ colorFamily: string; winnerCount: number }>;
+}
+
+/**
+ * Pure helper (2026-05-08): planlegg Oddsen Fullt-Hus-payout.
+ *
+ * Tar liste av (ticketColor, count) og returnerer en plan over hvor mye
+ * som skal utbetales per color-family-gruppe. Engine kaller deretter
+ * `payoutService.payoutPhase` per `groups`-rad.
+ *
+ * `winnerColorCounts`-input er allerede aggregert per (string-)
+ * ticketColor — caller (engine) deduplicerer ved trenger ikke fordi
+ * `Game1DrawEngineService.payoutOddsenFullHouse` har full vinner-context
+ * og itererer per assignment. Dette helper-snittet er der for å gjøre
+ * computasjonen testbar isolert.
+ *
+ * `resolveColorFamily`-mapping må sendes inn av caller (avhenger av
+ * `Game1JackpotService` som ikke skal være cyclic-importert i helpers).
+ */
+export function planOddsenFullHousePayout(args: {
+  oddsenCfg: Game1OddsenConfig;
+  drawSequenceAtWin: number;
+  /** Liste av vinnere med ticket-color (slug eller engelsk). */
+  winners: ReadonlyArray<{ ticketColor: string }>;
+  /** Funksjon som mapper ticket-color → color-family ("yellow" osv.). */
+  resolveColorFamily: (ticketColor: string) => string;
+}): OddsenPayoutPlan {
+  const { oddsenCfg, drawSequenceAtWin, winners, resolveColorFamily } = args;
+  const { bucket, prizesTable } = selectOddsenBucket(
+    oddsenCfg,
+    drawSequenceAtWin,
+  );
+
+  // Aggregér vinnere per color-family.
+  const counts = new Map<string, number>();
+  for (const w of winners) {
+    const family = resolveColorFamily(w.ticketColor);
+    counts.set(family, (counts.get(family) ?? 0) + 1);
+  }
+
+  const groups: OddsenPayoutPlanGroup[] = [];
+  const skippedColorFamilies: Array<{
+    colorFamily: string;
+    winnerCount: number;
+  }> = [];
+
+  for (const [family, count] of counts.entries()) {
+    const perWinnerPrize = prizesTable[family] ?? 0;
+    if (perWinnerPrize <= 0) {
+      skippedColorFamilies.push({ colorFamily: family, winnerCount: count });
+      continue;
+    }
+    groups.push({
+      colorFamily: family,
+      winnerCount: count,
+      perWinnerPrizeCents: perWinnerPrize,
+      totalPhasePrizeCents: perWinnerPrize * count,
+    });
+  }
+
+  return {
+    bucket,
+    drawSequenceAtWin,
+    targetDraw: oddsenCfg.targetDraw,
+    groups,
+    skippedColorFamilies,
+  };
+}
+
+/**
+ * Resolve Oddsen-config fra `ticket_config_json`. Returnerer `null` hvis
+ * spillet ikke er en Oddsen-variant (vanlig spill bruker pattern-baserte
+ * payouts via `patternPrizeToCents`).
+ *
+ * Spec (Tobias 2026-05-07): targetDraw er heltall ≥ 1 (typisk 55/56/57).
+ * Per-farge low/high-prizes er int øre. Manglende eller invalide felter
+ * → return null (fail-safe → fallback til normal pattern-payout).
+ */
+export function resolveOddsenConfig(
+  rawTicketConfig: unknown,
+): Game1OddsenConfig | null {
+  let parsed: unknown = rawTicketConfig;
+  if (typeof rawTicketConfig === "string") {
+    try {
+      parsed = JSON.parse(rawTicketConfig);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const spill1 = obj.spill1;
+  if (!spill1 || typeof spill1 !== "object" || Array.isArray(spill1)) {
+    return null;
+  }
+  const oddsenRaw = (spill1 as Record<string, unknown>).oddsen;
+  if (!oddsenRaw || typeof oddsenRaw !== "object" || Array.isArray(oddsenRaw)) {
+    return null;
+  }
+  const o = oddsenRaw as Record<string, unknown>;
+  const targetDrawN =
+    typeof o.targetDraw === "number"
+      ? o.targetDraw
+      : Number.parseInt(String(o.targetDraw), 10);
+  if (
+    !Number.isFinite(targetDrawN) ||
+    !Number.isInteger(targetDrawN) ||
+    targetDrawN < 1
+  ) {
+    return null;
+  }
+  const lowRaw = o.bingoLowPrizes;
+  const highRaw = o.bingoHighPrizes;
+  if (
+    !lowRaw ||
+    typeof lowRaw !== "object" ||
+    Array.isArray(lowRaw) ||
+    !highRaw ||
+    typeof highRaw !== "object" ||
+    Array.isArray(highRaw)
+  ) {
+    return null;
+  }
+  const bingoLowPrizes: Record<string, number> = {};
+  const bingoHighPrizes: Record<string, number> = {};
+  for (const [k, v] of Object.entries(lowRaw as Record<string, unknown>)) {
+    const n = numberOrZero(v);
+    if (n > 0) bingoLowPrizes[k.toLowerCase()] = Math.round(n);
+  }
+  for (const [k, v] of Object.entries(highRaw as Record<string, unknown>)) {
+    const n = numberOrZero(v);
+    if (n > 0) bingoHighPrizes[k.toLowerCase()] = Math.round(n);
+  }
+  if (Object.keys(bingoLowPrizes).length === 0) return null;
+  return { targetDraw: targetDrawN, bingoLowPrizes, bingoHighPrizes };
+}
+
+/**
  * Resolve jackpot-config fra ticket_config_json. Returnerer null hvis
  * jackpot ikke er konfigurert.
  *
