@@ -279,39 +279,88 @@ Følgende mekanikker er **separate paths** og IKKE en del av Rad 1-4 + Fullt Hus
 
 ---
 
-## 9. Multi-vinner-scenarier — Per-vinner per farge
+## 9. Multi-vinner-scenarier — Bong-vektet pot-deling
 
 > **Status:** Bekreftet av Tobias 2026-05-08.
 
 ### 9.1 Regelen
 
-**Hver vinner får sin auto-multiplikatert prize per bongfarge, uavhengig av om andre vinner samme phase i samme trekk.**
+**Vinnere på samme phase deler en pot, der delingen er vektet med bongstørrelse.** "Hvis du satser dobbelt så mye, vinner du dobbelt så mye" — proporsjonalt med innsats.
 
-Det er IKKE pot-deling. Hver bong-betaling generer sin egen prize basert på bong-pris.
+Mathematisk er dette ekvivalent med per-vinner auto-multiplikator (hver vinner får `base × bongMultiplier` uavhengig av andre vinnere), men presentert som pot-deling.
 
-### 9.2 Eksempel — Rad 1 med base 100 kr
+### 9.2 Formel
 
-**Scenario:** I samme trekk vinner følgende spillere Rad 1:
-- Spiller A med hvit bong (5 kr)
-- Spiller B med gul bong (10 kr)
-- Spiller C med lilla bong (15 kr)
-- Spiller D med en annen lilla bong (15 kr)
+**Pot for fasen** = `base × Σ(bongMultiplier for hver vinner)`
 
-**Utbetaling:**
-- A får **100 kr** (100 × 1)
-- B får **200 kr** (100 × 2)
-- C får **300 kr** (100 × 3)
-- D får **300 kr** (100 × 3)
+der `bongMultiplier` er:
+- Hvit (5 kr): × 1
+- Gul (10 kr): × 2
+- Lilla (15 kr): × 3
 
-Total payout: 900 kr. Det er IKKE en pot på 100 kr som deles på 4 vinnere — det er fire individuelle utbetalinger basert på hver spillers bongfarge.
+**Hver vinners andel** = `(deres bongMultiplier / sum av alle bongMultipliers) × pot`
 
-### 9.3 Konsekvens for engine-implementasjon
+Dette forenkles til: `vinnerens andel = base × deres bongMultiplier`
 
-Engine-pathen `Game1DrawEngineService.payoutPerColorGroups` har historisk brukt "firstColor's pattern" som tilsier pot-deling. Dette er **feil** for hovedspill og må endres slik at hver vinner får sin farges entry fra `spill1.ticketColors[]`-array.
+### 9.3 Eksempler (Rad 1 base = 100 kr)
 
-### 9.4 Trafikklys avviker
+| Vinnere | Pot-formel | Pot total | Per vinner |
+|---|---|---|---|
+| 1 hvit (solo) | 100 × 1 | 100 | hvit får 100 |
+| 1 lilla (solo) | 100 × 3 | 300 | lilla får 300 |
+| 1 hvit + 1 lilla | 100 × (1+3) | 400 | hvit 100, lilla 300 |
+| 2 lilla | 100 × (3+3) | 600 | hver lilla 300 |
+| 2 lilla + 1 hvit | 100 × (3+3+1) | 700 | hver lilla 300, hvit 100 |
+| 1 hvit + 1 gul + 1 lilla | 100 × (1+2+3) | 600 | hvit 100, gul 200, lilla 300 |
 
-For Trafikklys er ikke regelen per-bongfarge — det er per-rad-farge. Alle vinnere på samme rad får samme prize (definert av rad-fargen for runden), uavhengig av bongfarge. Dette er fordi alle Trafikklys-bonger har samme pris (15 kr).
+**Verifisering av prinsippet:** I alle tilfeller får en lilla-vinner 300 kr og en hvit-vinner 100 kr — dvs. lilla får 3× det hvit får, fordi lilla satset 3× så mye. Antall andre vinnere påvirker IKKE den enkelte spillerens utbetaling.
+
+### 9.4 Konsekvens for engine-implementasjon
+
+Engine kan implementere dette på to ekvivalente måter:
+
+**Implementasjon X — Per-vinner auto-mult (enklere):**
+```
+for each winner:
+  prize = base × bongMultiplier[winner.color]
+  pay(winner, prize)
+```
+
+**Implementasjon Y — Pot-basert (eksponerer regnskaps-konseptet):**
+```
+pot = base × sum(bongMultiplier[w.color] for w in winners)
+for each winner:
+  share = (bongMultiplier[winner.color] / total_multiplier_sum) × pot
+  pay(winner, share)
+```
+
+Begge gir IDENTISKE utbetalinger. Velg den som er enklest å forklare i audit-rapporter.
+
+**Eksisterende engine-path** `Game1DrawEngineService.payoutPerColorGroups` med "firstColor's pattern" var feil — den var en pot-deling uten bong-vekting (alle vinnere fikk samme andel uavhengig av bongstørrelse). Den må erstattes med en av implementasjonene over.
+
+### 9.5 Compliance-ledger
+
+For audit må følgende skrives per vinner:
+- `prizeAmountCents` — vinnerens faktiske utbetaling
+- `ticketColor` — vinnerens bongfarge
+- `ticketPriceCents` — vinnerens innsats (5/10/15 kr)
+- `bongMultiplier` — vekt brukt i utregningen (1/2/3)
+- `totalPotCents` — total pot for fasen
+- `winnerCount` — antall vinnere på samme phase
+
+Dette gir Lotteritilsynet full sporbarhet på hvordan utbetalingen ble regnet ut.
+
+### 9.6 Trafikklys avviker
+
+For Trafikklys er ikke regelen bong-vektet — det er rad-farge-basert. Alle vinnere på samme rad får SAMME prize (definert av rad-fargen for runden), uavhengig av bongfarge. Dette er konsistent med bong-vektet logikk fordi alle Trafikklys-bonger har samme pris (15 kr flat) og dermed samme vekt.
+
+### 9.7 Oddsen
+
+Auto-multiplikator-regelen + bong-vektet pot-deling gjelder også Oddsen, men på Fullt Hus brukes `bingoBaseLow` eller `bingoBaseHigh` som base avhengig av om Fullt Hus skjedde innen `targetDraw`.
+
+Eksempel — Oddsen-55 med Fullt Hus på trekk 50 (HIGH bucket):
+- Pot = 1500 × (sum av vinnere's bongMultiplier)
+- 1 hvit + 1 lilla → pot = 1500 × (1+3) = 6000, hvit 1500, lilla 4500
 
 ---
 
@@ -482,6 +531,7 @@ Før du skriver eller endrer kode i payout-pathen, gå gjennom denne sjekklisten
 |---|---|---|
 | 2026-05-08 | Initial versjon. Konsolidert fra PM_HANDOFF_2026-05-07.md, SPILLKATALOG.md, og direkte bekreftelser fra Tobias gjennom flere PM-sesjoner. Multi-vinner-regel markert som åpent spørsmål. | PM-AI (Claude Opus 4.7) |
 | 2026-05-08 | Multi-vinner-regel (§9) bekreftet av Tobias som "per-vinner per farge" (Tolkning A). Engine-pathen `payoutPerColorGroups` må endres for å matche regelen. | PM-AI (Claude Opus 4.7) |
+| 2026-05-08 | §9 utvidet med presis formulering: bong-vektet pot-deling (matematisk ekvivalent med per-vinner auto-mult). Tobias bekreftet at det skal eksponeres som "deling av pot" der pot skalerer med vinnernes innsats. Eksempel-tabell + compliance-ledger-felter + Oddsen-utvidelse lagt til. | PM-AI (Claude Opus 4.7) |
 
 ---
 
