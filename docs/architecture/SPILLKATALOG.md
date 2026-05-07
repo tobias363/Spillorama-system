@@ -2,6 +2,8 @@
 
 **Status:** Korrigert 2026-04-25 av Tobias (teknisk lead) etter PM-handoff. Erstatter feil klassifisering fra 2026-04-23-spikringen som hevdet alle interne spill var hovedspill.
 
+> **Se også:** [SPILL_REGLER_OG_PAYOUT.md](./SPILL_REGLER_OG_PAYOUT.md) — kanonisk doc for premie-mekanikk, auto-multiplikator, cap-håndhevelse, spesialspill (Trafikklys + Oddsen) og engine-bridge ticket-config-shape.
+
 **Formål:** Eneste autoritative kilde for hvilke spill som finnes i Spillorama-systemet, hvordan de navngis, og hvilken regulatorisk kategori de tilhører.
 
 Ved uenighet mellom dette dokumentet og andre dokumenter (README-er, wireframe-spec, audit-rapporter, canonical specs, kildekode-kommentarer): **dette dokumentet vinner**, og de andre må oppdateres.
