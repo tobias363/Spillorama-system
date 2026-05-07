@@ -6,7 +6,11 @@
  * `migrations/20261210000000_app_game_catalog_and_plan.sql`.
  */
 
-import type { GameCatalogEntry, TicketColor } from "./gameCatalog.types.js";
+import type {
+  BonusGameSlug,
+  GameCatalogEntry,
+  TicketColor,
+} from "./gameCatalog.types.js";
 
 // ── Weekday whitelist (matcher Game1ScheduleTickService.ts:299-305) ─────
 
@@ -44,6 +48,14 @@ export interface GamePlanItem {
   planId: string;
   position: number;
   gameCatalogId: string;
+  /**
+   * Per-item bonus-spill-override (Tolkning A, 2026-05-07).
+   *
+   * NULL = ingen override — engine-bridge bruker `catalog.bonusGameSlug`
+   * som fallback. Ikke-NULL overstyrer catalog. Whitelist matcher
+   * `BONUS_GAME_SLUG_VALUES` i `gameCatalog.types.ts`.
+   */
+  bonusGameOverride: BonusGameSlug | null;
   notes: string | null;
   createdAt: string;
 }
@@ -85,6 +97,14 @@ export interface ListGamePlanFilter {
 
 export interface SetGamePlanItemsInput {
   gameCatalogId: string;
+  /**
+   * Tolkning A (2026-05-07): per-item bonus-spill-override.
+   *
+   * - undefined eller null → ingen override (fallback til catalog).
+   * - string → må være i `BONUS_GAME_SLUG_VALUES`-whitelist; service-laget
+   *   validerer.
+   */
+  bonusGameOverride?: BonusGameSlug | null;
   notes?: string | null;
 }
 

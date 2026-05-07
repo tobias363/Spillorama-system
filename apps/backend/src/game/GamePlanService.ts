@@ -22,6 +22,10 @@ import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
+import {
+  BONUS_GAME_SLUG_VALUES,
+  type BonusGameSlug,
+} from "./gameCatalog.types.js";
 import type {
   CreateGamePlanInput,
   GamePlan,
@@ -37,6 +41,38 @@ import { WEEKDAY_VALUES } from "./gamePlan.types.js";
 const logger = rootLogger.child({ module: "game-plan-service" });
 
 const VALID_WEEKDAYS = new Set<Weekday>(WEEKDAY_VALUES);
+const VALID_BONUS_SLUGS = new Set<BonusGameSlug>(BONUS_GAME_SLUG_VALUES);
+
+/**
+ * Tolkning A (2026-05-07): valider per-item bonus-spill-override.
+ *
+ * - undefined eller null → returner null (ingen override).
+ * - string → må være i `BONUS_GAME_SLUG_VALUES`. Trim + lowercase
+ *   normaliseres for å matche slug-whitelist.
+ * - alt annet → INVALID_INPUT.
+ */
+function assertBonusGameOverride(
+  value: unknown,
+  field: string,
+): BonusGameSlug | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} må være streng eller null.`,
+    );
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  const slug = trimmed.toLowerCase() as BonusGameSlug;
+  if (!VALID_BONUS_SLUGS.has(slug)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} må være en av: ${BONUS_GAME_SLUG_VALUES.join(", ")} (fikk "${trimmed}").`,
+    );
+  }
+  return slug;
+}
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 const MAX_NAME_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2000;
@@ -199,6 +235,7 @@ interface GamePlanItemRow {
   plan_id: string;
   position: number;
   game_catalog_id: string;
+  bonus_game_override: string | null;
   notes: string | null;
   created_at: Date | string;
 }
@@ -236,11 +273,21 @@ function mapPlanRow(row: GamePlanRow): GamePlan {
 }
 
 function mapItemRow(row: GamePlanItemRow): GamePlanItem {
+  // Tolkning A (2026-05-07): bonus_game_override kan ha vilkårlig tekst i
+  // DB hvis migrasjonen kjøres uten service-validering. Filtrer mot
+  // whitelist og fall tilbake til null hvis det er noe rart.
+  const rawOverride = row.bonus_game_override;
+  const bonusGameOverride: BonusGameSlug | null =
+    typeof rawOverride === "string" &&
+    VALID_BONUS_SLUGS.has(rawOverride as BonusGameSlug)
+      ? (rawOverride as BonusGameSlug)
+      : null;
   return {
     id: row.id,
     planId: row.plan_id,
     position: Number(row.position),
     gameCatalogId: row.game_catalog_id,
+    bonusGameOverride,
     notes: row.notes,
     createdAt: asIso(row.created_at),
   };
@@ -357,7 +404,7 @@ export class GamePlanService {
     planId: string,
   ): Promise<GamePlanWithItems["items"]> {
     const { rows } = await this.pool.query<GamePlanItemRow>(
-      `SELECT id, plan_id, position, game_catalog_id, notes, created_at
+      `SELECT id, plan_id, position, game_catalog_id, bonus_game_override, notes, created_at
        FROM ${this.itemTable()}
        WHERE plan_id = $1
        ORDER BY position ASC`,
@@ -700,7 +747,16 @@ export class GamePlanService {
           : raw.notes.trim().length === 0
             ? null
             : assertNonEmptyString(raw.notes, `items[${i}].notes`, 500);
-      validatedItems.push({ gameCatalogId: catalogId, notes });
+      // Tolkning A (2026-05-07): valider per-item bonus-spill-override.
+      const bonusGameOverride = assertBonusGameOverride(
+        raw.bonusGameOverride,
+        `items[${i}].bonusGameOverride`,
+      );
+      validatedItems.push({
+        gameCatalogId: catalogId,
+        bonusGameOverride,
+        notes,
+      });
     }
 
     const client = await this.pool.connect();
@@ -714,13 +770,14 @@ export class GamePlanService {
         const item = validatedItems[i];
         await client.query(
           `INSERT INTO ${this.itemTable()}
-             (id, plan_id, position, game_catalog_id, notes)
-           VALUES ($1, $2, $3, $4, $5)`,
+             (id, plan_id, position, game_catalog_id, bonus_game_override, notes)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
           [
             randomUUID(),
             existing.id,
             i + 1,
             item.gameCatalogId,
+            item.bonusGameOverride ?? null,
             item.notes ?? null,
           ],
         );
@@ -747,6 +804,10 @@ export class GamePlanService {
       details: {
         itemCount: validatedItems.length,
         catalogIds: validatedItems.map((i) => i.gameCatalogId),
+        // Tolkning A (2026-05-07): logg bonus-override-mønsteret for sporbarhet.
+        // Lagrer en parallell array av kun bonus-overrides — null der ingen
+        // override er satt — så vi kan korrelere mot catalogIds-arrayen.
+        bonusOverrides: validatedItems.map((i) => i.bonusGameOverride ?? null),
       },
     });
 

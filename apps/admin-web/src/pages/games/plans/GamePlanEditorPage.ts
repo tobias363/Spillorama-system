@@ -29,7 +29,10 @@ import {
 } from "./GamePlanState.js";
 import { fetchCatalogList } from "../catalog/GameCatalogState.js";
 import {
+  BONUS_GAME_DISPLAY_NAMES,
+  BONUS_GAME_SLUG_VALUES,
   WEEKDAY_VALUES,
+  type BonusGameSlug,
   type GamePlanWithItems,
   type SetGamePlanItemInput,
   type Weekday,
@@ -109,6 +112,7 @@ export async function renderGamePlanEditPage(
     }
     const sequence: SetGamePlanItemInput[] = plan.items.map((it) => ({
       gameCatalogId: it.gameCatalogId,
+      bonusGameOverride: it.bonusGameOverride ?? null,
       notes: it.notes,
     }));
     const state: PlanEditorState = {
@@ -470,7 +474,13 @@ function wireSequenceBuilder(
     let dirty = a.length !== b.length;
     if (!dirty) {
       for (let i = 0; i < a.length; i += 1) {
-        if (a[i]!.gameCatalogId !== b[i]!.gameCatalogId) {
+        const ai = a[i]!;
+        const bi = b[i]!;
+        if (
+          ai.gameCatalogId !== bi.gameCatalogId ||
+          // Tolkning A (2026-05-07): bonus-override-endring teller som dirty.
+          (ai.bonusGameOverride ?? null) !== (bi.bonusGameOverride ?? null)
+        ) {
           dirty = true;
           break;
         }
@@ -518,7 +528,13 @@ function wireSequenceBuilder(
       btn.addEventListener("click", () => {
         const id = btn.dataset.id;
         if (!id) return;
-        state.sequence.push({ gameCatalogId: id, notes: null });
+        // Tolkning A (2026-05-07): nye items har eksplisitt null-override
+        // (fallback til catalog).
+        state.sequence.push({
+          gameCatalogId: id,
+          bonusGameOverride: null,
+          notes: null,
+        });
         renderSequence();
         updateDirtyMarker();
       });
@@ -539,18 +555,35 @@ function wireSequenceBuilder(
         const entry = catalogById.get(it.gameCatalogId);
         const label = entry?.displayName ?? `(ukjent: ${it.gameCatalogId})`;
         const slug = entry?.slug ?? "";
+        const bonusSelected = it.bonusGameOverride ?? "";
+        // Tolkning A (2026-05-07): "Ingen bonus" + 4 bonus-slugs.
+        const bonusOptions = [
+          `<option value=""${bonusSelected === "" ? " selected" : ""}>Ingen bonus</option>`,
+          ...BONUS_GAME_SLUG_VALUES.map(
+            (s) =>
+              `<option value="${escapeHtml(s)}"${
+                bonusSelected === s ? " selected" : ""
+              }>${escapeHtml(BONUS_GAME_DISPLAY_NAMES[s])}</option>`,
+          ),
+        ].join("");
         return `
           <div class="seq-item" draggable="true" data-index="${idx}"
-            style="padding:8px 12px;margin-bottom:4px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:move;display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;align-items:center">
-              <i class="fa fa-bars" style="margin-right:12px;color:#888" title="Dra"></i>
+            style="padding:8px 12px;margin-bottom:4px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:move;display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div style="display:flex;align-items:center;flex:1;min-width:0">
+              <i class="fa fa-bars" style="margin-right:12px;color:#888;flex-shrink:0" title="Dra"></i>
               <span style="display:inline-block;min-width:24px;color:#888;font-weight:bold">${idx + 1}.</span>
-              <strong>${escapeHtml(label)}</strong>
-              <small style="margin-left:8px;color:#888"><code>${escapeHtml(slug)}</code></small>
+              <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(label)}</strong>
+              <small style="margin-left:8px;color:#888;flex-shrink:0"><code>${escapeHtml(slug)}</code></small>
             </div>
+            <select class="form-control input-sm seq-bonus-select"
+              data-index="${idx}"
+              title="Bonus-spill for denne posisjonen"
+              style="width:auto;min-width:140px;flex-shrink:0">
+              ${bonusOptions}
+            </select>
             <button type="button" class="btn btn-danger btn-xs"
               data-action="remove-from-sequence" data-index="${idx}"
-              title="Fjern">
+              title="Fjern" style="flex-shrink:0">
               <i class="fa fa-times"></i>
             </button>
           </div>`;
@@ -568,6 +601,25 @@ function wireSequenceBuilder(
           if (idx < 0 || idx >= state.sequence.length) return;
           state.sequence.splice(idx, 1);
           renderSequence();
+          updateDirtyMarker();
+        });
+      });
+
+    // Tolkning A (2026-05-07): wire bonus-dropdown change.
+    sequenceList
+      .querySelectorAll<HTMLSelectElement>(".seq-bonus-select")
+      .forEach((sel) => {
+        sel.addEventListener("change", () => {
+          const idx = Number(sel.dataset.index ?? -1);
+          if (idx < 0 || idx >= state.sequence.length) return;
+          const value = sel.value;
+          const item = state.sequence[idx];
+          if (!item) return;
+          if (value === "") {
+            item.bonusGameOverride = null;
+          } else {
+            item.bonusGameOverride = value as BonusGameSlug;
+          }
           updateDirtyMarker();
         });
       });

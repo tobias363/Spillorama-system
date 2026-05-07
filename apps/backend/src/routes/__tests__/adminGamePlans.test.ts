@@ -162,6 +162,7 @@ async function startServer(
           planId: id,
           position: idx + 1,
           gameCatalogId: it.gameCatalogId,
+          bonusGameOverride: it.bonusGameOverride ?? null,
           notes: it.notes ?? null,
           createdAt: "2026-05-07T10:00:00Z",
           catalogEntry: entry,
@@ -234,6 +235,7 @@ async function startServer(
           planId: id,
           position: idx + 1,
           gameCatalogId: it.gameCatalogId,
+          bonusGameOverride: it.bonusGameOverride ?? null,
           notes: it.notes ?? null,
           createdAt: "2026-05-07T10:00:00Z",
           catalogEntry: entry,
@@ -555,6 +557,64 @@ test("Fase 2 plans: GET ukjent id gir GAME_PLAN_NOT_FOUND", async () => {
     );
     assert.equal(res.status, 400);
     assert.equal(res.json.error.code, "GAME_PLAN_NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── Tolkning A (2026-05-07): per-item bonus-override ────────────────────
+
+test("Tolkning A plans: PUT /items godtar og forwarder bonusGameOverride", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makePlan({ id: "plan-1", name: "P", hallId: "hall-a" })],
+    [makeCatalogEntry("cat-bingo", "bingo")],
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/admin/game-plans/plan-1/items",
+      "admin-tok",
+      {
+        items: [
+          { gameCatalogId: "cat-bingo", bonusGameOverride: "wheel_of_fortune" },
+          { gameCatalogId: "cat-bingo", bonusGameOverride: null },
+          { gameCatalogId: "cat-bingo" },
+        ],
+      },
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.items.length, 3);
+    assert.equal(res.json.ok, true);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Tolkning A plans: PUT /items avviser bonusGameOverride som ikke er streng/null", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makePlan({ id: "plan-1", name: "P", hallId: "hall-a" })],
+    [makeCatalogEntry("cat-bingo", "bingo")],
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "PUT",
+      "/api/admin/game-plans/plan-1/items",
+      "admin-tok",
+      {
+        items: [
+          {
+            gameCatalogId: "cat-bingo",
+            bonusGameOverride: 42,
+          },
+        ],
+      },
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
   } finally {
     await ctx.close();
   }

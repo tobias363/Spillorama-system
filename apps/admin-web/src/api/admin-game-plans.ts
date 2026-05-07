@@ -26,6 +26,31 @@ export const WEEKDAY_VALUES = [
 ] as const;
 export type Weekday = (typeof WEEKDAY_VALUES)[number];
 
+/**
+ * Tolkning A (2026-05-07): bonus-spill-whitelist matcher backend
+ * `BONUS_GAME_SLUG_VALUES` i `apps/backend/src/game/gameCatalog.types.ts`.
+ *
+ * Display-mapping (norsk):
+ *   wheel_of_fortune → "Lykkehjul"
+ *   color_draft      → "Fargekladd"
+ *   treasure_chest   → "Skattekiste"
+ *   mystery          → "Mystery Joker"
+ */
+export const BONUS_GAME_SLUG_VALUES = [
+  "mystery",
+  "wheel_of_fortune",
+  "treasure_chest",
+  "color_draft",
+] as const;
+export type BonusGameSlug = (typeof BONUS_GAME_SLUG_VALUES)[number];
+
+export const BONUS_GAME_DISPLAY_NAMES: Record<BonusGameSlug, string> = {
+  mystery: "Mystery Joker",
+  wheel_of_fortune: "Lykkehjul",
+  treasure_chest: "Skattekiste",
+  color_draft: "Fargekladd",
+};
+
 // ── Typer ───────────────────────────────────────────────────────────────
 
 export interface GamePlan {
@@ -49,6 +74,11 @@ export interface GamePlanItem {
   planId: string;
   position: number;
   gameCatalogId: string;
+  /**
+   * Tolkning A (2026-05-07): per-item bonus-spill-override.
+   * NULL = bruk catalog.bonusGameSlug. Ikke-NULL = overstyrer.
+   */
+  bonusGameOverride: BonusGameSlug | null;
   notes: string | null;
   createdAt: string;
   catalogEntry: GameCatalogEntry;
@@ -82,6 +112,11 @@ export interface UpdateGamePlanInput {
 
 export interface SetGamePlanItemInput {
   gameCatalogId: string;
+  /**
+   * Tolkning A (2026-05-07): per-item bonus-spill-override.
+   * Whitelisted slug eller null. undefined = ikke send.
+   */
+  bonusGameOverride?: BonusGameSlug | null;
   notes?: string | null;
 }
 
