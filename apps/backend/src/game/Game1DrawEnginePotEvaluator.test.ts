@@ -49,7 +49,10 @@ test("perColor: én vinner, én farge, ingen jackpot → totalPhasePrize går ti
   assert.equal(result.get("hall-a"), 500_00);
 });
 
-test("perColor: 2 vinnere samme farge → split 50/50 (floor)", () => {
+test("perColor: 2 vinnere samme farge → hver får full prize (Tolkning A, ingen split)", () => {
+  // Per-vinner-per-farge (PM 2026-05-08): begge får 1001_00 hver, IKKE
+  // floor(1001_00 / 2). Helper-en returnerer ordinær for firstWinner i
+  // hallen — som under ny semantikk er full per-color prize.
   const winners = [
     w({ userId: "u-1", hallId: "hall-a", ticketColor: "yellow" }),
     w({ userId: "u-2", hallId: "hall-a", ticketColor: "yellow", assignmentId: "a-2" }),
@@ -62,8 +65,7 @@ test("perColor: 2 vinnere samme farge → split 50/50 (floor)", () => {
     patternsForColor: () => ({ totalPhasePrizeCents: 1001_00 }),
     jackpotForColor: () => 0,
   });
-  // 1001_00 / 2 = 500_50 → floor = 500 kr-50-øre
-  assert.equal(result.get("hall-a"), Math.floor(1001_00 / 2));
+  assert.equal(result.get("hall-a"), 1001_00);
 });
 
 test("perColor: jackpot legges til firstWinner-farge", () => {

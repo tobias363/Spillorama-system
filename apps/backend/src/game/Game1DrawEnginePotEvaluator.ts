@@ -63,20 +63,21 @@ export interface RunAccumulatingPotEvaluationParams {
 }
 
 /**
- * Agent IJ2 — beregn ordinær premie (i øre) for hver hall's firstWinner.
- * Bruker samme split-logikk som `Game1PayoutService.payoutPhase` for å
- * matche wallet-credit-beløpet som utbetales til firstWinner før pot-
- * evaluering. Pot-er med `capType='total'` bruker dette for å trimme
+ * Agent IJ2 / Tolkning A (2026-05-08) — beregn ordinær premie (i øre)
+ * for hver hall's firstWinner. Bruker samme per-vinner-per-farge-logikk
+ * som `Game1PayoutService.payoutPhase` mottar fra `payoutPerColorGroups`,
+ * for å matche wallet-credit-beløpet som utbetales til firstWinner før
+ * pot-evaluering. Pot-er med `capType='total'` bruker dette for å trimme
  * pot-payout slik at ordinær + pot ≤ maxAmountCents.
  *
- * `ordinaryWinCents` for firstWinner(hall) =
- *   prizePerWinner(hall-group) + jackpotPerWinner(hall-group)
+ * **Per-vinner-per-farge-semantikk** (PM-bekreftet 2026-05-08):
+ *   `ordinaryWinCents` for firstWinner(hall) =
+ *     prizeCentsForColor(firstWinner.ticketColor) +
+ *     jackpotForColor(firstWinner.ticketColor)
  *
- * Hvor `hall-group` er samme gruppering som caller bruker til payoutPhase:
- *   - per-color-path: gruppe = ticketColor → totalPhasePrizeCents(color) /
- *     groupWinners.length + jackpotAmountCents(color)
- *   - flat-path: alle winners deler én pott → totalPhasePrizeCents /
- *     winners.length + per-winner jackpot (firstWinner's farge)
+ * Hver vinner får sin egen farges full auto-multiplikatert prize —
+ * INGEN intra-color split. To vinnere på samme farge får samme prize
+ * (ikke pot/2). Se `payoutPerColorGroups` for full begrunnelse.
  *
  * Returnerer en Map keyed på hallId. Halls uten vinner får ikke en entry.
  *
@@ -99,15 +100,6 @@ export function computeOrdinaryWinCentsByHallPerColor(args: {
   const { winners } = args;
   if (winners.length === 0) return new Map();
 
-  // Gruppe-key for split = ticketColor (matcher payoutPerColorGroups).
-  const groupSizeByColor = new Map<string, number>();
-  for (const w of winners) {
-    groupSizeByColor.set(
-      w.ticketColor,
-      (groupSizeByColor.get(w.ticketColor) ?? 0) + 1
-    );
-  }
-
   // firstWinner per hall — array-orden (matcher PotEvaluator).
   const firstWinnerPerHall = new Map<
     string,
@@ -122,14 +114,13 @@ export function computeOrdinaryWinCentsByHallPerColor(args: {
   const result = new Map<string, number>();
   for (const [hallId, firstWinner] of firstWinnerPerHall) {
     const color = firstWinner.ticketColor;
-    const groupSize = groupSizeByColor.get(color) ?? 1;
     let ordinary = 0;
     try {
       const patterns = args.patternsForColor(color);
       if (patterns) {
-        // Floor-split (matcher Game1PayoutService.payoutPhase).
-        const perWinner = Math.floor(patterns.totalPhasePrizeCents / groupSize);
-        ordinary += Math.max(0, perWinner);
+        // Per-vinner-per-farge: full prize per vinner, INGEN intra-color
+        // split. Tolkning A (PM 2026-05-08).
+        ordinary += Math.max(0, patterns.totalPhasePrizeCents);
       }
       ordinary += Math.max(0, args.jackpotForColor(color));
     } catch {

@@ -155,16 +155,22 @@ function runningStateRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// ── Test 1: Per-farge fixed-beløp — to vinnere, global pot deles ────────
+// ── Test 1: Per-farge fixed-beløp — hver vinner får sin farges prize ───
 //
-// NB (post PR #653 — Q3=X global pot): Tidligere antok denne testen at
-// hver farge fikk sin egen pot-pattern (Alice 100, Bob 50). Etter PR #653
-// (`fix(backend): Spill 1 Q3 global pot per phase (regulatorisk pilot-fix)`)
-// brukes første vinners farge-pattern som GLOBAL pot, og alle vinnere
-// deler likt uansett farge. Med Alice's pattern = 100 kr og 2 vinnere
-// får begge 50 kr hver.
+// NB (post 2026-05-08 — Tolkning A per-vinner per farge):
+//   Tobias bekreftet 2026-05-08 at multi-vinner-regelen er per-vinner per
+//   bongfarge, IKKE pot-deling. Tidligere implementasjon (PR #653 Q3=X)
+//   brukte firstColor's pattern som global pot. Det var feil.
+//
+//   Fix-en (`fix/bridge-row-payout-auto-mult-2026-05-08` engine-pathen):
+//   hver vinner får sin egen farges auto-multiplikatert prize.
+//
+//   Med Alice's pattern = 100 kr (small_white) og Bob's pattern = 50 kr
+//   (small_yellow): Alice får 100 kr, Bob får 50 kr.
+//
+//   Doc: docs/architecture/SPILL_REGLER_OG_PAYOUT.md §9
 
-test("perColorConfig: game_config_json med spill1.ticketColors → global pot fra første vinners farge-matrise (PR #653 Q3=X)", async () => {
+test("perColorConfig: game_config_json med spill1.ticketColors → per-vinner per-farge (Tolkning A 2026-05-08)", async () => {
   const { adapter: wallet, credits } = makeFakeWallet();
   const payoutService = new Game1PayoutService({
     walletAdapter: wallet,
@@ -266,15 +272,17 @@ test("perColorConfig: game_config_json med spill1.ticketColors → global pot fr
 
   await service.drawNext("g1");
 
-  // Per Q3=X (PR #653): global pot = Alice's farge-pattern = 100 kr.
-  // 2 vinnere deler likt → 50 kr hver, uavhengig av Bob's egen farge-matrise.
+  // Per Tolkning A (PM 2026-05-08): hver vinner får sin EGEN farges
+  // pattern-amount, IKKE pot-deling.
+  //   Alice (small_white) → row_1 = 100 kr (full prize, ikke split)
+  //   Bob   (small_yellow) → row_1 = 50 kr (full prize, ikke split)
   assert.equal(credits.length, 2, "to vinnere → to wallet-credit-kall");
   const alice = credits.find((c) => c.accountId === "w-alice");
   const bob = credits.find((c) => c.accountId === "w-bob");
   assert.ok(alice, "Alice skal ha credit");
   assert.ok(bob, "Bob skal ha credit");
-  assert.equal(alice!.amount, 50, "Alice → 50 kr (global pot 100 / 2 vinnere)");
-  assert.equal(bob!.amount, 50, "Bob → 50 kr (global pot 100 / 2 vinnere, uavhengig av egen farge)");
+  assert.equal(alice!.amount, 100, "Alice → 100 kr (sin small_white row_1, full prize)");
+  assert.equal(bob!.amount, 50, "Bob → 50 kr (sin small_yellow row_1, full prize)");
 });
 
 // ── Test 2: Bakoverkompat — game_config_json=null → flat-path ──────────
