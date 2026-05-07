@@ -75,7 +75,7 @@ export function createAdminHallReportsRouter(deps: AdminHallReportsRouterDeps): 
   async function requirePermission(req: express.Request, permission: AdminPermission): Promise<PublicAppUser> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     return user;
   }
 

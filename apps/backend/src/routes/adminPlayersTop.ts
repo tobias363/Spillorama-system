@@ -67,7 +67,7 @@ export function createAdminPlayersTopRouter(deps: AdminPlayersTopRouterDeps): ex
   async function requireUser(req: express.Request): Promise<PublicAppUser> {
     const accessToken = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(accessToken);
-    assertAdminPermission(user.role, "DAILY_REPORT_READ");
+    assertAdminPermission(user, "DAILY_REPORT_READ");
     return user;
   }
 

@@ -470,6 +470,20 @@ export function getAdminPermissionMap(role: UserRole): Record<AdminPermission, b
  *   - hvis ikke → kaster FORBIDDEN
  *
  * Hvis user-objekt uten `_systemAccount`: faller tilbake til role-sjekk.
+ *
+ * PR-D (2026-05-07): Alle ~75 produksjonscallsites er migrert til object-form.
+ * String-form er nå DEPRECATED for nye route/socket-callsites — den lekker
+ * bypass av SystemAccount-permission-whitelist og hall-scope-håndhevelse.
+ *
+ * String-form aksepteres fortsatt fordi:
+ *   - Den finnes brukt i tester (`AdminAccessPolicy.test.ts`,
+ *     `admin-all-permissions.test.ts`) som tester rolle-baserte regler isolert.
+ *   - Eldre helpers kan fortsatt sende `role: AppRole` direkte fra eksterne
+ *     kilder hvor det ikke finnes et tilgjengelig user-objekt.
+ *
+ * Nye route/socket-handlers SKAL bruke object-form: pass hele user-objektet
+ * (`PublicAppUser`), ikke `user.role`. Object-form håndhever automatisk
+ * SystemAccount-whitelist for `sa_*`-keys.
  */
 type AssertableUser =
   | UserRole
@@ -488,6 +502,8 @@ export function assertAdminPermission(
   message?: string
 ): void {
   // String-form: bevarer eldre semantikk (ingen system-account-sjekk).
+  // DEPRECATED for nye route/socket-callsites — bruk object-form i stedet
+  // (pass hele user-objektet, ikke `user.role`). Se kommentar over.
   if (typeof roleOrUser === "string") {
     if (canAccessAdminPermission(roleOrUser, permission)) {
       return;

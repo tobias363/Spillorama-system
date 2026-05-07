@@ -85,7 +85,7 @@ export function createAdminAgentsRouter(deps: AdminAgentsRouterDeps): express.Ro
   ): Promise<{ id: string; role: UserRole; hallId: string | null }> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     return { id: user.id, role: user.role, hallId: user.hallId };
   }
 

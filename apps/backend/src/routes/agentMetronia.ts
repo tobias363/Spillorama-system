@@ -82,7 +82,7 @@ export function createAgentMetroniaRouter(deps: AgentMetroniaRouterDeps): expres
   ): Promise<{ userId: string; role: UserRole }> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     if (user.role === "AGENT") {
       await agentService.requireActiveAgent(user.id);
     }

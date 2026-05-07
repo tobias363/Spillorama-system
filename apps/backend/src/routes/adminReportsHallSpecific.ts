@@ -78,7 +78,7 @@ export function createAdminReportsHallSpecificRouter(
   async function requireUser(req: express.Request): Promise<PublicAppUser> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, "DAILY_REPORT_READ");
+    assertAdminPermission(user, "DAILY_REPORT_READ");
     return user;
   }
 

@@ -100,7 +100,7 @@ export function createAdminSmsBroadcastRouter(
   async function requireAdmin(req: express.Request): Promise<PublicAppUser> {
     const token = getAccessTokenFromRequest(req);
     const user = await deps.platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission, "Ikke tilgang til SMS-broadcast.");
+    assertAdminPermission(user, permission, "Ikke tilgang til SMS-broadcast.");
     return user;
   }
 

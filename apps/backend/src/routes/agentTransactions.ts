@@ -108,7 +108,7 @@ export function createAgentTransactionsRouter(deps: AgentTransactionsRouterDeps)
   ): Promise<{ userId: string; role: UserRole }> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     // For AGENT-rollen: sjekk også at kontoen er aktiv.
     if (user.role === "AGENT") {
       await agentService.requireActiveAgent(user.id);

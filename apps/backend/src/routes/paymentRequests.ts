@@ -391,7 +391,7 @@ export function createPaymentRequestsRouter(
     message?: string
   ): Promise<PublicAppUser> {
     const user = await getAuthenticatedUser(req);
-    assertAdminPermission(user.role, permission, message);
+    assertAdminPermission(user, permission, message);
     return user;
   }
 
