@@ -48,6 +48,27 @@ export interface AppUser {
 
 export interface PublicAppUser extends AppUser {
   balance: number;
+  /**
+   * PR-B (2026-05-07): satt når brukeren er en SystemAccount (sa_-token)
+   * i stedet for en JWT-session. Når satt:
+   *   - `id` er satt til system-account-id (sa-...)
+   *   - `role` er fast "ADMIN" så eksisterende role-baserte permission-
+   *     gates passerer; permission-whitelist håndheves separat via
+   *     `assertAdminPermission` som leser `_systemAccount.permissions`.
+   *   - `hallId` er den første entry i `hallScope` hvis satt, ellers null.
+   *     Cross-hall hall-scope-håndheving må sjekke `_systemAccount.hallScope`
+   *     direkte (ikke `hallId`) for system-accounts.
+   *   - `email`/`displayName` er syntetiske (`<name>@system-account.local`).
+   *
+   * Felt-navnet starter med _underscore for å signalisere intern semantikk —
+   * det skal ikke serialiseres til klient i normale auth/me-svar.
+   */
+  _systemAccount?: {
+    accountId: string;
+    accountName: string;
+    permissions: string[];
+    hallScope: string[] | null;
+  };
 }
 
 export interface SessionInfo {
@@ -567,6 +588,17 @@ export class PlatformService {
     assertUserNotBlocked(userId: string): Promise<void>;
   };
 
+  /**
+   * PR-B (2026-05-07): hook for SystemAccountService.verify(). Settes via
+   * `setSystemAccountResolver()` etter at begge servicene er konstruert.
+   * Når satt og access-tokenet starter med `sa_`, ruter
+   * `getUserFromAccessToken` til denne i stedet for JWT-lookup.
+   *
+   * Resolveren returnerer en syntetisk PublicAppUser hvis keyen er gyldig,
+   * eller `null` ved ugyldig/revoked/inaktiv key.
+   */
+  private systemAccountResolver?: (apiKey: string) => Promise<PublicAppUser | null>;
+
   constructor(
     private readonly walletAdapter: WalletAdapter,
     options: PlatformServiceOptions
@@ -830,6 +862,18 @@ export class PlatformService {
     const token = accessToken.trim();
     if (!token) {
       throw new DomainError("UNAUTHORIZED", "Mangler access token.");
+    }
+
+    // PR-B (2026-05-07): sa_-prefiks ruter til SystemAccountService.verify().
+    // Resolveren returnerer en syntetisk PublicAppUser med role=ADMIN +
+    // _systemAccount-marker. Permission-whitelist håndheves i
+    // assertAdminPermission via _systemAccount.permissions.
+    if (token.startsWith("sa_") && this.systemAccountResolver) {
+      const resolved = await this.systemAccountResolver(token);
+      if (!resolved) {
+        throw new DomainError("UNAUTHORIZED", "Ugyldig eller revoked API-key.");
+      }
+      return resolved;
     }
 
     const { rows } = await this.pool.query<UserRow>(
@@ -3722,6 +3766,18 @@ export class PlatformService {
    */
   setProfileSettingsService(service: { assertUserNotBlocked(userId: string): Promise<void> }): void {
     this.profileSettingsService = service;
+  }
+
+  /**
+   * PR-B (2026-05-07): wire SystemAccountService.verify() into PlatformService
+   * etter at begge er konstruert. Idempotent — senere kall overskriver.
+   * Når satt: `getUserFromAccessToken` ruter `sa_`-tokens hit i stedet for
+   * JWT-DB-lookup. JWT-tokens (eyJ-prefix) håndteres uendret.
+   */
+  setSystemAccountResolver(
+    resolver: (apiKey: string) => Promise<PublicAppUser | null>
+  ): void {
+    this.systemAccountResolver = resolver;
   }
 
   /**
