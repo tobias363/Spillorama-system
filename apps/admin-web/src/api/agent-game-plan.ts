@@ -91,10 +91,33 @@ export interface AgentGamePlanCurrentResponse {
   isMaster: boolean;
 }
 
+/**
+ * Fase 4 (2026-05-07): /start og /advance returnerer `scheduledGameId` +
+ * `bridgeError` når engine-bridge er injisert i routeren. `scheduledGameId`
+ * er IDen til den nye `app_game1_scheduled_games`-raden som engine kan
+ * starte fra (status='ready_to_start'). Frontend bruker denne for å
+ * trigge legacy `/api/agent/game1/start` rett etter at planen er startet
+ * — bridgen oppretter raden, legacy-routen finner den via hallId og
+ * starter engine.
+ *
+ * `bridgeError` er en kort feilkode (eks `BRIDGE_FAILED`,
+ * `GAME_PLAN_RUN_CORRUPT`) når bridgen feilet på en måte som IKKE
+ * blokkerer plan-state-overgangen — frontend kan logge og velge å falle
+ * tilbake til legacy-flyt. `JACKPOT_SETUP_REQUIRED` og `HALL_NOT_IN_GROUP`
+ * propageres som vanlige domain-errors, ikke i `bridgeError`.
+ */
+export interface AgentGamePlanStartResponse {
+  run: GamePlanRun;
+  scheduledGameId: string | null;
+  bridgeError: string | null;
+}
+
 export interface AgentGamePlanAdvanceResponse {
   run: GamePlanRun;
   nextGame: GameCatalogEntry | null;
   jackpotSetupRequired: boolean;
+  scheduledGameId: string | null;
+  bridgeError: string | null;
 }
 
 // ── GET /current ────────────────────────────────────────────────────────
@@ -111,8 +134,8 @@ export async function fetchAgentGamePlanCurrent(
 
 // ── POST /start ─────────────────────────────────────────────────────────
 
-export async function startAgentGamePlan(): Promise<{ run: GamePlanRun }> {
-  return apiRequest<{ run: GamePlanRun }>(
+export async function startAgentGamePlan(): Promise<AgentGamePlanStartResponse> {
+  return apiRequest<AgentGamePlanStartResponse>(
     "/api/agent/game-plan/start",
     { method: "POST", auth: true, body: {} },
   );

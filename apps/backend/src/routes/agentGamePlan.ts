@@ -516,10 +516,20 @@ export function createAgentGamePlanRouter(
       }
       const drawRaw = body.draw;
       const draw = Number(drawRaw);
-      if (!Number.isFinite(draw) || !Number.isInteger(draw) || draw < 1) {
+      // Hotfix 2 (2026-05-07): Spill 1 trekker maks 90 baller, så `draw`
+      // ≥ 91 er garantert ugyldig. Service-laget fanger fortsatt dette
+      // senere via catalog-validering, men validering her fanger feilen
+      // før vi runtripper til DB. Tester på service-laget verifiserer at
+      // også >90 fanges hvis admin har catalog med færre baller.
+      if (
+        !Number.isFinite(draw) ||
+        !Number.isInteger(draw) ||
+        draw < 1 ||
+        draw > 90
+      ) {
         throw new DomainError(
           "INVALID_INPUT",
-          "draw må være positivt heltall.",
+          "draw må være heltall mellom 1 og 90.",
         );
       }
       if (
