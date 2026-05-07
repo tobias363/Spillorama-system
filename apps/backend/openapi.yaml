@@ -46,6 +46,23 @@ tags:
     description: Admin login, bootstrap, RBAC
   - name: Admin — Games
     description: Game settings, rooms, draw control
+  - name: Admin — Game Catalog
+    description: |
+      Spillkatalog (master-data) for spilleplan-redesign 2026-05-07. CRUD
+      av kataloog-spill med rules (variant/auto-multiplier/explicit), bong-
+      farger og priser, premier per fase i øre, og bonus-spill-konfigurasjon.
+      Brukes som master-data for `Admin — Game Plans`.
+  - name: Admin — Game Plans
+    description: |
+      Spilleplaner (templates) for spilleplan-redesign 2026-05-07. Plan-
+      meta (navn, hall/group, ukedager, tidsvindu) + atomisk drag-and-drop
+      av items-listen med per-item bonus-override.
+  - name: Agent — Game Plan
+    description: |
+      Master-hall-runtime for spilleplan-redesign 2026-05-07. Hent gjeldende
+      plan + currentItem + jackpotSetupRequired-flagg, start/advance posisjon,
+      submit jackpot-popup-override, pause/resume. Master-only — kun agentens
+      egen hall via GAME1_MASTER_WRITE.
   - name: Admin — Halls
     description: Hall and terminal management, spilleplan
   - name: Admin — Compliance
@@ -916,6 +933,678 @@ components:
         resolvedAt:
           type: [string, "null"]
           format: date-time
+
+    # ── Game Catalog + Game Plans (spilleplan-redesign 2026-05-07) ────────
+
+    TicketColor:
+      type: string
+      enum: [gul, hvit, lilla]
+      description: |
+        Bongfarge-whitelist (Tobias bekreftet 3 farger 2026-05-07). Brukes
+        både i `GameCatalogEntry.ticketColors`/`ticketPricesCents` og i
+        jackpot-overrides på agent-runtime.
+
+    BonusGameSlug:
+      type: string
+      enum: [mystery, wheel_of_fortune, treasure_chest, color_draft]
+      description: |
+        Bonus-spill-whitelist. Slug `mystery` rendres som "Mystery Joker" i
+        UI via `BONUS_GAME_DISPLAY_NAMES`-mapping.
+
+    PrizeMultiplierMode:
+      type: string
+      enum: [auto, explicit_per_color]
+      description: |
+        Premie-modus per katalog-spill.
+        - `auto`: billigste bong (5 kr = 500 øre) får base-premie. Dyrere
+          bonger får `base × (ticketPrice / 500)`. Bingo-premien er et
+          skalar `bingoBase`. Standard for nye hovedspill.
+        - `explicit_per_color`: flat pris per bong + eksplisitt gevinst per
+          bongfarge. Brukes for spesialspill som Trafikklys / Oddsen.
+
+    PrizesCents:
+      type: object
+      required: [rad1, rad2, rad3, rad4, bingo]
+      description: |
+        Premier per fase i øre (cents). For `auto`-modus skal `bingoBase`
+        settes (skalar i øre — multiplisert opp for dyrere bonger). For
+        `explicit_per_color`-modus skal `bingo` ha per-farge-lookup.
+      properties:
+        rad1:
+          type: integer
+          minimum: 0
+          description: Rad 1-premie i øre.
+        rad2:
+          type: integer
+          minimum: 0
+          description: Rad 2-premie i øre.
+        rad3:
+          type: integer
+          minimum: 0
+          description: Rad 3-premie i øre.
+        rad4:
+          type: integer
+          minimum: 0
+          description: Rad 4-premie i øre.
+        bingoBase:
+          type: integer
+          minimum: 0
+          description: |
+            Base bingo-premie i øre for `auto`-modus (billigste bong = 500
+            øre). NULL/utelatt for `explicit_per_color`.
+        bingo:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+          description: |
+            Per-farge bingo-lookup for `explicit_per_color`-modus. Keys må
+            matche `ticketColors`-listen og `TicketColor`-enum (`gul`,
+            `hvit`, `lilla`). Beholdes også for backwards-compat i auto-modus.
+
+    GameCatalogEntry:
+      type: object
+      required:
+        [
+          id,
+          slug,
+          displayName,
+          rules,
+          ticketColors,
+          ticketPricesCents,
+          prizesCents,
+          prizeMultiplierMode,
+          bonusGameEnabled,
+          requiresJackpotSetup,
+          isActive,
+          sortOrder,
+          createdAt,
+          updatedAt,
+        ]
+      description: |
+        Master-data-rad for et katalog-spill. Speiler `app_game_catalog`-
+        tabellen 1:1. Ticket-priser og premier kommer i ØRE (cents) over
+        wire — admin-UI konverterer til/fra kr.
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+          description: Unik slug (lowercase, kebab-case).
+        displayName:
+          type: string
+        description:
+          type: [string, "null"]
+        rules:
+          type: object
+          additionalProperties: true
+          description: |
+            Variant-spesifikk konfigurasjon. Kjente felter:
+            - `gameVariant` (string, optional): "standard" | "trafikklys" |
+              "oddsen". Default "standard".
+            - `prizesPerRowColor` (object, kun trafikklys): mapping fra
+              rad-farge → øre. Brukes ved fullt hus i Trafikklys.
+            - `targetDraw` (integer, kun oddsen): trekning hvor `bingoBaseHigh`
+              gjelder; ellers `bingoBaseLow`.
+            - `bingoBaseHigh` / `bingoBaseLow` (integer øre, kun oddsen).
+            Engine-bridge i Fase 4 håndterer `auto`-modus + standard
+            `explicit_per_color` — Trafikklys/Oddsen-mekanikker er flagget
+            som gjenstående arbeid (PM_HANDOFF_2026-05-07 §1).
+        ticketColors:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketColor"
+        ticketPricesCents:
+          type: object
+          description: |
+            Per-bongfarge-pris i øre. Keys må være i `TicketColor`-enum.
+          additionalProperties:
+            type: integer
+            minimum: 1
+        prizesCents:
+          $ref: "#/components/schemas/PrizesCents"
+        prizeMultiplierMode:
+          $ref: "#/components/schemas/PrizeMultiplierMode"
+        bonusGameSlug:
+          oneOf:
+            - $ref: "#/components/schemas/BonusGameSlug"
+            - type: "null"
+          description: Standard bonus-spill for katalogen (kan overstyres per item).
+        bonusGameEnabled:
+          type: boolean
+        requiresJackpotSetup:
+          type: boolean
+          description: |
+            Hvis true, trigger agent-runtime `jackpotSetupRequired`-flagget
+            før denne posisjonen kan kjøres. Master må submitte popup via
+            `POST /api/agent/game-plan/jackpot-setup`.
+        isActive:
+          type: boolean
+        sortOrder:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdByUserId:
+          type: [string, "null"]
+
+    GameCatalogEntryInput:
+      type: object
+      required: [slug, displayName, prizesCents]
+      description: |
+        Body for `POST /api/admin/game-catalog`. `id`, `createdAt`,
+        `updatedAt`, `createdByUserId` settes server-side.
+      properties:
+        slug:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: [string, "null"]
+        rules:
+          type: object
+          additionalProperties: true
+        ticketColors:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketColor"
+        ticketPricesCents:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1
+        prizesCents:
+          $ref: "#/components/schemas/PrizesCents"
+        prizeMultiplierMode:
+          $ref: "#/components/schemas/PrizeMultiplierMode"
+        bonusGameSlug:
+          oneOf:
+            - $ref: "#/components/schemas/BonusGameSlug"
+            - type: "null"
+        bonusGameEnabled:
+          type: boolean
+        requiresJackpotSetup:
+          type: boolean
+        isActive:
+          type: boolean
+        sortOrder:
+          type: integer
+          minimum: 0
+
+    GameCatalogEntryUpdateInput:
+      type: object
+      description: |
+        Partial patch for `PUT /api/admin/game-catalog/{id}`. Kun felter
+        som er satt blir oppdatert.
+      properties:
+        slug:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: [string, "null"]
+        rules:
+          type: object
+          additionalProperties: true
+        ticketColors:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketColor"
+        ticketPricesCents:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1
+        prizesCents:
+          $ref: "#/components/schemas/PrizesCents"
+        prizeMultiplierMode:
+          $ref: "#/components/schemas/PrizeMultiplierMode"
+        bonusGameSlug:
+          oneOf:
+            - $ref: "#/components/schemas/BonusGameSlug"
+            - type: "null"
+        bonusGameEnabled:
+          type: boolean
+        requiresJackpotSetup:
+          type: boolean
+        isActive:
+          type: boolean
+        sortOrder:
+          type: integer
+          minimum: 0
+
+    Weekday:
+      type: string
+      enum: [mon, tue, wed, thu, fri, sat, sun]
+      description: |
+        Ukedag-whitelist (matcher `Game1ScheduleTickService.WEEKDAY_VALUES`).
+
+    GamePlan:
+      type: object
+      required:
+        [id, name, weekdays, startTime, endTime, isActive, createdAt, updatedAt]
+      description: |
+        Spilleplan-template (uten items — items hentes via detail-endpoint
+        eller via `PUT /items`). Speiler `app_game_plan`-tabellen 1:1.
+        XOR mellom `hallId` og `groupOfHallsId` — service-laget håndhever
+        at maks én er satt.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: [string, "null"]
+        hallId:
+          type: [string, "null"]
+        groupOfHallsId:
+          type: [string, "null"]
+        weekdays:
+          type: array
+          items:
+            $ref: "#/components/schemas/Weekday"
+        startTime:
+          type: string
+          example: "18:00"
+          description: '"HH:MM" 24-timersformat (Oslo-tz).'
+        endTime:
+          type: string
+          example: "23:00"
+          description: '"HH:MM" 24-timersformat (Oslo-tz).'
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdByUserId:
+          type: [string, "null"]
+
+    GamePlanItem:
+      type: object
+      required: [id, planId, position, gameCatalogId, catalogEntry, createdAt]
+      description: |
+        Ett item i en plan-sekvens. `catalogEntry` er resolved inline ved
+        detail/items-respons så frontend slipper ekstra round-trip.
+      properties:
+        id:
+          type: string
+        planId:
+          type: string
+        position:
+          type: integer
+          minimum: 1
+          description: 1-indeksert posisjon i sekvensen.
+        gameCatalogId:
+          type: string
+        catalogEntry:
+          $ref: "#/components/schemas/GameCatalogEntry"
+        bonusGameOverride:
+          oneOf:
+            - $ref: "#/components/schemas/BonusGameSlug"
+            - type: "null"
+          description: |
+            Per-item bonus-spill-override (Tolkning A, 2026-05-07). NULL =
+            ingen override — engine-bridge faller tilbake til
+            `catalog.bonusGameSlug`. Ikke-NULL overstyrer katalog.
+        notes:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    GamePlanWithItems:
+      allOf:
+        - $ref: "#/components/schemas/GamePlan"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/GamePlanItem"
+
+    GamePlanInput:
+      type: object
+      required: [name, weekdays, startTime, endTime]
+      description: |
+        Body for `POST /api/admin/game-plans`. Items legges inn separat via
+        `PUT /api/admin/game-plans/{id}/items`. XOR mellom `hallId` og
+        `groupOfHallsId` håndheves i service-laget.
+      properties:
+        name:
+          type: string
+        description:
+          type: [string, "null"]
+        hallId:
+          type: [string, "null"]
+        groupOfHallsId:
+          type: [string, "null"]
+        weekdays:
+          type: array
+          items:
+            $ref: "#/components/schemas/Weekday"
+        startTime:
+          type: string
+        endTime:
+          type: string
+        isActive:
+          type: boolean
+
+    GamePlanUpdateInput:
+      type: object
+      description: |
+        Partial patch for `PUT /api/admin/game-plans/{id}`. Kun felter som
+        er satt blir oppdatert. Items oppdateres via egen `/items`-endpoint.
+      properties:
+        name:
+          type: string
+        description:
+          type: [string, "null"]
+        hallId:
+          type: [string, "null"]
+        groupOfHallsId:
+          type: [string, "null"]
+        weekdays:
+          type: array
+          items:
+            $ref: "#/components/schemas/Weekday"
+        startTime:
+          type: string
+        endTime:
+          type: string
+        isActive:
+          type: boolean
+
+    GamePlanItemInput:
+      type: object
+      required: [gameCatalogId]
+      description: |
+        Ett item i `PUT /api/admin/game-plans/{id}/items`-payload. Posisjon
+        er implisitt rekkefølge i `items`-arrayet — ingen eksplisitt
+        `position`-felt. Drag-and-drop save sender hele sekvensen atomisk.
+      properties:
+        gameCatalogId:
+          type: string
+        bonusGameOverride:
+          oneOf:
+            - $ref: "#/components/schemas/BonusGameSlug"
+            - type: "null"
+          description: |
+            Tolkning A (2026-05-07): valgfri streng eller null. Whitelist-
+            validering skjer i service-laget — ugyldig slug → INVALID_INPUT.
+        notes:
+          type: [string, "null"]
+
+    SetGamePlanItemsInput:
+      type: object
+      required: [items]
+      description: |
+        Body for `PUT /api/admin/game-plans/{id}/items` — REPLACE hele
+        sekvensen atomisk (drag-and-drop save).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GamePlanItemInput"
+
+    GamePlanRunStatus:
+      type: string
+      enum: [idle, running, paused, finished]
+
+    JackpotOverride:
+      type: object
+      required: [draw, prizesCents]
+      description: |
+        Master-submitted jackpot-popup-override for én plan-posisjon. `draw`
+        er trekningsnummer (1-90 for Spill 1) hvor jackpot-pattern slår inn;
+        `prizesCents` er per-bongfarge øre-beløp.
+      properties:
+        draw:
+          type: integer
+          minimum: 1
+          maximum: 90
+        prizesCents:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1
+          description: |
+            Per-bongfarge premie i øre. Keys må være i `TicketColor`-enum
+            (`gul`, `hvit`, `lilla`). Minst én key kreves.
+
+    GamePlanRun:
+      type: object
+      required:
+        [
+          id,
+          planId,
+          hallId,
+          businessDate,
+          currentPosition,
+          status,
+          jackpotOverrides,
+          createdAt,
+          updatedAt,
+        ]
+      description: |
+        Per-(hall, businessDate)-runtime-state for en aktiv plan. Speiler
+        `app_game_plan_run`-tabellen 1:1.
+      properties:
+        id:
+          type: string
+        planId:
+          type: string
+        hallId:
+          type: string
+        businessDate:
+          type: string
+          format: date
+          description: ISO-dato (YYYY-MM-DD) i Oslo-tidssone.
+        currentPosition:
+          type: integer
+          minimum: 0
+          description: |
+            0 = idle (ikke startet), 1+ = aktiv posisjon eller siste
+            ferdige posisjon (kombinert med `status=finished`).
+        status:
+          $ref: "#/components/schemas/GamePlanRunStatus"
+        jackpotOverrides:
+          type: object
+          description: |
+            Mapping fra posisjon (string-keyed for JSON-kompatibilitet) til
+            `JackpotOverride`. Eks: `{"3": {draw: 47, prizesCents: {gul: 50000}}}`.
+          additionalProperties:
+            $ref: "#/components/schemas/JackpotOverride"
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        masterUserId:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CurrentGamePlanResponse:
+      type: object
+      required:
+        [
+          hallId,
+          businessDate,
+          run,
+          plan,
+          items,
+          currentItem,
+          nextItem,
+          jackpotSetupRequired,
+          pendingJackpotOverride,
+          isMaster,
+        ]
+      description: |
+        Aggregert respons for `GET /api/agent/game-plan/current`. Hvis ingen
+        plan dekker (hall, ukedag) i dag, settes `run`/`plan`/`currentItem`/
+        `nextItem` til null og `items` til tom liste — frontend faller
+        tilbake til legacy-flyten via `useNewGamePlan=false`.
+      properties:
+        hallId:
+          type: string
+        businessDate:
+          type: string
+          format: date
+        run:
+          oneOf:
+            - $ref: "#/components/schemas/GamePlanRun"
+            - type: "null"
+        plan:
+          oneOf:
+            - $ref: "#/components/schemas/GamePlan"
+            - type: "null"
+          description: |
+            Plan-meta uten items (items returneres som top-level felt).
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, position, catalogEntry]
+            properties:
+              id:
+                type: string
+              position:
+                type: integer
+              notes:
+                type: [string, "null"]
+              catalogEntry:
+                $ref: "#/components/schemas/GameCatalogEntry"
+        currentItem:
+          oneOf:
+            - type: object
+              required: [id, position, catalogEntry]
+              properties:
+                id:
+                  type: string
+                position:
+                  type: integer
+                notes:
+                  type: [string, "null"]
+                catalogEntry:
+                  $ref: "#/components/schemas/GameCatalogEntry"
+            - type: "null"
+        nextItem:
+          oneOf:
+            - type: object
+              required: [id, position, catalogEntry]
+              properties:
+                id:
+                  type: string
+                position:
+                  type: integer
+                notes:
+                  type: [string, "null"]
+                catalogEntry:
+                  $ref: "#/components/schemas/GameCatalogEntry"
+            - type: "null"
+        jackpotSetupRequired:
+          type: boolean
+          description: |
+            True hvis `currentItem.catalogEntry.requiresJackpotSetup` og
+            ingen override er lagret i `run.jackpotOverrides[currentPosition]`.
+        pendingJackpotOverride:
+          oneOf:
+            - $ref: "#/components/schemas/JackpotOverride"
+            - type: "null"
+          description: |
+            Pre-fyll for popup hvis admin har satt override tidligere.
+        isMaster:
+          type: boolean
+          description: |
+            True hvis caller er master for planen (ADMIN, eller agentens
+            `hallId` matcher `plan.hallId`). Master-only POST-endpoints
+            avslår caller med `isMaster=false`.
+
+    JackpotSetupInput:
+      type: object
+      required: [position, draw, prizesCents]
+      description: |
+        Body for `POST /api/agent/game-plan/jackpot-setup`.
+      properties:
+        position:
+          type: integer
+          minimum: 1
+          description: Plan-posisjonen popup gjelder for.
+        draw:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: |
+            Trekningsnummer hvor jackpot-pattern slår inn. Spill 1 trekker
+            maks 90 baller — `draw` over 90 avvises (`INVALID_INPUT`).
+        prizesCents:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1
+          description: |
+            Per-bongfarge premie i øre. Keys må være i `TicketColor`-enum.
+            Minst én key kreves.
+
+    StartGamePlanResponse:
+      type: object
+      required: [run]
+      description: |
+        Respons for `POST /api/agent/game-plan/start`. Når engine-bridge er
+        injisert (Fase 4), inkluderer responsen `scheduledGameId` som master-
+        UI sender til `/api/agent/game1/start` for å kjøre engine.
+      properties:
+        run:
+          $ref: "#/components/schemas/GamePlanRun"
+        scheduledGameId:
+          type: [string, "null"]
+          description: |
+            Engine-bridge `app_game1_scheduled_games`-rad-id, eller null
+            hvis bridgen er deaktivert eller feilet (se `bridgeError`).
+        bridgeError:
+          type: [string, "null"]
+          description: |
+            DomainError-kode hvis bridgen feilet (eks. `BRIDGE_FAILED`).
+            `JACKPOT_SETUP_REQUIRED` og `HALL_NOT_IN_GROUP` propageres som
+            400-respons istedet — ikke i dette feltet.
+
+    AdvanceGamePlanResponse:
+      type: object
+      required: [run, jackpotSetupRequired]
+      description: |
+        Respons for `POST /api/agent/game-plan/advance`. Hvis nye posisjon
+        krever jackpot-popup, returneres `jackpotSetupRequired=true` og
+        `nextGame` (katalog-entry-en for nåværende posisjon) — caller MÅ
+        kalle `/jackpot-setup` før neste advance.
+      properties:
+        run:
+          $ref: "#/components/schemas/GamePlanRun"
+        nextGame:
+          oneOf:
+            - $ref: "#/components/schemas/GameCatalogEntry"
+            - type: "null"
+          description: |
+            Katalog-entry for nåværende posisjon etter advance, eller null
+            hvis run er `finished`.
+        jackpotSetupRequired:
+          type: boolean
+        scheduledGameId:
+          type: [string, "null"]
+        bridgeError:
+          type: [string, "null"]
 
 security:
   - BearerAuth: []
@@ -2798,6 +3487,788 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Admin — Game Catalog (spilleplan-redesign 2026-05-07) ─────────────────
+  #
+  # Master-data CRUD for katalog-spill. Brukes av `Admin — Game Plans` som
+  # peker på katalog-entries. RBAC:
+  #   - GAME_CATALOG_READ:  ADMIN, HALL_OPERATOR, SUPPORT, AGENT
+  #   - GAME_CATALOG_WRITE: ADMIN
+  # Audit: create/update/deactivate skriver til AuditLogService via
+  # GameCatalogService (samme mønster som adminGameTypes.ts).
+
+  /api/admin/game-catalog:
+    get:
+      tags: [Admin — Game Catalog]
+      summary: List katalog-spill (filter på isActive)
+      parameters:
+        - in: query
+          name: isActive
+          required: false
+          schema:
+            type: boolean
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+      responses:
+        "200":
+          description: Catalog list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [entries, count]
+                        properties:
+                          entries:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/GameCatalogEntry"
+                          count:
+                            type: integer
+        "403":
+          description: FORBIDDEN — caller mangler GAME_CATALOG_READ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags: [Admin — Game Catalog]
+      summary: Opprett nytt katalog-spill (krever GAME_CATALOG_WRITE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GameCatalogEntryInput"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GameCatalogEntry"
+        "400":
+          description: |
+            INVALID_INPUT — validation failure (manglende slug/displayName/
+            prizesCents, ugyldig ticket-color, ugyldig prize-multiplier-mode,
+            ugyldig bonus-game-slug, sortOrder negativt eller ikke-heltall).
+            GAME_CATALOG_SLUG_EXISTS — slug er allerede i bruk.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller mangler GAME_CATALOG_WRITE (kun ADMIN)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/admin/game-catalog/{id}:
+    get:
+      tags: [Admin — Game Catalog]
+      summary: Hent ett katalog-spill
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Catalog entry
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GameCatalogEntry"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_CATALOG_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      tags: [Admin — Game Catalog]
+      summary: Oppdater katalog-spill (partial patch, krever GAME_CATALOG_WRITE)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GameCatalogEntryUpdateInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GameCatalogEntry"
+        "400":
+          description: |
+            INVALID_INPUT — partial-patch validation failure.
+            GAME_CATALOG_SLUG_EXISTS — ny slug kolliderer med eksisterende rad.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_CATALOG_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      tags: [Admin — Game Catalog]
+      summary: Soft-deactivate katalog-spill (sets isActive=false)
+      description: |
+        Soft-delete: setter `isActive=false` slik at eksisterende plan-runs
+        fortsatt kan referere katalogen. Aktive plan-items kan fortsatt
+        peke på deaktiverte katalog-spill — admin må manuelt fjerne dem.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deactivated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [deactivated]
+                        properties:
+                          deactivated:
+                            type: boolean
+                            enum: [true]
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_CATALOG_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ── Admin — Game Plans (spilleplan-redesign 2026-05-07) ──────────────────
+  #
+  # CRUD av spilleplan-templates + atomic items-replace. RBAC:
+  #   - GAME_CATALOG_READ:  ADMIN, HALL_OPERATOR, SUPPORT, AGENT
+  #   - GAME_CATALOG_WRITE: ADMIN
+  # HALL_OPERATOR/AGENT auto-scopes til egen hall i list-filter via
+  # `resolveHallScopeFilter`.
+
+  /api/admin/game-plans:
+    get:
+      tags: [Admin — Game Plans]
+      summary: List spilleplaner (filter hallId/groupOfHallsId/isActive)
+      parameters:
+        - in: query
+          name: hallId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: groupOfHallsId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: isActive
+          required: false
+          schema:
+            type: boolean
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+      responses:
+        "200":
+          description: Plan list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [plans, count]
+                        properties:
+                          plans:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/GamePlan"
+                          count:
+                            type: integer
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags: [Admin — Game Plans]
+      summary: Opprett ny spilleplan-template (uten items)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GamePlanInput"
+      responses:
+        "200":
+          description: Created plan (uten items — bruk PUT /items for å legge til)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GamePlan"
+        "400":
+          description: |
+            INVALID_INPUT — manglende name/weekdays/startTime/endTime,
+            ugyldig weekday-verdi, eller XOR-brudd mellom hallId og
+            groupOfHallsId (begge satt eller begge null).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/admin/game-plans/{id}:
+    get:
+      tags: [Admin — Game Plans]
+      summary: Hent én spilleplan inkl. items + catalog-entry inline
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Plan med resolved items
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GamePlanWithItems"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      tags: [Admin — Game Plans]
+      summary: Oppdater plan-meta (partial patch, krever GAME_CATALOG_WRITE)
+      description: |
+        Oppdaterer plan-metadata (navn, beskrivelse, hall/group, ukedager,
+        tidsvindu, isActive). Items oppdateres via egen
+        `/api/admin/game-plans/{id}/items`-endpoint.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GamePlanUpdateInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GamePlan"
+        "400":
+          description: INVALID_INPUT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      tags: [Admin — Game Plans]
+      summary: Soft-deactivate spilleplan
+      description: |
+        Setter `isActive=false`. Aktive plan-runs påvirkes ikke — de
+        beholder peker mot planen og fullfører dagen. Plan blir ikke valgt
+        for nye runs i `getOrCreateForToday`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deactivated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [deactivated]
+                        properties:
+                          deactivated:
+                            type: boolean
+                            enum: [true]
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/admin/game-plans/{id}/items:
+    put:
+      tags: [Admin — Game Plans]
+      summary: Atomic save av items-listen (drag-and-drop replace)
+      description: |
+        REPLACE hele plan-sekvensen atomisk. `position` er implisitt — det
+        er rekkefølgen i `items`-arrayet (1-indeksert: items[0] → position=1,
+        items[1] → position=2, osv). Per-item `bonusGameOverride` validerer
+        slug-whitelist server-side.
+
+        Service-laget håndhever atomisitet: enten settes hele sekvensen
+        eller ingen — partial saves er ikke mulig.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetGamePlanItemsInput"
+      responses:
+        "200":
+          description: Updated plan med ny items-sekvens
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GamePlanWithItems"
+        "400":
+          description: |
+            INVALID_INPUT — `items` ikke array, item mangler `gameCatalogId`,
+            ugyldig `bonusGameOverride`-slug (ikke i `BONUS_GAME_SLUG_VALUES`),
+            eller item peker på ikke-eksisterende katalog-id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ── Agent — Game Plan (master-runtime 2026-05-07) ─────────────────────────
+  #
+  # Master-only runtime for spilleplan-redesign. RBAC:
+  #   GAME1_MASTER_WRITE — ADMIN, HALL_OPERATOR, AGENT (SUPPORT eksplisitt
+  #   utelatt). Hall-scope: GET låser HALL_OPERATOR/AGENT til egen hall;
+  #   POST avslår caller med `isMaster=false` (kun master-hallens agent
+  #   kan starte/advance/pause/resume + sette jackpot-override).
+  # Audit: writes går via GamePlanRunService som skriver
+  #   `game_plan_run.{create,start,advance,jackpot_set,pause,resume,finish}`.
+
+  /api/agent/game-plan/current:
+    get:
+      tags: [Agent — Game Plan]
+      summary: Hent gjeldende plan + currentItem + jackpotSetupRequired
+      description: |
+        Returnerer aggregert state for master-dashboardet. Hvis ingen plan
+        dekker (hall, ukedag) i dag, returneres `run=null`/`plan=null`/
+        `items=[]` — frontend faller da tilbake til legacy-flyten via
+        `useNewGamePlan=false` localStorage-flagg. ADMIN må angi `?hallId=`
+        hvis egen `hallId` ikke er satt.
+      parameters:
+        - in: query
+          name: hallId
+          required: false
+          schema:
+            type: string
+          description: |
+            Kun ADMIN. HALL_OPERATOR/AGENT er låst til egen hall — cross-hall
+            queries returnerer 403 FORBIDDEN.
+      responses:
+        "200":
+          description: Aggregert state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/CurrentGamePlanResponse"
+        "400":
+          description: |
+            INVALID_INPUT — ADMIN uten egen `hallId` har ikke angitt
+            `?hallId=`-query.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: |
+            FORBIDDEN — caller mangler GAME1_MASTER_WRITE, eller
+            HALL_OPERATOR/AGENT prøvde cross-hall query.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/agent/game-plan/start:
+    post:
+      tags: [Agent — Game Plan]
+      summary: Start neste posisjon (master-only, idle → running)
+      description: |
+        idle → running, `current_position=1`. Krever at en plan dekker
+        (hall, ukedag) for `today` i Oslo-tz, ellers `NO_MATCHING_PLAN`.
+        Engine-bridge (Fase 4) kan returnere `scheduledGameId` som master-
+        UI sender til `/api/agent/game1/start` for engine-kjøring.
+
+        **Multi-hall ready-check** (legacy "alle haller klar"-popup) skjer
+        i UI-laget før dette kallet — backend-runtime fokuserer på
+        plan-state.
+      responses:
+        "200":
+          description: Started — run i `running`-state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StartGamePlanResponse"
+        "400":
+          description: |
+            NO_MATCHING_PLAN — ingen aktiv plan dekker (hall, ukedag) i dag.
+            JACKPOT_SETUP_REQUIRED — engine-bridge fant at posisjon krever
+            jackpot-popup før start (catalog.requiresJackpotSetup=true uten
+            override).
+            HALL_NOT_IN_GROUP — engine-bridge kunne ikke matche hallen til
+            plan.groupOfHallsId.
+            INVALID_INPUT — ADMIN uten egen hallId.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: |
+            FORBIDDEN — caller mangler GAME1_MASTER_WRITE, eller agentens
+            hallId matcher ikke `plan.hallId` (ikke master).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/agent/game-plan/advance:
+    post:
+      tags: [Agent — Game Plan]
+      summary: Flytt til neste posisjon (master-only)
+      description: |
+        Inkrementer `current_position`. Hvis nye posisjon krever jackpot-
+        popup (`catalog.requiresJackpotSetup=true` og ingen override
+        lagret), returneres `jackpotSetupRequired=true` og caller må kalle
+        `/jackpot-setup` før neste advance.
+
+        Når siste posisjon passeres, settes `status=finished` og
+        `finishedAt`. Engine-bridge oppretter `scheduledGameId` for nye
+        posisjon når relevant.
+      responses:
+        "200":
+          description: Advanced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AdvanceGamePlanResponse"
+        "400":
+          description: |
+            GAME_PLAN_RUN_NOT_FOUND — ingen aktiv run for (hall, dato).
+            GAME_PLAN_RUN_NOT_RUNNING — run er `idle`/`paused`/`finished`,
+            kall `/start` eller `/resume` først.
+            JACKPOT_SETUP_REQUIRED — propageres fra engine-bridge.
+            HALL_NOT_IN_GROUP — engine-bridge group-mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller er ikke master.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/agent/game-plan/jackpot-setup:
+    post:
+      tags: [Agent — Game Plan]
+      summary: Submit jackpot-popup (draw + prizesCents per bongfarge)
+      description: |
+        Master submitter `draw` + `prizesCents` for nåværende posisjon
+        (eller en spesifikk `position`). Override lagres i
+        `run.jackpotOverrides[position]`. Etter dette kan master kalle
+        `/advance` igjen — `jackpotSetupRequired` skal nå være `false`.
+
+        Server-side validering håndhever:
+          - `draw` ∈ [1, 90] (Spill 1 maks 90 baller).
+          - `prizesCents` keys må være i `TicketColor`-enum og minst 1 key.
+          - Verdier må være positive heltall (øre).
+          - Server-laget validerer også mot `catalog.ticketColors` —
+            farger ikke i katalogens whitelist gir `INVALID_INPUT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JackpotSetupInput"
+      responses:
+        "200":
+          description: Override lagret
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [run]
+                        properties:
+                          run:
+                            $ref: "#/components/schemas/GamePlanRun"
+        "400":
+          description: |
+            INVALID_INPUT — `position` ikke positivt heltall, `draw` utenfor
+            [1, 90], `prizesCents` ikke objekt, ugyldig bongfarge-key, eller
+            ikke-positivt øre-beløp. Også: `prizesCents` farge ikke i
+            katalogens `ticketColors`-whitelist.
+            GAME_PLAN_RUN_NOT_FOUND — ingen aktiv run for (hall, dato).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller er ikke master.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/agent/game-plan/pause:
+    post:
+      tags: [Agent — Game Plan]
+      summary: Pause aktiv plan (running → paused, master-only)
+      description: |
+        State-overgang for parity med master-UI. Faktisk pause-knapp i
+        engine er fortsatt `/api/agent/game1/pause` — denne endepunkten
+        oppdaterer kun plan-runtime-state.
+      responses:
+        "200":
+          description: Paused
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [run]
+                        properties:
+                          run:
+                            $ref: "#/components/schemas/GamePlanRun"
+        "400":
+          description: |
+            GAME_PLAN_RUN_NOT_FOUND — ingen aktiv run for (hall, dato).
+            GAME_PLAN_RUN_NOT_RUNNING — run er ikke i `running`-state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller er ikke master.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/agent/game-plan/resume:
+    post:
+      tags: [Agent — Game Plan]
+      summary: Resume pauset plan (paused → running, master-only)
+      responses:
+        "200":
+          description: Resumed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [run]
+                        properties:
+                          run:
+                            $ref: "#/components/schemas/GamePlanRun"
+        "400":
+          description: |
+            GAME_PLAN_RUN_NOT_FOUND — ingen aktiv run for (hall, dato).
+            GAME_PLAN_RUN_NOT_PAUSED — run er ikke i `paused`-state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller er ikke master.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/admin/settings/catalog:
     get:

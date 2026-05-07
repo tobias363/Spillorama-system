@@ -321,7 +321,12 @@ I dag bruker `GamePlanEngineBridge.buildEngineTicketConfig`:
 
 ### 3. OpenAPI-spec for nye endepunkter (LOW)
 
-`apps/backend/openapi.yaml` mangler ~17 nye admin/agent-endepunkter. Trenges for Lotteritilsynet-revisjon. Estimat: 1-2 timer.
+✅ **Landet** i branch `docs/openapi-spilleplan-endpoints-2026-05-08`
+(2026-05-08). Alle 17 nye admin/agent-endepunkter dokumentert i
+`apps/backend/openapi.yaml` med 3 nye tags (`Admin — Game Catalog`,
+`Admin — Game Plans`, `Agent — Game Plan`) og ~20 nye schemas
+(GameCatalogEntry, GamePlan, GamePlanRun, JackpotOverride, etc.).
+`npm run spec:lint` grønn.
 
 ### 4. Trafikklys + Oddsen i admin-master-data
 
