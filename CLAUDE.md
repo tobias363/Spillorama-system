@@ -356,6 +356,10 @@ npm run dev
 
 These are decisions baked in by the Spillorama team — not auto-detectable from code.
 
+### Game rules + payout (KANONISK — les FØR du rører payout-kode)
+
+See @docs/architecture/SPILL_REGLER_OG_PAYOUT.md for autoritative regler om bongpriser, auto-multiplikator, single-prize cap (databingo only), spesialspill (Trafikklys + Oddsen), bonus-spill, multi-vinner, og engine-bridge ticket-config-shape. Hvis du finner kode som motsier doc-en, **doc-en vinner** og koden må fikses.
+
 ### Game catalog (master truth)
 
 See @docs/architecture/SPILLKATALOG.md for the definitive game catalog. Quick mapping:

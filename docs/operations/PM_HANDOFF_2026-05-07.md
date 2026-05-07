@@ -556,6 +556,7 @@ Tobias har eksplisitt valgt lazy per-task-modus: **LOAD kun når koden skrives s
 
 ## 🔗 Referanser
 
+- **Spill-regler + payout (KANONISK — les FØR payout-endringer):** [docs/architecture/SPILL_REGLER_OG_PAYOUT.md](../architecture/SPILL_REGLER_OG_PAYOUT.md) — autoritativt dokument for bongpriser, auto-multiplikator, cap, spesialspill og engine-bridge-shape
 - **Forrige PM-handoff:** [docs/operations/PM_HANDOFF_2026-04-26.md](./PM_HANDOFF_2026-04-26.md)
 - **Spilleplan deprecation-plan:** [docs/architecture/GAME_PLAN_REDESIGN_DEPRECATION_PLAN_2026-05-07.md](../architecture/GAME_PLAN_REDESIGN_DEPRECATION_PLAN_2026-05-07.md)
 - **Game catalog:** [docs/architecture/SPILLKATALOG.md](../architecture/SPILLKATALOG.md)
