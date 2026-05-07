@@ -1182,6 +1182,12 @@ test("extra draw attempts are rejected and audited", async () => {
 });
 
 test("prize policy caps single databingo payouts and stores policy reference", async () => {
+  // 2026-05-08 (Tobias): single-prize cap (2500 kr) gjelder KUN
+  // databingo. Test bruker `gameSlug: "spillorama"` så
+  // `ledgerGameTypeForSlug` returnerer DATABINGO og capen aktiveres.
+  // Spill 1 (slug `bingo`, default når slug ikke gis) er hovedspill og
+  // har ingen cap — verifisert i egen test "prize policy does NOT cap
+  // main game payouts (Spill 1)".
   const wallet = new InMemoryWalletAdapter();
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20000,
@@ -1192,7 +1198,8 @@ test("prize policy caps single databingo payouts and stores policy reference", a
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
     hallId: "hall-1",
     playerName: "Host",
-    walletId: "wallet-host"
+    walletId: "wallet-host",
+    gameSlug: "spillorama",
   });
   await engine.joinRoom({
     roomCode,
@@ -1254,8 +1261,94 @@ test("prize policy caps single databingo payouts and stores policy reference", a
 
   assert.equal(claim.valid, true);
   // 30% of 9000 prizePool = 2700, capped to singlePrizeCap of 2500
+  // (gameSlug "spillorama" → DATABINGO → cap aktiv).
   assert.equal(claim.payoutAmount, 2500);
   assert.equal(claim.payoutWasCapped, true);
+  assert.ok(claim.payoutPolicyVersion);
+});
+
+test("prize policy does NOT cap main game payouts (Spill 1) — 2026-05-08 cap-fjerning", async () => {
+  // Tobias 2026-05-08: Spill 1 (hovedspill, slug `bingo`) har INGEN
+  // single-prize cap. Innsatsen lilla Fullt Hus (3000 kr) og Oddsen
+  // lilla HIGH (4500 kr) skal utbetales fullt. Identisk setup som
+  // databingo-testen over, men med gameSlug "bingo" (default).
+  const wallet = new InMemoryWalletAdapter();
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
+    dailyLossLimit: 20000,
+    monthlyLossLimit: 20000,
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0,
+  });
+  const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host",
+    gameSlug: "bingo", // MAIN_GAME — uncapped per 2026-05-08
+  });
+  await engine.joinRoom({
+    roomCode,
+    hallId: "hall-1",
+    playerName: "Guest-1",
+    walletId: "wallet-guest-1",
+  });
+  await engine.joinRoom({
+    roomCode,
+    hallId: "hall-1",
+    playerName: "Guest-2",
+    walletId: "wallet-guest-2",
+  });
+
+  await wallet.topUp("wallet-host", 5000, "test");
+  await wallet.topUp("wallet-guest-1", 5000, "test");
+  await wallet.topUp("wallet-guest-2", 5000, "test");
+
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostPlayerId,
+    entryFee: 3000,
+    ticketsPerPlayer: 1,
+    payoutPercent: 80,
+    // 30% LINE payout på 9000-pool = 2700 kr — pre-2026-05-08 ble dette
+    // cappet til 2500. Etter cap-fjerning utbetales fullt 2700.
+    patterns: [
+      { id: "1-rad", name: "1 Rad", claimType: "LINE" as const, prizePercent: 30, order: 1, design: 1 },
+      { id: "full-plate", name: "Full Plate", claimType: "BINGO" as const, prizePercent: 70, order: 2, design: 2 },
+    ],
+  });
+
+  const needed = new Set([1, 2, 3, 4, 5]);
+  prioritizeDrawNumbers(engine, roomCode, [...needed]);
+  let safety = 0;
+  while (needed.size > 0 && safety < 60) {
+    const { number } = await engine.drawNextNumber({
+      roomCode,
+      actorPlayerId: hostPlayerId,
+    });
+    if (!needed.has(number)) {
+      safety += 1;
+      continue;
+    }
+    await engine.markNumber({
+      roomCode,
+      playerId: hostPlayerId,
+      number,
+    });
+    needed.delete(number);
+    safety += 1;
+  }
+  assert.equal(needed.size, 0);
+
+  const claim = await engine.submitClaim({
+    roomCode,
+    playerId: hostPlayerId,
+    type: "LINE",
+  });
+
+  assert.equal(claim.valid, true);
+  // Spill 1 = MAIN_GAME → ingen cap. Full payout 2700 kr.
+  assert.equal(claim.payoutAmount, 2700, "MAIN_GAME utbetales fullt 2700 kr (uncapped)");
+  assert.equal(claim.payoutWasCapped, false, "wasCapped=false for hovedspill");
+  // policyVersion settes fortsatt for sporbarhet selv om capen ikke aktiveres.
   assert.ok(claim.payoutPolicyVersion);
 });
 

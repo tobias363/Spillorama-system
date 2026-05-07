@@ -19,8 +19,17 @@
  *   - Hvis `wasCapped=true` → audit-logg differansen (cappedAmount mindre
  *     enn input.amount) som "RTP_HOUSE_RETAINED" via PayoutAuditTrail
  *     eller dedikert log slik at huset's beholdte beløp er sporbart.
- *   - Cap-en er identisk for MAIN_GAME og DATABINGO i dagens policy
- *     (PrizeGameType åpnes i egen task — bare slug-binding er K2-A scope).
+ *
+ * **2026-05-08 (Tobias):** Cap-en gjelder KUN databingo
+ * (`gameType = DATABINGO`, slug `spillorama`). Hovedspill (Spill 1-3)
+ * får aldri cappet payouts via denne porten. Spill 1's port-wrapper
+ * (`BingoEngine.getPrizePolicyPort()`) binder mot `MAIN_GAME` →
+ * `PrizePolicyManager.applySinglePrizeCap` short-circuiter og
+ * returnerer beløpet uendret. Innsatsen lilla Fullt Hus (3000 kr),
+ * Oddsen lilla HIGH (4500 kr) og mini-game-payouts > 2500 kr utbetales
+ * derfor i sin helhet. Kanonisk regel:
+ * [`docs/architecture/SPILL_REGLER_OG_PAYOUT.md`](../../../docs/architecture/SPILL_REGLER_OG_PAYOUT.md) §4
+ * og [`docs/operations/SPILL1_VINNINGSREGLER.md`](../../../docs/operations/SPILL1_VINNINGSREGLER.md) §4.
  */
 
 export interface PrizePolicyApplyInput {

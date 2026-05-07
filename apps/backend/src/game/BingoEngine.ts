@@ -897,13 +897,24 @@ export class BingoEngine {
    * fordi alle dagens consumere er Spill 1-tjenester (PotEvaluator, lucky
    * bonus, mini-games). Spill 1 er hovedspill per SPILLKATALOG.md.
    * `PrizePolicyManager` registrerer både MAIN_GAME- og DATABINGO-default-
-   * policy-er med identisk cap (2500), så bytte er semantisk no-op men
-   * gjør prize-cap-bindingen regulatorisk konsistent med ledger-events
-   * for Spill 1.
+   * policy-er.
+   *
+   * **2026-05-08 (Tobias):** Cap gjelder KUN databingo. Spill 1 er
+   * hovedspill → port-en passerer `gameType: "MAIN_GAME"` til
+   * `PrizePolicyManager.applySinglePrizeCap`, som short-circuiter og
+   * returnerer beløpet uendret. Resultatet: alle Spill 1 payout-paths
+   * (Innsatsen, Oddsen, mini-games, lucky bonus) utbetales i sin
+   * helhet uten cap. `wasCapped` er alltid `false` fra denne porten,
+   * og `cappedAmount` er identisk med `amount`. `policyId` returneres
+   * fortsatt for sporbarhet selv om capen ikke aktiveres.
+   *
+   * Kanonisk regel:
+   * [`docs/architecture/SPILL_REGLER_OG_PAYOUT.md`](../../../docs/architecture/SPILL_REGLER_OG_PAYOUT.md) §4 og
+   * [`docs/operations/SPILL1_VINNINGSREGLER.md`](../../../docs/operations/SPILL1_VINNINGSREGLER.md) §4.
    *
    * Regulatorisk: alle Spill 1 payout-paths SKAL kalle dette før
-   * walletAdapter.credit. Differansen (cappedAmount - amount) audit-
-   * logges av caller (typisk via PayoutAuditTrail eller dedikert log).
+   * walletAdapter.credit. Hvis `wasCapped=true` (kun mulig for
+   * DATABINGO i fremtiden) audit-logges differansen.
    */
   getPrizePolicyPort(): import("../adapters/PrizePolicyPort.js").PrizePolicyPort {
     const prizePolicy = this.prizePolicy;
@@ -918,6 +929,8 @@ export class BingoEngine {
           // 2026-05-06 (audit §9.1): port-en brukes per i dag kun av
           // Spill 1-tjenester (PotEvaluator, MiniGameOddsen, lucky bonus,
           // Game1MiniGameOrchestrator). Spill 1 = hovedspill → MAIN_GAME.
+          // 2026-05-08 (Tobias): MAIN_GAME-grenen i applySinglePrizeCap
+          // returnerer beløpet uendret — capen aktiveres ikke for hovedspill.
           gameType: "MAIN_GAME",
           amount: input.amount,
           atMs: input.atMs,

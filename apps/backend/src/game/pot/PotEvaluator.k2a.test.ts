@@ -2,13 +2,33 @@
  * K2-A CRIT-2 + CRIT-3: tester for compliance ledger + single-prize-cap
  * i evaluateAccumulatingPots (PotEvaluator).
  *
+ * **2026-05-08 (Tobias):** Single-prize cap (2500 kr) gjelder KUN
+ * databingo. Spill 1 (hovedspill) er uncapped — Innsatsen lilla Fullt
+ * Hus (3000 kr), Jackpott 30 000 kr osv. utbetales i sin helhet.
+ * Disse testene verifiserer at PotEvaluator-pipen håndterer
+ * `wasCapped: false`-svar fra port-en korrekt for hovedspill, og at
+ * pipen FORTSATT respekterer cap når port-en (hypotetisk) svarer
+ * `wasCapped: true` (databingo-fremtid). Testene mockar port-en
+ * direkte, så endringen i `PrizePolicyManager.applySinglePrizeCap`
+ * påvirker ikke dem direkte — men test-intent er oppdatert til
+ * å reflektere nytt regelverk.
+ *
+ * Kanonisk regel:
+ *   - docs/architecture/SPILL_REGLER_OG_PAYOUT.md §4
+ *   - docs/operations/SPILL1_VINNINGSREGLER.md §4
+ *
  * Verifiserer:
  *   - CRIT-2: pot-payout skriver EXTRA_PRIZE-entry til ComplianceLedger med
  *     korrekt MAIN_GAME-gameType (Spill 1 = hovedspill).
  *   - CRIT-2: Soft-fail — ledger-feil ruller IKKE tilbake pot-payout.
- *   - CRIT-3: Jackpott-payout 30 000 kr → cap til 2500 kr per §11.
+ *   - CRIT-3 (uncapped MAIN_GAME path): Spill 1 jackpott 30 000 kr utbetales
+ *     fullt — port-en (BingoEngine.getPrizePolicyPort) returnerer wasCapped=false
+ *     for MAIN_GAME, og PotEvaluator akkumulerer ingen HOUSE_RETAINED.
+ *   - CRIT-3 (capped DATABINGO path): hvis port-en hypotetisk returnerer
+ *     wasCapped=true, så pipen audit-logger differansen og krediterer
+ *     capped beløp. Dette er forsvarslag som beholdes for fremtidig
+ *     databingo-bruk.
  *   - CRIT-3: Innsatsen-payout under cap → ingen trim.
- *   - CRIT-3: capped-payout reflekteres i amountCents og houseRetainedCents.
  */
 
 import assert from "node:assert/strict";
@@ -246,13 +266,16 @@ test("K2-A CRIT-2: ledger-feil ruller IKKE tilbake pot-credit (soft-fail)", asyn
   assert.equal(credits[0]!.amount, 2000);
 });
 
-test("K2-A CRIT-3: Jackpott 30 000 kr → cap til 2500 kr per §11", async () => {
+test("K2-A CRIT-3 (post-2026-05-08): Spill 1 Jackpott 30 000 kr utbetales fullt — MAIN_GAME uncapped", async () => {
+  // Tobias 2026-05-08: Spill 1 er hovedspill → ingen single-prize cap.
+  // BingoEngine.getPrizePolicyPort returnerer wasCapped=false for MAIN_GAME,
+  // så PotEvaluator krediter hele 30 000 kr og ingen HOUSE_RETAINED akkumuleres.
   const pot = makeJackpottPot(3_000_000); // 30 000 kr
   const service = makeFakePotService({
     pots: [pot],
     tryWinResult: {
       triggered: true,
-      amountCents: 3_000_000, // 30 000 kr
+      amountCents: 3_000_000,
       reasonCode: null,
       eventId: "ev-1",
     },
@@ -260,7 +283,63 @@ test("K2-A CRIT-3: Jackpott 30 000 kr → cap til 2500 kr per §11", async () =>
   const { adapter, credits } = makeFakeWalletAdapter();
   const audit = new AuditLogService(new InMemoryAuditLogStore());
   const { port: ledgerPort, calls: ledgerCalls } = makeRecordingLedgerPort();
-  // Cap til 2500 kr.
+  // No-op port: returnerer input uendret (matcher MAIN_GAME-oppførselen
+  // til BingoEngine.getPrizePolicyPort etter cap-fjerning).
+  const { port: policyPort, calls: policyCalls } = makeRecordingPolicyPort();
+
+  const results = await evaluateAccumulatingPots({
+    client: dummyClient,
+    potService: service,
+    walletAdapter: adapter,
+    hallId: "hall-a",
+    scheduledGameId: "sg-1",
+    drawSequenceAtWin: 57,
+    firstWinner: defaultWinner(),
+    audit,
+    complianceLedgerPort: ledgerPort,
+    prizePolicyPort: policyPort,
+  });
+
+  // Policy-port ble kalt for sporbarhet, men returnerte uncapped.
+  assert.equal(policyCalls.length, 1);
+  assert.equal(policyCalls[0]!.amount, 30_000);
+
+  // Wallet kreditert med fullt beløp 30 000 kr — uncapped.
+  assert.equal(credits.length, 1);
+  assert.equal(credits[0]!.amount, 30_000, "Spill 1 jackpot utbetales fullt");
+
+  // Resultat reflekterer full payout, ingen house-retained.
+  assert.equal(results.length, 1);
+  const res = results[0]!;
+  assert.equal(res.triggered, true);
+  assert.equal(res.amountCents, 3_000_000);
+  assert.equal(res.potAmountGrossCents, 3_000_000);
+  assert.equal(res.houseRetainedCents, 0, "ingen HOUSE_RETAINED for hovedspill");
+
+  // Ledger-entry har fullt beløp.
+  assert.equal(ledgerCalls.length, 1);
+  assert.equal(ledgerCalls[0]!.amount, 30_000);
+});
+
+test("K2-A CRIT-3 (databingo-forsvarslag): port-svar wasCapped=true → pipen capper og logger HOUSE_RETAINED", async () => {
+  // Forsvarslag: hvis port-en (hypotetisk i databingo-runtime) returnerer
+  // wasCapped=true så skal PotEvaluator-pipen respektere det. Dette
+  // dekker SpinnGo-fremtid (DATABINGO) og fanger regresjon hvis MAIN_GAME-
+  // short-circuit fjernes ved et uhell.
+  const pot = makeJackpottPot(3_000_000);
+  const service = makeFakePotService({
+    pots: [pot],
+    tryWinResult: {
+      triggered: true,
+      amountCents: 3_000_000,
+      reasonCode: null,
+      eventId: "ev-1",
+    },
+  });
+  const { adapter, credits } = makeFakeWalletAdapter();
+  const audit = new AuditLogService(new InMemoryAuditLogStore());
+  const { port: ledgerPort, calls: ledgerCalls } = makeRecordingLedgerPort();
+  // Mock port: simuler databingo-cap til 2500 kr.
   const { port: policyPort, calls: policyCalls } = makeRecordingPolicyPort(2500);
 
   const results = await evaluateAccumulatingPots({
@@ -276,7 +355,6 @@ test("K2-A CRIT-3: Jackpott 30 000 kr → cap til 2500 kr per §11", async () =>
     prizePolicyPort: policyPort,
   });
 
-  // Policy-port ble kalt med kroner.
   assert.equal(policyCalls.length, 1);
   assert.equal(policyCalls[0]!.amount, 30_000);
 
@@ -284,15 +362,12 @@ test("K2-A CRIT-3: Jackpott 30 000 kr → cap til 2500 kr per §11", async () =>
   assert.equal(credits.length, 1);
   assert.equal(credits[0]!.amount, 2500);
 
-  // Resultat reflekterer capped beløp + house-retained-differanse.
   assert.equal(results.length, 1);
   const res = results[0]!;
-  assert.equal(res.triggered, true);
-  assert.equal(res.amountCents, 250_000); // 2500 kr i øre
+  assert.equal(res.amountCents, 250_000);
   assert.equal(res.potAmountGrossCents, 3_000_000);
-  assert.equal(res.houseRetainedCents, 2_750_000); // 27 500 kr beholdt
+  assert.equal(res.houseRetainedCents, 2_750_000);
 
-  // Ledger-entry har capped beløp (faktisk utbetalt).
   assert.equal(ledgerCalls.length, 1);
   assert.equal(ledgerCalls[0]!.amount, 2500);
   const meta = ledgerCalls[0]!.metadata!;

@@ -2,12 +2,26 @@
  * K2-A CRIT-2 + CRIT-3: tester for compliance ledger + single-prize-cap
  * i Game1MiniGameOrchestrator.
  *
+ * **2026-05-08 (Tobias):** Single-prize cap (2500 kr) gjelder KUN
+ * databingo. Spill 1 mini-games (Wheel, Chest, Mystery, ColorDraft) er
+ * hovedspill og uncapped — Wheel-buckets på 4000 kr utbetales fullt.
+ * Testen "K2-A CRIT-3: mini-game-payout 4000 kr → cap" er omdøpt til
+ * å verifisere uncapped-oppførselen for Spill 1 og at cap-pipen
+ * fortsatt fungerer hvis port-en (hypotetisk databingo) returnerer
+ * wasCapped=true. Testene mockar port-en direkte.
+ *
+ * Kanonisk regel:
+ *   - docs/architecture/SPILL_REGLER_OG_PAYOUT.md §4
+ *   - docs/operations/SPILL1_VINNINGSREGLER.md §4
+ *
  * Verifiserer:
  *   - CRIT-2: Mini-game-payout skriver EXTRA_PRIZE-entry til ComplianceLedger
  *     med korrekt MAIN_GAME-gameType (Spill 1 = hovedspill).
  *   - CRIT-2: Soft-fail — ledger-feil ruller IKKE tilbake wallet-credit.
- *   - CRIT-3: Mini-game-payout > 2500 kr trimmes til cap.
- *   - CRIT-3: payout_cents persistert i DB matcher capped beløp.
+ *   - CRIT-3 (uncapped MAIN_GAME path): Spill 1 wheel-bucket 4000 kr utbetales
+ *     fullt; payout_cents persistert i DB matcher requestedCents.
+ *   - CRIT-3 (databingo-forsvarslag): port-svar wasCapped=true → pipen
+ *     capper og persisterer cap-trimmet payout_cents.
  */
 
 import assert from "node:assert/strict";
@@ -268,13 +282,16 @@ test("K2-A CRIT-2: ledger-feil ruller IKKE tilbake wallet-credit (soft-fail)", a
   assert.equal(credits[0]!.amount, 2000); // kroner
 });
 
-test("K2-A CRIT-3: mini-game-payout 4000 kr → cap til 2500 kr", async () => {
+test("K2-A CRIT-3 (post-2026-05-08): Spill 1 mini-game-payout 4000 kr utbetales fullt — MAIN_GAME uncapped", async () => {
+  // Tobias 2026-05-08: Spill 1 mini-game er hovedspill → ingen cap.
+  // BingoEngine.getPrizePolicyPort returnerer wasCapped=false for MAIN_GAME,
+  // så Wheel-bucket på 4000 kr krediter spiller fullt.
   const { pool, updates } = makeFakePool();
   const audit = makeStubAuditLog();
   const { adapter: walletAdapter, credits } = makeStubWalletAdapter();
   const { port: ledgerPort, calls: ledgerCalls } = makeRecordingLedgerPort();
-  // Policy-port returnerer 2500 (capped) for input 4000.
-  const { port: policyPort, calls: policyCalls } = makeRecordingPolicyPort(2500);
+  // No-op port: returnerer input uendret (matcher MAIN_GAME-oppførselen).
+  const { port: policyPort, calls: policyCalls } = makeRecordingPolicyPort();
 
   const orchestrator = new Game1MiniGameOrchestrator({
     pool: pool as never,
@@ -293,16 +310,67 @@ test("K2-A CRIT-3: mini-game-payout 4000 kr → cap til 2500 kr", async () => {
     choiceJson: {},
   });
 
-  // Policy-port ble kalt med kroner-beløp.
+  // Policy-port ble kalt for sporbarhet, men returnerte uncapped.
   assert.equal(policyCalls.length, 1);
   assert.equal(policyCalls[0]!.amount, 4000);
   assert.equal(policyCalls[0]!.hallId, "hall-a");
 
-  // Wallet ble kreditert med capped beløp (2500 kr), IKKE 4000.
+  // Wallet ble kreditert med fullt 4000 kr — uncapped.
+  assert.equal(credits.length, 1);
+  assert.equal(credits[0]!.amount, 4000, "Spill 1 Wheel-bucket utbetales fullt");
+
+  // Returnert payoutCents = full requested (400 000), ikke capped.
+  assert.equal(result.payoutCents, 400_000);
+
+  // Ledger-entry har fullt beløp.
+  assert.equal(ledgerCalls.length, 1);
+  assert.equal(ledgerCalls[0]!.amount, 4000);
+  const meta = ledgerCalls[0]!.metadata!;
+  assert.equal(meta.requestedCents, 400_000);
+  assert.equal(meta.cappedCents, 400_000);
+  assert.equal(meta.houseRetainedCents, 0, "ingen HOUSE_RETAINED for hovedspill");
+
+  // UPDATE-statement persistert fullt payout_cents.
+  const update = updates.find((u) => u.sql.startsWith("UPDATE"));
+  assert.ok(update, "UPDATE-call funnet");
+  assert.equal(update!.params[3], 400_000, "payout_cents = full requested");
+});
+
+test("K2-A CRIT-3 (databingo-forsvarslag): port-svar wasCapped=true → pipen capper og persisterer cap-trimmet payout_cents", async () => {
+  // Forsvarslag: hvis port-en (hypotetisk i databingo-runtime) returnerer
+  // wasCapped=true, så respekterer pipen capen, krediter capped beløp,
+  // og persisterer cap-trimmet payout_cents til DB. Dekker SpinnGo-fremtid.
+  const { pool, updates } = makeFakePool();
+  const audit = makeStubAuditLog();
+  const { adapter: walletAdapter, credits } = makeStubWalletAdapter();
+  const { port: ledgerPort, calls: ledgerCalls } = makeRecordingLedgerPort();
+  // Mock port: simuler databingo-cap til 2500 kr.
+  const { port: policyPort, calls: policyCalls } = makeRecordingPolicyPort(2500);
+
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as never,
+    auditLog: audit,
+    walletAdapter,
+    broadcaster: makeBroadcaster(),
+    complianceLedgerPort: ledgerPort,
+    prizePolicyPort: policyPort,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame(400_000));
+
+  const result = await orchestrator.handleChoice({
+    resultId: "res-1",
+    userId: "u-1",
+    choiceJson: {},
+  });
+
+  assert.equal(policyCalls.length, 1);
+  assert.equal(policyCalls[0]!.amount, 4000);
+
+  // Wallet ble kreditert med capped beløp (2500 kr).
   assert.equal(credits.length, 1);
   assert.equal(credits[0]!.amount, 2500);
 
-  // Returnert payoutCents = capped (250 000), ikke requested (400 000).
+  // Returnert payoutCents = capped (250 000).
   assert.equal(result.payoutCents, 250_000);
 
   // Ledger-entry har capped amount.
@@ -313,7 +381,7 @@ test("K2-A CRIT-3: mini-game-payout 4000 kr → cap til 2500 kr", async () => {
   assert.equal(meta.cappedCents, 250_000);
   assert.equal(meta.houseRetainedCents, 150_000);
 
-  // UPDATE-statement persistert capped payout_cents (parameter 4 = 250000).
+  // UPDATE-statement persistert capped payout_cents.
   const update = updates.find((u) => u.sql.startsWith("UPDATE"));
   assert.ok(update, "UPDATE-call funnet");
   assert.equal(update!.params[3], 250_000, "payout_cents = capped");

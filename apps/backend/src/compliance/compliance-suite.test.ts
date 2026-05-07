@@ -509,6 +509,11 @@ test("compliance: enforces self exclusion minimum period", async () => {
 });
 
 test("compliance: enforces databingo prize caps and keeps payout audit", async () => {
+  // 2026-05-08 (Tobias): single-prize cap (2500 kr) gjelder KUN
+  // databingo. Test bruker `gameSlug: "spillorama"` (DATABINGO) så
+  // capen aktiveres. Hovedspill (Spill 1, slug `bingo` — default når
+  // slug ikke er gitt) er uncapped — verifisert i egen test
+  // "prize policy does NOT cap main game payouts" i BingoEngine.test.ts.
   const wallet = new InMemoryWalletAdapter();
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20_000,
@@ -520,7 +525,8 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
     hallId: "hall-prize",
     playerName: "Host",
-    walletId: "wallet-host"
+    walletId: "wallet-host",
+    gameSlug: "spillorama",
   });
   await engine.joinRoom({
     roomCode,
