@@ -262,12 +262,16 @@ import { createAdminGameTypesRouter } from "./routes/adminGameTypes.js";
 import { GameTypeService } from "./admin/GameTypeService.js";
 import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
 import { SubGameService } from "./admin/SubGameService.js";
-// Spilleplan-redesign Fase 1+2 (2026-05-07): GameCatalog + GamePlan service
-// + admin-routes. Erstatter 9-tabell schedule-stack med 4 tabeller.
+// Spilleplan-redesign Fase 1+2+3 (2026-05-07): GameCatalog + GamePlan +
+// GamePlanRun service + admin-routes + agent-runtime-router. Erstatter
+// 9-tabell schedule-stack med 4 tabeller. Fase 3 kobler runtime-state
+// (app_game_plan_run) til master-dashboardet via /api/agent/game-plan/*.
 import { GameCatalogService } from "./game/GameCatalogService.js";
 import { GamePlanService } from "./game/GamePlanService.js";
+import { GamePlanRunService } from "./game/GamePlanRunService.js";
 import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
 import { createAdminGamePlansRouter } from "./routes/adminGamePlans.js";
+import { createAgentGamePlanRouter } from "./routes/agentGamePlan.js";
 import { createAdminGame1PotsRouter } from "./routes/adminGame1Pots.js";
 import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
 import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
@@ -1098,6 +1102,17 @@ const gamePlanService = new GamePlanService({
   catalogService: gameCatalogService,
 });
 
+// Fase 3 (2026-05-07): GamePlanRunService — runtime-state for spilleplan.
+// Tabell: app_game_plan_run. Eksponert til master-dashboardet via
+// `/api/agent/game-plan/*`. Audit-log injiseres post-construction (samme
+// mønster som GameCatalog/GamePlan).
+const gamePlanRunService = new GamePlanRunService({
+  pool: sharedPool,
+  schema: pgSchema,
+  planService: gamePlanService,
+  catalogService: gameCatalogService,
+});
+
 // BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
 // mapping). Ren admin-katalog — runtime /api/leaderboard (routes/game.ts)
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
@@ -1329,6 +1344,7 @@ scheduleService.setAuditLogService(auditLogService);
 // domain-operasjoner) — samme mønster som ScheduleService.
 gameCatalogService.setAuditLogService(auditLogService);
 gamePlanService.setAuditLogService(auditLogService);
+gamePlanRunService.setAuditLogService(auditLogService);
 
 // BIN-720: Profile Settings API — service (router wires mot slutten av
 // filen, sammen med andre app.use-kall). Tilgjengelig kun når
@@ -2783,6 +2799,19 @@ app.use(createAdminGameCatalogRouter({
 app.use(createAdminGamePlansRouter({
   platformService,
   auditLogService,
+  planService: gamePlanService,
+}));
+// Spilleplan-redesign Fase 3 (2026-05-07): agent-runtime for spilleplan.
+// 6 endepunkter under /api/agent/game-plan/*. GAME1_MASTER_WRITE-permission
+// (ADMIN/HALL_OPERATOR/AGENT). Master-only writes (start/advance/jackpot-
+// setup/pause/resume) håndheves via plan.hallId-match mot actor.hallId.
+//
+// Frontend velger feature-flag-bevisst om data hentes fra denne ruteren
+// (`useNewGamePlan=true`) eller fra legacy `/api/agent/game1/current-game`
+// (default false). Begge ruter er registrert side om side i Fase 3.
+app.use(createAgentGamePlanRouter({
+  platformService,
+  planRunService: gamePlanRunService,
   planService: gamePlanService,
 }));
 // Agent IJ — Innsatsen-jackpot: per-hall pot-administrasjon (Game1PotService).
