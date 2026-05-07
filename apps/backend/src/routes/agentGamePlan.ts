@@ -59,6 +59,7 @@ import type {
   TicketColor,
 } from "../game/gameCatalog.types.js";
 import { TICKET_COLOR_VALUES } from "../game/gameCatalog.types.js";
+import type { GamePlanEngineBridge } from "../game/GamePlanEngineBridge.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -80,6 +81,13 @@ export interface AgentGamePlanRouterDeps {
   platformService: PlatformService;
   planRunService: GamePlanRunService;
   planService: GamePlanService;
+  /**
+   * Fase 4 (2026-05-07): valgfri engine-bridge. Når satt, returnerer
+   * `/start` og `/advance` en `scheduledGameId` som master-UI kan sende
+   * til `/api/agent/game1/start` for å kjøre engine. Når null, beholder
+   * vi Fase 3-oppførsel (kun state-overgang, ingen scheduled-game).
+   */
+  engineBridge?: GamePlanEngineBridge | null;
 }
 
 interface PlanItemWithCatalog extends GamePlanItem {
@@ -203,6 +211,7 @@ export function createAgentGamePlanRouter(
   deps: AgentGamePlanRouterDeps,
 ): express.Router {
   const { platformService, planRunService, planService } = deps;
+  const engineBridge = deps.engineBridge ?? null;
   const router = express.Router();
 
   async function requirePermission(
@@ -341,7 +350,51 @@ export function createAgentGamePlanRouter(
         businessDate,
         actor.id,
       );
-      apiSuccess(res, { run: started });
+
+      // Fase 4 (2026-05-07): hvis engine-bridge er injisert, opprett en
+      // `app_game1_scheduled_games`-rad for posisjon 1 så master-UI kan
+      // kalle `/api/agent/game1/start` med `scheduledGameId` for å kjøre
+      // engine. Bridgen er idempotent — re-trigger gir samme rad.
+      let scheduledGameId: string | null = null;
+      let bridgeError: string | null = null;
+      if (engineBridge) {
+        try {
+          const result = await engineBridge.createScheduledGameForPlanRunPosition(
+            started.id,
+            started.currentPosition,
+          );
+          scheduledGameId = result.scheduledGameId;
+        } catch (err) {
+          // JACKPOT_SETUP_REQUIRED og HALL_NOT_IN_GROUP er forventede
+          // domain-errors som UI kan vise — propager. Ukjente feil logges
+          // og strippes fra responsen så start-flagget ikke blokkeres.
+          if (err instanceof DomainError) {
+            if (
+              err.code === "JACKPOT_SETUP_REQUIRED" ||
+              err.code === "HALL_NOT_IN_GROUP"
+            ) {
+              throw err;
+            }
+            bridgeError = err.code;
+            logger.warn(
+              { runId: started.id, position: started.currentPosition, err },
+              "[fase-4] engine-bridge feilet — fortsetter uten scheduledGameId",
+            );
+          } else {
+            bridgeError = "BRIDGE_FAILED";
+            logger.error(
+              { runId: started.id, position: started.currentPosition, err },
+              "[fase-4] engine-bridge kastet uventet feil",
+            );
+          }
+        }
+      }
+
+      apiSuccess(res, {
+        run: started,
+        scheduledGameId,
+        bridgeError,
+      });
     } catch (err) {
       apiFailure(res, err);
     }
@@ -375,12 +428,62 @@ export function createAgentGamePlanRouter(
         businessDate,
         actor.id,
       );
+
+      // Fase 4 (2026-05-07): opprett scheduled-game-rad for ny posisjon
+      // hvis bridgen er injisert og vi faktisk gikk videre (ikke jackpot-
+      // blokkering, ikke ferdig).
+      let scheduledGameId: string | null = null;
+      let bridgeError: string | null = null;
+      if (
+        engineBridge &&
+        !result.jackpotSetupRequired &&
+        result.run.status !== "finished" &&
+        result.nextGame !== null
+      ) {
+        try {
+          const bridgeResult =
+            await engineBridge.createScheduledGameForPlanRunPosition(
+              result.run.id,
+              result.run.currentPosition,
+            );
+          scheduledGameId = bridgeResult.scheduledGameId;
+        } catch (err) {
+          if (err instanceof DomainError) {
+            if (
+              err.code === "JACKPOT_SETUP_REQUIRED" ||
+              err.code === "HALL_NOT_IN_GROUP"
+            ) {
+              throw err;
+            }
+            bridgeError = err.code;
+            logger.warn(
+              {
+                runId: result.run.id,
+                position: result.run.currentPosition,
+                err,
+              },
+              "[fase-4] engine-bridge feilet på advance — fortsetter uten scheduledGameId",
+            );
+          } else {
+            bridgeError = "BRIDGE_FAILED";
+            logger.error(
+              {
+                runId: result.run.id,
+                position: result.run.currentPosition,
+                err,
+              },
+              "[fase-4] engine-bridge kastet uventet feil ved advance",
+            );
+          }
+        }
+      }
+
       apiSuccess(res, {
         run: result.run,
         nextGame: result.nextGame,
         jackpotSetupRequired: result.jackpotSetupRequired,
-        // Frontend trenger fortsatt gameId for engine-binding i Fase 3.5
-        // — i Fase 3 reflekterer vi bare state-overgangen.
+        scheduledGameId,
+        bridgeError,
       });
     } catch (err) {
       apiFailure(res, err);

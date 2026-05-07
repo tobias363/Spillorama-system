@@ -269,6 +269,7 @@ import { SubGameService } from "./admin/SubGameService.js";
 import { GameCatalogService } from "./game/GameCatalogService.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
+import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
 import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
 import { createAdminGamePlansRouter } from "./routes/adminGamePlans.js";
 import { createAgentGamePlanRouter } from "./routes/agentGamePlan.js";
@@ -1111,6 +1112,18 @@ const gamePlanRunService = new GamePlanRunService({
   schema: pgSchema,
   planService: gamePlanService,
   catalogService: gameCatalogService,
+});
+
+// Fase 4 (2026-05-07): GamePlanEngineBridge — bro mellom katalog-modellen
+// og legacy draw-engine. Spawn-er en `app_game1_scheduled_games`-rad i
+// farten basert på plan-run + catalog-entry så
+// Game1MasterControlService.startGame kan kjøre uendret.
+const gamePlanEngineBridge = new GamePlanEngineBridge({
+  pool: sharedPool,
+  schema: pgSchema,
+  catalogService: gameCatalogService,
+  planService: gamePlanService,
+  planRunService: gamePlanRunService,
 });
 
 // BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
@@ -2813,6 +2826,10 @@ app.use(createAgentGamePlanRouter({
   platformService,
   planRunService: gamePlanRunService,
   planService: gamePlanService,
+  // Fase 4 (2026-05-07): bridgen er injisert så `/start` og `/advance`
+  // returnerer scheduledGameId som master-UI kan bruke til å trigge
+  // engine via /api/agent/game1/start.
+  engineBridge: gamePlanEngineBridge,
 }));
 // Agent IJ — Innsatsen-jackpot: per-hall pot-administrasjon (Game1PotService).
 // 5 endepunkter — list/detail/init/patch-config/reset. HALL_GAME_CONFIG_READ/WRITE.
