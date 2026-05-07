@@ -28,6 +28,7 @@ function makeCatalog(): GameCatalogEntry {
       rad4: 10000,
       bingo: { gul: 200000, hvit: 250000 },
     },
+    prizeMultiplierMode: "explicit_per_color",
     bonusGameSlug: null,
     bonusGameEnabled: false,
     requiresJackpotSetup: false,

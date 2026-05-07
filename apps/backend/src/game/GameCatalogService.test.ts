@@ -112,9 +112,14 @@ function validPrizes(): PrizesCents {
     rad2: 10000,
     rad3: 10000,
     rad4: 10000,
+    // Auto-modus default: bingoBase = base for billigste bong (5 kr).
+    bingoBase: 100000,
+    // bingo-objektet beholdes for backwards-compat med tester som bruker
+    // explicit_per_color-modus; "auto"-validering aksepterer det også.
     bingo: { gul: 200000, hvit: 50000 },
   };
 }
+
 
 function validCreateInput(
   overrides: Partial<CreateGameCatalogInput> = {},
@@ -375,6 +380,8 @@ test("Fase 1: create() aksepterer 3-color happy path (gul/hvit/lilla)", async ()
         rad2: 10000,
         rad3: 10000,
         rad4: 10000,
+        // Auto-modus default — bingoBase er base for billigste bong (5 kr).
+        bingoBase: 100000,
         bingo: { gul: 200000, hvit: 50000, lilla: 500000 },
       },
     }),
@@ -539,6 +546,167 @@ test("Fase 1: list() med isActive=true legger til WHERE-clause", async () => {
   assert.deepEqual(queries[0].params?.[0], true);
 });
 
+// ── prizeMultiplierMode (Tobias 2026-05-07) ─────────────────────────────
+
+test("Fase 1: create() auto-modus krever bingoBase", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "auto-mode without bingoBase",
+    () =>
+      svc.create(
+        validCreateInput({
+          prizeMultiplierMode: "auto",
+          prizesCents: {
+            rad1: 10000,
+            rad2: 10000,
+            rad3: 10000,
+            rad4: 10000,
+            // bingoBase mangler — explicit-shape med bingo per farge
+            bingo: { gul: 200000, hvit: 50000 },
+          },
+        }),
+      ),
+    "INVALID_INPUT",
+  );
+});
+
+test("Fase 1: create() auto-modus avviser bingoBase 0 eller negativ", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "auto-mode bingoBase=0",
+    () =>
+      svc.create(
+        validCreateInput({
+          prizeMultiplierMode: "auto",
+          prizesCents: {
+            rad1: 10000,
+            rad2: 10000,
+            rad3: 10000,
+            rad4: 10000,
+            bingoBase: 0,
+            bingo: {},
+          },
+        }),
+      ),
+    "INVALID_INPUT",
+  );
+});
+
+test("Fase 1: create() explicit_per_color-modus bevarer per-farge bingo", async () => {
+  const { service, queries } = makeCapturingService({
+    existingRow: makeMinimalRow({
+      prize_multiplier_mode: "explicit_per_color",
+      prizes_cents_json: {
+        rad1: 10000,
+        rad2: 10000,
+        rad3: 10000,
+        rad4: 10000,
+        bingo: { gul: 200000, hvit: 50000, lilla: 500000 },
+      },
+    }),
+  });
+  await service.create(
+    validCreateInput({
+      ticketColors: ["gul", "hvit", "lilla"],
+      ticketPricesCents: { gul: 1500, hvit: 1500, lilla: 1500 },
+      prizeMultiplierMode: "explicit_per_color",
+      prizesCents: {
+        rad1: 10000,
+        rad2: 10000,
+        rad3: 10000,
+        rad4: 10000,
+        bingo: { gul: 200000, hvit: 50000, lilla: 500000 },
+      },
+    }),
+  );
+  // Verifiser at INSERT skjedde med explicit_per_color
+  const insert = queries.find((q) => /INSERT INTO/i.test(q.sql));
+  assert.ok(insert, "INSERT skal kjøres");
+  // Param 9 (0-indeksert: $9) er prize_multiplier_mode i SQL-rekkefølgen
+  assert.equal(insert!.params![8], "explicit_per_color");
+});
+
+test("Fase 1: create() prizeMultiplierMode default er auto", async () => {
+  const { service, queries } = makeCapturingService({
+    existingRow: makeMinimalRow(),
+  });
+  await service.create(validCreateInput()); // no mode supplied
+  const insert = queries.find((q) => /INSERT INTO/i.test(q.sql));
+  assert.ok(insert);
+  // prize_multiplier_mode er param $9
+  assert.equal(insert!.params![8], "auto");
+});
+
+test("Fase 1: create() avviser ukjent prizeMultiplierMode", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "unknown mode",
+    () =>
+      svc.create(
+        validCreateInput({
+          prizeMultiplierMode:
+            "weird_mode" as unknown as "auto",
+        }),
+      ),
+    "INVALID_INPUT",
+  );
+});
+
+// calculateActualPrize-helper
+
+test("Fase 1: calculateActualPrize() auto: hvit 5kr → base × 1", async () => {
+  const { calculateActualPrize, CHEAPEST_TICKET_PRICE_CENTS } = await import(
+    "./GameCatalogService.js"
+  );
+  assert.equal(CHEAPEST_TICKET_PRICE_CENTS, 500);
+  const result = calculateActualPrize(
+    { prizeMultiplierMode: "auto" },
+    100000, // base 1000 kr
+    500, // hvit 5 kr
+  );
+  assert.equal(result, 100000);
+});
+
+test("Fase 1: calculateActualPrize() auto: gul 10kr → base × 2", async () => {
+  const { calculateActualPrize } = await import("./GameCatalogService.js");
+  const result = calculateActualPrize(
+    { prizeMultiplierMode: "auto" },
+    100000,
+    1000, // gul 10 kr
+  );
+  assert.equal(result, 200000);
+});
+
+test("Fase 1: calculateActualPrize() auto: lilla 15kr → base × 3", async () => {
+  const { calculateActualPrize } = await import("./GameCatalogService.js");
+  const result = calculateActualPrize(
+    { prizeMultiplierMode: "auto" },
+    100000,
+    1500, // lilla 15 kr
+  );
+  assert.equal(result, 300000);
+});
+
+test("Fase 1: calculateActualPrize() explicit_per_color: returnerer base uendret", async () => {
+  const { calculateActualPrize } = await import("./GameCatalogService.js");
+  const result = calculateActualPrize(
+    { prizeMultiplierMode: "explicit_per_color" },
+    50000,
+    1500, // ticket-pris ignoreres i explicit-modus
+  );
+  assert.equal(result, 50000);
+});
+
+test("Fase 1: calculateActualPrize() auto: 0 ticketPrice → 0", async () => {
+  const { calculateActualPrize } = await import("./GameCatalogService.js");
+  const result = calculateActualPrize(
+    { prizeMultiplierMode: "auto" },
+    100000,
+    0,
+  );
+  assert.equal(result, 0);
+});
+
 // ── forTesting ───────────────────────────────────────────────────────────
 
 test("Fase 1: forTesting() lager instans uten å åpne pool", () => {
@@ -578,8 +746,10 @@ function makeMinimalRow(
       rad2: 10000,
       rad3: 10000,
       rad4: 10000,
+      bingoBase: 100000,
       bingo: { gul: 200000, hvit: 50000 },
     },
+    prize_multiplier_mode: "auto",
     bonus_game_slug: null,
     bonus_game_enabled: false,
     requires_jackpot_setup: false,
@@ -608,8 +778,10 @@ function minimalEntry(
       rad2: 10000,
       rad3: 10000,
       rad4: 10000,
+      bingoBase: 100000,
       bingo: { gul: 200000, hvit: 50000 },
     },
+    prizeMultiplierMode: "auto",
     bonusGameSlug: null,
     bonusGameEnabled: false,
     requiresJackpotSetup: false,

@@ -50,6 +50,7 @@ import type { Pool } from "pg";
 
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { calculateActualPrize } from "./GameCatalogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
 import type { GamePlanService } from "./GamePlanService.js";
 import type { GamePlanRunService } from "./GamePlanRunService.js";
@@ -150,16 +151,37 @@ export function buildTicketConfigFromCatalog(
     });
   }
 
+  // Bingo-premier per bongfarge for engine.
+  // Auto-multiplikator (Tobias 2026-05-07): når
+  // `catalog.prizeMultiplierMode = "auto"`, regnes per-farge bingo ut fra
+  // `bingoBase × (ticketPrice / 500)` via `calculateActualPrize`. Hvit
+  // 5 kr → base × 1, gul 10 kr → base × 2, lilla 15 kr → base × 3 osv.
+  // Når mode = "explicit_per_color" leses `prizesCents.bingo[color]`
+  // uendret (Trafikklys-stil).
   const bingoPrizes: Record<string, number> = {};
-  for (const color of catalog.ticketColors) {
-    const englishKey = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
-    const prize = catalog.prizesCents.bingo[color] ?? 0;
-    if (prize > 0) bingoPrizes[englishKey] = prize;
+  if (catalog.prizeMultiplierMode === "auto") {
+    const bingoBase = catalog.prizesCents.bingoBase ?? 0;
+    if (bingoBase > 0) {
+      for (const color of catalog.ticketColors) {
+        const englishKey = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
+        const ticketPrice = catalog.ticketPricesCents[color] ?? 0;
+        if (ticketPrice <= 0) continue;
+        const actual = calculateActualPrize(catalog, bingoBase, ticketPrice);
+        if (actual > 0) bingoPrizes[englishKey] = actual;
+      }
+    }
+  } else {
+    for (const color of catalog.ticketColors) {
+      const englishKey = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
+      const prize = catalog.prizesCents.bingo[color] ?? 0;
+      if (prize > 0) bingoPrizes[englishKey] = prize;
+    }
   }
 
   const config: Record<string, unknown> = {
     catalogId: catalog.id,
     catalogSlug: catalog.slug,
+    prizeMultiplierMode: catalog.prizeMultiplierMode,
     // Engine-leselig nøkkel — array-of-objects med {color, size, pricePerTicket}.
     ticketTypesData,
     rowPrizes: {
@@ -175,6 +197,15 @@ export function buildTicketConfigFromCatalog(
     // hvis admin har lagt til detaljer.
     rules: catalog.rules,
   };
+
+  // bingoBase eksponeres separat så engine/audit-tooling kan se base-
+  // verdien for "auto"-modus uten å re-derive fra prizesCents-rådata.
+  if (
+    catalog.prizeMultiplierMode === "auto" &&
+    typeof catalog.prizesCents.bingoBase === "number"
+  ) {
+    config.bingoBase = catalog.prizesCents.bingoBase;
+  }
 
   // Tolkning A (2026-05-07): override > catalog. catalog.bonusGameEnabled
   // er fortsatt master-switch — hvis bonus er disabled på catalog-nivå,

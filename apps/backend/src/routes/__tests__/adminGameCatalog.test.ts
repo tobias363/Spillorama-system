@@ -83,6 +83,7 @@ function makeEntry(
       rad4: 10000,
       bingo: { gul: 200000, hvit: 50000 },
     },
+    prizeMultiplierMode: overrides.prizeMultiplierMode ?? "explicit_per_color",
     bonusGameSlug: overrides.bonusGameSlug ?? null,
     bonusGameEnabled: overrides.bonusGameEnabled ?? false,
     requiresJackpotSetup: overrides.requiresJackpotSetup ?? false,

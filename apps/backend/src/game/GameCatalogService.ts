@@ -32,12 +32,14 @@ import type {
   CreateGameCatalogInput,
   GameCatalogEntry,
   ListGameCatalogFilter,
+  PrizeMultiplierMode,
   PrizesCents,
   TicketColor,
   UpdateGameCatalogInput,
 } from "./gameCatalog.types.js";
 import {
   BONUS_GAME_SLUG_VALUES,
+  PRIZE_MULTIPLIER_MODE_VALUES,
   TICKET_COLOR_VALUES,
 } from "./gameCatalog.types.js";
 
@@ -45,10 +47,53 @@ const logger = rootLogger.child({ module: "game-catalog-service" });
 
 const VALID_TICKET_COLORS = new Set<TicketColor>(TICKET_COLOR_VALUES);
 const VALID_BONUS_GAME_SLUGS = new Set<string>(BONUS_GAME_SLUG_VALUES);
+const VALID_PRIZE_MULTIPLIER_MODES = new Set<PrizeMultiplierMode>(
+  PRIZE_MULTIPLIER_MODE_VALUES,
+);
 const SLUG_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_NAME_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2000;
 const MAX_SLUG_LENGTH = 80;
+
+/**
+ * Premise (Tobias 2026-05-07): billigste bong er ALLTID 5 kr (500 øre).
+ * Auto-multiplikator beregner premie = base × (ticketPrice / 500).
+ */
+export const CHEAPEST_TICKET_PRICE_CENTS = 500;
+
+/**
+ * Beregn faktisk premie for en gitt katalog-entry og bong-pris.
+ *
+ * - "auto"-modus: returnerer `basePrize × (ticketPriceCents / 500)`,
+ *   avrundet til nærmeste hele øre. Brukes både for rad-premier og
+ *   bingoBase.
+ * - "explicit_per_color"-modus: returnerer `basePrize` uendret —
+ *   caller har allerede slått opp riktig farge-spesifikk premie i
+ *   `prizesCents.bingo[color]` eller `rules.prizesPerRowColor`.
+ *
+ * Cheapest-pris er hardkodet til 500 øre (5 kr) per Tobias' premise —
+ * hvis det noensinne endres må både migrasjons-skriptet og denne
+ * helper-en oppdateres samtidig.
+ */
+export function calculateActualPrize(
+  catalog: Pick<GameCatalogEntry, "prizeMultiplierMode">,
+  basePrizeCents: number,
+  ticketPriceCents: number,
+): number {
+  if (catalog.prizeMultiplierMode === "explicit_per_color") {
+    return basePrizeCents;
+  }
+  // auto-modus
+  if (
+    !Number.isFinite(basePrizeCents) ||
+    !Number.isFinite(ticketPriceCents) ||
+    ticketPriceCents <= 0
+  ) {
+    return 0;
+  }
+  const multiplier = ticketPriceCents / CHEAPEST_TICKET_PRICE_CENTS;
+  return Math.round(basePrizeCents * multiplier);
+}
 
 // ── input-validering ────────────────────────────────────────────────────
 
@@ -157,9 +202,37 @@ function assertNonNegativeInt(value: unknown, field: string): number {
   return n;
 }
 
+function assertPrizeMultiplierMode(value: unknown): PrizeMultiplierMode {
+  if (value === undefined || value === null) return "auto";
+  if (typeof value !== "string") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "prizeMultiplierMode må være en streng.",
+    );
+  }
+  const normalised = value.trim().toLowerCase() as PrizeMultiplierMode;
+  if (!VALID_PRIZE_MULTIPLIER_MODES.has(normalised)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `prizeMultiplierMode må være én av ${PRIZE_MULTIPLIER_MODE_VALUES.join(", ")}.`,
+    );
+  }
+  return normalised;
+}
+
+/**
+ * Validér prizes-skjema basert på premie-modus.
+ *
+ * - "auto"-modus: krever `bingoBase` som int > 0; ignorerer `bingo`-
+ *   per-farge-objektet (men tolererer at det finnes for backwards-
+ *   compat).
+ * - "explicit_per_color"-modus: krever `bingo` som per-farge-objekt
+ *   (gammel shape, samme validering som før).
+ */
 function assertPrizesCents(
   value: unknown,
   ticketColors: TicketColor[],
+  mode: PrizeMultiplierMode,
 ): PrizesCents {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new DomainError("INVALID_INPUT", "prizesCents må være et objekt.");
@@ -170,7 +243,44 @@ function assertPrizesCents(
   const rad3 = assertNonNegativeInt(obj.rad3, "prizesCents.rad3");
   const rad4 = assertNonNegativeInt(obj.rad4, "prizesCents.rad4");
   const allowed = new Set<TicketColor>(ticketColors);
-  // Bingo må være et objekt med per-farge-beløp.
+
+  if (mode === "auto") {
+    // Auto-modus krever én base — bingoBase. bingo-per-farge ignoreres
+    // men aksepteres (backwards-compat for klienter som sender begge).
+    if (obj.bingoBase === undefined || obj.bingoBase === null) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "prizesCents.bingoBase er påkrevd i auto-modus (gjelder billigste bong).",
+      );
+    }
+    const bingoBase = Number(obj.bingoBase);
+    if (
+      !Number.isFinite(bingoBase) ||
+      !Number.isInteger(bingoBase) ||
+      bingoBase <= 0
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "prizesCents.bingoBase må være positivt heltall (øre).",
+      );
+    }
+    // Behold eventuelt eksisterende bingo-objekt for backwards-compat,
+    // men valider at hvis det finnes, så er det et objekt med kjente
+    // farger (vi vil ikke ha sløkkede strukturer i DB).
+    let bingo: Partial<Record<TicketColor, number>> = {};
+    if (obj.bingo !== undefined && obj.bingo !== null) {
+      if (typeof obj.bingo !== "object" || Array.isArray(obj.bingo)) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "prizesCents.bingo må være et objekt eller utelates.",
+        );
+      }
+      bingo = assertPositiveCentsMap(obj.bingo, "prizesCents.bingo", allowed);
+    }
+    return { rad1, rad2, rad3, rad4, bingoBase, bingo };
+  }
+
+  // explicit_per_color-modus: per-farge bingo (gammel shape)
   if (
     !obj.bingo ||
     typeof obj.bingo !== "object" ||
@@ -178,7 +288,7 @@ function assertPrizesCents(
   ) {
     throw new DomainError(
       "INVALID_INPUT",
-      "prizesCents.bingo må være et objekt med per-bongfarge-beløp.",
+      "prizesCents.bingo må være et objekt med per-bongfarge-beløp i explicit_per_color-modus.",
     );
   }
   const bingo = assertPositiveCentsMap(obj.bingo, "prizesCents.bingo", allowed);
@@ -248,6 +358,7 @@ interface GameCatalogRow {
   ticket_colors_json: unknown;
   ticket_prices_cents_json: unknown;
   prizes_cents_json: unknown;
+  prize_multiplier_mode: string;
   bonus_game_slug: string | null;
   bonus_game_enabled: boolean;
   requires_jackpot_setup: boolean;
@@ -295,13 +406,31 @@ function parsePrizesCents(raw: unknown): PrizesCents {
     const n = Number(obj[k]);
     return Number.isFinite(n) && Number.isInteger(n) && n >= 0 ? n : 0;
   };
-  return {
+  const result: PrizesCents = {
     rad1: num("rad1"),
     rad2: num("rad2"),
     rad3: num("rad3"),
     rad4: num("rad4"),
     bingo: parseCentsMap(obj.bingo),
   };
+  // bingoBase er bare relevant for "auto"-modus, men vi parser den
+  // alltid hvis den finnes — caller (mapRow + helpers) bruker den når
+  // mode = "auto".
+  if (obj.bingoBase !== undefined) {
+    const n = Number(obj.bingoBase);
+    if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) {
+      result.bingoBase = n;
+    }
+  }
+  return result;
+}
+
+function parsePrizeMultiplierMode(raw: unknown): PrizeMultiplierMode {
+  if (typeof raw === "string") {
+    const v = raw.trim().toLowerCase() as PrizeMultiplierMode;
+    if (VALID_PRIZE_MULTIPLIER_MODES.has(v)) return v;
+  }
+  return "auto";
 }
 
 function mapRow(row: GameCatalogRow): GameCatalogEntry {
@@ -317,6 +446,7 @@ function mapRow(row: GameCatalogRow): GameCatalogEntry {
     ticketColors: parseTicketColors(row.ticket_colors_json),
     ticketPricesCents: parseCentsMap(row.ticket_prices_cents_json),
     prizesCents: parsePrizesCents(row.prizes_cents_json),
+    prizeMultiplierMode: parsePrizeMultiplierMode(row.prize_multiplier_mode),
     bonusGameSlug:
       row.bonus_game_slug &&
       VALID_BONUS_GAME_SLUGS.has(row.bonus_game_slug.toLowerCase())
@@ -392,6 +522,7 @@ export class GameCatalogService {
     const { rows } = await this.pool.query<GameCatalogRow>(
       `SELECT id, slug, display_name, description, rules_json,
               ticket_colors_json, ticket_prices_cents_json, prizes_cents_json,
+              prize_multiplier_mode,
               bonus_game_slug, bonus_game_enabled, requires_jackpot_setup,
               is_active, sort_order, created_at, updated_at, created_by_user_id
        FROM ${this.table()}
@@ -410,6 +541,7 @@ export class GameCatalogService {
     const { rows } = await this.pool.query<GameCatalogRow>(
       `SELECT id, slug, display_name, description, rules_json,
               ticket_colors_json, ticket_prices_cents_json, prizes_cents_json,
+              prize_multiplier_mode,
               bonus_game_slug, bonus_game_enabled, requires_jackpot_setup,
               is_active, sort_order, created_at, updated_at, created_by_user_id
        FROM ${this.table()}
@@ -427,6 +559,7 @@ export class GameCatalogService {
     const { rows } = await this.pool.query<GameCatalogRow>(
       `SELECT id, slug, display_name, description, rules_json,
               ticket_colors_json, ticket_prices_cents_json, prizes_cents_json,
+              prize_multiplier_mode,
               bonus_game_slug, bonus_game_enabled, requires_jackpot_setup,
               is_active, sort_order, created_at, updated_at, created_by_user_id
        FROM ${this.table()}
@@ -486,7 +619,14 @@ export class GameCatalogService {
         );
       }
     }
-    const prizesCents = assertPrizesCents(input.prizesCents, ticketColors);
+    const prizeMultiplierMode = assertPrizeMultiplierMode(
+      input.prizeMultiplierMode,
+    );
+    const prizesCents = assertPrizesCents(
+      input.prizesCents,
+      ticketColors,
+      prizeMultiplierMode,
+    );
     const bonusGameSlug = assertBonusGameSlug(input.bonusGameSlug);
     const bonusGameEnabled = input.bonusGameEnabled === true;
     if (bonusGameEnabled && bonusGameSlug === null) {
@@ -513,10 +653,12 @@ export class GameCatalogService {
         `INSERT INTO ${this.table()}
            (id, slug, display_name, description, rules_json,
             ticket_colors_json, ticket_prices_cents_json, prizes_cents_json,
+            prize_multiplier_mode,
             bonus_game_slug, bonus_game_enabled, requires_jackpot_setup,
             is_active, sort_order, created_by_user_id)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb,
-                 $9, $10, $11, $12, $13, $14)`,
+                 $9,
+                 $10, $11, $12, $13, $14, $15)`,
         [
           id,
           slug,
@@ -526,6 +668,7 @@ export class GameCatalogService {
           JSON.stringify(ticketColors),
           JSON.stringify(ticketPricesCents),
           JSON.stringify(prizesCents),
+          prizeMultiplierMode,
           bonusGameSlug,
           bonusGameEnabled,
           requiresJackpotSetup,
@@ -560,6 +703,7 @@ export class GameCatalogService {
           slug,
           displayName,
           ticketColors,
+          prizeMultiplierMode,
           requiresJackpotSetup,
           bonusGameSlug,
         },
@@ -662,10 +806,43 @@ export class GameCatalogService {
       }
     }
 
+    // Resolve final mode before validating prizes (cross-field).
+    const finalPrizeMode: PrizeMultiplierMode =
+      patch.prizeMultiplierMode !== undefined
+        ? assertPrizeMultiplierMode(patch.prizeMultiplierMode)
+        : existing.prizeMultiplierMode;
+
+    if (patch.prizeMultiplierMode !== undefined) {
+      sets.push(`prize_multiplier_mode = $${params.length + 1}`);
+      params.push(finalPrizeMode);
+    }
+
     if (patch.prizesCents !== undefined) {
-      const prizes = assertPrizesCents(patch.prizesCents, finalTicketColors);
+      const prizes = assertPrizesCents(
+        patch.prizesCents,
+        finalTicketColors,
+        finalPrizeMode,
+      );
       sets.push(`prizes_cents_json = $${params.length + 1}::jsonb`);
       params.push(JSON.stringify(prizes));
+    } else if (patch.prizeMultiplierMode !== undefined) {
+      // Mode endret uten å sende inn nye prizes — re-valider eksisterende
+      // prizes mot ny mode for å unngå inkonsistente DB-rader.
+      try {
+        assertPrizesCents(
+          existing.prizesCents,
+          finalTicketColors,
+          finalPrizeMode,
+        );
+      } catch (err) {
+        if (err instanceof DomainError) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            `prizeMultiplierMode endret til ${finalPrizeMode}, men eksisterende prizesCents passer ikke nye modus: ${err.message}`,
+          );
+        }
+        throw err;
+      }
     }
 
     if (patch.bonusGameSlug !== undefined) {

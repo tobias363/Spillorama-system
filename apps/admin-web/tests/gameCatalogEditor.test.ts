@@ -63,8 +63,11 @@ describe("GameCatalogState helpers", () => {
     expect(p.ticketColors).toEqual(["gul", "hvit"]);
     expect(p.ticketPricesKr.gul).toBe(10);
     expect(p.ticketPricesKr.hvit).toBe(5);
-    expect(p.prizesKr.bingo.gul).toBe(2000);
-    expect(p.prizesKr.bingo.hvit).toBe(500);
+    // Tobias 2026-05-07: default mode er "auto" — bingoBase brukes i
+    // stedet for per-farge bingo. Per-farge bingo er tom.
+    expect(p.prizeMultiplierMode).toBe("auto");
+    expect(p.prizesKr.bingoBase).toBe(1000);
+    expect(p.prizesKr.bingo).toEqual({});
   });
 });
 
@@ -151,9 +154,11 @@ describe("GameCatalogEditorPage — new", () => {
     // Default payload: gul=10kr=1000øre, hvit=5kr=500øre
     expect(body.ticketPricesCents.gul).toBe(1000);
     expect(body.ticketPricesCents.hvit).toBe(500);
-    // Bingo-premier: gul=2000kr=200000øre, hvit=500kr=50000øre
-    expect(body.prizesCents.bingo.gul).toBe(200000);
-    expect(body.prizesCents.bingo.hvit).toBe(50000);
+    // Tobias 2026-05-07: auto-modus default — bingoBase 1000 kr → 100000 øre.
+    // Per-farge bingo blir tomt; backend regner ut faktisk premie.
+    expect(body.prizeMultiplierMode).toBe("auto");
+    expect(body.prizesCents.bingoBase).toBe(100000);
+    expect(body.prizesCents.bingo).toEqual({});
     // Rad-premier: 100kr=10000øre
     expect(body.prizesCents.rad1).toBe(10000);
     expect(body.slug).toBe("jackpot");
@@ -161,11 +166,123 @@ describe("GameCatalogEditorPage — new", () => {
   });
 });
 
+// ── Premie-modus toggle (Tobias 2026-05-07) ─────────────────────────────
+
+describe("GameCatalogEditorPage — prizeMultiplierMode", () => {
+  it("default rendrer auto-modus radio som checked + viser bingoBase-felt", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+    const autoRadio = container.querySelector<HTMLInputElement>(
+      'input[name="prizeMultiplierMode"][value="auto"]',
+    );
+    const explicitRadio = container.querySelector<HTMLInputElement>(
+      'input[name="prizeMultiplierMode"][value="explicit_per_color"]',
+    );
+    expect(autoRadio?.checked).toBe(true);
+    expect(explicitRadio?.checked).toBe(false);
+    const baseField = container.querySelector<HTMLInputElement>(
+      'input[name="prize-bingoBase"]',
+    );
+    expect(baseField).toBeTruthy();
+    // Auto-blokk synlig, explicit-blokk skjult
+    const autoBlock = container.querySelector<HTMLElement>(".prize-auto-block");
+    const explicitBlock = container.querySelector<HTMLElement>(
+      ".prize-explicit-block",
+    );
+    expect(autoBlock?.style.display).toBe("");
+    expect(explicitBlock?.style.display).toBe("none");
+  });
+
+  it("toggle til explicit_per_color skjuler auto-blokken og viser per-farge bingo", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+    const explicitRadio = container.querySelector<HTMLInputElement>(
+      'input[name="prizeMultiplierMode"][value="explicit_per_color"]',
+    );
+    explicitRadio!.checked = true;
+    explicitRadio!.dispatchEvent(new Event("change"));
+    const autoBlock = container.querySelector<HTMLElement>(".prize-auto-block");
+    const explicitBlock = container.querySelector<HTMLElement>(
+      ".prize-explicit-block",
+    );
+    expect(autoBlock?.style.display).toBe("none");
+    expect(explicitBlock?.style.display).toBe("");
+  });
+
+  it("auto-preview-tabell rendres med multiplikator-rader", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+    const previewBody = container.querySelector<HTMLTableSectionElement>(
+      "#cat-prize-preview tbody",
+    );
+    expect(previewBody).toBeTruthy();
+    const rows = previewBody!.querySelectorAll("tr");
+    // Default: gul + hvit aktive — to rader
+    expect(rows.length).toBe(2);
+    // hvit (5 kr) → multiplikator ×1
+    const html = previewBody!.innerHTML;
+    expect(html).toContain("Hvit");
+    expect(html).toContain("×1");
+    // gul (10 kr) → multiplikator ×2
+    expect(html).toContain("Gul");
+    expect(html).toContain("×2");
+  });
+
+  it("submit i explicit-modus sender per-farge bingo + utelater bingoBase", async () => {
+    const fetchMock = mockFetch({
+      id: "cat-trafikk",
+      slug: "trafikklys",
+      displayName: "Trafikklys",
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderGameCatalogNewPage(container);
+
+    // Velg explicit-modus
+    const explicitRadio = container.querySelector<HTMLInputElement>(
+      'input[name="prizeMultiplierMode"][value="explicit_per_color"]',
+    );
+    explicitRadio!.checked = true;
+    explicitRadio!.dispatchEvent(new Event("change"));
+
+    // Fyll inn name + slug
+    (container.querySelector<HTMLInputElement>("#cat-displayName")!).value =
+      "Trafikklys";
+    (container.querySelector<HTMLInputElement>("#cat-slug")!).value =
+      "trafikklys";
+
+    // Eksplisitt per-farge bingo i kr — 200 og 500
+    (
+      container.querySelector<HTMLInputElement>('input[name="bingoPrize-gul"]')!
+    ).value = "200";
+    (
+      container.querySelector<HTMLInputElement>('input[name="bingoPrize-hvit"]')!
+    ).value = "500";
+
+    const form = container.querySelector<HTMLFormElement>("#game-catalog-form")!;
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushMicrotasks();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init.body as string);
+    expect(body.prizeMultiplierMode).toBe("explicit_per_color");
+    expect(body.prizesCents.bingo.gul).toBe(20000);
+    expect(body.prizesCents.bingo.hvit).toBe(50000);
+    // bingoBase skal IKKE være med i explicit-modus
+    expect(body.prizesCents.bingoBase).toBeUndefined();
+  });
+});
+
 // ── Editor edit ─────────────────────────────────────────────────────────
 
 describe("GameCatalogEditorPage — edit", () => {
   it("pre-fills form fra eksisterende entry", async () => {
-    // Mock GET /api/admin/game-catalog/cat-1
+    // Mock GET /api/admin/game-catalog/cat-1 — explicit_per_color-modus
+    // (Trafikklys-stil) for å verifisere edit-flyten
     mockFetch({
       id: "cat-1",
       slug: "innsatsen",
@@ -181,6 +298,7 @@ describe("GameCatalogEditorPage — edit", () => {
         rad4: 20000,
         bingo: { gul: 200000, hvit: 50000, lilla: 500000 },
       },
+      prizeMultiplierMode: "explicit_per_color",
       bonusGameSlug: "wheel_of_fortune",
       bonusGameEnabled: true,
       requiresJackpotSetup: true,
