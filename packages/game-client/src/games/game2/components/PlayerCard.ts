@@ -1,54 +1,72 @@
 /**
  * Spill 2 — player-kolonne ytterst til venstre i `ComboPanel`.
  *
- * 2026-05-04 (Tobias-direktiv revidert): mockup-paritet med Bong Mockup.
- * `.player-card { background: transparent; border: none; box-shadow: none; }`
- * — ingen kort-bakgrunn, bare icon + tall inline. Innsats/Gevinst-rader
- * behouldes på linje 2-3 (Tobias-direktiv: "innsats når man har plassert
- * innsats. under der må gevinst komme når man vinner noe").
+ * 2026-05-06 (Tobias-direktiv, PR 2 mockup-paritet — `Bong Mockup.html`):
+ *   - `.player-col` er `justify-content: center` → innholdsblokken er
+ *     vertikalt sentrert i kolonnen, ikke top-anchored.
+ *   - `.player-stake` har 15px font-size, 500 weight, white-92% farge,
+ *     `margin-top: 4px` (vi bruker ROW_GAP = 4 i Pixi).
+ *   - Gevinst-raden er en Spillorama-utvidelse (Tobias 2026-05-04) som
+ *     ikke er i mockupen, men beholdes i samme stil (15px, 600 weight).
  *
  * Layout (mockup `.player-col`):
  *   width: 110px
- *   padding: 16px 18px
+ *   padding: 10px 16px
  *   .player-card: gap 8px, icon 22×22, pc-num 22px font-weight 700
  *
- * Tobias-paritet:
+ * Spillorama-paritet:
  *   - Innsats-rad (skjul når 0)
  *   - Gevinst-rad (skjul når 0)
+ *
+ * Vertikal sentrering: alt innhold er pakket i `contentBlock` som
+ * reposisjoneres hver gang en rad vises/skjules slik at den synlige
+ * blokken alltid er midt i kolonnen (mockup `justify-content: center`).
  */
 
 import { Container, Graphics, Text } from "pixi.js";
 
 /** Kolonne-bredde (mockup `.player-col { width: 110px }`). */
 export const PLAYER_COL_WIDTH = 110;
-/** Kolonne-padding (mockup `.player-col { padding: 16px 18px }`). */
-const COL_PAD_X = 18;
-const COL_PAD_Y = 16;
+/** Kolonne-padding X (mockup `.player-col { padding: 10px 16px }`). */
+const COL_PAD_X = 16;
 /** Ikon-størrelse (mockup 22×22). */
 const ICON_SIZE = 22;
 /** Mellomrom mellom ikon og tall (mockup gap: 8). */
 const ICON_GAP = 8;
-/** Vertikal gap mellom rad 1 (count) og rad 2 (Innsats). */
-const ROW_GAP = 10;
+/** Vertikal gap mellom ikon-rad og innsats-rad (mockup `margin-top: 4`). */
+const ROW_GAP = 4;
+/** Linje-høyde for innsats/gevinst-tekst — fontSize 15 + ~3px breathing. */
+const TEXT_LINE_HEIGHT = 18;
+/** Liten ekstra gap mellom innsats- og gevinst-rad. */
+const GEVINST_GAP = 2;
 
 export class PlayerCard extends Container {
+  private contentBlock: Container;
   private icon: Graphics;
   private numText: Text;
   private innsatsText: Text;
   private gevinstText: Text;
   private lastStake = -1;
   private lastWinnings = -1;
+  private colHeight: number;
 
-  constructor(_colHeight: number) {
+  constructor(colHeight: number) {
     super();
+    this.colHeight = colHeight;
     // Ingen bakgrunn-kort — mockup har transparent player-card.
+
+    // ── content-block: pakker icon+num+innsats+gevinst slik at vi kan
+    //    flytte hele blokken i ett (vertikal sentrering). ─────────────────
+    this.contentBlock = new Container();
+    this.contentBlock.x = COL_PAD_X;
+    this.addChild(this.contentBlock);
 
     // ── ikon (hode-skulder, 22×22) ───────────────────────────────────────
     this.icon = new Graphics();
-    this.icon.x = COL_PAD_X;
-    this.icon.y = COL_PAD_Y;
+    this.icon.x = 0;
+    this.icon.y = 0;
     this.drawIcon();
-    this.addChild(this.icon);
+    this.contentBlock.addChild(this.icon);
 
     // ── tall ("01") — 22px, font-weight 700, hvit ───────────────────────
     this.numText = new Text({
@@ -61,41 +79,42 @@ export class PlayerCard extends Container {
         letterSpacing: 0.2,
       },
     });
-    this.numText.x = COL_PAD_X + ICON_SIZE + ICON_GAP;
-    // Justere y så tall-baseline matcher icon-senter (icon top-aligned).
-    this.numText.y = COL_PAD_Y + 1;
-    this.addChild(this.numText);
+    this.numText.x = ICON_SIZE + ICON_GAP;
+    this.numText.y = 1; // baseline-justering mot icon-senter
+    this.contentBlock.addChild(this.numText);
 
-    // ── Innsats-rad (Tobias-direktiv 2026-05-04) ─────────────────────────
-    const row2Y = COL_PAD_Y + ICON_SIZE + ROW_GAP;
+    // ── Innsats-rad (mockup `.player-stake`: 15px, 500 weight, white-92).
     this.innsatsText = new Text({
       text: "Innsats: 0 kr",
       style: {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-        fontSize: 12,
+        fontSize: 15,
         fontWeight: "500",
-        fill: 0xeae0d2,
+        fill: 0xeaeaea,
       },
     });
-    this.innsatsText.x = COL_PAD_X;
-    this.innsatsText.y = row2Y;
+    this.innsatsText.x = 0;
+    this.innsatsText.y = ICON_SIZE + ROW_GAP;
     this.innsatsText.visible = false;
-    this.addChild(this.innsatsText);
+    this.contentBlock.addChild(this.innsatsText);
 
-    // ── Gevinst-rad ──────────────────────────────────────────────────────
+    // ── Gevinst-rad (Spillorama-utvidelse — speiler innsats-styling, gull).
     this.gevinstText = new Text({
       text: "Gevinst: 0 kr",
       style: {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-        fontSize: 12,
+        fontSize: 15,
         fontWeight: "600",
         fill: 0xffe83d,
       },
     });
-    this.gevinstText.x = COL_PAD_X;
-    this.gevinstText.y = row2Y + 16;
+    this.gevinstText.x = 0;
+    this.gevinstText.y = ICON_SIZE + ROW_GAP + TEXT_LINE_HEIGHT + GEVINST_GAP;
     this.gevinstText.visible = false;
-    this.addChild(this.gevinstText);
+    this.contentBlock.addChild(this.gevinstText);
+
+    // Initial layout — kun icon-raden synlig.
+    this.layoutContentBlock();
   }
 
   /** Sett antall spillere — vises 2-sifret med leading zero. */
@@ -116,6 +135,7 @@ export class PlayerCard extends Container {
     } else {
       this.innsatsText.visible = false;
     }
+    this.layoutContentBlock();
   }
 
   setWinnings(winnings: number): void {
@@ -127,10 +147,42 @@ export class PlayerCard extends Container {
     } else {
       this.gevinstText.visible = false;
     }
+    this.layoutContentBlock();
   }
 
   get colWidth(): number {
     return PLAYER_COL_WIDTH;
+  }
+
+  /**
+   * Vertikalt sentrert layout (mockup `.player-col { justify-content: center }`).
+   * Computes total height of currently-visible rows and centers the block.
+   * Innsats- og gevinst-rad er valgfrie — y-posisjonene reberegnes for
+   * å lukke gap-en når en rad er skjult.
+   */
+  private layoutContentBlock(): void {
+    // Beregn nåværende innholds-høyde basert på synlige rader.
+    let height = ICON_SIZE;
+    if (this.innsatsText.visible) {
+      height += ROW_GAP + TEXT_LINE_HEIGHT;
+    }
+    if (this.gevinstText.visible) {
+      // Gevinst-raden henger under enten icon (om innsats er skjult) eller
+      // innsats. Vi gir samme gap fra forrige rad i begge tilfeller.
+      height += this.innsatsText.visible
+        ? GEVINST_GAP + TEXT_LINE_HEIGHT
+        : ROW_GAP + TEXT_LINE_HEIGHT;
+    }
+
+    // Re-posisjoner gevinst-raden hvis innsats er skjult.
+    if (this.gevinstText.visible) {
+      this.gevinstText.y = this.innsatsText.visible
+        ? ICON_SIZE + ROW_GAP + TEXT_LINE_HEIGHT + GEVINST_GAP
+        : ICON_SIZE + ROW_GAP;
+    }
+
+    // Sentrere blokken vertikalt.
+    this.contentBlock.y = Math.max(0, (this.colHeight - height) / 2);
   }
 
   // ── interne tegne-rutiner ───────────────────────────────────────────────

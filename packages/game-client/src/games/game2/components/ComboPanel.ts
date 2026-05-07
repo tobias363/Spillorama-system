@@ -149,8 +149,10 @@ export class ComboPanel extends Container {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
         fontSize: 13,
         fontWeight: "700",
-        fill: 0xeae0d2,
-        letterSpacing: 1.6,
+        // Mockup `.hovedspill-col .panel-title { color: #fff }` — pure white,
+        // ikke cream-tone. Tobias 2026-05-06 PR 2 mockup-paritet.
+        fill: 0xffffff,
+        letterSpacing: 1.82, // 0.14em av 13px
         align: "center",
       },
     });
@@ -221,22 +223,26 @@ export class ComboPanel extends Container {
     // Kløver-ikon (lazy-loaded, fallback til Graphics).
     void this.loadClover();
 
-    // Label under kløver — viser "VELG LYKKETALL" når ingen valgt, ellers
-    // "Lykketall: NN".
+    // Label under kløver — mockup `.panel-title` med multi-line "Velg<br/>Lykketall".
+    // Tobias 2026-05-06 PR 2: bryt teksten over to linjer for å matche mockup,
+    // og match `panel-title`-styling (13px, 0.12em letter-spacing, white-92).
+    // Når en lykketall er valgt, viser vi "LYKKETALL: NN" på én linje (se
+    // `setLuckyNumber`).
     this.lykketallLabel = new Text({
-      text: "VELG LYKKETALL",
+      text: "VELG\nLYKKETALL",
       style: {
         fontFamily: "Inter, system-ui, Helvetica, sans-serif",
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: "700",
-        fill: 0xeae0d2,
-        letterSpacing: 1.2,
+        fill: 0xffffff,
+        letterSpacing: 1.56, // 0.12em av 13px
         align: "center",
+        lineHeight: 16,
       },
     });
     this.lykketallLabel.anchor.set(0.5, 0);
     this.lykketallLabel.x = LYKKETALL_COL_W / 2;
-    // Posisjon settes i `layoutLykketallContent` etter at kløveren er lastet.
+    // Posisjon settes i `loadClover` etter at kløveren er lastet.
     // Foreløpig posisjon: under forventet kløver-plass.
     this.lykketallLabel.y = (this.panelH - CLOVER_SIZE) / 2 + CLOVER_SIZE + 6;
     this.lykketallCol.addChild(this.lykketallLabel);
@@ -314,7 +320,9 @@ export class ComboPanel extends Container {
     this.buyButtonText.text = label;
   }
 
-  /** Markér valgt lucky-number — oppdaterer tekst-display i Lykketall-kolonnen. */
+  /** Markér valgt lucky-number — oppdaterer tekst-display i Lykketall-kolonnen.
+   *  Default-state er multi-line "VELG\nLYKKETALL" (mockup-paritet).
+   *  Når en lykketall er valgt skifter vi til single-line "LYKKETALL: NN" i gull. */
   setLuckyNumber(n: number | null): void {
     if (this.currentLuckyNumber === n) return;
     this.currentLuckyNumber = n;
@@ -322,8 +330,8 @@ export class ComboPanel extends Container {
       this.lykketallLabel.text = `LYKKETALL: ${n}`;
       this.lykketallLabel.style.fill = 0xffe83d;
     } else {
-      this.lykketallLabel.text = "VELG LYKKETALL";
-      this.lykketallLabel.style.fill = 0xeae0d2;
+      this.lykketallLabel.text = "VELG\nLYKKETALL";
+      this.lykketallLabel.style.fill = 0xffffff;
     }
   }
 
@@ -413,9 +421,15 @@ export class ComboPanel extends Container {
    * Last kløver-asset asynkront og plasser i Lykketall-kolonnen. Sentrert
    * horisontalt; vertikalt over labelen så hele blokken (kløver + label)
    * er midt-stilt i kolonnen.
+   *
+   * Tobias 2026-05-06 PR 2: label er nå multi-line "VELG\nLYKKETALL" med
+   * 13px / lineHeight 16 → ~32px label-høyde. Block-høyde oppdatert
+   * tilsvarende så blokken (kløver + label) er ekte vertikalt sentrert.
    */
   private async loadClover(): Promise<void> {
-    const blockH = CLOVER_SIZE + 6 + 14; // kløver + gap + label-h
+    // 13px font, lineHeight 16, 2 linjer ≈ 32px. Pluss 6px gap til kløver.
+    const labelH = 32;
+    const blockH = CLOVER_SIZE + 6 + labelH; // kløver + gap + label-h
     const blockTop = (this.panelH - blockH) / 2;
     try {
       const tex = (await Assets.load(CLOVER_URL)) as Texture;
