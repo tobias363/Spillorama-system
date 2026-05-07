@@ -279,39 +279,39 @@ Følgende mekanikker er **separate paths** og IKKE en del av Rad 1-4 + Fullt Hus
 
 ---
 
-## 9. Multi-vinner-scenarier — ÅPENT SPØRSMÅL
+## 9. Multi-vinner-scenarier — Per-vinner per farge
 
-> **Status:** Avventer bekreftelse fra Tobias.
+> **Status:** Bekreftet av Tobias 2026-05-08.
 
-### 9.1 Bakgrunn
+### 9.1 Regelen
 
-Når flere vinnere får samme phase (Rad 1, Rad 2, ..., Fullt Hus) i samme trekk, oppstår spørsmålet: får hver vinner sin farges multiplikatert prize, eller deles en pot mellom dem?
+**Hver vinner får sin auto-multiplikatert prize per bongfarge, uavhengig av om andre vinner samme phase i samme trekk.**
 
-### 9.2 Engine-implementasjon i dag
+Det er IKKE pot-deling. Hver bong-betaling generer sin egen prize basert på bong-pris.
 
-`Game1DrawEngineService.payoutPerColorGroups` bruker tilsynelatende "firstColor's pattern" — alle vinnere deler likt uavhengig av bongfarge. Det betyr en lilla-vinner ved siden av en hvit-vinner får ikke 3x det den hvite får.
+### 9.2 Eksempel — Rad 1 med base 100 kr
 
-### 9.3 Mulige tolkninger
+**Scenario:** I samme trekk vinner følgende spillere Rad 1:
+- Spiller A med hvit bong (5 kr)
+- Spiller B med gul bong (10 kr)
+- Spiller C med lilla bong (15 kr)
+- Spiller D med en annen lilla bong (15 kr)
 
-**Tolkning A — Per-vinner per farge (Tobias' uttalte hovedregel):**
-- Hvit-vinner får 100 kr (rad1_base × 1)
-- Lilla-vinner får 300 kr (rad1_base × 3)
-- Hver vinner uavhengig av andre
+**Utbetaling:**
+- A får **100 kr** (100 × 1)
+- B får **200 kr** (100 × 2)
+- C får **300 kr** (100 × 3)
+- D får **300 kr** (100 × 3)
 
-**Tolkning B — Pot-deling per farge:**
-- Pot per fargegruppe deles likt blant vinnerne i gruppen
-- Lilla-pot på 300 kr for én vinner; 150 kr/vinner ved to lilla-vinnere; osv.
+Total payout: 900 kr. Det er IKKE en pot på 100 kr som deles på 4 vinnere — det er fire individuelle utbetalinger basert på hver spillers bongfarge.
 
-**Tolkning C — Pot-deling samlet:**
-- En total pot for phase deles likt mellom ALLE vinnere uavhengig av farge
+### 9.3 Konsekvens for engine-implementasjon
 
-### 9.4 Konsekvens for koden
+Engine-pathen `Game1DrawEngineService.payoutPerColorGroups` har historisk brukt "firstColor's pattern" som tilsier pot-deling. Dette er **feil** for hovedspill og må endres slik at hver vinner får sin farges entry fra `spill1.ticketColors[]`-array.
 
-- Hvis Tolkning A er korrekt: engine `payoutPerColorGroups` har bug og må endres
-- Hvis Tolkning B: engine kan være korrekt avhengig av implementasjon
-- Hvis Tolkning C: engine kan være korrekt, men auto-multiplikator gir lite mening for multi-vinner
+### 9.4 Trafikklys avviker
 
-**Tobias må bekrefte hvilken som gjelder for pilot.** Når svar foreligger, oppdater denne seksjonen og fjern "ÅPENT SPØRSMÅL"-stempelet.
+For Trafikklys er ikke regelen per-bongfarge — det er per-rad-farge. Alle vinnere på samme rad får samme prize (definert av rad-fargen for runden), uavhengig av bongfarge. Dette er fordi alle Trafikklys-bonger har samme pris (15 kr).
 
 ---
 
@@ -481,6 +481,7 @@ Før du skriver eller endrer kode i payout-pathen, gå gjennom denne sjekklisten
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-08 | Initial versjon. Konsolidert fra PM_HANDOFF_2026-05-07.md, SPILLKATALOG.md, og direkte bekreftelser fra Tobias gjennom flere PM-sesjoner. Multi-vinner-regel markert som åpent spørsmål. | PM-AI (Claude Opus 4.7) |
+| 2026-05-08 | Multi-vinner-regel (§9) bekreftet av Tobias som "per-vinner per farge" (Tolkning A). Engine-pathen `payoutPerColorGroups` må endres for å matche regelen. | PM-AI (Claude Opus 4.7) |
 
 ---
 
