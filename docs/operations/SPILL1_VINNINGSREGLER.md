@@ -1,7 +1,9 @@
 # Spill 1 — vinningsregler (definitiv referanse)
 
-**Dato:** 2026-04-27  
+**Dato:** 2026-04-27 (oppdatert 2026-05-08)
 **Status:** Definitiv kilde for testing og produksjons-validering. Erstatter alle tidligere uformelle beskrivelser.
+
+**2026-05-08 oppdatering:** §3 (multi-vinner-split) og §4 (single-prize-cap) er korrigert per Tobias' eksplisitte avklaring. Endringene er reflektert i denne fila + i [`docs/architecture/SPILL_REGLER_OG_PAYOUT.md`](../architecture/SPILL_REGLER_OG_PAYOUT.md) §9 (kanonisk regelsett).
 
 Dette dokumentet beskriver eksakt hvordan vinninger detekteres og fordeles i Spill 1 (Norsk Bingo, 75-ball, 5-fase). Brukes som test-spec og review-grunnlag.
 
@@ -51,40 +53,77 @@ Etter HVER trekning evaluerer engine den aktive fasen (første ikke-vunnede fase
 
 ---
 
-## 3. Multi-winner split (delt premie)
+## 3. Multi-winner split — Pot per bongstørrelse (oppdatert 2026-05-08)
 
-### Når split skjer
+> **2026-05-08:** Tidligere versjon av denne seksjonen sa "delt likt mellom alle vinnere uansett bongstørrelse". Tobias har bekreftet at riktig regel er **separate potter per bongstørrelse** — innsatsen avgjør hvor mye man vinner.
 
-Hvis **flere bonger treffer samme mønster på samme trekning**, deles premien likt mellom alle vinnere — gjelder alle 5 faser.
+### Hovedregel
 
-Konkret: hvis ball 17 fullfører 1. rad på spiller A's bong OG spiller B's bong samtidig:
+For hver fase (Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus) er det **én pot per bongstørrelse**:
 
-- Total premie for 1 Rad: 100 kr
-- Antall vinnere: 2
-- Per-vinner: floor(100 / 2) = **50 kr** til hver
-- Rest-øre: 0 (jevnt delelig)
+| Bongstørrelse | Pot |
+|---|---|
+| Hvit (5 kr) | base × 1 |
+| Gul (10 kr) | base × 2 |
+| Lilla (15 kr) | base × 3 |
+
+Hver pot deles likt mellom bongene som vant innenfor samme bongstørrelse. En spiller får summen av sine bongers andeler.
+
+### Eksempler (Rad 1 base = 100 kr)
+
+**Eksempel A — solo lilla-spiller:**
+- Lilla-pot = 100 × 3 = 300 kr
+- 1 vinnende lilla-bong → 300 kr / 1 = 300 kr til spilleren
+
+**Eksempel B — 2 forskjellige spillere, begge gul:**
+- Gul-pot = 100 × 2 = 200 kr
+- 2 vinnende gul-bonger (forskjellige spillere) → 200 / 2 = 100 kr hver
+
+**Eksempel C — 1 hvit-spiller + 1 lilla-spiller (forskjellige spillere):**
+- Hvit-pot = 100 × 1 = 100 kr → hvit-spiller får 100 kr
+- Lilla-pot = 100 × 3 = 300 kr → lilla-spiller får 300 kr
+- Total payout 400 kr (forhold 1:3 = "lilla satset 3x mer, vinner 3x mer")
+
+**Eksempel D — 1 spiller med 3 lilla-bonger som alle vinner:**
+- Lilla-pot = 100 × 3 = 300 kr
+- 3 vinnende lilla-bonger (samme spiller) → 300 / 3 = 100 kr per bong
+- Spilleren får alle 3 andelene = 300 kr totalt
+- "Spilleren får alt" — gevinsten illustrert på bongen (300 kr) deles på de 3 bongene, men spilleren har alle og får hele poten
+
+**Eksempel E — 3 forskjellige spillere med 1 lilla-bong hver:**
+- Lilla-pot = 300 kr
+- 3 vinnende lilla-bonger (forskjellige spillere) → 300 / 3 = 100 kr per spiller
 
 ### Floor-rounding og hus-rest
 
-Premier deles med floor-division. Eventuell rest-øre (matematisk umulig å dele jevnt) tilfaller huset.
+Premier deles med floor-division per bongstørrelse-pot. Eventuell rest-øre (matematisk umulig å dele jevnt) tilfaller huset.
 
-Eksempel: 3 vinnere på Fullt Hus 1000 kr:
-- Per-vinner: floor(1000 / 3) = 333 kr × 3 = 999 kr
-- Hus-rest: 1 kr (loggføres som `HOUSE_RETAINED` i compliance-ledger per §71)
+Eksempel: 3 vinnende lilla-bonger på Fullt Hus med base 1000 kr:
+- Lilla-pot = 1000 × 3 = 3000 kr
+- Per-bong: floor(3000 / 3) = 1000 kr × 3 = 3000 kr
+- Hus-rest: 0 kr (jevnt delelig)
 
-### Multi-bong per spiller
+Eksempel med rest: 7 vinnende lilla-bonger på Rad 1 base 100 kr:
+- Lilla-pot = 100 × 3 = 300 kr
+- Per-bong: floor(300 / 7) = 42 kr × 7 = 294 kr
+- Hus-rest: 6 kr (loggføres som `HOUSE_RETAINED` i compliance-ledger per §71)
 
-En enkelt spiller kan ha flere bonger som ALLE treffer mønsteret på samme ball. Spilleren teller likevel som **én** vinner — gevinsten splittes per UNIK spiller, ikke per bong.
+### Multi-bong per spiller — én pot, alle andeler til samme spiller
 
-Eksempel: spiller A har 3 bonger der alle 3 treffer 1 Rad på ball 16. Spiller B har ingen.
-- Total premie: 100 kr
-- Antall unike vinnere: 1 (kun A)
-- A får hele 100 kr
+En enkelt spiller kan ha flere bonger som ALLE treffer mønsteret på samme ball. Spilleren får **summen av sine bongers andeler** av poten — ikke flere potter.
 
-Hvis spiller A og B begge har bonger som treffer på ball 16:
-- 2 unike vinnere → 50 kr hver, uavhengig av hvor mange bonger hver har
+Som vist i Eksempel D: spilleren med 3 lilla-bonger får 300 kr totalt (samme som solo-vinner), ikke 900 kr (3 × 300).
 
-> **Viktig per-farge-regel:** I varianter med `patternsByColor` (per-farge premie-matrise) kan en spiller vinne i flere farge-grupper hvis de har bonger i flere farger. Hver farge har egen split innen seg. Detaljer i [`docs/architecture/spill1-variantconfig-admin-coupling.md`](../architecture/spill1-variantconfig-admin-coupling.md).
+### Tomme bongstørrelse-potter
+
+Hvis en bongstørrelse ikke har noen vinnere, utbetales den potten ikke. Pot "går ikke videre" til andre bongstørrelser.
+
+Eksempel: Fullt Hus med 1 lilla-vinner og 0 gul/hvit-vinnere:
+- Lilla-pot utbetalt: 300 × 3 = 900 kr (per Tobias-uttalelse for lilla solo)
+- Gul-pot ikke utbetalt
+- Hvit-pot ikke utbetalt
+
+> **Per-farge-regel for varianter:** I varianter med `patternsByColor` (per-farge premie-matrise) kan en spiller vinne i flere farge-grupper hvis de har bonger i flere farger. Hver farge har egen pot etter §3-regelen. Detaljer i [`docs/architecture/spill1-variantconfig-admin-coupling.md`](../architecture/spill1-variantconfig-admin-coupling.md) — men oppmerk at "per-farge-pot" der refererer til _bong_-fargen i §3, ikke til Trafikklys' rad-farge.
 
 ---
 
@@ -105,9 +144,15 @@ Hver fase i variant-config har et `winningType`-felt:
 - Pool-cappet — premien kan reduseres hvis pool er liten
 - Ingen hus-deficit; hus deler ikke ut mer enn pool kan dekke
 
-### Single-prize-cap (regulatorisk)
+### Single-prize-cap (regulatorisk) — kun databingo (oppdatert 2026-05-08)
 
-Uansett `winningType` kan ENKELT-premie ALDRI overstige **2500 kr** (pengespillforskriften §11). Hvis konfigurert prize > 2500, kappes til 2500 og diff loggføres som `HOUSE_RETAINED` med audit-tag.
+> **2026-05-08:** Denne paragrafen sa tidligere at 2500 kr-capen gjelder **all** bingo. Tobias har bekreftet at capen kun gjelder databingo (SpinnGo / `spillorama`), ikke hovedspill.
+
+**Hovedspill (Spill 1, 2, 3 — slugs `bingo`, `rocket`, `monsterbingo`):** Ingen single-prize-cap. Lilla-bong på Innsatsen Fullt Hus = 3000 kr og lilla-bong på Oddsen-HIGH = 4500 kr er forventet og regulatorisk OK.
+
+**Databingo (SpinnGo — slug `spillorama`):** Single-premie kan ALDRI overstige **2500 kr** (pengespillforskriften §11 for databingo-kategorien). Hvis konfigurert prize > 2500, kappes til 2500 og diff loggføres som `HOUSE_RETAINED` med audit-tag.
+
+**Implementasjon:** `PrizePolicyPort.applySinglePrizeCap` skal kun aktiveres for `gameType = DATABINGO`, ikke `gameType = MAIN_GAME`. Eksisterende kode i `BingoEngine.submitClaim` som bruker capen blanket på alle game-types må fikses for å skille per gameType (oppfølger-PR — flagget i `SPILL_REGLER_OG_PAYOUT.md` §4).
 
 ---
 

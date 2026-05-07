@@ -279,88 +279,110 @@ Følgende mekanikker er **separate paths** og IKKE en del av Rad 1-4 + Fullt Hus
 
 ---
 
-## 9. Multi-vinner-scenarier — Bong-vektet pot-deling
+## 9. Multi-vinner-regel — Pot per bongstørrelse
 
-> **Status:** Bekreftet av Tobias 2026-05-08.
+> **Status:** DEFINITIV. Bekreftet av Tobias 2026-05-08. Erstatter §3 i `docs/operations/SPILL1_VINNINGSREGLER.md` (som sa flat-deling 50/50 — feil).
 
 ### 9.1 Regelen
 
-**Vinnere på samme phase deler en pot, der delingen er vektet med bongstørrelse.** "Hvis du satser dobbelt så mye, vinner du dobbelt så mye" — proporsjonalt med innsats.
+For hver fase (Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus) er det **separate potter per bongstørrelse**. Hver pot deles likt mellom bongene som vant innenfor samme bongstørrelse. En spiller får summen av sine bongers andeler.
 
-Mathematisk er dette ekvivalent med per-vinner auto-multiplikator (hver vinner får `base × bongMultiplier` uavhengig av andre vinnere), men presentert som pot-deling.
+**Det utbetales aldri mer enn én pot per bongstørrelse for samme fase.** Multi-bong-per-spiller gir ikke ekstra utbetalinger — spilleren får sin andel av poten, ikke per-bong-utbetaling.
 
 ### 9.2 Formel
 
-**Pot for fasen** = `base × Σ(bongMultiplier for hver vinner)`
+```
+pot[bongstørrelse] = base × bongMultiplier[bongstørrelse]
+```
 
 der `bongMultiplier` er:
 - Hvit (5 kr): × 1
 - Gul (10 kr): × 2
 - Lilla (15 kr): × 3
 
-**Hver vinners andel** = `(deres bongMultiplier / sum av alle bongMultipliers) × pot`
-
-Dette forenkles til: `vinnerens andel = base × deres bongMultiplier`
-
-### 9.3 Eksempler (Rad 1 base = 100 kr)
-
-| Vinnere | Pot-formel | Pot total | Per vinner |
-|---|---|---|---|
-| 1 hvit (solo) | 100 × 1 | 100 | hvit får 100 |
-| 1 lilla (solo) | 100 × 3 | 300 | lilla får 300 |
-| 1 hvit + 1 lilla | 100 × (1+3) | 400 | hvit 100, lilla 300 |
-| 2 lilla | 100 × (3+3) | 600 | hver lilla 300 |
-| 2 lilla + 1 hvit | 100 × (3+3+1) | 700 | hver lilla 300, hvit 100 |
-| 1 hvit + 1 gul + 1 lilla | 100 × (1+2+3) | 600 | hvit 100, gul 200, lilla 300 |
-
-**Verifisering av prinsippet:** I alle tilfeller får en lilla-vinner 300 kr og en hvit-vinner 100 kr — dvs. lilla får 3× det hvit får, fordi lilla satset 3× så mye. Antall andre vinnere påvirker IKKE den enkelte spillerens utbetaling.
-
-### 9.4 Konsekvens for engine-implementasjon
-
-Engine kan implementere dette på to ekvivalente måter:
-
-**Implementasjon X — Per-vinner auto-mult (enklere):**
 ```
-for each winner:
-  prize = base × bongMultiplier[winner.color]
-  pay(winner, prize)
+hver vinnende bongs andel = pot[bongstørrelse] / antall_vinnende_bonger_i_samme_størrelse
+spillerens utbetaling     = sum av alle hens vinnende bongers andel
 ```
 
-**Implementasjon Y — Pot-basert (eksponerer regnskaps-konseptet):**
-```
-pot = base × sum(bongMultiplier[w.color] for w in winners)
-for each winner:
-  share = (bongMultiplier[winner.color] / total_multiplier_sum) × pot
-  pay(winner, share)
-```
+Hvis en bongstørrelse ikke har noen vinnere, utbetales den potten ikke (poten "går ikke videre" til andre bongstørrelser).
 
-Begge gir IDENTISKE utbetalinger. Velg den som er enklest å forklare i audit-rapporter.
+### 9.3 Test-matrise (Rad 1 base = 100 kr)
 
-**Eksisterende engine-path** `Game1DrawEngineService.payoutPerColorGroups` med "firstColor's pattern" var feil — den var en pot-deling uten bong-vekting (alle vinnere fikk samme andel uavhengig av bongstørrelse). Den må erstattes med en av implementasjonene over.
+| Scenario | Hvit-pot (100) | Gul-pot (200) | Lilla-pot (300) | Spiller-utbetaling |
+|---|---|---|---|---|
+| 1 hvit-spiller solo | 100 (1 bong) | — | — | hvit får **100** |
+| 1 lilla-spiller solo | — | — | 300 (1 bong) | lilla får **300** |
+| 1 hvit + 1 lilla (forskjellige spillere) | 100 (1) | — | 300 (1) | hvit **100**, lilla **300** |
+| 2 hvit-spillere | 100 (2) | — | — | hver hvit får **50** |
+| 2 gul-spillere | — | 200 (2) | — | hver gul får **100** ("50/50"-prinsippet) |
+| 2 lilla-spillere | — | — | 300 (2) | hver lilla får **150** |
+| 1 spiller med 3 lilla-bonger som alle vinner | — | — | 300 (3 bonger samme spiller) | spilleren får **300** (alle 3 andelene) |
+| 3 forskjellige spillere med 1 lilla-bong hver | — | — | 300 (3 bonger forskjellige spillere) | hver spiller får **100** |
+| 1 hvit + 1 gul + 1 lilla | 100 (1) | 200 (1) | 300 (1) | hvit 100, gul 200, lilla 300 (forhold 1:2:3) |
 
-### 9.5 Compliance-ledger
+**Verifisering mot prinsippene Tobias har bekreftet:**
+- ✅ "Innsats avgjør gevinst" — lilla-pot (300) > gul-pot (200) > hvit-pot (100)
+- ✅ "Aldri flere gevinster per rad" — én pot per bongstørrelse, ikke per bong
+- ✅ "Spilleren som satser mest vinner mest" — lilla-spillere vinner mer enn hvit-spillere
+- ✅ "Begge satser 10 kr → 50/50" — gul-pot (200) deles likt på 2 gul-vinnere = 100 hver
+- ✅ "Spilleren med 3 bonger får alt" — én pot, alle 3 andelene går til samme spiller = full pot
+- ✅ "1/3 til 5 kr-bong, 2/3 til 10 kr-bong" — solo hvit (100) vs solo gul (200), forhold 1:2 av total payout 300
 
-For audit må følgende skrives per vinner:
+### 9.4 Trafikklys avviker
+
+For Trafikklys (`prize_multiplier_mode = "explicit_per_color"`) er bongprisen flat 15 kr. Pot-størrelsen er definert av RAD-FARGEN (ikke bongfargen):
+
+- Pot = `prizesPerRowColor[radFarge]` for radvinst, eller `bingoPerRowColor[radFarge]` for Fullt Hus
+- Alle vinnere deler poten likt (ikke vektet — alle bonger har samme pris og dermed samme vekt)
+
+Dette er en spesialregel som kun gjelder Trafikklys-katalog-rader.
+
+### 9.5 Oddsen
+
+Pot-per-bongstørrelse gjelder også Oddsen. Eneste forskjell på Fullt Hus:
+- Pot-base bytter mellom `bingoBaseLow` og `bingoBaseHigh` avhengig av om Fullt Hus skjedde på trekk ≤ `targetDraw` (HIGH) eller etter (LOW)
+
+Eksempel — Oddsen-55 med Fullt Hus på trekk 50 (HIGH-bucket):
+- Lilla-pot = 1500 × 3 = 4500 kr
+- 1 lilla-spiller solo → 4500 kr
+- 2 lilla-spillere → hver får 2250 kr (lilla-pot delt likt mellom 2 lilla-bonger)
+
+### 9.6 Compliance-ledger-felter
+
+For full Lotteritilsynet-sporbarhet må følgende skrives per vinner:
 - `prizeAmountCents` — vinnerens faktiske utbetaling
 - `ticketColor` — vinnerens bongfarge
 - `ticketPriceCents` — vinnerens innsats (5/10/15 kr)
-- `bongMultiplier` — vekt brukt i utregningen (1/2/3)
-- `totalPotCents` — total pot for fasen
-- `winnerCount` — antall vinnere på samme phase
+- `bongMultiplier` — vekt brukt (1/2/3)
+- `potCentsForBongSize` — størrelsen på poten for denne bongstørrelsen (base × multiplier)
+- `winningTicketsInSameSize` — antall bonger som vant samme pot
+- `winningPlayersInSameSize` — antall unike spillere innenfor samme bongstørrelse
 
-Dette gir Lotteritilsynet full sporbarhet på hvordan utbetalingen ble regnet ut.
+Dette gjør at en revisor kan reprodusere utbetalingen fra ledger-data alene.
 
-### 9.6 Trafikklys avviker
+### 9.7 Engine-implementasjon
 
-For Trafikklys er ikke regelen bong-vektet — det er rad-farge-basert. Alle vinnere på samme rad får SAMME prize (definert av rad-fargen for runden), uavhengig av bongfarge. Dette er konsistent med bong-vektet logikk fordi alle Trafikklys-bonger har samme pris (15 kr flat) og dermed samme vekt.
+```
+for each phase (Rad 1, ..., Fullt Hus):
+  for each bongstørrelse (hvit, gul, lilla):
+    winning_tickets = tickets som vant denne fasen med denne bongstørrelsen
+    if len(winning_tickets) == 0:
+      continue  // ingen pot utbetales for denne størrelsen
+    pot_cents = base × bongMultiplier[bongstørrelse]
+    share_per_ticket = floor(pot_cents / len(winning_tickets))
+    rest = pot_cents - (share_per_ticket × len(winning_tickets))  // floor-rest til HOUSE_RETAINED
+    for each ticket in winning_tickets:
+      pay(ticket.player, share_per_ticket)
+    if rest > 0:
+      log_house_retained(rest)  // floor-rounding-rest, audit-event
+```
 
-### 9.7 Oddsen
+**Floor-rounding:** Hvis `pot_cents % len(winning_tickets) != 0`, går resten til huset som `HOUSE_RETAINED`-ledger-event (samme floor-regel som eksisterende `SPILL1_VINNINGSREGLER.md` §3 — denne delen er uendret).
 
-Auto-multiplikator-regelen + bong-vektet pot-deling gjelder også Oddsen, men på Fullt Hus brukes `bingoBaseLow` eller `bingoBaseHigh` som base avhengig av om Fullt Hus skjedde innen `targetDraw`.
+### 9.8 Status
 
-Eksempel — Oddsen-55 med Fullt Hus på trekk 50 (HIGH bucket):
-- Pot = 1500 × (sum av vinnere's bongMultiplier)
-- 1 hvit + 1 lilla → pot = 1500 × (1+3) = 6000, hvit 1500, lilla 4500
+Eksisterende engine-path `Game1DrawEngineService.payoutPerColorGroups` med "firstColor's pattern" implementerer **verken** denne regelen eller flat-deling-uten-vekting. PR #995 implementerte per-vinner-uavhengig (Tolkning A) — også feil. Begge må erstattes med ny path som matcher §9.7 over.
 
 ---
 
