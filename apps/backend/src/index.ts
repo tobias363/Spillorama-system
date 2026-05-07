@@ -178,6 +178,8 @@ import { createXmlExportDailyTickJob } from "./jobs/xmlExportDailyTick.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { createAdminAgentPermissionsRouter } from "./routes/adminAgentPermissions.js";
+import { createAdminSystemAccountsRouter } from "./routes/adminSystemAccounts.js";
+import { SystemAccountService, isSystemAccountKey } from "./auth/SystemAccountService.js";
 import { AgentPermissionService } from "./platform/AgentPermissionService.js";
 import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
 import { createAgentDashboardRouter } from "./routes/agentDashboard.js";
@@ -1200,6 +1202,88 @@ const auditLogService = new AuditLogService(auditLogStore);
 // every successful online top-up emits payment.online.completed
 // (regulatorisk pengespillforskriften-trail).
 swedbankPayService.setAuditLogger(auditLogService);
+
+// PR-B (2026-05-07): SystemAccountService — langlevende API-keys for
+// ops/automation/CI som kan kalle admin-endpoints uten passord-flow.
+// Wires SystemAccountService.verify inn som resolver i PlatformService
+// slik at sa_-tokens går til SystemAccountService.verify() i stedet for
+// JWT-DB-lookup. JWT-tokens (eyJ-prefix) håndteres uendret.
+const systemAccountService = new SystemAccountService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
+
+platformService.setSystemAccountResolver(async (apiKey) => {
+  const verified = await systemAccountService.verify(apiKey);
+  if (!verified) return null;
+  // Sett role = "ADMIN" så eksisterende role-baserte permission-gates
+  // passerer (ADMIN_ACCESS_POLICY har ADMIN i alle whitelists). Faktisk
+  // permission-håndhevelse skjer via _systemAccount.permissions hvis
+  // route-handleren bruker object-form av assertAdminPermission.
+  // hallId settes til første scope-entry hvis hallScope er en liste,
+  // ellers null (globalt scope).
+  const hallId = verified.hallScope && verified.hallScope.length > 0
+    ? verified.hallScope[0]!
+    : null;
+  return {
+    id: verified.id,
+    email: `${verified.name}@system-account.local`,
+    displayName: verified.name,
+    walletId: `wallet-${verified.id}`,
+    role: "ADMIN",
+    hallId,
+    kycStatus: "VERIFIED",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    balance: 0,
+    _systemAccount: {
+      accountId: verified.id,
+      accountName: verified.name,
+      permissions: verified.permissions,
+      hallScope: verified.hallScope,
+    },
+  };
+});
+
+// PR-B (2026-05-07): audit-trail + last-used-tracking middleware. Mountes
+// AFTER httpRateLimiter slik at rate-limit gjelder også sa_-keys, og BEFORE
+// alle admin-routes så audit skrives uavhengig av om route-handleren feiler.
+// Audit-skriving + last-used-update er fire-and-forget — failure skal aldri
+// blokkere request-pipelinen.
+app.use(async (req, _res, next) => {
+  try {
+    const header = req.headers.authorization;
+    if (typeof header === "string" && header.startsWith("Bearer ")) {
+      const token = header.slice("Bearer ".length).trim();
+      if (isSystemAccountKey(token)) {
+        const verified = await systemAccountService.verify(token);
+        if (verified) {
+          // Fire-and-forget — failure er bevisst silent.
+          void systemAccountService.recordUsage(verified.id, req.ip ?? null);
+          void auditLogService.record({
+            actorId: verified.id,
+            actorType: "SYSTEM",
+            action: "system_account.use",
+            resource: "system_account",
+            resourceId: verified.id,
+            details: {
+              accountName: verified.name,
+              method: req.method,
+              path: req.path,
+            },
+            ipAddress: req.ip ?? null,
+            userAgent: typeof req.headers["user-agent"] === "string"
+              ? req.headers["user-agent"]
+              : null,
+          });
+        }
+      }
+    }
+  } catch {
+    // Audit-failure skal ikke blokkere requests.
+  }
+  next();
+});
 
 // HV2-B4 (2026-04-30): per-hall Spill 1 prize-floor lookup + ScheduleService
 // floor-håndhevelse. `spill1PrizeDefaultsService` (instansiert ovenfor for
@@ -2872,6 +2956,13 @@ app.use(createAdminAgentPermissionsRouter({
   platformService,
   agentService,
   agentPermissionService,
+  auditLogService,
+}));
+
+// PR-B (2026-05-07): admin-CRUD for system-account API-keys (ops/automation).
+app.use(createAdminSystemAccountsRouter({
+  platformService,
+  systemAccountService,
   auditLogService,
 }));
 

@@ -459,8 +459,55 @@ export function getAdminPermissionMap(role: UserRole): Record<AdminPermission, b
   return map;
 }
 
-export function assertAdminPermission(role: UserRole, permission: AdminPermission, message?: string): void {
-  if (canAccessAdminPermission(role, permission)) {
+/**
+ * PR-B (2026-05-07): SystemAccount-aware overload av assertAdminPermission.
+ *
+ * Hvis kalleren passerer en role-string direkte (eldre kode-stil), behold
+ * den eldre semantikken (ingen system-account-sjekk).
+ *
+ * Hvis kalleren passerer et user-objekt med `_systemAccount`-marker:
+ *   - sjekker at permission er i whitelist
+ *   - hvis ikke → kaster FORBIDDEN
+ *
+ * Hvis user-objekt uten `_systemAccount`: faller tilbake til role-sjekk.
+ */
+type AssertableUser =
+  | UserRole
+  | {
+      role: UserRole;
+      _systemAccount?: {
+        permissions: string[];
+        accountId: string;
+        accountName: string;
+      };
+    };
+
+export function assertAdminPermission(
+  roleOrUser: AssertableUser,
+  permission: AdminPermission,
+  message?: string
+): void {
+  // String-form: bevarer eldre semantikk (ingen system-account-sjekk).
+  if (typeof roleOrUser === "string") {
+    if (canAccessAdminPermission(roleOrUser, permission)) {
+      return;
+    }
+    throw new DomainError("FORBIDDEN", message ?? "Du har ikke tilgang til dette endepunktet.");
+  }
+
+  // Object-form: se etter system-account-marker.
+  const sa = roleOrUser._systemAccount;
+  if (sa) {
+    if (sa.permissions.includes(permission)) {
+      return;
+    }
+    throw new DomainError(
+      "FORBIDDEN",
+      message ?? "System-accountens whitelist tillater ikke denne operasjonen."
+    );
+  }
+  // Vanlig bruker — sjekk rolle.
+  if (canAccessAdminPermission(roleOrUser.role, permission)) {
     return;
   }
   throw new DomainError("FORBIDDEN", message ?? "Du har ikke tilgang til dette endepunktet.");
