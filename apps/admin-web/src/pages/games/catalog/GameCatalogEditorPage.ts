@@ -24,7 +24,11 @@ import {
   entryToFormPayload,
   fetchCatalogEntry,
   saveCatalogEntry,
+  GAME_VARIANT_VALUES,
+  TRAFIKKLYS_ROW_COLORS,
   type CatalogFormPayload,
+  type GameVariant,
+  type TrafikklysRowColor,
 } from "./GameCatalogState.js";
 import {
   BONUS_GAME_SLUG_VALUES,
@@ -53,11 +57,26 @@ const PRIZE_MODE_LABELS: Record<PrizeMultiplierMode, string> = {
   explicit_per_color: "Spesialpris (eksplisitt per bongfarge)",
 };
 
+const GAME_VARIANT_LABELS: Record<GameVariant, string> = {
+  standard: "Standard",
+  trafikklys: "Trafikklys (spesial)",
+  oddsen: "Oddsen (spesial)",
+};
+
+const TRAFIKKLYS_ROW_COLOR_LABELS: Record<TrafikklysRowColor, string> = {
+  grønn: "Grønn",
+  gul: "Gul",
+  rød: "Rød",
+};
+
 /**
  * Tobias 2026-05-07 (premise): billigste bong er ALLTID 5 kr (500 øre).
  * Multiplikator: faktor = ticketPriceCents / 500.
  */
 const CHEAPEST_PRICE_CENTS = 500;
+
+/** Tobias 2026-05-07: billigste bong er ALLTID 5 kr (500 øre) — Oddsen-base. */
+const ODDSEN_CHEAPEST_PRICE_KR = 5;
 
 export async function renderGameCatalogNewPage(
   container: HTMLElement,
@@ -133,9 +152,13 @@ function renderShell(
             <div class="panel-wrapper collapse in"><div class="panel-body">
               <form id="game-catalog-form" class="form-horizontal" data-existing-id="${escapeHtml(isEdit ? "edit" : "new")}">
                 ${renderBasicSection(payload, isEdit)}
+                ${renderGameVariantSection(payload)}
                 ${renderTicketColorsSection(payload)}
                 ${renderTicketPricesSection(payload)}
+                ${renderTrafikklysFlatPriceSection(payload)}
                 ${renderPrizesSection(payload)}
+                ${renderTrafikklysPrizesSection(payload)}
+                ${renderOddsenSection(payload)}
                 ${renderBonusSection(payload)}
                 ${renderSpecialSection(payload)}
                 <div style="padding:16px;border-top:1px solid #eee;margin-top:16px">
@@ -194,6 +217,189 @@ function renderBasicSection(
             <span class="slider round"></span>
           </label>
           <span class="text-muted" style="margin-left:8px">Inaktive entries kan ikke legges i nye sekvenser.</span>
+        </div>
+      </div>
+    </fieldset>`;
+}
+
+/**
+ * Spilltype-velger. Standard/Trafikklys/Oddsen (radio).
+ *
+ * Når brukeren bytter variant, JS-en i wireForm() viser/skjuler de
+ * relevante seksjonene (trafikklys-flat-pris, trafikklys-premier,
+ * oddsen-felter, og standard pris/premier-seksjoner).
+ */
+function renderGameVariantSection(p: CatalogFormPayload): string {
+  const radios = GAME_VARIANT_VALUES.map(
+    (variant) => `
+      <label class="radio-inline" style="margin-right:16px">
+        <input type="radio" name="gameVariant" value="${variant}"
+          data-variant="${variant}"
+          ${p.gameVariant === variant ? "checked" : ""}>
+        ${escapeHtml(GAME_VARIANT_LABELS[variant])}
+      </label>`,
+  ).join("");
+  return `
+    <fieldset style="border:1px solid #ddd;padding:12px;margin-bottom:16px"
+              id="cat-variant-fieldset">
+      <legend style="font-size:14px;width:auto;padding:0 8px">Spilltype</legend>
+      <div class="form-group">
+        <label class="col-sm-3 control-label">Variant</label>
+        <div class="col-sm-9">
+          ${radios}
+          <p class="help-block">
+            <strong>Standard</strong> bruker pris pr. bongfarge + rad-premier.
+            <strong>Trafikklys</strong> har én flat pris og premier per rad-farge
+            (grønn/gul/rød). <strong>Oddsen</strong> har høy bingo-premie ved
+            fullt hus på et bestemt trekk, lav ellers.
+          </p>
+        </div>
+      </div>
+    </fieldset>`;
+}
+
+/**
+ * Trafikklys: én flat pris alle bonger (15 kr default).
+ * Vises kun når gameVariant=trafikklys; skjuler standard pris-pr-farge.
+ */
+function renderTrafikklysFlatPriceSection(p: CatalogFormPayload): string {
+  const visible = p.gameVariant === "trafikklys";
+  return `
+    <fieldset class="cat-trafikklys-flat-price"
+              style="border:1px solid #ddd;padding:12px;margin-bottom:16px;${visible ? "" : "display:none"}">
+      <legend style="font-size:14px;width:auto;padding:0 8px">Pris alle bonger (Trafikklys)</legend>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="cat-trafikklys-ticketPrice">Pris (kr)</label>
+        <div class="col-sm-9">
+          <input type="number" class="form-control" id="cat-trafikklys-ticketPrice"
+            name="trafikklysTicketPrice"
+            value="${p.trafikklys.ticketPriceKr}"
+            min="0" step="1" style="max-width:140px">
+          <p class="help-block">Trafikklys har samme pris for alle bongfarger (default 15 kr).</p>
+        </div>
+      </div>
+    </fieldset>`;
+}
+
+/**
+ * Trafikklys: premier per RAD-FARGE (grønn/gul/rød) — ikke per bongfarge.
+ * Vises kun når gameVariant=trafikklys.
+ */
+function renderTrafikklysPrizesSection(p: CatalogFormPayload): string {
+  const visible = p.gameVariant === "trafikklys";
+  const colorChip = (rc: TrafikklysRowColor): string => {
+    const checked = p.trafikklys.rowColors.includes(rc);
+    return `
+      <label class="checkbox-inline" style="margin-right:12px">
+        <input type="checkbox" name="trafikklysRowColor" value="${rc}" data-row-color="${rc}"${checked ? " checked" : ""}>
+        ${escapeHtml(TRAFIKKLYS_ROW_COLOR_LABELS[rc])}
+      </label>`;
+  };
+  const prizeRow = (
+    rc: TrafikklysRowColor,
+    field: "prize" | "bingo",
+    label: string,
+  ): string => {
+    const value =
+      field === "prize"
+        ? p.trafikklys.prizesPerRowColorKr[rc] ?? 0
+        : p.trafikklys.bingoPerRowColorKr[rc] ?? 0;
+    const rowClass =
+      field === "prize"
+        ? "trafikklys-prize-row"
+        : "trafikklys-bingo-row";
+    const isActive = p.trafikklys.rowColors.includes(rc);
+    return `
+      <div class="form-group ${rowClass}" data-row-color="${rc}"
+           style="${isActive ? "" : "display:none"}">
+        <label class="col-sm-3 control-label">${escapeHtml(label)} ${escapeHtml(TRAFIKKLYS_ROW_COLOR_LABELS[rc])} (kr)</label>
+        <div class="col-sm-9">
+          <input type="number" class="form-control"
+            name="trafikklys${field === "prize" ? "Prize" : "Bingo"}-${rc}"
+            data-row-color="${rc}"
+            value="${value}"
+            min="0" step="1" style="max-width:140px">
+        </div>
+      </div>`;
+  };
+  return `
+    <fieldset class="cat-trafikklys-prizes"
+              style="border:1px solid #ddd;padding:12px;margin-bottom:16px;${visible ? "" : "display:none"}">
+      <legend style="font-size:14px;width:auto;padding:0 8px">Trafikklys-premier</legend>
+      <div class="form-group">
+        <label class="col-sm-3 control-label">Aktive rad-farger</label>
+        <div class="col-sm-9">
+          ${TRAFIKKLYS_ROW_COLORS.map(colorChip).join("")}
+          <p class="help-block">Premier defineres pr. rad-farge (rød/grønn/gul) — ikke pr. bongfarge.</p>
+        </div>
+      </div>
+      <p class="help-block" style="padding-left:25%;margin-top:8px">Premie ved rad/full house pr. rad-farge:</p>
+      ${TRAFIKKLYS_ROW_COLORS.map((rc) => prizeRow(rc, "prize", "Premie")).join("")}
+      <p class="help-block" style="padding-left:25%;margin-top:8px">Bingo (fullt hus) pr. rad-farge:</p>
+      ${TRAFIKKLYS_ROW_COLORS.map((rc) => prizeRow(rc, "bingo", "Bingo")).join("")}
+    </fieldset>`;
+}
+
+/**
+ * Oddsen: target-trekk + lav/høy base. Vises kun når gameVariant=oddsen.
+ *
+ * Viser preview-tabell som regner ut per-farge low/high via multiplikator
+ * (pris / 5 kr). Brukerne ser konkret hva spillerne vil få.
+ */
+function renderOddsenSection(p: CatalogFormPayload): string {
+  const visible = p.gameVariant === "oddsen";
+  return `
+    <fieldset class="cat-oddsen"
+              style="border:1px solid #ddd;padding:12px;margin-bottom:16px;${visible ? "" : "display:none"}">
+      <legend style="font-size:14px;width:auto;padding:0 8px">Oddsen-spesial</legend>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="cat-oddsen-targetDraw">Target-trekk</label>
+        <div class="col-sm-9">
+          <input type="number" class="form-control" id="cat-oddsen-targetDraw"
+            name="oddsenTargetDraw"
+            value="${p.oddsen.targetDraw}"
+            min="1" max="90" step="1" style="max-width:120px">
+          <p class="help-block">Trekk-nummer (1-90) som gir HØY bingo-premie ved fullt hus.</p>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="cat-oddsen-bingoBaseLow">Bingo lav (5 kr-bong, base)</label>
+        <div class="col-sm-9">
+          <input type="number" class="form-control" id="cat-oddsen-bingoBaseLow"
+            name="oddsenBingoBaseLow"
+            value="${p.oddsen.bingoBaseLowKr}"
+            min="0" step="1" style="max-width:140px">
+          <p class="help-block">Premie hvis fullt hus IKKE på target-trekk.</p>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="cat-oddsen-bingoBaseHigh">Bingo høy (5 kr-bong, base)</label>
+        <div class="col-sm-9">
+          <input type="number" class="form-control" id="cat-oddsen-bingoBaseHigh"
+            name="oddsenBingoBaseHigh"
+            value="${p.oddsen.bingoBaseHighKr}"
+            min="0" step="1" style="max-width:140px">
+          <p class="help-block">Premie hvis fullt hus PÅ target-trekk.</p>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-3 control-label">Forhåndsvisning</label>
+        <div class="col-sm-9">
+          <table class="table table-condensed table-bordered" style="margin-bottom:0;max-width:520px"
+                 id="cat-oddsen-preview"
+                 aria-label="Forhåndsvisning av oddsen-premier">
+            <thead>
+              <tr>
+                <th>Bongfarge</th>
+                <th>Pris</th>
+                <th>Multiplikator</th>
+                <th>Bingo lav</th>
+                <th>Bingo høy</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p class="help-block">Per-farge premier regnes ut som <code>base × (pris / 5 kr)</code>.</p>
         </div>
       </div>
     </fieldset>`;
@@ -431,6 +637,8 @@ function wireForm(
       if (bingoRow) bingoRow.style.display = checked ? "" : "none";
       // Auto-modus preview re-rendres når aktive farger endres
       renderAutoPreview(form);
+      // Oddsen-preview re-rendres når aktive farger endres
+      renderOddsenPreview(form);
     });
   });
 
@@ -473,8 +681,55 @@ function wireForm(
     el.addEventListener("input", () => renderAutoPreview(form));
   });
 
-  // Initial preview-render
+  // Initial auto-preview-render
   renderAutoPreview(form);
+
+  // Variant-radio: viser/skjuler standard vs spesial-blokker
+  const variantRadios = form.querySelectorAll<HTMLInputElement>(
+    'input[name="gameVariant"]',
+  );
+  variantRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      applyVariantVisibility(form, radio.value as GameVariant);
+      if ((radio.value as GameVariant) === "oddsen") {
+        renderOddsenPreview(form);
+      }
+    });
+  });
+
+  // Trafikklys rad-farge-chips: viser/skjuler enkelt-rader
+  const rcCheckboxes = form.querySelectorAll<HTMLInputElement>(
+    'input[name="trafikklysRowColor"]',
+  );
+  rcCheckboxes.forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const rc = cb.dataset.rowColor as TrafikklysRowColor;
+      const visible = cb.checked;
+      const prizeRow = form.querySelector<HTMLElement>(
+        `.trafikklys-prize-row[data-row-color="${rc}"]`,
+      );
+      const bingoRow = form.querySelector<HTMLElement>(
+        `.trafikklys-bingo-row[data-row-color="${rc}"]`,
+      );
+      if (prizeRow) prizeRow.style.display = visible ? "" : "none";
+      if (bingoRow) bingoRow.style.display = visible ? "" : "none";
+    });
+  });
+
+  // Oddsen live-preview: når base-input eller priser endres, re-rendre
+  const oddsenInputs = form.querySelectorAll<HTMLInputElement>(
+    'input[name="oddsenBingoBaseLow"], input[name="oddsenBingoBaseHigh"], input[name^="ticketPrice-"]',
+  );
+  oddsenInputs.forEach((el) => {
+    el.addEventListener("input", () => renderOddsenPreview(form));
+  });
+
+  // Initial preview-render (oddsen)
+  renderOddsenPreview(form);
+
+  // Apply initial visibility for the loaded variant
+  applyVariantVisibility(form, initial.gameVariant);
 
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -541,6 +796,127 @@ function renderAutoPreview(form: HTMLFormElement): void {
   }
 }
 
+/**
+ * Vis/skjul seksjoner basert på valgt variant.
+ *
+ * - `standard`: vis standard pris-pr-farge + premier-pr-farge; skjul spesial-felter
+ * - `trafikklys`: skjul standard pris-pr-farge fieldset + bingo-rader; vis trafikklys-blokker
+ * - `oddsen`: vis standard pris-pr-farge (Oddsen bruker dem), skjul standard
+ *   bingo-rader (Oddsen overskriver bingo via rules), vis oddsen-fieldset
+ */
+function applyVariantVisibility(form: HTMLFormElement, variant: GameVariant): void {
+  const isTrafikklys = variant === "trafikklys";
+  const isOddsen = variant === "oddsen";
+
+  // Standard pris-pr-farge-fieldset — finn via .ticket-price-row.closest("fieldset").
+  // For Trafikklys skjules hele seksjonen siden flat-pris brukes i stedet.
+  const ticketPriceRow0 = form.querySelector<HTMLElement>(".ticket-price-row");
+  const standardPricesField = ticketPriceRow0?.closest("fieldset") ?? null;
+  if (standardPricesField) {
+    (standardPricesField as HTMLElement).style.display = isTrafikklys
+      ? "none"
+      : "";
+  }
+
+  // Standard bingo-pris-rader. For Trafikklys og Oddsen skjules de helt
+  // (bingo-premier styres via rules-blob i stedet).
+  const bingoRows = form.querySelectorAll<HTMLElement>(".bingo-prize-row");
+  bingoRows.forEach((row) => {
+    if (isTrafikklys || isOddsen) {
+      row.style.display = "none";
+    } else {
+      const color = row.dataset.color as TicketColor | undefined;
+      if (!color) return;
+      const cb = form.querySelector<HTMLInputElement>(
+        `input[name="ticketColor"][value="${color}"]`,
+      );
+      row.style.display = cb?.checked ? "" : "none";
+    }
+  });
+
+  // Spesial-fieldsets
+  const trafikklysFlat = form.querySelector<HTMLElement>(
+    ".cat-trafikklys-flat-price",
+  );
+  if (trafikklysFlat) trafikklysFlat.style.display = isTrafikklys ? "" : "none";
+  const trafikklysPrizes = form.querySelector<HTMLElement>(
+    ".cat-trafikklys-prizes",
+  );
+  if (trafikklysPrizes) trafikklysPrizes.style.display = isTrafikklys ? "" : "none";
+  const oddsen = form.querySelector<HTMLElement>(".cat-oddsen");
+  if (oddsen) oddsen.style.display = isOddsen ? "" : "none";
+}
+
+/**
+ * Tegn oddsen-preview-tabell. Leser bingoBaseLow/High + per-farge ticket-pris,
+ * regner ut multiplikator (pris / 5 kr) og tegner per-farge low/high.
+ */
+function renderOddsenPreview(form: HTMLFormElement): void {
+  const tbody = form.querySelector<HTMLTableSectionElement>(
+    "#cat-oddsen-preview tbody",
+  );
+  if (!tbody) return;
+
+  const lowEl = form.querySelector<HTMLInputElement>(
+    'input[name="oddsenBingoBaseLow"]',
+  );
+  const highEl = form.querySelector<HTMLInputElement>(
+    'input[name="oddsenBingoBaseHigh"]',
+  );
+  const lowKr = Number(lowEl?.value ?? 0);
+  const highKr = Number(highEl?.value ?? 0);
+
+  const activeColors: TicketColor[] = [];
+  for (const color of TICKET_COLOR_VALUES) {
+    const cb = form.querySelector<HTMLInputElement>(
+      `input[name="ticketColor"][value="${color}"]`,
+    );
+    if (cb?.checked) activeColors.push(color);
+  }
+
+  const rows: string[] = [];
+  for (const color of activeColors) {
+    const priceEl = form.querySelector<HTMLInputElement>(
+      `input[name="ticketPrice-${color}"]`,
+    );
+    const priceKr = Number(priceEl?.value ?? 0);
+    if (!Number.isFinite(priceKr) || priceKr <= 0) {
+      rows.push(`
+        <tr>
+          <td>${escapeHtml(COLOR_LABELS[color])}</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+        </tr>`);
+      continue;
+    }
+    const multiplier = priceKr / ODDSEN_CHEAPEST_PRICE_KR;
+    const lowOut = Number.isFinite(lowKr) && lowKr > 0
+      ? Math.round(lowKr * multiplier)
+      : 0;
+    const highOut = Number.isFinite(highKr) && highKr > 0
+      ? Math.round(highKr * multiplier)
+      : 0;
+    rows.push(`
+      <tr>
+        <td>${escapeHtml(COLOR_LABELS[color])}</td>
+        <td>${priceKr} kr</td>
+        <td>×${multiplier % 1 === 0 ? multiplier : multiplier.toFixed(2)}</td>
+        <td>${lowOut > 0 ? `<strong>${lowOut} kr</strong>` : "—"}</td>
+        <td>${highOut > 0 ? `<strong>${highOut} kr</strong>` : "—"}</td>
+      </tr>`);
+  }
+  if (rows.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="text-muted text-center">Velg bongfarger for forhåndsvisning</td>
+      </tr>`;
+  } else {
+    tbody.innerHTML = rows.join("");
+  }
+}
+
 function readForm(form: HTMLFormElement): CatalogFormPayload | null {
   const slugEl = form.querySelector<HTMLInputElement>("#cat-slug");
   const displayNameEl = form.querySelector<HTMLInputElement>("#cat-displayName");
@@ -574,6 +950,13 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     return null;
   }
 
+  // Variant (default standard)
+  const variantRadio = form.querySelector<HTMLInputElement>(
+    'input[name="gameVariant"]:checked',
+  );
+  const gameVariant: GameVariant =
+    (variantRadio?.value as GameVariant) ?? "standard";
+
   // Ticket colors
   const colorCbs = form.querySelectorAll<HTMLInputElement>(
     'input[name="ticketColor"]:checked',
@@ -586,18 +969,32 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     return null;
   }
 
-  // Ticket prices (kun for valgte farger)
+  // Ticket prices — for Trafikklys leser vi flat-pris og fanner ut til alle farger
   const ticketPricesKr: Partial<Record<TicketColor, number>> = {};
-  for (const color of ticketColors) {
-    const el = form.querySelector<HTMLInputElement>(
-      `input[name="ticketPrice-${color}"]`,
+  if (gameVariant === "trafikklys") {
+    const flatEl = form.querySelector<HTMLInputElement>(
+      'input[name="trafikklysTicketPrice"]',
     );
-    const v = Number(el?.value ?? 0);
-    if (!Number.isFinite(v) || v <= 0) {
-      Toast.error(`Pris for ${COLOR_LABELS[color]} må være > 0.`);
+    const flat = Number(flatEl?.value ?? 0);
+    if (!Number.isFinite(flat) || flat <= 0) {
+      Toast.error("Trafikklys-pris må være > 0.");
       return null;
     }
-    ticketPricesKr[color] = v;
+    for (const color of ticketColors) {
+      ticketPricesKr[color] = flat;
+    }
+  } else {
+    for (const color of ticketColors) {
+      const el = form.querySelector<HTMLInputElement>(
+        `input[name="ticketPrice-${color}"]`,
+      );
+      const v = Number(el?.value ?? 0);
+      if (!Number.isFinite(v) || v <= 0) {
+        Toast.error(`Pris for ${COLOR_LABELS[color]} må være > 0.`);
+        return null;
+      }
+      ticketPricesKr[color] = v;
+    }
   }
 
   // Prize-mode (Tobias 2026-05-07)
@@ -607,7 +1004,8 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
   const prizeMultiplierMode: PrizeMultiplierMode =
     modeRadio?.value === "explicit_per_color" ? "explicit_per_color" : "auto";
 
-  // Prizes
+  // Standard rad-premier (alle varianter — Oddsen og Trafikklys overrider
+  // bare bingo-delen via rules-blob)
   const radNum = (field: string): number => {
     const el = form.querySelector<HTMLInputElement>(`input[name="prize-${field}"]`);
     const n = Number(el?.value ?? 0);
@@ -622,30 +1020,163 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     bingo: {} as Partial<Record<TicketColor, number>>,
   };
 
-  if (prizeMultiplierMode === "auto") {
-    // Auto-modus: én base — bingoBase. Per-farge bingo regnes ut backend.
-    const baseEl = form.querySelector<HTMLInputElement>(
-      'input[name="prize-bingoBase"]',
-    );
-    const v = Number(baseEl?.value ?? 0);
-    if (!Number.isFinite(v) || v <= 0) {
-      Toast.error("Bingo base må være > 0 i auto-multiplikator-modus.");
-      return null;
-    }
-    prizesKr.bingoBase = v;
-  } else {
-    // Explicit-modus: per-bongfarge bingo (Trafikklys-stil)
-    for (const color of ticketColors) {
-      const el = form.querySelector<HTMLInputElement>(
-        `input[name="bingoPrize-${color}"]`,
+  // Bingo-premie-håndtering avhenger av variant.
+  // - Standard: prize-mode (auto/explicit) styrer hvordan bingo leses.
+  // - Trafikklys/Oddsen: fallback-tall (1) per farge — bingo styres via
+  //   rules-blob på backend.
+  if (gameVariant === "standard") {
+    if (prizeMultiplierMode === "auto") {
+      // Auto-modus: én base — bingoBase. Per-farge bingo regnes ut backend.
+      const baseEl = form.querySelector<HTMLInputElement>(
+        'input[name="prize-bingoBase"]',
       );
-      const v = Number(el?.value ?? 0);
+      const v = Number(baseEl?.value ?? 0);
       if (!Number.isFinite(v) || v <= 0) {
-        Toast.error(`Bingo-premie for ${COLOR_LABELS[color]} må være > 0.`);
+        Toast.error("Bingo base må være > 0 i auto-multiplikator-modus.");
         return null;
       }
-      prizesKr.bingo[color] = v;
+      prizesKr.bingoBase = v;
+    } else {
+      // Explicit-modus: per-bongfarge bingo (Trafikklys-stil)
+      for (const color of ticketColors) {
+        const el = form.querySelector<HTMLInputElement>(
+          `input[name="bingoPrize-${color}"]`,
+        );
+        const v = Number(el?.value ?? 0);
+        if (!Number.isFinite(v) || v <= 0) {
+          Toast.error(`Bingo-premie for ${COLOR_LABELS[color]} må være > 0.`);
+          return null;
+        }
+        prizesKr.bingo[color] = v;
+      }
     }
+  } else {
+    // Spesial-varianter (Trafikklys/Oddsen): fallback-tall, backend bruker rules-blob
+    for (const color of ticketColors) {
+      prizesKr.bingo[color] = 1;
+    }
+  }
+
+  // Trafikklys-spesifikke felter
+  let trafikklys: CatalogFormPayload["trafikklys"];
+  if (gameVariant === "trafikklys") {
+    const flatEl = form.querySelector<HTMLInputElement>(
+      'input[name="trafikklysTicketPrice"]',
+    );
+    const ticketPriceKr = Number(flatEl?.value ?? 0);
+    const rcCbs = form.querySelectorAll<HTMLInputElement>(
+      'input[name="trafikklysRowColor"]:checked',
+    );
+    const rowColors = Array.from(rcCbs)
+      .map((cb) => cb.value as TrafikklysRowColor)
+      .filter((c): c is TrafikklysRowColor =>
+        (TRAFIKKLYS_ROW_COLORS as readonly string[]).includes(c),
+      );
+    if (rowColors.length === 0) {
+      Toast.error("Velg minst én rad-farge for Trafikklys.");
+      return null;
+    }
+    const prizesPerRowColorKr: Partial<Record<TrafikklysRowColor, number>> = {};
+    const bingoPerRowColorKr: Partial<Record<TrafikklysRowColor, number>> = {};
+    for (const rc of rowColors) {
+      const prizeEl = form.querySelector<HTMLInputElement>(
+        `input[name="trafikklysPrize-${rc}"]`,
+      );
+      const bingoEl = form.querySelector<HTMLInputElement>(
+        `input[name="trafikklysBingo-${rc}"]`,
+      );
+      const prizeV = Number(prizeEl?.value ?? 0);
+      const bingoV = Number(bingoEl?.value ?? 0);
+      if (!Number.isFinite(prizeV) || prizeV <= 0) {
+        Toast.error(
+          `Trafikklys-premie for ${TRAFIKKLYS_ROW_COLOR_LABELS[rc]} må være > 0.`,
+        );
+        return null;
+      }
+      if (!Number.isFinite(bingoV) || bingoV <= 0) {
+        Toast.error(
+          `Trafikklys-bingo for ${TRAFIKKLYS_ROW_COLOR_LABELS[rc]} må være > 0.`,
+        );
+        return null;
+      }
+      prizesPerRowColorKr[rc] = prizeV;
+      bingoPerRowColorKr[rc] = bingoV;
+    }
+    trafikklys = {
+      ticketPriceKr,
+      rowColors,
+      prizesPerRowColorKr,
+      bingoPerRowColorKr,
+    };
+  } else {
+    // Bevar siste-leste verdier hvis variant er noe annet —
+    // bruker default som er trygg fallback.
+    const flatEl = form.querySelector<HTMLInputElement>(
+      'input[name="trafikklysTicketPrice"]',
+    );
+    const ticketPriceKr = Number(flatEl?.value ?? 0) || 15;
+    trafikklys = {
+      ticketPriceKr: ticketPriceKr > 0 ? ticketPriceKr : 15,
+      rowColors: [...TRAFIKKLYS_ROW_COLORS],
+      prizesPerRowColorKr: { grønn: 100, gul: 150, rød: 50 },
+      bingoPerRowColorKr: { grønn: 1000, gul: 1500, rød: 500 },
+    };
+  }
+
+  // Oddsen-spesifikke felter
+  let oddsen: CatalogFormPayload["oddsen"];
+  if (gameVariant === "oddsen") {
+    const targetEl = form.querySelector<HTMLInputElement>(
+      'input[name="oddsenTargetDraw"]',
+    );
+    const lowEl = form.querySelector<HTMLInputElement>(
+      'input[name="oddsenBingoBaseLow"]',
+    );
+    const highEl = form.querySelector<HTMLInputElement>(
+      'input[name="oddsenBingoBaseHigh"]',
+    );
+    const targetDraw = Number(targetEl?.value ?? 0);
+    const bingoBaseLowKr = Number(lowEl?.value ?? 0);
+    const bingoBaseHighKr = Number(highEl?.value ?? 0);
+    if (!Number.isFinite(targetDraw) || targetDraw < 1 || targetDraw > 90) {
+      Toast.error("Oddsen target-trekk må være mellom 1 og 90.");
+      return null;
+    }
+    if (!Number.isFinite(bingoBaseLowKr) || bingoBaseLowKr <= 0) {
+      Toast.error("Oddsen bingo-lav må være > 0.");
+      return null;
+    }
+    if (!Number.isFinite(bingoBaseHighKr) || bingoBaseHighKr <= 0) {
+      Toast.error("Oddsen bingo-høy må være > 0.");
+      return null;
+    }
+    // Per-farge: regn ut via multiplikator (pris / 5 kr)
+    const bingoLowPerColorKr: Partial<Record<TicketColor, number>> = {};
+    const bingoHighPerColorKr: Partial<Record<TicketColor, number>> = {};
+    for (const color of ticketColors) {
+      const priceKr = ticketPricesKr[color] ?? 0;
+      if (priceKr > 0) {
+        const multiplier = priceKr / ODDSEN_CHEAPEST_PRICE_KR;
+        bingoLowPerColorKr[color] = Math.round(bingoBaseLowKr * multiplier);
+        bingoHighPerColorKr[color] = Math.round(bingoBaseHighKr * multiplier);
+      }
+    }
+    oddsen = {
+      targetDraw: Math.round(targetDraw),
+      bingoBaseLowKr,
+      bingoBaseHighKr,
+      bingoLowPerColorKr,
+      bingoHighPerColorKr,
+    };
+  } else {
+    // Default fallback for non-Oddsen variants
+    oddsen = {
+      targetDraw: 55,
+      bingoBaseLowKr: 500,
+      bingoBaseHighKr: 1500,
+      bingoLowPerColorKr: { hvit: 500, gul: 1000, lilla: 1500 },
+      bingoHighPerColorKr: { hvit: 1500, gul: 3000, lilla: 4500 },
+    };
   }
 
   // Bonus
@@ -676,6 +1207,9 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     requiresJackpotSetup,
     isActive,
     sortOrder: Number.isFinite(sortOrder) && sortOrder >= 0 ? sortOrder : 0,
+    gameVariant,
+    trafikklys,
+    oddsen,
   };
 }
 
