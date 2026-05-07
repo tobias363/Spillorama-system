@@ -80,22 +80,23 @@ function assertSchemaName(schema: string): string {
 }
 
 /**
- * Bygg ticket_config_json fra catalog-entry. Engine + Game1PayoutService
- * leser denne for å vite ticket-typer + premier per pattern.
+ * Bygg ticket_config_json fra catalog-entry.
  *
- * Mapping (catalog → legacy ticket_config_json):
- *   - ticketTypes:   ticketColors-listen (Engine forventer "yellow"/"white"/
- *                    "purple" på engelsk, så vi mapper "gul"→"yellow" osv.)
- *   - ticketPrice:   ticketPricesCents (per farge)
- *   - ticketPrize:   prizesCents.bingo (per farge — Fullt Hus)
- *   - rowPrizes:     {row1, row2, row3, row4} = prizesCents.rad1-rad4
- *   - bonusGame:     {slug, enabled} fra catalog
- *   - catalogId:     catalog-id for revers-binding (engine kan slå opp
- *                    catalog-konfig hvis nødvendig)
+ * C2-fix (2026-05-07, code-review): engine forventer en ARRAY-of-objects
+ * under `ticketTypesData` (ikke et record under `ticketTypes`). Se
+ * `Game1TicketPurchaseService.extractTicketCatalog`
+ * (apps/backend/src/game/Game1TicketPurchaseService.ts:1191) som er
+ * eneste konsumpsjons-kilde. Riktig shape:
+ *   { ticketTypesData: [{ color, size, pricePerTicket }, ...] }
  *
- * Engine sin nåværende kode plukker ut ticketTypesData["yellow"] osv. via
- * legacy-keys. Catalog bruker norsk farge-vokabular, så bridgen oversetter
- * her — ikke i engine.
+ * Hver bongfarge får entries for både small og large — Spillorama selger
+ * begge størrelser av hver farge, og engine validerer hver
+ * (color, size)-kombinasjon separat. Konvensjon (legacy + tester):
+ * large = 2x small når catalog kun har én pris per farge.
+ *
+ * Catalog bruker norsk farge-vokabular ("gul"/"hvit"/"lilla"); engine
+ * forventer engelsk ("yellow"/"white"/"purple"). Bridgen oversetter
+ * her, ikke i engine.
  */
 const NORWEGIAN_TO_ENGLISH_COLOR: Record<TicketColor, string> = {
   gul: "yellow",
@@ -103,27 +104,58 @@ const NORWEGIAN_TO_ENGLISH_COLOR: Record<TicketColor, string> = {
   lilla: "purple",
 };
 
+/**
+ * Multiplikator for "large"-bong-pris over "small". Legacy-konvensjon
+ * (BingoEngine + admin-UI): 2x når kun én pris er definert per farge.
+ * Hvis catalog senere får et eget large-pris-felt, kan dette erstattes
+ * med en lookup.
+ */
+const LARGE_TICKET_PRICE_MULTIPLIER = 2;
+
 export function buildTicketConfigFromCatalog(
   catalog: GameCatalogEntry,
 ): Record<string, unknown> {
-  const ticketTypes: Record<string, { price: number; prize: number }> = {};
+  const ticketTypesData: Array<{
+    color: string;
+    size: "small" | "large";
+    pricePerTicket: number;
+  }> = [];
   for (const color of catalog.ticketColors) {
     const englishKey = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
-    const price = catalog.ticketPricesCents[color] ?? 0;
+    const smallPrice = catalog.ticketPricesCents[color] ?? 0;
+    if (smallPrice <= 0) continue;
+    ticketTypesData.push({
+      color: englishKey,
+      size: "small",
+      pricePerTicket: smallPrice,
+    });
+    ticketTypesData.push({
+      color: englishKey,
+      size: "large",
+      pricePerTicket: smallPrice * LARGE_TICKET_PRICE_MULTIPLIER,
+    });
+  }
+
+  const bingoPrizes: Record<string, number> = {};
+  for (const color of catalog.ticketColors) {
+    const englishKey = NORWEGIAN_TO_ENGLISH_COLOR[color] ?? color;
     const prize = catalog.prizesCents.bingo[color] ?? 0;
-    ticketTypes[englishKey] = { price, prize };
+    if (prize > 0) bingoPrizes[englishKey] = prize;
   }
 
   const config: Record<string, unknown> = {
     catalogId: catalog.id,
     catalogSlug: catalog.slug,
-    ticketTypes,
+    // Engine-leselig nøkkel — array-of-objects med {color, size, pricePerTicket}.
+    ticketTypesData,
     rowPrizes: {
       row1: catalog.prizesCents.rad1,
       row2: catalog.prizesCents.rad2,
       row3: catalog.prizesCents.rad3,
       row4: catalog.prizesCents.rad4,
     },
+    // Bingo-premie per (engelsk) farge — engine bruker dette for fullt-hus.
+    bingoPrizes,
     // Tobias 2026-05-07: rules-objektet beholdes som "extra" så engine kan
     // lese spill-spesifikk config (mini-game-rotation, lucky number osv.)
     // hvis admin har lagt til detaljer.
@@ -141,27 +173,63 @@ export function buildTicketConfigFromCatalog(
 }
 
 /**
- * Bygg jackpot_config_json fra override. Engine forventer:
- *   { jackpotPrize: { yellow, white, purple }, jackpotDraw }
- * Override-keyen er per farge på norsk; vi oversetter til engelsk.
+ * Bygg jackpot-konfig fra override.
  *
- * Returnerer tom objekt hvis override mangler — engine tolererer da at
- * spillet ikke har jackpot.
+ * H1-fix (2026-05-07, code-review): engine leser jackpot fra
+ * `ticket_config_json.spill1.jackpot.prizeByColor` + `.draw` — IKKE fra
+ * en separat `jackpot_config_json`-kolonne. Se
+ * `Game1DrawEngineHelpers.resolveJackpotConfig`
+ * (apps/backend/src/game/Game1DrawEngineHelpers.ts:154).
+ *
+ * Returnerer både engine-leselig keys (`prizeByColor`/`draw`) og
+ * backward-compat-aliaser (`jackpotPrize`/`jackpotDraw`) i samme objekt.
+ * Caller `buildEngineTicketConfig` plukker ut riktig sub-set når den
+ * embedder under `spill1.jackpot`-pathen i ticket-config.
+ *
+ * Returnerer tom objekt hvis override mangler.
  */
 export function buildJackpotConfigFromOverride(
   override: JackpotOverride | null,
 ): Record<string, unknown> {
   if (!override) return {};
-  const jackpotPrize: Record<string, number> = {};
+  const prizeByColor: Record<string, number> = {};
   for (const [color, amount] of Object.entries(override.prizesCents)) {
     if (typeof amount !== "number") continue;
     const englishKey =
       NORWEGIAN_TO_ENGLISH_COLOR[color as TicketColor] ?? color;
-    jackpotPrize[englishKey] = amount;
+    prizeByColor[englishKey] = amount;
   }
   return {
-    jackpotPrize,
+    // Engine-leselig keys (primær).
+    prizeByColor,
+    draw: override.draw,
+    // Backward-compat alias-keys (admin-tooling, tester).
+    jackpotPrize: { ...prizeByColor },
     jackpotDraw: override.draw,
+  };
+}
+
+/**
+ * H1-fix: kombiner ticket-config og jackpot-override i én payload som
+ * engine kan parse direkte. Plasserer jackpot under `spill1.jackpot`-
+ * pathen så `Game1DrawEngineHelpers.resolveJackpotConfig` finner den
+ * (den leter både på `obj.spill1.jackpot` og fallback `obj.jackpot`).
+ */
+export function buildEngineTicketConfig(
+  catalog: GameCatalogEntry,
+  jackpotOverride: JackpotOverride | null,
+): Record<string, unknown> {
+  const base = buildTicketConfigFromCatalog(catalog);
+  const jackpot = buildJackpotConfigFromOverride(jackpotOverride);
+  if (Object.keys(jackpot).length === 0) return base;
+  return {
+    ...base,
+    spill1: {
+      jackpot: {
+        prizeByColor: jackpot.prizeByColor,
+        draw: jackpot.draw,
+      },
+    },
   };
 }
 
@@ -441,8 +509,12 @@ export class GamePlanEngineBridge {
       }
     }
 
-    // Bygg konfig-objekter
-    const ticketConfig = buildTicketConfigFromCatalog(catalog);
+    // Bygg konfig-objekter. H1-fix (2026-05-07): jackpot embedded-es i
+    // ticket_config_json under `spill1.jackpot`-pathen så
+    // `resolveJackpotConfig` finner det. Jackpot-config-kolonnen får
+    // fortsatt en kopi for backward-compat med admin-tooling, men engine
+    // konsumerer den ikke.
+    const ticketConfig = buildEngineTicketConfig(catalog, jackpotOverride);
     const jackpotConfig = buildJackpotConfigFromOverride(jackpotOverride);
 
     // Bygg participating_halls = bare run.hall_id (single-hall i Fase 4).

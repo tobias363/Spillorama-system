@@ -44,7 +44,6 @@
  *   - Kan kjøres mens prod er live — ingen ALTER TABLE eller LOCK.
  */
 
-import { randomUUID } from "node:crypto";
 import pg from "pg";
 import {
   MIGRATION_PREFIX,
@@ -616,13 +615,16 @@ async function executeMigration(client: pg.Client): Promise<MigrationStats> {
       }
     }
 
-    // Audit-log
+    // Audit-log: id auto-genereres av BIGSERIAL — vi setter den IKKE
+    // eksplisitt (gammel kode forsøkte å bruke randomUUID-streng som
+    // bigint, som krasjer med "invalid input syntax for type bigint").
+    // Skjema: apps/backend/migrations/20260418160000_app_audit_log.sql:17.
     await client.query(
       `INSERT INTO ${schema}.app_audit_log
-         (id, actor_id, actor_type, action, resource, resource_id, details)
-       VALUES ($1, NULL, 'SYSTEM', 'data_migration.game_plan_redesign.execute',
-               'system', NULL, $2::jsonb)`,
-      [randomUUID(), JSON.stringify(stats)],
+         (actor_id, actor_type, action, resource, resource_id, details)
+       VALUES (NULL, 'SYSTEM', 'data_migration.game_plan_redesign.execute',
+               'system', NULL, $1::jsonb)`,
+      [JSON.stringify(stats)],
     );
 
     await client.query("COMMIT");
@@ -668,13 +670,13 @@ async function rollbackMigration(client: pg.Client): Promise<MigrationStats> {
     );
     stats.catalogsCreated -= catDel.rowCount ?? 0;
 
-    // Audit
+    // Audit: id auto-genereres av BIGSERIAL (samme C1-fix som executeMigration).
     await client.query(
       `INSERT INTO ${schema}.app_audit_log
-         (id, actor_id, actor_type, action, resource, resource_id, details)
-       VALUES ($1, NULL, 'SYSTEM', 'data_migration.game_plan_redesign.rollback',
-               'system', NULL, $2::jsonb)`,
-      [randomUUID(), JSON.stringify(stats)],
+         (actor_id, actor_type, action, resource, resource_id, details)
+       VALUES (NULL, 'SYSTEM', 'data_migration.game_plan_redesign.rollback',
+               'system', NULL, $1::jsonb)`,
+      [JSON.stringify(stats)],
     );
 
     await client.query("COMMIT");

@@ -235,17 +235,33 @@ function makeBridge(options: BridgeOptions = {}): {
 // ── tests ────────────────────────────────────────────────────────────────
 
 test("buildTicketConfigFromCatalog: 2 farger oversettes gul→yellow, hvit→white", () => {
+  // C2-fix (2026-05-07): engine forventer `ticketTypesData` som ARRAY-of-
+  // objects med {color, size, pricePerTicket}. Hver bongfarge får
+  // entries for både small og large.
   const catalog = makeCatalogEntry();
   const cfg = buildTicketConfigFromCatalog(catalog);
   assert.equal(cfg.catalogId, "gc-1");
   assert.equal(cfg.catalogSlug, "innsatsen");
-  const ticketTypes = cfg.ticketTypes as Record<
-    string,
-    { price: number; prize: number }
-  >;
-  assert.deepEqual(ticketTypes.yellow, { price: 1000, prize: 200000 });
-  assert.deepEqual(ticketTypes.white, { price: 500, prize: 50000 });
-  assert.equal(ticketTypes.purple, undefined);
+  const ticketTypesData = cfg.ticketTypesData as Array<{
+    color: string;
+    size: "small" | "large";
+    pricePerTicket: number;
+  }>;
+  assert.ok(Array.isArray(ticketTypesData));
+  // 2 farger × 2 størrelser = 4 entries
+  assert.equal(ticketTypesData.length, 4);
+  const find = (color: string, size: "small" | "large") =>
+    ticketTypesData.find((e) => e.color === color && e.size === size);
+  assert.equal(find("yellow", "small")!.pricePerTicket, 1000);
+  assert.equal(find("yellow", "large")!.pricePerTicket, 2000);
+  assert.equal(find("white", "small")!.pricePerTicket, 500);
+  assert.equal(find("white", "large")!.pricePerTicket, 1000);
+  assert.equal(find("purple", "small"), undefined);
+  // Bingo-premier per farge
+  const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
+  assert.equal(bingoPrizes.yellow, 200000);
+  assert.equal(bingoPrizes.white, 50000);
+  // Row-premier
   const rowPrizes = cfg.rowPrizes as Record<string, number>;
   assert.equal(rowPrizes.row1, 10000);
   assert.equal(rowPrizes.row2, 10000);
@@ -267,13 +283,72 @@ test("buildTicketConfigFromCatalog: 3 farger (gul/hvit/lilla) propageres", () =>
     },
   });
   const cfg = buildTicketConfigFromCatalog(catalog);
-  const ticketTypes = cfg.ticketTypes as Record<
-    string,
-    { price: number; prize: number }
-  >;
-  assert.deepEqual(ticketTypes.yellow, { price: 1000, prize: 100000 });
-  assert.deepEqual(ticketTypes.white, { price: 500, prize: 50000 });
-  assert.deepEqual(ticketTypes.purple, { price: 2000, prize: 250000 });
+  const ticketTypesData = cfg.ticketTypesData as Array<{
+    color: string;
+    size: "small" | "large";
+    pricePerTicket: number;
+  }>;
+  assert.equal(ticketTypesData.length, 6);
+  const find = (color: string, size: "small" | "large") =>
+    ticketTypesData.find((e) => e.color === color && e.size === size);
+  assert.equal(find("yellow", "small")!.pricePerTicket, 1000);
+  assert.equal(find("yellow", "large")!.pricePerTicket, 2000);
+  assert.equal(find("white", "small")!.pricePerTicket, 500);
+  assert.equal(find("white", "large")!.pricePerTicket, 1000);
+  assert.equal(find("purple", "small")!.pricePerTicket, 2000);
+  assert.equal(find("purple", "large")!.pricePerTicket, 4000);
+  const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
+  assert.equal(bingoPrizes.yellow, 100000);
+  assert.equal(bingoPrizes.white, 50000);
+  assert.equal(bingoPrizes.purple, 250000);
+});
+
+// C2-regresjons-test: verifiser at engine sin extractTicketCatalog faktisk
+// kan parse output-en. Hvis ikke vil purchase-flow feile med
+// "Spillets ticket-konfig er ikke satt".
+test("C2: bridge-output kompatibel med engine.extractTicketCatalog (kontrakt)", () => {
+  const cat = makeCatalogEntry({
+    ticketColors: ["gul", "hvit", "lilla"],
+    ticketPricesCents: { gul: 1000, hvit: 500, lilla: 2500 },
+    prizesCents: {
+      rad1: 5000,
+      rad2: 7500,
+      rad3: 10000,
+      rad4: 15000,
+      bingo: { gul: 100000, hvit: 50000, lilla: 250000 },
+    },
+  });
+  const cfg = buildTicketConfigFromCatalog(cat);
+  // Replisere engine sin parse-logikk fra
+  // Game1TicketPurchaseService.extractTicketCatalog (linje 1191-1226).
+  const list = (cfg as { ticketTypesData?: unknown }).ticketTypesData;
+  assert.ok(Array.isArray(list), "ticketTypesData må være array");
+  const parsed: Array<{ color: string; size: string; priceCents: number }> = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const i = item as Record<string, unknown>;
+    const color = typeof i.color === "string" ? i.color.trim() : "";
+    const sizeRaw = typeof i.size === "string" ? i.size.toLowerCase() : "";
+    const size = sizeRaw === "small" || sizeRaw === "large" ? sizeRaw : null;
+    let priceCents: number | null = null;
+    for (const key of ["priceCents", "priceCentsEach", "pricePerTicket", "price"]) {
+      const val = i[key];
+      if (typeof val === "number" && Number.isFinite(val) && val >= 0) {
+        priceCents = Math.round(val);
+        break;
+      }
+    }
+    if (!color || !size || priceCents === null) continue;
+    parsed.push({ color, size, priceCents });
+  }
+  assert.equal(parsed.length, 6, "engine skal kunne parse alle 6 entries");
+  const catalogByKey = new Map<string, number>();
+  for (const item of parsed) {
+    catalogByKey.set(`${item.color}:${item.size}`, item.priceCents);
+  }
+  assert.equal(catalogByKey.get("yellow:small"), 1000);
+  assert.equal(catalogByKey.get("yellow:large"), 2000);
+  assert.equal(catalogByKey.get("purple:large"), 5000);
 });
 
 test("buildTicketConfigFromCatalog: bonus-spill aktivert legges på", () => {
@@ -302,16 +377,66 @@ test("buildJackpotConfigFromOverride: null → tom obj", () => {
 });
 
 test("buildJackpotConfigFromOverride: oversetter farger til engelsk", () => {
+  // H1-fix (2026-05-07): primær-keys er `prizeByColor` + `draw` (engine-
+  // leselig). Backward-compat alias-keys (`jackpotPrize` + `jackpotDraw`)
+  // bevares også for admin-tooling.
   const cfg = buildJackpotConfigFromOverride({
     draw: 50,
     prizesCents: { gul: 100000, hvit: 50000, lilla: 200000 },
   });
+  // Primær-keys (engine-shape)
+  assert.equal(cfg.draw, 50);
+  assert.deepEqual(cfg.prizeByColor, {
+    yellow: 100000,
+    white: 50000,
+    purple: 200000,
+  });
+  // Backward-compat alias-keys
   assert.equal(cfg.jackpotDraw, 50);
   assert.deepEqual(cfg.jackpotPrize, {
     yellow: 100000,
     white: 50000,
     purple: 200000,
   });
+});
+
+// H1-regresjons-test: verifiser at engine sin resolveJackpotConfig finner
+// jackpot-data i ticket_config_json under spill1.jackpot.
+test("H1: buildEngineTicketConfig embedder jackpot under spill1.jackpot (engine kan parse)", async () => {
+  const { resolveJackpotConfig } = await import("./Game1DrawEngineHelpers.js");
+  const { buildEngineTicketConfig } = await import("./GamePlanEngineBridge.js");
+  const cat = makeCatalogEntry({
+    ticketColors: ["gul", "hvit"],
+    ticketPricesCents: { gul: 1000, hvit: 500 },
+    prizesCents: {
+      rad1: 10000,
+      rad2: 10000,
+      rad3: 10000,
+      rad4: 10000,
+      bingo: { gul: 200000, hvit: 50000 },
+    },
+  });
+  const override = {
+    draw: 56,
+    prizesCents: { gul: 600000, hvit: 300000 },
+  };
+  const cfg = buildEngineTicketConfig(cat, override);
+  const resolved = resolveJackpotConfig(cfg);
+  assert.ok(resolved, "engine skal finne jackpot under spill1.jackpot");
+  assert.equal(resolved!.draw, 56);
+  assert.equal(resolved!.prizeByColor.yellow, 600000);
+  assert.equal(resolved!.prizeByColor.white, 300000);
+});
+
+test("H1: buildEngineTicketConfig uten jackpot-override returnerer base uten spill1-wrapper", async () => {
+  const { buildEngineTicketConfig } = await import("./GamePlanEngineBridge.js");
+  const cat = makeCatalogEntry();
+  const cfg = buildEngineTicketConfig(cat, null);
+  assert.equal(
+    (cfg as Record<string, unknown>).spill1,
+    undefined,
+    "spill1-wrapper skal ikke legges til når jackpot mangler",
+  );
 });
 
 test("createScheduledGameForPlanRunPosition: happy path oppretter rad", async () => {
@@ -363,10 +488,17 @@ test("createScheduledGameForPlanRunPosition: happy path oppretter rad", async ()
   // ticket_config_json contains catalog mapping
   const ticketCfg = JSON.parse(params[8] as string);
   assert.equal(ticketCfg.catalogId, "gc-1");
-  assert.deepEqual(ticketCfg.ticketTypes.yellow, {
-    price: 1000,
-    prize: 200000,
-  });
+  // C2-fix: ticketTypesData er array-of-objects (ikke record)
+  assert.ok(Array.isArray(ticketCfg.ticketTypesData));
+  const yellowSmall = (ticketCfg.ticketTypesData as Array<{
+    color: string;
+    size: string;
+    pricePerTicket: number;
+  }>).find((e) => e.color === "yellow" && e.size === "small");
+  assert.ok(yellowSmall);
+  assert.equal(yellowSmall!.pricePerTicket, 1000);
+  // bingoPrizes per farge (Fullt hus)
+  assert.equal(ticketCfg.bingoPrizes.yellow, 200000);
 });
 
 test("createScheduledGameForPlanRunPosition: idempotent retry — eksisterende rad gjenbrukes", async () => {
@@ -468,9 +600,21 @@ test("createScheduledGameForPlanRunPosition: jackpot-game med override → mappe
   const insertQ = queries.find((q) =>
     /INSERT INTO\s+"public"\."app_game1_scheduled_games"/i.test(q.sql),
   );
+  // jackpot_config_json (kolonne 9) — backward-compat: admin-tooling
+  // forventer fortsatt jackpotPrize/jackpotDraw på top-level her.
   const jackpotCfg = JSON.parse(insertQ!.params![9] as string);
   assert.equal(jackpotCfg.jackpotDraw, 50);
   assert.deepEqual(jackpotCfg.jackpotPrize, {
+    yellow: 100000,
+    white: 50000,
+    purple: 250000,
+  });
+  // H1-fix: ekte engine-leselig location er ticket_config_json under
+  // spill1.jackpot — verifiser at det også er skrevet dit.
+  const ticketCfg = JSON.parse(insertQ!.params![8] as string);
+  assert.ok(ticketCfg.spill1, "spill1-wrapper i ticket-config");
+  assert.equal(ticketCfg.spill1.jackpot.draw, 50);
+  assert.deepEqual(ticketCfg.spill1.jackpot.prizeByColor, {
     yellow: 100000,
     white: 50000,
     purple: 250000,
