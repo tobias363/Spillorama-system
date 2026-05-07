@@ -59,6 +59,9 @@ import {
   unmarkHallReadyForGame,
   type Spill1CurrentGameResponse,
 } from "../../api/agent-game1.js";
+import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
+import { adaptGamePlanToLegacyShape } from "../../api/agent-game-plan-adapter.js";
+import { isFeatureEnabled } from "../../utils/featureFlags.js";
 import {
   AgentGame1Socket,
   type AgentGame1StatusUpdate,
@@ -507,9 +510,22 @@ async function refreshRooms(): Promise<void> {
 
 async function refreshSpill1(): Promise<void> {
   try {
-    const data = await fetchAgentGame1CurrentGame(
-      pageAbort ? { signal: pageAbort.signal } : {}
-    );
+    // Fase 3 (2026-05-07): feature-flag-aware data-source. Når
+    // `useNewGamePlan=true` (kun aktivert via localStorage av Tobias/QA),
+    // hent fra plan-runtime-API og adapt til legacy-shape så all
+    // rendering nedenfor er uendret. Default behavior (false) er
+    // fortsatt legacy `/api/agent/game1/current-game`.
+    let data: Spill1CurrentGameResponse;
+    if (isFeatureEnabled("useNewGamePlan")) {
+      const planResp = await fetchAgentGamePlanCurrent(
+        pageAbort ? { signal: pageAbort.signal } : {}
+      );
+      data = adaptGamePlanToLegacyShape(planResp);
+    } else {
+      data = await fetchAgentGame1CurrentGame(
+        pageAbort ? { signal: pageAbort.signal } : {}
+      );
+    }
     if (!activeContainer) return; // unmounted while in-flight
     state.spill1 = data;
     state.spill1Error = null;
