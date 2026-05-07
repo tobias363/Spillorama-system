@@ -331,23 +331,26 @@ test("E2E: admin GM.config.spill1 → scheduler spawn → drawEngine per-farge-u
   // 5. Draw neste kule → skal utløse fase 1-win for begge vinnere.
   await drawEngine.drawNext(spawned.id);
 
-  // 6. Verifiser: per Q3=X (PR #653 — `fix(backend): Spill 1 Q3 global pot
-  //    per phase`) brukes første vinners farge-pattern som GLOBAL pot, og
-  //    alle vinnere deler likt. Med Alice's pattern = 100 kr og 2 vinnere
-  //    får begge 50 kr hver (uavhengig av Bob's egen farge-matrise).
-  //    Eldre forventning (Alice 100, Bob 50 — per-color isolerte premier)
-  //    gjaldt før PR #653; nå må E2E-testen verifisere global-pot-semantikk.
+  // 6. Verifiser per pot-per-bongstørrelse-regel (2026-05-08, §9 i
+  //    SPILL_REGLER_OG_PAYOUT.md): SEPARATE potter per bongstørrelse —
+  //    innsatsen avgjør gevinsten.
+  //    - Alice (small_white, pot 100) er solo i sin pot → får 100.
+  //    - Bob (small_yellow, pot 50) er solo i sin pot → får 50.
+  //    Total payout 150 kr.
+  //    Historikk: PR #653 (Q3=X global pot, 2026-04-27) prøvde å dele én
+  //    pot på 100 likt mellom begge → 50 hver. Tobias har bekreftet at
+  //    riktig regel er per-bongstørrelse-pot per §9.3.
   assert.equal(credits.length, 2, "to wallet-credit-kall — én per vinner");
   const alice = credits.find((c) => c.accountId === "w-alice");
   const bob = credits.find((c) => c.accountId === "w-bob");
   assert.ok(alice, "Alice skal ha credit");
   assert.ok(bob, "Bob skal ha credit");
   assert.equal(
-    alice!.amount, 50,
-    "Alice → 50 kr (global pot 100 fra første vinners farge / 2 vinnere)"
+    alice!.amount, 100,
+    "Alice (small_white) → 100 kr (egen pot, solo i sin bongstørrelse)"
   );
   assert.equal(
     bob!.amount, 50,
-    "Bob → 50 kr (samme global pot, uavhengig av egen farge-matrise per Q3=X)"
+    "Bob (small_yellow) → 50 kr (egen pot, solo i sin bongstørrelse — pattern = 50 i E2E-config)"
   );
 });

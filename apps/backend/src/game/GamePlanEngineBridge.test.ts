@@ -439,14 +439,27 @@ test("H1: buildEngineTicketConfig embedder jackpot under spill1.jackpot (engine 
   assert.equal(resolved!.prizeByColor.white, 300000);
 });
 
-test("H1: buildEngineTicketConfig uten jackpot-override returnerer base uten spill1-wrapper", async () => {
+test("H1: buildEngineTicketConfig uten jackpot-override har ticketColors[]-blokk men ikke jackpot", async () => {
+  // Pilot-fix (2026-05-08): `spill1`-wrapper inneholder NÅ alltid
+  // `ticketColors[]` for engine-payout-pathen. Jackpot legges på toppen
+  // når relevant. Originale H1-test asserterte spill1 === undefined når
+  // jackpot mangler — den invariant er BRUT med vilje fordi engine
+  // trenger ticketColors[] for korrekt Rad 1-4 + Fullt Hus-payout.
   const { buildEngineTicketConfig } = await import("./GamePlanEngineBridge.js");
   const cat = makeCatalogEntry();
   const cfg = buildEngineTicketConfig(cat, null);
+  const spill1 = (cfg as Record<string, unknown>).spill1 as
+    | Record<string, unknown>
+    | undefined;
+  assert.ok(spill1, "spill1-blokk skal eksistere (pilot-fix)");
+  assert.ok(
+    Array.isArray(spill1.ticketColors),
+    "spill1.ticketColors skal være array",
+  );
   assert.equal(
-    (cfg as Record<string, unknown>).spill1,
+    spill1.jackpot,
     undefined,
-    "spill1-wrapper skal ikke legges til når jackpot mangler",
+    "spill1.jackpot skal mangle uten override",
   );
 });
 
@@ -480,10 +493,12 @@ test("createScheduledGameForPlanRunPosition: happy path oppretter rad", async ()
   );
   assert.ok(insertQ, "INSERT skal kjøres");
   const params = insertQ!.params!;
+  // Pilot-fix (2026-05-08): game_config_json flyttet fra inline NULL i
+  // SQL til ny $15-parameter. Catalog/plan_run/plan_position skiftet.
   // params: [id, sub_game_index, sub_game_name, custom_game_name, day,
   //          start, end, notif_seconds, ticket_config, jackpot_config,
-  //          game_mode, master_hall, group_hall, participating, catalog_id,
-  //          plan_run_id, plan_position]
+  //          game_mode, master_hall, group_hall, participating,
+  //          game_config, catalog_id, plan_run_id, plan_position]
   assert.equal(params[1], 0); // sub_game_index = position-1
   assert.equal(params[2], "Innsatsen"); // sub_game_name
   assert.equal(params[3], null); // custom_game_name
@@ -493,9 +508,17 @@ test("createScheduledGameForPlanRunPosition: happy path oppretter rad", async ()
   assert.equal(params[12], "hg-1"); // group_hall_id
   // participating_halls_json
   assert.deepEqual(JSON.parse(params[13] as string), ["hall-1"]);
-  assert.equal(params[14], "gc-1"); // catalog_entry_id
-  assert.equal(params[15], "run-1"); // plan_run_id
-  assert.equal(params[16], 1); // plan_position
+  // Pilot-fix: game_config_json bærer spill1.ticketColors[]
+  const gameCfg = JSON.parse(params[14] as string);
+  assert.equal(gameCfg.catalogId, "gc-1");
+  assert.ok(gameCfg.spill1, "game_config skal ha spill1-blokk");
+  assert.ok(
+    Array.isArray(gameCfg.spill1.ticketColors),
+    "game_config.spill1.ticketColors skal være array",
+  );
+  assert.equal(params[15], "gc-1"); // catalog_entry_id
+  assert.equal(params[16], "run-1"); // plan_run_id
+  assert.equal(params[17], 1); // plan_position
   // ticket_config_json contains catalog mapping
   const ticketCfg = JSON.parse(params[8] as string);
   assert.equal(ticketCfg.catalogId, "gc-1");

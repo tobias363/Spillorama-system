@@ -327,6 +327,31 @@ I dag bruker `GamePlanEngineBridge.buildEngineTicketConfig`:
 
 I dag har 13 hovedspill korrekte priser men premiene er fortsatt i gammel explicit-format på flere standard-spill. Migration #20261210010300 har konvertert til auto-mode med `bingoBase` kopiert fra `bingo.hvit`. **Verifiser** at dette ble korrekt for hver spill — Tobias bør gå gjennom katalog-editor manuelt.
 
+✅ **Landet 2026-05-08** (`fix/spill1-pot-per-bongsize-runtime-2026-05-08`):
+   bridge skriver nå kanonisk `spill1.ticketColors[]` med slug-form-keys
+   (small_yellow / large_white / etc.) i både `ticket_config_json` og
+   `game_config_json`. Auto-multiplikator (hvit×1, gul×2, lilla×3) +
+   small/large-skalering (×2) er bakt inn via `calculateActualPrize`.
+   Engine sin payout-pipeline implementerer nå **pot-per-bongstørrelse**
+   per §9 i SPILL_REGLER_OG_PAYOUT.md: separate potter per bongstørrelse,
+   floor-split blant vinnere i samme størrelse, multi-bong-per-spiller
+   gir summen av andelene.
+
+   Oddsen Fullt Hus HIGH/LOW-overstyring er også implementert i samme
+   PR — bridgen skriver `spill1.oddsen` blokk når
+   `catalog.rules.gameVariant === "oddsen"`, og engine bytter pot-base
+   basert på `drawSequenceAtWin <= targetDraw`. Compliance-ledger får
+   §9.6-felter (`bongMultiplier`, `potCentsForBongSize`,
+   `winningTicketsInSameSize`, `winningPlayersInSameSize`, `gameVariant`,
+   `oddsenBucket`, `oddsenTargetDraw`).
+
+   Trafikklys-rad-farge (rød/grønn/gul) er FORTSATT ikke implementert —
+   det er separat path via `rules.gameVariant === "trafikklys"` +
+   `rules.prizesPerRowColor`. Cap-fjerning for hovedspill (per §4 — kun
+   databingo skal cappes) er flagget som oppfølger-PR; krever endring i
+   `PrizePolicyManager` defaults og berører flere call-sites på tvers
+   av Game1/2/3-engines.
+
 ### 5. Bonus-spill display-navn for "Mystery Joker"
 
 I dag bruker vi slug `mystery` i whitelist (`BONUS_GAME_SLUG_VALUES`). Display-navn "Mystery Joker" leveres via `BONUS_GAME_DISPLAY_NAMES`. Hvis Tobias vil ha separat slug `mystery_joker`, må whitelist utvides.

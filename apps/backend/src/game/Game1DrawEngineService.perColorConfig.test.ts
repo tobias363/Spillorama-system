@@ -155,16 +155,20 @@ function runningStateRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// ── Test 1: Per-farge fixed-beløp — to vinnere, global pot deles ────────
+// ── Test 1: Per-farge fixed-beløp — to vinnere, separate per-bongstørrelse-potter ──
 //
-// NB (post PR #653 — Q3=X global pot): Tidligere antok denne testen at
-// hver farge fikk sin egen pot-pattern (Alice 100, Bob 50). Etter PR #653
-// (`fix(backend): Spill 1 Q3 global pot per phase (regulatorisk pilot-fix)`)
-// brukes første vinners farge-pattern som GLOBAL pot, og alle vinnere
-// deler likt uansett farge. Med Alice's pattern = 100 kr og 2 vinnere
-// får begge 50 kr hver.
+// HISTORIKK:
+//   - Pre-PR #653: hver farge fikk sin egen pot-pattern (Alice 100, Bob 50).
+//   - PR #653 (Q3=X global pot, 2026-04-27): første vinners farge-pattern ble
+//     global pot delt likt på alle vinnere uansett farge (begge 50 kr).
+//   - 2026-05-08 (pot-per-bongstørrelse, §9 i SPILL_REGLER_OG_PAYOUT.md): Tobias
+//     har bekreftet riktig regel: SEPARATE potter per bongstørrelse — innsatsen
+//     avgjør hvor mye man vinner. Alice (small_white, pot 100) får 100;
+//     Bob (small_yellow, pot 50) får 50. Dette matcher §9.3 scenario "1 hvit
+//     + 1 lilla (forskjellige spillere)" — hver pot deles likt blant vinnere
+//     i samme størrelse, og 1 vinner per pot → hele poten til den vinneren.
 
-test("perColorConfig: game_config_json med spill1.ticketColors → global pot fra første vinners farge-matrise (PR #653 Q3=X)", async () => {
+test("perColorConfig: game_config_json med spill1.ticketColors → pot-per-bongstørrelse (§9.3)", async () => {
   const { adapter: wallet, credits } = makeFakeWallet();
   const payoutService = new Game1PayoutService({
     walletAdapter: wallet,
@@ -266,15 +270,20 @@ test("perColorConfig: game_config_json med spill1.ticketColors → global pot fr
 
   await service.drawNext("g1");
 
-  // Per Q3=X (PR #653): global pot = Alice's farge-pattern = 100 kr.
-  // 2 vinnere deler likt → 50 kr hver, uavhengig av Bob's egen farge-matrise.
+  // Per pot-per-bongstørrelse-regel (2026-05-08, §9.3 SPILL_REGLER_OG_PAYOUT.md):
+  // - small_white-pot = 100 kr (1 vinner: Alice) → Alice får 100.
+  // - small_yellow-pot = 50 kr (1 vinner: Bob) → Bob får 50.
+  // Total payout 150 kr — innsatsen avgjør gevinsten ("Alice satset 5 kr,
+  // får 100; Bob satset 10 kr — men på et 50-kr-pattern", per test-config).
+  // I full pilot vil bridgen sørge for at gul-pot er 200 (auto-mult ×2),
+  // men her er pattern eksplisitt = 50 i test-config-en.
   assert.equal(credits.length, 2, "to vinnere → to wallet-credit-kall");
   const alice = credits.find((c) => c.accountId === "w-alice");
   const bob = credits.find((c) => c.accountId === "w-bob");
   assert.ok(alice, "Alice skal ha credit");
   assert.ok(bob, "Bob skal ha credit");
-  assert.equal(alice!.amount, 50, "Alice → 50 kr (global pot 100 / 2 vinnere)");
-  assert.equal(bob!.amount, 50, "Bob → 50 kr (global pot 100 / 2 vinnere, uavhengig av egen farge)");
+  assert.equal(alice!.amount, 100, "Alice (small_white) → 100 kr (egen pot)");
+  assert.equal(bob!.amount, 50, "Bob (small_yellow) → 50 kr (egen pot, 50-kr-pattern)");
 });
 
 // ── Test 2: Bakoverkompat — game_config_json=null → flat-path ──────────

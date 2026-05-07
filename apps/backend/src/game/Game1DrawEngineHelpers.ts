@@ -332,6 +332,99 @@ export function patternPrizeToCents(
   return Math.floor((potCents * percent) / 100);
 }
 
+// ── Oddsen variant-config (Pot-per-bongstørrelse, §6 + §9.5) ───────────────
+
+/**
+ * Pot-per-bongstørrelse-fix (2026-05-08): variant-level Oddsen-config for
+ * Fullt Hus HIGH/LOW-overstyring. Lagres av bridge i
+ * `ticket_config_json.spill1.oddsen` (eller `game_config_json` mirror).
+ *
+ * Brukes IKKE for Rad 1-4 — de følger standard auto-mult-pathen via
+ * `patternsByColor`. Kun Fullt Hus-poten overstyres.
+ *
+ * Skiller seg fra `MiniGameOddsenEngine.OddsenConfig` (mini-game-pot under
+ * Fullt Hus) — denne er top-level Fullt Hus-payout for catalog-rad-typer
+ * `oddsen-55`/`56`/`57`.
+ */
+export interface OddsenVariantConfig {
+  targetDraw: number;
+  bingoBaseLow: number;
+  bingoBaseHigh: number;
+}
+
+/**
+ * Resolve Oddsen variant-config fra raw JSON-blokk
+ * (`ticket_config_json` eller `game_config_json`). Leter på
+ * `obj.spill1.oddsen` (kanonisk) og `obj.oddsen` (fallback). Returnerer
+ * null hvis blokken mangler eller har ugyldige felter — caller faller
+ * tilbake til standard auto-mult-pattern for Fullt Hus.
+ */
+export function resolveOddsenVariantConfig(
+  raw: unknown,
+): OddsenVariantConfig | null {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const spill1 = obj.spill1 as Record<string, unknown> | undefined;
+  const oddsen =
+    (spill1?.oddsen as Record<string, unknown> | undefined) ??
+    (obj.oddsen as Record<string, unknown> | undefined);
+  if (!oddsen || typeof oddsen !== "object") return null;
+
+  const targetDraw = numberOrZero(oddsen.targetDraw);
+  const bingoBaseLow = numberOrZero(oddsen.bingoBaseLow);
+  const bingoBaseHigh = numberOrZero(oddsen.bingoBaseHigh);
+
+  // targetDraw må være positivt; basene kan være 0 (eks. "ingen LOW-payout").
+  if (targetDraw <= 0) return null;
+  if (bingoBaseLow < 0) return null;
+  if (bingoBaseHigh < 0) return null;
+
+  return { targetDraw, bingoBaseLow, bingoBaseHigh };
+}
+
+/**
+ * Pot-per-bongstørrelse-fix (2026-05-08): bongMultiplier-mapping per
+ * §9.2 i SPILL_REGLER_OG_PAYOUT.md.
+ *
+ * Slug-form (`small_yellow`, `large_white`, ...) → multiplier:
+ *   - Hvit (5 kr) bonger     → multiplier 1
+ *   - Gul (10 kr) bonger     → multiplier 2 (small) eller 4 (large)
+ *   - Lilla (15 kr) bonger   → multiplier 3 (small) eller 6 (large)
+ *
+ * **Viktig:** Etter bridge-konvensjon (LARGE_TICKET_PRICE_MULTIPLIER = 2)
+ * koster `large_yellow` 20 kr, så multiplier = 4. `large_purple` koster
+ * 30 kr → multiplier 6. Dette stemmer med formelen i §3.1:
+ * `actualPrize = base × (ticketPrice / 500)`.
+ *
+ * Returnerer null for ukjente slugs — caller faller tilbake til
+ * `patternPrizeToCents` (eksisterende auto-mult-path).
+ */
+export function bongMultiplierForColorSlug(slug: string): number | null {
+  if (!slug) return null;
+  const s = slug.toLowerCase().trim();
+  // Family + size-prefix.
+  // Hvit (5 kr): small × 1, large × 2.
+  if (s === "small_white") return 1;
+  if (s === "large_white") return 2;
+  // Gul (10 kr): small × 2, large × 4.
+  if (s === "small_yellow") return 2;
+  if (s === "large_yellow") return 4;
+  // Lilla (15 kr): small × 3, large × 6.
+  if (s === "small_purple") return 3;
+  if (s === "large_purple") return 6;
+  // Ekstra bridge-farger (red/green/orange) — ukjent prising; behold null
+  // og la auto-mult-pattern overstyre.
+  return null;
+}
+
 export function parseMarkings(raw: unknown, expectedLength: number): boolean[] {
   let parsed: unknown = raw;
   if (typeof raw === "string") {
