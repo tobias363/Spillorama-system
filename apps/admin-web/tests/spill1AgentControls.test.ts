@@ -49,7 +49,11 @@ describe("Spill1AgentControls", () => {
     expect(startBtn?.disabled).toBe(false);
   });
 
-  it("master-agent + purchase_open + NOT allReady → start disabled", () => {
+  it("master-agent + purchase_open + NOT allReady → start aktiv (allReady ignoreres etter REQ-007 confirmUnreadyHalls-flyt)", () => {
+    // Tobias 2026-05-03: master kan starte selv om noen haller ikke er
+    // klare; backend ekskluderer ikke-klare haller automatisk via
+    // confirmUnreadyHalls-overstyringen. allReady-feltet er beholdt i
+    // interface for andre kallere men leses ikke lenger her.
     const html = renderSpill1AgentControls({
       currentGame: makeGame({ status: "purchase_open" }),
       isMasterAgent: true,
@@ -60,7 +64,7 @@ describe("Spill1AgentControls", () => {
     const startBtn = root.querySelector<HTMLButtonElement>(
       "[data-marker='spill1-start-btn']"
     );
-    expect(startBtn?.disabled).toBe(true);
+    expect(startBtn?.disabled).toBe(false);
   });
 
   it("master-agent + ready_to_start → start alltid aktiv (independent of allReady)", () => {
@@ -75,6 +79,46 @@ describe("Spill1AgentControls", () => {
       "[data-marker='spill1-start-btn']"
     );
     expect(startBtn?.disabled).toBe(false);
+  });
+
+  it("master-agent + scheduled → start disabled + tooltip viser purchase-vinduet (Tobias 2026-05-07)", () => {
+    const html = renderSpill1AgentControls({
+      currentGame: makeGame({
+        status: "scheduled",
+        scheduledStartTime: "2026-05-07T16:30:00Z",
+      }),
+      isMasterAgent: true,
+      allReady: false,
+      excludedHallIds: [],
+    });
+    const root = mountFragment(html);
+    const startBtn = root.querySelector<HTMLButtonElement>(
+      "[data-marker='spill1-start-btn']"
+    );
+    expect(startBtn?.disabled).toBe(true);
+    const tooltip = startBtn?.getAttribute("title") ?? "";
+    expect(tooltip).toContain("purchase-vinduet åpner");
+    // 2026-05-07T16:30:00Z = 18:30 Europe/Oslo (CEST, UTC+2)
+    expect(tooltip).toContain("18:30");
+  });
+
+  it("master-agent + scheduled → status-badge forklarer at runden er planlagt", () => {
+    const html = renderSpill1AgentControls({
+      currentGame: makeGame({
+        status: "scheduled",
+        scheduledStartTime: "2026-05-07T16:30:00Z",
+      }),
+      isMasterAgent: true,
+      allReady: false,
+      excludedHallIds: [],
+    });
+    const root = mountFragment(html);
+    const badge = root.querySelector<HTMLElement>(
+      "[data-marker='spill1-status-badge']"
+    );
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toContain("planlagt");
+    expect(badge?.textContent).toContain("18:30");
   });
 
   it("master-agent + paused → resume aktiv, start disabled", () => {
@@ -113,15 +157,22 @@ describe("Spill1AgentControls", () => {
     ).toBe(true);
   });
 
-  it("slave-agent viser kun master-notice, ingen knapper", () => {
+  it("slave-agent (non-master) viser klar/angre-knapp, ingen master-knapper", () => {
+    // 2026-05-02: Non-master-agent får Klar/Angre-Klar-knapper, ikke
+    // master-handlinger. Tidligere test forventet `spill1-slave-notice`
+    // men det data-marker-attrib ble fjernet i samme PR.
     const html = renderSpill1AgentControls({
       currentGame: makeGame(),
       isMasterAgent: false,
       allReady: true,
       excludedHallIds: [],
+      selfHallId: "hall-slave",
+      selfHallReady: false,
     });
     const root = mountFragment(html);
-    expect(root.querySelector("[data-marker='spill1-slave-notice']")).toBeTruthy();
+    expect(
+      root.querySelector("[data-marker='spill1-mark-ready-btn']")
+    ).toBeTruthy();
     expect(
       root.querySelector("[data-marker='spill1-start-btn']")
     ).toBeNull();

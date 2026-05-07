@@ -140,6 +140,14 @@ function defaultReadyRows(): HallReadyStatusRow[] {
 interface StartOpts {
   users?: Record<string, PublicAppUser>;
   activeRow?: MockActiveRow | null;
+  /**
+   * 2026-05-07: optional scheduled-row simulering. Brukes til å teste at
+   * `/start` returnerer GAME_NOT_STARTABLE_YET når runden er i status
+   * `'scheduled'` men purchase-vinduet ennå ikke er åpnet. Mock-pool-en
+   * inspiserer SQL og returnerer denne raden kun for SQL-query-er som
+   * filtrerer på `status = 'scheduled'`.
+   */
+  scheduledRow?: MockActiveRow | null;
   readyRows?: HallReadyStatusRow[];
   allReady?: boolean;
   startImpl?: Game1MasterControlService["startGame"];
@@ -232,21 +240,35 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
     },
   } as unknown as Game1HallReadyService;
 
+  const scheduledRow =
+    opts.scheduledRow === undefined ? null : opts.scheduledRow;
+
   const pool = {
     async query(sql: string, params: unknown[]) {
       poolQueries.push({ sql, params });
       if (opts.poolError) throw opts.poolError;
-      // Simuler scheduled_games-select.
-      if (
-        sql.includes("app_game1_scheduled_games") &&
-        active &&
+      if (!sql.includes("app_game1_scheduled_games")) {
+        return { rows: [], rowCount: 0 };
+      }
+      const matchesHall = (row: MockActiveRow): boolean =>
         Array.isArray(params) &&
-        (active.master_hall_id === params[0] ||
-          (Array.isArray(active.participating_halls_json) &&
-            (active.participating_halls_json as string[]).includes(
+        (row.master_hall_id === params[0] ||
+          (Array.isArray(row.participating_halls_json) &&
+            (row.participating_halls_json as string[]).includes(
               String(params[0])
-            )))
-      ) {
+            )));
+      // 2026-05-07: skill mellom `findScheduledGameForHall` (status='scheduled')
+      // og de to andre helperne basert på SQL-form. Tester kan sette
+      // `scheduledRow` for å simulere "runden er planlagt men purchase ikke
+      // åpnet enda" uten å påvirke `activeRow`-logikken.
+      const isScheduledOnlyQuery = sql.includes("status = 'scheduled'");
+      if (isScheduledOnlyQuery) {
+        if (scheduledRow && matchesHall(scheduledRow)) {
+          return { rows: [scheduledRow], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      }
+      if (active && matchesHall(active)) {
         return { rows: [active], rowCount: 1 };
       }
       return { rows: [], rowCount: 0 };
@@ -520,6 +542,59 @@ test("POST /start — ingen aktiv runde gir NO_ACTIVE_GAME", async () => {
     assert.equal(res.status, 400);
     const payload = (await res.json()) as { error: { code: string } };
     assert.equal(payload.error.code, "NO_ACTIVE_GAME");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /start — runden er 'scheduled' (purchase ikke åpnet enda) gir GAME_NOT_STARTABLE_YET med tid (Tobias 2026-05-07)", async () => {
+  // Master-agent trykker Start mens runden ennå er i `'scheduled'`.
+  // findActiveGameForHall returnerer null (filterer bort scheduled),
+  // så fallback `findScheduledGameForHall` skal returnere planlagt-raden
+  // og bygge feilmeldingen "Spillet er planlagt og åpner for kjøp kl HH:MM".
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: null,
+    scheduledRow: {
+      ...defaultActiveRow(),
+      status: "scheduled",
+      // 2026-05-07T16:30:00Z = 18:30 Europe/Oslo (CEST, UTC+2)
+      scheduled_start_time: "2026-05-07T16:30:00.000Z",
+    },
+  });
+  try {
+    const res = await post(ctx, "/api/agent/game1/start", "t-m", {});
+    assert.equal(res.status, 400);
+    const payload = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    assert.equal(payload.error.code, "GAME_NOT_STARTABLE_YET");
+    assert.match(payload.error.message, /Spillet er planlagt/);
+    assert.match(payload.error.message, /18:30/);
+    // Master-control-service skal IKKE være kalt — vi feiler før delegering.
+    assert.equal(ctx.serviceCalls.startGame.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /start — NO_ACTIVE_GAME beholdt når verken aktiv eller scheduled finnes (regress)", async () => {
+  // Verifiserer at den eksisterende stien (ingen runde i det hele tatt)
+  // fortsatt returnerer NO_ACTIVE_GAME — ikke ved et uhell skifter til
+  // GAME_NOT_STARTABLE_YET.
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: null,
+    scheduledRow: null,
+  });
+  try {
+    const res = await post(ctx, "/api/agent/game1/start", "t-m", {});
+    assert.equal(res.status, 400);
+    const payload = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    assert.equal(payload.error.code, "NO_ACTIVE_GAME");
+    assert.match(payload.error.message, /Ingen aktiv Spill 1-runde/);
   } finally {
     await ctx.close();
   }
