@@ -154,7 +154,7 @@ export function createAdminObservabilityRouter(
   async function requireAdmin(req: express.Request): Promise<PublicAppUser> {
     const token = getAccessTokenFromRequest(req);
     const user = await deps.platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission, "Ikke tilgang til observability.");
+    assertAdminPermission(user, permission, "Ikke tilgang til observability.");
     return user;
   }
 

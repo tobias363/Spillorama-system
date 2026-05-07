@@ -247,13 +247,13 @@ export function buildAdminRouterHelpers(deps: AdminRouterDeps): AdminRouterHelpe
     message?: string
   ): Promise<PublicAppUser> {
     const user = await getAuthenticatedUser(req);
-    assertAdminPermission(user.role, permission, message);
+    assertAdminPermission(user, permission, message);
     return user;
   }
 
   async function requireAdminPanelUser(req: express.Request, message?: string): Promise<PublicAppUser> {
     const user = await getAuthenticatedUser(req);
-    assertAdminPermission(user.role, "ADMIN_PANEL_ACCESS", message);
+    assertAdminPermission(user, "ADMIN_PANEL_ACCESS", message);
     return user;
   }
 

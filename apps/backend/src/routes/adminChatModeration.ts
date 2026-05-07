@@ -178,7 +178,7 @@ export function createAdminChatModerationRouter(
   ): Promise<PublicAppUser> {
     const accessToken = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(accessToken);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     return user;
   }
 

@@ -161,7 +161,7 @@ export function createAdminGame1Namespace(
         return next(new Error("UNAUTHORIZED"));
       }
       const user = await platformService.getUserFromAccessToken(token);
-      assertAdminPermission(user.role, "GAME1_MASTER_WRITE");
+      assertAdminPermission(user, "GAME1_MASTER_WRITE");
       socket.data.user = user;
       return next();
     } catch (err) {

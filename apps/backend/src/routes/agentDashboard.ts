@@ -182,7 +182,7 @@ export function createAgentDashboardRouter(deps: AgentDashboardRouterDeps): expr
   ): Promise<{ userId: string; role: UserRole; email: string; displayName: string }> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     if (user.role !== "AGENT") {
       throw new DomainError(
         "FORBIDDEN",

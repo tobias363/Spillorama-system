@@ -144,7 +144,7 @@ export function createAdminTrackSpendingRouter(deps: AdminTrackSpendingRouterDep
   async function requireUser(req: express.Request): Promise<PublicAppUser> {
     const accessToken = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(accessToken);
-    assertAdminPermission(user.role, "TRACK_SPENDING_READ");
+    assertAdminPermission(user, "TRACK_SPENDING_READ");
     return user;
   }
 

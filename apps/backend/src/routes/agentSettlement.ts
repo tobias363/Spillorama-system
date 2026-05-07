@@ -109,7 +109,7 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
   ): Promise<{ userId: string; role: UserRole; displayName: string }> {
     const token = getAccessTokenFromRequest(req);
     const user = await platformService.getUserFromAccessToken(token);
-    assertAdminPermission(user.role, permission);
+    assertAdminPermission(user, permission);
     if (user.role === "AGENT") {
       await agentService.requireActiveAgent(user.id);
     }

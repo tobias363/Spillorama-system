@@ -83,7 +83,7 @@ export function createAdminGameReplayRouter(
     permissions: AdminPermission[]
   ): void {
     for (const p of permissions) {
-      assertAdminPermission(user.role, p);
+      assertAdminPermission(user, p);
     }
   }
 
