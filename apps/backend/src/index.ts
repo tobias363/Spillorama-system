@@ -122,6 +122,7 @@ import { createDevGame2StateRouter } from "./routes/devGame2State.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
+import { Game1RescheduleService } from "./game/Game1RescheduleService.js";
 import { Game1TicketPurchaseService } from "./game/Game1TicketPurchaseService.js";
 import { Game1DrawEngineService } from "./game/Game1DrawEngineService.js";
 import { Game1PotService } from "./game/pot/Game1PotService.js";
@@ -1746,6 +1747,16 @@ const game1MasterControlService = new Game1MasterControlService({
   schema: pgSchema,
 });
 
+// 2026-05-07 PM-direktiv: runtime-justering av scheduled_start_time / end-time
+// på en eksisterende app_game1_scheduled_games-rad. Driver pilot-testing
+// der master-agent eller admin må flytte starttidspunkt uten direct DB-
+// tilgang. Cron Game1ScheduleTickService.openPurchaseForImminentGames flipper
+// scheduled → purchase_open på neste tick etter justering.
+const game1RescheduleService = new Game1RescheduleService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
 // MASTER_PLAN §2.3 — daglig-akkumulerende jackpot-state (Appendix B.9).
 // Starter 2000 kr, +4000/dag, max 30k. State per hall-gruppe.
 const game1JackpotStateService = new Game1JackpotStateService({
@@ -2480,6 +2491,9 @@ app.use(createAdminGame1MasterRouter({
   drawEngine: game1DrawEngineService,
   io,
   jackpotStateService: game1JackpotStateService,
+  // 2026-05-07 PM-direktiv: aktiver POST /reschedule. Når undefined
+  // returnerer endepunktet RESCHEDULE_NOT_CONFIGURED.
+  rescheduleService: game1RescheduleService,
 }));
 // LOW-1: GET /api/admin/games/:gameId/replay — rekonstruert event-stream
 // for Game 1 scheduled_game. Krever GAME1_GAME_READ + PLAYER_KYC_READ.
