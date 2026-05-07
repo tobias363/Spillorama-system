@@ -80,6 +80,7 @@ function makeCatalogEntry(id: string, slug: string): GameCatalogEntry {
       rad4: 10000,
       bingo: { gul: 200000 },
     },
+    prizeMultiplierMode: "explicit_per_color",
     bonusGameSlug: null,
     bonusGameEnabled: false,
     requiresJackpotSetup: false,

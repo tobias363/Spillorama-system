@@ -41,6 +41,7 @@ function makeCatalog(
       rad4: 10000,
       bingo: { gul: 200000 },
     },
+    prizeMultiplierMode: "explicit_per_color",
     bonusGameSlug: null,
     bonusGameEnabled: false,
     requiresJackpotSetup: opts.requiresJackpotSetup ?? true,

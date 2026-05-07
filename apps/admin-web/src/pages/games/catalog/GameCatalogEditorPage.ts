@@ -28,8 +28,10 @@ import {
 } from "./GameCatalogState.js";
 import {
   BONUS_GAME_SLUG_VALUES,
+  PRIZE_MULTIPLIER_MODE_VALUES,
   TICKET_COLOR_VALUES,
   type BonusGameSlug,
+  type PrizeMultiplierMode,
   type TicketColor,
 } from "../../../api/admin-game-catalog.js";
 
@@ -45,6 +47,17 @@ const BONUS_LABELS: Record<BonusGameSlug, string> = {
   treasure_chest: "Skattkiste (Treasure Chest)",
   color_draft: "Color Draft",
 };
+
+const PRIZE_MODE_LABELS: Record<PrizeMultiplierMode, string> = {
+  auto: "Auto-multiplikator (én base, dyrere bonger får mer)",
+  explicit_per_color: "Spesialpris (eksplisitt per bongfarge)",
+};
+
+/**
+ * Tobias 2026-05-07 (premise): billigste bong er ALLTID 5 kr (500 øre).
+ * Multiplikator: faktor = ticketPriceCents / 500.
+ */
+const CHEAPEST_PRICE_CENTS = 500;
 
 export async function renderGameCatalogNewPage(
   container: HTMLElement,
@@ -259,15 +272,80 @@ function renderPrizesSection(p: CatalogFormPayload): string {
         </div>
       </div>`;
   };
+
+  // Mode-radio: switch between auto-multiplikator (default) og spesialpris.
+  const modeRadios = PRIZE_MULTIPLIER_MODE_VALUES.map(
+    (mode) => `
+      <label class="radio-inline" style="margin-right:16px">
+        <input type="radio" name="prizeMultiplierMode" value="${mode}"
+          data-mode="${mode}"
+          ${p.prizeMultiplierMode === mode ? "checked" : ""}>
+        ${escapeHtml(PRIZE_MODE_LABELS[mode])}
+      </label>`,
+  ).join("");
+
+  const isAuto = p.prizeMultiplierMode === "auto";
+
+  // Auto-modus: én bingoBase + preview-tabell
+  const autoBingoBlock = `
+    <div class="form-group prize-auto-block" style="${isAuto ? "" : "display:none"}">
+      <label class="col-sm-3 control-label">Bingo base (kr)</label>
+      <div class="col-sm-9">
+        <input type="number" class="form-control" name="prize-bingoBase"
+          value="${p.prizesKr.bingoBase}"
+          min="0" step="1" placeholder="Base for billigste bong (5 kr)">
+        <p class="help-block">
+          Gjelder billigste bong (5 kr). Backend regner premie for dyrere
+          bonger som <code>base × (pris / 5 kr)</code>.
+        </p>
+      </div>
+    </div>
+    <div class="form-group prize-auto-preview" style="${isAuto ? "" : "display:none"}">
+      <label class="col-sm-3 control-label">Forhåndsvisning</label>
+      <div class="col-sm-9">
+        <table class="table table-condensed table-bordered" style="margin-bottom:0;max-width:520px"
+               id="cat-prize-preview"
+               aria-label="Forhåndsvisning av auto-multiplikator">
+          <thead>
+            <tr>
+              <th>Bongfarge</th>
+              <th>Pris</th>
+              <th>Multiplikator</th>
+              <th>Bingo-premie</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // Explicit-modus: per-bongfarge bingo-felter (gammel shape)
+  const explicitBingoBlock = `
+    <div class="prize-explicit-block" style="${isAuto ? "display:none" : ""}">
+      <p class="help-block" style="padding-left:25%">Bingo (fullt hus) per bongfarge — flat pris fra dette skjemaet:</p>
+      ${TICKET_COLOR_VALUES.map(bingoRow).join("")}
+    </div>`;
+
   return `
     <fieldset style="border:1px solid #ddd;padding:12px;margin-bottom:16px">
       <legend style="font-size:14px;width:auto;padding:0 8px">4. Premier (kr)</legend>
+      <div class="form-group">
+        <label class="col-sm-3 control-label">Premie-modus</label>
+        <div class="col-sm-9">
+          ${modeRadios}
+          <p class="help-block">
+            Auto-multiplikator (anbefalt for hovedspill): én base som
+            multipliseres opp etter bong-pris. Spesialpris: eksplisitt per
+            bongfarge — bruk dette for Trafikklys og lignende spesialspill.
+          </p>
+        </div>
+      </div>
       ${radField("rad1", "Rad 1")}
       ${radField("rad2", "Rad 2")}
       ${radField("rad3", "Rad 3")}
       ${radField("rad4", "Rad 4")}
-      <p class="help-block" style="padding-left:25%">Bingo (fullt hus) varierer per bongfarge:</p>
-      ${TICKET_COLOR_VALUES.map(bingoRow).join("")}
+      ${autoBingoBlock}
+      ${explicitBingoBlock}
     </fieldset>`;
 }
 
@@ -351,6 +429,8 @@ function wireForm(
       );
       if (priceRow) priceRow.style.display = checked ? "" : "none";
       if (bingoRow) bingoRow.style.display = checked ? "" : "none";
+      // Auto-modus preview re-rendres når aktive farger endres
+      renderAutoPreview(form);
     });
   });
 
@@ -361,10 +441,104 @@ function wireForm(
     if (bonusRow) bonusRow.style.display = bonusEnabled.checked ? "" : "none";
   });
 
+  // Prize-mode-radio: switch synlighet på auto vs explicit blokker
+  const modeRadios = form.querySelectorAll<HTMLInputElement>(
+    'input[name="prizeMultiplierMode"]',
+  );
+  const autoBlocks = form.querySelectorAll<HTMLElement>(
+    ".prize-auto-block, .prize-auto-preview",
+  );
+  const explicitBlock = form.querySelector<HTMLElement>(".prize-explicit-block");
+  modeRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      const isAuto = radio.value === "auto";
+      autoBlocks.forEach((el) => {
+        el.style.display = isAuto ? "" : "none";
+      });
+      if (explicitBlock) explicitBlock.style.display = isAuto ? "none" : "";
+      if (isAuto) renderAutoPreview(form);
+    });
+  });
+
+  // Live-preview: oppdater når bingoBase endres eller bong-pris endres
+  const bingoBaseEl = form.querySelector<HTMLInputElement>(
+    'input[name="prize-bingoBase"]',
+  );
+  bingoBaseEl?.addEventListener("input", () => renderAutoPreview(form));
+  const priceInputs = form.querySelectorAll<HTMLInputElement>(
+    'input[name^="ticketPrice-"]',
+  );
+  priceInputs.forEach((el) => {
+    el.addEventListener("input", () => renderAutoPreview(form));
+  });
+
+  // Initial preview-render
+  renderAutoPreview(form);
+
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void submitForm(form, initial, existingId);
   });
+}
+
+/**
+ * Tegn auto-multiplikator-forhåndsvisning. Leser bingoBase + aktive farger
+ * + per-farge ticket-pris, regner ut multiplikator og skriver tabell-rader.
+ */
+function renderAutoPreview(form: HTMLFormElement): void {
+  const tbody = form.querySelector<HTMLTableSectionElement>(
+    "#cat-prize-preview tbody",
+  );
+  if (!tbody) return;
+  const baseEl = form.querySelector<HTMLInputElement>(
+    'input[name="prize-bingoBase"]',
+  );
+  const baseKr = Number(baseEl?.value ?? 0);
+  const baseCents = Number.isFinite(baseKr) ? Math.round(baseKr * 100) : 0;
+  const activeColors: TicketColor[] = [];
+  for (const color of TICKET_COLOR_VALUES) {
+    const cb = form.querySelector<HTMLInputElement>(
+      `input[name="ticketColor"][value="${color}"]`,
+    );
+    if (cb?.checked) activeColors.push(color);
+  }
+  const rows: string[] = [];
+  for (const color of activeColors) {
+    const priceEl = form.querySelector<HTMLInputElement>(
+      `input[name="ticketPrice-${color}"]`,
+    );
+    const priceKr = Number(priceEl?.value ?? 0);
+    const priceCents = Number.isFinite(priceKr) ? Math.round(priceKr * 100) : 0;
+    if (priceCents <= 0 || baseCents <= 0) {
+      rows.push(`
+        <tr>
+          <td>${escapeHtml(COLOR_LABELS[color])}</td>
+          <td>${priceCents > 0 ? priceKr + " kr" : "—"}</td>
+          <td>—</td>
+          <td>—</td>
+        </tr>`);
+      continue;
+    }
+    const multiplier = priceCents / CHEAPEST_PRICE_CENTS;
+    const actualCents = Math.round(baseCents * multiplier);
+    const actualKr = actualCents / 100;
+    rows.push(`
+      <tr>
+        <td>${escapeHtml(COLOR_LABELS[color])}</td>
+        <td>${priceKr} kr</td>
+        <td>×${multiplier % 1 === 0 ? multiplier : multiplier.toFixed(2)}</td>
+        <td><strong>${actualKr} kr</strong></td>
+      </tr>`);
+  }
+  if (rows.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" class="text-muted text-center">Velg bongfarger for forhåndsvisning</td>
+      </tr>`;
+  } else {
+    tbody.innerHTML = rows.join("");
+  }
 }
 
 function readForm(form: HTMLFormElement): CatalogFormPayload | null {
@@ -426,6 +600,13 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     ticketPricesKr[color] = v;
   }
 
+  // Prize-mode (Tobias 2026-05-07)
+  const modeRadio = form.querySelector<HTMLInputElement>(
+    'input[name="prizeMultiplierMode"]:checked',
+  );
+  const prizeMultiplierMode: PrizeMultiplierMode =
+    modeRadio?.value === "explicit_per_color" ? "explicit_per_color" : "auto";
+
   // Prizes
   const radNum = (field: string): number => {
     const el = form.querySelector<HTMLInputElement>(`input[name="prize-${field}"]`);
@@ -437,18 +618,34 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     rad2: radNum("rad2"),
     rad3: radNum("rad3"),
     rad4: radNum("rad4"),
+    bingoBase: 0,
     bingo: {} as Partial<Record<TicketColor, number>>,
   };
-  for (const color of ticketColors) {
-    const el = form.querySelector<HTMLInputElement>(
-      `input[name="bingoPrize-${color}"]`,
+
+  if (prizeMultiplierMode === "auto") {
+    // Auto-modus: én base — bingoBase. Per-farge bingo regnes ut backend.
+    const baseEl = form.querySelector<HTMLInputElement>(
+      'input[name="prize-bingoBase"]',
     );
-    const v = Number(el?.value ?? 0);
+    const v = Number(baseEl?.value ?? 0);
     if (!Number.isFinite(v) || v <= 0) {
-      Toast.error(`Bingo-premie for ${COLOR_LABELS[color]} må være > 0.`);
+      Toast.error("Bingo base må være > 0 i auto-multiplikator-modus.");
       return null;
     }
-    prizesKr.bingo[color] = v;
+    prizesKr.bingoBase = v;
+  } else {
+    // Explicit-modus: per-bongfarge bingo (Trafikklys-stil)
+    for (const color of ticketColors) {
+      const el = form.querySelector<HTMLInputElement>(
+        `input[name="bingoPrize-${color}"]`,
+      );
+      const v = Number(el?.value ?? 0);
+      if (!Number.isFinite(v) || v <= 0) {
+        Toast.error(`Bingo-premie for ${COLOR_LABELS[color]} må være > 0.`);
+        return null;
+      }
+      prizesKr.bingo[color] = v;
+    }
   }
 
   // Bonus
@@ -472,6 +669,7 @@ function readForm(form: HTMLFormElement): CatalogFormPayload | null {
     description: description.length > 0 ? description : null,
     ticketColors,
     ticketPricesKr,
+    prizeMultiplierMode,
     prizesKr,
     bonusGameEnabled,
     bonusGameSlug,

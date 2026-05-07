@@ -52,8 +52,13 @@ function makeCatalogEntry(
       rad2: 10000,
       rad3: 10000,
       rad4: 10000,
+      // Default: bevar gammel explicit-per-color shape så eksisterende
+      // bridge-tester (som ikke setter prizeMultiplierMode) får samme
+      // bingoPrizes-verdier som før. Tester for "auto"-modus overstyrer
+      // mode + bingoBase eksplisitt.
       bingo: { gul: 200000, hvit: 50000 },
     },
+    prizeMultiplierMode: "explicit_per_color",
     bonusGameSlug: null,
     bonusGameEnabled: false,
     requiresJackpotSetup: false,
@@ -870,4 +875,72 @@ test("getJackpotConfigForPosition: tolererer snake_case prizes_cents fra DB", as
   assert.ok(result);
   assert.equal(result!.draw, 55);
   assert.equal(result!.prizesCents.hvit, 75000);
+});
+
+// ── Auto-multiplikator (Tobias 2026-05-07) ──────────────────────────────
+
+test("Auto-mode: bingoPrizes regnes ut fra bingoBase × (ticketPrice/500)", () => {
+  // hvit 5kr → base × 1, gul 10kr → base × 2, lilla 15kr → base × 3
+  const cat = makeCatalogEntry({
+    ticketColors: ["gul", "hvit", "lilla"],
+    ticketPricesCents: { gul: 1000, hvit: 500, lilla: 1500 },
+    prizeMultiplierMode: "auto",
+    prizesCents: {
+      rad1: 10000,
+      rad2: 10000,
+      rad3: 10000,
+      rad4: 10000,
+      bingoBase: 100000, // base 1000 kr (gjelder hvit 5 kr)
+      bingo: {},
+    },
+  });
+  const cfg = buildTicketConfigFromCatalog(cat);
+  const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
+  assert.equal(bingoPrizes.white, 100000); // 5 kr × 1
+  assert.equal(bingoPrizes.yellow, 200000); // 10 kr × 2
+  assert.equal(bingoPrizes.purple, 300000); // 15 kr × 3
+  // bingoBase eksponeres i config for diagnostikk
+  assert.equal(cfg.bingoBase, 100000);
+  assert.equal(cfg.prizeMultiplierMode, "auto");
+});
+
+test("Auto-mode: bingoBase = 0 produserer tom bingoPrizes", () => {
+  const cat = makeCatalogEntry({
+    prizeMultiplierMode: "auto",
+    prizesCents: {
+      rad1: 10000,
+      rad2: 10000,
+      rad3: 10000,
+      rad4: 10000,
+      bingoBase: 0,
+      bingo: {},
+    },
+  });
+  const cfg = buildTicketConfigFromCatalog(cat);
+  const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
+  assert.deepEqual(bingoPrizes, {});
+});
+
+test("Explicit-mode: bingoPrizes leses fra prizesCents.bingo per farge (Trafikklys-stil)", () => {
+  const cat = makeCatalogEntry({
+    ticketColors: ["gul", "hvit", "lilla"],
+    ticketPricesCents: { gul: 1500, hvit: 1500, lilla: 1500 },
+    prizeMultiplierMode: "explicit_per_color",
+    prizesCents: {
+      rad1: 10000,
+      rad2: 10000,
+      rad3: 10000,
+      rad4: 10000,
+      // ikke bingoBase — eksplisitt per-farge
+      bingo: { gul: 50000, hvit: 30000, lilla: 70000 },
+    },
+  });
+  const cfg = buildTicketConfigFromCatalog(cat);
+  const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
+  assert.equal(bingoPrizes.yellow, 50000);
+  assert.equal(bingoPrizes.white, 30000);
+  assert.equal(bingoPrizes.purple, 70000);
+  // bingoBase eksponeres IKKE i explicit-modus
+  assert.equal(cfg.bingoBase, undefined);
+  assert.equal(cfg.prizeMultiplierMode, "explicit_per_color");
 });

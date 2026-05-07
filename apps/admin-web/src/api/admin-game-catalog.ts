@@ -26,6 +26,12 @@ export const BONUS_GAME_SLUG_VALUES = [
 ] as const;
 export type BonusGameSlug = (typeof BONUS_GAME_SLUG_VALUES)[number];
 
+export const PRIZE_MULTIPLIER_MODE_VALUES = [
+  "auto",
+  "explicit_per_color",
+] as const;
+export type PrizeMultiplierMode = (typeof PRIZE_MULTIPLIER_MODE_VALUES)[number];
+
 // ── Typer ───────────────────────────────────────────────────────────────
 
 export interface PrizesCents {
@@ -33,6 +39,9 @@ export interface PrizesCents {
   rad2: number;
   rad3: number;
   rad4: number;
+  /** Base for "auto"-modus — gjelder billigste bong (5 kr / 500 øre). */
+  bingoBase?: number;
+  /** Per-farge bingo for "explicit_per_color"-modus (Trafikklys o.l.). */
   bingo: Partial<Record<TicketColor, number>>;
 }
 
@@ -45,6 +54,7 @@ export interface GameCatalogEntry {
   ticketColors: TicketColor[];
   ticketPricesCents: Partial<Record<TicketColor, number>>;
   prizesCents: PrizesCents;
+  prizeMultiplierMode: PrizeMultiplierMode;
   bonusGameSlug: BonusGameSlug | null;
   bonusGameEnabled: boolean;
   requiresJackpotSetup: boolean;
@@ -63,6 +73,7 @@ export interface CreateGameCatalogInput {
   ticketColors: TicketColor[];
   ticketPricesCents: Partial<Record<TicketColor, number>>;
   prizesCents: PrizesCents;
+  prizeMultiplierMode?: PrizeMultiplierMode;
   bonusGameSlug?: BonusGameSlug | null;
   bonusGameEnabled?: boolean;
   requiresJackpotSetup?: boolean;
