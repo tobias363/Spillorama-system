@@ -19,6 +19,7 @@
     "seed:demo-pilot-day": "tsx scripts/seed-demo-pilot-day.ts",
     "export:game-config": "tsx scripts/export-game-catalog.ts",
     "import:legacy-templates": "tsx scripts/import-legacy-subgame-templates.ts",
+    "import:players-excel": "tsx scripts/import-players-from-excel.ts",
     "seed:legacy-config": "tsx scripts/seed-legacy-game-config.ts",
     "smoke-test": "tsx scripts/e2e-smoke-test.ts",
     "spec:lint": "redocly lint openapi.yaml"
@@ -56,6 +57,7 @@
     "socket.io-client": "^4.8.3",
     "tsx": "^4.19.3",
     "typescript": "~5.9.0",
+    "xlsx": "^0.18.5",
     "yaml": "^2.8.3"
   }
 }
