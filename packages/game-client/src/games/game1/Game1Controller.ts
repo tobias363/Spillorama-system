@@ -41,6 +41,7 @@ import { MiniGameRouter } from "./logic/MiniGameRouter.js";
 import { LegacyMiniGameAdapter } from "./logic/LegacyMiniGameAdapter.js";
 import { Game1SocketActions } from "./logic/SocketActions.js";
 import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
+import { Game1LobbyFallback } from "./logic/LobbyFallback.js";
 import type { Phase } from "./logic/Phase.js";
 
 /**
@@ -142,6 +143,13 @@ class Game1Controller implements GameController {
   private pendingLegacyMiniGame: MiniGameActivatedPayload | null = null;
   private actions: Game1SocketActions | null = null;
   private reconnectFlow: Game1ReconnectFlow | null = null;
+  /**
+   * R1 (BIN-822, 2026-05-08): lobby-fallback overlay. Vises når
+   * `socket.createRoom` feiler — typisk når master ikke har trykket Start
+   * ennå men hallen er innenfor åpningstid. Lytter på `lobby:state-update`
+   * og retry-er join når runden er klar (purchase_open/running).
+   */
+  private lobbyFallback: Game1LobbyFallback | null = null;
 
   /**
    * Mini-game-kø (Tobias 2026-04-26): backend triggerer mini-game POST-commit
@@ -291,11 +299,34 @@ class Game1Controller implements GameController {
     });
 
     if (!joinResult.ok || !joinResult.data) {
-      // Tobias-direktiv 2026-05-03: room-join failure → samme connection-error
-      // fallback. Hele overlayet er klikkbart → reload.
-      this.loader.setError();
-      console.error("[Game1] Room join failed:", joinResult.error);
-      this.showError(joinResult.error?.message || "Kunne ikke joine rom");
+      // R1 (BIN-822, 2026-05-08, Tobias-direktiv): istedenfor å vise
+      // "FÅR IKKE KOBLET TIL ROM"-feilen direkte, mounter vi en lobby-
+      // fallback-overlay som lytter på `spill1:lobby:{hallId}`-rommet og
+      // viser "neste spill om X min" / "Stengt" mens vi venter. Når
+      // master starter runden trigger lobby-state-update at vi reloader
+      // siden — det re-initialiserer Game1Controller med en runde som
+      // er klar til join.
+      //
+      // Reload er valgt over inline-retry fordi denne controlleren har
+      // mye in-flight init-state (Pixi-stage, socket-listeners, bridge).
+      // En full re-init er enklere og safer enn å "rewinde" tilstanden.
+      console.warn(
+        "[Game1] Room join feilet — mounter lobby-fallback istedenfor å vise feil:",
+        joinResult.error,
+      );
+      this.loader.hide();
+      this.lobbyFallback = new Game1LobbyFallback({
+        hallId: this.deps.hallId,
+        socket: this.deps.socket,
+        onShouldRetryJoin: () => {
+          // Lobby-state indikerer at runden er klar — reload siden så
+          // shell-en kan re-mounte spillet med fresh socket/Pixi-state.
+          if (typeof window !== "undefined") {
+            window.location.reload();
+          }
+        },
+      });
+      void this.lobbyFallback.start();
       return;
     }
 
@@ -427,6 +458,9 @@ class Game1Controller implements GameController {
     this.pendingLegacyMiniGame = null;
     this.actions = null;
     this.reconnectFlow = null;
+    // R1 (BIN-822): cleanup lobby-fallback overlay + socket-subscribe.
+    this.lobbyFallback?.stop();
+    this.lobbyFallback = null;
     this.clearScreen();
     this.root.destroy({ children: true });
   }
