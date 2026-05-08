@@ -1,0 +1,102 @@
+# Docker Compose override for R2 failover-test (BIN-811).
+#
+# Spins up TWO backend instances against shared Postgres + Redis so we can
+# `kill -9` the primary mid-round and verify that the secondary instance
+# picks up via Redis-state without losing draws or marks.
+#
+# Usage:
+#   docker-compose \
+#     -f docker-compose.yml \
+#     -f infra/chaos-tests/docker-compose.chaos.yml \
+#     up -d --build
+#
+# This override:
+#   - Disables the default `backend` service via `profiles: [disabled]`.
+#   - Adds backend-1 on :4001 and backend-2 on :4002 with identical env.
+#   - Both share the same Postgres and Redis (cross-instance state lives in
+#     Redis via ROOM_STATE_PROVIDER=redis + SCHEDULER_LOCK_PROVIDER=redis,
+#     and Socket.IO uses @socket.io/redis-adapter for cross-instance
+#     pub/sub).
+#
+# We deliberately skip a load balancer (haproxy/traefik). The chaos-test
+# script targets each instance directly by port so we can:
+#   1) seed traffic against `backend-1`,
+#   2) `docker kill -s SIGKILL backend-1` mid-round,
+#   3) re-route the test client to `backend-2` and verify it sees the
+#      same state.
+#
+# Adding a real LB would test sticky-session/handoff (which is a separate
+# concern — Socket.IO clients are typically pinned to one instance per
+# Render-style sticky lb). The failover-invariant we test here is the
+# DB+Redis state: can ANY surviving instance reconstruct the round.
+
+services:
+  backend:
+    # Disable the default backend so the override fully replaces it.
+    profiles:
+      - disabled
+
+  backend-1:
+    build:
+      context: ../../apps/backend
+      dockerfile: Dockerfile
+    container_name: spillorama-backend-1
+    ports:
+      - "4001:4000"
+    env_file: ../../apps/backend/.env.production
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      INSTANCE_ID: backend-1
+      APP_PG_CONNECTION_STRING: postgres://spillorama:spillorama@postgres:5432/spillorama
+      REDIS_URL: redis://redis:6379
+      ROOM_STATE_PROVIDER: redis
+      SCHEDULER_LOCK_PROVIDER: redis
+      WALLET_PROVIDER: postgres
+      WALLET_PG_CONNECTION_STRING: postgres://spillorama:spillorama@postgres:5432/spillorama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # IMPORTANT: do not auto-restart — we kill this instance intentionally
+    # in the chaos-test and want it to STAY dead so the test verifies that
+    # backend-2 takes over on its own.
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  backend-2:
+    build:
+      context: ../../apps/backend
+      dockerfile: Dockerfile
+    container_name: spillorama-backend-2
+    ports:
+      - "4002:4000"
+    env_file: ../../apps/backend/.env.production
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      INSTANCE_ID: backend-2
+      APP_PG_CONNECTION_STRING: postgres://spillorama:spillorama@postgres:5432/spillorama
+      REDIS_URL: redis://redis:6379
+      ROOM_STATE_PROVIDER: redis
+      SCHEDULER_LOCK_PROVIDER: redis
+      WALLET_PROVIDER: postgres
+      WALLET_PG_CONNECTION_STRING: postgres://spillorama:spillorama@postgres:5432/spillorama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
