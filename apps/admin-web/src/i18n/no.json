@@ -1169,7 +1169,7 @@
   "select_schedule_for_each_weeday": "Velg tidsplan for hver ukedag",
   "grop_of_halls": "Gruppe av saler",
   "grop_of_halls_name": "Navn på gruppe av haller",
-  "master_hall": "Mestersalen",
+  "master_hall": "Master-hall",
   "group_of_id": "Gruppehall-ID",
   "group_of_name": "Navn på gruppehallen",
   "number_of_hall_assigned": "Antall haller tildelt",
@@ -3264,5 +3264,8 @@
   "minutes_short": "min",
   "seconds_short": "sek",
   "invalid_input": "Ugyldig verdi.",
-  "preview": "Forhåndsvisning"
+  "preview": "Forhåndsvisning",
+  "master_hall_none": "(Ingen pinned — agentens hall blir master)",
+  "master_hall_hint": "Når satt blir denne hallen master uavhengig av hvilken hall sin agent som starter spillet. Må være i medlemslisten over.",
+  "master_hall_not_member": "Master-hallen må være med i medlemslisten."
 }

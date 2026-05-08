@@ -1034,7 +1034,7 @@
   "psw_token_invalied_or_expired": "Password reset token is invalid or has expired.",
   "start_date_and_end_date": "Start Date and End Date",
   "time_slot": "Time Slot",
-  "master_hall": "Master Hall",
+  "master_hall": "Master hall",
   "start_date_and_time": "Start Date and Time",
   "end_date_and_time": "End Date and Time",
   "pattern_price": "Pattern Price",
@@ -3269,5 +3269,8 @@
   "minutes_short": "min",
   "seconds_short": "sec",
   "invalid_input": "Invalid value.",
-  "preview": "Preview"
+  "preview": "Preview",
+  "master_hall_none": "(None pinned — agent's hall becomes master)",
+  "master_hall_hint": "When set, this hall is master regardless of which hall's agent starts the game. Must be in the member list above.",
+  "master_hall_not_member": "Master hall must be in the member list."
 }

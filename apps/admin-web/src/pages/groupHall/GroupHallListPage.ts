@@ -123,7 +123,16 @@ export function renderGroupHallListPage(container: HTMLElement): void {
           title: t("halls"),
           render: (r) => {
             if (r.members.length === 0) return `<em class="text-muted">${escapeHtml(t("no_data"))}</em>`;
-            const names = r.members.map((m) => escapeHtml(m.hallName)).join(", ");
+            // 2026-05-08 (Tobias-feedback): marker master-hallen med kron
+            // hvis pinned. Lar bingovert-/admin-UI raskt se hvilken hall som
+            // er master uten å åpne edit-modalen.
+            const names = r.members
+              .map((m) => {
+                const isMaster = r.masterHallId === m.hallId;
+                const prefix = isMaster ? "👑 " : "";
+                return `${prefix}${escapeHtml(m.hallName)}`;
+              })
+              .join(", ");
             return `<span title="${escapeHtml(String(r.members.length))}">${names}</span>`;
           },
         },
