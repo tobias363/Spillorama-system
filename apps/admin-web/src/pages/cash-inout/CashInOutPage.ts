@@ -708,12 +708,21 @@ function ensureLegacyStyles(): void {
       margin-left: 6px;
       font-weight: normal;
     }
+    /* 2026-05-08 (Tobias-feedback): seksjons-overskrift + kompakt
+       ticket-count-meta. Sektor-stilen samsvarer med Master-handlinger
+       og Min hall-handlinger så agentene ser konsistente headere. */
+    .cashinout-1to1 .spill1-hall-section h4,
     .cashinout-1to1 .spill1-self-actions h4,
     .cashinout-1to1 .spill1-master-actions h4 {
       font-size: 14px;
       color: #555;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+    }
+    .cashinout-1to1 .spill1-hall-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
     @media (max-width: 991px) {
       .cashinout-1to1 .cashinout-daily-actions { align-items: stretch; }
