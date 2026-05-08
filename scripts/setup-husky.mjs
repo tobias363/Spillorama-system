@@ -22,16 +22,23 @@ const REPO_ROOT = join(dirname(__filename), "..");
 const HUSKY_DIR = join(REPO_ROOT, ".husky");
 const HOOK_PATH = join(HUSKY_DIR, "pre-commit");
 
-const HOOK_CONTENT = `# Husky pre-commit hook -- blokker blink-risikable CSS- og CSS-in-JS-monstre.
+const HOOK_CONTENT = `# Husky pre-commit hook
 #
-# Kjorer lint-staged som:
-#  - stylelint --fix pa CSS-filer med endringer
-#  - lint-no-backdrop-js pa TS-filer med endringer (scanner hele TS-treet)
+# Kjorer lint-staged (.lintstagedrc.json) som matcher endrede filer mot:
+#  - stylelint --fix paa CSS-filer
+#  - lint-no-backdrop-js + lint-no-unsafe-html paa TS-filer
+#  - npm run check (TypeScript strict) paa apps/backend/src/**/*.ts
+#  - validate-skill-frontmatter paa .claude/skills/*/SKILL.md
+#  - check-markdown-links paa docs/**/*.md
+#  - validate-migration-name paa apps/backend/migrations/*.sql
+#  - check-large-binaries paa store binary-typer
 #
-# Hvis hook feiler, fiks overtredelsene FOR commit. For nodbypass med
+# Hvis hook feiler, fiks overtredelsene FOR commit. For nedbypass med
 # begrunnelse: commit med --no-verify og dokumenter hvorfor.
 #
-# Se docs/engineering/CSS_LINTING.md.
+# Se docs/engineering/PRE_COMMIT_HOOKS.md for full liste over regler og
+# hvordan legge til nye hooks. Se docs/engineering/CSS_LINTING.md for
+# CSS-spesifikke regler.
 
 npx lint-staged
 `;

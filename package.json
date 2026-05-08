@@ -57,13 +57,7 @@
     "schema:diff": "bash scripts/schema-ci/diff-schema.sh",
     "prepare": "husky || true && node scripts/setup-husky.mjs || true"
   },
-  "lint-staged": {
-    "**/*.css": "stylelint --fix",
-    "**/*.{ts,tsx,mts,cts}": [
-      "bash -c 'npm run --silent lint:no-backdrop-js'",
-      "bash -c 'npm run --silent lint:no-unsafe-html'"
-    ]
-  },
+  "//lint_staged_rationale": "Lint-staged config has been moved to .lintstagedrc.json (2026-05-08). The standalone file makes hook contents self-documenting and lets us add validate-skill-frontmatter, check-markdown-links, validate-migration-name, and check-large-binaries without bloating package.json.",
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/pngjs": "^6.0.5",
