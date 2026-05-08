@@ -8,7 +8,7 @@
  * `aggregator.getLobbyState(hallId, actor)` og verifiserer hele
  * `Spill1AgentLobbyState`-objektet (inkl. `inconsistencyWarnings`).
  *
- * Test-states som dekkes (jf. Bølge 1-mandat):
+ * Test-states som dekkes (jf. Bølge 1-mandat + code-review-utvidelser):
  *   1.  idle (ingen plan-run for businessDate)
  *   2.  purchase_open (scheduled-game spawnet, billettkjøp åpent, ingen ready)
  *   3.  ready_to_start (alle haller markert ready)
@@ -21,13 +21,22 @@
  *   10. plan-running-no-scheduled (BRIDGE_FAILED scenario)
  *   11. cross-tz-businessDate (kall ved 23:55 Oslo-tid, sjekk businessDate)
  *   12. status-mismatch (plan-run.running men scheduled-game.cancelled)
- *   13. stale-plan-run (yesterday-or-older fortsatt åpen)
+ *   13. stale-plan-run — running (yesterday-or-older fortsatt running)
  *   14. admin-actor-no-hall (ADMIN er master uavhengig av hallId)
  *   15. infra-error (DB throws → DomainError)
+ *   16. hall-scope-flag (HALL_OPERATOR ser hall-scoped state)
+ *
+ * Code-review (PR #1050) la til:
+ *   17. empty-state (ADMIN-uten-hall route-shape parser via Zod)
+ *   18. stale-plan-run paused (warning trigger uavhengig av plan-status)
+ *   19. currentPosition=0 (idle-run uten advance — buildPlanMeta ikke krasjer)
+ *   20. malformed-participating-json (defensive parse, aggregator ikke krasjer)
  */
 
 import assert from "node:assert/strict";
 import test from "node:test";
+
+import { Spill1AgentLobbyStateSchema } from "@spillorama/shared-types";
 
 import { GameLobbyAggregator } from "../GameLobbyAggregator.js";
 import { DomainError } from "../../errors/DomainError.js";
@@ -1093,10 +1102,19 @@ test("state=status-mismatch: plan-run.running men scheduled-game.cancelled", asy
     status: "running",
     currentPosition: 1,
   });
-  // Ny scheduled-game-rad spawnet via plan-bridge, men status er allerede
-  // 'cancelled' (race med master-stop eller cron). Note: queryActiveScheduledGameForHall
-  // vil ikke matche cancelled — men queryScheduledGameByPlanRun (bridge-lookup)
-  // matcher uavhengig av status.
+  // EDGE CASE (bevisst): PLAN_SCHED_STATUS_MISMATCH trigges KUN når
+  // plan-run-status divergerer fra en bridge-spawnet rad. Hvis kun
+  // legacy-row finnes i cancelled-state og ingen bridge-row, får vi
+  // hverken status-mismatch eller bridge-failed — fordi
+  // queryActiveScheduledGameForHall ekskluderer cancelled-rader uansett
+  // (status NOT IN ('purchase_open','ready_to_start','running','paused')).
+  // Dette er konsistent med audit-rapport §3.5 "stale legacy snapshot
+  // behandles som ingen aktiv game". Code-review (PR #1050) funn 6.
+  //
+  // I denne testen sender vi en BRIDGE-row (plan_run_id+plan_position
+  // matcher) i 'cancelled'-state, så queryScheduledGameByPlanRun
+  // returnerer raden uavhengig av status. Det er stien som faktisk
+  // trigger PLAN_SCHED_STATUS_MISMATCH.
   const schedGame: ScheduledGameRowStub = {
     id: SCHEDULED_GAME_ID,
     status: "cancelled",
@@ -1321,4 +1339,242 @@ test("hall-scope: HALL_OPERATOR på HALL_A får isMasterAgent=true når master =
     hallId: HALL_B,
   });
   assert.equal(stateNonMasterAgent.isMasterAgent, false);
+});
+
+// ── Test 17: empty-state schema-validation (route-level shape) ────────
+
+test("empty-state: ADMIN-uten-hall route-shape parser via Spill1AgentLobbyStateSchema", () => {
+  // Code-review (PR #1050) funn 1: 'agentGame1Lobby.ts:142-160' returnerer
+  // empty-state med null-felter. Denne testen verifiserer at den eksakte
+  // shape-en route-en konstruerer faktisk passerer Zod-skjemaet — det er
+  // kontrakten Bølge 3-frontend baserer parsing på.
+  //
+  // Vi konstruerer empty-state-objektet 1:1 som route-handleren gjør, og
+  // kaller parse(). Hvis schemaet noen gang strammes inn slik at
+  // null-feltene avvises, fanger denne testen det før wire-skewen treffer
+  // prod.
+  const emptyState = {
+    hallId: null,
+    hallName: null,
+    businessDate: null,
+    generatedAt: new Date().toISOString(),
+    currentScheduledGameId: null,
+    planMeta: null,
+    scheduledGameMeta: null,
+    halls: [] as never[],
+    allHallsReady: false,
+    masterHallId: null,
+    groupOfHallsId: null,
+    isMasterAgent: false,
+    nextScheduledStartTime: null,
+    inconsistencyWarnings: [] as never[],
+  };
+
+  const result = Spill1AgentLobbyStateSchema.safeParse(emptyState);
+  assert.equal(
+    result.success,
+    true,
+    `empty-state må parse via schema. Feil: ${result.success ? "" : JSON.stringify(result.error.issues)}`,
+  );
+  if (result.success) {
+    assert.equal(result.data.hallId, null);
+    assert.equal(result.data.hallName, null);
+    assert.equal(result.data.businessDate, null);
+    assert.equal(result.data.halls.length, 0);
+    assert.equal(result.data.inconsistencyWarnings.length, 0);
+    assert.equal(result.data.allHallsReady, false);
+    assert.equal(result.data.isMasterAgent, false);
+  }
+});
+
+// ── Test 18: STALE_PLAN_RUN trigges også for status='paused' ──────────
+
+test("STALE_PLAN_RUN: trigges når yesterday-run står i status='paused' (ikke kun running)", async () => {
+  // Code-review (PR #1050) flagget at testen for stale-plan-run kun
+  // dekker 'running'. Aggregator-koden bruker 'planRun.status !== "finished"'
+  // som guard, så 'paused' og 'idle' skal også trigge warning. Denne
+  // testen verifiserer paused-grenen.
+  const yesterday = "2026-05-07"; // FIXED_BUSINESS_DATE er 2026-05-08
+  const plan = makePlanWithItems({
+    id: PLAN_ID,
+    hallId: null,
+    groupOfHallsId: GOH_ID,
+  });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "paused", // ← key forskjell fra Test 13
+    currentPosition: 1,
+    businessDate: yesterday,
+  });
+
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [],
+    hallReadyRowsByGameId: new Map(),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  const staleWarn = state.inconsistencyWarnings.find(
+    (w) => w.code === "STALE_PLAN_RUN",
+  );
+  assert.notEqual(
+    staleWarn,
+    undefined,
+    "STALE_PLAN_RUN må trigge for paused-state også, ikke kun running",
+  );
+  // Verify detail.planRunStatus reflects 'paused' (so caller can act on it)
+  const detail = staleWarn?.detail as { planRunStatus?: string } | undefined;
+  assert.equal(detail?.planRunStatus, "paused");
+});
+
+// ── Test 19: currentPosition=0 edge-case (idle-run uten advance) ──────
+
+test("planMeta: currentPosition=0 (idle-run uten advance) — buildPlanMeta krasjer ikke", async () => {
+  // Code-review (PR #1050) flagget at currentPosition=0 er en gyldig
+  // edge-case for idle-state der lazy-create returnerer run uten
+  // advance. buildPlanMeta sin guard 'Math.max(1, ...)' beskytter mot
+  // crash, men vi vil ha eksplisitt test.
+  const plan = makePlanWithItems({
+    id: PLAN_ID,
+    hallId: null,
+    groupOfHallsId: GOH_ID,
+  });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "idle",
+    currentPosition: 0, // ← edge-case
+  });
+
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [],
+    hallReadyRowsByGameId: new Map(),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  // Aggregator skal ikke krasje. planMeta kan eksistere (med
+  // currentPosition=0 i meta-objektet) eller falle tilbake til null
+  // hvis items ikke matcher — begge er akseptable. Det viktige er
+  // at vi ikke kaster.
+  assert.notEqual(state, undefined);
+  // Hvis planMeta finnes, må currentPosition være korrekt eksponert.
+  // (Note: vi parser ikke via Zod-schema her fordi test-fixturene
+  // bruker syntetiske IDer som ikke er valid UUIDv4. Schema-parsing
+  // dekkes av Test 17 empty-state + route-laget i prod.)
+  if (state.planMeta !== null) {
+    assert.equal(state.planMeta.currentPosition, 0);
+    // totalPositions speiler items-count (2 fra makePlanWithItems-default).
+    assert.equal(state.planMeta.totalPositions, 2);
+  }
+});
+
+// ── Test 20: malformed JSON i participating_halls_json ────────────────
+
+test("malformed-participating-json: ugyldig JSON-streng håndteres defensivt", async () => {
+  // Code-review (PR #1050) flagget at parseHallIdsArray sin try/catch
+  // bør verifiseres med eksplisitt test. Hvis 'participating_halls_json'
+  // i DB er en ugyldig JSON-streng (corrupt rad / partial write),
+  // skal aggregator returnere tom liste og ikke krasje.
+  const plan = makePlanWithItems({
+    id: PLAN_ID,
+    hallId: null,
+    groupOfHallsId: GOH_ID,
+  });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "running",
+    currentPosition: 1,
+  });
+  // Sett participating_halls_json til en streng som IKKE er valid JSON.
+  const schedGame: ScheduledGameRowStub = {
+    id: SCHEDULED_GAME_ID,
+    status: "running",
+    master_hall_id: HALL_A,
+    group_hall_id: GOH_ID,
+    participating_halls_json: "not-json-at-all-{[",
+    scheduled_start_time: "2026-05-08T15:00:00Z",
+    scheduled_end_time: "2026-05-08T16:00:00Z",
+    actual_start_time: "2026-05-08T15:01:00Z",
+    actual_end_time: null,
+    plan_run_id: RUN_ID,
+    plan_position: 1,
+    pause_reason: null,
+  };
+
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [schedGame],
+    hallReadyRowsByGameId: new Map([[SCHEDULED_GAME_ID, []]]),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  // Aggregator skal returnere state uten å throw, og participating
+  // skal tolkes som tom array.
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  // currentScheduledGameId skal fortsatt være satt (vi hentet raden).
+  assert.equal(state.currentScheduledGameId, SCHEDULED_GAME_ID);
+  // Med tom participating-array etter parse-feil, blir alle ikke-master
+  // haller markert ekskludert via "Ikke deltaker"-grenen.
+  // Master (HALL_A) skal fortsatt vises som ikke-ekskludert.
+  const masterEntry = state.halls.find((h) => h.hallId === HALL_A);
+  assert.notEqual(masterEntry, undefined);
+  assert.equal(masterEntry?.excludedFromGame, false);
+  assert.equal(masterEntry?.isMaster, true);
+  // Note: Schema-parse dekkes av Test 17 empty-state. Test-fixturer her
+  // bruker syntetiske IDer som ikke er UUIDv4, så strict schema-parse
+  // ville feile på UUID-validering. Aggregator-kontrakten testes i
+  // prod via route-laget (commit 4 — Zod safeParse).
 });
