@@ -64,6 +64,8 @@ function group(id: string, name: string, hallIds: string[]): HallGroup {
     name,
     status: "active",
     tvId: null,
+
+    masterHallId: null,
     productIds: [],
     members: hallIds.map((hallId) => ({
       hallId,

@@ -51,6 +51,8 @@ function makeGroup(
     name,
     status: "active",
     tvId: null,
+
+    masterHallId: null,
     productIds: [],
     members: hallIds.map((hallId, idx) => ({
       hallId,

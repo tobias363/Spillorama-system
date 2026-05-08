@@ -581,6 +581,8 @@ test("aggregateOverview: hall-grupper aggregeres med ALL_READY/PARTIAL/NONE", as
         name: "Group A",
         status: "active",
         tvId: null,
+
+        masterHallId: null,
         productIds: [],
         members: [
           { hallId: "hall-1", hallName: "Hall 1", hallStatus: "active", addedAt: "2026-01-01T00:00:00Z" },
