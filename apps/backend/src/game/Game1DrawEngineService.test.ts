@@ -1130,7 +1130,7 @@ test("getState returnerer view for eksisterende game", async () => {
       },
       {
         match: (s) =>
-          s.includes("SELECT status FROM") && s.includes("scheduled_games"),
+          s.includes("SELECT status") && s.includes("scheduled_games"),
         rows: [{ status: "running" }],
       },
       {
@@ -1160,7 +1160,7 @@ test("getState når scheduled_game er completed → isFinished=true", async () =
       },
       {
         match: (s) =>
-          s.includes("SELECT status FROM") && s.includes("scheduled_games"),
+          s.includes("SELECT status") && s.includes("scheduled_games"),
         rows: [{ status: "completed" }],
       },
       {

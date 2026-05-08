@@ -138,6 +138,16 @@ import {
   // (small_yellow / large_purple / ...) til vekt for pot-skalering.
   resolveOddsenVariantConfig,
   bongMultiplierForColorSlug,
+  // Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
+  // resolveTrafikklysVariantConfig leser top-level Trafikklys-config (rad-
+  // farge-styrt pot for Rad 1-4 + Fullt Hus). isTrafikklysRowColor brukes
+  // til å validere DB-kolonne-verdier ved load. pickTrafikklysRowColor
+  // wrapper crypto.randomInt for server-autoritativ trekking.
+  resolveTrafikklysVariantConfig,
+  isTrafikklysRowColor,
+  pickTrafikklysRowColor,
+  type TrafikklysRowColor,
+  type TrafikklysVariantConfig,
 } from "./Game1DrawEngineHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -181,6 +191,15 @@ export interface Game1GameStateView {
    */
   pausedAutomatically?: boolean;
   drawnBalls: number[]; // I trekk-rekkefølge (tom hvis ingen draws ennå)
+  /**
+   * Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
+   * server-trukket rad-farge for Trafikklys-spill. Klient/TV-skjerm bruker
+   * denne til å vise banner ("Denne runden er GRØNN"). NULL for ikke-
+   * Trafikklys-spill (standard hovedspill, Oddsen) og legacy-rader.
+   *
+   * Verdier: "rød" / "grønn" / "gul" — eller null.
+   */
+  trafikklysRowColor: TrafikklysRowColor | null;
 }
 
 export interface Game1DrawRecord {
@@ -368,6 +387,16 @@ interface ScheduledGameRow {
    * Resume-trykk. Brukes kun i lokal/test-flyt.
    */
   master_is_test_hall?: boolean | null;
+  /**
+   * Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
+   * server-trukket rad-farge for Trafikklys-spill (rules.gameVariant=
+   * 'trafikklys'). Bestemmer hvilken pot som brukes for Rad 1-4 og Fullt
+   * Hus (uavhengig av bongfarge). NULL for ikke-Trafikklys-spill og legacy-
+   * rader. Trekkes ÉN gang ved `startGame` og bevares gjennom hele runden.
+   *
+   * Whitelist håndheves av DB CHECK-constraint: 'rød'/'grønn'/'gul'.
+   */
+  trafikklys_row_color?: string | null;
 }
 
 interface GameStateRow {
@@ -889,7 +918,12 @@ export class Game1DrawEngineService {
           "startGame idempotent: engine-state finnes allerede"
         );
         const draws = await this.loadDrawsInOrder(client, scheduledGameId);
-        return this.buildStateView(existing, game.status, draws);
+        return this.buildStateView(
+          existing,
+          game.status,
+          draws,
+          game.trafikklys_row_color ?? null,
+        );
       }
 
       // Pre-cond-sjekk. Master-control validerer også dette, men vi defender
@@ -908,6 +942,39 @@ export class Game1DrawEngineService {
       // Resolve draw-bag.
       const bagConfig = resolveDrawBagConfig("game_1", undefined);
       const drawBag = buildDrawBag(bagConfig);
+
+      // Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
+      // Detekter Trafikklys-variant ved spill-start, valider at den IKKE
+      // kombineres med Oddsen, og trekk én rad-farge server-autoritativt.
+      // Rad-fargen persisteres på scheduled-game-raden og bevares gjennom
+      // hele runden (Rad 1 → ... → Fullt Hus). Klient-snapshot eksponerer
+      // den via `Game1GameStateView.trafikklysRowColor` slik at TV-skjerm/
+      // spiller-app kan vise banner ("Denne runden er GRØNN").
+      //
+      // Idempotent re-start: hvis kolonnen allerede er satt på raden, behold
+      // verdien (ikke re-trekk). Det skjer kun via crash-recovery — startGame
+      // har idempotent short-circuit ovenfor som returnerer tidligere.
+      const trafikklysCfg =
+        resolveTrafikklysVariantConfig(game.ticket_config_json) ??
+        resolveTrafikklysVariantConfig(game.game_config_json);
+      const oddsenCfgForExclusivity =
+        resolveOddsenVariantConfig(game.ticket_config_json) ??
+        resolveOddsenVariantConfig(game.game_config_json);
+      if (trafikklysCfg && oddsenCfgForExclusivity) {
+        // §B9: Trafikklys + Oddsen er gjensidig ekskluderende. Per Tobias
+        // 2026-05-08 (gap-doc §3.3) kaster vi heller enn å silently la
+        // Trafikklys vinne — det er en konfig-bug som må synlig fanges
+        // tidlig før penger er på spill.
+        throw new DomainError(
+          "TRAFIKKLYS_ODDSEN_EXCLUSIVE",
+          "Trafikklys og Oddsen kan ikke kombineres på samme katalog-rad.",
+        );
+      }
+
+      let trafikklysRowColorPicked: TrafikklysRowColor | null = null;
+      if (trafikklysCfg) {
+        trafikklysRowColorPicked = pickTrafikklysRowColor(trafikklysCfg);
+      }
 
       // INSERT game_state.
       await client.query(
@@ -930,15 +997,19 @@ export class Game1DrawEngineService {
       );
 
       // UPDATE scheduled_game status → running (hvis ikke allerede running).
-      if (game.status !== "running") {
+      // Persist trafikklys-rad-fargen i samme query når den trekkes — det
+      // sparer en round-trip og garanterer atomisitet (rad-farge er låst
+      // til status='running'-flippen).
+      if (game.status !== "running" || trafikklysRowColorPicked !== null) {
         await client.query(
           `UPDATE ${this.scheduledGamesTable()}
-              SET status              = 'running',
-                  actual_start_time   = COALESCE(actual_start_time, now()),
-                  started_by_user_id  = COALESCE(started_by_user_id, $2),
-                  updated_at          = now()
+              SET status                = CASE WHEN status = 'running' THEN status ELSE 'running' END,
+                  actual_start_time     = COALESCE(actual_start_time, now()),
+                  started_by_user_id    = COALESCE(started_by_user_id, $2),
+                  trafikklys_row_color  = COALESCE(trafikklys_row_color, $3),
+                  updated_at            = now()
             WHERE id = $1`,
-          [scheduledGameId, actorUserId]
+          [scheduledGameId, actorUserId, trafikklysRowColorPicked]
         );
       }
 
@@ -952,6 +1023,10 @@ export class Game1DrawEngineService {
           drawBagSize: bagConfig.drawBagSize,
           assignmentsCreated,
           purchasesCount: purchases.length,
+          // Trafikklys-spor for compliance-audit. Når null har raden ikke
+          // Trafikklys-variant — auditor kan filtrere på feltet.
+          trafikklysRowColor: trafikklysRowColorPicked,
+          trafikklysActive: trafikklysCfg !== null,
         },
       });
 
@@ -960,6 +1035,7 @@ export class Game1DrawEngineService {
           scheduledGameId,
           maxBallValue: bagConfig.maxBallValue,
           assignmentsCreated,
+          trafikklysRowColor: trafikklysRowColorPicked,
         },
         "[GAME1_SCHEDULE PR4b] draw-engine startet"
       );
@@ -971,7 +1047,7 @@ export class Game1DrawEngineService {
           "Kunne ikke lese ny engine-state etter INSERT."
         );
       }
-      return this.buildStateView(state, "running", []);
+      return this.buildStateView(state, "running", [], trafikklysRowColorPicked);
     });
   }
 
@@ -1122,7 +1198,13 @@ export class Game1DrawEngineService {
         game.ticket_config_json,
         game.game_config_json,
         ball,
-        game.room_code
+        game.room_code,
+        // Trafikklys runtime (2026-05-08, §5): persistert rad-farge fra
+        // scheduled-game-raden. Validert mot whitelist; null hvis ikke-
+        // Trafikklys-spill. Brukes til å overstyre Rad/Fullt Hus-poten.
+        isTrafikklysRowColor(game.trafikklys_row_color)
+          ? game.trafikklys_row_color
+          : null,
       );
 
       // PR 4d.4: capture for post-commit admin-broadcast.
@@ -1298,7 +1380,15 @@ export class Game1DrawEngineService {
       }
       const updatedStatus = isFinished ? "completed" : game.status;
       const draws = await this.loadDrawsInOrder(client, scheduledGameId);
-      return this.buildStateView(updatedState, updatedStatus, draws);
+      // Trafikklys runtime (2026-05-08): rad-farge er persistert ved
+      // startGame; vi videreformidler den til state-view-en så hver
+      // drawNext-respons inneholder rowColor (idempotent på tvers av draws).
+      return this.buildStateView(
+        updatedState,
+        updatedStatus,
+        draws,
+        game.trafikklys_row_color ?? null,
+      );
     }).then(async (view) => {
       // PR 4d.3: admin-broadcast etter commit. view.lastDrawnBall er alltid
       // satt her (vi har akkurat trukket og persistert), og drawsCompleted
@@ -1732,13 +1822,20 @@ export class Game1DrawEngineService {
     );
     const state = rows[0];
     if (!state) return null;
-    const { rows: gameRows } = await this.pool.query<{ status: string }>(
-      `SELECT status FROM ${this.scheduledGamesTable()} WHERE id = $1`,
+    // Trafikklys runtime (2026-05-08): hent rad-farge så getState-snapshot
+    // matcher startGame/drawNext-snapshotene. Klient/TV-skjerm bruker
+    // verdien til å vise banner.
+    const { rows: gameRows } = await this.pool.query<{
+      status: string;
+      trafikklys_row_color: string | null;
+    }>(
+      `SELECT status, trafikklys_row_color FROM ${this.scheduledGamesTable()} WHERE id = $1`,
       [scheduledGameId]
     );
     const status = gameRows[0]?.status ?? "unknown";
+    const trafikklysRowColor = gameRows[0]?.trafikklys_row_color ?? null;
     const draws = await this.listDraws(scheduledGameId);
-    return this.buildStateView(state, status, draws);
+    return this.buildStateView(state, status, draws, trafikklysRowColor);
   }
 
   /**
@@ -1804,6 +1901,7 @@ export class Game1DrawEngineService {
               sg.ticket_config_json,
               sg.room_code,
               sg.game_config_json,
+              sg.trafikklys_row_color,
               h.is_test_hall AS master_is_test_hall
          FROM ${this.scheduledGamesTable()} sg
          LEFT JOIN "${this.schema}"."app_halls" h
@@ -2025,7 +2123,15 @@ export class Game1DrawEngineService {
     ticketConfigJson: unknown,
     gameConfigJson: unknown,
     lastBall: number,
-    roomCode: string | null
+    roomCode: string | null,
+    /**
+     * Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
+     * server-trukket rad-farge for spillet. Validert mot whitelist
+     * (rød/grønn/gul) før det sendes inn — null for ikke-Trafikklys-spill.
+     * Når satt: payout-pathen overstyrer Rad/Fullt Hus-poten basert på
+     * rad-farge i stedet for bongfarge.
+     */
+    trafikklysRowColor: TrafikklysRowColor | null = null,
   ): Promise<{
     phaseWon: boolean;
     winnerCount: number;
@@ -2235,6 +2341,11 @@ export class Game1DrawEngineService {
       // størrelsen. Hver pot skalerer med bong-multiplier (hvit×1, gul×2,
       // lilla×3 — small/large × 2 utover det). En spiller får summen av
       // sine bongers andeler innenfor sin størrelse.
+      //
+      // Trafikklys-overstyring (§5 + §9.4): når trafikklysRowColor er satt,
+      // erstatter payoutPerColorGroups bongstørrelse-poten med en uniform
+      // pot lest fra rules.{prizesPerRowColor, bingoPerRowColor}[rowColor].
+      // Alle vinnere deler poten likt — flat 15 kr-bong, ingen vekting.
       await this.payoutPerColorGroups(
         client,
         scheduledGameId,
@@ -2246,50 +2357,77 @@ export class Game1DrawEngineService {
         jackpotCfg,
         ticketConfigJson,
         gameConfigJson,
+        trafikklysRowColor,
       );
 
-      // BIN-696: Beregn representativ prizePerWinner basert på første
-      // vinners color-gruppe (matcher engine `firstPayoutAmount`-konvensjon
-      // for snapshot-feltet `patternResult.payoutAmount`). Dette er kun
-      // for pattern:won-broadcast — eksakte per-vinner-beløp er allerede
-      // utbetalt korrekt av payoutPerColorGroups via payoutService.
-      //
-      // Pot-per-bongstørrelse-fix (2026-05-08): første vinners FAKTISKE
-      // andel er pot[firstSize] / antall_vinnere_i_firstSize, ikke en
-      // global-pot-andel. Vi bruker firstColor's pot direkte (som er
-      // base × bongMultiplier via patternPrizeToCents) og deler på
-      // firstColor-gruppe-størrelse.
-      const firstWinnerColor = winners[0]?.ticketColor;
-      if (firstWinnerColor) {
-        const firstColorGroupSize = winners.filter((w) => w.ticketColor === firstWinnerColor).length;
-        const firstColorEngineName = resolveEngineColorName(firstWinnerColor) ?? firstWinnerColor;
-        const firstColorPatterns = resolvePatternsForColor(
-          variantConfig,
-          firstColorEngineName,
-          () => {}
-        );
-        const firstColorPhasePattern = firstColorPatterns[currentPhase - 1];
-        if (firstColorPhasePattern && firstColorGroupSize > 0) {
-          let firstColorTotalPrizeCents = patternPrizeToCents(firstColorPhasePattern, potCents);
+      // Trafikklys-overstyring (§5 + §9.4): når rad-farge er trukket,
+      // er prizePerWinner = pot[rowColor] / antall_vinnere — alle vinnere
+      // deler poten likt fordi alle bonger er flat 15 kr. Dette må evalueres
+      // FØR Oddsen-pathen så vi ikke får dobbel-beregning.
+      const trafikklysCfgForBroadcast =
+        trafikklysRowColor !== null
+          ? resolveTrafikklysVariantConfig(ticketConfigJson) ??
+            resolveTrafikklysVariantConfig(gameConfigJson)
+          : null;
+      const trafikklysActive =
+        trafikklysCfgForBroadcast !== null &&
+        trafikklysRowColor !== null &&
+        trafikklysCfgForBroadcast.rowColors.includes(trafikklysRowColor);
 
-          // Oddsen Fullt Hus override (samme bucket-logikk som payoutPerColorGroups).
-          if (currentPhase === TOTAL_PHASES) {
-            const oddsenCfg =
-              resolveOddsenVariantConfig(ticketConfigJson) ??
-              resolveOddsenVariantConfig(gameConfigJson);
-            if (oddsenCfg) {
-              const bucket =
-                drawSequenceAtWin <= oddsenCfg.targetDraw ? "high" : "low";
-              const baseForBucket =
-                bucket === "high" ? oddsenCfg.bingoBaseHigh : oddsenCfg.bingoBaseLow;
-              const multiplier = bongMultiplierForColorSlug(firstWinnerColor);
-              if (multiplier !== null) {
-                firstColorTotalPrizeCents = baseForBucket * multiplier;
+      if (trafikklysActive && trafikklysCfgForBroadcast && trafikklysRowColor) {
+        const isFullHouse = currentPhase === TOTAL_PHASES;
+        const trafikklysPot = isFullHouse
+          ? trafikklysCfgForBroadcast.bingoPerRowColor[trafikklysRowColor]
+          : trafikklysCfgForBroadcast.prizesPerRowColor[trafikklysRowColor];
+        if (typeof trafikklysPot === "number" && trafikklysPot > 0) {
+          prizePerWinnerCentsForBroadcast = Math.floor(
+            trafikklysPot / winners.length,
+          );
+        }
+      } else {
+        // BIN-696: Beregn representativ prizePerWinner basert på første
+        // vinners color-gruppe (matcher engine `firstPayoutAmount`-konvensjon
+        // for snapshot-feltet `patternResult.payoutAmount`). Dette er kun
+        // for pattern:won-broadcast — eksakte per-vinner-beløp er allerede
+        // utbetalt korrekt av payoutPerColorGroups via payoutService.
+        //
+        // Pot-per-bongstørrelse-fix (2026-05-08): første vinners FAKTISKE
+        // andel er pot[firstSize] / antall_vinnere_i_firstSize, ikke en
+        // global-pot-andel. Vi bruker firstColor's pot direkte (som er
+        // base × bongMultiplier via patternPrizeToCents) og deler på
+        // firstColor-gruppe-størrelse.
+        const firstWinnerColor = winners[0]?.ticketColor;
+        if (firstWinnerColor) {
+          const firstColorGroupSize = winners.filter((w) => w.ticketColor === firstWinnerColor).length;
+          const firstColorEngineName = resolveEngineColorName(firstWinnerColor) ?? firstWinnerColor;
+          const firstColorPatterns = resolvePatternsForColor(
+            variantConfig,
+            firstColorEngineName,
+            () => {}
+          );
+          const firstColorPhasePattern = firstColorPatterns[currentPhase - 1];
+          if (firstColorPhasePattern && firstColorGroupSize > 0) {
+            let firstColorTotalPrizeCents = patternPrizeToCents(firstColorPhasePattern, potCents);
+
+            // Oddsen Fullt Hus override (samme bucket-logikk som payoutPerColorGroups).
+            if (currentPhase === TOTAL_PHASES) {
+              const oddsenCfg =
+                resolveOddsenVariantConfig(ticketConfigJson) ??
+                resolveOddsenVariantConfig(gameConfigJson);
+              if (oddsenCfg) {
+                const bucket =
+                  drawSequenceAtWin <= oddsenCfg.targetDraw ? "high" : "low";
+                const baseForBucket =
+                  bucket === "high" ? oddsenCfg.bingoBaseHigh : oddsenCfg.bingoBaseLow;
+                const multiplier = bongMultiplierForColorSlug(firstWinnerColor);
+                if (multiplier !== null) {
+                  firstColorTotalPrizeCents = baseForBucket * multiplier;
+                }
               }
             }
-          }
 
-          prizePerWinnerCentsForBroadcast = Math.floor(firstColorTotalPrizeCents / firstColorGroupSize);
+            prizePerWinnerCentsForBroadcast = Math.floor(firstColorTotalPrizeCents / firstColorGroupSize);
+          }
         }
       }
 
@@ -2297,6 +2435,8 @@ export class Game1DrawEngineService {
         // Pot-per-bongstørrelse-fix (2026-05-08): for Oddsen Fullt Hus
         // overstyres pot-en med HIGH/LOW bucket × bongMultiplier. Resolved
         // én gang her og brukt i patternsForColor-callback.
+        // Trafikklys-overstyring: hvis rad-farge er trukket, returner
+        // uniform pot (rules.bingoPerRowColor[rowColor]) for ALLE bonger.
         const oddsenCfgForCap =
           resolveOddsenVariantConfig(ticketConfigJson) ??
           resolveOddsenVariantConfig(gameConfigJson);
@@ -2306,6 +2446,16 @@ export class Game1DrawEngineService {
           drawSequenceAtWin,
           potCents,
           patternsForColor: (color) => {
+            // Trafikklys Fullt Hus: rad-farge gir uniform pot på tvers av
+            // bongfarger. Pot deles likt blant ALLE vinnere — vi returnerer
+            // samme totalPhasePrizeCents per (color)-key, og caller-en
+            // splitter etterpå basert på winnerCount.
+            if (trafikklysActive && trafikklysCfgForBroadcast && trafikklysRowColor) {
+              const pot = trafikklysCfgForBroadcast.bingoPerRowColor[trafikklysRowColor];
+              if (typeof pot === "number" && pot > 0) {
+                return { totalPhasePrizeCents: pot };
+              }
+            }
             // Oddsen Fullt Hus: HIGH/LOW × multiplier overstyrer pattern.
             if (oddsenCfgForCap) {
               const bucket =
@@ -2587,9 +2737,57 @@ export class Game1DrawEngineService {
     jackpotCfg: Game1JackpotConfig | null,
     ticketConfigJson: unknown,
     gameConfigJson: unknown,
+    /**
+     * Trafikklys runtime (2026-05-08, §5 + §9.4 i SPILL_REGLER_OG_PAYOUT.md):
+     * server-trukket rad-farge fra scheduled-game-raden. Når satt OG
+     * Trafikklys-config er aktiv, overstyrer vi pot-tabellen — alle
+     * vinnere deler én uniform pot lest fra rules.{prizesPerRowColor,
+     * bingoPerRowColor}[rowColor]. Ingen vekting per bongstørrelse fordi
+     * alle bonger er flat 15 kr.
+     */
+    trafikklysRowColor: TrafikklysRowColor | null = null,
   ): Promise<void> {
     if (winners.length === 0) {
       return;
+    }
+
+    // Trafikklys-overstyring (§5 + §9.4): rad-farge bestemmer pot-en, ikke
+    // bongfargen. Resolve config tidlig så vi kan velge mellom Trafikklys-
+    // path og standard pot-per-bongstørrelse-path.
+    const trafikklysCfg =
+      trafikklysRowColor !== null
+        ? resolveTrafikklysVariantConfig(ticketConfigJson) ??
+          resolveTrafikklysVariantConfig(gameConfigJson)
+        : null;
+
+    if (trafikklysCfg && trafikklysRowColor !== null) {
+      // Defensiv guard: rad-fargen må være kjent i config. Hvis admin
+      // har endret rules.rowColors etter at runden startet, faller vi
+      // tilbake til standard pot-per-bongstørrelse-pathen — sikrere enn
+      // 0-payout. Audit-log fanger avviket.
+      const rowColorIsKnown = trafikklysCfg.rowColors.includes(
+        trafikklysRowColor,
+      );
+      if (rowColorIsKnown) {
+        await this.payoutTrafikklys(client, {
+          scheduledGameId,
+          currentPhase,
+          drawSequenceAtWin,
+          winners,
+          trafikklysCfg,
+          trafikklysRowColor,
+          jackpotCfg,
+        });
+        return;
+      }
+      log.warn(
+        {
+          scheduledGameId,
+          trafikklysRowColor,
+          knownColors: trafikklysCfg.rowColors,
+        },
+        "[TRAFIKKLYS] trukket rad-farge mangler i rules.rowColors — faller til standard pot-per-bongstørrelse",
+      );
     }
 
     // Resolve oddsen-config (gjelder kun Fullt Hus-fase). Ledser fra
@@ -2642,9 +2840,8 @@ export class Game1DrawEngineService {
       const phasePattern = colorPatterns[currentPhase - 1];
 
       // Pot-størrelse for denne bongstørrelsen.
-      // - Standard / Trafikklys: patternPrizeToCents(pattern, pot) — bridge
-      //   har allerede skalert basen × bongMultiplier per (color, size)
-      //   via auto-mult.
+      // - Standard: patternPrizeToCents(pattern, pot) — bridge har allerede
+      //   skalert basen × bongMultiplier per (color, size) via auto-mult.
       // - Oddsen Fullt Hus: HIGH/LOW base × bongMultiplier. Bestemmes per
       //   gruppe basert på drawSequenceAtWin vs targetDraw.
       let potForBongSizeCents = phasePattern
@@ -2719,6 +2916,136 @@ export class Game1DrawEngineService {
         },
       });
     }
+  }
+
+  /**
+   * Trafikklys-payout (2026-05-08, §5 + §9.4 i SPILL_REGLER_OG_PAYOUT.md):
+   *
+   * Pot-størrelsen er definert av RAD-FARGEN (ikke bongfargen). Alle vinnere
+   * deler poten LIKT — ingen vekting fordi alle bonger har samme pris (15 kr).
+   *
+   * Algoritme:
+   * ```
+   * if currentPhase < TOTAL_PHASES (Rad 1-4):
+   *   pot_cents = rules.prizesPerRowColor[rowColor]
+   * else (Fullt Hus):
+   *   pot_cents = rules.bingoPerRowColor[rowColor]
+   * floor-split blant ALLE vinnere via payoutService.payoutPhase
+   * rest tilfaller huset (HOUSE_RETAINED via splitRoundingAudit)
+   * ```
+   *
+   * Compliance-ledger får `gameVariant: "trafikklys"` + `trafikklysRowColor`
+   * i potMetadata for full Lotteritilsynet-sporbarhet (§9.6).
+   *
+   * **Multi-bong-per-spiller:** §9.4 sier at hvis én spiller har flere
+   * bonger som vinner samme rad/Fullt Hus, får hen én pot-andel × antall
+   * vinner-bonger (eller én aggregert credit). Vi sender alle vinner-
+   * bonger inn til payoutService.payoutPhase som genererer én credit per
+   * bong med per-bong-andel. Wallet-summen blir total = (pot/N) × bong-
+   * antall, som matcher §9.4 multi-bong-regelen.
+   *
+   * **Verifisering mot §A4 test-matrise:**
+   * - Solo Rad rød (50 kr): potCents = 5000, 1 bong → 5000 ✅
+   * - Solo Rad gul (150 kr): potCents = 15000, 1 bong → 15000 ✅
+   * - 2 vinnere Rad grønn (100 kr): potCents = 10000, 2 bonger → 5000 hver ✅
+   * - 3 vinnere Rad rød (50 kr): potCents = 5000, 3 bonger → 1666 hver, rest 2 ✅
+   * - Solo Fullt Hus rød (500 kr): potCents = 50000, 1 bong → 50000 ✅
+   * - 2 vinnere Fullt Hus grønn (1000 kr): potCents = 100000, 2 bonger → 50000 hver ✅
+   */
+  private async payoutTrafikklys(
+    client: PoolClient,
+    args: {
+      scheduledGameId: string;
+      currentPhase: number;
+      drawSequenceAtWin: number;
+      winners: Array<Game1WinningAssignment & { userId: string }>;
+      trafikklysCfg: TrafikklysVariantConfig;
+      trafikklysRowColor: TrafikklysRowColor;
+      jackpotCfg: Game1JackpotConfig | null;
+    },
+  ): Promise<void> {
+    const {
+      scheduledGameId,
+      currentPhase,
+      drawSequenceAtWin,
+      winners,
+      trafikklysCfg,
+      trafikklysRowColor,
+      jackpotCfg,
+    } = args;
+
+    if (winners.length === 0) {
+      return;
+    }
+
+    // §5.4: Rad 1-4 bruker prizesPerRowColor; Fullt Hus bruker bingoPerRowColor.
+    const isFullHouse = currentPhase === TOTAL_PHASES;
+    const potCents = isFullHouse
+      ? trafikklysCfg.bingoPerRowColor[trafikklysRowColor]
+      : trafikklysCfg.prizesPerRowColor[trafikklysRowColor];
+
+    // Defensiv: hvis pot er 0 eller udefinert (config-bug), logg og skip.
+    // Vi vil ikke utbetale ukjente beløp eller kaste — bedre å hoppe over
+    // payout og la audit-log flagge avviket.
+    if (typeof potCents !== "number" || potCents <= 0) {
+      log.warn(
+        {
+          scheduledGameId,
+          currentPhase,
+          trafikklysRowColor,
+          potCents,
+        },
+        "[TRAFIKKLYS] potCents er 0/udefinert — hopper over payout for fasen",
+      );
+      return;
+    }
+
+    // Multi-jackpot-routing for Fullt Hus. Trafikklys + Jackpot er ikke
+    // en standard kombinasjon (Trafikklys er en variant, Jackpot er en
+    // annen variant), men vi opprettholder eksisterende jackpot-path for
+    // backward-compat: hvis admin tilfeldigvis har koblet jackpot til en
+    // Trafikklys-rad, evalueres jackpot per vinner-farge som vanlig.
+    let jackpotAmountCentsPerWinner = 0;
+    if (
+      isFullHouse &&
+      this.jackpotService &&
+      jackpotCfg &&
+      winners.length > 0
+    ) {
+      // Bruk første vinners ticketColor som representativ. I praksis
+      // er dette uvanlig fordi Trafikklys ikke er konfigurert med
+      // prize-by-color-jackpot — verdien blir typisk 0.
+      const j = this.jackpotService.evaluate({
+        phase: currentPhase,
+        drawSequenceAtWin,
+        ticketColor: winners[0]!.ticketColor,
+        jackpotConfig: jackpotCfg,
+      });
+      jackpotAmountCentsPerWinner = j.triggered ? j.amountCents : 0;
+    }
+
+    // §9.6 audit-felter for compliance-ledger.
+    const uniquePlayerIds = new Set(winners.map((w) => w.userId));
+
+    await this.payoutService!.payoutPhase(client, {
+      scheduledGameId,
+      phase: currentPhase,
+      drawSequenceAtWin,
+      roomCode: "",
+      totalPhasePrizeCents: potCents,
+      winners,
+      jackpotAmountCentsPerWinner,
+      phaseName: phaseDisplayName(currentPhase),
+      potMetadata: {
+        // bongMultiplier IKKE skrevet for Trafikklys — flat-prising,
+        // ingen vekting per bongfarge.
+        potCentsForBongSize: potCents,
+        winningTicketsInSameSize: winners.length,
+        winningPlayersInSameSize: uniquePlayerIds.size,
+        gameVariant: "trafikklys",
+        trafikklysRowColor,
+      },
+    });
   }
 
   /**
@@ -3162,12 +3489,24 @@ export class Game1DrawEngineService {
   private buildStateView(
     state: GameStateRow,
     gameStatus: string,
-    draws: Game1DrawRecord[]
+    draws: Game1DrawRecord[],
+    /**
+     * Trafikklys runtime (2026-05-08): server-trukket rad-farge for
+     * Trafikklys-spill. NULL for ikke-Trafikklys-spill og legacy-rader.
+     * Sendes inn fra calleren som henter `scheduled_games`-raden.
+     */
+    trafikklysRowColor: string | null = null,
   ): Game1GameStateView {
     const isFinished =
       gameStatus === "completed" ||
       gameStatus === "cancelled" ||
       state.engine_ended_at !== null;
+    // Validér rad-farge mot whitelist før eksponering — defensivt mot
+    // korrupt DB-data. Ukjent verdi → null (klient ser ingen banner).
+    const validatedRowColor =
+      trafikklysRowColor !== null && isTrafikklysRowColor(trafikklysRowColor)
+        ? trafikklysRowColor
+        : null;
     return {
       scheduledGameId: state.scheduled_game_id,
       currentPhase: Number(state.current_phase),
@@ -3190,6 +3529,7 @@ export class Game1DrawEngineService {
           ? null
           : Number(state.paused_at_phase),
       drawnBalls: draws.map((d) => d.ball),
+      trafikklysRowColor: validatedRowColor,
     };
   }
 
