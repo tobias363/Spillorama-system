@@ -648,6 +648,45 @@ test("Fase 1 plan: list() med isActive=true legger til WHERE", async () => {
   assert.match(queries[0].sql, /WHERE is_active = \$1/);
 });
 
+// GoH-matching (2026-05-08): planer kan være bundet til en GoH istedet
+// for en konkret hall, så `list` må kunne ta `groupOfHallsIds: string[]`
+// og OR-e mot `hallId` når begge er satt.
+
+test("Pilot-fix: list() med groupOfHallsIds bruker ANY-array", async () => {
+  const { service, queries } = makeCapturingService({});
+  await service.list({ groupOfHallsIds: ["goh-A", "goh-B"] });
+  assert.match(queries[0].sql, /group_of_halls_id = ANY\(\$1::text\[\]\)/);
+  assert.deepEqual(queries[0].params?.[0], ["goh-A", "goh-B"]);
+});
+
+test("Pilot-fix: list() med både hallId og groupOfHallsIds OR-er filtere", async () => {
+  const { service, queries } = makeCapturingService({});
+  await service.list({
+    hallId: "hall-1",
+    groupOfHallsIds: ["goh-A"],
+    isActive: true,
+  });
+  // hallId og groupOfHallsIds skal være kombinert med OR i én parentes,
+  // ikke to separate AND-conditions.
+  assert.match(
+    queries[0].sql,
+    /\(hall_id = \$1 OR group_of_halls_id = ANY\(\$2::text\[\]\)\)/,
+  );
+  assert.deepEqual(queries[0].params?.[0], "hall-1");
+  assert.deepEqual(queries[0].params?.[1], ["goh-A"]);
+});
+
+test("Pilot-fix: list() med tom groupOfHallsIds-liste ignorerer feltet", async () => {
+  const { service, queries } = makeCapturingService({});
+  // Tom liste = ingen gruppe-treff (vil ikke matche noe). Service-en
+  // skal hoppe over filteret istedenfor å sende ANY([]) som matcher 0
+  // rader uansett.
+  await service.list({ hallId: "hall-1", groupOfHallsIds: [] });
+  // Skal kun bruke hallId-filter — ikke OR-konstruksjon.
+  assert.match(queries[0].sql, /WHERE hall_id = \$1/);
+  assert.doesNotMatch(queries[0].sql, /ANY\(\$/);
+});
+
 // ── forTesting ───────────────────────────────────────────────────────────
 
 test("Fase 1 plan: forTesting() lager instans uten å åpne pool", () => {

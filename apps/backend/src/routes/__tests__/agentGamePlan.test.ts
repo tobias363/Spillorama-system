@@ -1610,6 +1610,55 @@ test("Lazy-create: regresjon — POST /start kjører IKKE før GET /current har 
   }
 });
 
+test("Pilot-fix 2026-05-08: GET /current soft-failer for ADMIN uten hallId", async () => {
+  // Pilot-bug: ADMIN logget inn uten session-hall traff 400 INVALID_INPUT
+  // på UI-pollen `Spill1HallStatusBox.refresh()`. Read-only poll skal
+  // soft-faile med tom-state istedenfor å støye Sentry.
+  const adminWithoutHall: PublicAppUser = {
+    ...adminUser,
+    hallId: null,
+  };
+  const ctx = await startServer({ "admin-tok": adminWithoutHall }, [], []);
+  try {
+    const get = await req(
+      ctx.baseUrl,
+      "GET",
+      "/api/agent/game-plan/current",
+      "admin-tok",
+    );
+    assert.equal(get.status, 200, "skal være 200 ikke 400");
+    assert.equal(get.json.data.run, null);
+    assert.equal(get.json.data.plan, null);
+    assert.deepEqual(get.json.data.items, []);
+    assert.equal(get.json.data.hallId, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Pilot-fix 2026-05-08: POST /start STADIG feiler 400 for ADMIN uten hallId", async () => {
+  // Soft-fail-en på GET /current skal IKKE smitte over til write-rutene.
+  // ADMIN må fortsatt eksplisitt velge hall før den kan starte runden.
+  const adminWithoutHall: PublicAppUser = {
+    ...adminUser,
+    hallId: null,
+  };
+  const ctx = await startServer({ "admin-tok": adminWithoutHall }, [], []);
+  try {
+    const start = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/start",
+      "admin-tok",
+    );
+    assert.equal(start.status, 400);
+    assert.equal(start.json.error.code, "INVALID_INPUT");
+    assert.match(start.json.error.message, /hallId/i);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test("Lazy-create: POST /advance feiler når ingen run finnes (ikke lazy-create)", async () => {
   // Sentral regresjon: bekrefter at vi IKKE lazy-creates på write-ruter.
   // Uten run + uten /start først skal /advance returnere

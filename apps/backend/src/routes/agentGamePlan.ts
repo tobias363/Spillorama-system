@@ -301,7 +301,41 @@ export function createAgentGamePlanRouter(
       const actor = await requirePermission(req, "GAME1_MASTER_WRITE");
       const queryHallId =
         typeof req.query.hallId === "string" ? req.query.hallId : undefined;
-      const hallId = resolveHallScope(actor, queryHallId);
+      // Pilot-fix 2026-05-08: ADMIN uten session-hall som ikke har sendt
+      // `?hallId` fikk 400 INVALID_INPUT på en read-only poll. UI-siden
+      // (`Spill1HallStatusBox.refresh`) poller dette endpointet hvert 10s
+      // og 400-fail støyte til Sentry. Vi soft-failer her med et
+      // empty-state svar — admin-UI har ingen plan-scope uten hallId, så
+      // tomt svar er semantisk korrekt. Skrive-rutene (`/start` osv.)
+      // bruker fortsatt den strikte resolveren og feiler 400 hvis admin
+      // ikke har valgt hall.
+      let hallId: string;
+      try {
+        hallId = resolveHallScope(actor, queryHallId);
+      } catch (err) {
+        if (
+          err instanceof DomainError &&
+          err.code === "INVALID_INPUT" &&
+          actor.role === "ADMIN" &&
+          !actor.hallId &&
+          !queryHallId
+        ) {
+          apiSuccess(res, {
+            hallId: null,
+            businessDate: todayOsloKey(),
+            run: null,
+            plan: null,
+            items: [],
+            currentItem: null,
+            nextItem: null,
+            jackpotSetupRequired: false,
+            pendingJackpotOverride: null,
+            isMaster: false,
+          });
+          return;
+        }
+        throw err;
+      }
       const businessDate = todayOsloKey();
 
       const loaded = await loadCurrent(hallId, businessDate);

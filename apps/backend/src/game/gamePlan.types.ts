@@ -91,6 +91,17 @@ export interface UpdateGamePlanInput {
 export interface ListGamePlanFilter {
   hallId?: string;
   groupOfHallsId?: string;
+  /**
+   * GoH-multi-match (2026-05-08): hent alle planer hvor
+   * `group_of_halls_id` matcher en av disse IDene. Brukes av
+   * `GamePlanRunService.getOrCreateForToday` for å finne GoH-baserte
+   * planer for en hall (alle GoH-er hallen er medlem av). Tom liste =
+   * ingen treff (returnerer []), ikke "alle".
+   *
+   * Kombineres med `hallId` via OR — caller får plans der
+   * hall_id = X ELLER group_of_halls_id IN (...).
+   */
+  groupOfHallsIds?: string[];
   isActive?: boolean;
   limit?: number;
 }
