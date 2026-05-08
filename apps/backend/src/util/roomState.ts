@@ -507,6 +507,16 @@ export class RoomStateManager {
       fetchSpill1HallFloors?: (
         hallId: string,
       ) => Promise<Spill1HallFloorDefaults | null | undefined>;
+      /**
+       * Spill 3 re-design 2026-05-08: optional fetcher for Spill 3 global
+       * singleton-config. Når satt og gameSlug er en Spill 3-alias
+       * (monsterbingo / mønsterbingo / game_3), brukes
+       * `buildVariantConfigFromSpill3Config(config)` som primærkilde for
+       * variantConfig — ny prize-mode (fixed/percentage), 5-fase patterns
+       * (Row 1-4 + Full House), bongpris og auto-start-threshold styres
+       * av denne. Faller stille tilbake til DEFAULT_GAME3_CONFIG ved feil.
+       */
+      fetchSpill3Config?: () => Promise<import("../game/Spill3ConfigService.js").Spill3Config | null>;
     },
   ): Promise<void> {
     if (this.variantByRoom.has(roomCode)) return;
@@ -575,6 +585,33 @@ export class RoomStateManager {
     // dem via roomState.getVariantConfig.
     const isSpill2 = gameSlug === "rocket" || gameSlug === "game_2" || gameSlug === "tallspill";
     const isSpill3 = gameSlug === "monsterbingo" || gameSlug === "mønsterbingo" || gameSlug === "game_3";
+
+    // Spill 3 re-design 2026-05-08: bruk global singleton-config som
+    // primærkilde for monsterbingo. Faller stille til legacy-pacepath ved
+    // feil/mangle (samme som Spill 2/3-pacepath under).
+    if (isSpill3 && opts.fetchSpill3Config) {
+      try {
+        const spill3Config = await opts.fetchSpill3Config();
+        if (spill3Config) {
+          // Lazy-import for å unngå circular i package boot-rekkefølge.
+          const { buildVariantConfigFromSpill3Config } = await import(
+            "../game/Spill3GlobalRoomService.js"
+          );
+          const mapped = buildVariantConfigFromSpill3Config(spill3Config);
+          this.variantByRoom.set(roomCode, {
+            gameType: gameSlug,
+            config: mapped,
+          });
+          return;
+        }
+      } catch (err) {
+        roomStateLog.warn(
+          { err, roomCode },
+          "Spill 3 config-lookup failed — fallback til legacy variantConfig",
+        );
+      }
+    }
+
     if ((isSpill2 || isSpill3) && opts.gameManagementId && opts.fetchGameManagementConfig) {
       try {
         const config = await opts.fetchGameManagementConfig(opts.gameManagementId);

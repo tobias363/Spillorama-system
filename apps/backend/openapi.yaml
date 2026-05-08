@@ -57,6 +57,12 @@ tags:
       Spilleplaner (templates) for spilleplan-redesign 2026-05-07. Plan-
       meta (navn, hall/group, ukedager, tidsvindu) + atomisk drag-and-drop
       av items-listen med per-item bonus-override.
+  - name: Admin — Spill 3 Config
+    description: |
+      Spill 3 (monsterbingo) global singleton-konfig per Tobias-direktiv
+      2026-05-08. ETT globalt rom alltid aktivt for alle haller — auto-start
+      når X bonger er solgt. Premier kan settes som faste kr-beløp ELLER
+      prosent av runde-omsetning. Pause mellom rad-faser konfigurerbar.
   - name: Agent — Game Plan
     description: |
       Master-hall-runtime for spilleplan-redesign 2026-05-07. Hent gjeldende
@@ -1436,6 +1442,172 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    # ── Spill 3 (monsterbingo) re-design 2026-05-08 ───────────────────────
+
+    Spill3PrizeMode:
+      type: string
+      enum: [fixed, percentage]
+      description: |
+        Premie-modus for Spill 3:
+          - "fixed":      Faste kr-beløp per fase (uavhengig av omsetning).
+                          Krever at `prizeRad1Cents`..`prizeFullHouseCents`
+                          er satt. Alle pct-felter er null.
+          - "percentage": Prosent av runde-omsetning (totalSold × pct/100).
+                          Krever at `prizeRad1Pct`..`prizeFullHousePct` er
+                          satt. Alle cents-felter er null. Sum av prosenter
+                          må være ≤ 100.
+
+    Spill3Config:
+      type: object
+      required:
+        [
+          id,
+          minTicketsToStart,
+          prizeMode,
+          ticketPriceCents,
+          pauseBetweenRowsMs,
+          active,
+          createdAt,
+          updatedAt,
+        ]
+      description: |
+        Global singleton-konfig for Spill 3 (monsterbingo). ETT globalt rom
+        alltid aktivt — alle haller deltar. Auto-start når
+        `minTicketsToStart` bonger er solgt. 5-fase Row 1-4 + Full House,
+        `pauseBetweenRowsMs` mellom rad-faser.
+      properties:
+        id:
+          type: string
+        minTicketsToStart:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: |
+            Antall bonger som må selges totalt før runden auto-starter.
+            0 = umiddelbar start. Endres av admin uten kode-deploy.
+        prizeMode:
+          $ref: "#/components/schemas/Spill3PrizeMode"
+        prizeRad1Cents:
+          type: [integer, "null"]
+          minimum: 0
+          description: Fast premie i øre for Rad 1 (kun fixed-mode).
+        prizeRad2Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad3Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad4Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeFullHouseCents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad1Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+          description: Prosent av omsetning for Rad 1 (kun percentage-mode).
+        prizeRad2Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeRad3Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeRad4Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeFullHousePct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        ticketPriceCents:
+          type: integer
+          minimum: 1
+          description: |
+            Bongpris i øre. Per Tobias-direktiv 2026-05-08: 500 (5 kr) —
+            KUN 1 type bong, online-only.
+        pauseBetweenRowsMs:
+          type: integer
+          minimum: 0
+          maximum: 60000
+          description: |
+            Pause mellom rad-faser (Rad 1 → Rad 2 → ...) i millisekunder.
+            Default 3000 (3 sek).
+        active:
+          type: boolean
+          description: |
+            Singleton-flagg. Kun ÉN rad har `active=TRUE` til enhver tid
+            (håndhevet via partial unique index).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        updatedByUserId:
+          type: [string, "null"]
+
+    Spill3ConfigUpdateInput:
+      type: object
+      description: |
+        Partial-update for `PUT /api/admin/spill3/config`. Kun feltene som
+        faktisk er sendt blir endret. Service-laget validerer prize-mode-
+        konsistens etter merge — fixed-mode krever alle cents-felter satt,
+        percentage-mode krever alle pct-felter satt.
+      properties:
+        minTicketsToStart:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        prizeMode:
+          $ref: "#/components/schemas/Spill3PrizeMode"
+        prizeRad1Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad2Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad3Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad4Cents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeFullHouseCents:
+          type: [integer, "null"]
+          minimum: 0
+        prizeRad1Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeRad2Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeRad3Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeRad4Pct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        prizeFullHousePct:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        ticketPriceCents:
+          type: integer
+          minimum: 1
+        pauseBetweenRowsMs:
+          type: integer
+          minimum: 0
+          maximum: 60000
 
     CurrentGamePlanResponse:
       type: object
@@ -3981,6 +4153,100 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ── Admin — Spill 3 Config (re-design 2026-05-08) ─────────────────────────
+  #
+  # Spill 3 (monsterbingo) global singleton-konfig. ETT globalt rom for alle
+  # haller — auto-start når X bonger er solgt, prize-mode (fixed/percentage)
+  # styres globalt, faste pauser mellom rad-faser.
+  #
+  # RBAC:
+  #   GAME_CATALOG_READ:  ADMIN, HALL_OPERATOR, SUPPORT, AGENT
+  #   GAME_CATALOG_WRITE: ADMIN
+  # Audit: PUT skriver `spill3.config.update`-event via Spill3ConfigService.
+
+  /api/admin/spill3/config:
+    get:
+      tags: [Admin — Spill 3 Config]
+      summary: Hent aktiv Spill 3 global config
+      description: |
+        Returnerer den eneste aktive (active=TRUE) konfig-raden. Singleton-
+        invariant håndheves via partial unique index. Cache TTL ~5 sek —
+        endringer slår inn ved neste cache-miss.
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Spill3Config"
+        "403":
+          description: FORBIDDEN — caller mangler GAME_CATALOG_READ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: |
+            CONFIG_MISSING — ingen aktiv konfig-rad finnes. Migrasjon må
+            kjøres eller admin må aktivere en rad. Skal aldri skje i prod.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      tags: [Admin — Spill 3 Config]
+      summary: Oppdater Spill 3 global config (krever GAME_CATALOG_WRITE)
+      description: |
+        Partial-update — kun feltene som faktisk er sendt blir endret.
+        Service-laget validerer prize-mode-konsistens etter merge:
+          - fixed-mode krever alle prizeRad*Cents og prizeFullHouseCents satt
+          - percentage-mode krever alle prizeRad*Pct og prizeFullHousePct satt
+          - sum av prosenter må være ≤ 100%
+
+        Audit-log-event `spill3.config.update` skrives med før/etter-snapshot.
+        Cache invalideres umiddelbart etter update — neste runde-spawn
+        leser ny config.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Spill3ConfigUpdateInput"
+      responses:
+        "200":
+          description: Updated config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Spill3Config"
+        "400":
+          description: |
+            INVALID_INPUT — feltgrenser brutt (ugyldig prizeMode, pct > 100,
+            cents < 0, ticketPrice = 0, etc.) /
+            INVALID_CONFIG — prize-mode-konsistens brutt (fixed mangler
+            cents-felter, percentage mangler pct-felter, eller sum av
+            prosenter > 100).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller mangler GAME_CATALOG_WRITE (kun ADMIN)
           content:
             application/json:
               schema:
