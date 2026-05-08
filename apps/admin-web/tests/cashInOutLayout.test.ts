@@ -156,7 +156,17 @@ describe("CashInOutPage — 1:1 legacy layout", () => {
     const ongoing = root.querySelector('[data-marker="box-ongoing-games"]');
     expect(upcoming).toBeTruthy();
     expect(ongoing).toBeTruthy();
-    expect(upcoming?.textContent).toContain("Ingen kommende spill");
+    // Box 3 (upcoming) is now mounted with `Spill1HallStatusBox`, which
+    // synchronously replaces the static "Ingen kommende spill"-placeholder
+    // with a skeleton ("Henter Spill 1-status…") and starts an async
+    // `fetchLobbyState` poll. The text we observe synchronously is therefore
+    // the loading skeleton — both are valid empty/initial states for an
+    // agent who hasn't loaded a runde yet.
+    const upcomingText = upcoming?.textContent ?? "";
+    expect(
+      upcomingText.includes("Ingen kommende spill") ||
+        upcomingText.includes("Henter Spill 1-status"),
+    ).toBe(true);
     expect(ongoing?.textContent).toContain("Ingen pågående spill");
   });
 
