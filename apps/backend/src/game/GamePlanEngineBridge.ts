@@ -35,16 +35,23 @@
  *      - ticket_config_json = derivert fra catalog (farger, priser, premier)
  *      - jackpot_config_json = jackpot-override (hvis catalog krever setup)
  *      - master_hall_id     = run.hallId
- *      - group_hall_id      = run.hallId (single-hall planer for nå)
- *      - participating_halls_json = [run.hallId]
+ *      - group_hall_id      = hall-gruppe som master tilhører
+ *      - participating_halls_json = ALLE aktive haller i gruppen
+ *        (master først, deretter andre medlemmer i added_at-rekkefølge)
  *      - status             = 'ready_to_start'
  *   2) Returnerer scheduled_game.id som passes til
  *      `Game1MasterControlService.startGame({ gameId, actor })`.
  *   3) Engine kjører uendret — den vet ikke at raden er bridge-spawnet.
  *
+ * Multi-hall via group-of-halls (2026-05-08):
+ * Bridgen ekspanderer nå `participating_halls_json` til å inkludere alle
+ * aktive medlemmer av masterhallens hall-gruppe — ikke bare masteren.
+ * Dette er nødvendig for pilot-bruken (Teknobingo Årnes som master +
+ * Bodø/Brumunddal/Fauske som deltagere). Engine + Game1HallReadyService
+ * er allerede multi-hall-aware via `parseHallIdsArray`-helpere — de leser
+ * `participating_halls_json` direkte.
+ *
  * Out-of-scope:
- *   - Multi-hall planer (Fase 4 fokuserer på single-hall; group-of-halls
- *     krever app_groups-tabellen som ikke finnes ennå).
  *   - Bonus-spill-integrasjon i engine (catalog.bonus_game_slug propageres
  *     til ticket_config_json så MiniGameRouter kan plukke det opp, men
  *     selve trigger-logikken er fortsatt i engine).
@@ -848,14 +855,20 @@ export class GamePlanEngineBridge {
     // game_config_json, så de er funksjonelt ekvivalente per fil.
     const gameConfigJson = JSON.stringify(ticketConfig);
 
-    // Bygg participating_halls = bare run.hall_id (single-hall i Fase 4).
-    // Multi-hall via groupOfHalls støttes når app_groups-tabellen lander.
-    const participatingHalls = [run.hall_id];
-
     // Hent hall-group som hallen tilhører (engine forventer group_hall_id).
-    // Hvis hallen ikke er i en gruppe, oppretter vi ikke en — vi velger
-    // første aktive gruppe-medlemskap, eller hallen selv som fallback.
+    // Kaster HALL_NOT_IN_GROUP hvis hallen ikke er medlem av aktiv gruppe.
     const groupHallId = await this.resolveGroupHallId(run.hall_id);
+
+    // Multi-hall (2026-05-08): ekspandér participating_halls til ALLE
+    // aktive haller i gruppen, med masteren først. Tidligere var dette
+    // hardkodet til [run.hall_id] (single-hall) — det brøt cross-hall-
+    // spill der Bodø/Brumunddal/Fauske skulle delta sammen med Årnes-
+    // master. Solo-grupper (1 medlem) returnerer fortsatt [hallId] og
+    // oppfører seg som single-hall.
+    const participatingHalls = await this.resolveParticipatingHallIds(
+      run.hall_id,
+      groupHallId,
+    );
 
     // scheduled_start_time = NOW (engine starter umiddelbart). End_time =
     // now + DEFAULT_PURCHASE_WINDOW_SECONDS. Disse styrer ikke draw-rytmen,
@@ -949,6 +962,71 @@ export class GamePlanEngineBridge {
       catalogEntry: catalog,
       reused: false,
     };
+  }
+
+  /**
+   * Hent alle aktive haller i en gruppe, med masteren først.
+   *
+   * Bruker INNER JOIN mot `app_halls` for å filtrere bort:
+   *   - Soft-delete: `app_halls` har ingen `deleted_at`-kolonne, men
+   *     `is_active=false` betyr at hallen er deaktivert (legacy + ny
+   *     soft-delete-konvensjon brukes om hverandre, så vi sjekker begge
+   *     hvis en `deleted_at`-kolonne legges til senere).
+   *   - Hall-rader som har blitt slettet (FK ON DELETE CASCADE rydder
+   *     opp medlemskap automatisk, så dette er en defensiv sjekk).
+   *
+   * Sortering: master først (definert via CASE WHEN), deretter
+   * `m.added_at ASC`. `DISTINCT` sikrer dedup ved utilsiktede dobbel-
+   * medlemskap (skal ikke skje pga. PRIMARY KEY (group_id, hall_id),
+   * men robusthet er gratis her).
+   *
+   * Edge-cases:
+   *   - Solo-gruppe (kun masteren): returnerer [masterHallId].
+   *   - Master ikke i gruppen: kaster MASTER_NOT_IN_GROUP. Skal aldri
+   *     skje fordi groupHallId er resolvet via masterens medlemskap,
+   *     men vi er defensive.
+   *   - Alle medlemmer inaktive: kaster NO_ACTIVE_HALLS_IN_GROUP.
+   */
+  private async resolveParticipatingHallIds(
+    masterHallId: string,
+    groupHallId: string,
+  ): Promise<string[]> {
+    const { rows } = await this.pool.query<{ hall_id: string }>(
+      `SELECT DISTINCT m.hall_id, m.added_at
+       FROM "${this.schema}"."app_hall_group_members" m
+       INNER JOIN "${this.schema}"."app_halls" h ON h.id = m.hall_id
+       WHERE m.group_id = $1
+         AND h.is_active = true
+       ORDER BY (CASE WHEN m.hall_id = $2 THEN 0 ELSE 1 END),
+                m.added_at ASC,
+                m.hall_id ASC`,
+      [groupHallId, masterHallId],
+    );
+
+    if (rows.length === 0) {
+      throw new DomainError(
+        "NO_ACTIVE_HALLS_IN_GROUP",
+        `Hall-gruppe ${groupHallId} har ingen aktive haller. Bridge kan ikke spawne spill uten minst én aktiv hall.`,
+      );
+    }
+
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (!seen.has(row.hall_id)) {
+        seen.add(row.hall_id);
+        ids.push(row.hall_id);
+      }
+    }
+
+    if (!ids.includes(masterHallId)) {
+      throw new DomainError(
+        "MASTER_NOT_IN_GROUP",
+        `Master-hallen ${masterHallId} er ikke aktivt medlem av gruppe ${groupHallId}.`,
+      );
+    }
+
+    return ids;
   }
 
   /**

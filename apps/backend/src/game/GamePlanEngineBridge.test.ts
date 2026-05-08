@@ -155,6 +155,13 @@ interface BridgeOptions {
   existingScheduled?: { id: string; catalog_entry_id: string } | null;
   /** Hall-group-medlemskap for resolveGroupHallId. */
   hallGroupId?: string | null;
+  /**
+   * Aktive haller i hall-gruppen (multi-hall via GoH, 2026-05-08).
+   * Brukes av `resolveParticipatingHallIds`. Hvis ikke satt
+   * eksplisitt, faller stuben tilbake til `[runRow.hall_id]` for
+   * bakover-kompatibilitet med eksisterende tester.
+   */
+  groupHallMembers?: string[];
 }
 
 function makeBridge(options: BridgeOptions = {}): {
@@ -204,9 +211,34 @@ function makeBridge(options: BridgeOptions = {}): {
         return { rows: [] };
       }
       // SELECT group_id FROM ... app_hall_group_members
-      if (/app_hall_group_members/i.test(sql)) {
+      // (resolveGroupHallId — fra master-hall til gruppe)
+      if (
+        /SELECT\s+group_id/i.test(sql) &&
+        /app_hall_group_members/i.test(sql)
+      ) {
         if (options.hallGroupId !== null && options.hallGroupId !== undefined) {
           return { rows: [{ group_id: options.hallGroupId }] };
+        }
+        return { rows: [] };
+      }
+      // SELECT DISTINCT m.hall_id FROM ... app_hall_group_members
+      // (resolveParticipatingHallIds — alle aktive haller i gruppen)
+      if (
+        /SELECT\s+DISTINCT\s+m\.hall_id/i.test(sql) &&
+        /app_hall_group_members/i.test(sql)
+      ) {
+        const masterId =
+          (options.runRow?.hall_id as string | undefined) ?? null;
+        // Eksplisitt members-liste vinner over default-fallback.
+        if (options.groupHallMembers !== undefined) {
+          return {
+            rows: options.groupHallMembers.map((id) => ({ hall_id: id })),
+          };
+        }
+        // Default: solo-gruppe med kun masteren (bakover-kompatibel
+        // med eksisterende tester som ikke setter groupHallMembers).
+        if (masterId) {
+          return { rows: [{ hall_id: masterId }] };
         }
         return { rows: [] };
       }
