@@ -540,3 +540,117 @@ describe("error propagation across all master-actions", () => {
     }
   });
 });
+
+/**
+ * Code-review-test 2026-05-08 (PR #1075 review #3): single-id-regel.
+ *
+ * Bølge 3-arkitekturen håndhever at UI sender BARE `hallId` (+ valgfri
+ * `reason` / jackpot-felter) i master-action-bodyen. Backend resolver
+ * `scheduledGameId` internt fra aggregator + plan-runtime — frontend
+ * skal aldri trenge eller sende den. Forrige dual-fetch-løsning passet
+ * `scheduledGameId` mellom UI og backend i begge retninger, og det var
+ * roten til pause-bug og plan↔engine-state-skew.
+ *
+ * Hvis disse testene begynner å feile betyr det at noen har lagt
+ * `scheduledGameId` (eller alias `gameId`/`id`) tilbake i request-bodyen
+ * — det er en regresjon mot Bølge 3-kontrakten og må fikses i
+ * `agent-game1.ts`-bindingen.
+ */
+describe("single-id-regel: master-actions sender bare hallId", () => {
+  function expectNoScheduledGameIdAliases(body: unknown): void {
+    expect(body).not.toHaveProperty("scheduledGameId");
+    expect(body).not.toHaveProperty("gameId");
+    expect(body).not.toHaveProperty("id");
+  }
+
+  function makeOkResponse() {
+    return {
+      status: 200,
+      body: {
+        scheduledGameId: "sg-1",
+        planRunId: "run-1",
+        status: "running" as const,
+        scheduledGameStatus: "running" as const,
+        inconsistencyWarnings: [],
+      },
+    };
+  }
+
+  it("startMaster body inneholder kun hallId — ingen scheduled-game-id-alias", async () => {
+    const { calls, setResponses } = recordingFetch();
+    setResponses([makeOkResponse()]);
+
+    await startMaster("hall-1");
+
+    const body = JSON.parse(String(calls[0]!.init!.body));
+    expect(body).toEqual({ hallId: "hall-1" });
+    expectNoScheduledGameIdAliases(body);
+  });
+
+  it("advanceMaster body inneholder kun hallId — ingen scheduled-game-id-alias", async () => {
+    const { calls, setResponses } = recordingFetch();
+    setResponses([makeOkResponse()]);
+
+    await advanceMaster("hall-1");
+
+    const body = JSON.parse(String(calls[0]!.init!.body));
+    expect(body).toEqual({ hallId: "hall-1" });
+    expectNoScheduledGameIdAliases(body);
+  });
+
+  it("pauseMaster body inneholder kun hallId (+ reason) — ingen scheduled-game-id-alias", async () => {
+    const { calls, setResponses } = recordingFetch();
+    setResponses([makeOkResponse(), makeOkResponse()]);
+
+    await pauseMaster("hall-1");
+    const bodyNoReason = JSON.parse(String(calls[0]!.init!.body));
+    expect(bodyNoReason).toEqual({ hallId: "hall-1" });
+    expectNoScheduledGameIdAliases(bodyNoReason);
+
+    await pauseMaster("hall-1", "Kaffepause");
+    const bodyWithReason = JSON.parse(String(calls[1]!.init!.body));
+    expect(bodyWithReason).toEqual({
+      hallId: "hall-1",
+      reason: "Kaffepause",
+    });
+    expectNoScheduledGameIdAliases(bodyWithReason);
+  });
+
+  it("resumeMaster body inneholder kun hallId — ingen scheduled-game-id-alias", async () => {
+    const { calls, setResponses } = recordingFetch();
+    setResponses([makeOkResponse()]);
+
+    await resumeMaster("hall-1");
+
+    const body = JSON.parse(String(calls[0]!.init!.body));
+    expect(body).toEqual({ hallId: "hall-1" });
+    expectNoScheduledGameIdAliases(body);
+  });
+
+  it("stopMaster body inneholder kun hallId + reason — ingen scheduled-game-id-alias", async () => {
+    const { calls, setResponses } = recordingFetch();
+    setResponses([makeOkResponse()]);
+
+    await stopMaster("hall-1", "Tekniske problemer");
+
+    const body = JSON.parse(String(calls[0]!.init!.body));
+    expect(body).toEqual({ hallId: "hall-1", reason: "Tekniske problemer" });
+    expectNoScheduledGameIdAliases(body);
+  });
+
+  it("setJackpot body inneholder kun hallId + position + draw + prizesCents — ingen scheduled-game-id-alias", async () => {
+    const { calls, setResponses } = recordingFetch();
+    setResponses([makeOkResponse()]);
+
+    await setJackpot("hall-1", 3, 47, { gul: 50000, hvit: 30000 });
+
+    const body = JSON.parse(String(calls[0]!.init!.body));
+    expect(body).toEqual({
+      hallId: "hall-1",
+      position: 3,
+      draw: 47,
+      prizesCents: { gul: 50000, hvit: 30000 },
+    });
+    expectNoScheduledGameIdAliases(body);
+  });
+});
