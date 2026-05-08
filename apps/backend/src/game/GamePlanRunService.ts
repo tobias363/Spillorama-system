@@ -456,12 +456,24 @@ export class GamePlanRunService {
       }
       throw err;
     }
+    // Audit-trail forbedring 2026-05-08 (oppfølger #1011): inkluder
+    // `bindingType` ("direct" vs. "group") og `matchedGroupId` så
+    // Lotteritilsynet-sporingen viser om runen ble matchet via
+    // direct-hall-binding eller via GoH-medlemskap. Dette ble lagt til
+    // som del av isMaster-fix-en for å gjøre GoH-bundne planer synlige
+    // i audit-loggen. `matchedGroupId` er null for direct-bundne planer.
     void this.audit({
       actorId: "system",
       actorType: "SYSTEM",
       action: "game_plan_run.create",
       resourceId: id,
-      details: { planId: matched.id, hallId: hall, businessDate: dateStr },
+      details: {
+        planId: matched.id,
+        hallId: hall,
+        businessDate: dateStr,
+        bindingType: matched.hallId === hall ? "direct" : "group",
+        matchedGroupId: matched.groupOfHallsId ?? null,
+      },
     });
     const created = await this.findForDay(hall, dateStr);
     if (!created) {

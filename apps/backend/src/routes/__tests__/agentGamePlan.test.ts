@@ -637,19 +637,24 @@ test("Fase 3 plan-runtime: master-agent kan starte plan", async () => {
   }
 });
 
-test("Fase 3 plan-runtime: slave-agent får 403 på /start", async () => {
-  // Plan tilhører hall-master, men slaveAgent.hallId === hall-slave.
-  // Slave kjøper ikke "getOrCreateForToday" pga sin egen hall ikke har
-  // plan, så vi forventer NO_MATCHING_PLAN istedenfor FORBIDDEN her —
-  // men hvis plan FINNES for slave-hallen blir det FORBIDDEN. Vi tester
-  // begge situasjoner.
+test("Fase 3 plan-runtime: slave-agent kan ikke nå en run for en annen hall", async () => {
+  // Pilot-fix 2026-05-08 (oppfølger #1011): isMaster bruker nå run.hallId
+  // istedenfor plan.hallId. Master-begrepet er per-run (caller-hallen IS
+  // master, satt av getOrCreateForToday). Cross-hall-beskyttelse skjer i
+  // `resolveHallScope`: AGENT/HALL_OPERATOR kan kun lese/skrive sin egen
+  // hallId, så de kan aldri lese eller skrive til en annen halls run.
+  //
+  // Dette testet seeder en run for hall-master, og slaveAgent i hall-slave
+  // forsøker å treffe write-ruter. Vi forventer at slave faller på
+  // GAME_PLAN_RUN_NOT_FOUND eller NO_MATCHING_PLAN (ikke FORBIDDEN), fordi
+  // slave aldri ser eller får tilgang til hall-master sin run.
   const cat = makeCatalog("cat-1");
-  const plan: GamePlanWithItems = {
-    ...makePlan({ id: "plan-slave", hallId: "hall-slave" }),
+  const masterPlan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
     items: [
       {
         id: "i-1",
-        planId: "plan-slave",
+        planId: "plan-master",
         position: 1,
         gameCatalogId: cat.id,
         bonusGameOverride: null,
@@ -659,34 +664,93 @@ test("Fase 3 plan-runtime: slave-agent får 403 på /start", async () => {
       },
     ],
   };
-  // For 403-test: slave-agenten i hall-slave starter en plan som
-  // tilhører hall-master. Vi seeder en run direkte for hall-slave med
-  // plan-id som peker på hall-master sitt plan.
-  const masterPlan: GamePlanWithItems = {
-    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
-    items: plan.items.map((i) => ({ ...i, planId: "plan-master" })),
-  };
-  const slaveRun = makeRun({
-    id: "run-cross",
+  const masterRun = makeRun({
+    id: "run-master",
     planId: "plan-master",
-    hallId: "hall-slave",
+    hallId: "hall-master",
     status: "idle",
   });
   const ctx = await startServer(
-    { "tok": slaveAgent },
+    { tok: slaveAgent },
     [masterPlan],
-    [slaveRun],
+    [masterRun],
   );
   try {
+    // Slave forsøker å starte; resolveHallScope låser til hall-slave,
+    // men ingen plan dekker hall-slave → NO_MATCHING_PLAN.
     const start = await req(
       ctx.baseUrl,
       "POST",
       "/api/agent/game-plan/start",
       "tok",
     );
-    // Slave-agenten kan ikke starte fordi plan.hallId !== actor.hallId.
     assert.equal(start.status, 400);
-    assert.equal(start.json.error.code, "FORBIDDEN");
+    assert.equal(start.json.error.code, "NO_MATCHING_PLAN");
+    // Master sin run er fortsatt urørt.
+    assert.equal(ctx.runs.get("hall-master|" + todayStr)?.status, "idle");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Fase 3 plan-runtime: master-fix — agent for hall-master er master av egen run uavhengig av plan-binding", async () => {
+  // Pilot-fix 2026-05-08 (oppfølger #1011): GoH-bundne planer (plan.hallId
+  // === null) returnerte tidligere `isMaster=false` for AGENT/HALL_OPERATOR
+  // og blokkerte master-handlinger. Etter fix-en bestemmes master av
+  // run.hallId, ikke plan.hallId. Dette testet verifiserer at en agent i
+  // hall-master kan starte runden selv om planen er GoH-bundet.
+  const cat = makeCatalog("cat-1");
+  const gohPlan: GamePlanWithItems = {
+    ...makePlan({
+      id: "plan-goh",
+      hallId: null,
+      groupOfHallsId: "goh-1",
+    }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-goh",
+        position: 1,
+        gameCatalogId: cat.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  // Run er bundet til hall-master (via getOrCreateForToday) selv om
+  // planen er GoH-bundet. masterAgent er i hall-master.
+  const gohRun = makeRun({
+    id: "run-goh",
+    planId: "plan-goh",
+    hallId: "hall-master",
+    status: "idle",
+  });
+  const ctx = await startServer(
+    { tok: masterAgent },
+    [gohPlan],
+    [gohRun],
+  );
+  try {
+    // GET /current skal returnere isMaster=true for GoH-bundet plan.
+    const get = await req(
+      ctx.baseUrl,
+      "GET",
+      "/api/agent/game-plan/current",
+      "tok",
+    );
+    assert.equal(get.status, 200);
+    assert.equal(get.json.data.isMaster, true);
+    // POST /start skal nå lykkes.
+    const start = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/start",
+      "tok",
+    );
+    assert.equal(start.status, 200);
+    assert.equal(start.json.data.run.status, "running");
   } finally {
     await ctx.close();
   }
