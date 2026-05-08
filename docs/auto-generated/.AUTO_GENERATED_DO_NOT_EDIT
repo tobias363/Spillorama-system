@@ -1,0 +1,3 @@
+Disse filene auto-genereres av .github/workflows/auto-generate-docs.yml
+Ikke rediger manuelt — endringer overskrives.
+For å oppdatere: kjør scripts/generate-architecture-docs.sh
