@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spillorama — Pilot Dev Overview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0f0f1a;
+      color: #fff;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body { padding: 24px; }
+
+    header {
+      max-width: 1400px;
+      margin: 0 auto 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    header h1 {
+      font-size: 26px;
+      color: #ffe83d;
+      letter-spacing: 1.5px;
+    }
+    header .meta {
+      margin-top: 8px;
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 13px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    header .meta .tag {
+      background: rgba(255, 232, 61, 0.08);
+      border: 1px solid rgba(255, 232, 61, 0.25);
+      color: #ffe83d;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+    }
+    header p.lead {
+      margin-top: 12px;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 900px;
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    section.panel {
+      background: linear-gradient(180deg, #1a1a2e 0%, #12121f 100%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 22px 24px;
+    }
+    section.panel h2 {
+      font-size: 18px;
+      color: #ffe83d;
+      margin-bottom: 4px;
+    }
+    section.panel .panel-sub {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.45);
+      margin-bottom: 16px;
+    }
+
+    /* ── Bonus mini-game cards ── */
+    .bonus-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .bonus-card {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .bonus-card:hover {
+      border-color: rgba(255, 232, 61, 0.4);
+      background: rgba(255, 232, 61, 0.04);
+    }
+    .bonus-card .icon {
+      font-size: 28px;
+      line-height: 1;
+    }
+    .bonus-card .title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .bonus-card .slug {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+    }
+    .bonus-card .desc {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.5;
+      flex: 1;
+    }
+    .bonus-card a.action {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: linear-gradient(180deg, #c41030 0%, #8a0020 100%);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      text-align: center;
+      letter-spacing: 0.5px;
+      transition: opacity 0.15s;
+    }
+    .bonus-card a.action:hover { opacity: 0.85; }
+
+    /* ── Scenario columns ── */
+    .scenario-cols {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+    .scenario-col {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .scenario-col h3 {
+      font-size: 14px;
+      color: #ffe83d;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .scenario-col .col-sub {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      margin-bottom: 12px;
+    }
+    .scenario-col ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .scenario-col ul a {
+      display: block;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #fff;
+      font-size: 13px;
+      text-decoration: none;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .scenario-col ul a:hover {
+      background: rgba(255, 232, 61, 0.08);
+      border-color: rgba(255, 232, 61, 0.4);
+      color: #ffe83d;
+    }
+
+    /* ── TV iframes ── */
+    .tv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+    .tv-card {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .tv-card .tv-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .tv-card .tv-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .tv-card .tv-title .role {
+      display: inline-block;
+      margin-left: 8px;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      vertical-align: middle;
+      letter-spacing: 0.5px;
+    }
+    .tv-card .tv-title .role.master {
+      background: rgba(255, 232, 61, 0.15);
+      color: #ffe83d;
+      border: 1px solid rgba(255, 232, 61, 0.4);
+    }
+    .tv-card .tv-title .role.deltager {
+      background: rgba(120, 200, 255, 0.1);
+      color: #78c8ff;
+      border: 1px solid rgba(120, 200, 255, 0.3);
+    }
+    .tv-card .tv-link {
+      font-size: 11px;
+      color: #ffe83d;
+      text-decoration: none;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+    }
+    .tv-card .tv-link:hover { text-decoration: underline; }
+    .tv-frame-wrap {
+      width: 100%;
+      height: 270px;
+      background: #000;
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .tv-frame-wrap iframe {
+      /* 1920×1080 scaled down to fit a 480×270 box (factor 0.25). The
+       * surrounding wrapper sets the visible dimensions; the iframe is
+       * drawn at full size and then transform-scaled so the layout matches
+       * what the production TV would show. */
+      width: 1920px;
+      height: 1080px;
+      border: 0;
+      transform: scale(0.25);
+      transform-origin: top left;
+      pointer-events: none;
+    }
+    .tv-frame-wrap .tv-cover {
+      position: absolute;
+      inset: 0;
+      cursor: pointer;
+    }
+
+    /* ── Ops links ── */
+    .ops-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 10px;
+    }
+    .ops-list a {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #fff;
+      text-decoration: none;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .ops-list a:hover {
+      background: rgba(255, 232, 61, 0.06);
+      border-color: rgba(255, 232, 61, 0.4);
+    }
+    .ops-list a .ops-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #ffe83d;
+    }
+    .ops-list a .ops-url {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.5);
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      word-break: break-all;
+    }
+
+    footer {
+      max-width: 1400px;
+      margin: 32px auto 0;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: rgba(255, 255, 255, 0.35);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    /* Mobile fallback (not a target — just keep readable) */
+    @media (max-width: 900px) {
+      .scenario-cols { grid-template-columns: 1fr; }
+      .tv-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SPILLORAMA — PILOT DEV OVERVIEW</h1>
+    <div class="meta">
+      <span>Build: <span class="tag" id="build-tag">local dev</span></span>
+      <span>Pilot-haller: 4</span>
+      <span>Bonus-spill: 5</span>
+      <span>Visual scenarier: 14</span>
+    </div>
+    <p class="lead">
+      Sentral landing-side for visuell QA og dev-test. Samler alle bonus-mini-spill,
+      visual-harness-scenarier for Spill 1/2/3, live TV-skjerm-instanser for de fire
+      pilot-hallene, og snarveier til admin-konsoll og spiller-shell.
+    </p>
+  </header>
+
+  <main>
+    <!-- ── Seksjon 1: Bonus-mini-spill ── -->
+    <section class="panel">
+      <h2>1. Bonus-mini-spill (preview)</h2>
+      <p class="panel-sub">
+        Trigger, choice og result simulert med dummy-data — ingen backend-kall.
+        Klikk panel for å aktivere ett om gangen i preview-siden.
+      </p>
+      <div class="bonus-grid">
+        <article class="bonus-card">
+          <div class="icon">🎡</div>
+          <div class="title">Lykkehjulet</div>
+          <div class="slug">wheel_of_fortune</div>
+          <div class="desc">
+            Spinning wheel med 10 segmenter. Hver segment = en multiplier
+            (typisk 1×–5×). Fullt Hus-vinner får én spinn.
+          </div>
+          <a class="action" href="/web/games/preview.html">Åpne preview</a>
+        </article>
+
+        <article class="bonus-card">
+          <div class="icon">📦</div>
+          <div class="title">Skattekisten</div>
+          <div class="slug">treasure_chest</div>
+          <div class="desc">
+            Treasure-chest-stil mini-game der vinneren åpner én av flere kister
+            med skjulte premier. Auto-velg etter 10 s.
+          </div>
+          <a class="action" href="/web/games/preview.html">Åpne preview</a>
+        </article>
+
+        <article class="bonus-card">
+          <div class="icon">🃏</div>
+          <div class="title">Mystery Joker</div>
+          <div class="slug">mystery</div>
+          <div class="desc">
+            Opp/ned-gjetting i 5 runder, matching-siffer = JOKER (max-premie),
+            6-trinns premie-stige. Portert 1:1 fra legacy Unity (PR #430).
+          </div>
+          <a class="action" href="/web/games/preview.html">Åpne preview</a>
+        </article>
+
+        <article class="bonus-card">
+          <div class="icon">🎨</div>
+          <div class="title">Fargetrekning</div>
+          <div class="slug">color_draft</div>
+          <div class="desc">
+            Match målfargen blant 12 luker. Auto-velg etter 10 s. Farge-basert
+            mini-game der spilleren velger farge for ekstra premie.
+          </div>
+          <a class="action" href="/web/games/preview.html">Åpne preview</a>
+        </article>
+
+        <article class="bonus-card">
+          <div class="icon">🎯</div>
+          <div class="title">Oddsen</div>
+          <div class="slug">oddsen (cross-round)</div>
+          <div class="desc">
+            Velg 1 av 3 tall (55/56/57). Avgjøres i neste spill. Cross-round
+            mystery — verken klassisk bonus-spill eller mini-game.
+          </div>
+          <a class="action" href="/web/games/preview.html">Åpne preview</a>
+        </article>
+      </div>
+    </section>
+
+    <!-- ── Seksjon 2: Visual-harness scenarier ── -->
+    <section class="panel">
+      <h2>2. Spill-scenarier (visual-harness)</h2>
+      <p class="panel-sub">
+        Deterministiske, backend-løse states for visuell regression-testing.
+        Playwright snapshots disse og diff-er mot baseline.
+      </p>
+      <div class="scenario-cols">
+        <div class="scenario-col">
+          <h3>Spill 1 — Bingo (75-ball 5×5)</h3>
+          <p class="col-sub">slug: <code>bingo</code> · 5 scenarier</p>
+          <ul>
+            <li><a href="/web/games/visual-harness.html?scenario=idle">idle</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=buy-popup">buy-popup</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=draw-active">draw-active</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=pattern-won">pattern-won</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=win-screen">win-screen</a></li>
+          </ul>
+        </div>
+
+        <div class="scenario-col">
+          <h3>Spill 2 — Rocket (3×3, ETT globalt rom)</h3>
+          <p class="col-sub">slug: <code>rocket</code> · 6 scenarier</p>
+          <ul>
+            <li><a href="/web/games/visual-harness.html?scenario=spill2-lobby">spill2-lobby</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=spill2-buy-popup-open">spill2-buy-popup-open</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=spill2-pre-round-2-bongs">spill2-pre-round-2-bongs</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=spill2-running-7-bongs">spill2-running-7-bongs</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=spill2-running-9-bongs">spill2-running-9-bongs</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=spill2-countdown-with-prizes">spill2-countdown-with-prizes</a></li>
+          </ul>
+        </div>
+
+        <div class="scenario-col">
+          <h3>Spill 3 — Monsterbingo (5×5 uten free)</h3>
+          <p class="col-sub">slug: <code>monsterbingo</code> · 3 scenarier</p>
+          <ul>
+            <li><a href="/web/games/visual-harness.html?scenario=spill3-lobby">spill3-lobby</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=spill3-running-with-bongs">spill3-running-with-bongs</a></li>
+            <li><a href="/web/games/visual-harness.html?scenario=g3-pattern-row">g3-pattern-row</a></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Seksjon 3: TV-skjerm live ── -->
+    <section class="panel">
+      <h2>3. TV-skjerm (live)</h2>
+      <p class="panel-sub">
+        Live state per pilot-hall. iframe-preview skalert ned fra 1920×1080.
+        Klikk overlegget eller "Åpne fullskjerm"-lenken for full TV-visning.
+      </p>
+      <div class="tv-grid">
+        <article class="tv-card">
+          <div class="tv-head">
+            <div class="tv-title">
+              Demo Bingohall 1
+              <span class="role master">MASTER</span>
+            </div>
+            <a class="tv-link" target="_blank" href="http://localhost:4000/tv/demo-hall-001/11111111-1111-4111-8111-111111111111">Åpne fullskjerm ↗</a>
+          </div>
+          <div class="tv-frame-wrap">
+            <iframe src="http://localhost:4000/tv/demo-hall-001/11111111-1111-4111-8111-111111111111" title="Demo Bingohall 1"></iframe>
+            <a class="tv-cover" target="_blank" href="http://localhost:4000/tv/demo-hall-001/11111111-1111-4111-8111-111111111111" aria-label="Åpne TV-skjerm hall 1"></a>
+          </div>
+        </article>
+
+        <article class="tv-card">
+          <div class="tv-head">
+            <div class="tv-title">
+              Demo Bingohall 2
+              <span class="role deltager">DELTAGER</span>
+            </div>
+            <a class="tv-link" target="_blank" href="http://localhost:4000/tv/demo-hall-002/22222222-2222-4222-8222-222222222222">Åpne fullskjerm ↗</a>
+          </div>
+          <div class="tv-frame-wrap">
+            <iframe src="http://localhost:4000/tv/demo-hall-002/22222222-2222-4222-8222-222222222222" title="Demo Bingohall 2"></iframe>
+            <a class="tv-cover" target="_blank" href="http://localhost:4000/tv/demo-hall-002/22222222-2222-4222-8222-222222222222" aria-label="Åpne TV-skjerm hall 2"></a>
+          </div>
+        </article>
+
+        <article class="tv-card">
+          <div class="tv-head">
+            <div class="tv-title">
+              Demo Bingohall 3
+              <span class="role deltager">DELTAGER</span>
+            </div>
+            <a class="tv-link" target="_blank" href="http://localhost:4000/tv/demo-hall-003/33333333-3333-4333-8333-333333333333">Åpne fullskjerm ↗</a>
+          </div>
+          <div class="tv-frame-wrap">
+            <iframe src="http://localhost:4000/tv/demo-hall-003/33333333-3333-4333-8333-333333333333" title="Demo Bingohall 3"></iframe>
+            <a class="tv-cover" target="_blank" href="http://localhost:4000/tv/demo-hall-003/33333333-3333-4333-8333-333333333333" aria-label="Åpne TV-skjerm hall 3"></a>
+          </div>
+        </article>
+
+        <article class="tv-card">
+          <div class="tv-head">
+            <div class="tv-title">
+              Demo Bingohall 4
+              <span class="role deltager">DELTAGER</span>
+            </div>
+            <a class="tv-link" target="_blank" href="http://localhost:4000/tv/demo-hall-004/44444444-4444-4444-8444-444444444444">Åpne fullskjerm ↗</a>
+          </div>
+          <div class="tv-frame-wrap">
+            <iframe src="http://localhost:4000/tv/demo-hall-004/44444444-4444-4444-8444-444444444444" title="Demo Bingohall 4"></iframe>
+            <a class="tv-cover" target="_blank" href="http://localhost:4000/tv/demo-hall-004/44444444-4444-4444-8444-444444444444" aria-label="Åpne TV-skjerm hall 4"></a>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ── Seksjon 4: Admin / Operatør / Spiller ── -->
+    <section class="panel">
+      <h2>4. Admin / Operatør-flater</h2>
+      <p class="panel-sub">
+        Direkte-lenker til admin-konsoll, master-konsoll, spiller-shell og
+        backend-helsesjekker.
+      </p>
+      <div class="ops-list">
+        <a target="_blank" href="http://localhost:5174/admin/">
+          <span class="ops-label">Admin-konsoll login</span>
+          <span class="ops-url">http://localhost:5174/admin/</span>
+        </a>
+        <a target="_blank" href="http://localhost:5174/admin/#/admin/ops">
+          <span class="ops-label">Live Operations Console (master)</span>
+          <span class="ops-url">http://localhost:5174/admin/#/admin/ops</span>
+        </a>
+        <a target="_blank" href="http://localhost:5174/admin/#/games/catalog">
+          <span class="ops-label">Spillkatalog</span>
+          <span class="ops-url">http://localhost:5174/admin/#/games/catalog</span>
+        </a>
+        <a target="_blank" href="http://localhost:5174/admin/#/games/plans">
+          <span class="ops-label">Spilleplaner</span>
+          <span class="ops-url">http://localhost:5174/admin/#/games/plans</span>
+        </a>
+        <a target="_blank" href="http://localhost:4000/web/?dev-user=demo-pilot-spiller-1">
+          <span class="ops-label">Spiller-shell (hall 1)</span>
+          <span class="ops-url">http://localhost:4000/web/?dev-user=demo-pilot-spiller-1</span>
+        </a>
+        <a target="_blank" href="http://localhost:4000/web/?dev-user=demo-pilot-spiller-4">
+          <span class="ops-label">Spiller-shell (hall 2)</span>
+          <span class="ops-url">http://localhost:4000/web/?dev-user=demo-pilot-spiller-4</span>
+        </a>
+        <a target="_blank" href="http://localhost:4000/web/?dev-user=demo-pilot-spiller-7">
+          <span class="ops-label">Spiller-shell (hall 3)</span>
+          <span class="ops-url">http://localhost:4000/web/?dev-user=demo-pilot-spiller-7</span>
+        </a>
+        <a target="_blank" href="http://localhost:4000/web/?dev-user=demo-pilot-spiller-10">
+          <span class="ops-label">Spiller-shell (hall 4)</span>
+          <span class="ops-url">http://localhost:4000/web/?dev-user=demo-pilot-spiller-10</span>
+        </a>
+        <a target="_blank" href="http://localhost:4000/health">
+          <span class="ops-label">Backend health (JSON)</span>
+          <span class="ops-url">http://localhost:4000/health</span>
+        </a>
+        <a target="_blank" href="http://localhost:4000/api/status">
+          <span class="ops-label">System status (JSON)</span>
+          <span class="ops-url">http://localhost:4000/api/status</span>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Spillorama · Pilot Dev Overview · 4 demo-haller · 5 bonus-spill · 14 visual-harness-scenarier
+  </footer>
+
+  <script type="module" src="./dev-overview.ts"></script>
+</body>
+</html>
