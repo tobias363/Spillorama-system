@@ -398,7 +398,7 @@ skapte dual-fetch og ID-krangel-bugen som er dokumentert i
 - `halls[]` er ferdig-filtrert mot nåværende GoH-membership (stale haller flagget via warning).
 - Aggregator throw KUN ved infrastruktur-feil (`LOBBY_AGGREGATOR_INFRA_ERROR` → 5xx). Alle "data ser rar ut"-scenarioer flagges som warnings, aldri throw.
 
-**Bakover-kompatibilitet:** Eksisterende endpoints (`/current-game`, `/game-plan/current`, `/admin/game1/games/:id/...`) er IKKE påvirket. UI bytter til ny endpoint i Bølge 3 etter at Bølge 2 (MasterActionService) er på plass.
+**Bakover-kompatibilitet:** Eksisterende endpoints (`/current-game`, `/game-plan/current`, `/admin/game1/games/:id/...`) er IKKE påvirket. UI byttet til ny endpoint i Bølge 3 (2026-05-08) etter at Bølge 2 (MasterActionService) landet.
 
 ### 4.2 MasterActionService (Bølge 2) — kanonisk sekvenseringsmotor
 
@@ -437,13 +437,29 @@ bridge-spawn skjedde uten engine-trigger.
 - `BRIDGE_FAILED` — generic bridge-feil med original-error i details
 - Forventede DomainErrors fra plan-service og bridge propageres uendret (`NO_MATCHING_PLAN`, `HALL_NOT_IN_GROUP`, `MASTER_NOT_IN_GROUP`, `NO_ACTIVE_HALLS_IN_GROUP`)
 
-**Kontrakt for Bølge 3 (UI-bytte):**
-- Klient kaller `/api/agent/game1/master/{action}` med `{ hallId? }` body (eller default til user.hallId)
-- Respons-shape `MasterActionResult` med `scheduledGameId`, `planRunId`, `status`, `scheduledGameStatus`, `inconsistencyWarnings`
-- Klient skal IKKE kalle `/api/agent/game-plan/*` eller `/api/admin/game1/games/:id/*` direkte for master-actions
-- `agent-game-plan-adapter.ts` og `agent-master-actions.ts` (frontend) skal slettes i Bølge 3
+**Kontrakt for Bølge 3 (UI-bytte) — FULLFØRT 2026-05-08:**
+- ✅ Klient kaller `/api/agent/game1/master/{action}` med `{ hallId? }` body (eller default til user.hallId)
+- ✅ Respons-shape `MasterActionResult` med `scheduledGameId`, `planRunId`, `status`, `scheduledGameStatus`, `inconsistencyWarnings`
+- ✅ Klient kaller IKKE `/api/agent/game-plan/*` eller `/api/admin/game1/games/:id/*` direkte for master-actions
+- ✅ `agent-game-plan-adapter.ts` og `agent-master-actions.ts` (frontend) er slettet
 
-**Bakover-kompatibilitet:** Eksisterende `/api/agent/game-plan/*` og `/api/admin/game1/games/:gameId/*` endpoints er IKKE påvirket — de fortsetter å fungere mens UI gjør gradvis migrering i Bølge 3.
+**Bakover-kompatibilitet:** Eksisterende `/api/agent/game-plan/*` og `/api/admin/game1/games/:gameId/*` endpoints er IKKE påvirket — de fortsetter å fungere for backend-direct-callers (eks. admin-master-konsoll som ikke gikk via Bølge 3-refaktor).
+
+### 4.3 UI master-binding (Bølge 3) — FULLFØRT 2026-05-08
+
+**UI-konsumenter er kollapset til ÉN datakilde:**
+
+- **Helper:** `apps/admin-web/src/api/agent-game1.ts` har 7 nye public-funksjoner:
+  - `fetchLobbyState(hallId, opts)` — single-source-of-truth aggregator-call (Zod-validert respons)
+  - `startMaster` / `advanceMaster` / `pauseMaster` / `resumeMaster` / `stopMaster` / `setJackpot`
+- **Komponenter refaktorert:**
+  - `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts` — dual-fetch + adapter + wrapper er fjernet; bruker `fetchLobbyState` + `startMaster/pauseMaster/resumeMaster`
+  - `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts` (Spill 1-blokken) — samme refaktor; Spill 2/3-blokken (rom-kode-paradigme) er **uberørt**
+- **Slettet kode:**
+  - `apps/admin-web/src/api/agent-game-plan-adapter.ts` (146 linjer)
+  - `apps/admin-web/src/api/agent-master-actions.ts` (135 linjer)
+  - To tilhørende test-filer
+- **Tester:** `apps/admin-web/tests/agentGame1MasterActions.test.ts` — 21 test-cases dekker alle 7 funksjoner, error-paths, warning-propagering. Alle grønne.
 
 ---
 
