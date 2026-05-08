@@ -447,6 +447,38 @@ app.use(httpRateLimiter.middleware());
 
 // BIN-278: Root redirects to web shell (must be before express.static)
 app.get(["/", "/index.html"], (_req, res) => { res.redirect(302, "/web/"); });
+
+// Tobias-feedback 2026-05-08: TV-skjerm-redirect.
+// TV-skjermen er en del av admin-Vite-bundlen og lever på hash-route
+// `/admin/#/tv/<hallId>/<tvToken>[/winners]`. Operatører prøver
+// imidlertid den naturlige URL-formen `/tv/<hallId>/<tvToken>` direkte
+// på `:4000/tv/...`, hvilket før denne fixen falt gjennom til
+// `app.get("*")`-fallbacken og serverte player-shellen
+// (`web/index.html`). Player-shellen har relative asset-paths
+// (spillvett.css, min-konto.css, firebase-messaging-sw.js) som
+// browseren da resolver mot `/tv/<hallId>/spillvett.css`. Backend har
+// ingen sånn fil, fallbacken returnerer `web/index.html` med
+// `Content-Type: text/html`, og browseren nekter å laste HTML som
+// CSS/JS — resultat: svart skjerm pluss MIME-feil i konsollen.
+//
+// Vi løser det ved å redirecte de bare TV-pathene til riktig SPA-hash.
+// Det er en rein view-redirect (ingen state), så 302 er trygt og
+// matchen er hjørne-stram (regex krever to ikke-tomme segmenter etter
+// `/tv/` og maks ett valgfritt `/winners`-suffiks).
+const TV_REDIRECT_PATTERN =
+  /^\/tv\/([^/?#]+)\/([^/?#]+)(\/winners)?\/?$/;
+app.get(TV_REDIRECT_PATTERN, (req, res) => {
+  const match = TV_REDIRECT_PATTERN.exec(req.path);
+  if (!match) {
+    res.status(404).send("not found");
+    return;
+  }
+  const hallId = encodeURIComponent(match[1] ?? "");
+  const tvToken = encodeURIComponent(match[2] ?? "");
+  const winners = match[3] ? "/winners" : "";
+  res.redirect(302, `/admin/#/tv/${hallId}/${tvToken}${winners}`);
+});
+
 app.use("/admin", express.static(adminWebDir));
 app.use(express.static(publicDir));
 // TV-voice ball-utrop. express.static-mounten over plukker opp eventuelle
