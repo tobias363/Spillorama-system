@@ -27,6 +27,7 @@
  */
 
 import express from "express";
+import { Spill1AgentLobbyStateSchema } from "@spillorama/shared-types";
 import { DomainError } from "../errors/DomainError.js";
 import type {
   PlatformService,
@@ -140,7 +141,7 @@ export function createAgentGame1LobbyRouter(
       // Soft-fail empty-state for ADMIN uten hallId (samme strategi som
       // agentGamePlan.ts §343-380). Frontend rendrer "velg hall først"-state.
       if (hallId === null) {
-        apiSuccess(res, {
+        const emptyState = {
           hallId: null,
           hallName: null,
           businessDate: null,
@@ -148,14 +149,33 @@ export function createAgentGame1LobbyRouter(
           currentScheduledGameId: null,
           planMeta: null,
           scheduledGameMeta: null,
-          halls: [],
+          halls: [] as never[],
           allHallsReady: false,
           masterHallId: null,
           groupOfHallsId: null,
           isMasterAgent: false,
           nextScheduledStartTime: null,
-          inconsistencyWarnings: [],
-        });
+          inconsistencyWarnings: [] as never[],
+        };
+        // Code-review (PR #1050) funn 5: validér payload mot Zod-skjemaet
+        // før wire. Fanger typos, manglende felter og kontrakt-skew der
+        // backend driver UI-en uten Bølge 3-frontend-validering.
+        const parsed = Spill1AgentLobbyStateSchema.safeParse(emptyState);
+        if (!parsed.success) {
+          logger.error(
+            { issues: parsed.error.issues },
+            "[lobby-route] empty-state failed Zod validation — backend bug",
+          );
+          res.status(500).json({
+            ok: false,
+            error: {
+              code: "INTERNAL_ERROR",
+              message: "Lobby empty-state schema-validation failed",
+            },
+          });
+          return;
+        }
+        apiSuccess(res, parsed.data);
         return;
       }
 
@@ -167,7 +187,32 @@ export function createAgentGame1LobbyRouter(
       // intermediær cache skal returnere stale state etter master-action.
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 
-      apiSuccess(res, state);
+      // Code-review (PR #1050) funn 5: validér aggregator-respons mot
+      // Zod-skjemaet før wire. Fanger drift mellom Spill1AgentLobbyState-
+      // typen og det vi faktisk returnerer (typo, nytt felt på typen som
+      // ikke er i skjemaet, etc.). En feil her er en backend-bug → 500
+      // INTERNAL_ERROR; UI skal aldri se en payload som ikke matcher
+      // schemaet det parser mot.
+      const parsed = Spill1AgentLobbyStateSchema.safeParse(state);
+      if (!parsed.success) {
+        logger.error(
+          {
+            issues: parsed.error.issues,
+            hallId,
+          },
+          "[lobby-route] aggregator returned schema-violating payload — backend bug",
+        );
+        res.status(500).json({
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "Lobby state schema-validation failed",
+          },
+        });
+        return;
+      }
+
+      apiSuccess(res, parsed.data);
     } catch (err) {
       // Logg infrastruktur-feil med kontext, men la apiFailure håndtere
       // serialisering til wire-format (DomainError → 4xx, andre → 5xx).
