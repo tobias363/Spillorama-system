@@ -13,7 +13,8 @@
  * splittet over to steder:
  *   1. `apps/admin-web/src/api/agent-master-actions.ts` — frontend-wrapper
  *      som kalte plan-API først og legacy-API etterpå, ignorerte bridge-
- *      respons, og lot UI gjette hvilket id-rom var aktivt.
+ *      respons, og lot UI gjette hvilket id-rom var aktivt. SLETTET i
+ *      Bølge 3 — UI bruker nå `agent-game1.ts:startMaster()` etc. direkte.
  *   2. `apps/backend/src/routes/agentGamePlan.ts:443-616` — backend-route
  *      som kjørte plan-mutering og bridge-spawn, men IKKE kalt
  *      `Game1MasterControlService.startGame` (engine).
