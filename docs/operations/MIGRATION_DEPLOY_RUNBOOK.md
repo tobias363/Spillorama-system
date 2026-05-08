@@ -196,11 +196,57 @@ Hvis migrate har feilet på prod og du ikke kan fikse innen 30 minutter:
 
 ---
 
-## 8. Referanser
+## 8. Backup + Rollback Drills
+
+Migrasjons-runbooken dekker hva som skjer **når en migration feiler i build**, men dekker IKKE faktisk recovery hvis prod-DB krasjer eller hvis en deploy går gjennom og senere viser seg ødelagt. For dette har vi to drill-prosedyrer som verifiserer at recovery-pathen faktisk fungerer:
+
+| Drill | Doc | Frekvens | Pilot-gating |
+|---|---|---|---|
+| Backup-restore (D-DB-RESTORE-1) | [`DRILL_BACKUP_RESTORE_2026-Q3.md`](./DRILL_BACKUP_RESTORE_2026-Q3.md) | Kvartalsvis | ✅ Obligatorisk pre-pilot |
+| Deploy rollback (D-ROLLBACK-1) | [`DRILL_ROLLBACK_2026-Q3.md`](./DRILL_ROLLBACK_2026-Q3.md) | Per staging-deploy + kvartalsvis full | ✅ Obligatorisk pre-pilot |
+
+### 8.1 Når kjøres drills?
+
+- **Pre-pilot (obligatorisk):** begge drills må passere før første hall flippes. Pilot-gating per [`LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md`](../architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md) §6 R12.
+- **Kvartalsvis:** begge drills, roterer mellom L2-personer for trening.
+- **Halvårlig:** full table-top med L3 + Tobias som beslutningstakere.
+- **Etter major schema-endring:** ad-hoc D-DB-RESTORE-1 for å verifisere at PITR fungerer mot ny schema.
+- **Før pilot-utvidelse:** re-kjør begge drills før hver utvidelse til flere haller.
+- **Etter Render-plan-endring:** re-kjør D-DB-RESTORE-1 — backup-strategien kan ha endret seg (eks. PITR aktivert).
+
+### 8.2 Sammenheng med denne runbooken
+
+| Scenario | Hvilken doc dekker det? |
+|---|---|
+| Migration feiler i build (deploy aldri lykkes) | Denne runbooken §2-§4 |
+| Migration lykkes på staging men feiler på prod (out-of-band schema) | Denne runbooken §4.3 |
+| Migration lykkes, men senere ødelegger appen → vi må rulle tilbake deploy | [`DEPLOY_ROLLBACK_PROCEDURE.md`](./DEPLOY_ROLLBACK_PROCEDURE.md) + [`DRILL_ROLLBACK_2026-Q3.md`](./DRILL_ROLLBACK_2026-Q3.md) |
+| Migration ødelegger data → vi må PITR-restore DB | [`DATABASE_RESTORE_PROCEDURE.md`](./DATABASE_RESTORE_PROCEDURE.md) + [`DRILL_BACKUP_RESTORE_2026-Q3.md`](./DRILL_BACKUP_RESTORE_2026-Q3.md) |
+| Operatør sletter data ved feiltakelse | [`DATABASE_RESTORE_PROCEDURE.md`](./DATABASE_RESTORE_PROCEDURE.md) §1 + [`DRILL_BACKUP_RESTORE_2026-Q3.md`](./DRILL_BACKUP_RESTORE_2026-Q3.md) |
+
+### 8.3 Forward-only-policy + drill-konsekvenser
+
+Per `apps/backend/migrations/README.md` (BIN-661) er alle migrasjoner **forward-only**. Det betyr:
+
+- DB-en kan **aldri** rulles tilbake forbi siste applied migrasjon.
+- Hvis ny migrasjon er breaking (NOT NULL uten default, DROP COLUMN, etc.): ren backend-rollback er utilstrekkelig — vi må også lande forward-fix-migrasjon.
+- D-ROLLBACK-1 Scenario D tester nettopp denne forward-fix-cyklen.
+
+> 🚨 **Aldri rull DB-en tilbake forbi siste migrasjon.** Det betyr aldri `pg_restore` av en eldre snapshot for å "fjerne" en migrasjon, og aldri manuelt slette rader fra `pgmigrations`. Den eneste reverseringen er ny forward-migrasjon. Se [ADR-012](../decisions/ADR-012-idempotent-migrations.md) for hele beslutningen.
+
+---
+
+## 9. Referanser
 
 - `render.yaml` — `buildCommand` med `npm run migrate`-step.
 - `apps/backend/package.json` — `migrate`-script-definisjon.
 - `apps/backend/migrations/` — alle migration-filer.
-- `docs/operations/ROLLBACK_RUNBOOK.md` — hall-rollback (separat mekanisme).
-- `docs/operations/PILOT_CUTOVER_RUNBOOK.md` — kontekst for hall-cutover.
+- `apps/backend/migrations/README.md` — forward-only-policy (BIN-661).
+- [ADR-012 — Idempotente migrasjoner](../decisions/ADR-012-idempotent-migrations.md) — `CREATE TABLE IF NOT EXISTS` før ALTER-mønster.
+- [`ROLLBACK_RUNBOOK.md`](./ROLLBACK_RUNBOOK.md) — hall-rollback (separat mekanisme, client-variant flag).
+- [`DEPLOY_ROLLBACK_PROCEDURE.md`](./DEPLOY_ROLLBACK_PROCEDURE.md) — Render-deploy-rollback (faktisk hendelse).
+- [`DATABASE_RESTORE_PROCEDURE.md`](./DATABASE_RESTORE_PROCEDURE.md) — DB-restore (faktisk hendelse).
+- [`DRILL_BACKUP_RESTORE_2026-Q3.md`](./DRILL_BACKUP_RESTORE_2026-Q3.md) — backup-restore-drill (D-DB-RESTORE-1).
+- [`DRILL_ROLLBACK_2026-Q3.md`](./DRILL_ROLLBACK_2026-Q3.md) — deploy-rollback-drill (D-ROLLBACK-1).
+- [`PILOT_CUTOVER_RUNBOOK.md`](./PILOT_CUTOVER_RUNBOOK.md) — kontekst for hall-cutover.
 - `node-pg-migrate` docs: https://salsita.github.io/node-pg-migrate/
