@@ -9,20 +9,27 @@
  * Hva den gjør:
  *   1. Sjekker at Docker (Postgres + Redis) kjører — starter dem hvis de
  *      er nede (via docker-compose up postgres redis).
- *   2. Starter backend (tsx --watch på port 4000), admin-web (Vite på 5174),
+ *   2. Venter på at Postgres er klar og kjører `npm run migrate`
+ *      idempotent (henter manglende migrasjoner).
+ *   3. Heuristikk-sjekk: hvis DB er tom (ingen rader i app_halls), kjør
+ *      `npm run seed:demo-pilot-day` automatisk slik at admin/agent/spillere
+ *      kan logge inn etter første-gangs-startup.
+ *   4. Starter backend (tsx --watch på port 4000), admin-web (Vite på 5174),
  *      game-client (Vite på default 5173) og visual-harness (Node på 4173)
  *      parallelt med farge-kodet output-prefiks.
- *   3. Helsesjekker hver port etter ~10 sek — printer en fin status-tabell.
- *   4. Ctrl+C dreper alle barneprosesser rent (SIGTERM først, så SIGKILL
+ *   5. Helsesjekker hver port etter ~10 sek — printer en fin status-tabell.
+ *   6. Ctrl+C dreper alle barneprosesser rent (SIGTERM først, så SIGKILL
  *      etter 3 sek hvis noe henger).
  *
  * Bruk:
  *   npm run dev:all
  *
  * Flagg:
- *   --no-docker    Hopp Docker-sjekk (hvis du har Postgres/Redis lokalt)
- *   --no-harness   Skip visual-harness (sparer en port)
- *   --no-admin     Skip admin-web (kun backend + game-client)
+ *   --no-docker      Hopp Docker-sjekk (hvis du har Postgres/Redis lokalt)
+ *   --no-harness     Skip visual-harness (sparer en port)
+ *   --no-admin       Skip admin-web (kun backend + game-client)
+ *   --skip-migrate   Hopp over migrate (bruk hvis du allerede har kjørt det)
+ *   --force-seed     Re-seed selv om DB ikke er tom (idempotent)
  *
  * Backwards-compat: `npm run dev` (alene) fungerer fortsatt som før — denne
  * scripten er additiv og endrer ingen eksisterende workflows.
@@ -43,6 +50,14 @@ const args = new Set(process.argv.slice(2));
 const SKIP_DOCKER = args.has("--no-docker");
 const SKIP_HARNESS = args.has("--no-harness");
 const SKIP_ADMIN = args.has("--no-admin");
+const SKIP_MIGRATE = args.has("--skip-migrate");
+const FORCE_SEED = args.has("--force-seed");
+
+// Default-DSN for local Docker-Postgres (matcher docker-compose.yml).
+// Override hvis brukeren allerede har APP_PG_CONNECTION_STRING satt i env.
+const PG_DSN =
+  process.env.APP_PG_CONNECTION_STRING ??
+  "postgres://spillorama:spillorama@localhost:5432/spillorama";
 
 // ── Color helpers (no chalk dep — tiny ANSI wrapper) ────────────────────────
 
@@ -134,6 +149,207 @@ function ensureDockerInfra() {
   if (up.status !== 0) {
     console.log(color("red", "[docker] docker compose up feilet"));
     return false;
+  }
+  return true;
+}
+
+// ── Postgres-readiness + migrate + smart-seed ──────────────────────────────
+
+/**
+ * Kort polling-loop som venter til Postgres svarer på pg_isready (foretrukket
+ * via docker exec, fallback til en TCP-handshake som proxy hvis docker-CLI
+ * ikke er tilgjengelig). Returnerer true når klart, false ved timeout.
+ */
+async function waitForPostgresReady(maxSeconds = 30) {
+  const start = Date.now();
+  let usedDocker = false;
+  // Først: prøv docker exec pg_isready (mest pålitelig)
+  const dockerHas = spawnSync("docker", ["info"], { stdio: "ignore" });
+  const containerLookup = spawnSync(
+    "docker",
+    [
+      "compose",
+      "-f",
+      path.join(ROOT, "docker-compose.yml"),
+      "ps",
+      "-q",
+      "postgres",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] }
+  );
+  const containerId =
+    dockerHas.status === 0 && containerLookup.status === 0
+      ? (containerLookup.stdout?.toString().trim() ?? "")
+      : "";
+  if (containerId) {
+    usedDocker = true;
+  }
+
+  while (Date.now() - start < maxSeconds * 1000) {
+    if (usedDocker) {
+      const ready = spawnSync(
+        "docker",
+        ["exec", containerId, "pg_isready", "-U", "spillorama"],
+        { stdio: "ignore" }
+      );
+      if (ready.status === 0) return true;
+    } else {
+      // Fallback: TCP-connect til 5432 — dette betyr ikke at PG er ferdig
+      // med initdb, men det er bedre enn ingenting hvis brukeren har
+      // --no-docker eller en alternativ Postgres.
+      if (await isPortOpen(5432)) return true;
+    }
+    await delay(500);
+  }
+  return false;
+}
+
+/**
+ * Kjør node-pg-migrate idempotent. Returnerer true ved suksess, false ved feil.
+ */
+function runMigrate() {
+  if (SKIP_MIGRATE) {
+    console.log(color("yellow", "[migrate] hoppet over (--skip-migrate)"));
+    return true;
+  }
+  console.log(color("blue", "[migrate] kjører node-pg-migrate"));
+  const res = spawnSync(
+    "npm",
+    ["--prefix", "apps/backend", "run", "migrate", "--silent"],
+    {
+      cwd: ROOT,
+      stdio: "inherit",
+      env: { ...process.env, APP_PG_CONNECTION_STRING: PG_DSN },
+    }
+  );
+  if (res.status !== 0) {
+    console.log(
+      color(
+        "red",
+        "[migrate] node-pg-migrate feilet — fix migrasjonen og prøv igjen, " +
+          "eller bruk --skip-migrate hvis du har kjørt det manuelt."
+      )
+    );
+    return false;
+  }
+  console.log(color("green", "[migrate] ✓ ferdig (idempotent)"));
+  return true;
+}
+
+/**
+ * Sjekk om DB er tom — heuristikk: COUNT(*) FROM app_halls. Hvis ingen haller
+ * er seedet, antar vi at DB er fersk og kjører seed automatisk.
+ *
+ * Hvis sjekken feiler (tabellen finnes ikke, etc.), antar vi at noe er
+ * uventet og skipper seed for å unngå å overskrive ekte data — men logger
+ * feilen.
+ */
+function isDatabaseEmpty() {
+  const sql = "SELECT COUNT(*)::int AS n FROM app_halls;";
+  const node = spawnSync(
+    "node",
+    [
+      "-e",
+      `import("pg").then(async ({default: pg}) => {
+        const c = new pg.Client({connectionString: process.env.APP_PG_CONNECTION_STRING});
+        await c.connect();
+        try {
+          const r = await c.query(${JSON.stringify(sql)});
+          process.stdout.write(String(r.rows[0]?.n ?? 0));
+          await c.end();
+        } catch (err) {
+          process.stderr.write(String(err.message || err));
+          await c.end();
+          process.exit(2);
+        }
+      }).catch(err => { process.stderr.write(String(err.message || err)); process.exit(3); });`,
+    ],
+    {
+      // ROOT har hoisted node_modules (pg) — apps/backend har ingen lokal
+      // node_modules siden prosjektet bruker workspace-hoisting.
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, APP_PG_CONNECTION_STRING: PG_DSN },
+    }
+  );
+  if (node.status !== 0) {
+    const errOut = node.stderr?.toString().trim() ?? "";
+    console.log(
+      color(
+        "yellow",
+        `[seed] kunne ikke sjekke DB-tilstand (${errOut || `exit ${node.status}`}) — hopper over seed`
+      )
+    );
+    return false;
+  }
+  const count = Number(node.stdout?.toString().trim() ?? "0");
+  return Number.isFinite(count) && count === 0;
+}
+
+/**
+ * Kjør seed-demo-pilot-day idempotent. Returnerer true ved suksess.
+ */
+function runSeed() {
+  console.log(color("blue", "[seed] kjører seed:demo-pilot-day (idempotent)"));
+  const res = spawnSync(
+    "npm",
+    ["--prefix", "apps/backend", "run", "seed:demo-pilot-day", "--silent"],
+    {
+      cwd: ROOT,
+      stdio: "inherit",
+      env: { ...process.env, APP_PG_CONNECTION_STRING: PG_DSN },
+    }
+  );
+  if (res.status !== 0) {
+    console.log(color("red", "[seed] seed-script feilet"));
+    return false;
+  }
+  console.log(color("green", "[seed] ✓ demo-data seedet"));
+  return true;
+}
+
+/**
+ * Kombinert helper: vent på PG, kjør migrate, sjekk om DB er tom, kjør seed.
+ * Returnerer true hvis alt gikk bra (eller ble skippet trygt).
+ */
+async function ensureDatabaseReady() {
+  if (SKIP_MIGRATE && !FORCE_SEED) {
+    console.log(
+      color(
+        "yellow",
+        "[db] --skip-migrate satt — hopper også over auto-seed-sjekk. Bruk --force-seed for å re-seede."
+      )
+    );
+    return true;
+  }
+  console.log(color("blue", "[migrate] venter på Postgres…"));
+  const ready = await waitForPostgresReady(30);
+  if (!ready) {
+    console.log(
+      color(
+        "red",
+        "[migrate] Postgres ble ikke klar innen 30s — sjekk `docker compose logs postgres`."
+      )
+    );
+    return false;
+  }
+  console.log(color("green", "[migrate] Postgres klar"));
+  if (!runMigrate()) return false;
+
+  if (FORCE_SEED) {
+    console.log(color("yellow", "[seed] --force-seed satt — kjører seed uansett"));
+    if (!runSeed()) return false;
+    return true;
+  }
+  if (SKIP_MIGRATE) {
+    // Brukeren vil ikke ha auto-DB-håndtering
+    return true;
+  }
+  if (isDatabaseEmpty()) {
+    console.log(color("yellow", "[seed] DB tom — kjører førstegangs-seed"));
+    if (!runSeed()) return false;
+  } else {
+    console.log(color("dim", "[seed] DB allerede seedet, hopper over"));
   }
   return true;
 }
@@ -242,6 +458,23 @@ async function main() {
     process.exit(1);
   }
 
+  // ── Migrate + smart-seed (Tobias-direktiv 2026-05-08) ─────────────────
+  // Hvis brukeren har --no-docker satt antar vi at de selv styrer Postgres
+  // og vil typisk også styre migrate/seed manuelt — hopp over.
+  if (!SKIP_DOCKER) {
+    const dbOk = await ensureDatabaseReady();
+    if (!dbOk) {
+      process.exit(1);
+    }
+  } else {
+    console.log(
+      color(
+        "yellow",
+        "[db] --no-docker satt — hopper over auto-migrate/seed. Kjør 'npm run dev:seed' manuelt om nødvendig."
+      )
+    );
+  }
+
   // ── Backend ───────────────────────────────────────────────────────────
   spawnChild({
     name: "backend",
@@ -251,6 +484,9 @@ async function main() {
     env: {
       // Sørg for at admin-web's vite-proxy treffer riktig port
       PORT: process.env.PORT ?? "4000",
+      // Bruk samme DSN som migrate/seed-stegene — `apps/backend/.env`
+      // overstyrer fortsatt hvis den finnes (dotenv lastes inne i backend).
+      APP_PG_CONNECTION_STRING: PG_DSN,
     },
   });
 
