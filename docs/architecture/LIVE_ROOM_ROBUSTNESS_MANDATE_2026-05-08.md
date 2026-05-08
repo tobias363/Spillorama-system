@@ -124,6 +124,36 @@ Før pilot går live i én hall (Teknobingo Årnes som master + 3 deltager-halle
 - R10 (Spill 3 chaos-test)
 - R11 (per-rom isolation)
 
+### 6.1 Go/no-go-policy (Tobias 2026-05-08)
+
+**BESLUTNING:** Hvis Bølge 1-tiltakene R2 (failover) eller R3 (reconnect) avdekker strukturelle arkitektur-problemer, **skal pilot-utrulling pauses** inntil problemet er løst.
+
+**Begrunnelse:** Tap av kunde-tillit ved live-feil er dyrere enn 1-2 ukers utsatt pilot. Bingo-spillere er vanedyr — én dårlig kveld med "rom utilgjengelig" eller mistede draws sender dem til konkurrent og de kommer ikke tilbake.
+
+**Operativ konsekvens:**
+
+1. **R2/R3 må kjøres FØR pilot-go-live-møte** — ikke etter. Resultatet må være grønt eller "kjent risiko med dokumentert mitigation".
+2. **"Best effort, fikser i drift" er IKKE et akseptabelt go-live-kriterium.** Hvis test avdekker arkitektur-problem (ikke bare en tunable parameter), pauser vi.
+3. **Pilot-go/no-go-møte må holdes** med Tobias før første hall går live. R-tiltak gjennomgås punkt-for-punkt.
+4. **Ved tvil — pause.** Bedre å vente 2 uker enn å brenne tilliten i pilot-haller.
+
+**Hva som regnes som "strukturelt problem":**
+- Draws kan mistes ved instans-restart (R2)
+- Klient kan ikke replay-e state etter > 5 sek nett-glipp (R3)
+- Wallet-double-spend ved race-condition (kontinuerlig)
+- En rom-feil drar ned andre rom (R11 — derfor R11 før utvidelse)
+- §66/§71-rapporter blir inkonsistente ved instans-failover
+
+**Hva som IKKE blokkerer (kan fikses i drift):**
+- Performance-tuning (latency, throughput) hvis vi er innenfor SLA
+- UI-polish
+- Mindre feature-mangler som ikke berører rom-state
+- Logging/metrics-forbedringer
+
+**Eskalering:**
+
+Hvis R2/R3 viser strukturelle problemer og fix-estimat > 1 uke, eskalér til Tobias for beslutning om eksternt løft (SRE-konsulent / chaos-engineering-byrå) per §8.
+
 ---
 
 ## 7. Hvordan måle "Evolution Gaming-grade"
@@ -157,6 +187,7 @@ Hvis vi finner at egen kapasitet ikke holder for å nå Evolution-nivå, er **ek
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-08 | Initial. Doc-fester direktiv fra Tobias om Evolution-grade robusthet. | PM-AI (Claude Opus 4.7) |
+| 2026-05-08 | §6.1: Go/no-go-policy doc-festet. Hvis R2/R3-test avdekker strukturelle problemer skal pilot pauses, ikke "best effort, fikser i drift". Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
 
 ---
 
