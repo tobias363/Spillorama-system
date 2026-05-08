@@ -380,6 +380,22 @@ for each phase (Rad 1, ..., Fullt Hus):
 
 **Floor-rounding:** Hvis `pot_cents % len(winning_tickets) != 0`, går resten til huset som `HOUSE_RETAINED`-ledger-event (samme floor-regel som eksisterende `SPILL1_VINNINGSREGLER.md` §3 — denne delen er uendret).
 
+**Presisering — øre vs kr:** Engine opererer i øre (cents), ikke hele kroner. Eksempel-tabellen i §9.3 og test-eksempler i `SPILL1_VINNINGSREGLER.md` §3 bruker forenklet kr-notasjon for lesbarhet, men faktisk implementasjon er:
+
+```
+Eksempel: Lilla-pot 300 kr (30000 øre), 7 vinnende lilla-bonger
+Engine-flow:
+  pot_cents = 30000
+  share_per_ticket = floor(30000 / 7) = 4285 øre = 42.85 kr
+  total_distributed = 4285 × 7 = 29995 øre
+  rest = 30000 - 29995 = 5 øre = 0.05 kr → HOUSE_RETAINED
+
+NB: Hvis tabellen ovenfor sier "42 kr per bong, 6 kr til hus" er det kr-floor.
+Engine er presist 42.85 kr per bong, 5 øre til hus. Mathematisk korrekt.
+```
+
+Ledger-skriving alltid i øre (`prizeAmountCents`) — kr-konvertering for visning skjer i frontend.
+
 ### 9.8 Status
 
 Eksisterende engine-path `Game1DrawEngineService.payoutPerColorGroups` med "firstColor's pattern" implementerer **verken** denne regelen eller flat-deling-uten-vekting. PR #995 implementerte per-vinner-uavhengig (Tolkning A) — også feil. Begge må erstattes med ny path som matcher §9.7 over.
