@@ -14,19 +14,70 @@
 
 ## 0. Oversikt
 
-| Markedsnavn | Slug | Variant | Regulatorisk | Engine |
-|---|---|---|---|---|
-| Spill 1 (Hovedspill 1) | familie `bingo` (13 varianter) | standard / oddsen / trafikklys | MAIN_GAME | BingoEngine + Game1DrawEngineService |
-| Spill 2 (Hovedspill 2) | `rocket` | full plate | MAIN_GAME | Game2Engine |
-| Spill 3 (Hovedspill 3) | `monsterbingo` | mønsterbingo | MAIN_GAME | Game3Engine |
-| SpinnGo (Spill 4) | `spillorama` | databingo + rulett | DATABINGO | SpinnGo-engine |
-| Candy (eksternt) | `candy` | tredjeparts | N/A | Candy-leverandør |
+| Markedsnavn | Slug | Salg | Master | Globalt rom | Auto-progresjon | Regulatorisk | Engine |
+|---|---|---|---|---|---|---|---|
+| **Spill 1** (Hovedspill 1) | familie `bingo` (12 varianter) | **Fysisk + online** | ✅ Master per GoH | Per GoH | Master-styrt mellom rader | MAIN_GAME | BingoEngine + Game1DrawEngineService |
+| **Spill 2** (Hovedspill 2) | `rocket` | Online only | ❌ Ingen master | ETT globalt | ✅ Fullt automatisk | MAIN_GAME | Game2Engine |
+| **Spill 3** (Hovedspill 3) | `monsterbingo` | Online only | ❌ Ingen master | ETT globalt | ✅ Fullt automatisk | MAIN_GAME | Game3Engine (re-design pågår 2026-05-08) |
+| **SpinnGo** (Spill 4) | `spillorama` | Online (player-startet) | — | — | Player-startet | DATABINGO | SpinnGo-engine |
+| Candy (eksternt) | `candy` | — | — | — | — | N/A | Tredjepart-leverandør |
+
+### 0.1 Beslutningstre — hvor hører min endring hjemme?
+
+```
+Trenger jeg å endre fysisk-bong-salg, master-handling, multi-hall-koordinering?
+└── Spill 1 (familie `bingo`) — VELG ALDRI Spill 2/3 for dette
+
+Trenger jeg å endre fullautomatisert online-runde, threshold-start, globalt rom?
+└── Spill 2 (`rocket`) eller Spill 3 (`monsterbingo`) — Spill 1 har det IKKE
+
+Trenger jeg å legge til/endre gevinstmønster for Spill 1?
+└── ❌ FORBUDT — Spill 1 sine gevinstmønstre er definert: Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus.
+   Nye gevinstmønster-varianter (eks. Bokstav, T/L/X-mønster) hører hjemme på Spill 3.
+
+Trenger jeg å endre player-startet rulett-mekanikk?
+└── SpinnGo (`spillorama`) — egen engine, databingo-kategori
+```
+
+### 0.2 Bokstav er IKKE et Spill 1-katalog-rad (avklart 2026-05-08)
+
+Tobias presiserte 2026-05-08: Bokstav er en **gevinstmønster-variant for Spill 3** (når Spill 3-runtime er implementert, kommer Bokstav som en variant der). Bokstav skal **ikke** være en Spill 1-katalog-rad.
+
+**Konsekvens:**
+- Slug `bokstav` slettes/deaktiveres fra Spill 1-katalog (én rad mindre — 12 totalt, ikke 13)
+- Bokstav-mønster-mekanikk bygges inn i Spill 3-runtime som valgbar variant (admin kan velge mønster per runde eller per spilleplan-item)
+- Ny Spill 3-config-tabell må støtte mønster-variant-felter
 
 ---
 
-## 1. Hovedspill 1 — slug-familie `bingo` (13 katalog-varianter)
+## 1. Hovedspill 1 — slug-familie `bingo` (12 katalog-varianter)
 
-### 1.1 Felles mekanikk for ALLE Hovedspill 1-varianter
+### 1.0 Arkitektur-overordnet (KRITISK — definert + immutable)
+
+> **STATUSAVKLARING 2026-05-08:** Spill 1's gevinstmønstre er DEFINERT som `Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus` og skal ALDRI endres. Nye gevinstmønster-varianter (eks. Bokstav, T/L/X-mønstre) hører hjemme på Spill 3, ikke Spill 1.
+
+**Spill 1 sine kjennetegn:**
+
+| Egenskap | Verdi |
+|---|---|
+| Salg av fysiske bonger | ✅ Ja (i hall, via agent) |
+| Online-kjøp | ✅ Ja (parallelt med fysiske) |
+| Master-handling | ✅ Master-hall styrer rundene (start/pause/start neste rad) |
+| Multi-hall | ✅ Flere haller linket via group-of-halls (GoH) |
+| Auto-progresjon mellom rader | ❌ Master-styrt (ikke automatisk) |
+| Globalt rom | ❌ Per-GoH (én GoH = ett rom) |
+| Bongstørrelser | Hvit 5 / Gul 10 / Lilla 15 kr |
+| Faser (immutable) | Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus |
+
+**Master-handling:** Master-hall (definert per GoH via `master_hall_id`) styrer:
+- Når runden starter (`Game1MasterControlService.startGame`)
+- Pause/resume
+- Start neste rad etter pause-perioden
+- Bekreftelse av røde haller (TASK HS — `Game1MasterControlService.ts:121`)
+
+**Multi-hall-koordinering:** `GamePlanEngineBridge.resolveParticipatingHallIds` (PR #998) henter alle aktive medlemmer av master-hallens GoH og inkluderer i `participating_halls_json`. Master kan ekskludere haller midlertidig (men ikke seg selv).
+
+### 1.1 Felles mekanikk for ALLE Spill 1-varianter
 
 **Spill-engine:** BingoEngine + Game1DrawEngineService (`apps/backend/src/game/`)
 
@@ -164,33 +215,16 @@
 
 ---
 
-### 1.6 Bokstav (slug `bokstav`)
+### 1.6 ~~Bokstav~~ (FJERNET 2026-05-08)
 
-**Status (verifisert 2026-05-08):** 🚨 **PILOT-BLOKKERT** — slug + admin-katalog-rad eksisterer, men bokstav-mønster-mekanikk er IKKE implementert i engine. Engine kjører dagens `bokstav`-katalog-rad som standard 5-fase auto-mult-bingo (samme som `bingo`-slug).
-
-**Hva som finnes:**
-- Slug `bokstav` registrert i admin-frontend
-- Katalog-rad i prod-DB (mest sannsynlig med standard-konfig)
-- Test-suite i #999 antar standard auto-mult (base 800)
-
-**Hva som mangler:**
-- Engine pattern-mask for bokstav-mønstre (T/L/X/Plus/etc.)
-- Pattern-cycling-mekanikk for å erstatte/tillegge til Rad 1-4
-- Admin-UI for å velge hvilke bokstav-mønster som er aktive
-- Premie-strategi per bokstav-mønster
-
-**Variant:** `standard` (default) — men distinkt mekanikk udefinert
-**Bongpriser:** ✅ Hvit 5 / Gul 10 / Lilla 15
-
-**Krever Tobias-avklaring før pilot:**
-
-1. **Skal bokstav-mønstre implementeres som distinkt mekanikk?** Eller er `bokstav` bare et re-brandnavn for standard 5-fase?
-2. **Hvis distinkt:** hvilke mønstre er aktive (T-form, L-form, X-form, Plus, Pyramide, etc.)?
-3. **Erstatter eller supplerer:** skal bokstav-mønstre erstatte Rad 1-4 eller komme i tillegg?
-4. **Premie-strategi:** auto-mult som standard, eller per-bokstav-mønster eksplisitt?
-5. **Pilot-prioritet:** trengs `bokstav` dag 1, eller kan det utsettes til K2?
-
-**Praktisk anbefaling:** Hvis pilot kjøres uten Bokstav-spesifikk mekanikk, kan slug-en deaktiveres midlertidig i admin-katalog og spillet utelates fra pilot-spilleplaner. Beslutning hos Tobias.
+> **AVKLART 2026-05-08:** Bokstav er IKKE et Spill 1-katalog-rad. Tobias presiserte at Bokstav er en **gevinstmønster-variant for Spill 3** når Spill 3-runtime er implementert.
+>
+> **Konsekvens:**
+> - Slug `bokstav` skal slettes/deaktiveres fra Spill 1-katalog (12 katalog-rader, ikke 13)
+> - Bokstav-mønster bygges inn i Spill 3-runtime som valgbar mønster-variant
+> - Se §3 (Spill 3) for Bokstav-mønster-spec
+>
+> **Spill 1 har permanent definerte faser:** Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus. INGEN nye gevinstmønstre kommer til Spill 1.
 
 ---
 
@@ -469,48 +503,89 @@ Identisk med Oddsen 55, men `targetDraw = 57`.
 
 ---
 
-## 3. Hovedspill 3 — Monsterbingo (slug `monsterbingo`)
+## 3. Hovedspill 3 — Monsterbingo (slug `monsterbingo`) — RE-DESIGN PÅGÅR 2026-05-08
 
-**Engine:** Game3Engine (`apps/backend/src/game/Game3Engine.ts`)
+> **STATUSAVKLARING 2026-05-08:** Tobias har bestemt at Spill 3 skal re-designes til å ha samme premie-mekanikk som Spill 1 (Rad 1-4 + Fullt Hus), men med **fullautomatisert online-only-runde-drift**. Tidligere "Row 1-4 + Coverall mønsterbingo per PR #860" er erstattet.
 
-**Spillebrett:**
-- 75 baller (1-75)
-- 5×5 grid **uten** fri sentercelle
-- Mønsterbingo (ikke vanlig Rad 1-4)
+**Engine:** Game3Engine (re-implementeres) — pågående PR
 
-**Antall rom:** ✅ ETT globalt rom
+### 3.1 Arkitektur-overordnet (KRITISK — bekreftet av Tobias 2026-05-08)
 
-**Bongpriser:** ✅ Standard hvit/gul/lilla (5/10/15)
+| Egenskap | Verdi |
+|---|---|
+| Salg av fysiske bonger | ❌ Ingen — online-only |
+| Master-handling | ❌ Ingen — fullt automatisk |
+| Globalt rom | ✅ ETT live rom alltid aktivt — alle haller deltar |
+| Auto-progresjon mellom rader | ✅ 3 sekunders pause, så start neste rad |
+| Auto-start | ✅ Når threshold nås — admin-konfigurerbar globalt |
+| Spillebrett | 75 baller, 5×5 grid med fri sentercelle (samme som Spill 1) |
+| Faser | Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus |
 
-**Mønstre (etter Tobias-direktiv 2026-05-03 revert via PR #860):**
+### 3.2 Bonger
 
-- ÉN ticket-type: "Standard"
-- Patterns: Row 1, Row 2, Row 3, Row 4 (à 10% hver, ball-thresholds 15/25/40/55) + Coverall (60%)
-- **Visuelt likt Spill 1**
+- **Kun 1 type bong** — ingen multi-farge
+- **Pris: 5 kr** (flat)
+- **Salg: kun før runden starter** — aldri midt i runde
 
-**Spesial-mekanikk:**
+### 3.3 Auto-start på threshold
 
-- Mønsterbingo: vinnermønstrene er ikke nødvendigvis horisontale rader
-- Ball-threshold-mekanikk: pattern må vinnes innen X antall trekk (15/25/40/55) for å være gyldig
-- Coverall = Fullt Hus (50% sjanse for at det skjer i runden)
-- Perpetual loop med kulekø + chat
-- Auto-multiplikator gjelder ✅ (per bongfarge)
+- Admin-konfig: `minTicketsToStart` i backend-settings (admin-UI: `/admin/#/games/spill3-config`)
+- Endres løpende av admin uten kode-deploy
+- **Globalt for alle haller** (IKKE per GoH — alle haller deltar i samme rom)
+- Hvis threshold ikke nås → spillet starter aldri
+- Eksempel: i dag setter admin 50 bonger må selges; i morgen 20 bonger
 
-**Premier:**
+### 3.4 Slutt på runde
 
-| Pattern | Ball-threshold | Andel av total prize-pool | Notat |
-|---|---|---|---|
-| Row 1 | innen 15 trekk | 10% | |
-| Row 2 | innen 25 trekk | 10% | |
-| Row 3 | innen 40 trekk | 10% | |
-| Row 4 | innen 55 trekk | 10% | |
-| Coverall | uten threshold | 60% | Fullt Hus |
+Runde slutter når én av disse skjer:
+- **Første Fullt Hus-vinner** identifisert
+- **75 baller trukket** (selv uten Fullt Hus)
 
-⚠️ Konkrete kr-tall per pattern må verifiseres mot prod-katalog.
+Etter slutt: rommet venter på neste threshold-trigger.
 
-**Status pilot:** Spill 3 er pilot-klar etter PR #860-revert.
+### 3.5 Premier
 
-**§11-distribusjon:** Minst 15%
+To admin-konfig-modus:
+
+**Modus 1 — Fast (`prizeMode: "fixed"`):**
+- Admin setter Rad 1 = X kr, Rad 2 = Y kr, etc., Fullt Hus = Z kr
+- Premiene er konstante uansett antall solgte bonger
+
+**Modus 2 — Prosent (`prizeMode: "percentage"`):**
+- Admin setter Rad 1 = 5%, Rad 2 = 8%, etc., Fullt Hus = 30%
+- Premie = `(prosent / 100) × total_bong_salg_for_runden`
+- Eksempel: 200 bonger × 5 kr = 1000 kr omsetning. Rad 1 = 5% × 1000 = 50 kr
+
+### 3.6 Multi-vinner pot-deling
+
+Samme regel som Spill 1 §9 — Rad 1 deles bare ut én gang totalt:
+- 1 vinner Rad 1 → får hele Rad 1-poten
+- 2 vinnere Rad 1 → hver får halvparten
+- N vinnere Rad 1 → hver får `floor(pot / N)`, rest til HOUSE_RETAINED
+
+Siden det kun er én bong-type (5 kr flat), blir det **flat pot-deling** (ingen bong-vekting).
+
+### 3.7 Gevinstmønster-varianter (kommer)
+
+> **Bokstav-mønster** (T/L/X/Plus/Pyramide etc.) er en valgbar gevinstmønster-variant for Spill 3 som implementeres **etter** Spill 3-redesign er live.
+
+Når Bokstav-variant aktiveres:
+- Admin velger hvilke bokstav-mønstre som er aktive (per katalog-rad eller per spilleplan-item)
+- Engine kjører bokstav-mønster i stedet for / i tillegg til Rad 1-4 (TBD per agent-design)
+- Premie-mekanikken forblir den samme (fixed eller percentage)
+
+**Spec for Bokstav-variant er IKKE definert ennå** — kommer som egen oppfølger-spec etter Spill 3-redesign.
+
+### 3.8 §11-distribusjon
+
+Minst 15% til organisasjoner (MAIN_GAME).
+
+### 3.9 Status
+
+- 🔄 **Re-design pågår** (agent kjører fra 2026-05-08)
+- Nåværende `Game3Engine` (Row 1-4 + Coverall) erstattes
+- Estimat: ~8-12 dev-dager
+- Pilot-relevans: KRITISK — uten re-design er Spill 3 ikke pilot-klar
 
 ---
 
