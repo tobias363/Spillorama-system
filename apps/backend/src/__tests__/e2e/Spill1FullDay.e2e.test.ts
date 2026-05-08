@@ -495,32 +495,20 @@ describe("Spill 1 synthetic E2E (BIN-823)", { skip: skipReason }, () => {
       "/api/auth/me",
       { token: playerToken! },
     );
-    // Cross-system bug found 2026-05-08: when SessionService is wired in
-    // index.ts (default), `auth.ts`'s `getAuthenticatedUser` calls
-    // `sessionService.touchActivity()` which can throw INTERNAL_ERROR for
-    // newly-registered users that don't have a session row yet. The same
-    // token works fine on `/api/wallet/me` because wallet.ts uses a simpler
-    // helper. Tracked as TODO — for now we accept either 200 (fixed) or
-    // 400+INTERNAL_ERROR (current state) but explicitly fail on anything
-    // else so we still catch new regressions.
-    assert.ok(
-      r.status === 200 || r.status === 400,
-      `auth/me must return 200 or 400 (current bug); got ${r.status}: ${r.raw.slice(0, 200)}`,
+    // BIN-824 (2026-05-08): tidligere godtok denne testen 400+INTERNAL_ERROR
+    // som "kjent bug". Fixed via SessionService.touchActivity soft-fail +
+    // ensureInitialized som legger til REQ-132-kolonner (last_activity_at,
+    // device_user_agent, ip_address) på fresh test-schemaer. Hard assertion
+    // nå — vi forventer 200 og full PlayerProfile.
+    assert.equal(
+      r.status,
+      200,
+      `auth/me must return 200 for newly-registered players (BIN-824 fixed); got ${r.status}: ${r.raw.slice(0, 200)}`,
     );
-    if (r.status === 200) {
-      assert.equal(r.body?.ok, true);
-      if (r.body?.ok) {
-        assert.equal(r.body.data.email, playerEmail);
-        assert.equal(r.body.data.role, "PLAYER");
-      }
-    } else {
-      // 400 — known bug. Still assert structured error.
-      assert.equal(r.body?.ok, false);
-      console.warn(
-        `[E2E][KNOWN-BUG] /api/auth/me returns ${r.status} for newly-registered ` +
-          `players. Likely sessionService.touchActivity() crash on missing session ` +
-          `row. See apps/backend/src/routes/auth.ts:165-173.`,
-      );
+    assert.equal(r.body?.ok, true);
+    if (r.body?.ok) {
+      assert.equal(r.body.data.email, playerEmail);
+      assert.equal(r.body.data.role, "PLAYER");
     }
   });
 
