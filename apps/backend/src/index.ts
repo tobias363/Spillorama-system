@@ -273,6 +273,7 @@ import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
 import { Game1LobbyService } from "./game/Game1LobbyService.js";
+import { Spill1LobbyBroadcaster } from "./game/Spill1LobbyBroadcaster.js";
 import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
 import { createAdminSpill2ConfigRouter } from "./routes/adminSpill2Config.js";
 import { createAdminSpill3ConfigRouter } from "./routes/adminSpill3Config.js";
@@ -1175,6 +1176,18 @@ const game1LobbyService = new Game1LobbyService({
   schema: pgSchema,
   planService: gamePlanService,
   planRunService: gamePlanRunService,
+});
+
+// R1 (BIN-822, 2026-05-08): broadcaster som wire-er master-handlinger
+// (start/advance/pause/resume/stop) til `lobby:state-update`-events. Klient
+// som er subscribed til `spill1:lobby:{hallId}`-rom mottar oppdatert state
+// uten å vente på 10s-poll-tick. Best-effort: broadcasts feiler aldri
+// state-overgangen, kun logger warning.
+const spill1LobbyBroadcaster = new Spill1LobbyBroadcaster({
+  io,
+  lobbyService: game1LobbyService,
+  pool: sharedPool,
+  schema: pgSchema,
 });
 
 // BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
@@ -2711,6 +2724,10 @@ app.use(createAgentGame1Router({
   hallReadyService: game1HallReadyService,
   hallGroupService,
   pool: platformService.getPool(),
+  // R1 (BIN-822, 2026-05-08): broadcast lobby-state-update etter
+  // start/resume/stop slik at klient som er subscribed til
+  // `spill1:lobby:{hallId}`-rom bytter til runde-modus uten polling.
+  lobbyBroadcaster: spill1LobbyBroadcaster,
 }));
 // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
 // Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og
@@ -2921,6 +2938,11 @@ app.use(createAgentGamePlanRouter({
   // returnerer scheduledGameId som master-UI kan bruke til å trigge
   // engine via /api/agent/game1/start.
   engineBridge: gamePlanEngineBridge,
+  // R1 (BIN-822, 2026-05-08): broadcast lobby-state-update etter hver
+  // master-handling (start/advance/pause/resume) så klient som er
+  // subscribed til `spill1:lobby:{hallId}`-rom mottar oppdatert state
+  // umiddelbart. Best-effort — null hvis ikke wire-et.
+  lobbyBroadcaster: spill1LobbyBroadcaster,
 }));
 // Spill 1 lobby-rom (2026-05-08, Tobias-direktiv): public read-only state
 // for klient-shell. `GET /api/games/spill1/lobby?hallId=X` returnerer

@@ -91,6 +91,16 @@ export interface AgentGamePlanRouterDeps {
    * vi Fase 3-oppførsel (kun state-overgang, ingen scheduled-game).
    */
   engineBridge?: GamePlanEngineBridge | null;
+  /**
+   * R1 (BIN-822, 2026-05-08): valgfri lobby-broadcaster. Når satt, kalles
+   * `broadcastForHall(hallId)` etter hver vellykket master-handling
+   * (start/advance/pause/resume) så klient som er subscribed til
+   * `spill1:lobby:{hallId}`-rom mottar `lobby:state-update` umiddelbart.
+   * Best-effort — broadcast-feil blokkerer ikke state-overgangen.
+   */
+  lobbyBroadcaster?: {
+    broadcastForHall(hallId: string): Promise<void>;
+  } | null;
 }
 
 interface PlanItemWithCatalog extends GamePlanItem {
@@ -236,7 +246,21 @@ export function createAgentGamePlanRouter(
 ): express.Router {
   const { platformService, planRunService, planService } = deps;
   const engineBridge = deps.engineBridge ?? null;
+  const lobbyBroadcaster = deps.lobbyBroadcaster ?? null;
   const router = express.Router();
+
+  /**
+   * R1 (BIN-822): best-effort fire-and-forget lobby-broadcast. Brukes etter
+   * vellykkede state-overganger så klient som er subscribed til
+   * `spill1:lobby:{hallId}`-rom mottar fersk state. Aldri kaster — feil
+   * logges av broadcasteren selv.
+   */
+  function fireLobbyBroadcast(hallId: string | null | undefined): void {
+    if (!lobbyBroadcaster || typeof hallId !== "string" || !hallId.trim()) {
+      return;
+    }
+    void lobbyBroadcaster.broadcastForHall(hallId.trim());
+  }
 
   async function requirePermission(
     req: express.Request,
@@ -484,6 +508,10 @@ export function createAgentGamePlanRouter(
         }
       }
 
+      // R1 (BIN-822): klient som er subscribed til `spill1:lobby:{hallId}`
+      // får oppdatert state nå (state-overgang idle → running).
+      fireLobbyBroadcast(hallId);
+
       apiSuccess(res, {
         run: started,
         scheduledGameId,
@@ -571,6 +599,9 @@ export function createAgentGamePlanRouter(
           }
         }
       }
+
+      // R1 (BIN-822): klient bytter til ny posisjon eller "finished"-state.
+      fireLobbyBroadcast(hallId);
 
       apiSuccess(res, {
         run: result.run,
@@ -687,6 +718,9 @@ export function createAgentGamePlanRouter(
         { draw, prizesCents },
         actor.id,
       );
+      // R1 (BIN-822): jackpot-setup kan endre om engine-bridge spawner
+      // scheduled-game; klient bør re-fetche state.
+      fireLobbyBroadcast(hallId);
       apiSuccess(res, { run: updated });
     } catch (err) {
       apiFailure(res, err);
@@ -714,6 +748,8 @@ export function createAgentGamePlanRouter(
         );
       }
       const run = await planRunService.pause(hallId, businessDate, actor.id);
+      // R1 (BIN-822): klient ser pauset-state.
+      fireLobbyBroadcast(hallId);
       apiSuccess(res, { run });
     } catch (err) {
       apiFailure(res, err);
@@ -741,6 +777,8 @@ export function createAgentGamePlanRouter(
         );
       }
       const run = await planRunService.resume(hallId, businessDate, actor.id);
+      // R1 (BIN-822): klient bytter fra paused tilbake til running.
+      fireLobbyBroadcast(hallId);
       apiSuccess(res, { run });
     } catch (err) {
       apiFailure(res, err);

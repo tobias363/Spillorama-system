@@ -72,6 +72,16 @@ export interface AgentGame1RouterDeps {
   hallGroupService: HallGroupService;
   pool: Pool;
   schema?: string;
+  /**
+   * R1 (BIN-822, 2026-05-08): valgfri lobby-broadcaster. Når satt, kalles
+   * `broadcastForScheduledGame(gameId)` etter hver vellykket master-handling
+   * (start/resume/stop) så klient som er subscribed til
+   * `spill1:lobby:{hallId}`-rom mottar `lobby:state-update` umiddelbart.
+   * Best-effort — broadcast-feil blokkerer ikke state-overgangen.
+   */
+  lobbyBroadcaster?: {
+    broadcastForScheduledGame(scheduledGameId: string): Promise<void>;
+  } | null;
 }
 
 interface ActiveGameRow {
@@ -187,6 +197,27 @@ export function createAgentGame1Router(
     throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
   }
   const scheduledGamesTable = `"${schema}"."app_game1_scheduled_games"`;
+  const lobbyBroadcaster = deps.lobbyBroadcaster ?? null;
+
+  /**
+   * R1 (BIN-822): best-effort fire-and-forget lobby-broadcast per
+   * scheduled-game. Brukes etter master-actions (start/resume/stop) så
+   * klient som er subscribed til `spill1:lobby:{hallId}`-rom mottar fersk
+   * state. Broadcaster fan-er ut til master-hall + alle participating-halls.
+   * Aldri kaster — feil logges av broadcasteren selv.
+   */
+  function fireLobbyBroadcastForGame(
+    scheduledGameId: string | null | undefined,
+  ): void {
+    if (
+      !lobbyBroadcaster ||
+      typeof scheduledGameId !== "string" ||
+      !scheduledGameId.trim()
+    ) {
+      return;
+    }
+    void lobbyBroadcaster.broadcastForScheduledGame(scheduledGameId.trim());
+  }
 
   const router = express.Router();
 
@@ -555,6 +586,11 @@ export function createAgentGame1Router(
       }
       const result = await masterControlService.startGame(startInput);
 
+      // R1 (BIN-822): klient som er subscribed til
+      // `spill1:lobby:{hallId}`-rom for master-hall + participating-halls
+      // får fersk state nå (status: ready_to_start → running).
+      fireLobbyBroadcastForGame(result.gameId);
+
       apiSuccess(res, {
         gameId: result.gameId,
         status: result.status,
@@ -594,6 +630,9 @@ export function createAgentGame1Router(
         gameId: active.id,
         actor: masterActor,
       });
+
+      // R1 (BIN-822): klient bytter fra paused tilbake til running.
+      fireLobbyBroadcastForGame(result.gameId);
 
       apiSuccess(res, {
         gameId: result.gameId,
@@ -645,6 +684,10 @@ export function createAgentGame1Router(
         actor: masterActor,
         reason,
       });
+
+      // R1 (BIN-822): klient ser at runden er stoppet (finished/error) og
+      // bytter tilbake til lobby-modus.
+      fireLobbyBroadcastForGame(result.gameId);
 
       apiSuccess(res, {
         gameId: result.gameId,
