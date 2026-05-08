@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
 # CodeRabbit-konfigurasjon for Spillorama-system
 # https://docs.coderabbit.ai/getting-started/configure-coderabbit
 #
@@ -217,29 +219,14 @@ knowledge_base:
   pull_requests:
     scope: "auto"  # Lærer fra historie
 
-# Tools — eksisterende verktøy CodeRabbit skal komplementere
-tools:
-  # Vi har dependency-cruiser allerede — la CodeRabbit kjenne til den
-  github-checks:
-    enabled: true
-    timeout_ms: 90000
-
-  # Markdown-link-checker (vi har egen via husky, men CodeRabbit kan også sjekke)
-  markdownlint:
-    enabled: true
-
-  # ESLint
-  eslint:
-    enabled: true
-
-  # Hadolint for Dockerfiles
-  hadolint:
-    enabled: true
-
-  # Shellcheck for bash-scripts
-  shellcheck:
-    enabled: true
-
-  # YAMLLint
-  yamllint:
-    enabled: true
+# MERKNAD: `tools:`-key er deprecated i CodeRabbit v2-config (oppdaget av
+# Candy-PM 2026-05-08). CodeRabbit auto-detecter eksisterende tools fra
+# repo-config nå (eslint, markdownlint, hadolint, shellcheck, yamllint
+# kjører hvis de er installert/konfigurert).
+#
+# Vi har allerede:
+# - dependency-cruiser via .dependency-cruiser.cjs (PR #1067)
+# - husky pre-commit hooks (PR #1068)
+# - github-actions workflows i .github/workflows/
+#
+# CodeRabbit bruker disse automatisk via github-checks-integrasjon.
