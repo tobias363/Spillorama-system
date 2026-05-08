@@ -39,6 +39,11 @@ export interface GroupHallCreatePayload {
   status?: HallGroupStatus;
   /** Free-form tekst-felt — persistert under `extra.description`. */
   description?: string;
+  /**
+   * 2026-05-08 (Tobias-feedback): pinned master-hall — må være i hallIds.
+   * `null` eller udefinert betyr "ingen pin".
+   */
+  masterHallId?: string | null;
 }
 
 /** Form-payload for patch — alle felt valgfrie. */
@@ -48,6 +53,11 @@ export interface GroupHallUpdatePayload {
   hallIds?: string[];
   status?: HallGroupStatus;
   description?: string;
+  /**
+   * 2026-05-08 (Tobias-feedback): null nullstiller pin. Hvis satt sammen
+   * med hallIds må master være i den nye listen.
+   */
+  masterHallId?: string | null;
 }
 
 /**
@@ -112,6 +122,19 @@ export function validateGroupHallPayload(
       if (!h.trim()) return "hall_id_invalid";
     }
   }
+  // 2026-05-08 (Tobias-feedback): hvis master-hallen er satt og hallIds
+  // også er sendt, må master være i listen. Hvis hallIds ikke er sendt
+  // håndhever backend at hallen er medlem.
+  if (
+    "masterHallId" in input &&
+    input.masterHallId !== undefined &&
+    input.masterHallId !== null &&
+    "hallIds" in input &&
+    input.hallIds !== undefined &&
+    !input.hallIds.includes(input.masterHallId)
+  ) {
+    return "master_hall_not_member";
+  }
   return null;
 }
 
@@ -169,6 +192,8 @@ export async function createGroupHall(
     };
     if (payload.status) input.status = payload.status;
     if (payload.tvId !== undefined) input.tvId = payload.tvId;
+    if (payload.masterHallId !== undefined)
+      input.masterHallId = payload.masterHallId;
     const extra = toExtra(payload.description);
     if (extra !== undefined) input.extra = extra;
     const row = await apiCreateHallGroup(input);
@@ -191,6 +216,8 @@ export async function updateGroupHall(
     if (payload.tvId !== undefined) update.tvId = payload.tvId;
     if (payload.hallIds !== undefined) update.hallIds = payload.hallIds;
     if (payload.status !== undefined) update.status = payload.status;
+    if (payload.masterHallId !== undefined)
+      update.masterHallId = payload.masterHallId;
     const extra = toExtra(payload.description);
     if (extra !== undefined) update.extra = extra;
     if (Object.keys(update).length === 0) {
