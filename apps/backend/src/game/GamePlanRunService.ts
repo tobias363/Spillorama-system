@@ -360,9 +360,40 @@ export class GamePlanRunService {
   }
 
   /**
+   * Finn alle aktive group-of-halls (`app_hall_groups`) som hallen er
+   * medlem av. Brukes til å finne GoH-baserte planer som dekker hallen
+   * (en plan kan være bundet til en GoH istedet for en konkret hall).
+   *
+   * Pilot-fix 2026-05-08: før denne ble lagt til matchet
+   * `getOrCreateForToday` kun planer der `plan.hallId === hall`. Tobias'
+   * pilot-plan er GoH-bundet (`hallId=null, groupOfHallsId='06b1c6ce-...'`)
+   * og blokkerte derfor pilot-flow med `NO_MATCHING_PLAN`.
+   *
+   * Henter kun grupper hvor `g.deleted_at IS NULL` og `g.status = 'active'`
+   * — samme filter som `GamePlanEngineBridge.resolveGroupHallId`.
+   */
+  private async findGoHIdsForHall(hallId: string): Promise<string[]> {
+    const { rows } = await this.pool.query<{ group_id: string }>(
+      `SELECT m.group_id
+       FROM "${this.schema}"."app_hall_group_members" m
+       INNER JOIN "${this.schema}"."app_hall_groups" g ON g.id = m.group_id
+       WHERE m.hall_id = $1
+         AND g.deleted_at IS NULL
+         AND g.status = 'active'`,
+      [hallId],
+    );
+    return rows.map((r) => r.group_id);
+  }
+
+  /**
    * Idempotent create. Hvis ingen run finnes for (hall, businessDate)
    * opprettes en idle-rad bundet til en plan. Hvis flere planer matcher
    * (hall + ukedag) tar service-en den første aktive (sortert på navn).
+   *
+   * GoH-matching (2026-05-08): planer kan være bundet til ENTEN
+   * `plan.hallId === hall` ELLER `plan.groupOfHallsId IN (GoH-er hall er
+   * medlem av)`. Begge typer hentes i samme spørring (filter.hallId +
+   * filter.groupOfHallsIds OR-es), dedup på `id` etterpå.
    *
    * Hvis ingen plan finnes som dekker (hall, weekday) kastes
    * `NO_MATCHING_PLAN`.
@@ -378,15 +409,28 @@ export class GamePlanRunService {
     const existing = await this.findForDay(hall, dateStr);
     if (existing) return existing;
 
-    // Finn matchende plan. Vi henter alle aktive planer for hallen og
-    // velger første som matcher ukedag.
+    // Finn matchende plan. Vi henter alle aktive planer som enten:
+    //   - er bundet direkte til hall, ELLER
+    //   - er bundet til en GoH som hall er medlem av
+    // og velger første som matcher ukedag. Listen er allerede sortert
+    // på navn ASC (sekundært createdAt ASC), så "første" er stabil.
     const weekdayKey = this.weekdayFromDateStr(dateStr);
+    const goHIds = await this.findGoHIdsForHall(hall);
     const candidates = await this.planService.list({
       hallId: hall,
+      groupOfHallsIds: goHIds.length > 0 ? goHIds : undefined,
       isActive: true,
       limit: 50,
     });
-    const matched = candidates.find((p) =>
+    // Dedup på id (en plan kan i teorien matche begge filtere — selv om
+    // CHECK constraint sier XOR, er defensiv dedup gratis).
+    const seen = new Set<string>();
+    const unique = candidates.filter((p) => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+    const matched = unique.find((p) =>
       (p.weekdays as readonly string[]).includes(weekdayKey),
     );
     if (!matched) {

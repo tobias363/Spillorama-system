@@ -357,10 +357,30 @@ export class GamePlanService {
         : 200;
     const params: unknown[] = [];
     const conditions: string[] = [];
-    if (filter.hallId !== undefined) {
+
+    // GoH-multi-match (2026-05-08): hvis caller har sendt både `hallId`
+    // OG `groupOfHallsIds`, skal disse OR-es (plan matcher om det er
+    // direkte-hall ELLER medlem av en av GoH-ene). Ellers AND-es
+    // condition-ene som tidligere.
+    const hasHallScope = filter.hallId !== undefined;
+    const hasGroupIdsScope =
+      Array.isArray(filter.groupOfHallsIds) && filter.groupOfHallsIds.length > 0;
+    if (hasHallScope && hasGroupIdsScope) {
+      params.push(filter.hallId);
+      const hallIdx = params.length;
+      params.push(filter.groupOfHallsIds);
+      const groupIdsIdx = params.length;
+      conditions.push(
+        `(hall_id = $${hallIdx} OR group_of_halls_id = ANY($${groupIdsIdx}::text[]))`,
+      );
+    } else if (hasHallScope) {
       params.push(filter.hallId);
       conditions.push(`hall_id = $${params.length}`);
+    } else if (hasGroupIdsScope) {
+      params.push(filter.groupOfHallsIds);
+      conditions.push(`group_of_halls_id = ANY($${params.length}::text[])`);
     }
+
     if (filter.groupOfHallsId !== undefined) {
       params.push(filter.groupOfHallsId);
       conditions.push(`group_of_halls_id = $${params.length}`);
