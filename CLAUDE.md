@@ -356,6 +356,10 @@ npm run dev
 
 These are decisions baked in by the Spillorama team — not auto-detectable from code.
 
+### 🚨 Live-rom-robusthet (P0-MANDAT — ikke kompromisser)
+
+Spill 1, 2 og 3 er live-rom som **alltid** må være tilgjengelige innenfor spilleplanens åpningstid. Mål: Evolution Gaming-grade oppetid (99.95 %+). Hvis du rører rom-arkitektur, socket-events, draw-tick, ticket-purchase eller wallet-touch fra rom-events: **les @docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md først**. R1-R12 i mandatet er pilot-gating. Direktiv fra Tobias 2026-05-08.
+
 ### Game rules + payout (KANONISK — les FØR du rører payout-kode)
 
 See @docs/architecture/SPILL_REGLER_OG_PAYOUT.md for autoritative regler om bongpriser, auto-multiplikator, single-prize cap (databingo only), spesialspill (Trafikklys + Oddsen), bonus-spill, multi-vinner, og engine-bridge ticket-config-shape. Hvis du finner kode som motsier doc-en, **doc-en vinner** og koden må fikses.
