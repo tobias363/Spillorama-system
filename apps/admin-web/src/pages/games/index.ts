@@ -44,6 +44,8 @@ import {
   renderGamePlanNewPage,
   renderGamePlanEditPage,
 } from "./plans/GamePlanEditorPage.js";
+// Tobias-direktiv 2026-05-08: Spill 2 (rocket) global singleton-konfig.
+import { renderSpill2ConfigPage } from "./spill2Config/Spill2ConfigPage.js";
 // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) admin-config.
 import { renderSpill3ConfigPage } from "./spill3Config/Spill3ConfigPage.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
@@ -70,6 +72,8 @@ const STATIC_GAMES_ROUTES = new Set<string>([
   "/games/catalog/new",
   "/games/plans",
   "/games/plans/new",
+  // Tobias-direktiv 2026-05-08: Spill 2 (rocket) admin-config.
+  "/games/spill2-config",
   // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) admin-config.
   "/games/spill3-config",
 ]);
@@ -178,6 +182,11 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
     case "/games/plans/new":
       void renderGamePlanNewPage(container);
       return;
+    // Tobias-direktiv 2026-05-08: Spill 2 (rocket) globalt rom-konfig.
+    case "/games/spill2-config":
+      void renderSpill2ConfigPage(container);
+      return;
+    // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) admin-config.
     case "/games/spill3-config":
       void renderSpill3ConfigPage(container);
       return;
