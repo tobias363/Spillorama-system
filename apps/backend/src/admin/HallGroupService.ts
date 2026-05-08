@@ -18,6 +18,16 @@
  * Soft-delete: `deleted_at` settes + status = 'inactive'. Hard-delete
  * blokkeres hvis gruppen er referert fra `app_daily_schedules.groupHallIds`
  * (JSON array). Service sjekker dette i `remove({ hard: true })`.
+ *
+ * 2026-05-08 (Tobias-feedback) — `master_hall_id`-utvidelse:
+ *   - GoH har et valgfritt pinned master-hall-felt. Når satt overstyrer
+ *     den `run.hall_id` ved scheduled-game-spawn (se
+ *     GamePlanEngineBridge.createScheduledGameForPlanRunPosition).
+ *   - Service-laget håndhever at master-hallen er medlem av gruppen ved
+ *     create/update.
+ *   - Hvis `update.hallIds` fjerner master uten eksplisitt `masterHallId`
+ *     i samme call, nullstilles master automatisk så DB-FK ikke kommer i
+ *     konflikt med brukerintensjonen.
  */
 
 import { randomUUID } from "node:crypto";
@@ -45,6 +55,13 @@ export interface HallGroup {
   name: string;
   status: HallGroupStatus;
   tvId: number | null;
+  /**
+   * 2026-05-08 (Tobias-feedback): pinned master-hall for GoH. NULL = ingen
+   * pin (legacy-fallback til run.hall_id ved scheduled-game-spawn). Når
+   * satt, må hallen være medlem av gruppen — service-laget håndhever
+   * invariant.
+   */
+  masterHallId: string | null;
   productIds: string[];
   members: HallGroupMember[];
   extra: Record<string, unknown>;
@@ -59,6 +76,8 @@ export interface CreateHallGroupInput {
   hallIds?: string[];
   status?: HallGroupStatus;
   tvId?: number | null;
+  /** 2026-05-08 (Tobias-feedback): pinned master-hall — må være i hallIds hvis satt. */
+  masterHallId?: string | null;
   productIds?: string[];
   extra?: Record<string, unknown>;
   legacyGroupHallId?: string | null;
@@ -71,6 +90,13 @@ export interface UpdateHallGroupInput {
   hallIds?: string[];
   status?: HallGroupStatus;
   tvId?: number | null;
+  /**
+   * 2026-05-08 (Tobias-feedback): pinned master-hall. Send null for å
+   * nullstille. Hvis satt og hallIds også sendes, må master-hallen være
+   * i den nye listen. Hvis kun masterHallId sendes, må hallen være
+   * eksisterende medlem.
+   */
+  masterHallId?: string | null;
   productIds?: string[];
   extra?: Record<string, unknown>;
 }
@@ -104,6 +130,7 @@ interface HallGroupRow {
   name: string;
   status: HallGroupStatus;
   tv_id: number | null;
+  master_hall_id: string | null;
   products_json: unknown;
   extra_json: Record<string, unknown>;
   created_by: string | null;
@@ -170,6 +197,23 @@ function assertTvId(value: unknown): number | null {
     );
   }
   return n;
+}
+
+/**
+ * 2026-05-08 (Tobias-feedback): valider valgfri master-hall-id. Tom-streng
+ * og null tolkes begge som "ingen master pinned". Trim før returnering så
+ * vi ikke lagrer whitespace-bare strings.
+ */
+function assertMasterHallId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "masterHallId må være en streng eller null."
+    );
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 function assertHallIds(value: unknown, field = "hallIds"): string[] {
@@ -302,7 +346,7 @@ export class HallGroupService {
     params.push(limit);
     const { rows } = await this.pool.query<HallGroupRow>(
       `SELECT g.id, g.legacy_group_hall_id, g.name, g.status, g.tv_id,
-              g.products_json, g.extra_json, g.created_by,
+              g.master_hall_id, g.products_json, g.extra_json, g.created_by,
               g.created_at, g.updated_at, g.deleted_at
        FROM ${this.table()} g
        ${joinClause}
@@ -324,7 +368,7 @@ export class HallGroupService {
     }
     const { rows } = await this.pool.query<HallGroupRow>(
       `SELECT id, legacy_group_hall_id, name, status, tv_id,
-              products_json, extra_json, created_by,
+              master_hall_id, products_json, extra_json, created_by,
               created_at, updated_at, deleted_at
        FROM ${this.table()}
        WHERE id = $1`,
@@ -344,11 +388,25 @@ export class HallGroupService {
     const hallIds = input.hallIds !== undefined ? assertHallIds(input.hallIds) : [];
     const status = input.status ? assertStatus(input.status) : "active";
     const tvId = input.tvId !== undefined ? assertTvId(input.tvId) : null;
+    const masterHallId =
+      input.masterHallId !== undefined
+        ? assertMasterHallId(input.masterHallId)
+        : null;
     const productIds =
       input.productIds !== undefined ? assertProductIds(input.productIds) : [];
     const extra = assertExtra(input.extra);
     if (!input.createdBy?.trim()) {
       throw new DomainError("INVALID_INPUT", "createdBy er påkrevd.");
+    }
+    // 2026-05-08 (Tobias-feedback): master-hallen MÅ være medlem av gruppen.
+    // Sjekk pre-DB slik at vi kan returnere et meningsfullt feilbudskap før
+    // vi ramler i FK-violation. assertHallsExist (under) sjekker hall-
+    // eksistens — denne sjekken validerer kun members-invariant.
+    if (masterHallId !== null && !hallIds.includes(masterHallId)) {
+      throw new DomainError(
+        "MASTER_HALL_NOT_MEMBER",
+        "masterHallId må være med i hallIds-listen."
+      );
     }
 
     // Legacy-id: auto-generer hvis ikke oppgitt (matches legacy `GH_<timestamp>`-
@@ -377,15 +435,16 @@ export class HallGroupService {
       try {
         await client.query(
           `INSERT INTO ${this.table()}
-             (id, legacy_group_hall_id, name, status, tv_id,
+             (id, legacy_group_hall_id, name, status, tv_id, master_hall_id,
               products_json, extra_json, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)`,
           [
             id,
             legacyGroupHallId,
             name,
             status,
             tvId,
+            masterHallId,
             JSON.stringify(productIds),
             JSON.stringify(extra),
             input.createdBy,
@@ -430,6 +489,10 @@ export class HallGroupService {
     const sets: string[] = [];
     const params: unknown[] = [];
     let hallIdsToSet: string[] | null = null;
+    // 2026-05-08 (Tobias-feedback): hold masterHallId-update separat så vi
+    // kan håndheve members-invariant etter at ny medlemsskapsliste er kjent.
+    // undefined = ikke endre, null = nullstill, string = sett ny.
+    let masterHallIdUpdate: string | null | undefined = undefined;
 
     if (update.name !== undefined) {
       sets.push(`name = $${params.length + 1}`);
@@ -453,6 +516,42 @@ export class HallGroupService {
     }
     if (update.hallIds !== undefined) {
       hallIdsToSet = assertHallIds(update.hallIds);
+    }
+    if (update.masterHallId !== undefined) {
+      masterHallIdUpdate = assertMasterHallId(update.masterHallId);
+    }
+
+    // Validering: hvis master-hallen settes (ikke nullstilles), må den være
+    // medlem av POST-update medlemslisten (enten ny hallIds hvis sendt,
+    // ellers eksisterende). Tom-streng/null = nullstill — alltid OK.
+    if (masterHallIdUpdate !== undefined && masterHallIdUpdate !== null) {
+      const effectiveMembers =
+        hallIdsToSet !== null
+          ? hallIdsToSet
+          : existing.members.map((m) => m.hallId);
+      if (!effectiveMembers.includes(masterHallIdUpdate)) {
+        throw new DomainError(
+          "MASTER_HALL_NOT_MEMBER",
+          "masterHallId må være medlem av gruppen."
+        );
+      }
+    }
+
+    // 2026-05-08: hvis ny hallIds fjerner eksisterende master uten at
+    // caller eksplisitt setter ny masterHallId, nullstill master automatisk
+    // så DB-FK ikke kommer i konflikt med brukerintensjonen.
+    if (
+      masterHallIdUpdate === undefined &&
+      hallIdsToSet !== null &&
+      existing.masterHallId !== null &&
+      !hallIdsToSet.includes(existing.masterHallId)
+    ) {
+      masterHallIdUpdate = null;
+    }
+
+    if (masterHallIdUpdate !== undefined) {
+      sets.push(`master_hall_id = $${params.length + 1}`);
+      params.push(masterHallIdUpdate);
     }
 
     if (sets.length === 0 && hallIdsToSet === null) {
@@ -684,6 +783,7 @@ export class HallGroupService {
       name: row.name,
       status: row.status,
       tvId: row.tv_id === null ? null : Number(row.tv_id),
+      masterHallId: row.master_hall_id,
       productIds: parseProducts(row.products_json),
       members,
       extra: (row.extra_json ?? {}) as Record<string, unknown>,
@@ -714,6 +814,7 @@ export class HallGroupService {
           status TEXT NOT NULL DEFAULT 'active'
             CHECK (status IN ('active', 'inactive')),
           tv_id INTEGER NULL,
+          master_hall_id TEXT NULL,
           products_json JSONB NOT NULL DEFAULT '[]'::jsonb,
           extra_json JSONB NOT NULL DEFAULT '{}'::jsonb,
           created_by TEXT NULL,
@@ -721,6 +822,13 @@ export class HallGroupService {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           deleted_at TIMESTAMPTZ NULL
         )`
+      );
+      // 2026-05-08 (Tobias-feedback): idempotent ADD COLUMN for testløp som
+      // har latet tabellen være pre-creert. Migration 20261214000000
+      // håndterer prod-tilfellet; denne kallen sikrer at forTesting()-flyten
+      // har kolonnen også uten migrasjonsrunner.
+      await client.query(
+        `ALTER TABLE ${this.table()} ADD COLUMN IF NOT EXISTS master_hall_id TEXT NULL`
       );
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.membersTable()} (
