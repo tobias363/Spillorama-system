@@ -593,6 +593,7 @@ Tobias har eksplisitt valgt lazy per-task-modus: **LOAD kun når koden skrives s
 - **Master-plan pilot:** [docs/architecture/MASTER_PLAN_SPILL1_PILOT_2026-04-24.md](../architecture/MASTER_PLAN_SPILL1_PILOT_2026-04-24.md)
 - **Pilot-readiness:** docs/architecture/PILOT_READINESS_2026-05-01.md (sjekk eksistens)
 - **Architecture overview:** [docs/architecture/ARKITEKTUR.md](../architecture/ARKITEKTUR.md)
+- **Pilot-flow manuell test (2026-05-08):** [docs/operations/PILOT_FLOW_TEST_CHECKLIST_2026-05-08.md](./PILOT_FLOW_TEST_CHECKLIST_2026-05-08.md) — Tobias-checklist for end-to-end-verifisering (admin → ready → master → kunde → pot-deling). Smoke-test-script: `apps/backend/scripts/pilot-smoke-test.sh`.
 
 ---
 
