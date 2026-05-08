@@ -366,6 +366,7 @@ Redirecter til `/admin/#/tv/<hallId>/<token>` så admin-Vite-bundle rendrer (fix
 | `Game1HallReadyService` | `apps/backend/src/game/Game1HallReadyService.ts` | Per-hall ready-state |
 | `Game1LobbyService` | `apps/backend/src/game/Game1LobbyService.ts` | Lobby-state-aggregat for SPILLER-shell (R1) |
 | `GameLobbyAggregator` (Bølge 1, 2026-05-08) | `apps/backend/src/game/GameLobbyAggregator.ts` | **Kanonisk** lobby-state for MASTER/AGENT-konsoll. Erstatter dual-fetch + adapter-pattern. Eksponert via `GET /api/agent/game1/lobby`. |
+| `MasterActionService` (Bølge 2, 2026-05-08) | `apps/backend/src/game/MasterActionService.ts` | **Kanonisk** sekvenseringsmotor for master-actions. ENESTE sted som vet om plan-run-id ↔ scheduled-game-id. Eksponert via `POST /api/agent/game1/master/{action}`. |
 | `Spill1LobbyBroadcaster` | `apps/backend/src/game/Spill1LobbyBroadcaster.ts` | Fan-out til lobby-rom (R1) |
 | `Game1ScheduleTickService` | `apps/backend/src/game/Game1ScheduleTickService.ts` | Auto-flip scheduled→purchase_open→running |
 | `GamePlanEngineBridge` | `apps/backend/src/game/GamePlanEngineBridge.ts` | Spawner scheduled-games fra plan-runtime |
@@ -398,6 +399,51 @@ skapte dual-fetch og ID-krangel-bugen som er dokumentert i
 - Aggregator throw KUN ved infrastruktur-feil (`LOBBY_AGGREGATOR_INFRA_ERROR` → 5xx). Alle "data ser rar ut"-scenarioer flagges som warnings, aldri throw.
 
 **Bakover-kompatibilitet:** Eksisterende endpoints (`/current-game`, `/game-plan/current`, `/admin/game1/games/:id/...`) er IKKE påvirket. UI bytter til ny endpoint i Bølge 3 etter at Bølge 2 (MasterActionService) er på plass.
+
+### 4.2 MasterActionService (Bølge 2) — kanonisk sekvenseringsmotor
+
+Service-en er **ENESTE** sted som vet om både plan-run-id og scheduled-
+game-id, og driver master-actions ende-til-ende. Erstatter den
+fragmenterte sekvenseringen i `apps/admin-web/src/api/agent-master-actions.ts`
+og `apps/backend/src/routes/agentGamePlan.ts:443-616` der plan-mutering og
+bridge-spawn skjedde uten engine-trigger.
+
+**Bølge 2 fundament:**
+- **Service:** `MasterActionService` i `apps/backend/src/game/MasterActionService.ts` med public methods `start`, `advance`, `pause`, `resume`, `stop`, `setJackpot`
+- **Routes:** 6 nye POST-endpoints under `/api/agent/game1/master/*` i `apps/backend/src/routes/agentGame1Master.ts`
+- **Pre-validering:** Hver write-action kaller `GameLobbyAggregator.getLobbyState` først for RBAC + blocking-warning-sjekk (BRIDGE_FAILED, DUAL_SCHEDULED_GAMES)
+- **Audit:** Hver vellykket action skriver `spill1.master.{start, advance, pause, resume, stop, jackpot_set, finish}` via `AuditLogService.record` med actorId, hallId, planRunId, scheduledGameId
+- **Best-effort lobby-broadcast:** Trigger `Spill1LobbyBroadcaster.broadcastForHall(hallId)` etter hver action
+- **Tester:** 33 unit-tester (`apps/backend/src/game/__tests__/MasterActionService.test.ts`) + 2 integration-tester med InMemoryAuditLogStore + 1 skip-graceful Postgres-test (`apps/backend/src/__tests__/MasterActionService.integration.test.ts`)
+
+**Sekvensering per action:**
+
+| Action | Plan-runtime | Bridge | Engine | Audit |
+|---|---|---|---|---|
+| `start` | getOrCreateForToday + start (idle→running) | createScheduledGameForPlanRunPosition | startGame | spill1.master.start |
+| `advance` | advanceToNext (position++) | createScheduledGameForPlanRunPosition (ny posisjon) | startGame | spill1.master.advance / spill1.master.finish |
+| `pause` | best-effort pause | — | pauseGame | spill1.master.pause |
+| `resume` | best-effort resume | — | resumeGame | spill1.master.resume |
+| `stop` | finish | — | stopGame | spill1.master.stop |
+| `setJackpot` | setJackpotOverride | — | — | spill1.master.jackpot_set |
+
+**Stabile error-koder:**
+- `FORBIDDEN` — caller er ikke master-agent
+- `LOBBY_INCONSISTENT` — aggregator har flagget BRIDGE_FAILED/DUAL_SCHEDULED_GAMES
+- `NO_ACTIVE_GAME` — pause/resume/stop uten aktiv scheduled-game
+- `JACKPOT_SETUP_REQUIRED` — advance til posisjon som krever jackpot-popup
+- `PLAN_RUN_FINISHED` — start på ferdig run
+- `ENGINE_FAILED` — generic engine-feil med original-error i details
+- `BRIDGE_FAILED` — generic bridge-feil med original-error i details
+- Forventede DomainErrors fra plan-service og bridge propageres uendret (`NO_MATCHING_PLAN`, `HALL_NOT_IN_GROUP`, `MASTER_NOT_IN_GROUP`, `NO_ACTIVE_HALLS_IN_GROUP`)
+
+**Kontrakt for Bølge 3 (UI-bytte):**
+- Klient kaller `/api/agent/game1/master/{action}` med `{ hallId? }` body (eller default til user.hallId)
+- Respons-shape `MasterActionResult` med `scheduledGameId`, `planRunId`, `status`, `scheduledGameStatus`, `inconsistencyWarnings`
+- Klient skal IKKE kalle `/api/agent/game-plan/*` eller `/api/admin/game1/games/:id/*` direkte for master-actions
+- `agent-game-plan-adapter.ts` og `agent-master-actions.ts` (frontend) skal slettes i Bølge 3
+
+**Bakover-kompatibilitet:** Eksisterende `/api/agent/game-plan/*` og `/api/admin/game1/games/:gameId/*` endpoints er IKKE påvirket — de fortsetter å fungere mens UI gjør gradvis migrering i Bølge 3.
 
 ---
 
