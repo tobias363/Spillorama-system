@@ -26,8 +26,19 @@ import type {
   WalletLossStateEvent,
   G2JackpotListUpdatePayload,
 } from "@spillorama/shared-types/socket-events";
+import type { Spill1LobbyState } from "@spillorama/shared-types/api";
 import type { RoomSnapshot } from "@spillorama/shared-types/game";
 import { SocketEvents } from "@spillorama/shared-types/socket-events";
+
+/**
+ * R1 (BIN-822, 2026-05-08): Spill 1 lobby-state-update push payload.
+ * Server emit-er denne på Socket.IO-rommet `spill1:lobby:{hallId}` etter
+ * master-handlinger (start/advance/pause/resume/stop).
+ */
+export interface Spill1LobbyStateUpdatePayload {
+  hallId: string;
+  state: Spill1LobbyState;
+}
 
 // ── Connection state ────────────────────────────────────────────────────────
 
@@ -104,6 +115,13 @@ export interface SpilloramaSocketListeners {
    * `PlayScreen.updateJackpot()`.
    */
   g2JackpotListUpdate: (payload: G2JackpotListUpdatePayload) => void;
+  /**
+   * R1 (BIN-822, 2026-05-08): Spill 1 lobby-state-update push. Server
+   * emit-er denne på `spill1:lobby:{hallId}`-rommet etter master-handlinger
+   * (start/advance/pause/resume/stop) så klient bytter mellom lobby-modus
+   * og runde-modus uten å vente på 10s-poll-tick.
+   */
+  spill1LobbyStateUpdate: (payload: Spill1LobbyStateUpdatePayload) => void;
   connectionStateChanged: ConnectionListener;
 }
 
@@ -169,6 +187,7 @@ export class SpilloramaSocket {
     betRejected: new Set(),
     walletLossState: new Set(),
     g2JackpotListUpdate: new Set(),
+    spill1LobbyStateUpdate: new Set(),
     connectionStateChanged: new Set(),
   };
 
@@ -207,6 +226,7 @@ export class SpilloramaSocket {
     betRejected: [],
     walletLossState: [],
     g2JackpotListUpdate: [],
+    spill1LobbyStateUpdate: [],
     connectionStateChanged: [],
   };
 
@@ -452,6 +472,16 @@ export class SpilloramaSocket {
     this.socket.on(SocketEvents.WALLET_LOSS_STATE, (payload: WalletLossStateEvent) => {
       this.dispatchOrBuffer("walletLossState", payload);
     });
+
+    // R1 (BIN-822, 2026-05-08): Spill 1 lobby-state-update push fra
+    // server. Emit-es på `spill1:lobby:{hallId}`-rom etter master-handlinger
+    // (start/advance/pause/resume/stop). Klient bruker dette til å bytte
+    // mellom lobby-modus og runde-modus uten å vente på 10s-poll-tick.
+    // Event-navn er literal — ikke i SocketEvents-enum siden lobby er
+    // en separat funksjonalitet på toppen av room-protokollen.
+    this.socket.on("lobby:state-update", (payload: Spill1LobbyStateUpdatePayload) => {
+      this.dispatchOrBuffer("spill1LobbyStateUpdate", payload);
+    });
   }
 
   disconnect(): void {
@@ -539,6 +569,33 @@ export class SpilloramaSocket {
 
   async createRoom(payload: Omit<RoomCreatePayload, "accessToken">): Promise<AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>> {
     return this.emit(SocketEvents.ROOM_CREATE, payload);
+  }
+
+  /**
+   * R1 (BIN-822, 2026-05-08): subscribe til hall-spesifikt Spill 1 lobby-rom.
+   *
+   * Server returnerer current snapshot på subscribe-ack så klient slipper
+   * separat HTTP-fetch (sparer en round-trip). Etter subscribe mottar klient
+   * `lobby:state-update`-broadcasts via `onSpill1LobbyStateUpdate(handler)`.
+   *
+   * Lobby-rom er public (no-auth) så denne kan kalles før spilleren er
+   * autentisert. accessToken sendes likevel fra emit() for konsistens —
+   * server ignorerer det for lobby-events.
+   */
+  async subscribeSpill1Lobby(
+    hallId: string,
+  ): Promise<AckResponse<{ state: Spill1LobbyState | null }>> {
+    return this.emit("spill1:lobby:subscribe", { hallId });
+  }
+
+  /**
+   * R1 (BIN-822, 2026-05-08): unsubscribe fra hall-spesifikt lobby-rom.
+   * Klient bør kalle denne ved hall-bytte og før destroy().
+   */
+  async unsubscribeSpill1Lobby(
+    hallId: string,
+  ): Promise<AckResponse<{ unsubscribed: true }>> {
+    return this.emit("spill1:lobby:unsubscribe", { hallId });
   }
 
   async joinRoom(payload: Omit<RoomJoinPayload, "accessToken">): Promise<AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>> {
