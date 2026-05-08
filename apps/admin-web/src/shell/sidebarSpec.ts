@@ -3,11 +3,11 @@ import type { FeatureFlag } from "../utils/featureFlags.js";
 
 /**
  * Optional feature-flag gate. The leaf/group is visible only when the
- * named flag's runtime value matches `expectedValue`. Used by the
- * spilleplan-redesign cleanup (2026-05-07) to hide legacy game-admin
- * entries when `useNewGamePlan=true` (and to hide the new entries when
- * the flag is off). The route stays registered either way — the gate
- * only affects the sidebar.
+ * named flag's runtime value matches `expectedValue`. The route stays
+ * registered either way — the gate only affects the sidebar.
+ *
+ * Status 2026-05-08: ingen aktive sidebar-flagger. Beholder typedefen
+ * som infrastruktur for fremtidige bruk.
  */
 export interface SidebarFeatureFlagGate {
   name: FeatureFlag;
@@ -104,32 +104,16 @@ export const adminSidebar: SidebarNode[] = [
     ],
   },
 
-  // 4. Tidsplanadministrasjon — legacy. Skjules når `useNewGamePlan=true`.
-  // Cleanup 2026-05-07: routes blir værende registrert (via router/routes.ts)
-  // så bookmarks fortsatt fungerer; sidebar-oppføringen forsvinner kun.
-  { kind: "leaf", id: "schedules", path: "/schedules", icon: "fa fa-calendar", labelKey: "schedule_management", module: "Schedule Management",
-    featureFlag: { name: "useNewGamePlan", expectedValue: false } },
-
-  // 5. Opprettelse av spill — legacy.
-  { kind: "leaf", id: "gameManagement", path: "/gameManagement", icon: "fa fa-plus-square", labelKey: "game_creation_management", module: "Game Creation Management",
-    featureFlag: { name: "useNewGamePlan", expectedValue: false } },
-
-  // 6. Lagret spillliste — legacy.
-  { kind: "leaf", id: "savedGameList", path: "/savedGameList", icon: "fa fa-list", labelKey: "saved_game_list", module: "Saved Game List",
-    featureFlag: { name: "useNewGamePlan", expectedValue: false } },
-
-  // Fase 2 (2026-05-07): spilleplan-redesign — ny katalog + plan-builder.
-  // Plassert under "saved game list" så de fanges i samme mentale gruppe
-  // ("hva spilles, og når"). Synlig når `useNewGamePlan=true` er på, slik
-  // at vi viser én flyt om gangen i sidebaren. Default flag=false → gruppen
-  // er skjult og legacy-flyt fortsetter.
+  // 4. Spilladministrasjon — ny katalog + plan-builder. Erstatter legacy
+  // Tidsplanadministrasjon, Opprettelse av spill og Lagret spillliste som
+  // ble fjernet 2026-05-08 (cleanup av `useNewGamePlan`-flagget — ny flyt
+  // er nå standard).
   {
     kind: "group",
     id: "spilleplan-redesign",
     icon: "fa fa-puzzle-piece",
     labelKey: "game_management",
     module: "Game Catalog",
-    featureFlag: { name: "useNewGamePlan", expectedValue: true },
     children: [
       { kind: "leaf", id: "game-catalog", path: "/games/catalog", icon: "fa fa-circle-o", labelKey: "game_catalog_title", module: "Game Catalog" },
       { kind: "leaf", id: "game-plans", path: "/games/plans", icon: "fa fa-circle-o", labelKey: "game_plans_title", module: "Game Plans" },
@@ -392,27 +376,10 @@ export const agentSidebar: SidebarNode[] = [
     labelKey: "agent_game_management",
     children: [
       { kind: "leaf", id: "agent-games-overview", path: "/agent/games", icon: "fa fa-circle-o", labelKey: "agent_games_overview" },
-      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 2):
-      // Schedule Management er AGENT-tilgjengelig (`SCHEDULE_READ/WRITE` har
-      // AGENT i AdminAccessPolicy). Eksponer leaf slik at bingoverten kan
-      // åpne dagens plan uten å kjenne URL-en. (PR #823 audit, gap #2.)
-      // Cleanup 2026-05-07: skjult når `useNewGamePlan=true` (ny flyt eier
-      // schedule-/spilleplan-administrasjon). Routen er fortsatt registrert.
-      { kind: "leaf", id: "agent-schedules", path: "/schedules", icon: "fa fa-circle-o", labelKey: "schedule_management",
-        featureFlag: { name: "useNewGamePlan", expectedValue: false } },
-      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 3) +
-      // legacy AGENT-sidebar "Opprettelse av spill":
-      // GameManagementPage gir Game Creation Management. Backend: AGENT har
-      // `GAME_MGMT_READ/WRITE`. HALL_OPERATOR-scope filtrerer per egen hall.
-      // (PR #823 audit, gap #3.)
-      { kind: "leaf", id: "agent-game-creation", path: "/gameManagement", icon: "fa fa-plus-square", labelKey: "game_creation_management",
-        featureFlag: { name: "useNewGamePlan", expectedValue: false } },
-      // Wireframe Role Management-matrise (PDF 8 §8.3 rad 4):
-      // Saved Game List er AGENT-tilgjengelig (`SAVED_GAME_READ/WRITE` har
-      // AGENT). Master-hall-agenter har default-access per legacy-spec.
-      // (PR #823 audit, gap #4.)
-      { kind: "leaf", id: "agent-saved-game-list", path: "/savedGameList", icon: "fa fa-circle-o", labelKey: "saved_game_list",
-        featureFlag: { name: "useNewGamePlan", expectedValue: false } },
+      // Cleanup 2026-05-08: legacy schedule/gameManagement/savedGameList-leaves
+      // ble fjernet sammen med `useNewGamePlan`-flagget. Ny spilleplan-flyt
+      // (`/games/catalog` + `/games/plans`) er nå standard og admin-eid;
+      // agenter eksponeres ikke for plan-administrasjon i sidebar.
     ],
   },
   {

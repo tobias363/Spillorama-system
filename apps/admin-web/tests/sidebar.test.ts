@@ -93,19 +93,17 @@ describe("Sidebar spec", () => {
     }
   });
 
-  it("agent sidebar exposes Schedule Management + Saved Game List under game-management (PR #823 audit gaps #2/#4)", () => {
+  it("agent sidebar — game-management-gruppen er ren etter cleanup 2026-05-08 (Schedule + SavedGameList legacy-leaves fjernet)", () => {
+    // Cleanup 2026-05-08: legacy schedule/savedGameList/gameManagement-leaves
+    // ble fjernet sammen med `useNewGamePlan`-flagget. Ny spilleplan-flyt er
+    // admin-eid; agenter eksponeres ikke for plan-administrasjon i sidebar.
     const games = agentSidebar.find((n) => n.kind === "group" && n.id === "agent-game-management");
     expect(games).toBeDefined();
     if (games && games.kind === "group") {
-      const schedules = games.children.find((c) => c.id === "agent-schedules");
-      expect(schedules).toBeDefined();
-      expect(schedules?.path).toBe("/schedules");
-      expect(schedules?.labelKey).toBe("schedule_management");
-
-      const savedGames = games.children.find((c) => c.id === "agent-saved-game-list");
-      expect(savedGames).toBeDefined();
-      expect(savedGames?.path).toBe("/savedGameList");
-      expect(savedGames?.labelKey).toBe("saved_game_list");
+      const ids = games.children.map((c) => c.id);
+      expect(ids).not.toContain("agent-schedules");
+      expect(ids).not.toContain("agent-saved-game-list");
+      expect(ids).not.toContain("agent-game-creation");
     }
   });
 

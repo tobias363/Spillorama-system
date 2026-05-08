@@ -27,14 +27,9 @@
  *
  * Bruk:
  *   ```ts
- *   if (isFeatureEnabled("useNewGamePlan")) {
- *     const planResp = await fetchAgentGamePlanCurrent();
- *     const adapted = adaptGamePlanToLegacyShape(planResp);
- *     // … render UI som vanlig …
- *   } else {
- *     const legacy = await fetchAgentGame1CurrentGame();
- *     // … samme render …
- *   }
+ *   const planResp = await fetchAgentGamePlanCurrent();
+ *   const adapted = adaptGamePlanToLegacyShape(planResp);
+ *   // … render UI som vanlig …
  *   ```
  *
  * Begrensninger / gaps (deferred til Fase 3.5):

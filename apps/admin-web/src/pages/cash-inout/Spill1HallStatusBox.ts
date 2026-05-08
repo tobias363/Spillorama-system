@@ -17,7 +17,6 @@
  */
 
 import {
-  fetchAgentGame1CurrentGame,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
@@ -32,7 +31,6 @@ import {
   startSpill1MasterAction,
   resumeSpill1MasterAction,
 } from "../../api/agent-master-actions.js";
-import { isFeatureEnabled } from "../../utils/featureFlags.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
 import { escapeHtml } from "./shared.js";
@@ -108,18 +106,11 @@ export function mountSpill1HallStatusBox(
 
   async function refresh(): Promise<void> {
     try {
-      // Fase 3 (2026-05-07): feature-flag-aware data-source. Når
-      // `useNewGamePlan=true` (kun aktivert via localStorage av Tobias/QA),
-      // hent fra plan-runtime-API og adapt til legacy-shape så all
-      // rendering nedenfor er uendret. Default behavior (false) er
-      // fortsatt legacy `/api/agent/game1/current-game`.
-      let res: Spill1CurrentGameResponse;
-      if (isFeatureEnabled("useNewGamePlan")) {
-        const planResp = await fetchAgentGamePlanCurrent({ signal });
-        res = adaptGamePlanToLegacyShape(planResp);
-      } else {
-        res = await fetchAgentGame1CurrentGame({ signal });
-      }
+      // Cleanup 2026-05-08: ny plan-runtime er nå standard data-source.
+      // Adapter mapper plan-respons til legacy-shape så all rendering
+      // nedenfor er uendret.
+      const planResp = await fetchAgentGamePlanCurrent({ signal });
+      const res: Spill1CurrentGameResponse = adaptGamePlanToLegacyShape(planResp);
       if (aborted) return;
       state.loaded = true;
       state.data = res;
@@ -181,9 +172,8 @@ export function mountSpill1HallStatusBox(
           // er klare. Hvis ikke alle er klare, vis bekreftelse + send
           // confirmUnreadyHalls (REQ-007 backend-override).
           //
-          // Fase 4 (2026-05-07): `startSpill1MasterAction` er feature-flag-
-          // aware — kaller plan-API + engine-API når `useNewGamePlan=true`,
-          // ellers ren legacy-flyt. UI er identisk uansett.
+          // `startSpill1MasterAction` kaller plan-API først (state-overgang
+          // i plan-runtime) og deretter engine-API for faktisk trekning.
           const unreadyHalls = data.halls.filter(
             (h) => !h.isReady && !h.excludedFromGame,
           );
@@ -206,9 +196,8 @@ export function mountSpill1HallStatusBox(
           break;
         }
         case "resume":
-          // Fase 4: resume går via plan-API først (state-overgang i plan)
-          // og deretter legacy-API for å resume engine. Når feature-flag
-          // er av, kun legacy.
+          // Resume går via plan-API først (state-overgang i plan) og
+          // deretter engine-API for å resume trekningen.
           await resumeSpill1MasterAction();
           Toast.success("Spill 1 gjenopptatt.");
           break;
