@@ -39,6 +39,8 @@ const PERCENTAGE_CONFIG: Spill3Config = {
   prizeFullHousePct: 30,
   ticketPriceCents: 500,
   pauseBetweenRowsMs: 3000,
+  openingTimeStart: "11:00",
+  openingTimeEnd: "23:00",
   active: true,
   createdAt: "2026-05-08T00:00:00Z",
   updatedAt: "2026-05-08T00:00:00Z",

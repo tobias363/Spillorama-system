@@ -117,6 +117,10 @@ export const adminSidebar: SidebarNode[] = [
     children: [
       { kind: "leaf", id: "game-catalog", path: "/games/catalog", icon: "fa fa-circle-o", labelKey: "game_catalog_title", module: "Game Catalog" },
       { kind: "leaf", id: "game-plans", path: "/games/plans", icon: "fa fa-circle-o", labelKey: "game_plans_title", module: "Game Plans" },
+      // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) global konfig.
+      // ETT globalt rom for alle haller — admin-konfigurerbart vindu, bongpris,
+      // pause og premie-modus.
+      { kind: "leaf", id: "spill3-config", path: "/games/spill3-config", icon: "fa fa-circle-o", labelKey: "spill3_config_title", roles: ["admin", "super-admin"] },
       { kind: "leaf", id: "groupHall", path: "/groupHall", icon: "fa fa-circle-o", labelKey: "group_of_halls_management", roles: ["admin", "super-admin"] },
     ],
   },

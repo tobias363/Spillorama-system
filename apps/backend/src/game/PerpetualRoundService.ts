@@ -204,6 +204,22 @@ export interface PerpetualRoundServiceConfig {
   /** Etter at startGame har returnert, broadcast room-state. Optional fail-soft. */
   emitRoomUpdate?: (roomCode: string) => Promise<void>;
   /**
+   * Tobias-direktiv 2026-05-08: opening-window-guard for Spill 3.
+   * Kalles før `engine.startGame` fyres. Hvis returnerer `false` skipper
+   * vi spawn (loop fortsetter, men ingen ny runde til vinduet åpnes).
+   *
+   * Brukes for `monsterbingo` for å håndheve daglig åpningstid (HH:MM-
+   * vindu fra Spill3Config). Ved feil/exception → fail-open (spawn
+   * tillates) for å unngå at en buggy config-hook stopper hele rommet.
+   *
+   * Returnerer `null` for å si "vet ikke" (no-config) — caller velger
+   * default. Vi kjører fail-open: undefined eller null → spawn OK.
+   */
+  canSpawnRound?: (input: {
+    roomCode: string;
+    gameSlug: string;
+  }) => Promise<boolean | null | undefined>;
+  /**
    * Test-injection: bruk en custom timer-impl. Brukes av Vitest-tester slik
    * at vi ikke trenger fake-timers + setTimeout race conditions.
    *
@@ -256,11 +272,12 @@ export const NATURAL_END_REASONS: ReadonlySet<string> = new Set([
  * trigget bet:arm + game:start).
  */
 export class PerpetualRoundService {
-  private readonly config: Required<Omit<PerpetualRoundServiceConfig, "emitRoomUpdate" | "setTimeoutFn" | "clearTimeoutFn" | "armedLookup">> & {
+  private readonly config: Required<Omit<PerpetualRoundServiceConfig, "emitRoomUpdate" | "setTimeoutFn" | "clearTimeoutFn" | "armedLookup" | "canSpawnRound">> & {
     emitRoomUpdate?: PerpetualRoundServiceConfig["emitRoomUpdate"];
     setTimeoutFn: NonNullable<PerpetualRoundServiceConfig["setTimeoutFn"]>;
     clearTimeoutFn: NonNullable<PerpetualRoundServiceConfig["clearTimeoutFn"]>;
     armedLookup?: ArmedPlayerLookup;
+    canSpawnRound?: PerpetualRoundServiceConfig["canSpawnRound"];
   };
 
   /**
@@ -323,6 +340,7 @@ export class PerpetualRoundService {
       defaultEntryFee: config.defaultEntryFee,
       ...(config.emitRoomUpdate ? { emitRoomUpdate: config.emitRoomUpdate } : {}),
       ...(config.armedLookup ? { armedLookup: config.armedLookup } : {}),
+      ...(config.canSpawnRound ? { canSpawnRound: config.canSpawnRound } : {}),
       setTimeoutFn: config.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms)),
       clearTimeoutFn: config.clearTimeoutFn ?? ((h) => clearTimeout(h)),
     };
@@ -739,6 +757,38 @@ export class PerpetualRoundService {
       return;
     }
 
+    // Tobias-direktiv 2026-05-08: opening-window-guard. For Spill 3
+    // sjekker dette mot daglig HH:MM-vindu (Europe/Oslo). Utenfor vinduet
+    // skipper vi spawn — neste spiller-event eller scheduled tick vil
+    // re-trigge ved neste handleGameEnded-cycle.
+    if (this.config.canSpawnRound) {
+      try {
+        const allowed = await this.config.canSpawnRound({
+          roomCode,
+          gameSlug: snapshot.gameSlug ?? "",
+        });
+        if (allowed === false) {
+          logger.info(
+            {
+              roomCode,
+              prevGameId,
+              slug: snapshot.gameSlug,
+              reason: "outside_opening_window",
+            },
+            "perpetual: skip restart (canSpawnRound returned false)",
+          );
+          return;
+        }
+      } catch (err) {
+        // Fail-open: hvis hooken kaster, fortsett å spawne. En crash i
+        // config-fetch skal ikke stoppe runder for haller som er åpne.
+        logger.warn(
+          { roomCode, prevGameId, err },
+          "perpetual: canSpawnRound threw — fail-open (spawn allowed)",
+        );
+      }
+    }
+
     const variantInfo = this.config.variantLookup.getVariantConfig(roomCode);
     // 2026-05-04 (Tobias bug-fix): bruk slug-aware default entry fee.
     // For Spill 2 (rocket) og Spill 3 (monsterbingo) → 10 kr/brett. For
@@ -957,6 +1007,31 @@ export class PerpetualRoundService {
         "perpetual: skip first-round spawn (no players — unexpected at join-time)",
       );
       return false;
+    }
+
+    // Tobias-direktiv 2026-05-08: opening-window-guard. Hvis Spill 3 er
+    // utenfor åpningstid skal første runde ikke spawnes selv om en
+    // spiller joiner. Spilleren ser bingobordet, men ingen runde starter
+    // før vinduet åpner.
+    if (this.config.canSpawnRound) {
+      try {
+        const allowed = await this.config.canSpawnRound({
+          roomCode,
+          gameSlug: slug,
+        });
+        if (allowed === false) {
+          logger.info(
+            { roomCode, slug, reason: "outside_opening_window" },
+            "perpetual: skip first-round spawn (canSpawnRound returned false)",
+          );
+          return false;
+        }
+      } catch (err) {
+        logger.warn(
+          { roomCode, slug, err },
+          "perpetual: canSpawnRound threw on first-round — fail-open (spawn allowed)",
+        );
+      }
     }
 
     // Debug-bug 2026-05-03: signal at vi har bestått alle skip-checks og

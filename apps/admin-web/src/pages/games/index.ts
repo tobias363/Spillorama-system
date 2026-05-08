@@ -44,6 +44,8 @@ import {
   renderGamePlanNewPage,
   renderGamePlanEditPage,
 } from "./plans/GamePlanEditorPage.js";
+// Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) admin-config.
+import { renderSpill3ConfigPage } from "./spill3Config/Spill3ConfigPage.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
 
 /** Static routes that resolve via routes.ts directly (no params). */
@@ -68,6 +70,8 @@ const STATIC_GAMES_ROUTES = new Set<string>([
   "/games/catalog/new",
   "/games/plans",
   "/games/plans/new",
+  // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) admin-config.
+  "/games/spill3-config",
 ]);
 
 /**
@@ -173,6 +177,9 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
       return;
     case "/games/plans/new":
       void renderGamePlanNewPage(container);
+      return;
+    case "/games/spill3-config":
+      void renderSpill3ConfigPage(container);
       return;
   }
 

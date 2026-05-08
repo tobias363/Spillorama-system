@@ -2695,6 +2695,28 @@ const perpetualRoundService = new PerpetualRoundService({
   emitRoomUpdate: async (roomCode) => {
     await emitRoomUpdate(roomCode);
   },
+  // Tobias-direktiv 2026-05-08: opening-window-guard for Spill 3.
+  // Ikke-monsterbingo-rom returnerer null (ingen guard) så de spawner
+  // som før. Monsterbingo henter Spill3Config og sjekker om current
+  // Oslo-tid er innenfor [openingTimeStart, openingTimeEnd).
+  canSpawnRound: async ({ gameSlug }) => {
+    const isSpill3 =
+      gameSlug === "monsterbingo" ||
+      gameSlug === "mønsterbingo" ||
+      gameSlug === "game_3";
+    if (!isSpill3) return null;
+    try {
+      const config = await spill3ConfigService.getActive();
+      const { isWithinOpeningWindow } = await import(
+        "./game/Spill3ConfigService.js"
+      );
+      return isWithinOpeningWindow(config);
+    } catch {
+      // Fail-open: hvis vi ikke får config, la PerpetualRoundService
+      // spawne (logges også separat i service-laget).
+      return null;
+    }
+  },
 });
 // Tobias 2026-05-04: late-bind for game2AutoDrawTickService.onStaleRoomEnded
 // (definert lenger oppe i fila, før perpetualRoundService finnes). Når tick-en

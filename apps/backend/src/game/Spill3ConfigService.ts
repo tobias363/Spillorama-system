@@ -50,6 +50,16 @@ export const PAUSE_BETWEEN_ROWS_MS_MAX = 60_000;
 export const TICKET_PRICE_CENTS_MIN = 1;
 export const TICKET_PRICE_CENTS_MAX = 100_000;
 
+/**
+ * Default-vindu hvis admin har slettet verdiene (skal ikke skje, men
+ * defensiv fallback). Migration seeder 11:00 / 23:00.
+ */
+export const DEFAULT_OPENING_TIME_START = "11:00";
+export const DEFAULT_OPENING_TIME_END = "23:00";
+
+/** Strict HH:MM 24t-regex (00:00-23:59). */
+const HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 export interface Spill3Config {
   id: string;
   minTicketsToStart: number;
@@ -66,6 +76,12 @@ export interface Spill3Config {
   prizeFullHousePct: number | null;
   ticketPriceCents: number;
   pauseBetweenRowsMs: number;
+  /**
+   * HH:MM (24t) — daglig vindu hvor nye runder kan spawnes.
+   * Engine/bridge skal sjekke disse før round-start.
+   */
+  openingTimeStart: string;
+  openingTimeEnd: string;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -92,6 +108,8 @@ export interface UpdateSpill3ConfigInput {
   prizeFullHousePct?: number | null;
   ticketPriceCents?: number;
   pauseBetweenRowsMs?: number;
+  openingTimeStart?: string;
+  openingTimeEnd?: string;
   /** Audit-log-actor. Skrives til `updated_by_user_id` og audit-event. */
   updatedByUserId: string;
 }
@@ -143,6 +161,32 @@ function assertNullablePct(value: unknown, field: string): number | null {
   }
   // Rund av til 2 desimaler for å matche NUMERIC(5,2) i DB.
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Validerer HH:MM (24t) format. Returnerer normalisert string ved suksess.
+ * Engine/bridge bruker denne for å parse vindu før round-start.
+ */
+function assertHHMM(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new DomainError("INVALID_INPUT", `${field} må være en streng (HH:MM).`);
+  }
+  const v = value.trim();
+  if (!HHMM_REGEX.test(v)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} må være på formatet HH:MM (24t, eks. "11:00", "23:30").`,
+    );
+  }
+  return v;
+}
+
+/**
+ * Sammenlign to HH:MM-strenger leksikografisk — gyldig for 24t-format
+ * (zero-padded). Returnerer < 0 hvis a < b, 0 hvis lik, > 0 hvis a > b.
+ */
+function compareHHMM(a: string, b: string): number {
+  return a.localeCompare(b);
 }
 
 function assertPrizeMode(value: unknown): Spill3PrizeMode {
@@ -209,6 +253,59 @@ export function assertConfigConsistency(config: Spill3Config): void {
       );
     }
   }
+
+  // Opening-time-vindu: start må være < end (samme dag, ingen midnatt-
+  // wraparound). Begge må være gyldige HH:MM-strenger.
+  if (!HHMM_REGEX.test(config.openingTimeStart)) {
+    throw new DomainError(
+      "INVALID_CONFIG",
+      `openingTimeStart må være HH:MM (fikk "${config.openingTimeStart}").`,
+    );
+  }
+  if (!HHMM_REGEX.test(config.openingTimeEnd)) {
+    throw new DomainError(
+      "INVALID_CONFIG",
+      `openingTimeEnd må være HH:MM (fikk "${config.openingTimeEnd}").`,
+    );
+  }
+  if (compareHHMM(config.openingTimeStart, config.openingTimeEnd) >= 0) {
+    throw new DomainError(
+      "INVALID_CONFIG",
+      `openingTimeStart (${config.openingTimeStart}) må være før openingTimeEnd (${config.openingTimeEnd}).`,
+    );
+  }
+}
+
+/**
+ * Sjekker om en gitt UTC-tidspunkt faller innenfor det daglige
+ * åpningsvinduet i Europe/Oslo-tidssone. Engine/bridge bruker dette
+ * før round-start: hvis returnerer false skal ingen ny runde spawnes.
+ *
+ * Vinduet tolkes som en daglig HH:MM-tidsperiode i lokal tid (Oslo).
+ * Eksempel: 11:00 → 23:00 betyr at runder kan starte mellom 11:00 og
+ * 23:00 hver dag (uavhengig av dato).
+ */
+export function isWithinOpeningWindow(
+  config: Pick<Spill3Config, "openingTimeStart" | "openingTimeEnd">,
+  now: Date = new Date(),
+): boolean {
+  // Bruk Intl.DateTimeFormat for korrekt Oslo-lokaltid uavhengig av
+  // server-zonen (Render kjører UTC). Format returnerer "HH:MM" (24t).
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Oslo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const hh = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const mm = parts.find((p) => p.type === "minute")?.value ?? "00";
+  // Edge case: Intl returnerer "24:00" for midnatt på noen Node-versjoner.
+  const nowHHMM = hh === "24" ? "00:00" : `${hh}:${mm}`;
+  return (
+    compareHHMM(nowHHMM, config.openingTimeStart) >= 0 &&
+    compareHHMM(nowHHMM, config.openingTimeEnd) < 0
+  );
 }
 
 // ── Row-mapping ───────────────────────────────────────────────────────────
@@ -229,6 +326,12 @@ interface Spill3ConfigRow {
   prize_full_house_pct: string | number | null;
   ticket_price_cents: number;
   pause_between_rows_ms: number;
+  /**
+   * NULL-able mens migrasjonen ennå ikke har kjørt på legacy-rader,
+   * men service-laget faller tilbake til DEFAULT_OPENING_TIME_*.
+   */
+  opening_time_start: string | null;
+  opening_time_end: string | null;
   active: boolean;
   created_at: Date | string;
   updated_at: Date | string;
@@ -262,6 +365,8 @@ function mapRow(row: Spill3ConfigRow): Spill3Config {
     prizeFullHousePct: pgNumericToNumber(row.prize_full_house_pct),
     ticketPriceCents: row.ticket_price_cents,
     pauseBetweenRowsMs: row.pause_between_rows_ms,
+    openingTimeStart: row.opening_time_start ?? DEFAULT_OPENING_TIME_START,
+    openingTimeEnd: row.opening_time_end ?? DEFAULT_OPENING_TIME_END,
     active: row.active,
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
@@ -446,6 +551,12 @@ export class Spill3ConfigService {
         PAUSE_BETWEEN_ROWS_MS_MAX,
       );
     }
+    if (input.openingTimeStart !== undefined) {
+      partialUpdate.openingTimeStart = assertHHMM(input.openingTimeStart, "openingTimeStart");
+    }
+    if (input.openingTimeEnd !== undefined) {
+      partialUpdate.openingTimeEnd = assertHHMM(input.openingTimeEnd, "openingTimeEnd");
+    }
 
     // Merge partial inn i eksisterende, valider total-konsistens.
     const merged: Spill3Config = { ...before, ...partialUpdate };
@@ -468,8 +579,10 @@ export class Spill3ConfigService {
            prize_full_house_pct = $13,
            ticket_price_cents = $14,
            pause_between_rows_ms = $15,
+           opening_time_start = $16,
+           opening_time_end = $17,
            updated_at = now(),
-           updated_by_user_id = $16
+           updated_by_user_id = $18
        WHERE id = $1`,
       [
         before.id,
@@ -487,6 +600,8 @@ export class Spill3ConfigService {
         merged.prizeFullHousePct,
         merged.ticketPriceCents,
         merged.pauseBetweenRowsMs,
+        merged.openingTimeStart,
+        merged.openingTimeEnd,
         input.updatedByUserId,
       ],
     );
@@ -540,6 +655,7 @@ export class Spill3ConfigService {
               prize_rad1_pct, prize_rad2_pct, prize_rad3_pct,
               prize_rad4_pct, prize_full_house_pct,
               ticket_price_cents, pause_between_rows_ms,
+              opening_time_start, opening_time_end,
               active, created_at, updated_at, updated_by_user_id
          FROM ${this.schema}.app_spill3_config
         WHERE active = TRUE
@@ -570,6 +686,8 @@ function serializeForAudit(c: Spill3Config): Record<string, unknown> {
     prizeFullHousePct: c.prizeFullHousePct,
     ticketPriceCents: c.ticketPriceCents,
     pauseBetweenRowsMs: c.pauseBetweenRowsMs,
+    openingTimeStart: c.openingTimeStart,
+    openingTimeEnd: c.openingTimeEnd,
     active: c.active,
     updatedAt: c.updatedAt,
   };
@@ -592,6 +710,8 @@ function diffChangedFields(before: Spill3Config, after: Spill3Config): string[] 
     "prizeFullHousePct",
     "ticketPriceCents",
     "pauseBetweenRowsMs",
+    "openingTimeStart",
+    "openingTimeEnd",
   ];
   return fields.filter((f) => before[f] !== after[f]);
 }

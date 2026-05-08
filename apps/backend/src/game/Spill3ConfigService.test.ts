@@ -18,6 +18,7 @@ import test from "node:test";
 import {
   Spill3ConfigService,
   assertConfigConsistency,
+  isWithinOpeningWindow,
   type Spill3Config,
 } from "./Spill3ConfigService.js";
 import { DomainError } from "../errors/DomainError.js";
@@ -49,6 +50,8 @@ const DEFAULT_PERCENTAGE_ROW = {
   prize_full_house_pct: "30.00",
   ticket_price_cents: 500,
   pause_between_rows_ms: 3000,
+  opening_time_start: "11:00",
+  opening_time_end: "23:00",
   active: true,
   created_at: "2026-05-08T00:00:00Z",
   updated_at: "2026-05-08T00:00:00Z",
@@ -109,7 +112,9 @@ function makeServiceWithRow(
           prize_full_house_pct: params[12],
           ticket_price_cents: params[13],
           pause_between_rows_ms: params[14],
-          updated_by_user_id: params[15],
+          opening_time_start: params[15],
+          opening_time_end: params[16],
+          updated_by_user_id: params[17],
         };
       }
       return { rowCount: 1, rows: [] };
@@ -385,6 +390,8 @@ test("assertConfigConsistency: percentage med null-pct kaster", () => {
     prizeFullHousePct: 30,
     ticketPriceCents: 500,
     pauseBetweenRowsMs: 3000,
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
     active: true,
     createdAt: "",
     updatedAt: "",
@@ -410,6 +417,8 @@ test("assertConfigConsistency: fixed med null-cents kaster", () => {
     prizeFullHousePct: null,
     ticketPriceCents: 500,
     pauseBetweenRowsMs: 3000,
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
     active: true,
     createdAt: "",
     updatedAt: "",
@@ -435,6 +444,8 @@ test("assertConfigConsistency: percentage med komplett pct passerer", () => {
     prizeFullHousePct: 30,
     ticketPriceCents: 500,
     pauseBetweenRowsMs: 3000,
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
     active: true,
     createdAt: "",
     updatedAt: "",
@@ -461,6 +472,8 @@ test("assertConfigConsistency: fixed med komplett cents passerer", () => {
     prizeFullHousePct: null,
     ticketPriceCents: 500,
     pauseBetweenRowsMs: 3000,
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
     active: true,
     createdAt: "",
     updatedAt: "",
@@ -513,4 +526,165 @@ test("update: audit-log-feil blokkerer ikke caller", async () => {
     minTicketsToStart: 99,
   });
   assert.equal(updated.minTicketsToStart, 99);
+});
+
+// ── opening time tester (Tobias-direktiv 2026-05-08) ──────────────────────
+
+test("getActive: returnerer opening-time-felter med default-vinduet", async () => {
+  const { service } = makeServiceWithRow(DEFAULT_PERCENTAGE_ROW);
+  const config = await service.getActive();
+  assert.equal(config.openingTimeStart, "11:00");
+  assert.equal(config.openingTimeEnd, "23:00");
+});
+
+test("getActive: faller tilbake til default ved NULL i DB-rad", async () => {
+  // Pre-migrasjons-rad: opening_time_start/end er null. Service-laget
+  // skal bruke DEFAULT_OPENING_TIME_START/END.
+  const legacyRow = {
+    ...DEFAULT_PERCENTAGE_ROW,
+    opening_time_start: null,
+    opening_time_end: null,
+  };
+  const { service } = makeServiceWithRow(legacyRow);
+  const config = await service.getActive();
+  assert.equal(config.openingTimeStart, "11:00");
+  assert.equal(config.openingTimeEnd, "23:00");
+});
+
+test("update: aksepterer gyldige opening-times", async () => {
+  const { service } = makeServiceWithRow(DEFAULT_PERCENTAGE_ROW);
+  const updated = await service.update({
+    updatedByUserId: "admin-1",
+    openingTimeStart: "09:00",
+    openingTimeEnd: "22:30",
+  });
+  assert.equal(updated.openingTimeStart, "09:00");
+  assert.equal(updated.openingTimeEnd, "22:30");
+});
+
+test("update: avviser ugyldig HH:MM-format", async () => {
+  const { service } = makeServiceWithRow(DEFAULT_PERCENTAGE_ROW);
+  await expectDomainError(
+    "update openingTimeStart='25:00'",
+    () =>
+      service.update({
+        updatedByUserId: "admin-1",
+        openingTimeStart: "25:00",
+      }),
+    "INVALID_INPUT",
+  );
+  await expectDomainError(
+    "update openingTimeEnd='9:0'",
+    () =>
+      service.update({
+        updatedByUserId: "admin-1",
+        openingTimeEnd: "9:0",
+      }),
+    "INVALID_INPUT",
+  );
+  await expectDomainError(
+    "update openingTimeStart='abc'",
+    () =>
+      service.update({
+        updatedByUserId: "admin-1",
+        openingTimeStart: "abc",
+      }),
+    "INVALID_INPUT",
+  );
+});
+
+test("update: avviser start >= end (samme dag, ingen midnatt-wraparound)", async () => {
+  const { service } = makeServiceWithRow(DEFAULT_PERCENTAGE_ROW);
+  await expectDomainError(
+    "start=22:00, end=10:00",
+    () =>
+      service.update({
+        updatedByUserId: "admin-1",
+        openingTimeStart: "22:00",
+        openingTimeEnd: "10:00",
+      }),
+    "INVALID_CONFIG",
+  );
+  await expectDomainError(
+    "start=12:00, end=12:00 (lik)",
+    () =>
+      service.update({
+        updatedByUserId: "admin-1",
+        openingTimeStart: "12:00",
+        openingTimeEnd: "12:00",
+      }),
+    "INVALID_CONFIG",
+  );
+});
+
+test("isWithinOpeningWindow: midt på dagen i åpent vindu = true", () => {
+  // 14:00 UTC = 16:00 Oslo (sommer) eller 15:00 Oslo (vinter). Begge er
+  // innenfor [11:00, 23:00).
+  const config = { openingTimeStart: "11:00", openingTimeEnd: "23:00" };
+  // Et tydelig sommer-tidspunkt: 2026-07-01T14:00:00Z = 16:00 Oslo (DST).
+  assert.equal(
+    isWithinOpeningWindow(config, new Date("2026-07-01T14:00:00Z")),
+    true,
+  );
+});
+
+test("isWithinOpeningWindow: før vinduet (06:00 Oslo) = false", () => {
+  const config = { openingTimeStart: "11:00", openingTimeEnd: "23:00" };
+  // 04:00Z = 06:00 Oslo (sommer) — før 11:00 → false.
+  assert.equal(
+    isWithinOpeningWindow(config, new Date("2026-07-01T04:00:00Z")),
+    false,
+  );
+});
+
+test("isWithinOpeningWindow: etter vinduet (23:30 Oslo) = false", () => {
+  const config = { openingTimeStart: "11:00", openingTimeEnd: "23:00" };
+  // 21:30Z = 23:30 Oslo (sommer) — etter 23:00 → false.
+  assert.equal(
+    isWithinOpeningWindow(config, new Date("2026-07-01T21:30:00Z")),
+    false,
+  );
+});
+
+test("isWithinOpeningWindow: ekskluderende endpoint (23:00 Oslo selv) = false", () => {
+  const config = { openingTimeStart: "11:00", openingTimeEnd: "23:00" };
+  // 21:00Z = 23:00 Oslo (sommer) — endpoint er eksklusiv → false.
+  assert.equal(
+    isWithinOpeningWindow(config, new Date("2026-07-01T21:00:00Z")),
+    false,
+  );
+});
+
+test("isWithinOpeningWindow: inklusiv start-endpoint (11:00 Oslo selv) = true", () => {
+  const config = { openingTimeStart: "11:00", openingTimeEnd: "23:00" };
+  // 09:00Z = 11:00 Oslo (sommer) — start-endpoint inkluderes → true.
+  assert.equal(
+    isWithinOpeningWindow(config, new Date("2026-07-01T09:00:00Z")),
+    true,
+  );
+});
+
+test("update: opening-times skrives til audit-log changedFields", async () => {
+  const auditEvents: Array<{ action: string; details: unknown }> = [];
+  const auditStub = {
+    record: async (input: { action: string; details: unknown }) => {
+      auditEvents.push({ action: input.action, details: input.details });
+    },
+  };
+  const { service } = makeServiceWithRow(DEFAULT_PERCENTAGE_ROW);
+  service.setAuditLogService(auditStub as never);
+  await service.update({
+    updatedByUserId: "admin-1",
+    openingTimeStart: "10:00",
+    openingTimeEnd: "22:00",
+  });
+  assert.equal(auditEvents.length, 1);
+  const details = auditEvents[0]!.details as {
+    changedFields: string[];
+    after: { openingTimeStart: string; openingTimeEnd: string };
+  };
+  assert.ok(details.changedFields.includes("openingTimeStart"));
+  assert.ok(details.changedFields.includes("openingTimeEnd"));
+  assert.equal(details.after.openingTimeStart, "10:00");
+  assert.equal(details.after.openingTimeEnd, "22:00");
 });
