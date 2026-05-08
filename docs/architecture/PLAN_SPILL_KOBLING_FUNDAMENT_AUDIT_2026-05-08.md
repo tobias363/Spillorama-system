@@ -593,17 +593,54 @@ Sortert etter avhengighet og tryggleikm. Hver bølge åpnes som egen PR/issue.
 **Tester som bryter:** Eksisterende tick-tester for daily_schedule-flow må verifiseres mot ny "skip if plan exists"-regel.
 **Linear:** Ny issue.
 
-### Bølge 5 — Konsolider GoH-membership-filter
+### Bølge 5 — Konsolider GoH-membership-filter — FULLFØRT 2026-05-08
 
-**Mål:** Én funksjon, ett sted.
+**Status:** Fullført på branch `refactor/goh-membership-query-bolge-5`.
 
-**Tasks:**
-1. Lag `HallGroupMembershipQuery.getActiveMembers(groupId)` — én autoritativ implementasjon.
-2. Refaktorer `agentGame1.ts:getCurrentGoHMembersByGroupId`, `GamePlanEngineBridge.resolveParticipatingHallIds`, `Game1HallReadyService` til å bruke samme.
+**Levert:**
+1. ✅ `apps/backend/src/platform/HallGroupMembershipQuery.ts` — konsolidert
+   helper med fire metoder:
+   - `getActiveMembers(groupId)` — array av aktive medlemmer (filterer
+     `is_active=false` haller), `null` hvis gruppen ikke finnes / er
+     soft-deletet / inaktiv. Setter `isMaster=true` for pinned master.
+   - `getMasterHallId(groupId)` — pinned `master_hall_id` med defensiv
+     LEFT JOIN-sjekk mot `is_active`, `null` hvis ikke satt eller hall
+     deaktivert.
+   - `isMember(groupId, hallId)` — boolean medlemskap-sjekk. Erstatter
+     `Game1JackpotStateService.isHallInGroup`-mønsteret som inline-SQL.
+   - `findGroupForHall(hallId)` — første aktive GoH for hall (eldste
+     medlemskap), `null` hvis ingen.
+2. ✅ `apps/backend/src/routes/agentGame1.ts` —
+   `getCurrentGoHMembersByGroupId` er nå thin wrapper rundt
+   `getActiveMembers`. Public Map<hallId, hallName>-shape bevart slik
+   at master-konsoll-callers (/current-game + /hall-status) ikke
+   trenger endring. Soft-fail-strategi uendret (null ved DB-feil).
+3. ✅ `apps/backend/src/game/GamePlanEngineBridge.ts` —
+   `resolveParticipatingHallIds` og `resolveGroupHallId` er nå thin
+   wrappers rundt `getActiveMembers` + `findGroupForHall`. Bridge-
+   spesifikke DomainErrors (`NO_ACTIVE_HALLS_IN_GROUP`,
+   `MASTER_NOT_IN_GROUP`, `HALL_NOT_IN_GROUP`) konstrueres på toppen.
+4. ✅ `apps/backend/src/platform/__tests__/HallGroupMembershipQuery.test.ts` —
+   25 unit-tester med stub-Pool (alle 4 metoder × happy-path / not-
+   found / DB-error / INVALID_INPUT-cases).
 
-**Estimat:** 1 dev-dag.
-**Tester:** Eksisterende.
-**Linear:** Ny issue.
+**Backwards-compat:**
+- Alle eksisterende test-suite (8 multiHall + 26 main + 31 agentGame1
+  routes) passerer uendret. Test-pool-mocks er oppdatert til å
+  dispatche på de nye SQL-pattern (`SELECT m.hall_id, h.name AS
+  hall_name`) men test-fixture-API er identisk.
+- `Game1HallReadyService.ts` ble inspisert men inneholder ingen direkte
+  GoH-membership-query — den bruker `participating_halls_json`-snapshot.
+  Refaktor av denne service-en var derfor ikke aktuelt for Bølge 5.
+
+**Soft-fail-strategier konsolidert:**
+- Helper kaster `DomainError("DB_ERROR")` ved DB-feil — caller velger
+  hva å gjøre (returner null, kast videre, fallback til snapshot).
+- Helper returnerer `null` for "ikke funnet"-tilfeller (gruppe finnes
+  ikke, hall er ikke medlem, master ikke pinned).
+- Caller skiller via try/catch.
+
+**Estimat:** 1 dev-dag (faktisk: ~1.5 time wall-clock).
 
 ### Bølge 6 — Konsolider scheduled-game-finder-queries — FULLFØRT 2026-05-08
 
