@@ -4,11 +4,20 @@
  * `gameType: "MAIN_GAME"` (Spill 2/3 er hovedspill per SPILLKATALOG.md),
  * IKKE `"DATABINGO"` som var pre-fix-bug.
  *
- * Strategi: vi setter `MAIN_GAME`-cap til en konstreng verdi (50) og
- * `DATABINGO`-cap til en stor verdi (10 000) gjennom `upsertPrizePolicy`.
- * Hvis pre-fix-bug-en er på plass binder Game2/Game3 til DATABINGO og
- * får 10 000-cap (utbetaler full requested). Med fix-en binder de til
- * MAIN_GAME og får 50-cap (utbetaling kappes).
+ * **Oppdatert 2026-05-08 (Tobias):** Single-prize cap (2500 kr) gjelder
+ * KUN databingo. Spill 2/3 (rocket / monsterbingo) er hovedspill og
+ * uncapped. Selv om policy-tabellen sier `MAIN_GAME`-cap = 50, skal
+ * `applySinglePrizeCap` short-circuite og returnere fullt beløp.
+ *
+ * Strategi: vi setter `DATABINGO`-cap til en svært lav verdi (50) og
+ * verifiserer at Spill 2/3 IKKE blir cappet — dvs. de binder mot
+ * `MAIN_GAME`-policyen (som er funksjonelt deaktivert) og IKKE mot
+ * `DATABINGO`-policyen. Dette er regresjon-prevent for #769-bug-en
+ * (Game2/Game3 hardkodet DATABINGO før #769).
+ *
+ * Kanonisk regel:
+ *   - docs/architecture/SPILL_REGLER_OG_PAYOUT.md §4
+ *   - docs/operations/SPILL1_VINNINGSREGLER.md §4
  *
  * Vi tester gjennom det fulle engine-flowet (drawNextNumber + auto-claim)
  * og inspiserer claim-records etter å ha lukket runden.
@@ -184,14 +193,16 @@ class WinningG3Adapter implements BingoSystemAdapter {
 
 // ── Game2 (rocket) prize-cap binding ────────────────────────────────────────
 
-describe("Game2Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
-  test("MAIN_GAME-cap kicker inn for Spill 2 (rocket); DATABINGO-cap er IKKE relevant", async () => {
+describe("Game2Engine — prize-cap binder mot MAIN_GAME (audit §9.1, oppdatert 2026-05-08)", () => {
+  test("Spill 2 (rocket) ignorerer MAIN_GAME-cap (uncapped) men ville cappet hvis bound mot DATABINGO", async () => {
     // Setup: opprett engine med default policy. Sett deretter:
-    //   - MAIN_GAME-cap = 50 (svært lav)
-    //   - DATABINGO-cap = 10 000 (svært høy)
-    // Hvis bug-en er tilbake (DATABINGO brukt for prize-cap), vil utbetalingen
-    // gå opp til DATABINGO-cap (limited only by RTP-budget). Med fix-en
-    // bindes mot MAIN_GAME → cap kicker inn på 50.
+    //   - MAIN_GAME-cap = 50 (svært lav — men funksjonelt deaktivert per
+    //     2026-05-08 cap-fjerning)
+    //   - DATABINGO-cap = 50 (også lav — pre-#769-bug-en bandt rocket
+    //     til DATABINGO; hvis det skjer igjen vil capen aktiveres)
+    // Forventning: Spill 2 binder til MAIN_GAME → cap deaktivert →
+    // payout > 50. Hvis bug-en er tilbake (DATABINGO bound) ville payout
+    // vært ≤ 50 fordi DATABINGO-cap ER aktiv.
     const wallet = new InMemoryWalletAdapter();
     await wallet.createAccount({ accountId: "wallet-host", initialBalance: 1_000_000 });
     await wallet.createAccount({ accountId: "wallet-guest", initialBalance: 1_000_000 });
@@ -206,17 +217,14 @@ describe("Game2Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
       monthlyLossLimit: 10_000_000,
     });
 
-    // Konfigurer caps: MAIN_GAME = 50, DATABINGO = 10 000.
-    await engine.upsertPrizePolicy({
-      gameType: "MAIN_GAME",
-      effectiveFrom: new Date().toISOString(),
-      singlePrizeCap: 50,
-      dailyExtraPrizeCap: 5_000,
-    });
+    // DATABINGO-cap settes til 1 (svært lav). MAIN_GAME-cap er
+    // default 2500 (men funksjonelt deaktivert per 2026-05-08
+    // cap-fjerning). Hvis #769-regresjon skjer (Game2 hardkoder
+    // DATABINGO igjen), ville alle payouts bli kappet til 1.
     await engine.upsertPrizePolicy({
       gameType: "DATABINGO",
       effectiveFrom: new Date().toISOString(),
-      singlePrizeCap: 10_000,
+      singlePrizeCap: 1,
       dailyExtraPrizeCap: 5_000,
     });
 
@@ -233,10 +241,6 @@ describe("Game2Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
       walletId: "wallet-guest",
     });
     // Bruk høy entry-fee + tickets så pricePerWinner blir >> 50.
-    // jackpotNumberTable[9] = 100 i DEFAULT_GAME2_CONFIG, men splittes over
-    // antall vinnere (her 2 stykker som begge vinner draw 9). Pris-per-vinner
-    // 100/2=50 vs etter-jackpot fallback. Vi setter høy entryFee så
-    // remainingPrizePool overstiger 50 betydelig.
     await engine.startGame({
       roomCode,
       actorPlayerId: hostId,
@@ -252,22 +256,26 @@ describe("Game2Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
     const snap = engine.getRoomSnapshot(roomCode);
     const claims = snap.currentGame?.claims ?? [];
     assert.ok(claims.length > 0, "minst én claim forventet etter draw 9");
-    // Med MAIN_GAME-cap = 50 er ingen utbetaling > 50.
-    // (Hvis pre-fix-bug var aktiv ville DATABINGO-cap (10 000) gjelde og
-    // payouts ville være vesentlig høyere — ofte hele jackpot-andelen.)
-    for (const c of claims) {
-      assert.ok(
-        (c.payoutAmount ?? 0) <= 50,
-        `Spill 2 (rocket) skal binde mot MAIN_GAME-cap 50, men payoutAmount=${c.payoutAmount ?? 0}`,
-      );
-    }
+    // 2026-05-08: Forventet at minst én claim har payout > 1 som bevis
+    // på at Spill 2 binder til MAIN_GAME (uncapped) IKKE DATABINGO
+    // (capped til 1). Hvis #769-regresjon skjer ville alle claims
+    // vært ≤ 1.
+    const overCap = claims.filter((c) => (c.payoutAmount ?? 0) > 1);
+    assert.ok(
+      overCap.length > 0,
+      `Spill 2 (rocket) skal binde til MAIN_GAME (uncapped); DATABINGO-cap=1 må IKKE aktiveres. Faktisk payouts: ${claims.slice(0, 10).map((c) => c.payoutAmount).join(", ")}`,
+    );
   });
 });
 
 // ── Game3 (monsterbingo) prize-cap binding ──────────────────────────────────
 
-describe("Game3Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
-  test("MAIN_GAME-cap kicker inn for Spill 3 (monsterbingo)", async () => {
+describe("Game3Engine — prize-cap binder mot MAIN_GAME (audit §9.1, oppdatert 2026-05-08)", () => {
+  test("Spill 3 (monsterbingo) ignorerer MAIN_GAME-cap (uncapped) men ville cappet hvis bound mot DATABINGO", async () => {
+    // 2026-05-08: cap-fjerning for hovedspill. Spill 3 binder til
+    // MAIN_GAME (per #769) → cap deaktivert. Selv med cap=50 i
+    // policy-tabellen for begge gameTypes, skal Spill 3 utbetale fullt.
+    // Hvis #769-regresjon (DATABINGO-binding), ville cap-50 aktiveres.
     const wallet = new InMemoryWalletAdapter();
     await wallet.createAccount({ accountId: "wallet-host", initialBalance: 1_000_000 });
     await wallet.createAccount({ accountId: "wallet-guest", initialBalance: 1_000_000 });
@@ -283,16 +291,14 @@ describe("Game3Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
       monthlyLossLimit: 10_000_000,
     });
 
-    await engine.upsertPrizePolicy({
-      gameType: "MAIN_GAME",
-      effectiveFrom: new Date().toISOString(),
-      singlePrizeCap: 50,
-      dailyExtraPrizeCap: 5_000,
-    });
+    // DATABINGO-cap settes til 1 (svært lav). MAIN_GAME-cap er
+    // default 2500 (men funksjonelt deaktivert per cap-fjerning). Hvis
+    // #769-regresjon skjer (Game3 hardkoder DATABINGO igjen), ville
+    // alle payouts bli kappet til 1.
     await engine.upsertPrizePolicy({
       gameType: "DATABINGO",
       effectiveFrom: new Date().toISOString(),
-      singlePrizeCap: 10_000,
+      singlePrizeCap: 1,
       dailyExtraPrizeCap: 5_000,
     });
 
@@ -336,16 +342,14 @@ describe("Game3Engine — prize-cap binder mot MAIN_GAME (audit §9.1)", () => {
       return;
     }
 
-    for (const c of claims) {
-      assert.ok(
-        (c.payoutAmount ?? 0) <= 50,
-        `Spill 3 (monsterbingo) skal binde mot MAIN_GAME-cap 50, men payoutAmount=${c.payoutAmount ?? 0}`,
-      );
-    }
-    // Med tight 50-cap og høy entryFee skal minst én claim være capped.
+    // 2026-05-08: Forventet at minst én claim har payout > 1 som bevis
+    // på at Spill 3 binder til MAIN_GAME (uncapped) IKKE DATABINGO
+    // (capped til 1). Hvis #769-regresjon skjer ville alle claims
+    // vært ≤ 1.
+    const overCap = claims.filter((c) => (c.payoutAmount ?? 0) > 1);
     assert.ok(
-      claims.some((c) => c.payoutWasCapped),
-      "minst én Spill 3-claim skal flagges som capped med MAIN_GAME=50",
+      overCap.length > 0,
+      `Spill 3 (monsterbingo) skal binde til MAIN_GAME (uncapped); DATABINGO-cap=1 må IKKE aktiveres. Faktisk payouts: ${claims.slice(0, 10).map((c) => c.payoutAmount).join(", ")}`,
     );
   });
 });

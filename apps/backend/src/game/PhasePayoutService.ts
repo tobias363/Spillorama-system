@@ -110,11 +110,18 @@ export interface PhasePayoutInput {
    * 2026-05-06 (audit §9.1): valgfri prize-policy-scope-key. Når caller har
    * resolved per-spill `LedgerGameType` fra `room.gameSlug` (via
    * `ledgerGameTypeForSlug`) kan den passes inn her så prize-cap binder
-   * mot riktig policy-bucket. Default `"DATABINGO"` for bakoverkompatibilitet
-   * — caps er per i dag identiske (2500 kr) og policy-default for begge
-   * registreres i `PrizePolicyManager` constructor.
+   * mot riktig policy-bucket. Default `"DATABINGO"` for bakoverkompatibilitet.
    *
-   * Spill 1-3 → "MAIN_GAME"; SpinnGo → "DATABINGO".
+   * **2026-05-08 (Tobias):** Cap aktiveres KUN for `DATABINGO`. For
+   * `MAIN_GAME` (Spill 1-3 — slugs `bingo`, `rocket`, `monsterbingo`)
+   * short-circuiter `applySinglePrizeCap` og returnerer beløpet
+   * uendret. Hovedspill har ingen single-prize cap. Default-en
+   * `"DATABINGO"` er en defensive sikkerhets-fallback for ukjente
+   * slugs — i praksis sender alle real callers (`BingoEngine`,
+   * `ClaimSubmitterService`) eksplisitt `prizeGameType: gameType`
+   * resolved fra `ledgerGameTypeForSlug(room.gameSlug)`.
+   *
+   * Spill 1-3 → "MAIN_GAME" (uncapped); SpinnGo → "DATABINGO" (capped).
    */
   prizeGameType?: PrizeGameType;
 }
@@ -223,14 +230,19 @@ export class PhasePayoutService {
   async computeAndPayPhase(input: PhasePayoutInput): Promise<PhasePayoutResult> {
     const rtpBudgetBefore = roundCurrency(Math.max(0, input.remainingPayoutBudget));
 
-    // ── 1) Single-prize-cap (§11 regulatorisk 2500 kr) ─────────────────
+    // ── 1) Single-prize-cap (§11 regulatorisk 2500 kr — KUN databingo) ─
     //
     // 2026-05-06 (audit §9.1): bind prize-cap mot per-spill PrizeGameType
-    // når caller har resolved den. Default forblir DATABINGO for
-    // bakoverkompatibilitet — caps er identiske (2500 kr) og policy-
-    // default for begge registreres i PrizePolicyManager. Spill 1-3
-    // (caller passer `prizeGameType: "MAIN_GAME"`) skiller seg nå
-    // korrekt fra SpinnGo (DATABINGO) på cap-bindingen.
+    // når caller har resolved den.
+    //
+    // 2026-05-08 (Tobias): Cap aktiveres KUN for DATABINGO. For
+    // MAIN_GAME (Spill 1-3) short-circuiter `applySinglePrizeCap` og
+    // returnerer beløpet uendret. Default-fallback "DATABINGO" er en
+    // defensive sikkerhets-fallback for ukjente slugs — i praksis
+    // sender alle callers (BingoEngine, ClaimSubmitterService) eksplisitt
+    // `prizeGameType: gameType`. Innsatsen lilla Fullt Hus (3000 kr) og
+    // Oddsen lilla HIGH (4500 kr) utbetales derfor i sin helhet for
+    // hovedspill. Se SPILL_REGLER_OG_PAYOUT.md §4 for kanonisk regel.
     const capped = this.prizePolicy.applySinglePrizeCap({
       hallId: input.hallId,
       gameType: input.prizeGameType ?? "DATABINGO",

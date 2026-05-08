@@ -25,12 +25,19 @@ const POLICY_WILDCARD = "*";
  * hardkodet `"DATABINGO"` (Game2Engine.ts:379/503, Game3Engine.ts:571).
  *
  * 2026-05-06 (audit §9.1): typen utvides til union så Spill 2/3 kan
- * binde prize-cap mot MAIN_GAME-policy. Caps er fortsatt 2500 for begge
- * inntil Lotteritilsynet eventuelt differensierer dem.
+ * binde prize-cap mot MAIN_GAME-policy.
+ *
+ * 2026-05-08 (Tobias): Single-prize cap (2500 kr) gjelder KUN
+ * databingo (`DATABINGO` / slug `spillorama`). Hovedspill (`MAIN_GAME`)
+ * har ingen cap — `applySinglePrizeCap` short-circuiter for MAIN_GAME
+ * og returnerer beløpet uendret. Default-policy registreres fortsatt
+ * for begge gameTypes så `resolvePrizePolicy` ikke kaster, men cap-en
+ * aktiveres ikke for hovedspill. Se
+ * [`docs/architecture/SPILL_REGLER_OG_PAYOUT.md`](../../../docs/architecture/SPILL_REGLER_OG_PAYOUT.md) §4.
  *
  * Spillkategorisering (docs/architecture/SPILLKATALOG.md, PM-låst 2026-04-25):
- *   - Spill 1-3 (bingo / rocket / monsterbingo + aliaser) → MAIN_GAME
- *   - SpinnGo (spillorama / game_5) → DATABINGO
+ *   - Spill 1-3 (bingo / rocket / monsterbingo + aliaser) → MAIN_GAME (uncapped)
+ *   - SpinnGo (spillorama / game_5) → DATABINGO (2500 kr cap)
  */
 export type PrizeGameType = "DATABINGO" | "MAIN_GAME";
 
@@ -235,6 +242,27 @@ export class PrizePolicyManager {
 
   // ── Methods used by BingoEngine ─────────────────────────────────
 
+  /**
+   * Apply single-prize cap per pengespillforskriften §11.
+   *
+   * **2026-05-08 (Tobias):** Single-prize cap (2500 kr) gjelder KUN
+   * databingo (`gameType = DATABINGO`, slug `spillorama`). Hovedspill
+   * (Spill 1, 2, 3 — slugs `bingo`, `rocket`, `monsterbingo`) har INGEN
+   * cap. Tidligere oppførsel cappet hovedspill blanket og var feil:
+   * Innsatsen lilla Fullt Hus (3000 kr) ble feilaktig cappet til 2500,
+   * Oddsen lilla HIGH (4500 kr) likedan, og diverse mini-game-payouts
+   * over 2500 kr.
+   *
+   * Kanonisk regel:
+   * - [`docs/architecture/SPILL_REGLER_OG_PAYOUT.md`](../../../docs/architecture/SPILL_REGLER_OG_PAYOUT.md) §4
+   * - [`docs/operations/SPILL1_VINNINGSREGLER.md`](../../../docs/operations/SPILL1_VINNINGSREGLER.md) §4
+   *
+   * Implementasjon: for `MAIN_GAME` returneres input uendret med
+   * `wasCapped: false`. Policy-objektet returneres fortsatt for
+   * audit-sporbarhet (policyId logges på payout-events selv om capen
+   * ikke aktiveres). For `DATABINGO` gjelder original cap-logikk
+   * (`min(amount, policy.singlePrizeCap)`).
+   */
   applySinglePrizeCap(input: {
     hallId: string;
     gameType: PrizeGameType;
@@ -253,6 +281,16 @@ export class PrizePolicyManager {
       gameType: input.gameType,
       atMs
     });
+    if (input.gameType !== "DATABINGO") {
+      // 2026-05-08 (Tobias): Hovedspill (MAIN_GAME) har ingen single-prize cap.
+      // Returner amount uendret. Policy-objektet beholdes i return-shape så
+      // call-sites fortsatt kan logge policyId for sporbarhet.
+      return {
+        cappedAmount: amount,
+        wasCapped: false,
+        policy,
+      };
+    }
     const cappedAmount = Math.min(amount, policy.singlePrizeCap);
     return {
       cappedAmount,
