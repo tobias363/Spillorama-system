@@ -12,7 +12,33 @@
  * router legger til hall-scope-sjekk: kun master-hall-agent kan POSTe
  * start/resume, mens GET-endepunkter er tilgjengelig for alle deltakende
  * haller slik at slave-agenter også kan rendre status-stripen.
+ *
+ * Bølge 3 (2026-05-08): kanonisk lobby-state + master-actions.
+ *   - fetchLobbyState(hallId)  — single-source-of-truth via aggregator
+ *   - startMaster / advanceMaster / pauseMaster / resumeMaster /
+ *     stopMaster / setJackpot — alle treffer
+ *     `/api/agent/game1/master/*` (Bølge 2 routes) som returnerer
+ *     `MasterActionResult` med `scheduledGameId` (NULL for finished/bridge-
+ *     failed) + `planRunId` + status. UI bruker KUN `scheduledGameId` for
+ *     videre actions; `planRunId` er kun for diagnose/audit.
+ *
+ *   Backend-router: apps/backend/src/routes/agentGame1Lobby.ts +
+ *                    apps/backend/src/routes/agentGame1Master.ts
+ *
+ *   Refaktor-detaljer i `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §6.3.
  */
+
+// admin-web har ikke @spillorama/shared-types som workspace-dependency
+// (samme mønster som admin-payments.ts) — derfor relativ path-import direkte
+// fra source-filen. Schema-fila er pure-zod (ingen runtime-deps utover zod
+// som er vendored gjennom shared-types).
+import {
+  Spill1AgentLobbyStateSchema,
+  type Spill1AgentLobbyState,
+  type Spill1LobbyInconsistencyCode,
+  type Spill1PlanRunStatus,
+  type Spill1ScheduledGameStatus,
+} from "../../../../packages/shared-types/src/spill1-lobby-state.js";
 
 import { apiRequest } from "./client.js";
 
@@ -203,4 +229,161 @@ export async function stopAgentGame1(reason?: string): Promise<Spill1ActionRespo
     "/api/agent/game1/stop",
     { method: "POST", auth: true, body }
   );
+}
+
+// ── Bølge 3 (2026-05-08): kanonisk lobby-state + master-actions ──────────
+
+/**
+ * Aggregert resultat for hver master-action. Ekvivalent med backend-
+ * `MasterActionResult`-typen i `apps/backend/src/game/MasterActionService.ts`.
+ *
+ * UI skal kun bruke `scheduledGameId` for videre handlinger (start/pause/
+ * resume/stop/setJackpot — id-en passes inn av master-routen). `planRunId`
+ * er informativ og brukes til diagnose / audit-korrelasjon.
+ */
+export interface MasterActionResult {
+  /**
+   * Aktiv scheduled-game-id ETTER actionen. `null` ved `finish` eller hvis
+   * bridgen feilet å spawne (kontroller `inconsistencyWarnings`).
+   */
+  scheduledGameId: string | null;
+  /** Plan-run-id som handlingen ble utført mot. Aldri null. */
+  planRunId: string;
+  /** Plan-runtime-status etter handlingen. */
+  status: Spill1PlanRunStatus;
+  /** Scheduled-game-status etter handlingen. `null` hvis ingen scheduled-game ble berørt. */
+  scheduledGameStatus: Spill1ScheduledGameStatus | null;
+  /** Inconsistency-warnings fra aggregator-pre-check. Klient bør vise disse. */
+  inconsistencyWarnings: Spill1LobbyInconsistencyCode[];
+}
+
+/**
+ * Hent ferdig-aggregert lobby-state for hallen (Bølge 1 single-source-of-
+ * truth). Erstatter den tidligere dual-fetch-pattern (`fetchAgentGamePlanCurrent`
+ * + `fetchAgentGame1CurrentGame`) — én kall, én id-rom, ingen merge-band-aid.
+ *
+ * `hallId` kreves for HALL_OPERATOR/AGENT (cross-hall query → 403). ADMIN
+ * kan utelate eller sende eksplisitt hallId.
+ *
+ * Responsen valideres mot Zod-skjemaet — runtime-validering fanger
+ * version-skew mellom backend og frontend før UI rendrer på korrupte felter.
+ */
+export async function fetchLobbyState(
+  hallId?: string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<Spill1AgentLobbyState> {
+  const path = hallId
+    ? `/api/agent/game1/lobby?hallId=${encodeURIComponent(hallId)}`
+    : "/api/agent/game1/lobby";
+  const raw = await apiRequest<unknown>(path, {
+    auth: true,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+  // Strict parse: kontrakt-brudd skal kaste, slik at caller fanger feilen
+  // tidlig i stedet for å rendre på en partial payload med manglende felter.
+  return Spill1AgentLobbyStateSchema.parse(raw);
+}
+
+interface MasterActionBody {
+  hallId?: string;
+  reason?: string;
+  position?: number;
+  draw?: number;
+  prizesCents?: Record<string, number>;
+}
+
+/**
+ * Felles HTTP-utgang for master-actions. Posten kalles med tom body når UI
+ * lar backend bruke caller's user.hallId; ADMIN kan sende `hallId` i body.
+ */
+async function postMasterAction(
+  path: string,
+  body: MasterActionBody = {}
+): Promise<MasterActionResult> {
+  return apiRequest<MasterActionResult>(path, {
+    method: "POST",
+    auth: true,
+    body,
+  });
+}
+
+/**
+ * Master starter Spill 1 (`idle` → `running`). Backend kjører:
+ *   1. `MasterActionService.start` (single sekvenseringsmotor)
+ *   2. lobby-aggregator-pre-check + audit-event
+ *   3. engine-bridge spawn av scheduled-game-rad
+ *
+ * Returnerer `scheduledGameId` som UI lagrer for videre actions (advance/
+ * pause/resume/stop). DomainError-koder propageres som `ApiError` (typiske
+ * koder: `JACKPOT_SETUP_REQUIRED`, `HALLS_NOT_READY`, `BRIDGE_FAILED`).
+ */
+export async function startMaster(hallId?: string): Promise<MasterActionResult> {
+  const body: MasterActionBody = {};
+  if (hallId !== undefined) body.hallId = hallId;
+  return postMasterAction("/api/agent/game1/master/start", body);
+}
+
+/**
+ * Master flytter til neste plan-posisjon. Plan-run advance-er, og engine-
+ * bridge spawner scheduled-game for ny posisjon hvis aktuelt. Hvis ny
+ * posisjon krever jackpot-popup, kaster backend `JACKPOT_SETUP_REQUIRED`.
+ */
+export async function advanceMaster(hallId?: string): Promise<MasterActionResult> {
+  const body: MasterActionBody = {};
+  if (hallId !== undefined) body.hallId = hallId;
+  return postMasterAction("/api/agent/game1/master/advance", body);
+}
+
+/**
+ * Master pauser aktiv Spill 1-runde (`running` → `paused`). Engine pauses
+ * draw-timeren. `reason` er valgfritt audit-trail-felt.
+ */
+export async function pauseMaster(
+  hallId?: string,
+  reason?: string
+): Promise<MasterActionResult> {
+  const body: MasterActionBody = {};
+  if (hallId !== undefined) body.hallId = hallId;
+  if (reason !== undefined && reason.trim().length > 0) {
+    body.reason = reason.trim();
+  }
+  return postMasterAction("/api/agent/game1/master/pause", body);
+}
+
+/**
+ * Master gjenopptar pauset runde (`paused` → `running`).
+ */
+export async function resumeMaster(hallId?: string): Promise<MasterActionResult> {
+  const body: MasterActionBody = {};
+  if (hallId !== undefined) body.hallId = hallId;
+  return postMasterAction("/api/agent/game1/master/resume", body);
+}
+
+/**
+ * Master stopper aktiv runde (regulatorisk avbrudd). `reason` er PÅKREVD
+ * for compliance-sporbarhet; backend avviser med INVALID_INPUT hvis tom.
+ */
+export async function stopMaster(
+  hallId: string | undefined,
+  reason: string
+): Promise<MasterActionResult> {
+  const body: MasterActionBody = { reason };
+  if (hallId !== undefined) body.hallId = hallId;
+  return postMasterAction("/api/agent/game1/master/stop", body);
+}
+
+/**
+ * Master submitter jackpot-popup (draw + prizesCents per bongfarge) for
+ * en spesifikk plan-posisjon. `prizesCents`-keys må matche katalog-
+ * whitelist (gul/hvit/lilla); validering skjer server-side.
+ */
+export async function setJackpot(
+  hallId: string | undefined,
+  position: number,
+  draw: number,
+  prizesCents: Record<string, number>
+): Promise<MasterActionResult> {
+  const body: MasterActionBody = { position, draw, prizesCents };
+  if (hallId !== undefined) body.hallId = hallId;
+  return postMasterAction("/api/agent/game1/master/jackpot-setup", body);
 }
