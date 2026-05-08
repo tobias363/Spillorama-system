@@ -118,7 +118,36 @@ while [[ $WAITED -lt 60 ]]; do
   WAITED=$((WAITED + 2))
 done
 
-info "Starter backend-1 alene (initialiserer DB-skjema)"
+# ── §1.5 Kjør migrate i en throwaway-container FØR backends starter ──────
+# Backends har idempotent CREATE TABLE IF NOT EXISTS-logikk i flere
+# services (`SecurityService.initializeSchema`,
+# `PostgresResponsibleGamingStore.initializeSchema`, etc) som genererer
+# strukturer som overlapper med node-pg-migrate. Hvis vi lar backend-1
+# starte først og deretter kjører `npm run migrate`, kolliderer vi på
+# `INSERT INTO wallet_accounts` mot `balance` etter at den er konvertert
+# til GENERATED ALWAYS AS i en senere migration.
+#
+# Løsning: kjør migrate i en standalone container mot ferskt skjema,
+# så er DB-en på "main" idempotent når backendene boots.
+CHAOS_IMAGE="$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" config --images 2>/dev/null | grep backend | head -1)"
+if [[ -z "$CHAOS_IMAGE" ]]; then
+  CHAOS_IMAGE="agent-a7ab3534d8eb48e84-backend-1"
+fi
+NETWORK_NAME="$(docker inspect -f '{{range $k, $_ := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo "")"
+if [[ -z "$NETWORK_NAME" ]]; then
+  NETWORK_NAME="$(docker network ls --format '{{.Name}}' | grep -E "default$" | head -1)"
+fi
+
+info "Kjører node-pg-migrate i throwaway-container (network=$NETWORK_NAME)"
+docker run --rm \
+  --network "$NETWORK_NAME" \
+  -e APP_PG_CONNECTION_STRING="postgres://spillorama:spillorama@postgres:5432/spillorama" \
+  "$CHAOS_IMAGE" \
+  sh -c 'cd /app && npm run migrate' >/tmp/chaos-migrate.log 2>&1 \
+  || { fail "Migrate feilet — sjekk /tmp/chaos-migrate.log"; tail -20 /tmp/chaos-migrate.log; exit 2; }
+pass "Migrate OK"
+
+info "Starter backend-1 alene (skjema er allerede migrert)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-1
 
 info "Venter på at backend-1 svarer (timeout 60s)"
@@ -156,15 +185,10 @@ if [[ -z "${H1:-}" || -z "${H2:-}" ]]; then
   exit 2
 fi
 
-# ── §2 Migrate + seed pilot-data ─────────────────────────────────────────
-info "Migrerer DB + seeder pilot-data via backend-1"
-docker exec spillorama-backend-1 npm --prefix /app run migrate >/dev/null 2>&1 \
-  || warn "Migrate feilet (kan være OK hvis allerede kjørt)"
-
-# Seed-script bygger 4 demo-haller, gruppe + spillere.
+# ── §2 Seed pilot-data ────────────────────────────────────────────────────
 # Scripts kompileres ikke til dist (tsconfig include = src/**/*) så vi
-# kjører TS-kilden via tsx — samme måte som r3-reconnect-test gjør det
-# (BIN-825).
+# kjører TS-kilden via tsx (BIN-825).
+info "Seeder pilot-data via backend-1"
 docker exec -e DEMO_SEED_PASSWORD="$ADMIN_PASSWORD" spillorama-backend-1 \
   npx tsx /app/scripts/seed-demo-pilot-day.ts >/dev/null 2>&1 \
   || warn "Seed-script feilet eller ikke tilgjengelig — vi går videre med eksisterende data"

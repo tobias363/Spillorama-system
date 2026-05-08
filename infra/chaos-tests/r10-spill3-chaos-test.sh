@@ -123,7 +123,27 @@ while [[ $WAITED -lt 60 ]]; do
   WAITED=$((WAITED + 2))
 done
 
-info "Starter backend-1 (initialiserer DB-skjema)"
+# ── §1.5 Migrate FØR backends starter ────────────────────────────────────
+# Se r2-failover-test.sh §1.5 for full begrunnelse.
+CHAOS_IMAGE="$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" config --images 2>/dev/null | grep backend | head -1)"
+if [[ -z "$CHAOS_IMAGE" ]]; then
+  CHAOS_IMAGE="agent-a7ab3534d8eb48e84-backend-1"
+fi
+NETWORK_NAME="$(docker inspect -f '{{range $k, $_ := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo "")"
+if [[ -z "$NETWORK_NAME" ]]; then
+  NETWORK_NAME="$(docker network ls --format '{{.Name}}' | grep -E "default$" | head -1)"
+fi
+
+info "Kjører node-pg-migrate i throwaway-container (network=$NETWORK_NAME)"
+docker run --rm \
+  --network "$NETWORK_NAME" \
+  -e APP_PG_CONNECTION_STRING="postgres://spillorama:spillorama@postgres:5432/spillorama" \
+  "$CHAOS_IMAGE" \
+  sh -c 'cd /app && npm run migrate' >/tmp/chaos-migrate.log 2>&1 \
+  || { fail "Migrate feilet — sjekk /tmp/chaos-migrate.log"; tail -20 /tmp/chaos-migrate.log; exit 2; }
+pass "Migrate OK"
+
+info "Starter backend-1 (skjema er allerede migrert)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-1
 
 info "Venter på at backend-1 svarer (timeout 60s)"
@@ -161,11 +181,8 @@ if [[ -z "${H1:-}" || -z "${H2:-}" ]]; then
   exit 2
 fi
 
-# ── §2 Migrate + seed pilot-data ─────────────────────────────────────────
-info "Migrerer DB + seeder pilot-data via backend-1"
-docker exec spillorama-backend-1 npm --prefix /app run migrate >/dev/null 2>&1 \
-  || warn "Migrate feilet (kan være OK hvis allerede kjørt)"
-
+# ── §2 Seed pilot-data (migrate kjørte i §1.5) ──────────────────────────
+info "Seeder pilot-data via backend-1"
 docker exec -e DEMO_SEED_PASSWORD="$ADMIN_PASSWORD" spillorama-backend-1 \
   node /app/dist/scripts/seed-demo-pilot-day.js >/dev/null 2>&1 \
   || warn "Seed-script feilet eller ikke tilgjengelig — vi går videre med eksisterende data"

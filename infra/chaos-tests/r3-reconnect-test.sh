@@ -146,6 +146,28 @@ while [[ $WAITED -lt 60 ]]; do
   WAITED=$((WAITED + 2))
 done
 
+# ── §1.5 Kjør migrate i throwaway-container FØR backend starter ─────────
+# Se r2-failover-test.sh §1.5 for begrunnelsen — backend's interne
+# `CREATE TABLE IF NOT EXISTS`-logikk kolliderer med node-pg-migrate
+# hvis backend boots først og migrate kjører etterpå.
+CHAOS_IMAGE="$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" config --images 2>/dev/null | grep backend | head -1)"
+if [[ -z "$CHAOS_IMAGE" ]]; then
+  CHAOS_IMAGE="agent-a7ab3534d8eb48e84-backend-1"
+fi
+NETWORK_NAME="$(docker inspect -f '{{range $k, $_ := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo "")"
+if [[ -z "$NETWORK_NAME" ]]; then
+  NETWORK_NAME="$(docker network ls --format '{{.Name}}' | grep -E "default$" | head -1)"
+fi
+
+info "Kjører node-pg-migrate i throwaway-container (network=$NETWORK_NAME)"
+docker run --rm \
+  --network "$NETWORK_NAME" \
+  -e APP_PG_CONNECTION_STRING="postgres://spillorama:spillorama@postgres:5432/spillorama" \
+  "$CHAOS_IMAGE" \
+  sh -c 'cd /app && npm run migrate' >/tmp/chaos-migrate.log 2>&1 \
+  || { fail "Migrate feilet — sjekk /tmp/chaos-migrate.log"; tail -20 /tmp/chaos-migrate.log; exit 2; }
+pass "Migrate OK"
+
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-1
 
 info "Venter på at backend-1 blir healthy (timeout 90s)"
@@ -167,13 +189,8 @@ if [[ -z "${H1:-}" ]]; then
   exit 2
 fi
 
-# ── §2 Migrate + seed pilot-data ─────────────────────────────────────────
-info "Migrerer DB + seeder pilot-data via backend-1"
-docker exec spillorama-backend-1 npm --prefix /app run migrate >/dev/null 2>&1 \
-  || warn "Migrate feilet (kan være OK hvis allerede kjørt)"
-
-# Seed-script bygger 4 demo-haller, gruppe + spillere. Vi gjenbruker
-# samme seed som R2 — Profil A gir oss `demo-hall-999` + `demo-spiller-1`.
+# ── §2 Seed pilot-data ────────────────────────────────────────────────────
+info "Seeder pilot-data via backend-1"
 docker exec -e DEMO_SEED_PASSWORD="$ADMIN_PASSWORD" spillorama-backend-1 \
   npx tsx /app/scripts/seed-demo-pilot-day.ts >/dev/null 2>&1 \
   || warn "Seed-script feilet eller ikke tilgjengelig — vi går videre med eksisterende data"
