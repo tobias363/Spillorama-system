@@ -1099,8 +1099,21 @@ export class GamePlanEngineBridge {
     masterHallId: string,
     groupHallId: string,
   ): Promise<string[]> {
+    // 2026-05-08 (BRIDGE_FAILED-fix): SELECT DISTINCT krever at hver
+    // ORDER BY-ekspresjon også står i SELECT-listen. Den tidligere
+    // versjonen brukte `(CASE WHEN m.hall_id = $2 THEN 0 ELSE 1 END)` i
+    // ORDER BY uten å inkludere den i SELECT, noe Postgres avviser med
+    // 42P10 "for SELECT DISTINCT, ORDER BY expressions must appear in
+    // select list" → bridgen kastet, og /start + /advance returnerte
+    // bridgeError=BRIDGE_FAILED uten scheduledGameId.
+    //
+    // Fix: dropp DISTINCT (PRIMARY KEY (group_id, hall_id) garanterer
+    // allerede uniqueness per medlem) og behold sorteringen. Loop-en
+    // under bruker uansett en Set<hall_id> for defensiv dedup, så atferd
+    // er identisk. Master kommer fortsatt først pga. CASE-uttrykket i
+    // ORDER BY.
     const { rows } = await this.pool.query<{ hall_id: string }>(
-      `SELECT DISTINCT m.hall_id, m.added_at
+      `SELECT m.hall_id, m.added_at
        FROM "${this.schema}"."app_hall_group_members" m
        INNER JOIN "${this.schema}"."app_halls" h ON h.id = m.hall_id
        WHERE m.group_id = $1

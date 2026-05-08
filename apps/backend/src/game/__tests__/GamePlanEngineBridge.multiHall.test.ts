@@ -217,8 +217,12 @@ function makeBridge(options: BridgeOptions = {}): {
         return { rows: [] };
       }
       // resolveParticipatingHallIds
+      // 2026-05-08 (BRIDGE_FAILED-fix): DISTINCT ble fjernet fordi
+      // Postgres avviser ORDER BY-CASE-uttrykk uten matchende SELECT-felt
+      // (42P10). PRIMARY KEY (group_id, hall_id) gir uniqueness uten
+      // DISTINCT.
       if (
-        /SELECT\s+DISTINCT\s+m\.hall_id/i.test(sql) &&
+        /SELECT\s+m\.hall_id,\s*m\.added_at/i.test(sql) &&
         /app_hall_group_members/i.test(sql)
       ) {
         const masterId =
@@ -511,11 +515,11 @@ test("Idempotent retry: re-kall returnerer eksisterende rad uten ny INSERT", asy
   );
   assert.equal(insert, undefined, "INSERT skal IKKE kjøres ved retry");
 
-  // Verifiser at vi ikke kalte resolveParticipatingHallIds (DISTINCT-spørring)
-  // — eksisterende rad hopper rett til catalog-fetch og returnerer.
+  // Verifiser at vi ikke kalte resolveParticipatingHallIds — eksisterende
+  // rad hopper rett til catalog-fetch og returnerer.
   const partQ = queries.find(
     (q) =>
-      /SELECT\s+DISTINCT\s+m\.hall_id/i.test(q.sql) &&
+      /SELECT\s+m\.hall_id,\s*m\.added_at/i.test(q.sql) &&
       /app_hall_group_members/i.test(q.sql),
   );
   assert.equal(

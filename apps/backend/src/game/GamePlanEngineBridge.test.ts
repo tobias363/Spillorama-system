@@ -221,10 +221,14 @@ function makeBridge(options: BridgeOptions = {}): {
         }
         return { rows: [] };
       }
-      // SELECT DISTINCT m.hall_id FROM ... app_hall_group_members
-      // (resolveParticipatingHallIds — alle aktive haller i gruppen)
+      // SELECT m.hall_id, m.added_at FROM ... app_hall_group_members
+      // (resolveParticipatingHallIds — alle aktive haller i gruppen).
+      // 2026-05-08: DISTINCT ble fjernet pga. PG-feil 42P10 ("for SELECT
+      // DISTINCT, ORDER BY expressions must appear in select list" når
+      // ORDER BY brukte en CASE-ekspresjon for å heise master til topps).
+      // PRIMARY KEY (group_id, hall_id) garanterer uniqueness uten DISTINCT.
       if (
-        /SELECT\s+DISTINCT\s+m\.hall_id/i.test(sql) &&
+        /SELECT\s+m\.hall_id,\s*m\.added_at/i.test(sql) &&
         /app_hall_group_members/i.test(sql)
       ) {
         const masterId =
