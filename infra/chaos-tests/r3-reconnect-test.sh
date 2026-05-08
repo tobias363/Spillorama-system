@@ -126,9 +126,27 @@ info "Genererer .env.chaos (idempotent)"
 bash "$SCRIPT_DIR/setup-chaos-env.sh" >/dev/null
 
 # ── §1 Bygg og start chaos-stack (gjenbruker R2-compose) ────────────────
-info "Bygger og starter chaos-stack (backend-1 + postgres + redis — backend-2 ikke nødvendig for R3)"
+# R3 trenger bare backend-1, men compose ville startet backend-2 i
+# parallell og truffet samme schema-init-race som beskrevet i r2-skriptet.
+# Vi bringer derfor opp deps + backend-1 eksplisitt og lar backend-2 være.
+info "Bygger og starter chaos-stack (postgres + redis + backend-1 — backend-2 starter ikke for R3)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
-docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build postgres redis
+
+info "Venter på postgres + redis health (timeout 60s)"
+WAITED=0
+while [[ $WAITED -lt 60 ]]; do
+  PG_OK=$(docker inspect -f '{{.State.Health.Status}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo unknown)
+  R_OK=$(docker inspect -f '{{.State.Health.Status}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q redis | head -1)" 2>/dev/null || echo unknown)
+  if [[ "$PG_OK" == "healthy" && "$R_OK" == "healthy" ]]; then
+    pass "postgres + redis healthy (etter ${WAITED}s)"
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-1
 
 info "Venter på at backend-1 blir healthy (timeout 90s)"
 WAITED=0

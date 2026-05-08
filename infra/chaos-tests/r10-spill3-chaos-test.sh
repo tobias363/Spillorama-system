@@ -104,23 +104,55 @@ info "Genererer .env.chaos (idempotent)"
 bash "$SCRIPT_DIR/setup-chaos-env.sh" >/dev/null
 
 # ── §1 Bygg og start chaos-stack ─────────────────────────────────────────
-info "Bygger og starter chaos-stack (backend-1 + backend-2 + postgres + redis)"
+# Sequential bring-up — see r2-failover-test.sh for the schema-init-race
+# rationale.
+info "Bygger og starter chaos-stack (postgres + redis først)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
-docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build postgres redis
 
-info "Venter på at begge backend-instanser blir healthy (timeout 90s)"
+info "Venter på postgres + redis health (timeout 60s)"
 WAITED=0
-H1=""
-H2=""
-while [[ $WAITED -lt 90 ]]; do
-  H1=$(curl -sf "$BACKEND_1_URL/health" 2>/dev/null || echo "")
-  H2=$(curl -sf "$BACKEND_2_URL/health" 2>/dev/null || echo "")
-  if [[ -n "$H1" ]] && [[ -n "$H2" ]]; then
-    pass "Begge backends svarer på /health (etter ${WAITED}s)"
+while [[ $WAITED -lt 60 ]]; do
+  PG_OK=$(docker inspect -f '{{.State.Health.Status}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo unknown)
+  R_OK=$(docker inspect -f '{{.State.Health.Status}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q redis | head -1)" 2>/dev/null || echo unknown)
+  if [[ "$PG_OK" == "healthy" && "$R_OK" == "healthy" ]]; then
+    pass "postgres + redis healthy (etter ${WAITED}s)"
     break
   fi
-  sleep 3
-  WAITED=$((WAITED + 3))
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+
+info "Starter backend-1 (initialiserer DB-skjema)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-1
+
+info "Venter på at backend-1 svarer (timeout 60s)"
+WAITED=0
+H1=""
+while [[ $WAITED -lt 60 ]]; do
+  H1=$(curl -sf "$BACKEND_1_URL/health" 2>/dev/null || echo "")
+  if [[ -n "$H1" ]]; then
+    pass "backend-1 svarer (etter ${WAITED}s)"
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+
+info "Starter backend-2 (DB-skjema er initialisert)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-2
+
+info "Venter på at backend-2 svarer (timeout 60s)"
+WAITED=0
+H2=""
+while [[ $WAITED -lt 60 ]]; do
+  H2=$(curl -sf "$BACKEND_2_URL/health" 2>/dev/null || echo "")
+  if [[ -n "$H2" ]]; then
+    pass "Begge backends svarer (etter ${WAITED}s)"
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
 done
 
 if [[ -z "${H1:-}" || -z "${H2:-}" ]]; then
