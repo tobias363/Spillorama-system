@@ -190,3 +190,10 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 - Endrer multi-vinner-regel
 - Endrer pilot-go-live-kriterier
 - Lager nye gevinstmønstre for Spill 1
+
+## Relaterte ADR-er
+
+- [ADR-0002 — Perpetual rom-modell for Spill 2/3](../../../docs/adr/0002-perpetual-room-model-spill2-3.md) — kontrast: Spill 1 forblir per-hall master-styrt
+- [ADR-0008 — Spillkatalog-paritet (Spill 1-3 = MAIN_GAME)](../../../docs/adr/0008-spillkatalog-classification.md) — bindende: MAIN_GAME for bingo
+- [ADR-0009 — PM-sentralisert git-flyt](../../../docs/adr/0009-pm-centralized-git-flow.md) — relevant for koordinering av master-flyt-PR-er
+- [ADR-0011 — Casino-grade observability](../../../docs/adr/0011-casino-grade-observability.md) — trace-ID-propagering gjelder også master-actions

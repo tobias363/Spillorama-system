@@ -430,6 +430,18 @@ Earlier docs claimed all four were hovedspill — that was incorrect and correct
 
 Project memory lives in `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/` with `MEMORY.md` as the index. Auto-loaded each session — use it for user profile, feedback rules, and project decisions that survive across sessions.
 
+### Architecture Decision Records (ADR)
+
+Design-beslutninger som påvirker ≥ 2 agenter eller services dokumenteres som ADR-er i `docs/adr/`. Når du tar en slik beslutning, **lag en ADR FØR du commiterer kode** — ellers glir "why"-konteksten bort med PM-handovers.
+
+- Index: @docs/adr/README.md
+- Template: @docs/adr/_template.md
+- Selv-referansen (om ADR-prosessen): @docs/adr/0001-adr-format-og-prosess.md
+
+ADR-er er **immutable etter merge**. Hvis du må snu, lag ny ADR som markerer den gamle `Superseded by ADR-MMMM`. Sentrale skills i `.claude/skills/` peker på relevante ADR-er i `Relaterte ADR-er`-seksjonen.
+
+> **Migrering 2026-05-08:** ADR-er er flyttet fra `docs/decisions/` (3-siffer) til `docs/adr/` (4-siffer). Eldre referanser til `ADR-NNN` skal mappes til `NNNN` per katalog i `docs/decisions/README.md`.
+
 ### Git workflow (PM-centralized, adopted 2026-04-21)
 
 - **Agents** commit + push feature-branches only.
