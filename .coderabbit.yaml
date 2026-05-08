@@ -234,6 +234,25 @@ reviews:
         Endringer i SKILL.md påvirker hvordan agenter resonnerer — gjennomgå
         med ekstra forsiktighet.
 
+    - path: "docs/adr/**"
+      instructions: |
+        ADR-format (ADR-0001 er selv-refererende kilde — ALDRI rør den uten
+        å erstatte med ny ADR med Status: Superseded by ADR-MMMM).
+        Filnavn: `NNNN-kort-tittel.md` (4-siffer numbering, kebab-case).
+        Verifiser:
+        - Status: Proposed | Accepted | Deprecated | Superseded by ADR-MMMM
+          (ingen andre verdier — ALDRI "WIP" eller "TBD")
+        - Påkrevde seksjoner: Kontekst, Beslutning, Konsekvenser
+          (positive/negative/nøytrale), Alternativer vurdert,
+          Implementasjon, Referanser
+        - Frontmatter: Status, Dato (YYYY-MM-DD), Deciders, Konsulterer
+        - ALDRI endre Status: Accepted ADR — opprett ny ADR som
+          superseder den (`Status: Superseded by ADR-NNNN`)
+        - ALDRI re-bruk ADR-nummer (selv om ADR-en ble forkastet før merge)
+        - Referanser-seksjon skal peke til kilde-doc-er, PR-er, Linear-issues
+        ADR-er er Spillorama-system sin "tidskapsel" — de overlever PM-handovers
+        og må være self-contained. Se ADR-0001 for full prosess-spec.
+
 # Chat-config — for @coderabbitai i PR-kommentarer
 chat:
   auto_reply: true
