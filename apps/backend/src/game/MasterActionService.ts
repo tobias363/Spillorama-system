@@ -173,7 +173,7 @@ export interface MasterActionInput {
   hallId: string;
 }
 
-/** Pause input — har optional reason for audit-trail. */
+/** Pause/Stop input — har optional reason for audit-trail. */
 export interface MasterActionInputWithReason extends MasterActionInput {
   reason?: string;
 }
@@ -319,10 +319,6 @@ function wrapEngineError(err: unknown, context: string): never {
 
 // ── service ─────────────────────────────────────────────────────────────
 
-/**
- * Skeleton — public methods kommer i påfølgende commits.
- * (Bølge 2: skeleton + interfaces først for atomic-commit-historikk.)
- */
 export class MasterActionService {
   private readonly pool: Pool;
   private readonly schema: string;
@@ -403,9 +399,664 @@ export class MasterActionService {
   }
 
   // ── public API ─────────────────────────────────────────────────────────
-  // start/advance/pause/resume/stop/setJackpot kommer i neste commit.
 
-  // ── private helpers (delvis — preValidate/buildResult lander i neste commit) ──
+  /**
+   * Start neste posisjon i planen. Sekvens:
+   *
+   *   1. Pre-validere via aggregator (RBAC + blocking warnings).
+   *   2. `planRunService.getOrCreateForToday(hallId)` — idempotent lazy-create.
+   *   3. `planRunService.start` — idle → running, position=1.
+   *   4. `engineBridge.createScheduledGameForPlanRunPosition` — spawn
+   *      `app_game1_scheduled_games`-rad.
+   *   5. `masterControlService.startGame({ gameId })` — engine starter
+   *      (status='ready_to_start' → 'running').
+   *   6. Audit + return.
+   *
+   * Hvis (5) feiler: rollback (4) ved å la run-status være `running` men
+   * scheduled-game-status forblir `ready_to_start`. Aggregator vil flagge
+   * dette som `BRIDGE_FAILED` ved neste poll (selv om bridgen ikke faktisk
+   * feilet — det er state-mismatch som triggrer warning). Master må kalle
+   * `start` igjen for å re-trigger engine.
+   *
+   * NB: Dette er kompromisset audit-rapporten beskriver — full SAGA-
+   * rollback krever cross-service-transaksjon som ikke er praktisk. Vi
+   * lar plan-state stå og lar aggregator detektere mismatch.
+   */
+  async start(input: MasterActionInput): Promise<MasterActionResult> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+
+    // 1. Pre-validation
+    const lobby = await this.preValidate(hallId, actor, "start");
+
+    // 2. Lazy-create plan-run for today (idempotent).
+    const businessDate = this.businessDate();
+    let run;
+    try {
+      run = await this.planRunService.getOrCreateForToday(hallId, businessDate);
+    } catch (err) {
+      // NO_MATCHING_PLAN, HALL_NOT_IN_GROUP propageres uendret — UI viser
+      // klar feilmelding.
+      throw err;
+    }
+
+    // 3. Validate state-machine pre-condition. Idempotent re-start på en
+    // running run skal ikke feile — vi rull tilbake state og lar bridgen
+    // gjenbruke eksisterende scheduled-game-rad. Men start fra `paused`
+    // eller `finished` er ikke gyldig.
+    if (run.status === "paused") {
+      throw new DomainError(
+        "GAME_PLAN_RUN_INVALID_TRANSITION",
+        "Plan-run er pauset — bruk /resume i stedet.",
+      );
+    }
+    if (run.status === "finished") {
+      throw new DomainError(
+        "PLAN_RUN_FINISHED",
+        "Plan-run er allerede ferdig for i dag.",
+      );
+    }
+
+    // 4. Start (idle → running). Hvis allerede running er dette idempotent
+    // for engine-bridge-spawn, men plan-service vil avvise idle→running
+    // som ugyldig overgang. Vi sjekker først.
+    let started = run;
+    if (run.status === "idle") {
+      started = await this.planRunService.start(
+        hallId,
+        businessDate,
+        actor.userId,
+      );
+    }
+
+    // 5. Bridge-spawn for current_position. Idempotent på (run.id, position).
+    let scheduledGameId: string;
+    try {
+      const result = await this.engineBridge.createScheduledGameForPlanRunPosition(
+        started.id,
+        started.currentPosition,
+      );
+      scheduledGameId = result.scheduledGameId;
+    } catch (err) {
+      // JACKPOT_SETUP_REQUIRED og HALL_NOT_IN_GROUP er forventede domain-
+      // errors — propager. Andre feil indikerer infrastruktur-problem og
+      // pakkes som BRIDGE_FAILED for konsistent error-shape.
+      if (err instanceof DomainError) {
+        if (
+          err.code === "JACKPOT_SETUP_REQUIRED" ||
+          err.code === "HALL_NOT_IN_GROUP" ||
+          err.code === "MASTER_NOT_IN_GROUP" ||
+          err.code === "NO_ACTIVE_HALLS_IN_GROUP"
+        ) {
+          throw err;
+        }
+      }
+      logger.error(
+        { err, runId: started.id, position: started.currentPosition },
+        "[master-action] bridge-spawn feilet",
+      );
+      throw new DomainError(
+        "BRIDGE_FAILED",
+        "Kunne ikke spawne scheduled-game fra plan-run-posisjon.",
+        {
+          runId: started.id,
+          position: started.currentPosition,
+          originalError:
+            err instanceof Error ? err.message : "ukjent feil",
+        },
+      );
+    }
+
+    // 6. Engine.startGame — flytter scheduled-game.status til 'running' +
+    // trigger draw-engine.
+    let engineResult;
+    try {
+      engineResult = await this.masterControlService.startGame({
+        gameId: scheduledGameId,
+        actor,
+        // Tobias-direktiv 2026-05-08: master kan starte uavhengig av
+        // ready-status. Vi sender ikke confirmUnready/confirmExcludeRed
+        // — masterControlService auto-ekskluderer non-green halls.
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          scheduledGameId,
+          runId: started.id,
+          actorId: actor.userId,
+        },
+        "[master-action] engine.startGame feilet — plan-state forblir running. Master må kalle /start igjen.",
+      );
+      wrapEngineError(err, "start.engine");
+    }
+
+    // 7. Audit
+    await this.audit({
+      action: "spill1.master.start",
+      actor,
+      hallId,
+      planRunId: started.id,
+      scheduledGameId,
+      details: {
+        position: started.currentPosition,
+        previousPlanStatus: run.status,
+        engineStatus: engineResult.status,
+      },
+    });
+
+    // 8. Best-effort broadcast
+    this.fireLobbyBroadcast(hallId);
+
+    return this.buildResult({
+      scheduledGameId,
+      planRunId: started.id,
+      planRunStatus: started.status,
+      scheduledGameStatus: engineResult.status as Spill1ScheduledGameStatus,
+      lobby,
+    });
+  }
+
+  /**
+   * Flytt til neste posisjon i planen. Sekvens:
+   *
+   *   1. Pre-validering.
+   *   2. `planRunService.advanceToNext` — position++ (eller finished hvis
+   *      siste posisjon nådd). Returnerer `jackpotSetupRequired=true` hvis
+   *      catalog krever popup; i så fall blir plan-run IKKE flyttet.
+   *   3. Hvis `jackpotSetupRequired=true` → kast `JACKPOT_SETUP_REQUIRED`
+   *      og la caller invoke /setJackpot.
+   *   4. Hvis status='finished' → return uten engine-call.
+   *   5. `engineBridge.createScheduledGameForPlanRunPosition` for ny posisjon.
+   *   6. `masterControlService.startGame({ gameId })` for ny posisjon.
+   *   7. Audit + return.
+   */
+  async advance(input: MasterActionInput): Promise<MasterActionResult> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+
+    const lobby = await this.preValidate(hallId, actor, "advance");
+
+    const businessDate = this.businessDate();
+    const result = await this.planRunService.advanceToNext(
+      hallId,
+      businessDate,
+      actor.userId,
+    );
+
+    // Catch jackpot-setup blokkering FØR engine-bridge-spawn.
+    if (result.jackpotSetupRequired) {
+      const detail = result.nextGame
+        ? {
+            position: result.run.currentPosition + 1,
+            catalogId: result.nextGame.id,
+            catalogSlug: result.nextGame.slug,
+          }
+        : { position: result.run.currentPosition + 1 };
+      throw new DomainError(
+        "JACKPOT_SETUP_REQUIRED",
+        "Neste posisjon krever jackpot-popup — kall /jackpot-setup først.",
+        detail,
+      );
+    }
+
+    // Plan-run gikk til 'finished' (siste posisjon passert).
+    if (result.run.status === "finished") {
+      await this.audit({
+        action: "spill1.master.finish",
+        actor,
+        hallId,
+        planRunId: result.run.id,
+        scheduledGameId: null,
+        details: {
+          finalPosition: result.run.currentPosition,
+          reason: "advance_past_end",
+        },
+      });
+      this.fireLobbyBroadcast(hallId);
+      return this.buildResult({
+        scheduledGameId: null,
+        planRunId: result.run.id,
+        planRunStatus: result.run.status,
+        scheduledGameStatus: null,
+        lobby,
+      });
+    }
+
+    // Spawn ny scheduled-game-rad.
+    let scheduledGameId: string;
+    try {
+      const bridgeResult =
+        await this.engineBridge.createScheduledGameForPlanRunPosition(
+          result.run.id,
+          result.run.currentPosition,
+        );
+      scheduledGameId = bridgeResult.scheduledGameId;
+    } catch (err) {
+      if (err instanceof DomainError) {
+        if (
+          err.code === "JACKPOT_SETUP_REQUIRED" ||
+          err.code === "HALL_NOT_IN_GROUP" ||
+          err.code === "MASTER_NOT_IN_GROUP" ||
+          err.code === "NO_ACTIVE_HALLS_IN_GROUP"
+        ) {
+          throw err;
+        }
+      }
+      logger.error(
+        { err, runId: result.run.id, position: result.run.currentPosition },
+        "[master-action] bridge-spawn feilet på advance",
+      );
+      throw new DomainError(
+        "BRIDGE_FAILED",
+        "Kunne ikke spawne scheduled-game for ny posisjon.",
+        {
+          runId: result.run.id,
+          position: result.run.currentPosition,
+          originalError:
+            err instanceof Error ? err.message : "ukjent feil",
+        },
+      );
+    }
+
+    // Trigger engine.
+    let engineResult;
+    try {
+      engineResult = await this.masterControlService.startGame({
+        gameId: scheduledGameId,
+        actor,
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          scheduledGameId,
+          runId: result.run.id,
+        },
+        "[master-action] engine.startGame feilet på advance",
+      );
+      wrapEngineError(err, "advance.engine");
+    }
+
+    await this.audit({
+      action: "spill1.master.advance",
+      actor,
+      hallId,
+      planRunId: result.run.id,
+      scheduledGameId,
+      details: {
+        toPosition: result.run.currentPosition,
+        catalogSlug: result.nextGame?.slug ?? null,
+        engineStatus: engineResult.status,
+      },
+    });
+
+    this.fireLobbyBroadcast(hallId);
+
+    return this.buildResult({
+      scheduledGameId,
+      planRunId: result.run.id,
+      planRunStatus: result.run.status,
+      scheduledGameStatus: engineResult.status as Spill1ScheduledGameStatus,
+      lobby,
+    });
+  }
+
+  /**
+   * Pause aktiv runde. Sekvens:
+   *
+   *   1. Pre-validering.
+   *   2. `lobby.currentScheduledGameId` MÅ være satt — ellers NO_ACTIVE_GAME.
+   *   3. `masterControlService.pauseGame({ gameId, reason })`.
+   *   4. `planRunService.pause` — best-effort marker. Hvis run er i annen
+   *      status, logg + skip (ikke kast).
+   *   5. Audit + return.
+   */
+  async pause(input: MasterActionInputWithReason): Promise<MasterActionResult> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+    const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+
+    const lobby = await this.preValidate(hallId, actor, "pause");
+
+    const scheduledGameId = lobby.currentScheduledGameId;
+    if (!scheduledGameId) {
+      throw new DomainError(
+        "NO_ACTIVE_GAME",
+        "Ingen aktiv runde å pause for hallen.",
+      );
+    }
+
+    let engineResult;
+    try {
+      engineResult = await this.masterControlService.pauseGame({
+        gameId: scheduledGameId,
+        actor,
+        ...(reason ? { reason } : {}),
+      });
+    } catch (err) {
+      logger.warn(
+        { err, scheduledGameId, hallId },
+        "[master-action] pauseGame feilet",
+      );
+      wrapEngineError(err, "pause.engine");
+    }
+
+    // Best-effort plan-run pause. Plan-run kan være i `running` eller annen
+    // status; vi ignorerer feil her siden engine allerede er pauset.
+    const planRunId = lobby.planMeta?.planRunId ?? null;
+    if (planRunId && lobby.planMeta?.planRunStatus === "running") {
+      try {
+        await this.planRunService.pause(
+          hallId,
+          this.businessDate(),
+          actor.userId,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, planRunId, hallId },
+          "[master-action] plan-run pause feilet — fortsetter (engine allerede pauset)",
+        );
+      }
+    }
+
+    await this.audit({
+      action: "spill1.master.pause",
+      actor,
+      hallId,
+      planRunId,
+      scheduledGameId,
+      details: {
+        reason: reason || null,
+        engineStatus: engineResult.status,
+      },
+    });
+
+    this.fireLobbyBroadcast(hallId);
+
+    // Re-fetch plan-run-status post-pause for return-value.
+    const refreshedPlan = await this.planRunService.findForDay(
+      hallId,
+      this.businessDate(),
+    );
+    const planStatus = refreshedPlan?.status ?? lobby.planMeta?.planRunStatus;
+
+    return this.buildResult({
+      scheduledGameId,
+      planRunId: planRunId ?? "",
+      planRunStatus: (planStatus ?? "running") as Spill1PlanRunStatus,
+      scheduledGameStatus: engineResult.status as Spill1ScheduledGameStatus,
+      lobby,
+    });
+  }
+
+  /**
+   * Resume pauset runde. Sekvens speiler `pause` motsatt vei.
+   */
+  async resume(input: MasterActionInput): Promise<MasterActionResult> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+
+    const lobby = await this.preValidate(hallId, actor, "resume");
+
+    const scheduledGameId = lobby.currentScheduledGameId;
+    if (!scheduledGameId) {
+      throw new DomainError(
+        "NO_ACTIVE_GAME",
+        "Ingen aktiv runde å resume for hallen.",
+      );
+    }
+
+    let engineResult;
+    try {
+      engineResult = await this.masterControlService.resumeGame({
+        gameId: scheduledGameId,
+        actor,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, scheduledGameId, hallId },
+        "[master-action] resumeGame feilet",
+      );
+      wrapEngineError(err, "resume.engine");
+    }
+
+    const planRunId = lobby.planMeta?.planRunId ?? null;
+    if (planRunId && lobby.planMeta?.planRunStatus === "paused") {
+      try {
+        await this.planRunService.resume(
+          hallId,
+          this.businessDate(),
+          actor.userId,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, planRunId, hallId },
+          "[master-action] plan-run resume feilet — fortsetter (engine allerede resumed)",
+        );
+      }
+    }
+
+    await this.audit({
+      action: "spill1.master.resume",
+      actor,
+      hallId,
+      planRunId,
+      scheduledGameId,
+      details: {
+        engineStatus: engineResult.status,
+      },
+    });
+
+    this.fireLobbyBroadcast(hallId);
+
+    const refreshedPlan = await this.planRunService.findForDay(
+      hallId,
+      this.businessDate(),
+    );
+    const planStatus = refreshedPlan?.status ?? lobby.planMeta?.planRunStatus;
+
+    return this.buildResult({
+      scheduledGameId,
+      planRunId: planRunId ?? "",
+      planRunStatus: (planStatus ?? "running") as Spill1PlanRunStatus,
+      scheduledGameStatus: engineResult.status as Spill1ScheduledGameStatus,
+      lobby,
+    });
+  }
+
+  /**
+   * Stopp aktiv runde og avslutt plan-run (idempotent for begge state-rom).
+   * Sekvens:
+   *
+   *   1. Pre-validering.
+   *   2. `masterControlService.stopGame({ gameId, reason })` — engine-side
+   *      cancellation (status='cancelled', refund-loop, etc.).
+   *   3. `planRunService.finish` — plan-run til 'finished'.
+   *   4. Audit + return.
+   *
+   * Reason er påkrevd (regulatorisk audit). Hvis ingen scheduled-game
+   * eksisterer (e.g. master vil bare avslutte plan-run-en) kan plan-run
+   * fortsatt finishes alene — men da kalles ikke engine.
+   */
+  async stop(input: MasterStopInput): Promise<MasterActionResult> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+    const reason = (input.reason ?? "").trim();
+    if (!reason) {
+      throw new DomainError("INVALID_INPUT", "reason er påkrevd ved stop.");
+    }
+
+    const lobby = await this.preValidate(hallId, actor, "stop");
+
+    const scheduledGameId = lobby.currentScheduledGameId;
+    let engineResult: { status: string; refundSummary?: unknown } | null = null;
+
+    if (scheduledGameId) {
+      try {
+        engineResult = await this.masterControlService.stopGame({
+          gameId: scheduledGameId,
+          actor,
+          reason,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, scheduledGameId, hallId },
+          "[master-action] stopGame feilet",
+        );
+        wrapEngineError(err, "stop.engine");
+      }
+    }
+
+    const planRunId = lobby.planMeta?.planRunId ?? null;
+    if (planRunId) {
+      try {
+        await this.planRunService.finish(
+          hallId,
+          this.businessDate(),
+          actor.userId,
+        );
+      } catch (err) {
+        // Hvis run er i status der finish ikke er gyldig, logg og fortsett.
+        // Engine er allerede stoppet, så semantisk er stoppet utført.
+        logger.warn(
+          { err, planRunId, hallId },
+          "[master-action] plan-run finish feilet — fortsetter (engine allerede stoppet)",
+        );
+      }
+    }
+
+    await this.audit({
+      action: "spill1.master.stop",
+      actor,
+      hallId,
+      planRunId,
+      scheduledGameId: scheduledGameId ?? null,
+      details: {
+        reason,
+        engineStatus: engineResult?.status ?? null,
+      },
+    });
+
+    this.fireLobbyBroadcast(hallId);
+
+    return this.buildResult({
+      scheduledGameId,
+      planRunId: planRunId ?? "",
+      planRunStatus: "finished",
+      scheduledGameStatus:
+        (engineResult?.status as Spill1ScheduledGameStatus | undefined) ??
+        null,
+      lobby,
+    });
+  }
+
+  /**
+   * Submit jackpot-popup (draw + prizesCents) for en posisjon. Validerer:
+   *
+   *   - position ≥ 1
+   *   - draw ∈ [1, 90]
+   *   - prizesCents-keys i TICKET_COLOR_VALUES, verdier positive heltall (øre)
+   *
+   * Plan-run må være i `running` eller `paused`. Service-laget validerer
+   * også at posisjonen krever override (catalog.requiresJackpotSetup=true).
+   */
+  async setJackpot(input: MasterSetJackpotInput): Promise<MasterActionResult> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+
+    if (
+      !Number.isFinite(input.position) ||
+      !Number.isInteger(input.position) ||
+      input.position < 1
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "position må være positivt heltall.",
+      );
+    }
+    if (
+      !Number.isFinite(input.draw) ||
+      !Number.isInteger(input.draw) ||
+      input.draw < MIN_DRAW ||
+      input.draw > MAX_DRAW
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `draw må være heltall mellom ${MIN_DRAW} og ${MAX_DRAW}.`,
+      );
+    }
+    if (
+      !input.prizesCents ||
+      typeof input.prizesCents !== "object" ||
+      Array.isArray(input.prizesCents)
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "prizesCents må være et objekt.",
+      );
+    }
+    const prizesCents: Record<string, number> = {};
+    for (const [k, v] of Object.entries(input.prizesCents)) {
+      if (!VALID_TICKET_COLORS.has(k as TicketColor)) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `prizesCents.${k} er ikke en gyldig bongfarge.`,
+        );
+      }
+      const n = Number(v);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `prizesCents.${k} må være positivt heltall (øre).`,
+        );
+      }
+      prizesCents[k] = n;
+    }
+    if (Object.keys(prizesCents).length === 0) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "prizesCents må ha minst én farge.",
+      );
+    }
+
+    const lobby = await this.preValidate(hallId, actor, "setJackpot");
+
+    const businessDate = this.businessDate();
+    const updated = await this.planRunService.setJackpotOverride(
+      hallId,
+      businessDate,
+      input.position,
+      { draw: input.draw, prizesCents },
+      actor.userId,
+    );
+
+    await this.audit({
+      action: "spill1.master.jackpot_set",
+      actor,
+      hallId,
+      planRunId: updated.id,
+      scheduledGameId: lobby.currentScheduledGameId,
+      details: {
+        position: input.position,
+        draw: input.draw,
+        prizeColors: Object.keys(prizesCents),
+      },
+    });
+
+    this.fireLobbyBroadcast(hallId);
+
+    return this.buildResult({
+      scheduledGameId: lobby.currentScheduledGameId,
+      planRunId: updated.id,
+      planRunStatus: updated.status,
+      scheduledGameStatus:
+        lobby.scheduledGameMeta?.status ?? null,
+      lobby,
+    });
+  }
+
+  // ── private helpers ────────────────────────────────────────────────────
 
   private businessDate(): string {
     return todayOsloKey(this.clock());
@@ -420,7 +1071,7 @@ export class MasterActionService {
    *   3. Avvis hvis blocking-warnings (`BRIDGE_FAILED`,
    *      `DUAL_SCHEDULED_GAMES`) er satt (LOBBY_INCONSISTENT).
    */
-  protected async preValidate(
+  private async preValidate(
     hallId: string,
     actor: MasterActor,
     actionName: string,
@@ -474,7 +1125,7 @@ export class MasterActionService {
    * Bygg `MasterActionResult` fra interim state. Alle felter er satt;
    * caller får en konsistent shape uavhengig av action-type.
    */
-  protected buildResult(input: {
+  private buildResult(input: {
     scheduledGameId: string | null;
     planRunId: string;
     planRunStatus: Spill1PlanRunStatus;
@@ -494,22 +1145,65 @@ export class MasterActionService {
    * Best-effort lobby-broadcast. Aldri kaster — feil logges av broadcasteren
    * selv. UI-en som lytter får oppdatert state innen ~50ms etter action.
    */
-  protected fireLobbyBroadcast(hallId: string): void {
+  private fireLobbyBroadcast(hallId: string): void {
     if (!this.lobbyBroadcaster) return;
     void this.lobbyBroadcaster.broadcastForHall(hallId);
   }
 
-  /** Wrapper rundt engine-feil for konsistent ENGINE_FAILED-shape. */
-  protected wrapEngineError(err: unknown, context: string): never {
-    return wrapEngineError(err, context);
+  /**
+   * Audit-event for master-actions. Skriver `spill1.master.<action>`-event
+   * via `AuditLogService`. Fire-and-forget — failure logges men blokkerer
+   * ikke responsen (samme mønster som `GamePlanRunService.audit`).
+   *
+   * Felter som skrives:
+   *   - actorId   = actor.userId
+   *   - actorType = mapping fra MasterActor.role
+   *   - action    = "spill1.master.<verb>"
+   *   - resource  = "spill1_master_action"
+   *   - resourceId = scheduledGameId ?? planRunId (best identifier)
+   *   - details   = { hallId, planRunId, scheduledGameId, ...domainSpecific }
+   */
+  private async audit(input: {
+    action: string;
+    actor: MasterActor;
+    hallId: string;
+    planRunId: string | null;
+    scheduledGameId: string | null;
+    details?: Record<string, unknown>;
+  }): Promise<void> {
+    if (!this.auditLogService) return;
+    try {
+      const actorType =
+        input.actor.role === "ADMIN"
+          ? "ADMIN"
+          : input.actor.role === "HALL_OPERATOR"
+            ? "HALL_OPERATOR"
+            : input.actor.role === "AGENT"
+              ? "AGENT"
+              : input.actor.role === "SUPPORT"
+                ? "SUPPORT"
+                : "USER";
+      const resourceId =
+        input.scheduledGameId ?? input.planRunId ?? null;
+      await this.auditLogService.record({
+        actorId: input.actor.userId,
+        actorType,
+        action: input.action,
+        resource: "spill1_master_action",
+        resourceId,
+        details: {
+          hallId: input.hallId,
+          planRunId: input.planRunId,
+          scheduledGameId: input.scheduledGameId,
+          ...(input.details ?? {}),
+        },
+      });
+    } catch (err) {
+      // Audit-svikt skal aldri blokkere domene-actions.
+      logger.warn(
+        { err, action: input.action },
+        "[master-action] audit-log feilet — fortsetter",
+      );
+    }
   }
-
-  /** Validate ticket-color string — eksponert for setJackpot-implementasjonen. */
-  protected isValidTicketColor(s: string): boolean {
-    return VALID_TICKET_COLORS.has(s as TicketColor);
-  }
-
-  /** MIN_DRAW/MAX_DRAW eksponert for tester og setJackpot. */
-  static readonly MIN_DRAW = MIN_DRAW;
-  static readonly MAX_DRAW = MAX_DRAW;
 }
