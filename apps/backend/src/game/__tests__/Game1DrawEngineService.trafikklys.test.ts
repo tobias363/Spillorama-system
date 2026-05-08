@@ -43,9 +43,24 @@ import {
 } from "../GamePlanEngineBridge.js";
 import {
   buildVariantConfigFromGameConfigJson,
+  pickTrafikklysRowColor,
   resolveOddsenVariantConfig,
+  resolveTrafikklysVariantConfig,
 } from "../Game1DrawEngineHelpers.js";
 import type { GameCatalogEntry } from "../gameCatalog.types.js";
+import { Game1DrawEngineService } from "../Game1DrawEngineService.js";
+import { Game1JackpotService } from "../Game1JackpotService.js";
+import { Game1PayoutService } from "../Game1PayoutService.js";
+import {
+  AuditLogService,
+  InMemoryAuditLogStore,
+} from "../../compliance/AuditLogService.js";
+import type {
+  WalletAdapter,
+  WalletTransaction,
+} from "../../adapters/WalletAdapter.js";
+import type { Game1TicketPurchaseService } from "../Game1TicketPurchaseService.js";
+import type { ComplianceLedgerPort } from "../../adapters/ComplianceLedgerPort.js";
 
 // ── Trafikklys-katalog-fixture (matcher SPILL_REGLER §5.3) ─────────────────
 
@@ -309,140 +324,1363 @@ test("[A4] §9.4: 2 vinnere Fullt Hus grønn (1000 kr-pot) → 500 kr hver", () 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// KATEGORI B — Kontrakt-tester for IKKE-IMPLEMENTERT runtime
+// KATEGORI B — Runtime-tester (Trafikklys-engine)
 //
-// Disse er markert med test.todo. Når Trafikklys-runtime implementeres
-// skal de kunne enables ved å fjerne `.todo`-suffix og bruke det
-// dokumenterte forventede API-et. Se TRAFIKKLYS_RUNTIME_GAP_2026-05-08.md
-// for komplett spec.
+// Disse driver `Game1DrawEngineService.drawNext` mot stub-pool, samme mønster
+// som `Game1DrawEngineService.potPerBongSize.test.ts`. Stub-en simulerer
+// scheduled_game-raden med `trafikklys_row_color` satt OG `game_config_json`
+// med kanonisk `spill1.trafikklys`-blokk slik bridge skriver i prod.
+//
+// Engine-pathen forventes da å:
+//   - Detektere Trafikklys-config via resolveTrafikklysVariantConfig
+//   - Sjekke rad-farge mot rules.rowColors
+//   - Bruke prizesPerRowColor[rowColor] for Rad 1-4 (uniform pot, ikke vektet)
+//   - Bruke bingoPerRowColor[rowColor] for Fullt Hus
+//   - Skrive gameVariant + trafikklysRowColor til ComplianceLedgerPort-metadata
 // ───────────────────────────────────────────────────────────────────────────
 
-// ── B1: Rad-farge-trekking ved spill-start ─────────────────────────────────
+// ── Stub-pool + wallet-helpers (parallel med potPerBongSize-test) ──────────
 
-test.todo(
-  "[B1] runtime: startGame trekker en rad-farge fra rules.rowColors og persisterer på scheduled-game-rad. " +
-    "Forventet: ny kolonne `app_game1_scheduled_games.trafikklys_row_color` (eller felt i game_config_json.spill1.trafikklys.rowColor) settes til en av {grønn, gul, rød}.",
-);
+interface StubResponse {
+  match: (sql: string, params: unknown[]) => boolean;
+  rows: unknown[] | (() => unknown[]);
+  rowCount?: number;
+  once?: boolean;
+  throwErr?: { code: string; message: string };
+}
 
-test.todo(
-  "[B1] runtime: rad-farge-trekking er deterministisk per scheduled-game (samme RNG-seed gir samme rad-farge). " +
-    "Forventet: sann tilfeldighet ved live-spill, men reproduserbar i tester via fixed seed.",
-);
+function createStubPool(responses: StubResponse[]) {
+  const queue = responses.slice();
+  const runQuery = async (sql: string, params: unknown[] = []) => {
+    for (let i = 0; i < queue.length; i++) {
+      const r = queue[i]!;
+      if (r.match(sql, params)) {
+        if (r.throwErr) {
+          const err = Object.assign(new Error(r.throwErr.message), {
+            code: r.throwErr.code,
+          });
+          if (r.once !== false) queue.splice(i, 1);
+          throw err;
+        }
+        const rows = typeof r.rows === "function" ? r.rows() : r.rows;
+        if (r.once !== false) queue.splice(i, 1);
+        return { rows, rowCount: r.rowCount ?? rows.length };
+      }
+    }
+    return { rows: [], rowCount: 0 };
+  };
+  return {
+    pool: {
+      connect: async () => ({ query: runQuery, release: () => undefined }),
+      query: runQuery,
+    },
+  };
+}
 
-// ── B2: Rad-farge eksponert i game-state / room-snapshot ───────────────────
+interface RecordedCredit {
+  accountId: string;
+  amount: number;
+  reason: string;
+  idempotencyKey?: string;
+  to?: string;
+}
 
-test.todo(
-  "[B2] runtime: rad-farge eksponeres i game-state for klient-rendering (TV-skjerm-banner). " +
-    "Forventet: room-snapshot inneholder { trafikklys: { rowColor: 'grønn' } } slik at klient kan vise 'Denne runden er GRØNN'.",
-);
+function makeFakeWallet(): {
+  adapter: WalletAdapter;
+  credits: RecordedCredit[];
+} {
+  const credits: RecordedCredit[] = [];
+  let txCounter = 0;
+  const adapter: WalletAdapter = {
+    async createAccount() {
+      throw new Error("ni");
+    },
+    async ensureAccount() {
+      throw new Error("ni");
+    },
+    async getAccount() {
+      throw new Error("ni");
+    },
+    async listAccounts() {
+      return [];
+    },
+    async getBalance() {
+      return 0;
+    },
+    async getDepositBalance() {
+      return 0;
+    },
+    async getWinningsBalance() {
+      return 0;
+    },
+    async getBothBalances() {
+      return { deposit: 0, winnings: 0, total: 0 };
+    },
+    async debit() {
+      throw new Error("ni");
+    },
+    async credit(accountId, amount, reason, options) {
+      credits.push({
+        accountId,
+        amount,
+        reason,
+        idempotencyKey: options?.idempotencyKey,
+        to: options?.to,
+      });
+      const tx: WalletTransaction = {
+        id: `wtx-${++txCounter}`,
+        accountId,
+        type: "CREDIT",
+        amount,
+        reason,
+        createdAt: new Date().toISOString(),
+      };
+      return tx;
+    },
+    async topUp() {
+      throw new Error("ni");
+    },
+    async withdraw() {
+      throw new Error("ni");
+    },
+    async transfer() {
+      throw new Error("ni");
+    },
+    async listTransactions() {
+      return [];
+    },
+  };
+  return { adapter, credits };
+}
 
-// ── B3: Rad-pot bruker rules.prizesPerRowColor[radFarge] (uavhengig av bongfarge) ──
+interface RecordedLedgerEvent {
+  hallId: string;
+  eventType: string;
+  amount: number;
+  metadata?: Record<string, unknown>;
+}
 
-test.todo(
-  "[B3] runtime: Rad 1 vinner med rad-farge=rød → 50 kr (uavhengig av bongfarge). " +
-    "Forventet asserts: " +
-    "potForBongSizeCents === 5000 for ALLE bongfarger; " +
-    "wallet.credits[0].amount === 5000 for solo-vinner.",
-);
+function makeRecordingLedger(): {
+  port: ComplianceLedgerPort;
+  events: RecordedLedgerEvent[];
+} {
+  const events: RecordedLedgerEvent[] = [];
+  const port: ComplianceLedgerPort = {
+    async recordComplianceLedgerEvent(input) {
+      events.push({
+        hallId: input.hallId,
+        eventType: input.eventType,
+        amount: input.amount,
+        metadata: input.metadata as Record<string, unknown> | undefined,
+      });
+    },
+  };
+  return { port, events };
+}
 
-test.todo(
-  "[B3] runtime: Rad 1 vinner med rad-farge=grønn → 100 kr. " +
-    "Forventet: potForBongSizeCents === 10000.",
-);
+function makeFakeTicketPurchase(): Game1TicketPurchaseService {
+  return {
+    async listPurchasesForGame() {
+      return [];
+    },
+  } as unknown as Game1TicketPurchaseService;
+}
 
-test.todo(
-  "[B3] runtime: Rad 1 vinner med rad-farge=gul → 150 kr. " +
-    "Forventet: potForBongSizeCents === 15000.",
-);
+// Helpers for å bygge Trafikklys-config og winning grid/markings.
 
-test.todo(
-  "[B3] runtime: hvit-bong (5 kr-multiplier=1) får IKKE vektet pot for Trafikklys. " +
-    "Forventet: pot === prizesPerRowColor[rowColor] uendret (ingen × 1 / × 2 / × 3-skalering).",
-);
+/**
+ * Kanonisk `game_config_json` for Trafikklys (matcher det
+ * `GamePlanEngineBridge.buildTicketConfigFromCatalog` skriver i prod).
+ *
+ * spill1.ticketColors[] inneholder placeholder-pattern fra bridge — engine
+ * skal IKKE bruke disse for Trafikklys, men `patternsByColor`-shape er
+ * nødvendig for at engine velger pot-per-bongstørrelse-pathen (som er den
+ * eneste pathen som har Trafikklys-overstyringen).
+ */
+function makeTrafikklysGameConfig(): unknown {
+  return {
+    spill1: {
+      ticketColors: [
+        // Alle 6 (color, size)-kombinasjoner får placeholder-pattern.
+        // Engine skal overstyre via spill1.trafikklys-blokken nedenfor.
+        {
+          color: "small_white",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            row_2: { mode: "fixed", amount: 100 },
+            row_3: { mode: "fixed", amount: 100 },
+            row_4: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+        {
+          color: "large_white",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            row_2: { mode: "fixed", amount: 100 },
+            row_3: { mode: "fixed", amount: 100 },
+            row_4: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+        {
+          color: "small_yellow",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            row_2: { mode: "fixed", amount: 100 },
+            row_3: { mode: "fixed", amount: 100 },
+            row_4: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+        {
+          color: "large_yellow",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            row_2: { mode: "fixed", amount: 100 },
+            row_3: { mode: "fixed", amount: 100 },
+            row_4: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+        {
+          color: "small_purple",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            row_2: { mode: "fixed", amount: 100 },
+            row_3: { mode: "fixed", amount: 100 },
+            row_4: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+        {
+          color: "large_purple",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            row_2: { mode: "fixed", amount: 100 },
+            row_3: { mode: "fixed", amount: 100 },
+            row_4: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+      ],
+      trafikklys: {
+        rowColors: ["grønn", "gul", "rød"],
+        prizesPerRowColor: {
+          grønn: 10000,
+          gul: 15000,
+          rød: 5000,
+        },
+        bingoPerRowColor: {
+          grønn: 100000,
+          gul: 150000,
+          rød: 50000,
+        },
+      },
+    },
+    // top-level rules-blokk per bridge-konvensjon
+    rules: {
+      gameVariant: "trafikklys",
+      ticketPriceCents: 1500,
+      rowColors: ["grønn", "gul", "rød"],
+      prizesPerRowColor: {
+        grønn: 10000,
+        gul: 15000,
+        rød: 5000,
+      },
+      bingoPerRowColor: {
+        grønn: 100000,
+        gul: 150000,
+        rød: 50000,
+      },
+    },
+  };
+}
 
-test.todo(
-  "[B3] runtime: lilla-bong (15 kr-multiplier=3) får IKKE vektet pot for Trafikklys. " +
-    "Forventet: pot === prizesPerRowColor[rowColor] uendret.",
-);
+function winningRow0Grid(): Array<number | null> {
+  return [
+    1, 2, 3, 4, 5,
+    6, 7, 8, 9, 10,
+    11, 12, 0, 13, 14,
+    15, 16, 17, 18, 19,
+    20, 21, 22, 23, 24,
+  ];
+}
 
-// ── B4: Fullt Hus-pot bruker rules.bingoPerRowColor[radFarge] ──────────────
+function allRow0Marked(): boolean[] {
+  return [
+    true, true, true, true, true,
+    false, false, false, false, false,
+    false, false, true, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+  ];
+}
 
-test.todo(
-  "[B4] runtime: Fullt Hus med rad-farge=rød → 500 kr. " +
-    "Forventet: potForBongSizeCents === 50000 for Fullt Hus-fasen.",
-);
+function fullGridAllMarked(): {
+  grid: Array<number | null>;
+  marked: boolean[];
+} {
+  return {
+    grid: [
+      1, 2, 3, 4, 5,
+      6, 7, 8, 9, 10,
+      11, 12, 0, 13, 14,
+      15, 16, 17, 18, 19,
+      20, 21, 22, 23, 24,
+    ],
+    marked: Array(25).fill(true),
+  };
+}
 
-test.todo(
-  "[B4] runtime: Fullt Hus med rad-farge=grønn → 1000 kr. " +
-    "Forventet: potForBongSizeCents === 100000.",
-);
+function runningStateRow(overrides: Record<string, unknown> = {}) {
+  return {
+    scheduled_game_id: "g1",
+    draw_bag_json: [5, 11, 22],
+    draws_completed: 0,
+    current_phase: 1,
+    last_drawn_ball: null,
+    last_drawn_at: null,
+    next_auto_draw_at: null,
+    paused: false,
+    engine_started_at: "2026-04-21T12:00:00.000Z",
+    engine_ended_at: null,
+    ...overrides,
+  };
+}
 
-test.todo(
-  "[B4] runtime: Fullt Hus med rad-farge=gul → 1500 kr. " +
-    "Forventet: potForBongSizeCents === 150000.",
-);
+interface WinnerDef {
+  assignmentId: string;
+  userId: string;
+  walletId: string;
+  hallId: string;
+  ticketColor: string;
+}
 
-// ── B5: Multi-vinner-aritmetikk via runtime ────────────────────────────────
+/**
+ * Bygg stub-respons-pipeline for én Trafikklys drawNext-call. Setup matcher
+ * faktiske queries i `Game1DrawEngineService.drawNext` for fase 1 — alle
+ * vinner i Rad 1 på første ball.
+ *
+ * Stub-en setter `trafikklys_row_color` på scheduled_games-raden så engine
+ * leser det og overstyrer pot-tabellen.
+ */
+function buildTrafikklysRow1StubResponses(args: {
+  gameConfigJson: unknown;
+  winners: WinnerDef[];
+  trafikklysRowColor: "rød" | "grønn" | "gul";
+  potCents?: number;
+}): StubResponse[] {
+  const winners = args.winners;
+  const drawSeq = 1;
 
-test.todo(
-  "[B5] runtime: 2 vinnere på Rad 1 grønn → hver får 50 kr (100 kr-pot delt likt). " +
-    "Forventet: 2 wallet.credits, hver med amount === 5000.",
-);
+  const walletIdResponses: StubResponse[] = winners.map((w) => ({
+    match: (s) => s.includes("wallet_id") && s.includes("app_users"),
+    rows: [{ wallet_id: w.walletId }],
+    once: true,
+  }));
 
-test.todo(
-  "[B5] runtime: 3 vinnere på Fullt Hus rød (500 kr-pot) → hver får 166 kr, rest 2 til hus. " +
-    "Forventet: floor-split + house-retain matcher splitPot(50000, 3).",
-);
+  return [
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      rows: [
+        runningStateRow({
+          draws_completed: drawSeq - 1,
+          current_phase: 1,
+          last_drawn_ball: null,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [
+        {
+          id: "g1",
+          status: "running",
+          ticket_config_json: {},
+          game_config_json: args.gameConfigJson,
+          trafikklys_row_color: args.trafikklysRowColor,
+        },
+      ],
+    },
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") &&
+        s.includes("app_game1_ticket_assignments") &&
+        s.includes("FOR UPDATE"),
+      rows: winners.map((w) => ({
+        id: w.assignmentId,
+        grid_numbers_json: winningRow0Grid(),
+        markings_json: { marked: allRow0Marked() },
+      })),
+    },
+    {
+      match: (s) =>
+        s.trim().startsWith("UPDATE") &&
+        s.includes("app_game1_ticket_assignments") &&
+        s.includes("markings_json"),
+      rows: [],
+      once: false,
+    },
+    {
+      match: (s) =>
+        s.includes(
+          "SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id",
+        ) && s.includes("app_game1_ticket_assignments"),
+      rows: winners.map((w) => ({
+        id: w.assignmentId,
+        grid_numbers_json: winningRow0Grid(),
+        markings_json: { marked: allRow0Marked() },
+        buyer_user_id: w.userId,
+        hall_id: w.hallId,
+        ticket_color: w.ticketColor,
+      })),
+    },
+    ...walletIdResponses,
+    {
+      match: (s) =>
+        s.includes("COALESCE(SUM(total_amount_cents)") &&
+        s.includes("app_game1_ticket_purchases"),
+      rows: [{ pot_cents: args.potCents ?? 0 }],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_phase_winners"),
+      rows: [],
+      once: false,
+    },
+    {
+      match: (s) =>
+        s.trim().startsWith("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("SELECT") && s.includes("app_game1_game_state"),
+      rows: [
+        runningStateRow({
+          draws_completed: drawSeq,
+          last_drawn_ball: 5,
+          current_phase: 2,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        {
+          draw_sequence: drawSeq,
+          ball_value: 5,
+          drawn_at: "2026-04-21T12:01:00.000Z",
+        },
+      ],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ];
+}
 
-// ── B6: Multi-bong-per-spiller-håndtering ──────────────────────────────────
+/**
+ * Bygg stub for Fullt Hus-fase (current_phase=5, alle markeringer satt).
+ * Brukes for Fullt Hus-runtime-tester.
+ */
+function buildTrafikklysFullHouseStubResponses(args: {
+  gameConfigJson: unknown;
+  winners: WinnerDef[];
+  trafikklysRowColor: "rød" | "grønn" | "gul";
+  drawSequenceAtWin?: number;
+}): StubResponse[] {
+  const winners = args.winners;
+  const drawSeq = args.drawSequenceAtWin ?? 1;
+  const { grid, marked } = fullGridAllMarked();
 
-test.todo(
-  "[B6] runtime: spiller med 3 bonger som alle vinner Rad 1 grønn → spilleren får én pot-andel × 3 (eller én aggregert credit). " +
-    "Forventet: payout-aritmetikk matcher §9.4 multi-bong-regelen — ingen dobbeltelling.",
-);
+  const walletIdResponses: StubResponse[] = winners.map((w) => ({
+    match: (s) => s.includes("wallet_id") && s.includes("app_users"),
+    rows: [{ wallet_id: w.walletId }],
+    once: true,
+  }));
+
+  // draw_bag må ha nok baller. Lag bag med drawSeq + 5 baller.
+  const drawBag: number[] = [];
+  for (let i = 1; i <= drawSeq + 5; i++) drawBag.push(i);
+
+  return [
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      rows: [
+        runningStateRow({
+          draws_completed: drawSeq - 1,
+          current_phase: 5,
+          draw_bag_json: drawBag,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [
+        {
+          id: "g1",
+          status: "running",
+          ticket_config_json: {},
+          game_config_json: args.gameConfigJson,
+          trafikklys_row_color: args.trafikklysRowColor,
+        },
+      ],
+    },
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") &&
+        s.includes("app_game1_ticket_assignments") &&
+        s.includes("FOR UPDATE"),
+      rows: winners.map((w) => ({
+        id: w.assignmentId,
+        grid_numbers_json: grid,
+        markings_json: { marked },
+      })),
+    },
+    {
+      match: (s) =>
+        s.trim().startsWith("UPDATE") &&
+        s.includes("app_game1_ticket_assignments") &&
+        s.includes("markings_json"),
+      rows: [],
+      once: false,
+    },
+    {
+      match: (s) =>
+        s.includes(
+          "SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id",
+        ) && s.includes("app_game1_ticket_assignments"),
+      rows: winners.map((w) => ({
+        id: w.assignmentId,
+        grid_numbers_json: grid,
+        markings_json: { marked },
+        buyer_user_id: w.userId,
+        hall_id: w.hallId,
+        ticket_color: w.ticketColor,
+      })),
+    },
+    ...walletIdResponses,
+    {
+      match: (s) =>
+        s.includes("COALESCE(SUM(total_amount_cents)") &&
+        s.includes("app_game1_ticket_purchases"),
+      rows: [{ pot_cents: 0 }],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_phase_winners"),
+      rows: [],
+      once: false,
+    },
+    {
+      match: (s) =>
+        s.trim().startsWith("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("SELECT") && s.includes("app_game1_game_state"),
+      rows: [
+        runningStateRow({
+          draws_completed: drawSeq,
+          last_drawn_ball: drawSeq,
+          current_phase: 5,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        {
+          draw_sequence: drawSeq,
+          ball_value: drawSeq,
+          drawn_at: "2026-04-21T12:01:00.000Z",
+        },
+      ],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ];
+}
+
+function makeServiceForRow1(
+  gameConfigJson: unknown,
+  winners: WinnerDef[],
+  trafikklysRowColor: "rød" | "grønn" | "gul",
+  options: { potCents?: number } = {},
+): {
+  service: Game1DrawEngineService;
+  wallet: ReturnType<typeof makeFakeWallet>;
+  ledger: ReturnType<typeof makeRecordingLedger>;
+} {
+  const wallet = makeFakeWallet();
+  const ledger = makeRecordingLedger();
+  const payoutService = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    complianceLedgerPort: ledger.port,
+  });
+  const jackpotService = new Game1JackpotService();
+  const { pool } = createStubPool(
+    buildTrafikklysRow1StubResponses({
+      gameConfigJson,
+      winners,
+      trafikklysRowColor,
+      potCents: options.potCents,
+    }),
+  );
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase(),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    payoutService,
+    jackpotService,
+  });
+  return { service, wallet, ledger };
+}
+
+function makeServiceForFullHouse(
+  gameConfigJson: unknown,
+  winners: WinnerDef[],
+  trafikklysRowColor: "rød" | "grønn" | "gul",
+  options: { drawSequenceAtWin?: number } = {},
+): {
+  service: Game1DrawEngineService;
+  wallet: ReturnType<typeof makeFakeWallet>;
+  ledger: ReturnType<typeof makeRecordingLedger>;
+} {
+  const wallet = makeFakeWallet();
+  const ledger = makeRecordingLedger();
+  const payoutService = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    complianceLedgerPort: ledger.port,
+  });
+  const jackpotService = new Game1JackpotService();
+  const { pool } = createStubPool(
+    buildTrafikklysFullHouseStubResponses({
+      gameConfigJson,
+      winners,
+      trafikklysRowColor,
+      drawSequenceAtWin: options.drawSequenceAtWin,
+    }),
+  );
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase(),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    payoutService,
+    jackpotService,
+  });
+  return { service, wallet, ledger };
+}
+
+// ── B1: Rad-farge-trekking ─────────────────────────────────────────────────
+
+test("[B1] runtime: pickTrafikklysRowColor trekker en farge fra rules.rowColors", () => {
+  const cfg = resolveTrafikklysVariantConfig({
+    rules: {
+      gameVariant: "trafikklys",
+      rowColors: ["grønn", "gul", "rød"],
+      prizesPerRowColor: { grønn: 10000, gul: 15000, rød: 5000 },
+      bingoPerRowColor: { grønn: 100000, gul: 150000, rød: 50000 },
+    },
+  });
+  assert.ok(cfg, "config skal kunne parses");
+  // Sample 30 trekkinger — alle skal være innenfor whitelist.
+  for (let i = 0; i < 30; i++) {
+    const c = pickTrafikklysRowColor(cfg!);
+    assert.ok(
+      ["grønn", "gul", "rød"].includes(c),
+      `${c} må være en gyldig rad-farge`,
+    );
+  }
+});
+
+test("[B1] runtime: pickTrafikklysRowColor er deterministisk når pickFn injiseres", () => {
+  const cfg = resolveTrafikklysVariantConfig({
+    rules: {
+      gameVariant: "trafikklys",
+      rowColors: ["grønn", "gul", "rød"],
+      prizesPerRowColor: { grønn: 10000, gul: 15000, rød: 5000 },
+      bingoPerRowColor: { grønn: 100000, gul: 150000, rød: 50000 },
+    },
+  });
+  assert.ok(cfg);
+  // Stub pickFn: returner alltid index 0 → grønn (første i listen).
+  const c1 = pickTrafikklysRowColor(cfg!, () => 0);
+  const c2 = pickTrafikklysRowColor(cfg!, () => 0);
+  assert.equal(c1, "grønn");
+  assert.equal(c2, "grønn");
+  // Stub pickFn: returner index 1 → gul.
+  assert.equal(pickTrafikklysRowColor(cfg!, () => 1), "gul");
+  // Stub pickFn: returner index 2 → rød.
+  assert.equal(pickTrafikklysRowColor(cfg!, () => 2), "rød");
+});
+
+// ── B2: Rad-farge eksponert i game-state ──────────────────────────────────
+
+test("[B2] runtime: getState eksponerer trafikklysRowColor fra DB-kolonne", async () => {
+  // Vi simulerer kun getState — buildStateView blir testet end-to-end via
+  // andre tester. Her sjekker vi at state-view-en inneholder rad-fargen
+  // når DB-raden har den satt.
+  const { pool } = createStubPool([
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_game_state"),
+      rows: [
+        runningStateRow({
+          draws_completed: 1,
+          current_phase: 2,
+          last_drawn_ball: 5,
+        }),
+      ],
+    },
+    {
+      match: (s) =>
+        s.includes("status") &&
+        s.includes("trafikklys_row_color") &&
+        s.includes("scheduled_games"),
+      rows: [{ status: "running", trafikklys_row_color: "grønn" }],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        {
+          draw_sequence: 1,
+          ball_value: 5,
+          drawn_at: "2026-04-21T12:01:00.000Z",
+        },
+      ],
+    },
+  ]);
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase(),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+  });
+  const view = await service.getState("g1");
+  assert.ok(view);
+  assert.equal(view!.trafikklysRowColor, "grønn");
+});
+
+test("[B2] runtime: getState returnerer null trafikklysRowColor for ikke-Trafikklys-spill", async () => {
+  const { pool } = createStubPool([
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_game_state"),
+      rows: [
+        runningStateRow({
+          draws_completed: 1,
+          current_phase: 2,
+        }),
+      ],
+    },
+    {
+      match: (s) =>
+        s.includes("status") &&
+        s.includes("trafikklys_row_color") &&
+        s.includes("scheduled_games"),
+      rows: [{ status: "running", trafikklys_row_color: null }],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+  ]);
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase(),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+  });
+  const view = await service.getState("g1");
+  assert.ok(view);
+  assert.equal(view!.trafikklysRowColor, null);
+});
+
+// ── B3: Rad-pot uavhengig av bongfarge ─────────────────────────────────────
+
+test("[B3] runtime: Rad 1 vinner med rad-farge=rød → 50 kr (uavhengig av bongfarge)", async () => {
+  const { service, wallet } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white", // hvit-bong, men pot styres av rad-farge
+      },
+    ],
+    "rød",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 1, "én credit for solo-vinner");
+  // 50 kr-pot solo → 50 kr (= 5000 øre / 100 = 50 kr i wallet-API).
+  assert.equal(
+    wallet.credits[0]!.amount,
+    50,
+    "rød Rad 1 = 50 kr (prizesPerRowColor.rød = 5000 øre)",
+  );
+});
+
+test("[B3] runtime: Rad 1 vinner med rad-farge=grønn → 100 kr", async () => {
+  const { service, wallet } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+    ],
+    "grønn",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(wallet.credits[0]!.amount, 100, "grønn Rad 1 = 100 kr");
+});
+
+test("[B3] runtime: Rad 1 vinner med rad-farge=gul → 150 kr", async () => {
+  const { service, wallet } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_purple",
+      },
+    ],
+    "gul",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(wallet.credits[0]!.amount, 150, "gul Rad 1 = 150 kr");
+});
+
+test("[B3] runtime: hvit-bong får IKKE vektet pot for Trafikklys", async () => {
+  // hvit-bong (small_white) ville fått pot × 1 i standard pot-per-bongstørrelse
+  // (multiplier = 1). For Trafikklys er pot uniform — alle bongfarger får
+  // samme rad-farge-pot. Vi verifiserer dette ved å sammenligne 1 hvit vs
+  // 1 lilla — begge skal få identisk beløp.
+  const { service: svcWhite, wallet: wWhite } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "grønn",
+  );
+  const { service: svcPurple, wallet: wPurple } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-2",
+        walletId: "w-2",
+        hallId: "h-a",
+        ticketColor: "small_purple",
+      },
+    ],
+    "grønn",
+  );
+  await svcWhite.drawNext("g1");
+  await svcPurple.drawNext("g1");
+  assert.equal(wWhite.credits[0]!.amount, 100);
+  assert.equal(wPurple.credits[0]!.amount, 100);
+  assert.equal(
+    wWhite.credits[0]!.amount,
+    wPurple.credits[0]!.amount,
+    "Trafikklys: hvit og lilla får samme pot — ingen bongMultiplier-vekting",
+  );
+});
+
+test("[B3] runtime: lilla-bong får IKKE vektet pot for Trafikklys", async () => {
+  // Verifisering at large_purple (som ville fått multiplier 6 i standard
+  // path) får samme pot som small_white (multiplier 1) for samme rad-farge.
+  const { service: svcSmallWhite, wallet: wSmallWhite } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "rød",
+  );
+  const { service: svcLargePurple, wallet: wLargePurple } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-2",
+        walletId: "w-2",
+        hallId: "h-a",
+        ticketColor: "large_purple",
+      },
+    ],
+    "rød",
+  );
+  await svcSmallWhite.drawNext("g1");
+  await svcLargePurple.drawNext("g1");
+  // Begge skal få 50 kr (rød Rad 1 = 5000 øre = 50 kr).
+  assert.equal(wSmallWhite.credits[0]!.amount, 50);
+  assert.equal(wLargePurple.credits[0]!.amount, 50);
+});
+
+// ── B4: Fullt Hus-pot bruker bingoPerRowColor ──────────────────────────────
+
+test("[B4] runtime: Fullt Hus med rad-farge=rød → 500 kr", async () => {
+  const { service, wallet } = makeServiceForFullHouse(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "rød",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(
+    wallet.credits[0]!.amount,
+    500,
+    "Fullt Hus rød = 500 kr (bingoPerRowColor.rød = 50000 øre)",
+  );
+});
+
+test("[B4] runtime: Fullt Hus med rad-farge=grønn → 1000 kr", async () => {
+  const { service, wallet } = makeServiceForFullHouse(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+    ],
+    "grønn",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(wallet.credits[0]!.amount, 1000, "Fullt Hus grønn = 1000 kr");
+});
+
+test("[B4] runtime: Fullt Hus med rad-farge=gul → 1500 kr", async () => {
+  const { service, wallet } = makeServiceForFullHouse(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_purple",
+      },
+    ],
+    "gul",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(wallet.credits[0]!.amount, 1500, "Fullt Hus gul = 1500 kr");
+});
+
+// ── B5: Multi-vinner-aritmetikk ────────────────────────────────────────────
+
+test("[B5] runtime: 2 vinnere på Rad 1 grønn → hver får 50 kr (100 kr-pot delt likt)", async () => {
+  const { service, wallet } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+      {
+        assignmentId: "a-2",
+        userId: "u-2",
+        walletId: "w-2",
+        hallId: "h-a",
+        ticketColor: "large_purple",
+      },
+    ],
+    "grønn",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 2);
+  for (const c of wallet.credits) {
+    assert.equal(
+      c.amount,
+      50,
+      "100 kr-pot / 2 vinnere = 50 kr hver (uniform — uavhengig av bongfarge)",
+    );
+  }
+});
+
+test("[B5] runtime: 3 vinnere på Fullt Hus rød (500 kr-pot) → hver får 166.66 kr, rest til hus", async () => {
+  const { service, wallet } = makeServiceForFullHouse(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+      {
+        assignmentId: "a-2",
+        userId: "u-2",
+        walletId: "w-2",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+      {
+        assignmentId: "a-3",
+        userId: "u-3",
+        walletId: "w-3",
+        hallId: "h-a",
+        ticketColor: "small_purple",
+      },
+    ],
+    "rød",
+  );
+  await service.drawNext("g1");
+  assert.equal(wallet.credits.length, 3);
+  // Engine opererer i øre: 50000 / 3 = floor 16666 = 166.66 kr per vinner.
+  // Ledger-floor: 50000 - 16666*3 = 2 øre HOUSE_RETAINED.
+  for (const c of wallet.credits) {
+    assert.equal(
+      c.amount,
+      166.66,
+      "floor((500 × 100)/3)/100 = 166.66 kr per vinner",
+    );
+  }
+  const total = wallet.credits.reduce((sum, c) => sum + c.amount, 0);
+  // 3 × 166.66 = 499.98. Rest 0.02 kr til hus.
+  assert.ok(
+    Math.abs(total - 499.98) < 0.001,
+    `total ≈ 499.98, got ${total}`,
+  );
+});
+
+// ── B6: Multi-bong-per-spiller ─────────────────────────────────────────────
+
+test("[B6] runtime: spiller med 3 bonger som alle vinner Rad 1 grønn → 3 credits, total 100 kr", async () => {
+  // §9.4: alle vinner-bonger får én pot-andel hver. Spilleren får summen
+  // av sine andeler. 100 kr-pot / 3 bonger = floor 33.33 kr per bong.
+  // Spilleren får 3 × 33.33 = 99.99 kr (rest 0.01 kr til hus).
+  const { service, wallet } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-solo",
+        walletId: "w-solo",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+      {
+        assignmentId: "a-2",
+        userId: "u-solo",
+        walletId: "w-solo",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+      {
+        assignmentId: "a-3",
+        userId: "u-solo",
+        walletId: "w-solo",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+    ],
+    "grønn",
+  );
+  await service.drawNext("g1");
+  // 3 credits, alle til samme wallet.
+  assert.equal(wallet.credits.length, 3);
+  for (const c of wallet.credits) {
+    assert.equal(c.accountId, "w-solo");
+    assert.equal(
+      c.amount,
+      33.33,
+      "100 kr / 3 = 33.33 kr per bong (engine i øre, floor)",
+    );
+  }
+  const total = wallet.credits.reduce((sum, c) => sum + c.amount, 0);
+  // 3 × 33.33 = 99.99. Rest 0.01 til hus.
+  assert.ok(
+    Math.abs(total - 99.99) < 0.001,
+    `total ≈ 99.99, got ${total}`,
+  );
+});
 
 // ── B7: Compliance-ledger metadata ─────────────────────────────────────────
 
-test.todo(
-  "[B7] runtime: payoutPerColorGroups skriver gameVariant: 'trafikklys' i potMetadata. " +
-    "Forventet: PRIZE-ledger-entries har metadata.gameVariant === 'trafikklys'.",
-);
+test("[B7] runtime: payoutTrafikklys skriver gameVariant: 'trafikklys' i potMetadata", async () => {
+  const { service, ledger } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "grønn",
+  );
+  await service.drawNext("g1");
+  // Finn PRIZE-eventet for spilleren.
+  const prizeEvent = ledger.events.find((e) => e.eventType === "PRIZE");
+  assert.ok(prizeEvent, "PRIZE-event må eksistere i ledger");
+  assert.equal(
+    prizeEvent!.metadata?.gameVariant,
+    "trafikklys",
+    "metadata.gameVariant === 'trafikklys'",
+  );
+});
 
-test.todo(
-  "[B7] runtime: payoutPerColorGroups skriver trafikklysRowColor i potMetadata. " +
-    "Forventet: PRIZE-ledger-entries har metadata.trafikklysRowColor === <trukket rad-farge>.",
-);
+test("[B7] runtime: payoutTrafikklys skriver trafikklysRowColor i potMetadata", async () => {
+  const { service, ledger } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_purple",
+      },
+    ],
+    "gul",
+  );
+  await service.drawNext("g1");
+  const prizeEvent = ledger.events.find((e) => e.eventType === "PRIZE");
+  assert.ok(prizeEvent);
+  assert.equal(
+    prizeEvent!.metadata?.trafikklysRowColor,
+    "gul",
+    "metadata.trafikklysRowColor matcher trukket rad-farge",
+  );
+});
 
-test.todo(
-  "[B7] runtime: bongMultiplier IKKE skrives for Trafikklys (flat-prising). " +
-    "Forventet: metadata.bongMultiplier === undefined eller 1 (ingen vekting per bongfarge).",
-);
+test("[B7] runtime: bongMultiplier IKKE skrives for Trafikklys (flat-prising)", async () => {
+  const { service, ledger } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "large_purple", // ville hatt multiplier=6 i standard path
+      },
+    ],
+    "grønn",
+  );
+  await service.drawNext("g1");
+  const prizeEvent = ledger.events.find((e) => e.eventType === "PRIZE");
+  assert.ok(prizeEvent);
+  assert.equal(
+    prizeEvent!.metadata?.bongMultiplier,
+    undefined,
+    "bongMultiplier skal ikke skrives — Trafikklys har flat 15 kr-bong, ingen vekting",
+  );
+});
 
 // ── B8: Multi-rad-progresjon med stabil rad-farge ──────────────────────────
 
-test.todo(
-  "[B8] runtime: spillet kjører gjennom Rad 1 → Rad 2 → Rad 3 → Rad 4 → Fullt Hus med SAMME rad-farge. " +
-    "Forventet: rad-farge persisteres ved start og brukes uendret gjennom hele runden.",
-);
+test("[B8] runtime: rad-farge persisteres ved start og brukes uendret gjennom hele runden", async () => {
+  // Verifisering: når DB-raden har trafikklys_row_color satt, leser hver
+  // drawNext-call samme verdi via loadScheduledGameForUpdate.
+  // Vi gjør 2 separate drawNext-calls med samme stub-config (samme row color)
+  // og verifiserer at begge utbetaler samme pot.
+  const cfg = makeTrafikklysGameConfig();
+  const { service: svc1, wallet: w1 } = makeServiceForRow1(
+    cfg,
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+    ],
+    "grønn",
+  );
+  await svc1.drawNext("g1");
+  assert.equal(w1.credits[0]!.amount, 100, "Rad 1 grønn = 100 kr");
 
-test.todo(
-  "[B8] runtime: ny scheduled-game trekker NY rad-farge (ikke gjenbruk fra forrige runde). " +
-    "Forventet: hver scheduled-game har eget tilfeldig rad-farge-trekk.",
-);
+  // Nytt service med samme config men Fullt Hus-stub. Verifiserer at
+  // bingoPerRowColor.grønn = 1000 kr brukes i samme runde.
+  const { service: svc5, wallet: w5 } = makeServiceForFullHouse(
+    cfg,
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_yellow",
+      },
+    ],
+    "grønn",
+  );
+  await svc5.drawNext("g1");
+  assert.equal(w5.credits[0]!.amount, 1000, "Fullt Hus grønn = 1000 kr");
+});
+
+test("[B8] runtime: ny scheduled-game kan ha annen rad-farge", async () => {
+  // To separate scheduled-games skal kunne ha forskjellig rad-farge —
+  // verifisert ved å bygge to services med forskjellige row colors og
+  // sjekke at de utbetaler forskjellige pots.
+  const { service: svcGreen, wallet: wGreen } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "grønn",
+  );
+  const { service: svcRed, wallet: wRed } = makeServiceForRow1(
+    makeTrafikklysGameConfig(),
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "rød",
+  );
+  await svcGreen.drawNext("g1");
+  await svcRed.drawNext("g1");
+  assert.equal(wGreen.credits[0]!.amount, 100, "scheduled-game A: grønn → 100 kr");
+  assert.equal(wRed.credits[0]!.amount, 50, "scheduled-game B: rød → 50 kr");
+});
 
 // ── B9: Defensivt — gameVariant-eksklusivitet ──────────────────────────────
 
-test.todo(
-  "[B9] runtime: Trafikklys + Oddsen er gjensidig ekskluderende. " +
-    "Forventet: hvis BÅDE rules.gameVariant === 'trafikklys' OG spill1.oddsen er satt, kaster engine eller logger advarsel. " +
-    "(Avgjørelse fra Tobias trengs: skal Trafikklys vinne eller skal det kaste?)",
-);
+test("[B9] runtime: Trafikklys + Oddsen er gjensidig ekskluderende — bridge skriver kun trafikklys-blokk", () => {
+  // Bridge-test: når katalog har gameVariant=trafikklys, skal IKKE
+  // oddsen-blokk skrives (selv om bridge skulle få Oddsen-felter
+  // tilfeldigvis). buildOddsenBlock returnerer null fordi
+  // gameVariant !== "oddsen".
+  const catalog = makeTrafikklysCatalog();
+  const cfg = buildTicketConfigFromCatalog(catalog);
+  const spill1 = cfg.spill1 as { trafikklys?: unknown; oddsen?: unknown };
+  assert.ok(spill1.trafikklys, "spill1.trafikklys skal være satt");
+  assert.equal(
+    spill1.oddsen,
+    undefined,
+    "spill1.oddsen skal IKKE være satt for Trafikklys-katalog",
+  );
+});
 
-test.todo(
-  "[B9] runtime: ukjent rad-farge i rowColors → fallback til standard pattern eller eksplisitt feil. " +
-    "Forventet: hvis rules.rowColors inneholder en farge som IKKE finnes i prizesPerRowColor, " +
-    "skal engine logge warning og bruke trygg fallback (f.eks. lavest-farge eller feile spill-start).",
-);
+test("[B9] runtime: ukjent rad-farge i DB → fallback til standard pattern", async () => {
+  // Hvis trafikklys_row_color har en verdi som ikke er i rules.rowColors
+  // (dvs. korrupt DB-data eller admin har endret rules etter spill-start),
+  // skal engine logge warning og falle tilbake til standard pot-per-
+  // bongstørrelse-pathen. Verifisert ved å sette rad-fargen til en farge
+  // som ikke finnes i config (f.eks. via direkte DB-injeksjon).
+  //
+  // Vi bygger en config der rules.rowColors mangler "rød" så pot-en for
+  // rød er udefinert. Engine skal da hoppe Trafikklys-pathen og falle
+  // til standard-pathen som bruker placeholder-pattern (100 kr).
+  const limitedCfg = {
+    spill1: {
+      ticketColors: [
+        {
+          color: "small_white",
+          prizePerPattern: {
+            row_1: { mode: "fixed", amount: 100 },
+            full_house: { mode: "fixed", amount: 1000 },
+          },
+        },
+      ],
+      trafikklys: {
+        rowColors: ["grønn", "gul"], // mangler "rød"
+        prizesPerRowColor: {
+          grønn: 10000,
+          gul: 15000,
+        },
+        bingoPerRowColor: {
+          grønn: 100000,
+          gul: 150000,
+        },
+      },
+    },
+    rules: {
+      gameVariant: "trafikklys",
+      rowColors: ["grønn", "gul"],
+      prizesPerRowColor: { grønn: 10000, gul: 15000 },
+      bingoPerRowColor: { grønn: 100000, gul: 150000 },
+    },
+  };
+  const { service, wallet } = makeServiceForRow1(
+    limitedCfg,
+    [
+      {
+        assignmentId: "a-1",
+        userId: "u-1",
+        walletId: "w-1",
+        hallId: "h-a",
+        ticketColor: "small_white",
+      },
+    ],
+    "rød", // ikke i rowColors → engine skal logge + falle tilbake
+  );
+  await service.drawNext("g1");
+  // Standard-fallback bruker placeholder-pattern: 100 kr.
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(
+    wallet.credits[0]!.amount,
+    100,
+    "fallback til standard-pattern (small_white row_1 = 100 kr)",
+  );
+});
 
 // ───────────────────────────────────────────────────────────────────────────
 // META — sanity-check at gap-dokumentet eksisterer

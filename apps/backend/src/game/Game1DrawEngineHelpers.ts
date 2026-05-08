@@ -16,6 +16,7 @@
  *     PT-helper forblir uavhengig av service-fila.
  */
 
+import { randomInt } from "node:crypto";
 import type { Game1JackpotConfig } from "./Game1JackpotService.js";
 import {
   buildVariantConfigFromSpill1Config,
@@ -388,6 +389,193 @@ export function resolveOddsenVariantConfig(
   if (bingoBaseHigh < 0) return null;
 
   return { targetDraw, bingoBaseLow, bingoBaseHigh };
+}
+
+// ── Trafikklys variant-config (rad-farge-styrt pot, §5 + §9.4) ────────────
+
+/** Whitelist av gyldige rad-farger (per §5.2 i SPILL_REGLER_OG_PAYOUT.md). */
+export type TrafikklysRowColor = "rød" | "grønn" | "gul";
+
+/**
+ * Eksportert konstant så engine kan iterere over canonical rad-farge-listen
+ * uten å re-declarere den. Brukes blant annet i `pickTrafikklysRowColor`
+ * og som default når `rules.rowColors` mangler i konfigen (defensiv
+ * fallback — bridge skriver alltid feltet).
+ */
+export const TRAFIKKLYS_ROW_COLORS: ReadonlyArray<TrafikklysRowColor> = [
+  "rød",
+  "grønn",
+  "gul",
+];
+
+/**
+ * Trafikklys runtime (2026-05-08): variant-level config for rad-farge-styrt
+ * payout. Lagres av bridge i `ticket_config_json.spill1.trafikklys` (eller
+ * `game_config_json` mirror) når katalog-raden har
+ * `rules.gameVariant === "trafikklys"`.
+ *
+ * Mekanikken er beskrevet i SPILL_REGLER_OG_PAYOUT.md §5:
+ *   - Bongpris: flat 15 kr alle bonger
+ *   - Premier styres av RAD-FARGE (rød/grønn/gul) — IKKE bongfarge
+ *   - Master/system trekker rad-farge ved spill-start (server-autoritativ)
+ *   - Pot for Rad 1-4 = `prizesPerRowColor[rowColor]` (uniform — alle bonger
+ *     samme størrelse)
+ *   - Pot for Fullt Hus = `bingoPerRowColor[rowColor]`
+ *   - Multi-vinner: poten deles likt blant vinnerne (ikke vektet — alle
+ *     bonger har samme pris)
+ *
+ * Skiller seg fra Oddsen ved at Trafikklys overstyrer ALLE faser
+ * (Rad 1-4 + Fullt Hus), mens Oddsen kun overstyrer Fullt Hus.
+ *
+ * `rowColors` er whitelist for hvilke farger som er gyldig i runtime-trekkingen.
+ */
+export interface TrafikklysVariantConfig {
+  rowColors: ReadonlyArray<TrafikklysRowColor>;
+  prizesPerRowColor: Readonly<Record<TrafikklysRowColor, number>>;
+  bingoPerRowColor: Readonly<Record<TrafikklysRowColor, number>>;
+}
+
+/** Type-guard for runtime-validering av rad-farge fra DB / JSON. */
+export function isTrafikklysRowColor(v: unknown): v is TrafikklysRowColor {
+  return (
+    typeof v === "string" &&
+    (TRAFIKKLYS_ROW_COLORS as ReadonlyArray<string>).includes(v)
+  );
+}
+
+/**
+ * Resolve Trafikklys variant-config fra raw JSON-blokk
+ * (`ticket_config_json` eller `game_config_json`). Leter på
+ * `obj.spill1.trafikklys` (kanonisk) og `obj.rules` (fallback fra
+ * bridge — `rules`-objektet videreformidles uendret av
+ * `buildTicketConfigFromCatalog` så engine kan lese rules.gameVariant +
+ * rules.prizesPerRowColor + rules.bingoPerRowColor direkte).
+ *
+ * Returnerer null hvis blokken mangler, har feil shape, eller ikke har
+ * `gameVariant === "trafikklys"`. Caller faller tilbake til standard
+ * payout-pathen ved null.
+ *
+ * Validering:
+ *   - rowColors må være ikke-tom array av kjente rad-farger.
+ *   - prizesPerRowColor må ha numerisk verdi for alle farger i rowColors.
+ *   - bingoPerRowColor må ha numerisk verdi for alle farger i rowColors.
+ *   - Ukjente farger i rowColors filtreres bort. Hvis listen blir tom
+ *     etter filtrering → null.
+ */
+export function resolveTrafikklysVariantConfig(
+  raw: unknown,
+): TrafikklysVariantConfig | null {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+
+  // Kanonisk lokasjon: `obj.spill1.trafikklys` (skrevet av bridge).
+  // Fallback: `obj.rules` når `gameVariant === "trafikklys"` — bridgen
+  // videreformidler `catalog.rules` uendret som top-level `rules`-felt.
+  const spill1 = obj.spill1 as Record<string, unknown> | undefined;
+  const fromSpill1 = spill1?.trafikklys as
+    | Record<string, unknown>
+    | undefined;
+
+  let source: Record<string, unknown> | null = null;
+  if (fromSpill1 && typeof fromSpill1 === "object") {
+    source = fromSpill1;
+  } else {
+    const rules = obj.rules as Record<string, unknown> | undefined;
+    if (rules && typeof rules === "object" && rules.gameVariant === "trafikklys") {
+      source = rules;
+    } else if (obj.gameVariant === "trafikklys") {
+      // Hvis raw selv er rules-objektet
+      source = obj;
+    }
+  }
+  if (!source) return null;
+
+  // rowColors må være array av kjente farger.
+  const rawRowColors = source.rowColors;
+  if (!Array.isArray(rawRowColors) || rawRowColors.length === 0) return null;
+  const rowColors: TrafikklysRowColor[] = [];
+  for (const c of rawRowColors) {
+    if (isTrafikklysRowColor(c) && !rowColors.includes(c)) {
+      rowColors.push(c);
+    }
+  }
+  if (rowColors.length === 0) return null;
+
+  const rawPrizes = source.prizesPerRowColor;
+  const rawBingo = source.bingoPerRowColor;
+  if (!rawPrizes || typeof rawPrizes !== "object") return null;
+  if (!rawBingo || typeof rawBingo !== "object") return null;
+
+  const prizesPerRowColor: Partial<Record<TrafikklysRowColor, number>> = {};
+  const bingoPerRowColor: Partial<Record<TrafikklysRowColor, number>> = {};
+
+  for (const color of rowColors) {
+    const prize = numberOrZero(
+      (rawPrizes as Record<string, unknown>)[color],
+    );
+    const bingo = numberOrZero(
+      (rawBingo as Record<string, unknown>)[color],
+    );
+    if (prize <= 0 || bingo <= 0) return null;
+    prizesPerRowColor[color] = prize;
+    bingoPerRowColor[color] = bingo;
+  }
+
+  return {
+    rowColors,
+    prizesPerRowColor: prizesPerRowColor as Record<TrafikklysRowColor, number>,
+    bingoPerRowColor: bingoPerRowColor as Record<TrafikklysRowColor, number>,
+  };
+}
+
+/**
+ * Trafikklys runtime (2026-05-08): trekk én rad-farge fra config.rowColors.
+ *
+ * Bruker `crypto.randomInt` for server-autoritativ tilfeldighet — samme
+ * RNG-mekanikk som ball-trekking. `randomInt(min, max)` returnerer et
+ * uniformt tall i `[min, max)`, så `randomInt(0, n)` mapper til index
+ * `0..n-1` med uniform fordeling.
+ *
+ * Validering:
+ *   - `config.rowColors` er allerede filtrert til kjente farger av
+ *     `resolveTrafikklysVariantConfig` (whitelist-validering kjører før
+ *     denne funksjonen kalles).
+ *   - Hvis listen skulle være tom (defensiv) → kaster med tydelig
+ *     feilmelding så caller-kontrakten ikke svelges.
+ *
+ * Wrapper rundt `crypto.randomInt` for å gjøre stubbing i test triviell.
+ * Tester injecter en `pickFn` for deterministisk seed-test.
+ */
+export function pickTrafikklysRowColor(
+  config: TrafikklysVariantConfig,
+  /**
+   * Valgfri override for tester. Returnerer en index i `[0, max)`.
+   * Default: `crypto.randomInt(0, max)` — server-autoritativ.
+   */
+  pickFn?: (max: number) => number,
+): TrafikklysRowColor {
+  const colors = config.rowColors;
+  if (!colors || colors.length === 0) {
+    throw new Error(
+      "pickTrafikklysRowColor: rowColors-listen er tom — config-validering har feilet.",
+    );
+  }
+  const max = colors.length;
+  const idx = pickFn ? pickFn(max) : randomInt(0, max);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= max) {
+    throw new Error(
+      `pickTrafikklysRowColor: index ${idx} er utenfor [0, ${max}).`,
+    );
+  }
+  return colors[idx]!;
 }
 
 /**

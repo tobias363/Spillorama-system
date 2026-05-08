@@ -188,6 +188,77 @@ function buildOddsenBlock(
   return { targetDraw, bingoBaseLow, bingoBaseHigh };
 }
 
+const TRAFIKKLYS_VALID_ROW_COLORS: ReadonlySet<string> = new Set([
+  "rød",
+  "grønn",
+  "gul",
+]);
+
+/**
+ * Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
+ *
+ * Bygg `spill1.trafikklys`-blokk når katalog-raden er en Trafikklys-variant.
+ * Engine leser denne blokken i `Game1DrawEngineService` for å trekke rad-
+ * farge ved spill-start og overstyre BÅDE Rad 1-4 OG Fullt Hus-poten basert
+ * på trukket rad-farge.
+ *
+ * Blokken er en transparent kopi av `rules.{rowColors, prizesPerRowColor,
+ * bingoPerRowColor}` — engine kan også lese feltene fra top-level `rules`
+ * (bridgen videreformidler `catalog.rules` uendret), men en kanonisk
+ * `spill1.trafikklys`-blokk gjør parsing-pathen identisk med Oddsen-pathen
+ * og forenkler tester.
+ *
+ * Returnerer null hvis raden IKKE er Trafikklys, eller hvis nødvendige
+ * felter (rowColors, prizesPerRowColor, bingoPerRowColor) mangler/er
+ * ugyldige. Engine vil da bruke standard auto-mult-pathen som fallback.
+ */
+function buildTrafikklysBlock(
+  catalog: GameCatalogEntry,
+): {
+  rowColors: string[];
+  prizesPerRowColor: Record<string, number>;
+  bingoPerRowColor: Record<string, number>;
+} | null {
+  const rules = catalog.rules as Record<string, unknown> | null | undefined;
+  if (!rules || typeof rules !== "object") return null;
+  if (rules.gameVariant !== "trafikklys") return null;
+
+  const rawRowColors = rules.rowColors;
+  if (!Array.isArray(rawRowColors) || rawRowColors.length === 0) return null;
+  const rowColors: string[] = [];
+  for (const c of rawRowColors) {
+    if (typeof c === "string" && TRAFIKKLYS_VALID_ROW_COLORS.has(c)) {
+      if (!rowColors.includes(c)) rowColors.push(c);
+    }
+  }
+  if (rowColors.length === 0) return null;
+
+  const rawPrizes = rules.prizesPerRowColor as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  const rawBingo = rules.bingoPerRowColor as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  if (!rawPrizes || typeof rawPrizes !== "object") return null;
+  if (!rawBingo || typeof rawBingo !== "object") return null;
+
+  const prizesPerRowColor: Record<string, number> = {};
+  const bingoPerRowColor: Record<string, number> = {};
+
+  for (const color of rowColors) {
+    const prize = numberFromRules(rawPrizes[color]);
+    const bingo = numberFromRules(rawBingo[color]);
+    if (prize === null || prize <= 0) return null;
+    if (bingo === null || bingo <= 0) return null;
+    prizesPerRowColor[color] = prize;
+    bingoPerRowColor[color] = bingo;
+  }
+
+  return { rowColors, prizesPerRowColor, bingoPerRowColor };
+}
+
 function numberFromRules(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string") {
@@ -404,6 +475,14 @@ export function buildTicketConfigFromCatalog(
   // via `bingoBase × multiplier`.
   const oddsenBlock = buildOddsenBlock(catalog);
 
+  // Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md): bygg
+  // `spill1.trafikklys`-blokk parallelt med oddsen. Engine bruker den til å
+  // overstyre BÅDE Rad 1-4 og Fullt Hus-poten basert på trukket rad-farge.
+  // Mutually exclusive med oddsen — bridge avviser kombinasjonen ved å sette
+  // KUN trafikklys-blokken (oddsen-blokken vil uansett bli null fordi
+  // gameVariant !== "oddsen" når Trafikklys er aktiv).
+  const trafikklysBlock = buildTrafikklysBlock(catalog);
+
   const spill1Block: Record<string, unknown> = {
     // Pilot-fix (2026-05-08): kanonisk per-farge-pattern-blokk for
     // engine sin variant-mapper. Slug-form keys (small_yellow/large_yellow/
@@ -412,6 +491,9 @@ export function buildTicketConfigFromCatalog(
   };
   if (oddsenBlock) {
     spill1Block.oddsen = oddsenBlock;
+  }
+  if (trafikklysBlock) {
+    spill1Block.trafikklys = trafikklysBlock;
   }
 
   const config: Record<string, unknown> = {
