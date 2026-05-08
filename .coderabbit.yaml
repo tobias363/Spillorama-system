@@ -74,7 +74,10 @@ reviews:
     - "!**/*.min.js"
     - "!**/*.min.css"
     - "!apps/backend/migrations/*.sql"   # Migrations — håndteres av migration-policy-skill
-    - "!.claude/skills/**"               # Skills auto-aktiveres, ikke kode-review-relevant
+    # Skills: SKILL.md reviewes (frontmatter-validering nedenfor),
+    # men resten av skill-mappene (assets, scripts) skippes.
+    - "!.claude/skills/**/!(SKILL).md"
+    - "!.claude/skills/**/*.{json,yaml,yml,sh,py,js,ts}"
 
   # Path-spesifikke instruksjoner — Spillorama-kontekst
   path_instructions:
@@ -212,6 +215,24 @@ reviews:
         - CREATE TABLE IF NOT EXISTS
         - ALTER TABLE ... IF NOT EXISTS
         - Filnavn følger YYYYMMDDhhmmss_<navn>.sql
+
+    - path: ".claude/skills/**/SKILL.md"
+      instructions: |
+        Skills auto-aktiveres basert på description. Strenge formkrav:
+        - YAML-frontmatter MÅ ha `name`, `description`, `metadata.version`
+        - `description` skal være "pushy" — front-loadede keywords +
+          relevante filnavn/symboler + "Make sure to use this skill
+          whenever..."-frase. Korte beskrivelser trigger ikke pålitelig.
+        - Body 150-300 linjer (ikke mer — skills er lookup, ikke tutorials)
+        - Body-struktur: Kontekst (read first) → Kjerne-arkitektur →
+          Immutable beslutninger → Vanlige feil → Kanonisk referanse →
+          Når aktiv
+        - IKKE re-skriv fundament-doc-er — pek på dem (docs/architecture/...,
+          docs/adr/..., docs/engineering/...)
+        - Vedlikehold: hver PR som endrer fundament-doc bør sjekke om
+          tilhørende skill må oppdateres tilsvarende
+        Endringer i SKILL.md påvirker hvordan agenter resonnerer — gjennomgå
+        med ekstra forsiktighet.
 
 # Chat-config — for @coderabbitai i PR-kommentarer
 chat:
