@@ -269,6 +269,7 @@ import { SubGameService } from "./admin/SubGameService.js";
 import { GameCatalogService } from "./game/GameCatalogService.js";
 import { Spill2ConfigService } from "./game/Spill2ConfigService.js";
 import { Spill3ConfigService } from "./game/Spill3ConfigService.js";
+import { createPerpetualRoundOpeningWindowGuard } from "./game/PerpetualRoundOpeningWindowGuard.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
@@ -2785,28 +2786,14 @@ const perpetualRoundService = new PerpetualRoundService({
   emitRoomUpdate: async (roomCode) => {
     await emitRoomUpdate(roomCode);
   },
-  // Tobias-direktiv 2026-05-08: opening-window-guard for Spill 3.
-  // Ikke-monsterbingo-rom returnerer null (ingen guard) så de spawner
-  // som før. Monsterbingo henter Spill3Config og sjekker om current
-  // Oslo-tid er innenfor [openingTimeStart, openingTimeEnd).
-  canSpawnRound: async ({ gameSlug }) => {
-    const isSpill3 =
-      gameSlug === "monsterbingo" ||
-      gameSlug === "mønsterbingo" ||
-      gameSlug === "game_3";
-    if (!isSpill3) return null;
-    try {
-      const config = await spill3ConfigService.getActive();
-      const { isWithinOpeningWindow } = await import(
-        "./game/Spill3ConfigService.js"
-      );
-      return isWithinOpeningWindow(config);
-    } catch {
-      // Fail-open: hvis vi ikke får config, la PerpetualRoundService
-      // spawne (logges også separat i service-laget).
-      return null;
-    }
-  },
+  // Tobias-direktiv 2026-05-08: opening-window-guard for Spill 2 + Spill 3.
+  // BIN-823 — regulatorisk pilot-go-live-blokker (Lotteritilsynet krever at
+  // spillet er utilgjengelig etter stengetid). Logikken er flyttet ut til
+  // `PerpetualRoundOpeningWindowGuard` for å være unit-testbar.
+  canSpawnRound: createPerpetualRoundOpeningWindowGuard({
+    spill2ConfigService,
+    spill3ConfigService,
+  }),
 });
 // Tobias 2026-05-04: late-bind for game2AutoDrawTickService.onStaleRoomEnded
 // (definert lenger oppe i fila, før perpetualRoundService finnes). Når tick-en
