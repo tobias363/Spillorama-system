@@ -10,8 +10,12 @@
  * Endepunkter:
  *   GET  /api/agent/game-plan/current
  *     Returnerer plan + items + currentItem + nextItem + jackpot-flagg.
- *     Hvis ingen plan dekker (hall, ukedag) i dag → run=null + plan=null
- *     (ikke en feil — frontend faller tilbake til legacy-flow).
+ *     Lazy-oppretter dagens plan-run (idle-state) hvis en aktiv plan
+ *     dekker (hall, ukedag) men ingen run finnes ennå — slik at master
+ *     ser dagens kommende spill umiddelbart uten å trykke /start først
+ *     (UI har ikke en knapp før det er en run å vise). Hvis ingen plan
+ *     dekker → run=null + plan=null (ikke en feil — frontend faller
+ *     tilbake til legacy-flow).
  *   POST /api/agent/game-plan/start
  *     Master-only. idle → running, current_position=1.
  *   POST /api/agent/game-plan/advance
@@ -225,22 +229,58 @@ export function createAgentGamePlanRouter(
   }
 
   /**
-   * Slå opp aktiv eller siste run for (hall, businessDate). Returnerer
-   * null hvis ingen run finnes (idempotent — caller velger om de vil
-   * opprette).
+   * Slå opp aktiv run for (hall, businessDate). Hvis ingen run finnes,
+   * lazy-opprett en idle-rad ved å kalle `getOrCreateForToday` — så
+   * lenge `lazyCreate=true` (default). Det gjør at master-UI ser
+   * dagens kommende spill umiddelbart når siden åpnes, uten å kreve at
+   * en agent først trykker `/start` (som UI ikke har en knapp for før
+   * det er en run å vise).
    *
-   * Soft-fail: hvis NO_MATCHING_PLAN kastes (ingen aktiv plan dekker
-   * dagen for hallen), returner null. Frontend faller tilbake til
-   * legacy-flyten via `useNewGamePlan=false`.
+   * Lazy-create kjøres KUN herfra (`GET /current`) — alle write-ruter
+   * (`/start`, `/advance`, etc.) sender `lazyCreate=false` så de
+   * fortsatt feiler eksplisitt med GAME_PLAN_RUN_NOT_FOUND når en run
+   * mangler. Dette gir sterk separasjon mellom "vis dagens plan" og
+   * "kjør state-overgang".
+   *
+   * Soft-fail-koder:
+   *   - `NO_MATCHING_PLAN`        → ingen aktiv plan dekker (hall, ukedag),
+   *                                 f.eks. master åpner siden lørdag når
+   *                                 plan kun kjører mandag-fredag.
+   *   - `HALL_NOT_IN_GROUP`       → hallen ikke konfigurert for plan-runtime.
+   *   - `INVALID_INPUT` på past-date → defensivt; bør ikke skje ettersom
+   *                                 vi sender `todayOsloKey()`.
+   *
+   * Andre feil (DB-feil, FK-violations, INVALID_CONFIG) propagerer.
    */
   async function loadCurrent(
     hallId: string,
     businessDate: string,
+    lazyCreate: boolean = true,
   ): Promise<{
     run: GamePlanRun;
     plan: GamePlanWithItems;
   } | null> {
-    const run = await planRunService.findForDay(hallId, businessDate);
+    let run = await planRunService.findForDay(hallId, businessDate);
+    if (!run && lazyCreate) {
+      try {
+        run = await planRunService.getOrCreateForToday(hallId, businessDate);
+      } catch (err) {
+        if (
+          err instanceof DomainError &&
+          (err.code === "NO_MATCHING_PLAN" ||
+            err.code === "HALL_NOT_IN_GROUP")
+        ) {
+          // Ingen plan dekker dagen — UI viser empty-state. Logges som
+          // debug for diagnostikk uten å støye varsel-kanalen.
+          logger.debug(
+            { hallId, businessDate, code: err.code },
+            "[fase-3] lazy-create avslått — ingen plan dekker dagen",
+          );
+          return null;
+        }
+        throw err;
+      }
+    }
     if (!run) return null;
     const plan = await planService.getById(run.planId);
     if (!plan) {
@@ -408,7 +448,7 @@ export function createAgentGamePlanRouter(
       const hallId = resolveHallScope(actor, undefined);
       const businessDate = todayOsloKey();
 
-      const loaded = await loadCurrent(hallId, businessDate);
+      const loaded = await loadCurrent(hallId, businessDate, false);
       if (!loaded) {
         throw new DomainError(
           "GAME_PLAN_RUN_NOT_FOUND",
@@ -571,7 +611,7 @@ export function createAgentGamePlanRouter(
         );
       }
 
-      const loaded = await loadCurrent(hallId, businessDate);
+      const loaded = await loadCurrent(hallId, businessDate, false);
       if (!loaded) {
         throw new DomainError(
           "GAME_PLAN_RUN_NOT_FOUND",
@@ -606,7 +646,7 @@ export function createAgentGamePlanRouter(
       const actor = await requirePermission(req, "GAME1_MASTER_WRITE");
       const hallId = resolveHallScope(actor, undefined);
       const businessDate = todayOsloKey();
-      const loaded = await loadCurrent(hallId, businessDate);
+      const loaded = await loadCurrent(hallId, businessDate, false);
       if (!loaded) {
         throw new DomainError(
           "GAME_PLAN_RUN_NOT_FOUND",
@@ -633,7 +673,7 @@ export function createAgentGamePlanRouter(
       const actor = await requirePermission(req, "GAME1_MASTER_WRITE");
       const hallId = resolveHallScope(actor, undefined);
       const businessDate = todayOsloKey();
-      const loaded = await loadCurrent(hallId, businessDate);
+      const loaded = await loadCurrent(hallId, businessDate, false);
       if (!loaded) {
         throw new DomainError(
           "GAME_PLAN_RUN_NOT_FOUND",
