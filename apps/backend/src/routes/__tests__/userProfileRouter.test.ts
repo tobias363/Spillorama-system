@@ -313,7 +313,14 @@ async function startServer(opts?: {
     ...opts?.user,
   };
 
-  const startTimeMs = opts?.startTimeMs ?? new Date("2026-05-01T12:00:00Z").getTime();
+  // Tests anchor on a wall-clock value rather than a fixed historical date.
+  // ComplianceManager.resolveLossLimitState uses real `Date.now()` to detect
+  // when pending loss-limit entries become "due" — using a fixed past date
+  // makes the 48h-pending window resolve immediately as soon as wall-clock
+  // passes that fixed date + 48h, which silently flipped these tests stale
+  // around 2026-05-03. Anchoring on real time + 1h keeps `nowMs + 48h` in
+  // the future of real time so the pending stays pending.
+  const startTimeMs = opts?.startTimeMs ?? Date.now() + 60 * 60 * 1000;
   const clock = { nowMs: startTimeMs };
 
   const platformService = {

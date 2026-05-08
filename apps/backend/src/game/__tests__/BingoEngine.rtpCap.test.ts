@@ -182,7 +182,12 @@ test(
     // (test-InMemoryWalletAdapter pre-funder system-konti med 1000 kr som
     // er irrelevant for cap-logikken; vi sjekker bare at saldoen ikke ble
     // negativ etter payout — ergo hus har fortsatt ≥ 0.)
-    const houseAccountId = "house-hall-rtp-cap-databingo-internet";
+    //
+    // K2-A regulatorisk fix (CRIT-1, PR #443, 2026-04-30): `rocket` (Spill 2)
+    // klassifiseres som MAIN_GAME — ikke DATABINGO. `makeHouseAccountId`
+    // formaterer derfor konto-ID-en som `main_game-internet`, ikke
+    // `databingo-internet`. Se ledgerGameTypeForSlug.ts for full kontekst.
+    const houseAccountId = "house-hall-rtp-cap-main_game-internet";
     const houseBalance = await wallet.getBalance(houseAccountId);
     assert.ok(
       houseBalance >= 0,
