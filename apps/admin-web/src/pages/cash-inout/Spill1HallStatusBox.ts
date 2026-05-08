@@ -8,8 +8,19 @@
  *  - For agentens EGEN hall vises 2 knapper:
  *      • "Marker hall som Klar" / "Angre Klar"
  *      • "Ingen kunder" / "Har kunder igjen" (rød/grå)
- *  - Master-hall får i tillegg "Start Spill 1" + "Stopp Spill 1"-
- *    knapper i samme grid-stil som kontant-inn-/ut-knappene over.
+ *  - Master-hall får 5 master-handlinger i samme grid-stil som kontant-
+ *    inn-/ut-knappene over:
+ *      • "Start Spill 1"        — start trekning (status purchase_open/ready_to_start)
+ *      • "Kringkast Klar (2 min)" — broadcast 'Klar' + 2-min countdown til alle haller
+ *      • "PAUSE"                — frys trekning under aktivt spill (status running)
+ *      • "Fortsett"             — gjenoppta etter pause (status paused)
+ *      • "Avbryt"               — stopp runden med påkrevd begrunnelse (audit-trail)
+ *
+ * 2026-05-08 (Tobias direktiv): PAUSE + Kringkast Klar + Avbryt med
+ * begrunnelse er flyttet inn fra `/agent/games`-konsollet (Game1MasterConsole),
+ * slik at agent har komplette master-handlinger på cashinout-dashbordet uten
+ * å navigere mellom sider. `/agent/games` beholdes som fall-back og bruker
+ * fortsatt sin egen Game1MasterConsole-implementasjon.
  *
  * Polling: 2s tick mot `/api/agent/game1/current-game`. Stoppes på
  * unmount via AbortSignal — caller passer inn signalet fra
@@ -30,12 +41,27 @@ import { adaptGamePlanToLegacyShape } from "../../api/agent-game-plan-adapter.js
 import {
   startSpill1MasterAction,
   resumeSpill1MasterAction,
+  pauseSpill1MasterPlanState,
 } from "../../api/agent-master-actions.js";
+import {
+  listAgentRooms,
+  pauseRoomGame,
+  markRoomReady,
+  type AgentRoomSummary,
+} from "../../api/agent-next-game.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
 import { escapeHtml } from "./shared.js";
 
 const POLL_INTERVAL_MS = 2_000;
+
+/**
+ * 2026-05-08 (Tobias direktiv): broadcast-ready-knappen kringkaster "Klar"
+ * + starter en 2-minutters countdown til alle haller. Samme tall som
+ * NextGamePanel.DEFAULT_COUNTDOWN_SECONDS — holdes konsistent slik at master
+ * får samme oppførsel uansett hvor de trykker fra.
+ */
+const BROADCAST_COUNTDOWN_SECONDS = 120;
 
 interface BoxState {
   loaded: boolean;
@@ -201,13 +227,58 @@ export function mountSpill1HallStatusBox(
           await resumeSpill1MasterAction();
           Toast.success("Spill 1 gjenopptatt.");
           break;
-        case "stop":
-          if (!confirm("Er du sikker på at du vil stoppe denne runden?")) {
+        case "pause": {
+          // 2026-05-08 (Tobias direktiv): PAUSE under aktivt spill. Vi må
+          // finne aktivt rom (RUNNING) for å kalle pauseRoomGame(roomCode).
+          // Plan-state-overgangen er soft (bridge swallow-er INVALID_TRANSITION),
+          // engine-pausen er den som faktisk fryser trekningen.
+          const reason = window.prompt("Pause-årsak (audit-logges):", "") ?? "";
+          const roomCode = await findActiveRoomCode("running");
+          if (!roomCode) {
+            Toast.warning("Fant ikke aktivt rom å pause.");
             return;
           }
-          await stopAgentGame1();
-          Toast.info("Spill 1 stoppet.");
+          await pauseSpill1MasterPlanState();
+          await pauseRoomGame(roomCode, reason);
+          Toast.info("Spill 1 pauset.");
           break;
+        }
+        case "broadcast-ready": {
+          // 2026-05-08 (Tobias direktiv): kringkast "Klar"-signal til alle
+          // haller + start 2-min countdown på TV-display og terminaler.
+          // Bruker samme HTTP-endpoint som NextGamePanel (markRoomReady).
+          // Soft-fail på "ingen rom funnet" — backend krever et room-code,
+          // så hvis ingen runde er aktiv kan ikke broadcast-en sendes.
+          const roomCode = await findActiveRoomCode("any");
+          if (!roomCode) {
+            Toast.warning("Fant ikke aktivt rom å kringkaste fra.");
+            return;
+          }
+          await markRoomReady(roomCode, {
+            countdownSeconds: BROADCAST_COUNTDOWN_SECONDS,
+          });
+          Toast.success(
+            `Klar kringkastet — ${BROADCAST_COUNTDOWN_SECONDS / 60}-minutters countdown startet.`,
+          );
+          break;
+        }
+        case "stop": {
+          // 2026-05-08 (Tobias direktiv): krev en begrunnelse (regulatorisk
+          // audit-trail) før Avbryt utføres. Tom begrunnelse → toast-warning
+          // og avbryt aksjonen — Lotteritilsynet trenger en forklaring.
+          const reason = window.prompt(
+            "Begrunnelse for å avbryte runden (regulatorisk audit-krav):",
+            "",
+          );
+          if (reason === null) return;
+          if (!reason.trim()) {
+            Toast.warning("Begrunnelse er påkrevd for å avbryte runden.");
+            return;
+          }
+          await stopAgentGame1(reason.trim());
+          Toast.info("Spill 1 avbrutt.");
+          break;
+        }
         default:
           return;
       }
@@ -318,8 +389,17 @@ function render(container: HTMLElement, state: BoxState): void {
     isMaster &&
     (game.status === "ready_to_start" || game.status === "purchase_open");
   const canResume = isMaster && game.status === "paused";
+  // 2026-05-08 (Tobias direktiv): PAUSE er kun gyldig mens engine trekker —
+  // backend `/game/pause` krever GAME_RUNNING.
+  const canPause = isMaster && game.status === "running";
   const canStop =
     isMaster && (game.status === "running" || game.status === "paused");
+  // 2026-05-08 (Tobias direktiv): broadcast-ready er meningsfullt mens vi
+  // venter på start (purchase_open / ready_to_start). NextGamePanel kaller
+  // markRoomReady kun fra disse statene; vi følger samme regel her.
+  const canBroadcastReady =
+    isMaster &&
+    (game.status === "purchase_open" || game.status === "ready_to_start");
 
   const hallsHtml = renderHallList(data.halls, ownHallId);
   const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status);
@@ -331,7 +411,9 @@ function render(container: HTMLElement, state: BoxState): void {
   const masterButtonsHtml = renderMasterButtons({
     canStart,
     canResume,
+    canPause,
     canStop,
+    canBroadcastReady,
     isMaster,
     gameStatus: game.status,
     scheduledStartTime: game.scheduledStartTime,
@@ -446,7 +528,17 @@ function renderOwnHallButtons(
 function renderMasterButtons(opts: {
   canStart: boolean;
   canResume: boolean;
+  /**
+   * 2026-05-08 (Tobias direktiv): PAUSE-knapp under aktivt spill. Krever
+   * status='running' (engine-pausen er den som faktisk fryser trekningen).
+   */
+  canPause: boolean;
   canStop: boolean;
+  /**
+   * 2026-05-08 (Tobias direktiv): "Kringkast Klar + 2-min countdown"-knapp.
+   * Bruker samme HTTP-endpoint som NextGamePanel (markRoomReady).
+   */
+  canBroadcastReady: boolean;
   isMaster: boolean;
   gameStatus: string;
   /**
@@ -479,27 +571,79 @@ function renderMasterButtons(opts: {
          </p>`
       : "";
   return `
-    <div class="spill1-master-actions" style="margin-top:16px;">
+    <div class="spill1-master-actions" style="margin-top:16px;"
+         data-marker="spill1-master-actions">
       <h4 style="margin:0 0 8px 0;">Master-handlinger</h4>
       <div class="cashinout-grid">
         <button type="button" class="btn btn-success cashinout-grid-btn"
                 data-spill1-action="start"
+                data-marker="spill1-master-start-btn"
                 ${opts.canStart ? "" : "disabled"}${startTooltipAttr}>
           <i class="fa fa-play" aria-hidden="true"></i> Start Spill 1
         </button>
+        <button type="button" class="btn btn-warning cashinout-grid-btn"
+                data-spill1-action="broadcast-ready"
+                data-marker="spill1-master-broadcast-ready-btn"
+                ${opts.canBroadcastReady ? "" : "disabled"}
+                title="Kringkast 'Klar' til alle haller + start 2-min countdown">
+          <i class="fa fa-bullhorn" aria-hidden="true"></i>
+          Kringkast Klar (2 min)
+        </button>
+        <button type="button" class="btn btn-warning cashinout-grid-btn"
+                data-spill1-action="pause"
+                data-marker="spill1-master-pause-btn"
+                ${opts.canPause ? "" : "disabled"}>
+          <i class="fa fa-pause" aria-hidden="true"></i> PAUSE
+        </button>
         <button type="button" class="btn btn-info cashinout-grid-btn"
                 data-spill1-action="resume"
+                data-marker="spill1-master-resume-btn"
                 ${opts.canResume ? "" : "disabled"}>
-          <i class="fa fa-play-circle" aria-hidden="true"></i> Resume
+          <i class="fa fa-play-circle" aria-hidden="true"></i> Fortsett
         </button>
         <button type="button" class="btn btn-danger cashinout-grid-btn"
                 data-spill1-action="stop"
+                data-marker="spill1-master-stop-btn"
                 ${opts.canStop ? "" : "disabled"}>
-          <i class="fa fa-stop" aria-hidden="true"></i> Stopp Spill 1
+          <i class="fa fa-stop" aria-hidden="true"></i> Avbryt
         </button>
       </div>
       ${startWarning}
     </div>`;
+}
+
+/**
+ * 2026-05-08 (Tobias direktiv): finn aktivt rom for å kalle pauseRoomGame /
+ * markRoomReady. Backend `/api/admin/rooms/:code/...`-rutene tar imot
+ * room-code, ikke game-id, så vi må gjøre et oppslag.
+ *
+ *   - mode='running' → kun RUNNING-rom (PAUSE krever aktiv engine)
+ *   - mode='any'     → RUNNING > PAUSED > OPEN (broadcast-ready trigges fra
+ *                       hvilket som helst aktivt rom; backend filtrerer på
+ *                       hall-scope i JWT)
+ *
+ * Soft-fail: nettverksfeil → null så caller kan vise warning-toast i stedet
+ * for å la modalen bli hengende.
+ */
+async function findActiveRoomCode(
+  mode: "running" | "any"
+): Promise<string | null> {
+  let rooms: AgentRoomSummary[] = [];
+  try {
+    rooms = await listAgentRooms();
+  } catch {
+    return null;
+  }
+  const running = rooms.find((r) => r.currentGame?.status === "RUNNING");
+  if (running) return running.code;
+  if (mode === "running") return null;
+  const paused = rooms.find((r) => r.currentGame?.status === "PAUSED");
+  if (paused) return paused.code;
+  // OPEN er valid for broadcast-ready (purchase_open-fasen).
+  const open = rooms.find(
+    (r) => r.status === "OPEN" || r.currentGame?.status === "WAITING"
+  );
+  return open?.code ?? null;
 }
 
 /**
