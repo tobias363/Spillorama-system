@@ -85,20 +85,22 @@ Dette er ikke en "P1 etter pilot" — dette er **fundament som må være på pla
 
 ## 5. Tiltak — prioritert (P0 før pilot live)
 
-| # | Tiltak | Estimat | Status |
-|---|---|---|---|
-| R1 | **Lobby-rom Game1Controller-wireup** — løse "FÅR IKKE KOBLET TIL ROM" ende-til-ende | 1-2d | Foundation: PR #1018 åpen |
-| R2 | **Failover-test** — drep backend-instans midt i runde, verifiser at annen instans plukker opp uten å miste draws | 2-3d | Ikke startet |
-| R3 | **Klient-reconnect-test** — verifiser at klient som mister nett 5/15/60 sek får full state-replay og kan fortsette uten tap | 2d | Ikke startet |
-| R4 | **Load-test** — k6 eller artillery-script som simulerer 1000 samtidige klienter per rom over 60 min | 2-3d | Ikke startet |
-| R5 | **Idempotent socket-event-håndtering** — `clientRequestId`-deduplisering på `ticket:mark`, `claim:submit`, `ticket:buy` | 2d | Delvis (wallet har, sockets ikke verifisert) |
-| R6 | **Outbox for room-events** — alle wallet-touch fra room-events går via outbox | 1-2d | Wallet-siden ferdig; rom-side må verifiseres |
-| R7 | **Health-endpoint per rom** — `/api/games/{slug}/health?hallId=X` med p95-latency, last-draw-age, connected-clients | 1d | Ikke startet |
-| R8 | **Alerting** — PagerDuty/Slack-varsel hvis rom står i error-state > 30 sek eller draw-tick-jitter > 2s | 1d | Ikke startet |
-| R9 | **Spill 2 perpetual-room load-test** — verifiser at perpetual-loop ikke akkumulerer leaks over 24t | 2d | Ikke startet |
-| R10 | **Spill 3 phase-state-machine engine-wireup + chaos-test** — verifiser at engine fortsetter korrekt etter midlertidig backend-nedetid | 3-4d | Foundation: PR #1008 |
-| R11 | **Per-rom resource-isolation** — én rom-feil må aldri ta ned andre rom (process-level isolation eller sirkel-bryter per rom) | 3-5d | Ikke startet |
-| R12 | **Disaster-recovery-runbook** — dokumentert prosedyre for rom-failover, DB-failover, Redis-failover, full instance-restart | 1d | Eksisterer i `docs/operations/` men må valideres mot rom-arkitektur |
+| # | Tiltak | Linear | Estimat | Status |
+|---|---|---|---|---|
+| R1 | **Lobby-rom Game1Controller-wireup** — løse "FÅR IKKE KOBLET TIL ROM" ende-til-ende | [BIN-822](https://linear.app/bingosystem/issue/BIN-822) | 1-2d | Foundation: PR #1018 åpen |
+| R2 | **Failover-test** — drep backend-instans midt i runde, verifiser at annen instans plukker opp uten å miste draws | [BIN-811](https://linear.app/bingosystem/issue/BIN-811) | 2-3d | Ikke startet |
+| R3 | **Klient-reconnect-test** — verifiser at klient som mister nett 5/15/60 sek får full state-replay og kan fortsette uten tap | [BIN-812](https://linear.app/bingosystem/issue/BIN-812) | 2d | Ikke startet |
+| R4 | **Load-test** — k6 eller artillery-script som simulerer 1000 samtidige klienter per rom over 60 min | [BIN-817](https://linear.app/bingosystem/issue/BIN-817) | 2-3d | Ikke startet |
+| R5 | **Idempotent socket-event-håndtering** — `clientRequestId`-deduplisering på `ticket:mark`, `claim:submit`, `ticket:buy` | [BIN-813](https://linear.app/bingosystem/issue/BIN-813) | 2d | Delvis (wallet har, sockets ikke verifisert) |
+| R6 | **Outbox for room-events** — alle wallet-touch fra room-events går via outbox | [BIN-818](https://linear.app/bingosystem/issue/BIN-818) | 1-2d | Wallet-siden ferdig; rom-side må verifiseres |
+| R7 | **Health-endpoint per rom** — `/api/games/{slug}/health?hallId=X` med p95-latency, last-draw-age, connected-clients | [BIN-814](https://linear.app/bingosystem/issue/BIN-814) | 1d | Ikke startet |
+| R8 | **Alerting** — PagerDuty/Slack-varsel hvis rom står i error-state > 30 sek eller draw-tick-jitter > 2s | [BIN-815](https://linear.app/bingosystem/issue/BIN-815) | 1d | Ikke startet |
+| R9 | **Spill 2 perpetual-room load-test** — verifiser at perpetual-loop ikke akkumulerer leaks over 24t | [BIN-819](https://linear.app/bingosystem/issue/BIN-819) | 2d | Ikke startet |
+| R10 | **Spill 3 phase-state-machine engine-wireup + chaos-test** — verifiser at engine fortsetter korrekt etter midlertidig backend-nedetid | [BIN-820](https://linear.app/bingosystem/issue/BIN-820) | 3-4d | Foundation: PR #1008 |
+| R11 | **Per-rom resource-isolation** — én rom-feil må aldri ta ned andre rom (process-level isolation eller sirkel-bryter per rom) | [BIN-821](https://linear.app/bingosystem/issue/BIN-821) | 3-5d | Ikke startet |
+| R12 | **Disaster-recovery-runbook** — dokumentert prosedyre for rom-failover, DB-failover, Redis-failover, full instance-restart | [BIN-816](https://linear.app/bingosystem/issue/BIN-816) | 1d | Eksisterer i `docs/operations/` men må valideres mot rom-arkitektur |
+
+Parent-issue: [BIN-810](https://linear.app/bingosystem/issue/BIN-810) — Live-rom-robusthet (R-mandat)
 
 **Sum:** ~22-30 dev-dager. Kan parallelliseres med 3-4 agenter til ~7-10 kalenderdager.
 
@@ -222,6 +224,7 @@ Hvis vi finner at egen kapasitet ikke holder for å nå Evolution-nivå, er **ek
 | 2026-05-08 | Initial. Doc-fester direktiv fra Tobias om Evolution-grade robusthet. | PM-AI (Claude Opus 4.7) |
 | 2026-05-08 | §6.1: Go/no-go-policy doc-festet. Hvis R2/R3-test avdekker strukturelle problemer skal pilot pauses, ikke "best effort, fikser i drift". Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
 | 2026-05-08 | §8.1: Eksternt løft kun ved R2/R3-fix > 1 uke eller R11. §8.2: Pilot holder 4 haller, utvidelse betinger 2-4 ukers drift-data + R4/R6/R9 bestått. Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
+| 2026-05-08 | §5: Linear-numre lagt til som krysslenking (parent BIN-810 + R1-R12 → BIN-811..822). | PM-AI (Claude Opus 4.7) |
 
 ---
 
