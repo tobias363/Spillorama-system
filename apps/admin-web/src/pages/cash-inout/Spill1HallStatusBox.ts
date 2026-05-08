@@ -141,6 +141,22 @@ export function mountSpill1HallStatusBox(
         res.halls = legacyResp.halls;
         res.allReady = legacyResp.allReady;
       }
+      // 2026-05-08 (Tobias-bug-fix): adapter setter `currentGame.id` til
+      // plan-run-id, men master-handlinger (pause/resume/stop) går mot
+      // `/api/admin/game1/games/:gameId/...` som krever scheduled-games-id.
+      // Legacy-endpoint `/api/agent/game1/current-game` returnerer ekte
+      // scheduled-games-id i `currentGame.id` — vi bruker den når den
+      // finnes så pause-knappen treffer riktig rad. `participatingHallIds`
+      // overstyres også fordi adapter-en bare hadde plan-runtime sin
+      // hall-snapshot tilgjengelig.
+      if (legacyResp?.currentGame && res.currentGame) {
+        res.currentGame.id = legacyResp.currentGame.id;
+        res.currentGame.masterHallId = legacyResp.currentGame.masterHallId;
+        res.currentGame.groupHallId = legacyResp.currentGame.groupHallId;
+        res.currentGame.participatingHallIds =
+          legacyResp.currentGame.participatingHallIds;
+        res.isMasterAgent = legacyResp.isMasterAgent;
+      }
       if (aborted) return;
       state.loaded = true;
       state.data = res;
