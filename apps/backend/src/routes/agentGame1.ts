@@ -363,6 +363,38 @@ export function createAgentGame1Router(
     }
   }
 
+  /**
+   * 2026-05-08 (Tobias-feedback): hent NÅVÆRENDE GoH-medlemmer for en gitt
+   * group_hall_id (UUID som scheduled_games.group_hall_id refererer). Brukes
+   * til å filtrere bort haller som var med i `participating_halls_json`
+   * (snapshot på spawn-tid) men senere er fjernet fra GoH-en av admin.
+   *
+   * Master-konsollet skal kun vise haller som ER medlemmer NÅ — ellers
+   * dukker "stale" haller opp etter en GoH-membership-endring.
+   *
+   * Soft-fail: returnerer null hvis gruppen ikke finnes eller lookup
+   * feiler, slik at caller kan falle tilbake på legacy-oppførsel
+   * (vise alt fra `participating_halls_json` + ready-rader).
+   */
+  async function getCurrentGoHMembersByGroupId(
+    groupHallId: string
+  ): Promise<Map<string, string> | null> {
+    try {
+      const group = await hallGroupService.get(groupHallId);
+      const members = new Map<string, string>();
+      for (const m of group.members) {
+        members.set(m.hallId, m.hallName);
+      }
+      return members;
+    } catch (err) {
+      logger.debug(
+        { groupHallId, err },
+        "getCurrentGoHMembersByGroupId failed; falling back to legacy listing"
+      );
+      return null;
+    }
+  }
+
   // ── GET /api/agent/game1/current-game ────────────────────────────────────
 
   router.get("/api/agent/game1/current-game", async (req, res) => {
@@ -422,20 +454,65 @@ export function createAgentGame1Router(
       const participatingIds = new Set(
         parseHallIdsArray(active.participating_halls_json)
       );
+
+      // 2026-05-08 (Tobias-feedback): Hent NÅVÆRENDE GoH-medlemmer via
+      // game-raden sin `group_hall_id`. Vi filtrerer slik at kun haller
+      // som ER medlemmer av GoH-en NÅ vises i master-konsollet.
+      // Snapshot-data (`participating_halls_json` + `ready_rows`) blir
+      // ikke endret — vi bare skjuler haller som admin har fjernet fra
+      // GoH-en etter spawn. Dette løser bug-en der ny stale hall
+      // ("ikke bruk") fortsatte å vises selv om den var fjernet.
+      //
+      // Soft-fail: hvis lookup feiler eller gruppen ikke finnes (dev-DB
+      // uten data), fall tilbake til legacy-oppførselen (vise alt fra
+      // gruppen-via-hallId + ready-rows). Dette beholder back-compat for
+      // tester og dev-miljø.
+      const currentGoHMembers = await getCurrentGoHMembersByGroupId(
+        active.group_hall_id
+      );
+
       // Slå sammen group-halls + alle hall-IDer fra ready-rader
       // (dekker edge case der ready-rad finnes for hall som ikke er
       // i gruppen lenger).
-      const allHallIds = new Set<string>([
+      const candidateHallIds = new Set<string>([
         ...groupHalls.map((h) => h.hallId),
         ...readyRows.map((r) => r.hallId),
       ]);
 
+      // Sikkerhets-fallback: master-hall vises ALLTID så lenge spillet
+      // har en master, selv om master-hallen midlertidig ikke skulle
+      // være i gruppen lenger (edge-case ved samtidig admin-edit).
+      candidateHallIds.add(active.master_hall_id);
+
+      // Sikkerhets-fallback: requesting agent ser alltid sin egen hall
+      // i listen — ellers kan agenten miste sin egen pille.
+      candidateHallIds.add(hallId);
+
+      // Intersect med nåværende GoH-membership hvis vi klarte å hente
+      // den. Fjernede haller blir filtrert bort her — det er kjernen i
+      // Tobias-feedback.
+      const allHallIds: Set<string> =
+        currentGoHMembers !== null
+          ? new Set(
+              Array.from(candidateHallIds).filter(
+                (hid) =>
+                  // Behold master + selv selv om de skulle ha falt ut.
+                  currentGoHMembers.has(hid) ||
+                  hid === active.master_hall_id ||
+                  hid === hallId
+              )
+            )
+          : candidateHallIds;
+
       const hallsWithName = await Promise.all(
         Array.from(allHallIds).map(async (hid) => {
           const ready = readyByHallId.get(hid);
+          // Prefer live navn fra current-GoH-lookup (bekreftet medlem),
+          // ellers groupHalls-lookup (legacy), ellers platformService.
+          const goHName = currentGoHMembers?.get(hid);
           const groupHall = groupHalls.find((g) => g.hallId === hid);
-          let hallName = groupHall?.hallName ?? hid;
-          if (!groupHall) {
+          let hallName = goHName ?? groupHall?.hallName ?? hid;
+          if (!goHName && !groupHall) {
             try {
               const hall = await platformService.getHall(hid);
               hallName = hall.name;
@@ -675,14 +752,39 @@ export function createAgentGame1Router(
       const allReady = await hallReadyService.allParticipatingHallsReady(
         active.id
       );
+
+      // 2026-05-08 (Tobias-feedback): samme GoH-membership-filter som
+      // `/current-game` — ready-rader fra ikke-medlemmer av gjeldende GoH
+      // skal ikke vises i master-konsollet. Master-hall + requesting-hall
+      // er sikkerhets-fallback og vises alltid (selv om de skulle ha falt
+      // ut av GoH-en i en race-situasjon). Soft-fail tilbake til legacy
+      // hvis lookup mot gruppen feiler.
+      const currentGoHMembers = await getCurrentGoHMembersByGroupId(
+        active.group_hall_id
+      );
+      const filteredHalls =
+        currentGoHMembers !== null
+          ? halls.filter(
+              (h) =>
+                currentGoHMembers.has(h.hallId) ||
+                h.hallId === active.master_hall_id ||
+                h.hallId === hallId
+            )
+          : halls;
+
       const hallsWithName = await Promise.all(
-        halls.map(async (h) => {
-          let hallName = h.hallId;
-          try {
-            const hall = await platformService.getHall(h.hallId);
-            hallName = hall.name;
-          } catch {
-            // soft-fail
+        filteredHalls.map(async (h) => {
+          // Prefer navn fra current GoH-lookup (bekreftet medlem) over
+          // platformService-call.
+          const goHName = currentGoHMembers?.get(h.hallId);
+          let hallName = goHName ?? h.hallId;
+          if (!goHName) {
+            try {
+              const hall = await platformService.getHall(h.hallId);
+              hallName = hall.name;
+            } catch {
+              // soft-fail
+            }
           }
           return {
             hallId: h.hallId,

@@ -154,6 +154,26 @@ interface StartOpts {
   resumeImpl?: Game1MasterControlService["resumeGame"];
   halls?: Record<string, { id: string; name: string }>;
   poolError?: Error;
+  /**
+   * 2026-05-08 (Tobias-feedback): mock for `hallGroupService.list({hallId})`
+   * (brukt av legacy `getGroupHallsForHall`). Default behavior er å returnere
+   * en gruppe hvis hallId er kjent, ellers tom liste.
+   */
+  groupHallsForHall?: Record<
+    string,
+    { id: string; members: { hallId: string; hallName: string }[] }
+  >;
+  /**
+   * 2026-05-08 (Tobias-feedback): mock for `hallGroupService.get(groupId)`
+   * (brukt av nye `getCurrentGoHMembersByGroupId`). Returnerer current GoH-
+   * membership for en gitt group_hall_id. Hvis `null`, simulerer at
+   * lookup feiler (gruppen finnes ikke / DB-feil) — caller skal falle
+   * tilbake til legacy-oppførselen.
+   */
+  goHById?: Record<
+    string,
+    { members: { hallId: string; hallName: string }[] } | null
+  >;
 }
 
 interface Ctx {
@@ -275,6 +295,41 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
     },
   } as unknown as Parameters<typeof createAgentGame1Router>[0]["pool"];
 
+  // 2026-05-08 (Tobias-feedback): mock hallGroupService med både `list` og
+  // `get`. Default er tom oppførsel (matchende eksisterende test-baseline).
+  // Tester som vil simulere GoH-membership setter `groupHallsForHall` eller
+  // `goHById`-opsjonene over.
+  const mockHallGroupService = {
+    async list(filter?: { hallId?: string }) {
+      const hallId = filter?.hallId;
+      if (!hallId) return [];
+      const hit = opts.groupHallsForHall?.[hallId];
+      if (!hit) return [];
+      return [
+        {
+          id: hit.id,
+          members: hit.members,
+        },
+      ];
+    },
+    async get(groupId: string) {
+      const hit = opts.goHById?.[groupId];
+      if (hit === undefined) {
+        // Default: kast som om gruppen ikke finnes (matcher legacy
+        // baseline-oppførsel hvor goHById ikke er satt).
+        throw new DomainError("HALL_GROUP_NOT_FOUND", "Hall-gruppe finnes ikke.");
+      }
+      if (hit === null) {
+        // Eksplisitt simulering av lookup-feil (DB-feil osv).
+        throw new Error("simulated DB error");
+      }
+      return {
+        id: groupId,
+        members: hit.members,
+      };
+    },
+  };
+
   const app = express();
   app.use(express.json());
   app.use(
@@ -282,9 +337,9 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
       platformService,
       masterControlService,
       hallReadyService,
-      hallGroupService: {
-        list: async () => [],
-      } as unknown as Parameters<typeof createAgentGame1Router>[0]["hallGroupService"],
+      hallGroupService: mockHallGroupService as unknown as Parameters<
+        typeof createAgentGame1Router
+      >[0]["hallGroupService"],
       pool,
     })
   );
@@ -774,6 +829,313 @@ test("GET /hall-status — SUPPORT avvises", async () => {
   try {
     const res = await get(ctx, "/api/agent/game1/hall-status", "t-sup");
     assert.equal(res.status, 400);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── GoH-membership-filter (Tobias-feedback 2026-05-08) ────────────────────
+//
+// Bug: scheduled-game's `participating_halls_json` er en snapshot fra
+// spawn-tidspunkt. Hvis admin endrer GoH-membership senere, dukker
+// "stale" haller opp i master-konsollet. Fix: intersekter med
+// `hallGroupService.get(group_hall_id).members` slik at kun haller som
+// ER medlemmer NÅ vises.
+
+test("GET /current-game — filtrerer bort haller som ikke er i GoH NÅ (Tobias 2026-05-08)", async () => {
+  // Scenario:
+  //   participating_halls_json = ["hall-master", "hall-slave", "hall-stale"]
+  //   readyRows har ready-rad for hall-stale (selv om den er fjernet fra GoH)
+  //   GoH-medlemmer NÅ = [hall-master, hall-slave] (admin har fjernet hall-stale)
+  // Forventning: master-konsoll returnerer kun hall-master + hall-slave.
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: {
+      ...defaultActiveRow(),
+      group_hall_id: "grp-1",
+      participating_halls_json: ["hall-master", "hall-slave", "hall-stale"],
+    },
+    readyRows: [
+      ...defaultReadyRows(),
+      {
+        gameId: "g1",
+        hallId: "hall-stale",
+        isReady: false,
+        readyAt: null,
+        readyByUserId: null,
+        digitalTicketsSold: 0,
+        physicalTicketsSold: 0,
+        excludedFromGame: false,
+        excludedReason: null,
+        startTicketId: null,
+        startScannedAt: null,
+        finalScanTicketId: null,
+        finalScannedAt: null,
+        createdAt: "",
+        updatedAt: "",
+      },
+    ],
+    groupHallsForHall: {
+      "hall-master": {
+        id: "grp-1",
+        members: [
+          { hallId: "hall-master", hallName: "Master Hall" },
+          { hallId: "hall-slave", hallName: "Slave Hall" },
+        ],
+      },
+    },
+    goHById: {
+      "grp-1": {
+        members: [
+          { hallId: "hall-master", hallName: "Master Hall" },
+          { hallId: "hall-slave", hallName: "Slave Hall" },
+        ],
+      },
+    },
+  });
+  try {
+    const res = await get(ctx, "/api/agent/game1/current-game", "t-m");
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      data: { halls: Array<{ hallId: string; hallName: string }> };
+    };
+    const hallIds = payload.data.halls.map((h) => h.hallId).sort();
+    // hall-stale skal IKKE være i listen lenger.
+    assert.deepEqual(hallIds, ["hall-master", "hall-slave"]);
+    // Bekreft at hall-stale ikke vises overhodet.
+    assert.ok(!payload.data.halls.some((h) => h.hallId === "hall-stale"));
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /current-game — master-hall vises ALLTID som sikkerhets-fallback (Tobias 2026-05-08)", async () => {
+  // Edge-case: GoH-membership-lookup returnerer kun hall-slave (bug eller
+  // race der master-hall ikke står i lista lenger). Master-hall skal
+  // fortsatt vises fordi `active.master_hall_id` overstyrer filteret.
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: {
+      ...defaultActiveRow(),
+      group_hall_id: "grp-1",
+    },
+    goHById: {
+      "grp-1": {
+        members: [
+          // hall-master er ikke i listen — sjelden race-case, men håndteres.
+          { hallId: "hall-slave", hallName: "Slave Hall" },
+        ],
+      },
+    },
+  });
+  try {
+    const res = await get(ctx, "/api/agent/game1/current-game", "t-m");
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      data: { halls: Array<{ hallId: string }> };
+    };
+    const hallIds = payload.data.halls.map((h) => h.hallId);
+    // Master-hall MÅ vises selv om den ikke er i current GoH-listen.
+    assert.ok(hallIds.includes("hall-master"));
+    // hall-slave er fortsatt med (currently a member).
+    assert.ok(hallIds.includes("hall-slave"));
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /current-game — ekskluderte haller vises (separat fra GoH-filter)", async () => {
+  // Halls med `excludedFromGame=true` er ikke det samme som "fjernet fra
+  // GoH". Ekskluderte haller skal fortsatt vises i listen så master kan
+  // se hva som ble ekskludert (med excludedReason).
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: {
+      ...defaultActiveRow(),
+      group_hall_id: "grp-1",
+      participating_halls_json: ["hall-master", "hall-slave"],
+    },
+    readyRows: [
+      {
+        gameId: "g1",
+        hallId: "hall-master",
+        isReady: true,
+        readyAt: "2026-04-24T09:55:00Z",
+        readyByUserId: "u-m",
+        digitalTicketsSold: 10,
+        physicalTicketsSold: 5,
+        excludedFromGame: false,
+        excludedReason: null,
+        startTicketId: null,
+        startScannedAt: null,
+        finalScanTicketId: null,
+        finalScannedAt: null,
+        createdAt: "",
+        updatedAt: "",
+      },
+      {
+        gameId: "g1",
+        hallId: "hall-slave",
+        isReady: false,
+        readyAt: null,
+        readyByUserId: null,
+        digitalTicketsSold: 0,
+        physicalTicketsSold: 0,
+        excludedFromGame: true,
+        excludedReason: "Tekniske problemer",
+        startTicketId: null,
+        startScannedAt: null,
+        finalScanTicketId: null,
+        finalScannedAt: null,
+        createdAt: "",
+        updatedAt: "",
+      },
+    ],
+    goHById: {
+      "grp-1": {
+        members: [
+          { hallId: "hall-master", hallName: "Master Hall" },
+          { hallId: "hall-slave", hallName: "Slave Hall" },
+        ],
+      },
+    },
+  });
+  try {
+    const res = await get(ctx, "/api/agent/game1/current-game", "t-m");
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      data: {
+        halls: Array<{
+          hallId: string;
+          excludedFromGame: boolean;
+          excludedReason: string | null;
+        }>;
+      };
+    };
+    const slave = payload.data.halls.find((h) => h.hallId === "hall-slave");
+    assert.ok(slave);
+    assert.equal(slave!.excludedFromGame, true);
+    assert.equal(slave!.excludedReason, "Tekniske problemer");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /current-game — soft-fail når hallGroupService.get feiler (legacy fallback)", async () => {
+  // Hvis lookup mot current GoH-membership feiler (DB-feil eller gruppen
+  // ikke finnes), faller endepunktet tilbake til legacy-oppførselen
+  // (vise alt fra `participating_halls_json` + ready-rows). Dette
+  // beholder back-compat for tester og dev-miljø.
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: {
+      ...defaultActiveRow(),
+      group_hall_id: "grp-error",
+      participating_halls_json: ["hall-master", "hall-slave"],
+    },
+    goHById: {
+      "grp-error": null, // simulerer DB-feil
+    },
+  });
+  try {
+    const res = await get(ctx, "/api/agent/game1/current-game", "t-m");
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      data: { halls: Array<{ hallId: string }> };
+    };
+    // Forventning: legacy-oppførsel — alle ready-row-haller vises.
+    const hallIds = payload.data.halls.map((h) => h.hallId).sort();
+    assert.deepEqual(hallIds, ["hall-master", "hall-slave"]);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /hall-status — filtrerer bort haller som ikke er i GoH NÅ (Tobias 2026-05-08)", async () => {
+  // Samme bug-fix som /current-game — også /hall-status skal kun returnere
+  // ready-rader for haller som ER medlemmer av GoH-en NÅ.
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    activeRow: {
+      ...defaultActiveRow(),
+      group_hall_id: "grp-1",
+      participating_halls_json: ["hall-master", "hall-slave", "hall-stale"],
+    },
+    readyRows: [
+      ...defaultReadyRows(),
+      {
+        gameId: "g1",
+        hallId: "hall-stale",
+        isReady: false,
+        readyAt: null,
+        readyByUserId: null,
+        digitalTicketsSold: 0,
+        physicalTicketsSold: 0,
+        excludedFromGame: false,
+        excludedReason: null,
+        startTicketId: null,
+        startScannedAt: null,
+        finalScanTicketId: null,
+        finalScannedAt: null,
+        createdAt: "",
+        updatedAt: "",
+      },
+    ],
+    goHById: {
+      "grp-1": {
+        members: [
+          { hallId: "hall-master", hallName: "Master Hall" },
+          { hallId: "hall-slave", hallName: "Slave Hall" },
+        ],
+      },
+    },
+  });
+  try {
+    const res = await get(ctx, "/api/agent/game1/hall-status", "t-m");
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      data: { halls: Array<{ hallId: string }> };
+    };
+    const hallIds = payload.data.halls.map((h) => h.hallId).sort();
+    assert.deepEqual(hallIds, ["hall-master", "hall-slave"]);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /current-game — requesting agent ser ALLTID sin egen hall som sikkerhets-fallback", async () => {
+  // Edge-case: agentens hallId er ikke i current GoH-listen (race der
+  // admin har fjernet slave fra GoH-en mens runden er aktiv, men slave
+  // var med i `participating_halls_json` på spawn-tidspunkt). Agent skal
+  // fortsatt se sin egen pille — ellers mister de oversikt over egen
+  // status.
+  const ctx = await startServer({
+    users: { "t-s": slaveAgent },
+    activeRow: {
+      ...defaultActiveRow(),
+      group_hall_id: "grp-1",
+      // slave er fortsatt i snapshotten (game spawnet før admin endret GoH)
+      participating_halls_json: ["hall-master", "hall-slave"],
+    },
+    goHById: {
+      "grp-1": {
+        members: [
+          // hall-slave er NÅ ikke lenger i GoH-listen (admin fjernet)
+          { hallId: "hall-master", hallName: "Master Hall" },
+        ],
+      },
+    },
+  });
+  try {
+    const res = await get(ctx, "/api/agent/game1/current-game", "t-s");
+    assert.equal(res.status, 200);
+    const payload = (await res.json()) as {
+      data: { halls: Array<{ hallId: string }> };
+    };
+    const hallIds = payload.data.halls.map((h) => h.hallId);
+    // Slave-agent MÅ se sin egen hall + master-hall (begge security-fallback).
+    assert.ok(hallIds.includes("hall-slave"));
+    assert.ok(hallIds.includes("hall-master"));
   } finally {
     await ctx.close();
   }
