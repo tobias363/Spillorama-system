@@ -76,7 +76,10 @@ reviews:
     - "!**/*.min.js"
     - "!**/*.min.css"
     - "!apps/backend/migrations/*.sql"   # Migrations — håndteres av migration-policy-skill
-    - "!.claude/skills/**"               # Skills auto-aktiveres, ikke kode-review-relevant
+    # Skills: SKILL.md reviewes (frontmatter-validering nedenfor),
+    # men resten av skill-mappene (assets, scripts) skippes.
+    - "!.claude/skills/**/!(SKILL).md"
+    - "!.claude/skills/**/*.{json,yaml,yml,sh,py,js,ts}"
 
   # Path-spesifikke instruksjoner — Spillorama-kontekst
   path_instructions:
@@ -139,6 +142,21 @@ reviews:
         - 5×5 UTEN fri sentercelle (forskjell fra Spill 1)
         Se docs/architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md.
 
+    - path: "apps/backend/src/game/{Game5,Spillorama,SpinnGo}*.ts"
+      instructions: |
+        SpinnGo / Spill 4 / `spillorama`-slug = DATABINGO (forhåndstrukket,
+        player-startet — IKKE hovedspill, IKKE master-trigget).
+        Slug: `spillorama` (historisk arv, IKKE `spinngo` eller `game5`).
+        Verifiser:
+        - gameType DATABINGO via ledgerGameTypeForSlug (ikke MAIN_GAME)
+        - §11 minimum 30% til organisasjoner (vs 15% for Spill 1-3)
+        - applySinglePrizeCap MED cap = 2500 kr KUN for databingo
+          (ALDRI for Spill 1-3 — hovedspill har INGEN single-prize-cap)
+        - Cap-konstanten 2500 i apps/backend/src/adapters/PrizePolicyPort.ts
+          er regulatorisk — endring krever Tobias-godkjennelse
+        - Forhåndstrukket flow (ikke live draw-tick som Spill 1/2/3)
+        Se docs/architecture/SPILLKATALOG.md + SPILL_REGLER_OG_PAYOUT.md.
+
     - path: "apps/backend/src/game/MasterActionService.ts"
       instructions: |
         ENESTE sted som kjenner BÅDE plan-run-id og scheduled-game-id (Bølge 2).
@@ -199,6 +217,43 @@ reviews:
         - CREATE TABLE IF NOT EXISTS
         - ALTER TABLE ... IF NOT EXISTS
         - Filnavn følger YYYYMMDDhhmmss_<navn>.sql
+
+    - path: ".claude/skills/**/SKILL.md"
+      instructions: |
+        Skills auto-aktiveres basert på description. Strenge formkrav:
+        - YAML-frontmatter MÅ ha `name`, `description`, `metadata.version`
+        - `description` skal være "pushy" — front-loadede keywords +
+          relevante filnavn/symboler + "Make sure to use this skill
+          whenever..."-frase. Korte beskrivelser trigger ikke pålitelig.
+        - Body 150-300 linjer (ikke mer — skills er lookup, ikke tutorials)
+        - Body-struktur: Kontekst (read first) → Kjerne-arkitektur →
+          Immutable beslutninger → Vanlige feil → Kanonisk referanse →
+          Når aktiv
+        - IKKE re-skriv fundament-doc-er — pek på dem (docs/architecture/...,
+          docs/adr/..., docs/engineering/...)
+        - Vedlikehold: hver PR som endrer fundament-doc bør sjekke om
+          tilhørende skill må oppdateres tilsvarende
+        Endringer i SKILL.md påvirker hvordan agenter resonnerer — gjennomgå
+        med ekstra forsiktighet.
+
+    - path: "docs/adr/**"
+      instructions: |
+        ADR-format (ADR-0001 er selv-refererende kilde — ALDRI rør den uten
+        å erstatte med ny ADR med Status: Superseded by ADR-MMMM).
+        Filnavn: `NNNN-kort-tittel.md` (4-siffer numbering, kebab-case).
+        Verifiser:
+        - Status: Proposed | Accepted | Deprecated | Superseded by ADR-MMMM
+          (ingen andre verdier — ALDRI "WIP" eller "TBD")
+        - Påkrevde seksjoner: Kontekst, Beslutning, Konsekvenser
+          (positive/negative/nøytrale), Alternativer vurdert,
+          Implementasjon, Referanser
+        - Frontmatter: Status, Dato (YYYY-MM-DD), Deciders, Konsulterer
+        - ALDRI endre Status: Accepted ADR — opprett ny ADR som
+          superseder den (`Status: Superseded by ADR-NNNN`)
+        - ALDRI re-bruk ADR-nummer (selv om ADR-en ble forkastet før merge)
+        - Referanser-seksjon skal peke til kilde-doc-er, PR-er, Linear-issues
+        ADR-er er Spillorama-system sin "tidskapsel" — de overlever PM-handovers
+        og må være self-contained. Se ADR-0001 for full prosess-spec.
 
 # Chat-config — for @coderabbitai i PR-kommentarer
 chat:
