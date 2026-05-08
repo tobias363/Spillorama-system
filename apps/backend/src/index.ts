@@ -299,6 +299,9 @@ import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminCmsRouter } from "./routes/adminCms.js";
 import { createPublicCmsRouter } from "./routes/publicCms.js";
 import { createPublicStatusRouter } from "./routes/publicStatus.js";
+// BIN-814 / R7: per-room health endpoint for Spill 1, 2, 3 (offentlig
+// observerbarhet — alerting i R8 bygger på dette).
+import { createPublicGameHealthRouter } from "./routes/publicGameHealth.js";
 import { bootstrapStatusPage } from "./observability/statusBootstrap.js";
 // §6.4 (Wave 3b, 2026-05-06): Postgres-pool-utilization-metrics-tick. Wires
 // pgPool* gauges på en setInterval-loop som leser `pool.totalCount`,
@@ -3026,6 +3029,20 @@ const statusBootstrap = bootstrapStatusPage({
 });
 app.get("/status", (_req, res) => res.sendFile(path.join(publicDir, "status.html")));
 app.use(createPublicStatusRouter(statusBootstrap));
+// BIN-814 / R7: public per-room health-endpoint for Spill 1/2/3. Mountet
+// FØR globale rate-limiteren (router har egen 60/min sliding-window per
+// IP) slik at monitoring-systemer kan polle uten å konkurrere med
+// generell `/api/`-trafikk. Public-endpoint, ingen auth.
+app.use(
+  createPublicGameHealthRouter({
+    pool: platformService.getPool(),
+    schema: pgSchema,
+    engine,
+    io,
+    spill2ConfigService,
+    spill3ConfigService,
+  }),
+);
 // Fase 2A (2026-05-05): admin observability — error-rates + registry. Mounts
 // `/api/admin/observability/error-rates` + `/api/admin/observability/error-codes`.
 // Bearer-auth + ADMIN_PANEL_ACCESS — driver dashboards og on-call-UI.

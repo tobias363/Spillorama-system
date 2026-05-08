@@ -40,6 +40,12 @@ tags:
       Public (un-authenticated) read-endpoints for the system status page
       (`/status`). Spillere og hall-operatører kan sjekke disse ved problemer.
       Cache 30s. BIN-791.
+  - name: Game Health — Public
+    description: |
+      Per-rom helsestatus for Spill 1 (bingo), Spill 2 (rocket) og Spill 3
+      (monsterbingo). Brukes av ops, monitoring (R8 alerting bygger på
+      dette) og admin-konsoll. Public, no auth, rate-limit 60/min/IP.
+      Aldri stale > 5s — `Cache-Control: no-cache`. BIN-814 / R7.
   - name: Payments
     description: Swedbank Pay payment intents and callbacks
   - name: Admin — Auth
@@ -945,6 +951,101 @@ components:
         resolvedAt:
           type: [string, "null"]
           format: date-time
+
+    # ── Game Health — Public (BIN-814 / R7) ──────────────────────────────
+    GameRoomHealth:
+      type: object
+      description: |
+        Per-rom helsestatus for Spill 1, 2 og 3. Eksponeres av
+        `/api/games/spill[1-3]/health`. Aldri stale > 5s.
+      required:
+        [
+          status,
+          lastDrawAge,
+          connectedClients,
+          currentPhase,
+          currentPosition,
+          instanceId,
+          redisHealthy,
+          dbHealthy,
+          nextScheduledStart,
+          withinOpeningHours,
+          p95SocketRoundtripMs,
+          checkedAt,
+        ]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+          description: |
+            Aggregert helsestatus.
+              - `ok`        : alt friskt eller venter på neste runde
+                              innenfor åpningstid.
+              - `degraded`  : aktiv runde men minst én avhengighet svikter
+                              (Redis nede / draw stale > 30s).
+              - `down`      : DB nede, eller utenfor åpningstid uten aktiv
+                              runde.
+        lastDrawAge:
+          type: [integer, "null"]
+          minimum: 0
+          description: |
+            Sekunder siden siste trekning. `null` hvis ingen runde har
+            kjørt enda eller hvis rommet er idle/finished.
+        connectedClients:
+          type: integer
+          minimum: 0
+          description: Antall socket.io-klienter i rommet/rommene.
+        currentPhase:
+          type: string
+          enum: [idle, running, paused, finished]
+          description: |
+            Live-fase. `idle` = ingen aktiv runde (lobby venter), `running`
+            = aktivt trekk pågår, `paused` = master-pause, `finished` =
+            siste runde nettopp avsluttet.
+        currentPosition:
+          type: [integer, "null"]
+          minimum: 1
+          description: |
+            Plan-position for Spill 1 (kommer i en oppfølgings-PR når
+            `Game1LobbyService` lander). Alltid `null` for Spill 2/3
+            (perpetual loop / singleton uten plan-konsept).
+        instanceId:
+          type: string
+          description: |
+            Backend-instans-id (f.eks. Render instance-id eller
+            `<hostname>-<pid>`). Brukes til å spore hvilken backend-node
+            som besvarte requesten.
+        redisHealthy:
+          type: boolean
+          description: |
+            True hvis socket.io Redis-adapter responderer på `serverCount()`,
+            eller hvis vi kjører in-memory-adapter (dev/test).
+        dbHealthy:
+          type: boolean
+          description: True hvis `SELECT 1` mot Postgres lykkes.
+        nextScheduledStart:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            ISO-tid for neste planlagte start. For Spill 1 leses fra
+            `app_game1_scheduled_games` med status `scheduled`/`purchase_open`/
+            `ready_to_start`. Alltid `null` for Spill 2/3 (perpetual).
+        withinOpeningHours:
+          type: boolean
+          description: |
+            True hvis nåværende tidspunkt er innenfor konfigurert
+            åpningsvindu (Europe/Oslo). Spill 1 returnerer alltid `true`
+            inntil schedule-basert vindu er implementert (TODO R8).
+        p95SocketRoundtripMs:
+          type: [number, "null"]
+          minimum: 0
+          description: |
+            P95 socket-roundtrip i ms over siste 5 min. `null` inntil
+            R5/R8-metrikker er på plass.
+        checkedAt:
+          type: string
+          format: date-time
+          description: ISO-tid for når svaret ble generert.
 
     # ── Game Catalog + Game Plans (spilleplan-redesign 2026-05-07) ────────
 
@@ -3519,6 +3620,173 @@ paths:
                             type: array
                             items:
                               $ref: "#/components/schemas/PublicStatusIncident"
+
+  # ── Game Health — Public (BIN-814 / R7) ───────────────────────────────────
+  #
+  # Per-rom helsestatus for Spill 1, 2 og 3. Public-endpoints (ingen auth).
+  # Rate-limit 60/min per IP via router-lokal sliding-window. Cache:
+  # `no-cache, max-age=0` — aldri stale > 5s. Mandat: `LIVE_ROOM_ROBUSTNESS_
+  # MANDATE_2026-05-08.md` §3.4 R7.
+  #
+  # Implementasjon: apps/backend/src/routes/publicGameHealth.ts.
+
+  /api/games/spill1/health:
+    get:
+      tags: [Game Health — Public]
+      summary: Helsestatus for Spill 1 (bingo) — per hall (BIN-814 / R7)
+      description: |
+        Returnerer aggregert live-state for det/de Spill 1-rom som tilhører
+        gitt hall (`master_hall_id` matcher `hallId`-parameteren). Spill 1
+        kjøres som per-hall lobbies med planlagte runder fra
+        `app_game1_scheduled_games`.
+
+        Status-mapping:
+          - `ok`        : DB+Redis friske og enten aktiv runde uten stale
+                          draws, eller ingen aktiv runde innenfor åpningstid.
+          - `degraded`  : aktiv runde men Redis nede ELLER draw-stale > 30s.
+          - `down`      : DB nede, eller utenfor åpningstid uten aktiv runde.
+
+        Public, no auth. Rate-limit 60/min/IP.
+      security: []
+      parameters:
+        - in: query
+          name: hallId
+          required: true
+          schema:
+            type: string
+            maxLength: 120
+      responses:
+        "200":
+          description: Helsestatus
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "no-cache, max-age=0, must-revalidate"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GameRoomHealth"
+        "400":
+          description: INVALID_INPUT — hallId mangler eller for lang
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: RATE_LIMITED — over 60 req/min for denne IP-en
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/games/spill2/health:
+    get:
+      tags: [Game Health — Public]
+      summary: Helsestatus for Spill 2 (rocket) — perpetual loop (BIN-814 / R7)
+      description: |
+        Returnerer aggregert live-state for Spill 2-rom. Spill 2 er et
+        globalt singleton-rom (`isHallShared=true`) — `hallId`-parameteren
+        brukes til logging/audit, men live-state hentes på tvers av alle
+        haller. `nextScheduledStart` er alltid `null` (perpetual-loopen
+        spawn'er nye runder automatisk basert på `Spill2Config.minTicketsToStart`).
+
+        `withinOpeningHours` leses fra `Spill2Config` (admin-konfigurert
+        Europe/Oslo HH:MM-vindu). Hvis config ikke kan leses regnes
+        rommet som utenfor åpningstid → `down`.
+
+        Public, no auth. Rate-limit 60/min/IP.
+      security: []
+      parameters:
+        - in: query
+          name: hallId
+          required: true
+          schema:
+            type: string
+            maxLength: 120
+      responses:
+        "200":
+          description: Helsestatus
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "no-cache, max-age=0, must-revalidate"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GameRoomHealth"
+        "400":
+          description: INVALID_INPUT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/games/spill3/health:
+    get:
+      tags: [Game Health — Public]
+      summary: Helsestatus for Spill 3 (monsterbingo) — singleton rom (BIN-814 / R7)
+      description: |
+        Returnerer aggregert live-state for Spill 3 sitt globale singleton-
+        rom. Som Spill 2 er rommet shared mellom alle haller; `hallId`
+        brukes for logging/audit. `nextScheduledStart` er alltid `null`
+        (auto-spawn ved `Spill3Config.minTicketsToStart`).
+
+        Public, no auth. Rate-limit 60/min/IP.
+      security: []
+      parameters:
+        - in: query
+          name: hallId
+          required: true
+          schema:
+            type: string
+            maxLength: 120
+      responses:
+        "200":
+          description: Helsestatus
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "no-cache, max-age=0, must-revalidate"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/GameRoomHealth"
+        "400":
+          description: INVALID_INPUT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   # ── Payments ──────────────────────────────────────────────────────────────
 
