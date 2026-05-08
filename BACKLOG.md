@@ -1,6 +1,6 @@
 # Spillorama Backlog
 
-**Sist oppdatert:** 2026-05-06 (MED-2 lukket: migrasjons-rekkefølge fix)
+**Sist oppdatert:** 2026-05-08 (BIN-823 åpnet: Spill 2 åpningstid-guard regulatorisk pilot-blokker)
 **Eier:** Tobias Haugen
 **Formål:** Oversikt over åpne pilot-blokkere, pågående waves, og post-pilot-arbeid.
 
@@ -38,6 +38,28 @@ Status: ✅ Lukket. Customer Unique ID (PR #464), agent-portal cash-inout, ticke
 
 ### K3 - Hall-binding (alle merget)
 Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
+
+### K4 — Regulatorisk åpningstid-håndhevelse (ÅPEN, BIN-823)
+
+**Severity:** Pilot-go-live-blokker (Lotteritilsynet-krav).
+**Status:** 🔴 Åpen — fix-agent spawnet 2026-05-08.
+**Linear:** [BIN-823](https://linear.app/bingosystem/issue/BIN-823) (Urgent, parent BIN-810).
+
+| § | Tema | Beskrivelse | Estimat |
+|---|---|---|---|
+| Spill 2 | `canSpawnRound` mangler for `rocket` | `apps/backend/src/index.ts:2792-2809` returnerer `null` for ikke-Spill-3-slug → ROCKET perpetual-loop spawner runder uavhengig av `Spill2Config.openingTimeStart`/`End`. Spillere kan kjøpe bonger og spille etter stengetid. | 0.5-1 dev-dag |
+
+**Tobias-direktiv 2026-05-08:**
+> *"Veldig viktig at det ikke er mulig å kunne spille spillene etter stengetid. Er strenge regler på det fra Lotteritilsynt."*
+
+**Fix-skisse:**
+1. Implementer `Spill2ConfigService.isWithinOpeningWindow()` (speil Spill 3-helper)
+2. Utvid `canSpawnRound`-callback i `index.ts` til å håndtere `rocket`/`game_2`-slug
+3. Enhets-test (innenfor/utenfor vindu, sommer-/vintertid, edge-cases)
+4. Integrasjonstest (verifiser at PerpetualRoundService faktisk stopper spawn)
+5. Oppdater SPILL2_IMPLEMENTATION_STATUS §10.2 + §3.8
+
+**Verifikasjon før merge:** Type-check grønn, alle tester passerer, Spill 3-pathen uberørt, dokumentasjon oppdatert.
 
 ### Pilot-blokkere lukket 2026-05-06 (Wave 1+2)
 
