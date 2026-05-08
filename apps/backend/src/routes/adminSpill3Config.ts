@@ -86,6 +86,18 @@ function parsePrizeMode(value: unknown): Spill3PrizeMode | undefined {
   return v;
 }
 
+/**
+ * Aksepter HH:MM-streng (24t). Service-laget validerer formatet strengt;
+ * her trimmer vi bare og avviser ikke-string ved field-presence.
+ */
+function parseHHMMOptional(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new DomainError("INVALID_INPUT", `${field} må være en streng (HH:MM).`);
+  }
+  return value.trim();
+}
+
 export function createAdminSpill3ConfigRouter(
   deps: AdminSpill3ConfigRouterDeps,
 ): express.Router {
@@ -164,6 +176,11 @@ export function createAdminSpill3ConfigRouter(
 
       const pause = parseOptionalInt(body.pauseBetweenRowsMs, "pauseBetweenRowsMs");
       if (pause !== undefined) update.pauseBetweenRowsMs = pause;
+
+      const openStart = parseHHMMOptional(body.openingTimeStart, "openingTimeStart");
+      if (openStart !== undefined) update.openingTimeStart = openStart;
+      const openEnd = parseHHMMOptional(body.openingTimeEnd, "openingTimeEnd");
+      if (openEnd !== undefined) update.openingTimeEnd = openEnd;
 
       const updated = await spill3ConfigService.update(update);
       apiSuccess(res, updated);

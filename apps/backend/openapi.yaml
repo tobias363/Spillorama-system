@@ -1467,6 +1467,8 @@ components:
           prizeMode,
           ticketPriceCents,
           pauseBetweenRowsMs,
+          openingTimeStart,
+          openingTimeEnd,
           active,
           createdAt,
           updatedAt,
@@ -1538,6 +1540,19 @@ components:
           description: |
             Pause mellom rad-faser (Rad 1 → Rad 2 → ...) i millisekunder.
             Default 3000 (3 sek).
+        openingTimeStart:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: |
+            HH:MM 24t — starten på det daglige vinduet hvor nye runder
+            kan spawnes (Europe/Oslo). Tobias-direktiv 2026-05-08.
+            Default 11:00.
+        openingTimeEnd:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: |
+            HH:MM 24t — slutten på det daglige vinduet. Default 23:00.
+            Service-laget håndhever `openingTimeStart < openingTimeEnd`.
         active:
           type: boolean
           description: |
@@ -1608,6 +1623,17 @@ components:
           type: integer
           minimum: 0
           maximum: 60000
+        openingTimeStart:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: |
+            HH:MM 24t — daglig vindu (Europe/Oslo) for når runder kan
+            starte. Tobias-direktiv 2026-05-08. Service-laget valider er
+            `openingTimeStart < openingTimeEnd`.
+        openingTimeEnd:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: HH:MM 24t — slutten på daglig vindu.
 
     CurrentGamePlanResponse:
       type: object

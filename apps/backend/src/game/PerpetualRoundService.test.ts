@@ -187,6 +187,7 @@ function makeService(args: {
   delayMs?: number;
   disabledSlugs?: ReadonlySet<string>;
   emitRoomUpdate?: PerpetualRoundServiceConfig["emitRoomUpdate"];
+  canSpawnRound?: PerpetualRoundServiceConfig["canSpawnRound"];
 }): PerpetualRoundService {
   return new PerpetualRoundService({
     enabled: args.enabled ?? true,
@@ -198,6 +199,7 @@ function makeService(args: {
     defaultPayoutPercent: 80,
     defaultEntryFee: 0,
     ...(args.emitRoomUpdate ? { emitRoomUpdate: args.emitRoomUpdate } : {}),
+    ...(args.canSpawnRound ? { canSpawnRound: args.canSpawnRound } : {}),
     setTimeoutFn: args.timer.setTimeoutFn,
     clearTimeoutFn: args.timer.clearTimeoutFn,
   });
@@ -1235,4 +1237,139 @@ test("admin-config-round-pace: ugyldig per-game-verdi → env-fallback (defense-
   service.handleGameEnded(makeGameEndedInput({ roomCode: "ROCKET" }));
 
   assert.equal(observedDelays[0], 5000, "ugyldig per-game-verdi må ignoreres → env-fallback");
+});
+
+// ── canSpawnRound-hook (Tobias-direktiv 2026-05-08, opening-window) ──────
+
+test("canSpawnRound: returns false → spawn skip etter delay", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  let hookCalls = 0;
+  const service = makeService({
+    engine,
+    timer,
+    canSpawnRound: async ({ gameSlug }) => {
+      hookCalls += 1;
+      assert.equal(gameSlug, "monsterbingo");
+      return false;
+    },
+  });
+
+  service.handleGameEnded(
+    makeGameEndedInput({ roomCode: "MONSTERBINGO", endedReason: "G3_FULL_HOUSE" }),
+  );
+  await timer.runNext();
+
+  assert.equal(hookCalls, 1, "canSpawnRound skal kalles én gang");
+  assert.equal(
+    state.startGameCalls.length,
+    0,
+    "startGame skal IKKE kalles når hook returnerer false",
+  );
+});
+
+test("canSpawnRound: returns true → spawn fortsetter normalt", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({
+    engine,
+    timer,
+    canSpawnRound: async () => true,
+  });
+
+  service.handleGameEnded(
+    makeGameEndedInput({ roomCode: "MONSTERBINGO", endedReason: "G3_FULL_HOUSE" }),
+  );
+  await timer.runNext();
+
+  assert.equal(state.startGameCalls.length, 1, "startGame kalt etter delay");
+});
+
+test("canSpawnRound: returns null → spawn fortsetter (no-config-default)", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({
+    engine,
+    timer,
+    canSpawnRound: async () => null,
+  });
+
+  service.handleGameEnded(
+    makeGameEndedInput({ roomCode: "MONSTERBINGO", endedReason: "G3_FULL_HOUSE" }),
+  );
+  await timer.runNext();
+
+  assert.equal(state.startGameCalls.length, 1, "null fra hook = fail-open, spawn OK");
+});
+
+test("canSpawnRound: kaster exception → fail-open, spawn fortsetter", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const service = makeService({
+    engine,
+    timer,
+    canSpawnRound: async () => {
+      throw new Error("DB connection lost");
+    },
+  });
+
+  service.handleGameEnded(
+    makeGameEndedInput({ roomCode: "MONSTERBINGO", endedReason: "G3_FULL_HOUSE" }),
+  );
+  await timer.runNext();
+
+  assert.equal(
+    state.startGameCalls.length,
+    1,
+    "exception fra hook skal IKKE blokkere spawn (fail-open)",
+  );
+});
+
+test("canSpawnRound: gjelder også spawnFirstRoundIfNeeded (player-trigget join)", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({ code: "MONSTERBINGO", gameSlug: "monsterbingo" }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  let hookCalls = 0;
+  const service = makeService({
+    engine,
+    timer,
+    canSpawnRound: async () => {
+      hookCalls += 1;
+      return false;
+    },
+  });
+
+  const result = await service.spawnFirstRoundIfNeeded("MONSTERBINGO");
+  assert.equal(result, false, "spawn skal returnere false når hook avviser");
+  assert.equal(hookCalls, 1);
+  assert.equal(state.startGameCalls.length, 0, "startGame ikke kalt");
 });
