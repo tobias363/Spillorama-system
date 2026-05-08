@@ -288,6 +288,28 @@ export interface GameState {
   pauseReason?: string;
   /** BIN-463: Test game — no real money transactions. */
   isTestGame?: boolean;
+  /**
+   * BIN-820 / R10 (2026-05-08): Spill 3 phase-state-machine state.
+   *
+   * Når satt indikerer det at runden er en Spill 3 (monsterbingo) sequential-
+   * fase-runde. Engine bruker `Game3PhaseStateMachine` til å sekvensere
+   * Rad 1 → pause → Rad 2 → ... → Fullt Hus. Feltet er serializerbart
+   * (plain JSON) slik at recovery-snapshot bevarer fase-state ved
+   * server-restart midt i en runde.
+   *
+   * Format matcher `Game3PhaseState` i `Game3PhaseStateMachine.ts`:
+   *   {
+   *     currentPhaseIndex: 0..4,
+   *     pausedUntilMs: number | null,
+   *     phasesWon: number[],
+   *     status: "ACTIVE" | "ENDED",
+   *     endedReason: "FULL_HOUSE" | "DRAW_BAG_EMPTY" | null,
+   *   }
+   *
+   * Optional / `undefined` for alle ikke-Spill-3-runder (Spill 1/2/SpinnGo)
+   * — forblir bakoverkompatibel med eksisterende `GameState`-konsumenter.
+   */
+  spill3PhaseState?: import("./Game3PhaseStateMachine.js").Game3PhaseState;
   startedAt: string;
   endedAt?: string;
   endedReason?: string;
@@ -394,6 +416,12 @@ export interface GameSnapshot {
   pauseReason?: string;
   /** BIN-463: Test game — no real money transactions. */
   isTestGame?: boolean;
+  /**
+   * BIN-820 / R10 (2026-05-08): Spill 3 phase-state-machine state.
+   * Snapshot-side mirror of `GameState.spill3PhaseState`. Persisted via
+   * recovery-checkpoint slik at server-restart bevarer fase-overgang.
+   */
+  spill3PhaseState?: import("./Game3PhaseStateMachine.js").Game3PhaseState;
   startedAt: string;
   endedAt?: string;
   endedReason?: string;

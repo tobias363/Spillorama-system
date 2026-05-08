@@ -4566,6 +4566,19 @@ export class BingoEngine {
       pauseUntil: game.pauseUntil,
       pauseReason: game.pauseReason,
       isTestGame: game.isTestGame,
+      // BIN-820 / R10 (2026-05-08): Spill 3 phase-state-machine snapshot.
+      // Forwards `spill3PhaseState` slik at recovery-snapshot bevarer
+      // fase-overgang ved server-restart midt i en runde. Cloned for å
+      // unngå shared-mutation mellom snapshot og live state.
+      spill3PhaseState: game.spill3PhaseState
+        ? {
+            currentPhaseIndex: game.spill3PhaseState.currentPhaseIndex,
+            pausedUntilMs: game.spill3PhaseState.pausedUntilMs,
+            phasesWon: [...game.spill3PhaseState.phasesWon],
+            status: game.spill3PhaseState.status,
+            endedReason: game.spill3PhaseState.endedReason,
+          }
+        : undefined,
       startedAt: game.startedAt,
       endedAt: game.endedAt,
       endedReason: game.endedReason
