@@ -210,25 +210,43 @@ function makeBridge(options: BridgeOptions = {}): {
           return { rows: [options.existingScheduled] };
         return { rows: [] };
       }
-      // SELECT group_id FROM ... app_hall_group_members
+      // Bølge 5 (2026-05-08): resolveGroupHallId bruker nå
+      // HallGroupMembershipQuery.findGroupForHall som velger m.group_id.
       // (resolveGroupHallId — fra master-hall til gruppe)
       if (
-        /SELECT\s+group_id/i.test(sql) &&
-        /app_hall_group_members/i.test(sql)
+        /SELECT\s+m?\.?group_id/i.test(sql) &&
+        /app_hall_group_members/i.test(sql) &&
+        /WHERE\s+m\.hall_id\s*=/i.test(sql)
       ) {
         if (options.hallGroupId !== null && options.hallGroupId !== undefined) {
           return { rows: [{ group_id: options.hallGroupId }] };
         }
         return { rows: [] };
       }
-      // SELECT m.hall_id, m.added_at FROM ... app_hall_group_members
-      // (resolveParticipatingHallIds — alle aktive haller i gruppen).
-      // 2026-05-08: DISTINCT ble fjernet pga. PG-feil 42P10 ("for SELECT
-      // DISTINCT, ORDER BY expressions must appear in select list" når
-      // ORDER BY brukte en CASE-ekspresjon for å heise master til topps).
-      // PRIMARY KEY (group_id, hall_id) garanterer uniqueness uten DISTINCT.
+      // Bølge 5 (2026-05-08): HallGroupMembershipQuery.getActiveMembers
+      // gjør et group-existence-check først (`SELECT master_hall_id`).
+      // Stuben returnerer en rad med master_hall_id=null når hallGroupId
+      // er satt — bridgen bruker run.hall_id som effektiv master uansett.
       if (
-        /SELECT\s+m\.hall_id,\s*m\.added_at/i.test(sql) &&
+        /SELECT\s+master_hall_id/i.test(sql) &&
+        /app_hall_groups/i.test(sql) &&
+        /WHERE\s+id\s*=/i.test(sql) &&
+        !/LEFT JOIN/i.test(sql)
+      ) {
+        if (
+          options.hallGroupId !== null &&
+          options.hallGroupId !== undefined
+        ) {
+          return { rows: [{ master_hall_id: null }] };
+        }
+        return { rows: [] };
+      }
+      // Bølge 5 (2026-05-08): getActiveMembers' members-query
+      // (`SELECT m.hall_id, h.name AS hall_name, h.is_active …`).
+      // Tidligere matchet stuben `SELECT m.hall_id, m.added_at` — den
+      // form-en finnes ikke lenger i koden, så vi har oppdatert regex.
+      if (
+        /SELECT\s+m\.hall_id,\s*h\.name/i.test(sql) &&
         /app_hall_group_members/i.test(sql)
       ) {
         const masterId =
@@ -236,13 +254,19 @@ function makeBridge(options: BridgeOptions = {}): {
         // Eksplisitt members-liste vinner over default-fallback.
         if (options.groupHallMembers !== undefined) {
           return {
-            rows: options.groupHallMembers.map((id) => ({ hall_id: id })),
+            rows: options.groupHallMembers.map((id) => ({
+              hall_id: id,
+              hall_name: id,
+              is_active: true,
+            })),
           };
         }
         // Default: solo-gruppe med kun masteren (bakover-kompatibel
         // med eksisterende tester som ikke setter groupHallMembers).
         if (masterId) {
-          return { rows: [{ hall_id: masterId }] };
+          return {
+            rows: [{ hall_id: masterId, hall_name: masterId, is_active: true }],
+          };
         }
         return { rows: [] };
       }

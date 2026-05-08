@@ -71,6 +71,7 @@ import type { Pool } from "pg";
 
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { HallGroupMembershipQuery } from "../platform/HallGroupMembershipQuery.js";
 import { calculateActualPrize } from "./GameCatalogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
 import type { GamePlanService } from "./GamePlanService.js";
@@ -653,6 +654,13 @@ export class GamePlanEngineBridge {
   private readonly catalogService: GameCatalogService;
   private readonly planService: GamePlanService;
   private readonly planRunService: GamePlanRunService;
+  /**
+   * Bølge 5 (2026-05-08): konsolidert GoH-membership-query. Brukes av
+   * `resolveParticipatingHallIds` + `resolveGroupHallId` istedenfor inline
+   * SQL — én autoritativ implementasjon på tvers av engine-bridge,
+   * agent-konsoll og hall-ready-service.
+   */
+  private readonly membershipQuery: HallGroupMembershipQuery;
 
   constructor(options: GamePlanEngineBridgeOptions) {
     this.pool = options.pool;
@@ -660,6 +668,10 @@ export class GamePlanEngineBridge {
     this.catalogService = options.catalogService;
     this.planService = options.planService;
     this.planRunService = options.planRunService;
+    this.membershipQuery = new HallGroupMembershipQuery({
+      pool: this.pool,
+      schema: this.schema,
+    });
   }
 
   /** @internal — test-hook. */
@@ -682,6 +694,12 @@ export class GamePlanEngineBridge {
     (svc as unknown as {
       planRunService: GamePlanRunService;
     }).planRunService = opts.planRunService;
+    (svc as unknown as {
+      membershipQuery: HallGroupMembershipQuery;
+    }).membershipQuery = new HallGroupMembershipQuery({
+      pool: opts.pool,
+      schema: assertSchemaName(opts.schema ?? "public"),
+    });
     return svc;
   }
 
@@ -1099,48 +1117,49 @@ export class GamePlanEngineBridge {
     masterHallId: string,
     groupHallId: string,
   ): Promise<string[]> {
-    // 2026-05-08 (BRIDGE_FAILED-fix): SELECT DISTINCT krever at hver
-    // ORDER BY-ekspresjon også står i SELECT-listen. Den tidligere
-    // versjonen brukte `(CASE WHEN m.hall_id = $2 THEN 0 ELSE 1 END)` i
-    // ORDER BY uten å inkludere den i SELECT, noe Postgres avviser med
-    // 42P10 "for SELECT DISTINCT, ORDER BY expressions must appear in
-    // select list" → bridgen kastet, og /start + /advance returnerte
-    // bridgeError=BRIDGE_FAILED uten scheduledGameId.
+    // Bølge 5 (2026-05-08): bruker konsolidert HallGroupMembershipQuery
+    // istedenfor inline SQL. Helper-en filtrerer allerede inaktive haller
+    // (`h.is_active = true` i JOIN) og sorterer pinned master først.
     //
-    // Fix: dropp DISTINCT (PRIMARY KEY (group_id, hall_id) garanterer
-    // allerede uniqueness per medlem) og behold sorteringen. Loop-en
-    // under bruker uansett en Set<hall_id> for defensiv dedup, så atferd
-    // er identisk. Master kommer fortsatt først pga. CASE-uttrykket i
-    // ORDER BY.
-    const { rows } = await this.pool.query<{ hall_id: string }>(
-      `SELECT m.hall_id, m.added_at
-       FROM "${this.schema}"."app_hall_group_members" m
-       INNER JOIN "${this.schema}"."app_halls" h ON h.id = m.hall_id
-       WHERE m.group_id = $1
-         AND h.is_active = true
-       ORDER BY (CASE WHEN m.hall_id = $2 THEN 0 ELSE 1 END),
-                m.added_at ASC,
-                m.hall_id ASC`,
-      [groupHallId, masterHallId],
-    );
+    // Bridge-spesifikk logikk som beholdes her:
+    //   - `masterHallId` kan være `run.hall_id` (legacy-fallback) ELLER
+    //     pinned `goh.master_hall_id` — vi sorterer ALLTID den effektive
+    //     masteren først, ikke nødvendigvis GoH-pinnen.
+    //   - Tom liste → NO_ACTIVE_HALLS_IN_GROUP (bridge-spesifikk feil).
+    //   - Master ikke i listen → MASTER_NOT_IN_GROUP (defensiv sjekk).
+    //
+    // Soft-fail: helper-en kaster DomainError("DB_ERROR") ved DB-feil;
+    // bridgen lar feilen propagere til BRIDGE_FAILED-pathen i caller.
+    const members = await this.membershipQuery.getActiveMembers(groupHallId);
 
-    if (rows.length === 0) {
+    if (members === null || members.length === 0) {
       throw new DomainError(
         "NO_ACTIVE_HALLS_IN_GROUP",
         `Hall-gruppe ${groupHallId} har ingen aktive haller. Bridge kan ikke spawne spill uten minst én aktiv hall.`,
       );
     }
 
+    // Re-sortér: effektiv master (kan avvike fra pinned master) først,
+    // resten i den rekkefølgen helper-en allerede ga (alfabetisk på
+    // hall-navn → deterministisk).
     const ids: string[] = [];
     const seen = new Set<string>();
-    for (const row of rows) {
-      if (!seen.has(row.hall_id)) {
-        seen.add(row.hall_id);
-        ids.push(row.hall_id);
+    let masterFound = false;
+    for (const m of members) {
+      if (m.hallId === masterHallId) masterFound = true;
+    }
+    if (masterFound) {
+      ids.push(masterHallId);
+      seen.add(masterHallId);
+    }
+    for (const m of members) {
+      if (!seen.has(m.hallId)) {
+        ids.push(m.hallId);
+        seen.add(m.hallId);
       }
     }
 
-    if (!ids.includes(masterHallId)) {
+    if (!masterFound) {
       throw new DomainError(
         "MASTER_NOT_IN_GROUP",
         `Master-hallen ${masterHallId} er ikke aktivt medlem av gruppe ${groupHallId}.`,
@@ -1157,20 +1176,12 @@ export class GamePlanEngineBridge {
    * som inneholder hallen.
    */
   private async resolveGroupHallId(hallId: string): Promise<string> {
-    const { rows } = await this.pool.query<{ group_id: string }>(
-      `SELECT group_id
-       FROM "${this.schema}"."app_hall_group_members" m
-       INNER JOIN "${this.schema}"."app_hall_groups" g ON g.id = m.group_id
-       WHERE m.hall_id = $1
-         AND g.deleted_at IS NULL
-         AND g.status = 'active'
-       ORDER BY m.added_at ASC
-       LIMIT 1`,
-      [hallId],
-    );
-    if (rows[0]) return rows[0].group_id;
-    // Ingen aktiv gruppe-medlemskap — engine vil feile på FK-violation.
-    // Vi kaster en eksplisitt feil med klart UX-budskap.
+    // Bølge 5 (2026-05-08): bruker konsolidert HallGroupMembershipQuery
+    // istedenfor inline SQL. Helper-en gjør samme query (oldest aktive
+    // medlemskap) og returnerer null hvis ingen finnes — bridgen
+    // konverterer til HALL_NOT_IN_GROUP-DomainError for klart UX-budskap.
+    const groupId = await this.membershipQuery.findGroupForHall(hallId);
+    if (groupId !== null) return groupId;
     throw new DomainError(
       "HALL_NOT_IN_GROUP",
       `Hallen ${hallId} er ikke medlem av en aktiv hall-gruppe. Catalog-modellen krever at hallen tilhører minst én gruppe for å starte spill.`,

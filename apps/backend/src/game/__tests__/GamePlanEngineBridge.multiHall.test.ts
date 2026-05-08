@@ -206,34 +206,67 @@ function makeBridge(options: BridgeOptions = {}): {
           return { rows: [options.existingScheduled] };
         return { rows: [] };
       }
-      // resolveGroupHallId
+      // Bølge 5 (2026-05-08): resolveGroupHallId bruker nå
+      // HallGroupMembershipQuery.findGroupForHall som velger m.group_id
+      // (alias-prefiks) via INNER JOIN mot app_hall_groups. Stub matcher
+      // begge formene: legacy `SELECT group_id` og ny `SELECT m.group_id`.
       if (
-        /SELECT\s+group_id/i.test(sql) &&
-        /app_hall_group_members/i.test(sql)
+        /SELECT\s+m?\.?group_id/i.test(sql) &&
+        /app_hall_group_members/i.test(sql) &&
+        /WHERE\s+m\.hall_id\s*=/i.test(sql)
       ) {
         if (options.hallGroupId !== null && options.hallGroupId !== undefined) {
           return { rows: [{ group_id: options.hallGroupId }] };
         }
         return { rows: [] };
       }
-      // resolveParticipatingHallIds
-      // 2026-05-08 (BRIDGE_FAILED-fix): DISTINCT ble fjernet fordi
-      // Postgres avviser ORDER BY-CASE-uttrykk uten matchende SELECT-felt
-      // (42P10). PRIMARY KEY (group_id, hall_id) gir uniqueness uten
-      // DISTINCT.
+      // Bølge 5 (2026-05-08): HallGroupMembershipQuery.getActiveMembers
+      // gjør først et `SELECT master_hall_id FROM app_hall_groups WHERE id = $1`
+      // for å sjekke at gruppen finnes + hente pinned master. Stub
+      // returnerer null (ingen pinned master) så bridge bruker run.hall_id.
       if (
-        /SELECT\s+m\.hall_id,\s*m\.added_at/i.test(sql) &&
+        /SELECT\s+master_hall_id/i.test(sql) &&
+        /app_hall_groups/i.test(sql) &&
+        /WHERE\s+id\s*=/i.test(sql) &&
+        !/LEFT JOIN/i.test(sql)
+      ) {
+        // Hvis hallGroupId-parameter matcher request, returner gruppen
+        // (uten pinned master). Tester for resolveGoHMasterHallId bruker
+        // egen path med LEFT JOIN — den path-en filtreres av
+        // `!/LEFT JOIN/i`-clauset.
+        if (
+          options.hallGroupId !== null &&
+          options.hallGroupId !== undefined
+        ) {
+          return { rows: [{ master_hall_id: null }] };
+        }
+        return { rows: [] };
+      }
+      // Bølge 5 (2026-05-08): HallGroupMembershipQuery.getActiveMembers
+      // andre query — selve members-listen med JOIN mot app_halls.
+      // SQL: `SELECT m.hall_id, h.name AS hall_name, h.is_active
+      //         FROM app_hall_group_members m
+      //         INNER JOIN app_halls h ON h.id = m.hall_id
+      //        WHERE m.group_id = $1 AND h.is_active = true ...`
+      if (
+        /SELECT\s+m\.hall_id,\s*h\.name/i.test(sql) &&
         /app_hall_group_members/i.test(sql)
       ) {
         const masterId =
           (options.runRow?.hall_id as string | undefined) ?? null;
         if (options.groupHallMembers !== undefined) {
           return {
-            rows: options.groupHallMembers.map((id) => ({ hall_id: id })),
+            rows: options.groupHallMembers.map((id) => ({
+              hall_id: id,
+              hall_name: id,
+              is_active: true,
+            })),
           };
         }
         if (masterId) {
-          return { rows: [{ hall_id: masterId }] };
+          return {
+            rows: [{ hall_id: masterId, hall_name: masterId, is_active: true }],
+          };
         }
         return { rows: [] };
       }

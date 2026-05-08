@@ -67,6 +67,7 @@ import {
   SCHEDULED_GAME_STATUSES,
   type ScheduledGameRow,
 } from "../game/Game1ScheduledGameFinder.js";
+import { HallGroupMembershipQuery } from "../platform/HallGroupMembershipQuery.js";
 
 const logger = rootLogger.child({ module: "agent-game1" });
 
@@ -201,6 +202,13 @@ export function createAgentGame1Router(
   // De tre lokale wrapper-funksjonene under beholdes som thin wrappers så
   // Bølge 2 (`MasterActionService` parallel) ikke får signatur-konflikter.
   const scheduledGameFinder = new Game1ScheduledGameFinder({ pool, schema });
+  // Bølge 5 (2026-05-08): konsolidert GoH-membership-query. Erstatter inline
+  // `hallGroupService.get()`-kallet i `getCurrentGoHMembersByGroupId` slik at
+  // alle tre kall-sites (denne, GamePlanEngineBridge.resolveParticipatingHallIds,
+  // GamePlanEngineBridge.resolveGroupHallId) bruker samme autoritative
+  // implementasjon. Wrapper under beholdes for backwards-compat på Map<hallId,
+  // hallName>-shape som callers bruker for navn-lookup.
+  const hallGroupMembershipQuery = new HallGroupMembershipQuery({ pool, schema });
   const lobbyBroadcaster = deps.lobbyBroadcaster ?? null;
 
   /**
@@ -345,13 +353,23 @@ export function createAgentGame1Router(
   async function getCurrentGoHMembersByGroupId(
     groupHallId: string
   ): Promise<Map<string, string> | null> {
+    // Bølge 5 (2026-05-08): bruker konsolidert HallGroupMembershipQuery.
+    // Public signatur (Map<hallId, hallName>) er bevart slik at callers
+    // (master-konsoll + hall-status) ikke trenger endring.
+    //
+    // Soft-fail-strategi (uendret): null hvis gruppen ikke finnes ELLER
+    // lookup feiler (DB-error). Caller faller tilbake til legacy-
+    // oppførsel (vise alt fra `participating_halls_json` + ready-rader).
     try {
-      const group = await hallGroupService.get(groupHallId);
-      const members = new Map<string, string>();
-      for (const m of group.members) {
-        members.set(m.hallId, m.hallName);
+      const members = await hallGroupMembershipQuery.getActiveMembers(
+        groupHallId,
+      );
+      if (members === null) return null;
+      const map = new Map<string, string>();
+      for (const m of members) {
+        map.set(m.hallId, m.hallName);
       }
-      return members;
+      return map;
     } catch (err) {
       logger.debug(
         { groupHallId, err },
