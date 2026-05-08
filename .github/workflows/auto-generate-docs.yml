@@ -1,0 +1,70 @@
+name: Auto-generate architecture docs
+
+# Auto-genererer docs/auto-generated/ ved hver push til main + manuelt.
+# Begrunnelse: håndskrevne arkitektur-dokumenter blir stale; agenter
+# leser dem og handler på utdatert info. Generatoren kjører fra
+# kildene (openapi.yaml, migrations, package.json, SKILL.md) så det
+# alltid finnes en current-state-snapshot agenter kan stole på.
+
+on:
+  push:
+    branches: [main]
+    # Kjør bare hvis kilder for genereringen faktisk endret seg
+    paths:
+      - 'apps/backend/openapi.yaml'
+      - 'apps/backend/migrations/**'
+      - 'apps/backend/src/**'
+      - 'apps/admin-web/src/**'
+      - 'packages/**'
+      - 'apps/*/package.json'
+      - 'packages/*/package.json'
+      - '.claude/skills/**'
+      - 'scripts/generate-architecture-docs.sh'
+      - '.github/workflows/auto-generate-docs.yml'
+  workflow_dispatch:
+
+# Vi committer tilbake til main, så trenger write-permission
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    # Hopp over self-trigger ved [skip ci]-commit-meldinger
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Bruk default GITHUB_TOKEN — workflow har contents:write så
+          # den kan pushe tilbake til main uten PAT.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Ikke bruk cache — vi installerer ingenting tungt
+
+      - name: Run generator
+        run: |
+          chmod +x scripts/generate-architecture-docs.sh
+          ./scripts/generate-architecture-docs.sh
+
+      - name: Configure git author
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions (auto-doc)"
+
+      - name: Commit + push if changed
+        run: |
+          git add docs/auto-generated/
+          if git diff --cached --quiet; then
+            echo "[auto-doc] No changes — skipping commit."
+            exit 0
+          fi
+          # [skip ci] forhindrer infinite loop hvis CI også trigger på docs-endringer
+          git commit -m "chore(auto-doc): refresh architecture artefacts from main [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
