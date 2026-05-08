@@ -1,22 +1,24 @@
 /**
- * Cleanup 2026-05-07: legacy game-admin sidebar-oppføringer (Tidsplan-
- * administrasjon, Opprettelse av spill, Lagret spillliste) skjules når
- * feature-flag `useNewGamePlan=true`. De nye oppføringene (Spillkatalog,
- * Spilleplaner, samt selve "spilleplan-redesign"-gruppen) skjules når
- * flagget er av.
+ * Cleanup 2026-05-08: `useNewGamePlan`-flagget er fjernet — ny spilleplan-
+ * flyt er nå standard. Disse testene var tidligere parametrisert på flag-
+ * verdi (legacy-oppføringer skjult når flag=true, nye oppføringer skjult
+ * når flag=false). Etter cleanup verifiserer testene at:
  *
- * Routes blir værende registrert i begge tilstander — det er kun
- * sidebar-rendringen som filtreres. Bookmark-/direkte-lenke-tilgang
- * fortsetter dermed å fungere i overgangsperioden.
+ *  - Legacy-oppføringer (Tidsplanadministrasjon, Opprettelse av spill,
+ *    Lagret spillliste) IKKE lenger renders i sidebar.
+ *  - Nye oppføringer (Spillkatalog, Spilleplaner, "spilleplan-redesign"-
+ *    gruppen) ALLTID renders.
+ *
+ * Routes for legacy-paths er fortsatt registrert via router/routes.ts —
+ * bookmarks/direkte-lenker fungerer for tilbakekompatibilitet.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { initI18n } from "../src/i18n/I18n.js";
 import { renderSidebar } from "../src/shell/Sidebar.js";
 import { setSession, type Session } from "../src/auth/Session.js";
-import { setFeatureFlag } from "../src/utils/featureFlags.js";
 
-const LEGACY_ADMIN_PATHS = [
+const LEGACY_PATHS_REMOVED = [
   "/schedules",
   "/gameManagement",
   "/savedGameList",
@@ -73,19 +75,14 @@ function renderedGroupIds(host: HTMLElement): string[] {
   );
 }
 
-describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
+describe("Sidebar — useNewGamePlan flag fjernet (cleanup 2026-05-08)", () => {
   beforeEach(() => {
     initI18n();
     document.body.innerHTML = "<div id='host'></div>";
-    window.localStorage.clear();
-  });
-
-  afterEach(() => {
-    window.localStorage.clear();
   });
 
   describe("admin sidebar", () => {
-    it("default (flag=false): legacy-oppføringer er synlige, nye er skjult", () => {
+    it("legacy-leaves er borte fra sidebar (routes finnes fortsatt)", () => {
       const host = document.getElementById("host")!;
       const session = adminSession();
       setSession(session);
@@ -93,20 +90,15 @@ describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
       renderSidebar(host, session, "/admin");
       const hrefs = renderedHrefs(host);
 
-      for (const path of LEGACY_ADMIN_PATHS) {
-        expect(hrefs, `legacy ${path} skal være synlig når flag=false`).toContain(`#${path}`);
+      for (const path of LEGACY_PATHS_REMOVED) {
+        expect(
+          hrefs,
+          `legacy ${path} skal være borte fra sidebar etter cleanup`,
+        ).not.toContain(`#${path}`);
       }
-      for (const path of NEW_ADMIN_PATHS) {
-        expect(hrefs, `new ${path} skal være skjult når flag=false`).not.toContain(`#${path}`);
-      }
-      expect(renderedGroupIds(host), "spilleplan-redesign-gruppen skal være skjult når flag=false").not.toContain(
-        "spilleplan-redesign",
-      );
     });
 
-    it("flag=true: legacy-oppføringer er skjult, nye er synlige", () => {
-      setFeatureFlag("useNewGamePlan", true);
-
+    it("nye spilleplan-leaves er alltid synlige", () => {
       const host = document.getElementById("host")!;
       const session = adminSession();
       setSession(session);
@@ -114,20 +106,16 @@ describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
       renderSidebar(host, session, "/admin");
       const hrefs = renderedHrefs(host);
 
-      for (const path of LEGACY_ADMIN_PATHS) {
-        expect(hrefs, `legacy ${path} skal være skjult når flag=true`).not.toContain(`#${path}`);
-      }
       for (const path of NEW_ADMIN_PATHS) {
-        expect(hrefs, `new ${path} skal være synlig når flag=true`).toContain(`#${path}`);
+        expect(hrefs, `${path} skal være synlig`).toContain(`#${path}`);
       }
-      expect(renderedGroupIds(host), "spilleplan-redesign-gruppen skal være synlig når flag=true").toContain(
-        "spilleplan-redesign",
-      );
+      expect(
+        renderedGroupIds(host),
+        "spilleplan-redesign-gruppen skal være synlig",
+      ).toContain("spilleplan-redesign");
     });
 
-    it("flag=true: master-dashbord (cash-inout) og andre admin-funksjoner er uberørt", () => {
-      setFeatureFlag("useNewGamePlan", true);
-
+    it("master-dashbord (cash-inout) og andre admin-funksjoner er uberørt", () => {
       const host = document.getElementById("host")!;
       const session = adminSession();
       setSession(session);
@@ -136,8 +124,12 @@ describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
 
       const groupIds = renderedGroupIds(host);
       expect(groupIds, "Kontant inn/ut-gruppen skal forbli synlig").toContain("cash-inout");
-      expect(groupIds, "Spilleradministrasjon-gruppen skal forbli synlig").toContain("player-management");
-      expect(groupIds, "Rapportadministrasjon skal forbli synlig").toContain("report-management");
+      expect(groupIds, "Spilleradministrasjon-gruppen skal forbli synlig").toContain(
+        "player-management",
+      );
+      expect(groupIds, "Rapportadministrasjon skal forbli synlig").toContain(
+        "report-management",
+      );
 
       const hrefs = renderedHrefs(host);
       expect(hrefs, "Hallspesifikke rapporter").toContain("#/hallSpecificReport");
@@ -146,24 +138,7 @@ describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
   });
 
   describe("agent sidebar", () => {
-    it("default (flag=false): legacy spill-leaves under game-management er synlige", () => {
-      const host = document.getElementById("host")!;
-      const session = agentSession();
-      setSession(session);
-
-      renderSidebar(host, session, "/agent/dashboard");
-      const hrefs = renderedHrefs(host);
-
-      // Agent-sidebaren bruker samme legacy-paths som admin (de er felles
-      // routes — agent har bare egne sidebar-leaves som peker til samme URL).
-      expect(hrefs).toContain("#/schedules");
-      expect(hrefs).toContain("#/gameManagement");
-      expect(hrefs).toContain("#/savedGameList");
-    });
-
-    it("flag=true: legacy spill-leaves under game-management er skjult", () => {
-      setFeatureFlag("useNewGamePlan", true);
-
+    it("legacy spill-leaves under game-management er borte", () => {
       const host = document.getElementById("host")!;
       const session = agentSession();
       setSession(session);
@@ -176,9 +151,7 @@ describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
       expect(hrefs).not.toContain("#/savedGameList");
     });
 
-    it("flag=true: agent-cash-in-out + andre agent-funksjoner er uberørt", () => {
-      setFeatureFlag("useNewGamePlan", true);
-
+    it("agent-cash-in-out + andre agent-funksjoner er uberørt", () => {
       const host = document.getElementById("host")!;
       const session = agentSession();
       setSession(session);
@@ -186,8 +159,12 @@ describe("Sidebar — useNewGamePlan flag-gate (cleanup 2026-05-07)", () => {
       renderSidebar(host, session, "/agent/dashboard");
 
       const groupIds = renderedGroupIds(host);
-      expect(groupIds, "Kontant inn/ut-gruppen skal forbli synlig").toContain("agent-cash-in-out");
-      expect(groupIds, "Spilleradministrasjon-gruppen skal forbli synlig").toContain("agent-player-management");
+      expect(groupIds, "Kontant inn/ut-gruppen skal forbli synlig").toContain(
+        "agent-cash-in-out",
+      );
+      expect(groupIds, "Spilleradministrasjon-gruppen skal forbli synlig").toContain(
+        "agent-player-management",
+      );
 
       const hrefs = renderedHrefs(host);
       expect(hrefs).toContain("#/agent/bingo-check");

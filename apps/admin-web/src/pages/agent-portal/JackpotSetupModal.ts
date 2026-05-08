@@ -12,8 +12,7 @@
  * matche backend-konvensjon (alle prisfelt i øre — se
  * `apps/admin-web/src/api/admin-game-catalog.ts`).
  *
- * Caller: NextGamePanel + Spill1HallStatusBox når
- * `useNewGamePlan=true` og data fra
+ * Caller: NextGamePanel + Spill1HallStatusBox når data fra
  * `/api/agent/game-plan/current.jackpotSetupRequired === true`.
  *
  * Backend-rute:

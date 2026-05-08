@@ -1,30 +1,33 @@
 /**
- * Fase 3 (2026-05-07): enkel feature-flag-helper for admin-web.
+ * Feature-flag-helper for admin-web.
  *
  * Lar oss rolle ut nye flyter bak en flag uten å bryte produksjon. Flag-
  * verdien leses fra localStorage på frontend (utviklere/QA kan toggle i
  * devtools-konsollen):
  *
  *   ```js
- *   localStorage.setItem("ff:useNewGamePlan", "true");
+ *   localStorage.setItem("ff:<navn>", "true");
  *   ```
  *
  * For server-side default kan en backend-rute returnere "default
- * verdier", men i Fase 3 holder localStorage-only siden ingen master-
- * dashbord-brukere har dette enabled før Tobias selv skrur det på.
+ * verdier", men i nåværende oppsett holder localStorage-only.
  *
  * Default for ALLE flags er `false` så behavior er backwards-compatible.
  *
  * Bruk:
- *   if (isFeatureEnabled("useNewGamePlan")) { ... }
+ *   if (isFeatureEnabled("<navn>")) { ... }
  *
  * Fjerne en flag senere: bare slett `setItem`-callsiten, så faller alle
  * tilbake til default `false`.
+ *
+ * Status 2026-05-08: ingen aktive feature-flags. `useNewGamePlan` ble
+ * fjernet da ny spilleplan-flyt ble standard. Helperen beholdes som
+ * infrastruktur for fremtidige flagger.
  */
 
 const STORAGE_PREFIX = "ff:";
 
-const KNOWN_FEATURE_FLAGS = ["useNewGamePlan"] as const;
+const KNOWN_FEATURE_FLAGS = [] as const;
 
 export type FeatureFlag = (typeof KNOWN_FEATURE_FLAGS)[number];
 
@@ -66,13 +69,16 @@ export function setFeatureFlag(flag: FeatureFlag, enabled: boolean): boolean {
 
 /**
  * Hent alle feature-flags som key→bool. Brukes av admin-debug-panel når
- * vi senere bygger en "feature toggle"-side. I Fase 3 ikke aktivt brukt,
- * men eksportert for completeness.
+ * vi senere bygger en "feature toggle"-side. Eksportert for completeness.
+ *
+ * Når `KNOWN_FEATURE_FLAGS` er tom (cleanup 2026-05-08) returnerer
+ * funksjonen et tomt objekt. Loop-body er strukturelt unreachable, men
+ * beholdes så funksjonen virker når et nytt flag legges til.
  */
 export function getAllFeatureFlags(): Record<FeatureFlag, boolean> {
   const out = {} as Record<FeatureFlag, boolean>;
   for (const flag of KNOWN_FEATURE_FLAGS) {
-    out[flag] = isFeatureEnabled(flag);
+    (out as Record<string, boolean>)[flag] = isFeatureEnabled(flag);
   }
   return out;
 }

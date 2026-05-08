@@ -1,19 +1,18 @@
 /**
- * Hotfix 2 (2026-05-07): tester for `agent-master-actions.ts`-wrapper.
+ * Tester for `agent-master-actions.ts`-wrapper.
  *
- * Verifiserer at:
- *   - Når `useNewGamePlan=false` (default), kalles KUN legacy
- *     `/api/agent/game1/start` og `/api/agent/game1/resume` — plan-API
- *     er stille.
- *   - Når `useNewGamePlan=true`, kalles plan-API FØRST og deretter
+ * Cleanup 2026-05-08: `useNewGamePlan`-flagget er fjernet — ny flyt er
+ * standard. Verifiserer nå at:
+ *   - `startSpill1MasterAction` ALLTID kaller plan-API først og deretter
  *     legacy-API for å trigge engine.
+ *   - `resumeSpill1MasterAction` ALLTID kaller plan-API + engine-API.
+ *   - `pauseSpill1MasterPlanState` ALLTID kaller plan-API.
  *   - Idempotens-fallback: hvis plan-API kaster
- *     `GAME_PLAN_RUN_INVALID_TRANSITION` (plan allerede running), faller
- *     wrapperen tilbake til ren legacy-call uten å kaste.
- *
- * Dette er et regress-test for HIGH #2-buggen som fant at master-knapper
- * ALDRI kalte plan-API selv med flag på (knapper var koblet direkte til
- * legacy `startAgentGame1`).
+ *     `GAME_PLAN_RUN_INVALID_TRANSITION` eller `GAME_PLAN_RUN_NOT_FOUND`
+ *     (avhengig av action), faller wrapperen tilbake til ren engine-call
+ *     uten å kaste.
+ *   - Reelle feil (f.eks. `JACKPOT_SETUP_REQUIRED`) propageres til caller
+ *     uten at engine-API kalles.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -22,7 +21,6 @@ import {
   resumeSpill1MasterAction,
   pauseSpill1MasterPlanState,
 } from "../src/api/agent-master-actions.js";
-import { setFeatureFlag } from "../src/utils/featureFlags.js";
 
 interface FetchCall {
   url: string;
@@ -70,27 +68,12 @@ beforeEach(() => {
   window.localStorage.setItem("bingo_admin_access_token", "tok-abc");
 });
 
-describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
+describe("agent-master-actions wrapper", () => {
   describe("startSpill1MasterAction", () => {
-    it("flag=false: kaller KUN legacy /api/agent/game1/start", async () => {
-      // Default: feature-flag av — wrapperen skal ikke kalle plan-API.
+    it("kaller plan-API FØRST og deretter legacy-API", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([
-        { status: 200, body: { gameId: "g-1", status: "running", auditId: "a1" } },
-      ]);
-
-      await startSpill1MasterAction();
-
-      expect(calls.length).toBe(1);
-      expect(calls[0]!.url).toBe("/api/agent/game1/start");
-      expect(calls[0]!.init!.method).toBe("POST");
-    });
-
-    it("flag=true: kaller plan-API FØRST og deretter legacy-API", async () => {
-      setFeatureFlag("useNewGamePlan", true);
-      const { calls, setResponses } = recordingFetch();
-      setResponses([
-        // Plan-API responsen (med scheduledGameId fra Fase 4-bridgen)
+        // Plan-API responsen
         {
           status: 200,
           body: {
@@ -108,10 +91,10 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
       expect(calls.length).toBe(2);
       expect(calls[0]!.url).toBe("/api/agent/game-plan/start");
       expect(calls[1]!.url).toBe("/api/agent/game1/start");
+      expect(calls[1]!.init!.method).toBe("POST");
     });
 
-    it("flag=true: tolererer GAME_PLAN_RUN_INVALID_TRANSITION (plan allerede running)", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("tolererer GAME_PLAN_RUN_INVALID_TRANSITION (plan allerede running)", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([
         // Plan-API: plan er allerede running → INVALID_TRANSITION
@@ -133,8 +116,7 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
       expect(calls[1]!.url).toBe("/api/agent/game1/start");
     });
 
-    it("flag=true: propagerer JACKPOT_SETUP_REQUIRED uten å kalle legacy", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("propagerer JACKPOT_SETUP_REQUIRED uten å kalle legacy", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([
         {
@@ -156,8 +138,7 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
       expect(calls[0]!.url).toBe("/api/agent/game-plan/start");
     });
 
-    it("flag=true: videresender confirmExcludedHalls + confirmUnreadyHalls til legacy", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("videresender confirmExcludedHalls + confirmUnreadyHalls til legacy", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([
         { status: 200, body: { run: { id: "run-1" }, scheduledGameId: "sg-1", bridgeError: null } },
@@ -173,20 +154,7 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
   });
 
   describe("resumeSpill1MasterAction", () => {
-    it("flag=false: kaller KUN legacy /api/agent/game1/resume", async () => {
-      const { calls, setResponses } = recordingFetch();
-      setResponses([
-        { status: 200, body: { gameId: "g-1", status: "running", auditId: "a1" } },
-      ]);
-
-      await resumeSpill1MasterAction();
-
-      expect(calls.length).toBe(1);
-      expect(calls[0]!.url).toBe("/api/agent/game1/resume");
-    });
-
-    it("flag=true: kaller plan-API + legacy-API", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("kaller plan-API + legacy-API", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([
         { status: 200, body: { run: { id: "run-1", status: "running" } } },
@@ -200,8 +168,7 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
       expect(calls[1]!.url).toBe("/api/agent/game1/resume");
     });
 
-    it("flag=true: tolererer GAME_PLAN_RUN_NOT_FOUND og kjører legacy-resume", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("tolererer GAME_PLAN_RUN_NOT_FOUND og kjører legacy-resume", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([
         { status: 400, body: { code: "GAME_PLAN_RUN_NOT_FOUND", message: "ingen plan" } },
@@ -212,19 +179,28 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
 
       expect(calls.length).toBe(2);
     });
+
+    it("tolererer GAME_PLAN_RUN_INVALID_TRANSITION og kjører legacy-resume", async () => {
+      const { calls, setResponses } = recordingFetch();
+      setResponses([
+        {
+          status: 400,
+          body: {
+            code: "GAME_PLAN_RUN_INVALID_TRANSITION",
+            message: "Plan ikke i paused-state",
+          },
+        },
+        { status: 200, body: { gameId: "g-1", status: "running", auditId: "a1" } },
+      ]);
+
+      await resumeSpill1MasterAction();
+
+      expect(calls.length).toBe(2);
+    });
   });
 
   describe("pauseSpill1MasterPlanState", () => {
-    it("flag=false: no-op (ingen kall)", async () => {
-      const { calls } = recordingFetch();
-
-      await pauseSpill1MasterPlanState();
-
-      expect(calls.length).toBe(0);
-    });
-
-    it("flag=true: kaller /api/agent/game-plan/pause", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("kaller /api/agent/game-plan/pause", async () => {
       const { calls, setResponses } = recordingFetch();
       setResponses([{ status: 200, body: { run: { id: "run-1", status: "paused" } } }]);
 
@@ -234,8 +210,7 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
       expect(calls[0]!.url).toBe("/api/agent/game-plan/pause");
     });
 
-    it("flag=true: tolererer INVALID_TRANSITION (plan ikke i running)", async () => {
-      setFeatureFlag("useNewGamePlan", true);
+    it("tolererer INVALID_TRANSITION (plan ikke i running)", async () => {
       const { setResponses } = recordingFetch();
       setResponses([
         {
@@ -245,6 +220,18 @@ describe("Hotfix 2 — agent-master-actions wrapper (HIGH #2)", () => {
       ]);
 
       // Skal ikke kaste — caller har ansvar for engine-pause separat.
+      await expect(pauseSpill1MasterPlanState()).resolves.toBeUndefined();
+    });
+
+    it("tolererer GAME_PLAN_RUN_NOT_FOUND", async () => {
+      const { setResponses } = recordingFetch();
+      setResponses([
+        {
+          status: 400,
+          body: { code: "GAME_PLAN_RUN_NOT_FOUND", message: "ingen plan" },
+        },
+      ]);
+
       await expect(pauseSpill1MasterPlanState()).resolves.toBeUndefined();
     });
   });

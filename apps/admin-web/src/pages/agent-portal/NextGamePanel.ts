@@ -52,7 +52,6 @@ import {
   type AgentTransferRequest,
 } from "./agentHallSocket.js";
 import {
-  fetchAgentGame1CurrentGame,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   type Spill1CurrentGameResponse,
@@ -63,7 +62,6 @@ import {
   startSpill1MasterAction,
   resumeSpill1MasterAction,
 } from "../../api/agent-master-actions.js";
-import { isFeatureEnabled } from "../../utils/featureFlags.js";
 import {
   AgentGame1Socket,
   type AgentGame1StatusUpdate,
@@ -512,22 +510,13 @@ async function refreshRooms(): Promise<void> {
 
 async function refreshSpill1(): Promise<void> {
   try {
-    // Fase 3 (2026-05-07): feature-flag-aware data-source. Når
-    // `useNewGamePlan=true` (kun aktivert via localStorage av Tobias/QA),
-    // hent fra plan-runtime-API og adapt til legacy-shape så all
-    // rendering nedenfor er uendret. Default behavior (false) er
-    // fortsatt legacy `/api/agent/game1/current-game`.
-    let data: Spill1CurrentGameResponse;
-    if (isFeatureEnabled("useNewGamePlan")) {
-      const planResp = await fetchAgentGamePlanCurrent(
-        pageAbort ? { signal: pageAbort.signal } : {}
-      );
-      data = adaptGamePlanToLegacyShape(planResp);
-    } else {
-      data = await fetchAgentGame1CurrentGame(
-        pageAbort ? { signal: pageAbort.signal } : {}
-      );
-    }
+    // Cleanup 2026-05-08: ny plan-runtime er nå standard data-source.
+    // Adapter mapper plan-respons til legacy-shape så all rendering
+    // nedenfor er uendret.
+    const planResp = await fetchAgentGamePlanCurrent(
+      pageAbort ? { signal: pageAbort.signal } : {}
+    );
+    const data: Spill1CurrentGameResponse = adaptGamePlanToLegacyShape(planResp);
     if (!activeContainer) return; // unmounted while in-flight
     state.spill1 = data;
     state.spill1Error = null;
@@ -1044,11 +1033,10 @@ async function attemptSpill1Start(
   confirmUnreadyHalls: string[] | undefined
 ): Promise<void> {
   try {
-    // Fase 4 (2026-05-07): `startSpill1MasterAction` driver enten plan+
-    // engine-flyt eller ren legacy basert på `useNewGamePlan`-feature-flag.
-    // UI/feilhåndtering nedenfor er uendret — alle 3 error-koder i
-    // catch-blokken nedenfor stammer fra legacy `/api/agent/game1/start`
-    // og propageres uendret av wrapperen.
+    // `startSpill1MasterAction` kaller plan-API først (state-overgang i
+    // plan-runtime) og deretter engine-API for faktisk trekning.
+    // Feilkoder i catch-blokken nedenfor stammer fra legacy
+    // `/api/agent/game1/start` og propageres uendret av wrapperen.
     await startSpill1MasterAction(confirmExcludedHalls, confirmUnreadyHalls);
     Toast.success("Spill 1 startet");
     await refreshSpill1();

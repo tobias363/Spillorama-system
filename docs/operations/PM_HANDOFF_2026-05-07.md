@@ -18,7 +18,7 @@
 - Backend: commit `8076cc6f` med ny spilleplan-modell + alle hotfixes
 - 13 katalog-spill opprettet via API (9 standard + 1 generic bingo + 3 Oddsen-varianter + 1 Trafikklys-spesial)
 - 4 bonus-spill-valg (Lykkehjul/Fargekladd/Skattekiste/Mystery Joker) — kun via per-item override
-- Feature flag `ff:useNewGamePlan` aktivert i Tobias' Chrome
+- Feature flag `ff:useNewGamePlan` fjernet 2026-05-08 — ny flyt er nå standard
 - ADMIN-bruker: `tobias@nordicprofil.no`
 
 **Kritisk gjenstår (1 oppfølger-PR):**
@@ -268,21 +268,14 @@ For standard hovedspill (alle untatt Trafikklys):
 - `POST /api/agent/game-plan/jackpot-setup` — submit jackpot-popup (draw + prizesCents)
 - `POST /api/agent/game-plan/pause` / `/resume`
 
-### Feature flag
+### Feature flag (fjernet 2026-05-08)
 
-`ff:useNewGamePlan` (localStorage):
-- **`false`** (default): Master-dashbord leser legacy `app_game1_scheduled_games`. Sidebar viser gamle entries (Tidsplanadministrasjon, Opprettelse av spill, Lagret spillliste).
-- **`true`**: Master-dashbord leser nye plan-modell via adapter. Sidebar viser kun nye entries (Spillkatalog, Spilleplaner).
-
-Aktiver:
-```js
-localStorage.setItem('ff:useNewGamePlan', 'true')
-```
-
-Deaktiver:
-```js
-localStorage.removeItem('ff:useNewGamePlan')
-```
+`ff:useNewGamePlan` ble fjernet i cleanup 2026-05-08 — ny spilleplan-flyt
+er nå standard. Master-dashbord leser plan-modell via adapter, og sidebar
+viser kun nye entries (Spillkatalog, Spilleplaner). Legacy-routes for
+`/schedules`, `/gameManagement` og `/savedGameList` er fortsatt registrert
+for tilbakekompatibilitet med eksisterende bookmarks, men er ikke synlig
+i sidebar.
 
 ### Test-status
 
@@ -509,7 +502,7 @@ For spill med `requires_jackpot_setup = true`:
 1. **Les denne handover-doc'en** (du leser den nå)
 2. **Sjekk live-status:** `https://spillorama-system.onrender.com/health` skal returnere `ok: true`
 3. **Verifiser pull from main** lokalt: `git pull origin main` → siste commit `8076cc6f`
-4. **Tobias' Chrome:** sjekk at feature flag er aktivt: `localStorage.getItem('ff:useNewGamePlan')` skal returnere `'true'`
+4. **Tobias' Chrome:** ny spilleplan-flyt er nå standard (flag fjernet 2026-05-08); ingen localStorage-toggling lenger.
 5. **Sjekk katalog:** Naviger til `/admin/#/games/catalog` → 13 spill skal være listet
 
 ### Første prioritet (bør gjøres ASAP)

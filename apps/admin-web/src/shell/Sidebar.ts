@@ -5,11 +5,9 @@ import { isFeatureEnabled } from "../utils/featureFlags.js";
 import { type SidebarLeaf, type SidebarGroup, sidebarFor } from "./sidebarSpec.js";
 
 function isVisible(node: SidebarLeaf | SidebarGroup, session: Session): boolean {
-  // Cleanup 2026-05-07: feature-flag-gate evalueres FØRST, før role/module-
-  // gates. Dette lar oss skjule legacy-oppføringer (`useNewGamePlan=false`)
-  // og nye oppføringer (`useNewGamePlan=true`) symmetrisk uten å påvirke
-  // resten av visibility-logikken. Default flag-verdi = false, så når
-  // flagget ikke er satt forblir legacy-oppføringene synlige.
+  // Feature-flag-gate evalueres FØRST, før role/module-gates. Default
+  // flag-verdi = false. For tiden er ingen sidebar-oppføringer flag-gated
+  // (cleanup 2026-05-08), men infrastrukturen beholdes for fremtidig bruk.
   if (node.featureFlag) {
     const actual = isFeatureEnabled(node.featureFlag.name);
     if (actual !== node.featureFlag.expectedValue) return false;
