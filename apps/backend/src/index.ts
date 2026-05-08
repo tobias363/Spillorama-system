@@ -138,6 +138,8 @@ import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
 import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
 import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
+import { createAgentGame1LobbyRouter } from "./routes/agentGame1Lobby.js";
+import { GameLobbyAggregator } from "./game/GameLobbyAggregator.js";
 import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
@@ -1920,6 +1922,21 @@ const game1HallReadyService = new Game1HallReadyService({
   schema: pgSchema,
 });
 
+// Bølge 1 (2026-05-08): GameLobbyAggregator — kanonisk single-source-of-truth
+// for Spill 1 lobby-state. Aggregerer plan-runtime + scheduled-games +
+// hall-ready + GoH-membership og eksponeres via /api/agent/game1/lobby.
+// Pure read-service; ingen state-mutering. Brukes av master-konsoll/agent-
+// portal i Bølge 3 til å erstatte dual-fetch + adapter-merge-pattern.
+const gameLobbyAggregator = new GameLobbyAggregator({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  planService: gamePlanService,
+  planRunService: gamePlanRunService,
+  hallReadyService: game1HallReadyService,
+  hallGroupService,
+  platformService,
+});
+
 // GAME1_SCHEDULE PR 1+2: 15s-tick som spawner Game 1-rader fra daily_schedules,
 // flipper status 'scheduled' → 'purchase_open', 'purchase_open' →
 // 'ready_to_start' når alle haller klare, og cancel-er utløpte rader.
@@ -2760,6 +2777,15 @@ app.use(createAgentGame1Router({
   // start/resume/stop slik at klient som er subscribed til
   // `spill1:lobby:{hallId}`-rom bytter til runde-modus uten polling.
   lobbyBroadcaster: spill1LobbyBroadcaster,
+}));
+
+// Bølge 1 (2026-05-08): kanonisk Spill 1 lobby-endpoint som erstatter
+// UI-laget sitt dual-fetch (plan-runtime + legacy-current-game). Returnerer
+// Spill1AgentLobbyState — én sannhets-kilde for master-konsoll/agent-portal.
+// Eksisterende endpoints fortsetter uendret; UI bytter i Bølge 3.
+app.use(createAgentGame1LobbyRouter({
+  platformService,
+  aggregator: gameLobbyAggregator,
 }));
 // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
 // Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og
