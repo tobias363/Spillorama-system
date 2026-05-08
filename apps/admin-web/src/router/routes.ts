@@ -33,6 +33,12 @@ export const routes: RouteDef[] = [
   { path: "/gameManagement", titleKey: "game_creation_management", module: "Game Creation Management" },
   { path: "/savedGameList", titleKey: "saved_game_list", module: "Saved Game List" },
 
+  // Sidebar-reorg 2026-05-08: «Spill 1» landingsside som samler katalog,
+  // spilleplaner og hallgrupper under ett menyvalg. Underliggende ruter
+  // (/games/catalog, /games/plans, /groupHall) er fortsatt registrert
+  // separat slik at deep-links fungerer.
+  { path: "/spill1", titleKey: "spill1_home_title", module: "Game Catalog", roles: ["admin", "super-admin", "agent", "hall-operator"] },
+
   // Fase 2 (2026-05-07): spilleplan-redesign — GameCatalog + GamePlans.
   // Dynamic edit-routes (/games/catalog/:id, /games/plans/:id) resolves via
   // games-dispatcher (hash-regex match, mirrors gameType pattern).

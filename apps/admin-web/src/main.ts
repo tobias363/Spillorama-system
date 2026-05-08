@@ -65,6 +65,7 @@ import { mountAgentCheckForBingo } from "./pages/agent-portal/AgentCheckForBingo
 import { renderPastGameWinningHistoryPage } from "./pages/agent-portal/PastGameWinningHistoryPage.js";
 import { renderOrderHistoryPage } from "./pages/agent-portal/OrderHistoryPage.js";
 import { renderSoldTicketUiPage } from "./pages/agent-portal/SoldTicketUiPage.js";
+import { renderSpill1HomePage } from "./pages/spill1/Spill1HomePage.js";
 import { isTvRoute, mountTvRoute } from "./pages/tv/index.js";
 
 const MAINTENANCE_MODE = false;
@@ -542,6 +543,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (route.path === "/agent/sold-tickets-ui") {
     void renderSoldTicketUiPage(container);
+    return;
+  }
+  if (route.path === "/spill1") {
+    renderSpill1HomePage(container);
     return;
   }
   if (isCashInOutRoute(route.path)) {
