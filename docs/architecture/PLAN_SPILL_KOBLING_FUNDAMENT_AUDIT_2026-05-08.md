@@ -519,22 +519,25 @@ pages/games/master/Game1MasterConsole.ts   Beholdt — admin direct-edit (uten p
 
 Sortert etter avhengighet og tryggleikm. Hver bølge åpnes som egen PR/issue.
 
-### Bølge 1 — Konsolidert lobby-aggregator (backend, fundament)
+### Bølge 1 — Konsolidert lobby-aggregator (backend, fundament) ✅ FULLFØRT 2026-05-08
 
-**Mål:** Ett endepunkt som returnerer LobbyState. Alle eksisterende endpoints fortsetter å eksistere så UI ikke brytes.
+**Status:** Merget på branch `refactor/lobby-aggregator-bolge-1`. Alle 16 unit-tester + 4 integration-tester (skip-graceful) passering. Type-check grønn.
 
-**Tasks:**
-1. Lag `GameLobbyAggregator.ts` som tar `hallId` og returnerer `LobbyState`.
-   - Aggregerer plan-runtime (via planRunService) + scheduled-games (via direkte query) + hall-ready (via hallReadyService) + GoH-membership.
-   - Single source of truth for UI.
-2. Lag ny route `GET /api/agent/game1/lobby?hallId=X` som returnerer aggregat.
-3. Skriv tester (snapshot per state-overgang).
-4. Behold gamle endpoints uendret.
+**Levert:**
+1. ✅ `Spill1AgentLobbyState` wire-format (Zod-validert) i `packages/shared-types/src/spill1-lobby-state.ts`. Naming valgt for å unngå kollisjon med eksisterende `Spill1LobbyState` (public klient-shell-API).
+2. ✅ `GameLobbyAggregator` i `apps/backend/src/game/GameLobbyAggregator.ts` — aggregerer plan-runtime + scheduled-games + hall-ready + GoH-membership. Pure read (ingen `getOrCreateForToday`-side-effect). Throw kun ved infra-feil.
+3. ✅ Ny route `GET /api/agent/game1/lobby?hallId=X` i `apps/backend/src/routes/agentGame1Lobby.ts`. RBAC `GAME1_MASTER_WRITE`, hall-scope-låst for HALL_OPERATOR/AGENT.
+4. ✅ Snapshot-tester (16 stater inkl. dual-scheduled-games, stale-goh-member, BRIDGE_FAILED, status-mismatch, cross-tz-businessDate, infra-error).
+5. ✅ Integration-test (DB-required, skip-graceful) for SQL-syntax-validering av kritiske queries.
+6. ✅ Eksisterende endpoints uendret — UI bytter i Bølge 3.
 
-**Estimat:** 2-3 dev-dager.
-**Tester som må skrives:** Snapshot-tester for hver state (idle, purchase_open, running, paused, finished, missing-plan).
-**Tester som bryter:** Ingen.
-**Linear:** Ny issue.
+**Kontrakt for Bølge 2/3:**
+- `currentScheduledGameId` er kanonisk id-felt for master-actions. Aldri plan-run-id i UI.
+- `inconsistencyWarnings`-koder er stabile: `PLAN_SCHED_STATUS_MISMATCH`, `MISSING_GOH_MEMBERSHIP`, `STALE_PLAN_RUN`, `BRIDGE_FAILED`, `DUAL_SCHEDULED_GAMES`.
+- `halls[]` er ferdig-filtrert mot nåværende GoH-membership.
+
+**Estimat (mandat):** 2-3 dev-dager. **Faktisk:** ~3-4 timer wall-clock for AI-agent (audit + read source + 6 commits).
+**Tester som ble skrevet:** 16 snapshot + 4 integration. Ingen brutt.
 
 ### Bølge 2 — MasterActionService (backend, single sekvensering)
 
