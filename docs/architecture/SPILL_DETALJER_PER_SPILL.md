@@ -69,13 +69,41 @@ Tobias presiserte 2026-05-08: Bokstav er en **gevinstmønster-variant for Spill 
 | Bongstørrelser | Hvit 5 / Gul 10 / Lilla 15 kr |
 | Faser (immutable) | Rad 1, Rad 2, Rad 3, Rad 4, Fullt Hus |
 
-**Master-handling:** Master-hall (definert per GoH via `master_hall_id`) styrer:
-- Når runden starter (`Game1MasterControlService.startGame`)
-- Pause/resume
-- Start neste rad etter pause-perioden
-- Bekreftelse av røde haller (TASK HS — `Game1MasterControlService.ts:121`)
+**Master-handling (oppdatert 2026-05-08 per Tobias-direktiv):**
+
+| Regel | Verdi |
+|---|---|
+| Master kan starte/stoppe uavhengig av om andre haller er ready | ✅ — ready-status er KUN informativ visning, ikke gate |
+| Master kan hoppe over neste spill i sekvensen | ❌ — alltid umiddelbart neste i spilleplan-rekkefølgen |
+| Per-hall ready-status synlig for master | ✅ — pills med grønn (ready) / oransje (ikke klar) / grå (ekskludert) |
+| "Start neste spill {planlagt-navn}" | ✅ — eks. "Start neste spill — Bingo" |
+| "Pause" / "Fortsett" | ✅ — master kontrollerer pause-perioden |
+| "Avbryt spill" | ❌ Flyttet til admin-only (regulatorisk-tung) |
+| "Kringkast Klar + 2-min countdown" | ❌ Fjernet (master starter direkte) |
+| "Marker som klar" (ikke-master haller) | ✅ Beholdt (informativ til master) |
+
+**Master starter via:** `POST /api/agent/game-plan/start` → bridge spawner scheduled-game-rad → `Game1MasterControlService.startGame` → engine kjører.
+
+**Audit-event ved master-start:** inkluderer `notReadyHalls: string[]` i metadata for Lotteritilsynet-sporbarhet — hvis master starter med haller som ikke har bekreftet ready, dokumenteres det.
 
 **Multi-hall-koordinering:** `GamePlanEngineBridge.resolveParticipatingHallIds` (PR #998) henter alle aktive medlemmer av master-hallens GoH og inkluderer i `participating_halls_json`. Master kan ekskludere haller midlertidig (men ikke seg selv).
+
+**Sekvensiell progresjon mellom rader:** Etter Rad 1 vunnes → master tar bevisst Pause → klargjør neste rad → trykker Fortsett. Ingen automatisk progresjon mellom rader for Spill 1 (forskjellig fra Spill 3 som er fullt automatisk).
+
+### 1.0.1 Klient-rom-tilgang (oppdatert 2026-05-08)
+
+**Spill 1-rom er åpent innenfor spilleplanens åpningstid** (eks. 11:00-21:00).
+
+- Kunde kobler til rom-en uavhengig av om en runde er aktivt kjørende
+- I rommet ser kunden hvilket spill som er NESTE planlagte
+- Kunde kan kjøpe bonger til neste spill
+- Når master starter spillet, får kunden live trekk + pattern-evaluering
+- Etter Fullt Hus → kunde ser "Neste spill om X min" og kan kjøpe nye bonger
+- Når åpningstiden utløper (etter `endTime`) → rommet stenges, klient får "Stengt"-melding
+
+**Hva betyr dette for engine:** Rom-objektet for Spill 1 er knyttet til spilleplan-runden, ikke til en enkelt scheduled-game. Klient subscriber til rommet ved login + hall-valg. Scheduled-game-instanser flyter gjennom rommet sekvensielt.
+
+**Backend-implementering:** Lobby-rom (eller "plan-rom") er åpent når `now() ∈ [plan.startTime, plan.endTime]`. Bridge spawner scheduled-game-rader når master starter. Klient subscriber til lobby-rommet og får oppdatert state ved hver scheduled-game-overgang. Hvis ingen aktiv scheduled-game finnes (ventefase mellom runder eller før master har trykket Start), klient ser "Neste spill: {navn}" + bong-kjøp-flyt for det spillet.
 
 ### 1.1 Felles mekanikk for ALLE Spill 1-varianter
 
