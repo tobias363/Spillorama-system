@@ -356,6 +356,25 @@ npm run dev
 
 These are decisions baked in by the Spillorama team — not auto-detectable from code.
 
+### 🚨 Spill 1 fundament (LESE-FØRST-I-SESJON — gjelder ALL Spill 1-relatert kode)
+
+Hvis oppgaven din rører **Spill 1** på noen måte — plan-runtime, master-actions (start/pause/resume/advance/end), scheduled-game lifecycle, klient-lobby, master-konsoll, NextGamePanel, Spill1HallStatusBox, GamePlanEngineBridge, ticket-purchase, draw-engine, hall-state, transfer-master, payout-evaluering, eller UI som binder noe av dette sammen — **les @docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md FØR du gjør noe**.
+
+Dokumentet inneholder:
+- Komplett arkitektur-kart (klient → backend → state)
+- Master-rolle-modellen og master-handlinger (Tobias-direktiv 2026-05-08)
+- 13 katalog-varianter + per-variant regler
+- Pilot-gating R1-R12 med status per tiltak
+- Backend-services-kart med fil-paths
+- Immutable beslutninger (det som ALDRI skal endres uten Tobias)
+- Kjente begrensninger og åpne issues
+
+**Regel ved konflikt:** Hvis koden motsier doc-en, **doc-en vinner**. Oppdater doc-en samtidig som du gjør en avgjørelse — men IKKE handle utenom den uten eksplisitt Tobias-godkjennelse i samme sesjon.
+
+Direktiv fra Tobias 2026-05-08: *"må gjøre sånn at man alltid leser denne slik at man ikke handler utenom de reglene som er satt"* og *"alt av kode som krangler mot hverandre må fjernes ... fundamentet legges godt nå"*.
+
+Dette gjelder uavhengig av om oppgaven er backend, frontend, klient, test, dokumentasjon eller infrastruktur — så lenge Spill 1 berøres.
+
 ### 🚨 Live-rom-robusthet (P0-MANDAT — ikke kompromisser)
 
 Spill 1, 2 og 3 er live-rom som **alltid** må være tilgjengelige innenfor spilleplanens åpningstid. Mål: Evolution Gaming-grade oppetid (99.95 %+). Hvis du rører rom-arkitektur, socket-events, draw-tick, ticket-purchase eller wallet-touch fra rom-events: **les @docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md først**. R1-R12 i mandatet er pilot-gating. Direktiv fra Tobias 2026-05-08.
