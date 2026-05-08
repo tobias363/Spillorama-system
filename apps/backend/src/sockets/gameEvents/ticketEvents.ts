@@ -13,7 +13,10 @@
  * `cancelPreRoundTicket` i `deps` (display-cache er delt state mellom tickets
  * og rommet generelt, men cachen er allerede isolert via deps-injection).
  *
- * Ingen logikk endret.
+ * BIN-813 R5: ticket:mark er wrapped med `withSocketIdempotency`. Klient
+ * sender UUID v4 som `clientRequestId` per mark — reconnect-replay får
+ * cached respons uten dobbel-marking i engine. Wrapper-en er pass-through
+ * når clientRequestId mangler eller store er udefinert (legacy-mode).
  */
 import {
   TicketReplacePayloadSchema,
@@ -22,6 +25,7 @@ import {
 } from "@spillorama/shared-types/socket-events";
 import { DomainError } from "../../errors/DomainError.js";
 import { IdempotencyKeys } from "../../game/idempotency.js";
+import { withSocketIdempotency } from "../withSocketIdempotency.js";
 import type { SocketContext } from "./context.js";
 import type { AckResponse, MarkPayload } from "./types.js";
 import { logger as rootLogger } from "../../util/logger.js";
@@ -39,7 +43,7 @@ export function registerTicketEvents(ctx: SocketContext): void {
     rateLimited,
     requireAuthenticatedPlayerAction,
   } = ctx;
-  const { emitRoomUpdate } = deps;
+  const { emitRoomUpdate, socketIdempotencyStore } = deps;
 
   // BIN-499: ticket:mark is high-frequency. Room-fanout scaled as O(players × marks);
   // at 1000 players × 15 tickets × 20 marks/round = 300k full-snapshot broadcasts per
@@ -50,7 +54,12 @@ export function registerTicketEvents(ctx: SocketContext): void {
   //   - Update the player's marks (engine.markNumber).
   //   - Send a private ticket:marked event to this socket only (optimistic UI hook).
   //   - No room-fanout. Claims (LINE/BINGO) still fanout via the claim:submit handler.
-  socket.on("ticket:mark", rateLimited("ticket:mark", async (payload: MarkPayload, callback: (response: AckResponse<{ number: number; playerId: string }>) => void) => {
+  //
+  // BIN-813 R5: dedupe-wrappet for å unngå dupliserte marks ved reconnect-replay.
+  const baseTicketMarkHandler = async (
+    payload: MarkPayload,
+    callback: (response: AckResponse<{ number: number; playerId: string }>) => void,
+  ): Promise<void> => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
       if (!Number.isFinite(payload?.number)) {
@@ -64,7 +73,16 @@ export function registerTicketEvents(ctx: SocketContext): void {
     } catch (error) {
       ackFailure(callback, error);
     }
-  }));
+  };
+
+  const ticketMarkHandler = socketIdempotencyStore
+    ? withSocketIdempotency(
+        { store: socketIdempotencyStore, eventName: "ticket:mark", socket },
+        baseTicketMarkHandler,
+      )
+    : baseTicketMarkHandler;
+
+  socket.on("ticket:mark", rateLimited("ticket:mark", ticketMarkHandler));
 
   // BIN-509: ticket:replace — pre-round swap of a single display ticket,
   // charging gameVariant.replaceAmount. Runtime-validated via Zod (BIN-545).

@@ -11,12 +11,16 @@
  * (minigame:play, jackpot:spin) ligger i miniGameEvents.ts siden de ikke deler
  * claim-trigger-logikk.
  *
- * Uendret fra opprinnelig gameEvents.ts.
+ * BIN-813 R5: claim:submit er wrapped med `withSocketIdempotency`. Klient
+ * sender UUID v4 som `clientRequestId` per claim — reconnect-replay får
+ * cached respons uten å dobbel-utbetale (selv om wallet-laget også er
+ * idempotent via deterministisk key i `Game1PayoutService`).
  */
 import { ClaimSubmitPayloadSchema } from "@spillorama/shared-types/socket-events";
 import { DomainError } from "../../errors/DomainError.js";
 import { addBreadcrumb } from "../../observability/sentry.js";
 import { metrics as promMetrics } from "../../util/metrics.js";
+import { withSocketIdempotency } from "../withSocketIdempotency.js";
 import type { SocketContext } from "./context.js";
 import type { AckResponse, ClaimPayload } from "./types.js";
 import type { RoomSnapshot } from "../../game/types.js";
@@ -32,9 +36,17 @@ export function registerClaimEvents(ctx: SocketContext): void {
     rateLimited,
     requireAuthenticatedPlayerAction,
   } = ctx;
-  const { emitRoomUpdate } = deps;
+  const { emitRoomUpdate, socketIdempotencyStore } = deps;
 
-  socket.on("claim:submit", rateLimited("claim:submit", async (payload: ClaimPayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
+  // BIN-813 R5: hver socket-handler som har sideeffekter wrapper handler-
+  // kroppen sin med `withSocketIdempotency`. Wrapper-en er en pass-through
+  // når clientRequestId mangler (legacy-klient) eller idempotency-store
+  // er udefinert (test-harness uten Redis), så eksisterende tester kjører
+  // uendret.
+  const baseClaimHandler = async (
+    payload: ClaimPayload,
+    callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void,
+  ): Promise<void> => {
     try {
       // BIN-545: runtime-validate the incoming claim:submit payload against the
       // shared-types Zod schema. `roomCode` and `type` must be present and
@@ -120,5 +132,16 @@ export function registerClaimEvents(ctx: SocketContext): void {
     } catch (error) {
       ackFailure(callback, error);
     }
-  }));
+  };
+
+  // BIN-813 R5: wrap base-handler med idempotency. Hvis store ikke er
+  // konfigurert, registrer base-handler direkte (legacy-mode for tester).
+  const handler = socketIdempotencyStore
+    ? withSocketIdempotency(
+        { store: socketIdempotencyStore, eventName: "claim:submit", socket },
+        baseClaimHandler,
+      )
+    : baseClaimHandler;
+
+  socket.on("claim:submit", rateLimited("claim:submit", handler));
 }

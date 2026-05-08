@@ -9,6 +9,7 @@ import type { SocketRateLimiter } from "../../middleware/socketRateLimit.js";
 import type { RoomSnapshot, Ticket } from "../../game/types.js";
 import type { RoomUpdatePayload } from "../../util/roomHelpers.js";
 import type { ChatMessage, LeaderboardEntry } from "./types.js";
+import type { SocketIdempotencyStore } from "../SocketIdempotencyStore.js";
 
 export interface BingoSchedulerSettings {
   autoRoundStartEnabled: boolean;
@@ -228,4 +229,17 @@ export interface GameEventsDeps {
    * room:join faller tilbake til pre-direktiv-flyten (ingen auto-spawn).
    */
   spawnFirstRoundIfNeeded?: (roomCode: string) => Promise<boolean>;
+
+  /**
+   * BIN-813 R5: Idempotency-store for `clientRequestId`-deduplisering på
+   * socket-events. Brukes av `withSocketIdempotency`-wrapper rundt
+   * `ticket:mark`, `claim:submit` og `bet:arm` for å returnere cached
+   * respons ved reconnect-replay i stedet for å trigge dupliserte
+   * sideeffekter.
+   *
+   * Optional — hvis utelatt skipper wrappers idempotency og handlerne
+   * kjører som før. Wallet-laget er fortsatt idempotent som defense-
+   * in-depth.
+   */
+  socketIdempotencyStore?: SocketIdempotencyStore;
 }

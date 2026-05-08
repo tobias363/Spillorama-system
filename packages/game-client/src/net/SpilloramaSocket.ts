@@ -119,6 +119,29 @@ function getToken(): string {
   return sessionStorage.getItem(TOKEN_KEY) || "";
 }
 
+/**
+ * BIN-813 R5: Generer en UUID v4 til bruk som `clientRequestId` for
+ * idempotent socket-events. Server-siden cacher ack på (userId, eventName,
+ * clientRequestId) i 5 min, så reconnect-replay får cached respons uten
+ * dupliserte sideeffekter.
+ *
+ * Bruker `crypto.randomUUID()` når tilgjengelig (alle moderne browsers
+ * + Node.js 16.7+). Fallback er en Math.random()-basert v4-generator
+ * for eldre browsers (kun garantert kvalitet i sertifiserte miljøer
+ * — pilot kjører Chrome/Edge/Safari som alle støtter native).
+ */
+function generateClientRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // RFC 4122 v4 fallback (matcher UUID_V4_REGEX i backend).
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 // ── Socket wrapper ──────────────────────────────────────────────────────────
 
 /**
@@ -571,8 +594,20 @@ export class SpilloramaSocket {
     return this.emit(SocketEvents.DRAW_NEXT, payload);
   }
 
-  async markTicket(payload: { roomCode: string; number: number }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
-    return this.emit(SocketEvents.TICKET_MARK, payload);
+  /**
+   * BIN-813 R5: `clientRequestId` (UUID v4) auto-genereres hvis ikke
+   * eksplisitt sendt inn. Server cacher ack på (userId, eventName,
+   * clientRequestId) i 5 min så reconnect-replay returnerer samme
+   * ack uten å trigge dupliserte engine-marks.
+   *
+   * Caller kan overstyre `clientRequestId` (e.g. for test-determinisme
+   * eller for å gjenbruke samme key under en kjent retry-syklus).
+   */
+  async markTicket(payload: { roomCode: string; number: number; clientRequestId?: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
+    return this.emit(SocketEvents.TICKET_MARK, {
+      ...payload,
+      clientRequestId: payload.clientRequestId ?? generateClientRequestId(),
+    });
   }
 
   /**
@@ -583,8 +618,17 @@ export class SpilloramaSocket {
     return this.emit(SocketEvents.TICKET_CANCEL, payload);
   }
 
-  async submitClaim(payload: { roomCode: string; type: "LINE" | "BINGO" }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
-    return this.emit(SocketEvents.CLAIM_SUBMIT, payload);
+  /**
+   * BIN-813 R5: `clientRequestId` (UUID v4) auto-genereres for å sikre
+   * at reconnect-replay av claim:submit ikke trigger dobbel-utbetaling.
+   * Wallet-laget er allerede idempotent, men dedupen her sparer
+   * ekstra DB-trips og pattern:won-broadcast-spam.
+   */
+  async submitClaim(payload: { roomCode: string; type: "LINE" | "BINGO"; clientRequestId?: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
+    return this.emit(SocketEvents.CLAIM_SUBMIT, {
+      ...payload,
+      clientRequestId: payload.clientRequestId ?? generateClientRequestId(),
+    });
   }
 
   async setLuckyNumber(payload: { roomCode: string; luckyNumber: number }): Promise<AckResponse<unknown>> {
