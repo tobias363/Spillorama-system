@@ -1536,4 +1536,10 @@ export const __test = {
   setState: (s: Partial<PanelState>): void => { state = { ...state, ...s }; },
   render,
   pickActiveRoom,
+  // Code-review-fix 2026-05-08 (PR #1075 review #4): eksponer
+  // `mapLobbyToLegacyShape` for unit-test. Translatoren er kritisk for
+  // Bølge 3 — den setter `currentGame.id = scheduledGameId` (single
+  // id-rom) og må verifiseres mot empty-state, full-state, og
+  // inconsistencyWarnings-propagering.
+  mapLobbyToLegacyShape,
 };
