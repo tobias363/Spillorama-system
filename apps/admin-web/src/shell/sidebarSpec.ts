@@ -104,10 +104,12 @@ export const adminSidebar: SidebarNode[] = [
     ],
   },
 
-  // 4. Spilladministrasjon — ny katalog + plan-builder. Erstatter legacy
-  // Tidsplanadministrasjon, Opprettelse av spill og Lagret spillliste som
-  // ble fjernet 2026-05-08 (cleanup av `useNewGamePlan`-flagget — ny flyt
-  // er nå standard).
+  // 4. Spilladministrasjon — sidebar-reorg 2026-05-08: «Spill 1» er én leaf
+  // som åpner landingssiden /spill1 med tabs/cards til Spillkatalog,
+  // Spilleplaner og Hallgrupper-administrasjon. Tidligere ekspanderte de
+  // tre underitems direkte i sidebar; samlet nå i ett menyvalg for å rydde
+  // opp i sidebar-rotet. Spill 2/3-konfig forblir egne leaves under samme
+  // gruppe siden de er separate spill, ikke under Spill 1.
   {
     kind: "group",
     id: "spilleplan-redesign",
@@ -115,8 +117,7 @@ export const adminSidebar: SidebarNode[] = [
     labelKey: "game_management",
     module: "Game Catalog",
     children: [
-      { kind: "leaf", id: "game-catalog", path: "/games/catalog", icon: "fa fa-circle-o", labelKey: "game_catalog_title", module: "Game Catalog" },
-      { kind: "leaf", id: "game-plans", path: "/games/plans", icon: "fa fa-circle-o", labelKey: "game_plans_title", module: "Game Plans" },
+      { kind: "leaf", id: "spill1-home", path: "/spill1", icon: "fa fa-gamepad", labelKey: "spill1_home_title", module: "Game Catalog" },
       // Tobias-direktiv 2026-05-08: Spill 2 (rocket) globalt rom-konfig.
       // ETT globalt rom alltid aktivt mellom åpningstider. Gjelder for ALLE
       // haller (én sannhet).
@@ -125,7 +126,6 @@ export const adminSidebar: SidebarNode[] = [
       // ETT globalt rom for alle haller — admin-konfigurerbart vindu, bongpris,
       // pause og premie-modus.
       { kind: "leaf", id: "spill3-config", path: "/games/spill3-config", icon: "fa fa-circle-o", labelKey: "spill3_config_title", roles: ["admin", "super-admin"] },
-      { kind: "leaf", id: "groupHall", path: "/groupHall", icon: "fa fa-circle-o", labelKey: "group_of_halls_management", roles: ["admin", "super-admin"] },
     ],
   },
 

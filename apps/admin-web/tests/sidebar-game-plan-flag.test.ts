@@ -6,11 +6,15 @@
  *
  *  - Legacy-oppføringer (Tidsplanadministrasjon, Opprettelse av spill,
  *    Lagret spillliste) IKKE lenger renders i sidebar.
- *  - Nye oppføringer (Spillkatalog, Spilleplaner, "spilleplan-redesign"-
- *    gruppen) ALLTID renders.
+ *  - Spill 1-landingsside (`/spill1`) og "spilleplan-redesign"-gruppen
+ *    ALLTID renders (sidebar-reorg 2026-05-08 erstattet de tre direkte
+ *    leaves «Spillkatalog», «Spilleplaner» og «Hallgrupper-administrasjon»
+ *    med ett samlet inngangspunkt; tabs/cards på Spill 1-siden navigerer
+ *    videre til de underliggende rutene).
  *
- * Routes for legacy-paths er fortsatt registrert via router/routes.ts —
- * bookmarks/direkte-lenker fungerer for tilbakekompatibilitet.
+ * Routes for legacy-paths og de underliggende rutene (`/games/catalog`,
+ * `/games/plans`, `/groupHall`) er fortsatt registrert via router/routes.ts
+ * — bookmarks/direkte-lenker fungerer for tilbakekompatibilitet.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -24,7 +28,10 @@ const LEGACY_PATHS_REMOVED = [
   "/savedGameList",
 ] as const;
 
-const NEW_ADMIN_PATHS = ["/games/catalog", "/games/plans"] as const;
+// Sidebar-reorg 2026-05-08: «Spill 1»-leaf er én landingsside (/spill1) som
+// internt rendrer kort til /games/catalog, /games/plans og /groupHall. De
+// underliggende rutene er fortsatt deep-linkbare men ikke synlige i sidebar.
+const NEW_ADMIN_PATHS = ["/spill1"] as const;
 
 function adminSession(overrides: Partial<Session> = {}): Session {
   return {
