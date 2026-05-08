@@ -86,6 +86,14 @@ fi
 
 pass "Pre-flight OK"
 
+# ── §0.5 Generer .env.chaos (BIN-825) ────────────────────────────────────
+# Tidligere brukte composen `apps/backend/.env.production` som er
+# .gitignored og uansett ikke noe vi vil trekke prod-secrets inn fra.
+# `setup-chaos-env.sh` skriver et trygt dummy-env til
+# `infra/chaos-tests/.env.chaos`.
+info "Genererer .env.chaos (idempotent)"
+bash "$SCRIPT_DIR/setup-chaos-env.sh" >/dev/null
+
 # ── §1 Bygg og start chaos-stack ─────────────────────────────────────────
 info "Bygger og starter chaos-stack (backend-1 + backend-2 + postgres + redis)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
@@ -117,9 +125,12 @@ info "Migrerer DB + seeder pilot-data via backend-1"
 docker exec spillorama-backend-1 npm --prefix /app run migrate >/dev/null 2>&1 \
   || warn "Migrate feilet (kan være OK hvis allerede kjørt)"
 
-# Seed-script bygger 4 demo-haller, gruppe + spillere
+# Seed-script bygger 4 demo-haller, gruppe + spillere.
+# Scripts kompileres ikke til dist (tsconfig include = src/**/*) så vi
+# kjører TS-kilden via tsx — samme måte som r3-reconnect-test gjør det
+# (BIN-825).
 docker exec -e DEMO_SEED_PASSWORD="$ADMIN_PASSWORD" spillorama-backend-1 \
-  node /app/dist/scripts/seed-demo-pilot-day.js >/dev/null 2>&1 \
+  npx tsx /app/scripts/seed-demo-pilot-day.ts >/dev/null 2>&1 \
   || warn "Seed-script feilet eller ikke tilgjengelig — vi går videre med eksisterende data"
 
 # ── §3 Login + hente test-runde ──────────────────────────────────────────

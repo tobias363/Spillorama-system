@@ -99,6 +99,10 @@ fi
 
 pass "Pre-flight OK (scenario=$SCENARIO)"
 
+# ── §0.5 Generer .env.chaos (BIN-825) ────────────────────────────────────
+info "Genererer .env.chaos (idempotent)"
+bash "$SCRIPT_DIR/setup-chaos-env.sh" >/dev/null
+
 # ── §1 Bygg og start chaos-stack ─────────────────────────────────────────
 info "Bygger og starter chaos-stack (backend-1 + backend-2 + postgres + redis)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true

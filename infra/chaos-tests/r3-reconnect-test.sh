@@ -119,6 +119,12 @@ fi
 
 pass "Pre-flight OK"
 
+# ── §0.5 Generer .env.chaos (BIN-825) ────────────────────────────────────
+# Tidligere brukte composen `apps/backend/.env.production` som er
+# .gitignored og uansett ikke noe vi vil trekke prod-secrets inn fra.
+info "Genererer .env.chaos (idempotent)"
+bash "$SCRIPT_DIR/setup-chaos-env.sh" >/dev/null
+
 # ── §1 Bygg og start chaos-stack (gjenbruker R2-compose) ────────────────
 info "Bygger og starter chaos-stack (backend-1 + postgres + redis — backend-2 ikke nødvendig for R3)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
