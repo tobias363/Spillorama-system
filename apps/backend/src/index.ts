@@ -267,10 +267,12 @@ import { SubGameService } from "./admin/SubGameService.js";
 // 9-tabell schedule-stack med 4 tabeller. Fase 3 kobler runtime-state
 // (app_game_plan_run) til master-dashboardet via /api/agent/game-plan/*.
 import { GameCatalogService } from "./game/GameCatalogService.js";
+import { Spill3ConfigService } from "./game/Spill3ConfigService.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
 import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
+import { createAdminSpill3ConfigRouter } from "./routes/adminSpill3Config.js";
 import { createAdminGamePlansRouter } from "./routes/adminGamePlans.js";
 import { createAgentGamePlanRouter } from "./routes/agentGamePlan.js";
 import { createAdminGame1PotsRouter } from "./routes/adminGame1Pots.js";
@@ -1097,6 +1099,15 @@ const gameCatalogService = new GameCatalogService({
   pool: sharedPool,
   schema: pgSchema,
 });
+
+// Spill 3 (monsterbingo) re-design 2026-05-08: global singleton-konfig.
+// Tabell: app_spill3_config. Auto-start-threshold + prize-mode (fixed/
+// percentage) + rad-pause settes globalt for ETT globalt rom (alle haller
+// deltar). Audit-log injiseres post-construction når auditLogService er klar.
+const spill3ConfigService = new Spill3ConfigService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
 const gamePlanService = new GamePlanService({
   pool: sharedPool,
   schema: pgSchema,
@@ -1358,6 +1369,7 @@ scheduleService.setAuditLogService(auditLogService);
 gameCatalogService.setAuditLogService(auditLogService);
 gamePlanService.setAuditLogService(auditLogService);
 gamePlanRunService.setAuditLogService(auditLogService);
+spill3ConfigService.setAuditLogService(auditLogService);
 
 // BIN-720: Profile Settings API — service (router wires mot slutten av
 // filen, sammen med andre app.use-kall). Tilgjengelig kun når
@@ -2809,6 +2821,14 @@ app.use(createAdminGameCatalogRouter({
   auditLogService,
   catalogService: gameCatalogService,
 }));
+// Spill 3 re-design 2026-05-08: GET/PUT /api/admin/spill3/config — global
+// singleton-konfig (min_tickets_to_start, prize_mode, prize_rad*_cents/pct,
+// ticket_price_cents, pause_between_rows_ms). GAME_CATALOG_READ for read,
+// GAME_CATALOG_WRITE (ADMIN-only) for update.
+app.use(createAdminSpill3ConfigRouter({
+  platformService,
+  spill3ConfigService,
+}));
 app.use(createAdminGamePlansRouter({
   platformService,
   auditLogService,
@@ -3471,6 +3491,18 @@ app.use(createAdminRouter({
       ...opts,
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
       fetchSpill1HallFloors: fetchSpill1HallFloorsForRoomState,
+      // Spill 3 re-design 2026-05-08: globalt singleton-config-lookup.
+      // Hooken trigges kun for monsterbingo-rom; for alle andre slugs
+      // er den en no-op (caller ignorerer return-verdien).
+      fetchSpill3Config: async () => {
+        try {
+          return await spill3ConfigService.getActive();
+        } catch {
+          // Ingen aktiv rad → fall-through til legacy variantConfig (engine
+          // bruker DEFAULT_GAME3_CONFIG som baseline).
+          return null;
+        }
+      },
     }),
   auditLogService,
   emailService,
@@ -3796,6 +3828,18 @@ const registerGameEvents = createGameEventHandlers({
       ...opts,
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
       fetchSpill1HallFloors: fetchSpill1HallFloorsForRoomState,
+      // Spill 3 re-design 2026-05-08: globalt singleton-config-lookup.
+      // Hooken trigges kun for monsterbingo-rom; for alle andre slugs
+      // er den en no-op (caller ignorerer return-verdien).
+      fetchSpill3Config: async () => {
+        try {
+          return await spill3ConfigService.getActive();
+        } catch {
+          // Ingen aktiv rad → fall-through til legacy variantConfig (engine
+          // bruker DEFAULT_GAME3_CONFIG som baseline).
+          return null;
+        }
+      },
     }),
   chatMessageStore,
   // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.
@@ -4362,6 +4406,14 @@ const PORT = Number(process.env.PORT ?? 4000);
           ...(opts.gameManagementId !== undefined
             ? { gameManagementId: opts.gameManagementId }
             : {}),
+          // Spill 3 re-design 2026-05-08: hook for monsterbingo bootstrap.
+          fetchSpill3Config: async () => {
+            try {
+              return await spill3ConfigService.getActive();
+            } catch {
+              return null;
+            }
+          },
         }),
       bindDefaultVariantConfig: (code, slug) =>
         roomState.bindDefaultVariantConfig(code, slug),

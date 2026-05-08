@@ -507,7 +507,7 @@ Identisk med Oddsen 55, men `targetDraw = 57`.
 
 > **STATUSAVKLARING 2026-05-08:** Tobias har bestemt at Spill 3 skal re-designes til å ha samme premie-mekanikk som Spill 1 (Rad 1-4 + Fullt Hus), men med **fullautomatisert online-only-runde-drift**. Tidligere "Row 1-4 + Coverall mønsterbingo per PR #860" er erstattet.
 
-**Engine:** Game3Engine (re-implementeres) — pågående PR
+**Engine:** Game3Engine (re-implementeres) — fundament merget #1006, engine-utvidelse pågår
 
 ### 3.1 Arkitektur-overordnet (KRITISK — bekreftet av Tobias 2026-05-08)
 
@@ -547,14 +547,26 @@ Etter slutt: rommet venter på neste threshold-trigger.
 
 To admin-konfig-modus:
 
-**Modus 1 — Fast (`prizeMode: "fixed"`):**
+**Modus 1 — Fast (`prize_mode: "fixed"`):**
 - Admin setter Rad 1 = X kr, Rad 2 = Y kr, etc., Fullt Hus = Z kr
 - Premiene er konstante uansett antall solgte bonger
 
-**Modus 2 — Prosent (`prizeMode: "percentage"`):**
+**Modus 2 — Prosent (`prize_mode: "percentage"`):**
 - Admin setter Rad 1 = 5%, Rad 2 = 8%, etc., Fullt Hus = 30%
 - Premie = `(prosent / 100) × total_bong_salg_for_runden`
 - Eksempel: 200 bonger × 5 kr = 1000 kr omsetning. Rad 1 = 5% × 1000 = 50 kr
+- Sum av prosenter må være ≤ 100% (validering)
+
+**Default seed (migration 20261211000000 — fra #1006):**
+
+| Fase | Pct |
+|---|---|
+| Rad 1 | 5% |
+| Rad 2 | 8% |
+| Rad 3 | 12% |
+| Rad 4 | 15% |
+| Fullt Hus | 30% |
+| **Sum** | **70%** (resten 30% til hus/§11) |
 
 ### 3.6 Multi-vinner pot-deling
 
@@ -574,18 +586,57 @@ Når Bokstav-variant aktiveres:
 - Engine kjører bokstav-mønster i stedet for / i tillegg til Rad 1-4 (TBD per agent-design)
 - Premie-mekanikken forblir den samme (fixed eller percentage)
 
-**Spec for Bokstav-variant er IKKE definert ennå** — kommer som egen oppfølger-spec etter Spill 3-redesign.
+**Spec for Bokstav-variant er IKKE definert ennå** — kommer som egen oppfølger-spec etter Spill 3-redesign er live.
 
 ### 3.8 §11-distribusjon
 
-Minst 15% til organisasjoner (MAIN_GAME).
+Minst 15% til organisasjoner (`gameType = MAIN_GAME`).
 
-### 3.9 Status
+### 3.9 Implementasjons-status
 
-- 🔄 **Re-design pågår** (agent kjører fra 2026-05-08)
-- Nåværende `Game3Engine` (Row 1-4 + Coverall) erstattes
-- Estimat: ~8-12 dev-dager
-- Pilot-relevans: KRITISK — uten re-design er Spill 3 ikke pilot-klar
+**✅ Levert (PR #1006 — fundament):**
+- Database-skjema: migration `20261211000000` med `app_spill3_config` (singleton, partial unique index på `active=TRUE`)
+- Service-lag:
+  - `apps/backend/src/game/Spill3ConfigService.ts` — CRUD + cache + audit
+  - `apps/backend/src/game/Spill3GlobalRoomService.ts` — bridge til `GameVariantConfig`
+- Admin-API:
+  - `GET /api/admin/spill3/config` — hent aktiv config
+  - `PUT /api/admin/spill3/config` — oppdater (partial patch, ADMIN-only)
+- `roomState.bindVariantConfigForRoom`-hook (mapper config til `GameVariantConfig.patterns`)
+- Default seed med 5/8/12/15/30%-fordeling
+- Fail-soft fallback til legacy `DEFAULT_GAME3_CONFIG` hvis service ikke svarer
+
+**🚨 Gjenstår (engine-utvidelse, ny PR pågår):**
+
+Spec'en krever "Rad 1 → 3s pause → Rad 2 → 3s pause → ...". Dagens `Game3Engine` evaluerer alle aktive patterns konkurrent. For å støtte sekvensiell rad-evaluering med pause må PatternCycler utvides med en `phaseDelayMs`-mekanikk:
+
+```typescript
+// I Game3Engine.onDrawCompleted:
+// 1. Evaluer kun den AKTIVE fasen (currentPhaseIndex)
+// 2. Når fasen er vunnet → schedule advance til neste fase via setTimeout(phaseDelayMs)
+// 3. I mellomtiden: ingen nye trekk evalueres, ingen pattern-matching skjer
+// 4. Etter delay: bumpe currentPhaseIndex og fortsette
+```
+
+Krever:
+- Ny `Game3PhaseState` med `currentPhaseIndex: 0|1|2|3|4` og `pausedUntilMs?: number`
+- DrawScheduler må vente på `pausedUntilMs` før nye trekk
+- Mocking-egnet `phaseDelayMs`-injection for tester
+
+Forventet effort: 3-5 dev-dager.
+
+**🚨 Gjenstår (admin-UI form, ny PR pågår):**
+
+`apps/admin-web/src/pages/games/spill3Config/Spill3ConfigPage.ts`:
+- Form med radio for prize-mode (fixed/percentage)
+- Conditional input-fields per mode (cents vs pct)
+- Live-preview av "ved X solgte bonger blir Rad 1 = Y kr" via `calculatePhasePrizeCents`
+- PUT mot `/api/admin/spill3/config`
+- Sidebar-link under "Spilladministrasjon"
+
+Forventet effort: 1-2 dev-dager.
+
+**Pilot-relevans:** Foundation er pilot-trygg (legacy fallback bevart). Komplett Spill 3-spec krever engine-utvidelse + admin-UI før pilot kan kjøre Spill 3-runder med ny mekanikk.
 
 ---
 
