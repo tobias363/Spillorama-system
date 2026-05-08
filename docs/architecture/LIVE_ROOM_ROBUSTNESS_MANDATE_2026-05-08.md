@@ -180,6 +180,39 @@ Vår benchmark er ikke "feilfri kode" — det er "håndterer feil så godt at sl
 
 Hvis vi finner at egen kapasitet ikke holder for å nå Evolution-nivå, er **eksternt løft** (kortvarig SRE-konsulent eller chaos-engineering-byrå) bedre enn å gå live på sub-par robusthet.
 
+### 8.1 Eksternt løft — beslutning 2026-05-08
+
+**BESLUTNING:** Vi henter IKKE inn SRE-konsulent før R2/R3 er forsøkt internt. **Trigger for ekstern eskalering:**
+
+- **R2 (failover-test) viser strukturelle problemer** med fix-estimat > 1 uke → eskalér til Tobias for SRE-konsulent
+- **R3 (reconnect-test) viser strukturelle problemer** med fix-estimat > 1 uke → eskalér til Tobias for SRE-konsulent
+- **R11 (per-rom isolation)** krever distributed-systems-arkitekt → eskalér til Tobias når R11 startes
+- **> 1 hendelse/mnd etter 3 mnd drift** → vurder chaos-engineering-byrå (Gremlin / lignende)
+
+**Begrunnelse:** Vi har solid wallet-fundament (BIN-761→764) bygd internt. Backend-team har rom-arkitektur i hodet. Eksterne kommer inn som "second opinion + drill-instruktør", ikke som hovedimplementatør. Vi sparer kost og tid hvis interne agenter klarer R2/R3 alene.
+
+**Budsjett-rammer (estimat) hvis eskalering trigges:**
+- SRE-konsulent (3-4 uker, R2/R3 + R11): 200-400k NOK
+- Erfaren distributed-systems-arkitekt (R11 enkeltstående): 150-250k NOK
+- Chaos-engineering-byrå (kontinuerlig, post-3-mnd): 50-100k NOK/mnd
+
+### 8.2 Pilot-omfang — beslutning 2026-05-08
+
+**BESLUTNING:** Pilot holder **4 haller** (Teknobingo Årnes som master + Bodø + Brumunddal + Fauske). Ingen utvidelse til 6-8 før vi har 2-4 ukers drift-data fra 4-hall-pilot.
+
+**Begrunnelse:**
+- 4 haller dekker både master-rolle og 3 deltager-haller — hele master-koordineringssløyfen testes
+- Mer haller gir lite ekstra signal (samme arkitektur, bare mer last)
+- Mindre risiko ved første pilot — hvis noe feiler er det 4 hall-eiere å håndtere, ikke 8
+- Fokus på kvalitet > skala. Når 4-hall-pilot kjører stabilt 2-4 uker → utvid
+
+**Utvidelses-trigger fra 4 til neste hall(er):**
+- 4-hall-pilot grønn (ingen pilot-pauseuser, ingen kunde-klager om "rom utilgjengelig") i 2 uker
+- R4 (load-test 1000 klienter) bestått
+- R6 (outbox-validering) bestått
+- R9 (Spill 2 24t-leak) bestått
+- Alle pilot-haller har null kjente compliance-feil
+
 ---
 
 ## 9. Endringslogg
@@ -188,6 +221,7 @@ Hvis vi finner at egen kapasitet ikke holder for å nå Evolution-nivå, er **ek
 |---|---|---|
 | 2026-05-08 | Initial. Doc-fester direktiv fra Tobias om Evolution-grade robusthet. | PM-AI (Claude Opus 4.7) |
 | 2026-05-08 | §6.1: Go/no-go-policy doc-festet. Hvis R2/R3-test avdekker strukturelle problemer skal pilot pauses, ikke "best effort, fikser i drift". Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
+| 2026-05-08 | §8.1: Eksternt løft kun ved R2/R3-fix > 1 uke eller R11. §8.2: Pilot holder 4 haller, utvidelse betinger 2-4 ukers drift-data + R4/R6/R9 bestått. Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
 
 ---
 
