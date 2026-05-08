@@ -378,6 +378,11 @@ export const HallGroupRowSchema = z.object({
   status: HallGroupStatus,
   /** TV-skjerm-ID (numerisk) — brukes av hall-TV-streaming. */
   tvId: z.number().int().nullable(),
+  /**
+   * 2026-05-08 (Tobias-feedback): pinned master-hall for GoH. NULL = ingen
+   * pin. Når satt, må hallen være medlem av gruppen.
+   */
+  masterHallId: z.string().nullable(),
   /** Produkt-ids knyttet til gruppen. Bevart som streng-array. */
   productIds: z.array(z.string().min(1)),
   /** Medlems-haller (denormalisert for admin-UI). */
@@ -396,6 +401,8 @@ export const CreateHallGroupSchema = z.object({
   hallIds: z.array(z.string().min(1)).default([]),
   status: HallGroupStatus.optional(),
   tvId: z.number().int().nullable().optional(),
+  /** 2026-05-08 (Tobias-feedback): pinned master — må være i hallIds. */
+  masterHallId: z.string().nullable().optional(),
   productIds: z.array(z.string().min(1)).optional(),
   extra: z.record(z.string(), z.unknown()).optional(),
 });
@@ -408,6 +415,12 @@ export const UpdateHallGroupSchema = z
     hallIds: z.array(z.string().min(1)).optional(),
     status: HallGroupStatus.optional(),
     tvId: z.number().int().nullable().optional(),
+    /**
+     * 2026-05-08 (Tobias-feedback): send null for å nullstille. Hvis satt
+     * sammen med hallIds, må master være i den nye listen. Hvis kun denne
+     * sendes, må hallen være eksisterende medlem.
+     */
+    masterHallId: z.string().nullable().optional(),
     productIds: z.array(z.string().min(1)).optional(),
     extra: z.record(z.string(), z.unknown()).optional(),
   })
