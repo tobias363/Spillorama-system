@@ -159,6 +159,14 @@ export function stableEntryDiscriminatorHash(entry: ComplianceLedgerEntry): stri
 
 // ── ComplianceLedger ──────────────────────────────────────────────
 
+/**
+ * G2 (2026-05-09): optional sink for §71-canonical regulatory-ledger writes.
+ * Wired post-construction via `setRegulatoryLedgerSink`. When set,
+ * `recordComplianceLedgerEvent` invokes it AFTER the legacy persist —
+ * non-blocking; sink swallows its own errors.
+ */
+export type RegulatoryLedgerSink = (entry: ComplianceLedgerEntry) => Promise<void>;
+
 export class ComplianceLedger {
   private readonly complianceLedger: ComplianceLedgerEntry[] = [];
   private readonly dailyReportArchive = new Map<string, DailyComplianceReport>();
@@ -166,10 +174,19 @@ export class ComplianceLedger {
 
   private readonly walletAdapter: WalletAdapter;
   private readonly persistence?: ResponsibleGamingPersistenceAdapter;
+  private regulatoryLedgerSink?: RegulatoryLedgerSink;
 
   constructor(config: ComplianceLedgerConfig) {
     this.walletAdapter = config.walletAdapter;
     this.persistence = config.persistence;
+  }
+
+  /**
+   * G2 (2026-05-09): wire the §71 regulatory-ledger sink after construction.
+   * Pass `undefined` to disable.
+   */
+  setRegulatoryLedgerSink(sink: RegulatoryLedgerSink | undefined): void {
+    this.regulatoryLedgerSink = sink;
   }
 
   // ── Hydration ───────────────────────────────────────────────────
@@ -283,6 +300,22 @@ export class ComplianceLedger {
         metadata: entry.metadata ? { ...entry.metadata } : undefined,
         idempotencyKey
       });
+    }
+
+    // G2 (2026-05-09): parallel-write to §71-canonical regulatory-ledger.
+    // Non-blocking — sink internally catches+logs.
+    if (this.regulatoryLedgerSink) {
+      try {
+        await this.regulatoryLedgerSink({
+          ...entry,
+          metadata: entry.metadata ? { ...entry.metadata } : undefined,
+        });
+      } catch (err) {
+        logger.error(
+          { err, entryId: entry.id },
+          "regulatory-ledger-sink threw despite internal catch — investigate",
+        );
+      }
     }
   }
 
