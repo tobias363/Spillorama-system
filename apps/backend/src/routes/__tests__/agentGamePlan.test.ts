@@ -1071,7 +1071,12 @@ test("Fase 3 plan-runtime: ADMIN kan operere på vegne av master-hall via ?hallI
     );
     assert.equal(get.status, 200);
     assert.equal(get.json.data.hallId, "hall-master");
-    assert.equal(get.json.data.run, null);
+    // 2026-05-08: GET /current lazy-creates idle-run når plan dekker dagen
+    // for hallen, så ADMIN ser også en run umiddelbart. Tidligere asserte
+    // testen run=null fordi lazy-create ikke fantes ennå.
+    assert.notEqual(get.json.data.run, null);
+    assert.equal(get.json.data.run.status, "idle");
+    assert.equal(get.json.data.plan.id, "plan-master");
   } finally {
     await ctx.close();
   }
@@ -1394,6 +1399,249 @@ test("Fase 4 bridge: /advance til siste posisjon (finished) gir scheduledGameId=
     assert.equal(adv.json.data.scheduledGameId, null);
     // Bridge skal IKKE kalles på finished
     assert.equal(ctx.bridgeSpawns.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── Lazy-create på GET /current (2026-05-08) ────────────────────────────
+// Pilot-fix: master-UI rendrer "Ingen kommende spill" når GET /current
+// returnerer run=null, og spiller-master har dermed ikke en knapp å
+// trykke for å starte. Fix: GET /current lazy-oppretter dagens idle-run
+// hvis en plan dekker (hall, ukedag). POST /start, /advance, /pause,
+// /resume, /jackpot-setup forventer fortsatt eksisterende run.
+
+test("Lazy-create: GET /current uten run + matchende plan → run opprettes idle", async () => {
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], []);
+  try {
+    const get = await req(
+      ctx.baseUrl,
+      "GET",
+      "/api/agent/game-plan/current",
+      "tok",
+    );
+    assert.equal(get.status, 200);
+    // Run skal være lazy-opprettet, idle-state, posisjon 1
+    assert.notEqual(get.json.data.run, null);
+    assert.equal(get.json.data.run.status, "idle");
+    assert.equal(get.json.data.run.currentPosition, 1);
+    // Plan + items skal returneres
+    assert.equal(get.json.data.plan.id, "plan-master");
+    assert.equal(get.json.data.items.length, 1);
+    assert.equal(get.json.data.currentItem.position, 1);
+    // Run skal være persistert i in-memory-store
+    assert.equal(ctx.runs.size, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Lazy-create: GET /current uten run + ingen matchende plan → empty-state", async () => {
+  const ctx = await startServer({ tok: masterAgent }, [], []);
+  try {
+    const get = await req(
+      ctx.baseUrl,
+      "GET",
+      "/api/agent/game-plan/current",
+      "tok",
+    );
+    assert.equal(get.status, 200);
+    assert.equal(get.json.data.run, null);
+    assert.equal(get.json.data.plan, null);
+    assert.deepEqual(get.json.data.items, []);
+    // Ingen lazy-create skal ha skjedd
+    assert.equal(ctx.runs.size, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Lazy-create: GET /current med eksisterende run → returnerer den uendret", async () => {
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  // Seede en run med eksplisitt running-state og masterUserId, så vi
+  // kan verifisere at den IKKE blir overskrevet av lazy-create.
+  const existing = makeRun({
+    id: "run-existing",
+    planId: "plan-master",
+    hallId: "hall-master",
+    status: "running",
+    currentPosition: 1,
+    masterUserId: "agent-master",
+    startedAt: "2026-05-07T11:00:00Z",
+  });
+  const ctx = await startServer({ tok: masterAgent }, [plan], [existing]);
+  try {
+    const get = await req(
+      ctx.baseUrl,
+      "GET",
+      "/api/agent/game-plan/current",
+      "tok",
+    );
+    assert.equal(get.status, 200);
+    assert.equal(get.json.data.run.id, "run-existing");
+    assert.equal(get.json.data.run.status, "running");
+    assert.equal(get.json.data.run.masterUserId, "agent-master");
+    // Fortsatt bare én run i store-en
+    assert.equal(ctx.runs.size, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Lazy-create: paused run beholdes uendret av GET /current", async () => {
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const paused = makeRun({
+    id: "run-paused",
+    planId: "plan-master",
+    hallId: "hall-master",
+    status: "paused",
+    currentPosition: 2,
+  });
+  const ctx = await startServer({ tok: masterAgent }, [plan], [paused]);
+  try {
+    const get = await req(
+      ctx.baseUrl,
+      "GET",
+      "/api/agent/game-plan/current",
+      "tok",
+    );
+    assert.equal(get.status, 200);
+    assert.equal(get.json.data.run.id, "run-paused");
+    assert.equal(get.json.data.run.status, "paused");
+    assert.equal(get.json.data.run.currentPosition, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Lazy-create: regresjon — POST /start kjører IKKE før GET /current har opprettet run", async () => {
+  // Verifiserer at POST /start fortsatt bruker getOrCreateForToday
+  // direkte og ikke avhenger av at GET /current har vært kalt først.
+  // (Dvs. /start lazy-creates uavhengig av /current, men /advance
+  // forventer at en run finnes.)
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], []);
+  try {
+    const start = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/start",
+      "tok",
+    );
+    assert.equal(start.status, 200);
+    assert.equal(start.json.data.run.status, "running");
+    // POST /advance må feile fordi posisjon 2 ikke finnes (eneste item
+    // er på posisjon 1) — men det viser at POST-rutene ikke lazy-creates
+    // når run allerede er opprettet av /start.
+    const adv = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/advance",
+      "tok",
+    );
+    // I vår fake-impl avancerer running-status til finished når
+    // newPosition > items.length. Dette bekrefter at /advance fant
+    // run-en og opererte på den, ikke lazy-creates en ny.
+    assert.equal(adv.status, 200);
+    assert.equal(adv.json.data.run.status, "finished");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("Lazy-create: POST /advance feiler når ingen run finnes (ikke lazy-create)", async () => {
+  // Sentral regresjon: bekrefter at vi IKKE lazy-creates på write-ruter.
+  // Uten run + uten /start først skal /advance returnere
+  // GAME_PLAN_RUN_NOT_FOUND.
+  const cat = makeCatalog("cat-1");
+  const plan: GamePlanWithItems = {
+    ...makePlan({ id: "plan-master", hallId: "hall-master" }),
+    items: [
+      {
+        id: "i-1",
+        planId: "plan-master",
+        position: 1,
+        gameCatalogId: cat.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T00:00:00Z",
+        catalogEntry: cat,
+      },
+    ],
+  };
+  const ctx = await startServer({ tok: masterAgent }, [plan], []);
+  try {
+    const adv = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/agent/game-plan/advance",
+      "tok",
+    );
+    assert.equal(adv.status, 400);
+    assert.equal(adv.json.error.code, "GAME_PLAN_RUN_NOT_FOUND");
+    // Ingen run skal ha blitt opprettet av /advance
+    assert.equal(ctx.runs.size, 0);
   } finally {
     await ctx.close();
   }

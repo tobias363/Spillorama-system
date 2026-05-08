@@ -125,6 +125,13 @@ done
 
 ## §3 Master starter neste spill
 
+> **Lazy-create-fix (2026-05-08):** `GET /api/agent/game-plan/current`
+> oppretter dagens plan-run automatisk (idle-state) når master åpner
+> master-konsollen og en aktiv plan dekker (hall, ukedag). Master ser
+> dermed dagens kommende spill umiddelbart, uten å trykke noen knapp
+> først. POST `/start`, `/advance`, `/pause`, `/resume`,
+> `/jackpot-setup` lazy-creates IKKE — de forventer eksisterende run.
+
 I master-hallens browser:
 
 - [ ] Naviger til **Spill 1 — Master**
