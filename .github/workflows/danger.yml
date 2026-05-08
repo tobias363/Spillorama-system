@@ -1,0 +1,42 @@
+name: Danger
+
+# Auto-PR-checklist bot per Tobias-direktiv 2026-05-08.
+# Kommenterer context-sensitive review-sjekkliste på hver PR basert på
+# hvilke filer som endres. Doc: docs/engineering/PR_AUTO_CHECKLIST.md.
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: danger-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  danger:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # `--ignore-scripts` for å hoppe over husky m.m. som ikke trengs i danger-jobben.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run Danger
+        run: npx danger ci --failOnErrors
+        env:
+          DANGER_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
