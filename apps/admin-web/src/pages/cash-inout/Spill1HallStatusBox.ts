@@ -74,6 +74,24 @@ interface BoxState {
   data: ViewState | null;
   busy: boolean;
   errorMessage: string | null;
+  /**
+   * Code-review-fix 2026-05-08 (PR #1075 review #1): warning-banner
+   * istedenfor Toast.warning i polling-loopen.
+   *
+   * Tidligere kalte vi `Toast.warning(messages)` ved hver 2s-refresh hvis
+   * `inconsistencyWarnings` ikke var tom. Toast er ikke idempotent (hver
+   * kall lager ny DOM-boks med 4s timeout, jf. Toast.ts), så polling 2s ×
+   * 4s timeout gir 2-3 stacked toasts permanent ved vedvarende warning
+   * (f.eks. BRIDGE_FAILED som ikke fikses raskt). Resultatet er en
+   * voksende stack av kopier i hjørnet av skjermen.
+   *
+   * Fix: deklarativ state — vi setter banneret ved hver refresh, og
+   * render-funksjonen viser ÉN inline `<div class="alert alert-warning">`
+   * over hall-pillene. Banneret forsvinner automatisk når warnings
+   * cleares fra backend. User-action-feil bruker fortsatt `Toast.error`
+   * (i `onClick`-handler), så transient feedback er bevart.
+   */
+  warningBanner: string | null;
 }
 
 let activeMount: { container: HTMLElement; signal: AbortSignal; cleanup: () => void } | null = null;
@@ -100,6 +118,7 @@ export function mountSpill1HallStatusBox(
     data: null,
     busy: false,
     errorMessage: null,
+    warningBanner: null,
   };
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -150,16 +169,24 @@ export function mountSpill1HallStatusBox(
       state.errorMessage = null;
 
       // Aggregator kan flagge informative inconsistencies. Vi viser dem
-      // som non-blocking toast slik at master kan refreshe / kontakte
-      // support hvis warning-en peker på en ekte race (f.eks. plan-run
-      // sier running men scheduled-game er cancelled).
+      // som non-blocking warning-banner over hall-pillene slik at master
+      // kan refreshe / kontakte support hvis warning-en peker på en ekte
+      // race (f.eks. plan-run sier running men scheduled-game er
+      // cancelled).
+      //
+      // Code-review-fix 2026-05-08 (PR #1075 review #1): tidligere kalte
+      // vi `Toast.warning(messages)` her ved hver refresh. Toast er IKKE
+      // idempotent — hver kall lager ny DOM-boks med 4s timeout. Ved 2s
+      // polling × 4s timeout fikk vi 2-3 stacked toasts permanent ved
+      // vedvarende warning. Nå er banneret deklarativt: state.warningBanner
+      // settes per refresh, og render() viser ÉN inline alert. Forsvinner
+      // når warnings cleares.
       if (lobby.inconsistencyWarnings.length > 0) {
-        const messages = lobby.inconsistencyWarnings
+        state.warningBanner = lobby.inconsistencyWarnings
           .map((w) => `${w.code}: ${w.message}`)
-          .join("\n");
-        // En enkelt warning-toast pr refresh — Toast.warning er idempotent
-        // nok (samme tekst gir én visuell varsel).
-        Toast.warning(messages);
+          .join(" · ");
+      } else {
+        state.warningBanner = null;
       }
 
       render(container, state);
@@ -369,6 +396,7 @@ function render(container: HTMLElement, state: BoxState): void {
   // gruppen" som separate seksjoner slik at master ser umiddelbart hvor
   // mange andre haller som er klare/ikke klare. Master-hall i andre-
   // listen får 👑-merke.
+  const warningBannerHtml = renderWarningBanner(state.warningBanner);
   const masterHallIdForCrown = data.masterHallId;
   const gameStatus = data.scheduledGameStatus;
   if (!gameStatus) {
@@ -389,6 +417,7 @@ function render(container: HTMLElement, state: BoxState): void {
         <h3 class="box-title">Spill 1 — venter på neste runde</h3>
       </div>
       <div class="box-body">
+        ${warningBannerHtml}
         <p class="text-muted small" style="margin-bottom: 12px;">
           Hall-status for neste planlagte spill. Status oppdateres når
           runden spawnes.
@@ -464,10 +493,32 @@ function render(container: HTMLElement, state: BoxState): void {
       <h3 class="box-title">${titleParts.join(" · ")}</h3>
     </div>
     <div class="box-body">
+      ${warningBannerHtml}
       ${ownHallHtml}
       ${otherHallsHtml}
       ${ownButtonsHtml}
       ${masterButtonsHtml}
+    </div>`;
+}
+
+/**
+ * Code-review-fix 2026-05-08 (PR #1075 review #1): render warning-banner
+ * over hall-pillene istedenfor å spamme Toast.warning fra polling-loopen.
+ *
+ * Banneret er deklarativt — `state.warningBanner` settes per refresh, og
+ * vises som ÉN inline `<div class="alert alert-warning">`. Banneret
+ * forsvinner automatisk når `inconsistencyWarnings` er tom igjen.
+ *
+ * Returnerer tom string når ingen warning er aktiv så caller kan
+ * inline'e resultatet trygt.
+ */
+function renderWarningBanner(banner: string | null): string {
+  if (!banner) return "";
+  return `
+    <div class="alert alert-warning" data-marker="spill1-hall-status-warning"
+         style="margin-bottom:12px;">
+      <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+      <small>${escapeHtml(banner)}</small>
     </div>`;
 }
 
