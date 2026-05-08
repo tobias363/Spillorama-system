@@ -57,6 +57,12 @@ tags:
       Spilleplaner (templates) for spilleplan-redesign 2026-05-07. Plan-
       meta (navn, hall/group, ukedager, tidsvindu) + atomisk drag-and-drop
       av items-listen med per-item bonus-override.
+  - name: Admin — Spill 2 Config
+    description: |
+      Spill 2 (rocket / Tallspill) global singleton-konfig per Tobias-direktiv
+      2026-05-08 (parallel til Spill 3). ETT globalt rom for alle haller —
+      alltid aktivt mellom åpningstider, auto-start når X bonger er solgt.
+      Jackpot-mapping per draw-count og lucky-number-bonus konfigurerbar.
   - name: Admin — Spill 3 Config
     description: |
       Spill 3 (monsterbingo) global singleton-konfig per Tobias-direktiv
@@ -1634,6 +1640,145 @@ components:
           type: string
           pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
           description: HH:MM 24t — slutten på daglig vindu.
+
+    # ── Spill 2 (rocket) re-design 2026-05-08 ─────────────────────────────
+
+    Spill2JackpotEntry:
+      type: object
+      required: [price, isCash]
+      properties:
+        price:
+          type: number
+          minimum: 0
+          description: |
+            Premie-verdi.
+              - `isCash=true`  → flat øre-beløp delt mellom vinnere
+              - `isCash=false` → prosent (0-100) av (ticketCount × ticketPrice)
+        isCash:
+          type: boolean
+
+    Spill2JackpotTable:
+      type: object
+      required: ["9", "10", "11", "12", "13", "1421"]
+      description: |
+        Jackpot-mapping per draw-count. Krever alle 6 keys ("9".."13" +
+        "1421"-bucket for [14..21]).
+      properties:
+        "9":    { $ref: "#/components/schemas/Spill2JackpotEntry" }
+        "10":   { $ref: "#/components/schemas/Spill2JackpotEntry" }
+        "11":   { $ref: "#/components/schemas/Spill2JackpotEntry" }
+        "12":   { $ref: "#/components/schemas/Spill2JackpotEntry" }
+        "13":   { $ref: "#/components/schemas/Spill2JackpotEntry" }
+        "1421": { $ref: "#/components/schemas/Spill2JackpotEntry" }
+
+    Spill2Config:
+      type: object
+      required:
+        [
+          id,
+          minTicketsToStart,
+          ticketPriceCents,
+          roundPauseMs,
+          ballIntervalMs,
+          jackpotNumberTable,
+          luckyNumberEnabled,
+          active,
+          createdAt,
+          updatedAt,
+        ]
+      description: |
+        Global singleton-konfig for Spill 2 (rocket / Tallspill). ETT
+        globalt rom alltid aktivt (innenfor åpningstid). Alle haller deltar.
+      properties:
+        id:
+          type: string
+        openingTimeStart:
+          type: [string, "null"]
+          description: |
+            HH:MM 24h-format (Europe/Oslo). null = ingen begrensning
+            (alltid åpent).
+        openingTimeEnd:
+          type: [string, "null"]
+          description: HH:MM 24h-format. null hvis start også er null.
+        minTicketsToStart:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Antall bonger som må selges før runden auto-starter. 0 = umiddelbar.
+        ticketPriceCents:
+          type: integer
+          minimum: 1
+          description: Bongpris i øre. Default 1000 (10 kr).
+        roundPauseMs:
+          type: integer
+          minimum: 1000
+          maximum: 300000
+        ballIntervalMs:
+          type: integer
+          minimum: 1000
+          maximum: 10000
+        jackpotNumberTable:
+          $ref: "#/components/schemas/Spill2JackpotTable"
+        luckyNumberEnabled:
+          type: boolean
+        luckyNumberPrizeCents:
+          type: [integer, "null"]
+          minimum: 0
+          description: |
+            Tilleggspremie i øre når aktivert og siste ball ved seier
+            matcher rundens lucky-number. Påkrevd hvis `luckyNumberEnabled=true`.
+        active:
+          type: boolean
+          description: |
+            Singleton-flagg. Kun ÉN rad har `active=TRUE` til enhver tid
+            (håndhevet via partial unique index).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        updatedByUserId:
+          type: [string, "null"]
+
+    Spill2ConfigUpdateInput:
+      type: object
+      description: |
+        Partial-update for `PUT /api/admin/spill2/config`. Kun feltene som
+        faktisk er sendt blir endret. Service-laget validerer åpningstid-
+        konsistens (enten begge null eller begge satt med start < end),
+        jackpot-tabell-shape (alle 6 keys), og lucky-number-konsistens
+        (enabled=true → prize_cents må være satt).
+      properties:
+        openingTimeStart:
+          type: [string, "null"]
+          pattern: "^([0-9]{1,2}):([0-9]{2})$"
+        openingTimeEnd:
+          type: [string, "null"]
+          pattern: "^([0-9]{1,2}):([0-9]{2})$"
+        minTicketsToStart:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        ticketPriceCents:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        roundPauseMs:
+          type: integer
+          minimum: 1000
+          maximum: 300000
+        ballIntervalMs:
+          type: integer
+          minimum: 1000
+          maximum: 10000
+        jackpotNumberTable:
+          $ref: "#/components/schemas/Spill2JackpotTable"
+        luckyNumberEnabled:
+          type: boolean
+        luckyNumberPrizeCents:
+          type: [integer, "null"]
+          minimum: 0
 
     CurrentGamePlanResponse:
       type: object
@@ -4179,6 +4324,101 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: GAME_PLAN_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ── Admin — Spill 2 Config (re-design 2026-05-08) ─────────────────────────
+  #
+  # Spill 2 (rocket / Tallspill) global singleton-konfig (parallel til Spill 3).
+  # ETT globalt rom for alle haller — alltid aktivt mellom åpningstider, auto-
+  # start på X solgte bonger, jackpot-mapping per draw-count, lucky-number-bonus.
+  #
+  # RBAC:
+  #   GAME_CATALOG_READ:  ADMIN, HALL_OPERATOR, SUPPORT, AGENT
+  #   GAME_CATALOG_WRITE: ADMIN
+  # Audit: PUT skriver `spill2.config.update`-event via Spill2ConfigService.
+
+  /api/admin/spill2/config:
+    get:
+      tags: [Admin — Spill 2 Config]
+      summary: Hent aktiv Spill 2 global config
+      description: |
+        Returnerer den eneste aktive (active=TRUE) konfig-raden. Singleton-
+        invariant håndheves via partial unique index. Cache TTL ~5 sek —
+        endringer slår inn ved neste cache-miss.
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Spill2Config"
+        "403":
+          description: FORBIDDEN — caller mangler GAME_CATALOG_READ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: |
+            CONFIG_MISSING — ingen aktiv konfig-rad finnes. Migrasjon må
+            kjøres eller admin må aktivere en rad. Skal aldri skje i prod.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      tags: [Admin — Spill 2 Config]
+      summary: Oppdater Spill 2 global config (krever GAME_CATALOG_WRITE)
+      description: |
+        Partial-update — kun feltene som faktisk er sendt blir endret.
+        Service-laget validerer:
+          - tall-grenser per felt
+          - åpningstid-format og start < end (eller begge null)
+          - jackpot-tabell shape (alle 6 keys, valid {price, isCash})
+          - luckyNumberEnabled=true → luckyNumberPrizeCents må være satt
+
+        Audit-log-event `spill2.config.update` skrives med før/etter-snapshot.
+        Cache invalideres umiddelbart etter update — neste runde-spawn
+        leser ny config.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Spill2ConfigUpdateInput"
+      responses:
+        "200":
+          description: Updated config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Spill2Config"
+        "400":
+          description: |
+            INVALID_INPUT — feltgrenser brutt (ugyldig HH:MM, jackpot-key
+            mangler, prosent > 100 for isCash=false, etc.) /
+            INVALID_CONFIG — åpningstid-konsistens brutt (kun en av
+            start/end satt eller start >= end) eller lucky-number aktivert
+            uten prize_cents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: FORBIDDEN — caller mangler GAME_CATALOG_WRITE (kun ADMIN)
           content:
             application/json:
               schema:

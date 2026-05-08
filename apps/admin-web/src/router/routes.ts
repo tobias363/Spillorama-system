@@ -40,6 +40,8 @@ export const routes: RouteDef[] = [
   { path: "/games/catalog/new", titleKey: "game_catalog_new_title", module: "Game Catalog", roles: ["admin", "super-admin"] },
   { path: "/games/plans", titleKey: "game_plans_title", module: "Game Plans", roles: ["admin", "super-admin", "agent", "hall-operator"] },
   { path: "/games/plans/new", titleKey: "game_plans_new_title", module: "Game Plans", roles: ["admin", "super-admin"] },
+  // Tobias-direktiv 2026-05-08: Spill 2 (rocket) globalt rom-konfig.
+  { path: "/games/spill2-config", titleKey: "spill2_config_title", module: "Game Catalog", roles: ["admin", "super-admin", "agent", "hall-operator"] },
   // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) global singleton-konfig.
   { path: "/games/spill3-config", titleKey: "spill3_config_title", module: "Game Catalog", roles: ["admin", "super-admin"] },
 

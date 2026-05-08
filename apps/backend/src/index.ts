@@ -267,11 +267,13 @@ import { SubGameService } from "./admin/SubGameService.js";
 // 9-tabell schedule-stack med 4 tabeller. Fase 3 kobler runtime-state
 // (app_game_plan_run) til master-dashboardet via /api/agent/game-plan/*.
 import { GameCatalogService } from "./game/GameCatalogService.js";
+import { Spill2ConfigService } from "./game/Spill2ConfigService.js";
 import { Spill3ConfigService } from "./game/Spill3ConfigService.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
 import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
+import { createAdminSpill2ConfigRouter } from "./routes/adminSpill2Config.js";
 import { createAdminSpill3ConfigRouter } from "./routes/adminSpill3Config.js";
 import { createAdminGamePlansRouter } from "./routes/adminGamePlans.js";
 import { createAgentGamePlanRouter } from "./routes/agentGamePlan.js";
@@ -1100,6 +1102,16 @@ const gameCatalogService = new GameCatalogService({
   schema: pgSchema,
 });
 
+// Spill 2 (rocket) re-design 2026-05-08: global singleton-konfig (parallel
+// til Spill 3). Tabell: app_spill2_config. Åpningstider + min-tickets-gate
+// + jackpot-mapping + lucky-number-bonus settes globalt for ETT globalt rom
+// (alle haller deltar). Audit-log injiseres post-construction når
+// auditLogService er klar.
+const spill2ConfigService = new Spill2ConfigService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
+
 // Spill 3 (monsterbingo) re-design 2026-05-08: global singleton-konfig.
 // Tabell: app_spill3_config. Auto-start-threshold + prize-mode (fixed/
 // percentage) + rad-pause settes globalt for ETT globalt rom (alle haller
@@ -1369,6 +1381,7 @@ scheduleService.setAuditLogService(auditLogService);
 gameCatalogService.setAuditLogService(auditLogService);
 gamePlanService.setAuditLogService(auditLogService);
 gamePlanRunService.setAuditLogService(auditLogService);
+spill2ConfigService.setAuditLogService(auditLogService);
 spill3ConfigService.setAuditLogService(auditLogService);
 
 // BIN-720: Profile Settings API — service (router wires mot slutten av
@@ -2843,6 +2856,14 @@ app.use(createAdminGameCatalogRouter({
   auditLogService,
   catalogService: gameCatalogService,
 }));
+// Spill 2 re-design 2026-05-08: GET/PUT /api/admin/spill2/config — global
+// singleton-konfig (åpningstider, min_tickets_to_start, ticket_price_cents,
+// jackpotNumberTable, lucky-number-bonus, pace-fields).
+// GAME_CATALOG_READ for read, GAME_CATALOG_WRITE (ADMIN-only) for update.
+app.use(createAdminSpill2ConfigRouter({
+  platformService,
+  spill2ConfigService,
+}));
 // Spill 3 re-design 2026-05-08: GET/PUT /api/admin/spill3/config — global
 // singleton-konfig (min_tickets_to_start, prize_mode, prize_rad*_cents/pct,
 // ticket_price_cents, pause_between_rows_ms). GAME_CATALOG_READ for read,
@@ -3513,6 +3534,15 @@ app.use(createAdminRouter({
       ...opts,
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
       fetchSpill1HallFloors: fetchSpill1HallFloorsForRoomState,
+      // Spill 2 re-design 2026-05-08: globalt singleton-config-lookup
+      // (parallel til Spill 3). Hooken trigges kun for rocket-rom.
+      fetchSpill2Config: async () => {
+        try {
+          return await spill2ConfigService.getActive();
+        } catch {
+          return null;
+        }
+      },
       // Spill 3 re-design 2026-05-08: globalt singleton-config-lookup.
       // Hooken trigges kun for monsterbingo-rom; for alle andre slugs
       // er den en no-op (caller ignorerer return-verdien).
@@ -3850,6 +3880,15 @@ const registerGameEvents = createGameEventHandlers({
       ...opts,
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
       fetchSpill1HallFloors: fetchSpill1HallFloorsForRoomState,
+      // Spill 2 re-design 2026-05-08: globalt singleton-config-lookup
+      // (parallel til Spill 3). Hooken trigges kun for rocket-rom.
+      fetchSpill2Config: async () => {
+        try {
+          return await spill2ConfigService.getActive();
+        } catch {
+          return null;
+        }
+      },
       // Spill 3 re-design 2026-05-08: globalt singleton-config-lookup.
       // Hooken trigges kun for monsterbingo-rom; for alle andre slugs
       // er den en no-op (caller ignorerer return-verdien).
@@ -4428,6 +4467,14 @@ const PORT = Number(process.env.PORT ?? 4000);
           ...(opts.gameManagementId !== undefined
             ? { gameManagementId: opts.gameManagementId }
             : {}),
+          // Spill 2 re-design 2026-05-08: hook for rocket bootstrap.
+          fetchSpill2Config: async () => {
+            try {
+              return await spill2ConfigService.getActive();
+            } catch {
+              return null;
+            }
+          },
           // Spill 3 re-design 2026-05-08: hook for monsterbingo bootstrap.
           fetchSpill3Config: async () => {
             try {

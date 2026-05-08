@@ -117,6 +117,10 @@ export const adminSidebar: SidebarNode[] = [
     children: [
       { kind: "leaf", id: "game-catalog", path: "/games/catalog", icon: "fa fa-circle-o", labelKey: "game_catalog_title", module: "Game Catalog" },
       { kind: "leaf", id: "game-plans", path: "/games/plans", icon: "fa fa-circle-o", labelKey: "game_plans_title", module: "Game Plans" },
+      // Tobias-direktiv 2026-05-08: Spill 2 (rocket) globalt rom-konfig.
+      // ETT globalt rom alltid aktivt mellom åpningstider. Gjelder for ALLE
+      // haller (én sannhet).
+      { kind: "leaf", id: "spill2-config", path: "/games/spill2-config", icon: "fa fa-rocket", labelKey: "spill2_config_title", roles: ["admin", "super-admin"] },
       // Tobias-direktiv 2026-05-08: Spill 3 (monsterbingo) global konfig.
       // ETT globalt rom for alle haller — admin-konfigurerbart vindu, bongpris,
       // pause og premie-modus.

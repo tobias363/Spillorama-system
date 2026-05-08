@@ -517,6 +517,16 @@ export class RoomStateManager {
        * av denne. Faller stille tilbake til DEFAULT_GAME3_CONFIG ved feil.
        */
       fetchSpill3Config?: () => Promise<import("../game/Spill3ConfigService.js").Spill3Config | null>;
+      /**
+       * Spill 2 re-design 2026-05-08 (parallel til Spill 3): optional fetcher
+       * for Spill 2 global singleton-config. Når satt og gameSlug er en
+       * Spill 2-alias (rocket / tallspill / game_2), brukes
+       * `buildVariantConfigFromSpill2Config(config)` som primærkilde —
+       * jackpot-mapping, lucky-number, bongpris, åpningstider og pace-fields
+       * styres av denne. Faller stille tilbake til legacy GameManagement-
+       * config-pathen og deretter DEFAULT_GAME2_CONFIG ved feil.
+       */
+      fetchSpill2Config?: () => Promise<import("../game/Spill2ConfigService.js").Spill2Config | null>;
     },
   ): Promise<void> {
     if (this.variantByRoom.has(roomCode)) return;
@@ -608,6 +618,33 @@ export class RoomStateManager {
         roomStateLog.warn(
           { err, roomCode },
           "Spill 3 config-lookup failed — fallback til legacy variantConfig",
+        );
+      }
+    }
+
+    // Spill 2 re-design 2026-05-08: speiler Spill 3-pathen for `rocket`-rom.
+    // Bruker global singleton-config som primærkilde — åpningstider,
+    // jackpot-mapping og pace-fields settes admin-konfigurert globalt.
+    // Faller stille til legacy GameManagement-config-pacepath ved feil.
+    if (isSpill2 && opts.fetchSpill2Config) {
+      try {
+        const spill2Config = await opts.fetchSpill2Config();
+        if (spill2Config) {
+          // Lazy-import for å unngå circular i package boot-rekkefølge.
+          const { buildVariantConfigFromSpill2Config } = await import(
+            "../game/Spill2GlobalRoomService.js"
+          );
+          const mapped = buildVariantConfigFromSpill2Config(spill2Config);
+          this.variantByRoom.set(roomCode, {
+            gameType: gameSlug,
+            config: mapped,
+          });
+          return;
+        }
+      } catch (err) {
+        roomStateLog.warn(
+          { err, roomCode },
+          "Spill 2 config-lookup failed — fallback til legacy variantConfig",
         );
       }
     }
