@@ -195,6 +195,80 @@ describe("Spill1AgentControls", () => {
     expect(notice?.textContent).toContain("hall-2");
     expect(notice?.textContent).toContain("hall-3");
   });
+
+  // ── 2026-05-08 (Tobias-direktiv): konsolidert master-handlinger ──────────
+
+  it("Tobias 2026-05-08: master-agent + running → Pause-knapp aktiv, Start/Fortsett disabled", () => {
+    const html = renderSpill1AgentControls({
+      currentGame: makeGame({ status: "running" }),
+      isMasterAgent: true,
+      allReady: true,
+      excludedHallIds: [],
+    });
+    const root = mountFragment(html);
+    expect(
+      root.querySelector<HTMLButtonElement>("[data-marker='spill1-pause-btn']")
+        ?.disabled
+    ).toBe(false);
+    expect(
+      root.querySelector<HTMLButtonElement>("[data-marker='spill1-start-btn']")
+        ?.disabled
+    ).toBe(true);
+    expect(
+      root.querySelector<HTMLButtonElement>("[data-marker='spill1-resume-btn']")
+        ?.disabled
+    ).toBe(true);
+  });
+
+  it("Tobias 2026-05-08: Stop-knapp er FJERNET fra master-handlinger", () => {
+    const html = renderSpill1AgentControls({
+      currentGame: makeGame({ status: "running" }),
+      isMasterAgent: true,
+      allReady: true,
+      excludedHallIds: [],
+    });
+    const root = mountFragment(html);
+    // Stop-knappen flyttet til admin-only-endpoint (/api/admin/game1/.../stop).
+    expect(root.querySelector("[data-marker='spill1-stop-btn']")).toBeNull();
+    expect(root.querySelector("[data-action='spill1-stop']")).toBeNull();
+  });
+
+  it("Tobias 2026-05-08: Start-label inkluderer planlagt-navnet", () => {
+    const html = renderSpill1AgentControls({
+      currentGame: makeGame({
+        status: "purchase_open",
+        subGameName: "Bingo",
+        customGameName: null,
+      }),
+      isMasterAgent: true,
+      allReady: true,
+      excludedHallIds: [],
+    });
+    const root = mountFragment(html);
+    const startBtn = root.querySelector<HTMLButtonElement>(
+      "[data-marker='spill1-start-btn']"
+    );
+    expect(startBtn?.textContent).toContain("Start neste spill");
+    expect(startBtn?.textContent).toContain("Bingo");
+  });
+
+  it("Tobias 2026-05-08: Start-label bruker customGameName når satt", () => {
+    const html = renderSpill1AgentControls({
+      currentGame: makeGame({
+        status: "purchase_open",
+        subGameName: "Bingo",
+        customGameName: "Mystery-spillet",
+      }),
+      isMasterAgent: true,
+      allReady: true,
+      excludedHallIds: [],
+    });
+    const root = mountFragment(html);
+    const startBtn = root.querySelector<HTMLButtonElement>(
+      "[data-marker='spill1-start-btn']"
+    );
+    expect(startBtn?.textContent).toContain("Mystery-spillet");
+  });
 });
 
 describe("Spill1AgentStatus", () => {

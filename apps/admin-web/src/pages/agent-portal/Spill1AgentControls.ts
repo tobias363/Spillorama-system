@@ -1,14 +1,29 @@
 /**
  * Task 1.4 (2026-04-24): Spill 1 agent-kontrollpanel.
  *
- * Rendrer Start / Resume-knapper for agent-portalen. Knappene er kun
- * aktive hvis:
- *   - isMasterAgent === true (ellers viser vi en text-muted-melding
- *     "Kun master-hall kan starte runden").
- *   - Start: current-game.status er `purchase_open` eller `ready_to_start`.
- *   - Resume: current-game.status er `paused`.
+ * 2026-05-08 (Tobias-direktiv): konsolidert master-handlinger.
  *
- * Event-delegation skjer i NextGamePanel via `data-action`-attributter.
+ * Rendrer Start / Pause / Fortsett-knapper for agent-portalen. Knappene er
+ * kun aktive hvis:
+ *   - isMasterAgent === true (ellers viser vi Klar/Ikke-klar-knapp for
+ *     non-master agent).
+ *   - Start: current-game.status er `purchase_open` eller `ready_to_start`.
+ *     Master kan starte UAVHENGIG av om andre haller er klare — ikke-klare
+ *     haller auto-ekskluderes (audit-trail-event).
+ *   - Pause: current-game.status er `running`.
+ *   - Fortsett: current-game.status er `paused`.
+ *
+ * Stop-knappen er bevisst FJERNET fra agent-UI per Tobias-direktiv 2026-05-08.
+ * Hvis admin trenger å stoppe en aktiv runde brukes admin-panelet
+ * (`/api/admin/game1/...`) som har eget audit-trail. "Kringkast 'Klar' +
+ * 2-min countdown" er også fjernet — master starter uavhengig av ready-status
+ * så den knappen mister sin verdi.
+ *
+ * Event-delegation skjer i NextGamePanel via `data-action`-attributter:
+ *   - `spill1-start`     → master starter neste planlagte spill
+ *   - `spill1-pause`     → master pauser aktiv runde (running → paused)
+ *   - `spill1-resume`    → master gjenopptar pauset runde (paused → running)
+ *   - `spill1-mark-ready`/`spill1-unmark-ready` (non-master)
  */
 
 import type { Spill1CurrentGame } from "../../api/agent-game1.js";
@@ -83,14 +98,14 @@ export function renderSpill1AgentControls(
       </div>`;
   }
 
-  // 2026-05-07 (Tobias UX): Start er aktiv kun når purchase-vinduet ER åpnet
-  // (`purchase_open` / `ready_to_start`). I `'scheduled'` venter vi på cron-
-  // promotering — knappen disables med tooltip som viser når den blir aktiv,
-  // matcher backend-error `GAME_NOT_STARTABLE_YET`. Hvis status er
-  // `running`/`completed`/`cancelled` har vi heller ingen Start-action.
+  // 2026-05-08 (Tobias-direktiv): Start er aktiv når purchase-vinduet er åpnet
+  // (`purchase_open` / `ready_to_start`). Master kan starte UAVHENGIG av om
+  // andre haller er klare — ikke-klare auto-ekskluderes. I `'scheduled'`
+  // venter vi på cron-promotering. Pause/Fortsett synlig kun når aktuelt.
   const canStart =
     currentGame.status === "ready_to_start" ||
     currentGame.status === "purchase_open";
+  const canPause = currentGame.status === "running";
   const canResume = currentGame.status === "paused";
 
   // 2026-05-07: status-badge over master-handlinger-panelet. Forklarer hva
@@ -100,11 +115,18 @@ export function renderSpill1AgentControls(
   const startTooltip = buildStartButtonTooltip(currentGame, canStart);
   const startTooltipAttr = startTooltip ? ` title="${escapeHtml(startTooltip)}"` : "";
 
+  // 2026-05-08: knapp-label inkluderer planlagt-navnet på neste spill så
+  // master ser presis hva som starter. Eks: "Start neste spill — Bingo".
+  const nextGameName = currentGame.customGameName ?? currentGame.subGameName;
+  const startLabel = nextGameName
+    ? `Start neste spill — ${nextGameName}`
+    : "Start neste spill";
+
   const excludedNotice =
     excludedHallIds.length > 0
       ? `<p class="text-muted small" data-marker="spill1-excluded-notice">
-           <i class="fa fa-warning" aria-hidden="true"></i>
-           Ekskluderte haller som må bekreftes: <code>${excludedHallIds
+           <i class="fa fa-info-circle" aria-hidden="true"></i>
+           Ekskluderte haller: <code>${excludedHallIds
              .map((h) => escapeHtml(h))
              .join(", ")}</code>
          </p>`
@@ -122,14 +144,21 @@ export function renderSpill1AgentControls(
                   data-marker="spill1-start-btn"
                   data-game-id="${escapeHtml(currentGame.id)}"
                   ${canStart ? "" : "disabled"}${startTooltipAttr}>
-            <i class="fa fa-play" aria-hidden="true"></i> Start Spill 1
+            <i class="fa fa-play" aria-hidden="true"></i> ${escapeHtml(startLabel)}
+          </button>
+          <button class="btn btn-warning"
+                  data-action="spill1-pause"
+                  data-marker="spill1-pause-btn"
+                  data-game-id="${escapeHtml(currentGame.id)}"
+                  ${canPause ? "" : "disabled"}>
+            <i class="fa fa-pause" aria-hidden="true"></i> Pause
           </button>
           <button class="btn btn-info"
                   data-action="spill1-resume"
                   data-marker="spill1-resume-btn"
                   data-game-id="${escapeHtml(currentGame.id)}"
                   ${canResume ? "" : "disabled"}>
-            <i class="fa fa-play" aria-hidden="true"></i> Resume
+            <i class="fa fa-play-circle" aria-hidden="true"></i> Fortsett
           </button>
         </div>
         ${excludedNotice}

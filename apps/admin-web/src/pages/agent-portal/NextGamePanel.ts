@@ -71,6 +71,7 @@ import { renderSpill1AgentControls } from "./Spill1AgentControls.js";
 import {
   approveGame1MasterTransfer,
   rejectGame1MasterTransfer,
+  pauseGame1,
 } from "../../api/admin-game1-master.js";
 import { fetchMe } from "../../api/auth.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
@@ -843,6 +844,12 @@ function renderCountdown(): string {
 function renderActions(): string {
   const room = state.activeRoom;
   if (!room) return "";
+  // 2026-05-08 (Tobias-direktiv): "Handlinger"-boksen er konsolidert inn i
+  // "Spill 1 master-handlinger" (Spill1AgentControls) når Spill 1 har en
+  // aktiv runde. Vi skjuler legacy room-action-boksen i den situasjonen så
+  // master ikke får dobbelt sett av Start/Pause/Fortsett-knapper.
+  // Beholdes for Spill 2/3 (room-basert) og når ingen Spill 1-runde er aktiv.
+  if (state.spill1?.currentGame) return "";
   const gameStatus = room.currentGame?.status ?? "NONE";
   // Tillat start hvis det ikke er et RUNNING spill i rommet.
   const canStart = gameStatus !== "RUNNING" && gameStatus !== "PAUSED";
@@ -888,6 +895,11 @@ function renderActions(): string {
 function renderReadyPanel(): string {
   const room = state.activeRoom;
   if (!room) return "";
+  // 2026-05-08 (Tobias-direktiv): "Kringkast 'Klar' + 2-min countdown" mister
+  // sin verdi når master kan starte uavhengig av andre haller. Skjul
+  // ready-panelet for Spill 1 — non-master agenter har Klar/Ikke-klar-knapp
+  // i Spill1AgentControls allerede.
+  if (state.spill1?.currentGame) return "";
   const event = state.lastHallEvent;
   const selfReadyLabel = state.selfReady
     ? `<span class="label label-success" data-marker="agent-ng-self-ready-yes">${escapeHtml(t("agent_next_game_ready_yes"))}</span>`
@@ -958,6 +970,13 @@ function wireSpill1Buttons(container: HTMLElement): void {
   container.querySelector<HTMLButtonElement>('[data-action="spill1-start"]')?.addEventListener(
     "click",
     () => { void onSpill1Start(); },
+  );
+  // 2026-05-08 (Tobias-direktiv): Pause master-handling, konsolidert i
+  // Spill1AgentControls. Kaller pauseRoomGame med engine-room-code når
+  // Spill 1 har en aktiv runde.
+  container.querySelector<HTMLButtonElement>('[data-action="spill1-pause"]')?.addEventListener(
+    "click",
+    () => { void onSpill1Pause(); },
   );
   container.querySelector<HTMLButtonElement>('[data-action="spill1-resume"]')?.addEventListener(
     "click",
@@ -1144,6 +1163,30 @@ async function onSpill1Resume(): Promise<void> {
     // Fase 4 (2026-05-07): plan-API → engine-API når feature-flag er på.
     await resumeSpill1MasterAction();
     Toast.success("Spill 1 fortsatt");
+    await refreshSpill1();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  }
+}
+
+/**
+ * 2026-05-08 (Tobias-direktiv): master pauser aktiv Spill 1-runde.
+ * Bruker admin-game1-master `/pause`-endepunkt direkte (AGENT har
+ * GAME1_MASTER_WRITE-permission). Engine pauser draw-timeren og
+ * `paused`-status flippes på scheduled-game-raden.
+ */
+async function onSpill1Pause(): Promise<void> {
+  const spill1 = state.spill1;
+  if (!spill1 || !spill1.currentGame) return;
+  if (!spill1.isMasterAgent) {
+    Toast.warning("Kun master-hall-agent kan pause Spill 1.");
+    return;
+  }
+  try {
+    const reason = window.prompt("Årsak (valgfritt):", "") ?? undefined;
+    await pauseGame1(spill1.currentGame.id, reason);
+    Toast.success("Spill 1 pauset");
     await refreshSpill1();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -531,4 +531,88 @@ describe("NextGamePanel rendering", () => {
     expect(el?.textContent).toContain("paused");
     expect(el?.textContent).toContain("Kaffepause");
   });
+
+  // ── 2026-05-08 (Tobias-direktiv): legacy "Handlinger"-boks skjules når
+  // Spill 1 har en aktiv runde — master-handlinger konsolidert i
+  // Spill1AgentControls. Beholdes for Spill 2/3 (room-basert).
+  it("Tobias 2026-05-08: 'Handlinger'-boks skjules når Spill 1 har aktiv runde", async () => {
+    const container = document.getElementById("c")!;
+    const { __test } = await import("../src/pages/agent-portal/NextGamePanel.js");
+    const room = {
+      code: "BINGO1",
+      hallId: "hall-1",
+      gameSlug: "bingo",
+      status: "ACTIVE",
+      currentGame: null,
+    };
+    __test.setState({
+      rooms: [room],
+      activeRoom: room,
+      lastFetchError: null,
+      lastHallEvent: null,
+      socketFallback: false,
+      countdownEndsAt: null,
+      countdownTick: 0,
+      selfReady: false,
+      jackpotArmed: false,
+      // Spill 1 currentGame er satt → renderActions/renderReadyPanel skal være tom
+      spill1: {
+        hallId: "hall-1",
+        isMasterAgent: true,
+        currentGame: {
+          id: "g1",
+          status: "purchase_open",
+          masterHallId: "hall-1",
+          groupHallId: "grp-1",
+          participatingHallIds: ["hall-1"],
+          subGameName: "Bingo",
+          customGameName: null,
+          scheduledStartTime: null,
+          scheduledEndTime: null,
+          actualStartTime: null,
+          actualEndTime: null,
+        },
+        halls: [],
+        allReady: true,
+      },
+    } as never);
+    __test.render(container);
+
+    // Legacy room-action-boks SKAL VÆRE skjult.
+    expect(container.querySelector("[data-marker='agent-ng-actions']")).toBeNull();
+    // Legacy ready-panel SKAL VÆRE skjult (broadcast-ready knappen).
+    expect(container.querySelector("[data-marker='agent-ng-ready-panel']")).toBeNull();
+
+    // Master-handlinger via Spill1AgentControls SKAL VÆRE synlig.
+    expect(container.querySelector("[data-marker='spill1-agent-controls']")).toBeTruthy();
+  });
+
+  it("Tobias 2026-05-08: 'Handlinger'-boks vises for Spill 2/3 (room uten Spill 1)", async () => {
+    const container = document.getElementById("c")!;
+    const { __test } = await import("../src/pages/agent-portal/NextGamePanel.js");
+    const room = {
+      code: "ROCKET1",
+      hallId: "hall-1",
+      gameSlug: "rocket",
+      status: "ACTIVE",
+      currentGame: { id: "g1", status: "RUNNING" },
+    };
+    __test.setState({
+      rooms: [room],
+      activeRoom: room,
+      lastFetchError: null,
+      lastHallEvent: null,
+      socketFallback: false,
+      countdownEndsAt: null,
+      countdownTick: 0,
+      selfReady: false,
+      jackpotArmed: false,
+      // Ingen Spill 1 currentGame → legacy box vises som før
+      spill1: null,
+    } as never);
+    __test.render(container);
+
+    expect(container.querySelector("[data-marker='agent-ng-actions']")).toBeTruthy();
+    expect(container.querySelector("[data-marker='agent-ng-ready-panel']")).toBeTruthy();
+  });
 });

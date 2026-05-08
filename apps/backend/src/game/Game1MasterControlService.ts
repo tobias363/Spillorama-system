@@ -101,30 +101,27 @@ export interface StartGameInput {
   gameId: string;
   confirmExcludedHalls?: string[];
   /**
-   * Task 1.5: master-override for "agents not ready"-flyt. Hvis noen deltakende
-   * (non-excluded, non-master) haller har `is_ready=false` på start-tidspunktet,
-   * kaster `startGame` en `HALLS_NOT_READY`-DomainError med listen i
-   * `details.unreadyHalls`. Frontend viser popup "Agents not ready yet: …" med
-   * valg [Avbryt] / [Start uansett].
+   * 2026-05-08 (Tobias-direktiv): legacy-felt beholdt for backward compat.
+   * Master kan nå starte UAVHENGIG av om haller er klare — alle ikke-grønne
+   * ikke-master-haller auto-ekskluderes med `excluded_reason='unready_override'`.
+   * Audit-event `start_game_with_unready_override` skrives med strukturert
+   * `notReadyHalls`/`noPlayersHalls`/`scanPendingHalls`-metadata for
+   * Lotteritilsynet-sporbarhet.
    *
-   * Hvis master bekrefter override, kaller klienten `/start` på nytt med
-   * samtlige ikke-klare hall-IDer i `confirmUnreadyHalls`. Service ekskluderer
-   * da disse hallene (UPSERT excluded_from_game=true, grunn="unready_override")
-   * og skriver audit-entry `start_game_with_unready_override` med listen +
-   * tidsstempel FØR normal `start`-entry.
+   * UI-er trenger IKKE lenger å sende dette feltet — det ignoreres effektivt.
+   * Behold for å unngå å bryte eksisterende klientkall.
    *
    * KUN relevant ved initial start (status='purchase_open'|'ready_to_start').
    * Resume (paused→running) bruker ingen ready-sjekk.
    */
   confirmUnreadyHalls?: string[];
   /**
-   * TASK HS: eksplisitt bekreftelse fra master om at røde haller
-   * (playerCount === 0) skal ekskluderes fra dagens spill. Rød hall uten
-   * eksplisitt bekreftelse blokkerer start-knappen (samme pattern som
-   * `confirmExcludedHalls` — tvinger admin til å se listen).
+   * 2026-05-08 (Tobias-direktiv): legacy-felt beholdt for backward compat.
+   * Røde haller (0 spillere) auto-ekskluderes nå med
+   * `excluded_reason='auto_excluded_red_no_players'`. Master-hallen kan ALDRI
+   * ekskluderes — hvis master er rød kastes `MASTER_HALL_RED`.
    *
-   * Røde haller i listen settes `excluded_from_game=true` i samme transaksjon
-   * som status-flippen til `running`.
+   * UI-er trenger IKKE lenger å sende dette feltet — det ignoreres effektivt.
    */
   confirmExcludeRedHalls?: string[];
   actor: MasterActor;
@@ -497,17 +494,17 @@ export class Game1MasterControlService {
 
       const readyRows = await this.loadReadySnapshot(client, input.gameId);
 
-      // TASK HS: beregn farge-kode per ikke-allerede-ekskludert hall.
-      // Kombineres med Task 1.5: confirmUnreadyHalls overrider unready→excluded
-      // før orange-blokk-sjekken. Red (0 spillere) krever confirmExcludeRedHalls.
+      // 2026-05-08: beregn farge-kode per ikke-allerede-ekskludert hall.
+      // Brukes til auto-eksklusjon nedenfor (master kan starte uavhengig av
+      // ready-status). `confirmedUnready`-settet brukes til å unngå dobbel
+      // markering av haller som master allerede har bekreftet.
       const masterHallId = game.master_hall_id;
       const confirmedUnready = new Set(input.confirmUnreadyHalls ?? []);
       const colorById = new Map<string, "red" | "orange" | "green">();
       for (const r of readyRows) {
         if (r.excluded_from_game) continue;
         // Hvis master har confirmed denne unready-hallen, behandles den som
-        // ekskludert i color-utregningen (vil bli markert excluded_from_game
-        // i overrideExcluded-loopen lenger ned).
+        // allerede ekskludert i color-utregningen.
         if (confirmedUnready.has(r.hall_id) && r.hall_id !== masterHallId) {
           continue;
         }
@@ -521,12 +518,9 @@ export class Game1MasterControlService {
         .filter(([, color]) => color === "orange")
         .map(([hallId]) => hallId);
 
-      // Task 1.5: compute orange (unready) halls BEFORE status-guard så
-      // `HALLS_NOT_READY` kan returneres med strukturert liste (via
-      // DomainError.details). Orange = not-ready, not-excluded, not master,
-      // OG ikke rød (røde haller har egen RED_HALLS_NOT_CONFIRMED-flyt).
-      // Master kan ikke være orange (kastes som MASTER_HALL_RED/HALLS_NOT_READY
-      // separat lenger ned).
+      // Beregn orange (unready) haller for auto-eksklusjon. Orange =
+      // not-ready, not-excluded, not master, OG ikke rød (røde haller
+      // håndteres separat i auto-exclusion-loopen).
       const redHallSet = new Set(redHallIds);
       const unreadyHalls = readyRows
         .filter(
@@ -537,21 +531,18 @@ export class Game1MasterControlService {
             !redHallSet.has(r.hall_id)
         )
         .map((r) => r.hall_id);
-      const uncoveredUnready = unreadyHalls.filter(
-        (h) => !confirmedUnready.has(h)
-      );
 
+      // 2026-05-08 (Tobias-direktiv): master kan starte/stoppe neste planlagte
+      // spill UAVHENGIG av om andre haller er klare. Ready-status er KUN
+      // informativ visning, ikke gate. Master-hallen MÅ fortsatt være klar
+      // (master-side data-feil hvis ikke), men alle andre ikke-grønne haller
+      // auto-ekskluderes med audit-trail-entry.
       if (game.status === "purchase_open") {
-        const nonExcluded = readyRows.filter((r) => !r.excluded_from_game);
-        if (nonExcluded.length === 0) {
-          throw new DomainError(
-            "NO_READY_HALLS",
-            "Ingen deltakende haller er klare."
-          );
-        }
-
         // Master-hall er alltid deltaker og må være klar (kan ikke
-        // ekskluderes). Håndteres som blocking feil før unready-override.
+        // ekskluderes). Håndteres som blocking feil — master må fikse sitt
+        // eget salg før start. Behold som hard-feil per direktivet:
+        // "Master-hallen kan ALDRI ekskluderes — hvis master er rød er det
+        // feil-situasjon (master må fikse sitt eget salg før start)."
         const masterRow = readyRows.find(
           (r) => r.hall_id === game.master_hall_id
         );
@@ -562,63 +553,85 @@ export class Game1MasterControlService {
             { unreadyHalls: [game.master_hall_id] }
           );
         }
+      }
+      // Computed scan-orange (orange men ikke unready) brukes til
+      // auto-eksklusjon nedenfor + audit-metadata.
+      const scanOrangeHalls = orangeHallIds.filter(
+        (h) => !unreadyHalls.includes(h)
+      );
 
-        // Task 1.5: tilsvar `confirmExcludedHalls` — hvis uncoveredUnready
-        // (haller som er unready og IKKE i confirmUnreadyHalls) eksisterer,
-        // kast HALLS_NOT_READY med strukturert details slik at frontend kan
-        // vise popup "Agents not ready yet: …".
-        if (uncoveredUnready.length > 0) {
-          throw new DomainError(
-            "HALLS_NOT_READY",
-            `Haller er ikke klare: ${uncoveredUnready.join(", ")}.`,
-            { unreadyHalls: uncoveredUnready }
-          );
-        }
-
-        // TASK HS: orange-haller som ikke er unready (dvs. de mangler scan
-        // eller har annen orange-årsak utover is_ready) blokkerer Start.
-        // Denne sjekken kjører ETTER unready-håndteringen ovenfor, så
-        // orangeHallIds her er kun "scan-orange" osv.
-        const scanOrangeHalls = orangeHallIds.filter(
-          (h) => !unreadyHalls.includes(h)
+      // 2026-05-08 (Tobias-direktiv): master-hall er master-side data-feil
+      // hvis rød. Behold som hard-feil. Master-hallen kan ALDRI ekskluderes.
+      if (redHallIds.includes(masterHallId)) {
+        throw new DomainError(
+          "MASTER_HALL_RED",
+          "Master-hallen har ingen spillere. Fiks salg i master-hallen før du starter."
         );
-        if (scanOrangeHalls.length > 0) {
-          throw new DomainError(
-            "HALLS_NOT_READY",
-            `Ikke alle haller er klare (${scanOrangeHalls.length} mangler registrering). Vent eller ekskluder: ${scanOrangeHalls.join(", ")}.`
-          );
-        }
       }
 
-      // Task 1.5: hvis master har bekreftet override, marker de gjeldende
-      // hallene som excluded_from_game=true (med grunn="unready_override")
-      // FØR start-transisjonen slik at runde-beregning ikke inkluderer
-      // dem. Idempotent: hvis en hall allerede er ekskludert, gjør UPDATE
-      // ingen ting (ON CONFLICT DO UPDATE).
-      const overrideExcluded: string[] = [];
-      if (input.confirmUnreadyHalls && input.confirmUnreadyHalls.length > 0) {
-        for (const hallId of input.confirmUnreadyHalls) {
-          // Bare flytt haller som faktisk var orange (unready) til excluded.
-          // Dersom en hall ikke var i listen (f.eks. pga. race) ignoreres
-          // den stille — override-audit logger samtlige IDer klient sendte.
-          if (!unreadyHalls.includes(hallId)) continue;
-          if (hallId === game.master_hall_id) continue;
-          await client.query(
-            `INSERT INTO ${this.hallReadyTable()}
-               (game_id, hall_id, is_ready, excluded_from_game, excluded_reason)
-             VALUES ($1, $2, false, true, $3)
-             ON CONFLICT (game_id, hall_id) DO UPDATE
-               SET excluded_from_game = true,
-                   excluded_reason    = EXCLUDED.excluded_reason,
-                   updated_at         = now()`,
-            [input.gameId, hallId, "unready_override"]
-          );
-          overrideExcluded.push(hallId);
-        }
+      // 2026-05-08 (Tobias-direktiv): auto-ekskluder alle ikke-grønne ikke-
+      // master-haller. Ready-status er KUN informativ visning, ikke gate.
+      // Hver hall får distinkt `excluded_reason` slik at audit-trailen viser
+      // hvorfor (Lotteritilsynet-sporbarhet):
+      //   - unready_override:                hall-en er orange (is_ready=false)
+      //   - auto_excluded_red_no_players:    hall-en er rød (0 spillere)
+      //   - auto_excluded_scan_pending:      hall-en er orange pga. manglende
+      //                                       scan/registrering
+      //
+      // `confirmUnreadyHalls`/`confirmExcludeRedHalls`/`confirmExcludedHalls`
+      // beholdes i StartGameInput for backward compat med UI-er som fortsatt
+      // sender dem, men de er nå informasjonelle: alle non-green halls auto-
+      // ekskluderes uansett.
+      const autoExcludedUnready: string[] = [];
+      const autoExcludedRed: string[] = [];
+      const autoExcludedScanOrange: string[] = [];
 
-        // Skriv override-audit FØR normal start-audit slik at det er
-        // sporbart i hvilken rekkefølge hendelsene skjedde. `unreadyHalls`
-        // = IDer klient sendte; `applied` = faktisk ekskluderte.
+      const upsertExclusion = async (hallId: string, reason: string) => {
+        await client.query(
+          `INSERT INTO ${this.hallReadyTable()}
+             (game_id, hall_id, is_ready, excluded_from_game, excluded_reason)
+           VALUES ($1, $2, false, true, $3)
+           ON CONFLICT (game_id, hall_id) DO UPDATE
+             SET excluded_from_game = true,
+                 excluded_reason    = COALESCE(
+                   ${this.hallReadyTable()}.excluded_reason,
+                   EXCLUDED.excluded_reason),
+                 updated_at         = now()`,
+          [input.gameId, hallId, reason]
+        );
+      };
+
+      // Auto-ekskluder unready-haller (orange, is_ready=false).
+      for (const hallId of unreadyHalls) {
+        if (hallId === masterHallId) continue;
+        await upsertExclusion(hallId, "unready_override");
+        autoExcludedUnready.push(hallId);
+      }
+
+      // Auto-ekskluder rød-haller (0 spillere). Master-hallen er allerede
+      // sjekket ovenfor, så masterHallId vil aldri være med i redHallIds her.
+      for (const hallId of redHallIds) {
+        if (hallId === masterHallId) continue;
+        await upsertExclusion(hallId, "auto_excluded_red_no_players");
+        autoExcludedRed.push(hallId);
+      }
+
+      // Auto-ekskluder scan-orange-haller (orange men ikke unready —
+      // typisk manglende ticket-scan eller annen orange-årsak).
+      for (const hallId of scanOrangeHalls) {
+        if (hallId === masterHallId) continue;
+        await upsertExclusion(hallId, "auto_excluded_scan_pending");
+        autoExcludedScanOrange.push(hallId);
+      }
+
+      // Skriv audit-event for soft-warning-overgangen FØR normal start-audit
+      // slik at Lotteritilsynet-sporbarheten viser hvilke haller som ble
+      // auto-ekskludert. Skip hvis ingen auto-eksklusjon skjedde.
+      const totalAutoExcluded =
+        autoExcludedUnready.length +
+        autoExcludedRed.length +
+        autoExcludedScanOrange.length;
+      if (totalAutoExcluded > 0) {
         const overrideAuditId = await this.writeAudit(client, {
           gameId: input.gameId,
           action: "start_game_with_unready_override",
@@ -626,8 +639,20 @@ export class Game1MasterControlService {
           groupHallId: game.group_hall_id,
           snapshot: this.snapshotReadyRows(readyRows),
           metadata: {
-            confirmUnreadyHalls: input.confirmUnreadyHalls,
-            appliedExcludedHalls: overrideExcluded,
+            // Bevares for backward compat med eksisterende audit-konsumenter:
+            // klient-sendte lister hvis noen av UI-ene fortsatt sender dem.
+            confirmUnreadyHalls: input.confirmUnreadyHalls ?? [],
+            confirmExcludeRedHalls: input.confirmExcludeRedHalls ?? [],
+            // Auto-eksklusjoner per kategori (separate lister for klar
+            // sporbarhet).
+            notReadyHalls: autoExcludedUnready,
+            noPlayersHalls: autoExcludedRed,
+            scanPendingHalls: autoExcludedScanOrange,
+            appliedExcludedHalls: [
+              ...autoExcludedUnready,
+              ...autoExcludedRed,
+              ...autoExcludedScanOrange,
+            ],
             overriddenAt: new Date().toISOString(),
           },
         });
@@ -636,83 +661,28 @@ export class Game1MasterControlService {
             gameId: input.gameId,
             actorId: input.actor.userId,
             auditId: overrideAuditId,
-            overrideExcluded,
+            notReadyHalls: autoExcludedUnready,
+            noPlayersHalls: autoExcludedRed,
+            scanPendingHalls: autoExcludedScanOrange,
           },
           "master.start.unready_override"
         );
       }
 
-      // TASK HS: røde haller må bekreftes eksplisitt via confirmExcludeRedHalls.
-      // Master-hallen kan ALDRI ekskluderes — hvis master er rød er det feil-
-      // situasjon (master må fikse sitt eget salg før start).
-      const redUnconfirmed = redHallIds.filter(
-        (h) =>
-          h !== masterHallId &&
-          !(input.confirmExcludeRedHalls ?? []).includes(h)
-      );
-      if (redUnconfirmed.length > 0) {
-        throw new DomainError(
-          "RED_HALLS_NOT_CONFIRMED",
-          `Master må bekrefte ekskludering av røde haller (0 spillere): ${redUnconfirmed.join(", ")}.`
-        );
-      }
-      if (redHallIds.includes(masterHallId)) {
-        throw new DomainError(
-          "MASTER_HALL_RED",
-          "Master-hallen har ingen spillere. Fiks salg i master-hallen før du starter."
-        );
-      }
-
-      // TASK HS: sett excluded_from_game=true for bekreftede røde haller i
-      // samme transaksjon som status-flippen.
-      const redToExclude = redHallIds.filter(
-        (h) =>
-          h !== masterHallId &&
-          (input.confirmExcludeRedHalls ?? []).includes(h)
-      );
-      for (const hallId of redToExclude) {
-        await client.query(
-          `INSERT INTO ${this.hallReadyTable()}
-             (game_id, hall_id, is_ready, excluded_from_game, excluded_reason)
-           VALUES ($1, $2, false, true, 'auto_excluded_red_no_players')
-           ON CONFLICT (game_id, hall_id) DO UPDATE
-             SET excluded_from_game = true,
-                 excluded_reason    = COALESCE(
-                   ${this.hallReadyTable()}.excluded_reason,
-                   'auto_excluded_red_no_players'),
-                 updated_at         = now()`,
-          [input.gameId, hallId]
-        );
-      }
-
-      // Re-compute excluded hall-IDs ETTER override-applikering slik at
-      // `confirmExcludedHalls`-sjekken inkluderer nyekskluderte. Unngå
-      // ekstra DB-round-trip hvis ingen override ble kjørt: da er pre-
-      // snapshot (readyRows) fortsatt gyldig.
-      const needsRefresh =
-        overrideExcluded.length > 0 || redToExclude.length > 0;
+      // Re-load ready-snapshot ETTER auto-eksklusjon så `excludedHallIds` og
+      // `excludedReason` reflekterer faktisk DB-state.
+      const needsRefresh = totalAutoExcluded > 0;
       const postRows = needsRefresh
         ? await this.loadReadySnapshot(client, input.gameId)
         : readyRows;
       const excludedHallIds = postRows
         .filter((r) => r.excluded_from_game)
         .map((r) => r.hall_id);
-      const confirmed = new Set([
-        ...(input.confirmExcludedHalls ?? []),
-        // Task 1.5: override-ekskluderte haller er implisitt bekreftet via
-        // `confirmUnreadyHalls`; kaller trenger ikke sende dem dobbelt.
-        ...overrideExcluded,
-        // TASK HS: red-ekskluderte haller er implisitt bekreftet via
-        // `confirmExcludeRedHalls`.
-        ...redToExclude,
-      ]);
-      const unconfirmed = excludedHallIds.filter((h) => !confirmed.has(h));
-      if (unconfirmed.length > 0) {
-        throw new DomainError(
-          "EXCLUDED_HALLS_NOT_CONFIRMED",
-          `Master må bekrefte ekskluderte haller: ${unconfirmed.join(", ")}.`
-        );
-      }
+
+      // 2026-05-08 (Tobias-direktiv): `EXCLUDED_HALLS_NOT_CONFIRMED` er
+      // fjernet — alle eksisterende ekskluderinger (manuelle excludeHall-call
+      // før start, eller auto-eksklusjoner ovenfor) er implisitt akseptert
+      // når master starter. Ready-status er KUN informativ.
 
       const { rows: updated } = await client.query<ScheduledGameRow>(
         `UPDATE ${this.scheduledGamesTable()}
@@ -741,10 +711,15 @@ export class Game1MasterControlService {
           confirmUnreadyHalls: input.confirmUnreadyHalls ?? [],
           confirmExcludeRedHalls: input.confirmExcludeRedHalls ?? [],
           excludedHallIds,
-          overrideExcluded,
+          // 2026-05-08 (Tobias-direktiv): erstatt enkelt `overrideExcluded`
+          // med separate kategorier slik at Lotteritilsynet-rapporten viser
+          // PRESIST hvorfor hver hall ble ekskludert.
+          notReadyHalls: autoExcludedUnready,
+          noPlayersHalls: autoExcludedRed,
+          scanPendingHalls: autoExcludedScanOrange,
           jackpotConfirmed: input.jackpotConfirmed === true,
           jackpotAmountCents: jackpotAmountCents ?? null,
-          autoExcludedRedHalls: redToExclude,
+          autoExcludedRedHalls: autoExcludedRed,
         },
       });
 
