@@ -1,12 +1,15 @@
 /**
  * TASK HS: start-guard-tester for Game1MasterControlService.startGame.
  *
- * Dekker:
- *   - 🟠 Oransje hall blokkerer start (HALLS_NOT_READY inneholder navn)
- *   - 🔴 Rød hall uten confirmExcludeRedHalls → RED_HALLS_NOT_CONFIRMED
- *   - 🔴 Rød hall med confirmExcludeRedHalls → OK + UPDATE excluded_from_game
- *   - Master-hall er rød → MASTER_HALL_RED (kan ikke ekskluderes)
- *   - Blanding av grønne + bekreftet røde → start går gjennom
+ * 2026-05-08 (Tobias-direktiv) — oppdatert til ny soft-warning-flyt:
+ *   - 🟠 Oransje hall (manglende slutt-scan) → auto-ekskluder med
+ *     'auto_excluded_scan_pending' (ikke lenger HALLS_NOT_READY-blokk)
+ *   - 🔴 Rød hall (0 spillere) → auto-ekskluder med
+ *     'auto_excluded_red_no_players' (ikke lenger RED_HALLS_NOT_CONFIRMED)
+ *   - 🔴 Master-hall rød → fortsatt blokkerer med MASTER_HALL_RED (master-
+ *     side data-feil)
+ *   - Blanding av grønne + ikke-grønne → start går gjennom (ikke-grønne
+ *     auto-ekskluderes)
  */
 
 import assert from "node:assert/strict";
@@ -124,10 +127,10 @@ function orangeRow(hallId: string): unknown {
   };
 }
 
-// ── 🟠 Oransje hall blokkerer start ─────────────────────────────────────────
+// ── 🟠 Oransje hall auto-ekskluderes (Tobias 2026-05-08) ────────────────────
 
-test("startGame blokkeres av 🟠 oransje hall (manglende slutt-scan)", async () => {
-  const { pool } = createStubPool([
+test("startGame auto-ekskluderer 🟠 oransje hall (manglende slutt-scan)", async () => {
+  const { pool, queries } = createStubPool([
     { match: (s) => s.startsWith("BEGIN"), rows: [] },
     {
       match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
@@ -138,31 +141,65 @@ test("startGame blokkeres av 🟠 oransje hall (manglende slutt-scan)", async ()
       rows: [
         greenRow("hall-master"),
         greenRow("hall-2"),
-        orangeRow("hall-3"), // oransje blokkerer
+        // Oransje: is_ready=false + spillere finnes (slutt-scan mangler).
+        // I dette setupet behandler unreadyHalls-filteren den som unready
+        // (is_ready=false). Det viktige er at start ikke blokkerer.
+        orangeRow("hall-3"),
       ],
     },
-    { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
+    // UPSERT auto-exclusion av hall-3
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") &&
+        s.includes("app_game1_hall_ready_status"),
+      rows: [],
+    },
+    // Override-audit
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    // Post-exclusion snapshot
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [
+        greenRow("hall-master"),
+        greenRow("hall-2"),
+        { ...(orangeRow("hall-3") as Record<string, unknown>), excluded_from_game: true },
+      ],
+    },
+    {
+      match: (s) => s.includes("SET status") && s.includes("'running'"),
+      rows: [
+        gameRow({
+          status: "running",
+          actual_start_time: "2026-04-24T10:00:00.000Z",
+        }),
+      ],
+    },
+    { match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"), rows: [] },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
   ]);
   const svc = Game1MasterControlService.forTesting(pool as never);
-  await assert.rejects(
-    svc.startGame({ gameId: "g1", actor: masterActor }),
-    (err: unknown) => {
-      if (!(err instanceof DomainError)) return false;
-      assert.equal(err.code, "HALLS_NOT_READY");
-      assert.match(
-        err.message,
-        /hall-3/,
-        "feilmelding skal navngi oransje hall"
-      );
-      return true;
-    }
+  const result = await svc.startGame({ gameId: "g1", actor: masterActor });
+  assert.equal(result.status, "running");
+
+  // Verifiser at hall-3 ble auto-ekskludert (uansett kategori — orange-not-ready
+  // eller scan-pending er begge gyldige reasons her).
+  const upsert = queries.find(
+    (q) =>
+      q.sql.includes("INSERT INTO") &&
+      q.sql.includes("app_game1_hall_ready_status") &&
+      Array.isArray(q.params) &&
+      q.params[1] === "hall-3"
   );
+  assert.ok(upsert, "auto-exclusion av oransje hall-3 forventet");
 });
 
-// ── 🔴 Rød hall uten bekreftelse ────────────────────────────────────────────
+// ── 🔴 Rød hall uten bekreftelse → auto-ekskluder (Tobias 2026-05-08) ──────
 
-test("startGame blokkeres av 🔴 rød hall uten confirmExcludeRedHalls", async () => {
-  const { pool } = createStubPool([
+test("startGame auto-ekskluderer 🔴 rød hall uten confirmExcludeRedHalls", async () => {
+  const { pool, queries } = createStubPool([
     { match: (s) => s.startsWith("BEGIN"), rows: [] },
     {
       match: (s) => s.includes("FOR UPDATE"),
@@ -176,14 +213,53 @@ test("startGame blokkeres av 🔴 rød hall uten confirmExcludeRedHalls", async 
         redRow("hall-3"),
       ],
     },
-    { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
+    // UPSERT auto-exclusion av rød hall-3
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") &&
+        s.includes("app_game1_hall_ready_status"),
+      rows: [],
+    },
+    // Override-audit
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    // Post-exclusion snapshot
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [
+        greenRow("hall-master"),
+        greenRow("hall-2"),
+        { ...(redRow("hall-3") as Record<string, unknown>), excluded_from_game: true },
+      ],
+    },
+    {
+      match: (s) => s.includes("SET status") && s.includes("'running'"),
+      rows: [
+        gameRow({
+          status: "running",
+          actual_start_time: "2026-04-24T10:00:00.000Z",
+        }),
+      ],
+    },
+    { match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"), rows: [] },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
   ]);
   const svc = Game1MasterControlService.forTesting(pool as never);
-  await assert.rejects(
-    svc.startGame({ gameId: "g1", actor: masterActor }),
-    (err: unknown) =>
-      err instanceof DomainError && err.code === "RED_HALLS_NOT_CONFIRMED"
+  const result = await svc.startGame({ gameId: "g1", actor: masterActor });
+  assert.equal(result.status, "running");
+
+  // Verifiser at hall-3 ble auto-ekskludert med 'auto_excluded_red_no_players'.
+  const upsert = queries.find(
+    (q) =>
+      q.sql.includes("INSERT INTO") &&
+      q.sql.includes("app_game1_hall_ready_status") &&
+      Array.isArray(q.params) &&
+      q.params[1] === "hall-3" &&
+      q.params[2] === "auto_excluded_red_no_players"
   );
+  assert.ok(upsert, "auto-exclusion av rød hall-3 med 'auto_excluded_red_no_players'");
 });
 
 // ── 🔴 Rød hall MED bekreftelse → OK + ekskludering ─────────────────────────
@@ -203,13 +279,27 @@ test("startGame med confirmExcludeRedHalls setter excluded_from_game=true", asyn
         redRow("hall-3"),
       ],
     },
-    // UPSERT red hall to excluded
+    // UPSERT red hall to excluded — reason er nå parameterisert ($3) i ny
+    // 2026-05-08-flyt, så vi matcher på SQL-fragment uten literal.
     {
       match: (s) =>
         s.includes("INSERT INTO") &&
-        s.includes("app_game1_hall_ready_status") &&
-        s.includes("auto_excluded_red_no_players"),
+        s.includes("app_game1_hall_ready_status"),
       rows: [],
+    },
+    // Override-audit (auto-exclusion event)
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    // Post-exclusion snapshot
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [
+        greenRow("hall-master"),
+        greenRow("hall-2"),
+        { ...(redRow("hall-3") as Record<string, unknown>), excluded_from_game: true },
+      ],
     },
     // UPDATE to running
     {
@@ -232,21 +322,30 @@ test("startGame med confirmExcludeRedHalls setter excluded_from_game=true", asyn
   });
   assert.equal(result.status, "running");
 
+  // Verifiser at hall-3 ble auto-ekskludert med 'auto_excluded_red_no_players'
+  // som parameter (ikke literal i SQL).
   const autoExcludeQuery = queries.find(
     (q) =>
-      q.sql.includes("auto_excluded_red_no_players") &&
-      q.sql.includes("INSERT INTO")
+      q.sql.includes("INSERT INTO") &&
+      q.sql.includes("app_game1_hall_ready_status") &&
+      Array.isArray(q.params) &&
+      q.params[1] === "hall-3" &&
+      q.params[2] === "auto_excluded_red_no_players"
   );
-  assert.ok(autoExcludeQuery, "skal ha utført auto-exclude UPSERT");
-  assert.equal(autoExcludeQuery!.params[1], "hall-3");
+  assert.ok(autoExcludeQuery, "skal ha utført auto-exclude UPSERT med rett reason");
 
-  // Audit skal logge autoExcludedRedHalls
-  const auditQuery = queries.find(
-    (q) => q.sql.includes("master_audit") && q.sql.includes("INSERT")
+  // Audit skal logge autoExcludedRedHalls i metadata.
+  const startAudit = queries.find(
+    (q) =>
+      q.sql.includes("master_audit") &&
+      q.sql.includes("INSERT") &&
+      Array.isArray(q.params) &&
+      q.params[2] === "start"
   );
-  assert.ok(auditQuery);
-  const metadata = JSON.parse(String(auditQuery!.params[7]));
+  assert.ok(startAudit);
+  const metadata = JSON.parse(String(startAudit!.params[7]));
   assert.deepEqual(metadata.autoExcludedRedHalls, ["hall-3"]);
+  assert.deepEqual(metadata.noPlayersHalls, ["hall-3"]);
 });
 
 // ── Master-hall rød → MASTER_HALL_RED ───────────────────────────────────────

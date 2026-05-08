@@ -21,7 +21,6 @@ import {
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
   setHallHasCustomersForGame,
-  stopAgentGame1,
   type Spill1CurrentGameResponse,
   type Spill1CurrentGameHall,
 } from "../../api/agent-game1.js";
@@ -31,6 +30,7 @@ import {
   startSpill1MasterAction,
   resumeSpill1MasterAction,
 } from "../../api/agent-master-actions.js";
+import { pauseGame1 } from "../../api/admin-game1-master.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
 import { escapeHtml } from "./shared.js";
@@ -201,13 +201,16 @@ export function mountSpill1HallStatusBox(
           await resumeSpill1MasterAction();
           Toast.success("Spill 1 gjenopptatt.");
           break;
-        case "stop":
-          if (!confirm("Er du sikker på at du vil stoppe denne runden?")) {
-            return;
-          }
-          await stopAgentGame1();
-          Toast.info("Spill 1 stoppet.");
+        case "pause": {
+          // 2026-05-08 (Tobias-direktiv): master pauser aktiv Spill 1-runde
+          // direkte via admin-game1-pause-endepunktet (AGENT har
+          // GAME1_MASTER_WRITE-permission). Engine pauser draw-timeren og
+          // status flippes til 'paused' på scheduled-game-raden.
+          const reason = window.prompt("Årsak (valgfritt):", "") ?? undefined;
+          await pauseGame1(gameId, reason);
+          Toast.success("Spill 1 pauset.");
           break;
+        }
         default:
           return;
       }
@@ -310,16 +313,16 @@ function render(container: HTMLElement, state: BoxState): void {
   const isMaster = data.isMasterAgent;
   const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
 
-  // 2026-05-07 (Tobias UX): Start kun aktiv når purchase-vinduet ER åpnet
-  // (`purchase_open` / `ready_to_start`). I `'scheduled'` venter vi på cron-
-  // promotering — backend returnerer GAME_NOT_STARTABLE_YET hvis vi prøver,
-  // så vi disable-r knappen i UI med tooltip som matcher backend-meldingen.
+  // 2026-05-08 (Tobias-direktiv): Start aktiv når purchase-vinduet er åpnet.
+  // Master kan starte UAVHENGIG av om andre haller er klare. Pause/Fortsett
+  // synlig kun når aktuelt. Stop-knappen FJERNET fra agent-UI (admin-only
+  // via /api/admin/game1/...). "Kringkast 'Klar' + 2-min countdown" også
+  // fjernet — master starter uavhengig av ready-status.
   const canStart =
     isMaster &&
     (game.status === "ready_to_start" || game.status === "purchase_open");
+  const canPause = isMaster && game.status === "running";
   const canResume = isMaster && game.status === "paused";
-  const canStop =
-    isMaster && (game.status === "running" || game.status === "paused");
 
   const hallsHtml = renderHallList(data.halls, ownHallId);
   const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status);
@@ -328,14 +331,18 @@ function render(container: HTMLElement, state: BoxState): void {
   const unreadyCount = data.halls.filter(
     (h) => !h.isReady && !h.excludedFromGame,
   ).length;
+  // 2026-05-08: vis planlagt-navnet i Start-knappen så master ser presis
+  // hva som starter (eks: "Start neste spill — Bingo").
+  const nextGameName = game.customGameName ?? game.subGameName ?? null;
   const masterButtonsHtml = renderMasterButtons({
     canStart,
+    canPause,
     canResume,
-    canStop,
     isMaster,
     gameStatus: game.status,
     scheduledStartTime: game.scheduledStartTime,
     unreadyCount,
+    nextGameName,
   });
 
   const titleParts: string[] = [];
@@ -445,8 +452,8 @@ function renderOwnHallButtons(
 
 function renderMasterButtons(opts: {
   canStart: boolean;
+  canPause: boolean;
   canResume: boolean;
-  canStop: boolean;
   isMaster: boolean;
   gameStatus: string;
   /**
@@ -460,6 +467,11 @@ function renderMasterButtons(opts: {
    * får bekreftelses-popup og hallene ekskluderes fra denne runden.
    */
   unreadyCount: number;
+  /**
+   * 2026-05-08: planlagt sub-game-navn (eks "Bingo", "Mystery"). Brukes til
+   * å bygge dynamisk Start-label "Start neste spill — {navn}".
+   */
+  nextGameName: string | null;
 }): string {
   if (!opts.isMaster) return "";
   const startTooltip = buildStartTooltip(
@@ -473,11 +485,18 @@ function renderMasterButtons(opts: {
   const startWarning =
     opts.canStart && opts.unreadyCount > 0
       ? `<p class="text-muted small" style="margin-top:8px;margin-bottom:0;">
-           <i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+           <i class="fa fa-info-circle text-warning" aria-hidden="true"></i>
            ${opts.unreadyCount} hall${opts.unreadyCount === 1 ? "" : "er"}
            ikke klar enda — start vil ekskludere ${opts.unreadyCount === 1 ? "den" : "dem"}.
          </p>`
       : "";
+  // 2026-05-08 (Tobias-direktiv): Start-label inkluderer planlagt-navnet på
+  // neste spill. Stop-knappen er FJERNET fra agent-UI — admin har eget
+  // audit-trail-endpoint via /api/admin/game1/games/:gameId/stop hvis
+  // master må stoppe en aktiv runde.
+  const startLabel = opts.nextGameName
+    ? `Start neste spill — ${opts.nextGameName}`
+    : "Start neste spill";
   return `
     <div class="spill1-master-actions" style="margin-top:16px;">
       <h4 style="margin:0 0 8px 0;">Master-handlinger</h4>
@@ -485,17 +504,17 @@ function renderMasterButtons(opts: {
         <button type="button" class="btn btn-success cashinout-grid-btn"
                 data-spill1-action="start"
                 ${opts.canStart ? "" : "disabled"}${startTooltipAttr}>
-          <i class="fa fa-play" aria-hidden="true"></i> Start Spill 1
+          <i class="fa fa-play" aria-hidden="true"></i> ${escapeHtml(startLabel)}
+        </button>
+        <button type="button" class="btn btn-warning cashinout-grid-btn"
+                data-spill1-action="pause"
+                ${opts.canPause ? "" : "disabled"}>
+          <i class="fa fa-pause" aria-hidden="true"></i> Pause
         </button>
         <button type="button" class="btn btn-info cashinout-grid-btn"
                 data-spill1-action="resume"
                 ${opts.canResume ? "" : "disabled"}>
-          <i class="fa fa-play-circle" aria-hidden="true"></i> Resume
-        </button>
-        <button type="button" class="btn btn-danger cashinout-grid-btn"
-                data-spill1-action="stop"
-                ${opts.canStop ? "" : "disabled"}>
-          <i class="fa fa-stop" aria-hidden="true"></i> Stopp Spill 1
+          <i class="fa fa-play-circle" aria-hidden="true"></i> Fortsett
         </button>
       </div>
       ${startWarning}

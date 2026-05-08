@@ -22,6 +22,8 @@ interface StubResponse {
   match: (sql: string) => boolean;
   rows: unknown[];
   rowCount?: number;
+  /** Hvis satt: responsen kan brukes flere ganger (for repeat-queries). */
+  reusable?: boolean;
 }
 
 interface StubClient {
@@ -44,7 +46,9 @@ function createStubPool(responses: StubResponse[] = []): {
     for (let i = 0; i < activeResponses.length; i++) {
       const r = activeResponses[i]!;
       if (r.match(sql)) {
-        activeResponses.splice(i, 1);
+        if (!r.reusable) {
+          activeResponses.splice(i, 1);
+        }
         return { rows: r.rows, rowCount: r.rowCount ?? r.rows.length };
       }
     }
@@ -203,8 +207,11 @@ test("startGame tillater 'scheduled'-status (Tobias UX 2026-05-03 — master kan
   }
 });
 
-test("startGame fra purchase_open avviser hvis ikke alle haller klare", async () => {
-  const { pool } = createStubPool([
+test("startGame fra purchase_open auto-ekskluderer ikke-klare haller (Tobias 2026-05-08)", async () => {
+  // Tidligere kastet HALLS_NOT_READY når noen haller ikke var klare. Per
+  // Tobias-direktivet 2026-05-08 auto-ekskluderes de istedet og master kan
+  // starte uavhengig.
+  const { pool, queries } = createStubPool([
     { match: (s) => s.startsWith("BEGIN"), rows: [] },
     {
       match: (s) => s.includes("FOR UPDATE"),
@@ -217,17 +224,55 @@ test("startGame fra purchase_open avviser hvis ikke alle haller klare", async ()
         readyRow({ hall_id: "hall-2", is_ready: false }),
       ],
     },
-    { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") &&
+        s.includes("hall_ready_status"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [
+        readyRow({ hall_id: "hall-master", is_ready: true }),
+        readyRow({
+          hall_id: "hall-2",
+          is_ready: false,
+          excluded_from_game: true,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("SET status") && s.includes("'running'"),
+      rows: [gameRow({ status: "running" })],
+    },
+    { match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"), rows: [] },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
   ]);
   const svc = Game1MasterControlService.forTesting(pool as never);
-  await assert.rejects(
-    svc.startGame({ gameId: "g1", actor: masterActor }),
-    (err: unknown) =>
-      err instanceof DomainError && err.code === "HALLS_NOT_READY"
+  const result = await svc.startGame({ gameId: "g1", actor: masterActor });
+  assert.equal(result.status, "running");
+
+  // Verifiser auto-exclusion av hall-2 med 'unready_override'.
+  const upsert = queries.find(
+    (q) =>
+      q.sql.includes("INSERT INTO") &&
+      q.sql.includes("hall_ready_status") &&
+      Array.isArray(q.params) &&
+      q.params[1] === "hall-2" &&
+      q.params[2] === "unready_override"
   );
+  assert.ok(upsert, "auto-exclusion av hall-2 forventet");
 });
 
-test("startGame avviser hvis excluded halls ikke er bekreftet", async () => {
+test("startGame aksepterer eksisterende excluded halls uten confirm (Tobias 2026-05-08)", async () => {
+  // Tidligere kastet EXCLUDED_HALLS_NOT_CONFIRMED når master ikke eksplisitt
+  // bekreftet allerede ekskluderte haller. Per Tobias-direktivet aksepteres
+  // alle eksisterende ekskluderinger implisitt — master kan starte uten å
+  // gjenta hallene i en confirm-liste.
   const { pool } = createStubPool([
     { match: (s) => s.startsWith("BEGIN"), rows: [] },
     {
@@ -241,15 +286,18 @@ test("startGame avviser hvis excluded halls ikke er bekreftet", async () => {
         readyRow({ hall_id: "hall-2", is_ready: true }),
         readyRow({ hall_id: "hall-3", is_ready: false, excluded_from_game: true }),
       ],
+      reusable: true,
     },
-    { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
+    {
+      match: (s) => s.includes("SET status") && s.includes("'running'"),
+      rows: [gameRow({ status: "running" })],
+    },
+    { match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"), rows: [] },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
   ]);
   const svc = Game1MasterControlService.forTesting(pool as never);
-  await assert.rejects(
-    svc.startGame({ gameId: "g1", actor: masterActor }),
-    (err: unknown) =>
-      err instanceof DomainError && err.code === "EXCLUDED_HALLS_NOT_CONFIRMED"
-  );
+  const result = await svc.startGame({ gameId: "g1", actor: masterActor });
+  assert.equal(result.status, "running");
 });
 
 test("startGame aksepterer når excluded halls er bekreftet", async () => {
