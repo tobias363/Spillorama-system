@@ -368,7 +368,17 @@ function render(container: HTMLElement, state: BoxState): void {
 
   const ownHallHtml = renderOwnHallSection(ownHall, ownHallId, masterHallIdForCrown);
   const otherHallsHtml = renderOtherHallsSection(otherHalls, masterHallIdForCrown);
-  const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status);
+  // 2026-05-08 (Tobias-bug-fix): "Marker Klar" / "Ingen kunder"-knappene
+  // kaller `/api/admin/game1/halls/:hallId/ready` med `gameId` i body.
+  // Backend krever en eksisterende `scheduled_games`-rad — som først
+  // spawnes når master kaller `/api/agent/game-plan/start`. Før master
+  // har startet er `currentGame.id` enten tom (backend) eller en plan-
+  // run-id (adapter) — ingen av dem er en gyldig scheduled-games-id.
+  // Vi disabler knappene defensivt og viser en tooltip så agenter
+  // forstår hvorfor de er disabled.
+  const hasValidGameId =
+    typeof game.id === "string" && game.id.length > 0 && game.status !== "scheduled";
+  const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status, hasValidGameId);
   // Antall ikke-klare/ikke-ekskluderte haller — vises som hint på Start-knappen
   // så master ser umiddelbart hvor mange som vil bli ekskludert.
   const unreadyCount = data.halls.filter(
@@ -548,7 +558,8 @@ function renderStatusPill(h: Spill1CurrentGameHall): string {
 
 function renderOwnHallButtons(
   ownHall: Spill1CurrentGameHall | null,
-  gameStatus: string
+  gameStatus: string,
+  hasValidGameId: boolean
 ): string {
   if (!ownHall) {
     return "";
@@ -560,27 +571,39 @@ function renderOwnHallButtons(
     gameStatus === "purchase_open" ||
     gameStatus === "ready_to_start";
 
+  // 2026-05-08 (Tobias-bug-fix): disable hvis ingen gyldig scheduled-game-
+  // id finnes ennå (backend returnerer 400 før master har trykket Start
+  // neste spill). Tooltipen forklarer hvorfor knappene er disabled.
+  const disableForNoGameId = !hasValidGameId;
+  const noGameIdTooltip = "Master må starte spillet først";
+  const noGameIdTooltipAttr = disableForNoGameId
+    ? ` title="${escapeHtml(noGameIdTooltip)}"`
+    : "";
+
+  const readyDisabled =
+    !editable || ownHall.excludedFromGame || disableForNoGameId;
   const readyBtn = ownHall.isReady
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="unmark-ready"
-                ${editable && !ownHall.excludedFromGame ? "" : "disabled"}>
+                ${readyDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
          <i class="fa fa-undo" aria-hidden="true"></i> Angre Klar
        </button>`
     : `<button type="button" class="btn btn-success cashinout-grid-btn"
                 data-spill1-action="mark-ready"
-                ${editable && !ownHall.excludedFromGame ? "" : "disabled"}>
+                ${readyDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
          <i class="fa fa-check-circle" aria-hidden="true"></i> Marker Klar
        </button>`;
 
+  const customersDisabled = !editable || disableForNoGameId;
   const customersBtn = ownHall.excludedFromGame
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="has-customers"
-                ${editable ? "" : "disabled"}>
+                ${customersDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
          <i class="fa fa-undo" aria-hidden="true"></i> Har kunder igjen
        </button>`
     : `<button type="button" class="btn btn-danger cashinout-grid-btn"
                 data-spill1-action="no-customers"
-                ${editable ? "" : "disabled"}>
+                ${customersDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
          <i class="fa fa-times" aria-hidden="true"></i> Ingen kunder
        </button>`;
 
