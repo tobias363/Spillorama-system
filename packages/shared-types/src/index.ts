@@ -5,3 +5,4 @@ export * from "./reports.js";
 export * from "./spill1-patterns.js";
 export * from "./spill1-sub-variants.js";
 export * from "./ticket-colors.js";
+export * from "./spill1-lobby-state.js";
