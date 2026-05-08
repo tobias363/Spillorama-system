@@ -33,6 +33,8 @@ Detailed execution breakdown:
 
 ## 4. Epic Backlog
 
+> **🚨 P0-MANDAT — Live-rom-robusthet:** Spill 1, 2 og 3 er live-rom som må holde Evolution Gaming-grade oppetid (99.95 %+ innenfor åpningstid). Tiltakene R1-R12 i [`docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md`](../architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md) er **gating for pilot-live**. Direktiv fra Tobias 2026-05-08: ikke kompromisser på dette område — bruk eksterne ressurser (SRE-konsulent/chaos-engineering-byrå) hvis intern kapasitet ikke holder.
+
 ## EPIC A - Identity, Registration, and Hall Model (`P0`)
 
 Goal: enforce registered play per hall and remove anonymous gameplay.
