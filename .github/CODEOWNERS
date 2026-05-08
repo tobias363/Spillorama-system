@@ -1,0 +1,135 @@
+# Spillorama CODEOWNERS
+#
+# Auto-assignerer review-eier basert på endrede filer.
+# Per pengespillforskriften + Evolution Gaming-grade-mandat — kritiske
+# områder krever Tobias som eier (eller delegert reviewer).
+#
+# Format: <pattern> <owner> [owner ...]
+# Patterns matches glob-style, siste matchende linje vinner.
+#
+# Tobias-direktiv 2026-05-08:
+# > "alt av kode som krangler mot hverandre må fjernes ... fundamentet
+# >  legges godt nå. har hatt nok erfaring tidligere med å ta snarveier
+# >  — det kommer alltid tilbake med dobbelt så mye tidsbruk for å fikse"
+
+# ──────────────────────────────────────────────────────────────────────
+# DEFAULT — alt uten mer-spesifikk match
+# ──────────────────────────────────────────────────────────────────────
+* @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# REGULATORISK — pengespillforskriften, krever Tobias-review
+# ──────────────────────────────────────────────────────────────────────
+
+# Compliance-laget (§11/§66/§71-håndhevelse)
+/apps/backend/src/compliance/                @tobias363
+/apps/backend/src/wallet/                    @tobias363
+/apps/backend/src/adapters/                  @tobias363
+
+# Audit-trail og hash-chain (Lotteritilsynet-sporbarhet)
+/apps/backend/src/auth/AuditLogService.ts    @tobias363
+
+# Anti-fraud + AML
+/apps/backend/src/security/                  @tobias363
+
+# Migration-files (DB-skjema-evolusjon kan ikke reverses)
+/apps/backend/migrations/                    @tobias363
+/apps/backend/src/migrations/                @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# LIVE-ROM-ARKITEKTUR — Evolution Gaming-grade
+# ──────────────────────────────────────────────────────────────────────
+
+# Spill 1 master-flow + plan-runtime
+/apps/backend/src/game/Game1*.ts             @tobias363
+/apps/backend/src/game/MasterActionService.ts @tobias363
+/apps/backend/src/game/GamePlanRunService.ts @tobias363
+/apps/backend/src/game/GamePlanEngineBridge.ts @tobias363
+/apps/backend/src/game/GameLobbyAggregator.ts @tobias363
+
+# Spill 2 perpetual loop
+/apps/backend/src/game/Spill2*.ts            @tobias363
+/apps/backend/src/game/Game2*.ts             @tobias363
+
+# Spill 3 phase-state-machine
+/apps/backend/src/game/Spill3*.ts            @tobias363
+/apps/backend/src/game/Game3*.ts             @tobias363
+
+# Engine-base
+/apps/backend/src/game/BingoEngine.ts        @tobias363
+/apps/backend/src/game/PerpetualRoundService.ts @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# FUNDAMENT-DOKUMENTASJON — endring krever skill-update
+# ──────────────────────────────────────────────────────────────────────
+
+/docs/architecture/SPILL1_IMPLEMENTATION_STATUS_*.md  @tobias363
+/docs/architecture/SPILL2_IMPLEMENTATION_STATUS_*.md  @tobias363
+/docs/architecture/SPILL3_IMPLEMENTATION_STATUS_*.md  @tobias363
+/docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_*.md  @tobias363
+/docs/architecture/SPILL_REGLER_OG_PAYOUT.md          @tobias363
+/docs/architecture/SPILLKATALOG.md                    @tobias363
+/docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_*.md @tobias363
+
+# ADR-er (immutable etter accepted)
+/docs/adr/                                   @tobias363
+
+# CLAUDE.md (auto-loaded i hver agent-sesjon)
+/CLAUDE.md                                   @tobias363
+
+# Copilot-instructions
+/.github/copilot-instructions.md             @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# CI / INFRASTRUKTUR — endring kan blokkere alle PR-er
+# ──────────────────────────────────────────────────────────────────────
+
+/.github/workflows/                          @tobias363
+/.github/CODEOWNERS                          @tobias363
+/.github/dangerfile.ts                       @tobias363
+/.dependency-cruiser.cjs                     @tobias363
+/.dependency-cruiser-known-violations.json   @tobias363
+/.husky/                                     @tobias363
+/.lintstagedrc.json                          @tobias363
+/render.yaml                                 @tobias363
+/docker-compose.yml                          @tobias363
+/docker-compose.e2e.yml                      @tobias363
+/infra/chaos-tests/                          @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# SHARED TYPES — wire-format mellom apps + packages
+# ──────────────────────────────────────────────────────────────────────
+
+/packages/shared-types/                      @tobias363
+
+# OpenAPI spec (publisert kontrakt)
+/apps/backend/openapi.yaml                   @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# OPS / DR / SECURITY
+# ──────────────────────────────────────────────────────────────────────
+
+/docs/operations/                            @tobias363
+/docs/compliance/                            @tobias363
+/docs/handoffs/                              @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# SKILLS — auto-aktiverte regler for agenter
+# ──────────────────────────────────────────────────────────────────────
+
+/.claude/skills/                             @tobias363
+
+# ──────────────────────────────────────────────────────────────────────
+# MERKNAD
+# ──────────────────────────────────────────────────────────────────────
+#
+# CODEOWNERS auto-assigner reviewer ved PR. Med branch-protection som
+# IKKE krever review-approval (per Tobias' git-workflow), virker dette
+# som "informasjons-flagg" — Tobias varsles men kan ikke blokkeres.
+#
+# Når team vokser:
+# 1. Erstatt @tobias363 med team-handles (eks @tobias363/compliance)
+# 2. Aktivér "Require review from Code Owners" i branch-protection
+# 3. Konfigurer separate eiere per fil-pattern
+#
+# Inntil da: Tobias er single-point-of-review for kritiske endringer.
