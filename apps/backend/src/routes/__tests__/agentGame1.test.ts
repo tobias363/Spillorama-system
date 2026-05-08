@@ -267,6 +267,56 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
     async query(sql: string, params: unknown[]) {
       poolQueries.push({ sql, params });
       if (opts.poolError) throw opts.poolError;
+      // Bølge 5 (2026-05-08): rute-laget bruker nå
+      // `HallGroupMembershipQuery.getActiveMembers` istedenfor å gå via
+      // `hallGroupService.get`. Stuben dispatch-er på SQL-pattern og
+      // mapper data fra `opts.goHById` slik at eksisterende test-setup
+      // (med `goHById`-key) fortsatt fungerer uten å duplisere mock.
+      //
+      // Q1: `SELECT master_hall_id FROM "public"."app_hall_groups" WHERE id = $1 ...`
+      // (uten LEFT JOIN — det er getActiveMembers' group-existence-check)
+      if (
+        /SELECT\s+master_hall_id/i.test(sql) &&
+        /app_hall_groups/i.test(sql) &&
+        /WHERE\s+id\s*=/i.test(sql) &&
+        !/LEFT JOIN/i.test(sql)
+      ) {
+        const groupId = params?.[0] as string | undefined;
+        if (groupId === undefined) {
+          return { rows: [], rowCount: 0 };
+        }
+        const hit = opts.goHById?.[groupId];
+        if (hit === undefined) {
+          // Default = gruppen finnes ikke (matcher legacy-baseline).
+          return { rows: [], rowCount: 0 };
+        }
+        if (hit === null) {
+          // Eksplisitt simulert DB-feil — kast samme feil som
+          // mockHallGroupService.get gjorde tidligere.
+          throw new Error("simulated DB error");
+        }
+        return { rows: [{ master_hall_id: null }], rowCount: 1 };
+      }
+      // Q2: getActiveMembers' members-query: `SELECT m.hall_id, h.name ...`
+      if (
+        /SELECT\s+m\.hall_id,\s*h\.name/i.test(sql) &&
+        /app_hall_group_members/i.test(sql)
+      ) {
+        const groupId = params?.[0] as string | undefined;
+        if (groupId === undefined) {
+          return { rows: [], rowCount: 0 };
+        }
+        const hit = opts.goHById?.[groupId];
+        if (hit === undefined || hit === null) {
+          return { rows: [], rowCount: 0 };
+        }
+        const rows = hit.members.map((m) => ({
+          hall_id: m.hallId,
+          hall_name: m.hallName,
+          is_active: true,
+        }));
+        return { rows, rowCount: rows.length };
+      }
       if (!sql.includes("app_game1_scheduled_games")) {
         return { rows: [], rowCount: 0 };
       }
