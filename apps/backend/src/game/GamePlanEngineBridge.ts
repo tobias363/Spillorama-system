@@ -941,6 +941,30 @@ export class GamePlanEngineBridge {
     // Kaster HALL_NOT_IN_GROUP hvis hallen ikke er medlem av aktiv gruppe.
     const groupHallId = await this.resolveGroupHallId(run.hall_id);
 
+    // 2026-05-08 (Tobias-feedback): hvis GoH har et pinned master-hall,
+    // bruk det som master uavhengig av hvilken hall sin agent som starter
+    // plan-run-en. Service-laget håndhever at master er medlem av gruppen,
+    // men vi double-checker mot resolveParticipatingHallIds som filtrer
+    // inaktive haller — hvis GoH-master er deaktivert, faller vi tilbake
+    // til run.hall_id (defensiv fallback). Hvis ingen pin er satt
+    // (NULL/undefined), bevarer vi legacy-atferd hvor agentens hall blir
+    // master.
+    const goHMasterPin = await this.resolveGoHMasterHallId(groupHallId);
+    let effectiveMasterHallId = run.hall_id;
+    if (goHMasterPin !== null) {
+      effectiveMasterHallId = goHMasterPin;
+      log.info(
+        {
+          runId: run.id,
+          position,
+          runHallId: run.hall_id,
+          pinnedMaster: goHMasterPin,
+          groupHallId,
+        },
+        "[GoH-master-pin] bruker GoH master_hall_id istedenfor run.hall_id",
+      );
+    }
+
     // Multi-hall (2026-05-08): ekspandér participating_halls til ALLE
     // aktive haller i gruppen, med masteren først. Tidligere var dette
     // hardkodet til [run.hall_id] (single-hall) — det brøt cross-hall-
@@ -948,7 +972,7 @@ export class GamePlanEngineBridge {
     // master. Solo-grupper (1 medlem) returnerer fortsatt [hallId] og
     // oppfører seg som single-hall.
     const participatingHalls = await this.resolveParticipatingHallIds(
-      run.hall_id,
+      effectiveMasterHallId,
       groupHallId,
     );
 
@@ -1004,7 +1028,7 @@ export class GamePlanEngineBridge {
           JSON.stringify(jackpotConfig),
           // game_mode — Manual fordi master driver framgang i katalog-modellen
           "Manual",
-          run.hall_id,
+          effectiveMasterHallId,
           groupHallId,
           JSON.stringify(participatingHalls),
           // Pilot-fix (2026-05-08): game_config_json bærer
@@ -1021,7 +1045,7 @@ export class GamePlanEngineBridge {
         // FK-violation — sannsynligvis hall eller hall-group mangler
         throw new DomainError(
           "GAME_PLAN_RUN_CORRUPT",
-          `Kan ikke spawne scheduled-game: hall (${run.hall_id}) eller hall-group (${groupHallId}) ikke funnet.`,
+          `Kan ikke spawne scheduled-game: hall (${effectiveMasterHallId}) eller hall-group (${groupHallId}) ikke funnet.`,
         );
       }
       throw err;
@@ -1035,6 +1059,8 @@ export class GamePlanEngineBridge {
         catalogId: catalog.id,
         catalogSlug: catalog.slug,
         hallId: run.hall_id,
+        masterHallId: effectiveMasterHallId,
+        masterHallPinned: goHMasterPin !== null,
       },
       "[fase-4] opprettet scheduled-game-rad fra plan-run + catalog",
     );
@@ -1136,6 +1162,30 @@ export class GamePlanEngineBridge {
       "HALL_NOT_IN_GROUP",
       `Hallen ${hallId} er ikke medlem av en aktiv hall-gruppe. Catalog-modellen krever at hallen tilhører minst én gruppe for å starte spill.`,
     );
+  }
+
+  /**
+   * 2026-05-08 (Tobias-feedback): Hent pinned master_hall_id for en GoH.
+   * Returnerer NULL hvis kolonnen er NULL eller hallen er deaktivert
+   * (`is_active = false`). Defensive fallback — hvis admin har pekt master
+   * mot en hall som senere ble deaktivert, må bridgen falle tilbake til
+   * run.hall_id istedenfor å feile spawn-en.
+   */
+  private async resolveGoHMasterHallId(
+    groupHallId: string,
+  ): Promise<string | null> {
+    const { rows } = await this.pool.query<{ master_hall_id: string | null }>(
+      `SELECT g.master_hall_id
+       FROM "${this.schema}"."app_hall_groups" g
+       LEFT JOIN "${this.schema}"."app_halls" h ON h.id = g.master_hall_id
+       WHERE g.id = $1
+         AND g.deleted_at IS NULL
+         AND g.status = 'active'
+         AND (g.master_hall_id IS NULL OR h.is_active = true)`,
+      [groupHallId],
+    );
+    if (rows.length === 0) return null;
+    return rows[0]!.master_hall_id;
   }
 
   private dateRowToKey(value: unknown): string {
