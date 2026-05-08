@@ -122,6 +122,16 @@ export interface AgentGamePlanAdvanceResponse {
 
 // ── GET /current ────────────────────────────────────────────────────────
 
+/**
+ * @deprecated Bølge 3 (2026-05-08): bruk `fetchLobbyState` fra
+ * `./agent-game1.js` i stedet. Aggregator (Bølge 1) returnerer ÉN ferdig
+ * konsistent shape med kanonisk `currentScheduledGameId` og full GoH-
+ * ready-state — ingen dual-fetch eller merge-logikk i klient. Denne
+ * funksjonen holdes for kompatibilitet inntil siste caller (per
+ * 2026-05-08 ingen) er migrert.
+ *
+ * Audit: `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §6.3.
+ */
 export async function fetchAgentGamePlanCurrent(
   opts: { signal?: AbortSignal; hallId?: string } = {},
 ): Promise<AgentGamePlanCurrentResponse> {
@@ -134,6 +144,15 @@ export async function fetchAgentGamePlanCurrent(
 
 // ── POST /start ─────────────────────────────────────────────────────────
 
+/**
+ * @deprecated Bølge 3 (2026-05-08): bruk `startMaster` fra
+ * `./agent-game1.js` i stedet. Den nye master-routen (`POST /api/agent/
+ * game1/master/start`) koordinerer plan-state + engine-bridge sentralt
+ * via `MasterActionService` (Bølge 2) og returnerer `MasterActionResult`
+ * med kanonisk `scheduledGameId`. Denne funksjonen treffer kun plan-
+ * state og krever at engine-bridge spawnes separat — det er band-aid'en
+ * Bølge 3 fjerner.
+ */
 export async function startAgentGamePlan(): Promise<AgentGamePlanStartResponse> {
   return apiRequest<AgentGamePlanStartResponse>(
     "/api/agent/game-plan/start",
@@ -143,6 +162,11 @@ export async function startAgentGamePlan(): Promise<AgentGamePlanStartResponse> 
 
 // ── POST /advance ───────────────────────────────────────────────────────
 
+/**
+ * @deprecated Bølge 3 (2026-05-08): bruk `advanceMaster` fra
+ * `./agent-game1.js`. Single master-route håndterer både plan-advance
+ * og engine-bridge-spawn for ny posisjon i én atomisk operasjon.
+ */
 export async function advanceAgentGamePlan(): Promise<AgentGamePlanAdvanceResponse> {
   return apiRequest<AgentGamePlanAdvanceResponse>(
     "/api/agent/game-plan/advance",
@@ -159,6 +183,16 @@ export interface JackpotSetupInput {
   prizesCents: Partial<Record<TicketColor, number>>;
 }
 
+/**
+ * Submit jackpot-popup-override for én plan-posisjon. Brukes fortsatt
+ * av `JackpotSetupModal.ts` per Bølge 3.5-oppfølger (migrasjon til
+ * `setJackpot` fra `./agent-game1.js` planlegges i egen PR — ny
+ * master-route krever `hallId` + `position` + `draw` + `prizesCents`).
+ *
+ * MERK: ingen `@deprecated`-tag her fordi denne fortsatt har aktiv
+ * caller. Andre eksporter i denne filen er deprecated og bør ikke brukes
+ * i ny kode.
+ */
 export async function setAgentGamePlanJackpot(
   input: JackpotSetupInput,
 ): Promise<{ run: GamePlanRun }> {
@@ -170,6 +204,13 @@ export async function setAgentGamePlanJackpot(
 
 // ── POST /pause + /resume ───────────────────────────────────────────────
 
+/**
+ * @deprecated Bølge 3 (2026-05-08): bruk `pauseMaster` fra
+ * `./agent-game1.js`. Single master-route koordinerer plan-state + engine
+ * pause-tick via `MasterActionService` så plan og engine alltid holder
+ * samme status (forrige dual-call hadde race der plan ble paused men
+ * engine fortsatte).
+ */
 export async function pauseAgentGamePlan(): Promise<{ run: GamePlanRun }> {
   return apiRequest<{ run: GamePlanRun }>(
     "/api/agent/game-plan/pause",
@@ -177,6 +218,11 @@ export async function pauseAgentGamePlan(): Promise<{ run: GamePlanRun }> {
   );
 }
 
+/**
+ * @deprecated Bølge 3 (2026-05-08): bruk `resumeMaster` fra
+ * `./agent-game1.js`. Samme begrunnelse som `pauseAgentGamePlan` —
+ * single master-route eliminerer plan↔engine-state-skew.
+ */
 export async function resumeAgentGamePlan(): Promise<{ run: GamePlanRun }> {
   return apiRequest<{ run: GamePlanRun }>(
     "/api/agent/game-plan/resume",

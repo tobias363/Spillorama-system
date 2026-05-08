@@ -563,20 +563,50 @@ Sortert etter avhengighet og tryggleikm. Hver bølge åpnes som egen PR/issue.
 **Estimat (mandat):** 3 dev-dager. **Faktisk:** ~3-4 timer wall-clock for AI-agent (recovery av forrige attempt + 7 atomic-commits).
 **Tester:** 33 unit + 2 integration + 1 skip-graceful Postgres = 35 totalt.
 
-### Bølge 3 — Bytt UI til ny aggregator + master-action-endpoints
+### Bølge 3 — Bytt UI til ny aggregator + master-action-endpoints — FULLFØRT 2026-05-08
 
-**Mål:** Spill1HallStatusBox og NextGamePanel.spill1-blokken bruker KUN de nye endpointene. Adapter-en og wrapper-en slettes.
+**Status:** Fullført på branch `refactor/ui-master-actions-bolge-3`.
 
-**Tasks:**
-1. Lag `pages/agent-portal/Spill1Panel.ts` (eller refaktorer eksisterende) som bruker ny `fetchLobbyState`.
-2. Bytt `Spill1HallStatusBox.ts` til å bruke ny endpoint (slett dual-fetch + adapter + merge).
-3. Slett `agent-game-plan-adapter.ts`, `agent-master-actions.ts`.
-4. Slett plan-runtime API-importer fra UI (`agent-game-plan.ts` beholdes for `JackpotSetupModal`).
+**Levert:**
+1. ✅ `apps/admin-web/src/api/agent-game1.ts` utvidet:
+   - `fetchLobbyState(hallId, opts)` — single-source-of-truth aggregator-call,
+     parser respons mot `Spill1AgentLobbyStateSchema` (Zod) for runtime
+     kontrakt-validering.
+   - `startMaster` / `advanceMaster` / `pauseMaster` / `resumeMaster` /
+     `stopMaster` / `setJackpot` — 6 master-action-funksjoner mot
+     `POST /api/agent/game1/master/*`-routes (Bølge 2).
+   - Returnerer `MasterActionResult` med `scheduledGameId` (single id-rom)
+     + `planRunId` (kun for diagnose/audit) + `inconsistencyWarnings`.
+2. ✅ `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts` refaktorert:
+   - Dual-fetch (`fetchAgentGamePlanCurrent` + `fetchAgentGame1CurrentGame`)
+     erstattet med ÉN `fetchLobbyState`-call.
+   - Adapter-merge-logikk (PR #1041's band-aid for `currentGame.id`-overskriving)
+     fjernet — `data.scheduledGameId = lobby.currentScheduledGameId` direkte.
+   - Master-actions: `pauseGame1` → `pauseMaster`, `startSpill1MasterAction`
+     → `startMaster`, `resumeSpill1MasterAction` → `resumeMaster`. Ingen
+     klient-side wrapper-logikk lenger.
+   - `inconsistencyWarnings` rendret som non-blocking `Toast.warning`.
+3. ✅ `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts` refaktorert (Spill 1-blokken):
+   - `refreshSpill1` bruker `fetchLobbyState` + ny `mapLobbyToLegacyShape`-
+     translator (setter `currentGame.id = lobby.currentScheduledGameId`,
+     i motsetning til forrige adapter som satte plan-run-id).
+   - Spill 2/3-blokken (rom-kode-paradigmet) **uberørt** — `startNextGame`/
+     `pauseRoomGame`/`resumeRoomGame` kjører som før.
+   - `inconsistencyWarnings` rendret via `state.spill1Error`-banner.
+4. ✅ Slettet (verifisert ingen imports finnes):
+   - `apps/admin-web/src/api/agent-game-plan-adapter.ts` (146 linjer)
+   - `apps/admin-web/src/api/agent-master-actions.ts` (135 linjer)
+   - `apps/admin-web/tests/agentGamePlanAdapter.test.ts`
+   - `apps/admin-web/tests/agentMasterActions.test.ts`
+5. ✅ Tester: `apps/admin-web/tests/agentGame1MasterActions.test.ts`
+   (21 test-cases) — dekker `fetchLobbyState`, alle 6 master-actions,
+   error-paths (FORBIDDEN, INVALID_INPUT, JACKPOT_SETUP_REQUIRED), warning-
+   propagering, `BRIDGE_FAILED` med null `scheduledGameId`. Alle grønne.
 
-**Estimat:** 2 dev-dager.
-**Tester som må skrives:** UI-tester som verifiserer at currentGame.id alltid er scheduled-game-id (eller null).
-**Tester som bryter:** Eksisterende tester som mocker plan-API + legacy-API parallelt — må oppdateres til ny mock.
-**Linear:** Ny issue.
+**Estimat (mandat):** 2 dev-dager. **Faktisk:** ~2 timer wall-clock for
+AI-agent (6 atomic commits + tests).
+**Tester:** 21 nye unit-tests grønne. Pre-existing 21 failing tests fra
+unrelated test-filer er identisk med main (ingen regresjon fra Bølge 3).
 
 ### Bølge 4 — Slett legacy parallel-spawn (opt-in)
 
