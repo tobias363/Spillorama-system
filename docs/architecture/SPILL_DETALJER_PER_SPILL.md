@@ -130,31 +130,67 @@
 
 ### 1.5 Ball × 10 (slug `ball-x-10`)
 
-**Mekanikk:** Standard 75-ball Spill 1. Premier varierer per katalog-rad.
+**Mekanikk (verifisert 2026-05-08):** Standard 75-ball Spill 1 med ball-value-multiplier på Fullt Hus.
 
-**Variant:** `standard` — auto-multiplikator
+**Variant:** `standard` — auto-multiplikator + ball-value-multiplier på Fullt Hus
 **Bongpriser:** ✅ Hvit 5 / Gul 10 / Lilla 15
+**`winningType`:** `ball-value-multiplier` (preset-låst)
 
-**Premier:** ⚠️ "varierer" per PM-handoff. Konkrete tall må verifiseres i prod-katalog.
+**Premier (5 kr-base):**
 
-**Bonus-spill:** ⚠️
-**Spesial-trekninger:** ⚠️ Mulig: bingo etter ekstra X antall trekk
+| Fase | Beregning | Eksempel (Hvit, siste ball = 50) |
+|---|---|---|
+| Rad 1 | ✅ 100 kr (fixed) | 100 kr |
+| Rad 2 | ✅ 200 kr (fixed) | 200 kr |
+| Rad 3 | ✅ 200 kr (fixed) | 200 kr |
+| Rad 4 | ✅ 200 kr (fixed) | 200 kr |
+| Fullt Hus | ✅ `base 1250 + (siste ball × 10)` | 1250 + 500 = 1750 kr |
+
+**Auto-multiplikator anvendes på Fullt Hus:**
+- Hvit 5 kr: 1750 kr (× 1)
+- Gul 10 kr: 3500 kr (× 2)
+- Lilla 15 kr: 5250 kr (× 3)
+
+**Implementasjon:**
+- Engine: `BingoEngine.ballValue.test.ts` (full enhetstest-suite)
+- Pattern-eval: `BingoEnginePatternEval.ts:394-420`
+- Preset: `packages/shared-types/src/spill1-sub-variants.ts:408-453`
+
+**Bonus-spill:** Etter standard per-item override-regler (§7.3)
+**Spesial-trekninger:** Ingen (75-ball)
 **Jackpot-popup:** Nei
 
-> **Åpent spørsmål til Tobias:** Hva er Ball × 10's distinkte mekanikk? Er det knyttet til antall ekstra trekk etter Fullt Hus, eller en 10× multiplier?
+✅ **PILOT-KLAR** — verifisert mekanikk, preset-låst, enhetstestet.
 
 ---
 
 ### 1.6 Bokstav (slug `bokstav`)
 
-**Mekanikk:** Standard 75-ball Spill 1 med bokstav-mønster (T/L/X/etc.) i tillegg til eller erstatt for rad 1-4.
+**Status (verifisert 2026-05-08):** 🚨 **PILOT-BLOKKERT** — slug + admin-katalog-rad eksisterer, men bokstav-mønster-mekanikk er IKKE implementert i engine. Engine kjører dagens `bokstav`-katalog-rad som standard 5-fase auto-mult-bingo (samme som `bingo`-slug).
 
-**Variant:** `standard` — auto-multiplikator
+**Hva som finnes:**
+- Slug `bokstav` registrert i admin-frontend
+- Katalog-rad i prod-DB (mest sannsynlig med standard-konfig)
+- Test-suite i #999 antar standard auto-mult (base 800)
+
+**Hva som mangler:**
+- Engine pattern-mask for bokstav-mønstre (T/L/X/Plus/etc.)
+- Pattern-cycling-mekanikk for å erstatte/tillegge til Rad 1-4
+- Admin-UI for å velge hvilke bokstav-mønster som er aktive
+- Premie-strategi per bokstav-mønster
+
+**Variant:** `standard` (default) — men distinkt mekanikk udefinert
 **Bongpriser:** ✅ Hvit 5 / Gul 10 / Lilla 15
 
-**Premier:** ⚠️ "varierer"
+**Krever Tobias-avklaring før pilot:**
 
-> **Åpent spørsmål til Tobias:** Hvilke bokstav-mønster er aktivt? Erstatter de Rad 1-4, eller er de ekstra-faser?
+1. **Skal bokstav-mønstre implementeres som distinkt mekanikk?** Eller er `bokstav` bare et re-brandnavn for standard 5-fase?
+2. **Hvis distinkt:** hvilke mønstre er aktive (T-form, L-form, X-form, Plus, Pyramide, etc.)?
+3. **Erstatter eller supplerer:** skal bokstav-mønstre erstatte Rad 1-4 eller komme i tillegg?
+4. **Premie-strategi:** auto-mult som standard, eller per-bokstav-mønster eksplisitt?
+5. **Pilot-prioritet:** trengs `bokstav` dag 1, eller kan det utsettes til K2?
+
+**Praktisk anbefaling:** Hvis pilot kjøres uten Bokstav-spesifikk mekanikk, kan slug-en deaktiveres midlertidig i admin-katalog og spillet utelates fra pilot-spilleplaner. Beslutning hos Tobias.
 
 ---
 
