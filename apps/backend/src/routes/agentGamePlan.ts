@@ -53,7 +53,6 @@ import type {
 import type { GamePlanRunService } from "../game/GamePlanRunService.js";
 import type { GamePlanService } from "../game/GamePlanService.js";
 import type {
-  GamePlan,
   GamePlanItem,
   GamePlanRun,
   GamePlanWithItems,
@@ -143,23 +142,44 @@ function resolveHallScope(
 }
 
 /**
- * Bestem om caller er master for planen. Master = agentens hall matcher
- * plan.hallId direkte. For group-of-halls-planer er master-hall et
- * eget begrep som krever oppslag i hallGroupService — den koblingen
- * er deferred til Fase 3.5 (vi bruker plan.hallId for nå).
+ * Bestem om caller er master for runden. Master = agentens hall matcher
+ * `run.hallId`.
  *
- * ADMIN er alltid master. HALL_OPERATOR/AGENT må matche plan-hallen
- * eksakt.
+ * Pilot-fix 2026-05-08 (oppfølger #1011): tidligere brukte denne
+ * `plan.hallId` for å bestemme master, noe som returnerte `false` for
+ * GoH-bundne planer (`plan.hallId === null`) og blokkerte AGENT/
+ * HALL_OPERATOR fra master-handlinger. Det medførte at kun ADMIN-
+ * brukere kunne trykke Start på Tobias' pilot-plan.
+ *
+ * Fix-en er enkel og semantisk korrekt: `run.hallId` ER master-hallen.
+ * `GamePlanRunService.getOrCreateForToday(hall)` setter
+ * `run.hall_id = hall` (UNIQUE-constraint per (hall_id, business_date)),
+ * og `GamePlanEngineBridge.createScheduledGameForPlanRunPosition` setter
+ * `app_game1_scheduled_games.master_hall_id = run.hall_id`. Master-
+ * begrepet er altså bundet til runden, ikke til planen.
+ *
+ * Konsekvenser per binding-type:
+ *   - Direct-bundet plan (plan.hallId !== null): kun den hallen kan
+ *     `getOrCreateForToday` (alle andre faller på NO_MATCHING_PLAN i
+ *     plan-list-filteret), så run.hallId === plan.hallId. Backward-
+ *     kompatibel oppførsel — eksisterende master-tester forblir grønne.
+ *   - GoH-bundet plan (plan.hallId === null, plan.groupOfHallsId !== null):
+ *     hver hall i GoH kan kalle `getOrCreateForToday` og får sin egen
+ *     run (UNIQUE per (hall, businessDate)). Innenfor en run er det den
+ *     callende hallen som er master.
+ *   - ADMIN: alltid master.
+ *
+ * Cross-hall-beskyttelse beholdes via `resolveHallScope`: AGENT/
+ * HALL_OPERATOR kan kun lese/skrive til egen `actor.hallId`, så de kan
+ * aldri ende opp med en run hvor `run.hallId !== actor.hallId` med
+ * mindre noen har manuelt seeded en run for andre haller (test-fixture).
+ * I så fall vil `isMaster` returnere `false` og write-rutene avslår med
+ * FORBIDDEN — riktig oppførsel.
  */
-function isMaster(actor: PublicAppUser, plan: GamePlan): boolean {
+function isMaster(actor: PublicAppUser, run: GamePlanRun): boolean {
   if (actor.role === "ADMIN") return true;
   if (!actor.hallId) return false;
-  if (plan.hallId && plan.hallId === actor.hallId) return true;
-  // Group-of-halls: master-hall-attribusjon kobles på i Fase 3.5 når
-  // app_groups-tabellen er på plass og group.master_hall_id er ekspandert
-  // i plan-detaljen. Fram til da: hvis plan er knyttet til group-of-halls
-  // er ingen agent master. ADMIN-route brukes til å starte runs.
-  return false;
+  return actor.hallId === run.hallId;
 }
 
 /**
@@ -365,7 +385,7 @@ export function createAgentGamePlanRouter(
         currentItem,
       );
       const pendingJackpotOverride = pickPendingOverride(run, currentItem);
-      const master = isMaster(actor, plan);
+      const master = isMaster(actor, run);
 
       apiSuccess(res, {
         hallId,
@@ -412,7 +432,7 @@ export function createAgentGamePlanRouter(
           "Plan finnes ikke for run.",
         );
       }
-      if (!isMaster(actor, plan)) {
+      if (!isMaster(actor, run)) {
         throw new DomainError(
           "FORBIDDEN",
           "Kun master-hallens agent kan starte spilleplan-runden.",
@@ -489,8 +509,8 @@ export function createAgentGamePlanRouter(
           "Ingen aktiv run for (hall, dato). Kall /start først.",
         );
       }
-      const { plan } = loaded;
-      if (!isMaster(actor, plan)) {
+      const { run } = loaded;
+      if (!isMaster(actor, run)) {
         throw new DomainError(
           "FORBIDDEN",
           "Kun master-hallens agent kan flytte spilleplanen videre.",
@@ -652,8 +672,8 @@ export function createAgentGamePlanRouter(
           "Ingen aktiv run for (hall, dato).",
         );
       }
-      const { plan } = loaded;
-      if (!isMaster(actor, plan)) {
+      const { run } = loaded;
+      if (!isMaster(actor, run)) {
         throw new DomainError(
           "FORBIDDEN",
           "Kun master-hallens agent kan sette jackpot-override.",
@@ -687,7 +707,7 @@ export function createAgentGamePlanRouter(
           "Ingen aktiv run for (hall, dato).",
         );
       }
-      if (!isMaster(actor, loaded.plan)) {
+      if (!isMaster(actor, loaded.run)) {
         throw new DomainError(
           "FORBIDDEN",
           "Kun master-hallens agent kan pause spilleplanen.",
@@ -714,7 +734,7 @@ export function createAgentGamePlanRouter(
           "Ingen aktiv run for (hall, dato).",
         );
       }
-      if (!isMaster(actor, loaded.plan)) {
+      if (!isMaster(actor, loaded.run)) {
         throw new DomainError(
           "FORBIDDEN",
           "Kun master-hallens agent kan resume spilleplanen.",
