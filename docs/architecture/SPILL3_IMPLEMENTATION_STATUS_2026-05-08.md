@@ -356,10 +356,12 @@ Endres av admin uten kode-deploy. Globalt for hele spillet (IKKE per-hall — al
 
 `isWithinOpeningWindow(config)` (apps/backend/src/game/Spill3ConfigService.ts:288-309) bruker `Intl.DateTimeFormat` med `timeZone: "Europe/Oslo"` for korrekt lokal-tid uavhengig av server-zone (Render kjører UTC).
 
-**Wire-effect:** PerpetualRoundService kaller `canSpawnRound` (apps/backend/src/index.ts:2792-2809) før hver spawn:
+**Wire-effect:** PerpetualRoundService kaller `canSpawnRound` før hver spawn. Logikken bor i `apps/backend/src/game/PerpetualRoundOpeningWindowGuard.ts` (BIN-823 refactor, 2026-05-08) som factory-bygger callbacken fra `Spill2ConfigService` + `Spill3ConfigService`. For `monsterbingo`/`mønsterbingo`/`game_3`-slugs:
 - Hvis innenfor vindu → spawn ny runde
 - Hvis utenfor vindu → skip spawn (loop fortsetter, men ingen ny runde til vinduet åpner)
 - Ved feil/exception → fail-open (spawn tillates)
+
+Samme guard dekker også Spill 2 (`rocket`/`game_2`/`tallspill`) — se [SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md §3.8](./SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md). Begge spill bruker samme factory-mønster slik at refaktor på en av dem ikke kan miste guard-en på den andre.
 
 ---
 
@@ -645,7 +647,7 @@ spill3PhaseState: game.spill3PhaseState
 | `roomState.bindVariantConfigForRoom` | `apps/backend/src/util/roomState.ts:597-650` | Hook-flyt: fetcher Spill3Config og mapper til variant via Spill3GlobalRoomService |
 | Routes: `/api/admin/spill3/config` | `apps/backend/src/routes/adminSpill3Config.ts` (193 linjer) | GET (READ) + PUT (WRITE) for konfig |
 | Routes: `/api/games/spill3/health` | `apps/backend/src/routes/publicGameHealth.ts:565-610` | Public R7 helse-endpoint |
-| Index-wireup | `apps/backend/src/index.ts:1163, 2792-2809, 2948, 3652, 4006, 4606` | Service-init, canSpawnRound-hook, route-registration, fetcher-hooks |
+| Index-wireup | `apps/backend/src/index.ts:1163, 2789-2796 (canSpawnRound via PerpetualRoundOpeningWindowGuard factory), 2948, 3652, 4006, 4606` | Service-init, canSpawnRound-hook, route-registration, fetcher-hooks |
 
 ### 5.1 Migrasjoner
 

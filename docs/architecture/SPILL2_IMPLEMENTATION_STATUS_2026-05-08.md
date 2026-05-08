@@ -155,9 +155,9 @@ Spill 2 har ingen master som starter rundene. To call-sites trigger ny runde:
 - ingen pending auto-restart for rommet
 - ingen aktiv runde (currentGame.status ∉ {WAITING, RUNNING})
 - rommet har minst 1 spiller
-- (Spill 3-only) `canSpawnRound` returnerer true innen åpningstid
+- `canSpawnRound` returnerer true innen åpningstid (Spill 2 + Spill 3 — se §3.8)
 
-For Spill 2 er **ingen åpnings-tid-guard wired** i `canSpawnRound` (`apps/backend/src/index.ts:2792-2809` — kun Spill 3). Dette er en **kjent gap** (§10 nedenfor). Hvis admin setter `Spill2Config.openingTimeStart/End`, vil HEALTH-endpointet rapportere `withinOpeningHours: false` korrekt, men perpetual-loopen vil fortsatt spawne runder utenfor åpningstid.
+**BIN-823-fix (2026-05-08):** Spill 2 har nå en aktiv åpningstid-guard wired i `canSpawnRound`. Logikken er flyttet ut til `PerpetualRoundOpeningWindowGuard` (`apps/backend/src/game/PerpetualRoundOpeningWindowGuard.ts`) og kalles via factory i `apps/backend/src/index.ts`. For Spill 2 (rocket/game_2/tallspill) henter guarden `Spill2Config` og kaller `isWithinOpeningHours(config)`. Hvis `openingTimeStart`/`End` er null returneres true (alltid åpent — default-konfig). Hvis begge er satt sammenlignes nåværende Oslo-HH:MM mot vinduet [start, end). Ved DB-feil returneres null (fail-open).
 
 Implementasjon: `apps/backend/src/game/PerpetualRoundService.ts:922-1100`.
 
@@ -366,7 +366,7 @@ Tar `Spill2Config` (admin-konfigurert global singleton) og mapper det inn i eksi
 
 **Hva tjenesten IKKE gjør** (jfr. JSDoc §line 20-46):
 1. Lucky-number-randomisering — engine eier sin egen `luckyNumbersByPlayer` Map; bridge eksponerer kun **beløpet**, ikke nummer-pick.
-2. Åpningstid-gating i room-spawn — caller (perpetual-loop / cron) må lese `Spill2ConfigService.getActive()` separat før spawn-call. **Ikke wired for Spill 2 per 2026-05-08.**
+2. ~~Åpningstid-gating i room-spawn — caller (perpetual-loop / cron) må lese `Spill2ConfigService.getActive()` separat før spawn-call. **Ikke wired for Spill 2 per 2026-05-08.**~~ **BIN-823-fix (2026-05-08):** Åpningstid-gating er nå wired via `PerpetualRoundOpeningWindowGuard`. `PerpetualRoundService.canSpawnRound` kaller `isWithinOpeningHours(spill2Config)` før hver spawn for `rocket`/`game_2`/`tallspill`-slugs. Runder spawner ikke utenfor `[openingTimeStart, openingTimeEnd)`-vinduet (Oslo-tz).
 3. Migration av `GameManagement.config.spill2`-overrides — to konfig-kilder eksisterer side om side. `roomState.bindVariantConfigForRoom` prioriterer `Spill2Config` over `GameManagement` for `rocket`-rom.
 
 **Fall-through-rekkefølge** (`apps/backend/src/util/roomState.ts:625-650`):
@@ -737,7 +737,7 @@ Single-prize-cap: Hovedspill har INGEN cap. Spill 2 betaler ut faktisk pricePerW
 
 | Issue | Beskrivelse | Linear |
 |---|---|---|
-| **Åpningstid-guard mangler i perpetual-loop** | `canSpawnRound` for Spill 2 returnerer alltid null — perpetual-loopen spawner runder uavhengig av `Spill2Config.openingTime*`. Spill 3 har full guard via `isWithinOpeningWindow`. **Pilot-blokker hvis admin setter åpningstid og forventer at runder stopper utenfor vinduet.** Fix: speile Spill 3-pathen i `apps/backend/src/index.ts:2792-2809`. | Ikke logget |
+| ~~**Åpningstid-guard mangler i perpetual-loop**~~ | ~~`canSpawnRound` for Spill 2 returnerer alltid null — perpetual-loopen spawner runder uavhengig av `Spill2Config.openingTime*`. Spill 3 har full guard via `isWithinOpeningWindow`. **Pilot-blokker hvis admin setter åpningstid og forventer at runder stopper utenfor vinduet.**~~ **FIKSET BIN-823 (2026-05-08):** Logikken er flyttet til `apps/backend/src/game/PerpetualRoundOpeningWindowGuard.ts` og kalles via factory i `apps/backend/src/index.ts`. Spill 2-config med `openingTimeStart`/`End` håndheves nå likt med Spill 3. Verifisert via 19 unit-tester (`PerpetualRoundOpeningWindowGuard.test.ts`) + 4 wiring-regression-tester (`indexWiring.spill2OpeningWindowGuard.test.ts`). | BIN-823 |
 | **R9 — 24t-leak-test ikke startet** | Verifiser at perpetual-loop holder seg uten leak/drift over 24t. Krav for utvidelse fra 4 → flere haller. | BIN-819 |
 | **R4 — Load-test 1000 klienter ikke startet** | Skala-bekreftelse for ROCKET. | BIN-817 |
 | **R11 — Per-rom resource-isolation ikke startet** | Sirkel-bryter per rom så Spill 2-feil ikke tar ned Spill 1/3. | BIN-821 |
