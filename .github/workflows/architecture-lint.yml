@@ -1,0 +1,58 @@
+name: Architecture Lint
+
+# Tobias-direktiv 2026-05-08: verdensklasse fundament — CI skal håndheve
+# arkitektoniske konvensjoner automatisk. Reglene er definert i
+# `.dependency-cruiser.cjs`. Kjente violations baselinet i
+# `.dependency-cruiser-known-violations.json` (tech-debt, ikke CI-blokker).
+# Se docs/engineering/ARCHITECTURE_LINT.md for full doc.
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: architecture-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch-lint:
+    name: dependency-cruiser
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root workspace dependencies
+        # Root install gir oss `dependency-cruiser` (dev-dep) og
+        # workspace-symlinks for `packages/*`.
+        run: npm ci --no-audit --no-fund
+
+      - name: Build packages/shared-types
+        # Subpath-exports fra @spillorama/shared-types (f.eks.
+        # `@spillorama/shared-types/socket-events`) krever at dist/ er
+        # bygget — ellers fanger `not-to-unresolvable`-regelen ~12
+        # falske positives.
+        run: npm --prefix packages/shared-types run build
+
+      - name: Run architecture lint
+        run: npm run lint:arch
+
+      - name: Upload dependency-graph (mermaid) on failure
+        if: failure()
+        run: |
+          npm run lint:arch:graph > /tmp/arch-graph.mmd || true
+          echo "::group::Architecture graph (mermaid)"
+          cat /tmp/arch-graph.mmd
+          echo "::endgroup::"
