@@ -90,7 +90,11 @@ Tobias presiserte 2026-05-08: Bokstav er en **gevinstmønster-variant for Spill 
 
 **Sekvensiell progresjon mellom rader:** Etter Rad 1 vunnes → master tar bevisst Pause → klargjør neste rad → trykker Fortsett. Ingen automatisk progresjon mellom rader for Spill 1 (forskjellig fra Spill 3 som er fullt automatisk).
 
-### 1.0.1 Klient-rom-tilgang (oppdatert 2026-05-08)
+### 1.0.1 Lobby-rom og åpningstider (Tobias 2026-05-08)
+
+**Tobias-direktiv 2026-05-08:**
+
+> "Så lenge rommet er åpent skal man ha mulighet til å gå inn i rommet og kjøpe bonger. Åpningstidene blir da samme som spilleplanen. Hvis det er satt til 11:00-21:00 da er åpningstiden på rommet det samme. Når man kommer inn i rommet ser man da neste planlagte spill og kan kjøpe bonger til dette spillet."
 
 **Spill 1-rom er åpent innenfor spilleplanens åpningstid** (eks. 11:00-21:00).
 
@@ -103,7 +107,29 @@ Tobias presiserte 2026-05-08: Bokstav er en **gevinstmønster-variant for Spill 
 
 **Hva betyr dette for engine:** Rom-objektet for Spill 1 er knyttet til spilleplan-runden, ikke til en enkelt scheduled-game. Klient subscriber til rommet ved login + hall-valg. Scheduled-game-instanser flyter gjennom rommet sekvensielt.
 
-**Backend-implementering:** Lobby-rom (eller "plan-rom") er åpent når `now() ∈ [plan.startTime, plan.endTime]`. Bridge spawner scheduled-game-rader når master starter. Klient subscriber til lobby-rommet og får oppdatert state ved hver scheduled-game-overgang. Hvis ingen aktiv scheduled-game finnes (ventefase mellom runder eller før master har trykket Start), klient ser "Neste spill: {navn}" + bong-kjøp-flyt for det spillet.
+**Kontrakt:**
+- Spill 1-rommet for en hall er **åpent** så lenge `now ∈ [plan.startTime, plan.endTime]` for en plan som dekker hallen (direkte hall-binding eller GoH-medlemskap).
+- Innenfor åpningstid kan kunden gå inn i rommet og se **neste planlagte spill** (catalog-slug + visningsnavn) basert på `app_game_plan_run.current_position` i den aktive runen (eller plan-item-1 hvis ingen run finnes ennå).
+- Bong-kjøp åpner når master eller `Game1ScheduleTickService` flytter scheduled-game til `purchase_open`. Klient ser status via `nextScheduledGame.status`.
+- Når runden er live (`status === "running"`) bytter klient til runde-modus i samme rom.
+- Etter Fullt Hus → klient tilbake til lobby-modus med "neste spill"-info.
+- Etter `plan.endTime` (eller hvis `run.status === "finished"`) → rommet rapporteres som **stengt** og UI viser "Stengt"-melding.
+
+**Backend-implementasjon (2026-05-08):**
+- `Game1LobbyService.getLobbyState(hallId)` — read-only state-aggregat. Returnerer `Game1LobbyState` med `isOpen`, `openingTimeStart`, `openingTimeEnd`, `nextScheduledGame`, `runStatus`, `overallStatus`.
+- `GET /api/games/spill1/lobby?hallId=X` — public endepunkt, no-auth, no-cache.
+- `Spill1LobbyState`-type i `@spillorama/shared-types/api`.
+- Socket.IO-rom `spill1:lobby:{hallId}` — klient subscriber via `spill1:lobby:subscribe`. Server broadcaster `lobby:state-update` ved master-handlinger (wireup i påfølgende PR).
+
+**Bakover-kompatibilitet:**
+- Eksisterende `game1:join-scheduled` socket-handler påvirkes IKKE.
+- Klient bruker lobby-state til å presentere "neste spill om X min" + "kjøp bonger"-knapp FØR socket-join, og bytter til runde-modus når master har spawnet runden.
+
+**Filer:**
+- `apps/backend/src/game/Game1LobbyService.ts`
+- `apps/backend/src/routes/spill1Lobby.ts`
+- `apps/backend/src/sockets/spill1LobbyEvents.ts`
+- `packages/shared-types/src/api.ts` (`Spill1LobbyState`-type)
 
 ### 1.1 Felles mekanikk for ALLE Spill 1-varianter
 

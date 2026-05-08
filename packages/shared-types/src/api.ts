@@ -54,6 +54,64 @@ export interface GameStatusInfo {
   nextRoundAt: string | null;
 }
 
+// ── Spill 1 lobby (2026-05-08, Tobias-direktiv) ────────────────────────────
+// GET /api/games/spill1/lobby?hallId=X. Public endpoint som rapporterer om
+// rommet er åpent (innenfor plan.startTime-endTime), neste planlagte spill,
+// og engine-status hvis runden er spawnet. Klient bruker `overallStatus`
+// til å bestemme UI-state.
+
+/**
+ * Aggregert status for hele lobby-vinduet:
+ *   - `closed` → "Stengt"-melding (ingen plan eller utenfor åpningstid)
+ *   - `idle` → "Venter på neste runde — bonger ikke i salg ennå"
+ *   - `purchase_open` → "Kjøp bonger"-knapp aktiv
+ *   - `ready_to_start` → "Spillet starter snart"
+ *   - `running` → bytt til runde-modus i samme rom
+ *   - `paused` → "Pauset"
+ *   - `finished` → "Spilleplanen er ferdig for dagen"
+ */
+export type Spill1LobbyOverallStatus =
+  | "closed"
+  | "idle"
+  | "purchase_open"
+  | "ready_to_start"
+  | "running"
+  | "paused"
+  | "finished";
+
+export interface Spill1LobbyNextGame {
+  itemId: string;
+  position: number;
+  catalogSlug: string;
+  catalogDisplayName: string;
+  status: Spill1LobbyOverallStatus;
+  scheduledGameId: string | null;
+  scheduledStartTime: string | null;
+  scheduledEndTime: string | null;
+  actualStartTime: string | null;
+}
+
+export interface Spill1LobbyState {
+  hallId: string;
+  /** ISO-dato (Oslo-tz). */
+  businessDate: string;
+  isOpen: boolean;
+  /** "HH:MM" eller null hvis ingen plan dekker dagen. */
+  openingTimeStart: string | null;
+  /** "HH:MM" eller null. */
+  openingTimeEnd: string | null;
+  planId: string | null;
+  planName: string | null;
+  runId: string | null;
+  runStatus: "idle" | "running" | "paused" | "finished" | null;
+  overallStatus: Spill1LobbyOverallStatus;
+  nextScheduledGame: Spill1LobbyNextGame | null;
+  /** 1-basert posisjon i planen. 0 hvis ingen run eller plan ferdig. */
+  currentRunPosition: number;
+  /** Antall items i planen. 0 hvis ingen plan. */
+  totalPositions: number;
+}
+
 export interface HallDefinition {
   id: string;
   name: string;

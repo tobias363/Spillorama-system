@@ -7,6 +7,7 @@ import type {
   WalletAccount,
   Transaction,
   PlayerComplianceSnapshot,
+  Spill1LobbyState,
 } from "@spillorama/shared-types/api";
 import type { RoomSnapshot, RoomSummary } from "@spillorama/shared-types/game";
 
@@ -126,6 +127,19 @@ export class SpilloramaApi {
 
   getGameStatus(): Promise<ApiResult<Record<string, GameStatusInfo>>> {
     return this.get("/api/games/status");
+  }
+
+  /**
+   * Hent Spill 1 lobby-state for en hall (2026-05-08, Tobias-direktiv).
+   *
+   * Returnerer åpningstid, neste planlagte spill, og engine-status hvis
+   * runden er spawnet. Klient bruker `overallStatus` til å bestemme om
+   * rommet skal vises som åpent, vise bong-kjøp, eller bytte til runde-
+   * modus. Polling hver 10s anbefales — endepunktet sender
+   * `Cache-Control: no-store`.
+   */
+  getSpill1Lobby(hallId: string): Promise<ApiResult<Spill1LobbyState>> {
+    return this.get(`/api/games/spill1/lobby?hallId=${encodeURIComponent(hallId)}`);
   }
 
   // ── Halls ─────────────────────────────────────────────────────────────
