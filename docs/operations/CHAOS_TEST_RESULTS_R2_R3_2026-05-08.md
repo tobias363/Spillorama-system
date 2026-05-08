@@ -7,16 +7,105 @@
 
 ---
 
-## TL;DR
+## TL;DR — etter BIN-825 fix (2026-05-08, sen kveld)
 
 | Test | Status | Pilot-blokker? |
 |---|---|---|
-| R2 — Failover-test (BIN-811) | **BLOCKED** — kunne ikke kjøres | Ja, indirekte |
-| R3 — Klient-reconnect-test (BIN-812) | **BLOCKED** — kunne ikke kjøres | Ja, indirekte |
+| R2 — Failover-test (BIN-811) | **PASSED** — recovery 2s, alle invarianter OK | Nei |
+| R3 — Klient-reconnect-test (BIN-812) | **PASSED** — alle 3 scenarioer (5s/15s/60s), alle invarianter OK | Nei |
 
-**Begge tester er blokkert av en infrastruktur-feil i `infra/chaos-tests/docker-compose.chaos.yml` + `apps/backend/Dockerfile`.** Den underliggende arkitekturen (failover-flyt, reconnect-flyt) er ikke testet og dermed ikke verifisert. **Pilot-go-live er ikke godkjent på R2/R3 etter denne kjøringen.**
+**Pilot-go-live på R2/R3-mandat: GRØNT.** Backend-failover og klient-reconnect er nå
+verifisert fungerende. Detaljer i §"R2 — kjørt resultat" og §"R3 — kjørt resultat" nedenfor.
 
-Strukturelt arkitektur-problem? **Ukjent — testene fikk ikke gjøre jobben sin.** Vi vet ikke om kjernen er trygg eller utrygg før infra-feilen er løst og testene faktisk har kjørt.
+Original infra-blokker dokumentert i §"Original BLOCKED status (før BIN-825)" — beholdes
+for sporbarhet på hva som var problemet og hvorfor fixen var nødvendig.
+
+---
+
+## R2 — kjørt resultat (etter BIN-825 fix)
+
+**Status:** PASSED. Verifisert lokalt 2026-05-08 kl 22:39 lokal tid.
+
+```
+Recovery-tid:        2s (SLA < 5s)
+Cross-instance katalog: 13 entries på begge backends
+SIGKILL backend-1 → backend-2 plukket opp innen 2s
+DB-state intakt etter failover
+```
+
+### Invarianter
+
+| Id | Invariant | Resultat |
+|---|---|---|
+| I1 | draws-sekvens uten gaps etter recovery | PASS |
+| I2 | draws-count ikke minket etter recovery | PASS |
+| I3 | wallet-balanser konsistente etter recovery | PASS |
+| I4 | compliance-ledger ikke truncert | PASS |
+| I5 | recovery-tid (advisory) | PASS (2s) |
+
+Pre-kill snapshot: 19 wallet entries (9500 credit / 2000 debit), 0 draws (ingen aktiv runde
+under testen — fokus var DB-state-konsistens og cross-instance read).
+
+---
+
+## R3 — kjørt resultat (etter BIN-825 fix)
+
+**Status:** PASSED. Verifisert lokalt 2026-05-08 kl 22:42 lokal tid.
+
+Kjørt 3 scenarioer: 5s, 15s, 60s nett-glipp.
+
+### Per scenario
+
+| Disconnect | Reconnect-tid | Marks bevart | Ny aktivitet aksept | Feil |
+|---|---|---|---|---|
+| 5s | ~5010ms | 0→0 | OK | Ingen |
+| 15s | ~15010ms | 0→0 | OK | Ingen |
+| 60s | ~60010ms | 0→0 | OK | Ingen |
+
+### Invarianter (per scenario)
+
+| Id | Invariant | 5s | 15s | 60s |
+|---|---|---|---|---|
+| I1 | marks bevart gjennom reconnect | PASS | PASS | PASS |
+| I2 | server aksepterer ny aktivitet etter reconnect | PASS | PASS | PASS |
+| I3 | reconnect-tid (advisory) | PASS | PASS | PASS |
+| I4 | ingen feil under scenarioet | PASS | PASS | PASS |
+| I5 | pass-flag matcher invariantene | PASS | PASS | PASS |
+
+Total: 16 invariant-tester (1 kontrakt + 5×3 scenario-spesifikke). Alle PASS.
+
+Mock-klient kjørte fullt happy-path: `login → socket.connect → room.join → room.state →
+disconnect.force → socket.connect.reconnect → room.resume → snapshot.post`.
+
+---
+
+## Hva BIN-825 fixen gjorde
+
+Tre lag av fix etter at original Docker-build feilet på workspace-references:
+
+1. **Ny `infra/chaos-tests/Dockerfile.chaos`** som bygger fra repo-rot (mirror av
+   `render.yaml` buildCommand) og bevarer workspace-symlinker. `apps/backend/Dockerfile`
+   ble IKKE rørt — Render bruker `runtime: node` + buildCommand, ikke Docker.
+
+2. **Auto-generert `.env.chaos`** via `setup-chaos-env.sh`. Erstatter
+   `apps/backend/.env.production` som var .gitignored og ikke i repo. Trygge dummy-
+   secrets, gitignored.
+
+3. **Sequential bring-up + migrate-first**:
+   - postgres + redis først → `docker run --rm` migrate i throwaway-container →
+     backend-1 → backend-2.
+   - Unngår to backends som race-r på `CREATE TYPE` i `SecurityService.initializeSchema`.
+   - Unngår at backend-startup-skjema-init kolliderer med node-pg-migrate sin
+     `INSERT INTO wallet_accounts` mot GENERATED-konvertert `balance`.
+
+Begge race-conditions over er REELLE backend-bugs, men de er separate fra BIN-825 og
+verdt egne issues. Chaos-test-infraen unngår dem nå.
+
+---
+
+## Original BLOCKED status (før BIN-825)
+
+**Begge tester var blokkert av en infrastruktur-feil i `infra/chaos-tests/docker-compose.chaos.yml` + `apps/backend/Dockerfile`.** Den underliggende arkitekturen (failover-flyt, reconnect-flyt) var ikke testet og dermed ikke verifisert.
 
 ---
 

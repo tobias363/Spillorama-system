@@ -99,24 +99,80 @@ fi
 
 pass "Pre-flight OK (scenario=$SCENARIO)"
 
-# ── §1 Bygg og start chaos-stack ─────────────────────────────────────────
-info "Bygger og starter chaos-stack (backend-1 + backend-2 + postgres + redis)"
-docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
-docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build
+# ── §0.5 Generer .env.chaos (BIN-825) ────────────────────────────────────
+info "Genererer .env.chaos (idempotent)"
+bash "$SCRIPT_DIR/setup-chaos-env.sh" >/dev/null
 
-info "Venter på at begge backend-instanser blir healthy (timeout 90s)"
+# ── §1 Bygg og start chaos-stack ─────────────────────────────────────────
+# Sequential bring-up — see r2-failover-test.sh for the schema-init-race
+# rationale.
+info "Bygger og starter chaos-stack (postgres + redis først)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build postgres redis
+
+info "Venter på postgres + redis health (timeout 60s)"
 WAITED=0
-H1=""
-H2=""
-while [[ $WAITED -lt 90 ]]; do
-  H1=$(curl -sf "$BACKEND_1_URL/health" 2>/dev/null || echo "")
-  H2=$(curl -sf "$BACKEND_2_URL/health" 2>/dev/null || echo "")
-  if [[ -n "$H1" ]] && [[ -n "$H2" ]]; then
-    pass "Begge backends svarer på /health (etter ${WAITED}s)"
+while [[ $WAITED -lt 60 ]]; do
+  PG_OK=$(docker inspect -f '{{.State.Health.Status}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo unknown)
+  R_OK=$(docker inspect -f '{{.State.Health.Status}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q redis | head -1)" 2>/dev/null || echo unknown)
+  if [[ "$PG_OK" == "healthy" && "$R_OK" == "healthy" ]]; then
+    pass "postgres + redis healthy (etter ${WAITED}s)"
     break
   fi
-  sleep 3
-  WAITED=$((WAITED + 3))
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+
+# ── §1.5 Migrate FØR backends starter ────────────────────────────────────
+# Se r2-failover-test.sh §1.5 for full begrunnelse.
+CHAOS_IMAGE="$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" config --images 2>/dev/null | grep backend | head -1)"
+if [[ -z "$CHAOS_IMAGE" ]]; then
+  CHAOS_IMAGE="agent-a7ab3534d8eb48e84-backend-1"
+fi
+NETWORK_NAME="$(docker inspect -f '{{range $k, $_ := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" ps -q postgres | head -1)" 2>/dev/null || echo "")"
+if [[ -z "$NETWORK_NAME" ]]; then
+  NETWORK_NAME="$(docker network ls --format '{{.Name}}' | grep -E "default$" | head -1)"
+fi
+
+info "Kjører node-pg-migrate i throwaway-container (network=$NETWORK_NAME)"
+docker run --rm \
+  --network "$NETWORK_NAME" \
+  -e APP_PG_CONNECTION_STRING="postgres://spillorama:spillorama@postgres:5432/spillorama" \
+  "$CHAOS_IMAGE" \
+  sh -c 'cd /app && npm run migrate' >/tmp/chaos-migrate.log 2>&1 \
+  || { fail "Migrate feilet — sjekk /tmp/chaos-migrate.log"; tail -20 /tmp/chaos-migrate.log; exit 2; }
+pass "Migrate OK"
+
+info "Starter backend-1 (skjema er allerede migrert)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-1
+
+info "Venter på at backend-1 svarer (timeout 60s)"
+WAITED=0
+H1=""
+while [[ $WAITED -lt 60 ]]; do
+  H1=$(curl -sf "$BACKEND_1_URL/health" 2>/dev/null || echo "")
+  if [[ -n "$H1" ]]; then
+    pass "backend-1 svarer (etter ${WAITED}s)"
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+
+info "Starter backend-2 (DB-skjema er initialisert)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d backend-2
+
+info "Venter på at backend-2 svarer (timeout 60s)"
+WAITED=0
+H2=""
+while [[ $WAITED -lt 60 ]]; do
+  H2=$(curl -sf "$BACKEND_2_URL/health" 2>/dev/null || echo "")
+  if [[ -n "$H2" ]]; then
+    pass "Begge backends svarer (etter ${WAITED}s)"
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
 done
 
 if [[ -z "${H1:-}" || -z "${H2:-}" ]]; then
@@ -125,11 +181,8 @@ if [[ -z "${H1:-}" || -z "${H2:-}" ]]; then
   exit 2
 fi
 
-# ── §2 Migrate + seed pilot-data ─────────────────────────────────────────
-info "Migrerer DB + seeder pilot-data via backend-1"
-docker exec spillorama-backend-1 npm --prefix /app run migrate >/dev/null 2>&1 \
-  || warn "Migrate feilet (kan være OK hvis allerede kjørt)"
-
+# ── §2 Seed pilot-data (migrate kjørte i §1.5) ──────────────────────────
+info "Seeder pilot-data via backend-1"
 docker exec -e DEMO_SEED_PASSWORD="$ADMIN_PASSWORD" spillorama-backend-1 \
   node /app/dist/scripts/seed-demo-pilot-day.js >/dev/null 2>&1 \
   || warn "Seed-script feilet eller ikke tilgjengelig — vi går videre med eksisterende data"
