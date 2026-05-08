@@ -509,7 +509,10 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
   // STEP 4 — Master start-guards (Game1MasterControlService)
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("STEP 4.1 — master start fails when 1 hall is unready (HALLS_NOT_READY with details)", async () => {
+  test("STEP 4.1 — master start FAILS when MASTER itself is unready (HALLS_NOT_READY)", async () => {
+    // 2026-05-08 (Tobias-direktiv): Master-hallen må være klar (hard-fail).
+    // Andre uklare haller blir auto-ekskludert, ikke blocked.
+    // Denne testen verifiserer kun master-hall-guarden.
     const masterActor: MasterActor = {
       userId: "agent-master",
       hallId: MASTER_HALL_ID,
@@ -532,25 +535,25 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
           sql.includes("FROM") &&
           sql.includes("app_game1_hall_ready_status"),
         rows: [
-          // Master is ready (must be — separate guard)
+          // Master is NOT ready — dette er hard-fail
           {
             hall_id: "hall-1",
-            is_ready: true,
+            is_ready: false,
             excluded_from_game: false,
             digital_tickets_sold: 5,
             physical_tickets_sold: 3,
             start_ticket_id: "100",
-            final_scan_ticket_id: "108",
+            final_scan_ticket_id: null,
           },
-          // Hall 2 is NOT ready (orange — has players, missing final scan)
+          // Hall 2 ready
           {
             hall_id: "hall-2",
-            is_ready: false,
+            is_ready: true,
             excluded_from_game: false,
-            digital_tickets_sold: 0,
-            physical_tickets_sold: 5,
+            digital_tickets_sold: 4,
+            physical_tickets_sold: 2,
             start_ticket_id: "200",
-            final_scan_ticket_id: null,
+            final_scan_ticket_id: "202",
           },
           // Hall 3 ready
           {
@@ -588,6 +591,9 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
       (err: unknown) => {
         assert.ok(err instanceof DomainError, "should throw DomainError");
         assert.equal((err as DomainError).code, "HALLS_NOT_READY");
+        // Master-hallen skal være listet i unreadyHalls
+        const details = (err as DomainError).details as { unreadyHalls?: string[] };
+        assert.deepEqual(details.unreadyHalls, [MASTER_HALL_ID]);
         return true;
       }
     );
