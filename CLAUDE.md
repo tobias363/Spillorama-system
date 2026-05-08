@@ -454,9 +454,21 @@ When scope crosses a legacy screen, reference these in agent prompts:
 - @docs/architecture/WIREFRAME_CATALOG.md — full content catalog (1760 lines, 65+ screens)
 - @docs/architecture/MASTER_PLAN_SPILL1_PILOT_2026-04-24.md — pilot critical path
 
+### Agent onboarding
+
+Hver agent-sesjon bør starte med:
+
+```bash
+./scripts/agent-onboarding.sh > /tmp/onboarding.md
+```
+
+Les `/tmp/onboarding.md` for current state (refaktor-bølger, sist merger,
+åpne pilot-blokkere, aktive worktrees, tilgjengelige skills) før første
+kode-endring. Se @docs/engineering/AGENT_ONBOARDING.md for detaljer.
+
 ---
 
-Generated for Claude Code automation. Last updated 2026-04-25.
+Generated for Claude Code automation. Last updated 2026-05-08.
 
 
 ## Skill Usage Guide
