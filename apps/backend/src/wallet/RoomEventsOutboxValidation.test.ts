@@ -30,6 +30,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import { PostgresWalletAdapter } from "../adapters/PostgresWalletAdapter.js";
+import { bootstrapWalletSchemaForTests } from "../adapters/walletSchemaTestUtil.js";
 import { WalletOutboxRepo } from "./WalletOutboxRepo.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
@@ -46,32 +47,12 @@ async function dropSchema(pool: Pool, schema: string): Promise<void> {
 }
 
 /**
- * Opprett outbox-tabell per test-schema. Migration `20260427000000_wallet_outbox.sql`
- * lager tabellen i public-schema; for isolerte test-schemas må vi recreate-en
- * her. Speiler shape fra migration-filen 1:1 (forward-only, ingen Down).
+ * Opprett wallet-skjema (inkl. outbox) per test-schema. BIN-828: bruker
+ * `bootstrapWalletSchemaForTests` siden runtime-init ikke duplikerer
+ * migrasjon-arbeid lengre.
  */
 async function createOutboxTable(pool: Pool, schema: string): Promise<void> {
-  await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS "${schema}"."wallet_outbox" (
-      id              BIGSERIAL PRIMARY KEY,
-      operation_id    TEXT NOT NULL,
-      account_id      TEXT NOT NULL,
-      event_type      TEXT NOT NULL,
-      payload         JSONB NOT NULL,
-      status          TEXT NOT NULL DEFAULT 'pending'
-                        CHECK (status IN ('pending', 'processed', 'dead_letter')),
-      attempts        INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
-      last_attempt_at TIMESTAMPTZ NULL,
-      last_error      TEXT NULL,
-      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-      processed_at    TIMESTAMPTZ NULL
-    );
-  `);
-  await pool.query(
-    `CREATE INDEX IF NOT EXISTS "${schema}_idx_wallet_outbox_pending"
-       ON "${schema}"."wallet_outbox" (status, created_at) WHERE status = 'pending';`,
-  );
+  await bootstrapWalletSchemaForTests(pool, { schema });
 }
 
 // ── Test 1: Ticket-purchase debit produserer outbox-rad atomisk ────────

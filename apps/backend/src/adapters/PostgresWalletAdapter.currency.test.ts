@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import { PostgresWalletAdapter } from "./PostgresWalletAdapter.js";
+import { bootstrapWalletSchemaForTests } from "./walletSchemaTestUtil.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
 const skipReason = PG_CONN
@@ -32,12 +33,16 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: schema-bootstrap er nå test-only siden runtime-init ikke
+    // lenger duplikerer migrasjon-arbeid (`PostgresWalletAdapter.
+    // initializeSchema()` antar at migrations har kjørt).
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
       defaultInitialBalance: 0
     });
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       await adapter.createAccount({ accountId: "w-cur-1", initialBalance: 500 });
       await adapter.topUp("w-cur-1", 200, "Topup test");
@@ -75,14 +80,16 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk (runtime-init lager ikke
+    // tabellene lengre — migrations er eneste sannhetskilde).
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
       defaultInitialBalance: 0
     });
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
-      // Bootstrap schema + tabeller
       await adapter.createAccount({ accountId: "w-cur-2", initialBalance: 100 });
 
       // Forsøk å sette currency='EUR' på wallet_accounts → må feile.
