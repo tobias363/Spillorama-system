@@ -72,6 +72,9 @@ import { WalletOutboxWorker } from "./wallet/WalletOutboxWorker.js";
 import { ComplianceOutboxRepo } from "./compliance/ComplianceOutboxRepo.js";
 import { ComplianceOutboxWorker } from "./compliance/ComplianceOutboxWorker.js";
 import { ComplianceOutboxComplianceLedgerPort } from "./compliance/ComplianceOutboxComplianceLedgerPort.js";
+import { RegulatoryLedgerStore } from "./compliance/regulatory/RegulatoryLedgerStore.js";
+import { RegulatoryLedgerService } from "./compliance/regulatory/RegulatoryLedgerService.js";
+import { DailyRegulatoryReportService } from "./compliance/regulatory/DailyRegulatoryReportService.js";
 import { PostgresWalletAdapter } from "./adapters/PostgresWalletAdapter.js";
 import { WalletAuditVerifier } from "./wallet/WalletAuditVerifier.js";
 import { createWalletAuditVerifyJob } from "./jobs/walletAuditVerify.js";
@@ -832,6 +835,42 @@ const complianceLedgerPort: import("./adapters/ComplianceLedgerPort.js").Complia
     return innerPort;
   }
 })();
+
+// G2 (2026-05-09): §71-canonical regulatory-ledger sink + daily-report
+// service. `dailyRegulatoryReportService` is null when:
+//   - `platformConnectionString` is empty (dev-without-DB), OR
+//   - the §71-store wiring threw (logged below)
+// In both cases the legacy daily-report flow continues to work — the
+// regulatory-report just gets skipped.
+let dailyRegulatoryReportService: DailyRegulatoryReportService | null = null;
+
+if (platformConnectionString.length > 0) {
+  try {
+    const regulatoryLedgerStore = new RegulatoryLedgerStore({
+      pool: sharedPool,
+      schema: pgSchema,
+    });
+    const regulatoryLedgerService = new RegulatoryLedgerService({
+      store: regulatoryLedgerStore,
+    });
+    // Hook the §71-write into every ComplianceLedger event. Non-blocking —
+    // RegulatoryLedgerService catches+logs internal errors.
+    engine.getComplianceLedgerInstance().setRegulatoryLedgerSink(async (entry) => {
+      await regulatoryLedgerService.recordFromComplianceEvent(entry);
+    });
+    dailyRegulatoryReportService = new DailyRegulatoryReportService({
+      pool: sharedPool,
+      schema: pgSchema,
+      store: regulatoryLedgerStore,
+    });
+    console.info("[regulatory-ledger] §71-sink wired (G2 + G3 + G4 active)");
+  } catch (err) {
+    console.error(
+      "[regulatory-ledger] failed to wire §71-sink — pilot regulatory-ledger DISABLED:",
+      err,
+    );
+  }
+}
 
 // BIN-516: chat persistence. Postgres-backed when the platform pool is up,
 // in-memory fallback for dev-without-DB so chat:history still works.
@@ -1759,7 +1798,14 @@ drawScheduler = new DrawScheduler({
 });
 drawScheduler.start();
 
-const dailyReportScheduler = createDailyReportScheduler({ engine, enabled: dailyReportJobEnabled, intervalMs: dailyReportJobIntervalMs });
+const dailyReportScheduler = createDailyReportScheduler({
+  engine,
+  enabled: dailyReportJobEnabled,
+  intervalMs: dailyReportJobIntervalMs,
+  // G3 (2026-05-09): hash-chained §71-daily-report. May be null if the
+  // §71-store wiring failed during boot — scheduler degrades gracefully.
+  regulatoryReportService: dailyRegulatoryReportService ?? undefined,
+});
 
 // BIN-693 Option B: Wallet-reservasjons-expiry-tick.
 const walletReservationExpiryTickMs = Math.max(
