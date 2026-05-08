@@ -67,9 +67,22 @@ class InMemoryPgStub {
       return Promise.resolve({ rows: [], rowCount: 0 });
     }
 
-    // SELECT id, wallet_id FROM app_users WHERE role='PLAYER' AND email <> $1
+    // resetTestPlayers.ts:166 — auto-pick første aktive hall som FK-fallback
+    // hvis `demo-hall-001` ikke eksisterer i prod. Stuben returnerer enten
+    // første hall fra `this.halls` eller tom liste.
+    if (/SELECT\s+id\s+FROM\s+[\s\S]*"app_halls"\s+WHERE\s+is_active\s*=\s*true/i.test(trimmed)) {
+      const first = this.halls[0];
+      return Promise.resolve({
+        rows: first ? [{ id: first.id }] : [],
+        rowCount: first ? 1 : 0,
+      });
+    }
+
+    // SELECT id, wallet_id [, email] FROM app_users WHERE role='PLAYER' AND email <> $1
+    // resetTestPlayers.ts:286-289 (per-row best-effort) henter også `email` for
+    // log-warn-melding når en rad skipes pga FK-RESTRICT.
     if (
-      /SELECT\s+id,\s+wallet_id\s+FROM\s+[\s\S]*"app_users"[\s\S]*WHERE\s+role\s*=\s*'PLAYER'\s+AND\s+email\s*<>\s*\$1/i.test(
+      /SELECT\s+id,\s+wallet_id(?:,\s+email)?\s+FROM\s+[\s\S]*"app_users"[\s\S]*WHERE\s+role\s*=\s*'PLAYER'\s+AND\s+email\s*<>\s*\$1/i.test(
         trimmed,
       )
     ) {
@@ -78,7 +91,7 @@ class InMemoryPgStub {
         (u) => u.role === "PLAYER" && u.email !== skipEmail,
       );
       return Promise.resolve({
-        rows: matches.map((u) => ({ id: u.id, wallet_id: u.wallet_id })),
+        rows: matches.map((u) => ({ id: u.id, wallet_id: u.wallet_id, email: u.email })),
         rowCount: matches.length,
       });
     }
@@ -100,7 +113,7 @@ class InMemoryPgStub {
       });
     }
 
-    // DELETE FROM wallet_entries WHERE account_id = ANY($1::text[])
+    // BULK: DELETE FROM wallet_entries WHERE account_id = ANY($1::text[])
     if (/DELETE\s+FROM\s+[\s\S]*"wallet_entries"\s+WHERE\s+account_id\s*=\s*ANY/i.test(trimmed)) {
       const ids = params[0] as string[];
       const before = this.walletEntries.length;
@@ -108,7 +121,17 @@ class InMemoryPgStub {
       return Promise.resolve({ rows: [], rowCount: before - this.walletEntries.length });
     }
 
-    // DELETE FROM wallet_transactions WHERE account_id=ANY OR related_account_id=ANY
+    // PER-RAD (PR #870-fjern): DELETE FROM wallet_entries WHERE account_id = $1.
+    // resetTestPlayers.ts:302 bytter til per-rad DELETE i en loop (best-effort
+    // per-rad rollback) så stuben må også støtte single-id-formen.
+    if (/DELETE\s+FROM\s+[\s\S]*"wallet_entries"\s+WHERE\s+account_id\s*=\s*\$1/i.test(trimmed)) {
+      const id = String(params[0]);
+      const before = this.walletEntries.length;
+      this.walletEntries = this.walletEntries.filter((e) => e.account_id !== id);
+      return Promise.resolve({ rows: [], rowCount: before - this.walletEntries.length });
+    }
+
+    // BULK: DELETE FROM wallet_transactions WHERE account_id=ANY OR related_account_id=ANY
     if (/DELETE\s+FROM\s+[\s\S]*"wallet_transactions"\s+WHERE\s+account_id\s*=\s*ANY/i.test(trimmed)) {
       const ids = params[0] as string[];
       const before = this.walletTransactions.length;
@@ -118,7 +141,17 @@ class InMemoryPgStub {
       return Promise.resolve({ rows: [], rowCount: before - this.walletTransactions.length });
     }
 
-    // DELETE FROM wallet_accounts WHERE id=ANY AND is_system=false
+    // PER-RAD: DELETE FROM wallet_transactions WHERE account_id = $1 OR related_account_id = $1
+    if (/DELETE\s+FROM\s+[\s\S]*"wallet_transactions"\s+WHERE\s+account_id\s*=\s*\$1\s+OR\s+related_account_id\s*=\s*\$1/i.test(trimmed)) {
+      const id = String(params[0]);
+      const before = this.walletTransactions.length;
+      this.walletTransactions = this.walletTransactions.filter(
+        (t) => t.account_id !== id && t.related_account_id !== id,
+      );
+      return Promise.resolve({ rows: [], rowCount: before - this.walletTransactions.length });
+    }
+
+    // BULK: DELETE FROM wallet_accounts WHERE id=ANY AND is_system=false
     if (/DELETE\s+FROM\s+[\s\S]*"wallet_accounts"\s+WHERE\s+id\s*=\s*ANY/i.test(trimmed)) {
       const ids = params[0] as string[];
       const before = this.walletAccounts.length;
@@ -128,7 +161,17 @@ class InMemoryPgStub {
       return Promise.resolve({ rows: [], rowCount: before - this.walletAccounts.length });
     }
 
-    // DELETE FROM app_users WHERE role='PLAYER' AND email <> $1
+    // PER-RAD: DELETE FROM wallet_accounts WHERE id = $1 AND is_system = false
+    if (/DELETE\s+FROM\s+[\s\S]*"wallet_accounts"\s+WHERE\s+id\s*=\s*\$1\s+AND\s+is_system\s*=\s*false/i.test(trimmed)) {
+      const id = String(params[0]);
+      const before = this.walletAccounts.length;
+      this.walletAccounts = this.walletAccounts.filter(
+        (a) => !(a.id === id && !a.is_system),
+      );
+      return Promise.resolve({ rows: [], rowCount: before - this.walletAccounts.length });
+    }
+
+    // BULK: DELETE FROM app_users WHERE role='PLAYER' AND email <> $1
     if (
       /DELETE\s+FROM\s+[\s\S]*"app_users"\s+WHERE\s+role\s*=\s*'PLAYER'\s+AND\s+email\s*<>\s*\$1/i.test(
         trimmed,
@@ -139,6 +182,14 @@ class InMemoryPgStub {
       this.users = this.users.filter(
         (u) => !(u.role === "PLAYER" && u.email !== skipEmail),
       );
+      return Promise.resolve({ rows: [], rowCount: before - this.users.length });
+    }
+
+    // PER-RAD: DELETE FROM app_users WHERE id = $1
+    if (/DELETE\s+FROM\s+[\s\S]*"app_users"\s+WHERE\s+id\s*=\s*\$1/i.test(trimmed)) {
+      const id = String(params[0]);
+      const before = this.users.length;
+      this.users = this.users.filter((u) => u.id !== id);
       return Promise.resolve({ rows: [], rowCount: before - this.users.length });
     }
 

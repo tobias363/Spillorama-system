@@ -145,6 +145,13 @@ async function startAdminServer(options: {
         : { roomCode: input.roomCode ?? "ROOM-A", playerId: "host-1" };
     },
     listRoomSummaries() { return [] as Array<{ code: string; hallId: string; gameStatus: string; playerCount: number }>; },
+    // 2026-05-02 (Tobias UX): adminRooms.ts:189 sjekker `engine.getRoomSnapshot`
+    // for idempotent re-create (én rom per group-of-halls). I tester får vi
+    // alltid en ny rom-create, så vi kaster ROOM_NOT_FOUND som signaliserer
+    // at create-stien skal kjøres.
+    getRoomSnapshot(_roomCode: string): never {
+      throw Object.assign(new Error("not found"), { code: "ROOM_NOT_FOUND" });
+    },
     async setPlayerLossLimits(input: unknown) {
       return options.onSetLossLimits
         ? options.onSetLossLimits(input)

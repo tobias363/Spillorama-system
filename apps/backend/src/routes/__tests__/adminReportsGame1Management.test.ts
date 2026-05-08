@@ -222,14 +222,14 @@ async function req(baseUrl: string, path: string, token?: string): Promise<{ sta
 
 // ── RBAC ────────────────────────────────────────────────────────────────────
 
-test("BIN-BOT-01: PLAYER + AGENT blokkert", async () => {
-  const ctx = await startServer({ "pl-tok": playerUser, "ag-tok": agentUser });
+// PR #797 (RBAC, 2026-05-01): AGENT-rolle fikk DAILY_REPORT_READ. AGENT er
+// derfor IKKE lenger blokkert — kun PLAYER. Hall-scope håndheves i route-laget.
+test("BIN-BOT-01: PLAYER blokkert (AGENT nå tillatt — PR #797)", async () => {
+  const ctx = await startServer({ "pl-tok": playerUser });
   try {
-    for (const token of ["pl-tok", "ag-tok"]) {
-      const r = await req(ctx.baseUrl, "/api/admin/reports/game1", token);
-      assert.equal(r.status, 400);
-      assert.equal(r.json.error.code, "FORBIDDEN");
-    }
+    const r = await req(ctx.baseUrl, "/api/admin/reports/game1", "pl-tok");
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error.code, "FORBIDDEN");
   } finally {
     await ctx.close();
   }

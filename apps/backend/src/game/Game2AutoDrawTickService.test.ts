@@ -24,6 +24,22 @@ import { DomainError } from "../errors/DomainError.js";
 
 // ── Test-helpers ────────────────────────────────────────────────────────────
 
+/**
+ * BUG-1 fix 2026-05-06 (PR #970) gjorde at første tick etter at et rom går
+ * RUNNING **alltid** initialiserer throttle-vinduet og hopper over draw — for
+ * å gi klient-countdown tid til å reagere. Tester som verifiserer "tick
+ * trigger draw" må derfor kjøre én warm-up-tick først så throttle-vinduet
+ * er etablert. Helper-en under er bare en eksplisitt
+ * `tick()`-call uten assertions så den faktiske test-kjøringen er lett å lese.
+ *
+ * Stuck-room-tester (drawn=21 + status=RUNNING) treffer warmup-grenen FØR
+ * snapshot hentes, så også de må warm-up-es slik at deres assertions om
+ * `forceEndStaleRound`-call kjøres på 2. tick.
+ */
+async function warmupThrottle(service: Game2AutoDrawTickService): Promise<void> {
+  await service.tick();
+}
+
 interface FakeRoom {
   code: string;
   hostPlayerId: string;
@@ -102,6 +118,7 @@ test("slug-filter: kun Spill 2-rom (rocket/game_2/tallspill) triggeres — Spill
     { code: "MYSTERY-Z", hostPlayerId: "host-z", gameSlug: "spillorama", gameStatus: "RUNNING" },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.checked, 3, "kun de 3 Spill 2-rommene skal telles som checked");
   assert.equal(r.drawsTriggered, 3);
@@ -119,6 +136,7 @@ test("slug-filter: case-insensitivt match — ROCKET, Rocket, rOcKeT alle aksept
     { code: "R3", hostPlayerId: "h3", gameSlug: "rOcKeT", gameStatus: "RUNNING" },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.checked, 3);
   assert.equal(r.drawsTriggered, 3);
@@ -146,6 +164,7 @@ test("status-filter: WAITING/ENDED/NONE skip — kun RUNNING trigges", async () 
     { code: "NONE", hostPlayerId: "h4", gameSlug: "rocket", gameStatus: "NONE" },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.checked, 1, "kun det RUNNING-rommet skal være checked");
   assert.equal(r.drawsTriggered, 1);
@@ -184,6 +203,7 @@ test("max-baller: 20 drawn + 1 plass igjen → trigges fortsatt", async () => {
     },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.drawsTriggered, 1);
   assert.equal(drawCalls.length, 1);
@@ -192,18 +212,28 @@ test("max-baller: 20 drawn + 1 plass igjen → trigges fortsatt", async () => {
 // ── Throttle ────────────────────────────────────────────────────────────────
 
 test("throttle: andre tick innen drawIntervalMs → skipped, ingen ny draw-kall", async () => {
+  // BUG-1 fix 2026-05-06: warmup-tick setter throttle-vinduet. Med
+  // drawIntervalMs=60_000 vil ALLE etterfølgende tick-er innen 60s være
+  // throttled. Vi verifiserer at throttle holder ved å kjøre 3 tick-er
+  // umiddelbart — kun warmup teller, ingen draw skal trigge.
   const { engine, drawCalls } = makeEngine([
     { code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 60_000 });
-  const r1 = await service.tick();
-  assert.equal(r1.drawsTriggered, 1);
-  assert.equal(drawCalls.length, 1);
+  // Warmup setter throttle.
+  const warmup = await service.tick();
+  assert.equal(warmup.skipped, 1, "warmup-tick skipped (throttle-init)");
+  assert.equal(drawCalls.length, 0);
   // Andre tick umiddelbart — throttle skal blokkere.
+  const r1 = await service.tick();
+  assert.equal(r1.drawsTriggered, 0);
+  assert.equal(r1.skipped, 1);
+  assert.equal(drawCalls.length, 0, "drawNextNumber skal ikke kalles innen 60s av warmup");
+  // Tredje tick: fortsatt innen 60s → throttle blokkerer.
   const r2 = await service.tick();
   assert.equal(r2.drawsTriggered, 0);
   assert.equal(r2.skipped, 1);
-  assert.equal(drawCalls.length, 1, "drawNextNumber skal ikke kalles igjen");
+  assert.equal(drawCalls.length, 0);
 });
 
 test("throttle: drawIntervalMs=0 → ingen throttle, hver tick trigger draw", async () => {
@@ -211,6 +241,7 @@ test("throttle: drawIntervalMs=0 → ingen throttle, hver tick trigger draw", as
     { code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   await service.tick();
   await service.tick();
   await service.tick();
@@ -275,6 +306,7 @@ test("ukjent feil: telt som errors, blokkerer ikke andre rom", async () => {
     }
   );
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.checked, 2);
   assert.equal(r.errors, 1);
@@ -289,6 +321,7 @@ test("getRoomSnapshot kaster: telt som errors, ingen drawNextNumber", async () =
     { throwOnSnapshot: new Set(["R"]) }
   );
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.errors, 1);
   assert.equal(drawCalls.length, 0);
@@ -323,6 +356,7 @@ test("actorPlayerId settes til SYSTEM_ACTOR_ID (audit §2.6)", async () => {
     },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   await service.tick();
   assert.equal(drawCalls[0]!.actorPlayerId, "__system_actor__");
 });
@@ -361,6 +395,9 @@ test("snapshot.currentGame.status !== RUNNING (race) → skipped uten draw-kall"
 test("constructor: ugyldig drawIntervalMs (negativ/NaN/undefined) → faller til default 30000ms", async () => {
   // 0 er gyldig (= "ingen throttle" — engine-laget håndhever sin egen
   // minDrawIntervalMs). Negativ/NaN/undefined → default 30 000 ms.
+  // BUG-1 fix 2026-05-06: første tick er alltid warmup. Andre tick (innen
+  // 30s default) må derfor ALLTID være throttled — det er nøyaktig hva vi
+  // verifiserer her: default-fallback er 30s, ikke 0.
   for (const bad of [-1, NaN, undefined]) {
     const { engine, drawCalls } = makeEngine([
       { code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
@@ -369,14 +406,22 @@ test("constructor: ugyldig drawIntervalMs (negativ/NaN/undefined) → faller til
       engine,
       drawIntervalMs: bad as number,
     });
-    await service.tick();
+    // Første tick = warmup (skip).
+    const r1 = await service.tick();
+    assert.equal(r1.skipped, 1, `bad=${String(bad)}: første tick (warmup) skipped`);
+    // Andre tick = throttled av default 30s (ingen draw).
     const r2 = await service.tick();
     assert.equal(
       r2.skipped,
       1,
       `bad=${String(bad)}: andre tick innen 30s skal være throttled (default-fallback)`,
     );
-    assert.equal(drawCalls.length, 1);
+    // Med default-fallback 30s og drawIntervalMs >= 30s ble draw aldri trigget i denne testen.
+    assert.equal(
+      drawCalls.length,
+      0,
+      `bad=${String(bad)}: drawNextNumber skal ikke ha blitt kalt (warmup+throttle blokkerer)`,
+    );
   }
 });
 
@@ -421,6 +466,7 @@ test("stuck-room recovery: drawn=21 + status=RUNNING + forceEndStaleRound wired 
       onStaleCalls.push(roomCode);
     },
   });
+  await warmupThrottle(service);
   const r = await service.tick();
 
   assert.equal(drawCalls.length, 0, "stuck rom skal IKKE trigge drawNextNumber");
@@ -483,6 +529,7 @@ test("stuck-room recovery: forceEndStaleRound returnerer false (allerede endet) 
       onStaleCallCount++;
     },
   });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(forceEndCallCount, 1);
   assert.equal(onStaleCallCount, 0, "callback skal ikke fyre når force-end returnerer false");
@@ -511,6 +558,7 @@ test("stuck-room recovery: forceEndStaleRound kaster → telles som error, krasj
     },
   };
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.errors, 1);
   assert.ok(r.errorMessages?.[0]?.includes("forceEndStaleRound failed"));
@@ -557,6 +605,7 @@ test("getLastTickResult: callback-feil i onStaleRoomEnded krasjer ikke tick + te
       throw new Error("callback boom");
     },
   });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.errors, 0, "callback-feil teller ikke som engine-error");
   assert.deepEqual(r.staleRoomsEnded, ["ROCKET"]);
@@ -588,6 +637,7 @@ test("broadcaster: kalles for HVERT vellykket draw med korrekt event-shape", asy
       },
     },
   });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.drawsTriggered, 2);
   assert.equal(broadcasterCalls.length, 2, "broadcaster skal kalles én gang per draw");
@@ -687,6 +737,7 @@ test("broadcaster: kast i broadcaster.onDrawCompleted krasjer IKKE tick + teller
       },
     },
   });
+  await warmupThrottle(service);
   const r = await service.tick();
   // Engine kalles for begge rom, drawsTriggered=2 — broadcaster-feil
   // teller ikke som engine-feil.
@@ -703,6 +754,7 @@ test("broadcaster: ikke injected → tick kjører uten emit (legacy-fallback for
     { code: "R", hostPlayerId: "h", gameSlug: "rocket", gameStatus: "RUNNING" },
   ]);
   const service = new Game2AutoDrawTickService({ engine, drawIntervalMs: 0 });
+  await warmupThrottle(service);
   const r = await service.tick();
   assert.equal(r.drawsTriggered, 1);
   assert.equal(drawCalls.length, 1);
@@ -732,10 +784,13 @@ test("admin-config-round-pace: per-game ballIntervalMs throttler tick uavhengig 
       }),
     },
   });
-  // Første tick: ingen forrige draw → trigger.
+  // BUG-1 fix 2026-05-06: første tick = warmup. Andre tick: per-game
+  // throttle (5s) skal blokkere innen vinduet.
+  await warmupThrottle(service);
   const r1 = await service.tick();
-  assert.equal(r1.drawsTriggered, 1);
-  // Andre tick rett etter: per-game-throttle (5s) skal blokkere.
+  assert.equal(r1.drawsTriggered, 0, "andre tick (5s vindu) skal være throttled");
+  assert.equal(r1.skipped, 1);
+  // Tredje tick rett etter: per-game-throttle (5s) skal fortsatt blokkere.
   const r2 = await service.tick();
   assert.equal(r2.drawsTriggered, 0);
   assert.equal(r2.skipped, 1);
@@ -751,10 +806,12 @@ test("admin-config-round-pace: variantLookup ikke injected → service drawInter
     drawIntervalMs: 0, // service-level: ingen throttle
     // variantLookup: undefined
   });
+  // BUG-1 fix 2026-05-06: første tick alltid skipped (warmup).
+  await warmupThrottle(service);
   const r1 = await service.tick();
   const r2 = await service.tick();
   assert.equal(r1.drawsTriggered, 1);
-  assert.equal(r2.drawsTriggered, 1, "uten variantLookup skal service drawIntervalMs (=0) tillate begge tick-er");
+  assert.equal(r2.drawsTriggered, 1, "uten variantLookup skal service drawIntervalMs (=0) tillate begge tick-er etter warmup");
 });
 
 test("admin-config-round-pace: ugyldig per-game ballIntervalMs → faller til env-default", async () => {
@@ -776,8 +833,12 @@ test("admin-config-round-pace: ugyldig per-game ballIntervalMs → faller til en
       }),
     },
   });
+  // BUG-1 fix 2026-05-06: første tick = warmup. Andre tick: 5s vindu blokkerer
+  // (innen 5s av warmup). Dette verifiserer at ugyldig per-game-verdi ikke
+  // bypasser service-level throttle.
+  await warmupThrottle(service);
   const r1 = await service.tick();
   const r2 = await service.tick();
-  assert.equal(r1.drawsTriggered, 1);
+  assert.equal(r1.drawsTriggered, 0, "andre tick (i 5s-vindu) skal være throttled av service-default");
   assert.equal(r2.drawsTriggered, 0, "ugyldig per-game-verdi → service drawIntervalMs (5000) håndhever throttle");
 });

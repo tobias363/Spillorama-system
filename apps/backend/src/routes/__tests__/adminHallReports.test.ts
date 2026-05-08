@@ -164,14 +164,15 @@ async function waitAudit(store: InMemoryAuditLogStore, action: string): Promise<
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-test("B3.8: PLAYER + AGENT blokkert fra admin hall-reports", async () => {
-  const ctx = await startServer({ "pl-tok": playerUser, "ag-tok": agentUser });
+// PR #797 (RBAC, 2026-05-01): AGENT-rolle fikk DAILY_REPORT_READ. AGENT er
+// derfor IKKE lenger blokkert fra hall-reports — kun PLAYER blokkeres her.
+// Hall-scope håndheves uansett i route-laget via `resolveHallScopeFilter`.
+test("B3.8: PLAYER blokkert fra admin hall-reports (AGENT nå tillatt — PR #797)", async () => {
+  const ctx = await startServer({ "pl-tok": playerUser });
   try {
-    for (const token of ["pl-tok", "ag-tok"]) {
-      const res = await req(ctx.baseUrl, "GET", "/api/admin/reports/halls/hall-a/daily?dateFrom=2026-04-01&dateTo=2026-04-30", token);
-      assert.equal(res.status, 400);
-      assert.equal(res.json.error.code, "FORBIDDEN");
-    }
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/reports/halls/hall-a/daily?dateFrom=2026-04-01&dateTo=2026-04-30", "pl-tok");
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
   } finally { await ctx.close(); }
 });
 
