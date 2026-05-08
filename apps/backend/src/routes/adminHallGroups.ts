@@ -99,6 +99,24 @@ function parseOptionalTvId(value: unknown): number | null | undefined {
   return n;
 }
 
+/**
+ * 2026-05-08 (Tobias-feedback): parse valgfri masterHallId fra wire.
+ * undefined = ikke endre, null/"" = nullstill, ikke-tom string = ny verdi.
+ * Service-laget validerer member-invariant.
+ */
+function parseOptionalMasterHallId(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "masterHallId må være en streng eller null."
+    );
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 function parseOptionalStringArray(
   value: unknown,
   field: string
@@ -213,6 +231,8 @@ export function createAdminHallGroupsRouter(
       if (status !== undefined) input.status = status;
       const tvId = parseOptionalTvId(body.tvId);
       if (tvId !== undefined) input.tvId = tvId;
+      const masterHallId = parseOptionalMasterHallId(body.masterHallId);
+      if (masterHallId !== undefined) input.masterHallId = masterHallId;
       const productIds = parseOptionalStringArray(body.productIds, "productIds");
       if (productIds !== undefined) input.productIds = productIds;
       const extra = parseOptionalExtra(body.extra);
@@ -237,6 +257,7 @@ export function createAdminHallGroupsRouter(
           memberCount: group.members.length,
           hallIds: group.members.map((m) => m.hallId),
           tvId: group.tvId,
+          masterHallId: group.masterHallId,
         },
         ipAddress: clientIp(req),
         userAgent: userAgent(req),
@@ -271,6 +292,8 @@ export function createAdminHallGroupsRouter(
       if (status !== undefined) update.status = status;
       const tvId = parseOptionalTvId(body.tvId);
       if (tvId !== undefined) update.tvId = tvId;
+      const masterHallId = parseOptionalMasterHallId(body.masterHallId);
+      if (masterHallId !== undefined) update.masterHallId = masterHallId;
       const productIds = parseOptionalStringArray(body.productIds, "productIds");
       if (productIds !== undefined) update.productIds = productIds;
       const extra = parseOptionalExtra(body.extra);
@@ -295,6 +318,8 @@ export function createAdminHallGroupsRouter(
           previousMemberCount: before.members.length,
           previousHallIds: before.members.map((m) => m.hallId),
           status: group.status,
+          masterHallId: group.masterHallId,
+          previousMasterHallId: before.masterHallId,
         },
         ipAddress: clientIp(req),
         userAgent: userAgent(req),

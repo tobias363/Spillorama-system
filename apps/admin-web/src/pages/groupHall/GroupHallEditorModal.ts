@@ -46,6 +46,8 @@ interface FormEls {
   description: HTMLTextAreaElement;
   status: HTMLSelectElement;
   members: HTMLSelectElement;
+  /** 2026-05-08 (Tobias-feedback): master-hall-velger (single-select). */
+  masterHall: HTMLSelectElement;
   errors: HTMLElement;
   saveBtn: HTMLButtonElement;
 }
@@ -195,6 +197,29 @@ function renderForm(args: RenderFormArgs): Node {
           <p class="help-block">${escapeHtml(t("select_halls_hint"))}</p>
         </div>
       </div>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="gh-master-hall">${escapeHtml(t("master_hall"))}</label>
+        <div class="col-sm-9">
+          <select id="gh-master-hall" name="masterHall" class="form-control"
+            data-testid="gh-master-hall">
+            <option value=""${existing?.masterHallId ? "" : " selected"}>${escapeHtml(t("master_hall_none"))}</option>
+            ${halls
+              .map((h) =>
+                existingMemberIds.has(h.id)
+                  ? `<option value="${escapeHtml(h.id)}"${existing?.masterHallId === h.id ? " selected" : ""}>${escapeHtml(h.name)}${h.slug ? ` (${escapeHtml(h.slug)})` : ""}</option>`
+                  : ""
+              )
+              .join("")}
+            ${extraInactiveMembers
+              .map(
+                (m) =>
+                  `<option value="${escapeHtml(m.hallId)}"${existing?.masterHallId === m.hallId ? " selected" : ""}>${escapeHtml(m.hallName)} (${escapeHtml(t("inactive"))})</option>`
+              )
+              .join("")}
+          </select>
+          <p class="help-block">${escapeHtml(t("master_hall_hint"))}</p>
+        </div>
+      </div>
       <div id="gh-editor-errors" class="alert alert-danger" style="display:none;"
         data-testid="gh-editor-errors" role="alert"></div>
     </form>
@@ -212,14 +237,24 @@ function readFormEls(instance: ModalInstance): FormEls | null {
   const description = root.querySelector<HTMLTextAreaElement>("#gh-description");
   const status = root.querySelector<HTMLSelectElement>("#gh-status");
   const members = root.querySelector<HTMLSelectElement>("#gh-members");
+  const masterHall = root.querySelector<HTMLSelectElement>("#gh-master-hall");
   const errors = root.querySelector<HTMLElement>("#gh-editor-errors");
   const saveBtn = root.querySelector<HTMLButtonElement>(
     "button[data-action='gh-modal-save']"
   );
-  if (!name || !tvId || !description || !status || !members || !errors || !saveBtn) {
+  if (
+    !name ||
+    !tvId ||
+    !description ||
+    !status ||
+    !members ||
+    !masterHall ||
+    !errors ||
+    !saveBtn
+  ) {
     return null;
   }
-  return { name, tvId, description, status, members, errors, saveBtn };
+  return { name, tvId, description, status, members, masterHall, errors, saveBtn };
 }
 
 function readSelectedHallIds(select: HTMLSelectElement): string[] {
@@ -272,18 +307,36 @@ async function onSaveClicked(
   const description = els.description.value.trim();
   const status = els.status.value as HallGroupStatus;
   const hallIds = readSelectedHallIds(els.members);
+  // 2026-05-08 (Tobias-feedback): tom-streng = "ingen master pinned" → null.
+  const rawMaster = els.masterHall.value;
+  const masterHallId: string | null = rawMaster === "" ? null : rawMaster;
+
+  // Pre-validate: hvis master er satt må den være i `hallIds`. Backend
+  // håndhever samme regel, men vi viser feilen umiddelbart i UI.
+  if (masterHallId !== null && !hallIds.includes(masterHallId)) {
+    showError(els.errors, t("master_hall_not_member"));
+    return;
+  }
 
   els.saveBtn.disabled = true;
   try {
     const result =
       opts.mode === "create"
-        ? await createGroupHall({ name, tvId, description, status, hallIds })
+        ? await createGroupHall({
+            name,
+            tvId,
+            description,
+            status,
+            hallIds,
+            masterHallId,
+          })
         : await updateGroupHall(opts.existing!.id, {
             name,
             tvId,
             description,
             status,
             hallIds,
+            masterHallId,
           });
 
     if (result.ok) {
@@ -318,6 +371,8 @@ function mapValidationKey(key: string): string {
       return t("tv_id_invalid");
     case "hall_id_invalid":
       return t("hall_id_invalid");
+    case "master_hall_not_member":
+      return t("master_hall_not_member");
     case "no_changes":
       return t("no_changes");
     default:

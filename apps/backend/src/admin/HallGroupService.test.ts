@@ -367,3 +367,83 @@ test("BIN-665 service: get() avviser tom id", async () => {
     "INVALID_INPUT"
   );
 });
+
+// ── 2026-05-08 Tobias-feedback: masterHallId-validering ────────────────────
+
+test("Tobias 2026-05-08: create() avviser masterHallId som ikke er i hallIds", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "master not in hallIds",
+    () =>
+      svc.create({
+        name: "Group A",
+        hallIds: ["hall-a", "hall-b"],
+        masterHallId: "hall-c",
+        createdBy: "u-1",
+      }),
+    "MASTER_HALL_NOT_MEMBER"
+  );
+});
+
+test("Tobias 2026-05-08: create() avviser masterHallId med tomme hallIds", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "master with no halls",
+    () =>
+      svc.create({
+        name: "Group A",
+        masterHallId: "hall-a",
+        createdBy: "u-1",
+      }),
+    "MASTER_HALL_NOT_MEMBER"
+  );
+});
+
+test("Tobias 2026-05-08: create() avviser masterHallId av feil type", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "master not string",
+    () =>
+      svc.create({
+        name: "Group A",
+        hallIds: ["hall-a"],
+        masterHallId: 42 as unknown as string,
+        createdBy: "u-1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("Tobias 2026-05-08: update() avviser masterHallId ikke i ny hallIds-liste", async () => {
+  const svc = makeValidatingService();
+  (svc as unknown as { get: (id: string) => Promise<unknown> }).get = async () => ({
+    id: "g-1",
+    deletedAt: null,
+    masterHallId: null,
+    members: [{ hallId: "hall-a" }],
+  });
+  await expectDomainError(
+    "master not in new hallIds",
+    () =>
+      svc.update("g-1", {
+        hallIds: ["hall-b"],
+        masterHallId: "hall-a",
+      }),
+    "MASTER_HALL_NOT_MEMBER"
+  );
+});
+
+test("Tobias 2026-05-08: update() avviser masterHallId ikke i eksisterende members", async () => {
+  const svc = makeValidatingService();
+  (svc as unknown as { get: (id: string) => Promise<unknown> }).get = async () => ({
+    id: "g-1",
+    deletedAt: null,
+    masterHallId: null,
+    members: [{ hallId: "hall-a" }, { hallId: "hall-b" }],
+  });
+  await expectDomainError(
+    "master not in existing members",
+    () => svc.update("g-1", { masterHallId: "hall-c" }),
+    "MASTER_HALL_NOT_MEMBER"
+  );
+});

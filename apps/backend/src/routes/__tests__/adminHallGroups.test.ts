@@ -86,6 +86,8 @@ function makeGroup(
     name: overrides.name,
     status: overrides.status ?? "active",
     tvId: overrides.tvId ?? null,
+
+    masterHallId: overrides.masterHallId ?? null,
     productIds: overrides.productIds ?? [],
     members: overrides.members ?? [],
     extra: overrides.extra ?? {},
