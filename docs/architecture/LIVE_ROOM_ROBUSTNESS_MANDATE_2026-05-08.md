@@ -91,7 +91,7 @@ Dette er ikke en "P1 etter pilot" — dette er **fundament som må være på pla
 | R2 | **Failover-test** — drep backend-instans midt i runde, verifiser at annen instans plukker opp uten å miste draws | [BIN-811](https://linear.app/bingosystem/issue/BIN-811) | 2-3d | Ikke startet |
 | R3 | **Klient-reconnect-test** — verifiser at klient som mister nett 5/15/60 sek får full state-replay og kan fortsette uten tap | [BIN-812](https://linear.app/bingosystem/issue/BIN-812) | 2d | Ikke startet |
 | R4 | **Load-test** — k6 eller artillery-script som simulerer 1000 samtidige klienter per rom over 60 min | [BIN-817](https://linear.app/bingosystem/issue/BIN-817) | 2-3d | Ikke startet |
-| R5 | **Idempotent socket-event-håndtering** — `clientRequestId`-deduplisering på `ticket:mark`, `claim:submit`, `ticket:buy` | [BIN-813](https://linear.app/bingosystem/issue/BIN-813) | 2d | Delvis (wallet har, sockets ikke verifisert) |
+| R5 | **Idempotent socket-event-håndtering** — `clientRequestId`-deduplisering på `ticket:mark`, `claim:submit`, `bet:arm` (vår `ticket:buy`-ekvivalent) | [BIN-813](https://linear.app/bingosystem/issue/BIN-813) | 2d | ✅ Implementert 2026-05-08 — `withSocketIdempotency`-wrapper aktivert på alle 3 events. Fail-soft ved Redis-utfall (wallet-laget er fortsatt idempotent som defense-in-depth). Regresjons-tester i `withSocketIdempotency.test.ts`, `claimEvents.idempotency.test.ts`, `betArm.idempotency.test.ts` (5 nye tester for bet:arm). |
 | R6 | **Outbox for room-events** — alle wallet-touch fra room-events går via outbox | [BIN-818](https://linear.app/bingosystem/issue/BIN-818) | 1-2d | Wallet-siden ferdig; rom-side må verifiseres |
 | R7 | **Health-endpoint per rom** — `/api/games/{slug}/health?hallId=X` med p95-latency, last-draw-age, connected-clients | [BIN-814](https://linear.app/bingosystem/issue/BIN-814) | 1d | Ikke startet |
 | R8 | **Alerting** — PagerDuty/Slack-varsel hvis rom står i error-state > 30 sek eller draw-tick-jitter > 2s | [BIN-815](https://linear.app/bingosystem/issue/BIN-815) | 1d | Ikke startet |
@@ -114,7 +114,7 @@ Før pilot går live i én hall (Teknobingo Årnes som master + 3 deltager-halle
 - [x] R1 (foundation, krever Game1Controller-wireup som final step)
 - [ ] R2 — failover-test grønn
 - [ ] R3 — reconnect-test grønn
-- [ ] R5 — idempotent socket-events verifisert
+- [x] R5 — idempotent socket-events verifisert (2026-05-08, `feat/bin-813-socket-idempotency`)
 - [ ] R7 — health-endpoint live
 - [ ] R8 — alerting live
 - [ ] R12 — runbook validert
@@ -225,6 +225,7 @@ Hvis vi finner at egen kapasitet ikke holder for å nå Evolution-nivå, er **ek
 | 2026-05-08 | §6.1: Go/no-go-policy doc-festet. Hvis R2/R3-test avdekker strukturelle problemer skal pilot pauses, ikke "best effort, fikser i drift". Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
 | 2026-05-08 | §8.1: Eksternt løft kun ved R2/R3-fix > 1 uke eller R11. §8.2: Pilot holder 4 haller, utvidelse betinger 2-4 ukers drift-data + R4/R6/R9 bestått. Beslutning av Tobias. | PM-AI (Claude Opus 4.7) |
 | 2026-05-08 | §5: Linear-numre lagt til som krysslenking (parent BIN-810 + R1-R12 → BIN-811..822). | PM-AI (Claude Opus 4.7) |
+| 2026-05-08 | §5 R5 + §6 pilot-checklist: R5 markert ✅ Implementert. `withSocketIdempotency`-wrapper aktivert på `bet:arm` (i tillegg til `ticket:mark` + `claim:submit`). Fail-soft ved Redis-utfall. Regresjons-tester i `withSocketIdempotency.test.ts`, `claimEvents.idempotency.test.ts` og ny `betArm.idempotency.test.ts`. Branch: `feat/bin-813-socket-idempotency`. | Backend-agent (BIN-813) |
 
 ---
 

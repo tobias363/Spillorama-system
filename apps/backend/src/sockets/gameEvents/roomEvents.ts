@@ -25,6 +25,7 @@ import {
   mustBeNonEmptyString,
   parseOptionalNonNegativeNumber,
 } from "../../util/httpHelpers.js";
+import { withSocketIdempotency } from "../withSocketIdempotency.js";
 import type { SocketContext } from "./context.js";
 import type {
   AckResponse,
@@ -239,6 +240,7 @@ export function registerRoomEvents(ctx: SocketContext): void {
     findPlayerInRoomByWallet,
     armPlayer,
     disarmPlayer,
+    socketIdempotencyStore,
   } = deps;
 
   socket.on("room:create", rateLimited("room:create", async (payload: CreateRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
@@ -795,10 +797,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
     }
   }));
 
-  socket.on("bet:arm", rateLimited("bet:arm", async (
+  // BIN-813 R5: bet:arm wrappes med `withSocketIdempotency` for å unngå
+  // dupliserte wallet-reservasjoner ved reconnect-replay. Klient sender
+  // `clientRequestId` (UUID v4) per arm-call. Hvis samme key sendes igjen
+  // returnerer wrapperen cached ack uten å kalle `engine.calculateMaxAffordableTickets`
+  // på nytt — wallet-laget er allerede idempotent via deterministisk arm-cycle-id,
+  // men cache her sparer DB-roundtrip og gir konsekvent svar til klient ved
+  // socket-flap. Wrapper-en er pass-through når `clientRequestId` mangler
+  // (legacy-klient) eller `socketIdempotencyStore` er udefinert (test-harness
+  // uten Redis), så eksisterende tester kjører uendret.
+  const baseBetArmHandler = async (
     payload: RoomActionPayload & { armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> },
-    callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean; lossLimit?: BetArmLossLimitInfo }>) => void
-  ) => {
+    callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean; lossLimit?: BetArmLossLimitInfo }>) => void,
+  ): Promise<void> => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
       const wantArmed = payload.armed !== false;
@@ -1195,7 +1206,16 @@ export function registerRoomEvents(ctx: SocketContext): void {
     } catch (error) {
       ackFailure(callback, error);
     }
-  }));
+  };
+
+  const betArmHandler = socketIdempotencyStore
+    ? withSocketIdempotency(
+        { store: socketIdempotencyStore, eventName: "bet:arm", socket },
+        baseBetArmHandler,
+      )
+    : baseBetArmHandler;
+
+  socket.on("bet:arm", rateLimited("bet:arm", betArmHandler));
 
   // ── Lucky number ──────────────────────────────────────────────────────────
   socket.on("lucky:set", rateLimited("lucky:set", async (payload: LuckyNumberPayload, callback: (response: AckResponse<{ luckyNumber: number }>) => void) => {
