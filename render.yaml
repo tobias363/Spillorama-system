@@ -3,7 +3,19 @@ services:
     name: spillorama-system
     runtime: node
     region: frankfurt
-    plan: starter
+    plan: standard
+    # IaC speiler faktisk Render-plan (oppgradert fra `free` → `standard`
+    # 2026-05-08 for å fjerne 15-min-sleep-issue + gi 2 GB RAM headroom for
+    # 4-hall-pilot Q3 2026). Web-tjenesten har dermed:
+    #   - 2 GB RAM, 1 CPU, $25/mnd
+    #   - Aldri sove (kritisk for pilot-kveld T-30min final-sjekk)
+    #   - SSH-tilgang for debug
+    #   - Persistent disk-støtte
+    #   - Zero-downtime deploys
+    # bingo-db er separat og ble samtidig oppgradert fra `basic_256mb` →
+    # `pro_4gb` ($95/mnd) for PITR-aktivering (30 dagers retention,
+    # auto-failover-readiness). DB-plan styres IKKE i denne render.yaml —
+    # konfigureres i Render-dashboardet og er ikke i Blueprint-IaC.
     # Migrate prod-DB ved hvert deploy. KRITISK: før denne ble lagt til
     # (2026-04-26) hadde prod-DB 95 pending migrations som førte til
     # "Uventet feil i server"-bugs (manglende tabell `app_user_profile_settings`
