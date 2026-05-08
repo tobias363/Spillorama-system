@@ -602,16 +602,32 @@ Sortert etter avhengighet og tryggleikm. Hver bølge åpnes som egen PR/issue.
 **Tester:** Eksisterende.
 **Linear:** Ny issue.
 
-### Bølge 6 — Konsolider scheduled-game-finder-queries
+### Bølge 6 — Konsolider scheduled-game-finder-queries — FULLFØRT 2026-05-08
 
-**Mål:** `findActiveOrUpcomingGameForHall`/`findActiveGameForHall`/`findScheduledGameForHall` → én helper.
+**Status:** Fullført på branch `refactor/scheduled-game-finder-bolge-6`.
 
-**Tasks:**
-1. Lag `ScheduledGameQuery.findFor(hallId, statuses)` med statuses-array.
-2. Erstatt alle tre kall med passende statuses-args.
+**Levert:**
+1. ✅ `apps/backend/src/game/Game1ScheduledGameFinder.ts` — konsolidert
+   helper med `findFor({hallId, statuses, orderBy})`-API. Predefinerte
+   `SCHEDULED_GAME_STATUSES.{ACTIVE, ACTIVE_OR_UPCOMING, SCHEDULED_ONLY}`-
+   konstanter erstatter inline status-arrays.
+2. ✅ `apps/backend/src/routes/agentGame1.ts` — 3 finder-funksjoner er
+   nå thin wrappers rundt ny helper. Public signatur (returverdi-shape)
+   er bevart slik at Bølge 2 (`MasterActionService` parallel) ikke får
+   konflikt.
+3. ✅ `apps/backend/src/game/__tests__/Game1ScheduledGameFinder.test.ts` —
+   18 unit-tester (status-buckets, orderBy, tom-array → INVALID_INPUT,
+   42P01/42703 soft-fail, schema-validering, hall-match-kriterium).
 
-**Estimat:** 0.5 dev-dag.
-**Tester:** Eksisterende.
+**Robusthet:**
+- Tom statuses-array → `INVALID_INPUT` (Postgres ville gitt `IN ()`-syntaksfeil).
+- 42P01 (table missing) / 42703 (column missing) → `null` (dev-DB uten migrations).
+- Annen DB-feil propageres (ikke svelget).
+- Schema-navn validert mot whitelist-regex før innsetting i SQL.
+
+**Kode-reduksjon:** 108 inline-linjer → 36 wrapper-linjer (~67% mindre kode).
+
+**Estimat:** 0.5 dev-dag (faktisk: ~1 time wall-clock).
 
 ### Sammendrag
 
