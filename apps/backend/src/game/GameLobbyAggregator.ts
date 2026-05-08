@@ -738,16 +738,31 @@ export class GameLobbyAggregator {
 
     // 6. Hall-navn-mapping. For haller som ikke er i GoH (master/caller
     // som faller ut), prøv platformService som siste fallback.
+    //
+    // Code-review (PR #1050) flagget N+1: tidligere itererte vi sekvensielt
+    // og await-et hver getHall — gir lineær latency for alle missing-haller.
+    // Promise.all parallelliserer fallback-lookups; getHall er trygg å kalle
+    // parallelt (read-only DB-spørring per hall, ingen delt lock).
     const hallNames = new Map<string, string>(goHMembers);
+    const idsToResolve: string[] = [];
     for (const id of hallIdsToShow) {
       if (!hallNames.has(id)) {
-        // Best-effort lookup
-        try {
-          const platHall = await this.platformService.getHall(id);
-          hallNames.set(id, platHall.name);
-        } catch {
-          hallNames.set(id, id);
-        }
+        idsToResolve.push(id);
+      }
+    }
+    if (idsToResolve.length > 0) {
+      const lookups = await Promise.all(
+        idsToResolve.map(async (id) => {
+          try {
+            const platHall = await this.platformService.getHall(id);
+            return { id, name: platHall.name };
+          } catch {
+            return { id, name: id };
+          }
+        }),
+      );
+      for (const { id, name } of lookups) {
+        hallNames.set(id, name);
       }
     }
 
@@ -789,6 +804,10 @@ export class GameLobbyAggregator {
     const result: Spill1HallReadyStatus[] = [];
     for (const hallId of hallIdsToShow) {
       const ready = readyByHallId.get(hallId) ?? null;
+      // Cache computeHallStatus-resultatet — code-review (PR #1050) flagget
+      // at vi tidligere kalte funksjonen to ganger på samme rad i samme
+      // iterasjon (én for colorCode, én for hasNoCustomers). Én call holder.
+      const computedStatus = ready ? computeHallStatus(ready) : null;
 
       // Hvis en runde finnes og hallen ikke er i participating_halls_json
       // OG ikke er master, marker som ekskludert (semantisk: ikke deltaker).
@@ -810,11 +829,10 @@ export class GameLobbyAggregator {
       // har row OG ingen scheduled-game finnes, marker som "gray"
       // (ikke participating ennå).
       let colorCode: Spill1HallStatusColor;
-      if (ready) {
-        const computed = computeHallStatus(ready);
+      if (computedStatus) {
         // Re-map: 'red' fra computeHallStatus = playerCount=0; det
         // matcher vår semantikk. 'orange'/'green' likt.
-        colorCode = computed.color;
+        colorCode = computedStatus.color;
       } else if (!hasScheduledGame) {
         // Ingen runde spawnet ennå — vi viser hallen som gray (avventer).
         colorCode = "gray";
@@ -831,9 +849,8 @@ export class GameLobbyAggregator {
       //   hasNoCustomers = true hvis playerCount=0 og ready-rad finnes
       //                    eller hvis excludedReason == "Ingen kunder"
       let hasNoCustomers = false;
-      if (ready) {
-        const computed = computeHallStatus(ready);
-        hasNoCustomers = computed.playerCount === 0;
+      if (computedStatus) {
+        hasNoCustomers = computedStatus.playerCount === 0;
       } else if (!hasScheduledGame) {
         // Ingen runde ennå — vi vet ikke. Default false.
         hasNoCustomers = false;
