@@ -42,7 +42,7 @@ RUN npm install --include=dev --no-audit --no-fund \
  && npm --prefix apps/backend install --include=dev --no-audit --no-fund
 
 # Source — only the workspaces backend needs at compile-time.
-COPY tsconfig.json ./
+# (no root tsconfig.json — backend's tsconfig is self-contained)
 COPY packages/shared-types/ packages/shared-types/
 COPY apps/backend/tsconfig.json apps/backend/
 COPY apps/backend/src/ apps/backend/src/
@@ -62,26 +62,20 @@ FROM node:22-alpine
 RUN apk add --no-cache tini wget
 WORKDIR /app
 
-# Copy workspace artefacts the runtime needs:
-#   - root + backend node_modules (with workspaces linked)
-#   - compiled shared-types (linked from root node_modules via workspaces)
-#   - backend dist + migrations + scripts (tsx at runtime for seeding)
-#   - public assets used by Express
-#
-# We keep the backend root at /app so chaos scripts can reuse the same
-# `npm --prefix /app run migrate` / `npx tsx /app/scripts/...` paths
-# they already invoke today.
-COPY --from=builder /repo/node_modules /repo/node_modules
-COPY --from=builder /repo/packages /repo/packages
-COPY --from=builder /repo/package.json /repo/package.json
-COPY --from=builder /repo/apps/backend/package.json /app/package.json
-COPY --from=builder /repo/apps/backend/package-lock.json /app/package-lock.json
-COPY --from=builder /repo/apps/backend/node_modules /app/node_modules
-COPY --from=builder /repo/apps/backend/dist /app/dist
-COPY --from=builder /repo/apps/backend/migrations /app/migrations
-COPY --from=builder /repo/apps/backend/scripts /app/scripts
-COPY --from=builder /repo/apps/backend/public /app/public
-COPY --from=builder /repo/apps/backend/openapi.yaml /app/openapi.yaml
+# We preserve the workspace tree shape so symlinks stay valid.
+# The backend's node_modules has `@spillorama/shared-types` symlinked as
+# `../../../../packages/shared-types` (relative). We'd break the link
+# if we flattened the layout, so the runtime keeps `/repo/...` intact
+# and exposes `/app` as a symlink to `/repo/apps/backend`. Chaos
+# scripts can keep using the same `/app/...` paths.
+COPY --from=builder /repo /repo
+
+# /app → /repo/apps/backend (one filesystem entry, doesn't duplicate
+# files). `npm --prefix /app run migrate` and `npx tsx /app/scripts/...`
+# both follow the symlink transparently.
+RUN rm -rf /app && ln -s /repo/apps/backend /app
+
+WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=4000

@@ -40,12 +40,15 @@ services:
     build:
       # BIN-825: build context is repo root because npm-workspace
       # links (file:../../packages/shared-types) need the whole tree.
-      context: ../..
+      # Path is relative to the BASE compose-file (docker-compose.yml at
+      # repo root), per Docker Compose v2 override semantics — NOT
+      # relative to this override file.
+      context: .
       dockerfile: infra/chaos-tests/Dockerfile.chaos
     container_name: spillorama-backend-1
     ports:
       - "4001:4000"
-    env_file: ./.env.chaos
+    env_file: infra/chaos-tests/.env.chaos
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -74,13 +77,15 @@ services:
 
   backend-2:
     build:
-      # BIN-825: same monorepo-aware build as backend-1.
-      context: ../..
+      # BIN-825: same monorepo-aware build as backend-1. See backend-1
+      # for the explanation of why context is relative to the BASE
+      # docker-compose.yml at repo root, not this override file.
+      context: .
       dockerfile: infra/chaos-tests/Dockerfile.chaos
     container_name: spillorama-backend-2
     ports:
       - "4002:4000"
-    env_file: ./.env.chaos
+    env_file: infra/chaos-tests/.env.chaos
     environment:
       NODE_ENV: production
       PORT: "4000"
