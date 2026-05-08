@@ -1532,46 +1532,36 @@ export class PostgresWalletAdapter implements WalletAdapter {
       await client.query("BEGIN");
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
 
-      // PR-W1 wallet-split: tabellen skapes alltid med split-kolonnene når
-      // den lages fra scratch (f.eks. i integration-tests uten migration-kjøring).
-      // `balance` er GENERATED for bakoverkompat.
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.accountsTable()} (
-          id TEXT PRIMARY KEY,
-          deposit_balance NUMERIC(20, 6) NOT NULL DEFAULT 0,
-          winnings_balance NUMERIC(20, 6) NOT NULL DEFAULT 0,
-          balance NUMERIC(20, 6) GENERATED ALWAYS AS (deposit_balance + winnings_balance) STORED,
-          is_system BOOLEAN NOT NULL DEFAULT false,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          CONSTRAINT wallet_accounts_system_no_winnings
-            CHECK (is_system = false OR winnings_balance = 0),
-          CONSTRAINT wallet_accounts_nonneg_deposit_nonsystem
-            CHECK (is_system = true OR deposit_balance >= 0),
-          CONSTRAINT wallet_accounts_nonneg_winnings_nonsystem
-            CHECK (is_system = true OR winnings_balance >= 0)
-        )`
-      );
-
-      // Hvis tabellen allerede finnes (pre-W1 schema), sørg for at split-
-      // kolonnene er lagt til. Idempotent med migrasjonen.
-      await client.query(
-        `ALTER TABLE ${this.accountsTable()}
-           ADD COLUMN IF NOT EXISTS deposit_balance NUMERIC(20, 6) NOT NULL DEFAULT 0,
-           ADD COLUMN IF NOT EXISTS winnings_balance NUMERIC(20, 6) NOT NULL DEFAULT 0`
-      );
+      // BIN-828 (2026-05-08): wallet_accounts/transactions/entries/reservations
+      // CREATE TABLE-statementene ble flyttet ut av runtime-init. Migrations er
+      // nå eneste sannhetskilde for skjemaet — duplikat CREATE TABLE her gjorde
+      // at backend-startup-DDL kolliderte med node-pg-migrate sin INSERT i
+      // `20260413000001_initial_schema.sql` (insert mot GENERATED-konvertert
+      // `balance` etter `20260606000000_wallet_split_deposit_winnings.sql`).
+      //
+      // Production: `render.yaml` `buildCommand` kjører `npm run migrate` FØR
+      // `npm run start`, så tabellene eksisterer alltid før denne metoden
+      // kjøres. ALTER TABLE-statementene under er beholdt som idempotent
+      // defensive ops (no-op når migration har gjort jobben, sikrer kolonner
+      // hvis backend kommer over en pre-BIN-766/BIN-764-DB).
+      //
+      // Tester med fersk `test_<uuid>`-schema må kalle
+      // `bootstrapWalletSchemaForTests` før de bruker adapter-en — se
+      // `apps/backend/src/adapters/walletSchemaTestUtil.ts`.
+      //
+      // Anti-pattern fjernet: runtime-init duplikerte migrasjon-arbeid.
 
       // BIN-766: multi-currency-readiness. NOK-only nå (CHECK enforcing).
+      // ALTER TABLE ... ADD COLUMN IF NOT EXISTS er idempotent: no-op når
+      // migration har lagt til kolonnen (prod), legger til på pre-BIN-766-DB.
       await client.query(
         `ALTER TABLE ${this.accountsTable()}
            ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
       );
       // BIN-766 / DB-P0-001: CHECK-constraint NOK-only. Idempotent via
-      // pg_constraint lookup — ADD only fires if the constraint is absent
-      // (fresh test schema). In production the migration
-      // `20260926000000_wallet_currency_readiness.sql` already added it so
-      // this is a no-op; no DROP+RE-ADD cycle, no full-table validation
-      // scan, no EXCLUSIVE lock on cold-boot.
+      // pg_constraint lookup — ADD only fires if the constraint is absent.
+      // I prod har migration `20260926000000_wallet_currency_readiness.sql`
+      // allerede lagt den til, så dette er no-op.
       await this.ensureCheckConstraint(
         client,
         "wallet_accounts",
@@ -1579,67 +1569,33 @@ export class PostgresWalletAdapter implements WalletAdapter {
         "currency = 'NOK'"
       );
 
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.transactionsTable()} (
-          id TEXT PRIMARY KEY,
-          operation_id TEXT NOT NULL,
-          account_id TEXT NOT NULL REFERENCES ${this.accountsTable()}(id),
-          transaction_type TEXT NOT NULL,
-          amount NUMERIC(20, 6) NOT NULL CHECK (amount > 0),
-          reason TEXT NOT NULL,
-          related_account_id TEXT NULL,
-          idempotency_key TEXT NULL,
-          currency TEXT NOT NULL DEFAULT 'NOK',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`
-      );
       // BIN-766: defensiv ADD COLUMN i tilfelle pre-BIN-766-DB.
       await client.query(
         `ALTER TABLE ${this.transactionsTable()}
            ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
       );
       // DB-P0-001: idempotent via pg_constraint lookup — see comment on
-      // wallet_accounts above. Production no-op; test-schema first-boot only.
+      // wallet_accounts above. Production no-op; pre-BIN-766-DB only.
       await this.ensureCheckConstraint(
         client,
         "wallet_transactions",
         "wallet_transactions_currency_nok_only",
         "currency = 'NOK'"
       );
-      // BIN-162: Idempotency key unique index (only for non-null keys)
+      // BIN-162: Idempotency key unique index (only for non-null keys).
+      // CREATE INDEX IF NOT EXISTS er idempotent.
       await client.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_transactions_idempotency_key
          ON ${this.transactionsTable()} (idempotency_key) WHERE idempotency_key IS NOT NULL`
       );
 
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.entriesTable()} (
-          id BIGSERIAL PRIMARY KEY,
-          operation_id TEXT NOT NULL,
-          account_id TEXT NOT NULL REFERENCES ${this.accountsTable()}(id),
-          side TEXT NOT NULL CHECK (side IN ('DEBIT', 'CREDIT')),
-          amount NUMERIC(20, 6) NOT NULL CHECK (amount > 0),
-          transaction_id TEXT NULL REFERENCES ${this.transactionsTable()}(id),
-          account_side TEXT NOT NULL DEFAULT 'deposit'
-            CHECK (account_side IN ('deposit', 'winnings')),
-          currency TEXT NOT NULL DEFAULT 'NOK',
-          entry_hash TEXT NULL,
-          previous_entry_hash TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`
-      );
-      // Hvis tabellen finnes fra før: sørg for account_side-kolonnen.
-      await client.query(
-        `ALTER TABLE ${this.entriesTable()}
-           ADD COLUMN IF NOT EXISTS account_side TEXT NOT NULL DEFAULT 'deposit'`
-      );
       // BIN-766: defensiv ADD COLUMN i tilfelle pre-BIN-766-DB.
       await client.query(
         `ALTER TABLE ${this.entriesTable()}
            ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'NOK'`
       );
       // DB-P0-001: idempotent via pg_constraint lookup — see comment on
-      // wallet_accounts above. Production no-op; test-schema first-boot only.
+      // wallet_accounts above.
       await this.ensureCheckConstraint(
         client,
         "wallet_entries",
@@ -1678,30 +1634,6 @@ export class PostgresWalletAdapter implements WalletAdapter {
          ON ${this.entriesTable()} (account_id, id)`
       );
 
-      // BIN-693 Option B + PR #513 §1.1: app_wallet_reservations.
-      // Mirror av migration `20260724100000_wallet_reservations.sql` +
-      // `20260425000000_wallet_reservations_numeric.sql`. Inline CREATE her
-      // gjør at integration-tester med fresh schema (test_<uuid>) har tabellen
-      // klar uten å måtte kjøre migration-CLI separat.
-      //
-      // amount_cents er NUMERIC(20,6) — IKKE BIGINT — for å matche
-      // wallet-balance-presisjon og støtte fractional NOK (eks. 12.50 kr).
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.reservationsTable()} (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          wallet_id TEXT NOT NULL,
-          amount_cents NUMERIC(20, 6) NOT NULL CHECK (amount_cents > 0),
-          idempotency_key TEXT NOT NULL UNIQUE,
-          status TEXT NOT NULL DEFAULT 'active'
-            CHECK (status IN ('active', 'released', 'committed', 'expired')),
-          room_code TEXT NOT NULL,
-          game_session_id TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          released_at TIMESTAMPTZ NULL,
-          committed_at TIMESTAMPTZ NULL,
-          expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 minutes')
-        )`
-      );
       // PR #513 §1.1: oppgrader eksisterende BIGINT-kolonne til NUMERIC(20,6).
       // Idempotent: ALTER COLUMN TYPE er no-op hvis typen allerede stemmer.
       await client.query(
@@ -1721,6 +1653,11 @@ export class PostgresWalletAdapter implements WalletAdapter {
          ON ${this.reservationsTable()}(room_code)`
       );
 
+      // Runtime-init: sikre at system-kontoene eksisterer. Disse skrives med
+      // det moderne split-skjemaet (deposit_balance/winnings_balance). Hvis
+      // tabellen ikke eksisterer (migrations ikke kjørt), feiler dette og
+      // backend stopper — fail-fast er det riktige (jf. BIN-825 chaos-fix:
+      // migrate MÅ kjøre før backend).
       await this.insertSystemAccountIfMissing(client, this.houseAccountId);
       await this.insertSystemAccountIfMissing(client, this.externalCashAccountId);
       await client.query("COMMIT");
