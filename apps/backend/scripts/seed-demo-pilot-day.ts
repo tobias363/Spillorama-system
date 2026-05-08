@@ -414,6 +414,10 @@ async function main(): Promise<void> {
     console.log("== Profil B: 4-hall-pilot ==");
     await seedFourHallProfile(client);
 
+    console.log("");
+    console.log("== Spilleplan-redesign 2026-05-07: game-catalog + demo-plan ==");
+    await seedGameCatalogAndPlans(client);
+
     // Hent ut tv_token for utskrift (kun hvis kolonnen finnes) — Profil A.
     let singleHallTvToken = "<ikke konfigurert>";
     if (await columnExists(client, "app_halls", "tv_token")) {
@@ -859,6 +863,672 @@ async function seedFourHallProfile(client: Client): Promise<void> {
 
   // 8) Kiosk-produkter — bind til alle 4 pilot-haller.
   await seedKioskProducts(client, allHallIds, ADMIN_ID);
+}
+
+// ── Game-catalog + demo-spilleplan (Spilleplan-redesign 2026-05-07) ─────────
+
+/**
+ * Seeder de 13 katalog-spillene fra `docs/architecture/SPILL_REGLER_OG_PAYOUT.md`
+ * §1.4 inn i `app_game_catalog`, og legger inn én demo-spilleplan
+ * (`demo-plan-pilot`) for Profil B (4-hall-pilot) hvor alle 13 spill er
+ * lagt inn i sortOrder-rekkefølge.
+ *
+ * Idempotens:
+ *   - Katalog-rader bruker `INSERT ... ON CONFLICT (id) DO UPDATE` så
+ *     re-kjøring oppdaterer fields hvis kanonisk doc endrer seg.
+ *   - Plan-meta bruker samme mønster.
+ *   - Plan-items bruker stable IDs (`demo-plan-item-pilot-N`) med
+ *     `ON CONFLICT (id) DO UPDATE` slik at sekvens kan re-seedes uten å
+ *     bryte FK-en fra `app_game1_scheduled_games.plan_item_id`. Vi rører
+ *     ikke posisjon for eksisterende rows for å unngå (plan_id, position)-
+ *     unique-constraint-violations ved partial-update.
+ *
+ * Kilde for premier: SPILL_REGLER_OG_PAYOUT.md §1.4 + §3.3 + §5 (Trafikklys)
+ * + §6 (Oddsen). Hvor doc-en sier "varierer" eller "500-2000" bruker vi
+ * defensive default-verdier som er gyldig (alle base ≥ 0; bingoBase ≥ 1
+ * for auto-modus). Disse kan justeres av admin via game-catalog-UI uten
+ * å rote sekvenser.
+ *
+ * Bokstav (slug `bokstav`): Tobias bekreftet 2026-05-08 at Bokstav er
+ * fjernet som Spill 1-katalog-rad (skal flyttes til Spill 3-runtime som
+ * mønster-variant). Master-doc §1.4 lister fortsatt slug-en — vi seeder
+ * raden for å matche docens 13-tall, men den kan deaktiveres etter
+ * seeding hvis Spill 3-runtime ikke trenger den.
+ */
+
+/**
+ * Demo-katalog-rad. Mappes 1:1 til `app_game_catalog`-kolonnene.
+ *
+ * `prizesCents.bingo` brukes alltid i schema-en (NOT NULL constraint via
+ * `prizes_cents_json`), men:
+ *   - I `auto`-modus er `bingoBase` skalaren som engine bruker. `bingo`-
+ *     objektet beholdes for backwards-compat (jf. parser i
+ *     GameCatalogService:400) — vi setter samme tall per farge slik at
+ *     legacy-kode som leser `bingo[color]` får et fornuftig fallback.
+ *   - I `explicit_per_color`-modus er `bingo`-objektet primær-kilden, og
+ *     `bingoBase` settes ikke (Trafikklys leser `rules.bingoPerRowColor`).
+ */
+interface DemoCatalogEntry {
+  id: string;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  rules: Record<string, unknown>;
+  ticketColors: readonly ("gul" | "hvit" | "lilla")[];
+  ticketPricesCents: Record<string, number>;
+  prizesCents: {
+    rad1: number;
+    rad2: number;
+    rad3: number;
+    rad4: number;
+    bingoBase?: number;
+    bingo: Record<string, number>;
+  };
+  prizeMultiplierMode: "auto" | "explicit_per_color";
+  bonusGameSlug: string | null;
+  bonusGameEnabled: boolean;
+  requiresJackpotSetup: boolean;
+  sortOrder: number;
+}
+
+// Standard rad-premie-base for hovedspill (alle Rad 1-4 = 100 kr base for
+// billigste bong, jf. eksempel-tabellen i §3.3 av SPILL_REGLER_OG_PAYOUT.md).
+// 100 kr = 10000 øre. Auto-mult skalerer til gul=200, lilla=300.
+const RAD_BASE_DEFAULT_CENTS = 10000;
+
+// Standard ticket-config for de 11 hovedspillene som bruker auto-mult med
+// alle 3 bongfarger.
+const STANDARD_TICKET_COLORS = ["hvit", "gul", "lilla"] as const;
+const STANDARD_TICKET_PRICES_CENTS = {
+  hvit: 500,
+  gul: 1000,
+  lilla: 1500,
+} as const;
+
+// Hjelpefunksjon: standard `bingo` per-farge-objekt for auto-modus
+// (auto-mult anvendt med base for hvit). Beholdes i prizes_cents_json for
+// backwards-compat — engine leser `bingoBase` for "auto".
+function autoBingoLookup(bingoBaseCents: number): Record<string, number> {
+  return {
+    hvit: bingoBaseCents,
+    gul: bingoBaseCents * 2,
+    lilla: bingoBaseCents * 3,
+  };
+}
+
+/**
+ * 13 katalog-spill iht. SPILL_REGLER_OG_PAYOUT.md §1.4. sortOrder = 1..13
+ * (1-indeksert) matcher position 1..13 i demo-spilleplanen.
+ */
+const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
+  // 1. bingo — standard 75-ball, bingoBase 1000 kr (= 100 000 øre).
+  {
+    id: "demo-catalog-bingo",
+    slug: "bingo",
+    displayName: "Bingo",
+    description: "Standard 75-ball Spill 1 — billigste bong får 1 000 kr Fullt Hus, auto-multiplikator skalerer for dyrere bonger.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 1,
+  },
+  // 2. 1000-spill — standard, bingoBase 1000 kr.
+  {
+    id: "demo-catalog-1000-spill",
+    slug: "1000-spill",
+    displayName: "1000-spill",
+    description: "Standard Spill 1 hvor billigste bong gir 1 000 kr på Fullt Hus.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 2,
+  },
+  // 3. 5x500 — standard, bingoBase 500 kr (= 50 000 øre).
+  {
+    id: "demo-catalog-5x500",
+    slug: "5x500",
+    displayName: "5×500",
+    description: "Standard Spill 1 hvor billigste bong gir 500 kr på Fullt Hus.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 50000,
+      bingo: autoBingoLookup(50000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 3,
+  },
+  // 4. ball-x-10 — standard, bingoBase varierer (default 1000 kr).
+  {
+    id: "demo-catalog-ball-x-10",
+    slug: "ball-x-10",
+    displayName: "Ball × 10",
+    description: "Standard Spill 1 — bingoBase varierer; default-seed setter 1 000 kr (admin justerer i game-catalog-UI).",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 4,
+  },
+  // 5. bokstav — standard, bingoBase varierer. NB: SPILL_DETALJER_PER_SPILL.md
+  // markerte denne som FJERNET 2026-05-08, men SPILL_REGLER_OG_PAYOUT.md §1.4
+  // (kanonisk per task-prompt) lister den fortsatt. Vi seeder raden for å
+  // matche 13-tallet — admin kan deaktivere via UI hvis Spill 3-runtime
+  // overtar Bokstav-mønsteret.
+  {
+    id: "demo-catalog-bokstav",
+    slug: "bokstav",
+    displayName: "Bokstav",
+    description: "Standard Spill 1 — bingoBase varierer; default-seed setter 1 000 kr. NB: kanonisk doc-konflikt — kan deaktiveres hvis Spill 3 overtar mønster-varianten.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 5,
+  },
+  // 6. innsatsen — standard med Innsatsen-pot. bingoBase 1000 kr (range
+  // 500-2000 ifølge §1.4; vi velger midten: 1000). Innsatsen-pot trekkes
+  // ut separat av PotEvaluator, ikke en del av prizes_cents_json.
+  {
+    id: "demo-catalog-innsatsen",
+    slug: "innsatsen",
+    displayName: "Innsatsen",
+    description: "Standard Spill 1 med Innsatsen-pot som ekstra premie. bingoBase 1 000 kr (intervall 500-2000 — admin kan justere).",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 6,
+  },
+  // 7. jackpot — master setter via popup. requires_jackpot_setup = TRUE.
+  // bingoBase blir override-et av master ved start, men schema krever
+  // bingoBase ≥ 1 i auto-modus — vi setter en placeholder 1000 kr.
+  {
+    id: "demo-catalog-jackpot",
+    slug: "jackpot",
+    displayName: "Jackpot",
+    description: "Master fyller jackpot-popup ved start (trekk + premier per bongfarge). bingoBase i seed er placeholder; runtime bruker master-override.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: true,
+    sortOrder: 7,
+  },
+  // 8. kvikkis — standard, bingoBase 1000 kr.
+  {
+    id: "demo-catalog-kvikkis",
+    slug: "kvikkis",
+    displayName: "Kvikkis",
+    description: "Standard Spill 1 — billigste bong gir 1 000 kr Fullt Hus.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 100000,
+      bingo: autoBingoLookup(100000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 8,
+  },
+  // 9. oddsen-55 — gameVariant "oddsen" + targetDraw 55. low/high split
+  // per §1.4 (low 500 kr / high 1500 kr) skrives i rules-feltet; engine
+  // leser disse for bingo-payout. bingoBase brukes IKKE av engine for
+  // oddsen-varianter, men schema krever ≥ 1 i auto-modus — vi setter low
+  // (50 000 øre) som placeholder.
+  {
+    id: "demo-catalog-oddsen-55",
+    slug: "oddsen-55",
+    displayName: "Oddsen 55",
+    description: "Spesialspill: HIGH bingo (1 500 kr base) hvis Fullt Hus oppnås på trekk ≤ 55, ellers LOW (500 kr base). Auto-mult skalerer for dyrere bonger.",
+    rules: {
+      gameVariant: "oddsen",
+      targetDraw: 55,
+      bingoBaseLow: 50000,
+      bingoBaseHigh: 150000,
+    },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      // Placeholder for schema-validator (auto-modus krever bingoBase ≥ 1)
+      bingoBase: 50000,
+      bingo: autoBingoLookup(50000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 9,
+  },
+  // 10. oddsen-56 — identisk med oddsen-55 men targetDraw 56.
+  {
+    id: "demo-catalog-oddsen-56",
+    slug: "oddsen-56",
+    displayName: "Oddsen 56",
+    description: "Spesialspill: HIGH bingo hvis Fullt Hus oppnås på trekk ≤ 56, ellers LOW.",
+    rules: {
+      gameVariant: "oddsen",
+      targetDraw: 56,
+      bingoBaseLow: 50000,
+      bingoBaseHigh: 150000,
+    },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 50000,
+      bingo: autoBingoLookup(50000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 10,
+  },
+  // 11. oddsen-57 — identisk med oddsen-55 men targetDraw 57.
+  {
+    id: "demo-catalog-oddsen-57",
+    slug: "oddsen-57",
+    displayName: "Oddsen 57",
+    description: "Spesialspill: HIGH bingo hvis Fullt Hus oppnås på trekk ≤ 57, ellers LOW.",
+    rules: {
+      gameVariant: "oddsen",
+      targetDraw: 57,
+      bingoBaseLow: 50000,
+      bingoBaseHigh: 150000,
+    },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 50000,
+      bingo: autoBingoLookup(50000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 11,
+  },
+  // 12. trafikklys — explicit_per_color. Alle bonger flat 15 kr (1500 øre).
+  // Premier styres av RAD-FARGE (rød/grønn/gul) ikke bongfarge — defineres
+  // i `rules.prizesPerRowColor` og `rules.bingoPerRowColor`. `prizes_cents_json`-
+  // shape: bingo-objekt per bongfarge med samme verdi (Trafikklys
+  // multi-vinner-regel deler likt fordi alle bonger har samme pris).
+  // bingoBase utelates i explicit_per_color-modus.
+  {
+    id: "demo-catalog-trafikklys",
+    slug: "trafikklys",
+    displayName: "Trafikklys",
+    description: "Spesialspill: master/system trekker rad-farge (rød/grønn/gul). Premier styres av rad-farge, ikke bongfarge. Alle bonger flat 15 kr.",
+    rules: {
+      gameVariant: "trafikklys",
+      ticketPriceCents: 1500,
+      rowColors: ["grønn", "gul", "rød"],
+      prizesPerRowColor: {
+        grønn: 10000,
+        gul: 15000,
+        rød: 5000,
+      },
+      bingoPerRowColor: {
+        grønn: 100000,
+        gul: 150000,
+        rød: 50000,
+      },
+    },
+    // Trafikklys er flat 15 kr — alle 3 bongfarger har samme pris i
+    // schema, men engine leser rad-farge-tabellen direkte fra rules.
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: {
+      hvit: 1500,
+      gul: 1500,
+      lilla: 1500,
+    },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      // explicit_per_color: bingoBase utelates (ikke i auto-modus).
+      // Per-farge bingo-lookup må være satt for alle aktive ticketColors.
+      bingo: {
+        hvit: 150000,
+        gul: 150000,
+        lilla: 150000,
+      },
+    },
+    prizeMultiplierMode: "explicit_per_color",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 12,
+  },
+  // 13. tv-extra — standard, bingoBase 3000 kr (= 300 000 øre).
+  {
+    id: "demo-catalog-tv-extra",
+    slug: "tv-extra",
+    displayName: "TV-Extra",
+    description: "Standard Spill 1 med høyere bingo-premie. Billigste bong gir 3 000 kr på Fullt Hus.",
+    rules: { gameVariant: "standard" },
+    ticketColors: STANDARD_TICKET_COLORS,
+    ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
+    prizesCents: {
+      rad1: RAD_BASE_DEFAULT_CENTS,
+      rad2: RAD_BASE_DEFAULT_CENTS,
+      rad3: RAD_BASE_DEFAULT_CENTS,
+      rad4: RAD_BASE_DEFAULT_CENTS,
+      bingoBase: 300000,
+      bingo: autoBingoLookup(300000),
+    },
+    prizeMultiplierMode: "auto",
+    bonusGameSlug: null,
+    bonusGameEnabled: false,
+    requiresJackpotSetup: false,
+    sortOrder: 13,
+  },
+];
+
+const DEMO_PLAN_ID = "demo-plan-pilot";
+const DEMO_PLAN_NAME = "Pilot Demo — alle 13 spill";
+const DEMO_PLAN_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const DEMO_PLAN_START_TIME = "11:00";
+const DEMO_PLAN_END_TIME = "21:00";
+
+/**
+ * Idempotent upsert av en katalog-rad. ON CONFLICT (id) DO UPDATE refresher
+ * alle felter slik at re-runs adopterer eventuelle endringer i kanonisk
+ * doc. created_at beholdes ved konflikt; updated_at settes til now().
+ */
+async function upsertGameCatalogEntry(
+  client: Client,
+  entry: DemoCatalogEntry,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO app_game_catalog
+       (id, slug, display_name, description, rules_json,
+        ticket_colors_json, ticket_prices_cents_json, prizes_cents_json,
+        prize_multiplier_mode, bonus_game_slug, bonus_game_enabled,
+        requires_jackpot_setup, is_active, sort_order, created_by_user_id)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb,
+             $9, $10, $11, $12, TRUE, $13, $14)
+     ON CONFLICT (id) DO UPDATE
+       SET slug = EXCLUDED.slug,
+           display_name = EXCLUDED.display_name,
+           description = EXCLUDED.description,
+           rules_json = EXCLUDED.rules_json,
+           ticket_colors_json = EXCLUDED.ticket_colors_json,
+           ticket_prices_cents_json = EXCLUDED.ticket_prices_cents_json,
+           prizes_cents_json = EXCLUDED.prizes_cents_json,
+           prize_multiplier_mode = EXCLUDED.prize_multiplier_mode,
+           bonus_game_slug = EXCLUDED.bonus_game_slug,
+           bonus_game_enabled = EXCLUDED.bonus_game_enabled,
+           requires_jackpot_setup = EXCLUDED.requires_jackpot_setup,
+           is_active = TRUE,
+           sort_order = EXCLUDED.sort_order,
+           updated_at = now()`,
+    [
+      entry.id,
+      entry.slug,
+      entry.displayName,
+      entry.description,
+      JSON.stringify(entry.rules),
+      JSON.stringify(entry.ticketColors),
+      JSON.stringify(entry.ticketPricesCents),
+      JSON.stringify(entry.prizesCents),
+      entry.prizeMultiplierMode,
+      entry.bonusGameSlug,
+      entry.bonusGameEnabled,
+      entry.requiresJackpotSetup,
+      entry.sortOrder,
+      ADMIN_ID,
+    ],
+  );
+}
+
+/**
+ * Idempotent upsert av plan-meta. Items håndteres av separat helper.
+ * group_of_halls_id binder mot pilot-GoH (Profil B) — XOR-constraint
+ * krever at hall_id er NULL.
+ */
+async function upsertGamePlan(
+  client: Client,
+  plan: {
+    id: string;
+    name: string;
+    description: string | null;
+    hallId: string | null;
+    groupOfHallsId: string | null;
+    weekdays: readonly string[];
+    startTime: string;
+    endTime: string;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO app_game_plan
+       (id, name, description, hall_id, group_of_halls_id, weekdays_json,
+        start_time, end_time, is_active, created_by_user_id)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::time, $8::time, TRUE, $9)
+     ON CONFLICT (id) DO UPDATE
+       SET name = EXCLUDED.name,
+           description = EXCLUDED.description,
+           hall_id = EXCLUDED.hall_id,
+           group_of_halls_id = EXCLUDED.group_of_halls_id,
+           weekdays_json = EXCLUDED.weekdays_json,
+           start_time = EXCLUDED.start_time,
+           end_time = EXCLUDED.end_time,
+           is_active = TRUE,
+           updated_at = now()`,
+    [
+      plan.id,
+      plan.name,
+      plan.description,
+      plan.hallId,
+      plan.groupOfHallsId,
+      JSON.stringify(plan.weekdays),
+      plan.startTime,
+      plan.endTime,
+      ADMIN_ID,
+    ],
+  );
+}
+
+/**
+ * Idempotent upsert av plan-items. Hver item får stable id
+ * `demo-plan-item-pilot-N` der N matcher position. ON CONFLICT (id) DO
+ * UPDATE refresher catalog-koblingen og notes.
+ *
+ * NB: Vi rører IKKE position på eksisterende items — det ville bryte
+ * (plan_id, position)-unique-constraint hvis to items ville fått samme
+ * posisjon midlertidig under partial-update. Stabile IDs gjør at
+ * position alltid stemmer overens med suffikset.
+ *
+ * Hvis admin senere fjerner en item via UI, blir ID-en gjenbrukt på neste
+ * seed-run — det er greit fordi vi alltid seeder den samme 13-sekvensen.
+ */
+async function upsertGamePlanItem(
+  client: Client,
+  item: {
+    id: string;
+    planId: string;
+    position: number;
+    gameCatalogId: string;
+    bonusGameOverride: string | null;
+    notes: string | null;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO app_game_plan_item
+       (id, plan_id, position, game_catalog_id, bonus_game_override, notes)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO UPDATE
+       SET game_catalog_id = EXCLUDED.game_catalog_id,
+           bonus_game_override = EXCLUDED.bonus_game_override,
+           notes = EXCLUDED.notes`,
+    [
+      item.id,
+      item.planId,
+      item.position,
+      item.gameCatalogId,
+      item.bonusGameOverride,
+      item.notes,
+    ],
+  );
+}
+
+async function seedGameCatalogAndPlans(client: Client): Promise<void> {
+  // 1) Verifiser at de nye tabellene finnes — migrasjonen
+  // 20261210000000_app_game_catalog_and_plan.sql må ha kjørt før vi
+  // forsøker å seede. Hvis ikke, hopp over (med advarsel) så seed-en
+  // ikke krasjer i CI / partial-migrate-miljøer.
+  const catalogTableExists = await tableExists(client, "app_game_catalog");
+  const planTableExists = await tableExists(client, "app_game_plan");
+  const itemTableExists = await tableExists(client, "app_game_plan_item");
+  if (!catalogTableExists || !planTableExists || !itemTableExists) {
+    console.warn(
+      `  [skip]            game-catalog-tabeller mangler ` +
+        `(catalog=${catalogTableExists}, plan=${planTableExists}, ` +
+        `item=${itemTableExists}). Kjør migrasjoner først ` +
+        `(npm run migrate). Hopper over.`,
+    );
+    return;
+  }
+
+  // 2) Seed alle 13 katalog-rader.
+  for (const entry of DEMO_CATALOG_ENTRIES) {
+    await upsertGameCatalogEntry(client, entry);
+    const flag = entry.requiresJackpotSetup ? " [jackpot-setup]" : "";
+    const mode = entry.prizeMultiplierMode === "auto" ? "auto" : "expl";
+    console.log(
+      `  [game-catalog]    ${entry.slug.padEnd(13)} sortOrder=${String(entry.sortOrder).padStart(2)} mode=${mode}${flag} (${entry.displayName})`,
+    );
+  }
+
+  // 3) Seed demo-spilleplan bundet til pilot-GoH.
+  await upsertGamePlan(client, {
+    id: DEMO_PLAN_ID,
+    name: DEMO_PLAN_NAME,
+    description:
+      "Demo-spilleplan for Profil B (4-hall-pilot). Inneholder alle 13 katalog-spill i sortOrder-rekkefølge. Genereres av seed-demo-pilot-day.",
+    hallId: null,
+    groupOfHallsId: PILOT_HALL_GROUP_ID,
+    weekdays: DEMO_PLAN_WEEKDAYS,
+    startTime: DEMO_PLAN_START_TIME,
+    endTime: DEMO_PLAN_END_TIME,
+  });
+  console.log(
+    `  [game-plan]       ${DEMO_PLAN_ID} (${DEMO_PLAN_NAME}, group=${PILOT_HALL_GROUP_ID}, ${DEMO_PLAN_START_TIME}-${DEMO_PLAN_END_TIME}, alle ukedager)`,
+  );
+
+  // 4) Seed 13 plan-items — én per katalog-spill i sortOrder-rekkefølge.
+  // Position 1..13 matcher sortOrder og index+1 i DEMO_CATALOG_ENTRIES.
+  for (let i = 0; i < DEMO_CATALOG_ENTRIES.length; i += 1) {
+    const entry = DEMO_CATALOG_ENTRIES[i];
+    const position = i + 1;
+    await upsertGamePlanItem(client, {
+      id: `demo-plan-item-pilot-${position}`,
+      planId: DEMO_PLAN_ID,
+      position,
+      gameCatalogId: entry.id,
+      // bonusGameOverride = null: følg katalog-default (jf. task-prompt §2).
+      bonusGameOverride: null,
+      notes: null,
+    });
+  }
+  console.log(
+    `  [game-plan-items] ${DEMO_CATALOG_ENTRIES.length} items (position 1..${DEMO_CATALOG_ENTRIES.length}, alle med bonusOverride=null)`,
+  );
 }
 
 // ── Kiosk-produkter (BIN-583 B3.6 / wireframe 17.12) ────────────────────────
@@ -2227,6 +2897,18 @@ function printInstructions(tvToken: string): void {
       `  Player login: ${player.email} / ${DEMO_PASSWORD} (hall=${player.hallId}, 500 NOK)`,
     );
   }
+  console.log(line);
+  console.log("Spilleplan-redesign 2026-05-07 — game-catalog + demo-plan:");
+  console.log(line);
+  console.log(
+    `  Katalog-spill:  ${DEMO_CATALOG_ENTRIES.length} stk i app_game_catalog (sortOrder 1..${DEMO_CATALOG_ENTRIES.length})`,
+  );
+  console.log(
+    `  Demo-plan:      ${DEMO_PLAN_NAME} (id=${DEMO_PLAN_ID}, group=${PILOT_HALL_GROUP_ID}, ${DEMO_PLAN_START_TIME}-${DEMO_PLAN_END_TIME})`,
+  );
+  console.log(`  Admin-UI:       http://localhost:5174/admin/#/games/catalog`);
+  console.log(`                  http://localhost:5174/admin/#/games/plans`);
+  console.log(`                  http://localhost:5174/admin/#/game1/master`);
   console.log(line);
   console.log("Endpoint-test:");
   console.log(
