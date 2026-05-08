@@ -5,8 +5,10 @@
  * running Spill 1-games hvor last_drawn_at + seconds ≤ now. Se
  * Game1AutoDrawTickService for detaljer.
  *
- * Feature-flag: `GAME1_AUTO_DRAW_ENABLED` (default: false i produksjon,
- * aktiveres når admin/master-UI i PR 4d er klar til live play).
+ * Feature-flag: `GAME1_AUTO_DRAW_ENABLED` (default: `true` per F13-fix
+ * 2026-05-09 — auto-draw er kjernen av Spill 1 og må være på for at
+ * running-spill skal trekke baller. Sett eksplisitt `false` i miljø hvis
+ * flagget skal disables for manuell QA).
  *
  * Robust mot "tabell mangler" (42P01) matcher mønsteret fra
  * game1ScheduleTick.ts.
