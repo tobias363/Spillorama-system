@@ -1,3 +1,32 @@
+# Architecture Decision Records (ADR) — DEPRECATED
+
+> **Migrert 2026-05-08:** ADR-er er flyttet til [`docs/adr/`](../adr/) med 4-siffer-nummerering og
+> oppdatert format. Se [`docs/adr/README.md`](../adr/README.md) for ny katalog. Filene i denne
+> mappen er beholdt for git-historikk og kan refereres som arkiv, men ny kontekst legges i
+> `docs/adr/`.
+>
+> **Migrasjons-mapping:**
+>
+> | Gammel | Ny |
+> |---|---|
+> | `ADR-001-perpetual-room-model-spill2-3.md` | `0002-perpetual-room-model-spill2-3.md` |
+> | `ADR-002-system-actor.md` | `0003-system-actor.md` |
+> | `ADR-003-hash-chain-audit.md` | `0004-hash-chain-audit.md` |
+> | `ADR-004-outbox-pattern.md` | `0005-outbox-pattern.md` |
+> | `ADR-005-structured-error-codes.md` | `0006-structured-error-codes.md` |
+> | `ADR-006-client-debug-suite.md` | `0007-client-debug-suite.md` |
+> | `ADR-007-spillkatalog-classification.md` | `0008-spillkatalog-classification.md` |
+> | `ADR-008-pm-centralized-git-flow.md` | `0009-pm-centralized-git-flow.md` |
+> | `ADR-009-done-policy-legacy-avkobling.md` | `0010-done-policy-legacy-avkobling.md` |
+> | `ADR-010-casino-grade-observability.md` | `0011-casino-grade-observability.md` |
+> | `ADR-011-batched-mass-payout.md` | `0012-batched-mass-payout.md` |
+> | `ADR-011-per-recipient-broadcast-perpetual-rooms.md` | `0013-per-recipient-broadcast-perpetual-rooms.md` |
+> | `ADR-012-idempotent-migrations.md` | `0014-idempotent-migrations.md` |
+>
+> Ny ADR-0001 (selvrefererende, om ADR-format og prosess) finnes kun på ny lokasjon.
+
+---
+
 # Architecture Decision Records (ADR)
 
 **Sist oppdatert:** 2026-05-06
