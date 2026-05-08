@@ -22,13 +22,9 @@
 language: "en"
 
 # Tonefall — chill (ikke aggressivt). Vi har strenge gates allerede.
-tone_instructions: |
-  Be concise and pragmatic. Don't restate what the diff already shows.
-  Focus on:
-    1. Bugs that automated tools can't catch (logic errors, race conditions, regulatory violations).
-    2. Spillorama-specific patterns (see path-instructions below).
-    3. Security issues (auth, input validation, SQL injection, secrets).
-  Skip stylistic comments — Prettier + ESLint + dependency-cruiser handle that.
+# NB: tone_instructions har 250-tegn-grense. Forkortet 2026-05-08 etter
+# at CodeRabbit ga config-parse-error på tidligere 406-tegn-versjon.
+tone_instructions: "Be concise. Skip stylistic feedback — automated tools handle that. Focus on bugs they miss: race conditions, regulatory violations, security (auth, SQL injection, secrets), Spillorama patterns from path-instructions."
 
 # Tidlig tilgang — false for stabilitet i regulert prod-system.
 early_access: false
