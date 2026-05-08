@@ -69,7 +69,6 @@ import type {
   GamePlanRun,
   GamePlanRunStatus,
   GamePlanWithItems,
-  Weekday,
 } from "./gamePlan.types.js";
 
 const logger = rootLogger.child({ module: "game-lobby-aggregator" });
@@ -88,14 +87,6 @@ function assertHallId(value: unknown): string {
     throw new DomainError("INVALID_INPUT", "hallId er påkrevd.");
   }
   return value.trim();
-}
-
-/** Mapping fra Oslo-dato (YYYY-MM-DD) → ukedag-slug (mon/tue/...). */
-function weekdayFromDateStr(dateStr: string): Weekday {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  const idx = d.getUTCDay(); // 0=Sunday
-  const order: Weekday[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-  return order[idx];
 }
 
 function asIso(value: Date | string | null | undefined): string | null {
