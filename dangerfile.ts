@@ -16,10 +16,18 @@
 import { danger, warn, message, fail } from "danger";
 
 // ------------------------------------------------------------------
+// Defensive lookup på GitHub-PR-metadata. `danger ci` injiserer disse
+// fra GITHUB_TOKEN. `danger local` (utvikler-test) har ikke noen PR
+// så vi faller tilbake til tomme verdier — botten kjører i "diff-only"
+// modus og hopper over PR-tittel/body-regler.
+// ------------------------------------------------------------------
+const githubPR = danger.github?.pr;
+const prTitle = githubPR?.title ?? "";
+const prBody = githubPR?.body ?? "";
+const hasPRMetadata = githubPR !== undefined;
+
 // Bypass-mekanisme: PR-beskrivelse som inneholder `[skip-danger]` slår
 // av alle warnings (men ikke `fail()` på PR-tittel — det er hard-stop).
-// ------------------------------------------------------------------
-const prBody = danger.github.pr.body ?? "";
 const skipChecklist = /\[skip-danger\]/i.test(prBody);
 
 // Samle alle endrede filer (modifiserte + nye)
@@ -135,7 +143,7 @@ if (!skipChecklist && allFiles.some((f) => liveRoomRe.test(f))) {
 // ============================================================
 const conventionalCommitRe =
   /^(feat|fix|chore|docs|test|refactor|perf|build|ci|style|revert)(\(.+\))?!?: .+/;
-if (!conventionalCommitRe.test(danger.github.pr.title)) {
+if (hasPRMetadata && !conventionalCommitRe.test(prTitle)) {
   fail(
     "PR-tittel må følge Conventional Commits-format:\n" +
       "  `<type>(<scope>): <subject>`\n\n" +
@@ -148,7 +156,7 @@ if (!conventionalCommitRe.test(danger.github.pr.title)) {
 // ============================================================
 // REGEL 8: PR-beskrivelse bør inneholde Summary + Test plan
 // ============================================================
-if (!skipChecklist && (prBody.length === 0 || prBody.length < 50)) {
+if (hasPRMetadata && !skipChecklist && prBody.length < 50) {
   warn(
     "PR-beskrivelse er kort eller tom. Inkluder minimum:\n" +
       "- **Summary** (hva gjør PR-en?)\n" +
