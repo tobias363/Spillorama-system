@@ -51,8 +51,13 @@ export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
   // limit is safe — anonymous abuse still falls back to /api/ below.
   { prefix: "/api/admin",                config: { windowMs: 60_000,  maxRequests: 600 } },
 
+  // Agent dashboard fyrer 7-10 parallelle requests ved page-load (auth/me,
+  // dashboard, payments, permissions, context, game-plan/current). Auth-
+  // guarded så høyere limit er trygg. Tobias-feedback 2026-05-08.
+  { prefix: "/api/agent",                config: { windowMs: 60_000,  maxRequests: 600 } },
+
   // General API reads: generous
-  { prefix: "/api/",                     config: { windowMs: 60_000,  maxRequests: 120 } },
+  { prefix: "/api/",                     config: { windowMs: 60_000,  maxRequests: 300 } },
 ];
 
 const GC_INTERVAL_MS = 60_000;
