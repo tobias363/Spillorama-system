@@ -272,11 +272,13 @@ import { Spill3ConfigService } from "./game/Spill3ConfigService.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
+import { Game1LobbyService } from "./game/Game1LobbyService.js";
 import { createAdminGameCatalogRouter } from "./routes/adminGameCatalog.js";
 import { createAdminSpill2ConfigRouter } from "./routes/adminSpill2Config.js";
 import { createAdminSpill3ConfigRouter } from "./routes/adminSpill3Config.js";
 import { createAdminGamePlansRouter } from "./routes/adminGamePlans.js";
 import { createAgentGamePlanRouter } from "./routes/agentGamePlan.js";
+import { createSpill1LobbyRouter } from "./routes/spill1Lobby.js";
 import { createAdminGame1PotsRouter } from "./routes/adminGame1Pots.js";
 import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
 import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
@@ -337,6 +339,7 @@ import {
   type SocketIdempotencyStore,
 } from "./sockets/SocketIdempotencyStore.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
+import { createSpill1LobbyEventHandlers } from "./sockets/spill1LobbyEvents.js";
 import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
 import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
@@ -1153,6 +1156,23 @@ const gamePlanEngineBridge = new GamePlanEngineBridge({
   pool: sharedPool,
   schema: pgSchema,
   catalogService: gameCatalogService,
+  planService: gamePlanService,
+  planRunService: gamePlanRunService,
+});
+
+// Spill 1 lobby-rom (2026-05-08, Tobias-direktiv): public read-only state
+// for klient-shell. Returnerer plan-åpningstider, neste planlagte spill,
+// og engine-status hvis runden er spawnet. Eksponert via
+// `GET /api/games/spill1/lobby?hallId=X` (no-auth, no-cache). Service-en
+// gjør INGEN write — kun read. Master driver state-overgangene via
+// `agentGamePlan.ts`-routene.
+//
+// Bakover-kompatibilitet: eksisterende `game1:join-scheduled` socket-
+// handler påvirkes IKKE. Klient kan bruke lobby-state til å presentere
+// "neste spill om X min" + "kjøp bonger"-knapp før socket-join.
+const game1LobbyService = new Game1LobbyService({
+  pool: sharedPool,
+  schema: pgSchema,
   planService: gamePlanService,
   planRunService: gamePlanRunService,
 });
@@ -2902,6 +2922,13 @@ app.use(createAgentGamePlanRouter({
   // engine via /api/agent/game1/start.
   engineBridge: gamePlanEngineBridge,
 }));
+// Spill 1 lobby-rom (2026-05-08, Tobias-direktiv): public read-only state
+// for klient-shell. `GET /api/games/spill1/lobby?hallId=X` returnerer
+// åpningstid + neste planlagte spill + scheduled-game-status hvis spawnet.
+// No-auth, no-cache (klient poller hvert 10s).
+app.use(createSpill1LobbyRouter({
+  lobbyService: game1LobbyService,
+}));
 // Agent IJ — Innsatsen-jackpot: per-hall pot-administrasjon (Game1PotService).
 // 5 endepunkter — list/detail/init/patch-config/reset. HALL_GAME_CONFIG_READ/WRITE.
 // Legacy Innsatsen-potten (dailySchedule.innsatsenSales + subGame.jackpotDraw) er
@@ -4110,6 +4137,16 @@ const registerGame1ScheduledEvents = createGame1ScheduledEventHandlers({
   bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
 });
 
+// Spill 1 lobby-rom socket-events (2026-05-08, Tobias-direktiv): klient
+// subscriber til `spill1:lobby:{hallId}`-rom for å motta `lobby:state-update`-
+// broadcasts ved master-handlinger. Server returnerer current snapshot på
+// subscribe så klient slipper en separat HTTP-fetch.
+const registerSpill1LobbyEvents = createSpill1LobbyEventHandlers({
+  io,
+  lobbyService: game1LobbyService,
+  socketRateLimiter,
+});
+
 // BIN-MYSTERY Gap D: socket-wire for alle 5 M6 mini-games (wheel, chest,
 // colordraft, oddsen, mystery). Før denne wire-up var setBroadcaster aldri
 // kalt → NoopMiniGameBroadcaster i bruk → klient fikk aldri mini_game-events.
@@ -4146,6 +4183,7 @@ io.on("connection", (socket: Socket) => {
   registerAdminDisplayEvents(socket);
   registerAdminHallEvents(socket);
   registerGame1ScheduledEvents(socket);
+  registerSpill1LobbyEvents(socket);
   miniGameSocketWire.register(socket);
   registerAdminOpsEvents(socket);
 });
