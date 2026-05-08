@@ -636,6 +636,127 @@ test("isWithinOpeningHours: utenfor vindu = false (etter)", () => {
   assert.equal(isWithinOpeningHours(config, oslo2300), false);
 });
 
+// BIN-823 edge-case-utvidelse: regulatorisk pilot-go-live krever at vi vet
+// EXAKT hva guard-en gjør på endpoint-grenser, DST-skifte, og just-utenfor-
+// vindu. Hver av disse case-ene speiler en regulatorisk failure-modus som
+// Lotteritilsynet ville flagget hvis vi ikke håndterte det korrekt.
+
+test("isWithinOpeningHours: inklusiv start (10:00 selv) = true", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "10:00",
+    openingTimeEnd: "22:00",
+  };
+  // 10:00:00 Oslo (CEST = UTC+2) → 08:00 UTC. nowHHMM === "10:00" === start
+  // → leksikografisk >= start, < end → true. Same convention som Spill 3.
+  const osloStart = new Date("2026-05-08T08:00:00Z");
+  assert.equal(isWithinOpeningHours(config, osloStart), true);
+});
+
+test("isWithinOpeningHours: ekskluderende end (22:00 selv) = false", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "10:00",
+    openingTimeEnd: "22:00",
+  };
+  // 22:00:00 Oslo (CEST = UTC+2) → 20:00 UTC. nowHHMM === "22:00" === end
+  // → leksikografisk < end er FALSE → false. Spillet stenger på selve
+  // stengetidspunktet (regulatorisk korrekt).
+  const osloEnd = new Date("2026-05-08T20:00:00Z");
+  assert.equal(isWithinOpeningHours(config, osloEnd), false);
+});
+
+test("isWithinOpeningHours: just-innenfor-end (21:59 Oslo) = true", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "10:00",
+    openingTimeEnd: "22:00",
+  };
+  // 21:59 Oslo (CEST) → 19:59 UTC. nowHHMM === "21:59" < "22:00" → true.
+  const osloJustInside = new Date("2026-05-08T19:59:00Z");
+  assert.equal(isWithinOpeningHours(config, osloJustInside), true);
+});
+
+test("isWithinOpeningHours: just-utenfor-start (09:59 Oslo) = false", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "10:00",
+    openingTimeEnd: "22:00",
+  };
+  // 09:59 Oslo (CEST) → 07:59 UTC. nowHHMM === "09:59" < "10:00" → false.
+  const osloJustOutside = new Date("2026-05-08T07:59:00Z");
+  assert.equal(isWithinOpeningHours(config, osloJustOutside), false);
+});
+
+test("isWithinOpeningHours: vintertid-test (CET = UTC+1, januar)", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
+  };
+  // 14:00 Oslo i januar (CET = UTC+1) → 13:00 UTC. Innenfor 11:00-23:00.
+  const osloVinter = new Date("2026-01-15T13:00:00Z");
+  assert.equal(isWithinOpeningHours(config, osloVinter), true);
+});
+
+test("isWithinOpeningHours: vintertid utenfor vindu (07:00 Oslo i januar) = false", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
+  };
+  // 07:00 Oslo i januar (CET = UTC+1) → 06:00 UTC. Utenfor 11:00-23:00.
+  const osloVinterUtenfor = new Date("2026-01-15T06:00:00Z");
+  assert.equal(isWithinOpeningHours(config, osloVinterUtenfor), false);
+});
+
+test("isWithinOpeningHours: midnatt-Oslo i sommertid (00:30 Oslo) = false når vindu 11:00-23:00", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
+  };
+  // 00:30 Oslo (CEST = UTC+2) → 22:30 UTC dagen før.
+  const osloMidnatt = new Date("2026-07-01T22:30:00Z");
+  assert.equal(isWithinOpeningHours(config, osloMidnatt), false);
+});
+
+test("isWithinOpeningHours: tidlig morgen utenfor vindu (03:00 Oslo) = false", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "11:00",
+    openingTimeEnd: "23:00",
+  };
+  // 03:00 Oslo (CEST = UTC+2) → 01:00 UTC. Tydelig utenfor 11:00-23:00.
+  const oslo0300 = new Date("2026-07-01T01:00:00Z");
+  assert.equal(isWithinOpeningHours(config, oslo0300), false);
+});
+
+test("isWithinOpeningHours: 24t-spenn (00:00-23:59) er innenfor på 12:00", () => {
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "00:00",
+    openingTimeEnd: "23:59",
+  };
+  // 12:00 Oslo (CEST) → 10:00 UTC. Innenfor [00:00, 23:59).
+  const osloMidday = new Date("2026-05-08T10:00:00Z");
+  assert.equal(isWithinOpeningHours(config, osloMidday), true);
+});
+
+test("isWithinOpeningHours: edge — kun start satt (skal være avvist av assert, men funksjonen krasjer ikke)", () => {
+  // assertConfigConsistency vil avvise denne kombinasjonen før den når DB,
+  // men hvis DB likevel skulle ha en ugyldig rad må funksjonen være
+  // defensive og IKKE krasje. Her behandles "kun start satt"-case via
+  // null-vindu-pathen → returnerer true (alltid åpent som fail-open).
+  const config: Spill2Config = {
+    ...createConfig(),
+    openingTimeStart: "10:00",
+    openingTimeEnd: null,
+  };
+  // Forventet: null-vindu = alltid åpent (defensive default).
+  assert.equal(isWithinOpeningHours(config, new Date("2026-05-08T03:00:00Z")), true);
+});
+
 function createConfig(): Spill2Config {
   return {
     id: "test",
