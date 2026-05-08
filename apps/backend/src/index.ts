@@ -328,6 +328,11 @@ import { createAdminPlayerActivityRouter } from "./routes/adminPlayerActivity.js
 import { createAdminGameOversightRouter } from "./routes/adminGameOversight.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
+import {
+  RedisSocketIdempotencyStore,
+  InMemorySocketIdempotencyStore,
+  type SocketIdempotencyStore,
+} from "./sockets/SocketIdempotencyStore.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
 import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
@@ -3842,6 +3847,16 @@ const spill1StopVoteService = new Spill1StopVoteService({
   clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
 });
 
+// BIN-813 R5: Socket-event-deduplisering basert på `clientRequestId`.
+// Reuser samme Redis-pubclient som Socket.IO-adapter — ingen ekstra
+// connection-overhead. I dev/test (uten REDIS_URL) bruker vi in-memory
+// så local utvikling fortsatt fungerer og test-harnesses kan inject sin
+// egen store hvis de trenger forutsigbar oppførsel. Ingen prod-impact
+// hvis Redis-pathen feiler — wrapperen er fail-soft.
+const socketIdempotencyStore: SocketIdempotencyStore = socketIoPubClient
+  ? new RedisSocketIdempotencyStore({ redis: socketIoPubClient })
+  : new InMemorySocketIdempotencyStore();
+
 const registerGameEvents = createGameEventHandlers({
   engine, platformService, io, socketRateLimiter,
   emitRoomUpdate, emitManyRoomUpdates, buildRoomUpdatePayload,
@@ -4008,6 +4023,9 @@ const registerGameEvents = createGameEventHandlers({
   // trigges. Fail-soft: hvis spawn kaster, fanger handler-en og logger
   // som warn så join fortsetter normalt.
   spawnFirstRoundIfNeeded: (roomCode) => perpetualRoundService.spawnFirstRoundIfNeeded(roomCode),
+
+  // BIN-813 R5: idempotency-store for socket-event-dedupe.
+  socketIdempotencyStore,
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

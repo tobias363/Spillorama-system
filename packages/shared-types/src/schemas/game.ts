@@ -299,6 +299,18 @@ export const ClaimSubmitPayloadSchema = z.object({
   roomCode: z.string().min(1),
   playerId: z.string().optional(),
   type: ClaimType,
+  /**
+   * BIN-813 R5: Klient-generert UUID v4 for idempotent socket-event-
+   * dedupe. Hvis to identiske `claim:submit`-events kommer inn med
+   * samme `clientRequestId` (typisk reconnect-replay), returnerer
+   * server samme ack uten å trigge dupliserte sideeffekter (payouts,
+   * pattern:won-broadcasts).
+   *
+   * Validert som UUID på server-side; ugyldig format → INVALID_INPUT.
+   * Optional for backward-compat med eldre klienter — manglende felt
+   * gir legacy-oppførsel uten dedupe.
+   */
+  clientRequestId: z.string().optional(),
 });
 export type ClaimSubmitPayload = z.infer<typeof ClaimSubmitPayloadSchema>;
 
@@ -435,6 +447,14 @@ export const BetArmPayloadSchema = z
     armed: z.boolean().optional(),
     ticketCount: z.number().int().nonnegative().optional(),
     ticketSelections: z.array(TicketSelectionSchema).optional(),
+    /**
+     * BIN-813 R5: Klient-generert UUID v4 for idempotent socket-event-
+     * dedupe. Reservert for fremtidig wrapping av bet:arm — wallet-laget
+     * er allerede idempotent via deterministisk arm-cycle-id, så feltet
+     * aksepteres her men benyttes kun når socket-handleren også er
+     * wrappet. Optional for backward-compat.
+     */
+    clientRequestId: z.string().optional(),
   })
   .refine(
     (v) => {
@@ -455,6 +475,13 @@ export const TicketMarkPayloadSchema = z.object({
   roomCode: z.string().min(1),
   playerId: z.string().optional(),
   number: z.number().int().positive().max(75),
+  /**
+   * BIN-813 R5: Klient-generert UUID v4 for idempotent socket-event-
+   * dedupe. Reconnect-replay av `ticket:mark` med samme `clientRequestId`
+   * gir cached respons uten dupliserte engine-marks. Optional for
+   * backward-compat.
+   */
+  clientRequestId: z.string().optional(),
 });
 export type TicketMarkPayload = z.infer<typeof TicketMarkPayloadSchema>;
 
