@@ -125,3 +125,10 @@ SKIP when:
 - UI work that only reads from a query-API (not the raw table)
 - Test fixtures that don't assert hash-chain integrity
 - Pure documentation updates that don't change algorithm or canonical-form
+
+## Relaterte ADR-er
+
+- [ADR-0003 — System-actor for engine-mutasjoner](../../../docs/adr/0003-system-actor.md) — actor-felt i hash-chain
+- [ADR-0004 — Hash-chain audit-trail (BIN-764)](../../../docs/adr/0004-hash-chain-audit.md) — bindende design-beslutning
+- [ADR-0005 — Outbox-pattern for events (BIN-761)](../../../docs/adr/0005-outbox-pattern.md) — outbox + audit-trail samspill
+- [ADR-0011 — Casino-grade observability](../../../docs/adr/0011-casino-grade-observability.md) — daglig anchor-snapshot

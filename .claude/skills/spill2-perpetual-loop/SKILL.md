@@ -249,3 +249,11 @@ Pilot-versjonen støtter IKKE over-midnatt-vindu (22:00-02:00). Service validere
 ## Kanonisk referanse
 
 Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md er autoritativ.
+
+## Relaterte ADR-er
+
+- [ADR-0002 — Perpetual rom-modell for Spill 2/3](../../../docs/adr/0002-perpetual-room-model-spill2-3.md) — bindende: ETT globalt rom, ikke per-hall
+- [ADR-0003 — System-actor for engine-mutasjoner](../../../docs/adr/0003-system-actor.md) — system-actor driver auto-tick uten menneskelig agent
+- [ADR-0008 — Spillkatalog-paritet (Spill 1-3 = MAIN_GAME)](../../../docs/adr/0008-spillkatalog-classification.md) — bindende: MAIN_GAME for rocket, ikke DATABINGO
+- [ADR-0012 — Batched parallel mass-payout](../../../docs/adr/0012-batched-mass-payout.md) — pilot-kritisk for 9/9-payout-bursts
+- [ADR-0013 — Per-spiller broadcast-strippet payload](../../../docs/adr/0013-per-recipient-broadcast-perpetual-rooms.md) — bindende: room:update strippes for 1500-spillere

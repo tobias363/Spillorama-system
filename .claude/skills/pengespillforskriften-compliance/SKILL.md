@@ -116,3 +116,10 @@ SKIP when:
 - Pure UI/CSS work that doesn't touch payout amounts or compliance state
 - Game catalog admin CRUD (no payout side-effects)
 - Test infrastructure that doesn't assert compliance invariants
+
+## Relaterte ADR-er
+
+- [ADR-0003 — System-actor for engine-mutasjoner](../../../docs/adr/0003-system-actor.md) — `actor_hall_id` binder til kjøpe-hall, ikke master-hall (BIN-661 fix)
+- [ADR-0004 — Hash-chain audit-trail (BIN-764)](../../../docs/adr/0004-hash-chain-audit.md) — Lotteritilsynet-paritet: ondsinnet redigering oppdages
+- [ADR-0008 — Spillkatalog-paritet (MAIN_GAME vs DATABINGO)](../../../docs/adr/0008-spillkatalog-classification.md) — bindende: §11-distribusjon 15% vs 30%
+- [ADR-0010 — Done-policy for legacy-avkobling](../../../docs/adr/0010-done-policy-legacy-avkobling.md) — regulatorisk forsvar: Lotteritilsynet kan kreve commit-bevis

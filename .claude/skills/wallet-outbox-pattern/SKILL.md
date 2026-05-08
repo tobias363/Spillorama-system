@@ -330,4 +330,13 @@ Symptom: `app_idempotency_cache` tabell vokser i det uendelige.
 
 ## Kanonisk referanse
 
-`apps/backend/src/wallet/README.md` er autoritativ for modul-API. ADR-003 (hash-chain) og ADR-004 (outbox) er bindende design-beslutninger. Spør Tobias før endringer på BIN-761→767-fundamentet.
+`apps/backend/src/wallet/README.md` er autoritativ for modul-API. ADR-0004 (hash-chain) og ADR-0005 (outbox) er bindende design-beslutninger. Spør Tobias før endringer på BIN-761→767-fundamentet.
+
+## Relaterte ADR-er
+
+- [ADR-0003 — System-actor for engine-mutasjoner](../../../docs/adr/0003-system-actor.md) — wallet-events bruker `actorType: "SYSTEM"` for cron-driven payout
+- [ADR-0004 — Hash-chain audit-trail (BIN-764)](../../../docs/adr/0004-hash-chain-audit.md) — bindende: alle wallet-touch må skrive via AuditLogService
+- [ADR-0005 — Outbox-pattern for events (BIN-761)](../../../docs/adr/0005-outbox-pattern.md) — bindende: alle wallet-mutasjoner går via outbox
+- [ADR-0008 — Spillkatalog-paritet (MAIN_GAME vs DATABINGO)](../../../docs/adr/0008-spillkatalog-classification.md) — bruk `ledgerGameTypeForSlug`, aldri hardkode
+- [ADR-0011 — Casino-grade observability](../../../docs/adr/0011-casino-grade-observability.md) — wallet-reconciliation-cron dekkes her
+- [ADR-0012 — Batched parallel mass-payout for Spill 2/3](../../../docs/adr/0012-batched-mass-payout.md) — bruk batched-pathen for >10 vinnere
