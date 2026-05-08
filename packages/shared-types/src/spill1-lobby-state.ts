@@ -311,14 +311,32 @@ export type Spill1LobbyInconsistencyWarning = z.infer<
  *   4. `inconsistencyWarnings` er en KONTRAKT — disse blir konsumert av
  *      Bølge 2 (MasterActionService) og Bølge 3 (UI). Listen kan utvides
  *      med nye koder, men aldri reduseres.
+ *
+ * EMPTY-STATE-SEMANTIKK:
+ *   Når aggregator-routen kalles uten hall-context — typisk ADMIN som
+ *   poller uten å ha valgt en hall (`agentGame1Lobby.ts` resolveHallScope
+ *   returnerer null) — returneres et empty-state der `hallId`, `hallName`
+ *   og `businessDate` er `null`. Alle andre felter er fortsatt populert
+ *   med tomme defaults (tom `halls[]`, `currentScheduledGameId=null`,
+ *   `inconsistencyWarnings=[]`). Frontend rendrer "velg hall først"-state
+ *   i denne situasjonen og verken kall masterActions eller polling-loop.
+ *   Dette matcher den eksisterende `agentGamePlan.ts:343-380`-strategien
+ *   for soft-fail på read-only polling.
  */
 export const Spill1AgentLobbyStateSchema = z.object({
-  /** Hallen som klienten spurte om. */
-  hallId: z.string(),
-  /** Display-navn på hallen. */
-  hallName: z.string(),
-  /** ISO-dato (`YYYY-MM-DD`) i Oslo-tidssone. Driver business-date-key i DB. */
-  businessDate: z.string(),
+  /**
+   * Hallen som klienten spurte om. `null` betyr empty-state — ADMIN
+   * uten valgt hall. UI rendrer "velg hall"-prompt og kaller hverken
+   * master-actions eller poller videre.
+   */
+  hallId: z.string().nullable(),
+  /** Display-navn på hallen. `null` i empty-state. */
+  hallName: z.string().nullable(),
+  /**
+   * ISO-dato (`YYYY-MM-DD`) i Oslo-tidssone. Driver business-date-key
+   * i DB. `null` i empty-state.
+   */
+  businessDate: z.string().nullable(),
   /** ISO-timestamp for når responsen ble generert. UI viser dette i "sist oppdatert". */
   generatedAt: z.string().datetime(),
 
