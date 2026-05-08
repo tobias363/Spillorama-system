@@ -330,12 +330,26 @@ npm run dev
 
 ## Additional Resources
 
+- **Auto-genererte arkitektur-artefakter:** @docs/auto-generated/ — current state fra main (API-endpoints, DB-skjema, modul-graf, skills-katalog). Les disse FØRST når du leter etter "current state" — håndskrevne docs kan være stale.
 - **Architecture decisions:** @docs/architecture/ARKITEKTUR.md
 - **Pengespillforskriften compliance:** @docs/compliance/
 - **OpenAPI spec:** @apps/backend/openapi.yaml (auto-served at `/api/docs`)
 - **Workflow & PR checklist:** @docs/engineering/ENGINEERING_WORKFLOW.md
 - **Operations & runbooks:** @docs/operations/
 - **Render Blueprint:** @render.yaml
+
+### Auto-genererte arkitektur-artefakter
+
+`docs/auto-generated/` inneholder alltid-friske artefakter generert fra main av `.github/workflows/auto-generate-docs.yml`:
+
+- `MODULE_DEPENDENCIES.md` — apps + packages dep-graf (mermaid) + backend-domene-graf
+- `DB_SCHEMA_SNAPSHOT.md` — tabeller + ALTER TABLE-statistikk parset fra migrations
+- `API_ENDPOINTS.md` — alle endpoints fra openapi.yaml, gruppert på tag
+- `MIGRATIONS_LOG.md` — kronologisk liste over migrations
+- `SKILLS_CATALOG.md` — alle SKILL.md med navn + description
+- `SERVICES_OVERVIEW.md` — apps/packages struktur, LOC, backend-domener
+
+**Hvis du leter etter "current state", LES disse FØRST før du graver i kode.** For å regenerere lokalt: `./scripts/generate-architecture-docs.sh`. Filene skal ALDRI redigeres manuelt — endringer overskrives.
 
 ## Key Decisions & Constraints
 
