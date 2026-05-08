@@ -136,6 +136,26 @@ describe("PDF 17 §17.29 — Order History (agent)", () => {
   });
 
   it("viser feilmelding ved backend-feil", async () => {
+    // Bug #5 fix landed (PR #793 + noShiftFallback.ts): SHIFT_NOT_ACTIVE /
+    // NO_ACTIVE_SHIFT now swap the container for a `.alert-warning`
+    // no-shift-banner with an "Åpne skift"-button rather than rendering a
+    // generic `.alert-danger`. We use a non-shift error-code here so the
+    // generic-error path is exercised.
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: { code: "INTERNAL_SERVER_ERROR", message: "Boom" },
+        }),
+        { status: 500, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    const c = document.createElement("div");
+    await renderOrderHistoryPage(c);
+    const alert = c.querySelector(".alert-danger");
+    expect(alert).not.toBeNull();
+  });
+
+  it("viser no-shift-banner ved SHIFT_NOT_ACTIVE-feil (Bug #5 fix, PR #793)", async () => {
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify({
@@ -146,7 +166,10 @@ describe("PDF 17 §17.29 — Order History (agent)", () => {
       )) as typeof fetch;
     const c = document.createElement("div");
     await renderOrderHistoryPage(c);
-    const alert = c.querySelector(".alert-danger");
-    expect(alert).not.toBeNull();
+    // No-shift swap surfaces an `alert-warning` with `data-marker
+    // ="agent-page-no-shift"` — no `.alert-danger` at all.
+    const warning = c.querySelector(".alert-warning[data-marker='agent-page-no-shift']");
+    expect(warning).not.toBeNull();
+    expect(c.querySelector(".alert-danger")).toBeNull();
   });
 });
