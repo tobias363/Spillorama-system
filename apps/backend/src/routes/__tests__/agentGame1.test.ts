@@ -278,10 +278,20 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
               String(params[0])
             )));
       // 2026-05-07: skill mellom `findScheduledGameForHall` (status='scheduled')
-      // og de to andre helperne basert på SQL-form. Tester kan sette
-      // `scheduledRow` for å simulere "runden er planlagt men purchase ikke
-      // åpnet enda" uten å påvirke `activeRow`-logikken.
-      const isScheduledOnlyQuery = sql.includes("status = 'scheduled'");
+      // og de to andre helperne. Tester kan sette `scheduledRow` for å
+      // simulere "runden er planlagt men purchase ikke åpnet enda" uten å
+      // påvirke `activeRow`-logikken.
+      //
+      // Bølge 6 (2026-05-08): etter `Game1ScheduledGameFinder`-konsolideringen
+      // bruker alle finder-queries `status IN ($2, $3, ...)` med parameterized
+      // statuser, så vi må disambiguere på params (ikke SQL-tekst). Eneste
+      // status-bucket som kun inneholder `'scheduled'` er SCHEDULED_ONLY.
+      const statusParams = Array.isArray(params)
+        ? (params.slice(1) as string[])
+        : [];
+      const isScheduledOnlyQuery =
+        sql.includes("status = 'scheduled'") ||
+        (statusParams.length === 1 && statusParams[0] === "scheduled");
       if (isScheduledOnlyQuery) {
         if (scheduledRow && matchesHall(scheduledRow)) {
           return { rows: [scheduledRow], rowCount: 1 };
