@@ -22,6 +22,29 @@ const logger = rootLogger.child({ module: "security-service" });
 
 const BLOCKED_IP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min per PM-avklaring
 
+/**
+ * BIN-827: Postgres advisory-lock-key for `SecurityService.initializeSchema`.
+ *
+ * Concurrent backend-instanser (Render multi-instance scaling, lokal
+ * docker-compose med replikaer, K8s pod-scaling) som starter samtidig
+ * race-er på DDL i pg_class/pg_index. Selv om hver `CREATE ... IF NOT
+ * EXISTS` er trygg isolert sett, er IF-NOT-EXISTS-sjekken IKKE atomisk
+ * mot concurrent inserts i pg-katalogen — to backender som begge ser
+ * "tabellen finnes ikke" prøver så å lage den, og den langsomste krasjer
+ * på `pg_type_typname_nsp_index`-collision eller tilsvarende katalog-
+ * unique-violation.
+ *
+ * Funnet av BIN-825 chaos-fix-agent 2026-05-08 under R2-test (sequential
+ * bring-up var workaround). Fikset her med Postgres advisory-lock som
+ * serialiserer init på tvers av instanser.
+ *
+ * Nøkkelen er en arbitrær 64-bit-konstant unik for SecurityService.init.
+ * Hex 0x53504c4f53454349n = ASCII "SPLOSECI" (Spillorama Security Init).
+ * Hvis du legger til andre `initializeSchema`-funksjoner som trenger lock,
+ * bruk en distinct nøkkel.
+ */
+const SECURITY_INIT_ADVISORY_LOCK_KEY = 0x53504c4f53454349n;
+
 export interface WithdrawEmail {
   id: string;
   email: string;
@@ -564,6 +587,15 @@ export class SecurityService {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      // BIN-827: Serialiser DDL på tvers av concurrent backend-instanser.
+      // pg_advisory_xact_lock blokkerer til lock acquired og frigis automatisk
+      // på COMMIT/ROLLBACK — ingen risiko for stuck-locks ved exception.
+      // Uten denne kunne to instanser begge se "tabellen finnes ikke" via
+      // CREATE ... IF NOT EXISTS og deretter krasje på pg-katalog-unique-
+      // violation (pg_type_typname_nsp_index el. pg_class_relname_nsp_index).
+      await client.query("SELECT pg_advisory_xact_lock($1)", [
+        SECURITY_INIT_ADVISORY_LOCK_KEY.toString(),
+      ]);
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.emailTable()} (
