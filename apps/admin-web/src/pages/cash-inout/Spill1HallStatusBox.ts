@@ -14,9 +14,17 @@
  * Polling: 2s tick mot `/api/agent/game1/current-game`. Stoppes på
  * unmount via AbortSignal — caller passer inn signalet fra
  * activePageAbort i CashInOutPage slik at samme cleanup-flyt brukes.
+ *
+ * 2026-05-08 (Tobias-feedback, branch feat/spill1-hall-status-multi-hall):
+ * Splittet hall-listen i to seksjoner — "Min hall" og "Andre haller i
+ * gruppen" — slik at master ser ready-state for alle GoH-medlemmer.
+ * Master-hall får 👑-merke; ticket-tellinger (digitale + fysiske) vises
+ * pr hall. Master-start-knappen er IKKE blokkert av andre halls
+ * ready-state (per Tobias-direktiv #1017).
  */
 
 import {
+  fetchAgentGame1CurrentGame,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
@@ -106,11 +114,33 @@ export function mountSpill1HallStatusBox(
 
   async function refresh(): Promise<void> {
     try {
-      // Cleanup 2026-05-08: ny plan-runtime er nå standard data-source.
-      // Adapter mapper plan-respons til legacy-shape så all rendering
-      // nedenfor er uendret.
-      const planResp = await fetchAgentGamePlanCurrent({ signal });
+      // 2026-05-08 (Tobias-feedback): Bingovert mangler oversikt over de
+      // andre hallene i sin GoH. Plan-runtime API-et returnerer ikke
+      // hall-ready-status — adapteren mocker derfor `halls: [<egen
+      // hall>]` (se agent-game-plan-adapter.ts §125-136 for begrunnelse).
+      //
+      // Vi henter derfor LEGACY `/api/agent/game1/current-game` PARALLELT
+      // med plan-runtime-callet. Legacy-endpoint returnerer alle haller i
+      // GoH med `isReady` / `excludedFromGame` / `digitalTicketsSold` /
+      // `physicalTicketsSold`-felter. Vi merger inn legacy-`halls[]` i
+      // adapter-shapen, og beholder plan-runtime som autoritet for
+      // `currentGame.id` (plan-run-id) + `currentGame.status` (plan-state).
+      //
+      // Hvis legacy-callet feiler (eks. ingen aktiv runde for hallen),
+      // beholder vi adapter-shapen uendret slik at tomme-state-rendering
+      // fortsetter å virke.
+      const [planResp, legacyResp] = await Promise.all([
+        fetchAgentGamePlanCurrent({ signal }),
+        fetchAgentGame1CurrentGame({ signal }).catch(() => null),
+      ]);
       const res: Spill1CurrentGameResponse = adaptGamePlanToLegacyShape(planResp);
+      if (legacyResp && legacyResp.halls.length > 0) {
+        // Merge: Bruk legacy-`halls[]` som kilde (full ready-state +
+        // ticket-tellinger). Resten (isMasterAgent, currentGame-meta) fra
+        // plan-runtime som er kanonisk for plan-state.
+        res.halls = legacyResp.halls;
+        res.allReady = legacyResp.allReady;
+      }
       if (aborted) return;
       state.loaded = true;
       state.data = res;
@@ -283,6 +313,13 @@ function render(container: HTMLElement, state: BoxState): void {
   // selv når ingen runde er aktiv eller spawn'et i scheduled-tabellen.
   // Etter en runde ferdig fortsetter hallene å vises (med status oransje
   // = ikke klar) så agentene har kontinuerlig oversikt over neste runde.
+  //
+  // 2026-05-08 (Tobias-feedback): Vis "Min hall" og "Andre haller i
+  // gruppen" som separate seksjoner slik at master ser umiddelbart hvor
+  // mange andre haller som er klare/ikke klare. Master-hall i andre-
+  // listen får 👑-merke; ticket-tellinger (digitale + fysiske) vises pr
+  // hall.
+  const masterHallIdForCrown = data.currentGame?.masterHallId ?? null;
   if (!data.currentGame) {
     if (data.halls.length === 0) {
       container.innerHTML = `
@@ -291,7 +328,8 @@ function render(container: HTMLElement, state: BoxState): void {
         </div>`;
       return;
     }
-    const hallsHtml = renderHallList(data.halls, data.hallId);
+    const ownHallSnap = data.halls.find((h) => h.hallId === data.hallId) ?? null;
+    const otherHallsSnap = data.halls.filter((h) => h.hallId !== data.hallId);
     container.innerHTML = `
       <div class="box-header with-border">
         <h3 class="box-title">Spill 1 — venter på neste runde</h3>
@@ -301,9 +339,8 @@ function render(container: HTMLElement, state: BoxState): void {
           Hall-status for neste planlagte spill. Status oppdateres når
           runden spawnes.
         </p>
-        <div class="spill1-hall-list" data-marker="spill1-hall-list">
-          ${hallsHtml}
-        </div>
+        ${renderOwnHallSection(ownHallSnap, data.hallId, masterHallIdForCrown)}
+        ${renderOtherHallsSection(otherHallsSnap, masterHallIdForCrown)}
       </div>`;
     return;
   }
@@ -312,19 +349,25 @@ function render(container: HTMLElement, state: BoxState): void {
   const ownHallId = data.hallId;
   const isMaster = data.isMasterAgent;
   const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
+  const otherHalls = data.halls.filter((h) => h.hallId !== ownHallId);
 
   // 2026-05-08 (Tobias-direktiv): Start aktiv når purchase-vinduet er åpnet.
   // Master kan starte UAVHENGIG av om andre haller er klare. Pause/Fortsett
   // synlig kun når aktuelt. Stop-knappen FJERNET fra agent-UI (admin-only
   // via /api/admin/game1/...). "Kringkast 'Klar' + 2-min countdown" også
   // fjernet — master starter uavhengig av ready-status.
+  //
+  // NB: `canStart` sjekker KUN game.status. Andre halls ready-state er
+  // IKKE en gate (per #1017) — den vises informativt på Start-knappen
+  // som "X hall(er) ikke klar enda — start vil ekskludere {dem|den}".
   const canStart =
     isMaster &&
     (game.status === "ready_to_start" || game.status === "purchase_open");
   const canPause = isMaster && game.status === "running";
   const canResume = isMaster && game.status === "paused";
 
-  const hallsHtml = renderHallList(data.halls, ownHallId);
+  const ownHallHtml = renderOwnHallSection(ownHall, ownHallId, masterHallIdForCrown);
+  const otherHallsHtml = renderOtherHallsSection(otherHalls, masterHallIdForCrown);
   const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status);
   // Antall ikke-klare/ikke-ekskluderte haller — vises som hint på Start-knappen
   // så master ser umiddelbart hvor mange som vil bli ekskludert.
@@ -356,33 +399,134 @@ function render(container: HTMLElement, state: BoxState): void {
       <h3 class="box-title">${titleParts.join(" · ")}</h3>
     </div>
     <div class="box-body">
-      <div class="spill1-hall-list" data-marker="spill1-hall-list">
-        ${hallsHtml}
-      </div>
+      ${ownHallHtml}
+      ${otherHallsHtml}
       ${ownButtonsHtml}
       ${masterButtonsHtml}
     </div>`;
 }
 
-function renderHallList(halls: Spill1CurrentGameHall[], ownHallId: string): string {
-  if (halls.length === 0) {
-    return `<p class="text-muted">Ingen haller registrert i denne runden.</p>`;
+/**
+ * 2026-05-08 (Tobias-feedback): Render egen-hall-seksjonen ("Min hall").
+ * Viser status-pillen + ticket-tellinger + master-merke om hallen er
+ * master. Knapper for egen hall (Marker Klar / Ingen kunder) rendres
+ * separat av `renderOwnHallButtons` slik at de kan kobles til samme
+ * grid-stil som kontant-inn-/ut-knappene.
+ */
+function renderOwnHallSection(
+  ownHall: Spill1CurrentGameHall | null,
+  ownHallId: string,
+  masterHallId: string | null,
+): string {
+  // Hvis egen hall ikke er i halls-listen (eks. tom-state før plan-runtime
+  // er registrert), vises minimal placeholder.
+  if (!ownHall) {
+    return `
+      <div class="spill1-hall-section" data-marker="spill1-own-hall-section"
+           style="margin-bottom:12px;">
+        <h4 style="margin:0 0 8px 0;">Min hall</h4>
+        <p class="text-muted small">Henter status…</p>
+      </div>`;
   }
-  const rows = halls
+  const isMasterHall = masterHallId !== null && ownHallId === masterHallId;
+  const masterCrown = isMasterHall
+    ? `<span class="label label-default" data-marker="spill1-pill-master"
+              title="Master-hall" style="margin-left:6px;">👑 Master</span>`
+    : "";
+  const pill = renderStatusPill(ownHall);
+  const ticketInfo = renderTicketCounts(ownHall);
+  return `
+    <div class="spill1-hall-section" data-marker="spill1-own-hall-section"
+         style="margin-bottom:12px;">
+      <h4 style="margin:0 0 8px 0;">Min hall</h4>
+      <div class="spill1-hall-list" data-marker="spill1-hall-list">
+        <div class="spill1-hall-row spill1-hall-row-own">
+          <span class="spill1-hall-name">
+            ${escapeHtml(ownHall.hallName)}
+            <small class="text-muted">(din hall)</small>
+            ${masterCrown}
+          </span>
+          <span class="spill1-hall-meta">
+            ${ticketInfo}
+            ${pill}
+          </span>
+        </div>
+      </div>
+    </div>`;
+}
+
+/**
+ * 2026-05-08 (Tobias-feedback): Render andre-haller-seksjonen ("Andre
+ * haller i gruppen"). Viser status-pill + ticket-tellinger pr hall +
+ * 👑-merke for master-hall. Master-agent ser denne for å avgjøre om
+ * de andre hallene er klare før de starter — men start-knappen er
+ * IKKE blokkert av andre halls ready-state (per Tobias-direktiv #1017).
+ */
+function renderOtherHallsSection(
+  otherHalls: Spill1CurrentGameHall[],
+  masterHallId: string | null,
+): string {
+  if (otherHalls.length === 0) {
+    return `
+      <div class="spill1-hall-section" data-marker="spill1-other-halls-section"
+           style="margin-bottom:12px;">
+        <h4 style="margin:0 0 8px 0;">Andre haller i gruppen</h4>
+        <p class="text-muted small">Ingen andre haller i denne gruppen.</p>
+      </div>`;
+  }
+  const rows = otherHalls
     .map((h) => {
-      const isOwn = h.hallId === ownHallId;
+      const isMasterHall = masterHallId !== null && h.hallId === masterHallId;
+      const masterCrown = isMasterHall
+        ? `<span class="label label-default" data-marker="spill1-pill-master"
+                  title="Master-hall" style="margin-left:6px;">👑 Master</span>`
+        : "";
       const pill = renderStatusPill(h);
+      const ticketInfo = renderTicketCounts(h);
       return `
-        <div class="spill1-hall-row${isOwn ? " spill1-hall-row-own" : ""}">
+        <div class="spill1-hall-row" data-hall-id="${escapeHtml(h.hallId)}">
           <span class="spill1-hall-name">
             ${escapeHtml(h.hallName)}
-            ${isOwn ? `<small class="text-muted">(din hall)</small>` : ""}
+            ${masterCrown}
           </span>
-          ${pill}
+          <span class="spill1-hall-meta">
+            ${ticketInfo}
+            ${pill}
+          </span>
         </div>`;
     })
     .join("");
-  return rows;
+  return `
+    <div class="spill1-hall-section" data-marker="spill1-other-halls-section"
+         style="margin-bottom:12px;">
+      <h4 style="margin:0 0 8px 0;">Andre haller i gruppen</h4>
+      <div class="spill1-hall-list" data-marker="spill1-hall-list">
+        ${rows}
+      </div>
+    </div>`;
+}
+
+/**
+ * 2026-05-08 (Tobias-feedback): Render kompakt ticket-teller (digitale
+ * + fysiske bonger) per hall. Skjules hvis hallen er ekskludert (da er
+ * antallet irrelevant — agentene ser uansett "Ekskludert"-pillen).
+ *
+ * Tooltip viser breakdown: "{digitale} dig + {fysiske} fys" — den
+ * kompakte visningen i UI viser kun totalen for å holde rad-bredde
+ * smal.
+ */
+function renderTicketCounts(h: Spill1CurrentGameHall): string {
+  if (h.excludedFromGame) return "";
+  const total = h.digitalTicketsSold + h.physicalTicketsSold;
+  if (total === 0) {
+    return `<small class="text-muted" style="margin-right:8px;"
+                   data-marker="spill1-tickets-count"
+                   title="Ingen bonger solgt">0 bonger</small>`;
+  }
+  const breakdown = `${h.digitalTicketsSold} dig + ${h.physicalTicketsSold} fys`;
+  return `<small class="text-muted" style="margin-right:8px;"
+                 data-marker="spill1-tickets-count"
+                 title="${breakdown}">${total} bonger</small>`;
 }
 
 function renderStatusPill(h: Spill1CurrentGameHall): string {
@@ -440,9 +584,13 @@ function renderOwnHallButtons(
          <i class="fa fa-times" aria-hidden="true"></i> Ingen kunder
        </button>`;
 
+  // 2026-05-08 (Tobias-feedback): Header endret fra "Min hall" til
+  // "Handlinger for min hall" siden status-pillen for egen hall nå
+  // rendres av `renderOwnHallSection` over knappene. Uten endringen
+  // ville agentene se to "Min hall"-headere i serie.
   return `
     <div class="spill1-self-actions" style="margin-top:16px;">
-      <h4 style="margin:0 0 8px 0;">Min hall</h4>
+      <h4 style="margin:0 0 8px 0;">Handlinger for min hall</h4>
       <div class="cashinout-grid">
         ${readyBtn}
         ${customersBtn}
