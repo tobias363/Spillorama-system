@@ -364,7 +364,8 @@ Redirecter til `/admin/#/tv/<hallId>/<token>` så admin-Vite-bundle rendrer (fix
 | `BingoEngine` | `apps/backend/src/game/BingoEngine.ts` | Hovedengine for 75-ball 5×5 |
 | `Game1MasterControlService` | `apps/backend/src/game/Game1MasterControlService.ts` | Master-handlinger (start, pause, advance) |
 | `Game1HallReadyService` | `apps/backend/src/game/Game1HallReadyService.ts` | Per-hall ready-state |
-| `Game1LobbyService` | `apps/backend/src/game/Game1LobbyService.ts` | Lobby-state-aggregat (R1) |
+| `Game1LobbyService` | `apps/backend/src/game/Game1LobbyService.ts` | Lobby-state-aggregat for SPILLER-shell (R1) |
+| `GameLobbyAggregator` (Bølge 1, 2026-05-08) | `apps/backend/src/game/GameLobbyAggregator.ts` | **Kanonisk** lobby-state for MASTER/AGENT-konsoll. Erstatter dual-fetch + adapter-pattern. Eksponert via `GET /api/agent/game1/lobby`. |
 | `Spill1LobbyBroadcaster` | `apps/backend/src/game/Spill1LobbyBroadcaster.ts` | Fan-out til lobby-rom (R1) |
 | `Game1ScheduleTickService` | `apps/backend/src/game/Game1ScheduleTickService.ts` | Auto-flip scheduled→purchase_open→running |
 | `GamePlanEngineBridge` | `apps/backend/src/game/GamePlanEngineBridge.ts` | Spawner scheduled-games fra plan-runtime |
@@ -375,6 +376,28 @@ Redirecter til `/admin/#/tv/<hallId>/<token>` så admin-Vite-bundle rendrer (fix
 | `Game1TransferHallService` | `apps/backend/src/game/Game1TransferHallService.ts` | 60s-handshake for runtime master-overføring |
 | `RoomAlertingService` | `apps/backend/src/observability/RoomAlertingService.ts` | R8 alerting til Slack/PagerDuty |
 | `SocketIdempotencyStore` | `apps/backend/src/sockets/SocketIdempotencyStore.ts` | R5 socket dedup |
+
+### 4.1 GameLobbyAggregator (Bølge 1) — kanonisk lobby-state for master/agent-UI
+
+Aggregator-en er **single-source-of-truth** for hva master/agent-konsollet
+viser. Tidligere hentet UI `/api/agent/game-plan/current` og
+`/api/agent/game1/current-game` parallelt og merget felt-for-felt — det
+skapte dual-fetch og ID-krangel-bugen som er dokumentert i
+[`PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md`](./PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md).
+
+**Bølge 1 fundament:**
+- **Wire-format:** `Spill1AgentLobbyState` i `packages/shared-types/src/spill1-lobby-state.ts` (Zod-validert)
+- **Service:** `GameLobbyAggregator` i `apps/backend/src/game/GameLobbyAggregator.ts` (pure read; ingen state-mutering)
+- **Route:** `GET /api/agent/game1/lobby?hallId=X` i `apps/backend/src/routes/agentGame1Lobby.ts`
+- **Tester:** 16 snapshot-tester per state i `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (alle passering) + integration-test mot ekte Postgres (skip-graceful)
+
+**Kontrakt for Bølge 2/3 (UI-bytte):**
+- `currentScheduledGameId` er ENESTE id-felt UI bruker for master-actions (start/pause/resume/stop). Aldri plan-run-id.
+- `inconsistencyWarnings` er stabile koder (`PLAN_SCHED_STATUS_MISMATCH`, `MISSING_GOH_MEMBERSHIP`, `STALE_PLAN_RUN`, `BRIDGE_FAILED`, `DUAL_SCHEDULED_GAMES`) — Bølge 2 reconciliere på disse, Bølge 3 viser feilbannere.
+- `halls[]` er ferdig-filtrert mot nåværende GoH-membership (stale haller flagget via warning).
+- Aggregator throw KUN ved infrastruktur-feil (`LOBBY_AGGREGATOR_INFRA_ERROR` → 5xx). Alle "data ser rar ut"-scenarioer flagges som warnings, aldri throw.
+
+**Bakover-kompatibilitet:** Eksisterende endpoints (`/current-game`, `/game-plan/current`, `/admin/game1/games/:id/...`) er IKKE påvirket. UI bytter til ny endpoint i Bølge 3 etter at Bølge 2 (MasterActionService) er på plass.
 
 ---
 
