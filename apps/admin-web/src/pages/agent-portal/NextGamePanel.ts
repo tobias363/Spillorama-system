@@ -54,6 +54,7 @@ import {
 import {
   markHallReadyForGame,
   unmarkHallReadyForGame,
+  fetchAgentGame1CurrentGame,
   type Spill1CurrentGameResponse,
 } from "../../api/agent-game1.js";
 import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
@@ -514,10 +515,39 @@ async function refreshSpill1(): Promise<void> {
     // Cleanup 2026-05-08: ny plan-runtime er nå standard data-source.
     // Adapter mapper plan-respons til legacy-shape så all rendering
     // nedenfor er uendret.
-    const planResp = await fetchAgentGamePlanCurrent(
-      pageAbort ? { signal: pageAbort.signal } : {}
-    );
+    //
+    // 2026-05-08 (Tobias-bug-fix): adapter setter `currentGame.id` til
+    // plan-run-id, men master-handlinger (pause/resume/stop) går mot
+    // `/api/admin/game1/games/:gameId/...` som krever scheduled-games-id.
+    // Vi henter LEGACY `/api/agent/game1/current-game` PARALLELT — dens
+    // `currentGame.id` er ekte scheduled-games-id. Speiler logikken i
+    // Spill1HallStatusBox.refresh().
+    const [planResp, legacyResp] = await Promise.all([
+      fetchAgentGamePlanCurrent(
+        pageAbort ? { signal: pageAbort.signal } : {}
+      ),
+      fetchAgentGame1CurrentGame(
+        pageAbort ? { signal: pageAbort.signal } : {}
+      ).catch(() => null),
+    ]);
     const data: Spill1CurrentGameResponse = adaptGamePlanToLegacyShape(planResp);
+    if (legacyResp && legacyResp.halls.length > 0) {
+      // Bruk legacy-`halls[]` som kilde (full ready-state + ticket-tellinger).
+      // Plan-runtime API-et returnerer ikke hall-ready-status.
+      data.halls = legacyResp.halls;
+      data.allReady = legacyResp.allReady;
+    }
+    if (legacyResp?.currentGame && data.currentGame) {
+      // Bruk scheduled-games-id fra legacy så pause/resume/stop treffer
+      // riktig rad. Adapter-id (plan-run-id) ville gitt 400 mot
+      // /api/admin/game1/games/:gameId/pause som krever scheduled-id.
+      data.currentGame.id = legacyResp.currentGame.id;
+      data.currentGame.masterHallId = legacyResp.currentGame.masterHallId;
+      data.currentGame.groupHallId = legacyResp.currentGame.groupHallId;
+      data.currentGame.participatingHallIds =
+        legacyResp.currentGame.participatingHallIds;
+      data.isMasterAgent = legacyResp.isMasterAgent;
+    }
     if (!activeContainer) return; // unmounted while in-flight
     state.spill1 = data;
     state.spill1Error = null;
