@@ -539,26 +539,29 @@ Sortert etter avhengighet og tryggleikm. Hver bølge åpnes som egen PR/issue.
 **Estimat (mandat):** 2-3 dev-dager. **Faktisk:** ~3-4 timer wall-clock for AI-agent (audit + read source + 6 commits).
 **Tester som ble skrevet:** 16 snapshot + 4 integration. Ingen brutt.
 
-### Bølge 2 — MasterActionService (backend, single sekvensering)
+### Bølge 2 — MasterActionService (backend, single sekvensering) ✅ FULLFØRT 2026-05-08
+
+**Status:** Levert på branch `refactor/master-action-service-bolge-2-v2`. 33 unit-tester + 2 integration-tester + 1 skip-graceful Postgres integration alle grønne. Type-check grønn.
 
 **Mål:** ENESTE sted som vet om plan + scheduled. Driver master-actions ende-til-ende.
 
-**Tasks:**
-1. Lag `MasterActionService.ts`.
-2. Implementer `start(actor)` som internt kaller:
-   - planRunService.getOrCreateForToday
-   - planRunService.start
-   - bridge.createScheduledGameForPlanRunPosition
-   - masterControlService.startGame (dvs. engine)
-   - audit som "start"
-3. Tilsvarende for advance, pause, resume, stop, setJackpot.
-4. Lag nye routes `/api/agent/game1/master/...` som delegerer til service-en.
-5. Skriv integration-tester som kjører fullt spann (mock pool + mock engine).
+**Levert:**
+1. ✅ `apps/backend/src/game/MasterActionService.ts` — klasse med public methods `start`, `advance`, `pause`, `resume`, `stop`, `setJackpot`. Hver action kjører pre-validering via `GameLobbyAggregator.getLobbyState`, sekvenserer plan-runtime → bridge → engine, skriver audit, og trigger best-effort lobby-broadcast.
+2. ✅ Stable error-koder: `FORBIDDEN`, `LOBBY_INCONSISTENT`, `NO_ACTIVE_GAME`, `JACKPOT_SETUP_REQUIRED`, `PLAN_RUN_FINISHED`, `ENGINE_FAILED`, `BRIDGE_FAILED`. Forventede DomainErrors fra plan-service og bridge propageres uendret.
+3. ✅ `apps/backend/src/routes/agentGame1Master.ts` — 6 nye POST-endpoints under `/api/agent/game1/master/*` med Zod-validering og hall-scope-resolver (HALL_OPERATOR/AGENT låst til egen hallId; ADMIN kan overstyre via body).
+4. ✅ Wire-up i `apps/backend/src/index.ts` etter `game1MasterControlService.setTicketPurchaseService` (alle deps klare).
+5. ✅ 33 unit-tester (`apps/backend/src/game/__tests__/MasterActionService.test.ts`) som dekker hver master-action × hvert pre-state-scenario inkl. RBAC, blocking-warnings, race-conditions, audit-event-verifikasjon.
+6. ✅ Integration-test (`apps/backend/src/__tests__/MasterActionService.integration.test.ts`) — full master-loop start → advance → pause → resume → stop med InMemoryAuditLogStore + en skip-graceful Postgres-versjon.
+7. ✅ Eksisterende `/api/agent/game-plan/*` og `/api/admin/game1/games/:id/*` endpoints uendret — UI bytter i Bølge 3.
 
-**Estimat:** 3 dev-dager.
-**Tester som må skrives:** Hver master-action med hver pre-state.
-**Tester som bryter:** Ingen — gamle routes uendret.
-**Linear:** Ny issue.
+**Kontrakt for Bølge 3:**
+- Klient kaller `/api/agent/game1/master/{action}` med `{ hallId? }` i body (eller default til user.hallId).
+- Respons-shape er `MasterActionResult` med `scheduledGameId`, `planRunId`, `status`, `scheduledGameStatus`, `inconsistencyWarnings`.
+- Klient skal IKKE kalle de gamle `/api/agent/game-plan/*` eller `/api/admin/game1/games/:gameId/*` direkte for master-actions — bruk de nye master-endpointene.
+- `agent-game-plan-adapter.ts` og `agent-master-actions.ts` (frontend) skal slettes i Bølge 3.
+
+**Estimat (mandat):** 3 dev-dager. **Faktisk:** ~3-4 timer wall-clock for AI-agent (recovery av forrige attempt + 7 atomic-commits).
+**Tester:** 33 unit + 2 integration + 1 skip-graceful Postgres = 35 totalt.
 
 ### Bølge 3 — Bytt UI til ny aggregator + master-action-endpoints
 

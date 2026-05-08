@@ -139,7 +139,9 @@ import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
 import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
 import { createAgentGame1LobbyRouter } from "./routes/agentGame1Lobby.js";
+import { createAgentGame1MasterRouter } from "./routes/agentGame1Master.js";
 import { GameLobbyAggregator } from "./game/GameLobbyAggregator.js";
+import { MasterActionService } from "./game/MasterActionService.js";
 import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
@@ -2207,6 +2209,29 @@ game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // masterControl (sirkulær avhengighet ellers).
 game1MasterControlService.setTicketPurchaseService(game1TicketPurchaseService);
 
+// Bølge 2 (2026-05-08): MasterActionService — kanonisk sekvenseringsmotor
+// for plan-runtime → engine-bridge → engine-actions for Spill 1. ENESTE
+// caller som binder plan-run-id ↔ scheduled-game-id sammen og kjører
+// rekkefølgen.
+//
+// Konstrueres her, etter game1MasterControlService er fullt wiret (drawEngine
+// + ticketPurchaseService satt). auditLogService injiseres etterpå via
+// setAuditLogService.
+//
+// Brukes av /api/agent/game1/master/* routene; eksisterende
+// /api/agent/game-plan/* og /api/admin/game1/games/:id/* fortsetter uendret
+// (UI bytter i Bølge 3).
+const masterActionService = new MasterActionService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  planRunService: gamePlanRunService,
+  engineBridge: gamePlanEngineBridge,
+  masterControlService: game1MasterControlService,
+  lobbyAggregator: gameLobbyAggregator,
+  auditLogService,
+  lobbyBroadcaster: spill1LobbyBroadcaster,
+});
+
 // BIN-690 M1: mini-game orchestrator (framework-foundation). Ingen konkrete
 // spill registrert i M1 — M2-M5 legger dem til via registerMiniGame().
 // Late-bound på drawEngine slik at Game1DrawEngineService kan konstrueres
@@ -2787,6 +2812,18 @@ app.use(createAgentGame1Router({
 app.use(createAgentGame1LobbyRouter({
   platformService,
   aggregator: gameLobbyAggregator,
+}));
+
+// Bølge 2 (2026-05-08): kanoniske master-action-endpoints
+// (/api/agent/game1/master/{start,advance,pause,resume,stop,jackpot-setup}).
+// Delegerer til MasterActionService som er ENESTE sted som vet om både
+// plan-run-id og scheduled-game-id. Erstatter den fragmenterte UI-flyten
+// der frontend kalte plan-API + legacy-API parallelt og lot klienten
+// merge id-rommene. Eksisterende /api/agent/game-plan/* og
+// /api/admin/game1/games/:id/* er IKKE påvirket — UI bytter i Bølge 3.
+app.use(createAgentGame1MasterRouter({
+  platformService,
+  masterActionService,
 }));
 // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
 // Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og
