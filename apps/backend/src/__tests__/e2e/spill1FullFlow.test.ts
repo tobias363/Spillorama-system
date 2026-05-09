@@ -2,18 +2,15 @@
  * Spill 1 full-flow regression tests — locks behavior verified end-to-end
  * against a live backend on 2026-05-09.
  *
- * Findings encoded:
- *   F10 — `/api/agent/game1/start` does NOT accept `jackpotConfirmed` body
- *         param (only `/api/admin/game1/games/:id/start` does). Bug: agent
- *         master cannot bypass the JACKPOT_CONFIRM_REQUIRED popup via the
- *         agent route.
- *   F13 — `GAME1_AUTO_DRAW_ENABLED` defaults to `false`. Without the env-var
- *         being explicitly set, even a successfully-started scheduled game
- *         will sit in `running` with 0 draws indefinitely. Pilot must set
- *         this var at deploy.
- *   F17 — `Spill1AgentLobbyStateSchema` rejects non-UUID `planMeta.planId`.
- *         Seed-data with `demo-plan-pilot` (non-UUID) breaks
- *         `/api/agent/game1/lobby` with INTERNAL_ERROR.
+ * Findings encoded (UPDATED 2026-05-09 to verify FIXES, not BUGS):
+ *   F10 — `/api/agent/game1/start` NOW accepts `jackpotConfirmed` body
+ *         param after PR #1101 (commit 40c465b3). Lockdown verifies the
+ *         wire-up is in place.
+ *   F13 — `GAME1_AUTO_DRAW_ENABLED` default endret til `true` etter PR
+ *         #1101 (commit 006b2f81). Pilot trenger ikke lenger sette env-var.
+ *   F17 — `Spill1AgentLobbyStateSchema` aksepterer NÅ både UUID og slug-
+ *         form for `planMeta.planId` etter shared-types-fix (commit
+ *         dfdf64f8). Speiler DB-skjemaet (`TEXT PRIMARY KEY`).
  *   F22 — Auto-draw stops at `DEFAULT_GAME1_MAX_DRAWS = 52`, not 75. With
  *         only 2 small-white tickets in play, phases 2-5 may never have
  *         winners and the game terminates silently after draw 52.
@@ -68,27 +65,28 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
       };
     }
 
-    it("rejects non-UUID planId — seed-data 'demo-plan-pilot' breaks lobby", () => {
+    it("F17-FIX: aksepterer non-UUID slug planId — seed 'demo-plan-pilot' OK", () => {
+      // OPPDATERT 2026-05-09: PR #1101 (commit dfdf64f8) endret
+      // Spill1IdSchema fra `z.string().uuid()` til `z.string().min(1)`
+      // fordi DB-skjemaet bruker TEXT PRIMARY KEY (ikke UUID). Demo-/seed-
+      // data og prod-runs bruker slug-form (`demo-plan-pilot`) ved siden av
+      // UUID. UUID-validering ga falsk strenghet og brøt
+      // /api/agent/game1/lobby med INTERNAL_ERROR for legitime DB-rader.
+      //
+      // Lockdown-test verifiserer at fixen faktisk er på plass: schema skal
+      // godta non-UUID planId.
       const parsed = Spill1AgentLobbyStateSchema.safeParse(
         buildLobbyPayload("demo-plan-pilot")
       );
+      if (!parsed.success) {
+        // Aid debugging hvis schema regresses tilbake til UUID-only.
+        console.error(parsed.error.issues);
+      }
       assert.equal(
         parsed.success,
-        false,
-        "seed-style non-UUID planId must fail validation (regression: schema is too strict for seed-data)"
+        true,
+        "F17-fix: slug-form planId må godtas — speiler DB-skjemaet (TEXT PRIMARY KEY)"
       );
-      if (!parsed.success) {
-        const planIdIssue = parsed.error.issues.find(
-          (i) =>
-            Array.isArray(i.path) &&
-            i.path.includes("planMeta") &&
-            i.path.includes("planId")
-        );
-        assert.ok(
-          planIdIssue,
-          "must explicitly fail on planMeta.planId, not on some other field"
-        );
-      }
     });
 
     it("accepts proper UUID planId (control case)", () => {
@@ -100,6 +98,20 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
         console.error(parsed.error.issues);
       }
       assert.equal(parsed.success, true, "UUID planId should pass");
+    });
+
+    it("F17-FIX: rejects empty-string planId (validation still functional)", () => {
+      // Selv etter fixen skal tom streng avvises — `z.string().min(1)`.
+      // Verifiserer at validering ikke ble fjernet helt, bare oppdatert til
+      // å matche DB-skjemaet.
+      const parsed = Spill1AgentLobbyStateSchema.safeParse(
+        buildLobbyPayload("")
+      );
+      assert.equal(
+        parsed.success,
+        false,
+        "tom streng planId må fortsatt avvises (min(1)-konstrukten)"
+      );
     });
 
     it("accepts empty-state shape (ADMIN without hallId)", () => {
@@ -128,25 +140,21 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
     });
   });
 
-  describe("F10: /api/agent/game1/start jackpotConfirmed wire-up gap", () => {
+  describe("F10-FIX: /api/agent/game1/start jackpotConfirmed wire-up", () => {
     /**
-     * This is a route-shape test — it documents the intentional wire-up
-     * gap. The agent route at `apps/backend/src/routes/agentGame1.ts:553-633`
-     * does NOT extract `jackpotConfirmed` from req.body and pass it to
-     * `Game1MasterControlService.startGame()`. Only the admin route at
-     * `apps/backend/src/routes/adminGame1Master.ts:319` does.
+     * OPPDATERT 2026-05-09: PR #1101 (commit 40c465b3) lukket F10-funnet ved
+     * å wire `jackpotConfirmed` (boolean | "true") inn i agent-route-handler-en.
+     * Speiler legacy admin-route adminGame1Master.ts:319.
      *
-     * Until the agent route is updated, master agents (HALL_OPERATOR /
-     * AGENT) cannot complete the JACKPOT_CONFIRM_REQUIRED popup flow via
-     * `/api/agent/game1/start`. They have to use the admin route which is
-     * RBAC-restricted to ADMIN by default. For pilot, this means master
-     * bingoverter need ADMIN role to confirm jackpot, OR the route must be
-     * extended.
+     * Lockdown-testen er flippet: vi verifiserer NÅ at agentGame1.ts
+     * INNEHOLDER `jackpotConfirmed` i `/api/agent/game1/start`-handler-en, og
+     * at parsing er tolerant (boolean ELLER literal "true").
      *
-     * This test reads the route file and asserts the gap is still there
-     * (so the file gets updated when the gap closes).
+     * NB: Denne PR-en (F-NEW-1) lukker SPEIL-buggen på Bølge 2-route
+     * (`/api/agent/game1/master/start` via MasterActionService). Legacy
+     * agent-route (denne) ble fixet i PR #1101 separat.
      */
-    it("documents agent-route gap: jackpotConfirmed not in agentGame1.ts (yet)", async () => {
+    it("F10-FIX: agentGame1.ts wirer jackpotConfirmed i /api/agent/game1/start", async () => {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       const here = path.dirname(new URL(import.meta.url).pathname);
@@ -158,15 +166,12 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
         "agentGame1.ts"
       );
       const content = await fs.readFile(routeFile, "utf8");
-      // We expect this assertion to FAIL when the gap is closed (i.e. when
-      // the route accepts jackpotConfirmed). At that point, this test must
-      // be updated to verify the new wire-up.
       const handlerStartIdx = content.indexOf(
         '"/api/agent/game1/start"'
       );
       assert.ok(
         handlerStartIdx >= 0,
-        "agent-route should still register /api/agent/game1/start"
+        "agent-route må fortsatt registrere /api/agent/game1/start"
       );
       const nextHandlerIdx = content.indexOf(
         "router.post(",
@@ -179,13 +184,21 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
       const referencesJackpotConfirmed = handlerBody.includes(
         "jackpotConfirmed"
       );
-      // Lock current state: gap exists. When fixed, flip this assertion.
       assert.equal(
         referencesJackpotConfirmed,
-        false,
-        "WHEN THIS FAILS: the agent-route now wires jackpotConfirmed. " +
-          "Update this test to assert the param IS extracted + passed " +
-          "to startGame(). Track via BIN-XXX (see SPILL1_E2E_VERIFICATION_2026-Q3.md)."
+        true,
+        "F10-fix verifisering: agentGame1.ts MÅ inneholde jackpotConfirmed " +
+          "i /api/agent/game1/start-handler-en (PR #1101 / commit 40c465b3)."
+      );
+      // Verifiser at vi gjør tolerant boolean | "true"-parsing (speiler
+      // legacy admin-route og forhindrer 'Unrecognized key' fra Zod).
+      const tolerantParse =
+        handlerBody.includes('jackpotConfirmed === true') &&
+        handlerBody.includes('jackpotConfirmed === "true"');
+      assert.equal(
+        tolerantParse,
+        true,
+        "F10-fix verifisering: parsing må akseptere boolean ELLER literal \"true\""
       );
     });
   });
