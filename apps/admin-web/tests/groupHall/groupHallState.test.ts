@@ -77,6 +77,7 @@ const sampleRow: HallGroupRow = {
   name: "Nord-gruppen",
   status: "active",
   tvId: 42,
+  masterHallId: null,
   productIds: [],
   members: [
     {

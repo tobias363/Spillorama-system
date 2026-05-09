@@ -172,6 +172,12 @@ interface ServiceMocks {
   engineBridgeCalls: string[];
   /** Master-control-service calls captured. */
   masterControlCalls: string[];
+  /**
+   * F-NEW-1 (E2E pilot-blokker, 2026-05-09): captured input til
+   * `masterControlService.startGame` slik at tester kan verifisere at
+   * `jackpotConfirmed` propageres riktig fra MasterActionInput.
+   */
+  startGameInputs: Array<Record<string, unknown>>;
 }
 
 interface ServiceOverrides {
@@ -239,6 +245,23 @@ interface ServiceOverrides {
   resumeGameError?: Error;
   stopGameResult?: { gameId: string; status: string; auditId: string; actualStartTime: string | null; actualEndTime: string | null };
   stopGameError?: Error;
+  // Pilot Q3 2026: rollback-helper overrides for retry-with-rollback-tester.
+  rollbackToIdle?: (input: {
+    runId: string;
+    expectedStatus: string;
+    expectedPosition: number;
+    targetPosition: number;
+    reason: string;
+    masterUserId: string;
+  }) => GamePlanRun | null | Promise<GamePlanRun | null>;
+  rollbackPosition?: (input: {
+    runId: string;
+    expectedStatus: string;
+    expectedPosition: number;
+    targetPosition: number;
+    reason: string;
+    masterUserId: string;
+  }) => GamePlanRun | null | Promise<GamePlanRun | null>;
 }
 
 function makeService(
@@ -250,6 +273,7 @@ function makeService(
     planRunCalls: [],
     engineBridgeCalls: [],
     masterControlCalls: [],
+    startGameInputs: [],
   };
 
   const lobbyAggregatorStub = {
@@ -365,6 +389,41 @@ function makeService(
       if (overrides.findForDay) return overrides.findForDay(hallId, businessDate);
       return makeRun({ status: "running" });
     },
+    // Pilot Q3 2026: rollback-helpers brukt av MasterActionService etter
+    // bridge-spawn-feil. Default-implementasjonene returnerer en gyldig
+    // run så testene som ikke testes spesifikt rollback-pathen ikke krasjer.
+    async rollbackToIdle(input: {
+      runId: string;
+      expectedStatus: string;
+      expectedPosition: number;
+      targetPosition: number;
+      reason: string;
+      masterUserId: string;
+    }): Promise<GamePlanRun | null> {
+      mocks.planRunCalls.push("rollbackToIdle");
+      if (overrides.rollbackToIdle) return overrides.rollbackToIdle(input);
+      return makeRun({
+        id: input.runId,
+        status: "idle",
+        currentPosition: input.targetPosition,
+      });
+    },
+    async rollbackPosition(input: {
+      runId: string;
+      expectedStatus: string;
+      expectedPosition: number;
+      targetPosition: number;
+      reason: string;
+      masterUserId: string;
+    }): Promise<GamePlanRun | null> {
+      mocks.planRunCalls.push("rollbackPosition");
+      if (overrides.rollbackPosition) return overrides.rollbackPosition(input);
+      return makeRun({
+        id: input.runId,
+        status: "running",
+        currentPosition: input.targetPosition,
+      });
+    },
   } as unknown as import("../GamePlanRunService.js").GamePlanRunService;
 
   const engineBridgeStub = {
@@ -379,7 +438,7 @@ function makeService(
   } as unknown as import("../GamePlanEngineBridge.js").GamePlanEngineBridge;
 
   const masterControlStub = {
-    async startGame(): Promise<{
+    async startGame(input: Record<string, unknown>): Promise<{
       gameId: string;
       status: string;
       auditId: string;
@@ -387,6 +446,8 @@ function makeService(
       actualEndTime: string | null;
     }> {
       mocks.masterControlCalls.push("startGame");
+      // F-NEW-1: capture input for assertions on jackpotConfirmed-propagering.
+      mocks.startGameInputs.push(input);
       if (overrides.startGameError) throw overrides.startGameError;
       return (
         overrides.startGameResult ?? {
@@ -1028,4 +1089,329 @@ test("preValidate: aggregator infra-error propageres uendret", async () => {
     (err: unknown) =>
       err instanceof DomainError && err.code === "LOBBY_AGGREGATOR_INFRA_ERROR",
   );
+});
+
+// ── F-NEW-1 regression tests (E2E pilot-blokker, 2026-05-09) ────────────
+//
+// E2E test-engineer-agenten i `docs/engineering/SPILL1_E2E_TEST_RUN_2026-05-09.md`
+// avdekket at master-bingovert ikke kunne fullføre jackpot-popup-flyten via
+// den NYE Bølge 2-routen `/api/agent/game1/master/start`. Service-laget
+// (MasterActionService.start) aksepterte ikke `jackpotConfirmed` i input,
+// og endepunktets Zod-schema avviste body-feltet med "Unrecognized key:
+// jackpotConfirmed". Resultatet var en endeløs JACKPOT_CONFIRM_REQUIRED-
+// loop på klient-siden — master-agent kunne ikke starte JACKPOT-spill via
+// agent-konsollet, kun via admin-konsollet.
+//
+// Disse testene encoder kontrakten:
+//   1. `MasterActionInput` MÅ akseptere `jackpotConfirmed?: boolean`.
+//   2. Når `jackpotConfirmed=true` propageres flagget videre til
+//      `Game1MasterControlService.startGame({ jackpotConfirmed: true })`.
+//   3. Når `jackpotConfirmed` utelates eller er false, settes flagget IKKE
+//      i startGame-input (forblir undefined). Dette gjør at jackpot-
+//      preflight i Game1MasterControlService.startGame fortsatt kan kaste
+//      JACKPOT_CONFIRM_REQUIRED for den første start-attempten.
+
+test("F-NEW-1: start propagerer jackpotConfirmed=true til masterControlService.startGame", async () => {
+  const { service, mocks } = makeService();
+  await service.start({
+    actor: MASTER_ACTOR,
+    hallId: HALL_ID,
+    jackpotConfirmed: true,
+  });
+  assert.equal(mocks.startGameInputs.length, 1);
+  const startInput = mocks.startGameInputs[0]!;
+  assert.equal(
+    startInput.jackpotConfirmed,
+    true,
+    "jackpotConfirmed=true må propageres til Game1MasterControlService.startGame",
+  );
+});
+
+test("F-NEW-1: start uten jackpotConfirmed sender IKKE flagget til engine (legacy default)", async () => {
+  const { service, mocks } = makeService();
+  await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
+  assert.equal(mocks.startGameInputs.length, 1);
+  const startInput = mocks.startGameInputs[0]!;
+  assert.ok(
+    !("jackpotConfirmed" in startInput),
+    "jackpotConfirmed skal ikke settes i input når master ikke har bekreftet — engine kan da kaste JACKPOT_CONFIRM_REQUIRED",
+  );
+});
+
+test("F-NEW-1: start med jackpotConfirmed=false sender IKKE flagget til engine", async () => {
+  const { service, mocks } = makeService();
+  await service.start({
+    actor: MASTER_ACTOR,
+    hallId: HALL_ID,
+    jackpotConfirmed: false,
+  });
+  assert.equal(mocks.startGameInputs.length, 1);
+  const startInput = mocks.startGameInputs[0]!;
+  assert.ok(
+    !("jackpotConfirmed" in startInput),
+    "jackpotConfirmed=false (eller undefined) skal IKKE settes — kun true propageres",
+  );
+});
+
+// ── retry-with-rollback (BIN-XXXX, 2026-05-09) ──────────────────────────
+
+const FAST_RETRY_DELAYS = [0, 0, 0] as const;
+const FAST_SLEEP = async (_ms: number): Promise<void> => {};
+
+function makeRetryService(
+  overrides: ServiceOverrides = {},
+): { service: MasterActionService; mocks: ServiceMocks } {
+  const built = makeService(overrides);
+  // Tving fast-retry-konfig på service-en via Object.assign — vi kan ikke
+  // re-konstruere service-en direkte fordi makeService bruker forTesting.
+  Object.assign(built.service as unknown as Record<string, unknown>, {
+    bridgeRetryDelaysMs: FAST_RETRY_DELAYS,
+    retrySleep: FAST_SLEEP,
+  });
+  return built;
+}
+
+test("start: bridge-spawn feiler 1x → retry lykkes på forsøk 2", async () => {
+  let calls = 0;
+  const { service, mocks } = makeRetryService({});
+  // Override bridge til å feile første forsøk, lykkes på andre.
+  const originalBridge =
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge;
+  Object.assign(originalBridge, {
+    createScheduledGameForPlanRunPosition: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("transient DB glitch");
+      return { scheduledGameId: SCHED_ID, reused: false };
+    },
+  });
+
+  const result = await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
+  assert.equal(result.scheduledGameId, SCHED_ID);
+  assert.equal(calls, 2, "bridge skal ha blitt kalt 2 ganger (1 fail + 1 success)");
+  assert.ok(mocks.masterControlCalls.includes("startGame"));
+  // Rollback skal IKKE være kalt siden retry lykkes.
+  assert.ok(!mocks.planRunCalls.includes("rollbackToIdle"));
+});
+
+test("start: bridge-spawn feiler 3x (alle forsøk) → rollback til idle + DomainError", async () => {
+  let calls = 0;
+  const { service, mocks } = makeRetryService({
+    // Run var idle, så vi forventer rollback.
+    getOrCreateForToday: () => makeRun({ status: "idle" }),
+  });
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        throw new Error("DB connection refused");
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => service.start({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) => {
+      if (!(err instanceof DomainError) || err.code !== "BRIDGE_FAILED") return false;
+      const details = err.details as { rolledBack?: boolean } | undefined;
+      return details?.rolledBack === true;
+    },
+  );
+  // 4 totale forsøk (1 + 3 retries).
+  assert.equal(calls, 4);
+  // Rollback skal være kalt.
+  assert.ok(
+    mocks.planRunCalls.includes("rollbackToIdle"),
+    "rollbackToIdle skal være kalt etter alle retries feilet",
+  );
+  // Audit-event skal skrives.
+  const rollbackAudit = mocks.auditEvents.find(
+    (e) => e.action === "spill1.master.start.bridge_failed_with_rollback",
+  );
+  assert.ok(rollbackAudit, "rollback-audit-event må skrives");
+});
+
+test("start: permanent feil (JACKPOT_SETUP_REQUIRED) → ingen retry, ingen rollback", async () => {
+  let calls = 0;
+  const { service, mocks } = makeRetryService({});
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        throw new DomainError("JACKPOT_SETUP_REQUIRED", "trenger popup");
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => service.start({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "JACKPOT_SETUP_REQUIRED",
+  );
+  // Permanente feil skal IKKE retries.
+  assert.equal(calls, 1, "permanent feil skal ikke retries");
+  // Rollback skal IKKE kalles for permanente feil — den feilen vil bare
+  // gjenta seg.
+  assert.ok(!mocks.planRunCalls.includes("rollbackToIdle"));
+});
+
+test("advance: bridge-spawn feiler 2x → retry lykkes på forsøk 3", async () => {
+  let calls = 0;
+  const { service, mocks } = makeRetryService({});
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        if (calls < 3) throw new Error(`transient-${calls}`);
+        return { scheduledGameId: SCHED_ID, reused: false };
+      },
+    },
+  );
+
+  const result = await service.advance({ actor: MASTER_ACTOR, hallId: HALL_ID });
+  assert.equal(result.scheduledGameId, SCHED_ID);
+  assert.equal(calls, 3);
+  // Position-rollback skal IKKE være kalt siden retry lykkes.
+  assert.ok(!mocks.planRunCalls.includes("rollbackPosition"));
+});
+
+test("advance: bridge feiler 4x → rollback position + DomainError", async () => {
+  let calls = 0;
+  const { service, mocks } = makeRetryService({
+    advanceToNext: () => ({
+      // Simuler at vi har inkrementert fra 1 til 2.
+      run: makeRun({ status: "running", currentPosition: 2 }),
+      nextGame: makeCatalogEntry(),
+      jackpotSetupRequired: false,
+    }),
+  });
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        throw new Error("DB pool exhausted");
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => service.advance({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) => {
+      if (!(err instanceof DomainError) || err.code !== "BRIDGE_FAILED") return false;
+      const details = err.details as { rolledBack?: boolean; previousPosition?: number } | undefined;
+      return details?.rolledBack === true && details?.previousPosition === 1;
+    },
+  );
+  assert.equal(calls, 4, "4 totale forsøk på advance");
+  assert.ok(
+    mocks.planRunCalls.includes("rollbackPosition"),
+    "rollbackPosition skal være kalt etter alle retries feilet",
+  );
+  const rollbackAudit = mocks.auditEvents.find(
+    (e) => e.action === "spill1.master.advance.bridge_failed_with_rollback",
+  );
+  assert.ok(rollbackAudit, "advance rollback-audit-event må skrives");
+});
+
+test("advance: permanent feil (HALL_NOT_IN_GROUP) → ingen retry, men rollback position", async () => {
+  // For permanente feil på advance skal vi rulle position tilbake siden
+  // advanceToNext har inkrementert den allerede.
+  let calls = 0;
+  const { service, mocks } = makeRetryService({
+    advanceToNext: () => ({
+      run: makeRun({ status: "running", currentPosition: 2 }),
+      nextGame: makeCatalogEntry(),
+      jackpotSetupRequired: false,
+    }),
+  });
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        throw new DomainError(
+          "HALL_NOT_IN_GROUP",
+          "hallen er ikke i aktiv gruppe",
+        );
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => service.advance({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "HALL_NOT_IN_GROUP",
+  );
+  assert.equal(calls, 1, "permanente feil skal ikke retries");
+  // Position-rollback SKAL kalles selv for permanente feil — ellers blir
+  // run hengende på posisjon 2 som ikke har scheduled-game.
+  assert.ok(mocks.planRunCalls.includes("rollbackPosition"));
+});
+
+test("start: rollback selv feiler → original BRIDGE_FAILED propageres uendret", async () => {
+  let calls = 0;
+  const { service, mocks } = makeRetryService({
+    getOrCreateForToday: () => makeRun({ status: "idle" }),
+    rollbackToIdle: () => {
+      throw new Error("rollback DB error");
+    },
+  });
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        throw new Error("primary bridge failure");
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => service.start({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) => err instanceof DomainError && err.code === "BRIDGE_FAILED",
+  );
+  assert.equal(calls, 4);
+  // Rollback ble forsøkt selv om den feilet.
+  assert.ok(mocks.planRunCalls.includes("rollbackToIdle"));
+});
+
+test("start: idempotent re-start på running run → ingen rollback selv om bridge feiler etter retries", async () => {
+  // Hvis run var allerede 'running' (idempotent re-start), skal vi IKKE
+  // rulle tilbake til idle — det ville ødelagt eksisterende engine-state.
+  let calls = 0;
+  const { service, mocks } = makeRetryService({
+    getOrCreateForToday: () => makeRun({ status: "running" }),
+  });
+  Object.assign(
+    (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
+      .engineBridge,
+    {
+      createScheduledGameForPlanRunPosition: async () => {
+        calls += 1;
+        throw new Error("transient");
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => service.start({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) => {
+      if (!(err instanceof DomainError) || err.code !== "BRIDGE_FAILED") return false;
+      const details = err.details as { rolledBack?: boolean } | undefined;
+      return details?.rolledBack === false;
+    },
+  );
+  assert.equal(calls, 4);
+  // Rollback skal IKKE kalles fordi run var allerede running.
+  assert.ok(!mocks.planRunCalls.includes("rollbackToIdle"));
 });

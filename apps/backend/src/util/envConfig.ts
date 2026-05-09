@@ -264,8 +264,15 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     process.env.GAME1_STALE_READY_SWEEP_ENABLED,
     false,
   );
-  // GAME1_SCHEDULE PR 4c: auto-draw-tick — default OFF til PR 4d socket-flyt er inne.
-  const jobGame1AutoDrawEnabled = parseBooleanEnv(process.env.GAME1_AUTO_DRAW_ENABLED, false);
+  // GAME1_SCHEDULE PR 4c: auto-draw-tick.
+  // F13 (E2E pilot-blokker, 2026-05-09): default endret fra `false` til
+  // `true`. Auto-draw er kjernen av Spill 1 — uten den står running-spill
+  // stille uten trekk og spillere venter forgjeves på baller. PR 4d
+  // socket-flyt har lenge vært på plass, og prod (`render.yaml` /
+  // RENDER_ENV_VAR_RUNBOOK.md) har allerede `GAME1_AUTO_DRAW_ENABLED=true`.
+  // Sett eksplisitt `false` i miljø hvis flagget skal disables (eks.
+  // manuell QA hvor man vil drive draw-tick selv).
+  const jobGame1AutoDrawEnabled = parseBooleanEnv(process.env.GAME1_AUTO_DRAW_ENABLED, true);
   // Minimum 500 ms — auto-draw trigges hvert `seconds`-felt fra ticket_config,
   // tick-intervallet bare polles. Default 1000 ms matcher "global 1s tick".
   const jobGame1AutoDrawIntervalMs = Math.max(500, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 1_000));
