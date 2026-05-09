@@ -461,3 +461,57 @@ Estimat for pilot-readiness: **0.5-1 dev-dag** for å lukke de tre P0-blokkerne.
 - `npm test:compliance` er fortsatt grønn (403/403).
 - `npm run check` er fortsatt grønn.
 - Ingen filer i konflikt-soner (sockets/, security/, PostgresWalletAdapter, smoke-test, drill-doc, pilot-runbook, compliance-doc) er endret.
+
+---
+
+## 9. Status-oppdatering 2026-05-09 (cleanup-bølge etter F10/F13/F17)
+
+Etter at F10/F13/F17 ble fikset (PR #1101) er resterende funn nå adressert.
+Status per funn:
+
+| ID | Severity | Status | PR / branch |
+|---|---|---|---|
+| F1 | low | ✅ Lukket — dokumentert i CLAUDE.md + AGENT_ONBOARDING.md | `fix/spill1-e2e-cleanup-f4-f7-plus-low` |
+| F2 | low | ✅ Lukket — dokumentert i CLAUDE.md + AGENT_ONBOARDING.md | `fix/spill1-e2e-cleanup-f4-f7-plus-low` |
+| F3 | n/a | ✅ Akseptert — eksisterende design (F3 er bare verifikasjon) | (ingen kode-endring) |
+| F4 | medium | ✅ Lukket — `formatOsloDateKey` brukt i `dateRowToString` | `fix/spill1-e2e-cleanup-f4-f7-plus-low` |
+| F5 | low | ✅ Lukket — `[CRIT]` demoted til `[WARN]` for kjent recovery-fallback | `fix/spill1-e2e-cleanup-f4-f7-plus-low` |
+| F6 | medium | 🔵 Akseptabel post-pilot — eldre test-fixture-rom; krever recovery-path-refaktor | (post-pilot) |
+| F7 | medium | ✅ Lukket — `PURCHASE_ALLOWED_STATUSES` aksepterer både `purchase_open` og `ready_to_start` | `fix/spill1-e2e-cleanup-f4-f7-plus-low` |
+| F8 | low | 🔵 Akseptabel — kun gotcha for fremtidige tester; bridge-pathen virker korrekt i prod-flyt | (kjent gotcha) |
+| F10 | high | ✅ Lukket | PR #1101 |
+| F13 | high | ✅ Lukket | PR #1101 |
+| F17 | high | ✅ Lukket | PR #1101 |
+| F21 | low | ✅ Lukket — strukturert log-event når engine ender med reason+draws+phase | `fix/spill1-e2e-cleanup-f4-f7-plus-low` |
+| F22 | low | 🔵 Avklaring til Tobias — `MAX_DRAWS=52` er forventet legacy-oppførsel; spørsmålet "skal spillet trekke videre til Fullt Hus" er produkt-beslutning, ikke bug | (Tobias-spørsmål) |
+
+**Pilot go/no-go etter cleanup-bølge:** **GO** — alle pilot-blokkere lukket.
+F6 og F8 er aksepterte, og F22 er produkt-spørsmål uten kode-endring.
+
+**Cleanup-bølge-commits (`fix/spill1-e2e-cleanup-f4-f7-plus-low`):**
+
+| Commit | Funn | Beskrivelse |
+|---|---|---|
+| `0c007c75` | F4 | `dateRowToString` bruker `formatOsloDateKey` (Oslo-tz-fix) + 6 unit-tester |
+| `4e6f9492` | F7 | `PURCHASE_ALLOWED_STATUSES` med `ready_to_start` tillatt + 7 unit-tester |
+| `66a45e73` | F5 + F21 | `[CRIT]` → `[WARN]` for recovery-fallback + ny `[engine] game completed`-log-event |
+| `54163e13` | F1 + F2 | CLAUDE.md + AGENT_ONBOARDING.md pre-flight-instruksjoner |
+
+**Test-totaler:**
+- 13 nye unit-tester (6 F4 + 7 F7), alle grønne.
+- TypeScript strict-mode passerer (`npm --prefix apps/backend run check`).
+- 0 regresjon i eksisterende test-suite.
+
+**Akseptert post-pilot (F6, F8):**
+- F6: eldre test-fixture-rom har drift mellom in-memory og DB-checkpoint.
+  Påvirker ikke nye runder. Krever recovery-path-refaktor som ikke
+  er pilot-blokker. Anbefales håndtert i egen post-pilot-issue.
+- F8: gotcha for testere som manuelt kloner scheduled-games — bridge-
+  pathen i prod setter `participating_halls_json` korrekt. Dokumentert
+  i denne rapporten som tester-gotcha.
+
+**Tobias-avklaring (F22):**
+- `DEFAULT_GAME1_MAX_DRAWS = 52` avslutter spill etter 52 trekk uavhengig
+  av om Fullt Hus er funnet. Forventet legacy-oppførsel for å begrense
+  spilltid. **Produkt-spørsmål:** Skal vi vise UI-melding eller tillate
+  videre trekk til Fullt Hus i pilot? Krever Tobias-beslutning.
