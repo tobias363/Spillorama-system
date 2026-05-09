@@ -14,11 +14,14 @@
  *   3. Heuristikk-sjekk: hvis DB er tom (ingen rader i app_halls), kjør
  *      `npm run seed:demo-pilot-day` automatisk slik at admin/agent/spillere
  *      kan logge inn etter første-gangs-startup.
- *   4. Starter backend (tsx --watch på port 4000), admin-web (Vite på 5174),
+ *   4. Bygger @spillorama/shared-types (idempotent tsc) — slik at backend
+ *      ikke krasjer ved oppstart med "module does not provide an export
+ *      named X" når src/ har nye exports som ikke er i dist/.
+ *   5. Starter backend (tsx --watch på port 4000), admin-web (Vite på 5174),
  *      game-client (Vite på default 5173) og visual-harness (Node på 4173)
  *      parallelt med farge-kodet output-prefiks.
- *   5. Helsesjekker hver port etter ~10 sek — printer en fin status-tabell.
- *   6. Ctrl+C dreper alle barneprosesser rent (SIGTERM først, så SIGKILL
+ *   6. Helsesjekker hver port etter ~10 sek — printer en fin status-tabell.
+ *   7. Ctrl+C dreper alle barneprosesser rent (SIGTERM først, så SIGKILL
  *      etter 3 sek hvis noe henger).
  *
  * Bruk:
@@ -29,6 +32,7 @@
  *   --no-harness     Skip visual-harness (sparer en port)
  *   --no-admin       Skip admin-web (kun backend + game-client)
  *   --skip-migrate   Hopp over migrate (bruk hvis du allerede har kjørt det)
+ *   --skip-build     Hopp over shared-types-build (hvis dist/ er ferskt)
  *   --force-seed     Re-seed selv om DB ikke er tom (idempotent)
  *
  * Backwards-compat: `npm run dev` (alene) fungerer fortsatt som før — denne
@@ -52,6 +56,7 @@ const SKIP_HARNESS = args.has("--no-harness");
 const SKIP_ADMIN = args.has("--no-admin");
 const SKIP_MIGRATE = args.has("--skip-migrate");
 const FORCE_SEED = args.has("--force-seed");
+const SKIP_BUILD = args.has("--skip-build");
 
 // Default-DSN for local Docker-Postgres (matcher docker-compose.yml).
 // Override hvis brukeren allerede har APP_PG_CONNECTION_STRING satt i env.
@@ -233,6 +238,47 @@ function runMigrate() {
     return false;
   }
   console.log(color("green", "[migrate] ✓ ferdig (idempotent)"));
+  return true;
+}
+
+/**
+ * Bygg shared-types før backend starter (Tobias-direktiv 2026-05-09).
+ *
+ * Hvorfor: backend importerer fra `@spillorama/shared-types` som peker på
+ * `packages/shared-types/dist/`. Hvis kildekoden i `src/` har nye exports
+ * som ikke er bygd til `dist/`, krasjer backend ved oppstart med:
+ *
+ *   SyntaxError: The requested module '@spillorama/shared-types' does not
+ *   provide an export named 'XXX'
+ *
+ * Vi kjører tsc-build på shared-types før backend spawn for å garantere
+ * at `dist/` er friskt. Idempotent — typescript hopper over uendrede filer.
+ */
+function buildSharedTypes() {
+  if (SKIP_BUILD) {
+    console.log(color("yellow", "[build] hoppet over (--skip-build)"));
+    return true;
+  }
+  console.log(color("blue", "[build] bygger @spillorama/shared-types"));
+  const res = spawnSync(
+    "npm",
+    ["--prefix", "packages/shared-types", "run", "build", "--silent"],
+    {
+      cwd: ROOT,
+      stdio: "inherit",
+    }
+  );
+  if (res.status !== 0) {
+    console.log(
+      color(
+        "red",
+        "[build] shared-types-build feilet — sjekk TypeScript-feil i packages/shared-types/src/, " +
+          "eller bruk --skip-build hvis dist/ er ferskt."
+      )
+    );
+    return false;
+  }
+  console.log(color("green", "[build] ✓ shared-types bygd"));
   return true;
 }
 
@@ -473,6 +519,15 @@ async function main() {
         "[db] --no-docker satt — hopper over auto-migrate/seed. Kjør 'npm run dev:seed' manuelt om nødvendig."
       )
     );
+  }
+
+  // ── Build shared-types (Tobias-direktiv 2026-05-09) ──────────────────
+  // Backend importerer fra @spillorama/shared-types/dist. Hvis dist/ er
+  // stale relative til src/ (eks. nye exports som GameLobbyAggregator-
+  // refactor sin Spill1AgentLobbyStateSchema), krasjer backend på oppstart.
+  // tsc-build er idempotent — uendrede filer hoppes over.
+  if (!buildSharedTypes()) {
+    process.exit(1);
   }
 
   // ── Backend ───────────────────────────────────────────────────────────
