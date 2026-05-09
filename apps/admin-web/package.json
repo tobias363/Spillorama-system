@@ -17,9 +17,9 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vite": "^5.2.0",
-    "vitest": "^1.4.0",
-    "@vitest/ui": "^1.4.0",
+    "vite": "^8.0.11",
+    "vitest": "^4.1.5",
+    "@vitest/ui": "^4.1.5",
     "jsdom": "^24.0.0",
     "@types/node": "^20.12.0"
   }
