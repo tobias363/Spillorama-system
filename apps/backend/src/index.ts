@@ -83,6 +83,7 @@ import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createUniqueIdExpiryJob } from "./jobs/uniqueIdExpiry.js";
+import { createGamePlanRunCleanupJob } from "./jobs/gamePlanRunCleanup.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createProfilePendingLossLimitFlushJob } from "./jobs/profilePendingLossLimitFlush.js";
 import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
@@ -280,6 +281,10 @@ import { Spill3ConfigService } from "./game/Spill3ConfigService.js";
 import { createPerpetualRoundOpeningWindowGuard } from "./game/PerpetualRoundOpeningWindowGuard.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
+import {
+  GamePlanRunCleanupService,
+  makeInlineCleanupHook,
+} from "./game/GamePlanRunCleanupService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
 import { Game1LobbyService } from "./game/Game1LobbyService.js";
 import { Spill1LobbyBroadcaster } from "./game/Spill1LobbyBroadcaster.js";
@@ -1226,6 +1231,23 @@ const gamePlanRunService = new GamePlanRunService({
   catalogService: gameCatalogService,
 });
 
+// Pilot Q3 2026: GamePlanRunCleanupService — auto-finish stale plan-runs.
+// Two entry-points:
+//   1. Nightly cron (03:00 Oslo) sweeps ALL halls (registered below with
+//      jobScheduler.register).
+//   2. Inline self-heal — bound to gamePlanRunService.getOrCreateForToday
+//      so any hall that hits the master-konsoll first thing in the morning
+//      auto-recovers from gårsdagens leftover state without operator
+//      intervention.
+// Audit-log injiseres post-construction (sammen med øvrige services).
+const gamePlanRunCleanupService = new GamePlanRunCleanupService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
+gamePlanRunService.setInlineCleanupHook(
+  makeInlineCleanupHook(gamePlanRunCleanupService),
+);
+
 // Fase 4 (2026-05-07): GamePlanEngineBridge — bro mellom katalog-modellen
 // og legacy draw-engine. Spawn-er en `app_game1_scheduled_games`-rad i
 // farten basert på plan-run + catalog-entry så
@@ -1499,6 +1521,7 @@ scheduleService.setAuditLogService(auditLogService);
 gameCatalogService.setAuditLogService(auditLogService);
 gamePlanService.setAuditLogService(auditLogService);
 gamePlanRunService.setAuditLogService(auditLogService);
+gamePlanRunCleanupService.setAuditLogService(auditLogService);
 spill2ConfigService.setAuditLogService(auditLogService);
 spill3ConfigService.setAuditLogService(auditLogService);
 
@@ -1905,6 +1928,36 @@ jobScheduler.register({
     pool: platformService.getPool(),
     schema: pgSchema,
     runAtHourLocal: jobUniqueIdExpiryRunAtHour,
+  }),
+});
+
+// Pilot Q3 2026: nightly auto-finish av stale plan-runs (running/paused med
+// gårsdagens business_date). Kjører kl 03:00 Oslo for å gi master-konsoll-
+// brukeren en ren start neste morgen — uten manuell SQL-edit eller ops-
+// involvering. Self-healing inline-hook (bound ved boot ovenfor) dekker
+// kanttilfellet hvor cron har feilet eller backend nettopp boot-et.
+//
+// Defaults uten env-overrides: enabled=true, tick=15min, run-at=03:00 Oslo.
+// Service-laget gjør 42P01-defensjon så fersh DB ikke krasjer cron-loopen.
+const jobGamePlanRunCleanupEnabled =
+  process.env.GAME_PLAN_RUN_CLEANUP_ENABLED !== "false";
+const jobGamePlanRunCleanupIntervalMs = Math.max(
+  60_000,
+  Number(process.env.GAME_PLAN_RUN_CLEANUP_INTERVAL_MS ?? 15 * 60 * 1000),
+);
+const jobGamePlanRunCleanupRunAtHour = Math.max(
+  0,
+  Math.min(23, Number(process.env.GAME_PLAN_RUN_CLEANUP_RUN_AT_HOUR ?? 3)),
+);
+jobScheduler.register({
+  name: "game-plan-run-cleanup",
+  description:
+    "Auto-finish stale game-plan-runs (running/paused med gårsdagens business_date). Pilot Q3 2026 self-healing.",
+  intervalMs: jobGamePlanRunCleanupIntervalMs,
+  enabled: jobGamePlanRunCleanupEnabled,
+  run: createGamePlanRunCleanupJob({
+    service: gamePlanRunCleanupService,
+    runAtHourLocal: jobGamePlanRunCleanupRunAtHour,
   }),
 });
 
