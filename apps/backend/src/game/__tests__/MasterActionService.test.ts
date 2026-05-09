@@ -172,6 +172,12 @@ interface ServiceMocks {
   engineBridgeCalls: string[];
   /** Master-control-service calls captured. */
   masterControlCalls: string[];
+  /**
+   * F-NEW-1 (E2E pilot-blokker, 2026-05-09): captured input til
+   * `masterControlService.startGame` slik at tester kan verifisere at
+   * `jackpotConfirmed` propageres riktig fra MasterActionInput.
+   */
+  startGameInputs: Array<Record<string, unknown>>;
 }
 
 interface ServiceOverrides {
@@ -250,6 +256,7 @@ function makeService(
     planRunCalls: [],
     engineBridgeCalls: [],
     masterControlCalls: [],
+    startGameInputs: [],
   };
 
   const lobbyAggregatorStub = {
@@ -379,7 +386,7 @@ function makeService(
   } as unknown as import("../GamePlanEngineBridge.js").GamePlanEngineBridge;
 
   const masterControlStub = {
-    async startGame(): Promise<{
+    async startGame(input: Record<string, unknown>): Promise<{
       gameId: string;
       status: string;
       auditId: string;
@@ -387,6 +394,8 @@ function makeService(
       actualEndTime: string | null;
     }> {
       mocks.masterControlCalls.push("startGame");
+      // F-NEW-1: capture input for assertions on jackpotConfirmed-propagering.
+      mocks.startGameInputs.push(input);
       if (overrides.startGameError) throw overrides.startGameError;
       return (
         overrides.startGameResult ?? {
@@ -1027,5 +1036,67 @@ test("preValidate: aggregator infra-error propageres uendret", async () => {
     () => service.start({ actor: MASTER_ACTOR, hallId: HALL_ID }),
     (err: unknown) =>
       err instanceof DomainError && err.code === "LOBBY_AGGREGATOR_INFRA_ERROR",
+  );
+});
+
+// ── F-NEW-1 regression tests (E2E pilot-blokker, 2026-05-09) ────────────
+//
+// E2E test-engineer-agenten i `docs/engineering/SPILL1_E2E_TEST_RUN_2026-05-09.md`
+// avdekket at master-bingovert ikke kunne fullføre jackpot-popup-flyten via
+// den NYE Bølge 2-routen `/api/agent/game1/master/start`. Service-laget
+// (MasterActionService.start) aksepterte ikke `jackpotConfirmed` i input,
+// og endepunktets Zod-schema avviste body-feltet med "Unrecognized key:
+// jackpotConfirmed". Resultatet var en endeløs JACKPOT_CONFIRM_REQUIRED-
+// loop på klient-siden — master-agent kunne ikke starte JACKPOT-spill via
+// agent-konsollet, kun via admin-konsollet.
+//
+// Disse testene encoder kontrakten:
+//   1. `MasterActionInput` MÅ akseptere `jackpotConfirmed?: boolean`.
+//   2. Når `jackpotConfirmed=true` propageres flagget videre til
+//      `Game1MasterControlService.startGame({ jackpotConfirmed: true })`.
+//   3. Når `jackpotConfirmed` utelates eller er false, settes flagget IKKE
+//      i startGame-input (forblir undefined). Dette gjør at jackpot-
+//      preflight i Game1MasterControlService.startGame fortsatt kan kaste
+//      JACKPOT_CONFIRM_REQUIRED for den første start-attempten.
+
+test("F-NEW-1: start propagerer jackpotConfirmed=true til masterControlService.startGame", async () => {
+  const { service, mocks } = makeService();
+  await service.start({
+    actor: MASTER_ACTOR,
+    hallId: HALL_ID,
+    jackpotConfirmed: true,
+  });
+  assert.equal(mocks.startGameInputs.length, 1);
+  const startInput = mocks.startGameInputs[0]!;
+  assert.equal(
+    startInput.jackpotConfirmed,
+    true,
+    "jackpotConfirmed=true må propageres til Game1MasterControlService.startGame",
+  );
+});
+
+test("F-NEW-1: start uten jackpotConfirmed sender IKKE flagget til engine (legacy default)", async () => {
+  const { service, mocks } = makeService();
+  await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
+  assert.equal(mocks.startGameInputs.length, 1);
+  const startInput = mocks.startGameInputs[0]!;
+  assert.ok(
+    !("jackpotConfirmed" in startInput),
+    "jackpotConfirmed skal ikke settes i input når master ikke har bekreftet — engine kan da kaste JACKPOT_CONFIRM_REQUIRED",
+  );
+});
+
+test("F-NEW-1: start med jackpotConfirmed=false sender IKKE flagget til engine", async () => {
+  const { service, mocks } = makeService();
+  await service.start({
+    actor: MASTER_ACTOR,
+    hallId: HALL_ID,
+    jackpotConfirmed: false,
+  });
+  assert.equal(mocks.startGameInputs.length, 1);
+  const startInput = mocks.startGameInputs[0]!;
+  assert.ok(
+    !("jackpotConfirmed" in startInput),
+    "jackpotConfirmed=false (eller undefined) skal IKKE settes — kun true propageres",
   );
 });
