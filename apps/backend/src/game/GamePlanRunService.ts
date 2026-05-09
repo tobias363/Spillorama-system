@@ -35,6 +35,7 @@ import { logger as rootLogger } from "../util/logger.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
 import type { GamePlanService } from "./GamePlanService.js";
+import type { InlineCleanupHook } from "./GamePlanRunCleanupService.js";
 import type {
   AdvanceToNextResult,
   GamePlanRun,
