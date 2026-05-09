@@ -1,6 +1,7 @@
 import { Container, Sprite, Text, Assets } from "pixi.js";
 import gsap from "gsap";
 import type { GameState } from "../../../bridge/GameBridge.js";
+import type { Spill1LobbyOverallStatus } from "@spillorama/shared-types/api";
 import type { PatternWonPayload, ChatMessage } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
@@ -158,6 +159,28 @@ export class PlayScreen extends Container {
    * lobby-data så spilleren ser riktige bongfarger.
    */
   private lobbyTicketConfig: BuyPopupTicketConfig | null = null;
+
+  /**
+   * Spillerklient-rebuild Fase 3 (2026-05-10): siste kjente
+   * `Spill1LobbyState.overallStatus` fra plan-runtime aggregatoren.
+   * Brukes til å gating-e CenterBall-countdown i `update()` slik at
+   * vi ALDRI starter en lokal countdown før master har trykket Start.
+   *
+   * Tobias-direktiv 2026-05-09 (PM_ONBOARDING_PLAYBOOK §2.3):
+   *   "Det skal aldri være noen andre views i det live rommet en neste
+   *    planlagte spill."
+   *
+   * Mapping i `update()`:
+   *   - `running`         → countdown-/live-ball-display kan kjøre normalt
+   *   - alt annet (idle, purchase_open, ready_to_start, paused,
+   *     closed, finished) → CenterBall holdes i waiting-state, ingen
+   *     setInterval-countdown. Game1Controller eier "venter på master"-
+   *     overlay-en separat.
+   *   - `null` (lobby-state ikke ankommet enda) → fail-safe: behandle
+   *     som ikke-running, dvs. ingen countdown. Vi heller bias mot å
+   *     vise "venter på master" enn å vise feil-aktig countdown.
+   */
+  private lobbyOverallStatus: Spill1LobbyOverallStatus | null = null;
 
   constructor(
     screenWidth: number,
@@ -412,17 +435,34 @@ export class PlayScreen extends Container {
 
     // Countdown / center-ball:
     //   - RUNNING → show the last drawn ball, stop countdown
-    //   - Else with millisUntilNextStart > 0 → run countdown
-    //   - Else → idle "waiting" view
+    //   - Else with millisUntilNextStart > 0 AND lobby.overallStatus === "running"
+    //     → run countdown (server har bekreftet at master har trygget runden)
+    //   - Else → idle "waiting" view (Game1Controller mounter "venter på
+    //     master"-overlay over toppen separat)
+    //
+    // Spillerklient-rebuild Fase 3 (2026-05-10) — Tobias-direktiv 2026-05-09:
+    // klient skal ALDRI starte en lokal countdown før master har trykket
+    // Start. Det betyr at vi gater countdown-init på
+    // `lobbyOverallStatus === "running"`. Pre-fix kjørte countdown så
+    // snart `state.millisUntilNextStart > 0` — det førte til at klient
+    // viste timer som ikke matchet server-tilstand når master ennå ikke
+    // hadde trigget. Nå venter vi på server-pushed overgang
+    // `overallStatus: purchase_open → running` før countdown starter.
+    const lobbyRunning = this.lobbyOverallStatus === "running";
     if (state.gameStatus === "RUNNING") {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       if (state.lastDrawnNumber !== null) this.centerBall.setNumber(state.lastDrawnNumber);
-    } else if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
+    } else if (
+      lobbyRunning &&
+      state.millisUntilNextStart !== null &&
+      state.millisUntilNextStart > 0
+    ) {
       this.leftInfo.startCountdown(state.millisUntilNextStart);
       this.centerBall.startCountdown(state.millisUntilNextStart);
     } else {
       this.leftInfo.stopCountdown();
+      this.centerBall.stopCountdown();
       this.centerBall.showWaiting();
     }
 
@@ -593,6 +633,33 @@ export class PlayScreen extends Container {
    */
   setBuyPopupTicketConfig(config: BuyPopupTicketConfig | null): void {
     this.lobbyTicketConfig = config;
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 3 (2026-05-10): server-driven
+   * `overallStatus` fra plan-runtime aggregator. Game1Controller kaller
+   * dette ved hver `Spill1LobbyState`-oppdatering.
+   *
+   * Når status endres skal `update(state)` re-evaluere countdown-state
+   * — vi kaller `update()` synkronisert med siste cached state slik at
+   * CenterBall reflekterer ny gating umiddelbart (uten å vente på neste
+   * `room:update`).
+   *
+   * Tobias-direktiv 2026-05-09: server er Source-of-Truth for runde-
+   * lifecycle. Klient må ikke ha en lokal hypotese om når countdown
+   * begynner — den skal speile `overallStatus === "running"`.
+   */
+  setLobbyOverallStatus(status: Spill1LobbyOverallStatus | null): void {
+    if (this.lobbyOverallStatus === status) return;
+    this.lobbyOverallStatus = status;
+    if (this.lastState) {
+      this.update(this.lastState);
+    }
+  }
+
+  /** Test-hook: hent siste kjente `lobbyOverallStatus`. */
+  getLobbyOverallStatus(): Spill1LobbyOverallStatus | null {
+    return this.lobbyOverallStatus;
   }
 
   hideBuyPopup(): void {
