@@ -1,0 +1,86 @@
+# BIN-825: Chaos-test Dockerfile for Spillorama monorepo.
+#
+# Why this exists:
+# `apps/backend/Dockerfile` was written assuming a flat layout, but the
+# repo is an npm-workspaces monorepo where `apps/backend/package.json`
+# has `file:../../packages/shared-types`. With `context: apps/backend`
+# Docker cannot reach the workspace siblings → `npm ci` fails before
+# any chaos-test can run (BIN-825 / BIN-810 pilot-blocker).
+#
+# This Dockerfile is dedicated to chaos-tests:
+#   - Build context is the REPO ROOT (set via docker-compose).
+#   - Mirrors render.yaml buildCommand so behaviour matches prod.
+#   - `apps/backend/Dockerfile` is left untouched. Render does not
+#     consume it (`runtime: node` + `buildCommand` in render.yaml),
+#     and rewriting it for monorepo would risk an unrelated regression.
+#
+# Build context: repo root
+# Usage:
+#   docker-compose \
+#     -f docker-compose.yml \
+#     -f infra/chaos-tests/docker-compose.chaos.yml \
+#     up -d --build
+
+# ── Build stage ────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+WORKDIR /repo
+
+# Workspace manifests + lockfiles. Copy them first so the install layer
+# is cached separately from the source code.
+COPY package.json package-lock.json* ./
+COPY apps/backend/package.json apps/backend/
+COPY apps/backend/package-lock.json* apps/backend/
+COPY apps/admin-web/package.json apps/admin-web/
+COPY packages/shared-types/package.json packages/shared-types/
+COPY packages/game-client/package.json packages/game-client/
+
+# Mirror render.yaml prod-build: install root + backend, then build.
+# `--include=dev` is REQUIRED — chaos-tests rely on tsx (devDep) at
+# runtime to seed pilot-data.
+RUN npm install --include=dev --no-audit --no-fund \
+ && npm --prefix apps/backend install --include=dev --no-audit --no-fund
+
+# Source — only the workspaces backend needs at compile-time.
+# (no root tsconfig.json — backend's tsconfig is self-contained)
+COPY packages/shared-types/ packages/shared-types/
+COPY apps/backend/tsconfig.json apps/backend/
+COPY apps/backend/src/ apps/backend/src/
+COPY apps/backend/openapi.yaml apps/backend/
+COPY apps/backend/migrations/ apps/backend/migrations/
+COPY apps/backend/scripts/ apps/backend/scripts/
+COPY apps/backend/public/ apps/backend/public/
+
+# Build shared-types first (backend imports its compiled output), then
+# the backend itself.
+RUN npm --prefix packages/shared-types run build \
+ && npm --prefix apps/backend run build
+
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM node:22-alpine
+
+RUN apk add --no-cache tini wget
+WORKDIR /app
+
+# We preserve the workspace tree shape so symlinks stay valid.
+# The backend's node_modules has `@spillorama/shared-types` symlinked as
+# `../../../../packages/shared-types` (relative). We'd break the link
+# if we flattened the layout, so the runtime keeps `/repo/...` intact
+# and exposes `/app` as a symlink to `/repo/apps/backend`. Chaos
+# scripts can keep using the same `/app/...` paths.
+COPY --from=builder /repo /repo
+
+# /app → /repo/apps/backend (one filesystem entry, doesn't duplicate
+# files). `npm --prefix /app run migrate` and `npx tsx /app/scripts/...`
+# both follow the symlink transparently.
+RUN rm -rf /app && ln -s /repo/apps/backend /app
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=4000
+
+EXPOSE 4000
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/index.js"]

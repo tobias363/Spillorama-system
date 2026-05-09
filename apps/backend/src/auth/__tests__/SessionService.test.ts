@@ -310,6 +310,75 @@ test("REQ-132: touchActivity er en no-op hvis sesjonen er ukjent", async () => {
   await svc.touchActivity("ukjent-token");
 });
 
+test("BIN-824: touchActivity soft-fails når SELECT kaster DB-feil (manglende kolonne)", async () => {
+  // Simulerer fresh test-schema som mangler last_activity_at-kolonnen
+  // (`undefined column` Postgres-feil 42703). Real-world repro: E2E-test
+  // som kjører ensureInitialized men ikke pg-migrations, eller en
+  // schema-drift mellom prod og test.
+  const failingPool = {
+    async query(sql: string) {
+      if (sql.trim().startsWith("SELECT id, last_activity_at, revoked_at")) {
+        const err = new Error(
+          'column "last_activity_at" does not exist'
+        ) as Error & { code?: string };
+        err.code = "42703";
+        throw err;
+      }
+      throw new Error(`unhandled SQL: ${sql.slice(0, 80)}`);
+    },
+  } as unknown as Pool;
+
+  const svc = SessionService.forTesting(failingPool);
+  // touchActivity må ikke kaste — den skal soft-fail og logge warn så
+  // at /api/auth/me kan svare 200 selv om session-tabellen er ute av
+  // sync med koden.
+  await svc.touchActivity("any-token");
+});
+
+test("BIN-824: touchActivity soft-fails når throttle-UPDATE kaster DB-feil", async () => {
+  // Sesjonen finnes (SELECT går OK), men UPDATE feiler underveis. Det
+  // skal IKKE blokkere /api/auth/me — best-effort throttle.
+  const store = makeStore();
+  insertSession(store, {
+    id: "s1",
+    userId: "u1",
+    accessToken: "tok",
+    lastActivityAt: new Date(Date.now() - 70_000), // > throttle, will trigger UPDATE
+  });
+  const failingPool = {
+    async query(sql: string, params: unknown[] = []) {
+      const trimmed = sql.trim();
+      if (trimmed.startsWith("SELECT id, last_activity_at, revoked_at")) {
+        const [tokenHash] = params as [string];
+        const row = [...store.values()].find((r) => r.token_hash === tokenHash);
+        return row
+          ? {
+              rows: [
+                {
+                  id: row.id,
+                  last_activity_at: row.last_activity_at,
+                  revoked_at: row.revoked_at,
+                },
+              ],
+              rowCount: 1,
+            }
+          : { rows: [], rowCount: 0 };
+      }
+      if (
+        trimmed.startsWith("UPDATE") &&
+        sql.includes("SET last_activity_at = now()")
+      ) {
+        throw new Error("simulated UPDATE failure");
+      }
+      throw new Error(`unhandled SQL: ${trimmed.slice(0, 80)}`);
+    },
+  } as unknown as Pool;
+
+  const svc = SessionService.forTesting(failingPool);
+  // Skal ikke kaste — throttle-feil er ikke fatal.
+  await svc.touchActivity("tok");
+});
+
 test("REQ-132: touchActivity er throttled (oppdaterer ikke under 60s)", async () => {
   const store = makeStore();
   const recentActivity = new Date(Date.now() - 30_000); // 30s siden

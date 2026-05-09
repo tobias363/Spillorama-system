@@ -1,0 +1,101 @@
+# BIN-823 — Synthetic E2E test for Spill 1 master flow.
+#
+# Catches cross-system bugs that unit-tests miss. Runs `node dist/index.js`
+# against ephemeral Postgres + Redis services and exercises the master HTTP
+# API surface end-to-end (auth, RBAC, error-shape, public health endpoints,
+# graceful shutdown).
+#
+# This is intentionally LIMITED to paths that touch live-room / wallet /
+# compliance critical code so the job stays fast (under 2 min) for PR-feedback.
+# Other PR-paths skip the job entirely via `paths` filter — the regular `ci`
+# job covers them.
+#
+# Companion docs:
+#   docs/engineering/E2E_TESTS.md — runbook + how to add new E2E tests
+#   docker-compose.e2e.yml         — local infra (mirrors GH Actions services)
+
+name: E2E test
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/backend/src/game/**'
+      - 'apps/backend/src/wallet/**'
+      - 'apps/backend/src/compliance/**'
+      - 'apps/backend/src/routes/agentGame1*.ts'
+      - 'apps/backend/src/routes/adminGame1Master*.ts'
+      - 'apps/backend/src/__tests__/e2e/**'
+      - 'apps/backend/package.json'
+      - 'apps/backend/migrations/**'
+      - 'docker-compose.e2e.yml'
+      - '.github/workflows/e2e-test.yml'
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: e2e
+          POSTGRES_PASSWORD: e2e
+          POSTGRES_DB: spillorama_e2e
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U e2e -d spillorama_e2e"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+
+      - name: Install packages/shared-types dependencies
+        run: npm --prefix packages/shared-types install --no-audit --no-fund
+
+      - name: Build packages/shared-types
+        run: npm --prefix packages/shared-types run build
+
+      - name: Install apps/backend dependencies
+        run: npm --prefix apps/backend ci
+
+      - name: Build apps/backend
+        # The E2E test exec's `node dist/index.js`, so we MUST build first.
+        run: npm --prefix apps/backend run build
+
+      - name: Run synthetic E2E tests
+        working-directory: apps/backend
+        env:
+          E2E_PG_CONNECTION_STRING: postgresql://e2e:e2e@localhost:5433/spillorama_e2e
+          E2E_REDIS_URL: redis://localhost:6380/0
+          LOG_LEVEL: warn
+        run: npm run test:e2e

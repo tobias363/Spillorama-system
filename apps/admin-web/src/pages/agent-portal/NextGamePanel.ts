@@ -54,14 +54,18 @@ import {
 import {
   markHallReadyForGame,
   unmarkHallReadyForGame,
+  // Bølge 3 (2026-05-08): single-source-of-truth fetch + master-actions.
+  // Erstatter dual-fetch (plan + legacy) + agent-game-plan-adapter +
+  // agent-master-actions-wrapper.
+  fetchLobbyState,
+  startMaster,
+  resumeMaster,
+  pauseMaster,
   type Spill1CurrentGameResponse,
+  type Spill1CurrentGame,
+  type Spill1CurrentGameHall,
 } from "../../api/agent-game1.js";
-import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
-import { adaptGamePlanToLegacyShape } from "../../api/agent-game-plan-adapter.js";
-import {
-  startSpill1MasterAction,
-  resumeSpill1MasterAction,
-} from "../../api/agent-master-actions.js";
+import type { Spill1AgentLobbyState } from "../../../../../packages/shared-types/src/spill1-lobby-state.js";
 import {
   AgentGame1Socket,
   type AgentGame1StatusUpdate,
@@ -71,7 +75,6 @@ import { renderSpill1AgentControls } from "./Spill1AgentControls.js";
 import {
   approveGame1MasterTransfer,
   rejectGame1MasterTransfer,
-  pauseGame1,
 } from "../../api/admin-game1-master.js";
 import { fetchMe } from "../../api/auth.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
@@ -511,17 +514,30 @@ async function refreshRooms(): Promise<void> {
 
 async function refreshSpill1(): Promise<void> {
   try {
-    // Cleanup 2026-05-08: ny plan-runtime er nå standard data-source.
-    // Adapter mapper plan-respons til legacy-shape så all rendering
-    // nedenfor er uendret.
-    const planResp = await fetchAgentGamePlanCurrent(
+    // Bølge 3 (2026-05-08): ÉN kall mot aggregator. Erstatter forrige
+    // dual-fetch (plan + legacy) + adapter-merge + ID-overstyring som var
+    // band-aid for plan↔spill-id-rotet. Aggregator returnerer ferdig
+    // konsistent state med `currentScheduledGameId` som ENESTE id-felt for
+    // master-actions.
+    const lobby = await fetchLobbyState(
+      undefined,
       pageAbort ? { signal: pageAbort.signal } : {}
     );
-    const data: Spill1CurrentGameResponse = adaptGamePlanToLegacyShape(planResp);
     if (!activeContainer) return; // unmounted while in-flight
+    const data = mapLobbyToLegacyShape(lobby);
     state.spill1 = data;
     state.spill1Error = null;
+
+    // Inconsistency-warnings rendres som non-blocking error-banner via
+    // state.spill1Error så master ser dem uten å miste hovedflyten.
+    if (lobby.inconsistencyWarnings.length > 0) {
+      state.spill1Error = lobby.inconsistencyWarnings
+        .map((w) => `${w.code}: ${w.message}`)
+        .join(" · ");
+    }
+
     if (data.currentGame && spill1Socket) {
+      // Subscribe socket på currentScheduledGameId (single id-rom).
       spill1Socket.subscribe(data.currentGame.id);
     }
   } catch (err) {
@@ -541,6 +557,77 @@ async function refreshSpill1(): Promise<void> {
     state.spill1Error = msg;
   }
   rerender();
+}
+
+/**
+ * Bølge 3 (2026-05-08): oversett `Spill1AgentLobbyState` (aggregator) til
+ * `Spill1CurrentGameResponse` (legacy renderer-shape) slik at de eksisterende
+ * `Spill1AgentStatus`/`Spill1AgentControls`-komponentene fortsetter å virke
+ * uten endring. Dette er translatoren — IKKE en adapter som lyver om id-er.
+ *
+ * Kontrast mot forrige `agent-game-plan-adapter`:
+ *   - Forrige adapter satte `currentGame.id = plan-run-id` (feil id-rom!).
+ *   - Denne translatoren setter `currentGame.id = scheduledGameId` (korrekt
+ *     id-rom — den ENESTE id-en master-actions skal bruke).
+ *   - Forrige adapter mocket `halls: [<egen hall>]`. Denne kjører gjennom
+ *     `lobby.halls[]` direkte (aggregator har full GoH-ready-state).
+ *
+ * `digitalTicketsSold`/`physicalTicketsSold` er hardkodet til 0 — disse
+ * eksponeres ikke av aggregator, og UI-rendering bruker dem ikke i
+ * Spill1AgentStatus heller (kun for tooltip-info i Spill1HallStatusBox
+ * som er separat refaktorert).
+ */
+function mapLobbyToLegacyShape(
+  lobby: Spill1AgentLobbyState,
+): Spill1CurrentGameResponse {
+  const halls: Spill1CurrentGameHall[] = lobby.halls.map((h) => ({
+    hallId: h.hallId,
+    hallName: h.hallName,
+    isReady: h.isReady,
+    readyAt: h.lastUpdatedAt,
+    digitalTicketsSold: 0,
+    physicalTicketsSold: 0,
+    excludedFromGame: h.excludedFromGame,
+    excludedReason: h.excludedReason,
+  }));
+
+  if (
+    !lobby.currentScheduledGameId ||
+    !lobby.scheduledGameMeta ||
+    !lobby.hallId
+  ) {
+    return {
+      hallId: lobby.hallId ?? "",
+      isMasterAgent: lobby.isMasterAgent,
+      currentGame: null,
+      halls,
+      allReady: lobby.allHallsReady,
+    };
+  }
+
+  const meta = lobby.scheduledGameMeta;
+  const subGameName = lobby.planMeta?.catalogDisplayName ?? "";
+  const currentGame: Spill1CurrentGame = {
+    id: lobby.currentScheduledGameId, // SCHEDULED-GAME-ID, ikke plan-run-id.
+    status: meta.status,
+    masterHallId: lobby.masterHallId ?? lobby.hallId,
+    groupHallId: lobby.groupOfHallsId ?? "",
+    participatingHallIds: lobby.halls.map((h) => h.hallId),
+    subGameName,
+    customGameName: null,
+    scheduledStartTime: meta.scheduledStartTime,
+    scheduledEndTime: meta.scheduledEndTime,
+    actualStartTime: meta.actualStartTime,
+    actualEndTime: meta.actualEndTime,
+  };
+
+  return {
+    hallId: lobby.hallId,
+    isMasterAgent: lobby.isMasterAgent,
+    currentGame,
+    halls,
+    allReady: lobby.allHallsReady,
+  };
 }
 
 function pickActiveRoom(rooms: AgentRoomSummary[]): AgentRoomSummary | null {
@@ -1026,37 +1113,39 @@ async function onSpill1Start(): Promise<void> {
     Toast.warning("Kun master-hall-agent kan starte Spill 1.");
     return;
   }
-  const excludedHallIds = spill1.halls
-    .filter((h) => h.excludedFromGame)
-    .map((h) => h.hallId);
-  let confirmExcludedHalls: string[] | undefined;
-  if (excludedHallIds.length > 0) {
+  // Bølge 3 (2026-05-08): start går nå via single master-route. REQ-007's
+  // `confirmExcludedHalls` / `confirmUnreadyHalls` håndteres via egen flow
+  // (HALLS_NOT_READY → popup → re-start). Den nye master-routen tar ikke
+  // disse override-listene som body — i stedet kommer hall-ekskludering
+  // fra ready-state-machine i lobby-aggregator.
+  //
+  // Hvis det er ekskluderte haller, vis bekreftelses-popup før start så
+  // master ser hvilke haller som ikke vil delta.
+  const excludedHalls = spill1.halls.filter((h) => h.excludedFromGame);
+  if (excludedHalls.length > 0) {
+    const names = excludedHalls.map((h) => h.hallName).join(", ");
     const ok = window.confirm(
-      `Bekreft ekskluderte haller:\n${excludedHallIds.join(", ")}`
+      `Disse hallene er ekskludert fra runden:\n\n  ${names}\n\nFortsett?`,
     );
     if (!ok) return;
-    confirmExcludedHalls = excludedHallIds;
   }
-  // REQ-007 (2026-04-26): forsøk start. Hvis backend kaster HALLS_NOT_READY,
-  // gjenta call med confirmUnreadyHalls etter master-bekreftelse i popup.
-  await attemptSpill1Start(confirmExcludedHalls, undefined);
+  await attemptSpill1Start();
 }
 
 /**
  * REQ-007: spill 1 start-call med automatisk håndtering av HALLS_NOT_READY-
  * fra backend. Ved feil med `unreadyHalls` i details, vises Hall Info-popup
  * der master kan velge [Avbryt] eller [Start uansett] (override).
+ *
+ * Bølge 3 (2026-05-08): bruker `startMaster(hallId)` direkte — den ENESTE
+ * master-routen for start. Bridge-spawn + plan-state-overgang skjer i
+ * `MasterActionService` (samme service som driver advance/pause/resume/stop).
  */
-async function attemptSpill1Start(
-  confirmExcludedHalls: string[] | undefined,
-  confirmUnreadyHalls: string[] | undefined
-): Promise<void> {
+async function attemptSpill1Start(): Promise<void> {
+  const spill1 = state.spill1;
+  if (!spill1) return;
   try {
-    // `startSpill1MasterAction` kaller plan-API først (state-overgang i
-    // plan-runtime) og deretter engine-API for faktisk trekning.
-    // Feilkoder i catch-blokken nedenfor stammer fra legacy
-    // `/api/agent/game1/start` og propageres uendret av wrapperen.
-    await startSpill1MasterAction(confirmExcludedHalls, confirmUnreadyHalls);
+    await startMaster(spill1.hallId);
     Toast.success("Spill 1 startet");
     await refreshSpill1();
   } catch (err) {
@@ -1075,10 +1164,12 @@ async function attemptSpill1Start(
         Toast.error(err.message);
         return;
       }
+      // Hall Info-popup. Master må eksplisitt markere hall(ene) som
+      // ekskludert i lobby-state før start retries; backend har ikke
+      // override-list-felter på den nye master-routen.
       const proceed = await promptHallInfoOverride(unreadyHalls);
       if (!proceed) return;
-      // Retry med override-listen.
-      await attemptSpill1Start(confirmExcludedHalls, unreadyHalls);
+      await attemptSpill1Start();
       return;
     }
     const msg = err instanceof Error ? err.message : String(err);
@@ -1160,8 +1251,10 @@ async function onSpill1Resume(): Promise<void> {
     return;
   }
   try {
-    // Fase 4 (2026-05-07): plan-API → engine-API når feature-flag er på.
-    await resumeSpill1MasterAction();
+    // Bølge 3 (2026-05-08): single master-route koordinerer plan + engine
+    // sentralt i backend. Erstatter `resumeSpill1MasterAction`-wrapperen
+    // som kalte plan-API + legacy-API i tandem.
+    await resumeMaster(spill1.hallId);
     Toast.success("Spill 1 fortsatt");
     await refreshSpill1();
   } catch (err) {
@@ -1171,10 +1264,11 @@ async function onSpill1Resume(): Promise<void> {
 }
 
 /**
- * 2026-05-08 (Tobias-direktiv): master pauser aktiv Spill 1-runde.
- * Bruker admin-game1-master `/pause`-endepunkt direkte (AGENT har
- * GAME1_MASTER_WRITE-permission). Engine pauser draw-timeren og
- * `paused`-status flippes på scheduled-game-raden.
+ * Bølge 3 (2026-05-08): master pauser aktiv Spill 1-runde via single
+ * master-route. Erstatter `pauseGame1(scheduledGameId, reason)` som traff
+ * admin-game1-master-route direkte med scheduledGameId — UI bruker nå
+ * KUN hallId; backend resolver scheduled-game-id internt fra
+ * `MasterActionService` så plan-state og engine-state holdes i takt.
  */
 async function onSpill1Pause(): Promise<void> {
   const spill1 = state.spill1;
@@ -1185,7 +1279,7 @@ async function onSpill1Pause(): Promise<void> {
   }
   try {
     const reason = window.prompt("Årsak (valgfritt):", "") ?? undefined;
-    await pauseGame1(spill1.currentGame.id, reason);
+    await pauseMaster(spill1.hallId, reason);
     Toast.success("Spill 1 pauset");
     await refreshSpill1();
   } catch (err) {
@@ -1442,4 +1536,10 @@ export const __test = {
   setState: (s: Partial<PanelState>): void => { state = { ...state, ...s }; },
   render,
   pickActiveRoom,
+  // Code-review-fix 2026-05-08 (PR #1075 review #4): eksponer
+  // `mapLobbyToLegacyShape` for unit-test. Translatoren er kritisk for
+  // Bølge 3 — den setter `currentGame.id = scheduledGameId` (single
+  // id-rom) og må verifiseres mot empty-state, full-state, og
+  // inconsistencyWarnings-propagering.
+  mapLobbyToLegacyShape,
 };

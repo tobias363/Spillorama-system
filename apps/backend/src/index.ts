@@ -72,6 +72,9 @@ import { WalletOutboxWorker } from "./wallet/WalletOutboxWorker.js";
 import { ComplianceOutboxRepo } from "./compliance/ComplianceOutboxRepo.js";
 import { ComplianceOutboxWorker } from "./compliance/ComplianceOutboxWorker.js";
 import { ComplianceOutboxComplianceLedgerPort } from "./compliance/ComplianceOutboxComplianceLedgerPort.js";
+import { RegulatoryLedgerStore } from "./compliance/regulatory/RegulatoryLedgerStore.js";
+import { RegulatoryLedgerService } from "./compliance/regulatory/RegulatoryLedgerService.js";
+import { DailyRegulatoryReportService } from "./compliance/regulatory/DailyRegulatoryReportService.js";
 import { PostgresWalletAdapter } from "./adapters/PostgresWalletAdapter.js";
 import { WalletAuditVerifier } from "./wallet/WalletAuditVerifier.js";
 import { createWalletAuditVerifyJob } from "./jobs/walletAuditVerify.js";
@@ -80,6 +83,7 @@ import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createUniqueIdExpiryJob } from "./jobs/uniqueIdExpiry.js";
+import { createGamePlanRunCleanupJob } from "./jobs/gamePlanRunCleanup.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createProfilePendingLossLimitFlushJob } from "./jobs/profilePendingLossLimitFlush.js";
 import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
@@ -138,6 +142,11 @@ import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
 import { createAdminGameReplayRouter } from "./routes/adminGameReplay.js";
 import { Game1ReplayService } from "./game/Game1ReplayService.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
+import { createAgentGame1LobbyRouter } from "./routes/agentGame1Lobby.js";
+import { createAgentGame1MasterRouter } from "./routes/agentGame1Master.js";
+import { GameLobbyAggregator } from "./game/GameLobbyAggregator.js";
+import { MasterActionService } from "./game/MasterActionService.js";
+import { StalePlanRunRecoveryService } from "./game/recovery/StalePlanRunRecoveryService.js";
 import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
@@ -269,8 +278,13 @@ import { SubGameService } from "./admin/SubGameService.js";
 import { GameCatalogService } from "./game/GameCatalogService.js";
 import { Spill2ConfigService } from "./game/Spill2ConfigService.js";
 import { Spill3ConfigService } from "./game/Spill3ConfigService.js";
+import { createPerpetualRoundOpeningWindowGuard } from "./game/PerpetualRoundOpeningWindowGuard.js";
 import { GamePlanService } from "./game/GamePlanService.js";
 import { GamePlanRunService } from "./game/GamePlanRunService.js";
+import {
+  GamePlanRunCleanupService,
+  makeInlineCleanupHook,
+} from "./game/GamePlanRunCleanupService.js";
 import { GamePlanEngineBridge } from "./game/GamePlanEngineBridge.js";
 import { Game1LobbyService } from "./game/Game1LobbyService.js";
 import { Spill1LobbyBroadcaster } from "./game/Spill1LobbyBroadcaster.js";
@@ -828,6 +842,42 @@ const complianceLedgerPort: import("./adapters/ComplianceLedgerPort.js").Complia
   }
 })();
 
+// G2 (2026-05-09): §71-canonical regulatory-ledger sink + daily-report
+// service. `dailyRegulatoryReportService` is null when:
+//   - `platformConnectionString` is empty (dev-without-DB), OR
+//   - the §71-store wiring threw (logged below)
+// In both cases the legacy daily-report flow continues to work — the
+// regulatory-report just gets skipped.
+let dailyRegulatoryReportService: DailyRegulatoryReportService | null = null;
+
+if (platformConnectionString.length > 0) {
+  try {
+    const regulatoryLedgerStore = new RegulatoryLedgerStore({
+      pool: sharedPool,
+      schema: pgSchema,
+    });
+    const regulatoryLedgerService = new RegulatoryLedgerService({
+      store: regulatoryLedgerStore,
+    });
+    // Hook the §71-write into every ComplianceLedger event. Non-blocking —
+    // RegulatoryLedgerService catches+logs internal errors.
+    engine.getComplianceLedgerInstance().setRegulatoryLedgerSink(async (entry) => {
+      await regulatoryLedgerService.recordFromComplianceEvent(entry);
+    });
+    dailyRegulatoryReportService = new DailyRegulatoryReportService({
+      pool: sharedPool,
+      schema: pgSchema,
+      store: regulatoryLedgerStore,
+    });
+    console.info("[regulatory-ledger] §71-sink wired (G2 + G3 + G4 active)");
+  } catch (err) {
+    console.error(
+      "[regulatory-ledger] failed to wire §71-sink — pilot regulatory-ledger DISABLED:",
+      err,
+    );
+  }
+}
+
 // BIN-516: chat persistence. Postgres-backed when the platform pool is up,
 // in-memory fallback for dev-without-DB so chat:history still works.
 const chatMessageStore: ChatMessageStore = new PostgresChatMessageStore({
@@ -1181,6 +1231,23 @@ const gamePlanRunService = new GamePlanRunService({
   catalogService: gameCatalogService,
 });
 
+// Pilot Q3 2026: GamePlanRunCleanupService — auto-finish stale plan-runs.
+// Two entry-points:
+//   1. Nightly cron (03:00 Oslo) sweeps ALL halls (registered below with
+//      jobScheduler.register).
+//   2. Inline self-heal — bound to gamePlanRunService.getOrCreateForToday
+//      so any hall that hits the master-konsoll first thing in the morning
+//      auto-recovers from gårsdagens leftover state without operator
+//      intervention.
+// Audit-log injiseres post-construction (sammen med øvrige services).
+const gamePlanRunCleanupService = new GamePlanRunCleanupService({
+  pool: sharedPool,
+  schema: pgSchema,
+});
+gamePlanRunService.setInlineCleanupHook(
+  makeInlineCleanupHook(gamePlanRunCleanupService),
+);
+
 // Fase 4 (2026-05-07): GamePlanEngineBridge — bro mellom katalog-modellen
 // og legacy draw-engine. Spawn-er en `app_game1_scheduled_games`-rad i
 // farten basert på plan-run + catalog-entry så
@@ -1454,6 +1521,7 @@ scheduleService.setAuditLogService(auditLogService);
 gameCatalogService.setAuditLogService(auditLogService);
 gamePlanService.setAuditLogService(auditLogService);
 gamePlanRunService.setAuditLogService(auditLogService);
+gamePlanRunCleanupService.setAuditLogService(auditLogService);
 spill2ConfigService.setAuditLogService(auditLogService);
 spill3ConfigService.setAuditLogService(auditLogService);
 
@@ -1754,7 +1822,14 @@ drawScheduler = new DrawScheduler({
 });
 drawScheduler.start();
 
-const dailyReportScheduler = createDailyReportScheduler({ engine, enabled: dailyReportJobEnabled, intervalMs: dailyReportJobIntervalMs });
+const dailyReportScheduler = createDailyReportScheduler({
+  engine,
+  enabled: dailyReportJobEnabled,
+  intervalMs: dailyReportJobIntervalMs,
+  // G3 (2026-05-09): hash-chained §71-daily-report. May be null if the
+  // §71-store wiring failed during boot — scheduler degrades gracefully.
+  regulatoryReportService: dailyRegulatoryReportService ?? undefined,
+});
 
 // BIN-693 Option B: Wallet-reservasjons-expiry-tick.
 const walletReservationExpiryTickMs = Math.max(
@@ -1856,6 +1931,36 @@ jobScheduler.register({
   }),
 });
 
+// Pilot Q3 2026: nightly auto-finish av stale plan-runs (running/paused med
+// gårsdagens business_date). Kjører kl 03:00 Oslo for å gi master-konsoll-
+// brukeren en ren start neste morgen — uten manuell SQL-edit eller ops-
+// involvering. Self-healing inline-hook (bound ved boot ovenfor) dekker
+// kanttilfellet hvor cron har feilet eller backend nettopp boot-et.
+//
+// Defaults uten env-overrides: enabled=true, tick=15min, run-at=03:00 Oslo.
+// Service-laget gjør 42P01-defensjon så fersh DB ikke krasjer cron-loopen.
+const jobGamePlanRunCleanupEnabled =
+  process.env.GAME_PLAN_RUN_CLEANUP_ENABLED !== "false";
+const jobGamePlanRunCleanupIntervalMs = Math.max(
+  60_000,
+  Number(process.env.GAME_PLAN_RUN_CLEANUP_INTERVAL_MS ?? 15 * 60 * 1000),
+);
+const jobGamePlanRunCleanupRunAtHour = Math.max(
+  0,
+  Math.min(23, Number(process.env.GAME_PLAN_RUN_CLEANUP_RUN_AT_HOUR ?? 3)),
+);
+jobScheduler.register({
+  name: "game-plan-run-cleanup",
+  description:
+    "Auto-finish stale game-plan-runs (running/paused med gårsdagens business_date). Pilot Q3 2026 self-healing.",
+  intervalMs: jobGamePlanRunCleanupIntervalMs,
+  enabled: jobGamePlanRunCleanupEnabled,
+  run: createGamePlanRunCleanupJob({
+    service: gamePlanRunCleanupService,
+    runAtHourLocal: jobGamePlanRunCleanupRunAtHour,
+  }),
+});
+
 // BIN-720: Profile Settings 48h-queue flush. Promoterer pending loss-limit-
 // endringer → active når effectiveFromMs <= now. Polling-intervall 15 min.
 if (profileSettingsService) {
@@ -1918,6 +2023,21 @@ jobScheduler.register({
 const game1HallReadyService = new Game1HallReadyService({
   pool: platformService.getPool(),
   schema: pgSchema,
+});
+
+// Bølge 1 (2026-05-08): GameLobbyAggregator — kanonisk single-source-of-truth
+// for Spill 1 lobby-state. Aggregerer plan-runtime + scheduled-games +
+// hall-ready + GoH-membership og eksponeres via /api/agent/game1/lobby.
+// Pure read-service; ingen state-mutering. Brukes av master-konsoll/agent-
+// portal i Bølge 3 til å erstatte dual-fetch + adapter-merge-pattern.
+const gameLobbyAggregator = new GameLobbyAggregator({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  planService: gamePlanService,
+  planRunService: gamePlanRunService,
+  hallReadyService: game1HallReadyService,
+  hallGroupService,
+  platformService,
 });
 
 // GAME1_SCHEDULE PR 1+2: 15s-tick som spawner Game 1-rader fra daily_schedules,
@@ -2188,6 +2308,41 @@ game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // stop. Late-binding fordi ticketPurchaseService konstrueres etter
 // masterControl (sirkulær avhengighet ellers).
 game1MasterControlService.setTicketPurchaseService(game1TicketPurchaseService);
+
+// Bølge 2 (2026-05-08): MasterActionService — kanonisk sekvenseringsmotor
+// for plan-runtime → engine-bridge → engine-actions for Spill 1. ENESTE
+// caller som binder plan-run-id ↔ scheduled-game-id sammen og kjører
+// rekkefølgen.
+//
+// Konstrueres her, etter game1MasterControlService er fullt wiret (drawEngine
+// + ticketPurchaseService satt). auditLogService injiseres etterpå via
+// setAuditLogService.
+//
+// Brukes av /api/agent/game1/master/* routene; eksisterende
+// /api/agent/game-plan/* og /api/admin/game1/games/:id/* fortsetter uendret
+// (UI bytter i Bølge 3).
+const masterActionService = new MasterActionService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  planRunService: gamePlanRunService,
+  engineBridge: gamePlanEngineBridge,
+  masterControlService: game1MasterControlService,
+  lobbyAggregator: gameLobbyAggregator,
+  auditLogService,
+  lobbyBroadcaster: spill1LobbyBroadcaster,
+});
+
+// 2026-05-09 (recover-stale): master-driven cleanup of stale plan-runs and
+// stuck scheduled-games. Mounted on POST /api/agent/game1/master/recover-
+// stale and used to unblock master when GameLobbyAggregator flags
+// STALE_PLAN_RUN or BRIDGE_FAILED (which otherwise block all master
+// actions via MasterActionService.preValidate). See
+// `StalePlanRunRecoveryService` for the full design rationale.
+const stalePlanRunRecoveryService = new StalePlanRunRecoveryService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  auditLogService,
+});
 
 // BIN-690 M1: mini-game orchestrator (framework-foundation). Ingen konkrete
 // spill registrert i M1 — M2-M5 legger dem til via registerMiniGame().
@@ -2761,6 +2916,31 @@ app.use(createAgentGame1Router({
   // `spill1:lobby:{hallId}`-rom bytter til runde-modus uten polling.
   lobbyBroadcaster: spill1LobbyBroadcaster,
 }));
+
+// Bølge 1 (2026-05-08): kanonisk Spill 1 lobby-endpoint som erstatter
+// UI-laget sitt dual-fetch (plan-runtime + legacy-current-game). Returnerer
+// Spill1AgentLobbyState — én sannhets-kilde for master-konsoll/agent-portal.
+// Eksisterende endpoints fortsetter uendret; UI bytter i Bølge 3.
+app.use(createAgentGame1LobbyRouter({
+  platformService,
+  aggregator: gameLobbyAggregator,
+}));
+
+// Bølge 2 (2026-05-08): kanoniske master-action-endpoints
+// (/api/agent/game1/master/{start,advance,pause,resume,stop,jackpot-setup}).
+// Delegerer til MasterActionService som er ENESTE sted som vet om både
+// plan-run-id og scheduled-game-id. Erstatter den fragmenterte UI-flyten
+// der frontend kalte plan-API + legacy-API parallelt og lot klienten
+// merge id-rommene. Eksisterende /api/agent/game-plan/* og
+// /api/admin/game1/games/:id/* er IKKE påvirket — UI bytter i Bølge 3.
+app.use(createAgentGame1MasterRouter({
+  platformService,
+  masterActionService,
+  // 2026-05-09 (recover-stale): inject cleanup-service so the
+  // /recover-stale endpoint is mounted. Without this dep the route
+  // returns 503 RECOVERY_NOT_CONFIGURED.
+  staleRecoveryService: stalePlanRunRecoveryService,
+}));
 // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
 // Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og
 // schedulerer `engine.startGame` i ROCKET / MONSTERBINGO etter en kort
@@ -2785,28 +2965,14 @@ const perpetualRoundService = new PerpetualRoundService({
   emitRoomUpdate: async (roomCode) => {
     await emitRoomUpdate(roomCode);
   },
-  // Tobias-direktiv 2026-05-08: opening-window-guard for Spill 3.
-  // Ikke-monsterbingo-rom returnerer null (ingen guard) så de spawner
-  // som før. Monsterbingo henter Spill3Config og sjekker om current
-  // Oslo-tid er innenfor [openingTimeStart, openingTimeEnd).
-  canSpawnRound: async ({ gameSlug }) => {
-    const isSpill3 =
-      gameSlug === "monsterbingo" ||
-      gameSlug === "mønsterbingo" ||
-      gameSlug === "game_3";
-    if (!isSpill3) return null;
-    try {
-      const config = await spill3ConfigService.getActive();
-      const { isWithinOpeningWindow } = await import(
-        "./game/Spill3ConfigService.js"
-      );
-      return isWithinOpeningWindow(config);
-    } catch {
-      // Fail-open: hvis vi ikke får config, la PerpetualRoundService
-      // spawne (logges også separat i service-laget).
-      return null;
-    }
-  },
+  // Tobias-direktiv 2026-05-08: opening-window-guard for Spill 2 + Spill 3.
+  // BIN-823 — regulatorisk pilot-go-live-blokker (Lotteritilsynet krever at
+  // spillet er utilgjengelig etter stengetid). Logikken er flyttet ut til
+  // `PerpetualRoundOpeningWindowGuard` for å være unit-testbar.
+  canSpawnRound: createPerpetualRoundOpeningWindowGuard({
+    spill2ConfigService,
+    spill3ConfigService,
+  }),
 });
 // Tobias 2026-05-04: late-bind for game2AutoDrawTickService.onStaleRoomEnded
 // (definert lenger oppe i fila, før perpetualRoundService finnes). Når tick-en

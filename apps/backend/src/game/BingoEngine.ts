@@ -888,6 +888,16 @@ export class BingoEngine {
   }
 
   /**
+   * G2 (2026-05-09): expose the underlying `ComplianceLedger` instance so
+   * `index.ts` can wire the §71-canonical regulatory-ledger sink AFTER
+   * boot. Used ONLY by `index.ts` boot — services should keep using
+   * `getComplianceLedgerPort()` for normal ledger writes.
+   */
+  getComplianceLedgerInstance(): ComplianceLedger {
+    return this.ledger;
+  }
+
+  /**
    * K2-A CRIT-3: eksponer PrizePolicyManager som narrow port slik at
    * scheduled-engine (PotEvaluator, mini-game, lucky bonus) kan håndheve
    * single-prize-cap (2500 kr per pengespillforskriften §11) på alle payout-
@@ -4566,6 +4576,19 @@ export class BingoEngine {
       pauseUntil: game.pauseUntil,
       pauseReason: game.pauseReason,
       isTestGame: game.isTestGame,
+      // BIN-820 / R10 (2026-05-08): Spill 3 phase-state-machine snapshot.
+      // Forwards `spill3PhaseState` slik at recovery-snapshot bevarer
+      // fase-overgang ved server-restart midt i en runde. Cloned for å
+      // unngå shared-mutation mellom snapshot og live state.
+      spill3PhaseState: game.spill3PhaseState
+        ? {
+            currentPhaseIndex: game.spill3PhaseState.currentPhaseIndex,
+            pausedUntilMs: game.spill3PhaseState.pausedUntilMs,
+            phasesWon: [...game.spill3PhaseState.phasesWon],
+            status: game.spill3PhaseState.status,
+            endedReason: game.spill3PhaseState.endedReason,
+          }
+        : undefined,
       startedAt: game.startedAt,
       endedAt: game.endedAt,
       endedReason: game.endedReason

@@ -433,7 +433,16 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     audit-trail er sensitivt (samme mønster som PLAYER_KYC_OVERRIDE).
    */
   WALLET_AUDIT_READ:  ["ADMIN", "SUPPORT"],
-  WALLET_AUDIT_WRITE: ["ADMIN"]
+  WALLET_AUDIT_WRITE: ["ADMIN"],
+  /**
+   * BIN-806 A13: anti-fraud / velocity-signal review-kø.
+   *   - ADMIN_ANTI_FRAUD_READ : list flagg/blocked-rader for review.
+   *     ADMIN + SUPPORT — sentralt compliance/AML-verktøy, ikke
+   *     hall-lokal beslutning. HALL_OPERATOR er bevisst utelatt:
+   *     fraud-vurdering må gjøres med full helhetsoversikt, ikke
+   *     én hall av gangen.
+   */
+  ADMIN_ANTI_FRAUD_READ: ["ADMIN", "SUPPORT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

@@ -1,0 +1,283 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# CodeRabbit-konfigurasjon for Spillorama-system
+# https://docs.coderabbit.ai/getting-started/configure-coderabbit
+#
+# Dato: 2026-05-08
+# Eier: Tobias Haugen (teknisk lead)
+#
+# Mål: AI-PR-review som forsterker (ikke duplikerer) våre eksisterende
+# automatiserte gates: dependency-cruiser, danger.js, husky, og våre 33
+# prosjekt-skills.
+#
+# Strategi:
+# - CodeRabbit foreslår, men blokkerer aldri (request_changes_workflow: false).
+# - Auto-review på alle PR-er + auto-incremental ved ny push.
+# - Path-instructions injiserer Spillorama-spesifikk kontekst i kritiske områder.
+# - Skip auto-genererte filer + testfiksturer.
+
+# Språk: norsk for kommentarer, engelsk for tekniske termer.
+# CodeRabbit støtter "no" og engelsk; vi bruker engelsk for å unngå
+# oversettelses-tap av tekniske termer.
+language: "en"
+
+# Tonefall — chill (ikke aggressivt). Vi har strenge gates allerede.
+# NB: tone_instructions har 250-tegn-grense. Forkortet 2026-05-08 etter
+# at CodeRabbit ga config-parse-error på tidligere 406-tegn-versjon.
+tone_instructions: "Be concise. Skip stylistic feedback — automated tools handle that. Focus on bugs they miss: race conditions, regulatory violations, security (auth, SQL injection, secrets), Spillorama patterns from path-instructions."
+
+# Tidlig tilgang — false for stabilitet i regulert prod-system.
+early_access: false
+
+# Hovedreview-konfig
+reviews:
+  # Profil — chill (kompletterer eksisterende automatiske gates)
+  profile: "chill"
+
+  # Aldri request changes — vi har egen done-policy
+  request_changes_workflow: false
+
+  # Sammendrag øverst i PR-en
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+
+  # Ingen poesi (off-topic for regulert pengespill-prosjekt)
+  poem: false
+
+  # Status-oppdatering ved review-completion
+  review_status: true
+
+  # Auto-review aktivert
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false  # Skip draft-PR-er — kjør først når PR er merge-klar
+    # Re-review når disse labels legges til
+    labels:
+      - "ready-for-review"
+      - "needs-coderabbit"
+    # Skip auto-review for disse base-branches
+    base_branches:
+      - "main"  # Vi reviewer auto, ikke avhengig av label
+
+  # Path-filtre — skip filer CodeRabbit ikke trenger å se
+  path_filters:
+    - "!docs/auto-generated/**"          # Auto-generert hver merge
+    - "!**/*.lock"                       # Lock-filer (npm, etc.)
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/.next/**"
+    - "!**/coverage/**"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+    - "!apps/backend/migrations/*.sql"   # Migrations — håndteres av migration-policy-skill
+    # Skills: SKILL.md reviewes (frontmatter-validering nedenfor),
+    # men resten av skill-mappene (assets, scripts) skippes.
+    - "!.claude/skills/**/!(SKILL).md"
+    - "!.claude/skills/**/*.{json,yaml,yml,sh,py,js,ts}"
+
+  # Path-spesifikke instruksjoner — Spillorama-kontekst
+  path_instructions:
+    - path: "apps/backend/src/wallet/**"
+      instructions: |
+        Wallet-kode er regulatorisk-kritisk (BIN-761→764, casino-grade).
+        Verifiser:
+        - All wallet-mutation går via WalletAdapter-interface (ikke direkte SQL)
+        - Outbox-rad enqueue-es atomisk i samme TX som ledger-mutering
+        - REPEATABLE READ-isolasjon på concurrent paths
+        - Idempotency-keys håndteres
+        - Hash-chain-integrity bevart (ADR-0004)
+        Se docs/architecture/SPILL_REGLER_OG_PAYOUT.md for payout-regler.
+
+    - path: "apps/backend/src/compliance/**"
+      instructions: |
+        Pengespillforskriften: §11 (15% Hovedspill, 30% Databingo til org),
+        §66 (obligatorisk pause etter 60 min), §71 (daglig rapport).
+        Verifiser:
+        - gameType MAIN_GAME vs DATABINGO via ledgerGameTypeForSlug
+        - Single-prize-cap KUN for databingo (Spill 1-3 har INGEN cap)
+        - actor_hall_id-binding på alle ledger-events (PR #443 multi-hall-fix)
+        - Audit-events skrives før commit
+        Se docs/architecture/SPILL_REGLER_OG_PAYOUT.md.
+
+    - path: "apps/backend/src/security/**"
+      instructions: |
+        Anti-fraud-laget (BIN-806). 5 heuristikker (velocity-hour/day,
+        amount-deviation, multi-account-IP, bot-timing).
+        Verifiser:
+        - Pre-commit decoration på wallet-mutations
+        - Fail-open på DB-feil (logg warn, ikke throw)
+        - critical → throw FRAUD_RISK_CRITICAL
+        - Module-augmentation av WalletAdapter (TransactionOptions.antiFraudContext)
+
+    - path: "apps/backend/src/game/Game1*.ts"
+      instructions: |
+        Spill 1 master-flow. Plan-runtime + scheduled-game-id-disambiguation.
+        KRITISK: ALDRI bruk planRunId for write-actions.
+        Bruk currentScheduledGameId fra Spill1AgentLobbyState (Bølge 1+2-refaktor).
+        Master-actions går via /api/agent/game1/master/* (ikke gamle /api/agent/game-plan/*).
+        Se docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md.
+
+    - path: "apps/backend/src/game/Spill2*.ts"
+      instructions: |
+        Spill 2 (rocket): ETT globalt rom + perpetual auto-tick.
+        Verifiser:
+        - Singleton-håndhevelse (canonicalRoomCode + partial unique idx)
+        - Åpningstid-guard (PerpetualRoundOpeningWindowGuard, BIN-823)
+        - Jackpot-mapping per draw-count (9/10/11/12/13/14-21)
+        Se docs/architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md.
+
+    - path: "apps/backend/src/game/Spill3*.ts"
+      instructions: |
+        Spill 3 (monsterbingo): Phase-state-machine — Rad 1 → 2 → 3 → 4 → Fullt Hus.
+        Verifiser:
+        - autoClaimPhaseMode-flag aktiverer phase-locked sequential evaluation
+        - pauseBetweenRowsMs respekteres mellom faser
+        - Premie-modus fixed eller percentage (ikke begge samtidig)
+        - 5×5 UTEN fri sentercelle (forskjell fra Spill 1)
+        Se docs/architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md.
+
+    - path: "apps/backend/src/game/{Game5,Spillorama,SpinnGo}*.ts"
+      instructions: |
+        SpinnGo / Spill 4 / `spillorama`-slug = DATABINGO (forhåndstrukket,
+        player-startet — IKKE hovedspill, IKKE master-trigget).
+        Slug: `spillorama` (historisk arv, IKKE `spinngo` eller `game5`).
+        Verifiser:
+        - gameType DATABINGO via ledgerGameTypeForSlug (ikke MAIN_GAME)
+        - §11 minimum 30% til organisasjoner (vs 15% for Spill 1-3)
+        - applySinglePrizeCap MED cap = 2500 kr KUN for databingo
+          (ALDRI for Spill 1-3 — hovedspill har INGEN single-prize-cap)
+        - Cap-konstanten 2500 i apps/backend/src/adapters/PrizePolicyPort.ts
+          er regulatorisk — endring krever Tobias-godkjennelse
+        - Forhåndstrukket flow (ikke live draw-tick som Spill 1/2/3)
+        Se docs/architecture/SPILLKATALOG.md + SPILL_REGLER_OG_PAYOUT.md.
+
+    - path: "apps/backend/src/game/MasterActionService.ts"
+      instructions: |
+        ENESTE sted som kjenner BÅDE plan-run-id og scheduled-game-id (Bølge 2).
+        Sekvensering: plan-runtime → bridge → engine.
+        Verifiser:
+        - Pre-validering via lobbyAggregator
+        - BLOCKING_WARNING_CODES (BRIDGE_FAILED, DUAL_SCHEDULED_GAMES) håndteres
+        - Engine-failure rollback fungerer
+
+    - path: "apps/backend/src/game/GameLobbyAggregator.ts"
+      instructions: |
+        Single read-source for Spill 1-master-state (Bølge 1).
+        Verifiser:
+        - PURE READ — aldri INSERT/UPDATE/DELETE
+        - currentScheduledGameId returneres korrekt
+        - inconsistencyWarnings genereres for alle 5 koder
+        - Oslo-tz businessDate håndteres
+
+    - path: "apps/backend/src/routes/**"
+      instructions: |
+        Routes må:
+        - Validere body med Zod (.strict())
+        - Sjekke RBAC via assertAdminPermission (se AdminAccessPolicy.ts)
+        - Hall-scope: HALL_OPERATOR/AGENT må eie hallId
+        - Returnere apiSuccess/apiFailure shape
+        - Ikke bruke console.log (bruk strukturert logger)
+
+    - path: "apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts"
+      instructions: |
+        Spill 1 master-konsoll i admin-portal. Etter Bølge 3:
+        - Bruk fetchLobbyState (ikke gamle dual-fetch + adapter)
+        - Bruk currentScheduledGameId for master-actions (ikke planRunId)
+        - Inconsistency-warnings vises som warning-banner (ikke Toast — toast-spam-fix)
+
+    - path: "apps/admin-web/src/pages/agent-portal/NextGamePanel.ts"
+      instructions: |
+        Hybrid Spill 1 + Spill 2/3 panel. Spill 2/3 bruker rom-kode-paradigme,
+        IKKE rør den. Spill 1-blokken bruker ny lobby-state-path (Bølge 3).
+
+    - path: "**/__tests__/**"
+      instructions: |
+        Tester:
+        - Bruk tsx --test (Node built-in) for backend
+        - Vitest for game-client + admin-web
+        - Integration-tester skipper grasiøst uten DB (WALLET_PG_TEST_CONNECTION_STRING)
+        - Snapshot-tester for state-aggregators
+        Se docs/engineering/CASINO_GRADE_TESTING.md.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        CI-workflows. Endringer kan blokkere alle PR-er. Ekstra forsiktighet.
+        Verifiser at required status checks i branch-protection er konsistent.
+
+    - path: "apps/backend/migrations/**"
+      instructions: |
+        Migrations er IMMUTABLE etter merget. ADR-0014.
+        Verifiser:
+        - CREATE TABLE IF NOT EXISTS
+        - ALTER TABLE ... IF NOT EXISTS
+        - Filnavn følger YYYYMMDDhhmmss_<navn>.sql
+
+    - path: ".claude/skills/**/SKILL.md"
+      instructions: |
+        Skills auto-aktiveres basert på description. Strenge formkrav:
+        - YAML-frontmatter MÅ ha `name`, `description`, `metadata.version`
+        - `description` skal være "pushy" — front-loadede keywords +
+          relevante filnavn/symboler + "Make sure to use this skill
+          whenever..."-frase. Korte beskrivelser trigger ikke pålitelig.
+        - Body 150-300 linjer (ikke mer — skills er lookup, ikke tutorials)
+        - Body-struktur: Kontekst (read first) → Kjerne-arkitektur →
+          Immutable beslutninger → Vanlige feil → Kanonisk referanse →
+          Når aktiv
+        - IKKE re-skriv fundament-doc-er — pek på dem (docs/architecture/...,
+          docs/adr/..., docs/engineering/...)
+        - Vedlikehold: hver PR som endrer fundament-doc bør sjekke om
+          tilhørende skill må oppdateres tilsvarende
+        Endringer i SKILL.md påvirker hvordan agenter resonnerer — gjennomgå
+        med ekstra forsiktighet.
+
+    - path: "docs/adr/**"
+      instructions: |
+        ADR-format (ADR-0001 er selv-refererende kilde — ALDRI rør den uten
+        å erstatte med ny ADR med Status: Superseded by ADR-MMMM).
+        Filnavn: `NNNN-kort-tittel.md` (4-siffer numbering, kebab-case).
+        Verifiser:
+        - Status: Proposed | Accepted | Deprecated | Superseded by ADR-MMMM
+          (ingen andre verdier — ALDRI "WIP" eller "TBD")
+        - Påkrevde seksjoner: Kontekst, Beslutning, Konsekvenser
+          (positive/negative/nøytrale), Alternativer vurdert,
+          Implementasjon, Referanser
+        - Frontmatter: Status, Dato (YYYY-MM-DD), Deciders, Konsulterer
+        - ALDRI endre Status: Accepted ADR — opprett ny ADR som
+          superseder den (`Status: Superseded by ADR-NNNN`)
+        - ALDRI re-bruk ADR-nummer (selv om ADR-en ble forkastet før merge)
+        - Referanser-seksjon skal peke til kilde-doc-er, PR-er, Linear-issues
+        ADR-er er Spillorama-system sin "tidskapsel" — de overlever PM-handovers
+        og må være self-contained. Se ADR-0001 for full prosess-spec.
+
+# Chat-config — for @coderabbitai i PR-kommentarer
+chat:
+  auto_reply: true
+
+# Knowledge base — peker på fundament-doc-er
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: "auto"  # Lærer fra PR-historie
+  issues:
+    scope: "auto"  # Bruker Linear-issues om de er linket
+  jira:
+    project_keys: []  # Vi bruker Linear, ikke Jira
+  linear:
+    team_keys:
+      - "BIN"  # Bingosystem-team i Linear
+  pull_requests:
+    scope: "auto"  # Lærer fra historie
+
+# MERKNAD: `tools:`-key er deprecated i CodeRabbit v2-config (oppdaget av
+# Candy-PM 2026-05-08). CodeRabbit auto-detecter eksisterende tools fra
+# repo-config nå (eslint, markdownlint, hadolint, shellcheck, yamllint
+# kjører hvis de er installert/konfigurert).
+#
+# Vi har allerede:
+# - dependency-cruiser via .dependency-cruiser.cjs (PR #1067)
+# - husky pre-commit hooks (PR #1068)
+# - github-actions workflows i .github/workflows/
+#
+# CodeRabbit bruker disse automatisk via github-checks-integrasjon.

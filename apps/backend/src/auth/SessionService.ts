@@ -134,23 +134,43 @@ export class SessionService {
    * grensen er overskredet revoker vi sesjonen og kaster SESSION_TIMED_OUT.
    *
    * Skal kalles fra auth-middleware på alle autentiserte routes.
+   *
+   * BIN-824 (2026-05-08): Soft-fail på DB-feil. `/api/auth/me` skal være
+   * lese-orientert, og en touchActivity-feil må aldri blokkere svaret. Vi
+   * fanger alle DB-feil (missing column under DDL-drift, midlertidig
+   * connection-tap, etc.) og logger som warn. Den eneste throw-pathen som
+   * fortsatt slipper igjennom er SESSION_TIMED_OUT — det er den korrekte
+   * feilkoden klienten skal se ved 30-min inactivity-timeout.
    */
   async touchActivity(accessToken: string): Promise<void> {
     const token = accessToken.trim();
     if (!token) return;
     const tokenHash = hashToken(token);
 
-    const result = await this.pool.query<{
-      id: string;
-      last_activity_at: Date | string;
-      revoked_at: Date | string | null;
-    }>(
-      `SELECT id, last_activity_at, revoked_at
-       FROM "${this.schema}"."app_sessions"
-       WHERE token_hash = $1
-       LIMIT 1`,
-      [tokenHash]
-    );
+    let result;
+    try {
+      result = await this.pool.query<{
+        id: string;
+        last_activity_at: Date | string;
+        revoked_at: Date | string | null;
+      }>(
+        `SELECT id, last_activity_at, revoked_at
+         FROM "${this.schema}"."app_sessions"
+         WHERE token_hash = $1
+         LIMIT 1`,
+        [tokenHash]
+      );
+    } catch (err) {
+      // BIN-824: SELECT kan feile hvis schema mangler kolonner som
+      // last_activity_at (eks. fresh test-schema som kun har kjørt
+      // ensureInitialized og ikke pg-migrations). Soft-fail — log warn og
+      // la getUserFromAccessToken senere validere tokenet.
+      logger.warn(
+        { err, tokenPrefix: token.slice(0, 8) },
+        "[BIN-824] session.touchActivity SELECT failed — soft-fail"
+      );
+      return;
+    }
 
     const row = result.rows[0];
     if (!row || row.revoked_at) {
@@ -167,13 +187,21 @@ export class SessionService {
     const idleMs = now - lastActivityMs;
 
     if (idleMs >= this.inactivityTimeoutMs) {
-      // Inactivity-timeout — revoker.
-      await this.pool.query(
-        `UPDATE "${this.schema}"."app_sessions"
-         SET revoked_at = now()
-         WHERE id = $1 AND revoked_at IS NULL`,
-        [row.id]
-      );
+      // Inactivity-timeout — revoker. SESSION_TIMED_OUT propageres med
+      // vilje (klient må logge inn på nytt).
+      try {
+        await this.pool.query(
+          `UPDATE "${this.schema}"."app_sessions"
+           SET revoked_at = now()
+           WHERE id = $1 AND revoked_at IS NULL`,
+          [row.id]
+        );
+      } catch (err) {
+        logger.warn(
+          { err, sessionId: row.id },
+          "[BIN-824] session.touchActivity revoke-update failed — propagating SESSION_TIMED_OUT anyway"
+        );
+      }
       logger.info(
         { sessionId: row.id, idleMs },
         "[REQ-132] session revoked due to inactivity timeout"
@@ -185,12 +213,21 @@ export class SessionService {
     }
 
     if (idleMs >= TOUCH_THROTTLE_MS) {
-      await this.pool.query(
-        `UPDATE "${this.schema}"."app_sessions"
-         SET last_activity_at = now()
-         WHERE id = $1`,
-        [row.id]
-      );
+      try {
+        await this.pool.query(
+          `UPDATE "${this.schema}"."app_sessions"
+           SET last_activity_at = now()
+           WHERE id = $1`,
+          [row.id]
+        );
+      } catch (err) {
+        // BIN-824: throttle-update er beste-effort. Hvis den feiler får
+        // tokenet bare tikke fortere senere — ingen funksjonell impact.
+        logger.warn(
+          { err, sessionId: row.id },
+          "[BIN-824] session.touchActivity throttle-update failed — soft-fail"
+        );
+      }
     }
   }
 

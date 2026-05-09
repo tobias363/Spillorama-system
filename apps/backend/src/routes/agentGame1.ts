@@ -62,6 +62,12 @@ import {
   getAccessTokenFromRequest,
 } from "../util/httpHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
+import {
+  Game1ScheduledGameFinder,
+  SCHEDULED_GAME_STATUSES,
+  type ScheduledGameRow,
+} from "../game/Game1ScheduledGameFinder.js";
+import { HallGroupMembershipQuery } from "../platform/HallGroupMembershipQuery.js";
 
 const logger = rootLogger.child({ module: "agent-game1" });
 
@@ -84,19 +90,13 @@ export interface AgentGame1RouterDeps {
   } | null;
 }
 
-interface ActiveGameRow {
-  id: string;
-  status: string;
-  master_hall_id: string;
-  group_hall_id: string;
-  participating_halls_json: unknown;
-  sub_game_name: string;
-  custom_game_name: string | null;
-  scheduled_start_time: Date | string;
-  scheduled_end_time: Date | string;
-  actual_start_time: Date | string | null;
-  actual_end_time: Date | string | null;
-}
+/**
+ * Bølge 6 (2026-05-08): tidligere lokal-interface; nå alias for kanonisk
+ * `ScheduledGameRow` fra `Game1ScheduledGameFinder`. Beholdt som alias så
+ * Bølge 2 (`MasterActionService` parallel) kan referere typen uten å
+ * endre import-stier.
+ */
+type ActiveGameRow = ScheduledGameRow;
 
 function parseHallIdsArray(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -196,7 +196,19 @@ export function createAgentGame1Router(
   if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
     throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
   }
-  const scheduledGamesTable = `"${schema}"."app_game1_scheduled_games"`;
+  // Bølge 6 (2026-05-08): konsolidert finder for `app_game1_scheduled_games`-
+  // queries. Erstatter de tre nær-identiske inline-queries (findActiveGameForHall,
+  // findActiveOrUpcomingGameForHall, findScheduledGameForHall) med ÉN service.
+  // De tre lokale wrapper-funksjonene under beholdes som thin wrappers så
+  // Bølge 2 (`MasterActionService` parallel) ikke får signatur-konflikter.
+  const scheduledGameFinder = new Game1ScheduledGameFinder({ pool, schema });
+  // Bølge 5 (2026-05-08): konsolidert GoH-membership-query. Erstatter inline
+  // `hallGroupService.get()`-kallet i `getCurrentGoHMembersByGroupId` slik at
+  // alle tre kall-sites (denne, GamePlanEngineBridge.resolveParticipatingHallIds,
+  // GamePlanEngineBridge.resolveGroupHallId) bruker samme autoritative
+  // implementasjon. Wrapper under beholdes for backwards-compat på Map<hallId,
+  // hallName>-shape som callers bruker for navn-lookup.
+  const hallGroupMembershipQuery = new HallGroupMembershipQuery({ pool, schema });
   const lobbyBroadcaster = deps.lobbyBroadcaster ?? null;
 
   /**
@@ -231,83 +243,38 @@ export function createAgentGame1Router(
     return user;
   }
 
+  // Bølge 6 (2026-05-08): de tre finder-funksjonene under er nå thin
+  // wrappers rundt `Game1ScheduledGameFinder`. Public signatur er
+  // bevart slik at Bølge 2 (`MasterActionService` parallel) ikke får
+  // konflikt. Status-buckets ligger i `SCHEDULED_GAME_STATUSES`.
+
   /**
-   * Finn "aktivt" scheduled_game for gitt hall. Prioritet:
-   *   1. running / paused / ready_to_start / purchase_open (ikke completed)
-   *      sortert med nærmeste scheduled_start først (latest scheduled).
-   * Returnerer null hvis ingen aktiv rad.
+   * Finn "aktivt" scheduled_game for gitt hall (`purchase_open` /
+   * `ready_to_start` / `running` / `paused`). Sortert ASC på
+   * `scheduled_start_time`. Returnerer null hvis ingen aktiv rad.
    */
   async function findActiveGameForHall(
     hallId: string
   ): Promise<ActiveGameRow | null> {
-    try {
-      const { rows } = await pool.query<ActiveGameRow>(
-        `SELECT id, status, master_hall_id, group_hall_id,
-                participating_halls_json, sub_game_name, custom_game_name,
-                scheduled_start_time, scheduled_end_time,
-                actual_start_time, actual_end_time
-           FROM ${scheduledGamesTable}
-           WHERE (master_hall_id = $1
-              OR participating_halls_json::jsonb @> to_jsonb($1::text))
-             AND status IN ('purchase_open','ready_to_start','running','paused')
-           ORDER BY scheduled_start_time ASC
-           LIMIT 1`,
-        [hallId]
-      );
-      return rows[0] ?? null;
-    } catch (err) {
-      const code = (err as { code?: string } | null)?.code ?? "";
-      if (code === "42P01" || code === "42703") {
-        // Tabellen/kolonnen mangler (dev uten migrations) — tolk som
-        // "ingen aktiv runde". Agent-portal får tom-state.
-        logger.debug(
-          { hallId, code },
-          "scheduled-games table missing; returning null"
-        );
-        return null;
-      }
-      throw err;
-    }
+    return scheduledGameFinder.findFor({
+      hallId,
+      statuses: SCHEDULED_GAME_STATUSES.ACTIVE,
+    });
   }
 
   /**
    * 2026-05-03 (Tobias UX): finn aktivt ELLER neste planlagte spill for
-   * hallen. Inkluderer `'scheduled'`-status i tillegg til de aktive
-   * (`purchase_open`/`ready_to_start`/`running`/`paused`) så agent-portal
-   * og cash-inout-dashbord alltid kan vise hall-status for kommende
-   * runde — ikke bare når en runde er live.
-   *
-   * Sortert ASC på `scheduled_start_time`, så nærmeste-i-tid får prioritet.
+   * hallen. Inkluderer `'scheduled'` i tillegg til ACTIVE-status så
+   * agent-portal og cash-inout-dashbord alltid kan vise hall-status
+   * for kommende runde — ikke bare når en runde er live.
    */
   async function findActiveOrUpcomingGameForHall(
     hallId: string
   ): Promise<ActiveGameRow | null> {
-    try {
-      const { rows } = await pool.query<ActiveGameRow>(
-        `SELECT id, status, master_hall_id, group_hall_id,
-                participating_halls_json, sub_game_name, custom_game_name,
-                scheduled_start_time, scheduled_end_time,
-                actual_start_time, actual_end_time
-           FROM ${scheduledGamesTable}
-           WHERE (master_hall_id = $1
-              OR participating_halls_json::jsonb @> to_jsonb($1::text))
-             AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')
-           ORDER BY scheduled_start_time ASC
-           LIMIT 1`,
-        [hallId]
-      );
-      return rows[0] ?? null;
-    } catch (err) {
-      const code = (err as { code?: string } | null)?.code ?? "";
-      if (code === "42P01" || code === "42703") {
-        logger.debug(
-          { hallId, code },
-          "scheduled-games table missing; returning null"
-        );
-        return null;
-      }
-      throw err;
-    }
+    return scheduledGameFinder.findFor({
+      hallId,
+      statuses: SCHEDULED_GAME_STATUSES.ACTIVE_OR_UPCOMING,
+    });
   }
 
   /**
@@ -317,38 +284,14 @@ export function createAgentGame1Router(
    * trykker Start mens runden fortsatt venter på cron-promotering til
    * `'purchase_open'`. Skiller `GAME_NOT_STARTABLE_YET` fra `NO_ACTIVE_GAME`
    * (= ingen runde i det hele tatt).
-   *
-   * Sortert ASC på `scheduled_start_time` for å returnere nærmeste-i-tid.
    */
   async function findScheduledGameForHall(
     hallId: string
   ): Promise<ActiveGameRow | null> {
-    try {
-      const { rows } = await pool.query<ActiveGameRow>(
-        `SELECT id, status, master_hall_id, group_hall_id,
-                participating_halls_json, sub_game_name, custom_game_name,
-                scheduled_start_time, scheduled_end_time,
-                actual_start_time, actual_end_time
-           FROM ${scheduledGamesTable}
-           WHERE (master_hall_id = $1
-              OR participating_halls_json::jsonb @> to_jsonb($1::text))
-             AND status = 'scheduled'
-           ORDER BY scheduled_start_time ASC
-           LIMIT 1`,
-        [hallId]
-      );
-      return rows[0] ?? null;
-    } catch (err) {
-      const code = (err as { code?: string } | null)?.code ?? "";
-      if (code === "42P01" || code === "42703") {
-        logger.debug(
-          { hallId, code },
-          "scheduled-games table missing; returning null"
-        );
-        return null;
-      }
-      throw err;
-    }
+    return scheduledGameFinder.findFor({
+      hallId,
+      statuses: SCHEDULED_GAME_STATUSES.SCHEDULED_ONLY,
+    });
   }
 
   /**
@@ -410,13 +353,23 @@ export function createAgentGame1Router(
   async function getCurrentGoHMembersByGroupId(
     groupHallId: string
   ): Promise<Map<string, string> | null> {
+    // Bølge 5 (2026-05-08): bruker konsolidert HallGroupMembershipQuery.
+    // Public signatur (Map<hallId, hallName>) er bevart slik at callers
+    // (master-konsoll + hall-status) ikke trenger endring.
+    //
+    // Soft-fail-strategi (uendret): null hvis gruppen ikke finnes ELLER
+    // lookup feiler (DB-error). Caller faller tilbake til legacy-
+    // oppførsel (vise alt fra `participating_halls_json` + ready-rader).
     try {
-      const group = await hallGroupService.get(groupHallId);
-      const members = new Map<string, string>();
-      for (const m of group.members) {
-        members.set(m.hallId, m.hallName);
+      const members = await hallGroupMembershipQuery.getActiveMembers(
+        groupHallId,
+      );
+      if (members === null) return null;
+      const map = new Map<string, string>();
+      for (const m of members) {
+        map.set(m.hallId, m.hallName);
       }
-      return members;
+      return map;
     } catch (err) {
       logger.debug(
         { groupHallId, err },
@@ -649,6 +602,13 @@ export function createAgentGame1Router(
             (v: unknown): v is string => typeof v === "string"
           )
         : undefined;
+      // F10 (E2E pilot-blokker, 2026-05-09): jackpotConfirmed-wireup. Speiler
+      // adminGame1Master.ts:319-320 så master-bingovert kan godkjenne jackpot-
+      // popup-flyten via agent-konsollet på lik linje med admin-konsollet.
+      // Når service-laget kaster JACKPOT_CONFIRM_REQUIRED, viser klienten
+      // popup og re-kaller endepunktet med jackpotConfirmed=true.
+      const jackpotConfirmed =
+        body.jackpotConfirmed === true || body.jackpotConfirmed === "true";
 
       const startInput: Parameters<Game1MasterControlService["startGame"]>[0] =
         {
@@ -660,6 +620,9 @@ export function createAgentGame1Router(
       }
       if (confirmUnreadyHalls !== undefined) {
         startInput.confirmUnreadyHalls = confirmUnreadyHalls;
+      }
+      if (jackpotConfirmed) {
+        startInput.jackpotConfirmed = true;
       }
       const result = await masterControlService.startGame(startInput);
 

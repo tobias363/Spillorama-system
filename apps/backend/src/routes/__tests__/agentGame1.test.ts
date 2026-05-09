@@ -267,6 +267,56 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
     async query(sql: string, params: unknown[]) {
       poolQueries.push({ sql, params });
       if (opts.poolError) throw opts.poolError;
+      // Bølge 5 (2026-05-08): rute-laget bruker nå
+      // `HallGroupMembershipQuery.getActiveMembers` istedenfor å gå via
+      // `hallGroupService.get`. Stuben dispatch-er på SQL-pattern og
+      // mapper data fra `opts.goHById` slik at eksisterende test-setup
+      // (med `goHById`-key) fortsatt fungerer uten å duplisere mock.
+      //
+      // Q1: `SELECT master_hall_id FROM "public"."app_hall_groups" WHERE id = $1 ...`
+      // (uten LEFT JOIN — det er getActiveMembers' group-existence-check)
+      if (
+        /SELECT\s+master_hall_id/i.test(sql) &&
+        /app_hall_groups/i.test(sql) &&
+        /WHERE\s+id\s*=/i.test(sql) &&
+        !/LEFT JOIN/i.test(sql)
+      ) {
+        const groupId = params?.[0] as string | undefined;
+        if (groupId === undefined) {
+          return { rows: [], rowCount: 0 };
+        }
+        const hit = opts.goHById?.[groupId];
+        if (hit === undefined) {
+          // Default = gruppen finnes ikke (matcher legacy-baseline).
+          return { rows: [], rowCount: 0 };
+        }
+        if (hit === null) {
+          // Eksplisitt simulert DB-feil — kast samme feil som
+          // mockHallGroupService.get gjorde tidligere.
+          throw new Error("simulated DB error");
+        }
+        return { rows: [{ master_hall_id: null }], rowCount: 1 };
+      }
+      // Q2: getActiveMembers' members-query: `SELECT m.hall_id, h.name ...`
+      if (
+        /SELECT\s+m\.hall_id,\s*h\.name/i.test(sql) &&
+        /app_hall_group_members/i.test(sql)
+      ) {
+        const groupId = params?.[0] as string | undefined;
+        if (groupId === undefined) {
+          return { rows: [], rowCount: 0 };
+        }
+        const hit = opts.goHById?.[groupId];
+        if (hit === undefined || hit === null) {
+          return { rows: [], rowCount: 0 };
+        }
+        const rows = hit.members.map((m) => ({
+          hall_id: m.hallId,
+          hall_name: m.hallName,
+          is_active: true,
+        }));
+        return { rows, rowCount: rows.length };
+      }
       if (!sql.includes("app_game1_scheduled_games")) {
         return { rows: [], rowCount: 0 };
       }
@@ -278,10 +328,20 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
               String(params[0])
             )));
       // 2026-05-07: skill mellom `findScheduledGameForHall` (status='scheduled')
-      // og de to andre helperne basert på SQL-form. Tester kan sette
-      // `scheduledRow` for å simulere "runden er planlagt men purchase ikke
-      // åpnet enda" uten å påvirke `activeRow`-logikken.
-      const isScheduledOnlyQuery = sql.includes("status = 'scheduled'");
+      // og de to andre helperne. Tester kan sette `scheduledRow` for å
+      // simulere "runden er planlagt men purchase ikke åpnet enda" uten å
+      // påvirke `activeRow`-logikken.
+      //
+      // Bølge 6 (2026-05-08): etter `Game1ScheduledGameFinder`-konsolideringen
+      // bruker alle finder-queries `status IN ($2, $3, ...)` med parameterized
+      // statuser, så vi må disambiguere på params (ikke SQL-tekst). Eneste
+      // status-bucket som kun inneholder `'scheduled'` er SCHEDULED_ONLY.
+      const statusParams = Array.isArray(params)
+        ? (params.slice(1) as string[])
+        : [];
+      const isScheduledOnlyQuery =
+        sql.includes("status = 'scheduled'") ||
+        (statusParams.length === 1 && statusParams[0] === "scheduled");
       if (isScheduledOnlyQuery) {
         if (scheduledRow && matchesHall(scheduledRow)) {
           return { rows: [scheduledRow], rowCount: 1 };
@@ -557,6 +617,128 @@ test("POST /start — master-agent kan videreformidle confirmExcludedHalls", asy
       ctx.serviceCalls.startGame[0]!.confirmExcludedHalls,
       ["hall-3"]
     );
+  } finally {
+    await ctx.close();
+  }
+});
+
+// F10 (E2E pilot-blokker, 2026-05-09): jackpotConfirmed-wireup ─────────
+//
+// Master-bingovert må kunne fullføre jackpot-popup-flyten via agent-
+// konsollet på samme måte som admin-konsollet (`adminGame1Master.ts:319`).
+// Tidligere ignorerte agent-routen `body.jackpotConfirmed`, så servicen
+// fikk aldri se flagget og returnerte JACKPOT_CONFIRM_REQUIRED i evig
+// loop.
+
+test("POST /start — F10: jackpotConfirmed=true propageres til service", async () => {
+  const ctx = await startServer({ users: { "t-m": masterAgent } });
+  try {
+    const res = await post(ctx, "/api/agent/game1/start", "t-m", {
+      jackpotConfirmed: true,
+    });
+    assert.equal(res.status, 200);
+    assert.equal(ctx.serviceCalls.startGame.length, 1);
+    assert.equal(
+      ctx.serviceCalls.startGame[0]!.jackpotConfirmed,
+      true,
+      "Service skal motta jackpotConfirmed=true når master har godkjent popup"
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /start — F10: jackpotConfirmed=\"true\" (string) aksepteres", async () => {
+  // Speiler adminGame1Master.ts:319-320 som også aksepterer string-formen
+  // for fleksibilitet mot JSON-klienter som serialiserer boolean som string.
+  const ctx = await startServer({ users: { "t-m": masterAgent } });
+  try {
+    const res = await post(ctx, "/api/agent/game1/start", "t-m", {
+      jackpotConfirmed: "true",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(
+      ctx.serviceCalls.startGame[0]!.jackpotConfirmed,
+      true,
+      "String 'true' skal koerse til boolean true (parity med admin-routen)"
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /start — F10: jackpotConfirmed utelatt → service ser undefined (kaster JACKPOT_CONFIRM_REQUIRED)", async () => {
+  // Når master ikke har godkjent jackpot-popup-en ennå skal flagget IKKE
+  // settes i startInput. Service-laget kaster JACKPOT_CONFIRM_REQUIRED
+  // og UI rendrer popup. Tester regress fra Tolkning A der `false` ble
+  // explisitt satt og servicen fortolket det som "godkjent" (subtil bug).
+  let observedFlag: unknown = "NOT-CHECKED";
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    startImpl: async (input) => {
+      observedFlag = input.jackpotConfirmed;
+      throw new DomainError(
+        "JACKPOT_CONFIRM_REQUIRED",
+        "Master må godkjenne jackpot-popup."
+      );
+    },
+  });
+  try {
+    const res = await post(ctx, "/api/agent/game1/start", "t-m", {});
+    assert.equal(res.status, 400);
+    const payload = (await res.json()) as { error: { code: string } };
+    assert.equal(payload.error.code, "JACKPOT_CONFIRM_REQUIRED");
+    assert.equal(
+      observedFlag,
+      undefined,
+      "Når flagget utelates skal det ikke settes i startInput (forblir undefined)"
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("POST /start — F10: re-submit med jackpotConfirmed=true etter JACKPOT_CONFIRM_REQUIRED gir suksess", async () => {
+  // End-to-end: popup-flyten (kast → re-submit) gir suksess. Kjerne-bevis
+  // for at fixet faktisk avlaster pilot-blokkeren.
+  let callCount = 0;
+  const ctx = await startServer({
+    users: { "t-m": masterAgent },
+    startImpl: async (input) => {
+      callCount += 1;
+      if (callCount === 1) {
+        if (input.jackpotConfirmed) {
+          throw new Error("Test-feil: første kall skal ikke ha jackpotConfirmed");
+        }
+        throw new DomainError("JACKPOT_CONFIRM_REQUIRED", "popup");
+      }
+      if (input.jackpotConfirmed !== true) {
+        throw new Error("Test-feil: andre kall skal ha jackpotConfirmed=true");
+      }
+      return {
+        gameId: "g1",
+        status: "running",
+        actualStartTime: "2026-05-09T10:00:00Z",
+        actualEndTime: null,
+        auditId: "audit-jackpot-ok",
+      };
+    },
+  });
+  try {
+    const first = await post(ctx, "/api/agent/game1/start", "t-m", {});
+    assert.equal(first.status, 400);
+    const firstPayload = (await first.json()) as { error: { code: string } };
+    assert.equal(firstPayload.error.code, "JACKPOT_CONFIRM_REQUIRED");
+
+    const second = await post(ctx, "/api/agent/game1/start", "t-m", {
+      jackpotConfirmed: true,
+    });
+    assert.equal(second.status, 200);
+    const secondPayload = (await second.json()) as {
+      data: { auditId: string };
+    };
+    assert.equal(secondPayload.data.auditId, "audit-jackpot-ok");
+    assert.equal(callCount, 2);
   } finally {
     await ctx.close();
   }

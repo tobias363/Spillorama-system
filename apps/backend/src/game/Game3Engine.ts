@@ -49,6 +49,13 @@
 
 import { randomUUID } from "node:crypto";
 import { Game2Engine, autoMarkPlayerCells } from "./Game2Engine.js";
+import {
+  createInitialPhaseState,
+  markDrawBagEmpty,
+  shouldDrawNext,
+  type Game3PhaseIndex,
+  type Game3PhaseState,
+} from "./Game3PhaseStateMachine.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import {
   PatternCycler,
@@ -228,17 +235,73 @@ export class Game3Engine extends Game2Engine {
     // util som Spill 2 bruker; idempotent.
     autoMarkPlayerCells(game, lastBall);
 
+    // BIN-820 / R10 (2026-05-08): phase-state-machine wireup. Når runden
+    // er i "phase-locked" Spill 3-modus (autoClaimPhaseMode + 5
+    // patterns matching Rad 1-4 + Fullt Hus per
+    // Spill3GlobalRoomService), sekvenseres rad-fasene med 3s pause.
+    //
+    // Init lazy: første onDrawCompleted etter round-start oppretter
+    // `game.spill3PhaseState`. Recovery-pathen hydrerer den allerede via
+    // BingoEngineRecovery, så server-restart bevarer fase-overgang.
+    const phaseModeActive = this.isPhaseModeActive(variantConfig);
+    if (phaseModeActive && game.spill3PhaseState === undefined) {
+      game.spill3PhaseState = createInitialPhaseState();
+    }
+
+    // BIN-820 / R10: pause-vakt. Hvis state-maskinen er i pause-vindu
+    // skal vi IKKE evaluere patterns denne ticken. Engine fortsetter å
+    // emittere `lastBall` (auto-mark er allerede gjort over) men hopper
+    // over `processG3Winners`. shouldDrawNext er server-clock-driven, så
+    // klienter ser pausen via patternSnapshot uten ekstra wire-events.
+    const phaseState = game.spill3PhaseState;
+    let phasePaused = false;
+    if (phaseModeActive && phaseState) {
+      const drawDecision = shouldDrawNext(phaseState, Date.now());
+      if (drawDecision.skip && drawDecision.reason === "PAUSED") {
+        phasePaused = true;
+      }
+    }
+
     const cycler = this.getOrCreateCycler(room, game);
     const step = cycler.step(drawIndex);
 
-    const winnerRecords = await this.processG3Winners({
-      room,
-      game,
-      lastBall,
-      drawIndex,
-      step,
-      variantConfig: variantConfig!,
-    });
+    // BIN-820 / R10: i phase-mode begrenser vi cycler-step.activePatterns til
+    // KUN den fasen state-maskinen sier er aktiv. Selv om PatternCycler
+    // også vurderer ballThreshold, setter Spill3GlobalRoomService alle 5
+    // patterns med ballThreshold=75 (= alle aktive samtidig per
+    // ball-threshold), så uten denne begrensningen ville cycler avgi
+    // hele Rad 1-4 + Fullt Hus parallelt og bryte sequential-spec'en.
+    let effectiveStep: CyclerStep = step;
+    if (phaseModeActive && phaseState && !phasePaused) {
+      const activeIdx = phaseState.currentPhaseIndex;
+      const filtered = step.activePatterns.filter((p) => phasePatternIndexFromSpec(p) === activeIdx);
+      effectiveStep = {
+        activePatterns: filtered,
+        deactivatedPatterns: step.deactivatedPatterns,
+        changed: step.changed,
+      };
+    }
+
+    const winnerRecords = phasePaused
+      ? []
+      : await this.processG3Winners({
+          room,
+          game,
+          lastBall,
+          drawIndex,
+          step: effectiveStep,
+          variantConfig: variantConfig!,
+        });
+
+    // BIN-820 / R10: oppdater phase-state etter evaluering. For hver
+    // pattern som ble vunnet i denne ticken (winnerRecords med ticket-
+    // vinnere), advance state-maskinen og schedule pause før neste fase.
+    // Spec'en sier 3s pause mellom rader; pause-millis kommer fra
+    // variantConfig.roundPauseMs (Spill3GlobalRoomService deler verdien
+    // mellom inter-round og inter-phase pause per Tobias-direktiv).
+    if (phaseModeActive && phaseState && winnerRecords.length > 0) {
+      this.advancePhaseStateAfterWinners(game, winnerRecords, variantConfig);
+    }
 
     // 2026-05-05 (Tobias-direktiv): End the round when EITHER an explicit
     // Full-House pattern was awarded this draw OR every pattern has been won
@@ -261,7 +324,27 @@ export class Game3Engine extends Game2Engine {
       (w) => w.isFullHouse && w.ticketWinners.length > 0,
     );
     const allPatternsWon = cycler.allResolved();
-    const roundOver = explicitFullHouseWon || allPatternsWon;
+    // BIN-820 / R10: i phase-mode er round-end signalisert via state-
+    // maskinens `status === "ENDED"` (etter Fullt Hus eller draw-bag
+    // empty). Beholder også explicitFullHouseWon/allPatternsWon-grenene
+    // for legacy-konfigurasjoner uten phase-mode.
+    const phaseEnded =
+      phaseModeActive && phaseState !== undefined && game.spill3PhaseState?.status === "ENDED";
+    const roundOver = explicitFullHouseWon || allPatternsWon || phaseEnded;
+
+    // BIN-820 / R10: hvis vi har trukket alle 75 baller men runden ikke
+    // er ferdig (ingen Fullt Hus), marker phase-state som ENDED med
+    // `DRAW_BAG_EMPTY`. Speilet av Game3Engine sin generelle
+    // DRAW_BAG_EMPTY-håndtering — phase-state må også oppdateres for at
+    // recovery skal kjenne riktig grunn.
+    if (
+      phaseModeActive &&
+      phaseState &&
+      game.drawnNumbers.length >= 75 &&
+      game.spill3PhaseState?.status === "ACTIVE"
+    ) {
+      game.spill3PhaseState = markDrawBagEmpty(game.spill3PhaseState);
+    }
 
     if (roundOver) {
       const endedAtMs = Date.now();
@@ -291,6 +374,93 @@ export class Game3Engine extends Game2Engine {
       gameEnded: roundOver,
       endedReason: roundOver ? "G3_FULL_HOUSE" : undefined,
     });
+  }
+
+  // ── Phase-state-machine integration (BIN-820 / R10) ──────────────────────
+
+  /**
+   * Detect Spill 3 phase-locked mode: `autoClaimPhaseMode === true` på
+   * variantConfig signaliserer at runden skal sekvensere Rad 1 → pause →
+   * Rad 2 → ... → Fullt Hus. Spill3GlobalRoomService setter dette flagget
+   * når configen er Spill 3 (monsterbingo).
+   *
+   * Legacy DEFAULT_GAME3_CONFIG (4 mønstre uten phase-mode) er IKKE
+   * påvirket — `autoClaimPhaseMode` er ikke satt der, så `phaseModeActive`
+   * forblir false og engine kjører den eksisterende konkurrent-cycler-pathen.
+   */
+  private isPhaseModeActive(variantConfig: GameVariantConfig | undefined): boolean {
+    return variantConfig?.autoClaimPhaseMode === true;
+  }
+
+  /**
+   * Advance phase-state etter at en pattern er vunnet og utbetalt. Hvis
+   * den vunne fasen er Fullt Hus (index 4) ender runden. Ellers schedules
+   * pause før neste fase aktiveres.
+   *
+   * Pause-varigheten leses fra `variantConfig.roundPauseMs` (Spill3-bridge
+   * gjenbruker dette feltet for inter-fase-pause; default 3000ms per
+   * Tobias-direktiv 2026-05-08).
+   */
+  private advancePhaseStateAfterWinners(
+    game: GameState,
+    winnerRecords: G3WinnerRecord[],
+    variantConfig: GameVariantConfig | undefined,
+  ): void {
+    const state = game.spill3PhaseState;
+    if (!state || state.status === "ENDED") return;
+
+    // For hver vinnende pattern, prøv å advance state. Vi går gjennom
+    // sortert pattern-index slik at om begge Rad 1 og Fullt Hus skulle
+    // vinnes på samme draw (skjer kun ved bug i pattern-mask), advancer
+    // vi i riktig rekkefølge.
+    const wonIndices = new Set<number>();
+    for (const record of winnerRecords) {
+      if (record.ticketWinners.length === 0) continue;
+      // patternId må mappes til phase-index. Vi har 5 patterns 0-4 i
+      // Spill3GlobalRoomService — bruk patternName eller fallback til 0.
+      const idx = phasePatternIndexFromName(record.patternName);
+      if (idx !== null) wonIndices.add(idx);
+    }
+
+    if (wonIndices.size === 0) return;
+
+    // Pause-millis fra config (default 3s).
+    const pauseMs =
+      typeof variantConfig?.roundPauseMs === "number" && variantConfig.roundPauseMs > 0
+        ? variantConfig.roundPauseMs
+        : 3000;
+
+    // Advance state for each won phase (sorted ascending). For Fullt Hus
+    // (idx=4) settes status=ENDED uten pause; for Rad 1-4 schedules vi
+    // pause + currentPhaseIndex++.
+    const sortedIdx = [...wonIndices].sort((a, b) => a - b);
+    let mutated = state;
+    const now = Date.now();
+    for (const idx of sortedIdx) {
+      if (mutated.status === "ENDED") break;
+      // Bare advance hvis denne fasen faktisk er den aktive — ignorer
+      // out-of-order patterns (skal ikke skje hvis effectiveStep-filteret
+      // i onDrawCompleted virker, men er fail-safe for chaos).
+      if (idx !== mutated.currentPhaseIndex) continue;
+      const isFullHouse = idx === 4;
+      const phaseIdx = idx as Game3PhaseIndex;
+      mutated = isFullHouse
+        ? {
+            currentPhaseIndex: phaseIdx,
+            pausedUntilMs: null,
+            phasesWon: [...mutated.phasesWon, phaseIdx],
+            status: "ENDED",
+            endedReason: "FULL_HOUSE",
+          }
+        : {
+            currentPhaseIndex: ((idx + 1) as Game3PhaseIndex),
+            pausedUntilMs: now + pauseMs,
+            phasesWon: [...mutated.phasesWon, phaseIdx],
+            status: "ACTIVE",
+            endedReason: null,
+          };
+    }
+    game.spill3PhaseState = mutated;
   }
 
   // ── Cycler construction ──────────────────────────────────────────────────
@@ -1334,6 +1504,48 @@ export function buildPatternSpecs(patterns: readonly PatternDefinition[]): Patte
     });
   }
   return specs;
+}
+
+/**
+ * BIN-820 / R10 (2026-05-08): map pattern-name to phase-index.
+ *
+ * Spill3GlobalRoomService bygger 5 patterns med navn `"1 Rad"`,
+ * `"2 Rader"`, ..., `"Fullt Hus"`. Game3PhaseStateMachine bruker
+ * konstantene `"Rad 1"`, `"Rad 2"`, ..., `"Fullt Hus"`. Mapperen aksepterer
+ * begge varianter slik at navn-skifte ikke bryter wireup.
+ *
+ * Returnerer 0-4 for kjente navn, eller `null` hvis pattern ikke er en
+ * Spill 3-fase (f.eks. legacy DEFAULT_GAME3_CONFIG-mønstre uten phase-mode).
+ */
+function phasePatternIndexFromName(name: string | undefined): 0 | 1 | 2 | 3 | 4 | null {
+  if (!name) return null;
+  const normalized = name.trim().toLowerCase();
+  // Bridge-form: "1 Rad", "2 Rader", ..., "Fullt Hus"
+  if (normalized === "1 rad") return 0;
+  if (normalized === "2 rader") return 1;
+  if (normalized === "3 rader") return 2;
+  if (normalized === "4 rader") return 3;
+  // Phase-state-machine-form: "Rad 1", "Rad 2", ...
+  if (normalized === "rad 1") return 0;
+  if (normalized === "rad 2") return 1;
+  if (normalized === "rad 3") return 2;
+  if (normalized === "rad 4") return 3;
+  // Fullt Hus / Coverall / Full House
+  if (normalized === "fullt hus" || normalized === "coverall" || normalized === "full house") {
+    return 4;
+  }
+  return null;
+}
+
+/**
+ * BIN-820 / R10 (2026-05-08): map en PatternSpec til phase-index.
+ *
+ * Wraps `phasePatternIndexFromName` siden spec'en kun har `name` (ikke
+ * `design`). Brukes i `effectiveStep`-filteret for å begrense cycler-
+ * evaluering til kun aktiv phase i phase-mode.
+ */
+function phasePatternIndexFromSpec(spec: PatternSpec): 0 | 1 | 2 | 3 | 4 | null {
+  return phasePatternIndexFromName(spec.name);
 }
 
 /** Convert a 25-cell 0/1 array (row-major) to a bitmask. */

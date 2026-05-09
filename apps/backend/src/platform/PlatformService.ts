@@ -4328,6 +4328,21 @@ export class PlatformService {
         )`
       );
 
+      // BIN-824 (2026-05-08): REQ-132-kolonner som ble lagt til via SQL-
+      // migrasjonen `20260910000000_user_2fa_and_session_metadata.sql`. Vi
+      // duplikerer ALTER-en her slik at fresh test-schemaer (som kun kjører
+      // `ensureInitialized` og ikke pg-migrations) også har kolonnene —
+      // ellers krasjer `SessionService.touchActivity` med "column
+      // last_activity_at does not exist" på første /api/auth/me-kall.
+      // IF NOT EXISTS gjør operasjonen idempotent for prod-DB der
+      // migrasjonen allerede har kjørt.
+      await client.query(
+        `ALTER TABLE ${this.sessionsTable()}
+         ADD COLUMN IF NOT EXISTS device_user_agent TEXT NULL,
+         ADD COLUMN IF NOT EXISTS ip_address TEXT NULL,
+         ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+      );
+
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.gamesTable()} (
           slug TEXT PRIMARY KEY,

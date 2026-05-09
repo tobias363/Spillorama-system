@@ -36,6 +36,10 @@ Before marking a Linear issue **Done**, all three must be true:
 
 "Implemented on feature-branch" is **NOT** Done. See [docs/engineering/ENGINEERING_WORKFLOW.md §7](../docs/engineering/ENGINEERING_WORKFLOW.md#7-legacy-avkobling-done-policy) for the full policy.
 
+## Architecture Decision Records (ADR)
+
+- [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, har en ADR blitt opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se `docs/adr/README.md` for når ADR kreves.)
+
 ## Tracking
 - Linear issue: 
 - Release note entry:

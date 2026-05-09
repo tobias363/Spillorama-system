@@ -206,34 +206,67 @@ function makeBridge(options: BridgeOptions = {}): {
           return { rows: [options.existingScheduled] };
         return { rows: [] };
       }
-      // resolveGroupHallId
+      // Bølge 5 (2026-05-08): resolveGroupHallId bruker nå
+      // HallGroupMembershipQuery.findGroupForHall som velger m.group_id
+      // (alias-prefiks) via INNER JOIN mot app_hall_groups. Stub matcher
+      // begge formene: legacy `SELECT group_id` og ny `SELECT m.group_id`.
       if (
-        /SELECT\s+group_id/i.test(sql) &&
-        /app_hall_group_members/i.test(sql)
+        /SELECT\s+m?\.?group_id/i.test(sql) &&
+        /app_hall_group_members/i.test(sql) &&
+        /WHERE\s+m\.hall_id\s*=/i.test(sql)
       ) {
         if (options.hallGroupId !== null && options.hallGroupId !== undefined) {
           return { rows: [{ group_id: options.hallGroupId }] };
         }
         return { rows: [] };
       }
-      // resolveParticipatingHallIds
-      // 2026-05-08 (BRIDGE_FAILED-fix): DISTINCT ble fjernet fordi
-      // Postgres avviser ORDER BY-CASE-uttrykk uten matchende SELECT-felt
-      // (42P10). PRIMARY KEY (group_id, hall_id) gir uniqueness uten
-      // DISTINCT.
+      // Bølge 5 (2026-05-08): HallGroupMembershipQuery.getActiveMembers
+      // gjør først et `SELECT master_hall_id FROM app_hall_groups WHERE id = $1`
+      // for å sjekke at gruppen finnes + hente pinned master. Stub
+      // returnerer null (ingen pinned master) så bridge bruker run.hall_id.
       if (
-        /SELECT\s+m\.hall_id,\s*m\.added_at/i.test(sql) &&
+        /SELECT\s+master_hall_id/i.test(sql) &&
+        /app_hall_groups/i.test(sql) &&
+        /WHERE\s+id\s*=/i.test(sql) &&
+        !/LEFT JOIN/i.test(sql)
+      ) {
+        // Hvis hallGroupId-parameter matcher request, returner gruppen
+        // (uten pinned master). Tester for resolveGoHMasterHallId bruker
+        // egen path med LEFT JOIN — den path-en filtreres av
+        // `!/LEFT JOIN/i`-clauset.
+        if (
+          options.hallGroupId !== null &&
+          options.hallGroupId !== undefined
+        ) {
+          return { rows: [{ master_hall_id: null }] };
+        }
+        return { rows: [] };
+      }
+      // Bølge 5 (2026-05-08): HallGroupMembershipQuery.getActiveMembers
+      // andre query — selve members-listen med JOIN mot app_halls.
+      // SQL: `SELECT m.hall_id, h.name AS hall_name, h.is_active
+      //         FROM app_hall_group_members m
+      //         INNER JOIN app_halls h ON h.id = m.hall_id
+      //        WHERE m.group_id = $1 AND h.is_active = true ...`
+      if (
+        /SELECT\s+m\.hall_id,\s*h\.name/i.test(sql) &&
         /app_hall_group_members/i.test(sql)
       ) {
         const masterId =
           (options.runRow?.hall_id as string | undefined) ?? null;
         if (options.groupHallMembers !== undefined) {
           return {
-            rows: options.groupHallMembers.map((id) => ({ hall_id: id })),
+            rows: options.groupHallMembers.map((id) => ({
+              hall_id: id,
+              hall_name: id,
+              is_active: true,
+            })),
           };
         }
         if (masterId) {
-          return { rows: [{ hall_id: masterId }] };
+          return {
+            rows: [{ hall_id: masterId, hall_name: masterId, is_active: true }],
+          };
         }
         return { rows: [] };
       }
@@ -275,6 +308,23 @@ function getInsertParticipatingHalls(queries: CapturedQuery[]): string[] {
   // params[13] = participating_halls_json (sjekk top-fil for kolonne-rekkefølge)
   const raw = insert!.params![13] as string;
   return JSON.parse(raw) as string[];
+}
+
+/**
+ * F-NEW-2 (E2E pilot-blokker, 2026-05-09): hent room_code fra INSERT-params.
+ *
+ * INSERT-en har 19 parametre når room_code er inkludert (primærpath etter
+ * fix). params[18] = room_code (siste param). Returnerer null hvis INSERT
+ * ikke har room_code-kolonnen (lazy-binding fallback ved 23505-race).
+ */
+function getInsertRoomCode(queries: CapturedQuery[]): string | null {
+  const insert = queries.find(
+    (q) =>
+      /INSERT INTO\s+"public"\."app_game1_scheduled_games"/i.test(q.sql) &&
+      /room_code/i.test(q.sql),
+  );
+  if (!insert) return null;
+  return (insert.params![18] as string) ?? null;
 }
 
 // ── tests ────────────────────────────────────────────────────────────────
@@ -555,4 +605,112 @@ test("Master først i ORDER BY: bridge tillit til SQL-rekkefølgen", async () =>
   const halls = getInsertParticipatingHalls(queries);
   assert.equal(halls[0], "hall-master");
   assert.equal(halls.length, 3);
+});
+
+// ── F-NEW-2 regression tests (E2E pilot-blokker, 2026-05-09) ────────────
+//
+// E2E test-engineer-agenten i `docs/engineering/SPILL1_E2E_TEST_RUN_2026-05-09.md`
+// avdekket at master.start spawner scheduled-game uten room_code (NULL).
+// Klienter kunne ikke joine fordi `joinScheduledGame`-pathen lazy-setter
+// room_code først når første spiller joiner — men master start engine
+// FØR noen joinet, og auto-draw-tick begynte å trekke baller for boot-
+// recovery-rom som ikke matchet vår master-startede runde.
+//
+// Disse testene encoder kontrakten:
+//   1. Bridge MÅ generere room_code OPP-FRONT i INSERT (eager-binding).
+//   2. Room-code-mapping er deterministisk — samme (master, group) gir
+//      samme rom-kode (matcher `getCanonicalRoomCode`).
+//   3. Hall-group → BINGO_<groupId>; solo-hall → BINGO_<hallId>.
+
+test("F-NEW-2: bridge skriver room_code til INSERT (BINGO_<groupId> for hall-group)", async () => {
+  const catalog = makeCatalogEntry();
+  const plan = makePlanWithItems([{ catalogEntry: catalog }]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-arnes",
+      business_date: "2026-05-08",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "demo-pilot-goh",
+    groupHallMembers: [
+      "hall-arnes",
+      "hall-bodo",
+      "hall-brumunddal",
+      "hall-fauske",
+    ],
+  });
+
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+
+  const roomCode = getInsertRoomCode(queries);
+  assert.equal(
+    roomCode,
+    "BINGO_DEMO-PILOT-GOH",
+    "room_code må settes til BINGO_<groupId> (uppercased) for hall-grupper",
+  );
+});
+
+test("F-NEW-2: solo-hall (uten group) får BINGO_<hallId>-kode", async () => {
+  const catalog = makeCatalogEntry();
+  const plan = makePlanWithItems([{ catalogEntry: catalog }]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-solo",
+      business_date: "2026-05-08",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    // Solo-GoH = master har egen gruppe med kun seg selv som medlem.
+    hallGroupId: "hg-solo",
+    groupHallMembers: ["hall-solo"],
+  });
+
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+
+  const roomCode = getInsertRoomCode(queries);
+  assert.equal(
+    roomCode,
+    "BINGO_HG-SOLO",
+    "Solo-GoH får BINGO_<groupId>-kode (linkKey = groupId hvis satt, ellers hallId)",
+  );
+});
+
+test("F-NEW-2: room_code er ikke-null + non-empty for alle scheduled-game-spawns", async () => {
+  // Smoke-test: uavhengig av hall-konfigurasjon må room_code alltid være
+  // satt. Dette beskytter mot regresjon der noen legger inn en sti som
+  // dropper room_code-paramet (eks. forenkler INSERT etter type-feil).
+  const catalog = makeCatalogEntry();
+  const plan = makePlanWithItems([{ catalogEntry: catalog }]);
+  const { bridge, queries } = makeBridge({
+    runRow: {
+      id: "run-1",
+      plan_id: "gp-1",
+      hall_id: "hall-arnes",
+      business_date: "2026-05-08",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "hg-pilot",
+    groupHallMembers: ["hall-arnes", "hall-bodo"],
+  });
+
+  await bridge.createScheduledGameForPlanRunPosition("run-1", 1);
+
+  const roomCode = getInsertRoomCode(queries);
+  assert.ok(
+    roomCode !== null && roomCode.trim().length > 0,
+    `room_code må være ikke-tom streng — fikk ${JSON.stringify(roomCode)}`,
+  );
+  assert.ok(
+    roomCode!.startsWith("BINGO_"),
+    "room_code må starte med BINGO_-prefix (canonical form)",
+  );
 });
