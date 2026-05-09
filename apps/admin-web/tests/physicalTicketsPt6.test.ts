@@ -376,7 +376,11 @@ describe("ActiveRangesPage (PT2/3/5)", () => {
     initI18n();
     document.body.innerHTML = "";
     window.localStorage.setItem("bingo_admin_access_token", "tok");
-    setSession(adminSession());
+    // Use operator-session: backend now requires `agentId | hallId` to list
+    // ranges. Admin sessions without an explicit hall would render the
+    // "hall_scope_required"-callout instead of fetching, so the table never
+    // populates. Operator-session auto-scopes to its single hall.
+    setSession(operatorSession());
   });
 
   it("loads ranges and renders action buttons per row", async () => {

@@ -118,7 +118,7 @@ describe("RegisterPage", () => {
     await flush();
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(String(fetchSpy.mock.calls[0][1].body));
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]![1].body));
     expect(body).toEqual({
       email: "kari@example.no",
       password: "Sterkt1234!!",
@@ -191,7 +191,7 @@ describe("RegisterPage", () => {
     submit(root);
     await flush();
 
-    const body = JSON.parse(String(fetchSpy.mock.calls[0][1].body));
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]![1].body));
     expect(body.phone).toBeUndefined();
   });
 });

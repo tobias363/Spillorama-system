@@ -64,6 +64,18 @@ async function tick(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i++) await new Promise<void>((r) => setTimeout(r, 0));
 }
 
+/**
+ * Drill into the first available group-of-halls card so the halls grid
+ * becomes visible. The page now opens on the groups view (drill-down v2);
+ * tests that assert on hall-cards must drill in first.
+ */
+async function drillIntoFirstGroup(root: HTMLElement): Promise<void> {
+  const groupCard = root.querySelector<HTMLElement>("[data-group-id]");
+  if (!groupCard) return;
+  groupCard.click();
+  await tick();
+}
+
 function makeHall(id: string, isActive = true): OpsHall {
   return {
     id,
@@ -191,6 +203,9 @@ describe("AdminOpsConsolePage — render + state", () => {
       _fetchOverview: async () => makeOverview(),
     });
     await tick();
+    // Drill-down v2: top-level is the groups grid. Drill into the group
+    // before asserting on hall-cards.
+    await drillIntoFirstGroup(root);
     const cardA = root.querySelector("[data-testid='ops-hall-card-hall-a']");
     expect(cardA).toBeTruthy();
     const dot = cardA?.querySelector("[data-testid='ops-health-dot-hall-a']");
@@ -347,6 +362,8 @@ describe("AdminOpsConsolePage — actions", () => {
       // Force the page to use the mockApiRouter via the real fetchOverview.
     });
     await tick();
+    // Drill-down v2: enter the group view to expose hall-cards.
+    await drillIntoFirstGroup(root);
     const card = root.querySelector("[data-testid='ops-hall-card-hall-a']");
     const pauseBtn = card?.querySelector<HTMLButtonElement>("[data-action='pause']");
     expect(pauseBtn).toBeTruthy();
@@ -393,6 +410,8 @@ describe("AdminOpsConsolePage — actions", () => {
       _socketFactory: factory,
     });
     await tick();
+    // Drill-down v2: enter the group view to expose hall-cards.
+    await drillIntoFirstGroup(root);
     const search = root.querySelector<HTMLInputElement>(
       "[data-testid='ops-search-input']",
     );
@@ -458,6 +477,8 @@ describe("AdminOpsConsolePage — FE-P0-005 listener-leak regression", () => {
       _fetchOverview: async () => makeOverview(),
     });
     await tick();
+    // Drill-down v2: enter the group view to expose hall-cards.
+    await drillIntoFirstGroup(root);
 
     // Sanity: 2 hall-cards + 1 alert ack-button rendered.
     const cards = root.querySelectorAll<HTMLElement>("[data-hall-id]");
@@ -536,6 +557,8 @@ describe("AdminOpsConsolePage — FE-P0-005 listener-leak regression", () => {
       _fetchOverview: fetchOverview,
     });
     await tick();
+    // Drill-down v2: enter the group view to expose hall-cards.
+    await drillIntoFirstGroup(root);
 
     // Apply many deltas — each one re-renders innerHTML so the pause-button
     // is a brand-new DOM node every time. With per-card binding, only the
@@ -637,6 +660,8 @@ describe("AdminOpsConsolePage — FE-P0-005 listener-leak regression", () => {
       _fetchOverview: async () => makeOverview(),
     });
     await tick();
+    // Drill-down v2: enter the group view to expose hall-cards.
+    await drillIntoFirstGroup(root);
 
     // Apply deltas; then click the box-body (data-action='drilldown').
     for (let i = 0; i < 25; i += 1) {

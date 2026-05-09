@@ -27,6 +27,10 @@ import { isGamesRoute } from "../../src/pages/games/index.js";
 const mockGameTypes = [
   { _id: "bingo", slug: "bingo", name: "Spill1", type: "game_1", row: 5, columns: 5, photo: "bingo.png", pattern: true },
   { _id: "monsterbingo", slug: "monsterbingo", name: "Spill3", type: "game_3", row: 5, columns: 5, photo: "mb.png", pattern: true },
+  // Tobias 2026-05-04: game_5 (SpinnGo) is intentionally NOT wired in the
+  // gameManagement-add-form-flow. Used by tests to assert the
+  // "not yet supported"-banner path.
+  { _id: "spinngo", slug: "spinngo", name: "Spill5", type: "game_5", row: 3, columns: 5, photo: "sg.png", pattern: false },
 ];
 vi.mock("../../src/pages/games/gameType/GameTypeState.js", async () => {
   return {
@@ -85,8 +89,10 @@ describe("GameManagementPage (list/picker) — BIN-684 wired", () => {
     const picker = c.querySelector<HTMLSelectElement>("#gm-type-picker");
     expect(picker).not.toBeNull();
     const opts = c.querySelectorAll("#gm-type-picker option");
-    // One default + 2 mocked types.
-    expect(opts.length).toBe(3);
+    // One default-placeholder option + 3 mocked types (bingo, monsterbingo,
+    // spinngo). The 3rd mock entry was added so the not-yet-supported-banner
+    // test below can exercise an un-wired variant (game_5 / SpinnGo).
+    expect(opts.length).toBe(4);
   });
 
   it("Add-knapp er aktiv (ingen BIN-622 tooltip)", async () => {
@@ -294,8 +300,11 @@ describe("GameManagement detail pages — BIN-684 wired", () => {
   });
 
   it("add page (ukjent type) viser not-yet-supported banner", async () => {
+    // Tobias 2026-05-04: game_3 (monsterbingo) is now wired via the
+    // Spill 2/3 pace-form. We use the un-wired game_5 (SpinnGo) variant to
+    // exercise the not-yet-supported-banner path.
     const c = document.createElement("div");
-    await renderGameManagementAddPage(c, "monsterbingo");
+    await renderGameManagementAddPage(c, "spinngo");
     expect(c.querySelector("[data-testid='gm-add-unsupported']")).not.toBeNull();
   });
 

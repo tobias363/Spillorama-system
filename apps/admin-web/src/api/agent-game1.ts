@@ -387,3 +387,74 @@ export async function setJackpot(
   if (hallId !== undefined) body.hallId = hallId;
   return postMasterAction("/api/agent/game1/master/jackpot-setup", body);
 }
+
+// ── 2026-05-09: stale-state recovery ─────────────────────────────────────
+//
+// Master-driven cleanup of STALE_PLAN_RUN/BRIDGE_FAILED state. The route
+// bypasses the lobby-aggregator pre-validation (which would block on
+// those exact warnings) so master can unblock without `psql`.
+//
+// Idempotent: invoking on a clean hall returns
+// `{ planRuns: 0, scheduledGames: 0 }`. UI typically refreshes
+// `fetchLobbyState` after a successful call to confirm the warnings
+// disappeared.
+
+export interface RecoverStaleClearedPlanRun {
+  id: string;
+  businessDate: string;
+  status: string;
+  currentPosition: number;
+  planId: string;
+}
+
+export interface RecoverStaleClearedScheduledGame {
+  id: string;
+  status: string;
+  scheduledStartTime: string;
+  scheduledEndTime: string;
+  subGameName: string;
+  groupHallId: string;
+}
+
+export interface RecoverStaleResponse {
+  ok: true;
+  cleared: {
+    planRuns: number;
+    scheduledGames: number;
+  };
+  details: {
+    recoveredAt: string;
+    todayBusinessDate: string;
+    clearedPlanRuns: RecoverStaleClearedPlanRun[];
+    clearedScheduledGames: RecoverStaleClearedScheduledGame[];
+  };
+}
+
+/**
+ * Master kaller cleanup av stale plan-runs og stuck scheduled-games for
+ * en hall. Bypasser lobby-aggregator pre-validation slik at master kan
+ * rydde opp selv om `BLOCKING_WARNING_CODES` (BRIDGE_FAILED,
+ * DUAL_SCHEDULED_GAMES) ellers blokkerer alle write-actions.
+ *
+ * Idempotent — kall flere ganger er trygt; andre kall på en ren hall
+ * returnerer `{ planRuns: 0, scheduledGames: 0 }`.
+ *
+ * Vanlige feilkoder:
+ *   - RECOVERY_NOT_CONFIGURED (503): backend mangler service-injection
+ *   - FORBIDDEN (400): caller er ikke master eller mangler permission
+ *   - INVALID_INPUT (400): ugyldig hallId
+ */
+export async function recoverStale(
+  hallId?: string,
+): Promise<RecoverStaleResponse> {
+  const body: { hallId?: string } = {};
+  if (hallId !== undefined) body.hallId = hallId;
+  return apiRequest<RecoverStaleResponse>(
+    "/api/agent/game1/master/recover-stale",
+    {
+      method: "POST",
+      auth: true,
+      body,
+    },
+  );
+}

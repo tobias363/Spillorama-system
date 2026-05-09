@@ -54,6 +54,26 @@
 
 import { z } from "zod";
 
+// ── ID-helpers ──────────────────────────────────────────────────────────
+//
+// F17 (E2E pilot-blokker, 2026-05-09): plan-IDer, plan-run-IDer og
+// scheduled-game-IDer er `TEXT PRIMARY KEY` i Postgres (ikke `UUID`).
+// Demo-/seed-data (eks. `demo-plan-pilot`) og produksjon-runs har
+// historisk brukt slug-form ved siden av UUID. Migrasjons-skjemaene
+// bekrefter dette:
+//   - app_game_plan.id             TEXT PRIMARY KEY
+//   - app_game_plan_run.id         TEXT PRIMARY KEY
+//   - app_game_plan_item.id        TEXT PRIMARY KEY
+//   - app_game1_scheduled_games.id TEXT PRIMARY KEY
+//
+// `z.string().uuid()` på disse feltene var derfor en falsk strenghet.
+// Server-laget genererer disse IDene selv (de kommer aldri inn fra
+// ukontrollert klient-payload), så UUID-validering ga ikke security —
+// bare brøt kontrakten mot DB-skjemaet og ga INTERNAL_ERROR for
+// legitime DB-rader. Vi bruker `z.string().min(1)` for konsistens med
+// resten av shared-types-pakken (`hallId: z.string()`).
+const Spill1IdSchema = z.string().min(1);
+
 // ── enum-sub-schemas ────────────────────────────────────────────────────
 
 /**
@@ -213,10 +233,16 @@ export type Spill1HallReadyStatus = z.infer<typeof Spill1HallReadyStatusSchema>;
  * `currentScheduledGameId` på top-level istedet.
  */
 export const Spill1PlanMetaSchema = z.object({
-  /** UUID i `app_game_plan_run`. Read-only for UI. */
-  planRunId: z.string().uuid(),
-  /** UUID i `app_game_plan` (template). */
-  planId: z.string().uuid(),
+  /**
+   * ID i `app_game_plan_run` (TEXT PRIMARY KEY — kan være UUID eller slug
+   * som `demo-plan-run-pilot-1`). Read-only for UI.
+   */
+  planRunId: Spill1IdSchema,
+  /**
+   * ID i `app_game_plan` (TEXT PRIMARY KEY — kan være UUID eller slug
+   * som `demo-plan-pilot`).
+   */
+  planId: Spill1IdSchema,
   /** Plan-display-navn. */
   planName: z.string(),
   /**
@@ -253,7 +279,11 @@ export type Spill1PlanMeta = z.infer<typeof Spill1PlanMetaSchema>;
  * top-level — duplisert for konsistens i nested-objektet.
  */
 export const Spill1ScheduledGameMetaSchema = z.object({
-  scheduledGameId: z.string().uuid(),
+  /**
+   * ID i `app_game1_scheduled_games` (TEXT PRIMARY KEY — kan være UUID
+   * eller slug). Speilet på `currentScheduledGameId` på top-level.
+   */
+  scheduledGameId: Spill1IdSchema,
   status: Spill1ScheduledGameStatusSchema,
   /**
    * Planlagt start (ISO-timestamp). Alltid satt — settes av spawn-pathen.
@@ -349,7 +379,7 @@ export const Spill1AgentLobbyStateSchema = z.object({
    *      bruk DEN.
    *   3. Ellers `null` (ingen aktiv runde — UI rendrer "Venter på start").
    */
-  currentScheduledGameId: z.string().uuid().nullable(),
+  currentScheduledGameId: Spill1IdSchema.nullable(),
 
   /**
    * Plan-runtime-meta hvis en plan dekker dagen og en run finnes. Null

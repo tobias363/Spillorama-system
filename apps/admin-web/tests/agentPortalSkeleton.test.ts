@@ -185,10 +185,13 @@ describe("Agent-portal placeholder-sider", () => {
   it("physical-tickets: rendrer full implementation (renderAddPage, ikke placeholder)", () => {
     const container = document.getElementById("c")!;
     mountAgentPhysicalTickets(container);
-    // Har content-header + tittel, men IKKE coming-soon-marker.
-    expect(container.querySelector("section.content-header h1")).toBeTruthy();
+    // Note: per UX cleanup 2026-05-02 (cash-inout/shared.ts), `contentHeader`
+    // returns "" — the shell now renders the global breadcrumb/title via
+    // Breadcrumb.ts. Pages mounted directly into a container therefore no
+    // longer ship a `section.content-header` element.
     expect(container.querySelector("[data-marker='coming-soon']")).toBeNull();
-    // Batch-form fra renderAddPage er på siden.
+    // Batch-form fra renderAddPage er på siden — confirms the full page
+    // (not a placeholder) was mounted.
     expect(container.querySelector("#batch-form")).toBeTruthy();
     expect(container.querySelector("#rangeStart")).toBeTruthy();
     expect(container.querySelector("#rangeEnd")).toBeTruthy();
@@ -213,12 +216,14 @@ describe("Agent-portal placeholder-sider", () => {
   it("cash-in-out: rendrer full implementation med Shift Log Out-knapp (Gap #9)", () => {
     const container = document.getElementById("c")!;
     mountAgentCashInOut(container);
-    // Har breadcrumb + tittel, men IKKE coming-soon-marker.
-    const crumb = container.querySelector<HTMLAnchorElement>(".breadcrumb a[href='#/agent/dashboard']");
-    expect(crumb).toBeTruthy();
-    expect(container.querySelector("section.content-header h1")).toBeTruthy();
+    // Note: per UX cleanup 2026-05-02 (cash-inout/shared.ts), `contentHeader`
+    // returns "" — the shell renders the global breadcrumb. The agent-portal
+    // mount also targets the legacy `[href='#/admin']` breadcrumb-link inside
+    // the legacy-ported header for href-rewriting; when that header is empty
+    // the rewrite is a no-op (handled defensively by mountAgentCashInOut).
     expect(container.querySelector("[data-marker='coming-soon']")).toBeNull();
-    // Shift Log Out-knappen må være på siden.
+    // Shift Log Out-knappen må være på siden — bekrefter at full versjon ble
+    // mountet (ikke placeholder).
     const logoutBtn = container.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
     expect(logoutBtn).toBeTruthy();
   });
