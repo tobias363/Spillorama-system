@@ -17,6 +17,7 @@ import { CenterBall } from "../components/CenterBall.js";
 import { stakeFromState } from "../logic/StakeCalculator.js";
 import { calculateMyRoundWinnings } from "../logic/WinningsCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
+import type { BuyPopupTicketConfig } from "../logic/lobbyTicketTypes.js";
 
 /**
  * Redesign 2026-04-23 — explicit column-based layout so each region has
@@ -143,6 +144,20 @@ export class PlayScreen extends Container {
    * 2026-04-20.
    */
   private autoShowBuyPopupDone = false;
+
+  /**
+   * Spillerklient-rebuild Fase 2 (2026-05-10): cached BuyPopup-konsumert
+   * ticket-config bygget fra plan-runtime aggregator. Settes av
+   * `setBuyPopupTicketConfig(...)` (kalles av Game1Controller når lobby-
+   * state oppdateres). Brukes som fallback i `showBuyPopup()` når
+   * `state.ticketTypes` er tomt (pre-game / før første room:update).
+   *
+   * Tobias-direktiv 2026-05-09: serveren er Source-of-Truth for ticket-
+   * types. Når room:update.gameVariant.ticketTypes er tilgjengelig
+   * brukes den (live-game). Mellom runder eller før første start brukes
+   * lobby-data så spilleren ser riktige bongfarger.
+   */
+  private lobbyTicketConfig: BuyPopupTicketConfig | null = null;
 
   constructor(
     screenWidth: number,
@@ -489,13 +504,20 @@ export class PlayScreen extends Container {
     // Auto-open the buy popup on entry so the player doesn't have to hunt for
     // the "Forhåndskjøp" button. One-shot per screen-session (see
     // autoShowBuyPopupDone doc) — applies to WAITING and SPECTATING mid-round
-    // joiners. Skipped for active players (har live brett) og hvis ticketTypes
-    // ikke har kommet enda (første snapshot før gameVariant populeres).
+    // joiners. Skipped for active players (har live brett).
+    //
+    // Spillerklient-rebuild Fase 2 (2026-05-10): vi åpner også hvis
+    // `lobbyTicketConfig` er tilgjengelig — det betyr plan-runtime
+    // aggregator har levert ticket-data selv om `room:update` ikke har
+    // kommet enda (typisk pre-game / før master starter runden).
     const hasLive = running && state.myTickets.length > 0;
+    const hasTicketTypes =
+      state.ticketTypes.length > 0
+      || (this.lobbyTicketConfig?.ticketTypes.length ?? 0) > 0;
     if (
       !this.autoShowBuyPopupDone
       && !hasLive
-      && state.ticketTypes.length > 0
+      && hasTicketTypes
       && (state.preRoundTickets?.length ?? 0) === 0
     ) {
       this.autoShowBuyPopupDone = true;
@@ -514,12 +536,28 @@ export class PlayScreen extends Container {
    *  `setBuyPopupDisplayName` separat ved socket-broadcast så det ikke er
    *  strengt nødvendig å sende displayName her — men det reduserer race-
    *  vinduet mellom popup-åpning og første lobby-state-emit.
+   *
+   *  Spillerklient-rebuild Fase 2 (2026-05-10): hvis `state.ticketTypes`
+   *  er tomt (pre-game / før første room:update) faller vi tilbake på
+   *  `lobbyTicketConfig` satt via `setBuyPopupTicketConfig(...)`. Dette
+   *  sikrer at spilleren ser riktige bongfarger fra plan-runtime catalog
+   *  før master har startet runden — Tobias-direktiv 2026-05-09:
+   *  "spilleren skal alltid se neste planlagte spill".
    */
   showBuyPopup(state?: GameState, displayName?: string): void {
     const ref = state ?? this.lastState;
     if (!ref) return;
-    const fee = ref.entryFee || 10;
-    const types = ref.ticketTypes ?? [];
+    let fee = ref.entryFee || 10;
+    let types = ref.ticketTypes ?? [];
+    // Fase 2 fallback: når room:update ikke har levert ticketTypes ennå,
+    // bruker vi plan-runtime catalog-data fra lobby-aggregatoren. Live
+    // game (state.ticketTypes ikke-tom) prioriteres alltid — den har
+    // small + large-bonger fra `gameVariant.ticketTypes` mens lobby-
+    // dataen er small-only (3-farge-modellen).
+    if (types.length === 0 && this.lobbyTicketConfig) {
+      types = this.lobbyTicketConfig.ticketTypes;
+      fee = this.lobbyTicketConfig.entryFee;
+    }
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
     this.buyPopup.showWithTypes(
       fee,
@@ -538,6 +576,23 @@ export class PlayScreen extends Container {
    */
   setBuyPopupDisplayName(displayName: string | null | undefined): void {
     this.buyPopup.setDisplayName(displayName);
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 2 (2026-05-10): cache ticket-config fra
+   * plan-runtime aggregator slik at `showBuyPopup()` kan bruke det som
+   * fallback når `state.ticketTypes` er tomt (pre-game). Idempotent —
+   * kall flere ganger ved hver lobby-state-update.
+   *
+   * Tobias-direktiv 2026-05-09: spilleren skal aldri se hardkodete
+   * bongfarger. Når master bytter plan-item (eks. fra Bingo til Trafikklys)
+   * pusher Game1Controller den nye config-en hit slik at popup-en oppdateres.
+   *
+   * Null = lobby-binding har ingen state ennå (eller plan dekker ikke
+   * dagen) — popup faller tilbake på `state.ticketTypes` (kan være tom).
+   */
+  setBuyPopupTicketConfig(config: BuyPopupTicketConfig | null): void {
+    this.lobbyTicketConfig = config;
   }
 
   hideBuyPopup(): void {
