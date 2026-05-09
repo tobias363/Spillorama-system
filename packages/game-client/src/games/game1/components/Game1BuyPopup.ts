@@ -64,6 +64,15 @@ export class Game1BuyPopup {
   private card: HTMLDivElement;
   private summaryEl: HTMLDivElement;
   /**
+   * Spillerklient-rebuild Fase 1 (2026-05-10): subtitle-element holdes på
+   * instans-state slik at Game1Controller kan oppdatere det live når plan-
+   * runtime aggregator pusher state-update (f.eks. master byttet plan-item).
+   *
+   * Default-tekst er "Bingo" (ikke "STANDARD") per Tobias-direktiv 2026-05-09:
+   * spilleren skal ALDRI se en degradert variant-string.
+   */
+  private subtitleEl: HTMLDivElement;
+  /**
    * Tobias 2026-04-29 (post-orphan-fix UX): tap-status-header viser
    * "Brukt i dag: X / Y kr" + advarsel ved < 25% gjenstår. Skjult
    * når lossState ikke er gitt (legacy clients).
@@ -75,6 +84,13 @@ export class Game1BuyPopup {
   private totalKrEl: HTMLDivElement;
   private buyBtn: HTMLButtonElement;
   private cancelBtn: HTMLButtonElement;
+  /**
+   * Sist-kjente catalog-display-navn fra plan-runtime aggregator. Brukes til
+   * å holde subtitle synkronisert mellom show()-kall og live state-update
+   * via `setDisplayName`. Default "Bingo" — vises hvis aggregator ikke har
+   * noen plan som dekker (rommet er fortsatt åpent men ingen runde planlagt).
+   */
+  private currentDisplayName = "Bingo";
 
   private onBuy: ((selections: Array<{ type: string; qty: number; name?: string }>) => void) | null = null;
   private alreadyPurchased = 0;
@@ -141,16 +157,21 @@ export class Game1BuyPopup {
     });
     header.appendChild(title);
 
-    const subtitle = document.createElement("div");
-    subtitle.textContent = "STANDARD";
-    Object.assign(subtitle.style, {
+    // Spillerklient-rebuild Fase 1 (2026-05-10): subtitle viser plan-runtime
+    // catalog-display-navn. Default "Bingo" — IKKE "STANDARD" (gammel feil
+    // hvor klient leste `variantConfig.gameType` istedenfor plan-item-en).
+    // Game1Controller kaller `setDisplayName(...)` så snart lobby-state er
+    // tilgjengelig og igjen ved hver socket-broadcast `spill1:lobby:update`.
+    this.subtitleEl = document.createElement("div");
+    this.subtitleEl.textContent = this.currentDisplayName;
+    Object.assign(this.subtitleEl.style, {
       fontSize: "12px",
       fontWeight: "600",
       color: "#f5b841",
       letterSpacing: "0.14em",
       marginTop: "3px",
     });
-    header.appendChild(subtitle);
+    header.appendChild(this.subtitleEl);
 
     this.summaryEl = document.createElement("div");
     this.summaryEl.style.cssText = "margin-top:6px;";
@@ -272,6 +293,12 @@ export class Game1BuyPopup {
      * eller free-play-rom uten compliance-tracking).
      */
     lossState?: LossStateForBuyPopup,
+    /**
+     * Spillerklient-rebuild Fase 1 (2026-05-10): valgfri override av
+     * subtitle-displayName. Hvis ikke gitt beholder vi siste verdi satt
+     * via `setDisplayName` (eller default "Bingo").
+     */
+    displayName?: string,
   ): void {
     if (ticketTypes.length === 0) return;
 
@@ -279,6 +306,10 @@ export class Game1BuyPopup {
     this.typesContainer.innerHTML = "";
     this.typeRows = [];
     this.uiState = "idle";
+
+    if (displayName !== undefined) {
+      this.setDisplayName(displayName);
+    }
 
     for (const tt of ticketTypes) {
       const price = Math.round(entryFee * tt.priceMultiplier);
@@ -290,6 +321,23 @@ export class Game1BuyPopup {
     this.renderLossState(lossState);
     this.updateTotal();
     this.backdrop.style.display = "flex";
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 1 (2026-05-10): oppdater subtitle med
+   * catalog-display-navn fra plan-runtime aggregator. Trygt å kalle både
+   * mens popup-en er åpen og lukket — når åpen oppdateres DOM live; når
+   * lukket lagres verdien til neste `showWithTypes`.
+   *
+   * Tom string eller falsy verdi mappes til "Bingo" (vi viser ALDRI tom
+   * subtitle eller "STANDARD"-fallback per Tobias-direktiv 2026-05-09).
+   */
+  setDisplayName(displayName: string | null | undefined): void {
+    const next = (displayName ?? "").trim() || "Bingo";
+    this.currentDisplayName = next;
+    if (this.subtitleEl) {
+      this.subtitleEl.textContent = next;
+    }
   }
 
   /**

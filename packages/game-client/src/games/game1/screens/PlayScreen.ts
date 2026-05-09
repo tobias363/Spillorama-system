@@ -506,14 +506,38 @@ export class PlayScreen extends Container {
   // ── Buy popup (explicit lifecycle, owned by Controller) ────────────────
 
   /** Open the buy popup at qty=0 on every call. Controller hides it on
-   *  successful arm — re-open starts fresh (matches product spec 2026-04-20). */
-  showBuyPopup(state?: GameState): void {
+   *  successful arm — re-open starts fresh (matches product spec 2026-04-20).
+   *
+   *  Spillerklient-rebuild Fase 1 (2026-05-10): valgfri `displayName`
+   *  forwarded til popup-subtitle. Hvis ikke satt beholder popup-en sist
+   *  kjente verdi (default "Bingo"). Game1Controller kaller
+   *  `setBuyPopupDisplayName` separat ved socket-broadcast så det ikke er
+   *  strengt nødvendig å sende displayName her — men det reduserer race-
+   *  vinduet mellom popup-åpning og første lobby-state-emit.
+   */
+  showBuyPopup(state?: GameState, displayName?: string): void {
     const ref = state ?? this.lastState;
     if (!ref) return;
     const fee = ref.entryFee || 10;
     const types = ref.ticketTypes ?? [];
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
-    this.buyPopup.showWithTypes(fee, types, alreadyPurchased);
+    this.buyPopup.showWithTypes(
+      fee,
+      types,
+      alreadyPurchased,
+      undefined,
+      displayName,
+    );
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 1 (2026-05-10): proxy for plan-runtime
+   * aggregator-update. Game1Controller abonnerer på lobby-state og kaller
+   * denne ved hver oppdatering. Trygt å kalle både når popup er åpen
+   * (live-DOM-oppdatering) og lukket (lagres til neste showBuyPopup).
+   */
+  setBuyPopupDisplayName(displayName: string | null | undefined): void {
+    this.buyPopup.setDisplayName(displayName);
   }
 
   hideBuyPopup(): void {
