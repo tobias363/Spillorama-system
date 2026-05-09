@@ -42,6 +42,7 @@ import { LegacyMiniGameAdapter } from "./logic/LegacyMiniGameAdapter.js";
 import { Game1SocketActions } from "./logic/SocketActions.js";
 import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
 import { Game1LobbyFallback } from "./logic/LobbyFallback.js";
+import { Game1LobbyStateBinding } from "./logic/LobbyStateBinding.js";
 import type { Phase } from "./logic/Phase.js";
 
 /**
@@ -150,6 +151,21 @@ class Game1Controller implements GameController {
    * og retry-er join når runden er klar (purchase_open/running).
    */
   private lobbyFallback: Game1LobbyFallback | null = null;
+  /**
+   * Spillerklient-rebuild Fase 1 (2026-05-10): plan-runtime aggregator
+   * binding. Henter `Spill1LobbyState` fra public lobby-endpoint og lytter
+   * på socket-broadcast `spill1:lobby:state-update`. Eksponerer
+   * `nextScheduledGame.catalogDisplayName` som driver subtitle-en på
+   * `Game1BuyPopup` (tidligere hardkodet til "STANDARD").
+   *
+   * Initialiseres i `start()` FØR `socket.createRoom`-kallet slik at vi
+   * har plan-state både når join lykkes (popup-subtitle) og når join
+   * feiler (lobby-fallback bruker ikke samme binding men har sin egen
+   * fetch-loop).
+   */
+  private lobbyStateBinding: Game1LobbyStateBinding | null = null;
+  /** Unsubscribe-handle for `lobbyStateBinding.onChange`. */
+  private lobbyStateUnsub: (() => void) | null = null;
 
   /**
    * Mini-game-kø (Tobias 2026-04-26): backend triggerer mini-game POST-commit
@@ -290,6 +306,29 @@ class Game1Controller implements GameController {
     // networks this resolves near-instantly because assets are small.
     this.loader.setState("LOADING_ASSETS");
     await preloadGameAssets("bingo");
+
+    // Spillerklient-rebuild Fase 1 (2026-05-10): start plan-runtime
+    // aggregator-binding FØR `socket.createRoom`. Dette gir oss tilgang
+    // til `nextScheduledGame.catalogDisplayName` så snart første HTTP-
+    // fetch eller socket-broadcast kommer — uavhengig av om
+    // join-flyten lykkes. Tobias-direktiv 2026-05-09: spilleren skal
+    // ALLTID se neste planlagte spill, aldri "STANDARD".
+    //
+    // Best-effort: fetch + subscribe kjøres parallelt med
+    // `socket.createRoom` slik at vi ikke forsinker join-tiden. Vi
+    // venter ikke på initial-fetch — listeners fyrer så snart state er
+    // tilgjengelig og oppdaterer subtitle live.
+    this.lobbyStateBinding = new Game1LobbyStateBinding({
+      hallId: this.deps.hallId,
+      socket: this.deps.socket,
+    });
+    this.lobbyStateUnsub = this.lobbyStateBinding.onChange((state) => {
+      // Forward catalog-display-navn til Game1BuyPopup. Trygt å kalle
+      // før playScreen er bygget — kun en no-op i det tilfellet.
+      const name = state?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
+      this.playScreen?.setBuyPopupDisplayName(name);
+    });
+    void this.lobbyStateBinding.start();
 
     // Join or create room
     this.loader.setState("JOINING_ROOM");
@@ -461,6 +500,15 @@ class Game1Controller implements GameController {
     // R1 (BIN-822): cleanup lobby-fallback overlay + socket-subscribe.
     this.lobbyFallback?.stop();
     this.lobbyFallback = null;
+    // Spillerklient-rebuild Fase 1 (2026-05-10): cleanup plan-runtime
+    // aggregator-binding. Stopp polling-timer + unsubscribe socket-rom +
+    // tøm listener-set.
+    if (this.lobbyStateUnsub) {
+      this.lobbyStateUnsub();
+      this.lobbyStateUnsub = null;
+    }
+    this.lobbyStateBinding?.stop();
+    this.lobbyStateBinding = null;
     this.clearScreen();
     this.root.destroy({ children: true });
   }
@@ -1195,6 +1243,16 @@ class Game1Controller implements GameController {
       void this.actions?.startGame();
     });
     screen.subscribeChatToBridge((listener) => this.deps.bridge.on("chatMessage", listener));
+
+    // Spillerklient-rebuild Fase 1 (2026-05-10): seed buy-popup-subtitle
+    // med catalog-display-navn fra plan-runtime aggregator. Hvis state
+    // ikke har ankommet enda settes "Bingo" som default — onChange-listener
+    // i `start()` oppdaterer subtitle ved første lobby-state-emit.
+    const lobbyState = this.lobbyStateBinding?.getState();
+    const initialDisplayName =
+      lobbyState?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
+    screen.setBuyPopupDisplayName(initialDisplayName);
+
     return screen;
   }
 
