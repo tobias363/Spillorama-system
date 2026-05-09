@@ -888,6 +888,16 @@ export class BingoEngine {
   }
 
   /**
+   * G2 (2026-05-09): expose the underlying `ComplianceLedger` instance so
+   * `index.ts` can wire the §71-canonical regulatory-ledger sink AFTER
+   * boot. Used ONLY by `index.ts` boot — services should keep using
+   * `getComplianceLedgerPort()` for normal ledger writes.
+   */
+  getComplianceLedgerInstance(): ComplianceLedger {
+    return this.ledger;
+  }
+
+  /**
    * K2-A CRIT-3: eksponer PrizePolicyManager som narrow port slik at
    * scheduled-engine (PotEvaluator, mini-game, lucky bonus) kan håndheve
    * single-prize-cap (2500 kr per pengespillforskriften §11) på alle payout-

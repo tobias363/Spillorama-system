@@ -32,15 +32,29 @@ import {
   startMaster,
   resumeMaster,
   pauseMaster,
+  recoverStale,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
   setHallHasCustomersForGame,
 } from "../../api/agent-game1.js";
-import type { Spill1AgentLobbyState, Spill1HallReadyStatus } from "../../../../../packages/shared-types/src/spill1-lobby-state.js";
+import type {
+  Spill1AgentLobbyState,
+  Spill1HallReadyStatus,
+  Spill1LobbyInconsistencyCode,
+} from "../../../../../packages/shared-types/src/spill1-lobby-state.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
 import { escapeHtml } from "./shared.js";
+
+/**
+ * 2026-05-09 (recover-stale): warning-koder som krever master-handling
+ * for å rydde opp. Når aggregator returnerer en av disse er master
+ * blokkert fra alle write-actions — recover-stale-knappen er eneste
+ * måte å unblokke uten `psql`-tilgang.
+ */
+const RECOVERABLE_WARNING_CODES: ReadonlySet<Spill1LobbyInconsistencyCode> =
+  new Set(["STALE_PLAN_RUN", "BRIDGE_FAILED"]);
 
 const POLL_INTERVAL_MS = 2_000;
 
@@ -92,6 +106,14 @@ interface BoxState {
    * (i `onClick`-handler), så transient feedback er bevart.
    */
   warningBanner: string | null;
+  /**
+   * 2026-05-09 (recover-stale): true når lobby-state har minst én
+   * STALE_PLAN_RUN eller BRIDGE_FAILED warning. Når true viser
+   * render-funksjonen en "🧹 Rydde stale plan-state"-knapp under
+   * warning-banneret. Master kan da kalle cleanup-endpointet uten
+   * å trenge psql-tilgang.
+   */
+  showRecoverButton: boolean;
 }
 
 let activeMount: { container: HTMLElement; signal: AbortSignal; cleanup: () => void } | null = null;
@@ -119,6 +141,7 @@ export function mountSpill1HallStatusBox(
     busy: false,
     errorMessage: null,
     warningBanner: null,
+    showRecoverButton: false,
   };
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -185,8 +208,17 @@ export function mountSpill1HallStatusBox(
         state.warningBanner = lobby.inconsistencyWarnings
           .map((w) => `${w.code}: ${w.message}`)
           .join(" · ");
+        // 2026-05-09 (recover-stale): show the cleanup button only when
+        // at least one warning is recoverable via master-action. Other
+        // warnings (PLAN_SCHED_STATUS_MISMATCH, MISSING_GOH_MEMBERSHIP,
+        // DUAL_SCHEDULED_GAMES) need different handling and should not
+        // tempt master to click the wrong button.
+        state.showRecoverButton = lobby.inconsistencyWarnings.some((w) =>
+          RECOVERABLE_WARNING_CODES.has(w.code),
+        );
       } else {
         state.warningBanner = null;
+        state.showRecoverButton = false;
       }
 
       render(container, state);
@@ -319,6 +351,37 @@ export function mountSpill1HallStatusBox(
           Toast.success("Spill 1 pauset.");
           break;
         }
+        case "recover-stale": {
+          // 2026-05-09: master-driven cleanup of STALE_PLAN_RUN /
+          // BRIDGE_FAILED state. Bypasses MasterActionService.preValidate
+          // (which would block on those exact warnings) so we can
+          // unblock master without psql-access.
+          //
+          // Confirm-modal first — this is a destructive(ish) action even
+          // though it only does forward state-transitions. Better to ask
+          // than to surprise the master with disappearing yesterday's
+          // run.
+          const ok = confirm(
+            "Dette markerer gårsdagens plan-run som ferdig og avslutter " +
+              "stuck scheduled-games for hallen.\n\n" +
+              "Operasjonen er trygg (ingen wallet-touch eller payout) og " +
+              "idempotent. Er du sikker?",
+          );
+          if (!ok) return;
+          const result = await recoverStale(ownHallId);
+          const planCount = result.cleared.planRuns;
+          const gameCount = result.cleared.scheduledGames;
+          if (planCount === 0 && gameCount === 0) {
+            Toast.info("Ingen stale-state funnet — alt var allerede rent.");
+          } else {
+            Toast.success(
+              `Stale plan-state ryddet: ${planCount} plan-run + ` +
+                `${gameCount} scheduled-game${gameCount === 1 ? "" : "s"} ` +
+                "markert som ferdig.",
+            );
+          }
+          break;
+        }
         default:
           return;
       }
@@ -396,7 +459,10 @@ function render(container: HTMLElement, state: BoxState): void {
   // gruppen" som separate seksjoner slik at master ser umiddelbart hvor
   // mange andre haller som er klare/ikke klare. Master-hall i andre-
   // listen får 👑-merke.
-  const warningBannerHtml = renderWarningBanner(state.warningBanner);
+  const warningBannerHtml = renderWarningBanner(
+    state.warningBanner,
+    state.showRecoverButton,
+  );
   const masterHallIdForCrown = data.masterHallId;
   const gameStatus = data.scheduledGameStatus;
   if (!gameStatus) {
@@ -511,14 +577,39 @@ function render(container: HTMLElement, state: BoxState): void {
  *
  * Returnerer tom string når ingen warning er aktiv så caller kan
  * inline'e resultatet trygt.
+ *
+ * 2026-05-09 (recover-stale): når `showRecoverButton=true` rendres en
+ * "🧹 Rydde stale plan-state"-knapp under banneret. Knappen er kun
+ * synlig når aggregator har flagget STALE_PLAN_RUN eller BRIDGE_FAILED
+ * (de eneste warning-kodene som master kan rydde opp via cleanup-
+ * endpointet). Andre warnings (DUAL_SCHEDULED_GAMES,
+ * PLAN_SCHED_STATUS_MISMATCH, MISSING_GOH_MEMBERSHIP) krever ulik
+ * intervensjon og skal ikke trigge denne knappen.
  */
-function renderWarningBanner(banner: string | null): string {
+function renderWarningBanner(
+  banner: string | null,
+  showRecoverButton = false,
+): string {
   if (!banner) return "";
+  const recoverButtonHtml = showRecoverButton
+    ? `
+      <div style="margin-top:8px;">
+        <button type="button"
+                class="btn btn-warning btn-sm"
+                data-spill1-action="recover-stale"
+                data-marker="spill1-hall-status-recover-button"
+                title="Marker gårsdagens plan-run som ferdig og avslutt stuck scheduled-games. Trygg og idempotent.">
+          <i class="fa fa-broom" aria-hidden="true"></i>
+          🧹 Rydde stale plan-state
+        </button>
+      </div>`
+    : "";
   return `
     <div class="alert alert-warning" data-marker="spill1-hall-status-warning"
          style="margin-bottom:12px;">
       <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
       <small>${escapeHtml(banner)}</small>
+      ${recoverButtonHtml}
     </div>`;
 }
 

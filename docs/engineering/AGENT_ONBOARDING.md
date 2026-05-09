@@ -63,6 +63,27 @@ Alle endringer i scriptet bør:
 - `awk`, `sed`, `find` (POSIX standard)
 - `gh` CLI — valgfri; uten det vises "(ikke tilgjengelig)" for PR-seksjonen
 
+## Pre-flight for første dev-sesjon (F1, F2 fra E2E-verification 2026-Q3)
+
+Hvis du nettopp har klonet repoet eller dit `node_modules/` er rensket, må
+du gjøre disse to stegene FØR `npm run dev` for å unngå feilmeldinger:
+
+```bash
+# F1: backend-deps installeres ikke automatisk av root `npm install`
+npm --prefix apps/backend install
+
+# F2: shared-types må bygges før backend kan importere det
+npm run build:types
+```
+
+Symptomer hvis du glemmer:
+
+- F1: `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'nodemailer'`
+  (eller annet backend-deps som ikke ligger i root `node_modules/`).
+- F2: `Cannot find module '@spillorama/shared-types/dist/socket-events.js'`.
+
+Disse stegene er idempotente — du kan kjøre dem på nytt uten skade.
+
 ## Plassering
 
 - Script: `scripts/agent-onboarding.sh`

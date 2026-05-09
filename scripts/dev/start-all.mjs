@@ -2,23 +2,30 @@
 /**
  * scripts/dev/start-all.mjs
  *
- * Local-test-stack one-command launcher (Tobias-direktiv 2026-05-05).
+ * Local-test-stack one-command launcher (Tobias-direktiv 2026-05-05 + 2026-05-09).
  *
  * Mål: redusere iterasjon fra 5-7 min Render-deploy til 2-sek hot-reload.
+ * Alltid sluttresultat: et fungerende, kjent state — uten manuell SQL-cleanup.
  *
  * Hva den gjør:
  *   1. Sjekker at Docker (Postgres + Redis) kjører — starter dem hvis de
  *      er nede (via docker-compose up postgres redis).
  *   2. Venter på at Postgres er klar og kjører `npm run migrate`
  *      idempotent (henter manglende migrasjoner).
- *   3. Heuristikk-sjekk: hvis DB er tom (ingen rader i app_halls), kjør
+ *   3. Stale-state-cleanup: scanner DB for plan-runs og scheduled-games
+ *      som henger fra tidligere business-dato med åpen status. Slike
+ *      rader oppdateres til 'finished'/'cancelled' så lokal pilot-flow
+ *      aldri lar deg treffe stale state.
+ *   4. Heuristikk-sjekk: hvis DB er tom (ingen rader i app_halls), kjør
  *      `npm run seed:demo-pilot-day` automatisk slik at admin/agent/spillere
  *      kan logge inn etter første-gangs-startup.
- *   4. Starter backend (tsx --watch på port 4000), admin-web (Vite på 5174),
+ *   5. Starter backend (tsx --watch på port 4000), admin-web (Vite på 5174),
  *      game-client (Vite på default 5173) og visual-harness (Node på 4173)
  *      parallelt med farge-kodet output-prefiks.
- *   5. Helsesjekker hver port etter ~10 sek — printer en fin status-tabell.
- *   6. Ctrl+C dreper alle barneprosesser rent (SIGTERM først, så SIGKILL
+ *   6. Helsesjekker hver port etter ~10 sek — printer en utvidet status-tabell
+ *      med PIDs, DB-state, antall haller/spillere/plan-runs og test-URL-er
+ *      med dynamisk hentet TV-token.
+ *   7. Ctrl+C dreper alle barneprosesser rent (SIGTERM først, så SIGKILL
  *      etter 3 sek hvis noe henger).
  *
  * Bruk:
@@ -30,9 +37,17 @@
  *   --no-admin       Skip admin-web (kun backend + game-client)
  *   --skip-migrate   Hopp over migrate (bruk hvis du allerede har kjørt det)
  *   --force-seed     Re-seed selv om DB ikke er tom (idempotent)
+ *   --reset-state    Tøm runtime-state (plan-runs, scheduled-games, tickets,
+ *                    redis-state, demo-saldoer) FØR oppstart, slik at dev-
+ *                    stack alltid starter på en kjent fersk pilot-state.
+ *                    Tilsvarer å kjøre `npm run dev:reset` automatisk pluss
+ *                    DELETE av plan-runs/scheduled-games + force-reseede.
+ *                    Trygt — rører kun runtime-data, ikke katalog/halls/users.
  *
  * Backwards-compat: `npm run dev` (alene) fungerer fortsatt som før — denne
- * scripten er additiv og endrer ingen eksisterende workflows.
+ * scripten er additiv og endrer ingen eksisterende workflows. Eksisterende
+ * `dev:all`-flow er bevart; nye funksjoner (cleanup + utvidet status) er
+ * lagt til uten å endre call-signaturen.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -52,6 +67,7 @@ const SKIP_HARNESS = args.has("--no-harness");
 const SKIP_ADMIN = args.has("--no-admin");
 const SKIP_MIGRATE = args.has("--skip-migrate");
 const FORCE_SEED = args.has("--force-seed");
+const RESET_STATE = args.has("--reset-state");
 
 // Default-DSN for local Docker-Postgres (matcher docker-compose.yml).
 // Override hvis brukeren allerede har APP_PG_CONNECTION_STRING satt i env.
@@ -236,6 +252,84 @@ function runMigrate() {
   return true;
 }
 
+// ── DB-spørring helper ─────────────────────────────────────────────────────
+
+/**
+ * Generic helper: kjør en SQL-spørring (eller batch) via en out-of-process
+ * `pg`-klient og returner JSON-resultat fra første radens første kolonne,
+ * eller hele rows-array (hvis fullRows=true). Helper-en bruker `node -e`
+ * fordi vi vil holde dette scriptet pure-ESM uten å kreve at brukeren
+ * bygger backend først.
+ *
+ * Returnerer { ok: true, value } ved suksess. Returnerer { ok: false,
+ * error } hvis noe feilet — vi kaster ikke; caller bestemmer om feilen
+ * skal blokkere oppstart eller bare logges.
+ */
+function runQuery(sql, opts = {}) {
+  const { fullRows = false, params = [] } = opts;
+  // SQL og params serialiseres inn i den child-prosessen vi spawn'er.
+  // JSON.stringify gir oss safe escaping av embedded quotes.
+  const code =
+    `import("pg").then(async ({default: pg}) => {
+      const c = new pg.Client({connectionString: process.env.APP_PG_CONNECTION_STRING});
+      await c.connect();
+      try {
+        const r = await c.query(${JSON.stringify(sql)}, ${JSON.stringify(params)});
+        if (${fullRows ? "true" : "false"}) {
+          process.stdout.write(JSON.stringify(r.rows));
+        } else {
+          const first = r.rows[0];
+          if (!first) {
+            process.stdout.write("null");
+          } else {
+            const k = Object.keys(first)[0];
+            process.stdout.write(JSON.stringify(first[k]));
+          }
+        }
+        await c.end();
+      } catch (err) {
+        process.stderr.write(String(err.message || err));
+        await c.end();
+        process.exit(2);
+      }
+    }).catch(err => { process.stderr.write(String(err.message || err)); process.exit(3); });`;
+  const node = spawnSync("node", ["-e", code], {
+    // ROOT har hoisted node_modules (pg) — apps/backend har ingen lokal
+    // node_modules siden prosjektet bruker workspace-hoisting.
+    cwd: ROOT,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, APP_PG_CONNECTION_STRING: PG_DSN },
+  });
+  if (node.status !== 0) {
+    const errOut = node.stderr?.toString().trim() ?? "";
+    return { ok: false, error: errOut || `exit ${node.status}` };
+  }
+  const raw = node.stdout?.toString().trim() ?? "";
+  if (!raw || raw === "null") return { ok: true, value: null };
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (err) {
+    return { ok: false, error: `parse-failure: ${err.message} (raw=${raw.slice(0, 80)})` };
+  }
+}
+
+/**
+ * Sjekk om en gitt tabell finnes i `public`-skjemaet. Brukes som guard
+ * før vi prøver å rydde stale state — fersk DB hvor migrasjonene ikke
+ * har kjørt enda, har ingen av tabellene og skal ikke trigge advarsel.
+ */
+function tableExists(tableName) {
+  const res = runQuery(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = $1
+     )::boolean AS exists;`,
+    { params: [tableName] }
+  );
+  if (!res.ok) return false;
+  return res.value === true;
+}
+
 /**
  * Sjekk om DB er tom — heuristikk: COUNT(*) FROM app_halls. Hvis ingen haller
  * er seedet, antar vi at DB er fersk og kjører seed automatisk.
@@ -245,44 +339,17 @@ function runMigrate() {
  * feilen.
  */
 function isDatabaseEmpty() {
-  const sql = "SELECT COUNT(*)::int AS n FROM app_halls;";
-  const node = spawnSync(
-    "node",
-    [
-      "-e",
-      `import("pg").then(async ({default: pg}) => {
-        const c = new pg.Client({connectionString: process.env.APP_PG_CONNECTION_STRING});
-        await c.connect();
-        try {
-          const r = await c.query(${JSON.stringify(sql)});
-          process.stdout.write(String(r.rows[0]?.n ?? 0));
-          await c.end();
-        } catch (err) {
-          process.stderr.write(String(err.message || err));
-          await c.end();
-          process.exit(2);
-        }
-      }).catch(err => { process.stderr.write(String(err.message || err)); process.exit(3); });`,
-    ],
-    {
-      // ROOT har hoisted node_modules (pg) — apps/backend har ingen lokal
-      // node_modules siden prosjektet bruker workspace-hoisting.
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, APP_PG_CONNECTION_STRING: PG_DSN },
-    }
-  );
-  if (node.status !== 0) {
-    const errOut = node.stderr?.toString().trim() ?? "";
+  const res = runQuery("SELECT COUNT(*)::int AS n FROM app_halls;");
+  if (!res.ok) {
     console.log(
       color(
         "yellow",
-        `[seed] kunne ikke sjekke DB-tilstand (${errOut || `exit ${node.status}`}) — hopper over seed`
+        `[seed] kunne ikke sjekke DB-tilstand (${res.error}) — hopper over seed`
       )
     );
     return false;
   }
-  const count = Number(node.stdout?.toString().trim() ?? "0");
+  const count = Number(res.value ?? 0);
   return Number.isFinite(count) && count === 0;
 }
 
@@ -308,19 +375,346 @@ function runSeed() {
   return true;
 }
 
+// ── Stale-state-cleanup (Tobias-direktiv 2026-05-09) ────────────────────────
+
+/**
+ * Stale-state-cleanup:
+ *
+ * Etter at Tobias har kjørt `npm run dev:all`, kan han havne i en stale
+ * plan-run-state hvis han hadde kjørt en runde gårsdag eller en pilot-
+ * smoke som ikke nådde finished-state. Tidligere måtte han manuelt åpne
+ * psql og oppdatere status — det fjerner vi nå.
+ *
+ * Heuristikk: alle rader i `app_game_plan_run` med status ∈ {idle, running,
+ * paused} OG business_date < CURRENT_DATE er stale. Tilsvarende for
+ * `app_game1_scheduled_games` med status ∈ {scheduled, purchase_open,
+ * ready_to_start, running, paused} OG scheduled_day < CURRENT_DATE.
+ *
+ * Vi UPDATEr dem til finished/cancelled (med finished_at/actual_end_time
+ * = now()) — sletter ikke (audit-trail beholdes). Helt idempotent.
+ *
+ * Returnerer { planRuns: number, scheduledGames: number } for status-tabellen.
+ */
+function cleanupStaleDevState() {
+  const result = { planRuns: 0, scheduledGames: 0 };
+
+  // Guard: hvis tabellene ikke finnes (fersk DB før migrate har lagt dem
+  // inn), returner 0 og hopp. Dette unngår "tabell finnes ikke"-advarsler
+  // ved første-gangs-startup.
+  const planRunExists = tableExists("app_game_plan_run");
+  const scheduledGamesExists = tableExists("app_game1_scheduled_games");
+  if (!planRunExists && !scheduledGamesExists) {
+    return result;
+  }
+
+  // 1) Stale plan-runs (fra tidligere business-dato med åpen status)
+  if (planRunExists) {
+    const stalePlanRunsRes = runQuery(
+      `SELECT COUNT(*)::int AS n FROM app_game_plan_run
+        WHERE status IN ('idle', 'running', 'paused')
+          AND business_date < (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date;`
+    );
+    if (stalePlanRunsRes.ok) {
+      const n = Number(stalePlanRunsRes.value ?? 0);
+      if (n > 0) {
+        console.log(
+          color(
+            "yellow",
+            `[dev] ${n} stale plan-runs detektert (fra tidligere business-dato) — rydder opp før dev-start`
+          )
+        );
+        const updateRes = runQuery(
+          `UPDATE app_game_plan_run
+              SET status = 'finished',
+                  finished_at = COALESCE(finished_at, now()),
+                  updated_at = now()
+            WHERE status IN ('idle', 'running', 'paused')
+              AND business_date < (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date
+            RETURNING id;`,
+          { fullRows: true }
+        );
+        if (updateRes.ok) {
+          const rows = Array.isArray(updateRes.value) ? updateRes.value : [];
+          result.planRuns = rows.length;
+          console.log(
+            color("green", `[dev] ✓ ryddet ${rows.length} stale plan-runs`)
+          );
+        } else {
+          console.log(
+            color(
+              "yellow",
+              `[dev] kunne ikke rydde stale plan-runs (${updateRes.error}) — fortsetter`
+            )
+          );
+        }
+      }
+    } else {
+      console.log(
+        color(
+          "yellow",
+          `[dev] kunne ikke sjekke stale plan-runs (${stalePlanRunsRes.error}) — fortsetter`
+        )
+      );
+    }
+  }
+
+  // 2) Stale scheduled-games (fra tidligere scheduled_day med åpen status)
+  if (scheduledGamesExists) {
+    const staleScheduledRes = runQuery(
+      `SELECT COUNT(*)::int AS n FROM app_game1_scheduled_games
+        WHERE status IN ('scheduled', 'purchase_open', 'ready_to_start', 'running', 'paused')
+          AND scheduled_day < (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date;`
+    );
+    if (staleScheduledRes.ok) {
+      const n = Number(staleScheduledRes.value ?? 0);
+      if (n > 0) {
+        console.log(
+          color(
+            "yellow",
+            `[dev] ${n} stale scheduled-games detektert (fra tidligere dato) — rydder opp`
+          )
+        );
+        const updateRes = runQuery(
+          `UPDATE app_game1_scheduled_games
+              SET status = 'cancelled',
+                  actual_end_time = COALESCE(actual_end_time, now()),
+                  stop_reason = COALESCE(stop_reason, 'auto_cleanup_stale_dev_state'),
+                  updated_at = now()
+            WHERE status IN ('scheduled', 'purchase_open', 'ready_to_start', 'running', 'paused')
+              AND scheduled_day < (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date
+            RETURNING id;`,
+          { fullRows: true }
+        );
+        if (updateRes.ok) {
+          const rows = Array.isArray(updateRes.value) ? updateRes.value : [];
+          result.scheduledGames = rows.length;
+          console.log(
+            color("green", `[dev] ✓ ryddet ${rows.length} stale scheduled-games`)
+          );
+        } else {
+          console.log(
+            color(
+              "yellow",
+              `[dev] kunne ikke rydde stale scheduled-games (${updateRes.error}) — fortsetter`
+            )
+          );
+        }
+      }
+    } else {
+      console.log(
+        color(
+          "yellow",
+          `[dev] kunne ikke sjekke stale scheduled-games (${staleScheduledRes.error}) — fortsetter`
+        )
+      );
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Full reset av runtime-state (--reset-state-flagget).
+ *
+ * Dette er pragmatisk: `npm run dev:reset` finnes allerede og rydder
+ * pågående runder, redis-state og demo-saldoer. Vi delegerer til den —
+ * pluss DELETE av plan-runs/scheduled-games + force-reseede for å gi et
+ * alltid-fersh pilot-state.
+ *
+ * NB: --reset-state rører IKKE selve schema (ingen DROP/migrate-roll-back),
+ * så katalog-spill, haller og brukere bevares. Audit-log og §71-rapporter
+ * røres heller aldri (append-only invariant). Kun runtime-data slettes.
+ */
+function runResetState() {
+  banner("Reset state — full opprydning av runtime-data");
+  console.log(
+    color(
+      "dim",
+      "[reset-state] kjører dev:reset (game_sessions + redis + demo-saldoer) + force-reseed"
+    )
+  );
+  const resetRes = spawnSync("npm", ["run", "dev:reset", "--silent"], {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: { ...process.env, APP_PG_CONNECTION_STRING: PG_DSN },
+  });
+  if (resetRes.status !== 0) {
+    console.log(color("red", "[reset-state] dev:reset feilet"));
+    return false;
+  }
+  // Tøm også plan-runs + scheduled-games selv om de ikke er "stale" —
+  // --reset-state betyr full reset til pilot-fersh.
+  const wipeStmts = [
+    `DELETE FROM app_game1_scheduled_games WHERE TRUE;`,
+    `DELETE FROM app_game_plan_run WHERE TRUE;`,
+  ];
+  // app_game1_tickets eier wallet-koblinger — vi sletter kun siste 24t for
+  // å unngå å bryte FK fra rapporter, og audit-log røres aldri (append-
+  // only invariant).
+  if (tableExists("app_game1_tickets")) {
+    wipeStmts.push(
+      `DELETE FROM app_game1_tickets WHERE created_at > now() - interval '24 hours';`
+    );
+  }
+  for (const sql of wipeStmts) {
+    if (
+      (sql.includes("app_game_plan_run") && !tableExists("app_game_plan_run")) ||
+      (sql.includes("app_game1_scheduled_games") &&
+        !tableExists("app_game1_scheduled_games"))
+    ) {
+      // Fersk DB uten denne tabellen — hopp graceful
+      continue;
+    }
+    const res = runQuery(sql);
+    if (!res.ok) {
+      console.log(
+        color(
+          "yellow",
+          `[reset-state] kunne ikke kjøre '${sql.slice(0, 60)}...' (${res.error}) — fortsetter`
+        )
+      );
+    }
+  }
+  console.log(color("green", "[reset-state] ✓ runtime-data tømt"));
+  // Force-reseed så pilot-data er garantert til stede.
+  if (!runSeed()) {
+    console.log(
+      color(
+        "yellow",
+        "[reset-state] reseed feilet — DB er tom for pilot-data, må reseedes manuelt"
+      )
+    );
+    return false;
+  }
+  console.log(color("green", "[reset-state] ✓ DB resatt til pilot-fersh state"));
+  return true;
+}
+
+// ── DB-stats + URL-helpers (status-tabell) ──────────────────────────────────
+
+/**
+ * Hent en samling DB-stats brukt i status-tabellen som vises etter at
+ * alt har startet. Returnerer null hvis sjekken feiler — vi vil ikke
+ * blokkere status-tabellen på en stats-feil.
+ */
+function getDbStateStats() {
+  const stats = {
+    halls: null,
+    players: null,
+    planRunsToday: null,
+    scheduledGamesToday: null,
+    activePlanRunStatus: null,
+  };
+  if (!tableExists("app_halls")) return stats;
+
+  const hallsRes = runQuery(
+    `SELECT COUNT(*)::int FROM app_halls WHERE is_active = TRUE;`
+  );
+  if (hallsRes.ok) stats.halls = Number(hallsRes.value ?? 0);
+
+  if (tableExists("app_users")) {
+    // app_users har ikke deleted_at i alle migrasjoner — fall back hvis kolonne
+    // mangler. Vi bruker information_schema for å sjekke kolonnen før COUNT.
+    const colRes = runQuery(
+      `SELECT EXISTS (
+         SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'app_users'
+            AND column_name = 'deleted_at'
+       )::boolean AS x;`
+    );
+    const hasDeletedAt = colRes.ok && colRes.value === true;
+    const playersRes = runQuery(
+      hasDeletedAt
+        ? `SELECT COUNT(*)::int FROM app_users WHERE deleted_at IS NULL;`
+        : `SELECT COUNT(*)::int FROM app_users;`
+    );
+    if (playersRes.ok) stats.players = Number(playersRes.value ?? 0);
+  }
+
+  if (tableExists("app_game_plan_run")) {
+    const planRunsRes = runQuery(
+      `SELECT COUNT(*)::int FROM app_game_plan_run
+        WHERE business_date = (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date;`
+    );
+    if (planRunsRes.ok) stats.planRunsToday = Number(planRunsRes.value ?? 0);
+
+    const activeStatusRes = runQuery(
+      `SELECT status FROM app_game_plan_run
+        WHERE business_date = (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date
+        ORDER BY updated_at DESC
+        LIMIT 1;`,
+      { fullRows: true }
+    );
+    if (activeStatusRes.ok && Array.isArray(activeStatusRes.value)) {
+      const row = activeStatusRes.value[0];
+      stats.activePlanRunStatus = row?.status ?? null;
+    }
+  }
+
+  if (tableExists("app_game1_scheduled_games")) {
+    const scheduledRes = runQuery(
+      `SELECT COUNT(*)::int FROM app_game1_scheduled_games
+        WHERE scheduled_day = (CURRENT_DATE AT TIME ZONE 'Europe/Oslo')::date;`
+    );
+    if (scheduledRes.ok) stats.scheduledGamesToday = Number(scheduledRes.value ?? 0);
+  }
+  return stats;
+}
+
+/**
+ * Hent test-URL-er dynamisk fra DB. Henter TV-token for demo-hall-001
+ * (master-hall) hvis den finnes, ellers fallback til en hvilken som helst
+ * aktiv hall med satt token.
+ *
+ * Tobias-direktiv: ALDRI hardkode tokens — alltid hent dynamisk så vi
+ * unngår "stale token i doc"-feilkilden.
+ */
+function getTestUrls(port) {
+  const urls = {
+    masterAdmin: `http://localhost:5174/admin/agent/cashinout`,
+    spillerShell: `http://localhost:${port}/web/?dev-user=demo-pilot-spiller-1`,
+    tvScreen: null,
+  };
+  if (!tableExists("app_halls")) return urls;
+  const hallRes = runQuery(
+    `SELECT id, tv_token FROM app_halls
+      WHERE is_active = TRUE
+        AND tv_token IS NOT NULL
+      ORDER BY
+        CASE id
+          WHEN 'demo-hall-001' THEN 1
+          WHEN 'demo-hall-master' THEN 2
+          ELSE 9
+        END,
+        created_at ASC
+      LIMIT 1;`,
+    { fullRows: true }
+  );
+  if (hallRes.ok && Array.isArray(hallRes.value) && hallRes.value.length > 0) {
+    const row = hallRes.value[0];
+    if (row.id && row.tv_token) {
+      urls.tvScreen = `http://localhost:${port}/tv/${row.id}/${row.tv_token}`;
+    }
+  }
+  return urls;
+}
+
 /**
  * Kombinert helper: vent på PG, kjør migrate, sjekk om DB er tom, kjør seed.
- * Returnerer true hvis alt gikk bra (eller ble skippet trygt).
+ * Returnerer { ok: true, cleanupResult } eller { ok: false }.
+ *
+ * cleanupResult: { planRuns, scheduledGames } for status-tabellen.
  */
 async function ensureDatabaseReady() {
-  if (SKIP_MIGRATE && !FORCE_SEED) {
+  if (SKIP_MIGRATE && !FORCE_SEED && !RESET_STATE) {
     console.log(
       color(
         "yellow",
         "[db] --skip-migrate satt — hopper også over auto-seed-sjekk. Bruk --force-seed for å re-seede."
       )
     );
-    return true;
+    return { ok: true, cleanupResult: { planRuns: 0, scheduledGames: 0 } };
   }
   console.log(color("blue", "[migrate] venter på Postgres…"));
   const ready = await waitForPostgresReady(30);
@@ -331,27 +725,48 @@ async function ensureDatabaseReady() {
         "[migrate] Postgres ble ikke klar innen 30s — sjekk `docker compose logs postgres`."
       )
     );
-    return false;
+    return { ok: false };
   }
   console.log(color("green", "[migrate] Postgres klar"));
-  if (!runMigrate()) return false;
+  if (!runMigrate()) return { ok: false };
+
+  // ── --reset-state har høyest prioritet — tøm alt før evt. cleanup ────
+  if (RESET_STATE) {
+    if (!runResetState()) return { ok: false };
+    return { ok: true, cleanupResult: { planRuns: 0, scheduledGames: 0 } };
+  }
+
+  // ── Stale-state-cleanup (Tobias-direktiv 2026-05-09) ─────────────────
+  // Etter migrate, før seed-sjekk: rydd plan-runs/scheduled-games som
+  // henger fra en tidligere business-dato med åpen status.
+  let cleanupResult = { planRuns: 0, scheduledGames: 0 };
+  try {
+    cleanupResult = cleanupStaleDevState();
+  } catch (err) {
+    console.log(
+      color(
+        "yellow",
+        `[dev] cleanup feilet uventet (${err.message ?? err}) — fortsetter dev-start`
+      )
+    );
+  }
 
   if (FORCE_SEED) {
     console.log(color("yellow", "[seed] --force-seed satt — kjører seed uansett"));
-    if (!runSeed()) return false;
-    return true;
+    if (!runSeed()) return { ok: false };
+    return { ok: true, cleanupResult };
   }
   if (SKIP_MIGRATE) {
     // Brukeren vil ikke ha auto-DB-håndtering
-    return true;
+    return { ok: true, cleanupResult };
   }
   if (isDatabaseEmpty()) {
     console.log(color("yellow", "[seed] DB tom — kjører førstegangs-seed"));
-    if (!runSeed()) return false;
+    if (!runSeed()) return { ok: false };
   } else {
     console.log(color("dim", "[seed] DB allerede seedet, hopper over"));
   }
-  return true;
+  return { ok: true, cleanupResult };
 }
 
 // ── Child-process management ────────────────────────────────────────────────
@@ -450,7 +865,7 @@ process.on("uncaughtException", (err) => {
 
 async function main() {
   banner("Spillorama Local Dev Stack");
-  console.log(color("dim", "Tobias-direktiv 2026-05-05 — én-kommando-startup"));
+  console.log(color("dim", "Tobias-direktiv 2026-05-05/2026-05-09 — én-kommando-startup, alltid fersh state"));
   console.log(color("dim", "Ctrl+C avslutter alt"));
   console.log("");
 
@@ -458,14 +873,16 @@ async function main() {
     process.exit(1);
   }
 
-  // ── Migrate + smart-seed (Tobias-direktiv 2026-05-08) ─────────────────
+  // ── Migrate + smart-seed + stale-state-cleanup ────────────────────────
   // Hvis brukeren har --no-docker satt antar vi at de selv styrer Postgres
   // og vil typisk også styre migrate/seed manuelt — hopp over.
+  let cleanupResult = { planRuns: 0, scheduledGames: 0 };
   if (!SKIP_DOCKER) {
-    const dbOk = await ensureDatabaseReady();
-    if (!dbOk) {
+    const dbResult = await ensureDatabaseReady();
+    if (!dbResult.ok) {
       process.exit(1);
     }
+    cleanupResult = dbResult.cleanupResult;
   } else {
     console.log(
       color(
@@ -527,12 +944,13 @@ async function main() {
   console.log("");
   console.log(color("dim", "[dev:all] venter på healthchecks (max 60s)…"));
 
+  const port = Number(process.env.PORT ?? 4000);
   const checks = [
-    { name: "backend", port: Number(process.env.PORT ?? 4000), critical: true },
-    { name: "games", port: 5173, critical: false },
+    { name: "backend", port, critical: true, urlPath: "/health" },
+    { name: "games", port: 5173, critical: false, urlPath: "/" },
   ];
-  if (!SKIP_ADMIN) checks.push({ name: "admin", port: 5174, critical: false });
-  if (!SKIP_HARNESS) checks.push({ name: "harness", port: 4173, critical: false });
+  if (!SKIP_ADMIN) checks.push({ name: "admin", port: 5174, critical: false, urlPath: "/admin/" });
+  if (!SKIP_HARNESS) checks.push({ name: "harness", port: 4173, critical: false, urlPath: "/" });
 
   const results = await Promise.all(
     checks.map(async (c) => ({
@@ -541,27 +959,87 @@ async function main() {
     }))
   );
 
+  // ── Utvidet status-tabell ─────────────────────────────────────────────
   console.log("");
   banner("Status");
+  // PIDs for hver service finnes i `children`-arrayet med samme navn
   for (const r of results) {
+    const child = children.find((c) => c.name === r.name);
+    const pid = child?.proc?.pid ?? "?";
     const icon = r.open ? color("green", "✓") : color("red", "✗");
-    const portStr = `localhost:${r.port}`;
+    const url = `http://localhost:${r.port}${r.urlPath ?? "/"}`;
     const status = r.open ? color("green", "OK") : color("red", "TIMEOUT");
-    console.log(`  ${icon}  ${r.name.padEnd(10)} ${portStr.padEnd(20)} ${status}`);
+    console.log(
+      `  ${icon}  ${r.name.padEnd(10)} ${url.padEnd(36)} ${status.padEnd(15)} ${color("dim", `(PID ${pid})`)}`
+    );
   }
+
+  // ── DB-state seksjon ───────────────────────────────────────────────────
+  if (!SKIP_DOCKER) {
+    console.log("");
+    console.log(color("bold", "DB-state:"));
+    let stats = null;
+    try {
+      stats = getDbStateStats();
+    } catch (err) {
+      console.log(color("yellow", `   (kunne ikke hente DB-stats: ${err.message ?? err})`));
+    }
+    if (stats) {
+      const fmt = (n) => (n === null ? color("dim", "?") : String(n));
+      console.log(`   Halls:                  ${fmt(stats.halls)}`);
+      console.log(`   Players:                ${fmt(stats.players)}`);
+      const planSuffix = stats.activePlanRunStatus
+        ? color("dim", ` (status=${stats.activePlanRunStatus})`)
+        : "";
+      console.log(`   Plan-runs today:        ${fmt(stats.planRunsToday)}${planSuffix}`);
+      console.log(`   Scheduled-games today:  ${fmt(stats.scheduledGamesToday)}`);
+      const cleanupTotal = cleanupResult.planRuns + cleanupResult.scheduledGames;
+      const cleanupColor = cleanupTotal > 0 ? "yellow" : "dim";
+      console.log(
+        `   ${color(
+          cleanupColor,
+          `Stale items cleaned:    ${cleanupResult.planRuns} plan-runs, ${cleanupResult.scheduledGames} scheduled-games`
+        )}`
+      );
+    }
+  }
+
+  // ── Test-URL-er (med dynamisk hentet TV-token) ─────────────────────────
   console.log("");
-  console.log(color("bold", "URLs:"));
-  console.log(`  • Backend API     : http://localhost:${process.env.PORT ?? 4000}/health`);
-  console.log(`  • Web shell       : http://localhost:${process.env.PORT ?? 4000}/web/`);
-  if (!SKIP_ADMIN) console.log(`  • Admin           : http://localhost:5174/admin/`);
-  console.log(`  • Game client dev : http://localhost:5173/`);
-  if (!SKIP_HARNESS) console.log(`  • Visual harness  : http://localhost:4173/`);
+  console.log(color("bold", "Test-URL-er:"));
+  let testUrls = null;
+  try {
+    testUrls = SKIP_DOCKER ? null : getTestUrls(port);
+  } catch {
+    /* swallow — dynamic URL-fetch er nice-to-have */
+  }
+  console.log(`   • Backend API     : http://localhost:${port}/health`);
+  console.log(`   • Web shell       : http://localhost:${port}/web/`);
+  if (!SKIP_ADMIN) console.log(`   • Admin           : http://localhost:5174/admin/`);
+  console.log(`   • Game client dev : http://localhost:5173/`);
+  if (!SKIP_HARNESS) console.log(`   • Visual harness  : http://localhost:4173/`);
+  if (testUrls) {
+    console.log("");
+    console.log(color("bold", "Pilot-flyt (login: tobias@nordicprofil.no / Spillorama123!):"));
+    console.log(
+      `   Master:  ${testUrls.masterAdmin}  ${color("dim", "(login: demo-agent-1@spillorama.no / Spillorama123!)")}`
+    );
+    console.log(`   Spiller: ${testUrls.spillerShell}`);
+    if (testUrls.tvScreen) {
+      console.log(`   TV:      ${testUrls.tvScreen}`);
+    } else {
+      console.log(
+        `   TV:      ${color("dim", "(ingen aktiv hall med tv_token i DB — kjør 'npm run dev:seed')")}`
+      );
+    }
+  }
   console.log("");
   console.log(
     color(
       "yellow",
-      "Tip: kjør 'npm run dev:credentials' for test-bruker-credentials, eller " +
-        "'npm run dev:seed' for demo-data."
+      "Tip: kjør 'npm run dev:credentials' for test-bruker-credentials, " +
+        "'npm run dev:reset' for å rydde state, eller 'npm run dev:all -- --reset-state' " +
+        "for å starte med fersh pilot-state."
     )
   );
   console.log("");
