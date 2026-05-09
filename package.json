@@ -43,6 +43,9 @@
     "lint:blink": "npm run lint:css && npm run lint:no-backdrop-js",
     "lint:xss": "npm run lint:no-unsafe-html",
     "lint:all": "npm run lint:css && npm run lint:no-backdrop-js && npm run lint:no-unsafe-html",
+    "lint:arch": "depcruise --config .dependency-cruiser.cjs --ignore-known .dependency-cruiser-known-violations.json apps/backend/src apps/admin-web/src packages",
+    "lint:arch:baseline": "depcruise --config .dependency-cruiser.cjs --output-type baseline --output-to .dependency-cruiser-known-violations.json apps/backend/src apps/admin-web/src packages",
+    "lint:arch:graph": "depcruise --config .dependency-cruiser.cjs --output-type mermaid apps/backend/src apps/admin-web/src packages",
     "test:stylelint": "node --test \"scripts/stylelint-rules/__tests__/*.mjs\"",
     "perf:check": "npm --prefix scripts/performance-budget run check",
     "perf:collect": "npm --prefix scripts/performance-budget run collect",
@@ -57,16 +60,12 @@
     "schema:diff": "bash scripts/schema-ci/diff-schema.sh",
     "prepare": "husky || true && node scripts/setup-husky.mjs || true"
   },
-  "lint-staged": {
-    "**/*.css": "stylelint --fix",
-    "**/*.{ts,tsx,mts,cts}": [
-      "bash -c 'npm run --silent lint:no-backdrop-js'",
-      "bash -c 'npm run --silent lint:no-unsafe-html'"
-    ]
-  },
+  "//lint_staged_rationale": "Lint-staged config has been moved to .lintstagedrc.json (2026-05-08). The standalone file makes hook contents self-documenting and lets us add validate-skill-frontmatter, check-markdown-links, validate-migration-name, and check-large-binaries without bloating package.json.",
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/pngjs": "^6.0.5",
+    "danger": "^13.0.7",
+    "dependency-cruiser": "^17.4.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "pngjs": "^7.0.0",

@@ -1,0 +1,18 @@
+# .lfs-allowed-paths
+#
+# Glob-patterns for paths exempted from the 1 MB binary-size limit
+# enforced by scripts/hooks/check-large-binaries.mjs.
+#
+# Format:
+#   - One pattern per line.
+#   - `*` matches anything except `/`.
+#   - `**` matches across `/`.
+#   - `#` comments and blank lines are ignored.
+#
+# Add an entry only when the binary is genuinely required to ship in the
+# repo (not via LFS or CDN). Document the reason inline so reviewers
+# don't have to guess.
+#
+# Examples (commented out — add only when actually needed):
+# packages/game-client/public/audio/master-loop.mp3   # legacy gameplay loop, replaced post-pilot
+# legacy/unity-client/Assets/Sprites/big-bg.png       # already-tracked legacy asset

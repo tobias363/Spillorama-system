@@ -299,6 +299,18 @@ export function restoreRoomFromSnapshot(
     bingoWinnerId: snapshot.bingoWinnerId,
     patterns: snapshot.patterns ? [...snapshot.patterns] : undefined,
     patternResults: snapshot.patternResults ? [...snapshot.patternResults] : undefined,
+    // BIN-820 / R10 (2026-05-08): hydrer Spill 3 phase-state-machine fra
+    // snapshot. Bevarer pause-vindu, currentPhaseIndex og phasesWon ved
+    // server-restart midt i en runde slik at chaos-recovery er korrekt.
+    spill3PhaseState: snapshot.spill3PhaseState
+      ? {
+          currentPhaseIndex: snapshot.spill3PhaseState.currentPhaseIndex,
+          pausedUntilMs: snapshot.spill3PhaseState.pausedUntilMs,
+          phasesWon: [...snapshot.spill3PhaseState.phasesWon],
+          status: snapshot.spill3PhaseState.status,
+          endedReason: snapshot.spill3PhaseState.endedReason,
+        }
+      : undefined,
     startedAt: snapshot.startedAt,
     endedAt: snapshot.endedAt,
     endedReason: snapshot.endedReason,

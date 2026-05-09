@@ -1052,6 +1052,167 @@
     .info-panel-body li { margin-bottom: 6px; }
     .info-panel-body a { color: #ef9a9a; }
 
+    /* ── CMS content (BIN-777 A10) ─────────────────────────────────────── */
+    /* Status-meldinger inni info-panel-body og cms-page-body */
+    .cms-loading, .cms-empty, .cms-error {
+      padding: 18px 0;
+      text-align: center;
+      font-size: 14px;
+    }
+    .cms-loading { color: rgba(255,255,255,0.55); }
+    .cms-empty   { color: rgba(255,255,255,0.45); font-style: italic; }
+    .cms-error   { color: #ff9191; }
+
+    /* Markdown-output stylet for både panel og full-page */
+    .info-panel-body code, .cms-page-body code {
+      background: rgba(255,255,255,0.08);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.92em;
+    }
+    .info-panel-body h3, .info-panel-body h4, .info-panel-body h5 {
+      margin: 18px 0 8px; font-weight: 700;
+    }
+    .info-panel-body h3:first-child,
+    .info-panel-body h4:first-child,
+    .info-panel-body h5:first-child { margin-top: 0; }
+
+    /* FAQ definition list */
+    .cms-faq-list { margin: 0; padding: 0; }
+    .cms-faq-q {
+      font-weight: 700;
+      color: #fff;
+      margin: 16px 0 6px;
+      font-size: 15px;
+    }
+    .cms-faq-q:first-child { margin-top: 0; }
+    .cms-faq-a {
+      margin: 0 0 12px;
+      padding-left: 0;
+      color: rgba(255,255,255,0.78);
+    }
+    .cms-faq-a p:last-child { margin-bottom: 0; }
+
+    /* ── CMS full-page view (SPA-route /web/faq etc.) ──────────────────── */
+    #cms-page-view {
+      position: fixed; inset: 0;
+      z-index: 5000;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(145deg, #1a0a0a 0%, #2d0808 60%, #150505 100%);
+      overflow-y: auto;
+      color: #f4f6fb;
+    }
+    #cms-page-view[hidden] { display: none; }
+
+    .cms-page-topbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 24px;
+      background: linear-gradient(180deg, #5c1010 0%, #3d0d0d 100%);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .cms-page-back-btn {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.14);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .cms-page-back-btn:hover { background: rgba(255,255,255,0.16); }
+    .cms-page-title {
+      margin: 0;
+      font-size: 18px; font-weight: 700;
+      color: #fff;
+      flex: 1;
+      letter-spacing: 0.01em;
+    }
+
+    .cms-page-body {
+      max-width: 760px;
+      margin: 32px auto;
+      padding: 0 24px;
+      flex: 1;
+      width: 100%;
+      box-sizing: border-box;
+      line-height: 1.6;
+    }
+    .cms-page-body h2,
+    .cms-page-body h3 {
+      color: #fff;
+      margin: 28px 0 10px;
+      font-weight: 700;
+    }
+    .cms-page-body h2:first-child,
+    .cms-page-body h3:first-child { margin-top: 0; }
+    .cms-page-body h2 { font-size: 22px; }
+    .cms-page-body h3 { font-size: 18px; }
+    .cms-page-body h4 { font-size: 16px; margin: 20px 0 8px; color: #fff; }
+    .cms-page-body p {
+      margin: 0 0 14px;
+      color: rgba(255,255,255,0.82);
+      font-size: 15px;
+    }
+    .cms-page-body ul, .cms-page-body ol {
+      margin: 0 0 14px;
+      padding-left: 24px;
+      color: rgba(255,255,255,0.82);
+    }
+    .cms-page-body li { margin: 0 0 6px; }
+    .cms-page-body a {
+      color: #ef9a9a;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .cms-page-body a:hover { color: #ffb3b3; }
+    .cms-page-body strong { color: #fff; }
+
+    .cms-page-footer {
+      padding: 24px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px 20px;
+      font-size: 13px;
+    }
+    .cms-page-footer a {
+      color: rgba(255,255,255,0.55);
+      text-decoration: none;
+      padding: 4px 0;
+    }
+    .cms-page-footer a:hover { color: rgba(255,255,255,0.85); }
+
+    /* Mobile-tilpasning */
+    @media (max-width: 600px) {
+      .cms-page-topbar { padding: 12px 16px; }
+      .cms-page-body { margin: 18px auto; padding: 0 16px; }
+      .cms-page-title { font-size: 16px; }
+    }
+
+    /* ── Pre-login footer i login-overlay ──────────────────────────────── */
+    .cms-login-footer {
+      margin: 0 28px 22px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 8px;
+      justify-content: center;
+      font-size: 12px;
+    }
+    .cms-login-footer a {
+      color: rgba(255,255,255,0.55);
+      text-decoration: none;
+    }
+    .cms-login-footer a:hover { color: rgba(255,255,255,0.85); }
+    .cms-login-footer .cms-sep { color: rgba(255,255,255,0.25); }
+
     /* ── Candy Overlay ──────────────────────────────────────────────────── */
     .candy-overlay {
       position: fixed; inset: 0;
@@ -1718,11 +1879,15 @@
     <footer class="lobby-footer">
       <button class="lobby-footer-link" type="button" onclick="SpilloramaPanels.openSchedule()">Spillplan</button>
       <button class="lobby-footer-link" type="button" onclick="SpilloramaPanels.openLeaderboard()">Toppliste</button>
-      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('faq')">FAQ</button>
-      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('terms')">Vilkar</button>
-      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('responsible')">Ansvarlig spill</button>
+      <!-- BIN-777 A10: Public CMS-sider via SPA-route. cms.js intercepts kliks
+           og bruker history.pushState; deep-link til /web/faq etc. fungerer
+           også på direkte besøk. Kundeservice-knappen bruker fortsatt
+           panel-modus siden den ikke er en av de 4 SPA-rutene. -->
+      <a class="lobby-footer-link" href="/web/faq"                data-cms-link="faq">FAQ</a>
+      <a class="lobby-footer-link" href="/web/terms"              data-cms-link="terms">Vilkår</a>
+      <a class="lobby-footer-link" href="/web/responsible-gaming" data-cms-link="responsible">Ansvarlig spill</a>
       <button class="lobby-footer-link" type="button" onclick="showInfoPanel('support')">Kundeservice</button>
-      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('about')">Om Spillorama</button>
+      <a class="lobby-footer-link" href="/web/about"              data-cms-link="about">Om Spillorama</a>
       <button class="lobby-footer-link" id="shell-logout-btn" type="button">Logg ut</button>
     </footer>
   </div>
@@ -2960,52 +3125,11 @@
       });
     }
 
-    /* ── Info panel system ───────────────────────────────────────────── */
-
-    var INFO_CONTENT = {
-      faq: {
-        title: 'Ofte stilte sporsmal',
-        body: '<h3>Hvordan spiller jeg bingo?</h3><p>Velg et spill fra lobbyen, kjop lodd og vent pa trekningen. Gevinster utbetales automatisk til lommeboken din.</p>' +
-              '<h3>Hva er Spillvett?</h3><p>Spillvett er var ansvarlig spill-funksjon. Her kan du sette daglige og manedlige grenser, ta spillepause eller stenge deg ute.</p>' +
-              '<h3>Hvordan setter jeg inn penger?</h3><p>Apne profilen din og klikk "Sett inn penger" i lommebok-seksjonen.</p>' +
-              '<h3>Hva er en bingohall?</h3><p>En bingohall er en lokal avdeling med egne spillegrenser og regler ifolge norsk forskrift.</p>'
-      },
-      terms: {
-        title: 'Vilkar og betingelser',
-        body: '<h3>Generelle vilkar</h3><p>Ved a opprette konto og bruke Spillorama aksepterer du disse vilkarene. Spillorama drives i henhold til norsk pengespillovgivning.</p>' +
-              '<h3>Aldersgrense</h3><p>Du ma vaere fylt 18 ar for a spille. Identitetsverifisering kreves ved registrering.</p>' +
-              '<h3>Ansvarlig spill</h3><p>Du plikter a sette personlige spillegrenser. Lotteritilsynet kan pallegge ytterligere begrensninger.</p>' +
-              '<h3>Personvern</h3><p>Vi behandler personopplysningene dine i samsvar med GDPR og norsk personopplysningslov. Data deles ikke med tredjeparter uten samtykke.</p>'
-      },
-      responsible: {
-        title: 'Ansvarlig spill',
-        body: '<h3>Spillvett-verktoy</h3>' +
-              '<ul><li><strong>Dagsgrense</strong> &mdash; Maks belop du kan spille for per dag</li>' +
-              '<li><strong>Manedsgrense</strong> &mdash; Maks belop du kan spille for per maned</li>' +
-              '<li><strong>Frivillig pause</strong> &mdash; Ta en midlertidig pause fra spilling</li>' +
-              '<li><strong>Selvutestengelse</strong> &mdash; Steng deg ute i minimum 12 maneder</li></ul>' +
-              '<h3>Trenger du hjelp?</h3><p>Kontakt Hjelpelinjen for spilleavhengige pa telefon 800 800 40 (gratis).</p>'
-      },
-      support: {
-        title: 'Kundeservice',
-        body: '<h3>Kontakt oss</h3><p>Har du sporsmal eller trenger hjelp? Ta kontakt med kundeservice.</p>' +
-              '<h3>Apningstider</h3><p>Mandag-fredag: 09:00-17:00<br>Lordag-sondag: Stengt</p>' +
-              '<h3>Selvhjelp</h3><p>Sjekk var FAQ-side for svar pa vanlige sporsmal.</p>'
-      },
-      about: {
-        title: 'Om Spillorama',
-        body: '<h3>Spillorama Databingo</h3><p>Spillorama er en norsk plattform for databingo, utviklet i henhold til pengespillforskriften.</p>' +
-              '<h3>Regulering</h3><p>Spillorama opererer under norsk lovgivning og er underlagt tilsyn fra Lotteritilsynet.</p>'
-      }
-    };
-
-    function showInfoPanel(key) {
-      var info = INFO_CONTENT[key];
-      if (!info) return;
-      document.getElementById('info-panel-title').textContent = info.title;
-      document.getElementById('info-panel-body').innerHTML = info.body;
-      document.getElementById('info-overlay').classList.add('is-visible');
-    }
+    /* ── Info panel system ─────────────────────────────────────────────
+       BIN-777 A10: Statisk INFO_CONTENT er erstattet med public CMS API
+       (`/api/cms/*`). Se `cms.js` — den eksponerer `window.showInfoPanel`
+       og `window.SpilloramaCms` slik at footer-onclicks i denne filen
+       fortsatt fungerer uten å kreve endring der. */
 
     document.getElementById('info-panel-close').addEventListener('click', function () {
       document.getElementById('info-overlay').classList.remove('is-visible');
@@ -3088,5 +3212,7 @@
   <script src="pendingDepositReminder.js"></script>
   <!-- 2026-05-02: Min Konto redesign — overlay-basert account-side -->
   <script src="min-konto.js"></script>
+  <!-- BIN-777 A10: Public CMS player-shell wiring (FAQ/Terms/RG/About) -->
+  <script src="cms.js"></script>
 </body>
 </html>

@@ -1,0 +1,56 @@
+# docker-compose.e2e.yml — isolated E2E-test infrastructure
+#
+# BIN-823 (synthetic E2E test for Spill 1 master flow): spinns up a dedicated
+# Postgres + Redis pair on non-default ports so E2E tests can run without
+# colliding with the developer's local `docker-compose up` (which uses 5432/6379).
+#
+# Usage:
+#   docker-compose -f docker-compose.e2e.yml up -d
+#   E2E_PG_CONNECTION_STRING=postgresql://e2e:e2e@127.0.0.1:5433/spillorama_e2e \
+#   E2E_REDIS_URL=redis://127.0.0.1:6380/0 \
+#     npm --prefix apps/backend run test:e2e
+#   docker-compose -f docker-compose.e2e.yml down -v
+#
+# In CI we use GitHub Actions `services:` blocks instead of this file (see
+# `.github/workflows/e2e-test.yml`). This compose file is for local dev /
+# manual reproduction.
+#
+# Why a separate file:
+#   - The default docker-compose.yml is wired for production-mode backend +
+#     full env-file load. E2E spawns its OWN backend (`node dist/index.js`)
+#     so it only needs the data-stores.
+#   - Different ports (5433/6380) prevent collision with `npm run dev`'s
+#     local stack.
+#   - `tmpfs` volumes mean E2E never accumulates state across runs.
+
+services:
+  postgres-e2e:
+    image: postgres:16-alpine
+    container_name: spillorama-postgres-e2e
+    environment:
+      POSTGRES_USER: e2e
+      POSTGRES_PASSWORD: e2e
+      POSTGRES_DB: spillorama_e2e
+    ports:
+      - "5433:5432"
+    # tmpfs: data lives in RAM and is cleared on container stop. E2E should
+    # never depend on persistence — every test run creates its own schema.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U e2e -d spillorama_e2e"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  redis-e2e:
+    image: redis:7-alpine
+    container_name: spillorama-redis-e2e
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10

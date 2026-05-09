@@ -11,7 +11,7 @@
  *  - Master-hall får i tillegg "Start Spill 1" + "Stopp Spill 1"-
  *    knapper i samme grid-stil som kontant-inn-/ut-knappene over.
  *
- * Polling: 2s tick mot `/api/agent/game1/current-game`. Stoppes på
+ * Polling: 2s tick mot `/api/agent/game1/lobby` (Bølge 3). Stoppes på
  * unmount via AbortSignal — caller passer inn signalet fra
  * activePageAbort i CashInOutPage slik at samme cleanup-flyt brukes.
  *
@@ -19,37 +19,101 @@
  * Splittet hall-listen i to seksjoner — "Min hall" og "Andre haller i
  * gruppen" — slik at master ser ready-state for alle GoH-medlemmer.
  * Master-hall får 👑-merke; ticket-tellinger (digitale + fysiske) vises
- * pr hall. Master-start-knappen er IKKE blokkert av andre halls
- * ready-state (per Tobias-direktiv #1017).
+ * pr hall.
+ *
+ * 2026-05-08 (Bølge 3): refaktorert til ny `fetchLobbyState` + master-
+ * action-routes. Dual-fetch + adapter + wrapper er fjernet — `currentGame.id`
+ * er nå alltid `lobby.currentScheduledGameId` (single id-rom). Pause/start/
+ * resume bruker `pauseMaster`/`startMaster`/`resumeMaster`.
  */
 
 import {
-  fetchAgentGame1CurrentGame,
+  fetchLobbyState,
+  startMaster,
+  resumeMaster,
+  pauseMaster,
+  recoverStale,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
   setHallHasCustomersForGame,
-  type Spill1CurrentGameResponse,
-  type Spill1CurrentGameHall,
 } from "../../api/agent-game1.js";
-import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
-import { adaptGamePlanToLegacyShape } from "../../api/agent-game-plan-adapter.js";
-import {
-  startSpill1MasterAction,
-  resumeSpill1MasterAction,
-} from "../../api/agent-master-actions.js";
-import { pauseGame1 } from "../../api/admin-game1-master.js";
+import type {
+  Spill1AgentLobbyState,
+  Spill1HallReadyStatus,
+  Spill1LobbyInconsistencyCode,
+} from "../../../../../packages/shared-types/src/spill1-lobby-state.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
 import { escapeHtml } from "./shared.js";
 
+/**
+ * 2026-05-09 (recover-stale): warning-koder som krever master-handling
+ * for å rydde opp. Når aggregator returnerer en av disse er master
+ * blokkert fra alle write-actions — recover-stale-knappen er eneste
+ * måte å unblokke uten `psql`-tilgang.
+ */
+const RECOVERABLE_WARNING_CODES: ReadonlySet<Spill1LobbyInconsistencyCode> =
+  new Set(["STALE_PLAN_RUN", "BRIDGE_FAILED"]);
+
 const POLL_INTERVAL_MS = 2_000;
+
+/**
+ * Bølge 3 (2026-05-08): refaktor til ren `Spill1AgentLobbyState`.
+ *
+ * Vi mapper aggregator-staten til en intern view-shape før render. Dette
+ * holder render-logikken under uendret samtidig som datakilden kollapses
+ * til ÉN endpoint (`/api/agent/game1/lobby`). Forrige løsning fetch'et
+ * plan-API + legacy-API parallelt og merget felt-for-felt — Bølge 1
+ * aggregator gjør jobben sentralt og UI ser ferdig konsistent state.
+ */
+interface ViewState {
+  /** Speiles av `lobby.hallId`. */
+  ownHallId: string;
+  /** Kun `true` hvis caller er master for runden. */
+  isMasterAgent: boolean;
+  /** `null` betyr ingen aktiv runde — UI viser tom-state med hall-pills. */
+  scheduledGameId: string | null;
+  scheduledGameStatus: string | null;
+  scheduledStartTime: string | null;
+  /** Display-navn for nåværende plan-item (bingo / jackpot / oddsen-55 …). */
+  catalogDisplayName: string | null;
+  masterHallId: string | null;
+  halls: Spill1HallReadyStatus[];
+  allReady: boolean;
+}
 
 interface BoxState {
   loaded: boolean;
-  data: Spill1CurrentGameResponse | null;
+  data: ViewState | null;
   busy: boolean;
   errorMessage: string | null;
+  /**
+   * Code-review-fix 2026-05-08 (PR #1075 review #1): warning-banner
+   * istedenfor Toast.warning i polling-loopen.
+   *
+   * Tidligere kalte vi `Toast.warning(messages)` ved hver 2s-refresh hvis
+   * `inconsistencyWarnings` ikke var tom. Toast er ikke idempotent (hver
+   * kall lager ny DOM-boks med 4s timeout, jf. Toast.ts), så polling 2s ×
+   * 4s timeout gir 2-3 stacked toasts permanent ved vedvarende warning
+   * (f.eks. BRIDGE_FAILED som ikke fikses raskt). Resultatet er en
+   * voksende stack av kopier i hjørnet av skjermen.
+   *
+   * Fix: deklarativ state — vi setter banneret ved hver refresh, og
+   * render-funksjonen viser ÉN inline `<div class="alert alert-warning">`
+   * over hall-pillene. Banneret forsvinner automatisk når warnings
+   * cleares fra backend. User-action-feil bruker fortsatt `Toast.error`
+   * (i `onClick`-handler), så transient feedback er bevart.
+   */
+  warningBanner: string | null;
+  /**
+   * 2026-05-09 (recover-stale): true når lobby-state har minst én
+   * STALE_PLAN_RUN eller BRIDGE_FAILED warning. Når true viser
+   * render-funksjonen en "🧹 Rydde stale plan-state"-knapp under
+   * warning-banneret. Master kan da kalle cleanup-endpointet uten
+   * å trenge psql-tilgang.
+   */
+  showRecoverButton: boolean;
 }
 
 let activeMount: { container: HTMLElement; signal: AbortSignal; cleanup: () => void } | null = null;
@@ -76,6 +140,8 @@ export function mountSpill1HallStatusBox(
     data: null,
     busy: false,
     errorMessage: null,
+    warningBanner: null,
+    showRecoverButton: false,
   };
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -114,37 +180,47 @@ export function mountSpill1HallStatusBox(
 
   async function refresh(): Promise<void> {
     try {
-      // 2026-05-08 (Tobias-feedback): Bingovert mangler oversikt over de
-      // andre hallene i sin GoH. Plan-runtime API-et returnerer ikke
-      // hall-ready-status — adapteren mocker derfor `halls: [<egen
-      // hall>]` (se agent-game-plan-adapter.ts §125-136 for begrunnelse).
-      //
-      // Vi henter derfor LEGACY `/api/agent/game1/current-game` PARALLELT
-      // med plan-runtime-callet. Legacy-endpoint returnerer alle haller i
-      // GoH med `isReady` / `excludedFromGame` / `digitalTicketsSold` /
-      // `physicalTicketsSold`-felter. Vi merger inn legacy-`halls[]` i
-      // adapter-shapen, og beholder plan-runtime som autoritet for
-      // `currentGame.id` (plan-run-id) + `currentGame.status` (plan-state).
-      //
-      // Hvis legacy-callet feiler (eks. ingen aktiv runde for hallen),
-      // beholder vi adapter-shapen uendret slik at tomme-state-rendering
-      // fortsetter å virke.
-      const [planResp, legacyResp] = await Promise.all([
-        fetchAgentGamePlanCurrent({ signal }),
-        fetchAgentGame1CurrentGame({ signal }).catch(() => null),
-      ]);
-      const res: Spill1CurrentGameResponse = adaptGamePlanToLegacyShape(planResp);
-      if (legacyResp && legacyResp.halls.length > 0) {
-        // Merge: Bruk legacy-`halls[]` som kilde (full ready-state +
-        // ticket-tellinger). Resten (isMasterAgent, currentGame-meta) fra
-        // plan-runtime som er kanonisk for plan-state.
-        res.halls = legacyResp.halls;
-        res.allReady = legacyResp.allReady;
-      }
+      // Bølge 3 (2026-05-08): ÉN kall, ÉN id-rom. Aggregator merger
+      // plan-API + legacy-API server-side og returnerer ferdig konsistent
+      // state. UI ser kun `currentScheduledGameId` (eller `null`) — ingen
+      // alias-id-er, ingen merge-logikk her.
+      const lobby = await fetchLobbyState(undefined, { signal });
       if (aborted) return;
+      const view = mapLobbyToView(lobby);
       state.loaded = true;
-      state.data = res;
+      state.data = view;
       state.errorMessage = null;
+
+      // Aggregator kan flagge informative inconsistencies. Vi viser dem
+      // som non-blocking warning-banner over hall-pillene slik at master
+      // kan refreshe / kontakte support hvis warning-en peker på en ekte
+      // race (f.eks. plan-run sier running men scheduled-game er
+      // cancelled).
+      //
+      // Code-review-fix 2026-05-08 (PR #1075 review #1): tidligere kalte
+      // vi `Toast.warning(messages)` her ved hver refresh. Toast er IKKE
+      // idempotent — hver kall lager ny DOM-boks med 4s timeout. Ved 2s
+      // polling × 4s timeout fikk vi 2-3 stacked toasts permanent ved
+      // vedvarende warning. Nå er banneret deklarativt: state.warningBanner
+      // settes per refresh, og render() viser ÉN inline alert. Forsvinner
+      // når warnings cleares.
+      if (lobby.inconsistencyWarnings.length > 0) {
+        state.warningBanner = lobby.inconsistencyWarnings
+          .map((w) => `${w.code}: ${w.message}`)
+          .join(" · ");
+        // 2026-05-09 (recover-stale): show the cleanup button only when
+        // at least one warning is recoverable via master-action. Other
+        // warnings (PLAN_SCHED_STATUS_MISMATCH, MISSING_GOH_MEMBERSHIP,
+        // DUAL_SCHEDULED_GAMES) need different handling and should not
+        // tempt master to click the wrong button.
+        state.showRecoverButton = lobby.inconsistencyWarnings.some((w) =>
+          RECOVERABLE_WARNING_CODES.has(w.code),
+        );
+      } else {
+        state.warningBanner = null;
+        state.showRecoverButton = false;
+      }
+
       render(container, state);
     } catch (err) {
       if (aborted) return;
@@ -163,6 +239,29 @@ export function mountSpill1HallStatusBox(
     }
   }
 
+  /**
+   * Bølge 3: oversett `Spill1AgentLobbyState` til lokal view-shape som
+   * render-funksjonene under konsumerer. Mapping er én-til-én — vi
+   * renamer felter for å holde renderfilen kompakt og leselig.
+   *
+   * `ownHallId` faller tilbake til `""` for ADMIN uten hall-context (empty-
+   * state) — render-funksjonene returnerer "Ingen kommende spill" placeholder
+   * i den situasjonen.
+   */
+  function mapLobbyToView(lobby: Spill1AgentLobbyState): ViewState {
+    return {
+      ownHallId: lobby.hallId ?? "",
+      isMasterAgent: lobby.isMasterAgent,
+      scheduledGameId: lobby.currentScheduledGameId,
+      scheduledGameStatus: lobby.scheduledGameMeta?.status ?? null,
+      scheduledStartTime: lobby.scheduledGameMeta?.scheduledStartTime ?? null,
+      catalogDisplayName: lobby.planMeta?.catalogDisplayName ?? null,
+      masterHallId: lobby.masterHallId,
+      halls: lobby.halls,
+      allReady: lobby.allHallsReady,
+    };
+  }
+
   async function onClick(event: Event): Promise<void> {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -172,9 +271,14 @@ export function mountSpill1HallStatusBox(
     if (!action) return;
     if (state.busy) return;
     const data = state.data;
-    if (!data || !data.currentGame) return;
-    const gameId = data.currentGame.id;
-    const ownHallId = data.hallId;
+    if (!data) return;
+    // Bølge 3: `gameId` er nå alltid `currentScheduledGameId` (eller null
+    // hvis ingen aktiv runde). Hall-ready-handlinger (mark-ready, no-customers
+    // osv.) krever en eksisterende scheduled-game-rad — vi avviser i UI hvis
+    // den mangler så vi ikke sender et call backend må avvise med 400.
+    const gameId = data.scheduledGameId;
+    const ownHallId = data.ownHallId;
+    if (!ownHallId) return;
 
     state.busy = true;
     setBusyState(container, true);
@@ -182,28 +286,35 @@ export function mountSpill1HallStatusBox(
     try {
       switch (action) {
         case "mark-ready":
+          if (!gameId) return;
           await markHallReadyForGame(ownHallId, gameId);
           Toast.success("Hallen er markert som Klar.");
           break;
         case "unmark-ready":
+          if (!gameId) return;
           await unmarkHallReadyForGame(ownHallId, gameId);
           Toast.info("Klar-markering angret.");
           break;
         case "no-customers":
+          if (!gameId) return;
           await setHallNoCustomersForGame(ownHallId, gameId);
           Toast.info("Hallen er markert som 'Ingen kunder'.");
           break;
         case "has-customers":
+          if (!gameId) return;
           await setHallHasCustomersForGame(ownHallId, gameId);
           Toast.info("Hallen er åpnet igjen.");
           break;
         case "start": {
-          // Tobias UX 2026-05-02: master kan starte selv om noen haller ikke
-          // er klare. Hvis ikke alle er klare, vis bekreftelse + send
-          // confirmUnreadyHalls (REQ-007 backend-override).
+          // Bølge 3: `startMaster` kaller den ENESTE master-routen
+          // (POST /api/agent/game1/master/start) som internt bruker
+          // `MasterActionService` for å koordinere plan-API + engine-bridge.
           //
-          // `startSpill1MasterAction` kaller plan-API først (state-overgang
-          // i plan-runtime) og deretter engine-API for faktisk trekning.
+          // Tobias UX 2026-05-02: master kan starte selv om noen haller
+          // ikke er klare. Vi viser bekreftelse FØR start; backend lager
+          // en HALLS_NOT_READY hvis "kjenne ekskludering" ikke er sendt
+          // — men master-routen i Bølge 2 håndterer dette via plan-flow,
+          // så vi sender bare med hallId.
           const unreadyHalls = data.halls.filter(
             (h) => !h.isReady && !h.excludedFromGame,
           );
@@ -214,31 +325,61 @@ export function mountSpill1HallStatusBox(
               `Hvis du starter nå vil de bli ekskludert fra denne runden. Vil du fortsette?`,
             );
             if (!ok) return;
-            await startSpill1MasterAction(
-              undefined,
-              unreadyHalls.map((h) => h.hallId),
+            await startMaster(ownHallId);
+            Toast.success(
+              `Spill 1 startet — ${unreadyHalls.length} hall(er) ekskludert.`,
             );
-            Toast.success(`Spill 1 startet — ${unreadyHalls.length} hall(er) ekskludert.`);
           } else {
-            await startSpill1MasterAction();
+            await startMaster(ownHallId);
             Toast.success("Spill 1 startet.");
           }
           break;
         }
         case "resume":
-          // Resume går via plan-API først (state-overgang i plan) og
-          // deretter engine-API for å resume trekningen.
-          await resumeSpill1MasterAction();
+          // Bølge 3: ÉN kall — `resumeMaster` koordinerer plan + engine
+          // sentralt i backend. Ingen idempotens-fallback i klient.
+          await resumeMaster(ownHallId);
           Toast.success("Spill 1 gjenopptatt.");
           break;
         case "pause": {
-          // 2026-05-08 (Tobias-direktiv): master pauser aktiv Spill 1-runde
-          // direkte via admin-game1-pause-endepunktet (AGENT har
-          // GAME1_MASTER_WRITE-permission). Engine pauser draw-timeren og
-          // status flippes til 'paused' på scheduled-game-raden.
+          // Bølge 3: master pauser via single master-route. `pauseMaster`
+          // sender PUSH til samme MasterActionService-instans som driver
+          // alle andre actions, så pause/resume/start har konsistent
+          // sekvensering uten klient-side rekkefølge-logikk.
           const reason = window.prompt("Årsak (valgfritt):", "") ?? undefined;
-          await pauseGame1(gameId, reason);
+          await pauseMaster(ownHallId, reason);
           Toast.success("Spill 1 pauset.");
+          break;
+        }
+        case "recover-stale": {
+          // 2026-05-09: master-driven cleanup of STALE_PLAN_RUN /
+          // BRIDGE_FAILED state. Bypasses MasterActionService.preValidate
+          // (which would block on those exact warnings) so we can
+          // unblock master without psql-access.
+          //
+          // Confirm-modal first — this is a destructive(ish) action even
+          // though it only does forward state-transitions. Better to ask
+          // than to surprise the master with disappearing yesterday's
+          // run.
+          const ok = confirm(
+            "Dette markerer gårsdagens plan-run som ferdig og avslutter " +
+              "stuck scheduled-games for hallen.\n\n" +
+              "Operasjonen er trygg (ingen wallet-touch eller payout) og " +
+              "idempotent. Er du sikker?",
+          );
+          if (!ok) return;
+          const result = await recoverStale(ownHallId);
+          const planCount = result.cleared.planRuns;
+          const gameCount = result.cleared.scheduledGames;
+          if (planCount === 0 && gameCount === 0) {
+            Toast.info("Ingen stale-state funnet — alt var allerede rent.");
+          } else {
+            Toast.success(
+              `Stale plan-state ryddet: ${planCount} plan-run + ` +
+                `${gameCount} scheduled-game${gameCount === 1 ? "" : "s"} ` +
+                "markert som ferdig.",
+            );
+          }
           break;
         }
         default:
@@ -309,18 +450,22 @@ function render(container: HTMLElement, state: BoxState): void {
     return;
   }
 
+  // Bølge 3 (2026-05-08): `data` er nå mappet fra `Spill1AgentLobbyState`.
+  // Ingen `currentGame`-objekt — vi sjekker `scheduledGameStatus` direkte.
   // 2026-05-03 (Tobias UX): vis alltid hall-status for hallene i gruppen,
   // selv når ingen runde er aktiv eller spawn'et i scheduled-tabellen.
-  // Etter en runde ferdig fortsetter hallene å vises (med status oransje
-  // = ikke klar) så agentene har kontinuerlig oversikt over neste runde.
   //
   // 2026-05-08 (Tobias-feedback): Vis "Min hall" og "Andre haller i
   // gruppen" som separate seksjoner slik at master ser umiddelbart hvor
   // mange andre haller som er klare/ikke klare. Master-hall i andre-
-  // listen får 👑-merke; ticket-tellinger (digitale + fysiske) vises pr
-  // hall.
-  const masterHallIdForCrown = data.currentGame?.masterHallId ?? null;
-  if (!data.currentGame) {
+  // listen får 👑-merke.
+  const warningBannerHtml = renderWarningBanner(
+    state.warningBanner,
+    state.showRecoverButton,
+  );
+  const masterHallIdForCrown = data.masterHallId;
+  const gameStatus = data.scheduledGameStatus;
+  if (!gameStatus) {
     if (data.halls.length === 0) {
       container.innerHTML = `
         <div class="box-body cashinout-empty-placeholder">
@@ -328,80 +473,85 @@ function render(container: HTMLElement, state: BoxState): void {
         </div>`;
       return;
     }
-    const ownHallSnap = data.halls.find((h) => h.hallId === data.hallId) ?? null;
-    const otherHallsSnap = data.halls.filter((h) => h.hallId !== data.hallId);
+    const ownHallSnap =
+      data.halls.find((h) => h.hallId === data.ownHallId) ?? null;
+    const otherHallsSnap = data.halls.filter(
+      (h) => h.hallId !== data.ownHallId,
+    );
     container.innerHTML = `
       <div class="box-header with-border">
         <h3 class="box-title">Spill 1 — venter på neste runde</h3>
       </div>
       <div class="box-body">
+        ${warningBannerHtml}
         <p class="text-muted small" style="margin-bottom: 12px;">
           Hall-status for neste planlagte spill. Status oppdateres når
           runden spawnes.
         </p>
-        ${renderOwnHallSection(ownHallSnap, data.hallId, masterHallIdForCrown)}
+        ${renderOwnHallSection(ownHallSnap, data.ownHallId, masterHallIdForCrown)}
         ${renderOtherHallsSection(otherHallsSnap, masterHallIdForCrown)}
       </div>`;
     return;
   }
 
-  const game = data.currentGame;
-  const ownHallId = data.hallId;
+  const ownHallId = data.ownHallId;
   const isMaster = data.isMasterAgent;
   const ownHall = data.halls.find((h) => h.hallId === ownHallId) ?? null;
   const otherHalls = data.halls.filter((h) => h.hallId !== ownHallId);
 
   // 2026-05-08 (Tobias-direktiv): Start aktiv når purchase-vinduet er åpnet.
   // Master kan starte UAVHENGIG av om andre haller er klare. Pause/Fortsett
-  // synlig kun når aktuelt. Stop-knappen FJERNET fra agent-UI (admin-only
-  // via /api/admin/game1/...). "Kringkast 'Klar' + 2-min countdown" også
-  // fjernet — master starter uavhengig av ready-status.
-  //
-  // NB: `canStart` sjekker KUN game.status. Andre halls ready-state er
-  // IKKE en gate (per #1017) — den vises informativt på Start-knappen
-  // som "X hall(er) ikke klar enda — start vil ekskludere {dem|den}".
+  // synlig kun når aktuelt.
   const canStart =
     isMaster &&
-    (game.status === "ready_to_start" || game.status === "purchase_open");
-  const canPause = isMaster && game.status === "running";
-  const canResume = isMaster && game.status === "paused";
+    (gameStatus === "ready_to_start" || gameStatus === "purchase_open");
+  const canPause = isMaster && gameStatus === "running";
+  const canResume = isMaster && gameStatus === "paused";
 
-  const ownHallHtml = renderOwnHallSection(ownHall, ownHallId, masterHallIdForCrown);
-  const otherHallsHtml = renderOtherHallsSection(otherHalls, masterHallIdForCrown);
-  // 2026-05-08 (Tobias-bug-fix): "Marker Klar" / "Ingen kunder"-knappene
-  // kaller `/api/admin/game1/halls/:hallId/ready` med `gameId` i body.
-  // Backend krever en eksisterende `scheduled_games`-rad — som først
-  // spawnes når master kaller `/api/agent/game-plan/start`. Før master
-  // har startet er `currentGame.id` enten tom (backend) eller en plan-
-  // run-id (adapter) — ingen av dem er en gyldig scheduled-games-id.
-  // Vi disabler knappene defensivt og viser en tooltip så agenter
-  // forstår hvorfor de er disabled.
+  const ownHallHtml = renderOwnHallSection(
+    ownHall,
+    ownHallId,
+    masterHallIdForCrown,
+  );
+  const otherHallsHtml = renderOtherHallsSection(
+    otherHalls,
+    masterHallIdForCrown,
+  );
+  // Bølge 3: `scheduledGameId` er null før master har startet runden — i den
+  // situasjonen disabler vi hall-knapper som krever en eksisterende
+  // scheduled_games-rad (mark-ready / no-customers etc.) med tooltip.
   const hasValidGameId =
-    typeof game.id === "string" && game.id.length > 0 && game.status !== "scheduled";
-  const ownButtonsHtml = renderOwnHallButtons(ownHall, game.status, hasValidGameId);
+    data.scheduledGameId !== null && gameStatus !== "scheduled";
+  const ownButtonsHtml = renderOwnHallButtons(
+    ownHall,
+    gameStatus,
+    hasValidGameId,
+  );
   // Antall ikke-klare/ikke-ekskluderte haller — vises som hint på Start-knappen
   // så master ser umiddelbart hvor mange som vil bli ekskludert.
   const unreadyCount = data.halls.filter(
     (h) => !h.isReady && !h.excludedFromGame,
   ).length;
   // 2026-05-08: vis planlagt-navnet i Start-knappen så master ser presis
-  // hva som starter (eks: "Start neste spill — Bingo").
-  const nextGameName = game.customGameName ?? game.subGameName ?? null;
+  // hva som starter (eks: "Start neste spill — Bingo"). Trekkes fra
+  // `lobby.planMeta.catalogDisplayName` som aggregator setter når plan
+  // dekker dagen.
+  const nextGameName = data.catalogDisplayName;
   const masterButtonsHtml = renderMasterButtons({
     canStart,
     canPause,
     canResume,
     isMaster,
-    gameStatus: game.status,
-    scheduledStartTime: game.scheduledStartTime,
+    gameStatus,
+    scheduledStartTime: data.scheduledStartTime,
     unreadyCount,
     nextGameName,
   });
 
   const titleParts: string[] = [];
-  titleParts.push(`Spill 1 — ${escapeHtml(statusLabel(game.status))}`);
-  if (game.subGameName) {
-    titleParts.push(`Subspill: ${escapeHtml(game.customGameName ?? game.subGameName)}`);
+  titleParts.push(`Spill 1 — ${escapeHtml(statusLabel(gameStatus))}`);
+  if (nextGameName) {
+    titleParts.push(`Subspill: ${escapeHtml(nextGameName)}`);
   }
 
   container.innerHTML = `
@@ -409,6 +559,7 @@ function render(container: HTMLElement, state: BoxState): void {
       <h3 class="box-title">${titleParts.join(" · ")}</h3>
     </div>
     <div class="box-body">
+      ${warningBannerHtml}
       ${ownHallHtml}
       ${otherHallsHtml}
       ${ownButtonsHtml}
@@ -417,14 +568,65 @@ function render(container: HTMLElement, state: BoxState): void {
 }
 
 /**
+ * Code-review-fix 2026-05-08 (PR #1075 review #1): render warning-banner
+ * over hall-pillene istedenfor å spamme Toast.warning fra polling-loopen.
+ *
+ * Banneret er deklarativt — `state.warningBanner` settes per refresh, og
+ * vises som ÉN inline `<div class="alert alert-warning">`. Banneret
+ * forsvinner automatisk når `inconsistencyWarnings` er tom igjen.
+ *
+ * Returnerer tom string når ingen warning er aktiv så caller kan
+ * inline'e resultatet trygt.
+ *
+ * 2026-05-09 (recover-stale): når `showRecoverButton=true` rendres en
+ * "🧹 Rydde stale plan-state"-knapp under banneret. Knappen er kun
+ * synlig når aggregator har flagget STALE_PLAN_RUN eller BRIDGE_FAILED
+ * (de eneste warning-kodene som master kan rydde opp via cleanup-
+ * endpointet). Andre warnings (DUAL_SCHEDULED_GAMES,
+ * PLAN_SCHED_STATUS_MISMATCH, MISSING_GOH_MEMBERSHIP) krever ulik
+ * intervensjon og skal ikke trigge denne knappen.
+ */
+function renderWarningBanner(
+  banner: string | null,
+  showRecoverButton = false,
+): string {
+  if (!banner) return "";
+  const recoverButtonHtml = showRecoverButton
+    ? `
+      <div style="margin-top:8px;">
+        <button type="button"
+                class="btn btn-warning btn-sm"
+                data-spill1-action="recover-stale"
+                data-marker="spill1-hall-status-recover-button"
+                title="Marker gårsdagens plan-run som ferdig og avslutt stuck scheduled-games. Trygg og idempotent.">
+          <i class="fa fa-broom" aria-hidden="true"></i>
+          🧹 Rydde stale plan-state
+        </button>
+      </div>`
+    : "";
+  return `
+    <div class="alert alert-warning" data-marker="spill1-hall-status-warning"
+         style="margin-bottom:12px;">
+      <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+      <small>${escapeHtml(banner)}</small>
+      ${recoverButtonHtml}
+    </div>`;
+}
+
+/**
  * 2026-05-08 (Tobias-feedback): Render egen-hall-seksjonen ("Min hall").
- * Viser status-pillen + ticket-tellinger + master-merke om hallen er
- * master. Knapper for egen hall (Marker Klar / Ingen kunder) rendres
- * separat av `renderOwnHallButtons` slik at de kan kobles til samme
- * grid-stil som kontant-inn-/ut-knappene.
+ * Viser status-pillen + master-merke om hallen er master. Knapper for
+ * egen hall (Marker Klar / Ingen kunder) rendres separat av
+ * `renderOwnHallButtons` slik at de kan kobles til samme grid-stil som
+ * kontant-inn-/ut-knappene.
+ *
+ * Bølge 3 (2026-05-08): typer er nå `Spill1HallReadyStatus` fra aggregator.
+ * Ticket-tellinger er fjernet — de var en del av legacy-merge-pathen som
+ * Bølge 1 fjerner. (Bonge-tellinger pr hall håndteres av cash-inout-
+ * dashboardets eksisterende cash-flow-tabeller.)
  */
 function renderOwnHallSection(
-  ownHall: Spill1CurrentGameHall | null,
+  ownHall: Spill1HallReadyStatus | null,
   ownHallId: string,
   masterHallId: string | null,
 ): string {
@@ -444,7 +646,6 @@ function renderOwnHallSection(
               title="Master-hall" style="margin-left:6px;">👑 Master</span>`
     : "";
   const pill = renderStatusPill(ownHall);
-  const ticketInfo = renderTicketCounts(ownHall);
   return `
     <div class="spill1-hall-section" data-marker="spill1-own-hall-section"
          style="margin-bottom:12px;">
@@ -457,7 +658,6 @@ function renderOwnHallSection(
             ${masterCrown}
           </span>
           <span class="spill1-hall-meta">
-            ${ticketInfo}
             ${pill}
           </span>
         </div>
@@ -467,13 +667,13 @@ function renderOwnHallSection(
 
 /**
  * 2026-05-08 (Tobias-feedback): Render andre-haller-seksjonen ("Andre
- * haller i gruppen"). Viser status-pill + ticket-tellinger pr hall +
- * 👑-merke for master-hall. Master-agent ser denne for å avgjøre om
- * de andre hallene er klare før de starter — men start-knappen er
- * IKKE blokkert av andre halls ready-state (per Tobias-direktiv #1017).
+ * haller i gruppen"). Viser status-pill + 👑-merke for master-hall.
+ * Master-agent ser denne for å avgjøre om de andre hallene er klare
+ * før de starter — men start-knappen er IKKE blokkert av andre halls
+ * ready-state (per Tobias-direktiv #1017).
  */
 function renderOtherHallsSection(
-  otherHalls: Spill1CurrentGameHall[],
+  otherHalls: Spill1HallReadyStatus[],
   masterHallId: string | null,
 ): string {
   if (otherHalls.length === 0) {
@@ -492,7 +692,6 @@ function renderOtherHallsSection(
                   title="Master-hall" style="margin-left:6px;">👑 Master</span>`
         : "";
       const pill = renderStatusPill(h);
-      const ticketInfo = renderTicketCounts(h);
       return `
         <div class="spill1-hall-row" data-hall-id="${escapeHtml(h.hallId)}">
           <span class="spill1-hall-name">
@@ -500,7 +699,6 @@ function renderOtherHallsSection(
             ${masterCrown}
           </span>
           <span class="spill1-hall-meta">
-            ${ticketInfo}
             ${pill}
           </span>
         </div>`;
@@ -517,31 +715,20 @@ function renderOtherHallsSection(
 }
 
 /**
- * 2026-05-08 (Tobias-feedback): Render kompakt ticket-teller (digitale
- * + fysiske bonger) per hall. Skjules hvis hallen er ekskludert (da er
- * antallet irrelevant — agentene ser uansett "Ekskludert"-pillen).
+ * Bølge 3 (2026-05-08): Render status-pill basert på aggregator-state.
+ * `colorCode` (red/orange/green/gray) er ferdig-beregnet av backend's
+ * `Game1HallReadyService.computeHallStatus` — vi mapper kun til UI-label.
  *
- * Tooltip viser breakdown: "{digitale} dig + {fysiske} fys" — den
- * kompakte visningen i UI viser kun totalen for å holde rad-bredde
- * smal.
+ * red    → Ekskludert / Ingen kunder (rød)
+ * orange → Ikke klar (gul)
+ * green  → Klar (grønn)
+ * gray   → Ikke deltagende (nøytral)
  */
-function renderTicketCounts(h: Spill1CurrentGameHall): string {
-  if (h.excludedFromGame) return "";
-  const total = h.digitalTicketsSold + h.physicalTicketsSold;
-  if (total === 0) {
-    return `<small class="text-muted" style="margin-right:8px;"
-                   data-marker="spill1-tickets-count"
-                   title="Ingen bonger solgt">0 bonger</small>`;
-  }
-  const breakdown = `${h.digitalTicketsSold} dig + ${h.physicalTicketsSold} fys`;
-  return `<small class="text-muted" style="margin-right:8px;"
-                 data-marker="spill1-tickets-count"
-                 title="${breakdown}">${total} bonger</small>`;
-}
-
-function renderStatusPill(h: Spill1CurrentGameHall): string {
-  if (h.excludedFromGame) {
-    const reason = h.excludedReason ? ` (${escapeHtml(h.excludedReason)})` : "";
+function renderStatusPill(h: Spill1HallReadyStatus): string {
+  if (h.excludedFromGame || h.hasNoCustomers) {
+    const reason = h.excludedReason
+      ? ` (${escapeHtml(h.excludedReason)})`
+      : "";
     return `<span class="label label-danger" data-marker="spill1-pill-excluded">
               <i class="fa fa-times-circle" aria-hidden="true"></i> Ekskludert${reason}
             </span>`;
@@ -557,7 +744,7 @@ function renderStatusPill(h: Spill1CurrentGameHall): string {
 }
 
 function renderOwnHallButtons(
-  ownHall: Spill1CurrentGameHall | null,
+  ownHall: Spill1HallReadyStatus | null,
   gameStatus: string,
   hasValidGameId: boolean
 ): string {

@@ -30,18 +30,37 @@ git clone https://github.com/tobias363/Spillorama-system.git
 cd Spillorama-system
 npm install
 
+# F1 (E2E-verification 2026-Q3): root `npm install` installerer ikke
+# automatisk i workspaces. Hvis backend-deps mangler ved `npm run dev`
+# (f.eks. `Cannot find package 'nodemailer'`), kjør:
+npm --prefix apps/backend install
+
+# F2 (E2E-verification 2026-Q3): shared-types må bygges før backend dev
+# startes første gang (ellers feiler import av '@spillorama/shared-types').
+npm run build:types
+
+# One-command lokal-stack: Docker + Postgres + Redis + migrate + smart-seed +
+# stale-state-cleanup + backend + admin-web + game-client + visual-harness.
+# Skriver utvidet status-tabell (PIDs, DB-state, test-URL-er med dynamisk
+# TV-token) når alt er oppe. Ctrl+C dreper alt pent.
+npm run dev:all
+
+# Hvis du har en gammel runde som henger — start med fersh pilot-state:
+npm run dev:all -- --reset-state
+
+# Tilgjengelige flagg: --no-docker --no-harness --no-admin --skip-migrate
+#                     --force-seed --reset-state
+
+# (Backwards-compat: gamle individuelle dev-kommandoer fungerer fortsatt)
+npm run dev            # Bare backend (port 4000)
+npm run dev:admin      # Bare admin UI (port 5174)
+npm run dev:games      # Bare game client (port 5173)
+
 # Spin up local infrastructure (Postgres + Redis + backend)
 docker-compose up -d
 
 # Type-check backend
 npm run check
-
-# Start backend dev server (port 4000)
-npm run dev
-
-# In another terminal: frontend dev servers
-npm run dev:admin      # Admin UI (port 5173)
-npm run dev:games      # Game client (port 5174)
 
 # Run tests
 npm test                    # All units
@@ -330,12 +349,26 @@ npm run dev
 
 ## Additional Resources
 
+- **Auto-genererte arkitektur-artefakter:** @docs/auto-generated/ — current state fra main (API-endpoints, DB-skjema, modul-graf, skills-katalog). Les disse FØRST når du leter etter "current state" — håndskrevne docs kan være stale.
 - **Architecture decisions:** @docs/architecture/ARKITEKTUR.md
 - **Pengespillforskriften compliance:** @docs/compliance/
 - **OpenAPI spec:** @apps/backend/openapi.yaml (auto-served at `/api/docs`)
 - **Workflow & PR checklist:** @docs/engineering/ENGINEERING_WORKFLOW.md
 - **Operations & runbooks:** @docs/operations/
 - **Render Blueprint:** @render.yaml
+
+### Auto-genererte arkitektur-artefakter
+
+`docs/auto-generated/` inneholder alltid-friske artefakter generert fra main av `.github/workflows/auto-generate-docs.yml`:
+
+- `MODULE_DEPENDENCIES.md` — apps + packages dep-graf (mermaid) + backend-domene-graf
+- `DB_SCHEMA_SNAPSHOT.md` — tabeller + ALTER TABLE-statistikk parset fra migrations
+- `API_ENDPOINTS.md` — alle endpoints fra openapi.yaml, gruppert på tag
+- `MIGRATIONS_LOG.md` — kronologisk liste over migrations
+- `SKILLS_CATALOG.md` — alle SKILL.md med navn + description
+- `SERVICES_OVERVIEW.md` — apps/packages struktur, LOC, backend-domener
+
+**Hvis du leter etter "current state", LES disse FØRST før du graver i kode.** For å regenerere lokalt: `./scripts/generate-architecture-docs.sh`. Filene skal ALDRI redigeres manuelt — endringer overskrives.
 
 ## Key Decisions & Constraints
 
@@ -355,6 +388,30 @@ npm run dev
 ## Project-specific Conventions
 
 These are decisions baked in by the Spillorama team — not auto-detectable from code.
+
+### 🚨 Spill 1, 2, 3 fundament (LESE-FØRST-I-SESJON — gjelder ALL kode som rører live-spillene)
+
+Hvis du rører ETT av live-spillene — Spill 1 (`bingo`), Spill 2 (`rocket`) eller Spill 3 (`monsterbingo`) — les den tilsvarende implementasjons-status-doc-en **FØR du gjør noe**:
+
+| Spill | Slug | Doc | Når du må lese |
+|---|---|---|---|
+| **Spill 1** | `bingo` | @docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md | plan-runtime, master-actions (start/pause/resume/advance), scheduled-game lifecycle, klient-lobby, NextGamePanel, Spill1HallStatusBox, GamePlanEngineBridge, GoH-master-koblinger, transfer-master, ticket-purchase, draw-engine, payout |
+| **Spill 2** | `rocket` | @docs/architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md | Spill2GlobalRoomService, Spill2ConfigService, Game2AutoDrawTickService, Game2Engine, Game2JackpotTable, Lucky Number, perpetual loop, ROCKET-rom, jackpot-mapping per draw-count |
+| **Spill 3** | `monsterbingo` | @docs/architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md | Spill3GlobalRoomService, Spill3ConfigService, Game3AutoDrawTickService, Game3Engine, **Game3PhaseStateMachine**, autoClaimPhaseMode, fixed/percentage premie-modus, MONSTERBINGO-rom, sequential rad-faser |
+
+**Spillene har FUNDAMENTALT forskjellige arkitekturer:**
+
+- **Spill 1** = per-hall lobby + GoH-master + plan-runtime + scheduled-games. Master starter/pauser bevisst.
+- **Spill 2** = ETT globalt rom (`ROCKET`) + perpetual loop + auto-tick. Ingen master, ingen plan. Auto-start på `minTicketsToStart`. Jackpot-mapping per draw-count.
+- **Spill 3** = ETT globalt rom (`MONSTERBINGO`) + perpetual loop + **phase-state-machine** (Rad 1 → Rad 2 → Rad 3 → Rad 4 → Fullt Hus med auto-pause mellom faser). Unik for Spill 3 — verken Spill 1 eller Spill 2 har det.
+
+**Antakelser fra ett spill overføres IKKE til de andre.** Endringer i `GamePlanEngineBridge` rører ikke Spill 2/3. Endringer i `Spill2GlobalRoomService` rører ikke Spill 1/3. Endringer i `Game3PhaseStateMachine` rører ikke Spill 1/2.
+
+**Regel ved konflikt:** Hvis koden motsier doc-en, **doc-en vinner**. Oppdater doc-en samtidig som du gjør en avgjørelse — men IKKE handle utenom den uten eksplisitt Tobias-godkjennelse i samme sesjon.
+
+Direktiv fra Tobias 2026-05-08: *"må gjøre sånn at man alltid leser denne slik at man ikke handler utenom de reglene som er satt"*, *"alt av kode som krangler mot hverandre må fjernes ... fundamentet legges godt nå"*, og *"veldig viktig at disse ulikhetene [Spill 1 vs Spill 2/3] kommer frem i beskrivelsen"*.
+
+Dette gjelder uavhengig av om oppgaven er backend, frontend, klient, test, dokumentasjon eller infrastruktur — så lenge ett av live-spillene berøres.
 
 ### 🚨 Live-rom-robusthet (P0-MANDAT — ikke kompromisser)
 
@@ -391,6 +448,18 @@ Earlier docs claimed all four were hovedspill — that was incorrect and correct
 ### Persistent memory
 
 Project memory lives in `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/` with `MEMORY.md` as the index. Auto-loaded each session — use it for user profile, feedback rules, and project decisions that survive across sessions.
+
+### Architecture Decision Records (ADR)
+
+Design-beslutninger som påvirker ≥ 2 agenter eller services dokumenteres som ADR-er i `docs/adr/`. Når du tar en slik beslutning, **lag en ADR FØR du commiterer kode** — ellers glir "why"-konteksten bort med PM-handovers.
+
+- Index: @docs/adr/README.md
+- Template: @docs/adr/_template.md
+- Selv-referansen (om ADR-prosessen): @docs/adr/0001-adr-format-og-prosess.md
+
+ADR-er er **immutable etter merge**. Hvis du må snu, lag ny ADR som markerer den gamle `Superseded by ADR-MMMM`. Sentrale skills i `.claude/skills/` peker på relevante ADR-er i `Relaterte ADR-er`-seksjonen.
+
+> **Migrering 2026-05-08:** ADR-er er flyttet fra `docs/decisions/` (3-siffer) til `docs/adr/` (4-siffer). Eldre referanser til `ADR-NNN` skal mappes til `NNNN` per katalog i `docs/decisions/README.md`.
 
 ### Git workflow (PM-centralized, adopted 2026-04-21)
 
@@ -430,9 +499,21 @@ When scope crosses a legacy screen, reference these in agent prompts:
 - @docs/architecture/WIREFRAME_CATALOG.md — full content catalog (1760 lines, 65+ screens)
 - @docs/architecture/MASTER_PLAN_SPILL1_PILOT_2026-04-24.md — pilot critical path
 
+### Agent onboarding
+
+Hver agent-sesjon bør starte med:
+
+```bash
+./scripts/agent-onboarding.sh > /tmp/onboarding.md
+```
+
+Les `/tmp/onboarding.md` for current state (refaktor-bølger, sist merger,
+åpne pilot-blokkere, aktive worktrees, tilgjengelige skills) før første
+kode-endring. Se @docs/engineering/AGENT_ONBOARDING.md for detaljer.
+
 ---
 
-Generated for Claude Code automation. Last updated 2026-04-25.
+Generated for Claude Code automation. Last updated 2026-05-08.
 
 
 ## Skill Usage Guide

@@ -182,8 +182,13 @@ export interface DrawOrchestrationCallbacks {
    * room reaches `drawNext` with no `variantConfig` cached (Render
    * restart or cache-tap), the service tells the engine to bind
    * `DEFAULT_NORSK_BINGO_CONFIG` so auto-claim phase mode keeps working.
-   * Engine logs the `[CRIT] VARIANT_CONFIG_AUTO_BOUND` event itself —
+   * Engine logs the `[WARN] VARIANT_CONFIG_AUTO_BOUND` event itself —
    * the service simply asks for the bind.
+   *
+   * F5 (E2E-verification 2026-Q3): tidligere logget engine `[CRIT]` for
+   * dette, men det er en **kjent recovery-fallback** og ikke en kritisk
+   * feil — et `[WARN]` er passende slik at ops ikke får falske alarmer
+   * fra normal restart-flyt.
    */
   autoBindSpill1VariantConfig(
     roomCode: string,
@@ -464,14 +469,19 @@ export class DrawOrchestrationService {
       (room.gameSlug === "bingo" || room.gameSlug === "game_1") &&
       !variantConfigForDraw
     ) {
-      logger.error(
+      // F5 (E2E-verification 2026-Q3): demoted from `logger.error` ([CRIT])
+      // to `logger.warn` ([WARN]) — auto-bind er en kjent recovery-fallback
+      // (typisk etter Render restart eller cache-tap), ikke en kritisk feil.
+      // Operator skal fortsatt se hendelsen i loggen, men ikke trigge
+      // PagerDuty/Slack-alarmer som [CRIT] gjør.
+      logger.warn(
         {
           roomCode: room.code,
           gameId: game.id,
           gameSlug: room.gameSlug,
           hasConfig: false,
         },
-        "[CRIT] VARIANT_CONFIG_AUTO_BOUND — Spill 1 room mangler variantConfig (cache-miss), auto-binder DEFAULT_NORSK_BINGO_CONFIG",
+        "[WARN] VARIANT_CONFIG_AUTO_BOUND — Spill 1 room mangler variantConfig (cache-miss), auto-binder DEFAULT_NORSK_BINGO_CONFIG (kjent recovery-fallback)",
       );
       variantConfigForDraw = this.callbacks.autoBindSpill1VariantConfig(room.code);
     }

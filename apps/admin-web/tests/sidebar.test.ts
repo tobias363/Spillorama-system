@@ -50,14 +50,13 @@ describe("Sidebar spec", () => {
     expect(live).toBeUndefined();
   });
 
-  it("admin spec exposes Game 1 master-konsoll som top-level entry", () => {
-    // Master-konsollen lå tidligere nestet i Spillorama Live-gruppen. Etter
-    // fjerning av iframe-section er den løftet til top-level.
+  it("admin spec does NOT expose Game 1 master-konsoll som top-level entry (BUG #2 fix)", () => {
+    // Game 1 master-konsoll-leaf ble fjernet i sidebar-cleanup (BUG #2):
+    // hardkodet placeholder-path `/game1/master/placeholder` returnerte alltid
+    // GAME_NOT_FOUND. Master-konsollen åpnes nå via Live Operations-konsollen
+    // (admin-ops) når en master-runde faktisk pågår — ikke fra global sidebar.
     const master = adminSidebar.find((n) => n.kind === "leaf" && n.id === "game1-master-console");
-    expect(master).toBeDefined();
-    if (master && master.kind === "leaf") {
-      expect(master.path).toBe("/game1/master/placeholder");
-    }
+    expect(master).toBeUndefined();
   });
 
   it("admin spec contains expected count of top-level menu-items + 1 header", () => {
@@ -130,16 +129,20 @@ describe("Sidebar spec", () => {
     }
   });
 
-  it("agent sidebar does NOT expose Wallet Management (RBAC blokk — WALLET_COMPLIANCE_READ er ADMIN/SUPPORT only)", () => {
-    // PR #823 audit rad 8: Wallet Management mangler AGENT i RBAC, og er
-    // bevisst ekskludert fra agent-sidebar inntil Tobias tar beslutning.
+  it("agent sidebar exposes agent-wallet leaf (PR #823 audit gap #8 — wireframe-paritet)", () => {
+    // PR #823 audit rad 8 — initial decision was to hide Wallet Management
+    // from agents until RBAC was decided. Decision landed: agent-wallet IS
+    // exposed (id `agent-wallet`, path `/wallet`) per wireframe Role Management
+    // matrise (PDF 8 §8.3 rad 8) + legacy AGENT-sidebar
+    // "Lommebokadministrasjon". Backend `/api/wallets` has no explicit RBAC-
+    // gate (session-auth holds), so the leaf is now intentionally visible.
     const findWalletLeaf = (nodes: SidebarNode[]): boolean =>
       nodes.some((n) => {
-        if (n.kind === "leaf") return n.path === "/wallet" || n.id === "wallet";
+        if (n.kind === "leaf") return n.id === "agent-wallet";
         if (n.kind === "group") return findWalletLeaf(n.children);
         return false;
       });
-    expect(findWalletLeaf(agentSidebar)).toBe(false);
+    expect(findWalletLeaf(agentSidebar)).toBe(true);
   });
 
   it("agent sidebar exposes Past Game Winning History (wireframe §17.32) and Sold Tickets (wireframe §17.31)", () => {
@@ -163,21 +166,24 @@ describe("Sidebar spec", () => {
   });
 
   // Legacy 1:1 sidebar (Tobias screenshot 2026-04-27) — verify menu-items
-  // appear in the correct order under "Hovednavigasjon". `game1-master-console`
-  // skutt inn etter cash-inout for hurtig-tilgang til BIN1-master (PR
-  // #629 + master-console-route 2026-04-27).
-  // `admin-ops` skutt inn etter dashboard som ADMIN/super-admin-only entry
-  // for ops-console (PR #667 — Ops Console backend + frontend 2026-04-27).
+  // appear in the correct order under "Hovednavigasjon".
+  //
+  // History:
+  // - `admin-ops` skutt inn etter dashboard som ADMIN/super-admin-only entry
+  //   for ops-console (PR #667 — Ops Console backend + frontend 2026-04-27).
+  // - `game1-master-console`-leaf removed (BUG #2): hardcoded
+  //   `/game1/master/placeholder` always returned GAME_NOT_FOUND. Master-
+  //   konsollen åpnes nå via Live Operations-konsollen.
+  // - `schedules` + `gameManagement` + `savedGameList`-leaves konsolidert til
+  //   ett `spilleplan-redesign`-group (sidebar-reorg 2026-05-08): «Spill 1»
+  //   landingside + Spill 2/3-konfig samlet i ett menyvalg for å rydde opp.
   describe("legacy 1:1 layout", () => {
     const LEGACY_ORDER: { id: string; kind: "leaf" | "group" }[] = [
       { id: "dashboard", kind: "leaf" },
       { id: "admin-ops", kind: "leaf" },
       { id: "cash-inout", kind: "group" },
-      { id: "game1-master-console", kind: "leaf" },
       { id: "player-management", kind: "group" },
-      { id: "schedules", kind: "leaf" },
-      { id: "gameManagement", kind: "leaf" },
-      { id: "savedGameList", kind: "leaf" },
+      { id: "spilleplan-redesign", kind: "group" },
       { id: "addPhysicalTickets", kind: "leaf" },
       { id: "physicalTicketManagement", kind: "leaf" },
       { id: "physicalCashOut", kind: "leaf" },
@@ -319,7 +325,7 @@ describe("renderSidebar", () => {
     expect(chevron).toBeTruthy();
   });
 
-  it("admin sidebar renders all 16 legacy menu-items + admin-ops in sequence directly after the header", () => {
+  it("admin sidebar renders all legacy menu-items + admin-ops in sequence directly after the header", () => {
     const host = document.getElementById("host")!;
     const session = adminSession();
     setSession(session);
@@ -330,19 +336,17 @@ describe("renderSidebar", () => {
     // First child is the header <li class="header">.
     expect(items[0]?.classList.contains("header")).toBe(true);
     // Legacy menu-items. We verify each by id (leaf) or data-group-id (group).
-    // Game1 master-console er innskutt etter cash-inout (PR #629 +
-    // game1-master-console route 2026-04-27).
-    // admin-ops er innskutt etter dashboard som ADMIN/super-admin-only
-    // entry for ops-console (PR #667 — 2026-04-27).
+    // History:
+    // - admin-ops insert after dashboard (PR #667).
+    // - game1-master-console-leaf removed (BUG #2 — placeholder-route 404).
+    // - schedules/gameManagement/savedGameList consolidated into the
+    //   spilleplan-redesign-group (sidebar-reorg 2026-05-08).
     const expected = [
       { kind: "leaf", routeId: "dashboard" },
       { kind: "leaf", routeId: "admin-ops" },
       { kind: "group", id: "cash-inout" },
-      { kind: "leaf", routeId: "game1-master-console" },
       { kind: "group", id: "player-management" },
-      { kind: "leaf", routeId: "schedules" },
-      { kind: "leaf", routeId: "gameManagement" },
-      { kind: "leaf", routeId: "savedGameList" },
+      { kind: "group", id: "spilleplan-redesign" },
       { kind: "leaf", routeId: "addPhysicalTickets" },
       { kind: "leaf", routeId: "physicalTicketManagement" },
       { kind: "leaf", routeId: "physicalCashOut" },

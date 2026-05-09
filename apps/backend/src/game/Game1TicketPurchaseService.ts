@@ -5,8 +5,13 @@
  *
  * Ansvar:
  *   1) purchase({ scheduledGameId, buyerUserId, hallId, ticketSpec, paymentMethod, … })
- *      - Pre-cond: scheduledGame.status='purchase_open' og hallen er
- *        fortsatt åpen for kjøp (via Game1HallReadyService.assertPurchaseOpenForHall).
+ *      - Pre-cond: scheduledGame.status ∈ {'purchase_open','ready_to_start'}
+ *        og hallen er fortsatt åpen for kjøp (via
+ *        Game1HallReadyService.assertPurchaseOpenForHall).
+ *        F7 (E2E-verification 2026-Q3): `ready_to_start` er nå tillatt
+ *        fordi catalog-modellen via GamePlanEngineBridge spawner direkte
+ *        i `ready_to_start` (master driver framgangen). Se
+ *        PURCHASE_ALLOWED_STATUSES nedenfor.
  *      - Validerer ticket_spec mot scheduled_games.ticket_config_json —
  *        bare farger fra konfigen godtas, og priser må matche.
  *      - digital_wallet → walletAdapter.debit(buyerUserId, total, idempotencyKey).
@@ -75,6 +80,32 @@ import {
 import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 
 const log = rootLogger.child({ module: "game1-ticket-purchase-service" });
+
+/**
+ * F7 (E2E-verification 2026-Q3): statuser hvor billett-kjøp er tillatt.
+ *
+ * Bakgrunn: legacy-flyten har `scheduled` → `purchase_open` → `ready_to_start`
+ * via cron-transitions (Game1ScheduleTickService). Catalog-modellen via
+ * GamePlanEngineBridge spawner derimot scheduled-game direkte i
+ * `ready_to_start` (se GamePlanEngineBridge.ts:1032) fordi master driver
+ * framgangen — det er ikke noe purchase-vindu i plan-modellen.
+ *
+ * Pre-F7-fix: `purchase_open` var ENESTE tillatte status, så plan-spawnede
+ * spill blokkerte alle billett-kjøp med `PURCHASE_CLOSED_FOR_GAME` selv om
+ * spillerne hadde til hensikt å kjøpe før master trykket start.
+ *
+ * Fix: tillat begge statuser. `ready_to_start` betyr "alle haller klare,
+ * master kan starte" — billett-kjøp skal være lov inntil master trykker
+ * start (som flytter status til `running`). Dette matcher intensjonen i
+ * begge flyt-typer.
+ *
+ * `running` er IKKE tillatt: når engine begynner å trekke baller skal
+ * billett-kjøp være låst (regulatorisk + UX).
+ */
+const PURCHASE_ALLOWED_STATUSES: readonly string[] = [
+  "purchase_open",
+  "ready_to_start",
+];
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -285,7 +316,7 @@ export class Game1TicketPurchaseService {
    * idempotencyKey.
    *
    * Feilkoder (alle DomainError → HTTP 400):
-   *   - PURCHASE_CLOSED_FOR_GAME    — status ≠ 'purchase_open'
+   *   - PURCHASE_CLOSED_FOR_GAME    — status ∉ {'purchase_open','ready_to_start'}
    *   - PURCHASE_CLOSED_FOR_HALL    — bingovert har trykket klar
    *   - INVALID_TICKET_SPEC         — farge/pris/størrelse feil
    *   - MISSING_AGENT               — agent-betaling uten agentUserId
@@ -306,7 +337,7 @@ export class Game1TicketPurchaseService {
 
     // Hent + validér scheduled-game + hall-ready.
     const game = await this.loadScheduledGame(input.scheduledGameId);
-    if (game.status !== "purchase_open") {
+    if (!PURCHASE_ALLOWED_STATUSES.includes(game.status)) {
       throw new DomainError(
         "PURCHASE_CLOSED_FOR_GAME",
         `Billettsalget er ikke åpent for dette spillet (status: '${game.status}').`
@@ -896,7 +927,7 @@ export class Game1TicketPurchaseService {
     hallId: string
   ): Promise<void> {
     const game = await this.loadScheduledGame(scheduledGameId);
-    if (game.status !== "purchase_open") {
+    if (!PURCHASE_ALLOWED_STATUSES.includes(game.status)) {
       throw new DomainError(
         "PURCHASE_CLOSED_FOR_GAME",
         `Billettsalget er ikke åpent for dette spillet (status: '${game.status}').`

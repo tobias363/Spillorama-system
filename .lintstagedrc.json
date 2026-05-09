@@ -1,0 +1,22 @@
+{
+  "**/*.css": "stylelint --fix --allow-empty-input",
+  "**/*.{ts,tsx,mts,cts}": [
+    "bash -c 'npm run --silent lint:no-backdrop-js'",
+    "bash -c 'npm run --silent lint:no-unsafe-html'"
+  ],
+  "apps/backend/src/**/*.ts": [
+    "bash -c 'npm --prefix apps/backend run --silent check'"
+  ],
+  ".claude/skills/*/SKILL.md": [
+    "node scripts/hooks/validate-skill-frontmatter.mjs"
+  ],
+  "docs/**/*.md": [
+    "node scripts/hooks/check-markdown-links.mjs"
+  ],
+  "apps/backend/migrations/*.sql": [
+    "node scripts/hooks/validate-migration-name.mjs"
+  ],
+  "**/*.{png,jpg,jpeg,gif,webp,mp3,mp4,zip,gz,tgz,tar,pdf,exe,dmg,iso}": [
+    "node scripts/hooks/check-large-binaries.mjs"
+  ]
+}
