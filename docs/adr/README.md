@@ -18,7 +18,7 @@ Alle ADR-er som er merget til `main` regnes som aktive (med mindre status sier a
 | [0001](./0001-adr-format-og-prosess.md) | ADR-format og prosess | Accepted | 2026-05-08 |
 | [0002](./0002-perpetual-room-model-spill2-3.md) | Perpetual rom-modell for Spill 2/3 | Accepted | 2026-05-04 |
 | [0003](./0003-system-actor.md) | System-actor for engine-mutasjoner | Accepted | 2026-05-04 |
-| [0004](./0004-hash-chain-audit.md) | Hash-chain audit-trail (BIN-764) | Accepted | 2026-04-26 |
+| [0004](./0004-hash-chain-audit.md) | Hash-chain audit-trail (BIN-764) | Superseded by [ADR-0015](./0015-hash-chain-audit-actual-implementation.md) | 2026-04-26 |
 | [0005](./0005-outbox-pattern.md) | Outbox-pattern for events (BIN-761) | Accepted | 2026-04-26 |
 | [0006](./0006-structured-error-codes.md) | Strukturerte error-codes | Accepted | 2026-05-05 |
 | [0007](./0007-client-debug-suite.md) | Klient-debug-suite | Accepted | 2026-05-05 |
@@ -29,6 +29,7 @@ Alle ADR-er som er merget til `main` regnes som aktive (med mindre status sier a
 | [0012](./0012-batched-mass-payout.md) | Batched parallel mass-payout for Spill 2/3 (Wave 3a) | Accepted | 2026-05-06 |
 | [0013](./0013-per-recipient-broadcast-perpetual-rooms.md) | Per-spiller broadcast-strippet payload for perpetual rooms (Wave 3b) | Accepted | 2026-05-06 |
 | [0014](./0014-idempotent-migrations.md) | Idempotente migrasjoner — CREATE TABLE IF NOT EXISTS før ALTER (MED-2) | Accepted | 2026-05-06 |
+| [0015](./0015-hash-chain-audit-actual-implementation.md) | Hash-chain audit-trail: faktisk implementasjon (supersedes ADR-0004) | Accepted | 2026-05-09 |
 
 ## Når lage ADR
 

@@ -69,8 +69,8 @@ sequenceDiagram
             alt Claim funnet
                 BE->>DB: BEGIN TX
                 BE->>DB: INSERT app_claim
-                BE->>DB: UPDATE app_wallet (payout)
-                BE->>DB: INSERT app_compliance_audit_log
+                BE->>DB: UPDATE app_wallet (payout) + wallet_entries with hash-chain
+                BE->>DB: INSERT app_audit_log
                 BE->>DB: COMMIT TX
                 BE-->>P: socket emit claim.confirmed
                 BE-->>TV: socket emit claim.confirmed (winner-display)

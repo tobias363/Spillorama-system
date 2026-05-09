@@ -7,7 +7,8 @@
 ## Ansvar
 
 Pengespillforskriften-compliance for Spillorama. Eier:
-- Audit-trail med hash-chain (ADR-003)
+- Audit-trail i `app_audit_log` (BIN-588 — append-only, no hash-chain)
+- Wallet-side hash-chain på `wallet_entries` (BIN-764, ADR-0015)
 - Spilleregrenser (per-hall daily/monthly loss limits)
 - Selvutestengelse (1 år) og frivillig pause
 - Obligatorisk pause etter 60 min sammenhengende spilling (§66)
@@ -27,7 +28,7 @@ Pengespillforskriften-compliance for Spillorama. Eier:
 | Service | Funksjon |
 |---|---|
 | `ComplianceManager` | `canPlay(playerId, hallId)`, `recordStake(...)`, `recordPrize(...)` |
-| `AuditLogService` | Append-only audit med hash-chain (ADR-003) |
+| `AuditLogService` | Append-only audit i `app_audit_log` (BIN-588). Hash-chain er på `wallet_entries`, ikke her — se ADR-0015. |
 | `ComplianceLedgerOverskudd` | §11-distribusjon-beregning |
 | `ResponsibleGamingStore` | Loss-limits, pauses, exclusions |
 | `PlayerComplianceService` | Compliance-data per spiller per hall |
@@ -42,7 +43,12 @@ HTTP-endepunkter (via `routes/`):
 ## AuditLogService (BIN-588)
 
 Centralised, append-only audit log for admin actions, auth events, deposits, withdraws, role changes,
-and other compliance-relevant state transitions. Hash-chain integrity per ADR-003.
+and other compliance-relevant state transitions.
+
+**Important:** `app_audit_log` has NO hash-chain — only an append-only constraint
+(blocks UPDATE/DELETE) plus backups. Hash-chain is implemented separately on
+`wallet_entries` (per-account, ADR-0015) and is being added to
+`app_regulatory_ledger` (global §71-chain). See ADR-0015 for the full map.
 
 ### Shape
 
@@ -61,7 +67,7 @@ await audit.record({
 
 ### Storage
 
-- `app_compliance_audit_log` (hash-chain — ADR-003)
+- `app_audit_log` (BIN-588 — append-only, no hash-chain; ADR-0015 explains why)
 - `PostgresAuditLogStore` — production-backed; fire-and-forget writes
 - `InMemoryAuditLogStore` — tests + dev fallback
 
@@ -81,7 +87,8 @@ Case-insensitive on keys; recurses into nested objects/arrays with depth cap.
 ## Avhengigheter
 
 **Bruker:**
-- Postgres (`app_compliance_audit_log`, `app_rg_compliance_ledger`,
+- Postgres (`app_audit_log` (BIN-588 audit), `wallet_entries` (BIN-764 hash-chain),
+  `app_regulatory_ledger` (incoming §71 chain, PR #1102), `app_rg_compliance_ledger`,
   `app_player_loss_limits`, `app_player_self_exclusion`, `app_player_timed_pause`)
 - `wallet/WalletService` — saldo-sjekk
 - `platform/PlatformService` — hall-config
@@ -95,7 +102,9 @@ Case-insensitive on keys; recurses into nested objects/arrays with depth cap.
 ## Invariants
 
 1. **Fail-closed:** hvis ComplianceService er nede, blokker spill — ikke åpne
-2. **Hash-chain audit:** ADR-003. Hver audit-rad har prev_hash + curr_hash
+2. **Hash-chain audit:** ADR-0015. Per-account chain on `wallet_entries`
+   (`previous_entry_hash` + `entry_hash`). `app_audit_log` has NO hash-chain
+   — only an append-only constraint.
 3. **§11 korrekt klassifisering:** Spill 1-3 = MAIN_GAME (15 %), SpinnGo = DATABINGO (30 %)
    (jf. ADR-007)
 4. **Compliance-binding til kjøpe-hall:** ikke master-hall (BIN-661 fix, PR #443)
@@ -112,10 +121,11 @@ Case-insensitive on keys; recurses into nested objects/arrays with depth cap.
 - Sjekk om `app_player_timed_pause` har aktiv pause
 - Sjekk obligatorisk pause-status (60 min spilt → 5 min pause)
 
-### "Audit-rad har feil prev_hash"
-- Kjør `npm run verify:audit-chain`
-- Sannsynligvis race condition mellom to AuditLogService-skrivinger
-- Manuell repair krever superpowers — eskaler til Tobias
+### "wallet_entries har feil previous_entry_hash"
+- Kjør `APP_PG_CONNECTION_STRING=... npm --prefix apps/backend run verify:audit-chain`
+- Sannsynligvis race condition i `PostgresWalletAdapter.ts:1393` eller direkte DB-tampering
+- Manuell repair krever superpowers — eskaler til Tobias og se
+  `docs/compliance/AUDIT_HASH_CHAIN_VERIFICATION_2026-Q3.md` for recovery-prosedyre
 
 ### "§71 hall-rapport viser feil tall"
 - Sjekk om compliance-rad har korrekt `actor_hall_id` (ikke master-hall)
@@ -149,19 +159,25 @@ Case-insensitive on keys; recurses into nested objects/arrays with depth cap.
 - `hallId:<uuid>`
 
 ### Migrasjoner (kritiske)
-- `app_compliance_audit_log` — hash-chain
+- `20260418160000_app_audit_log.sql` — `app_audit_log` (BIN-588, append-only)
+- `20260902000000_wallet_entries_hash_chain.sql` — `wallet_entries.entry_hash`
+  + `previous_entry_hash` (BIN-764 per-account chain)
+- `20260417000005_regulatory_ledger.sql` — `app_regulatory_ledger` (Blokk 1.12,
+  global §71 chain)
 - `app_rg_compliance_ledger` — §11-data
-- `app_audit_anchors` — daglig signed snapshot
+- `app_audit_anchors` — IKKE implementert (post-pilot, se ADR-0015)
 
 ### Verifisering
-- `npm run verify:audit-chain` — bekreft hash-kjede
+- `APP_PG_CONNECTION_STRING=... npm --prefix apps/backend run verify:audit-chain`
+  — bekreft `wallet_entries` hash-chain (read-only, exit 0/1/2)
 - `npm run reconcile:compliance-ledger` — bekreft §11-totals
+- §71-ledger-verifikasjons-CLI kommer i G2-G4 (PR #1102)
 
 ## Referanser
 
-- ADR-003 (hash-chain audit)
-- ADR-007 (spillkatalog-paritet)
-- ADR-002 (system-actor)
+- ADR-0015 (hash-chain audit — actual implementation, supersedes ADR-0004)
+- ADR-0008 (spillkatalog-paritet, formerly ADR-007)
+- ADR-0003 (system-actor)
 - `docs/compliance/` — regulatorisk grunnlag
 - `docs/architecture/modules/backend/AuditLogService.md`
 - `docs/architecture/modules/backend/ComplianceManager.md`

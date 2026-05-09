@@ -1,9 +1,19 @@
 # ADR-0004 — Hash-chain audit-trail (BIN-764)
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0015](./0015-hash-chain-audit-actual-implementation.md)
 **Dato:** 2026-04-26
 **Deciders:** Tobias Haugen
 **Konsulterer:** —
+
+> **Superseded 2026-05-09:** §71-verifikasjons-passet (PR #1095 + PR #1098)
+> avdekket at innholdet under ikke matcher faktisk implementasjon. Tabellen
+> `app_compliance_audit_log` finnes ikke; hash-chain er på `wallet_entries`
+> (per-konto, BIN-764) og `app_regulatory_ledger` (global §71, PR #1102).
+> CLI-en `npm run verify:audit-chain` ble lagt til 2026-05-09 (samme PR som
+> ADR-0015). Daglig `app_audit_anchors`-implementasjon er post-pilot. Se
+> [ADR-0015](./0015-hash-chain-audit-actual-implementation.md) for korrekt
+> kart. Innholdet under er **bevart uendret som historisk kontekst** —
+> ADR-er er immutable etter merge.
 
 > **Migrering 2026-05-08:** Migrert fra `docs/decisions/ADR-003-hash-chain-audit.md` til ny struktur. Innhold uendret.
 
