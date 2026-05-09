@@ -307,6 +307,22 @@ export interface DailyReportSchedulerDeps {
   engine: BingoEngine;
   enabled: boolean;
   intervalMs: number;
+  /**
+   * G3 (2026-05-09): when set, also generates §71-canonical daily-report
+   * rows in `app_daily_regulatory_reports` (with hash-chain) after the
+   * legacy `runDailyReportJob` completes. Non-blocking — errors logged
+   * but never propagate.
+   * See `apps/backend/src/compliance/regulatory/DailyRegulatoryReportService.ts`.
+   */
+  regulatoryReportService?: {
+    generateForDate(input: {
+      date: string;
+      generatedBy?: string | null;
+    }): Promise<{
+      rows: ReadonlyArray<{ inserted: boolean }>;
+      chainsStartedFromGenesis: ReadonlyArray<unknown>;
+    }>;
+  };
 }
 
 export function createDailyReportScheduler(deps: DailyReportSchedulerDeps): { start: () => void; stop: () => void } {
@@ -324,6 +340,26 @@ export function createDailyReportScheduler(deps: DailyReportSchedulerDeps): { st
     const report = await deps.engine.runDailyReportJob({ date: dateKey });
     lastDateKey = dateKey;
     console.log(`[daily-report] generated date=${report.date} rows=${report.rows.length} turnover=${report.totals.grossTurnover} prizes=${report.totals.prizesPaid}`);
+
+    // G3 (2026-05-09): regulatory daily-report (hash-chained, immutable).
+    // Wrapped in a separate try/catch so a §71-store outage doesn't block
+    // the legacy report flow.
+    if (deps.regulatoryReportService) {
+      try {
+        const regResult = await deps.regulatoryReportService.generateForDate({
+          date: dateKey,
+        });
+        const inserted = regResult.rows.filter((row) => row.inserted).length;
+        const skipped = regResult.rows.length - inserted;
+        const genesisCount = regResult.chainsStartedFromGenesis.length;
+        console.log(
+          `[regulatory-daily-report] date=${dateKey} rows=${regResult.rows.length} ` +
+          `inserted=${inserted} skipped=${skipped} chainsFromGenesis=${genesisCount}`,
+        );
+      } catch (err) {
+        console.error("[regulatory-daily-report] generation failed", err);
+      }
+    }
   }
 
   return {

@@ -509,13 +509,27 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
   // STEP 4 — Master start-guards (Game1MasterControlService)
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("STEP 4.1 — master start fails when 1 hall is unready (HALLS_NOT_READY with details)", async () => {
+  test("STEP 4.1 — master start auto-ekskluderer 1 unready hall (Tobias-direktiv 2026-05-08)", async () => {
+    // OPPDATERT 2026-05-09: Per Tobias-direktiv 2026-05-08
+    // (Game1MasterControlService.ts:535-540) kan master starte UAVHENGIG av
+    // om andre haller er klare. Ready-status er KUN informativ visning, ikke
+    // gate. Ikke-grønne ikke-master-haller auto-ekskluderes med audit-trail
+    // (`unready_override` / `auto_excluded_red_no_players` /
+    // `auto_excluded_scan_pending`).
+    //
+    // FORRIGE assertion (HALLS_NOT_READY) gjaldt OLD adferd der unready
+    // halls blokkerte start. Lockdown-test oppdatert for å verifisere ny
+    // adferd: master start skal SUKSEDE og hall-2 (unready) skal ende opp i
+    // INSERT-eksklusjons-queryen som queue trekker.
+    //
+    // Master-hall-not-ready er fortsatt hard-feil (HALLS_NOT_READY) og
+    // verifiseres i en egen test (STEP 4.1b nedenfor).
     const masterActor: MasterActor = {
       userId: "agent-master",
       hallId: MASTER_HALL_ID,
       role: "AGENT",
     };
-    const { pool } = createStubPool([
+    const { pool, queries } = createStubPool([
       // BEGIN
       { match: (sql) => /^\s*BEGIN/.test(sql), rows: [] },
       // SELECT FOR UPDATE on scheduled_games
@@ -526,7 +540,7 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
           sql.includes("FOR UPDATE"),
         rows: [scheduledGameRow()],
       },
-      // SELECT ready snapshot
+      // SELECT ready snapshot — master grønn, hall-2 orange (unready), 3+4 grønne
       {
         match: (sql) =>
           sql.includes("FROM") &&
@@ -542,7 +556,8 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
             start_ticket_id: "100",
             final_scan_ticket_id: "108",
           },
-          // Hall 2 is NOT ready (orange — has players, missing final scan)
+          // Hall 2 is NOT ready (orange — has players, missing final scan).
+          // Skal AUTO-EKSKLUDERES av master-start, ikke blokkere.
           {
             hall_id: "hall-2",
             is_ready: false,
@@ -574,7 +589,183 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
           },
         ],
       },
-      // ROLLBACK on guard failure
+      // INSERT auto-eksklusjon for hall-2 (unready_override)
+      {
+        match: (sql) =>
+          sql.includes("INSERT INTO") &&
+          sql.includes("app_game1_hall_ready_status") &&
+          sql.includes("ON CONFLICT"),
+        rows: [],
+        rowCount: 1,
+      },
+      // INSERT audit-event start_game_with_unready_override
+      {
+        match: (sql) =>
+          sql.includes("INSERT INTO") &&
+          sql.includes("app_game1_master_audit"),
+        rows: [{ id: "audit-override" }],
+        rowCount: 1,
+      },
+      // SELECT ready snapshot post-eksklusjon (re-load)
+      {
+        match: (sql) =>
+          sql.includes("FROM") &&
+          sql.includes("app_game1_hall_ready_status"),
+        rows: [
+          {
+            hall_id: "hall-1",
+            is_ready: true,
+            excluded_from_game: false,
+            digital_tickets_sold: 5,
+            physical_tickets_sold: 3,
+            start_ticket_id: "100",
+            final_scan_ticket_id: "108",
+          },
+          {
+            hall_id: "hall-2",
+            is_ready: false,
+            excluded_from_game: true, // nå auto-ekskludert
+            digital_tickets_sold: 0,
+            physical_tickets_sold: 5,
+            start_ticket_id: "200",
+            final_scan_ticket_id: null,
+          },
+          {
+            hall_id: "hall-3",
+            is_ready: true,
+            excluded_from_game: false,
+            digital_tickets_sold: 4,
+            physical_tickets_sold: 2,
+            start_ticket_id: "300",
+            final_scan_ticket_id: "302",
+          },
+          {
+            hall_id: "hall-4",
+            is_ready: true,
+            excluded_from_game: false,
+            digital_tickets_sold: 3,
+            physical_tickets_sold: 4,
+            start_ticket_id: "400",
+            final_scan_ticket_id: "404",
+          },
+        ],
+      },
+      // UPDATE status='running'
+      {
+        match: (sql) =>
+          /UPDATE/.test(sql) &&
+          sql.includes("app_game1_scheduled_games") &&
+          sql.includes("status"),
+        rows: [{ id: TEST_SCHEDULED_GAME_ID, status: "running" }],
+        rowCount: 1,
+      },
+      // INSERT main start-audit
+      {
+        match: (sql) =>
+          sql.includes("INSERT INTO") &&
+          sql.includes("app_game1_master_audit"),
+        rows: [{ id: "audit-start" }],
+        rowCount: 1,
+      },
+      // COMMIT
+      { match: (sql) => /^\s*COMMIT/.test(sql), rows: [] },
+      // Fallback ROLLBACK hvis stuben er feil-konfigurert
+      { match: (sql) => /^\s*ROLLBACK/.test(sql), rows: [] },
+    ]);
+    const svc = Game1MasterControlService.forTesting(pool as never);
+    // Skal IKKE kaste — master kan starte uavhengig av unready halls
+    try {
+      const result = await svc.startGame({
+        gameId: TEST_SCHEDULED_GAME_ID,
+        actor: masterActor,
+        jackpotConfirmed: true,
+      });
+      assert.ok(result, "startGame skal returnere MasterActionResult");
+    } catch (err) {
+      if (err instanceof DomainError) {
+        assert.fail(
+          `STEP 4.1 master start feilet med DomainError: ${err.code} — ${err.message}\n` +
+            `Per Tobias-direktiv 2026-05-08 skal master kunne starte uavhengig av unready halls.\n` +
+            `Sjekk Game1MasterControlService.startGame auto-eksklusjons-flyt.`
+        );
+      }
+      throw err;
+    }
+    // Verifiser at auto-eksklusjon faktisk ble forsøkt (INSERT med ON CONFLICT)
+    const exclusionInsert = queries.find(
+      (q) =>
+        q.sql.includes("INSERT INTO") &&
+        q.sql.includes("app_game1_hall_ready_status") &&
+        q.sql.includes("ON CONFLICT")
+    );
+    assert.ok(
+      exclusionInsert,
+      "auto-eksklusjons-INSERT med ON CONFLICT bør ha kjørt"
+    );
+  });
+
+  test("STEP 4.1b — master start fails when MASTER hall is unready (HALLS_NOT_READY)", async () => {
+    // Master-hallen kan ALDRI auto-ekskluderes — hvis master er rød er det
+    // feil-situasjon (master må fikse sitt eget salg før start). Bevart
+    // som hard-feil per Tobias-direktiv 2026-05-08.
+    const masterActor: MasterActor = {
+      userId: "agent-master",
+      hallId: MASTER_HALL_ID,
+      role: "AGENT",
+    };
+    const { pool } = createStubPool([
+      { match: (sql) => /^\s*BEGIN/.test(sql), rows: [] },
+      {
+        match: (sql) =>
+          sql.includes("FROM") &&
+          sql.includes("app_game1_scheduled_games") &&
+          sql.includes("FOR UPDATE"),
+        rows: [scheduledGameRow()],
+      },
+      // Ready snapshot — MASTER (hall-1) ER NOT READY
+      {
+        match: (sql) =>
+          sql.includes("FROM") &&
+          sql.includes("app_game1_hall_ready_status"),
+        rows: [
+          {
+            hall_id: "hall-1", // MASTER
+            is_ready: false, // ← KEY: master er ikke klar
+            excluded_from_game: false,
+            digital_tickets_sold: 0,
+            physical_tickets_sold: 5,
+            start_ticket_id: "100",
+            final_scan_ticket_id: null,
+          },
+          {
+            hall_id: "hall-2",
+            is_ready: true,
+            excluded_from_game: false,
+            digital_tickets_sold: 5,
+            physical_tickets_sold: 3,
+            start_ticket_id: "200",
+            final_scan_ticket_id: "208",
+          },
+          {
+            hall_id: "hall-3",
+            is_ready: true,
+            excluded_from_game: false,
+            digital_tickets_sold: 4,
+            physical_tickets_sold: 2,
+            start_ticket_id: "300",
+            final_scan_ticket_id: "302",
+          },
+          {
+            hall_id: "hall-4",
+            is_ready: true,
+            excluded_from_game: false,
+            digital_tickets_sold: 3,
+            physical_tickets_sold: 4,
+            start_ticket_id: "400",
+            final_scan_ticket_id: "404",
+          },
+        ],
+      },
       { match: (sql) => /^\s*ROLLBACK/.test(sql), rows: [] },
     ]);
     const svc = Game1MasterControlService.forTesting(pool as never);
@@ -583,11 +774,15 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
         svc.startGame({
           gameId: TEST_SCHEDULED_GAME_ID,
           actor: masterActor,
-          jackpotConfirmed: true, // bypass jackpot-guard for denne testen
+          jackpotConfirmed: true,
         }),
       (err: unknown) => {
-        assert.ok(err instanceof DomainError, "should throw DomainError");
-        assert.equal((err as DomainError).code, "HALLS_NOT_READY");
+        assert.ok(err instanceof DomainError, "skal kaste DomainError");
+        assert.equal(
+          (err as DomainError).code,
+          "HALLS_NOT_READY",
+          "master-hall not ready skal forsatt være hard-feil"
+        );
         return true;
       }
     );

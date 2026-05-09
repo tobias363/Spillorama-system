@@ -127,6 +127,15 @@ Regel:
 - `SEV-1` => umiddelbar vurdering av rollback.
 - `SEV-2` > 15 min uten stabil workaround => vurder rollback.
 
+### 5.1 Eskaleringssti for vanlige hall-feil
+
+| Symptom | Eskalering / handling |
+|---|---|
+| `Spill 1 — venter på neste runde` viser warning-banner med `STALE_PLAN_RUN: ...` eller `BRIDGE_FAILED: ...` | Master kan klikke `🧹 Rydde stale plan-state`-knappen i Spill 1-status-boksen i agent-konsollet. Bekreft modal `Yes`. Idempotent og safe — ingen wallet-touch. Gjenoppretter master-handlingsevne. Hvis feil persisterer etter 2-3 forsøk: eskalér til `L2 Backend On-Call`. |
+| `LOBBY_INCONSISTENT: DUAL_SCHEDULED_GAMES` | IKKE bruk recover-stale-knappen — denne dekker ikke dual-scheduled-games. Eskalér umiddelbart til `L2 Backend On-Call` for manuell DB-reconciliation. |
+| Master-konsollet henger på `Henter Spill 1-status…` > 30 sek | Sjekk health-endpoint `/api/games/spill1/health?hallId=...`. Hvis 5xx, eskalér til `L2 Backend On-Call`. |
+| Spillere ser `Stengt — åpner kl HH:MM` selv om hallen er åpen | Verifiser `app_game_plan.start_time`/`end_time` for dagens ukedag. Hvis feilkonfig, eskalér til admin (Compliance Owner) for å rette schedule. |
+
 ## 6. Rollback Kriterier
 
 Rollback trigges dersom minst ett punkt inntreffer:
