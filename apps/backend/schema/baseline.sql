@@ -216,6 +216,43 @@ CREATE TABLE public.app_agent_transactions (
 );
 
 --
+-- Name: app_alert_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_alert_log (
+    id bigint NOT NULL,
+    scenario_key text NOT NULL,
+    game text NOT NULL,
+    hall_id text,
+    scenario text NOT NULL,
+    severity text NOT NULL,
+    message text NOT NULL,
+    details jsonb DEFAULT '{}'::jsonb NOT NULL,
+    channels text[] DEFAULT ARRAY[]::text[] NOT NULL,
+    entry_hash text NOT NULL,
+    previous_entry_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT app_alert_log_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'warning'::text, 'info'::text])))
+);
+
+--
+-- Name: app_alert_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.app_alert_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: app_alert_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.app_alert_log_id_seq OWNED BY public.app_alert_log.id;
+
+--
 -- Name: app_aml_red_flags; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -256,6 +293,26 @@ CREATE TABLE public.app_aml_rules (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT app_aml_rules_severity_check CHECK ((severity = ANY (ARRAY['LOW'::text, 'MEDIUM'::text, 'HIGH'::text, 'CRITICAL'::text])))
+);
+
+--
+-- Name: app_anti_fraud_signals; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_anti_fraud_signals (
+    id text NOT NULL,
+    user_id text NOT NULL,
+    hall_id text,
+    transaction_id text,
+    risk_level text NOT NULL,
+    signals_json jsonb DEFAULT '[]'::jsonb NOT NULL,
+    action_taken text NOT NULL,
+    ip_address text,
+    amount_cents bigint,
+    operation_type text,
+    assessed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT app_anti_fraud_signals_action_taken_check CHECK ((action_taken = ANY (ARRAY['logged'::text, 'flagged_for_review'::text, 'blocked'::text]))),
+    CONSTRAINT app_anti_fraud_signals_risk_level_check CHECK ((risk_level = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text, 'critical'::text])))
 );
 
 --
@@ -549,7 +606,7 @@ CREATE TABLE public.app_daily_schedules (
 --
 
 CREATE TABLE public.app_deposit_requests (
-    id uuid NOT NULL,
+    id text NOT NULL,
     user_id text NOT NULL,
     wallet_id text NOT NULL,
     amount_cents bigint NOT NULL,
@@ -918,8 +975,8 @@ CREATE TABLE public.app_game1_pot_events (
 
 CREATE TABLE public.app_game1_scheduled_games (
     id text NOT NULL,
-    daily_schedule_id text NOT NULL,
-    schedule_id text NOT NULL,
+    daily_schedule_id text,
+    schedule_id text,
     sub_game_index integer NOT NULL,
     sub_game_name text NOT NULL,
     custom_game_name text,
@@ -944,10 +1001,17 @@ CREATE TABLE public.app_game1_scheduled_games (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     room_code text,
     game_config_json jsonb,
+    catalog_entry_id text,
+    plan_run_id text,
+    plan_position integer,
+    trafikklys_row_color text,
+    pause_reason text,
     CONSTRAINT app_game1_scheduled_games_game_mode_check CHECK ((game_mode = ANY (ARRAY['Auto'::text, 'Manual'::text]))),
     CONSTRAINT app_game1_scheduled_games_notification_start_seconds_check CHECK ((notification_start_seconds >= 0)),
+    CONSTRAINT app_game1_scheduled_games_plan_position_check CHECK (((plan_position IS NULL) OR (plan_position >= 1))),
     CONSTRAINT app_game1_scheduled_games_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'purchase_open'::text, 'ready_to_start'::text, 'running'::text, 'paused'::text, 'completed'::text, 'cancelled'::text]))),
-    CONSTRAINT app_game1_scheduled_games_sub_game_index_check CHECK ((sub_game_index >= 0))
+    CONSTRAINT app_game1_scheduled_games_sub_game_index_check CHECK ((sub_game_index >= 0)),
+    CONSTRAINT app_game1_scheduled_games_trafikklys_row_color_check CHECK (((trafikklys_row_color IS NULL) OR (trafikklys_row_color = ANY (ARRAY['rød'::text, 'grønn'::text, 'gul'::text]))))
 );
 
 --
@@ -994,6 +1058,47 @@ CREATE TABLE public.app_game1_ticket_purchases (
 );
 
 --
+-- Name: app_game2_ticket_pools; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_game2_ticket_pools (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    room_code text NOT NULL,
+    player_id uuid NOT NULL,
+    game_id text NOT NULL,
+    ticket_grids jsonb NOT NULL,
+    purchased_indices integer[] DEFAULT '{}'::integer[] NOT NULL,
+    pick_any_number integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT app_game2_ticket_pools_pick_any_number_range CHECK (((pick_any_number IS NULL) OR ((pick_any_number >= 1) AND (pick_any_number <= 21))))
+);
+
+--
+-- Name: app_game_catalog; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_game_catalog (
+    id text NOT NULL,
+    slug text NOT NULL,
+    display_name text NOT NULL,
+    description text,
+    rules_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    ticket_colors_json jsonb DEFAULT '["gul", "hvit"]'::jsonb NOT NULL,
+    ticket_prices_cents_json jsonb DEFAULT '{"gul": 1000, "hvit": 500}'::jsonb NOT NULL,
+    prizes_cents_json jsonb NOT NULL,
+    bonus_game_slug text,
+    bonus_game_enabled boolean DEFAULT false NOT NULL,
+    requires_jackpot_setup boolean DEFAULT false NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by_user_id text,
+    prize_multiplier_mode text DEFAULT 'auto'::text NOT NULL
+);
+
+--
 -- Name: app_game_management; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1021,6 +1126,63 @@ CREATE TABLE public.app_game_management (
     CONSTRAINT app_game_management_ticket_type_check CHECK (((ticket_type IS NULL) OR (ticket_type = ANY (ARRAY['Large'::text, 'Small'::text])))),
     CONSTRAINT app_game_management_total_earning_check CHECK ((total_earning >= 0)),
     CONSTRAINT app_game_management_total_sold_check CHECK ((total_sold >= 0))
+);
+
+--
+-- Name: app_game_plan; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_game_plan (
+    id text NOT NULL,
+    name text NOT NULL,
+    description text,
+    hall_id text,
+    group_of_halls_id text,
+    weekdays_json jsonb DEFAULT '[]'::jsonb NOT NULL,
+    start_time time without time zone NOT NULL,
+    end_time time without time zone NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by_user_id text,
+    CONSTRAINT app_game_plan_hall_or_group CHECK ((((hall_id IS NOT NULL) AND (group_of_halls_id IS NULL)) OR ((hall_id IS NULL) AND (group_of_halls_id IS NOT NULL)))),
+    CONSTRAINT app_game_plan_time_window CHECK ((start_time < end_time))
+);
+
+--
+-- Name: app_game_plan_item; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_game_plan_item (
+    id text NOT NULL,
+    plan_id text NOT NULL,
+    "position" integer NOT NULL,
+    game_catalog_id text NOT NULL,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    bonus_game_override text,
+    CONSTRAINT app_game_plan_item_position_check CHECK (("position" >= 1))
+);
+
+--
+-- Name: app_game_plan_run; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_game_plan_run (
+    id text NOT NULL,
+    plan_id text NOT NULL,
+    hall_id text NOT NULL,
+    business_date date NOT NULL,
+    current_position integer DEFAULT 1 NOT NULL,
+    status text DEFAULT 'idle'::text NOT NULL,
+    jackpot_overrides_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    master_user_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT app_game_plan_run_current_position_check CHECK ((current_position >= 1)),
+    CONSTRAINT app_game_plan_run_status_check CHECK ((status = ANY (ARRAY['idle'::text, 'running'::text, 'paused'::text, 'finished'::text])))
 );
 
 --
@@ -1111,6 +1273,20 @@ CREATE TABLE public.app_hall_cash_transactions (
 );
 
 --
+-- Name: app_hall_cash_withdrawals_daily; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_hall_cash_withdrawals_daily (
+    hall_id text NOT NULL,
+    business_date date NOT NULL,
+    total_amount_cents bigint DEFAULT 0 NOT NULL,
+    count integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT app_hall_cash_withdrawals_daily_count_check CHECK ((count >= 0)),
+    CONSTRAINT app_hall_cash_withdrawals_daily_total_amount_cents_check CHECK ((total_amount_cents >= 0))
+);
+
+--
 -- Name: app_hall_display_tokens; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1157,16 +1333,20 @@ CREATE TABLE public.app_hall_group_members (
 
 CREATE TABLE public.app_hall_groups (
     id text NOT NULL,
-    legacy_group_hall_id text,
     name text NOT NULL,
+    public_code text,
+    tv_broadcast_id integer,
     status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    archived_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    legacy_group_hall_id text,
     tv_id integer,
     products_json jsonb DEFAULT '[]'::jsonb NOT NULL,
     extra_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_by text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
+    master_hall_id text,
     CONSTRAINT app_hall_groups_status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text])))
 );
 
@@ -1232,17 +1412,15 @@ CREATE TABLE public.app_halls (
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    hall_group_id text,
     tv_url text,
-    hall_number integer,
     cash_balance numeric(14,2) DEFAULT 0 NOT NULL,
     dropsafe_balance numeric(14,2) DEFAULT 0 NOT NULL,
     tv_token text DEFAULT (gen_random_uuid())::text NOT NULL,
+    hall_number integer,
     tv_voice_selection text DEFAULT 'voice1'::text NOT NULL,
-    hall_group_id text,
     is_test_hall boolean DEFAULT false NOT NULL,
-    client_variant character varying(16) DEFAULT 'unity'::character varying NOT NULL,
-    CONSTRAINT app_halls_client_variant_check CHECK (((client_variant)::text = ANY ((ARRAY['unity'::character varying, 'web'::character varying, 'unity-fallback'::character varying])::text[]))),
-    CONSTRAINT ck_app_halls_tv_voice_selection CHECK ((tv_voice_selection = ANY (ARRAY['voice1'::text, 'voice2'::text, 'voice3'::text])))
+    CONSTRAINT app_halls_tv_voice_selection_check CHECK ((tv_voice_selection = ANY (ARRAY['voice1'::text, 'voice2'::text, 'voice3'::text])))
 );
 
 --
@@ -1940,9 +2118,9 @@ CREATE TABLE public.app_rg_play_states (
     active_from_ms bigint,
     pause_until_ms bigint,
     last_mandatory_break_json jsonb,
-    games_played_in_session integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    games_played_in_session integer DEFAULT 0 NOT NULL
 );
 
 --
@@ -2068,6 +2246,87 @@ CREATE TABLE public.app_sessions (
 );
 
 --
+-- Name: app_spill1_prize_defaults; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_spill1_prize_defaults (
+    hall_id text NOT NULL,
+    phase_index smallint NOT NULL,
+    min_prize_cents bigint NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT app_spill1_prize_defaults_min_prize_cents_check CHECK ((min_prize_cents >= 0)),
+    CONSTRAINT app_spill1_prize_defaults_phase_index_check CHECK (((phase_index >= 1) AND (phase_index <= 5)))
+);
+
+--
+-- Name: app_spill2_config; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_spill2_config (
+    id text NOT NULL,
+    opening_time_start text,
+    opening_time_end text,
+    min_tickets_to_start integer DEFAULT 5 NOT NULL,
+    ticket_price_cents integer DEFAULT 1000 NOT NULL,
+    round_pause_ms integer DEFAULT 60000 NOT NULL,
+    ball_interval_ms integer DEFAULT 4000 NOT NULL,
+    jackpot_number_table_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    lucky_number_enabled boolean DEFAULT false NOT NULL,
+    lucky_number_prize_cents integer,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by_user_id text,
+    CONSTRAINT app_spill2_config_ball_interval_ms_check CHECK (((ball_interval_ms >= 1000) AND (ball_interval_ms <= 10000))),
+    CONSTRAINT app_spill2_config_lucky_number_prize_cents_check CHECK (((lucky_number_prize_cents IS NULL) OR (lucky_number_prize_cents >= 0))),
+    CONSTRAINT app_spill2_config_min_tickets_to_start_check CHECK (((min_tickets_to_start >= 0) AND (min_tickets_to_start <= 1000))),
+    CONSTRAINT app_spill2_config_round_pause_ms_check CHECK (((round_pause_ms >= 1000) AND (round_pause_ms <= 300000))),
+    CONSTRAINT app_spill2_config_ticket_price_cents_check CHECK (((ticket_price_cents > 0) AND (ticket_price_cents <= 100000)))
+);
+
+--
+-- Name: app_spill3_config; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_spill3_config (
+    id text NOT NULL,
+    min_tickets_to_start integer DEFAULT 20 NOT NULL,
+    prize_mode text NOT NULL,
+    prize_rad1_cents integer,
+    prize_rad2_cents integer,
+    prize_rad3_cents integer,
+    prize_rad4_cents integer,
+    prize_full_house_cents integer,
+    prize_rad1_pct numeric(5,2),
+    prize_rad2_pct numeric(5,2),
+    prize_rad3_pct numeric(5,2),
+    prize_rad4_pct numeric(5,2),
+    prize_full_house_pct numeric(5,2),
+    ticket_price_cents integer DEFAULT 500 NOT NULL,
+    pause_between_rows_ms integer DEFAULT 3000 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by_user_id text,
+    opening_time_start text,
+    opening_time_end text,
+    CONSTRAINT app_spill3_config_pause_between_rows_ms_check CHECK (((pause_between_rows_ms >= 0) AND (pause_between_rows_ms <= 60000))),
+    CONSTRAINT app_spill3_config_prize_full_house_cents_check CHECK (((prize_full_house_cents IS NULL) OR (prize_full_house_cents >= 0))),
+    CONSTRAINT app_spill3_config_prize_full_house_pct_check CHECK (((prize_full_house_pct IS NULL) OR ((prize_full_house_pct >= (0)::numeric) AND (prize_full_house_pct <= (100)::numeric)))),
+    CONSTRAINT app_spill3_config_prize_mode_check CHECK ((prize_mode = ANY (ARRAY['fixed'::text, 'percentage'::text]))),
+    CONSTRAINT app_spill3_config_prize_rad1_cents_check CHECK (((prize_rad1_cents IS NULL) OR (prize_rad1_cents >= 0))),
+    CONSTRAINT app_spill3_config_prize_rad1_pct_check CHECK (((prize_rad1_pct IS NULL) OR ((prize_rad1_pct >= (0)::numeric) AND (prize_rad1_pct <= (100)::numeric)))),
+    CONSTRAINT app_spill3_config_prize_rad2_cents_check CHECK (((prize_rad2_cents IS NULL) OR (prize_rad2_cents >= 0))),
+    CONSTRAINT app_spill3_config_prize_rad2_pct_check CHECK (((prize_rad2_pct IS NULL) OR ((prize_rad2_pct >= (0)::numeric) AND (prize_rad2_pct <= (100)::numeric)))),
+    CONSTRAINT app_spill3_config_prize_rad3_cents_check CHECK (((prize_rad3_cents IS NULL) OR (prize_rad3_cents >= 0))),
+    CONSTRAINT app_spill3_config_prize_rad3_pct_check CHECK (((prize_rad3_pct IS NULL) OR ((prize_rad3_pct >= (0)::numeric) AND (prize_rad3_pct <= (100)::numeric)))),
+    CONSTRAINT app_spill3_config_prize_rad4_cents_check CHECK (((prize_rad4_cents IS NULL) OR (prize_rad4_cents >= 0))),
+    CONSTRAINT app_spill3_config_prize_rad4_pct_check CHECK (((prize_rad4_pct IS NULL) OR ((prize_rad4_pct >= (0)::numeric) AND (prize_rad4_pct <= (100)::numeric)))),
+    CONSTRAINT app_spill3_config_ticket_price_cents_check CHECK ((ticket_price_cents > 0))
+);
+
+--
 -- Name: app_static_tickets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2093,6 +2352,26 @@ CREATE TABLE public.app_static_tickets (
 );
 
 --
+-- Name: app_status_incidents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_status_incidents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    title text NOT NULL,
+    description text NOT NULL,
+    status text NOT NULL,
+    impact text NOT NULL,
+    affected_components jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_by_user_id text,
+    updated_by_user_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    CONSTRAINT app_status_incidents_impact_check CHECK ((impact = ANY (ARRAY['none'::text, 'minor'::text, 'major'::text, 'critical'::text]))),
+    CONSTRAINT app_status_incidents_status_check CHECK ((status = ANY (ARRAY['investigating'::text, 'identified'::text, 'monitoring'::text, 'resolved'::text])))
+);
+
+--
 -- Name: app_sub_games; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2111,6 +2390,28 @@ CREATE TABLE public.app_sub_games (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
     CONSTRAINT app_sub_games_status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text])))
+);
+
+--
+-- Name: app_system_accounts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_system_accounts (
+    id text NOT NULL,
+    name text NOT NULL,
+    description text,
+    api_key_hash text NOT NULL,
+    permissions_json jsonb NOT NULL,
+    hall_scope_json jsonb,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    last_used_ip text,
+    created_by_user_id text,
+    revoked_at timestamp with time zone,
+    revoked_by_user_id text,
+    revoke_reason text
 );
 
 --
@@ -2296,6 +2597,7 @@ CREATE TABLE public.app_users (
     id text NOT NULL,
     email text NOT NULL,
     display_name text NOT NULL,
+    surname text,
     password_hash text NOT NULL,
     wallet_id text NOT NULL,
     role text NOT NULL,
@@ -2303,11 +2605,10 @@ CREATE TABLE public.app_users (
     birth_date date,
     kyc_verified_at timestamp with time zone,
     kyc_provider_ref text,
+    phone text,
+    compliance_data jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    phone text,
-    surname text,
-    compliance_data jsonb,
     hall_id text,
     deleted_at timestamp with time zone,
     language text DEFAULT 'nb'::text NOT NULL,
@@ -2319,7 +2620,8 @@ CREATE TABLE public.app_users (
     bankid_document_url text,
     password_changed_at timestamp with time zone,
     CONSTRAINT app_users_agent_status_check CHECK ((agent_status = ANY (ARRAY['active'::text, 'inactive'::text]))),
-    CONSTRAINT app_users_role_check CHECK ((role = ANY (ARRAY['ADMIN'::text, 'HALL_OPERATOR'::text, 'SUPPORT'::text, 'PLAYER'::text, 'AGENT'::text])))
+    CONSTRAINT app_users_role_check CHECK ((role = ANY (ARRAY['ADMIN'::text, 'HALL_OPERATOR'::text, 'SUPPORT'::text, 'PLAYER'::text, 'AGENT'::text]))),
+    CONSTRAINT chk_app_users_hall_operator_has_hall CHECK ((((role = 'HALL_OPERATOR'::text) AND (hall_id IS NOT NULL)) OR (role <> 'HALL_OPERATOR'::text)))
 );
 
 --
@@ -2402,7 +2704,7 @@ CREATE TABLE public.app_withdraw_email_allowlist (
 --
 
 CREATE TABLE public.app_withdraw_requests (
-    id uuid NOT NULL,
+    id text NOT NULL,
     user_id text NOT NULL,
     wallet_id text NOT NULL,
     amount_cents bigint NOT NULL,
@@ -2415,15 +2717,17 @@ CREATE TABLE public.app_withdraw_requests (
     rejected_by text,
     rejected_at timestamp with time zone,
     wallet_transaction_id text,
-    destination_type text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    destination_type text,
     bank_account_number text,
     bank_name text,
     account_holder text,
     exported_at timestamp with time zone,
     exported_xml_batch_id text,
-    CONSTRAINT app_withdraw_requests_amount_cents_check CHECK ((amount_cents > 0))
+    CONSTRAINT app_withdraw_requests_amount_cents_check CHECK ((amount_cents > 0)),
+    CONSTRAINT app_withdraw_requests_destination_type_check CHECK (((destination_type IS NULL) OR (destination_type = ANY (ARRAY['bank'::text, 'hall'::text])))),
+    CONSTRAINT app_withdraw_requests_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'ACCEPTED'::text, 'REJECTED'::text, 'EXPORTED'::text])))
 );
 
 --
@@ -2628,9 +2932,9 @@ CREATE TABLE public.wallet_entries (
     transaction_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     account_side text DEFAULT 'deposit'::text NOT NULL,
-    currency text DEFAULT 'NOK'::text NOT NULL,
     entry_hash text,
     previous_entry_hash text,
+    currency text DEFAULT 'NOK'::text NOT NULL,
     CONSTRAINT wallet_entries_account_side_check CHECK ((account_side = ANY (ARRAY['deposit'::text, 'winnings'::text]))),
     CONSTRAINT wallet_entries_amount_check CHECK ((amount > (0)::numeric)),
     CONSTRAINT wallet_entries_currency_nok_only CHECK ((currency = 'NOK'::text)),
@@ -2744,6 +3048,12 @@ CREATE TABLE public.wallet_transactions (
     CONSTRAINT wallet_transactions_amount_check CHECK ((amount > (0)::numeric)),
     CONSTRAINT wallet_transactions_currency_nok_only CHECK ((currency = 'NOK'::text))
 );
+
+--
+-- Name: app_alert_log id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_alert_log ALTER COLUMN id SET DEFAULT nextval('public.app_alert_log_id_seq'::regclass);
 
 --
 -- Name: app_audit_log id; Type: DEFAULT; Schema: public; Owner: -
@@ -2873,6 +3183,13 @@ ALTER TABLE ONLY public.app_agent_transactions
     ADD CONSTRAINT app_agent_transactions_pkey PRIMARY KEY (id);
 
 --
+-- Name: app_alert_log app_alert_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_alert_log
+    ADD CONSTRAINT app_alert_log_pkey PRIMARY KEY (id);
+
+--
 -- Name: app_aml_red_flags app_aml_red_flags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2892,6 +3209,13 @@ ALTER TABLE ONLY public.app_aml_rules
 
 ALTER TABLE ONLY public.app_aml_rules
     ADD CONSTRAINT app_aml_rules_slug_key UNIQUE (slug);
+
+--
+-- Name: app_anti_fraud_signals app_anti_fraud_signals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_anti_fraud_signals
+    ADD CONSTRAINT app_anti_fraud_signals_pkey PRIMARY KEY (id);
 
 --
 -- Name: app_audit_log app_audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3202,11 +3526,74 @@ ALTER TABLE ONLY public.app_game1_ticket_purchases
     ADD CONSTRAINT app_game1_ticket_purchases_pkey PRIMARY KEY (id);
 
 --
+-- Name: app_game2_ticket_pools app_game2_ticket_pools_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game2_ticket_pools
+    ADD CONSTRAINT app_game2_ticket_pools_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_game2_ticket_pools app_game2_ticket_pools_room_player_game_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game2_ticket_pools
+    ADD CONSTRAINT app_game2_ticket_pools_room_player_game_unique UNIQUE (room_code, player_id, game_id);
+
+--
+-- Name: app_game_catalog app_game_catalog_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_catalog
+    ADD CONSTRAINT app_game_catalog_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_game_catalog app_game_catalog_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_catalog
+    ADD CONSTRAINT app_game_catalog_slug_key UNIQUE (slug);
+
+--
 -- Name: app_game_management app_game_management_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.app_game_management
     ADD CONSTRAINT app_game_management_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_game_plan_item app_game_plan_item_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_item
+    ADD CONSTRAINT app_game_plan_item_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_game_plan_item app_game_plan_item_plan_id_position_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_item
+    ADD CONSTRAINT app_game_plan_item_plan_id_position_key UNIQUE (plan_id, "position");
+
+--
+-- Name: app_game_plan app_game_plan_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan
+    ADD CONSTRAINT app_game_plan_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_game_plan_run app_game_plan_run_hall_id_business_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_run
+    ADD CONSTRAINT app_game_plan_run_hall_id_business_date_key UNIQUE (hall_id, business_date);
+
+--
+-- Name: app_game_plan_run app_game_plan_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_run
+    ADD CONSTRAINT app_game_plan_run_pkey PRIMARY KEY (id);
 
 --
 -- Name: app_game_settings_change_log app_game_settings_change_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3237,6 +3624,13 @@ ALTER TABLE ONLY public.app_hall_cash_transactions
     ADD CONSTRAINT app_hall_cash_transactions_pkey PRIMARY KEY (id);
 
 --
+-- Name: app_hall_cash_withdrawals_daily app_hall_cash_withdrawals_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_cash_withdrawals_daily
+    ADD CONSTRAINT app_hall_cash_withdrawals_daily_pkey PRIMARY KEY (hall_id, business_date);
+
+--
 -- Name: app_hall_display_tokens app_hall_display_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3265,11 +3659,32 @@ ALTER TABLE ONLY public.app_hall_group_members
     ADD CONSTRAINT app_hall_group_members_pkey PRIMARY KEY (group_id, hall_id);
 
 --
+-- Name: app_hall_groups app_hall_groups_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_groups
+    ADD CONSTRAINT app_hall_groups_name_key UNIQUE (name);
+
+--
 -- Name: app_hall_groups app_hall_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.app_hall_groups
     ADD CONSTRAINT app_hall_groups_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_hall_groups app_hall_groups_public_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_groups
+    ADD CONSTRAINT app_hall_groups_public_code_key UNIQUE (public_code);
+
+--
+-- Name: app_hall_groups app_hall_groups_tv_broadcast_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_groups
+    ADD CONSTRAINT app_hall_groups_tv_broadcast_id_key UNIQUE (tv_broadcast_id);
 
 --
 -- Name: app_hall_manual_adjustments app_hall_manual_adjustments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3685,6 +4100,27 @@ ALTER TABLE ONLY public.app_sessions
     ADD CONSTRAINT app_sessions_token_hash_key UNIQUE (token_hash);
 
 --
+-- Name: app_spill1_prize_defaults app_spill1_prize_defaults_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_spill1_prize_defaults
+    ADD CONSTRAINT app_spill1_prize_defaults_pkey PRIMARY KEY (hall_id, phase_index);
+
+--
+-- Name: app_spill2_config app_spill2_config_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_spill2_config
+    ADD CONSTRAINT app_spill2_config_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_spill3_config app_spill3_config_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_spill3_config
+    ADD CONSTRAINT app_spill3_config_pkey PRIMARY KEY (id);
+
+--
 -- Name: app_static_tickets app_static_tickets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3692,11 +4128,39 @@ ALTER TABLE ONLY public.app_static_tickets
     ADD CONSTRAINT app_static_tickets_pkey PRIMARY KEY (id);
 
 --
+-- Name: app_status_incidents app_status_incidents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_status_incidents
+    ADD CONSTRAINT app_status_incidents_pkey PRIMARY KEY (id);
+
+--
 -- Name: app_sub_games app_sub_games_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.app_sub_games
     ADD CONSTRAINT app_sub_games_pkey PRIMARY KEY (id);
+
+--
+-- Name: app_system_accounts app_system_accounts_api_key_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_system_accounts
+    ADD CONSTRAINT app_system_accounts_api_key_hash_key UNIQUE (api_key_hash);
+
+--
+-- Name: app_system_accounts app_system_accounts_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_system_accounts
+    ADD CONSTRAINT app_system_accounts_name_key UNIQUE (name);
+
+--
+-- Name: app_system_accounts app_system_accounts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_system_accounts
+    ADD CONSTRAINT app_system_accounts_pkey PRIMARY KEY (id);
 
 --
 -- Name: app_system_settings app_system_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4152,6 +4616,24 @@ CREATE INDEX idx_app_agent_tx_shift ON public.app_agent_transactions USING btree
 CREATE INDEX idx_app_agent_tx_shift_action ON public.app_agent_transactions USING btree (shift_id, action_type, payment_method);
 
 --
+-- Name: idx_app_alert_log_chain; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_alert_log_chain ON public.app_alert_log USING btree (id);
+
+--
+-- Name: idx_app_alert_log_game_hall_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_alert_log_game_hall_created ON public.app_alert_log USING btree (game, hall_id, created_at DESC);
+
+--
+-- Name: idx_app_alert_log_scenario_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_alert_log_scenario_created ON public.app_alert_log USING btree (scenario_key, created_at DESC);
+
+--
 -- Name: idx_app_aml_red_flags_severity_status; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4168,6 +4650,30 @@ CREATE INDEX idx_app_aml_red_flags_status_open ON public.app_aml_red_flags USING
 --
 
 CREATE INDEX idx_app_aml_red_flags_user ON public.app_aml_red_flags USING btree (user_id);
+
+--
+-- Name: idx_app_anti_fraud_signals_hall; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_anti_fraud_signals_hall ON public.app_anti_fraud_signals USING btree (hall_id, assessed_at DESC) WHERE (hall_id IS NOT NULL);
+
+--
+-- Name: idx_app_anti_fraud_signals_review_queue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_anti_fraud_signals_review_queue ON public.app_anti_fraud_signals USING btree (assessed_at DESC) WHERE (action_taken = ANY (ARRAY['flagged_for_review'::text, 'blocked'::text]));
+
+--
+-- Name: idx_app_anti_fraud_signals_risk_level; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_anti_fraud_signals_risk_level ON public.app_anti_fraud_signals USING btree (risk_level, assessed_at DESC);
+
+--
+-- Name: idx_app_anti_fraud_signals_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_anti_fraud_signals_user ON public.app_anti_fraud_signals USING btree (user_id, assessed_at DESC);
 
 --
 -- Name: idx_app_audit_log_action_created; Type: INDEX; Schema: public; Owner: -
@@ -4380,6 +4886,24 @@ CREATE INDEX idx_app_email_verify_tokens_user ON public.app_email_verify_tokens 
 CREATE UNIQUE INDEX idx_app_game1_scheduled_games_room_code ON public.app_game1_scheduled_games USING btree (room_code) WHERE (room_code IS NOT NULL);
 
 --
+-- Name: idx_app_game2_ticket_pools_game_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game2_ticket_pools_game_id ON public.app_game2_ticket_pools USING btree (game_id);
+
+--
+-- Name: idx_app_game_catalog_slug; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_catalog_slug ON public.app_game_catalog USING btree (slug) WHERE (is_active = true);
+
+--
+-- Name: idx_app_game_catalog_sort; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_catalog_sort ON public.app_game_catalog USING btree (sort_order, display_name);
+
+--
 -- Name: idx_app_game_management_repeated_from; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4398,6 +4922,30 @@ CREATE INDEX idx_app_game_management_status ON public.app_game_management USING 
 CREATE INDEX idx_app_game_management_type ON public.app_game_management USING btree (game_type_id) WHERE (deleted_at IS NULL);
 
 --
+-- Name: idx_app_game_plan_group; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_plan_group ON public.app_game_plan USING btree (group_of_halls_id) WHERE ((is_active = true) AND (group_of_halls_id IS NOT NULL));
+
+--
+-- Name: idx_app_game_plan_hall; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_plan_hall ON public.app_game_plan USING btree (hall_id) WHERE ((is_active = true) AND (hall_id IS NOT NULL));
+
+--
+-- Name: idx_app_game_plan_item_plan; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_plan_item_plan ON public.app_game_plan_item USING btree (plan_id, "position");
+
+--
+-- Name: idx_app_game_plan_run_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_plan_run_active ON public.app_game_plan_run USING btree (hall_id, business_date) WHERE (status = ANY (ARRAY['idle'::text, 'running'::text, 'paused'::text]));
+
+--
 -- Name: idx_app_game_settings_change_log_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4408,6 +4956,12 @@ CREATE INDEX idx_app_game_settings_change_log_created_at ON public.app_game_sett
 --
 
 CREATE INDEX idx_app_game_settings_change_log_game_slug_created_at ON public.app_game_settings_change_log USING btree (game_slug, created_at DESC);
+
+--
+-- Name: idx_app_game_types_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_types_status ON public.app_game_types USING btree (status) WHERE (deleted_at IS NULL);
 
 --
 -- Name: idx_app_hall_cash_tx_hall_created; Type: INDEX; Schema: public; Owner: -
@@ -4434,6 +4988,30 @@ CREATE INDEX idx_app_hall_cash_tx_shift ON public.app_hall_cash_transactions USI
 CREATE INDEX idx_app_hall_game_config_game_slug ON public.app_hall_game_config USING btree (game_slug);
 
 --
+-- Name: idx_app_hall_group_members_group; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_hall_group_members_group ON public.app_hall_group_members USING btree (group_id);
+
+--
+-- Name: idx_app_hall_group_members_hall; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_hall_group_members_hall ON public.app_hall_group_members USING btree (hall_id);
+
+--
+-- Name: idx_app_hall_groups_master_hall_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_hall_groups_master_hall_id ON public.app_hall_groups USING btree (master_hall_id) WHERE ((master_hall_id IS NOT NULL) AND (deleted_at IS NULL));
+
+--
+-- Name: idx_app_hall_groups_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_hall_groups_status ON public.app_hall_groups USING btree (status) WHERE (deleted_at IS NULL);
+
+--
 -- Name: idx_app_halls_hall_group_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4456,6 +5034,36 @@ CREATE INDEX idx_app_leaderboard_tiers_place ON public.app_leaderboard_tiers USI
 --
 
 CREATE INDEX idx_app_leaderboard_tiers_tier_active ON public.app_leaderboard_tiers USING btree (tier_name, active) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_loyalty_events_type_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_loyalty_events_type_time ON public.app_loyalty_events USING btree (event_type, created_at DESC);
+
+--
+-- Name: idx_app_loyalty_events_user_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_loyalty_events_user_time ON public.app_loyalty_events USING btree (user_id, created_at DESC);
+
+--
+-- Name: idx_app_loyalty_player_state_lifetime; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_loyalty_player_state_lifetime ON public.app_loyalty_player_state USING btree (lifetime_points DESC);
+
+--
+-- Name: idx_app_loyalty_player_state_tier; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_loyalty_player_state_tier ON public.app_loyalty_player_state USING btree (current_tier_id) WHERE (current_tier_id IS NOT NULL);
+
+--
+-- Name: idx_app_loyalty_tiers_rank_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_loyalty_tiers_rank_active ON public.app_loyalty_tiers USING btree (rank DESC, min_points) WHERE ((deleted_at IS NULL) AND (active = true));
 
 --
 -- Name: idx_app_machine_tickets_hall_machine; Type: INDEX; Schema: public; Owner: -
@@ -4608,6 +5216,12 @@ CREATE INDEX idx_app_physical_tickets_hall_status ON public.app_physical_tickets
 CREATE INDEX idx_app_physical_tickets_undistributed_winners ON public.app_physical_tickets USING btree (assigned_game_id) WHERE ((won_amount_cents > 0) AND (is_winning_distributed = false));
 
 --
+-- Name: idx_app_player_hall_status_hall; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_player_hall_status_hall ON public.app_player_hall_status USING btree (hall_id) WHERE (is_active = false);
+
+--
 -- Name: idx_app_regulatory_ledger_daily; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4638,6 +5252,42 @@ CREATE INDEX idx_app_regulatory_ledger_user ON public.app_regulatory_ledger USIN
 CREATE UNIQUE INDEX idx_app_rg_compliance_ledger_idempotency ON public.app_rg_compliance_ledger USING btree (idempotency_key);
 
 --
+-- Name: idx_app_saved_games_created_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_saved_games_created_by ON public.app_saved_games USING btree (created_by) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_saved_games_game_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_saved_games_game_type ON public.app_saved_games USING btree (game_type_id) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_saved_games_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_saved_games_status ON public.app_saved_games USING btree (status) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_schedules_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_schedules_created_at ON public.app_schedules USING btree (created_at DESC) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_schedules_created_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_schedules_created_by ON public.app_schedules USING btree (created_by) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_schedules_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_schedules_type ON public.app_schedules USING btree (schedule_type) WHERE (deleted_at IS NULL);
+
+--
 -- Name: idx_app_sessions_last_activity; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4656,6 +5306,18 @@ CREATE INDEX idx_app_sessions_token_hash ON public.app_sessions USING btree (tok
 CREATE INDEX idx_app_sessions_user_active ON public.app_sessions USING btree (user_id) WHERE (revoked_at IS NULL);
 
 --
+-- Name: idx_app_spill2_config_singleton_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_app_spill2_config_singleton_active ON public.app_spill2_config USING btree (active) WHERE (active = true);
+
+--
+-- Name: idx_app_spill3_config_singleton_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_app_spill3_config_singleton_active ON public.app_spill3_config USING btree (active) WHERE (active = true);
+
+--
 -- Name: idx_app_static_tickets_hall_color_unpurchased; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4668,6 +5330,18 @@ CREATE INDEX idx_app_static_tickets_hall_color_unpurchased ON public.app_static_
 CREATE UNIQUE INDEX idx_app_static_tickets_hall_serial_color ON public.app_static_tickets USING btree (hall_id, ticket_serial, ticket_color);
 
 --
+-- Name: idx_app_status_incidents_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_status_incidents_active ON public.app_status_incidents USING btree (created_at DESC) WHERE (status <> 'resolved'::text);
+
+--
+-- Name: idx_app_status_incidents_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_status_incidents_created_at ON public.app_status_incidents USING btree (created_at DESC);
+
+--
 -- Name: idx_app_sub_games_game_type; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4678,6 +5352,24 @@ CREATE INDEX idx_app_sub_games_game_type ON public.app_sub_games USING btree (ga
 --
 
 CREATE INDEX idx_app_sub_games_status ON public.app_sub_games USING btree (status) WHERE (deleted_at IS NULL);
+
+--
+-- Name: idx_app_system_accounts_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_system_accounts_active ON public.app_system_accounts USING btree (api_key_hash) WHERE ((revoked_at IS NULL) AND (is_active = true));
+
+--
+-- Name: idx_app_system_accounts_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_system_accounts_created_at ON public.app_system_accounts USING btree (created_at DESC);
+
+--
+-- Name: idx_app_system_settings_category; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_system_settings_category ON public.app_system_settings USING btree (category);
 
 --
 -- Name: idx_app_terminals_hall_id; Type: INDEX; Schema: public; Owner: -
@@ -4756,6 +5448,12 @@ CREATE INDEX idx_app_user_pins_locked ON public.app_user_pins USING btree (locke
 --
 
 CREATE INDEX idx_app_user_profile_settings_blocked_until ON public.app_user_profile_settings USING btree (blocked_until) WHERE (blocked_until IS NOT NULL);
+
+--
+-- Name: idx_app_users_deleted_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_users_deleted_at ON public.app_users USING btree (deleted_at) WHERE (deleted_at IS NOT NULL);
 
 --
 -- Name: idx_app_users_hall_id; Type: INDEX; Schema: public; Owner: -
@@ -5016,10 +5714,22 @@ CREATE INDEX idx_game1_purchases_refundable ON public.app_game1_ticket_purchases
 CREATE INDEX idx_game1_purchases_scheduled_game ON public.app_game1_ticket_purchases USING btree (scheduled_game_id);
 
 --
+-- Name: idx_game1_sched_catalog; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_game1_sched_catalog ON public.app_game1_scheduled_games USING btree (catalog_entry_id, scheduled_day) WHERE (catalog_entry_id IS NOT NULL);
+
+--
 -- Name: idx_game1_sched_group_day; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_game1_sched_group_day ON public.app_game1_scheduled_games USING btree (group_hall_id, scheduled_day);
+
+--
+-- Name: idx_game1_sched_plan_run; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_game1_sched_plan_run ON public.app_game1_scheduled_games USING btree (plan_run_id) WHERE (plan_run_id IS NOT NULL);
 
 --
 -- Name: idx_game1_sched_status_start; Type: INDEX; Schema: public; Owner: -
@@ -5164,126 +5874,6 @@ CREATE INDEX idx_pt4_pending_payouts_next_agent ON public.app_physical_ticket_pe
 --
 
 CREATE INDEX idx_pt4_pending_payouts_user ON public.app_physical_ticket_pending_payouts USING btree (responsible_user_id) WHERE ((paid_out_at IS NULL) AND (rejected_at IS NULL));
-
---
--- Name: idx_public_app_player_hall_status_hall; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_app_player_hall_status_hall ON public.app_player_hall_status USING btree (hall_id) WHERE (is_active = false);
-
---
--- Name: idx_public_app_users_deleted_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_app_users_deleted_at ON public.app_users USING btree (deleted_at) WHERE (deleted_at IS NOT NULL);
-
---
--- Name: idx_public_app_users_hall_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_app_users_hall_id ON public.app_users USING btree (hall_id) WHERE (hall_id IS NOT NULL);
-
---
--- Name: idx_public_blocked_ips_active; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_blocked_ips_active ON public.app_blocked_ips USING btree (ip_address);
-
---
--- Name: idx_public_game_types_status; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_game_types_status ON public.app_game_types USING btree (status) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_hall_group_members_group; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_hall_group_members_group ON public.app_hall_group_members USING btree (group_id);
-
---
--- Name: idx_public_hall_group_members_hall; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_hall_group_members_hall ON public.app_hall_group_members USING btree (hall_id);
-
---
--- Name: idx_public_hall_groups_status; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_hall_groups_status ON public.app_hall_groups USING btree (status) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_loyalty_events_type_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_loyalty_events_type_time ON public.app_loyalty_events USING btree (event_type, created_at DESC);
-
---
--- Name: idx_public_loyalty_events_user_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_loyalty_events_user_time ON public.app_loyalty_events USING btree (user_id, created_at DESC);
-
---
--- Name: idx_public_loyalty_player_state_lifetime; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_loyalty_player_state_lifetime ON public.app_loyalty_player_state USING btree (lifetime_points DESC);
-
---
--- Name: idx_public_loyalty_player_state_tier; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_loyalty_player_state_tier ON public.app_loyalty_player_state USING btree (current_tier_id) WHERE (current_tier_id IS NOT NULL);
-
---
--- Name: idx_public_loyalty_tiers_rank_active; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_loyalty_tiers_rank_active ON public.app_loyalty_tiers USING btree (rank DESC, min_points) WHERE ((deleted_at IS NULL) AND (active = true));
-
---
--- Name: idx_public_saved_games_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_saved_games_created_by ON public.app_saved_games USING btree (created_by) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_saved_games_game_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_saved_games_game_type ON public.app_saved_games USING btree (game_type_id) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_saved_games_status; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_saved_games_status ON public.app_saved_games USING btree (status) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_schedules_created_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_schedules_created_at ON public.app_schedules USING btree (created_at DESC) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_schedules_created_by; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_schedules_created_by ON public.app_schedules USING btree (created_by) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_schedules_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_schedules_type ON public.app_schedules USING btree (schedule_type) WHERE (deleted_at IS NULL);
-
---
--- Name: idx_public_system_settings_category; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_public_system_settings_category ON public.app_system_settings USING btree (category);
 
 --
 -- Name: idx_rg_extra_prizes_scope; Type: INDEX; Schema: public; Owner: -
@@ -5514,6 +6104,12 @@ CREATE INDEX idx_wallet_transactions_account_created ON public.wallet_transactio
 CREATE UNIQUE INDEX idx_wallet_transactions_idempotency_key ON public.wallet_transactions USING btree (idempotency_key) WHERE (idempotency_key IS NOT NULL);
 
 --
+-- Name: ix_app_halls_tv_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX ix_app_halls_tv_token ON public.app_halls USING btree (tv_token);
+
+--
 -- Name: ix_hall_display_tokens_hall; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5524,12 +6120,6 @@ CREATE INDEX ix_hall_display_tokens_hall ON public.app_hall_display_tokens USING
 --
 
 CREATE INDEX ix_hall_display_tokens_hash_active ON public.app_hall_display_tokens USING btree (token_hash) WHERE (revoked_at IS NULL);
-
---
--- Name: ix_public_app_halls_tv_token; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX ix_public_app_halls_tv_token ON public.app_halls USING btree (tv_token);
 
 --
 -- Name: uniq_app_agent_halls_primary_per_user; Type: INDEX; Schema: public; Owner: -
@@ -5556,16 +6146,64 @@ CREATE UNIQUE INDEX uniq_app_agent_tx_sale_per_ticket ON public.app_agent_transa
 CREATE UNIQUE INDEX uq_app_close_day_log_game_date ON public.app_close_day_log USING btree (game_management_id, close_date);
 
 --
+-- Name: uq_app_game_types_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_game_types_name ON public.app_game_types USING btree (name) WHERE (deleted_at IS NULL);
+
+--
+-- Name: uq_app_game_types_type_slug; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_game_types_type_slug ON public.app_game_types USING btree (type_slug) WHERE (deleted_at IS NULL);
+
+--
+-- Name: uq_app_hall_groups_legacy_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_hall_groups_legacy_id ON public.app_hall_groups USING btree (legacy_group_hall_id) WHERE ((legacy_group_hall_id IS NOT NULL) AND (deleted_at IS NULL));
+
+--
+-- Name: uq_app_hall_groups_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_hall_groups_name ON public.app_hall_groups USING btree (name) WHERE (deleted_at IS NULL);
+
+--
 -- Name: uq_app_leaderboard_tiers_tier_place; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX uq_app_leaderboard_tiers_tier_place ON public.app_leaderboard_tiers USING btree (tier_name, place) WHERE (deleted_at IS NULL);
 
 --
+-- Name: uq_app_loyalty_tiers_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_loyalty_tiers_name ON public.app_loyalty_tiers USING btree (name) WHERE (deleted_at IS NULL);
+
+--
+-- Name: uq_app_loyalty_tiers_rank; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_loyalty_tiers_rank ON public.app_loyalty_tiers USING btree (rank) WHERE (deleted_at IS NULL);
+
+--
+-- Name: uq_app_mini_games_config_game_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_mini_games_config_game_type ON public.app_mini_games_config USING btree (game_type);
+
+--
 -- Name: uq_app_patterns_name_per_game_type; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX uq_app_patterns_name_per_game_type ON public.app_patterns USING btree (game_type_id, name) WHERE (deleted_at IS NULL);
+
+--
+-- Name: uq_app_saved_games_name_per_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_app_saved_games_name_per_type ON public.app_saved_games USING btree (game_type_id, name) WHERE (deleted_at IS NULL);
 
 --
 -- Name: uq_app_sub_games_name_per_type; Type: INDEX; Schema: public; Owner: -
@@ -5578,54 +6216,6 @@ CREATE UNIQUE INDEX uq_app_sub_games_name_per_type ON public.app_sub_games USING
 --
 
 CREATE UNIQUE INDEX uq_app_sub_games_sub_game_number ON public.app_sub_games USING btree (sub_game_number) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_public_game_types_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_game_types_name ON public.app_game_types USING btree (name) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_public_game_types_type_slug; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_game_types_type_slug ON public.app_game_types USING btree (type_slug) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_public_hall_groups_legacy_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_hall_groups_legacy_id ON public.app_hall_groups USING btree (legacy_group_hall_id) WHERE ((legacy_group_hall_id IS NOT NULL) AND (deleted_at IS NULL));
-
---
--- Name: uq_public_hall_groups_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_hall_groups_name ON public.app_hall_groups USING btree (name) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_public_loyalty_tiers_name; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_loyalty_tiers_name ON public.app_loyalty_tiers USING btree (name) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_public_loyalty_tiers_rank; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_loyalty_tiers_rank ON public.app_loyalty_tiers USING btree (rank) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_public_mini_games_config_game_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_mini_games_config_game_type ON public.app_mini_games_config USING btree (game_type);
-
---
--- Name: uq_public_saved_games_name_per_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_public_saved_games_name_per_type ON public.app_saved_games USING btree (game_type_id, name) WHERE (deleted_at IS NULL);
 
 --
 -- Name: app_daily_regulatory_reports trg_app_daily_regulatory_reports_no_delete; Type: TRIGGER; Schema: public; Owner: -
@@ -5851,6 +6441,13 @@ ALTER TABLE ONLY public.app_aml_red_flags
     ADD CONSTRAINT app_aml_red_flags_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id) ON DELETE CASCADE;
 
 --
+-- Name: app_anti_fraud_signals app_anti_fraud_signals_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_anti_fraud_signals
+    ADD CONSTRAINT app_anti_fraud_signals_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id) ON DELETE CASCADE;
+
+--
 -- Name: app_blocked_ips app_blocked_ips_blocked_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5940,6 +6537,20 @@ ALTER TABLE ONLY public.app_daily_schedules
 
 ALTER TABLE ONLY public.app_daily_schedules
     ADD CONSTRAINT app_daily_schedules_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE SET NULL;
+
+--
+-- Name: app_deposit_requests app_deposit_requests_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_deposit_requests
+    ADD CONSTRAINT app_deposit_requests_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE SET NULL;
+
+--
+-- Name: app_deposit_requests app_deposit_requests_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_deposit_requests
+    ADD CONSTRAINT app_deposit_requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id) ON DELETE CASCADE;
 
 --
 -- Name: app_draw_session_events app_draw_session_events_draw_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6166,6 +6777,13 @@ ALTER TABLE ONLY public.app_game1_pot_events
     ADD CONSTRAINT app_game1_pot_events_winner_user_id_fkey FOREIGN KEY (winner_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
+-- Name: app_game1_scheduled_games app_game1_scheduled_games_catalog_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game1_scheduled_games
+    ADD CONSTRAINT app_game1_scheduled_games_catalog_entry_id_fkey FOREIGN KEY (catalog_entry_id) REFERENCES public.app_game_catalog(id) ON DELETE SET NULL;
+
+--
 -- Name: app_game1_scheduled_games app_game1_scheduled_games_daily_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6177,7 +6795,7 @@ ALTER TABLE ONLY public.app_game1_scheduled_games
 --
 
 ALTER TABLE ONLY public.app_game1_scheduled_games
-    ADD CONSTRAINT app_game1_scheduled_games_group_hall_id_fkey FOREIGN KEY (group_hall_id) REFERENCES public.app_hall_groups(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT app_game1_scheduled_games_group_hall_id_fkey FOREIGN KEY (group_hall_id) REFERENCES public.app_hall_groups(id) ON DELETE CASCADE;
 
 --
 -- Name: app_game1_scheduled_games app_game1_scheduled_games_master_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6185,6 +6803,13 @@ ALTER TABLE ONLY public.app_game1_scheduled_games
 
 ALTER TABLE ONLY public.app_game1_scheduled_games
     ADD CONSTRAINT app_game1_scheduled_games_master_hall_id_fkey FOREIGN KEY (master_hall_id) REFERENCES public.app_halls(id) ON DELETE RESTRICT;
+
+--
+-- Name: app_game1_scheduled_games app_game1_scheduled_games_plan_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game1_scheduled_games
+    ADD CONSTRAINT app_game1_scheduled_games_plan_run_id_fkey FOREIGN KEY (plan_run_id) REFERENCES public.app_game_plan_run(id) ON DELETE SET NULL;
 
 --
 -- Name: app_game1_scheduled_games app_game1_scheduled_games_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6257,6 +6882,13 @@ ALTER TABLE ONLY public.app_game1_ticket_purchases
     ADD CONSTRAINT app_game1_ticket_purchases_scheduled_game_id_fkey FOREIGN KEY (scheduled_game_id) REFERENCES public.app_game1_scheduled_games(id) ON DELETE RESTRICT;
 
 --
+-- Name: app_game_catalog app_game_catalog_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_catalog
+    ADD CONSTRAINT app_game_catalog_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
 -- Name: app_game_management app_game_management_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6271,6 +6903,62 @@ ALTER TABLE ONLY public.app_game_management
     ADD CONSTRAINT app_game_management_repeated_from_id_fkey FOREIGN KEY (repeated_from_id) REFERENCES public.app_game_management(id) ON DELETE SET NULL;
 
 --
+-- Name: app_game_plan app_game_plan_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan
+    ADD CONSTRAINT app_game_plan_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_game_plan app_game_plan_group_of_halls_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan
+    ADD CONSTRAINT app_game_plan_group_of_halls_id_fkey FOREIGN KEY (group_of_halls_id) REFERENCES public.app_hall_groups(id) ON DELETE CASCADE;
+
+--
+-- Name: app_game_plan app_game_plan_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan
+    ADD CONSTRAINT app_game_plan_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE CASCADE;
+
+--
+-- Name: app_game_plan_item app_game_plan_item_game_catalog_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_item
+    ADD CONSTRAINT app_game_plan_item_game_catalog_id_fkey FOREIGN KEY (game_catalog_id) REFERENCES public.app_game_catalog(id) ON DELETE RESTRICT;
+
+--
+-- Name: app_game_plan_item app_game_plan_item_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_item
+    ADD CONSTRAINT app_game_plan_item_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.app_game_plan(id) ON DELETE CASCADE;
+
+--
+-- Name: app_game_plan_run app_game_plan_run_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_run
+    ADD CONSTRAINT app_game_plan_run_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE RESTRICT;
+
+--
+-- Name: app_game_plan_run app_game_plan_run_master_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_run
+    ADD CONSTRAINT app_game_plan_run_master_user_id_fkey FOREIGN KEY (master_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_game_plan_run app_game_plan_run_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_plan_run
+    ADD CONSTRAINT app_game_plan_run_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.app_game_plan(id) ON DELETE CASCADE;
+
+--
 -- Name: app_game_settings_change_log app_game_settings_change_log_changed_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6283,6 +6971,13 @@ ALTER TABLE ONLY public.app_game_settings_change_log
 
 ALTER TABLE ONLY public.app_game_settings_change_log
     ADD CONSTRAINT app_game_settings_change_log_game_slug_fkey FOREIGN KEY (game_slug) REFERENCES public.app_games(slug) ON DELETE CASCADE;
+
+--
+-- Name: app_game_types app_game_types_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_game_types
+    ADD CONSTRAINT app_game_types_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
 -- Name: app_hall_cash_transactions app_hall_cash_transactions_agent_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6339,6 +7034,34 @@ ALTER TABLE ONLY public.app_hall_game_config
 
 ALTER TABLE ONLY public.app_hall_game_config
     ADD CONSTRAINT app_hall_game_config_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE CASCADE;
+
+--
+-- Name: app_hall_group_members app_hall_group_members_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_group_members
+    ADD CONSTRAINT app_hall_group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.app_hall_groups(id) ON DELETE CASCADE;
+
+--
+-- Name: app_hall_group_members app_hall_group_members_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_group_members
+    ADD CONSTRAINT app_hall_group_members_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE CASCADE;
+
+--
+-- Name: app_hall_groups app_hall_groups_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_groups
+    ADD CONSTRAINT app_hall_groups_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_hall_groups app_hall_groups_master_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_hall_groups
+    ADD CONSTRAINT app_hall_groups_master_hall_id_fkey FOREIGN KEY (master_hall_id) REFERENCES public.app_halls(id) ON DELETE SET NULL;
 
 --
 -- Name: app_hall_manual_adjustments app_hall_manual_adjustments_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6411,6 +7134,41 @@ ALTER TABLE ONLY public.app_leaderboard_tiers
     ADD CONSTRAINT app_leaderboard_tiers_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
+-- Name: app_loyalty_events app_loyalty_events_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_loyalty_events
+    ADD CONSTRAINT app_loyalty_events_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_loyalty_events app_loyalty_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_loyalty_events
+    ADD CONSTRAINT app_loyalty_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id) ON DELETE CASCADE;
+
+--
+-- Name: app_loyalty_player_state app_loyalty_player_state_current_tier_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_loyalty_player_state
+    ADD CONSTRAINT app_loyalty_player_state_current_tier_id_fkey FOREIGN KEY (current_tier_id) REFERENCES public.app_loyalty_tiers(id) ON DELETE SET NULL;
+
+--
+-- Name: app_loyalty_player_state app_loyalty_player_state_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_loyalty_player_state
+    ADD CONSTRAINT app_loyalty_player_state_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id) ON DELETE CASCADE;
+
+--
+-- Name: app_loyalty_tiers app_loyalty_tiers_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_loyalty_tiers
+    ADD CONSTRAINT app_loyalty_tiers_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
 -- Name: app_machine_tickets app_machine_tickets_agent_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6458,6 +7216,13 @@ ALTER TABLE ONLY public.app_machine_tickets
 
 ALTER TABLE ONLY public.app_maintenance_windows
     ADD CONSTRAINT app_maintenance_windows_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_mini_games_config app_mini_games_config_updated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_mini_games_config
+    ADD CONSTRAINT app_mini_games_config_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
 -- Name: app_notifications app_notifications_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6768,6 +7533,20 @@ ALTER TABLE ONLY public.app_risk_countries
     ADD CONSTRAINT app_risk_countries_added_by_fkey FOREIGN KEY (added_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
+-- Name: app_saved_games app_saved_games_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_saved_games
+    ADD CONSTRAINT app_saved_games_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_schedules app_schedules_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_schedules
+    ADD CONSTRAINT app_schedules_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
 -- Name: app_screen_saver_images app_screen_saver_images_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6780,6 +7559,20 @@ ALTER TABLE ONLY public.app_screen_saver_images
 
 ALTER TABLE ONLY public.app_sessions
     ADD CONSTRAINT app_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id);
+
+--
+-- Name: app_spill2_config app_spill2_config_updated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_spill2_config
+    ADD CONSTRAINT app_spill2_config_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_spill3_config app_spill3_config_updated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_spill3_config
+    ADD CONSTRAINT app_spill3_config_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
 -- Name: app_static_tickets app_static_tickets_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6836,6 +7629,13 @@ ALTER TABLE ONLY public.app_static_tickets
 
 ALTER TABLE ONLY public.app_sub_games
     ADD CONSTRAINT app_sub_games_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_system_settings app_system_settings_updated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_system_settings
+    ADD CONSTRAINT app_system_settings_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES public.app_users(id) ON DELETE SET NULL;
 
 --
 -- Name: app_terminals app_terminals_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6954,7 +7754,7 @@ ALTER TABLE ONLY public.app_user_profile_settings
 --
 
 ALTER TABLE ONLY public.app_users
-    ADD CONSTRAINT app_users_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE SET NULL;
+    ADD CONSTRAINT app_users_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE RESTRICT;
 
 --
 -- Name: app_users app_users_parent_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6990,6 +7790,20 @@ ALTER TABLE ONLY public.app_vouchers
 
 ALTER TABLE ONLY public.app_withdraw_email_allowlist
     ADD CONSTRAINT app_withdraw_email_allowlist_added_by_fkey FOREIGN KEY (added_by) REFERENCES public.app_users(id) ON DELETE SET NULL;
+
+--
+-- Name: app_withdraw_requests app_withdraw_requests_hall_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_withdraw_requests
+    ADD CONSTRAINT app_withdraw_requests_hall_id_fkey FOREIGN KEY (hall_id) REFERENCES public.app_halls(id) ON DELETE SET NULL;
+
+--
+-- Name: app_withdraw_requests app_withdraw_requests_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_withdraw_requests
+    ADD CONSTRAINT app_withdraw_requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_users(id) ON DELETE CASCADE;
 
 --
 -- Name: app_xml_export_batches app_xml_export_batches_agent_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
