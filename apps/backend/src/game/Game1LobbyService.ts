@@ -57,7 +57,12 @@ import type {
   GamePlanRunStatus,
   Weekday,
 } from "./gamePlan.types.js";
-import type { GameCatalogEntry } from "./gameCatalog.types.js";
+import type {
+  BonusGameSlug,
+  GameCatalogEntry,
+  PrizeMultiplierMode,
+  TicketColor,
+} from "./gameCatalog.types.js";
 
 const logger = rootLogger.child({ module: "game1-lobby-service" });
 
@@ -120,6 +125,36 @@ export interface Game1LobbyNextGame {
   scheduledEndTime: string | null;
   /** ISO-timestamp for `actual_start_time` (kun hvis status=running). */
   actualStartTime: string | null;
+  /**
+   * Spillerklient-rebuild Fase 2 (BIN/SPILL1, 2026-05-10): bongfarger fra
+   * plan-runtime catalog. Per Tobias-direktiv 2026-05-09 og
+   * `SPILL_REGLER_OG_PAYOUT.md` §2: standard hovedspill har 3 farger
+   * (hvit/gul/lilla), Trafikklys avviker. Spillerklient renderer ÉN
+   * ticket-knapp per element — aldri hardkodet.
+   *
+   * Kilde: `plan.items[currentPosition].catalogEntry.ticketColors`.
+   */
+  ticketColors: TicketColor[];
+  /**
+   * Pris per bongfarge i ØRE (cents). Keys MÅ være subset av
+   * `ticketColors`. Auto-multiplikator (5/10/15 kr = 500/1000/1500 øre)
+   * er ALLEREDE anvendt — klient konverterer øre→kr for visning.
+   *
+   * Kilde: `plan.items[currentPosition].catalogEntry.ticketPricesCents`.
+   */
+  ticketPricesCents: Partial<Record<TicketColor, number>>;
+  /**
+   * Premie-modus speilet fra katalog. `auto` for standard hovedspill,
+   * `explicit_per_color` for Trafikklys og lignende spesialspill.
+   * Klient bruker dette informativt — payout-beløp regnes i backend.
+   */
+  prizeMultiplierMode: PrizeMultiplierMode;
+  /**
+   * Bonus-spill aktivt for denne katalog-raden, eller null. Klient kan
+   * bruke til å vise "Bonus: Lykkehjul" e.l. NULL = ingen bonus eller
+   * `bonusGameEnabled=false` på katalog-raden.
+   */
+  bonusGameSlug: BonusGameSlug | null;
 }
 
 export interface Game1LobbyState {
@@ -517,13 +552,42 @@ export class Game1LobbyService {
   }
 
   private buildNextGameFromItem(
-    item: { id: string; position: number; catalogEntry: GameCatalogEntry },
+    item: {
+      id: string;
+      position: number;
+      bonusGameOverride?: BonusGameSlug | null;
+      catalogEntry: GameCatalogEntry;
+    },
     status: Game1LobbyOverallStatus,
     scheduledGameId: string | null,
     scheduledStartTime: string | null,
     scheduledEndTime: string | null,
     actualStartTime: string | null,
   ): Game1LobbyNextGame {
+    // Spillerklient-rebuild Fase 2 (2026-05-10): klone arrays/objekter fra
+    // catalog så caller ikke kan mutere våre interne typer (vi returnerer
+    // dette via JSON over wire uansett, men lokal kall-site i Bølge 1
+    // aggregator kunne ellers shared-references). Trygt selv om
+    // `ticketColors` allerede er en frozen-array fra ZOD-parse.
+    const ticketColors: TicketColor[] = [...item.catalogEntry.ticketColors];
+    const ticketPricesCents: Partial<Record<TicketColor, number>> = {};
+    for (const color of ticketColors) {
+      const price = item.catalogEntry.ticketPricesCents[color];
+      if (typeof price === "number" && Number.isFinite(price) && price > 0) {
+        ticketPricesCents[color] = price;
+      }
+    }
+    // Bonus-spill: per-item-override slår katalog (Tolkning A,
+    // gamePlan.types.ts:52-58). Hvis catalog har `bonusGameEnabled=false`
+    // og item har override → override vinner (admin har bevisst skrudd
+    // på bonus for akkurat denne posisjonen). Speiler engine-bridge-
+    // logikken i `GamePlanEngineBridge`.
+    const resolvedBonus: BonusGameSlug | null =
+      item.bonusGameOverride !== undefined && item.bonusGameOverride !== null
+        ? item.bonusGameOverride
+        : item.catalogEntry.bonusGameEnabled
+          ? item.catalogEntry.bonusGameSlug
+          : null;
     return {
       itemId: item.id,
       position: item.position,
@@ -534,6 +598,10 @@ export class Game1LobbyService {
       scheduledStartTime,
       scheduledEndTime,
       actualStartTime,
+      ticketColors,
+      ticketPricesCents,
+      prizeMultiplierMode: item.catalogEntry.prizeMultiplierMode,
+      bonusGameSlug: resolvedBonus,
     };
   }
 
