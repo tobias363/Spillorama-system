@@ -294,8 +294,11 @@ test("withRetry: auto-genererer correlation-id når ikke gitt", async () => {
     },
   );
   assert.equal(result.value, "ok");
-  const finalId = captured.id;
-  assert.ok(finalId, "auto-generated correlation-id should be set");
+  const finalId = captured.id as string | null;
+  if (finalId === null) {
+    throw new Error("auto-generated correlation-id should be set");
+  }
+  // finalId er nå snevret til string.
   assert.ok(
     finalId.includes("test.auto-corr-2"),
     `correlation-id should include operationName, got: ${finalId}`,
