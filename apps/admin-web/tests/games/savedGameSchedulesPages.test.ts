@@ -142,8 +142,21 @@ describe("Schedule detail pages (BIN-625 wired)", () => {
   });
 
   it("view page fetches and renders detail tabell når rad finnes", async () => {
-    const fn = vi.fn(async () =>
-      successResponse({
+    // The view page fetches THREE endpoints in parallel after the initial
+    // schedule fetch: GET /admin/schedules/:id, GET /admin/daily-schedules
+    // (for the "Brukt av:"-section), and GET /admin/halls (to map hallId →
+    // hall-name). A naïve catch-all mock that always returns the schedule
+    // breaks the daily-schedules call (`schedules.filter` on a non-array)
+    // and crashes rendering. Route the mock per URL so each endpoint gets
+    // a shape it can read.
+    const fn = vi.fn(async (url: string) => {
+      if (url.includes("/admin/daily-schedules")) {
+        return successResponse({ schedules: [], count: 0 });
+      }
+      if (url.includes("/admin/halls")) {
+        return successResponse([]);
+      }
+      return successResponse({
         id: "sch-1",
         scheduleName: "Kveld",
         scheduleNumber: "SID_001",
@@ -157,8 +170,8 @@ describe("Schedule detail pages (BIN-625 wired)", () => {
         createdBy: null,
         createdAt: "2026-04-20T10:00:00Z",
         updatedAt: "2026-04-20T10:00:00Z",
-      })
-    );
+      });
+    });
     (globalThis as unknown as { fetch: typeof fetch }).fetch = fn as unknown as typeof fetch;
 
     const c = document.createElement("div");

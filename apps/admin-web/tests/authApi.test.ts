@@ -77,7 +77,7 @@ describe("PR-B7 auth API wrappers", () => {
         birthDate: "1990-01-01",
       });
 
-      const body = JSON.parse(String(fetchSpy.mock.calls[0][1].body));
+      const body = JSON.parse(String(fetchSpy.mock.calls[0]![1].body));
       expect(body.phone).toBeUndefined();
     });
 
@@ -105,7 +105,7 @@ describe("PR-B7 auth API wrappers", () => {
         phone: "+4712345678",
       });
 
-      const body = JSON.parse(String(fetchSpy.mock.calls[0][1].body));
+      const body = JSON.parse(String(fetchSpy.mock.calls[0]![1].body));
       expect(body.phone).toBe("+4712345678");
     });
 
@@ -185,7 +185,7 @@ describe("PR-B7 auth API wrappers", () => {
       globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
       await validateResetToken("weird/token?x=1");
-      const calledUrl = String(fetchSpy.mock.calls[0][0]);
+      const calledUrl = String(fetchSpy.mock.calls[0]![0]);
       expect(calledUrl).toContain(encodeURIComponent("weird/token?x=1"));
     });
   });

@@ -118,10 +118,15 @@ describe("GameManagementAddForm — render", () => {
     expect(c.querySelector("[data-testid='gm-submit']")).not.toBeNull();
   });
 
-  it("viser not-yet-supported for game_2", async () => {
+  it("rendrer Spill 2/3-pace-form for game_2 (ikke not-yet-supported)", async () => {
+    // Tobias 2026-05-04: Spill 2 (rocket / game_2) and Spill 3 (game_3) now
+    // dispatch into `renderSpill23PaceAddPage` (round-pace + jackpot-table
+    // form) — they are no longer shown as "ikke wired ennå" placeholders.
     const c = await setupForm("rocket");
-    expect(c.querySelector("[data-testid='gm-add-unsupported']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-add-unsupported']")).toBeNull();
     expect(c.querySelector("[data-testid='gm-add-form-root']")).toBeNull();
+    expect(c.querySelector("[data-testid='gm-add-pace-root']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-pace-submit']")).not.toBeNull();
   });
 
   it("viser error-banner for ukjent typeId", async () => {

@@ -122,10 +122,13 @@ describe("BIN-17.32 — Past Game Winning History (agent)", () => {
   });
 
   it("viser feilmelding i DOM hvis backend feiler", async () => {
+    // Bug #5 fix landed (PR #793 + noShiftFallback.ts): SHIFT_NOT_ACTIVE /
+    // NO_ACTIVE_SHIFT now render an `.alert-warning` no-shift-banner. Use
+    // a non-shift error-code so the generic `.alert-danger` path is exercised.
     globalThis.fetch = (async () =>
       new Response(
-        JSON.stringify({ ok: false, error: { code: "SHIFT_NOT_ACTIVE", message: "No shift" } }),
-        { status: 400, headers: { "content-type": "application/json" } }
+        JSON.stringify({ ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Boom" } }),
+        { status: 500, headers: { "content-type": "application/json" } }
       )) as typeof fetch;
     const c = document.createElement("div");
     await renderPastGameWinningHistoryPage(c);

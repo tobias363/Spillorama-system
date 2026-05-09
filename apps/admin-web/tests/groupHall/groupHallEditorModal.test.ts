@@ -46,6 +46,7 @@ const fixtureRow: HallGroupRow = {
   name: "Nord-gruppen",
   status: "active",
   tvId: 7,
+  masterHallId: null,
   productIds: [],
   members: [
     {
