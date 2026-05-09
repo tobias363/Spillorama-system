@@ -27,7 +27,7 @@ import {
   reconcile,
   type LedgerReconcileEvent,
   type WalletReconcileEvent,
-} from "../../scripts/lib/walletLedgerReconciliation.js";
+} from "../lib/walletLedgerReconciliation.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
 const skipReason = PG_CONN

@@ -211,9 +211,11 @@ Hvis CLI returnerer exit-code `1`, følg denne eskaleringsstien:
 - Unit: `apps/backend/scripts/__tests__/walletLedgerReconciliation.test.ts`
   — 56 tester for klassifisering, aggregering, diff og output-formattering.
   Kjøres som del av `npm test`.
-- Integration: `apps/backend/src/__tests__/walletLedgerReconciliation.integration.test.ts`
+- Integration: `apps/backend/scripts/__tests__/walletLedgerReconciliation.integration.test.ts`
   — 7 tester mot ekte Postgres. Skip-graceful: krever
-  `WALLET_PG_TEST_CONNECTION_STRING`.
+  `WALLET_PG_TEST_CONNECTION_STRING`. Kjøres som del av `npm test`
+  (matcher glob `src/**/*.test.ts` ikke per default — kjør eksplisitt
+  med `tsx --test 'apps/backend/scripts/__tests__/*.test.ts'`).
 
 ## Begrensninger (per 2026-Q3)
 

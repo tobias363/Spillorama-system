@@ -480,7 +480,18 @@ export function aggregateLedgerBuckets(
   return [...buckets.values()].sort(sortBuckets);
 }
 
-function sortBuckets(a: ReconcileBucket, b: ReconcileBucket): number {
+/**
+ * Generic sort-comparer for any record with `(walletId, businessDate, side)`-
+ * felt. Brukes for `ReconcileBucket`, `AmountMismatch` og `CountMismatch`
+ * som alle deler matching-nøkkelen men har forskjellige tilleggsfelter.
+ */
+interface SortByMatchingKey {
+  walletId: string;
+  businessDate: string;
+  side: ReconcileSide;
+}
+
+function sortBuckets<T extends SortByMatchingKey>(a: T, b: T): number {
   if (a.businessDate !== b.businessDate) return a.businessDate.localeCompare(b.businessDate);
   if (a.walletId !== b.walletId) return a.walletId.localeCompare(b.walletId);
   if (a.side !== b.side) return a.side.localeCompare(b.side);
