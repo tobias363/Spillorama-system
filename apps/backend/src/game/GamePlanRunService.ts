@@ -884,6 +884,221 @@ export class GamePlanRunService {
     return this.requireById(run.id);
   }
 
+  /**
+   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): rollback en plan-run fra
+   * `running` tilbake til `idle` med restore av `current_position`. Brukt
+   * av `MasterActionService` etter at engine-bridge-spawn feilet 3 ganger
+   * — vi sletter ikke rad-en, men setter status tilbake slik at master
+   * kan trygt re-prøve `start`/`advance` uten å havne i
+   * `GAME_PLAN_RUN_INVALID_TRANSITION`.
+   *
+   * Atomisk WHERE-klausul (status/position match) gjør operasjonen idempotent
+   * og no-op hvis run allerede er i forventet rollback-tilstand. Returnerer
+   * `null` hvis ingen rad ble oppdatert (run ble endret av annen aktør i
+   * mellomtiden) — caller bestemmer om dette er feil eller akseptabelt.
+   *
+   * Audit: `game_plan_run.rollback` med `reason`, `fromPosition`,
+   * `toPosition`, og `correlationId` for full sporbarhet i Lotteritilsynet-
+   * audit. Reason er påkrevd så vi alltid vet HVORFOR rollback skjedde.
+   */
+  async rollbackToIdle(input: {
+    runId: string;
+    expectedStatus: GamePlanRunStatus;
+    expectedPosition: number;
+    targetPosition: number;
+    reason: string;
+    masterUserId: string;
+    correlationId?: string;
+  }): Promise<GamePlanRun | null> {
+    const runId = (input.runId ?? "").trim();
+    if (!runId) {
+      throw new DomainError("INVALID_INPUT", "runId er påkrevd.");
+    }
+    const reason = (input.reason ?? "").trim();
+    if (!reason) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "reason er påkrevd ved rollback (audit-trail).",
+      );
+    }
+    const masterUserId = (input.masterUserId ?? "").trim();
+    if (!masterUserId) {
+      throw new DomainError("INVALID_INPUT", "masterUserId er påkrevd.");
+    }
+    if (
+      !Number.isFinite(input.expectedPosition) ||
+      !Number.isInteger(input.expectedPosition) ||
+      input.expectedPosition < 1
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "expectedPosition må være positivt heltall.",
+      );
+    }
+    const targetPos = Math.max(1, Math.trunc(input.targetPosition));
+    if (input.expectedStatus !== "running") {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `rollbackToIdle støtter kun expectedStatus='running' (fikk '${input.expectedStatus}').`,
+      );
+    }
+
+    const result = await this.pool.query(
+      `UPDATE ${this.table()}
+       SET status = 'idle',
+           current_position = $4,
+           started_at = NULL,
+           updated_at = now()
+       WHERE id = $1
+         AND status = $2
+         AND current_position = $3`,
+      [runId, input.expectedStatus, input.expectedPosition, targetPos],
+    );
+
+    if (result.rowCount === 0) {
+      logger.warn(
+        {
+          runId,
+          expectedStatus: input.expectedStatus,
+          expectedPosition: input.expectedPosition,
+          targetPosition: targetPos,
+          reason,
+          correlationId: input.correlationId ?? null,
+        },
+        "[fase-1] rollbackToIdle no-op — state changed under us",
+      );
+      return null;
+    }
+
+    void this.audit({
+      actorId: masterUserId,
+      actorType: "USER",
+      action: "game_plan_run.rollback",
+      resourceId: runId,
+      details: {
+        fromStatus: input.expectedStatus,
+        toStatus: "idle",
+        fromPosition: input.expectedPosition,
+        toPosition: targetPos,
+        reason,
+        correlationId: input.correlationId ?? null,
+      },
+    });
+
+    return this.requireById(runId);
+  }
+
+  /**
+   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): rollback `current_position`
+   * til en tidligere verdi UTEN å endre status. Brukt av `MasterActionService`
+   * etter at engine-bridge-spawn for en ADVANCE-action feilet — vi ruller
+   * position tilbake til forrige verdi så master kan trygt re-prøve
+   * `/advance` uten at planen tror den allerede er flyttet.
+   */
+  async rollbackPosition(input: {
+    runId: string;
+    expectedStatus: GamePlanRunStatus;
+    expectedPosition: number;
+    targetPosition: number;
+    reason: string;
+    masterUserId: string;
+    correlationId?: string;
+  }): Promise<GamePlanRun | null> {
+    const runId = (input.runId ?? "").trim();
+    if (!runId) {
+      throw new DomainError("INVALID_INPUT", "runId er påkrevd.");
+    }
+    const reason = (input.reason ?? "").trim();
+    if (!reason) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "reason er påkrevd ved rollback (audit-trail).",
+      );
+    }
+    const masterUserId = (input.masterUserId ?? "").trim();
+    if (!masterUserId) {
+      throw new DomainError("INVALID_INPUT", "masterUserId er påkrevd.");
+    }
+    if (
+      !Number.isFinite(input.expectedPosition) ||
+      !Number.isInteger(input.expectedPosition) ||
+      input.expectedPosition < 1
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "expectedPosition må være positivt heltall.",
+      );
+    }
+    if (
+      !Number.isFinite(input.targetPosition) ||
+      !Number.isInteger(input.targetPosition) ||
+      input.targetPosition < 1
+    ) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "targetPosition må være positivt heltall.",
+      );
+    }
+    if (input.targetPosition >= input.expectedPosition) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `targetPosition (${input.targetPosition}) må være < expectedPosition (${input.expectedPosition}).`,
+      );
+    }
+    if (input.expectedStatus !== "running" && input.expectedStatus !== "paused") {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `rollbackPosition støtter kun 'running' eller 'paused' (fikk '${input.expectedStatus}').`,
+      );
+    }
+
+    const result = await this.pool.query(
+      `UPDATE ${this.table()}
+       SET current_position = $4,
+           updated_at = now()
+       WHERE id = $1
+         AND status = $2
+         AND current_position = $3`,
+      [
+        runId,
+        input.expectedStatus,
+        input.expectedPosition,
+        input.targetPosition,
+      ],
+    );
+
+    if (result.rowCount === 0) {
+      logger.warn(
+        {
+          runId,
+          expectedStatus: input.expectedStatus,
+          expectedPosition: input.expectedPosition,
+          targetPosition: input.targetPosition,
+          reason,
+          correlationId: input.correlationId ?? null,
+        },
+        "[fase-1] rollbackPosition no-op — state changed under us",
+      );
+      return null;
+    }
+
+    void this.audit({
+      actorId: masterUserId,
+      actorType: "USER",
+      action: "game_plan_run.position_rollback",
+      resourceId: runId,
+      details: {
+        status: input.expectedStatus,
+        fromPosition: input.expectedPosition,
+        toPosition: input.targetPosition,
+        reason,
+        correlationId: input.correlationId ?? null,
+      },
+    });
+
+    return this.requireById(runId);
+  }
+
   // ── interne hjelpere ──────────────────────────────────────────────────
 
   private async changeStatus(
