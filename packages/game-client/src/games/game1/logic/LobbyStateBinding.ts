@@ -44,6 +44,10 @@ import type {
   SpilloramaSocket,
   Spill1LobbyStateUpdatePayload,
 } from "../../../net/SpilloramaSocket.js";
+import {
+  buildBuyPopupTicketConfigFromLobby,
+  type BuyPopupTicketConfig,
+} from "./lobbyTicketTypes.js";
 
 export interface LobbyStateBindingOptions {
   hallId: string;
@@ -179,6 +183,25 @@ export class Game1LobbyStateBinding {
     const next = this.currentState?.nextScheduledGame;
     if (next?.catalogDisplayName) return next.catalogDisplayName;
     return "Bingo";
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 2 (2026-05-10): returner BuyPopup-konsumert
+   * ticket-config (entryFee + ticketTypes[]) bygget fra plan-runtime
+   * catalog. Brukes når spilleren er i lobby/pre-game-state og
+   * `room:update.gameVariant.ticketTypes` ikke har ankommet enda.
+   *
+   * Returnerer null hvis ingen plan dekker eller hvis ticket-config er
+   * tom/ugyldig — caller skal da falle tilbake på `state.ticketTypes`
+   * (fra room:update) eller hardkodet default.
+   *
+   * Tobias-direktiv 2026-05-09: serveren er Source-of-Truth for ticket-
+   * types. Klient må aldri hardkode bongfarger eller priser.
+   */
+  getBuyPopupTicketConfig(): BuyPopupTicketConfig | null {
+    return buildBuyPopupTicketConfigFromLobby(
+      this.currentState?.nextScheduledGame ?? null,
+    );
   }
 
   // ── interne hjelpere ────────────────────────────────────────────────────

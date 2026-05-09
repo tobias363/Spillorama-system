@@ -327,6 +327,16 @@ class Game1Controller implements GameController {
       // før playScreen er bygget — kun en no-op i det tilfellet.
       const name = state?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
       this.playScreen?.setBuyPopupDisplayName(name);
+
+      // Spillerklient-rebuild Fase 2 (2026-05-10): forward ticket-config
+      // fra plan-runtime catalog. Når master bytter plan-item (Bingo →
+      // Trafikklys → Oddsen) får BuyPopup oppdatert bongfarger umiddelbart.
+      // PlayScreen bruker dette som fallback i `showBuyPopup()` når
+      // `state.ticketTypes` (fra room:update.gameVariant) er tomt — det
+      // er case-en pre-game / før første room:update har levert
+      // variant-data.
+      const ticketConfig = this.lobbyStateBinding?.getBuyPopupTicketConfig() ?? null;
+      this.playScreen?.setBuyPopupTicketConfig(ticketConfig);
     });
     void this.lobbyStateBinding.start();
 
@@ -1252,6 +1262,14 @@ class Game1Controller implements GameController {
     const initialDisplayName =
       lobbyState?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
     screen.setBuyPopupDisplayName(initialDisplayName);
+
+    // Spillerklient-rebuild Fase 2 (2026-05-10): seed ticket-config så
+    // BuyPopup viser riktige bongfarger fra første øyeblikk. Hvis lobby-
+    // binding ikke har state ennå returneres null og PlayScreen faller
+    // tilbake på `state.ticketTypes` (fra senere room:update).
+    const initialTicketConfig =
+      this.lobbyStateBinding?.getBuyPopupTicketConfig() ?? null;
+    screen.setBuyPopupTicketConfig(initialTicketConfig);
 
     return screen;
   }
