@@ -31,6 +31,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 
 import { DomainError } from "../errors/DomainError.js";
+import { formatOsloDateKey } from "../util/osloTimezone.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
@@ -189,16 +190,32 @@ function asIsoOrNull(value: Date | string | null): string | null {
   return asIso(value);
 }
 
+/**
+ * F4 (E2E-verification 2026-Q3): tidssone-bug-fix — pg-driveren returnerer
+ * `business_date`-kolonnen som JS Date hvor moment-i-tid er **server-lokal
+ * midnatt** for den lagrede DATE-en. På en server med Europe/Oslo-tz blir
+ * det `00:00 Oslo-tid`, som i UTC er forrige kalenderdag (22:00-23:00 UTC,
+ * avhengig av DST).
+ *
+ * Tidligere versjon brukte `getUTCFullYear/Month/Date` på dette objektet
+ * og returnerte da feil dato i grenseperioden 22:00-00:00 UTC. F4-rapporten
+ * dokumenterte at `business_date` "2026-05-09" ble formattert til
+ * "2026-05-08" ved nattpoll i Oslo-vinduet 00:00-02:00.
+ *
+ * Riktig oppførsel: bruk `formatOsloDateKey` som tolker moment-i-tid via
+ * `Intl.DateTimeFormat({ timeZone: 'Europe/Oslo' })`. Det gir korrekt
+ * kalenderdato uavhengig av server-host-tz og DST.
+ */
 function dateRowToString(value: unknown): string {
   if (typeof value === "string") {
     // Postgres returnerer 'YYYY-MM-DD' eller full ISO — kapp til 10 tegn.
     return value.length >= 10 ? value.slice(0, 10) : value;
   }
   if (value instanceof Date) {
-    const yyyy = value.getUTCFullYear();
-    const mm = String(value.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(value.getUTCDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
+    if (Number.isNaN(value.getTime())) {
+      return "0000-00-00";
+    }
+    return formatOsloDateKey(value);
   }
   return "0000-00-00";
 }

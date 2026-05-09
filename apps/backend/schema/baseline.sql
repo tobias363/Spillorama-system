@@ -1005,6 +1005,7 @@ CREATE TABLE public.app_game1_scheduled_games (
     plan_run_id text,
     plan_position integer,
     trafikklys_row_color text,
+    pause_reason text,
     CONSTRAINT app_game1_scheduled_games_game_mode_check CHECK ((game_mode = ANY (ARRAY['Auto'::text, 'Manual'::text]))),
     CONSTRAINT app_game1_scheduled_games_notification_start_seconds_check CHECK ((notification_start_seconds >= 0)),
     CONSTRAINT app_game1_scheduled_games_plan_position_check CHECK (((plan_position IS NULL) OR (plan_position >= 1))),

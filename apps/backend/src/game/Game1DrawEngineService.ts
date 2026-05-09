@@ -1320,6 +1320,28 @@ export class Game1DrawEngineService {
           [scheduledGameId]
         );
 
+        // F21 (E2E-verification 2026-Q3): strukturert log-event når engine
+        // avslutter en runde. Tidligere endte spillet stille uten log
+        // (kun DB-update + audit-event), så ops kunne ikke se "hvorfor
+        // sluttet runden" uten å spørre databasen. Nå logger vi grunn
+        // (FULL_HOUSE eller MAX_DRAWS_REACHED), draws-count, og phase.
+        // Følger CLAUDE.md regel 3.4 R5/R8 om strukturert event-logg
+        // per state-overgang.
+        const completionReason = bingoWon ? "FULL_HOUSE" : "MAX_DRAWS_REACHED";
+        log.info(
+          {
+            scheduledGameId,
+            roomCode: game.room_code,
+            reason: completionReason,
+            drawsCompleted: nextSequence,
+            maxDraws,
+            currentPhase: state.current_phase,
+            phaseWon: phaseResult.phaseWon,
+            event: "game1.engine.completed",
+          },
+          `[engine] game completed reason=${completionReason} draws=${nextSequence}/${maxDraws} phase=${state.current_phase}`,
+        );
+
         // PR-C1b: capture room_code for POST-commit destroyRoom-kall.
         // `game.room_code` er allerede FOR UPDATE-låst tidligere i
         // transaksjonen (se loadScheduledGameForUpdate), så vi trenger

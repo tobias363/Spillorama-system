@@ -30,6 +30,15 @@ git clone https://github.com/tobias363/Spillorama-system.git
 cd Spillorama-system
 npm install
 
+# F1 (E2E-verification 2026-Q3): root `npm install` installerer ikke
+# automatisk i workspaces. Hvis backend-deps mangler ved `npm run dev`
+# (f.eks. `Cannot find package 'nodemailer'`), kjør:
+npm --prefix apps/backend install
+
+# F2 (E2E-verification 2026-Q3): shared-types må bygges før backend dev
+# startes første gang (ellers feiler import av '@spillorama/shared-types').
+npm run build:types
+
 # One-command lokal-stack: Docker + Postgres + Redis + migrate + smart-seed +
 # stale-state-cleanup + backend + admin-web + game-client + visual-harness.
 # Skriver utvidet status-tabell (PIDs, DB-state, test-URL-er med dynamisk
@@ -46,6 +55,9 @@ npm run dev:all -- --reset-state
 npm run dev            # Bare backend (port 4000)
 npm run dev:admin      # Bare admin UI (port 5174)
 npm run dev:games      # Bare game client (port 5173)
+
+# Spin up local infrastructure (Postgres + Redis + backend)
+docker-compose up -d
 
 # Type-check backend
 npm run check
