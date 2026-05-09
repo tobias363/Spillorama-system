@@ -442,6 +442,27 @@ export class GamePlanRunService {
    *
    * Hvis ingen plan finnes som dekker (hall, weekday) kastes
    * `NO_MATCHING_PLAN`.
+   *
+   * F-Plan-Reuse (2026-05-09): hvis eksisterende run for dagens
+   * businessDate er `status='finished'` (master har manuelt finishet
+   * eller recovery-cleanup har lukket den), skal vi tillate master å
+   * starte en ny runde samme dag. Vi DELETE-r den finished-raden og
+   * INSERT-er en ny idle-rad med ny ID.
+   *
+   * Hvorfor DELETE+INSERT vs. UPDATE-i-place:
+   *   1. UNIQUE(hall_id, business_date) blokkerer en parallell INSERT
+   *      uten å fjerne den gamle først.
+   *   2. UPDATE av primary-key (id) ville kreve CASCADE-håndtering på
+   *      `app_game1_scheduled_games.plan_run_id` (FK med ON DELETE SET
+   *      NULL). DELETE er mer eksplisitt: scheduled-games for forrige
+   *      run dropper plan_run_id-link (de er allerede merket
+   *      finished/cancelled av recovery-flow eller engine-completion).
+   *   3. Audit-trail forbedres: vi får én create-event per "logisk
+   *      runde" (forrige run sin lifecycle-events ligger fremdeles i
+   *      audit-log med den gamle ID-en).
+   *
+   * Eksisterende non-finished status (idle/running/paused) returneres
+   * uendret — det er den gamle idempotency-semantikken.
    */
   async getOrCreateForToday(
     hallId: string,
@@ -472,7 +493,39 @@ export class GamePlanRunService {
     }
 
     const existing = await this.findForDay(hall, dateStr);
-    if (existing) return existing;
+    if (existing && existing.status !== "finished") {
+      // Active run (idle/running/paused) — return as-is (idempotent).
+      return existing;
+    }
+
+    // F-Plan-Reuse (2026-05-09): if a finished run exists for the same
+    // business-date, delete it so we can create a fresh idle run. We
+    // capture the previous run's id for audit-trail correlation.
+    let previousRunId: string | null = null;
+    if (existing && existing.status === "finished") {
+      // Defensive guard: only delete if status is actually finished. We
+      // re-check the WHERE-clause in the DELETE itself so a race that
+      // resurrects the row between findForDay and DELETE is safe (the
+      // DELETE matches zero rows and we fall through to a fresh
+      // findForDay below).
+      previousRunId = existing.id;
+      const { rowCount } = await this.pool.query(
+        `DELETE FROM ${this.table()}
+         WHERE id = $1 AND status = 'finished'`,
+        [existing.id],
+      );
+      if ((rowCount ?? 0) === 0) {
+        // Race-loser: someone resurrected the row (e.g. UPDATE status).
+        // Re-fetch and return whatever we now find. If it became
+        // non-finished, that's the active run and caller gets it.
+        const racyResurrected = await this.findForDay(hall, dateStr);
+        if (racyResurrected && racyResurrected.status !== "finished") {
+          return racyResurrected;
+        }
+        // Still finished after race? Fall through to attempt INSERT
+        // again — the unique-violation-handler below will sort it out.
+      }
+    }
 
     // Finn matchende plan. Vi henter alle aktive planer som enten:
     //   - er bundet direkte til hall, ELLER
@@ -527,10 +580,16 @@ export class GamePlanRunService {
     // direct-hall-binding eller via GoH-medlemskap. Dette ble lagt til
     // som del av isMaster-fix-en for å gjøre GoH-bundne planer synlige
     // i audit-loggen. `matchedGroupId` er null for direct-bundne planer.
+    //
+    // F-Plan-Reuse (2026-05-09): når runen erstatter en finished run
+    // (samme hall + business_date), inkluderer vi `previousRunId` så
+    // audit-traceability fra forrige til ny runde er eksplisitt.
     void this.audit({
       actorId: "system",
       actorType: "SYSTEM",
-      action: "game_plan_run.create",
+      action: previousRunId
+        ? "game_plan_run.recreate_after_finish"
+        : "game_plan_run.create",
       resourceId: id,
       details: {
         planId: matched.id,
@@ -538,6 +597,7 @@ export class GamePlanRunService {
         businessDate: dateStr,
         bindingType: matched.hallId === hall ? "direct" : "group",
         matchedGroupId: matched.groupOfHallsId ?? null,
+        ...(previousRunId ? { previousRunId } : {}),
       },
     });
     const created = await this.findForDay(hall, dateStr);

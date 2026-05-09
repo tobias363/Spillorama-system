@@ -74,7 +74,7 @@ import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import { DomainError } from "../../errors/DomainError.js";
 import type { MasterActor } from "../Game1MasterControlService.js";
 import { logger as rootLogger } from "../../util/logger.js";
-import { todayOsloKey } from "../../util/osloTimezone.js";
+import { formatOsloDateKey, todayOsloKey } from "../../util/osloTimezone.js";
 
 const logger = rootLogger.child({ module: "stale-plan-run-recovery" });
 
@@ -169,12 +169,39 @@ function assertActor(actor: unknown): MasterActor {
   return a as MasterActor;
 }
 
+/**
+ * F-Recovery-Incomplete (2026-05-09): timezone-bug-fix mirroring F4 from
+ * `GamePlanRunService.dateRowToString`. The pg-driver returns DATE columns
+ * as a JS Date whose moment-in-time is the **server-local midnight** of
+ * the stored DATE. On a server in Europe/Oslo this is `00:00 Oslo time`,
+ * which in UTC is the previous calendar day (22:00-23:00 UTC depending on
+ * DST). Calling `getUTC*` on that Date returns the wrong date in the
+ * 22:00-00:00 UTC window (00:00-02:00 Oslo).
+ *
+ * Effect: snapshot rows in the recovery API response and audit-log
+ * details would carry the wrong businessDate around midnight, so support
+ * looking at the audit-trail later would think a row from "today" was
+ * "yesterday" — exactly the same false-flag mode that aggregator hit
+ * before F4 landed.
+ *
+ * Fix: use `formatOsloDateKey` from osloTimezone.ts which interprets
+ * moment-in-time via `Intl.DateTimeFormat({ timeZone: 'Europe/Oslo' })`.
+ * This gives the correct calendar date regardless of server-host-tz and
+ * DST. Same helper as F4-fix in GamePlanRunService.
+ *
+ * Note: the actual SQL filter `business_date < $2::date` already uses
+ * Oslo-tz today (`todayOsloKey(now)` is passed as `$2`). The Postgres
+ * comparison is timezone-naive on the `date` type, so the comparison
+ * itself is correct. THIS function only affects how we format the
+ * snapshot for the response/audit-event — never blocks recovery from
+ * happening, but ensures correct timestamps everywhere.
+ */
 function dateRowToString(value: unknown): string {
   if (value instanceof Date) {
-    const y = value.getUTCFullYear();
-    const m = String(value.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(value.getUTCDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    if (Number.isNaN(value.getTime())) {
+      return "0000-00-00";
+    }
+    return formatOsloDateKey(value);
   }
   if (typeof value === "string") {
     // Postgres `date` type may already be `YYYY-MM-DD`.
