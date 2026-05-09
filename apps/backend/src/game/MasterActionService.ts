@@ -107,6 +107,7 @@ import type { AuditLogService } from "../compliance/AuditLogService.js";
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 import { todayOsloKey } from "../util/osloTimezone.js";
+import { withRetry, DEFAULT_RETRY_DELAYS_MS } from "../util/retry.js";
 import type {
   GameLobbyAggregator,
   LobbyActorContext,
@@ -234,6 +235,15 @@ export interface MasterActionServiceOptions {
   lobbyBroadcaster?: {
     broadcastForHall(hallId: string): Promise<void>;
   } | null;
+  /**
+   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): backoff-delays for bridge-spawn
+   * retry. Default `[100, 500, 2000]` ms. Tester injisere `[0, 0, 0]`.
+   */
+  bridgeRetryDelaysMs?: ReadonlyArray<number>;
+  /**
+   * Sleep-injection for retry-helper (test-determinisme).
+   */
+  retrySleep?: (ms: number) => Promise<void>;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -333,6 +343,29 @@ function wrapEngineError(err: unknown, context: string): never {
   );
 }
 
+/**
+ * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): DomainError-koder som indikerer en
+ * PERMANENT bridge-feil — retry vil ikke fikse dem.
+ */
+const PERMANENT_BRIDGE_ERROR_CODES: ReadonlySet<string> = new Set([
+  "JACKPOT_SETUP_REQUIRED",
+  "HALL_NOT_IN_GROUP",
+  "MASTER_NOT_IN_GROUP",
+  "NO_ACTIVE_HALLS_IN_GROUP",
+  "INVALID_INPUT",
+  "GAME_PLAN_RUN_NOT_FOUND",
+  "GAME_CATALOG_NOT_FOUND",
+  "GAME_PLAN_RUN_CORRUPT",
+  "GAME_PLAN_NOT_FOUND",
+]);
+
+function isBridgeRetrySafe(err: unknown): boolean {
+  if (err instanceof DomainError) {
+    return !PERMANENT_BRIDGE_ERROR_CODES.has(err.code);
+  }
+  return true;
+}
+
 // ── service ─────────────────────────────────────────────────────────────
 
 export class MasterActionService {
@@ -347,6 +380,8 @@ export class MasterActionService {
   private readonly lobbyBroadcaster: {
     broadcastForHall(hallId: string): Promise<void>;
   } | null;
+  private readonly bridgeRetryDelaysMs: ReadonlyArray<number>;
+  private readonly retrySleep: ((ms: number) => Promise<void>) | undefined;
 
   constructor(opts: MasterActionServiceOptions) {
     if (!opts.pool) throw new DomainError("INVALID_CONFIG", "pool er påkrevd.");
@@ -374,6 +409,9 @@ export class MasterActionService {
     this.auditLogService = opts.auditLogService ?? null;
     this.clock = opts.clock ?? (() => new Date());
     this.lobbyBroadcaster = opts.lobbyBroadcaster ?? null;
+    this.bridgeRetryDelaysMs =
+      opts.bridgeRetryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+    this.retrySleep = opts.retrySleep;
   }
 
   /** @internal — test-hook (samme mønster som GamePlanRunService.forTesting). */
@@ -407,6 +445,13 @@ export class MasterActionService {
         broadcastForHall(hallId: string): Promise<void>;
       } | null;
     }).lobbyBroadcaster = opts.lobbyBroadcaster ?? null;
+    (svc as unknown as {
+      bridgeRetryDelaysMs: ReadonlyArray<number>;
+    }).bridgeRetryDelaysMs =
+      opts.bridgeRetryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+    (svc as unknown as {
+      retrySleep: ((ms: number) => Promise<void>) | undefined;
+    }).retrySleep = opts.retrySleep;
     return svc;
   }
 
