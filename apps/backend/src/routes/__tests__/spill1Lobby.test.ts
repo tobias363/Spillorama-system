@@ -95,6 +95,11 @@ function makeIdleState(overrides: Partial<Game1LobbyState> = {}): Game1LobbyStat
       scheduledStartTime: null,
       scheduledEndTime: null,
       actualStartTime: null,
+      // Fase 2 (2026-05-10): ticket-config eksponert via lobby
+      ticketColors: ["hvit", "gul", "lilla"],
+      ticketPricesCents: { hvit: 500, gul: 1000, lilla: 1500 },
+      prizeMultiplierMode: "auto",
+      bonusGameSlug: null,
     },
     currentRunPosition: 0,
     totalPositions: 2,
@@ -175,6 +180,10 @@ test("GET /api/games/spill1/lobby returnerer purchase_open + scheduledGameId", a
       scheduledStartTime: "2026-05-08T12:00:00Z",
       scheduledEndTime: "2026-05-08T12:10:00Z",
       actualStartTime: null,
+      ticketColors: ["hvit", "gul", "lilla"],
+      ticketPricesCents: { hvit: 500, gul: 1000, lilla: 1500 },
+      prizeMultiplierMode: "auto",
+      bonusGameSlug: null,
     },
   });
   const { service } = makeStubLobbyService({ state });
