@@ -107,6 +107,7 @@ import type { AuditLogService } from "../compliance/AuditLogService.js";
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
 import { todayOsloKey } from "../util/osloTimezone.js";
+import { withRetry, DEFAULT_RETRY_DELAYS_MS } from "../util/retry.js";
 import type {
   GameLobbyAggregator,
   LobbyActorContext,
@@ -234,6 +235,15 @@ export interface MasterActionServiceOptions {
   lobbyBroadcaster?: {
     broadcastForHall(hallId: string): Promise<void>;
   } | null;
+  /**
+   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): backoff-delays for bridge-spawn
+   * retry. Default `[100, 500, 2000]` ms. Tester injisere `[0, 0, 0]`.
+   */
+  bridgeRetryDelaysMs?: ReadonlyArray<number>;
+  /**
+   * Sleep-injection for retry-helper (test-determinisme).
+   */
+  retrySleep?: (ms: number) => Promise<void>;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -333,6 +343,29 @@ function wrapEngineError(err: unknown, context: string): never {
   );
 }
 
+/**
+ * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): DomainError-koder som indikerer en
+ * PERMANENT bridge-feil — retry vil ikke fikse dem.
+ */
+const PERMANENT_BRIDGE_ERROR_CODES: ReadonlySet<string> = new Set([
+  "JACKPOT_SETUP_REQUIRED",
+  "HALL_NOT_IN_GROUP",
+  "MASTER_NOT_IN_GROUP",
+  "NO_ACTIVE_HALLS_IN_GROUP",
+  "INVALID_INPUT",
+  "GAME_PLAN_RUN_NOT_FOUND",
+  "GAME_CATALOG_NOT_FOUND",
+  "GAME_PLAN_RUN_CORRUPT",
+  "GAME_PLAN_NOT_FOUND",
+]);
+
+function isBridgeRetrySafe(err: unknown): boolean {
+  if (err instanceof DomainError) {
+    return !PERMANENT_BRIDGE_ERROR_CODES.has(err.code);
+  }
+  return true;
+}
+
 // ── service ─────────────────────────────────────────────────────────────
 
 export class MasterActionService {
@@ -347,6 +380,8 @@ export class MasterActionService {
   private readonly lobbyBroadcaster: {
     broadcastForHall(hallId: string): Promise<void>;
   } | null;
+  private readonly bridgeRetryDelaysMs: ReadonlyArray<number>;
+  private readonly retrySleep: ((ms: number) => Promise<void>) | undefined;
 
   constructor(opts: MasterActionServiceOptions) {
     if (!opts.pool) throw new DomainError("INVALID_CONFIG", "pool er påkrevd.");
@@ -374,6 +409,9 @@ export class MasterActionService {
     this.auditLogService = opts.auditLogService ?? null;
     this.clock = opts.clock ?? (() => new Date());
     this.lobbyBroadcaster = opts.lobbyBroadcaster ?? null;
+    this.bridgeRetryDelaysMs =
+      opts.bridgeRetryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+    this.retrySleep = opts.retrySleep;
   }
 
   /** @internal — test-hook (samme mønster som GamePlanRunService.forTesting). */
@@ -407,6 +445,13 @@ export class MasterActionService {
         broadcastForHall(hallId: string): Promise<void>;
       } | null;
     }).lobbyBroadcaster = opts.lobbyBroadcaster ?? null;
+    (svc as unknown as {
+      bridgeRetryDelaysMs: ReadonlyArray<number>;
+    }).bridgeRetryDelaysMs =
+      opts.bridgeRetryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+    (svc as unknown as {
+      retrySleep: ((ms: number) => Promise<void>) | undefined;
+    }).retrySleep = opts.retrySleep;
     return svc;
   }
 
@@ -486,39 +531,100 @@ export class MasterActionService {
     }
 
     // 5. Bridge-spawn for current_position. Idempotent på (run.id, position).
+    // Pilot Q3 2026 (BIN-XXXX, 2026-05-09): retry-with-rollback. Hvis bridgen
+    // feiler med transient DB-glitch eller race-condition, prøver vi opptil
+    // 3 ganger med exponential backoff (100ms, 500ms, 2000ms). Hvis alle
+    // 3 forsøk feiler — OG vi nettopp flyttet plan-run til running (run var
+    // 'idle' før vi startet) — ruller vi plan-run tilbake til 'idle' så
+    // master kan trygt re-prøve uten GAME_PLAN_RUN_INVALID_TRANSITION.
+    //
+    // Permanente feil (JACKPOT_SETUP_REQUIRED, HALL_NOT_IN_GROUP, etc.)
+    // propageres uendret etter første forsøk via isBridgeRetrySafe.
+    const wasIdleBefore = run.status === "idle";
     let scheduledGameId: string;
     try {
-      const result = await this.engineBridge.createScheduledGameForPlanRunPosition(
-        started.id,
-        started.currentPosition,
+      const retryResult = await withRetry(
+        async () =>
+          this.engineBridge.createScheduledGameForPlanRunPosition(
+            started.id,
+            started.currentPosition,
+          ),
+        {
+          operationName: "engine-bridge.spawn.start",
+          delaysMs: this.bridgeRetryDelaysMs,
+          ...(this.retrySleep ? { sleep: this.retrySleep } : {}),
+          shouldRetry: (err) => isBridgeRetrySafe(err),
+          onRetry: (info) => {
+            logger.warn(
+              {
+                runId: started.id,
+                position: started.currentPosition,
+                attemptNumber: info.attemptNumber,
+                nextDelayMs: info.delayMs,
+                correlationId: info.correlationId,
+              },
+              "[master-action] bridge-spawn retry på start",
+            );
+          },
+        },
       );
-      scheduledGameId = result.scheduledGameId;
+      scheduledGameId = retryResult.value.scheduledGameId;
     } catch (err) {
-      // JACKPOT_SETUP_REQUIRED og HALL_NOT_IN_GROUP er forventede domain-
-      // errors — propager. Andre feil indikerer infrastruktur-problem og
-      // pakkes som BRIDGE_FAILED for konsistent error-shape.
-      if (err instanceof DomainError) {
-        if (
-          err.code === "JACKPOT_SETUP_REQUIRED" ||
-          err.code === "HALL_NOT_IN_GROUP" ||
-          err.code === "MASTER_NOT_IN_GROUP" ||
-          err.code === "NO_ACTIVE_HALLS_IN_GROUP"
-        ) {
-          throw err;
-        }
+      // Propager permanente DomainErrors uendret.
+      if (err instanceof DomainError && PERMANENT_BRIDGE_ERROR_CODES.has(err.code)) {
+        throw err;
       }
       logger.error(
         { err, runId: started.id, position: started.currentPosition },
-        "[master-action] bridge-spawn feilet",
+        "[master-action] bridge-spawn feilet etter retries",
       );
+
+      // Rollback plan-run hvis vi var den som flyttet den til running.
+      if (wasIdleBefore) {
+        await this.tryRollbackPlanRun({
+          runId: started.id,
+          actor,
+          reason: "bridge_failed_after_retries:start",
+          expectedPosition: started.currentPosition,
+          targetPosition: 1,
+          contextErr: err,
+        });
+        await this.audit({
+          action: "spill1.master.start.bridge_failed_with_rollback",
+          actor,
+          hallId,
+          planRunId: started.id,
+          scheduledGameId: null,
+          details: {
+            position: started.currentPosition,
+            originalError: err instanceof Error ? err.message : "ukjent feil",
+            rolledBack: true,
+          },
+        });
+        throw new DomainError(
+          "BRIDGE_FAILED",
+          "Bridge feilet etter 3 forsøk — plan-run resatt til idle, prøv igjen.",
+          {
+            runId: started.id,
+            position: started.currentPosition,
+            originalError: err instanceof Error ? err.message : "ukjent feil",
+            rolledBack: true,
+            rollbackReason: "bridge_failed_after_retries",
+          },
+        );
+      }
+
+      // Hvis run allerede var running (idempotent re-start), kast vanlig
+      // BRIDGE_FAILED uten rollback — vi vil ikke klusse med eksisterende
+      // engine-state.
       throw new DomainError(
         "BRIDGE_FAILED",
-        "Kunne ikke spawne scheduled-game fra plan-run-posisjon.",
+        "Kunne ikke spawne scheduled-game fra plan-run-posisjon (etter retries).",
         {
           runId: started.id,
           position: started.currentPosition,
-          originalError:
-            err instanceof Error ? err.message : "ukjent feil",
+          originalError: err instanceof Error ? err.message : "ukjent feil",
+          rolledBack: false,
         },
       );
     }
@@ -647,37 +753,109 @@ export class MasterActionService {
     }
 
     // Spawn ny scheduled-game-rad.
+    // Pilot Q3 2026 (BIN-XXXX, 2026-05-09): retry-with-rollback for advance.
+    // Hvis bridgen feiler etter alle retries, ruller vi position tilbake til
+    // forrige verdi (planRun.advanceToNext har allerede inkrementert position).
+    // Status forblir running — bare position rolles back så master kan
+    // re-prøve /advance med samme target.
+    const previousPosition = result.run.currentPosition - 1;
     let scheduledGameId: string;
     try {
-      const bridgeResult =
-        await this.engineBridge.createScheduledGameForPlanRunPosition(
-          result.run.id,
-          result.run.currentPosition,
-        );
-      scheduledGameId = bridgeResult.scheduledGameId;
+      const retryResult = await withRetry(
+        async () =>
+          this.engineBridge.createScheduledGameForPlanRunPosition(
+            result.run.id,
+            result.run.currentPosition,
+          ),
+        {
+          operationName: "engine-bridge.spawn.advance",
+          delaysMs: this.bridgeRetryDelaysMs,
+          ...(this.retrySleep ? { sleep: this.retrySleep } : {}),
+          shouldRetry: (err) => isBridgeRetrySafe(err),
+          onRetry: (info) => {
+            logger.warn(
+              {
+                runId: result.run.id,
+                position: result.run.currentPosition,
+                attemptNumber: info.attemptNumber,
+                nextDelayMs: info.delayMs,
+                correlationId: info.correlationId,
+              },
+              "[master-action] bridge-spawn retry på advance",
+            );
+          },
+        },
+      );
+      scheduledGameId = retryResult.value.scheduledGameId;
     } catch (err) {
-      if (err instanceof DomainError) {
-        if (
-          err.code === "JACKPOT_SETUP_REQUIRED" ||
-          err.code === "HALL_NOT_IN_GROUP" ||
-          err.code === "MASTER_NOT_IN_GROUP" ||
-          err.code === "NO_ACTIVE_HALLS_IN_GROUP"
-        ) {
-          throw err;
+      if (err instanceof DomainError && PERMANENT_BRIDGE_ERROR_CODES.has(err.code)) {
+        // Permanente feil — rull position tilbake siden vi har inkrementert
+        // den men kan ikke fullføre. Master kan re-prøve etter at root
+        // cause er fikset (f.eks. jackpot-setup).
+        if (previousPosition >= 1) {
+          await this.tryRollbackPlanRunPosition({
+            runId: result.run.id,
+            actor,
+            reason: `bridge_permanent_error:advance:${err.code}`,
+            expectedStatus: "running",
+            expectedPosition: result.run.currentPosition,
+            targetPosition: previousPosition,
+            contextErr: err,
+          });
         }
+        throw err;
       }
       logger.error(
         { err, runId: result.run.id, position: result.run.currentPosition },
-        "[master-action] bridge-spawn feilet på advance",
+        "[master-action] bridge-spawn feilet på advance etter retries",
       );
+
+      // Rull position tilbake til forrige verdi.
+      if (previousPosition >= 1) {
+        await this.tryRollbackPlanRunPosition({
+          runId: result.run.id,
+          actor,
+          reason: "bridge_failed_after_retries:advance",
+          expectedStatus: "running",
+          expectedPosition: result.run.currentPosition,
+          targetPosition: previousPosition,
+          contextErr: err,
+        });
+        await this.audit({
+          action: "spill1.master.advance.bridge_failed_with_rollback",
+          actor,
+          hallId,
+          planRunId: result.run.id,
+          scheduledGameId: null,
+          details: {
+            fromPosition: result.run.currentPosition,
+            toPosition: previousPosition,
+            originalError: err instanceof Error ? err.message : "ukjent feil",
+            rolledBack: true,
+          },
+        });
+        throw new DomainError(
+          "BRIDGE_FAILED",
+          "Bridge feilet etter 3 forsøk på advance — plan-position resatt, prøv igjen.",
+          {
+            runId: result.run.id,
+            position: result.run.currentPosition,
+            previousPosition,
+            originalError: err instanceof Error ? err.message : "ukjent feil",
+            rolledBack: true,
+            rollbackReason: "bridge_failed_after_retries",
+          },
+        );
+      }
+
       throw new DomainError(
         "BRIDGE_FAILED",
-        "Kunne ikke spawne scheduled-game for ny posisjon.",
+        "Kunne ikke spawne scheduled-game for ny posisjon (etter retries).",
         {
           runId: result.run.id,
           position: result.run.currentPosition,
-          originalError:
-            err instanceof Error ? err.message : "ukjent feil",
+          originalError: err instanceof Error ? err.message : "ukjent feil",
+          rolledBack: false,
         },
       );
     }
@@ -1171,6 +1349,126 @@ export class MasterActionService {
   private fireLobbyBroadcast(hallId: string): void {
     if (!this.lobbyBroadcaster) return;
     void this.lobbyBroadcaster.broadcastForHall(hallId);
+  }
+
+  /**
+   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): best-effort rollback av plan-run
+   * etter at bridge-spawn feilet alle retries. Fire-and-forget — hvis
+   * rollback selv kaster, logges det og vi kaster videre den ORIGINALE
+   * bridge-feilen så master ser klar feilmelding.
+   *
+   * @internal
+   */
+  private async tryRollbackPlanRun(input: {
+    runId: string;
+    actor: MasterActor;
+    reason: string;
+    expectedPosition: number;
+    targetPosition: number;
+    contextErr: unknown;
+  }): Promise<void> {
+    try {
+      const result = await this.planRunService.rollbackToIdle({
+        runId: input.runId,
+        expectedStatus: "running",
+        expectedPosition: input.expectedPosition,
+        targetPosition: input.targetPosition,
+        reason: input.reason,
+        masterUserId: input.actor.userId,
+      });
+      if (result === null) {
+        logger.warn(
+          {
+            runId: input.runId,
+            actorId: input.actor.userId,
+            reason: input.reason,
+          },
+          "[master-action] rollback no-op — state already changed by another actor",
+        );
+      } else {
+        logger.info(
+          {
+            runId: input.runId,
+            actorId: input.actor.userId,
+            reason: input.reason,
+            originalError:
+              input.contextErr instanceof Error
+                ? input.contextErr.message
+                : "ukjent feil",
+          },
+          "[master-action] plan-run rolled back to idle after bridge failure",
+        );
+      }
+    } catch (rollbackErr) {
+      // Rollback-feil må aldri overskrive original bridge-feilen.
+      logger.error(
+        {
+          err: rollbackErr,
+          runId: input.runId,
+          reason: input.reason,
+          originalErr: input.contextErr,
+        },
+        "[master-action] rollback selv feilet — manuell intervensjon kreves",
+      );
+    }
+  }
+
+  /**
+   * Pilot Q3 2026: best-effort rollback av position-only (advance-feil).
+   * Beholder status=running men ruller current_position tilbake.
+   *
+   * @internal
+   */
+  private async tryRollbackPlanRunPosition(input: {
+    runId: string;
+    actor: MasterActor;
+    reason: string;
+    expectedStatus: "running" | "paused";
+    expectedPosition: number;
+    targetPosition: number;
+    contextErr: unknown;
+  }): Promise<void> {
+    try {
+      const result = await this.planRunService.rollbackPosition({
+        runId: input.runId,
+        expectedStatus: input.expectedStatus,
+        expectedPosition: input.expectedPosition,
+        targetPosition: input.targetPosition,
+        reason: input.reason,
+        masterUserId: input.actor.userId,
+      });
+      if (result === null) {
+        logger.warn(
+          {
+            runId: input.runId,
+            actorId: input.actor.userId,
+            reason: input.reason,
+          },
+          "[master-action] position rollback no-op — state changed by another actor",
+        );
+      } else {
+        logger.info(
+          {
+            runId: input.runId,
+            actorId: input.actor.userId,
+            reason: input.reason,
+            fromPosition: input.expectedPosition,
+            toPosition: input.targetPosition,
+          },
+          "[master-action] plan-run position rolled back after bridge failure",
+        );
+      }
+    } catch (rollbackErr) {
+      logger.error(
+        {
+          err: rollbackErr,
+          runId: input.runId,
+          reason: input.reason,
+          originalErr: input.contextErr,
+        },
+        "[master-action] position rollback selv feilet — manuell intervensjon kreves",
+      );
+    }
   }
 
   /**
