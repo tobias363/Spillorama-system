@@ -70,6 +70,7 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { bootstrapWalletSchemaForTests } from "../../adapters/walletSchemaTestUtil.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const backendDir = resolve(__dirname, "..", "..", "..");
@@ -299,6 +300,25 @@ async function startSession(): Promise<TestSession> {
 
   // Pre-create schema so first SET search_path succeeds.
   await createSchema(PG_CONN!, schema);
+
+  // BIN-828 (2026-05-08): wallet_accounts/transactions/entries/reservations
+  // CREATE TABLE-statementene ble flyttet ut av PostgresWalletAdapter sin
+  // runtime-init. Production: render.yaml `buildCommand` kjører `npm run
+  // migrate` FØR backend booter. CI-e2e: ingen migrate-step — vi må kalle
+  // bootstrapWalletSchemaForTests for å speile post-migrate-skjemaet før
+  // backend forsøker å INSERT INTO wallet_accounts via auth/register.
+  //
+  // Uten dette: POST /api/auth/register → 400 (wallet-creation-feil
+  // p.g.a. "relation wallet_accounts does not exist").
+  const bootstrapPool = new Pool({ connectionString: PG_CONN! });
+  try {
+    await bootstrapWalletSchemaForTests(bootstrapPool, {
+      schema,
+      createSchema: false, // already created above
+    });
+  } finally {
+    await bootstrapPool.end();
+  }
 
   // Minimum env to boot. Same set as bootStartup.test.ts but keeping
   // ADMIN_BOOTSTRAP_SECRET so we can promote the admin via /api/admin/bootstrap.
