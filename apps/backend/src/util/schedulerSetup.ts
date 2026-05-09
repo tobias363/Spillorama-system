@@ -134,6 +134,64 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
     },
     onAutoStart: async (roomCode: string, hostPlayerId: string): Promise<{ firstDrawAtMs: number | null }> => {
       let firstDrawAtMs: number | null = null;
+      // 2026-05-09 (Tobias kritisk bug-fix): Spill 1 (`bingo`) skal IKKE
+      // auto-startes av DrawScheduler. Per pilot-spec
+      // (SPILL1_IMPLEMENTATION_STATUS_2026-05-08 §3.3) er Spill 1 master-
+      // styrt — eneste lovlig start-path er `MasterActionService.start`
+      // som kalles via `POST /api/agent/game1/master/start` når master
+      // klikker "Start neste spill" i cash-inout-dashboardet.
+      //
+      // Tidligere oppførsel (bug): når en Spill 1-runde endte i et boot-
+      // bootstrap-rom (`BINGO_DEMO-PILOT-GOH` osv.) trigget DrawScheduler-
+      // en auto-start på neste tick fordi `autoRoundStartEnabled=true` og
+      // `liveRoundsIndependentOfBet=true`. Dette ga uendelig kjede av
+      // runder som "kjørte selv" — master kunne ikke stoppe dem fra UI
+      // siden de ikke var koblet til plan-runtime.
+      //
+      // Fix: før vi kaller engine.startGame, sjekker vi rommets gameSlug.
+      // Hvis det er `bingo` (Spill 1), blokkerer vi auto-start helt og
+      // logger blokkering så ops kan se at det skjer.
+      // Spill 2 (`rocket`) og Spill 3 (`monsterbingo`) bruker
+      // `PerpetualRoundService` — IKKE DrawScheduler — så de er ikke
+      // påvirket av denne guarden.
+      try {
+        const snapshot = deps.engine.getRoomSnapshot(roomCode);
+        const slug = (snapshot.gameSlug ?? "").toLowerCase().trim();
+        if (slug === "bingo") {
+          schedulerLogger.warn(
+            {
+              roomCode,
+              hallId: snapshot.hallId,
+              gameSlug: slug,
+              hostPlayerId,
+              event: "auto.round.tick",
+              action: "blocked",
+              reason: "spill1_master_only",
+            },
+            "[scheduler] auto-start blokkert for Spill 1-rom — krever master-trigger via MasterActionService",
+          );
+          return { firstDrawAtMs };
+        }
+        // Debug-logging: trigget auto-start (Spill 2/3 og evt. andre).
+        schedulerLogger.info(
+          {
+            roomCode,
+            hallId: snapshot.hallId,
+            gameSlug: slug,
+            hostPlayerId,
+            event: "auto.round.tick",
+            action: "trigger",
+          },
+          "[scheduler] auto-start trigget av DrawScheduler",
+        );
+      } catch (snapshotErr) {
+        // Hvis snapshot feiler (rom slettet midt i tick), fortsett til
+        // engine.startGame som vil returnere DomainError og logge skip.
+        schedulerLogger.debug(
+          { roomCode, err: snapshotErr },
+          "[scheduler] snapshot-pre-check feilet — lar engine.startGame avgjøre",
+        );
+      }
       try {
         const variantInfo = deps.getVariantConfig?.(roomCode);
         await deps.engine.startGame({

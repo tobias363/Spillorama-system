@@ -246,11 +246,14 @@ test("unmarkReady happy path", async () => {
   assert.equal(result.readyAt, null);
 });
 
-test("unmarkReady avviser hvis status ≠ purchase_open", async () => {
+test("unmarkReady avviser hvis status er finished/running/paused", async () => {
+  // 2026-05-09: ready_to_start ble lagt til i lovlige statuser sammen med
+  // scheduled + purchase_open. Test bruker nå "running" (fortsatt ugyldig)
+  // for å verifisere avvisnings-pathen. Se PM_HANDOFF_2026-05-09 §3.4.
   const { pool } = createStubPool([
     {
       match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
-      rows: [scheduledGameRow({ status: "ready_to_start" })],
+      rows: [scheduledGameRow({ status: "running" })],
     },
   ]);
   const svc = Game1HallReadyService.forTesting(pool as never);

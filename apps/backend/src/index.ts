@@ -2869,6 +2869,60 @@ app.use(createAdminGame1ReadyRouter({
   auditLogService,
   hallReadyService: game1HallReadyService,
   io,
+  // 2026-05-09 (Tobias-direktiv) — pre-game ready-flow.
+  //
+  // Sub-haller skal kunne klikke "Marker Klar" FØR master har trykket
+  // Start. Dette callback lazy-spawner scheduled-game (status=scheduled,
+  // IKKE running) hvis ingen aktiv eksisterer. Mark-ready binder seg
+  // så til den nye gameId. Master starter spillet senere via separat
+  // /master/start — bruker den eksisterende scheduled-game-rad
+  // (idempotent på (run.id, position)).
+  //
+  // Permission-modell: routen sjekker GAME1_HALL_READY_WRITE +
+  // hall-scope. Sub-hall caller har sin egen hallId — vi finner
+  // masterHallId via GoH og bruker den til prepareScheduledGame
+  // (plan-run hører alltid til master).
+  lazyEnsureScheduledGameForHall: async ({ hallId, actorUserId, actorRole }) => {
+    // Finn GoH for hallen → masterHallId
+    const groups = await hallGroupService.list({
+      hallId,
+      limit: 1,
+      status: "active",
+    });
+    const group = groups[0];
+    if (!group) {
+      throw new DomainError(
+        "HALL_NOT_IN_GROUP",
+        "Hallen er ikke medlem av en aktiv hall-gruppe.",
+      );
+    }
+    const masterHallId = group.masterHallId;
+    if (!masterHallId) {
+      throw new DomainError(
+        "GROUP_HAS_NO_MASTER",
+        "Hall-gruppen har ikke en master-hall — admin må sette master-hall først.",
+      );
+    }
+    // PLAYER er ikke en gyldig MasterActor — routen krever
+    // GAME1_HALL_READY_WRITE som ekskluderer PLAYER, men TypeScript
+    // narrower ikke det automatisk. Fail-closed her hvis PLAYER skulle
+    // sluppet gjennom (defense-in-depth).
+    if (actorRole === "PLAYER") {
+      throw new DomainError(
+        "FORBIDDEN",
+        "PLAYER kan ikke trigge prepare-scheduled-game.",
+      );
+    }
+    const result = await masterActionService.prepareScheduledGame({
+      hallId: masterHallId,
+      actor: {
+        userId: actorUserId,
+        hallId,
+        role: actorRole,
+      },
+    });
+    return { scheduledGameId: result.scheduledGameId };
+  },
 }));
 // GAME1_SCHEDULE PR 3: master-control router for Game 1. 7 endepunkter —
 // POST /games/:gameId/{start,exclude-hall,include-hall,pause,resume,stop}

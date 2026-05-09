@@ -121,6 +121,21 @@ export interface AdminGame1ReadyRouterDeps {
    * testene kan mount router uten socket-lag; i prod er det alltid satt.
    */
   io?: SocketServer;
+  /**
+   * 2026-05-09 (Tobias-direktiv) — pre-game ready-flow.
+   *
+   * Callback som lazy-spawner scheduled-game (status=scheduled, IKKE
+   * running) når mark-ready/no-customers klikkes UTEN gameId. Wired til
+   * `MasterActionService.prepareScheduledGame` i index.ts.
+   *
+   * Returnerer effektiv gameId som routen bruker til å markere klar.
+   * Hvis ikke wired (legacy test) → routen krever gameId i body.
+   */
+  lazyEnsureScheduledGameForHall?: (input: {
+    hallId: string;
+    actorUserId: string;
+    actorRole: PublicAppUser["role"];
+  }) => Promise<{ scheduledGameId: string }>;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -147,7 +162,13 @@ function actorTypeFromRole(
 export function createAdminGame1ReadyRouter(
   deps: AdminGame1ReadyRouterDeps
 ): express.Router {
-  const { platformService, auditLogService, hallReadyService, io } = deps;
+  const {
+    platformService,
+    auditLogService,
+    hallReadyService,
+    io,
+    lazyEnsureScheduledGameForHall,
+  } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -289,7 +310,30 @@ export function createAdminGame1ReadyRouter(
       if (!isRecordObject(req.body)) {
         throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
       }
-      const gameId = mustBeNonEmptyString(req.body.gameId, "gameId");
+      // 2026-05-09 (Tobias-direktiv): gameId er nå OPTIONAL. Hvis mangler
+      // → kall lazyEnsureScheduledGameForHall som lazy-spawner scheduled-
+      // game (status=scheduled, IKKE running). Mark-ready binder seg så
+      // til den nye gameId. Master starter spillet senere via separat
+      // /master/start — bruker den eksisterende scheduled-game-rad
+      // (idempotent).
+      let gameId: string;
+      const rawGameId = req.body.gameId;
+      if (typeof rawGameId === "string" && rawGameId.trim()) {
+        gameId = rawGameId.trim();
+      } else {
+        if (!lazyEnsureScheduledGameForHall) {
+          throw new DomainError(
+            "GAME_ID_REQUIRED",
+            "gameId er påkrevd (lazy-spawn er ikke aktivert i denne instansen).",
+          );
+        }
+        const ensured = await lazyEnsureScheduledGameForHall({
+          hallId,
+          actorUserId: actor.id,
+          actorRole: actor.role,
+        });
+        gameId = ensured.scheduledGameId;
+      }
       const digitalTicketsSold =
         typeof req.body.digitalTicketsSold === "number" &&
         Number.isFinite(req.body.digitalTicketsSold) &&
@@ -357,7 +401,26 @@ export function createAdminGame1ReadyRouter(
       if (!isRecordObject(req.body)) {
         throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
       }
-      const gameId = mustBeNonEmptyString(req.body.gameId, "gameId");
+      // 2026-05-09 (Tobias-direktiv): gameId optional, samme lazy-spawn
+      // som mark-ready ovenfor.
+      let gameId: string;
+      const rawGameId = req.body.gameId;
+      if (typeof rawGameId === "string" && rawGameId.trim()) {
+        gameId = rawGameId.trim();
+      } else {
+        if (!lazyEnsureScheduledGameForHall) {
+          throw new DomainError(
+            "GAME_ID_REQUIRED",
+            "gameId er påkrevd (lazy-spawn er ikke aktivert i denne instansen).",
+          );
+        }
+        const ensured = await lazyEnsureScheduledGameForHall({
+          hallId,
+          actorUserId: actor.id,
+          actorRole: actor.role,
+        });
+        gameId = ensured.scheduledGameId;
+      }
       const reason =
         typeof req.body.reason === "string" && req.body.reason.trim()
           ? req.body.reason.trim()

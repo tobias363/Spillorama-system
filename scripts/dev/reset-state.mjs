@@ -92,10 +92,14 @@ async function assertSafeToReset(client) {
   }
   // Heuristikk: hvis det finnes brukere med email som IKKE matcher
   // demo-mønstrene OG som har hatt transaksjoner siste 7 dager, NEKT.
+  // 2026-05-09 (Tobias bug-fix): wallet_transactions.wallet_id ble omdøpt
+  // til account_id (joiner mot wallet_accounts.id, som er samme verdi som
+  // app_users.wallet_id). Tidligere reset-state.mjs feilet med
+  // "column t.wallet_id does not exist" og blokkerte hele reset-flyten.
   const result = await client.query(
     `SELECT COUNT(*)::int AS cnt
        FROM app_users u
-       JOIN wallet_transactions t ON t.wallet_id = u.wallet_id
+       JOIN wallet_transactions t ON t.account_id = u.wallet_id
       WHERE u.email NOT LIKE 'demo-%@%'
         AND u.email NOT LIKE '%@example.com'
         AND u.email NOT LIKE 'tobias@%'

@@ -252,10 +252,19 @@ export class Game1HallReadyService {
     const game = await this.loadScheduledGame(input.gameId);
     // 2026-05-03 (Tobias UX): tillat også 'scheduled' så agenter kan
     // markere klar tidlig (før cron promoter til 'purchase_open').
-    if (game.status !== "scheduled" && game.status !== "purchase_open") {
+    // 2026-05-09 (Tobias-direktiv): tillat også 'ready_to_start' — etter
+    // lazy-spawn (uten engine.startGame) kan scheduled-game-rad ende opp
+    // i denne statusen via Game1ScheduleTickService.openPurchaseForImminentGames.
+    // Ready-state er pre-game intent; det skal være lov å markere klar
+    // helt frem til engine faktisk starter (status='running').
+    if (
+      game.status !== "scheduled" &&
+      game.status !== "purchase_open" &&
+      game.status !== "ready_to_start"
+    ) {
       throw new DomainError(
         "GAME_NOT_READY_ELIGIBLE",
-        `Kan kun markere klar for spill i status 'scheduled' eller 'purchase_open' (nåværende: '${game.status}').`
+        `Kan kun markere klar for spill i status 'scheduled', 'purchase_open' eller 'ready_to_start' (nåværende: '${game.status}').`
       );
     }
     const participating = parseHallIdsArray(game.participating_halls_json);
@@ -325,10 +334,14 @@ export class Game1HallReadyService {
     const game = await this.loadScheduledGame(input.gameId);
     // 2026-05-03 (Tobias UX): tillat også 'scheduled' så agenter kan
     // angre klar tidlig (før cron promoter til 'purchase_open').
-    if (game.status !== "scheduled" && game.status !== "purchase_open") {
+    if (
+      game.status !== "scheduled" &&
+      game.status !== "purchase_open" &&
+      game.status !== "ready_to_start"
+    ) {
       throw new DomainError(
         "GAME_NOT_READY_ELIGIBLE",
-        `Kan kun angre klar for spill i status 'scheduled' eller 'purchase_open' (nåværende: '${game.status}').`
+        `Kan kun angre klar for spill i status 'scheduled', 'purchase_open' eller 'ready_to_start' (nåværende: '${game.status}').`
       );
     }
 
