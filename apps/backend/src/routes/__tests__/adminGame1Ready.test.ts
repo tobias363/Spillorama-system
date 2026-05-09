@@ -430,7 +430,13 @@ test("PR2 router: POST ready med status feil → GAME_NOT_READY_ELIGIBLE", async
   }
 });
 
-test("PR2 router: POST ready uten gameId i body → INVALID_INPUT", async () => {
+test("PR2 router: POST ready uten gameId i body → GAME_ID_REQUIRED (lazy-spawn ikke wired)", async () => {
+  // 2026-05-09 (Tobias-direktiv): gameId er nå OPTIONAL hvis
+  // lazyEnsureScheduledGameForHall-callback er wired (production).
+  // Test-setup wirer den IKKE — derfor faller routen tilbake til
+  // GAME_ID_REQUIRED-feilen. Production-prod-stien dekkes av
+  // index.ts wiring + integration-tester for prepareScheduledGame.
+  // Se PM_HANDOFF_2026-05-09 §3.2 + §3.3.
   const ctx = await startServer({ users: { "t-admin": adminUser } });
   try {
     const res = await req(
@@ -441,7 +447,7 @@ test("PR2 router: POST ready uten gameId i body → INVALID_INPUT", async () => 
       {}
     );
     assert.equal(res.status, 400);
-    assert.equal(res.body.error.code, "INVALID_INPUT");
+    assert.equal(res.body.error.code, "GAME_ID_REQUIRED");
   } finally {
     await ctx.close();
   }
