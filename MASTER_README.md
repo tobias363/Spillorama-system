@@ -8,6 +8,13 @@
 > [`docs/SYSTEM_DESIGN_PRINCIPLES.md`](./docs/SYSTEM_DESIGN_PRINCIPLES.md) (10 minutter), så
 > [`BACKLOG.md`](./BACKLOG.md) (10 minutter). Etter 30 minutter forstår du systemet, retningen,
 > og hva som er åpent. Alt annet er detalj.
+>
+> **Til ny PM som overtar koordinering:** Følg full onboarding-rutine i
+> [`docs/engineering/PM_ONBOARDING_PLAYBOOK.md`](./docs/engineering/PM_ONBOARDING_PLAYBOOK.md)
+> (60-90 minutter). Den dekker Tobias' immutable direktiver, trinn-for-trinn-prosedyre,
+> kommunikasjons-mønstre, compliance, pilot-status, tekniske prosedyrer, og
+> anti-mønstre. For 1-side cheatsheet, se
+> [`PM_ONBOARDING_QUICKREF.md`](./docs/engineering/PM_ONBOARDING_QUICKREF.md).
 
 ---
 

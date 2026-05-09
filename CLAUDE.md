@@ -511,6 +511,26 @@ Les `/tmp/onboarding.md` for current state (refaktor-bølger, sist merger,
 åpne pilot-blokkere, aktive worktrees, tilgjengelige skills) før første
 kode-endring. Se @docs/engineering/AGENT_ONBOARDING.md for detaljer.
 
+### PM onboarding (NY PM)
+
+**Hvis du tar over som PM**, følg den fulle onboarding-rutinen i
+@docs/engineering/PM_ONBOARDING_PLAYBOOK.md (60-90 min). Generer live
+current-state-rapport med:
+
+```bash
+./scripts/pm-onboarding.sh > /tmp/pm-onboarding.md
+```
+
+For 1-side cheatsheet under sesjonen, se
+@docs/engineering/PM_ONBOARDING_QUICKREF.md. For mal-prompts til
+research-agenter ved første onboarding, se
+@docs/engineering/PM_ONBOARDING_AGENT_PROMPTS.md.
+
+Playbook dekker: Tobias' immutable direktiver, trinn-for-trinn rutine,
+kommunikasjons-mønstre, compliance + regulatorisk, pilot-status R1-R12,
+tekniske prosedyrer (PR/deploy/rollback), anti-mønstre, og
+sjekkpunkter for fullført onboarding.
+
 ---
 
 Generated for Claude Code automation. Last updated 2026-05-08.
