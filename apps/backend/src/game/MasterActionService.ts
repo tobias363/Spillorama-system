@@ -700,6 +700,136 @@ export class MasterActionService {
    *   6. `masterControlService.startGame({ gameId })` for ny posisjon.
    *   7. Audit + return.
    */
+
+  /**
+   * 2026-05-09 (Tobias-direktiv) — pre-game ready-flow.
+   *
+   * Lazy-spawner scheduled-game-rad (status=scheduled) UTEN å starte engine.
+   * Brukes av `markReady`-route så haller kan markere seg klar FØR master
+   * har trykket "Start neste spill".
+   *
+   * Steg 1-5 av `start()` gjenbrukes:
+   *   1. Lazy-create plan-run via planRunService.getOrCreateForToday
+   *   2. Validér state (paused/finished → throw)
+   *   3. idle → running (planRunService.start)
+   *   4. Bridge-spawn scheduled-game (idempotent på (run.id, position))
+   *   5. RETURNER scheduledGameId + planRunId
+   *
+   * STEG 6 (engine.startGame) er BEVISST UTELATT. Engine-start trigges
+   * separat når master klikker "Start neste spill" — `start()` bruker
+   * eksisterende scheduled-game-rad (idempotent).
+   *
+   * Permission-modell:
+   * - SKIPPER `preValidate` (som krever GAME1_MASTER_WRITE)
+   * - Caller (typisk `markReady`-route) har egen permission-sjekk
+   *   (GAME1_HALL_READY_WRITE + hall-scope). Sub-haller kan da trigge
+   *   prepare via mark-ready uten å være master.
+   *
+   * Hall-id-håndtering:
+   * - `hallId` skal være MASTER-hallens id. Plan-run knyttes til master.
+   * - Caller fra sub-hall må først finne masterHallId via GoH og sende den.
+   */
+  async prepareScheduledGame(input: {
+    hallId: string;
+    actor: MasterActor;
+  }): Promise<{
+    scheduledGameId: string;
+    planRunId: string;
+    planRunStatus: Spill1PlanRunStatus;
+  }> {
+    const hallId = assertHallId(input.hallId);
+    const actor = assertActor(input.actor);
+
+    // 1. Lazy-create plan-run for today (idempotent).
+    const businessDate = this.businessDate();
+    const run = await this.planRunService.getOrCreateForToday(
+      hallId,
+      businessDate,
+    );
+
+    // 2. State-validation. Paused/finished kan ikke spawne ny scheduled-game.
+    if (run.status === "paused") {
+      throw new DomainError(
+        "GAME_PLAN_RUN_INVALID_TRANSITION",
+        "Plan-run er pauset — kan ikke forberede ny runde.",
+      );
+    }
+    if (run.status === "finished") {
+      throw new DomainError(
+        "PLAN_RUN_FINISHED",
+        "Plan-run er allerede ferdig for i dag.",
+      );
+    }
+
+    // 3. idle → running (start plan-run hvis ikke startet).
+    let started = run;
+    if (run.status === "idle") {
+      started = await this.planRunService.start(
+        hallId,
+        businessDate,
+        actor.userId,
+      );
+    }
+
+    // 4. Bridge-spawn scheduled-game. Idempotent på (run.id, position).
+    let scheduledGameId: string;
+    try {
+      const bridgeResult = await this.engineBridge.createScheduledGameForPlanRunPosition(
+        started.id,
+        started.currentPosition,
+      );
+      scheduledGameId = bridgeResult.scheduledGameId;
+    } catch (err) {
+      if (err instanceof DomainError && PERMANENT_BRIDGE_ERROR_CODES.has(err.code)) {
+        throw err;
+      }
+      logger.error(
+        { err, runId: started.id, position: started.currentPosition },
+        "[master-action] prepareScheduledGame bridge-spawn feilet",
+      );
+      throw new DomainError(
+        "BRIDGE_FAILED",
+        "Kunne ikke forberede scheduled-game.",
+        {
+          runId: started.id,
+          position: started.currentPosition,
+          originalError: err instanceof Error ? err.message : "ukjent feil",
+        },
+      );
+    }
+
+    // 5. Audit-trail. Logger som spill1.master.prepare.
+    await this.audit({
+      action: "spill1.master.prepare",
+      actor,
+      hallId,
+      planRunId: started.id,
+      scheduledGameId,
+      details: {
+        position: started.currentPosition,
+        wasIdleBefore: run.status === "idle",
+      },
+    });
+
+    // 6. Best-effort lobby-broadcast.
+    if (this.lobbyBroadcaster) {
+      try {
+        await this.lobbyBroadcaster.broadcastForHall(hallId);
+      } catch (err) {
+        logger.debug(
+          { err, hallId },
+          "[master-action] lobby-broadcast feilet etter prepare (best-effort)",
+        );
+      }
+    }
+
+    return {
+      scheduledGameId,
+      planRunId: started.id,
+      planRunStatus: started.status,
+    };
+  }
+
   async advance(input: MasterActionInput): Promise<MasterActionResult> {
     const hallId = assertHallId(input.hallId);
     const actor = assertActor(input.actor);

@@ -187,6 +187,35 @@ export function mountSpill1HallStatusBox(
       const lobby = await fetchLobbyState(undefined, { signal });
       if (aborted) return;
       const view = mapLobbyToView(lobby);
+      // 2026-05-09 (Tobias debug-fix): konsoll-logg så master kan
+      // verifisere kobling i F12-console. Logger kun ved ENDRING av
+      // scheduledGameId/status/warnings — ellers ville polling spamme
+      // konsollet hvert 2. sek. Bruker JSON-serialisert sammenligning
+      // for å oppdage shape-endringer på warnings.
+      const prevSig =
+        state.data === null
+          ? null
+          : `${state.data.scheduledGameId}|${state.data.scheduledGameStatus}|${state.warningBanner ?? ""}`;
+      const nextSig = `${view.scheduledGameId}|${view.scheduledGameStatus}|${
+        lobby.inconsistencyWarnings.map((w) => w.code).join(",")
+      }`;
+      if (prevSig !== nextSig) {
+        // eslint-disable-next-line no-console
+        console.log("[spill1-lobby] state-change", {
+          hallId: lobby.hallId,
+          isMasterAgent: lobby.isMasterAgent,
+          masterHallId: lobby.masterHallId,
+          groupOfHallsId: lobby.groupOfHallsId,
+          currentScheduledGameId: lobby.currentScheduledGameId,
+          scheduledGameStatus: lobby.scheduledGameMeta?.status ?? null,
+          planRunStatus: lobby.planMeta?.planRunStatus ?? null,
+          catalogDisplayName: lobby.planMeta?.catalogDisplayName ?? null,
+          hallsCount: lobby.halls.length,
+          hallIds: lobby.halls.map((h) => h.hallId),
+          warnings: lobby.inconsistencyWarnings,
+          generatedAt: lobby.generatedAt,
+        });
+      }
       state.loaded = true;
       state.data = view;
       state.errorMessage = null;
@@ -280,13 +309,28 @@ export function mountSpill1HallStatusBox(
     const ownHallId = data.ownHallId;
     if (!ownHallId) return;
 
+    // 2026-05-09 (Tobias debug-fix): logg master-action-klikk så Tobias
+    // kan verifisere i F12-console at riktig action + ids fyres mot
+    // backend. Synlig per klikk (ikke per polling) så ingen støy.
+    // eslint-disable-next-line no-console
+    console.log("[spill1-action] click", {
+      action,
+      ownHallId,
+      scheduledGameId: gameId,
+      isMasterAgent: data.isMasterAgent,
+      masterHallId: data.masterHallId,
+    });
+
     state.busy = true;
     setBusyState(container, true);
 
     try {
       switch (action) {
         case "mark-ready":
-          if (!gameId) return;
+          // 2026-05-09 (Tobias-direktiv): mark-ready kan nå kalles UTEN
+          // gameId. Backend lazy-spawner scheduled-game (status=scheduled,
+          // IKKE running) hvis ingen aktiv finnes — alle haller markerer
+          // klar FØR master klikker Start neste spill.
           await markHallReadyForGame(ownHallId, gameId);
           Toast.success("Hallen er markert som Klar.");
           break;
@@ -296,7 +340,7 @@ export function mountSpill1HallStatusBox(
           Toast.info("Klar-markering angret.");
           break;
         case "no-customers":
-          if (!gameId) return;
+          // 2026-05-09 (Tobias-direktiv): same lazy-spawn-flow.
           await setHallNoCustomersForGame(ownHallId, gameId);
           Toast.info("Hallen er markert som 'Ingen kunder'.");
           break;
@@ -478,6 +522,39 @@ function render(container: HTMLElement, state: BoxState): void {
     const otherHallsSnap = data.halls.filter(
       (h) => h.hallId !== data.ownHallId,
     );
+    // 2026-05-09 (Tobias UX-fix): Master må kunne starte ny runde også når
+    // ingen scheduled-game eksisterer ennå. Tidligere returnerte denne
+    // grenen tidlig uten å rendere master-knapper, slik at master satt
+    // fast i "venter på neste runde"-state uten noen måte å starte.
+    // MasterActionService.start er idempotent og lazy-creater plan-run +
+    // scheduled-game fra fullt idle, så ett klikk er nok for å initialisere
+    // hele kjeden.
+    const idleUnreadyCount = data.halls.filter(
+      (h) => !h.isReady && !h.excludedFromGame,
+    ).length;
+    const idleMasterButtonsHtml = renderMasterButtons({
+      canStart: data.isMasterAgent,
+      canPause: false,
+      canResume: false,
+      isMaster: data.isMasterAgent,
+      gameStatus: "idle",
+      scheduledStartTime: null,
+      unreadyCount: idleUnreadyCount,
+      nextGameName: data.catalogDisplayName,
+    });
+    // 2026-05-09 (Tobias-feedback): "Det må være mulig å markere seg klar
+    // i cash-in-out-vinduet." Vi rendrer ownHall-knappene i idle-state også
+    // — knappene er disabled med tooltip "Master må starte spillet først"
+    // inntil en scheduled-game-rad eksisterer (backend
+    // `markHallReadyForGame` krever en gameId). Når master klikker Start,
+    // spawn'es scheduled-game og knappene blir aktive automatisk via
+    // 2s-polling i refresh().
+    const idleOwnHallButtonsHtml = renderOwnHallButtons(
+      ownHallSnap,
+      "idle",
+      false,
+      data.isMasterAgent,
+    );
     container.innerHTML = `
       <div class="box-header with-border">
         <h3 class="box-title">Spill 1 — venter på neste runde</h3>
@@ -490,6 +567,8 @@ function render(container: HTMLElement, state: BoxState): void {
         </p>
         ${renderOwnHallSection(ownHallSnap, data.ownHallId, masterHallIdForCrown)}
         ${renderOtherHallsSection(otherHallsSnap, masterHallIdForCrown)}
+        ${idleOwnHallButtonsHtml}
+        ${idleMasterButtonsHtml}
       </div>`;
     return;
   }
@@ -725,7 +804,14 @@ function renderOtherHallsSection(
  * gray   → Ikke deltagende (nøytral)
  */
 function renderStatusPill(h: Spill1HallReadyStatus): string {
-  if (h.excludedFromGame || h.hasNoCustomers) {
+  // 2026-05-09 (Tobias UX-fix): Tidligere viste vi "Ekskludert" når
+  // EITHER `excludedFromGame=true` OR `hasNoCustomers=true`. Backend
+  // setter `hasNoCustomers=true` for HVER hall med playerCount=0 — som
+  // er forventet før spillere har koblet seg til (master åpner konsoll
+  // FØR spillere er online). Vi viser nå "Ekskludert" KUN ved eksplisitt
+  // master/agent-handling (`excludedFromGame`). `hasNoCustomers` påvirker
+  // bare label-tekst (lagt til som "(ingen kunder)" suffiks når aktuelt).
+  if (h.excludedFromGame) {
     const reason = h.excludedReason
       ? ` (${escapeHtml(h.excludedReason)})`
       : "";
@@ -746,51 +832,58 @@ function renderStatusPill(h: Spill1HallReadyStatus): string {
 function renderOwnHallButtons(
   ownHall: Spill1HallReadyStatus | null,
   gameStatus: string,
-  hasValidGameId: boolean
+  hasValidGameId: boolean,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _isMasterAgent: boolean = false,
 ): string {
   if (!ownHall) {
     return "";
   }
   // 2026-05-03 (Tobias UX): tillat også 'scheduled' så agenter kan
   // markere klar/exclude tidlig (før cron promoter til 'purchase_open').
+  // 2026-05-09 (Tobias-direktiv): "Alle haller skal markere seg som klar
+  // og deretter skal master starte spillet når da alle er klare."
+  // Backend lazy-spawner scheduled-game ved første mark-ready-klikk, så
+  // alle haller (inkludert sub-haller) kan klikke i idle-state.
   const editable =
     gameStatus === "scheduled" ||
     gameStatus === "purchase_open" ||
-    gameStatus === "ready_to_start";
+    gameStatus === "ready_to_start" ||
+    gameStatus === "idle";
 
-  // 2026-05-08 (Tobias-bug-fix): disable hvis ingen gyldig scheduled-game-
-  // id finnes ennå (backend returnerer 400 før master har trykket Start
-  // neste spill). Tooltipen forklarer hvorfor knappene er disabled.
-  const disableForNoGameId = !hasValidGameId;
-  const noGameIdTooltip = "Master må starte spillet først";
-  const noGameIdTooltipAttr = disableForNoGameId
-    ? ` title="${escapeHtml(noGameIdTooltip)}"`
+  // 2026-05-09: backend håndterer lazy-spawn via
+  // lazyEnsureScheduledGameForHall, så vi disabler IKKE for missing gameId.
+  // Tooltip forklarer hva som skjer ved klikk i idle-state.
+  const lazyTooltip = !hasValidGameId
+    ? "Markerer hallen klar — backend forbereder neste runde"
+    : "";
+  const lazyTooltipAttr = lazyTooltip
+    ? ` title="${escapeHtml(lazyTooltip)}"`
     : "";
 
-  const readyDisabled =
-    !editable || ownHall.excludedFromGame || disableForNoGameId;
+  const readyDisabled = !editable || ownHall.excludedFromGame;
   const readyBtn = ownHall.isReady
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="unmark-ready"
-                ${readyDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
+                ${readyDisabled ? "disabled" : ""}${lazyTooltipAttr}>
          <i class="fa fa-undo" aria-hidden="true"></i> Angre Klar
        </button>`
     : `<button type="button" class="btn btn-success cashinout-grid-btn"
                 data-spill1-action="mark-ready"
-                ${readyDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
+                ${readyDisabled ? "disabled" : ""}${lazyTooltipAttr}>
          <i class="fa fa-check-circle" aria-hidden="true"></i> Marker Klar
        </button>`;
 
-  const customersDisabled = !editable || disableForNoGameId;
+  const customersDisabled = !editable;
   const customersBtn = ownHall.excludedFromGame
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="has-customers"
-                ${customersDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
+                ${customersDisabled ? "disabled" : ""}${lazyTooltipAttr}>
          <i class="fa fa-undo" aria-hidden="true"></i> Har kunder igjen
        </button>`
     : `<button type="button" class="btn btn-danger cashinout-grid-btn"
                 data-spill1-action="no-customers"
-                ${customersDisabled ? "disabled" : ""}${noGameIdTooltipAttr}>
+                ${customersDisabled ? "disabled" : ""}${lazyTooltipAttr}>
          <i class="fa fa-times" aria-hidden="true"></i> Ingen kunder
        </button>`;
 

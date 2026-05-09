@@ -155,10 +155,18 @@ export async function resumeAgentGame1(): Promise<Spill1ActionResponse> {
  */
 export async function markHallReadyForGame(
   hallId: string,
-  gameId: string,
+  gameId: string | null,
   digitalTicketsSold?: number
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { gameId };
+  // 2026-05-09 (Tobias-direktiv): gameId er nå OPTIONAL. Hvis null sendes,
+  // backend lazy-spawner scheduled-game (status=scheduled) via
+  // MasterActionService.prepareScheduledGame før mark-ready binder seg
+  // til den nye gameId. Master starter spillet senere via separat
+  // /master/start-route.
+  const body: Record<string, unknown> = {};
+  if (gameId !== null) {
+    body.gameId = gameId;
+  }
   if (typeof digitalTicketsSold === "number") {
     body.digitalTicketsSold = digitalTicketsSold;
   }
@@ -187,10 +195,16 @@ export async function unmarkHallReadyForGame(
  */
 export async function setHallNoCustomersForGame(
   hallId: string,
-  gameId: string,
+  gameId: string | null,
   reason?: string
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { gameId };
+  // 2026-05-09 (Tobias-direktiv): gameId er nå OPTIONAL — samme lazy-spawn
+  // som markHallReadyForGame. Bind no-customers til lazy-spawnet
+  // scheduled-game (status=scheduled) hvis ingen aktiv finnes.
+  const body: Record<string, unknown> = {};
+  if (gameId !== null) {
+    body.gameId = gameId;
+  }
   if (reason && reason.trim()) {
     body.reason = reason.trim();
   }

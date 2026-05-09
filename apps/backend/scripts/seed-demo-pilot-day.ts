@@ -1857,22 +1857,28 @@ async function upsertPilotHall(client: Client, hall: PilotHall): Promise<void> {
 async function upsertPilotHallGroup(client: Client): Promise<void> {
   // Pilot-gruppe (4 sammenkoblede haller). Strukturen i app_hall_groups
   // er identisk med single-hall-gruppen — kun id + name varierer.
+  //
+  // 2026-05-09 (Tobias UX-fix): Setter `master_hall_id`-kolonnen
+  // EKSPLISITT (ikke bare i extra_json). GameLobbyAggregator leser fra
+  // kolonnen via HallGroupService.get(...).masterHallId — uten dette blir
+  // `isMasterAgent` alltid false og master-knappene rendres aldri i
+  // cash-inout. extra_json beholdes for backward-compat med admin-UI som
+  // også leser derfra.
   await client.query(
-    `INSERT INTO app_hall_groups (id, name, status, products_json, extra_json, created_by)
-     VALUES ($1, $2, 'active', '[]'::jsonb, $3::jsonb, NULL)
+    `INSERT INTO app_hall_groups (id, name, status, master_hall_id, products_json, extra_json, created_by)
+     VALUES ($1, $2, 'active', $4, '[]'::jsonb, $3::jsonb, NULL)
      ON CONFLICT (id) DO UPDATE
        SET name = EXCLUDED.name,
            status = 'active',
+           master_hall_id = EXCLUDED.master_hall_id,
            extra_json = EXCLUDED.extra_json,
            deleted_at = NULL,
            updated_at = now()`,
     [
       PILOT_HALL_GROUP_ID,
       PILOT_HALL_GROUP_NAME,
-      // Master-hall lagres i extra_json så admin-UI kan finne den uten å
-      // måtte joine app_daily_schedules.hall_ids_json. Runtime-master på
-      // selve game-runden bor fortsatt i daily-schedule (den er kanonisk).
       JSON.stringify({ masterHallId: PILOT_MASTER_HALL_ID, kind: "pilot" }),
+      PILOT_MASTER_HALL_ID,
     ],
   );
 }
