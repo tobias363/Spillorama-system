@@ -658,6 +658,7 @@ npm run dev:all  # eller: ./start-dev.sh
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-08 | Initial — konsolidert fra dagens sesjon. 14 PR-er merget, 7 R-tiltak ferdig, kanonisk doc-suite på plass. | PM-AI (Claude Opus 4.7) |
+| 2026-05-09 | Self-healing for stale plan-runs: nytt `GamePlanRunCleanupService` med (1) cron-job kl 03:00 Oslo som auto-finishes alle stale runs (`status IN ('running','paused')` + `business_date < CURRENT_DATE`), og (2) inline self-heal-hook bound til `getOrCreateForToday` så master-konsollet aldri ser STALE_PLAN_RUN-warning fra gårsdagens leftover state. Pilot Q3 2026 fundament — bingoverter trenger ikke manuell SQL-edit eller ops-eskalering ved backend-krasj eller glemt skift-slutt. Audit-event `game_plan_run.auto_cleanup` skrives per cleanup. | PM-AI (Claude Opus 4.7) |
 
 ---
 

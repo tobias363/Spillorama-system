@@ -1425,17 +1425,27 @@ async function upsertGamePlan(
 }
 
 /**
- * Idempotent upsert av plan-items. Hver item får stable id
- * `demo-plan-item-pilot-N` der N matcher position. ON CONFLICT (id) DO
- * UPDATE refresher catalog-koblingen og notes.
+ * Idempotent upsert av plan-items.
  *
- * NB: Vi rører IKKE position på eksisterende items — det ville bryte
- * (plan_id, position)-unique-constraint hvis to items ville fått samme
- * posisjon midlertidig under partial-update. Stabile IDs gjør at
- * position alltid stemmer overens med suffikset.
+ * Bug-fix 2026-05-09: Tabellen `app_game_plan_item` har TO unique-
+ * constraints — PRIMARY KEY (id) OG UNIQUE (plan_id, position). Tidligere
+ * versjon brukte `ON CONFLICT (id) DO UPDATE`, som krasjet hvis admin
+ * (eller en eldre seed-versjon) hadde lagt inn en rad med en annen `id`
+ * men samme `(plan_id, position)`. Eks: admin lager item via UI som får
+ * UUID-id, så krasjer seed-en på `Key (plan_id, "position")=
+ * (demo-plan-pilot, 1) already exists.`
  *
- * Hvis admin senere fjerner en item via UI, blir ID-en gjenbrukt på neste
- * seed-run — det er greit fordi vi alltid seeder den samme 13-sekvensen.
+ * For å gjøre seed-en fullstendig idempotent — uavhengig av om
+ * eksisterende data kommer fra forrige seed-kjøring eller manuell admin-
+ * redigering — sletter vi først alle plan-items for denne planen og
+ * posisjonen som har en annen `id`, og inserter så vår kanoniske rad
+ * med stable id. Dette håndterer begge conflict-typene.
+ *
+ * Vi velger DELETE-then-INSERT framfor `ON CONFLICT (plan_id, position)
+ * DO UPDATE` fordi sistnevnte ville beholdt den fremmede `id`-en på
+ * raden. DELETE-then-INSERT sikrer at id-et alltid er det stabile
+ * `demo-plan-item-pilot-N`. Tabellen har ingen FK som peker mot
+ * app_game_plan_item, så DELETE er trygt.
  */
 async function upsertGamePlanItem(
   client: Client,
@@ -1448,12 +1458,26 @@ async function upsertGamePlanItem(
     notes: string | null;
   },
 ): Promise<void> {
+  // Step 1: Wipe any existing row at this (plan_id, position) that has a
+  // DIFFERENT id than our canonical `demo-plan-item-pilot-N`. Handles
+  // rows from older seed-runs or manual admin-edits via UI.
+  await client.query(
+    `DELETE FROM app_game_plan_item
+      WHERE plan_id = $1 AND position = $2 AND id <> $3`,
+    [item.planId, item.position, item.id],
+  );
+
+  // Step 2: Upsert our canonical row. ON CONFLICT (id) handles the case
+  // where the row already exists with the correct stable id from a
+  // previous seed-run — refresh catalog-link/bonus-override/notes.
   await client.query(
     `INSERT INTO app_game_plan_item
        (id, plan_id, position, game_catalog_id, bonus_game_override, notes)
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (id) DO UPDATE
-       SET game_catalog_id = EXCLUDED.game_catalog_id,
+       SET plan_id = EXCLUDED.plan_id,
+           position = EXCLUDED.position,
+           game_catalog_id = EXCLUDED.game_catalog_id,
            bonus_game_override = EXCLUDED.bonus_game_override,
            notes = EXCLUDED.notes`,
     [
