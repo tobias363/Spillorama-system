@@ -47,6 +47,15 @@ Tre ting denne runbooken eksisterer for:
 Alt under er **prosedyre**, ikke implementasjon. Rekkefølgen i hver §
 er den faktiske on-call-handlingen — ikke en akademisk klassifisering.
 
+> **Master-driven recovery (2026-05-09):** Vanlige stale-state-warnings
+> (`STALE_PLAN_RUN`, `BRIDGE_FAILED`) som blokkerer master-handlinger
+> kan nå ryddes opp av master selv via `🧹 Rydde stale plan-state`-
+> knappen i agent-konsollet (Spill 1-status-boksen). Endpoint:
+> `POST /api/agent/game1/master/recover-stale`. Idempotent og safe (kun
+> forward state-transitions, ingen wallet-touch). Se
+> [`HALL_PILOT_RUNBOOK.md §5.1`](./HALL_PILOT_RUNBOOK.md) for
+> eskaleringssti.
+
 ---
 
 ## 1. Scope
