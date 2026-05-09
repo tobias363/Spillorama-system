@@ -35,6 +35,7 @@ import { logger as rootLogger } from "../util/logger.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
 import type { GamePlanService } from "./GamePlanService.js";
+import type { InlineCleanupHook } from "./GamePlanRunCleanupService.js";
 import type {
   AdvanceToNextResult,
   GamePlanRun,
@@ -283,6 +284,18 @@ export interface GamePlanRunServiceOptions {
   planService: GamePlanService;
   catalogService: GameCatalogService;
   auditLogService?: AuditLogService | null;
+  /**
+   * Optional self-healing hook (Pilot Q3 2026). Bound at app-boot to
+   * `GamePlanRunCleanupService.cleanupStaleRunsForHall` so that
+   * `getOrCreateForToday` can auto-finish gårsdagens stale runs INLINE
+   * before returning today's row. Without this hook the cron-job (kjøres
+   * 03:00 Oslo) is the only safety-net.
+   *
+   * Why optional: tests construct the service via `forTesting` without a
+   * cleanup-service, and we want backwards-compat for any caller that
+   * builds the service stand-alone (e.g. migrations / scripts).
+   */
+  inlineCleanupHook?: InlineCleanupHook | null;
 }
 
 export class GamePlanRunService {
@@ -291,6 +304,7 @@ export class GamePlanRunService {
   private readonly planService: GamePlanService;
   private readonly catalogService: GameCatalogService;
   private auditLogService: AuditLogService | null;
+  private inlineCleanupHook: InlineCleanupHook | null;
 
   constructor(options: GamePlanRunServiceOptions) {
     this.pool = options.pool;
@@ -298,6 +312,7 @@ export class GamePlanRunService {
     this.planService = options.planService;
     this.catalogService = options.catalogService;
     this.auditLogService = options.auditLogService ?? null;
+    this.inlineCleanupHook = options.inlineCleanupHook ?? null;
   }
 
   /** @internal — test-hook. */
@@ -307,6 +322,7 @@ export class GamePlanRunService {
     planService: GamePlanService;
     catalogService: GameCatalogService;
     auditLogService?: AuditLogService | null;
+    inlineCleanupHook?: InlineCleanupHook | null;
   }): GamePlanRunService {
     const svc = Object.create(
       GamePlanRunService.prototype,
@@ -324,11 +340,23 @@ export class GamePlanRunService {
     (svc as unknown as {
       auditLogService: AuditLogService | null;
     }).auditLogService = opts.auditLogService ?? null;
+    (svc as unknown as {
+      inlineCleanupHook: InlineCleanupHook | null;
+    }).inlineCleanupHook = opts.inlineCleanupHook ?? null;
     return svc;
   }
 
   setAuditLogService(service: AuditLogService | null): void {
     this.auditLogService = service ?? null;
+  }
+
+  /**
+   * Bind the inline cleanup-hook post-construction. Used by `index.ts` so
+   * we can construct `GamePlanRunService` BEFORE `GamePlanRunCleanupService`
+   * exists — otherwise we'd have a circular ordering constraint at app-boot.
+   */
+  setInlineCleanupHook(hook: InlineCleanupHook | null): void {
+    this.inlineCleanupHook = hook ?? null;
   }
 
   private table(): string {
@@ -405,6 +433,26 @@ export class GamePlanRunService {
     const hall = assertHallId(hallId);
     const dateStr = assertBusinessDate(businessDate);
     assertNotPastDate(dateStr);
+
+    // Pilot Q3 2026 self-healing: BEFORE we look at today's row, sweep
+    // away any stale running/paused runs from yesterday for THIS hall.
+    // The cron runs nightly at 03:00 Oslo, but if the cron failed or the
+    // backend just booted, this inline call ensures the master-konsoll
+    // never sees STALE_PLAN_RUN-warnings from gårsdagens leftover state.
+    //
+    // Hook may be null in tests / stand-alone scripts; treat as no-op.
+    // Failures inside the hook are best-effort — we log + continue so a
+    // cleanup glitch can never block today's run from being created.
+    if (this.inlineCleanupHook) {
+      try {
+        await this.inlineCleanupHook(hall);
+      } catch (err) {
+        logger.warn(
+          { err, hallId: hall },
+          "[pilot-q3] inline self-heal failed — continuing with getOrCreateForToday",
+        );
+      }
+    }
 
     const existing = await this.findForDay(hall, dateStr);
     if (existing) return existing;
