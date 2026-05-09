@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import { PostgresWalletAdapter } from "../adapters/PostgresWalletAdapter.js";
+import { bootstrapWalletSchemaForTests } from "../adapters/walletSchemaTestUtil.js";
 import { WalletAuditVerifier } from "./WalletAuditVerifier.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
@@ -27,8 +28,10 @@ async function dropSchema(pool: Pool, schema: string): Promise<void> {
 
 test("audit: chain er intakt etter normal wallet-bruk (createAccount + credit + debit)", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
-  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
+  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   try {
     await adapter.createAccount({ accountId: "w-roundtrip", initialBalance: 500 });
     await adapter.credit("w-roundtrip", 200, "payout", { to: "winnings" });
@@ -51,8 +54,10 @@ test("audit: chain er intakt etter normal wallet-bruk (createAccount + credit + 
 
 test("audit: manipulasjon av amount-felt detekteres som hash_mismatch", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
-  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
+  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   try {
     await adapter.createAccount({ accountId: "w-tamper", initialBalance: 1000 });
     await adapter.debit("w-tamper", 100, "kjøp-1");
@@ -87,8 +92,10 @@ test("audit: manipulasjon av amount-felt detekteres som hash_mismatch", { skip: 
 
 test("audit: verifyAccount er idempotent — samme svar ved gjentatt kjøring", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
-  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
+  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   try {
     await adapter.createAccount({ accountId: "w-idem", initialBalance: 200 });
     await adapter.credit("w-idem", 50, "payout", { to: "winnings" });
@@ -114,8 +121,10 @@ test("audit: verifyAccount er idempotent — samme svar ved gjentatt kjøring", 
 
 test("audit: 10k entries verifiseres på rimelig tid (<10s)", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
-  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
+  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   try {
     // Lag konto med 1000kr og kjør 5000 debit/credit-par.
     // Hver debit/credit gir 2 entries (DEBIT spiller + CREDIT motpart),
@@ -144,8 +153,10 @@ test("audit: 10k entries verifiseres på rimelig tid (<10s)", { skip: skipReason
 
 test("audit: legacy-rader uten entry_hash teller som legacyUnhashed, ikke mismatch", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
-  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
+  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   try {
     await adapter.createAccount({ accountId: "w-legacy", initialBalance: 100 });
     await adapter.debit("w-legacy", 30, "kjøp");
@@ -175,8 +186,10 @@ test("audit: legacy-rader uten entry_hash teller som legacyUnhashed, ikke mismat
 
 test("audit: verifyAll dekker alle kontoer og rapporterer totaler", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
-  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
+  const adapter = new PostgresWalletAdapter({ connectionString: PG_CONN!, schema, defaultInitialBalance: 0 });
   try {
     await adapter.createAccount({ accountId: "w-a", initialBalance: 100 });
     await adapter.createAccount({ accountId: "w-b", initialBalance: 200 });

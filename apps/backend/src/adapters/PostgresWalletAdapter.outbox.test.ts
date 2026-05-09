@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import { PostgresWalletAdapter } from "./PostgresWalletAdapter.js";
+import { bootstrapWalletSchemaForTests } from "./walletSchemaTestUtil.js";
 import { WalletOutboxRepo } from "../wallet/WalletOutboxRepo.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
@@ -40,6 +41,9 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk.
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
@@ -47,8 +51,6 @@ test(
     });
     const repo = new WalletOutboxRepo({ pool: adapter.getPool(), schema });
     adapter.setOutboxRepo(repo);
-
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       await adapter.createAccount({ accountId: "player-1", initialBalance: 0 });
       await adapter.topUp("player-1", 500, "deposit");
@@ -80,6 +82,9 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk.
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
@@ -87,8 +92,6 @@ test(
     });
     const repo = new WalletOutboxRepo({ pool: adapter.getPool(), schema });
     adapter.setOutboxRepo(repo);
-
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       await adapter.createAccount({ accountId: "player-A", initialBalance: 1000 });
       await adapter.createAccount({ accountId: "player-B", initialBalance: 0 });

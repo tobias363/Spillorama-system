@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import { PostgresWalletAdapter } from "./PostgresWalletAdapter.js";
+import { bootstrapWalletSchemaForTests } from "./walletSchemaTestUtil.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
 const skipReason = PG_CONN
@@ -35,12 +36,14 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk.
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
       defaultInitialBalance: 0,
     });
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       await adapter.createAccount({ accountId: "house-source", initialBalance: 2000 });
       await adapter.createAccount({ accountId: "player-alpha", initialBalance: 100 });
@@ -90,12 +93,14 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk.
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
       defaultInitialBalance: 0,
     });
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       await adapter.createAccount({ accountId: "from-acct", initialBalance: 1000 });
       await adapter.createAccount({ accountId: "to-acct", initialBalance: 0 });
@@ -130,12 +135,14 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk.
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
       defaultInitialBalance: 0,
     });
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       // Avsender har både deposit (fra initialBalance) og winnings.
       await adapter.createAccount({ accountId: "mixed-sender", initialBalance: 200 });
@@ -207,12 +214,14 @@ test(
   { skip: skipReason },
   async () => {
     const schema = makeTestSchema();
+    const cleanupPool = new Pool({ connectionString: PG_CONN });
+    // BIN-828: bootstrap schema før adapter-bruk.
+    await bootstrapWalletSchemaForTests(cleanupPool, { schema });
     const adapter = new PostgresWalletAdapter({
       connectionString: PG_CONN!,
       schema,
       defaultInitialBalance: 0,
     });
-    const cleanupPool = new Pool({ connectionString: PG_CONN });
     try {
       await adapter.createAccount({ accountId: "src", initialBalance: 1000 });
       await adapter.createAccount({ accountId: "dst", initialBalance: 0 });

@@ -14,6 +14,7 @@ import test from "node:test";
 import { Pool } from "pg";
 import { PostgresWalletAdapter } from "./PostgresWalletAdapter.js";
 import { WalletError } from "./WalletAdapter.js";
+import { bootstrapWalletSchemaForTests } from "./walletSchemaTestUtil.js";
 
 const PG_CONN = process.env.WALLET_PG_TEST_CONNECTION_STRING?.trim();
 const skipReason = PG_CONN
@@ -36,12 +37,14 @@ async function dropSchema(pool: Pool, schema: string): Promise<void> {
 
 test("postgres: createAccount + credit winnings → split persistert", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
+  const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
   const adapter = new PostgresWalletAdapter({
     connectionString: PG_CONN!,
     schema,
     defaultInitialBalance: 0
   });
-  const cleanupPool = new Pool({ connectionString: PG_CONN });
   try {
     await adapter.createAccount({ accountId: "w-alpha", initialBalance: 500 });
     await adapter.credit("w-alpha", 300, "payout", { to: "winnings" });
@@ -72,12 +75,14 @@ test("postgres: createAccount + credit winnings → split persistert", { skip: s
 
 test("postgres: debit trekker winnings først, så deposit (split-entries)", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
+  const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
   const adapter = new PostgresWalletAdapter({
     connectionString: PG_CONN!,
     schema,
     defaultInitialBalance: 0
   });
-  const cleanupPool = new Pool({ connectionString: PG_CONN });
   try {
     await adapter.createAccount({ accountId: "w-beta", initialBalance: 200 });
     await adapter.credit("w-beta", 100, "small payout", { to: "winnings" });
@@ -116,12 +121,14 @@ test("postgres: debit trekker winnings først, så deposit (split-entries)", { s
 
 test("postgres: race — 2 samtidige debits → second låses til first commit, ingen dobbel-debit", { skip: skipReason }, async () => {
   const schema = makeTestSchema();
+  const cleanupPool = new Pool({ connectionString: PG_CONN });
+  // BIN-828: bootstrap schema før adapter-bruk.
+  await bootstrapWalletSchemaForTests(cleanupPool, { schema });
   const adapter = new PostgresWalletAdapter({
     connectionString: PG_CONN!,
     schema,
     defaultInitialBalance: 0
   });
-  const cleanupPool = new Pool({ connectionString: PG_CONN });
   try {
     await adapter.createAccount({ accountId: "w-race", initialBalance: 100 });
     await adapter.credit("w-race", 50, "payout", { to: "winnings" });
