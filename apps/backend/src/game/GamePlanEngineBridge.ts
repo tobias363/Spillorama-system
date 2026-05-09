@@ -71,6 +71,7 @@ import type { Pool } from "pg";
 
 import { DomainError } from "../errors/DomainError.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { getCanonicalRoomCode } from "../util/canonicalRoomCode.js";
 import { HallGroupMembershipQuery } from "../platform/HallGroupMembershipQuery.js";
 import { calculateActualPrize } from "./GameCatalogService.js";
 import type { GameCatalogService } from "./GameCatalogService.js";
@@ -1004,7 +1005,41 @@ export class GamePlanEngineBridge {
     ).toISOString();
     const businessDateKey = this.dateRowToKey(run.business_date);
 
+    // F-NEW-2 (E2E pilot-blokker, 2026-05-09): generer room_code OPP-FRONT så
+    // master.start binder scheduled-game til en forutsigbar BingoEngine-rom-
+    // kode med en gang. Tidligere ble room_code satt lazy av
+    // `joinScheduledGame`-socket-handler ved første spiller-join (PR 4d.1
+    // designvalg) — det betød at dersom master startet engine FØR noen
+    // joinet, hadde scheduled-game status='running' men room_code=NULL.
+    // Konsekvens: klienter kunne ikke joine fordi ingen kode fantes å slå
+    // opp på, og auto-draw-tick trakk baller for boot-recovery-rom som
+    // ikke matchet vår master-startede runde.
+    //
+    // Vi bruker `getCanonicalRoomCode("bingo", masterHallId, groupHallId)`
+    // som returnerer `BINGO_<groupId>` for hall-grupper og `BINGO_<hallId>`
+    // for solo-haller — samme deterministiske mapping som
+    // `joinScheduledGame` bruker for å sikre at lazy-join-pathen og
+    // bridge-spawn-pathen havner på SAMME rom-kode.
+    //
+    // Race-håndtering: `idx_app_game1_scheduled_games_room_code`-unique
+    // index hindrer at to scheduled-games kan ha samme room_code samtidig.
+    // For BINGO_<groupId>-koder (per-link, shared mellom haller i samme
+    // gruppe) kan flere scheduled-games eksistere over tid (én pr posisjon
+    // i plan-runtime, sekvensielt), men kun ÉN i taget kan ha aktiv
+    // room_code. Hvis to bridge-spawns racer på FORSKJELLIGE posisjoner
+    // med samme room_code (eks. master kjører rapid advance før forrige
+    // runde er ferdig), faller den andre til catch-blokken under
+    // (unique-violation 23505) og vi degraderer til lazy-binding (uten
+    // room_code) for å beholde bakover-kompatibilitet.
+    const canonical = getCanonicalRoomCode(
+      "bingo",
+      effectiveMasterHallId,
+      groupHallId,
+    );
+    const roomCode = canonical.roomCode;
+
     const newId = randomUUID();
+    let assignedRoomCode: string | null = roomCode;
     try {
       await this.pool.query(
         `INSERT INTO ${this.scheduledGamesTable()}
@@ -1026,10 +1061,11 @@ export class GamePlanEngineBridge {
             game_config_json,
             catalog_entry_id,
             plan_run_id,
-            plan_position)
+            plan_position,
+            room_code)
          VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
                  $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
-                 'ready_to_start', $15::jsonb, $16, $17, $18)`,
+                 'ready_to_start', $15::jsonb, $16, $17, $18, $19)`,
         [
           newId,
           // sub_game_index — vi bruker plan_position-1 (0-basert)
@@ -1055,6 +1091,8 @@ export class GamePlanEngineBridge {
           catalog.id,
           run.id,
           position,
+          // F-NEW-2 (2026-05-09): room_code satt opp-front (se kommentar over).
+          roomCode,
         ],
       );
     } catch (err) {
@@ -1066,7 +1104,72 @@ export class GamePlanEngineBridge {
           `Kan ikke spawne scheduled-game: hall (${effectiveMasterHallId}) eller hall-group (${groupHallId}) ikke funnet.`,
         );
       }
-      throw err;
+      if (code === "23505") {
+        // F-NEW-2 race-håndtering: unique violation på room_code-index.
+        // Skjer hvis en annen aktiv scheduled-game allerede holder samme
+        // BINGO_<groupId>-kode (typisk forrige plan-position er fortsatt
+        // aktiv, eller boot-bootstrap har satt opp rommet). Re-spawn uten
+        // room_code så `joinScheduledGame`-pathen kan ta seg av lazy-
+        // binding ved første spiller-join (degraderer til legacy-
+        // oppførsel ved race, men holder bridge-spawn kjørende).
+        log.warn(
+          {
+            runId: run.id,
+            position,
+            attemptedRoomCode: roomCode,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[F-NEW-2] room_code unique-violation — fallback til lazy-binding",
+        );
+        assignedRoomCode = null;
+        await this.pool.query(
+          `INSERT INTO ${this.scheduledGamesTable()}
+             (id,
+              sub_game_index,
+              sub_game_name,
+              custom_game_name,
+              scheduled_day,
+              scheduled_start_time,
+              scheduled_end_time,
+              notification_start_seconds,
+              ticket_config_json,
+              jackpot_config_json,
+              game_mode,
+              master_hall_id,
+              group_hall_id,
+              participating_halls_json,
+              status,
+              game_config_json,
+              catalog_entry_id,
+              plan_run_id,
+              plan_position)
+           VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
+                   $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
+                   'ready_to_start', $15::jsonb, $16, $17, $18)`,
+          [
+            newId,
+            position - 1,
+            catalog.displayName,
+            null,
+            businessDateKey,
+            startTs,
+            endTs,
+            DEFAULT_NOTIFICATION_SECONDS,
+            JSON.stringify(ticketConfig),
+            JSON.stringify(jackpotConfig),
+            "Manual",
+            effectiveMasterHallId,
+            groupHallId,
+            JSON.stringify(participatingHalls),
+            gameConfigJson,
+            catalog.id,
+            run.id,
+            position,
+          ],
+        );
+      } else {
+        throw err;
+      }
     }
 
     log.info(
@@ -1079,6 +1182,7 @@ export class GamePlanEngineBridge {
         hallId: run.hall_id,
         masterHallId: effectiveMasterHallId,
         masterHallPinned: goHMasterPin !== null,
+        roomCode: assignedRoomCode,
       },
       "[fase-4] opprettet scheduled-game-rad fra plan-run + catalog",
     );
