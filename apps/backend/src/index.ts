@@ -142,6 +142,7 @@ import { createAgentGame1LobbyRouter } from "./routes/agentGame1Lobby.js";
 import { createAgentGame1MasterRouter } from "./routes/agentGame1Master.js";
 import { GameLobbyAggregator } from "./game/GameLobbyAggregator.js";
 import { MasterActionService } from "./game/MasterActionService.js";
+import { StalePlanRunRecoveryService } from "./game/recovery/StalePlanRunRecoveryService.js";
 import { createAgentGame1MiniGameRouter } from "./routes/agentGame1MiniGame.js";
 import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
@@ -2232,6 +2233,18 @@ const masterActionService = new MasterActionService({
   lobbyBroadcaster: spill1LobbyBroadcaster,
 });
 
+// 2026-05-09 (recover-stale): master-driven cleanup of stale plan-runs and
+// stuck scheduled-games. Mounted on POST /api/agent/game1/master/recover-
+// stale and used to unblock master when GameLobbyAggregator flags
+// STALE_PLAN_RUN or BRIDGE_FAILED (which otherwise block all master
+// actions via MasterActionService.preValidate). See
+// `StalePlanRunRecoveryService` for the full design rationale.
+const stalePlanRunRecoveryService = new StalePlanRunRecoveryService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  auditLogService,
+});
+
 // BIN-690 M1: mini-game orchestrator (framework-foundation). Ingen konkrete
 // spill registrert i M1 — M2-M5 legger dem til via registerMiniGame().
 // Late-bound på drawEngine slik at Game1DrawEngineService kan konstrueres
@@ -2824,6 +2837,10 @@ app.use(createAgentGame1LobbyRouter({
 app.use(createAgentGame1MasterRouter({
   platformService,
   masterActionService,
+  // 2026-05-09 (recover-stale): inject cleanup-service so the
+  // /recover-stale endpoint is mounted. Without this dep the route
+  // returns 503 RECOVERY_NOT_CONFIGURED.
+  staleRecoveryService: stalePlanRunRecoveryService,
 }));
 // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
 // Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og

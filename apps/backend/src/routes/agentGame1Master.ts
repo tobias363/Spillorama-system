@@ -28,6 +28,14 @@
  *   Eksisterende endpoints (`/api/agent/game-plan/start`,
  *   `/api/agent/game-plan/advance`, etc.) er IKKE påvirket. UI bytter til
  *   ny endpoint i Bølge 3.
+ *
+ * 2026-05-09 (recover-stale): la til
+ *   POST /api/agent/game1/master/recover-stale
+ * for master-driven cleanup av STALE_PLAN_RUN/BRIDGE_FAILED-state.
+ * Dette er et separat endpoint (ikke en MasterActionService-action) fordi
+ * recovery MÅ bypasse MasterActionService.preValidate som ellers blokkerer
+ * alle write-actions ved disse warnings (BLOCKING_WARNING_CODES). Se
+ * `StalePlanRunRecoveryService` for full begrunnelse.
  */
 
 import express from "express";
@@ -39,6 +47,7 @@ import type {
 } from "../platform/PlatformService.js";
 import type { MasterActionService } from "../game/MasterActionService.js";
 import type { MasterActor } from "../game/Game1MasterControlService.js";
+import type { StalePlanRunRecoveryService } from "../game/recovery/StalePlanRunRecoveryService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -55,6 +64,13 @@ const logger = rootLogger.child({ module: "agent-game1-master" });
 export interface AgentGame1MasterRouterDeps {
   platformService: PlatformService;
   masterActionService: MasterActionService;
+  /**
+   * Optional — when provided, mounts `POST /api/agent/game1/master/recover-stale`
+   * for master-driven cleanup of stale plan-runs and stuck scheduled-games.
+   * If omitted, the endpoint returns 503 RECOVERY_NOT_CONFIGURED so callers
+   * see a clear error rather than a 404.
+   */
+  staleRecoveryService?: StalePlanRunRecoveryService | null;
 }
 
 // ── input-validering ─────────────────────────────────────────────────────
@@ -104,6 +120,17 @@ const JackpotSetupBodySchema = z
       (obj) => Object.keys(obj).length > 0,
       { message: "prizesCents må ha minst én farge." },
     ),
+  })
+  .strict();
+
+/**
+ * 2026-05-09 (recover-stale): body-schema for cleanup-endpoint. Same
+ * `hallId`-pattern as other master-actions (ADMIN can override, others
+ * locked to own hall via `resolveHallScope`).
+ */
+const RecoverStaleBodySchema = z
+  .object({
+    hallId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -185,6 +212,7 @@ export function createAgentGame1MasterRouter(
   deps: AgentGame1MasterRouterDeps,
 ): express.Router {
   const { platformService, masterActionService } = deps;
+  const staleRecoveryService = deps.staleRecoveryService ?? null;
   const router = express.Router();
 
   async function requirePermission(
@@ -355,6 +383,69 @@ export function createAgentGame1MasterRouter(
     }
   });
 
+  // ── POST /api/agent/game1/master/recover-stale ─────────────────────────
+  //
+  // 2026-05-09: master-driven cleanup of STALE_PLAN_RUN/BRIDGE_FAILED
+  // state. This bypasses MasterActionService.preValidate (which would
+  // block on those exact warnings) and goes straight to the recovery
+  // service. Idempotent — running it on a clean hall returns
+  // `{ planRunsCleared: 0, scheduledGamesCleared: 0 }`.
+  //
+  // RBAC: same GAME1_MASTER_WRITE as other master-actions. Hall-scope
+  // also identical: ADMIN can override hallId, HALL_OPERATOR/AGENT
+  // locked to own hall. SUPPORT not allowed (excluded by permission).
+  router.post("/api/agent/game1/master/recover-stale", async (req, res) => {
+    try {
+      const user = await requirePermission(req, "GAME1_MASTER_WRITE");
+      const parsed = RecoverStaleBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `Ugyldig request body: ${parsed.error.issues
+            .map((i) => i.message)
+            .join("; ")}`,
+        );
+      }
+      const hallId = resolveHallScope(user, parsed.data.hallId);
+      const actor = toMasterActor(user);
+
+      if (!staleRecoveryService) {
+        // Fail-loud rather than 404 so ops sees a clear cause when the
+        // service isn't wired into a given environment.
+        res.status(503).json({
+          ok: false,
+          error: {
+            code: "RECOVERY_NOT_CONFIGURED",
+            message:
+              "Stale-plan-run-recovery er ikke konfigurert på denne backend-instansen.",
+          },
+        });
+        return;
+      }
+
+      const result = await staleRecoveryService.recoverStaleForHall({
+        actor,
+        hallId,
+      });
+
+      apiSuccess(res, {
+        ok: true,
+        cleared: {
+          planRuns: result.planRunsCleared,
+          scheduledGames: result.scheduledGamesCleared,
+        },
+        details: {
+          recoveredAt: result.recoveredAt,
+          todayBusinessDate: result.todayBusinessDate,
+          clearedPlanRuns: result.clearedPlanRuns,
+          clearedScheduledGames: result.clearedScheduledGames,
+        },
+      });
+    } catch (err) {
+      apiFailure(res, err);
+    }
+  });
+
   // Logger init slik at vi ser router-konstruksjon i oppstartslog.
   logger.info(
     {
@@ -365,7 +456,9 @@ export function createAgentGame1MasterRouter(
         "POST /api/agent/game1/master/resume",
         "POST /api/agent/game1/master/stop",
         "POST /api/agent/game1/master/jackpot-setup",
+        "POST /api/agent/game1/master/recover-stale",
       ],
+      staleRecoveryConfigured: staleRecoveryService !== null,
     },
     "[agent-game1-master] router initialized",
   );
