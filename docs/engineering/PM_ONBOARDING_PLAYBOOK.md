@@ -247,6 +247,34 @@ Hvis du jobber med pilot-go-live:
 find /Users/tobiashaugen/Projects/Spillorama-system/docs -name "*wallet*" -o -name "*WALLET*" | head -20
 ```
 
+### Trinn 3.2 — Les PITFALLS_LOG + AGENT_EXECUTION_LOG (15-20 min)
+
+> **🚨 KRITISK:** Tobias-direktiv 2026-05-10:
+> > "Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."
+
+Spillorama har 60+ dokumenterte fallgruver akkumulert siden 2026-04. Hvis du ikke kjenner disse fra dag 0, gjentar du dem. Det er ikke akseptabelt.
+
+**Obligatoriske docs:**
+
+1. **[`PITFALLS_LOG.md`](./PITFALLS_LOG.md)** — sentral fallgruve-katalog (63+ entries i 11 kategorier).
+   - Skim hele dokumentet (~10 min)
+   - For ditt scope: les relevante §-er nøye (~5-10 min):
+     - **Compliance/wallet-arbeid:** §1 + §2 + §8.4 (kode vs doc)
+     - **Spill 1/2/3-arkitektur:** §3 (FUNDAMENTAL forskjell mellom spillene) + §4
+     - **Pilot-go-live:** §3 + §4 + §6 (test-infra)
+     - **Git/PR-workflow:** §5 + §11 (agent-orkestrering)
+     - **Frontend/game-client:** §7 + §10 (routing)
+
+2. **[`AGENT_EXECUTION_LOG.md`](./AGENT_EXECUTION_LOG.md)** — kronologisk agent-arbeid med learnings (~5 min skim).
+   - Sjekk "Aktive agenter"-tabell — hvilke agenter kjører nå?
+   - Sjekk "Mønstre observert" for hva som funker / ikke funker
+   - Hvis du planlegger ny agent på samme scope som tidligere: les den entry-en
+
+**Når du spawner agent:**
+- Inkluder relevante PITFALLS_LOG §-pekere i agent-prompt
+- Eksempel: "Les `PITFALLS_LOG.md` §2 (Wallet) før du rør wallet-kode"
+- Etter agent-leveranse: legg til ny entry i AGENT_EXECUTION_LOG + eventuelle nye fallgruver i PITFALLS_LOG
+
 ### Trinn 4 — Spawn 6 parallelle research-agenter (10 min ventetid)
 
 Hvis du er en AI-PM med agent-tilgang og dette er **første** onboarding (ikke gjentakelse), spawn disse 6 Explore-agentene parallelt for kunnskaps-deep-dive:
@@ -890,6 +918,8 @@ Du er klar når du kan svare JA på alle disse spørsmålene:
 - [ ] Jeg har lest `SPILL_REGLER_OG_PAYOUT.md` hvis jeg skal røre payout-kode
 - [ ] Jeg har lest `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` hvis jeg skal røre spill-kode
 - [ ] Jeg har lest `LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md` hvis jeg skal røre rom-arkitektur
+- [ ] **Jeg har skummet `PITFALLS_LOG.md` og lest §-er for mitt scope** (§1.x compliance, §2.x wallet, §3.x spill-arkitektur, §4.x live-rom, §5.x git, §6.x test, §7.x frontend, §8.x doc-disiplin, §11.x agent-orkestrering)
+- [ ] **Jeg har skummet `AGENT_EXECUTION_LOG.md` for tidligere agent-arbeid på samme scope**
 
 ### Compliance
 - [ ] Jeg vet at 2500 kr cap KUN gjelder databingo, ikke hovedspill
