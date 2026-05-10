@@ -314,31 +314,41 @@ Tobias presiserte 2026-05-08: Bokstav er en **gevinstmønster-variant for Spill 
 
 ### 1.8 Jackpot (slug `jackpot`)
 
-**Mekanikk:** Standard 75-ball Spill 1 med **master-konfigurert jackpot per runde**.
+**Mekanikk:** Standard 75-ball Spill 1 med **master-konfigurert jackpot per runde**. Bingoverten har full kontroll — ingen automatisk akkumulering.
 
 **Variant:** `standard` — auto-multiplikator (men jackpot overstyrer Fullt Hus-utbetaling)
 **Bongpriser:** ✅ Hvit 5 / Gul 10 / Lilla 15
 
-**Spesial-mekanikk: Jackpot-popup**
+**Spesial-mekanikk: Jackpot-popup (KUN på dette katalog-spillet)**
 
-- `requires_jackpot_setup = true` på katalog-raden
+- `requires_jackpot_setup = true` på katalog-raden — KUN her i hele pilot-planen
 - Når master prøver å starte spillet: backend returnerer `JACKPOT_SETUP_REQUIRED`
-- Frontend viser popup med 4 inputs:
+- Frontend viser `JackpotSetupModal` med 4 **blank** inputs (ingen lazy default):
   1. **"Hvilket trekk?"** (draw-nummer 1-90, typisk 1-75)
   2. Premie hvit (kr)
   3. Premie gul (kr)
   4. Premie lilla (kr)
 - Master submitter → lagres i `app_game_plan_run.jackpot_overrides_json[<position>]`
-- Engine bruker overrides ved Fullt Hus-utbetaling
+- Engine bruker overrides ved Fullt Hus-utbetaling innen draw-threshold
+- **Eksempel:** Master setter `hvit=10000kr, gul=20000kr, lilla=30000kr, draw=56` for denne runden
 
 **Premier (Rad 1-4):**
 
 | Fase | Base | Hvit | Gul | Lilla |
 |---|---|---|---|---|
 | Rad 1-4 | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
-| Fullt Hus | **Master setter via popup** | per popup | per popup | per popup |
+| Fullt Hus | **Master setter manuelt via popup** | per popup | per popup | per popup |
 
-> **Daglig akkumulering:** Spillorama har en separat "Jackpott daglig akkumulering" (+4000 kr/dag, max 30 000) — er denne knyttet til `jackpot`-katalog-raden eller en helt egen mekanikk? ⚠️ verifiseres.
+> **Ingen daglig akkumulering:** Tidligere (2026-04 til 2026-05-10) hadde
+> Spillorama en cron-job som akkumulerte +4000 kr/dag opp til 30 000 kr og
+> krevde at master `JACKPOT_CONFIRM_REQUIRED`'et verdien før start.
+> **Dette ble fjernet 2026-05-10** per Tobias-direktiv: "Bingovertene i
+> hallene har full kontroll på det." Se ADR-0017
+> (`docs/adr/0017-remove-daily-jackpot-accumulation.md`, lander parallelt
+> via PR #1154). Master-flyt nå: blank input ved hver runde — ingen lazy
+> default fra cron, ingen auto-build-up bak kulissene. Bare
+> `jackpot`-katalog-spillet (pos 7) trigger popup; alle andre spill går
+> rett gjennom uten popup.
 
 **Bonus-spill:** ⚠️
 
@@ -798,11 +808,23 @@ Disse er IKKE en del av Rad 1-4 + Fullt Hus-payout. De legges på toppen som eks
 - Implementert som separat path (PR #2 i pilot K1-bølge)
 - Tilknyttet Spill 1-spill med Lucky-Number-feature aktivert
 
-### 6.3 Jackpott daglig akkumulering
+### 6.3 Jackpot-spill (master-konfigurert per runde)
 
-- +4000 kr/dag, max 30 000
-- Tilknyttet `jackpot`-katalog-raden? eller egen mekanikk? ⚠️ verifiseres
-- Service: `apps/backend/src/game/Game1JackpotStateService.ts`
+> **DEPRECATED 2026-05-10:** Daglig akkumulering (+4000/dag, max 30 000) er
+> fjernet per ADR-0017 (`docs/adr/0017-remove-daily-jackpot-accumulation.md`,
+> lander parallelt via PR #1154).
+
+- **Ingen automatisk akkumulering.** Bingoverten setter prizesCents per
+  bongfarge + draw-nummer manuelt via `JackpotSetupModal` ved hver runde
+  av `jackpot`-katalog-spillet (pos 7 i pilot-planen).
+- Override lagres i `app_game_plan_run.jackpot_overrides_json[<position>]`
+  per (run, posisjon).
+- Engine: `Game1DrawEngineDailyJackpot` leser fra plan-run-overrides
+  (refaktoreres i ADR-0017 PR-A) — ikke lenger fra `app_game1_jackpot_state`.
+- Audit-logg: `app_game1_jackpot_awards` beholdes som immutable historikk
+  (BIN-764 hash-chain).
+- Tidligere service `Game1JackpotStateService` (731 linjer) er deprecated;
+  cron-job `jackpotDailyTick` deaktivert.
 
 ### 6.4 Mini-games-payouts
 

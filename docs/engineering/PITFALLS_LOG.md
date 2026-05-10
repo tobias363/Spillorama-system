@@ -50,13 +50,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 5 | 2026-05-10 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 4 | 2026-05-10 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 8 | 2026-05-10 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 4 | 2026-05-10 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 5 | 2026-05-10 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 7 | 2026-05-10 |
 
-**Total:** 64 entries (per 2026-05-10)
+**Total:** 71 entries (per 2026-05-10)
 
 ---
 
@@ -678,6 +678,24 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - Bruk `typeof v === 'number' && Number.isFinite(v)` som primær guard
 - Skriv tester som passerer `[null, undefined, false, 50, "55"]` for å fange edge-cases
 
+### §7.8 — JackpotConfirmModal var feil mental modell (fjernet ADR-0017)
+
+**Severity:** P1 (designfeil korrigert)
+**Oppdaget:** 2026-05-10 (Tobias-bug-test rett etter PR #1150)
+**Symptom:** Master fikk read-only popup på Bingo (pos 1) som viste daglig akkumulert pott. Tobias forventet input-felt (per-bongfarge + draw) — men kun på Jackpot-katalog-spillet (pos 7), ikke på alle spill.
+**Root cause:** Backend kastet `JACKPOT_CONFIRM_REQUIRED` ved start av ALLE spill for å bekrefte daglig pott bygd opp av cron (`jackpotDailyTick` +4000/dag, max 30 000). Mental modell var "auto-akkumulering + master bekrefter på hvert spill". Tobias' faktiske mental modell: "ingen akkumulering, master setter alt manuelt KUN på Jackpot-spillet."
+**Fix:** ADR-0017 (`docs/adr/0017-remove-daily-jackpot-accumulation.md`, lander via PR #1154) fjerner daglig akkumulering helt. Cron-job deaktiveres, `JACKPOT_CONFIRM_REQUIRED`-error fjernes, `JackpotConfirmModal.ts` slettes. KUN `JACKPOT_SETUP_REQUIRED`-flow på `jackpot`-katalog-spillet (pos 7) beholdes — master setter blank input via `JackpotSetupModal`.
+**Prevention:**
+- Test mental-modell-antakelser med Tobias FØR større features bygges (særlig "smart auto"-funksjonalitet)
+- Daglig akkumulering var bygd uten eksplisitt Tobias-direktiv om at det var ønsket — anti-mønster: implementer "smart auto-funksjonalitet" når brukerne forventer manuell kontroll
+- Når en feature blokkerer master-flyt for ALLE spill (ikke bare det relevante), er det signal om feil scoping
+- Frontend popup-visualisering avslører ofte mental-modell-feil — Tobias så popup på Bingo og forsto umiddelbart at modellen var feil
+- ADR-0017 demonstrerer korrekt response: ny ADR som fjerner feilen, ikke patch på toppen
+**Related:**
+- ADR-0017 — fjerner daglig jackpot-akkumulering
+- PR #1150 (introduserte `JackpotConfirmModal` som denne ADR-en fjerner)
+- §7.6 (JackpotSetupModal eksisterte død i 3 dager) — beholdes; KUN `JackpotSetupModal` brukes på pos 7
+
 ---
 
 ## §8 Doc-disiplin
@@ -899,7 +917,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 
 - [`PM_ONBOARDING_PLAYBOOK.md`](./PM_ONBOARDING_PLAYBOOK.md) — full PM-rutine, §3.2 peker hit
 - [`AGENT_EXECUTION_LOG.md`](./AGENT_EXECUTION_LOG.md) — kronologisk agent-arbeid
-- [`AGENT_PROMPT_GUIDELINES.md`](./AGENT_PROMPT_GUIDELINES.md) — mal for agent-prompts (TODO)
+- `AGENT_PROMPT_GUIDELINES.md` — mal for agent-prompts (TODO — fil ikke opprettet enda)
 - [`ENGINEERING_WORKFLOW.md`](./ENGINEERING_WORKFLOW.md) — branch + PR + Done-policy
 - [`docs/adr/`](../adr/) — Architecture Decision Records
 - [`CLAUDE.md`](../../CLAUDE.md) — repo-root project conventions
@@ -911,3 +929,4 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-10 | Initial — 63 entries fra 12 PM-handoffs + audits + sesjons-erfaringer | PM-AI (Claude Opus 4.7) |
+| 2026-05-10 | Lagt til §7.8 (JackpotConfirmModal var feil mental modell — fjernet ADR-0017). Indeks-counts korrigert mot faktiske tall (§7=8, §11=7, total=71). | docs-agent (ADR-0017 PR-C) |

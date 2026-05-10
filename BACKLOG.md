@@ -144,7 +144,7 @@ Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 - ✅ transferHallAccess 60s handshake (PR #453)
 - ✅ Manuell Bingo-check UI (PR #433)
 - ✅ Mystery Game client-overlay (PR #430)
-- ✅ Lucky Number Bonus + Jackpott daglig akkumulering
+- ✅ Lucky Number Bonus + Jackpot-spill (master-konfigurert per runde — daglig akkumulering fjernet 2026-05-10 per ADR-0017)
 - ✅ Per-agent ready-state, shift-end checkboxer
 - ✅ Per-hall payout-cap, auto-escalation
 - ✅ XML-Withdraw pipeline

@@ -272,10 +272,19 @@ Følgende mekanikker er **separate paths** og IKKE en del av Rad 1-4 + Fullt Hus
 |---|---|
 | **Innsatsen-pot** | Egen pot som akkumuleres over runder. Utbetales ved Fullt Hus innen terskel. |
 | **Lucky Number Bonus** | Ekstra-premie hvis Fullt Hus oppnås på "lucky-ball". |
-| **Jackpott daglig akkumulering** | +4000/dag, max 30 000. Egen utbetaling. |
+| **Jackpot-spill (master-konfigurert per runde)** | Master setter manuelt prizesCents per bongfarge + draw-nummer via `JackpotSetupModal` på `jackpot`-katalog-spillet (pos 7). Ingen automatisk akkumulering — bingoverten har full kontroll. Se ADR-0017. |
 | **Mini-games (bonus-spill)** | Lykkehjul/Fargekladd/Skattekiste/Mystery — egne premier separate fra hovedspillet. |
 
 **Ikke bland disse med Rad 1-4 / Fullt Hus.** Når du fikser bugs i hovedpremie-pathen, ikke endre disse separate paths.
+
+> **NB om jackpot-akkumulering:** Tidligere hadde Spillorama en daglig
+> akkumulerings-cron (+4000/dag, max 30 000) for jackpot-spillet. Dette ble
+> **fjernet 2026-05-10** per Tobias-direktiv: "Bingoverten setter ALLTID
+> jackpot manuelt før spillet starter. Det skal IKKE være automatisk
+> akkumulering." Se ADR-0017 (`docs/adr/0017-remove-daily-jackpot-accumulation.md`,
+> lander parallelt via PR #1154). Master-flyt: blank input i
+> `JackpotSetupModal` ved hver runde av `jackpot`-katalog-spillet — ingen
+> lazy default fra cron.
 
 ---
 
