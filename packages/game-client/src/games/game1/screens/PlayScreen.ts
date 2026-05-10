@@ -662,6 +662,21 @@ export class PlayScreen extends Container {
     return this.lobbyOverallStatus;
   }
 
+  /**
+   * Spillerklient lobby-init-order-fix (2026-05-10): oppdater roomCode
+   * etter at `socket.createRoom` har returnert. Lar Game1Controller
+   * pre-bygge PlayScreen FØR join-flyten har lyktes, slik at
+   * `setBuyPopupDisplayName`/`setBuyPopupTicketConfig`/`setLobbyOverallStatus`
+   * kan lande på en ekte instans (ikke null-safe no-op) så snart første
+   * lobby-state-update fyrer.
+   *
+   * Delegerer til ChatPanelV2.setRoomCode som trigger lazy `loadHistory`
+   * når vi får første non-empty roomCode. Idempotent.
+   */
+  setRoomCode(roomCode: string): void {
+    this.chatPanel.setRoomCode(roomCode);
+  }
+
   hideBuyPopup(): void {
     this.buyPopup.hide();
   }
@@ -840,6 +855,16 @@ export class PlayScreen extends Container {
       this.elvisBar.remove();
       this.elvisBar = null;
     }
+  }
+
+  /**
+   * Spillerklient lobby-init-order-fix (2026-05-10): public alias for
+   * `removeElvisBar` slik at Game1Controller.transitionTo kan rive ned
+   * Elvis-baren ved overgang fra WAITING til PLAYING/SPECTATING når
+   * playScreen-instansen gjenbrukes på tvers av transisjoner. Idempotent.
+   */
+  hideElvisReplace(): void {
+    this.removeElvisBar();
   }
 
   /** Called after game-end reset from Controller. */
