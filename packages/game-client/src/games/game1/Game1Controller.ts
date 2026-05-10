@@ -395,7 +395,12 @@ class Game1Controller implements GameController {
       this.playScreen?.setLobbyOverallStatus(state?.overallStatus ?? null);
       this.applyWaitingForMasterFromLobbyState(state);
     });
-    void this.lobbyStateBinding.start();
+    // Tobias-bug 2026-05-11: `await` istedenfor `void` — initial HTTP-fetch
+    // må fullføre FØR createRoom slik at første room:update ikke overskriver
+    // lobby-state-binding. Race-bug: hvis socket-ack ankommer før onChange-
+    // listeren er aktiv, mistes første lobby-event og BuyPopup får aldri
+    // displayName ("Bingo") eller ticketColors (3 farger fra plan-runtime).
+    await this.lobbyStateBinding.start();
 
     // Join or create room
     this.loader.setState("JOINING_ROOM");
