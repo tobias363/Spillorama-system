@@ -168,11 +168,63 @@ export function deserializeRecoverableSnapshot(snap: RecoverableGameSnapshot): G
   };
 }
 
+// ── Errors ────────────────────────────────────────────────────────────
+
+/**
+ * ADR-0019 P0-2: thrown by `setAndPersist()` when the synchronous persist
+ * to the backing store fails. Critical paths catch this and decide whether
+ * to:
+ *   - propagate (fail-closed) — preserve regulatorisk consistency,
+ *   - log + degrade — pilot prefers fail-closed for state-binding paths.
+ *
+ * The original cause is preserved in `cause` (Error.cause / ES2022).
+ */
+export class RoomStatePersistError extends Error {
+  override readonly name = "RoomStatePersistError";
+  constructor(
+    public readonly roomCode: string,
+    cause: unknown,
+  ) {
+    super(
+      `Failed to persist room ${roomCode} to backing store synchronously`,
+      // Spread for cause-friendly construction without breaking older runtimes.
+      cause instanceof Error ? { cause } : undefined,
+    );
+  }
+}
+
 // ── Store interface ───────────────────────────────────────────────────
 
 export interface RoomStateStore {
   get(code: string): RoomState | undefined;
+  /**
+   * BIN-170: write-through to in-memory cache. For Redis-backed stores
+   * this schedules a fire-and-forget persist — the in-memory state is
+   * authoritative until `persist()` / `setAndPersist()` confirms the
+   * Redis write.
+   *
+   * Use for non-critical mutations (cleanup, eviction, heartbeat). For
+   * regulatorisk-kritiske paths (room creation, scheduled-game binding,
+   * isHallShared flip) use {@link setAndPersist} instead — see ADR-0019.
+   */
   set(code: string, room: RoomState): void;
+  /**
+   * ADR-0019 P0-2: write to in-memory cache AND await the persist to the
+   * backing store. Throws {@link RoomStatePersistError} on failure so
+   * critical paths can decide between fail-closed (re-throw) and
+   * fail-degraded (log + continue).
+   *
+   * Use for:
+   *   - room creation (RoomLifecycleService.createRoom)
+   *   - scheduledGameId binding (setScheduledGameId)
+   *   - isHallShared / isTestHall flag flips that affect routing
+   *   - post-checkpoint state-binding paths
+   *
+   * In-memory store: this is a no-op-equivalent (memory is the source of
+   * truth, no separate persist target). It still goes through the same
+   * async signature for caller-symmetry.
+   */
+  setAndPersist(code: string, room: RoomState): Promise<void>;
   delete(code: string): void;
   has(code: string): boolean;
   keys(): IterableIterator<string>;
@@ -196,6 +248,14 @@ export class InMemoryRoomStateStore implements RoomStateStore {
 
   get(code: string): RoomState | undefined { return this.rooms.get(code); }
   set(code: string, room: RoomState): void { this.rooms.set(code, room); }
+  /**
+   * ADR-0019 P0-2: for in-memory store, memory IS the backing store.
+   * `setAndPersist` reduces to `set` + `Promise.resolve()` so callers can
+   * use the same await-pattern for both store-types.
+   */
+  async setAndPersist(code: string, room: RoomState): Promise<void> {
+    this.rooms.set(code, room);
+  }
   delete(code: string): void { this.rooms.delete(code); }
   has(code: string): boolean { return this.rooms.has(code); }
   keys(): IterableIterator<string> { return this.rooms.keys(); }

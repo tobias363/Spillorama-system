@@ -31,7 +31,7 @@ import type {
   RoomSummary,
   Ticket
 } from "./types.js";
-import { InMemoryRoomStateStore, type RoomStateStore } from "../store/RoomStateStore.js";
+import { InMemoryRoomStateStore, RoomStatePersistError, type RoomStateStore } from "../store/RoomStateStore.js";
 import type {
   ResponsibleGamingPersistenceAdapter
 } from "./ResponsibleGamingPersistence.js";
@@ -1015,6 +1015,31 @@ export class BingoEngine {
     this.syncRoomToStore(room);
   }
 
+  /**
+   * ADR-0019 P0-2: async variant of {@link markRoomAsScheduled} that awaits
+   * the Redis-persist before returning. Use from scheduled-game-spawn paths
+   * where the room MUST be bound to the scheduled-game-id before the next
+   * inbound socket-event can join the room — otherwise a crash window
+   * (10-50 ms) between memory-mutation and Redis-write would leave Redis
+   * with the unbound room, breaking instance-failover.
+   *
+   * Throws {@link RoomStatePersistError} if Redis persist fails. Caller
+   * decides whether to retry, fail the spawn (fail-closed), or proceed
+   * with degraded durability.
+   */
+  async markRoomAsScheduledAndPersist(roomCode: string, scheduledGameId: string): Promise<void> {
+    const room = this.requireRoom(roomCode);
+    const trimmedId = scheduledGameId?.trim();
+    if (!trimmedId) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "scheduledGameId må være en ikke-tom streng.",
+      );
+    }
+    room.scheduledGameId = trimmedId;
+    await this.syncRoomToStoreAndPersist(room, "mark_room_as_scheduled");
+  }
+
   async startGame(input: StartGameInput): Promise<void> {
     const room = this.requireRoom(input.roomCode);
     // CRIT-4: scheduled Spill 1 må kjøre via Game1DrawEngineService.
@@ -1849,6 +1874,7 @@ export class BingoEngine {
         this.assertWalletNotAlreadyInRoom(room, walletId),
       serializeRoom: (room) => this.serializeRoom(room),
       syncRoomToStore: (room) => this.syncRoomToStore(room),
+      syncRoomToStoreAndPersist: (room, path) => this.syncRoomToStoreAndPersist(room, path),
       releaseAndForgetEviction: (roomCode, playerId, walletId) =>
         this.releaseAndForgetEviction(roomCode, playerId, walletId),
       disarmAllPlayersForRoom: (roomCode) => {
@@ -2951,6 +2977,30 @@ export class BingoEngine {
   }
 
   /**
+   * ADR-0019 P0-2: async variant of {@link setRoomTestHall} that awaits the
+   * Redis-persist before returning. Use from scheduled-game-spawn paths
+   * where the test-hall flag must be durable before next inbound event.
+   *
+   * No-op when value unchanged (idempotent). Returns silently when room
+   * does not exist (fail-soft mirroring sync variant).
+   *
+   * Throws {@link RoomStatePersistError} on Redis-persist failure.
+   */
+  async setRoomTestHallAndPersist(roomCode: string, isTestHall: boolean): Promise<void> {
+    const room = this.rooms.get(roomCode.trim().toUpperCase());
+    if (!room) return;
+    if (isTestHall) {
+      if (room.isTestHall !== true) {
+        room.isTestHall = true;
+        await this.syncRoomToStoreAndPersist(room, "set_room_test_hall");
+      }
+    } else if (room.isTestHall === true) {
+      room.isTestHall = undefined;
+      await this.syncRoomToStoreAndPersist(room, "set_room_test_hall");
+    }
+  }
+
+  /**
    * PILOT-STOP-SHIP fix (Tobias 2026-04-27): refresh `RoomState.isHallShared`
    * for et eksisterende rom. Brukes av `game1ScheduledEvents.ts` når et
    * scheduled multi-hall-spill joines mens rommet allerede eksisterer
@@ -2977,6 +3027,32 @@ export class BingoEngine {
     } else if (room.isHallShared === true) {
       room.isHallShared = undefined;
       this.syncRoomToStore(room);
+    }
+  }
+
+  /**
+   * ADR-0019 P0-2: async variant of {@link setRoomHallShared} that awaits
+   * the Redis-persist before returning. CRITICAL for multi-hall scheduled
+   * games: if the hall-shared flag is lost in Redis after a crash, Hall B
+   * joining sees `hallId=A` and gets HALL_MISMATCH — pilot-blocker for
+   * multi-hall scheduled flow.
+   *
+   * No-op when value unchanged (idempotent). Returns silently when room
+   * does not exist (fail-soft mirroring sync variant).
+   *
+   * Throws {@link RoomStatePersistError} on Redis-persist failure.
+   */
+  async setRoomHallSharedAndPersist(roomCode: string, isHallShared: boolean): Promise<void> {
+    const room = this.rooms.get(roomCode.trim().toUpperCase());
+    if (!room) return;
+    if (isHallShared) {
+      if (room.isHallShared !== true) {
+        room.isHallShared = true;
+        await this.syncRoomToStoreAndPersist(room, "set_room_hall_shared");
+      }
+    } else if (room.isHallShared === true) {
+      room.isHallShared = undefined;
+      await this.syncRoomToStoreAndPersist(room, "set_room_hall_shared");
     }
   }
 
@@ -4441,9 +4517,48 @@ export class BingoEngine {
   }
 
   /** BIN-251: Sync room state to external store (e.g. Redis) after structural mutations.
-   * In-place game mutations (draws, marks, claims) are synced by callers via persist(). */
+   * In-place game mutations (draws, marks, claims) are synced by callers via persist().
+   *
+   * Fire-and-forget Redis-persist. Non-critical paths only. For state-binding
+   * paths (room create, scheduledGameId, isHallShared, isTestHall) use
+   * {@link syncRoomToStoreAndPersist} so a backend-crash between memory-set
+   * and Redis-write doesn't lose the state (ADR-0019 P0-2). */
   private syncRoomToStore(room: RoomState): void {
     this.roomStateStore?.set(room.code, room);
+  }
+
+  /**
+   * ADR-0019 P0-2: sync write-through to external store. Awaits the Redis
+   * round-trip before returning so a backend-crash mid-set can't lose
+   * critical state-binding mutations.
+   *
+   * `path` is a metrics label segmenting call-sites — e.g. `"room_create"`,
+   * `"scheduled_game_bind"`, `"is_hall_shared_set"`. Surfaces in
+   * `metrics.roomStatePersistDuration` / `roomStatePersistFailures`.
+   *
+   * Caller-side fail-policy:
+   *   - Throws {@link RoomStatePersistError} if Redis-persist fails.
+   *   - Caller decides: re-throw to reject inbound request (fail-closed)
+   *     or log + continue with degraded durability (fail-degraded).
+   *
+   * No-op (memory write only) when `roomStateStore` is not wired —
+   * production deployments always have Redis wired; the optional shape
+   * is for tests + dev-without-redis.
+   */
+  protected async syncRoomToStoreAndPersist(room: RoomState, path: string): Promise<void> {
+    const store = this.roomStateStore;
+    if (!store) return;
+    // Prefer typed setAndPersistWithPath when the impl supports it for
+    // metrics-label fidelity; fall back to setAndPersist (generic label)
+    // for impls that don't expose the with-path variant.
+    const storeWithPath = store as RoomStateStore & {
+      setAndPersistWithPath?: (code: string, room: RoomState, path: string) => Promise<void>;
+    };
+    if (typeof storeWithPath.setAndPersistWithPath === "function") {
+      await storeWithPath.setAndPersistWithPath(room.code, room, path);
+    } else {
+      await store.setAndPersist(room.code, room);
+    }
   }
 
   private serializeRoom(room: RoomState): RoomSnapshot {

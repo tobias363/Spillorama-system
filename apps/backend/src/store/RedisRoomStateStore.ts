@@ -9,12 +9,24 @@
  * On shutdown: all pending writes flushed.
  *
  * Redis keys: `bingo:room:{roomCode}` with configurable TTL.
+ *
+ * ADR-0019 P0-2: critical state-binding paths (room create, scheduled-
+ * game-id binding, isHallShared flip) MUST use `setAndPersist()` to avoid
+ * the 10-50 ms in-memory-only window between `set()` and `persistAsync()`
+ * that could lose state on backend-crash. Non-critical paths (cleanup,
+ * heartbeat) keep using `set()` for performance.
  */
 
 import { Redis } from "ioredis";
 import type { RoomState } from "../game/types.js";
-import { serializeRoom, deserializeRoom, type RoomStateStore } from "./RoomStateStore.js";
+import {
+  serializeRoom,
+  deserializeRoom,
+  RoomStatePersistError,
+  type RoomStateStore,
+} from "./RoomStateStore.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { metrics } from "../util/metrics.js";
 
 const logger = rootLogger.child({ module: "redis-room-store" });
 
@@ -62,6 +74,66 @@ export class RedisRoomStateStore implements RoomStateStore {
     this.persistAsync(code).catch((err: unknown) => {
       logger.error({ err, roomCode: code }, "Unhandled error in Redis room persist — state may be stale in Redis");
     });
+  }
+
+  /**
+   * ADR-0019 P0-2: synchronous write-through. Writes to in-memory cache
+   * AND awaits the Redis persist before returning. Throws
+   * {@link RoomStatePersistError} on Redis failure so critical-path
+   * callers can decide fail-closed vs fail-degraded.
+   *
+   * Caller path-label is passed in for metrics-segmentation (see
+   * `metrics.roomStatePersistDuration` / `roomStatePersistFailures`).
+   *
+   * Memory write is unconditional — even if Redis fails, the in-memory
+   * state is updated so the current request can complete on this
+   * instance. On crash before Redis catches up, the lost state will be
+   * recovered from `app_event_outbox` checkpoint on the next instance
+   * (HOEY-7 + ADR-0019). For state that has no checkpoint backing
+   * (room.gameSlug, scheduledGameId, isHallShared), the throw lets the
+   * caller decide whether to reject the inbound request or proceed with
+   * degraded durability.
+   */
+  async setAndPersist(code: string, room: RoomState): Promise<void> {
+    this.rooms.set(code, room);
+    const path = "room_state"; // generic; callers can pass override via setAndPersistWithPath
+    const start = Date.now();
+    try {
+      await this.persist(code);
+      metrics.roomStatePersistDuration.observe({ path }, Date.now() - start);
+    } catch (err) {
+      metrics.roomStatePersistFailures.inc({ path });
+      logger.error(
+        { err, roomCode: code, durationMs: Date.now() - start },
+        "CRITICAL: Sync Redis persist failed on critical room-state path (ADR-0019)",
+      );
+      throw new RoomStatePersistError(code, err);
+    }
+  }
+
+  /**
+   * ADR-0019 P0-2: variant of {@link setAndPersist} that takes a
+   * caller-supplied `path` label for metrics-segmentation. Lets us
+   * baseline e.g. `room_create` vs `scheduled_game_bind` separately.
+   */
+  async setAndPersistWithPath(
+    code: string,
+    room: RoomState,
+    path: string,
+  ): Promise<void> {
+    this.rooms.set(code, room);
+    const start = Date.now();
+    try {
+      await this.persist(code);
+      metrics.roomStatePersistDuration.observe({ path }, Date.now() - start);
+    } catch (err) {
+      metrics.roomStatePersistFailures.inc({ path });
+      logger.error(
+        { err, roomCode: code, path, durationMs: Date.now() - start },
+        "CRITICAL: Sync Redis persist failed on critical room-state path (ADR-0019)",
+      );
+      throw new RoomStatePersistError(code, err);
+    }
   }
 
   delete(code: string): void {

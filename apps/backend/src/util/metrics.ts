@@ -260,4 +260,21 @@ export const metrics = {
     help: "Konfigurert max-størrelse for Postgres pool (§6.4)",
     labelNames: ["pool"] as const,
   }),
+
+  // ADR-0019 P0-2: synchronous Redis persist for critical room-state paths.
+  // Driven by `RedisRoomStateStore.setAndPersist()`. Histogram buckets cover
+  // the expected Redis round-trip range (1-50 ms) plus failure tail (>500 ms).
+  // `path` label segments by call-site so we can baseline e.g. room-create
+  // vs scheduled-game-binding.
+  roomStatePersistDuration: new client.Histogram({
+    name: "room_state_persist_duration_ms",
+    help: "Sync Redis persist duration for critical room-state paths (ADR-0019)",
+    labelNames: ["path"] as const,
+    buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 5_000],
+  }),
+  roomStatePersistFailures: new client.Counter({
+    name: "room_state_persist_failures_total",
+    help: "Sync Redis persist failures on critical room-state paths (ADR-0019)",
+    labelNames: ["path"] as const,
+  }),
 };

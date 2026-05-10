@@ -137,8 +137,19 @@ export interface RoomLifecycleCallbacks {
   /**
    * BIN-251: After a structural mutation (createRoom / destroyRoom),
    * sync to the optional external store (e.g. Redis).
+   *
+   * Fire-and-forget — see {@link syncRoomToStoreAndPersist} for the
+   * sync-persist variant used by createRoom (ADR-0019 P0-2).
    */
   syncRoomToStore(room: RoomState): void;
+  /**
+   * ADR-0019 P0-2: sync write-through after structural mutation. Awaits
+   * the Redis-persist before returning so a crash mid-create can't lose
+   * the room. Throws {@link RoomStatePersistError} on persist failure —
+   * createRoom propagates the throw (fail-closed: client sees an error
+   * rather than thinking the room was created when Redis missed the write).
+   */
+  syncRoomToStoreAndPersist(room: RoomState, path: string): Promise<void>;
   /**
    * K2 atomic eviction. Releases armed-state + reservation atomically via
    * `lifecycleStore.evictPlayer({ releaseReservation: true })` and
@@ -298,7 +309,14 @@ export class RoomLifecycleService {
     };
 
     this.rooms.set(code, room);
-    this.callbacks.syncRoomToStore(room); // BIN-251
+    // ADR-0019 P0-2: sync write-through to Redis for createRoom. Tidligere
+    // var dette `syncRoomToStore` (fire-and-forget) — om backend krasjet
+    // 10-50 ms etter `rooms.set` men FØR `persistAsync` rakk å lande i
+    // Redis, returnerte klienten `{ roomCode }` mens Redis manglet rommet.
+    // Neste instans-failover ville ikke kunne joine rommet. Nå venter vi
+    // på Redis-write; ved feil throwes RoomStatePersistError og klient får
+    // korrekt rejection istedenfor stille korrupsjon.
+    await this.callbacks.syncRoomToStoreAndPersist(room, "room_create");
     // LIVE_ROOM_OBSERVABILITY 2026-04-29: structured INFO-log slik at ops kan
     // grep room.created i Render-loggen og se hvem som åpnet rommet, hall,
     // canonical-kode + om det er test-hall. Tidligere ble dette begravd bak

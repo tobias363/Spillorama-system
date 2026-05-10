@@ -210,11 +210,14 @@ export function createGame1ScheduledEventHandlers(
       // (f.eks. hvis tidligere join allerede markerte rommet).
       if (isHallShared) {
         try {
-          engine.setRoomHallShared(row.room_code, true);
+          // ADR-0019 P0-2: sync-persist so the flag survives instance failover.
+          // Critical for multi-hall scheduled: missing flag → joinRoom kaster
+          // HALL_MISMATCH for non-master halls etter neste failover.
+          await engine.setRoomHallSharedAndPersist(row.room_code, true);
         } catch (err) {
           log.warn(
             { err, roomCode: row.room_code, scheduledGameId: row.id },
-            "setRoomHallShared på existing-rom feilet — joinRoom kan kaste HALL_MISMATCH"
+            "setRoomHallSharedAndPersist på existing-rom feilet — joinRoom kan kaste HALL_MISMATCH"
           );
         }
       }
@@ -234,23 +237,26 @@ export function createGame1ScheduledEventHandlers(
       // bypass-flagget. Resultat: Demo Hall fortsatt pauser på Phase 1.
       try {
         const hall = await platformService.getHall(hallId);
-        engine.setRoomTestHall(roomCode, hall.isTestHall === true);
+        // ADR-0019 P0-2: sync-persist test-hall flag for failover-safety.
+        await engine.setRoomTestHallAndPersist(roomCode, hall.isTestHall === true);
       } catch (err) {
         log.warn(
           { err, hallId, roomCode },
-          "setRoomTestHall refresh feilet — fortsetter med eksisterende state"
+          "setRoomTestHallAndPersist refresh feilet — fortsetter med eksisterende state"
         );
       }
       // CRIT-4: rommet kan ha blitt rebygget av en restart (Render-instans
       // som lastet state fra Redis-store) uten at scheduledGameId ble
       // hydrert fra DB-mappingen. Marker idempotent her så guarden
       // dekker tilfellet "room re-joined etter restart".
+      // ADR-0019 P0-2: sync-persist så scheduledGameId-binding overlever
+      // backend-crash mellom mark og persist.
       try {
-        engine.markRoomAsScheduled(roomCode, row.id);
+        await engine.markRoomAsScheduledAndPersist(roomCode, row.id);
       } catch (err) {
         log.warn(
           { err, roomCode, scheduledGameId: row.id },
-          "markRoomAsScheduled på existing-rom feilet — scheduled-engine er autoritativ"
+          "markRoomAsScheduledAndPersist på existing-rom feilet — scheduled-engine er autoritativ"
         );
       }
       const snapshot = engine.getRoomSnapshot(roomCode);
@@ -302,12 +308,13 @@ export function createGame1ScheduledEventHandlers(
       // Best-effort — hvis dette kaster (rommet borte etter race) er
       // scheduled-flyten allerede ansvarlig for state via
       // Game1DrawEngineService.
+      // ADR-0019 P0-2: sync-persist scheduledGameId-binding.
       try {
-        engine.markRoomAsScheduled(created.roomCode, row.id);
+        await engine.markRoomAsScheduledAndPersist(created.roomCode, row.id);
       } catch (err) {
         log.warn(
           { err, roomCode: created.roomCode, scheduledGameId: row.id },
-          "markRoomAsScheduled feilet etter assignRoomCode — fortsetter, scheduled-engine er autoritativ"
+          "markRoomAsScheduledAndPersist feilet etter assignRoomCode — fortsetter, scheduled-engine er autoritativ"
         );
       }
       const snapshot = engine.getRoomSnapshot(created.roomCode);
@@ -342,11 +349,14 @@ export function createGame1ScheduledEventHandlers(
     // før den hadde satt flagget.
     if (isHallShared) {
       try {
-        engine.setRoomHallShared(actualRoomCode, true);
+        // ADR-0019 P0-2: sync-persist isHallShared så flagget overlever
+        // crash-window mellom set + Redis-write — multi-hall scheduled
+        // pilot-blocker hvis tapt.
+        await engine.setRoomHallSharedAndPersist(actualRoomCode, true);
       } catch (err) {
         log.warn(
           { err, roomCode: actualRoomCode, scheduledGameId: row.id },
-          "setRoomHallShared på winner-rom feilet — joinRoom kan kaste HALL_MISMATCH"
+          "setRoomHallSharedAndPersist på winner-rom feilet — joinRoom kan kaste HALL_MISMATCH"
         );
       }
     }
@@ -359,12 +369,13 @@ export function createGame1ScheduledEventHandlers(
     });
     // CRIT-4: vinner-rommet kan også være "fresh" (annen race-vinner
     // markerte det allerede), men markeringen er idempotent.
+    // ADR-0019 P0-2: sync-persist scheduledGameId-binding.
     try {
-      engine.markRoomAsScheduled(actualRoomCode, row.id);
+      await engine.markRoomAsScheduledAndPersist(actualRoomCode, row.id);
     } catch (err) {
       log.warn(
         { err, roomCode: actualRoomCode, scheduledGameId: row.id },
-        "markRoomAsScheduled på winner-rom feilet — scheduled-engine er autoritativ"
+        "markRoomAsScheduledAndPersist på winner-rom feilet — scheduled-engine er autoritativ"
       );
     }
     const snapshot = engine.getRoomSnapshot(actualRoomCode);
