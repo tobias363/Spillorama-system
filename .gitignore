@@ -5,6 +5,11 @@ apps/backend/.env.production
 .DS_Store
 *.log
 
+# Local credentials (Render API, Linear API, etc.) — Bølge 1 (2026-05-10)
+secrets/*.local.md
+secrets/load-env.sh.local
+.pm-onboarding-confirmed.txt
+
 # IDE
 .vscode/
 .idea/

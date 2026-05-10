@@ -11,6 +11,20 @@
 - [ ] **Jeg er ikke PM** (Tobias / ekstern utvikler / Dependabot / annet). Onboarding-gate
   gjelder ikke for meg.
 
+<!--
+  PM-Gate Workflow Marker (verifiseres av .github/workflows/pm-gate-enforcement.yml)
+
+  Workflow-en aksepterer ETT av:
+    - Checkbox over m/faktisk SHA (BIN-PM-VT-format)
+    - gate-confirmed: <hash-prefix>      # 12-tegn-hash fra docs/.pm-confirmations.log
+    - gate-bypass: <begrunnelse>         # Eksplisitt bypass m/Tobias-godkjenning
+    - gate-not-applicable: <rolle>       # Tobias selv / docs-only / dependabot / ci-bot
+
+  Detaljer: docs/operations/PM_PR_VERIFICATION_DUTY.md
+-->
+
+<!-- valgfritt for kortform: gate-confirmed: __hash_or_remove__ -->
+
 ## Summary
 - 
 

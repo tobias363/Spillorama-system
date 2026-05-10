@@ -1,0 +1,76 @@
+name: Doc Freshness Check
+
+# Sjekker at kanoniske docs (linket fra MASTER_README, INVENTORY, CLAUDE.md)
+# ikke er for utdaterte. Genererer en rapport til docs/auto-generated/
+# DOC_FRESHNESS.md hver fredag.
+
+on:
+  schedule:
+    - cron: "0 14 * * 5"
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Antall dager før doc anses stale"
+        required: false
+        default: "90"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/check-doc-freshness.mjs"
+      - "MASTER_README.md"
+      - "docs/INVENTORY.md"
+      - "CLAUDE.md"
+      - ".github/workflows/doc-freshness.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: doc-freshness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run freshness check
+        id: check
+        run: |
+          mkdir -p docs/auto-generated
+          THRESHOLD="${{ inputs.threshold || '90' }}"
+          node scripts/check-doc-freshness.mjs \
+            --threshold="$THRESHOLD" \
+            --output=docs/auto-generated/DOC_FRESHNESS.md
+          echo "Generated docs/auto-generated/DOC_FRESHNESS.md"
+
+      - name: Commit if changed
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions (doc-freshness)"
+          if [ -n "$(git status --porcelain docs/auto-generated/DOC_FRESHNESS.md)" ]; then
+            git add docs/auto-generated/DOC_FRESHNESS.md
+            git commit -m "chore(docs): refresh doc-freshness report [skip ci]"
+            git push
+          else
+            echo "No changes to DOC_FRESHNESS.md"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Doc Freshness Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f docs/auto-generated/DOC_FRESHNESS.md ]; then
+            head -40 docs/auto-generated/DOC_FRESHNESS.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No report generated._" >> "$GITHUB_STEP_SUMMARY"
+          fi

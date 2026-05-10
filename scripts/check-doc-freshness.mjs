@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+/**
+ * check-doc-freshness.mjs
+ *
+ * Sjekker at "kanoniske" docs (de som er linket fra MASTER_README.md og
+ * INVENTORY.md Tier A) ikke er for utdaterte. Brukes av
+ * .github/workflows/doc-freshness.yml én gang i uken.
+ *
+ * Algoritme:
+ *   1. Parse MASTER_README.md + docs/INVENTORY.md for å finne kanoniske docs
+ *   2. For hver: les "Sist oppdatert: YYYY-MM-DD" (hvis finnes)
+ *   3. Sammenlign med terskel — default 90 dager
+ *   4. Hvis ingen "Sist oppdatert"-felt: faller tilbake til git log mtime
+ *   5. Skriv markdown-rapport til stdout (eller fil hvis --output)
+ *
+ * CLI:
+ *   node scripts/check-doc-freshness.mjs                  # 90 dager terskel, stdout
+ *   node scripts/check-doc-freshness.mjs --threshold=120  # 120 dager
+ *   node scripts/check-doc-freshness.mjs --output=docs/auto-generated/DOC_FRESHNESS.md
+ *   node scripts/check-doc-freshness.mjs --fail-on-stale  # exit 1 hvis noe stale
+ */
+
+import { readFile, writeFile, stat } from "node:fs/promises";
+import { execSync } from "node:child_process";
+import { resolve, relative, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "..");
+
+const args = process.argv.slice(2);
+const threshold = parseInt(
+  args.find((a) => a.startsWith("--threshold="))?.split("=")[1] ?? "90",
+  10,
+);
+const outputPath = args.find((a) => a.startsWith("--output="))?.split("=")[1];
+const failOnStale = args.includes("--fail-on-stale");
+
+const SOURCE_FILES = [
+  "MASTER_README.md",
+  "docs/INVENTORY.md",
+  "CLAUDE.md",
+];
+
+const SKIP_PATTERNS = [
+  /\/adr\//,
+  /\/decisions\//,
+  /\/postmortems\/(?!README|_TEMPLATE)/,
+  /\/audit\//,
+  /\/handoffs\//,
+  /\/operations\/PM_HANDOFF_/,
+  /\/legacy-snapshots\//,
+  /\/archive\//,
+  /\/auto-generated\//,
+  /_AUDIT_\d{4}-\d{2}-\d{2}\.md$/,
+  /_RESEARCH_\d{4}-\d{2}-\d{2}\.md$/,
+  /\d{4}-\d{2}-\d{2}\.md$/,
+  /\d{4}-\d{2}-\d{2}_/,
+];
+
+function extractDocPaths(content, sourceFile) {
+  const linkRegex = /\[[^\]]+\]\(([^)]+\.md)(?:#[^)]*)?\)/g;
+  const paths = new Set();
+  const sourceDir = dirname(sourceFile);
+  let m;
+  while ((m = linkRegex.exec(content)) !== null) {
+    let link = m[1].trim();
+    if (link.startsWith("http")) continue;
+    if (link.startsWith("/")) link = link.slice(1);
+    const resolved = relative(REPO_ROOT, resolve(REPO_ROOT, sourceDir, link));
+    paths.add(resolved);
+  }
+  return paths;
+}
+
+function shouldSkip(path) {
+  return SKIP_PATTERNS.some((re) => re.test(path));
+}
+
+function extractSistOppdatert(content) {
+  const re = /\*\*Sist oppdatert:?\*\*\s+(\d{4}-\d{2}-\d{2})/i;
+  const m = content.match(re);
+  if (!m) return null;
+  const d = new Date(m[1] + "T00:00:00Z");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function gitLastModified(absPath) {
+  try {
+    const out = execSync(
+      `git log -1 --format=%cI -- "${absPath}"`,
+      { cwd: REPO_ROOT, encoding: "utf8" },
+    ).trim();
+    if (!out) return null;
+    return new Date(out);
+  } catch {
+    return null;
+  }
+}
+
+function daysAgo(date) {
+  return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+async function main() {
+  const allPaths = new Set();
+  for (const src of SOURCE_FILES) {
+    const absSrc = resolve(REPO_ROOT, src);
+    let content;
+    try {
+      content = await readFile(absSrc, "utf8");
+    } catch (err) {
+      console.error(`Could not read ${src}: ${err.message}`);
+      continue;
+    }
+    for (const p of extractDocPaths(content, src)) {
+      if (!shouldSkip(p)) allPaths.add(p);
+    }
+  }
+
+  const results = [];
+  for (const path of [...allPaths].sort()) {
+    const absPath = resolve(REPO_ROOT, path);
+    let exists = true;
+    let content = "";
+    try {
+      content = await readFile(absPath, "utf8");
+    } catch {
+      exists = false;
+    }
+
+    if (!exists) {
+      results.push({
+        path, status: "MISSING",
+        sistOppdatert: null, gitLast: null, daysSince: null, source: null,
+      });
+      continue;
+    }
+
+    const sist = extractSistOppdatert(content);
+    const gitLast = gitLastModified(absPath);
+    const effective = sist ?? gitLast;
+    const days = effective ? daysAgo(effective) : null;
+    const source = sist ? "Sist oppdatert" : gitLast ? "git log" : "ukjent";
+
+    let status = "OK";
+    if (!effective) status = "NO_DATE";
+    else if (days > threshold) status = "STALE";
+
+    results.push({
+      path, status, sistOppdatert: sist, gitLast,
+      daysSince: days, source,
+    });
+  }
+
+  const stale = results.filter((r) => r.status === "STALE");
+  const missing = results.filter((r) => r.status === "MISSING");
+  const noDate = results.filter((r) => r.status === "NO_DATE");
+  const ok = results.filter((r) => r.status === "OK");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = [
+    `# Doc Freshness Report — ${today}`,
+    "",
+    `**Auto-generated by:** \`scripts/check-doc-freshness.mjs\``,
+    `**Threshold:** ${threshold} dager`,
+    `**Source files scanned:** ${SOURCE_FILES.join(", ")}`,
+    `**Total kanoniske docs sjekket:** ${results.length}`,
+    "",
+    `## Sammendrag`,
+    "",
+    `- ✅ OK (oppdatert siste ${threshold} dager): **${ok.length}**`,
+    `- ⚠️  Stale (>${threshold} dager): **${stale.length}**`,
+    `- ❓ Ingen "Sist oppdatert"-felt + ingen git-data: **${noDate.length}**`,
+    `- 🚫 Manglende fil (broken link): **${missing.length}**`,
+    "",
+  ];
+
+  if (missing.length > 0) {
+    lines.push(`## 🚫 Manglende filer (broken links)`, "");
+    lines.push("| Fil | Referert fra |");
+    lines.push("|---|---|");
+    for (const r of missing) {
+      lines.push(`| \`${r.path}\` | _<sjekk MASTER_README/INVENTORY/CLAUDE.md>_ |`);
+    }
+    lines.push("");
+  }
+
+  if (stale.length > 0) {
+    lines.push(`## ⚠️ Stale docs (>${threshold} dager siden Sist oppdatert)`, "");
+    lines.push("| Fil | Sist oppdatert | Dager siden | Kilde |");
+    lines.push("|---|---|---|---|");
+    for (const r of stale.sort((a, b) => b.daysSince - a.daysSince)) {
+      const dateStr = r.sistOppdatert
+        ? r.sistOppdatert.toISOString().slice(0, 10)
+        : r.gitLast?.toISOString().slice(0, 10) ?? "ukjent";
+      lines.push(`| \`${r.path}\` | ${dateStr} | **${r.daysSince}** | ${r.source} |`);
+    }
+    lines.push("");
+  }
+
+  if (noDate.length > 0) {
+    lines.push(`## ❓ Ingen dato funnet`, "");
+    for (const r of noDate) {
+      lines.push(`- \`${r.path}\``);
+    }
+    lines.push("");
+  }
+
+  lines.push(`## ✅ OK (kortform)`, "");
+  lines.push(`<details><summary>Vis ${ok.length} dokumenter</summary>`, "");
+  for (const r of ok) {
+    const dateStr = r.sistOppdatert
+      ? r.sistOppdatert.toISOString().slice(0, 10)
+      : r.gitLast?.toISOString().slice(0, 10);
+    lines.push(`- \`${r.path}\` — ${dateStr} (${r.daysSince}d, ${r.source})`);
+  }
+  lines.push("", `</details>`, "");
+
+  lines.push(`---`);
+  lines.push("");
+  lines.push(`**Hva betyr dette?**`);
+  lines.push("");
+  lines.push(`- **Stale-docs er IKKE automatisk feil** — noen docs er stabile og trenger sjelden oppdatering`);
+  lines.push(`- Sjekk hver stale-doc og avgjør:`);
+  lines.push(`  1. Bare oppdater "Sist oppdatert" hvis innholdet fortsatt er gyldig`);
+  lines.push(`  2. Re-skriv hvis innholdet er utdatert`);
+  lines.push(`  3. Marker DEPRECATED og lenk til erstatningen hvis ikke lenger relevant`);
+  lines.push(`  4. Fjern fra MASTER_README/INVENTORY hvis ikke lenger kanonisk`);
+
+  const report = lines.join("\n") + "\n";
+
+  if (outputPath) {
+    const absOut = resolve(REPO_ROOT, outputPath);
+    await writeFile(absOut, report, "utf8");
+    console.error(`Wrote report to ${outputPath}`);
+  } else {
+    process.stdout.write(report);
+  }
+
+  if (failOnStale && (stale.length > 0 || missing.length > 0)) {
+    console.error(`\nFAIL: ${stale.length} stale + ${missing.length} missing`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error("check-doc-freshness.mjs failed:", err);
+  process.exit(2);
+});

@@ -1,0 +1,140 @@
+name: PM Merge Verification
+
+# Tobias-direktiv 2026-05-10:
+# > "PM alltid må kontrollere og verifisere commits og at pull request i git
+# >  alltid blir verifisert at de går igjennom — man må ikke få failed
+# >  pull request. Dette er en av de viktigste jobbene til PM."
+#
+# Etter hver merge til main, venter ~3 min og sjekker om noen workflows feiler
+# på den nye commit-en. Hvis ja: oppretter en GitHub Issue som tagger PM med
+# detaljer. Hvis nei: bare logger grønt.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+  pull-requests: write
+
+jobs:
+  watch-ci:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for downstream CI to stabilize
+        run: |
+          echo "Venter 3 min for at downstream CI skal komme i gang..."
+          sleep 180
+
+      - name: Check workflow runs and open issue if any failed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha;
+            const ownRunId = context.runId;
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: sha,
+              per_page: 100,
+            });
+            const relevant = runs.data.workflow_runs.filter(r => r.id !== ownRunId);
+            const failed = relevant.filter(r =>
+              r.conclusion === 'failure' || r.conclusion === 'cancelled' || r.conclusion === 'timed_out'
+            );
+            const inProgress = relevant.filter(r =>
+              r.status === 'in_progress' || r.status === 'queued'
+            );
+            const passed = relevant.filter(r => r.conclusion === 'success');
+
+            console.log('SHA:', sha);
+            console.log('Total:', relevant.length, 'Passed:', passed.length, 'Failed:', failed.length, 'InProgress:', inProgress.length);
+
+            // Job summary
+            const summary = [
+              '## PM Merge Verification — ' + sha,
+              '',
+              '| Status | Antall |',
+              '|---|---|',
+              '| Passed | ' + passed.length + ' |',
+              '| Failed | ' + failed.length + ' |',
+              '| In progress | ' + inProgress.length + ' |',
+              '| Total | ' + relevant.length + ' |',
+              '',
+            ].join('\n');
+            await core.summary.addRaw(summary).write();
+
+            if (failed.length === 0) {
+              console.log('Alle workflows OK — ingen issue opprettet.');
+              return;
+            }
+
+            // Hent commit-info for å finne PM
+            const commit = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
+            const author = (commit.data.author && commit.data.author.login)
+              || (commit.data.commit.author && commit.data.commit.author.name)
+              || 'unknown';
+            const commitMsg = commit.data.commit.message.split('\n')[0];
+            const shortSha = sha.slice(0, 8);
+
+            const failureList = failed.map(r =>
+              '- [' + r.name + '](' + r.html_url + ') — ' + r.conclusion
+            ).join('\n');
+
+            const lines = [
+              '## Failed workflow(s) på main',
+              '',
+              'Commit: [`' + shortSha + '`](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/commit/' + sha + ')',
+              'Melding: ' + commitMsg,
+              'Mergetav: @' + author,
+              '',
+              '## Hvilke workflows feiler',
+              '',
+              failureList,
+              '',
+              '## Hva PM må gjøre NÅ',
+              '',
+              'Per Tobias-direktiv 2026-05-10 (PR-verifications-plikt):',
+              '',
+              '1. Sjekk hvilken workflow som feilet og hvorfor (klikk lenkene over)',
+              '2. Avgjør om dette krever rollback:',
+              '   - Hvis prod-deploy feilet eller CI viser test-failure → vurder rollback umiddelbart',
+              '   - Hvis det er INFRA-feil (uten reell kode-impact) → re-trigger workflow',
+              '3. Hvis rollback nødvendig: følg `docs/operations/ROLLBACK_RUNBOOK.md`',
+              '4. Lukk denne issue-en MED kommentar som dokumenterer:',
+              '   - Var det reell feil eller infra?',
+              '   - Hva ble gjort (rollback / re-run / fix-PR)?',
+              '   - Hvis fix-PR: link til PR-en',
+              '',
+              '## Hvorfor denne issue eksisterer',
+              '',
+              'Tobias-direktiv 2026-05-10:',
+              '> "PM alltid må kontrollere og verifisere commits og at pull request i git',
+              '>  alltid blir verifisert at de går igjennom. Alt arbeid må verifiseres og',
+              '>  kontrolleres at alt er ok når det er pullet til Git."',
+              '',
+              'Se `docs/operations/PM_PR_VERIFICATION_DUTY.md` for full prosedyre.',
+              '',
+              '---',
+              '',
+              'Auto-generert av `.github/workflows/pm-merge-verification.yml`',
+            ];
+            const body = lines.join('\n');
+
+            const title = 'CI failure on main efter merge — ' + shortSha + ': ' + commitMsg.slice(0, 80);
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              assignees: (author !== 'unknown' && author !== 'GitHub Actions') ? [author] : [],
+              labels: ['ci-failure', 'pm-action-required'],
+            });
+            console.log('Opened issue #' + issue.data.number);

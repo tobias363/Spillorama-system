@@ -1,0 +1,35 @@
+# PM-confirmations Audit Log
+#
+# Offentlig append-only audit-trail som beviser at PM har passert
+# pm-checkpoint-gate uten å eksponere takeaway-innhold.
+#
+# Format (én linje per bekreftelse):
+#   TIMESTAMP_ISO | HASH_PREFIX | PM_ID | HANDOFF_COUNT | MAIN_SHA
+#
+# Eksempel:
+#   2026-05-10T18:42:11Z | a7f3b2e1c8d9 | Claude Opus 4.7 - 2026-05-10 | 12 | abc123def456
+#
+# HASH_PREFIX = første 12 tegn av sha256 av .pm-onboarding-confirmed.txt
+# (selve filen er gitignored — bare hashen logges her).
+#
+# Hvordan oppdateres:
+#   1. PM kjører: bash scripts/pm-checkpoint.sh
+#   2. PM kjører: node scripts/check-pm-gate.mjs --log-public
+#      (Dette appender én linje til denne filen.)
+#   3. PM committer denne filen sammen med øvrig PR-arbeid.
+#
+# Hvorfor:
+#   - .pm-onboarding-confirmed.txt er gitignored (privat per PM)
+#   - Vi trenger likevel en offentlig spor som beviser "noen passerte gaten"
+#   - Hash-prefix lar Tobias verifisere at det matcher uten å eksponere innholdet
+#
+# Brukes av:
+#   - .github/workflows/pm-gate-enforcement.yml (verifiserer at PR-beskrivelse
+#     refererer en HASH_PREFIX som finnes her)
+#
+# Tobias-direktiv 2026-05-10:
+# > "vi må gjøre dette så vanntett som mulig så ny PM ikke går i de samme
+# >  fallgruvene som tidligere"
+#
+# Innhold under (sortert eldst til nyest):
+

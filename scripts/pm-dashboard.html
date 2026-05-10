@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<!--
+  pm-dashboard.html — Live PM-dashboard for Spillorama-system
+
+  Hva: Single-page HTML som viser live current-state for PM:
+    - Backend health (prod /health endpoint)
+    - Spill 1/2/3 health per slug
+    - Siste 10 commits til main (via GitHub API, public)
+    - Siste PM-handoff (locally read)
+    - BACKLOG topp-20 linjer
+
+  Hvordan bruke:
+    1. Åpne denne filen direkte i Chrome/Safari fra disk:
+       file:///Users/tobiashaugen/Projects/Spillorama-system/scripts/pm-dashboard.html
+    2. Eller serve via en lokal HTTP-server hvis du vil unngå CORS:
+       npx http-server scripts/ -p 8080 → http://localhost:8080/pm-dashboard.html
+    3. Bookmark den. Bruk som "morgens første sjekk".
+
+  Versjon: 1.0 (2026-05-10)
+-->
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<title>Spillorama PM Dashboard</title>
+<style>
+  :root {
+    --bg: #0e1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #7d8590; --accent: #58a6ff;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  h1 { margin: 0 0 4px 0; font-size: 22px; font-weight: 600; }
+  h2 { margin: 0 0 12px 0; font-size: 15px; font-weight: 600; color: var(--accent); }
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; overflow: hidden;
+  }
+  .card-wide { grid-column: 1 / -1; }
+  .row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: none; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge-green { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge-yellow { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .badge-red { background: rgba(248,81,73,.15); color: var(--red); }
+  pre, code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px; background: rgba(0,0,0,.3); border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .commit { font-family: ui-monospace, monospace; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .commit:last-child { border: none; }
+  .commit-sha { color: var(--accent); }
+  .commit-author { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 12px; }
+  button {
+    background: var(--accent); color: #fff; border: none;
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: 600;
+  }
+  button:hover { opacity: .85; }
+  .header-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 12px;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .loading { color: var(--muted); font-style: italic; }
+  .timestamp { font-size: 11px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="header-bar">
+  <div>
+    <h1>Spillorama PM Dashboard</h1>
+    <div class="subtitle">
+      Live current-state · sist oppdatert: <span id="last-updated">—</span>
+    </div>
+  </div>
+  <div>
+    <button onclick="refreshAll()">↻ Refresh all</button>
+  </div>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    <h2>🩺 Backend Health (prod)</h2>
+    <div id="health-prod"><div class="loading">Laster...</div></div>
+  </div>
+
+  <div class="card">
+    <h2>🎮 Spill-helse (Spill 1/2/3)</h2>
+    <div id="game-health"><div class="loading">Laster...</div></div>
+  </div>
+
+  <div class="card card-wide">
+    <h2>📝 Siste 10 commits til <code>main</code></h2>
+    <div id="commits"><div class="loading">Laster GitHub-API...</div></div>
+  </div>
+
+  <div class="card card-wide">
+    <h2>🔀 Åpne pull requests</h2>
+    <div id="prs"><div class="loading">Laster GitHub-API...</div></div>
+  </div>
+
+  <div class="card">
+    <h2>🚨 Hvis noe brenner</h2>
+    <p style="margin-top: 0;">Følg <a href="../docs/operations/EMERGENCY_RUNBOOK.md">EMERGENCY_RUNBOOK</a> trinn for trinn.</p>
+    <p>Tobias kontakt: se <a href="../docs/operations/STAKEHOLDERS.md">STAKEHOLDERS.md</a></p>
+    <p>Render: <a href="https://dashboard.render.com/" target="_blank">dashboard.render.com</a></p>
+    <p>Linear: <a href="https://linear.app/bingosystem" target="_blank">linear.app/bingosystem</a></p>
+  </div>
+
+  <div class="card">
+    <h2>📋 PM dag-1-sjekk</h2>
+    <ol style="margin-top: 0; padding-left: 20px;">
+      <li>Kjør <code>./scripts/pm-onboarding.sh</code></li>
+      <li>Les nyeste <a href="../docs/operations/">PM_HANDOFF</a></li>
+      <li>Sjekk <a href="../BACKLOG.md">BACKLOG</a> for åpne pilot-blokkere</li>
+      <li>Sjekk <a href="../docs/RISKS.md">RISKS</a> — er noe materialisert?</li>
+      <li>Sjekk denne dashboard-en — alle 4 helsekort grønne?</li>
+    </ol>
+  </div>
+
+  <div class="card card-wide">
+    <h2>📚 Kanoniske docs (snarveier)</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;">
+      <a href="../MASTER_README.md">MASTER_README</a>
+      <a href="../CLAUDE.md">CLAUDE.md</a>
+      <a href="../BACKLOG.md">BACKLOG</a>
+      <a href="../CONTRIBUTING.md">CONTRIBUTING</a>
+      <a href="../SECURITY.md">SECURITY</a>
+      <a href="../docs/SYSTEM_DESIGN_PRINCIPLES.md">SYSTEM_DESIGN_PRINCIPLES</a>
+      <a href="../docs/INVENTORY.md">INVENTORY</a>
+      <a href="../docs/GLOSSARY.md">GLOSSARY</a>
+      <a href="../docs/RISKS.md">RISKS</a>
+      <a href="../docs/memory/MEMORY.md">MEMORY</a>
+      <a href="../docs/architecture/SPILLKATALOG.md">SPILLKATALOG</a>
+      <a href="../docs/architecture/ARKITEKTUR.md">ARKITEKTUR</a>
+      <a href="../docs/operations/CREDENTIALS_AND_ACCESS.md">CREDENTIALS</a>
+      <a href="../docs/operations/VENDORS.md">VENDORS</a>
+      <a href="../docs/operations/STAKEHOLDERS.md">STAKEHOLDERS</a>
+      <a href="../docs/operations/EMERGENCY_RUNBOOK.md">EMERGENCY_RUNBOOK</a>
+      <a href="../docs/operations/BUS_FACTOR_PLAN.md">BUS_FACTOR_PLAN</a>
+      <a href="../docs/postmortems/README.md">POSTMORTEMS</a>
+      <a href="../docs/adr/README.md">ADR-katalog</a>
+      <a href="../docs/engineering/PM_ONBOARDING_PLAYBOOK.md">PM_ONBOARDING_PLAYBOOK</a>
+      <a href="../docs/SESSION_HANDOFF_PROTOCOL.md">SESSION_HANDOFF_PROTOCOL</a>
+      <a href="../docs/auto-generated/DOC_FRESHNESS.md">DOC_FRESHNESS-rapport</a>
+      <a href="../docs/status/">Ukesdigester</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const REPO = "tobias363/Spillorama-system";
+const PROD_BASE = "https://spillorama-system.onrender.com";
+
+async function fetchHealth() {
+  const el = document.getElementById("health-prod");
+  try {
+    const r = await fetch(PROD_BASE + "/health", { mode: "cors" });
+    if (r.ok) {
+      const data = await r.json().catch(() => ({}));
+      el.innerHTML = `
+        <div class="row"><span>Status</span><span class="badge badge-green">200 OK</span></div>
+        ${Object.entries(data).slice(0, 8).map(([k, v]) => `
+          <div class="row">
+            <span>${k}</span>
+            <span class="meta">${typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+          </div>
+        `).join("")}
+        <div class="timestamp">Sjekket ${new Date().toLocaleTimeString("no")}</div>
+      `;
+    } else {
+      el.innerHTML = `<div class="row"><span>Status</span><span class="badge badge-red">HTTP ${r.status}</span></div>`;
+    }
+  } catch (err) {
+    el.innerHTML = `<div class="row"><span>Status</span><span class="badge badge-yellow">CORS / nettverk</span></div>
+      <p class="meta">Kan ikke fetche fra browser pga CORS. Sjekk fra terminal:<br><code>curl -I ${PROD_BASE}/health</code></p>`;
+  }
+}
+
+async function fetchGameHealth() {
+  const el = document.getElementById("game-health");
+  const slugs = ["spill1", "spill2", "spill3"];
+  const rows = await Promise.all(slugs.map(async (slug) => {
+    try {
+      const r = await fetch(`${PROD_BASE}/api/games/${slug}/health?hallId=demo-hall-001`, { mode: "cors" });
+      const badge = r.ok ? `<span class="badge badge-green">OK</span>` : `<span class="badge badge-red">HTTP ${r.status}</span>`;
+      return `<div class="row"><span>${slug}</span>${badge}</div>`;
+    } catch {
+      return `<div class="row"><span>${slug}</span><span class="badge badge-yellow">CORS</span></div>`;
+    }
+  }));
+  el.innerHTML = rows.join("") + `<div class="timestamp">Demo-hall — verifiser i admin-portal for ekte hall-IDer</div>`;
+}
+
+async function fetchCommits() {
+  const el = document.getElementById("commits");
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/commits?per_page=10`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const commits = await r.json();
+    el.innerHTML = commits.map(c => `
+      <div class="commit">
+        <a href="${c.html_url}" target="_blank" class="commit-sha">${c.sha.slice(0, 8)}</a>
+        ${escapeHtml(c.commit.message.split("\n")[0])}
+        <div class="commit-author">— ${escapeHtml(c.commit.author.name)} · ${new Date(c.commit.author.date).toLocaleString("no")}</div>
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<p class="meta">Kunne ikke laste: ${escapeHtml(err.message)}.</p>`;
+  }
+}
+
+async function fetchPRs() {
+  const el = document.getElementById("prs");
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/pulls?state=open&per_page=20`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const prs = await r.json();
+    if (prs.length === 0) {
+      el.innerHTML = `<p class="meta">Ingen åpne PR-er.</p>`;
+      return;
+    }
+    el.innerHTML = prs.map(pr => `
+      <div class="commit">
+        <a href="${pr.html_url}" target="_blank" class="commit-sha">#${pr.number}</a>
+        ${escapeHtml(pr.title)}
+        <div class="commit-author">— ${escapeHtml(pr.user.login)} · oppdatert ${new Date(pr.updated_at).toLocaleString("no")}</div>
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<p class="meta">Kunne ikke laste: ${escapeHtml(err.message)}.</p>`;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function refreshAll() {
+  document.getElementById("last-updated").textContent = new Date().toLocaleString("no");
+  fetchHealth();
+  fetchGameHealth();
+  fetchCommits();
+  fetchPRs();
+}
+
+refreshAll();
+setInterval(refreshAll, 5 * 60 * 1000);
+</script>
+
+</body>
+</html>
