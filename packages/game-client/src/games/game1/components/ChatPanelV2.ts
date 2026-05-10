@@ -209,7 +209,15 @@ export class ChatPanelV2 {
     this.body.appendChild(inputRow);
     this.root.appendChild(this.body);
 
-    this.loadHistory();
+    // Spillerklient lobby-init-order-fix (2026-05-10): hvis roomCode er
+    // tom-streng (opprettet før `socket.createRoom` har returnert) hopper
+    // vi over loadHistory — caller må kalle `setRoomCode(actualRoomCode)`
+    // når room-join lykkes for å laste historikk. Dette gjør at ChatPanelV2
+    // kan instansieres tidlig uten å trigge en feilet HTTP/socket-kall mot
+    // tom roomCode.
+    if (this.roomCode) {
+      this.loadHistory();
+    }
 
     if (opts?.initialCollapsed) {
       // Mirror the collapsed end-state without animating — onToggle handlers
@@ -245,6 +253,25 @@ export class ChatPanelV2 {
     onChat: (listener: (msg: ChatMessage) => void) => () => void,
   ): void {
     this.unsubChat = onChat((msg) => this.addMessage(msg));
+  }
+
+  /**
+   * Spillerklient lobby-init-order-fix (2026-05-10): oppdater roomCode
+   * etter at `socket.createRoom` har returnert. ChatPanelV2 kan nå
+   * instansieres med tom roomCode (pre-join) og oppdateres til ekte
+   * roomCode etter join. Idempotent — re-set til samme verdi er no-op.
+   *
+   * Hvis dette er første gang vi får en non-empty roomCode (typisk skjer
+   * når Game1Controller har ventet på `socket.createRoom`), trigger vi
+   * også `loadHistory` slik at chat-historikken populeres.
+   */
+  setRoomCode(roomCode: string): void {
+    if (this.roomCode === roomCode) return;
+    const wasEmpty = this.roomCode === "";
+    this.roomCode = roomCode;
+    if (wasEmpty && roomCode) {
+      void this.loadHistory();
+    }
   }
 
   // BIN-blink-permanent-fix: memoize player-count tekst. Uten memoize

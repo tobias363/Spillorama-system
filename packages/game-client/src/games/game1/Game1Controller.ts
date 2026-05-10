@@ -329,6 +329,29 @@ class Game1Controller implements GameController {
     this.loader.setState("LOADING_ASSETS");
     await preloadGameAssets("bingo");
 
+    // Spillerklient lobby-init-order-fix (2026-05-10, Tobias-direktiv):
+    // PRE-BYGG `playScreen` FØR `socket.createRoom` slik at lobby-state-
+    // update-events kan oppdatere UI umiddelbart — uavhengig av om eller
+    // når join-flyten lykkes. Tidligere ble playScreen bygget i
+    // `transitionTo("WAITING"/...)` ETTER `socket.createRoom` returnerte
+    // (og etter `bridge.applySnapshot` + `waitForSyncReady`), så
+    // `setBuyPopupDisplayName(name)` på playScreen?.* var et null-safe
+    // no-op hvis lobby-state-update kom inn før join hadde lyktes.
+    //
+    // Med pre-creation lander lobby-listenerens kall (linje under) på
+    // en ekte PlayScreen-instans fra første event. roomCode oppdateres
+    // post-join via `playScreen.setRoomCode(actualRoomCode)`. ChatPanelV2
+    // har defensiv guard mot tom-streng-roomCode (loader-history hoppes
+    // over til `setRoomCode` får non-empty verdi).
+    //
+    // `transitionTo` for WAITING/PLAYING/SPECTATING gjenbruker den
+    // eksisterende playScreen-instansen i stedet for å destroye + bygge
+    // ny — det unngår både UI-flicker og listener-race med lobby-binding.
+    const initialW = this.deps.app.app.screen.width;
+    const initialH = this.deps.app.app.screen.height;
+    this.playScreen = this.buildPlayScreen(initialW, initialH);
+    this.setScreen(this.playScreen);
+
     // Spillerklient-rebuild Fase 1 (2026-05-10): start plan-runtime
     // aggregator-binding FØR `socket.createRoom`. Dette gir oss tilgang
     // til `nextScheduledGame.catalogDisplayName` så snart første HTTP-
@@ -345,8 +368,10 @@ class Game1Controller implements GameController {
       socket: this.deps.socket,
     });
     this.lobbyStateUnsub = this.lobbyStateBinding.onChange((state) => {
-      // Forward catalog-display-navn til Game1BuyPopup. Trygt å kalle
-      // før playScreen er bygget — kun en no-op i det tilfellet.
+      // Forward catalog-display-navn til Game1BuyPopup. playScreen er
+      // garantert satt her (pre-bygd over) — `?.` beholdes som
+      // defensiv-pattern, men listenerens kontrakt er at instansen
+      // eksisterer fra første event.
       const name = state?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
       this.playScreen?.setBuyPopupDisplayName(name);
 
@@ -396,6 +421,12 @@ class Game1Controller implements GameController {
         joinResult.error,
       );
       this.loader.hide();
+      // Spillerklient lobby-init-order-fix (2026-05-10): den pre-bygde
+      // playScreen-en hører ikke hjemme bak lobby-fallback-overlay-en.
+      // Riv den ned så den ikke ligger igjen og lekker ressurser eller
+      // forstyrrer waitForSyncReady-pathene som aldri kjører i denne
+      // failure-grenen.
+      this.clearScreen();
       this.lobbyFallback = new Game1LobbyFallback({
         hallId: this.deps.hallId,
         socket: this.deps.socket,
@@ -413,6 +444,13 @@ class Game1Controller implements GameController {
 
     this.myPlayerId = joinResult.data.playerId;
     this.actualRoomCode = joinResult.data.roomCode;
+
+    // Spillerklient lobby-init-order-fix (2026-05-10): playScreen ble
+    // pre-bygget med tom roomCode FØR `socket.createRoom`. Oppdater nå
+    // så ChatPanelV2 kan laste historikk + sende meldinger med ekte
+    // room-code. Idempotent — `setRoomCode` er no-op hvis verdien
+    // allerede er den samme.
+    this.playScreen?.setRoomCode(this.actualRoomCode);
 
     // Bug-fix 2026-05-04 (drawNew gap-loop, oppdaget på Spill 2):
     // applySnapshot MÅ kjøre FØR bridge.start(). SpilloramaSocket bufferer
@@ -564,7 +602,6 @@ class Game1Controller implements GameController {
 
   private transitionTo(phase: Phase, state: GameState): void {
     this.phase = phase;
-    this.clearScreen();
 
     const w = this.deps.app.app.screen.width;
     const h = this.deps.app.app.screen.height;
@@ -573,16 +610,35 @@ class Game1Controller implements GameController {
       case "WAITING":
       case "PLAYING":
       case "SPECTATING": {
+        // Spillerklient lobby-init-order-fix (2026-05-10): GJENBRUK eksisterende
+        // playScreen i stedet for å destroye + rebuilde. Pre-creation i `start()`
+        // gjør at playScreen er bygget FØR `socket.createRoom`, og lobby-state-
+        // update-listeneren har allerede oppdatert subtitle + ticket-config +
+        // overall-status mot den instansen. Et rebuild her ville rive ned
+        // disse oppdateringene og kreve at lobby-listeneren fyrer på nytt før
+        // UI igjen var korrekt — det er nettopp den race-en vi fikser.
+        //
+        // Build kun hvis playScreen er null (typisk etter en transition til
+        // ENDED som destroyet skjermen, eller første gang i en re-init flyt).
+        if (this.playScreen === null) {
+          this.playScreen = this.buildPlayScreen(w, h);
+          this.setScreen(this.playScreen);
+        }
+
         // All three "game-visible" phases share one PlayScreen setup. The new
         // `update(state)` method picks what to show based on gameStatus /
         // ticket arrays — no per-phase build/render juggling. Callbacks are
         // wired once at construction (they used to be re-wired in every
         // transition, three copies of the exact same 8-line block).
-        this.playScreen = this.buildPlayScreen(w, h);
         this.playScreen.update(state);
         this.playScreen.enableBuyMore();
 
         // BIN-419 Elvis replace — only shown in WAITING with existing tickets.
+        // Spillerklient lobby-init-order-fix (2026-05-10): siden vi nå
+        // gjenbruker playScreen-instansen mellom WAITING/PLAYING/SPECTATING-
+        // transisjoner, må vi eksplisitt fjerne Elvis-baren ved transisjon
+        // til PLAYING/SPECTATING. Tidligere ble hele skjermen destroyet, så
+        // baren forsvant via `playScreen.destroy()`.
         if (
           phase === "WAITING"
           && state.gameType === "elvis"
@@ -592,18 +648,20 @@ class Game1Controller implements GameController {
           this.playScreen.showElvisReplace(state.replaceAmount, () => {
             void this.actions?.elvisReplace();
           });
+        } else {
+          this.playScreen.hideElvisReplace();
         }
-
-        this.setScreen(this.playScreen);
         break;
       }
 
       case "ENDED":
         // Tobias 2026-04-29 prod-incident-fix: ENDED-fasen viser ikke lenger
         // en Pixi-skjerm — i stedet bruker vi `Game1EndOfRoundOverlay` (HTML)
-        // som monteres i onGameEnded(). Vi clearScreen()-er bare slik at
-        // PlayScreen-instansen ikke ligger igjen og lekker mens overlay vises.
-        // No-op her er bevisst.
+        // som monteres i onGameEnded(). Vi destroyer PlayScreen-instansen så
+        // den ikke ligger igjen og lekker mens overlay vises. Neste transition
+        // til WAITING/PLAYING/SPECTATING bygger en ny playScreen via
+        // `buildPlayScreen` (jf. null-sjekk over).
+        this.clearScreen();
         break;
     }
   }
