@@ -304,12 +304,6 @@ interface MasterActionBody {
   position?: number;
   draw?: number;
   prizesCents?: Record<string, number>;
-  /**
-   * Jackpot-modal: master-flow-2026-05-10. Settes til `true` etter at master
-   * har bekreftet daglig-akkumulert jackpot-pott i popup. Backend skipper
-   * JACKPOT_CONFIRM_REQUIRED-preflight når flagget er satt.
-   */
-  jackpotConfirmed?: boolean;
 }
 
 /**
@@ -337,18 +331,16 @@ async function postMasterAction(
  * pause/resume/stop). DomainError-koder propageres som `ApiError` (typiske
  * koder: `JACKPOT_SETUP_REQUIRED`, `HALLS_NOT_READY`, `BRIDGE_FAILED`).
  *
- * Jackpot-modal: master-flow-2026-05-10. Når master har bekreftet daglig-
- * akkumulert jackpot-pott via popup, sender klient `jackpotConfirmed=true`
- * for å hoppe `JACKPOT_CONFIRM_REQUIRED`-preflight. Backend-rute (Bølge 2)
- * propagerer flagget videre til Game1MasterControlService.startGame.
+ * ADR-0017 (2026-05-10): daglig-akkumulert jackpot-bekreftelse er fjernet.
+ * Tobias-direktiv — bingoverten setter ALLTID jackpot manuelt før spillet
+ * starter. Kun `JACKPOT_SETUP_REQUIRED` (catalog-entry pos 7) håndteres
+ * fortsatt av UI-flyten.
  */
 export async function startMaster(
   hallId?: string,
-  jackpotConfirmed?: boolean,
 ): Promise<MasterActionResult> {
   const body: MasterActionBody = {};
   if (hallId !== undefined) body.hallId = hallId;
-  if (jackpotConfirmed === true) body.jackpotConfirmed = true;
   return postMasterAction("/api/agent/game1/master/start", body);
 }
 
