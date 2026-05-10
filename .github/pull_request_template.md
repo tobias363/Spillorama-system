@@ -1,3 +1,16 @@
+## PM-onboarding-bekreftelse (mandatory for PM-AI)
+
+> Velg **én** av de tre boksene under. Hvis du er PM-AI som koordinerer prosjektet på toppen,
+> har du forbud mot å åpne PR uten passert onboarding-gate. Se `CLAUDE.md` topp-blokk og
+> `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` §3 for detaljer.
+
+- [ ] **Jeg er PM-AI** og `bash scripts/pm-checkpoint.sh --validate` returnerte exit 0 før første
+  kode-handling i denne sesjonen. Main-SHA i `.pm-onboarding-confirmed.txt`: `__paste_sha_here__`
+- [ ] **Jeg er en agent under PM-koordinering** (PM-AI har spawnet meg) og PM har bekreftet at
+  onboarding-gate er passert.
+- [ ] **Jeg er ikke PM** (Tobias / ekstern utvikler / Dependabot / annet). Onboarding-gate
+  gjelder ikke for meg.
+
 ## Summary
 - 
 

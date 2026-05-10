@@ -54,3 +54,9 @@ test-results/
 
 # Pilot-hardware test-profile runtime artefakter
 scripts/performance-budget/report-pilot-hw.json
+
+# PM-onboarding-gate (vanntett gate 2026-05-10)
+# Personal local audit-trail produsert av scripts/pm-checkpoint.sh.
+# Inneholder PM-identifier, timestamp, main-SHA og fri-tekst-takeaways
+# per PM_HANDOFF-fil. Skal IKKE deles i repo (privat for hver PM).
+.pm-onboarding-confirmed.txt
