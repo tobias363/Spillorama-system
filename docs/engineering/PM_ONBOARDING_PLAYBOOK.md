@@ -23,6 +23,8 @@
 > Hopp ALDRI over §2 (immutable direktiver), §3 trinn 2-3.1 (lesing),
 > §6 (compliance og regulatorisk), eller §10 (sjekkpunkter for
 > fullført onboarding).
+>
+> **⛔ HARD-BLOCK (vanntett gate 2026-05-10):** Før første kode-handling MÅ du passere onboarding-gate via `bash scripts/pm-checkpoint.sh`. Se §3 Trinn 0. Hvis du hopper over denne, har du brutt et eksplisitt Tobias-direktiv 2026-05-10 og PR-template-en din kommer til å bli rød.
 
 ---
 
@@ -158,6 +160,38 @@ Last KUN skills når du selv skal redigere kode i det domenet. Skip for ren PM/o
 ## 3. Trinn-for-trinn onboarding-rutine
 
 **Forventet total tid: 60-90 min.** Hopp ikke over noen trinn — særlig §2 og §6.
+
+### ⛔ Trinn 0 — Vanntett onboarding-gate (HARD-BLOCK)
+
+**Du har FORBUD mot å gå til Trinn 1+ før denne gaten er passert.**
+
+```bash
+cd /Users/tobiashaugen/Projects/Spillorama-system
+bash scripts/pm-checkpoint.sh --validate    # exit 0 = passert, exit 1 = må kjøres
+```
+
+Hvis exit ≠ 0:
+
+```bash
+bash scripts/pm-checkpoint.sh
+```
+
+Den interaktive gaten:
+
+1. Lister alle `docs/operations/PM_HANDOFF_*.md` fra prosjekt-start (2026-04-23) til i dag
+2. Krever per-fil-bekreftelse (`ja` / `nei`) + 1-3 setninger fri-tekst-takeaway
+3. Skriver `.pm-onboarding-confirmed.txt` til repo-rot med timestamp + main-SHA + alle takeaways
+4. Filen er gyldig i 7 dager (`PM_CHECKPOINT_VALIDITY_DAYS`)
+
+**Hvorfor hard-block?** Tobias-direktiv 2026-05-10:
+
+> "Dette er nå lagt inn i rutinen så det er umulig for ny PM å ikke få med seg dette? Vi må gjøre dette så vanntett som mulig."
+
+Tidligere PM-er har lest kun siste handoff og hoppet over de eldre — som har ført til repetert kontekst-tap, samme spørsmål to ganger, og fallgruver som allerede var dokumentert. Denne gaten gjør det fysisk umulig å skippe (uten å bryte direktivet eksplisitt og dokumentere hvorfor i PR-beskrivelsen).
+
+**For ikke-PM-roller** (Tobias, agenter under PM-koordinering, eksterne utviklere): trenger ikke kjøre. PR-template har checkbox.
+
+**Tobias-verifikasjon:** Tobias kan lese `.pm-onboarding-confirmed.txt` etter første PR for å sjekke at takeaway-tekstene er ekte og matcher faktisk handoff-innhold. Skriv ALDRI placeholder-takeaway som "lest" eller "OK" — det er fanget av kvalitets-sjekken.
 
 ### Trinn 1 — Generer live current-state (3 min)
 
@@ -874,6 +908,12 @@ Per `ROLLBACK_RUNBOOK.md`:
 ## 10. Sjekkpunkter for fullført onboarding
 
 Du er klar når du kan svare JA på alle disse spørsmålene:
+
+### ⛔ Vanntett gate (MÅ være krysset av)
+- [ ] `bash scripts/pm-checkpoint.sh --validate` returnerer exit 0
+- [ ] `.pm-onboarding-confirmed.txt` finnes i repo-rot og er ≤ 7 dager gammel
+- [ ] Jeg har skrevet ekte takeaway per PM_HANDOFF (ikke placeholder som "lest")
+- [ ] Jeg er forberedt på at Tobias kan be om å se filen som bevis
 
 ### Fundament
 - [ ] Jeg har lest §2 (Tobias-direktiver) og kan referere immutable kontrakter

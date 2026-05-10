@@ -1,5 +1,39 @@
 # Spillorama-System
 
+> ## ⛔ STOP — PM-onboarding-gate (HARD-BLOCK FØR FØRSTE KODE-HANDLING)
+>
+> **Hvis du er en AI eller person som opptrer som PM (Project Manager) for dette prosjektet,
+> har du FORBUD mot å skrive kode, åpne PR, mergee, eller koordinere agenter før du har passert
+> følgende vanntette gate:**
+>
+> ```bash
+> bash scripts/pm-checkpoint.sh --validate    # exit 0 = passert, exit 1 = må kjøres
+> ```
+>
+> **Hvis exit ≠ 0:** kjør den interaktive gaten først:
+>
+> ```bash
+> bash scripts/pm-checkpoint.sh
+> ```
+>
+> Gaten krever per-fil-bekreftelse av ALLE `docs/operations/PM_HANDOFF_*.md` fra prosjekt-start
+> (2026-04-23) til i dag, med 1-3 setninger fri-tekst-takeaway per fil. Den skriver
+> `.pm-onboarding-confirmed.txt` til repo-roten som bevis på passert gate. Filen er gyldig i 7
+> dager (`PM_CHECKPOINT_VALIDITY_DAYS`).
+>
+> **Hvorfor vanntett gate?** Tobias-direktiv 2026-05-10: "Vi må gjøre dette så vanntett som mulig
+> så ny PM ikke går i de samme fallgruvene som tidligere." Tidligere PM-er har hoppet over eldre
+> handoffs og repetert kontekst-tap. Denne gaten er designet for å være umulig å skippe uten å
+> bryte direktivet eksplisitt.
+>
+> **For ikke-PM-roller** (Tobias selv, agenter under PM-koordinering, eksterne utviklere): du
+> trenger ikke kjøre gaten — den er kun for personen/AI-en som koordinerer prosjektet på toppen.
+> PR-template har checkbox for å indikere rollen.
+>
+> Detaljer i [`docs/engineering/PM_ONBOARDING_PLAYBOOK.md`](./docs/engineering/PM_ONBOARDING_PLAYBOOK.md) §3.
+
+---
+
 Live bingo platform for the Norwegian market with real-time multiplayer games, wallet management, and regulatory compliance (pengespillforskriften). The system handles player authentication, responsible gaming, hall-based game sessions, and payment integration.
 
 ## Tech Stack
