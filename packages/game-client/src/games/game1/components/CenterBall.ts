@@ -27,6 +27,20 @@ interface PauseAwareBridge {
  *
  * Countdown mode + pause-awareness: unchanged from prior implementation
  * (Game1GamePlayPanel.SocketFlow.cs:672-696 mirrors the freeze).
+ *
+ * Idle-text-modus (2026-05-11, Tobias-direktiv):
+ *  - Når runden ikke er aktiv (`lobbyOverallStatus !== "running"`) skjules
+ *    selve ball-sprite + number-text, og to linjer tekst rendres i samme
+ *    container:
+ *      Linje 1: "Neste spill: {displayName}"
+ *      Linje 2: "Kjøp bonger for å være med i trekningen"
+ *  - Aktiveres via `setIdleText(displayName)` + `showIdleText()`.
+ *  - Deaktiveres automatisk når showNumber/setNumber/startCountdown
+ *    kalles (de mutere ut av idle-state).
+ *  - Erstatter `WaitingForMasterOverlay` (slettet 2026-05-11). Tobias-
+ *    direktivet er at vi IKKE skal ha en separat "venter på master"-
+ *    melding — bare "Neste spill" + kjøp-oppfordring der ballen vanligvis
+ *    ligger.
  */
 export class CenterBall extends Container {
   private ballSprite: Sprite | null = null;
@@ -45,6 +59,20 @@ export class CenterBall extends Container {
    * animation mid-yoyo doesn't drift the ball upward over time.
    */
   private baseY: number | null = null;
+
+  /**
+   * Idle-text-modus (2026-05-11, Tobias-direktiv). Når aktivt skjules
+   * ball + number-text og to linjer rendres i samme posisjon:
+   *   Linje 1: "Neste spill: {displayName}"  (eks "Neste spill: Bingo")
+   *   Linje 2: "Kjøp bonger for å være med i trekningen"
+   * Display-name oppdateres via `setIdleText(name)`. Mode toggle styres
+   * av `showIdleText()` / `hideIdleText()`. Mutating-handlinger
+   * (showNumber/setNumber/startCountdown) skjuler idle-text automatisk.
+   */
+  private idleHeadline: Text;
+  private idleBody: Text;
+  private idleDisplayName = "Bingo";
+  private idleVisible = false;
 
   constructor(bridge?: PauseAwareBridge) {
     super();
@@ -66,6 +94,49 @@ export class CenterBall extends Container {
     this.numberText.y = BALL_SIZE / 2 - 1;
     this.addChild(this.numberText);
 
+    // Idle-text linje 1 ("Neste spill: ...") + linje 2 ("Kjøp bonger ...").
+    // Skjult som default — `showIdleText()` viser dem og skjuler ball-/
+    // number-rendringen.
+    this.idleHeadline = new Text({
+      text: "",
+      style: {
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontSize: 22,
+        fill: 0xffffff,
+        fontWeight: "800",
+        align: "center",
+        letterSpacing: -0.3,
+        wordWrap: true,
+        wordWrapWidth: BALL_SIZE + 80,
+        dropShadow: { color: 0x000000, alpha: 0.9, blur: 6, distance: 2 },
+      },
+    });
+    this.idleHeadline.anchor.set(0.5);
+    this.idleHeadline.x = BALL_SIZE / 2;
+    this.idleHeadline.y = BALL_SIZE / 2 - 18;
+    this.idleHeadline.visible = false;
+    this.addChild(this.idleHeadline);
+
+    this.idleBody = new Text({
+      text: "",
+      style: {
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontSize: 14,
+        fill: 0xffffff,
+        fontWeight: "600",
+        align: "center",
+        letterSpacing: 0.1,
+        wordWrap: true,
+        wordWrapWidth: BALL_SIZE + 80,
+        dropShadow: { color: 0x000000, alpha: 0.85, blur: 5, distance: 1 },
+      },
+    });
+    this.idleBody.anchor.set(0.5);
+    this.idleBody.x = BALL_SIZE / 2;
+    this.idleBody.y = BALL_SIZE / 2 + 22;
+    this.idleBody.visible = false;
+    this.addChild(this.idleBody);
+
     // Default sprite — red (central colour for idle/countdown), swapped per
     // drawn number by showNumber/setNumber.
     void this.swapTexture("/web/games/assets/game1/design/balls/red.png");
@@ -85,6 +156,9 @@ export class CenterBall extends Container {
         this.ballSprite = new Sprite(tex);
         this.ballSprite.width = BALL_SIZE;
         this.ballSprite.height = BALL_SIZE;
+        // Hvis idle-text-modus er aktiv da sprite mounter (async race),
+        // start sprite-en som skjult. hideIdleText() vil restore visible.
+        if (this.idleVisible) this.ballSprite.visible = false;
         this.addChildAt(this.ballSprite, 0);
       }
     } catch {
@@ -94,6 +168,9 @@ export class CenterBall extends Container {
 
   /** Show a new drawn number with mockup-parity scale-in + overshoot. */
   showNumber(number: number): void {
+    // Idle-text-mode er ikke kompatibel med live-trekk — skjul tekst og
+    // restore ball/number-rendering før animasjonen kjører.
+    this.hideIdleText();
     this.stopCountdown();
     this.currentNumber = number;
     this.numberText.text = String(number).padStart(2, "0");
@@ -117,6 +194,7 @@ export class CenterBall extends Container {
 
   /** Set number without animation (state restore). */
   setNumber(number: number | null): void {
+    this.hideIdleText();
     this.stopCountdown();
     this.currentNumber = number;
     this.numberText.text = number !== null ? String(number).padStart(2, "0") : "";
@@ -130,6 +208,8 @@ export class CenterBall extends Container {
   }
 
   startCountdown(millisUntilStart: number): void {
+    // Countdown betyr at master har trygget runden — idle-text må vekk.
+    this.hideIdleText();
     this.stopCountdown();
     this.currentNumber = null;
     this.numberText.style.fontSize = 44;
@@ -163,8 +243,78 @@ export class CenterBall extends Container {
   showWaiting(): void {
     this.stopCountdown();
     this.currentNumber = null;
+    // I idle-text-modus skal vi IKKE re-rendre "..." over teksten —
+    // numberText er allerede skjult og idleHeadline/idleBody eier
+    // visningen. Behold tekst-state slik at idle-text er stabil.
+    if (this.idleVisible) return;
     this.numberText.text = "...";
     this.numberText.style.fontSize = 44;
+  }
+
+  /**
+   * Idle-text-modus (2026-05-11, Tobias-direktiv) — sett display-navn for
+   * neste planlagte spill. Kan kalles før eller etter `showIdleText()`.
+   * Hvis idle-text allerede er synlig oppdateres teksten live.
+   *
+   * `displayName` er katalog-display-navnet fra plan-runtime aggregator
+   * (`Spill1LobbyState.nextScheduledGame.catalogDisplayName`). Tom/null
+   * gir fallback "Bingo".
+   */
+  setIdleText(displayName: string | null | undefined): void {
+    const next = (displayName ?? "").trim() || "Bingo";
+    if (next === this.idleDisplayName) {
+      // Re-render for å sikre tekst alltid er synkron med visible-state.
+      if (this.idleVisible) this.renderIdleText();
+      return;
+    }
+    this.idleDisplayName = next;
+    if (this.idleVisible) this.renderIdleText();
+  }
+
+  /**
+   * Aktiver idle-text-modus. Skjuler ball-sprite + number-text og rendrer
+   * 2-linjers melding i samme posisjon. Idempotent — gjentatte kall mens
+   * idle er synlig er no-op (men oppdaterer tekst hvis `setIdleText` har
+   * blitt kalt mellomtiden).
+   *
+   * Forutsetning: `setIdleText` har blitt kalt med catalog-navnet. Hvis
+   * ikke, brukes "Bingo" som fallback.
+   */
+  showIdleText(): void {
+    if (this.idleVisible) {
+      this.renderIdleText();
+      return;
+    }
+    this.idleVisible = true;
+    if (this.ballSprite) this.ballSprite.visible = false;
+    this.numberText.visible = false;
+    this.idleHeadline.visible = true;
+    this.idleBody.visible = true;
+    this.renderIdleText();
+  }
+
+  /**
+   * Deaktiver idle-text-modus. Restore ball-sprite + number-text. Idempotent
+   * — no-op hvis allerede skjult. Kalles automatisk fra showNumber/
+   * setNumber/startCountdown så caller ikke trenger å huske å rydde.
+   */
+  hideIdleText(): void {
+    if (!this.idleVisible) return;
+    this.idleVisible = false;
+    this.idleHeadline.visible = false;
+    this.idleBody.visible = false;
+    this.numberText.visible = true;
+    if (this.ballSprite) this.ballSprite.visible = true;
+  }
+
+  /** Test-hook: er idle-text-modus aktiv? */
+  isIdleTextVisible(): boolean {
+    return this.idleVisible;
+  }
+
+  private renderIdleText(): void {
+    this.idleHeadline.text = `Neste spill: ${this.idleDisplayName}`;
+    this.idleBody.text = "Kjøp bonger for å være med i trekningen";
   }
 
   stopCountdown(): void {

@@ -1,98 +1,64 @@
 /**
  * @vitest-environment happy-dom
  *
- * Spillerklient-rebuild Fase 3 (2026-05-10) — controller-flow-tester for
- * "venter på master"-state.
+ * Spillerklient-rebuild — controller-flow-tester for "neste spill"-idle-state.
  *
- * Tobias-direktiv 2026-05-09 (PM_ONBOARDING_PLAYBOOK §2.3):
- *   "Når man kommer inn i spill 1 som kunde så skal man alltid da se neste
- *    spill som er planlagt. Dette spillet skal da starte når master har
- *    trykket på knappen. Det skal aldri være noen andre views i det live
- *    rommet en neste planlagte spill."
+ * 2026-05-11 (Tobias-direktiv): `WaitingForMasterOverlay` er fjernet helt.
+ * Idle-tekst rendres direkte i CenterBall-posisjonen via:
+ *   - `PlayScreen.setBuyPopupDisplayName(name)` → CenterBall.setIdleText(name)
+ *   - `PlayScreen.update(state)` → CenterBall.showIdleText() når
+ *     `gameStatus !== RUNNING` og lobby-status ikke har trygget runden.
+ *   - `CenterBall.showNumber/setNumber/startCountdown` → auto-hideIdleText.
  *
- * Disse testene speiler `applyWaitingForMasterFromLobbyState`-flyten i
- * Game1Controller (uten å instansiere full Pixi-app). Pattern matcher
- * `Game1Controller.endOfRoundFlow.test.ts` og fase 1+2-tester:
+ * Forrige design (slettet) brukte en separat HTML-overlay som la seg over
+ * Pixi-stagen. Tobias-direktiv 2026-05-11: "den kula som viser hvilket tall
+ * som blir trekt — når det ikke er aktiv runde fjerner vi den og skriver
+ * tekst der: 'Neste spill: {neste spill på planen}' + 'Kjøp bonger for å være
+ * med i trekningen'. Vi trenger ikke ha noen tekst om at vi venter på master."
  *
- *   M1 — Initial join uten lobby-state → overlay vises ikke (state ukjent)
- *   M2 — Lobby `purchase_open` → overlay vises med catalog-navn
- *   M3 — Lobby `running` → overlay dismisses
- *   M4 — Lobby `paused`/`idle` → overlay vises (alle ikke-running)
- *   M5 — Bridge gameStatus=RUNNING overrider stale lobby-state (race-fix)
- *   M6 — Lobby-fallback aktiv → ingen waiting-overlay (allerede dekket av fallback)
- *   M7 — onGameStarted dismisses overlay defensivt før lobby-update
- *   M8 — Etter Fullt Hus (lobby → idle/purchase_open) → overlay vises på nytt
- *   M9 — destroy() rydder overlay (idempotent)
- *   M10 — Reconnect-scenario: server pusher fersh state, overlay reflekterer
+ * Disse testene speiler den nye flyten — fra controller-perspektiv: når
+ * lobby-state oppdateres, hvilken signalering skjer mot PlayScreen?
+ *
+ *   N1 — Initial join uten lobby-state → CenterBall starter i idle-text-mode
+ *   N2 — Lobby `purchase_open` → setBuyPopupDisplayName(catalogDisplayName)
+ *   N3 — Lobby `running` → setLobbyOverallStatus("running") (driver
+ *                          PlayScreen.update til hideIdleText)
+ *   N4 — Lobby `paused`/`idle`/`closed`/`finished` → idle-text fortsatt aktiv
+ *   N5 — Plan-item-bytte (Bingo → Innsatsen) → display-name pushes nytt navn
+ *   N6 — onGameStarted: PlayScreen.update kalles med RUNNING → idle-text vekk
+ *   N7 — destroy rydder uten å lekke (CenterBall-cleanup via root.destroy)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WaitingForMasterOverlay } from "./components/WaitingForMasterOverlay.js";
 import type { Spill1LobbyState } from "@spillorama/shared-types/api";
 
 /**
- * Minimal harness som speiler `applyWaitingForMasterFromLobbyState`-
- * logikken i Game1Controller. Hvis controller-koden drifter, oppdater
- * også harness — kontrakten er "overlay-state speiler lobby-state +
- * bridge-state per Tobias §2.3".
+ * Minimal harness som speiler `Game1Controller`-flyten i fase 3 (etter
+ * 2026-05-11-rebuild): lobby-state-binding → PlayScreen-setters. Verifiserer
+ * at PM-direktivet "ingen 'venter på master'-overlay, kun 'Neste spill: X'"
+ * holdes ved hver state-overgang.
+ *
+ * Vi tester at:
+ *  - `setBuyPopupDisplayName` kalles med catalog-navnet ved hver lobby-update
+ *  - `setLobbyOverallStatus` forwardes synkronisert
+ *  - Ingen DOM-noder med `data-spill1-waiting-for-master` mounteres
  */
-class WaitingForMasterHarness {
-  overlay: WaitingForMasterOverlay | null = null;
+class ControllerFlowHarness {
   hasLobbyFallback = false;
   bridgeGameStatus: "NONE" | "WAITING" | "RUNNING" | "ENDED" = "NONE";
-  showCount = 0;
-  hideCount = 0;
-  private container: HTMLElement;
 
-  constructor(container: HTMLElement) {
-    this.container = container;
-  }
+  // Capture-mocks for PlayScreen-setters
+  setBuyPopupDisplayName = vi.fn<(name: string | null | undefined) => void>();
+  setLobbyOverallStatus = vi.fn<(
+    status: Spill1LobbyState["overallStatus"] | null,
+  ) => void>();
 
-  /** Mirror av Game1Controller.applyWaitingForMasterFromLobbyState. */
+  /** Mirror av Game1Controller.lobbyStateBinding.onChange-handleren (post-2026-05-11). */
   applyLobbyState(state: Spill1LobbyState | null): void {
     if (this.hasLobbyFallback) return;
 
-    if (!state) return;
-
-    if (state.overallStatus === "running") {
-      this.overlay?.hide();
-      this.hideCount += 1;
-      return;
-    }
-
-    if (this.bridgeGameStatus === "RUNNING") {
-      this.overlay?.hide();
-      this.hideCount += 1;
-      return;
-    }
-
-    if (!this.overlay) {
-      this.overlay = new WaitingForMasterOverlay({
-        container: this.container,
-      });
-    }
-    this.overlay.show({
-      catalogDisplayName: state.nextScheduledGame?.catalogDisplayName ?? null,
-      currentPosition: state.currentRunPosition || null,
-      totalPositions: state.totalPositions || null,
-      planName: state.planName,
-    });
-    this.showCount += 1;
-  }
-
-  /** Mirror av Game1Controller.onGameStarted's defensive hide. */
-  onGameStarted(): void {
-    this.overlay?.hide();
-    this.hideCount += 1;
-  }
-
-  /** Mirror av Game1Controller.destroy's overlay-cleanup. */
-  destroy(): void {
-    this.overlay?.destroy();
-    this.overlay = null;
-  }
-
-  isOverlayVisible(): boolean {
-    return this.overlay?.isVisible() ?? false;
+    const name = state?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
+    this.setBuyPopupDisplayName(name);
+    this.setLobbyOverallStatus(state?.overallStatus ?? null);
   }
 }
 
@@ -131,67 +97,58 @@ function makeLobbyState(
   };
 }
 
-describe("Game1Controller — venter på master (Fase 3)", () => {
+describe("Game1Controller — 'Neste spill'-idle-text (post-2026-05-11)", () => {
   let container: HTMLElement;
-  let harness: WaitingForMasterHarness;
+  let harness: ControllerFlowHarness;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    harness = new WaitingForMasterHarness(container);
+    harness = new ControllerFlowHarness();
   });
 
   afterEach(() => {
-    harness.destroy();
     if (container.parentElement) {
       container.parentElement.removeChild(container);
     }
   });
 
-  function findOverlays(): NodeListOf<Element> {
-    return container.querySelectorAll(
-      "[data-spill1-waiting-for-master]",
-    );
+  function findLegacyOverlay(): NodeListOf<Element> {
+    // Den gamle overlay-noden skal ALDRI eksistere i ny flyt.
+    return document.querySelectorAll("[data-spill1-waiting-for-master]");
   }
 
-  // ── M1 ──────────────────────────────────────────────────────────────────
-  it("M1 — Initial join uten lobby-state → overlay vises IKKE", () => {
+  // ── N1 ──────────────────────────────────────────────────────────────────
+  it("N1 — Initial uten lobby-state → ingen call til PlayScreen (vi vet ikke navnet enda)", () => {
     harness.applyLobbyState(null);
-    expect(findOverlays().length).toBe(0);
-    expect(harness.isOverlayVisible()).toBe(false);
+    // Mirror av production-flyten: når state er null fyrer vi ikke
+    // setBuyPopupDisplayName fordi navnet er ukjent. CenterBall har
+    // allerede fallback "Bingo" fra constructor.
+    expect(harness.setBuyPopupDisplayName).toHaveBeenCalledWith("Bingo");
+    expect(harness.setLobbyOverallStatus).toHaveBeenCalledWith(null);
+
+    // Tobias-direktiv: ingen legacy-overlay.
+    expect(findLegacyOverlay().length).toBe(0);
   });
 
-  // ── M2 ──────────────────────────────────────────────────────────────────
-  it("M2 — Lobby purchase_open viser overlay med catalog-navn", () => {
+  // ── N2 ──────────────────────────────────────────────────────────────────
+  it("N2 — Lobby purchase_open → forwarder 'Bingo' til BuyPopup + 'purchase_open' til status", () => {
     harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
 
-    expect(findOverlays().length).toBe(1);
-    const headline = container.querySelector(
-      "[data-spill1-waiting-for-master] [data-role='headline']",
-    );
-    expect(headline?.textContent).toBe("Bingo");
-    const subheadline = container.querySelector(
-      "[data-spill1-waiting-for-master] [data-role='subheadline']",
-    );
-    expect(subheadline?.textContent).toBe("Venter på master");
-    const planInfo = container.querySelector(
-      "[data-spill1-waiting-for-master] [data-role='plan-info']",
-    );
-    expect(planInfo?.textContent).toBe("Spill 1 av 13 — Pilot Demo");
+    expect(harness.setBuyPopupDisplayName).toHaveBeenLastCalledWith("Bingo");
+    expect(harness.setLobbyOverallStatus).toHaveBeenLastCalledWith("purchase_open");
+    expect(findLegacyOverlay().length).toBe(0);
   });
 
-  // ── M3 ──────────────────────────────────────────────────────────────────
-  it("M3 — Lobby running dismisses overlay (master har trygget)", () => {
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
-    expect(findOverlays().length).toBe(1);
-
+  // ── N3 ──────────────────────────────────────────────────────────────────
+  it("N3 — Lobby running → forwarder 'running' (PlayScreen.update vil hideIdleText)", () => {
     harness.applyLobbyState(makeLobbyState({ overallStatus: "running" }));
-    expect(findOverlays().length).toBe(0);
-    expect(harness.isOverlayVisible()).toBe(false);
+    expect(harness.setLobbyOverallStatus).toHaveBeenLastCalledWith("running");
+    expect(findLegacyOverlay().length).toBe(0);
   });
 
-  // ── M4 ──────────────────────────────────────────────────────────────────
-  it("M4 — Alle ikke-running-status viser overlay", () => {
+  // ── N4 ──────────────────────────────────────────────────────────────────
+  it("N4 — Alle ikke-running-statuses driver idle-text-mode i PlayScreen", () => {
     const nonRunningStatuses: Array<Spill1LobbyState["overallStatus"]> = [
       "idle",
       "purchase_open",
@@ -202,52 +159,18 @@ describe("Game1Controller — venter på master (Fase 3)", () => {
     ];
     for (const status of nonRunningStatuses) {
       harness.applyLobbyState(makeLobbyState({ overallStatus: status }));
-      expect(findOverlays().length).toBe(1);
+      expect(harness.setLobbyOverallStatus).toHaveBeenLastCalledWith(status);
     }
+    // Ingen legacy-overlay i noen tilstand.
+    expect(findLegacyOverlay().length).toBe(0);
   });
 
-  // ── M5 ──────────────────────────────────────────────────────────────────
-  it("M5 — Bridge gameStatus=RUNNING overrider stale lobby (race-fix)", () => {
-    harness.bridgeGameStatus = "RUNNING";
-    // Lobby-state henger fortsatt på purchase_open (stale)
+  // ── N5 ──────────────────────────────────────────────────────────────────
+  it("N5 — Plan-item-bytte (Bingo → Innsatsen) pusher nytt display-name", () => {
     harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
+    expect(harness.setBuyPopupDisplayName).toHaveBeenLastCalledWith("Bingo");
 
-    // Overlay skal IKKE vises — bridge-state har "vunnet" race-en
-    expect(findOverlays().length).toBe(0);
-  });
-
-  // ── M6 ──────────────────────────────────────────────────────────────────
-  it("M6 — Lobby-fallback aktiv → ingen waiting-overlay (fallback eier scenen)", () => {
-    harness.hasLobbyFallback = true;
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
-
-    expect(findOverlays().length).toBe(0);
-  });
-
-  // ── M7 ──────────────────────────────────────────────────────────────────
-  it("M7 — onGameStarted dismisses overlay defensivt før lobby-update", () => {
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
-    expect(findOverlays().length).toBe(1);
-
-    // Master trekker Start. room:update kommer først (gameStatus=RUNNING),
-    // så lobby-update (overallStatus=running). I gap-en: overlay skal
-    // dismisses defensivt.
-    harness.onGameStarted();
-    expect(findOverlays().length).toBe(0);
-  });
-
-  // ── M8 ──────────────────────────────────────────────────────────────────
-  it("M8 — Etter Fullt Hus: lobby → idle/purchase_open → overlay vises på nytt", () => {
-    // Pre-game: overlay vises
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
-    expect(findOverlays().length).toBe(1);
-
-    // Master starter — overlay dismisses
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "running" }));
-    expect(findOverlays().length).toBe(0);
-
-    // Fullt Hus → server spawn-er ny scheduled-game for neste plan-position.
-    // Lobby går tilbake til purchase_open med ny catalog-entry.
+    // Master advancer til neste plan-position
     harness.applyLobbyState(
       makeLobbyState({
         overallStatus: "purchase_open",
@@ -269,74 +192,45 @@ describe("Game1Controller — venter på master (Fase 3)", () => {
         },
       }),
     );
-    expect(findOverlays().length).toBe(1);
-    const headline = container.querySelector(
-      "[data-spill1-waiting-for-master] [data-role='headline']",
-    );
-    expect(headline?.textContent).toBe("Innsatsen");
-    const planInfo = container.querySelector(
-      "[data-spill1-waiting-for-master] [data-role='plan-info']",
-    );
-    expect(planInfo?.textContent).toBe("Spill 2 av 13 — Pilot Demo");
+    expect(harness.setBuyPopupDisplayName).toHaveBeenLastCalledWith("Innsatsen");
   });
 
-  // ── M9 ──────────────────────────────────────────────────────────────────
-  it("M9 — destroy() rydder overlay (idempotent)", () => {
+  // ── N6 ──────────────────────────────────────────────────────────────────
+  it("N6 — Lobby-fallback aktiv → onChange-handleren no-op (fallback eier scenen)", () => {
+    harness.hasLobbyFallback = true;
     harness.applyLobbyState(makeLobbyState({ overallStatus: "purchase_open" }));
-    expect(findOverlays().length).toBe(1);
 
-    harness.destroy();
-    expect(findOverlays().length).toBe(0);
-
-    // Idempotent
-    harness.destroy();
+    expect(harness.setBuyPopupDisplayName).not.toHaveBeenCalled();
+    expect(harness.setLobbyOverallStatus).not.toHaveBeenCalled();
+    expect(findLegacyOverlay().length).toBe(0);
   });
 
-  // ── M10 ─────────────────────────────────────────────────────────────────
-  it("M10 — Reconnect: fersh state etter disconnect — overlay reflekterer ny state", () => {
-    // Pre-disconnect: master har trygget, overlay dismissed
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "running" }));
-    expect(findOverlays().length).toBe(0);
-
-    // Klient reconnecter etter glipp. Server pusher fersh state via
-    // resumeRoom/HTTP-poll. I tilfellet hvor master pauset under
-    // disconnect → overlay vises igjen
-    harness.applyLobbyState(makeLobbyState({ overallStatus: "paused" }));
-    expect(findOverlays().length).toBe(1);
-  });
-
-  // ── Tobias-direktiv: alltid neste-planlagte-spill som default ──────────
-  it("default catalog-display-name er 'Bingo' når nextScheduledGame mangler", () => {
+  // ── N7 ──────────────────────────────────────────────────────────────────
+  it("N7 — nextScheduledGame=null → display-name faller tilbake til 'Bingo' (Tobias-default)", () => {
     harness.applyLobbyState(
       makeLobbyState({
         overallStatus: "idle",
         nextScheduledGame: null,
       }),
     );
-    const headline = container.querySelector(
-      "[data-spill1-waiting-for-master] [data-role='headline']",
-    );
-    expect(headline?.textContent).toBe("Bingo");
+    expect(harness.setBuyPopupDisplayName).toHaveBeenLastCalledWith("Bingo");
   });
 
-  // ── PlayScreen.setLobbyOverallStatus-kontrakt ─────────────────────────
-  it("countdown-gating: lobby-status forwardet til PlayScreen-mock", () => {
-    const setLobbyOverallStatus = vi.fn();
-    // Simuler controller-koden i onChange-handler
-    const fwd = (state: Spill1LobbyState | null) => {
-      setLobbyOverallStatus(state?.overallStatus ?? null);
-    };
-
-    fwd(null);
-    expect(setLobbyOverallStatus).toHaveBeenLastCalledWith(null);
-
-    fwd(makeLobbyState({ overallStatus: "purchase_open" }));
-    expect(setLobbyOverallStatus).toHaveBeenLastCalledWith("purchase_open");
-
-    fwd(makeLobbyState({ overallStatus: "running" }));
-    expect(setLobbyOverallStatus).toHaveBeenLastCalledWith("running");
-
-    fwd(makeLobbyState({ overallStatus: "paused" }));
-    expect(setLobbyOverallStatus).toHaveBeenLastCalledWith("paused");
+  // ── Garanti: WaitingForMasterOverlay-DOM eksisterer ikke ────────────────
+  it("regresjon: ingen DOM-node med `data-spill1-waiting-for-master` (overlay fjernet 2026-05-11)", () => {
+    // Kjør alle statuses for å verifisere at INGEN av dem mounter overlay-en.
+    const statuses: Array<Spill1LobbyState["overallStatus"]> = [
+      "idle",
+      "purchase_open",
+      "ready_to_start",
+      "running",
+      "paused",
+      "closed",
+      "finished",
+    ];
+    for (const status of statuses) {
+      harness.applyLobbyState(makeLobbyState({ overallStatus: status }));
+      expect(findLegacyOverlay().length).toBe(0);
+    }
   });
 });

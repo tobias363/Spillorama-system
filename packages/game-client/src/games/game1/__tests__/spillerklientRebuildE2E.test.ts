@@ -1,48 +1,37 @@
 /**
  * @vitest-environment happy-dom
  *
- * Spillerklient-rebuild — Fase 4 ende-til-ende acceptance-tester (2026-05-10).
+ * Spillerklient-rebuild — Fase 4 ende-til-ende acceptance-tester.
+ * Oppdatert 2026-05-11 etter at `WaitingForMasterOverlay` ble fjernet
+ * og erstattet med CenterBall idle-text-modus.
  *
  * Bakgrunn:
- *   Fase 1+2+3 har levert tre integrerte komponenter som SAMMEN dekker
- *   Tobias-direktivet 2026-05-09:
- *
+ *   Tobias-direktiv 2026-05-09 (uendret):
  *     "Når man kommer inn i spill 1 som kunde så skal man alltid da se
  *      neste spill som er planlagt. Dette spillet skal da starte når
- *      master har trykket på knappen. Det skal aldri være noen andre
- *      views i det live rommet en neste planlagte spill."
+ *      master har trykket på knappen."
  *
- *   - Fase 1 (#1128): `Game1LobbyStateBinding` driver lobby-state via
- *     public `/api/games/spill1/lobby` + socket-broadcast og forwarder
+ *   Tobias-direktiv 2026-05-11 (nytt):
+ *     "Den kula som viser hvilket tall som blir trekt — når det ikke er
+ *      aktiv runde fjerner vi den og skriver tekst der:
+ *        Linje 1: 'Neste spill: {neste spill på planen}'
+ *        Linje 2: 'Kjøp bonger for å være med i trekningen'
+ *      Vi trenger ikke ha noen tekst om at vi venter på master."
+ *
+ *   - Fase 1: `Game1LobbyStateBinding` driver lobby-state og forwarder
  *     `nextScheduledGame.catalogDisplayName` til `Game1BuyPopup`.
- *   - Fase 2 (#1129): `buildBuyPopupTicketConfigFromLobby` konverterer
- *     `Spill1LobbyNextGame.ticketColors`/`ticketPricesCents` til
- *     `Game1BuyPopup.showWithTypes(...)`-shape. 3 farger for standard
- *     hovedspill, 1 farge for Trafikklys.
- *   - Fase 3 (#1130): `WaitingForMasterOverlay` + countdown-gating sørger
- *     for at klienten viser "venter på master" når
- *     `lobby.overallStatus !== "running"` — INGEN lokal countdown,
- *     INGEN "..."-fallback.
+ *   - Fase 2: `buildBuyPopupTicketConfigFromLobby` konverterer
+ *     `Spill1LobbyNextGame` til BuyPopup-shape.
+ *   - Fase 3 (rev. 2026-05-11): `CenterBall.setIdleText` + `showIdleText`/
+ *     `hideIdleText` styrer "Neste spill: X"-rendringen direkte i Pixi-
+ *     stage. Ingen separat HTML-overlay.
  *
- *   Disse acceptance-testene bygger en in-process integration-harness som
- *   wirer ekte komponenter (ingen mocks for selve testede classes — kun
- *   socket og fetch er stubbed) og kjører de 6 scenarier dokumentert i
- *   `SPILLERKLIENT_REBUILD_HANDOFF_2026-05-10.md` §3 fase 4.
- *
- * Test-filosofi (jf. SKILL "test engineer"):
- *   - **Strategi A**: in-process integrasjon, raskere CI, ingen Docker.
- *     Ekte `Game1LobbyStateBinding`, ekte `Game1BuyPopup`, ekte
- *     `WaitingForMasterOverlay`, ekte `buildBuyPopupTicketConfigFromLobby`.
- *     Det vi mocker er KUN ytterkanten (socket + fetch) — alt mellom
- *     er produksjonskode.
- *   - **Strategi B** (live E2E mot prod-build) er bevisst out-of-scope
- *     for denne PR-en — kommer som follow-up. Disse testene er CI-runnable
- *     uten manuelle steg, noe som er pilot-blocker per `LIVE_ROOM_ROBUSTNESS
- *     _MANDATE_2026-05-08.md` R5/R7.
- *   - **Ingen produksjonskode rørt** — kun nye test-filer + helpers.
- *
- * Run:
- *   `npm --prefix packages/game-client test -- --run spillerklientRebuildE2E`
+ * Test-filosofi:
+ *   - In-process integrasjon. Ekte `Game1LobbyStateBinding`, ekte
+ *     `Game1BuyPopup`, ekte CenterBall. Socket + fetch stubbet.
+ *   - "Venter på master"-overlay-DOM (data-attributtet
+ *     `data-spill1-waiting-for-master`) skal IKKE eksistere. Vi bekrefter
+ *     dette per scenario som regresjon-vakt.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -60,15 +49,10 @@ import { Game1LobbyStateBinding } from "../logic/LobbyStateBinding.js";
 import { buildBuyPopupTicketConfigFromLobby } from "../logic/lobbyTicketTypes.js";
 import { Game1BuyPopup } from "../components/Game1BuyPopup.js";
 import { HtmlOverlayManager } from "../components/HtmlOverlayManager.js";
-import { WaitingForMasterOverlay } from "../components/WaitingForMasterOverlay.js";
+import { CenterBall } from "../components/CenterBall.js";
 
 // ── Test-fixtures ─────────────────────────────────────────────────────────
 
-/**
- * Standard 3-farge Bingo-katalogvariant. Speiler hva
- * `Game1LobbyService.buildNextGameFromItem` genererer for `bingo`-slug
- * etter fase 2-utvidelsen i shared-types.
- */
 function makeNextScheduledGameStandardBingo(
   overrides: Partial<Spill1LobbyNextGame> = {},
 ): Spill1LobbyNextGame {
@@ -90,10 +74,6 @@ function makeNextScheduledGameStandardBingo(
   };
 }
 
-/**
- * Trafikklys-spesialvariant — KUN lilla-bong à 15 kr. Per
- * `SPILL_REGLER_OG_PAYOUT.md` §5 og `prizeMultiplierMode: "explicit_per_color"`.
- */
 function makeNextScheduledGameTrafikklys(): Spill1LobbyNextGame {
   return makeNextScheduledGameStandardBingo({
     itemId: "item-trafikklys",
@@ -131,11 +111,9 @@ function makeLobbyState(
 
 interface SocketStubControls {
   socket: SpilloramaSocket;
-  /** Trigger `spill1LobbyStateUpdate`-event som om server pushet broadcast. */
   emitStateUpdate: (state: Spill1LobbyState) => void;
   subscribeMock: ReturnType<typeof vi.fn>;
   unsubscribeMock: ReturnType<typeof vi.fn>;
-  /** Aksesserer registrerte event-listeners. */
   getRegisteredListenerCount: () => number;
 }
 
@@ -192,15 +170,14 @@ function makeSocketStub(
 // ── Integration-harness ──────────────────────────────────────────────────
 
 /**
- * SpillerklientHarness wires de tre fase-komponentene sammen slik de
- * fungerer i Game1Controller — uten Pixi-stage, uten full controller-
- * bootstrapping. Speiler `applyWaitingForMasterFromLobbyState`-logikken
- * samt forwardingen av displayName/ticketConfig fra LobbyStateBinding
- * til Game1BuyPopup.
+ * SpillerklientHarness wires fase-komponentene sammen slik de fungerer i
+ * Game1Controller (post-2026-05-11). Speiler:
+ *   - lobby-binding → setBuyPopupDisplayName (BuyPopup + CenterBall)
+ *   - lobby-binding → setLobbyOverallStatus (driver PlayScreen.update
+ *     som toggler CenterBall.showIdleText vs hideIdleText)
  *
- * NB: harness-en skal ikke trene controller-INNVENDIG-state — kun det
- * brukeren ser (DOM-state av overlay + popup). Det er hele poenget med
- * fase 4: vi tester at ALT-OG-ALT fungerer fra spillerens synspunkt.
+ * Vi tester gjennom CenterBall direkte siden full PlayScreen-instansiering
+ * krever Pixi-app (out-of-scope for happy-dom).
  */
 class SpillerklientHarness {
   private readonly container: HTMLElement;
@@ -210,12 +187,11 @@ class SpillerklientHarness {
   /** Speiler `bridge.getState().gameStatus`. RUNNING overrider lobby-state. */
   bridgeGameStatus: "NONE" | "WAITING" | "RUNNING" | "ENDED" = "NONE";
 
-  // Fase 1+2: BuyPopup mottar setDisplayName + setTicketConfig
   buyPopup: Game1BuyPopup;
-  // Fase 3: WaitingForMasterOverlay vises/skjules basert på lobby
-  waitingOverlay: WaitingForMasterOverlay | null = null;
-  // Driver av lobby-state
+  centerBall: CenterBall;
   binding: Game1LobbyStateBinding;
+  /** Cached siste lobby-state for å mirror PlayScreen.update-flyten. */
+  private lastLobbyStatus: Spill1LobbyOverallStatus | null = null;
 
   constructor(
     container: HTMLElement,
@@ -225,21 +201,21 @@ class SpillerklientHarness {
     this.container = container;
     this.hallId = hallId;
 
-    // Mount BuyPopup som ekte komponent (DOM mountes lazily via
-    // HtmlOverlayManager).
+    // BuyPopup mountes via HtmlOverlayManager (ekte DOM).
     const overlayManager = new HtmlOverlayManager(container);
     this.buyPopup = new Game1BuyPopup(overlayManager);
 
-    // Build LobbyStateBinding som driver state. Init med kort polling-
-    // intervall så testene ikke holder timeren åpen for lenge.
+    // CenterBall instansieres uten Pixi-stage — vi tester den direkte via
+    // dens public API. happy-dom håndterer Pixi.Text/Container i headless-mode.
+    this.centerBall = new CenterBall();
+
+    // LobbyStateBinding driver state-flyten.
     this.binding = new Game1LobbyStateBinding({
       hallId,
       socket,
-      pollIntervalMs: 60_000, // lang nok til å aldri trigge i test
-      apiBaseUrl: "http://localhost:0", // fetch stubbet, gir alltid 503
+      pollIntervalMs: 60_000,
+      apiBaseUrl: "http://localhost:0",
     });
-
-    // Wire onChange — speiler Game1Controller.lobbyStateUnsub-callbacken.
     this.binding.onChange((state) => this.onLobbyStateChanged(state));
   }
 
@@ -249,94 +225,67 @@ class SpillerklientHarness {
 
   stop(): void {
     this.binding.stop();
-    this.waitingOverlay?.destroy();
-    this.waitingOverlay = null;
     this.buyPopup.destroy();
+    this.centerBall.destroy();
   }
 
   /**
-   * Mirror av Game1Controller.lobbyStateBinding.onChange-handleren:
-   *   1. setBuyPopupDisplayName (fase 1)
-   *   2. setBuyPopupTicketConfig (fase 2 — vi bygger via converter)
-   *   3. applyWaitingForMasterFromLobbyState (fase 3)
+   * Mirror av Game1Controller.lobbyStateBinding.onChange-handleren
+   * (post-2026-05-11): forwarder display-name til BuyPopup + CenterBall,
+   * og driver idle-text-mode basert på status.
    */
   private onLobbyStateChanged(state: Spill1LobbyState | null): void {
-    // Fase 1 — display-navn
+    if (this.hasLobbyFallback) return;
+
     const displayName = state?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
     this.buyPopup.setDisplayName(displayName);
+    this.centerBall.setIdleText(displayName);
 
-    // Fase 2 — ticket-config (vi konverterer fra lobby state og lagrer for
-    // popup-åpning. Når popup åpnes via showWithTypes(...) ville
-    // PlayScreen prioritere state.ticketTypes. Vi simulerer pre-game-
-    // tilfellet hvor state.ticketTypes er tomt og lobby-config tar over.).
-    // Storage på instansen sjelden brukt direkte — vi tester gjennom
-    // openBuyPopup() under.
+    this.lastLobbyStatus = state?.overallStatus ?? null;
 
-    // Fase 3 — vente-på-master
-    this.applyWaitingForMaster(state);
+    // Mirror PlayScreen.update-flyten: hideIdleText ved running, ellers vis.
+    this.applyCenterBallVisibility();
   }
 
-  /** Mirror av Game1Controller.applyWaitingForMasterFromLobbyState. */
-  private applyWaitingForMaster(state: Spill1LobbyState | null): void {
-    if (this.hasLobbyFallback) return;
-    if (!state) return;
-
-    if (state.overallStatus === "running") {
-      this.waitingOverlay?.hide();
+  /**
+   * Mirror av PlayScreen.update — bestemmer om CenterBall skal være i
+   * idle-text-modus eller live-ball-modus. Bridge-RUNNING overrider lobby
+   * (race-fix mellom room:update og lobby:state).
+   */
+  private applyCenterBallVisibility(): void {
+    if (this.lastLobbyStatus === "running") {
+      this.centerBall.hideIdleText();
       return;
     }
-
     if (this.bridgeGameStatus === "RUNNING") {
-      this.waitingOverlay?.hide();
+      this.centerBall.hideIdleText();
       return;
     }
-
-    if (!this.waitingOverlay) {
-      this.waitingOverlay = new WaitingForMasterOverlay({
-        container: this.container,
-      });
-    }
-    this.waitingOverlay.show({
-      catalogDisplayName: state.nextScheduledGame?.catalogDisplayName ?? null,
-      currentPosition: state.currentRunPosition || null,
-      totalPositions: state.totalPositions || null,
-      planName: state.planName,
-    });
+    this.centerBall.showIdleText();
   }
 
-  /**
-   * Speil av Game1Controller.onGameStarted's defensive overlay-hide.
-   * Brukes for å verifisere reaksjon på `gameStarted` som kommer FØR
-   * lobby-state-update.
-   */
+  /** Speil av Game1Controller.onGameStarted-flyten. */
   onGameStarted(): void {
-    this.waitingOverlay?.hide();
+    this.bridgeGameStatus = "RUNNING";
+    this.applyCenterBallVisibility();
   }
 
-  /**
-   * Mirror av PlayScreen.showBuyPopup — åpner buy-popup med ticket-config
-   * fra lobby (fallback når room:update ikke har levert variant).
-   */
   openBuyPopupFromLobby(): void {
     const lobbyConfig = this.binding.getBuyPopupTicketConfig();
     const displayName = this.binding.getCatalogDisplayName();
-    if (!lobbyConfig) {
-      // Ingen lobby-data — popup-en skal ikke åpnes (samme oppførsel som
-      // PlayScreen.showBuyPopup når state.ticketTypes er tom).
-      return;
-    }
+    if (!lobbyConfig) return;
     this.buyPopup.showWithTypes(
       lobbyConfig.entryFee,
       lobbyConfig.ticketTypes,
-      0, // alreadyPurchased
+      0,
       undefined,
       displayName,
     );
   }
 
-  /** Konvensjonell DOM-query for waiting-overlay (fase 3). */
-  isWaitingOverlayVisible(): boolean {
-    return this.waitingOverlay?.isVisible() ?? false;
+  /** True hvis CenterBall er i idle-text-modus. */
+  isCenterBallIdleVisible(): boolean {
+    return this.centerBall.isIdleTextVisible();
   }
 
   /** Antall ticket-rader rendret av BuyPopup. */
@@ -345,12 +294,10 @@ class SpillerklientHarness {
     if (!overlay) return 0;
     const card = overlay.lastElementChild?.firstElementChild;
     if (!card) return 0;
-    // typesContainer er child[1] i kortet (header, types, sep, status, total, buy, cancel)
     const typesContainer = card.children[1];
     return typesContainer?.children.length ?? 0;
   }
 
-  /** Display-navn rendret i BuyPopup-subtitle. */
   getBuyPopupSubtitle(): string | null {
     const overlay = this.container.querySelector(".g1-overlay-root");
     if (!overlay) return null;
@@ -363,7 +310,6 @@ class SpillerklientHarness {
     return null;
   }
 
-  /** Pris-tekstinformasjon for hver ticket-rad. */
   getBuyPopupTicketPrices(): Array<string> {
     const overlay = this.container.querySelector(".g1-overlay-root");
     if (!overlay) return [];
@@ -374,13 +320,23 @@ class SpillerklientHarness {
     const rows = Array.from(typesContainer.children) as HTMLElement[];
     return rows.map((row) => row.textContent?.replace(/\s+/g, " ").trim() ?? "");
   }
+
+  /** Test-hjelper: hent renderet idle-text linje 1 ("Neste spill: X"). */
+  getIdleHeadline(): string {
+    // CenterBall.idleHeadline er privat. Vi leser ved å instansiere en
+    // identisk shape — alternativt via tagger. Vi bruker simpelthen
+    // proxy-getter på public state via reflect. For happy-dom-test er det
+    // tilstrekkelig å verifisere at idle-mode er aktiv + at setIdleText
+    // ble kalt med riktig navn (verifisert via mock).
+    // For end-to-end visuelle assert bruker vi en typecast.
+    // @ts-expect-error — privat felt, test-only.
+    return (this.centerBall.idleHeadline?.text as string) ?? "";
+  }
 }
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  // happy-dom: gi binding en working fetch som alltid returnerer 503 så
-  // socket-broadcast er den eneste state-kilden vi kontrollerer.
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue({
@@ -389,7 +345,6 @@ beforeEach(() => {
       json: async () => ({ ok: false }),
     }),
   );
-  // ResizeObserver-stub — Game1BuyPopup bruker den i constructor.
   if (
     typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver ===
     "undefined"
@@ -410,13 +365,12 @@ afterEach(() => {
 
 // ── Acceptance-scenarier ──────────────────────────────────────────────────
 
-describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
+describe("Spillerklient-rebuild — Fase 4 ende-til-ende (post-2026-05-11)", () => {
   // ── Test 1 ────────────────────────────────────────────────────────────
-  it("Test 1: Master ikke startet → spiller ser 'venter på master', ingen countdown, ingen '...'", async () => {
+  it("Test 1: Master ikke startet → CenterBall viser 'Neste spill: Bingo' idle-text, ingen overlay", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
-    // Initial socket-state: master har IKKE startet — purchase_open.
     const initialState = makeLobbyState({ overallStatus: "purchase_open" });
     const { socket } = makeSocketStub("demo-hall-001", initialState);
     const harness = new SpillerklientHarness(container, "demo-hall-001", socket);
@@ -424,32 +378,17 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
     try {
       await harness.start();
 
-      // Forventet: WaitingForMasterOverlay er mounted og synlig.
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
+      // Forventet: idle-text aktiv på CenterBall.
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
+      expect(harness.getIdleHeadline()).toBe("Neste spill: Bingo");
 
-      // Forventet: overlay viser "Bingo" som catalog-navn (fra plan-runtime).
-      const overlayHeadline = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='headline']",
-      );
-      expect(overlayHeadline?.textContent).toBe("Bingo");
+      // Tobias-direktiv 2026-05-11: ingen "venter på master"-overlay.
+      expect(
+        document.querySelectorAll("[data-spill1-waiting-for-master]").length,
+      ).toBe(0);
 
-      // Forventet: subheadline sier "Venter på master".
-      const overlaySubheadline = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='subheadline']",
-      );
-      expect(overlaySubheadline?.textContent).toBe("Venter på master");
-
-      // Forventet: plan-info reflekterer 1 av 13 fra Pilot Demo.
-      const overlayPlanInfo = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='plan-info']",
-      );
-      expect(overlayPlanInfo?.textContent).toBe(
-        "Spill 1 av 13 — Pilot Demo — alle 13 spill",
-      );
-
-      // Forventet: NEI til "..." eller andre fallback-views — Tobias-direktiv.
+      // Ingen "..." eller "STANDARD" tekst i DOM (Tobias-direktiv).
       const debugTextNodes = container.textContent ?? "";
-      expect(debugTextNodes).not.toMatch(/^\.\.\./);
       expect(debugTextNodes).not.toMatch(/STANDARD/);
     } finally {
       harness.stop();
@@ -458,7 +397,7 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
   });
 
   // ── Test 2 ────────────────────────────────────────────────────────────
-  it("Test 2: Master starter → overlay dismisses og lobby-running drives videre flow", async () => {
+  it("Test 2: Master starter → idle-text dismisses og CenterBall klar for live-trekk", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -470,27 +409,15 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
 
     try {
       await harness.start();
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
 
-      // Pre-condition: overlay synlig.
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
-
-      // Master kaller /api/agent/game1/master/start → server pusher
-      // overallStatus="running" via socket-broadcast.
+      // Master starter — server pusher overallStatus="running".
       emitStateUpdate(makeLobbyState({ overallStatus: "running" }));
 
-      // Forventet: overlay dismisses.
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
-
-      // Tobias-direktiv: ingen "..." eller stale-fallback skal være synlig.
-      const overlayElements = container.querySelectorAll(
-        "[data-spill1-waiting-for-master]",
-      );
-      // Overlay-noden kan fortsatt eksistere i DOM, men skal være `display: none`.
-      for (const el of Array.from(overlayElements)) {
-        const style = window.getComputedStyle(el as HTMLElement);
-        // I happy-dom regnes hidden via inline style.
-        expect((el as HTMLElement).style.display).toBe("none");
-      }
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
+      expect(
+        document.querySelectorAll("[data-spill1-waiting-for-master]").length,
+      ).toBe(0);
     } finally {
       harness.stop();
       container.remove();
@@ -502,16 +429,12 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
-    const { socket } = makeSocketStub(
-      "demo-hall-001",
-      makeLobbyState(), // standard 3-farge bingo
-    );
+    const { socket } = makeSocketStub("demo-hall-001", makeLobbyState());
     const harness = new SpillerklientHarness(container, "demo-hall-001", socket);
 
     try {
       await harness.start();
 
-      // Spilleren klikker "Kjøp bong" (PlayScreen.showBuyPopup).
       harness.openBuyPopupFromLobby();
 
       // Forventet: 6 ticket-rader (3 farger × small+stor, Tobias 2026-05-11).
@@ -543,21 +466,19 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
   });
 
   // ── Test 4 ────────────────────────────────────────────────────────────
-  it("Test 4: Trafikklys (1 farge à 15 kr) viser 1 ticket-knapp og oppdatert subtitle", async () => {
+  it("Test 4: Trafikklys (1 farge à 15 kr) viser 1 ticket-knapp og oppdatert idle-text", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
     const { socket, emitStateUpdate } = makeSocketStub(
       "demo-hall-001",
-      makeLobbyState(), // initialt standard bingo
+      makeLobbyState(),
     );
     const harness = new SpillerklientHarness(container, "demo-hall-001", socket);
 
     try {
       await harness.start();
 
-      // Admin endrer plan-item til Trafikklys-katalog → server pusher
-      // ny lobby-state via socket-broadcast.
       emitStateUpdate(
         makeLobbyState({
           overallStatus: "purchase_open",
@@ -565,7 +486,6 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
         }),
       );
 
-      // Spilleren åpner kjøp-popup.
       harness.openBuyPopupFromLobby();
 
       // Forventet: 2 ticket-knapper (small + stor lilla; Tobias 2026-05-11).
@@ -590,11 +510,11 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
       expect(fullCardText).not.toMatch(/\b5\s*kr\b/);
       expect(fullCardText).not.toMatch(/\b10\s*kr\b/);
 
-      // Sanity: WaitingForMasterOverlay viser nå "Trafikklys" som catalog-navn.
-      const overlayHeadline = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='headline']",
-      );
-      expect(overlayHeadline?.textContent).toBe("Trafikklys");
+      // Sanity: CenterBall idle-text reflekterer nytt navn ("Trafikklys").
+      expect(harness.getIdleHeadline()).toBe("Neste spill: Trafikklys");
+      expect(
+        document.querySelectorAll("[data-spill1-waiting-for-master]").length,
+      ).toBe(0);
     } finally {
       harness.stop();
       container.remove();
@@ -602,7 +522,7 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
   });
 
   // ── Test 5 ────────────────────────────────────────────────────────────
-  it("Test 5: Etter Fullt Hus → ny purchase_open viser 'venter på master' for neste plan-position", async () => {
+  it("Test 5: Etter Fullt Hus → ny purchase_open viser idle-text for neste plan-position", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -614,17 +534,14 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
 
     try {
       await harness.start();
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
 
-      // Pre-game: overlay synlig.
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
-
-      // Master starter Spill 1 — overlay dismisses.
+      // Master starter — idle-text dismisses.
       emitStateUpdate(makeLobbyState({ overallStatus: "running" }));
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
 
-      // Server kjører runden ferdig → Fullt Hus identifisert. Server
-      // spawner ny scheduled-game for neste plan-position og pusher
-      // lobby-state med purchase_open + position 2.
+      // Fullt Hus identifisert → server spawn-er ny scheduled-game for
+      // neste plan-position.
       emitStateUpdate(
         makeLobbyState({
           overallStatus: "purchase_open",
@@ -638,29 +555,15 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
         }),
       );
 
-      // Forventet: overlay synlig på nytt — Tobias-direktiv om "alltid neste
-      // planlagte spill mellom runder".
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
+      // Idle-text aktiv på nytt med nytt navn.
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
+      expect(harness.getIdleHeadline()).toBe("Neste spill: Innsatsen");
 
-      // Forventet: overlay viser nytt catalog-navn ("Innsatsen") og position 2.
-      const overlayHeadline = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='headline']",
-      );
-      expect(overlayHeadline?.textContent).toBe("Innsatsen");
-
-      const overlayPlanInfo = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='plan-info']",
-      );
-      expect(overlayPlanInfo?.textContent).toBe(
-        "Spill 2 av 13 — Pilot Demo — alle 13 spill",
-      );
-
-      // BuyPopup-subtitle skal også reflektere nytt catalog-navn.
-      // (Vi har ikke åpnet popup-en, men setDisplayName er kalt — verifiser via
-      // direkte accessor.)
-      // Selv om popup ikke er synlig oppdateres internt subtitle-element.
-      const subtitle = harness.getBuyPopupSubtitle();
-      expect(subtitle).toBe("Innsatsen");
+      // BuyPopup-subtitle reflekterer også nytt navn.
+      expect(harness.getBuyPopupSubtitle()).toBe("Innsatsen");
+      expect(
+        document.querySelectorAll("[data-spill1-waiting-for-master]").length,
+      ).toBe(0);
     } finally {
       harness.stop();
       container.remove();
@@ -668,11 +571,10 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
   });
 
   // ── Test 6 ────────────────────────────────────────────────────────────
-  it("Test 6: Disconnect → reconnect → fersh state pushes nytt lobby-state, render reflekterer current status", async () => {
+  it("Test 6: Disconnect → reconnect → fersh state, render reflekterer current status", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
-    // Pre-disconnect: lobby er running, overlay er ikke synlig.
     const { socket, emitStateUpdate } = makeSocketStub(
       "demo-hall-001",
       makeLobbyState({ overallStatus: "running" }),
@@ -681,35 +583,18 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
 
     try {
       await harness.start();
+      // Initial running → idle-text er IKKE synlig.
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
 
-      // Initial-ack ga overallStatus=running → overlay aldri vist.
-      // (running-grenen hopper over `mount + show`.)
-      // Vi bekrefter at det er ingen overlay-DOM-noder.
-      const initialOverlays = container.querySelectorAll(
-        "[data-spill1-waiting-for-master]",
-      );
-      expect(initialOverlays.length).toBe(0);
-
-      // Spiller mister nett. Backend stoper å pushe state-updates. Lokalt
-      // har vi fortsatt cached "running".
-
-      // Reconnect — server pusher fersh state. I mellomtiden har master
-      // satt spillet på pause, så lobby-state er nå "paused".
+      // Reconnect: server pusher fersh "paused"-state.
       emitStateUpdate(makeLobbyState({ overallStatus: "paused" }));
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
 
-      // Forventet: overlay vises basert på CURRENT status, ikke stale
-      // pre-disconnect-data. Tobias-direktiv: "ingen andre views enn
-      // neste planlagte spill".
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
-
-      // Reconnect-scenario nr 2: master fortsetter spillet.
+      // Master fortsetter spillet.
       emitStateUpdate(makeLobbyState({ overallStatus: "running" }));
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
 
-      // Forventet: overlay dismisses igjen.
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
-
-      // Reconnect-scenario nr 3: spilleren har vært borte lenge nok til
-      // at Fullt Hus skjedde og ny plan-item venter.
+      // Spilleren var borte lenge — ny plan-item venter.
       emitStateUpdate(
         makeLobbyState({
           overallStatus: "purchase_open",
@@ -722,19 +607,8 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
         }),
       );
 
-      // Forventet: overlay synlig + viser CURRENT plan-position (ikke
-      // stale fra før disconnect).
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
-      const overlayHeadline = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='headline']",
-      );
-      expect(overlayHeadline?.textContent).toBe("Kvikkis");
-      const overlayPlanInfo = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='plan-info']",
-      );
-      expect(overlayPlanInfo?.textContent).toBe(
-        "Spill 5 av 13 — Pilot Demo — alle 13 spill",
-      );
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
+      expect(harness.getIdleHeadline()).toBe("Neste spill: Kvikkis");
     } finally {
       harness.stop();
       container.remove();
@@ -742,10 +616,10 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
   });
 });
 
-// ── Edge case-acceptance: integrert flyt verifisert ───────────────────────
+// ── Edge case-acceptance ──────────────────────────────────────────────────
 
-describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
-  it("nextScheduledGame=null (closed/finished) → BuyPopup-subtitle 'Bingo' og overlay viser 'Bingo' (ingen STANDARD)", async () => {
+describe("Spillerklient-rebuild — Fase 4 integrert robusthet (post-2026-05-11)", () => {
+  it("nextScheduledGame=null (closed/finished) → BuyPopup-subtitle 'Bingo' og idle-text 'Neste spill: Bingo'", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -757,16 +631,9 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
 
     try {
       await harness.start();
-
-      // Tobias-direktiv: aldri "STANDARD" eller tom subtitle. Default = "Bingo".
       expect(harness.getBuyPopupSubtitle()).toBe("Bingo");
-
-      // Overlay vises også for closed (ikke-running).
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
-      const overlayHeadline = container.querySelector(
-        "[data-spill1-waiting-for-master] [data-role='headline']",
-      );
-      expect(overlayHeadline?.textContent).toBe("Bingo");
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
+      expect(harness.getIdleHeadline()).toBe("Neste spill: Bingo");
     } finally {
       harness.stop();
       container.remove();
@@ -785,9 +652,6 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
 
     try {
       await harness.start();
-
-      // Når lobby ikke har ticket-config skal popup IKKE åpnes (vi viser
-      // ikke gamle 8-farge-defaults).
       harness.openBuyPopupFromLobby();
       expect(harness.getBuyPopupTicketRowCount()).toBe(0);
     } finally {
@@ -796,7 +660,7 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     }
   });
 
-  it("Bridge-state RUNNING overrider stale lobby (race-fix) — overlay forblir skjult", async () => {
+  it("Bridge-state RUNNING overrider stale lobby (race-fix) — idle-text skjult", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -807,21 +671,16 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     const harness = new SpillerklientHarness(container, "demo-hall-001", socket);
 
     try {
-      // Bridge har allerede mottatt room:update.gameStatus=RUNNING (master
-      // klikket Start, men lobby-state-update henger igjen).
       harness.bridgeGameStatus = "RUNNING";
-
       await harness.start();
-
-      // Forventet: overlay vises ikke pga bridge-override.
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
     } finally {
       harness.stop();
       container.remove();
     }
   });
 
-  it("Lobby-fallback aktiv → ingen waiting-overlay (fallback eier scenen)", async () => {
+  it("Lobby-fallback aktiv → onChange-handleren no-op (fallback eier scenen)", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -832,25 +691,23 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     const harness = new SpillerklientHarness(container, "demo-hall-001", socket);
 
     try {
-      // Game1Controller markerer hasLobbyFallback=true når createRoom
-      // feiler og Game1LobbyFallback overtar.
       harness.hasLobbyFallback = true;
-
       await harness.start();
-
-      // Forventet: ingen waiting-overlay (fallback-en eier visningen).
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
-      const overlays = container.querySelectorAll(
-        "[data-spill1-waiting-for-master]",
-      );
-      expect(overlays.length).toBe(0);
+      // CenterBall mountes initielt med fallback "Bingo" og idle-text-mode
+      // hvis vi viser den. Når fallback eier scenen overstyrer den display-
+      // logikken — vi skipper applyLobbyState så getIdleHeadline returnerer
+      // initial fallback (det rendres ikke av spillet uansett siden
+      // fallback dekker hele skjermen i prod).
+      expect(
+        document.querySelectorAll("[data-spill1-waiting-for-master]").length,
+      ).toBe(0);
     } finally {
       harness.stop();
       container.remove();
     }
   });
 
-  it("Defensiv: onGameStarted() før lobby-update lander → overlay dismisses umiddelbart", async () => {
+  it("onGameStarted før lobby-update lander → idle-text dismisses umiddelbart", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -862,14 +719,11 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
 
     try {
       await harness.start();
-      expect(harness.isWaitingOverlayVisible()).toBe(true);
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
 
-      // Master har klikket Start. room:update.gameStatus=RUNNING ankommer
-      // før lobby-state-update — controller bruker onGameStarted som
-      // defensive hide.
+      // Bridge mottar room:update.gameStatus=RUNNING før lobby-update.
       harness.onGameStarted();
-
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
     } finally {
       harness.stop();
       container.remove();
@@ -897,7 +751,6 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     expect(trafikklys!.entryFee).toBe(15);
     expect(trafikklys!.ticketTypes).toHaveLength(2);
 
-    // 3. Tom/null lobby-data → null (caller faller på state.ticketTypes)
     expect(buildBuyPopupTicketConfigFromLobby(null)).toBeNull();
     expect(buildBuyPopupTicketConfigFromLobby(undefined)).toBeNull();
     expect(
@@ -911,7 +764,7 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     const inkonsistent = buildBuyPopupTicketConfigFromLobby(
       makeNextScheduledGameStandardBingo({
         ticketColors: ["hvit", "gul", "lilla"],
-        ticketPricesCents: { hvit: 500, gul: 1000 }, // mangler lilla
+        ticketPricesCents: { hvit: 500, gul: 1000 },
       }),
     );
     expect(inkonsistent).not.toBeNull();
@@ -919,7 +772,7 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     expect(inkonsistent!.ticketTypes).toHaveLength(4);
   });
 
-  it("Lobby-state med ulike overallStatus-verdier driver overlay riktig per Tobias-direktiv", async () => {
+  it("Lobby-state med ulike overallStatus-verdier driver idle-text-mode riktig", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -932,7 +785,6 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     try {
       await harness.start();
 
-      // Verifiser at overlay vises for ALLE ikke-running statuses.
       const nonRunningStatuses: Spill1LobbyOverallStatus[] = [
         "idle",
         "purchase_open",
@@ -944,12 +796,16 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
 
       for (const status of nonRunningStatuses) {
         emitStateUpdate(makeLobbyState({ overallStatus: status }));
-        expect(harness.isWaitingOverlayVisible()).toBe(true);
+        expect(harness.isCenterBallIdleVisible()).toBe(true);
       }
 
-      // Når status går til "running" — overlay dismisses.
       emitStateUpdate(makeLobbyState({ overallStatus: "running" }));
-      expect(harness.isWaitingOverlayVisible()).toBe(false);
+      expect(harness.isCenterBallIdleVisible()).toBe(false);
+
+      // Regresjon: ingen overlay-DOM-noder i hele scenariet.
+      expect(
+        document.querySelectorAll("[data-spill1-waiting-for-master]").length,
+      ).toBe(0);
     } finally {
       harness.stop();
       container.remove();
