@@ -208,6 +208,9 @@
       throw new Error('NETWORK_ERROR');
     }
     if (res.status === 404) return null;
+    // 2026-05-11 Tobias-direktiv: 429 må vise pen "midlertidig
+    // utilgjengelig"-melding, ikke "HTTP_429".
+    if (res.status === 429) throw new Error('RATE_LIMITED');
     if (!res.ok) throw new Error('HTTP_' + res.status);
     var body = await res.json();
     if (!body.ok || !body.data) throw new Error('INVALID_RESPONSE');
@@ -230,6 +233,8 @@
       throw new Error('NETWORK_ERROR');
     }
     if (res.status === 404) return { faqs: [], count: 0 };
+    // 2026-05-11 Tobias-direktiv: 429 må vise pen melding, ikke "HTTP_429".
+    if (res.status === 429) throw new Error('RATE_LIMITED');
     if (!res.ok) throw new Error('HTTP_' + res.status);
     var body = await res.json();
     if (!body.ok || !body.data) throw new Error('INVALID_RESPONSE');
@@ -264,6 +269,12 @@
     var msg = err && err.message ? err.message : 'UKJENT_FEIL';
     if (msg === 'NETWORK_ERROR') {
       return '<div class="cms-error">Kunne ikke kontakte serveren. Sjekk internett-tilkoblingen og prøv igjen.</div>';
+    }
+    // 2026-05-11 Tobias-direktiv: 429 må vise pen melding (ingen
+    // sekund-countdown). Auto-retry kan trigges ved at brukeren åpner
+    // panelet på nytt; CMS-content er cachet, så stille reload er trygt.
+    if (msg === 'RATE_LIMITED') {
+      return '<div class="cms-error">Spillet er midlertidig utilgjengelig. Prøv igjen om noen sekunder.</div>';
     }
     return '<div class="cms-error">Kunne ikke laste innhold (' + escapeHtml(msg) + ').</div>';
   }

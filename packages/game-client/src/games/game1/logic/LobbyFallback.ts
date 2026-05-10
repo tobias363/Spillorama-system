@@ -239,6 +239,15 @@ export class Game1LobbyFallback {
     try {
       const url = `${this.apiBaseUrl}/api/games/spill1/lobby?hallId=${encodeURIComponent(this.hallId)}`;
       const res = await fetch(url, { credentials: "omit" });
+      // 2026-05-11 Tobias-direktiv: 429-rate-limit må aldri lekke
+      // sekund-countdown til kunden. Polling-loopen vår er allerede 10s,
+      // så bare logg og hold overlay-en (sist kjente headline står). Backend
+      // alerting fanger persistent 429-mønster — vi forsøker bare igjen ved
+      // neste tick.
+      if (res.status === 429) {
+        console.warn("[Game1LobbyFallback] poll throttled (429) — behold sist kjente state");
+        return;
+      }
       if (!res.ok) return;
       const body = (await res.json()) as
         | { ok: true; data: Spill1LobbyState }

@@ -146,4 +146,47 @@ describe("SpilloramaApi.request — shellAuth response-shape (pilot-bug 2026-05-
       expect(result.data).toEqual({ id: "u1" });
     }
   });
+
+  // ── 2026-05-11 Tobias-bug: 429 må ikke vise sekund-countdown ────────────
+  it("shellAuth-pathen propagerer RATE_LIMITED-kode når feil er rate-limited", async () => {
+    // auth.js bygger en Error med isRateLimited=true ved 429. SpilloramaApi
+    // skal preservere dette som RATE_LIMITED-kode istedenfor REQUEST_FAILED.
+    const rateLimitedErr = new Error(
+      "Spillet er midlertidig utilgjengelig. Vi prøver igjen automatisk.",
+    );
+    (rateLimitedErr as { isRateLimited?: boolean }).isRateLimited = true;
+    (rateLimitedErr as { retryAfterMs?: number }).retryAfterMs = 5000;
+
+    setShellAuth({
+      authenticatedFetch: vi.fn().mockRejectedValue(rateLimitedErr),
+    });
+
+    const api = new SpilloramaApi("");
+    const result = await api.getGames();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("RATE_LIMITED");
+      // Sekund-countdown må aldri lekke til UI — meldingen er statisk.
+      expect(result.error.message).not.toMatch(/\d+\s*sekunder/);
+    }
+  });
+
+  it("direct-fetch path returnerer RATE_LIMITED ved HTTP 429 (ingen shellAuth)", async () => {
+    setShellAuth(null);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 429,
+      json: vi.fn(),
+    } as unknown as Response);
+
+    const api = new SpilloramaApi("");
+    const result = await api.getProfile();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("RATE_LIMITED");
+      // Sekund-countdown må aldri lekke til UI.
+      expect(result.error.message).not.toMatch(/\d+\s*sekunder/);
+    }
+  });
 });

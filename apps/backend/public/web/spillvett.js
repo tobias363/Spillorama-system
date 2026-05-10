@@ -256,6 +256,12 @@
       body: requestOptions.body
     });
 
+    // 2026-05-11 Tobias-direktiv: 429 må aldri vise sekund-countdown til
+    // kunder. Bruk SpilloramaAuth-helperen for sanitised feil.
+    if (response.status === 429 && window.SpilloramaAuth && typeof window.SpilloramaAuth.buildRateLimitedError === "function") {
+      throw window.SpilloramaAuth.buildRateLimitedError(response);
+    }
+
     const responseType = response.headers.get("content-type") || "";
     if (responseType.includes("application/pdf")) {
       return response.blob();

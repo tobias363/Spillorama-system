@@ -74,7 +74,32 @@
 
   // ── Data loading ─────────────────────────────────────────────────────────
 
+  // 2026-05-11 Tobias-direktiv: hurtig reload kan trigge 429-rate-limit på
+  // bursten av lobby-fetches (/api/halls + /api/wallet/me + /api/games +
+  // /api/games/status + /api/wallet/me/compliance). Klient skal ALDRI vise
+  // rå "For mange forespørsler. Prøv igjen om X sekunder." til kunder.
+  // I stedet: vis pen "midlertidig utilgjengelig"-melding og auto-retry
+  // stille i bakgrunnen med eksponentiell backoff (2s, 4s, 8s, max 30s).
+  var LOBBY_BACKOFF_MS = [2000, 4000, 8000];
+  var lobbyRetryTimer = null;
+  var lobbyRetryAttempt = 0;
+
+  function isRateLimitedError(err) {
+    if (window.SpilloramaAuth && typeof window.SpilloramaAuth.isRateLimitedError === 'function') {
+      return window.SpilloramaAuth.isRateLimitedError(err);
+    }
+    return !!(err && err.isRateLimited === true);
+  }
+
+  function cancelPendingLobbyRetry() {
+    if (lobbyRetryTimer) {
+      clearTimeout(lobbyRetryTimer);
+      lobbyRetryTimer = null;
+    }
+  }
+
   async function loadLobbyData() {
+    cancelPendingLobbyRetry();
     lobbyState.loading = true;
     lobbyState.error = '';
     renderLobby();
@@ -118,8 +143,33 @@
         sessionStorage.setItem(HALL_KEY, lobbyState.activeHallId);
         await loadCompliance();
       }
+
+      // Suksess — reset backoff-teller for neste sesjon.
+      lobbyRetryAttempt = 0;
     } catch (err) {
-      lobbyState.error = err.message || 'Kunne ikke laste lobby';
+      if (isRateLimitedError(err)) {
+        // Rate-limit: vis pen melding (uten sekund-countdown) og scheduler
+        // stille auto-retry. Tobias-direktiv 2026-05-11: kunden skal aldri
+        // se rå "For mange forespørsler. Prøv igjen om X sekunder."
+        if (lobbyRetryAttempt < LOBBY_BACKOFF_MS.length) {
+          var serverHint = Math.max(1000, Math.min(err.retryAfterMs || 0, 30000));
+          var backoff = Math.max(LOBBY_BACKOFF_MS[lobbyRetryAttempt], serverHint);
+          lobbyRetryAttempt += 1;
+          lobbyState.error = 'Spillet er midlertidig utilgjengelig. Vi prøver igjen automatisk.';
+          lobbyRetryTimer = setTimeout(function () {
+            lobbyRetryTimer = null;
+            void loadLobbyData();
+          }, backoff);
+        } else {
+          // 3 forsøk uten suksess — la meldingen stå. Hot-reload eller
+          // hall-switch trigger ny load.
+          lobbyState.error = 'Spillet er midlertidig utilgjengelig. Prøv igjen om noen minutter.';
+          lobbyRetryAttempt = 0;
+        }
+      } else {
+        lobbyState.error = err.message || 'Kunne ikke laste lobby';
+        lobbyRetryAttempt = 0;
+      }
     } finally {
       lobbyState.loading = false;
       renderLobby();
