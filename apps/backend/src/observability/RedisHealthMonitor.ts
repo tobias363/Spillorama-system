@@ -444,16 +444,24 @@ export class RedisHealthMonitor {
   /**
    * Gjør én ping mot Redis med timeout. Returnerer true ved suksess,
    * false ved alle feil-typer (timeout, connection-error, exception).
+   *
+   * Cleanup-strategi: timeout-timer holdes IKKE `unref`'d. Det fører til at
+   * Node's test-runner ("Promise resolution is still pending but the event
+   * loop has already resolved") cancellerer testen når `redis.ping()` returnerer
+   * en hanger-Promise og ingen andre handles holder event-loopen aktiv. I prod
+   * holdes loopen aktiv av andre intervaller (Express server, Socket.IO, osv.)
+   * så det er trygt. Vi `clearTimeout` på begge baner (success + reject) slik
+   * at vi ikke leaker en pending timer mellom hver `tick()`.
    */
   private async doPing(nowMs: number): Promise<boolean> {
+    let timeoutHandle: NodeJS.Timeout | null = null;
     try {
       const pingPromise = this.redis.ping();
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
-        const timeout = setTimeout(
+        timeoutHandle = setTimeout(
           () => reject(new Error(`Redis ping timeout (${this.pingTimeoutMs}ms)`)),
           this.pingTimeoutMs,
         );
-        if (typeof timeout.unref === "function") timeout.unref();
       });
       const result = (await Promise.race([
         pingPromise,
@@ -471,6 +479,13 @@ export class RedisHealthMonitor {
     } catch (err) {
       this.recordPingFailure(nowMs, err);
       return false;
+    } finally {
+      // Frigjør pending timeout-timer hvis vi vant kappløpet via en annen
+      // gren (success / explicit reject) — ellers vil timeren holde event-
+      // loopen våken til den faktisk avfyrer.
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+      }
     }
   }
 
