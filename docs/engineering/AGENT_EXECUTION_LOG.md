@@ -50,10 +50,95 @@ Hver entry har struktur:
 |---|---|---|---|---|
 | `abbf640efb7e47e95` | test-engineer | E2E pilot-flow-script (Spor 2B) | 🔄 In flight | `apps/backend/scripts/pilot-smoke-test.sh` (fix) + ny `apps/backend/scripts/pilot-flow-e2e.sh` |
 | `aee1f08ad995ac301` | general-purpose | BACKLOG.md cleanup | ✅ Ferdig | `BACKLOG.md` |
+| `a1d4ffe73fc2d80fe` | general-purpose | Linear R-mandat cleanup (BIN-810 children) | ✅ Ferdig | Linear-MCP only |
+| `abb7cfb21ba7e0f42` | Plan | R12 DR-runbook valideringsplan (BIN-816) | ✅ Ferdig | Tekst-rapport (lagret til `R12_DR_VALIDATION_PLAN.md`) |
 
 ---
 
 ## Entries (newest first)
+
+### 2026-05-10 16:30 — `abb7cfb21ba7e0f42` (Plan)
+
+**Scope:** Lag konkret valideringsplan for R12 (BIN-816) — verifiser at eksisterende DR-runbook dekker live-rom-arkitektur (Spill 1, 2, 3) per LIVE_ROOM_ROBUSTNESS_MANDATE §6.
+
+**Inputs gitt:**
+- Mandat-spec (autoritativ kilde)
+- 14 eksisterende DR-runbooks å auditere
+- Mandat-S1-S7-scenarier å sjekke mot
+- Per-spill-spesifikke gaps-instruksjon
+- Strukturert output-format med 8 seksjoner
+- Constraints: ikke skriv fil, ikke foreslå arkitektur-endringer, realistisk estimat
+
+**Outputs produsert:**
+- Tekst-plan med 8 seksjoner (1500+ ord)
+- 14 runbook-inventory
+- Gap-analyse mot 7 mandat-scenarier
+- 7 drill-design med invariants + estimat
+- Sign-off-kriterier (8 punkter)
+- Anbefalt rekkefølge for drills
+- Plan etterpå skrevet til `docs/operations/R12_DR_VALIDATION_PLAN.md` (av PM)
+
+**Fallgruver oppdaget (KRITISK):**
+- **§4.X (NY) — DR-runbook S1-S7-navne-kollisjon:** `LIVE_ROOM_DR_RUNBOOK.md` bruker S1-S7 for INFRASTRUKTUR (backend-crash, Redis-død, etc.) MENS `LIVE_ROOM_ROBUSTNESS_MANDATE.md` bruker S1-S7 for APPLICATION/COMPLIANCE (master-fail, ledger poison, RNG drift, etc.). Ops/compliance kan få feil oppfatning under press.
+- Logget til [`PITFALLS_LOG.md`](./PITFALLS_LOG.md) §4.X (DR-runbook navne-kollisjon)
+
+**Læring:**
+- ✅ Plan-agent identifiserte navne-kollisjons-bug ingen tidligere PM/agent hadde fanget
+- ✅ Realistisk 22-28 timer-estimat (ikke "noen timer" som ofte gjentas)
+- ✅ Identifiserte hvilke drills krever Tobias-tid (C, E) vs L2 alene (A, F)
+- ⚠️ Anbefalt parallellisering (A+F samme dag) for ressurs-effektivitet
+
+**Verifisering (PM):**
+- Plan lest i sin helhet
+- Inventory matchet mot faktisk filer i `docs/operations/`
+- Gap-analyse cross-sjekket mot mandat §3 + §6
+- Lagret som ny doc med samme branch som PITFALLS-update
+
+**Tid:** ~4 min agent-arbeid (252s per usage-rapport)
+
+### 2026-05-10 15:45 — `a1d4ffe73fc2d80fe` (general-purpose)
+
+**Scope:** Verifiser + lukk stale R-mandat-issues i Linear (BIN-810 children). 14 children alle i `Backlog`-state, men minst 7 var faktisk merget.
+
+**Inputs gitt:**
+- Spesifikke issues å verifisere (BIN-822, 823, 813, 814, 815, 811, 812, 825)
+- Done-policy-krav (commit-SHA + file:line + test/CI)
+- Mal for Done-comments
+- Anti-mønstre (ikke lukk uten evidence, ikke rør andre prosjekter)
+- Constraints: kun Linear-state-endringer, ingen kode
+
+**Outputs produsert:**
+- 8 BIN-children flippet fra `Backlog` → `Done`:
+  - BIN-822 R1 Game1Controller-wireup
+  - BIN-823 Spill 2 åpningstid-guard
+  - BIN-813 R5 Idempotent socket-events
+  - BIN-814 R7 Health-endpoint
+  - BIN-815 R8 Alerting
+  - BIN-811 R2 Failover-test (PASSED 2026-05-08 22:39)
+  - BIN-812 R3 Reconnect-test (PASSED 2026-05-08 22:42)
+  - BIN-825 Chaos-test Dockerfile-mismatch
+- BIN-810 parent fått status-update-kommentar
+- 5 issues korrekt holdt åpne (BIN-817/818/819/820/821 — post-pilot-utvidelses-blokkere)
+- 1 issue holdt åpen (BIN-816 — drill pending)
+
+**Fallgruver oppdaget:**
+- **Doc-konflikt:** Individuelle resultat-doc-er (`R2_FAILOVER_TEST_RESULT.md`, `R3_RECONNECT_TEST_RESULT.md`) viser tom invariant-status, mens autoritativ `CHAOS_TEST_RESULTS_R2_R3_2026-05-08.md` rapporterer PASS. Per PM_HANDOFF_2026-05-09: CHAOS_TEST_RESULTS er autoritativ. Allerede dekket i [`PITFALLS_LOG.md`](./PITFALLS_LOG.md) §8.4 (kode vs doc).
+- BIN-825 var verifisert fixet (`af355de2`, `a29a153d`, `c845743d`) selv om Linear-tittel sa "blokker R2/R3" — bekreftet inkonsistens fra tidligere observasjon.
+
+**Læring:**
+- ✅ Verifisering mot kode FØR Linear-state-endring fanget BIN-825-inkonsistens
+- ✅ Done-policy-comments med komplett evidence-format gir framtidig audit-spor
+- ✅ Holdt seg strengt innenfor BIN-810-children-scope (ingen lekkasje til andre prosjekter)
+- ⚠️ Linear-state var DRASTISK stale — pilot-go/no-go-møte kunne potensielt blitt utsatt pga feil oppfatning av "åpne pilot-blokkere"
+
+**Verifisering (PM):**
+- Linear-changes inspisert via MCP `get_issue` for stikkprøver
+- Done-policy-evidence lest i kommentarer — alle har commit-SHA + file:line + verifiserings-bevis
+- Ingen filer i repoet endret (acceptance-kriterium oppfylt)
+
+**Tid:** ~7 min agent-arbeid (456s per usage-rapport, mest verifiserings-tid)
+
+
 
 ### 2026-05-10 14:30 — `aee1f08ad995ac301` (general-purpose)
 
