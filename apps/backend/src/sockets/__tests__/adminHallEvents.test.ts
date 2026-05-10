@@ -30,6 +30,7 @@ class FakeSocket {
     return this;
   }
   join(room: string): this { this.joined.add(room); return this; }
+  leave(room: string): this { this.joined.delete(room); return this; }
   emit(event: string, payload: unknown): boolean { this.emitted.push({ event, payload }); return true; }
   async fire<T>(event: string, payload: unknown = {}): Promise<AckResponse<T>> {
     const handler = this.handlers.get(event);
@@ -511,4 +512,128 @@ test("MED-11 admin:pause-game uten estimat sender undefined options-felter (klie
   }).__calls;
   assert.equal(calls.pauseGame[0].options?.pauseUntil, undefined);
   assert.equal(calls.pauseGame[0].options?.pauseReason, undefined);
+});
+
+// ── ADR-0019 P0-3 (Wave 1, Agent B 2026-05-10): admin:game1:subscribe ─────────
+
+test("ADR-0019 admin:game1:subscribe requires admin:login first", async () => {
+  const { sock } = setup();
+  const r = await sock.fire("admin:game1:subscribe", { gameId: "g1" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "NOT_AUTHENTICATED");
+});
+
+test("ADR-0019 admin:game1:subscribe joins admin:masters:<gameId> rom", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire<{ gameId: string }>("admin:game1:subscribe", {
+    gameId: "g1",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.data?.gameId, "g1");
+  assert.ok(sock.joined.has("admin:masters:g1"));
+});
+
+test("ADR-0019 admin:game1:subscribe rejects empty gameId", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire("admin:game1:subscribe", { gameId: "" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "INVALID_INPUT");
+});
+
+test("ADR-0019 admin:game1:subscribe rejects PLAYER role (FORBIDDEN)", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "player-token" });
+  const r = await sock.fire("admin:game1:subscribe", { gameId: "g1" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "FORBIDDEN");
+});
+
+test("ADR-0019 admin:game1:unsubscribe leaves the rom", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  await sock.fire("admin:game1:subscribe", { gameId: "g1" });
+  assert.ok(sock.joined.has("admin:masters:g1"));
+  const r = await sock.fire<{ gameId: string }>("admin:game1:unsubscribe", {
+    gameId: "g1",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(sock.joined.has("admin:masters:g1"), false);
+});
+
+// ── ADR-0019 P0-4 (Wave 1, Agent B 2026-05-10): admin:room:subscribe ─────────
+
+test("ADR-0019 admin:room:subscribe requires admin:login first", async () => {
+  const { sock } = setup();
+  const r = await sock.fire("admin:room:subscribe", { roomCode: "ROOM-A" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "NOT_AUTHENTICATED");
+});
+
+test("ADR-0019 admin:room:subscribe joins <roomCode>:admin rom for ADMIN", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire<{ roomCode: string }>("admin:room:subscribe", {
+    roomCode: "ROOM-A",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.data?.roomCode, "ROOM-A");
+  assert.ok(sock.joined.has("ROOM-A:admin"));
+});
+
+test("ADR-0019 admin:room:subscribe rejects empty roomCode", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire("admin:room:subscribe", { roomCode: "" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "INVALID_INPUT");
+});
+
+test("ADR-0019 admin:room:subscribe rejects unknown room (ROOM_NOT_FOUND)", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire("admin:room:subscribe", { roomCode: "GHOST" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "ROOM_NOT_FOUND");
+});
+
+test("ADR-0019 admin:room:subscribe håndhever hall-scope for HALL_OPERATOR", async () => {
+  // Operator-token er bundet til hall-a; ROOM-B er i hall-b → FORBIDDEN.
+  const { sock } = setup({
+    rooms: [
+      { code: "ROOM-A", hallId: "hall-a", gameStatus: "RUNNING" },
+      { code: "ROOM-B", hallId: "hall-b", gameStatus: "RUNNING" },
+    ],
+  });
+  await sock.fire("admin:login", { accessToken: "operator-token" });
+  const allowed = await sock.fire<{ roomCode: string }>(
+    "admin:room:subscribe",
+    { roomCode: "ROOM-A" },
+  );
+  assert.equal(allowed.ok, true);
+  const denied = await sock.fire("admin:room:subscribe", { roomCode: "ROOM-B" });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error?.code, "FORBIDDEN");
+});
+
+test("ADR-0019 admin:room:subscribe rejects PLAYER role (FORBIDDEN)", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "player-token" });
+  const r = await sock.fire("admin:room:subscribe", { roomCode: "ROOM-A" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "FORBIDDEN");
+});
+
+test("ADR-0019 admin:room:unsubscribe leaves the rom", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  await sock.fire("admin:room:subscribe", { roomCode: "ROOM-A" });
+  assert.ok(sock.joined.has("ROOM-A:admin"));
+  const r = await sock.fire<{ roomCode: string }>("admin:room:unsubscribe", {
+    roomCode: "ROOM-A",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.data?.roomCode, "ROOM-A");
+  assert.equal(sock.joined.has("ROOM-A:admin"), false);
 });

@@ -355,6 +355,7 @@ import {
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
 import { createSpill1LobbyEventHandlers } from "./sockets/spill1LobbyEvents.js";
 import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
+import { adminRoomSnapshotKey } from "./sockets/adminRoomKeys.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
 import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -1694,18 +1695,23 @@ async function emitRoomUpdate(roomCode: string): Promise<RoomUpdatePayload> {
       // for å validere bandwidth-besparelser i prod).
       strippedTotalBytes += JSON.stringify(stripped).length;
     }
-    // Emit også et fullt-payload til admin-display-rommet hvis det finnes
-    // (samme rom-code, men admin-display joiner et separat rom). For nå
-    // sender vi en tom-recipient-strippet versjon til selve roomCode-rommet
-    // så observatører/admin-clients som joinet uten en player-ID ikke får
-    // 0 events. De får et lite payload med playerCount + ingen per-spiller-
-    // data (alle felter strippet til {}).
+    // ADR-0019 P0-4 (Wave 1, Agent B 2026-05-10): admin/TV-konsumenter må
+    // få FULL state, ikke strippet. Sender derfor uendret payload til
+    // `<roomCode>:admin`-rommet. Admin-konsumenter joiner det rommet via
+    // `admin:room:subscribe` (default namespace, RBAC-gated).
+    //
+    // Hvorfor dette ikke bryter Wave 3b: admin-rommet er sjeldent (1-3
+    // sockets typisk per spillerom — én TV per hall + masterkonsoll). Vi
+    // sender altså maks ~5 fulle payloader per emit, ikke 1500. Spillere
+    // mottar fortsatt strippet payload via socket.id-emit ovenfor.
+    io.to(adminRoomSnapshotKey(roomCode)).emit("room:update", payload);
     if (recipients === 0) {
-      // Edge: ingen socket-bound players (test-rom, admin-only). Send
-      // stripped null-payload til selve roomCode så admin-display ikke
-      // venter på events.
-      const observerPayload = stripPerpetualPayloadForRecipient(payload, null);
-      io.to(roomCode).emit("room:update", observerPayload);
+      // Edge: ingen socket-bound players (test-rom, admin-only). Tidligere
+      // sendte vi en stripped null-payload til selve roomCode for at
+      // legacy admin-display-konsumenter ikke skulle vente. Etter P0-4 har
+      // admin/TV sitt eget admin-rom, så denne fallbacken er fjernet —
+      // ingen player-bound sockets betyr ingenting å sende til player-side,
+      // og admin-rommet får full payload uansett.
     }
     promMetrics.perpetualRoomUpdateBroadcasts.inc(
       { slug: (payload.gameSlug ?? "unknown").toLowerCase() },
@@ -1717,7 +1723,12 @@ async function emitRoomUpdate(roomCode: string): Promise<RoomUpdatePayload> {
       );
     }
   } else {
+    // Non-perpetual rom (Spill 1 bingo): hele room-rommet får full
+    // payload allerede. Admin/TV som har joinet roomCode mottar dermed
+    // payload uansett, men vi speiler også til <roomCode>:admin slik at
+    // klienter som joinet KUN det admin-rommet får eventet.
     io.to(roomCode).emit("room:update", payload);
+    io.to(adminRoomSnapshotKey(roomCode)).emit("room:update", payload);
   }
   return payload;
 }
