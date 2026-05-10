@@ -514,23 +514,28 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
       // Spilleren klikker "Kjøp bong" (PlayScreen.showBuyPopup).
       harness.openBuyPopupFromLobby();
 
-      // Forventet: 3 ticket-rader.
-      expect(harness.getBuyPopupTicketRowCount()).toBe(3);
+      // Forventet: 6 ticket-rader (3 farger × small+stor, Tobias 2026-05-11).
+      expect(harness.getBuyPopupTicketRowCount()).toBe(6);
 
       // Forventet: subtitle viser "Bingo" (fra plan-runtime — fase 1).
       expect(harness.getBuyPopupSubtitle()).toBe("Bingo");
 
-      // Forventet: priser matcher 5/10/15 kr (fase 2 auto-multiplier).
+      // Forventet: priser matcher 5/10/15 kr (small) + 15/30/45 kr (stor =
+      // 3× small) (fase 2 auto-multiplier + 2026-05-11 stor-varianter).
       // Vi sjekker at hver ticket-rad inneholder den forventede pris-strengen.
       const rowTexts = harness.getBuyPopupTicketPrices();
       const concat = rowTexts.join(" | ");
-      // Auto-multiplier: 5kr base × [1, 2, 3] = 5/10/15 kr.
+      // Auto-multiplier: 5kr base × [1, 2, 3] = 5/10/15 kr (small).
+      // Stor = 3× = 15/30/45 kr.
       expect(concat).toMatch(/5\s*kr/);
       expect(concat).toMatch(/10\s*kr/);
       expect(concat).toMatch(/15\s*kr/);
+      expect(concat).toMatch(/30\s*kr/);
+      expect(concat).toMatch(/45\s*kr/);
 
-      // Forventet: IKKE 8 farger (gammel hardkodet bug).
-      expect(harness.getBuyPopupTicketRowCount()).toBeLessThan(8);
+      // Forventet: ikke flere enn 6 (3 farger × 2 varianter — Tobias-direktiv).
+      // Gammel hardkodet 8-farge-bug ville gitt > 6.
+      expect(harness.getBuyPopupTicketRowCount()).toBeLessThanOrEqual(6);
     } finally {
       harness.stop();
       container.remove();
@@ -563,21 +568,24 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende acceptance", () => {
       // Spilleren åpner kjøp-popup.
       harness.openBuyPopupFromLobby();
 
-      // Forventet: 1 ticket-knapp (kun lilla-bong).
-      expect(harness.getBuyPopupTicketRowCount()).toBe(1);
+      // Forventet: 2 ticket-knapper (small + stor lilla; Tobias 2026-05-11).
+      expect(harness.getBuyPopupTicketRowCount()).toBe(2);
 
       // Forventet: subtitle viser "Trafikklys" (fra plan-runtime).
       expect(harness.getBuyPopupSubtitle()).toBe("Trafikklys");
 
-      // Forventet: pris er 15 kr (Trafikklys flat-pris).
-      const rowText = harness.getBuyPopupTicketPrices()[0] ?? "";
-      expect(rowText).toMatch(/15\s*kr/);
+      // Forventet: small lilla = 15 kr, stor lilla = 45 kr (3× small).
+      const smallRowText = harness.getBuyPopupTicketPrices()[0] ?? "";
+      const largeRowText = harness.getBuyPopupTicketPrices()[1] ?? "";
+      expect(smallRowText).toMatch(/15\s*kr/);
+      expect(largeRowText).toMatch(/45\s*kr/);
 
-      // Forventet: ingen referanse til 5 kr eller 10 kr i Trafikklys-modus.
+      // Forventet: ingen referanse til 5 kr eller 10 kr i Trafikklys-modus
+      // (kun lilla-priser 15/45 kr finnes).
       const fullCardText = (
         container.querySelector(".g1-overlay-root")?.textContent ?? ""
       ).replace(/\s+/g, " ");
-      // Vi tillater 15 men ikke 5 eller 10 alene som pris.
+      // Vi tillater 15 og 45 men ikke 5 eller 10 alene som pris.
       // (Total-summen kan vise "0 kr" når qty=0, så match på "5 kr" / "10 kr".)
       expect(fullCardText).not.toMatch(/\b5\s*kr\b/);
       expect(fullCardText).not.toMatch(/\b10\s*kr\b/);
@@ -872,21 +880,22 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     // Verifiser at converter-en (fase 2 pure-funksjon) gir riktig output
     // for alle realistiske inputs spilleren kan se.
 
-    // 1. Standard 3-farge bingo
+    // 1. Standard 3-farge bingo — 6 rader (small+stor per farge,
+    //    Tobias 2026-05-11)
     const standard = buildBuyPopupTicketConfigFromLobby(
       makeNextScheduledGameStandardBingo(),
     );
     expect(standard).not.toBeNull();
     expect(standard!.entryFee).toBe(5);
-    expect(standard!.ticketTypes).toHaveLength(3);
+    expect(standard!.ticketTypes).toHaveLength(6);
 
-    // 2. Trafikklys 1-farge
+    // 2. Trafikklys 1-farge — 2 rader (small + stor lilla)
     const trafikklys = buildBuyPopupTicketConfigFromLobby(
       makeNextScheduledGameTrafikklys(),
     );
     expect(trafikklys).not.toBeNull();
     expect(trafikklys!.entryFee).toBe(15);
-    expect(trafikklys!.ticketTypes).toHaveLength(1);
+    expect(trafikklys!.ticketTypes).toHaveLength(2);
 
     // 3. Tom/null lobby-data → null (caller faller på state.ticketTypes)
     expect(buildBuyPopupTicketConfigFromLobby(null)).toBeNull();
@@ -898,7 +907,7 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
     ).toBeNull();
 
     // 4. Inkonsistent seed: farge i ticketColors men ikke i ticketPricesCents
-    //    → den fargen droppes (ingen 0 kr-knapp).
+    //    → den fargen droppes (begge varianter: ingen 0 kr-knapp).
     const inkonsistent = buildBuyPopupTicketConfigFromLobby(
       makeNextScheduledGameStandardBingo({
         ticketColors: ["hvit", "gul", "lilla"],
@@ -906,7 +915,8 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet", () => {
       }),
     );
     expect(inkonsistent).not.toBeNull();
-    expect(inkonsistent!.ticketTypes).toHaveLength(2);
+    // 2 gyldige farger × 2 varianter = 4 rader
+    expect(inkonsistent!.ticketTypes).toHaveLength(4);
   });
 
   it("Lobby-state med ulike overallStatus-verdier driver overlay riktig per Tobias-direktiv", async () => {

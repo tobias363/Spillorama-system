@@ -184,7 +184,8 @@ describe("LobbyStateBinding: HTTP-fetch som primær state-kilde", () => {
     const config = binding.getBuyPopupTicketConfig();
     expect(config).not.toBeNull();
     expect(config!.entryFee).toBe(5); // hvit 500 øre = 5 kr
-    expect(config!.ticketTypes).toHaveLength(3);
+    // 3 farger × 2 varianter (small + stor) = 6 rader (Tobias 2026-05-11)
+    expect(config!.ticketTypes).toHaveLength(6);
 
     binding.stop();
   });
@@ -551,7 +552,8 @@ describe("LobbyStateBinding: wire-format-kontrakt fra public lobby-endpoint", ()
     const config = binding.getBuyPopupTicketConfig();
     expect(config).not.toBeNull();
     expect(config!.entryFee).toBe(15);
-    expect(config!.ticketTypes).toHaveLength(1);
+    // 1 farge × 2 varianter = 2 rader (small + stor lilla)
+    expect(config!.ticketTypes).toHaveLength(2);
 
     binding.stop();
   });
@@ -577,7 +579,8 @@ describe("LobbyStateBinding: wire-format-kontrakt fra public lobby-endpoint", ()
     await binding.start();
 
     expect(binding.getCatalogDisplayName()).toBe("Oddsen 55");
-    expect(binding.getBuyPopupTicketConfig()!.ticketTypes).toHaveLength(3);
+    // 3 farger × 2 varianter (small + stor) = 6 rader
+    expect(binding.getBuyPopupTicketConfig()!.ticketTypes).toHaveLength(6);
 
     binding.stop();
   });
