@@ -105,6 +105,14 @@ info "Bygger og starter chaos-stack (postgres + redis først)"
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build postgres redis
 
+# Pilot-fix 2026-05-10: bygg backend-images EKSPLISITT før migrate. Ved
+# første gangs-kjøring (eller rensket image-cache) feilet §1.5 med
+# "pull access denied for spillorama-system-backend-1".
+info "Bygger backend-images for migrate + chaos-stack (kan ta 3-5 min ved første kjøring)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" build backend-1 backend-2 \
+  || { fail "Backend-build feilet — sjekk Dockerfile.chaos + monorepo-paths"; exit 2; }
+pass "backend-1 + backend-2 images bygget"
+
 info "Venter på postgres + redis health (timeout 60s)"
 WAITED=0
 while [[ $WAITED -lt 60 ]]; do
