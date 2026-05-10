@@ -2,6 +2,7 @@
 
 **Linear:** [BIN-819](https://linear.app/bingosystem/issue/BIN-819)
 **Mandat:** [docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md §3.5](../architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md)
+**Operasjonell runbook:** [`R9_SPILL2_LEAK_TEST_RUNBOOK.md`](./R9_SPILL2_LEAK_TEST_RUNBOOK.md) — slik kjører du testen
 **Test-skript:** [`infra/leak-tests/r9-spill2-24h-leak-test.sh`](../../infra/leak-tests/r9-spill2-24h-leak-test.sh)
 **Heap-helper:** [`infra/leak-tests/heap-snapshot-helper.mjs`](../../infra/leak-tests/heap-snapshot-helper.mjs)
 
@@ -230,12 +231,14 @@ P0-PR med chaos-engineering-ansvar.**
 ## 8. Levert
 
 - [x] `infra/leak-tests/r9-spill2-24h-leak-test.sh` — runnable bash-script
-- [x] `infra/leak-tests/heap-snapshot-helper.mjs` — sample + analyze
+- [x] `infra/leak-tests/heap-snapshot-helper.mjs` — sample + analyze + **CSV-trend-export**
 - [x] `docs/operations/R9_SPILL2_LEAK_TEST_RESULT.md` — denne rapporten
+- [x] `docs/operations/R9_SPILL2_LEAK_TEST_RUNBOOK.md` — operasjonell runbook (Bølge 2 ADR-0020, Agent H)
 - [x] Smoke-modus dokumentert (1 t kjøring)
 - [x] Akseptansegrenser konfigurert via env (`HEAP_GROWTH_LIMIT_PCT`, `FD_GROWTH_LIMIT_PCT`)
-- [x] Helper validert lokalt (sample-modus + analyze-modus syntax/output OK)
-- [ ] Faktisk 24t-kjøring — ansvar: PM/ops før pilot-go-live-møte
+- [x] Helper validert lokalt (sample-modus + analyze-modus + csv-modus syntax/output OK)
+- [x] Trend-CSV auto-genereres ved test-end (heatmap-friendly: 12 kolonner med per-rad vekst-prosent)
+- [ ] Faktisk 24t-kjøring — ansvar: PM/ops før pilot-utvidelses-vurdering (NB: ikke pilot-go-live)
 
 ---
 
@@ -244,3 +247,4 @@ P0-PR med chaos-engineering-ansvar.**
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-08 | Initial versjon — infrastruktur + smoke-modus levert. Faktisk 24t-kjøring gjenstår. | Agent (R9 BIN-819) |
+| 2026-05-10 | Lagt til operasjonell runbook (`R9_SPILL2_LEAK_TEST_RUNBOOK.md`), CSV-trend-export i helper.mjs (heatmap-friendly), auto-CSV-generering ved test-end, smoke-test verifisert lokalt med synthetic samples (PASS + FAIL paths begge fungerer). | Agent H (Bølge 2 ADR-0020) |
