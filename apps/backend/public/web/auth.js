@@ -717,11 +717,29 @@
   // dev-user matcher allerede-innlogget bruker, skip auto-login og fjern
   // bare ?dev-user=. Hvis dev-user er en ANNEN bruker, clear session og
   // start auto-login på nytt.
+  // Pilot-fix 2026-05-10: normalize dev-user-param til full email før
+  // backend-kall. Tobias-bug: ?dev-user=demo-pilot-spiller-1 (uten
+  // @example.com) gav 403 fordi backend-allowlist krever full email.
+  // Spec mirrors devUserAutoLoginRegression.test.ts (linjer 75-91).
+  function normalizeDevUserParam(raw) {
+    if (!raw) return null;
+    var trimmed = String(raw).trim().toLowerCase();
+    if (trimmed === '') return null;
+    if (trimmed.indexOf('@') !== -1) return trimmed;
+    if (trimmed === 'tobias') return 'tobias@nordicprofil.no';
+    if (/^demo-pilot-/.test(trimmed)) return trimmed + '@example.com';
+    if (/^demo-agent-/.test(trimmed)) return trimmed + '@spillorama.no';
+    if (/^demo-/.test(trimmed)) return trimmed + '@example.com';
+    return trimmed;
+  }
+
   async function maybeDevAutoLogin() {
     var params = new URLSearchParams(window.location.search);
-    var devUser = params.get('dev-user');
+    var rawDevUser = params.get('dev-user');
+    if (!rawDevUser) return false;
+    var devUser = normalizeDevUserParam(rawDevUser);
     if (!devUser) return false;
-    var requestedEmail = devUser.trim().toLowerCase();
+    var requestedEmail = devUser; // already trimmed + lowercased
     var existingUser = storedUser();
     var existingEmail = existingUser && existingUser.email ? String(existingUser.email).toLowerCase() : null;
     if (storedToken() && existingEmail === requestedEmail) {
