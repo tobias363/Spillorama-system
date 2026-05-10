@@ -640,6 +640,44 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Oppdaget:** 2026-04 (memory: debug_preference.md)
 **Prevention:** Bruk `chrome-devtools-mcp` for console logs, screenshots, JS eval, network. Aldri computer-use for browser-tasks.
 
+### §7.5 — Frontend må normalisere query-params før backend-kall
+
+**Severity:** P0 (pilot-blokker for lokal test, fixed PR #1149)
+**Oppdaget:** 2026-05-10 (Tobias-bug)
+**Symptom:** `?dev-user=demo-pilot-spiller-1` (uten `@example.com`) → 403 fra backend
+**Root cause:** Frontend (`auth.js` + `main.ts`) sendte raw query-param uten normalisering. Backend allowlist-regex (`/^demo-pilot-\w+@example\.com$/`) krever full email — KORREKT spec.
+**Fix:** Pure-funksjon `normalizeDevUserParam()` i begge dev-user-paths som mapper kort-form → full email FØR backend-kall
+**Prevention:**
+- Backend-kontrakter (allowlist-regex, schemas) er sannhet — frontend MÅ matche
+- Kasusvis kort-form-syntax må normaliseres på frontend, ikke løsne backend
+- Lås kontrakter i tester: `devAutoLoginRoute.handler.test.ts` (16 tester) verifiserer at short-form FORBLIR avvist
+- Frontend må ha matchende regression-test (`devUserAutoLoginRegression.test.ts`)
+- Anti-mønster: "Backend rejecter min input → backend må fikses" — ofte er backend riktig
+
+### §7.6 — JackpotSetupModal eksisterte død i 3 dager før wireup
+
+**Severity:** P0 (UX-blocker for jackpot-spill)
+**Oppdaget:** 2026-05-10 (Tobias-bug fra screenshot)
+**Symptom:** Backend kastet `JACKPOT_CONFIRM_REQUIRED` / `JACKPOT_SETUP_REQUIRED` → frontend viste rå `Toast.error` istedenfor popup
+**Root cause:** `JackpotSetupModal.ts` (245 linjer fra Fase 3, 2026-05-07) var bygd men ALDRI wired inn noe sted. Komponenten kunne kun kalles fra tester.
+**Fix (PR #1150):** Wire-er begge modaler (Setup + Confirm) inn i `Spill1HallStatusBox.startGame` + `NextGamePanel.attemptSpill1Start` via `runStartWithJackpotFlow`-loop som retry'er etter modal-submit
+**Prevention:**
+- Når en komponent opprettes for et flowfix, må wireup-PR landes i SAMME bølge — ikke etterlate "klar-til-bruk" som dødkode
+- Sjekk: kan komponenten kalles fra produksjons-flyt? Hvis nei, ikke marker leveranse som ferdig
+- Backend error-codes skal ALLTID ha matchende UI-handler i frontend — `Toast.error` er IKKE handler, det er fallback
+- Tester må dekke wireup-pathen, ikke bare selve komponenten isolert
+
+### §7.7 — `Number(null) === 0`-edge-case i JSON-parsing
+
+**Severity:** P2 (subtil bug i JackpotSetupModal-data-extraction)
+**Oppdaget:** 2026-05-10 (PR #1150 test eksponerte)
+**Symptom:** `extractJackpotConfirmData` filtrerte ikke ut `null`/`undefined`/`boolean` i drawThresholds-array → `Number(null) === 0` ble inkludert som gyldig threshold
+**Fix:** Eksplisitt type-sjekk for `null`/`undefined`/`boolean` før `Number()`-konvertering
+**Prevention:**
+- `Number()` kaster ikke ved invalid input — det returnerer `0` eller `NaN`
+- Bruk `typeof v === 'number' && Number.isFinite(v)` som primær guard
+- Skriv tester som passerer `[null, undefined, false, 50, "55"]` for å fange edge-cases
+
 ---
 
 ## §8 Doc-disiplin
@@ -811,6 +849,30 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Prevention:**
 - Etter hver agent-leveranse: legg til entry i [AGENT_EXECUTION_LOG.md](./AGENT_EXECUTION_LOG.md)
 - Format: dato, agent-type, scope, fallgruver oppdaget, learnings
+
+### §11.6 — Test-engineer + implementer-pattern for fix-PR
+
+**Severity:** P1 (workflow)
+**Oppdaget:** 2026-05-10 (spillerklient normalize-fix vellykket)
+**Prevention:**
+- For bug-fix der ROOT-CAUSE ikke er åpenbar: spawn først `test-engineer`-agent
+- Test-engineer leverer:
+  - Regression-tester som låser kontrakten
+  - Spec for pure-funksjon (signature + mapping-tabell)
+  - Slut-rapport med "Anbefaling til implementer-agent"
+- Implementer-agent (eller PM) porter spec til produksjons-kode
+- Pattern brukt vellykket i PR #1149 (devUserAutoLoginRegression spec → 38 linjers fix)
+
+### §11.7 — Komponent-uten-wireup er IKKE leveranse
+
+**Severity:** P0 (illusjons-leveranse)
+**Oppdaget:** 2026-05-10 (JackpotSetupModal lå død i 3 dager)
+**Symptom:** Komponent commit'et + tester grønne, men aldri kalt fra produksjons-flyt → bug forblir
+**Fix:** Wireup-PR må landes i SAMME bølge som komponent-PR — ellers er ikke leveransen ferdig
+**Prevention:**
+- DoD for komponent: "Kan jeg trigge denne fra UI uten devtools?"
+- Hvis nei: leveranse er IKKE ferdig — wireup må inn i samme PR eller raskt-følge-PR
+- PM-checklist: "Hver ny komponent → finn `import`-statement i prod-path"
 
 ---
 

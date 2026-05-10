@@ -52,10 +52,93 @@ Hver entry har struktur:
 | `aee1f08ad995ac301` | general-purpose | BACKLOG.md cleanup | ✅ Ferdig | `BACKLOG.md` |
 | `a1d4ffe73fc2d80fe` | general-purpose | Linear R-mandat cleanup (BIN-810 children) | ✅ Ferdig | Linear-MCP only |
 | `abb7cfb21ba7e0f42` | Plan | R12 DR-runbook valideringsplan (BIN-816) | ✅ Ferdig | Tekst-rapport (lagret til `R12_DR_VALIDATION_PLAN.md`) |
+| (test-engineer for spillerklient) | test-engineer | Spillerklient dev-user 403 + LobbyState fetch-resilience tests | ✅ Ferdig (commit `dc1d1ffb`) | 3 test-filer (493 + 290 + 393 linjer) |
+| `aa8a2cf0f2c0495ab` | general-purpose | JackpotSetupModal wireup i master start-flyt | ✅ Ferdig (commit `3cea3963`) | `Spill1HallStatusBox.ts` + `NextGamePanel.ts` + ny `JackpotConfirmModal.ts` + 2 test-filer |
 
 ---
 
 ## Entries (newest first)
+
+### 2026-05-10 18:10 — `aa8a2cf0f2c0495ab` (general-purpose, JackpotSetupModal wireup)
+
+**Scope:** Wire `JackpotSetupModal.ts` (245 linjer fra Fase 3, 2026-05-07) inn i master start-flyt fra cash-inout-dashboardet (Spill1HallStatusBox) og NextGamePanel. Tobias-bug 2026-05-10: backend kastet `JACKPOT_CONFIRM_REQUIRED`/`JACKPOT_SETUP_REQUIRED` → frontend viste rå `Toast.error` istedenfor popup.
+
+**Inputs gitt:**
+- Mandat: wire eksisterende JackpotSetupModal + lag ny JackpotConfirmModal for daglig-akkumulert pott
+- Pekere til backend-error-codes (Game1MasterControlService:453, MasterActionService:856, GamePlanEngineBridge:920)
+- Mønster fra `Game1MasterConsole.openJackpotConfirmPopup` som referanse
+- F-NEW-1 (2026-05-09): backend tok allerede `jackpotConfirmed?: boolean` — bare frontend manglet
+
+**Outputs produsert:**
+- Branch `feat/jackpot-setup-modal-master-flow-2026-05-10` (commit `3cea3963`, pushed)
+- Modifisert: `apps/admin-web/src/api/agent-game1.ts` (+45 linjer), `Spill1HallStatusBox.ts` (+~190 linjer), `NextGamePanel.ts` (+~125 linjer)
+- Nye filer: `JackpotConfirmModal.ts` (198 linjer), `jackpotConfirmModal.test.ts` (221 linjer, 18 tester), `spill1HallStatusBoxJackpotFlow.test.ts` (481 linjer, 6 wireup-tester)
+- Ny logikk: `runStartWithJackpotFlow`-loop som retry'er etter modal-submit
+- Type-check admin-web + backend GREEN
+- Vitest jackpot-suite: 40 PASS (18 + 6 + 9 + 7)
+- Vitest full admin-web: 1544 PASS, 3 skipped
+- Compliance gate: 444/446 PASS
+- Live curl-verifisert: `JACKPOT_CONFIRM_REQUIRED` → `jackpotConfirmed: true` → backend bypass
+- PR #1150 (auto-merge SQUASH aktivert)
+
+**Fallgruver oppdaget:**
+- **§7.6 (NY):** JackpotSetupModal eksisterte død i 3 dager før wireup — komponenten fra Fase 3 ble aldri kalt fra produksjonsflyt
+- **§7.7 (NY):** `Number(null) === 0`-edge-case i `extractJackpotConfirmData` — drawThresholds-array filtrerte ikke ut `null`/`undefined`/`boolean` → `Number(null)` ble inkludert som gyldig threshold
+- **§11.7 (NY):** Komponent-uten-wireup er IKKE leveranse — DoD må kreve "kan trigges fra UI uten devtools"
+- Modal `onClose`-callback fyrer alltid uansett close-årsak → idempotent `settle()`-pattern med `resolved`-flag for å unngå dobbel-resolve
+
+**Læring:**
+- ✅ Mønster med "loop max 3x" fanger sekvensielle backend-feil (CONFIRM først, deretter SETUP)
+- ✅ Live curl mot backend før test-skriving avdekket kontrakt-detalj
+- ✅ Bakover-kompatibel API-endring (`startMaster()` med valgfri `jackpotConfirmed`)
+- ⚠️ PM-gate `[bypass-pm-gate]`-melding misvisende fra stale `.git/COMMIT_EDITMSG` — agent ignorerte og pushed
+- ⚠️ Anbefalt sjekk: hver ny komponent → grep etter `import.*ComponentName` i prod-path
+
+**Verifisering (PM):**
+- Branch fetched + commits inspisert
+- 40 jackpot-tester PASS i agent-rapport
+- PR #1150 auto-merge SQUASH aktivert
+- PR-beskrivelse inkluderer Tobias retest-instruksjoner
+
+**Tid:** ~17 min agent-arbeid (1003s per usage-rapport, 124 tool-uses)
+
+### 2026-05-10 17:50 — `(test-engineer for spillerklient)` (test-engineer)
+
+**Scope:** Skriv regresjonstester for to spillerklient-bugs Tobias rapporterte: (1) `?dev-user=demo-pilot-spiller-1` ga 403 og (2) lobby-fetch-resilience ved backend-feil.
+
+**Inputs gitt:**
+- Tobias screenshot + console-log som viste 403 på `/api/dev/auto-login?email=demo-pilot-spiller-1` (uten domain)
+- Backend allowlist-regex i `apps/backend/src/dev/devAutoLoginRoute.ts` (KORREKT spec — krever full email)
+- Frontend dev-user-paths (`auth.js:740` + `main.ts:84`) som sendte raw param uten normalisering
+- Mandat: lås backend-kontrakt + skriv frontend regression-tester + lever spec for `normalizeDevUserParam()`
+
+**Outputs produsert:**
+- Branch `fix/spillerklient-plan-runtime-fallback-2026-05-10` (commit `dc1d1ffb`, pushed)
+- 3 nye test-filer:
+  - `apps/backend/src/dev/devAutoLoginRoute.handler.test.ts` (393 linjer, 16 tester) — låser backend-kontrakt
+  - `packages/game-client/src/games/game1/__tests__/devUserAutoLoginRegression.test.ts` (290 linjer, 24 tester) — frontend regression
+  - `packages/game-client/src/games/game1/logic/LobbyStateBinding.fetchResilience.test.ts` (497 linjer, 16 tester) — fetch-resilience
+- Slut-rapport med `normalizeDevUserParam()`-spec klar for implementer
+- Mapping-tabell: `'demo-pilot-X'` → `@example.com`, `'demo-agent-X'` → `@spillorama.no`, `'tobias'` → `@nordicprofil.no`
+
+**Fallgruver oppdaget:**
+- **§7.5 (NY):** Frontend må normalisere query-params før backend-kall — backend-allowlist-regex er KORREKT spec, ikke bug
+- Anti-mønster: "Backend rejecter min input → backend må fikses" (ofte er backend riktig)
+
+**Læring:**
+- ✅ Test-engineer-pattern: lever regression-tester FØR implementasjon for å låse spec
+- ✅ Slut-rapport med "Anbefaling til implementer-agent" gjør PM-handoff trivielt (PM porter spec til prod-kode)
+- ✅ Pure-funksjon med eksplisitt mapping-tabell er trivielt å porte mellom JS (auth.js) og TS (main.ts)
+- ⚠️ Bug-symptomene ("STANDARD"-header, 8 farger, ingen overlay) var alle nedstrøms av 403 — én bug fix → tre bugs forsvinner
+
+**Verifisering (PM):**
+- 16 backend-tester PASS via `npx tsx --test`
+- 24 frontend regression-tester PASS via `vitest run`
+- 16 LobbyStateBinding-tester PASS
+- PM portet `normalizeDevUserParam()` til auth.js + main.ts (commit `f3967221`)
+- PR #1149 auto-merge SQUASH aktivert
+
+**Tid:** ~12 min agent-arbeid (test-skriving) + ~3 min PM implementasjon
 
 ### 2026-05-10 16:30 — `abb7cfb21ba7e0f42` (Plan)
 
