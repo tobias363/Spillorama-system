@@ -242,4 +242,20 @@ export interface GameEventsDeps {
    * in-depth.
    */
   socketIdempotencyStore?: SocketIdempotencyStore;
+
+  /**
+   * ADR-0019 / P0-1 (2026-05-10): Hent gjeldende (sist incrementede)
+   * stateVersion for et rom uten å incremente counter. Brukes av
+   * `room:state` resync-ack-en så klienten får versjonen som matcher
+   * den siste emitted state-en (ikke en framtidig uutsendt versjon).
+   *
+   * Klient anvender resync-snapshot uavhengig av stateVersion (det er
+   * en full snapshot — ikke en delta), men `lastAppliedStateVersion`
+   * settes til returnert versjon så en stale `room:update` med samme
+   * eller eldre versjon ikke overskriver state etter resync.
+   *
+   * Optional — test-harnesses uten version-store kan utelate; handler-en
+   * faller tilbake til `undefined` (klient skipper dedup).
+   */
+  getCurrentStateVersion?: (roomCode: string) => Promise<number>;
 }

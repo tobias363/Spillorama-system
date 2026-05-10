@@ -59,6 +59,11 @@ import {
 } from "./util/httpHelpers.js";
 import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util/bingoSettings.js";
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, isPerpetualGameSlug, stripPerpetualPayloadForRecipient, type RoomUpdatePayload } from "./util/roomHelpers.js";
+import {
+  RedisRoomStateVersionStore,
+  InMemoryRoomStateVersionStore,
+  type RoomStateVersionStore,
+} from "./util/RoomStateVersionStore.js";
 import { RoomStateManager } from "./util/roomState.js";
 import {
   buildRoomLifecycleStoreSync,
@@ -667,6 +672,35 @@ const localBingoAdapter = usePostgresBingoAdapter
 
 const roomStateStore: RoomStateStore = roomStateProvider === "redis" ? new RedisRoomStateStore({ url: redisUrl }) : new InMemoryRoomStateStore();
 const redisSchedulerLock = useRedisLock ? new RedisSchedulerLock({ url: redisUrl }) : null;
+
+// ADR-0019 / P0-1 (2026-05-10): monotonic stateVersion counter per rom.
+// Brukes av `emitRoomUpdate` for å stample hver `room:update`-emit slik at
+// klient (GameBridge) kan dedup'e out-of-order replays. Vi bruker en
+// dedikert Redis-instans her (samme URL som roomStateStore) i stedet for
+// å dele `socketIoPubClient` — den blir først opprettet ved socket-bootstrap
+// lenger nede, mens `emitRoomUpdate` (som trenger version-counter) er
+// referert allerede i `schedulerCallbacks`. Den dedikerte instansen er
+// trivielt billig (én extra TCP-tilkobling) og holder bootstrap-rekkefølgen
+// enkel.
+//
+// In-memory fallback brukes når `ROOM_STATE_PROVIDER !== redis` (dev/test).
+// I dev resetter counter-en ved restart — det er OK siden vi ikke har
+// horizontal scaling og klienter er sjelden koblet over restart.
+let roomStateVersionRedisClient: Redis | null = null;
+if (roomStateProvider === "redis") {
+  // Lazy-connect via ioredis så vi ikke blokkerer startup hvis Redis er
+  // midlertidig nede; INCR/GET-kallene retry-er via maxRetriesPerRequest.
+  roomStateVersionRedisClient = new Redis(redisUrl, {
+    maxRetriesPerRequest: 3,
+    lazyConnect: false,
+  });
+  roomStateVersionRedisClient.on("error", (err) =>
+    console.error("[room-state-version] redis error", err),
+  );
+}
+const roomStateVersionStore: RoomStateVersionStore = roomStateVersionRedisClient
+  ? new RedisRoomStateVersionStore({ redis: roomStateVersionRedisClient })
+  : new InMemoryRoomStateVersionStore();
 
 const responsibleGamingStore = platformConnectionString.length > 0
   ? new PostgresResponsibleGamingStore({ pool: sharedPool, schema: pgSchema, ssl: pgSsl })
@@ -1629,9 +1663,22 @@ function getHallNameSync(hallId: string): string | null {
   return hallNameCache.get(hallId) ?? null;
 }
 
-function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): RoomUpdatePayload {
+function buildRoomUpdatePayload(
+  snapshot: RoomSnapshot,
+  nowMs = Date.now(),
+  /**
+   * ADR-0019 / P0-1 (2026-05-10): monotonic stateVersion populert av
+   * caller. Undefined utelater feltet på wire-en (backwards-compat).
+   * Emit-pathen (`emitRoomUpdate`) skal alltid sende en konkret verdi
+   * via `roomStateVersionStore.next()`. Resync-pathen (room:state ack)
+   * sender via `roomStateVersionStore.current()` så klient får siste
+   * emitted versjon.
+   */
+  stateVersion?: number,
+): RoomUpdatePayload {
   return buildRoomUpdatePayloadHelper(snapshot, nowMs, {
     runtimeBingoSettings, drawScheduler, bingoMaxDrawsPerRound, schedulerTickMs,
+    stateVersion,
     getArmedPlayerIds: (code) => roomState.getArmedPlayerIds(code),
     getArmedPlayerTicketCounts: (code) => roomState.getArmedPlayerTicketCounts(code),
     getArmedPlayerSelections: (code) => roomState.getArmedPlayerSelections(code),
@@ -1666,7 +1713,15 @@ function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): Roo
 }
 
 async function emitRoomUpdate(roomCode: string): Promise<RoomUpdatePayload> {
-  const payload = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode));
+  // ADR-0019 / P0-1 (2026-05-10): increment monotonic stateVersion FØR
+  // vi bygger payload-en. Counter er per-rom og lagret i Redis (eller
+  // in-memory i dev) — overlever instance-restart og er unik på tvers av
+  // backend-nodes som broadcaster til samme rom over Redis-adapteren.
+  //
+  // Klient bruker `stateVersion` til å skippe payloads som er eldre enn
+  // sist anvendte (out-of-order replay etter reconnect).
+  const stateVersion = await roomStateVersionStore.next(roomCode);
+  const payload = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode), Date.now(), stateVersion);
 
   // §6.1 (Wave 3b, 2026-05-06): per-spiller-payload for perpetual rooms.
   //
@@ -4337,6 +4392,12 @@ const registerGameEvents = createGameEventHandlers({
 
   // BIN-813 R5: idempotency-store for socket-event-dedupe.
   socketIdempotencyStore,
+
+  // ADR-0019 / P0-1 (2026-05-10): get current stateVersion for `room:state`
+  // resync. Klienten setter `lastAppliedStateVersion` til returnert verdi
+  // så stale `room:update` (eldre versjon) ikke overskriver state etter
+  // resync.
+  getCurrentStateVersion: (roomCode) => roomStateVersionStore.current(roomCode),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.
