@@ -29,6 +29,9 @@ Alle ADR-er som er merget til `main` regnes som aktive (med mindre status sier a
 | [0012](./0012-batched-mass-payout.md) | Batched parallel mass-payout for Spill 2/3 (Wave 3a) | Accepted | 2026-05-06 |
 | [0013](./0013-per-recipient-broadcast-perpetual-rooms.md) | Per-spiller broadcast-strippet payload for perpetual rooms (Wave 3b) | Accepted | 2026-05-06 |
 | [0014](./0014-idempotent-migrations.md) | Idempotente migrasjoner — CREATE TABLE IF NOT EXISTS før ALTER (MED-2) | Accepted | 2026-05-06 |
+| [0015](./0015-spill71-regulatory-ledger.md) | §71 regulatory-ledger (separate audit-tabell) | Accepted | 2026-05-09 |
+| [0016](./0016-master-action-bridge-retry-rollback.md) | Master-action bridge-retry + rollback | Accepted | 2026-05-09 |
+| [0017](./0017-remove-daily-jackpot-accumulation.md) | Fjerne daglig jackpot-akkumulering — bingovert setter manuelt | Accepted | 2026-05-10 |
 
 ## Når lage ADR
 
