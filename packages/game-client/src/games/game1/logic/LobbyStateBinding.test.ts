@@ -247,7 +247,7 @@ describe("Game1LobbyStateBinding", () => {
 
   // ── Fase 2 (2026-05-10): bongfarger fra plan-runtime catalog ────────────
   describe("getBuyPopupTicketConfig (Fase 2 — bongfarger fra plan-runtime)", () => {
-    it("returnerer 3-farge-config for standard Bingo", async () => {
+    it("returnerer 3-farge-config for standard Bingo (6 rader = small+large per farge)", async () => {
       const initial = makeLobbyState();
       const { socket } = makeSocketStub(initial);
       const binding = new Game1LobbyStateBinding({ hallId: "hall-1", socket });
@@ -256,18 +256,24 @@ describe("Game1LobbyStateBinding", () => {
       const config = binding.getBuyPopupTicketConfig();
       expect(config).not.toBeNull();
       expect(config!.entryFee).toBe(5);
-      expect(config!.ticketTypes).toHaveLength(3);
+      // 3 farger × 2 varianter (small + large) = 6 rader (Tobias 2026-05-11)
+      expect(config!.ticketTypes).toHaveLength(6);
       // Backend-canonical names matcher `spill1VariantMapper.COLOR_SLUG_TO_NAME`
       // — kritisk for at `bet:arm`-resolution skal lykkes.
+      // Rekkefølge: [small_c1, large_c1, small_c2, large_c2, ...] så
+      // small+large av samme farge havner side-ved-side i 2-column-grid.
       expect(config!.ticketTypes.map((t) => t.name)).toEqual([
         "Small White",
+        "Large White",
         "Small Yellow",
+        "Large Yellow",
         "Small Purple",
+        "Large Purple",
       ]);
       binding.stop();
     });
 
-    it("returnerer 1-farge-config for Trafikklys", async () => {
+    it("returnerer 1-farge-config for Trafikklys (2 rader = small + stor lilla)", async () => {
       const initial = makeLobbyState({
         nextScheduledGame: makeNextScheduledGame({
           catalogSlug: "trafikklys",
@@ -284,8 +290,10 @@ describe("Game1LobbyStateBinding", () => {
       const config = binding.getBuyPopupTicketConfig();
       expect(config).not.toBeNull();
       expect(config!.entryFee).toBe(15);
-      expect(config!.ticketTypes).toHaveLength(1);
+      // 1 farge × 2 varianter = 2 rader
+      expect(config!.ticketTypes).toHaveLength(2);
       expect(config!.ticketTypes[0].name).toBe("Small Purple");
+      expect(config!.ticketTypes[1].name).toBe("Large Purple");
       binding.stop();
     });
 
@@ -308,8 +316,8 @@ describe("Game1LobbyStateBinding", () => {
       const binding = new Game1LobbyStateBinding({ hallId: "hall-1", socket });
       await binding.start();
 
-      // Verifiser initial 3-farge state
-      expect(binding.getBuyPopupTicketConfig()!.ticketTypes).toHaveLength(3);
+      // Verifiser initial 6-rad state (3 farger × 2 varianter)
+      expect(binding.getBuyPopupTicketConfig()!.ticketTypes).toHaveLength(6);
 
       // Master skifter til Trafikklys
       const trafikklys = makeLobbyState({
@@ -324,7 +332,7 @@ describe("Game1LobbyStateBinding", () => {
       emitStateUpdate({ hallId: "hall-1", state: trafikklys });
 
       const config = binding.getBuyPopupTicketConfig();
-      expect(config!.ticketTypes).toHaveLength(1);
+      expect(config!.ticketTypes).toHaveLength(2);
       expect(config!.entryFee).toBe(15);
       binding.stop();
     });
