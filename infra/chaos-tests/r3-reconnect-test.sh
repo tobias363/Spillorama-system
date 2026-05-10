@@ -133,6 +133,13 @@ info "Bygger og starter chaos-stack (postgres + redis + backend-1 — backend-2 
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" down -v >/dev/null 2>&1 || true
 docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" up -d --build postgres redis
 
+# Pilot-fix 2026-05-10: bygg backend-1 EKSPLISITT (R3 trenger ikke backend-2,
+# men image-en må bygges for migrate-trinnet).
+info "Bygger backend-1-image (kan ta 3-5 min ved første kjøring)"
+docker-compose -f "$MAIN_COMPOSE" -f "$CHAOS_COMPOSE" build backend-1 \
+  || { fail "Backend-build feilet"; exit 2; }
+pass "backend-1 image bygget"
+
 info "Venter på postgres + redis health (timeout 60s)"
 WAITED=0
 while [[ $WAITED -lt 60 ]]; do
