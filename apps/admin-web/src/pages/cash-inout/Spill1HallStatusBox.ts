@@ -38,6 +38,8 @@ import {
   setHallNoCustomersForGame,
   setHallHasCustomersForGame,
 } from "../../api/agent-game1.js";
+import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
+import type { AgentGamePlanItem } from "../../api/agent-game-plan.js";
 import type {
   Spill1AgentLobbyState,
   Spill1HallReadyStatus,
@@ -45,6 +47,11 @@ import type {
 } from "../../../../../packages/shared-types/src/spill1-lobby-state.js";
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
+import { openJackpotSetupModal } from "../agent-portal/JackpotSetupModal.js";
+import {
+  openJackpotConfirmModal,
+  extractJackpotConfirmData,
+} from "./JackpotConfirmModal.js";
 import { escapeHtml } from "./shared.js";
 
 /**
@@ -359,6 +366,17 @@ export function mountSpill1HallStatusBox(
           // en HALLS_NOT_READY hvis "kjenne ekskludering" ikke er sendt
           // — men master-routen i Bølge 2 håndterer dette via plan-flow,
           // så vi sender bare med hallId.
+          //
+          // Jackpot-modal (master-flow-2026-05-10): backend kan kaste:
+          //   - `JACKPOT_CONFIRM_REQUIRED` — daglig-akkumulert pott må
+          //     bekreftes. Vi viser JackpotConfirmModal og retry'er med
+          //     `jackpotConfirmed=true`.
+          //   - `JACKPOT_SETUP_REQUIRED` — catalog-entry har
+          //     `requiresJackpotSetup=true`, master må sette draw +
+          //     prizesCents per bongfarge. Vi viser JackpotSetupModal og
+          //     retry'er start når submit lykkes.
+          // Loop max 3 ganger for å fange tilfeller der begge feiler i
+          // sekvens (f.eks. setup-required deretter confirm-required).
           const unreadyHalls = data.halls.filter(
             (h) => !h.isReady && !h.excludedFromGame,
           );
@@ -369,14 +387,12 @@ export function mountSpill1HallStatusBox(
               `Hvis du starter nå vil de bli ekskludert fra denne runden. Vil du fortsette?`,
             );
             if (!ok) return;
-            await startMaster(ownHallId);
-            Toast.success(
-              `Spill 1 startet — ${unreadyHalls.length} hall(er) ekskludert.`,
-            );
-          } else {
-            await startMaster(ownHallId);
-            Toast.success("Spill 1 startet.");
           }
+          const startSucceeded = await runStartWithJackpotFlow(
+            ownHallId,
+            unreadyHalls.length,
+          );
+          if (!startSucceeded) return;
           break;
         }
         case "resume":
@@ -1038,5 +1054,154 @@ function statusLabel(status: string): string {
       return "Avbrutt";
     default:
       return status;
+  }
+}
+
+/**
+ * Jackpot-modal: master-flow-2026-05-10 (Tobias-direktiv).
+ *
+ * Kjører master-start med automatisk håndtering av to forskjellige
+ * jackpot-feil fra backend:
+ *
+ *   - `JACKPOT_CONFIRM_REQUIRED`: daglig-akkumulert jackpot-pott må
+ *     bekreftes av master. Vi viser confirm-popup og retry'er
+ *     `startMaster()` med `jackpotConfirmed=true`.
+ *
+ *   - `JACKPOT_SETUP_REQUIRED`: catalog-entry har `requiresJackpotSetup=true`,
+ *     master må sette draw + prizesCents per bongfarge for nåværende
+ *     plan-posisjon. Vi viser JackpotSetupModal som submitter
+ *     /jackpot-setup, og retry'er deretter start.
+ *
+ * Loop max 3 ganger så begge feilene kan håndteres i sekvens (sjelden,
+ * men teoretisk mulig at master må sette opp jackpot for spillet OG
+ * bekrefte den daglig-akkumulerte potten).
+ *
+ * Returnerer `true` hvis start lyktes, `false` hvis master avbrøt eller
+ * vi traff max-attempts. Toast-feedback (success / error) er allerede
+ * vist før retur.
+ *
+ * `unreadyHallCount` brukes kun til success-melding så master ser hvor
+ * mange haller som ble ekskludert. Validering av unready-haller er
+ * gjort av caller før denne funksjonen kalles.
+ */
+async function runStartWithJackpotFlow(
+  ownHallId: string,
+  unreadyHallCount: number,
+): Promise<boolean> {
+  let jackpotConfirmed = false;
+  let setupSubmittedThisAttempt = false;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await startMaster(ownHallId, jackpotConfirmed || undefined);
+      const successMessage =
+        unreadyHallCount > 0
+          ? `Spill 1 startet — ${unreadyHallCount} hall(er) ekskludert.`
+          : "Spill 1 startet.";
+      Toast.success(successMessage);
+      return true;
+    } catch (err) {
+      if (!(err instanceof ApiError)) {
+        const message =
+          err instanceof Error ? err.message : "Kunne ikke starte Spill 1.";
+        Toast.error(message);
+        return false;
+      }
+
+      // JACKPOT_CONFIRM_REQUIRED: daglig-akkumulert pott må bekreftes.
+      if (err.code === "JACKPOT_CONFIRM_REQUIRED" && !jackpotConfirmed) {
+        const data = extractJackpotConfirmData(err);
+        const confirmed = await openJackpotConfirmModal(data);
+        if (!confirmed) return false;
+        jackpotConfirmed = true;
+        continue;
+      }
+
+      // JACKPOT_SETUP_REQUIRED: catalog-entry krever popup med
+      // draw + prizesCents per bongfarge.
+      if (err.code === "JACKPOT_SETUP_REQUIRED" && !setupSubmittedThisAttempt) {
+        const item = await fetchCatalogItemForJackpotSetup(ownHallId, err);
+        if (!item) {
+          Toast.error(
+            "Klarte ikke å laste plan-data for jackpot-setup. Refresh og prøv igjen.",
+          );
+          return false;
+        }
+        const submitted = await openJackpotSetupModalAsPromise(item);
+        if (!submitted) return false;
+        setupSubmittedThisAttempt = true;
+        continue;
+      }
+
+      // Annen DomainError → vis melding og avbryt.
+      Toast.error(err.message);
+      return false;
+    }
+  }
+
+  Toast.error(
+    "Klarte ikke å starte Spill 1 etter 3 forsøk. Refresh og prøv igjen.",
+  );
+  return false;
+}
+
+/**
+ * Wrap `openJackpotSetupModal` (callback-basert) som en Promise<boolean>
+ * slik at `runStartWithJackpotFlow` kan bruke den i en sekvensiell loop.
+ * Resolverer `true` hvis master submitter modal-en (success-callback fyrer),
+ * `false` hvis avbryt eller backdrop-close.
+ */
+function openJackpotSetupModalAsPromise(
+  item: AgentGamePlanItem,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let resolved = false;
+    const settle = (value: boolean): void => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+    openJackpotSetupModal({
+      item,
+      onSuccess: () => settle(true),
+      onCancel: () => settle(false),
+    });
+  });
+}
+
+/**
+ * Hent katalog-item for nåværende plan-posisjon når backend kaster
+ * `JACKPOT_SETUP_REQUIRED`. Vi fetcher /api/agent/game-plan/current for
+ * å få full `currentItem.catalogEntry` (med ticketColors-listen som
+ * JackpotSetupModal trenger for å rendre input per bongfarge).
+ *
+ * Returnerer `null` hvis fetch feilet eller currentItem mangler — caller
+ * viser feilmelding i så fall.
+ */
+async function fetchCatalogItemForJackpotSetup(
+  hallId: string,
+  err: ApiError,
+): Promise<AgentGamePlanItem | null> {
+  try {
+    const planCurrent = await fetchAgentGamePlanCurrent({ hallId });
+    // Foretrekk currentItem (det er den master prøver å starte). Hvis
+    // backend signaliserer at en spesifikk posisjon er det som krever
+    // setup (via err.details.position), match den i items[].
+    const targetPosition = (() => {
+      const d = err.details;
+      if (!d) return null;
+      const p = Number(d.position);
+      return Number.isFinite(p) && Number.isInteger(p) ? p : null;
+    })();
+    if (targetPosition !== null) {
+      const match = planCurrent.items.find(
+        (i) => i.position === targetPosition,
+      );
+      if (match) return match;
+    }
+    return planCurrent.currentItem ?? planCurrent.nextItem ?? null;
+  } catch {
+    // Network/parse-feil: graceful return null så caller viser feilmelding.
+    return null;
   }
 }
