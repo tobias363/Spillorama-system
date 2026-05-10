@@ -95,7 +95,17 @@ else
   done_step "main pulled"
 fi
 
-# ── §5 Start dev-stack med fersh data ────────────────────────────────────
+# ── §5 Bygg game-client bundle (fersh kode i public/web/games/) ──────────
+# Tobias-bug 2026-05-11: spillerklient leser fra apps/backend/public/web/games/
+# som er en STATISK bundle bygd via `build:games`. Hvis vi ikke rebygger
+# før restart, ser Tobias på en gammel bundle (siste manuelle build kunne
+# være dager gammel). Dev-stack hot-reload dekker IKKE dette — game-client
+# serveres som static files, ikke fra Vite dev-server for spillerklienten.
+info "Bygger game-client bundle (npm run build:games)..."
+npm run build:games 2>&1 | tail -3
+done_step "game-client bundle bygd"
+
+# ── §6 Start dev-stack med fersh data ────────────────────────────────────
 
 info "Starter dev-stack (Docker + Postgres + Redis + migrate + seed + backend + admin-web + game-client)..."
 echo
