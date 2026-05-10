@@ -48,10 +48,6 @@ import type {
 import { Toast } from "../../components/Toast.js";
 import { ApiError } from "../../api/client.js";
 import { openJackpotSetupModal } from "../agent-portal/JackpotSetupModal.js";
-import {
-  openJackpotConfirmModal,
-  extractJackpotConfirmData,
-} from "./JackpotConfirmModal.js";
 import { escapeHtml } from "./shared.js";
 
 /**
@@ -367,16 +363,15 @@ export function mountSpill1HallStatusBox(
           // — men master-routen i Bølge 2 håndterer dette via plan-flow,
           // så vi sender bare med hallId.
           //
-          // Jackpot-modal (master-flow-2026-05-10): backend kan kaste:
-          //   - `JACKPOT_CONFIRM_REQUIRED` — daglig-akkumulert pott må
-          //     bekreftes. Vi viser JackpotConfirmModal og retry'er med
-          //     `jackpotConfirmed=true`.
-          //   - `JACKPOT_SETUP_REQUIRED` — catalog-entry har
-          //     `requiresJackpotSetup=true`, master må sette draw +
-          //     prizesCents per bongfarge. Vi viser JackpotSetupModal og
-          //     retry'er start når submit lykkes.
-          // Loop max 3 ganger for å fange tilfeller der begge feiler i
-          // sekvens (f.eks. setup-required deretter confirm-required).
+          // Jackpot-popup (ADR-0017, 2026-05-10): backend kan kaste
+          // `JACKPOT_SETUP_REQUIRED` når katalog-entry har
+          // `requiresJackpotSetup=true` (kun pos 7 i pilot-planen). Master
+          // må sette draw + prizesCents per bongfarge før start retries.
+          // Vi viser JackpotSetupModal og retry'er start når submit lykkes.
+          //
+          // Tobias-direktiv 2026-05-10: bingoverten setter ALLTID jackpot
+          // manuelt før spillet starter. Daglig-akkumulert jackpot-bekreftelse
+          // (`JACKPOT_CONFIRM_REQUIRED` fra PR #1150) er fjernet.
           const unreadyHalls = data.halls.filter(
             (h) => !h.isReady && !h.excludedFromGame,
           );
@@ -1058,23 +1053,20 @@ function statusLabel(status: string): string {
 }
 
 /**
- * Jackpot-modal: master-flow-2026-05-10 (Tobias-direktiv).
+ * Jackpot-popup-flyt (ADR-0017, 2026-05-10).
  *
- * Kjører master-start med automatisk håndtering av to forskjellige
- * jackpot-feil fra backend:
+ * Kjører master-start med automatisk håndtering av `JACKPOT_SETUP_REQUIRED`
+ * fra backend: catalog-entry har `requiresJackpotSetup=true` (gjelder kun
+ * Jackpot-katalog-spillet på pos 7 i pilot-planen), master må sette draw +
+ * prizesCents per bongfarge før start retries. Vi viser JackpotSetupModal
+ * som submitter /jackpot-setup, og retry'er deretter start.
  *
- *   - `JACKPOT_CONFIRM_REQUIRED`: daglig-akkumulert jackpot-pott må
- *     bekreftes av master. Vi viser confirm-popup og retry'er
- *     `startMaster()` med `jackpotConfirmed=true`.
+ * Tobias-direktiv 2026-05-10: bingoverten setter ALLTID jackpot manuelt
+ * før spillet starter. Daglig-akkumulert jackpot-bekreftelse (gammel
+ * `JACKPOT_CONFIRM_REQUIRED`-flyt fra PR #1150) er fjernet — det skal
+ * IKKE være automatisk akkumulering.
  *
- *   - `JACKPOT_SETUP_REQUIRED`: catalog-entry har `requiresJackpotSetup=true`,
- *     master må sette draw + prizesCents per bongfarge for nåværende
- *     plan-posisjon. Vi viser JackpotSetupModal som submitter
- *     /jackpot-setup, og retry'er deretter start.
- *
- * Loop max 3 ganger så begge feilene kan håndteres i sekvens (sjelden,
- * men teoretisk mulig at master må sette opp jackpot for spillet OG
- * bekrefte den daglig-akkumulerte potten).
+ * Loop max 2 ganger så master kan submit'e setup og deretter starte.
  *
  * Returnerer `true` hvis start lyktes, `false` hvis master avbrøt eller
  * vi traff max-attempts. Toast-feedback (success / error) er allerede
@@ -1088,12 +1080,11 @@ async function runStartWithJackpotFlow(
   ownHallId: string,
   unreadyHallCount: number,
 ): Promise<boolean> {
-  let jackpotConfirmed = false;
   let setupSubmittedThisAttempt = false;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await startMaster(ownHallId, jackpotConfirmed || undefined);
+      await startMaster(ownHallId);
       const successMessage =
         unreadyHallCount > 0
           ? `Spill 1 startet — ${unreadyHallCount} hall(er) ekskludert.`
@@ -1106,15 +1097,6 @@ async function runStartWithJackpotFlow(
           err instanceof Error ? err.message : "Kunne ikke starte Spill 1.";
         Toast.error(message);
         return false;
-      }
-
-      // JACKPOT_CONFIRM_REQUIRED: daglig-akkumulert pott må bekreftes.
-      if (err.code === "JACKPOT_CONFIRM_REQUIRED" && !jackpotConfirmed) {
-        const data = extractJackpotConfirmData(err);
-        const confirmed = await openJackpotConfirmModal(data);
-        if (!confirmed) return false;
-        jackpotConfirmed = true;
-        continue;
       }
 
       // JACKPOT_SETUP_REQUIRED: catalog-entry krever popup med
@@ -1140,7 +1122,7 @@ async function runStartWithJackpotFlow(
   }
 
   Toast.error(
-    "Klarte ikke å starte Spill 1 etter 3 forsøk. Refresh og prøv igjen.",
+    "Klarte ikke å starte Spill 1 etter 2 forsøk. Refresh og prøv igjen.",
   );
   return false;
 }

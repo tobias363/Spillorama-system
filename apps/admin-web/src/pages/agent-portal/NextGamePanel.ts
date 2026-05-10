@@ -81,10 +81,6 @@ import { escapeHtml } from "../../utils/escapeHtml.js";
 import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
 import type { AgentGamePlanItem } from "../../api/agent-game-plan.js";
 import { openJackpotSetupModal } from "./JackpotSetupModal.js";
-import {
-  openJackpotConfirmModal,
-  extractJackpotConfirmData,
-} from "../cash-inout/JackpotConfirmModal.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const DEFAULT_COUNTDOWN_SECONDS = 120;
@@ -1148,18 +1144,18 @@ async function onSpill1Start(): Promise<void> {
  * master-routen for start. Bridge-spawn + plan-state-overgang skjer i
  * `MasterActionService` (samme service som driver advance/pause/resume/stop).
  *
- * Jackpot-modal (master-flow-2026-05-10): håndterer også:
- *   - `JACKPOT_CONFIRM_REQUIRED`: daglig-akkumulert pott må bekreftes.
- *     Vi viser JackpotConfirmModal og retry'er med `jackpotConfirmed=true`.
- *   - `JACKPOT_SETUP_REQUIRED`: catalog-entry har `requiresJackpotSetup=true`,
- *     master må sette draw + prizesCents per bongfarge. Vi viser
- *     JackpotSetupModal og retry'er start når submit lykkes.
+ * Jackpot-popup (ADR-0017, 2026-05-10): håndterer `JACKPOT_SETUP_REQUIRED`.
+ * Catalog-entry har `requiresJackpotSetup=true` (kun pos 7 i pilot-planen),
+ * master må sette draw + prizesCents per bongfarge. Vi viser
+ * JackpotSetupModal og retry'er start når submit lykkes. Daglig-akkumulert
+ * jackpot-bekreftelse er fjernet — bingoverten setter ALLTID jackpot
+ * manuelt før spillet starter.
  */
-async function attemptSpill1Start(jackpotConfirmed = false): Promise<void> {
+async function attemptSpill1Start(): Promise<void> {
   const spill1 = state.spill1;
   if (!spill1) return;
   try {
-    await startMaster(spill1.hallId, jackpotConfirmed || undefined);
+    await startMaster(spill1.hallId);
     Toast.success("Spill 1 startet");
     await refreshSpill1();
   } catch (err) {
@@ -1183,26 +1179,13 @@ async function attemptSpill1Start(jackpotConfirmed = false): Promise<void> {
       // override-list-felter på den nye master-routen.
       const proceed = await promptHallInfoOverride(unreadyHalls);
       if (!proceed) return;
-      await attemptSpill1Start(jackpotConfirmed);
+      await attemptSpill1Start();
       return;
     }
 
-    // Jackpot-modal (master-flow-2026-05-10): JACKPOT_CONFIRM_REQUIRED.
-    // Daglig-akkumulert pott må bekreftes av master før start.
-    if (
-      err instanceof ApiError &&
-      err.code === "JACKPOT_CONFIRM_REQUIRED" &&
-      !jackpotConfirmed
-    ) {
-      const data = extractJackpotConfirmData(err);
-      const confirmed = await openJackpotConfirmModal(data);
-      if (!confirmed) return;
-      await attemptSpill1Start(true);
-      return;
-    }
-
-    // Jackpot-modal: JACKPOT_SETUP_REQUIRED. Catalog krever per-posisjon
-    // popup med draw + prizesCents per bongfarge.
+    // ADR-0017: JACKPOT_SETUP_REQUIRED — catalog krever per-posisjon
+    // popup med draw + prizesCents per bongfarge (kun pos 7 = Jackpot-
+    // katalog-spillet i pilot-planen). Master submitter manuelt.
     if (err instanceof ApiError && err.code === "JACKPOT_SETUP_REQUIRED") {
       const item = await fetchCatalogItemForSpill1JackpotSetup(
         spill1.hallId,
@@ -1216,7 +1199,7 @@ async function attemptSpill1Start(jackpotConfirmed = false): Promise<void> {
       }
       const submitted = await openJackpotSetupModalAsPromise(item);
       if (!submitted) return;
-      await attemptSpill1Start(jackpotConfirmed);
+      await attemptSpill1Start();
       return;
     }
 
