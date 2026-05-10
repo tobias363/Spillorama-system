@@ -589,12 +589,20 @@ export class PlayScreen extends Container {
     if (!ref) return;
     let fee = ref.entryFee || 10;
     let types = ref.ticketTypes ?? [];
-    // Fase 2 fallback: når room:update ikke har levert ticketTypes ennå,
-    // bruker vi plan-runtime catalog-data fra lobby-aggregatoren. Live
-    // game (state.ticketTypes ikke-tom) prioriteres alltid — den har
-    // small + large-bonger fra `gameVariant.ticketTypes` mens lobby-
-    // dataen er small-only (3-farge-modellen).
-    if (types.length === 0 && this.lobbyTicketConfig) {
+    // Tobias-bug 2026-05-11: plan-runtime catalog-data (3 farger fra
+    // spilleplanen) skal være AUTORITATIV for ticket-design — IKKE
+    // state.ticketTypes (room:update payload) som ofte inneholder backend-
+    // sin 8-farge DEFAULT_TICKET_COLORS-fallback selv for hovedspill 1.
+    //
+    // Tidligere kommentar antok "live game prioriteres alltid (small+large
+    // fra gameVariant)" — men dette er feil for hovedspill 1 hvor
+    // spilleplanen definerer 3 farger (hvit/gul/lilla). Plan-runtime
+    // catalog reflekterer akkurat hva spilleplanen sier denne posisjonen
+    // skal ha, så den vinner.
+    //
+    // Fallback til state.ticketTypes kun hvis lobbyTicketConfig mangler
+    // (lobby-state ikke lastet ennå, eller bug i plan-runtime).
+    if (this.lobbyTicketConfig) {
       types = this.lobbyTicketConfig.ticketTypes;
       fee = this.lobbyTicketConfig.entryFee;
     }
