@@ -173,21 +173,6 @@ export interface MasterActionResult {
 export interface MasterActionInput {
   actor: MasterActor;
   hallId: string;
-  /**
-   * F-NEW-1 (E2E pilot-blokker, 2026-05-09): jackpot-confirm-flagget for
-   * `start`-action. Når true propageres den til
-   * Game1MasterControlService.startGame som hopper JACKPOT_CONFIRM_REQUIRED-
-   * preflight. Andre actions (advance/pause/resume/stop/setJackpot) ignorerer
-   * feltet — det er kun relevant ved første start av en runde der jackpot er
-   * aktivt for hall-gruppen.
-   *
-   * Hvorfor på common-input istedenfor egen StartInput? Fordi alle write-
-   * actions deler samme route-schema og resolveHallScope-helper; et eget
-   * input-shape ville krevd 6+ varianter med duplicate validation. Default
-   * undefined → service throws JACKPOT_CONFIRM_REQUIRED når jackpot er
-   * aktivt og master ikke har bekreftet popup (samme oppførsel som før fix-en).
-   */
-  jackpotConfirmed?: boolean;
 }
 
 /** Pause/Stop input — har optional reason for audit-trail. */
@@ -327,7 +312,7 @@ function extractWarningCodes(
 /**
  * Wrap engine-feil i `ENGINE_FAILED` med original-error i details for
  * sporbarhet. DomainError propageres uendret — hvis engine kaster en
- * spesifikk DomainError (HALLS_NOT_READY, JACKPOT_CONFIRM_REQUIRED, etc.)
+ * spesifikk DomainError (HALLS_NOT_READY, JACKPOT_SETUP_REQUIRED, etc.)
  * skal klient se den koden direkte.
  */
 function wrapEngineError(err: unknown, context: string): never {
@@ -640,12 +625,9 @@ export class MasterActionService {
         // ready-status. Vi sender ikke confirmUnready/confirmExcludeRed
         // — masterControlService auto-ekskluderer non-green halls.
         //
-        // F-NEW-1 (2026-05-09): propager jackpotConfirmed når master har
-        // bekreftet jackpot-popup. Uten dette kaster
-        // Game1MasterControlService.startGame JACKPOT_CONFIRM_REQUIRED selv
-        // når master allerede har klikket "Bekreft" i UI — endeløs loop på
-        // klient-siden.
-        ...(input.jackpotConfirmed === true ? { jackpotConfirmed: true } : {}),
+        // ADR-0017 (2026-05-10): jackpotConfirmed-feltet er fjernet.
+        // Daglig jackpot-akkumulering er erstattet av per-spill setup via
+        // JackpotSetupModal (lagres i app_game_plan_run.jackpot_overrides_json).
       });
     } catch (err) {
       logger.warn(

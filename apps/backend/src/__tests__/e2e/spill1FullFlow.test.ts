@@ -140,21 +140,22 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
     });
   });
 
-  describe("F10-FIX: /api/agent/game1/start jackpotConfirmed wire-up", () => {
+  describe("ADR-0017: /api/agent/game1/start må IKKE wire jackpotConfirmed", () => {
     /**
-     * OPPDATERT 2026-05-09: PR #1101 (commit 40c465b3) lukket F10-funnet ved
-     * å wire `jackpotConfirmed` (boolean | "true") inn i agent-route-handler-en.
-     * Speiler legacy admin-route adminGame1Master.ts:319.
+     * ADR-0017 (2026-05-10) overstyrer F10-FIX (PR #1101) og F-NEW-1 (PR #1118):
      *
-     * Lockdown-testen er flippet: vi verifiserer NÅ at agentGame1.ts
-     * INNEHOLDER `jackpotConfirmed` i `/api/agent/game1/start`-handler-en, og
-     * at parsing er tolerant (boolean ELLER literal "true").
+     * Tobias-direktiv 2026-05-10: "Jackpot-popup gjelder kun for Jackpot-katalog-
+     * spillet (pos 7), og bingoverten setter ALLTID jackpot manuelt før spillet
+     * starter. Det skal IKKE være automatisk akkumulering."
      *
-     * NB: Denne PR-en (F-NEW-1) lukker SPEIL-buggen på Bølge 2-route
-     * (`/api/agent/game1/master/start` via MasterActionService). Legacy
-     * agent-route (denne) ble fixet i PR #1101 separat.
+     * Den tidligere wire-up av `body.jackpotConfirmed` til service-laget er
+     * fjernet. Lockdown-testen er flippet på nytt: vi verifiserer NÅ at
+     * agentGame1.ts IKKE INNEHOLDER `jackpotConfirmed`-håndtering i
+     * `/api/agent/game1/start`-handler-en. Daglig jackpot-akkumulering er
+     * erstattet av per-spill setup via `JackpotSetupModal` og lagres i
+     * `app_game_plan_run.jackpot_overrides_json`.
      */
-    it("F10-FIX: agentGame1.ts wirer jackpotConfirmed i /api/agent/game1/start", async () => {
+    it("ADR-0017: agentGame1.ts wirer IKKE jackpotConfirmed i /api/agent/game1/start", async () => {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       const here = path.dirname(new URL(import.meta.url).pathname);
@@ -181,24 +182,17 @@ describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () =>
         handlerStartIdx,
         nextHandlerIdx > 0 ? nextHandlerIdx : undefined
       );
-      const referencesJackpotConfirmed = handlerBody.includes(
-        "jackpotConfirmed"
+      // Per ADR-0017 skal jackpotConfirmed-feltet ikke parses, propageres
+      // eller settes på startInput. Komment-referanse til ADR-0017 er OK,
+      // men ingen aktiv kode-bruk skal forekomme.
+      const setsJackpotConfirmed = handlerBody.match(
+        /startInput\.jackpotConfirmed|jackpotConfirmed\s*=\s*body\./
       );
       assert.equal(
-        referencesJackpotConfirmed,
-        true,
-        "F10-fix verifisering: agentGame1.ts MÅ inneholde jackpotConfirmed " +
-          "i /api/agent/game1/start-handler-en (PR #1101 / commit 40c465b3)."
-      );
-      // Verifiser at vi gjør tolerant boolean | "true"-parsing (speiler
-      // legacy admin-route og forhindrer 'Unrecognized key' fra Zod).
-      const tolerantParse =
-        handlerBody.includes('jackpotConfirmed === true') &&
-        handlerBody.includes('jackpotConfirmed === "true"');
-      assert.equal(
-        tolerantParse,
-        true,
-        "F10-fix verifisering: parsing må akseptere boolean ELLER literal \"true\""
+        setsJackpotConfirmed,
+        null,
+        "ADR-0017: agentGame1.ts skal IKKE parse eller propagere jackpotConfirmed " +
+          "i /api/agent/game1/start-handler-en — feltet er fjernet."
       );
     });
   });

@@ -82,21 +82,6 @@ export interface AgentGame1MasterRouterDeps {
 const StartBodySchema = z
   .object({
     hallId: z.string().min(1).optional(),
-    /**
-     * F-NEW-1 (E2E pilot-blokker, 2026-05-09): jackpotConfirmed-wireup på
-     * Bølge 2 master-route. Speiler legacy /api/agent/game1/start (PR #1101)
-     * og /api/admin/game1/games/:id/start. Når master har klikket "Bekreft"
-     * på jackpot-popup, sender klient `jackpotConfirmed=true`. Service-laget
-     * propagerer flagget til Game1MasterControlService.startGame som hopper
-     * JACKPOT_CONFIRM_REQUIRED-preflight.
-     *
-     * Tolerér både boolean og literal-string "true" for klienter som ikke
-     * serialiserer boolean korrekt (matcher PR #1101 sin tolerant-parsing
-     * i agentGame1.ts).
-     */
-    jackpotConfirmed: z
-      .union([z.boolean(), z.literal("true")])
-      .optional(),
   })
   .strict();
 
@@ -256,15 +241,13 @@ export function createAgentGame1MasterRouter(
       }
       const hallId = resolveHallScope(user, parsed.data.hallId);
       const actor = toMasterActor(user);
-      // F-NEW-1: normaliser boolean | "true" → boolean for service-layer.
-      const jackpotConfirmed =
-        parsed.data.jackpotConfirmed === true ||
-        parsed.data.jackpotConfirmed === "true";
 
+      // ADR-0017 (2026-05-10): jackpotConfirmed-feltet er fjernet.
+      // Daglig jackpot-akkumulering er erstattet av per-spill setup via
+      // JackpotSetupModal (lagres i app_game_plan_run.jackpot_overrides_json).
       const result = await masterActionService.start({
         actor,
         hallId,
-        ...(jackpotConfirmed ? { jackpotConfirmed: true } : {}),
       });
       apiSuccess(res, result);
     } catch (err) {

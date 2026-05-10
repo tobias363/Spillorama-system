@@ -1091,65 +1091,28 @@ test("preValidate: aggregator infra-error propageres uendret", async () => {
   );
 });
 
-// ── F-NEW-1 regression tests (E2E pilot-blokker, 2026-05-09) ────────────
+// ── ADR-0017 regression tests (2026-05-10) ──────────────────────────────
 //
-// E2E test-engineer-agenten i `docs/engineering/SPILL1_E2E_TEST_RUN_2026-05-09.md`
-// avdekket at master-bingovert ikke kunne fullføre jackpot-popup-flyten via
-// den NYE Bølge 2-routen `/api/agent/game1/master/start`. Service-laget
-// (MasterActionService.start) aksepterte ikke `jackpotConfirmed` i input,
-// og endepunktets Zod-schema avviste body-feltet med "Unrecognized key:
-// jackpotConfirmed". Resultatet var en endeløs JACKPOT_CONFIRM_REQUIRED-
-// loop på klient-siden — master-agent kunne ikke starte JACKPOT-spill via
-// agent-konsollet, kun via admin-konsollet.
+// Tobias-direktiv 2026-05-10: "Jackpot-popup gjelder kun for Jackpot-katalog-
+// spillet (pos 7), og bingoverten setter ALLTID jackpot manuelt før spillet
+// starter. Det skal IKKE være automatisk akkumulering."
 //
-// Disse testene encoder kontrakten:
-//   1. `MasterActionInput` MÅ akseptere `jackpotConfirmed?: boolean`.
-//   2. Når `jackpotConfirmed=true` propageres flagget videre til
-//      `Game1MasterControlService.startGame({ jackpotConfirmed: true })`.
-//   3. Når `jackpotConfirmed` utelates eller er false, settes flagget IKKE
-//      i startGame-input (forblir undefined). Dette gjør at jackpot-
-//      preflight i Game1MasterControlService.startGame fortsatt kan kaste
-//      JACKPOT_CONFIRM_REQUIRED for den første start-attempten.
+// Den tidligere F-NEW-1-flyten propagerte `jackpotConfirmed`-flagget gjennom
+// MasterActionInput → Game1MasterControlService for å hoppe over en pre-start
+// JACKPOT_CONFIRM_REQUIRED-blokkering. Per ADR-0017 er hele jackpot-confirm-
+// preflight-blokken fjernet — ingen pre-start-popup, ingen jackpot-state-
+// service, ingen jackpotConfirmed-flagg.
+//
+// Disse testene fanger regressjoner hvis noen prøver å re-introducere flagget.
 
-test("F-NEW-1: start propagerer jackpotConfirmed=true til masterControlService.startGame", async () => {
-  const { service, mocks } = makeService();
-  await service.start({
-    actor: MASTER_ACTOR,
-    hallId: HALL_ID,
-    jackpotConfirmed: true,
-  });
-  assert.equal(mocks.startGameInputs.length, 1);
-  const startInput = mocks.startGameInputs[0]!;
-  assert.equal(
-    startInput.jackpotConfirmed,
-    true,
-    "jackpotConfirmed=true må propageres til Game1MasterControlService.startGame",
-  );
-});
-
-test("F-NEW-1: start uten jackpotConfirmed sender IKKE flagget til engine (legacy default)", async () => {
+test("ADR-0017: start passes through til masterControlService.startGame uten jackpotConfirmed", async () => {
   const { service, mocks } = makeService();
   await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
   assert.equal(mocks.startGameInputs.length, 1);
   const startInput = mocks.startGameInputs[0]!;
   assert.ok(
     !("jackpotConfirmed" in startInput),
-    "jackpotConfirmed skal ikke settes i input når master ikke har bekreftet — engine kan da kaste JACKPOT_CONFIRM_REQUIRED",
-  );
-});
-
-test("F-NEW-1: start med jackpotConfirmed=false sender IKKE flagget til engine", async () => {
-  const { service, mocks } = makeService();
-  await service.start({
-    actor: MASTER_ACTOR,
-    hallId: HALL_ID,
-    jackpotConfirmed: false,
-  });
-  assert.equal(mocks.startGameInputs.length, 1);
-  const startInput = mocks.startGameInputs[0]!;
-  assert.ok(
-    !("jackpotConfirmed" in startInput),
-    "jackpotConfirmed=false (eller undefined) skal IKKE settes — kun true propageres",
+    "jackpotConfirmed skal aldri settes i startGame-input per ADR-0017 — feltet er fjernet fra StartGameInput",
   );
 });
 

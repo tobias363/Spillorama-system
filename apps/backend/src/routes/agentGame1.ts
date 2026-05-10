@@ -602,14 +602,12 @@ export function createAgentGame1Router(
             (v: unknown): v is string => typeof v === "string"
           )
         : undefined;
-      // F10 (E2E pilot-blokker, 2026-05-09): jackpotConfirmed-wireup. Speiler
-      // adminGame1Master.ts:319-320 så master-bingovert kan godkjenne jackpot-
-      // popup-flyten via agent-konsollet på lik linje med admin-konsollet.
-      // Når service-laget kaster JACKPOT_CONFIRM_REQUIRED, viser klienten
-      // popup og re-kaller endepunktet med jackpotConfirmed=true.
-      const jackpotConfirmed =
-        body.jackpotConfirmed === true || body.jackpotConfirmed === "true";
 
+      // ADR-0017 (2026-05-10): jackpotConfirmed-feltet er fjernet.
+      // Daglig jackpot-akkumulering er erstattet av per-spill setup via
+      // JackpotSetupModal — bingovert setter draw + prizesCents manuelt
+      // FØR Jackpot-spill (pos 7) starter, og verdiene lagres i
+      // app_game_plan_run.jackpot_overrides_json.
       const startInput: Parameters<Game1MasterControlService["startGame"]>[0] =
         {
           gameId: active.id,
@@ -620,9 +618,6 @@ export function createAgentGame1Router(
       }
       if (confirmUnreadyHalls !== undefined) {
         startInput.confirmUnreadyHalls = confirmUnreadyHalls;
-      }
-      if (jackpotConfirmed) {
-        startInput.jackpotConfirmed = true;
       }
       const result = await masterControlService.startGame(startInput);
 

@@ -1,14 +1,14 @@
 /**
- * MASTER_PLAN §2.3 — tester for Game1JackpotStateService.
+ * Tester for Game1JackpotStateService — beholdt for admin-tooling +
+ * immutable audit-historikk (ADR-0017, 2026-05-10).
  *
  * Dekker:
  *   - getStateForGroup: parser row korrekt (cents, thresholds, date)
  *   - getStateForGroup: manglende rad → defaults (start=2000, cap=30k, thresholds 50/55/56/57)
- *   - accumulateDaily: call-shape matcher WHERE last_accumulation_date < today
- *   - accumulateDaily: separerer updated vs capped vs alreadyCurrent
- *   - accumulateDaily: idempotent (2. kall samme dag gir 0 updates)
- *   - accumulateDaily: 30k-cap håndheves via LEAST (testes via mock-respons)
+ *   - accumulateDaily: ADR-0017 deprecated — no-op uten DB-skriv
  *   - resetToStart: setter current_amount_cents tilbake til seed
+ *   - awardJackpot: brukes fortsatt av admin-manual-award flow
+ *   - listAwards: immutable audit-historikk
  */
 
 import assert from "node:assert/strict";
@@ -123,100 +123,25 @@ test("getCurrentAmount: returnerer amount fra state", async () => {
   assert.equal(amount, 1_200_000);
 });
 
-// ─── accumulateDaily ──────────────────────────────────────────────────────
+// ─── accumulateDaily — ADR-0017 (deprecated til no-op) ────────────────────
 
-test("accumulateDaily: én gruppe fikk påfyll (under cap)", async () => {
+test("accumulateDaily: ADR-0017 deprecated — no-op uten DB-skriv", async () => {
+  // Tobias-direktiv 2026-05-10: "Det skal IKKE være automatisk akkumulering."
+  //
+  // Tidligere kjørte denne metoden en SQL UPDATE med LEAST(...)-cap; etter
+  // ADR-0017 returnerer den umiddelbart med 0-tellere. Cron-jobben
+  // (jackpotDailyTick) er deaktivert i index.ts samtidig.
   const { pool, calls } = makePoolMock({
-    responses: [
-      // UPDATE ... RETURNING
-      {
-        rows: [
-          {
-            hall_group_id: "g1",
-            current_amount_cents: "600000", // 200k + 400k
-            prev_amount_cents: "200000",
-            max_cap_cents: "3000000",
-          },
-        ],
-        rowCount: 1,
-      } as unknown as QueryResult<Record<string, unknown>>,
-      // SELECT COUNT
-      { rows: [{ cnt: "1" }], rowCount: 1 } as unknown as QueryResult<Record<string, unknown>>,
-    ],
+    responses: [], // ingen queries forventet
   });
   const svc = new Game1JackpotStateService({ pool, todayKey: () => "2026-04-24" });
   const result = await svc.accumulateDaily();
-  assert.equal(result.updatedCount, 1);
-  assert.equal(result.cappedCount, 0);
-  assert.equal(result.alreadyCurrentCount, 0);
-  assert.equal(result.errors, 0);
-  assert.ok(calls[0], "første query skal være UPDATE");
-  assert.match(calls[0]!.text, /UPDATE/i);
-  assert.match(calls[0]!.text, /LEAST/, "bruker LEAST for 30k-cap");
-  assert.match(calls[0]!.text, /last_accumulation_date < \$1::date/, "idempotent WHERE-guard");
-  assert.deepEqual(calls[0]!.params, ["2026-04-24"]);
-});
 
-test("accumulateDaily: gruppe som var på cap (prev >= cap) → capped, ikke updated", async () => {
-  const { pool } = makePoolMock({
-    responses: [
-      {
-        rows: [
-          {
-            hall_group_id: "g-full",
-            current_amount_cents: "3000000",
-            prev_amount_cents: "3000000", // var allerede på cap
-            max_cap_cents: "3000000",
-          },
-        ],
-        rowCount: 1,
-      } as unknown as QueryResult<Record<string, unknown>>,
-      { rows: [{ cnt: "1" }], rowCount: 1 } as unknown as QueryResult<Record<string, unknown>>,
-    ],
-  });
-  const svc = new Game1JackpotStateService({ pool, todayKey: () => "2026-04-24" });
-  const result = await svc.accumulateDaily();
-  assert.equal(result.updatedCount, 0);
-  assert.equal(result.cappedCount, 1, "cap-treffere skal telles som capped");
-});
-
-test("accumulateDaily: idempotent (ingen rader returnert andre gang samme dag)", async () => {
-  const { pool } = makePoolMock({
-    responses: [
-      { rows: [], rowCount: 0 } as unknown as QueryResult<Record<string, unknown>>, // UPDATE
-      { rows: [{ cnt: "5" }], rowCount: 1 } as unknown as QueryResult<Record<string, unknown>>, // SELECT
-    ],
-  });
-  const svc = new Game1JackpotStateService({ pool, todayKey: () => "2026-04-24" });
-  const result = await svc.accumulateDaily();
-  assert.equal(result.updatedCount, 0);
-  assert.equal(result.cappedCount, 0);
-  assert.equal(result.alreadyCurrentCount, 5, "alle 5 grupper var allerede oppdatert");
-});
-
-test("accumulateDaily: 30k-cap — LEAST-klausul i SQL returnerer new = cap når prev+increment > cap", async () => {
-  // Simulerer: prev=2_800_000, increment=400_000 → LEAST(3_200_000, 3_000_000) = 3_000_000.
-  const { pool } = makePoolMock({
-    responses: [
-      {
-        rows: [
-          {
-            hall_group_id: "g-near-cap",
-            current_amount_cents: "3000000", // toppet ut på cap
-            prev_amount_cents: "2800000",
-            max_cap_cents: "3000000",
-          },
-        ],
-        rowCount: 1,
-      } as unknown as QueryResult<Record<string, unknown>>,
-      { rows: [{ cnt: "1" }], rowCount: 1 } as unknown as QueryResult<Record<string, unknown>>,
-    ],
-  });
-  const svc = new Game1JackpotStateService({ pool, todayKey: () => "2026-04-24" });
-  const result = await svc.accumulateDaily();
-  // prev < cap → updated. curr == cap → logs "reached_cap" men stadig updated.
-  assert.equal(result.updatedCount, 1);
-  assert.equal(result.cappedCount, 0);
+  assert.equal(result.updatedCount, 0, "no-op: ingen påfyll");
+  assert.equal(result.cappedCount, 0, "no-op: ingen capped");
+  assert.equal(result.alreadyCurrentCount, 0, "no-op: ingen skip");
+  assert.equal(result.errors, 0, "no-op: ingen feil");
+  assert.equal(calls.length, 0, "ADR-0017: accumulateDaily skal ikke skrive til DB");
 });
 
 // ─── resetToStart ─────────────────────────────────────────────────────────

@@ -622,15 +622,20 @@ test("POST /start — master-agent kan videreformidle confirmExcludedHalls", asy
   }
 });
 
-// F10 (E2E pilot-blokker, 2026-05-09): jackpotConfirmed-wireup ─────────
+// ADR-0017 (2026-05-10): jackpotConfirmed-feltet er fjernet ─────────────
 //
-// Master-bingovert må kunne fullføre jackpot-popup-flyten via agent-
-// konsollet på samme måte som admin-konsollet (`adminGame1Master.ts:319`).
-// Tidligere ignorerte agent-routen `body.jackpotConfirmed`, så servicen
-// fikk aldri se flagget og returnerte JACKPOT_CONFIRM_REQUIRED i evig
-// loop.
+// Tobias-direktiv 2026-05-10: "Jackpot-popup gjelder kun for Jackpot-katalog-
+// spillet (pos 7), og bingoverten setter ALLTID jackpot manuelt før spillet
+// starter. Det skal IKKE være automatisk akkumulering."
+//
+// Den tidligere F10-flyten propagerte body.jackpotConfirmed til service-laget
+// og brukte det til å hoppe over en pre-start JACKPOT_CONFIRM_REQUIRED-blokk.
+// Per ADR-0017 er hele preflight-blokken fjernet — jackpot konfigureres
+// per spill via JackpotSetupModal og lagres i app_game_plan_run.jackpot_overrides_json.
 
-test("POST /start — F10: jackpotConfirmed=true propageres til service", async () => {
+test("POST /start — ADR-0017: body.jackpotConfirmed påvirker IKKE service-input", async () => {
+  // Selv hvis klienten sender jackpotConfirmed=true (legacy-klienter), skal
+  // backend ignorere feltet og ikke videreføre det til startGame-input.
   const ctx = await startServer({ users: { "t-m": masterAgent } });
   try {
     const res = await post(ctx, "/api/agent/game1/start", "t-m", {
@@ -638,107 +643,11 @@ test("POST /start — F10: jackpotConfirmed=true propageres til service", async 
     });
     assert.equal(res.status, 200);
     assert.equal(ctx.serviceCalls.startGame.length, 1);
-    assert.equal(
-      ctx.serviceCalls.startGame[0]!.jackpotConfirmed,
-      true,
-      "Service skal motta jackpotConfirmed=true når master har godkjent popup"
+    const startInput = ctx.serviceCalls.startGame[0]! as unknown as Record<string, unknown>;
+    assert.ok(
+      !("jackpotConfirmed" in startInput),
+      "ADR-0017: jackpotConfirmed skal aldri settes i startGame-input — feltet er fjernet fra StartGameInput",
     );
-  } finally {
-    await ctx.close();
-  }
-});
-
-test("POST /start — F10: jackpotConfirmed=\"true\" (string) aksepteres", async () => {
-  // Speiler adminGame1Master.ts:319-320 som også aksepterer string-formen
-  // for fleksibilitet mot JSON-klienter som serialiserer boolean som string.
-  const ctx = await startServer({ users: { "t-m": masterAgent } });
-  try {
-    const res = await post(ctx, "/api/agent/game1/start", "t-m", {
-      jackpotConfirmed: "true",
-    });
-    assert.equal(res.status, 200);
-    assert.equal(
-      ctx.serviceCalls.startGame[0]!.jackpotConfirmed,
-      true,
-      "String 'true' skal koerse til boolean true (parity med admin-routen)"
-    );
-  } finally {
-    await ctx.close();
-  }
-});
-
-test("POST /start — F10: jackpotConfirmed utelatt → service ser undefined (kaster JACKPOT_CONFIRM_REQUIRED)", async () => {
-  // Når master ikke har godkjent jackpot-popup-en ennå skal flagget IKKE
-  // settes i startInput. Service-laget kaster JACKPOT_CONFIRM_REQUIRED
-  // og UI rendrer popup. Tester regress fra Tolkning A der `false` ble
-  // explisitt satt og servicen fortolket det som "godkjent" (subtil bug).
-  let observedFlag: unknown = "NOT-CHECKED";
-  const ctx = await startServer({
-    users: { "t-m": masterAgent },
-    startImpl: async (input) => {
-      observedFlag = input.jackpotConfirmed;
-      throw new DomainError(
-        "JACKPOT_CONFIRM_REQUIRED",
-        "Master må godkjenne jackpot-popup."
-      );
-    },
-  });
-  try {
-    const res = await post(ctx, "/api/agent/game1/start", "t-m", {});
-    assert.equal(res.status, 400);
-    const payload = (await res.json()) as { error: { code: string } };
-    assert.equal(payload.error.code, "JACKPOT_CONFIRM_REQUIRED");
-    assert.equal(
-      observedFlag,
-      undefined,
-      "Når flagget utelates skal det ikke settes i startInput (forblir undefined)"
-    );
-  } finally {
-    await ctx.close();
-  }
-});
-
-test("POST /start — F10: re-submit med jackpotConfirmed=true etter JACKPOT_CONFIRM_REQUIRED gir suksess", async () => {
-  // End-to-end: popup-flyten (kast → re-submit) gir suksess. Kjerne-bevis
-  // for at fixet faktisk avlaster pilot-blokkeren.
-  let callCount = 0;
-  const ctx = await startServer({
-    users: { "t-m": masterAgent },
-    startImpl: async (input) => {
-      callCount += 1;
-      if (callCount === 1) {
-        if (input.jackpotConfirmed) {
-          throw new Error("Test-feil: første kall skal ikke ha jackpotConfirmed");
-        }
-        throw new DomainError("JACKPOT_CONFIRM_REQUIRED", "popup");
-      }
-      if (input.jackpotConfirmed !== true) {
-        throw new Error("Test-feil: andre kall skal ha jackpotConfirmed=true");
-      }
-      return {
-        gameId: "g1",
-        status: "running",
-        actualStartTime: "2026-05-09T10:00:00Z",
-        actualEndTime: null,
-        auditId: "audit-jackpot-ok",
-      };
-    },
-  });
-  try {
-    const first = await post(ctx, "/api/agent/game1/start", "t-m", {});
-    assert.equal(first.status, 400);
-    const firstPayload = (await first.json()) as { error: { code: string } };
-    assert.equal(firstPayload.error.code, "JACKPOT_CONFIRM_REQUIRED");
-
-    const second = await post(ctx, "/api/agent/game1/start", "t-m", {
-      jackpotConfirmed: true,
-    });
-    assert.equal(second.status, 200);
-    const secondPayload = (await second.json()) as {
-      data: { auditId: string };
-    };
-    assert.equal(secondPayload.data.auditId, "audit-jackpot-ok");
-    assert.equal(callCount, 2);
   } finally {
     await ctx.close();
   }
