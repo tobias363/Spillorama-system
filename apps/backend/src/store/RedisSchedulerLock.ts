@@ -9,6 +9,10 @@
 
 import { Redis } from "ioredis";
 import { logger as rootLogger } from "../util/logger.js";
+import {
+  recordRedisFailure,
+  recordRedisSuccess,
+} from "../observability/RedisHealthMetrics.js";
 
 const logger = rootLogger.child({ module: "redis-lock" });
 
@@ -54,21 +58,41 @@ export class RedisSchedulerLock {
   /**
    * Try to acquire a lock for a room.
    * Returns true if acquired, false if already held by another instance.
+   *
+   * ADR-0020 / P1-3: Records success/failure to RedisHealthMetrics so that
+   * RedisHealthMonitor can detect when lock-acquire is silently failing
+   * after `maxRetriesPerRequest`. Failures are reported but not propagated
+   * differently — caller still sees the original error or false-result.
    */
   async tryAcquire(roomCode: string, timeoutMs?: number): Promise<boolean> {
     const ttlMs = timeoutMs ?? this.defaultTimeoutMs;
     const ttlSeconds = Math.ceil(ttlMs / 1000);
     const key = this.lockKey(roomCode);
 
-    const result = await this.redis.set(key, this.instanceId, "EX", ttlSeconds, "NX");
-    if (result === "OK") {
-      this._acquireCount++;
-      return true;
+    try {
+      const result = await this.redis.set(key, this.instanceId, "EX", ttlSeconds, "NX");
+      // Either "OK" (acquired) or null (already held). Both count as
+      // successful Redis-roundtrip — failure means an exception thrown.
+      recordRedisSuccess("lock_acquire");
+      if (result === "OK") {
+        this._acquireCount++;
+        return true;
+      }
+      return false;
+    } catch (err) {
+      recordRedisFailure("lock_acquire", err);
+      throw err;
     }
-    return false;
   }
 
-  /** Release a lock (only if we own it). */
+  /**
+   * Release a lock (only if we own it).
+   *
+   * ADR-0020 / P1-3: Records success/failure to RedisHealthMetrics. A
+   * release-failure typically means the Redis connection is down — the
+   * lock will expire on TTL, but ops should still get an alarm so they
+   * can investigate.
+   */
   async release(roomCode: string): Promise<void> {
     const key = this.lockKey(roomCode);
     // Lua script: only delete if the value matches our instance ID
@@ -79,7 +103,13 @@ export class RedisSchedulerLock {
         return 0
       end
     `;
-    await this.redis.eval(script, 1, key, this.instanceId);
+    try {
+      await this.redis.eval(script, 1, key, this.instanceId);
+      recordRedisSuccess("lock_release");
+    } catch (err) {
+      recordRedisFailure("lock_release", err);
+      throw err;
+    }
   }
 
   /**
