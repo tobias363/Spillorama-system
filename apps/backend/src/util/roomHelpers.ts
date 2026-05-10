@@ -167,6 +167,23 @@ export type RoomUpdatePayload = RoomSnapshot & {
   luckyNumbers: Record<string, number>;
   serverTimestamp: number;
   /**
+   * ADR-0019 / P0-1 (2026-05-10): Monotonic counter per (roomCode) som
+   * inkrementeres pre-emit av `emitRoomUpdate`. Klient (GameBridge) bruker
+   * dette til å dedup'e out-of-order payloads (reconnect-replay eller
+   * multi-instance broadcast).
+   *
+   * Server skal alltid populere dette på `room:update`-emits via
+   * `RoomStateVersionStore.next(roomCode)`. `room:state` resync-ack
+   * populerer via `RoomStateVersionStore.current(roomCode)` så klienten
+   * får versjonen som matcher den siste emitted state-en uten å
+   * incremente counter-en.
+   *
+   * Optional på wire-en for backwards-compat — legacy emit-paths
+   * (test-server, ad-hoc emits) som ikke vet om counter-en sender
+   * `undefined` og klient hopper over dedup.
+   */
+  stateVersion?: number;
+  /**
    * §6.1 fix (Wave 3b, 2026-05-06): authoritative connected-player count
    * for perpetual rooms whose `players[]` array was stripped on the wire.
    * Always populated by `stripPlayersForWire` when stripping; otherwise
@@ -239,6 +256,13 @@ export function buildRoomUpdatePayload(
     drawScheduler: DrawScheduler;
     bingoMaxDrawsPerRound: number;
     schedulerTickMs: number;
+    /**
+     * ADR-0019 / P0-1 (2026-05-10): Monotonic stateVersion populert av
+     * caller før emit. Optional — når undefined utelater vi feltet på
+     * wire-en og klient skipper dedup (backwards-compat). Server-side
+     * emit-path skal alltid sette dette via `RoomStateVersionStore.next()`.
+     */
+    stateVersion?: number;
     getArmedPlayerIds: (roomCode: string) => string[];
     getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
     getArmedPlayerSelections?: (roomCode: string) => Record<string, Array<{ type: string; qty: number; name?: string }>>;
@@ -523,6 +547,11 @@ export function buildRoomUpdatePayload(
     luckyNumbers: getLuckyNumbers(snapshot.code),
     scheduler: buildRoomSchedulerState(snapshot, nowMs, opts),
     serverTimestamp: nowMs,
+    // ADR-0019 / P0-1 (2026-05-10): propager monotonic stateVersion fra
+    // caller. Utelat på wire-en hvis caller ikke har satt den (test-
+    // harness eller legacy path) så schema-en aksepterer payload-en
+    // som backwards-kompatibel.
+    ...(opts.stateVersion !== undefined ? { stateVersion: opts.stateVersion } : {}),
     gameVariant,
   };
 }

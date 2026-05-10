@@ -267,6 +267,24 @@ export const RoomUpdatePayloadSchema = RoomSnapshotSchema.extend({
   armedPlayerIds: z.array(z.string()),
   luckyNumbers: z.record(z.string(), z.number().int()),
   serverTimestamp: z.number().int(),
+  /**
+   * ADR-0019 / P0-1 (2026-05-10): Monotonic counter that increments per
+   * `room:update` emit. Used by the client (GameBridge) to drop out-of-
+   * order payloads (typically reconnect-replay or multi-instance broadcast).
+   *
+   * Server starts the counter at 1 on first emit per room and uses Redis
+   * `INCR` so it survives instance restart and is unique across multi-
+   * instance broadcast. `room:state` resync ack returns the LATEST counter
+   * value WITHOUT incrementing (i.e. the version of the last emitted state).
+   *
+   * Client rule: `payload.stateVersion < state.lastAppliedStateVersion` →
+   * skip + log warn. Equal: idempotent — apply normally. Greater: apply.
+   *
+   * Optional on the wire so older backends (pre-ADR-0019) keep working — the
+   * client treats missing as "0" semantics (always older or equal, so
+   * never blocks a payload — i.e. dedup is opt-in).
+   */
+  stateVersion: z.number().int().nonnegative().optional(),
   playerStakes: z.record(z.string(), z.number()),
   /**
    * §6.1 fix (Wave 3, 2026-05-06): authoritative connected-player count for

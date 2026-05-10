@@ -243,6 +243,34 @@ export class GameBridge {
    */
   private lastWalletStateTs: number | null = null;
 
+  /**
+   * ADR-0019 / P0-1 (2026-05-10): Sist anvendt `stateVersion` fra
+   * `room:update`-payload. Brukes til å dedup'e out-of-order replays
+   * (reconnect-replay eller multi-instance broadcast hvor en eldre payload
+   * kan ankomme etter en nyere).
+   *
+   * Initialisert til `null` så første `room:update` alltid får anvendes.
+   * Resettes ved `stop()` (clean re-mount) og `applySnapshot` (resync).
+   *
+   * Klient-regel:
+   *   - `payload.stateVersion < lastAppliedStateVersion` → skip + log warn
+   *   - `payload.stateVersion >= lastAppliedStateVersion` → apply normalt
+   *
+   * Equal er idempotent (resync-snapshot ankommer med samme version som en
+   * pågående emit, eller server retransmitter same emit) — vi anvender
+   * normalt heller enn å silently dropp.
+   *
+   * Backwards-compat: hvis server utelater feltet (`undefined`), skipper
+   * vi dedup helt og applyer payload-en (legacy-flyt).
+   */
+  private lastAppliedStateVersion: number | null = null;
+
+  /**
+   * Test-metrics: hvor mange `room:update`-payloads ble droppet pga
+   * stateVersion-dedup. Eksponert via `getStateVersionMetrics()`.
+   */
+  private stateVersionSkippedCount = 0;
+
   private events: EventMap = {
     stateChanged: new Set(),
     gameStarted: new Set(),
@@ -313,6 +341,10 @@ export class GameBridge {
     // been refreshed independently).
     this.lastEmittedBalance = null;
     this.lastWalletStateTs = null;
+    // ADR-0019 / P0-1 (2026-05-10): reset stateVersion-dedup så re-mount
+    // alltid godtar første room:update på nytt.
+    this.lastAppliedStateVersion = null;
+    this.stateVersionSkippedCount = 0;
   }
 
   getState(): GameState {
@@ -358,7 +390,11 @@ export class GameBridge {
     // RoomSnapshot. Pull variant info from it so the buy popup gets ticket types
     // immediately — otherwise we'd have to wait for the next room:update push,
     // which can race with our listener registration.
-    const payload = snapshot as RoomSnapshot & { gameVariant?: RoomUpdatePayload["gameVariant"]; serverTimestamp?: number };
+    const payload = snapshot as RoomSnapshot & {
+      gameVariant?: RoomUpdatePayload["gameVariant"];
+      serverTimestamp?: number;
+      stateVersion?: number;
+    };
     if (payload.gameVariant) {
       this.state.gameType = payload.gameVariant.gameType ?? "standard";
       this.state.ticketTypes = (payload.gameVariant.ticketTypes ?? []) as GameState["ticketTypes"];
@@ -371,6 +407,14 @@ export class GameBridge {
     }
     if (typeof payload.serverTimestamp === "number") {
       this.state.serverTimestamp = payload.serverTimestamp;
+    }
+    // ADR-0019 / P0-1 (2026-05-10): resync ack-en stempler den
+    // sist-emitted versjonen for rommet. Sett `lastAppliedStateVersion`
+    // til denne så stale `room:update` (eldre versjon) ankommer etter
+    // resync ikke overskriver state. En `room:update` med samme versjon
+    // er idempotent og lar vi gå gjennom; nyere versjon overskriver.
+    if (typeof payload.stateVersion === "number") {
+      this.lastAppliedStateVersion = payload.stateVersion;
     }
 
     // Pre-game premie-rad fix (2026-04-26): same fallback as handleRoomUpdate.
@@ -391,6 +435,40 @@ export class GameBridge {
   // ── Socket event handlers ─────────────────────────────────────────────
 
   private handleRoomUpdate(payload: RoomUpdatePayload): void {
+    // ADR-0019 / P0-1 (2026-05-10): drop out-of-order `room:update` ved hjelp
+    // av monotonic stateVersion.
+    //
+    // Reconnect-replay og multi-instance-broadcast kan levere en eldre
+    // payload etter en nyere — `serverTimestamp` alene (ms-presisjon) er
+    // ikke nok fordi to emits generert i samme tick deler tid. Server
+    // garanterer at hver `room:update`-emit har strengt voksende
+    // `stateVersion` via Redis INCR; klient skipper alt som er strengt
+    // mindre enn sist anvendte versjon.
+    //
+    // Equal-versjon (typisk resync etterfulgt av samme emit) er idempotent
+    // og lar vi gå gjennom. Backwards-compat: hvis server ikke har rullet
+    // ut feltet enda, er `payload.stateVersion` undefined og vi skipper
+    // dedup helt.
+    if (
+      typeof payload.stateVersion === "number"
+      && this.lastAppliedStateVersion !== null
+      && payload.stateVersion < this.lastAppliedStateVersion
+    ) {
+      this.stateVersionSkippedCount += 1;
+      console.warn(
+        "[GameBridge] dropped out-of-order room:update — stateVersion regressed",
+        {
+          received: payload.stateVersion,
+          lastApplied: this.lastAppliedStateVersion,
+          serverTimestamp: payload.serverTimestamp,
+        },
+      );
+      return;
+    }
+    if (typeof payload.stateVersion === "number") {
+      this.lastAppliedStateVersion = payload.stateVersion;
+    }
+
     this.state.roomCode = payload.code;
     this.state.hallId = payload.hallId;
     this.state.players = payload.players;
@@ -594,6 +672,18 @@ export class GameBridge {
       gaps: this.drawGapCount,
       duplicates: this.drawDuplicateCount,
       lastAppliedDrawIndex: this.lastAppliedDrawIndex,
+    };
+  }
+
+  /**
+   * ADR-0019 / P0-1 (2026-05-10): Observability hook — read stateVersion-
+   * dedup-counters. Brukes av tester for å verifisere at out-of-order
+   * payloads droppes; senere kan denne kobles til Sentry/Prometheus.
+   */
+  getStateVersionMetrics(): { skipped: number; lastApplied: number | null } {
+    return {
+      skipped: this.stateVersionSkippedCount,
+      lastApplied: this.lastAppliedStateVersion,
     };
   }
 

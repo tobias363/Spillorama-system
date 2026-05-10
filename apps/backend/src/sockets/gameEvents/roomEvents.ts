@@ -241,6 +241,7 @@ export function registerRoomEvents(ctx: SocketContext): void {
     armPlayer,
     disarmPlayer,
     socketIdempotencyStore,
+    getCurrentStateVersion,
   } = deps;
 
   socket.on("room:create", rateLimited("room:create", async (payload: CreateRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
@@ -791,6 +792,23 @@ export function registerRoomEvents(ctx: SocketContext): void {
 
       assertUserCanAccessRoom(user, roomCode);
       const snapshot = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode));
+      // ADR-0019 / P0-1 (2026-05-10): stample resync-snapshot med gjeldende
+      // stateVersion så klient kan oppdatere `lastAppliedStateVersion` etter
+      // applySnapshot. Uten dette ville klient med cached
+      // `lastAppliedStateVersion=5` fra forrige sesjon kunne skippe en gyldig
+      // `room:update v6` etter resync — `current()` returnerer den siste
+      // versjonen som faktisk er emittet til rommet, så klient kommer på
+      // samme nivå som server.
+      //
+      // Hvis dep mangler (test-harness uten store) lar vi feltet være
+      // udefinert; klient skipper bare dedup-en.
+      if (getCurrentStateVersion) {
+        try {
+          snapshot.stateVersion = await getCurrentStateVersion(roomCode);
+        } catch (err) {
+          logger.warn({ err, roomCode }, "getCurrentStateVersion failed during room:state resync");
+        }
+      }
       ackSuccess(callback, { snapshot });
     } catch (error) {
       ackFailure(callback, error);

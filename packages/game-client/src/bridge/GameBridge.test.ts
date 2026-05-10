@@ -1003,4 +1003,231 @@ describe("GameBridge", () => {
       expect(state.patterns).toEqual(variantPatterns);
     });
   });
+
+  /**
+   * ADR-0019 / P0-1 (2026-05-10): stateVersion-dedup.
+   *
+   * Dekker:
+   *   1. Første room:update (lastApplied=null) → apply uansett
+   *   2. Strengt voksende stateVersion → apply alle
+   *   3. Strengt synkende stateVersion → drop + counter++
+   *   4. Lik stateVersion (idempotent) → apply
+   *   5. Manglende stateVersion (legacy server) → skip dedup, apply
+   *   6. stop() resetter dedup-state
+   *   7. applySnapshot (resync) setter lastApplied til snapshot.stateVersion
+   *   8. Etter resync, eldre room:update droppes
+   *   9. Mixed ordering (1, 3, 2, 4) → 2 droppes
+   *  10. Metrics-getter eksponerer counter + lastApplied
+   */
+  describe("stateVersion dedup (ADR-0019 / P0-1)", () => {
+    it("applies first room:update regardless of stateVersion (no baseline)", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 1 }));
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(1);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(0);
+    });
+
+    it("applies strictly increasing stateVersion in order", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 1 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 2 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 3 }));
+
+      expect(listener).toHaveBeenCalledTimes(3);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(3);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(0);
+    });
+
+    it("drops out-of-order room:update (stateVersion < lastApplied)", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      // Apply v5 first
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 5 }));
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(5);
+
+      // Now an out-of-order v3 arrives — should be dropped
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 3 }));
+      expect(listener).toHaveBeenCalledTimes(1); // no new stateChanged
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(5); // unchanged
+      expect(bridge.getStateVersionMetrics().skipped).toBe(1);
+    });
+
+    it("applies equal stateVersion (idempotent — resync retransmit)", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 5 }));
+      // Same version — typically resync sender same emit. Apply normally.
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 5 }));
+
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(5);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(0);
+    });
+
+    it("skips dedup when payload.stateVersion is missing (legacy server)", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      // No stateVersion at all — legacy server. Apply all.
+      const payload = makeRoomUpdate({});
+      delete (payload as { stateVersion?: number }).stateVersion;
+      socket.fire("roomUpdate", payload);
+      socket.fire("roomUpdate", payload);
+      socket.fire("roomUpdate", payload);
+
+      expect(listener).toHaveBeenCalledTimes(3);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(null);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(0);
+    });
+
+    it("skips dedup when only payload.stateVersion is missing on later push", () => {
+      // Cross-version-rollout: first push has stateVersion=5, then server
+      // rolls back and starts emitting without stateVersion. Client should
+      // still apply (no dedup possible without version).
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 5 }));
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(5);
+
+      const legacyPayload = makeRoomUpdate({});
+      delete (legacyPayload as { stateVersion?: number }).stateVersion;
+      socket.fire("roomUpdate", legacyPayload);
+
+      // Should still apply since payload has no stateVersion to compare against
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(5); // unchanged (no version in legacy)
+      expect(bridge.getStateVersionMetrics().skipped).toBe(0);
+    });
+
+    it("stop() resets dedup-state so re-start applies first update", () => {
+      bridge.start("player-1");
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 10 }));
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(10);
+
+      bridge.stop();
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(null);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(0);
+
+      // After re-start, an older version (5) is applied because there's no
+      // baseline. This is correct for the "clean re-mount" semantics.
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 5 }));
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(5);
+    });
+
+    it("applySnapshot (resync) sets lastAppliedStateVersion from snapshot.stateVersion", () => {
+      bridge.start("player-1");
+      // Resync ack includes stateVersion from server's current() call
+      const snapshotWithVersion = {
+        ...makeRoomSnapshot(),
+        stateVersion: 42,
+      } as RoomSnapshot & { stateVersion: number };
+      bridge.applySnapshot(snapshotWithVersion);
+
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(42);
+    });
+
+    it("after resync, stale room:update (older version) is dropped", () => {
+      bridge.start("player-1");
+      // Resync establishes baseline of v42
+      bridge.applySnapshot({
+        ...makeRoomSnapshot(),
+        stateVersion: 42,
+      } as RoomSnapshot & { stateVersion: number });
+
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      // A stale v30 arrives after resync — should be dropped
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 30 }));
+      expect(listener).toHaveBeenCalledTimes(0);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(1);
+
+      // But a fresh v43 is applied normally
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 43 }));
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(43);
+    });
+
+    it("mixed-ordering scenario: applies 1, 3, drops 2, applies 4", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 1 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 3 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 2 })); // stale!
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 4 }));
+
+      expect(listener).toHaveBeenCalledTimes(3); // 1, 3, 4
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(4);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(1);
+    });
+
+    it("reconnect-replay scenario: replays of older state are all dropped", () => {
+      bridge.start("player-1");
+      const listener = vi.fn();
+      bridge.on("stateChanged", listener);
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 100 }));
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(100);
+
+      // Server replays older buffered emits after socket reconnect
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 95 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 96 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 97 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 98 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 99 }));
+
+      // All 5 replays dropped
+      expect(listener).toHaveBeenCalledTimes(1); // only v100 applied
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(100);
+      expect(bridge.getStateVersionMetrics().skipped).toBe(5);
+
+      // New v101 is applied
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 101 }));
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(bridge.getStateVersionMetrics().lastApplied).toBe(101);
+    });
+
+    it("getStateVersionMetrics() exposes skipped counter and lastApplied", () => {
+      bridge.start("player-1");
+      expect(bridge.getStateVersionMetrics()).toEqual({
+        skipped: 0,
+        lastApplied: null,
+      });
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 5 }));
+      expect(bridge.getStateVersionMetrics()).toEqual({
+        skipped: 0,
+        lastApplied: 5,
+      });
+
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 3 }));
+      socket.fire("roomUpdate", makeRoomUpdate({ stateVersion: 2 }));
+      expect(bridge.getStateVersionMetrics()).toEqual({
+        skipped: 2,
+        lastApplied: 5,
+      });
+    });
+  });
 });
