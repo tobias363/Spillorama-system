@@ -79,6 +79,35 @@ export type Spill1LobbyOverallStatus =
   | "paused"
   | "finished";
 
+/**
+ * Whitelisted bongfarger per `SPILL_REGLER_OG_PAYOUT.md` §2 og
+ * `gameCatalog.types.ts:14`. Eksponert her i shared-types så spillerklient
+ * og admin-UI kan bruke samme typer uten cross-package import fra backend.
+ *
+ * Standard hovedspill: 3 farger (hvit 5 kr / gul 10 kr / lilla 15 kr).
+ * Trafikklys: ofte alle 3 men flat 15 kr. Klient skal aldri hardkode et
+ * sett — alltid lese `Spill1LobbyNextGame.ticketColors` fra serveren.
+ */
+export type Spill1LobbyTicketColor = "gul" | "hvit" | "lilla";
+
+/**
+ * Bonus-spill-whitelist (per `gameCatalog.types.ts:17-22`). NULL betyr
+ * ingen bonus aktiv for denne katalog-raden / plan-itemet.
+ */
+export type Spill1LobbyBonusGameSlug =
+  | "mystery"
+  | "wheel_of_fortune"
+  | "treasure_chest"
+  | "color_draft";
+
+/**
+ * Premie-modus (auto vs explicit_per_color). Klient bruker dette for
+ * å vite om bongprisene må respekteres slik de er (auto-multiplier
+ * ligger i prisene allerede) eller om det er spesialspill (Trafikklys
+ * = explicit_per_color med flat pris).
+ */
+export type Spill1LobbyPrizeMultiplierMode = "auto" | "explicit_per_color";
+
 export interface Spill1LobbyNextGame {
   itemId: string;
   position: number;
@@ -89,6 +118,40 @@ export interface Spill1LobbyNextGame {
   scheduledStartTime: string | null;
   scheduledEndTime: string | null;
   actualStartTime: string | null;
+  /**
+   * Spillerklient-rebuild Fase 2 (BIN/SPILL1, 2026-05-10): bongfarger fra
+   * plan-runtime catalog. Per Tobias-direktiv 2026-05-09 og
+   * `SPILL_REGLER_OG_PAYOUT.md` §2: standard hovedspill har 3 farger
+   * (hvit/gul/lilla), Trafikklys avviker. Klient renderer ÉN ticket-knapp
+   * per element i denne arrayen — aldri hardkodet.
+   *
+   * Tom array `[]` skal aldri sendes i praksis (alle katalog-rader har
+   * minst én farge), men klient må håndtere det defensivt.
+   */
+  ticketColors: Spill1LobbyTicketColor[];
+  /**
+   * Pris per bongfarge i ØRE (cents). Keys MÅ være subset av `ticketColors`
+   * (ellers er det inkonsistens i seed). Auto-multiplikator (5/10/15 kr =
+   * 500/1000/1500 øre) er ALLEREDE anvendt — klient konverterer kun
+   * øre→kr for visning og sender riktig type-streng til backend.
+   *
+   * Tobias-direktiv: spilleren skal aldri se "STANDARD" eller andre
+   * degraderte fallback-strenger. Hvis vi ikke har data, render "Bingo"
+   * som default-tekst og ingen ticket-knapper (frontend ansvar).
+   */
+  ticketPricesCents: Partial<Record<Spill1LobbyTicketColor, number>>;
+  /**
+   * Premie-modus. Speiler katalog-rad. Klient bruker dette informativt —
+   * faktiske premiebeløp er allerede regnet ut i `ticketPricesCents` og
+   * server returnerer korrekt utbetaling i payout-eventet.
+   */
+  prizeMultiplierMode: Spill1LobbyPrizeMultiplierMode;
+  /**
+   * Bonus-spill aktivt for denne katalog-raden, eller null. Klient kan
+   * bruke dette til å vise "Bonus: Lykkehjul" e.l. i UI. NULL = ingen
+   * bonus eller `bonusGameEnabled=false`.
+   */
+  bonusGameSlug: Spill1LobbyBonusGameSlug | null;
 }
 
 export interface Spill1LobbyState {

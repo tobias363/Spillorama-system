@@ -1,6 +1,7 @@
 import { Container, Sprite, Text, Assets } from "pixi.js";
 import gsap from "gsap";
 import type { GameState } from "../../../bridge/GameBridge.js";
+import type { Spill1LobbyOverallStatus } from "@spillorama/shared-types/api";
 import type { PatternWonPayload, ChatMessage } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
@@ -17,6 +18,7 @@ import { CenterBall } from "../components/CenterBall.js";
 import { stakeFromState } from "../logic/StakeCalculator.js";
 import { calculateMyRoundWinnings } from "../logic/WinningsCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
+import type { BuyPopupTicketConfig } from "../logic/lobbyTicketTypes.js";
 
 /**
  * Redesign 2026-04-23 — explicit column-based layout so each region has
@@ -143,6 +145,42 @@ export class PlayScreen extends Container {
    * 2026-04-20.
    */
   private autoShowBuyPopupDone = false;
+
+  /**
+   * Spillerklient-rebuild Fase 2 (2026-05-10): cached BuyPopup-konsumert
+   * ticket-config bygget fra plan-runtime aggregator. Settes av
+   * `setBuyPopupTicketConfig(...)` (kalles av Game1Controller når lobby-
+   * state oppdateres). Brukes som fallback i `showBuyPopup()` når
+   * `state.ticketTypes` er tomt (pre-game / før første room:update).
+   *
+   * Tobias-direktiv 2026-05-09: serveren er Source-of-Truth for ticket-
+   * types. Når room:update.gameVariant.ticketTypes er tilgjengelig
+   * brukes den (live-game). Mellom runder eller før første start brukes
+   * lobby-data så spilleren ser riktige bongfarger.
+   */
+  private lobbyTicketConfig: BuyPopupTicketConfig | null = null;
+
+  /**
+   * Spillerklient-rebuild Fase 3 (2026-05-10): siste kjente
+   * `Spill1LobbyState.overallStatus` fra plan-runtime aggregatoren.
+   * Brukes til å gating-e CenterBall-countdown i `update()` slik at
+   * vi ALDRI starter en lokal countdown før master har trykket Start.
+   *
+   * Tobias-direktiv 2026-05-09 (PM_ONBOARDING_PLAYBOOK §2.3):
+   *   "Det skal aldri være noen andre views i det live rommet en neste
+   *    planlagte spill."
+   *
+   * Mapping i `update()`:
+   *   - `running`         → countdown-/live-ball-display kan kjøre normalt
+   *   - alt annet (idle, purchase_open, ready_to_start, paused,
+   *     closed, finished) → CenterBall holdes i waiting-state, ingen
+   *     setInterval-countdown. Game1Controller eier "venter på master"-
+   *     overlay-en separat.
+   *   - `null` (lobby-state ikke ankommet enda) → fail-safe: behandle
+   *     som ikke-running, dvs. ingen countdown. Vi heller bias mot å
+   *     vise "venter på master" enn å vise feil-aktig countdown.
+   */
+  private lobbyOverallStatus: Spill1LobbyOverallStatus | null = null;
 
   constructor(
     screenWidth: number,
@@ -397,17 +435,34 @@ export class PlayScreen extends Container {
 
     // Countdown / center-ball:
     //   - RUNNING → show the last drawn ball, stop countdown
-    //   - Else with millisUntilNextStart > 0 → run countdown
-    //   - Else → idle "waiting" view
+    //   - Else with millisUntilNextStart > 0 AND lobby.overallStatus === "running"
+    //     → run countdown (server har bekreftet at master har trygget runden)
+    //   - Else → idle "waiting" view (Game1Controller mounter "venter på
+    //     master"-overlay over toppen separat)
+    //
+    // Spillerklient-rebuild Fase 3 (2026-05-10) — Tobias-direktiv 2026-05-09:
+    // klient skal ALDRI starte en lokal countdown før master har trykket
+    // Start. Det betyr at vi gater countdown-init på
+    // `lobbyOverallStatus === "running"`. Pre-fix kjørte countdown så
+    // snart `state.millisUntilNextStart > 0` — det førte til at klient
+    // viste timer som ikke matchet server-tilstand når master ennå ikke
+    // hadde trigget. Nå venter vi på server-pushed overgang
+    // `overallStatus: purchase_open → running` før countdown starter.
+    const lobbyRunning = this.lobbyOverallStatus === "running";
     if (state.gameStatus === "RUNNING") {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       if (state.lastDrawnNumber !== null) this.centerBall.setNumber(state.lastDrawnNumber);
-    } else if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
+    } else if (
+      lobbyRunning &&
+      state.millisUntilNextStart !== null &&
+      state.millisUntilNextStart > 0
+    ) {
       this.leftInfo.startCountdown(state.millisUntilNextStart);
       this.centerBall.startCountdown(state.millisUntilNextStart);
     } else {
       this.leftInfo.stopCountdown();
+      this.centerBall.stopCountdown();
       this.centerBall.showWaiting();
     }
 
@@ -489,13 +544,20 @@ export class PlayScreen extends Container {
     // Auto-open the buy popup on entry so the player doesn't have to hunt for
     // the "Forhåndskjøp" button. One-shot per screen-session (see
     // autoShowBuyPopupDone doc) — applies to WAITING and SPECTATING mid-round
-    // joiners. Skipped for active players (har live brett) og hvis ticketTypes
-    // ikke har kommet enda (første snapshot før gameVariant populeres).
+    // joiners. Skipped for active players (har live brett).
+    //
+    // Spillerklient-rebuild Fase 2 (2026-05-10): vi åpner også hvis
+    // `lobbyTicketConfig` er tilgjengelig — det betyr plan-runtime
+    // aggregator har levert ticket-data selv om `room:update` ikke har
+    // kommet enda (typisk pre-game / før master starter runden).
     const hasLive = running && state.myTickets.length > 0;
+    const hasTicketTypes =
+      state.ticketTypes.length > 0
+      || (this.lobbyTicketConfig?.ticketTypes.length ?? 0) > 0;
     if (
       !this.autoShowBuyPopupDone
       && !hasLive
-      && state.ticketTypes.length > 0
+      && hasTicketTypes
       && (state.preRoundTickets?.length ?? 0) === 0
     ) {
       this.autoShowBuyPopupDone = true;
@@ -514,12 +576,28 @@ export class PlayScreen extends Container {
    *  `setBuyPopupDisplayName` separat ved socket-broadcast så det ikke er
    *  strengt nødvendig å sende displayName her — men det reduserer race-
    *  vinduet mellom popup-åpning og første lobby-state-emit.
+   *
+   *  Spillerklient-rebuild Fase 2 (2026-05-10): hvis `state.ticketTypes`
+   *  er tomt (pre-game / før første room:update) faller vi tilbake på
+   *  `lobbyTicketConfig` satt via `setBuyPopupTicketConfig(...)`. Dette
+   *  sikrer at spilleren ser riktige bongfarger fra plan-runtime catalog
+   *  før master har startet runden — Tobias-direktiv 2026-05-09:
+   *  "spilleren skal alltid se neste planlagte spill".
    */
   showBuyPopup(state?: GameState, displayName?: string): void {
     const ref = state ?? this.lastState;
     if (!ref) return;
-    const fee = ref.entryFee || 10;
-    const types = ref.ticketTypes ?? [];
+    let fee = ref.entryFee || 10;
+    let types = ref.ticketTypes ?? [];
+    // Fase 2 fallback: når room:update ikke har levert ticketTypes ennå,
+    // bruker vi plan-runtime catalog-data fra lobby-aggregatoren. Live
+    // game (state.ticketTypes ikke-tom) prioriteres alltid — den har
+    // small + large-bonger fra `gameVariant.ticketTypes` mens lobby-
+    // dataen er small-only (3-farge-modellen).
+    if (types.length === 0 && this.lobbyTicketConfig) {
+      types = this.lobbyTicketConfig.ticketTypes;
+      fee = this.lobbyTicketConfig.entryFee;
+    }
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
     this.buyPopup.showWithTypes(
       fee,
@@ -538,6 +616,50 @@ export class PlayScreen extends Container {
    */
   setBuyPopupDisplayName(displayName: string | null | undefined): void {
     this.buyPopup.setDisplayName(displayName);
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 2 (2026-05-10): cache ticket-config fra
+   * plan-runtime aggregator slik at `showBuyPopup()` kan bruke det som
+   * fallback når `state.ticketTypes` er tomt (pre-game). Idempotent —
+   * kall flere ganger ved hver lobby-state-update.
+   *
+   * Tobias-direktiv 2026-05-09: spilleren skal aldri se hardkodete
+   * bongfarger. Når master bytter plan-item (eks. fra Bingo til Trafikklys)
+   * pusher Game1Controller den nye config-en hit slik at popup-en oppdateres.
+   *
+   * Null = lobby-binding har ingen state ennå (eller plan dekker ikke
+   * dagen) — popup faller tilbake på `state.ticketTypes` (kan være tom).
+   */
+  setBuyPopupTicketConfig(config: BuyPopupTicketConfig | null): void {
+    this.lobbyTicketConfig = config;
+  }
+
+  /**
+   * Spillerklient-rebuild Fase 3 (2026-05-10): server-driven
+   * `overallStatus` fra plan-runtime aggregator. Game1Controller kaller
+   * dette ved hver `Spill1LobbyState`-oppdatering.
+   *
+   * Når status endres skal `update(state)` re-evaluere countdown-state
+   * — vi kaller `update()` synkronisert med siste cached state slik at
+   * CenterBall reflekterer ny gating umiddelbart (uten å vente på neste
+   * `room:update`).
+   *
+   * Tobias-direktiv 2026-05-09: server er Source-of-Truth for runde-
+   * lifecycle. Klient må ikke ha en lokal hypotese om når countdown
+   * begynner — den skal speile `overallStatus === "running"`.
+   */
+  setLobbyOverallStatus(status: Spill1LobbyOverallStatus | null): void {
+    if (this.lobbyOverallStatus === status) return;
+    this.lobbyOverallStatus = status;
+    if (this.lastState) {
+      this.update(this.lastState);
+    }
+  }
+
+  /** Test-hook: hent siste kjente `lobbyOverallStatus`. */
+  getLobbyOverallStatus(): Spill1LobbyOverallStatus | null {
+    return this.lobbyOverallStatus;
   }
 
   hideBuyPopup(): void {
