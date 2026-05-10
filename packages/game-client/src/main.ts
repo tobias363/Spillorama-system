@@ -75,9 +75,26 @@ if (
 // Begge mekanismene tre kun i kraft når `import.meta.env.DEV === true`,
 // så prod-bundle blir ikke berørt (Vite tree-shaker import-greinen ut).
 
+// Pilot-fix 2026-05-10: normalize dev-user-param til full email før
+// backend-kall. Tobias-bug: ?dev-user=demo-pilot-spiller-1 (uten
+// @example.com) gav 403 fordi backend-allowlist krever full email.
+// Spec mirrors devUserAutoLoginRegression.test.ts (linjer 75-91).
+function normalizeDevUserParam(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim().toLowerCase();
+  if (trimmed === "") return null;
+  if (trimmed.includes("@")) return trimmed;
+  if (trimmed === "tobias") return "tobias@nordicprofil.no";
+  if (/^demo-pilot-/.test(trimmed)) return `${trimmed}@example.com`;
+  if (/^demo-agent-/.test(trimmed)) return `${trimmed}@spillorama.no`;
+  if (/^demo-/.test(trimmed)) return `${trimmed}@example.com`;
+  return trimmed;
+}
+
 if (import.meta.env.DEV && typeof window !== "undefined") {
   // (1) Auto-login via ?dev-user=
-  const devUser = new URLSearchParams(window.location.search).get("dev-user");
+  const rawDevUser = new URLSearchParams(window.location.search).get("dev-user");
+  const devUser = normalizeDevUserParam(rawDevUser);
   const tokenKey = "spillorama.dev.accessToken";
   const userKey = "spillorama.dev.user";
   if (devUser && !sessionStorage.getItem(tokenKey)) {
