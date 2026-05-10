@@ -1116,7 +1116,7 @@ test("ADR-0017: start passes through til masterControlService.startGame uten jac
   );
 });
 
-// ── retry-with-rollback (BIN-XXXX, 2026-05-09) ──────────────────────────
+// ── retry-with-rollback (PR #1116, 2026-05-09) ──────────────────────────
 
 const FAST_RETRY_DELAYS = [0, 0, 0] as const;
 const FAST_SLEEP = async (_ms: number): Promise<void> => {};

@@ -30,7 +30,7 @@ for å rydde — eller bruke force-recovery-action — før neste forsøk var mu
 For pilot Q3 2026 er dette uakseptabelt: hver hengende master-flow er én
 hall-runde tapt og en av de 4 pilot-hallene står stille.
 
-Krav fra task-spec (BIN-XXXX):
+Krav fra task-spec (PR #1116, 2026-05-09):
 
 > Bridge-feil må enten:
 > 1. Auto-retry og lykkes etter 1-2 forsøk
@@ -154,7 +154,7 @@ Avvist:
 ## Referanser
 
 - ADR-0001 — ADR-format og prosess
-- BIN-XXXX — Pilot Q3 2026 retry-rollback-arbeidet
+- PR #1116 (2026-05-09) — Pilot Q3 2026 retry-rollback-arbeidet
 - Task-spec: "Retry-mekanisme + smart-recovery for `GamePlanEngineBridge`"
 - `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` — Spill 1
   master-flyt

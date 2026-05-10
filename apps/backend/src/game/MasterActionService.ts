@@ -221,7 +221,7 @@ export interface MasterActionServiceOptions {
     broadcastForHall(hallId: string): Promise<void>;
   } | null;
   /**
-   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): backoff-delays for bridge-spawn
+   * Pilot Q3 2026 (PR #1116, 2026-05-09): backoff-delays for bridge-spawn
    * retry. Default `[100, 500, 2000]` ms. Tester injisere `[0, 0, 0]`.
    */
   bridgeRetryDelaysMs?: ReadonlyArray<number>;
@@ -329,7 +329,7 @@ function wrapEngineError(err: unknown, context: string): never {
 }
 
 /**
- * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): DomainError-koder som indikerer en
+ * Pilot Q3 2026 (PR #1116, 2026-05-09): DomainError-koder som indikerer en
  * PERMANENT bridge-feil — retry vil ikke fikse dem.
  */
 const PERMANENT_BRIDGE_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -516,7 +516,7 @@ export class MasterActionService {
     }
 
     // 5. Bridge-spawn for current_position. Idempotent på (run.id, position).
-    // Pilot Q3 2026 (BIN-XXXX, 2026-05-09): retry-with-rollback. Hvis bridgen
+    // Pilot Q3 2026 (PR #1116, 2026-05-09): retry-with-rollback. Hvis bridgen
     // feiler med transient DB-glitch eller race-condition, prøver vi opptil
     // 3 ganger med exponential backoff (100ms, 500ms, 2000ms). Hvis alle
     // 3 forsøk feiler — OG vi nettopp flyttet plan-run til running (run var
@@ -865,7 +865,7 @@ export class MasterActionService {
     }
 
     // Spawn ny scheduled-game-rad.
-    // Pilot Q3 2026 (BIN-XXXX, 2026-05-09): retry-with-rollback for advance.
+    // Pilot Q3 2026 (PR #1116, 2026-05-09): retry-with-rollback for advance.
     // Hvis bridgen feiler etter alle retries, ruller vi position tilbake til
     // forrige verdi (planRun.advanceToNext har allerede inkrementert position).
     // Status forblir running — bare position rolles back så master kan
@@ -1464,7 +1464,7 @@ export class MasterActionService {
   }
 
   /**
-   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): best-effort rollback av plan-run
+   * Pilot Q3 2026 (PR #1116, 2026-05-09): best-effort rollback av plan-run
    * etter at bridge-spawn feilet alle retries. Fire-and-forget — hvis
    * rollback selv kaster, logges det og vi kaster videre den ORIGINALE
    * bridge-feilen så master ser klar feilmelding.

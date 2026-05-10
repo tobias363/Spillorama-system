@@ -885,7 +885,7 @@ export class GamePlanRunService {
   }
 
   /**
-   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): rollback en plan-run fra
+   * Pilot Q3 2026 (PR #1116, 2026-05-09): rollback en plan-run fra
    * `running` tilbake til `idle` med restore av `current_position`. Brukt
    * av `MasterActionService` etter at engine-bridge-spawn feilet 3 ganger
    * — vi sletter ikke rad-en, men setter status tilbake slik at master
@@ -989,7 +989,7 @@ export class GamePlanRunService {
   }
 
   /**
-   * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): rollback `current_position`
+   * Pilot Q3 2026 (PR #1116, 2026-05-09): rollback `current_position`
    * til en tidligere verdi UTEN å endre status. Brukt av `MasterActionService`
    * etter at engine-bridge-spawn for en ADVANCE-action feilet — vi ruller
    * position tilbake til forrige verdi så master kan trygt re-prøve
