@@ -289,11 +289,16 @@ test("POST /start — ADMIN happy path → 200 + audit-id + socket-broadcast", a
     assert.equal(ctx.serviceCalls.startGame.length, 1);
     assert.deepEqual(ctx.serviceCalls.startGame[0]!.confirmExcludedHalls, ["hall-3"]);
     assert.equal(ctx.serviceCalls.startGame[0]!.actor.role, "ADMIN");
-    const globalEmit = ctx.emitted.find((e) => e.room === null);
-    assert.ok(globalEmit);
-    assert.equal(globalEmit!.event, "game1:master-action");
+    // ADR-0019 P0-3 (Agent B, 2026-05-10): master-action broadcast er nå targeted
+    // til `admin:masters:<gameId>` istedenfor global io.emit. Tidligere lekket
+    // global emit til ~36k sockets på pilot-peak. Verifiser at master-action
+    // ble emittet til riktig admin-rom + group-rom (deltager-haller).
+    const mastersEmit = ctx.emitted.find((e) => e.room === "admin:masters:g1");
+    assert.ok(mastersEmit, "forventet emit til admin:masters:<gameId>");
+    assert.equal(mastersEmit!.event, "game1:master-action");
     const groupEmit = ctx.emitted.find((e) => e.room === "group:grp-1");
     assert.ok(groupEmit);
+    assert.equal(groupEmit!.event, "game1:master-action");
   } finally {
     await ctx.close();
   }
