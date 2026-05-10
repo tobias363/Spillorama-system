@@ -1,6 +1,6 @@
 # Spillorama Backlog
 
-**Sist oppdatert:** 2026-05-08 (BIN-823 åpnet: Spill 2 åpningstid-guard regulatorisk pilot-blokker)
+**Sist oppdatert:** 2026-05-10 (BIN-823 lukket: Spill 2 åpningstid-guard fikset, K1-K4 alle merget; Wave 3a/3b også merget)
 **Eier:** Tobias Haugen
 **Formål:** Oversikt over åpne pilot-blokkere, pågående waves, og post-pilot-arbeid.
 
@@ -39,27 +39,25 @@ Status: ✅ Lukket. Customer Unique ID (PR #464), agent-portal cash-inout, ticke
 ### K3 - Hall-binding (alle merget)
 Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 
-### K4 — Regulatorisk åpningstid-håndhevelse (ÅPEN, BIN-823)
+### K4 — Regulatorisk åpningstid-håndhevelse (✅ Lukket BIN-823)
 
 **Severity:** Pilot-go-live-blokker (Lotteritilsynet-krav).
-**Status:** 🔴 Åpen — fix-agent spawnet 2026-05-08.
-**Linear:** [BIN-823](https://linear.app/bingosystem/issue/BIN-823) (Urgent, parent BIN-810).
+**Status:** ✅ Lukket — fixet 2026-05-08 via `PerpetualRoundOpeningWindowGuard.ts` factory + 19 unit-tester + 4 wiring-regression-tester. Begge Spill 2 (`rocket`/`game_2`/`tallspill`) og Spill 3 (`monsterbingo`) dekkes av samme factory-mønster.
+**Linear:** [BIN-823](https://linear.app/bingosystem/issue/BIN-823) (Done).
 
-| § | Tema | Beskrivelse | Estimat |
-|---|---|---|---|
-| Spill 2 | `canSpawnRound` mangler for `rocket` | `apps/backend/src/index.ts:2792-2809` returnerer `null` for ikke-Spill-3-slug → ROCKET perpetual-loop spawner runder uavhengig av `Spill2Config.openingTimeStart`/`End`. Spillere kan kjøpe bonger og spille etter stengetid. | 0.5-1 dev-dag |
+**Verifikasjon:**
+- **Fil:** `apps/backend/src/game/PerpetualRoundOpeningWindowGuard.ts` (eksisterer)
+- **Tester:** `apps/backend/src/game/PerpetualRoundOpeningWindowGuard.test.ts` (eksisterer) + `apps/backend/src/__tests__/indexWiring.spill2OpeningWindowGuard.test.ts` (eksisterer)
+- **Wireup:** `apps/backend/src/index.ts:281, 3025-3026` — `createPerpetualRoundOpeningWindowGuard({ ... })` factory-pattern injectes som `canSpawnRound`-callback til `PerpetualRoundService`
+- **Merget commits:** PR #1051 (`96bba71f` fix(spill2): åpningstid-guard for ROCKET perpetual-loop), `1a12d0a0` fix(spill2): wire åpningstid-guard, `12207204` feat(spill2): PerpetualRoundOpeningWindowGuard factory + edge-case-tester, `e6981335` test(spill2): unit + integrasjonstest
+- **Doc-ref:** [`SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md` §3.8 + §10.2](./docs/architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md), [`SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md` §3.8](./docs/architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md)
+
+| § | Tema | Status |
+|---|---|---|
+| Spill 2 | `canSpawnRound` for `rocket` | ✅ Lukket — guard wired via factory; runder spawner ikke utenfor `[openingTimeStart, openingTimeEnd)`-vinduet (Oslo-tz). DB-feil → fail-open (returnerer null). |
 
 **Tobias-direktiv 2026-05-08:**
 > *"Veldig viktig at det ikke er mulig å kunne spille spillene etter stengetid. Er strenge regler på det fra Lotteritilsynt."*
-
-**Fix-skisse:**
-1. Implementer `Spill2ConfigService.isWithinOpeningWindow()` (speil Spill 3-helper)
-2. Utvid `canSpawnRound`-callback i `index.ts` til å håndtere `rocket`/`game_2`-slug
-3. Enhets-test (innenfor/utenfor vindu, sommer-/vintertid, edge-cases)
-4. Integrasjonstest (verifiser at PerpetualRoundService faktisk stopper spawn)
-5. Oppdater SPILL2_IMPLEMENTATION_STATUS §10.2 + §3.8
-
-**Verifikasjon før merge:** Type-check grønn, alle tester passerer, Spill 3-pathen uberørt, dokumentasjon oppdatert.
 
 ### Pilot-blokkere lukket 2026-05-06 (Wave 1+2)
 
@@ -73,16 +71,16 @@ Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 
 **Verifisert prod 2026-05-06:** ROCKET `autoDraw.errors=0`, MONSTERBINGO 75/75 ENDED + perpetual-restart scheduled. Trekninger faktisk skjer.
 
-### Wave 3 — gjenstående pilot-blokkere (performance-engineering)
+### Wave 3 — performance-engineering ✅ LUKKET 2026-05-06
 
-| § | Tema | Beskrivelse | Estimat |
-|---|---|---|---|
-| §3.1 | onDrawCompleted slow at scale | Mass-payout (100+ winners) tar 15s+ blokkerer 30s tick | ~2 t |
-| §3.4 | room.players mutex missing | `assertWalletNotInRunningGame` muterer Map for RUNNING rom uten draw-lock — korrumperer iterator daglig ved 1500 spillere | ~3 t |
-| §6.1 | room:update payload size | 300 KB × 1500 sockets = 450 MB per emit; bandwidth-issue | ~4 t |
-| §6.4 | Postgres pool exhaustion | Sekvensielle wallet-transfers serialiserer gjennom 25-connection pool | ~3 t |
+| § | Tema | Fix |
+|---|---|---|
+| §3.1 | onDrawCompleted slow at scale | ✅ Wave 3a — batched parallel mass-payout. PR #952 (`08f6ef95`) |
+| §3.4 | room.players mutex missing | ✅ Wave 3a — snapshot iterator + race-detector. PR #952 (`08f6ef95`) |
+| §6.1 | room:update payload size | ✅ Wave 3b — per-spiller-strip i `emitRoomUpdate`, 314 KB → 0.8 KB pr. mottaker. PR #953 (`0444aff9`) |
+| §6.4 | Postgres pool exhaustion | ✅ Wave 3b mitigated — pool-stats-metrics + 5s→3s fail-fast timeout. Se [`SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05.md`](./docs/architecture/SPILL2_3_CASINO_GRADE_AUDIT_2026-05-05.md). |
 
-**Wave 3-prioritet:** disse er performance-engineering snarere enn bug-fixes. Krever load-testing-infrastruktur (`npm run dev:stress` finnes via PR #946) før refaktor.
+**ADR-ref:** ADR-011 + audit-banner + module-READMEs for Wave 3b (commit `9fec8e10`).
 
 ### Andre åpne saker
 
@@ -90,7 +88,7 @@ Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 |---|---|---|
 | MED-1 | Trace-ID full-stack (klient → DB) | Klient ✅, HTTP ✅, Socket.IO ⚠️, DB-queries ⚠️ |
 | MED-2 | Migrasjons-rekkefølge bug (`20260425` ALTER før `20260724` CREATE) | ✅ Lukket 2026-05-06 — idempotent CREATE+ALTER. Se ADR-012. |
-| Wave 4 | Outbox-bredkast for compliance + game-events | Ikke startet — avhengig av Wave 3 |
+| Wave 4 | Outbox-bredkast for compliance + game-events | Ikke startet (post-Wave-3) |
 
 ---
 
@@ -103,6 +101,13 @@ Status: ✅ Lukket. transferHallAccess (PR #453), auto-escalation, payout-cap.
 ### Wave 2 — MAIN_GAME-paritet + Game3-recovery ✅ LUKKET 2026-05-06
 - PR #948 — prize-cap binder MAIN_GAME for Spill 2/3 (regulatorisk §11)
 - Game3AutoDrawTickService stuck-recovery paritet med PR #876
+
+### Wave 3a — performance fixes (mass-payout + room.players race) ✅ LUKKET 2026-05-06
+- PR #952 — batched parallel mass-payout (§3.1) + snapshot-iterator/race-detector (§3.4)
+
+### Wave 3b — payload-stripping + pool-tuning ✅ LUKKET 2026-05-06
+- PR #953 — per-recipient broadcast for `room:update` (§6.1) + Postgres pool fail-fast (§6.4)
+- ADR-011 introdusert for per-spiller-strip-pattern
 
 ---
 
