@@ -54,6 +54,16 @@ bash apps/backend/scripts/pilot-smoke-test.sh
 
 Hvis script feiler — fix før du går videre.
 
+> **Automatisert komplement (Spor 2B, 2026-05-10):** Etter at smoke-test
+> passerer kan du kjøre `bash apps/backend/scripts/pilot-flow-e2e.sh`
+> som dekker §1-§6 ende-til-ende uten browser. Skriptet er idempotent og
+> tar ~2-3 minutter. Bruk `OUTPUT_JSON=1` for strukturert rapport på
+> `/tmp/pilot-flow-e2e-report.json`. Master-start kan feile pga.
+> pre-eksisterende backend-bug (ENGINE_FAILED på audit-log
+> CHECK-constraint) — skriptet fortsetter og verifiserer ledger-state +
+> multi-hall-binding uansett, slik at PR #443-regresjons-sjekken
+> fungerer.
+
 ---
 
 ## §1 Admin oppretter spilleplan kl 11:00
