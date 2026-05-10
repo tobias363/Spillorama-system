@@ -78,6 +78,13 @@ import {
 } from "../../api/admin-game1-master.js";
 import { fetchMe } from "../../api/auth.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
+import { fetchAgentGamePlanCurrent } from "../../api/agent-game-plan.js";
+import type { AgentGamePlanItem } from "../../api/agent-game-plan.js";
+import { openJackpotSetupModal } from "./JackpotSetupModal.js";
+import {
+  openJackpotConfirmModal,
+  extractJackpotConfirmData,
+} from "../cash-inout/JackpotConfirmModal.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const DEFAULT_COUNTDOWN_SECONDS = 120;
@@ -1140,12 +1147,19 @@ async function onSpill1Start(): Promise<void> {
  * Bølge 3 (2026-05-08): bruker `startMaster(hallId)` direkte — den ENESTE
  * master-routen for start. Bridge-spawn + plan-state-overgang skjer i
  * `MasterActionService` (samme service som driver advance/pause/resume/stop).
+ *
+ * Jackpot-modal (master-flow-2026-05-10): håndterer også:
+ *   - `JACKPOT_CONFIRM_REQUIRED`: daglig-akkumulert pott må bekreftes.
+ *     Vi viser JackpotConfirmModal og retry'er med `jackpotConfirmed=true`.
+ *   - `JACKPOT_SETUP_REQUIRED`: catalog-entry har `requiresJackpotSetup=true`,
+ *     master må sette draw + prizesCents per bongfarge. Vi viser
+ *     JackpotSetupModal og retry'er start når submit lykkes.
  */
-async function attemptSpill1Start(): Promise<void> {
+async function attemptSpill1Start(jackpotConfirmed = false): Promise<void> {
   const spill1 = state.spill1;
   if (!spill1) return;
   try {
-    await startMaster(spill1.hallId);
+    await startMaster(spill1.hallId, jackpotConfirmed || undefined);
     Toast.success("Spill 1 startet");
     await refreshSpill1();
   } catch (err) {
@@ -1169,11 +1183,96 @@ async function attemptSpill1Start(): Promise<void> {
       // override-list-felter på den nye master-routen.
       const proceed = await promptHallInfoOverride(unreadyHalls);
       if (!proceed) return;
-      await attemptSpill1Start();
+      await attemptSpill1Start(jackpotConfirmed);
       return;
     }
+
+    // Jackpot-modal (master-flow-2026-05-10): JACKPOT_CONFIRM_REQUIRED.
+    // Daglig-akkumulert pott må bekreftes av master før start.
+    if (
+      err instanceof ApiError &&
+      err.code === "JACKPOT_CONFIRM_REQUIRED" &&
+      !jackpotConfirmed
+    ) {
+      const data = extractJackpotConfirmData(err);
+      const confirmed = await openJackpotConfirmModal(data);
+      if (!confirmed) return;
+      await attemptSpill1Start(true);
+      return;
+    }
+
+    // Jackpot-modal: JACKPOT_SETUP_REQUIRED. Catalog krever per-posisjon
+    // popup med draw + prizesCents per bongfarge.
+    if (err instanceof ApiError && err.code === "JACKPOT_SETUP_REQUIRED") {
+      const item = await fetchCatalogItemForSpill1JackpotSetup(
+        spill1.hallId,
+        err,
+      );
+      if (!item) {
+        Toast.error(
+          "Klarte ikke å laste plan-data for jackpot-setup. Refresh og prøv igjen.",
+        );
+        return;
+      }
+      const submitted = await openJackpotSetupModalAsPromise(item);
+      if (!submitted) return;
+      await attemptSpill1Start(jackpotConfirmed);
+      return;
+    }
+
     const msg = err instanceof Error ? err.message : String(err);
     Toast.error(msg);
+  }
+}
+
+/**
+ * Wrap `openJackpotSetupModal` (callback-basert) som Promise<boolean>.
+ * Resolverer `true` hvis master submitter, `false` hvis avbryt.
+ */
+function openJackpotSetupModalAsPromise(
+  item: AgentGamePlanItem,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let resolved = false;
+    const settle = (value: boolean): void => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+    openJackpotSetupModal({
+      item,
+      onSuccess: () => settle(true),
+      onCancel: () => settle(false),
+    });
+  });
+}
+
+/**
+ * Fetch katalog-item for nåværende plan-posisjon når backend kaster
+ * `JACKPOT_SETUP_REQUIRED`. JackpotSetupModal trenger full
+ * `currentItem.catalogEntry` (med ticketColors-listen).
+ */
+async function fetchCatalogItemForSpill1JackpotSetup(
+  hallId: string,
+  err: ApiError,
+): Promise<AgentGamePlanItem | null> {
+  try {
+    const planCurrent = await fetchAgentGamePlanCurrent({ hallId });
+    const targetPosition = (() => {
+      const d = err.details;
+      if (!d) return null;
+      const p = Number(d.position);
+      return Number.isFinite(p) && Number.isInteger(p) ? p : null;
+    })();
+    if (targetPosition !== null) {
+      const match = planCurrent.items.find(
+        (i) => i.position === targetPosition,
+      );
+      if (match) return match;
+    }
+    return planCurrent.currentItem ?? planCurrent.nextItem ?? null;
+  } catch {
+    return null;
   }
 }
 
