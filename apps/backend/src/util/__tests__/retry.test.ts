@@ -1,5 +1,5 @@
 /**
- * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): unit-tester for `withRetry`-helper.
+ * Pilot Q3 2026 (PR #1116, 2026-05-09): unit-tester for `withRetry`-helper.
  *
  * Tester valideres med node:test + tsx (samme runner som resten av backend).
  * Tester bruker en synkron-i-praksis sleep-mock (resolve umiddelbart) så

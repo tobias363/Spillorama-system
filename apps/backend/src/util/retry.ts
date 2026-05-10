@@ -1,5 +1,5 @@
 /**
- * Pilot Q3 2026 (BIN-XXXX, 2026-05-09): generic retry-helper med
+ * Pilot Q3 2026 (PR #1116, 2026-05-09): generic retry-helper med
  * exponential backoff for transient operasjoner.
  *
  * Designet for `MasterActionService` sin bridge-spawn-flyt der vi vil tåle
