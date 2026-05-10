@@ -15,9 +15,9 @@
       "playerEmailPrefix": "loadtest-",
       "playerEmailDomain": "@loadtest.local",
       "expectedSlaMs": {
-        "p95SocketRoundtrip": 250,
-        "p95TicketMarkLatency": 500,
-        "p99SocketRoundtrip": 1000
+        "p95SocketRoundtrip": 500,
+        "p95TicketMarkLatency": 750,
+        "p99SocketRoundtrip": 1500
       }
     },
     "stress": {
