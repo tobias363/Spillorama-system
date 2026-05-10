@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 7 | 2026-05-10 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
-| [§4 Live-rom-state](#4-live-rom-state) | 6 | 2026-05-10 |
+| [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 5 | 2026-05-10 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 4 | 2026-05-10 |
@@ -56,7 +56,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 5 | 2026-05-10 |
 
-**Total:** 63 entries (per 2026-05-10)
+**Total:** 64 entries (per 2026-05-10)
 
 ---
 
@@ -438,6 +438,40 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - Alle nye socket-events som muterer state MÅ bruke wrapper
 - Fail-soft ved Redis-utfall (wallet-laget er fortsatt idempotent som defense-in-depth)
 **Related:** [ADR-0005](../adr/0005-outbox-pattern.md), tester `withSocketIdempotency.test.ts`
+
+### §4.7 — DR-runbook S1-S7-navne-kollisjon (mandat vs runbook)
+
+**Severity:** P1 (forvirring under press → feil prosedyre)
+**Oppdaget:** 2026-05-10 av Plan-agent under R12-valideringsplan-arbeid (BIN-816)
+**Symptom:** Ops/compliance leser "S5"-prosedyre i én doc og forventer en annen i annen doc — ulik forståelse under incident
+**Root cause:** To dokumenter bruker SAMME notasjon "S1-S7" for ULIKE scenario-sett:
+- `docs/operations/LIVE_ROOM_DR_RUNBOOK.md` bruker S1-S7 for INFRASTRUKTUR-scenarier:
+  - S1: Backend-instans-krasj
+  - S2: Redis-failover
+  - S3: Postgres failover
+  - S4: Region-down
+  - S5: DDoS
+  - S6: Rolling restart
+  - S7: Perpetual-loop-leak
+- `docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md` referer til S1-S7 for APPLICATION/COMPLIANCE-scenarier:
+  - S1: Master-hall fail
+  - S2: Multi-hall desync
+  - S3: Ledger poison
+  - S4: Wallet corruption
+  - S5: Rate-limit cascade
+  - S6: RNG drift
+  - S7: Network partition
+**Fix-plan (per `R12_DR_VALIDATION_PLAN.md` §8):**
+- Re-numerér ELLER eksplisitt cross-reference mellom mandat-S1-S7 og runbook-S1-S7
+- Legg mapping-tabell øverst i `LIVE_ROOM_DR_RUNBOOK.md`
+- Når denne fallgruven slår inn, kan compliance-eier følge feil prosedyre under press
+**Prevention:**
+- Aldri bruk samme notasjon (S1-S7, P0-P3, etc.) for to ulike kategorier i samme prosjekt
+- Code-/doc-review: hvis du ser overlappende numbering, krev cross-reference
+- Test: kan ny ops/compliance lese "S5 trigget" og umiddelbart vite hvilken prosedyre uten konflikt?
+**Related:**
+- [`R12_DR_VALIDATION_PLAN.md`](../operations/R12_DR_VALIDATION_PLAN.md) §8 (foreslått fix)
+- BIN-816 R12 DR-runbook validering
 
 ---
 
