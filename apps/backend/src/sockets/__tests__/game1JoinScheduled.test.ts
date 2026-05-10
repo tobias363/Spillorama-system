@@ -128,6 +128,16 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
     markRoomAsScheduled: (code: string, scheduledGameId: string) => {
       markScheduledCalls.push({ code, scheduledGameId });
     },
+    // ADR-0019 P0-2: sync-persist variants used by joinScheduledGame.
+    markRoomAsScheduledAndPersist: async (code: string, scheduledGameId: string) => {
+      markScheduledCalls.push({ code, scheduledGameId });
+    },
+    setRoomHallSharedAndPersist: async (_code: string, _isHallShared: boolean) => {
+      /* no-op for test mock */
+    },
+    setRoomTestHallAndPersist: async (_code: string, _isTestHall: boolean) => {
+      /* no-op for test mock */
+    },
   };
 
   const game1DrawEngine = {

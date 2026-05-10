@@ -30,6 +30,8 @@ class FakeStore implements RoomStateStore {
   private readonly rooms = new Map<string, RoomState>();
   get(code: string): RoomState | undefined { return this.rooms.get(code); }
   set(code: string, room: RoomState): void { this.rooms.set(code, room); }
+  // ADR-0019 P0-2: sync-persist signature matches in-memory store (no Redis).
+  async setAndPersist(code: string, room: RoomState): Promise<void> { this.rooms.set(code, room); }
   delete(code: string): void { this.rooms.delete(code); }
   has(code: string): boolean { return this.rooms.has(code); }
   keys(): IterableIterator<string> { return this.rooms.keys(); }
