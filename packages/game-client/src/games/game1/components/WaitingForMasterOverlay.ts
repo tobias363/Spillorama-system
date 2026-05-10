@@ -175,13 +175,19 @@ export class WaitingForMasterOverlay {
     ].join(";");
 
     const card = document.createElement("div");
+    // Tobias-bug 2026-05-11: card hadde `pointer-events: auto` for fokus-
+    // styling, men card-en sentreres i viewport og dekker dermed
+    // BuyPopup-stepperne (Small Yellow/White/Purple "+0-"-knapper).
+    // Card har ingen interaktive elementer selv, så `none` er trygt og
+    // tillater spilleren å klikke "+/-" gjennom card-en for å velge brett
+    // mens "Venter på master"-meldingen er synlig.
     card.style.cssText = [
       "background: rgba(8, 16, 32, 0.78)",
       "color: #fff",
       "padding: 32px 48px",
       "border-radius: 16px",
       "max-width: 480px",
-      "pointer-events: auto",
+      "pointer-events: none",
       "box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4)",
       "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     ].join(";");
