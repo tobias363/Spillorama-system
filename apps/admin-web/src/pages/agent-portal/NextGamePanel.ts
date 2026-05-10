@@ -543,6 +543,14 @@ async function refreshSpill1(): Promise<void> {
       // Subscribe socket på currentScheduledGameId (single id-rom).
       spill1Socket.subscribe(data.currentGame.id);
     }
+    // ADR-0019 P0-3 (Wave 1, 2026-05-10): transfer-events leveres ikke
+    // lenger via global io.emit. Agent-portal må eksplisitt joine
+    // `admin:masters:<scheduledGameId>` på default namespace for å motta
+    // transfer-request/approved/rejected/expired. Hopp over hvis ingen
+    // currentGame eller socket ikke er klar.
+    if (data.currentGame && hallSocket) {
+      hallSocket.subscribeGame(data.currentGame.id);
+    }
   } catch (err) {
     // FE-P0-003: aborts on unmount are silent.
     if (err instanceof DOMException && err.name === "AbortError") return;

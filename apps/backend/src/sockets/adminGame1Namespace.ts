@@ -57,6 +57,7 @@ import type {
   AdminGame1MasterChangedEvent,
 } from "../game/AdminGame1Broadcaster.js";
 import { emitPhaseWonToHallDisplays } from "./adminDisplayEvents.js";
+import { adminMastersRoomKey } from "./adminRoomKeys.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "admin-game1-namespace" });
@@ -346,16 +347,22 @@ export function createAdminGame1Namespace(
       }
     },
     /**
-     * Task 1.6: master-transfer request opprettet. Broadcast:
-     *   - admin-namespace `game1:<gameId>`  → master-konsoll ser pending-banner
-     *   - default-namespace `hall:<toHallId>:display` → agent-portal-popup når
-     *     agentens socket har joint hall-display-rommet (via admin-display:
-     *     subscribe). Agent-portal som ikke har joint rommet faller tilbake
-     *     på polling av `GET .../transfer-request`.
+     * Task 1.6 + ADR-0019 P0-3 (Wave 1): master-transfer request opprettet.
+     *
+     * Broadcast-strategi (post-P0-3-fix):
+     *   - admin-namespace `game1:<gameId>` → master-konsoll ser pending-banner
+     *     (master-konsoll subscriber via game1:subscribe på /admin-game1)
+     *   - default-namespace `hall:<toHallId>:display` → TV-skjerm + agent
+     *     som har gjort `admin-display:subscribe`
      *   - default-namespace `hall:<fromHallId>:display` → initiator ser status
-     *   - default-namespace `io.emit(...)` → bred fallback så alle admin-klienter
-     *     kan filtrere på `toHallId`/`fromHallId` mot sin egen hall. Dette
-     *     dekker agent-portalen som ikke joiner display-rommet.
+     *   - default-namespace `admin:masters:<gameId>` → agent-portal-konsoller
+     *     som har joinet master-rommet via admin:game1:subscribe (default ns).
+     *
+     * Tidligere brukte vi `io.emit(...)` som bred fallback for agent-portalen.
+     * Det sendte alle transfer-events til hver tilkoblet socket (~36k på
+     * pilot-peak), inkludert spillere som aldri trenger transfer-state. Det
+     * brøt eksplisitt ADR-0013 / Wave 3b per-spiller-strip-mandatet. Nå går
+     * eventet kun til admin/TV/agent-konsoller som faktisk er i master-rommet.
      */
     onTransferRequest(event: AdminGame1TransferRequestEvent): void {
       try {
@@ -371,8 +378,13 @@ export function createAdminGame1Namespace(
           "game1:transfer-request",
           payload
         );
-        // Bred fallback — klient-siden filtrerer på hallId.
-        io.emit("game1:transfer-request", payload);
+        // ADR-0019 P0-3: targeted broadcast til admin-masters-rommet i stedet
+        // for global io.emit. Agent-portal joiner rommet via
+        // `admin:game1:subscribe` på default namespace.
+        io.to(adminMastersRoomKey(event.gameId)).emit(
+          "game1:transfer-request",
+          payload
+        );
       } catch (err) {
         log.warn(
           { err, event: "game1:transfer-request", gameId: event.gameId },
@@ -394,7 +406,11 @@ export function createAdminGame1Namespace(
           "game1:transfer-approved",
           payload
         );
-        io.emit("game1:transfer-approved", payload);
+        // ADR-0019 P0-3: targeted broadcast (se onTransferRequest).
+        io.to(adminMastersRoomKey(event.gameId)).emit(
+          "game1:transfer-approved",
+          payload
+        );
       } catch (err) {
         log.warn(
           { err, event: "game1:transfer-approved", gameId: event.gameId },
@@ -412,7 +428,11 @@ export function createAdminGame1Namespace(
           "game1:transfer-rejected",
           payload
         );
-        io.emit("game1:transfer-rejected", payload);
+        // ADR-0019 P0-3: targeted broadcast (se onTransferRequest).
+        io.to(adminMastersRoomKey(event.gameId)).emit(
+          "game1:transfer-rejected",
+          payload
+        );
       } catch (err) {
         log.warn(
           { err, event: "game1:transfer-rejected", gameId: event.gameId },
@@ -434,7 +454,11 @@ export function createAdminGame1Namespace(
           "game1:transfer-expired",
           payload
         );
-        io.emit("game1:transfer-expired", payload);
+        // ADR-0019 P0-3: targeted broadcast (se onTransferRequest).
+        io.to(adminMastersRoomKey(event.gameId)).emit(
+          "game1:transfer-expired",
+          payload
+        );
       } catch (err) {
         log.warn(
           { err, event: "game1:transfer-expired", gameId: event.gameId },
@@ -467,8 +491,10 @@ export function createAdminGame1Namespace(
       }
     },
     /**
-     * Task 1.6: master-hall byttet (broadcastes etter approve). Globalt til
-     * game-room — alle haller i linken oppdaterer "Master"-badgen i UI.
+     * Task 1.6 + ADR-0019 P0-3 (Wave 1): master-hall byttet (broadcastes etter
+     * approve). Targetes til admin-masters-rommet for default namespace
+     * konsumenter, og til alle TV-displays i berørte haller (fra/til-master).
+     * Spillere har ingen behov for master-changed events.
      */
     onMasterChanged(event: AdminGame1MasterChangedEvent): void {
       try {
@@ -482,9 +508,20 @@ export function createAdminGame1Namespace(
         namespace
           .to(gameRoomKey(event.gameId))
           .emit("game1:master-changed", payload);
-        // Globalt default-namespace broadcast så TV-skjerm + hall-UIer i
-        // alle haller kan re-hente hall-status (UI viser master-badge).
-        io.emit("game1:master-changed", payload);
+        // ADR-0019 P0-3: replaced global io.emit med targeted broadcast.
+        io.to(adminMastersRoomKey(event.gameId)).emit(
+          "game1:master-changed",
+          payload
+        );
+        // TV-skjermer i berørte haller skal også oppdatere master-badge.
+        io.to(`hall:${event.previousMasterHallId}:display`).emit(
+          "game1:master-changed",
+          payload
+        );
+        io.to(`hall:${event.newMasterHallId}:display`).emit(
+          "game1:master-changed",
+          payload
+        );
       } catch (err) {
         log.warn(
           { err, event: "game1:master-changed", gameId: event.gameId },

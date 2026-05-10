@@ -101,6 +101,13 @@ export class AgentHallSocket {
     onTransferExpired: (evt: AgentTransferRequest) => void;
   };
   private currentRoomCode: string | null = null;
+  /**
+   * ADR-0019 P0-3 (Wave 1): gameId vi er abonnert på via
+   * `admin:game1:subscribe` — backend leverer transfer-events kun til
+   * sockets som har joinet `admin:masters:<gameId>` (ikke lenger via
+   * global io.emit). Re-sendes ved reconnect.
+   */
+  private currentGameId: string | null = null;
   private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private fallbackActive = false;
   private disposed = false;
@@ -135,9 +142,23 @@ export class AgentHallSocket {
         this.fallbackActive = false;
         this.options.onFallbackActive(false);
       }
-      // Task 1.6: ingen subscribe nødvendig — backend emitter også globalt
-      // via io.emit(...) slik at agent-portal kan filtrere klient-side på
-      // toHallId/fromHallId mot options.hallId.
+      // ADR-0019 P0-3 (Wave 1, 2026-05-10): backend bruker IKKE lenger
+      // global io.emit for transfer-events. Vi må gjøre admin:login + så
+      // admin:game1:subscribe når vi vet hvilken gameId vi er interessert
+      // i. Selve admin:login er nødvendig fordi admin:game1:subscribe-
+      // handleren krever en autentisert socket. Re-emit ved reconnect
+      // håndteres av `subscribeGame` cached i `currentGameId`.
+      const token = getToken();
+      if (token) {
+        this.socket.emit("admin:login", { accessToken: token }, () => {
+          // Re-subscribe ved reconnect hvis vi hadde et aktivt gameId.
+          if (this.currentGameId) {
+            this.socket.emit("admin:game1:subscribe", {
+              gameId: this.currentGameId,
+            });
+          }
+        });
+      }
     });
 
     this.socket.on("disconnect", () => {
@@ -195,6 +216,33 @@ export class AgentHallSocket {
     this.currentRoomCode = roomCode;
   }
 
+  /**
+   * ADR-0019 P0-3 (Wave 1): abonnér på master-events for gitt gameId.
+   * Sender `admin:game1:subscribe { gameId }` slik at backend joiner
+   * socketen i `admin:masters:<gameId>`. Bytter abonnement hvis en annen
+   * gameId allerede var aktiv (unsubscribe + subscribe). Re-sendes
+   * automatisk i `connect`-handleren ved reconnect.
+   *
+   * Caller bør kalle denne så snart neste-spill-gameId er kjent. Hvis
+   * gameId ikke er kjent enda, kan den utelates — transfer-events
+   * leveres bare for gameId-er vi er abonnert på.
+   */
+  subscribeGame(gameId: string): void {
+    if (this.disposed) return;
+    if (this.currentGameId === gameId) return;
+    if (this.currentGameId && this.socket.connected) {
+      this.socket.emit("admin:game1:unsubscribe", {
+        gameId: this.currentGameId,
+      });
+    }
+    this.currentGameId = gameId;
+    if (this.socket.connected) {
+      this.socket.emit("admin:game1:subscribe", { gameId });
+    }
+    // Hvis ikke connected enda — connect-handleren re-emitter
+    // admin:login + admin:game1:subscribe.
+  }
+
   isFallbackActive(): boolean {
     return this.fallbackActive;
   }
@@ -207,6 +255,16 @@ export class AgentHallSocket {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelFallbackTimer();
+    if (this.currentGameId && this.socket.connected) {
+      try {
+        this.socket.emit("admin:game1:unsubscribe", {
+          gameId: this.currentGameId,
+        });
+      } catch {
+        // ignorer — socket kan allerede være nede
+      }
+    }
+    this.currentGameId = null;
     this.currentRoomCode = null;
     this.socket.removeAllListeners();
     this.socket.disconnect();

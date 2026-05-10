@@ -332,9 +332,17 @@ test("PR2 router: POST ready som ADMIN happy path → 200 + AuditLog + socket-em
     assert.ok(audits.find((a) => a.action === "hall.sales.closed"));
 
     // Socket-broadcast
+    // ADR-0019 P0-3 (Agent B, 2026-05-10): ready-status-update er nå targeted
+    // til `admin:masters:<gameId>` istedenfor global io.emit. Tidligere lekket
+    // global emit til ~36k sockets på pilot-peak; spillere har ingen behov for
+    // ready-status. Master/agent-konsoller joiner `admin:masters:<gameId>`;
+    // TV-skjermen joiner fortsatt `hall:<hallId>:display`.
     const event = ctx.emitted.find((e) => e.event === "game1:ready-status-update");
     assert.ok(event, "forventet socket-emit");
-    assert.deepEqual(event!.room, null); // global emit først
+    const mastersEmit = ctx.emitted.find(
+      (e) => e.room === "admin:masters:g1" && e.event === "game1:ready-status-update"
+    );
+    assert.ok(mastersEmit, "forventet emit til admin:masters:<gameId>");
     const displayEmit = ctx.emitted.find(
       (e) => e.room === "hall:hall-a:display"
     );

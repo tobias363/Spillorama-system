@@ -109,6 +109,7 @@ import {
   isRecordObject,
 } from "../util/httpHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { adminMastersRoomKey } from "../sockets/adminRoomKeys.js";
 
 const logger = rootLogger.child({ module: "admin-game1-ready" });
 
@@ -223,8 +224,12 @@ export function createAdminGame1ReadyRouter(
       at: Date.now(),
     };
     if (io) {
-      // Global broadcast — admin master-UI-subscribers + hall-display.
-      io.emit("game1:ready-status-update", event);
+      // ADR-0019 P0-3 (Wave 1): replaced global io.emit med targeted broadcast.
+      // Tidligere io.emit lekket ready-status til alle tilkoblede sockets (~36k
+      // på pilot-peak); spillere har ingen behov for ready-status-events.
+      // Master/agent-konsoller joiner admin:masters:<gameId>; TV-skjermen
+      // joiner hall:<hallId>:display.
+      io.to(adminMastersRoomKey(gameId)).emit("game1:ready-status-update", event);
       io.to(`hall:${hallId}:display`).emit("game1:ready-status-update", event);
     }
     // TASK HS: også broadcast beriket farge-event. Hentes separat for å

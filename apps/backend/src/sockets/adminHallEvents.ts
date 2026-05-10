@@ -610,5 +610,169 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
         ackFailure(callback, code, message);
       }
     });
+
+    // ── admin:game1:subscribe (ADR-0019 P0-3, Wave 1) ────────────────────
+    //
+    // Lar agent-portal/master-konsoll på DEFAULT namespace joine
+    // `admin:masters:<gameId>` for å motta master-action, transfer-*,
+    // master-changed, og ready-status-update events. Tidligere brukte
+    // backend bare `io.emit(...)` som lekket til alle ~36k sockets.
+    //
+    // Master-konsollen som bruker /admin-game1-namespacet trenger IKKE
+    // dette eventet (den joiner game1:<gameId> via game1:subscribe på
+    // namespacet). Dette eventet er for default-namespace-konsumenter
+    // (agent-portal) som ikke er på det dedikerte admin-namespacet.
+    socket.on(
+      "admin:game1:subscribe",
+      async (
+        payload: { gameId?: unknown } | undefined,
+        callback?: (r: AckResponse<{ gameId: string }>) => void,
+      ) => {
+        try {
+          if (!adminRateLimitOk(socket, "admin:game1:subscribe")) {
+            ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+            return;
+          }
+          const admin = (socket.data as AdminSocketData).adminUser;
+          if (!admin) {
+            ackFailure(callback, "NOT_AUTHENTICATED", "Kjør admin:login først.");
+            return;
+          }
+          // Bare admin-roller som har lov å se master-actions skal joine.
+          // Master-event-konsumenter er ADMIN, HALL_OPERATOR og AGENT (samme
+          // sett som GAME1_MASTER_WRITE). SUPPORT er read-only og kan også
+          // observere ready-state-events for incident-response.
+          if (!canAccessAdminPermission(admin.role, "ROOM_CONTROL_READ")) {
+            ackFailure(callback, "FORBIDDEN", "Mangler tilgang til master-events.");
+            return;
+          }
+          const gameId =
+            typeof payload?.gameId === "string" ? payload.gameId.trim() : "";
+          if (!gameId) {
+            ackFailure(callback, "INVALID_INPUT", "gameId mangler.");
+            return;
+          }
+          // Bruk samme rom-konvensjon som backend emitter på (adminMastersRoomKey).
+          socket.join(`admin:masters:${gameId}`);
+          ackSuccess(callback, { gameId });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "ukjent feil";
+          ackFailure(callback, "SUBSCRIBE_FAILED", message);
+        }
+      },
+    );
+
+    socket.on(
+      "admin:game1:unsubscribe",
+      async (
+        payload: { gameId?: unknown } | undefined,
+        callback?: (r: AckResponse<{ gameId: string }>) => void,
+      ) => {
+        try {
+          if (!adminRateLimitOk(socket, "admin:game1:unsubscribe")) {
+            ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+            return;
+          }
+          const gameId =
+            typeof payload?.gameId === "string" ? payload.gameId.trim() : "";
+          if (!gameId) {
+            ackFailure(callback, "INVALID_INPUT", "gameId mangler.");
+            return;
+          }
+          socket.leave(`admin:masters:${gameId}`);
+          ackSuccess(callback, { gameId });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "ukjent feil";
+          ackFailure(callback, "UNSUBSCRIBE_FAILED", message);
+        }
+      },
+    );
+
+    // ── admin:room:subscribe (ADR-0019 P0-4, Wave 1) ─────────────────────
+    //
+    // Lar admin/TV-konsumenter joine `<roomCode>:admin` for å motta FULLE
+    // room:update-snapshots. Counterpart til per-spiller-strip i index.ts
+    // som filtrerer state per mottaker. Uten admin-rom-snapshot ville
+    // admin-display + TV se players=[] / tickets={} / marks={} for
+    // perpetual-rom (Spill 2/3), som bryter "alle ser samme state".
+    //
+    // Brukes av admin-display (TV) og master-konsoll-room-view; spillere
+    // skal IKKE joine dette rommet — de mottar strippet payload via
+    // socket.id-emit.
+    socket.on(
+      "admin:room:subscribe",
+      async (
+        payload: { roomCode?: unknown } | undefined,
+        callback?: (r: AckResponse<{ roomCode: string }>) => void,
+      ) => {
+        try {
+          if (!adminRateLimitOk(socket, "admin:room:subscribe")) {
+            ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+            return;
+          }
+          const admin = (socket.data as AdminSocketData).adminUser;
+          if (!admin) {
+            ackFailure(callback, "NOT_AUTHENTICATED", "Kjør admin:login først.");
+            return;
+          }
+          if (!canAccessAdminPermission(admin.role, "ROOM_CONTROL_READ")) {
+            ackFailure(callback, "FORBIDDEN", "Mangler tilgang til admin-rom.");
+            return;
+          }
+          const roomCode =
+            typeof payload?.roomCode === "string" ? payload.roomCode.trim() : "";
+          if (!roomCode) {
+            ackFailure(callback, "INVALID_INPUT", "roomCode mangler.");
+            return;
+          }
+          // Hall-scope: HALL_OPERATOR/AGENT må kun kunne se rom i egen hall.
+          // ADMIN/SUPPORT er globalt scope.
+          const hallId = resolveHallId(roomCode);
+          if (hallId === null) {
+            ackFailure(callback, "ROOM_NOT_FOUND", "Rommet finnes ikke.");
+            return;
+          }
+          try {
+            assertAdminCanActOnHall(admin, hallId);
+          } catch (err) {
+            const code = (err as { code?: string }).code ?? "FORBIDDEN";
+            const message = err instanceof Error ? err.message : "Du har ikke tilgang til denne hallen.";
+            ackFailure(callback, code, message);
+            return;
+          }
+          socket.join(`${roomCode}:admin`);
+          ackSuccess(callback, { roomCode });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "ukjent feil";
+          ackFailure(callback, "SUBSCRIBE_FAILED", message);
+        }
+      },
+    );
+
+    socket.on(
+      "admin:room:unsubscribe",
+      async (
+        payload: { roomCode?: unknown } | undefined,
+        callback?: (r: AckResponse<{ roomCode: string }>) => void,
+      ) => {
+        try {
+          if (!adminRateLimitOk(socket, "admin:room:unsubscribe")) {
+            ackFailure(callback, "RATE_LIMITED", "For mange foresporsler. Vent litt.");
+            return;
+          }
+          const roomCode =
+            typeof payload?.roomCode === "string" ? payload.roomCode.trim() : "";
+          if (!roomCode) {
+            ackFailure(callback, "INVALID_INPUT", "roomCode mangler.");
+            return;
+          }
+          socket.leave(`${roomCode}:admin`);
+          ackSuccess(callback, { roomCode });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "ukjent feil";
+          ackFailure(callback, "UNSUBSCRIBE_FAILED", message);
+        }
+      },
+    );
   };
 }

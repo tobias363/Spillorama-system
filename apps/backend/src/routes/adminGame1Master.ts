@@ -50,6 +50,7 @@ import {
   isRecordObject,
 } from "../util/httpHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { adminMastersRoomKey } from "../sockets/adminRoomKeys.js";
 
 const logger = rootLogger.child({ module: "admin-game1-master" });
 
@@ -183,7 +184,14 @@ function broadcastAction(
 ): void {
   if (!io) return;
   const eventPayload = { ...payload, at: Date.now() };
-  io.emit("game1:master-action", eventPayload);
+  // ADR-0019 P0-3 (Wave 1): replaced global io.emit med targeted broadcast
+  // til admin-masters-rommet + (når satt) group-rommet for haller-i-link.
+  // Tidligere io.emit lekket master-action til ~36k sockets på pilot-peak;
+  // spillere har ingen behov for master-action events.
+  io.to(adminMastersRoomKey(payload.gameId)).emit(
+    "game1:master-action",
+    eventPayload
+  );
   if (payload.groupHallId) {
     io.to(`group:${payload.groupHallId}`).emit(
       "game1:master-action",

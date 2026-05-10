@@ -21,6 +21,7 @@ type Listener = (payload: unknown) => void;
 
 class FakeSocket {
   public connected = false;
+  public readonly emits: Array<{ event: string; payload: unknown }> = [];
   private readonly listeners = new Map<string, Listener[]>();
   on(event: string, cb: Listener): this {
     const arr = this.listeners.get(event) ?? [];
@@ -28,7 +29,8 @@ class FakeSocket {
     this.listeners.set(event, arr);
     return this;
   }
-  emit(): this {
+  emit(event: string, payload?: unknown, _ack?: (...args: unknown[]) => void): this {
+    this.emits.push({ event, payload });
     return this;
   }
   removeAllListeners(): this {
@@ -123,5 +125,88 @@ describe("Task 1.6: AgentHallSocket transfer-filter", () => {
     fake.trigger("game1:transfer-request", sample("hall-b", "hall-a"));
     expect(onTransferRequest).toHaveBeenCalledTimes(1);
     socket.dispose();
+  });
+});
+
+// ── ADR-0019 P0-3 (Wave 1, 2026-05-10): subscribeGame for admin-masters-rom ──
+
+describe("ADR-0019: AgentHallSocket admin:game1:subscribe wiring", () => {
+  it("emits admin:login etter connect", () => {
+    const fake = new FakeSocket();
+    const socket = new AgentHallSocket({
+      hallId: "hall-a",
+      onHallEvent: () => {},
+      _ioFactory: (() => fake as never) as never,
+    });
+    fake.simulateConnect();
+    // Første emit etter connect skal være admin:login med token.
+    const loginEmit = fake.emits.find((e) => e.event === "admin:login");
+    expect(loginEmit).toBeDefined();
+    expect(loginEmit?.payload).toEqual({ accessToken: "tok" });
+    socket.dispose();
+  });
+
+  it("subscribeGame sender admin:game1:subscribe når connected", () => {
+    const fake = new FakeSocket();
+    const socket = new AgentHallSocket({
+      hallId: "hall-a",
+      onHallEvent: () => {},
+      _ioFactory: (() => fake as never) as never,
+    });
+    fake.simulateConnect();
+    fake.emits.length = 0; // clear emits-buffer
+    socket.subscribeGame("scheduled-game-1");
+    const subEmit = fake.emits.find((e) => e.event === "admin:game1:subscribe");
+    expect(subEmit).toBeDefined();
+    expect(subEmit?.payload).toEqual({ gameId: "scheduled-game-1" });
+    socket.dispose();
+  });
+
+  it("subscribeGame bytter abonnement (unsubscribe + subscribe)", () => {
+    const fake = new FakeSocket();
+    const socket = new AgentHallSocket({
+      hallId: "hall-a",
+      onHallEvent: () => {},
+      _ioFactory: (() => fake as never) as never,
+    });
+    fake.simulateConnect();
+    socket.subscribeGame("game-1");
+    fake.emits.length = 0;
+    socket.subscribeGame("game-2");
+    const unsubEmit = fake.emits.find((e) => e.event === "admin:game1:unsubscribe");
+    const subEmit = fake.emits.find((e) => e.event === "admin:game1:subscribe");
+    expect(unsubEmit?.payload).toEqual({ gameId: "game-1" });
+    expect(subEmit?.payload).toEqual({ gameId: "game-2" });
+    socket.dispose();
+  });
+
+  it("subscribeGame idempotent når samme gameId allerede aktiv", () => {
+    const fake = new FakeSocket();
+    const socket = new AgentHallSocket({
+      hallId: "hall-a",
+      onHallEvent: () => {},
+      _ioFactory: (() => fake as never) as never,
+    });
+    fake.simulateConnect();
+    socket.subscribeGame("game-1");
+    fake.emits.length = 0;
+    socket.subscribeGame("game-1");
+    expect(fake.emits).toEqual([]);
+    socket.dispose();
+  });
+
+  it("dispose sender admin:game1:unsubscribe for aktivt gameId", () => {
+    const fake = new FakeSocket();
+    const socket = new AgentHallSocket({
+      hallId: "hall-a",
+      onHallEvent: () => {},
+      _ioFactory: (() => fake as never) as never,
+    });
+    fake.simulateConnect();
+    socket.subscribeGame("game-1");
+    fake.emits.length = 0;
+    socket.dispose();
+    const unsubEmit = fake.emits.find((e) => e.event === "admin:game1:unsubscribe");
+    expect(unsubEmit?.payload).toEqual({ gameId: "game-1" });
   });
 });
