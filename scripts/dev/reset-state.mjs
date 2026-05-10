@@ -153,30 +153,70 @@ async function resetPaymentRequests(client) {
 
 async function resetWallets(client) {
   step("Resetter demo-spiller-saldoer til 5000 NOK");
-  // Vi trekker en correction-tx slik at saldo lander på 5000 NOK
+  // Fix 2026-05-10: tidligere brukte vi `targetCents = 5000 * 100 = 500000`
+  // som var en enhets-bug — `wallet_accounts.deposit_balance` er
+  // `numeric(20,6)` lagret i NOK (major-units), IKKE øre. Resultat var
+  // at demo-wallets fikk 500_000 NOK istedenfor 5000 NOK, og reconciliation
+  // fanget 21 ERROR-divergences fordi `wallet_entries` (ledger) sa 500 NOK
+  // mens balance sa 500_000. Riktig: `targetMajor = 5000` (NOK direkte),
+  // pluss correction-entry i wallet_entries så ledger matcher balance.
   const usersRes = await client.query(
     `SELECT u.id, u.email, u.wallet_id, w.deposit_balance, w.winnings_balance
        FROM app_users u
        LEFT JOIN wallet_accounts w ON w.id = u.wallet_id
       WHERE u.email LIKE 'demo-%@%' OR u.email LIKE '%@example.com'`
   );
-  const targetCents = 5000 * 100;
+  const targetMajor = 5000; // 5000 NOK (kr) — wallet_accounts.deposit_balance er i NOK
   let updated = 0;
   for (const row of usersRes.rows) {
     if (!row.wallet_id) continue;
     // Direkte UPDATE av wallet — vi går rundt vanlig pengeflyt fordi dette
     // er en lokal-test-helper. ALDRI bruk denne mot prod-DB.
+
+    // Beregn diff mot eksisterende ledger-sum slik at correction-entry
+    // matcher balance. Hvis ledger allerede er på targetMajor, hopper vi
+    // over INSERT for å unngå duplikate operation_id-konflikter (idempotent).
+    const ledgerRes = await client.query(
+      `SELECT COALESCE(
+         SUM(CASE WHEN side = 'CREDIT' THEN amount
+                  WHEN side = 'DEBIT'  THEN -amount
+                  ELSE 0 END),
+         0
+       ) AS net
+       FROM wallet_entries
+       WHERE account_id = $1 AND account_side = 'deposit'`,
+      [row.wallet_id]
+    );
+    const ledgerNet = Number(ledgerRes.rows[0]?.net ?? 0);
+    const diff = targetMajor - ledgerNet;
+    if (Math.abs(diff) > 0.01) {
+      // Skriv correction-entry så reconciliation ser balansert state.
+      // operation_id er stabil basert på wallet_id + dato slik at re-runs
+      // samme dag dedup-er via ON CONFLICT.
+      const today = new Date().toISOString().slice(0, 10);
+      const opId = `dev-reset-${row.wallet_id}-${today}`;
+      await client.query(
+        `INSERT INTO wallet_entries
+           (operation_id, account_id, side, amount, account_side,
+            currency, entry_hash, previous_entry_hash)
+         VALUES
+           ($1, $2, $3, $4, 'deposit', 'NOK', NULL, NULL)
+         ON CONFLICT (operation_id) DO NOTHING`,
+        [opId, row.wallet_id, diff > 0 ? 'CREDIT' : 'DEBIT', Math.abs(diff)]
+      );
+    }
+
     await client.query(
       `UPDATE wallet_accounts
           SET deposit_balance = $2,
               winnings_balance = 0,
               updated_at = now()
         WHERE id = $1`,
-      [row.wallet_id, targetCents]
+      [row.wallet_id, targetMajor]
     );
     updated += 1;
   }
-  console.log(`  ${color("dim", `oppdaterte ${updated} demo-wallets til 5000 NOK`)}`);
+  console.log(`  ${color("dim", `oppdaterte ${updated} demo-wallets til 5000 NOK (ledger sync)`)}`);
 }
 
 async function resetRedis() {
