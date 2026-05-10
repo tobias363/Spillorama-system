@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "R4 load-test config for Spill 1. Smoke = lokal sanity, full = staging 1000-VU.",
+  "scenarios": {
+    "smoke": {
+      "description": "50 VUs over 5 min — verifiser at scriptet, infra og metrics fungerer ende-til-ende.",
+      "vuCount": 50,
+      "rampUpSeconds": 30,
+      "holdMinutes": 3,
+      "rampDownSeconds": 30,
+      "ticketsPerVu": 5,
+      "marksPerSecond": 0.5,
+      "targetHallId": "demo-hall-001",
+      "targetRoomCode": "BINGO1",
+      "playerEmailPrefix": "loadtest-",
+      "playerEmailDomain": "@loadtest.local",
+      "expectedSlaMs": {
+        "p95SocketRoundtrip": 250,
+        "p95TicketMarkLatency": 500,
+        "p99SocketRoundtrip": 1000
+      }
+    },
+    "stress": {
+      "description": "200 VUs over 10 min — mellomtest hvis full er for tungt lokalt.",
+      "vuCount": 200,
+      "rampUpSeconds": 60,
+      "holdMinutes": 8,
+      "rampDownSeconds": 60,
+      "ticketsPerVu": 5,
+      "marksPerSecond": 0.5,
+      "targetHallId": "demo-hall-001",
+      "targetRoomCode": "BINGO1",
+      "playerEmailPrefix": "loadtest-",
+      "playerEmailDomain": "@loadtest.local",
+      "expectedSlaMs": {
+        "p95SocketRoundtrip": 350,
+        "p95TicketMarkLatency": 750,
+        "p99SocketRoundtrip": 1500
+      }
+    },
+    "full": {
+      "description": "1000 VUs over 60 min — pilot-utvidelses-baseline. Kjør på staging (eller dedikert lokal-stack med min 16 GB RAM).",
+      "vuCount": 1000,
+      "rampUpSeconds": 60,
+      "holdMinutes": 60,
+      "rampDownSeconds": 30,
+      "ticketsPerVu": 5,
+      "marksPerSecond": 0.3,
+      "targetHallId": "demo-hall-001",
+      "targetRoomCode": "BINGO1",
+      "playerEmailPrefix": "loadtest-",
+      "playerEmailDomain": "@loadtest.local",
+      "expectedSlaMs": {
+        "p95SocketRoundtrip": 500,
+        "p95TicketMarkLatency": 1000,
+        "p99SocketRoundtrip": 2000
+      }
+    }
+  },
+  "metricsSamplingSeconds": 30,
+  "stopOnFirstError": false,
+  "tolerances": {
+    "maxConnectionErrorPercent": 1.0,
+    "maxAckTimeoutPercent": 2.0,
+    "minPlayersConnectedPercent": 95.0
+  }
+}
