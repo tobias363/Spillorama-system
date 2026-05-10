@@ -1,6 +1,11 @@
 # Husky pre-commit hook
 #
-# Kjorer lint-staged (.lintstagedrc.json) som matcher endrede filer mot:
+# Tre-trinns enforcement (utvidet 2026-05-10 med PM-gate + Tier-A intent):
+#   Trinn 1 — PM-gate: blokkerer commit hvis PM-onboarding-gate ikke gyldig
+#   Trinn 2 — Tier-A intent: blokkerer commit på Tier-A-paths uten Intent-confirmed-by
+#   Trinn 3 — Lint-staged: kvalitets-sjekker på endrede filer
+#
+# Lint-staged (.lintstagedrc.json) matcher endrede filer mot:
 #  - stylelint --fix paa CSS-filer
 #  - lint-no-backdrop-js + lint-no-unsafe-html paa TS-filer
 #  - npm run check (TypeScript strict) paa apps/backend/src/**/*.ts
@@ -12,8 +17,21 @@
 # Hvis hook feiler, fiks overtredelsene FOR commit. For nedbypass med
 # begrunnelse: commit med --no-verify og dokumenter hvorfor.
 #
+# Bypass av PM-gate spesifikt:
+#   PM_GATE_BYPASS=1 git commit ...
+#   git commit -m "fix: subject\n\n[bypass-pm-gate: <begrunnelse>]"
+#
+# Bypass av Tier-A intent-sjekk:
+#   PM_INTENT_BYPASS=1 git commit ...
+#
 # Se docs/engineering/PRE_COMMIT_HOOKS.md for full liste over regler og
-# hvordan legge til nye hooks. Se docs/engineering/CSS_LINTING.md for
-# CSS-spesifikke regler.
+# hvordan legge til nye hooks.
 
+# Trinn 1 — PM-gate enforcement (graceful hvis pm-checkpoint.sh ikke finnes)
+node scripts/check-pm-gate.mjs --strict || exit 1
+
+# Trinn 2 — Tier-A intent-håndhevelse
+node scripts/check-tier-a-intent.mjs || exit 1
+
+# Trinn 3 — Lint-staged kvalitets-sjekker
 npx lint-staged

@@ -1,0 +1,163 @@
+name: PM Gate Enforcement
+
+# Blokkerer merge av PR-er som ikke beviser at PM har passert
+# pm-checkpoint-gate (BIN-PM-VT, 2026-05-10).
+#
+# PR-beskrivelsen MÅ inneholde én av disse linjene/markørene:
+#
+#   gate-confirmed: <hash-prefix>      # 12-tegn-hash fra docs/.pm-confirmations.log
+#   Main-SHA i `.pm-onboarding-confirmed.txt`: <git-SHA>   # BIN-PM-VT-checkbox-format
+#   gate-bypass: <begrunnelse>         # Eksplisitt bypass m/Tobias-godkjenning
+#   gate-not-applicable: <rolle>       # Tobias selv / docs-only / dependabot / ci-bot
+#
+# Hvis ingen av disse finnes: PR blokkeres fra merge.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check PR description for gate-marker
+        id: check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          BODY="${PR_BODY:-}"
+
+          CONFIRMED_HASH=$(echo "$BODY" | grep -oE 'gate-confirmed:\s*[a-f0-9]{8,16}' | head -1 || true)
+          CONFIRMED_SHA=$(echo "$BODY" | grep -oE 'Main-SHA[^:]*:\s*`?[a-f0-9]{8,40}`?' | head -1 || true)
+          BYPASS=$(echo "$BODY" | grep -oE 'gate-bypass:\s*.+' | head -1 || true)
+          NOT_APPL=$(echo "$BODY" | grep -oE 'gate-not-applicable:\s*.+' | head -1 || true)
+
+          if [ -n "$CONFIRMED_HASH" ]; then
+            HASH=$(echo "$CONFIRMED_HASH" | grep -oE '[a-f0-9]{8,16}')
+            if [ -z "$HASH" ] || [ "$HASH" = "00000000" ]; then
+              echo "decision=missing" >> "$GITHUB_OUTPUT"
+            else
+              echo "marker=$HASH" >> "$GITHUB_OUTPUT"
+              echo "marker_type=hash" >> "$GITHUB_OUTPUT"
+              echo "decision=verify-marker" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ -n "$CONFIRMED_SHA" ]; then
+            SHA=$(echo "$CONFIRMED_SHA" | grep -oE '[a-f0-9]{8,40}' | head -1)
+            if [ -z "$SHA" ] || echo "$CONFIRMED_SHA" | grep -qE '__paste_sha_here__|<paste|<sha'; then
+              echo "decision=missing" >> "$GITHUB_OUTPUT"
+            else
+              echo "marker=$SHA" >> "$GITHUB_OUTPUT"
+              echo "marker_type=sha" >> "$GITHUB_OUTPUT"
+              echo "decision=verify-marker" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ -n "$BYPASS" ]; then
+            echo "decision=bypass" >> "$GITHUB_OUTPUT"
+            echo "bypass=$BYPASS" >> "$GITHUB_OUTPUT"
+          elif [ -n "$NOT_APPL" ]; then
+            echo "decision=not-applicable" >> "$GITHUB_OUTPUT"
+            echo "not_applicable=$NOT_APPL" >> "$GITHUB_OUTPUT"
+          else
+            echo "decision=missing" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify marker exists in .pm-confirmations.log
+        if: steps.check.outputs.decision == 'verify-marker'
+        run: |
+          MARKER="${{ steps.check.outputs.marker }}"
+          MARKER_TYPE="${{ steps.check.outputs.marker_type }}"
+          LOG="docs/.pm-confirmations.log"
+
+          if [ ! -f "$LOG" ]; then
+            echo "::error::Public log $LOG mangler. Hodefilen må committes først."
+            exit 1
+          fi
+
+          FOUND=0
+          if [ "$MARKER_TYPE" = "hash" ]; then
+            if grep -qF "| $MARKER |" "$LOG"; then
+              FOUND=1
+            fi
+          else
+            if grep -qE "\| ${MARKER}[a-f0-9]*\s*$" "$LOG" || grep -qE "\| [a-f0-9]*${MARKER}\s*$" "$LOG"; then
+              FOUND=1
+            fi
+          fi
+
+          if [ "$FOUND" = "1" ]; then
+            echo "::notice::Gate-marker ($MARKER_TYPE: $MARKER) verifisert i $LOG"
+          else
+            echo "::error::PR-beskrivelse refererer gate-marker '$MARKER' (type: $MARKER_TYPE), men den finnes IKKE i $LOG."
+            echo "::error::Kjør lokalt: node scripts/check-pm-gate.mjs --log-public, deretter commit + push docs/.pm-confirmations.log."
+            exit 1
+          fi
+
+      - name: Auto-comment if gate-marker missing
+        if: steps.check.outputs.decision == 'missing'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const lines = [
+              '## ⛔ PM-gate ikke bekreftet',
+              '',
+              'Denne PR-en mangler gyldig gate-marker. Du må legge til **én** av disse i PR-beskrivelsen:',
+              '',
+              '```',
+              'gate-confirmed: <hash-prefix>      # 12-tegn-hash fra docs/.pm-confirmations.log',
+              'gate-bypass: <begrunnelse>         # Eksplisitt bypass m/Tobias-godkjenning',
+              'gate-not-applicable: <rolle>      # Tobias selv / docs-only / dependabot / ci-bot',
+              '```',
+              '',
+              'Eller kryss av "Jeg er PM-AI"-checkbox og lim inn faktisk SHA i feltet `__paste_sha_here__` (BIN-PM-VT-format).',
+              '',
+              '**Hvordan finne hash-prefix:**',
+              '',
+              '```bash',
+              'bash scripts/pm-checkpoint.sh                        # hvis ikke allerede passert',
+              'node scripts/check-pm-gate.mjs --log-public          # appender til public audit-trail',
+              'tail -1 docs/.pm-confirmations.log                   # andre kolonne er hash',
+              '```',
+              '',
+              'Etter editering av PR-beskrivelse vil workflow re-kjøre automatisk.',
+              '',
+              '---',
+              '',
+              'Se `docs/operations/PM_PR_VERIFICATION_DUTY.md` for full regelverk.',
+            ];
+            const body = lines.join('\n');
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('PM-gate ikke bekreftet')
+            );
+            if (!existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+            core.setFailed('PR-beskrivelse mangler gate-marker. Se kommentar over.');
+
+      - name: Bypass logged (informativ)
+        if: steps.check.outputs.decision == 'bypass'
+        run: |
+          echo "::warning::Bypass-marker funnet: '${{ steps.check.outputs.bypass }}'"
+          echo "::warning::Sørg for at Tobias har godkjent bypass før merge."
+
+      - name: Not-applicable accepted (informativ)
+        if: steps.check.outputs.decision == 'not-applicable'
+        run: |
+          echo "::notice::PR markert ikke-applicable: '${{ steps.check.outputs.not_applicable }}'"

@@ -1,0 +1,70 @@
+name: Weekly Status Digest
+
+# Genererer docs/status/YYYY-Wnn.md hver fredag kl 14:00 UTC.
+
+on:
+  schedule:
+    - cron: "0 14 * * 5"
+  workflow_dispatch:
+    inputs:
+      week:
+        description: "ISO uke (YYYY-Wnn). Tom = nåværende uke."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-status-digest-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate digest
+        id: gen
+        run: |
+          if [ -n "${{ inputs.week }}" ]; then
+            node scripts/generate-weekly-status.mjs --week="${{ inputs.week }}"
+          else
+            node scripts/generate-weekly-status.mjs
+          fi
+          LATEST=$(ls -t docs/status/*.md 2>/dev/null | grep -v README | head -1)
+          echo "file=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Generated: $LATEST"
+
+      - name: Commit if changed
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions (weekly-status)"
+          if [ -n "$(git status --porcelain docs/status/)" ]; then
+            git add docs/status/
+            git commit -m "chore(docs): add weekly status digest [skip ci]"
+            git push
+          else
+            echo "No changes — digest already up to date"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Weekly Status Digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ steps.gen.outputs.file }}" ] && [ -f "${{ steps.gen.outputs.file }}" ]; then
+            echo "**File:** \`${{ steps.gen.outputs.file }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            head -30 "${{ steps.gen.outputs.file }}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No file generated._" >> "$GITHUB_STEP_SUMMARY"
+          fi
