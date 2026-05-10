@@ -87,21 +87,41 @@ export class SpilloramaApi {
         // Allerede unwrapped data — pakk inn i ok:true-konvolusjon.
         return { ok: true, data: result as T };
       } catch (err) {
-        // `authenticatedFetch` kaster ved 401-uten-refresh og ved
-        // `body.ok === false`. Konverter til ApiError-shape så caller
+        // `authenticatedFetch` kaster ved 401-uten-refresh, 429-rate-limit
+        // og ved `body.ok === false`. Konverter til ApiError-shape så caller
         // ikke trenger try/catch i tillegg til ok-sjekk.
+        //
+        // 2026-05-11 Tobias-direktiv: 429-feilen er allerede sanitized i
+        // auth.js (ingen sekund-countdown), men vi propagerer `RATE_LIMITED`-
+        // koden så callers kan skille rate-limit fra andre transientfeil og
+        // gjøre auto-backoff i stedet for å vise "Prøv igjen"-knapp.
+        const rateLimited =
+          err && typeof err === "object" && (err as { isRateLimited?: boolean }).isRateLimited === true;
         const message =
           err instanceof Error ? err.message : "Ukjent nettverksfeil";
         return {
           ok: false,
-          error: { code: "REQUEST_FAILED", message },
+          error: {
+            code: rateLimited ? "RATE_LIMITED" : "REQUEST_FAILED",
+            message,
+          },
         };
       }
     }
 
     // Direct-fetch path (ingen shell-auth tilgjengelig). Behold gammel
-    // oppførsel: forvent ApiResult-shape direkte fra serveren.
+    // oppførsel: forvent ApiResult-shape direkte fra serveren — men
+    // sanitiser 429 så ingen sekund-countdown fra backend bubble-er til UI.
     const res = await fetch(`${this.baseUrl}${path}`, init);
+    if (res.status === 429) {
+      return {
+        ok: false,
+        error: {
+          code: "RATE_LIMITED",
+          message: "Spillet er midlertidig utilgjengelig. Vi prøver igjen automatisk.",
+        },
+      };
+    }
     return (await res.json()) as ApiResult<T>;
   }
 

@@ -28,6 +28,11 @@
       'Accept': 'application/json'
     }, opts.headers || {});
     var res = await fetch(path, Object.assign({}, opts, { headers: headers }));
+    // 2026-05-11 Tobias-direktiv: 429 må ikke vise sekund-countdown til
+    // kunder. Bruk SpilloramaAuth-helperen for sanitised feilmelding.
+    if (res.status === 429 && window.SpilloramaAuth && typeof window.SpilloramaAuth.buildRateLimitedError === 'function') {
+      throw window.SpilloramaAuth.buildRateLimitedError(res);
+    }
     var body = await res.json();
     if (!body.ok) throw new Error(body.error?.message || 'Noe gikk galt');
     return body.data;

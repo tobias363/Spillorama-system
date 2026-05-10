@@ -20,6 +20,12 @@
       'Accept': 'application/json'
     }, opts.headers || {});
     var res = await fetch(path, Object.assign({}, opts, { headers: headers }));
+    // 2026-05-11 Tobias-direktiv: 429-rate-limit må aldri lekke
+    // "Prøv igjen om X sekunder."-melding til kunder. Bruk SpilloramaAuth-
+    // helperen (lastet før panels.js) til å bygge sanitisert feil.
+    if (res.status === 429 && window.SpilloramaAuth && typeof window.SpilloramaAuth.buildRateLimitedError === 'function') {
+      throw window.SpilloramaAuth.buildRateLimitedError(res);
+    }
     var body = await res.json();
     if (!body.ok) throw new Error(body.error && body.error.message ? body.error.message : 'Noe gikk galt');
     return body.data;

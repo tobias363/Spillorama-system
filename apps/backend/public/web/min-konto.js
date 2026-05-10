@@ -107,6 +107,12 @@
       credentials: 'include',
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     }).then(function (res) {
+      // 2026-05-11 Tobias-direktiv: 429 må ikke vise "Prøv igjen om X
+      // sekunder." til kunder. Min-konto-panelet henter saldo/grenser ved
+      // gjentatt åpning og kan trigge rate-limit ved hurtig klikking.
+      if (res.status === 429 && window.SpilloramaAuth && typeof window.SpilloramaAuth.buildRateLimitedError === 'function') {
+        throw window.SpilloramaAuth.buildRateLimitedError(res);
+      }
       return res.json().then(function (json) {
         if (!res.ok || (json && json.ok === false)) {
           var err = new Error((json && json.error && json.error.message) || ('HTTP ' + res.status));

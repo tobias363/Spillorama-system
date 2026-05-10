@@ -91,8 +91,37 @@
 
   // ── API ─────────────────────────────────────────────────────────────────
 
+  // 2026-05-11 Tobias-direktiv: spillerklient skal ALDRI vise rå
+  // "For mange forespørsler. Prøv igjen om X sekunder."-melding til kunder.
+  // Backend kan returnere 429 med en sekund-countdown i meldingen — vi
+  // erstatter den med en pen sanitized melding og markerer feilen som
+  // rate-limited slik at callere kan trigge auto-backoff.
+  //
+  // Returnerer alltid en Error med `.isRateLimited=true` og en
+  // `retryAfterMs`-property (parset fra Retry-After-header eller default
+  // 5s). Eventuelle sekund-countdowns fra backend skjules helt.
+  function buildRateLimitedError(res) {
+    var retryAfterHeader = (res && typeof res.headers?.get === 'function')
+      ? res.headers.get('Retry-After')
+      : null;
+    var retryAfterSec = parseInt(retryAfterHeader || '', 10);
+    if (!Number.isFinite(retryAfterSec) || retryAfterSec <= 0) {
+      retryAfterSec = 5;
+    }
+    // Bevisst ingen "X sekunder" i user-facing message — Tobias-direktiv
+    // 2026-05-11. Klient-laget styrer evt. countdown-UI (vi viser ingen).
+    var err = new Error('Spillet er midlertidig utilgjengelig. Vi prøver igjen automatisk.');
+    err.isRateLimited = true;
+    err.retryAfterMs = retryAfterSec * 1000;
+    err.httpStatus = 429;
+    return err;
+  }
+
   async function apiFetch(path, options) {
     const res = await fetch(path, options);
+    if (res.status === 429) {
+      throw buildRateLimitedError(res);
+    }
     const body = await res.json();
     if (!body.ok) {
       throw new Error(body.error?.message || 'Noe gikk galt');
@@ -151,9 +180,20 @@
         Accept: 'application/json'
       });
       const retryRes = await fetch(path, Object.assign({}, options, { headers: retryHeaders }));
+      if (retryRes.status === 429) {
+        throw buildRateLimitedError(retryRes);
+      }
       const retryBody = await retryRes.json();
       if (!retryBody.ok) throw new Error(retryBody.error?.message || 'Feil ved henting av data');
       return retryBody.data;
+    }
+
+    // 2026-05-11: 429 må ALDRI bubble opp som rå "For mange forespørsler.
+    // Prøv igjen om X sekunder." Sanitized melding + isRateLimited-flag
+    // gir callere mulighet til å trigge auto-backoff istedenfor å vise
+    // sekund-countdown til kunden.
+    if (res.status === 429) {
+      throw buildRateLimitedError(res);
     }
 
     const body = await res.json();
@@ -701,7 +741,24 @@
   }
 
   // ── Public API ───────────────────────────────────────────────────────────
-  window.SpilloramaAuth = { storedToken, storedUser, clearSession, authenticatedFetch };
+  //
+  // `isRateLimitedError`/`buildRateLimitedError` eksponeres så andre shell-
+  // filer (lobby.js, panels.js, min-konto.js, profile.js, …) kan detektere
+  // 429-feil og rendere felles "midlertidig utilgjengelig"-melding uten
+  // sekund-countdown. Pilot-bug 2026-05-11 (Tobias-direktiv): rå
+  // "For mange forespørsler. Prøv igjen om X sekunder."-melding kom frem
+  // til kunder ved hurtig reload.
+  function isRateLimitedError(err) {
+    return !!(err && err.isRateLimited === true);
+  }
+  window.SpilloramaAuth = {
+    storedToken,
+    storedUser,
+    clearSession,
+    authenticatedFetch,
+    isRateLimitedError,
+    buildRateLimitedError
+  };
 
   // ── Dev-only auto-login (Tobias 2026-05-05, fix 2026-05-06) ─────────────
   // Hvis URL inneholder ?dev-user=email@example.com prøver vi å auto-logge
