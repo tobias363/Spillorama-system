@@ -1,7 +1,7 @@
 # PM-onboarding-playbook — Spillorama-system
 
 **Status:** Autoritativ. Følg denne rutinen ved hver PM-overgang.
-**Sist oppdatert:** 2026-05-09
+**Sist oppdatert:** 2026-05-10
 **Eier:** Tobias Haugen (teknisk lead)
 **Vedlikehold:** Oppdater ved hver større endring i prosjekt-fundamentet (ny ADR som overstyrer mønstre, nye pilot-haller, store kataloog-endringer).
 
@@ -327,8 +327,71 @@ Hvis du vil dykke dypere etter trinn-rutinen i §3, her er prioritert lese-rekke
 - `MODULE_DEPENDENCIES.md` — backend-domene-graf
 - `SERVICES_OVERVIEW.md` — apps/packages-struktur
 - `SKILLS_CATALOG.md` — domain-skills-katalog
+- `DOC_FRESHNESS.md` — ukentlig sjekk av kanoniske docs (auto-fredag)
+
+[`docs/status/`](../status/) — ukesdigester, generert hver fredag:
+- `YYYY-Wnn.md` per ISO-uke (commits, handoffs, postmortems, ADR-er)
+- Ny PM kan bla bakover for å forstå utvikling over tid
 
 **Bruk disse FØRST** når du leter etter "current state" — håndskrevne docs kan være stale.
+
+---
+
+## 4.5 MCP-tools og connectors (live data via Cowork/Claude)
+
+Spillorama-PM bruker Cowork/Claude med disse MCP-koblingene:
+
+| MCP | Status | Brukstilfelle |
+|---|---|---|
+| **Linear** | ✅ Koblet | "Hva er åpne BIN-issues?", "Lukk BIN-NNN", endre status |
+| **GitHub** | (innebygd) | PR-mgmt, issues, workflow-runs |
+| **Cowork artifacts** | ✅ Innebygd | Lag live PM-dashboard (se `docs/operations/PM_DASHBOARD.md`) |
+| **Render** | ❌ Ikke tilgjengelig per 2026-05-10 | Bruk `secrets/render-api.local.md` + curl |
+| **Slack/PagerDuty** | (verifiser) | Hvis koblet — alarms til incident-channel |
+
+### Konkrete Linear-MCP-bruksmønstre
+
+I Cowork-chat — disse fungerer fordi MCP-en er koblet:
+
+```
+"Vis åpne BIN-issues sortert på prioritet"
+→ Claude bruker mcp__linear__list_issues + filter
+
+"Hva er status på BIN-823?"
+→ Claude bruker mcp__linear__get_issue
+
+"Marker BIN-815 som Done — commit SHA: abc123"
+→ Claude bruker mcp__linear__update_issue + skriver kommentar
+
+"Lag ny BIN-issue: 'Spill 2 leak-test feilet, se /docs/postmortems/2026-05-15-...'"
+→ Claude bruker mcp__linear__create_issue
+```
+
+**Foretrukket framfor manuell API:** Hvis Linear MCP fungerer, bruk den.
+Den har auth allerede, scope er satt korrekt, og PM kan inspisere requestet
+før det sendes. Manuell `LINEAR_API_KEY` skal kun brukes av scripts.
+
+### Bekreft hvilke MCP-er som faktisk er aktivert
+
+Ny PM bør verifisere:
+
+```
+Spør Claude i Cowork: "List alle MCP-tools du har tilgang til (mcp__*)"
+```
+
+Hvis Linear-tools mangler eller returnerer auth-feil — oppdater
+`docs/memory/MEMORY.md` §8 og fikse koblingen via Cowork connector-settings.
+
+### PM-dashboard som artifact
+
+Cowork-artifacts kan ha embedded MCP-kall. Du kan be Claude lage en
+live PM-dashboard som henter Linear-data ved hver refresh:
+
+> "Opprett en Cowork-artifact som viser åpne BIN-issues, gruppert på status,
+> oppdatert hver gang jeg åpner den. Bruk samme stil som
+> `scripts/pm-dashboard.html`. Kall den 'Spillorama PM Dashboard (Live)'."
+
+Detaljer: [`docs/operations/PM_DASHBOARD.md`](../operations/PM_DASHBOARD.md).
 
 ---
 
@@ -679,6 +742,7 @@ Per `ROLLBACK_RUNBOOK.md`:
 | Agent merger PR | PM eier merge |
 | `gh pr merge --merge` (no-ff) | `gh pr merge --squash --auto --delete-branch` |
 | Lukke Linear-issue på branch-merge | Vent på main-merge + verifiser |
+| Lage kjedede PR-er der B baserer på A uten rebase mellom squash-merger | Rebase B mot main etter A merges, ELLER bruk combined PR fra start (cherry-pick alle commits til én branch fra main). Squash-merge gir ny SHA → kjedet PR blir `mergeable: CONFLICTING/DIRTY` ellers. Se PM_HANDOFF_2026-05-10 §8. |
 
 ### 9.2 Compliance anti-mønstre
 
@@ -1020,6 +1084,7 @@ Last KUN når du redigerer kode i det domenet (lazy per-task).
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-09 | Initial — komplett PM-onboarding-playbook generert fra 6 parallelle research-agenter | PM-AI (Claude Opus 4.7 + 6 Explore-agenter) |
+| 2026-05-10 | Spillerklient-rebuild fase 1+2+3+4 fullført (5 PR-er merget i én sesjon). Pilot-blokker for spillerklient fjernet. Ny lærdom (§9 anti-mønstre): kjedede PR-er må rebases mot main mellom hvert squash-merge ELLER bruk combined PR for å unngå CONFLICTING-state. Se PM_HANDOFF_2026-05-10 §8. | PM-AI (Claude Opus 4.7) |
 
 ---
 
