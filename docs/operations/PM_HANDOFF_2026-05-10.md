@@ -10,10 +10,26 @@
 
 ## 🚨 LES FØRST hvis du er ny PM
 
-1. **Følg PM-onboarding-rutinen.** [`docs/engineering/PM_ONBOARDING_PLAYBOOK.md`](../engineering/PM_ONBOARDING_PLAYBOOK.md) — 60-90 min for 100% paritet med forrige PM. Den ble etablert 2026-05-09 og oppdatert i denne sesjonen.
-2. **Generer current-state:** `./scripts/pm-onboarding.sh > /tmp/pm-onboarding.md`
-3. **Tobias rør ALDRI git lokalt.** Du eier git pull etter merge. Hot-reload tar resten — Tobias bare refresher nettleseren.
-4. **Husk Tobias' immutable direktiver i playbook §2.** Hvis du fraviker, har du brutt fundamental kontrakt.
+**LESE-DISIPLIN ER IKKE VALGFRITT.** Tobias-direktiv 2026-05-10:
+
+> "Det er ekstremt viktig at vi setter den rutinen slik at man alltid leser ALL dokumentasjon — slik at man har all kontekst og ikke går i de samme fallgruvene som tidligere."
+
+Dette er ikke en handoff for ÉN sesjon — det er en kumulativ kunnskapsbase.
+Hvis du hopper over noen av de obligatoriske doc-ene, garanterer du at du
+gjentar fallgruver som tidligere PM-er har dokumentert og løst.
+
+### Konkret sjekkliste FØR du gjør noen kode-endring eller delegerer agent:
+
+1. **Følg PM-onboarding-rutinen.** [`docs/engineering/PM_ONBOARDING_PLAYBOOK.md`](../engineering/PM_ONBOARDING_PLAYBOOK.md) — 60-90 min (lengre hvis du er helt ny — da må du også lese alle handoffs siden 2026-04-23).
+2. **Les ALLE PM-handoffs** (ikke bare denne):
+   ```bash
+   ls -1 /Users/tobiashaugen/Projects/Spillorama-system/docs/operations/PM_HANDOFF_*.md | sort
+   ```
+   Hver handoff har unike fallgruver, anti-mønstre og immutable direktiver som ikke nødvendigvis er repetert i nyeste.
+3. **Generer current-state:** `./scripts/pm-onboarding.sh > /tmp/pm-onboarding.md`
+4. **Tobias rør ALDRI git lokalt.** Du eier git pull etter merge. Hot-reload tar resten — Tobias bare refresher nettleseren.
+5. **Husk Tobias' immutable direktiver i playbook §2.** Hvis du fraviker, har du brutt fundamental kontrakt.
+6. **Tema-spesifikke audits/design-docs** per playbook §3.1 — basert på scope (wallet/compliance, Spill 1/2/3, pilot-go-live, etc).
 
 ---
 

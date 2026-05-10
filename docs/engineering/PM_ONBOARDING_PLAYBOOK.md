@@ -5,7 +5,24 @@
 **Eier:** Tobias Haugen (teknisk lead)
 **Vedlikehold:** Oppdater ved hver større endring i prosjekt-fundamentet (ny ADR som overstyrer mønstre, nye pilot-haller, store kataloog-endringer).
 
-> **Til ny PM:** Følg denne playbook fra topp til bunn. Estimert tid 60-90 minutter for full onboarding. Etter dette skal du ha 100% kunnskaps-paritet med forrige PM og være klar til å fortsette uten kontekst-tap. Hopp ALDRI over §2 (Tobias' direktiver) eller §6 (compliance og regulatorisk).
+> **Til ny PM:** Følg denne playbook fra topp til bunn. Estimert tid 60-90
+> minutter for full onboarding (lengre hvis du er helt ny til prosjektet —
+> da må du også lese ALLE PM-handoffs siden 2026-04-23, se §3 trinn 3).
+> Etter dette skal du ha 100% kunnskaps-paritet med forrige PM og være
+> klar til å fortsette uten kontekst-tap.
+>
+> **🚨 LESE-DISIPLIN ER IKKE VALGFRITT.** Tobias-direktiv 2026-05-10:
+>
+> > "Det er ekstremt viktig at vi setter den rutinen slik at man alltid leser ALL dokumentasjon — slik at man har all kontekst og ikke går i de samme fallgruvene som tidligere."
+>
+> Hvis du hopper over noen av de obligatoriske doc-ene (særlig §2
+> Tobias-direktiver, §6 compliance, §3-trinn-3 alle handoffs, §3.1
+> tema-spesifikke audits), garanterer du at du gjentar fallgruver som
+> tidligere PM-er har dokumentert og løst. Det er ikke akseptabelt.
+>
+> Hopp ALDRI over §2 (immutable direktiver), §3 trinn 2-3.1 (lesing),
+> §6 (compliance og regulatorisk), eller §10 (sjekkpunkter for
+> fullført onboarding).
 
 ---
 
@@ -175,13 +192,60 @@ Les disse i rekkefølge:
 | 2 | [`docs/SYSTEM_DESIGN_PRINCIPLES.md`](../SYSTEM_DESIGN_PRINCIPLES.md) | 10 min | "True north" — design-filosofi, casino-grade-mål, ikke-mål |
 | 3 | **§2 i denne playbook** (Tobias' direktiver) | 5 min | Immutable kontrakter — overstyrer alt |
 
-### Trinn 3 — Les forrige PM-handoff (15 min)
+### Trinn 3 — Les ALLE relevante PM-handoffs (30-60 min)
+
+> **🚨 IKKE bare les siste handoff.** Tidligere PM-er har dokumentert
+> kjente fallgruver, anti-mønstre og immutable beslutninger som ikke
+> nødvendigvis er repetert i nyeste handoff. Hopp over dette og du går
+> garantert i fellene som har blitt løst tidligere.
+
+**Tobias-direktiv 2026-05-10:**
+> "Det er ekstremt viktig at vi setter den rutinen slik at man alltid leser ALL dokumentasjon — slik at man har all kontekst og ikke går i de samme fallgruvene som tidligere."
+
+**Hva du MÅ lese (i kronologisk rekkefølge — eldste først):**
 
 ```bash
-ls -t /Users/tobiashaugen/Projects/Spillorama-system/docs/operations/PM_HANDOFF_*.md | head -1
+ls -1 /Users/tobiashaugen/Projects/Spillorama-system/docs/operations/PM_HANDOFF_*.md | sort
 ```
 
-Den nyeste handoff er state-of-the-art. Les den i sin helhet — særlig §2 (Tobias-direktiver), §3 (kode-endringer), §5 (kjente bugs), §6 (plan for neste sesjon), §10 (hva neste PM bør gjøre FØRST).
+For hver handoff (alle siden 2026-04-23 hvis du er ny til prosjektet):
+1. Hvilke beslutninger ble fattet — disse er ofte fortsatt aktive
+2. Hvilke bugs ble oppdaget — sjekk om de er fikset eller fortsatt åpne
+3. Hvilke fallgruver er dokumentert — IKKE gjenta dem
+4. Hvilke direktiver fra Tobias er nye — disse er kumulative, ikke erstattende
+
+**Minimum-lesingsregel for ny PM:**
+- Hvis du er **helt ny** til prosjektet: ALLE handoffs siden 2026-04-23 (~10-15 stk, ~3-5 min hver = 30-60 min total)
+- Hvis du **kjenner prosjektet** men har vært borte i 1+ måned: alle handoffs etter forrige du leste
+- Hvis du **var her i går**: kun siste handoff
+
+**Anti-mønster:** "Jeg leser bare den siste — den er state-of-the-art."
+
+Dette er FEIL. Siste handoff dekker SISTE SESJON, ikke hele prosjektet. Anti-mønstre, regulatoriske direktiver, og fallgruver er spredt utover hele handoff-historikken og må leses kumulativt.
+
+### Trinn 3.1 — Les ALLE relevante audits + design-doc-er (avhengig av scope)
+
+Hvis du jobber med wallet/compliance:
+- ALLE filer i `docs/compliance/` (~10-15 stk)
+- ALLE wallet-relaterte audits i `docs/audit/`
+
+Hvis du jobber med Spill 1/2/3:
+- `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` (alle 3)
+- `SPILL_REGLER_OG_PAYOUT.md`
+- `SPILLKATALOG.md`
+- ALLE `SPILL*_AUDIT*` i `docs/architecture/`
+
+Hvis du jobber med pilot-go-live:
+- `LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md`
+- ALLE `PILOT_*` runbooks i `docs/operations/`
+- ALLE `R[2-12]_*_TEST_RESULT*` i `docs/operations/`
+
+**Tommelfingerregel:** Søk i `docs/`-katalogen for tema du jobber med, sortert etter modifisert dato (nyeste først), les minimum siste 5 relaterte. Bedre mer enn mindre.
+
+```bash
+# Eksempel for "wallet"-tema:
+find /Users/tobiashaugen/Projects/Spillorama-system/docs -name "*wallet*" -o -name "*WALLET*" | head -20
+```
 
 ### Trinn 4 — Spawn 6 parallelle research-agenter (10 min ventetid)
 
@@ -816,6 +880,16 @@ Du er klar når du kan svare JA på alle disse spørsmålene:
 - [ ] Jeg vet forskjellen mellom Spill 1, 2, 3 (rom-modell, master, perpetual)
 - [ ] Jeg vet at Spill 4 = SpinnGo = `spillorama` slug = databingo (ikke hovedspill)
 - [ ] Jeg vet at Game 4 / `themebingo` er deprecated
+
+### Lese-disiplin (FØR alle andre sjekkpunkter)
+- [ ] Jeg har lest §2 (Tobias' immutable direktiver) i sin helhet
+- [ ] Jeg har lest §3 trinn-rutinen + fulgt den
+- [ ] **Jeg har lest ALLE PM-handoffs siden 2026-04-23** (eller siden forrige jeg leste hvis ikke ny)
+- [ ] Jeg har lest tema-spesifikke audits + design-doc-er per §3.1 (basert på scope)
+- [ ] Jeg har lest `MASTER_README.md` + `docs/SYSTEM_DESIGN_PRINCIPLES.md`
+- [ ] Jeg har lest `SPILL_REGLER_OG_PAYOUT.md` hvis jeg skal røre payout-kode
+- [ ] Jeg har lest `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` hvis jeg skal røre spill-kode
+- [ ] Jeg har lest `LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md` hvis jeg skal røre rom-arkitektur
 
 ### Compliance
 - [ ] Jeg vet at 2500 kr cap KUN gjelder databingo, ikke hovedspill
