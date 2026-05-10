@@ -192,18 +192,29 @@ async function resetWallets(client) {
     if (Math.abs(diff) > 0.01) {
       // Skriv correction-entry så reconciliation ser balansert state.
       // operation_id er stabil basert på wallet_id + dato slik at re-runs
-      // samme dag dedup-er via ON CONFLICT.
+      // samme dag idempotent dedup-eres.
+      //
+      // NB: `wallet_entries.operation_id` har KUN INDEX, IKKE UNIQUE constraint
+      // (se migrations/20260413000001_initial_schema.sql:51). ON CONFLICT på
+      // operation_id ville feile med "no unique or exclusion constraint
+      // matching" — vi bruker SELECT-så-INSERT-pattern istedenfor. Trygt for
+      // dev-script siden vi kjører i samme TX.
       const today = new Date().toISOString().slice(0, 10);
       const opId = `dev-reset-${row.wallet_id}-${today}`;
-      await client.query(
-        `INSERT INTO wallet_entries
-           (operation_id, account_id, side, amount, account_side,
-            currency, entry_hash, previous_entry_hash)
-         VALUES
-           ($1, $2, $3, $4, 'deposit', 'NOK', NULL, NULL)
-         ON CONFLICT (operation_id) DO NOTHING`,
-        [opId, row.wallet_id, diff > 0 ? 'CREDIT' : 'DEBIT', Math.abs(diff)]
+      const existingRes = await client.query(
+        `SELECT 1 FROM wallet_entries WHERE operation_id = $1 LIMIT 1`,
+        [opId]
       );
+      if (existingRes.rowCount === 0) {
+        await client.query(
+          `INSERT INTO wallet_entries
+             (operation_id, account_id, side, amount, account_side,
+              currency, entry_hash, previous_entry_hash)
+           VALUES
+             ($1, $2, $3, $4, 'deposit', 'NOK', NULL, NULL)`,
+          [opId, row.wallet_id, diff > 0 ? 'CREDIT' : 'DEBIT', Math.abs(diff)]
+        );
+      }
     }
 
     await client.query(
