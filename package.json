@@ -13,6 +13,7 @@
     "dev:admin:prod": "npm -w @spillorama/admin-web run dev:prod-backend",
     "dev:games": "npm -w @spillorama/game-client run dev",
     "dev:all": "node scripts/dev/start-all.mjs",
+    "dev:nuke": "bash scripts/dev/nuke-restart.sh",
     "dev:seed": "node scripts/dev/seed-demo.mjs",
     "dev:reset": "node scripts/dev/reset-state.mjs",
     "dev:credentials": "node scripts/dev/credentials.mjs",
