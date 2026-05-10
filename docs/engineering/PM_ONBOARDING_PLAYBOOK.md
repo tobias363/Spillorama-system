@@ -1,7 +1,7 @@
 # PM-onboarding-playbook — Spillorama-system
 
 **Status:** Autoritativ. Følg denne rutinen ved hver PM-overgang.
-**Sist oppdatert:** 2026-05-10
+**Sist oppdatert:** 2026-05-11
 **Eier:** Tobias Haugen (teknisk lead)
 **Vedlikehold:** Oppdater ved hver større endring i prosjekt-fundamentet (ny ADR som overstyrer mønstre, nye pilot-haller, store kataloog-endringer).
 
@@ -88,12 +88,16 @@ Hvis du står foran valget "ship buggy nå" eller "fiks det riktig som tar 2 dag
 ### 2.2 Tobias rør ALDRI git lokalt
 PM eier `git pull` i hovedrepoet etter HVER PR-merge. Hot-reload tar resten — Tobias bare refresher nettleseren.
 
-**Standard restart-kommando etter merge** (gi denne til Tobias):
+**Standard restart-kommando etter merge** (vedtatt 2026-05-11, gi denne til Tobias):
 ```bash
-cd /Users/tobiashaugen/Projects/Spillorama-system && lsof -nP -iTCP:5174 -sTCP:LISTEN -t 2>/dev/null | xargs -r kill -9 && VITE_DEV_BACKEND_URL=http://localhost:4000 npm --prefix apps/admin-web run dev
+cd /Users/tobiashaugen/Projects/Spillorama-system && npm run dev:nuke
 ```
 
-**ALLTID** med `cd /Users/...` først — Tobias er ofte i `~`.
+**ALLTID** med `cd /Users/...` først — Tobias er ofte i `~` etter ny terminal-tab.
+
+`dev:nuke` dreper ALLE stale prosesser (port 4000-5175 + Docker), FLUSHALL Redis, canceler stale runder i Postgres, re-seeder via `--reset-state`, og starter ren stack (backend + admin-web + game-client + visual-harness) i ÉN kommando. Garantert clean state — ingen selective restart hvor en av lagene kan henge i stale state.
+
+> **Gammel selective-kommando** (`lsof -nP -iTCP:5174 ... && npm --prefix apps/admin-web run dev`) er superseded. Bruk IKKE denne lenger — den restarter kun admin-web og lar backend/game-client/Docker være urørt, som gir falsk trygghet hvis merge inkluderer endringer på andre lag.
 
 ### 2.3 PM verifiser CI etter PR-åpning
 Auto-merge fyrer KUN ved ekte CI-grønning, ikke ved INFRA-fail. Etter ny PR + auto-merge: sjekk `gh pr checks <nr>` etter 5-10 min. Hvis ≥ 3 PR-er feiler samme måte → INFRA-bug → root-cause-fix først.
@@ -1088,6 +1092,11 @@ gh pr merge <nr> --squash --auto --delete-branch
 - Nye Tobias-direktiver: [liste]
 ```
 
+#### 2026-05-11 (PM-AI: Claude Opus 4.7)
+- §2.2: Standard restart-kommando byttet fra selective admin-restart til `npm run dev:nuke`. Tobias-direktiv: "Kan du legge inn i rutinen at det alltid skal sendes dev:nuke slik at vi vet at alle andre prosesser avsluttes?" — sikrer clean state på tvers av alle lag (backend + admin-web + game-client + visual-harness + Docker + Redis + Postgres-stale-runder).
+- Memory `feedback_dev_nuke_after_merge.md` lagt til (superseder `feedback_pm_pull_after_merge.md`-restart-kommandoen).
+- Nye Tobias-direktiver: alltid `npm run dev:nuke` etter merge, aldri selective restart.
+
 ### Flytende-doc-disiplin (regel)
 
 Hvis du som PM gjør **arbeid** som påvirker innholdet i playbook (eks. "vi
@@ -1229,6 +1238,7 @@ Last KUN når du redigerer kode i det domenet (lazy per-task).
 |---|---|---|
 | 2026-05-09 | Initial — komplett PM-onboarding-playbook generert fra 6 parallelle research-agenter | PM-AI (Claude Opus 4.7 + 6 Explore-agenter) |
 | 2026-05-10 | Spillerklient-rebuild fase 1+2+3+4 fullført (5 PR-er merget i én sesjon). Pilot-blokker for spillerklient fjernet. Ny lærdom (§9 anti-mønstre): kjedede PR-er må rebases mot main mellom hvert squash-merge ELLER bruk combined PR for å unngå CONFLICTING-state. Se PM_HANDOFF_2026-05-10 §8. | PM-AI (Claude Opus 4.7) |
+| 2026-05-11 | Evolution-grade Bølge 1 + Bølge 2 levert (20 PR-er). ADR-0017 (fjerne daglig jackpot), ADR-0019 (Bølge 1 P0-konsistens), ADR-0020 (Bølge 2 utvidelses-fundament), ADR-0021 (master kan starte med 0 spillere). §2.2 standard restart-kommando byttet til `npm run dev:nuke` (Tobias-direktiv om "alle prosesser avsluttes"). | PM-AI (Claude Opus 4.7) |
 
 ---
 
