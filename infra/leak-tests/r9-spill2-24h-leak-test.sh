@@ -317,6 +317,14 @@ ANALYSIS=$(node "$SNAPSHOT_HELPER" --analyze \
 echo "$ANALYSIS" | jq .
 echo "$ANALYSIS" > "$SAMPLES_DIR/analysis.json"
 
+# Eksporter også flat trend-CSV — gjør det enklere å plotte heatmap eller
+# importere til Excel/Grafana. CSV-en er deterministisk ut fra samples.json.
+node "$SNAPSHOT_HELPER" --csv \
+  --samples="$SAMPLES_DIR/samples.json" \
+  --out-csv="$SAMPLES_DIR/trends.csv" >/dev/null 2>&1 \
+  && info "Trend-CSV: $SAMPLES_DIR/trends.csv" \
+  || warn "Kunne ikke generere trends.csv (fortsetter — JSON-rapport finnes)"
+
 OK=$(echo "$ANALYSIS" | jq -r '.ok')
 HEAP_GROWTH=$(echo "$ANALYSIS" | jq -r '.heapGrowthPct')
 FD_GROWTH=$(echo "$ANALYSIS" | jq -r '.fdGrowthPct')

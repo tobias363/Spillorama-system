@@ -5,7 +5,7 @@
  * Linear: https://linear.app/bingosystem/issue/BIN-819
  * Mandat-ref: docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md §3.5
  *
- * To moduser:
+ * Tre moduser:
  *
  *   1) SAMPLE-modus (default) — kjøres av r9-spill2-24h-leak-test.sh hver time:
  *      Spør backenden om diagnostikk (heap-bruk, FD-count, DB-pool, Redis,
@@ -24,6 +24,14 @@
  *      invarianten holder seg innenfor toleranse-grense. Returnerer
  *      `{ ok, heapGrowthPct, fdGrowthPct, errors[] }` på stdout.
  *
+ *   3) CSV-modus (--csv) — produserer trend-CSV for heatmap-rendring:
+ *      Leser samples.json og skriver CSV til stdout (eller --out-csv-fil).
+ *      Kolonner: label,ts,rssMb,heapUsedMb,heapTotalMb,openFds,
+ *      dbPoolActive,dbPoolIdle,redisClients,socketIoClients,
+ *      heapGrowthFromBaselinePct,fdGrowthFromBaselinePct.
+ *      Dette gir en flat tabell som kan importeres direkte i Excel,
+ *      Grafana, eller plottes med matplotlib for visuell trend-analyse.
+ *
  * Bruk:
  *   node heap-snapshot-helper.mjs \
  *     --backend=http://localhost:4000 \
@@ -36,6 +44,10 @@
  *     --samples=/tmp/r9-samples/samples.json \
  *     --heap-growth-limit-pct=10 \
  *     --fd-growth-limit-pct=10
+ *
+ *   node heap-snapshot-helper.mjs --csv \
+ *     --samples=/tmp/r9-samples/samples.json \
+ *     [--out-csv=/tmp/r9-samples/trends.csv]
  */
 
 import fs from "node:fs";
@@ -289,9 +301,95 @@ function analyzeMode() {
   process.exit(errors.length === 0 ? 0 : 1);
 }
 
+// ── CSV-modus ────────────────────────────────────────────────────────────
+//
+// Eksporterer samples.json som flat CSV for trend-/heatmap-analyse.
+// Vekst-prosenter (heapGrowthFromBaselinePct, fdGrowthFromBaselinePct)
+// beregnes per rad mot baseline (sample 0) — gjør det trivielt å plotte
+// trend over tid uten å re-implementere matematikken i Excel/Grafana.
+function csvMode() {
+  const samplesPath = String(args.samples ?? "");
+  const outCsv = String(args["out-csv"] ?? "");
+
+  if (!samplesPath || !fs.existsSync(samplesPath)) {
+    process.stderr.write(`samples-fil mangler: ${samplesPath}\n`);
+    process.exit(2);
+  }
+
+  const samples = JSON.parse(fs.readFileSync(samplesPath, "utf8"));
+  if (!Array.isArray(samples) || samples.length === 0) {
+    process.stderr.write(`Ingen samples i ${samplesPath}\n`);
+    process.exit(1);
+  }
+
+  // Baseline = første sample. Hvis heapUsedMb = 0 (ingen diag-endpoint),
+  // bruker vi rssMb som heap-proxy slik at trend fortsatt er meningsfull.
+  const baseline = samples[0];
+  const useHeap = Number(baseline.heapUsedMb) > 0;
+  const baselineHeap = useHeap
+    ? Number(baseline.heapUsedMb)
+    : Number(baseline.rssMb ?? 0);
+  const baselineFd = Number(baseline.openFds ?? baseline.openFileDescriptors ?? 0);
+
+  const headers = [
+    "label",
+    "ts",
+    "rssMb",
+    "heapUsedMb",
+    "heapTotalMb",
+    "openFds",
+    "dbPoolActive",
+    "dbPoolIdle",
+    "redisClients",
+    "socketIoClients",
+    "heapGrowthFromBaselinePct",
+    "fdGrowthFromBaselinePct",
+  ];
+
+  const rows = [headers.join(",")];
+  for (const s of samples) {
+    const heapNow = useHeap ? Number(s.heapUsedMb) : Number(s.rssMb ?? 0);
+    const fdNow = Number(s.openFds ?? s.openFileDescriptors ?? 0);
+    const heapGrowth =
+      baselineHeap > 0
+        ? ((heapNow - baselineHeap) / baselineHeap) * 100
+        : 0;
+    const fdGrowth =
+      baselineFd > 0
+        ? ((fdNow - baselineFd) / baselineFd) * 100
+        : 0;
+    rows.push(
+      [
+        s.label ?? "",
+        s.ts ?? "",
+        Number(s.rssMb ?? 0),
+        Number(s.heapUsedMb ?? 0),
+        Number(s.heapTotalMb ?? 0),
+        fdNow,
+        Number(s.dbPoolActive ?? 0),
+        Number(s.dbPoolIdle ?? 0),
+        Number(s.redisClients ?? 0),
+        Number(s.socketIoClients ?? 0),
+        heapGrowth.toFixed(2),
+        fdGrowth.toFixed(2),
+      ].join(","),
+    );
+  }
+
+  const csv = rows.join("\n") + "\n";
+  if (outCsv) {
+    fs.writeFileSync(outCsv, csv);
+    process.stderr.write(`Wrote ${samples.length} rows to ${outCsv}\n`);
+  } else {
+    process.stdout.write(csv);
+  }
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────
 if (args.analyze) {
   analyzeMode();
+} else if (args.csv) {
+  csvMode();
 } else {
   sampleMode().catch((err) => {
     process.stderr.write(`heap-snapshot-helper: ${err.message}\n`);
