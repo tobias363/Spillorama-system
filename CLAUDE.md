@@ -36,6 +36,29 @@
 
 Live bingo platform for the Norwegian market with real-time multiplayer games, wallet management, and regulatory compliance (pengespillforskriften). The system handles player authentication, responsible gaming, hall-based game sessions, and payment integration.
 
+> ## 🛡️ PM-håndhevings-system (4 lag) — Tobias-direktiv 2026-05-10
+>
+> Spillorama har fire uavhengige håndhevings-lag som tvinger PM-er til å lese
+> dokumentasjon FØR kode-handlinger, og verifisere CI ETTER hver merge:
+>
+> | Lag | Hva | Hvor håndheves |
+> |---|---|---|
+> | 1. **Onboarding-gate** | PM må bekrefte lest ALLE handoffs (med 1-3 setn. takeaway per fil) | `bash scripts/pm-checkpoint.sh` (interaktiv) |
+> | 2. **Pre-commit blokk** | Commit blokkeres lokalt hvis gate ikke gyldig | `.husky/pre-commit` → `node scripts/check-pm-gate.mjs --strict` |
+> | 3. **PR-merge blokk** | PR kan ikke merges uten verifisert gate-marker | `.github/workflows/pm-gate-enforcement.yml` |
+> | 4. **Post-merge CI-watcher** | Røde workflows på main → auto-issue tagger PM | `.github/workflows/pm-merge-verification.yml` |
+>
+> **PM-en har en av sine viktigste plikter i å verifisere at alle PR-er går
+> grønt gjennom CI** (per Tobias-direktiv). Detaljer:
+> [`docs/operations/PM_PR_VERIFICATION_DUTY.md`](./docs/operations/PM_PR_VERIFICATION_DUTY.md).
+>
+> **For ikke-PM-roller** (Tobias selv, agenter under PM-koordinering, dependabot):
+> bruk `gate-not-applicable: <rolle>` i PR-beskrivelsen, eller
+> `PM_GATE_BYPASS=1` for engang-bypass (dokumentert).
+>
+> **Public audit-trail** (hash-only, ingen takeaways eksponert):
+> [`docs/.pm-confirmations.log`](./docs/.pm-confirmations.log).
+
 ## Tech Stack
 
 | Layer | Technology | Version | Purpose |
@@ -512,6 +535,26 @@ A Linear issue is closed only when:
 3. Test (or green-CI link) confirms behavior
 
 Adopted after four false Done-findings.
+
+### Pitfalls log + agent execution log (adopted 2026-05-10)
+
+Tobias-direktiv 2026-05-10: dokumentasjon av fallgruver er kritisk for å unngå
+gjenta gamle feil. To dokumenter eier dette ansvaret:
+
+- **[`docs/engineering/PITFALLS_LOG.md`](docs/engineering/PITFALLS_LOG.md)** — sentral fallgruve-katalog (63+ entries i 11 kategorier: compliance, wallet, spill-arkitektur, live-rom, git/PR, test, frontend, doc-disiplin, env, routing, agent-orkestrering)
+- **[`docs/engineering/AGENT_EXECUTION_LOG.md`](docs/engineering/AGENT_EXECUTION_LOG.md)** — kronologisk agent-arbeid med inputs/outputs/learnings per leveranse
+
+**Når du skal kode på et tema:**
+1. Skim PITFALLS_LOG-indeks
+2. Les §-er for ditt scope (eks. §1 + §2 for wallet/compliance, §3 for spill-arkitektur)
+3. Hvis du planlegger spawn av agent: inkluder relevante §-pekere i prompt
+
+**Når du oppdager ny fallgruve:**
+- Legg til entry i PITFALLS_LOG samme PR som fix
+- Format dokumentert nederst i PITFALLS_LOG ("Hvordan legge til ny entry")
+
+**Når du har levert agent-arbeid:**
+- Append entry i AGENT_EXECUTION_LOG (PM eier dette)
 
 ### Spill 1 first (YAGNI)
 
