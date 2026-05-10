@@ -477,10 +477,31 @@ export class Game1BuyPopup {
 
   // ── Private ──────────────────────────────────────────────────────────
 
+  /**
+   * Tobias-direktiv 2026-05-11: norske UI-navn istedenfor engelske canonical.
+   * `tt.name` (eks "Small White") brukes server-side for routing — vi MÅ
+   * IKKE endre den. Display-navnet vises kun i UI.
+   *
+   *   "Small White"  → "Liten hvit"
+   *   "Small Yellow" → "Liten gul"
+   *   "Small Purple" → "Liten lilla"
+   *   "Large White"  → "Stor hvit"
+   *   "Large Yellow" → "Stor gul"
+   *   "Large Purple" → "Stor lilla"
+   */
+  private static readonly NORWEGIAN_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+    "Small White": "Liten hvit",
+    "Small Yellow": "Liten gul",
+    "Small Purple": "Liten lilla",
+    "Large White": "Stor hvit",
+    "Large Yellow": "Stor gul",
+    "Large Purple": "Stor lilla",
+  };
+
   private getDisplayName(tt: { name: string; type: string }): string {
     if (tt.type === "elvis") return tt.name;
     if (tt.type === "traffic-light") return "Traffic Light";
-    return tt.name;
+    return Game1BuyPopup.NORWEGIAN_DISPLAY_NAMES[tt.name] ?? tt.name;
   }
 
   private buildTypeRow(
