@@ -1,51 +1,57 @@
 /**
- * MASTER_PLAN_SPILL1_PILOT_2026-04-24 §2.3 — DrawEngine-hook for daglig
- * akkumulert Jackpott (Appendix B.9).
+ * ADR-0017 (2026-05-10) — DrawEngine-hook for per-spill Jackpott.
+ *
+ * Tobias-direktiv 2026-05-10:
+ *   "Jackpot-popup gjelder kun for Jackpot-katalog-spillet (pos 7), og
+ *    bingoverten setter ALLTID jackpot manuelt før spillet starter. Det
+ *    skal IKKE være automatisk akkumulering."
+ *
+ * Forhistorie:
+ *   Tidligere kjørte denne hooken auto-utbetaling fra `app_game1_jackpot_state`
+ *   (daglig akkumulering +4000 kr/dag, max 30 000 kr). Per ADR-0017 er den
+ *   automatiske akkumuleringen fjernet — jackpot leses nå direkte fra
+ *   `app_game_plan_run.jackpot_overrides_json[currentPosition]` som master
+ *   setter via `JackpotSetupModal` før Jackpot-spillet starter.
  *
  * Når kalles dette?
- *   Etter at Game1DrawEngineService.payoutPhase har utbetalt Fullt Hus
+ *   Etter at `Game1DrawEngineService.payoutPhase` har utbetalt Fullt Hus
  *   (phase === 5) sin ordinære gevinst + per-farge jackpot, kjøres denne
  *   hooken én gang per Fullt Hus-event. Hooken er separat fra:
  *
  *     - `Game1JackpotService` (per-farge fixed-amount jackpot)
  *     - `Game1PotService` (Innsatsen + akkumulerende pot per hall)
  *
- *   Den daglig-akkumulerende potten er en ENESTE pott per hall-gruppe som
- *   vokser +4000 kr/dag opp til 30 000 kr cap. Når en spiller vinner Fullt
- *   Hus PÅ eller FØR `drawThresholds[0]` (default 50), tømmes potten og
- *   resettes til seed (2000 kr).
+ * Jackpot-override-shape (lagret i `plan_run.jackpot_overrides_json`):
+ *   {
+ *     "<position>": {
+ *       "draw":        <ball-trekning hvor jackpot-pattern slår inn (1-90)>,
+ *       "prizesCents": { "hvit": <øre>, "gul": <øre>, "lilla": <øre> }
+ *     }
+ *   }
  *
- * Awards-pathen:
- *   1. Resolve `hall_group_id` fra scheduled-game.
- *   2. Atomisk award via `Game1JackpotStateService.awardJackpot` (debit +
- *      reset + audit-rad i app_game1_jackpot_awards).
- *   3. Distribuer awarded-amount likt mellom Fullt Hus-vinnerne via
- *      WalletAdapter.credit(to: "winnings"). Idempotent via per-(award,
- *      winner)-nøkkel.
+ *   Eksempel:
+ *     { "7": { "draw": 47, "prizesCents": { "hvit": 50000, "gul": 100000, "lilla": 150000 } } }
  *
- * Fail-closed semantikk:
- *   - Mangler service eller wallet → no-op (bakoverkompat).
- *   - Award-call kaster → propager (drawNext-transaksjon ruller tilbake).
- *   - Wallet-credit kaster ETTER award-debit → vi har en partial-failure-
- *     situasjon: state er debitert, men én eller flere wallet-credits
- *     mangler. Service-laget logger feilen og kaster videre slik at draw-
- *     transaksjonen ruller tilbake. ROLLBACK på app_game1_jackpot_awards-
- *     INSERT er IKKE mulig fordi den var commit-et i sin egen
- *     pool.connect()-transaksjon. Operatør får varsel via audit-log og må
- *     manuelt re-trigger payout (idempotent på service-nivå returnerer
- *     samme awardedAmount, og credit-keys er idempotente).
+ * Auto-utbetaling skjer KUN når:
+ *   1) Vi finner aktiv plan-run for scheduled-game (via plan_run_id +
+ *      plan_position kolonner på `app_game1_scheduled_games`).
+ *   2) Plan-run.jackpot_overrides[currentPosition] eksisterer.
+ *   3) `drawSequenceAtWin <= override.draw` (vinning innen jackpot-vinduet).
+ *   4) Vinneren har en bongfarge som er i `prizesCents`-mappingen.
  *
- *     Pragmatisk valg: pilot-scope er én hall, lite trafikk. Full atomicitet
- *     mellom award-debit og N wallet-credits krever distribuert transaksjon
- *     (eller å persiste credits inne i awardJackpot-transaksjonen). Det
- *     utsettes til post-pilot-PR.
+ * Hvis noen av disse mangler er det fail-quiet (info-event logget). Auto-
+ * utbetaling for Spill 1 sin spill-sekvens er derfor opt-in per Jackpot-
+ * spill — andre katalog-spill (Bingo, 1000-spill, etc.) har ingen
+ * jackpot-override og evaluator-en gjør no-op.
+ *
+ * Audit:
+ *   `game1_jackpot.auto_award` skrives som best-effort etter wallet-credit
+ *   (samme idempotency-key-format som før: `g1-jackpot-{scheduledGameId}-{drawSequenceAtWin}`).
+ *   Detaljene inkluderer planRunId, planPosition, override.draw, og per-farge
+ *   prize-summer for Lotteritilsynet-sporbarhet.
  */
 
 import type { PoolClient } from "pg";
-import type {
-  AwardJackpotResult,
-  Game1JackpotStateService,
-} from "./Game1JackpotStateService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import { logger as rootLogger } from "../util/logger.js";
@@ -61,15 +67,19 @@ export interface DailyJackpotWinner {
   userId: string;
   /** hall-id (audit). */
   hallId: string;
+  /**
+   * ADR-0017 (2026-05-10): bongfarge-slug ("small_yellow", "small_white",
+   * "large_yellow", etc.). Vi mapper familie-prefiks ("yellow"|"white"|"purple")
+   * til admin-overridens bongfarge-keys ("gul"|"hvit"|"lilla").
+   */
+  ticketColor: string;
 }
 
 export interface RunDailyJackpotEvaluationInput {
-  /** Postgres-client fra ytre transaksjon — brukes til å lese hall_group_id og scheduled-game-state. */
+  /** Postgres-client fra ytre transaksjon — brukes til å lese plan-run-state. */
   client: PoolClient;
   /** Schema-prefiks ("public" eller annet). */
   schema: string;
-  /** State-service (kjører sin egen pool-tilkobling for atomic award). */
-  jackpotStateService: Game1JackpotStateService;
   /** Wallet for credit til vinner. */
   walletAdapter: WalletAdapter;
   /** Audit-tjeneste for fire-and-forget logg. */
@@ -85,161 +95,331 @@ export interface RunDailyJackpotEvaluationInput {
 export interface RunDailyJackpotEvaluationResult {
   /** True når evaluering trigget en award. */
   awarded: boolean;
-  /** Award-rad-id i app_game1_jackpot_awards (tom hvis ikke trigget). */
-  awardId: string;
-  /** Beløp som ble distribuert (sum av credits til alle vinnere). */
+  /** Beløp som ble distribuert (sum av credits til alle vinnere, øre). */
   totalAwardedCents: number;
-  /** Hall-gruppe som potten tilhørte (null hvis spillet ikke har gruppe). */
-  hallGroupId: string | null;
+  /** Plan-run som potten ble lest fra (null hvis ikke matchet). */
+  planRunId: string | null;
+  /** Plan-position på scheduled-game (null hvis manglende). */
+  planPosition: number | null;
+  /** Override.draw som var satt for denne posisjonen (null hvis ingen). */
+  triggerDraw: number | null;
   /** Grunn til at award ikke ble trigget (audit). */
   skipReason?:
-    | "NO_HALL_GROUP"
+    | "NO_PLAN_RUN_BINDING"
+    | "NO_PLAN_RUN_FOUND"
+    | "NO_OVERRIDE_FOR_POSITION"
     | "ABOVE_THRESHOLD"
-    | "ZERO_BALANCE"
     | "NO_WINNERS"
-    | "STATE_MISSING";
+    | "NO_PRIZE_FOR_COLOR";
 }
 
 /**
- * Hovedfunksjon. Kalles fra Game1DrawEngineService.payoutPhase når
+ * ADR-0017: map ticket-color slug-form (engine) til bongfarge-key (admin
+ * override). Engine bruker `small_yellow`/`large_yellow`/`small_white`/etc.
+ * mens admin lagrer `gul`/`hvit`/`lilla`. Familie-prefiks bestemmer mapping.
+ *
+ * Returnerer null hvis bongfargen ikke gjenkjennes — caller skipper credit
+ * for den vinneren.
+ */
+function ticketColorToOverrideKey(ticketColor: string): string | null {
+  const normalized = ticketColor.toLowerCase().trim();
+  if (normalized.includes("yellow")) return "gul";
+  if (normalized.includes("white")) return "hvit";
+  if (normalized.includes("purple")) return "lilla";
+  return null;
+}
+
+interface PlanRunRow {
+  plan_run_id: string;
+  plan_position: number;
+  jackpot_overrides_json: unknown;
+}
+
+interface ScheduledGameRow {
+  plan_run_id: string | null;
+  plan_position: number | null;
+}
+
+interface JackpotOverridePayload {
+  draw: number;
+  prizesCents: Record<string, number>;
+}
+
+/**
+ * ADR-0017: les plan-run-id + plan-position fra scheduled-game, deretter hent
+ * jackpot-override-objektet fra plan-run for nåværende posisjon. Returnerer
+ * null hvis bindingen mangler eller plan-runen ikke har override for posisjonen.
+ */
+async function loadActiveJackpotOverride(
+  client: PoolClient,
+  schema: string,
+  scheduledGameId: string,
+): Promise<{
+  planRunId: string;
+  planPosition: number;
+  override: JackpotOverridePayload;
+} | { planRunId: string | null; planPosition: number | null; override: null }> {
+  // 1) Hent plan_run_id + plan_position fra scheduled-game.
+  const sgRow = await client.query<ScheduledGameRow>(
+    `SELECT plan_run_id, plan_position
+       FROM "${schema}"."app_game1_scheduled_games"
+      WHERE id = $1`,
+    [scheduledGameId],
+  );
+  const sg = sgRow.rows[0];
+  if (!sg || !sg.plan_run_id || sg.plan_position == null) {
+    return { planRunId: null, planPosition: null, override: null };
+  }
+
+  // 2) Hent plan-runens jackpot-overrides JSON.
+  const prRow = await client.query<PlanRunRow>(
+    `SELECT id AS plan_run_id, current_position AS plan_position,
+            jackpot_overrides_json
+       FROM "${schema}"."app_game_plan_run"
+      WHERE id = $1`,
+    [sg.plan_run_id],
+  );
+  const pr = prRow.rows[0];
+  if (!pr) {
+    return { planRunId: sg.plan_run_id, planPosition: sg.plan_position, override: null };
+  }
+
+  // 3) Resolve override for plan_position på scheduled-game (NB: bruker
+  //    scheduled-gamens position, ikke plan-runens current_position. Dette
+  //    er for å være robust mot at master har klikket /advance før
+  //    Fullt Hus-eventet ble committet til DB).
+  const overrides = pr.jackpot_overrides_json;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
+    return { planRunId: pr.plan_run_id, planPosition: sg.plan_position, override: null };
+  }
+  const positionKey = String(sg.plan_position);
+  const raw = (overrides as Record<string, unknown>)[positionKey];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { planRunId: pr.plan_run_id, planPosition: sg.plan_position, override: null };
+  }
+
+  // 4) Parse override-shape. Tolerer både camelCase og snake_case (matcher
+  //    GamePlanRunService.parseJackpotOverrides).
+  const obj = raw as Record<string, unknown>;
+  const drawN = Number(obj.draw);
+  if (!Number.isFinite(drawN) || !Number.isInteger(drawN) || drawN <= 0) {
+    return { planRunId: pr.plan_run_id, planPosition: sg.plan_position, override: null };
+  }
+  let prizesRaw: unknown = obj.prizesCents;
+  if (prizesRaw === undefined) prizesRaw = obj.prizes_cents;
+  if (!prizesRaw || typeof prizesRaw !== "object" || Array.isArray(prizesRaw)) {
+    return { planRunId: pr.plan_run_id, planPosition: sg.plan_position, override: null };
+  }
+  const prizes: Record<string, number> = {};
+  for (const [key, val] of Object.entries(prizesRaw as Record<string, unknown>)) {
+    const n = Number(val);
+    if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) {
+      prizes[key] = n;
+    }
+  }
+  if (Object.keys(prizes).length === 0) {
+    return { planRunId: pr.plan_run_id, planPosition: sg.plan_position, override: null };
+  }
+
+  return {
+    planRunId: pr.plan_run_id,
+    planPosition: sg.plan_position,
+    override: { draw: drawN, prizesCents: prizes },
+  };
+}
+
+/**
+ * Hovedfunksjon. Kalles fra `Game1DrawEngineService.payoutPhase` når
  * `currentPhase === TOTAL_PHASES (5)` og `winners.length > 0`.
+ *
+ * ADR-0017 (2026-05-10): Leser per-spill jackpot-override fra
+ * `app_game_plan_run.jackpot_overrides_json` i stedet for daglig akkumulering.
  */
 export async function runDailyJackpotEvaluation(
-  input: RunDailyJackpotEvaluationInput
+  input: RunDailyJackpotEvaluationInput,
 ): Promise<RunDailyJackpotEvaluationResult> {
   const empty: RunDailyJackpotEvaluationResult = {
     awarded: false,
-    awardId: "",
     totalAwardedCents: 0,
-    hallGroupId: null,
+    planRunId: null,
+    planPosition: null,
+    triggerDraw: null,
   };
 
   if (input.winners.length === 0) {
     return { ...empty, skipReason: "NO_WINNERS" };
   }
 
-  // 1) Resolve hall_group_id fra scheduled_game (samme transaksjon).
-  const groupRow = await input.client.query<{ group_hall_id: string | null }>(
-    `SELECT group_hall_id FROM "${input.schema}"."app_game1_scheduled_games" WHERE id = $1`,
-    [input.scheduledGameId]
+  // 1) Resolve jackpot-override fra plan-run.
+  const lookup = await loadActiveJackpotOverride(
+    input.client,
+    input.schema,
+    input.scheduledGameId,
   );
-  const hallGroupId = groupRow.rows[0]?.group_hall_id ?? null;
-  if (!hallGroupId) {
-    return { ...empty, skipReason: "NO_HALL_GROUP" };
-  }
 
-  // 2) Hent state for å sjekke threshold.
-  const state = await input.jackpotStateService.getStateForGroup(hallGroupId);
-  if (state.currentAmountCents <= 0) {
-    return { ...empty, hallGroupId, skipReason: "ZERO_BALANCE" };
-  }
-
-  // Pilot-modell (Master-plan §2.3): bruk drawThresholds[0] som "trigger
-  // hvis vinning kom på/innen denne sekvensen". Multi-threshold-progresjon
-  // (50→55→56→57) er P1 og krever per-sub-game tilstand — ikke implementert
-  // her. For pilot er det ett spill per dag som har sjanse til jackpot, med
-  // standard threshold 50.
-  const triggerThreshold = state.drawThresholds[0];
-  if (typeof triggerThreshold !== "number" || triggerThreshold <= 0) {
-    log.warn(
-      { hallGroupId, drawThresholds: state.drawThresholds },
-      "[MASTER_PLAN §2.3] ugyldig drawThresholds — hopper over award"
-    );
-    return { ...empty, hallGroupId, skipReason: "STATE_MISSING" };
-  }
-  if (input.drawSequenceAtWin > triggerThreshold) {
-    return { ...empty, hallGroupId, skipReason: "ABOVE_THRESHOLD" };
-  }
-
-  // 3) Atomic debit-and-reset.
-  const idempotencyKey = `g1-jackpot-${input.scheduledGameId}-${input.drawSequenceAtWin}`;
-  let award: AwardJackpotResult;
-  try {
-    award = await input.jackpotStateService.awardJackpot({
-      hallGroupId,
-      idempotencyKey,
-      reason: "FULL_HOUSE_WITHIN_THRESHOLD",
-      scheduledGameId: input.scheduledGameId,
-      drawSequenceAtWin: input.drawSequenceAtWin,
-    });
-  } catch (err) {
-    log.error(
-      { err, hallGroupId, idempotencyKey, scheduledGameId: input.scheduledGameId },
-      "[MASTER_PLAN §2.3] awardJackpot kastet — ruller tilbake draw-transaksjon"
-    );
-    throw err;
-  }
-
-  if (award.noopZeroBalance) {
-    return { ...empty, hallGroupId, skipReason: "ZERO_BALANCE" };
-  }
-  if (award.awardedAmountCents <= 0) {
-    return { ...empty, hallGroupId, skipReason: "ZERO_BALANCE" };
-  }
-
-  // 4) Split likt mellom vinnere. Floor-rounding; rest beholdes på huset.
-  //    Vi krediterer via wallet-adapter med per-vinner idempotency-key
-  //    `g1-jackpot-credit-{awardId}-{winnerAssignmentId}` slik at retry
-  //    av draw-transaksjonen ikke dobbel-krediterer.
-  const winnerCount = input.winners.length;
-  const perWinnerCents = Math.floor(award.awardedAmountCents / winnerCount);
-  const houseRetainedCents = award.awardedAmountCents - perWinnerCents * winnerCount;
-
-  if (perWinnerCents <= 0) {
-    // Edge-case: mer enn awardedAmountCents winners (n>award). Logges men
-    // vi har allerede debitert state — flag til ops-team.
-    log.warn(
+  if (lookup.override === null) {
+    if (lookup.planRunId === null) {
+      log.info(
+        { scheduledGameId: input.scheduledGameId },
+        "[ADR-0017] no plan-run binding on scheduled-game — skipping daily jackpot",
+      );
+      return { ...empty, skipReason: "NO_PLAN_RUN_BINDING" };
+    }
+    log.info(
       {
-        hallGroupId,
-        awardId: award.awardId,
-        awardedAmountCents: award.awardedAmountCents,
-        winnerCount,
+        scheduledGameId: input.scheduledGameId,
+        planRunId: lookup.planRunId,
+        planPosition: lookup.planPosition,
       },
-      "[MASTER_PLAN §2.3] perWinnerCents=0 — for mange vinnere for award; ingen credit"
+      "[ADR-0017] no jackpot-override for plan-position — skipping daily jackpot",
     );
     return {
-      awarded: true,
-      awardId: award.awardId,
-      totalAwardedCents: 0,
-      hallGroupId,
+      ...empty,
+      planRunId: lookup.planRunId,
+      planPosition: lookup.planPosition,
+      skipReason: "NO_OVERRIDE_FOR_POSITION",
+    };
+  }
+
+  const { planRunId, planPosition, override } = lookup;
+
+  // 2) Sjekk at vinning skjedde innen override.draw.
+  if (input.drawSequenceAtWin > override.draw) {
+    log.info(
+      {
+        scheduledGameId: input.scheduledGameId,
+        planRunId,
+        planPosition,
+        triggerDraw: override.draw,
+        drawSequenceAtWin: input.drawSequenceAtWin,
+      },
+      "[ADR-0017] win above threshold — no jackpot award",
+    );
+    return {
+      ...empty,
+      planRunId,
+      planPosition,
+      triggerDraw: override.draw,
+      skipReason: "ABOVE_THRESHOLD",
+    };
+  }
+
+  // 3) Beregn per-vinner-credit. Hver vinner får sin bongfarges prize-beløp;
+  //    vinnere med samme bongfarge deler den fargens pot likt (floor-rounding,
+  //    rest til hus). Dette matcher pot-per-bongstørrelse-regelen i
+  //    `SPILL_REGLER_OG_PAYOUT.md` §9.
+  const winnersByColor = new Map<string, DailyJackpotWinner[]>();
+  for (const winner of input.winners) {
+    const colorKey = ticketColorToOverrideKey(winner.ticketColor);
+    if (!colorKey) {
+      log.warn(
+        { winnerAssignmentId: winner.assignmentId, ticketColor: winner.ticketColor },
+        "[ADR-0017] unknown ticket-color — skipping winner",
+      );
+      continue;
+    }
+    const list = winnersByColor.get(colorKey) ?? [];
+    list.push(winner);
+    winnersByColor.set(colorKey, list);
+  }
+
+  if (winnersByColor.size === 0) {
+    return {
+      ...empty,
+      planRunId,
+      planPosition,
+      triggerDraw: override.draw,
+      skipReason: "NO_PRIZE_FOR_COLOR",
     };
   }
 
   let totalCreditedCents = 0;
-  for (const winner of input.winners) {
-    const creditKey = `g1-jackpot-credit-${award.awardId}-${winner.assignmentId}`;
-    try {
-      await input.walletAdapter.credit(
-        winner.walletId,
-        perWinnerCents / 100,
-        `Spill 1 Daglig Jackpott — spill ${input.scheduledGameId}`,
+  const auditPerColor: Array<{
+    colorKey: string;
+    potCents: number;
+    winnerCount: number;
+    perWinnerCents: number;
+    houseRetainedCents: number;
+  }> = [];
+
+  for (const [colorKey, colorWinners] of winnersByColor.entries()) {
+    const potCents = override.prizesCents[colorKey];
+    if (potCents == null || potCents <= 0) {
+      // Ingen prize for denne bongfargen — fail-quiet, fortsett til neste.
+      log.info(
         {
-          idempotencyKey: creditKey,
-          to: "winnings",
-        }
-      );
-      totalCreditedCents += perWinnerCents;
-    } catch (err) {
-      // Wallet-feil: state er allerede debitert (den lever i sin egen
-      // committed transaksjon). Vi propagerer videre slik at draw-
-      // transaksjonen ruller tilbake — men state-debit ruller IKKE
-      // tilbake. Operatør må bruke admin-tooling for å rebalansere.
-      // Pragmatisk pilot-akseptert avvik (se fil-docstring).
-      log.error(
-        {
-          err,
-          hallGroupId,
-          awardId: award.awardId,
-          winnerAssignmentId: winner.assignmentId,
-          perWinnerCents,
+          scheduledGameId: input.scheduledGameId,
+          planRunId,
+          colorKey,
+          winnerCount: colorWinners.length,
         },
-        "[MASTER_PLAN §2.3] wallet.credit feilet etter award-debit — partial failure"
+        "[ADR-0017] no prize configured for ticket-color — skipping",
       );
-      throw err;
+      continue;
     }
+
+    const winnerCount = colorWinners.length;
+    const perWinnerCents = Math.floor(potCents / winnerCount);
+    const houseRetainedCents = potCents - perWinnerCents * winnerCount;
+
+    if (perWinnerCents <= 0) {
+      log.warn(
+        { potCents, winnerCount, colorKey },
+        "[ADR-0017] perWinnerCents=0 — too many winners for pot; no credit",
+      );
+      auditPerColor.push({
+        colorKey,
+        potCents,
+        winnerCount,
+        perWinnerCents: 0,
+        houseRetainedCents: potCents,
+      });
+      continue;
+    }
+
+    for (const winner of colorWinners) {
+      const creditKey =
+        `g1-jackpot-credit-${input.scheduledGameId}-${input.drawSequenceAtWin}-${winner.assignmentId}`;
+      try {
+        await input.walletAdapter.credit(
+          winner.walletId,
+          perWinnerCents / 100,
+          `Spill 1 Jackpott — spill ${input.scheduledGameId}`,
+          {
+            idempotencyKey: creditKey,
+            to: "winnings",
+          },
+        );
+        totalCreditedCents += perWinnerCents;
+      } catch (err) {
+        // Wallet-feil propageres — caller (drawNext) ruller tilbake draw-tx.
+        log.error(
+          {
+            err,
+            scheduledGameId: input.scheduledGameId,
+            planRunId,
+            winnerAssignmentId: winner.assignmentId,
+            colorKey,
+            perWinnerCents,
+          },
+          "[ADR-0017] wallet.credit failed during jackpot payout",
+        );
+        throw err;
+      }
+    }
+
+    auditPerColor.push({
+      colorKey,
+      potCents,
+      winnerCount,
+      perWinnerCents,
+      houseRetainedCents,
+    });
   }
 
-  // 5) Audit (fire-and-forget).
+  // 4) Audit (fire-and-forget). Ingen state-debit-rad lenger — `app_game1_jackpot_state`
+  //    er deprecated. Idempotency-key på audit-eventet matcher pre-ADR-format
+  //    så eksisterende ops-dashbord fortsatt fungerer.
   input.audit
     .record({
       actorId: null,
@@ -248,44 +428,46 @@ export async function runDailyJackpotEvaluation(
       resource: "game1_scheduled_game",
       resourceId: input.scheduledGameId,
       details: {
-        hallGroupId,
-        awardId: award.awardId,
-        awardedAmountCents: award.awardedAmountCents,
-        previousAmountCents: award.previousAmountCents,
-        newAmountCents: award.newAmountCents,
-        idempotent: award.idempotent,
-        winnerCount,
-        perWinnerCents,
-        houseRetainedCents,
+        planRunId,
+        planPosition,
+        triggerDraw: override.draw,
         drawSequenceAtWin: input.drawSequenceAtWin,
-        triggerThreshold,
+        totalAwardedCents: totalCreditedCents,
+        perColor: auditPerColor,
+        idempotencyKey: `g1-jackpot-${input.scheduledGameId}-${input.drawSequenceAtWin}`,
+        adrReference: "ADR-0017",
       },
     })
     .catch((err) => {
       log.warn(
-        { err, awardId: award.awardId, scheduledGameId: input.scheduledGameId },
-        "[MASTER_PLAN §2.3] audit append failed"
+        {
+          err,
+          scheduledGameId: input.scheduledGameId,
+          planRunId,
+          planPosition,
+        },
+        "[ADR-0017] audit append failed",
       );
     });
 
   log.info(
     {
-      hallGroupId,
-      awardId: award.awardId,
-      awardedAmountCents: award.awardedAmountCents,
-      winnerCount,
-      perWinnerCents,
-      idempotent: award.idempotent,
       scheduledGameId: input.scheduledGameId,
+      planRunId,
+      planPosition,
+      triggerDraw: override.draw,
       drawSequenceAtWin: input.drawSequenceAtWin,
+      totalAwardedCents: totalCreditedCents,
+      perColorCount: auditPerColor.length,
     },
-    "[MASTER_PLAN §2.3] daily-jackpot awarded"
+    "[ADR-0017] per-spill jackpot awarded",
   );
 
   return {
-    awarded: true,
-    awardId: award.awardId,
+    awarded: totalCreditedCents > 0,
     totalAwardedCents: totalCreditedCents,
-    hallGroupId,
+    planRunId,
+    planPosition,
+    triggerDraw: override.draw,
   };
 }

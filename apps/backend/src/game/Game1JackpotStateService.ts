@@ -1,34 +1,45 @@
 /**
- * MASTER_PLAN_SPILL1_PILOT_2026-04-24 §2.3 — Jackpott daglig akkumulering.
+ * Game1JackpotStateService — DEPRECATED daglig akkumulering, beholdt
+ * for admin-tooling og immutable audit-historikk.
  *
- * Spec (PM-låst, Appendix B.9):
- *   * Starter 2000 kr (200_000 øre) per hall-gruppe
- *   * +4000 kr/dag (400_000 øre) — daglig cron-tick
- *   * Max 30 000 kr (3_000_000 øre) — hard cap
- *   * Draw-thresholds: [50, 55, 56, 57] — konsumeres per sub-game (IKKE
- *     eskalering i ett spill, men progresjon mellom sub-games inntil
- *     jackpot vunnes).
+ * Historikk:
+ *   MASTER_PLAN_SPILL1_PILOT_2026-04-24 §2.3 (Appendix B.9): Tjenesten
+ *   implementerte daglig +4000 kr akkumulering (start 2000, max 30 000)
+ *   per hall-gruppe via cron-job `jackpotDailyTick`.
  *
- * Skillelinje mot eksisterende tjenester:
- *   * Game1JackpotService — evaluerer per-farge fixed-amount jackpot for
- *     Fullt Hus. Kjøres i drawNext per spill.
- *   * Game1AccumulatingPotsService (PR-T1 framework) — generell pot per
- *     (hall, pot_key). Kan utvides senere til å subsumere denne; for pilot
- *     holder vi en dedikert tabell/service for tydelig PM-audit.
+ * ADR-0017 (2026-05-10) — Tobias-direktiv:
+ *   "Jackpot-popup gjelder kun for Jackpot-katalog-spillet (pos 7), og
+ *    bingoverten setter ALLTID jackpot manuelt før spillet starter. Det
+ *    skal IKKE være automatisk akkumulering."
  *
- * Ansvar:
- *   1) getCurrentAmount(hallGroupId) — synkron les av state.
- *   2) accumulateDaily() — idempotent cron-metode. For hver hall-gruppe,
- *      hvis last_accumulation_date < today, addr daily_increment_cents
- *      opp til max_cap_cents. Kalles 1×/dag (kl 00:15 via jackpotDailyTick).
- *   3) getStateForGroup(hallGroupId) — full state inkl. draw-thresholds og
- *      cap (brukes av confirm-popup).
- *   4) resetToStart(hallGroupId, reason) — reset til seed (2000 kr) etter
- *      jackpot-vinning. TODO-hook for fremtidig integrasjon med drawNext.
- *   5) ensureStateExists(hallGroupId) — lazy-init (for grupper opprettet
- *      etter migrasjonen kjørte).
+ *   Konsekvens:
+ *     1. `accumulateDaily()` er deprecated til no-op (cron-jobben er
+ *        deaktivert i index.ts).
+ *     2. `app_game1_jackpot_state.current_amount_cents` settes til 0 i
+ *        PR-D migration så stale lesninger gir 0.
+ *     3. `Game1DrawEngineDailyJackpot.ts` er refaktorert til å lese
+ *        per-spill jackpot-config fra `app_game_plan_run.jackpot_overrides_json`
+ *        i stedet for å bruke denne tjenesten.
  *
- * DB: app_game1_jackpot_state (migrasjon 20260821000000).
+ * Hva beholdes:
+ *   1) `getCurrentAmount(hallGroupId)` — admin-UI lesning (returnerer 0
+ *      etter PR-D migration).
+ *   2) `getStateForGroup(hallGroupId)` — admin-UI lesning.
+ *   3) `awardJackpot(input)` — admin-tool for ADMIN_MANUAL_AWARD-korreksjoner.
+ *      Skriver immutable rad i `app_game1_jackpot_awards` (ADR-0004 hash-chain).
+ *   4) `resetToStart(hallGroupId, reason)` — admin-tool for reset.
+ *   5) `ensureStateExists(hallGroupId)` — lazy-init (idempotent).
+ *   6) `isHallInGroup(hallId, hallGroupId)` — RBAC-helper for admin-router.
+ *   7) `listAwards(hallGroupId, limit)` — historikk-lesning av immutable awards.
+ *
+ * Hva fjernes:
+ *   * `accumulateDaily()` — no-op (deprecated).
+ *   * `Game1DrawEngineDailyJackpot.runDailyJackpotEvaluation` bruker IKKE
+ *     lenger denne tjenesten (leser plan-run-overrides direkte).
+ *
+ * DB: app_game1_jackpot_state (migrasjon 20260821000000) +
+ *     app_game1_jackpot_awards (migrasjon 20260901000000) — beholdes som
+ *     forward-only-tabeller per ADR-0014.
  */
 
 import { randomUUID } from "node:crypto";
@@ -296,98 +307,31 @@ export class Game1JackpotStateService {
   }
 
   /**
-   * Idempotent daglig akkumulering (kalles av jackpotDailyTick cron).
+   * @deprecated ADR-0017 (2026-05-10) — Daglig jackpot-akkumulering er fjernet.
    *
-   * Logikk per hall-gruppe:
-   *   1) Hvis last_accumulation_date >= today → no-op (allerede oppdatert).
-   *   2) Hvis current_amount_cents >= max_cap_cents → kun oppdater
-   *      last_accumulation_date (så cron ikke retrier hele dagen).
-   *   3) Ellers: new_amount = min(current + daily_increment, max_cap),
-   *      last_accumulation_date = today.
+   * Tobias-direktiv 2026-05-10: "Jackpot-popup gjelder kun for Jackpot-katalog-
+   * spillet (pos 7), og bingoverten setter ALLTID jackpot manuelt før spillet
+   * starter. Det skal IKKE være automatisk akkumulering."
    *
-   * Alt skjer i én SQL UPDATE med LEAST(...) og en WHERE-klausul som
-   * implisitt gir idempotens.
+   * Metoden returnerer no-op-respons uten å skrive til DB. Cron-jobben
+   * (jackpotDailyTick) er deaktivert i index.ts samtidig. `app_game1_jackpot_state`-
+   * tabellen beholdes for forward-only-policy (ADR-0014) men `current_amount_cents`
+   * settes til 0 i PR-D migration så stale lesninger gir 0.
+   *
+   * `app_game1_jackpot_awards` beholdes som immutable audit-historikk
+   * (ADR-0004 hash-chain).
    */
   async accumulateDaily(): Promise<AccumulateDailyResult> {
-    const today = this.todayKey();
-    let updatedCount = 0;
-    let alreadyCurrentCount = 0;
-    let cappedCount = 0;
-    let errors = 0;
-
-    try {
-      // Atomisk UPDATE — bruker LEAST for cap og WHERE for idempotens.
-      // RETURNING gir oss både ny og gammel amount så vi kan skille
-      // "økt" vs "capped (oppdaterte bare dato)".
-      const { rows: updatedRows } = await this.pool.query<{
-        hall_group_id: string;
-        current_amount_cents: string | number;
-        prev_amount_cents: string | number;
-        max_cap_cents: string | number;
-      }>(
-        `WITH before AS (
-           SELECT hall_group_id, current_amount_cents AS prev_amount_cents
-             FROM ${this.table()}
-            WHERE last_accumulation_date < $1::date
-         )
-         UPDATE ${this.table()} t
-            SET current_amount_cents   = LEAST(
-                                            t.current_amount_cents + t.daily_increment_cents,
-                                            t.max_cap_cents
-                                          ),
-                last_accumulation_date = $1::date,
-                updated_at             = now()
-           FROM before b
-          WHERE t.hall_group_id = b.hall_group_id
-          RETURNING t.hall_group_id,
-                    t.current_amount_cents,
-                    b.prev_amount_cents,
-                    t.max_cap_cents`,
-        [today]
-      );
-
-      for (const row of updatedRows) {
-        const prev = toBigIntCents(row.prev_amount_cents, 0);
-        const curr = toBigIntCents(row.current_amount_cents, 0);
-        const cap = toBigIntCents(row.max_cap_cents, JACKPOT_DEFAULT_MAX_CAP_CENTS);
-        if (prev >= cap) {
-          cappedCount += 1;
-        } else {
-          updatedCount += 1;
-          if (curr >= cap) {
-            // Rent audit: akkurat nådd cap denne tick-en.
-            log.info(
-              { hallGroupId: row.hall_group_id, prev, curr, cap },
-              "jackpot.accumulate.reached_cap"
-            );
-          }
-        }
-      }
-
-      // Grupper som allerede var oppdatert i dag:
-      const { rows: currentRows } = await this.pool.query<{ cnt: string }>(
-        `SELECT COUNT(*)::text AS cnt
-           FROM ${this.table()}
-          WHERE last_accumulation_date = $1::date`,
-        [today]
-      );
-      const totalCurrent = Number(currentRows[0]?.cnt ?? "0");
-      // totalCurrent inkluderer de vi nettopp oppdaterte pluss evt.
-      // capped-rader vi oppdaterte. alreadyCurrent = total - dagens updates.
-      const thisTickTotal = updatedCount + cappedCount;
-      alreadyCurrentCount = Math.max(0, totalCurrent - thisTickTotal);
-
-      log.info(
-        { today, updatedCount, alreadyCurrentCount, cappedCount },
-        "jackpot.accumulate.done"
-      );
-    } catch (err) {
-      errors += 1;
-      log.error({ err }, "jackpot.accumulate.failed");
-      throw err;
-    }
-
-    return { updatedCount, alreadyCurrentCount, cappedCount, errors };
+    log.info(
+      {},
+      "jackpot.accumulate.no_op_deprecated_per_adr_0017"
+    );
+    return {
+      updatedCount: 0,
+      alreadyCurrentCount: 0,
+      cappedCount: 0,
+      errors: 0,
+    };
   }
 
   /**

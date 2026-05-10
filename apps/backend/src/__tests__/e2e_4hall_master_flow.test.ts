@@ -678,7 +678,6 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
       const result = await svc.startGame({
         gameId: TEST_SCHEDULED_GAME_ID,
         actor: masterActor,
-        jackpotConfirmed: true,
       });
       assert.ok(result, "startGame skal returnere MasterActionResult");
     } catch (err) {
@@ -774,7 +773,6 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
         svc.startGame({
           gameId: TEST_SCHEDULED_GAME_ID,
           actor: masterActor,
-          jackpotConfirmed: true,
         }),
       (err: unknown) => {
         assert.ok(err instanceof DomainError, "skal kaste DomainError");
@@ -846,7 +844,6 @@ describe("E2E 4-hall master flow — pilot blokker-validering", () => {
       const result = await svc.startGame({
         gameId: TEST_SCHEDULED_GAME_ID,
         actor: masterActor,
-        jackpotConfirmed: true,
       });
       assert.ok(result, "startGame should return MasterActionResult");
     } catch (err) {

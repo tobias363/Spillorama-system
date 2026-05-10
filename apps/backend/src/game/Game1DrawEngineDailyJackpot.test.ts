@@ -1,15 +1,19 @@
 /**
- * MASTER_PLAN §2.3 — tester for runDailyJackpotEvaluation hooken.
+ * ADR-0017 (2026-05-10) — tester for runDailyJackpotEvaluation hooken etter
+ * refactor til plan-run-overrides.
  *
  * Dekker:
- *   - NO_HALL_GROUP når scheduled-game ikke har gruppe → no-op
- *   - ZERO_BALANCE når state.currentAmountCents=0 → no-op
- *   - ABOVE_THRESHOLD når drawSequenceAtWin > drawThresholds[0] → no-op
- *   - happy path: én vinner får full saldo, state debiteres
- *   - happy path: tre vinnere → split likt floor + house retainer
- *   - perWinnerCents=0 (mer vinnere enn awarded) → award skjer men ingen credit
- *   - wallet.credit-feil etter award-debit → propagerer (caller ruller tilbake draw)
- *   - idempotent service-respons → audit + ingen feil (allerede awarded)
+ *   - NO_WINNERS når winners-array er tomt → no-op
+ *   - NO_PLAN_RUN_BINDING når scheduled-game mangler plan_run_id → no-op
+ *   - NO_OVERRIDE_FOR_POSITION når plan-run.jackpot_overrides_json ikke har
+ *     entry for posisjonen → no-op
+ *   - ABOVE_THRESHOLD når drawSequenceAtWin > override.draw → no-op
+ *   - NO_PRIZE_FOR_COLOR når vinnerens bongfarge ikke gjenkjennes → no-op
+ *   - happy path: én vinner får sin bongfarges prize-beløp
+ *   - happy path: flere vinnere med samme bongfarge → pot delt likt + floor
+ *   - happy path: flere bongfarger → hver farge får sin pott
+ *   - skip ukonfigurerte bongfarger (override mangler farge for vinner)
+ *   - wallet.credit-feil → propagerer (caller ruller tilbake draw)
  */
 
 import assert from "node:assert/strict";
@@ -20,12 +24,6 @@ import {
   InMemoryAuditLogStore,
 } from "../compliance/AuditLogService.js";
 import type { WalletAdapter, WalletTransaction } from "../adapters/WalletAdapter.js";
-import type {
-  AwardJackpotInput,
-  AwardJackpotResult,
-  Game1JackpotState,
-  Game1JackpotStateService,
-} from "./Game1JackpotStateService.js";
 import {
   runDailyJackpotEvaluation,
   type DailyJackpotWinner,
@@ -33,59 +31,41 @@ import {
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
 
-interface JackpotSvcMockOpts {
-  state?: Game1JackpotState;
-  awardImpl?: (input: AwardJackpotInput) => Promise<AwardJackpotResult>;
-}
-
-function makeJackpotServiceMock(opts: JackpotSvcMockOpts = {}): {
-  service: Game1JackpotStateService;
-  awardCalls: AwardJackpotInput[];
-} {
-  const awardCalls: AwardJackpotInput[] = [];
-  const defaultState: Game1JackpotState = {
-    hallGroupId: "grp-1",
-    currentAmountCents: 1_000_000, // 10 000 kr
-    lastAccumulationDate: "2026-04-26",
-    maxCapCents: 3_000_000,
-    dailyIncrementCents: 400_000,
-    drawThresholds: [50, 55, 56, 57],
-    updatedAt: new Date().toISOString(),
-  };
-  const service = {
-    async getStateForGroup(_id: string): Promise<Game1JackpotState> {
-      return opts.state ?? defaultState;
-    },
-    async awardJackpot(input: AwardJackpotInput): Promise<AwardJackpotResult> {
-      awardCalls.push(input);
-      if (opts.awardImpl) return opts.awardImpl(input);
-      return {
-        awardId: "g1ja-test-1",
-        hallGroupId: input.hallGroupId,
-        awardedAmountCents: 1_000_000,
-        previousAmountCents: 1_000_000,
-        newAmountCents: 200_000,
-        idempotent: false,
-        noopZeroBalance: false,
-      };
-    },
-  } as unknown as Game1JackpotStateService;
-  return { service, awardCalls };
-}
-
 interface ClientMockOpts {
-  /** Hva SELECT group_hall_id returnerer. */
-  groupHallId?: string | null;
+  /** scheduled-game-rad. Returner null/undefined-felter for å simulere
+   *  manglende plan-binding. Når undefined returneres ingen rad. */
+  scheduledGame?:
+    | { plan_run_id: string | null; plan_position: number | null }
+    | undefined;
+  /** plan-run-rad. Når undefined returneres ingen rad (= NO_OVERRIDE_FOR_POSITION). */
+  planRun?:
+    | {
+        plan_run_id: string;
+        plan_position: number;
+        jackpot_overrides_json: unknown;
+      }
+    | undefined;
 }
 
-function makeClient(opts: ClientMockOpts = {}): PoolClient {
+function makeClient(opts: ClientMockOpts): PoolClient {
+  const scheduledGameRow = opts.scheduledGame;
+  const planRunRow = opts.planRun;
   return {
-    query: async () => ({
-      rows: opts.groupHallId === undefined
-        ? []
-        : [{ group_hall_id: opts.groupHallId }],
-      rowCount: opts.groupHallId === undefined ? 0 : 1,
-    }),
+    query: async (sql: string) => {
+      if (sql.includes("app_game1_scheduled_games")) {
+        if (!scheduledGameRow) {
+          return { rows: [], rowCount: 0 };
+        }
+        return { rows: [scheduledGameRow], rowCount: 1 };
+      }
+      if (sql.includes("app_game_plan_run")) {
+        if (!planRunRow) {
+          return { rows: [], rowCount: 0 };
+        }
+        return { rows: [planRunRow], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
   } as unknown as PoolClient;
 }
 
@@ -95,11 +75,26 @@ interface WalletMockOpts {
 
 function makeWallet(opts: WalletMockOpts = {}): {
   wallet: WalletAdapter;
-  credits: Array<{ accountId: string; amount: number; idempotencyKey?: string; to?: string }>;
+  credits: Array<{
+    accountId: string;
+    amount: number;
+    idempotencyKey?: string;
+    to?: string;
+  }>;
 } {
-  const credits: Array<{ accountId: string; amount: number; idempotencyKey?: string; to?: string }> = [];
+  const credits: Array<{
+    accountId: string;
+    amount: number;
+    idempotencyKey?: string;
+    to?: string;
+  }> = [];
   const wallet = {
-    async credit(accountId: string, amount: number, _reason: string, options?: { idempotencyKey?: string; to?: string }): Promise<WalletTransaction> {
+    async credit(
+      accountId: string,
+      amount: number,
+      _reason: string,
+      options?: { idempotencyKey?: string; to?: string },
+    ): Promise<WalletTransaction> {
       credits.push({
         accountId,
         amount,
@@ -118,21 +113,7 @@ function makeWallet(opts: WalletMockOpts = {}): {
   return { wallet, credits };
 }
 
-function defaultWinners(n = 1): DailyJackpotWinner[] {
-  const out: DailyJackpotWinner[] = [];
-  for (let i = 1; i <= n; i++) {
-    out.push({
-      assignmentId: `asg-${i}`,
-      walletId: `w-${i}`,
-      userId: `u-${i}`,
-      hallId: `hall-${i}`,
-    });
-  }
-  return out;
-}
-
 function makeDeps(args: {
-  jackpotMock: ReturnType<typeof makeJackpotServiceMock>;
   walletMock: ReturnType<typeof makeWallet>;
   client: PoolClient;
 }) {
@@ -144,20 +125,35 @@ function makeDeps(args: {
     common: {
       client: args.client,
       schema: "public",
-      jackpotStateService: args.jackpotMock.service,
       walletAdapter: args.walletMock.wallet,
       audit,
     },
   };
 }
 
+function defaultWinners(
+  count = 1,
+  ticketColor = "small_yellow",
+): DailyJackpotWinner[] {
+  const out: DailyJackpotWinner[] = [];
+  for (let i = 1; i <= count; i++) {
+    out.push({
+      assignmentId: `asg-${i}`,
+      walletId: `w-${i}`,
+      userId: `u-${i}`,
+      hallId: `hall-${i}`,
+      ticketColor,
+    });
+  }
+  return out;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 test("runDailyJackpotEvaluation: NO_WINNERS → no-op", async () => {
-  const jackpot = makeJackpotServiceMock();
   const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({});
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   const result = await runDailyJackpotEvaluation({
     ...common,
@@ -167,16 +163,15 @@ test("runDailyJackpotEvaluation: NO_WINNERS → no-op", async () => {
   });
   assert.equal(result.awarded, false);
   assert.equal(result.skipReason, "NO_WINNERS");
-  assert.equal(jackpot.awardCalls.length, 0);
   assert.equal(wallet.credits.length, 0);
 });
 
-test("runDailyJackpotEvaluation: NO_HALL_GROUP når scheduled-game mangler gruppe → no-op", async () => {
-  const jackpot = makeJackpotServiceMock();
+test("runDailyJackpotEvaluation: NO_PLAN_RUN_BINDING når scheduled-game mangler plan_run_id → no-op", async () => {
   const wallet = makeWallet();
-  // groupHallId null
-  const client = makeClient({ groupHallId: null });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({
+    scheduledGame: { plan_run_id: null, plan_position: null },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   const result = await runDailyJackpotEvaluation({
     ...common,
@@ -185,107 +180,160 @@ test("runDailyJackpotEvaluation: NO_HALL_GROUP når scheduled-game mangler grupp
     winners: defaultWinners(1),
   });
   assert.equal(result.awarded, false);
-  assert.equal(result.skipReason, "NO_HALL_GROUP");
-  assert.equal(jackpot.awardCalls.length, 0);
+  assert.equal(result.skipReason, "NO_PLAN_RUN_BINDING");
+  assert.equal(wallet.credits.length, 0);
 });
 
-test("runDailyJackpotEvaluation: ZERO_BALANCE når state har 0 saldo → no-op", async () => {
-  const jackpot = makeJackpotServiceMock({
-    state: {
-      hallGroupId: "grp-1",
-      currentAmountCents: 0,
-      lastAccumulationDate: "2026-04-26",
-      maxCapCents: 3_000_000,
-      dailyIncrementCents: 400_000,
-      drawThresholds: [50, 55, 56, 57],
-      updatedAt: new Date().toISOString(),
+test("runDailyJackpotEvaluation: NO_OVERRIDE_FOR_POSITION når plan-run mangler entry → no-op", async () => {
+  const wallet = makeWallet();
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {}, // tom override
     },
   });
+  const { common } = makeDeps({ walletMock: wallet, client });
+
+  const result = await runDailyJackpotEvaluation({
+    ...common,
+    scheduledGameId: "g1",
+    drawSequenceAtWin: 30,
+    winners: defaultWinners(1),
+  });
+  assert.equal(result.awarded, false);
+  assert.equal(result.skipReason, "NO_OVERRIDE_FOR_POSITION");
+  assert.equal(result.planRunId, "pr-1");
+  assert.equal(result.planPosition, 7);
+  assert.equal(wallet.credits.length, 0);
+});
+
+test("runDailyJackpotEvaluation: ABOVE_THRESHOLD når draw > override.draw → no-op", async () => {
   const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          prizesCents: { gul: 100_000 },
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
+
+  const result = await runDailyJackpotEvaluation({
+    ...common,
+    scheduledGameId: "g1",
+    drawSequenceAtWin: 51, // over override.draw=50
+    winners: defaultWinners(1, "small_yellow"),
+  });
+  assert.equal(result.awarded, false);
+  assert.equal(result.skipReason, "ABOVE_THRESHOLD");
+  assert.equal(result.triggerDraw, 50);
+  assert.equal(wallet.credits.length, 0);
+});
+
+test("runDailyJackpotEvaluation: NO_PRIZE_FOR_COLOR når vinnerens bongfarge ikke er i override → no-op", async () => {
+  const wallet = makeWallet();
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          // Kun gul/hvit/lilla er gyldige farger; "rød" er ikke i mappingen
+          prizesCents: { gul: 100_000 },
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   const result = await runDailyJackpotEvaluation({
     ...common,
     scheduledGameId: "g1",
     drawSequenceAtWin: 50,
-    winners: defaultWinners(1),
+    winners: defaultWinners(1, "unknown_color"),
   });
   assert.equal(result.awarded, false);
-  assert.equal(result.skipReason, "ZERO_BALANCE");
-  assert.equal(jackpot.awardCalls.length, 0, "skal ikke debit-prøve på 0 saldo");
+  assert.equal(result.skipReason, "NO_PRIZE_FOR_COLOR");
+  assert.equal(wallet.credits.length, 0);
 });
 
-test("runDailyJackpotEvaluation: ABOVE_THRESHOLD når draw > thresholds[0] → no-op", async () => {
-  const jackpot = makeJackpotServiceMock(); // thresholds default [50,55,56,57]
+test("runDailyJackpotEvaluation: happy path én gul-vinner → får full gul-pott", async () => {
   const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
-
-  const result = await runDailyJackpotEvaluation({
-    ...common,
-    scheduledGameId: "g1",
-    drawSequenceAtWin: 51, // over threshold[0]=50
-    winners: defaultWinners(1),
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          prizesCents: { gul: 100_000, hvit: 50_000, lilla: 150_000 },
+        },
+      },
+    },
   });
-  assert.equal(result.awarded, false);
-  assert.equal(result.skipReason, "ABOVE_THRESHOLD");
-  assert.equal(jackpot.awardCalls.length, 0);
-});
-
-test("runDailyJackpotEvaluation: happy path én vinner → får full saldo + idempotency-key korrekt", async () => {
-  const jackpot = makeJackpotServiceMock();
-  const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   const result = await runDailyJackpotEvaluation({
     ...common,
     scheduledGameId: "game-abc",
-    drawSequenceAtWin: 50,
-    winners: defaultWinners(1),
+    drawSequenceAtWin: 47,
+    winners: defaultWinners(1, "small_yellow"),
   });
   assert.equal(result.awarded, true);
-  assert.equal(result.totalAwardedCents, 1_000_000);
-  assert.equal(result.hallGroupId, "grp-1");
-  assert.equal(jackpot.awardCalls.length, 1);
-  assert.equal(jackpot.awardCalls[0]!.idempotencyKey, "g1-jackpot-game-abc-50");
-  assert.equal(jackpot.awardCalls[0]!.reason, "FULL_HOUSE_WITHIN_THRESHOLD");
+  assert.equal(result.totalAwardedCents, 100_000);
+  assert.equal(result.planRunId, "pr-1");
+  assert.equal(result.planPosition, 7);
+  assert.equal(result.triggerDraw, 50);
   assert.equal(wallet.credits.length, 1);
   assert.equal(wallet.credits[0]!.accountId, "w-1");
-  assert.equal(wallet.credits[0]!.amount, 10_000, "10 000 kr (1_000_000 øre)");
+  assert.equal(wallet.credits[0]!.amount, 1000); // 100_000 øre = 1000 kr
   assert.equal(wallet.credits[0]!.to, "winnings");
-  assert.match(wallet.credits[0]!.idempotencyKey ?? "", /^g1-jackpot-credit-/);
+  assert.match(
+    wallet.credits[0]!.idempotencyKey ?? "",
+    /^g1-jackpot-credit-game-abc-47-/,
+  );
 });
 
-test("runDailyJackpotEvaluation: tre vinnere → split likt med floor + house retainer", async () => {
-  const jackpot = makeJackpotServiceMock({
-    awardImpl: async (input) => ({
-      awardId: "g1ja-tri",
-      hallGroupId: input.hallGroupId,
-      awardedAmountCents: 1_000_000, // 10 000 kr
-      previousAmountCents: 1_000_000,
-      newAmountCents: 200_000,
-      idempotent: false,
-      noopZeroBalance: false,
-    }),
-  });
+test("runDailyJackpotEvaluation: tre gul-vinnere → split likt med floor", async () => {
   const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          prizesCents: { gul: 100_000 }, // 1000 kr / 3 = 333.33 kr per vinner
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   const result = await runDailyJackpotEvaluation({
     ...common,
     scheduledGameId: "g1",
     drawSequenceAtWin: 49,
-    winners: defaultWinners(3),
+    winners: defaultWinners(3, "small_yellow"),
   });
-  // 1_000_000 / 3 = 333_333 (floor) per vinner; 1 øre rest til hus
+  // 100_000 / 3 = 33_333 (floor) per vinner; 1 øre rest til hus
   assert.equal(result.awarded, true);
-  assert.equal(result.totalAwardedCents, 333_333 * 3, "summen er 999_999 — 1 øre til hus");
+  assert.equal(result.totalAwardedCents, 33_333 * 3);
   assert.equal(wallet.credits.length, 3);
   for (const credit of wallet.credits) {
-    assert.equal(credit.amount, 333_333 / 100, "3 333.33 kr per vinner");
+    assert.equal(credit.amount, 33_333 / 100);
     assert.equal(credit.to, "winnings");
   }
   // Idempotency-keys er distinkte per vinner
@@ -293,114 +341,136 @@ test("runDailyJackpotEvaluation: tre vinnere → split likt med floor + house re
   assert.equal(keys.size, 3, "alle keys må være unike");
 });
 
-test("runDailyJackpotEvaluation: idempotent service-respons → ingen feil, audit logget", async () => {
-  const jackpot = makeJackpotServiceMock({
-    awardImpl: async (input) => ({
-      awardId: "g1ja-existing",
-      hallGroupId: input.hallGroupId,
-      awardedAmountCents: 500_000,
-      previousAmountCents: 500_000,
-      new_amountCents: 200_000,
-      newAmountCents: 200_000,
-      idempotent: true,
-      noopZeroBalance: false,
-    } as AwardJackpotResult),
-  });
+test("runDailyJackpotEvaluation: flere bongfarger → hver farge får sin pott", async () => {
   const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common, auditStore } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          prizesCents: { gul: 100_000, hvit: 50_000, lilla: 150_000 },
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
+
+  const winners: DailyJackpotWinner[] = [
+    { assignmentId: "a-1", walletId: "w-yellow", userId: "u-1", hallId: "h-1", ticketColor: "small_yellow" },
+    { assignmentId: "a-2", walletId: "w-white", userId: "u-2", hallId: "h-2", ticketColor: "small_white" },
+    { assignmentId: "a-3", walletId: "w-purple", userId: "u-3", hallId: "h-3", ticketColor: "large_purple" },
+  ];
 
   const result = await runDailyJackpotEvaluation({
     ...common,
     scheduledGameId: "g1",
-    drawSequenceAtWin: 30,
-    winners: defaultWinners(1),
+    drawSequenceAtWin: 45,
+    winners,
   });
   assert.equal(result.awarded, true);
-  assert.equal(result.awardId, "g1ja-existing");
-  // Wallet.credit kjøres uavhengig av idempotency på state-siden — credit-
-  // adapteren håndterer selv via sin egen idempotency-key. Caller forventer
-  // at retry-flyt alltid gjør en credit-call.
-  assert.equal(wallet.credits.length, 1);
-  // Audit-rad skal være logget (fire-and-forget; vent litt)
-  await new Promise((r) => setTimeout(r, 20));
-  const auditEntries = await auditStore.list();
-  const auditEvent = auditEntries.find((e) => e.action === "game1_jackpot.auto_award");
-  assert.ok(auditEvent, "skal ha audit-rad");
-  assert.equal((auditEvent!.details as Record<string, unknown>).idempotent, true);
+  // 100_000 + 50_000 + 150_000 = 300_000
+  assert.equal(result.totalAwardedCents, 300_000);
+  assert.equal(wallet.credits.length, 3);
+
+  const yellowCredit = wallet.credits.find((c) => c.accountId === "w-yellow");
+  const whiteCredit = wallet.credits.find((c) => c.accountId === "w-white");
+  const purpleCredit = wallet.credits.find((c) => c.accountId === "w-purple");
+  assert.ok(yellowCredit && whiteCredit && purpleCredit, "alle 3 vinnere skal få credit");
+  assert.equal(yellowCredit!.amount, 1000); // 100_000 øre
+  assert.equal(whiteCredit!.amount, 500); // 50_000 øre
+  assert.equal(purpleCredit!.amount, 1500); // 150_000 øre
 });
 
-test("runDailyJackpotEvaluation: wallet.credit feil etter award → propageres (caller ruller tilbake draw)", async () => {
-  const jackpot = makeJackpotServiceMock();
+test("runDailyJackpotEvaluation: vinner med farge som ikke har prize-config → fail-quiet, fortsetter med andre", async () => {
+  const wallet = makeWallet();
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          // KUN gul satt — hvit-vinner får ingen credit
+          prizesCents: { gul: 100_000 },
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
+
+  const winners: DailyJackpotWinner[] = [
+    { assignmentId: "a-1", walletId: "w-yellow", userId: "u-1", hallId: "h-1", ticketColor: "small_yellow" },
+    { assignmentId: "a-2", walletId: "w-white", userId: "u-2", hallId: "h-2", ticketColor: "small_white" },
+  ];
+
+  const result = await runDailyJackpotEvaluation({
+    ...common,
+    scheduledGameId: "g1",
+    drawSequenceAtWin: 45,
+    winners,
+  });
+  assert.equal(result.awarded, true);
+  assert.equal(result.totalAwardedCents, 100_000); // KUN gul
+  assert.equal(wallet.credits.length, 1);
+  assert.equal(wallet.credits[0]!.accountId, "w-yellow");
+});
+
+test("runDailyJackpotEvaluation: wallet.credit feiler → propagerer (caller ruller tilbake)", async () => {
   const wallet = makeWallet({ failOnCallCount: 1 });
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          prizesCents: { gul: 100_000 },
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   await assert.rejects(
-    () => runDailyJackpotEvaluation({
-      ...common,
-      scheduledGameId: "g1",
-      drawSequenceAtWin: 50,
-      winners: defaultWinners(2),
-    }),
-    /simulated wallet failure/
+    () =>
+      runDailyJackpotEvaluation({
+        ...common,
+        scheduledGameId: "g1",
+        drawSequenceAtWin: 45,
+        winners: defaultWinners(1, "small_yellow"),
+      }),
+    /simulated wallet failure/,
   );
-  // Service-award SKJEDDE før wallet feilet → state er debitert, men draw-
-  // transaksjonen ruller tilbake i caller.
-  assert.equal(jackpot.awardCalls.length, 1);
 });
 
-test("runDailyJackpotEvaluation: noopZeroBalance fra service → no-op", async () => {
-  const jackpot = makeJackpotServiceMock({
-    awardImpl: async (input) => ({
-      awardId: "",
-      hallGroupId: input.hallGroupId,
-      awardedAmountCents: 0,
-      previousAmountCents: 0,
-      newAmountCents: 0,
-      idempotent: false,
-      noopZeroBalance: true,
-    }),
-  });
+test("runDailyJackpotEvaluation: tolererer snake_case prizes_cents fra DB", async () => {
   const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
+  const client = makeClient({
+    scheduledGame: { plan_run_id: "pr-1", plan_position: 7 },
+    planRun: {
+      plan_run_id: "pr-1",
+      plan_position: 7,
+      jackpot_overrides_json: {
+        "7": {
+          draw: 50,
+          prizes_cents: { gul: 50_000 }, // snake_case-form
+        },
+      },
+    },
+  });
+  const { common } = makeDeps({ walletMock: wallet, client });
 
   const result = await runDailyJackpotEvaluation({
     ...common,
     scheduledGameId: "g1",
-    drawSequenceAtWin: 50,
-    winners: defaultWinners(1),
+    drawSequenceAtWin: 45,
+    winners: defaultWinners(1, "small_yellow"),
   });
-  assert.equal(result.awarded, false);
-  assert.equal(result.skipReason, "ZERO_BALANCE");
-  assert.equal(wallet.credits.length, 0, "ingen credit ved noop");
-});
-
-test("runDailyJackpotEvaluation: per-vinner-credit=0 (n>award) → award flagges men ingen credits", async () => {
-  // 2 vinnere, kun 1 øre awardet → floor(1/2)=0 per vinner
-  const jackpot = makeJackpotServiceMock({
-    awardImpl: async (input) => ({
-      awardId: "g1ja-tiny",
-      hallGroupId: input.hallGroupId,
-      awardedAmountCents: 1, // edge: 1 øre, 2 vinnere
-      previousAmountCents: 1,
-      newAmountCents: 200_000,
-      idempotent: false,
-      noopZeroBalance: false,
-    }),
-  });
-  const wallet = makeWallet();
-  const client = makeClient({ groupHallId: "grp-1" });
-  const { common } = makeDeps({ jackpotMock: jackpot, walletMock: wallet, client });
-
-  const result = await runDailyJackpotEvaluation({
-    ...common,
-    scheduledGameId: "g1",
-    drawSequenceAtWin: 50,
-    winners: defaultWinners(2),
-  });
-  assert.equal(result.awarded, true, "award skjedde");
-  assert.equal(result.totalAwardedCents, 0, "men ingenting kreditert");
-  assert.equal(wallet.credits.length, 0);
+  assert.equal(result.awarded, true);
+  assert.equal(result.totalAwardedCents, 50_000);
 });

@@ -311,14 +311,9 @@ export function createAdminGame1MasterRouter(
       const confirmExcludeRedHalls = Array.isArray(body.confirmExcludeRedHalls)
         ? body.confirmExcludeRedHalls.filter((v: unknown): v is string => typeof v === "string")
         : undefined;
-      // MASTER_PLAN §2.3: jackpotConfirmed er et boolean som master sender
-      // etter å ha godkjent pre-start-popup. Når service-laget ser den
-      // mangler og jackpot-service er koblet inn, kastes JACKPOT_CONFIRM_REQUIRED
-      // med current amount i details — klient rendrer popup og re-kaller
-      // endepunktet med jackpotConfirmed=true.
-      const jackpotConfirmed =
-        body.jackpotConfirmed === true || body.jackpotConfirmed === "true";
-
+      // ADR-0017 (2026-05-10): jackpotConfirmed-feltet er fjernet.
+      // Daglig jackpot-akkumulering er erstattet av per-spill setup via
+      // JackpotSetupModal (lagres i app_game_plan_run.jackpot_overrides_json).
       const { masterHallId, groupHallId } = await loadMasterHallId(gameId);
       const masterActor = buildActor(actor, masterHallId);
       const startInput: Parameters<Game1MasterControlService["startGame"]>[0] = {
@@ -333,9 +328,6 @@ export function createAdminGame1MasterRouter(
       }
       if (confirmUnreadyHalls !== undefined) {
         startInput.confirmUnreadyHalls = confirmUnreadyHalls;
-      }
-      if (jackpotConfirmed) {
-        startInput.jackpotConfirmed = true;
       }
       const result = await masterControlService.startGame(startInput);
 
@@ -353,7 +345,6 @@ export function createAdminGame1MasterRouter(
         status: result.status,
         actualStartTime: result.actualStartTime,
         auditId: result.auditId,
-        jackpotAmountCents: result.jackpotAmountCents ?? null,
       });
     } catch (error) {
       if (error instanceof DomainError && error.code === "FORBIDDEN" && gameId) {

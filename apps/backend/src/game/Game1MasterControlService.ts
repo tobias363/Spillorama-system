@@ -52,7 +52,6 @@ import type {
   Game1TicketPurchaseService,
   Game1RefundAllForGameResult,
 } from "./Game1TicketPurchaseService.js";
-import type { Game1JackpotStateService } from "./Game1JackpotStateService.js";
 
 const log = rootLogger.child({ module: "game1-master-control-service" });
 
@@ -125,13 +124,6 @@ export interface StartGameInput {
    */
   confirmExcludeRedHalls?: string[];
   actor: MasterActor;
-  /**
-   * MASTER_PLAN §2.3 — Jackpot confirm-popup (Appendix B.9).
-   * Når jackpot er aktivt for hall-gruppen må master eksplisitt bekrefte
-   * via pre-start-popup. startGame returnerer DomainError
-   * JACKPOT_CONFIRM_REQUIRED med current amount hvis ikke satt.
-   */
-  jackpotConfirmed?: boolean;
 }
 
 export interface ExcludeHallInput {
@@ -176,12 +168,6 @@ export interface MasterActionResult {
    * injisert (legacy-modus).
    */
   refundSummary?: Game1RefundAllForGameResult | null;
-  /**
-   * MASTER_PLAN §2.3 — Jackpot-amount (øre) som var aktivt da startGame
-   * committet. Kun satt når jackpotStateService er injisert og spillet
-   * tilhører en hall-gruppe med jackpot-state.
-   */
-  jackpotAmountCents?: number;
 }
 
 /**
@@ -227,13 +213,6 @@ export interface Game1MasterControlServiceOptions {
    * = legacy-mode uten automatisk refund (eksisterende tester passerer).
    */
   ticketPurchaseService?: Game1TicketPurchaseService;
-  /**
-   * MASTER_PLAN §2.3 — valgfri jackpot-state-service. Når satt krever
-   * startGame eksplisitt `jackpotConfirmed=true` og returnerer current
-   * jackpot-amount (øre) i MasterActionResult.jackpotAmountCents.
-   * Null = legacy-mode uten jackpot-confirm (eksisterende tester passerer).
-   */
-  jackpotStateService?: Game1JackpotStateService;
 }
 
 interface ScheduledGameRow {
@@ -311,7 +290,6 @@ export class Game1MasterControlService {
   private drawEngine: Game1DrawEngineService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
   private ticketPurchaseService: Game1TicketPurchaseService | null;
-  private jackpotStateService: Game1JackpotStateService | null;
 
   constructor(options: Game1MasterControlServiceOptions) {
     this.pool = options.pool;
@@ -323,14 +301,6 @@ export class Game1MasterControlService {
     this.drawEngine = options.drawEngine ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
     this.ticketPurchaseService = options.ticketPurchaseService ?? null;
-    this.jackpotStateService = options.jackpotStateService ?? null;
-  }
-
-  /**
-   * MASTER_PLAN §2.3: late-binding for jackpot-state-service.
-   */
-  setJackpotStateService(jackpotStateService: Game1JackpotStateService): void {
-    this.jackpotStateService = jackpotStateService;
   }
 
   /**
@@ -436,41 +406,12 @@ export class Game1MasterControlService {
   }
 
   async startGame(input: StartGameInput): Promise<MasterActionResult> {
-    // MASTER_PLAN §2.3: jackpot-confirm preflight (utenfor transaksjonen
-    // slik at selv om confirm er påkrevd så blokkeres ikke DB-rader).
-    // Hvis jackpot-service er injisert må master eksplisitt ha bekreftet
-    // via popup før startGame kalles med jackpotConfirmed=true. Amount
-    // inkluderes i error slik at klient kan re-rendre popup uten ekstra kall.
-    let jackpotAmountCents: number | undefined;
-    if (this.jackpotStateService) {
-      const groupHallId = await this.readGroupHallId(input.gameId);
-      if (groupHallId) {
-        try {
-          const state = await this.jackpotStateService.getStateForGroup(groupHallId);
-          jackpotAmountCents = state.currentAmountCents;
-          if (!input.jackpotConfirmed) {
-            throw new DomainError(
-              "JACKPOT_CONFIRM_REQUIRED",
-              `Jackpott må bekreftes av master før start. Nåværende beløp: ${(state.currentAmountCents / 100).toFixed(0)} kr.`,
-              {
-                jackpotAmountCents: state.currentAmountCents,
-                maxCapCents: state.maxCapCents,
-                dailyIncrementCents: state.dailyIncrementCents,
-                drawThresholds: state.drawThresholds,
-                hallGroupId: groupHallId,
-              }
-            );
-          }
-        } catch (err) {
-          if (err instanceof DomainError) throw err;
-          // Soft-fail: logg og fortsett uten jackpot-integrasjon slik
-          // at infrastruktur-feil ikke blokkerer start (fail-open for
-          // MVP). Framtidig: fail-closed når jackpot er kritisk sti.
-          log.warn({ err, gameId: input.gameId }, "jackpot-preflight soft-failed, fortsetter");
-        }
-      }
-    }
-
+    // ADR-0017 (2026-05-10, Tobias-direktiv): Daglig jackpot-akkumulering
+    // er fjernet. Jackpot for "Jackpot"-katalog-spillet (pos 7) settes
+    // manuelt av master via JackpotSetupModal og lagres i
+    // app_game_plan_run.jackpot_overrides_json. Pre-start-popup-blokkering
+    // (JACKPOT_CONFIRM_REQUIRED) er fjernet fra master-flyten — Bingo og
+    // andre ikke-jackpot-spill går rett gjennom.
     const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
@@ -717,14 +658,12 @@ export class Game1MasterControlService {
           notReadyHalls: autoExcludedUnready,
           noPlayersHalls: autoExcludedRed,
           scanPendingHalls: autoExcludedScanOrange,
-          jackpotConfirmed: input.jackpotConfirmed === true,
-          jackpotAmountCents: jackpotAmountCents ?? null,
           autoExcludedRedHalls: autoExcludedRed,
         },
       });
 
       log.info(
-        { gameId: input.gameId, actorId: input.actor.userId, auditId, jackpotAmountCents },
+        { gameId: input.gameId, actorId: input.actor.userId, auditId },
         "master.start"
       );
 
@@ -741,9 +680,6 @@ export class Game1MasterControlService {
         _groupHallId: game.group_hall_id,
         _readySnapshot: this.snapshotReadyRows(readyRows),
       };
-      if (jackpotAmountCents !== undefined) {
-        masterResult.jackpotAmountCents = jackpotAmountCents;
-      }
       return masterResult;
     });
 
@@ -798,9 +734,6 @@ export class Game1MasterControlService {
       actualEndTime: result.actualEndTime,
       auditId: result.auditId,
     };
-    if (result.jackpotAmountCents !== undefined) {
-      cleanResult.jackpotAmountCents = result.jackpotAmountCents;
-    }
 
     this.notifyStatusChange(cleanResult, "start", input.actor.userId);
     return cleanResult;
@@ -1617,19 +1550,6 @@ export class Game1MasterControlService {
       [gameId]
     );
     return rows[0]?.status ?? "unknown";
-  }
-
-  /**
-   * MASTER_PLAN §2.3 — les group_hall_id uten FOR UPDATE-lock (brukes av
-   * jackpot-preflight i startGame). Returnerer null hvis raden mangler —
-   * caller håndterer ved å hoppe over jackpot-preflighten.
-   */
-  private async readGroupHallId(gameId: string): Promise<string | null> {
-    const { rows } = await this.pool.query<{ group_hall_id: string }>(
-      `SELECT group_hall_id FROM ${this.scheduledGamesTable()} WHERE id = $1`,
-      [gameId]
-    );
-    return rows[0]?.group_hall_id ?? null;
   }
 
   private async loadReadySnapshot(

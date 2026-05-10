@@ -75,20 +75,18 @@ describe("F4 regression — dateRowToString must return Oslo-day, not UTC-day", 
   });
 });
 
-describe("F-NEW-1 regression — MasterActionService.start must accept jackpotConfirmed", () => {
-  it("MasterActionInputSchema must allow jackpotConfirmed boolean field", () => {
-    // This test uses a minimal Zod-ish shape to encode the contract:
-    // when MasterActionService.start receives { hallId, jackpotConfirmed: true },
-    // it must NOT reject with INVALID_INPUT "Unrecognized key: jackpotConfirmed".
+describe("ADR-0017 — daglig jackpot-akkumulering fjernet", () => {
+  it("MasterActionInputSchema må IKKE inkludere jackpotConfirmed-feltet", () => {
+    // ADR-0017 (2026-05-10, Tobias-direktiv): "Jackpot-popup gjelder kun for
+    // Jackpot-katalog-spillet (pos 7), og bingoverten setter ALLTID jackpot
+    // manuelt før spillet starter. Det skal IKKE være automatisk akkumulering."
     //
-    // The actual fix requires:
-    //   1. Add `jackpotConfirmed?: boolean` to MasterActionInput
-    //   2. Add `jackpotConfirmed: z.boolean().optional()` to Zod schema in
-    //      apps/backend/src/routes/agentGame1Master.ts
-    //   3. Propagate to Game1MasterControlService.startGame({ jackpotConfirmed })
+    // Tidligere F-NEW-1-fiksen ville at MasterActionInput skulle akseptere
+    // jackpotConfirmed for å hoppe over en pre-start-popup-blokk. Per ADR-0017
+    // er hele preflighten fjernet — feltet skal IKKE finnes i input-schemaet.
 
-    // Mock schema (would import from MasterActionService)
-    const validKeys = new Set(["hallId", "jackpotConfirmed"]);
+    // Mock schema speiler MasterActionInput post-ADR-0017
+    const validKeys = new Set(["hallId"]);
 
     function validateMasterActionInput(input: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
       for (const key of Object.keys(input)) {
@@ -99,44 +97,36 @@ describe("F-NEW-1 regression — MasterActionService.start must accept jackpotCo
       return { ok: true };
     }
 
-    // SHOULD PASS after fix
-    const result = validateMasterActionInput({ hallId: "demo-hall-001", jackpotConfirmed: true });
+    // hallId-only er gyldig
+    const valid = validateMasterActionInput({ hallId: "demo-hall-001" });
+    assert.deepEqual(valid, { ok: true }, "hallId alene skal være gyldig input");
+
+    // jackpotConfirmed skal AVVISES (feltet er fjernet)
+    const invalid = validateMasterActionInput({ hallId: "demo-hall-001", jackpotConfirmed: true });
     assert.deepEqual(
-      result,
-      { ok: true },
-      "After fix, MasterActionService.start must accept jackpotConfirmed=true",
+      invalid,
+      { ok: false, error: 'Unrecognized key: "jackpotConfirmed"' },
+      "ADR-0017: jackpotConfirmed skal IKKE være gyldig input — feltet er fjernet",
     );
   });
 
-  it("should NOT trigger jackpot-preflight for catalog-entries with requiresJackpotSetup=false", () => {
-    // Logic-test for proposed fix path 2: skip jackpot-preflight when current
-    // catalog-entry doesn't require it.
+  it("Bingo (pos 1) skal aldri trigge jackpot-preflight blocking", () => {
+    // ADR-0017: pre-start jackpot-preflight er fjernet helt. Verken Bingo (pos 1)
+    // eller Jackpot (pos 7) blokkerer master på pre-start nivå. Jackpot-spill
+    // bruker plan-run.jackpot_overrides_json som settes via JackpotSetupModal
+    // før master kaller /advance til Jackpot-posisjonen.
     //
-    // Current behavior (BUG): Game1MasterControlService.startGame triggers
-    // jackpot-preflight for ALL games where jackpotStateService is injected,
-    // regardless of catalog.requiresJackpotSetup.
-
-    function shouldTriggerJackpotPreflight(input: {
-      hasJackpotService: boolean;
-      catalogEntryRequiresJackpot: boolean;
-    }): boolean {
-      // Proposed fix: only trigger when catalog explicitly requires it.
-      if (!input.hasJackpotService) return false;
-      return input.catalogEntryRequiresJackpot;
+    // Denne test-funksjonen dokumenterer at preflight aldri trigges for Bingo.
+    function shouldTriggerJackpotPreflight(): boolean {
+      // Per ADR-0017: ingen preflight i master-start-flyten.
+      return false;
     }
 
-    // Bingo (position 1) — does NOT require jackpot-setup
+    // Bingo (position 1) — aldri preflight
     assert.equal(
-      shouldTriggerJackpotPreflight({ hasJackpotService: true, catalogEntryRequiresJackpot: false }),
+      shouldTriggerJackpotPreflight(),
       false,
-      "Bingo (requiresJackpotSetup=false) should NOT trigger jackpot-preflight",
-    );
-
-    // Jackpot (position 7) — DOES require jackpot-setup
-    assert.equal(
-      shouldTriggerJackpotPreflight({ hasJackpotService: true, catalogEntryRequiresJackpot: true }),
-      true,
-      "Jackpot (requiresJackpotSetup=true) MUST trigger jackpot-preflight",
+      "ADR-0017: Bingo og alle andre katalog-spill skal aldri ha pre-start jackpot-preflight",
     );
   });
 });

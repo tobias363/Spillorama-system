@@ -225,17 +225,13 @@ export interface Game1DrawEngineServiceOptions {
    */
   jackpotService?: Game1JackpotService;
   /**
-   * MASTER_PLAN §2.3 / Appendix B.9: state-service for daglig akkumulert
-   * jackpot per hall-gruppe. Når wired opp + walletAdapter satt vil engine
-   * etter Fullt Hus innen `drawThresholds[0]` (default 50) atomisk debit-
-   * and-reset state-potten og distribuere awarded amount likt mellom
-   * vinnere via wallet.credit.
+   * @deprecated ADR-0017 (2026-05-10): jackpot-state-service brukes ikke
+   * lenger av engine. Daglig akkumulering er fjernet; per-spill jackpot-
+   * setup leses fra `app_game_plan_run.jackpot_overrides_json` direkte i
+   * `runDailyJackpotEvaluation`.
    *
-   * Fail-closed: ikke wired → no-op (bakoverkompat). Wallet-credit-feil
-   * etter award-debit propageres → draw-transaksjon ruller tilbake, men
-   * state-debiten lever videre (begrenset av at awardJackpot kjører i
-   * egen pool.connect()-transaksjon). Pragmatisk pilot-akseptert avvik;
-   * full atomicitet er post-pilot-PR.
+   * Felt beholdt midlertidig for backward-compat med eksisterende
+   * konstruksjons-call-sites; selve verdien er ubrukt i engine-logikk.
    */
   jackpotStateService?: Game1JackpotStateService;
   /**
@@ -2610,23 +2606,21 @@ export class Game1DrawEngineService {
       });
     }
 
-    // MASTER_PLAN §2.3 / Appendix B.9: daglig-akkumulert Jackpott. Kjører
-    // kun ved Fullt Hus + state-service wired + walletAdapter wired. Service-
-    // helperen er fail-closed på sin egen side (no-op hvis state mangler
-    // eller threshold ikke oppfylt). Wallet-credit-feil ETTER award-debit
-    // propagerer her — caller (drawNext) ruller tilbake DRAW-transaksjon,
-    // men state-debit lever videre i sin egen committed transaksjon (se
-    // Game1DrawEngineDailyJackpot.ts docstring for begrunnelse).
+    // ADR-0017 (2026-05-10, Tobias-direktiv): per-spill jackpot-payout via
+    // plan-run-overrides. Master setter draw + prizesCents per bongfarge i
+    // JackpotSetupModal før Jackpot-spillet (pos 7) starter — verdiene lagres
+    // i `app_game_plan_run.jackpot_overrides_json[currentPosition]`.
+    //
+    // Auto-utbetaling skjer kun når Fullt Hus vinnes på/innen `override.draw`.
+    // Ingen daglig akkumulering — `app_game1_jackpot_state` er deprecated.
     if (
       currentPhase === TOTAL_PHASES &&
       winners.length > 0 &&
-      this.jackpotStateService !== null &&
       this.walletAdapter !== null
     ) {
       await runDailyJackpotEvaluation({
         client,
         schema: this.schema,
-        jackpotStateService: this.jackpotStateService,
         walletAdapter: this.walletAdapter,
         audit: this.audit,
         scheduledGameId,
@@ -2636,6 +2630,7 @@ export class Game1DrawEngineService {
           walletId: w.walletId,
           userId: w.userId,
           hallId: w.hallId,
+          ticketColor: w.ticketColor,
         })),
       });
     }

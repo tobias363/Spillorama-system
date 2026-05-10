@@ -113,7 +113,6 @@ import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
 import { createGame2AutoDrawTickJob } from "./jobs/game2AutoDrawTick.js";
 import { createGame3AutoDrawTickJob } from "./jobs/game3AutoDrawTick.js";
-import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
 import { createIdempotencyKeyCleanupJob } from "./jobs/idempotencyKeyCleanup.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
 import { createGameStartNotificationsJob } from "./jobs/gameStartNotifications.js";
@@ -601,7 +600,6 @@ const {
   jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
   jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
-  jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
   jobIdempotencyCleanupEnabled, jobIdempotencyCleanupIntervalMs, jobIdempotencyCleanupRunAtHour,
   jobIdempotencyCleanupRetentionDays, jobIdempotencyCleanupBatchSize,
   jobWalletAuditVerifyEnabled, jobWalletAuditVerifyIntervalMs, jobWalletAuditVerifyRunAtHour,
@@ -2115,28 +2113,23 @@ const game1RescheduleService = new Game1RescheduleService({
   schema: pgSchema,
 });
 
-// MASTER_PLAN §2.3 — daglig-akkumulerende jackpot-state (Appendix B.9).
-// Starter 2000 kr, +4000/dag, max 30k. State per hall-gruppe.
+// ADR-0017 (2026-05-10, Tobias-direktiv): Daglig jackpot-akkumulering er
+// fjernet. Jackpot for "Jackpot"-katalog-spillet (pos 7) settes manuelt av
+// master via JackpotSetupModal og lagres i app_game_plan_run.jackpot_overrides_json.
+//
+// Service-instansen beholdes fordi:
+//   1. `app_game1_jackpot_awards` er immutable audit-historikk (ADR-0004 hash-
+//      chain) som admin kan lese via /api/admin/game1/jackpot/:hallGroupId/state
+//      og /listAwards.
+//   2. POST /api/admin/game1/jackpot/:hallGroupId/award (ADMIN_MANUAL_AWARD)
+//      er fortsatt en admin-tool for korreksjoner.
+//   3. `accumulateDaily()` er deprecated til no-op (se Game1JackpotStateService).
+//
+// `app_game1_jackpot_state.current_amount_cents` settes til 0 i PR-D migration
+// slik at GET state returnerer 0 i stedet for legacy-verdier.
 const game1JackpotStateService = new Game1JackpotStateService({
   pool: platformService.getPool(),
   schema: pgSchema,
-});
-// Late-bind slik at master-control kan bruke servicen for pre-start-confirm.
-game1MasterControlService.setJackpotStateService(game1JackpotStateService);
-
-// MASTER_PLAN §2.3 / Appendix B.9 — daglig jackpot-akkumulering (+4000/dag).
-// Kjøres 00:15 lokal tid for å unngå midnatt-race med andre daglige jobs.
-// Default OFF — PM aktiverer i staging via JOB_JACKPOT_DAILY_ENABLED=true.
-jobScheduler.register({
-  name: "jackpot-daily-tick",
-  description: "Daglig +4000 kr akkumulering på Spill 1 Jackpott per hall-gruppe (MASTER_PLAN §2.3).",
-  intervalMs: jobJackpotDailyIntervalMs,
-  enabled: jobJackpotDailyEnabled,
-  run: createJackpotDailyTickJob({
-    service: game1JackpotStateService,
-    runAtHourLocal: jobJackpotDailyRunAtHour,
-    runAtMinuteLocal: jobJackpotDailyRunAtMinute,
-  }),
 });
 
 // BIN-767: Wallet idempotency-key TTL-cleanup. Industri-standard kasino-
@@ -2276,10 +2269,10 @@ const game1DrawEngineService = new Game1DrawEngineService({
   auditLogService,
   payoutService: game1PayoutService,
   jackpotService: game1JackpotService,
-  // MASTER_PLAN §2.3 / Appendix B.9: daglig akkumulert jackpot per hall-
-  // gruppe. Når wired sammen med walletAdapter (under) vil engine etter
-  // Fullt Hus innen drawThresholds[0] (default 50) atomisk debit-and-reset
-  // state-pott og distribuere awarded amount til vinnere via wallet.credit.
+  // ADR-0017 (2026-05-10): jackpotStateService brukes ikke lenger av engine-
+  // logikken (runDailyJackpotEvaluation leser plan-run-overrides direkte).
+  // Feltet er beholdt midlertidig for bakover-kompatibilitet — selve verdien
+  // er ubrukt etter ADR-0017.
   jackpotStateService: game1JackpotStateService,
   physicalTicketPayoutService,
   // PR-T3 Spor 4: akkumulerende pot-evaluering etter Fullt Hus. Pot-payout
