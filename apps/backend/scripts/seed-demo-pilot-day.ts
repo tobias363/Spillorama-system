@@ -1323,8 +1323,12 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
 const DEMO_PLAN_ID = "demo-plan-pilot";
 const DEMO_PLAN_NAME = "Pilot Demo — alle 13 spill";
 const DEMO_PLAN_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const DEMO_PLAN_START_TIME = "11:00";
-const DEMO_PLAN_END_TIME = "21:00";
+// Tobias-direktiv 2026-05-11: 24t-åpningstid på demo-plan så testing kan
+// kjøres nattetid uten å treffe "stengt"-blokken. 00:00-23:59 — DB-constraint
+// `start_time < end_time` tillater ikke 00:00-24:00. Demo-only — prod-planer
+// skal ha realistiske åpningstider (11:00-21:00 etc.) via admin-UI.
+const DEMO_PLAN_START_TIME = "00:00";
+const DEMO_PLAN_END_TIME = "23:59";
 
 /**
  * Idempotent upsert av en katalog-rad. ON CONFLICT (id) DO UPDATE refresher
