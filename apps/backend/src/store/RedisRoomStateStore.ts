@@ -27,6 +27,10 @@ import {
 } from "./RoomStateStore.js";
 import { logger as rootLogger } from "../util/logger.js";
 import { metrics } from "../util/metrics.js";
+import {
+  recordRedisFailure,
+  recordRedisSuccess,
+} from "../observability/RedisHealthMetrics.js";
 
 const logger = rootLogger.child({ module: "redis-room-store" });
 
@@ -154,18 +158,33 @@ export class RedisRoomStateStore implements RoomStateStore {
    * HOEY-11: Explicitly persist a room to Redis (synchronous with error propagation).
    * Called after critical mutations (payout, game end, buy-in).
    * Throws on failure so callers can handle or log at CRITICAL level.
+   *
+   * ADR-0020 / P1-3: Records success/failure to RedisHealthMetrics so that
+   * RedisHealthMonitor can detect degraded persist patterns and trigger
+   * alarms when consecutive failures exceed threshold.
    */
   async persist(code: string): Promise<void> {
     const room = this.rooms.get(code);
     if (!room) return;
     const serialized = serializeRoom(room);
     const json = JSON.stringify(serialized);
-    await this.redis.setex(this.redisKey(code), this.ttlSeconds, json);
+    try {
+      await this.redis.setex(this.redisKey(code), this.ttlSeconds, json);
+      recordRedisSuccess("persist");
+    } catch (err) {
+      recordRedisFailure("persist", err);
+      throw err;
+    }
   }
 
   /**
    * Fire-and-forget persistence for non-critical write-through cache updates.
    * Errors are logged but not thrown — in-memory state is authoritative.
+   *
+   * ADR-0020 / P1-3: Failures are also tracked in RedisHealthMetrics via the
+   * underlying `persist()` call. The monitor polls these counters and
+   * triggers a "redis_degraded" alarm when consecutive persist-failures
+   * exceed the configured threshold (default 5). Caller stays fail-soft.
    */
   private async persistAsync(code: string): Promise<void> {
     try {
