@@ -2,6 +2,11 @@
  * 2026-05-08 (Tobias-direktiv): master kan starte UAVHENGIG av om andre haller
  * er klare — ready-status er KUN informativ visning, ikke gate.
  *
+ * 2026-05-10 (ADR-0021): master kan også starte UAVHENGIG av om master-hallen
+ * har solgte bonger. `MASTER_HALL_RED`-blokkeringen er fjernet — bingoverten
+ * har full kontroll. Master deltar alltid (auto-eksklusjons-loopen skipper
+ * master-hallen).
+ *
  * Tester verifiserer at serviceen:
  *   1. Auto-ekskluderer ikke-grønne ikke-master-haller med distinkte
  *      `excluded_reason`-verdier (`unready_override`,
@@ -10,8 +15,9 @@
  *      `notReadyHalls`/`noPlayersHalls`/`scanPendingHalls`-metadata for
  *      Lotteritilsynet-sporbarhet.
  *   3. KASTER fortsatt `HALLS_NOT_READY` hvis MASTER-hallen ikke er klar
- *      (master-side data-feil).
- *   4. KASTER fortsatt `MASTER_HALL_RED` hvis master-hallen har 0 spillere.
+ *      (master har ikke huket "Klar"-knappen — separat fra kapasitet).
+ *   4. TILLATER start når master-hallen har 0 spillere (rød) — runden
+ *      starter med master-hall som tom deltaker (ADR-0021).
  *
  * Pre-cond: `purchase_open` status. Tester dekker IKKE Resume-flyt — den
  * bruker ingen ready-sjekk per design (per-hall ready gjelder bare ved

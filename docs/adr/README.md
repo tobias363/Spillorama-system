@@ -32,6 +32,7 @@ Alle ADR-er som er merget til `main` regnes som aktive (med mindre status sier a
 | [0015](./0015-spill71-regulatory-ledger.md) | §71 regulatory-ledger (separate audit-tabell) | Accepted | 2026-05-09 |
 | [0016](./0016-master-action-bridge-retry-rollback.md) | Master-action bridge-retry + rollback | Accepted | 2026-05-09 |
 | [0017](./0017-remove-daily-jackpot-accumulation.md) | Fjerne daglig jackpot-akkumulering — bingovert setter manuelt | Accepted | 2026-05-10 |
+| [0021](./0021-allow-master-start-without-players.md) | Master kan starte spillet uten solgte bonger (fjerner `MASTER_HALL_RED`) | Accepted | 2026-05-10 |
 
 ## Når lage ADR
 

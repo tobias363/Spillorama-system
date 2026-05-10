@@ -118,7 +118,13 @@ export interface StartGameInput {
    * 2026-05-08 (Tobias-direktiv): legacy-felt beholdt for backward compat.
    * Røde haller (0 spillere) auto-ekskluderes nå med
    * `excluded_reason='auto_excluded_red_no_players'`. Master-hallen kan ALDRI
-   * ekskluderes — hvis master er rød kastes `MASTER_HALL_RED`.
+   * ekskluderes — den deltar alltid, selv med 0 spillere (ADR-0021).
+   *
+   * 2026-05-10 (ADR-0021): Master kan starte spillet uavhengig av om
+   * master-hallen har solgte bonger. `MASTER_HALL_RED`-blokkeringen er
+   * fjernet — bingoverten har full kontroll. Auto-eksklusjons-loopen for
+   * røde haller skipper master-hallen, så master deltar med 0 spillere
+   * uten å bli ekskludert.
    *
    * UI-er trenger IKKE lenger å sende dette feltet — det ignoreres effektivt.
    */
@@ -501,14 +507,13 @@ export class Game1MasterControlService {
         (h) => !unreadyHalls.includes(h)
       );
 
-      // 2026-05-08 (Tobias-direktiv): master-hall er master-side data-feil
-      // hvis rød. Behold som hard-feil. Master-hallen kan ALDRI ekskluderes.
-      if (redHallIds.includes(masterHallId)) {
-        throw new DomainError(
-          "MASTER_HALL_RED",
-          "Master-hallen har ingen spillere. Fiks salg i master-hallen før du starter."
-        );
-      }
+      // 2026-05-10 (ADR-0021, Tobias-direktiv): master kan starte spillet
+      // UAVHENGIG av om master-hallen har solgte bonger.
+      // `MASTER_HALL_RED`-blokkeringen er fjernet — bingoverten har full
+      // kontroll. Auto-eksklusjons-loopen nedenfor skipper master-hallen
+      // (`if (hallId === masterHallId) continue`), så master deltar alltid
+      // med 0 spillere uten å bli ekskludert. Demo-flyt, kalibrering og
+      // last-minute-salg dekkes av denne adferden.
 
       // 2026-05-08 (Tobias-direktiv): auto-ekskluder alle ikke-grønne ikke-
       // master-haller. Ready-status er KUN informativ visning, ikke gate.
@@ -549,8 +554,9 @@ export class Game1MasterControlService {
         autoExcludedUnready.push(hallId);
       }
 
-      // Auto-ekskluder rød-haller (0 spillere). Master-hallen er allerede
-      // sjekket ovenfor, så masterHallId vil aldri være med i redHallIds her.
+      // Auto-ekskluder rød-haller (0 spillere) — UNNTATT master-hallen.
+      // Master-hallen deltar alltid (ADR-0021), selv med 0 spillere.
+      // `if (hallId === masterHallId) continue` håndhever det her.
       for (const hallId of redHallIds) {
         if (hallId === masterHallId) continue;
         await upsertExclusion(hallId, "auto_excluded_red_no_players");

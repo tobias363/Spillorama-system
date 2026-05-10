@@ -6,10 +6,15 @@
  *     'auto_excluded_scan_pending' (ikke lenger HALLS_NOT_READY-blokk)
  *   - 🔴 Rød hall (0 spillere) → auto-ekskluder med
  *     'auto_excluded_red_no_players' (ikke lenger RED_HALLS_NOT_CONFIRMED)
- *   - 🔴 Master-hall rød → fortsatt blokkerer med MASTER_HALL_RED (master-
- *     side data-feil)
  *   - Blanding av grønne + ikke-grønne → start går gjennom (ikke-grønne
  *     auto-ekskluderes)
+ *
+ * 2026-05-10 (ADR-0021):
+ *   - 🔴 Master-hall rød (0 spillere) → start TILLATES (ikke lenger
+ *     `MASTER_HALL_RED`-blokk). Master-hallen deltar alltid med 0 spillere
+ *     uten å bli ekskludert. Bingoverten har full kontroll.
+ *   - Master-hall ikke "Klar"-huket → fortsatt `HALLS_NOT_READY` (separat
+ *     sjekk fra kapasitet, gjelder ready-flag-knappen).
  */
 
 import assert from "node:assert/strict";
@@ -348,47 +353,69 @@ test("startGame med confirmExcludeRedHalls setter excluded_from_game=true", asyn
   assert.deepEqual(metadata.noPlayersHalls, ["hall-3"]);
 });
 
-// ── Master-hall rød → MASTER_HALL_RED ───────────────────────────────────────
+// ── Master-hall rød (0 spillere) men "Klar" → start TILLATES (ADR-0021) ────
 
-test("startGame avviser hvis master-hall selv er rød", async () => {
-  const { pool } = createStubPool([
+test("startGame: master-hall rød (0 spillere) MED is_ready=true → OK (ADR-0021)", async () => {
+  // Master-hall er rød (0 spillere) men er huket "Klar". Etter ADR-0021
+  // skal start TILLATES uten `MASTER_HALL_RED`-blokk. Master deltar i
+  // runden med 0 spillere — auto-eksklusjons-loopen skipper master-hallen.
+  const masterRedButReady = {
+    hall_id: "hall-master",
+    is_ready: true,
+    excluded_from_game: false,
+    digital_tickets_sold: 0,
+    physical_tickets_sold: 0,
+    start_ticket_id: null,
+    final_scan_ticket_id: null,
+  };
+  const { pool, queries } = createStubPool([
     { match: (s) => s.startsWith("BEGIN"), rows: [] },
     {
       match: (s) => s.includes("FOR UPDATE"),
       rows: [gameRow({ status: "purchase_open" })],
     },
+    // Pre-auto-exclusion snapshot.
     {
       match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [masterRedButReady, greenRow("hall-2"), greenRow("hall-3")],
+    },
+    // Post-auto-exclusion snapshot (ingen endring — master ikke ekskludert,
+    // ingen andre haller å auto-ekskludere siden hall-2/hall-3 er grønne).
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [masterRedButReady, greenRow("hall-2"), greenRow("hall-3")],
+    },
+    {
+      match: (s) => s.includes("SET status") && s.includes("'running'"),
       rows: [
-        redRow("hall-master"),
-        greenRow("hall-2"),
-        greenRow("hall-3"),
+        gameRow({
+          status: "running",
+          actual_start_time: "2026-04-24T10:00:00.000Z",
+        }),
       ],
     },
-    { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
   ]);
   const svc = Game1MasterControlService.forTesting(pool as never);
-  // Siden master-hall er rød, vil flyten først feile med HALLS_NOT_READY
-  // (master-hall er også not-ready). Vi vil ha MASTER_HALL_RED-sjekken.
-  // For å isolere må master-hall være "ready" men ha 0 spillere — teknisk
-  // umulig med FINAL_SCAN_REQUIRED-guard i markReady, men rent
-  // test-scenario:
-  await assert.rejects(
-    svc.startGame({
-      gameId: "g1",
-      actor: masterActor,
-      confirmExcludeRedHalls: ["hall-master"],
-    }),
-    (err: unknown) => {
-      if (!(err instanceof DomainError)) return false;
-      // Kan være enten HALLS_NOT_READY (not-ready) eller MASTER_HALL_RED,
-      // avhengig av rekkefølge — begge er korrekt avvisning.
-      return (
-        err.code === "MASTER_HALL_RED" ||
-        err.code === "HALLS_NOT_READY" ||
-        err.code === "RED_HALLS_NOT_CONFIRMED"
-      );
-    }
+  const result = await svc.startGame({ gameId: "g1", actor: masterActor });
+  assert.equal(result.status, "running");
+
+  // Verifiser at master-hallen IKKE ble auto-ekskludert (selv om rød).
+  const masterExcludedQuery = queries.find(
+    (q) =>
+      q.sql.includes("INSERT INTO") &&
+      q.sql.includes("app_game1_hall_ready_status") &&
+      Array.isArray(q.params) &&
+      q.params[1] === "hall-master"
+  );
+  assert.equal(
+    masterExcludedQuery,
+    undefined,
+    "master-hallen skal ALDRI ekskluderes (ADR-0021)"
   );
 });
 
