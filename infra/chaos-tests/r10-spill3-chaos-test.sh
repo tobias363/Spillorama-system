@@ -182,9 +182,12 @@ if [[ -z "${H1:-}" || -z "${H2:-}" ]]; then
 fi
 
 # ── §2 Seed pilot-data (migrate kjørte i §1.5) ──────────────────────────
+# Seed-scripts kjøres via tsx (ikke compiled) fordi tsconfig.json kun
+# inkluderer src/, så apps/backend/scripts/ blir aldri kompilert til
+# dist/. Speiler r2-failover-test.sh §2.
 info "Seeder pilot-data via backend-1"
 docker exec -e DEMO_SEED_PASSWORD="$ADMIN_PASSWORD" spillorama-backend-1 \
-  node /app/dist/scripts/seed-demo-pilot-day.js >/dev/null 2>&1 \
+  npx tsx /app/scripts/seed-demo-pilot-day.ts >/dev/null 2>&1 \
   || warn "Seed-script feilet eller ikke tilgjengelig — vi går videre med eksisterende data"
 
 # ── §3 Login + verifiser Spill 3-konfig ──────────────────────────────────
