@@ -312,9 +312,44 @@
   // 6. LOSS LIMITS (Tapsgrenser)
   // ═══════════════════════════════════════════════════════════════════
 
+  // Quick-win 3 (2026-05-11): debounce compliance-fetch ved form-open. Tidligere
+  // refetchet vi /api/wallet/me/compliance HVER GANG loss-limits-form ble
+  // åpnet — rask re-open kunne trigge flere duplikat-fetches innen sekunder.
+  // 30s cache matcher lobby/spillvett-pollers og gir konsistent state.
+  //
+  // Cache invalideres når:
+  //   - Bruker submitter ny limit (form-submit-handler)
+  //   - Hall endres (spillorama:hallChanged-event)
+  //   - Lobby fetcher fersk compliance (spillorama:complianceLoaded-event)
+  var _cachedCompliance = null;
+  var _cachedComplianceAt = 0;
+  var _cachedComplianceHallId = '';
+  var COMPLIANCE_CACHE_TTL_MS = 30 * 1000;
+
+  function invalidateComplianceCache() {
+    _cachedCompliance = null;
+    _cachedComplianceAt = 0;
+    _cachedComplianceHallId = '';
+  }
+
   function initLossLimits() {
     var form = document.getElementById('loss-limits-form');
     if (!form) return;
+
+    // Quick-win 3: lytt på events som invaliderer cachen og hold den konsistent.
+    if (!form.__pollingQuickWin3Listeners) {
+      form.__pollingQuickWin3Listeners = true;
+      // Lobby har lastet fersk compliance — gjenbruk det istedenfor å fetche.
+      window.addEventListener('spillorama:complianceLoaded', function (e) {
+        var detail = (e && e.detail) || {};
+        if (!detail.hallId || !detail.compliance) return;
+        _cachedCompliance = detail.compliance;
+        _cachedComplianceAt = (typeof detail.fetchedAt === 'number') ? detail.fetchedAt : Date.now();
+        _cachedComplianceHallId = detail.hallId;
+      });
+      // Hall byttet → cache er for feil hall.
+      window.addEventListener('spillorama:hallChanged', invalidateComplianceCache);
+    }
 
     // Load current limits
     loadCurrentLimits();
@@ -340,6 +375,8 @@
           body: JSON.stringify(payload)
         });
         if (successEl) { successEl.textContent = 'Grenser oppdatert!'; successEl.hidden = false; }
+        // Quick-win 3: limits endret → cachet compliance er stale.
+        invalidateComplianceCache();
       } catch (err) {
         if (errEl) { errEl.textContent = err.message || 'Kunne ikke oppdatere grenser'; errEl.hidden = false; }
       }
@@ -350,7 +387,21 @@
     try {
       var hallId = sessionStorage.getItem('lobby.activeHallId') || '';
       if (!hallId) return;
-      var compliance = await apiFetch('/api/wallet/me/compliance?hallId=' + encodeURIComponent(hallId));
+
+      // Quick-win 3 (2026-05-11): bruk cache hvis fersk + samme hall.
+      var compliance;
+      var isFresh = _cachedCompliance
+        && _cachedComplianceHallId === hallId
+        && (Date.now() - _cachedComplianceAt) < COMPLIANCE_CACHE_TTL_MS;
+      if (isFresh) {
+        compliance = _cachedCompliance;
+      } else {
+        compliance = await apiFetch('/api/wallet/me/compliance?hallId=' + encodeURIComponent(hallId));
+        _cachedCompliance = compliance;
+        _cachedComplianceAt = Date.now();
+        _cachedComplianceHallId = hallId;
+      }
+
       if (compliance && compliance.limits) {
         var dailyEl = document.getElementById('loss-limit-daily');
         var monthlyEl = document.getElementById('loss-limit-monthly');
