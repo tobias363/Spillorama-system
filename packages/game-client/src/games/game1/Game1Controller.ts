@@ -422,14 +422,25 @@ class Game1Controller implements GameController {
       // joinet den FORRIGE runden må re-emit `game1:join-scheduled` mot
       // ny id slik at vi bytter til riktig rom.
       //
-      // Vi re-joiner BARE når gameId-en faktisk endret seg (delta), ikke
-      // ved hver onChange-tick. Andre felter (overallStatus,
-      // catalogDisplayName, ticketColors) endrer seg uten at gameId
-      // endres — re-join på de ville vært overflødig støy mot serveren.
+      // Upgrade-after-fallback (Tobias 2026-05-11): hvis initial join
+      // gikk via `createRoom`-fallback (lobby hadde scheduledGameId=null
+      // ved klient-last fordi auto-master ennå ikke hadde spawnet runden),
+      // `this.joinedScheduledGameId` forblir null. Når lobby SENERE
+      // oppdaterer med en joinable scheduledGameId må vi ALLIKEVEL kalle
+      // `joinScheduledGame` slik at klient bytter fra ad-hoc-rommet til
+      // det "ekte" scheduled-game-rommet. Pre-fix-bug krevde
+      // `joinedScheduledGameId !== null` → delta-watcher trigget aldri
+      // for klienter som lastet før første scheduled-game var spawnet.
+      //
+      // Vi re-joiner BARE når gameId-en faktisk endret seg (delta).
+      // Pre-join state (joinedScheduledGameId=null) → upgrade hvis lobby
+      // gir oss en gameId. Post-join state → re-join på plan-advance.
+      // Andre felter (overallStatus, catalogDisplayName, ticketColors)
+      // endrer seg uten at gameId endres — re-join på de ville vært
+      // overflødig støy mot serveren.
       const nextScheduledGameId = this.pickJoinableScheduledGameId(state);
       if (
         nextScheduledGameId !== null &&
-        this.joinedScheduledGameId !== null &&
         nextScheduledGameId !== this.joinedScheduledGameId
       ) {
         // Fire-and-forget: kjør re-join asynkront så onChange-listeneren
