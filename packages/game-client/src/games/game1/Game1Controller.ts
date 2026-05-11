@@ -854,6 +854,40 @@ class Game1Controller implements GameController {
         playerName: this.resolvePlayerName(),
       });
       if (!result.ok || !result.data) {
+        // Tobias-bug 2026-05-11: PLAYER_ALREADY_IN_ROOM betyr at klient
+        // er allerede i samme socket-rom (initial-join via createRoom-
+        // fallback landet oss på samme canonical roomCode som scheduled-
+        // game's room_code). Lokal state er stale (NONE, drawn=[]) men
+        // server-state har scheduled-game-engine RUNNING. Fix: bruk
+        // `room:resume` for å hente fresh snapshot + applySnapshot på
+        // bridge → klient sync-er til scheduled-game-state uten å
+        // duplicate-joine.
+        const errCode = (result.error as { code?: string } | undefined)?.code;
+        if (errCode === "PLAYER_ALREADY_IN_ROOM" && this.actualRoomCode) {
+          console.info(
+            "[Game1Controller] PLAYER_ALREADY_IN_ROOM — bruker room:resume for å sync state",
+          );
+          try {
+            const resume = await this.deps.socket.resumeRoom({
+              roomCode: this.actualRoomCode,
+            });
+            if (resume.ok && resume.data?.snapshot) {
+              this.joinedScheduledGameId = nextScheduledGameId;
+              this.deps.bridge.applySnapshot(resume.data.snapshot);
+              return;
+            }
+            console.warn(
+              "[Game1Controller] room:resume etter PLAYER_ALREADY_IN_ROOM feilet:",
+              resume.ok ? "no snapshot" : resume.error,
+            );
+          } catch (resumeErr) {
+            console.warn(
+              "[Game1Controller] room:resume threw etter PLAYER_ALREADY_IN_ROOM:",
+              resumeErr,
+            );
+          }
+          return;
+        }
         console.warn(
           "[Game1Controller] re-join scheduled game feilet — beholder forrige room:",
           result.error,
