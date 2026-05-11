@@ -23,7 +23,7 @@ export interface HttpRateLimitTier {
 
 /** Default rate limit tiers — strictest match wins (longest prefix). */
 export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
-  // Auth: strict — brute force protection
+  // ── Strict: auth-WRITE endpoints (brute-force-vern) ───────────────────
   { prefix: "/api/auth/login",           config: { windowMs: 60_000,  maxRequests: 5  } },
   // REQ-130: PIN brute force-vern. 5 forsøk / 15 min per IP, men service-laget
   // har sin egen lockout per bruker (5 forsøk → admin reset).
@@ -33,17 +33,32 @@ export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
   { prefix: "/api/auth/register",        config: { windowMs: 60_000,  maxRequests: 3  } },
   { prefix: "/api/auth/forgot-password", config: { windowMs: 60_000,  maxRequests: 3  } },
   { prefix: "/api/auth/change-password", config: { windowMs: 60_000,  maxRequests: 5  } },
-  { prefix: "/api/auth",                 config: { windowMs: 60_000,  maxRequests: 20 } },
 
-  // Payments: moderate
-  { prefix: "/api/payments",             config: { windowMs: 60_000,  maxRequests: 10 } },
+  // ── Moderate: auth-READ endpoints (polling fra profil-side) ───────────
+  //
+  // Tobias-bug 2026-05-11: page-load fyrer 4-5 auth-reads (/me, /pin/status,
+  // /2fa/status, /sessions). 4 refresh → 16-20 calls → traff gamle 20/min
+  // limit → 429. Spillere ble kastet ut etter ~4 refreshes. Det er ikke
+  // akseptabelt for vanlig bruk — kun login/register/passord-skriv trenger
+  // strict-cap. Auth-leser har auth-guard så høyere cap er trygt.
+  { prefix: "/api/auth/me",              config: { windowMs: 60_000,  maxRequests: 200 } },
+  { prefix: "/api/auth/sessions",        config: { windowMs: 60_000,  maxRequests: 200 } },
+  { prefix: "/api/auth/pin/status",      config: { windowMs: 60_000,  maxRequests: 200 } },
+  { prefix: "/api/auth/2fa/status",      config: { windowMs: 60_000,  maxRequests: 200 } },
+  // Catch-all for andre auth-endpoints (refresh, logout, verify-email, etc.)
+  // 100/min er nok for refresh-token-rotasjon + utilsiktede dobbel-kall.
+  { prefix: "/api/auth",                 config: { windowMs: 60_000,  maxRequests: 100 } },
+
+  // ── Payments: moderate (skriv-tunge) ──────────────────────────────────
+  { prefix: "/api/payments",             config: { windowMs: 60_000,  maxRequests: 30 } },
   { prefix: "/api/wallet/me/topup",      config: { windowMs: 60_000,  maxRequests: 10 } },
 
-  // Compliance/wallet writes
+  // Compliance/wallet writes — strict (regulatorisk)
   { prefix: "/api/wallet/me/self-exclusion", config: { windowMs: 60_000, maxRequests: 5 } },
   { prefix: "/api/wallet/me/timed-pause",   config: { windowMs: 60_000, maxRequests: 5 } },
   { prefix: "/api/wallet/me/loss-limits",   config: { windowMs: 60_000, maxRequests: 10 } },
 
+  // ── Admin og agent: høye cap-er (auth-guarded) ────────────────────────
   // Admin catalog reads: the admin dashboard polls 6 endpoints every 10s
   // (~36 req/min/tab), on top of click-through traffic across list/view pages.
   // The shared `/api/` 120/min tier leaves almost no headroom for a single
@@ -56,8 +71,12 @@ export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
   // guarded så høyere limit er trygg. Tobias-feedback 2026-05-08.
   { prefix: "/api/agent",                config: { windowMs: 60_000,  maxRequests: 600 } },
 
-  // General API reads: generous
-  { prefix: "/api/",                     config: { windowMs: 60_000,  maxRequests: 300 } },
+  // ── General API reads: very generous (Tobias-direktiv 2026-05-11) ─────
+  //
+  // Spillere refresher siden, åpner BuyPopup, polleer balance/lobby/games-
+  // status hvert 30s + spillvett-poll. 4-5 refreshes innen 1 min er
+  // realistisk og kan ikke kaste dem ut. Økt fra 300 → 1000.
+  { prefix: "/api/",                     config: { windowMs: 60_000,  maxRequests: 1000 } },
 ];
 
 const GC_INTERVAL_MS = 60_000;
