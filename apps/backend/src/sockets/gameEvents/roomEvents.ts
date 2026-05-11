@@ -48,6 +48,17 @@ import { logRoomEvent } from "../../util/roomLogVerbose.js";
 const roomEventsLogger = rootLogger.child({ module: "socket.room" });
 
 /**
+ * Debug-logging-toggle (2026-05-11, Tobias-direktiv): når
+ * `DEBUG_SPILL1_DRAWS=true` skriv `[room.join] socket joined`-log for hver
+ * vellykket socket → room-binding (create / join / re-attach / race-recovery).
+ * Lar ops grep "[room.join]" og direkte se hvilke `(socketId, roomCode,
+ * walletId, hallId, slug, path)`-tuples er live i rommet vs hvilke
+ * `roomCode` server-emits faktisk fyrer mot.
+ */
+const DEBUG_SPILL1_DRAWS =
+  process.env.DEBUG_SPILL1_DRAWS?.trim().toLowerCase() === "true";
+
+/**
  * Demo Hall bypass (Tobias 2026-04-27): hent `isTestHall` fra
  * `app_halls.is_test_hall` så `RoomState.isTestHall` propageres riktig
  * til `BingoEnginePatternEval.evaluateActivePhase`. Uten dette slår
@@ -370,6 +381,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
           }
           const snapshot = await emitRoomUpdate(existingCanonical.code);
           logger.debug({ roomCode: existingCanonical.code }, "BIN-134: room:create → existing canonical");
+          if (DEBUG_SPILL1_DRAWS) {
+            roomEventsLogger.info(
+              {
+                roomCode: existingCanonical.code,
+                socketId: socket.id,
+                walletId: identity.walletId,
+                hallId: identity.hallId,
+                slug: requestedGameSlug ?? null,
+                path: "create.existing-canonical",
+              },
+              "[room.join] socket joined"
+            );
+          }
           ackSuccess(callback, { roomCode: existingCanonical.code, playerId, snapshot });
           return;
         }
@@ -419,6 +443,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
           }
           const snapshot = await emitRoomUpdate(canonicalRoom.code);
           logger.debug({ roomCode: canonicalRoom.code }, "BIN-134: room:create → existing canonical (legacy)");
+          if (DEBUG_SPILL1_DRAWS) {
+            roomEventsLogger.info(
+              {
+                roomCode: canonicalRoom.code,
+                socketId: socket.id,
+                walletId: identity.walletId,
+                hallId: identity.hallId,
+                slug: requestedGameSlug ?? null,
+                path: "create.existing-canonical-legacy",
+              },
+              "[room.join] socket joined"
+            );
+          }
           ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
           return;
         }
@@ -496,6 +533,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
               }
             }
             const recoverSnapshot = await emitRoomUpdate(roomCode);
+            if (DEBUG_SPILL1_DRAWS) {
+              roomEventsLogger.info(
+                {
+                  roomCode,
+                  socketId: socket.id,
+                  walletId: identity.walletId,
+                  hallId: identity.hallId,
+                  slug: requestedGameSlug ?? null,
+                  path: "create.race-recovery",
+                },
+                "[room.join] socket joined"
+              );
+            }
             ackSuccess(callback, { roomCode, playerId, snapshot: recoverSnapshot });
             return;
           }
@@ -534,6 +584,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
       }
       const snapshot = await emitRoomUpdate(roomCode);
       logger.debug({ roomCode }, "BIN-134: room:create SUCCESS");
+      if (DEBUG_SPILL1_DRAWS) {
+        roomEventsLogger.info(
+          {
+            roomCode,
+            socketId: socket.id,
+            walletId: identity.walletId,
+            hallId: identity.hallId,
+            slug: requestedGameSlug ?? null,
+            path: "create.new",
+          },
+          "[room.join] socket joined"
+        );
+      }
       ackSuccess(callback, { roomCode, playerId, snapshot });
     } catch (error) {
       logger.error({ err: error, code: (error as Record<string, unknown>).code }, "BIN-134: room:create FAILED");
@@ -615,6 +678,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
             socket.join(roomCode);
             socket.join(walletRoomKey(identity.walletId));
             const newSnapshot = await emitRoomUpdate(roomCode);
+            if (DEBUG_SPILL1_DRAWS) {
+              roomEventsLogger.info(
+                {
+                  roomCode,
+                  socketId: socket.id,
+                  walletId: identity.walletId,
+                  hallId: identity.hallId,
+                  slug: "bingo",
+                  path: "join.auto-create-canonical",
+                },
+                "[room.join] socket joined"
+              );
+            }
             ackSuccess(callback, { roomCode, playerId: newRoom.playerId, snapshot: newSnapshot });
             return;
           }
@@ -684,6 +760,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
           }
         }
         const snapshot = await emitRoomUpdate(roomCode);
+        if (DEBUG_SPILL1_DRAWS) {
+          roomEventsLogger.info(
+            {
+              roomCode,
+              socketId: socket.id,
+              walletId: identity.walletId,
+              hallId: identity.hallId,
+              slug: null,
+              path: "join.existing-player-reattach",
+            },
+            "[room.join] socket joined"
+          );
+        }
         ackSuccess(callback, { roomCode, playerId: existingPlayer.id, snapshot });
         return;
       }
@@ -722,6 +811,19 @@ export function registerRoomEvents(ctx: SocketContext): void {
         }
       }
       const snapshot = await emitRoomUpdate(roomCode);
+      if (DEBUG_SPILL1_DRAWS) {
+        roomEventsLogger.info(
+          {
+            roomCode,
+            socketId: socket.id,
+            walletId: identity.walletId,
+            hallId: identity.hallId,
+            slug: null,
+            path: "join.new-player",
+          },
+          "[room.join] socket joined"
+        );
+      }
       ackSuccess(callback, { roomCode, playerId, snapshot });
     } catch (error) {
       console.error("[room:join] FAILED:", toPublicError(error));

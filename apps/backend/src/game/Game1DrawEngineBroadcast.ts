@@ -28,6 +28,17 @@ import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-broadcast" });
 
+/**
+ * Debug-logging-toggle (2026-05-11, Tobias-direktiv): når
+ * `DEBUG_SPILL1_DRAWS=true` skriv `[draw] broadcast trigger`-log FØR
+ * broadcaster-call slik at ops kan se om draw faktisk nådde broadcast-laget
+ * — også når `playerBroadcaster=null` (rom ikke koblet enda).
+ * `hasBroadcaster`-feltet lar oss skille "ingen player-broadcast bundet"
+ * fra "broadcast fyrt men `io.to()` traff ingen socket".
+ */
+const DEBUG_SPILL1_DRAWS =
+  process.env.DEBUG_SPILL1_DRAWS?.trim().toLowerCase() === "true";
+
 // ── Player-broadcast (C4, default-namespace) ─────────────────────────────────
 
 /**
@@ -42,6 +53,19 @@ export function emitPlayerDrawNew(
   ballNumber: number,
   drawIndex0Based: number
 ): void {
+  if (DEBUG_SPILL1_DRAWS) {
+    // 2026-05-11: log FØR null-check så vi ser begge tilstander.
+    log.info(
+      {
+        roomCode,
+        drawIndex: drawIndex0Based,
+        ball: ballNumber,
+        scheduledGameId,
+        hasBroadcaster: playerBroadcaster !== null,
+      },
+      "[draw] broadcast trigger"
+    );
+  }
   if (!playerBroadcaster) return;
   try {
     playerBroadcaster.onDrawNew({
