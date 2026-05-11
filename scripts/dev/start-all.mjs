@@ -904,6 +904,14 @@ async function main() {
       // Bruk samme DSN som migrate/seed-stegene — `apps/backend/.env`
       // overstyrer fortsatt hvis den finnes (dotenv lastes inne i backend).
       APP_PG_CONNECTION_STRING: PG_DSN,
+      // Tobias-direktiv 2026-05-11: auto-master for hall-default skal kjøre
+      // som default i dev-stack så Tobias kan visuelt verifisere hall-
+      // isolation + 30-sek-trekninger uten å manuelt sette flagget i .env.
+      // DemoAutoMasterTickService er gated bak denne flag-en og vil aldri
+      // kjøre i prod (Render har ikke `dev:all`, derfor trygt å auto-enable
+      // her). Kan overstyres manuelt: `DEMO_AUTO_MASTER_ENABLED=false npm run dev:all`.
+      DEMO_AUTO_MASTER_ENABLED:
+        process.env.DEMO_AUTO_MASTER_ENABLED ?? "true",
     },
   });
 
