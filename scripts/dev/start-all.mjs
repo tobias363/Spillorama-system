@@ -912,6 +912,17 @@ async function main() {
       // her). Kan overstyres manuelt: `DEMO_AUTO_MASTER_ENABLED=false npm run dev:all`.
       DEMO_AUTO_MASTER_ENABLED:
         process.env.DEMO_AUTO_MASTER_ENABLED ?? "true",
+      // Tobias-direktiv 2026-05-11 (akutt): "ingenting av det som blir
+      // gjort har noen effekt. bør det gjøres mer research i hvordan
+      // andre håndterer dette?" — rate-limiteren straffer dev-multi-tab-
+      // workflow urettferdig. Industry-standard (Stripe, GitHub,
+      // Cloudflare): bypass i dev. Backend støtter også per-request
+      // localhost-bypass i httpRateLimit.ts som ekstra defense, men denne
+      // env-flagg gjør det eksplisitt + cron-detektabel for Tobias.
+      // Render-prod kjører `npm run start`, ikke `dev:all` — så prod-
+      // sliding-window forblir aktivert.
+      HTTP_RATE_LIMIT_DISABLED:
+        process.env.HTTP_RATE_LIMIT_DISABLED ?? "true",
     },
   });
 

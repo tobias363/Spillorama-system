@@ -154,11 +154,37 @@ export class HttpRateLimiter {
   /** Express middleware factory */
   middleware(): (req: Request, res: Response, next: NextFunction) => void {
     return (req: Request, res: Response, next: NextFunction) => {
+      // Tobias-direktiv 2026-05-11: Industry-standard tre-lags bypass for å
+      // unngå at dev/staging-traffikk kvelner egen utvikling. Match hvordan
+      // de fleste plattformer (Stripe, GitHub, Cloudflare) håndterer dev-
+      // tooling: full bypass for localhost + env-kontrollerbar global disable.
+      //
+      //   1. `HTTP_RATE_LIMIT_DISABLED=true` → full bypass globalt (kjøres
+      //      automatisk av `npm run dev:all` så lokale Mac-er aldri kan
+      //      lock-out seg selv). Aldri satt i prod-env på Render.
+      //   2. localhost-bypass (`::1`, `127.0.0.1`) — sliding-window er meningsløs
+      //      når alle klient-vinduer deler samme IP. Forhindrer at 2-3 tabs
+      //      i Tobias' browser fyller opp tier-en samtidig.
+      //   3. Default per-IP sliding window — eneste mode i prod.
+      if (process.env["HTTP_RATE_LIMIT_DISABLED"] === "true") {
+        return next();
+      }
+
       const config = this.resolveConfig(req.path);
       if (!config) return next();
 
       // Key: IP + path prefix for the matching tier
       const ip = req.ip || req.socket.remoteAddress || "unknown";
+
+      // Localhost-bypass: dev-miljø har ALLE klient-vinduer på samme IP
+      // (`::1` eller `127.0.0.1`). Sliding-window straffer da multi-tab-
+      // workflows + browser-refresh urettferdig. I prod kjører backend
+      // bak Render-proxy som setter `X-Forwarded-For` til ekte klient-IP,
+      // så dette bare matcher i dev.
+      if (ip === "::1" || ip === "127.0.0.1" || ip === "::ffff:127.0.0.1") {
+        return next();
+      }
+
       const tierPrefix = this.tiers.find((t) => req.path.startsWith(t.prefix))?.prefix ?? req.path;
       const key = `${ip}:${tierPrefix}`;
 
