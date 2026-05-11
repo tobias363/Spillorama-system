@@ -779,10 +779,14 @@ test("Task 1.1: resumeGame støtter auto-pause (status='running' + game_state.pa
         s.includes("paused"),
       rows: [],
     },
-    // SELECT scheduled_games for audit-rad (etter UPDATE av game_state)
+    // ADR-0022 Lag 1: UPDATE scheduled_games SET auto_resume_eligible_at=NULL
+    // og RETURN scheduled-game-rad for audit. Tidligere var dette en
+    // SELECT — ny code kombinerer clear-eligibility + read i én query.
     {
       match: (s) =>
-        s.includes("SELECT id, status") && !s.includes("FOR UPDATE"),
+        s.includes("UPDATE") &&
+        s.includes("scheduled_games") &&
+        s.includes("auto_resume_eligible_at"),
       rows: [gameRow({ status: "running" })],
     },
     // loadReadySnapshot
@@ -811,6 +815,8 @@ test("Task 1.1: resumeGame støtter auto-pause (status='running' + game_state.pa
   );
   assert.ok(gameStateUpdate, "UPDATE game_state må skje ved auto-pause-resume");
   // Ikke UPDATE scheduled_games.status (status='running' allerede).
+  // ADR-0022 Lag 1: vi gjør riktignok en UPDATE for å clear-e
+  // auto_resume_eligible_at, men status-feltet skal IKKE være med.
   const scheduledStatusUpdate = queries.find(
     (q) =>
       q.sql.includes("UPDATE") &&
@@ -821,6 +827,19 @@ test("Task 1.1: resumeGame støtter auto-pause (status='running' + game_state.pa
     scheduledStatusUpdate,
     undefined,
     "status='running' → ingen UPDATE av scheduled_games.status ved auto-pause-resume"
+  );
+
+  // ADR-0022 Lag 1: UPDATE scheduled_games for auto_resume_eligible_at=NULL
+  // MÅ skje (clear-er stale eligibility-stempel).
+  const autoResumeUpdate = queries.find(
+    (q) =>
+      q.sql.includes("UPDATE") &&
+      q.sql.includes("scheduled_games") &&
+      q.sql.includes("auto_resume_eligible_at")
+  );
+  assert.ok(
+    autoResumeUpdate,
+    "ADR-0022: auto_resume_eligible_at må clear-es ved manuell Resume"
   );
 
   // Audit-rad skrives med resumeType='auto' i metadata.

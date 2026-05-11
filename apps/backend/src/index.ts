@@ -105,6 +105,26 @@ import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 // per hall-id; ScheduleService duck-typer mot Spill1PrizeDefaultsLookup.
 import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+// ADR-0022 Lag 1+2: stuck-recovery cron services.
+import {
+  Game1AutoResumePausedService,
+} from "./game/Game1AutoResumePausedService.js";
+import { Game1StuckGameDetectionService } from "./game/Game1StuckGameDetectionService.js";
+import {
+  createGame1AutoResumePausedJob,
+  isGame1AutoResumeEnabled,
+  getGame1AutoResumeTickIntervalMs,
+  getGame1MasterHeartbeatTimeoutMs,
+} from "./jobs/game1AutoResumePaused.js";
+import {
+  createGame1StuckGameDetectionJob,
+  isGame1StuckDetectionEnabled,
+  getGame1StuckDetectionIntervalMs,
+  getGame1StuckNoDrawsThresholdMs,
+  getGame1StuckPastEndThresholdMs,
+} from "./jobs/game1StuckGameDetection.js";
+// ADR-0022 Lag 4: master heartbeat socket-event handler.
+import { createMasterHeartbeatEventHandlers } from "./sockets/masterHeartbeatEvents.js";
 import {
   enrichScheduledGame1RoomSnapshot,
   type ScheduledGame1ProjectedRoomSnapshot,
@@ -2543,6 +2563,56 @@ jobScheduler.register({
   run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
 });
 
+// ADR-0022 Lag 1: Auto-resume paused scheduled-games når master er borte.
+// Service-en tikker hvert GAME1_AUTO_RESUME_TICK_INTERVAL_MS (default 5s),
+// finner scheduled-games hvor draw-engine auto-pauset etter phase-won OG
+// master_last_seen_at er stale, og kaller engine.resumeGame via direct
+// DB-update. Speiler Game1AutoDrawTickService-pattern.
+const game1AutoResumePausedService = new Game1AutoResumePausedService({
+  pool: platformService.getPool(),
+  auditLogService,
+  schema: pgSchema,
+  heartbeatTimeoutMs: getGame1MasterHeartbeatTimeoutMs(process.env),
+});
+jobScheduler.register({
+  name: "game1-auto-resume-paused",
+  description: "ADR-0022 Lag 1: Auto-resume engine-paused Spill 1-runder når master er borte (heartbeat stale).",
+  intervalMs: getGame1AutoResumeTickIntervalMs(process.env),
+  enabled: isGame1AutoResumeEnabled(process.env),
+  run: createGame1AutoResumePausedJob({ service: game1AutoResumePausedService }),
+});
+
+// ADR-0022 Lag 2: Stuck-game-detection. Siste-skanse-cleanup når Lag 1
+// ikke fanget tilfellet (master borte i 30+ min, eller draw-scheduler dead).
+// Tikker hvert GAME1_STUCK_DETECTION_INTERVAL_MS (default 60s).
+const game1StuckGameDetectionService = new Game1StuckGameDetectionService({
+  pool: platformService.getPool(),
+  auditLogService,
+  engineStop: {
+    stopGame: (scheduledGameId, reason, actorUserId) =>
+      game1DrawEngineService.stopGame(scheduledGameId, reason, actorUserId),
+    destroyRoomForScheduledGameSafe: (scheduledGameId, _reasonTag) =>
+      // Engine-API tar kun "completion" | "cancellation"-enum. Stuck-end
+      // er semantisk en cancellation (vi avbryter en hengende runde), så
+      // mapper alle reasonTag-verdier inn dit. Engine logger sin egen
+      // detalj uavhengig av dette argumentet.
+      game1DrawEngineService.destroyRoomForScheduledGameSafe(
+        scheduledGameId,
+        "cancellation",
+      ),
+  },
+  schema: pgSchema,
+  noDrawsThresholdMs: getGame1StuckNoDrawsThresholdMs(process.env),
+  pastEndThresholdMs: getGame1StuckPastEndThresholdMs(process.env),
+});
+jobScheduler.register({
+  name: "game1-stuck-game-detection",
+  description: "ADR-0022 Lag 2: Auto-end stuck Spill 1-runder (stale draws eller way over scheduled_end_time).",
+  intervalMs: getGame1StuckDetectionIntervalMs(process.env),
+  enabled: isGame1StuckDetectionEnabled(process.env),
+  run: createGame1StuckGameDetectionJob({ service: game1StuckGameDetectionService }),
+});
+
 // DemoAutoMasterTickService (Tobias-direktiv 2026-05-11):
 // Auto-master for `hall-default` så Tobias kan visuelt verifisere hall-
 // isolation: pilot-haller styres manuelt av Tobias (master), default-hall
@@ -3137,6 +3207,8 @@ app.use(createAgentGame1MasterRouter({
   // /recover-stale endpoint is mounted. Without this dep the route
   // returns 503 RECOVERY_NOT_CONFIGURED.
   staleRecoveryService: stalePlanRunRecoveryService,
+  // ADR-0022 Lag 4: schema for master:heartbeat UPDATE.
+  schema: pgSchema,
 }));
 // Spill 2/3 perpetual auto-restart (Tobias-direktiv 2026-05-03).
 // Service henger på `bingoAdapter.onGameEnded` (chained nedenfor) og
@@ -4575,6 +4647,17 @@ const registerGame1ScheduledEvents = createGame1ScheduledEventHandlers({
   bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
 });
 
+// ADR-0022 Lag 4: master:heartbeat socket-event handler. Admin-web sender
+// heartbeat hvert 30s når master er på cash-inout-siden. Backend oppdaterer
+// app_game_plan_run.master_last_seen_at — brukes av Game1AutoResumePausedService
+// for å skille "master aktiv" fra "master borte → auto-resume safe".
+const registerMasterHeartbeatEvents = createMasterHeartbeatEventHandlers({
+  pool: platformService.getPool(),
+  platformService,
+  socketRateLimiter,
+  schema: pgSchema,
+});
+
 // Spill 1 lobby-rom socket-events (2026-05-08, Tobias-direktiv): klient
 // subscriber til `spill1:lobby:{hallId}`-rom for å motta `lobby:state-update`-
 // broadcasts ved master-handlinger. Server returnerer current snapshot på
@@ -4622,6 +4705,7 @@ io.on("connection", (socket: Socket) => {
   registerAdminHallEvents(socket);
   registerGame1ScheduledEvents(socket);
   registerSpill1LobbyEvents(socket);
+  registerMasterHeartbeatEvents(socket);
   miniGameSocketWire.register(socket);
   registerAdminOpsEvents(socket);
 });

@@ -71,6 +71,11 @@ export interface AgentGame1MasterRouterDeps {
    * see a clear error rather than a 404.
    */
   staleRecoveryService?: StalePlanRunRecoveryService | null;
+  /**
+   * ADR-0022 Lag 4: schema-prefix for app_game_plan_run-UPDATE i heartbeat-
+   * endpoint. Default "public". Settes typisk via APP_PG_SCHEMA-env i index.ts.
+   */
+  schema?: string;
 }
 
 // ── input-validering ─────────────────────────────────────────────────────
@@ -213,6 +218,7 @@ export function createAgentGame1MasterRouter(
 ): express.Router {
   const { platformService, masterActionService } = deps;
   const staleRecoveryService = deps.staleRecoveryService ?? null;
+  const schema = (deps.schema ?? "public").trim();
   const router = express.Router();
 
   async function requirePermission(
@@ -452,6 +458,72 @@ export function createAgentGame1MasterRouter(
     }
   });
 
+  // ── POST /api/agent/game1/master/heartbeat ─────────────────────────────
+  //
+  // ADR-0022 Lag 4: REST-variant av master:heartbeat (admin-web bruker REST-
+  // polling — ingen socket.io-client på cash-inout-siden). Oppdaterer
+  // `app_game_plan_run.master_last_seen_at` slik at Game1AutoResumePausedService
+  // kan skille "master aktiv" fra "master borte → auto-resume safe".
+  //
+  // Fail-soft: aldri kast til klient. Hvis ingen plan-run finnes returneres
+  // `planRunUpdated: false`. Klient retry'er ved neste 30s-intervall uansett.
+  //
+  // RBAC: GAME1_MASTER_WRITE (samme som andre master-actions). Hall-scope
+  // som start/resume/etc.
+  router.post("/api/agent/game1/master/heartbeat", async (req, res) => {
+    try {
+      const user = await requirePermission(req, "GAME1_MASTER_WRITE");
+      const parsed = StartBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        // Fail-soft for heartbeat — klient skal ikke se 400 og crash.
+        apiSuccess(res, {
+          acceptedAt: new Date().toISOString(),
+          planRunUpdated: false,
+          reason: "INVALID_INPUT",
+        });
+        return;
+      }
+      const hallId = resolveHallScope(user, parsed.data.hallId);
+
+      // Compute today-Oslo-businessDate i UTC samme måte som
+      // GamePlanRunService.todayBusinessDate.
+      const businessDateFmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Oslo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const businessDate = businessDateFmt.format(new Date());
+
+      const { rowCount } = await platformService
+        .getPool()
+        .query(
+          `UPDATE "${schema}"."app_game_plan_run"
+              SET master_last_seen_at = now(),
+                  updated_at          = now()
+            WHERE hall_id        = $1
+              AND business_date  = $2
+              AND status IN ('idle','running','paused')`,
+          [hallId, businessDate],
+        );
+
+      apiSuccess(res, {
+        acceptedAt: new Date().toISOString(),
+        planRunUpdated: (rowCount ?? 0) > 0,
+      });
+    } catch (err) {
+      // Heartbeat skal aldri kaste til klient — klient skal bare retry'e
+      // ved neste intervall. Log som debug så vi ser hikk i log uten å
+      // alarmere ops.
+      logger.debug({ err }, "[master-heartbeat] soft-fail");
+      apiSuccess(res, {
+        acceptedAt: new Date().toISOString(),
+        planRunUpdated: false,
+        reason: "SOFT_FAIL",
+      });
+    }
+  });
+
   // Logger init slik at vi ser router-konstruksjon i oppstartslog.
   logger.info(
     {
@@ -463,6 +535,7 @@ export function createAgentGame1MasterRouter(
         "POST /api/agent/game1/master/stop",
         "POST /api/agent/game1/master/jackpot-setup",
         "POST /api/agent/game1/master/recover-stale",
+        "POST /api/agent/game1/master/heartbeat",
       ],
       staleRecoveryConfigured: staleRecoveryService !== null,
     },

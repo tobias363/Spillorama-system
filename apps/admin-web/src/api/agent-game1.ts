@@ -479,3 +479,47 @@ export async function recoverStale(
     },
   );
 }
+
+/**
+ * ADR-0022 Lag 4: master:heartbeat-respons fra
+ * `POST /api/agent/game1/master/heartbeat`. Brukes av
+ * `Game1AutoResumePausedService` til å skille "master aktiv" fra "master
+ * borte → auto-resume safe". UI emit hvert 30s så lenge master har
+ * cash-inout-konsollet åpent.
+ */
+export interface MasterHeartbeatResponse {
+  acceptedAt: string;
+  planRunUpdated: boolean;
+  /** Optional årsak-kode for soft-fail; UI ignorerer dette feltet. */
+  reason?: string;
+}
+
+/**
+ * Send master-heartbeat. Fail-soft: caller skal ikke retrye umiddelbart
+ * ved feil — neste 30s-interval fanger det. Vi kaster IKKE her; returnerer
+ * planRunUpdated=false hvis backend nektet eller nettverk svikter.
+ */
+export async function sendMasterHeartbeat(
+  hallId?: string,
+): Promise<MasterHeartbeatResponse> {
+  const body: { hallId?: string } = {};
+  if (hallId !== undefined) body.hallId = hallId;
+  try {
+    return await apiRequest<MasterHeartbeatResponse>(
+      "/api/agent/game1/master/heartbeat",
+      {
+        method: "POST",
+        auth: true,
+        body,
+      },
+    );
+  } catch {
+    // Fail-soft: returner neutral response så caller (timer-loop) ikke
+    // logger error per iterasjon.
+    return {
+      acceptedAt: new Date().toISOString(),
+      planRunUpdated: false,
+      reason: "NETWORK_ERROR",
+    };
+  }
+}

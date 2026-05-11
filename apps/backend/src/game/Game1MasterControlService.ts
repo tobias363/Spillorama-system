@@ -1082,11 +1082,13 @@ export class Game1MasterControlService {
         // Case (a): status='paused' → 'running'. Også nullstill auto-pause-
         // feltene defensivt (normalt er de allerede NULL/false for manuell
         // pause, men en combined paused-state bør uansett ende i ren
-        // running).
+        // running). ADR-0022 Lag 1: clear auto_resume_eligible_at — master
+        // tok manuell handling, ingen behov for auto-resume-arming.
         const { rows: updated } = await client.query<ScheduledGameRow>(
           `UPDATE ${this.scheduledGamesTable()}
-              SET status     = 'running',
-                  updated_at = now()
+              SET status                  = 'running',
+                  auto_resume_eligible_at = NULL,
+                  updated_at              = now()
             WHERE id = $1
             RETURNING id, status, master_hall_id, group_hall_id,
                       participating_halls_json, actual_start_time, actual_end_time`,
@@ -1114,12 +1116,17 @@ export class Game1MasterControlService {
             WHERE scheduled_game_id = $1`,
           [input.gameId]
         );
-        // Hent fresh scheduled_game-rad for audit (status er uendret).
+        // ADR-0022 Lag 1: clear auto_resume_eligible_at + hent fresh scheduled-
+        // game-rad. Master tok manuell Fortsett, så auto-resume-armingen
+        // skal av — Game1AutoResumePausedService skal ikke fyre senere på
+        // samme runde med stale eligibility-timestamp.
         const { rows: fresh } = await client.query<ScheduledGameRow>(
-          `SELECT id, status, master_hall_id, group_hall_id,
-                  participating_halls_json, actual_start_time, actual_end_time
-             FROM ${this.scheduledGamesTable()}
-             WHERE id = $1`,
+          `UPDATE ${this.scheduledGamesTable()}
+              SET auto_resume_eligible_at = NULL,
+                  updated_at              = now()
+            WHERE id = $1
+            RETURNING id, status, master_hall_id, group_hall_id,
+                      participating_halls_json, actual_start_time, actual_end_time`,
           [input.gameId]
         );
         row = fresh[0]!;
@@ -1201,13 +1208,16 @@ export class Game1MasterControlService {
         );
       }
 
+      // ADR-0022 Lag 1: clear auto_resume_eligible_at også ved stop — runden
+      // er ferdig (cancelled), så det er ingenting å auto-resume.
       const { rows: updated } = await client.query<ScheduledGameRow>(
         `UPDATE ${this.scheduledGamesTable()}
-            SET status              = 'cancelled',
-                stopped_by_user_id  = $2,
-                stop_reason         = $3,
-                actual_end_time     = now(),
-                updated_at          = now()
+            SET status                  = 'cancelled',
+                stopped_by_user_id      = $2,
+                stop_reason             = $3,
+                actual_end_time         = now(),
+                auto_resume_eligible_at = NULL,
+                updated_at              = now()
           WHERE id = $1
           RETURNING id, status, master_hall_id, group_hall_id,
                     participating_halls_json, actual_start_time, actual_end_time`,

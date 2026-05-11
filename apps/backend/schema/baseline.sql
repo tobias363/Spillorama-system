@@ -855,7 +855,7 @@ CREATE TABLE public.app_game1_master_audit (
     halls_ready_snapshot jsonb NOT NULL,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT app_game1_master_audit_action_check CHECK ((action = ANY (ARRAY['start'::text, 'pause'::text, 'resume'::text, 'stop'::text, 'exclude_hall'::text, 'include_hall'::text, 'timeout_detected'::text, 'transfer_request'::text, 'transfer_approved'::text, 'transfer_rejected'::text, 'transfer_expired'::text])))
+    CONSTRAINT app_game1_master_audit_action_check CHECK ((action = ANY (ARRAY['start'::text, 'pause'::text, 'resume'::text, 'stop'::text, 'exclude_hall'::text, 'include_hall'::text, 'timeout_detected'::text, 'transfer_request'::text, 'transfer_approved'::text, 'transfer_rejected'::text, 'transfer_expired'::text, 'start_game_with_unready_override'::text, 'start_engine_failed_rollback'::text])))
 );
 
 --
@@ -1006,6 +1006,7 @@ CREATE TABLE public.app_game1_scheduled_games (
     plan_position integer,
     trafikklys_row_color text,
     pause_reason text,
+    auto_resume_eligible_at timestamp with time zone,
     CONSTRAINT app_game1_scheduled_games_game_mode_check CHECK ((game_mode = ANY (ARRAY['Auto'::text, 'Manual'::text]))),
     CONSTRAINT app_game1_scheduled_games_notification_start_seconds_check CHECK ((notification_start_seconds >= 0)),
     CONSTRAINT app_game1_scheduled_games_plan_position_check CHECK (((plan_position IS NULL) OR (plan_position >= 1))),
@@ -1181,6 +1182,8 @@ CREATE TABLE public.app_game_plan_run (
     master_user_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    master_last_seen_at timestamp with time zone,
+    master_last_seen_socket_id text,
     CONSTRAINT app_game_plan_run_current_position_check CHECK ((current_position >= 1)),
     CONSTRAINT app_game_plan_run_status_check CHECK ((status = ANY (ARRAY['idle'::text, 'running'::text, 'paused'::text, 'finished'::text])))
 );
@@ -4880,6 +4883,12 @@ CREATE INDEX idx_app_email_verify_tokens_expires ON public.app_email_verify_toke
 CREATE INDEX idx_app_email_verify_tokens_user ON public.app_email_verify_tokens USING btree (user_id) WHERE (used_at IS NULL);
 
 --
+-- Name: idx_app_game1_scheduled_games_auto_resume_eligible; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game1_scheduled_games_auto_resume_eligible ON public.app_game1_scheduled_games USING btree (auto_resume_eligible_at) WHERE (auto_resume_eligible_at IS NOT NULL);
+
+--
 -- Name: idx_app_game1_scheduled_games_room_code; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4944,6 +4953,12 @@ CREATE INDEX idx_app_game_plan_item_plan ON public.app_game_plan_item USING btre
 --
 
 CREATE INDEX idx_app_game_plan_run_active ON public.app_game_plan_run USING btree (hall_id, business_date) WHERE (status = ANY (ARRAY['idle'::text, 'running'::text, 'paused'::text]));
+
+--
+-- Name: idx_app_game_plan_run_master_last_seen; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_app_game_plan_run_master_last_seen ON public.app_game_plan_run USING btree (master_last_seen_at) WHERE (master_last_seen_at IS NOT NULL);
 
 --
 -- Name: idx_app_game_settings_change_log_created_at; Type: INDEX; Schema: public; Owner: -

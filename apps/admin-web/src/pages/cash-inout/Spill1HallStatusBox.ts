@@ -33,6 +33,7 @@ import {
   resumeMaster,
   pauseMaster,
   recoverStale,
+  sendMasterHeartbeat,
   markHallReadyForGame,
   unmarkHallReadyForGame,
   setHallNoCustomersForGame,
@@ -62,6 +63,29 @@ const RECOVERABLE_WARNING_CODES: ReadonlySet<Spill1LobbyInconsistencyCode> =
 const POLL_INTERVAL_MS = 2_000;
 
 /**
+ * ADR-0022 Lag 4: master-heartbeat-intervall. Sender én POST hvert 30s
+ * mot `/api/agent/game1/master/heartbeat` så lenge master har cash-inout-
+ * UI-en åpen. Backend Game1AutoResumePausedService krever fersh heartbeat
+ * (<90s) for å regne master som "aktiv" og IKKE auto-resume.
+ */
+const MASTER_HEARTBEAT_INTERVAL_MS = 30_000;
+
+/**
+ * ADR-0022 Lag 3: terskel før vi viser advarsel-banner. Engine auto-pauser
+ * umiddelbart etter phase-won, men UI skal ikke spamme bannere for de
+ * første sekundene. 30s er nok tid til at master rekker å klikke Fortsett
+ * uten å se banner.
+ */
+const PAUSE_BANNER_SOFT_THRESHOLD_MS = 30_000;
+
+/**
+ * ADR-0022 Lag 3: terskel før vi viser warning-banner med countdown til
+ * auto-resume. Settes mindre enn auto_resume_eligible_at-vinduet så
+ * master ser advarselen før Lag 1-cron fyrer.
+ */
+const PAUSE_BANNER_WARNING_THRESHOLD_MS = 45_000;
+
+/**
  * Bølge 3 (2026-05-08): refaktor til ren `Spill1AgentLobbyState`.
  *
  * Vi mapper aggregator-staten til en intern view-shape før render. Dette
@@ -86,6 +110,18 @@ interface ViewState {
   allReady: boolean;
   /** Aggregator warnings used for targeted master recovery affordances. */
   warningCodes: Spill1LobbyInconsistencyCode[];
+  // ADR-0022 Lag 3: stuck-recovery banner-state.
+  /** ISO-timestamp for når engine sist auto-pauset (proxy: last_drawn_at). */
+  pauseStartedAt: string | null;
+  /** ISO-timestamp for når Game1AutoResumePausedService vil auto-fortsette. */
+  autoResumeEligibleAt: string | null;
+  /** ISO-timestamp for når Game1StuckGameDetectionService vil auto-avbryte. */
+  stuckAutoEndAt: string | null;
+  // ADR-0022 Lag 4: master-heartbeat-state.
+  /** ISO-timestamp for sist heartbeat. Null hvis aldri sendt. */
+  masterLastSeenAt: string | null;
+  /** Computed server-side: true hvis heartbeat innenfor terskel. */
+  masterIsActive: boolean;
 }
 
 interface BoxState {
@@ -150,6 +186,11 @@ export function mountSpill1HallStatusBox(
   };
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  // ADR-0022 Lag 4: master:heartbeat-timer. Sender POST hvert 30s mot
+  // /api/agent/game1/master/heartbeat så lenge UI-en er åpen på master.
+  // Backend bruker dette til å skille "master aktiv" fra "master borte →
+  // auto-resume safe" i Game1AutoResumePausedService.
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let aborted = false;
 
   const cleanup = (): void => {
@@ -157,6 +198,10 @@ export function mountSpill1HallStatusBox(
     if (pollTimer !== null) {
       clearInterval(pollTimer);
       pollTimer = null;
+    }
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
     }
     // Bug-fix 2026-05-02: nullstill activeMount så neste mount-kall i samme
     // container ikke no-op-er på stale referanse.
@@ -176,6 +221,33 @@ export function mountSpill1HallStatusBox(
     if (state.busy) return;
     void refresh();
   }, POLL_INTERVAL_MS);
+
+  // ADR-0022 Lag 4: master:heartbeat-timer. Sender en POST hvert 30s mot
+  // backend så Game1AutoResumePausedService kan skille "master aktiv" fra
+  // "master borte". Vi sender første heartbeat umiddelbart slik at
+  // backend ser pingen før første auto-resume-tick rekker å fyre.
+  void sendHeartbeatIfActive();
+  heartbeatTimer = setInterval(() => {
+    if (aborted) return;
+    void sendHeartbeatIfActive();
+  }, MASTER_HEARTBEAT_INTERVAL_MS);
+
+  async function sendHeartbeatIfActive(): Promise<void> {
+    // Send kun heartbeat hvis caller er master-agent og vi har en hall-
+    // kontekst. Backend tar uansett ikke skade av å motta heartbeat fra
+    // ikke-master, men sparer noen DB-UPDATE-er.
+    const data = state.data;
+    if (!data) return;
+    if (!data.isMasterAgent) return;
+    if (!data.ownHallId) return;
+    try {
+      await sendMasterHeartbeat(data.ownHallId);
+    } catch {
+      // Fail-soft: sendMasterHeartbeat-funksjonen returnerer allerede en
+      // neutral response ved nettverksfeil — denne try/catch er bare
+      // forsikring for uventede sync-throws.
+    }
+  }
 
   container.addEventListener(
     "click",
@@ -294,6 +366,15 @@ export function mountSpill1HallStatusBox(
       halls: lobby.halls,
       allReady: lobby.allHallsReady,
       warningCodes: lobby.inconsistencyWarnings.map((w) => w.code),
+      // ADR-0022 Lag 3: stuck-recovery banner-felter (optional på wire,
+      // null hvis aggregator-versjonen ikke fyller dem ennå).
+      pauseStartedAt: lobby.scheduledGameMeta?.pauseStartedAt ?? null,
+      autoResumeEligibleAt:
+        lobby.scheduledGameMeta?.autoResumeEligibleAt ?? null,
+      stuckAutoEndAt: lobby.scheduledGameMeta?.stuckAutoEndAt ?? null,
+      // ADR-0022 Lag 4: master-heartbeat-state.
+      masterLastSeenAt: lobby.masterLastSeenAt ?? null,
+      masterIsActive: lobby.masterIsActive ?? false,
     };
   }
 
@@ -644,6 +725,19 @@ function render(container: HTMLElement, state: BoxState): void {
   // `lobby.planMeta.catalogDisplayName` som aggregator setter når plan
   // dekker dagen.
   const nextGameName = data.catalogDisplayName;
+
+  // ADR-0022 Lag 3: aktivér pulse på Fortsett-knappen når engine har vært
+  // auto-paused i > PAUSE_BANNER_SOFT_THRESHOLD_MS. Pulse trekker master-
+  // ens oppmerksomhet til knappen uten å skjule den eller endre layout.
+  const resumePulse =
+    canResume === true &&
+    data.pauseStartedAt !== null &&
+    (() => {
+      const pauseMs = new Date(data.pauseStartedAt!).getTime();
+      if (Number.isNaN(pauseMs)) return false;
+      return Date.now() - pauseMs >= PAUSE_BANNER_SOFT_THRESHOLD_MS;
+    })();
+
   const masterButtonsHtml = renderMasterButtons({
     canStart,
     canPause,
@@ -653,6 +747,7 @@ function render(container: HTMLElement, state: BoxState): void {
     scheduledStartTime: data.scheduledStartTime,
     unreadyCount,
     nextGameName,
+    resumePulse,
   });
 
   const titleParts: string[] = [];
@@ -661,16 +756,113 @@ function render(container: HTMLElement, state: BoxState): void {
     titleParts.push(`Subspill: ${escapeHtml(nextGameName)}`);
   }
 
+  // ADR-0022 Lag 3: stuck-recovery-banner over master-knappene.
+  // Banneret bygges utenfor master-action-blokken så det er synlig også
+  // hvis canStart=false (typisk når engine er auto-paused og master må
+  // klikke Fortsett).
+  const stuckRecoveryBannerHtml = renderStuckRecoveryBanner(data);
+
   container.innerHTML = `
     <div class="box-header with-border">
       <h3 class="box-title">${titleParts.join(" · ")}</h3>
     </div>
     <div class="box-body">
       ${warningBannerHtml}
+      ${stuckRecoveryBannerHtml}
       ${ownHallHtml}
       ${otherHallsHtml}
       ${ownButtonsHtml}
       ${masterButtonsHtml}
+    </div>`;
+}
+
+/**
+ * ADR-0022 Lag 3: render stuck-recovery-banner over master-actions når
+ * engine har vært auto-paused i > 30s (soft warning) eller > 45s (warning
+ * banner med countdown til auto-resume), eller når scheduled_end_time +
+ * 30 min er passert (kritisk banner — auto-end vil snart fyre).
+ *
+ * Master ser hva som er galt og hvor mange sekunder de har før systemet
+ * tar over. Eksisterende "Fortsett"-knapp er last-resort-affordance per
+ * Option A (Tobias-direktiv 2026-05-12) — vi peker på den fra banneret
+ * uten å introdusere en ny knapp.
+ *
+ * Returnerer tom streng når ingen stuck-state oppdages — caller inline'er.
+ */
+function renderStuckRecoveryBanner(data: ViewState): string {
+  // Bare relevant når engine er auto-paused. Manuell master-pause håndteres
+  // ikke som "stuck" — master er bevisst tilstede.
+  if (data.scheduledGameStatus !== "paused") return "";
+  if (!data.pauseStartedAt) return "";
+
+  const now = Date.now();
+  const pauseMs = new Date(data.pauseStartedAt).getTime();
+  if (Number.isNaN(pauseMs)) return "";
+  const pausedFor = Math.max(0, now - pauseMs);
+  if (pausedFor < PAUSE_BANNER_SOFT_THRESHOLD_MS) return "";
+
+  // Sekunder igjen før auto-resume fyrer (Lag 1).
+  let autoResumeInSec: number | null = null;
+  if (data.autoResumeEligibleAt) {
+    const eligibleMs = new Date(data.autoResumeEligibleAt).getTime();
+    if (!Number.isNaN(eligibleMs)) {
+      autoResumeInSec = Math.max(0, Math.ceil((eligibleMs - now) / 1000));
+    }
+  }
+
+  // Sekunder igjen før auto-end fyrer (Lag 2).
+  let autoEndInMin: number | null = null;
+  if (data.stuckAutoEndAt) {
+    const endMs = new Date(data.stuckAutoEndAt).getTime();
+    if (!Number.isNaN(endMs) && endMs > now) {
+      autoEndInMin = Math.max(0, Math.ceil((endMs - now) / 60_000));
+    }
+  }
+
+  // Kritisk: scheduled_end_time + 30 min passert → auto-end imminent.
+  const isCritical = autoEndInMin !== null && autoEndInMin <= 5;
+
+  // Warning: paused > PAUSE_BANNER_WARNING_THRESHOLD_MS.
+  const isWarning =
+    !isCritical && pausedFor >= PAUSE_BANNER_WARNING_THRESHOLD_MS;
+
+  const cssClass = isCritical
+    ? "alert alert-danger"
+    : isWarning
+      ? "alert alert-warning"
+      : "alert alert-info";
+  const icon = isCritical
+    ? "fa-exclamation-triangle"
+    : isWarning
+      ? "fa-clock"
+      : "fa-pause-circle";
+
+  const pausedForSec = Math.floor(pausedFor / 1000);
+  const heartbeatStatus = data.isMasterAgent
+    ? data.masterIsActive
+      ? " Master-heartbeat aktiv — auto-fortsett skipper."
+      : " Master-heartbeat utgått — auto-fortsett vil fyre."
+    : "";
+
+  let mainMessage = `<strong>⏸ Pauset for ${pausedForSec}s.</strong> Klikk <em>Fortsett</em> for å gå videre.`;
+  if (autoResumeInSec !== null && autoResumeInSec > 0 && !data.masterIsActive) {
+    mainMessage += ` Auto-fortsett om ${autoResumeInSec}s.`;
+  }
+  if (isCritical && autoEndInMin !== null) {
+    mainMessage = `<strong>🚨 Runden er forsinket.</strong> Auto-avbryt om ${autoEndInMin} min — klikk <em>Fortsett</em> umiddelbart.`;
+  } else if (
+    autoEndInMin !== null &&
+    autoEndInMin < 30 &&
+    !isCritical
+  ) {
+    mainMessage += ` Auto-avbryt om ${autoEndInMin} min.`;
+  }
+
+  return `
+    <div class="${cssClass}" data-marker="spill1-stuck-recovery-banner"
+         style="margin-bottom:12px;">
+      <i class="fa ${icon}" aria-hidden="true"></i>
+      <small>${mainMessage}${heartbeatStatus}</small>
     </div>`;
 }
 
@@ -953,6 +1145,12 @@ function renderMasterButtons(opts: {
    * å bygge dynamisk Start-label "Start neste spill — {navn}".
    */
   nextGameName: string | null;
+  /**
+   * ADR-0022 Lag 3: hvis true, legg pulse-animasjon på Fortsett-knappen
+   * for å trekke oppmerksomheten til den. Aktiveres når engine har vært
+   * auto-paused i > PAUSE_BANNER_SOFT_THRESHOLD_MS.
+   */
+  resumePulse?: boolean;
 }): string {
   if (!opts.isMaster) return "";
   const startTooltip = buildStartTooltip(
@@ -978,6 +1176,28 @@ function renderMasterButtons(opts: {
   const startLabel = opts.nextGameName
     ? `Start neste spill — ${opts.nextGameName}`
     : "Start neste spill";
+  // ADR-0022 Lag 3: pulse-klasse på Fortsett når engine har vært auto-
+  // paused i en stund. Selve pulse-animasjonen er definert inline i style-
+  // tagen rendret én gang per render-pass (idempotent — duplikate
+  // animasjons-keyframes deklarert i samme dokument er trygt). Vi
+  // injecter style-blokken bare når pulse er aktiv så vi unngår å
+  // forurense ren rest-state.
+  const resumeShouldPulse =
+    opts.resumePulse === true && opts.canResume === true;
+  const resumeClass = resumeShouldPulse
+    ? "btn btn-info cashinout-grid-btn spill1-resume-pulse"
+    : "btn btn-info cashinout-grid-btn";
+  const pulseStyleBlock = resumeShouldPulse
+    ? `<style>
+        @keyframes spill1ResumePulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(91, 192, 222, 0.7); }
+          50% { box-shadow: 0 0 0 8px rgba(91, 192, 222, 0); }
+        }
+        .spill1-resume-pulse {
+          animation: spill1ResumePulse 1.6s ease-in-out infinite;
+        }
+      </style>`
+    : "";
   return `
     <div class="spill1-master-actions" style="margin-top:16px;">
       <h4 style="margin:0 0 8px 0;">Master-handlinger</h4>
@@ -992,13 +1212,14 @@ function renderMasterButtons(opts: {
                 ${opts.canPause ? "" : "disabled"}>
           <i class="fa fa-pause" aria-hidden="true"></i> Pause
         </button>
-        <button type="button" class="btn btn-info cashinout-grid-btn"
+        <button type="button" class="${resumeClass}"
                 data-spill1-action="resume"
                 ${opts.canResume ? "" : "disabled"}>
           <i class="fa fa-play-circle" aria-hidden="true"></i> Fortsett
         </button>
       </div>
       ${startWarning}
+      ${pulseStyleBlock}
     </div>`;
 }
 
