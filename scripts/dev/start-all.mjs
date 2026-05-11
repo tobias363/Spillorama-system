@@ -904,14 +904,22 @@ async function main() {
       // Bruk samme DSN som migrate/seed-stegene — `apps/backend/.env`
       // overstyrer fortsatt hvis den finnes (dotenv lastes inne i backend).
       APP_PG_CONNECTION_STRING: PG_DSN,
-      // Tobias-direktiv 2026-05-11: auto-master for hall-default skal kjøre
-      // som default i dev-stack så Tobias kan visuelt verifisere hall-
-      // isolation + 30-sek-trekninger uten å manuelt sette flagget i .env.
-      // DemoAutoMasterTickService er gated bak denne flag-en og vil aldri
-      // kjøre i prod (Render har ikke `dev:all`, derfor trygt å auto-enable
-      // her). Kan overstyres manuelt: `DEMO_AUTO_MASTER_ENABLED=false npm run dev:all`.
+      // Tobias-direktiv 2026-05-11 (revidert ved sesjons-slutt): default
+      // FALSE pga RACE-CONDITION mellom auto-master endGame (destroyer
+      // engine.rooms-entry) og klient joinScheduledGame (prøver joinRoom
+      // på samme canonical roomCode). Klient fikk ROOM_NOT_FOUND i loop.
+      //
+      // Inntil race fikses i DemoAutoMasterTickService eller
+      // game1ScheduledEvents.joinScheduledGame: KEEP DEFAULT FALSE.
+      //
+      // Hvis du vil teste auto-master manuelt:
+      // `DEMO_AUTO_MASTER_ENABLED=true npm run dev:all`
+      //
+      // For å få 30s draws på hall-default: logg inn som master-agent
+      // (tobias-arnes@spillorama.no / Spillorama123!) og bruk
+      // /admin/agent/cash-in-out manuelt.
       DEMO_AUTO_MASTER_ENABLED:
-        process.env.DEMO_AUTO_MASTER_ENABLED ?? "true",
+        process.env.DEMO_AUTO_MASTER_ENABLED ?? "false",
       // Tobias-direktiv 2026-05-11 (akutt): "ingenting av det som blir
       // gjort har noen effekt. bør det gjøres mer research i hvordan
       // andre håndterer dette?" — rate-limiteren straffer dev-multi-tab-
