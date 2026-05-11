@@ -303,6 +303,26 @@ export const Spill1ScheduledGameMetaSchema = z.object({
    * Null i alle andre statuser.
    */
   pauseReason: z.string().nullable(),
+  /**
+   * ADR-0022 Lag 3: ISO-timestamp for når engine sist auto-pauset etter
+   * en phase-won. Brukes av UI til å rendre "Pauset for Ys"-banner og
+   * countdown til auto-resume. Null når runden ikke er i auto-pause.
+   */
+  pauseStartedAt: z.string().datetime().nullable().optional(),
+  /**
+   * ADR-0022 Lag 3: ISO-timestamp for når Game1AutoResumePausedService
+   * vil auto-fortsette runden hvis master ikke er aktiv. Speil av
+   * app_game1_scheduled_games.auto_resume_eligible_at. Null hvis auto-
+   * resume ikke er armert (ikke pauset etter phase-won, eller manuell pause).
+   */
+  autoResumeEligibleAt: z.string().datetime().nullable().optional(),
+  /**
+   * ADR-0022 Lag 3: ISO-timestamp for når Game1StuckGameDetectionService
+   * vil auto-avbryte runden hvis ingen progresjon. Beregnet =
+   * scheduled_end_time + STUCK_PAST_END_THRESHOLD_MS. Null hvis ingen
+   * scheduled_end_time finnes.
+   */
+  stuckAutoEndAt: z.string().datetime().nullable().optional(),
 });
 export type Spill1ScheduledGameMeta = z.infer<
   typeof Spill1ScheduledGameMetaSchema
@@ -445,5 +465,26 @@ export const Spill1AgentLobbyStateSchema = z.object({
    * Diagnose-warnings for UI/Bølge 2-callers. Tom liste hvis alt er konsistent.
    */
   inconsistencyWarnings: z.array(Spill1LobbyInconsistencyWarningSchema),
+
+  /**
+   * ADR-0022 Lag 4: ISO-timestamp for sist mottatte master:heartbeat-event
+   * fra admin-web cash-inout-side. Brukes av Game1AutoResumePausedService
+   * for å skille "master aktiv men venter bevisst" fra "master borte → auto-
+   * resume safe". Speilet fra app_game_plan_run.master_last_seen_at. Null
+   * hvis ingen plan-run finnes eller master aldri har sendt heartbeat.
+   *
+   * Optional for backwards-compat under utrulling — eldre payloads uten
+   * feltet skal fortsatt parse. Settes til konkret verdi (eller null) i ny
+   * aggregator-versjon.
+   */
+  masterLastSeenAt: z.string().datetime().nullable().optional(),
+  /**
+   * ADR-0022 Lag 4 + 3: `true` hvis `masterLastSeenAt > now() - HEARTBEAT_TIMEOUT_MS`
+   * (default 90s). Beregnet server-side så UI ikke trenger å re-evaluere
+   * pr. polling-runde. UI bruker dette til banner-tekst ("Master aktiv" vs
+   * "Master borte") og til å skjule countdown for auto-resume når master er
+   * synlig.
+   */
+  masterIsActive: z.boolean().optional(),
 });
 export type Spill1AgentLobbyState = z.infer<typeof Spill1AgentLobbyStateSchema>;

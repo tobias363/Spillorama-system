@@ -708,3 +708,46 @@ export interface BingoSchedulerSettings {
   autoDrawEnabled: boolean;
   autoDrawIntervalMs: number;
 }
+
+// ── Master heartbeat (ADR-0022 Lag 4) ──────────────────────────────────────
+
+/**
+ * Payload for `master:heartbeat` socket-event.
+ *
+ * Emit-source: admin-web `Spill1HallStatusBox` på `cash-inout`-siden, hvert
+ * `GAME1_MASTER_HEARTBEAT_INTERVAL_MS` (default 30s) så lenge master har
+ * UI-en åpen. Handler i `apps/backend/src/sockets/masterHeartbeatEvents.ts`
+ * oppdaterer `app_game_plan_run.master_last_seen_at` for aktivt plan-run
+ * på `hallId`.
+ *
+ * Brukes av:
+ *   - Lag 1 (Game1AutoResumePausedService) for å skille "master aktiv" fra
+ *     "master borte → auto-resume safe"
+ *   - Lag 3 (UI) for å vise master-status-indikator
+ *
+ * Idempotent: kan emittes flere ganger uten skade — siste timestamp vinner.
+ * Best-effort: hvis handler kaster, blokkerer det ikke heartbeat-loopen
+ * (klient ignorerer ack-feil).
+ */
+export interface MasterHeartbeatPayload extends AuthenticatedSocketPayload {
+  /**
+   * Hall-id som master-konsoll er aktiv for. Backend slår opp aktivt
+   * plan-run for (hallId, today-Oslo) og oppdaterer master_last_seen_at
+   * på den raden. Hvis ingen plan-run finnes, er det no-op (men vi
+   * logger debug-event for ops).
+   */
+  hallId: string;
+}
+
+/**
+ * Ack-respons for `master:heartbeat`. UI bryr seg ikke om innholdet — bruker
+ * bare ack til å detektere disconnect. `acceptedAt` gir master en visuell
+ * "siste pulse mottatt"-indikator (kan brukes i Lag 3 UI).
+ */
+export interface MasterHeartbeatAckPayload {
+  /** Server-tidsstempel for når heartbeat ble mottatt og persistert. */
+  acceptedAt: string;
+  /** `true` hvis plan-run ble funnet og oppdatert. `false` = no-op (master
+   *  er på en hall uten aktivt plan-run i dag). */
+  planRunUpdated: boolean;
+}

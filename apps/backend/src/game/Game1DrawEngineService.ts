@@ -173,9 +173,18 @@ export interface Game1DrawEngineConfig {
    * scheduled_game via ticket_config_json.maxDraws.
    */
   defaultMaxDraws: number;
+  /**
+   * ADR-0022 Lag 1: ms etter en phase-pause før `auto_resume_eligible_at`
+   * trigger Game1AutoResumePausedService til å sjekke om master er aktiv.
+   * Settes på scheduled_games-rad samtidig som engine auto-pauser.
+   * Default 60_000 (1 min). Sett 0 for å effektivt disable auto-resume
+   * (vil aldri bli eligible).
+   */
+  autoResumeDelayMs: number;
 }
 
 export const DEFAULT_GAME1_MAX_DRAWS = 75;
+export const DEFAULT_GAME1_AUTO_RESUME_DELAY_MS = 60_000;
 
 export interface Game1GameStateView {
   scheduledGameId: string;
@@ -639,6 +648,8 @@ export class Game1DrawEngineService {
     this.config = {
       defaultMaxDraws:
         options.config?.defaultMaxDraws ?? DEFAULT_GAME1_MAX_DRAWS,
+      autoResumeDelayMs:
+        options.config?.autoResumeDelayMs ?? DEFAULT_GAME1_AUTO_RESUME_DELAY_MS,
     };
     this.payoutService = options.payoutService ?? null;
     this.jackpotService = options.jackpotService ?? null;
@@ -1341,6 +1352,21 @@ export class Game1DrawEngineService {
           autoPauseTriggered ? state.current_phase : null,
         ]
       );
+
+      // ADR-0022 Lag 1: Sett auto_resume_eligible_at på scheduled-game-raden
+      // når engine auto-pauser etter phase-won. Game1AutoResumePausedService
+      // bruker denne timestampen + master_last_seen_at til å avgjøre om
+      // auto-resume skal trigge. Nullstilles av samme service ved auto-resume,
+      // av master-control-service ved manuell Fortsett, og når runden ender.
+      if (autoPauseTriggered) {
+        await client.query(
+          `UPDATE ${this.scheduledGamesTable()}
+              SET auto_resume_eligible_at = now() + ($2::int * INTERVAL '1 ms'),
+                  updated_at              = now()
+            WHERE id = $1`,
+          [scheduledGameId, this.config.autoResumeDelayMs]
+        );
+      }
 
       // Hvis Fullt Hus vunnet eller maxDraws nådd → marker scheduled_game som completed.
       if (isFinished) {

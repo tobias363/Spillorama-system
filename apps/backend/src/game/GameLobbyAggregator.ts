@@ -89,6 +89,21 @@ function assertHallId(value: unknown): string {
   return value.trim();
 }
 
+/**
+ * ADR-0022 Lag 3: terskel for når UI skal vise "Auto-avbryt om Y min"-banner.
+ * Speil av Game1StuckGameDetectionService.DEFAULT_GAME1_STUCK_PAST_END_THRESHOLD_MS.
+ * Hardcoded fordi aggregator ikke har env-tilgang direkte — env-konfig
+ * propageres via separate services. Sync via koden-eierskap (samme konstant
+ * skal endres begge steder).
+ */
+const STUCK_AUTO_END_THRESHOLD_MS_FOR_AGGREGATOR = 1_800_000; // 30 min
+
+/**
+ * ADR-0022 Lag 4: terskel for når master regnes som "aktiv" basert på sist-
+ * mottatte heartbeat. Default 90s. Speil av Game1AutoResumePausedService.
+ */
+const MASTER_HEARTBEAT_TIMEOUT_MS_FOR_AGGREGATOR = 90_000;
+
 function asIso(value: Date | string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "string") return value;
@@ -188,6 +203,14 @@ interface ScheduledGameRow {
   pause_reason: string | null;
   engine_paused?: boolean | null;
   engine_paused_at_phase?: number | null;
+  // ADR-0022 Lag 1 + 3: auto-resume eligibility-stempel som settes av draw-
+  // engine ved phase-pause. Eksponeres til UI for å vise countdown til
+  // auto-resume og brukes av Game1AutoResumePausedService cron.
+  auto_resume_eligible_at?: Date | string | null;
+  // ADR-0022 Lag 3: siste draw-timestamp fra engine-state. Brukes som
+  // proxy for `pauseStartedAt` (engine auto-pauser umiddelbart etter en
+  // phase-vinnende draw, så `last_drawn_at ≈ pause_started_at`).
+  last_drawn_at?: Date | string | null;
 }
 
 // ── service ─────────────────────────────────────────────────────────────
@@ -489,6 +512,14 @@ export class GameLobbyAggregator {
         )
       : null;
 
+    // 16. ADR-0022 Lag 4: master heartbeat-state. Leses fra plan-run-raden
+    // hvis den finnes — for UI til å vise master-status-indikator + brukes
+    // til å vise/skjule auto-resume-countdown.
+    const masterLastSeenAt = await this.loadMasterLastSeenAt(
+      planRun?.id ?? null,
+    );
+    const masterIsActive = this.computeMasterIsActive(masterLastSeenAt);
+
     return {
       hallId: hall,
       hallName,
@@ -504,7 +535,57 @@ export class GameLobbyAggregator {
       isMasterAgent,
       nextScheduledStartTime,
       inconsistencyWarnings: warnings,
+      masterLastSeenAt,
+      masterIsActive,
     };
+  }
+
+  /**
+   * ADR-0022 Lag 4: hent siste master-heartbeat-timestamp fra plan-run.
+   * Returnerer null hvis ingen plan-run finnes eller master aldri har sendt
+   * heartbeat på denne run-en.
+   */
+  private async loadMasterLastSeenAt(
+    planRunId: string | null,
+  ): Promise<string | null> {
+    if (!planRunId) return null;
+    try {
+      const { rows } = await this.pool.query<{
+        master_last_seen_at: Date | string | null;
+      }>(
+        `SELECT master_last_seen_at
+         FROM "${this.schema}"."app_game_plan_run"
+         WHERE id = $1
+         LIMIT 1`,
+        [planRunId],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      return asIso(row.master_last_seen_at);
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code ?? "";
+      // Tabell/kolonne mangler i fresh-dev — fail-soft.
+      if (code === "42P01" || code === "42703") return null;
+      // Andre feil: log warn men returner null så aggregator ikke kaster.
+      logger.warn(
+        { err, planRunId },
+        "[lobby-aggregator] master_last_seen_at-lookup feilet — antar null",
+      );
+      return null;
+    }
+  }
+
+  /**
+   * ADR-0022 Lag 4: computer `masterIsActive` basert på heartbeat-timestamp.
+   * True hvis master sendte heartbeat innenfor MASTER_HEARTBEAT_TIMEOUT_MS.
+   * False hvis null eller eldre enn terskel.
+   */
+  private computeMasterIsActive(masterLastSeenAt: string | null): boolean {
+    if (!masterLastSeenAt) return false;
+    const seenMs = new Date(masterLastSeenAt).getTime();
+    if (Number.isNaN(seenMs)) return false;
+    const now = this.clock().getTime();
+    return now - seenMs <= MASTER_HEARTBEAT_TIMEOUT_MS_FOR_AGGREGATOR;
   }
 
   // ── interne sub-helpers ───────────────────────────────────────────────
@@ -588,8 +669,10 @@ export class GameLobbyAggregator {
                 sg.participating_halls_json, sg.scheduled_start_time,
                 sg.scheduled_end_time, sg.actual_start_time, sg.actual_end_time,
                 sg.plan_run_id, sg.plan_position, sg.pause_reason,
+                sg.auto_resume_eligible_at AS auto_resume_eligible_at,
                 gs.paused AS engine_paused,
-                gs.paused_at_phase AS engine_paused_at_phase
+                gs.paused_at_phase AS engine_paused_at_phase,
+                gs.last_drawn_at AS last_drawn_at
          FROM "${this.schema}"."app_game1_scheduled_games" sg
          LEFT JOIN "${this.schema}"."app_game1_game_state" gs
                 ON gs.scheduled_game_id = sg.id
@@ -617,8 +700,10 @@ export class GameLobbyAggregator {
                 sg.participating_halls_json, sg.scheduled_start_time,
                 sg.scheduled_end_time, sg.actual_start_time, sg.actual_end_time,
                 sg.plan_run_id, sg.plan_position, sg.pause_reason,
+                sg.auto_resume_eligible_at AS auto_resume_eligible_at,
                 gs.paused AS engine_paused,
-                gs.paused_at_phase AS engine_paused_at_phase
+                gs.paused_at_phase AS engine_paused_at_phase,
+                gs.last_drawn_at AS last_drawn_at
          FROM "${this.schema}"."app_game1_scheduled_games" sg
          LEFT JOIN "${this.schema}"."app_game1_game_state" gs
                 ON gs.scheduled_game_id = sg.id
@@ -968,6 +1053,30 @@ export class GameLobbyAggregator {
           ? `Auto-pause etter fase ${row.engine_paused_at_phase}`
           : "Auto-pause i draw-engine"
         : null);
+
+    // ADR-0022 Lag 3: pauseStartedAt ≈ last_drawn_at når engine_paused=true.
+    // Engine auto-pauser umiddelbart etter den phase-vinnende draw, så
+    // siste-draw-timestamp er presis nok for UI-countdown.
+    const pauseStartedAt =
+      row.engine_paused === true && row.last_drawn_at !== null
+        ? asIso(row.last_drawn_at ?? null)
+        : null;
+
+    // ADR-0022 Lag 3: stuckAutoEndAt = scheduled_end_time +
+    // STUCK_PAST_END_THRESHOLD_MS. UI rendrer kritisk banner når denne nærmer
+    // seg now(). Bruker default 30 min siden vi ikke har env-tilgang her —
+    // er konsistent med Game1StuckGameDetectionService default.
+    const stuckEndThresholdMs = STUCK_AUTO_END_THRESHOLD_MS_FOR_AGGREGATOR;
+    const stuckAutoEndAt = row.scheduled_end_time
+      ? (() => {
+          const endIso = asIso(row.scheduled_end_time);
+          if (endIso === null) return null;
+          const endMs = new Date(endIso).getTime();
+          if (Number.isNaN(endMs)) return null;
+          return new Date(endMs + stuckEndThresholdMs).toISOString();
+        })()
+      : null;
+
     return {
       scheduledGameId: row.id,
       status: effectiveStatus,
@@ -976,6 +1085,9 @@ export class GameLobbyAggregator {
       actualStartTime: asIso(row.actual_start_time),
       actualEndTime: asIso(row.actual_end_time),
       pauseReason,
+      pauseStartedAt,
+      autoResumeEligibleAt: asIso(row.auto_resume_eligible_at ?? null),
+      stuckAutoEndAt,
     };
   }
 
