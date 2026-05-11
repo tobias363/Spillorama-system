@@ -131,6 +131,7 @@ import { createAdminSmsBroadcastRouter } from "./routes/adminSmsBroadcast.js";
 // Tobias 2026-05-04: Spill 2 (rocket) debug-telemetry — read-only diagnose
 // + force-end workaround. Token-gated via RESET_TEST_PLAYERS_TOKEN-env-var.
 import { createDevGame2StateRouter } from "./routes/devGame2State.js";
+import { createDevHallRoomInfoRouter } from "./routes/devHallRoomInfo.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -4202,6 +4203,20 @@ app.use(
     perpetualRoundService,
     spawnFirstRoundIfNeeded: (roomCode) =>
       perpetualRoundService.spawnFirstRoundIfNeeded(roomCode),
+  })
+);
+
+// Tobias 2026-05-11: hall → rom-mapping debug-route. Token-gated.
+//   GET /api/_dev/hall-room-info?hallId=<hallId>&token=<token>
+// Returnerer hallens canonical roomCode, GoH-binding, andre haller i samme
+// rom, configured draw-interval, og isolation-diagnose. Lar Tobias verifisere
+// at en hall (eks `hall-default`) er trygt isolert fra andre haller før
+// pilot går live.
+app.use(
+  createDevHallRoomInfoRouter({
+    pool: sharedPool,
+    schema: pgSchema,
+    engine,
   })
 );
 

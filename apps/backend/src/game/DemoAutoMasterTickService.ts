@@ -93,13 +93,19 @@ const DEMO_AUTO_MASTER_ACTOR: MasterActor = {
 const DEFAULT_TARGET_HALLS: ReadonlyArray<string> = ["hall-default"];
 
 /**
- * Tobias-direktiv 2026-05-11: "trekning skal gå hvert 3 sekund" på default-
- * hall. Dette overrider per-game `seconds` fra ticket_config så
- * Game1AutoDrawTickService trekker baller med 3-sek-intervall i stedet for
- * default 5. Pilot-haller er IKKE påvirket (de styres av sin egen plan-
- * config og master).
+ * Tobias-direktiv 2026-05-11 (oppdatert): "default hall skal ha sitt eget rom
+ * hvor det er trekning hvert 30 sekund". Dette overrider per-game `seconds`
+ * fra ticket_config så Game1AutoDrawTickService trekker baller med 30-sek-
+ * intervall i stedet for default 5. Pilot-haller er IKKE påvirket (de styres
+ * av sin egen plan-config og master).
+ *
+ * NB: hall-default er allerede isolert i sin egen GoH `demo-default-goh`
+ * (single-hall GoH, kun `hall-default` som medlem) — bekreftet via
+ * `app_hall_groups` live query 2026-05-11. canonicalRoomCode er da
+ * `BINGO_DEMO-DEFAULT-GOH` som er TOMT for andre haller (ikke delt med
+ * pilot-haller eller demo-haller).
  */
-const DEFAULT_HALL_BALL_INTERVAL_SECONDS = 3;
+const DEFAULT_HALL_BALL_INTERVAL_SECONDS = 30;
 
 /**
  * `process.env.DEMO_AUTO_MASTER_ENABLED` flag. Tjenesten er KUN aktiv

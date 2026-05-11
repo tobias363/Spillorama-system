@@ -328,7 +328,7 @@ test("tick: etter start() patcher ticket_config seconds=3 for default-hall (Tobi
   assert.equal(timingOverrideCalls.length, 1);
   assert.deepEqual(timingOverrideCalls[0], {
     hallId: "hall-default",
-    seconds: 3,
+    seconds: 30,
   });
 });
 
@@ -367,7 +367,7 @@ test("tick: advance() patcher også timing-override for ny scheduled-game", asyn
 
   assert.equal(result.advanced, 1);
   assert.equal(timingOverrideCalls.length, 1);
-  assert.equal(timingOverrideCalls[0].seconds, 3);
+  assert.equal(timingOverrideCalls[0].seconds, 30);
 });
 
 test("tick: idle-run uten scheduled-game → start() (bug-fix 2026-05-11)", async () => {
