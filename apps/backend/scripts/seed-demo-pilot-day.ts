@@ -1330,6 +1330,16 @@ const DEMO_PLAN_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DEMO_PLAN_START_TIME = "00:00";
 const DEMO_PLAN_END_TIME = "23:59";
 
+// Default-hall isolation-plan (Tobias-direktiv 2026-05-11):
+// `hall-default` får sin egen plan direkte bundet til hallen (ikke GoH).
+// Driver auto-master-cron (DemoAutoMasterTickService) som starter +
+// advancer plan-runs uavhengig av Tobias' master-handlinger på pilot-haller.
+// Hensikt: visuelt verifisere hall-isolation — default-hall ser ulike
+// trekninger fra pilot-haller (demo-hall-001..004).
+const DEFAULT_HALL_ID = "hall-default";
+const DEFAULT_HALL_PLAN_ID = "demo-plan-default";
+const DEFAULT_HALL_PLAN_NAME = "Default Hall — auto-master isolation";
+
 /**
  * Idempotent upsert av en katalog-rad. ON CONFLICT (id) DO UPDATE refresher
  * alle felter slik at re-runs adopterer eventuelle endringer i kanonisk
@@ -1556,6 +1566,37 @@ async function seedGameCatalogAndPlans(client: Client): Promise<void> {
   }
   console.log(
     `  [game-plan-items] ${DEMO_CATALOG_ENTRIES.length} items (position 1..${DEMO_CATALOG_ENTRIES.length}, alle med bonusOverride=null)`,
+  );
+
+  // 5) Seed default-hall plan (Tobias-direktiv 2026-05-11) — direkte bundet
+  //    til `hall-default` (ikke GoH). Brukes som diagnostic for hall-isolation:
+  //    pilot-haller styres manuelt av Tobias som master; default-hall får
+  //    auto-master via DemoAutoMasterTickService når DEMO_AUTO_MASTER_ENABLED
+  //    er aktivert. Inneholder kun bingo (item 1) for å holde testen rask;
+  //    plan blir aldri ferdig (auto-master starter rundt på nytt).
+  await upsertGamePlan(client, {
+    id: DEFAULT_HALL_PLAN_ID,
+    name: DEFAULT_HALL_PLAN_NAME,
+    description:
+      "Auto-master-plan for hall-default (Tobias 2026-05-11 hall-isolation-test). " +
+      "Driver av DemoAutoMasterTickService når DEMO_AUTO_MASTER_ENABLED=true.",
+    hallId: DEFAULT_HALL_ID,
+    groupOfHallsId: null,
+    weekdays: DEMO_PLAN_WEEKDAYS,
+    startTime: DEMO_PLAN_START_TIME,
+    endTime: DEMO_PLAN_END_TIME,
+  });
+  // Bare item 1 (bingo) — auto-master starter pa nytt etter ferdig.
+  await upsertGamePlanItem(client, {
+    id: "demo-plan-item-default-1",
+    planId: DEFAULT_HALL_PLAN_ID,
+    position: 1,
+    gameCatalogId: DEMO_CATALOG_ENTRIES[0].id,
+    bonusGameOverride: null,
+    notes: "Auto-master iteration item — gjentakes når plan-run finishes.",
+  });
+  console.log(
+    `  [game-plan]       ${DEFAULT_HALL_PLAN_ID} (${DEFAULT_HALL_PLAN_NAME}, hall=${DEFAULT_HALL_ID}, 1 item)`,
   );
 }
 

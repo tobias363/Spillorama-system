@@ -105,6 +105,10 @@ import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 // per hall-id; ScheduleService duck-typer mot Spill1PrizeDefaultsLookup.
 import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+import {
+  DemoAutoMasterTickService,
+  isDemoAutoMasterEnabled,
+} from "./game/DemoAutoMasterTickService.js";
 import { Game2AutoDrawTickService } from "./game/Game2AutoDrawTickService.js";
 import { Game3AutoDrawTickService } from "./game/Game3AutoDrawTickService.js";
 // Tobias-bug-fix 2026-05-04: Spill 2/3 cron-tick må emitte `draw:new` +
@@ -2506,6 +2510,54 @@ jobScheduler.register({
   enabled: jobGame1AutoDrawEnabled,
   run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
 });
+
+// DemoAutoMasterTickService (Tobias-direktiv 2026-05-11):
+// Auto-master for `hall-default` så Tobias kan visuelt verifisere hall-
+// isolation: pilot-haller styres manuelt av Tobias (master), default-hall
+// kjører uavhengig auto-master-loop (30s ball-intervall via plan-config).
+// Krever:
+//   - Seeded plan bundet til `hall-default` (se `seed-demo-pilot-day.ts`)
+//   - Env-flag `DEMO_AUTO_MASTER_ENABLED=true` (default OFF i prod)
+// Tjenesten tikker hvert 10. sekund, sjekker plan-run-status og auto-
+// starter / auto-advancer. Hall-default-spillere ser ekte trekninger,
+// uavhengig av Tobias' master-handlinger på pilot.
+// PITFALLS_LOG §11.10 — single-command restart må kunne re-seede dette.
+if (isDemoAutoMasterEnabled()) {
+  const demoAutoMasterTickService = new DemoAutoMasterTickService({
+    pool: platformService.getPool(),
+    schema: pgSchema,
+    masterActionService,
+    planRunService: gamePlanRunService,
+  });
+  jobScheduler.register({
+    name: "demo-auto-master-tick",
+    description:
+      "Auto-master for hall-default (Tobias-diagnostic 2026-05-11): " +
+      "auto-start + auto-advance plan-runs for haller utenfor pilot-GoH " +
+      "så Tobias visuelt kan verifisere hall-isolation. KUN aktiv når " +
+      "DEMO_AUTO_MASTER_ENABLED=true.",
+    intervalMs: 10_000,
+    enabled: true,
+    run: async () => {
+      try {
+        const result = await demoAutoMasterTickService.tick();
+        return {
+          itemsProcessed: result.checked,
+          note:
+            `started=${result.startedNew} advanced=${result.advanced} ` +
+            `skipped=${result.skipped} errors=${result.errors}`,
+        };
+      } catch (err) {
+        // Fail-soft — log only, neste tick prøver på nytt.
+        console.warn("[demo-auto-master] tick exception:", err);
+        return { itemsProcessed: 0, note: `error: ${String(err)}` };
+      }
+    },
+  });
+  console.log(
+    "[demo-auto-master] enabled — hall-default kjører auto-master-loop",
+  );
+}
 
 // Spill 2/3 auto-draw-tick (Tobias-direktiv 2026-05-03):
 //   "Spill 2/3 har perpetual auto-restart, men ingen baller ble trukket."
