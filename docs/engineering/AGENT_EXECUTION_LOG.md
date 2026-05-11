@@ -1,7 +1,7 @@
 # Agent Execution Log — kronologisk agent-arbeid
 
 **Status:** Autoritativ. Alle agent-leveranser dokumenteres her.
-**Sist oppdatert:** 2026-05-10
+**Sist oppdatert:** 2026-05-11
 **Eier:** PM-AI (vedlikeholdes ved hver agent-leveranse)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover."*
@@ -59,7 +59,74 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
-### 2026-05-10 18:10 — `aa8a2cf0f2c0495ab` (general-purpose, JackpotSetupModal wireup)
+### 2026-05-10 → 2026-05-11 — Sesjon-summering: ADR-0017 + Bølge 1 + 2 + Tobias-bug-fix (PM-orkestrert)
+
+**Scope:** Implementere 4 ADR-er (0017 jackpot manual, 0019 state-konsistens, 0020 utvidelses-fundament, 0021 master start uten spillere), pluss fikse 10+ Tobias-rapporterte bugs under live testing. Spawnet ~12 parallelle agenter på ulike scope.
+
+**Inputs gitt:**
+- Tobias-direktiv: ADR-0017 manuell jackpot (ikke daglig akkumulering)
+- Tobias-direktiv: "Sett av så mange ressurser som mulig" for Bølge 1 + Bølge 2
+- Tobias-direktiv: "ja, du kan starte MASTER_HALL_RED" (ADR-0021)
+- Tobias-direktiv: Liten/Stor hvit/gul/lilla bong-navn (norske UI-labels)
+- Tobias-direktiv: Erstatt WaitingForMasterOverlay med CenterBall idle-text
+- Live bug-rapporter med skjermdump-feil ("fortsatt samme bilde", "venter på master popup", "429 fra rate-limit")
+
+**Outputs produsert (PR-er merget):**
+- **PR #1149** — `normalizeDevUserParam` for short-form dev-user query
+- **PR #1154** — ADR-0017: fjern daglig jackpot-akkumulering
+- **PR #1168** — admin-master-rooms socket-broadcast targeting (ADR-0019)
+- **PR #1169** — `RoomStateVersionStore` for monotonic stateVersion dedup (ADR-0019)
+- **PR #1174** — `RedisHealthMonitor` + `RedisHealthMetrics` (ADR-0020)
+- **PR #1175** — `infra/leak-tests/r9-spill2-24h-leak-test.sh` + runbook (ADR-0020 R9)
+- **PR #1176** — `RoomCircuitBreaker` + `RoomLatencyTracker` + `RoomIsolationGuard` (ADR-0020 R11)
+- **PR #1180** — `infra/load-tests/spill1-1000-clients.mjs` + R4 runbook (ADR-0020)
+- **PR #1183** — PM_ONBOARDING_PLAYBOOK §2.2 → bruk `npm run dev:nuke`
+- **PR #1184** — fix `reset-state.mjs` ON CONFLICT → SELECT-then-INSERT
+- **PR #1185** — `await lobbyStateBinding.start()` fix race condition
+- **PR #1189** — `npm run build:games` i nuke-restart (§5)
+- **PR #1190** — `lobbyTicketConfig` vinner over `state.ticketTypes`
+- **PR #1192** — demo-plan 00:00-23:59 for 24h opening
+- **PR #1193** — `pointer-events: none` på WaitingForMasterOverlay card
+- **PR #1195** — `NORWEGIAN_DISPLAY_NAMES` (Liten hvit, Stor lilla, etc.)
+- **PR #1197** — `buildBuyPopupTicketConfigFromLobby` autogenerer Large variants
+
+**In-flight ved sesjons-slutt:**
+- **PR #1196** — Slett WaitingForMasterOverlay, erstatt med CenterBall idle-text (CONFLICTING — rebase pending)
+
+**Fallgruver oppdaget (alle dokumentert i PITFALLS_LOG):**
+- §7.9 — `state.ticketTypes` overrider plan-runtime variantConfig (PR #1190)
+- §7.10 — Static game-client-bundle krever eksplisitt rebuild (PR #1189)
+- §7.11 — Lobby-init race condition (PR #1185)
+- §7.12 — WaitingForMasterOverlay pointer-events blokkerer BuyPopup-klikk (PR #1193, #1196)
+- §9.5 — Demo-plan åpningstid blokkerte natt-testing (PR #1192)
+- §9.6 — `reset-state.mjs` ON CONFLICT uten UNIQUE-constraint (PR #1184)
+- §11.8 — Single-command `npm run dev:nuke` eliminerer port-konflikter (PR #1183, #1189)
+- §11.9 — Worktree-branch-leakage mellom parallelle agenter
+- §11.10 — Pre-commit hook leser stale `COMMIT_EDITMSG`
+
+**Læring:**
+- **Mental modell-feil avsløres av frontend-popup:** ADR-0017 oppdaget kun fordi Tobias så `JackpotConfirmModal` på Bingo og umiddelbart forsto at modellen var feil. Pre-impl test mental-modell med eksempel-visualisering.
+- **Static bundle er silent failure-modus:** Endringer i `packages/game-client/src/` synlige i Vite HMR men IKKE i spiller-shell før `npm run build:games`. Standard restart-kommando må alltid inkludere rebuild.
+- **Lobby er autoritativ for spill-konfig:** Når `state.ticketTypes` og `lobbyTicketConfig` kolliderer, vinner lobby. Dokumentér eksplisitt — race conditions vil ellers gjenta seg.
+- **Pointer-events: none MÅ være på alle nested elementer**, ikke bare backdrop. Card med `pointer-events: auto` dekker BuyPopup selv om backdrop er gjennomsiktig.
+- **PM-sentralisert workflow scaler:** 16 PR-er merget over 12-15 timer. Auto-merge + CI-verifisering + dev:nuke-rutine eliminerte deploy-friksjon.
+- **Worktree-isolation er obligatorisk for parallelle agenter** — cherry-pick mellom branches der begge endrer overlappende filer er anti-mønster. Bruk worktree + isolated branch fra start.
+
+**Verifisering (PM):**
+- 16 PR-er merget med ekte CI-grønning (verifisert via `gh pr checks <nr>` 5-10 min etter merge)
+- Tobias bekreftet via live-test at de Norske ticket-navn er synlige i BuyPopup
+- Lobby-state binding fungerer (CENTER_BALL viser "Neste spill: Bingo / Kjøp bonger for å være med i trekningen" når plan er aktiv men runde ikke startet)
+- Auto-multiplier verifisert i `buildBuyPopupTicketConfigFromLobby`-output (Small = 1×, Large = 3×)
+
+**Tid:**
+- PM-orkestrering: ~12-15 timer over sesjonen
+- Agent-arbeid: ~25-35 agent-timer total
+
+**Status:** Bølge ferdig, klar for retest. PR #1196 må rebases. Hall-isolation-bug fra Tobias er åpen for diagnose.
+
+---
+
+
 
 **Scope:** Wire `JackpotSetupModal.ts` (245 linjer fra Fase 3, 2026-05-07) inn i master start-flyt fra cash-inout-dashboardet (Spill1HallStatusBox) og NextGamePanel. Tobias-bug 2026-05-10: backend kastet `JACKPOT_CONFIRM_REQUIRED`/`JACKPOT_SETUP_REQUIRED` → frontend viste rå `Toast.error` istedenfor popup.
 
@@ -434,3 +501,4 @@ Hver entry har struktur:
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
+| 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |

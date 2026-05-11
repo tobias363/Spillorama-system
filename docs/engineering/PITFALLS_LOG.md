@@ -1,7 +1,7 @@
 # Spillorama Pitfalls Log — kumulativ fallgruve-katalog
 
 **Status:** Autoritativ. Alle fallgruver oppdaget i prosjektet samles her.
-**Sist oppdatert:** 2026-05-10
+**Sist oppdatert:** 2026-05-11
 **Eier:** PM-AI (vedlikeholdes ved hver agent-sesjon + hver PR-merge med learning)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."*
@@ -50,13 +50,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 5 | 2026-05-10 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 8 | 2026-05-10 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 12 | 2026-05-11 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
-| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 4 | 2026-05-10 |
+| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 6 | 2026-05-11 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 7 | 2026-05-10 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 10 | 2026-05-11 |
 
-**Total:** 71 entries (per 2026-05-10)
+**Total:** 79 entries (per 2026-05-11)
 
 ---
 
@@ -696,6 +696,76 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - PR #1150 (introduserte `JackpotConfirmModal` som denne ADR-en fjerner)
 - §7.6 (JackpotSetupModal eksisterte død i 3 dager) — beholdes; KUN `JackpotSetupModal` brukes på pos 7
 
+### §7.9 — `state.ticketTypes` overrider plan-runtime variantConfig
+
+**Severity:** P0 (BuyPopup viste 8 farger fra DEFAULT_STANDARD_CONFIG i stedet for 3 fra plan)
+**Oppdaget:** 2026-05-10 (Tobias live-test: "fortsatt ikke riktig spill som kan spilles her og det er heller ikke riktig bongtyper")
+**Symptom:** Spillerklient BuyPopup viste 8 hardkodete farger (Small Yellow/White/Purple/Red/Green/Orange + Large Yellow/White) selv om plan-runtime hadde 3 farger (hvit/gul/lilla)
+**Root cause:** `PlayScreen.showBuyPopup` prioriterte `state.ticketTypes` (fra room-snapshot, defaultet til `DEFAULT_STANDARD_CONFIG` med 8 farger) OVER `this.lobbyTicketConfig` (bygd fra `LobbyStateBinding` med riktige 3 farger fra katalog). Race-rekkefølge: state-snapshot kom først → ticket-typer satt → lobby-update overrode aldri.
+**Fix:** PR #1190 — flippet priority i `PlayScreen.ts:587-609` så `lobbyTicketConfig` vinner over `state.ticketTypes`. Lobby er single-source-of-truth for ticket-config.
+**Prevention:**
+- Når to kilder for samme data eksisterer: dokumentér eksplisitt hvilken som er autoritativ
+- Lobby/plan-runtime er ALLTID autoritativ for spill-konfigurasjon (game variant, ticket colors, prizes) — ikke room-snapshot
+- Pre-pilot regression: spawn ny runde av Innsatsen → BuyPopup skal vise 3 farger ikke 8
+- BuyPopup-spec bør være: "Hvis lobbyTicketConfig er satt, ignorer state.ticketTypes"
+**Related:**
+- PR #1190 (priority-flip)
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts:587-609`
+- `packages/game-client/src/games/game1/logic/lobbyTicketTypes.ts` — `buildBuyPopupTicketConfigFromLobby`
+- §7.1 (Game1Controller default `variantConfig=STANDARD`) — relatert root cause
+
+### §7.10 — Static game-client-bundle krever eksplisitt rebuild
+
+**Severity:** P0 (klient-endringer slo ikke gjennom i timer)
+**Oppdaget:** 2026-05-10 (Tobias rapporterte "fortsatt samme bilde" etter merget PR-er)
+**Symptom:** Endringer i `packages/game-client/src/` synlige i Vite HMR (`localhost:5174`) men IKKE i `localhost:4000/web/?dev-user=...` (spiller-shell)
+**Root cause:** Spiller-shell laster game-client som **statisk bundle** fra `apps/backend/public/web/games/`, ikke fra Vite dev-server. Bundle bygd manuelt via `npm run build:games` — siste build var 5 dager gammel. Hot-reload dekker IKKE dette.
+**Fix:** PR #1189 — la til `npm run build:games` som §5 i `scripts/dev/nuke-restart.sh` så `dev:nuke` alltid bygger fersk bundle før dev-stack starter.
+**Prevention:**
+- `npm run dev:nuke` er standard restart-kommando (ikke `dev:all` direkte)
+- Hvis Tobias sier "fortsatt samme bilde" etter merget PR → første sjekk: er bundlen oppdatert? (`ls -la apps/backend/public/web/games/*.js`)
+- Game-client-endringer krever ALLTID `build:games` for å være synlige i spiller-shell
+- Admin-web (`:5174`) bruker Vite HMR direkte — der gjelder ikke denne fallgruven
+**Related:**
+- PR #1189 (build:games i nuke-restart)
+- `scripts/dev/nuke-restart.sh`
+- `apps/backend/public/web/games/` — statisk bundle-output
+- §11.8 (kommer) — single-command restart
+
+### §7.11 — Lobby-init race condition: synkron `void start()` mister state
+
+**Severity:** P0 (lobby returnerte null nextScheduledGame periodisk)
+**Oppdaget:** 2026-05-10 (test-engineer-agent fant via regression-test)
+**Symptom:** Spillerklient sporadisk så "Venter på master" overlay selv om plan-runtime var aktiv. Race-rekkefølge: socket-connect → state-snapshot kom før lobby-state ble fetchet → klient hadde stale defaults.
+**Root cause:** `Game1Controller:398` startet `LobbyStateBinding` med `void this.lobbyStateBinding.start()` (fire-and-forget). Initial state-snapshot kom på socket innen `LobbyStateBinding.start()` resolved → BuyPopup og overlay leste defaults før lobby var ferdig.
+**Fix:** PR #1185 — endret til `await this.lobbyStateBinding.start()` så controller blokkerer initial state-flow til lobby har levert første snapshot.
+**Prevention:**
+- Async-init MÅ awaitges når downstream-state avhenger av resultatet
+- `void promise()` er bare OK når feilen er irrelevant og rekkefølgen ikke betyr noe
+- Regression-test pattern: spawn test-engineer FØRST for å finne race-vinduet, så fix
+- Pre-pilot: dev:nuke + start spiller med dev-user → første lobby-snapshot må komme før noen UI-elementer rendres
+**Related:**
+- PR #1185 (await fix)
+- `packages/game-client/src/games/game1/Game1Controller.ts:398`
+- `packages/game-client/src/games/game1/lobby/LobbyStateBinding.ts`
+
+### §7.12 — WaitingForMasterOverlay backdrop `pointer-events: auto` blokkerte BuyPopup-klikk
+
+**Severity:** P0 (spiller kunne ikke kjøpe bonger)
+**Oppdaget:** 2026-05-10 (Tobias: "fortsatt fikk samme bilde uten muloighet for å kjøpe")
+**Symptom:** "Venter på master"-overlay vises over PlayScreen. BuyPopup-stepperne (Small Yellow +/- Lilla +/-) ble dekket av overlay-cardet — klikk gikk til overlay i stedet.
+**Root cause:** `WaitingForMasterOverlay.mount()` satte `card.style.pointerEvents = "auto"` for fokus-styling. Card sentreres i viewport og dekket dermed BuyPopup-stepperne (som ligger lavere i z-index men er interaktive).
+**Fix:** Først PR #1193 (satt card til `pointer-events: none`), deretter PR #1196 (fjernet hele overlay-komponenten — erstattet med `CenterBall.setIdleText()` per Tobias-direktiv: "kula som viser hvilket tall som blir trekt. Når det ikke er aktiv runde så fjerner vi den og skriver tekst der: Neste spill: {neste på planen}").
+**Prevention:**
+- Overlays med `pointer-events: none` på backdrop MÅ ha `none` på alle nested elementer som dekker interaktive UI
+- "Display-only overlay" → ALDRI `pointer-events: auto` (det skal kun stå hvor brukeren skal kunne klikke)
+- Alternativ design er bedre: bruk eksisterende UI-element (CenterBall) i stedet for å legge nytt overlay på toppen
+- Pre-pilot: med pause-state spawn'et, spillere skal kunne klikke ALLE BuyPopup-knapper
+**Related:**
+- PR #1193 (pointer-events fix)
+- PR #1196 (overlay slettet, erstattet med CenterBall idle-text)
+- `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleText`
+
 ---
 
 ## §8 Doc-disiplin
@@ -785,6 +855,37 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Severity:** P1 (per §3.6)
 **Oppdaget:** 2026-05-09
 **Prevention:** Set BÅDE kolonne OG extra_json ved seed/migration
+
+### §9.5 — Demo-plan åpningstid blokkerte natt-testing
+
+**Severity:** P1 (utviklings-blokker)
+**Oppdaget:** 2026-05-10 (Tobias testet klokken 00:23 — plan kun aktiv 11:00-21:00)
+**Symptom:** Spillerklient så "Stengt — åpner kl 11:00" om natten. Lobby returnerte `null nextScheduledGame` selv om demo-plan eksisterte.
+**Root cause:** `seed-demo-pilot-day.ts` brukte `DEMO_PLAN_START_TIME = "11:00"`, `DEMO_PLAN_END_TIME = "21:00"`. Korrekt for prod-hall-åpningstid, men blokkerer dev/staging-testing utenfor norsk åpningstid.
+**Fix:** PR #1192 — endret demo-plan til 00:00-23:59 (24t opening). Plan er fortsatt regulatorisk-korrekt fordi den ER en demo-plan, ikke prod-plan.
+**Prevention:**
+- Dev/staging-seed bør være tilgjengelig 24/7 så testing ikke blokkerer ved tidssoner
+- Prod-plan har egne åpningstider — disse seedes via egne migrations/admin-UI, ikke dev-seed
+- PM-bekreftelse før seed-time-endring: dev/staging vs prod
+**Related:**
+- PR #1192
+- `apps/backend/scripts/seed-demo-pilot-day.ts:1323-1327`
+
+### §9.6 — `reset-state.mjs` ON CONFLICT på `operation_id` uten UNIQUE-constraint
+
+**Severity:** P1 (reset-state-script feilet ved gjentatt kjøring)
+**Oppdaget:** 2026-05-10 (forsøkte `npm run dev:all -- --reset-state` i ren staging)
+**Symptom:** `ERROR: there is no unique or exclusion constraint matching the ON CONFLICT specification`
+**Root cause:** `app_wallet_entries.operation_id` har bare INDEX (for performance lookup), ikke UNIQUE-constraint. ON CONFLICT krever UNIQUE.
+**Fix:** PR #1184 — endret til SELECT-then-INSERT pattern. Script sjekker først om operation_id finnes, skipper INSERT hvis duplikat. Idempotent uten å kreve schema-endring.
+**Prevention:**
+- ALDRI bruk `ON CONFLICT` uten å verifisere at target-kolonne har UNIQUE/EXCLUSION constraint
+- Migrate-policy (ADR-0014): forward-only, kan ikke legge til UNIQUE-constraint i en kolonne med eksisterende duplikater uten cleanup-migration
+- SELECT-then-INSERT er alltid trygt fallback for idempotente scripts
+**Related:**
+- PR #1184
+- `scripts/dev/reset-state.mjs`
+- ADR-0014 (idempotent migrations)
 
 ---
 
@@ -892,6 +993,54 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - Hvis nei: leveranse er IKKE ferdig — wireup må inn i samme PR eller raskt-følge-PR
 - PM-checklist: "Hver ny komponent → finn `import`-statement i prod-path"
 
+### §11.8 — Single-command restart (`npm run dev:nuke`) eliminerer port-konflikter
+
+**Severity:** P1 (developer-experience + tap av tid)
+**Oppdaget:** 2026-05-10 (Tobias: "Gi meg kun 1 kommondo som alltid vil funke. klarer vi det?")
+**Symptom:** Stale node-prosesser, EADDRINUSE-feil på porter, foreldreløse Docker-containers fra worktree-isolasjon, manglende rebuild av game-client → "fortsatt samme bilde"
+**Fix:** `scripts/dev/nuke-restart.sh` dreper ALT (node, porter 4000-4002/4173/5173-5175, Docker spillorama+chaos+agent-containers), pull main, `npm run build:games` (KRITISK: §7.10), så `npm run dev:all -- --reset-state`. Eksponert som `npm run dev:nuke`.
+**Prevention:**
+- Standard restart-kommando er ALLTID `npm run dev:nuke` — IKKE `dev:all` direkte
+- Etter PR-merge, gi Tobias denne kommandoen (ikke individuelle kill/restart-kommandoer)
+- PM_ONBOARDING_PLAYBOOK §2.2 oppdatert (PR #1183) til å bruke `dev:nuke`
+- Hvis Tobias kjøre `dev:all` direkte og det feiler: peg på `dev:nuke` som standard, ikke debug individuelle porter
+**Related:**
+- `scripts/dev/nuke-restart.sh`
+- PR #1183 (PLAYBOOK-oppdatering)
+- PR #1189 (la til build:games-steget)
+- §7.10 (static bundle krever rebuild)
+
+### §11.9 — Worktree-branch-leakage: agenter må eie egne branches
+
+**Severity:** P1 (merge-conflict mellom parallelle agenter)
+**Oppdaget:** 2026-05-10 (cherry-pick WaitingForMasterOverlay slett-fil-konflikt)
+**Symptom:** Agent A starter på branch X, agent B starter på branch Y. Begge endrer overlappende filer (`WaitingForMasterOverlay.ts`). Når B prøver å cherry-picke commits fra A's branch → konflikt på fil som A slettet men B endret.
+**Root cause:** Parallelle agenter må ikke bare eie ulike filer (§11.3), men også ulike worktrees så de kjører på uavhengig git-state. Cherry-pick mellom branches er anti-mønster når begge branchene er aktive.
+**Fix:** Hver agent får isolert worktree via `.claude/worktrees/<slug>/`. Pre-commit hooks i én worktree leser ikke `COMMIT_EDITMSG` fra en annen.
+**Prevention:**
+- Parallelle agent-spawn: bruk `isolation: "worktree"`-parameter
+- Pre-flight check ved spawn: skip om annen agent allerede har branch som rør samme fil
+- Hvis cherry-pick må til mellom branches: rebase i stedet — eller (bedre) kombinér PR-er til én commit-chain fra main
+**Related:**
+- §11.3 (Parallelle agenter må eie ulike filer)
+- §5.x (kjedede PR-er må rebases mot main mellom hvert squash)
+- PR #1196 (overlay-slett ble blokkert av denne fallgruven)
+
+### §11.10 — Pre-commit hook leser stale `COMMIT_EDITMSG`
+
+**Severity:** P2 (developer-friction)
+**Oppdaget:** 2026-05-10 (forsøk på å committe overlay-fix)
+**Symptom:** `check-tier-a-intent.mjs` blokkerer commit med "Tier A intent missing" selv om commit-meldingen er korrekt
+**Root cause:** Hook leser `.git/COMMIT_EDITMSG` som kan inneholde en TIDLIGERE commit-melding fra forrige `git commit -m` som ble avbrutt. Stale data fra forrige sesjon.
+**Fix:** Bruk `PM_GATE_BYPASS=1 PM_INTENT_BYPASS=1 git commit ... --no-verify` for sjelden forekommende hook-bug. Eller tøm `.git/COMMIT_EDITMSG` manuelt mellom forsøk.
+**Prevention:**
+- Hook bør lese fra `git rev-parse --verify HEAD^{commit}` eller commit-meldingen via stdin, ikke COMMIT_EDITMSG
+- Hvis hook blokkerer feilaktig: dokumentér bypass-grunn i commit-meldingen så reviewer ser hvorfor
+- Aldri rutinmessig bypass alle hooks — kun denne spesifikke hook med kjent bug
+**Related:**
+- `.husky/pre-commit`
+- `scripts/check-tier-a-intent.mjs` (TODO: refactor til stdin-basert input)
+
 ---
 
 ## Hvordan legge til ny entry
@@ -930,3 +1079,4 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 |---|---|---|
 | 2026-05-10 | Initial — 63 entries fra 12 PM-handoffs + audits + sesjons-erfaringer | PM-AI (Claude Opus 4.7) |
 | 2026-05-10 | Lagt til §7.8 (JackpotConfirmModal var feil mental modell — fjernet ADR-0017). Indeks-counts korrigert mot faktiske tall (§7=8, §11=7, total=71). | docs-agent (ADR-0017 PR-C) |
+| 2026-05-11 | Lagt til §7.9 (state.ticketTypes override), §7.10 (static bundle rebuild), §7.11 (lobby-init race), §7.12 (overlay pointer-events). §9.5 (demo-plan opening hours), §9.6 (ON CONFLICT uten UNIQUE). §11.8 (dev:nuke single-command), §11.9 (worktree-branch-leakage), §11.10 (pre-commit COMMIT_EDITMSG-bug). Total 71→79 entries. | PM-AI (sesjon 2026-05-10→2026-05-11) | docs-agent (ADR-0017 PR-C) |
