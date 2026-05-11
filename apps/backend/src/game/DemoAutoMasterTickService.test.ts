@@ -58,9 +58,19 @@ function makeFakeMasterActionService(opts: {
 
 function makeFakePool(opts: {
   scheduledGameStatusByPosition?: Record<string, string>;
+  timingOverrideCalls?: Array<{ hallId: string; seconds: number }>;
 }) {
   return {
-    query: async (_sql: string, params: unknown[]) => {
+    query: async (sql: string, params: unknown[]) => {
+      // applyDefaultHallTimingOverride: UPDATE ... SET ticket_config_json = jsonb_set(...)
+      if (sql.includes("UPDATE") && sql.includes("ticket_config_json")) {
+        opts.timingOverrideCalls?.push({
+          hallId: String(params[0]),
+          seconds: Number(params[1]),
+        });
+        return { rows: [] };
+      }
+      // getCurrentScheduledGameStatus: SELECT status FROM app_game1_scheduled_games
       const position = String(params[1]);
       const status = opts.scheduledGameStatusByPosition?.[position];
       return { rows: status ? [{ status }] : [] };
@@ -112,9 +122,10 @@ test("tick: ingen run → kaller masterActionService.start", async () => {
   assert.deepEqual(startCalls, ["hall-default"]);
 });
 
-test("tick: run.status='finished' → skip", async () => {
+test("tick: run.status='finished' → slett run for ny iteration (Tobias loop 2026-05-11)", async () => {
   const startCalls: string[] = [];
   const advanceCalls: string[] = [];
+  const deleteCalls: string[] = [];
   const masterActionService = makeFakeMasterActionService({
     startCalls,
     advanceCalls,
@@ -122,7 +133,7 @@ test("tick: run.status='finished' → skip", async () => {
   const planRunService = makeFakePlanRunService({
     runByHall: {
       "hall-default": {
-        id: "run-1",
+        id: "run-finished-1",
         hallId: "hall-default",
         businessDate: "2026-05-11",
         status: "finished",
@@ -130,7 +141,15 @@ test("tick: run.status='finished' → skip", async () => {
       },
     },
   });
-  const pool = makeFakePool({});
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      if (sql.includes("DELETE FROM") && sql.includes("app_game_plan_run")) {
+        deleteCalls.push(String(params[0]));
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
 
   const service = new DemoAutoMasterTickService({
     pool: pool as never,
@@ -141,13 +160,15 @@ test("tick: run.status='finished' → skip", async () => {
 
   const result = await service.tick();
 
+  // Tobias-direktiv 2026-05-11: finished run skal slettes så cron looper.
   assert.equal(result.checked, 1);
   assert.equal(result.skipped, 1);
+  assert.deepEqual(deleteCalls, ["run-finished-1"]);
   assert.equal(startCalls.length, 0);
   assert.equal(advanceCalls.length, 0);
 });
 
-test("tick: scheduled-game.status='finished' → advance", async () => {
+test("tick: scheduled-game.status='completed' → advance", async () => {
   const startCalls: string[] = [];
   const advanceCalls: string[] = [];
   const masterActionService = makeFakeMasterActionService({
@@ -166,7 +187,7 @@ test("tick: scheduled-game.status='finished' → advance", async () => {
     },
   });
   const pool = makeFakePool({
-    scheduledGameStatusByPosition: { "1": "finished" },
+    scheduledGameStatusByPosition: { "1": "completed" },
   });
 
   const service = new DemoAutoMasterTickService({
@@ -282,6 +303,110 @@ test("tick: én hall feiler, andre fortsetter (fail-soft)", async () => {
     result.errorMessages?.[0]?.includes("hall-a"),
     "error-message should reference hall-a",
   );
+});
+
+test("tick: etter start() patcher ticket_config seconds=3 for default-hall (Tobias 2026-05-11)", async () => {
+  const startCalls: string[] = [];
+  const advanceCalls: string[] = [];
+  const timingOverrideCalls: Array<{ hallId: string; seconds: number }> = [];
+  const masterActionService = makeFakeMasterActionService({
+    startCalls,
+    advanceCalls,
+  });
+  const planRunService = makeFakePlanRunService({ runByHall: {} });
+  const pool = makeFakePool({ timingOverrideCalls });
+
+  const service = new DemoAutoMasterTickService({
+    pool: pool as never,
+    masterActionService: masterActionService as never,
+    planRunService: planRunService as never,
+    targetHallIds: ["hall-default"],
+  });
+
+  await service.tick();
+
+  assert.equal(timingOverrideCalls.length, 1);
+  assert.deepEqual(timingOverrideCalls[0], {
+    hallId: "hall-default",
+    seconds: 3,
+  });
+});
+
+test("tick: advance() patcher også timing-override for ny scheduled-game", async () => {
+  const startCalls: string[] = [];
+  const advanceCalls: string[] = [];
+  const timingOverrideCalls: Array<{ hallId: string; seconds: number }> = [];
+  const masterActionService = makeFakeMasterActionService({
+    startCalls,
+    advanceCalls,
+  });
+  const planRunService = makeFakePlanRunService({
+    runByHall: {
+      "hall-default": {
+        id: "run-1",
+        hallId: "hall-default",
+        businessDate: "2026-05-11",
+        status: "running",
+        currentPosition: 1,
+      },
+    },
+  });
+  const pool = makeFakePool({
+    scheduledGameStatusByPosition: { "1": "completed" },
+    timingOverrideCalls,
+  });
+
+  const service = new DemoAutoMasterTickService({
+    pool: pool as never,
+    masterActionService: masterActionService as never,
+    planRunService: planRunService as never,
+    targetHallIds: ["hall-default"],
+  });
+
+  const result = await service.tick();
+
+  assert.equal(result.advanced, 1);
+  assert.equal(timingOverrideCalls.length, 1);
+  assert.equal(timingOverrideCalls[0].seconds, 3);
+});
+
+test("tick: idle-run uten scheduled-game → start() (bug-fix 2026-05-11)", async () => {
+  const startCalls: string[] = [];
+  const advanceCalls: string[] = [];
+  const timingOverrideCalls: Array<{ hallId: string; seconds: number }> = [];
+  const masterActionService = makeFakeMasterActionService({
+    startCalls,
+    advanceCalls,
+  });
+  const planRunService = makeFakePlanRunService({
+    runByHall: {
+      "hall-default": {
+        id: "run-1",
+        hallId: "hall-default",
+        businessDate: "2026-05-11",
+        status: "idle",
+        currentPosition: 1,
+      },
+    },
+  });
+  const pool = makeFakePool({
+    // scheduledGameStatusByPosition er tom → null → start() skal kjøres
+    timingOverrideCalls,
+  });
+
+  const service = new DemoAutoMasterTickService({
+    pool: pool as never,
+    masterActionService: masterActionService as never,
+    planRunService: planRunService as never,
+    targetHallIds: ["hall-default"],
+  });
+
+  const result = await service.tick();
+
+  // Pre-fix bug: dette ville være skipped=1 fordi run finnes (ikke null)
+  // Post-fix: idle-run uten scheduled-game → start() kalles
+  assert.equal(result.startedNew, 1);
+  assert.deepEqual(startCalls, ["hall-default"]);
 });
 
 test("tick: default targetHallIds er ['hall-default']", async () => {
