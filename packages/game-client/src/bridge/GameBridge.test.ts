@@ -406,6 +406,45 @@ describe("GameBridge", () => {
       expect(bridge.getState().preRoundTickets).toEqual(tickets);
     });
 
+    it("applies pre-start scheduled snapshot fields when myPlayerId is set after applySnapshot", () => {
+      const tickets = [{ grid: [[1, 2, 3, 4, 5]], type: "small" as const }];
+      bridge.applySnapshot({
+        ...makeRoomSnapshot(),
+        preRoundTickets: { "player-1": tickets },
+        armedPlayerIds: ["player-1"],
+        playerStakes: { "player-1": 45 },
+        playerPendingStakes: {},
+      } as RoomSnapshot);
+
+      bridge.start("player-1");
+
+      const state = bridge.getState();
+      expect(state.preRoundTickets).toEqual(tickets);
+      expect(state.isArmed).toBe(true);
+      expect(state.myStake).toBe(45);
+    });
+
+    it("applies running scheduled snapshot tickets and stake when myPlayerId is set after applySnapshot", () => {
+      const game = makeGameSnapshot({
+        tickets: { "player-1": [{ grid: [[1, 2, 3, 4, 5]], type: "small" }] },
+        marks: { "player-1": [[1, 2]] },
+      });
+      bridge.applySnapshot({
+        ...makeRoomSnapshot({ currentGame: game }),
+        playerStakes: { "player-1": 45 },
+        preRoundTickets: {},
+        armedPlayerIds: [],
+        playerPendingStakes: {},
+      } as RoomSnapshot);
+
+      bridge.start("player-1");
+
+      const state = bridge.getState();
+      expect(state.myTickets).toHaveLength(1);
+      expect(state.myMarks).toEqual([[1, 2]]);
+      expect(state.myStake).toBe(45);
+    });
+
     it("round-state-isolation: myStake reflects active-round stake from playerStakes", () => {
       // RUNNING + 4 live brett → stake = 80 kr.
       bridge.start("player-1");

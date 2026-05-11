@@ -15,12 +15,18 @@ function makeDeps(overrides: Partial<SocketActionsDeps> = {}) {
     submitClaim: vi.fn().mockResolvedValue({ ok: true }),
     cancelTicket: vi.fn().mockResolvedValue({ ok: true, data: { removedTicketIds: ["t1"], fullyDisarmed: false } }),
     setLuckyNumber: vi.fn().mockResolvedValue({ ok: true }),
+    // Codex live-room-control-plane hardening 2026-05-11: scheduled REST-purchase
+    // flow trigger room:state-resync så bridge får oppdatert snapshot etter
+    // /api/game1/purchase. Mock returnerer snapshot=null så bridge.applySnapshot
+    // ikke kalles i tester som ikke verifiserer resync-pathen eksplisitt.
+    getRoomState: vi.fn().mockResolvedValue({ ok: true, data: { snapshot: null } }),
   } as unknown as SpilloramaSocket & {
     armBet: ReturnType<typeof vi.fn>;
     startGame: ReturnType<typeof vi.fn>;
     submitClaim: ReturnType<typeof vi.fn>;
     cancelTicket: ReturnType<typeof vi.fn>;
     setLuckyNumber: ReturnType<typeof vi.fn>;
+    getRoomState: ReturnType<typeof vi.fn>;
   };
 
   const bridge = {
@@ -61,6 +67,11 @@ function makeDeps(overrides: Partial<SocketActionsDeps> = {}) {
 }
 
 describe("Game1SocketActions", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
   describe("buy", () => {
     it("sends ticketSelections when provided", async () => {
       const { deps, socket } = makeDeps();
@@ -180,6 +191,55 @@ describe("Game1SocketActions", () => {
         monthlyLimit: 4400,
         walletBalance: 480,
       });
+    });
+
+    it("uses scheduled purchase API before master start", async () => {
+      sessionStorage.setItem("spillorama.accessToken", "token-1");
+      sessionStorage.setItem("spillorama.user", JSON.stringify({ id: "user-1" }));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ ok: true, data: { purchaseId: "p-1" } }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" });
+      const { deps, socket, playScreen } = makeDeps({
+        getScheduledPurchaseContext: () => ({
+          scheduledGameId: "sg-1",
+          hallId: "hall-1",
+          overallStatus: "purchase_open",
+          ticketConfig: {
+            entryFee: 5,
+            ticketTypes: [
+              { name: "Small Yellow", type: "small", priceMultiplier: 2, ticketCount: 1 },
+              { name: "Large Yellow", type: "large", priceMultiplier: 6, ticketCount: 3 },
+            ],
+          },
+        }),
+      });
+
+      await new Game1SocketActions(deps).buy([
+        { type: "small", qty: 2, name: "Small Yellow" },
+        { type: "large", qty: 1, name: "Large Yellow" },
+      ]);
+
+      expect(socket.armBet).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledWith("/api/game1/purchase", expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer token-1" }),
+      }));
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body).toMatchObject({
+        scheduledGameId: "sg-1",
+        buyerUserId: "user-1",
+        hallId: "hall-1",
+        paymentMethod: "digital_wallet",
+        idempotencyKey: "web-game1-uuid-1",
+      });
+      expect(body.ticketSpec).toEqual([
+        { color: "yellow", size: "small", count: 2, priceCentsEach: 1000 },
+        { color: "yellow", size: "large", count: 1, priceCentsEach: 2000 },
+      ]);
+      expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
     });
   });
 

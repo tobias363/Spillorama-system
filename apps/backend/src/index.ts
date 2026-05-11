@@ -106,6 +106,10 @@ import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 import { Spill1PrizeDefaultsService } from "./game/Spill1PrizeDefaultsService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
 import {
+  enrichScheduledGame1RoomSnapshot,
+  type ScheduledGame1ProjectedRoomSnapshot,
+} from "./game/Game1ScheduledRoomSnapshot.js";
+import {
   DemoAutoMasterTickService,
   isDemoAutoMasterEnabled,
 } from "./game/DemoAutoMasterTickService.js";
@@ -1682,7 +1686,7 @@ function buildRoomUpdatePayload(
    */
   stateVersion?: number,
 ): RoomUpdatePayload {
-  return buildRoomUpdatePayloadHelper(snapshot, nowMs, {
+  const payload = buildRoomUpdatePayloadHelper(snapshot, nowMs, {
     runtimeBingoSettings, drawScheduler, bingoMaxDrawsPerRound, schedulerTickMs,
     stateVersion,
     getArmedPlayerIds: (code) => roomState.getArmedPlayerIds(code),
@@ -1716,6 +1720,33 @@ function buildRoomUpdatePayload(
     // MM:SS" tikker mellom runder.
     getPerpetualNextRoundAtMs: (code) => perpetualRoundService.getNextRoundAtMs(code),
   });
+  const projection = (snapshot as ScheduledGame1ProjectedRoomSnapshot).__scheduledGame1Projection;
+  if (!projection) return payload;
+
+  return {
+    ...payload,
+    preRoundTickets: {
+      ...payload.preRoundTickets,
+      ...projection.preRoundTickets,
+    },
+    armedPlayerIds: [...new Set([...payload.armedPlayerIds, ...projection.armedPlayerIds])],
+    playerStakes: {
+      ...payload.playerStakes,
+      ...projection.playerStakes,
+    },
+    playerPendingStakes: {
+      ...payload.playerPendingStakes,
+      ...projection.playerPendingStakes,
+    },
+  };
+}
+
+async function getAuthoritativeRoomSnapshot(roomCode: string): Promise<RoomSnapshot> {
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  return enrichScheduledGame1RoomSnapshot(snapshot, {
+    pool: platformService.getPool(),
+    schema: pgSchema,
+  });
 }
 
 async function emitRoomUpdate(roomCode: string): Promise<RoomUpdatePayload> {
@@ -1727,7 +1758,7 @@ async function emitRoomUpdate(roomCode: string): Promise<RoomUpdatePayload> {
   // Klient bruker `stateVersion` til å skippe payloads som er eldre enn
   // sist anvendte (out-of-order replay etter reconnect).
   const stateVersion = await roomStateVersionStore.next(roomCode);
-  const payload = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode), Date.now(), stateVersion);
+  const payload = buildRoomUpdatePayload(await getAuthoritativeRoomSnapshot(roomCode), Date.now(), stateVersion);
 
   // §6.1 (Wave 3b, 2026-05-06): per-spiller-payload for perpetual rooms.
   //
@@ -4476,6 +4507,7 @@ const registerGameEvents = createGameEventHandlers({
   // så stale `room:update` (eldre versjon) ikke overskriver state etter
   // resync.
   getCurrentStateVersion: (roomCode) => roomStateVersionStore.current(roomCode),
+  getAuthoritativeRoomSnapshot,
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

@@ -333,6 +333,8 @@ export interface RoomSnapshot {
   hallId: string;
   hostPlayerId: string;
   gameSlug?: string;
+  scheduledGameId?: string | null;
+  isHallShared?: boolean;
   createdAt: string;
   players: Player[];
   currentGame?: GameSnapshot;

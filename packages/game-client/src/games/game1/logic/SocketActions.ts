@@ -9,9 +9,104 @@ export interface SocketActionsDeps {
   readonly bridge: GameBridge;
   readonly getRoomCode: () => string;
   readonly getPhase: () => Phase;
+  readonly getScheduledPurchaseContext?: () => {
+    scheduledGameId: string | null;
+    hallId: string;
+    overallStatus: string | null;
+    ticketConfig: {
+      entryFee: number;
+      ticketTypes: Array<{ name: string; type: string; priceMultiplier: number; ticketCount: number }>;
+    } | null;
+  };
   readonly getPlayScreen: () => PlayScreen | null;
   readonly toast: ToastNotification | null;
   readonly onError: (message: string) => void;
+}
+
+interface ScheduledTicketSpecEntry {
+  color: string;
+  size: "small" | "large";
+  count: number;
+  priceCentsEach: number;
+}
+
+function getAccessToken(): string {
+  if (typeof sessionStorage === "undefined") return "";
+  return sessionStorage.getItem("spillorama.accessToken") || "";
+}
+
+function getCurrentUserId(): string | null {
+  if (typeof sessionStorage === "undefined") return null;
+  for (const key of ["spillorama.user", "spillorama.dev.user"]) {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(key) || "null") as { id?: unknown } | null;
+      if (typeof parsed?.id === "string" && parsed.id.trim()) return parsed.id.trim();
+    } catch {
+      // ignore malformed session storage
+    }
+  }
+  return null;
+}
+
+function makeClientIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `web-game1-${crypto.randomUUID()}`;
+  }
+  return `web-game1-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function colorFromTicketName(name: string): string | null {
+  const n = name.toLowerCase();
+  if (n.includes("white")) return "white";
+  if (n.includes("yellow")) return "yellow";
+  if (n.includes("purple")) return "purple";
+  if (n.includes("red")) return "red";
+  if (n.includes("green")) return "green";
+  if (n.includes("orange")) return "orange";
+  return null;
+}
+
+function sizeFromSelection(selection: { type: string; name?: string }): "small" | "large" {
+  const raw = `${selection.type} ${selection.name ?? ""}`.toLowerCase();
+  return raw.includes("large") ? "large" : "small";
+}
+
+function buildScheduledTicketSpec(
+  selections: Array<{ type: string; qty: number; name?: string }>,
+  ticketTypes: Array<{ name: string; type: string; priceMultiplier: number; ticketCount: number }>,
+  entryFee: number,
+): ScheduledTicketSpecEntry[] {
+  const specByKey = new Map<string, ScheduledTicketSpecEntry>();
+  const effectiveSelections = selections.length > 0
+    ? selections
+    : [{ type: "small", qty: 1, name: "Small White" }];
+  for (const selection of effectiveSelections) {
+    const qty = Math.max(1, Math.round(selection.qty));
+    const ticketType =
+      (selection.name ? ticketTypes.find((t) => t.name === selection.name) : undefined) ??
+      ticketTypes.find((t) => t.type === selection.type);
+    const name = selection.name ?? ticketType?.name ?? selection.type;
+    const color = colorFromTicketName(name);
+    if (!color) {
+      throw new Error(`Ukjent bongfarge for ${name}.`);
+    }
+    const size = sizeFromSelection(selection);
+    const sameColorSmall = ticketTypes.find((t) =>
+      t.type === "small" && colorFromTicketName(t.name) === color
+    );
+    const multiplier = size === "large"
+      ? (sameColorSmall?.priceMultiplier ?? ticketType?.priceMultiplier ?? 1) * 2
+      : (ticketType?.priceMultiplier ?? sameColorSmall?.priceMultiplier ?? 1);
+    const priceCentsEach = Math.round(entryFee * multiplier * 100);
+    const key = `${color}:${size}:${priceCentsEach}`;
+    const existing = specByKey.get(key);
+    if (existing) {
+      existing.count += qty;
+    } else {
+      specByKey.set(key, { color, size, count: qty, priceCentsEach });
+    }
+  }
+  return [...specByKey.values()];
 }
 
 /**
@@ -43,6 +138,72 @@ export class Game1SocketActions {
    * room:update etterpå).
    */
   async buy(selections: Array<{ type: string; qty: number; name?: string }> = []): Promise<void> {
+    const scheduledContext = this.deps.getScheduledPurchaseContext?.() ?? null;
+    if (
+      scheduledContext?.scheduledGameId &&
+      scheduledContext.ticketConfig &&
+      (scheduledContext.overallStatus === "purchase_open" ||
+        scheduledContext.overallStatus === "ready_to_start")
+    ) {
+      try {
+        const buyerUserId = getCurrentUserId();
+        const accessToken = getAccessToken();
+        if (!buyerUserId || !accessToken) {
+          throw new Error("Mangler innlogget spiller for bongkjøp.");
+        }
+        const ticketSpec = buildScheduledTicketSpec(
+          selections,
+          scheduledContext.ticketConfig.ticketTypes,
+          scheduledContext.ticketConfig.entryFee,
+        );
+        const response = await fetch("/api/game1/purchase", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            scheduledGameId: scheduledContext.scheduledGameId,
+            buyerUserId,
+            hallId: scheduledContext.hallId,
+            paymentMethod: "digital_wallet",
+            idempotencyKey: makeClientIdempotencyKey(),
+            ticketSpec,
+          }),
+        });
+        const body = await response.json().catch(() => null) as {
+          ok?: boolean;
+          error?: { message?: string };
+        } | null;
+        if (!response.ok || body?.ok === false) {
+          throw new Error(body?.error?.message || "Kunne ikke kjøpe billetter");
+        }
+        const roomCode = this.deps.getRoomCode();
+        if (roomCode) {
+          const state = await this.deps.socket.getRoomState({
+            roomCode,
+            hallId: scheduledContext.hallId,
+            scheduledGameId: scheduledContext.scheduledGameId,
+          });
+          if (state.ok && state.data?.snapshot) {
+            this.deps.bridge.applySnapshot(state.data.snapshot);
+          } else {
+            console.warn("[Game1SocketActions] room:state etter scheduled purchase feilet", state);
+          }
+        }
+        this.deps.getPlayScreen()?.showBuyPopupResult(true);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("spillorama:balanceRefreshRequested"));
+        }
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Kunne ikke kjøpe billetter";
+        this.deps.getPlayScreen()?.showBuyPopupResult(false, message);
+        this.deps.onError(message);
+        return;
+      }
+    }
+
     const payload: {
       roomCode: string;
       armed: true;

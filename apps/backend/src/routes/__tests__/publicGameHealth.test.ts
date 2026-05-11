@@ -24,8 +24,15 @@ import {
   createPublicGameHealthRouter,
 } from "../publicGameHealth.js";
 
-const { deriveStatus, phaseFromRoomStatus, msToSec, DRAW_STALE_THRESHOLD_SEC } =
-  __testExports;
+const {
+  deriveStatus,
+  deriveMismatchStatus,
+  phaseFromRoomStatus,
+  msToSec,
+  DRAW_STALE_THRESHOLD_SEC,
+  SPILL2_EXPECTED_ROOM_CODE,
+  SPILL3_EXPECTED_ROOM_CODE,
+} = __testExports;
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -149,6 +156,39 @@ test("msToSec: null → null, ms → floor(sec)", () => {
   assert.equal(msToSec(31_500), 31);
 });
 
+test("deriveMismatchStatus: forventet rom mangler → missing_engine_room", () => {
+  assert.equal(
+    deriveMismatchStatus({
+      expectedRoomCode: "ROCKET",
+      roomCodes: [],
+      scheduledGameId: null,
+      currentGameId: null,
+    }),
+    "missing_engine_room",
+  );
+});
+
+test("deriveMismatchStatus: duplicate rom og scheduled/current mismatch flagges", () => {
+  assert.equal(
+    deriveMismatchStatus({
+      expectedRoomCode: "ROCKET",
+      roomCodes: ["ROCKET", "OLD-ROCKET"],
+      scheduledGameId: null,
+      currentGameId: "g-1",
+    }),
+    "duplicate_engine_rooms",
+  );
+  assert.equal(
+    deriveMismatchStatus({
+      expectedRoomCode: "BINGO-HALL-X",
+      roomCodes: ["BINGO-HALL-X"],
+      scheduledGameId: "sg-1",
+      currentGameId: "other-game",
+    }),
+    "scheduled_game_mismatch",
+  );
+});
+
 // ── Integrasjon: full HTTP-round-trip med stub deps ─────────────────────────
 
 interface StubServerCtx {
@@ -167,6 +207,10 @@ interface StubOptions {
   dbOk?: boolean;
   /** Skal Redis-adapter-sjekk lykkes? */
   redisOk?: boolean;
+  spill1ScheduleRows?: Array<Record<string, unknown>>;
+  roomSummaries?: Array<Record<string, unknown>>;
+  roomSnapshots?: Record<string, Record<string, unknown>>;
+  socketRooms?: Map<string, Set<string>>;
 }
 
 async function startStubServer(opts: StubOptions = {}): Promise<StubServerCtx> {
@@ -185,15 +229,20 @@ async function startStubServer(opts: StubOptions = {}): Promise<StubServerCtx> {
       if (sql.includes("SELECT 1") && opts.dbOk === false) {
         throw new Error("DB connection failed");
       }
-      // For fetchNextSpill1Start — returnér tom rows.
+      if (sql.includes("app_game1_scheduled_games")) {
+        return { rows: opts.spill1ScheduleRows ?? [] };
+      }
+      // Default for other DB reads — returnér tom rows.
       return { rows: [] };
     },
   };
 
   // Stub `BingoEngine` — kun `listRoomSummaries` + `getRoomSnapshot`.
   const stubEngine = {
-    listRoomSummaries: () => [],
-    getRoomSnapshot: () => {
+    listRoomSummaries: () => opts.roomSummaries ?? [],
+    getRoomSnapshot: (roomCode: string) => {
+      const snapshot = opts.roomSnapshots?.[roomCode.trim().toUpperCase()];
+      if (snapshot) return snapshot;
       throw new Error("ROOM_NOT_FOUND");
     },
   };
@@ -202,7 +251,7 @@ async function startStubServer(opts: StubOptions = {}): Promise<StubServerCtx> {
   const stubIo = {
     of: (_namespace: string) => ({
       adapter: {
-        rooms: new Map<string, Set<string>>(),
+        rooms: opts.socketRooms ?? new Map<string, Set<string>>(),
         // Hvis redisOk=true vi gir en serverCount; hvis false: throw.
         ...(opts.redisOk === false
           ? {
@@ -320,6 +369,14 @@ test("integration: GET /api/games/spill1/health med hallId → 200 + Cache-Contr
         connectedClients: number;
         dbHealthy: boolean;
         redisHealthy: boolean;
+        authority: string;
+        expectedRoomCode: string | null;
+        engineRoomExists: boolean;
+        scheduledGameId: string | null;
+        currentGameId: string | null;
+        drawIndex: number | null;
+        schedulerOwner: string;
+        mismatchStatus: string;
         instanceId: string;
         checkedAt: string;
       };
@@ -329,8 +386,88 @@ test("integration: GET /api/games/spill1/health med hallId → 200 + Cache-Contr
     assert.equal(body.data.redisHealthy, true);
     assert.equal(body.data.currentPhase, "idle");
     assert.equal(body.data.connectedClients, 0);
+    assert.equal(body.data.authority, "scheduled-db");
+    assert.equal(body.data.expectedRoomCode, null);
+    assert.equal(body.data.engineRoomExists, false);
+    assert.equal(body.data.scheduledGameId, null);
+    assert.equal(body.data.currentGameId, null);
+    assert.equal(body.data.drawIndex, null);
+    assert.equal(body.data.schedulerOwner, "scheduled");
+    assert.equal(body.data.mismatchStatus, "ok");
     assert.ok(body.data.instanceId.length > 0);
     assert.ok(body.data.checkedAt.length > 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("integration: Spill 1 health eksponerer schedule + engine control-plane metadata", async () => {
+  const ctx = await startStubServer({
+    dbOk: true,
+    redisOk: true,
+    spill1ScheduleRows: [
+      {
+        id: "sg-1",
+        room_code: "bingo-hall-x",
+        plan_position: 3,
+        scheduled_start_time: new Date("2026-05-11T12:00:00Z"),
+      },
+    ],
+    roomSummaries: [
+      {
+        code: "BINGO-HALL-X",
+        hallId: "hall-x",
+        hostPlayerId: "host-1",
+        gameSlug: "bingo",
+        playerCount: 2,
+        createdAt: "2026-05-11T11:55:00Z",
+        gameStatus: "RUNNING",
+      },
+    ],
+    roomSnapshots: {
+      "BINGO-HALL-X": {
+        currentGame: {
+          id: "sg-1",
+          status: "RUNNING",
+          isPaused: false,
+          drawnNumbers: [12, 44],
+          startedAt: "2026-05-11T12:00:00Z",
+        },
+      },
+    },
+    socketRooms: new Map([["BINGO-HALL-X", new Set(["s1", "s2"])]]),
+  });
+  try {
+    const resp = await fetch(
+      `${ctx.baseUrl}/api/games/spill1/health?hallId=hall-x`,
+    );
+    assert.equal(resp.status, 200);
+    const body = (await resp.json()) as {
+      ok: boolean;
+      data: {
+        currentPhase: string;
+        currentPosition: number | null;
+        connectedClients: number;
+        expectedRoomCode: string | null;
+        engineRoomExists: boolean;
+        scheduledGameId: string | null;
+        currentGameId: string | null;
+        drawIndex: number | null;
+        mismatchStatus: string;
+        nextScheduledStart: string | null;
+      };
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.data.currentPhase, "running");
+    assert.equal(body.data.currentPosition, 3);
+    assert.equal(body.data.connectedClients, 2);
+    assert.equal(body.data.expectedRoomCode, "BINGO-HALL-X");
+    assert.equal(body.data.engineRoomExists, true);
+    assert.equal(body.data.scheduledGameId, "sg-1");
+    assert.equal(body.data.currentGameId, "sg-1");
+    assert.equal(body.data.drawIndex, 1);
+    assert.equal(body.data.mismatchStatus, "ok");
+    assert.equal(body.data.nextScheduledStart, "2026-05-11T12:00:00.000Z");
   } finally {
     await ctx.close();
   }
@@ -349,6 +486,14 @@ test("integration: GET /api/games/spill2/health → bruker Spill2Config + health
         status: string;
         nextScheduledStart: string | null;
         withinOpeningHours: boolean;
+        authority: string;
+        expectedRoomCode: string | null;
+        engineRoomExists: boolean;
+        scheduledGameId: string | null;
+        currentGameId: string | null;
+        drawIndex: number | null;
+        schedulerOwner: string;
+        mismatchStatus: string;
       };
     };
     assert.equal(body.ok, true);
@@ -356,6 +501,14 @@ test("integration: GET /api/games/spill2/health → bruker Spill2Config + health
     // Spill 2 stub returnerer null/null åpningstider → alltid åpent → ok.
     assert.equal(body.data.withinOpeningHours, true);
     assert.equal(body.data.status, "ok");
+    assert.equal(body.data.authority, "perpetual-engine");
+    assert.equal(body.data.expectedRoomCode, SPILL2_EXPECTED_ROOM_CODE);
+    assert.equal(body.data.engineRoomExists, false);
+    assert.equal(body.data.scheduledGameId, null);
+    assert.equal(body.data.currentGameId, null);
+    assert.equal(body.data.drawIndex, null);
+    assert.equal(body.data.schedulerOwner, "perpetual");
+    assert.equal(body.data.mismatchStatus, "missing_engine_room");
     assert.equal(ctx.callsToGetActiveSpill2, 1);
   } finally {
     await ctx.close();
@@ -371,12 +524,21 @@ test("integration: GET /api/games/spill3/health → bruker Spill3Config", async 
     assert.equal(resp.status, 200);
     const body = (await resp.json()) as {
       ok: boolean;
-      data: { status: string; withinOpeningHours: boolean };
+      data: {
+        status: string;
+        withinOpeningHours: boolean;
+        expectedRoomCode: string | null;
+        schedulerOwner: string;
+        mismatchStatus: string;
+      };
     };
     assert.equal(body.ok, true);
     // Spill 3 stub returnerer 00:00-23:59 → alltid åpent.
     assert.equal(body.data.withinOpeningHours, true);
     assert.equal(body.data.status, "ok");
+    assert.equal(body.data.expectedRoomCode, SPILL3_EXPECTED_ROOM_CODE);
+    assert.equal(body.data.schedulerOwner, "perpetual");
+    assert.equal(body.data.mismatchStatus, "missing_engine_room");
     assert.equal(ctx.callsToGetActiveSpill3, 1);
   } finally {
     await ctx.close();

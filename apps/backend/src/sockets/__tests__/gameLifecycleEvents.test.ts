@@ -39,6 +39,7 @@ interface CtxOptions {
   autoRoundTicketsPerPlayer?: number;
   configuredEntryFee?: number;
   variantInfo?: { gameType: string; config: unknown };
+  roomGameSlug?: string;
 }
 
 function makeCtx(opts: CtxOptions = {}): {
@@ -79,6 +80,17 @@ function makeCtx(opts: CtxOptions = {}): {
     async endGame(input: { reason?: string }) {
       if (opts.endGameThrows) throw opts.endGameThrows;
       endGameCalls.push({ reason: input.reason });
+    },
+    getRoomSnapshot(roomCode: string): RoomSnapshot {
+      return {
+        code: roomCode,
+        hallId: "hall-1",
+        hostPlayerId: "p1",
+        gameSlug: opts.roomGameSlug ?? "bingo",
+        createdAt: new Date(0).toISOString(),
+        players: [],
+        gameHistory: [],
+      };
     },
   };
 
@@ -260,6 +272,26 @@ test("game:start — engine.startGame kaster → disarm/clear/emit IKKE kalles",
   assert.equal(emitRoomUpdateCalls.length, 0);
 });
 
+test("game:start — avviser perpetual Spill 2/3-rom før engine.startGame", async () => {
+  for (const gameSlug of ["rocket", "game_2", "tallspill", "monsterbingo", "game_3", "mønsterbingo"]) {
+    const { ctx, socket, startGameCalls, disarmAllCalls, clearCacheCalls, emitRoomUpdateCalls } = makeCtx({
+      roomGameSlug: gameSlug,
+    });
+    registerGameLifecycleEvents(ctx);
+
+    const { response } = await invoke(socket, "game:start", {
+      roomCode: "ROCKET",
+      ticketsPerPlayer: 3,
+    });
+    assert.equal(response.ok, false, `${gameSlug} skal avvises`);
+    assert.equal(response.error?.code, "PERPETUAL_LIFECYCLE_FORBIDDEN");
+    assert.equal(startGameCalls.length, 0, "engine.startGame skal ikke kalles");
+    assert.equal(disarmAllCalls.length, 0, "skal ikke disarme ved guard-feil");
+    assert.equal(clearCacheCalls.length, 0, "skal ikke clear-cache ved guard-feil");
+    assert.equal(emitRoomUpdateCalls.length, 0, "skal ikke emitte update ved guard-feil");
+  }
+});
+
 // ── game:end ──────────────────────────────────────────────────────────────
 
 test("game:end — happy path videresender reason til engine.endGame", async () => {
@@ -293,6 +325,24 @@ test("game:end — engine.endGame kaster → ack failure", async () => {
   const { response } = await invoke(socket, "game:end", { roomCode: "ROOM1" });
   assert.equal(response.ok, false);
   assert.equal(response.error?.code, "GAME_NOT_RUNNING");
+});
+
+test("game:end — avviser perpetual Spill 2/3-rom før engine.endGame", async () => {
+  for (const gameSlug of ["rocket", "game_2", "tallspill", "monsterbingo", "game_3", "mønsterbingo"]) {
+    const { ctx, socket, endGameCalls, emitRoomUpdateCalls } = makeCtx({
+      roomGameSlug: gameSlug,
+    });
+    registerGameLifecycleEvents(ctx);
+
+    const { response } = await invoke(socket, "game:end", {
+      roomCode: "MONSTERBINGO",
+      reason: "ADMIN_TERMINATED",
+    });
+    assert.equal(response.ok, false, `${gameSlug} skal avvises`);
+    assert.equal(response.error?.code, "PERPETUAL_LIFECYCLE_FORBIDDEN");
+    assert.equal(endGameCalls.length, 0, "engine.endGame skal ikke kalles");
+    assert.equal(emitRoomUpdateCalls.length, 0, "skal ikke emitte update ved guard-feil");
+  }
 });
 
 test("game:end — happy path returnerer snapshot", async () => {

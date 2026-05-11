@@ -122,7 +122,8 @@ function parseHallIdsArray(value: unknown): string[] {
  * scheduled-game er i? Hvis det avviker → mismatch-warning.
  *   - idle → ingen forventning (scheduled-game finnes ikke ennå normalt,
  *     eller rest-fra-forrige-runde i completed/cancelled).
- *   - running → forventer running ELLER paused (engine kan auto-pause).
+ *   - running → forventer active statuses, eller completed mellom to
+ *     master-startede plan-posisjoner.
  *   - paused → forventer paused.
  *   - finished → forventer completed (eller ingen scheduled-game).
  */
@@ -149,7 +150,8 @@ function isPlanSchedStatusConsistent(
         schedStatus === "paused" ||
         schedStatus === "ready_to_start" ||
         schedStatus === "purchase_open" ||
-        schedStatus === "scheduled"
+        schedStatus === "scheduled" ||
+        schedStatus === "completed"
       );
     case "paused":
       return schedStatus === "paused" || schedStatus === "running";
@@ -184,6 +186,8 @@ interface ScheduledGameRow {
   plan_run_id: string | null;
   plan_position: number | null;
   pause_reason: string | null;
+  engine_paused?: boolean | null;
+  engine_paused_at_phase?: number | null;
 }
 
 // ── service ─────────────────────────────────────────────────────────────
@@ -580,12 +584,16 @@ export class GameLobbyAggregator {
   ): Promise<ScheduledGameRow | null> {
     try {
       const { rows } = await this.pool.query<ScheduledGameRow>(
-        `SELECT id, status, master_hall_id, group_hall_id,
-                participating_halls_json, scheduled_start_time,
-                scheduled_end_time, actual_start_time, actual_end_time,
-                plan_run_id, plan_position, pause_reason
-         FROM "${this.schema}"."app_game1_scheduled_games"
-         WHERE plan_run_id = $1 AND plan_position = $2
+        `SELECT sg.id, sg.status, sg.master_hall_id, sg.group_hall_id,
+                sg.participating_halls_json, sg.scheduled_start_time,
+                sg.scheduled_end_time, sg.actual_start_time, sg.actual_end_time,
+                sg.plan_run_id, sg.plan_position, sg.pause_reason,
+                gs.paused AS engine_paused,
+                gs.paused_at_phase AS engine_paused_at_phase
+         FROM "${this.schema}"."app_game1_scheduled_games" sg
+         LEFT JOIN "${this.schema}"."app_game1_game_state" gs
+                ON gs.scheduled_game_id = sg.id
+         WHERE sg.plan_run_id = $1 AND sg.plan_position = $2
          LIMIT 1`,
         [planRunId, position],
       );
@@ -605,15 +613,19 @@ export class GameLobbyAggregator {
   ): Promise<ScheduledGameRow | null> {
     try {
       const { rows } = await this.pool.query<ScheduledGameRow>(
-        `SELECT id, status, master_hall_id, group_hall_id,
-                participating_halls_json, scheduled_start_time,
-                scheduled_end_time, actual_start_time, actual_end_time,
-                plan_run_id, plan_position, pause_reason
-         FROM "${this.schema}"."app_game1_scheduled_games"
-         WHERE (master_hall_id = $1
-            OR participating_halls_json::jsonb @> to_jsonb($1::text))
-           AND status IN ('purchase_open','ready_to_start','running','paused')
-         ORDER BY scheduled_start_time ASC
+        `SELECT sg.id, sg.status, sg.master_hall_id, sg.group_hall_id,
+                sg.participating_halls_json, sg.scheduled_start_time,
+                sg.scheduled_end_time, sg.actual_start_time, sg.actual_end_time,
+                sg.plan_run_id, sg.plan_position, sg.pause_reason,
+                gs.paused AS engine_paused,
+                gs.paused_at_phase AS engine_paused_at_phase
+         FROM "${this.schema}"."app_game1_scheduled_games" sg
+         LEFT JOIN "${this.schema}"."app_game1_game_state" gs
+                ON gs.scheduled_game_id = sg.id
+         WHERE (sg.master_hall_id = $1
+            OR sg.participating_halls_json::jsonb @> to_jsonb($1::text))
+           AND sg.status IN ('purchase_open','ready_to_start','running','paused')
+         ORDER BY sg.scheduled_start_time ASC
          LIMIT 1`,
         [hallId],
       );
@@ -945,14 +957,25 @@ export class GameLobbyAggregator {
       );
       return null;
     }
+    const effectiveStatus: Spill1ScheduledGameStatus =
+      row.status === "running" && row.engine_paused === true
+        ? "paused"
+        : row.status as Spill1ScheduledGameStatus;
+    const pauseReason =
+      row.pause_reason ??
+      (row.engine_paused === true
+        ? row.engine_paused_at_phase !== null && row.engine_paused_at_phase !== undefined
+          ? `Auto-pause etter fase ${row.engine_paused_at_phase}`
+          : "Auto-pause i draw-engine"
+        : null);
     return {
       scheduledGameId: row.id,
-      status: row.status as Spill1ScheduledGameStatus,
+      status: effectiveStatus,
       scheduledStartTime: startIso,
       scheduledEndTime: asIso(row.scheduled_end_time),
       actualStartTime: asIso(row.actual_start_time),
       actualEndTime: asIso(row.actual_end_time),
-      pauseReason: row.pause_reason ?? null,
+      pauseReason,
     };
   }
 

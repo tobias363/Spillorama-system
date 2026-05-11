@@ -618,7 +618,7 @@ export class SpilloramaSocket {
    *   ad-hoc-rommet. Spilleren ser ingen baller trukket.
    *
    *   Kontrakt: caller MÅ ha verifisert at scheduled-game er joinable
-   *   (status ∈ {purchase_open, running}) via lobby-state. Hvis ikke,
+   *   (status ∈ {purchase_open, ready_to_start, running, paused}) via lobby-state. Hvis ikke,
    *   server kaster GAME_NOT_JOINABLE.
    */
   async joinScheduledGame(payload: {
@@ -629,11 +629,11 @@ export class SpilloramaSocket {
     return this.emit("game1:join-scheduled", payload);
   }
 
-  async resumeRoom(payload: { roomCode: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
+  async resumeRoom(payload: { roomCode: string; scheduledGameId?: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
     return this.emit(SocketEvents.ROOM_RESUME, payload);
   }
 
-  async getRoomState(payload: { roomCode: string; hallId?: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
+  async getRoomState(payload: { roomCode: string; hallId?: string; scheduledGameId?: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
     return this.emit(SocketEvents.ROOM_STATE, payload);
   }
 

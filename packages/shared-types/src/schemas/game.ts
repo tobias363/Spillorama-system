@@ -178,6 +178,8 @@ export const RoomSnapshotSchema = z.object({
   hallId: z.string(),
   hostPlayerId: z.string(),
   gameSlug: z.string().optional(),
+  scheduledGameId: z.string().nullable().optional(),
+  isHallShared: z.boolean().optional(),
   createdAt: IsoDateString,
   players: z.array(PlayerSchema),
   currentGame: GameSnapshotSchema.optional(),

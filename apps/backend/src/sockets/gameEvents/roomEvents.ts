@@ -84,6 +84,35 @@ async function lookupIsTestHall(
   }
 }
 
+function getExpectedScheduledGameId(payload: unknown): string | null {
+  const value = (payload as { scheduledGameId?: unknown } | null)?.scheduledGameId;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function assertScheduledRoomBinding(
+  snapshot: RoomSnapshot,
+  expectedScheduledGameId: string | null,
+): void {
+  const scheduledGameId = snapshot.scheduledGameId?.trim() || null;
+  if (!scheduledGameId) return;
+
+  if (!expectedScheduledGameId) {
+    throw new DomainError(
+      "SCHEDULED_GAME_REQUIRED",
+      "Scheduled Spill 1-rom krever scheduledGameId ved resume/resync.",
+    );
+  }
+
+  if (scheduledGameId !== expectedScheduledGameId) {
+    throw new DomainError(
+      "SCHEDULED_GAME_MISMATCH",
+      "Klienten forsøkte å synke mot feil schedulert spill.",
+    );
+  }
+}
+
 /**
  * BIN-693 Option B: reserver delta-beløp for pre-round bong-kjøp.
  *
@@ -834,6 +863,11 @@ export function registerRoomEvents(ctx: SocketContext): void {
   socket.on("room:resume", rateLimited("room:resume", async (payload: ResumeRoomPayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      const preAttachSnapshot = engine.getRoomSnapshot(roomCode);
+      assertScheduledRoomBinding(
+        preAttachSnapshot,
+        getExpectedScheduledGameId(payload),
+      );
       engine.attachPlayerSocket(roomCode, playerId, socket.id);
       socket.join(roomCode);
       // BIN-760: per-wallet socket-rom for `wallet:state`-push. Hent
@@ -893,7 +927,15 @@ export function registerRoomEvents(ctx: SocketContext): void {
       }
 
       assertUserCanAccessRoom(user, roomCode);
-      const snapshot = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode));
+      const transportSnapshot = engine.getRoomSnapshot(roomCode);
+      assertScheduledRoomBinding(
+        transportSnapshot,
+        getExpectedScheduledGameId(payload),
+      );
+      const authoritativeSnapshot = deps.getAuthoritativeRoomSnapshot
+        ? await deps.getAuthoritativeRoomSnapshot(roomCode)
+        : transportSnapshot;
+      const snapshot = buildRoomUpdatePayload(authoritativeSnapshot);
       // ADR-0019 / P0-1 (2026-05-10): stample resync-snapshot med gjeldende
       // stateVersion så klient kan oppdatere `lastAppliedStateVersion` etter
       // applySnapshot. Uten dette ville klient med cached

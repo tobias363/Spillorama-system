@@ -8,6 +8,7 @@ export interface ReconnectFlowDeps {
   readonly socket: SpilloramaSocket;
   readonly bridge: GameBridge;
   readonly loader: LoadingOverlay | null;
+  readonly getScheduledGameId?: () => string | null;
 }
 
 /**
@@ -103,7 +104,10 @@ export class Game1ReconnectFlow {
     this.deps.loader?.setState("RESYNCING");
 
     try {
-      const result = await this.deps.socket.resumeRoom({ roomCode });
+      const scheduledGameId = this.deps.getScheduledGameId?.() ?? null;
+      const resumePayload: { roomCode: string; scheduledGameId?: string } = { roomCode };
+      if (scheduledGameId) resumePayload.scheduledGameId = scheduledGameId;
+      const result = await this.deps.socket.resumeRoom(resumePayload);
       let snapshot = result.ok ? result.data?.snapshot : null;
 
       // Fallback: hvis resumeRoom ikke returnerer snapshot, prøv
@@ -113,7 +117,9 @@ export class Game1ReconnectFlow {
         if (!result.ok) {
           console.warn("[Game1] Room resume failed, trying getRoomState:", result.error?.message);
         }
-        const fallback = await this.deps.socket.getRoomState({ roomCode });
+        const statePayload: { roomCode: string; scheduledGameId?: string } = { roomCode };
+        if (scheduledGameId) statePayload.scheduledGameId = scheduledGameId;
+        const fallback = await this.deps.socket.getRoomState(statePayload);
         snapshot = fallback.ok ? (fallback.data?.snapshot ?? null) : null;
       }
 

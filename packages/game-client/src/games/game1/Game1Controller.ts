@@ -310,11 +310,25 @@ class Game1Controller implements GameController {
       bridge,
       getRoomCode: () => this.actualRoomCode,
       getPhase: () => this.phase,
+      getScheduledPurchaseContext: () => {
+        const state = this.lobbyStateBinding?.getState() ?? null;
+        return {
+          scheduledGameId: this.pickJoinableScheduledGameId(state),
+          hallId: this.deps.hallId,
+          overallStatus: state?.overallStatus ?? null,
+          ticketConfig: this.lobbyStateBinding?.getBuyPopupTicketConfig() ?? null,
+        };
+      },
       getPlayScreen: () => this.playScreen,
       toast: this.toast,
       onError: (msg) => this.showError(msg),
     });
-    this.reconnectFlow = new Game1ReconnectFlow({ socket, bridge, loader: this.loader });
+    this.reconnectFlow = new Game1ReconnectFlow({
+      socket,
+      bridge,
+      loader: this.loader,
+      getScheduledGameId: () => this.joinedScheduledGameId,
+    });
 
     // Connect socket
     socket.connect();
@@ -536,6 +550,7 @@ class Game1Controller implements GameController {
     this.initialJoinComplete = true;
     if (initialScheduledGameId && joinResult.ok && joinResult.data) {
       this.joinedScheduledGameId = initialScheduledGameId;
+      bridge.setScheduledGameId(initialScheduledGameId);
     }
     if (isSpill1DrawsDebugEnabled()) {
       console.log("[ROOM] join ack", {
@@ -870,7 +885,7 @@ class Game1Controller implements GameController {
 
   /**
    * Returner `scheduledGameId` fra lobby-state HVIS runden er joinable
-   * (status ∈ {purchase_open, running}). Ellers null.
+   * (status ∈ {purchase_open, ready_to_start, running, paused}). Ellers null.
    *
    * Server håndhever joinable-status (game1ScheduledEvents.ts:79-80,
    * JOINABLE_STATUSES). Vi speiler den whitelisten her så vi unngår
@@ -881,8 +896,7 @@ class Game1Controller implements GameController {
    *   - state er null (lobby-binding har ikke lastet enda)
    *   - ingen plan dekker (`nextScheduledGame === null`)
    *   - scheduledGameId er null (plan-runtime har ikke spawnet rom enda)
-   *   - status er idle/finished/upcoming (master har ikke trykket Start
-   *     eller runden er ferdig)
+   *   - status er idle/finished/upcoming/completed/cancelled
    */
   private pickJoinableScheduledGameId(
     state: ReturnType<Game1LobbyStateBinding["getState"]>,
@@ -890,7 +904,12 @@ class Game1Controller implements GameController {
     const next = state?.nextScheduledGame;
     if (!next) return null;
     if (!next.scheduledGameId) return null;
-    if (next.status !== "purchase_open" && next.status !== "running") {
+    if (
+      next.status !== "purchase_open" &&
+      next.status !== "ready_to_start" &&
+      next.status !== "running" &&
+      next.status !== "paused"
+    ) {
       return null;
     }
     return next.scheduledGameId;
@@ -969,9 +988,11 @@ class Game1Controller implements GameController {
           try {
             const resume = await this.deps.socket.resumeRoom({
               roomCode: this.actualRoomCode,
+              scheduledGameId: nextScheduledGameId,
             });
             if (resume.ok && resume.data?.snapshot) {
               this.joinedScheduledGameId = nextScheduledGameId;
+              this.deps.bridge.setScheduledGameId(nextScheduledGameId);
               this.deps.bridge.applySnapshot(resume.data.snapshot);
               this.updateDebugHud();
               return;
@@ -995,6 +1016,7 @@ class Game1Controller implements GameController {
         return;
       }
       this.joinedScheduledGameId = nextScheduledGameId;
+      this.deps.bridge.setScheduledGameId(nextScheduledGameId);
       this.actualRoomCode = result.data.roomCode;
       this.playScreen?.setRoomCode(this.actualRoomCode);
       // Bridge er allerede startet — applySnapshot resync-er state mot

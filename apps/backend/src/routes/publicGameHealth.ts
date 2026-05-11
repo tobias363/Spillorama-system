@@ -39,6 +39,14 @@
  *       "connectedClients": <antall socket-clients>,
  *       "currentPhase": "idle"|"running"|"paused"|"finished",
  *       "currentPosition": <plan-position, eller null>,
+ *       "authority": "scheduled-db"|"perpetual-engine",
+ *       "expectedRoomCode": "<kanonisk rom-kode, eller null>",
+ *       "engineRoomExists": <bool>,
+ *       "scheduledGameId": "<scheduled DB-id, eller null>",
+ *       "currentGameId": "<engine currentGame.id, eller null>",
+ *       "drawIndex": <0-basert indeks for siste trekk, eller null>,
+ *       "schedulerOwner": "scheduled"|"perpetual",
+ *       "mismatchStatus": "ok"|"...",
  *       "instanceId": "<backend-instans-id>",
  *       "redisHealthy": <bool>,
  *       "dbHealthy": <bool>,
@@ -102,6 +110,8 @@ const DRAW_STALE_THRESHOLD_SEC = 30;
 const SPILL1_SLUG = "bingo";
 const SPILL2_SLUG = "rocket";
 const SPILL3_SLUG = "monsterbingo";
+const SPILL2_EXPECTED_ROOM_CODE = "ROCKET";
+const SPILL3_EXPECTED_ROOM_CODE = "MONSTERBINGO";
 
 /**
  * Faste plan-faser. Speiler `currentPhase`-feltet i mandatet — `idle` =
@@ -112,6 +122,14 @@ type HealthPhase = "idle" | "running" | "paused" | "finished";
 
 /** Status-rangering per mandatet. */
 type HealthStatus = "ok" | "degraded" | "down";
+type HealthAuthority = "scheduled-db" | "perpetual-engine";
+type SchedulerOwner = "scheduled" | "perpetual";
+type MismatchStatus =
+  | "ok"
+  | "missing_engine_room"
+  | "unexpected_engine_room"
+  | "duplicate_engine_rooms"
+  | "scheduled_game_mismatch";
 
 interface HealthResponseData {
   status: HealthStatus;
@@ -121,6 +139,22 @@ interface HealthResponseData {
   currentPhase: HealthPhase;
   /** Plan-position (Spill 1 — pos i game-plan-runen). `null` for Spill 2/3. */
   currentPosition: number | null;
+  /** Hvilket kontrollplan som er autoritativt for rom/runde. */
+  authority: HealthAuthority;
+  /** Forventet kanonisk engine-room. Spill 1: fra schedule.room_code hvis satt. */
+  expectedRoomCode: string | null;
+  /** Finnes forventet engine-room, eller minst ett relevant rom hvis ingen forventet kode. */
+  engineRoomExists: boolean;
+  /** Spill 1 scheduled-game-id fra DB. Spill 2/3 er perpetual og returnerer null. */
+  scheduledGameId: string | null;
+  /** Nåværende engine-game-id fra valgt live room. */
+  currentGameId: string | null;
+  /** 0-basert drawIndex for siste draw på wire; null før første draw. */
+  drawIndex: number | null;
+  /** Eier av scheduler/tick-loop for dette spillet. */
+  schedulerOwner: SchedulerOwner;
+  /** Maskinlesbar indikasjon på schedule/engine/romkode-avvik. */
+  mismatchStatus: MismatchStatus;
   instanceId: string;
   redisHealthy: boolean;
   dbHealthy: boolean;
@@ -257,6 +291,15 @@ interface RoomLiveSnapshot {
   /** ms siden siste draw, eller null hvis ingen pågående runde. */
   lastDrawAgeMs: number | null;
   phase: HealthPhase;
+  currentGameId: string | null;
+  drawIndex: number | null;
+}
+
+interface Spill1ScheduleInfo {
+  scheduledGameId: string | null;
+  expectedRoomCode: string | null;
+  currentPosition: number | null;
+  nextScheduledStart: string | null;
 }
 
 /**
@@ -279,7 +322,13 @@ function aggregateLiveState(
   });
 
   if (matched.length === 0) {
-    return { roomCodes: [], lastDrawAgeMs: null, phase: "idle" };
+    return {
+      roomCodes: [],
+      lastDrawAgeMs: null,
+      phase: "idle",
+      currentGameId: null,
+      drawIndex: null,
+    };
   }
 
   // Velg det "mest aktive" rommet for fase-rapport — RUNNING > WAITING > ENDED.
@@ -297,10 +346,15 @@ function aggregateLiveState(
   // Inspect snapshot for paused-flag + draw-timing.
   let phase: HealthPhase = "idle";
   let lastDrawAgeMs: number | null = null;
+  let currentGameId: string | null = null;
+  let drawIndex: number | null = null;
   try {
     const snap = engine.getRoomSnapshot(top.code);
     const game = snap.currentGame;
     if (game) {
+      currentGameId = game.id;
+      drawIndex =
+        game.drawnNumbers.length > 0 ? game.drawnNumbers.length - 1 : null;
       phase = phaseFromRoomStatus(game.status, Boolean(game.isPaused));
       // BingoEngine sin DrawOrchestrationService eksponerer __getLastDrawAt.
       // Vi når den via the protected drawOrchestrationService-felt — bruk
@@ -328,15 +382,17 @@ function aggregateLiveState(
     roomCodes: matched.map((s) => s.code),
     lastDrawAgeMs,
     phase,
+    currentGameId,
+    drawIndex,
   };
 }
 
-/** Hent neste planlagte Spill 1-runde for en gitt hall. */
-async function fetchNextSpill1Start(
+/** Hent control-plane metadata for neste/aktive Spill 1-runde for en gitt hall. */
+async function fetchSpill1ScheduleInfo(
   pool: Pool,
   schema: string,
   hallId: string,
-): Promise<string | null> {
+): Promise<Spill1ScheduleInfo> {
   // Validér schema-navnet for å unngå SQL-injeksjon (samme guard som
   // eksisterende services). Rådata mappes som ISO-string.
   if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
@@ -344,26 +400,67 @@ async function fetchNextSpill1Start(
   }
   try {
     const result = await pool.query(
-      `SELECT scheduled_start_time
+      `SELECT id, room_code, plan_position, scheduled_start_time
          FROM "${schema}"."app_game1_scheduled_games"
         WHERE master_hall_id = $1
-          AND status IN ('scheduled','purchase_open','ready_to_start')
-          AND scheduled_start_time > NOW()
+          AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')
         ORDER BY scheduled_start_time ASC
         LIMIT 1`,
       [hallId],
     );
     const row = result.rows[0];
-    if (!row) return null;
+    if (!row) {
+      return {
+        scheduledGameId: null,
+        expectedRoomCode: null,
+        currentPosition: null,
+        nextScheduledStart: null,
+      };
+    }
     const ts =
       row.scheduled_start_time instanceof Date
         ? row.scheduled_start_time
         : new Date(String(row.scheduled_start_time));
-    return ts.toISOString();
+    return {
+      scheduledGameId:
+        typeof row.id === "string" && row.id.trim() ? row.id.trim() : null,
+      expectedRoomCode:
+        typeof row.room_code === "string" && row.room_code.trim()
+          ? row.room_code.trim().toUpperCase()
+          : null,
+      currentPosition:
+        typeof row.plan_position === "number" ? row.plan_position : null,
+      nextScheduledStart: ts.toISOString(),
+    };
   } catch (err) {
-    log.warn({ err, hallId }, "[health] fetchNextSpill1Start failed");
-    return null;
+    log.warn({ err, hallId }, "[health] fetchSpill1ScheduleInfo failed");
+    return {
+      scheduledGameId: null,
+      expectedRoomCode: null,
+      currentPosition: null,
+      nextScheduledStart: null,
+    };
   }
+}
+
+function deriveMismatchStatus(args: {
+  expectedRoomCode: string | null;
+  roomCodes: string[];
+  scheduledGameId: string | null;
+  currentGameId: string | null;
+}): MismatchStatus {
+  const { expectedRoomCode, roomCodes, scheduledGameId, currentGameId } = args;
+  if (scheduledGameId && currentGameId && scheduledGameId !== currentGameId) {
+    return "scheduled_game_mismatch";
+  }
+  if (!expectedRoomCode) return "ok";
+  const expectedExists = roomCodes.includes(expectedRoomCode);
+  if (!expectedExists) return "missing_engine_room";
+  if (roomCodes.length > 1) return "duplicate_engine_rooms";
+  if (roomCodes.some((code) => code !== expectedRoomCode)) {
+    return "unexpected_engine_room";
+  }
+  return "ok";
 }
 
 /**
@@ -475,11 +572,14 @@ export function createPublicGameHealthRouter(
       // raffinere ved behov.
       const withinOpeningHours = true;
       const liveState = aggregateLiveState(engine, SPILL1_SLUG, hallId, false);
-      const [dbHealthy, redisHealthy, nextScheduledStart] = await Promise.all([
+      const [dbHealthy, redisHealthy, scheduleInfo] = await Promise.all([
         checkDatabaseHealthy(pool),
         checkRedisHealthy(io),
-        fetchNextSpill1Start(pool, schema, hallId),
+        fetchSpill1ScheduleInfo(pool, schema, hallId),
       ]);
+      const engineRoomExists = scheduleInfo.expectedRoomCode
+        ? liveState.roomCodes.includes(scheduleInfo.expectedRoomCode)
+        : liveState.roomCodes.length > 0;
       const data: HealthResponseData = {
         status: deriveStatus({
           phase: liveState.phase,
@@ -491,13 +591,24 @@ export function createPublicGameHealthRouter(
         lastDrawAge: msToSec(liveState.lastDrawAgeMs),
         connectedClients: countClientsInRooms(io, liveState.roomCodes),
         currentPhase: liveState.phase,
-        // TODO(R7-followup): når Game1LobbyService (PR #1018) er merget,
-        // les game-plan-position herfra. Ingen data tilgjengelig nå.
-        currentPosition: null,
+        currentPosition: scheduleInfo.currentPosition,
+        authority: "scheduled-db",
+        expectedRoomCode: scheduleInfo.expectedRoomCode,
+        engineRoomExists,
+        scheduledGameId: scheduleInfo.scheduledGameId,
+        currentGameId: liveState.currentGameId,
+        drawIndex: liveState.drawIndex,
+        schedulerOwner: "scheduled",
+        mismatchStatus: deriveMismatchStatus({
+          expectedRoomCode: scheduleInfo.expectedRoomCode,
+          roomCodes: liveState.roomCodes,
+          scheduledGameId: scheduleInfo.scheduledGameId,
+          currentGameId: liveState.currentGameId,
+        }),
         instanceId,
         redisHealthy,
         dbHealthy,
-        nextScheduledStart,
+        nextScheduledStart: scheduleInfo.nextScheduledStart,
         withinOpeningHours,
         // TODO(R8): integrer mot socket-roundtrip-metric når R5 lander.
         p95SocketRoundtripMs: null,
@@ -531,6 +642,9 @@ export function createPublicGameHealthRouter(
         ? isWithinSpill2OpeningHours(config)
         : false;
       const liveState = aggregateLiveState(engine, SPILL2_SLUG, hallId, true);
+      const engineRoomExists = liveState.roomCodes.includes(
+        SPILL2_EXPECTED_ROOM_CODE,
+      );
       const data: HealthResponseData = {
         status: deriveStatus({
           phase: liveState.phase,
@@ -544,6 +658,19 @@ export function createPublicGameHealthRouter(
         currentPhase: liveState.phase,
         // Spill 2 har ikke plan-position-konseptet — perpetual loop.
         currentPosition: null,
+        authority: "perpetual-engine",
+        expectedRoomCode: SPILL2_EXPECTED_ROOM_CODE,
+        engineRoomExists,
+        scheduledGameId: null,
+        currentGameId: liveState.currentGameId,
+        drawIndex: liveState.drawIndex,
+        schedulerOwner: "perpetual",
+        mismatchStatus: deriveMismatchStatus({
+          expectedRoomCode: SPILL2_EXPECTED_ROOM_CODE,
+          roomCodes: liveState.roomCodes,
+          scheduledGameId: null,
+          currentGameId: liveState.currentGameId,
+        }),
         instanceId,
         redisHealthy,
         dbHealthy,
@@ -582,6 +709,9 @@ export function createPublicGameHealthRouter(
         ? isWithinSpill3OpeningWindow(config)
         : false;
       const liveState = aggregateLiveState(engine, SPILL3_SLUG, hallId, true);
+      const engineRoomExists = liveState.roomCodes.includes(
+        SPILL3_EXPECTED_ROOM_CODE,
+      );
       const data: HealthResponseData = {
         status: deriveStatus({
           phase: liveState.phase,
@@ -594,6 +724,19 @@ export function createPublicGameHealthRouter(
         connectedClients: countClientsInRooms(io, liveState.roomCodes),
         currentPhase: liveState.phase,
         currentPosition: null,
+        authority: "perpetual-engine",
+        expectedRoomCode: SPILL3_EXPECTED_ROOM_CODE,
+        engineRoomExists,
+        scheduledGameId: null,
+        currentGameId: liveState.currentGameId,
+        drawIndex: liveState.drawIndex,
+        schedulerOwner: "perpetual",
+        mismatchStatus: deriveMismatchStatus({
+          expectedRoomCode: SPILL3_EXPECTED_ROOM_CODE,
+          roomCodes: liveState.roomCodes,
+          scheduledGameId: null,
+          currentGameId: liveState.currentGameId,
+        }),
         instanceId,
         redisHealthy,
         dbHealthy,
@@ -620,7 +763,10 @@ export function createPublicGameHealthRouter(
 /** @internal Visible for testing — pure status-mapping. */
 export const __testExports = {
   deriveStatus,
+  deriveMismatchStatus,
   phaseFromRoomStatus,
   msToSec,
   DRAW_STALE_THRESHOLD_SEC,
+  SPILL2_EXPECTED_ROOM_CODE,
+  SPILL3_EXPECTED_ROOM_CODE,
 };

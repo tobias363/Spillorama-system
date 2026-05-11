@@ -445,6 +445,14 @@ export interface RoomSnapshot {
    * room creation (defaulted to "bingo" if caller omitted).
    */
   gameSlug: string;
+  /**
+   * Scheduled Spill 1-binding copied from RoomState. When present, generic
+   * room resume/state calls must prove they are resyncing the same scheduled
+   * game and not an ad-hoc room with the same user.
+   */
+  scheduledGameId?: string | null;
+  /** Shared global/hall-group room marker copied from RoomState. */
+  isHallShared?: boolean;
   createdAt: string;
   players: Player[];
   currentGame?: GameSnapshot;

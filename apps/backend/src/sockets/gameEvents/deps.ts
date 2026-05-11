@@ -258,4 +258,10 @@ export interface GameEventsDeps {
    * faller tilbake til `undefined` (klient skipper dedup).
    */
   getCurrentStateVersion?: (roomCode: string) => Promise<number>;
+  /**
+   * Scheduled Spill 1 uses Game1DrawEngineService/DB as authoritative state.
+   * When provided, room:state resync snapshots are enriched from that source
+   * instead of returning the bare BingoEngine transport-room snapshot.
+   */
+  getAuthoritativeRoomSnapshot?: (roomCode: string) => Promise<RoomSnapshot>;
 }

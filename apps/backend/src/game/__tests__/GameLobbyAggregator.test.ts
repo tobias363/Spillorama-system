@@ -178,6 +178,8 @@ interface ScheduledGameRowStub {
   plan_run_id: string | null;
   plan_position: number | null;
   pause_reason: string | null;
+  engine_paused?: boolean | null;
+  engine_paused_at_phase?: number | null;
 }
 
 interface HallReadyRowStub {
@@ -248,7 +250,7 @@ function makeAggregator(opts: AggregatorStubOpts = {}): GameLobbyAggregator {
           : (textOrConfig as { text: string }).text;
       // queryScheduledGameByPlanRun
       if (
-        /WHERE plan_run_id = \$1 AND plan_position = \$2/i.test(sql) &&
+        /WHERE (?:sg\.)?plan_run_id = \$1 AND (?:sg\.)?plan_position = \$2/i.test(sql) &&
         params
       ) {
         const [planRunId, position] = params as [string, number];
@@ -259,7 +261,7 @@ function makeAggregator(opts: AggregatorStubOpts = {}): GameLobbyAggregator {
       }
       // queryActiveScheduledGameForHall
       if (
-        /master_hall_id = \$1[\s\S]*OR participating_halls_json/i.test(sql) &&
+        /(?:sg\.)?master_hall_id = \$1[\s\S]*OR (?:sg\.)?participating_halls_json/i.test(sql) &&
         params
       ) {
         const [hallId] = params as [string];
@@ -762,6 +764,62 @@ test("state=paused: master har pauset runden", async () => {
   assert.equal(state.inconsistencyWarnings.length, 0);
 });
 
+test("state=auto-paused: running scheduled-game med engine pause vises som paused", async () => {
+  const plan = makePlanWithItems({ id: PLAN_ID, hallId: null, groupOfHallsId: GOH_ID });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "running",
+    currentPosition: 1,
+  });
+  const schedGame: ScheduledGameRowStub = {
+    id: SCHEDULED_GAME_ID,
+    status: "running",
+    master_hall_id: HALL_A,
+    group_hall_id: GOH_ID,
+    participating_halls_json: [HALL_A],
+    scheduled_start_time: "2026-05-08T15:00:00Z",
+    scheduled_end_time: "2026-05-08T16:00:00Z",
+    actual_start_time: "2026-05-08T15:01:00Z",
+    actual_end_time: null,
+    plan_run_id: RUN_ID,
+    plan_position: 1,
+    pause_reason: null,
+    engine_paused: true,
+    engine_paused_at_phase: 1,
+  };
+
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [schedGame],
+    hallReadyRowsByGameId: new Map([[SCHEDULED_GAME_ID, []]]),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  assert.equal(state.currentScheduledGameId, SCHEDULED_GAME_ID);
+  assert.equal(state.scheduledGameMeta?.status, "paused");
+  assert.equal(state.scheduledGameMeta?.pauseReason, "Auto-pause etter fase 1");
+  assert.equal(state.planMeta?.planRunStatus, "running");
+  assert.equal(state.inconsistencyWarnings.length, 0);
+});
+
 // ── Test 6: finished ───────────────────────────────────────────────────
 
 test("state=finished: spilleplanen er ferdig for dagen", async () => {
@@ -1091,7 +1149,66 @@ test("state=cross-tz-businessDate: businessDate i Oslo-tz, ikke UTC", async () =
   assert.equal(state.businessDate, "2026-05-09");
 });
 
-// ── Test 12: status-mismatch (plan-run.running med scheduled-game.cancelled) ──
+// ── Test 12: terminal completed mellom plan-posisjoner ───────────────────
+
+test("state=inter-round: plan-run.running med scheduled-game.completed er ikke mismatch", async () => {
+  const plan = makePlanWithItems({ id: PLAN_ID, hallId: null, groupOfHallsId: GOH_ID });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "running",
+    currentPosition: 1,
+  });
+  const schedGame: ScheduledGameRowStub = {
+    id: SCHEDULED_GAME_ID,
+    status: "completed",
+    master_hall_id: HALL_A,
+    group_hall_id: GOH_ID,
+    participating_halls_json: [HALL_A],
+    scheduled_start_time: "2026-05-08T15:00:00Z",
+    scheduled_end_time: "2026-05-08T16:00:00Z",
+    actual_start_time: "2026-05-08T15:00:00Z",
+    actual_end_time: "2026-05-08T15:10:00Z",
+    plan_run_id: RUN_ID,
+    plan_position: 1,
+    pause_reason: null,
+  };
+
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [schedGame],
+    hallReadyRowsByGameId: new Map([[SCHEDULED_GAME_ID, []]]),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  assert.equal(state.currentScheduledGameId, SCHEDULED_GAME_ID);
+  assert.equal(state.scheduledGameMeta?.status, "completed");
+  assert.equal(
+    state.inconsistencyWarnings.some(
+      (w) => w.code === "PLAN_SCHED_STATUS_MISMATCH",
+    ),
+    false,
+  );
+});
+
+// ── Test 13: status-mismatch (plan-run.running med scheduled-game.cancelled) ──
 
 test("state=status-mismatch: plan-run.running men scheduled-game.cancelled", async () => {
   const plan = makePlanWithItems({ id: PLAN_ID, hallId: null, groupOfHallsId: GOH_ID });

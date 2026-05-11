@@ -28,6 +28,7 @@ import { getCanonicalRoomCode } from "../util/canonicalRoomCode.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "boot:hall-group-rooms" });
+const MAX_BOOT_HOST_NAME_LENGTH = 24;
 
 export interface BootstrapHallGroupRoomsDeps {
   engine: BingoEngine;
@@ -57,6 +58,11 @@ export interface BootstrapResult {
   skipped: string[];
   /** Grupper som feilet — typisk DB-feil eller missing master-hall. */
   errors: Array<{ groupId: string; reason: string }>;
+}
+
+function makeBootHostName(groupName: string): string {
+  const base = `Boot ${groupName.trim() || "Hall"}`;
+  return base.slice(0, MAX_BOOT_HOST_NAME_LENGTH).trimEnd();
 }
 
 export async function bootstrapHallGroupRooms(
@@ -118,7 +124,7 @@ export async function bootstrapHallGroupRooms(
       // i live).
       const created = await deps.engine.createRoom({
         hallId: firstMember.hallId,
-        playerName: `Boot Host ${group.name.slice(0, 16)}`,
+        playerName: makeBootHostName(group.name),
         walletId: `boot-host-${group.id}`,
         roomCode: canonical.roomCode,
         ...(canonical.effectiveHallId === null
