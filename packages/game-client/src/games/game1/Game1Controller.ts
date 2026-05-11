@@ -56,6 +56,29 @@ import type { Phase } from "./logic/Phase.js";
 const END_SCREEN_AUTO_DISMISS_MS = 10_000;
 
 /**
+ * Debug-logging-toggle (2026-05-11, Tobias-direktiv): når
+ * `window.__DEBUG_SPILL1_DRAWS__=true` (sett i devtools-console) eller
+ * `localStorage.setItem("DEBUG_SPILL1_DRAWS", "true")` emit ekstra
+ * `[DRAW]`/`[ROOM]`-console-logger som dekker klient-flyten. Lar Tobias
+ * åpne devtools, grep "[DRAW]" og direkte se hvilke `draw:new`-events
+ * klient mottar + hvilken `roomCode` klienten faktisk havnet på etter
+ * `createRoom`. Default OFF for ikke å spamme prod.
+ */
+function isSpill1DrawsDebugEnabled(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    const wnd = window as unknown as { __DEBUG_SPILL1_DRAWS__?: unknown };
+    if (wnd.__DEBUG_SPILL1_DRAWS__ === true) return true;
+    const ls = typeof window.localStorage !== "undefined"
+      ? window.localStorage.getItem("DEBUG_SPILL1_DRAWS")
+      : null;
+    return ls?.trim().toLowerCase() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Game 1 (Classic Bingo) controller — orchestration only.
  *
  * Ansvar delegert til logic/-moduler:
@@ -443,10 +466,22 @@ class Game1Controller implements GameController {
     //   er null osv.) faller vi tilbake til den eksisterende
     //   `socket.createRoom`-flyten — den feiler typisk og trigger
     //   `Game1LobbyFallback`-overlay-en (R1/BIN-822).
+    //
+    // Debug-logging (PR #1208, 2026-05-11): logger join-mode + ack-payload
+    // bak `DEBUG_SPILL1_DRAWS`-flagget så vi kan SE hvilken roomCode klient
+    // ender på uten å gjette.
     const lobbyStateAtJoinTime = this.lobbyStateBinding.getState();
     const initialScheduledGameId = this.pickJoinableScheduledGameId(
       lobbyStateAtJoinTime,
     );
+    if (isSpill1DrawsDebugEnabled()) {
+      console.log("[ROOM] join request", {
+        mode: initialScheduledGameId ? "joinScheduledGame" : "createRoom",
+        hallId: this.deps.hallId,
+        gameSlug: "bingo",
+        scheduledGameId: initialScheduledGameId,
+      });
+    }
     const joinResult = initialScheduledGameId
       ? await socket.joinScheduledGame({
           scheduledGameId: initialScheduledGameId,
@@ -459,6 +494,15 @@ class Game1Controller implements GameController {
         });
     if (initialScheduledGameId && joinResult.ok && joinResult.data) {
       this.joinedScheduledGameId = initialScheduledGameId;
+    }
+    if (isSpill1DrawsDebugEnabled()) {
+      console.log("[ROOM] join ack", {
+        mode: initialScheduledGameId ? "joinScheduledGame" : "createRoom",
+        ok: joinResult.ok,
+        roomCode: joinResult.ok ? joinResult.data?.roomCode : null,
+        playerId: joinResult.ok ? joinResult.data?.playerId : null,
+        error: joinResult.ok ? null : joinResult.error,
+      });
     }
 
     if (!joinResult.ok || !joinResult.data) {
@@ -522,10 +566,38 @@ class Game1Controller implements GameController {
     bridge.start(this.myPlayerId);
 
     this.unsubs.push(
-      bridge.on("stateChanged", (state) => this.onStateChanged(state)),
+      bridge.on("stateChanged", (state) => {
+        if (isSpill1DrawsDebugEnabled()) {
+          // 2026-05-11: stateChanged fyres på hver `room:update` (etter at
+          // GameBridge.handleRoomUpdate har anvendt payloaden). Logger
+          // roomCode/gameStatus/drawCount slik at klient kan verifisere
+          // hvilket rom den faktisk sitter i + om rommet endrer status.
+          console.log("[ROOM] room:update applied", {
+            roomCode: state.roomCode,
+            gameStatus: state.gameStatus,
+            drawnNumbersLength: state.drawnNumbers.length,
+          });
+        }
+        this.onStateChanged(state);
+      }),
       bridge.on("gameStarted", (state) => this.onGameStarted(state)),
       bridge.on("gameEnded", (state) => this.onGameEnded(state)),
-      bridge.on("numberDrawn", (num, idx, state) => this.onNumberDrawn(num, idx, state)),
+      bridge.on("numberDrawn", (num, idx, state) => {
+        if (isSpill1DrawsDebugEnabled()) {
+          // 2026-05-11: numberDrawn fyres etter at GameBridge.handleDrawNew
+          // har validert drawIndex og oppdatert state.drawnNumbers. Hvis
+          // dette ALDRI logges men `[ROOM] room:update applied` viser
+          // running gameStatus → klient sitter i feil socket-rom og
+          // mottar aldri `draw:new` direkte.
+          console.log("[DRAW] received", {
+            ball: num,
+            drawIndex: idx,
+            roomCode: state.roomCode,
+            drawnNumbersLength: state.drawnNumbers.length,
+          });
+        }
+        this.onNumberDrawn(num, idx, state);
+      }),
       bridge.on("patternWon", (result, state) => this.onPatternWon(result, state)),
       // BIN-690 PR-M6: scheduled-games mini-game protocol.
       bridge.on("miniGameTrigger", (data) => this.handleMiniGameTrigger(data)),

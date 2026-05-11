@@ -21,6 +21,17 @@ import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-player-broadcaster-adapter" });
 
+/**
+ * Debug-logging-toggle (2026-05-11, Tobias-direktiv): når
+ * `DEBUG_SPILL1_DRAWS=true` emit `[draw] emitted`-strukturert log med
+ * `{roomCode, drawIndex, ball, scheduledGameId}` rett før hver
+ * `io.to(roomCode).emit("draw:new")`. Lar ops grep "[draw]" og se nøyaktig
+ * hvilke `roomCode` server emitter til vs hvilke klient sockets joiner.
+ * Default OFF for ikke å spamme prod.
+ */
+const DEBUG_SPILL1_DRAWS =
+  process.env.DEBUG_SPILL1_DRAWS?.trim().toLowerCase() === "true";
+
 export interface Game1PlayerBroadcasterAdapterDeps {
   io: SocketServer;
   /**
@@ -45,6 +56,19 @@ export function createGame1PlayerBroadcaster(
   return {
     onDrawNew(event: Game1PlayerDrawNewEvent): void {
       try {
+        if (DEBUG_SPILL1_DRAWS) {
+          // 2026-05-11: deterministisk diagnose-log. Bruker `log.info` (ikke
+          // `.debug`) så loggen vises uavhengig av LOG_LEVEL=info-default.
+          log.info(
+            {
+              roomCode: event.roomCode,
+              drawIndex: event.drawIndex,
+              ball: event.number,
+              scheduledGameId: event.gameId,
+            },
+            "[draw] emitted"
+          );
+        }
         io.to(event.roomCode).emit("draw:new", {
           number: event.number,
           drawIndex: event.drawIndex,

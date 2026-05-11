@@ -153,6 +153,17 @@ import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-service" });
 
+/**
+ * Debug-logging-toggle (2026-05-11, Tobias-direktiv): når
+ * `DEBUG_SPILL1_DRAWS=true` skriver vi strukturerte
+ * `[scheduled.assign-roomcode]`- og `[draw] committed`-logger som dekker
+ * draw-commit-flyten ende-til-ende. Grep "[draw]" for hver vellykket
+ * commit, "[scheduled.assign-roomcode]" for når roomCode pinnes til
+ * scheduled_game-raden.
+ */
+const DEBUG_SPILL1_DRAWS =
+  process.env.DEBUG_SPILL1_DRAWS?.trim().toLowerCase() === "true";
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 export interface Game1DrawEngineConfig {
@@ -1475,6 +1486,25 @@ export class Game1DrawEngineService {
         }
       }
 
+      // 2026-05-11 (Tobias-direktiv): structured commit-log FØR broadcast-
+      // sekvensen. Setter `roomCode` til `capturedRoomCode` (kan være null)
+      // slik at en null-verdi her direkte forklarer hvorfor spiller-klient
+      // ikke får `draw:new` — broadcast-laget skipper når
+      // `capturedRoomCode===null` (ingen spillere joinet enda).
+      if (DEBUG_SPILL1_DRAWS && view.lastDrawnBall != null) {
+        log.info(
+          {
+            scheduledGameId,
+            roomCode: capturedRoomCode,
+            drawIndex: view.drawsCompleted - 1,
+            ball: view.lastDrawnBall,
+            drawsCompleted: view.drawsCompleted,
+            isFinished: view.isFinished,
+          },
+          "[draw] committed"
+        );
+      }
+
       // PR-C4: spiller-broadcast til default-namespace. Samme rekkefølge som
       // admin-broadcast (draw:new → pattern:won → room:update) slik at
       // spiller-UI og admin-UI holder seg synkronisert.
@@ -1990,7 +2020,7 @@ export class Game1DrawEngineService {
     scheduledGameId: string,
     roomCode: string
   ): Promise<string> {
-    return this.runInTransaction(async (client) => {
+    const result = await this.runInTransaction(async (client) => {
       const { rows } = await client.query<{ room_code: string | null }>(
         `SELECT room_code
            FROM ${this.scheduledGamesTable()}
@@ -2004,7 +2034,7 @@ export class Game1DrawEngineService {
       }
       if (row.room_code !== null) {
         // Annen request vant racen. Returner eksisterende kode uten UPDATE.
-        return row.room_code;
+        return { before: row.room_code, after: row.room_code, wonRace: false };
       }
       await client.query(
         `UPDATE ${this.scheduledGamesTable()}
@@ -2013,8 +2043,25 @@ export class Game1DrawEngineService {
           WHERE id = $1 AND room_code IS NULL`,
         [scheduledGameId, roomCode]
       );
-      return roomCode;
+      return { before: null as string | null, after: roomCode, wonRace: true };
     });
+    if (DEBUG_SPILL1_DRAWS) {
+      // 2026-05-11: log både `before` og `after` slik at ops kan se om denne
+      // request vant racet (before=null, after=ROOMA) eller mistet
+      // (before=ROOMB, after=ROOMB). Kritisk for å diagnostisere klient som
+      // joiner én roomCode mens scheduled-engine emitter til en annen.
+      log.info(
+        {
+          scheduledGameId,
+          roomCode: result.after,
+          before: result.before,
+          after: result.after,
+          wonRace: result.wonRace,
+        },
+        "[scheduled.assign-roomcode]"
+      );
+    }
+    return result.after;
   }
 
   private async loadGameState(
