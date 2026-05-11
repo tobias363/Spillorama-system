@@ -63,16 +63,28 @@ export class CenterBall extends Container {
   /**
    * Idle-text-modus (2026-05-11, Tobias-direktiv). Når aktivt skjules
    * ball + number-text og to linjer rendres i samme posisjon:
-   *   Linje 1: "Neste spill: {displayName}"  (eks "Neste spill: Bingo")
-   *   Linje 2: "Kjøp bonger for å være med i trekningen"
+   *   - "next-game"-mode (default — `overallStatus === "idle"`):
+   *       Linje 1: "Neste spill: {displayName}"  (eks "Neste spill: Bingo")
+   *       Linje 2: "Kjøp bonger for å være med i trekningen"
+   *   - "closed"-mode (Tobias 2026-05-11, hall-isolation-fix):
+   *       Linje 1: "Stengt"
+   *       Linje 2: "Ingen aktiv plan i hallen akkurat nå"
+   *     Aktiveres når lobby-state returnerer `overallStatus === "closed"`
+   *     (hallen er ikke medlem av noen GoH med aktiv plan, eller utenfor
+   *     plan-åpningstid). Default-hallen som ikke er del av pilot-GoH-en
+   *     skal IKKE vise "Neste spill: Bingo (venter på master)" — den
+   *     skal vise "Stengt".
+   *
    * Display-name oppdateres via `setIdleText(name)`. Mode toggle styres
-   * av `showIdleText()` / `hideIdleText()`. Mutating-handlinger
-   * (showNumber/setNumber/startCountdown) skjuler idle-text automatisk.
+   * av `setIdleMode(mode)` + `showIdleText()` / `hideIdleText()`.
+   * Mutating-handlinger (showNumber/setNumber/startCountdown) skjuler
+   * idle-text automatisk.
    */
   private idleHeadline: Text;
   private idleBody: Text;
   private idleDisplayName = "Bingo";
   private idleVisible = false;
+  private idleMode: "next-game" | "closed" = "next-game";
 
   constructor(bridge?: PauseAwareBridge) {
     super();
@@ -312,7 +324,38 @@ export class CenterBall extends Container {
     return this.idleVisible;
   }
 
+  /** Test-hook: hvilken idle-mode er aktiv? */
+  getIdleMode(): "next-game" | "closed" {
+    return this.idleMode;
+  }
+
+  /**
+   * Idle-text-modus (2026-05-11, hall-isolation-fix):
+   *
+   *   - `"next-game"` — standard, vises når plan finnes og venter på master.
+   *     Headline = "Neste spill: {displayName}", body = kjøp-oppfordring.
+   *   - `"closed"` — vises når lobby returnerer `overallStatus === "closed"`
+   *     (ingen plan for hallen, eller utenfor åpningstid). Headline =
+   *     "Stengt", body = "Ingen aktiv plan i hallen akkurat nå".
+   *
+   * Idempotent — gjentatte kall med samme mode er no-op. Hvis idle-text
+   * er synlig re-rendres tekst umiddelbart.
+   */
+  setIdleMode(mode: "next-game" | "closed"): void {
+    if (this.idleMode === mode) {
+      if (this.idleVisible) this.renderIdleText();
+      return;
+    }
+    this.idleMode = mode;
+    if (this.idleVisible) this.renderIdleText();
+  }
+
   private renderIdleText(): void {
+    if (this.idleMode === "closed") {
+      this.idleHeadline.text = "Stengt";
+      this.idleBody.text = "Ingen aktiv plan i hallen akkurat nå";
+      return;
+    }
     this.idleHeadline.text = `Neste spill: ${this.idleDisplayName}`;
     this.idleBody.text = "Kjøp bonger for å være med i trekningen";
   }

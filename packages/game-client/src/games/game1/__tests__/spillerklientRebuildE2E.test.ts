@@ -251,6 +251,10 @@ class SpillerklientHarness {
    * Mirror av PlayScreen.update — bestemmer om CenterBall skal være i
    * idle-text-modus eller live-ball-modus. Bridge-RUNNING overrider lobby
    * (race-fix mellom room:update og lobby:state).
+   *
+   * Hall-isolation-fix (Tobias 2026-05-11): når `overallStatus === "closed"`
+   * byttes idle-mode til "closed" så CenterBall viser "Stengt" i stedet
+   * for "Neste spill: Bingo".
    */
   private applyCenterBallVisibility(): void {
     if (this.lastLobbyStatus === "running") {
@@ -261,6 +265,9 @@ class SpillerklientHarness {
       this.centerBall.hideIdleText();
       return;
     }
+    this.centerBall.setIdleMode(
+      this.lastLobbyStatus === "closed" ? "closed" : "next-game",
+    );
     this.centerBall.showIdleText();
   }
 
@@ -619,7 +626,12 @@ describe("Spillerklient-rebuild — Fase 4 ende-til-ende (post-2026-05-11)", () 
 // ── Edge case-acceptance ──────────────────────────────────────────────────
 
 describe("Spillerklient-rebuild — Fase 4 integrert robusthet (post-2026-05-11)", () => {
-  it("nextScheduledGame=null (closed/finished) → BuyPopup-subtitle 'Bingo' og idle-text 'Neste spill: Bingo'", async () => {
+  it("overallStatus='closed' (hall uten plan) → idle-text viser 'Stengt' (hall-isolation 2026-05-11)", async () => {
+    // Hall-isolation-fix (Tobias 2026-05-11): default-hall som ikke er
+    // medlem av en GoH med aktiv plan skal IKKE vise "Neste spill: Bingo
+    // (venter på master)" — det er pilot-hallens view. I stedet vises
+    // "Stengt / Ingen aktiv plan i hallen akkurat nå" så spilleren ser
+    // tydelig at hallene er isolerte.
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -632,6 +644,31 @@ describe("Spillerklient-rebuild — Fase 4 integrert robusthet (post-2026-05-11)
     try {
       await harness.start();
       expect(harness.getBuyPopupSubtitle()).toBe("Bingo");
+      expect(harness.isCenterBallIdleVisible()).toBe(true);
+      // Forventet: idle-mode er "closed" og headline er "Stengt"
+      // (IKKE "Neste spill: Bingo" — det ville være pilot-hallens view).
+      expect(harness.getIdleHeadline()).toBe("Stengt");
+    } finally {
+      harness.stop();
+      container.remove();
+    }
+  });
+
+  it("overallStatus='idle' (hall i pilot-GoH, venter på master) → idle-text viser 'Neste spill: Bingo'", async () => {
+    // Pilot-hall i demo-pilot-goh som har aktiv plan — venter på master.
+    // Skal vise "Neste spill: Bingo / Kjøp bonger for å være med i
+    // trekningen". Dette er KUN for haller som faktisk har plan-state.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const { socket } = makeSocketStub(
+      "demo-hall-001",
+      makeLobbyState({ overallStatus: "idle" }),
+    );
+    const harness = new SpillerklientHarness(container, "demo-hall-001", socket);
+
+    try {
+      await harness.start();
       expect(harness.isCenterBallIdleVisible()).toBe(true);
       expect(harness.getIdleHeadline()).toBe("Neste spill: Bingo");
     } finally {

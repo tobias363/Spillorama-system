@@ -248,6 +248,69 @@ describe("CenterBall idle-text-modus (2026-05-11, Tobias-direktiv)", () => {
     ball.destroy();
   });
 
+  // ── Hall-isolation fix (Tobias 2026-05-11): setIdleMode("closed") ────
+  // Default-hall som ikke er medlem av en GoH med aktiv plan skal IKKE vise
+  // "Neste spill: Bingo" — den skal vise "Stengt / Ingen aktiv plan".
+
+  it("setIdleMode default er 'next-game' (legacy-modus)", () => {
+    const ball = new CenterBall();
+    expect(ball.getIdleMode()).toBe("next-game");
+    ball.destroy();
+  });
+
+  it("setIdleMode('closed') + showIdleText rendrer 'Stengt' + 'Ingen aktiv plan ...'", () => {
+    const ball = new CenterBall();
+    ball.setIdleMode("closed");
+    ball.showIdleText();
+
+    expect(ball.isIdleTextVisible()).toBe(true);
+    expect(ball.getIdleMode()).toBe("closed");
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+    expect(readIdleBody(ball)).toBe("Ingen aktiv plan i hallen akkurat nå");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode('closed') ignorerer setIdleText-displayName (Bingo skjules)", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Innsatsen");
+    ball.setIdleMode("closed");
+    ball.showIdleText();
+
+    // Selv om displayName er satt til "Innsatsen", skal closed-mode
+    // overstyre med "Stengt"-tekst.
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+    expect(readIdleHeadline(ball)).not.toContain("Innsatsen");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode switching live oppdaterer rendret tekst", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    // Hall-state endres til closed (eks. plan utløpte midt i kveld).
+    ball.setIdleMode("closed");
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+
+    // Hall-state åpnes igjen.
+    ball.setIdleMode("next-game");
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode er idempotent — gjentatte kall med samme mode er no-op", () => {
+    const ball = new CenterBall();
+    ball.setIdleMode("closed");
+    ball.setIdleMode("closed");
+    ball.setIdleMode("closed");
+    expect(ball.getIdleMode()).toBe("closed");
+    ball.destroy();
+  });
+
   it("hideIdleText restore ball-sprite + number-text-visibilitet", () => {
     const ball = new CenterBall();
     ball.setIdleText("Bingo");

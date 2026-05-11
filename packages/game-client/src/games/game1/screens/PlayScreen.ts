@@ -459,7 +459,16 @@ export class PlayScreen extends Container {
     // `WaitingForMasterOverlay`. Når runden ikke er aktiv viser CenterBall
     // "Neste spill: {displayName}" + "Kjøp bonger for å være med i
     // trekningen" direkte i ball-posisjonen (selve ballen + tall skjules).
+    //
+    // Hall-isolation-fix (2026-05-11, Tobias-direktiv): når
+    // `lobbyOverallStatus === "closed"` skal vi IKKE vise "Neste spill"
+    // — da har hallen ingen aktiv plan (ikke medlem av GoH med plan, eller
+    // utenfor åpningstid). Bytt til `idle-mode="closed"` så CenterBall
+    // viser "Stengt / Ingen aktiv plan i hallen akkurat nå" i stedet for
+    // "Neste spill: Bingo". Dette forhindrer at default-hall (utenfor
+    // pilot-GoH) viser samme view som master-hall.
     const lobbyRunning = this.lobbyOverallStatus === "running";
+    const lobbyClosed = this.lobbyOverallStatus === "closed";
     if (state.gameStatus === "RUNNING") {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
@@ -477,9 +486,13 @@ export class PlayScreen extends Container {
     } else {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
-      // Vis idle-text der ballen vanligvis ligger. Hvis Game1Controller
-      // ikke har pushet en lobby-state ennå har CenterBall fallback-tekst
-      // "Bingo" som default display-name (Tobias-direktiv: aldri blank).
+      // Sett idle-mode basert på lobby-state.
+      //   - `closed`     → "Stengt / Ingen aktiv plan i hallen akkurat nå"
+      //   - alt annet    → "Neste spill: {displayName}"
+      // Game1Controller pusher displayName via `setBuyPopupDisplayName`
+      // når lobby-state mottas — CenterBall fallback-tekst er "Bingo" om
+      // ingenting er satt enda (Tobias-direktiv: aldri blank).
+      this.centerBall.setIdleMode(lobbyClosed ? "closed" : "next-game");
       this.centerBall.showIdleText();
     }
 
@@ -694,6 +707,18 @@ export class PlayScreen extends Container {
   setLobbyOverallStatus(status: Spill1LobbyOverallStatus | null): void {
     if (this.lobbyOverallStatus === status) return;
     this.lobbyOverallStatus = status;
+
+    // Hall-isolation-fix (Tobias 2026-05-11): hvis idle-text allerede er
+    // synlig (initial mount-state før noen room:update), oppdater
+    // CenterBall sin idle-mode umiddelbart. `update()` håndterer dette
+    // når lastState er satt, men før første game-state har kommet inn er
+    // lastState=null og update() trigges ikke. Vi må derfor sync mode
+    // her så `closed`-hall ikke viser "Neste spill" mellom mount og
+    // første room:update.
+    if (this.centerBall.isIdleTextVisible()) {
+      this.centerBall.setIdleMode(status === "closed" ? "closed" : "next-game");
+    }
+
     if (this.lastState) {
       this.update(this.lastState);
     }
