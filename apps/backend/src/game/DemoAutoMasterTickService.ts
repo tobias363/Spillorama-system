@@ -1,0 +1,245 @@
+/**
+ * DemoAutoMasterTickService — auto-master for dev/staging-haller (Tobias-direktiv 2026-05-11)
+ *
+ * Bakgrunn:
+ *   Tobias-direktiv 2026-05-11 etter live hall-isolation-test:
+ *   > "Vi må også sørge for at det er kun hallene i linken som ser sin
+ *   >  trekning. ... Kan du sette default til at trekning skal gå hvert
+ *   >  30 sekund? slik at vi får verifisert at vi klarer å skille på dem."
+ *
+ *   For å visuelt verifisere at haller er korrekt isolerte trenger vi
+ *   "trafikk" på default-hall som er ULIK pilot-hallens (Tobias styrer
+ *   pilot-haller manuelt som master). Default-hall får derfor en
+ *   uavhengig plan + auto-master-cron som starter/advancer plan-runs
+ *   automatisk hvert 30. sekund.
+ *
+ * Hva tjenesten gjør (per tick):
+ *   1) For hver target-hall (default: `["hall-default"]`):
+ *      a. Hent gjeldende plan-run for (hall, today).
+ *      b. Hvis ingen run finnes → `masterActionService.start({...})`.
+ *      c. Hvis run.status === "finished" → skip (planen er ferdig for i dag).
+ *      d. Hvis aktiv scheduled-game er `finished` → `advance()` til neste.
+ *      e. Hvis aktiv scheduled-game er `running` med max draws → la
+ *         Game1AutoDrawTickService håndtere — ikke trigg advance før status flippes.
+ *   2) Audit: hver auto-handling logges som `demo_auto_master.{action}`.
+ *
+ * Scope og guards:
+ *   - **Dev/staging-only**: aktiveres KUN når env-var
+ *     `DEMO_AUTO_MASTER_ENABLED=true` er satt. NEVER kjør i prod.
+ *   - **Target halls**: hard-coded `["hall-default"]` ved oppstart. Pilot-
+ *     haller (`demo-hall-001..004`) er IKKE i target-listen og styres
+ *     fortsatt av master (Tobias).
+ *   - **Synthetic actor**: Tjenesten bruker en SYSTEM-actor med `role: "ADMIN"`
+ *     så `MasterActionService.assertMaster` ikke avviser. Audit-event taggers
+ *     med `actor_user_id='demo-auto-master'`.
+ *   - **Fail-soft**: enkelt-feil per hall logges som warn — neste tick prøver
+ *     på nytt. Tjenesten skal ALDRI throws ved cron-tick.
+ *
+ * Konfigurasjon:
+ *   - Tick-intervall styres av JobScheduler (typisk 10s)
+ *   - Ball-intervall (30s mellom kuler) settes i seedet plan via
+ *     `ticket_config_json.spill1.timing.seconds = 30`
+ *
+ * Referanser:
+ *   - PITFALLS_LOG §11.10 — single-command restart må regenerere demo-state
+ *   - SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md §1.0.1 — lobby-rom-konsept
+ *   - PR #1196 — `closed`-state gating-fix i PlayScreen
+ */
+
+import type { Pool } from "pg";
+import type { MasterActionService } from "./MasterActionService.js";
+import type { MasterActor } from "./Game1MasterControlService.js";
+import type { GamePlanRunService } from "./GamePlanRunService.js";
+import { logger as rootLogger } from "../util/logger.js";
+import { todayOsloKey } from "../util/osloTimezone.js";
+
+const log = rootLogger.child({ module: "demo-auto-master-tick" });
+
+export interface DemoAutoMasterTickServiceOptions {
+  pool: Pool;
+  schema?: string;
+  masterActionService: MasterActionService;
+  planRunService: GamePlanRunService;
+  /**
+   * Hall-IDer som skal auto-styres. Default: `["hall-default"]`. Pilot-
+   * haller skal IKKE være i denne listen (Tobias styrer dem manuelt).
+   */
+  targetHallIds?: ReadonlyArray<string>;
+}
+
+export interface DemoAutoMasterTickResult {
+  checked: number;
+  startedNew: number;
+  advanced: number;
+  skipped: number;
+  errors: number;
+  errorMessages?: string[];
+}
+
+/**
+ * Synthetic actor brukt av cron-en. role=ADMIN gir `assertMaster` pass
+ * uten å kreve at hall-en matcher actor.hallId.
+ */
+const DEMO_AUTO_MASTER_ACTOR: MasterActor = {
+  userId: "demo-auto-master",
+  hallId: "system",
+  role: "ADMIN",
+};
+
+const DEFAULT_TARGET_HALLS: ReadonlyArray<string> = ["hall-default"];
+
+/**
+ * `process.env.DEMO_AUTO_MASTER_ENABLED` flag. Tjenesten er KUN aktiv
+ * når denne er "true" (string compare). Ikke aktiv i prod by default.
+ */
+export function isDemoAutoMasterEnabled(): boolean {
+  return process.env["DEMO_AUTO_MASTER_ENABLED"] === "true";
+}
+
+export class DemoAutoMasterTickService {
+  private readonly pool: Pool;
+  private readonly schema: string;
+  private readonly masterActionService: MasterActionService;
+  private readonly planRunService: GamePlanRunService;
+  private readonly targetHallIds: ReadonlyArray<string>;
+
+  constructor(options: DemoAutoMasterTickServiceOptions) {
+    this.pool = options.pool;
+    this.schema = options.schema ?? "public";
+    this.masterActionService = options.masterActionService;
+    this.planRunService = options.planRunService;
+    this.targetHallIds = options.targetHallIds ?? DEFAULT_TARGET_HALLS;
+  }
+
+  /**
+   * Cron-entry-point. Returnerer aggregert resultat for observability.
+   * Throws ALDRI — fail-soft per hall.
+   */
+  async tick(now: Date = new Date()): Promise<DemoAutoMasterTickResult> {
+    const result: DemoAutoMasterTickResult = {
+      checked: 0,
+      startedNew: 0,
+      advanced: 0,
+      skipped: 0,
+      errors: 0,
+      errorMessages: [],
+    };
+
+    for (const hallId of this.targetHallIds) {
+      result.checked++;
+      try {
+        await this.tickHall(hallId, now, result);
+      } catch (err) {
+        result.errors++;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (result.errorMessages && result.errorMessages.length < 10) {
+          result.errorMessages.push(`${hallId}: ${msg}`);
+        }
+        log.warn({ err, hallId }, "[demo-auto-master] tick feilet for hall");
+      }
+    }
+
+    return result;
+  }
+
+  private async tickHall(
+    hallId: string,
+    now: Date,
+    result: DemoAutoMasterTickResult,
+  ): Promise<void> {
+    const businessDate = todayOsloKey(now);
+
+    // 1) Sjekk eksisterende plan-run.
+    let run;
+    try {
+      run = await this.planRunService.findForDay(hallId, businessDate);
+    } catch (err) {
+      log.warn({ err, hallId }, "[demo-auto-master] planRunService.findForDay feilet");
+      result.skipped++;
+      return;
+    }
+
+    // 2) Plan ferdig for dagen → skip.
+    if (run && run.status === "finished") {
+      result.skipped++;
+      return;
+    }
+
+    // 3) Ingen run → master.start.
+    if (!run) {
+      log.info({ hallId, businessDate }, "[demo-auto-master] starter ny plan-run");
+      try {
+        await this.masterActionService.start({
+          actor: DEMO_AUTO_MASTER_ACTOR,
+          hallId,
+        });
+        result.startedNew++;
+      } catch (err) {
+        // Plan-mangler eller HALL_NOT_IN_GROUP er forventet hvis seed
+        // ikke har kjørt — logg som info ikke error.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (
+          msg.includes("NO_MATCHING_PLAN") ||
+          msg.includes("HALL_NOT_IN_GROUP")
+        ) {
+          log.debug(
+            { hallId, error: msg },
+            "[demo-auto-master] ingen plan for hall — skip",
+          );
+          result.skipped++;
+          return;
+        }
+        throw err;
+      }
+      return;
+    }
+
+    // 4) Aktiv scheduled-game er finished → advance til neste.
+    const scheduledGameStatus = await this.getCurrentScheduledGameStatus(
+      run.id,
+      run.currentPosition,
+    );
+    if (scheduledGameStatus === "finished") {
+      log.info(
+        { hallId, planRunId: run.id, position: run.currentPosition },
+        "[demo-auto-master] advancer til neste posisjon",
+      );
+      try {
+        await this.masterActionService.advance({
+          actor: DEMO_AUTO_MASTER_ACTOR,
+          hallId,
+        });
+        result.advanced++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("PLAN_RUN_FINISHED")) {
+          result.skipped++;
+          return;
+        }
+        throw err;
+      }
+      return;
+    }
+
+    // 5) Aktiv runde kjører — ikke gjør noe (auto-draw-tick håndterer kuler).
+    result.skipped++;
+  }
+
+  /**
+   * Hent status på currently active scheduled-game for plan-run-en.
+   * Returnerer `null` hvis ingen scheduled-game finnes for posisjonen.
+   */
+  private async getCurrentScheduledGameStatus(
+    planRunId: string,
+    currentPosition: number,
+  ): Promise<string | null> {
+    const { rows } = await this.pool.query<{ status: string }>(
+      `SELECT status FROM ${this.schema}.app_game1_scheduled_games
+       WHERE plan_run_id = $1 AND plan_position = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [planRunId, currentPosition],
+    );
+    return rows[0]?.status ?? null;
+  }
+}
