@@ -186,6 +186,23 @@
     } catch {
       lobbyState.compliance = null;
     }
+    // Quick-win 1 (2026-05-11): Broadcast compliance til andre shell-moduler
+    // (spillvett.js, panels.js, min-konto.js) som tidligere fetchet samme
+    // endpoint i parallell ~100ms etter page-load. Andre moduler kan
+    // konsumere dette event-et og hoppe over sin egen fetch.
+    //
+    // Tobias-direktiv 2026-05-11: "Vi må få kontroll på dette". Audit
+    // viste 5 parallelle requests ved page-load — denne eliminerer én
+    // (lobby + spillvett delte tidligere compliance-fetch).
+    try {
+      window.dispatchEvent(new CustomEvent('spillorama:complianceLoaded', {
+        detail: {
+          hallId: lobbyState.activeHallId,
+          compliance: lobbyState.compliance,
+          fetchedAt: Date.now()
+        }
+      }));
+    } catch (_) { /* ignore — CustomEvent unsupported i ekstreme legacy-browsers */ }
   }
 
   function canPlay() {
