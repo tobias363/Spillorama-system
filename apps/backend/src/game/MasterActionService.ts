@@ -344,6 +344,9 @@ const PERMANENT_BRIDGE_ERROR_CODES: ReadonlySet<string> = new Set([
   "GAME_PLAN_NOT_FOUND",
 ]);
 
+const TERMINAL_SCHEDULED_GAME_STATUSES: ReadonlySet<Spill1ScheduledGameStatus> =
+  new Set(["completed", "cancelled"]);
+
 function isBridgeRetrySafe(err: unknown): boolean {
   if (err instanceof DomainError) {
     return !PERMANENT_BRIDGE_ERROR_CODES.has(err.code);
@@ -513,6 +516,78 @@ export class MasterActionService {
         businessDate,
         actor.userId,
       );
+    }
+
+    // Local/live recovery: hvis plan-run fortsatt står running på en posisjon
+    // hvor scheduled-game allerede er completed/cancelled, skal masterens
+    // "Start neste spill" flytte planen videre før ny engine-start. Uten dette
+    // gjenbruker bridge-spawn den terminale raden og UI blir stående med
+    // PLAN_SCHED_STATUS_MISMATCH.
+    if (run.status === "running") {
+      const currentScheduled = await this.getPlanRunScheduledGameForPosition(
+        started.id,
+        started.currentPosition,
+      );
+      if (
+        currentScheduled &&
+        TERMINAL_SCHEDULED_GAME_STATUSES.has(currentScheduled.status)
+      ) {
+        const advanceResult = await this.planRunService.advanceToNext(
+          hallId,
+          businessDate,
+          actor.userId,
+        );
+        if (advanceResult.jackpotSetupRequired) {
+          const detail = advanceResult.nextGame
+            ? {
+                position: started.currentPosition + 1,
+                catalogId: advanceResult.nextGame.id,
+                catalogSlug: advanceResult.nextGame.slug,
+              }
+            : { position: started.currentPosition + 1 };
+          throw new DomainError(
+            "JACKPOT_SETUP_REQUIRED",
+            "Neste posisjon krever jackpot-popup — kall /jackpot-setup først.",
+            detail,
+          );
+        }
+        if (advanceResult.run.status === "finished") {
+          await this.audit({
+            action: "spill1.master.finish",
+            actor,
+            hallId,
+            planRunId: advanceResult.run.id,
+            scheduledGameId: null,
+            details: {
+              finalPosition: advanceResult.run.currentPosition,
+              reason: "start_auto_advanced_past_terminal_current_position",
+              previousScheduledGameId: currentScheduled.id,
+              previousScheduledGameStatus: currentScheduled.status,
+            },
+          });
+          this.fireLobbyBroadcast(hallId);
+          return this.buildResult({
+            scheduledGameId: null,
+            planRunId: advanceResult.run.id,
+            planRunStatus: advanceResult.run.status,
+            scheduledGameStatus: null,
+            lobby,
+          });
+        }
+        await this.audit({
+          action: "spill1.master.start.auto_advance_terminal_position",
+          actor,
+          hallId,
+          planRunId: advanceResult.run.id,
+          scheduledGameId: currentScheduled.id,
+          details: {
+            fromPosition: started.currentPosition,
+            toPosition: advanceResult.run.currentPosition,
+            previousScheduledGameStatus: currentScheduled.status,
+          },
+        });
+        started = advanceResult.run;
+      }
     }
 
     // 5. Bridge-spawn for current_position. Idempotent på (run.id, position).
@@ -753,7 +828,74 @@ export class MasterActionService {
       );
     }
 
-    // 4. Bridge-spawn scheduled-game. Idempotent på (run.id, position).
+    // 4. Hvis forrige scheduled-game på current_position allerede er
+    // terminal, skal ready-flow forberede neste plan-posisjon. Uten dette
+    // binder mark-ready seg til en completed/cancelled rad og avvises av
+    // Game1HallReadyService.
+    if (run.status === "running") {
+      const currentScheduled = await this.getPlanRunScheduledGameForPosition(
+        started.id,
+        started.currentPosition,
+      );
+      if (
+        currentScheduled &&
+        TERMINAL_SCHEDULED_GAME_STATUSES.has(currentScheduled.status)
+      ) {
+        const advanceResult = await this.planRunService.advanceToNext(
+          hallId,
+          businessDate,
+          actor.userId,
+        );
+        if (advanceResult.jackpotSetupRequired) {
+          const detail = advanceResult.nextGame
+            ? {
+                position: started.currentPosition + 1,
+                catalogId: advanceResult.nextGame.id,
+                catalogSlug: advanceResult.nextGame.slug,
+              }
+            : { position: started.currentPosition + 1 };
+          throw new DomainError(
+            "JACKPOT_SETUP_REQUIRED",
+            "Neste posisjon krever jackpot-popup — kall /jackpot-setup først.",
+            detail,
+          );
+        }
+        if (advanceResult.run.status === "finished") {
+          await this.audit({
+            action: "spill1.master.finish",
+            actor,
+            hallId,
+            planRunId: advanceResult.run.id,
+            scheduledGameId: null,
+            details: {
+              finalPosition: advanceResult.run.currentPosition,
+              reason: "prepare_auto_advanced_past_terminal_current_position",
+              previousScheduledGameId: currentScheduled.id,
+              previousScheduledGameStatus: currentScheduled.status,
+            },
+          });
+          throw new DomainError(
+            "PLAN_RUN_FINISHED",
+            "Plan-run er allerede ferdig for i dag.",
+          );
+        }
+        await this.audit({
+          action: "spill1.master.prepare.auto_advance_terminal_position",
+          actor,
+          hallId,
+          planRunId: advanceResult.run.id,
+          scheduledGameId: currentScheduled.id,
+          details: {
+            fromPosition: started.currentPosition,
+            toPosition: advanceResult.run.currentPosition,
+            previousScheduledGameStatus: currentScheduled.status,
+          },
+        });
+        started = advanceResult.run;
+      }
+    }
+
+    // 5. Bridge-spawn scheduled-game. Idempotent på (run.id, position).
     let scheduledGameId: string;
     try {
       const bridgeResult = await this.engineBridge.createScheduledGameForPlanRunPosition(
@@ -780,7 +922,7 @@ export class MasterActionService {
       );
     }
 
-    // 5. Audit-trail. Logger som spill1.master.prepare.
+    // 6. Audit-trail. Logger som spill1.master.prepare.
     await this.audit({
       action: "spill1.master.prepare",
       actor,
@@ -793,7 +935,7 @@ export class MasterActionService {
       },
     });
 
-    // 6. Best-effort lobby-broadcast.
+    // 7. Best-effort lobby-broadcast.
     if (this.lobbyBroadcaster) {
       try {
         await this.lobbyBroadcaster.broadcastForHall(hallId);
@@ -1373,6 +1515,29 @@ export class MasterActionService {
 
   private businessDate(): string {
     return todayOsloKey(this.clock());
+  }
+
+  private scheduledGamesTable(): string {
+    return `"${this.schema}"."app_game1_scheduled_games"`;
+  }
+
+  private async getPlanRunScheduledGameForPosition(
+    runId: string,
+    position: number,
+  ): Promise<{ id: string; status: Spill1ScheduledGameStatus } | null> {
+    const { rows } = await this.pool.query<{
+      id: string;
+      status: Spill1ScheduledGameStatus;
+    }>(
+      `SELECT id, status
+         FROM ${this.scheduledGamesTable()}
+        WHERE plan_run_id = $1
+          AND plan_position = $2
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [runId, position],
+    );
+    return rows[0] ?? null;
   }
 
   /**

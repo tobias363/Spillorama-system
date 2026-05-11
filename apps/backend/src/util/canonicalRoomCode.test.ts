@@ -66,11 +66,29 @@ test("rocket (Spill 2) → ROCKET shared, hallId og groupId ignoreres", () => {
   assert.equal(a.isHallShared, true);
 });
 
+test("Spill 2-aliaser game_2/tallspill → ROCKET shared", () => {
+  for (const slug of ["game_2", "tallspill"]) {
+    const r = getCanonicalRoomCode(slug, "hall-A", "group-X");
+    assert.equal(r.roomCode, "ROCKET");
+    assert.equal(r.effectiveHallId, null);
+    assert.equal(r.isHallShared, true);
+  }
+});
+
 test("monsterbingo (Spill 3) → MONSTERBINGO shared, groupId ignoreres", () => {
   const r = getCanonicalRoomCode("monsterbingo", "hall-A", "group-X");
   assert.equal(r.roomCode, "MONSTERBINGO");
   assert.equal(r.effectiveHallId, null);
   assert.equal(r.isHallShared, true);
+});
+
+test("Spill 3-aliaser game_3/mønsterbingo → MONSTERBINGO shared", () => {
+  for (const slug of ["game_3", "mønsterbingo"]) {
+    const r = getCanonicalRoomCode(slug, "hall-A", "group-X");
+    assert.equal(r.roomCode, "MONSTERBINGO");
+    assert.equal(r.effectiveHallId, null);
+    assert.equal(r.isHallShared, true);
+  }
 });
 
 test("ukjent slug → uppercased per-hall (ikke shared, groupId ignoreres)", () => {

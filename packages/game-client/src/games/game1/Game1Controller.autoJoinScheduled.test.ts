@@ -22,7 +22,7 @@
  *   Strategy A — in-process harness UTEN full Pixi-stage. Vi tester direkte
  *   helper-funksjonene som driver beslutningen (`pickJoinableScheduledGameId`,
  *   delta-watcher-mønsteret) og verifiserer at de matcher serverens
- *   join-kontrakt (joinable statuses = purchase_open|running).
+ *   join-kontrakt (joinable statuses = purchase_open|ready_to_start|running|paused).
  *
  *   Kontrakt vi låser:
  *     - lobby-state med `nextScheduledGame.scheduledGameId='abc'` +
@@ -54,7 +54,12 @@ function pickJoinableScheduledGameId(state: Spill1LobbyState | null): string | n
   const next = state?.nextScheduledGame;
   if (!next) return null;
   if (!next.scheduledGameId) return null;
-  if (next.status !== "purchase_open" && next.status !== "running") {
+  if (
+    next.status !== "purchase_open" &&
+    next.status !== "ready_to_start" &&
+    next.status !== "running" &&
+    next.status !== "paused"
+  ) {
     return null;
   }
   return next.scheduledGameId;
@@ -143,6 +148,26 @@ describe("Game1Controller — pickJoinableScheduledGameId", () => {
       }),
     });
     expect(pickJoinableScheduledGameId(state)).toBe("abc-2");
+  });
+
+  it("returnerer scheduledGameId når status=ready_to_start", () => {
+    const state = makeLobbyState({
+      nextScheduledGame: makeNextGame({
+        scheduledGameId: "abc-ready",
+        status: "ready_to_start",
+      }),
+    });
+    expect(pickJoinableScheduledGameId(state)).toBe("abc-ready");
+  });
+
+  it("returnerer scheduledGameId når status=paused", () => {
+    const state = makeLobbyState({
+      nextScheduledGame: makeNextGame({
+        scheduledGameId: "abc-paused",
+        status: "paused",
+      }),
+    });
+    expect(pickJoinableScheduledGameId(state)).toBe("abc-paused");
   });
 
   it("returnerer null når status=idle (master har ikke startet)", () => {

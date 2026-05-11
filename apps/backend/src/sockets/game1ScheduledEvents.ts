@@ -76,7 +76,12 @@ interface ScheduledGameJoinRow {
   participating_halls_json: unknown;
 }
 
-const JOINABLE_STATUSES = new Set(["purchase_open", "running"]);
+const JOINABLE_STATUSES = new Set([
+  "purchase_open",
+  "ready_to_start",
+  "running",
+  "paused",
+]);
 
 export function createGame1ScheduledEventHandlers(
   deps: Game1ScheduledEventsDeps
@@ -185,6 +190,93 @@ export function createGame1ScheduledEventHandlers(
     return stringHalls.length > 1;
   }
 
+  function getDomainCode(err: unknown): string {
+    if (err instanceof DomainError) return err.code;
+    return (err as { code?: string } | null)?.code ?? "";
+  }
+
+  async function lookupHallIsTestHall(hallId: string): Promise<boolean> {
+    try {
+      const hall = await platformService.getHall(hallId);
+      return hall.isTestHall === true;
+    } catch (err) {
+      log.warn(
+        { err, hallId },
+        "isTestHall lookup failed — defaulting to false (regular hall)"
+      );
+      return false;
+    }
+  }
+
+  async function markScheduledRoom(
+    roomCode: string,
+    row: ScheduledGameJoinRow,
+    isHallShared: boolean,
+    hallId: string
+  ): Promise<void> {
+    if (isHallShared) {
+      try {
+        await engine.setRoomHallSharedAndPersist(roomCode, true);
+      } catch (err) {
+        log.warn(
+          { err, roomCode, scheduledGameId: row.id },
+          "setRoomHallSharedAndPersist feilet — joinRoom kan kaste HALL_MISMATCH"
+        );
+      }
+    }
+
+    try {
+      const isTestHall = await lookupHallIsTestHall(hallId);
+      await engine.setRoomTestHallAndPersist(roomCode, isTestHall);
+    } catch (err) {
+      log.warn(
+        { err, hallId, roomCode },
+        "setRoomTestHallAndPersist refresh feilet — fortsetter med eksisterende state"
+      );
+    }
+
+    try {
+      await engine.markRoomAsScheduledAndPersist(roomCode, row.id);
+    } catch (err) {
+      log.warn(
+        { err, roomCode, scheduledGameId: row.id },
+        "markRoomAsScheduledAndPersist feilet — scheduled-engine er autoritativ"
+      );
+    }
+  }
+
+  async function createMissingScheduledRoom(
+    row: ScheduledGameJoinRow,
+    user: PublicAppUser,
+    hallId: string,
+    playerName: string,
+    socketId: string,
+    isHallShared: boolean,
+    roomCode: string
+  ): Promise<JoinScheduledAckData> {
+    const isTestHall = await lookupHallIsTestHall(hallId);
+    const created = await engine.createRoom({
+      hallId,
+      playerName,
+      walletId: user.walletId,
+      socketId,
+      gameSlug: "bingo",
+      roomCode,
+      ...(isHallShared ? { effectiveHallId: null } : {}),
+      ...(isTestHall ? { isTestHall: true } : {}),
+    });
+    if (bindDefaultVariantConfig) {
+      bindDefaultVariantConfig(created.roomCode, "bingo");
+    }
+    await markScheduledRoom(created.roomCode, row, isHallShared, hallId);
+    const snapshot = engine.getRoomSnapshot(created.roomCode);
+    return {
+      roomCode: created.roomCode,
+      playerId: created.playerId,
+      snapshot,
+    };
+  }
+
   /**
    * Hovedflyt: player-join inn i schedulert rom.
    *
@@ -215,50 +307,69 @@ export function createGame1ScheduledEventHandlers(
           // HALL_MISMATCH for non-master halls etter neste failover.
           await engine.setRoomHallSharedAndPersist(row.room_code, true);
         } catch (err) {
-          log.warn(
-            { err, roomCode: row.room_code, scheduledGameId: row.id },
-            "setRoomHallSharedAndPersist på existing-rom feilet — joinRoom kan kaste HALL_MISMATCH"
-          );
+          const code = getDomainCode(err);
+          if (code !== "ROOM_NOT_FOUND") {
+            log.warn(
+              { err, roomCode: row.room_code, scheduledGameId: row.id },
+              "setRoomHallSharedAndPersist på existing-rom feilet — joinRoom kan kaste HALL_MISMATCH"
+            );
+          }
         }
       }
 
       // Eksisterende rom — gjenta join (idempotent hvis samme wallet).
-      const { roomCode, playerId } = await engine.joinRoom({
-        roomCode: row.room_code,
-        hallId,
-        playerName,
-        walletId: user.walletId,
-        socketId,
-      });
+      let roomCode: string;
+      let playerId: string;
+      try {
+        const joined = await engine.joinRoom({
+          roomCode: row.room_code,
+          hallId,
+          playerName,
+          walletId: user.walletId,
+          socketId,
+        });
+        roomCode = joined.roomCode;
+        playerId = joined.playerId;
+      } catch (err) {
+        const code = getDomainCode(err);
+        if (code !== "ROOM_NOT_FOUND") {
+          throw err;
+        }
+        log.warn(
+          { err, roomCode: row.room_code, scheduledGameId: row.id },
+          "scheduled-game har room_code men BingoEngine-rom mangler — reoppretter canonical room"
+        );
+        try {
+          return await createMissingScheduledRoom(
+            row,
+            user,
+            hallId,
+            playerName,
+            socketId,
+            isHallShared,
+            row.room_code
+          );
+        } catch (createErr) {
+          if (getDomainCode(createErr) !== "ROOM_ALREADY_EXISTS") {
+            throw createErr;
+          }
+          const joined = await engine.joinRoom({
+            roomCode: row.room_code,
+            hallId,
+            playerName,
+            walletId: user.walletId,
+            socketId,
+          });
+          roomCode = joined.roomCode;
+          playerId = joined.playerId;
+        }
+      }
       // Bug A fix (Tobias 2026-04-28): refresh `RoomState.isTestHall` for
       // eksisterende scheduled-rom. PR #671 propagerte flagget kun ved
       // createRoom — eksisterende rom (skapt før deploy, eller hvor admin
       // toggler is_test_hall etter rom-opprettelse) fikk aldri oppdatert
       // bypass-flagget. Resultat: Demo Hall fortsatt pauser på Phase 1.
-      try {
-        const hall = await platformService.getHall(hallId);
-        // ADR-0019 P0-2: sync-persist test-hall flag for failover-safety.
-        await engine.setRoomTestHallAndPersist(roomCode, hall.isTestHall === true);
-      } catch (err) {
-        log.warn(
-          { err, hallId, roomCode },
-          "setRoomTestHallAndPersist refresh feilet — fortsetter med eksisterende state"
-        );
-      }
-      // CRIT-4: rommet kan ha blitt rebygget av en restart (Render-instans
-      // som lastet state fra Redis-store) uten at scheduledGameId ble
-      // hydrert fra DB-mappingen. Marker idempotent her så guarden
-      // dekker tilfellet "room re-joined etter restart".
-      // ADR-0019 P0-2: sync-persist så scheduledGameId-binding overlever
-      // backend-crash mellom mark og persist.
-      try {
-        await engine.markRoomAsScheduledAndPersist(roomCode, row.id);
-      } catch (err) {
-        log.warn(
-          { err, roomCode, scheduledGameId: row.id },
-          "markRoomAsScheduledAndPersist på existing-rom feilet — scheduled-engine er autoritativ"
-        );
-      }
+      await markScheduledRoom(roomCode, row, isHallShared, hallId);
       const snapshot = engine.getRoomSnapshot(roomCode);
       return { roomCode, playerId, snapshot };
     }
@@ -268,16 +379,7 @@ export function createGame1ScheduledEventHandlers(
     // `BingoEnginePatternEval.evaluateActivePhase`. Uten dette slår
     // Spill 1 auto-pause (PR #643) inn etter Phase 1 og scheduled-spillet
     // henger til master resumer manuelt — bug rapportert 2026-04-27.
-    let isTestHall = false;
-    try {
-      const hall = await platformService.getHall(hallId);
-      isTestHall = hall.isTestHall === true;
-    } catch (err) {
-      log.warn(
-        { err, hallId },
-        "isTestHall lookup failed — defaulting to false (regular hall)"
-      );
-    }
+    const isTestHall = await lookupHallIsTestHall(hallId);
     // PILOT-STOP-SHIP fix (Tobias 2026-04-27): for multi-hall scheduled
     // sender vi `effectiveHallId: null` slik at `engine.createRoom`
     // markerer rommet som `isHallShared=true`. Uten dette får Hall B's
@@ -433,8 +535,8 @@ export function createGame1ScheduledEventHandlers(
           );
 
           socket.join(result.roomCode);
-          await emitRoomUpdate(result.roomCode);
-          ackSuccess(callback, result);
+          const snapshot = await emitRoomUpdate(result.roomCode);
+          ackSuccess(callback, { ...result, snapshot });
         } catch (error) {
           log.warn(
             { err: error, event: "game1:join-scheduled" },

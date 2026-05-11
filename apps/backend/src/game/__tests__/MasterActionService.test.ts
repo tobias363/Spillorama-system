@@ -262,6 +262,17 @@ interface ServiceOverrides {
     reason: string;
     masterUserId: string;
   }) => GamePlanRun | null | Promise<GamePlanRun | null>;
+  currentScheduledGameForPosition?: {
+    id: string;
+    status:
+      | "scheduled"
+      | "purchase_open"
+      | "ready_to_start"
+      | "running"
+      | "paused"
+      | "completed"
+      | "cancelled";
+  } | null;
 }
 
 function makeService(
@@ -538,9 +549,19 @@ function makeService(
     },
   };
 
+  const poolStub = {
+    async query(): Promise<{ rows: unknown[] }> {
+      return {
+        rows: overrides.currentScheduledGameForPosition
+          ? [overrides.currentScheduledGameForPosition]
+          : [],
+      };
+    },
+  };
+
   // Bruk forTesting for å skape service uten å kalle full constructor.
   const service = MasterActionService.forTesting({
-    pool: {} as unknown as import("pg").Pool,
+    pool: poolStub as unknown as import("pg").Pool,
     schema: "public",
     planRunService: planRunStub,
     engineBridge: engineBridgeStub,
@@ -585,6 +606,63 @@ test("start: idempotent re-start på running run → bridge gjenbrukes uten å k
   assert.equal(result.scheduledGameId, SCHED_ID);
   // start() i planRun ble IKKE kalt fordi run var allerede running
   assert.ok(!mocks.planRunCalls.includes("start"));
+});
+
+test("start: running run med completed scheduled-game auto-advancer før engine-start", async () => {
+  const { service, mocks } = makeService({
+    getOrCreateForToday: () => makeRun({ status: "running", currentPosition: 1 }),
+    currentScheduledGameForPosition: { id: "completed-sg", status: "completed" },
+    advanceToNext: () => ({
+      run: makeRun({ status: "running", currentPosition: 2 }),
+      nextGame: makeCatalogEntry(),
+      jackpotSetupRequired: false,
+    }),
+    bridgeResult: { scheduledGameId: "next-sg", reused: false },
+    startGameResult: {
+      gameId: "next-sg",
+      status: "running",
+      auditId: AUDIT_ID,
+      actualStartTime: "2026-05-08T15:00:00Z",
+      actualEndTime: null,
+    },
+  });
+
+  const result = await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
+
+  assert.equal(result.scheduledGameId, "next-sg");
+  assert.equal(result.status, "running");
+  assert.ok(mocks.planRunCalls.includes("advanceToNext"));
+  assert.equal(mocks.startGameInputs[0]?.gameId, "next-sg");
+  const recoveryAudit = mocks.auditEvents.find(
+    (event) => event.action === "spill1.master.start.auto_advance_terminal_position",
+  );
+  assert.ok(recoveryAudit, "auto-advance recovery must be audited");
+});
+
+test("prepareScheduledGame: running run med completed scheduled-game auto-advancer før ready-spawn", async () => {
+  const { service, mocks } = makeService({
+    getOrCreateForToday: () => makeRun({ status: "running", currentPosition: 2 }),
+    currentScheduledGameForPosition: { id: "completed-sg", status: "completed" },
+    advanceToNext: () => ({
+      run: makeRun({ status: "running", currentPosition: 3 }),
+      nextGame: makeCatalogEntry(),
+      jackpotSetupRequired: false,
+    }),
+    bridgeResult: { scheduledGameId: "ready-sg", reused: false },
+  });
+
+  const result = await service.prepareScheduledGame({
+    actor: MASTER_ACTOR,
+    hallId: HALL_ID,
+  });
+
+  assert.equal(result.scheduledGameId, "ready-sg");
+  assert.equal(result.planRunStatus, "running");
+  assert.ok(mocks.planRunCalls.includes("advanceToNext"));
+  const recoveryAudit = mocks.auditEvents.find(
+    (event) => event.action === "spill1.master.prepare.auto_advance_terminal_position",
+  );
+  assert.ok(recoveryAudit, "prepare auto-advance recovery must be audited");
 });
 
 test("start: paused run → GAME_PLAN_RUN_INVALID_TRANSITION", async () => {

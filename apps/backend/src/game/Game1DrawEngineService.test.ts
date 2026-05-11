@@ -1213,8 +1213,8 @@ test("listDraws returnerer draws i rekkefølge", async () => {
 
 // ── Default-config sanity ───────────────────────────────────────────────────
 
-test("DEFAULT_GAME1_MAX_DRAWS er 52 (legacy Game 1)", () => {
-  assert.equal(DEFAULT_GAME1_MAX_DRAWS, 52);
+test("DEFAULT_GAME1_MAX_DRAWS er 75 for scheduled Spill 1", () => {
+  assert.equal(DEFAULT_GAME1_MAX_DRAWS, 75);
 });
 
 // ── Integration: Full spill-loop (startGame → drawNext × N → finished) ──────
@@ -1420,6 +1420,8 @@ interface RecordedPlayerPatternWon {
   winnerIds: string[];
   winnerCount: number;
   drawIndex: number;
+  payoutAmount: number;
+  claimType: "LINE" | "BINGO";
 }
 
 function makeRecordingPlayerBroadcaster(): {
@@ -1533,6 +1535,154 @@ test("PR-C4: drawNext sender draw:new + room:update til spiller-rom når room_co
 
   // Ingen phase-won (ingen vinnere).
   assert.equal(recorder.patternWonCalls.length, 0);
+});
+
+test("PR-C4: scheduled pattern:won sender runtime playerId, ikke buyer_user_id", async () => {
+  const grid = [
+    10, 20, 30, 40, 50,
+    1, 2, 3, 4, 5,
+    6, 7, 0, 8, 9,
+    11, 12, 13, 14, 15,
+    16, 17, 18, 19, 21,
+  ];
+  const beforeMark = [
+    false, true, true, true, true,
+    false, false, false, false, false,
+    false, false, true, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+  ];
+  const afterMark = [
+    true, true, true, true, true,
+    false, false, false, false, false,
+    false, false, true, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+  ];
+  const { pool } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      rows: [runningStateRow()],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [scheduledGameRow({ status: "running", room_code: "ROOM-C4" })],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") &&
+        s.includes("app_game1_ticket_assignments") &&
+        s.includes("FOR UPDATE"),
+      rows: [
+        {
+          id: "assignment-1",
+          grid_numbers_json: grid,
+          markings_json: { marked: beforeMark },
+        },
+      ],
+    },
+    {
+      match: (s) =>
+        s.includes("UPDATE") && s.includes("app_game1_ticket_assignments"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") &&
+        s.includes("app_game1_ticket_assignments") &&
+        s.includes("JOIN") &&
+        s.includes("app_game1_ticket_purchases"),
+      rows: [
+        {
+          id: "assignment-1",
+          grid_numbers_json: grid,
+          markings_json: { marked: afterMark },
+          buyer_user_id: "buyer-user-1",
+          hall_id: "hall-a",
+          ticket_color: "yellow",
+        },
+      ],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_users"),
+      rows: [{ wallet_id: "wallet-1" }],
+    },
+    {
+      match: (s) =>
+        s.includes("SUM(total_amount_cents)") &&
+        s.includes("app_game1_ticket_purchases"),
+      rows: [{ pot_cents: 2000 }],
+    },
+    {
+      match: (s) =>
+        s.includes("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("SELECT"),
+      rows: [
+        runningStateRow({
+          draws_completed: 1,
+          current_phase: 2,
+          last_drawn_ball: 10,
+          last_drawn_at: "2026-04-21T12:01:00.000Z",
+          paused: true,
+          paused_at_phase: 1,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        {
+          draw_sequence: 1,
+          ball_value: 10,
+          drawn_at: "2026-04-21T12:01:00.000Z",
+        },
+      ],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+
+  const recorder = makeRecordingPlayerBroadcaster();
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase([]),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    payoutService: {
+      payoutPhase: async () => undefined,
+    } as never,
+    playerBroadcaster: recorder.broadcaster,
+    bingoEngine: {
+      refreshPlayerBalancesForWallet: async () => [],
+      getRoomSnapshot: () => ({
+        code: "ROOM-C4",
+        gameSlug: "bingo",
+        players: [
+          {
+            id: "runtime-player-1",
+            name: "Player",
+            walletId: "wallet-1",
+            balance: 0,
+          },
+        ],
+      }),
+    } as never,
+  });
+
+  await service.drawNext("g1");
+
+  assert.equal(recorder.patternWonCalls.length, 1);
+  assert.deepEqual(recorder.patternWonCalls[0]!.winnerIds, ["runtime-player-1"]);
+  assert.notDeepEqual(recorder.patternWonCalls[0]!.winnerIds, ["buyer-user-1"]);
 });
 
 test("PR-C4: drawNext sender INGEN broadcast til spiller-rom når room_code er NULL (ingen joinet enda)", async () => {

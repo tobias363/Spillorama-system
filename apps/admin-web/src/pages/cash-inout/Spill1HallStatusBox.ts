@@ -84,6 +84,8 @@ interface ViewState {
   masterHallId: string | null;
   halls: Spill1HallReadyStatus[];
   allReady: boolean;
+  /** Aggregator warnings used for targeted master recovery affordances. */
+  warningCodes: Spill1LobbyInconsistencyCode[];
 }
 
 interface BoxState {
@@ -291,6 +293,7 @@ export function mountSpill1HallStatusBox(
       masterHallId: lobby.masterHallId,
       halls: lobby.halls,
       allReady: lobby.allHallsReady,
+      warningCodes: lobby.inconsistencyWarnings.map((w) => w.code),
     };
   }
 
@@ -309,6 +312,10 @@ export function mountSpill1HallStatusBox(
     // osv.) krever en eksisterende scheduled-game-rad — vi avviser i UI hvis
     // den mangler så vi ikke sender et call backend må avvise med 400.
     const gameId = data.scheduledGameId;
+    const terminalRound =
+      data.scheduledGameStatus === "completed" ||
+      data.scheduledGameStatus === "cancelled";
+    const readyActionGameId = terminalRound ? null : gameId;
     const ownHallId = data.ownHallId;
     if (!ownHallId) return;
 
@@ -320,6 +327,7 @@ export function mountSpill1HallStatusBox(
       action,
       ownHallId,
       scheduledGameId: gameId,
+      readyActionGameId,
       isMasterAgent: data.isMasterAgent,
       masterHallId: data.masterHallId,
     });
@@ -334,22 +342,22 @@ export function mountSpill1HallStatusBox(
           // gameId. Backend lazy-spawner scheduled-game (status=scheduled,
           // IKKE running) hvis ingen aktiv finnes — alle haller markerer
           // klar FØR master klikker Start neste spill.
-          await markHallReadyForGame(ownHallId, gameId);
+          await markHallReadyForGame(ownHallId, readyActionGameId);
           Toast.success("Hallen er markert som Klar.");
           break;
         case "unmark-ready":
-          if (!gameId) return;
-          await unmarkHallReadyForGame(ownHallId, gameId);
+          if (!readyActionGameId) return;
+          await unmarkHallReadyForGame(ownHallId, readyActionGameId);
           Toast.info("Klar-markering angret.");
           break;
         case "no-customers":
           // 2026-05-09 (Tobias-direktiv): same lazy-spawn-flow.
-          await setHallNoCustomersForGame(ownHallId, gameId);
+          await setHallNoCustomersForGame(ownHallId, readyActionGameId);
           Toast.info("Hallen er markert som 'Ingen kunder'.");
           break;
         case "has-customers":
-          if (!gameId) return;
-          await setHallHasCustomersForGame(ownHallId, gameId);
+          if (!readyActionGameId) return;
+          await setHallHasCustomersForGame(ownHallId, readyActionGameId);
           Toast.info("Hallen er åpnet igjen.");
           break;
         case "start": {
@@ -592,9 +600,18 @@ function render(container: HTMLElement, state: BoxState): void {
   // 2026-05-08 (Tobias-direktiv): Start aktiv når purchase-vinduet er åpnet.
   // Master kan starte UAVHENGIG av om andre haller er klare. Pause/Fortsett
   // synlig kun når aktuelt.
+  //
+  // 2026-05-11 (live-room recovery): når scheduled-game allerede er terminal,
+  // er riktig master-handling fortsatt "Start neste spill". Backend
+  // auto-advancer plan-run før ny engine-start.
+  const canStartFromTerminalRound =
+    isMaster &&
+    (gameStatus === "completed" || gameStatus === "cancelled");
   const canStart =
     isMaster &&
-    (gameStatus === "ready_to_start" || gameStatus === "purchase_open");
+    (gameStatus === "ready_to_start" ||
+      gameStatus === "purchase_open" ||
+      canStartFromTerminalRound);
   const canPause = isMaster && gameStatus === "running";
   const canResume = isMaster && gameStatus === "paused";
 
@@ -860,6 +877,8 @@ function renderOwnHallButtons(
     gameStatus === "scheduled" ||
     gameStatus === "purchase_open" ||
     gameStatus === "ready_to_start" ||
+    gameStatus === "completed" ||
+    gameStatus === "cancelled" ||
     gameStatus === "idle";
 
   // 2026-05-09: backend håndterer lazy-spawn via

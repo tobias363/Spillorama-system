@@ -8,8 +8,10 @@
  *                            Hvis hallen ikke er i en gruppe → fallback til
  *                            `BINGO_<hallId>` så enkeltståendel-haller fortsatt
  *                            fungerer (deterministisk + isolert).
- *   - rocket (Spill 2):      GLOBAL (alle haller deler ÉN rom: `ROCKET`).
- *   - monsterbingo (Spill 3): GLOBAL (`MONSTERBINGO`).
+ *   - rocket/game_2/tallspill (Spill 2):
+ *                            GLOBAL (alle haller deler ÉN rom: `ROCKET`).
+ *   - monsterbingo/game_3/mønsterbingo (Spill 3):
+ *                            GLOBAL (`MONSTERBINGO`).
  *   - ukjent slug:           per-hall, slug uppercased.
  *
  * `effectiveHallId` returnerer `null` for shared rooms — caller bruker dette
@@ -29,6 +31,9 @@ export interface CanonicalRoomMapping {
   /** True hvis dette er et shared room som ALLE relevante haller deler. */
   isHallShared: boolean;
 }
+
+const SPILL2_SLUG_ALIASES = new Set(["rocket", "game_2", "tallspill"]);
+const SPILL3_SLUG_ALIASES = new Set(["monsterbingo", "game_3", "mønsterbingo"]);
 
 /**
  * Mapper (gameSlug, hallId, groupId?) til kanonisk rom-kode + effektiv hall-binding.
@@ -52,11 +57,11 @@ export function getCanonicalRoomCode(
 ): CanonicalRoomMapping {
   const slug = (gameSlug ?? "bingo").toLowerCase().trim();
 
-  if (slug === "rocket") {
+  if (SPILL2_SLUG_ALIASES.has(slug)) {
     return { roomCode: "ROCKET", effectiveHallId: null, isHallShared: true };
   }
 
-  if (slug === "monsterbingo") {
+  if (SPILL3_SLUG_ALIASES.has(slug)) {
     return { roomCode: "MONSTERBINGO", effectiveHallId: null, isHallShared: true };
   }
 

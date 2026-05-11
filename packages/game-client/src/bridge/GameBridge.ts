@@ -22,6 +22,13 @@ import type {
 } from "@spillorama/shared-types/game";
 import type { SpilloramaSocket } from "../net/SpilloramaSocket.js";
 
+type SnapshotPayload = RoomSnapshot & {
+  preRoundTickets?: RoomUpdatePayload["preRoundTickets"];
+  armedPlayerIds?: RoomUpdatePayload["armedPlayerIds"];
+  playerStakes?: RoomUpdatePayload["playerStakes"];
+  playerPendingStakes?: RoomUpdatePayload["playerPendingStakes"];
+};
+
 // ── Derived game state (what game scenes consume) ───────────────────────────
 
 export interface GameState {
@@ -266,6 +273,13 @@ export class GameBridge {
   private lastAppliedStateVersion: number | null = null;
 
   /**
+   * Scheduled Spill 1 authority binding. Når satt sendes den med
+   * `room:state` resync slik at backend kan avvise stale/ad-hoc roomCode.
+   */
+  private scheduledGameId: string | null = null;
+  private lastSnapshotPayload: SnapshotPayload | null = null;
+
+  /**
    * Test-metrics: hvor mange `room:update`-payloads ble droppet pga
    * stateVersion-dedup. Eksponert via `getStateVersionMetrics()`.
    */
@@ -297,6 +311,9 @@ export class GameBridge {
   start(myPlayerId: string | null): void {
     this.myPlayerId = myPlayerId;
     this.state.myPlayerId = myPlayerId;
+    if (this.lastSnapshotPayload) {
+      this.applyPlayerScopedSnapshotFields(this.lastSnapshotPayload);
+    }
 
     this.unsubscribers.push(
       this.socket.on("roomUpdate", (payload) => this.handleRoomUpdate(payload)),
@@ -345,6 +362,8 @@ export class GameBridge {
     // alltid godtar første room:update på nytt.
     this.lastAppliedStateVersion = null;
     this.stateVersionSkippedCount = 0;
+    this.scheduledGameId = null;
+    this.lastSnapshotPayload = null;
   }
 
   getState(): GameState {
@@ -367,6 +386,9 @@ export class GameBridge {
   applySnapshot(snapshot: RoomSnapshot): void {
     this.state.roomCode = snapshot.code;
     this.state.hallId = snapshot.hallId;
+    if (snapshot.scheduledGameId !== undefined) {
+      this.scheduledGameId = snapshot.scheduledGameId ?? null;
+    }
     this.state.players = snapshot.players;
     this.state.playerCount = snapshot.players.length;
 
@@ -390,11 +412,13 @@ export class GameBridge {
     // RoomSnapshot. Pull variant info from it so the buy popup gets ticket types
     // immediately — otherwise we'd have to wait for the next room:update push,
     // which can race with our listener registration.
-    const payload = snapshot as RoomSnapshot & {
+    const payload = snapshot as SnapshotPayload & {
       gameVariant?: RoomUpdatePayload["gameVariant"];
       serverTimestamp?: number;
       stateVersion?: number;
     };
+    this.lastSnapshotPayload = payload;
+    this.applyPlayerScopedSnapshotFields(payload);
     if (payload.gameVariant) {
       this.state.gameType = payload.gameVariant.gameType ?? "standard";
       this.state.ticketTypes = (payload.gameVariant.ticketTypes ?? []) as GameState["ticketTypes"];
@@ -649,8 +673,14 @@ export class GameBridge {
     }
     this.resyncInFlight = true;
 
+    const payload: { roomCode: string; hallId?: string; scheduledGameId?: string } = {
+      roomCode: this.state.roomCode,
+    };
+    if (this.state.hallId) payload.hallId = this.state.hallId;
+    if (this.scheduledGameId) payload.scheduledGameId = this.scheduledGameId;
+
     this.socket
-      .getRoomState({ roomCode: this.state.roomCode, hallId: this.state.hallId || undefined })
+      .getRoomState(payload)
       .then((ack) => {
         if (ack.ok && ack.data?.snapshot) {
           this.applySnapshot(ack.data.snapshot);
@@ -685,6 +715,10 @@ export class GameBridge {
       skipped: this.stateVersionSkippedCount,
       lastApplied: this.lastAppliedStateVersion,
     };
+  }
+
+  setScheduledGameId(scheduledGameId: string | null): void {
+    this.scheduledGameId = scheduledGameId;
   }
 
   private handlePatternWon(payload: PatternWonPayload): void {
@@ -782,6 +816,22 @@ export class GameBridge {
     if (this.myPlayerId) {
       this.state.myTickets = game.tickets[this.myPlayerId] || [];
       this.state.myMarks = game.marks[this.myPlayerId] || [];
+    }
+  }
+
+  private applyPlayerScopedSnapshotFields(snapshot: SnapshotPayload): void {
+    if (!this.myPlayerId) return;
+
+    if (snapshot.currentGame) {
+      this.state.myTickets = snapshot.currentGame.tickets[this.myPlayerId] || [];
+      this.state.myMarks = snapshot.currentGame.marks[this.myPlayerId] || [];
+    }
+
+    if (snapshot.preRoundTickets) {
+      this.state.preRoundTickets = snapshot.preRoundTickets[this.myPlayerId] ?? [];
+      this.state.isArmed = (snapshot.armedPlayerIds ?? []).includes(this.myPlayerId);
+      this.state.myStake = snapshot.playerStakes?.[this.myPlayerId] ?? 0;
+      this.state.myPendingStake = snapshot.playerPendingStakes?.[this.myPlayerId] ?? 0;
     }
   }
 

@@ -109,15 +109,15 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
     onRoomRescheduled: async (roomCode: string) => { await deps.emitRoomUpdate(roomCode); },
     onRoomExhausted: (roomCode: string, count: number) => {
       console.error(`[DrawScheduler] Room ${roomCode} exhausted after ${count} consecutive stuck detections. Ending round with SYSTEM_ERROR.`);
-      try {
+      void (async () => {
         const snapshot = deps.engine.getRoomSnapshot(roomCode);
         if (snapshot.currentGame?.status === "RUNNING") {
-          deps.engine.endGame({ roomCode, actorPlayerId: snapshot.hostPlayerId, reason: "SYSTEM_ERROR" });
-          void deps.emitRoomUpdate(roomCode);
+          await deps.engine.endGame({ roomCode, actorPlayerId: snapshot.hostPlayerId, reason: "SYSTEM_ERROR" });
+          await deps.emitRoomUpdate(roomCode);
         }
-      } catch (error) {
+      })().catch((error) => {
         console.error(`[DrawScheduler] Failed to end exhausted room ${roomCode}:`, error);
-      }
+      });
     },
     onShutdown: async (activeRoomCodes: string[]) => {
       // §6.1 (Wave 3b, 2026-05-06): shutdown er en sjelden ett-skudd-event.

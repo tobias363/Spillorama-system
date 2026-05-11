@@ -9,6 +9,8 @@
  */
 import { parseTicketsPerPlayerInput } from "../../util/httpHelpers.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "../../game/compliance.js";
+import { DomainError } from "../../errors/DomainError.js";
+import { isPerpetualGameSlug } from "../../util/roomHelpers.js";
 import type { SocketContext } from "./context.js";
 import type {
   AckResponse,
@@ -16,6 +18,16 @@ import type {
   StartGamePayload,
 } from "./types.js";
 import type { RoomSnapshot } from "../../game/types.js";
+
+function assertGenericLifecycleAllowed(snapshot: RoomSnapshot): void {
+  if (!isPerpetualGameSlug(snapshot.gameSlug)) {
+    return;
+  }
+  throw new DomainError(
+    "PERPETUAL_LIFECYCLE_FORBIDDEN",
+    "Spill 2/3-rom styres av systemtjenester og kan ikke startes eller stoppes manuelt.",
+  );
+}
 
 export function registerGameLifecycleEvents(ctx: SocketContext): void {
   const {
@@ -40,6 +52,7 @@ export function registerGameLifecycleEvents(ctx: SocketContext): void {
   socket.on("game:start", rateLimited("game:start", async (payload: StartGamePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      assertGenericLifecycleAllowed(engine.getRoomSnapshot(roomCode));
       const requestedTicketsPerPlayer =
         payload?.ticketsPerPlayer === undefined || payload?.ticketsPerPlayer === null
           ? undefined
@@ -149,6 +162,7 @@ export function registerGameLifecycleEvents(ctx: SocketContext): void {
   socket.on("game:end", rateLimited("game:end", async (payload: EndGamePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      assertGenericLifecycleAllowed(engine.getRoomSnapshot(roomCode));
       await engine.endGame({
         roomCode,
         actorPlayerId: playerId,

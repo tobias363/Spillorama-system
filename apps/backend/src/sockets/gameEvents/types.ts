@@ -33,7 +33,9 @@ export interface JoinRoomPayload extends CreateRoomPayload {
   roomCode: string;
 }
 
-export interface ResumeRoomPayload extends RoomActionPayload {}
+export interface ResumeRoomPayload extends RoomActionPayload {
+  scheduledGameId?: string;
+}
 
 export interface StartGamePayload extends RoomActionPayload {
   entryFee?: number;
@@ -76,6 +78,7 @@ export interface ClaimPayload extends RoomActionPayload {
 
 export interface RoomStatePayload extends AuthenticatedSocketPayload {
   roomCode: string;
+  scheduledGameId?: string;
 }
 
 export interface ExtraDrawPayload extends RoomActionPayload {

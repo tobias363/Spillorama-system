@@ -9,7 +9,8 @@
  *   - Race: assignRoomCode returnerer annen kode → destroyRoom + joinRoom
  *     inn i vinneren
  *   - Multi-hall: valid hallId → OK; ikke-deltagende hall → HALL_NOT_ALLOWED
- *   - Status-gate: scheduled/ready_to_start → GAME_NOT_JOINABLE
+ *   - Status-gate: scheduled/completed → GAME_NOT_JOINABLE
+ *   - Status-contract: purchase_open/ready_to_start/running/paused → joinable
  *   - Ukjent scheduledGameId → GAME_NOT_FOUND
  *   - Invalid payload → INVALID_INPUT
  *   - Rate-limit → RATE_LIMITED
@@ -80,6 +81,7 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
     engineCreateRoomCode: "ROOM-X1",
     engineCreateRoomPlayerId: "player-created",
     engineJoinRoomPlayerId: "player-joined",
+    engineJoinRoomError: null,
     user: {
       walletId: "wallet-1",
       role: "PLAYER",
@@ -99,20 +101,27 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
   };
 
   let destroyCalledWith: string | null = null;
+  const createRoomCalls: Array<Record<string, unknown>> = [];
   // CRIT-4: spore markRoomAsScheduled-kall så testene kan verifisere
   // at scheduled-flyten merker rom som scheduled (defensiv guard mot
   // dual-engine state-divergens).
   const markScheduledCalls: Array<{ code: string; scheduledGameId: string }> = [];
   const engine = {
     assertWalletAllowedForGameplay: () => {},
-    createRoom: async () => ({
-      roomCode: opts.engineCreateRoomCode,
-      playerId: opts.engineCreateRoomPlayerId,
-    }),
-    joinRoom: async (input: { roomCode: string }) => ({
-      roomCode: input.roomCode,
-      playerId: opts.engineJoinRoomPlayerId,
-    }),
+    createRoom: async (input: Record<string, unknown>) => {
+      createRoomCalls.push(input);
+      return {
+        roomCode: opts.engineCreateRoomCode,
+        playerId: opts.engineCreateRoomPlayerId,
+      };
+    },
+    joinRoom: async (input: { roomCode: string }) => {
+      if (opts.engineJoinRoomError) throw opts.engineJoinRoomError;
+      return {
+        roomCode: input.roomCode,
+        playerId: opts.engineJoinRoomPlayerId,
+      };
+    },
     getRoomSnapshot: (code: string) => ({
       code,
       hallId: "hall-a",
@@ -149,6 +158,7 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
   const platformService = {
     getUserFromAccessToken: async () => opts.user,
     assertUserEligibleForGameplay: async () => {},
+    getHall: async () => ({ isTestHall: false }),
     getPool: () => pool,
   };
 
@@ -184,6 +194,7 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
     emitCalls,
     bindCalls,
     markScheduledCalls,
+    createRoomCalls,
   };
 }
 
@@ -199,6 +210,7 @@ interface StubOptions {
   engineCreateRoomCode: string;
   engineCreateRoomPlayerId: string;
   engineJoinRoomPlayerId: string;
+  engineJoinRoomError: Error & { code?: string } | null;
   user: Record<string, unknown>;
   rateLimitAllow: boolean;
 }
@@ -259,6 +271,66 @@ test("4d.2: happy path — eksisterende room_code → joinRoom (reconnect)", asy
   assert.deepEqual(stubs.markScheduledCalls, [
     { code: "EXISTING", scheduledGameId: "sg-1" },
   ]);
+});
+
+for (const status of ["ready_to_start", "paused"] as const) {
+  test(`4d.2: status-contract — ${status} er joinable`, async () => {
+    const stubs = makeStubs({
+      scheduledGameRow: {
+        id: "sg-1",
+        status,
+        room_code: null,
+        participating_halls_json: ["hall-a"],
+      },
+    });
+    const sock = mockSocket();
+    stubs.factory(sock as never);
+
+    const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
+
+    assert.equal(resp.ok, true, `expected ok for ${status}, got: ${JSON.stringify(resp)}`);
+    assert.deepEqual(stubs.markScheduledCalls, [
+      { code: "ROOM-X1", scheduledGameId: "sg-1" },
+    ]);
+  });
+}
+
+test("ROOM_NOT_FOUND recovery — eksisterende room_code men manglende BingoEngine-rom reopprettes", async () => {
+  const missingRoom = Object.assign(new Error("Rommet finnes ikke."), {
+    code: "ROOM_NOT_FOUND",
+  });
+  const stubs = makeStubs({
+    scheduledGameRow: {
+      id: "sg-1",
+      status: "running",
+      room_code: "BINGO_DEMO-DEFAULT-GOH",
+      participating_halls_json: ["hall-a"],
+    },
+    engineJoinRoomError: missingRoom,
+    engineCreateRoomCode: "BINGO_DEMO-DEFAULT-GOH",
+  });
+  const sock = mockSocket();
+  stubs.factory(sock as never);
+
+  const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
+
+  assert.equal(resp.ok, true, `expected ok, got: ${JSON.stringify(resp)}`);
+  const data = resp.data as { roomCode: string; playerId: string };
+  assert.equal(data.roomCode, "BINGO_DEMO-DEFAULT-GOH");
+  assert.equal(data.playerId, "player-created");
+  assert.deepEqual(stubs.bindCalls, [
+    { code: "BINGO_DEMO-DEFAULT-GOH", slug: "bingo" },
+  ]);
+  assert.equal(stubs.createRoomCalls.length, 1);
+  assert.equal(
+    stubs.createRoomCalls[0]?.roomCode,
+    "BINGO_DEMO-DEFAULT-GOH",
+    "recovery må gjenopprette nøyaktig DB-mappet canonical roomCode",
+  );
+  assert.deepEqual(stubs.markScheduledCalls, [
+    { code: "BINGO_DEMO-DEFAULT-GOH", scheduledGameId: "sg-1" },
+  ]);
+  assert.ok(sock.rooms.has("BINGO_DEMO-DEFAULT-GOH"), "socket skal joine recovery-rommet");
 });
 
 test("4d.2: race — assignRoomCode returnerer annen kode → destroyRoom + joinRoom inn i vinneren", async () => {

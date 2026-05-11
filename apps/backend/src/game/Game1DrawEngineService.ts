@@ -168,13 +168,14 @@ const DEBUG_SPILL1_DRAWS =
 
 export interface Game1DrawEngineConfig {
   /**
-   * Maks antall kuler trukket før game ender automatisk. Legacy standard for
-   * Game 1: 52. Overridable per scheduled_game via ticket_config_json.maxDraws.
+   * Maks antall kuler trukket før game ender automatisk. Spill 1 scheduled
+   * 75-ball skal som default kunne trekke hele bagen. Overridable per
+   * scheduled_game via ticket_config_json.maxDraws.
    */
   defaultMaxDraws: number;
 }
 
-export const DEFAULT_GAME1_MAX_DRAWS = 52;
+export const DEFAULT_GAME1_MAX_DRAWS = 75;
 
 export interface Game1GameStateView {
   scheduledGameId: string;
@@ -805,6 +806,31 @@ export class Game1DrawEngineService {
       prizePerWinnerKr,
       claimType
     );
+  }
+
+  private resolvePlayerPatternWinnerIds(
+    roomCode: string,
+    winnerWalletIds: string[],
+    fallbackWinnerIds: string[]
+  ): string[] {
+    if (!this.bingoEngine || winnerWalletIds.length === 0) {
+      return fallbackWinnerIds;
+    }
+    try {
+      const walletSet = new Set(winnerWalletIds);
+      const snapshot = this.bingoEngine.getRoomSnapshot(roomCode);
+      const playerIds = snapshot.players
+        .filter((player) => walletSet.has(player.walletId))
+        .map((player) => player.id);
+      const uniquePlayerIds = Array.from(new Set(playerIds));
+      return uniquePlayerIds.length > 0 ? uniquePlayerIds : fallbackWinnerIds;
+    } catch (err) {
+      log.warn(
+        { err, roomCode },
+        "kunne ikke mappe scheduled winner walletIds til runtime playerIds — bruker fallback winnerIds"
+      );
+      return fallbackWinnerIds;
+    }
   }
 
   /**
@@ -1522,12 +1548,17 @@ export class Game1DrawEngineService {
           drawIndex0Based
         );
         if (capturedPhaseResult) {
+          const playerWinnerIds = this.resolvePlayerPatternWinnerIds(
+            capturedRoomCode,
+            capturedPhaseResult.winnerWalletIds,
+            capturedPhaseResult.winnerIds
+          );
           this.notifyPlayerPatternWon(
             capturedRoomCode,
             scheduledGameId,
             capturedPhaseResult.patternName,
             capturedPhaseResult.phase,
-            capturedPhaseResult.winnerIds,
+            playerWinnerIds,
             drawIndex0Based,
             // BIN-696: per-winner split-amount + claimType slik at
             // klient-popup (WinPopup/WinScreenV2) får faktisk credited
