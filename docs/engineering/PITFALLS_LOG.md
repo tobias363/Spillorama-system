@@ -50,13 +50,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 5 | 2026-05-10 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 12 | 2026-05-11 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 14 | 2026-05-11 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
-| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 6 | 2026-05-11 |
+| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 7 | 2026-05-11 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 10 | 2026-05-11 |
 
-**Total:** 79 entries (per 2026-05-11)
+**Total:** 82 entries (per 2026-05-11)
 
 ---
 
@@ -766,6 +766,37 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - PR #1196 (overlay slettet, erstattet med CenterBall idle-text)
 - `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleText`
 
+### §7.13 — `PLAYER_ALREADY_IN_ROOM` ved upgrade fra hall-default til scheduled-game
+
+**Severity:** P0 (klient blokkert fra spill)
+**Oppdaget:** 2026-05-11 (Tobias: "samme problem som tidlgiere nedtellingne bare starter på nytt, trekning starter ikke")
+**Symptom:** Klient joiner hall-default-rom (canonical: `BINGO_<HALL>`), så spawner master scheduled-game i samme canonical roomCode. Delta-watcher trigger ny `game1:join-scheduled` → server returnerer `PLAYER_ALREADY_IN_ROOM` → klient mister state-sync.
+**Root cause:** Server `joinRoom`-handler avviser duplikat-join på samme roomCode. Men klienten må fortsatt motta scheduled-game-state (current_game-ID, draws, marks). `game1:join-scheduled` har ingen "re-attach existing membership"-modus.
+**Fix:** PR #1218 — Game1Controller fanger `PLAYER_ALREADY_IN_ROOM`-fall og kaller `socket.resumeRoom({ roomCode })` som returnerer ferskt snapshot. Bridge applySnapshot oppdaterer state.
+**Prevention:**
+- ALDRI anta at re-join er trygt — sjekk om client allerede er medlem
+- For roomCode-changes som beholder canonical: bruk `resumeRoom`, ikke ny `join`
+- Hall-default-rom som upgraded til scheduled-game = samme canonical roomCode → samme membership
+**Related:**
+- PR #1218 (`fix(spillerklient): room:resume fallback ved PLAYER_ALREADY_IN_ROOM`)
+- `packages/game-client/src/games/game1/Game1Controller.ts:syncScheduledGameMembership`
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts:joinRoom` (kilden for error-koden)
+
+### §7.14 — Delta-watcher race: initial-join + watcher dobbel-fyrer samtidig
+
+**Severity:** P1 (intermittent client-state-corruption)
+**Oppdaget:** 2026-05-11 (race-bug under hall-default → scheduled-game-upgrade-test)
+**Symptom:** `joinRoom`-call fra `start()` og delta-watcher (effect-hook som reagerer på `scheduledGameId`-endring) fyrte parallelt → server fikk 2 join-requests → state-mismatch.
+**Root cause:** Delta-watcher hadde ikke gate på `initialJoinComplete`-flag. Watcher reagerte umiddelbart på første snapshot-update fra plan-runtime selv om initial `start()` allerede var i ferd med å joine.
+**Fix:** PR #1216 — `initialJoinComplete: boolean` flag i Game1Controller-state. Settes til `true` etter første vellykket join. Delta-watcher gate `if (!this.initialJoinComplete) return`.
+**Prevention:**
+- Effect-hooks som reagerer på state-changes MÅ gate bak "har vi fullført initial setup?"-flag
+- Pattern: `if (!isReady) return` ved toppen av watcher
+- Race-condition-tester: spawn klient + tving delta-update innen 100ms etter start
+**Related:**
+- PR #1216 (`fix(spillerklient): gate delta-watcher bak initialJoinComplete`)
+- `packages/game-client/src/games/game1/Game1Controller.ts:initialJoinComplete`
+
 ---
 
 ## §8 Doc-disiplin
@@ -886,6 +917,23 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - PR #1184
 - `scripts/dev/reset-state.mjs`
 - ADR-0014 (idempotent migrations)
+
+### §9.7 — HTTP rate-limit kastet spillere ut etter 4 refresh
+
+**Severity:** P0 (spillere mistet tilgang)
+**Oppdaget:** 2026-05-11 (Tobias: "kan ikke være sånn at hele spillet shuttes ned hvis en kunde oppdaterer siden 4 ganger")
+**Symptom:** 11 endpoints returnerte 429 Too Many Requests samtidig etter ~4 page-refreshes. Spilleren ble logget ut og lobbyen krasjet med "For mange forespørsler. Prøv igjen om X sekunder".
+**Root cause:** `/api/auth/*` catch-all tier hadde `maxRequests: 20` per 60s. Hver page-load fyrer 4-5 auth-reads (`/me`, `/pin/status`, `/2fa/status`, `/sessions`). 4 refresh × 5 calls = 20 → traff limit → 429 på ALT under `/api/auth/`. Også `/api/`-default 300/min var marginalt for spillere som poller balance/lobby/games-status hvert 30s + spillvett-poll.
+**Fix:** PR #1220 — separate tiers for auth-READ-endpoints (`/me`, `/sessions`, `/pin/status`, `/2fa/status` à 200/min hver), auth catch-all 20 → 100/min, `/api/` 300 → 1000/min, payments 10 → 30/min. Auth-WRITE-endpoints (login/register/password) beholder strict-cap for brute-force-vern.
+**Prevention:**
+- Skill auth-READ fra auth-WRITE i tiers — read-paths trenger høyere limit
+- Estimer realistisk klient-aktivitet: page-load × N endpoints × M refresh per minutt
+- Auth-guarded endpoints kan ha HØYERE limit enn anonymous (DoS er forhindret av JWT)
+- Spillere må kunne refreshe 5-10 ganger per minutt uten kunsekvens
+**Related:**
+- PR #1220 (`fix(rate-limit): spillere kastes ikke ut etter 4 refresh`)
+- `apps/backend/src/middleware/httpRateLimit.ts:DEFAULT_HTTP_RATE_LIMITS`
+- `apps/backend/src/middleware/httpRateLimit.test.ts` — regresjons-test ensures admin tier ≥ 600 og /api/wallet/me = 1000
 
 ---
 
