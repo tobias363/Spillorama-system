@@ -498,6 +498,23 @@ export function buildTicketConfigFromCatalog(
     spill1Block.trafikklys = trafikklysBlock;
   }
 
+  // Tobias-direktiv 2026-05-11: ball-trekk-intervall (sekunder mellom hver
+  // kule) propageres fra `catalog.rules.timing.seconds` til
+  // `spill1.timing.seconds` slik at `Game1AutoDrawTickService.resolveSeconds`
+  // bruker katalog-eksplisitt verdi i stedet for default-fallback (5 sek).
+  // Hvis katalog ikke har timing, faller engine på `defaultSeconds = 5`.
+  const catalogTiming = (catalog.rules as Record<string, unknown>)?.timing;
+  if (
+    catalogTiming &&
+    typeof catalogTiming === "object" &&
+    "seconds" in catalogTiming &&
+    typeof (catalogTiming as { seconds: unknown }).seconds === "number"
+  ) {
+    spill1Block.timing = {
+      seconds: (catalogTiming as { seconds: number }).seconds,
+    };
+  }
+
   const config: Record<string, unknown> = {
     catalogId: catalog.id,
     catalogSlug: catalog.slug,
