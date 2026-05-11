@@ -19,21 +19,11 @@
     error: "",
     report: null,
     compliance: null,
-    // Quick-win 1 (2026-05-11): timestamp-cache av compliance for å unngå
-    // duplikat-fetches innen 30s av samme hall. Brukes både for å konsumere
-    // event fra lobby.js og for å dedup egne refreshData-call-paths.
-    complianceFetchedAt: 0,
-    complianceHallId: "",
     pendingHostHallId: "",
     syncTimer: null,
     refreshIntervalId: null,
     candyEmbedOrigin: ""
   };
-
-  // Quick-win 1: hvor lenge compliance-data anses som fersk nok til å
-  // gjenbruke uten ny fetch. 30s matcher polling-frekvensen og halve TTL
-  // på server-side cache.
-  const COMPLIANCE_FRESHNESS_MS = 30 * 1000;
 
   const els = {};
 
@@ -330,14 +320,6 @@
     }, 250);
   }
 
-  // Quick-win 4 (2026-05-11): 15s → 30s. Spillvett-state endrer seg sjelden
-  // (kun ved limit-endring, pause-aktivering, self-exclude). 30s polling er
-  // rikelig og halverer trafikken mot /api/spillevett/report +
-  // /api/wallet/me/compliance. Audit 2026-05-11 viste at 15s var for
-  // aggressivt for ren read-state. Tobias-direktiv: "Vi må få kontroll på
-  // dette".
-  const SPILLVETT_POLL_INTERVAL_MS = 30000;
-
   function ensureRefreshLoop() {
     if (state.refreshIntervalId) {
       window.clearInterval(state.refreshIntervalId);
@@ -346,7 +328,7 @@
       if (state.token && state.hallId) {
         void refreshData({ silent: true });
       }
-    }, SPILLVETT_POLL_INTERVAL_MS);
+    }, 15000);
   }
 
   function buildStatusPills(compliance) {
@@ -678,43 +660,11 @@
     });
   }
 
-  // Quick-win 2 (2026-05-11): exponential backoff [2s, 4s, 8s, 16s] med
-  // respekt for Retry-After-header når server returnerer 429. Klient skal
-  // ALDRI vise sekund-countdown til kunder (Tobias-direktiv 2026-05-11),
-  // og skal automatisk prøve igjen i bakgrunnen.
-  const SPILLVETT_BACKOFF_MS = [2000, 4000, 8000, 16000];
-  const SPILLVETT_MAX_BACKOFF_MS = 60000;
-  let _spillvettRateLimitedAttempt = 0;
-  let _spillvettRetryTimer = null;
-
-  function isRateLimitedError(err) {
-    if (window.SpilloramaAuth && typeof window.SpilloramaAuth.isRateLimitedError === "function") {
-      return window.SpilloramaAuth.isRateLimitedError(err);
-    }
-    return !!(err && err.isRateLimited === true);
-  }
-
-  function cancelSpillvettRetry() {
-    if (_spillvettRetryTimer) {
-      window.clearTimeout(_spillvettRetryTimer);
-      _spillvettRetryTimer = null;
-    }
-  }
-
-  function complianceIsFresh() {
-    if (!state.compliance || !state.complianceHallId) return false;
-    if (state.complianceHallId !== state.hallId) return false;
-    if (state.complianceFetchedAt <= 0) return false;
-    return (Date.now() - state.complianceFetchedAt) < COMPLIANCE_FRESHNESS_MS;
-  }
-
   async function refreshData(options) {
     if (!state.token || !state.hallId) {
       render();
       return;
     }
-
-    cancelSpillvettRetry();
 
     const silent = Boolean(options && options.silent);
     if (!silent) {
@@ -725,52 +675,15 @@
 
     try {
       const hallQuery = `hallId=${encodeURIComponent(state.hallId)}`;
-
-      // Quick-win 1: gjenbruk fersk compliance-data fra lobby.js (event
-      // `spillorama:complianceLoaded`) eller fra tidligere refresh innenfor
-      // 30s. Sparer én duplikat-fetch på page-load + hver poll-syklus.
-      let compliancePromise;
-      if (complianceIsFresh()) {
-        compliancePromise = Promise.resolve(state.compliance);
-      } else {
-        compliancePromise = apiRequest(`/api/wallet/me/compliance?${hallQuery}`);
-      }
-
-      const reportPromise = apiRequest(
-        `/api/spillevett/report?${hallQuery}&period=${encodeURIComponent(state.reportPeriod)}`
-      );
-
-      const [compliance, report] = await Promise.all([compliancePromise, reportPromise]);
-
+      const [compliance, report] = await Promise.all([
+        apiRequest(`/api/wallet/me/compliance?${hallQuery}`),
+        apiRequest(`/api/spillevett/report?${hallQuery}&period=${encodeURIComponent(state.reportPeriod)}`)
+      ]);
       state.compliance = compliance;
-      state.complianceFetchedAt = Date.now();
-      state.complianceHallId = state.hallId;
       state.report = report;
       state.error = "";
-      // Suksess — reset rate-limit-backoff-teller.
-      _spillvettRateLimitedAttempt = 0;
     } catch (error) {
-      if (isRateLimitedError(error)) {
-        // Quick-win 2: planlegg stille auto-retry med eksponentiell backoff
-        // som respekterer Retry-After. Klient skal ALDRI vise "Prøv igjen
-        // om X sekunder" — vi rendrer en sanitised feilmelding og prøver
-        // igjen i bakgrunnen.
-        const idx = Math.min(_spillvettRateLimitedAttempt, SPILLVETT_BACKOFF_MS.length - 1);
-        const serverHint = Math.max(1000, Math.min(error.retryAfterMs || 0, SPILLVETT_MAX_BACKOFF_MS));
-        const backoff = Math.min(
-          SPILLVETT_MAX_BACKOFF_MS,
-          Math.max(SPILLVETT_BACKOFF_MS[idx], serverHint)
-        );
-        _spillvettRateLimitedAttempt += 1;
-        state.error = "Spillet er midlertidig utilgjengelig. Vi prøver igjen automatisk.";
-        _spillvettRetryTimer = window.setTimeout(function () {
-          _spillvettRetryTimer = null;
-          void refreshData({ silent: true });
-        }, backoff);
-      } else {
-        state.error = normalizeApiError(error);
-        _spillvettRateLimitedAttempt = 0;
-      }
+      state.error = normalizeApiError(error);
     } finally {
       state.isLoading = false;
       render();
@@ -1090,30 +1003,6 @@
       }
     });
 
-    // Quick-win 1 (2026-05-11): konsumér compliance fra lobby.js for å unngå
-    // duplikat-fetch på page-load (lobby + spillvett fetchet samme endpoint
-    // innen ~100ms tidligere). Vi cacher compliance med timestamp og lar
-    // refreshData skippe sin egen fetch så lenge data er fersk (< 30s).
-    //
-    // Når event-et fires:
-    //   1. Oppdater state.compliance + fetchedAt + hallId
-    //   2. Hvis modulen ikke har lastet enda → render umiddelbart med
-    //      lobbyens data. refreshData skipper compliance-fetch men henter
-    //      fortsatt /api/spillevett/report som er unik for spillvett.
-    window.addEventListener('spillorama:complianceLoaded', function (event) {
-      const detail = (event && event.detail) || {};
-      if (!detail.hallId || !detail.compliance) return;
-      // Bare cache hvis det matcher vår aktive hall — bruker kan ha byttet
-      // hall mens lobby fortsatt fetcher gammel data.
-      if (state.hallId && detail.hallId !== state.hallId) return;
-      state.compliance = detail.compliance;
-      state.complianceFetchedAt = (typeof detail.fetchedAt === "number") ? detail.fetchedAt : Date.now();
-      state.complianceHallId = detail.hallId;
-      // Re-render hvis modal/drawer er åpen så obligatorisk pause-modal
-      // m.m. får oppdatert info uten å vente på neste poll-syklus.
-      render();
-    });
-
     state.token = safeStorageGet(storageKeys.token);
     state.hallId = safeStorageGet(storageKeys.hallId);
     state.hallName = safeStorageGet(storageKeys.hallName);
@@ -1170,8 +1059,6 @@
     state.hallName = "";
     state.approvedHalls = [];
     state.compliance = null;
-    state.complianceFetchedAt = 0;
-    state.complianceHallId = "";
     state.report = null;
     state.error = "";
     state.pendingHostHallId = "";
@@ -1185,12 +1072,6 @@
   window.SetActiveHall = function SetActiveHall(hallId, hallName) {
     if (!hallId) {
       return;
-    }
-    // Quick-win 1 (2026-05-11): invalider compliance-cache når hall endrer
-    // seg. Cached data var for forrige hall og må refreshes.
-    if (state.hallId && state.hallId !== hallId) {
-      state.complianceFetchedAt = 0;
-      state.complianceHallId = "";
     }
     state.hallId = hallId;
     state.hallName = hallName || hallId;

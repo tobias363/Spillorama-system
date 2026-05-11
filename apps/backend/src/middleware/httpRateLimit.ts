@@ -1,50 +1,12 @@
 /**
  * BIN-277: Per-route sliding-window rate limiter for Express REST endpoints.
  *
- * Tracks requests by **userId** (extracted from the Bearer token) when an
- * Authorization header is present, falling back to **IP** for anonymous
- * traffic. Each route prefix has its own tier-config. Stale entries are
- * garbage-collected periodically to prevent memory leaks.
- *
- * ## Per-user keying (industry-standard, 2026-05-11)
- *
- * Stripe, GitHub, Cloudflare, Discord rate-limit autenticerte routes
- * **per user / per API-key**, not per IP. Per-IP collapses in production
- * for NAT'd networks — a bingo hall with 250 players behind one NAT-IP
- * would share one bucket and lock the whole hall out simultaneously.
- *
- * Spillorama uses opaque session tokens (not JWTs). The bearer token IS
- * the user-identity for rate-limiting purposes: two users have different
- * tokens → different keys, same user across requests → same key. We hash
- * the token (truncated SHA-256) so the raw token never enters memory
- * bucket-keys, logs, or error messages.
- *
- * For anonymous routes (`/api/auth/login`, `/api/auth/register`,
- * `/api/auth/forgot-password`, etc.) the request has no Authorization
- * header, so we fall back to per-IP keying — which is the **correct**
- * brute-force defense for those routes.
- *
- * ## Soft-fail on invalid bearer
- *
- * If the Authorization header is malformed or empty (`"Bearer "`), we
- * **do not** return 401 from this middleware — auth-middleware downstream
- * owns auth-rejection. We silently fall back to per-IP keying so the
- * request proceeds to the real auth-guard and gets a proper 401 with
- * domain-specific error code.
- *
- * ## X-RateLimit-* response headers (GitHub-style)
- *
- * Industry-standard so the client can pre-emptively back off polling
- * BEFORE hitting 429. We set on every response (200 OK + 429):
- *
- *   X-RateLimit-Limit:     <maxRequests> for matched tier
- *   X-RateLimit-Remaining: <maxRequests - current bucket size>
- *   X-RateLimit-Reset:     <unix-epoch-seconds when oldest sample expires>
- *   Retry-After:           <seconds> (only on 429)
+ * Tracks requests by IP (or authenticated user when available). Each route
+ * prefix can have its own limit. Stale entries are garbage-collected
+ * periodically to prevent memory leaks.
  */
 
 import type { Request, Response, NextFunction } from "express";
-import { createHash } from "node:crypto";
 
 export interface HttpRateLimitConfig {
   /** Window duration in milliseconds */
@@ -79,13 +41,6 @@ export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
   // limit → 429. Spillere ble kastet ut etter ~4 refreshes. Det er ikke
   // akseptabelt for vanlig bruk — kun login/register/passord-skriv trenger
   // strict-cap. Auth-leser har auth-guard så høyere cap er trygt.
-  //
-  // 2026-05-11 (per-user keying landet): disse limits er nå per-bruker
-  // (ikke per-IP) når Authorization header er til stede. Det betyr at en
-  // bingohall med 250 spillere bak samme NAT-IP ikke lenger deler bucket.
-  // I oppfølger-PR kan vi vurdere å bumpe ytterligere (1000/min er
-  // sant industry-standard for auth-guarded reads), men beholder dagens
-  // tall for å redusere risiko i denne refaktoren.
   { prefix: "/api/auth/me",              config: { windowMs: 60_000,  maxRequests: 200 } },
   { prefix: "/api/auth/sessions",        config: { windowMs: 60_000,  maxRequests: 200 } },
   { prefix: "/api/auth/pin/status",      config: { windowMs: 60_000,  maxRequests: 200 } },
@@ -125,76 +80,6 @@ export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
 ];
 
 const GC_INTERVAL_MS = 60_000;
-/**
- * Hash-prefix length for bearer-tokens used as bucket keys. SHA-256
- * truncated to 16 hex chars (64 bits) gives ~2^32 collision resistance,
- * which is more than enough for rate-limit-bucket identity. Different
- * users have different tokens → different keys with overwhelming
- * probability. The raw token never appears in memory bucket-keys or
- * logs.
- */
-const TOKEN_KEY_HASH_LEN = 16;
-
-/**
- * Result from `check()`. `allowed` + `retryAfterMs` are the original
- * contract (existing callers). `current`, `limit`, `resetAtMs` are added
- * for X-RateLimit-* response-headers (industry-standard, GitHub-style).
- */
-export interface HttpRateLimitCheckResult {
-  allowed: boolean;
-  /** ms until the bucket allows another request (only set when blocked). */
-  retryAfterMs?: number;
-  /** Number of requests recorded in the current window (AFTER this call). */
-  current: number;
-  /** Tier's maxRequests. */
-  limit: number;
-  /**
-   * Unix epoch ms when the OLDEST timestamp in the bucket expires (i.e.
-   * when at least one slot frees up). If the bucket is empty, this is
-   * `nowMs + windowMs`. Clients can pre-compute backoff against this.
-   */
-  resetAtMs: number;
-}
-
-/**
- * Derive the rate-limit-bucket key from a request. Per-user when an
- * Authorization Bearer token is present and parseable; per-IP otherwise.
- *
- * Soft-fail on invalid bearer (empty `"Bearer "`, malformed scheme): we
- * silently fall back to per-IP. Auth-middleware downstream owns 401-
- * rejection — this middleware should never short-circuit a request with
- * 401, only with 429.
- *
- * Exported for testing (see `httpRateLimit.test.ts`).
- */
-export function deriveRateLimitKey(
-  req: Pick<Request, "headers" | "ip" | "socket">,
-  tierPrefix: string
-): { key: string; mode: "user" | "ip" } {
-  const auth = req.headers.authorization;
-  if (typeof auth === "string" && auth.length > 0) {
-    // Match "Bearer <token>" case-insensitively (RFC 6750 §2.1 says the
-    // scheme is case-insensitive, though Bearer is canonical).
-    const match = /^Bearer\s+(\S.*)$/i.exec(auth);
-    if (match && match[1]) {
-      const token = match[1].trim();
-      if (token.length > 0) {
-        // Hash so the raw token never appears in memory bucket-keys, GC
-        // dumps, or error messages. 16 hex chars = 64-bit prefix —
-        // collision probability is negligible for rate-limit identity.
-        const hashed = createHash("sha256")
-          .update(token, "utf8")
-          .digest("hex")
-          .slice(0, TOKEN_KEY_HASH_LEN);
-        return { key: `user:${hashed}:${tierPrefix}`, mode: "user" };
-      }
-    }
-    // Soft-fail: malformed Authorization header → fall back to per-IP.
-    // Don't reject here — let downstream auth-middleware return 401.
-  }
-  const ip = req.ip || req.socket?.remoteAddress || "unknown";
-  return { key: `ip:${ip}:${tierPrefix}`, mode: "ip" };
-}
 
 export class HttpRateLimiter {
   private readonly buckets = new Map<string, number[]>();
@@ -235,30 +120,14 @@ export class HttpRateLimiter {
   }
 
   /**
-   * Resolve the tier-prefix for a given path. Returns the path itself as
-   * fallback if no tier matches (matches resolveConfig's no-op behavior).
-   */
-  resolveTierPrefix(path: string): string {
-    for (const tier of this.tiers) {
-      if (path.startsWith(tier.prefix)) {
-        return tier.prefix;
-      }
-    }
-    return path;
-  }
-
-  /**
    * Check whether a request is allowed.
-   * Returns { allowed, retryAfterMs?, current, limit, resetAtMs }.
-   *
-   * `current` and `resetAtMs` enable X-RateLimit-* response headers.
-   * `retryAfterMs` is only set when blocked.
+   * Returns { allowed, retryAfterMs } — retryAfterMs is set when blocked.
    */
   check(
     key: string,
     config: HttpRateLimitConfig,
     nowMs: number = Date.now()
-  ): HttpRateLimitCheckResult {
+  ): { allowed: boolean; retryAfterMs?: number } {
     const bucketKey = key;
     let timestamps = this.buckets.get(bucketKey);
     if (!timestamps) {
@@ -272,32 +141,14 @@ export class HttpRateLimiter {
       timestamps.shift();
     }
 
-    // resetAtMs = when the OLDEST timestamp in the window expires.
-    // For an empty bucket, the bucket would never fill so reset is
-    // "now + windowMs" — that's the worst-case from the client's view.
-    const resetAtMs = timestamps.length > 0
-      ? timestamps[0]! + config.windowMs
-      : nowMs + config.windowMs;
-
     if (timestamps.length >= config.maxRequests) {
-      const oldestInWindow = timestamps[0]!;
+      const oldestInWindow = timestamps[0];
       const retryAfterMs = oldestInWindow + config.windowMs - nowMs;
-      return {
-        allowed: false,
-        retryAfterMs: Math.max(retryAfterMs, 1000),
-        current: timestamps.length,
-        limit: config.maxRequests,
-        resetAtMs,
-      };
+      return { allowed: false, retryAfterMs: Math.max(retryAfterMs, 1000) };
     }
 
     timestamps.push(nowMs);
-    return {
-      allowed: true,
-      current: timestamps.length,
-      limit: config.maxRequests,
-      resetAtMs,
-    };
+    return { allowed: true };
   }
 
   /** Express middleware factory */
@@ -314,7 +165,7 @@ export class HttpRateLimiter {
       //   2. localhost-bypass (`::1`, `127.0.0.1`) — sliding-window er meningsløs
       //      når alle klient-vinduer deler samme IP. Forhindrer at 2-3 tabs
       //      i Tobias' browser fyller opp tier-en samtidig.
-      //   3. Default sliding-window per (user OR IP) — eneste mode i prod.
+      //   3. Default per-IP sliding window — eneste mode i prod.
       if (process.env["HTTP_RATE_LIMIT_DISABLED"] === "true") {
         return next();
       }
@@ -322,29 +173,22 @@ export class HttpRateLimiter {
       const config = this.resolveConfig(req.path);
       if (!config) return next();
 
+      // Key: IP + path prefix for the matching tier
+      const ip = req.ip || req.socket.remoteAddress || "unknown";
+
       // Localhost-bypass: dev-miljø har ALLE klient-vinduer på samme IP
       // (`::1` eller `127.0.0.1`). Sliding-window straffer da multi-tab-
       // workflows + browser-refresh urettferdig. I prod kjører backend
       // bak Render-proxy som setter `X-Forwarded-For` til ekte klient-IP,
       // så dette bare matcher i dev.
-      const ip = req.ip || req.socket.remoteAddress || "unknown";
       if (ip === "::1" || ip === "127.0.0.1" || ip === "::ffff:127.0.0.1") {
         return next();
       }
 
-      const tierPrefix = this.resolveTierPrefix(req.path);
-      const { key } = deriveRateLimitKey(req, tierPrefix);
+      const tierPrefix = this.tiers.find((t) => req.path.startsWith(t.prefix))?.prefix ?? req.path;
+      const key = `${ip}:${tierPrefix}`;
 
       const result = this.check(key, config);
-
-      // Set X-RateLimit-* response headers on every response (200 OK
-      // and 429 alike). Industry-standard (GitHub, Stripe) so clients
-      // can pre-emptively back off polling. Reset is unix-epoch seconds.
-      res.set("X-RateLimit-Limit", String(result.limit));
-      const remaining = Math.max(0, result.limit - result.current);
-      res.set("X-RateLimit-Remaining", String(remaining));
-      res.set("X-RateLimit-Reset", String(Math.ceil(result.resetAtMs / 1000)));
-
       if (!result.allowed) {
         const retryAfterSec = Math.ceil((result.retryAfterMs ?? 1000) / 1000);
         res.set("Retry-After", String(retryAfterSec));
@@ -366,7 +210,7 @@ export class HttpRateLimiter {
     const now = Date.now();
     for (const [key, timestamps] of this.buckets) {
       // Remove all expired timestamps
-      while (timestamps.length > 0 && timestamps[0]! <= now - 120_000) {
+      while (timestamps.length > 0 && timestamps[0] <= now - 120_000) {
         timestamps.shift();
       }
       if (timestamps.length === 0) {
