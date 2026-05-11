@@ -104,8 +104,10 @@ describe("HttpRateLimiter", () => {
     // future change removes the /api/admin tier these asserts catch it before
     // production admins start seeing "For mange forespørsler".
     //
-    // OPPDATERT 2026-05-09: PR #1029 hevet /api/admin til 600/min og /api/
-    // default til 300/min. Test-assertions oppdatert tilsvarende.
+    // OPPDATERT 2026-05-11 (Tobias-bug): /api/ default hevet 300 → 1000 så
+    // spillere ikke kastes ut etter 4 refresh. /api/admin fortsatt 600.
+    // Admin tier kan nå være LAVERE enn /api/ default fordi spillere har
+    // mer polling-aktivitet enn admin-konsollet. Test-assertions oppdatert.
     const limiter = new HttpRateLimiter();
     const gamesConfig = limiter.resolveConfig("/api/admin/games");
     assert.ok(gamesConfig);
@@ -113,13 +115,8 @@ describe("HttpRateLimiter", () => {
       gamesConfig.maxRequests >= 600,
       `expected admin tier maxRequests >= 600, got ${gamesConfig.maxRequests}`
     );
-    // Non-admin routes fall back to the shared /api/ tier (currently 300/min).
+    // Non-admin routes fall back to the shared /api/ tier (currently 1000/min).
     const walletConfig = limiter.resolveConfig("/api/wallet/me");
-    assert.equal(walletConfig?.maxRequests, 300);
-    // Admin tier should be strictly higher than the shared default.
-    assert.ok(
-      gamesConfig.maxRequests > (walletConfig?.maxRequests ?? 0),
-      `admin tier (${gamesConfig.maxRequests}) skal være strengt høyere enn /api/ default (${walletConfig?.maxRequests})`
-    );
+    assert.equal(walletConfig?.maxRequests, 1000);
   });
 });
