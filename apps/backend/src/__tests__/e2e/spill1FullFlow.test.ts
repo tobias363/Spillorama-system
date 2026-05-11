@@ -11,9 +11,12 @@
  *   F17 — `Spill1AgentLobbyStateSchema` aksepterer NÅ både UUID og slug-
  *         form for `planMeta.planId` etter shared-types-fix (commit
  *         dfdf64f8). Speiler DB-skjemaet (`TEXT PRIMARY KEY`).
- *   F22 — Auto-draw stops at `DEFAULT_GAME1_MAX_DRAWS = 52`, not 75. With
- *         only 2 small-white tickets in play, phases 2-5 may never have
- *         winners and the game terminates silently after draw 52.
+ *   F22 — Auto-draw stops at `DEFAULT_GAME1_MAX_DRAWS = 75` (oppdatert
+ *         2026-05-11 codex live-room-control-plane-hardening). Pre-fix
+ *         var verdien 52 — det fjernet phase 4 og Fullt Hus muligheten
+ *         på scheduled Spill 1, siden alle 5 faser krever opp til 75
+ *         baller for å garantere vinner. Lock-down-testen verifiserer
+ *         at vi ikke ved et uhell regresser til 52.
  *
  * These are unit-level shape/wire tests — they don't spin up the full
  * backend like `Spill1FullDay.e2e.test.ts`, but they assert the contracts
@@ -29,8 +32,14 @@ import { DEFAULT_GAME1_MAX_DRAWS } from "../../game/Game1DrawEngineService.js";
 
 describe("Spill1 E2E lock-down — findings from 2026-05-09 verification", () => {
   describe("F22: DEFAULT_GAME1_MAX_DRAWS contract", () => {
-    it("default max-draws is 52 (legacy Spill 1 standard, not 75)", () => {
-      assert.equal(DEFAULT_GAME1_MAX_DRAWS, 52);
+    it("default max-draws is 75 (full Spill 1 ball-range, oppdatert 2026-05-11)", () => {
+      // OPPDATERT 2026-05-11 (codex live-room-control-plane-hardening, PR #1239):
+      // Verdien ble flippet fra 52 → 75 fordi phase 4 (4 fulle rader) + Fullt
+      // Hus krever opp til 75 baller for å garantere at en vinner kan kåres.
+      // Med 52 som cap kunne scheduled Spill 1 ende silently uten Fullt Hus-
+      // vinner. Per SPILL_REGLER_OG_PAYOUT.md er Spill 1 = 75-ball, 5×5
+      // grid med fri sentercelle.
+      assert.equal(DEFAULT_GAME1_MAX_DRAWS, 75);
     });
   });
 
