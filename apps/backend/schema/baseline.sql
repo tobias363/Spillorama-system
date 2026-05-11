@@ -4883,7 +4883,7 @@ CREATE INDEX idx_app_email_verify_tokens_user ON public.app_email_verify_tokens 
 -- Name: idx_app_game1_scheduled_games_room_code; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX idx_app_game1_scheduled_games_room_code ON public.app_game1_scheduled_games USING btree (room_code) WHERE (room_code IS NOT NULL);
+CREATE UNIQUE INDEX idx_app_game1_scheduled_games_room_code ON public.app_game1_scheduled_games USING btree (room_code) WHERE ((room_code IS NOT NULL) AND (status <> ALL (ARRAY['completed'::text, 'cancelled'::text])));
 
 --
 -- Name: idx_app_game2_ticket_pools_game_id; Type: INDEX; Schema: public; Owner: -

@@ -1026,11 +1026,23 @@ export class GamePlanEngineBridge {
     // For BINGO_<groupId>-koder (per-link, shared mellom haller i samme
     // gruppe) kan flere scheduled-games eksistere over tid (én pr posisjon
     // i plan-runtime, sekvensielt), men kun ÉN i taget kan ha aktiv
-    // room_code. Hvis to bridge-spawns racer på FORSKJELLIGE posisjoner
-    // med samme room_code (eks. master kjører rapid advance før forrige
-    // runde er ferdig), faller den andre til catch-blokken under
-    // (unique-violation 23505) og vi degraderer til lazy-binding (uten
-    // room_code) for å beholde bakover-kompatibilitet.
+    // room_code.
+    //
+    // Index-scope (2026-05-11 fix — migration 20261221000000): unique-
+    // index gjelder KUN aktive rader (status NOT IN ('completed',
+    // 'cancelled')). Det betyr at gjenbruk av samme room_code er trygt
+    // når forrige runde er ferdig — typisk auto-master-loop og pilot
+    // advance() etter completed runde. Tidligere blokkerte index-en
+    // alle historiske rader, som tvang oss til lazy-binding-fallback
+    // (room_code=NULL) ved gjenbruk.
+    //
+    // Hvis to bridge-spawns racer på SAMME canonical room_code mens
+    // BEGGE er aktive (svært usannsynlig — hver plan-position drives
+    // sekvensielt av master, men kunne skje ved overlappende plan-runs
+    // for samme hall + GoH), faller den andre til catch-blokken under
+    // (unique-violation 23505) og vi degraderer til lazy-binding for å
+    // beholde robusthet. Dette er nå en ekte race, ikke en gjenbruks-
+    // konflikt.
     const canonical = getCanonicalRoomCode(
       "bingo",
       effectiveMasterHallId,
