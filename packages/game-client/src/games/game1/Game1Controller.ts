@@ -588,6 +588,13 @@ class Game1Controller implements GameController {
     this.myPlayerId = joinResult.data.playerId;
     this.actualRoomCode = joinResult.data.roomCode;
 
+    // Tobias 2026-05-11 debug-HUD: vis hvilket rom + hall klienten faktisk
+    // havnet på. Aktiveres når `?debug=1` i URL eller localStorage
+    // DEBUG_SPILL1_DRAWS=true. Fast-position top-right slik at vi alltid
+    // ser om hall-default er isolert (rom-suffix `_HALL-DEFAULT` eller
+    // `_DEMO-DEFAULT-GOH`) vs. om den deler rom med pilot-haller.
+    this.mountDebugHud();
+
     // Spillerklient lobby-init-order-fix (2026-05-10): playScreen ble
     // pre-bygget med tom roomCode FØR `socket.createRoom`. Oppdater nå
     // så ChatPanelV2 kan laste historikk + sende meldinger med ekte
@@ -764,7 +771,99 @@ class Game1Controller implements GameController {
     // helt. Idle-tekst eier nå av CenterBall som ryddes opp via
     // `root.destroy({ children: true })`.
     this.clearScreen();
+    this.unmountDebugHud();
     this.root.destroy({ children: true });
+  }
+
+  // ── Debug-HUD (Tobias 2026-05-11) ───────────────────────────────────────
+  //
+  // Vis fast-position-banner top-right med:
+  //   roomCode | hallId | playerId | scheduledGameId | drawInterval
+  //
+  // Aktiveres når `?debug=1` i URL eller localStorage DEBUG_SPILL1_DRAWS=true.
+  // Lar Tobias verifisere fra spillerklienten at hall-default er isolert
+  // (rom-suffix `_DEMO-DEFAULT-GOH` med kun seg selv som medlem) vs. om den
+  // deler rom med andre haller.
+
+  private debugHudEl: HTMLDivElement | null = null;
+
+  private isDebugHudEnabled(): boolean {
+    try {
+      if (typeof window === "undefined") return false;
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("debug") === "1") return true;
+      if (params.get("debug") === "true") return true;
+      const ls = typeof window.localStorage !== "undefined"
+        ? window.localStorage.getItem("DEBUG_SPILL1_DRAWS")
+        : null;
+      return ls?.trim().toLowerCase() === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  private mountDebugHud(): void {
+    if (!this.isDebugHudEnabled()) return;
+    if (typeof document === "undefined") return;
+    if (this.debugHudEl) {
+      this.updateDebugHud();
+      return;
+    }
+    const hud = document.createElement("div");
+    hud.id = "spill1-debug-hud";
+    hud.style.cssText = [
+      "position: fixed",
+      "top: 8px",
+      "right: 8px",
+      "z-index: 999999",
+      "background: rgba(0, 0, 0, 0.85)",
+      "color: #0f0",
+      "font-family: ui-monospace, SFMono-Regular, Menlo, monospace",
+      "font-size: 11px",
+      "line-height: 1.4",
+      "padding: 8px 10px",
+      "border-radius: 6px",
+      "border: 1px solid #0f0",
+      "max-width: 320px",
+      "white-space: pre-wrap",
+      "pointer-events: none",
+      "box-shadow: 0 2px 8px rgba(0,0,0,0.5)",
+    ].join(";");
+    document.body.appendChild(hud);
+    this.debugHudEl = hud;
+    this.updateDebugHud();
+  }
+
+  private updateDebugHud(): void {
+    if (!this.debugHudEl) return;
+    const hallId = this.deps.hallId ?? "(none)";
+    const roomCode = this.actualRoomCode || "(none)";
+    const playerId = this.myPlayerId ?? "(none)";
+    const scheduledGameId = this.joinedScheduledGameId ?? "(none)";
+    // Sniff isolation status fra roomCode-suffix.
+    let isolation = "?";
+    if (roomCode.includes("DEMO-DEFAULT-GOH")) {
+      isolation = "ISOLERT (default-GoH, kun hall-default)";
+    } else if (roomCode.includes("DEMO-PILOT-GOH")) {
+      isolation = "DELT (4 demo-pilot-haller)";
+    } else if (roomCode.startsWith("BINGO_")) {
+      isolation = "GoH-binding " + roomCode.replace("BINGO_", "");
+    }
+    this.debugHudEl.textContent = [
+      "🐛 SPILL1 DEBUG-HUD",
+      `room  : ${roomCode}`,
+      `hall  : ${hallId}`,
+      `player: ${playerId.slice(0, 8)}…`,
+      `sched : ${scheduledGameId === "(none)" ? "(none)" : scheduledGameId.slice(0, 8) + "…"}`,
+      `isol  : ${isolation}`,
+    ].join("\n");
+  }
+
+  private unmountDebugHud(): void {
+    if (this.debugHudEl) {
+      this.debugHudEl.remove();
+      this.debugHudEl = null;
+    }
   }
 
   // ── Klient-auto-join-scheduled-game (Tobias 2026-05-11) ──────────────────
@@ -874,6 +973,7 @@ class Game1Controller implements GameController {
             if (resume.ok && resume.data?.snapshot) {
               this.joinedScheduledGameId = nextScheduledGameId;
               this.deps.bridge.applySnapshot(resume.data.snapshot);
+              this.updateDebugHud();
               return;
             }
             console.warn(
@@ -900,6 +1000,7 @@ class Game1Controller implements GameController {
       // Bridge er allerede startet — applySnapshot resync-er state mot
       // den nye runden uten å rive ned listeners.
       this.deps.bridge.applySnapshot(result.data.snapshot);
+      this.updateDebugHud();
     } catch (err) {
       console.warn("[Game1Controller] re-join threw — beholder forrige room:", err);
     }
