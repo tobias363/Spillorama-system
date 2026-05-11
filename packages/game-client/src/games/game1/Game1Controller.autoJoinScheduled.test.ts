@@ -251,12 +251,20 @@ class DeltaWatcherHarness {
     this.joinedScheduledGameId = scheduledGameId;
   }
 
-  /** Mirror av delta-watcher-grenen i lobbyStateUnsub-callback. */
+  /**
+   * Mirror av delta-watcher-grenen i lobbyStateUnsub-callback.
+   *
+   * Upgrade-after-fallback (Tobias 2026-05-11): klient som lastet før
+   * auto-master spawned scheduled-game har `joinedScheduledGameId=null`
+   * (gikk via createRoom-fallback). Når lobby SENERE oppdaterer med
+   * joinable scheduledGameId må vi ALLIKEVEL kalle re-join — vi sjekker
+   * derfor KUN `nextScheduledGameId !== this.joinedScheduledGameId`
+   * (uten å kreve at joinedScheduledGameId allerede er satt).
+   */
   onLobbyState(state: Spill1LobbyState | null, hallId: string): void {
     const nextScheduledGameId = pickJoinableScheduledGameId(state);
     if (
       nextScheduledGameId !== null &&
-      this.joinedScheduledGameId !== null &&
       nextScheduledGameId !== this.joinedScheduledGameId
     ) {
       this.reJoin(nextScheduledGameId, hallId);
@@ -331,17 +339,53 @@ describe("Game1Controller — delta-watcher (plan-advance)", () => {
     expect(harness.joinCalls).toEqual([]);
   });
 
-  it("re-joiner IKKE før initial-join har skjedd (joinedScheduledGameId = null)", () => {
-    // Vi har ikke primet en initial-join — klient er ennå i createRoom-
-    // fallback-pathen. Da skal delta-watcher ikke trigge re-join.
+  it("upgrade-after-fallback: klient som gikk via createRoom upgrade-r til joinScheduledGame når lobby gir gameId (Tobias 2026-05-11)", () => {
+    // Scenario: klient lastet FØR auto-master spawned scheduled-game.
+    // Initial-join gikk via createRoom-fallback (joinedScheduledGameId=null).
+    // Når auto-master spawner runde → lobby-broadcast oppdaterer med
+    // joinable scheduledGameId → delta-watcher må upgrade klient til
+    // riktig scheduled-game-rom (ellers ser klient ingen draws selv om
+    // backend trekker baller).
+    //
+    // Pre-fix (PR #1207): krevde joinedScheduledGameId !== null → trigget
+    //   aldri for klienter som lastet pre-spawn. Tobias' live-test
+    //   2026-05-11 viste mode='createRoom' og deretter ingen re-join.
+    expect(harness.joinedScheduledGameId).toBeNull();
+
     harness.onLobbyState(
       makeLobbyState({
-        nextScheduledGame: makeNextGame({ scheduledGameId: "abc" }),
+        nextScheduledGame: makeNextGame({
+          scheduledGameId: "abc-spawned-after-load",
+          status: "running",
+        }),
+      }),
+      "demo-hall-001",
+    );
+
+    expect(harness.joinCalls).toEqual([
+      { scheduledGameId: "abc-spawned-after-load", hallId: "demo-hall-001" },
+    ]);
+    expect(harness.joinedScheduledGameId).toBe("abc-spawned-after-load");
+  });
+
+  it("upgrade-after-fallback: re-joiner IKKE når ny gameId er idle (krever joinable status)", () => {
+    // Selv om vi er i pre-join-state (joinedScheduledGameId=null), skal
+    // delta-watcher ALDRI trigge join mot en idle-runde (server vil
+    // reject med GAME_NOT_JOINABLE). Whitelist gjelder for begge paths.
+    expect(harness.joinedScheduledGameId).toBeNull();
+
+    harness.onLobbyState(
+      makeLobbyState({
+        nextScheduledGame: makeNextGame({
+          scheduledGameId: "abc-idle",
+          status: "idle",
+        }),
       }),
       "demo-hall-001",
     );
 
     expect(harness.joinCalls).toEqual([]);
+    expect(harness.joinedScheduledGameId).toBeNull();
   });
 
   it("re-joiner IKKE når ny gameId er ikke-joinable (status=idle)", () => {
