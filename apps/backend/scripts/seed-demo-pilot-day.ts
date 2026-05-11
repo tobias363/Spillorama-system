@@ -1331,12 +1331,17 @@ const DEMO_PLAN_START_TIME = "00:00";
 const DEMO_PLAN_END_TIME = "23:59";
 
 // Default-hall isolation-plan (Tobias-direktiv 2026-05-11):
-// `hall-default` får sin egen plan direkte bundet til hallen (ikke GoH).
-// Driver auto-master-cron (DemoAutoMasterTickService) som starter +
-// advancer plan-runs uavhengig av Tobias' master-handlinger på pilot-haller.
-// Hensikt: visuelt verifisere hall-isolation — default-hall ser ulike
-// trekninger fra pilot-haller (demo-hall-001..004).
+// `hall-default` får sin egen single-hall GoH ('demo-default-goh') og plan
+// bundet til den GoH-en. GamePlanEngineBridge krever GoH-medlemskap for
+// å spawne scheduled-games — derfor kan vi ikke ha hall-bound plan direkte.
+// DemoAutoMasterTickService starter + advancer plan-runs uavhengig av
+// Tobias' master-handlinger på pilot-haller. Hensikt: visuelt verifisere
+// hall-isolation — default-hall ser ulike trekninger fra pilot-haller.
 const DEFAULT_HALL_ID = "hall-default";
+const DEFAULT_HALL_GOH_ID = "demo-default-goh";
+// Max 24 chars — bootstrapHallGroupRooms bruker dette navnet til auto-
+// generert host-player som har 24-tegn-cap på Spillernavn.
+const DEFAULT_HALL_GOH_NAME = "Default Auto-GoH";
 const DEFAULT_HALL_PLAN_ID = "demo-plan-default";
 const DEFAULT_HALL_PLAN_NAME = "Default Hall — auto-master isolation";
 
@@ -1568,20 +1573,47 @@ async function seedGameCatalogAndPlans(client: Client): Promise<void> {
     `  [game-plan-items] ${DEMO_CATALOG_ENTRIES.length} items (position 1..${DEMO_CATALOG_ENTRIES.length}, alle med bonusOverride=null)`,
   );
 
-  // 5) Seed default-hall plan (Tobias-direktiv 2026-05-11) — direkte bundet
-  //    til `hall-default` (ikke GoH). Brukes som diagnostic for hall-isolation:
-  //    pilot-haller styres manuelt av Tobias som master; default-hall får
-  //    auto-master via DemoAutoMasterTickService når DEMO_AUTO_MASTER_ENABLED
-  //    er aktivert. Inneholder kun bingo (item 1) for å holde testen rask;
-  //    plan blir aldri ferdig (auto-master starter rundt på nytt).
+  // 5) Seed default-hall single-hall GoH + plan (Tobias-direktiv 2026-05-11).
+  //    Bridge krever GoH-medlemskap for å spawne scheduled-games, så
+  //    hall-default får sin egen GoH med kun seg selv som medlem. Det er
+  //    arkitektonisk "uvanlig" men teknisk korrekt — én-hall-GoH er ikke
+  //    forbudt av schema. Plan bindes til denne GoH-en. Auto-master via
+  //    DemoAutoMasterTickService starter + advancer rundt på rundt.
+  await client.query(
+    `INSERT INTO app_hall_groups (id, name, status, master_hall_id, products_json, extra_json, created_by)
+     VALUES ($1, $2, 'active', $3, '[]'::jsonb, $4::jsonb, NULL)
+     ON CONFLICT (id) DO UPDATE
+       SET name = EXCLUDED.name,
+           status = 'active',
+           master_hall_id = EXCLUDED.master_hall_id,
+           extra_json = EXCLUDED.extra_json,
+           deleted_at = NULL,
+           updated_at = now()`,
+    [
+      DEFAULT_HALL_GOH_ID,
+      DEFAULT_HALL_GOH_NAME,
+      DEFAULT_HALL_ID,
+      JSON.stringify({ masterHallId: DEFAULT_HALL_ID, kind: "default-auto" }),
+    ],
+  );
+  await client.query(
+    `INSERT INTO app_hall_group_members (group_id, hall_id)
+     VALUES ($1, $2)
+     ON CONFLICT (group_id, hall_id) DO NOTHING`,
+    [DEFAULT_HALL_GOH_ID, DEFAULT_HALL_ID],
+  );
+  console.log(
+    `  [hall-group]      ${DEFAULT_HALL_GOH_NAME} (id=${DEFAULT_HALL_GOH_ID}, single-hall: ${DEFAULT_HALL_ID})`,
+  );
+
   await upsertGamePlan(client, {
     id: DEFAULT_HALL_PLAN_ID,
     name: DEFAULT_HALL_PLAN_NAME,
     description:
       "Auto-master-plan for hall-default (Tobias 2026-05-11 hall-isolation-test). " +
       "Driver av DemoAutoMasterTickService når DEMO_AUTO_MASTER_ENABLED=true.",
-    hallId: DEFAULT_HALL_ID,
-    groupOfHallsId: null,
+    hallId: null,
+    groupOfHallsId: DEFAULT_HALL_GOH_ID,
     weekdays: DEMO_PLAN_WEEKDAYS,
     startTime: DEMO_PLAN_START_TIME,
     endTime: DEMO_PLAN_END_TIME,
@@ -1596,7 +1628,7 @@ async function seedGameCatalogAndPlans(client: Client): Promise<void> {
     notes: "Auto-master iteration item — gjentakes når plan-run finishes.",
   });
   console.log(
-    `  [game-plan]       ${DEFAULT_HALL_PLAN_ID} (${DEFAULT_HALL_PLAN_NAME}, hall=${DEFAULT_HALL_ID}, 1 item)`,
+    `  [game-plan]       ${DEFAULT_HALL_PLAN_ID} (${DEFAULT_HALL_PLAN_NAME}, group=${DEFAULT_HALL_GOH_ID}, 1 item)`,
   );
 }
 

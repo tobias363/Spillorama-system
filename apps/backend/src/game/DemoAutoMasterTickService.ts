@@ -79,14 +79,27 @@ export interface DemoAutoMasterTickResult {
 /**
  * Synthetic actor brukt av cron-en. role=ADMIN gir `assertMaster` pass
  * uten å kreve at hall-en matcher actor.hallId.
+ *
+ * BUG-FIX 2026-05-11: userId må peke på en eksisterende rad i app_users
+ * fordi `app_game_plan_run.master_user_id` har FK-constraint.
+ * Bruker den seedede demo-admin-en i stedet for en syntetisk id.
  */
 const DEMO_AUTO_MASTER_ACTOR: MasterActor = {
-  userId: "demo-auto-master",
+  userId: "demo-user-admin",
   hallId: "system",
   role: "ADMIN",
 };
 
 const DEFAULT_TARGET_HALLS: ReadonlyArray<string> = ["hall-default"];
+
+/**
+ * Tobias-direktiv 2026-05-11: "trekning skal gå hvert 3 sekund" på default-
+ * hall. Dette overrider per-game `seconds` fra ticket_config så
+ * Game1AutoDrawTickService trekker baller med 3-sek-intervall i stedet for
+ * default 5. Pilot-haller er IKKE påvirket (de styres av sin egen plan-
+ * config og master).
+ */
+const DEFAULT_HALL_BALL_INTERVAL_SECONDS = 3;
 
 /**
  * `process.env.DEMO_AUTO_MASTER_ENABLED` flag. Tjenesten er KUN aktiv
@@ -159,21 +172,48 @@ export class DemoAutoMasterTickService {
       return;
     }
 
-    // 2) Plan ferdig for dagen → skip.
+    // 2) Plan ferdig → slett run så cron kan starte ny iteration.
+    //    Tobias-direktiv 2026-05-11: default-hall skal LOOP-e auto-master
+    //    kontinuerlig — ikke stoppe når 1-item-planen er ferdig. Slett
+    //    finished run så getOrCreateForToday lager en ny idle-run neste tick.
     if (run && run.status === "finished") {
+      await this.pool.query(
+        `DELETE FROM ${this.schema}.app_game_plan_run WHERE id = $1`,
+        [run.id],
+      );
+      log.info(
+        { hallId, planRunId: run.id },
+        "[demo-auto-master] slettet finished run for ny iteration",
+      );
       result.skipped++;
       return;
     }
 
-    // 3) Ingen run → master.start.
-    if (!run) {
-      log.info({ hallId, businessDate }, "[demo-auto-master] starter ny plan-run");
+    // 3) Ingen run eller run=idle uten scheduled-game → master.start.
+    //    Bug-fix 2026-05-11: tidligere sjekket vi kun (!run), men
+    //    planRunService.findForDay returnerer ofte en eksisterende idle-run
+    //    fra forrige sesjon. Hvis ingen scheduled-game finnes for
+    //    current_position må vi fortsatt kalle start() — som er idempotent
+    //    (idle→running) og oppretter scheduled-game via engine-bridge.
+    const scheduledGameStatus = run
+      ? await this.getCurrentScheduledGameStatus(run.id, run.currentPosition)
+      : null;
+
+    if (!run || (run.status === "idle" && scheduledGameStatus === null)) {
+      log.info(
+        { hallId, businessDate, runStatus: run?.status ?? null },
+        "[demo-auto-master] starter ny plan-run / scheduled-game",
+      );
       try {
         await this.masterActionService.start({
           actor: DEMO_AUTO_MASTER_ACTOR,
           hallId,
         });
         result.startedNew++;
+        // Override ticket_config.spill1.timing.seconds for default-hall så
+        // Game1AutoDrawTickService trekker baller med 3-sek-intervall.
+        // Idempotent — påvirker kun den nyeste scheduled-game-raden.
+        await this.applyDefaultHallTimingOverride(hallId);
       } catch (err) {
         // Plan-mangler eller HALL_NOT_IN_GROUP er forventet hvis seed
         // ikke har kjørt — logg som info ikke error.
@@ -194,12 +234,13 @@ export class DemoAutoMasterTickService {
       return;
     }
 
-    // 4) Aktiv scheduled-game er finished → advance til neste.
-    const scheduledGameStatus = await this.getCurrentScheduledGameStatus(
-      run.id,
-      run.currentPosition,
-    );
-    if (scheduledGameStatus === "finished") {
+    // 4) Aktiv scheduled-game er ferdig (`completed`/`cancelled`) → advance.
+    //    Bug-fix 2026-05-11: tabellen bruker `completed`/`cancelled`-status,
+    //    ikke `finished` (som var den feilaktige antakelsen).
+    if (
+      scheduledGameStatus === "completed" ||
+      scheduledGameStatus === "cancelled"
+    ) {
       log.info(
         { hallId, planRunId: run.id, position: run.currentPosition },
         "[demo-auto-master] advancer til neste posisjon",
@@ -210,6 +251,7 @@ export class DemoAutoMasterTickService {
           hallId,
         });
         result.advanced++;
+        await this.applyDefaultHallTimingOverride(hallId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("PLAN_RUN_FINISHED")) {
@@ -241,5 +283,62 @@ export class DemoAutoMasterTickService {
       [planRunId, currentPosition],
     );
     return rows[0]?.status ?? null;
+  }
+
+  /**
+   * Override `ticket_config_json.spill1.timing.seconds` på default-hall sin
+   * nyeste scheduled-game-rad til 3 sekunder (Tobias-direktiv 2026-05-11).
+   *
+   * Game1AutoDrawTickService leser `seconds` fra ticket_config og bruker
+   * det som ball-intervall (default 5). Pilot-haller skal IKKE påvirkes —
+   * vi patcher kun raden hvor master_hall_id = hallId.
+   *
+   * Idempotent — re-kjøring med samme verdi er no-op (DB-row uendret).
+   */
+  private async applyDefaultHallTimingOverride(hallId: string): Promise<void> {
+    try {
+      // PostgreSQL JSONB merge: behold eksisterende ticket_config, men
+      // overstyr `spill1.timing.seconds` til 3.
+      await this.pool.query(
+        `UPDATE ${this.schema}.app_game1_scheduled_games
+         SET ticket_config_json = jsonb_set(
+           jsonb_set(
+             jsonb_set(
+               COALESCE(ticket_config_json::jsonb, '{}'::jsonb),
+               '{spill1}',
+               COALESCE(ticket_config_json::jsonb -> 'spill1', '{}'::jsonb),
+               true
+             ),
+             '{spill1,timing}',
+             COALESCE(ticket_config_json::jsonb -> 'spill1' -> 'timing', '{}'::jsonb),
+             true
+           ),
+           '{spill1,timing,seconds}',
+           to_jsonb($2::int),
+           true
+         )
+         WHERE master_hall_id = $1
+           AND status IN ('scheduled', 'purchase_open', 'ready_to_start', 'running')
+           AND id = (
+             SELECT id FROM ${this.schema}.app_game1_scheduled_games
+             WHERE master_hall_id = $1
+               AND status IN ('scheduled', 'purchase_open', 'ready_to_start', 'running')
+             ORDER BY created_at DESC
+             LIMIT 1
+           )`,
+        [hallId, DEFAULT_HALL_BALL_INTERVAL_SECONDS],
+      );
+      log.debug(
+        { hallId, seconds: DEFAULT_HALL_BALL_INTERVAL_SECONDS },
+        "[demo-auto-master] timing override applied",
+      );
+    } catch (err) {
+      // Fail-soft — hvis JSONB-patchet feiler, kjøres draws bare med
+      // default 5-sek-intervall. Ikke kritisk for hall-isolation-bevis.
+      log.warn(
+        { err, hallId },
+        "[demo-auto-master] kunne ikke override timing — bruker default seconds",
+      );
+    }
   }
 }
