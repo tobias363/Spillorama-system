@@ -52,11 +52,11 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 5 | 2026-05-10 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 14 | 2026-05-11 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
-| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 7 | 2026-05-11 |
+| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 8 | 2026-05-11 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 10 | 2026-05-11 |
 
-**Total:** 82 entries (per 2026-05-11)
+**Total:** 83 entries (per 2026-05-11)
 
 ---
 
@@ -917,6 +917,28 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - PR #1184
 - `scripts/dev/reset-state.mjs`
 - ADR-0014 (idempotent migrations)
+
+### §9.8 — Per-IP rate-limiting er industri-anti-pattern for autenticerte routes (NAT-pool-problemet)
+
+**Severity:** P0 (pilot-blokker — ville låst hele bingolokale ute samtidig)
+**Oppdaget:** 2026-05-11 (Tobias: "Vi er nødt til å angripe dette på en annen måte nå. ingenting av det som blir gjort har noen effekt. bør det gjøres mer research i hvordan andre håndterer dette?")
+**Symptom:** Patches på rate-limit (§9.7 + PR #1226 localhost-bypass) løste IKKE rotårsaken. Tobias fortsatt blokkert. Research-agent avdekket at vi rate-limitet på feil dimensjon.
+**Root cause:** Per-IP-keying er trygt KUN for anonymous routes (login-brute-force-vern). For autenticerte routes vil 250 spillere i ett bingolokale **dele én NAT-IP** — hele lokalet treffer rate-limit samtidig. Industry-standard (Stripe/GitHub/Cloudflare/Discord) nøkler autenticerte routes på `userId` fra JWT-claim eller token-hash, ikke IP.
+**Fix:** Tre PR-er som etterlikner Stripe-pattern:
+- PR #1229 — per-user keying via SHA-256-hash av Bearer-token (Spillorama bruker opaque sessions, ikke JWT, men hash gir samme funksjonelle isolering). Per-IP fallback for anonymous routes.
+- PR #1230 — Redis response-cache 15-30s på stille read-endpoints (`/api/games/status`, `/api/halls`). Polling-trafikk faller fra ~3000 → ~50 handler-kjøringer per minutt ved pilot-skala.
+- PR #1231 — klient quick-wins (respekter Retry-After, dedupe duplicate-fetches, halver spillvett-poll-frekvens).
+**Prevention:**
+- ALDRI rate-limit på per-IP for autenticerte routes som spillere bruker fra delt nettverk
+- Bruk JWT-claim (eller token-hash for opaque-sessions) som primær nøkkel
+- Per-IP er kun for anonymous routes (login/register/csp-report) som brute-force-vern
+- Cache + push istedenfor poll for live state — sliding-window-rate-limit kan ALDRI rate-allowe poll-trafikk fra mange klienter pålitelig
+**Related:**
+- PR #1229 (per-user keying)
+- PR #1230 (Redis response-cache)
+- PR #1231 (klient polling-quick-wins)
+- `docs/research/RATE_LIMITING_INDUSTRY_RESEARCH_2026-05-11.md` (full industry-research)
+- §9.7 (akutt-fix før dette) + §8.4 (doc-vinner-prinsipp — research-rapport ble doc)
 
 ### §9.7 — HTTP rate-limit kastet spillere ut etter 4 refresh
 
