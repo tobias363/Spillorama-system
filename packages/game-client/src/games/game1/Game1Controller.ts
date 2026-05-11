@@ -43,7 +43,6 @@ import { Game1SocketActions } from "./logic/SocketActions.js";
 import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
 import { Game1LobbyFallback } from "./logic/LobbyFallback.js";
 import { Game1LobbyStateBinding } from "./logic/LobbyStateBinding.js";
-import { WaitingForMasterOverlay } from "./components/WaitingForMasterOverlay.js";
 import type { Phase } from "./logic/Phase.js";
 
 /**
@@ -167,28 +166,6 @@ class Game1Controller implements GameController {
   private lobbyStateBinding: Game1LobbyStateBinding | null = null;
   /** Unsubscribe-handle for `lobbyStateBinding.onChange`. */
   private lobbyStateUnsub: (() => void) | null = null;
-  /**
-   * Spillerklient-rebuild Fase 3 (2026-05-10): "Bingo (venter på master)"-
-   * overlay som vises når `lobbyState.overallStatus !== "running"` etter
-   * vellykket `socket.createRoom`. Dette dekker:
-   *   - Pre-game (bonger åpent for kjøp men master har ikke trygget Start)
-   *   - Mellom runder (etter Fullt Hus, før neste runde-spawn)
-   *   - Pause/finished/closed
-   *
-   * Tobias-direktiv 2026-05-09: spilleren skal ALDRI se "..." eller
-   * andre fallback-views — bare "neste planlagte spill". Overlay-en er
-   * en HTML-overlay som ligger over PlayScreen-Pixi-stage med
-   * `pointer-events: none` på backdrop slik at BuyPopup fortsatt kan
-   * åpnes/klikkes under.
-   *
-   * Forskjell fra `lobbyFallback`: lobbyFallback aktiveres KUN når
-   * `socket.createRoom` feiler (typisk pre-master-trigger der ingen
-   * scheduled-game finnes). `waitingForMasterOverlay` aktiveres ETTER
-   * vellykket join — den dekker "alt-er-klart-men-master-har-ikke-
-   * trykket-Start"-tilfellet.
-   */
-  private waitingForMasterOverlay: WaitingForMasterOverlay | null = null;
-
   /**
    * Mini-game-kø (Tobias 2026-04-26): backend triggerer mini-game POST-commit
    * umiddelbart etter Fullt Hus-payout. Hvis WinScreenV2 (Fullt Hus-fontene)
@@ -386,14 +363,18 @@ class Game1Controller implements GameController {
       this.playScreen?.setBuyPopupTicketConfig(ticketConfig);
 
       // Spillerklient-rebuild Fase 3 (2026-05-10): forward overall-status
-      // til PlayScreen + drive "venter på master"-overlay. Når master
-      // klikker Start endres overallStatus fra purchase_open/idle/...
-      // til "running" — overlay-en dismisses og countdown kan kjøre.
-      // Etter Fullt Hus dismisses overlay-en igjen for neste runde
-      // basert på server-pushed state-overgang (running → idle/finished
-      // → purchase_open).
+      // til PlayScreen for å gating-e CenterBall-countdown. Når master
+      // klikker Start endres overallStatus fra purchase_open/idle/... til
+      // "running" — countdown kan da kjøre, og CenterBall byttes fra
+      // idle-tekst til live-ball-rendering. Etter Fullt Hus går status
+      // tilbake til idle/purchase_open og idle-text vises igjen.
+      //
+      // 2026-05-11 (Tobias-direktiv): `WaitingForMasterOverlay` er
+      // fjernet. Idle-text rendres direkte i CenterBall-posisjonen via
+      // `PlayScreen.setBuyPopupDisplayName` (forwarder catalog-navn til
+      // både BuyPopup og CenterBall) + `PlayScreen.update()`-flyten som
+      // toggles ball vs idle-text basert på state.
       this.playScreen?.setLobbyOverallStatus(state?.overallStatus ?? null);
-      this.applyWaitingForMasterFromLobbyState(state);
     });
     // Tobias-bug 2026-05-11: `await` istedenfor `void` — initial HTTP-fetch
     // må fullføre FØR createRoom slik at første room:update ikke overskriver
@@ -594,11 +575,9 @@ class Game1Controller implements GameController {
     }
     this.lobbyStateBinding?.stop();
     this.lobbyStateBinding = null;
-    // Spillerklient-rebuild Fase 3 (2026-05-10): cleanup "venter på
-    // master"-overlay. Idempotent — destroy() er trygt å kalle selv
-    // om overlay aldri ble mounted.
-    this.waitingForMasterOverlay?.destroy();
-    this.waitingForMasterOverlay = null;
+    // 2026-05-11 (Tobias-direktiv): `WaitingForMasterOverlay` er fjernet
+    // helt. Idle-tekst eier nå av CenterBall som ryddes opp via
+    // `root.destroy({ children: true })`.
     this.clearScreen();
     this.root.destroy({ children: true });
   }
@@ -803,11 +782,10 @@ class Game1Controller implements GameController {
     this.playScreen?.enableBuyMore();
     this.playScreen?.hideBuyPopup();
 
-    // Spillerklient-rebuild Fase 3 (2026-05-10): defensive overlay-hide
-    // ved gameStarted. Lobby-state-update kommer typisk med få ms delay
-    // etter room:update — vi vil ikke at overlay-en skal flickre oppå
-    // live-runden i mellomtiden. Idempotent — no-op hvis allerede hidden.
-    this.waitingForMasterOverlay?.hide();
+    // 2026-05-11 (Tobias-direktiv): `WaitingForMasterOverlay` er fjernet.
+    // PlayScreen.update() håndterer idle-text-mode-toggle basert på
+    // state.gameStatus = RUNNING → hideIdleText automatisk. Ingen
+    // defensiv overlay-hide nødvendig her.
 
     // Reset announced numbers for the new round
     this.deps.audio.resetAnnouncedNumbers();
@@ -1386,77 +1364,6 @@ class Game1Controller implements GameController {
     screen.setLobbyOverallStatus(lobbyState?.overallStatus ?? null);
 
     return screen;
-  }
-
-  /**
-   * Spillerklient-rebuild Fase 3 (2026-05-10): driver "venter på master"-
-   * overlay basert på `Spill1LobbyState.overallStatus`. Kalt fra
-   * lobby-binding-onChange ved hver state-update.
-   *
-   * Logikk:
-   *   - `running`         → master har trykket Start. Skjul overlay.
-   *   - alt annet         → vis/oppdater overlay med catalog-navn +
-   *                          plan-info. Bruker mounter den lazy ved
-   *                          første kall hvor status !== running.
-   *   - `null` (lobby-state ennå ikke ankommet) → vi vet ikke ennå —
-   *                          ikke mount overlay (vil bli kalt på nytt
-   *                          så snart første HTTP-fetch eller socket-
-   *                          subscribe leverer state). Hvis caller har
-   *                          allerede vist overlay-en, beholdes den —
-   *                          stale-state er bedre enn å flicker bort
-   *                          for så å vise på nytt.
-   *
-   * Game1Controller eier overlay-instansen lazily — første gang vi
-   * trenger den oppretter vi en. Cleanup skjer i `destroy()`.
-   *
-   * Tobias-direktiv 2026-05-09: ingen "..." eller fallback-views.
-   * "Venter på master" er den ENESTE rendrede meldingen mellom runder.
-   */
-  private applyWaitingForMasterFromLobbyState(
-    state: import("@spillorama/shared-types/api").Spill1LobbyState | null,
-  ): void {
-    // Hvis lobbyFallback (pre-join overlay) er aktiv har vi ikke joinet
-    // rommet ennå — fallback-en eier hele skjermen. Ikke vis "venter på
-    // master" oppå den.
-    if (this.lobbyFallback !== null) return;
-
-    if (!state) {
-      // Ingen lobby-state ennå. Ikke trigg overlay før vi vet om master
-      // har trygget eller ikke — initial render i `start()` har allerede
-      // vist LoadingOverlay.
-      return;
-    }
-
-    if (state.overallStatus === "running") {
-      // Master har trygget — skjul overlay hvis aktiv.
-      this.waitingForMasterOverlay?.hide();
-      return;
-    }
-
-    // Robusthet mot race: hvis room-state allerede sier RUNNING men
-    // lobby-state-update fortsatt henger igjen på purchase_open/idle,
-    // skal overlay-en ikke flickere oppå live-runden. Server pusher
-    // typisk room:update før spill1:lobby:state-update — vi tar den
-    // mest "live"-aktive kilden.
-    const bridgeState = this.deps.bridge.getState();
-    if (bridgeState.gameStatus === "RUNNING") {
-      this.waitingForMasterOverlay?.hide();
-      return;
-    }
-
-    // Status er noe annet enn "running" — mount/oppdater overlay.
-    if (!this.waitingForMasterOverlay) {
-      const container = this.deps.app.app.canvas.parentElement ?? document.body;
-      this.waitingForMasterOverlay = new WaitingForMasterOverlay({
-        container,
-      });
-    }
-    this.waitingForMasterOverlay.show({
-      catalogDisplayName: state.nextScheduledGame?.catalogDisplayName ?? null,
-      currentPosition: state.currentRunPosition || null,
-      totalPositions: state.totalPositions || null,
-      planName: state.planName,
-    });
   }
 
   private openLuckyPicker(): void {

@@ -220,7 +220,12 @@ export class PlayScreen extends Container {
     this.centerBall.y = RING_TOP_Y;
     this.centerBall.setBaseY(RING_TOP_Y);
     this.addChild(this.centerBall);
-    this.centerBall.showWaiting();
+    // Initial: vis idle-text "Neste spill: Bingo" + kjøp-oppfordring.
+    // setIdleText er kalt med fallback-name; Game1Controller overstyrer
+    // straks via `setCenterBallIdleText(displayName)` så snart første
+    // lobby-state-update kommer inn.
+    this.centerBall.setIdleText(null);
+    this.centerBall.showIdleText();
 
     // ── HTML overlay layer ────────────────────────────────────────────────
     this.overlayManager = new HtmlOverlayManager(container);
@@ -434,11 +439,12 @@ export class PlayScreen extends Container {
     this.lastState = state;
 
     // Countdown / center-ball:
-    //   - RUNNING → show the last drawn ball, stop countdown
+    //   - RUNNING → show the last drawn ball, stop countdown, hide idle-text
     //   - Else with millisUntilNextStart > 0 AND lobby.overallStatus === "running"
-    //     → run countdown (server har bekreftet at master har trygget runden)
-    //   - Else → idle "waiting" view (Game1Controller mounter "venter på
-    //     master"-overlay over toppen separat)
+    //     → run countdown (server har bekreftet at master har trygget runden),
+    //       hide idle-text
+    //   - Else → idle "Neste spill"-tekst (erstatter den gamle ballen +
+    //     "venter på master"-overlay 2026-05-11)
     //
     // Spillerklient-rebuild Fase 3 (2026-05-10) — Tobias-direktiv 2026-05-09:
     // klient skal ALDRI starte en lokal countdown før master har trykket
@@ -448,10 +454,25 @@ export class PlayScreen extends Container {
     // viste timer som ikke matchet server-tilstand når master ennå ikke
     // hadde trigget. Nå venter vi på server-pushed overgang
     // `overallStatus: purchase_open → running` før countdown starter.
+    //
+    // Idle-text-modus (2026-05-11, Tobias-direktiv) erstatter
+    // `WaitingForMasterOverlay`. Når runden ikke er aktiv viser CenterBall
+    // "Neste spill: {displayName}" + "Kjøp bonger for å være med i
+    // trekningen" direkte i ball-posisjonen (selve ballen + tall skjules).
+    //
+    // Hall-isolation-fix (2026-05-11, Tobias-direktiv): når
+    // `lobbyOverallStatus === "closed"` skal vi IKKE vise "Neste spill"
+    // — da har hallen ingen aktiv plan (ikke medlem av GoH med plan, eller
+    // utenfor åpningstid). Bytt til `idle-mode="closed"` så CenterBall
+    // viser "Stengt / Ingen aktiv plan i hallen akkurat nå" i stedet for
+    // "Neste spill: Bingo". Dette forhindrer at default-hall (utenfor
+    // pilot-GoH) viser samme view som master-hall.
     const lobbyRunning = this.lobbyOverallStatus === "running";
+    const lobbyClosed = this.lobbyOverallStatus === "closed";
     if (state.gameStatus === "RUNNING") {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
+      this.centerBall.hideIdleText();
       if (state.lastDrawnNumber !== null) this.centerBall.setNumber(state.lastDrawnNumber);
     } else if (
       lobbyRunning &&
@@ -460,10 +481,19 @@ export class PlayScreen extends Container {
     ) {
       this.leftInfo.startCountdown(state.millisUntilNextStart);
       this.centerBall.startCountdown(state.millisUntilNextStart);
+      // startCountdown kaller hideIdleText() internt — ingen behov for
+      // duplisert kall her.
     } else {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
-      this.centerBall.showWaiting();
+      // Sett idle-mode basert på lobby-state.
+      //   - `closed`     → "Stengt / Ingen aktiv plan i hallen akkurat nå"
+      //   - alt annet    → "Neste spill: {displayName}"
+      // Game1Controller pusher displayName via `setBuyPopupDisplayName`
+      // når lobby-state mottas — CenterBall fallback-tekst er "Bingo" om
+      // ingenting er satt enda (Tobias-direktiv: aldri blank).
+      this.centerBall.setIdleMode(lobbyClosed ? "closed" : "next-game");
+      this.centerBall.showIdleText();
     }
 
     // Tickets displayed depend on game phase:
@@ -621,9 +651,26 @@ export class PlayScreen extends Container {
    * aggregator-update. Game1Controller abonnerer på lobby-state og kaller
    * denne ved hver oppdatering. Trygt å kalle både når popup er åpen
    * (live-DOM-oppdatering) og lukket (lagres til neste showBuyPopup).
+   *
+   * 2026-05-11 (Tobias-direktiv): forwarder også navnet til CenterBall
+   * sitt idle-text-display. Når lobby-status er ikke-running viser
+   * CenterBall "Neste spill: {displayName}" + kjøp-oppfordring i samme
+   * posisjon som ballen vanligvis ligger. Når runden starter (status →
+   * running) skjules teksten automatisk.
    */
   setBuyPopupDisplayName(displayName: string | null | undefined): void {
     this.buyPopup.setDisplayName(displayName);
+    this.centerBall.setIdleText(displayName);
+  }
+
+  /**
+   * Test-hook + eksplisitt setter for CenterBall idle-text. Game1Controller
+   * bruker `setBuyPopupDisplayName` for å pushe samme catalog-displayName
+   * til både BuyPopup og CenterBall — denne metoden eksisterer for tester
+   * og fremtidige call-sites som vil oppdatere kun CenterBall.
+   */
+  setCenterBallIdleText(displayName: string | null | undefined): void {
+    this.centerBall.setIdleText(displayName);
   }
 
   /**
@@ -660,6 +707,18 @@ export class PlayScreen extends Container {
   setLobbyOverallStatus(status: Spill1LobbyOverallStatus | null): void {
     if (this.lobbyOverallStatus === status) return;
     this.lobbyOverallStatus = status;
+
+    // Hall-isolation-fix (Tobias 2026-05-11): hvis idle-text allerede er
+    // synlig (initial mount-state før noen room:update), oppdater
+    // CenterBall sin idle-mode umiddelbart. `update()` håndterer dette
+    // når lastState er satt, men før første game-state har kommet inn er
+    // lastState=null og update() trigges ikke. Vi må derfor sync mode
+    // her så `closed`-hall ikke viser "Neste spill" mellom mount og
+    // første room:update.
+    if (this.centerBall.isIdleTextVisible()) {
+      this.centerBall.setIdleMode(status === "closed" ? "closed" : "next-game");
+    }
+
     if (this.lastState) {
       this.update(this.lastState);
     }

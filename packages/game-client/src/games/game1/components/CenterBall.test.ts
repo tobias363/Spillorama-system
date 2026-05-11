@@ -169,3 +169,222 @@ describe("CenterBall idle-tween-kontrakt (round 4 Pixi blink-fiks)", () => {
     ball.destroy();
   });
 });
+
+describe("CenterBall idle-text-modus (2026-05-11, Tobias-direktiv)", () => {
+  // Idle-text-modus erstatter `WaitingForMasterOverlay`. Når runden ikke
+  // er aktiv viser CenterBall to linjer:
+  //   Linje 1: "Neste spill: {displayName}"
+  //   Linje 2: "Kjøp bonger for å være med i trekningen"
+  // og skjuler ball-sprite + number-text. Mutating-handlinger
+  // (showNumber/setNumber/startCountdown) skjuler idle-text automatisk.
+
+  function readIdleHeadline(ball: CenterBall): string {
+    // @ts-expect-error — privat felt-access for assert.
+    return ball.idleHeadline.text as string;
+  }
+  function readIdleBody(ball: CenterBall): string {
+    // @ts-expect-error — privat felt-access for assert.
+    return ball.idleBody.text as string;
+  }
+  function isIdleHeadlineVisible(ball: CenterBall): boolean {
+    // @ts-expect-error — privat felt-access for assert.
+    return ball.idleHeadline.visible as boolean;
+  }
+  function isNumberTextVisible(ball: CenterBall): boolean {
+    // @ts-expect-error — privat felt-access for assert.
+    return ball.numberText.visible as boolean;
+  }
+
+  it("setIdleText + showIdleText rendrer 'Neste spill: Bingo' + 'Kjøp bonger ...'", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+
+    expect(ball.isIdleTextVisible()).toBe(true);
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+    expect(readIdleBody(ball)).toBe("Kjøp bonger for å være med i trekningen");
+    expect(isIdleHeadlineVisible(ball)).toBe(true);
+    expect(isNumberTextVisible(ball)).toBe(false);
+
+    ball.destroy();
+  });
+
+  it("setIdleText(null) faller tilbake til 'Bingo' (Tobias-default)", () => {
+    const ball = new CenterBall();
+    ball.setIdleText(null);
+    ball.showIdleText();
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+    ball.destroy();
+  });
+
+  it("setIdleText('') (tom streng) faller tilbake til 'Bingo'", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("");
+    ball.showIdleText();
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+    ball.destroy();
+  });
+
+  it("setIdleText oppdaterer headline live når idle-mode allerede er synlig", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    // Master advancer plan-item — display-name oppdateres.
+    ball.setIdleText("Innsatsen");
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Innsatsen");
+
+    ball.destroy();
+  });
+
+  it("showIdleText er idempotent (gjentatte kall er no-op)", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    ball.showIdleText();
+    ball.showIdleText();
+    expect(ball.isIdleTextVisible()).toBe(true);
+    ball.destroy();
+  });
+
+  // ── Hall-isolation fix (Tobias 2026-05-11): setIdleMode("closed") ────
+  // Default-hall som ikke er medlem av en GoH med aktiv plan skal IKKE vise
+  // "Neste spill: Bingo" — den skal vise "Stengt / Ingen aktiv plan".
+
+  it("setIdleMode default er 'next-game' (legacy-modus)", () => {
+    const ball = new CenterBall();
+    expect(ball.getIdleMode()).toBe("next-game");
+    ball.destroy();
+  });
+
+  it("setIdleMode('closed') + showIdleText rendrer 'Stengt' + 'Ingen aktiv plan ...'", () => {
+    const ball = new CenterBall();
+    ball.setIdleMode("closed");
+    ball.showIdleText();
+
+    expect(ball.isIdleTextVisible()).toBe(true);
+    expect(ball.getIdleMode()).toBe("closed");
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+    expect(readIdleBody(ball)).toBe("Ingen aktiv plan i hallen akkurat nå");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode('closed') ignorerer setIdleText-displayName (Bingo skjules)", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Innsatsen");
+    ball.setIdleMode("closed");
+    ball.showIdleText();
+
+    // Selv om displayName er satt til "Innsatsen", skal closed-mode
+    // overstyre med "Stengt"-tekst.
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+    expect(readIdleHeadline(ball)).not.toContain("Innsatsen");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode switching live oppdaterer rendret tekst", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    // Hall-state endres til closed (eks. plan utløpte midt i kveld).
+    ball.setIdleMode("closed");
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+
+    // Hall-state åpnes igjen.
+    ball.setIdleMode("next-game");
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode er idempotent — gjentatte kall med samme mode er no-op", () => {
+    const ball = new CenterBall();
+    ball.setIdleMode("closed");
+    ball.setIdleMode("closed");
+    ball.setIdleMode("closed");
+    expect(ball.getIdleMode()).toBe("closed");
+    ball.destroy();
+  });
+
+  it("hideIdleText restore ball-sprite + number-text-visibilitet", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    expect(isNumberTextVisible(ball)).toBe(false);
+
+    ball.hideIdleText();
+    expect(ball.isIdleTextVisible()).toBe(false);
+    expect(isIdleHeadlineVisible(ball)).toBe(false);
+    expect(isNumberTextVisible(ball)).toBe(true);
+
+    ball.destroy();
+  });
+
+  it("hideIdleText er idempotent", () => {
+    const ball = new CenterBall();
+    ball.hideIdleText();
+    ball.hideIdleText();
+    expect(ball.isIdleTextVisible()).toBe(false);
+    ball.destroy();
+  });
+
+  it("showNumber auto-skjuler idle-text", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    expect(ball.isIdleTextVisible()).toBe(true);
+
+    ball.showNumber(42);
+    expect(ball.isIdleTextVisible()).toBe(false);
+    expect(isNumberTextVisible(ball)).toBe(true);
+    ball.destroy();
+  });
+
+  it("setNumber auto-skjuler idle-text", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+
+    ball.setNumber(7);
+    expect(ball.isIdleTextVisible()).toBe(false);
+    ball.destroy();
+  });
+
+  it("startCountdown auto-skjuler idle-text", () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+
+    ball.startCountdown(5_000);
+    expect(ball.isIdleTextVisible()).toBe(false);
+    ball.stopCountdown();
+    ball.destroy();
+  });
+
+  it("showWaiting i idle-mode bevarer idle-state (ingen flicker til '...')", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Innsatsen");
+    ball.showIdleText();
+
+    ball.showWaiting();
+    // Idle-mode må fortsatt være synlig, ikke fallback til "..."
+    expect(ball.isIdleTextVisible()).toBe(true);
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Innsatsen");
+
+    ball.destroy();
+  });
+
+  it("showWaiting uten aktiv idle-mode setter '...' som før (legacy-fallback)", () => {
+    const ball = new CenterBall();
+    ball.showWaiting();
+    expect(ball.isIdleTextVisible()).toBe(false);
+    // @ts-expect-error — privat felt-access.
+    expect(ball.numberText.text as string).toBe("...");
+    ball.destroy();
+  });
+});

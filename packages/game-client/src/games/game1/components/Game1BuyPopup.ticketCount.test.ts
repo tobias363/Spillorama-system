@@ -106,7 +106,7 @@ describe("Bug B 2026-04-30 — Game1BuyPopup ticketCount multiplicity", () => {
       captured = selections;
     });
 
-    const row = findRowByName(container, "Large Yellow");
+    const row = findRowByName(container, "Stor gul");
     expect(row).not.toBeNull();
     clickPlus(row!, 1);
 
@@ -137,7 +137,7 @@ describe("Bug B 2026-04-30 — Game1BuyPopup ticketCount multiplicity", () => {
       captured = selections;
     });
 
-    const row = findRowByName(container, "Large Yellow");
+    const row = findRowByName(container, "Stor gul");
     clickPlus(row!, 2);
 
     const buyBtn = findBuyButton(container);
@@ -153,8 +153,8 @@ describe("Bug B 2026-04-30 — Game1BuyPopup ticketCount multiplicity", () => {
       captured = selections;
     });
 
-    const smallRow = findRowByName(container, "Small Yellow");
-    const largeRow = findRowByName(container, "Large White");
+    const smallRow = findRowByName(container, "Liten gul");
+    const largeRow = findRowByName(container, "Stor hvit");
     clickPlus(smallRow!, 1);
     clickPlus(largeRow!, 1);
 
@@ -171,7 +171,7 @@ describe("Bug B 2026-04-30 — Game1BuyPopup ticketCount multiplicity", () => {
   });
 
   it("Popup-totalen for Large Yellow qty=1 viser '30 kr · 3 brett' (display + price riktig)", () => {
-    const row = findRowByName(container, "Large Yellow");
+    const row = findRowByName(container, "Stor gul");
     clickPlus(row!, 1);
 
     // Total-row viser "Total: NN kr". Vi sjekker bare at 30 kr finnes på siden.
