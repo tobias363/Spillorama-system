@@ -602,6 +602,33 @@ export class SpilloramaSocket {
     return this.emit(SocketEvents.ROOM_JOIN, payload);
   }
 
+  /**
+   * BIN-822 follow-up (Tobias 2026-05-11): join inn på et schedulert Spill 1
+   * via `scheduledGameId` i stedet for ad-hoc `room:create`. Server slår opp
+   * scheduled-game-rad, kaller `engine.createRoom` + `assignRoomCode` ved
+   * første join, og returnerer samme snapshot-shape som
+   * `room:create`/`room:join` så bridge ikke trenger spesialcase.
+   *
+   * Bakgrunn — den kritiske wiring-gapen:
+   *   Backend har `game1:join-scheduled` som binder rommet til den
+   *   schedulerte runden. Klient brukte tidligere `socket.createRoom`-flyten
+   *   som returnerer per-hall ad-hoc room-code. Resultat: når master
+   *   (eller demo-auto-master) starter en schedulert runde, emittes
+   *   `draw:new` til scheduled-game-rommet, mens klient lytter på
+   *   ad-hoc-rommet. Spilleren ser ingen baller trukket.
+   *
+   *   Kontrakt: caller MÅ ha verifisert at scheduled-game er joinable
+   *   (status ∈ {purchase_open, running}) via lobby-state. Hvis ikke,
+   *   server kaster GAME_NOT_JOINABLE.
+   */
+  async joinScheduledGame(payload: {
+    scheduledGameId: string;
+    hallId: string;
+    playerName: string;
+  }): Promise<AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>> {
+    return this.emit("game1:join-scheduled", payload);
+  }
+
   async resumeRoom(payload: { roomCode: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
     return this.emit(SocketEvents.ROOM_RESUME, payload);
   }

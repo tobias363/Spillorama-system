@@ -167,6 +167,21 @@ class Game1Controller implements GameController {
   /** Unsubscribe-handle for `lobbyStateBinding.onChange`. */
   private lobbyStateUnsub: (() => void) | null = null;
   /**
+   * Klient-auto-join-scheduled-game (Tobias 2026-05-11): siste scheduled
+   * game-id som klient har joinet på. Brukes for å detektere plan-advance —
+   * når `nextScheduledGame.scheduledGameId` i lobby-state endrer seg fra
+   * denne lagrede verdien til en ny non-null verdi, re-emit
+   * `game1:join-scheduled` mot ny id. Null = klient har ikke joinet via
+   * scheduled-flyten (typisk legacy `socket.createRoom`-flyt eller
+   * pre-join).
+   *
+   * Delta-watcher (ikke per-tick): vi sammenligner mot lagret id i
+   * onChange-handleren, så re-join skjer KUN når den faktiske gameId-en
+   * endrer seg — ikke ved hver lobby-state-tick (overallStatus,
+   * catalogDisplayName, etc. endrer seg uten at gameId endres).
+   */
+  private joinedScheduledGameId: string | null = null;
+  /**
    * Mini-game-kø (Tobias 2026-04-26): backend triggerer mini-game POST-commit
    * umiddelbart etter Fullt Hus-payout. Hvis WinScreenV2 (Fullt Hus-fontene)
    * fortsatt vises, holder vi tilbake mini-game-overlayet og spiller det av
@@ -375,6 +390,30 @@ class Game1Controller implements GameController {
       // både BuyPopup og CenterBall) + `PlayScreen.update()`-flyten som
       // toggles ball vs idle-text basert på state.
       this.playScreen?.setLobbyOverallStatus(state?.overallStatus ?? null);
+
+      // Klient-auto-join-scheduled-game delta-watcher (Tobias 2026-05-11):
+      //
+      // Plan-advance scenario: master flytter posisjonen i spilleplanen,
+      // backend spawner nytt scheduled-game-rad og lobby-broadcasten
+      // oppdaterer `nextScheduledGame.scheduledGameId`. Klient som nettopp
+      // joinet den FORRIGE runden må re-emit `game1:join-scheduled` mot
+      // ny id slik at vi bytter til riktig rom.
+      //
+      // Vi re-joiner BARE når gameId-en faktisk endret seg (delta), ikke
+      // ved hver onChange-tick. Andre felter (overallStatus,
+      // catalogDisplayName, ticketColors) endrer seg uten at gameId
+      // endres — re-join på de ville vært overflødig støy mot serveren.
+      const nextScheduledGameId = this.pickJoinableScheduledGameId(state);
+      if (
+        nextScheduledGameId !== null &&
+        this.joinedScheduledGameId !== null &&
+        nextScheduledGameId !== this.joinedScheduledGameId
+      ) {
+        // Fire-and-forget: kjør re-join asynkront så onChange-listeneren
+        // ikke blokkerer. Feil logges men kaster ikke ut — caller-state
+        // forblir på forrige room til neste runde reload-er klient.
+        void this.handleScheduledGameDelta(nextScheduledGameId);
+      }
     });
     // Tobias-bug 2026-05-11: `await` istedenfor `void` — initial HTTP-fetch
     // må fullføre FØR createRoom slik at første room:update ikke overskriver
@@ -385,10 +424,42 @@ class Game1Controller implements GameController {
 
     // Join or create room
     this.loader.setState("JOINING_ROOM");
-    const joinResult = await socket.createRoom({
-      hallId: this.deps.hallId,
-      gameSlug: "bingo",
-    });
+    // Klient-auto-join-scheduled-game (Tobias 2026-05-11):
+    //
+    // Bakgrunn — kritisk wiring-gap:
+    //   Backend har `game1:join-scheduled`-handler (game1ScheduledEvents.ts
+    //   :391-443) som binder rommet til en schedulert runde via
+    //   `engine.createRoom` + `assignRoomCode`. Klient kalte tidligere
+    //   utelukkende `socket.createRoom`, som returnerer per-hall ad-hoc
+    //   room. Når master (eller demo-auto-master) starter den schedulerte
+    //   runden, emittes `draw:new` til scheduled-game-rommet — klient
+    //   lytter på ad-hoc-rommet og ser ingen baller.
+    //
+    // Fix:
+    //   Hvis lobby-state har en joinable `nextScheduledGame.scheduledGameId`
+    //   bruker vi `socket.joinScheduledGame` slik at klient lander i samme
+    //   rom som engine senere broadcaster til. Hvis ingen scheduled-game
+    //   er klar (ingen plan dekker, status=idle/finished, scheduledGameId
+    //   er null osv.) faller vi tilbake til den eksisterende
+    //   `socket.createRoom`-flyten — den feiler typisk og trigger
+    //   `Game1LobbyFallback`-overlay-en (R1/BIN-822).
+    const lobbyStateAtJoinTime = this.lobbyStateBinding.getState();
+    const initialScheduledGameId = this.pickJoinableScheduledGameId(
+      lobbyStateAtJoinTime,
+    );
+    const joinResult = initialScheduledGameId
+      ? await socket.joinScheduledGame({
+          scheduledGameId: initialScheduledGameId,
+          hallId: this.deps.hallId,
+          playerName: this.resolvePlayerName(),
+        })
+      : await socket.createRoom({
+          hallId: this.deps.hallId,
+          gameSlug: "bingo",
+        });
+    if (initialScheduledGameId && joinResult.ok && joinResult.data) {
+      this.joinedScheduledGameId = initialScheduledGameId;
+    }
 
     if (!joinResult.ok || !joinResult.data) {
       // R1 (BIN-822, 2026-05-08, Tobias-direktiv): istedenfor å vise
@@ -580,6 +651,110 @@ class Game1Controller implements GameController {
     // `root.destroy({ children: true })`.
     this.clearScreen();
     this.root.destroy({ children: true });
+  }
+
+  // ── Klient-auto-join-scheduled-game (Tobias 2026-05-11) ──────────────────
+
+  /**
+   * Returner `scheduledGameId` fra lobby-state HVIS runden er joinable
+   * (status ∈ {purchase_open, running}). Ellers null.
+   *
+   * Server håndhever joinable-status (game1ScheduledEvents.ts:79-80,
+   * JOINABLE_STATUSES). Vi speiler den whitelisten her så vi unngår
+   * unødvendige server-roundtrips for idle/finished/scheduled-runder —
+   * de vil uansett kaste GAME_NOT_JOINABLE.
+   *
+   * Returnerer null hvis:
+   *   - state er null (lobby-binding har ikke lastet enda)
+   *   - ingen plan dekker (`nextScheduledGame === null`)
+   *   - scheduledGameId er null (plan-runtime har ikke spawnet rom enda)
+   *   - status er idle/finished/upcoming (master har ikke trykket Start
+   *     eller runden er ferdig)
+   */
+  private pickJoinableScheduledGameId(
+    state: ReturnType<Game1LobbyStateBinding["getState"]>,
+  ): string | null {
+    const next = state?.nextScheduledGame;
+    if (!next) return null;
+    if (!next.scheduledGameId) return null;
+    if (next.status !== "purchase_open" && next.status !== "running") {
+      return null;
+    }
+    return next.scheduledGameId;
+  }
+
+  /**
+   * Hent display-navnet til den innloggede spilleren fra sessionStorage.
+   *
+   * Backend-schema for `game1:join-scheduled` krever
+   * `playerName: z.string().min(1).max(50)`. Selv om server uansett
+   * henter wallet-eier via accessToken, må feltet være satt for at
+   * Zod-validering skal passere. `accessToken`-utvalg gjør oss
+   * resilient — payload sendes ikke uten den uansett (se
+   * SpilloramaSocket.emit).
+   *
+   * Sessionkey `spillorama.dev.user` settes både av dev-auto-login
+   * (main.ts) og av shell-en (lobby.js → mountGame). Hvis vi ikke
+   * finner navnet, default-er vi til "Spiller" så feltet validerer.
+   */
+  private resolvePlayerName(): string {
+    if (typeof sessionStorage === "undefined") return "Spiller";
+    try {
+      const raw = sessionStorage.getItem("spillorama.dev.user");
+      if (!raw) return "Spiller";
+      const parsed = JSON.parse(raw) as { displayName?: unknown };
+      const name = typeof parsed.displayName === "string"
+        ? parsed.displayName.trim()
+        : "";
+      if (!name) return "Spiller";
+      return name.length > 50 ? name.slice(0, 50) : name;
+    } catch {
+      return "Spiller";
+    }
+  }
+
+  /**
+   * Re-join når lobby-state-binding rapporterer ny `scheduledGameId`
+   * (plan-advance). Hentes inn async fra delta-watcher i `onChange`.
+   *
+   * Pragmatisk scope: re-emit `game1:join-scheduled` med ny id, oppdater
+   * `actualRoomCode`, og applieser fresh snapshot på bridge. Bridge
+   * håndterer state-overgang via `applySnapshot` — ingen ekstra
+   * `bridge.start`-kall siden bridge allerede er i drift.
+   *
+   * Hvis re-join feiler logges advarsel og state forblir uendret. Neste
+   * onChange-tick vil prøve igjen hvis gameId fortsatt differer (caller
+   * sjekker `joinedScheduledGameId !== nextScheduledGameId`).
+   */
+  private async handleScheduledGameDelta(
+    nextScheduledGameId: string,
+  ): Promise<void> {
+    const previous = this.joinedScheduledGameId;
+    console.info(
+      `[Game1Controller] plan-advance: ${previous} → ${nextScheduledGameId}, re-joining scheduled game`,
+    );
+    try {
+      const result = await this.deps.socket.joinScheduledGame({
+        scheduledGameId: nextScheduledGameId,
+        hallId: this.deps.hallId,
+        playerName: this.resolvePlayerName(),
+      });
+      if (!result.ok || !result.data) {
+        console.warn(
+          "[Game1Controller] re-join scheduled game feilet — beholder forrige room:",
+          result.error,
+        );
+        return;
+      }
+      this.joinedScheduledGameId = nextScheduledGameId;
+      this.actualRoomCode = result.data.roomCode;
+      this.playScreen?.setRoomCode(this.actualRoomCode);
+      // Bridge er allerede startet — applySnapshot resync-er state mot
+      // den nye runden uten å rive ned listeners.
+      this.deps.bridge.applySnapshot(result.data.snapshot);
+    } catch (err) {
+      console.warn("[Game1Controller] re-join threw — beholder forrige room:", err);
+    }
   }
 
   // ── State transitions ─────────────────────────────────────────────────
