@@ -45,6 +45,7 @@ import { initSharedPool } from "./util/sharedPool.js";
 import { DrawScheduler } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { HttpRateLimiter } from "./middleware/httpRateLimit.js";
+import { createResponseCacheMiddleware } from "./middleware/httpResponseCache.js";
 import { register as promRegister, metrics as promMetrics } from "./util/metrics.js";
 import { createExternalGameWalletRouter } from "./integration/externalGameWallet.js";
 import { InMemoryRoomStateStore, type RoomStateStore } from "./store/RoomStateStore.js";
@@ -4074,6 +4075,66 @@ app.use(
     auditLogService,
   })
 );
+// Server-side Redis response-cache for stille polling-endpoints (Tobias-
+// direktiv 2026-05-11 om rate-limit-fundament, Agent 2 av 3 parallelle).
+// Industry-standard pattern (Stripe idempotency-cache + GitHub conditional
+// GET): når shellen poller hvert 30. sek og cache er 30s, treffer kun ~1
+// request per 30s tier — resten serveres fra Redis uten å konsumere rate-
+// limit-budget.
+//
+// Vi mounter cache KUN på endpoints som er trygt å cache (ikke user-
+// specific). Data returnert av disse rutene er identisk for alle
+// autentiserte brukere — eks. listGames / listHalls / listScheduleSlots
+// avhenger ikke av caller. Middlewaren krever uansett Authorization-
+// header per default (defense-in-depth) før den serverer cached data, så
+// en anonymous request ville fortsatt få 401 fra handleren.
+//
+// Hvis Redis ikke er konfigurert (`ROOM_STATE_PROVIDER !== redis`) hopper
+// vi over cache helt — middlewaren er ikke pilot-blokker, kun en
+// optimalisering for å absorbere polling-bursts.
+let responseCacheRedis: Redis | null = null;
+if (roomStateProvider === "redis") {
+  responseCacheRedis = new Redis(redisUrl, {
+    maxRetriesPerRequest: 3,
+    lazyConnect: false,
+  });
+  responseCacheRedis.on("error", (err) =>
+    console.error("[http-response-cache] redis error", err),
+  );
+}
+if (responseCacheRedis) {
+  const cacheRedis = responseCacheRedis;
+  //
+  // VIKTIG MOUNT-ORDER: Hver `app.use(prefix, mw)` matcher i Express i
+  // registreringsrekkefølge OG matcher bredt på path-prefix. Hvis vi
+  // mounter både `/api/games/status` og `/api/games` ville begge fyre på
+  // `GET /api/games/status` — doblet wrap av `res.json()` og to Redis-
+  // SETs ved cache-miss. Vi mounter derfor KUN på de mest spesifikke
+  // polling-targetene for å unngå overlapp:
+  //
+  //   - `/api/games/status` — polled hvert 30. sek av lobby + admin.
+  //     30s cache betyr at en 1500-spillere-pilot trigger ~50 backend-
+  //     handler-kjøringer per minutt i stedet for ~3000.
+  //   - `/api/halls` — list-endpoint vist ved hall-velger / login.
+  //     60s cache; hall-tilstand endres sjelden i prod.
+  //
+  // `/api/games` (list-endpoint) er ikke wired enda — det er en
+  // one-shot ved lobby-load, ikke en polling-target. Hvis logs senere
+  // viser polling, kan vi legge til en exact-match-router for den.
+  //
+  // Cache TTL slår igjennom ved CACHE-MISS (neste handler-kjøring),
+  // ikke ved write — så admin-endring (eks deaktivering av spill) blir
+  // synlig for klienter innen <ttl> sekunder.
+  app.use(
+    "/api/games/status",
+    createResponseCacheMiddleware({ redis: cacheRedis, ttlSeconds: 30 }),
+  );
+  app.use(
+    "/api/halls",
+    createResponseCacheMiddleware({ redis: cacheRedis, ttlSeconds: 60 }),
+  );
+}
+
 app.use(createGameRouter({ platformService, engine, drawScheduler, emitRoomUpdate, buildRoomUpdatePayload, assertUserCanAccessRoom, assertUserCanActAsPlayer }));
 
 // BIN-FCM: notifikasjons-endpoints. Player-facing (/api/notifications*)
