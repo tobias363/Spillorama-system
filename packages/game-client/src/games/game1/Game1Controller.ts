@@ -205,6 +205,22 @@ class Game1Controller implements GameController {
    */
   private joinedScheduledGameId: string | null = null;
   /**
+   * RACE-FIX (Tobias 2026-05-11 live-test):
+   *
+   * Delta-watcher i `lobbyStateUnsub.onChange` trigger asynkront `void
+   * handleScheduledGameDelta(...)` med en gang lobbyStateBinding leverer
+   * første state (kalles av `await lobbyStateBinding.start()` ~line 466).
+   * Parallelt kjører initial-join (line 484) som ALSO emit-er
+   * `socket.joinScheduledGame` for SAMME scheduledGameId. Begge får
+   * `socket.joinScheduledGame` mot samme rom → dobbel-join → server-state
+   * blir uforutsigbar, klient kan ende i fallback eller blokkert state.
+   *
+   * Fix: delta-watcher trigger KUN etter at initial-join er ferdig
+   * (suksess eller feil). Initial-join eier først join-call; delta-watcher
+   * tar over for plan-advance-scenario etter det.
+   */
+  private initialJoinComplete = false;
+  /**
    * Mini-game-kø (Tobias 2026-04-26): backend triggerer mini-game POST-commit
    * umiddelbart etter Fullt Hus-payout. Hvis WinScreenV2 (Fullt Hus-fontene)
    * fortsatt vises, holder vi tilbake mini-game-overlayet og spiller det av
@@ -440,12 +456,21 @@ class Game1Controller implements GameController {
       // overflødig støy mot serveren.
       const nextScheduledGameId = this.pickJoinableScheduledGameId(state);
       if (
+        this.initialJoinComplete &&
         nextScheduledGameId !== null &&
         nextScheduledGameId !== this.joinedScheduledGameId
       ) {
         // Fire-and-forget: kjør re-join asynkront så onChange-listeneren
         // ikke blokkerer. Feil logges men kaster ikke ut — caller-state
         // forblir på forrige room til neste runde reload-er klient.
+        //
+        // RACE-FIX (Tobias 2026-05-11): gate på `initialJoinComplete` for
+        // å unngå dobbel-join når lobbyStateBinding.start()-ack ankommer
+        // FØR initial-join (linje under) har sendt sin join. Pre-fix:
+        // delta-watcher og initial-join trigger samtidig på SAMME
+        // scheduledGameId → server får 2 join-call → state inkonsistent
+        // → klient kan ende i fallback eller bli umiddelbar tilbakeført
+        // til lobby.
         void this.handleScheduledGameDelta(nextScheduledGameId);
       }
     });
@@ -503,6 +528,12 @@ class Game1Controller implements GameController {
           hallId: this.deps.hallId,
           gameSlug: "bingo",
         });
+    // RACE-FIX (Tobias 2026-05-11): markér initial-join som ferdig FØR vi
+    // sjekker resultat. Delta-watcher kan nå trygt overta for plan-advance.
+    // Selv ved feil (joinResult.ok=false → fallback) settes flagget til true
+    // slik at delta-watcher kan kalles når lobby-state senere oppdaterer
+    // med joinable scheduledGameId.
+    this.initialJoinComplete = true;
     if (initialScheduledGameId && joinResult.ok && joinResult.data) {
       this.joinedScheduledGameId = initialScheduledGameId;
     }
