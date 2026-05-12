@@ -76,7 +76,14 @@ interface ScheduledGameJoinRow {
   participating_halls_json: unknown;
 }
 
+// Tobias 2026-05-12 state-matrise: `scheduled`-status (master har trykket
+// Start, nedtelling kjører) skal være KJØPBAR. Tidligere var `scheduled`
+// utelatt → klient måtte vente ~30 sek til cron flippet til `purchase_open`
+// → popup viste seg ikke før kort før engine startet. Med `scheduled` i
+// joinable-listen kan spillere kjøpe bonger umiddelbart etter master har
+// klikket "Start neste spill".
 const JOINABLE_STATUSES = new Set([
+  "scheduled",
   "purchase_open",
   "ready_to_start",
   "running",
