@@ -419,10 +419,33 @@ export function buildRoomUpdatePayload(
   const boughtAtIso = new Date(nowMs).toISOString();
   const currentEntryFee = snapshot.currentGame?.entryFee ?? opts.getRoomConfiguredEntryFee(snapshot.code);
 
+  // Pris-per-brett (Tobias-direktiv 2026-05-12): hvert brett-kort skal vise
+  // pris pr. bong slik den er satt i backend-config, IKKE bundle-pris.
+  //
+  // Tidligere returnerte denne `fee * priceMultiplier` per brett — bundle-
+  // pris (eks. 45 kr for "Stor lilla" med fee=15 + multiplier=3). Tobias
+  // verifiserte 2026-05-12 at hver av 3 brett i "Stor lilla" skal vise
+  // 15 kr (per-bong-pris fra backend-config), ikke 45 kr (bundle-pris).
+  //
+  // Per-brett-formula: `(fee * priceMultiplier) / ticketCount`:
+  //   - Small Yellow (pm=1, count=1): 5  × 1 / 1 = 5  kr per brett ✅
+  //   - Large Yellow (pm=3, count=3): 10 × 3 / 3 = 10 kr per brett ✅
+  //   - Stor lilla   (pm=3, count=3): 15 × 3 / 3 = 15 kr per brett ✅
+  //
+  // Match-prioritet: name før type. Type-only-match (eks. `type: "large"`)
+  // er ambiguøs når flere farger deler samme type (Large Yellow vs Large
+  // Purple). Name-match (eks. `Large Purple`) sikrer at vi treffer riktig
+  // priceMultiplier/ticketCount-par når admin har satt per-farge-priser.
+  // Faller tilbake til type-match for backward-compat med legacy tickets
+  // uten color/name (eks. fra display-cache pre-BIN-688).
   function enrichTicketList(list: Ticket[], fee: number): Ticket[] {
     return list.map((t, idx) => {
-      const tt = effectiveConfig.ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
-      const price = roundCurrency(fee * (tt?.priceMultiplier ?? 1));
+      const tt =
+        (t.color ? effectiveConfig.ticketTypes.find((x: TicketTypeConfig) => x.name === t.color) : undefined) ??
+        effectiveConfig.ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
+      const priceMultiplier = tt?.priceMultiplier ?? 1;
+      const ticketCount = Math.max(1, tt?.ticketCount ?? 1);
+      const price = roundCurrency((fee * priceMultiplier) / ticketCount);
       return {
         ...t,
         ticketNumber: t.ticketNumber ?? t.id ?? String(idx + 1),
