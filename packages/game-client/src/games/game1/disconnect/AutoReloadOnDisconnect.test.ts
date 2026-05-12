@@ -16,6 +16,14 @@ import { AutoReloadOnDisconnect } from "./AutoReloadOnDisconnect.js";
  *   - resetAttempts nullstiller counter
  *   - storage-feil svelges (reload skjer uansett)
  *   - dobbel armReload er idempotent (timer ikke restartet)
+ *   - PR #1247-regresjon: armReload er no-op før markConnected() er kalt
+ *   - PR #1247-regresjon: armReload fyrer normalt etter markConnected()
+ *   - PR #1247-regresjon: markConnected() er one-way (forblir true)
+ *   - PR #1247-regresjon: default delayMs er 30s
+ *
+ * NB: Alle armReload-tester må kalle markConnected() FØRST — armReload er
+ * no-op før socket har koblet til minst én gang. Dette er en defensive
+ * gate mot reload-loop ved permanent initial-connect-failure.
  */
 
 function makeMemoryStorage(): {
@@ -46,6 +54,7 @@ describe("AutoReloadOnDisconnect", () => {
       reloadFn,
       storage: makeMemoryStorage().api,
     });
+    reloader.markConnected();
 
     reloader.armReload();
     vi.advanceTimersByTime(2000);
@@ -64,6 +73,7 @@ describe("AutoReloadOnDisconnect", () => {
       reloadFn,
       storage: makeMemoryStorage().api,
     });
+    reloader.markConnected();
 
     reloader.armReload();
     expect(reloadFn).not.toHaveBeenCalled();
@@ -84,6 +94,7 @@ describe("AutoReloadOnDisconnect", () => {
       storage: memStorage.api,
       now: () => 1_000_000,
     });
+    reloader.markConnected();
 
     reloader.armReload();
     vi.advanceTimersByTime(100);
@@ -113,6 +124,7 @@ describe("AutoReloadOnDisconnect", () => {
       storage: memStorage.api,
       now: () => 1_010_000, // 10s etter siste attempt
     });
+    reloader.markConnected();
 
     reloader.armReload();
     vi.advanceTimersByTime(100);
@@ -141,6 +153,7 @@ describe("AutoReloadOnDisconnect", () => {
       storage: memStorage.api,
       now: () => 1_070_000, // 70s etter — alle 3 attempts utenfor window
     });
+    reloader.markConnected();
 
     reloader.armReload();
     vi.advanceTimersByTime(100);
@@ -199,6 +212,7 @@ describe("AutoReloadOnDisconnect", () => {
       reloadFn,
       storage: makeMemoryStorage().api,
     });
+    reloader.markConnected();
 
     reloader.armReload();
     vi.advanceTimersByTime(3000);
@@ -219,6 +233,7 @@ describe("AutoReloadOnDisconnect", () => {
       storage: memStorage.api,
       now: () => 1_000_000,
     });
+    reloader.markConnected();
 
     reloader.armReload();
     vi.advanceTimersByTime(100);
@@ -228,6 +243,104 @@ describe("AutoReloadOnDisconnect", () => {
     expect(memStorage.store.get("spillorama:reload-attempts")).toBe(
       JSON.stringify([1_000_000]),
     );
+    vi.useRealTimers();
+  });
+
+  // ── PR #1247-regresjon fix (Tobias 2026-05-12) ────────────────────────
+  //
+  // Brukeren ble kastet tilbake til lobby ved kortvarige nett-glipper.
+  // Rot-årsak: armReload kunne fyre selv om socket aldri hadde lykkes
+  // med initial-connect. Reload tok brukeren tilbake til shell-en, og
+  // siden spill-state er kun i minnet, havnet de på lobby.
+  //
+  // Fix: markConnected()-gate + delayMs default 30s. Disse testene
+  // verifiserer at gaten faktisk fungerer + at default-en er korrekt.
+
+  it("PR #1247: armReload FØR markConnected() → no-op (ingen reload)", () => {
+    vi.useFakeTimers();
+    const reloadFn = vi.fn();
+    const reloader = new AutoReloadOnDisconnect({
+      delayMs: 100,
+      reloadFn,
+      storage: makeMemoryStorage().api,
+    });
+
+    // Ikke kall markConnected() — simulerer scenarioet der socket aldri
+    // har lykkes med å koble til server (eks. server nede ved sidelast,
+    // auth-token utløpt). armReload skal være no-op her, ellers ville
+    // brukeren bli reload-et inn i samme feil-tilstand i evighet.
+    reloader.armReload();
+    vi.advanceTimersByTime(10_000); // langt forbi delayMs
+
+    expect(reloadFn).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("PR #1247: armReload ETTER markConnected() → fyrer normalt", () => {
+    vi.useFakeTimers();
+    const reloadFn = vi.fn();
+    const reloader = new AutoReloadOnDisconnect({
+      delayMs: 100,
+      reloadFn,
+      storage: makeMemoryStorage().api,
+    });
+
+    // Steg 1: armReload pre-connect = no-op.
+    reloader.armReload();
+    vi.advanceTimersByTime(200);
+    expect(reloadFn).not.toHaveBeenCalled();
+
+    // Steg 2: markConnected → simulerer at socket har koblet til.
+    reloader.markConnected();
+
+    // Steg 3: armReload skal nå fyre etter delayMs.
+    reloader.armReload();
+    vi.advanceTimersByTime(101);
+    expect(reloadFn).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("PR #1247: markConnected() er one-way (forblir true selv om kalt flere ganger)", () => {
+    vi.useFakeTimers();
+    const reloadFn = vi.fn();
+    const reloader = new AutoReloadOnDisconnect({
+      delayMs: 100,
+      reloadFn,
+      storage: makeMemoryStorage().api,
+    });
+
+    reloader.markConnected();
+    reloader.markConnected(); // idempotent — ingen effekt
+    reloader.markConnected();
+
+    reloader.armReload();
+    vi.advanceTimersByTime(101);
+    expect(reloadFn).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("PR #1247: default delayMs er 30s (ikke 5s)", () => {
+    vi.useFakeTimers();
+    const reloadFn = vi.fn();
+    const reloader = new AutoReloadOnDisconnect({
+      // ingen eksplisitt delayMs — bruk default.
+      reloadFn,
+      storage: makeMemoryStorage().api,
+    });
+    reloader.markConnected();
+
+    reloader.armReload();
+
+    // 5s default ville fyrt her — verifiserer at den IKKE gjør det.
+    vi.advanceTimersByTime(5_001);
+    expect(reloadFn).not.toHaveBeenCalled();
+
+    // 30s default skal fyre nå.
+    vi.advanceTimersByTime(25_000); // total 30_001ms
+    expect(reloadFn).toHaveBeenCalledTimes(1);
+
     vi.useRealTimers();
   });
 });
