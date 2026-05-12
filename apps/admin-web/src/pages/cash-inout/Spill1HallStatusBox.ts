@@ -427,7 +427,24 @@ export function mountSpill1HallStatusBox(
           Toast.success("Hallen er markert som Klar.");
           break;
         case "unmark-ready":
-          if (!readyActionGameId) return;
+          // 2026-05-12 (Tobias pilot-test fix): tidligere ble dette en silent
+          // return hvis `readyActionGameId === null` (typisk når forrige
+          // runde var completed/cancelled). Backend `unmarkReady` aksepterer
+          // KUN status='scheduled'/'purchase_open'/'ready_to_start', og det
+          // finnes ingen lazy-spawn-flyt for unmark (det gir ingen mening å
+          // angre klar på en ferdig runde). Resultat: master klikket Angre
+          // Klar → ingenting skjedde → ingen feedback. Fiks: i terminal-runde
+          // viser vi en informativ toast i stedet for å avvise stille, og
+          // knapp-rendret disabler nå ready-knappene i terminal-runde slik
+          // at dette branchet bare treffes hvis race-state har tilbakestilt
+          // status mellom render og click.
+          if (!readyActionGameId) {
+            Toast.info(
+              "Forrige runde er fullført — start neste runde først, deretter " +
+              "kan du markere Klar/Angre Klar for den nye runden.",
+            );
+            return;
+          }
           await unmarkHallReadyForGame(ownHallId, readyActionGameId);
           Toast.info("Klar-markering angret.");
           break;
@@ -437,7 +454,17 @@ export function mountSpill1HallStatusBox(
           Toast.info("Hallen er markert som 'Ingen kunder'.");
           break;
         case "has-customers":
-          if (!readyActionGameId) return;
+          // 2026-05-12 (Tobias pilot-test fix): samme som unmark-ready over —
+          // has-customers krever en aktiv scheduled-game (backend
+          // `setHallHasCustomers` har ingen lazy-spawn-flyt). I terminal-
+          // runde gir vi tilbakemelding i stedet for silent return.
+          if (!readyActionGameId) {
+            Toast.info(
+              "Forrige runde er fullført — start neste runde først, deretter " +
+              "kan du åpne hallen igjen for den nye runden.",
+            );
+            return;
+          }
           await setHallHasCustomersForGame(ownHallId, readyActionGameId);
           Toast.info("Hallen er åpnet igjen.");
           break;
@@ -1093,13 +1120,28 @@ function renderOwnHallButtons(
   // og deretter skal master starte spillet når da alle er klare."
   // Backend lazy-spawner scheduled-game ved første mark-ready-klikk, så
   // alle haller (inkludert sub-haller) kan klikke i idle-state.
-  const editable =
+  //
+  // 2026-05-12 (Tobias pilot-test fix): split editable i to:
+  //   - readyEditableForUnmark: kun pre-game statuser (Angre Klar /
+  //     Har kunder igjen krever en aktiv scheduled-game-rad backend kan
+  //     UPDATE — completed/cancelled-rader avvises av Game1HallReadyService).
+  //   - readyEditableForMark: inkluderer terminal-statuser fordi backend
+  //     lazy-spawner ny scheduled-game når master klikker Marker Klar /
+  //     Ingen kunder på en ferdig runde (lazyEnsureScheduledGameForHall).
+  const isPreGameStatus =
     gameStatus === "scheduled" ||
     gameStatus === "purchase_open" ||
     gameStatus === "ready_to_start" ||
-    gameStatus === "completed" ||
-    gameStatus === "cancelled" ||
     gameStatus === "idle";
+  const isTerminalRound =
+    gameStatus === "completed" || gameStatus === "cancelled";
+  // Mark-handlinger (Marker Klar / Ingen kunder) kan kalles i alle pre-game
+  // OG terminal-statuser fordi backend lazy-spawner ny runde ved behov.
+  const editableForMark = isPreGameStatus || isTerminalRound;
+  // Unmark-handlinger (Angre Klar / Har kunder igjen) krever en
+  // eksisterende ikke-terminal scheduled-game-rad. I terminal-runde må
+  // master starte ny runde først.
+  const editableForUnmark = isPreGameStatus;
 
   // 2026-05-09: backend håndterer lazy-spawn via
   // lazyEnsureScheduledGameForHall, så vi disabler IKKE for missing gameId.
@@ -1111,11 +1153,28 @@ function renderOwnHallButtons(
     ? ` title="${escapeHtml(lazyTooltip)}"`
     : "";
 
-  const readyDisabled = !editable || ownHall.excludedFromGame;
+  // 2026-05-12 (Tobias pilot-test fix): egen tooltip for terminal-runde
+  // som forklarer at neste runde må startes først. Skiller seg fra
+  // lazy-tooltip slik at master ser hvorfor knappen er disabled.
+  const terminalTooltipAttr = isTerminalRound
+    ? ` title="${escapeHtml(
+        "Forrige runde er fullført — start neste runde først",
+      )}"`
+    : "";
+
+  const readyDisabled = ownHall.isReady
+    ? !editableForUnmark || ownHall.excludedFromGame
+    : !editableForMark || ownHall.excludedFromGame;
+  // For Angre Klar i terminal-runde: vis terminal-tooltip; ellers lazy-
+  // tooltip hvis relevant. Mark-knappen viser kun lazy-tooltip siden
+  // mark-handling fungerer i terminal-runde via lazy-spawn.
+  const readyTooltipAttr = ownHall.isReady && isTerminalRound
+    ? terminalTooltipAttr
+    : lazyTooltipAttr;
   const readyBtn = ownHall.isReady
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="unmark-ready"
-                ${readyDisabled ? "disabled" : ""}${lazyTooltipAttr}>
+                ${readyDisabled ? "disabled" : ""}${readyTooltipAttr}>
          <i class="fa fa-undo" aria-hidden="true"></i> Angre Klar
        </button>`
     : `<button type="button" class="btn btn-success cashinout-grid-btn"
@@ -1124,11 +1183,18 @@ function renderOwnHallButtons(
          <i class="fa fa-check-circle" aria-hidden="true"></i> Marker Klar
        </button>`;
 
-  const customersDisabled = !editable;
+  const customersDisabled = ownHall.excludedFromGame
+    ? !editableForUnmark
+    : !editableForMark;
+  // For Har kunder igjen i terminal-runde: vis terminal-tooltip.
+  const customersTooltipAttr =
+    ownHall.excludedFromGame && isTerminalRound
+      ? terminalTooltipAttr
+      : lazyTooltipAttr;
   const customersBtn = ownHall.excludedFromGame
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="has-customers"
-                ${customersDisabled ? "disabled" : ""}${lazyTooltipAttr}>
+                ${customersDisabled ? "disabled" : ""}${customersTooltipAttr}>
          <i class="fa fa-undo" aria-hidden="true"></i> Har kunder igjen
        </button>`
     : `<button type="button" class="btn btn-danger cashinout-grid-btn"
