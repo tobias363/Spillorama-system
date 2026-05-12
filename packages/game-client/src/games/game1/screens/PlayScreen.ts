@@ -182,6 +182,31 @@ export class PlayScreen extends Container {
    */
   private lobbyOverallStatus: Spill1LobbyOverallStatus | null = null;
 
+  /**
+   * Wait-on-master-fix (Agent B, 2026-05-12 — Tobias-direktiv 2026-05-12,
+   * Alternativ B): true når scheduled-game ennå ikke er spawnet av bridge
+   * (eller lobby-state mangler scheduledGameId). Brukes til å:
+   *   1. Disable "Forhåndskjøp til dagens spill" + "Kjøp flere brett"
+   *      knapper med tekst "Venter på master — kjøp åpner snart".
+   *   2. Blokkere auto-show av BuyPopup i `update()` slik at vi ikke
+   *      bygger en stale popup med tomme/feil ticket-types.
+   *
+   * Settes av `setWaitingForMasterPurchase(waiting, reason?)` fra
+   * Game1Controller når lobby-state-binding oppdaterer. Default `false`
+   * inntil første lobby-event ankommer (defensiv — vi heller bias mot å
+   * vise kjøp-knapper enn å vise dem disabled feilaktig).
+   *
+   * BAKGRUNN: pre-fix kunne klient sende `bet:arm` (in-memory armed-state
+   * i Redis via SpilloramaSocket.armBet) før bridge spawnet scheduled-
+   * game. Armed-state ble IKKE konvertert til DB-persistert
+   * `app_game1_ticket_purchases` ved spawn → bonger forsvant.
+   *
+   * Agent A fikset backend room_code-binding (PR #1253) men flagget
+   * eksplisitt at klient må vente til scheduled-game eksisterer før
+   * kjøp tillates. Dette er den klient-siden av fixen.
+   */
+  private waitingForMasterPurchase = false;
+
   constructor(
     screenWidth: number,
     screenHeight: number,
@@ -487,12 +512,21 @@ export class PlayScreen extends Container {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       // Sett idle-mode basert på lobby-state.
-      //   - `closed`     → "Stengt / Ingen aktiv plan i hallen akkurat nå"
-      //   - alt annet    → "Neste spill: {displayName}"
+      //   - `closed`         → "Stengt / Ingen aktiv plan i hallen akkurat nå"
+      //   - waiting-master   → "Neste spill: {displayName} / Venter på at
+      //                         master starter neste runde" (Tobias 2026-05-12,
+      //                         Alternativ B: scheduled-game ennå ikke spawnet)
+      //   - next-game        → "Neste spill: {displayName} / Kjøp bonger for å
+      //                         være med i trekningen" (joinable scheduled-game)
       // Game1Controller pusher displayName via `setBuyPopupDisplayName`
       // når lobby-state mottas — CenterBall fallback-tekst er "Bingo" om
       // ingenting er satt enda (Tobias-direktiv: aldri blank).
-      this.centerBall.setIdleMode(lobbyClosed ? "closed" : "next-game");
+      const idleMode: "closed" | "waiting-master" | "next-game" = lobbyClosed
+        ? "closed"
+        : this.waitingForMasterPurchase
+          ? "waiting-master"
+          : "next-game";
+      this.centerBall.setIdleMode(idleMode);
       this.centerBall.showIdleText();
     }
 
@@ -580,6 +614,15 @@ export class PlayScreen extends Container {
     // `lobbyTicketConfig` er tilgjengelig — det betyr plan-runtime
     // aggregator har levert ticket-data selv om `room:update` ikke har
     // kommet enda (typisk pre-game / før master starter runden).
+    //
+    // Wait-on-master-fix (Agent B, 2026-05-12, Alternativ B): blokker
+    // auto-show når `waitingForMasterPurchase=true` (scheduled-game ennå
+    // ikke spawnet av bridge). Spilleren ser disabled-knapper i Center-
+    // Top med "Venter på master"-tekst og kan ikke arme bonger via
+    // `bet:arm` som ville blitt foreldreløs ved senere bridge-spawn.
+    // `autoShowBuyPopupDone` settes IKKE til true her — neste `update()`
+    // etter `setWaitingForMasterPurchase(false)` får lov til å åpne
+    // popup-en.
     const hasLive = running && state.myTickets.length > 0;
     const hasTicketTypes =
       state.ticketTypes.length > 0
@@ -588,6 +631,7 @@ export class PlayScreen extends Container {
       !this.autoShowBuyPopupDone
       && !hasLive
       && hasTicketTypes
+      && !this.waitingForMasterPurchase
       && (state.preRoundTickets?.length ?? 0) === 0
     ) {
       this.autoShowBuyPopupDone = true;
@@ -715,8 +759,19 @@ export class PlayScreen extends Container {
     // lastState=null og update() trigges ikke. Vi må derfor sync mode
     // her så `closed`-hall ikke viser "Neste spill" mellom mount og
     // første room:update.
+    //
+    // Wait-on-master-fix (Agent B, 2026-05-12): respekterer også
+    // `waitingForMasterPurchase` her slik at idle-mode synker når
+    // setLobbyOverallStatus blir kalt før setWaitingForMasterPurchase
+    // (mount-race-vindu).
     if (this.centerBall.isIdleTextVisible()) {
-      this.centerBall.setIdleMode(status === "closed" ? "closed" : "next-game");
+      const initialIdleMode: "closed" | "waiting-master" | "next-game" =
+        status === "closed"
+          ? "closed"
+          : this.waitingForMasterPurchase
+            ? "waiting-master"
+            : "next-game";
+      this.centerBall.setIdleMode(initialIdleMode);
     }
 
     if (this.lastState) {
@@ -837,6 +892,74 @@ export class PlayScreen extends Container {
 
   enableBuyMore(): void {
     this.centerTop.setBuyMoreDisabled(false);
+  }
+
+  /**
+   * Wait-on-master-fix (Agent B, 2026-05-12 — Tobias-direktiv 2026-05-12,
+   * Alternativ B): disable kjøp-knapper og BuyPopup når scheduled-game
+   * ennå ikke er spawnet av bridge. Spilleren ser "Venter på master —
+   * kjøp åpner snart" på "Forhåndskjøp til dagens spill"-knappen
+   * istedenfor å kunne arme bonger via `bet:arm` (in-memory armed-state
+   * som ble foreldreløs når bridge spawnet scheduled-game etterpå).
+   *
+   * Når `waiting=true`:
+   *   - "Forhåndskjøp til dagens spill"-knapp disables + bytter tekst.
+   *   - "Kjøp flere brett"-knapp disables (samme reason — den vises
+   *     mellom runder og skal også vente).
+   *   - BuyPopup auto-åpning blokkeres i `update()` via `autoShowBuyPopup`-
+   *     gate. (Hvis popup allerede er åpen forblir den synlig — bruker
+   *     må aktivt lukke den, men kjøp-knappen i popup-en er fortsatt
+   *     aktiv. Dette er bevisst: vi blokkerer NYE kjøp-forsøk fra knapp
+   *     i Center-Top, men ikke pågående UX-flyt.)
+   *
+   * Når `waiting=false`:
+   *   - Begge knapper re-aktiveres med default label.
+   *   - Auto-show av popup tillates på neste `update()` hvis betingelser
+   *     ellers passer (`autoShowBuyPopupDone === false`).
+   *
+   * Idempotent — CenterTopPanel.setPreBuyDisabled/setBuyMoreDisabled
+   * memo-iserer state og skipper DOM-mutasjon hvis verdien er uendret.
+   */
+  setWaitingForMasterPurchase(waiting: boolean, reason?: string): void {
+    if (this.waitingForMasterPurchase === waiting) return;
+    this.waitingForMasterPurchase = waiting;
+    const reasonText = reason ?? "Master har ikke startet neste runde ennå";
+    this.centerTop.setPreBuyDisabled(waiting, reasonText);
+    // "Kjøp flere brett" vises ikke under RUNNING (display:none via
+    // setGameRunning), så `running && disabled` er stort sett en no-op
+    // for buyMore. Men hvis ROUND-end → idle (master har ikke trigget
+    // ny start enda), vil buyMore være synlig og må også disables.
+    //
+    // Reason-string er felles for begge knapper — bruker ser samme
+    // melding uansett hvor de hover-er.
+    this.centerTop.setBuyMoreDisabled(waiting, reasonText);
+
+    // Re-trigge update() slik at CenterBall idle-mode synker. Pre-fix:
+    // CenterBall viste fortsatt "Kjøp bonger for å være med i
+    // trekningen" selv etter setWaitingForMasterPurchase(true) fordi
+    // idle-mode beregnes i update() og våre prop-setter trigger ikke
+    // update på egen hånd. Idempotent — update() er pure render og
+    // CenterBall.setIdleMode/showIdleText er begge memoiserte.
+    if (this.lastState) {
+      this.update(this.lastState);
+    } else if (this.centerBall.isIdleTextVisible()) {
+      // Mount-race: setWaitingForMasterPurchase kan kalles før første
+      // room:update. Da har vi ikke noe lastState å re-rendere fra, men
+      // CenterBall idle-text er allerede synlig (initial mount). Oppdater
+      // mode direkte — closed har høyere prioritet enn waiting-master.
+      const initialIdleMode: "closed" | "waiting-master" | "next-game" =
+        this.lobbyOverallStatus === "closed"
+          ? "closed"
+          : waiting
+            ? "waiting-master"
+            : "next-game";
+      this.centerBall.setIdleMode(initialIdleMode);
+    }
+  }
+
+  /** Test-hook: hent siste kjente waiting-for-master-state. */
+  getWaitingForMasterPurchase(): boolean {
+    return this.waitingForMasterPurchase;
   }
 
   /** BIN-419: Elvis replace — lets the player swap pre-round tickets for a fee.
@@ -1095,6 +1218,14 @@ export class PlayScreen extends Container {
 
   private openBuyPopup(): void {
     if (!this.lastState) return;
+    // Wait-on-master-fix (Agent B, 2026-05-12): defensive gate. CenterTopPanel-
+    // knappene er allerede disabled når `waitingForMasterPurchase=true`
+    // (setPreBuyDisabled/setBuyMoreDisabled), så denne pathen skal aldri
+    // kjøre i den state-en. Men hvis et test-script eller framtidig
+    // refaktor kaller `openBuyPopup` direkte, vil denne guarden hindre
+    // at popup-en åpnes med stale ticket-types før scheduled-game
+    // eksisterer.
+    if (this.waitingForMasterPurchase) return;
     this.showBuyPopup(this.lastState);
   }
 

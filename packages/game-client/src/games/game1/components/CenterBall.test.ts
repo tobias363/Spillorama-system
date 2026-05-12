@@ -311,6 +311,82 @@ describe("CenterBall idle-text-modus (2026-05-11, Tobias-direktiv)", () => {
     ball.destroy();
   });
 
+  // ── Wait-on-master-fix (Agent B, 2026-05-12, Alternativ B) ───────────
+  // Når plan finnes men scheduled-game ennå ikke er spawnet av bridge,
+  // skal CenterBall vise "Venter på at master starter neste runde"
+  // istedenfor "Kjøp bonger for å være med i trekningen". Pre-fix-bug:
+  // klient viste "Kjøp bonger..." selv når kjøp-knappene var disabled
+  // pga waitingForMasterPurchase=true → forvirrende UX.
+
+  it("setIdleMode('waiting-master') rendrer 'Neste spill: {name}' + 'Venter på at master ...'", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.setIdleMode("waiting-master");
+    ball.showIdleText();
+
+    expect(ball.isIdleTextVisible()).toBe(true);
+    expect(ball.getIdleMode()).toBe("waiting-master");
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+    expect(readIdleBody(ball)).toBe("Venter på at master starter neste runde");
+
+    ball.destroy();
+  });
+
+  it("waiting-master + displayName='Innsatsen' rendrer 'Neste spill: Innsatsen' + venter-tekst", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Innsatsen");
+    ball.setIdleMode("waiting-master");
+    ball.showIdleText();
+
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Innsatsen");
+    expect(readIdleBody(ball)).toBe("Venter på at master starter neste runde");
+
+    ball.destroy();
+  });
+
+  it("setIdleMode switching next-game → waiting-master → next-game synker tekst live", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.showIdleText();
+    expect(readIdleBody(ball)).toBe("Kjøp bonger for å være med i trekningen");
+
+    // Plan-runtime: scheduled-game ennå ikke spawnet → vent på master.
+    ball.setIdleMode("waiting-master");
+    expect(readIdleBody(ball)).toBe("Venter på at master starter neste runde");
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    // Bridge spawner scheduled-game → klar for kjøp.
+    ball.setIdleMode("next-game");
+    expect(readIdleBody(ball)).toBe("Kjøp bonger for å være med i trekningen");
+    expect(readIdleHeadline(ball)).toBe("Neste spill: Bingo");
+
+    ball.destroy();
+  });
+
+  it("closed har prioritet over waiting-master ved switching", () => {
+    const ball = new CenterBall();
+    ball.setIdleText("Bingo");
+    ball.setIdleMode("waiting-master");
+    ball.showIdleText();
+    expect(readIdleBody(ball)).toBe("Venter på at master starter neste runde");
+
+    // Plan-utløp midt i kveld eller hall fjernet fra GoH.
+    ball.setIdleMode("closed");
+    expect(readIdleHeadline(ball)).toBe("Stengt");
+    expect(readIdleBody(ball)).toBe("Ingen aktiv plan i hallen akkurat nå");
+
+    ball.destroy();
+  });
+
+  it("waiting-master er idempotent — gjentatte kall er no-op", () => {
+    const ball = new CenterBall();
+    ball.setIdleMode("waiting-master");
+    ball.setIdleMode("waiting-master");
+    ball.setIdleMode("waiting-master");
+    expect(ball.getIdleMode()).toBe("waiting-master");
+    ball.destroy();
+  });
+
   it("hideIdleText restore ball-sprite + number-text-visibilitet", () => {
     const ball = new CenterBall();
     ball.setIdleText("Bingo");

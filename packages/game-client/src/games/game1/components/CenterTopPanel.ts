@@ -648,6 +648,8 @@ export class CenterTopPanel {
   // kun hvis verdien faktisk endret, ellers blir det ~9 style-mutasjoner
   // per update × 5 updates/sec = 45 unødvendige mutasjoner.
   private lastBuyMoreDisabled: boolean | null = null;
+  private lastPreBuyDisabled: boolean | null = null;
+  private lastPreBuyLabel = "Forhåndskjøp til dagens spill";
   private lastGameRunning: boolean | null = null;
   private lastCanStart: boolean | null = null;
 
@@ -662,6 +664,40 @@ export class CenterTopPanel {
     this.buyMoreBtn.style.opacity = disabled ? "0.4" : "1";
     this.buyMoreBtn.style.cursor = disabled ? "not-allowed" : "pointer";
     this.buyMoreBtn.title = disabled ? (reason ?? "") : "";
+  }
+
+  /**
+   * Wait-on-master-fix (Agent B, 2026-05-12): disable "Forhåndskjøp til
+   * dagens spill"-knappen når scheduled-game ennå ikke er spawnet av
+   * bridge. Pre-fix-bug: klient kunne arme bonger via `bet:arm` (in-memory
+   * armed-state) før master klikket Start, og når bridge senere spawnet
+   * scheduled-game ble armed-state ikke konvertert til DB-persistert
+   * `app_game1_ticket_purchases`-rader → "bongene forsvant".
+   *
+   * Alternativ B per Tobias-direktiv 2026-05-12: klient venter med kjøp
+   * til scheduled-game er spawnet (vis "Venter på master, kjøp åpner
+   * snart" i lobby). UX-mønster identisk med `setBuyMoreDisabled` —
+   * disable + opacity + cursor + title. Tekst byttes også slik at
+   * spilleren ser STATUS uten å trykke (tooltip-only var ikke nok per
+   * Tobias-direktiv "tydelig venter-state").
+   */
+  setPreBuyDisabled(disabled: boolean, reason?: string): void {
+    if (this.lastPreBuyDisabled === disabled) return; // no-op: 0 mutations
+    this.lastPreBuyDisabled = disabled;
+    this.preBuyBtn.disabled = disabled;
+    this.preBuyBtn.style.opacity = disabled ? "0.4" : "1";
+    this.preBuyBtn.style.cursor = disabled ? "not-allowed" : "pointer";
+    this.preBuyBtn.title = disabled ? (reason ?? "") : "";
+    // Byttet label ved disabled-state slik at spilleren ser status uten
+    // tooltip. `lastPreBuyLabel` cache-er normal-tekst slik at re-enable
+    // ikke trenger hardkodet streng. Sync med createActionButton (linje
+    // ~270): default-label er "Forhåndskjøp til dagens spill".
+    const nextLabel = disabled
+      ? "Venter på master — kjøp åpner snart"
+      : this.lastPreBuyLabel;
+    if (this.preBuyBtn.textContent !== nextLabel) {
+      this.preBuyBtn.textContent = nextLabel;
+    }
   }
 
   setGameRunning(running: boolean): void {

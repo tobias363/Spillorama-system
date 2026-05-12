@@ -813,6 +813,29 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - PR #1216 (`fix(spillerklient): gate delta-watcher bak initialJoinComplete`)
 - `packages/game-client/src/games/game1/Game1Controller.ts:initialJoinComplete`
 
+### §7.15 — Klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets ble foreldreløse)
+
+**Severity:** P0 (kunde-fasilitære, regulatorisk og UX) — pilot-blokker
+**Oppdaget:** 2026-05-12 (Tobias pilot-test 11:03-11:05)
+**Symptom:** Spiller armet 4 bonger (4 × 5 kr = 160 kr trukket fra saldo) → master klikket Start → spillet kjørte 75 baller med `MyTickets: 0` i HUD. Bongene "forsvant". Server hadde mottatt `bet:arm` (in-memory armed-state), men ingen rad ble opprettet i `app_game1_ticket_purchases`.
+**Root cause (todelt):**
+1. Backend (`GamePlanEngineBridge.createScheduledGameForPlanRunPosition`) feilet med 23505 hvis stale aktiv rad allerede holdt room_code → bridge degraderte til lazy-binding (room_code=NULL). Klient kunne ikke joine fordi `io.to(NULL)` ikke broadcast-er.
+2. Klient sendte `bet:arm` (in-memory armed-state) FØR scheduled-game var spawnet av bridge. Selv etter backend-fix (room_code-binding) kunne armed-tickets bli foreldreløse hvis bridge spawnet ny scheduled-game-rad uten å vite om eksisterende armed-set.
+**Fix (todelt):**
+- Backend: PR #1253 (Agent A) — `releaseStaleRoomCodeBindings` cancellerer stale rader FØR INSERT.
+- Klient (denne fixen, Agent B): Alternativ B per Tobias-direktiv 2026-05-12. Klient venter med kjøp til scheduled-game er spawnet. Disable kjøp-knapper med "Venter på master — kjøp åpner snart"-tekst. BuyPopup auto-open blokkeres. CenterBall idle-mode `waiting-master` (ny mode) viser "Venter på at master starter neste runde" istedenfor "Kjøp bonger for å være med i trekningen".
+**Prevention:**
+- Klient skal ALDRI sende `bet:arm` før det finnes en joinable scheduled-game (status purchase_open/ready_to_start/running/paused + scheduledGameId !== null)
+- Standardflyt: `/api/game1/purchase` med scheduledGameId (DB-persistert via `app_game1_ticket_purchases`) ER autoritær path. `bet:arm` (Redis in-memory) er kun fallback for legacy-rom uten plan-runtime — i pilot-flyt bør den aldri fyre.
+- UI-disable er tydelig kommunikasjon til spilleren om at de venter på master, ikke en bug.
+**Related:**
+- PR #1253 (Agent A — backend room_code-fix)
+- Følge-PR (Agent B — klient wait-on-master)
+- §7.12 (WaitingForMasterOverlay erstattet av CenterBall idle-text)
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts:setWaitingForMasterPurchase`
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts:setPreBuyDisabled`
+- `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleMode("waiting-master")`
+
 ---
 
 ## §8 Doc-disiplin
@@ -1166,3 +1189,4 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | 2026-05-10 | Initial — 63 entries fra 12 PM-handoffs + audits + sesjons-erfaringer | PM-AI (Claude Opus 4.7) |
 | 2026-05-10 | Lagt til §7.8 (JackpotConfirmModal var feil mental modell — fjernet ADR-0017). Indeks-counts korrigert mot faktiske tall (§7=8, §11=7, total=71). | docs-agent (ADR-0017 PR-C) |
 | 2026-05-11 | Lagt til §7.9 (state.ticketTypes override), §7.10 (static bundle rebuild), §7.11 (lobby-init race), §7.12 (overlay pointer-events). §9.5 (demo-plan opening hours), §9.6 (ON CONFLICT uten UNIQUE). §11.8 (dev:nuke single-command), §11.9 (worktree-branch-leakage), §11.10 (pre-commit COMMIT_EDITMSG-bug). Total 71→79 entries. | PM-AI (sesjon 2026-05-10→2026-05-11) | docs-agent (ADR-0017 PR-C) |
+| 2026-05-12 | Lagt til §7.15 — klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets foreldreløse). Pilot-blokker fra Tobias-test 11:03-11:05, fikset via Alternativ B (klient venter med kjøp). | Agent B (Klient wait-on-master) |

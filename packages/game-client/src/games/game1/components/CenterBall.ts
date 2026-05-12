@@ -84,7 +84,7 @@ export class CenterBall extends Container {
   private idleBody: Text;
   private idleDisplayName = "Bingo";
   private idleVisible = false;
-  private idleMode: "next-game" | "closed" = "next-game";
+  private idleMode: "next-game" | "closed" | "waiting-master" = "next-game";
 
   constructor(bridge?: PauseAwareBridge) {
     super();
@@ -325,15 +325,23 @@ export class CenterBall extends Container {
   }
 
   /** Test-hook: hvilken idle-mode er aktiv? */
-  getIdleMode(): "next-game" | "closed" {
+  getIdleMode(): "next-game" | "closed" | "waiting-master" {
     return this.idleMode;
   }
 
   /**
-   * Idle-text-modus (2026-05-11, hall-isolation-fix):
+   * Idle-text-modus (2026-05-11, hall-isolation-fix; 2026-05-12 utvidet
+   * med `waiting-master` per Tobias-direktiv Alternativ B):
    *
-   *   - `"next-game"` — standard, vises når plan finnes og venter på master.
-   *     Headline = "Neste spill: {displayName}", body = kjøp-oppfordring.
+   *   - `"next-game"` — standard, vises når plan finnes OG scheduled-game
+   *     er spawnet OG status er joinable. Headline = "Neste spill:
+   *     {displayName}", body = "Kjøp bonger for å være med i trekningen".
+   *   - `"waiting-master"` — vises når plan finnes men scheduled-game
+   *     ennå ikke er spawnet av bridge (eller status er idle/finished).
+   *     Headline = "Neste spill: {displayName}", body = "Venter på at
+   *     master starter neste runde". Pre-fix vist "Kjøp bonger..." selv
+   *     når kjøp-knappene var disabled → forvirrende UX. Wait-on-master-
+   *     fix (Agent B, 2026-05-12).
    *   - `"closed"` — vises når lobby returnerer `overallStatus === "closed"`
    *     (ingen plan for hallen, eller utenfor åpningstid). Headline =
    *     "Stengt", body = "Ingen aktiv plan i hallen akkurat nå".
@@ -341,7 +349,7 @@ export class CenterBall extends Container {
    * Idempotent — gjentatte kall med samme mode er no-op. Hvis idle-text
    * er synlig re-rendres tekst umiddelbart.
    */
-  setIdleMode(mode: "next-game" | "closed"): void {
+  setIdleMode(mode: "next-game" | "closed" | "waiting-master"): void {
     if (this.idleMode === mode) {
       if (this.idleVisible) this.renderIdleText();
       return;
@@ -354,6 +362,11 @@ export class CenterBall extends Container {
     if (this.idleMode === "closed") {
       this.idleHeadline.text = "Stengt";
       this.idleBody.text = "Ingen aktiv plan i hallen akkurat nå";
+      return;
+    }
+    if (this.idleMode === "waiting-master") {
+      this.idleHeadline.text = `Neste spill: ${this.idleDisplayName}`;
+      this.idleBody.text = "Venter på at master starter neste runde";
       return;
     }
     this.idleHeadline.text = `Neste spill: ${this.idleDisplayName}`;
