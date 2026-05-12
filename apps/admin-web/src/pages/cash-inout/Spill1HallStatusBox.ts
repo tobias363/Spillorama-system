@@ -438,11 +438,23 @@ export function mountSpill1HallStatusBox(
           // knapp-rendret disabler nå ready-knappene i terminal-runde slik
           // at dette branchet bare treffes hvis race-state har tilbakestilt
           // status mellom render og click.
+          //
+          // 2026-05-13 (Tobias pilot-test regresjon-fix): skill mellom
+          // terminal-runde og idle-state så toast er presis. Render-laget
+          // disabler nå knappen i begge tilstander så dette branchet bare
+          // treffes ved race-state mellom render og click.
           if (!readyActionGameId) {
-            Toast.info(
-              "Forrige runde er fullført — start neste runde først, deretter " +
-              "kan du markere Klar/Angre Klar for den nye runden.",
-            );
+            if (terminalRound) {
+              Toast.info(
+                "Forrige runde er fullført — start neste runde først, deretter " +
+                "kan du markere Klar/Angre Klar for den nye runden.",
+              );
+            } else {
+              Toast.info(
+                "Ingen aktiv runde — vent til master starter neste spill, " +
+                "deretter kan du angre Klar for den nye runden.",
+              );
+            }
             return;
           }
           await unmarkHallReadyForGame(ownHallId, readyActionGameId);
@@ -458,11 +470,21 @@ export function mountSpill1HallStatusBox(
           // has-customers krever en aktiv scheduled-game (backend
           // `setHallHasCustomers` har ingen lazy-spawn-flyt). I terminal-
           // runde gir vi tilbakemelding i stedet for silent return.
+          //
+          // 2026-05-13 (Tobias pilot-test regresjon-fix): skill mellom
+          // terminal- og idle-tilstand for klar feilmelding.
           if (!readyActionGameId) {
-            Toast.info(
-              "Forrige runde er fullført — start neste runde først, deretter " +
-              "kan du åpne hallen igjen for den nye runden.",
-            );
+            if (terminalRound) {
+              Toast.info(
+                "Forrige runde er fullført — start neste runde først, deretter " +
+                "kan du åpne hallen igjen for den nye runden.",
+              );
+            } else {
+              Toast.info(
+                "Ingen aktiv runde — vent til master starter neste spill, " +
+                "deretter kan du åpne hallen igjen for den nye runden.",
+              );
+            }
             return;
           }
           await setHallHasCustomersForGame(ownHallId, readyActionGameId);
@@ -1128,6 +1150,16 @@ function renderOwnHallButtons(
   //   - readyEditableForMark: inkluderer terminal-statuser fordi backend
   //     lazy-spawner ny scheduled-game når master klikker Marker Klar /
   //     Ingen kunder på en ferdig runde (lazyEnsureScheduledGameForHall).
+  //
+  // 2026-05-13 (Tobias pilot-test regresjon-fix): "Angre Klar virker ikke"
+  // gjenoppstod etter PR #1280 fordi `gameStatus="idle"` er medlem av
+  // isPreGameStatus → button rendret som ENABLED, men click-handler
+  // bailet stille (`readyActionGameId=null` siden `data.scheduledGameId
+  // === null` i idle). Master klikket → ingenting skjedde → ingen
+  // feedback. Fiks: idle er ikke editable for unmark — backend
+  // `setHallHasCustomers`/`unmarkReady` har ingen lazy-spawn-flyt, så
+  // unmark krever en faktisk scheduled-game-rad. Master må vente til
+  // master har startet neste runde for å kunne angre.
   const isPreGameStatus =
     gameStatus === "scheduled" ||
     gameStatus === "purchase_open" ||
@@ -1135,13 +1167,19 @@ function renderOwnHallButtons(
     gameStatus === "idle";
   const isTerminalRound =
     gameStatus === "completed" || gameStatus === "cancelled";
+  const isIdleStatus = gameStatus === "idle";
   // Mark-handlinger (Marker Klar / Ingen kunder) kan kalles i alle pre-game
   // OG terminal-statuser fordi backend lazy-spawner ny runde ved behov.
   const editableForMark = isPreGameStatus || isTerminalRound;
   // Unmark-handlinger (Angre Klar / Har kunder igjen) krever en
   // eksisterende ikke-terminal scheduled-game-rad. I terminal-runde må
-  // master starte ny runde først.
-  const editableForUnmark = isPreGameStatus;
+  // master starte ny runde først. I idle-state finnes det heller ingen
+  // rad å oppdatere — vi disabler så click-handleren ikke bailer stille.
+  // NB: vi disabler IKKE basert på `hasValidGameId` for status="scheduled"
+  // — `hasValidGameId` er en lazy-spawn-relatert flagg (false også for
+  // status="scheduled" som er en gyldig DB-rad), mens backend `unmarkReady`
+  // aksepterer `scheduled` likt med `purchase_open`/`ready_to_start`.
+  const editableForUnmark = isPreGameStatus && !isIdleStatus;
 
   // 2026-05-09: backend håndterer lazy-spawn via
   // lazyEnsureScheduledGameForHall, så vi disabler IKKE for missing gameId.
@@ -1161,6 +1199,15 @@ function renderOwnHallButtons(
         "Forrige runde er fullført — start neste runde først",
       )}"`
     : "";
+  // 2026-05-13 (Tobias pilot-test regresjon-fix): tooltip for idle-state
+  // når Angre Klar / Har kunder igjen ikke kan kalles fordi det ikke
+  // finnes en scheduled-game-rad ennå. Master får vite at de må vente
+  // på neste runde eller starte planen.
+  const idleUnmarkTooltipAttr = isIdleStatus
+    ? ` title="${escapeHtml(
+        "Ingen aktiv runde — vent på at master starter neste spill",
+      )}"`
+    : "";
 
   const readyDisabled = ownHall.isReady
     ? !editableForUnmark || ownHall.excludedFromGame
@@ -1168,9 +1215,15 @@ function renderOwnHallButtons(
   // For Angre Klar i terminal-runde: vis terminal-tooltip; ellers lazy-
   // tooltip hvis relevant. Mark-knappen viser kun lazy-tooltip siden
   // mark-handling fungerer i terminal-runde via lazy-spawn.
+  //
+  // 2026-05-13: I idle-state med isReady=true (transient state mellom
+  // mark-ready lazy-spawn og polling-refresh), vis idle-tooltip i stedet
+  // for lazy-tooltip (sistnevnte er for mark-ready, ikke unmark).
   const readyTooltipAttr = ownHall.isReady && isTerminalRound
     ? terminalTooltipAttr
-    : lazyTooltipAttr;
+    : ownHall.isReady && isIdleStatus
+      ? idleUnmarkTooltipAttr
+      : lazyTooltipAttr;
   const readyBtn = ownHall.isReady
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="unmark-ready"
@@ -1187,10 +1240,13 @@ function renderOwnHallButtons(
     ? !editableForUnmark
     : !editableForMark;
   // For Har kunder igjen i terminal-runde: vis terminal-tooltip.
+  // 2026-05-13: I idle med excludedFromGame=true (transient), vis idle-tooltip.
   const customersTooltipAttr =
     ownHall.excludedFromGame && isTerminalRound
       ? terminalTooltipAttr
-      : lazyTooltipAttr;
+      : ownHall.excludedFromGame && isIdleStatus
+        ? idleUnmarkTooltipAttr
+        : lazyTooltipAttr;
   const customersBtn = ownHall.excludedFromGame
     ? `<button type="button" class="btn btn-default cashinout-grid-btn"
                 data-spill1-action="has-customers"
