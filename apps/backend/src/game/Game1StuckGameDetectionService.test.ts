@@ -218,3 +218,91 @@ test("tick: race-condition (rad allerede cancelled) → ingen audit", async () =
   assert.deepEqual(auditedEvents, []);
   assert.equal(engine.stopCalls.length, 0);
 });
+
+// ── Grace-period for SCHEDULED_END_EXCEEDED (Tobias-direktiv 2026-05-12) ──
+//
+// Bakgrunn: tidligere kunne en runde som startet 45 min etter
+// scheduled_end_time bli auto-kansellert innen sekunder fordi
+// `scheduled_end_time + 30min < now()` var sant umiddelbart. Nå kreves det
+// også at `actual_start_time + 30min < now()` — m.a.o. minst 30 min faktisk
+// spilletid. Unit-testen verifiserer at audit-trail-en nå inkluderer
+// `actualStartTime` slik at Lotteritilsynet kan se hvorfor en runde ble
+// kansellert (grace-period passert eller ikke).
+//
+// Selve SQL-filtreringen kjøres i Postgres og dekkes implisitt av at
+// findCandidates() ikke returnerer rader for nylig startede runder.
+// MockPool returnerer rader uansett SQL-filter, så vi tester her at
+// `actualStartTime` propageres fra DB-rad til Candidate + audit-detail.
+
+test("tick: SCHEDULED_END_EXCEEDED inkluderer actualStartTime i audit-detail (grace-period observability)", async () => {
+  const scheduledEnd = new Date("2026-05-12T20:57:34Z");
+  const actualStart = new Date("2026-05-12T21:42:30Z"); // 45 min after scheduled_end
+  const audit = new AuditLogService(new InMemoryAuditLogStore());
+  const recorded: Array<{ action: string; details: unknown }> = [];
+  audit.record = async (input) => {
+    recorded.push({ action: input.action, details: input.details });
+  };
+  const pool = new MockPool();
+  pool.selectRows = [
+    {
+      scheduled_game_id: "sg-late-start",
+      hall_id: "hall-a",
+      plan_run_id: "run-1",
+      status: "running",
+      last_drawn_at: new Date("2026-05-12T21:42:55Z"),
+      scheduled_end_time: scheduledEnd,
+      actual_start_time: actualStart,
+      reason: "SCHEDULED_END_EXCEEDED",
+    } satisfies Record<string, unknown>,
+  ];
+  const svc = new Game1StuckGameDetectionService({
+    pool: pool as unknown as import("pg").Pool,
+    auditLogService: audit,
+    engineStop: makeMockEngine(),
+    clock: () => new Date("2026-05-12T22:00:00Z"),
+  });
+  const result = await svc.tick();
+  assert.equal(result.autoEnded, 1);
+  assert.equal(recorded.length, 1);
+  const details = recorded[0]?.details as Record<string, unknown>;
+  assert.equal(details["actualStartTime"], actualStart.toISOString());
+  assert.equal(details["scheduledEndTime"], scheduledEnd.toISOString());
+  assert.equal(details["reason"], "SCHEDULED_END_EXCEEDED");
+});
+
+test("tick: SCHEDULED_END_EXCEEDED med actual_start_time=null → audit-detail har null", async () => {
+  // Edge case: runde som aldri faktisk startet (sitter i 'running'-state
+  // fra master-trigger uten at engine kjørte). Skal fortsatt kunne auto-
+  // kanselleres via fallback i SQL — actualStartTime=null i audit.
+  const scheduledEnd = new Date("2026-05-12T20:57:34Z");
+  const audit = new AuditLogService(new InMemoryAuditLogStore());
+  const recorded: Array<{ action: string; details: unknown }> = [];
+  audit.record = async (input) => {
+    recorded.push({ action: input.action, details: input.details });
+  };
+  const pool = new MockPool();
+  pool.selectRows = [
+    {
+      scheduled_game_id: "sg-never-started",
+      hall_id: "hall-a",
+      plan_run_id: "run-1",
+      status: "running",
+      last_drawn_at: null,
+      scheduled_end_time: scheduledEnd,
+      actual_start_time: null,
+      reason: "SCHEDULED_END_EXCEEDED",
+    } satisfies Record<string, unknown>,
+  ];
+  const svc = new Game1StuckGameDetectionService({
+    pool: pool as unknown as import("pg").Pool,
+    auditLogService: audit,
+    engineStop: makeMockEngine(),
+    clock: () => new Date("2026-05-12T22:00:00Z"),
+  });
+  const result = await svc.tick();
+  assert.equal(result.autoEnded, 1);
+  assert.equal(recorded.length, 1);
+  const details = recorded[0]?.details as Record<string, unknown>;
+  assert.equal(details["actualStartTime"], null);
+  assert.equal(details["scheduledEndTime"], scheduledEnd.toISOString());
+});
