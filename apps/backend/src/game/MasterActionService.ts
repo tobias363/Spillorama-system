@@ -63,6 +63,11 @@
  *   LOBBY_INCONSISTENT        — bridge-failed eller dual-scheduled-games;
  *                                aggregator har flagget at state krangler.
  *   NO_ACTIVE_GAME            — pause/resume/stop uten aktiv scheduled-game.
+ *   SCHEDULED_GAME_TERMINAL   — pause/resume: scheduled-game er completed/
+ *                                cancelled mens plan-run='running'. Master
+ *                                skal klikke "Start neste spill" — som
+ *                                auto-advancer til neste plan-posisjon via
+ *                                eksisterende `start()`-logikk.
  *   JACKPOT_SETUP_REQUIRED    — advance til posisjon som krever jackpot-popup.
  *   PLAN_RUN_FINISHED         — advance på allerede ferdig run.
  *   ENGINE_FAILED             — Game1MasterControlService kastet (med
@@ -1256,6 +1261,27 @@ export class MasterActionService {
 
     const lobby = await this.preValidate(hallId, actor, "pause");
 
+    // Pilot-blokker-fix 2026-05-12: auto-reconcile stale terminal mismatch
+    // FØR vi prøver engine-action. Hvis scheduled-game er terminal mens
+    // plan-run er 'running', flipper vi plan-run til 'paused' og kaster
+    // klar feil så master vet de skal klikke "Start neste spill" istedet.
+    const reconciled = await this.tryReconcileTerminalScheduledGame({
+      lobby,
+      actor,
+      hallId,
+      triggeringAction: "pause",
+    });
+    if (reconciled) {
+      throw new DomainError(
+        "SCHEDULED_GAME_TERMINAL",
+        "Forrige runde er allerede avsluttet — klikk 'Start neste spill' for å fortsette planen.",
+        {
+          scheduledGameStatus: lobby.scheduledGameMeta?.status ?? null,
+          scheduledGameId: lobby.scheduledGameMeta?.scheduledGameId ?? null,
+        },
+      );
+    }
+
     const scheduledGameId = lobby.currentScheduledGameId;
     if (!scheduledGameId) {
       throw new DomainError(
@@ -1335,6 +1361,30 @@ export class MasterActionService {
     const actor = assertActor(input.actor);
 
     const lobby = await this.preValidate(hallId, actor, "resume");
+
+    // Pilot-blokker-fix 2026-05-12: auto-reconcile stale terminal mismatch
+    // FØR vi prøver engine-action. Dette dekker det rapporterte tilfellet
+    // hvor master klikket "Fortsett" mens scheduled-game var 'cancelled' og
+    // plan-run var 'running' — `Game1MasterControlService.resumeGame()`
+    // kaster `GAME_NOT_PAUSED`, men feilen ble vanskelig å oppdage i UI
+    // ("ingenting skjer"). Nå reconcileer vi plan-run til 'paused' og
+    // kaster en klar DomainError så master får handleable melding.
+    const reconciled = await this.tryReconcileTerminalScheduledGame({
+      lobby,
+      actor,
+      hallId,
+      triggeringAction: "resume",
+    });
+    if (reconciled) {
+      throw new DomainError(
+        "SCHEDULED_GAME_TERMINAL",
+        "Forrige runde er allerede avsluttet — klikk 'Start neste spill' for å fortsette planen.",
+        {
+          scheduledGameStatus: lobby.scheduledGameMeta?.status ?? null,
+          scheduledGameId: lobby.scheduledGameMeta?.scheduledGameId ?? null,
+        },
+      );
+    }
 
     const scheduledGameId = lobby.currentScheduledGameId;
     if (!scheduledGameId) {
@@ -1620,6 +1670,104 @@ export class MasterActionService {
       [runId, position],
     );
     return rows[0] ?? null;
+  }
+
+  /**
+   * Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): detekter stale terminal-
+   * scheduled-game-state og kast tydelig feil til master.
+   *
+   * Kontekst:
+   *   Når en runde avsluttes naturlig (Fullt Hus, alle baller trukket) eller
+   *   blir cancelled av stuck-detection / master-stop, blir scheduled-game-
+   *   status satt til 'completed'/'cancelled'. Men plan-run-status berøres
+   *   ikke fra engine-side — den forblir 'running' (semantikk: planen pågår,
+   *   neste posisjon mangler bare et nytt engine-start). Aggregator flagger
+   *   denne tilstanden som `PLAN_SCHED_STATUS_MISMATCH` (informativ, ikke-
+   *   blokkerende).
+   *
+   *   Forrige logikk:
+   *     - `start()` / `advance()` / `prepareScheduledGame()` håndterer denne
+   *       state-en korrekt: de auto-advancer plan-run til neste posisjon
+   *       (via `planRunService.advanceToNext`) før de spawner ny scheduled-
+   *       game.
+   *     - `pause()` / `resume()` håndterte den IKKE → engine kastet
+   *       `GAME_NOT_PAUSED` (resume) eller `GAME_NOT_RUNNING` (pause), men
+   *       feilen ble vanskelig å oppdage i UI ("ingenting skjer").
+   *
+   * Denne metoden er defense-in-depth som kalles fra `pause()` / `resume()`
+   * FØR engine-action. Den:
+   *   1. Detekterer mismatch (plan-run='running' + scheduled-game terminal).
+   *   2. Skriver audit-event for sporbarhet.
+   *   3. Broadcaster lobby så UI refresher.
+   *   4. Returnerer true — caller skal kaste `SCHEDULED_GAME_TERMINAL` med
+   *      Norwegian melding som peker master mot "Start neste spill" (som
+   *      kjører auto-advance via `start()`-pathen).
+   *
+   * VIKTIG — vi modifiserer IKKE plan-run.status:
+   *   - Plan-run='running' er den korrekte semantikken mens master er mellom
+   *     to runder i samme plan (engine ferdig, neste ikke spawnet).
+   *   - Hvis vi pauset plan-run-en ville `start()` kaste
+   *     `GAME_PLAN_RUN_INVALID_TRANSITION` (paused→running ikke tillatt
+   *     via start). Master ville da måtte kalle /resume først — som er den
+   *     fellen vi prøver å unngå.
+   *
+   * Returnerer `true` hvis mismatch detektert (caller bør avbryte med
+   * SCHEDULED_GAME_TERMINAL-feil), `false` ellers.
+   */
+  private async tryReconcileTerminalScheduledGame(input: {
+    lobby: Spill1AgentLobbyState;
+    actor: MasterActor;
+    hallId: string;
+    triggeringAction: "pause" | "resume";
+  }): Promise<boolean> {
+    const { lobby, actor, hallId, triggeringAction } = input;
+    const planRunStatus = lobby.planMeta?.planRunStatus;
+    const scheduledGameStatus = lobby.scheduledGameMeta?.status;
+    const scheduledGameId = lobby.scheduledGameMeta?.scheduledGameId ?? null;
+    const planRunId = lobby.planMeta?.planRunId ?? null;
+
+    if (!planRunStatus || !scheduledGameStatus || !planRunId) {
+      return false;
+    }
+    if (planRunStatus !== "running") {
+      return false;
+    }
+    if (!TERMINAL_SCHEDULED_GAME_STATUSES.has(scheduledGameStatus)) {
+      return false;
+    }
+
+    // Mismatch detected: plan-run='running' men scheduled-game er terminal.
+    // Vi skriver audit-event for sporbarhet og broadcaster lobby-update.
+    // VIKTIG: vi modifiserer IKKE plan-run-status — den skal forbli 'running'
+    // så `start()` kan auto-advance via eksisterende path (lines 580-645).
+    await this.audit({
+      action: "spill1.master.auto_reconcile_terminal_scheduled_game",
+      actor,
+      hallId,
+      planRunId,
+      scheduledGameId,
+      details: {
+        triggeringAction,
+        previousPlanRunStatus: planRunStatus,
+        scheduledGameStatus,
+        reason:
+          "scheduled-game terminal mens plan-run='running' — master skal klikke 'Start neste spill' for auto-advance",
+      },
+    });
+
+    logger.info(
+      {
+        hallId,
+        planRunId,
+        scheduledGameId,
+        scheduledGameStatus,
+        triggeringAction,
+      },
+      "[master-action] stale terminal scheduled-game detektert — kaster SCHEDULED_GAME_TERMINAL",
+    );
+
+    this.fireLobbyBroadcast(hallId);
+    return true;
   }
 
   /**

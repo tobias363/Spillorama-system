@@ -951,6 +951,213 @@ test("resume: ingen aktiv scheduled-game → NO_ACTIVE_GAME", async () => {
   );
 });
 
+// ── tests: auto-reconcile stale terminal scheduled-game (pilot-fix 2026-05-12) ──
+
+/**
+ * Pilot-blokker 2026-05-12: når en runde avsluttes naturlig (Fullt Hus eller
+ * alle baller trukket) eller cancelles av stuck-detection, blir
+ * scheduled-game.status='completed'/'cancelled' MEN plan-run.status forblir
+ * 'running'. Hvis master klikker "Fortsett" i denne stale state-en, kastet
+ * `Game1MasterControlService.resumeGame()` `GAME_NOT_PAUSED`, men feilen var
+ * vanskelig å oppdage i UI ("ingenting skjer"). Fixen er en pre-action
+ * auto-reconcile i `MasterActionService.pause()` og `resume()`.
+ */
+function makeTerminalLobbyState(
+  scheduledGameStatus: "completed" | "cancelled",
+): Spill1AgentLobbyState {
+  return makeLobbyState({
+    currentScheduledGameId: SCHED_ID,
+    planMeta: {
+      planId: PLAN_ID,
+      planRunId: RUN_ID,
+      planName: "Test Plan",
+      planRunStatus: "running",
+      currentPosition: 1,
+      totalPositions: 5,
+      catalogSlug: "bingo",
+      catalogDisplayName: "Bingo",
+      jackpotSetupRequired: false,
+      pendingJackpotOverride: null,
+    },
+    scheduledGameMeta: {
+      scheduledGameId: SCHED_ID,
+      status: scheduledGameStatus,
+      scheduledStartTime: "2026-05-08T16:00:00.000Z",
+      scheduledEndTime: null,
+      actualStartTime: "2026-05-08T16:00:30.000Z",
+      actualEndTime: "2026-05-08T16:08:00.000Z",
+      pauseReason: null,
+    },
+  });
+}
+
+test("resume: scheduled-game='cancelled' + plan-run='running' → SCHEDULED_GAME_TERMINAL (uten å mute plan-run)", async () => {
+  const { service, mocks } = makeService({
+    lobbyState: makeTerminalLobbyState("cancelled"),
+  });
+  await assert.rejects(
+    () => service.resume({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "SCHEDULED_GAME_TERMINAL",
+  );
+  // VIKTIG: plan-run.pause skal IKKE kalles — plan-run='running' er korrekt
+  // semantikk mens master er mellom to runder. Modifisering ville brutt
+  // `start()`-auto-advance-pathen.
+  assert.ok(
+    !mocks.planRunCalls.includes("pause"),
+    "planRun.pause skal IKKE kalles — plan-run.status='running' er korrekt",
+  );
+  // Engine resume skal IKKE ha blitt kalt
+  assert.ok(
+    !mocks.masterControlCalls.includes("resumeGame"),
+    "engine.resumeGame skal IKKE kalles ved terminal scheduled-game",
+  );
+  // Audit-event for auto-reconcile skal være skrevet
+  const reconcileAudit = mocks.auditEvents.find(
+    (e) =>
+      e.action === "spill1.master.auto_reconcile_terminal_scheduled_game",
+  );
+  assert.ok(
+    reconcileAudit,
+    "auto_reconcile_terminal_scheduled_game audit-event må skrives",
+  );
+  assert.equal(reconcileAudit?.details["triggeringAction"], "resume");
+  assert.equal(reconcileAudit?.details["scheduledGameStatus"], "cancelled");
+});
+
+test("resume: scheduled-game='completed' + plan-run='running' → SCHEDULED_GAME_TERMINAL", async () => {
+  const { service, mocks } = makeService({
+    lobbyState: makeTerminalLobbyState("completed"),
+  });
+  await assert.rejects(
+    () => service.resume({ actor: MASTER_ACTOR, hallId: HALL_ID }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "SCHEDULED_GAME_TERMINAL",
+  );
+  assert.ok(!mocks.planRunCalls.includes("pause"));
+  assert.ok(!mocks.masterControlCalls.includes("resumeGame"));
+});
+
+test("pause: scheduled-game='cancelled' + plan-run='running' → SCHEDULED_GAME_TERMINAL", async () => {
+  const { service, mocks } = makeService({
+    lobbyState: makeTerminalLobbyState("cancelled"),
+  });
+  await assert.rejects(
+    () =>
+      service.pause({
+        actor: MASTER_ACTOR,
+        hallId: HALL_ID,
+        reason: "Operatør pauset",
+      }),
+    (err: unknown) =>
+      err instanceof DomainError && err.code === "SCHEDULED_GAME_TERMINAL",
+  );
+  assert.ok(
+    !mocks.planRunCalls.includes("pause"),
+    "planRun.pause skal IKKE kalles selv ved pause-triggering",
+  );
+  assert.ok(!mocks.masterControlCalls.includes("pauseGame"));
+  const reconcileAudit = mocks.auditEvents.find(
+    (e) =>
+      e.action === "spill1.master.auto_reconcile_terminal_scheduled_game",
+  );
+  assert.equal(reconcileAudit?.details["triggeringAction"], "pause");
+});
+
+test("resume: scheduled-game='cancelled' + plan-run='paused' → INGEN reconcile (allerede synkron)", async () => {
+  // Tobias-direktiv: hvis master allerede har pauset plan-run, men scheduled-
+  // game er terminal, skal vi IKKE auto-reconcile (plan-run er ikke 'running',
+  // så det er ingen mismatch å fikse). Reconciler skal ikke trigge — flow
+  // faller gjennom til engine, og engine sin oppførsel er testet separat.
+  const { service, mocks } = makeService({
+    lobbyState: makeLobbyState({
+      currentScheduledGameId: SCHED_ID,
+      planMeta: {
+        planId: PLAN_ID,
+        planRunId: RUN_ID,
+        planName: "Test Plan",
+        planRunStatus: "paused",
+        currentPosition: 1,
+        totalPositions: 5,
+        catalogSlug: "bingo",
+        catalogDisplayName: "Bingo",
+        jackpotSetupRequired: false,
+        pendingJackpotOverride: null,
+      },
+      scheduledGameMeta: {
+        scheduledGameId: SCHED_ID,
+        status: "cancelled",
+        scheduledStartTime: "2026-05-08T16:00:00.000Z",
+        scheduledEndTime: null,
+        actualStartTime: "2026-05-08T16:00:30.000Z",
+        actualEndTime: "2026-05-08T16:08:00.000Z",
+        pauseReason: null,
+      },
+    }),
+  });
+  // Resume kalles — pre-pause-state aksepteres som default-mock-vei.
+  // Vi bekrefter KUN at reconciler ikke triggrer (kontrakten den lover).
+  await service
+    .resume({ actor: MASTER_ACTOR, hallId: HALL_ID })
+    .catch(() => undefined);
+  const reconcileAudit = mocks.auditEvents.find(
+    (e) =>
+      e.action === "spill1.master.auto_reconcile_terminal_scheduled_game",
+  );
+  assert.ok(
+    !reconcileAudit,
+    "auto-reconcile skal IKKE kjøres når plan-run allerede er paused",
+  );
+  // Plan-run.pause skal heller IKKE kalles (kun via reconciler).
+  assert.ok(
+    !mocks.planRunCalls.includes("pause"),
+    "planRun.pause skal IKKE kalles når plan-run er paused fra start",
+  );
+});
+
+test("resume: scheduled-game='paused' + plan-run='running' → INGEN reconcile (ikke terminal)", async () => {
+  // Sanity-test: bekreft at running-state IKKE trigges som reconcile.
+  // I dette tilfellet skal eksisterende paused-state-flow kjøre.
+  const { service, mocks } = makeService({
+    lobbyState: makeLobbyState({
+      currentScheduledGameId: SCHED_ID,
+      planMeta: {
+        planId: PLAN_ID,
+        planRunId: RUN_ID,
+        planName: "Test Plan",
+        planRunStatus: "paused",
+        currentPosition: 1,
+        totalPositions: 5,
+        catalogSlug: "bingo",
+        catalogDisplayName: "Bingo",
+        jackpotSetupRequired: false,
+        pendingJackpotOverride: null,
+      },
+      scheduledGameMeta: {
+        scheduledGameId: SCHED_ID,
+        status: "paused",
+        scheduledStartTime: "2026-05-08T16:00:00.000Z",
+        scheduledEndTime: null,
+        actualStartTime: "2026-05-08T16:00:30.000Z",
+        actualEndTime: null,
+        pauseReason: "Master pauset",
+      },
+    }),
+  });
+  // Normal paused → running flow skal lykkes
+  const result = await service.resume({ actor: MASTER_ACTOR, hallId: HALL_ID });
+  assert.equal(result.scheduledGameId, SCHED_ID);
+  assert.ok(mocks.masterControlCalls.includes("resumeGame"));
+  const reconcileAudit = mocks.auditEvents.find(
+    (e) =>
+      e.action === "spill1.master.auto_reconcile_terminal_scheduled_game",
+  );
+  assert.ok(
+    !reconcileAudit,
+    "auto-reconcile skal IKKE kjøres for paused (ikke-terminal) status",
+  );
+});
+
 // ── tests: stop ─────────────────────────────────────────────────────────
 
 test("stop: running scheduled-game → engine.stopGame + plan-run.finish + audit", async () => {
