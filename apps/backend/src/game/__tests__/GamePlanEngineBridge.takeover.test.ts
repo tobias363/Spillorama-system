@@ -821,15 +821,22 @@ test("F-NEW-3: 23505 etter første release → retry-INSERT lykkes (transient ra
   }
 });
 
-test("F-NEW-3: stale rad med samme (run, position) men annen ID skal IKKE cancelleres (idempotency-grense)", async () => {
-  // Defensiv: stub-en kan i teorien returnere en stale rad med samme
-  // (plan_run_id, plan_position) hvis schema-en var korrupt. Bridge-SQL
-  // ekskluderer EKSPLISITT vår egen (run, pos) i WHERE-klausulen
-  // (`NOT (plan_run_id = $2 AND plan_position = $3)`), så stub-en må
-  // simulere SQL-en og IKKE returnere en slik rad. Denne testen
-  // verifiserer at vi BRUKER den filter-klausulen — vi sjekker at
-  // WHERE-SQL inneholder NOT-betingelsen, slik at en framtidig refaktor
-  // ikke fjerner den ved et uhell.
+test("F-NEW-3 SQL-NULL-fix (2026-05-12 hotfix): release-pass SQL har IKKE NOT-klausul som ekskluderer egen (run, pos)", async () => {
+  // SQL-NULL-bug fix (2026-05-12): tidligere hadde release-pass-SELECT
+  // klausulen `NOT (plan_run_id = $2 AND plan_position = $3)`. Den
+  // filtrerte IKKE bort stale rader med `plan_run_id IS NULL` fordi
+  // `NULL = 'xyz'` evaluerer til NULL i SQL, og rader med NULL-WHERE-
+  // resultat ekskluderes fra spørringen. Stale rader med NULL plan_run_id
+  // ble dermed UTELATT fra release-pass → INSERT feilet med 23505 fordi
+  // den blokkerende raden ikke ble cancellet.
+  //
+  // Fix: drop NOT-klausulen helt. Idempotency-sjekken FØR release-pass
+  // (linje ~863) har allerede returnert hvis det fantes aktiv rad for
+  // samme (run, pos), så når vi når release-pass er ALLE aktive rader
+  // med samme room_code per definisjon stale.
+  //
+  // Denne testen verifiserer at SQL IKKE inneholder NOT-klausulen — en
+  // framtidig refaktor som re-introduserer den ville reproducere bugen.
   const catalog = makeCatalogEntry();
   const plan = makePlanWithItems([{ catalogEntry: catalog }]);
   const build = makeBridge({
@@ -857,11 +864,224 @@ test("F-NEW-3: stale rad med samme (run, position) men annen ID skal IKKE cancel
   );
   assert.ok(releaseSelect, "release-pass SELECT må ha kjørt");
   assert.ok(
-    /NOT\s*\(plan_run_id\s*=\s*\$2\s*AND\s*plan_position\s*=\s*\$3\)/i.test(
-      releaseSelect!.sql,
-    ),
-    "release-pass SELECT skal eksplisitt ekskludere egen (run, position)",
+    !/NOT\s*\(plan_run_id\s*=/i.test(releaseSelect!.sql),
+    "release-pass SELECT skal IKKE inneholde NOT (plan_run_id = ...) — re-introduserer SQL-NULL-bugen",
   );
+  // Verifiser at vi kun har én parameter (room_code) i SELECT-en.
+  // Pre-fix hadde $1, $2, $3 (room_code, run_id, position). Post-fix
+  // har kun $1.
+  assert.ok(
+    !/\$2/.test(releaseSelect!.sql),
+    "release-pass SELECT skal kun bruke $1 (room_code) — $2 og $3 er droppet",
+  );
+});
+
+test("F-NEW-3 SQL-NULL-fix: stale rad med plan_run_id=NULL blokkerer INSERT → release-pass FANGER og cancellerer den", async () => {
+  // ROT-ÅRSAK 2026-05-12: legacy/crash-recovery-rader kan ha plan_run_id=NULL
+  // (eks. spawnet via fail-fast-path før plan-binding, eller direkte-spawn
+  // utenfor plan-runtime). Pre-fix-SQL filtrerte IKKE disse fordi
+  // `NOT (NULL = $2 AND ...)` evaluerer til NULL → ekskludert fra WHERE.
+  // Post-fix: SQL fjerner NOT-klausulen, så NULL-plan_run_id-rader
+  // BLIR fanget og cancellet.
+  //
+  // Tobias-test 2026-05-12 15:37 reproduserte denne:
+  //   `46cb104d-edb1-4714-94a4-12770d770b47 | status='ready_to_start'
+  //    | plan_run_id=NULL | room_code='BINGO_DEMO-PILOT-GOH'`
+  // Master-start fikk 23505 med tom `releasedStaleIds: []`. Manuell
+  // SQL-cancel var workaround. Denne testen sikrer regresjon.
+  const catalog = makeCatalogEntry();
+  const plan = makePlanWithItems([{ catalogEntry: catalog }]);
+  const build = makeBridge({
+    runRow: {
+      id: "run-new",
+      plan_id: "gp-1",
+      hall_id: "hall-arnes",
+      business_date: "2026-05-12",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "demo-pilot-goh",
+    groupHallMembers: ["hall-arnes"],
+    staleRows: [
+      {
+        // Eksakt scenario fra Tobias-test: NULL plan_run_id +
+        // ready_to_start + BINGO_DEMO-PILOT-GOH room_code.
+        id: "46cb104d-edb1-4714-94a4-12770d770b47",
+        status: "ready_to_start",
+        plan_run_id: null,
+        plan_position: 1,
+        master_hall_id: "hall-arnes",
+        group_hall_id: "demo-pilot-goh",
+      },
+    ],
+  });
+
+  const result = await build.bridge.createScheduledGameForPlanRunPosition(
+    "run-new",
+    1,
+  );
+
+  assert.equal(result.reused, false);
+  assert.equal(
+    getInsertRoomCode(build.queries),
+    "BINGO_DEMO-PILOT-GOH",
+    "room_code må fortsatt være satt etter at NULL-plan_run_id-rad er cancellet",
+  );
+  assert.equal(
+    countCancelUpdates(build.queries),
+    1,
+    "NULL-plan_run_id-rad skal cancelleres (pre-fix-bug: var ekskludert fra release-pass)",
+  );
+  assert.equal(
+    countAuditInserts(build.queries),
+    1,
+    "audit-INSERT for cancellet NULL-plan_run_id-rad",
+  );
+  assert.equal(
+    countInserts(build.queries),
+    1,
+    "én INSERT for ny scheduled-game (ingen 23505-retry)",
+  );
+});
+
+test("F-NEW-3 SQL-NULL-fix: stale rad med plan_position=NULL men plan_run_id satt skal også cancelleres", async () => {
+  // Tilsvarende SQL-NULL-bug for plan_position. `NOT (plan_run_id = $2
+  // AND NULL = $3)` evaluerer til NULL → rad ekskludert pre-fix.
+  // Post-fix: alle aktive rader med samme room_code cancelleres
+  // uavhengig av (run, pos)-verdier.
+  const catalog = makeCatalogEntry();
+  const plan = makePlanWithItems([{ catalogEntry: catalog }]);
+  const build = makeBridge({
+    runRow: {
+      id: "run-new",
+      plan_id: "gp-1",
+      hall_id: "hall-arnes",
+      business_date: "2026-05-12",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "demo-pilot-goh",
+    groupHallMembers: ["hall-arnes"],
+    staleRows: [
+      {
+        id: "sg-stale-null-pos",
+        status: "running",
+        plan_run_id: "run-old",
+        plan_position: null,
+        master_hall_id: "hall-arnes",
+        group_hall_id: "demo-pilot-goh",
+      },
+    ],
+  });
+
+  await build.bridge.createScheduledGameForPlanRunPosition("run-new", 1);
+
+  assert.equal(
+    countCancelUpdates(build.queries),
+    1,
+    "NULL-plan_position-rad skal cancelleres",
+  );
+  assert.equal(countAuditInserts(build.queries), 1);
+  assert.equal(countInserts(build.queries), 1);
+});
+
+test("F-NEW-3 SQL-NULL-fix: stale rad med ANNEN plan_run_id (non-null) cancelleres (regresjon)", async () => {
+  // Sanity-check: post-fix skal fortsatt fange ordinære stale rader
+  // (annen run, samme room_code). Dette er hovedscenariet F-NEW-3 var
+  // designet for; må ikke regrere.
+  const catalog = makeCatalogEntry();
+  const plan = makePlanWithItems([{ catalogEntry: catalog }]);
+  const build = makeBridge({
+    runRow: {
+      id: "run-new",
+      plan_id: "gp-1",
+      hall_id: "hall-arnes",
+      business_date: "2026-05-12",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "demo-pilot-goh",
+    groupHallMembers: ["hall-arnes"],
+    staleRows: [
+      {
+        id: "sg-stale-other-run",
+        status: "paused",
+        plan_run_id: "run-old-different",
+        plan_position: 2,
+        master_hall_id: "hall-arnes",
+        group_hall_id: "demo-pilot-goh",
+      },
+    ],
+  });
+
+  await build.bridge.createScheduledGameForPlanRunPosition("run-new", 1);
+
+  assert.equal(
+    countCancelUpdates(build.queries),
+    1,
+    "stale rad med annen non-null plan_run_id skal cancelleres",
+  );
+  assert.equal(countAuditInserts(build.queries), 1);
+  assert.equal(countInserts(build.queries), 1);
+});
+
+test("F-NEW-3 SQL-NULL-fix: audit-metadata bevarer currentRunId + currentPosition selv etter SQL-forenkling", async () => {
+  // Audit-trail må fortsatt inkludere `cancelledByRunId` og
+  // `cancelledByPosition` så Lotteritilsynet kan rekonstruere kjeden:
+  // hvilken NY (run, pos) tok over room_code etter cancel?
+  //
+  // Selv om SQL-en ikke lenger BRUKER (run, pos) som filter, holder vi
+  // dem i funksjons-signaturen for audit-metadata.
+  const catalog1 = makeCatalogEntry({ id: "gc-1", slug: "innsatsen-1" });
+  const catalog2 = makeCatalogEntry({ id: "gc-2", slug: "innsatsen-2" });
+  const catalog3 = makeCatalogEntry({ id: "gc-3", slug: "innsatsen-3" });
+  const plan = makePlanWithItems([
+    { catalogEntry: catalog1 },
+    { catalogEntry: catalog2 },
+    { catalogEntry: catalog3 },
+  ]);
+  const build = makeBridge({
+    runRow: {
+      id: "run-takes-over",
+      plan_id: "gp-1",
+      hall_id: "hall-arnes",
+      business_date: "2026-05-12",
+      jackpot_overrides_json: {},
+    },
+    plan,
+    existingScheduled: null,
+    hallGroupId: "demo-pilot-goh",
+    groupHallMembers: ["hall-arnes"],
+    staleRows: [
+      {
+        id: "sg-stale-1",
+        status: "ready_to_start",
+        plan_run_id: null,
+        plan_position: 1,
+        master_hall_id: "hall-arnes",
+        group_hall_id: "demo-pilot-goh",
+      },
+    ],
+  });
+
+  await build.bridge.createScheduledGameForPlanRunPosition("run-takes-over", 3);
+
+  // Hent audit-INSERT-en og verifiser metadata-payload.
+  const auditInsert = build.queries.find((q) =>
+    /INSERT INTO\s+"[^"]*"\."app_game1_master_audit"/i.test(q.sql),
+  );
+  assert.ok(auditInsert, "audit-INSERT må ha kjørt");
+  // metadata_json er parameter $5 (indeksert fra 0 = index 4).
+  const metadataRaw = auditInsert!.params?.[4] as string;
+  assert.ok(metadataRaw, "metadata-payload må være satt");
+  const metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
+  assert.equal(metadata.cancelledByRunId, "run-takes-over");
+  assert.equal(metadata.cancelledByPosition, 3);
+  assert.equal(metadata.reason, "auto_cancelled_by_bridge_takeover");
+  assert.equal(metadata.roomCode, "BINGO_DEMO-PILOT-GOH");
 });
 
 test("F-NEW-3 regresjon: lazy-binding (room_code=NULL) fallback-INSERT er fjernet", async () => {

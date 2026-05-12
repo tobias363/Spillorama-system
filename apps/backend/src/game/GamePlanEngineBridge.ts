@@ -1464,9 +1464,8 @@ export class GamePlanEngineBridge {
   /**
    * F-NEW-3 (Tobias-direktiv 2026-05-12): "ta over" hall-default-rommet.
    *
-   * Finn og auto-cancel alle stale aktive scheduled-game-rader som holder
-   * den kanoniske `roomCode` men peker på en ANNEN (plan_run_id,
-   * plan_position) enn den vi prøver å spawne for.
+   * Finn og auto-cancel ALLE stale aktive scheduled-game-rader som holder
+   * den kanoniske `roomCode`, slik at INSERT med room_code lykkes.
    *
    * Sammenhengen:
    *   - Unique-indeksen `idx_app_game1_scheduled_games_room_code` (migration
@@ -1485,9 +1484,24 @@ export class GamePlanEngineBridge {
    * SELECT-en, men UPDATE-WHERE-status-filteret håndhever at vi ikke
    * dobbel-canceller.
    *
-   * NB: vi ekskluderer eksplisitt rader for vår EGEN (plan_run_id,
-   * plan_position) — idempotent-retry-pathen (linje ~844) har allerede
-   * returnert den raden, så vi når aldri hit. Men forsiktighet er gratis.
+   * SQL-NULL-fix (2026-05-12 hotfix): Vi DROPPER tidligere
+   * `NOT (plan_run_id = $2 AND plan_position = $3)`-klausul. Den filtrerte
+   * IKKE bort vår egen (run, pos) NÅR plan_run_id IS NULL — fordi
+   * `NULL = 'xyz'` evaluerer til NULL i SQL, `NOT NULL` evaluerer til
+   * NULL, og rader med NULL-resultat ekskluderes fra WHERE som om de
+   * var FALSE. Stale rader med `plan_run_id IS NULL` (eks. legacy-rader
+   * spawnet via fail-fast-pathen før plan-binding) ble dermed AKSEPTERT
+   * av WHERE som "matcher current (run, pos)" og UTELATT fra release-
+   * passet. Resultat: tom `releasedStaleIds`-array → INSERT feiler med
+   * 23505 fordi den blokkerende raden ikke ble cancellet.
+   *
+   * Riktig modell: idempotency-sjekken FØR denne metoden (linje ~863)
+   * filtrerer for `plan_run_id = $1 AND plan_position = $2 AND status
+   * NOT IN ('cancelled','completed')`. Hvis den fant en match, har vi
+   * allerede returnert `reused: true` og caller når ALDRI release-pass.
+   * Når vi når release-pass, er det garantert at det IKKE finnes aktiv
+   * rad for vår egen (run, pos) — dermed er ALLE aktive rader med samme
+   * room_code per definisjon stale og skal cancelleres.
    *
    * Audit: hver cancellet rad får en `app_game1_master_audit`-entry med
    * action='stop', actor='SYSTEM', og metadata pekende på årsaken +
@@ -1505,10 +1519,14 @@ export class GamePlanEngineBridge {
     newMasterHallId: string,
     newGroupHallId: string,
   ): Promise<string[]> {
-    // 1. Finn stale aktive rader med samme room_code men ANNEN (run, pos).
+    // 1. Finn ALLE stale aktive rader med samme room_code.
     //    Filter på samme status-set som unique-indeksen ekskluderer
     //    'completed','cancelled' fra (slik at vi kun targeterer rader som
     //    faktisk blokkerer INSERT).
+    //
+    //    Vi filtrerer IKKE bort vår egen (run, pos) i SQL — idempotency-
+    //    sjekken har allerede ekskludert den. Se JSDoc over for forklaring
+    //    av SQL-NULL-bugen som motiverte denne forenklingen.
     const { rows: staleRows } = await this.pool.query<{
       id: string;
       status: string;
@@ -1521,9 +1539,8 @@ export class GamePlanEngineBridge {
               master_hall_id, group_hall_id
          FROM ${this.scheduledGamesTable()}
         WHERE room_code = $1
-          AND status NOT IN ('completed', 'cancelled')
-          AND NOT (plan_run_id = $2 AND plan_position = $3)`,
-      [roomCode, currentRunId, currentPosition],
+          AND status NOT IN ('completed', 'cancelled')`,
+      [roomCode],
     );
 
     if (staleRows.length === 0) return [];
