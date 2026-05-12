@@ -352,6 +352,118 @@ describe("CenterTopPanel — setBuyMoreDisabled (BIN-409 D2)", () => {
   });
 });
 
+describe("CenterTopPanel — setPreBuyDisabled (Wait-on-master-fix Agent B, 2026-05-12)", () => {
+  let panel: CenterTopPanel;
+  let container: HTMLElement;
+  let overlay: HtmlOverlayManager;
+
+  beforeEach(() => {
+    ({ panel, container, overlay } = makePanel());
+  });
+
+  afterEach(() => {
+    panel.destroy();
+    overlay.destroy();
+    container.remove();
+  });
+
+  function findPreBuyBtn(): HTMLButtonElement | null {
+    const btns = container.querySelectorAll("button");
+    for (const b of btns) {
+      if (
+        b.textContent === "Forhåndskjøp til dagens spill" ||
+        b.textContent === "Venter på master — kjøp åpner snart"
+      ) {
+        return b as HTMLButtonElement;
+      }
+    }
+    return null;
+  }
+
+  it("default state: knappen er enabled med 'Forhåndskjøp til dagens spill'-tekst", () => {
+    const btn = findPreBuyBtn();
+    expect(btn).not.toBeNull();
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.textContent).toBe("Forhåndskjøp til dagens spill");
+    expect(btn!.style.cursor).toBe("pointer");
+  });
+
+  it("disabled=true: knappen disables, bytter tekst, og setter tooltip", () => {
+    const btn = findPreBuyBtn();
+    expect(btn).not.toBeNull();
+    panel.setPreBuyDisabled(true, "Master har ikke startet neste runde ennå");
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toBe("Master har ikke startet neste runde ennå");
+    expect(btn!.textContent).toBe("Venter på master — kjøp åpner snart");
+    expect(btn!.style.opacity).toBe("0.4");
+    expect(btn!.style.cursor).toBe("not-allowed");
+  });
+
+  it("disabled=false re-enables og restorer original 'Forhåndskjøp'-tekst", () => {
+    const btn = findPreBuyBtn();
+    expect(btn).not.toBeNull();
+    panel.setPreBuyDisabled(true, "Master har ikke startet neste runde ennå");
+    expect(btn!.textContent).toBe("Venter på master — kjøp åpner snart");
+    panel.setPreBuyDisabled(false);
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.title).toBe("");
+    expect(btn!.textContent).toBe("Forhåndskjøp til dagens spill");
+    expect(btn!.style.opacity).toBe("1");
+    expect(btn!.style.cursor).toBe("pointer");
+  });
+
+  it("hover (mouseenter) endrer IKKE bakgrunnen mens knappen er disabled", () => {
+    const btn = findPreBuyBtn();
+    expect(btn).not.toBeNull();
+    panel.setPreBuyDisabled(true, "Venter");
+    const bgBefore = btn!.style.background;
+    btn!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    // Hover-handler er gated av `!btn.disabled` — bg skal ikke endres.
+    expect(btn!.style.background).toBe(bgBefore);
+  });
+
+  it("idempotent: gjentatt setPreBuyDisabled(true) er no-op (memoisert state)", () => {
+    const btn = findPreBuyBtn();
+    expect(btn).not.toBeNull();
+    panel.setPreBuyDisabled(true, "Master har ikke startet neste runde ennå");
+    // Snapshot DOM state, gjør no-op-kall, sjekk uendret.
+    const opacityBefore = btn!.style.opacity;
+    const cursorBefore = btn!.style.cursor;
+    const titleBefore = btn!.title;
+    const textBefore = btn!.textContent;
+    panel.setPreBuyDisabled(true, "Master har ikke startet neste runde ennå");
+    expect(btn!.style.opacity).toBe(opacityBefore);
+    expect(btn!.style.cursor).toBe(cursorBefore);
+    expect(btn!.title).toBe(titleBefore);
+    expect(btn!.textContent).toBe(textBefore);
+  });
+
+  it("tooltip har default verdi når reason argument er utelatt", () => {
+    const btn = findPreBuyBtn();
+    expect(btn).not.toBeNull();
+    panel.setPreBuyDisabled(true);
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toBe("");
+    // Selv uten reason er teksten på knappen tydelig for spilleren.
+    expect(btn!.textContent).toBe("Venter på master — kjøp åpner snart");
+  });
+
+  it("preBuy + buyMore disable independent: setPreBuyDisabled rør ikke buyMoreBtn", () => {
+    panel.setPreBuyDisabled(true, "Venter");
+    // Finn buyMore (samme query-helper som setBuyMoreDisabled-suite).
+    const btns = container.querySelectorAll("button");
+    let buyMoreBtn: HTMLButtonElement | null = null;
+    for (const b of btns) {
+      if (b.textContent === "Kjøp flere brett") {
+        buyMoreBtn = b as HTMLButtonElement;
+      }
+    }
+    expect(buyMoreBtn).not.toBeNull();
+    expect(buyMoreBtn!.disabled).toBe(false);
+    expect(buyMoreBtn!.textContent).toBe("Kjøp flere brett");
+  });
+});
+
 /**
  * Fase-progresjon gjennom alle 5 faser (Rad 1 → Rad 2 → Rad 3 → Rad 4 → Fullt Hus).
  * Verifiserer at:

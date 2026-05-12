@@ -510,6 +510,29 @@ class Game1Controller implements GameController {
       // toggles ball vs idle-text basert på state.
       this.playScreen?.setLobbyOverallStatus(state?.overallStatus ?? null);
 
+      // Wait-on-master-fix (Agent B, 2026-05-12 — Tobias-direktiv 2026-05-12,
+      // Alternativ B): gating-e kjøp-knapper til scheduled-game er
+      // spawnet. Pre-fix-bug: klient kunne sende `bet:arm` (in-memory
+      // armed-state) før bridge spawnet `app_game1_scheduled_games`-rad.
+      // Når bridge senere spawnet runden ble armed-state IKKE konvertert
+      // til DB-persistert `app_game1_ticket_purchases` → bongene
+      // forsvant.
+      //
+      // Pickin'-logikk speiler `pickJoinableScheduledGameId` (linje 967):
+      //   - scheduledGameId null      → vent på bridge
+      //   - status idle/finished      → ingen runde tilgjengelig
+      //   - status purchase_open/     → kjøp åpent, knapper aktive
+      //     ready_to_start/running/
+      //     paused
+      //
+      // `closed`-status (utenfor åpningstid / ingen plan) skal også
+      // disable kjøp-knapper, men de vises da uansett ikke fordi
+      // CenterBall idle-mode = "closed" + andre disable-paths slår inn.
+      // For konsistens sender vi waiting=true også der.
+      const joinableGameId = this.pickJoinableScheduledGameId(state);
+      const purchaseAllowed = joinableGameId !== null;
+      this.playScreen?.setWaitingForMasterPurchase(!purchaseAllowed);
+
       // Klient-auto-join-scheduled-game delta-watcher (Tobias 2026-05-11):
       //
       // Plan-advance scenario: master flytter posisjonen i spilleplanen,
@@ -534,7 +557,11 @@ class Game1Controller implements GameController {
       // Andre felter (overallStatus, catalogDisplayName, ticketColors)
       // endrer seg uten at gameId endres — re-join på de ville vært
       // overflødig støy mot serveren.
-      const nextScheduledGameId = this.pickJoinableScheduledGameId(state);
+      //
+      // Wait-on-master-fix (Agent B, 2026-05-12): gjenbruker `joinableGameId`
+      // beregnet over slik at vi ikke kaller `pickJoinableScheduledGameId`
+      // to ganger per onChange-event.
+      const nextScheduledGameId = joinableGameId;
       if (
         this.initialJoinComplete &&
         nextScheduledGameId !== null &&
@@ -1874,6 +1901,19 @@ class Game1Controller implements GameController {
     // basert på `state.millisUntilNextStart` — det er nettopp buggen vi
     // ønsker å hindre.
     screen.setLobbyOverallStatus(lobbyState?.overallStatus ?? null);
+
+    // Wait-on-master-fix (Agent B, 2026-05-12, Alternativ B): seed wait-
+    // on-master-state slik at "Forhåndskjøp"-knappen ikke flash-er kort
+    // i enabled-tilstand før onChange-listeneren fyrer for første gang.
+    // Speiler `pickJoinableScheduledGameId(state)`-logikken — purchase
+    // tillates kun når scheduled-game er joinable.
+    //
+    // Hvis lobbyState er null (pre-init) seedes waiting=true (defensiv —
+    // vi heller bias mot å vente). Hvis lobbyState mangler
+    // scheduledGameId seedes waiting=true også. onChange-listeneren
+    // overstyrer dette så snart første live event ankommer.
+    const initialJoinableId = this.pickJoinableScheduledGameId(lobbyState ?? null);
+    screen.setWaitingForMasterPurchase(initialJoinableId === null);
 
     return screen;
   }
