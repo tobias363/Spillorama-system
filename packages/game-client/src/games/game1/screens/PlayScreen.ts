@@ -663,14 +663,16 @@ export class PlayScreen extends Container {
     // aggregator har levert ticket-data selv om `room:update` ikke har
     // kommet enda (typisk pre-game / før master starter runden).
     //
-    // Wait-on-master-fix (Agent B, 2026-05-12, Alternativ B): blokker
-    // auto-show når `waitingForMasterPurchase=true` (scheduled-game ennå
-    // ikke spawnet av bridge). Spilleren ser disabled-knapper i Center-
-    // Top med "Venter på master"-tekst og kan ikke arme bonger via
-    // `bet:arm` som ville blitt foreldreløs ved senere bridge-spawn.
-    // `autoShowBuyPopupDone` settes IKKE til true her — neste `update()`
-    // etter `setWaitingForMasterPurchase(false)` får lov til å åpne
-    // popup-en.
+    // Tobias-direktiv 2026-05-12 ("popup skal alltid komme på entry"):
+    // popup-en SKAL vises også når scheduled-game ennå ikke er spawnet
+    // av bridge (mellom runder eller før master har trykket Start). Vi
+    // fjernet derfor den tidligere `!this.waitingForMasterPurchase`-
+    // blokken — i stedet propagerer vi wait-state inn i Game1BuyPopup
+    // via `setWaitingForMaster(...)` (kalt fra
+    // `setWaitingForMasterPurchase` under). Brukeren ser priser +
+    // bongdesign, men `Kjøp`-knappen i popup-en disables med "Venter
+    // på master"-tekst inntil scheduled-game er joinable. Ingen
+    // foreldreløse `bet:arm`-emits.
     const hasLive = running && state.myTickets.length > 0;
     const hasTicketTypes =
       state.ticketTypes.length > 0
@@ -679,7 +681,6 @@ export class PlayScreen extends Container {
       !this.autoShowBuyPopupDone
       && !hasLive
       && hasTicketTypes
-      && !this.waitingForMasterPurchase
       && (state.preRoundTickets?.length ?? 0) === 0
     ) {
       this.autoShowBuyPopupDone = true;
@@ -764,6 +765,12 @@ export class PlayScreen extends Container {
     }
 
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
+    // Tobias 2026-05-12 ("popup skal alltid komme"): seed wait-state ved
+    // show() slik at popup-en starter med korrekt Kjøp-knapp-tilstand
+    // (disabled hvis scheduled-game ikke joinable enda). Uten denne
+    // ville popup-en flash-e med enabled "Kjøp"-knapp før første
+    // setWaitingForMasterPurchase-kall fra Game1Controller.
+    this.buyPopup.setWaitingForMaster(this.waitingForMasterPurchase);
     this.buyPopup.showWithTypes(
       fee,
       types,
@@ -1016,6 +1023,13 @@ export class PlayScreen extends Container {
     // Reason-string er felles for begge knapper — bruker ser samme
     // melding uansett hvor de hover-er.
     this.centerTop.setBuyMoreDisabled(waiting, reasonText);
+
+    // Tobias 2026-05-12 ("popup skal alltid komme"): propag wait-state
+    // til BuyPopup slik at hvis popup-en allerede er åpen (auto-show
+    // ved entry), reagerer Kjøp-knappen live når lobby-state oppdaterer.
+    // Idempotent — BuyPopup.setWaitingForMaster skipper DOM-mutasjon
+    // hvis state ikke endret.
+    this.buyPopup.setWaitingForMaster(waiting, reasonText);
 
     // Re-trigge update() slik at CenterBall idle-mode synker. Pre-fix:
     // CenterBall viste fortsatt "Kjøp bonger for å være med i
