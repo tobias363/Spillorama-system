@@ -109,6 +109,43 @@ export const IdempotencyKeys = {
   game1RefundCredit: (params: { purchaseId: string }): string =>
     `game1-refund:${params.purchaseId}:credit`,
 
+  /**
+   * Game1ArmedToPurchaseConversionService — én per (scheduledGameId, playerId).
+   *
+   * Brukes når armed-state fra lobby-rom (pre-purchase via bet:arm) konverteres
+   * til en faktisk `app_game1_ticket_purchases`-rad ved bridge-spawn av
+   * scheduled-game. Wallet-reservasjonen comm-ittes via samme key (suffix
+   * `:commit-reservation`) for å unngå dobbelt-debitering hvis konverteringen
+   * retry-es.
+   *
+   * Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): bonger kjøpt før master
+   * trykker Start MÅ være LIVE i runden. Service-en sikrer at
+   * `Game1DrawEngineService.startGame` finner `app_game1_ticket_purchases`-
+   * rader via `ticketPurchase.listPurchasesForGame(scheduledGameId)`.
+   *
+   * Format: `g1-armed-conv:{scheduledGameId}:{playerId}` (purchase-id).
+   * Commit-form: `{base}:commit-reservation` (wallet-adapter dedup).
+   *
+   * Se apps/backend/src/game/Game1ArmedToPurchaseConversionService.ts.
+   */
+  game1ArmedConversion: (params: {
+    scheduledGameId: string;
+    playerId: string;
+  }): string =>
+    `g1-armed-conv:${params.scheduledGameId}:${params.playerId}`,
+
+  /**
+   * Commit-key for wallet-reservation under armed-conversion-flyten.
+   * Suffix `:commit-reservation` for å skille fra purchase-INSERT-keyen.
+   * Wallet-adapter dedup-er på denne keyen — retry av konvertering
+   * dobbel-comm-itter ikke reservasjonen.
+   */
+  game1ArmedConversionCommit: (params: {
+    scheduledGameId: string;
+    playerId: string;
+  }): string =>
+    `g1-armed-conv:${params.scheduledGameId}:${params.playerId}:commit-reservation`,
+
   // === Spill 1 mini-games ======================================================
 
   /**
