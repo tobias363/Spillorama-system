@@ -840,14 +840,35 @@ export class GamePlanEngineBridge {
       );
     }
 
-    // Idempotens-sjekk: finnes allerede en rad for (run, position)?
+    // Idempotens-sjekk: finnes en AKTIV rad for (run, position)?
+    //
+    // PITFALLS §4.4-fix (2026-05-12): vi MÅ filtrere bort `cancelled` og
+    // `completed` rader. Pre-fix-bug var:
+    //   - master stopGame → status='cancelled', actual_end_time satt
+    //   - master advance/start på samme posisjon (samme runde-loop, eller
+    //     etter crash-recovery) → idempotens-SELECT plukket opp den
+    //     cancelled raden → returnerte `reused: true` → klient prøvde å
+    //     markere ready på cancelled rad → `GAME_NOT_READY_ELIGIBLE`
+    // Samme problem oppstår med `completed` rader: en posisjon som har
+    // kjørt ferdig naturlig kan ikke gjenbrukes som idempotency-hit.
+    //
+    // Aktive statuser hvor idempotency-reuse er korrekt:
+    //   'scheduled' | 'purchase_open' | 'ready_to_start' | 'running' | 'paused'
+    //
+    // Status-listen speiler partial-unique-indeksen
+    // `idx_app_game1_scheduled_games_room_code` (migration
+    // 20261221000000_app_game1_scheduled_games_room_code_active_only)
+    // som bruker SAMME `status NOT IN ('completed','cancelled')`
+    // filter — vi er konsistent med DB-invarianten.
     const { rows: existing } = await this.pool.query<{
       id: string;
       catalog_entry_id: string | null;
     }>(
       `SELECT id, catalog_entry_id
        FROM ${this.scheduledGamesTable()}
-       WHERE plan_run_id = $1 AND plan_position = $2
+       WHERE plan_run_id = $1
+         AND plan_position = $2
+         AND status NOT IN ('cancelled', 'completed')
        LIMIT 1`,
       [run.id, position],
     );
