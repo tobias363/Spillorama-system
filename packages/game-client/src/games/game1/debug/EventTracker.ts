@@ -42,7 +42,8 @@ export type EventType =
   | "socket.recv"
   | "state.change"
   | "lobby.change"
-  | "error.client";
+  | "error.client"
+  | "rest.fetch";
 
 export interface TrackedEvent {
   /** Monotont voksende ID (within session). Format: `evt-<n>`. */
@@ -126,6 +127,54 @@ export class EventTracker {
   constructor(opts: EventTrackerOptions = {}) {
     // Tillat liten buffer-størrelse for tester. Produksjons-default 500.
     this.bufferSize = Math.max(1, opts.bufferSize ?? 500);
+  }
+
+  /**
+   * Spor en REST/fetch-request. Spesialisert helper rundt `track("rest.fetch", ...)`
+   * for å gi konsistent event-shape på tvers av call-sites (SocketActions.buy
+   * REST-purchase-path, fremtidige REST-kall fra klient, m.fl.).
+   *
+   * Tobias-direktiv 2026-05-12: tidligere debug-dump fra Tobias inneholdt 232
+   * events men kun ÉN socket.emit (createRoom). Årsaken var at REST-fetch
+   * (`fetch("/api/game1/purchase", ...)`) ikke ble logget noen steder. Denne
+   * helperen lukker det hullet.
+   *
+   * Best-effort: alle felter kan være null/undefined uten at metoden krasjer.
+   * Idempotent — kan kalles flere ganger; hvert kall tracker en ny event.
+   *
+   * GDPR/sanitize: payload sendes gjennom samme `sanitizePayload`-pipeline
+   * som `track()` så sensitive felter (token, password) blir redacted.
+   */
+  trackFetch(input: {
+    url: string;
+    method: string;
+    requestBody?: unknown;
+    responseStatus?: number;
+    responseBody?: unknown;
+    durationMs?: number;
+    correlationId?: string;
+    traceId?: string;
+  }): string {
+    const payload: Record<string, unknown> = {
+      url: input.url,
+      method: input.method,
+    };
+    if (input.requestBody !== undefined && input.requestBody !== null) {
+      payload.requestBody = input.requestBody;
+    }
+    if (input.responseStatus !== undefined && input.responseStatus !== null) {
+      payload.responseStatus = input.responseStatus;
+    }
+    if (input.responseBody !== undefined && input.responseBody !== null) {
+      payload.responseBody = input.responseBody;
+    }
+    if (input.durationMs !== undefined && input.durationMs !== null) {
+      payload.durationMs = input.durationMs;
+    }
+    return this.track("rest.fetch", payload, {
+      traceId: input.traceId,
+      correlationId: input.correlationId,
+    });
   }
 
   /**

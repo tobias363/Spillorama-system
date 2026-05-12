@@ -138,6 +138,25 @@ function getToken(): string {
 }
 
 /**
+ * Tobias-direktiv 2026-05-12: før vi sender en payload til emit-observatoren
+ * (som skal logge til EventTracker for debug-dump), fjerner vi `accessToken`
+ * defensivt. Det er aldri i payload på dette punktet (vi appender det først
+ * i `socket.emit`-kallet), men hvis en caller noen gang skulle inkludere
+ * tokenet i sin egen payload, slipper vi at det havner i debug-loggen.
+ *
+ * Vi muterer ikke input — returnerer en shallow copy med tokenet strippet.
+ */
+function stripAccessToken(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!payload || typeof payload !== "object") return {};
+  if (!("accessToken" in payload)) return payload;
+  const out: Record<string, unknown> = { ...payload };
+  delete out.accessToken;
+  return out;
+}
+
+/**
  * BIN-813 R5: Generer en UUID v4 til bruk som `clientRequestId` for
  * idempotent socket-events. Server-siden cacher ack på (userId, eventName,
  * clientRequestId) i 5 min, så reconnect-replay får cached respons uten
@@ -159,6 +178,45 @@ function generateClientRequestId(): string {
     return v.toString(16);
   });
 }
+
+// ── Emit observer (Tobias-direktiv 2026-05-12) ─────────────────────────────
+
+/**
+ * Observer-hook for å instrumentere alle socket-emit-kall.
+ *
+ * Bakgrunn: Tobias-direktiv 2026-05-12 — debug-dump fra klient skal logge
+ * ALLE socket-emits (bet:arm, claim:submit, ticket:mark, …). Pre-fix-versjon
+ * av EventTracker plukket kun opp én `createRoom`-emit fordi den var
+ * eksplisitt tracket i Game1Controller. Resten gikk uregistrerte gjennom
+ * den private `SpilloramaSocket.emit()`-wrapperen.
+ *
+ * Designvalg: Observer i stedet for direkte EventTracker-dependency så
+ * `SpilloramaSocket` (net/-laget) ikke trenger å vite om
+ * `games/game1/debug/EventTracker` (domene-laget). Game1Controller wiring-
+ * er observatøren ved oppstart.
+ *
+ * Best-effort: hvis observer kaster, fanger vi feilen og logger en warn —
+ * socket-emit-flyten må ALDRI knekke pga. debug-instrumentering.
+ *
+ * `phase` skiller pre-emit fra post-ack slik at klient-debug-loggen kan
+ * korrelere request/response selv om de er på samme socket-event-navn.
+ */
+export interface SocketEmitObserverEvent {
+  /** Socket-event-navn (eks "bet:arm", "claim:submit", "room:create"). */
+  event: string;
+  /** `pre` fyrer rett før socket.emit, `ack` fyrer etter respons. */
+  phase: "pre" | "ack";
+  /** Sanitisert payload uten accessToken (fjernet av observatøren). */
+  payload: Record<string, unknown>;
+  /** Hvis `phase === "ack"`: ms fra pre til ack. */
+  durationMs?: number;
+  /** Hvis `phase === "ack"`: success-flag fra AckResponse. */
+  ok?: boolean;
+  /** Hvis `phase === "ack"` og ok=false: error-shape (kode + melding). */
+  error?: { code?: string; message?: string };
+}
+
+export type SocketEmitObserver = (event: SocketEmitObserverEvent) => void;
 
 // ── Socket wrapper ──────────────────────────────────────────────────────────
 
@@ -255,8 +313,48 @@ export class SpilloramaSocket {
   private lastAutoRetryAt = 0;
   private onlineHandler: (() => void) | null = null;
 
+  /**
+   * Emit-observer (Tobias-direktiv 2026-05-12). Wired av Game1Controller når
+   * debug-HUD aktiveres slik at EventTracker fanger opp alle socket-emits.
+   * Default null → ingen observasjon. Setter `setEmitObserver(null)` for å
+   * fjerne. Best-effort dispatch; observer-feil tar aldri ned emit-flyten.
+   */
+  private emitObserver: SocketEmitObserver | null = null;
+
   constructor(serverUrl: string) {
     this.serverUrl = serverUrl;
+  }
+
+  /**
+   * Installer (eller fjern med `null`) en observer som mottar pre/ack-events
+   * for hvert socket-emit. Brukes av debug-HUD til å rute alle emits inn i
+   * EventTracker uten å duplisere call-site-instrumentering.
+   *
+   * Tobias-direktiv 2026-05-12: tidligere debug-dump manglet `bet:arm` osv.
+   * fordi de gikk gjennom den private `emit()`-wrapperen uten å treffe
+   * `tracker.track()`. Etter denne integrasjonen er alle wrapper-emits
+   * automatisk fanget.
+   *
+   * Idempotent — re-kall overskriver eksisterende observer.
+   */
+  setEmitObserver(observer: SocketEmitObserver | null): void {
+    this.emitObserver = observer;
+  }
+
+  /**
+   * Helper for å invokere observer trygt. Best-effort — feil i observer
+   * må ALDRI ta ned socket-emit-flyten. Vi swallower exceptions med en
+   * console.warn så feil-konfigurert debug-HUD ikke kveler pilot-test.
+   */
+  private notifyEmitObserver(event: SocketEmitObserverEvent): void {
+    const observer = this.emitObserver;
+    if (!observer) return;
+    try {
+      observer(event);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[SpilloramaSocket] emit observer threw:", err);
+    }
   }
 
   /**
@@ -540,16 +638,40 @@ export class SpilloramaSocket {
    *  "zombie" error. Now the timeout and the ack race cooperatively and
    *  whichever wins clears the other. */
   private emit<T>(event: string, payload: Record<string, unknown>): Promise<AckResponse<T>> {
+    // Tobias-direktiv 2026-05-12: notify observer FØR emit slik at debug-HUD
+    // ser request selv om socket er disconnect-et (vi vil vite om noen
+    // forsøkte å emit-e mens vi var nede). Payload sanitiseres her (uten
+    // accessToken) før observatøren får den.
+    const startedAt = Date.now();
+    const sanitizedPayload = stripAccessToken(payload);
+    this.notifyEmitObserver({ event, phase: "pre", payload: sanitizedPayload });
+
     return new Promise((resolve) => {
+      const finish = (response: AckResponse<T>): void => {
+        // Best-effort: ack-observatør sender response-summary (ok + error-kode).
+        this.notifyEmitObserver({
+          event,
+          phase: "ack",
+          payload: sanitizedPayload,
+          durationMs: Date.now() - startedAt,
+          ok: response.ok,
+          error: response.ok ? undefined : response.error,
+        });
+        resolve(response);
+      };
+
       if (!this.socket?.connected) {
-        resolve({ ok: false, error: { code: "NOT_CONNECTED", message: "Ikke tilkoblet." } });
+        finish({
+          ok: false,
+          error: { code: "NOT_CONNECTED", message: "Ikke tilkoblet." },
+        });
         return;
       }
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        resolve({
+        finish({
           ok: false,
           error: { code: "TIMEOUT", message: `Server svarte ikke innen 15s (${event}).` },
         });
@@ -561,7 +683,7 @@ export class SpilloramaSocket {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          resolve(response);
+          finish(response);
         },
       );
     });

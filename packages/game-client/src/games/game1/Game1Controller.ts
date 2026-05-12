@@ -356,6 +356,13 @@ class Game1Controller implements GameController {
       getPlayScreen: () => this.playScreen,
       toast: this.toast,
       onError: (msg) => this.showError(msg),
+      // Tobias-direktiv 2026-05-12: gi SocketActions tilgang til
+      // EventTracker-singleton-en så REST-purchase-fetch (`/api/game1/purchase`)
+      // logges som `rest.fetch`-events. EventStreamer (mountet i debug-HUD)
+      // sender events videre til backend slik at live-monitoring-agenten ser
+      // dem mens Tobias tester. Trygt å sette uavhengig av `?debug=1` — vi
+      // tracker bare hvis tracker er aktivert, og buffer er ring-bounded.
+      eventTracker: getEventTracker(),
     });
     this.reconnectFlow = new Game1ReconnectFlow({
       socket,
@@ -1128,6 +1135,61 @@ class Game1Controller implements GameController {
         this.debugEventStreamer = null;
       }
     }
+
+    // Tobias-direktiv 2026-05-12: rute alle socket-emit-kall gjennom
+    // EventTracker. SpilloramaSocket sin private `emit()` fyrer
+    // `emitObserver` med `phase: "pre"` rett før emit og `phase: "ack"` etter
+    // ack/timeout. Vi tracker pre som `socket.emit` (full payload-summary)
+    // og ack som `socket.recv` (med duration + ok-flag).
+    //
+    // Før denne wiring-en hadde Tobias' debug-dump kun ÉN socket.emit
+    // (createRoom, fordi den var manuelt tracket i Game1Controller).
+    // `bet:arm`, `claim:submit`, `ticket:mark`, `room:state` osv. fikk
+    // ingen oppføring fordi de gikk gjennom den private wrapperen.
+    //
+    // pickSafeFields plukker ut roomCode/scheduledGameId/etc og payloadKeys
+    // for å unngå å lekke bong-numre / pattern-data i debug-loggen.
+    try {
+      const tracker = getEventTracker();
+      this.deps.socket.setEmitObserver((emitEvent) => {
+        // Safe-fields-listen er bred nok til å dekke alle wrapper-emits
+        // som finnes i dag uten å spille av sensitive felter.
+        const safeFields = [
+          "roomCode",
+          "hallId",
+          "scheduledGameId",
+          "gameSlug",
+          "armed",
+          "ticketCount",
+          "number",
+          "type",
+          "playerName",
+          "luckyNumber",
+          "ticketId",
+          "selectedIndex",
+          "resultId",
+        ] as const;
+        const summary = pickSafeFields(emitEvent.payload, safeFields);
+        if (emitEvent.phase === "pre") {
+          tracker.track("socket.emit", {
+            event: emitEvent.event,
+            ...summary,
+          });
+        } else {
+          tracker.track("socket.recv", {
+            event: emitEvent.event,
+            phase: "ack",
+            ok: emitEvent.ok ?? null,
+            durationMs: emitEvent.durationMs ?? null,
+            errorCode: emitEvent.error?.code ?? null,
+            errorMessage: emitEvent.error?.message ?? null,
+            ...summary,
+          });
+        }
+      });
+    } catch (err) {
+      console.warn("[Game1] setEmitObserver wiring feilet:", err);
+    }
   }
 
   /**
@@ -1229,6 +1291,14 @@ class Game1Controller implements GameController {
         // Best-effort.
       }
       this.debugEventStreamer = null;
+    }
+    // Tobias-direktiv 2026-05-12: rydd emit-observer slik at vi ikke
+    // beholder en handle til destroyed-controller på socket-en mellom
+    // mount/unmount-sykluser av game-skiftene.
+    try {
+      this.deps.socket.setEmitObserver(null);
+    } catch (err) {
+      console.warn("[Game1] setEmitObserver(null) feilet:", err);
     }
   }
 

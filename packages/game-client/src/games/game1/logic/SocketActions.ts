@@ -1,6 +1,7 @@
 import type { GameBridge } from "../../../bridge/GameBridge.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 import type { ToastNotification } from "../components/ToastNotification.js";
+import type { EventTracker } from "../debug/EventTracker.js";
 import type { PlayScreen } from "../screens/PlayScreen.js";
 import type { Phase } from "./Phase.js";
 
@@ -21,6 +22,14 @@ export interface SocketActionsDeps {
   readonly getPlayScreen: () => PlayScreen | null;
   readonly toast: ToastNotification | null;
   readonly onError: (message: string) => void;
+  /**
+   * Optional EventTracker reference for debug-instrumentation (Tobias-
+   * direktiv 2026-05-12). Når satt, REST-fetch-kallene (eks scheduled
+   * purchase via `/api/game1/purchase`) logges som `rest.fetch`-events
+   * med URL, method, request-body-summary, response-status, body-summary
+   * og varighet. Default `undefined` → ingen tracking (produksjon).
+   */
+  readonly eventTracker?: EventTracker;
 }
 
 interface ScheduledTicketSpecEntry {
@@ -145,6 +154,43 @@ export class Game1SocketActions {
       (scheduledContext.overallStatus === "purchase_open" ||
         scheduledContext.overallStatus === "ready_to_start")
     ) {
+      // Tobias-direktiv 2026-05-12: REST-fetch må logges til EventTracker
+      // slik at debug-dump fanger purchase-kallet (tidligere usynlig). Vi
+      // tracker også feil-stier (network-error, non-2xx, body-parse-feil) så
+      // PM/agent ser hvor flyten knakk i pilot-tester.
+      const tracker = this.deps.eventTracker;
+      const fetchUrl = "/api/game1/purchase";
+      const fetchMethod = "POST";
+      // Best-effort: hvis tracker-summary kaster (eks payload-throwing-getter),
+      // fanger vi i en util for å unngå å ta ned hele buy-flyten.
+      const safeTrackFetch = (input: {
+        responseStatus?: number;
+        responseBody?: unknown;
+        durationMs?: number;
+        requestBody?: unknown;
+      }): void => {
+        if (!tracker) return;
+        try {
+          tracker.trackFetch({
+            url: fetchUrl,
+            method: fetchMethod,
+            requestBody: input.requestBody,
+            responseStatus: input.responseStatus,
+            responseBody: input.responseBody,
+            durationMs: input.durationMs,
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("[Game1SocketActions] trackFetch threw:", err);
+        }
+      };
+
+      const startedAt = Date.now();
+      let requestBodySummary: Record<string, unknown> | null = null;
+      // Flag: true når safeTrackFetch er kalt etter fetch returnerte
+      // (success eller HTTP-feil). Hindrer dobbel-tracking i catch-pathen
+      // når exception ble kastet fra response-handling, ikke fra selve fetch().
+      let fetchTracked = false;
       try {
         const buyerUserId = getCurrentUserId();
         const accessToken = getAccessToken();
@@ -156,8 +202,24 @@ export class Game1SocketActions {
           scheduledContext.ticketConfig.ticketTypes,
           scheduledContext.ticketConfig.entryFee,
         );
-        const response = await fetch("/api/game1/purchase", {
-          method: "POST",
+        const idempotencyKey = makeClientIdempotencyKey();
+        // Bygg request-body-summary for tracker FØR fetch — på en
+        // network-failure har vi fortsatt nok info til å diagnose.
+        // ticketSpec gjengis som summary (count per farge/størrelse) for å
+        // unngå å eksponere full intern ticket-shape i debug-dump.
+        requestBodySummary = {
+          scheduledGameId: scheduledContext.scheduledGameId,
+          hallId: scheduledContext.hallId,
+          idempotencyKey,
+          ticketSpecSummary: ticketSpec.map((t) => ({
+            color: t.color,
+            size: t.size,
+            count: t.count,
+          })),
+          ticketSpecCount: ticketSpec.length,
+        };
+        const response = await fetch(fetchUrl, {
+          method: fetchMethod,
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${accessToken}`,
@@ -167,14 +229,26 @@ export class Game1SocketActions {
             buyerUserId,
             hallId: scheduledContext.hallId,
             paymentMethod: "digital_wallet",
-            idempotencyKey: makeClientIdempotencyKey(),
+            idempotencyKey,
             ticketSpec,
           }),
         });
         const body = await response.json().catch(() => null) as {
           ok?: boolean;
-          error?: { message?: string };
+          error?: { code?: string; message?: string };
         } | null;
+        // Tracker-event for vellykket/feilet fetch — ringer FØR vi kaster
+        // så feil-pathen også får response-status loggført.
+        safeTrackFetch({
+          requestBody: requestBodySummary,
+          responseStatus: response.status,
+          responseBody: {
+            ok: body?.ok ?? null,
+            errorCode: body?.error?.code ?? null,
+          },
+          durationMs: Date.now() - startedAt,
+        });
+        fetchTracked = true;
         if (!response.ok || body?.ok === false) {
           throw new Error(body?.error?.message || "Kunne ikke kjøpe billetter");
         }
@@ -198,6 +272,23 @@ export class Game1SocketActions {
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Kunne ikke kjøpe billetter";
+        // Tobias-direktiv 2026-05-12: hvis fetch kastet (network error,
+        // CORS, pre-flight-feil) før vi rakk å tracke response, logger vi
+        // feilen som rest.fetch med tom response-side. `fetchTracked`-
+        // flagget unngår dobbel-tracking når exception ble kastet fra
+        // post-response-handling.
+        if (!fetchTracked) {
+          safeTrackFetch({
+            requestBody: requestBodySummary,
+            responseStatus: undefined,
+            responseBody: {
+              ok: false,
+              errorCode: "FETCH_THREW",
+              errorMessage: message,
+            },
+            durationMs: Date.now() - startedAt,
+          });
+        }
         this.deps.getPlayScreen()?.showBuyPopupResult(false, message);
         this.deps.onError(message);
         return;

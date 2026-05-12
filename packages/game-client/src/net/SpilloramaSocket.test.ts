@@ -388,3 +388,206 @@ describe("E2E v2: window.online auto-recovery", () => {
     expect(fakeSocket.connect).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Tobias-direktiv 2026-05-12: setEmitObserver-hook for debug-instrumentation.
+ *
+ * Bakgrunn: tidligere debug-dump fra Tobias inneholdt 232 events men kun
+ * ÉN socket.emit (createRoom). Resten av wrapper-emits (bet:arm,
+ * claim:submit, ticket:mark, room:state, …) gikk gjennom den private
+ * `SpilloramaSocket.emit()` uten å treffe EventTracker.
+ *
+ * Fix: SpilloramaSocket eksponerer nå `setEmitObserver(observer)` som
+ * fyrer en `pre`/`ack`-event per wrapper-emit. Game1Controller wirer
+ * observatøren mot EventTracker i `mountDebugHud()`.
+ *
+ * Disse testene verifiserer:
+ *   - Observer fyrer på `pre` (rett før socket.emit) og `ack` (etter respons)
+ *   - `accessToken` strippes fra payload som sendes til observer
+ *   - Observer-feil tar IKKE ned emit-flyten
+ *   - setEmitObserver(null) fjerner observatøren
+ *   - NOT_CONNECTED-pathen tracker også (vi vil vite om noen emit-er mens vi er disconnect)
+ */
+describe("setEmitObserver — debug-instrumentation hook (Tobias-direktiv 2026-05-12)", () => {
+  type FakeSocket = {
+    connected: boolean;
+    auth: { accessToken: string };
+    io: { on: ReturnType<typeof vi.fn> };
+    on: ReturnType<typeof vi.fn>;
+    emit: ReturnType<typeof vi.fn>;
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    removeAllListeners: ReturnType<typeof vi.fn>;
+  };
+
+  let fakeSocket: FakeSocket;
+  let SocketCtor: typeof SpilloramaSocket;
+
+  beforeEach(async () => {
+    fakeSocket = {
+      connected: true,
+      auth: { accessToken: "" },
+      io: { on: vi.fn() },
+      on: vi.fn(),
+      emit: vi.fn(),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      removeAllListeners: vi.fn(),
+    };
+    const ioMock = vi.fn(() => fakeSocket);
+
+    vi.resetModules();
+    vi.doMock("socket.io-client", () => ({ io: ioMock }));
+
+    const mod = await import("./SpilloramaSocket.js");
+    SocketCtor = mod.SpilloramaSocket;
+  });
+
+  afterEach(() => {
+    vi.doUnmock("socket.io-client");
+    vi.resetModules();
+  });
+
+  function newConnectedSocket(): InstanceType<typeof SpilloramaSocket> {
+    const s = new SocketCtor("ws://localhost:0");
+    s.connect();
+    // Drive connectionState → "connected" så `emit()` ikke faller på NOT_CONNECTED
+    const connectHandler = (fakeSocket.on.mock.calls.find((c) => c[0] === "connect") ?? [])[1] as
+      | (() => void)
+      | undefined;
+    connectHandler?.();
+    return s;
+  }
+
+  it("fyrer observer med phase=pre rett før socket.emit kalles", async () => {
+    const s = newConnectedSocket();
+    const observer = vi.fn();
+    s.setEmitObserver(observer);
+
+    // armBet kaster ack-callback umiddelbart (synkront) så vi får ack-phase også.
+    fakeSocket.emit.mockImplementation(
+      (
+        _event: string,
+        _payload: unknown,
+        ack: (response: { ok: boolean; data?: unknown }) => void,
+      ) => {
+        ack({ ok: true, data: { snapshot: {}, armed: true } });
+      },
+    );
+
+    await s.armBet({ roomCode: "ROOM-X", armed: true, ticketCount: 1 });
+
+    // Forventer 2 calls: pre + ack
+    expect(observer).toHaveBeenCalledTimes(2);
+    const preCall = observer.mock.calls[0][0];
+    expect(preCall.event).toBe("bet:arm");
+    expect(preCall.phase).toBe("pre");
+    expect(preCall.payload).toMatchObject({ roomCode: "ROOM-X", armed: true });
+    // accessToken er IKKE i pre-payload (lekkasjeforsikring)
+    expect(preCall.payload).not.toHaveProperty("accessToken");
+
+    const ackCall = observer.mock.calls[1][0];
+    expect(ackCall.event).toBe("bet:arm");
+    expect(ackCall.phase).toBe("ack");
+    expect(ackCall.ok).toBe(true);
+    expect(typeof ackCall.durationMs).toBe("number");
+    expect(ackCall.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("fyrer ack-phase med ok=false + error når server returnerer feil", async () => {
+    const s = newConnectedSocket();
+    const observer = vi.fn();
+    s.setEmitObserver(observer);
+
+    fakeSocket.emit.mockImplementation(
+      (
+        _event: string,
+        _payload: unknown,
+        ack: (response: { ok: boolean; error?: { code: string; message: string } }) => void,
+      ) => {
+        ack({ ok: false, error: { code: "LOSS_LIMIT_REACHED", message: "Grense nådd" } });
+      },
+    );
+
+    await s.armBet({ roomCode: "ROOM-X", armed: true });
+
+    const ackCall = observer.mock.calls.find((c) => c[0].phase === "ack")?.[0];
+    expect(ackCall).toBeDefined();
+    expect(ackCall?.ok).toBe(false);
+    expect(ackCall?.error).toEqual({ code: "LOSS_LIMIT_REACHED", message: "Grense nådd" });
+  });
+
+  it("tracker NOT_CONNECTED-pathen som pre + ack", async () => {
+    const s = new SocketCtor("ws://localhost:0");
+    s.connect();
+    // IKKE drive connect-handler → connectionState er "connecting" + socket.connected=false
+    fakeSocket.connected = false;
+
+    const observer = vi.fn();
+    s.setEmitObserver(observer);
+
+    const result = await s.armBet({ roomCode: "ROOM-X", armed: true });
+
+    expect(result.ok).toBe(false);
+    expect(observer).toHaveBeenCalledTimes(2);
+    const ackCall = observer.mock.calls[1][0];
+    expect(ackCall.phase).toBe("ack");
+    expect(ackCall.ok).toBe(false);
+    expect(ackCall.error?.code).toBe("NOT_CONNECTED");
+  });
+
+  it("setEmitObserver(null) fjerner observatøren", async () => {
+    const s = newConnectedSocket();
+    const observer = vi.fn();
+    s.setEmitObserver(observer);
+
+    fakeSocket.emit.mockImplementation(
+      (_e: string, _p: unknown, ack: (r: { ok: boolean }) => void) => ack({ ok: true }),
+    );
+
+    await s.armBet({ roomCode: "R", armed: true });
+    expect(observer).toHaveBeenCalled();
+
+    observer.mockClear();
+    s.setEmitObserver(null);
+    await s.armBet({ roomCode: "R", armed: true });
+    expect(observer).not.toHaveBeenCalled();
+  });
+
+  it("observer-feil tar IKKE ned emit-flyten (best-effort)", async () => {
+    const s = newConnectedSocket();
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    s.setEmitObserver(() => {
+      throw new Error("observer exploded");
+    });
+
+    fakeSocket.emit.mockImplementation(
+      (_e: string, _p: unknown, ack: (r: { ok: boolean }) => void) => ack({ ok: true }),
+    );
+
+    const result = await s.armBet({ roomCode: "R", armed: true });
+    expect(result.ok).toBe(true);
+    // Warn-spy fyrte minst én gang (én per pre/ack-call)
+    expect(consoleWarnSpy).toHaveBeenCalled();
+    consoleWarnSpy.mockRestore();
+  });
+
+  it("strippes accessToken fra payload selv om caller skulle inkludere den", async () => {
+    const s = newConnectedSocket();
+    const observer = vi.fn();
+    s.setEmitObserver(observer);
+
+    fakeSocket.emit.mockImplementation(
+      (_e: string, _p: unknown, ack: (r: { ok: boolean }) => void) => ack({ ok: true }),
+    );
+
+    // Caller-side wrapper-methods inkluderer normalt ikke accessToken
+    // (det legges til av emit()). Men test det indirekte: subscribeSpill1Lobby
+    // sender bare { hallId }, og vi verifiserer at observer ser kun det.
+    await s.subscribeSpill1Lobby("hall-1");
+
+    const preCall = observer.mock.calls[0][0];
+    expect(preCall.payload).toEqual({ hallId: "hall-1" });
+    expect(preCall.payload).not.toHaveProperty("accessToken");
+  });
+});
