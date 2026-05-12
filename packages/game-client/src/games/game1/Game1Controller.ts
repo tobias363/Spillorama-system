@@ -354,11 +354,29 @@ class Game1Controller implements GameController {
     }
 
     // Tobias-bug 2026-05-12: auto-reload-orchestrator. Armert ved
-    // disconnect, cancellet ved reconnect. Hvis socket fortsatt er borte
-    // etter delayMs → window.location.reload() (forsøk på å hente fresh
-    // page-state, akkurat som "Funket når jeg gikk inn og ut"). Hvis vi
-    // reload-er 3+ ganger innen 2 min → vis "tekniske problemer"-melding
-    // i stedet for å gå inn i reload-loop.
+    // disconnect, cancellet ved reconnect/reconnecting. Hvis socket
+    // fortsatt er borte etter delayMs → window.location.reload().
+    //
+    // PR #1247-regresjon (Tobias 2026-05-12): brukeren ble kastet ut av
+    // spillet ved kortvarige nett-glipper fordi 5s-default var for kort
+    // og auto-reload fyrte mens socket.io fortsatt prøvde å rekoble.
+    // Tre fix-er bundlet her:
+    //
+    //   1. delayMs default økt fra 5s til 30s i AutoReloadOnDisconnect.
+    //      Socket.io reconnect-backoff kan gå opp til
+    //      reconnectionDelayMax=30s, så 5s ga ikke nok tid. 30s gir
+    //      socket.io 5-6 reconnect-forsøk før vi gir opp.
+    //
+    //   2. Cancel reload på "reconnecting" — socket.io prøver aktivt å
+    //      rekoble, så vi skal IKKE fyre reload mens det skjer. Re-armes
+    //      automatisk hvis "disconnected" fires igjen etter "reconnecting".
+    //
+    //   3. markConnected()-gate i AutoReloadOnDisconnect — defensive:
+    //      armReload() er no-op før vi har sett første "connected"-event.
+    //      Hindrer reload-loop hvis initial-connect feiler permanent.
+    //
+    // Hvis vi reload-er 3+ ganger innen 2 min → vis "tekniske problemer"-
+    // melding i stedet for å gå inn i reload-loop.
     const autoReloader = new AutoReloadOnDisconnect({
       onMaxAttemptsReached: () => {
         // Reload-loop oppdaget — vis terminal-error-overlay slik at brukeren
@@ -374,17 +392,30 @@ class Game1Controller implements GameController {
       autoReloader.cancelReload();
     });
 
+    // PR #1247-regresjon fix (2026-05-12): hvis vi allerede er connected
+    // (vanlig — vi awaiter "connected" på linje 340-346 før vi når hit),
+    // markér det med en gang så armReload() ikke blokkeres på første
+    // disconnect senere. Dekker også race-tilfeller hvor connect-event
+    // fyrte før vår listener ble registrert.
+    if (socket.isConnected()) {
+      autoReloader.markConnected();
+    }
+
     this.unsubs.push(
       socket.on("connectionStateChanged", (state) => {
         if (state === "reconnecting") {
           telemetry.trackReconnect();
           this.loader?.setState("RECONNECTING");
-          // Reconnecting = socket prøver fortsatt. Auto-reload armer kun
-          // ved "disconnected", så ingen handling her.
+          // Socket.io prøver aktivt å rekoble — cancel evt armet reload
+          // så vi ikke unødig kaster ut brukeren mens recovery pågår.
+          // Hvis reconnect feiler og state går tilbake til "disconnected"
+          // re-armes timer-en.
+          autoReloader.cancelReload();
         }
         if (state === "connected") {
-          // Vellykket reconnect → cancel pending auto-reload, så vi ikke
-          // unødig reload-er en allerede recovered klient.
+          autoReloader.markConnected();
+          // Vellykket connect/reconnect → cancel pending auto-reload, så vi
+          // ikke unødig reload-er en allerede recovered klient.
           autoReloader.cancelReload();
           if (this.loader?.isShowing()) {
             // Reconnected — resume room to rebuild state from server snapshot
@@ -396,9 +427,8 @@ class Game1Controller implements GameController {
         if (state === "disconnected") {
           telemetry.trackDisconnect("socket");
           this.loader?.setState("DISCONNECTED");
-          // Armér auto-reload. Hvis socket re-connecter innen 5s
-          // (default delayMs) cancellerer "connected"-armen reload-en;
-          // ellers fyrer den og siden lastes på nytt.
+          // armReload er gated på markConnected() i AutoReloadOnDisconnect —
+          // no-op hvis socket aldri har lykkes med initial-connect.
           autoReloader.armReload();
         }
       }),
