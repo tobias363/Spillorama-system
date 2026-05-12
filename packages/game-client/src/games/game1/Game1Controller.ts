@@ -55,6 +55,10 @@ import {
   pickSafeFields,
 } from "./debug/EventTracker.js";
 import { DebugEventLogPanel } from "./debug/DebugEventLogPanel.js";
+// Auto-stream-extension (Tobias-direktiv 2026-05-12) — events POST-es
+// hvert 2. sek til backend slik at en live-monitoring-agent kan lese
+// dem mens Tobias tester. Beholder dump-knappen som fallback.
+import { EventStreamer } from "./debug/EventStreamer.js";
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -258,6 +262,17 @@ class Game1Controller implements GameController {
    * `mountDebugHud` lager instansen.
    */
   private debugEventPanel: DebugEventLogPanel | null = null;
+
+  /**
+   * Auto-stream av tracker-events til backend (Tobias-direktiv 2026-05-12).
+   * Aktiveres når `?debug=1` i URL og `RESET_TEST_PLAYERS_TOKEN` er kjent
+   * via dev-config (eller URL-param `?debugToken=...` for ad-hoc). Default
+   * null → ingen streaming.
+   *
+   * Beholder eksisterende dump-knapp som fallback: hvis streameren feiler
+   * (eks. backend nede), kan Tobias fortsatt dumpe JSON-fil manuelt.
+   */
+  private debugEventStreamer: EventStreamer | null = null;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -994,6 +1009,31 @@ class Game1Controller implements GameController {
     }
   }
 
+  /**
+   * Resolve debug-stream-token. Strategi (Tobias-direktiv 2026-05-12):
+   *   1. URL `?debugToken=<token>` — ad-hoc-override for ny tester
+   *   2. localStorage `SPILL1_DEBUG_STREAM_TOKEN` — vedvarende på samme browser
+   *   3. Default `spillorama-2026-test` — matcher `RESET_TEST_PLAYERS_TOKEN`-
+   *      default-en på dev-server. Streameren håndterer 401/403 fail-soft,
+   *      så et feil default-token er kun mer støy i devtools, ikke en bug.
+   */
+  private resolveDebugStreamToken(): string {
+    try {
+      if (typeof window === "undefined") return "spillorama-2026-test";
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = params.get("debugToken")?.trim();
+      if (fromQuery) return fromQuery;
+      const fromLs =
+        typeof window.localStorage !== "undefined"
+          ? window.localStorage.getItem("SPILL1_DEBUG_STREAM_TOKEN")?.trim()
+          : null;
+      if (fromLs) return fromLs;
+      return "spillorama-2026-test";
+    } catch {
+      return "spillorama-2026-test";
+    }
+  }
+
   private mountDebugHud(): void {
     if (!this.isDebugHudEnabled()) return;
     if (typeof document === "undefined") return;
@@ -1064,6 +1104,28 @@ class Game1Controller implements GameController {
       } catch (err) {
         // Panel-mount er best-effort; må ikke ta ned spillet.
         console.warn("[Game1] DebugEventLogPanel mount feilet:", err);
+      }
+    }
+
+    // Auto-stream tracker-events til backend (Tobias-direktiv 2026-05-12).
+    // Hver 2. sek POST'es nye events til /api/_dev/debug/events slik at en
+    // live-monitoring-agent kan lese dem mens Tobias tester. Fail-soft —
+    // hvis backend er nede eller token mangler, faller vi tilbake til
+    // "Dump diagnose"-knappen.
+    if (!this.debugEventStreamer) {
+      try {
+        const tracker = getEventTracker();
+        this.debugEventStreamer = new EventStreamer({
+          token: this.resolveDebugStreamToken(),
+          // Default endpoint /api/_dev/debug/events
+          // Default flushIntervalMs 2000
+        });
+        this.debugEventStreamer.start(tracker);
+      } catch (err) {
+        // Streameren krever fetch — i Node-test-miljø er det fint at vi
+        // bare logger warn og fortsetter uten streaming.
+        console.warn("[Game1] EventStreamer start feilet:", err);
+        this.debugEventStreamer = null;
       }
     }
   }
@@ -1159,6 +1221,14 @@ class Game1Controller implements GameController {
         // Best-effort.
       }
       this.debugEventPanel = null;
+    }
+    if (this.debugEventStreamer) {
+      try {
+        this.debugEventStreamer.stop();
+      } catch {
+        // Best-effort.
+      }
+      this.debugEventStreamer = null;
     }
   }
 

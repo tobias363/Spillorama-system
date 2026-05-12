@@ -156,6 +156,10 @@ import { createAdminSmsBroadcastRouter } from "./routes/adminSmsBroadcast.js";
 // + force-end workaround. Token-gated via RESET_TEST_PLAYERS_TOKEN-env-var.
 import { createDevGame2StateRouter } from "./routes/devGame2State.js";
 import { createDevHallRoomInfoRouter } from "./routes/devHallRoomInfo.js";
+// Tobias 2026-05-12: auto-stream-collector for klient-event-tracker (PR #1263).
+// Klienten POST'er events hvert 2. sek til /api/_dev/debug/events, vi
+// appender til /tmp/spillorama-debug-events.jsonl for live-monitoring-agent.
+import { createDevDebugEventLogRouter } from "./routes/devDebugEventLog.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -4322,6 +4326,14 @@ app.use(
     engine,
   })
 );
+
+// Tobias 2026-05-12: klient-event-tracker auto-stream-collector. Token-gated.
+//   POST /api/_dev/debug/events?token=<token>      — klient batch-flush
+//   GET  /api/_dev/debug/events/tail?token=...&since=<ms> — agent-polling
+// Klient (Game1Controller med ?debug=1) POST'er hver 2. sek, vi appender til
+// /tmp/spillorama-debug-events.jsonl. Live-monitoring-agent kan poll-e
+// tail-endepunktet for å se hva Tobias gjør i sann tid.
+app.use(createDevDebugEventLogRouter());
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 
