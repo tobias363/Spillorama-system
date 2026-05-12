@@ -229,6 +229,34 @@ export interface MasterActionServiceOptions {
    * Sleep-injection for retry-helper (test-determinisme).
    */
   retrySleep?: (ms: number) => Promise<void>;
+  /**
+   * Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): callback som triggres
+   * MELLOM `bridge.createScheduledGameForPlanRunPosition` og
+   * `masterControlService.startGame`. Brukes til å konvertere armed-state
+   * fra lobby-rom (forhåndskjøpte bonger via bet:arm) til faktiske
+   * `app_game1_ticket_purchases`-rader slik at engine.startGame finner
+   * dem og spillerne ser bongene som LIVE i runden.
+   *
+   * Wires i index.ts til en lambda som leser armed-state fra
+   * `RoomStateManager` + engine room-snapshot, og kaller
+   * `Game1ArmedToPurchaseConversionService.convertArmedToPurchases`.
+   *
+   * Soft-fail: Hvis hook kaster, log warning og fortsett til engine.startGame.
+   * Spillet starter, men disse spillerne får ingen brett — bedre enn å
+   * blokkere hele runden.
+   *
+   * Brukes også fra advance-actionen for runder N+1, N+2, ... siden de
+   * spawner nye scheduled-games.
+   */
+  onScheduledGameSpawned?:
+    | ((input: {
+        scheduledGameId: string;
+        planRunId: string;
+        position: number;
+        masterHallId: string;
+        actorUserId: string;
+      }) => Promise<void>)
+    | null;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -370,6 +398,20 @@ export class MasterActionService {
   } | null;
   private readonly bridgeRetryDelaysMs: ReadonlyArray<number>;
   private readonly retrySleep: ((ms: number) => Promise<void>) | undefined;
+  /**
+   * Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): hook for armed-state-
+   * konvertering. Triggres mellom bridge-spawn og engine.startGame. Se
+   * `MasterActionServiceOptions.onScheduledGameSpawned` for detaljer.
+   */
+  private readonly onScheduledGameSpawned:
+    | ((input: {
+        scheduledGameId: string;
+        planRunId: string;
+        position: number;
+        masterHallId: string;
+        actorUserId: string;
+      }) => Promise<void>)
+    | null;
 
   constructor(opts: MasterActionServiceOptions) {
     if (!opts.pool) throw new DomainError("INVALID_CONFIG", "pool er påkrevd.");
@@ -400,6 +442,7 @@ export class MasterActionService {
     this.bridgeRetryDelaysMs =
       opts.bridgeRetryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
     this.retrySleep = opts.retrySleep;
+    this.onScheduledGameSpawned = opts.onScheduledGameSpawned ?? null;
   }
 
   /** @internal — test-hook (samme mønster som GamePlanRunService.forTesting). */
@@ -440,6 +483,17 @@ export class MasterActionService {
     (svc as unknown as {
       retrySleep: ((ms: number) => Promise<void>) | undefined;
     }).retrySleep = opts.retrySleep;
+    (svc as unknown as {
+      onScheduledGameSpawned:
+        | ((input: {
+            scheduledGameId: string;
+            planRunId: string;
+            position: number;
+            masterHallId: string;
+            actorUserId: string;
+          }) => Promise<void>)
+        | null;
+    }).onScheduledGameSpawned = opts.onScheduledGameSpawned ?? null;
     return svc;
   }
 
@@ -688,6 +742,23 @@ export class MasterActionService {
         },
       );
     }
+
+    // 5b. Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): konverter armed-
+    // state fra lobby-rom til `app_game1_ticket_purchases`-rader MELLOM
+    // bridge-spawn og engine.startGame. Bonger kjøpt før master trykker
+    // Start MÅ være LIVE i runden — uten denne hooken finner
+    // engine.startGame ingen purchases og spillerne får ingen brett.
+    //
+    // Soft-fail: hvis hook kaster, log warning og fortsett til engine.
+    // startGame. Spillet kjører videre uten disse spillerne — bedre enn å
+    // blokkere hele runden.
+    await this.triggerArmedConversionHook({
+      scheduledGameId,
+      planRunId: started.id,
+      position: started.currentPosition,
+      masterHallId: hallId,
+      actorUserId: actor.userId,
+    });
 
     // 6. Engine.startGame — flytter scheduled-game.status til 'running' +
     // trigger draw-engine.
@@ -1113,6 +1184,17 @@ export class MasterActionService {
         },
       );
     }
+
+    // Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): konverter armed-state
+    // mellom bridge-spawn og engine.startGame for advance-flyten. Samme
+    // hook som start(). Soft-fail.
+    await this.triggerArmedConversionHook({
+      scheduledGameId,
+      planRunId: result.run.id,
+      position: result.run.currentPosition,
+      masterHallId: hallId,
+      actorUserId: actor.userId,
+    });
 
     // Trigger engine.
     let engineResult;
@@ -1761,6 +1843,46 @@ export class MasterActionService {
    *   - resourceId = scheduledGameId ?? planRunId (best identifier)
    *   - details   = { hallId, planRunId, scheduledGameId, ...domainSpecific }
    */
+  /**
+   * Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): trigger armed-conversion
+   * hook etter bridge-spawn. Soft-fail: hook-feil blokkerer ikke engine.
+   * startGame, men logges som warn så ops kan se om noen spillere ble
+   * etterlatt uten brett.
+   *
+   * Skip når hook ikke er konfigurert (test-harness eller deploy uten
+   * conversion-tjenesten wired) — return uten effekt.
+   */
+  private async triggerArmedConversionHook(input: {
+    scheduledGameId: string;
+    planRunId: string;
+    position: number;
+    masterHallId: string;
+    actorUserId: string;
+  }): Promise<void> {
+    if (!this.onScheduledGameSpawned) {
+      logger.debug(
+        { scheduledGameId: input.scheduledGameId },
+        "[master-action] onScheduledGameSpawned hook ikke konfigurert — skip armed-conversion",
+      );
+      return;
+    }
+    try {
+      await this.onScheduledGameSpawned(input);
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          scheduledGameId: input.scheduledGameId,
+          planRunId: input.planRunId,
+          position: input.position,
+          masterHallId: input.masterHallId,
+        },
+        "[master-action] onScheduledGameSpawned hook feilet — engine.startGame kjører videre uten armed-conversion. " +
+          "Spillere med pre-purchase kan ha mistet bonger.",
+      );
+    }
+  }
+
   private async audit(input: {
     action: string;
     actor: MasterActor;
