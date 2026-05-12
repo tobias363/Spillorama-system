@@ -103,20 +103,12 @@ export class Game1BuyPopup {
    */
   private uiState: "idle" | "confirming" | "error" | "success" = "idle";
 
-  /**
-   * Tobias 2026-05-12 ("popup skal alltid komme på entry"): popup-en
-   * SKAL vises også når scheduled-game ennå ikke er spawnet av bridge
-   * (mellom runder eller før master har trykket Start). Tidligere
-   * blokkerte PlayScreen.update() auto-show når `waitingForMasterPurchase
-   * === true` for å hindre foreldreløse `bet:arm`-emits (Agent B,
-   * PR #1255). Med denne flagget kan popup vises og brukeren ser priser
-   * + bongdesign, men `Kjøp`-knappen disables med "Venter på master"-
-   * tekst inntil scheduled-game er joinable.
-   *
-   * Settes via `setWaitingForMaster(waiting, reason?)`. Idempotent.
-   */
-  private waitingForMaster = false;
-  private waitingReason = "Venter på at master starter neste runde";
+  // Tobias-direktiv 2026-05-12 ("knappen skal være Kjøp bonger alltid"):
+  // wait-on-master-state ble introdusert i en tidligere iterasjon men er
+  // nå fjernet. Popup-en lar alltid spilleren kjøpe, og backend håndhever
+  // bridge-spawn → armed-state-persistens som opprinnelig design.
+  // `setWaitingForMaster`-metoden er beholdt som no-op for backward-
+  // compat med eksisterende kallsteder.
 
   constructor(overlay: HtmlOverlayManager) {
     this.backdrop = document.createElement("div");
@@ -798,11 +790,15 @@ export class Game1BuyPopup {
     this.renderSummary();
 
     // Buy-knapp state
-    // Tobias 2026-05-12 ("popup skal alltid komme"): når
-    // `waitingForMaster=true` overstyres `canBuy=false` selv om brukeren
-    // har valgt brett. Popup vises på entry uavhengig av wait-state, men
-    // kjøp er ikke åpent før scheduled-game er joinable.
-    const canBuy = !atHardCap && totalBrett > 0 && !this.waitingForMaster;
+    //
+    // Tobias-direktiv 2026-05-12 ("knappen skal være Kjøp bonger alltid"):
+    // Kjøp-knappen er alltid enabled så lenge brukeren har valgt brett.
+    // Wait-on-master-overstyringen er fjernet — hvis scheduled-game ikke
+    // er spawnet, faller buy-handler tilbake til bet:arm-socket-pathen og
+    // backend persisterer armed-state ved senere bridge-spawn. Dette er
+    // den opprinnelige fungerende oppførselen før PR #1255 Alternativ B
+    // la til den over-defensive blokken.
+    const canBuy = !atHardCap && totalBrett > 0;
     this.buyBtn.disabled = !canBuy;
     if (canBuy) {
       this.buyBtn.textContent = `Kjøp ${totalBrett} brett · ${totalKr} kr`;
@@ -810,12 +806,6 @@ export class Game1BuyPopup {
       this.buyBtn.style.color = "#fff";
       this.buyBtn.style.cursor = "pointer";
       this.buyBtn.style.boxShadow = "0 4px 14px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.2)";
-    } else if (this.waitingForMaster) {
-      this.buyBtn.textContent = this.waitingReason;
-      this.buyBtn.style.background = "rgba(245, 184, 65, 0.18)";
-      this.buyBtn.style.color = "rgba(245,232,216,0.8)";
-      this.buyBtn.style.cursor = "not-allowed";
-      this.buyBtn.style.boxShadow = "none";
     } else {
       this.buyBtn.textContent = "Velg brett for å kjøpe";
       this.buyBtn.style.background = "rgba(220, 38, 38, 0.25)";
@@ -826,30 +816,18 @@ export class Game1BuyPopup {
   }
 
   /**
-   * Tobias 2026-05-12 ("popup skal alltid komme på entry"): toggle
-   * mellom waiting-state og normal kjøp-mode. Når `waiting=true` settes
-   * Kjøp-knappen disabled med `reason`-tekst, slik at brukeren ser
-   * priser + bongdesign men ikke kan sende `bet:arm` mens scheduled-
-   * game er upspawnet av bridge.
+   * Tobias-direktiv 2026-05-12 ("knappen skal være Kjøp bonger alltid"):
+   * wait-on-master-disable er fjernet. Popup-en lar alltid spilleren
+   * kjøpe, og backend håndhever bridge-spawn → armed-state-persistens
+   * som opprinnelig fungerende design.
    *
-   * Idempotent — kall flere ganger med samme verdi er no-op (kun ny
-   * DOM-mutasjon hvis state faktisk endrer seg).
-   *
-   * PlayScreen.setWaitingForMasterPurchase kaller denne hver gang
-   * lobby-state oppdaterer, slik at popup-en reagerer live når bridge
-   * spawner scheduled-game (waiting flippes til false → Kjøp-knapp
-   * enables).
+   * Metoden er beholdt som no-op for backward-compat med
+   * `PlayScreen.setWaitingForMasterPurchase`-kallsteder — mindre diff
+   * og enkel å revertere hvis vi senere ombestemmer oss.
    */
-  setWaitingForMaster(waiting: boolean, reason?: string): void {
-    const nextReason = reason ?? "Venter på at master starter neste runde";
-    if (this.waitingForMaster === waiting && this.waitingReason === nextReason) {
-      return;
-    }
-    this.waitingForMaster = waiting;
-    this.waitingReason = nextReason;
-    // Re-render Kjøp-knappen via vanlig oppdaterings-path. Trygt å
-    // kalle selv om popup ikke er synlig — DOM-mutasjonene er pure.
-    this.updateTotal();
+  setWaitingForMaster(_waiting: boolean, _reason?: string): void {
+    // Intentionally no-op — Kjøp-knappen er alltid kjøpbar når brett
+    // er valgt. Bridge-spawn → armed-state-persistens håndteres backend.
   }
 
   private renderSummary(): void {
