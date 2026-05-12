@@ -554,6 +554,13 @@ export class PerpetualRoundService {
     const pollHandle = setInterval(() => {
       this.checkThresholdAndProceed(roomCode);
     }, PerpetualRoundService.THRESHOLD_POLL_INTERVAL_MS);
+    // Bug-fix 2026-05-12 (test-stabilitet): unref slik at threshold-polling
+    // ikke holder Node-process-en levende i tester etter at alle
+    // assertions er ferdige. Trygt i prod siden HTTP-server + DB-pool
+    // holder event-loop-en levende uansett.
+    if (typeof pollHandle === "object" && pollHandle !== null && "unref" in pollHandle) {
+      (pollHandle as { unref: () => void }).unref();
+    }
 
     // Sikkerhets-timeout: max 30 min ventetid. Etter det starter vi
     // runden uansett — bedre enn evig hengende rom.
@@ -569,6 +576,9 @@ export class PerpetualRoundService {
       );
       void this.proceedToCountdown(roomCode, "TIMEOUT");
     }, PerpetualRoundService.THRESHOLD_MAX_WAIT_MS);
+    if (typeof timeoutHandle === "object" && timeoutHandle !== null && "unref" in timeoutHandle) {
+      (timeoutHandle as { unref: () => void }).unref();
+    }
 
     this.waitingForTicketsByRoom.set(roomCode, {
       pollHandle,
@@ -1034,6 +1044,68 @@ export class PerpetualRoundService {
       }
     }
 
+    const variantInfo = this.config.variantLookup.getVariantConfig(roomCode);
+
+    // Tobias-bug 2026-05-12: minTicketsBeforeCountdown skal håndheves på
+    // FØRSTE runde, ikke bare mellom påfølgende. Tidligere kall til
+    // engine.startGame her var symmetrisk med handleGameEnded MED-untatt
+    // threshold-gaten — det betydde at Spill 2/3 "bare startet" når
+    // første spiller joinet, uavhengig av minTicketsToStart-config.
+    //
+    // Doc-en (Spill2GlobalRoomService.ts:16): "PerpetualRoundService
+    // respekterer auto-start-threshold før første runde OG mellom
+    // påfølgende runder". Per "doc-en vinner over kode"-prinsippet i
+    // CLAUDE.md fikser vi koden til å matche kontrakten.
+    //
+    // Implementasjon: gjenbruker startWaitingForTickets-polling-gaten
+    // som allerede dekker post-game-end-flowen. prevGameId = ""
+    // (sentinel) fordi det ikke finnes en forrige runde å referere til
+    // — feltet brukes kun til logging downstream.
+    const minTicketsRaw = variantInfo?.config?.minTicketsBeforeCountdown;
+    const minTicketsForFirstRound =
+      typeof minTicketsRaw === "number" &&
+      Number.isFinite(minTicketsRaw) &&
+      minTicketsRaw > 0
+        ? Math.floor(minTicketsRaw)
+        : 0;
+    if (minTicketsForFirstRound > 0) {
+      const counts =
+        this.config.armedLookup?.getArmedPlayerTicketCounts(roomCode) ?? {};
+      const totalArmedTickets = Object.values(counts).reduce(
+        (sum, n) => sum + (typeof n === "number" ? n : 0),
+        0,
+      );
+      if (totalArmedTickets < minTicketsForFirstRound) {
+        // Threshold ikke nådd — armér polling-gate. Når neste bonge-
+        // kjøp tikker threshold ≥ N, vil checkThresholdAndProceed
+        // schedulere normal countdown og dermed startNextRound.
+        // Idempotent: clearWaitingForTickets svelger ikke-eksisterende
+        // state, og startWaitingForTickets selv-deduplisere via
+        // waitingForTicketsByRoom-Map-en (overrider eksisterende
+        // entry hvis kalt to ganger på samme rom).
+        this.clearWaitingForTickets(roomCode);
+        this.startWaitingForTickets({
+          roomCode,
+          // Sentinel: ingen prev game. Downstream-bruk er kun logging
+          // (proceedToCountdown, startNextRound, canSpawnRound-log).
+          prevGameId: "",
+          slug,
+          minTickets: minTicketsForFirstRound,
+        });
+        logger.info(
+          {
+            roomCode,
+            slug,
+            totalArmedTickets,
+            minTickets: minTicketsForFirstRound,
+            reason: "first_round_threshold_not_met",
+          },
+          "perpetual: skip first-round spawn — armed waiting-for-tickets-gate",
+        );
+        return false;
+      }
+    }
+
     // Debug-bug 2026-05-03: signal at vi har bestått alle skip-checks og
     // skal kjøre engine.startGame. Hvis denne logges men "spawn succeeded"
     // ikke gjør det, vet ops at startGame kastet (warn-log under).
@@ -1044,11 +1116,10 @@ export class PerpetualRoundService {
         currentStatus: currentStatus ?? "NONE",
         playerCount: snapshot.players.length,
         actorPlayerId: SYSTEM_ACTOR_ID,
+        minTicketsForFirstRound,
       },
       "perpetual: attempting first-round spawn",
     );
-
-    const variantInfo = this.config.variantLookup.getVariantConfig(roomCode);
     // 2026-05-04 (Tobias bug-fix): symmetrisk med startNextRound —
     // slug-aware default entry fee. Spill 2/3 = 10 kr; ukjente slugs
     // bruker env-default.
