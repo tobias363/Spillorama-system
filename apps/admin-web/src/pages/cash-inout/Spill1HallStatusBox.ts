@@ -655,9 +655,16 @@ function render(container: HTMLElement, state: BoxState): void {
       false,
       data.isMasterAgent,
     );
+    // 2026-05-12 (Tobias-direktiv): bruk samme header-mønster som aktiv-
+    // pathen. I idle (ingen scheduled-game spawnet) viser vi alltid
+    // "Neste spill på spilleplan: {name}" hvis aggregator har plan-meta.
+    const idleNextGameName = data.catalogDisplayName;
+    const idleTitleHtml = idleNextGameName
+      ? `Neste spill på spilleplan: ${escapeHtml(idleNextGameName)}`
+      : "Neste spill på spilleplan";
     container.innerHTML = `
       <div class="box-header with-border">
-        <h3 class="box-title">Spill 1 — venter på neste runde</h3>
+        <h3 class="box-title">${idleTitleHtml}</h3>
       </div>
       <div class="box-body">
         ${warningBannerHtml}
@@ -750,10 +757,31 @@ function render(container: HTMLElement, state: BoxState): void {
     resumePulse,
   });
 
-  const titleParts: string[] = [];
-  titleParts.push(`Spill 1 — ${escapeHtml(statusLabel(gameStatus))}`);
+  // 2026-05-12 (Tobias-direktiv): header-tekst skal speile lobby-tilstanden
+  // klart for master. Tidligere ble dette rendret som
+  // "Spill 1 — Fullført · Subspill: 5×500" som verken signaliserer aktiv-vs-
+  // neste-tilstand eller bruker termen "trekning". Riktig:
+  //   - Aktiv trekning pågår (purchase_open | ready_to_start | running |
+  //     paused): "Aktiv trekning - {catalog-display-name}"
+  //   - Ellers (scheduled | completed | cancelled): "Neste spill på
+  //     spilleplan: {catalog-display-name}"
+  // Når `catalogDisplayName` mangler (ingen plan-meta i lobby-state) faller
+  // vi tilbake til en generisk overskrift uten navn.
+  const isActiveDraw =
+    gameStatus === "purchase_open" ||
+    gameStatus === "ready_to_start" ||
+    gameStatus === "running" ||
+    gameStatus === "paused";
+  let titleHtml: string;
   if (nextGameName) {
-    titleParts.push(`Subspill: ${escapeHtml(nextGameName)}`);
+    const escapedName = escapeHtml(nextGameName);
+    titleHtml = isActiveDraw
+      ? `Aktiv trekning - ${escapedName}`
+      : `Neste spill på spilleplan: ${escapedName}`;
+  } else {
+    titleHtml = isActiveDraw
+      ? "Aktiv trekning"
+      : "Neste spill på spilleplan";
   }
 
   // ADR-0022 Lag 3: stuck-recovery-banner over master-knappene.
@@ -764,7 +792,7 @@ function render(container: HTMLElement, state: BoxState): void {
 
   container.innerHTML = `
     <div class="box-header with-border">
-      <h3 class="box-title">${titleParts.join(" · ")}</h3>
+      <h3 class="box-title">${titleHtml}</h3>
     </div>
     <div class="box-body">
       ${warningBannerHtml}
@@ -1269,27 +1297,6 @@ function formatScheduledStartHHMM(value: string | null): string | null {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   });
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "scheduled":
-      return "Planlagt";
-    case "purchase_open":
-      return "Salg åpent";
-    case "ready_to_start":
-      return "Klar til start";
-    case "running":
-      return "Pågår";
-    case "paused":
-      return "Pauset";
-    case "completed":
-      return "Fullført";
-    case "cancelled":
-      return "Avbrutt";
-    default:
-      return status;
-  }
 }
 
 /**
