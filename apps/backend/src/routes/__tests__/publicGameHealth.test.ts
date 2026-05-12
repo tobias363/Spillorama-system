@@ -624,6 +624,11 @@ test("integration: response-tid under 200ms (akseptansekriterie)", async () => {
 });
 
 test("integration: rate-limit håndhever 60/min per IP", async () => {
+  // Tobias 2026-05-12: rate-limit-bypass i dev (NODE_ENV != production) ble
+  // lagt til for å unngå at tester-team rate-limit-er seg selv. For å TESTE
+  // prod-oppførselen må vi manipulere NODE_ENV i denne testen.
+  const originalNodeEnv = process.env["NODE_ENV"];
+  process.env["NODE_ENV"] = "production";
   const ctx = await startStubServer({ dbOk: true, redisOk: true });
   try {
     const url = `${ctx.baseUrl}/api/games/spill1/health?hallId=hall-x`;
@@ -645,6 +650,11 @@ test("integration: rate-limit håndhever 60/min per IP", async () => {
     assert.equal(body.error.code, "RATE_LIMITED");
   } finally {
     await ctx.close();
+    if (originalNodeEnv === undefined) {
+      delete process.env["NODE_ENV"];
+    } else {
+      process.env["NODE_ENV"] = originalNodeEnv;
+    }
   }
 });
 
