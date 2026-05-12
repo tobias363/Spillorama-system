@@ -62,6 +62,46 @@ export function registerLifecycleEvents(ctx: SocketContext): void {
   }));
 
   socket.on("disconnect", (reason: string) => {
+    // Tobias-direktiv 2026-05-12: capture EKSTRA kontekst FØR engine
+    // detacher socket-en. Etter detach mister vi tilgang til hvilke rom
+    // socket-en var i og hvilken player-record som var bound — så vi må
+    // snapshoote alt på toppen av handleren.
+    //
+    // `socket.rooms` inkluderer alltid `socket.id` som "default rom" —
+    // vi filtrerer det ut for å bare se faktiske game-rom socket-en
+    // hadde joinet. `socket.data.user` settes ved handshake (se index.ts
+    // ~linje 4380) for autentiserte spillere; vi sender kun walletId og
+    // playerId hvis disse er bound.
+    //
+    // Defensive lookups: eksisterende tester mocker socket som en bar
+    // `EventEmitter` uten `rooms`/`data`/`handshake`/`conn`. Vi må ikke
+    // kaste på manglende felter — fallback til `null` for ops-loggen.
+    const sockData = (socket as { data?: unknown }).data as
+      | { user?: { walletId?: string; id?: string } }
+      | undefined;
+    const walletId = sockData?.user?.walletId ?? null;
+    const playerId = sockData?.user?.id ?? null;
+    const socketRooms = (socket as { rooms?: Iterable<string> }).rooms;
+    const roomsAtDisconnect =
+      socketRooms && typeof (socketRooms as Iterable<string>)[Symbol.iterator] === "function"
+        ? Array.from(socketRooms).filter((r) => r !== socket.id)
+        : [];
+    const handshakeIssuedMs = (
+      socket as { handshake?: { issued?: number } }
+    ).handshake?.issued;
+    const duration =
+      typeof handshakeIssuedMs === "number" && handshakeIssuedMs > 0
+        ? Date.now() - handshakeIssuedMs
+        : null;
+    // Transport-name forteller oss om vi ble droppet på websocket vs
+    // long-polling vs HTTP-fallback — viktig for å skille legitime
+    // disconnects (klient lukket fanen) fra infrastruktur-glipper.
+    const conn = (socket as { conn?: { transport?: { name?: string } } }).conn;
+    const transport =
+      typeof conn?.transport?.name === "string"
+        ? conn.transport.name
+        : "unknown";
+
     engine.detachSocket(socket.id);
     socketRateLimiter.cleanup(socket.id);
     // BIN-539: Every disconnect rolls into reconnect/retry dashboards. The
@@ -73,6 +113,25 @@ export function registerLifecycleEvents(ctx: SocketContext): void {
       lifecycleLogger,
       { socketId: socket.id, reason: reason || "unknown" },
       "socket.disconnected",
+    );
+
+    // Tobias-direktiv 2026-05-12: utvidet disconnect-log med rooms +
+    // transport + duration + walletId/playerId. Skilles fra det
+    // eksisterende `logRoomEvent`-kallet for å holde Sentry-breadcrumben
+    // smal (bare reason + socketId der), mens denne loggen er ren ops-
+    // diagnose med full kontekst.
+    lifecycleLogger.warn(
+      {
+        socketId: socket.id,
+        reason: reason || "unknown",
+        walletId,
+        playerId,
+        roomsAtDisconnect,
+        duration,
+        transport,
+        event: "socket.disconnect",
+      },
+      `[socket] disconnect reason=${reason || "unknown"}`,
     );
   });
 }

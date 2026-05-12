@@ -42,6 +42,7 @@ import {
 } from "./compliance/AuditLogService.js";
 import { Spill1StopVoteService } from "./spillevett/Spill1StopVoteService.js";
 import { initSharedPool } from "./util/sharedPool.js";
+import { logger as rootLogger } from "./util/logger.js";
 import { DrawScheduler } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { HttpRateLimiter } from "./middleware/httpRateLimit.js";
@@ -160,6 +161,11 @@ import { createDevHallRoomInfoRouter } from "./routes/devHallRoomInfo.js";
 // Klienten POST'er events hvert 2. sek til /api/_dev/debug/events, vi
 // appender til /tmp/spillorama-debug-events.jsonl for live-monitoring-agent.
 import { createDevDebugEventLogRouter } from "./routes/devDebugEventLog.js";
+// Tobias 2026-05-12: backend-side observability for live Spill 1-flyt.
+// Lar PM-AI + Tobias se EKSAKT state (engine in-memory + DB + Socket.IO +
+// stateVersion) uten å gjette. Token-gated, fail-soft per kilde.
+import { createDevGameStateSnapshotRouter } from "./routes/devGameStateSnapshot.js";
+import { createDevSocketClientsRouter } from "./routes/devSocketClients.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -418,6 +424,21 @@ import { createTvVoiceAssetsRouter } from "./routes/tvVoiceAssets.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
+// Tobias-direktiv 2026-05-12: strukturert observability for live Spill 1-flyt.
+// Tre dedikerte child-loggere så ops kan filtrere på `module` i prod-logs.
+// - `room-update-emit` → emit-mønster + payload-size + recipient-count.
+// - `room-lifecycle` → destroyRoom-events med pre-destroy state.
+// - `socket-lifecycle` → extended disconnect-context (rooms, transport,
+//   duration, walletId/playerId hvis bound).
+//
+// Andre lifecycle-events (connect, leaderboard:get) går fortsatt via
+// `socket.lifecycle`-logger i `lifecycleEvents.ts` for å unngå støy.
+const roomUpdateEmitLogger = rootLogger.child({ module: "room-update-emit" });
+const roomLifecycleLogger = rootLogger.child({ module: "room-lifecycle" });
+const socketLifecycleExtendedLogger = rootLogger.child({
+  module: "socket-lifecycle-extended",
+});
 // BIN-614: Admin web shell is a Vite SPA. `dist/` is produced by
 // `npm --prefix apps/admin-web run build`. We serve from `dist/` if it exists,
 // otherwise fall back to the pre-Vite flat `apps/admin-web/` layout so local
@@ -1781,71 +1802,112 @@ async function emitRoomUpdate(roomCode: string): Promise<RoomUpdatePayload> {
   //
   // Klient bruker `stateVersion` til å skippe payloads som er eldre enn
   // sist anvendte (out-of-order replay etter reconnect).
-  const stateVersion = await roomStateVersionStore.next(roomCode);
-  const payload = buildRoomUpdatePayload(await getAuthoritativeRoomSnapshot(roomCode), Date.now(), stateVersion);
+  try {
+    const stateVersion = await roomStateVersionStore.next(roomCode);
+    const payload = buildRoomUpdatePayload(await getAuthoritativeRoomSnapshot(roomCode), Date.now(), stateVersion);
 
-  // §6.1 (Wave 3b, 2026-05-06): per-spiller-payload for perpetual rooms.
-  //
-  // Standard `io.to(roomCode).emit(...)` itererer over alle 1500 sockets
-  // og sender hele snapshot-en (~300 KB) til hver. Med Spill 2/3 kan det
-  // bli 450 MB pr. emit, 225 MB/s sustained → bruker opp Render-bandwidth
-  // på minutter. Stripping reduserer payload til ~5 KB/spiller = 7.5 MB
-  // pr. emit (60× mindre). Klient leser kun `myTickets/myMarks/playerCount`
-  // fra Spill 2/3-payloader, så stripping er observasjons-nøytral.
-  //
-  // Game1 (`bingo`) er IKKE perpetual — der har klient behov for full
-  // `players[]` (top-5-leaderboard + chat-roster) så vi sender uendret.
-  if (isPerpetualGameSlug(payload.gameSlug)) {
-    let recipients = 0;
-    let strippedTotalBytes = 0;
-    for (const player of payload.players) {
-      if (!player.socketId) continue;
-      const stripped = stripPerpetualPayloadForRecipient(payload, player.id);
-      // `volatile` ville droppet emits ved congestion — vi vil hellere ha
-      // backpressure-feedback enn tap, så vi bruker normal emit her.
-      io.to(player.socketId).emit("room:update", stripped);
-      recipients += 1;
-      // Best-effort byte-tracking for metrics (JSON.stringify én gang
-      // per emit — ikke billig, men gir oss reelle bytes-on-the-wire-tall
-      // for å validere bandwidth-besparelser i prod).
-      strippedTotalBytes += JSON.stringify(stripped).length;
-    }
-    // ADR-0019 P0-4 (Wave 1, Agent B 2026-05-10): admin/TV-konsumenter må
-    // få FULL state, ikke strippet. Sender derfor uendret payload til
-    // `<roomCode>:admin`-rommet. Admin-konsumenter joiner det rommet via
-    // `admin:room:subscribe` (default namespace, RBAC-gated).
-    //
-    // Hvorfor dette ikke bryter Wave 3b: admin-rommet er sjeldent (1-3
-    // sockets typisk per spillerom — én TV per hall + masterkonsoll). Vi
-    // sender altså maks ~5 fulle payloader per emit, ikke 1500. Spillere
-    // mottar fortsatt strippet payload via socket.id-emit ovenfor.
-    io.to(adminRoomSnapshotKey(roomCode)).emit("room:update", payload);
-    if (recipients === 0) {
-      // Edge: ingen socket-bound players (test-rom, admin-only). Tidligere
-      // sendte vi en stripped null-payload til selve roomCode for at
-      // legacy admin-display-konsumenter ikke skulle vente. Etter P0-4 har
-      // admin/TV sitt eget admin-rom, så denne fallbacken er fjernet —
-      // ingen player-bound sockets betyr ingenting å sende til player-side,
-      // og admin-rommet får full payload uansett.
-    }
-    promMetrics.perpetualRoomUpdateBroadcasts.inc(
-      { slug: (payload.gameSlug ?? "unknown").toLowerCase() },
+    // Tobias-direktiv 2026-05-12: strukturert emit-logging. Computed FØR
+    // vi gjør faktisk emit slik at vi har data også hvis emit kaster.
+    // `payloadSizeBytes` bruker JSON.stringify én gang per emit — samme
+    // kost som perpetual-stripping allerede betaler, så det er ikke en
+    // ny perf-regresjon for Spill 1.
+    const recipientCount =
+      io.sockets.adapter.rooms.get(roomCode)?.size ?? 0;
+    const payloadSizeBytes = JSON.stringify(payload).length;
+
+    roomUpdateEmitLogger.info(
+      {
+        roomCode,
+        gameStatus: payload.currentGame?.status ?? "NONE",
+        gameSlug: payload.gameSlug ?? null,
+        drawnCount: payload.currentGame?.drawnNumbers?.length ?? 0,
+        stateVersion,
+        recipientCount,
+        payloadSizeBytes,
+        hasPlayers: payload.players.length,
+        event: "room.update.emit",
+      },
+      "[room-update] emit",
     );
-    if (strippedTotalBytes > 0) {
-      promMetrics.perpetualRoomUpdateBytes.observe(
+
+    // §6.1 (Wave 3b, 2026-05-06): per-spiller-payload for perpetual rooms.
+    //
+    // Standard `io.to(roomCode).emit(...)` itererer over alle 1500 sockets
+    // og sender hele snapshot-en (~300 KB) til hver. Med Spill 2/3 kan det
+    // bli 450 MB pr. emit, 225 MB/s sustained → bruker opp Render-bandwidth
+    // på minutter. Stripping reduserer payload til ~5 KB/spiller = 7.5 MB
+    // pr. emit (60× mindre). Klient leser kun `myTickets/myMarks/playerCount`
+    // fra Spill 2/3-payloader, så stripping er observasjons-nøytral.
+    //
+    // Game1 (`bingo`) er IKKE perpetual — der har klient behov for full
+    // `players[]` (top-5-leaderboard + chat-roster) så vi sender uendret.
+    if (isPerpetualGameSlug(payload.gameSlug)) {
+      let recipients = 0;
+      let strippedTotalBytes = 0;
+      for (const player of payload.players) {
+        if (!player.socketId) continue;
+        const stripped = stripPerpetualPayloadForRecipient(payload, player.id);
+        // `volatile` ville droppet emits ved congestion — vi vil hellere ha
+        // backpressure-feedback enn tap, så vi bruker normal emit her.
+        io.to(player.socketId).emit("room:update", stripped);
+        recipients += 1;
+        // Best-effort byte-tracking for metrics (JSON.stringify én gang
+        // per emit — ikke billig, men gir oss reelle bytes-on-the-wire-tall
+        // for å validere bandwidth-besparelser i prod).
+        strippedTotalBytes += JSON.stringify(stripped).length;
+      }
+      // ADR-0019 P0-4 (Wave 1, Agent B 2026-05-10): admin/TV-konsumenter må
+      // få FULL state, ikke strippet. Sender derfor uendret payload til
+      // `<roomCode>:admin`-rommet. Admin-konsumenter joiner det rommet via
+      // `admin:room:subscribe` (default namespace, RBAC-gated).
+      //
+      // Hvorfor dette ikke bryter Wave 3b: admin-rommet er sjeldent (1-3
+      // sockets typisk per spillerom — én TV per hall + masterkonsoll). Vi
+      // sender altså maks ~5 fulle payloader per emit, ikke 1500. Spillere
+      // mottar fortsatt strippet payload via socket.id-emit ovenfor.
+      io.to(adminRoomSnapshotKey(roomCode)).emit("room:update", payload);
+      if (recipients === 0) {
+        // Edge: ingen socket-bound players (test-rom, admin-only). Tidligere
+        // sendte vi en stripped null-payload til selve roomCode for at
+        // legacy admin-display-konsumenter ikke skulle vente. Etter P0-4 har
+        // admin/TV sitt eget admin-rom, så denne fallbacken er fjernet —
+        // ingen player-bound sockets betyr ingenting å sende til player-side,
+        // og admin-rommet får full payload uansett.
+      }
+      promMetrics.perpetualRoomUpdateBroadcasts.inc(
         { slug: (payload.gameSlug ?? "unknown").toLowerCase() },
-        strippedTotalBytes,
       );
+      if (strippedTotalBytes > 0) {
+        promMetrics.perpetualRoomUpdateBytes.observe(
+          { slug: (payload.gameSlug ?? "unknown").toLowerCase() },
+          strippedTotalBytes,
+        );
+      }
+    } else {
+      // Non-perpetual rom (Spill 1 bingo): hele room-rommet får full
+      // payload allerede. Admin/TV som har joinet roomCode mottar dermed
+      // payload uansett, men vi speiler også til <roomCode>:admin slik at
+      // klienter som joinet KUN det admin-rommet får eventet.
+      io.to(roomCode).emit("room:update", payload);
+      io.to(adminRoomSnapshotKey(roomCode)).emit("room:update", payload);
     }
-  } else {
-    // Non-perpetual rom (Spill 1 bingo): hele room-rommet får full
-    // payload allerede. Admin/TV som har joinet roomCode mottar dermed
-    // payload uansett, men vi speiler også til <roomCode>:admin slik at
-    // klienter som joinet KUN det admin-rommet får eventet.
-    io.to(roomCode).emit("room:update", payload);
-    io.to(adminRoomSnapshotKey(roomCode)).emit("room:update", payload);
+    return payload;
+  } catch (err) {
+    // Tobias-direktiv 2026-05-12: hvis emit-pathen kaster (manglende rom,
+    // Redis-feil på stateVersion, payload-build-feil osv) må vi logge
+    // strukturert med samme event-navn så ops kan korrelere mot success-
+    // emits. Re-kaster fordi caller forventer at fail-state propageres
+    // (eksisterende oppførsel før instrumentering).
+    roomUpdateEmitLogger.error(
+      {
+        roomCode,
+        err,
+        event: "room.update.emit.failed",
+      },
+      "[room-update] emit failed",
+    );
+    throw err;
   }
-  return payload;
 }
 
 async function emitManyRoomUpdates(roomCodes: Iterable<string>): Promise<void> {
@@ -4334,6 +4396,28 @@ app.use(
 // /tmp/spillorama-debug-events.jsonl. Live-monitoring-agent kan poll-e
 // tail-endepunktet for å se hva Tobias gjør i sann tid.
 app.use(createDevDebugEventLogRouter());
+
+// Tobias 2026-05-12: backend-side live-state-snapshot for Spill 1.
+//   GET /api/_dev/game-state-snapshot?roomCode=<code>&token=<token>
+// Returnerer engine in-memory + DB scheduled_games + DB game_state +
+// socket-room-size + siste emitted stateVersion. Lar PM-AI korrelere
+// observert klient-state mot autoritativ backend-state uten gjetning.
+app.use(
+  createDevGameStateSnapshotRouter({
+    pool: sharedPool,
+    schema: pgSchema,
+    engine,
+    io,
+    roomStateVersionStore,
+  }),
+);
+
+// Tobias 2026-05-12: Socket.IO connected-clients oversikt.
+//   GET /api/_dev/socket-clients?token=<token>
+// Returnerer alle connected sockets med rooms, transport, duration,
+// userAgent og walletId/playerId (hvis bound). PM-AI bruker dette til å
+// verifisere "klient mistet forbindelsen"-rapporter mot backend-state.
+app.use(createDevSocketClientsRouter({ io }));
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 
