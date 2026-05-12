@@ -15,6 +15,10 @@ import { PlayScreen } from "./screens/PlayScreen.js";
 import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
 import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { preloadGameAssets } from "../../core/preloadGameAssets.js";
+// Tobias-bug 2026-05-12: auto-reload på prolonged socket-disconnect.
+// Brukeren beskrev: "Funket når jeg gikk inn og ut" — reload er den
+// pragmatiske recovery-metoden når socket dropper.
+import { AutoReloadOnDisconnect } from "./disconnect/AutoReloadOnDisconnect.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
 import { WinPopup } from "./components/WinPopup.js";
@@ -349,21 +353,53 @@ class Game1Controller implements GameController {
       return;
     }
 
+    // Tobias-bug 2026-05-12: auto-reload-orchestrator. Armert ved
+    // disconnect, cancellet ved reconnect. Hvis socket fortsatt er borte
+    // etter delayMs → window.location.reload() (forsøk på å hente fresh
+    // page-state, akkurat som "Funket når jeg gikk inn og ut"). Hvis vi
+    // reload-er 3+ ganger innen 2 min → vis "tekniske problemer"-melding
+    // i stedet for å gå inn i reload-loop.
+    const autoReloader = new AutoReloadOnDisconnect({
+      onMaxAttemptsReached: () => {
+        // Reload-loop oppdaget — vis terminal-error-overlay slik at brukeren
+        // ser at det er noe galt med kjernen, ikke deres egen tilkobling.
+        // LoadingOverlay.setError gjør hele overlayet klikkbart (reload),
+        // men teksten oppdateres slik at brukeren forstår alvoret.
+        this.loader?.setError(
+          "Tekniske problemer. Vennligst prøv igjen om noen minutter — eller trykk her for å laste på nytt.",
+        );
+      },
+    });
+    this.unsubs.push(() => {
+      autoReloader.cancelReload();
+    });
+
     this.unsubs.push(
       socket.on("connectionStateChanged", (state) => {
         if (state === "reconnecting") {
           telemetry.trackReconnect();
           this.loader?.setState("RECONNECTING");
+          // Reconnecting = socket prøver fortsatt. Auto-reload armer kun
+          // ved "disconnected", så ingen handling her.
         }
-        if (state === "connected" && this.loader?.isShowing()) {
-          // Reconnected — resume room to rebuild state from server snapshot
-          void this.reconnectFlow?.handleReconnect(this.actualRoomCode, (phase, s) =>
-            this.transitionTo(phase, s),
-          );
+        if (state === "connected") {
+          // Vellykket reconnect → cancel pending auto-reload, så vi ikke
+          // unødig reload-er en allerede recovered klient.
+          autoReloader.cancelReload();
+          if (this.loader?.isShowing()) {
+            // Reconnected — resume room to rebuild state from server snapshot
+            void this.reconnectFlow?.handleReconnect(this.actualRoomCode, (phase, s) =>
+              this.transitionTo(phase, s),
+            );
+          }
         }
         if (state === "disconnected") {
           telemetry.trackDisconnect("socket");
           this.loader?.setState("DISCONNECTED");
+          // Armér auto-reload. Hvis socket re-connecter innen 5s
+          // (default delayMs) cancellerer "connected"-armen reload-en;
+          // ellers fyrer den og siden lastes på nytt.
+          autoReloader.armReload();
         }
       }),
     );
