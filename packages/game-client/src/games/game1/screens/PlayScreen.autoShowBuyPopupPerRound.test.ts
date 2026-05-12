@@ -93,7 +93,14 @@ function decideAutoShowBuyPopup(inputs: AutoShowInputs): AutoShowDecision {
     autoShowDone = false;
   }
 
-  // Auto-show gate (identisk med PlayScreen.update linje ~626-639):
+  // Auto-show gate (identisk med PlayScreen.update linje ~626-639).
+  //
+  // Tobias-direktiv 2026-05-12 ("popup skal alltid komme på entry"):
+  // `waitingForMasterPurchase` blokkerer IKKE lenger auto-show. I
+  // stedet propageres wait-state inn i BuyPopup via
+  // `setWaitingForMaster(...)` slik at Kjøp-knappen disables med
+  // "Venter på master"-tekst når scheduled-game ikke er joinable. Det
+  // hindrer foreldreløse `bet:arm`-emits uten å skjule popup-en.
   const running = inputs.gameStatus === "RUNNING";
   const hasLive = running && inputs.myTicketCount > 0;
   const hasTicketTypes =
@@ -104,7 +111,6 @@ function decideAutoShowBuyPopup(inputs: AutoShowInputs): AutoShowDecision {
     !autoShowDone
     && !hasLive
     && hasTicketTypes
-    && !inputs.waitingForMasterPurchase
     && inputs.preRoundTicketCount === 0;
 
   return {
@@ -284,10 +290,13 @@ describe("PlayScreen auto-show BuyPopup per round (Tobias-bug 2026-05-12)", () =
     expect(result.shouldAutoShow).toBe(true);
   });
 
-  it("STATE-MATRISE: 'mellom runder' UTEN scheduled-game (waiting-for-master) → popup blokkert", () => {
-    // Wait-on-master-fix (PR #1255): selv om vi er mellom runder, må
-    // popup IKKE auto-åpnes hvis scheduled-game ikke er spawnet ennå —
-    // ellers risikerer vi orphan armed-tickets.
+  it("STATE-MATRISE: 'mellom runder' UTEN scheduled-game (waiting-for-master) → popup VISES (Tobias 2026-05-12)", () => {
+    // Tobias-direktiv 2026-05-12 ("popup skal alltid komme på entry"):
+    // overstyrer den tidligere wait-on-master-blokken (PR #1255). Popup
+    // skal vises selv om scheduled-game ikke er spawnet ennå. Orphan-
+    // `bet:arm` forhindres i stedet ved at BuyPopup.setWaitingForMaster
+    // disabler Kjøp-knappen med "Venter på master"-tekst — så spilleren
+    // ser priser + bongdesign uten å kunne sende foreldreløs arm.
     const result = decideAutoShowBuyPopup(defaultInputs({
       previousGameStatus: "RUNNING",
       gameStatus: "NONE",
@@ -296,11 +305,10 @@ describe("PlayScreen auto-show BuyPopup per round (Tobias-bug 2026-05-12)", () =
       waitingForMasterPurchase: true, // ingen scheduled-game ennå
       autoShowBuyPopupDone: true,
     }));
-    // Reset av flagget skjer, MEN auto-show blokkeres på waitingForMaster-gaten.
-    expect(result.shouldAutoShow).toBe(false);
-    // Når waitingForMaster blir false senere, neste tick kan auto-åpne
-    // fordi flagget er nullstilt fra round-end-reset.
-    expect(result.nextAutoShowBuyPopupDone).toBe(false);
+    // Popup VISES — wait-state propageres til BuyPopup som disabler
+    // Kjøp-knappen via setWaitingForMaster.
+    expect(result.shouldAutoShow).toBe(true);
+    expect(result.nextAutoShowBuyPopupDone).toBe(true);
   });
 
   it("STATE-MATRISE: 'mellom runder' med pre-round-brett → popup blokkert (allerede kjøpt)", () => {
@@ -313,6 +321,43 @@ describe("PlayScreen auto-show BuyPopup per round (Tobias-bug 2026-05-12)", () =
       autoShowBuyPopupDone: true,
     }));
     expect(result.shouldAutoShow).toBe(false);
+  });
+
+  it("TOBIAS 2026-05-12 ENTRY: spiller går inn under aktiv RUNNING uten egne brett → popup VISES", () => {
+    // Mid-round spectator joiner. Tidligere bug: popup viste ikke fordi
+    // klienten satte `waitingForMasterPurchase=true` initially (før
+    // første lobby-state-event), eller fordi state.gameStatus var
+    // RUNNING uten live-brett. Nytt direktiv: popup skal vises uansett.
+    const result = decideAutoShowBuyPopup(defaultInputs({
+      previousGameStatus: "NONE",
+      gameStatus: "RUNNING",
+      myTicketCount: 0, // spectator, ingen live-brett
+      preRoundTicketCount: 0,
+      stateTicketTypesLength: 3,
+      waitingForMasterPurchase: false, // scheduled-game spawnet
+      autoShowBuyPopupDone: false, // første update etter mount
+    }));
+    expect(result.shouldAutoShow).toBe(true);
+    expect(result.nextAutoShowBuyPopupDone).toBe(true);
+  });
+
+  it("TOBIAS 2026-05-12 ENTRY: spiller går inn mellom runder UTEN scheduled-game → popup VISES (BuyPopup disabler kjøp-knapp)", () => {
+    // Master har advance-d eller akkurat ferdigstilt runde, men bridge
+    // har ikke spawnet ny scheduled-game ennå. `waitingForMasterPurchase`
+    // er true. Tidligere blokkerte dette popup; nytt direktiv:
+    // popup VISES, men BuyPopup.setWaitingForMaster disabler Kjøp-
+    // knappen med "Venter på master"-tekst.
+    const result = decideAutoShowBuyPopup(defaultInputs({
+      previousGameStatus: "NONE",
+      gameStatus: "NONE",
+      myTicketCount: 0,
+      preRoundTicketCount: 0,
+      stateTicketTypesLength: 3,
+      waitingForMasterPurchase: true,
+      autoShowBuyPopupDone: false,
+    }));
+    expect(result.shouldAutoShow).toBe(true);
+    expect(result.nextAutoShowBuyPopupDone).toBe(true);
   });
 
   it("STATE-MATRISE: 'Ingen planlagte spill' (ingen ticketTypes) → popup blokkert", () => {
