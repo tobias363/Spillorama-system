@@ -252,6 +252,14 @@ function asIsoOrNull(value: Date | string | null): string | null {
  */
 function mapScheduledGameStatus(status: string): Game1LobbyOverallStatus {
   switch (status) {
+    // Tobias 2026-05-12 state-matrise: `scheduled` (master har trykket
+    // Start, nedtelling kjører) er semantisk samme som `purchase_open`
+    // fra klient-perspektiv — bonger skal kunne kjøpes umiddelbart.
+    // Tidligere falt `scheduled` gjennom til default → `"idle"` →
+    // `pickJoinableScheduledGameId` returnerte null → BuyMore disabled
+    // → popup blokkert. Mapper nå til `purchase_open` slik at klient
+    // ser kjøp-tilstand med en gang master starter.
+    case "scheduled":
     case "purchase_open":
       return "purchase_open";
     case "ready_to_start":
