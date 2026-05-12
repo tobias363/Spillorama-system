@@ -48,6 +48,13 @@ import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
 import { Game1LobbyFallback } from "./logic/LobbyFallback.js";
 import { Game1LobbyStateBinding } from "./logic/LobbyStateBinding.js";
 import type { Phase } from "./logic/Phase.js";
+// Debug event-tracker (Tobias-direktiv 2026-05-12) — sentralisert
+// event-historikk + JSON-dump for diagnose. Aktiveres KUN bak debug-flagget.
+import {
+  getEventTracker,
+  pickSafeFields,
+} from "./debug/EventTracker.js";
+import { DebugEventLogPanel } from "./debug/DebugEventLogPanel.js";
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -243,6 +250,14 @@ class Game1Controller implements GameController {
    * Fullt Hus 1000 = 1700 kr totalt vist i animasjonen.
    */
   private roundAccumulatedWinnings = 0;
+
+  /**
+   * Debug event-log-panel (Tobias-direktiv 2026-05-12). Mountes når
+   * `?debug=1` i URL eller localStorage `DEBUG_SPILL1_DRAWS=true`. Henter
+   * sin egen tracker via singleton `getEventTracker()`. Default null →
+   * `mountDebugHud` lager instansen.
+   */
+  private debugEventPanel: DebugEventLogPanel | null = null;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -617,6 +632,20 @@ class Game1Controller implements GameController {
     const initialScheduledGameId = this.pickJoinableScheduledGameId(
       lobbyStateAtJoinTime,
     );
+    // Tracker (Tobias-direktiv 2026-05-12): bind hall + scheduled-game-id
+    // som session-kontekst FØR vi tracker join-request, slik at exporten
+    // alltid har basis-info selv om join feiler.
+    const tracker = getEventTracker();
+    tracker.setSessionContext({
+      hallId: this.deps.hallId,
+      scheduledGameId: initialScheduledGameId ?? null,
+    });
+    tracker.track("socket.emit", {
+      event: initialScheduledGameId ? "joinScheduledGame" : "createRoom",
+      hallId: this.deps.hallId,
+      gameSlug: "bingo",
+      scheduledGameId: initialScheduledGameId,
+    });
     if (isSpill1DrawsDebugEnabled()) {
       console.log("[ROOM] join request", {
         mode: initialScheduledGameId ? "joinScheduledGame" : "createRoom",
@@ -644,6 +673,21 @@ class Game1Controller implements GameController {
     if (initialScheduledGameId && joinResult.ok && joinResult.data) {
       this.joinedScheduledGameId = initialScheduledGameId;
       bridge.setScheduledGameId(initialScheduledGameId);
+    }
+    // Tracker (Tobias-direktiv 2026-05-12): join-ack. Track ok-status,
+    // roomCode, playerId og evt. feil for senere diagnose.
+    tracker.track("socket.recv", {
+      event: "join:ack",
+      ok: joinResult.ok,
+      roomCode: joinResult.ok ? joinResult.data?.roomCode : null,
+      playerId: joinResult.ok ? joinResult.data?.playerId : null,
+      error: joinResult.ok ? null : joinResult.error,
+    });
+    if (joinResult.ok && joinResult.data) {
+      tracker.setSessionContext({
+        playerId: joinResult.data.playerId,
+        roomCode: joinResult.data.roomCode,
+      });
     }
     if (isSpill1DrawsDebugEnabled()) {
       console.log("[ROOM] join ack", {
@@ -724,6 +768,15 @@ class Game1Controller implements GameController {
 
     this.unsubs.push(
       bridge.on("stateChanged", (state) => {
+        // Tracker (Tobias-direktiv 2026-05-12): hver stateChange er en
+        // mulig sannhets-source-of-truth-endring. Track kun safe-fields
+        // (roomCode, gameStatus, drawn-count) — IKKE full state-payload
+        // som ville lekke ticket-grids og pattern-data.
+        tracker.track("state.change", {
+          roomCode: state.roomCode,
+          gameStatus: state.gameStatus,
+          drawnNumbersLength: state.drawnNumbers.length,
+        });
         if (isSpill1DrawsDebugEnabled()) {
           // 2026-05-11: stateChanged fyres på hver `room:update` (etter at
           // GameBridge.handleRoomUpdate har anvendt payloaden). Logger
@@ -737,9 +790,31 @@ class Game1Controller implements GameController {
         }
         this.onStateChanged(state);
       }),
-      bridge.on("gameStarted", (state) => this.onGameStarted(state)),
-      bridge.on("gameEnded", (state) => this.onGameEnded(state)),
+      bridge.on("gameStarted", (state) => {
+        tracker.track("state.change", {
+          event: "gameStarted",
+          roomCode: state.roomCode,
+          gameStatus: state.gameStatus,
+        });
+        this.onGameStarted(state);
+      }),
+      bridge.on("gameEnded", (state) => {
+        tracker.track("state.change", {
+          event: "gameEnded",
+          roomCode: state.roomCode,
+          gameStatus: state.gameStatus,
+          drawnNumbersLength: state.drawnNumbers.length,
+        });
+        this.onGameEnded(state);
+      }),
       bridge.on("numberDrawn", (num, idx, state) => {
+        tracker.track("socket.recv", {
+          event: "draw:new",
+          ball: num,
+          drawIndex: idx,
+          roomCode: state.roomCode,
+          drawnNumbersLength: state.drawnNumbers.length,
+        });
         if (isSpill1DrawsDebugEnabled()) {
           // 2026-05-11: numberDrawn fyres etter at GameBridge.handleDrawNew
           // har validert drawIndex og oppdatert state.drawnNumbers. Hvis
@@ -755,7 +830,15 @@ class Game1Controller implements GameController {
         }
         this.onNumberDrawn(num, idx, state);
       }),
-      bridge.on("patternWon", (result, state) => this.onPatternWon(result, state)),
+      bridge.on("patternWon", (result, state) => {
+        // Tracker: trygge felter — pattern-navn + drawIndex + claim-status.
+        // IKKE full claim-payload (kan ha bong-data).
+        tracker.track("socket.recv", pickSafeFields(
+          result as unknown as Record<string, unknown>,
+          ["patternName", "drawIndex", "claimType", "playerId"],
+        ));
+        this.onPatternWon(result, state);
+      }),
       // BIN-690 PR-M6: scheduled-games mini-game protocol.
       bridge.on("miniGameTrigger", (data) => this.handleMiniGameTrigger(data)),
       bridge.on("miniGameResult", (data) => {
@@ -894,6 +977,7 @@ class Game1Controller implements GameController {
   // deler rom med andre haller.
 
   private debugHudEl: HTMLDivElement | null = null;
+  private debugHudTextEl: HTMLPreElement | null = null;
 
   private isDebugHudEnabled(): boolean {
     try {
@@ -934,12 +1018,103 @@ class Game1Controller implements GameController {
       "border: 1px solid #0f0",
       "max-width: 320px",
       "white-space: pre-wrap",
-      "pointer-events: none",
+      // Inner "Dump"-knapp må kunne klikkes — derfor enable pointer-events
+      // og la kun text-node-en være pointer-events: none via display.
+      "pointer-events: auto",
       "box-shadow: 0 2px 8px rgba(0,0,0,0.5)",
     ].join(";");
     document.body.appendChild(hud);
     this.debugHudEl = hud;
+    // Status-text legges i et eget <pre>-element så `updateDebugHud` ikke
+    // overskriver dump-knappen vi appender lenger ned.
+    const textEl = document.createElement("pre");
+    textEl.style.cssText = "margin: 0; padding: 0; white-space: pre-wrap; font: inherit; color: inherit;";
+    hud.appendChild(textEl);
+    this.debugHudTextEl = textEl;
     this.updateDebugHud();
+
+    // Tobias-direktiv 2026-05-12: "Dump diagnose"-knapp i debug-HUD-en.
+    // Trigger en JSON-download med hele event-log + session-kontekst.
+    // Aktiveres bak samme `?debug=1`-flagg som HUD-en.
+    const dumpBtn = document.createElement("button");
+    dumpBtn.textContent = "⬇ Dump diagnose";
+    dumpBtn.title = "Last ned JSON-rapport (event-log + session-context)";
+    dumpBtn.style.cssText = [
+      "display: block",
+      "width: 100%",
+      "margin-top: 6px",
+      "background: rgba(0, 200, 0, 0.25)",
+      "color: #fff",
+      "border: 1px solid #0f0",
+      "border-radius: 3px",
+      "padding: 4px 8px",
+      "font-family: inherit",
+      "font-size: 11px",
+      "cursor: pointer",
+    ].join(";");
+    dumpBtn.addEventListener("click", () => this.handleDebugDump());
+    hud.appendChild(dumpBtn);
+
+    // Mount full event-log-panel (top-left, separat fra denne HUD-en
+    // top-right) — viser real-time event-strøm med filter + clear.
+    if (!this.debugEventPanel) {
+      this.debugEventPanel = new DebugEventLogPanel();
+      try {
+        this.debugEventPanel.mount();
+      } catch (err) {
+        // Panel-mount er best-effort; må ikke ta ned spillet.
+        console.warn("[Game1] DebugEventLogPanel mount feilet:", err);
+      }
+    }
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-12: bygg JSON-rapport fra event-tracker og
+   * trigger fil-download. Brukeren sender filen til PM/agent for diagnose.
+   *
+   * Fail-soft: hvis Blob/URL-API ikke er tilgjengelig (eller download
+   * blokkeres av browser-sandbox), faller vi tilbake til
+   * `console.log("[DEBUG-EXPORT]", report)` så Tobias kan kopiere fra
+   * devtools-console.
+   */
+  private handleDebugDump(): void {
+    try {
+      const tracker = getEventTracker();
+      // Sørg for at session-context er ferskest mulig før dump.
+      tracker.setSessionContext({
+        playerId: this.myPlayerId,
+        roomCode: this.actualRoomCode || null,
+        scheduledGameId: this.joinedScheduledGameId,
+        currentScreen: this.phase,
+      });
+      const report = tracker.export();
+      const json = JSON.stringify(report, null, 2);
+      if (
+        typeof Blob === "undefined" ||
+        typeof URL === "undefined" ||
+        typeof document === "undefined"
+      ) {
+        console.log("[DEBUG-EXPORT]", report);
+        this.toast?.info("Diagnose dumpet til console (browser støtter ikke fil-download).");
+        return;
+      }
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const filename = `spillorama-debug-${ts}.json`;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.toast?.info(`Diagnose lastet ned: ${filename}`);
+    } catch (err) {
+      console.error("[Game1] Debug dump feilet:", err);
+      this.toast?.error("Kunne ikke laste ned diagnose-fil. Se devtools-console.");
+    }
   }
 
   private updateDebugHud(): void {
@@ -957,7 +1132,7 @@ class Game1Controller implements GameController {
     } else if (roomCode.startsWith("BINGO_")) {
       isolation = "GoH-binding " + roomCode.replace("BINGO_", "");
     }
-    this.debugHudEl.textContent = [
+    const text = [
       "🐛 SPILL1 DEBUG-HUD",
       `room  : ${roomCode}`,
       `hall  : ${hallId}`,
@@ -965,12 +1140,25 @@ class Game1Controller implements GameController {
       `sched : ${scheduledGameId === "(none)" ? "(none)" : scheduledGameId.slice(0, 8) + "…"}`,
       `isol  : ${isolation}`,
     ].join("\n");
+    // Skriv til separat <pre>-element så dump-knappen ikke wipes ut.
+    // Fallback til hele HUD-elementet hvis text-el ikke er init enda.
+    const target = this.debugHudTextEl ?? this.debugHudEl;
+    target.textContent = text;
   }
 
   private unmountDebugHud(): void {
     if (this.debugHudEl) {
       this.debugHudEl.remove();
       this.debugHudEl = null;
+      this.debugHudTextEl = null;
+    }
+    if (this.debugEventPanel) {
+      try {
+        this.debugEventPanel.unmount();
+      } catch {
+        // Best-effort.
+      }
+      this.debugEventPanel = null;
     }
   }
 
@@ -1952,6 +2140,14 @@ class Game1Controller implements GameController {
   }
 
   private showError(message: string): void {
+    // Tracker (Tobias-direktiv 2026-05-12): klient-side feilmelding.
+    // Skriv til samme event-log som socket/state-events så Tobias ser
+    // hele tidslinjen ved dump.
+    try {
+      getEventTracker().track("error.client", { message });
+    } catch {
+      // Tracker er best-effort; må ikke ta ned feilvisningen.
+    }
     if (this.toast) {
       this.toast.error(message, 8000);
     } else {
