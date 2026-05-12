@@ -560,20 +560,22 @@ export class PlayScreen extends Container {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       // Sett idle-mode basert på lobby-state.
-      //   - `closed`         → "Stengt / Ingen aktiv plan i hallen akkurat nå"
-      //   - waiting-master   → "Neste spill: {displayName} / Venter på at
-      //                         master starter neste runde" (Tobias 2026-05-12,
-      //                         Alternativ B: scheduled-game ennå ikke spawnet)
-      //   - next-game        → "Neste spill: {displayName} / Kjøp bonger for å
-      //                         være med i trekningen" (joinable scheduled-game)
+      //   - `closed`    → "Stengt / Ingen aktiv plan i hallen akkurat nå"
+      //   - `next-game` → "Neste spill: {displayName} / Kjøp bonger for å
+      //                    være med i trekningen"
+      //
+      // Tobias-direktiv 2026-05-12 ("knappen skal være Kjøp bonger alltid"):
+      // `waiting-master`-modus er fjernet — spilleren ser alltid "Neste
+      // spill: X / Kjøp bonger" når lobby er åpen, uansett om scheduled-
+      // game er spawnet av bridge eller ikke. Backend håndhever bridge-
+      // spawn → armed-state-persistens som opprinnelig design.
+      //
       // Game1Controller pusher displayName via `setBuyPopupDisplayName`
       // når lobby-state mottas — CenterBall fallback-tekst er "Bingo" om
       // ingenting er satt enda (Tobias-direktiv: aldri blank).
       const idleMode: "closed" | "waiting-master" | "next-game" = lobbyClosed
         ? "closed"
-        : this.waitingForMasterPurchase
-          ? "waiting-master"
-          : "next-game";
+        : "next-game";
       this.centerBall.setIdleMode(idleMode);
       this.centerBall.showIdleText();
     }
@@ -730,12 +732,11 @@ export class PlayScreen extends Container {
       fee = this.lobbyTicketConfig.entryFee;
     }
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
-    // Tobias 2026-05-12 ("popup skal alltid komme"): seed wait-state ved
-    // show() slik at popup-en starter med korrekt Kjøp-knapp-tilstand
-    // (disabled hvis scheduled-game ikke joinable enda). Uten denne
-    // ville popup-en flash-e med enabled "Kjøp"-knapp før første
-    // setWaitingForMasterPurchase-kall fra Game1Controller.
-    this.buyPopup.setWaitingForMaster(this.waitingForMasterPurchase);
+    // Tobias-direktiv 2026-05-12 ("knappen skal være Kjøp bonger alltid"):
+    // wait-on-master-seeding er fjernet — Kjøp-knappen i popup er alltid
+    // kjøpbar når brett er valgt. Defensiv no-op-kall holder
+    // BuyPopup-state ren i fall noen tidligere kallsted satte true.
+    this.buyPopup.setWaitingForMaster(false);
     this.buyPopup.showWithTypes(
       fee,
       types,
@@ -975,46 +976,32 @@ export class PlayScreen extends Container {
    * Idempotent — CenterTopPanel.setPreBuyDisabled/setBuyMoreDisabled
    * memo-iserer state og skipper DOM-mutasjon hvis verdien er uendret.
    */
-  setWaitingForMasterPurchase(waiting: boolean, reason?: string): void {
+  setWaitingForMasterPurchase(waiting: boolean, _reason?: string): void {
+    // Tobias-direktiv 2026-05-12 ("knappen skal være Kjøp bonger alltid"):
+    // wait-on-master-disable er fjernet fra hele klient-UI. Kjøp-knappene
+    // i både CenterTop og BuyPopup forblir alltid kjøpbare; backend
+    // håndhever bridge-spawn → armed-state-persistens som opprinnelig
+    // fungerende design.
+    //
+    // Vi beholder state-tracking for telemetri og evt. fremtidig revert,
+    // men kaller IKKE setPreBuyDisabled / setBuyMoreDisabled /
+    // buyPopup.setWaitingForMaster lenger. CenterBall idle-mode bruker
+    // "next-game" alltid (med mindre lobby er closed).
     if (this.waitingForMasterPurchase === waiting) return;
     this.waitingForMasterPurchase = waiting;
-    const reasonText = reason ?? "Master har ikke startet neste runde ennå";
-    this.centerTop.setPreBuyDisabled(waiting, reasonText);
-    // "Kjøp flere brett" vises ikke under RUNNING (display:none via
-    // setGameRunning), så `running && disabled` er stort sett en no-op
-    // for buyMore. Men hvis ROUND-end → idle (master har ikke trigget
-    // ny start enda), vil buyMore være synlig og må også disables.
-    //
-    // Reason-string er felles for begge knapper — bruker ser samme
-    // melding uansett hvor de hover-er.
-    this.centerTop.setBuyMoreDisabled(waiting, reasonText);
+    // Eksplisitt re-enable knappene (idempotent — CenterTopPanel
+    // memoiserer state). Defensiv mot mulige tidligere kall som satte
+    // dem til disabled.
+    this.centerTop.setPreBuyDisabled(false);
+    this.centerTop.setBuyMoreDisabled(false);
+    this.buyPopup.setWaitingForMaster(false);
 
-    // Tobias 2026-05-12 ("popup skal alltid komme"): propag wait-state
-    // til BuyPopup slik at hvis popup-en allerede er åpen (auto-show
-    // ved entry), reagerer Kjøp-knappen live når lobby-state oppdaterer.
-    // Idempotent — BuyPopup.setWaitingForMaster skipper DOM-mutasjon
-    // hvis state ikke endret.
-    this.buyPopup.setWaitingForMaster(waiting, reasonText);
-
-    // Re-trigge update() slik at CenterBall idle-mode synker. Pre-fix:
-    // CenterBall viste fortsatt "Kjøp bonger for å være med i
-    // trekningen" selv etter setWaitingForMasterPurchase(true) fordi
-    // idle-mode beregnes i update() og våre prop-setter trigger ikke
-    // update på egen hånd. Idempotent — update() er pure render og
-    // CenterBall.setIdleMode/showIdleText er begge memoiserte.
+    // Re-trigge update() så CenterBall idle-mode synker.
     if (this.lastState) {
       this.update(this.lastState);
     } else if (this.centerBall.isIdleTextVisible()) {
-      // Mount-race: setWaitingForMasterPurchase kan kalles før første
-      // room:update. Da har vi ikke noe lastState å re-rendere fra, men
-      // CenterBall idle-text er allerede synlig (initial mount). Oppdater
-      // mode direkte — closed har høyere prioritet enn waiting-master.
       const initialIdleMode: "closed" | "waiting-master" | "next-game" =
-        this.lobbyOverallStatus === "closed"
-          ? "closed"
-          : waiting
-            ? "waiting-master"
-            : "next-game";
+        this.lobbyOverallStatus === "closed" ? "closed" : "next-game";
       this.centerBall.setIdleMode(initialIdleMode);
     }
   }
