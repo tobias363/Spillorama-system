@@ -165,6 +165,11 @@ import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
 import { Game1RescheduleService } from "./game/Game1RescheduleService.js";
 import { Game1TicketPurchaseService } from "./game/Game1TicketPurchaseService.js";
+import { Game1ArmedToPurchaseConversionService } from "./game/Game1ArmedToPurchaseConversionService.js";
+import type {
+  ArmedPlayerInput,
+  Game1ArmedTicketSpecEntry,
+} from "./game/Game1ArmedToPurchaseConversionService.js";
 import { Game1DrawEngineService } from "./game/Game1DrawEngineService.js";
 import { Game1PotService } from "./game/pot/Game1PotService.js";
 import { Game1MiniGameOrchestrator } from "./game/minigames/Game1MiniGameOrchestrator.js";
@@ -2437,6 +2442,31 @@ game1MasterControlService.setTicketPurchaseService(game1TicketPurchaseService);
 // + ticketPurchaseService satt). auditLogService injiseres etterpå via
 // setAuditLogService.
 //
+// Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): konverterer armed-state
+// fra lobby-rom til `app_game1_ticket_purchases`-rader når master starter
+// runde (eller advance-er til neste posisjon). Service-en gjør den
+// regulatorisk-trygge wallet-commit + INSERT + compliance-ledger-flyten.
+//
+// Wires inn i MasterActionService via `onScheduledGameSpawned`-callback
+// lengre ned slik at konverteringen triggres MELLOM bridge-spawn og
+// engine.startGame — tidsvindu hvor purchase-radene MÅ eksistere for at
+// Game1DrawEngineService.startGame.listPurchasesForGame skal returnere
+// noe.
+const game1ArmedConversionService = new Game1ArmedToPurchaseConversionService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  walletAdapter,
+  auditLogService,
+  // K1 compliance-fix: skriv STAKE-entry per konvertert purchase bundet
+  // til kjøpe-hallen (player.hallId — IKKE master-hallen) per BIN-443.
+  // Samme port som Game1TicketPurchaseService bruker.
+  complianceLedgerPort,
+  // PR-W5 wallet-split: logg BUYIN mot Spillvett-tapsgrense for å matche
+  // Game1TicketPurchaseService.purchase()-paritet. Kun deposit-delen
+  // teller per §11 pengespillforskriften.
+  complianceLossPort: engine.getComplianceLossPort(),
+});
+
 // Brukes av /api/agent/game1/master/* routene; eksisterende
 // /api/agent/game-plan/* og /api/admin/game1/games/:id/* fortsetter uendret
 // (UI bytter i Bølge 3).
@@ -2449,7 +2479,383 @@ const masterActionService = new MasterActionService({
   lobbyAggregator: gameLobbyAggregator,
   auditLogService,
   lobbyBroadcaster: spill1LobbyBroadcaster,
+  // Pilot-blokker-fix 2026-05-12: hook som leser armed-state fra
+  // RoomStateManager + engine room-snapshot, og kaller conversion-service
+  // for hver armed spiller. Soft-fail i MasterActionService — engine.
+  // startGame fortsetter selv om konverteringen feiler.
+  onScheduledGameSpawned: async (input) => {
+    await runArmedToPurchaseConversionForSpawn(input);
+  },
 });
+
+/**
+ * Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): Resolverer armed-state
+ * fra RoomStateManager + engine room-snapshot og kaller conversion-service
+ * for hver armed spiller i lobby-rommet som matcher det nye scheduled-
+ * game-rommet.
+ *
+ * Lobby-rom-koden ER scheduled-game-rom-koden (begge er
+ * `BINGO_<groupId>` for GoH-rom eller `BINGO_<hallId>` for single-hall).
+ * Bridgen har akkurat bundet `room_code` på scheduled-game-raden — vi
+ * hoper inn fra DB og leser armed-state mot samme kode.
+ *
+ * Flyt:
+ *   1. SELECT room_code FROM app_game1_scheduled_games WHERE id = ...
+ *   2. roomState.getArmedPlayerIds(roomCode) + getArmedPlayerSelections
+ *      + getReservationId per player.
+ *   3. engine.getRoomSnapshot(roomCode).players for walletId/hallId.
+ *   4. Bygg ArmedPlayerInput[] og kall
+ *      game1ArmedConversionService.convertArmedToPurchases.
+ *
+ * Resolveren er throws-safe — hver feil logges og bobler opp så
+ * MasterActionService kan logge warning. Spillet starter videre.
+ */
+async function runArmedToPurchaseConversionForSpawn(input: {
+  scheduledGameId: string;
+  planRunId: string;
+  position: number;
+  masterHallId: string;
+  actorUserId: string;
+}): Promise<void> {
+  // Hent room_code + ticket_config fra scheduled-game-raden.
+  const { rows } = await platformService.getPool().query<{
+    room_code: string | null;
+    hall_id: string;
+    ticket_config_json: unknown;
+  }>(
+    `SELECT room_code, hall_id, ticket_config_json
+       FROM "${pgSchema}"."app_game1_scheduled_games"
+      WHERE id = $1`,
+    [input.scheduledGameId],
+  );
+  const row = rows[0];
+  if (!row) {
+    console.warn(
+      `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} ikke funnet — skip konvertering`,
+    );
+    return;
+  }
+  const roomCode = row.room_code;
+  if (!roomCode) {
+    console.warn(
+      `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} mangler room_code — kan ikke matche lobby-rom`,
+    );
+    return;
+  }
+
+  // Hent armed-state fra in-memory roomState.
+  const armedPlayerIds = roomState.getArmedPlayerIds(roomCode);
+  if (armedPlayerIds.length === 0) {
+    // Helt legitimt: ingen pre-purchase armed. Engine.startGame kjører
+    // uten brett, men runden er fortsatt gyldig. Log info så ops kan se
+    // hvor ofte dette skjer.
+    console.info(
+      `[armed-conversion-hook] roomCode=${roomCode} har ingen armed spillere — skip konvertering`,
+    );
+    return;
+  }
+
+  const ticketCounts = roomState.getArmedPlayerTicketCounts(roomCode);
+  const selectionsMap = roomState.getArmedPlayerSelections(roomCode);
+  const ticketCatalog = extractTicketCatalogFromConfig(row.ticket_config_json);
+  if (ticketCatalog.length === 0) {
+    console.warn(
+      `[armed-conversion-hook] roomCode=${roomCode} mangler ticket_config_json — kan ikke bygge ticketSpec`,
+    );
+    return;
+  }
+
+  // Hent room-snapshot for walletId/hallId per armed spiller.
+  let roomSnapshot;
+  try {
+    roomSnapshot = engine.getRoomSnapshot(roomCode);
+  } catch (err) {
+    console.warn(
+      `[armed-conversion-hook] engine.getRoomSnapshot feilet for roomCode=${roomCode}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  // Map socket-rom-spiller-id → user-id via PlatformService walletId-lookup.
+  // RoomSnapshot.players har walletId — vi trenger platform-user-id for
+  // app_game1_ticket_purchases.buyer_user_id. PlatformService eier mapping.
+  const armedPlayers: ArmedPlayerInput[] = [];
+  for (const playerId of armedPlayerIds) {
+    const player = roomSnapshot.players.find((p) => p.id === playerId);
+    if (!player) {
+      console.warn(
+        `[armed-conversion-hook] armed playerId=${playerId} mangler i room-snapshot for ${roomCode} — skip`,
+      );
+      continue;
+    }
+    const reservationId = roomState.getReservationId(roomCode, playerId);
+    if (!reservationId) {
+      console.warn(
+        `[armed-conversion-hook] armed playerId=${playerId} mangler reservationId — skip (kan være gratis-spill eller race)`,
+      );
+      continue;
+    }
+    const walletId = player.walletId ?? null;
+    if (!walletId) {
+      console.warn(
+        `[armed-conversion-hook] armed playerId=${playerId} mangler walletId — skip`,
+      );
+      continue;
+    }
+    // Resolve userId via direkte SELECT mot app_users på wallet_id.
+    // Spillorama-konvensjon: app_users har én rad per spiller med
+    // `wallet_id`-FK til wallet-konto. PlatformService eksponerer ikke en
+    // dedikert getUserByWalletId-metode, så vi gjør direkte query for å
+    // unngå service-method-rundtur (denne hooken må være rask — kjører
+    // mellom bridge-spawn og engine.startGame).
+    let userId: string | null = null;
+    try {
+      const userRows = await platformService.getPool().query<{
+        id: string;
+      }>(
+        `SELECT id FROM "${pgSchema}"."app_users" WHERE wallet_id = $1 LIMIT 1`,
+        [walletId],
+      );
+      userId = userRows.rows[0]?.id ?? null;
+    } catch (err) {
+      console.warn(
+        `[armed-conversion-hook] SELECT app_users.id by wallet_id=${walletId} feilet: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!userId) {
+      console.warn(
+        `[armed-conversion-hook] kunne ikke resolve userId for walletId=${walletId} (playerId=${playerId}) — skip`,
+      );
+      continue;
+    }
+
+    // BIN-443: hallId = player.hallId (kjøpe-hallen), IKKE master-hallens
+    // hallId. For single-hall lobby-rom = samme. For GoH-rom = forskjellig
+    // for ikke-master-haller.
+    const buyerHallId = player.hallId ?? input.masterHallId;
+
+    // Bygg ticketSpec fra armed selections eller fallback til flat count.
+    const selections = selectionsMap[playerId] ?? [];
+    const ticketCount = ticketCounts[playerId] ?? 0;
+    const ticketSpec = buildTicketSpecFromArmed({
+      selections,
+      ticketCount,
+      catalog: ticketCatalog,
+    });
+    if (ticketSpec.length === 0) {
+      console.warn(
+        `[armed-conversion-hook] kunne ikke bygge ticketSpec for playerId=${playerId} — skip`,
+      );
+      continue;
+    }
+
+    armedPlayers.push({
+      userId,
+      walletId,
+      hallId: buyerHallId,
+      reservationId,
+      ticketSpec,
+    });
+  }
+
+  if (armedPlayers.length === 0) {
+    console.info(
+      `[armed-conversion-hook] roomCode=${roomCode} hadde armed-spillere, men ingen kunne resolves til konvertering`,
+    );
+    return;
+  }
+
+  // Trigger konvertering. Failures returnert i result — ikke kastet.
+  const result = await game1ArmedConversionService.convertArmedToPurchases({
+    scheduledGameId: input.scheduledGameId,
+    lobbyRoomCode: roomCode,
+    actorUserId: input.actorUserId,
+    armedPlayers,
+  });
+
+  if (result.failures.length > 0) {
+    console.warn(
+      `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} hadde ${result.failures.length} failures av ${armedPlayers.length} armed-spillere — se game1.armed.conversion_failed audit-events`,
+      { failures: result.failures.map((f) => ({ userId: f.userId, errorCode: f.errorCode })) },
+    );
+  }
+  console.info(
+    `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} konverterte ${result.convertedCount}/${armedPlayers.length} armed-spillere (${result.failures.length} failures)`,
+  );
+}
+
+/**
+ * Trekk ut ticket-catalog (color/size/priceCents) fra scheduled-game-raden
+ * sin `ticket_config_json`. Speilet av Game1TicketPurchaseService sin
+ * `extractTicketCatalog` — vi duper logikken her for å holde
+ * conversion-hook decoupled fra purchase-service-interne helpere.
+ */
+function extractTicketCatalogFromConfig(
+  raw: unknown,
+): Array<{ color: string; size: "small" | "large"; priceCents: number }> {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  let list: unknown = parsed;
+  if (Array.isArray((parsed as { ticketTypesData?: unknown }).ticketTypesData)) {
+    list = (parsed as { ticketTypesData: unknown }).ticketTypesData;
+  } else if (Array.isArray((parsed as { ticketTypes?: unknown }).ticketTypes)) {
+    list = (parsed as { ticketTypes: unknown }).ticketTypes;
+  }
+  if (!Array.isArray(list)) return [];
+  const out: Array<{ color: string; size: "small" | "large"; priceCents: number }> = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const i = item as Record<string, unknown>;
+    const color = typeof i.color === "string" ? i.color.trim() : "";
+    const sizeRaw = typeof i.size === "string" ? i.size.toLowerCase() : "";
+    const size = sizeRaw === "small" || sizeRaw === "large" ? sizeRaw : null;
+    let priceCents: number | null = null;
+    for (const key of ["priceCents", "priceCentsEach", "pricePerTicket", "price"]) {
+      const val = i[key];
+      if (typeof val === "number" && Number.isFinite(val) && val >= 0) {
+        priceCents = Math.round(val);
+        break;
+      }
+      if (typeof val === "string") {
+        const n = Number.parseFloat(val);
+        if (Number.isFinite(n) && n >= 0) {
+          priceCents = Math.round(n);
+          break;
+        }
+      }
+    }
+    if (!color || !size || priceCents === null) continue;
+    out.push({ color, size: size as "small" | "large", priceCents });
+  }
+  return out;
+}
+
+/**
+ * Konverter armed selections (fra bet:arm) til Game1ArmedTicketSpecEntry[].
+ *
+ * Selections-shape: `{ type: "small" | "large", qty: N, name?: "Small Yellow" }`.
+ * Ticket-catalog shape: `{ color: "yellow", size: "small", priceCents: 500 }`.
+ *
+ * Mapping:
+ *   - `name="Small Yellow"` + `type="small"` → `color="yellow"`, `size="small"`
+ *   - `name="Large Purple"` + `type="large"` → `color="purple"`, `size="large"`
+ *
+ * Fallback (ingen selections, kun ticketCount): assume flat ticketCount av
+ * billigste catalog-entry. Best-effort — disse spillerne bør egentlig ha
+ * sendt selections i nyere klient-versjoner.
+ */
+function buildTicketSpecFromArmed(input: {
+  selections: Array<{ type: string; qty: number; name?: string }>;
+  ticketCount: number;
+  catalog: Array<{ color: string; size: "small" | "large"; priceCents: number }>;
+}): Game1ArmedTicketSpecEntry[] {
+  const { selections, ticketCount, catalog } = input;
+  if (catalog.length === 0) return [];
+
+  // Build a (color, size) → priceCents lookup.
+  const priceByKey = new Map<string, number>();
+  for (const c of catalog) {
+    priceByKey.set(`${c.color}:${c.size}`, c.priceCents);
+  }
+
+  // With selections (preferred path): map name → color.
+  if (selections.length > 0) {
+    const aggregated = new Map<string, { color: string; size: "small" | "large"; count: number; priceCentsEach: number }>();
+    for (const sel of selections) {
+      if (!sel || typeof sel !== "object") continue;
+      const qty = Number(sel.qty);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const size: "small" | "large" =
+        sel.type === "large" ? "large" : "small";
+      const color = resolveColorFromName(sel.name, size, catalog);
+      if (!color) continue;
+      const priceCents = priceByKey.get(`${color}:${size}`);
+      if (priceCents === undefined) continue;
+      const key = `${color}:${size}`;
+      const existing = aggregated.get(key);
+      if (existing) {
+        existing.count += Math.round(qty);
+      } else {
+        aggregated.set(key, {
+          color,
+          size,
+          count: Math.round(qty),
+          priceCentsEach: priceCents,
+        });
+      }
+    }
+    return [...aggregated.values()].filter((e) => e.count > 0);
+  }
+
+  // Fallback: no selections, use ticketCount with cheapest small entry.
+  // ticketCount is "weighted" (Large = 3 brett a 1× cost), but without
+  // selections we cannot reverse-engineer the original purchase. Use the
+  // cheapest small ticket and assume flat count.
+  if (ticketCount <= 0) return [];
+  const sortedSmall = catalog
+    .filter((c) => c.size === "small")
+    .sort((a, b) => a.priceCents - b.priceCents);
+  const cheapest = sortedSmall[0] ?? catalog[0];
+  if (!cheapest) return [];
+  return [
+    {
+      color: cheapest.color,
+      size: cheapest.size,
+      count: Math.round(ticketCount),
+      priceCentsEach: cheapest.priceCents,
+    },
+  ];
+}
+
+/**
+ * Resolve color (e.g. "yellow", "white", "purple") from selection.name +
+ * size. Matches BingoEngine's name-based ticket-type lookup.
+ *
+ * name="Small Yellow" + size=small → "yellow"
+ * name="Large Purple" + size=large → "purple"
+ * name=undefined → first catalog-entry matching size (legacy fallback)
+ */
+function resolveColorFromName(
+  name: string | undefined,
+  size: "small" | "large",
+  catalog: Array<{ color: string; size: "small" | "large"; priceCents: number }>,
+): string | null {
+  if (typeof name === "string" && name.length > 0) {
+    const lower = name.toLowerCase();
+    // Match against catalog colors — pick the one whose color appears in name.
+    for (const c of catalog) {
+      if (c.size === size && lower.includes(c.color.toLowerCase())) {
+        return c.color;
+      }
+    }
+    // Try english family names if catalog uses norsk
+    const norwegianToEnglish: Record<string, string> = {
+      gul: "yellow",
+      hvit: "white",
+      lilla: "purple",
+    };
+    for (const [no, en] of Object.entries(norwegianToEnglish)) {
+      if (lower.includes(en)) {
+        // Find matching catalog entry by English family + size.
+        for (const c of catalog) {
+          if (c.size === size && c.color.toLowerCase() === no) {
+            return c.color;
+          }
+        }
+      }
+    }
+  }
+  // Fallback: first catalog entry matching size.
+  const first = catalog.find((c) => c.size === size);
+  return first?.color ?? null;
+}
 
 // 2026-05-09 (recover-stale): master-driven cleanup of stale plan-runs and
 // stuck scheduled-games. Mounted on POST /api/agent/game1/master/recover-
