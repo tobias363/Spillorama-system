@@ -137,14 +137,40 @@ export class PlayScreen extends Container {
   private callbacks: Callbacks = {};
   private lastState: GameState | null = null;
   /**
-   * One-shot flag: auto-open the buy popup on the first `update()` where the
-   * player lands on the screen without any armed brett and ticketTypes have
-   * arrived. Subsequent state changes never re-auto-open — the player either
-   * buys (popup auto-hides on success) or closes it manually and must use
-   * the "Kjøp flere brett" button to re-open at qty=0. Product decision
-   * 2026-04-20.
+   * Per-runde one-shot flag: auto-open the buy popup on the first `update()`
+   * where the player lands on the screen without any armed brett and ticket-
+   * types have arrived. Subsequent state changes in the SAME round never
+   * re-auto-open — the player either buys (popup auto-hides on success) or
+   * closes it manually and must use the "Kjøp flere brett" button to re-open
+   * at qty=0. Product decision 2026-04-20.
+   *
+   * Tobias-bug 2026-05-12 (popup-visibility regresjon): pre-fix var dette
+   * en lifetime-flag som aldri ble nullstilt. Kombinert med PR #1163
+   * (lobby-init-order — playScreen gjenbrukes mellom transitions) betød
+   * det at popup-en kun auto-åpnet ÉN gang per browser-session, ikke per
+   * runde slik Tobias' state-matrise krever:
+   *
+   *   | Spilltilstand                | Popup  |
+   *   |------------------------------|--------|
+   *   | scheduled / ready_to_start   | Aktiv  |
+   *   | running / paused             | Skjult |
+   *   | completed / mellom runder    | Aktiv  |  ← regressed
+   *
+   * Fix (2026-05-12): nullstill flagget når `gameStatus` transitionerer
+   * fra `RUNNING` til ikke-running (round-end). Det er det samme
+   * lifecycle-punktet som tidligere triggret PlayScreen-rebuild (pre-#1163).
    */
   private autoShowBuyPopupDone = false;
+
+  /**
+   * Tobias-bug 2026-05-12: forrige `gameStatus` for å detektere
+   * RUNNING → non-RUNNING transition (round-end). Når vi ser den
+   * overgangen nullstilles `autoShowBuyPopupDone` slik at popup kan
+   * auto-åpne for neste runde. Initialiseres til "NONE" (samme som
+   * GameBridge default) så første `update()` etter mount ikke
+   * registreres som en falsk round-end.
+   */
+  private previousGameStatus: GameState["gameStatus"] = "NONE";
 
   /**
    * Spillerklient-rebuild Fase 2 (2026-05-10): cached BuyPopup-konsumert
@@ -461,6 +487,28 @@ export class PlayScreen extends Container {
    * second; `TicketGridHtml` diff-renders internally.
    */
   update(state: GameState): void {
+    // Tobias-bug 2026-05-12 (popup-visibility regresjon): detekter
+    // RUNNING → non-RUNNING transition (round-end) FØR vi lagrer ny state,
+    // slik at neste runde kan auto-åpne BuyPopup igjen. Pre-fix: flagget
+    // var "lifetime per PlayScreen-instans" og siden PR #1163 gjenbruker
+    // playScreen mellom WAITING/PLAYING/SPECTATING-transisjoner, fikk
+    // spilleren popup-en KUN én gang etter mount. Per Tobias' state-matrise
+    // skal popup auto-åpne ved `completed/finished/mellom runder`.
+    //
+    // Idempotent: kun reset når vi går fra RUNNING til noe annet
+    // (gameEnded fired). Andre transitions (NONE → WAITING, WAITING →
+    // RUNNING osv.) påvirker ikke flagget. Spilleren som har lukket popup-
+    // en manuelt midt i runden får IKKE den re-åpnet — kun ved runde-
+    // grense. Match med pre-#1163 oppførsel hvor PlayScreen ble rebuilt
+    // ved hver phase-transition.
+    if (
+      this.previousGameStatus === "RUNNING"
+      && state.gameStatus !== "RUNNING"
+    ) {
+      this.autoShowBuyPopupDone = false;
+    }
+    this.previousGameStatus = state.gameStatus;
+
     this.lastState = state;
 
     // Countdown / center-ball:
