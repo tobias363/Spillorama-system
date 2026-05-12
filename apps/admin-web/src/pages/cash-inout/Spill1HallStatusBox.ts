@@ -806,19 +806,21 @@ function render(container: HTMLElement, state: BoxState): void {
     resumePulse,
   });
 
-  // 2026-05-12 (Tobias-direktiv): header-tekst skal speile lobby-tilstanden
-  // klart for master. Tidligere ble dette rendret som
-  // "Spill 1 — Fullført · Subspill: 5×500" som verken signaliserer aktiv-vs-
-  // neste-tilstand eller bruker termen "trekning". Riktig:
-  //   - Aktiv trekning pågår (purchase_open | ready_to_start | running |
-  //     paused): "Aktiv trekning - {catalog-display-name}"
-  //   - Ellers (scheduled | completed | cancelled): "Neste spill på
-  //     spilleplan: {catalog-display-name}"
+  // 2026-05-12 (Tobias-direktiv, andre iterasjon): header-tekst skal kun si
+  // "Aktiv trekning" når trekning FAKTISK pågår — `purchase_open` og
+  // `ready_to_start` betyr at master enda ikke har startet, så det er
+  // fortsatt "Neste spill på spilleplan". Bare `running` og `paused` er
+  // aktiv trekning. Første iterasjon (PR #1277) putta feilaktig
+  // purchase_open/ready_to_start i aktiv-gruppen.
+  //
+  // Riktig mapping:
+  //   - running | paused                          → "Aktiv trekning - X"
+  //   - scheduled | purchase_open | ready_to_start
+  //     | completed | cancelled | null            → "Neste spill på spilleplan: X"
+  //
   // Når `catalogDisplayName` mangler (ingen plan-meta i lobby-state) faller
   // vi tilbake til en generisk overskrift uten navn.
   const isActiveDraw =
-    gameStatus === "purchase_open" ||
-    gameStatus === "ready_to_start" ||
     gameStatus === "running" ||
     gameStatus === "paused";
   let titleHtml: string;
