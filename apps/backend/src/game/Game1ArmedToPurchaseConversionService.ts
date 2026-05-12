@@ -225,7 +225,6 @@ export interface Game1ArmedToPurchaseConversionServiceOptions {
 
 interface ScheduledGameRow {
   id: string;
-  hall_id: string;
   master_hall_id: string;
   ticket_config_json: unknown;
 }
@@ -670,8 +669,15 @@ export class Game1ArmedToPurchaseConversionService {
   private async loadScheduledGame(
     scheduledGameId: string,
   ): Promise<ScheduledGameRow> {
+    // BIND-FIX 2026-05-13 (pilot-blokker): app_game1_scheduled_games har
+    // IKKE en `hall_id`-kolonne — kun `master_hall_id` (master-hallen)
+    // og `group_hall_id` (GoH-en). PR #1284 hadde en typo som refererte
+    // til ikke-eksisterende `hall_id` → PG-feilen kastet 42703 → hook
+    // kastet → MasterActionService logget warning og engine.startGame
+    // kjørte videre uten konvertering. Resultat: 0 purchases på tross av
+    // armed bonger. Fix: bruk korrekt kolonnenavn `master_hall_id`.
     const { rows } = await this.pool.query<ScheduledGameRow>(
-      `SELECT id, hall_id, master_hall_id, ticket_config_json
+      `SELECT id, master_hall_id, ticket_config_json
          FROM ${this.scheduledGamesTable()}
         WHERE id = $1`,
       [scheduledGameId],

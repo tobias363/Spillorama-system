@@ -2580,12 +2580,23 @@ async function runArmedToPurchaseConversionForSpawn(input: {
   actorUserId: string;
 }): Promise<void> {
   // Hent room_code + ticket_config fra scheduled-game-raden.
+  //
+  // BIND-FIX 2026-05-13 (pilot-blokker): app_game1_scheduled_games har IKKE
+  // en `hall_id`-kolonne — kun `master_hall_id` (master-hallen) og
+  // `group_hall_id` (GoH-en). PR #1284 hadde typo som refererte til
+  // ikke-eksisterende `hall_id` → SELECT kastet `column "hall_id" does
+  // not exist` (Postgres error code 42703) →
+  // MasterActionService.triggerArmedConversionHook fanget feilen og
+  // logget warning → engine.startGame kjørte videre uten konvertering.
+  // Resultat: 0 ticket-purchases på tross av armed bonger og en aktiv
+  // wallet-reservasjon. Vi trenger ikke `master_hall_id` her —
+  // `input.masterHallId` er allerede med i hook-input — så vi dropper
+  // det fra SELECT.
   const { rows } = await platformService.getPool().query<{
     room_code: string | null;
-    hall_id: string;
     ticket_config_json: unknown;
   }>(
-    `SELECT room_code, hall_id, ticket_config_json
+    `SELECT room_code, ticket_config_json
        FROM "${pgSchema}"."app_game1_scheduled_games"
       WHERE id = $1`,
     [input.scheduledGameId],
