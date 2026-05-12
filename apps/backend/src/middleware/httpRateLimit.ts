@@ -154,6 +154,12 @@ export class HttpRateLimiter {
   /** Express middleware factory */
   middleware(): (req: Request, res: Response, next: NextFunction) => void {
     return (req: Request, res: Response, next: NextFunction) => {
+      // Tobias-direktiv 2026-05-12: dev-stack ratelimits seg selv. NODE_ENV != production
+      // → bypass globalt (canary 2026-05-12 oppdaget at publicGameHealth.ts hadde sin
+      // egen rate-limiter, den er nå også scoped til /api/games/spill*).
+      if ((process.env["NODE_ENV"] ?? "").trim().toLowerCase() !== "production") {
+        return next();
+      }
       // Tobias-direktiv 2026-05-11: Industry-standard tre-lags bypass for å
       // unngå at dev/staging-traffikk kvelner egen utvikling. Match hvordan
       // de fleste plattformer (Stripe, GitHub, Cloudflare) håndterer dev-
@@ -166,7 +172,19 @@ export class HttpRateLimiter {
       //      når alle klient-vinduer deler samme IP. Forhindrer at 2-3 tabs
       //      i Tobias' browser fyller opp tier-en samtidig.
       //   3. Default per-IP sliding window — eneste mode i prod.
-      if (process.env["HTTP_RATE_LIMIT_DISABLED"] === "true") {
+      // Tobias-direktiv 2026-05-12 (akutt): dev-stack ratelimits seg selv
+      // når NODE_ENV != production. Tidligere bypass via env-flag + localhost-
+      // check var brutt fordi `req.ip` ikke alltid er "::1"/"127.0.0.1"
+      // selv for connections fra loopback (avhenger av Host-header,
+      // dual-stack-listening, og X-Forwarded-For-håndtering i trust-proxy:true).
+      // Forenklet til: hvis ikke prod → ALWAYS bypass. Trygt fordi rate-limit
+      // i dev/staging er mot tester-team, ikke spillere.
+      const isProductionEnv =
+        (process.env["NODE_ENV"] ?? "").trim().toLowerCase() === "production";
+      if (
+        !isProductionEnv ||
+        process.env["HTTP_RATE_LIMIT_DISABLED"] === "true"
+      ) {
         return next();
       }
 
@@ -176,11 +194,8 @@ export class HttpRateLimiter {
       // Key: IP + path prefix for the matching tier
       const ip = req.ip || req.socket.remoteAddress || "unknown";
 
-      // Localhost-bypass: dev-miljø har ALLE klient-vinduer på samme IP
-      // (`::1` eller `127.0.0.1`). Sliding-window straffer da multi-tab-
-      // workflows + browser-refresh urettferdig. I prod kjører backend
-      // bak Render-proxy som setter `X-Forwarded-For` til ekte klient-IP,
-      // så dette bare matcher i dev.
+      // Localhost-bypass: prod (Render) kjører bak proxy, så ::1/127.0.0.1
+      // betyr aldri spiller-trafikk i prod. Beholdes for defense-in-depth.
       if (ip === "::1" || ip === "127.0.0.1" || ip === "::ffff:127.0.0.1") {
         return next();
       }

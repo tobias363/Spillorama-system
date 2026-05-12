@@ -131,14 +131,25 @@ export class EventStreamer {
     this.maxBatchSize = Math.max(1, opts.maxBatchSize ?? 100);
     this.initialBackoffMs = Math.max(100, opts.initialBackoffMs ?? 1000);
     this.maxBackoffMs = Math.max(this.initialBackoffMs, opts.maxBackoffMs ?? 30_000);
-    // Bind fetch til globalThis så vi unngår `Illegal invocation` ved test-mocks.
-    const f = opts.fetchImpl ?? (typeof fetch !== "undefined" ? fetch : undefined);
-    if (!f) {
+    // Tobias-bug 2026-05-12: `TypeError: Illegal invocation` ved start().
+    // Browser-native fetch/setTimeout/clearTimeout krever `this === globalThis`.
+    // Assignet som instance-property uten bind() kalles de med `this === EventStreamer`
+    // → Illegal invocation. Wrap i arrow-funksjon som forwarder med korrekt this.
+    const userFetch = opts.fetchImpl;
+    if (userFetch) {
+      this.fetchImpl = userFetch;
+    } else if (typeof fetch !== "undefined") {
+      this.fetchImpl = ((input, init) => fetch(input, init)) as typeof fetch;
+    } else {
       throw new Error("EventStreamer: fetch er ikke tilgjengelig (Node uten polyfill?)");
     }
-    this.fetchImpl = f;
-    this.setTimeoutFn = opts.timers?.setTimeout ?? setTimeout;
-    this.clearTimeoutFn = opts.timers?.clearTimeout ?? clearTimeout;
+    this.setTimeoutFn =
+      opts.timers?.setTimeout ??
+      (((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
+        setTimeout(handler, timeout, ...args)) as unknown as typeof setTimeout);
+    this.clearTimeoutFn =
+      opts.timers?.clearTimeout ??
+      (((handle?: number) => clearTimeout(handle)) as unknown as typeof clearTimeout);
   }
 
   /**

@@ -1597,7 +1597,18 @@ export class Game1DrawEngineService {
         // player-liste / lucky-numbers / stakes samtidig med ball.
         // W1-hotfix: balanser er allerede refresh'ed over så snapshot-
         // building i `notifyPlayerRoomUpdate` plukker opp ny verdi.
-        this.notifyPlayerRoomUpdate(capturedRoomCode);
+        //
+        // Tobias 2026-05-12: når isFinished=true AWAITER vi emit-en for å
+        // garantere at klient får ENDED-snapshot FØR destroyRoom kjøres
+        // (linje ~1635). Uten dette race-er destroyRoom emit-en (BEVIST
+        // i backend-log 19:15:34: emitRoomUpdate ROOM_NOT_FOUND 8ms etter
+        // destroyRoom). For ikke-finished draws beholder vi fire-and-forget
+        // siden ingen destroyRoom skjer.
+        if (capturedCleanupInfo && this.playerBroadcaster) {
+          await this.playerBroadcaster.awaitRoomUpdate(capturedRoomCode);
+        } else {
+          this.notifyPlayerRoomUpdate(capturedRoomCode);
+        }
       }
       // BIN-690 M1: fire-and-forget mini-game-trigger for Fullt Hus-vinnere.
       // Kjøres POST-commit slik at mini-game-feil IKKE kan rulle tilbake

@@ -538,6 +538,19 @@ export function createPublicGameHealthRouter(
 
   // ── Rate-limit middleware (router-local) ─────────────────────────────────
   router.use((req, res, next) => {
+    // Tobias-direktiv 2026-05-12: dev-stack må aldri rate-limit-e seg selv.
+    // Når NODE_ENV != production → bypass. Rate-limit i dev/staging er mot
+    // tester-team, ikke spillere. Prod (Render) setter NODE_ENV=production.
+    if ((process.env["NODE_ENV"] ?? "").trim().toLowerCase() !== "production") {
+      return next();
+    }
+    // Path-scope-fix 2026-05-12: router er mounted top-level (uten prefix),
+    // så `router.use(...)` fyrte for ALLE paths — også `/api/games`,
+    // `/api/wallet`, etc. Det førte til 429 på endpoints som ikke har noen
+    // health-endpoint i det hele tatt. Begrens til faktiske health-paths.
+    if (!req.path.startsWith("/api/games/spill")) {
+      return next();
+    }
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     const result = limiter.check(ip);
     if (!result.allowed) {
