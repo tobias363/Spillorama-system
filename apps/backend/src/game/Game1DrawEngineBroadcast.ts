@@ -96,7 +96,13 @@ export function emitPlayerPatternWon(
   winnerIds: string[],
   drawIndex0Based: number,
   payoutAmountKr: number,
-  claimType: "LINE" | "BINGO"
+  claimType: "LINE" | "BINGO",
+  /**
+   * Tobias 2026-05-12 pilot-fix: vinnerens walletIds parallelt med
+   * winnerIds (socket-playerIds). Lar klient matche `isMe`-popup på
+   * walletId hvis server's playerId-mapping falt tilbake til auth-userId.
+   */
+  winnerWalletIds: string[]
 ): void {
   if (!playerBroadcaster) return;
   try {
@@ -110,6 +116,7 @@ export function emitPlayerPatternWon(
       drawIndex: drawIndex0Based,
       payoutAmount: payoutAmountKr,
       claimType,
+      winnerWalletIds,
     });
   } catch (err) {
     log.warn(

@@ -804,7 +804,13 @@ export class Game1DrawEngineService {
     winnerIds: string[],
     drawIndex0Based: number,
     prizePerWinnerKr: number,
-    claimType: ClaimType
+    claimType: ClaimType,
+    /**
+     * Tobias 2026-05-12 pilot-fix: vinnerens walletIds parallelt med
+     * winnerIds. Lar klient matche `isMe`-popup på walletId hvis
+     * `resolvePlayerPatternWinnerIds` falt tilbake til auth-userId.
+     */
+    winnerWalletIds: string[]
   ): void {
     emitPlayerPatternWon(
       this.playerBroadcaster,
@@ -815,7 +821,8 @@ export class Game1DrawEngineService {
       winnerIds,
       drawIndex0Based,
       prizePerWinnerKr,
-      claimType
+      claimType,
+      winnerWalletIds
     );
   }
 
@@ -1590,7 +1597,12 @@ export class Game1DrawEngineService {
             // klient-popup (WinPopup/WinScreenV2) får faktisk credited
             // beløp i stedet for å regne om phase-prize på egen hånd.
             capturedPhaseResult.prizePerWinnerKr,
-            capturedPhaseResult.claimType
+            capturedPhaseResult.claimType,
+            // Tobias 2026-05-12 pilot-fix: send vinnerens walletIds parallelt
+            // så klient kan matche `isMe`-popup på walletId hvis
+            // resolvePlayerPatternWinnerIds falt tilbake til userId (eks.
+            // fordi room-snapshot var stale eller wallet-mapping feilet).
+            capturedPhaseResult.winnerWalletIds
           );
         }
         // room:update push avslutter sekvensen — spilleren får oppdatert

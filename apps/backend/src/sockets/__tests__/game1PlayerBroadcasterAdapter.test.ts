@@ -79,6 +79,9 @@ test("onPatternWon: emitter pattern:won til roomCode med winnerIds + winnerCount
     // skal vise faktisk credited beløp og kunne route LINE/BINGO.
     payoutAmount: 100,
     claimType: "LINE",
+    // Tobias 2026-05-12 pilot-fix: vinnerens walletIds parallelt med
+    // winnerIds for klient-side `isMe`-popup-matching.
+    winnerWalletIds: ["wallet-a", "wallet-b"],
   });
 
   assert.equal(emits.length, 1);
@@ -96,6 +99,8 @@ test("onPatternWon: emitter pattern:won til roomCode med winnerIds + winnerCount
   // BIN-696: payoutAmount + claimType skal proxies inn i payloaden.
   assert.equal(payload.payoutAmount, 100);
   assert.equal(payload.claimType, "LINE");
+  // Tobias 2026-05-12 pilot-fix: walletIds-listen propageres til klient.
+  assert.deepEqual(payload.winnerWalletIds, ["wallet-a", "wallet-b"]);
 });
 
 test("onRoomUpdate: kaller emitRoomUpdate-hooken fire-and-forget", async () => {
