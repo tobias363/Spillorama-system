@@ -89,6 +89,10 @@ export function createGame1PlayerBroadcaster(
         // klient-popup viser faktisk credited beløp og kan route LINE/BINGO
         // korrekt. Manglet før i scheduled-Spill1-flow → undefined → 0 kr
         // i WinPopup ved Fullt Hus + feil popup-routing.
+        //
+        // Tobias 2026-05-12 pilot-fix: `winnerWalletIds` lar klient matche
+        // `isMe`-popup på walletId hvis server's playerId-mapping
+        // (resolvePlayerPatternWinnerIds) falt tilbake til auth-userId.
         io.to(event.roomCode).emit("pattern:won", {
           patternId: event.patternName,
           patternName: event.patternName,
@@ -101,6 +105,7 @@ export function createGame1PlayerBroadcaster(
           winnerId: event.winnerIds[0] ?? null,
           payoutAmount: event.payoutAmount,
           claimType: event.claimType,
+          winnerWalletIds: event.winnerWalletIds,
         });
       } catch (err) {
         log.warn(

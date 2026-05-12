@@ -1917,7 +1917,7 @@ class Game1Controller implements GameController {
     }
   }
 
-  private onPatternWon(result: PatternWonPayload, _state: GameState): void {
+  private onPatternWon(result: PatternWonPayload, state: GameState): void {
     if (this.phase === "PLAYING" && this.playScreen) this.playScreen.onPatternWon(result);
 
     // BIN-696: Vis annonsering til alle spillere om at fasen er vunnet.
@@ -1931,8 +1931,29 @@ class Game1Controller implements GameController {
 
     // BIN-696: Vinner-spesifikk annonsering med split-forklaring.
     const winnerIds = result.winnerIds ?? (result.winnerId ? [result.winnerId] : []);
-    const isMe = this.myPlayerId !== null && winnerIds.includes(this.myPlayerId);
     const winnerCount = result.winnerCount ?? winnerIds.length;
+
+    // Tobias 2026-05-12 pilot-fix (Spill 1 scheduled rad-vinst — vinner ser
+    // ingen popup): Server's `resolvePlayerPatternWinnerIds` mapper wallet
+    // → socket-playerId via room-snapshot, men hvis snapshot er stale eller
+    // wallet-mapping feiler faller den tilbake til auth-`userId`. Klient's
+    // `myPlayerId` er en random socket-UUID som aldri matcher userId →
+    // `isMe` ble alltid false og popupen ble ikke vist.
+    //
+    // Fix: prøv playerId-match FØRST (primær), deretter walletId-match
+    // (safety-net) ved å derive klientens egen walletId fra room-snapshot
+    // og matche mot `winnerWalletIds` som server nå sender parallelt.
+    const myWalletId =
+      this.myPlayerId !== null
+        ? state.players.find((p) => p.id === this.myPlayerId)?.walletId ?? null
+        : null;
+    const matchedByPlayerId =
+      this.myPlayerId !== null && winnerIds.includes(this.myPlayerId);
+    const matchedByWalletId =
+      myWalletId !== null &&
+      Array.isArray(result.winnerWalletIds) &&
+      result.winnerWalletIds.includes(myWalletId);
+    const isMe = matchedByPlayerId || matchedByWalletId;
 
     if (isMe) {
       this.deps.audio.playBingoSound();
