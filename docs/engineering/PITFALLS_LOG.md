@@ -416,6 +416,22 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Status:** Åpen — workaround er SQL-cleanup
 **Prevention:** Test: cancel runde → forsøk advance → verifiser ny rad spawner, ikke gjenbruker cancelled
 
+### §4.4b — `GamePlanEngineBridge` lazy-binding-fallback brøt klient-flyt (FIKSET F-NEW-3)
+
+**Severity:** P0 (pilot-blokker — armed tickets ble foreldreløse, spiller -160 kr men `MyTickets: 0`)
+**Oppdaget:** 2026-05-12 (Tobias-test: armed 4 tickets som spiller, master Start → bonger forsvant, saldo trekt)
+**Symptom:** Bridge fikk 23505 på `idx_app_game1_scheduled_games_room_code`, falt tilbake til `roomCode: null`. Klient-flyt kunne ikke joine (`io.to(NULL)`), tvang `createRoom` → ny `playerId` → 0 ticket-assignments → spiller mistet bongene.
+**Root cause:** En stale aktiv `app_game1_scheduled_games`-rad (`scheduled/purchase_open/ready_to_start/running/paused`) holdt den kanoniske `BINGO_<groupId>`-koden. Unique-indeksen (partial: ekskluderer `'completed'`/`'cancelled'`) blokkerte ny INSERT med samme room_code. Lazy-binding-fallback satte room_code=NULL — engine ble bundet uten klient-rute-key.
+**Fix (F-NEW-3):** `releaseStaleRoomCodeBindings(roomCode, runId, position, ...)` kjøres FØR INSERT. Finner stale aktive rader med samme room_code men ANNEN (plan_run_id, plan_position), setter `status='cancelled'` med `stop_reason='auto_cancelled_by_bridge_takeover'` + audit-entry i `app_game1_master_audit`. Etter release lykkes INSERT med room_code satt opp-front. 23505 etter release → retry én gang; hvis fortsatt 23505 → kast `ROOM_CODE_CONFLICT` (ikke degradering til NULL).
+**Prevention:**
+- ALDRI degrader til `room_code=NULL` ved 23505 — det brekker auto-draw-tick + klient-join atomisk
+- Stale aktive rader skal cancelleres med audit-spor, ikke ignoreres
+- Tester: `GamePlanEngineBridge.takeover.test.ts` verifiserer 9 scenarier (ingen/én/flere stale, race-cancellet, idempotency, retry-with-rollback, regresjon)
+**Related:**
+- `apps/backend/src/game/GamePlanEngineBridge.ts:releaseStaleRoomCodeBindings`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.takeover.test.ts`
+- PR `fix/spill1-bridge-takeover-existing-room-2026-05-12`
+
 ### §4.5 — Aldri `io.emit()` — alltid `io.to(roomCode)`
 
 **Severity:** P0 (skala-katastrofe)

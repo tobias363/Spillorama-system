@@ -1067,6 +1067,39 @@ export class GamePlanEngineBridge {
     );
     const roomCode = canonical.roomCode;
 
+    // F-NEW-3 (Tobias-direktiv 2026-05-12, pilot-blokker): "ta over"
+    // hall-default-rommet. Før INSERT — release alle stale aktive
+    // scheduled-game-rader som holder samme kanoniske `room_code` men
+    // peker på en ANNEN (plan_run_id, plan_position). Disse er typisk
+    // orphaner fra:
+    //   - Tidligere test-sesjoner hvor engine krasjet uten å markere
+    //     `completed/cancelled`
+    //   - DemoAutoMasterTickService som loopet runder raskt og lot rader
+    //     henge i `running`/`ready_to_start`
+    //   - PR #1116-retry-paths som spawnet rad men feilet på engine-start
+    //
+    // Idempotency-sjekk over (linje ~844) håndterer SAMME (run_id, position)
+    // separat — den runner og vi har allerede returnert hvis det finnes.
+    // Her tar vi over `room_code` fra ANDRE rader som ikke matcher oss.
+    //
+    // Audit-spor: hver auto-cancellert rad får `stop_reason =
+    // 'auto_cancelled_by_bridge_takeover'` + en `app_game1_master_audit`-
+    // entry med action='stop' og metadata pekende på den nye scheduled-
+    // game-en som tar over. Lotteritilsynet kan rekonstruere kjeden:
+    // gammel rad → release → ny rad → spill.
+    //
+    // Etter release-pass har unique-indeksen `idx_app_game1_scheduled_
+    // games_room_code` (partial: WHERE status NOT IN
+    // ('completed','cancelled')) ingen conflict, og INSERT med
+    // `room_code = canonical.roomCode` lykkes.
+    const releasedStaleIds = await this.releaseStaleRoomCodeBindings(
+      roomCode,
+      run.id,
+      position,
+      effectiveMasterHallId,
+      groupHallId,
+    );
+
     const newId = randomUUID();
     let assignedRoomCode: string | null = roomCode;
     try {
@@ -1120,7 +1153,9 @@ export class GamePlanEngineBridge {
           catalog.id,
           run.id,
           position,
-          // F-NEW-2 (2026-05-09): room_code satt opp-front (se kommentar over).
+          // F-NEW-2 (2026-05-09) / F-NEW-3 (2026-05-12): room_code satt
+          // opp-front. F-NEW-3 release-pass over har auto-cancellert
+          // konflikt-rader så denne INSERT lykkes uten 23505-fallback.
           roomCode,
         ],
       );
@@ -1134,68 +1169,115 @@ export class GamePlanEngineBridge {
         );
       }
       if (code === "23505") {
-        // F-NEW-2 race-håndtering: unique violation på room_code-index.
-        // Skjer hvis en annen aktiv scheduled-game allerede holder samme
-        // BINGO_<groupId>-kode (typisk forrige plan-position er fortsatt
-        // aktiv, eller boot-bootstrap har satt opp rommet). Re-spawn uten
-        // room_code så `joinScheduledGame`-pathen kan ta seg av lazy-
-        // binding ved første spiller-join (degraderer til legacy-
-        // oppførsel ved race, men holder bridge-spawn kjørende).
+        // F-NEW-3 race-håndtering (2026-05-12): unique-violation tross
+        // release-pass over. Mulige rot-årsaker:
+        //   - Parallell bridge-spawn racet vår release-pass (en annen agent/
+        //     prosess tok room_code etter SELECT, før INSERT)
+        //   - Race-vinneren binder room_code til ANNEN (run, position)
+        //
+        // Vi retry-er release-pass ÉN gang for å fange evt. nye stale
+        // rader, deretter retry-er INSERT. Hvis det fortsatt feiler,
+        // kaster vi `ROOM_CODE_CONFLICT` med actionable metadata —
+        // dette er en ekte race vi ikke skal degradere stille til
+        // `room_code=null` (som brøt pilot-flyten pre-F-NEW-3).
         log.warn(
           {
             runId: run.id,
             position,
             attemptedRoomCode: roomCode,
+            releasedStaleIds,
             err: err instanceof Error ? err.message : String(err),
           },
-          "[F-NEW-2] room_code unique-violation — fallback til lazy-binding",
+          "[F-NEW-3] room_code 23505 etter release-pass — retrying release+INSERT en gang",
         );
-        assignedRoomCode = null;
-        await this.pool.query(
-          `INSERT INTO ${this.scheduledGamesTable()}
-             (id,
-              sub_game_index,
-              sub_game_name,
-              custom_game_name,
-              scheduled_day,
-              scheduled_start_time,
-              scheduled_end_time,
-              notification_start_seconds,
-              ticket_config_json,
-              jackpot_config_json,
-              game_mode,
-              master_hall_id,
-              group_hall_id,
-              participating_halls_json,
-              status,
-              game_config_json,
-              catalog_entry_id,
-              plan_run_id,
-              plan_position)
-           VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
-                   $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
-                   'ready_to_start', $15::jsonb, $16, $17, $18)`,
-          [
-            newId,
-            position - 1,
-            catalog.displayName,
-            null,
-            businessDateKey,
-            startTs,
-            endTs,
-            DEFAULT_NOTIFICATION_SECONDS,
-            JSON.stringify(ticketConfig),
-            JSON.stringify(jackpotConfig),
-            "Manual",
-            effectiveMasterHallId,
-            groupHallId,
-            JSON.stringify(participatingHalls),
-            gameConfigJson,
-            catalog.id,
-            run.id,
-            position,
-          ],
+        const retryReleased = await this.releaseStaleRoomCodeBindings(
+          roomCode,
+          run.id,
+          position,
+          effectiveMasterHallId,
+          groupHallId,
         );
+        try {
+          await this.pool.query(
+            `INSERT INTO ${this.scheduledGamesTable()}
+               (id,
+                sub_game_index,
+                sub_game_name,
+                custom_game_name,
+                scheduled_day,
+                scheduled_start_time,
+                scheduled_end_time,
+                notification_start_seconds,
+                ticket_config_json,
+                jackpot_config_json,
+                game_mode,
+                master_hall_id,
+                group_hall_id,
+                participating_halls_json,
+                status,
+                game_config_json,
+                catalog_entry_id,
+                plan_run_id,
+                plan_position,
+                room_code)
+             VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
+                     $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
+                     'ready_to_start', $15::jsonb, $16, $17, $18, $19)`,
+            [
+              newId,
+              position - 1,
+              catalog.displayName,
+              null,
+              businessDateKey,
+              startTs,
+              endTs,
+              DEFAULT_NOTIFICATION_SECONDS,
+              JSON.stringify(ticketConfig),
+              JSON.stringify(jackpotConfig),
+              "Manual",
+              effectiveMasterHallId,
+              groupHallId,
+              JSON.stringify(participatingHalls),
+              gameConfigJson,
+              catalog.id,
+              run.id,
+              position,
+              roomCode,
+            ],
+          );
+          log.info(
+            {
+              runId: run.id,
+              position,
+              roomCode,
+              firstReleasedStaleIds: releasedStaleIds,
+              retryReleasedStaleIds: retryReleased,
+            },
+            "[F-NEW-3] retry-INSERT lyktes etter andre release-pass",
+          );
+        } catch (retryErr) {
+          const retryCode = (retryErr as { code?: string } | null)?.code ?? "";
+          if (retryCode === "23505") {
+            // Ekte race vi ikke kan løse uten å klusse med en aktiv
+            // konkurrerende run. Kast tydelig feil så master kan re-prøve
+            // (MasterActionService har retry-with-rollback for transient
+            // DB-feil).
+            throw new DomainError(
+              "ROOM_CODE_CONFLICT",
+              `Kan ikke binde scheduled-game til kanonisk room_code "${roomCode}" — ` +
+                `en annen aktiv scheduled-game holder samme kode tross release-pass. ` +
+                `Master må re-prøve eller admin må manuelt cancele konflikt-raden.`,
+              {
+                runId: run.id,
+                position,
+                attemptedRoomCode: roomCode,
+                firstReleasedStaleIds: releasedStaleIds,
+                retryReleasedStaleIds: retryReleased,
+              },
+            );
+          }
+          throw retryErr;
+        }
       } else {
         throw err;
       }
@@ -1356,5 +1438,155 @@ export class GamePlanEngineBridge {
       return `${yyyy}-${mm}-${dd}`;
     }
     return "0000-00-00";
+  }
+
+  /**
+   * F-NEW-3 (Tobias-direktiv 2026-05-12): "ta over" hall-default-rommet.
+   *
+   * Finn og auto-cancel alle stale aktive scheduled-game-rader som holder
+   * den kanoniske `roomCode` men peker på en ANNEN (plan_run_id,
+   * plan_position) enn den vi prøver å spawne for.
+   *
+   * Sammenhengen:
+   *   - Unique-indeksen `idx_app_game1_scheduled_games_room_code` (migration
+   *     20261221000000) er partial: `WHERE room_code IS NOT NULL AND status
+   *     NOT IN ('completed','cancelled')`. Den hindrer at to AKTIVE rader
+   *     deler samme room_code.
+   *   - Når en tidligere runde krasjet eller `MasterActionService` re-spawnet
+   *     uten å advance-e planen, kan en gammel rad henge i `running`/
+   *     `purchase_open`/`ready_to_start`/`paused`/`scheduled` med
+   *     den kanoniske koden. Det blokkerer ny INSERT.
+   *   - Vi cancel-er disse rader (status → 'cancelled') og skriver audit-
+   *     entry så Lotteritilsynet kan rekonstruere kjeden.
+   *
+   * Idempotent: hvis rad ALLEREDE er cancelled/completed, ekskluderes den
+   * av WHERE-klausulen. Hvis vi kjører to ganger parallelt, racer den ene
+   * SELECT-en, men UPDATE-WHERE-status-filteret håndhever at vi ikke
+   * dobbel-canceller.
+   *
+   * NB: vi ekskluderer eksplisitt rader for vår EGEN (plan_run_id,
+   * plan_position) — idempotent-retry-pathen (linje ~844) har allerede
+   * returnert den raden, så vi når aldri hit. Men forsiktighet er gratis.
+   *
+   * Audit: hver cancellet rad får en `app_game1_master_audit`-entry med
+   * action='stop', actor='SYSTEM', og metadata pekende på årsaken +
+   * den nye scheduled-game-en som tar over.
+   *
+   * Returnerer arrayen av cancelled scheduled-game-IDer (kan være tom).
+   * Soft-fail: hvis audit-skriving feiler, logges det men UPDATE rulles
+   * IKKE tilbake — å beholde room_code-conflict-en er verre enn et
+   * audit-hull (som ledger fortsatt fanger via wallet-events).
+   */
+  private async releaseStaleRoomCodeBindings(
+    roomCode: string,
+    currentRunId: string,
+    currentPosition: number,
+    newMasterHallId: string,
+    newGroupHallId: string,
+  ): Promise<string[]> {
+    // 1. Finn stale aktive rader med samme room_code men ANNEN (run, pos).
+    //    Filter på samme status-set som unique-indeksen ekskluderer
+    //    'completed','cancelled' fra (slik at vi kun targeterer rader som
+    //    faktisk blokkerer INSERT).
+    const { rows: staleRows } = await this.pool.query<{
+      id: string;
+      status: string;
+      plan_run_id: string | null;
+      plan_position: number | null;
+      master_hall_id: string;
+      group_hall_id: string;
+    }>(
+      `SELECT id, status, plan_run_id, plan_position,
+              master_hall_id, group_hall_id
+         FROM ${this.scheduledGamesTable()}
+        WHERE room_code = $1
+          AND status NOT IN ('completed', 'cancelled')
+          AND NOT (plan_run_id = $2 AND plan_position = $3)`,
+      [roomCode, currentRunId, currentPosition],
+    );
+
+    if (staleRows.length === 0) return [];
+
+    const cancelledIds: string[] = [];
+    for (const stale of staleRows) {
+      // 2. UPDATE → cancelled. Filter på status-set igjen for race-safety
+      //    (mellom SELECT og UPDATE kan en annen prosess ha cancellet den).
+      const { rows: updated } = await this.pool.query<{ id: string }>(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET status              = 'cancelled',
+                stopped_by_user_id  = 'SYSTEM',
+                stop_reason         = 'auto_cancelled_by_bridge_takeover',
+                actual_end_time     = COALESCE(actual_end_time, now()),
+                updated_at          = now()
+          WHERE id = $1
+            AND status NOT IN ('completed', 'cancelled')
+          RETURNING id`,
+        [stale.id],
+      );
+      if (updated.length === 0) {
+        // Race-vinner cancellet den allerede — det er OK.
+        log.info(
+          { staleGameId: stale.id, roomCode },
+          "[F-NEW-3] stale row already cancelled by concurrent process — skip",
+        );
+        continue;
+      }
+      cancelledIds.push(stale.id);
+
+      // 3. Skriv audit-entry. Bruker `app_game1_master_audit`-tabellen
+      //    samme som `Game1RecoveryService.cancelOverdueGame` for konsis
+      //    audit-pattern. Soft-fail: feil i audit-INSERT skal IKKE rulle
+      //    tilbake UPDATE-en — wallet/compliance-laget skriver egne
+      //    ledger-entries uavhengig av denne audit-en.
+      try {
+        await this.pool.query(
+          `INSERT INTO "${this.schema}"."app_game1_master_audit"
+             (id, game_id, action, actor_user_id, actor_hall_id,
+              group_hall_id, halls_ready_snapshot, metadata_json)
+           VALUES ($1, $2, 'stop', 'SYSTEM', $3, $4,
+                   '{}'::jsonb, $5::jsonb)`,
+          [
+            randomUUID(),
+            stale.id,
+            stale.master_hall_id,
+            stale.group_hall_id,
+            JSON.stringify({
+              reason: "auto_cancelled_by_bridge_takeover",
+              priorStatus: stale.status,
+              cancelledByRunId: currentRunId,
+              cancelledByPosition: currentPosition,
+              newMasterHallId,
+              newGroupHallId,
+              roomCode,
+              autoCancelledAt: new Date().toISOString(),
+            }),
+          ],
+        );
+      } catch (auditErr) {
+        log.warn(
+          {
+            err: auditErr,
+            staleGameId: stale.id,
+            roomCode,
+          },
+          "[F-NEW-3] audit-INSERT feilet etter cancel — UPDATE er committed, fortsetter",
+        );
+      }
+
+      log.warn(
+        {
+          staleGameId: stale.id,
+          stalePriorStatus: stale.status,
+          stalePlanRunId: stale.plan_run_id,
+          stalePlanPosition: stale.plan_position,
+          roomCode,
+          newRunId: currentRunId,
+          newPosition: currentPosition,
+        },
+        "[F-NEW-3] auto-cancelled stale scheduled-game som blokkerte room_code",
+      );
+    }
+
+    return cancelledIds;
   }
 }
