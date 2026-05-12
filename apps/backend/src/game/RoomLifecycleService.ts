@@ -453,6 +453,28 @@ export class RoomLifecycleService {
         `Kan ikke slette rom ${code} mens en runde pågår.`,
       );
     }
+
+    // Tobias-direktiv 2026-05-12: strukturert destroy-event. Sync-mutation
+    // som kjører FØR async emitRoomUpdate har fått kjørt — tidligere har
+    // dette skapt race-condition (destroyRoom + emit på samme tick),
+    // logging gir oss tidsstempel + state-snapshot så vi kan korrelere
+    // ovenfra hvor i flyten en emit-failure stammer fra.
+    logger.info(
+      {
+        roomCode: code,
+        hadCurrentGame: !!room.currentGame,
+        currentGameStatus: room.currentGame?.status ?? null,
+        currentGameEndedReason: room.currentGame?.endedReason ?? null,
+        currentGameDrawnCount: room.currentGame?.drawnNumbers.length ?? 0,
+        playerCount: room.players.size,
+        gameSlug: room.gameSlug ?? null,
+        hallId: room.hallId,
+        isHallShared: !!room.isHallShared,
+        event: "room.destroy",
+      },
+      "[room] destroy",
+    );
+
     // K2 (2026-04-29) — FORHANDSKJOP §7.5: pre-K2 destroyRoom evicted from
     // engine.rooms but never touched RoomStateManager / lifecycleStore,
     // leaving armed-state + reservation-mappings + arm-cycle stranded
