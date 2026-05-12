@@ -7,7 +7,7 @@
  *   (a) Engine skulle trekke baller men gjør det ikke (Redis-feil, scheduler
  *       death, draw-bag glitch) — `STUCK_NO_DRAWS`
  *   (b) Scheduled_end_time er passert med betydelig margin (default 30 min)
- *       og runden er fortsatt ikke ferdig — `SCHEDULED_END_EXCEEDED`
+ *       OG actual_start_time er minst pastEndThresholdMs gammel — `SCHEDULED_END_EXCEEDED`
  *
  * Algoritme (kjøres hver `GAME1_STUCK_DETECTION_INTERVAL_MS`, default 60s):
  *
@@ -21,7 +21,13 @@
  *              (default 5 min uten draws → noe er galt med scheduler/engine)
  *          (b) SCHEDULED_END_EXCEEDED:
  *              scheduled_end_time + STUCK_PAST_END_THRESHOLD_MS < now()
- *              (default 30 min etter scheduled-end → runden er bare ikke ferdig)
+ *              AND (actual_start_time IS NULL
+ *                   OR actual_start_time + STUCK_PAST_END_THRESHOLD_MS < now())
+ *              (default 30 min etter scheduled-end + minst 30 min siden
+ *               faktisk start. Grace-period 2026-05-12 (Tobias-direktiv):
+ *               master kan starte en spilleplan-posisjon hvis scheduled_end_time
+ *               allerede er i fortiden — vi gir minst 30 min reell spilletid
+ *               før watchdog kan kansellere via denne pathen.)
  *
  *   2. Auto-end:
  *        - UPDATE scheduled_games SET status='cancelled',
@@ -38,6 +44,15 @@
  *
  * Compliance: auto-end skrives som standard audit-event slik at Lotteritilsynet
  * kan se hvor mange runder som er stuck (helsesignal for pilot).
+ *
+ * Grace-period for SCHEDULED_END_EXCEEDED (2026-05-12, Tobias-direktiv):
+ * Tidligere kunne en runde som startet 45 min etter scheduled_end_time bli
+ * auto-kansellert innen sekunder fordi `scheduled_end_time + 30min < now()`
+ * var sant umiddelbart. Nå kreves det også at `actual_start_time + 30min <
+ * now()` — m.a.o. minst 30 min faktisk spilletid. Hvis actual_start_time
+ * er NULL (runden er ikke faktisk startet enda men sitter i 'running'-state
+ * fra master-trigger), faller vi tilbake til den eksisterende oppførselen
+ * for å unngå at slike rader henger evig.
  */
 
 import type { Pool } from "pg";
@@ -68,6 +83,13 @@ export interface Game1StuckCandidate {
   reason: Game1StuckReason;
   lastDrawnAt: Date | null;
   scheduledEndTime: Date | null;
+  /**
+   * Actual start-time (NULL hvis runden aldri startet, men sitter i
+   * 'running'/'paused'-state). Brukes til grace-period-sjekk for
+   * SCHEDULED_END_EXCEEDED: en runde som nettopp startet skal ikke
+   * auto-kanselleres umiddelbart selv om scheduled_end_time er passert.
+   */
+  actualStartTime: Date | null;
 }
 
 export interface Game1StuckTickResult {
@@ -206,6 +228,7 @@ export class Game1StuckGameDetectionService {
       status: "running" | "paused";
       last_drawn_at: Date | null;
       scheduled_end_time: Date | null;
+      actual_start_time: Date | null;
       reason: Game1StuckReason;
     }>(
       `SELECT
@@ -215,9 +238,14 @@ export class Game1StuckGameDetectionService {
          sg.status                      AS status,
          gs.last_drawn_at               AS last_drawn_at,
          sg.scheduled_end_time          AS scheduled_end_time,
+         sg.actual_start_time           AS actual_start_time,
          CASE
            WHEN sg.scheduled_end_time IS NOT NULL
                 AND sg.scheduled_end_time + ($2::int * INTERVAL '1 ms') < now()
+                AND (
+                  sg.actual_start_time IS NULL
+                  OR sg.actual_start_time + ($2::int * INTERVAL '1 ms') < now()
+                )
              THEN 'SCHEDULED_END_EXCEEDED'
            ELSE 'STUCK_NO_DRAWS'
          END                            AS reason
@@ -236,9 +264,18 @@ export class Game1StuckGameDetectionService {
            )
            OR
            -- (b) SCHEDULED_END_EXCEEDED: way past scheduled end-time
+           --     AND minst pastEndThresholdMs siden faktisk start
+           --     (grace-period 2026-05-12, Tobias-direktiv: master kan
+           --     starte en runde med scheduled_end_time i fortiden, og
+           --     vi gir minst pastEndThresholdMs reell spilletid før
+           --     watchdog kan auto-kansellere)
            (
              sg.scheduled_end_time IS NOT NULL
              AND sg.scheduled_end_time + ($2::int * INTERVAL '1 ms') < now()
+             AND (
+               sg.actual_start_time IS NULL
+               OR sg.actual_start_time + ($2::int * INTERVAL '1 ms') < now()
+             )
            )
          )
        ORDER BY
@@ -255,6 +292,7 @@ export class Game1StuckGameDetectionService {
       reason: r.reason,
       lastDrawnAt: r.last_drawn_at,
       scheduledEndTime: r.scheduled_end_time,
+      actualStartTime: r.actual_start_time,
     }));
   }
 
@@ -324,6 +362,8 @@ export class Game1StuckGameDetectionService {
             lastDrawnAt: candidate.lastDrawnAt?.toISOString() ?? null,
             scheduledEndTime:
               candidate.scheduledEndTime?.toISOString() ?? null,
+            actualStartTime:
+              candidate.actualStartTime?.toISOString() ?? null,
             noDrawsThresholdMs: this.noDrawsThresholdMs,
             pastEndThresholdMs: this.pastEndThresholdMs,
             adr: "ADR-0022",
@@ -401,6 +441,7 @@ export class Game1StuckGameDetectionService {
           priorStatus: candidate.priorStatus,
           lastDrawnAt: candidate.lastDrawnAt?.toISOString() ?? "never",
           scheduledEndTime: candidate.scheduledEndTime?.toISOString() ?? null,
+          actualStartTime: candidate.actualStartTime?.toISOString() ?? null,
         },
         "stuck-detection: auto-endet stuck Spill 1-runde"
       );
