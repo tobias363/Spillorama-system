@@ -1444,6 +1444,9 @@ function makeRecordingPlayerBroadcaster(): {
       onRoomUpdate: (roomCode) => {
         roomUpdateCalls.push(roomCode);
       },
+      awaitRoomUpdate: async (roomCode: string) => {
+        roomUpdateCalls.push(roomCode);
+      },
     },
     drawNewCalls,
     patternWonCalls,
@@ -1856,6 +1859,7 @@ test("PR-C4: playerBroadcaster.onDrawNew som kaster svelges (fire-and-forget)", 
     },
     onPatternWon: () => undefined,
     onRoomUpdate: () => undefined,
+      awaitRoomUpdate: () => Promise.resolve(),
   };
 
   const service = new Game1DrawEngineService({

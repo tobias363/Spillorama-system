@@ -155,6 +155,10 @@ function makeOrderTrackingBroadcaster(callLog: CallLog): Game1PlayerBroadcaster 
       callLog.push({ kind: "roomUpdate" });
       void roomCode;
     },
+    awaitRoomUpdate: async (roomCode: string) => {
+      callLog.push({ kind: "roomUpdate" });
+      void roomCode;
+    },
   };
 }
 
@@ -533,6 +537,7 @@ test(
       onDrawNew: () => undefined,
       onPatternWon: () => undefined,
       onRoomUpdate: () => undefined,
+      awaitRoomUpdate: () => Promise.resolve(),
     };
     const service = new Game1DrawEngineService({
       pool: pool as never,
@@ -636,6 +641,7 @@ test(
         onDrawNew: () => undefined,
         onPatternWon: () => undefined,
         onRoomUpdate: () => undefined,
+      awaitRoomUpdate: () => Promise.resolve(),
       },
     });
 

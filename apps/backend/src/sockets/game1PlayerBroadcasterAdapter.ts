@@ -122,5 +122,18 @@ export function createGame1PlayerBroadcaster(
           );
         });
     },
+    async awaitRoomUpdate(roomCode: string): Promise<void> {
+      // Tobias 2026-05-12: blocking variant for destroyRoom-race-fix.
+      // Caller awaiter denne FØR de muterer room-state. Aldri rejects —
+      // feil logges og swallow-es som i fire-and-forget-versjonen.
+      try {
+        await emitRoomUpdate(roomCode);
+      } catch (err) {
+        log.warn(
+          { err, roomCode },
+          "awaitRoomUpdate: emitRoomUpdate failed — service fortsetter uansett"
+        );
+      }
+    },
   };
 }

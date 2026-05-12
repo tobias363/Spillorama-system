@@ -85,6 +85,24 @@ export interface Game1PlayerBroadcaster {
    * kalle `emitRoomUpdate(roomCode)` uten å bry seg om returverdien.
    */
   onRoomUpdate(roomCode: string): void;
+  /**
+   * Tobias 2026-05-12: AWAIT-able variant. Brukes når caller MÅ vente
+   * på at `room:update` faktisk er emittet før de mutere room-state
+   * (eks. destroyRoomIfPresent etter game-end). Returnerer Promise som
+   * resolves når emit har fullført. Aldri rejects — feil logges internt.
+   *
+   * Hvorfor: race-condition oppdaget 2026-05-12. Sync onRoomUpdate
+   * queuer microtask `emitRoomUpdate(roomCode)`. Hvis caller deretter
+   * synkront kaller `destroyRoom`, fjernes rommet FØR emit-microtasken
+   * fyrer → `getAuthoritativeRoomSnapshot` kaster ROOM_NOT_FOUND →
+   * klient får aldri ENDED-status → henger i RUNNING + disconnect.
+   *
+   * Bevis i backend-log (PROD-data 2026-05-12 19:15:34):
+   *   1: game1.engine.completed (MAX_DRAWS_REACHED, draws=75/75)
+   *   2: [PR-C1b] destroyRoom etter scheduled-game-terminering (+8ms)
+   *   3: emitRoomUpdate failed: ROOM_NOT_FOUND                  (samme ms)
+   */
+  awaitRoomUpdate(roomCode: string): Promise<void>;
 }
 
 /** No-op fallback — brukes i tester uten socket-miljø + ved manglende injeksjon. */
@@ -92,4 +110,5 @@ export const NoopGame1PlayerBroadcaster: Game1PlayerBroadcaster = {
   onDrawNew: () => undefined,
   onPatternWon: () => undefined,
   onRoomUpdate: () => undefined,
+  awaitRoomUpdate: () => Promise.resolve(),
 };

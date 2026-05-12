@@ -107,8 +107,17 @@ export class AutoReloadOnDisconnect {
         ? (globalThis as { sessionStorage: Storage }).sessionStorage
         : noopStorage());
     this.onMaxAttemptsReached = opts.onMaxAttemptsReached ?? (() => {});
-    this.setTimeoutFn = opts.setTimeoutFn ?? setTimeout;
-    this.clearTimeoutFn = opts.clearTimeoutFn ?? clearTimeout;
+    // Tobias-bug 2026-05-12: `Uncaught TypeError: Illegal invocation` ved socket-disconnect.
+    // Browser-native setTimeout/clearTimeout krever `this === globalThis`. Assignet som
+    // instance-property uten bind() kalles de med `this === AutoReloadOnDisconnect`
+    // → Illegal invocation. Wrap i arrow-funksjon som forwarder med korrekt this.
+    this.setTimeoutFn =
+      opts.setTimeoutFn ??
+      (((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
+        setTimeout(handler, timeout, ...args)) as unknown as typeof setTimeout);
+    this.clearTimeoutFn =
+      opts.clearTimeoutFn ??
+      (((handle?: number) => clearTimeout(handle)) as unknown as typeof clearTimeout);
   }
 
   /**
