@@ -188,6 +188,13 @@ function makeService(args: {
   disabledSlugs?: ReadonlySet<string>;
   emitRoomUpdate?: PerpetualRoundServiceConfig["emitRoomUpdate"];
   canSpawnRound?: PerpetualRoundServiceConfig["canSpawnRound"];
+  /**
+   * ADR-0022-bug-fix 2026-05-12: armedLookup brukes av threshold-gaten i
+   * spawnFirstRoundIfNeeded for å telle solgte bonger. Default returnerer
+   * tomme verdier (intet armed) — tester som ønsker å verifisere threshold-
+   * enforcement injecter en konkret lookup.
+   */
+  armedLookup?: PerpetualRoundServiceConfig["armedLookup"];
 }): PerpetualRoundService {
   return new PerpetualRoundService({
     enabled: args.enabled ?? true,
@@ -200,9 +207,25 @@ function makeService(args: {
     defaultEntryFee: 0,
     ...(args.emitRoomUpdate ? { emitRoomUpdate: args.emitRoomUpdate } : {}),
     ...(args.canSpawnRound ? { canSpawnRound: args.canSpawnRound } : {}),
+    ...(args.armedLookup ? { armedLookup: args.armedLookup } : {}),
     setTimeoutFn: args.timer.setTimeoutFn,
     clearTimeoutFn: args.timer.clearTimeoutFn,
   });
+}
+
+/**
+ * ADR-0022-bug-fix 2026-05-12: simple armedLookup-stub for threshold-tester.
+ * Returnerer fast ticket-count for given room. Andre rooms har 0.
+ */
+function makeArmedLookupStub(
+  countsByRoom: Record<string, Record<string, number>>,
+): PerpetualRoundServiceConfig["armedLookup"] {
+  return {
+    getArmedPlayerIds: (roomCode) =>
+      Object.keys(countsByRoom[roomCode] ?? {}),
+    getArmedPlayerTicketCounts: (roomCode) => countsByRoom[roomCode] ?? {},
+    getArmedPlayerSelections: () => ({}),
+  };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -1372,4 +1395,168 @@ test("canSpawnRound: gjelder også spawnFirstRoundIfNeeded (player-trigget join)
   assert.equal(result, false, "spawn skal returnere false når hook avviser");
   assert.equal(hookCalls, 1);
   assert.equal(state.startGameCalls.length, 0, "startGame ikke kalt");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0022-bug-fix 2026-05-12: threshold-håndhevelse på første runde
+//
+// Bakgrunn: spawnFirstRoundIfNeeded kalte engine.startGame direkte uten å
+// sjekke minTicketsBeforeCountdown. Konsekvens: Spill 2/3 startet umiddelbart
+// når første spiller joinet, uavhengig av min-tickets-config. Doc-en
+// (Spill2GlobalRoomService.ts:16) sa derimot at threshold skal håndheves
+// "før første runde OG mellom påfølgende runder".
+//
+// Disse testene låser fixen så vi ikke regresser.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("spawnFirstRoundIfNeeded venter når minTicketsBeforeCountdown ikke nådd (0 tickets)", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket", playerCount: 1 })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "spill2",
+      config: {
+        minTicketsBeforeCountdown: 5,
+      } as unknown as import("./variantConfig.js").GameVariantConfig,
+    },
+  });
+  const armedLookup = makeArmedLookupStub({ ROCKET: {} }); // 0 tickets
+  const service = makeService({ engine, variantLookup, armedLookup, timer });
+
+  const result = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(
+    result,
+    false,
+    "spawn skal returnere false når 0 < threshold (5)",
+  );
+  assert.equal(
+    state.startGameCalls.length,
+    0,
+    "ADR-0022-bug-fix: engine.startGame skal IKKE kalles før threshold er nådd",
+  );
+});
+
+test("spawnFirstRoundIfNeeded venter når noen — men ikke nok — tickets solgt", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket", playerCount: 2 })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "spill2",
+      config: {
+        minTicketsBeforeCountdown: 5,
+      } as unknown as import("./variantConfig.js").GameVariantConfig,
+    },
+  });
+  // 3 tickets solgt (1 + 2), terskel 5 → fortsatt skal vente.
+  const armedLookup = makeArmedLookupStub({
+    ROCKET: { "player-1": 1, "player-2": 2 },
+  });
+  const service = makeService({ engine, variantLookup, armedLookup, timer });
+
+  const result = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(result, false);
+  assert.equal(
+    state.startGameCalls.length,
+    0,
+    "3 < 5 → engine.startGame skal IKKE kalles",
+  );
+});
+
+test("spawnFirstRoundIfNeeded starter når threshold er nådd nøyaktig", async () => {
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket", playerCount: 2 })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "spill2",
+      config: {
+        minTicketsBeforeCountdown: 5,
+      } as unknown as import("./variantConfig.js").GameVariantConfig,
+    },
+  });
+  // Nøyaktig 5 tickets — threshold nådd.
+  const armedLookup = makeArmedLookupStub({
+    ROCKET: { "player-1": 2, "player-2": 3 },
+  });
+  const service = makeService({ engine, variantLookup, armedLookup, timer });
+
+  const result = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(result, true, "spawn skal lykkes når threshold er nådd");
+  assert.equal(
+    state.startGameCalls.length,
+    1,
+    "engine.startGame skal kalles én gang",
+  );
+});
+
+test("spawnFirstRoundIfNeeded starter umiddelbart når minTicketsBeforeCountdown=0", async () => {
+  // Default-tilfellet: ingen threshold konfigurert → spawn umiddelbart
+  // som før (bakover-kompatibilitet).
+  const rooms = new Map([
+    ["ROCKET", makeRoom({ code: "ROCKET", gameSlug: "rocket", playerCount: 1 })],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    ROCKET: {
+      gameType: "spill2",
+      config: {
+        minTicketsBeforeCountdown: 0,
+      } as unknown as import("./variantConfig.js").GameVariantConfig,
+    },
+  });
+  const armedLookup = makeArmedLookupStub({ ROCKET: {} });
+  const service = makeService({ engine, variantLookup, armedLookup, timer });
+
+  const result = await service.spawnFirstRoundIfNeeded("ROCKET");
+
+  assert.equal(result, true);
+  assert.equal(state.startGameCalls.length, 1);
+});
+
+test("spawnFirstRoundIfNeeded venter på Spill 3 (monsterbingo) — symmetri med Spill 2", async () => {
+  const rooms = new Map([
+    [
+      "MONSTERBINGO",
+      makeRoom({
+        code: "MONSTERBINGO",
+        gameSlug: "monsterbingo",
+        playerCount: 1,
+      }),
+    ],
+  ]);
+  const { engine, state } = makeStubEngine(rooms);
+  const timer = makeFakeTimer();
+  const variantLookup = makeStubVariantLookup({
+    MONSTERBINGO: {
+      gameType: "spill3",
+      config: {
+        minTicketsBeforeCountdown: 20,
+      } as unknown as import("./variantConfig.js").GameVariantConfig,
+    },
+  });
+  const armedLookup = makeArmedLookupStub({
+    MONSTERBINGO: { "player-1": 3 },
+  });
+  const service = makeService({ engine, variantLookup, armedLookup, timer });
+
+  const result = await service.spawnFirstRoundIfNeeded("MONSTERBINGO");
+
+  assert.equal(result, false);
+  assert.equal(
+    state.startGameCalls.length,
+    0,
+    "3 < 20 → engine.startGame IKKE kalt for Spill 3 heller",
+  );
 });
