@@ -206,6 +206,7 @@ export type {
 // back-compat for eksisterende imports fra `BingoEngine.js` mens vi gradvis
 // flytter konsumentene over til den nye plasseringen.
 import { DomainError } from "../errors/DomainError.js";
+import { isCanonicalRoomCode } from "../util/canonicalRoomCode.js";
 export { DomainError };
 
 interface CreateRoomInput {
@@ -3114,6 +3115,166 @@ export class BingoEngine {
     // Idempotent — `reset` på en ukjent room-code er no-op.
     const code = roomCode.trim().toUpperCase();
     this.roomErrorCounter.reset(code);
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-13: Spill 1 lobby-rom-persistens fix.
+   *
+   * Reset post-game state på et HALL-SHARED CANONICAL Spill 1 lobby-rom
+   * (`BINGO_<groupId>`) UTEN å destruere selve rommet. Brukes etter
+   * scheduled-game completion/cancellation slik at lobby-rommet kan
+   * persistere mellom scheduled-games innenfor spilleplanens åpningstid.
+   *
+   * # Bakgrunn — bug
+   *
+   * Pre-fix: `Game1DrawEngineService.drawNext` (siste ball) +
+   * `stopGame` (manual cancel) kalte `destroyRoom(BINGO_<groupId>)`.
+   * Det destruerte hele lobby-rommet, evictet alle spillere, og wipet
+   * armed-state. Spillere som ikke disconnectet socket fikk
+   * `ROOM_NOT_FOUND` på neste `bet:arm` → kunne ikke kjøpe bonger til
+   * neste runde.
+   *
+   * Per Tobias' immutable direktiv: "Lobby-rommet skal være åpent
+   * innenfor åpningstid. Spillere skal alltid kunne kjøpe bonger til
+   * neste spill — også under aktiv trekning og rett etter trekningsslutt."
+   *
+   * # Hva metoden gjør
+   *
+   * 1. Archive `currentGame` til `gameHistory` (samme som `archiveIfEnded`).
+   *    Mini-game som ikke er ferdigspilt flyttes til `pendingMiniGame`.
+   * 2. Sett `currentGame = undefined` (rommet blir "idle/waiting").
+   * 3. Clear `scheduledGameId` så neste scheduled-game-spawn kan binde
+   *    rommet til en ny rad via `markRoomAsScheduledAndPersist`.
+   * 4. Disarm all players (clear in-memory armed-state) — armed-state
+   *    fra forrige runde skal IKKE påvirke neste runde, og PR #1284's
+   *    konverteringsservice har allerede laget purchases for runden
+   *    som nettopp endte. Spillere må re-arme for neste runde.
+   * 5. Persist til Redis (write-through).
+   *
+   * # Bevares (ikke fjernet)
+   *
+   * - `players`-map (alle spillere forblir i rommet)
+   * - `isHallShared` flagg (GoH-multi-hall-binding)
+   * - `isTestHall` flagg
+   * - `hallId`, `gameSlug`, `gameHistory`, `pendingMiniGame`
+   *
+   * # Idempotens
+   *
+   * No-op hvis:
+   *   - Rommet ikke finnes (ROOM_NOT_FOUND silently)
+   *   - Rommet er ikke et Spill 1 canonical hall-shared room
+   *   - Allerede idle (`currentGame === undefined` og `scheduledGameId === undefined`)
+   *
+   * # Throwing
+   *
+   * - `GAME_IN_PROGRESS` hvis `currentGame.status === "RUNNING"` —
+   *   matcher destroyRoom-guarden. Caller må endGame først.
+   *
+   * # Returns
+   *
+   * `true` hvis reset faktisk skjedde, `false` ved no-op (room not found,
+   * not canonical, eller allerede idle).
+   */
+  resetCanonicalRoomAfterGameEnd(roomCode: string): boolean {
+    const code = roomCode.trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) {
+      return false; // No-op: room already gone
+    }
+
+    // Guard: only canonical hall-shared Spill 1 lobby rooms. Per-hall
+    // single-hall rooms or ad-hoc rooms still use destroyRoom-path.
+    if (room.gameSlug !== "bingo") {
+      return false;
+    }
+    if (!room.isHallShared) {
+      return false;
+    }
+    if (!isCanonicalRoomCode(code)) {
+      return false;
+    }
+
+    // Defensive: never reset while game is actively RUNNING — drawNext
+    // wouldn't trigger this path mid-round, but stopGame can on a paused
+    // game where engine.stopGame already set status=ENDED. If somehow
+    // RUNNING leaks through, throw same as destroyRoom does.
+    if (room.currentGame && room.currentGame.status === "RUNNING") {
+      throw new DomainError(
+        "GAME_IN_PROGRESS",
+        `Kan ikke reset rom ${code} mens en runde pågår.`,
+      );
+    }
+
+    const hadCurrentGame = !!room.currentGame;
+    const hadScheduledGameId = !!room.scheduledGameId;
+
+    logger.info(
+      {
+        roomCode: code,
+        hadCurrentGame,
+        currentGameStatus: room.currentGame?.status ?? null,
+        currentGameEndedReason: room.currentGame?.endedReason ?? null,
+        currentGameDrawnCount: room.currentGame?.drawnNumbers.length ?? 0,
+        playerCount: room.players.size,
+        gameSlug: room.gameSlug ?? null,
+        hallId: room.hallId,
+        isHallShared: !!room.isHallShared,
+        scheduledGameId: room.scheduledGameId ?? null,
+        event: "room.reset_canonical",
+      },
+      "[room] reset canonical (post-game) — keep lobby alive for next round",
+    );
+
+    // 1. Archive currentGame → gameHistory + clear (matches archiveIfEnded)
+    if (room.currentGame?.status === "ENDED") {
+      const liveMiniGame = room.currentGame.miniGame;
+      if (liveMiniGame && !liveMiniGame.isPlayed) {
+        room.pendingMiniGame = {
+          ...liveMiniGame,
+          gameId: room.currentGame.id,
+        };
+      }
+      room.gameHistory.push(this.serializeGame(room.currentGame));
+    }
+    room.currentGame = undefined;
+
+    // 2. Clear scheduledGameId so next scheduled-game can claim the room.
+    room.scheduledGameId = undefined;
+
+    // 3. Disarm all players for the room. Wallet reservations from the
+    // round that just ended are already committed (via PR #1284 conversion)
+    // or released (if game cancelled before conversion). Disarm clears
+    // the in-memory armed-state so next bet:arm starts from scratch.
+    if (this.lifecycleStore) {
+      void this.lifecycleStore.disarmAllPlayers({ roomCode: code });
+    }
+
+    // 4. Engine-local per-room caches need partial cleanup. We KEEP
+    // variant-config + lucky-numbers (configured for the lobby/slug, not
+    // per-game). We RESET draw-locks and last-draw-tracking since they
+    // are game-specific.
+    this.drawOrchestrationService.cleanupRoomCaches?.(code);
+    this.roomLastRoundStartMs.delete(code);
+
+    // 5. K5: clear circuit-breaker state (game-specific).
+    this.roomErrorCounter.reset(code);
+
+    // 6. Persist to Redis (write-through). Same path as destroyRoom would
+    // have used via rooms.delete + roomStateStore.delete, but here we
+    // sync the updated room state.
+    this.syncRoomToStore(room);
+
+    logger.info(
+      {
+        roomCode: code,
+        archivedGame: hadCurrentGame,
+        clearedScheduledGameId: hadScheduledGameId,
+        remainingPlayerCount: room.players.size,
+      },
+      "[room] reset canonical complete — lobby alive for next round",
+    );
+
+    return true;
   }
 
   getPlayerCompliance(walletId: string, hallId?: string): PlayerComplianceSnapshot {
