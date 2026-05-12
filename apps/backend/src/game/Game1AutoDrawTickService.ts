@@ -126,7 +126,12 @@ export class Game1AutoDrawTickService {
     }
     this.schema = schema;
     this.drawEngine = options.drawEngine;
-    this.defaultSeconds = options.defaultSeconds ?? 5;
+    // Tobias-direktiv 2026-05-12: default 4 sek mellom hver trekning på
+    // Spill 1. Tidligere 5. Endring drevet av observasjon at "noen kjappe
+    // <1s, så 2s, deretter kjappe igjen" — det forrige defaultet sammen
+    // med 1s cron-grid ga inkonsistent UX. 4 sek + 500ms grid (se
+    // jobGame1AutoDrawIntervalMs i envConfig.ts) gir ±500ms drift.
+    this.defaultSeconds = options.defaultSeconds ?? 4;
     // Aksepter kun positive heltall som override; alt annet → null (= ingen override).
     const override = options.forceSecondsOverride;
     this.forceSecondsOverride =

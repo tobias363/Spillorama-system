@@ -269,9 +269,15 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // Sett eksplisitt `false` i miljø hvis flagget skal disables (eks.
   // manuell QA hvor man vil drive draw-tick selv).
   const jobGame1AutoDrawEnabled = parseBooleanEnv(process.env.GAME1_AUTO_DRAW_ENABLED, true);
-  // Minimum 500 ms — auto-draw trigges hvert `seconds`-felt fra ticket_config,
-  // tick-intervallet bare polles. Default 1000 ms matcher "global 1s tick".
-  const jobGame1AutoDrawIntervalMs = Math.max(500, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 1_000));
+  // Minimum 250 ms — auto-draw trigges hvert `seconds`-felt fra ticket_config,
+  // tick-intervallet bare polles.
+  //
+  // Tobias-direktiv 2026-05-12: default endret 1000 → 500 ms for jevnere
+  // draw-tempo. Med 1s grid + 4s mellom hver trekning kunne faktisk
+  // intervall vandre 4.0-5.0s; med 500 ms grid blir det 4.0-4.5s. Spillerne
+  // opplever konsekvent tempo. Min satt til 250 ms hvis ops vil ha enda
+  // tightere grid (eks. test/QA).
+  const jobGame1AutoDrawIntervalMs = Math.max(250, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 500));
 
   // Task 1.6: transfer-expiry-tick — default ON siden 60s TTL på master-
   // transfer-requests ellers ikke håndheves. Intervall 5s er grovt nok (TTL

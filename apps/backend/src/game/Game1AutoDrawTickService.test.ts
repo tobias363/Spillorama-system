@@ -343,34 +343,35 @@ test("tick: seconds fra generisk timing.seconds", async () => {
   assert.deepEqual(called, ["g1"]);
 });
 
-test("tick: seconds default 5 hvis ticket_config ugyldig/mangler", async () => {
+test("tick: seconds default 4 hvis ticket_config ugyldig/mangler (Tobias 2026-05-12)", async () => {
+  // Tobias-direktiv 2026-05-12: default 4 sek mellom hver trekning (var 5).
   const now = Date.now();
-  const threeSecAgo = new Date(now - 3_000);
-  const sixSecAgo = new Date(now - 6_000);
-  // Default 5: 3s siden → ikke due, 6s siden → due.
+  const twoSecAgo = new Date(now - 2_000);
+  const fiveSecAgo = new Date(now - 5_000);
+  // Default 4: 2s siden → ikke due, 5s siden → due.
   const { service: svcNotDue, called: calledNotDue } = makeService([
     {
       id: "g1",
       ticket_config_json: {},
       draws_completed: 1,
-      last_drawn_at: threeSecAgo,
-      engine_started_at: threeSecAgo,
+      last_drawn_at: twoSecAgo,
+      engine_started_at: twoSecAgo,
     },
   ]);
   const r1 = await svcNotDue.tick();
-  assert.equal(r1.drawsTriggered, 0);
+  assert.equal(r1.drawsTriggered, 0, "2s < default 4s → ikke due");
 
   const { service: svcDue, called: calledDue } = makeService([
     {
       id: "g1",
       ticket_config_json: {},
       draws_completed: 1,
-      last_drawn_at: sixSecAgo,
-      engine_started_at: sixSecAgo,
+      last_drawn_at: fiveSecAgo,
+      engine_started_at: fiveSecAgo,
     },
   ]);
   const r2 = await svcDue.tick();
-  assert.equal(r2.drawsTriggered, 1);
+  assert.equal(r2.drawsTriggered, 1, "5s >= default 4s → due");
   assert.deepEqual(calledDue, ["g1"]);
   assert.deepEqual(calledNotDue, []);
 });
@@ -421,11 +422,11 @@ test("tick: multiple games med ulike seconds-verdier beregnes per-game", async (
 // ── 4c-services-coverage tillegg: 6 nye tester per PM-godkjent scope ────────
 
 test("defensivity: seconds=0 eller negativ → defaultSeconds brukes", () => {
-  // `pickPositiveInt` avviser 0, negativ, float — faller til defaultSeconds=5.
-  // Låser at ugyldig config fra DB ikke fører til infinite-loop (seconds=0 =
-  // always-due).
+  // `pickPositiveInt` avviser 0, negativ, float — faller til defaultSeconds=4
+  // (Tobias 2026-05-12: var 5, ble endret). Låser at ugyldig config fra DB
+  // ikke fører til infinite-loop (seconds=0 = always-due).
   const now = Date.now();
-  // last=2s siden, seconds skulle vært 0 (=always-due), men faller til default=5 → ikke due.
+  // last=2s siden, seconds skulle vært 0, men faller til default=4 → ikke due.
   const { service, called } = makeService([
     {
       id: "g1",
@@ -436,7 +437,7 @@ test("defensivity: seconds=0 eller negativ → defaultSeconds brukes", () => {
     },
   ]);
   return service.tick().then((r) => {
-    assert.equal(r.drawsTriggered, 0, "seconds=0 skal falle til default=5 → 2s < 5s → ikke due");
+    assert.equal(r.drawsTriggered, 0, "seconds=0 skal falle til default=4 → 2s < 4s → ikke due");
     assert.equal(r.skippedNotDue, 1);
     assert.equal(called.length, 0);
   });
@@ -444,33 +445,33 @@ test("defensivity: seconds=0 eller negativ → defaultSeconds brukes", () => {
 
 test("defensivity: seconds=negativ eller float → defaultSeconds brukes", async () => {
   const now = Date.now();
-  const eightSecAgo = new Date(now - 8_000);
-  // Negativ → default 5. 8s siden → due.
+  const fiveSecAgo = new Date(now - 5_000);
+  // Negativ → default 4. 5s siden → due.
   const { service: svc1, called: c1 } = makeService([
     {
       id: "g1",
       ticket_config_json: { seconds: -3 },
       draws_completed: 1,
-      last_drawn_at: eightSecAgo,
-      engine_started_at: eightSecAgo,
+      last_drawn_at: fiveSecAgo,
+      engine_started_at: fiveSecAgo,
     },
   ]);
   const r1 = await svc1.tick();
-  assert.equal(r1.drawsTriggered, 1, "seconds=-3 → default=5, 8s > 5s → due");
+  assert.equal(r1.drawsTriggered, 1, "seconds=-3 → default=4, 5s > 4s → due");
   assert.deepEqual(c1, ["g1"]);
 
-  // Float 3.5 — pickPositiveInt avviser ikke-heltall → default 5.
+  // Float 3.5 — pickPositiveInt avviser ikke-heltall → default 4.
   const { service: svc2, called: c2 } = makeService([
     {
       id: "g1",
       ticket_config_json: { seconds: 3.5 },
       draws_completed: 1,
-      last_drawn_at: new Date(now - 4_000),
-      engine_started_at: new Date(now - 4_000),
+      last_drawn_at: new Date(now - 3_000),
+      engine_started_at: new Date(now - 3_000),
     },
   ]);
   const r2 = await svc2.tick();
-  assert.equal(r2.drawsTriggered, 0, "seconds=3.5 → default=5, 4s < 5s → ikke due");
+  assert.equal(r2.drawsTriggered, 0, "seconds=3.5 → default=4, 3s < 4s → ikke due");
   assert.equal(c2.length, 0);
 });
 

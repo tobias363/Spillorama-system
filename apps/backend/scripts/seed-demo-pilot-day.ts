@@ -967,7 +967,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "bingo",
     displayName: "Bingo",
     description: "Standard 75-ball Spill 1 — billigste bong får 1 000 kr Fullt Hus, auto-multiplikator skalerer for dyrere bonger.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -990,7 +990,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "1000-spill",
     displayName: "1000-spill",
     description: "Standard Spill 1 hvor billigste bong gir 1 000 kr på Fullt Hus.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1013,7 +1013,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "5x500",
     displayName: "5×500",
     description: "Standard Spill 1 hvor billigste bong gir 500 kr på Fullt Hus.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1036,7 +1036,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "ball-x-10",
     displayName: "Ball × 10",
     description: "Standard Spill 1 — bingoBase varierer; default-seed setter 1 000 kr (admin justerer i game-catalog-UI).",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1063,7 +1063,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "bokstav",
     displayName: "Bokstav",
     description: "Standard Spill 1 — bingoBase varierer; default-seed setter 1 000 kr. NB: kanonisk doc-konflikt — kan deaktiveres hvis Spill 3 overtar mønster-varianten.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1088,7 +1088,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "innsatsen",
     displayName: "Innsatsen",
     description: "Standard Spill 1 med Innsatsen-pot som ekstra premie. bingoBase 1 000 kr (intervall 500-2000 — admin kan justere).",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1113,7 +1113,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "jackpot",
     displayName: "Jackpot",
     description: "Master fyller jackpot-popup ved start (trekk + premier per bongfarge). bingoBase i seed er placeholder; runtime bruker master-override.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1136,7 +1136,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "kvikkis",
     displayName: "Kvikkis",
     description: "Standard Spill 1 — billigste bong gir 1 000 kr Fullt Hus.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
@@ -1168,7 +1168,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
       targetDraw: 55,
       bingoBaseLow: 50000,
       bingoBaseHigh: 150000,
-      timing: { seconds: 5 },
+      timing: { seconds: 4 },
     },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
@@ -1198,7 +1198,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
       targetDraw: 56,
       bingoBaseLow: 50000,
       bingoBaseHigh: 150000,
-      timing: { seconds: 5 },
+      timing: { seconds: 4 },
     },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
@@ -1227,7 +1227,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
       targetDraw: 57,
       bingoBaseLow: 50000,
       bingoBaseHigh: 150000,
-      timing: { seconds: 5 },
+      timing: { seconds: 4 },
     },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
@@ -1270,7 +1270,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
         gul: 150000,
         rød: 50000,
       },
-      timing: { seconds: 5 },
+      timing: { seconds: 4 },
     },
     // Trafikklys er flat 15 kr — alle 3 bongfarger har samme pris i
     // schema, men engine leser rad-farge-tabellen direkte fra rules.
@@ -1305,7 +1305,7 @@ const DEMO_CATALOG_ENTRIES: readonly DemoCatalogEntry[] = [
     slug: "tv-extra",
     displayName: "TV-Extra",
     description: "Standard Spill 1 med høyere bingo-premie. Billigste bong gir 3 000 kr på Fullt Hus.",
-    rules: { gameVariant: "standard", timing: { seconds: 5 } },
+    rules: { gameVariant: "standard", timing: { seconds: 4 } },
     ticketColors: STANDARD_TICKET_COLORS,
     ticketPricesCents: { ...STANDARD_TICKET_PRICES_CENTS },
     prizesCents: {
