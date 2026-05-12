@@ -328,3 +328,103 @@ describe("pickSafeFields", () => {
     expect(pickSafeFields(null, ["a"])).toEqual({ payloadKeys: [] });
   });
 });
+
+describe("EventTracker.trackFetch (Tobias-direktiv 2026-05-12)", () => {
+  beforeEach(() => {
+    resetEventTracker();
+  });
+
+  it("tracker en rest.fetch-event med url + method", () => {
+    const tracker = new EventTracker();
+    tracker.trackFetch({ url: "/api/game1/purchase", method: "POST" });
+    const events = tracker.getEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("rest.fetch");
+    expect(events[0].payload.url).toBe("/api/game1/purchase");
+    expect(events[0].payload.method).toBe("POST");
+  });
+
+  it("inkluderer request-body, response-status, response-body og varighet", () => {
+    const tracker = new EventTracker();
+    tracker.trackFetch({
+      url: "/api/game1/purchase",
+      method: "POST",
+      requestBody: { scheduledGameId: "sg-1", ticketSpecCount: 3 },
+      responseStatus: 200,
+      responseBody: { ok: true, errorCode: null },
+      durationMs: 142,
+    });
+    const event = tracker.getEvents()[0];
+    expect(event.payload).toMatchObject({
+      url: "/api/game1/purchase",
+      method: "POST",
+      requestBody: { scheduledGameId: "sg-1", ticketSpecCount: 3 },
+      responseStatus: 200,
+      durationMs: 142,
+    });
+    const respBody = event.payload.responseBody as Record<string, unknown>;
+    expect(respBody.ok).toBe(true);
+    expect(respBody.errorCode).toBeNull();
+  });
+
+  it("hopper over undefined/null felter (idempotent ved minimal input)", () => {
+    const tracker = new EventTracker();
+    tracker.trackFetch({
+      url: "/api/x",
+      method: "GET",
+      // requestBody, responseStatus, responseBody, durationMs alle undefined
+    });
+    const event = tracker.getEvents()[0];
+    expect(event.payload).not.toHaveProperty("requestBody");
+    expect(event.payload).not.toHaveProperty("responseStatus");
+    expect(event.payload).not.toHaveProperty("responseBody");
+    expect(event.payload).not.toHaveProperty("durationMs");
+  });
+
+  it("sanitizer fjerner sensitive felter i requestBody", () => {
+    const tracker = new EventTracker();
+    tracker.trackFetch({
+      url: "/api/auth/login",
+      method: "POST",
+      requestBody: { email: "test@example.com", password: "hemmelig" },
+    });
+    const event = tracker.getEvents()[0];
+    const reqBody = event.payload.requestBody as Record<string, unknown>;
+    expect(reqBody.email).toBe("test@example.com");
+    expect(reqBody.password).toBe("[REDACTED]");
+  });
+
+  it("propagerer correlationId + traceId", () => {
+    const tracker = new EventTracker();
+    tracker.trackFetch({
+      url: "/api/x",
+      method: "POST",
+      correlationId: "corr-1",
+      traceId: "trace-2",
+    });
+    const event = tracker.getEvents()[0];
+    expect(event.correlationId).toBe("corr-1");
+    expect(event.traceId).toBe("trace-2");
+  });
+
+  it("returnerer event-id slik at caller kan korrelere senere events", () => {
+    const tracker = new EventTracker();
+    const id = tracker.trackFetch({ url: "/api/x", method: "GET" });
+    expect(id).toMatch(/^evt-\d+$/);
+    expect(tracker.getEvents()[0].id).toBe(id);
+  });
+
+  it("kan kalles flere ganger uten å forstyrre ring-buffer-en", () => {
+    const tracker = new EventTracker();
+    tracker.trackFetch({ url: "/api/a", method: "GET" });
+    tracker.trackFetch({ url: "/api/b", method: "POST" });
+    tracker.trackFetch({ url: "/api/c", method: "DELETE" });
+    const events = tracker.getEvents();
+    expect(events).toHaveLength(3);
+    expect(events.map((e) => e.payload.url)).toEqual([
+      "/api/a",
+      "/api/b",
+      "/api/c",
+    ]);
+  });
+});

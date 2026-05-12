@@ -241,6 +241,235 @@ describe("Game1SocketActions", () => {
       ]);
       expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
     });
+
+    // Tobias-direktiv 2026-05-12: REST-fetch må logges som rest.fetch i
+    // EventTracker. Tidligere debug-dump fra Tobias inneholdt 232 events
+    // men kun ÉN socket.emit — fordi `fetch("/api/game1/purchase", ...)`
+    // ikke ble logget noen steder. Denne testen sikrer at instrumenteringen
+    // ikke regresserer.
+    it("tracker REST-purchase som rest.fetch når eventTracker er satt", async () => {
+      sessionStorage.setItem("spillorama.accessToken", "token-1");
+      sessionStorage.setItem("spillorama.user", JSON.stringify({ id: "user-1" }));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ ok: true, data: { purchaseId: "p-1" } }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-tracked" });
+
+      const trackFetchSpy = vi.fn();
+      const trackerStub = {
+        trackFetch: trackFetchSpy,
+      } as unknown as import("../debug/EventTracker.js").EventTracker;
+
+      const { deps } = makeDeps({
+        eventTracker: trackerStub,
+        getScheduledPurchaseContext: () => ({
+          scheduledGameId: "sg-track",
+          hallId: "hall-track",
+          overallStatus: "purchase_open",
+          ticketConfig: {
+            entryFee: 5,
+            ticketTypes: [
+              { name: "Small Yellow", type: "small", priceMultiplier: 2, ticketCount: 1 },
+            ],
+          },
+        }),
+      });
+
+      await new Game1SocketActions(deps).buy([
+        { type: "small", qty: 2, name: "Small Yellow" },
+      ]);
+
+      expect(trackFetchSpy).toHaveBeenCalledTimes(1);
+      const trackArg = trackFetchSpy.mock.calls[0][0];
+      expect(trackArg.url).toBe("/api/game1/purchase");
+      expect(trackArg.method).toBe("POST");
+      expect(trackArg.responseStatus).toBe(200);
+      expect(trackArg.responseBody).toEqual({ ok: true, errorCode: null });
+      expect(typeof trackArg.durationMs).toBe("number");
+      expect(trackArg.durationMs).toBeGreaterThanOrEqual(0);
+      // Request-body skal ha summary, ikke full ticketSpec (sanitize).
+      expect(trackArg.requestBody).toMatchObject({
+        scheduledGameId: "sg-track",
+        hallId: "hall-track",
+        idempotencyKey: "web-game1-uuid-tracked",
+        ticketSpecCount: 1,
+      });
+      expect(trackArg.requestBody.ticketSpecSummary).toEqual([
+        { color: "yellow", size: "small", count: 2 },
+      ]);
+    });
+
+    it("tracker HTTP-feil (4xx/5xx) som rest.fetch med response-status + errorCode", async () => {
+      sessionStorage.setItem("spillorama.accessToken", "token-1");
+      sessionStorage.setItem("spillorama.user", JSON.stringify({ id: "user-1" }));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue({
+          ok: false,
+          error: { code: "INSUFFICIENT_FUNDS", message: "Saldo for lav" },
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-err" });
+
+      const trackFetchSpy = vi.fn();
+      const trackerStub = {
+        trackFetch: trackFetchSpy,
+      } as unknown as import("../debug/EventTracker.js").EventTracker;
+
+      const { deps, onError } = makeDeps({
+        eventTracker: trackerStub,
+        getScheduledPurchaseContext: () => ({
+          scheduledGameId: "sg-1",
+          hallId: "hall-1",
+          overallStatus: "purchase_open",
+          ticketConfig: {
+            entryFee: 5,
+            ticketTypes: [
+              { name: "Small Yellow", type: "small", priceMultiplier: 2, ticketCount: 1 },
+            ],
+          },
+        }),
+      });
+
+      await new Game1SocketActions(deps).buy([
+        { type: "small", qty: 1, name: "Small Yellow" },
+      ]);
+
+      expect(trackFetchSpy).toHaveBeenCalledTimes(1);
+      const trackArg = trackFetchSpy.mock.calls[0][0];
+      expect(trackArg.responseStatus).toBe(400);
+      expect(trackArg.responseBody).toEqual({
+        ok: false,
+        errorCode: "INSUFFICIENT_FUNDS",
+      });
+      // onError skal ha fyrt med server-meldingen — instrumentering tar
+      // ikke over error-pathen.
+      expect(onError).toHaveBeenCalledWith("Saldo for lav");
+    });
+
+    it("tracker network-feil (fetch threw) med responseStatus undefined", async () => {
+      sessionStorage.setItem("spillorama.accessToken", "token-1");
+      sessionStorage.setItem("spillorama.user", JSON.stringify({ id: "user-1" }));
+      const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-net" });
+
+      const trackFetchSpy = vi.fn();
+      const trackerStub = {
+        trackFetch: trackFetchSpy,
+      } as unknown as import("../debug/EventTracker.js").EventTracker;
+
+      const { deps, onError } = makeDeps({
+        eventTracker: trackerStub,
+        getScheduledPurchaseContext: () => ({
+          scheduledGameId: "sg-1",
+          hallId: "hall-1",
+          overallStatus: "purchase_open",
+          ticketConfig: {
+            entryFee: 5,
+            ticketTypes: [
+              { name: "Small Yellow", type: "small", priceMultiplier: 2, ticketCount: 1 },
+            ],
+          },
+        }),
+      });
+
+      await new Game1SocketActions(deps).buy([
+        { type: "small", qty: 1, name: "Small Yellow" },
+      ]);
+
+      expect(trackFetchSpy).toHaveBeenCalledTimes(1);
+      const trackArg = trackFetchSpy.mock.calls[0][0];
+      expect(trackArg.responseStatus).toBeUndefined();
+      expect(trackArg.responseBody).toMatchObject({
+        ok: false,
+        errorCode: "FETCH_THREW",
+        errorMessage: "network down",
+      });
+      expect(onError).toHaveBeenCalledWith("network down");
+    });
+
+    it("krasjer ikke når eventTracker mangler (instrumentering er opt-in)", async () => {
+      sessionStorage.setItem("spillorama.accessToken", "token-1");
+      sessionStorage.setItem("spillorama.user", JSON.stringify({ id: "user-1" }));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ ok: true }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-no-tracker" });
+
+      // Ingen eventTracker satt — buy må fortsatt fungere.
+      const { deps, playScreen } = makeDeps({
+        getScheduledPurchaseContext: () => ({
+          scheduledGameId: "sg-1",
+          hallId: "hall-1",
+          overallStatus: "purchase_open",
+          ticketConfig: {
+            entryFee: 5,
+            ticketTypes: [
+              { name: "Small Yellow", type: "small", priceMultiplier: 2, ticketCount: 1 },
+            ],
+          },
+        }),
+      });
+
+      await expect(
+        new Game1SocketActions(deps).buy([
+          { type: "small", qty: 1, name: "Small Yellow" },
+        ]),
+      ).resolves.toBeUndefined();
+      expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
+    });
+
+    it("svelger trackFetch-feil uten å bryte buy-flyten", async () => {
+      sessionStorage.setItem("spillorama.accessToken", "token-1");
+      sessionStorage.setItem("spillorama.user", JSON.stringify({ id: "user-1" }));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ ok: true }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-throws" });
+
+      const trackerStub = {
+        trackFetch: vi.fn(() => {
+          throw new Error("tracker exploded");
+        }),
+      } as unknown as import("../debug/EventTracker.js").EventTracker;
+
+      const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      const { deps, playScreen } = makeDeps({
+        eventTracker: trackerStub,
+        getScheduledPurchaseContext: () => ({
+          scheduledGameId: "sg-1",
+          hallId: "hall-1",
+          overallStatus: "purchase_open",
+          ticketConfig: {
+            entryFee: 5,
+            ticketTypes: [
+              { name: "Small Yellow", type: "small", priceMultiplier: 2, ticketCount: 1 },
+            ],
+          },
+        }),
+      });
+
+      await new Game1SocketActions(deps).buy([
+        { type: "small", qty: 1, name: "Small Yellow" },
+      ]);
+
+      // Buy-flyten fullførte til tross for tracker-exception
+      expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
+      consoleWarnSpy.mockRestore();
+    });
   });
 
   describe("claim", () => {
