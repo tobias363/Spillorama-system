@@ -277,6 +277,58 @@ export async function getRoomSnapshotJson(
   return json.data;
 }
 
+/**
+ * Admin game detail via `GET /api/admin/game1/games/:gameId` (krever
+ * ADMIN/AGENT-auth med GAME1_GAME_READ). Returnerer engineState fra
+ * Game1DrawEngineService (drawsCompleted, currentPhase, isPaused, etc).
+ *
+ * Brukes som primær state-source for Rad-vinst-testen siden /api/rooms/
+ * (BingoEngine) returnerer null for scheduled Spill 1 (separate engines —
+ * BingoEngine eier hostPlayerId-rom mens Game1DrawEngineService eier
+ * scheduled-runde-state).
+ */
+export interface GameDetail {
+  game: {
+    id: string;
+    status: string; // "scheduled" | "purchase_open" | "ready_to_start" | "running" | "paused" | "completed" | "cancelled"
+    masterHallId: string;
+    groupHallId: string | null;
+    actualStartTime: string | null;
+    actualEndTime: string | null;
+  };
+  engineState: {
+    isPaused: boolean;
+    pausedAtPhase: number | null;
+    currentPhase: number;
+    drawsCompleted: number;
+    isFinished: boolean;
+  } | null;
+}
+
+export async function getGameDetail(
+  token: string,
+  gameId: string,
+): Promise<GameDetail | null> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/admin/game1/games/${encodeURIComponent(gameId)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  if (!res.ok) return null;
+  let json;
+  try {
+    json = (await res.json()) as {
+      ok: boolean;
+      data?: GameDetail;
+    };
+  } catch {
+    return null;
+  }
+  if (!json.ok || !json.data) return null;
+  return json.data;
+}
+
 /** Options for `resetPilotStateExt`. */
 export interface ResetPilotStateOptions {
   destroyRooms?: boolean;

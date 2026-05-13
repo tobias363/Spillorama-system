@@ -7,8 +7,7 @@ import {
   masterStop,
 } from "./helpers/rest.js";
 import {
-  getGameStateSnapshot,
-  getRoomSnapshotJson,
+  getGameDetail,
   masterPause,
   masterResume,
   resetPilotStateExt,
@@ -65,7 +64,6 @@ import {
 
 const MASTER_EMAIL = "demo-agent-1@spillorama.no";
 const HALL_ID = "demo-hall-001";
-const ROOM_CODE = "BINGO_DEMO-PILOT-GOH";
 
 /**
  * Hent demo-spiller med ledig dagsgrense. Identisk implementasjon med
@@ -320,14 +318,9 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     ).toBe("running");
 
     // Optional snapshot-diagnose (krever RESET_TEST_PLAYERS_TOKEN)
-    const startSnapshot = await getGameStateSnapshot(ROOM_CODE);
-    const startRoom = startSnapshot ? null : await getRoomSnapshotJson(ROOM_CODE);
-    const startStatus = startSnapshot?.engineRoom?.currentGame?.status ??
-      startRoom?.currentGame?.status ?? "n/a";
-    const startDrawn = startSnapshot?.engineRoom?.currentGame?.drawnCount ??
-      startRoom?.currentGame?.drawnNumbers.length ?? "n/a";
+    const startDetail = await getGameDetail(masterToken, initialScheduledGameId);
     console.log(
-      `[test] Etter start: status=${startStatus}, drawn=${startDrawn}, source=${startSnapshot ? "dev-snapshot" : startRoom ? "room-snapshot" : "none"}`,
+      `[test] Etter start: gameStatus=${startDetail?.game.status ?? "n/a"}, drawsCompleted=${startDetail?.engineState?.drawsCompleted ?? "n/a"}, currentPhase=${startDetail?.engineState?.currentPhase ?? "n/a"}`,
     );
 
     // ── Steg 8: Poll på auto-tick draws til Rad 1-vinst ────────────────────
@@ -347,63 +340,75 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     console.log("[test] Poller på auto-tick draws mot Rad 1-vinst...");
 
     let rad1WonAtDraw: number | null = null;
-    let rad1ClaimsCount = 0;
+    let rad1Phase: number | null = null;
     const winPopupLocator = page.locator('[data-test="win-popup-backdrop"]');
 
     const POLL_INTERVAL_MS = 500;
     const RAD1_TIMEOUT_MS = 90_000;
     const rad1Start = Date.now();
     let lastDrawnCount = 0;
+    let lastPhase = 1;
 
+    // Primær state-source: /api/admin/game1/games/<id> som har
+    // engineState.drawsCompleted + currentPhase. currentPhase går fra 1 → 2
+    // etter Rad 1 vinnes, så vi detekterer rad-vinst via phase-advance.
     while (Date.now() - rad1Start < RAD1_TIMEOUT_MS) {
-      // Detect via WinPopup (player er vinner)
+      // Detect via WinPopup (player er vinner — tidlig-exit hvis det skjer)
       const popupVisible = await winPopupLocator
         .isVisible({ timeout: 50 })
         .catch(() => false);
       if (popupVisible) {
-        const room = await getRoomSnapshotJson(ROOM_CODE);
-        rad1WonAtDraw = room?.currentGame?.drawnNumbers.length ?? 0;
+        const detail = await getGameDetail(masterToken, initialScheduledGameId);
+        rad1WonAtDraw = detail?.engineState?.drawsCompleted ?? 0;
+        rad1Phase = detail?.engineState?.currentPhase ?? null;
         console.log(
-          `[test] ✓ WinPopup detected etter ${rad1WonAtDraw} draws`,
+          `[test] ✓ WinPopup detected etter ${rad1WonAtDraw} draws, phase=${rad1Phase}`,
         );
         break;
       }
 
-      // Detect via room-snapshot (public route, ingen token nødvendig).
-      // Faller tilbake til _dev-snapshot hvis tilgjengelig (mer detalj).
-      const devSnap = await getGameStateSnapshot(ROOM_CODE);
-      const room = devSnap ? null : await getRoomSnapshotJson(ROOM_CODE);
+      const detail = await getGameDetail(masterToken, initialScheduledGameId);
+      if (!detail) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
 
-      const drawn = devSnap?.engineRoom?.currentGame?.drawnCount ??
-        room?.currentGame?.drawnNumbers.length ?? 0;
-      const claims = devSnap?.engineRoom?.currentGame?.claimsCount ??
-        room?.currentGame?.claims.length ?? 0;
-      const status = devSnap?.engineRoom?.currentGame?.status ??
-        room?.currentGame?.status ?? "UNKNOWN";
-      const endedReason = devSnap?.engineRoom?.currentGame?.endedReason ??
-        room?.currentGame?.endedReason;
+      const drawn = detail.engineState?.drawsCompleted ?? 0;
+      const phase = detail.engineState?.currentPhase ?? 1;
+      const isFinished = detail.engineState?.isFinished ?? false;
+      const isPaused = detail.engineState?.isPaused ?? false;
+      const gameStatus = detail.game.status;
 
-      if (drawn !== lastDrawnCount) {
+      if (drawn !== lastDrawnCount || phase !== lastPhase) {
         console.log(
-          `[test] Draw progress: drawn=${drawn}, claims=${claims}, status=${status}`,
+          `[test] Draw progress: drawn=${drawn}, phase=${phase}, isPaused=${isPaused}, gameStatus=${gameStatus}`,
         );
         lastDrawnCount = drawn;
+        lastPhase = phase;
       }
-      if (claims > 0) {
+
+      // Rad 1 vunnet hvis phase advanced fra 1 til 2+, ELLER hvis engine
+      // er paused at phase 1 (auto-pause på rad-vinst — på prod-hall).
+      // På demo-hall (is_test_hall=TRUE) auto-pause er bypassed så phase
+      // bare advanser uten å pause.
+      if (phase > 1 || (isPaused && detail.engineState?.pausedAtPhase === 1)) {
         rad1WonAtDraw = drawn;
-        rad1ClaimsCount = claims;
+        rad1Phase = phase;
         console.log(
-          `[test] ✓ Snapshot detected ${claims} claims etter ${drawn} draws — Rad-vinst registrert`,
+          `[test] ✓ Rad 1 vunnet — phase advanced fra 1 til ${phase} etter ${drawn} draws`,
         );
         break;
       }
-      if (status === "ENDED") {
+
+      if (isFinished || gameStatus === "completed" || gameStatus === "cancelled") {
         console.log(
-          `[test] Runde endet etter ${drawn} draws (status=ENDED, reason=${endedReason})`,
+          `[test] Runde slutt-state: gameStatus=${gameStatus}, drawn=${drawn}, phase=${phase}`,
         );
-        if (claims > 0) {
+        // Hvis runden er ferdig, har vi sannsynligvis vunnet alle faser.
+        // Bekreft via phase > 1.
+        if (phase > 1) {
           rad1WonAtDraw = drawn;
-          rad1ClaimsCount = claims;
+          rad1Phase = phase;
         }
         break;
       }
@@ -433,14 +438,15 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         "amount må være positivt (Rad 1 = base × bong-multiplier)",
       ).toBeGreaterThan(0);
     } else {
-      // Player var IKKE vinneren — verifiser via engine-snapshot
-      const snap = await getGameStateSnapshot(ROOM_CODE);
+      // Player var IKKE vinneren — verifiser via engine-state (phase advanced).
+      // En annen spiller vant Rad 1, så phase økte fra 1 til 2+.
+      const detail = await getGameDetail(masterToken, initialScheduledGameId);
       expect(
-        snap?.engineRoom?.currentGame?.claimsCount ?? 0,
-        "Minst én claim må eksistere (selv om vinneren ikke er current player)",
-      ).toBeGreaterThan(0);
+        detail?.engineState?.currentPhase ?? 1,
+        "Phase må være > 1 (Rad 1 vunnet av en annen spiller)",
+      ).toBeGreaterThan(1);
       console.log(
-        "[test] WinPopup ikke synlig — spilleren var ikke vinner. Verifisert via claims-count.",
+        `[test] WinPopup ikke synlig — annen spiller vant. Phase=${detail?.engineState?.currentPhase}.`,
       );
     }
 
@@ -508,60 +514,58 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     ).toBe(initialScheduledGameId);
 
     // ── Steg 11: Poll videre til Rad 2-vinst (auto-tick fortsetter) ───────
-    console.log("[test] Poller videre til Rad 2-vinst (eller annen ny pattern)...");
+    console.log("[test] Poller videre til Rad 2-vinst...");
 
     let rad2WonAtDraw: number | null = null;
-    const devSnapPreRad2 = await getGameStateSnapshot(ROOM_CODE);
-    const roomPreRad2 = devSnapPreRad2 ? null : await getRoomSnapshotJson(ROOM_CODE);
-    const claimsBeforeRad2 =
-      devSnapPreRad2?.engineRoom?.currentGame?.claimsCount ??
-      roomPreRad2?.currentGame?.claims.length ??
-      rad1ClaimsCount;
-    const drawnBeforeRad2 =
-      devSnapPreRad2?.engineRoom?.currentGame?.drawnCount ??
-      roomPreRad2?.currentGame?.drawnNumbers.length ?? 0;
+    let rad2Phase: number | null = null;
+    const phaseBeforeRad2 = rad1Phase ?? 2; // Rad 1 vunnet → phase=2
+
     console.log(
-      `[test] Før Rad 2: drawn=${drawnBeforeRad2}, claims=${claimsBeforeRad2}`,
+      `[test] Før Rad 2 polling: phase=${phaseBeforeRad2}, looking for phase>${phaseBeforeRad2}`,
     );
 
     const RAD2_TIMEOUT_MS = 90_000;
     const rad2Start = Date.now();
-    let rad2LastDrawn = drawnBeforeRad2;
+    let rad2LastPhase = phaseBeforeRad2;
 
     while (Date.now() - rad2Start < RAD2_TIMEOUT_MS) {
-      const devSnap = await getGameStateSnapshot(ROOM_CODE);
-      const room = devSnap ? null : await getRoomSnapshotJson(ROOM_CODE);
-
-      const drawn = devSnap?.engineRoom?.currentGame?.drawnCount ??
-        room?.currentGame?.drawnNumbers.length ?? 0;
-      const claims = devSnap?.engineRoom?.currentGame?.claimsCount ??
-        room?.currentGame?.claims.length ?? 0;
-      const status = devSnap?.engineRoom?.currentGame?.status ??
-        room?.currentGame?.status ?? "UNKNOWN";
-      const endedReason = devSnap?.engineRoom?.currentGame?.endedReason ??
-        room?.currentGame?.endedReason;
-
-      if (drawn !== rad2LastDrawn) {
-        console.log(
-          `[test] Rad2 draw progress: drawn=${drawn}, claims=${claims}, status=${status}`,
-        );
-        rad2LastDrawn = drawn;
+      const detail = await getGameDetail(masterToken, initialScheduledGameId);
+      if (!detail) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
       }
 
-      if (claims > claimsBeforeRad2) {
-        rad2WonAtDraw = drawn;
+      const drawn = detail.engineState?.drawsCompleted ?? 0;
+      const phase = detail.engineState?.currentPhase ?? 1;
+      const isFinished = detail.engineState?.isFinished ?? false;
+      const isPaused = detail.engineState?.isPaused ?? false;
+      const gameStatus = detail.game.status;
+
+      if (phase !== rad2LastPhase) {
         console.log(
-          `[test] ✓ Rad 2 (eller senere) vunnet, claims gikk fra ${claimsBeforeRad2} → ${claims} etter ${drawn} draws`,
+          `[test] Rad2 phase progress: phase=${phase}, drawn=${drawn}, isPaused=${isPaused}`,
+        );
+        rad2LastPhase = phase;
+      }
+
+      // Rad 2 vunnet hvis phase advanced beyond phaseBeforeRad2
+      if (phase > phaseBeforeRad2) {
+        rad2WonAtDraw = drawn;
+        rad2Phase = phase;
+        console.log(
+          `[test] ✓ Rad 2 (eller senere) vunnet — phase ${phaseBeforeRad2} → ${phase} etter ${drawn} draws`,
         );
         break;
       }
 
-      if (status === "ENDED") {
+      // Hvis runden er ferdig
+      if (isFinished || gameStatus === "completed" || gameStatus === "cancelled") {
         console.log(
-          `[test] Runde ferdig etter ${drawn} draws (status=ENDED, reason=${endedReason})`,
+          `[test] Runde slutt-state: gameStatus=${gameStatus}, drawn=${drawn}, phase=${phase}`,
         );
-        if (claims > claimsBeforeRad2) {
+        if (phase > phaseBeforeRad2) {
           rad2WonAtDraw = drawn;
+          rad2Phase = phase;
         }
         break;
       }
