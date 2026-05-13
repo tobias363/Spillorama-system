@@ -1,0 +1,3 @@
+apps/backend/src/game/Game1Engine.ts
+packages/game-client/src/games/game1/screens/PlayScreen.ts
+docs/engineering/PITFALLS_LOG.md

@@ -1,0 +1,2 @@
+fix(game-client): popup auto-show gate ignored waitingForMasterPurchase
+chore(test): add fixture for popup-mismatch scenario
