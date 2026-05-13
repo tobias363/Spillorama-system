@@ -59,6 +59,50 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Pilot-test: no-auto-start regression (Tobias 2026-05-13)
+
+**Scope:** Isolere bug Tobias rapporterte 2026-05-13: "runden startet også automatisk etter jeg kjøpte bong. vises som 5 kr innsats og 20 kr forhåndskjøp." Skal IKKE skje for Spill 1 (master-styrt mellom runder, ikke perpetual).
+
+**Inputs gitt:**
+- Branch: `feat/pilot-test-no-auto-start-2026-05-13` fra `origin/main`
+- Pre-reqs: `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, eksisterende `spill1-pilot-flow.spec.ts`, `helpers/rest.ts`, `SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`, `Game1MasterControlService`, `Game1ArmedToPurchaseConversionService`
+- Direktiv: Lag ny `tests/e2e/spill1-no-auto-start.spec.ts`. Pre-seed scheduled-game via `markHallReady` (purchase_open). Buy via REST. Verifiser status forblir purchase_open/ready_to_start, IKKE running. Master starter manuelt → verifiser run state transition.
+
+**Outputs produsert:**
+- **Ny test:** `tests/e2e/spill1-no-auto-start.spec.ts` (289 linjer, 2 test-scenarios)
+  - Scenario 1: 1 buy → 10s wait → verifiser ingen auto-start (10.4s deterministic)
+  - Scenario 2: 3 raske buys → 15s wait → verifiser ingen auto-start (15.4s deterministic)
+- **BUG_CATALOG oppdatert:** ny V-tabell ("Verifiserte ikke-bugs") med V1-entry for denne testen
+- **Branch:** `feat/pilot-test-no-auto-start-2026-05-13`
+- **Test-resultat:** **2 passed (26.7s)** — bug IKKE reprodusert via REST-flyt
+
+**Root-cause-analyse:**
+Bug-en Tobias rapporterte var IKKE en backend-auto-start. Det var en UI-misdisplay-bug i master-konsoll som hadde feil header-mapping fra PR #1277:
+- Status `purchase_open` og `ready_to_start` ble feilaktig vist som "Aktiv trekning - X" i header
+- Korrigert i commit `6b90b32e` 2026-05-12 ("'Aktiv trekning' kun ved running/paused")
+- Tobias' manuelle test så denne UI-tekst og konkluderte at "runden startet automatisk"
+
+Verifisert via test:
+- REST `/api/game1/purchase` rør IKKE status. Engine `running`-status settes KUN i `Game1MasterControlService.startGame` (SQL: `SET status='running', actual_start_time=now()`)
+- `Game1ScheduleTickService.transitionReadyToStartGames` flipper `purchase_open` → `ready_to_start` (når alle haller markert klar), ALDRI til `running`
+- `DemoAutoMasterTickService` target `hall-default` only, ikke pilot-haller
+
+**Læring:**
+- **Verdi-først teste:** Test verifiserer Spill 1 sin master-styrte semantikk er intakt mot bukker som flytter den til perpetual-modell ved feiltrekk
+- **UI vs DB:** Når Tobias rapporterer "runden startet" er det viktig å skille om det er backend-state eller UI-display. Header-text-mapping er ofte uavhengig av actual DB-state
+- **Test-design:** Direkte REST-buy bypasser UI-buy-popup-rendering — fokuser test på arkitektur, ikke UI-iterasjon
+- **Stress-test variant:** 3 raske buys + 15s wait dekker schedule-tick-cycle (10s interval) for race-detection
+- **Skala:** Test kjører på 27s deterministic — egnet som CI-gate hvis aktivert
+
+**Eierskap:**
+- `tests/e2e/spill1-no-auto-start.spec.ts` — ny test, owned by denne agenten
+- `tests/e2e/BUG_CATALOG.md` — appended V1-entry
+
+**Fallgruver oppdaget:** Ingen nye — bug Tobias rapporterte var allerede fikset i `main` før denne test-sesjonen.
+
+---
+
+
 ### 2026-05-10 → 2026-05-11 — Sesjon-summering: ADR-0017 + Bølge 1 + 2 + Tobias-bug-fix (PM-orkestrert)
 
 **Scope:** Implementere 4 ADR-er (0017 jackpot manual, 0019 state-konsistens, 0020 utvidelses-fundament, 0021 master start uten spillere), pluss fikse 10+ Tobias-rapporterte bugs under live testing. Spawnet ~12 parallelle agenter på ulike scope.
