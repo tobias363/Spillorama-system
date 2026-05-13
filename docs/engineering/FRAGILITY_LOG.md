@@ -17,24 +17,25 @@
 
 ---
 
-## F-01: PlayScreen.update() popup-auto-show gate (5 conditions)
+## F-01: PlayScreen.update() popup-auto-show gate (4 conditions, oppdatert 2026-05-13)
 
 **Filer:** `packages/game-client/src/games/game1/screens/PlayScreen.ts:693-720`
 
-**Hvorfor fragile:** 5 gate-conditions må ALLE være riktige for at popup vises:
+**Hvorfor fragile:** 4 gate-conditions må ALLE være riktige for at popup vises:
 1. `!autoShowBuyPopupDone` — kan settes feil sted og forhindre re-vis
 2. `!hasLive` — krever korrekt `myTickets.length`-sjekk
 3. `hasTicketTypes` — krever at lobbyTicketConfig ELLER state.ticketTypes er befolket
-4. `!waitingForMasterPurchase` — krever at `pickJoinableScheduledGameId(state)` returnerer ikke-null
-5. `preRoundTicketsCount === 0` — krever korrekt routing av pre-round vs live-tickets
+4. `preRoundTicketsCount === 0` — krever korrekt routing av pre-round vs live-tickets
+
+**FJERNET 2026-05-13:** `!waitingForMasterPurchase` var tidligere gate-condition (PR #1255 Alternativ B). Tobias-rapport 2026-05-13: "popup må komme frem uavhengig av hvilken runde som kjøres så lenge det er innenfor åpningstid". Fix: fjern gate-conditionen — popup vises uansett. Server-side `Game1ArmedToPurchaseConversionService` konverterer armed bonger → purchases ved master-start, så orphan-risiko eliminert.
 
 Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias-flyt.
 
 **Hva ALDRI gjøre:**
-- Legge til ny gate-condition uten å oppdatere alle 4 testene under
+- Legge til ny gate-condition uten å oppdatere alle testene under
 - Fjerne `getEventTracker().track("popup.autoShowGate", ...)` — server-side monitor avhenger av det
 - Endre `autoShowBuyPopupDone`-reset-logikk uten å forstå idle-state-modus
-- Sette `waitingForMasterPurchase = true` permanent — vil låse popup forever
+- Re-introdusere `!waitingForMasterPurchase` som gate-blokker — Tobias-direktiv 2026-05-13 sier popup MÅ vises på første runde også
 
 **Hvilke tester MÅ stå grønn etter endring:**
 - `tests/e2e/spill1-pilot-flow.spec.ts` — full happy-path
@@ -55,6 +56,7 @@ Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias
 - PR #1279 (2026-05-12): `waitingForMasterPurchase` låste Buy-knapp → fjernet
 - PR #1303 (2026-05-13): `state.entryFee` brukt feil → bruker nå `lobbyTicketConfig.entryFee`
 - I14 (2026-05-13): popup vises ikke pga stuck plan-run-state — root cause var IKKE popup-kode men plan-runtime (se F-02)
+- Tobias-rapport 2026-05-13 (kveld): popup vises ikke ved FØRSTE entry FØR runde har kjørt — `waitingForMasterPurchase=true` blokkerte gate. Live-monitor fanget bug-en (3036 iterations, 163 gate-evaluations, kun 2 willOpen=true). Fix: fjern `!waitingForMasterPurchase` fra gate-condition (denne PR).
 
 ---
 
