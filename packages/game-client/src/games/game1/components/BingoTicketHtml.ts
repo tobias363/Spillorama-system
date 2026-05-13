@@ -166,6 +166,19 @@ export class BingoTicketHtml {
     this.theme = getTicketThemeByName(opts.ticket.color, 0);
 
     this.root = document.createElement("div");
+    // data-test attributes consumed by Playwright pilot-flow tests
+    // (tests/e2e/spill1-pilot-flow.spec.ts). Inert in production.
+    this.root.setAttribute("data-test", "ticket-card");
+    this.root.setAttribute("data-test-ticket-id", opts.ticket.id ?? "");
+    this.root.setAttribute(
+      "data-test-ticket-color",
+      String(opts.ticket.color ?? ""),
+    );
+    this.root.setAttribute(
+      "data-test-ticket-type",
+      String(opts.ticket.type ?? ""),
+    );
+    this.root.setAttribute("data-test-ticket-price", String(opts.price));
     Object.assign(this.root.style, {
       // Bong.jsx-port: bongen fyller grid-cellens bredde opp til maxWidth 360px.
       // Høyden følger aspect-ratio 4:5 (240:300 → 0.8). `justifySelf: center`

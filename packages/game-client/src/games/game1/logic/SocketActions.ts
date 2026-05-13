@@ -91,12 +91,23 @@ function buildScheduledTicketSpec(
       throw new Error(`Ukjent bongfarge for ${name}.`);
     }
     const size = sizeFromSelection(selection);
-    const sameColorSmall = ticketTypes.find((t) =>
-      t.type === "small" && colorFromTicketName(t.name) === color
-    );
-    const multiplier = size === "large"
-      ? (sameColorSmall?.priceMultiplier ?? ticketType?.priceMultiplier ?? 1) * 2
-      : (ticketType?.priceMultiplier ?? sameColorSmall?.priceMultiplier ?? 1);
+    // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): bruk
+    // `priceMultiplier` direkte fra ticketTypes-tabellen, IKKE prøv å
+    // utlede small × 2 for large. Backend (`GamePlanEngineBridge.ts`)
+    // setter LARGE_TICKET_PRICE_MULTIPLIER = 3 (1 stor bong = 3 brett),
+    // og tabellen som sendes til klient inneholder denne verdien:
+    //   Small White:  priceMultiplier 1
+    //   Large White:  priceMultiplier 3
+    //   Small Yellow: priceMultiplier 2
+    //   Large Yellow: priceMultiplier 6
+    //   Small Purple: priceMultiplier 3
+    //   Large Purple: priceMultiplier 9
+    // Tidligere kode multipliserte small-bongens multiplikator med 2 for
+    // large → ga Large White = ×2 i stedet for ×3, og buy-API avviste med
+    // `INVALID_TICKET_SPEC` (server forventer 1500 øre).
+    const fallbackMultiplier =
+      ticketType?.priceMultiplier ?? 1;
+    const multiplier = ticketType?.priceMultiplier ?? fallbackMultiplier;
     const priceCentsEach = Math.round(entryFee * multiplier * 100);
     const key = `${color}:${size}:${priceCentsEach}`;
     const existing = specByKey.get(key);

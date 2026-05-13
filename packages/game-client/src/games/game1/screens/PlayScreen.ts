@@ -594,15 +594,30 @@ export class PlayScreen extends Container {
       ? state.myTickets
       : (state.preRoundTickets ?? []);
 
+    // Tobias-bug 2026-05-13 (BUY-DEBUG live-test): TicketGrid viste alle
+    // brett som "20 kr" / "0 kr" fordi `state.entryFee` (room.gameVariant
+    // default 20) ble brukt som fallback. Lobby-ticket-config har korrekt
+    // per-bong-pris (5 kr for billigste bong i Spill 1). Vi prioriterer
+    // `lobbyTicketConfig.entryFee` først (server-autoritativ via plan-
+    // runtime aggregator) og faller tilbake til `state.entryFee` kun hvis
+    // lobby-config mangler. Matcher BuyPopup-prioritering (showBuyPopup).
+    const gridEntryFee =
+      this.lobbyTicketConfig?.entryFee ?? state.entryFee ?? 10;
     this.ticketGrid.setTickets(tickets, {
       // Live brett (RUNNING) skal aldri ha × — de er allerede betalt.
       // Pre-round-brett (mellom runder) er kjøpt men ikke startet, så ×
       // gir refund via ticket:cancel. cancelable=running=false for
       // live-grid; cancelable=true for pre-round.
       cancelable: !running,
-      entryFee: state.entryFee || 10,
+      entryFee: gridEntryFee,
       state,
       liveTicketCount: running ? state.myTickets.length : 0,
+      // Tobias-bug 2026-05-13: send lobby-runtime ticket-types så
+      // `computePrice` kan mappe (ticket.type, ticket.color) → korrekt
+      // priceMultiplier/ticketCount. Uten dette fallback-er
+      // computePrice til state.ticketTypes (8 legacy-typer) som matcher
+      // feil med backend's (size, color)-modell.
+      ticketTypes: this.lobbyTicketConfig?.ticketTypes,
     });
 
     // Ball tube + called-numbers overlay reflect drawn history. We always sync

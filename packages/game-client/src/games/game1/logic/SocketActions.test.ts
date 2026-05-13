@@ -235,9 +235,15 @@ describe("Game1SocketActions", () => {
         paymentMethod: "digital_wallet",
         idempotencyKey: "web-game1-uuid-1",
       });
+      // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): pre-fix kode
+      // hardkodet `multiplier = sameColorSmall.priceMultiplier × 2` for
+      // Large-bonger. Det ga Large Yellow = 5 × (2 × 2) = 20 kr (= 2000 øre).
+      // Post-fix bruker `ticketType.priceMultiplier` direkte fra lobby-
+      // config. For Large Yellow: priceMultiplier=6 → 5 × 6 = 30 kr
+      // (= 3000 øre). Server forventer 3000 øre per Tobias-spec.
       expect(body.ticketSpec).toEqual([
         { color: "yellow", size: "small", count: 2, priceCentsEach: 1000 },
-        { color: "yellow", size: "large", count: 1, priceCentsEach: 2000 },
+        { color: "yellow", size: "large", count: 1, priceCentsEach: 3000 },
       ]);
       expect(playScreen.showBuyPopupResult).toHaveBeenCalledWith(true);
     });
