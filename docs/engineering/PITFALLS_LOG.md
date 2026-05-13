@@ -54,9 +54,9 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 8 | 2026-05-11 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 10 | 2026-05-11 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 13 | 2026-05-13 |
 
-**Total:** 83 entries (per 2026-05-11)
+**Total:** 86 entries (per 2026-05-13)
 
 ---
 
@@ -1239,6 +1239,70 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 - §5.x (kjedede PR-er må rebases mot main mellom hvert squash)
 - PR #1196 (overlay-slett ble blokkert av denne fallgruven)
 
+### §11.11 — ESM-modul som er BÅDE importerbar og kjørbar må gate dispatcher
+
+**Severity:** P2 (developer-friction, blokkerer testing)
+**Oppdaget:** 2026-05-13 (PM Push-Control Phase 2-bygg)
+**Symptom:** node:test for en ESM-fil rapporterer kun 1 test fullført, selv om filen har 30+ describe-blokker. Tester ble aldri kjørt fordi importeren printer help-tekst og kaller `process.exit()` på import.
+**Root cause:** ESM-moduler kjører top-level kode ved hver import. Hvis modulen har en CLI-dispatcher med `process.exit(cmd ? 1 : 0)` på bunnen, vil import.meta.url-utløst kjøring eksitere før test-rammeverket får kalt testene.
+**Fix:**
+```javascript
+// Pakk dispatcher i isDirectInvocation-guard:
+const isDirectInvocation =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("my-module.mjs");
+
+if (isDirectInvocation) {
+  const cmd = process.argv[2];
+  // ... dispatcher logic
+}
+```
+**Prevention:**
+- ENHVER ESM-fil som skal være BÅDE CLI-script og importerbart bibliotek MÅ ha denne guarden
+- Test umiddelbart med `import { someExport } from "../my-module.mjs"` i en test-fil
+- Eksplisitt `export` på funksjoner som testes (ikke bare implicit på top-level)
+**Related:**
+- `scripts/pm-push-control.mjs` — fixed 2026-05-13
+- `scripts/__tests__/pm-push-control.test.mjs` — importerer `globMatch`, `filesOverlap`, `fileInScope`, `macNotify`
+
+---
+
+### §11.12 — JSDoc `**` inne i ESM kommentarer kan tolkes som comment-close
+
+**Severity:** P3 (compile-time-friction)
+**Oppdaget:** 2026-05-13 (PM Push-Control Phase 2-bygg)
+**Symptom:** Node ESM-parser kaster `SyntaxError: Unexpected token '*'` ved oppstart fordi JSDoc-kommentar inneholder triple-star som tolkes som `*/` etterfulgt av `*`.
+**Root cause:** JSDoc-style kommentarer åpnes med `/**` og avsluttes med `*/`. Hvis innholdet inneholder `**` (markdown-bold eller doubled-star glob), kan parser i visse situasjoner forveksle.
+**Fix:** I JSDoc-kommentarer som dokumenterer glob-syntaks eller markdown-formattering, bruk plain-text-erstatninger som `[[double-star]]` eller `(double-asterisk)` i stedet for litterært `**`.
+**Prevention:**
+- Eksempler i JSDoc bør være kjørbare kodestumper, ikke glob-/markdown-syntaks
+- Hvis du MÅ dokumentere `**`, skap eksempler som dataobjekter (`{ glob: "scripts/**/*.mjs" }`) — strings escapes-håndteres
+**Related:**
+- `scripts/pm-push-control.mjs` — fixed 2026-05-13 (JSDoc for `globMatch`)
+
+---
+
+### §11.13 — GitHub Actions YAML heredoc i bash-blokk MÅ indenteres
+
+**Severity:** P2 (CI-fail på workflow-load)
+**Oppdaget:** 2026-05-13 (PM Push-Control Phase 2 auto-rebase-workflow)
+**Symptom:** YAML-parser kaster `could not find expected ':'` på linjer inne i en `run: |`-blokk fordi heredoc-content begynner på column 1 (ikke YAML-indentert).
+**Root cause:** YAML pipe-block (`|`) krever konsistent indentation for hele blokken. Bash heredoc (`<<EOF`) skriver content uten innrykk, men YAML krever ALT innenfor blokken matche indentasjonen.
+**Fix:** Erstatt heredocs i Actions-YAML med `printf` eller `cat` med eksplisitt innrykk:
+```yaml
+run: |
+  printf '%s\n' "line 1" > /tmp/out
+  printf '%s\n' "line 2" >> /tmp/out
+```
+**Prevention:**
+- Aldri bruk `<<EOF` i Actions-YAML; bruk `printf` eller `tee`
+- Test workflow-YAML lokalt: `python3 -c "import yaml; yaml.safe_load(open('path.yml'))"`
+- For komplekse comment-bodies, bruk `gh pr comment --body-file <tmp>` med innholdet bygd via `printf`
+**Related:**
+- `.github/workflows/auto-rebase-on-merge.yml` — fixed 2026-05-13
+
+---
+
 ### §11.10 — Pre-commit hook leser stale `COMMIT_EDITMSG`
 
 **Severity:** P2 (developer-friction)
@@ -1294,3 +1358,4 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 | 2026-05-10 | Lagt til §7.8 (JackpotConfirmModal var feil mental modell — fjernet ADR-0017). Indeks-counts korrigert mot faktiske tall (§7=8, §11=7, total=71). | docs-agent (ADR-0017 PR-C) |
 | 2026-05-11 | Lagt til §7.9 (state.ticketTypes override), §7.10 (static bundle rebuild), §7.11 (lobby-init race), §7.12 (overlay pointer-events). §9.5 (demo-plan opening hours), §9.6 (ON CONFLICT uten UNIQUE). §11.8 (dev:nuke single-command), §11.9 (worktree-branch-leakage), §11.10 (pre-commit COMMIT_EDITMSG-bug). Total 71→79 entries. | PM-AI (sesjon 2026-05-10→2026-05-11) | docs-agent (ADR-0017 PR-C) |
 | 2026-05-12 | Lagt til §7.15 — klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets foreldreløse). Pilot-blokker fra Tobias-test 11:03-11:05, fikset via Alternativ B (klient venter med kjøp). | Agent B (Klient wait-on-master) |
+| 2026-05-13 | Lagt til §11.11 (ESM dispatcher må gates med isDirectInvocation), §11.12 (JSDoc `**` parse-feil), §11.13 (GitHub Actions YAML heredoc indentation). Funn under PM Push-Control Phase 2-bygg. Total 83→86 entries. | Phase 2-agent (PM-AI orkestrert) |

@@ -1,0 +1,121 @@
+name: Auto-rebase open PRs on merge
+
+# Når en PR merges til main, kalkuler hvilke åpne PR-er som overlapper
+# på fil-nivå med den merget PR-en. Forsøk auto-rebase av disse via
+# GitHub API. Kommenter resultatet på hver PR.
+#
+# Etablert Phase 2 av PM Push Control (2026-05-13).
+# Doc: docs/engineering/PM_PUSH_CONTROL.md
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  auto-rebase:
+    # Kjør kun hvis PR ble merget (ikke bare lukket)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute overlapping open PRs
+        id: overlaps
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+          echo "Computing overlap with merged PR #$MERGED_PR"
+
+          # Hent filer fra merget PR
+          MERGED_FILES=$(gh pr view "$MERGED_PR" --json files --jq '.files[].path' | sort -u)
+          if [ -z "$MERGED_FILES" ]; then
+            echo "merged PR has no files (?), skipping"
+            echo "overlap_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$MERGED_FILES" > /tmp/merged-files.txt
+          echo "Merged PR touched $(wc -l </tmp/merged-files.txt) file(s)"
+
+          # Hent alle åpne PR-er
+          OPEN_PRS=$(gh pr list --state open --limit 100 --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"')
+
+          # For hver åpen PR, sjekk om noen filer overlapper
+          OVERLAPPING=""
+          while read -r LINE; do
+            PR_NUM=$(echo "$LINE" | awk '{print $1}')
+            PR_BRANCH=$(echo "$LINE" | awk '{print $2}')
+            [ -z "$PR_NUM" ] && continue
+            PR_FILES=$(gh pr view "$PR_NUM" --json files --jq '.files[].path' 2>/dev/null | sort -u)
+            [ -z "$PR_FILES" ] && continue
+            OVERLAP=$(comm -12 <(echo "$MERGED_FILES") <(echo "$PR_FILES") | head -5)
+            if [ -n "$OVERLAP" ]; then
+              echo "PR #$PR_NUM overlaps with merged PR on:"
+              echo "$OVERLAP" | sed 's/^/  /'
+              OVERLAPPING="$OVERLAPPING $PR_NUM"
+            fi
+          done <<< "$OPEN_PRS"
+
+          OVERLAPPING=$(echo "$OVERLAPPING" | tr ' ' '\n' | grep -v '^$' | sort -un | tr '\n' ' ')
+          COUNT=$(echo "$OVERLAPPING" | tr ' ' '\n' | grep -cv '^$' || echo 0)
+          echo "overlap_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "overlapping_prs=$OVERLAPPING" >> "$GITHUB_OUTPUT"
+          echo "Found $COUNT overlapping open PR(s): $OVERLAPPING"
+
+      - name: Attempt auto-rebase on overlapping PRs
+        if: steps.overlaps.outputs.overlap_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OVERLAPPING: ${{ steps.overlaps.outputs.overlapping_prs }}
+          MERGED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY##*/}"
+
+          # Build comment-bodies via printf into tmpfiles
+          for PR in $OVERLAPPING; do
+            [ -z "$PR" ] && continue
+            echo "--- Attempting rebase of PR #$PR ---"
+            RESPONSE=$(gh api \
+              -X PUT \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$OWNER/$REPO/pulls/$PR/update-branch" \
+              --silent 2>&1)
+            EC=$?
+            if [ $EC -eq 0 ]; then
+              echo "  Rebase request accepted for PR #$PR"
+              {
+                printf '%s\n\n' ":robot: Auto-rebased onto main after PR #${MERGED_PR} merged."
+                printf '%s\n\n' "This PR overlapped with #${MERGED_PR} on at least one file. GitHubs update-branch API has been invoked. Watch CI for green re-checks."
+                printf '%s\n' "-- PM Push Control (docs/engineering/PM_PUSH_CONTROL.md)"
+              } > /tmp/comment.md
+              gh pr comment "$PR" --body-file /tmp/comment.md
+            else
+              echo "  Rebase failed for PR #$PR: $RESPONSE"
+              {
+                printf '%s\n\n' ":warning: Conflicts with main after PR #${MERGED_PR} merged."
+                printf '%s\n\n' "Auto-rebase failed. This PR likely has merge conflicts with main. Manual rebase needed."
+                printf '%s\n' "    git fetch origin"
+                printf '%s\n' "    git checkout <this-branch>"
+                printf '%s\n' "    git rebase origin/main"
+                printf '%s\n' "    # resolve conflicts"
+                printf '%s\n\n' "    git push --force-with-lease"
+                printf '%s\n' "-- PM Push Control (docs/engineering/PM_PUSH_CONTROL.md)"
+              } > /tmp/comment.md
+              gh pr comment "$PR" --body-file /tmp/comment.md
+            fi
+          done
+
+      - name: No overlapping PRs (informativ)
+        if: steps.overlaps.outputs.overlap_count == '0'
+        run: |
+          echo "No open PRs overlap with merged PR. Nothing to rebase."

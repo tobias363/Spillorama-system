@@ -59,6 +59,100 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — PM Push-Control Phase 2 (Phase 2-agent, PM-AI orkestrert)
+
+**Scope:** Utvide Phase 1 PM push-control (PR #1330) med 7 deler: persistent
+registry (`.claude/active-agents.json` med /tmp-migrering), pre-push git-hook
+for agent-scope-sjekk, GitHub Actions auto-rebase-workflow ved PR-merge,
+node:test test-suite for `pm-push-control.mjs`, Mac-notifications via osascript
+med severity-baserte lyder, HTML-dashboard med auto-refresh, og live-monitor-
+integrasjon for å korrelere P0/P1-events med aktive agent-scope.
+
+**Inputs gitt:**
+- Phase 1-content via cherry-pick av commit `866aa39b` fra
+  `feat/pm-push-control-2026-05-13` (PR #1330, ikke merget enda)
+- Tobias-direktiv 2026-05-13: "Kan du også sette opp rutine i at du har
+  kontroll på alt som blir pusha til git så du kan forsikre om at det ikke
+  blir konfliktende arbeid"
+- Krav: branch fra `origin/main`, push til origin, IKKE åpne PR
+- 7 deliverables (A-G) med eksplisitt aksept-kriteria
+- Vitest-kompatibilitet ønsket — implementert med `node:test` som vitest speiler
+
+**Outputs produsert:**
+- **Branch:** `feat/pm-push-control-phase2-2026-05-13` (pushed til origin etter
+  test-verifikasjon)
+- **Filer endret:**
+  - `scripts/pm-push-control.mjs` — utvidet fra 470 linjer (Phase 1) til
+    ~760 linjer. Nye kommandoer: `scope-check`, `dashboard`, `notify`,
+    `monitor-correlate`. Nye flags: `--registry`, `--silent`. ESM-eksport av
+    `globMatch`, `filesOverlap`, `fileInScope`, `macNotify` for testing.
+    Glob-matcher utvidet til å håndtere `**/` (zero-or-more segments).
+    Direct-invocation-guard så modulen kan importeres uten å fyre dispatcher.
+- **Filer nye:**
+  - `.claude/active-agents.json` — initial empty registry (schema v2)
+  - `.husky/pre-push` — orchestrator-hook
+  - `.husky/pre-push-agent-scope-check.sh` — scope-check med WARN/STRICT-modi
+  - `.github/workflows/auto-rebase-on-merge.yml` — GitHub Actions workflow
+    som fyrer ved `pull_request.closed[merged=true]`, kalkulerer
+    fil-overlap mellom merget PR og åpne PRs via `gh pr view --json files`,
+    forsøker auto-rebase via `PUT /repos/.../pulls/{number}/update-branch`,
+    kommenterer på påvirkede PR-er.
+  - `scripts/__tests__/pm-push-control.test.mjs` — 34 node:test tester:
+    unit (globMatch, filesOverlap, fileInScope, macNotify) +
+    E2E CLI (register, list, unregister, scope-check WARN+STRICT,
+    legacy migration, env-var override, dashboard, notify).
+  - `scripts/__tests__/pre-push-scope-check.test.sh` — 9 bash-tester for
+    hook + bypass-flags.
+  - `scripts/generate-push-control-dashboard.sh` — wrapper for
+    `pm-push-control.mjs dashboard` med `--open` (browser) og `--watch`
+    (regen 30s).
+- **Filer oppdatert (knowledge-docs):**
+  - `docs/engineering/PM_PUSH_CONTROL.md` — utvidet med Phase 2-seksjoner:
+    nye kommandoer, registry-migrering, pre-push-hook, auto-rebase-workflow,
+    Mac-notif, HTML-dashboard, live-monitor-korrelasjon, testing.
+  - `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry.
+
+**Test-resultater:**
+- ✅ node:test: **34/34 PASS** (`scripts/__tests__/pm-push-control.test.mjs`)
+  med node 25.x, isolerte tempfile-registry, hverken canonical
+  `.claude/active-agents.json` eller `/tmp/active-agents.json` ble touchet.
+- ✅ Bash-test: **9/9 PASS** (`scripts/__tests__/pre-push-scope-check.test.sh`)
+- ✅ YAML-validering: `auto-rebase-on-merge.yml` — pyyaml parser OK,
+  4 steps, riktige triggers + permissions.
+- ✅ Direct CLI smoke-test: alle 12 commands (`list`, `register`, `unregister`,
+  `conflicts`, `merge-order`, `diff`, `poll`, `watch`, `scope-check`,
+  `dashboard`, `notify`, `monitor-correlate`) fungerer.
+- ✅ Regresjon: Phase 1-kommandoer fungerer uendret.
+- ⏭️ Mac-notif: test-verifisert på darwin platform — graceful skip på linux/CI.
+
+**Læring:**
+- **JSDoc `**` i ESM:** Triple-star (`* `) i JSDoc-blokker tolkes som
+  comment-close av node-parser. Måtte erstatte med `[[double-star]]` i
+  beskrivelser. Dokumentert i kommentar over `globMatch`.
+- **import.meta vs direct-invocation:** Standardmønsteret for å gjøre en
+  ESM-fil både importerbar OG kjørbar er
+  `import.meta.url === pathToFileURL(process.argv[1]).href`. Med worktree-
+  scenarioer kan path-comparison bli vanskelig, så jeg la til en fallback
+  med `endsWith("pm-push-control.mjs")` for robusthet.
+- **YAML heredoc-indentasjon:** Embedded heredocs i GitHub Actions YAML-
+  blokker MÅ være på samme indentation som omkringliggende bash-tekst —
+  ellers tolkes som YAML. Endte med `printf` i stedet for heredoc for å
+  unngå dette helt.
+- **Glob `**/` semantics:** Standard behavior er at `**/*.foo` matcher
+  både `foo.foo` (root) og `a/b/foo.foo` (nested). Krever spesial-håndtering
+  av `**/` → `(?:.*/)?` (gjør slashen optional). Andre patterns matter ikke.
+
+**Verifisering (PM):**
+- Hva PM må sjekke: kjør `node --test scripts/__tests__/pm-push-control.test.mjs`
+  + `bash scripts/__tests__/pre-push-scope-check.test.sh` for å verifisere
+  tester. Sjekk at `.claude/active-agents.json` er committed med tom
+  state. Sjekk at `.husky/pre-push*` er executable. Kjør
+  `node scripts/pm-push-control.mjs dashboard` og åpne HTML-en.
+
+**Tid:** ~3 timer agent-arbeid (under 6-8h estimat).
+
+---
+
 ### 2026-05-13 — Spill 1 re-entry-during-draw bug-FIX (I15) (reentry-fix agent, PM-AI)
 
 **Scope:** Implementer fix for I15 (re-entry-during-draw blokk) basert på diagnose levert av forrige agent (`docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md`). Speile `findPlayerInRoomByWallet + attachPlayerSocket`-guard fra `room:create`/`room:join` inn i `joinScheduledGame`. Knowledge protocol: oppdater FRAGILITY F-05 + PITFALLS §7.13 + BUG_CATALOG I15.
