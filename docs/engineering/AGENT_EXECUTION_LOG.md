@@ -111,6 +111,296 @@ Hver entry har struktur:
 
 ---
 
+### 2026-05-13 — Comprehension-verification (Tier-3 over FRAGILITY_LOG, general-purpose agent)
+
+**Scope:** Bygg Tier-3 enforcement i autonomi-pyramiden — heuristisk
+validering av `## Comprehension`-blokk i commit-meldinger som har
+`[context-read: F-NN]`-tagger. Forhindrer at agenter lyver med konstant
+kostnad ved å bare lime inn taggen uten å lese entry-en.
+
+**Inputs gitt:**
+- Mandat fra `<<autonomous-loop>>`-prompt: bygg verktøyet, fiks det til det
+  går grønt, dokumenter, oppdater PR-template + AGENT_EXECUTION_LOG +
+  PITFALLS_LOG, ikke åpne PR (PM tar over)
+- Pekere til `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, `FRAGILITY_LOG.md`,
+  `pre-commit-fragility-check.sh`, `ai-fragility-review.yml`, `PITFALLS_LOG §6`
+- Branch: `feat/comprehension-verification-2026-05-13` (ny fra origin/main)
+- Format: Conventional Commits norsk, `[bypass-pm-gate: ...]` + `gate-not-applicable: pm-autonomy-system`
+
+**Outputs produsert:**
+- **Branch:** `feat/comprehension-verification-2026-05-13` (pushed til origin)
+- **Filer:**
+  - `scripts/verify-context-comprehension.mjs:1-525` — Node ESM heuristic-validator
+    - parseFragilityLog (entries map med files + neverDo + rawBlock)
+    - extractComprehensionBlock (## Comprehension → stripper Co-Authored-By)
+    - extractContextReadFids (regex F-NN, komma-separert + multi-tag)
+    - extractBypassReason (bypass-tag med ≥20 chars krav)
+    - isGenericText (matcher "jeg leste", "OK", "lest", etc.)
+    - ruleOverlap (3+ content-word overlap, norsk+engelsk stop-words)
+    - findFileMention (full path, basename, eller glob-match)
+    - validateEntryAgainstComprehension (lengde + generic + filsti + regel)
+    - validateCommitMessage (e2e, returnerer ok/errors/warnings/fids)
+    - CLI: --commit-msg, --test, --help
+    - Git-note: skriver .git/comprehension-notes/comprehension-<sha>.txt
+  - `.husky/pre-commit-comprehension.sh:1-50` — bash wrapper (kompatibel med bash 3.2)
+  - `.husky/pre-commit:30-50` — wirer trinn 3 (comprehension) etter Tier-A intent
+  - `scripts/__tests__/verify-context-comprehension.test.mjs:1-590` — 48 tester (node --test)
+  - `docs/engineering/COMPREHENSION_VERIFICATION.md:1-380` — full guide + format-eksempler
+  - `.github/pull_request_template.md:65-85` — Knowledge protocol-seksjon med comprehension-reminder
+  - `docs/engineering/PITFALLS_LOG.md §5.8` — bash-4-requirement i fragility-check (oppdaget under arbeidet)
+
+**Test-resultater:**
+- 48 tester, alle passerer (107ms total)
+- Hook-performance lokalt:
+  - Uten `[context-read:]`-marker: ~108ms (regex + early exit)
+  - Med `[context-read: F-01]` god comprehension: ~150ms
+  - Med dårlig comprehension: ~150ms (avviser med detaljerte feilmeldinger)
+- Alle 4 acceptance-kriterier oppfylt:
+  - ✓ Allows commit with proper ## Comprehension block
+  - ✓ Rejects commit with "jeg leste"
+  - ✓ Override works with valid reason ≥ 20 chars
+  - ✓ Override rejects reason < 20 chars
+- TypeScript build: `npm run build:types` grønn
+- Backend typecheck: `npm --prefix apps/backend run check` grønn
+
+**Fallgruver oppdaget:**
+
+1. **§5.8 (ny i PITFALLS_LOG): bash 4-requirement i fragility-check** —
+   `.husky/pre-commit-fragility-check.sh` bruker `declare -A` (associative
+   arrays) som er bash 4+. macOS default bash er 3.2 — feiler med
+   `declare: -A: invalid option`. Scriptet eksisterer (PR #1326) men ble
+   aldri wiret. Konsekvens: min PR wirer KUN comprehension-hooken, ikke
+   fragility-hooken. Fragility-check må refaktores til POSIX eller Node
+   først.
+
+2. **Glob-pattern i FRAGILITY_LOG file-paths**: F-03 har `tests/e2e/*.spec.ts`
+   med glob. Initial parser-regex tillot ikke `*` i path-segmenter →
+   parsing-feil. Fix: utvid regex med `*` og legg til glob→regex-konvertering
+   i `findFileMention` så glob-pattern matcher konkrete spec-filer i
+   comprehension-tekst.
+
+3. **F-02 multi-line Filer-blokk**: F-02 har flere file-paths som bullets
+   under `**Filer:**`-header (ikke inline). Initial parser fanget kun
+   inline-paths. Fix: introduser `inFilerSection`-state-variabel som
+   samler bullet-rader til neste section-break.
+
+4. **Stop-word-filter for 3-ord-overlap**: Uten stop-word-filter ville
+   norsk-tekst med generisk fyll (`og`, `er`, `den`) trivielt nå 3-ord-grensen.
+   Lagt til 90+ norsk + engelsk stop-words i `STOP_WORDS`-set.
+
+**Læring:**
+
+- Bash hooks for kvalitets-sjekker bør være Node-baserte (matcher
+  `check-pm-gate.mjs`-mønster). Bash 3.2-grensene på macOS er for trange
+  for komplekse string-operasjoner.
+- Heuristikker har inherent trade-off: for streng = falske blokkering,
+  for løs = lett-bypassed. 3-ord-overlap + filsti-krav er empirisk
+  middel-streng — fanger "jeg leste" og copy-paste, godtar reell paraphrase.
+- Sjekk-design krever positivt + negativt test-suite parallelt. 48 tester
+  fordelt: parser (6), block-extraction (5), tag-extraction (8), generic-check
+  (5), overlap (3), file-mention (4), entry-validering (6), e2e (8),
+  quality-guards (2). Hver lag har sin egen sannhets-kilde.
+
+**Eierskap:**
+- `scripts/verify-context-comprehension.mjs` (eier alene)
+- `scripts/__tests__/verify-context-comprehension.test.mjs` (eier alene)
+- `.husky/pre-commit-comprehension.sh` (eier alene)
+- `docs/engineering/COMPREHENSION_VERIFICATION.md` (eier alene)
+- `.husky/pre-commit` + `.github/pull_request_template.md` + `PITFALLS_LOG` —
+  delt, kun additive endringer
+
+---
+
+### 2026-05-13 — Tobias-readiness auto-generator i AI Fragility Review (general-purpose agent)
+
+**Scope:** Utvid `ai-fragility-review.yml`-workflow med auto-genererte "Tobias smoke-test"-seksjoner per PR. Heuristikk-basert fil→scenario-mapping rendrer ferdig markdown med konkrete URL-er, credentials, klikk-steg, forventet resultat og typiske feilbilder. Skal redusere Tobias' verifikasjons-burden ved at han ser hva han skal teste uten å lese diffen selv.
+
+**Inputs gitt:**
+- Mandat fra Tobias 2026-05-13: PR-comment skal ha "Tobias smoke-test"-seksjon med <30 linjer, konkrete URL-er, norsk språk
+- Pekere til `.github/workflows/ai-fragility-review.yml`, `FRAGILITY_LOG.md`, `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, `PM_ONBOARDING_PLAYBOOK.md` §5, PR-template
+- 8 scenario-maler påkrevd (master-start/stop/advance, spiller-buy/mark, wallet-touch, docs-only, unknown)
+- Min 5 fixture-diff-er for testing
+- Branch: `feat/tobias-readiness-summary-2026-05-13`, ikke åpne PR
+
+**Outputs produsert:**
+- **Branch:** `feat/tobias-readiness-summary-2026-05-13` (pushes til origin etter PM-godkjent)
+- **Filer (nye):**
+  - `scripts/generate-tobias-readiness.mjs:1-301` — Node ESM-script med `classifyFile()` + `aggregateScenarios()` + `generateReadinessSection()` + CLI-main
+  - `scripts/tobias-readiness-templates/master-start.md` — start-runde-mal
+  - `scripts/tobias-readiness-templates/master-stop.md` — stopp-runde-mal
+  - `scripts/tobias-readiness-templates/master-advance.md` — advance-til-neste-fase-mal
+  - `scripts/tobias-readiness-templates/spiller-buy.md` — kjøp-bonger-mal
+  - `scripts/tobias-readiness-templates/spiller-mark.md` — marker-tall-mal
+  - `scripts/tobias-readiness-templates/wallet-touch.md` — wallet+compliance-mal
+  - `scripts/tobias-readiness-templates/docs-only.md` — "ikke nødvendig"-mal
+  - `scripts/tobias-readiness-templates/unknown.md` — fallback-mal
+  - `scripts/__tests__/generate-tobias-readiness.test.mjs` — 39 tester (node:test)
+  - `scripts/__tests__/fixtures/diff-{docs-only,master-start,spiller-buy,wallet-touch,mixed,husky-only,unknown}.txt`
+  - `scripts/__tests__/fixtures/commits-pilot-fix.txt`
+  - `docs/engineering/TOBIAS_READINESS_FORMAT.md` — vedlikeholds-doc
+- **Filer (endret):**
+  - `.github/workflows/ai-fragility-review.yml` — nytt `Generate Tobias smoke-test section`-step + integrasjon med eksisterende FRAGILITY-review comment
+
+**Test-resultat:**
+- `node --test scripts/__tests__/generate-tobias-readiness.test.mjs` → 39/39 pass, ~1.1s runtime
+- Manuell smoke-test med `--diff-file scripts/__tests__/fixtures/diff-spiller-buy.txt` produserte korrekt markdown med 2 scenarier (spiller-buy + spiller-mark) inkludert URL-er, credentials og "Forventet feilbilde"-seksjon
+- YAML-syntax verifisert med `js-yaml.load(...)` → OK
+
+**Fallgruver oppdaget:**
+- Hvis FRAGILITY har 0 matches OG vi bare ville posted Tobias-section, var den eksisterende `return`-early-koden et hinder — fikset ved å restrukturere så Tobias-section vises uavhengig av FRAGILITY-match
+- Eksisterende comment-detection brukte kun "🛡️ AI Fragility Review"-substreng — utvidet til å også matche "🎯 Tobias smoke-test" så docs-only-PR-er får én oppdatert comment, ikke duplikat
+- Aggregering: hvis blandet docs+kode, måtte vi droppe "docs-only" fra scenario-listen så reelle test-steg ikke ble overskygget av "ikke nødvendig"
+
+**Læring:**
+- Templates som markdown-filer (ikke inline strings i kode) gir mye lettere vedlikehold — Tobias eller framtidig PM kan justere språk uten å rør JS-koden
+- Test-fixture-tilnærming (diff-files på disk) gir reproduserbar testing av CLI-integrasjonen
+- `import.meta.url` + named exports lar samme fil være både CLI og test-target uten kunstig refactor
+
+**Verifisering (PM):**
+- Vil verifisere at workflow renderer korrekt på faktisk PR etter merge til main
+- Forventer at neste PR mot main får både FRAGILITY-review (eksisterende) + Tobias-readiness (nytt)
+
+**Tid:** ~3 timer agent-arbeid
+
+**Eierskap:** `scripts/generate-tobias-readiness.mjs`, `scripts/tobias-readiness-templates/`, `scripts/__tests__/generate-tobias-readiness.test.mjs`, `.github/workflows/ai-fragility-review.yml` (Tobias-section), `docs/engineering/TOBIAS_READINESS_FORMAT.md`
+
+---
+
+### 2026-05-13 — Spill 1 re-entry-during-draw bug-FIX (I15) (reentry-fix agent, PM-AI)
+
+**Scope:** Implementer fix for I15 (re-entry-during-draw blokk) basert på diagnose levert av forrige agent (`docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md`). Speile `findPlayerInRoomByWallet + attachPlayerSocket`-guard fra `room:create`/`room:join` inn i `joinScheduledGame`. Knowledge protocol: oppdater FRAGILITY F-05 + PITFALLS §7.13 + BUG_CATALOG I15.
+
+**Inputs gitt:**
+- Diagnose-doc med root-cause + foreslått fix (impl-only-pseudokode)
+- Repro-test `tests/e2e/spill1-reentry-during-draw.spec.ts` på `feat/reentry-diagnose-2026-05-13`
+- Pekere til `roomEvents.ts:372-397` (room:create-guard) og `roomEvents.ts:771-806` (room:join-guard)
+- Krav: branch fra origin/main, IKKE åpne PR, oppdater knowledge-docs
+
+**Outputs produsert:**
+- **Branch:** `fix/reentry-during-draw-2026-05-13` (pushed til origin)
+- **Filer endret:**
+  - `apps/backend/src/sockets/game1ScheduledEvents.ts:40,295-336` — re-attach-guard lagt til (33 linjer ny kode + import)
+- **Filer nye:**
+  - `apps/backend/src/sockets/__tests__/game1ScheduledEvents.reconnect.test.ts` — 4 unit-tester (350+ linjer)
+- **Filer oppdatert (knowledge-docs):**
+  - `docs/engineering/FRAGILITY_LOG.md` — F-05 lagt til (60+ linjer)
+  - `docs/engineering/PITFALLS_LOG.md` — §7.13 utvidet med Variant A vs Variant B + alle handler-path-listen
+  - `tests/e2e/BUG_CATALOG.md` — I15 status til 🟡 PR pending, endringslogg-entry
+- **Cherry-picks:** Cherry-picket diagnose-commit (`fbbd6a3c`) + FRAGILITY_LOG-introducing commit (`e54526f7`) inn på fix-branch så docs+repro-test + base FRAGILITY_LOG er tilgjengelig (FRAGILITY_LOG hadde ikke landet på main enda).
+
+**Test-resultater:**
+- ✅ TypeScript strict: clean (`npm run check` i apps/backend)
+- ✅ Unit-tester nye: 4/4 PASS (`game1ScheduledEvents.reconnect.test.ts`) — 564ms
+- ✅ Unit-tester eksisterende: 15/15 PASS (`game1JoinScheduled.test.ts`) — backwards-compat verifisert
+- ✅ Reconnect-tester: 3/3 PASS (`reconnectMidPhase.test.ts`)
+- ✅ Scheduled-binding-tester: 5/5 PASS (`roomEvents.scheduledBinding.test.ts`)
+- ✅ E2E PASS: `spill1-reentry-during-draw.spec.ts` (14.9s, 1/1 PASS mot lokal `dev:all` med `ENABLE_BUY_DEBUG=1`)
+
+**Fallgruver oppdatert i PITFALLS §7.13:**
+- Variant A (PR #1218): klient-side fallback for delta-watcher kun
+- Variant B (denne 2026-05-13): backend-side guard for initial-join — ny dimensjon for samme pitfall-klasse
+- KRITISK observasjon: ÉN handler-path-fix er ikke nok — ALLE join-handlere må ha guard
+
+**Ny FRAGILITY F-05:**
+- Filer: 6 (game1ScheduledEvents + roomEvents.ts + BingoEngine + roomHelpers)
+- Hvorfor fragile: `detachSocket` beholder player-record bevisst → ALLE join-paths må ha re-attach-guard
+- Hva ALDRI gjøre: 5 punkter (ikke kall joinRoom uten guard, ikke fjern guard "for å forenkle", ikke endre detachSocket, etc.)
+- Tester som MÅ stå grønn: 6 (4 unit + 2 E2E)
+- Manuell verifikasjon: 8-trinn flyt
+- Historisk skade: PR #1218 (Variant A glemt initial-join) + 2026-05-13 (I15 oppstod fordi initial-join-pathen var glemt)
+
+**Læring:**
+- Cherry-pick base-commits FØR fix når avhengige docs/tests ikke har landet på main enda. Spar tid vs å gjenskape repro-test.
+- `findPlayerInRoomByWallet` er en standalone helper i `roomHelpers.ts`, ikke en metode på engine — kan importeres direkte i `game1ScheduledEvents.ts` uten å rote med deps-objektet.
+- Test-stub som returnerer `players: [...]` i `getRoomSnapshot` er tilstrekkelig for å verifisere re-attach-pathen uten å mocke ut engine-internals.
+- Fail-soft pattern fra dev-team: catch + log warn ved snapshot-lookup-feil (annet enn ROOM_NOT_FOUND), fall gjennom til normal joinRoom. ROOM_NOT_FOUND-pathen håndteres allerede av eksisterende recovery-blokk.
+
+**Verifisering:**
+- Backend kjørte tsx watch under utvikling — fix-en hot-reloaded automatisk
+- E2E-test kjørt mot levende backend med fix-en aktiv → PASS
+- Pre-existing tester ikke brutt
+
+**Tid:** ~45 min (45 min implementasjon + tester + docs; bør være ferdig innenfor 30-60 min estimat)
+
+**Status:** Branch klar for push. PM tar over for PR. Repro-test forblir som permanent regresjons-vern. FRAGILITY F-05 låser inn at ALLE handler-paths må ha guard så framtidige paths ikke gjenstår.
+
+---
+
+### 2026-05-13 — Spill 1 re-entry-during-draw bug-diagnose (I15) (explore-agent, PM-AI)
+
+**Scope:** Diagnose Tobias-rapport 2026-05-13: "etter at jeg starter spill går ut av lobbyen for deretter å gå inn igjen så kommer jeg ikke inn i rommet under en trekning, må vente til trekning er ferdig før jeg kan gå inn". Reprodusere bug-en i E2E-test, finn root cause, klassifiser (impl vs struktur), foreslå fix uten å skrive den.
+
+**Inputs gitt:**
+- Symptom-beskrivelse fra Tobias
+- Pekere til `apps/backend/src/sockets/gameEvents/roomEvents.ts:636`, `RoomLifecycleService.ts`, `BingoEngine.ts:980`, `Game1Controller.ts`, `lobby.js`
+- Token `spillorama-2026-test` for debug-events
+- Forutsetning: dev:all kjører på port 4000
+- Branch: ny fra main, IKKE åpne PR, IKKE skriv fix
+- Hvis strukturell bug — STOP og rapporter til PM
+
+**Outputs produsert:**
+- **Branch:** `feat/reentry-diagnose-2026-05-13` (klar for push)
+- **Commit:** `<pending>` — `test(spill1): I15 — re-entry during active draw repro + diagnose`
+- **Filer (nye):**
+  - `tests/e2e/spill1-reentry-during-draw.spec.ts` — repro-test (forventet 🔴 inntil fix)
+  - `docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md` — full root-cause-diagnose med file:line + foreslått fix
+- **Filer (oppdatert):**
+  - `tests/e2e/BUG_CATALOG.md` — I15-entry + endringslogg
+
+**Test-run:**
+- `npx playwright test --config=tests/e2e/playwright.config.ts spill1-reentry-during-draw`
+- Status: 🔴 FAIL som forventet (test reproduserer bug-en)
+- Tid: ~24s
+- Console-output bekrefter: `[Game1] Room join feilet — mounter lobby-fallback istedenfor å vise feil: {code: PLAYER_ALREADY_IN_ROOM, message: ...}`
+
+**Root cause:**
+- File: `apps/backend/src/sockets/game1ScheduledEvents.ts:288-365` (`joinScheduledGame`)
+- Line 324: `engine.joinRoom({roomCode: row.room_code, ...})` kalles direkte UTEN re-attach-guard
+- Backend `detachSocket` (`BingoEngine.ts:3802-3831`) beholder player-record (kun socketId nullstilles) av regulatoriske grunner (armed-state, lucky, forhåndskjøp)
+- `RoomLifecycleService.joinRoom:393-394` → `assertWalletNotAlreadyInRoom` → THROW `PLAYER_ALREADY_IN_ROOM`
+- `room:create` (`roomEvents.ts:372-397`) og `room:join` (`roomEvents.ts:771-806`) har riktig guard via `findPlayerInRoomByWallet` + `attachPlayerSocket` — `joinScheduledGame` mangler den
+- Klient `Game1Controller.start` (line 717-753) faller direkte til `Game1LobbyFallback`-overlay ved `!joinResult.ok` (ingen `room:resume`-fallback for initial join, kun for plan-advance på linje 1325-1361)
+
+**Klassifisering: IMPLEMENTASJONS-bug (ikke strukturell)**
+- Mønsteret er etablert (room:create/room:join har samme guard)
+- < 30 linjer endring i én fil
+- Ingen ny tabell, event, eller arkitektur-pattern
+- Backwards-compatible (fresh joins faller fortsatt til `engine.joinRoom`)
+
+**Foreslått fix (impl-only, ikke skrevet):**
+```ts
+// joinScheduledGame, rett før engine.joinRoom-call på linje 324
+const existingSnapshot = engine.getRoomSnapshot(row.room_code);
+const existingPlayer = findPlayerInRoomByWallet(existingSnapshot, user.walletId);
+if (existingPlayer) {
+  engine.attachPlayerSocket(row.room_code, existingPlayer.id, socketId);
+  await markScheduledRoom(row.room_code, row, isHallShared, hallId);
+  const snapshot = engine.getRoomSnapshot(row.room_code);
+  return { roomCode: row.room_code, playerId: existingPlayer.id, snapshot };
+}
+// Else: full join (eksisterende kode)
+```
+
+**Fallgruver oppdaget (ingen nye):**
+- Bug-en treffer §3 (Spill-arkitektur) men er kjent symptom — `tests/e2e/helpers/rest.ts:200-201` har allerede dokumentert at "engine keeps player-slots after game-end — uten cleanup feiler neste `room:join` med `PLAYER_ALREADY_IN_ROOM`". Denne bugen er samme klasse, bare for re-join mid-runde i stedet for inter-runde.
+- Repro-strategien (capture console-warnings + DOM-check for `data-spill1-lobby-fallback`) er ny i denne test-suiten, men trivielt mønster.
+
+**Læring:**
+- **Backend join-flows er ikke ensartet.** `room:create`, `room:join`, og `game1:join-scheduled` har tre litt forskjellige veier inn til samme `engine.joinRoom`. To av tre har re-attach-guard. Mønsteret bør konsolideres (eventuelt via en `engine.joinOrReattach`-hjelp som kombinerer det).
+- **`engine.joinRoom` er IKKE idempotent.** Dokumentstringen "reconnect-trygg — samme wallet → samme player per eksisterende joinRoom-logikk" i `game1ScheduledEvents.ts:283-284` er feil. Idempotensen kommer fra wrap-guarden, ikke fra `joinRoom` selv.
+- **Capture console-warnings** er mer robust enn DOM-polling for transient overlays (Game1LobbyFallback rendres + fetch-feiler + kan unmounte raskt).
+
+**Verifisering:**
+- TypeScript strict passerer for testen (samme pattern som eksisterende spec-er)
+- Test bekreftet RØD via 1 run (24.7s)
+- Lobby-fallback-mount observert i console: PLAYER_ALREADY_IN_ROOM-error logget
+
+**Tid:** ~75 min (eksplorering + repro-test + diagnose-doc + BUG_CATALOG-update)
+
+**Status:** Branch klar for push. PM tar over. Klart for impl-agent å skrive selve fix-en (forventet < 30 linjer + 1-2 unit-tester for reconnect-pathen).
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.

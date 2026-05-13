@@ -48,6 +48,8 @@
 - [ ] `npm --prefix apps/backend run build`
 - [ ] Manual verification completed
 
+> **Tobias smoke-test auto-genereres:** Etter at PR-en er opprettet, vil `ai-fragility-review.yml` poste en kommentar med "🎯 Tobias smoke-test"-seksjon basert på endrede filer. Sjekk at de auto-genererte stegene matcher faktisk endring. Hvis du synes scenariet ikke passer, legg en eksplisitt "Smoke-test"-seksjon i PR-beskrivelsen. Format-spec: `docs/engineering/TOBIAS_READINESS_FORMAT.md`.
+
 ## Deploy Plan
 - Render environment: `staging` / `production`
 - Health endpoint checked: `/health`
@@ -66,6 +68,24 @@ Before marking a Linear issue **Done**, all three must be true:
 ## Architecture Decision Records (ADR)
 
 - [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, har en ADR blitt opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se `docs/adr/README.md` for når ADR kreves.)
+
+## Knowledge protocol (Tobias-direktiv 2026-05-13)
+
+Hvis denne PR-en rør pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet), bekreft minst ett av disse:
+
+- [ ] **PITFALLS_LOG.md** oppdatert ELLER ingen ny fallgruve oppdaget
+- [ ] **PM_HANDOFF_YYYY-MM-DD.md** utkast skrevet ELLER ikke sesjons-slutt
+- [ ] **Relevant skill** under `.claude/skills/` oppdatert ELLER ikke generaliserbart mønster
+- [ ] **AGENT_EXECUTION_LOG.md** appended hvis denne PR-en kommer fra en agent-leveranse
+
+### FRAGILITY-comprehension (Tier-3, etablert 2026-05-13)
+
+Hvis commits i denne PR-en har `[context-read: F-NN]`-tagger, bekreft:
+
+- [ ] Hver `[context-read: F-NN]`-tag har en tilhørende `## Comprehension`-blokk i commit-message som paraphraserer entry-en (filer + ≥ 1 regel fra "Hva ALDRI gjøre")
+- [ ] Eventuelle `[comprehension-bypass: ...]`-bruk er forklart i PR-beskrivelsen og minst 20 tegn lang
+
+Se [`docs/engineering/COMPREHENSION_VERIFICATION.md`](../docs/engineering/COMPREHENSION_VERIFICATION.md) for detaljer. Håndheves automatisk av `.husky/pre-commit-comprehension.sh`.
 
 ## Tracking
 - Linear issue: 

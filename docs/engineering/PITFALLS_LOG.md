@@ -585,6 +585,20 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Prevention:**
 - Sjekk PR-tittel matcher regex før push
 
+### §5.8 — `.husky/pre-commit-fragility-check.sh` krever bash 4 (declare -A)
+
+**Severity:** P1 (blokkerer commits på macOS hvis wired)
+**Oppdaget:** 2026-05-13 (under comprehension-verification-utvikling)
+**Symptom:** Scriptet bruker `declare -A FRAGILITY_MAP=()` (bash 4 associative arrays). macOS default bash er 3.2.57 — feiler med `declare: -A: invalid option` ved kjøring. Scriptet ble lagt til i PR #1326 men aldri wiret i `.husky/pre-commit`. Hvis det wires nå, vil ALLE commits på Mac avvises med exit 2.
+**Root cause:**
+- macOS har bash 3.2 av lisens-grunner (GPL v3 i bash 4+). Apple-developer-stack bruker `zsh` som default, men husky kaller `bash` eksplisitt.
+- Linux/CI har bash 5 — der fungerer scriptet
+**Fix:** Refaktor `pre-commit-fragility-check.sh` til POSIX-kompatibel logikk (uten `declare -A`) eller bytt til Node-implementasjon. Inntil da: la hooken være IKKE-wiret i `.husky/pre-commit` — komplement-verktøyene (`comprehension-check` + `ai-fragility-review.yml`) gir delvis dekning.
+**Prevention:**
+- Bash 4-features (`declare -A`, `mapfile`, `readarray`) skal ikke brukes i hooks
+- Hvis bash 3.2-grenser er for trange, port hooken til Node (matcher mønster fra `check-pm-gate.mjs`)
+- Test alle nye hooks lokalt på macOS før wiring
+
 ---
 
 ## §6 Test-infrastruktur
@@ -886,21 +900,43 @@ const detail = await fetch(`/api/admin/game1/games/${gameId}`, { headers: { Auth
 - PR #1196 (overlay slettet, erstattet med CenterBall idle-text)
 - `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleText`
 
-### §7.13 — `PLAYER_ALREADY_IN_ROOM` ved upgrade fra hall-default til scheduled-game
+### §7.13 — `PLAYER_ALREADY_IN_ROOM` på ALLE room-join-paths (ikke bare delta-watcher)
 
 **Severity:** P0 (klient blokkert fra spill)
-**Oppdaget:** 2026-05-11 (Tobias: "samme problem som tidlgiere nedtellingne bare starter på nytt, trekning starter ikke")
-**Symptom:** Klient joiner hall-default-rom (canonical: `BINGO_<HALL>`), så spawner master scheduled-game i samme canonical roomCode. Delta-watcher trigger ny `game1:join-scheduled` → server returnerer `PLAYER_ALREADY_IN_ROOM` → klient mister state-sync.
-**Root cause:** Server `joinRoom`-handler avviser duplikat-join på samme roomCode. Men klienten må fortsatt motta scheduled-game-state (current_game-ID, draws, marks). `game1:join-scheduled` har ingen "re-attach existing membership"-modus.
-**Fix:** PR #1218 — Game1Controller fanger `PLAYER_ALREADY_IN_ROOM`-fall og kaller `socket.resumeRoom({ roomCode })` som returnerer ferskt snapshot. Bridge applySnapshot oppdaterer state.
+**Oppdaget:** 2026-05-11 (PR #1218 — delta-watcher-pathen), utvidet 2026-05-13 (I15 — initial-join-pathen).
+
+**Symptom:**
+- **Variant A (PR #1218):** Klient joiner hall-default-rom (canonical: `BINGO_<HALL>`), så spawner master scheduled-game i samme canonical roomCode. Delta-watcher trigger ny `game1:join-scheduled` → server returnerer `PLAYER_ALREADY_IN_ROOM` → klient mister state-sync.
+- **Variant B (I15, denne 2026-05-13):** Spiller navigerer tilbake til lobby (`returnToShellLobby`) og inn igjen mid-runde. Klient kaller `game1:join-scheduled` initial → server `joinScheduledGame` → `engine.joinRoom` → `assertWalletNotAlreadyInRoom` THROW `PLAYER_ALREADY_IN_ROOM`. Klient lander på `Game1LobbyFallback`-overlay i stedet for pågående runde.
+
+**Root cause:** `engine.detachSocket` (`BingoEngine.ts:3802-3831`) beholder player-record (kun socketId nullstilles) av regulatoriske grunner — armed-state, lucky-number-valg, forhåndskjøpte bonger må overleve disconnect/reconnect. Konsekvensen er at **ALLE handler-paths som kaller `engine.joinRoom` MÅ ha en re-attach-guard via `findPlayerInRoomByWallet` + `attachPlayerSocket`**:
+- ✅ `room:create` (`roomEvents.ts:372-397`)
+- ✅ `room:join` (`roomEvents.ts:771-806`)
+- ✅ `room:resume` (`roomEvents.ts:863+`) — re-attach by design
+- ✅ `game1:join-scheduled` (`game1ScheduledEvents.ts:288-365`) — **fikset 2026-05-13 (I15)** via re-attach-guard, etter at PR #1218 fikset klient-side-fallback for delta-watcher men IKKE backend-side-guard for initial-join
+
+PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket.resumeRoom`) for `handleScheduledGameDelta`-pathen, men det dekket ikke `Game1Controller.start` (initial join). I15-fix legger guard på backend-side i `joinScheduledGame` så ALLE handler-paths har samme mønster.
+
+**Fix:**
+- **PR #1218 (Variant A):** Game1Controller fanger `PLAYER_ALREADY_IN_ROOM` i `handleScheduledGameDelta` og kaller `socket.resumeRoom({ roomCode })` for å sync state.
+- **2026-05-13 / `fix/reentry-during-draw-2026-05-13` (Variant B / I15):** Backend `joinScheduledGame` får re-attach-guard som speiler `room:create`/`room:join` — sjekker `findPlayerInRoomByWallet` før `engine.joinRoom` og kaller `attachPlayerSocket` hvis player allerede finnes. Test: `apps/backend/src/sockets/__tests__/game1ScheduledEvents.reconnect.test.ts` + E2E `tests/e2e/spill1-reentry-during-draw.spec.ts`.
+
 **Prevention:**
-- ALDRI anta at re-join er trygt — sjekk om client allerede er medlem
+- ALDRI kall `engine.joinRoom` uten å først sjekke `findPlayerInRoomByWallet` — du vil treffe `PLAYER_ALREADY_IN_ROOM` ved enhver reconnect mid-runde
+- Når du legger til ny join-handler-path: speile `room:join`-guard-mønsteret (`getRoomSnapshot` → `findPlayerInRoomByWallet` → `attachPlayerSocket` → return) FØR du går videre til `engine.joinRoom`
+- `detachSocket` beholder player-record bevisst — ALDRI endre det til "full cleanup" uten å forstå armed-state-implikasjoner
 - For roomCode-changes som beholder canonical: bruk `resumeRoom`, ikke ny `join`
-- Hall-default-rom som upgraded til scheduled-game = samme canonical roomCode → samme membership
+- Hall-default-rom som upgraded til scheduled-game = samme canonical roomCode → samme membership → re-attach-pathen MÅ aktiveres
+
 **Related:**
 - PR #1218 (`fix(spillerklient): room:resume fallback ved PLAYER_ALREADY_IN_ROOM`)
-- `packages/game-client/src/games/game1/Game1Controller.ts:syncScheduledGameMembership`
-- `apps/backend/src/sockets/gameEvents/roomEvents.ts:joinRoom` (kilden for error-koden)
+- `fix/reentry-during-draw-2026-05-13` (denne 2026-05-13 — backend-side guard for `joinScheduledGame`)
+- `packages/game-client/src/games/game1/Game1Controller.ts:syncScheduledGameMembership` (delta-watcher fallback)
+- `apps/backend/src/sockets/game1ScheduledEvents.ts:288-365` (initial-join re-attach-guard)
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts:372-397, 771-806` (reference-pattern)
+- `apps/backend/src/util/roomHelpers.ts:71-78` (`findPlayerInRoomByWallet`)
+- `apps/backend/src/game/BingoEngine.ts:3790-3800` (`attachPlayerSocket`)
+- FRAGILITY_LOG F-05 — kobler alle handler-paths til guard-mønsteret
 
 ### §7.14 — Delta-watcher race: initial-join + watcher dobbel-fyrer samtidig
 

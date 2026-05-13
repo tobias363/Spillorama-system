@@ -143,6 +143,65 @@ Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias
 
 ---
 
+## F-05: Re-attach-guard i ALLE room-join handler-paths
+
+**Filer:**
+- `apps/backend/src/sockets/game1ScheduledEvents.ts:288-365` — `joinScheduledGame` (I15-fix)
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts:372-397` — `room:create` (reference-pattern)
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts:771-806` — `room:join` (reference-pattern)
+- `apps/backend/src/game/BingoEngine.ts:3790-3800` — `attachPlayerSocket`
+- `apps/backend/src/game/BingoEngine.ts:3802-3831` — `detachSocket` (beholder player-record bevisst)
+- `apps/backend/src/util/roomHelpers.ts:71-78` — `findPlayerInRoomByWallet`
+
+**Hvorfor fragile:** `engine.detachSocket` beholder player-record (nullstiller KUN socketId) av regulatoriske grunner — armed-state, lucky-number-valg og forhåndskjøpte bonger må overleve disconnect/reconnect. Konsekvensen er at ALLE room-join-paths MÅ ha en re-attach-guard som speiler `room:join`/`room:create`-mønsteret. Mangler en handler-path guarden, kaster `engine.joinRoom` → `assertWalletNotAlreadyInRoom` → `PLAYER_ALREADY_IN_ROOM` ved re-entry mid-runde, og spilleren havner i `Game1LobbyFallback`-overlay i stedet for pågående runde.
+
+Mønster som alle handlers MÅ følge før `engine.joinRoom`:
+```ts
+const snapshot = engine.getRoomSnapshot(roomCode);
+const existing = findPlayerInRoomByWallet(snapshot, walletId);
+if (existing) {
+  engine.attachPlayerSocket(roomCode, existing.id, socketId);
+  // ... return existing.id som playerId
+  return;
+}
+// Kun fall gjennom til joinRoom hvis player IKKE finnes.
+```
+
+**Hva ALDRI gjøre:**
+- Kalle `engine.joinRoom` uten å først sjekke `findPlayerInRoomByWallet` (du vil treffe `PLAYER_ALREADY_IN_ROOM` ved enhver reconnect)
+- Fjerne re-attach-guarden fra `room:create`/`room:join`/`joinScheduledGame`/`handleScheduledGameDelta` "for å forenkle" — alle fire pathene MÅ ha den
+- Legge til ny join-handler-path uten å speile guard-mønsteret
+- Endre `detachSocket` slik at den faktisk fjerner player-record fra `room.players` (regulatorisk feil — armed-state forsvinner)
+- Endre `assertWalletNotAlreadyInRoom` til å "ignorere" wallets med null socket (defeats hele guard-poenget)
+
+**Hvilke tester MÅ stå grønn etter endring:**
+- `apps/backend/src/sockets/__tests__/game1ScheduledEvents.reconnect.test.ts` — re-attach-pathen (4 tester)
+- `apps/backend/src/sockets/__tests__/game1JoinScheduled.test.ts` — happy-path + race + status-gate (15 tester)
+- `apps/backend/src/sockets/__tests__/roomEvents.scheduledBinding.test.ts` — room:resume scheduled-binding
+- `apps/backend/src/sockets/__tests__/reconnectMidPhase.test.ts` — mid-phase reconnect
+- `tests/e2e/spill1-reentry-during-draw.spec.ts` — E2E re-entry under aktiv trekning
+- Alle `tests/e2e/spill1-*.spec.ts`-tester som inneholder `returnToShellLobby` eller socket-reconnect
+
+**Manuell verifikasjon:**
+1. `npm run dev:nuke`
+2. Master starter en runde via `/admin/agent/cash-in-out`
+3. Vent til status=`running` + minst 1 draw skjedd (~6s)
+4. Spiller åpner `/web/?debug=1`, klikker bingo-tile → play-screen vises
+5. Klient kaller `returnToShellLobby()` (back-knapp i lobby.js)
+6. Spiller klikker bingo-tile igjen
+7. **Verifiser at klient lander på play-screen UTEN `PLAYER_ALREADY_IN_ROOM`-feil i console** og UTEN at `Game1LobbyFallback`-overlay vises
+8. Sjekk backend-log for `room.player.attached` (ikke `room.player.joined`)
+
+**Historisk skade:**
+- **2026-05-11 (PR #1218):** Samme bug-klasse i `handleScheduledGameDelta`-pathen (hall-default → scheduled-game upgrade). Fikset KUN delta-watcher-pathen. `joinScheduledGame` initial-join-pathen ble glemt → I15 (denne bug-en) oppstod 2026-05-13. Konklusjon: ÉN handler-path-fix er ikke nok — ALLE join-handlere må ha samme guard.
+- **2026-05-13 (I15):** Tobias-rapport: "etter at jeg starter spill går ut av lobbyen for deretter å gå inn igjen så kommer jeg ikke inn i rommet under en trekning". Diagnose-doc: `docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md`. Repro-test: `tests/e2e/spill1-reentry-during-draw.spec.ts`. Fix: `fix/reentry-during-draw-2026-05-13` (denne PR).
+
+**Relatert:**
+- PITFALLS_LOG §7.13 — `PLAYER_ALREADY_IN_ROOM` ved upgrade fra hall-default til scheduled-game (PR #1218)
+- BUG_CATALOG.md I15 — re-entry-during-draw
+
+---
+
 ## Format for ny entry
 
 Når du fikser en bug som er ikke-triviell, OG du har sett at endring andre steder kunne ha brutt din fix, legg til:
@@ -177,3 +236,7 @@ Håndheves manuelt under PR-review (TODO: automatiser via danger-rule).
 |---|---|---|
 | 2026-05-13 | Initial — F-01 PlayScreen.update gate, F-02 plan-run lifecycle, F-03 manuell-flyt-gap, F-04 ConsoleBridge | PM-AI (Tobias-direktiv) |
 | 2026-05-13 | F-02 FIXED (I16) — auto-reconcile fra lobby-poll i `Game1LobbyService.tryReconcileTerminalScheduledGame`. 10 unit-tester, < 50ms latency, idempotent. | Agent (I16) |
+
+---
+
+| 2026-05-13 | F-05 — Re-attach-guard i ALLE room-join handler-paths (etter I15-fix på `joinScheduledGame`) | reentry-fix agent |
