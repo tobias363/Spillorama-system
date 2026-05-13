@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Single-file Stryker config for WalletOutboxWorker.ts — for faster iteration during initial baseline run 2026-05-13.",
+  "packageManager": "npm",
+  "reporters": ["html", "clear-text", "progress", "json"],
+  "testRunner": "tap",
+  "tap": {
+    "testFiles": [
+      "src/wallet/WalletOutboxWorker.test.ts",
+      "src/wallet/WalletOutboxWorker.survivors.test.ts"
+    ],
+    "nodeArgs": [
+      "--import",
+      "tsx/esm",
+      "--test-reporter=tap",
+      "-r",
+      "{{hookFile}}",
+      "{{testFile}}"
+    ]
+  },
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/wallet/WalletOutboxWorker.ts"
+  ],
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 50
+  },
+  "timeoutMS": 60000,
+  "concurrency": 4,
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.json",
+  "htmlReporter": {
+    "fileName": "reports/mutation-wallet/mutation.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation-wallet/mutation.json"
+  },
+  "ignorePatterns": [
+    "dist",
+    "migrations",
+    "scripts",
+    "node_modules",
+    ".stryker-tmp",
+    "reports",
+    "load-tests",
+    "public",
+    "tools"
+  ],
+  "tempDirName": ".stryker-tmp",
+  "logLevel": "info"
+}

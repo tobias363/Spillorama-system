@@ -76,5 +76,7 @@ scripts/performance-budget/report-pilot-hw.json
 # .stryker-tmp/  : Stryker scratchpad — kan vokse til flere GB under run
 # reports/mutation/ : HTML/JSON-rapporter — lastes opp som CI-artefakter
 apps/backend/.stryker-tmp/
+apps/backend/.stryker-tmp-*/
 apps/backend/reports/mutation/
+apps/backend/reports/mutation-*/
 .stryker-tmp/

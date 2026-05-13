@@ -227,8 +227,69 @@ mutation-score skal være pilot-gating-kriterium, lager vi ADR da.
 
 ---
 
+## Lærdom fra første full-baseline-run (2026-05-13)
+
+### Per-file vs full-suite kjøring
+
+Første-iterasjon dukket opp at full-suite-runs (alle 5 filer parallelt) er
+**dramatisk tregere** enn forventet — første poll viste 5-8 timer estimat,
+ikke 30-50 min som dry-run antydet. Konteinsjon mellom TypeScript-checker-
+prosesser og test-runner-prosesser var hoved-issuen.
+
+**Anbefaling:** Bruk per-file `stryker.<File>.config.json` for iterativ
+utvikling av survivor-tester. Per-file isolation:
+- WalletOutboxWorker (170 LOC, 64 mutanter): ~2.5 min
+- Game1HallReadyService (1029 LOC, 488 mutanter): ~15 min
+- Game1LobbyService (914 LOC, 316 mutanter): ~8 min
+- GamePlanRunService (1203 LOC, 770 mutanter): ~25 min (estimat)
+- MasterActionService (2077 LOC, ~1100 mutanter): ~40 min (estimat)
+
+Total sekvensiell: ~1.5 timer (vs 5-8 timer parallelt). Counter-intuitivt,
+men consistent med TypeScript-checker-overhead.
+
+### Mønstre for survivors
+
+Tre dominante kategorier observert i baseline-runs:
+
+1. **Equivalent mutants på log-strenger** (StringLiteral) — `console.error`,
+   `console.debug`, `log.info` med string-arg. Mutasjonen endrer ikke
+   funksjonell oppførsel. Disse er regnet som "akseptable" survivors og
+   skal ikke target-es med tester. Tobias-direktiv 2026-05-13.
+
+2. **Boundary-conditions** (EqualityOperator, ConditionalExpression) —
+   `>=` vs `>` på terskel-sjekker, `null !=` vs `null ==`, `===` vs `!==`.
+   Disse er **høy-verdi** å target med tester — de er reelle prod-bugs
+   som kan oppstå.
+
+3. **No-coverage på error-paths** — try/catch, `if (err)`, fallback-grener.
+   Test-suite kjører kun happy-path; error-paths er aldri eksekvert.
+   Adresseres ved å skrive negative tester med mock-en som kaster.
+
+### Test-strategi som drepte mest mutanter per LOC
+
+- **Boundary-testing for tall**: `>=` vs `>` tester eksakte verdi-grenser
+  (eks. `attempts == MAX_ATTEMPTS` for dead-letter).
+- **Pure functions er gull**: `computeHallStatus` er ren — 20 tester drepte
+  21 mutanter. Sammenlign med Game1LobbyService.buildNextGame (private
+  funksjon kun testbar via getLobbyState): 16 tester drepte 17 mutanter.
+- **Test-fixture med exact boundary-verdier**: Date(2026-05-08T11:00:00Z)
+  for å treffe 11:00 sharp osv.
+
+### Hva sliter mest
+
+- **Private helper-funksjoner** er vanskelig å nå målrettet (må gå via
+  public API som krever mocks for hele depend-graf).
+- **TypeScript-error-mutanter** (`140 errors` på Game1LobbyService) er
+  positive signaler (type-systemet fanger) men teller IKKE som "killed"
+  i Stryker-score. Det er en gap i score-modellen for strict-typed kode.
+- **ZOD-schema-mutanter** krever fixture-data for invalid input som
+  schema-en avviser.
+
+---
+
 ## Endringslogg
 
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-13 | Initial — Stryker mutation-testing etablert. Tap-runner (ikke vitest pga backend bruker `node --test`). 5 Tier-A-filer i scope. Weekly cron. | Backend-agent |
+| 2026-05-13 | Første full-baseline + survivors-tester. WalletOutboxWorker: 46%→82%. Game1HallReadyService: 48%→54%. Game1LobbyService: 39%→49%. Per-file `stryker.<File>.config.json`-mønster etablert. Lærdoms-seksjon utvidet med equivalent-mutant-håndtering. | Test-engineer agent |
