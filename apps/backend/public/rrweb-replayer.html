@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spillorama — Rrweb Session Replayer</title>
+    <!--
+      Standalone replayer for Rrweb DOM session-replay sessions.
+      Tobias-direktiv 2026-05-13.
+
+      Bruksmønster:
+        1. PM-agent / Tobias åpner /rrweb-replayer.html
+        2. Limer inn token (samme som RESET_TEST_PLAYERS_TOKEN i .env)
+        3. Klikker "List sessions" → ser alle session-filer på disk
+        4. Klikker "Replay" på en session → rrweb spiller av som video
+        5. Sjekker konsoll for any errors
+
+      Filen serves som static fra apps/backend/public/rrweb-replayer.html.
+      Bruker rrweb-player CDN-bundle (samme rrweb-versjon som klient).
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/index.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/style.css"
+    />
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #1a1a1a;
+        color: #eee;
+        margin: 0;
+        padding: 16px;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+      .controls {
+        background: #2a2a2a;
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+      }
+      .controls label {
+        display: block;
+        margin: 8px 0 4px;
+        font-size: 12px;
+        color: #aaa;
+      }
+      .controls input[type="text"],
+      .controls input[type="password"] {
+        width: 100%;
+        padding: 6px 8px;
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #444;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      .controls button {
+        background: #0f0;
+        color: #000;
+        border: none;
+        padding: 8px 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        margin-right: 8px;
+        margin-top: 8px;
+      }
+      .controls button:hover {
+        background: #0e0;
+      }
+      .sessions-list {
+        max-height: 200px;
+        overflow-y: auto;
+        background: #2a2a2a;
+        padding: 8px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      .sessions-list .row {
+        padding: 4px 8px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+      .sessions-list .row:hover {
+        background: #1a4a1a;
+      }
+      .sessions-list .meta {
+        color: #888;
+        font-size: 11px;
+        margin-left: 8px;
+      }
+      #replayer {
+        background: #0a0a0a;
+        border: 1px solid #444;
+        border-radius: 6px;
+        min-height: 600px;
+      }
+      .status {
+        background: #2a2a2a;
+        padding: 8px 12px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      .status.error {
+        background: #3a1a1a;
+        color: #faa;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Spillorama — Rrweb Session Replayer</h1>
+
+    <div class="controls">
+      <label for="token">RESET_TEST_PLAYERS_TOKEN</label>
+      <input
+        type="password"
+        id="token"
+        placeholder="spillorama-2026-test (default)"
+        value="spillorama-2026-test"
+      />
+
+      <label for="custom-session">Eller direkte session-id (skip listen)</label>
+      <input
+        type="text"
+        id="custom-session"
+        placeholder="<timestamp-ms>-<6chars>"
+      />
+
+      <button id="btn-list">List sessions</button>
+      <button id="btn-load">Last inn session-id</button>
+    </div>
+
+    <div id="status" class="status">Ready. Lim inn token og klikk "List sessions".</div>
+    <div id="sessions" class="sessions-list" style="display: none"></div>
+    <div id="replayer"></div>
+
+    <script>
+      // Standalone replayer-logic. Holdes inline siden det er én side med
+      // ingen build-step — PM-agenten åpner kun /rrweb-replayer.html.
+
+      const statusEl = document.getElementById("status");
+      const sessionsEl = document.getElementById("sessions");
+      const replayerEl = document.getElementById("replayer");
+      const tokenInput = document.getElementById("token");
+      const customSessionInput = document.getElementById("custom-session");
+
+      let currentPlayer = null;
+
+      function setStatus(msg, isError = false) {
+        statusEl.textContent = msg;
+        statusEl.className = "status" + (isError ? " error" : "");
+      }
+
+      async function listSessions() {
+        const token = tokenInput.value.trim();
+        if (!token) {
+          setStatus("Mangler token", true);
+          return;
+        }
+        setStatus("Henter sessions ...");
+        try {
+          const res = await fetch(
+            "/api/_dev/debug/rrweb-sessions?token=" +
+              encodeURIComponent(token),
+          );
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            setStatus(
+              "Feilet (" +
+                res.status +
+                "): " +
+                (body.error?.message ?? "ukjent"),
+              true,
+            );
+            return;
+          }
+          const body = await res.json();
+          const sessions = body.data?.sessions ?? [];
+          if (sessions.length === 0) {
+            sessionsEl.innerHTML =
+              "<div class='meta'>Ingen sessions på disk. La klient kjøre med ?debug=1 først.</div>";
+            sessionsEl.style.display = "block";
+            setStatus("Ingen sessions funnet.");
+            return;
+          }
+          sessionsEl.innerHTML = sessions
+            .map(
+              (s) =>
+                "<div class='row' data-session='" +
+                s.sessionId +
+                "'>" +
+                s.sessionId +
+                " <span class='meta'>" +
+                Math.round(s.fileSize / 1024) +
+                " KB — " +
+                new Date(s.modifiedAt).toLocaleString() +
+                "</span></div>",
+            )
+            .join("");
+          sessionsEl.style.display = "block";
+          for (const row of sessionsEl.querySelectorAll(".row")) {
+            row.addEventListener("click", () =>
+              loadSession(row.getAttribute("data-session")),
+            );
+          }
+          setStatus(
+            "Fant " + sessions.length + " session(s). Klikk en for å replay.",
+          );
+        } catch (err) {
+          setStatus("Network error: " + (err.message ?? err), true);
+        }
+      }
+
+      async function loadSession(sessionId) {
+        if (!sessionId) {
+          sessionId = customSessionInput.value.trim();
+        }
+        if (!sessionId) {
+          setStatus("Mangler session-id", true);
+          return;
+        }
+        const token = tokenInput.value.trim();
+        setStatus("Laster session " + sessionId + " ...");
+        try {
+          const res = await fetch(
+            "/api/_dev/debug/rrweb-events?session=" +
+              encodeURIComponent(sessionId) +
+              "&token=" +
+              encodeURIComponent(token),
+          );
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            setStatus(
+              "Feilet (" +
+                res.status +
+                "): " +
+                (body.error?.message ?? "ukjent"),
+              true,
+            );
+            return;
+          }
+          const body = await res.json();
+          const events = body.data?.events ?? [];
+          if (events.length === 0) {
+            setStatus("Session er tom (ingen events)", true);
+            return;
+          }
+          setStatus(
+            "Laster replay (" +
+              events.length +
+              " events" +
+              (body.data?.truncated ? ", truncated" : "") +
+              ") ...",
+          );
+          // Tøm forrige replayer
+          if (currentPlayer) {
+            try {
+              replayerEl.innerHTML = "";
+            } catch (_) {
+              /* ignore */
+            }
+            currentPlayer = null;
+          }
+          // Filter ut bug-markers (type=99) — disse er ikke rrweb-events og
+          // ville forvirre replayer. Vi viser dem som meta-info i status.
+          const bugMarks = events.filter((e) => e && e.type === 99);
+          const rrwebEvents = events.filter((e) => e && e.type !== 99);
+          if (rrwebEvents.length === 0) {
+            setStatus(
+              "Ingen rrweb-events i session (kun bug-markers: " +
+                bugMarks.length +
+                ")",
+              true,
+            );
+            return;
+          }
+          // Bruk rrweb-player (CDN-eksportert som global `rrwebPlayer`).
+          // eslint-disable-next-line no-undef
+          currentPlayer = new rrwebPlayer({
+            target: replayerEl,
+            props: {
+              events: rrwebEvents,
+              autoPlay: false,
+              showController: true,
+            },
+          });
+          let bugInfo = "";
+          if (bugMarks.length > 0) {
+            bugInfo =
+              " — " +
+              bugMarks.length +
+              " bug-marker(s): " +
+              bugMarks
+                .map(
+                  (m) =>
+                    (m.data && m.data.label) +
+                    " @ " +
+                    new Date(m.timestamp).toLocaleTimeString(),
+                )
+                .join(", ");
+          }
+          setStatus(
+            "Replay klar (" +
+              rrwebEvents.length +
+              " rrweb-events" +
+              (body.data?.truncated ? ", truncated" : "") +
+              ")" +
+              bugInfo,
+          );
+        } catch (err) {
+          setStatus("Network error: " + (err.message ?? err), true);
+        }
+      }
+
+      document
+        .getElementById("btn-list")
+        .addEventListener("click", listSessions);
+      document
+        .getElementById("btn-load")
+        .addEventListener("click", () => loadSession(null));
+    </script>
+  </body>
+</html>

@@ -26,6 +26,11 @@ import { SocketInjector } from "./SocketInjector.js";
 import { StateInspector } from "./StateInspector.js";
 import { StressTester } from "./StressTester.js";
 import { isDebugEnabled, persistDebugEnabled } from "./activation.js";
+// Tobias-direktiv 2026-05-13: Rrweb DOM session-replay. Vi starter recorderen
+// herfra (observer-pattern) slik at Game1Controller forblir uberørt. Lazy-
+// loader rrweb fra node_modules — prod-bundle uten ?debug=1 får ikke ekstra
+// ~80 KB.
+import { setupRrwebRecorder, resetRrwebRecorder } from "./RrwebRecorder.js";
 import type { DebugSuiteAPI, InstallOptions, LogLevel } from "./types.js";
 
 /** Suite version — bumped when public API changes shape. */
@@ -333,6 +338,24 @@ export function installDebugSuite(
   // Persist activation so reload keeps the suite up.
   persistDebugEnabled(true);
 
+  // Tobias-direktiv 2026-05-13: Rrweb DOM session-replay. Start automatisk
+  // når debug-suite installeres. Lazy-load rrweb fra node_modules; fail-soft
+  // hvis modulen mangler eller backend er nede. Token resolves via samme
+  // logikk som EventStreamer (URL ?debugToken= / localStorage / default).
+  try {
+    const recorder = setupRrwebRecorder({
+      token: resolveDebugTokenForRrweb(),
+      // Default endpoint /api/_dev/debug/rrweb-events
+      // Default flushIntervalMs 2000
+      // Default recordCanvas true (fange Pixi.js)
+    });
+    void recorder.start().catch((err: unknown) => {
+      logger.warn("system", "rrweb.start.failed", { err: String(err) });
+    });
+  } catch (err) {
+    logger.warn("system", "rrweb.setup.failed", { err: String(err) });
+  }
+
   logger.success("system", "debug.installed", {
     version: DEBUG_SUITE_VERSION,
     options: { ...options, hudParent: options.hudParent ? "[element]" : undefined },
@@ -362,6 +385,13 @@ export function installDebugSuite(
       }
       sockAny.__emitForDebug = undefined;
       sockAny.__spilloramaDebugEmitPatched = false;
+      // Tobias-direktiv 2026-05-13: stop Rrweb-recorder + clear singleton
+      // ved unmount.
+      try {
+        resetRrwebRecorder();
+      } catch {
+        /* best-effort */
+      }
       const w = window as unknown as { spillorama?: { debug?: DebugSuiteAPI } };
       if (w.spillorama) {
         w.spillorama.debug = undefined;
@@ -370,6 +400,33 @@ export function installDebugSuite(
     },
   };
   return installed;
+}
+
+/**
+ * Resolve token for RrwebRecorder. Samme strategi som
+ * Game1Controller.resolveDebugStreamToken:
+ *   1. URL `?debugToken=<token>` — ad-hoc override
+ *   2. localStorage `SPILL1_DEBUG_STREAM_TOKEN` — vedvarende per browser
+ *   3. Default `spillorama-2026-test` — matcher dev-default
+ *
+ * Recorder håndterer 401/403 fail-soft, så et feil default-token er kun
+ * mer støy i devtools, ikke en bug.
+ */
+function resolveDebugTokenForRrweb(): string {
+  try {
+    if (typeof window === "undefined") return "spillorama-2026-test";
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("debugToken")?.trim();
+    if (fromQuery) return fromQuery;
+    const fromLs =
+      typeof window.localStorage !== "undefined"
+        ? window.localStorage.getItem("SPILL1_DEBUG_STREAM_TOKEN")?.trim()
+        : null;
+    if (fromLs) return fromLs;
+    return "spillorama-2026-test";
+  } catch {
+    return "spillorama-2026-test";
+  }
 }
 
 /**
