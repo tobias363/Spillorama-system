@@ -291,6 +291,54 @@ export class TicketGridHtml {
       liveCount,
       prevSig: this.lastSignature,
     });
+
+    // [BUY-DEBUG] Tobias-direktiv 2026-05-13: log hver ticket før render.
+    // Dette er SISTE STEG i klient-flyten — det som faktisk vises i UI.
+    // Hvis prisen her er "20 kr" mens server sa "15 kr" har vi en
+    // klient-side override som må fikses.
+    const buyDebugEnabled =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      /[?&]debug=1/.test(window.location.search);
+    if (buyDebugEnabled) {
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][TicketGrid.rebuild][input]", {
+        ticketCount: tickets.length,
+        liveCount,
+        entryFee: opts.entryFee,
+        cancelable: opts.cancelable,
+        availableTicketTypes:
+          opts.state.ticketTypes?.map((t) => ({
+            name: t.name,
+            type: t.type,
+            priceMultiplier: t.priceMultiplier,
+            ticketCount: t.ticketCount,
+          })) ?? null,
+        tickets: tickets.map((t, idx) => {
+          const tt = opts.state.ticketTypes?.find((x) => x.type === t.type);
+          const computedPrice = this.computePrice(t, opts);
+          return {
+            idx,
+            id: t.id,
+            type: t.type,
+            color: t.color,
+            serverPrice: t.price,
+            computedPrice,
+            usedServerPrice: typeof t.price === "number",
+            resolvedTicketType: tt
+              ? {
+                  name: tt.name,
+                  type: tt.type,
+                  priceMultiplier: tt.priceMultiplier,
+                  ticketCount: tt.ticketCount,
+                }
+              : null,
+            isLive: idx < liveCount,
+          };
+        }),
+      });
+    }
+
     this.clear();
     for (let i = 0; i < tickets.length; i++) {
       const ticket = tickets[i];

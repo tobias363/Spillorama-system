@@ -1078,6 +1078,66 @@ export function registerRoomEvents(ctx: SocketContext): void {
           for (const sel of merged) {
             totalWeighted += sel.qty * weightFor(sel);
           }
+
+          // [BUY-DEBUG] Tobias-direktiv 2026-05-13: detaljert pris/farge-trace.
+          // Logger hver merged selection med resolved ticketType-config så vi
+          // kan se eksakt hvilken priceMultiplier/ticketCount/name backend
+          // tror er knyttet til denne kjøpsraden. Ved ?debug=1 i klient kan
+          // Tobias korrelere mot BUY-DEBUG-events på klient-siden via
+          // clientRequestId for å se hele kjøps-kjeden side-ved-side.
+          // eslint-disable-next-line no-console
+          console.log("[BUY-DEBUG][backend][bet:arm][selections-resolved]", {
+            socketId: socket.id,
+            playerId,
+            roomCode,
+            clientRequestId:
+              typeof (payload as unknown as { clientRequestId?: unknown })
+                .clientRequestId === "string"
+                ? (
+                    payload as unknown as { clientRequestId: string }
+                  ).clientRequestId
+                : null,
+            incomingSelections: selections.map((s) => ({
+              type: s.type,
+              name: s.name ?? null,
+              qty: s.qty,
+            })),
+            existingSelections: existing.map((s) => ({
+              type: s.type,
+              name: s.name ?? null,
+              qty: s.qty,
+            })),
+            mergedSelections: merged.map((s) => {
+              const tt =
+                (s.name
+                  ? ticketTypes.find((t) => t.name === s.name)
+                  : undefined) ??
+                ticketTypes.find((t) => t.type === s.type);
+              return {
+                type: s.type,
+                name: s.name ?? null,
+                qty: s.qty,
+                resolvedTicketType: tt
+                  ? {
+                      name: tt.name,
+                      type: tt.type,
+                      priceMultiplier: tt.priceMultiplier,
+                      ticketCount: tt.ticketCount,
+                    }
+                  : null,
+                weight: weightFor(s),
+                priceMultiplier: priceMultFor(s),
+              };
+            }),
+            totalWeighted,
+            availableTicketTypes: ticketTypes.map((t) => ({
+              name: t.name,
+              type: t.type,
+              priceMultiplier: t.priceMultiplier,
+              ticketCount: t.ticketCount,
+            })),
+          });
+
           if (totalWeighted > 30) {
             throw new DomainError(
               "INVALID_INPUT",
@@ -1103,6 +1163,29 @@ export function registerRoomEvents(ctx: SocketContext): void {
           const entryFee = deps.getRoomConfiguredEntryFee(roomCode);
           const wId = deps.getWalletIdForPlayer?.(roomCode, playerId);
           const hallId = engine.getRoomSnapshot(roomCode).hallId;
+
+          // [BUY-DEBUG] log entryFee + room config så Tobias kan korrelere
+          // klient-display ("5 kr per Liten hvit") mot server's faktiske pris-
+          // beregning. Hvis entryFee her er 20 i stedet for forventet 5 (= laveste
+          // bong-pris) er det her diskrepansen oppstår.
+          // eslint-disable-next-line no-console
+          console.log("[BUY-DEBUG][backend][bet:arm][entryFee-resolved]", {
+            roomCode,
+            playerId,
+            hallId,
+            walletId: wId,
+            entryFee,
+            entryFeeSource: "deps.getRoomConfiguredEntryFee()",
+            totalWeighted,
+            existingWeighted,
+            mergedSelectionCount: merged.length,
+            // Beregnet total-innsats med eksisterende formel — speil klient sin
+            // computePrice slik at vi kan se hvor forventet og faktisk divergerer.
+            expectedTotalKr: merged.reduce((sum, sel) => {
+              return sum + entryFee * priceMultFor(sel) * sel.qty;
+            }, 0),
+          });
+
           // Only consult compliance when we have a real wallet binding
           // and a positive entryFee — free-play (entryFee=0) bypasses
           // limit-check, matching ComplianceManager.wouldExceedLossLimit.

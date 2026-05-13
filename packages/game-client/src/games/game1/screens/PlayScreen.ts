@@ -711,6 +711,11 @@ export class PlayScreen extends Container {
     if (!ref) return;
     let fee = ref.entryFee || 10;
     let types = ref.ticketTypes ?? [];
+    let source: "lobbyTicketConfig" | "state.ticketTypes" | "fallback-default" =
+      "fallback-default";
+    if (Array.isArray(ref.ticketTypes) && ref.ticketTypes.length > 0) {
+      source = "state.ticketTypes";
+    }
     // Tobias-bug 2026-05-11: plan-runtime catalog-data (3 farger fra
     // spilleplanen) skal være AUTORITATIV for ticket-design — IKKE
     // state.ticketTypes (room:update payload) som ofte inneholder backend-
@@ -727,7 +732,37 @@ export class PlayScreen extends Container {
     if (this.lobbyTicketConfig) {
       types = this.lobbyTicketConfig.ticketTypes;
       fee = this.lobbyTicketConfig.entryFee;
+      source = "lobbyTicketConfig";
     }
+
+    // [BUY-DEBUG] Tobias-direktiv 2026-05-13: log hvilken kilde til
+    // ticketTypes som brukes (lobbyTicketConfig fra plan-runtime catalog
+    // vs state.ticketTypes fra room:update vs fallback-default). Hvis
+    // "20 kr"-bug oppstår, sjekk her hvilken kilde som leverer ticketTypes
+    // og om priceMultiplier-tabellen er riktig.
+    const buyDebugEnabled =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      /[?&]debug=1/.test(window.location.search);
+    if (buyDebugEnabled) {
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][PlayScreen.showBuyPopup]", {
+        source,
+        fee,
+        feeSource:
+          source === "lobbyTicketConfig"
+            ? "lobbyTicketConfig.entryFee (= smallest ticket price)"
+            : "ref.entryFee (= room-configured single fee)",
+        ticketTypes: types,
+        lobbyTicketConfigAvailable: !!this.lobbyTicketConfig,
+        lobbyTicketConfigEntryFee: this.lobbyTicketConfig?.entryFee ?? null,
+        stateTicketTypesCount: ref.ticketTypes?.length ?? 0,
+        stateEntryFee: ref.entryFee,
+        displayName,
+        preRoundTicketsCount: ref.preRoundTickets?.length ?? 0,
+      });
+    }
+
     const alreadyPurchased = ref.preRoundTickets?.length ?? 0;
     this.buyPopup.showWithTypes(
       fee,

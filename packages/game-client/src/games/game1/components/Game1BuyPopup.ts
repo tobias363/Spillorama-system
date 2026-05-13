@@ -302,6 +302,38 @@ export class Game1BuyPopup {
   ): void {
     if (ticketTypes.length === 0) return;
 
+    // [BUY-DEBUG] Tobias-direktiv 2026-05-13: logger ticketTypes input
+    // og resultater (per-row price) slik at vi kan se hva BuyPopup faktisk
+    // viser per rad. Korrelerer med backend ENABLE_BUY_DEBUG-logs.
+    const buyDebugEnabled =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      /[?&]debug=1/.test(window.location.search);
+    if (buyDebugEnabled) {
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][Game1BuyPopup.showWithTypes][input]", {
+        entryFee,
+        ticketTypes,
+        alreadyPurchased,
+        lossState: lossState
+          ? {
+              dailyUsed: lossState.dailyUsed,
+              dailyLimit: lossState.dailyLimit,
+              walletBalance: lossState.walletBalance,
+            }
+          : null,
+        displayName,
+        rows: ticketTypes.map((tt) => ({
+          name: tt.name,
+          type: tt.type,
+          priceMultiplier: tt.priceMultiplier,
+          ticketCount: tt.ticketCount,
+          rowLabelPriceKr: Math.round(entryFee * tt.priceMultiplier),
+          formula: `entryFee(${entryFee}) × priceMultiplier(${tt.priceMultiplier}) = ${Math.round(entryFee * tt.priceMultiplier)} kr (bundle-pris pr. kjøp)`,
+        })),
+      });
+    }
+
     this.alreadyPurchased = Math.max(0, alreadyPurchased);
     this.typesContainer.innerHTML = "";
     this.typeRows = [];
@@ -853,6 +885,34 @@ export class Game1BuyPopup {
     const selections = this.typeRows
       .filter((r) => r.qty > 0)
       .map((r) => ({ type: r.type, qty: r.qty, name: r.name }));
+
+    // [BUY-DEBUG] Tobias-direktiv 2026-05-13: log eksakt selections array
+    // som sendes til SocketActions.buy. Inkluderer alle typeRows (også
+    // qty=0) for å se hva spilleren MÅSKE valgte men avviste.
+    const buyDebugEnabled =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      /[?&]debug=1/.test(window.location.search);
+    if (buyDebugEnabled) {
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][Game1BuyPopup.handleBuy][submit]", {
+        selectionsSent: selections,
+        allTypeRows: this.typeRows.map((r) => ({
+          type: r.type,
+          name: r.name,
+          displayName: r.displayName,
+          qty: r.qty,
+          ticketCount: r.ticketCount,
+        })),
+        totalSelections: selections.length,
+        totalQty: selections.reduce((sum, s) => sum + s.qty, 0),
+        totalTickets: this.typeRows.reduce(
+          (sum, r) => sum + r.qty * r.ticketCount,
+          0,
+        ),
+      });
+    }
+
     this.onBuy?.(selections);
   }
 

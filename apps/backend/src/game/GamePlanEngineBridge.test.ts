@@ -321,10 +321,13 @@ test("buildTicketConfigFromCatalog: 2 farger oversettes gul→yellow, hvit→whi
   assert.equal(ticketTypesData.length, 4);
   const find = (color: string, size: "small" | "large") =>
     ticketTypesData.find((e) => e.color === color && e.size === size);
+  // Pilot-fix 2026-05-13: LARGE_TICKET_PRICE_MULTIPLIER 2 → 3 (3 brett per
+  // stor bong, ikke 2). Tobias-direktiv: "Bong man får på stor er det 3
+  // bonger man får". Stor lilla bundle = smallPrice × 3.
   assert.equal(find("yellow", "small")!.pricePerTicket, 1000);
-  assert.equal(find("yellow", "large")!.pricePerTicket, 2000);
+  assert.equal(find("yellow", "large")!.pricePerTicket, 3000); // 1000 × 3 (var 2000 før LARGE × 3)
   assert.equal(find("white", "small")!.pricePerTicket, 500);
-  assert.equal(find("white", "large")!.pricePerTicket, 1000);
+  assert.equal(find("white", "large")!.pricePerTicket, 1500); // 500 × 3 (var 1000)
   assert.equal(find("purple", "small"), undefined);
   // Bingo-premier per farge
   const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
@@ -360,12 +363,13 @@ test("buildTicketConfigFromCatalog: 3 farger (gul/hvit/lilla) propageres", () =>
   assert.equal(ticketTypesData.length, 6);
   const find = (color: string, size: "small" | "large") =>
     ticketTypesData.find((e) => e.color === color && e.size === size);
+  // Pilot-fix 2026-05-13: LARGE × 3 (3 brett per stor bong).
   assert.equal(find("yellow", "small")!.pricePerTicket, 1000);
-  assert.equal(find("yellow", "large")!.pricePerTicket, 2000);
+  assert.equal(find("yellow", "large")!.pricePerTicket, 3000); // 1000 × 3
   assert.equal(find("white", "small")!.pricePerTicket, 500);
-  assert.equal(find("white", "large")!.pricePerTicket, 1000);
+  assert.equal(find("white", "large")!.pricePerTicket, 1500); // 500 × 3
   assert.equal(find("purple", "small")!.pricePerTicket, 2000);
-  assert.equal(find("purple", "large")!.pricePerTicket, 4000);
+  assert.equal(find("purple", "large")!.pricePerTicket, 6000); // 2000 × 3
   const bingoPrizes = cfg.bingoPrizes as Record<string, number>;
   assert.equal(bingoPrizes.yellow, 100000);
   assert.equal(bingoPrizes.white, 50000);
@@ -415,9 +419,11 @@ test("C2: bridge-output kompatibel med engine.extractTicketCatalog (kontrakt)", 
   for (const item of parsed) {
     catalogByKey.set(`${item.color}:${item.size}`, item.priceCents);
   }
+  // Pilot-fix 2026-05-13: LARGE × 3 (3 brett per stor bong).
   assert.equal(catalogByKey.get("yellow:small"), 1000);
-  assert.equal(catalogByKey.get("yellow:large"), 2000);
-  assert.equal(catalogByKey.get("purple:large"), 5000);
+  assert.equal(catalogByKey.get("yellow:large"), 3000); // 1000 × 3
+  // purple:small = 2500 (gitt i fixture), purple:large = 2500 × 3 = 7500
+  assert.equal(catalogByKey.get("purple:large"), 7500);
 });
 
 test("buildTicketConfigFromCatalog: bonus-spill aktivert legges på", () => {
