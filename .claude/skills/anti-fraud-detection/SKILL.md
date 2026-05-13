@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/security/AntiFraudService.ts, apps/backend/src/security/AntiFraudWalletAdapter.ts, apps/backend/src/security/__tests__/AntiFraud*.test.ts, apps/backend/src/routes/adminAntiFraud.ts, apps/backend/src/routes/__tests__/adminAntiFraud.test.ts, apps/backend/src/compliance/AmlService.ts -->
+
 # Anti-Fraud Detection (BIN-806 / A13)
 
 Anti-fraud rides on top of the casino-grade wallet as a **decorating adapter**. It evaluates signals (velocity, deviation, IP-clustering, bot-timing) on every wallet mutation, classifies risk, and decides:

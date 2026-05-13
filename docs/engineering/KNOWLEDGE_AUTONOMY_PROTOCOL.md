@@ -29,9 +29,9 @@ Dette dokumentet beskriver det **vanntette enforcement-systemet** som gjør kunn
 | 2 | **FRAGILITY_LOG.md** — file:line → "ikke-rør-uten-å-verifisere"-regler | Manuell | PM oppdaterer per bug |
 | 3 | **BUG_CATALOG.md** — alle E2E-bugs spores | Manuell | Agent oppdaterer per leveranse |
 | 4 | **AGENT_EXECUTION_LOG.md** — agent-arbeid + learnings | Manuell | Agent oppdaterer per leveranse |
-| 5 | **Skills (`.claude/skills/*/SKILL.md`)** — domene-kunnskap | Manuell | PM oppdaterer per generaliserbart mønster |
+| 5 | **Skills (`.claude/skills/*/SKILL.md`)** — domene-kunnskap + scope-glob-mapping | Manuell + Auto | PM oppdaterer skill-innhold; scope-headers auto-pickes av context-pack |
 | 6 | **Live-monitor** + **ConsoleBridge** — runtime-observability | Automatisk | Monitor-agent kjører kontinuerlig |
-| 7 | **scripts/generate-context-pack.sh** — auto-brief per agent-spawn | Automatisk | Kjøres av PM før spawn |
+| 7 | **scripts/generate-context-pack.sh** — auto-brief per agent-spawn (inkl. skills via scope-glob) | Automatisk | Kjøres av PM før spawn |
 
 ---
 
@@ -57,6 +57,7 @@ PM inkluderer hele context-pack-en i agent-prompten under en `## Context Pack (m
 
 Agent **MÅ** først i sin første commit-message inkludere lese-bekreftelse:
 ```
+[skills-read: <skill-navn eller "none">]
 [context-read: F-NN, F-NN]
 [pitfalls-read: §1, §3]
 [prior-agent-brief: <SHA av siste relevante agent-commit eller "none">]
@@ -131,11 +132,55 @@ Kunnskapen er nå **flytende og selv-forbedrende**.
 
 ---
 
+## 2b. Skill-til-fil-mapping (Pilar 5 + 7, koblet)
+
+Hver skill (`.claude/skills/<name>/SKILL.md`) har en **scope-header** rett etter YAML-frontmatteren:
+
+```markdown
+---
+name: spill2-perpetual-loop
+description: ...
+---
+
+<!-- scope: apps/backend/src/game/Game2*, apps/backend/src/game/Spill2*, apps/backend/src/game/PerpetualRound*, packages/game-client/src/games/game2/** -->
+
+# Spill 2 — Perpetual room loop og auto-tick
+```
+
+Scope-globber bruker shell-glob (`*` = single-segment, `**` = recursive). Komma separerer flere mønstre.
+
+**Hvorfor:** når en agent rører `apps/backend/src/game/Game2Engine.ts`, skal `spill2-perpetual-loop`-skill alltid lastes — uten at PM må huske det manuelt. Scope-mapping er det vanntette koblings-leddet mellom **hvilken fil agent rører** og **hvilken domene-kunnskap som er invariant**.
+
+### Verktøy
+
+| Script | Hva | Når kjøres |
+|---|---|---|
+| `scripts/find-skills-for-file.mjs <file>` | Print skills som matcher gitt file | Manuelt + av context-pack-generator |
+| `scripts/build-skill-file-map.mjs` | Generer `docs/auto-generated/SKILL_FILE_MAP.md` | Hver gang scope endres — pre-commit + CI |
+| `scripts/generate-context-pack.sh <pattern>` | Auto-brief inkluderer matching skills som seksjon 1 | Hver agent-spawn |
+| `.github/workflows/skill-mapping-validate.yml` | Blokkerer PR uten scope-header + sjekker SKILL_FILE_MAP er current | Hver PR til main |
+| `npm run skills:map` / `npm run skills:for-file -- <file>` | Convenience-wrappers | Lokalt + CI |
+
+### Bredde-prinsipper
+
+- **Konservativt:** En skill MÅ kun matche filer der dens invarianter faktisk gjelder. Over-aggressive scopes (`apps/backend/**`) gir false-positives og senker tillit til auto-loading.
+- **Tech-stack-skills uten file-scope:** `typescript`, `vite`, `docker`, `bun`, `node`, `express` osv. finnes som tekst-referanser i CLAUDE.md men har INGEN `.claude/skills/<name>/SKILL.md`-fil. Det er bevisst — de er for brede til å koble til konkrete filer.
+- **Tom scope (`<!-- scope: -->`)** = "skill loaded eksplisitt eller via PM-judgement, ikke via fil-trigger". Brukes hvis en skill bevisst ikke har file-trigger.
+
+### Skill-katalog-tabell
+
+Se `docs/auto-generated/SKILL_FILE_MAP.md` for current state — auto-generert per push til main.
+
+---
+
 ## 3. Konkret enforcement-mekanismer
 
 | Mekanisme | Status | Hva den fanger |
 |---|---|---|
-| `scripts/generate-context-pack.sh` | ✅ Implementert | Auto-brief per agent-spawn |
+| `scripts/generate-context-pack.sh` | ✅ Implementert | Auto-brief per agent-spawn (inkl. skill-mapping seksjon 1) |
+| `scripts/find-skills-for-file.mjs` | ✅ Implementert | CLI for å finne relevante skills for en gitt file |
+| `scripts/build-skill-file-map.mjs` | ✅ Implementert | Generer SKILL_FILE_MAP.md med scope-coverage |
+| `skill-mapping-validate.yml` workflow | ✅ Implementert | Blokkerer PR uten scope-header + sjekker SKILL_FILE_MAP-freshness |
 | `knowledge-protocol-gate.yml` workflow | ✅ Implementert | PR-checkbox påkrevd |
 | Pre-commit hook for lese-bekreftelse | 🟡 TODO | Commit blokkert uten markører |
 | Danger-rule for delta-rapport | 🟡 TODO | PR blokkert uten delta-fil |

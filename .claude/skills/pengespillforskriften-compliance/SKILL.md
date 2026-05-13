@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/compliance/**, apps/backend/src/spillevett/**, apps/backend/src/game/ComplianceLedger*, apps/backend/src/game/PrizePolicyManager.ts, apps/backend/src/game/ledgerGameTypeForSlug.ts, apps/backend/src/game/ResponsibleGamingPersistence.ts, apps/backend/src/game/PostgresResponsibleGamingStore.ts, apps/backend/src/adapters/PrizePolicyPort.ts, apps/backend/src/adapters/ComplianceLedgerPort.ts, apps/backend/src/adapters/ComplianceLossPort.ts -->
+
 # Pengespillforskriften Compliance
 
 Spillorama is a regulated Norwegian bingo platform under **pengespillforskriften** (the Norwegian Gambling Act). Three sections directly govern code we write:

@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/game/Game2*, apps/backend/src/game/Spill2*, apps/backend/src/game/PerpetualRound*, apps/backend/src/jobs/game2AutoDrawTick.ts, apps/backend/src/util/canonicalRoomCode.ts, apps/backend/src/util/roomState.bindSpill2Config.test.ts, apps/backend/src/sockets/game23DrawBroadcasterAdapter.ts, packages/game-client/src/games/game2/** -->
+
 # Spill 2 — Perpetual room loop og auto-tick
 
 Spill 2 (slug-familie `rocket` / aliaser `game_2`, `tallspill`) er en uavhengig arkitektur som tilfeldigvis bruker samme draw-pipeline som Spill 1. **Det er ETT GLOBALT ROM (`ROCKET`) for alle haller**, drevet av en perpetual loop som auto-spawn'er nye runder. Ingen master, ingen plan, ingen per-hall lobby. Kun Fullt Hus (full plate 9/9) gir vinst.

@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/agent/AgentShiftService.ts, apps/backend/src/agent/AgentSettlementService.ts, apps/backend/src/agent/AgentSettlementStore.ts, apps/backend/src/agent/AgentTransactionService.ts, apps/backend/src/agent/AgentTransactionStore.ts, apps/backend/src/agent/HallCashLedger.ts, apps/backend/src/routes/agentSettlement.ts, apps/backend/src/routes/agentDashboard.ts, apps/backend/src/agent/__tests__/AgentShiftService*.test.ts, apps/backend/src/agent/__tests__/AgentSettlementService*.test.ts -->
+
 # Agent Shift + Settlement (BIN-583 B3.3)
 
 The agent (bingovert) opens a shift at the start of work, handles cash-in/cash-out + ticket-sales + product-sales during the shift, and closes the day with a daily-balance + settlement reconciliation. The settlement popup matches legacy wireframes 1:1 — there are 14 machine/category breakdown rows, severity-based diff-rules, and a daily-balance transfer to `hall.cash_balance`.
