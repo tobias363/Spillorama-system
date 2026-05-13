@@ -84,6 +84,18 @@ export class WinPopup {
     const amountFormatted = opts.amount.toLocaleString("no-NO").replace(/,/g, " ");
 
     const backdrop = document.createElement("div");
+    // data-test-attributter for Playwright pilot-flow-tester
+    // (tests/e2e/spill1-rad-vinst-flow.spec.ts, 2026-05-13). Inert i prod.
+    // Tester bruker `win-popup-backdrop` for å detektere at popup mountet,
+    // og `data-test-win-rows` / `data-test-win-amount` for å verifisere
+    // innhold uten å avhenge av nedenforliggende DOM-struktur.
+    backdrop.setAttribute("data-test", "win-popup-backdrop");
+    backdrop.setAttribute("data-test-win-rows", String(opts.rows));
+    backdrop.setAttribute("data-test-win-amount", String(opts.amount));
+    backdrop.setAttribute(
+      "data-test-win-shared",
+      opts.shared ? "true" : "false",
+    );
     Object.assign(backdrop.style, {
       position: "fixed",
       inset: "0",
