@@ -180,6 +180,28 @@ Alle throw på non-OK responses; tester skal IKKE retry-e silently.
 ## Status (2026-05-13)
 
 - ✅ Foundation: config, REST-helpers, data-test-attrs, npm-scripts
-- 🟡 First test: master + spiller buy-flow + re-open popup
+- ✅ First test: master + spiller buy-flow + re-open popup (grønn lokalt 13s)
 - ⏳ B-fase 2c: Rad-vinst + Fortsett til Rad 2 + auto-start-bug
-- ⏳ B-fase 3: CI-integration (blokkende gate på PR-mot-main)
+- ✅ B-fase 3: CI-integration via `.github/workflows/pilot-flow-e2e.yml`
+
+## CI-modus
+
+Workflow `.github/workflows/pilot-flow-e2e.yml` kjører automatisk på PR
+mot main hvis kode-paths matcher Spill 1 buy-flow (apps/backend/src/game,
+packages/game-client/src/games/game1, tests/e2e, m.fl.).
+
+**Env-vars som triggrer CI-modus:**
+
+- `E2E_DESTROY_ROOMS=1` — `resetPilotState` destruerer GoH-rom eksplisitt
+  (default-er også til true lokalt; CI signaliserer intent eksplisitt)
+- `CI=true` — Playwright switcher til GitHub-reporter + 1 retry
+
+**Helper `shouldDestroyRoomsForCi()`** i `helpers/rest.ts` brukes av
+testkoden til diagnose-logging.
+
+Workflow må starte `node dist/index.js` med `NODE_ENV=test` (ikke
+production) slik at `/api/dev/auto-login`-ruten er mountet. Se workflow
+for full env-konfig.
+
+**Branch protection:** workflow må registreres som required check via
+gh-API etter første grønne kjøring (PM ansvar).
