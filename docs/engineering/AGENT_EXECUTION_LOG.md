@@ -59,6 +59,51 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Skill freshness CI gate (general-purpose, B3-task)
+
+**Scope:** Bygg CI-gate som varsler når en skill i `.claude/skills/` er stale (90+ dager uten oppdatering AND 50+ commits til scope-filer siste 60 dager). Avhenger av B2 (skill-file-mapping) som introduserer `<!-- scope: ... -->` headers — fallback: skip skills uten header (mark "scope-undefined").
+
+**Inputs gitt:**
+- Mandat fra `KNOWLEDGE_AUTONOMY_PROTOCOL.md` Tier 3-C / "skill self-evolution"
+- Pekere til `.claude/skills/`, `docs/auto-generated/SKILLS_CATALOG.md`, `auto-generate-docs.yml`, `scripts/skill-evolution-review.sh`
+- Branch: ny fra main, ikke åpne PR (PM-AI tar over)
+
+**Outputs produsert:**
+- Branch: `feat/skill-freshness-ci-gate-2026-05-13`
+- Filer:
+  - `scripts/check-skill-freshness.mjs` (ny, 555 linjer) — Node ESM, ingen eksterne deps (bruker built-in `fs.globSync` fra Node 22+)
+  - `.github/workflows/skill-freshness-weekly.yml` (ny) — cron mandag 09:00 UTC + auto-issue ved very-stale + 7-dagers issue-dedup
+  - `.github/workflows/skill-freshness-pr-check.yml` (ny) — pull_request trigger + comment-update-pattern (idempotent)
+  - `docs/engineering/SKILL_FRESHNESS.md` (ny) — terskler, scope-header-format, refresh-flyt, deprecation-prosess
+- Test-output verifisert lokalt:
+  - Default JSON-mode: alle 20 skills detektert som "scope-undefined" (forventet — B2 ikke landet enda)
+  - Markdown-mode: korrekt sammendrag + per-status-tabeller
+  - Temporary scope-header injection på `wallet-outbox-pattern` → korrekt parsing (3 globs), 31 commits til scope siste 60 dager
+  - PR-mode: ingen endringer mot `origin/main` (ny branch) → tom rapport, exit 0
+  - `--very-stale-only`: filterer korrekt
+
+**Fallgruver oppdaget:**
+- Node 22+ har `fs.globSync` built-in → unngår `glob`-npm-deps. Eldre Node-versjoner ville feilet, men `.nvmrc` + workflow-pin på `node-version: 22` garanterer kompatibilitet.
+- `git log --since="N.days.ago" -- pattern` aksepterer glob direkte i pathspec, men trenger quoting for shell-safety. Brukte `execSync` med eksplisitt quoting istedenfor å bygge args-array, fordi shell-tolkningen var enklere å verifisere.
+- PR-comment-update-pattern: marker-string `<!-- skill-freshness-pr-check -->` + search-and-replace istedenfor delete-and-recreate, så PR-history holder seg ren.
+
+**Læring:**
+- Built-in `fs.globSync` reduserer dependency-overflate. Bra mønster for fremtidige Node-scripts.
+- `process.exit(0)` alltid (selv ved very-stale) — workflow er informasjonelt, ikke blokkerende. Tobias' direktiv: skills er kunnskaps-artefakter, ikke gate-keepers.
+- Issue-dedup via 7-dagers vindu + label-filter unngår støy hvis flere skills blir stale samtidig.
+- Scope-header som HTML-kommentar er kompatibel med eksisterende markdown-rendering — usynlig for human readers, men maskin-parseable.
+
+**Verifisering (PM):**
+- `node scripts/check-skill-freshness.mjs --quiet` → JSON valid, 20 skills, alle "scope-undefined" (forventet pre-B2)
+- `node scripts/check-skill-freshness.mjs --markdown --quiet` → markdown valid
+- `node scripts/check-skill-freshness.mjs --pr-mode --markdown --quiet` → "Ingen stale skills dekker endrede filer" (forventet, ny branch)
+- Workflow YAML lint via `yamllint` (passerer)
+- Ingen regression i eksisterende CI
+
+**Tid:** ~2.5 timer agent-arbeid
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
