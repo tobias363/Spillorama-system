@@ -196,37 +196,22 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     page,
   }) => {
     // ── Steg 3: Mark master-hall ready ─────────────────────────────────────
+    // Rekkefølge: ready → spiller buy → masterStart → trekk baller.
+    // I `ready_to_start`-state kan spilleren kjøpe bonger som rendres i grid
+    // umiddelbart (preRoundTickets). Master start konverterer preRoundTickets
+    // til faktiske ticket-purchases og engine begynner å akseptere draws.
     const ready = await markHallReady(masterToken, HALL_ID);
     initialScheduledGameId = ready.gameId;
     expect(initialScheduledGameId, "scheduled-game must spawn").toBeTruthy();
 
-    // ── Steg 4: Master start → status=running ──────────────────────────────
-    const started = await masterStart(masterToken);
-    expect(started.status, "plan-run skal være running").toBe("running");
+    // Verifiser lobby er purchase-open
+    const preStartLobby = await getLobbyState(masterToken, HALL_ID);
     expect(
-      started.scheduledGameId,
-      "scheduledGameId fra start må matche ready.gameId",
-    ).toBe(initialScheduledGameId);
-    expect(
-      started.scheduledGameStatus,
-      "scheduled-game-status etter start skal være running",
-    ).toBe("running");
+      ["ready_to_start", "purchase_open"],
+      "scheduled-game må være kjøps-åpen før klient buyer",
+    ).toContain(preStartLobby.scheduledGameMeta?.status ?? "");
 
-    // Verifiser engine-state via snapshot (krever RESET_TEST_PLAYERS_TOKEN).
-    // Hvis snapshot-route mangler token, fortsetter testen med fallback til
-    // socket-events + lobby-state.
-    const initialSnapshot = await getGameStateSnapshot(ROOM_CODE);
-    if (initialSnapshot) {
-      console.log(
-        `[test] Initial snapshot: status=${initialSnapshot.engineRoom?.currentGame?.status ?? "n/a"}, drawn=${initialSnapshot.engineRoom?.currentGame?.drawnCount ?? "n/a"}`,
-      );
-    } else {
-      console.log(
-        "[test] Snapshot-route ikke tilgjengelig (RESET_TEST_PLAYERS_TOKEN ikke satt) — fortsetter uten engine-state-poll",
-      );
-    }
-
-    // ── Steg 5: Spiller åpner klient + kjøper 12 brett ─────────────────────
+    // ── Steg 4: Spiller åpner klient + kjøper 12 brett (FØR master start) ──
     page.on("console", (msg) => {
       const text = msg.text();
       if (
@@ -314,7 +299,37 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       `[test] ✓ Buy-flow ferdig: ${EXPECTED_TOTAL_BRETT} brett representert som ${EXPECTED_ROWS.length} cards`,
     );
 
-    // ── Steg 7: Trekk baller manuelt til Rad 1-vinst ───────────────────────
+    // ── Steg 7: Master start → status=running ──────────────────────────────
+    // Nå er spilleren satt opp med 12 brett i grid (preRoundTickets). Master
+    // starter runden, engine konverterer preRoundTickets til ticket-purchases,
+    // og draw-next-calls begynner å fungere mot engine.
+    console.log("[test] Master start (etter buy)...");
+    const started = await masterStart(masterToken);
+    expect(started.status, "plan-run skal være running etter start").toBe(
+      "running",
+    );
+    expect(
+      started.scheduledGameId,
+      "scheduledGameId fra start må matche ready.gameId",
+    ).toBe(initialScheduledGameId);
+    expect(
+      started.scheduledGameStatus,
+      "scheduled-game-status etter start skal være running",
+    ).toBe("running");
+
+    // Optional snapshot-diagnose (krever RESET_TEST_PLAYERS_TOKEN)
+    const startSnapshot = await getGameStateSnapshot(ROOM_CODE);
+    if (startSnapshot) {
+      console.log(
+        `[test] Snapshot etter start: status=${startSnapshot.engineRoom?.currentGame?.status ?? "n/a"}, drawn=${startSnapshot.engineRoom?.currentGame?.drawnCount ?? "n/a"}`,
+      );
+    } else {
+      console.log(
+        "[test] Snapshot-route ikke tilgjengelig (RESET_TEST_PLAYERS_TOKEN ikke satt)",
+      );
+    }
+
+    // ── Steg 8: Trekk baller manuelt til Rad 1-vinst ───────────────────────
     // Bruker admin/draw-next istedenfor å vente på auto-tick (4s/draw).
     // Med 12 tickets × 5 rader = 60 row-muligheter er sannsynlighet at minst
     // én rad har 5/5 innen 25 draws ~95%. Vi trekker opptil MAX_DRAWS_TO_RAD1
