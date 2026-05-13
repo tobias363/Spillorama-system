@@ -1,0 +1,178 @@
+name: AI Fragility Review
+
+# Tobias-direktiv 2026-05-13 (Tier 3-A): "AI code-review-agent som leser
+# FRAGILITY før PR-merge og foreslår 'har du sjekket X?'"
+#
+# Workflow kjører på hver PR. For hver fil endret som matcher en FRAGILITY-
+# entry, auto-kommenterer PR-en med:
+#   - Hvilke F-NN-entries dekker filen
+#   - "Hva ALDRI gjøre"-listen fra hver entry
+#   - "Hvilke tester MÅ stå grønn"-listen
+#   - Spørsmål til committer: "har du verifisert disse?"
+#
+# Komplementerer:
+#   - delta-report-gate.yml (krever delta-rapport)
+#   - knowledge-protocol-gate.yml (krever checkbox)
+#   - pre-commit-fragility-check.sh (krever context-read-marker)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  fragility-review:
+    name: AI Fragility Review
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Match changed files to FRAGILITY entries
+        id: match
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
+            const fragilityPath = 'docs/engineering/FRAGILITY_LOG.md';
+            if (!fs.existsSync(fragilityPath)) {
+              core.info('FRAGILITY_LOG.md ikke funnet — skipper review.');
+              return;
+            }
+
+            // Parse FRAGILITY_LOG
+            const content = fs.readFileSync(fragilityPath, 'utf8');
+            const entries = [];
+            let current = null;
+            for (const line of content.split('\n')) {
+              const headerMatch = line.match(/^## (F-\d+):\s*(.+)$/);
+              if (headerMatch) {
+                if (current) entries.push(current);
+                current = {
+                  id: headerMatch[1],
+                  title: headerMatch[2],
+                  files: [],
+                  neverDo: [],
+                  requiredTests: [],
+                  rawBlock: [],
+                };
+                continue;
+              }
+              if (!current) continue;
+              if (line.startsWith('## ') && !line.startsWith('## F-')) {
+                entries.push(current);
+                current = null;
+                continue;
+              }
+              current.rawBlock.push(line);
+
+              // Parse file refs
+              const fileMatches = [...line.matchAll(/`([a-zA-Z0-9_\/.-]+\.(?:ts|tsx|js|jsx|md|yml|yaml|sh|sql|json))/g)];
+              for (const fm of fileMatches) {
+                current.files.push(fm[1]);
+              }
+            }
+            if (current) entries.push(current);
+
+            // Get changed files in PR
+            const base = context.payload.pull_request.base.sha;
+            const head = context.payload.pull_request.head.sha;
+            const changedFiles = execSync(`git diff --name-only ${base} ${head}`, {encoding:'utf8'})
+              .split('\n').filter(Boolean);
+
+            // Match
+            const matchedEntries = entries.filter(e =>
+              e.files.some(f => changedFiles.some(c => c === f || c.startsWith(f) || f.startsWith(c)))
+            );
+
+            if (matchedEntries.length === 0) {
+              core.info('Ingen FRAGILITY-entries matcher endrede filer — review skipped.');
+              return;
+            }
+
+            core.setOutput('matched_count', matchedEntries.length);
+
+            // Bygg kommentar
+            const lines = [];
+            lines.push('## 🛡️ AI Fragility Review');
+            lines.push('');
+            lines.push(`Denne PR-en endrer filer som er nevnt i ${matchedEntries.length} FRAGILITY-entry/-ies.`);
+            lines.push('Jeg har lest dem på dine vegne — vennligst bekreft at du har verifisert:');
+            lines.push('');
+
+            for (const e of matchedEntries) {
+              lines.push(`### ${e.id}: ${e.title}`);
+              lines.push('');
+
+              // Extract "Hva ALDRI gjøre" section
+              const blockText = e.rawBlock.join('\n');
+              const neverMatch = blockText.match(/\*\*Hva ALDRI gjøre:?\*\*\s*\n((?:[-*]\s+[^\n]+\n?)+)/i);
+              if (neverMatch) {
+                lines.push('**Sjekkpunkt — har du unngått disse?**');
+                lines.push(neverMatch[1].trim());
+                lines.push('');
+              }
+
+              // Extract required tests
+              const testMatch = blockText.match(/\*\*Hvilke tester MÅ stå grønn[^*]*\*\*\s*\n((?:[-*]\s+[^\n]+\n?)+)/i);
+              if (testMatch) {
+                lines.push('**Sjekkpunkt — har du kjørt og verifisert disse testene?**');
+                lines.push(testMatch[1].trim());
+                lines.push('');
+              }
+
+              // Historisk skade (compact)
+              const historyMatch = blockText.match(/\*\*Historisk skade:?\*\*\s*\n((?:[-*]\s+[^\n]+\n?){1,3})/i);
+              if (historyMatch) {
+                lines.push('**Historisk kontekst:**');
+                lines.push(historyMatch[1].trim());
+                lines.push('');
+              }
+
+              lines.push('---');
+              lines.push('');
+            }
+
+            lines.push('## Hva nå?');
+            lines.push('');
+            lines.push('1. Verifiser at du har lest entry-ene over og kjørt nevnte tester');
+            lines.push('2. Reager med 👍 på denne kommentaren for å bekrefte');
+            lines.push('3. Hvis du oppdager en NY fragility-pattern, legg til F-NN-entry i `docs/engineering/FRAGILITY_LOG.md`');
+            lines.push('');
+            lines.push('_Dette er en automatisk AI-review basert på FRAGILITY_LOG. Den erstatter ikke manuell code-review — den supplerer._');
+
+            const body = lines.join('\n');
+
+            // Auto-kommenter én gang per session — oppdater eksisterende hvis funnet
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('🛡️ AI Fragility Review')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing AI-review comment (${matchedEntries.length} entries)`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info(`Posted new AI-review comment (${matchedEntries.length} entries)`);
+            }

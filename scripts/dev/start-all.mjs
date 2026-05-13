@@ -786,6 +786,23 @@ function spawnChild({ name, colorName, command, args: childArgs, cwd, env }) {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  // Tobias-direktiv 2026-05-13 (Tier 3-E): Backend stdout/stderr må også
+  // skrives til /tmp/spillorama-<name>.log slik at live-monitor-agent kan
+  // tail-e dem. Backend-loggene er spesielt verdifulle for å fange server-
+  // side ERROR/FATAL/Unhandled rejections som pilot-monitor ellers ville
+  // miste. Fail-soft — hvis vi ikke kan åpne fil, skip silently.
+  let tmpLogStream = null;
+  try {
+    const fs = require("node:fs");
+    const tmpLogPath = `/tmp/spillorama-${name}.log`;
+    tmpLogStream = fs.createWriteStream(tmpLogPath, { flags: "a" });
+    tmpLogStream.write(
+      `\n=== ${new Date().toISOString()} dev:nuke start — ${name} (PID ${proc.pid}) ===\n`,
+    );
+  } catch {
+    /* fail-soft: terminal-output still works */
+  }
+
   function pipeStream(stream, isErr) {
     let buf = "";
     stream.on("data", (chunk) => {
@@ -797,6 +814,14 @@ function spawnChild({ name, colorName, command, args: childArgs, cwd, env }) {
         const out = `${prefix} ${line}`;
         if (isErr) process.stderr.write(out + "\n");
         else process.stdout.write(out + "\n");
+        // Også til /tmp/spillorama-<name>.log (uten farge-kode for monitor-parsing)
+        if (tmpLogStream) {
+          try {
+            tmpLogStream.write(line + "\n");
+          } catch {
+            /* fail-soft */
+          }
+        }
       }
     });
     stream.on("end", () => {
@@ -804,6 +829,13 @@ function spawnChild({ name, colorName, command, args: childArgs, cwd, env }) {
         const out = `${prefix} ${buf}`;
         if (isErr) process.stderr.write(out + "\n");
         else process.stdout.write(out + "\n");
+        if (tmpLogStream) {
+          try {
+            tmpLogStream.write(buf + "\n");
+          } catch {
+            /* fail-soft */
+          }
+        }
       }
     });
   }
