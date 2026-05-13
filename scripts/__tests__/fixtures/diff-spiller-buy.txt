@@ -1,0 +1,3 @@
+packages/game-client/src/games/game1/screens/PlayScreen.ts
+packages/game-client/src/games/game1/components/BuyPopup.ts
+packages/game-client/src/games/game1/components/TicketGridHtml.ts
