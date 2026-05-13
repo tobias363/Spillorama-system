@@ -7,7 +7,6 @@ import {
   masterStop,
 } from "./helpers/rest.js";
 import {
-  adminDrawNext,
   getGameStateSnapshot,
   masterPause,
   masterResume,
@@ -65,7 +64,6 @@ import {
 
 const MASTER_EMAIL = "demo-agent-1@spillorama.no";
 const HALL_ID = "demo-hall-001";
-const ADMIN_EMAIL = "tobias@nordicprofil.no";
 const ROOM_CODE = "BINGO_DEMO-PILOT-GOH";
 
 /**
@@ -153,25 +151,23 @@ const EXPECTED_TOTAL_BRETT = EXPECTED_ROWS.reduce(
  * muligheter, sannsynlighet at minst ett brett har 5/5 på en rad innen 25
  * draws er > 95%. 35 gir solid margin for å unngå flakiness.
  */
-const MAX_DRAWS_TO_RAD1 = 35;
-const MAX_DRAWS_TO_RAD2 = 30;
+// (MAX_DRAWS_TO_RAD1/2 utgår — vi bruker tids-basert polling istedenfor antall
+//  draws. RAD1_TIMEOUT_MS og RAD2_TIMEOUT_MS er definert inline i test-body.)
 
 test.describe("Spill 1 Rad-vinst-flow", () => {
   test.describe.configure({ mode: "serial" });
 
   let masterToken: string;
-  let adminToken: string;
   let playerEmail: string;
   let initialScheduledGameId: string;
 
   test.beforeAll(async () => {
-    // 1. Auto-login master + admin (admin trengs for /api/admin/rooms/.../draw-next).
+    // 1. Auto-login master. Admin-token (ADMIN_EMAIL) er ikke lenger nødvendig
+    //    siden vi bruker auto-tick draws istedenfor /api/admin/rooms/.../draw-next
+    //    (som er blokkert for scheduled Spill 1 — USE_SCHEDULED_API).
     const master = await autoLogin(MASTER_EMAIL);
     masterToken = master.accessToken;
     expect(master.hallId, "Master må være tilknyttet pilot-hall").toBe(HALL_ID);
-
-    const admin = await autoLogin(ADMIN_EMAIL);
-    adminToken = admin.accessToken;
 
     // 2. Hard-reset state (destroyRooms: true for fersh start)
     await resetPilotStateExt(masterToken, { destroyRooms: true });
@@ -195,6 +191,11 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
   test("master + spiller + master Fortsett-flyt for Rad 1 → Rad 2", async ({
     page,
   }) => {
+    // Auto-tick kjører hvert 4. sek (Game1AutoDrawTickService.defaultSeconds).
+    // Med polling-strategi for Rad 1 (~90s) + pause/resume (~5s) + Rad 2
+    // polling (~90s) + setup-overhead (~30s) trenger vi minst 240s.
+    test.setTimeout(300_000);
+
     // ── Steg 3: Mark master-hall ready ─────────────────────────────────────
     // Rekkefølge: ready → spiller buy → masterStart → trekk baller.
     // I `ready_to_start`-state kan spilleren kjøpe bonger som rendres i grid
@@ -329,80 +330,83 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       );
     }
 
-    // ── Steg 8: Trekk baller manuelt til Rad 1-vinst ───────────────────────
-    // Bruker admin/draw-next istedenfor å vente på auto-tick (4s/draw).
-    // Med 12 tickets × 5 rader = 60 row-muligheter er sannsynlighet at minst
-    // én rad har 5/5 innen 25 draws ~95%. Vi trekker opptil MAX_DRAWS_TO_RAD1
-    // for solid margin.
-    console.log("[test] Starter å trekke baller manuelt mot Rad 1-vinst...");
+    // ── Steg 8: Poll på auto-tick draws til Rad 1-vinst ────────────────────
+    // adminDrawNext via /api/admin/rooms/<code>/draw-next er BLOKKERT for
+    // scheduled Spill 1 ("USE_SCHEDULED_API" — må gå via Game1DrawEngineService).
+    // Det finnes pr 2026-05-13 ingen admin-endpoint for å trigge scheduled-
+    // game-drawNext utenfra; eneste vei er auto-tick som kjører hvert 4. sek
+    // (Game1AutoDrawTickService.defaultSeconds=4).
+    //
+    // Vi poller game-state-snapshot hvert 500ms og venter på enten:
+    //   - winPopup på klient (spilleren er vinner)
+    //   - claimsCount > 0 i engine-snapshot (annen spiller er vinner)
+    //   - game.status = ENDED (runde ferdig, sjekk om claims registrert)
+    //
+    // Forventet tid: ~5-7 draws (20-28 sek) før første pattern (Rad 1) for
+    // 12 brett × 5 rader. Vi gir 90 sek timeout for sikker margin mot flaks.
+    console.log("[test] Poller på auto-tick draws mot Rad 1-vinst...");
 
     let rad1WonAtDraw: number | null = null;
     let rad1ClaimsCount = 0;
-
-    // WinPopup-locator. Klient viser denne KUN hvis player er vinner (isMe).
-    // Vi har ingen garanti for at testspiller vinner (12 brett av spill med
-    // mange potensielle vinnere), så fallback er engine-snapshot claims-count.
     const winPopupLocator = page.locator('[data-test="win-popup-backdrop"]');
 
-    for (let drawIdx = 1; drawIdx <= MAX_DRAWS_TO_RAD1; drawIdx++) {
-      let drawResult: { number: number; drawIndex: number } | null = null;
-      try {
-        drawResult = await adminDrawNext(adminToken, ROOM_CODE);
-      } catch (err) {
-        // Hvis runden er ferdig (DRAW_BAG_EXHAUSTED eller GAME_FINISHED)
-        const snap = await getGameStateSnapshot(ROOM_CODE);
-        if (snap?.engineRoom?.currentGame?.status === "ENDED") {
-          console.log(
-            `[test] Runde endet ved draw ${drawIdx}: ${(err as Error).message}`,
-          );
-          break;
-        }
-        throw err;
-      }
-      console.log(
-        `[test] Draw ${drawIdx}/${MAX_DRAWS_TO_RAD1}: ball=${drawResult.number}, drawIndex=${drawResult.drawIndex}`,
-      );
+    const POLL_INTERVAL_MS = 500;
+    const RAD1_TIMEOUT_MS = 90_000;
+    const rad1Start = Date.now();
+    let lastDrawnCount = 0;
 
-      // Vent litt på at pattern-eval + socket-emit kjører
-      await new Promise((r) => setTimeout(r, 150));
-
-      // Detect via WinPopup (spiller vinner)
+    while (Date.now() - rad1Start < RAD1_TIMEOUT_MS) {
+      // Detect via WinPopup (player er vinner)
       const popupVisible = await winPopupLocator
         .isVisible({ timeout: 50 })
         .catch(() => false);
       if (popupVisible) {
-        rad1WonAtDraw = drawResult.drawIndex;
+        const snap = await getGameStateSnapshot(ROOM_CODE);
+        rad1WonAtDraw = snap?.engineRoom?.currentGame?.drawnCount ?? 0;
         console.log(
-          `[test] ✓ WinPopup detected at draw ${drawIdx}, drawIndex=${rad1WonAtDraw}`,
+          `[test] ✓ WinPopup detected etter ${snap?.engineRoom?.currentGame?.drawnCount ?? "?"} draws`,
         );
         break;
       }
 
-      // Detect via engine-snapshot (annen spiller vinner — også gyldig)
+      // Detect via engine-snapshot (annen spiller er vinner)
       const snap = await getGameStateSnapshot(ROOM_CODE);
-      const claims = snap?.engineRoom?.currentGame?.claimsCount ?? 0;
-      if (claims > 0) {
-        rad1WonAtDraw = drawResult.drawIndex;
-        rad1ClaimsCount = claims;
-        console.log(
-          `[test] ✓ Snapshot detected ${claims} claims at draw ${drawIdx} — Rad-vinst registrert`,
-        );
-        break;
+      if (snap?.engineRoom?.currentGame) {
+        const drawn = snap.engineRoom.currentGame.drawnCount;
+        const claims = snap.engineRoom.currentGame.claimsCount;
+        if (drawn !== lastDrawnCount) {
+          console.log(
+            `[test] Draw progress: drawn=${drawn}, claims=${claims}, status=${snap.engineRoom.currentGame.status}`,
+          );
+          lastDrawnCount = drawn;
+        }
+        if (claims > 0) {
+          rad1WonAtDraw = drawn;
+          rad1ClaimsCount = claims;
+          console.log(
+            `[test] ✓ Snapshot detected ${claims} claims etter ${drawn} draws — Rad-vinst registrert`,
+          );
+          break;
+        }
+        if (snap.engineRoom.currentGame.status === "ENDED") {
+          console.log(
+            `[test] Runde endet etter ${drawn} draws (status=ENDED, reason=${snap.engineRoom.currentGame.endedReason})`,
+          );
+          // Hvis runden er ENDED med claims, regn det som win
+          if (claims > 0) {
+            rad1WonAtDraw = drawn;
+            rad1ClaimsCount = claims;
+          }
+          break;
+        }
       }
 
-      // Stop hvis runden ender (eks. Fullt Hus med få trekk)
-      const status = snap?.engineRoom?.currentGame?.status;
-      if (status === "ENDED") {
-        console.log(
-          `[test] Runde endet ved draw ${drawIdx} (status=ENDED, reason=${snap?.engineRoom?.currentGame?.endedReason})`,
-        );
-        break;
-      }
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
 
     expect(
       rad1WonAtDraw,
-      `Rad 1 (eller annen pattern) må vinnes innen ${MAX_DRAWS_TO_RAD1} draws (med 12 brett × 5 rader skal det skje med > 95% sannsynlighet). Hvis dette feiler er det enten flaks-problem eller engine pattern-eval er broken — sjekk Game1DrawEngineService.`,
+      `Rad 1 (eller annen pattern) må vinnes innen ${RAD1_TIMEOUT_MS / 1000}s. Hvis dette feiler er det enten flaks-problem (lite sannsynlig med 12 brett × 5 rader) eller engine pattern-eval er broken / auto-draw-tick stopper — sjekk Game1DrawEngineService og Game1AutoDrawTickService.`,
     ).not.toBeNull();
 
     // ── Steg 8: Verifiser WinPopup-innhold (hvis synlig) ───────────────────
@@ -496,8 +500,8 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       "Samme scheduledGameId etter resume — ingen ny scheduled-game spawnet",
     ).toBe(initialScheduledGameId);
 
-    // ── Steg 11: Trekk videre til Rad 2-vinst ──────────────────────────────
-    console.log("[test] Trekker videre til Rad 2-vinst (eller annen ny pattern)...");
+    // ── Steg 11: Poll videre til Rad 2-vinst (auto-tick fortsetter) ───────
+    console.log("[test] Poller videre til Rad 2-vinst (eller annen ny pattern)...");
 
     let rad2WonAtDraw: number | null = null;
     const snapBeforeRad2 = await getGameStateSnapshot(ROOM_CODE);
@@ -507,54 +511,50 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       `[test] Før Rad 2: drawn=${snapBeforeRad2?.engineRoom?.currentGame?.drawnCount ?? "n/a"}, claims=${claimsBeforeRad2}`,
     );
 
-    for (let drawIdx = 1; drawIdx <= MAX_DRAWS_TO_RAD2; drawIdx++) {
-      let drawResult: { number: number; drawIndex: number } | null = null;
-      try {
-        drawResult = await adminDrawNext(adminToken, ROOM_CODE);
-      } catch (err) {
-        const snap = await getGameStateSnapshot(ROOM_CODE);
-        if (snap?.engineRoom?.currentGame?.status === "ENDED") {
-          console.log(
-            `[test] Runde endet ved Rad 2-draw ${drawIdx}: ${(err as Error).message}`,
-          );
-          break;
-        }
-        throw err;
-      }
-      console.log(
-        `[test] Rad2-draw ${drawIdx}/${MAX_DRAWS_TO_RAD2}: ball=${drawResult.number}, drawIndex=${drawResult.drawIndex}`,
-      );
+    const RAD2_TIMEOUT_MS = 90_000;
+    const rad2Start = Date.now();
+    let rad2LastDrawn = snapBeforeRad2?.engineRoom?.currentGame?.drawnCount ?? 0;
 
-      await new Promise((r) => setTimeout(r, 150));
-
+    while (Date.now() - rad2Start < RAD2_TIMEOUT_MS) {
       const snap = await getGameStateSnapshot(ROOM_CODE);
-      const currentClaims = snap?.engineRoom?.currentGame?.claimsCount ?? 0;
-      if (currentClaims > claimsBeforeRad2) {
-        rad2WonAtDraw = drawResult.drawIndex;
+      if (!snap?.engineRoom?.currentGame) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
+      const drawn = snap.engineRoom.currentGame.drawnCount;
+      const claims = snap.engineRoom.currentGame.claimsCount;
+
+      if (drawn !== rad2LastDrawn) {
         console.log(
-          `[test] ✓ Rad 2 vunnet ved draw ${drawIdx}, claims gikk fra ${claimsBeforeRad2} → ${currentClaims}`,
+          `[test] Rad2 draw progress: drawn=${drawn}, claims=${claims}, status=${snap.engineRoom.currentGame.status}`,
+        );
+        rad2LastDrawn = drawn;
+      }
+
+      if (claims > claimsBeforeRad2) {
+        rad2WonAtDraw = drawn;
+        console.log(
+          `[test] ✓ Rad 2 (eller senere) vunnet, claims gikk fra ${claimsBeforeRad2} → ${claims} etter ${drawn} draws`,
         );
         break;
       }
 
-      const status = snap?.engineRoom?.currentGame?.status;
-      if (status === "ENDED") {
+      if (snap.engineRoom.currentGame.status === "ENDED") {
         console.log(
-          `[test] Runde ferdig ved draw ${drawIdx}, status=ENDED, reason=${snap?.engineRoom?.currentGame?.endedReason ?? "n/a"}`,
+          `[test] Runde ferdig etter ${drawn} draws (status=ENDED, reason=${snap.engineRoom.currentGame.endedReason})`,
         );
-        // Hvis runden er ENDED med flere claims enn før-Rad-2, regn det som
-        // "Rad 2 (eller senere fase) vunnet" — vi gikk direkte til Fullt Hus
-        // eller multiple faser i ett trekk.
-        if (currentClaims > claimsBeforeRad2) {
-          rad2WonAtDraw = drawResult.drawIndex;
+        if (claims > claimsBeforeRad2) {
+          rad2WonAtDraw = drawn;
         }
         break;
       }
+
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
 
     expect(
       rad2WonAtDraw,
-      `Rad 2 (eller senere fase) må vinnes innen ${MAX_DRAWS_TO_RAD2} draws etter Rad 1. Hvis dette feiler er det enten flaks eller engine pattern-eval er broken — sjekk PatternCycler og Game1DrawEngineHelpers.`,
+      `Rad 2 (eller senere fase) må vinnes innen ${RAD2_TIMEOUT_MS / 1000}s etter Rad 1. Hvis dette feiler er det enten flaks eller engine pattern-eval er broken — sjekk PatternCycler og Game1DrawEngineHelpers.`,
     ).not.toBeNull();
 
     console.log("[test] ✓ HELE FLYTEN GRØNN — Rad 1 + Pause/Resume + Rad 2");
