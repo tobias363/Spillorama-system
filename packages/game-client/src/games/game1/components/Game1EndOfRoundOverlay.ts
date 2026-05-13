@@ -60,6 +60,22 @@ export const MIN_DISPLAY_MS = 3_000;
 export const MIN_DISPLAY_MS_SPECTATOR = 1_000;
 
 /**
+ * Tobias prod-incident 2026-05-13 (root cause #3 fra engine-bridge-
+ * diagnose-rapport): "Forbereder rommet..."-spinner henger evig fordi
+ * backend ikke emitter ny `room:update` etter round-end før master har
+ * klikket "Start neste spill". Klient venter på `markRoomReady()` som
+ * trigges av første state-update etter overlay vises — uten ny event
+ * trigges aldri.
+ *
+ * Fix: etter 30s uten markRoomReady, bytt loading-tekst fra "Forbereder
+ * rommet..." til "Venter på master — runden er slutt" og høyne synlighet
+ * av "Tilbake til lobby"-knappen. Overlay forblir oppe (bruker kan vente
+ * eller forlate manuelt) — vi triggerer IKKE auto-dismiss fordi state ikke
+ * er klar i rommet.
+ */
+export const WAITING_FOR_MASTER_TIMEOUT_MS = 30_000;
+
+/**
  * @deprecated SUMMARY_PHASE_MS er erstattet av MIN_DISPLAY_MS. Beholdes for
  * kompatibilitet med eksisterende tester; vil fjernes neste oppdatering.
  */
@@ -272,6 +288,16 @@ interface ActiveSession {
    * sant OG controller har kalt markRoomReady.
    */
   minDisplayElapsed: boolean;
+  /** DOM-handle for loading-tekst-elementet (oppdateres ved waiting-fallback). */
+  loadingMsgEl: HTMLSpanElement | null;
+  /** DOM-handle for spinner-elementet (skjules ved waiting-fallback). */
+  loadingSpinnerEl: HTMLDivElement | null;
+  /** DOM-handle for lobby-knappen (styles oppjusteres ved waiting-fallback). */
+  lobbyBtnEl: HTMLButtonElement | null;
+  /** True etter at waiting-for-master-fallback har slått inn. Idempotent. */
+  hasFiredWaitingFallback: boolean;
+  /** Pending timer-handle for waiting-fallback (30s default). */
+  waitingFallbackTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class Game1EndOfRoundOverlay {
@@ -448,6 +474,11 @@ export class Game1EndOfRoundOverlay {
       hasFiredCompleted: false,
       isRoomReady: false,
       minDisplayElapsed: minDisplayAlreadyElapsed,
+      loadingMsgEl: null,
+      loadingSpinnerEl: null,
+      lobbyBtnEl: lobbyBtn,
+      hasFiredWaitingFallback: false,
+      waitingFallbackTimer: null,
     };
 
     // Alltid SUMMARY — COUNTDOWN/LOADING-fasene er fjernet (Tobias-mandat
@@ -468,6 +499,30 @@ export class Game1EndOfRoundOverlay {
       // gang.
       // (Ingen timer trengs.)
     }
+
+    // Tobias prod-incident 2026-05-13 (root cause #3): start 30s timeout
+    // som bytter loading-tekst til "Venter på master — runden er slutt"
+    // hvis controller IKKE har kalt markRoomReady innen den tid. Dette
+    // forhindrer at spilleren ser "Forbereder rommet..."-spinner evig når
+    // master ikke har startet neste runde.
+    //
+    // Reconnect-resilience: hvis `elapsedSinceEndedMs` allerede er over
+    // timeout, slå fallback inn umiddelbart — bruker har trolig forlatt
+    // siden og kommet tilbake mens master fortsatt ikke har startet
+    // neste runde.
+    const elapsedSinceEnded = Math.max(0, summary.elapsedSinceEndedMs ?? 0);
+    const remainingForFallback = Math.max(
+      0,
+      WAITING_FOR_MASTER_TIMEOUT_MS - elapsedSinceEnded,
+    );
+    if (remainingForFallback === 0) {
+      // Allerede over timeout (reconnect efter lang fravær).
+      this.applyWaitingForMasterFallback();
+    } else {
+      this.session.waitingFallbackTimer = setTimeout(() => {
+        this.applyWaitingForMasterFallback();
+      }, remainingForFallback);
+    }
   }
 
   /**
@@ -484,6 +539,11 @@ export class Game1EndOfRoundOverlay {
     if (!session) return;
     if (session.isRoomReady) return;
     session.isRoomReady = true;
+    // Cancel waiting-fallback-timer — vi har mottatt fersk room-state.
+    if (session.waitingFallbackTimer !== null) {
+      clearTimeout(session.waitingFallbackTimer);
+      session.waitingFallbackTimer = null;
+    }
     this.tryDismiss();
   }
 
@@ -542,6 +602,61 @@ export class Game1EndOfRoundOverlay {
     if (this.countUpRaf !== null) {
       cancelAnimationFrame(this.countUpRaf);
       this.countUpRaf = null;
+    }
+    if (this.session?.waitingFallbackTimer != null) {
+      clearTimeout(this.session.waitingFallbackTimer);
+      this.session.waitingFallbackTimer = null;
+    }
+  }
+
+  /**
+   * Bytter loading-tekst fra "Forbereder rommet..." til "Venter på master
+   * — runden er slutt" og dempes spinneren. Lobby-knappens utseende
+   * høynes (mer kontrast) slik at brukeren tydelig ser at den er
+   * primær-action i ventetid-fallback.
+   *
+   * Idempotent — kall flere ganger uten effekt etter første call. Brukes
+   * av:
+   *   - 30s waiting-fallback-timer
+   *   - reconnect-pathen hvis elapsedSinceEndedMs allerede er ≥ timeout
+   */
+  private applyWaitingForMasterFallback(): void {
+    const session = this.session;
+    if (!session) return;
+    if (session.hasFiredWaitingFallback) return;
+    session.hasFiredWaitingFallback = true;
+    if (session.waitingFallbackTimer !== null) {
+      clearTimeout(session.waitingFallbackTimer);
+      session.waitingFallbackTimer = null;
+    }
+    // Bytt loading-tekst — tydeliggjør at vi venter på MASTER, ikke på
+    // rommet selv (rommet er klart, men master har ikke startet neste
+    // runde). Markér DOM-element med data-state for tester.
+    const loadingMsg = session.loadingMsgEl;
+    if (loadingMsg) {
+      loadingMsg.textContent = "Venter på master — runden er slutt";
+      const parent = loadingMsg.parentElement;
+      if (parent) {
+        parent.setAttribute("data-state", "waiting-for-master");
+        // Dempe rad-styling — vi venter på menneske, ikke laster system.
+        parent.style.color = "rgba(244,232,208,0.7)";
+      }
+    }
+    // Skjul spinner (det er ikke laste-tilstand lenger — det er vente-på-master).
+    const spinner = session.loadingSpinnerEl;
+    if (spinner) {
+      spinner.style.display = "none";
+    }
+    // Høyne lobby-knappens visuelle kontrast så bruker tydelig ser at det
+    // er primary action i fallback-tilstand.
+    const lobbyBtn = session.lobbyBtnEl;
+    if (lobbyBtn) {
+      lobbyBtn.setAttribute("data-state", "waiting-for-master");
+      Object.assign(lobbyBtn.style, {
+        color: "#f4e8d0",
+        background: "rgba(245,184,65,0.12)",
+        borderColor: "rgba(245,184,65,0.42)",
+      });
     }
   }
 
@@ -657,6 +772,7 @@ export class Game1EndOfRoundOverlay {
     // forstyrrer summary-lesing.
     const loadingWrap = document.createElement("div");
     loadingWrap.setAttribute("data-testid", "eor-loading-indicator");
+    loadingWrap.setAttribute("data-state", "preparing");
     Object.assign(loadingWrap.style, {
       display: "flex",
       flexDirection: "row",
@@ -683,6 +799,13 @@ export class Game1EndOfRoundOverlay {
     loadingMsg.textContent = "Forbereder rommet...";
     loadingWrap.appendChild(loadingMsg);
     phaseEl.appendChild(loadingWrap);
+
+    // Eksponer refs på session slik at waiting-fallback kan oppdatere
+    // tekst + skjule spinner uten å rebuild hele overlay.
+    if (this.session) {
+      this.session.loadingMsgEl = loadingMsg;
+      this.session.loadingSpinnerEl = spinner;
+    }
 
     this.swapPhase(phaseEl);
 
