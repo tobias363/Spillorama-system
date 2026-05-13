@@ -51,7 +51,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 14 | 2026-05-13 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 14 | 2026-05-11 |
-| [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
+| [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 8 | 2026-05-11 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 13 | 2026-05-13 |
@@ -1095,6 +1095,18 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 - Spill 1/2/3-scope → les `SPILL[1-3]_IMPLEMENTATION_STATUS_*` + `SPILL_REGLER_OG_PAYOUT.md` + `SPILLKATALOG.md`
 - Pilot-go-live-scope → les `LIVE_ROOM_ROBUSTNESS_MANDATE_*` + `PILOT_*`-runbooks + `R[2-12]_*_TEST_RESULT*`
 **Related:** [`PM_ONBOARDING_PLAYBOOK.md`](./PM_ONBOARDING_PLAYBOOK.md) §3.1
+
+### §8.6 — Cascade-merges fragmenterer delte template/config-filer
+
+**Severity:** P2 (lesbarhet + maintenance-byrde)
+**Oppdaget:** 2026-05-13 (audit av `.github/pull_request_template.md` etter PR #1335 + #1338 + #1333)
+**Symptom:** Tre påfølgende PR-er la hver til en ny seksjon i samme PR-template uten å rydde i eksisterende struktur. Resultat: 117 linjer, 5 overlappende blokker (PM-onboarding + Knowledge protocol + Bug-resurrection + Tobias-smoke-test orphan blockquote + Done-policy/ADR midt mellom). Summary-seksjonen sto under den lange PM-onboarding-blokken istedet for først.
+**Fix:** Restrukturer atomisk i én PR (`fix/pr-template-audit-2026-05-13`): Summary først, konsoliderte alle 4 disiplin-seksjoner under én `## Knowledge protocol`-paraply, beholdt alle 9 workflow-regex-markers. 117 → 108 linjer.
+**Prevention:**
+- Når en PR rør delte template/config-filer (`.github/pull_request_template.md`, `.github/workflows/*`, `CLAUDE.md`, top-level `docs/`-rotsiden): sjekk om eksisterende seksjon kan utvides, ikke legg til ny parallell seksjon
+- For workflow-markers: dokumentér i kommentar hvilken regex som parser markøren, slik at senere refaktor ikke bryter parsing
+- Hvis cascade-merges skjer pga uavhengige agent-bølger: PM eier konsolideringspass etter siste merge
+**Related:** PR #1335, #1338, #1333 (cascade-kilder)
 
 ---
 
