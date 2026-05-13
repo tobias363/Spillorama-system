@@ -16,6 +16,7 @@
 import { readFileSync, readdirSync, writeFileSync, statSync } from "node:fs";
 import { resolve, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 import { loadSkillScopes, fileMatchesGlob } from "./find-skills-for-file.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -126,8 +127,21 @@ function main() {
     });
   }
 
-  // Write output
-  const generatedAt = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  // Write output. Determinism note: we deliberately do NOT embed a
+  // wall-clock timestamp in the file because CI's freshness check runs
+  // build-skill-file-map and diffs the result against committed HEAD; a
+  // changing timestamp would make every run "stale". Use last-commit
+  // SHA of the script itself + scopes-tracked SKILL.md files as a
+  // stable provenance marker that only changes when content changes.
+  let provenance;
+  try {
+    provenance = execSync(
+      "git log -1 --format=%h -- scripts/build-skill-file-map.mjs scripts/find-skills-for-file.mjs .claude/skills/",
+      { cwd: REPO_ROOT, encoding: "utf8" },
+    ).trim();
+  } catch {
+    provenance = "unknown";
+  }
   const lines = [];
   lines.push("# Skill → File Mapping (auto-generated)");
   lines.push("");
@@ -137,7 +151,7 @@ function main() {
   lines.push("> `scripts/build-skill-file-map.mjs`. Kjør `npm run build:skill-map`");
   lines.push("> eller `node scripts/build-skill-file-map.mjs` lokalt.");
   lines.push(">");
-  lines.push(`> Sist oppdatert: ${generatedAt}`);
+  lines.push(`> Sist generert fra commit: ${provenance}`);
   lines.push("");
   lines.push("Hver skill har en `<!-- scope: glob1, glob2 -->`-header i sin");
   lines.push("`.claude/skills/<name>/SKILL.md`. Denne tabellen viser scope-mønstre");

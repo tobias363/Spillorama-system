@@ -4,7 +4,7 @@
 > `scripts/build-skill-file-map.mjs`. Kjør `npm run build:skill-map`
 > eller `node scripts/build-skill-file-map.mjs` lokalt.
 >
-> Sist oppdatert: 2026-05-13T13:17:08Z
+> Sist generert fra commit: d64fda58
 
 Hver skill har en `<!-- scope: glob1, glob2 -->`-header i sin
 `.claude/skills/<name>/SKILL.md`. Denne tabellen viser scope-mønstre
