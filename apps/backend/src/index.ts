@@ -161,6 +161,10 @@ import { createDevHallRoomInfoRouter } from "./routes/devHallRoomInfo.js";
 // Klienten POST'er events hvert 2. sek til /api/_dev/debug/events, vi
 // appender til /tmp/spillorama-debug-events.jsonl for live-monitoring-agent.
 import { createDevDebugEventLogRouter } from "./routes/devDebugEventLog.js";
+// Tobias 2026-05-13: "Rapporter bug nå"-knapp bundler ALT (klient-state,
+// pilot-monitor-tail, backend-log, klient-events, DB-state) i én markdown-
+// rapport som PM-agenten kan lese med ett verktøykall.
+import { createDevBugReportRouter } from "./routes/devBugReport.js";
 // Tobias 2026-05-12: backend-side observability for live Spill 1-flyt.
 // Lar PM-AI + Tobias se EKSAKT state (engine in-memory + DB + Socket.IO +
 // stateVersion) uten å gjette. Token-gated, fail-soft per kilde.
@@ -4939,6 +4943,17 @@ app.use(
 // /tmp/spillorama-debug-events.jsonl. Live-monitoring-agent kan poll-e
 // tail-endepunktet for å se hva Tobias gjør i sann tid.
 app.use(createDevDebugEventLogRouter());
+
+// Tobias 2026-05-13: "Rapporter bug nå"-knapp i debug-HUD bundler ALT i ÉN
+// markdown-rapport (klient-state + pilot-monitor + backend-log + klient-events
+// + DB-state + auto-diagnose) som PM-agenten kan lese med ett Read-kall.
+//   POST /api/_dev/debug/bug-report?token=<token>
+app.use(
+  createDevBugReportRouter({
+    pool: sharedPool,
+    schema: pgSchema,
+  }),
+);
 
 // Tobias 2026-05-12: backend-side live-state-snapshot for Spill 1.
 //   GET /api/_dev/game-state-snapshot?roomCode=<code>&token=<token>

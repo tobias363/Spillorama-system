@@ -60,6 +60,11 @@ import { DebugEventLogPanel } from "./debug/DebugEventLogPanel.js";
 // dem mens Tobias tester. Beholder dump-knappen som fallback.
 import { EventStreamer } from "./debug/EventStreamer.js";
 import { installConsoleBridge } from "./debug/ConsoleBridge.js";
+// Klient-instrumentation (Tobias-direktiv 2026-05-13) — fetch + error +
+// socket-emit-tracking. Wrapper-pattern så vi ikke endrer forretningslogikk.
+import { installFetchInstrument } from "./debug/FetchInstrument.js";
+import { installErrorHandler } from "./debug/ErrorHandler.js";
+import { installSocketEmitInstrument } from "./debug/SocketEmitInstrument.js";
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -1096,6 +1101,49 @@ class Game1Controller implements GameController {
     dumpBtn.addEventListener("click", () => this.handleDebugDump());
     hud.appendChild(dumpBtn);
 
+    // Tobias-direktiv 2026-05-13: "📸 Rapporter bug nå" — rød prominent
+    // knapp som ber backenden bundle alt (klient-state, pilot-monitor,
+    // backend-log, klient-events, DB-state) i ÉN markdown-rapport som
+    // PM-agenten kan lese med ett verktøykall.
+    const reportBugBtn = document.createElement("button");
+    reportBugBtn.textContent = "📸 Rapporter bug";
+    reportBugBtn.title =
+      "Send komplett bug-rapport til PM-agenten (klient-state + events + DB + logs)";
+    reportBugBtn.setAttribute("data-testid", "report-bug-now-hud");
+    reportBugBtn.style.cssText = [
+      "display: block",
+      "width: 100%",
+      "margin-top: 4px",
+      "background: #b8281f",
+      "color: #fff",
+      "font-weight: 700",
+      "border: 1px solid #ff5c5c",
+      "border-radius: 3px",
+      "padding: 4px 8px",
+      "font-family: inherit",
+      "font-size: 11px",
+      "cursor: pointer",
+      "box-shadow: 0 2px 4px rgba(255,92,92,0.4)",
+    ].join(";");
+    reportBugBtn.addEventListener("click", () => {
+      // Delegér til DebugEventLogPanel sin handleReportBug — den har
+      // all logikken (prompt, payload-bygging, POST, status-visning).
+      // Hvis panelet ikke er montert (test-miljø), gjør lokal fallback.
+      if (this.debugEventPanel) {
+        // Public-API-er er knappen i panelet — vi simulerer et klikk.
+        const panelBtn = document.querySelector<HTMLButtonElement>(
+          '[data-testid="report-bug-now"]',
+        );
+        if (panelBtn) {
+          panelBtn.click();
+          return;
+        }
+      }
+      // Fallback: kjør JSON-dump
+      this.handleDebugDump();
+    });
+    hud.appendChild(reportBugBtn);
+
     // Mount full event-log-panel (top-left, separat fra denne HUD-en
     // top-right) — viser real-time event-strøm med filter + clear.
     if (!this.debugEventPanel) {
@@ -1105,6 +1153,41 @@ class Game1Controller implements GameController {
       } catch (err) {
         // Panel-mount er best-effort; må ikke ta ned spillet.
         console.warn("[Game1] DebugEventLogPanel mount feilet:", err);
+      }
+    }
+
+    // Konfigurer "Rapporter bug nå"-knappen i panelet med token og
+    // collectors. PM-agent får full klient-state i én rapport-fil.
+    if (this.debugEventPanel) {
+      try {
+        this.debugEventPanel.setBugReportOptions({
+          token: this.resolveDebugStreamToken(),
+          collectClientState: () => ({
+            phase: this.phase,
+            roomCode: this.actualRoomCode,
+            joinedScheduledGameId: this.joinedScheduledGameId,
+            myPlayerId: this.myPlayerId,
+            hallId: this.deps.hallId,
+          }),
+          collectCurrentScreen: () => this.phase ?? null,
+          collectLastUserAction: () => {
+            // Plukk siste user.click fra event-tracker hvis tilgjengelig
+            try {
+              const events = getEventTracker().getEvents();
+              for (let i = events.length - 1; i >= 0; i--) {
+                if (events[i].type === "user.click") {
+                  const label = events[i].payload?.["label"];
+                  return typeof label === "string" ? label : null;
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+            return null;
+          },
+        });
+      } catch (err) {
+        console.warn("[Game1] setBugReportOptions feilet:", err);
       }
     }
 
@@ -1120,6 +1203,35 @@ class Game1Controller implements GameController {
       // Bridge er best-effort — fail-soft.
       // eslint-disable-next-line no-console
       console.warn("[Game1] installConsoleBridge feilet:", err);
+    }
+
+    // FetchInstrument (Tobias-direktiv 2026-05-13): wrapper rundt
+    // globalThis.fetch — logger alle REST-kall til EventTracker.
+    // Gated på debug-flagg, idempotent, fail-soft.
+    try {
+      installFetchInstrument();
+    } catch (err) {
+      console.warn("[Game1] installFetchInstrument feilet:", err);
+    }
+
+    // ErrorHandler (Tobias-direktiv 2026-05-13): fang window.onerror +
+    // unhandledrejection — viktig for live-monitor å se runtime-issues.
+    try {
+      installErrorHandler();
+    } catch (err) {
+      console.warn("[Game1] installErrorHandler feilet:", err);
+    }
+
+    // SocketEmitInstrument (Tobias-direktiv 2026-05-13): proxy public
+    // emit-metoder på den live SpilloramaSocket-instansen. Wrapper-pattern
+    // så vi ikke editer net/SpilloramaSocket.ts. Idempotent.
+    try {
+      const socket = this.deps.socket as unknown as object;
+      if (socket && typeof socket === "object") {
+        installSocketEmitInstrument(socket);
+      }
+    } catch (err) {
+      console.warn("[Game1] installSocketEmitInstrument feilet:", err);
     }
 
     // Auto-stream tracker-events til backend (Tobias-direktiv 2026-05-12).
@@ -1209,6 +1321,32 @@ class Game1Controller implements GameController {
     } else if (roomCode.startsWith("BINGO_")) {
       isolation = "GoH-binding " + roomCode.replace("BINGO_", "");
     }
+    // Tobias-direktiv 2026-05-13: live-counter for tracker-events +
+    // siste anomali (error/warn). Gir PM-agenten visuell bekreftelse
+    // på at instrumenteringen kjører.
+    let eventsLine = "events: (tracker n/a)";
+    let lastAnomalyLine = "lastErr: —";
+    try {
+      const tracker = getEventTracker();
+      const events = tracker.getEvents();
+      eventsLine = `events: 📊 ${events.length}`;
+      // Finn siste error.client / console.error / console.warn
+      for (let i = events.length - 1; i >= 0; i--) {
+        const t = events[i].type;
+        if (
+          t === "error.client" ||
+          t === "console.error" ||
+          t === "console.warn"
+        ) {
+          const ageSec = Math.floor((Date.now() - events[i].timestamp) / 1000);
+          const msg = events[i].payload?.["message"] ?? events[i].payload?.["tag"] ?? t;
+          lastAnomalyLine = `🔴 ${t} (${ageSec}s siden) ${String(msg).slice(0, 32)}`;
+          break;
+        }
+      }
+    } catch {
+      /* tracker kanskje ikke init enda */
+    }
     const text = [
       "🐛 SPILL1 DEBUG-HUD",
       `room  : ${roomCode}`,
@@ -1216,6 +1354,8 @@ class Game1Controller implements GameController {
       `player: ${playerId.slice(0, 8)}…`,
       `sched : ${scheduledGameId === "(none)" ? "(none)" : scheduledGameId.slice(0, 8) + "…"}`,
       `isol  : ${isolation}`,
+      eventsLine,
+      lastAnomalyLine,
     ].join("\n");
     // Skriv til separat <pre>-element så dump-knappen ikke wipes ut.
     // Fallback til hele HUD-elementet hvis text-el ikke er init enda.

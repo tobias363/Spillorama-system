@@ -61,6 +61,18 @@ function shouldBridgeMessage(args: unknown[]): boolean {
   return RELEVANT_PATTERNS.some((pattern) => pattern.test(first));
 }
 
+/**
+ * Tobias-direktiv 2026-05-13: `console.error` og `console.warn` skal ALLTID
+ * bridges, uavhengig av RELEVANT_PATTERNS. Dette gjør at PM-agenten ser
+ * runtime-issues som biblioteks-warnings og generelle errors.
+ *
+ * `.log/.info/.debug` beholder pattern-match (ellers fyller vi bufferen
+ * med Pixi/Vite/Service-Worker-støy).
+ */
+function shouldAlwaysBridgeLevel(level: ConsoleLevel["level"]): boolean {
+  return level === "error" || level === "warn";
+}
+
 function safeSerialize(args: unknown[]): unknown[] {
   // Bedre å sende objekter som JSON-serialiserbare versjoner enn å
   // risikere circular-reference-errors i EventTracker.
@@ -129,18 +141,25 @@ export function installConsoleBridge(): () => void {
         // Hvis recursion-guard er på, ikke re-emit (forhindrer
         // infinite-loop hvis EventTracker selv logger via console).
         if (reentrancyGuard) return;
-        if (!shouldBridgeMessage(args)) return;
+        // Tobias-direktiv 2026-05-13: error/warn skal ALLTID bridges,
+        // andre nivåer trenger pattern-match for å unngå Pixi/Vite-støy.
+        const alwaysBridge = shouldAlwaysBridgeLevel(level);
+        if (!alwaysBridge && !shouldBridgeMessage(args)) return;
 
         reentrancyGuard = true;
         try {
           const tracker = getEventTracker();
-          const firstArg = args[0] as string;
+          const firstArg = args[0];
+          const firstArgStr =
+            typeof firstArg === "string" ? firstArg : String(firstArg);
           // Strip leading [TAG] for å lage stable event-subtype
-          const tagMatch = firstArg.match(/^\[([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?)\]/);
+          const tagMatch = firstArgStr.match(
+            /^\[([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?)\]/,
+          );
           const tag = tagMatch ? tagMatch[1] : "untagged";
           tracker.track(`console.${level}`, {
             tag,
-            message: firstArg,
+            message: firstArgStr.slice(0, 1000),
             extra: safeSerialize(args.slice(1)),
           });
         } catch {
