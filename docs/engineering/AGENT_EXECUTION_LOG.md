@@ -59,210 +59,97 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
-### 2026-05-13 — I16 plan-run lifecycle auto-reconcile fra lobby-poll (general-purpose, isolated worktree)
+### 2026-05-13 — PM Push-Control Phase 2 (Phase 2-agent, PM-AI orkestrert)
 
-**Scope:** Fix bug I16 / FRAGILITY F-02: plan-run lifecycle ikke auto-reconciled fra lobby-poll. Stuck-state der `app_game_plan_run.status='running'` mens `app_game1_scheduled_games.status='completed'` etter E2E-test-runs. Tobias' manuelle test 1.5h senere → 1h diagnose for å finne stuck state. Fix legger reconcile-hook i `Game1LobbyService.getLobbyState` (read-path) så lobby-poll auto-healer state.
+**Scope:** Utvide Phase 1 PM push-control (PR #1330) med 7 deler: persistent
+registry (`.claude/active-agents.json` med /tmp-migrering), pre-push git-hook
+for agent-scope-sjekk, GitHub Actions auto-rebase-workflow ved PR-merge,
+node:test test-suite for `pm-push-control.mjs`, Mac-notifications via osascript
+med severity-baserte lyder, HTML-dashboard med auto-refresh, og live-monitor-
+integrasjon for å korrelere P0/P1-events med aktive agent-scope.
 
 **Inputs gitt:**
-- FRAGILITY_LOG F-02 (full kontekst), MasterActionService.tryReconcileTerminalScheduledGame som referanse-pattern
-- Estimat 1-2 timer, isolert worktree fra origin/main
-- Edge cases: concurrent reconcile, reconcile feiler mid-tx, paused-state preservering, scheduled_end_time future, idempotens
-- DO NOT create PR (PM tar over)
+- Phase 1-content via cherry-pick av commit `866aa39b` fra
+  `feat/pm-push-control-2026-05-13` (PR #1330, ikke merget enda)
+- Tobias-direktiv 2026-05-13: "Kan du også sette opp rutine i at du har
+  kontroll på alt som blir pusha til git så du kan forsikre om at det ikke
+  blir konfliktende arbeid"
+- Krav: branch fra `origin/main`, push til origin, IKKE åpne PR
+- 7 deliverables (A-G) med eksplisitt aksept-kriteria
+- Vitest-kompatibilitet ønsket — implementert med `node:test` som vitest speiler
 
 **Outputs produsert:**
-- **Branch:** `fix/plan-run-auto-reconcile-2026-05-13` (pushed til origin)
-- **Commits:** se commit-melding nedenfor
-- **Filer modifisert:**
-  - `apps/backend/src/game/Game1LobbyService.ts:46-66, 247-292, 506-545, 730-833` — ny private `tryReconcileTerminalScheduledGame` + `TERMINAL_SCHEDULED_GAME_STATUSES` + `AUTO_RECONCILE_ACTOR_ID` + reconcile-call i `getLobbyState`. Doc-header oppdatert til å reflektere ny write-path.
-  - `docs/engineering/FRAGILITY_LOG.md:61-104` — F-02 markert FIXED, fil-pekere oppdatert, manuell verifikasjon-tekst speilet ny atferd.
-  - `tests/e2e/BUG_CATALOG.md:48, 101` — I16 entry lagt til + endringslogg.
-- **Filer opprettet:**
-  - `apps/backend/src/game/__tests__/Game1LobbyService.reconcile.test.ts:1-509` — 10 nye unit-tester (stuck @ last position, stuck @ non-last, normal running, already-finished, paused preserved, finish-error fail-safe, cancelled status, non-terminal status, latency < 50ms, idempotent across two polls).
+- **Branch:** `feat/pm-push-control-phase2-2026-05-13` (pushed til origin etter
+  test-verifikasjon)
+- **Filer endret:**
+  - `scripts/pm-push-control.mjs` — utvidet fra 470 linjer (Phase 1) til
+    ~760 linjer. Nye kommandoer: `scope-check`, `dashboard`, `notify`,
+    `monitor-correlate`. Nye flags: `--registry`, `--silent`. ESM-eksport av
+    `globMatch`, `filesOverlap`, `fileInScope`, `macNotify` for testing.
+    Glob-matcher utvidet til å håndtere `**/` (zero-or-more segments).
+    Direct-invocation-guard så modulen kan importeres uten å fyre dispatcher.
+- **Filer nye:**
+  - `.claude/active-agents.json` — initial empty registry (schema v2)
+  - `.husky/pre-push` — orchestrator-hook
+  - `.husky/pre-push-agent-scope-check.sh` — scope-check med WARN/STRICT-modi
+  - `.github/workflows/auto-rebase-on-merge.yml` — GitHub Actions workflow
+    som fyrer ved `pull_request.closed[merged=true]`, kalkulerer
+    fil-overlap mellom merget PR og åpne PRs via `gh pr view --json files`,
+    forsøker auto-rebase via `PUT /repos/.../pulls/{number}/update-branch`,
+    kommenterer på påvirkede PR-er.
+  - `scripts/__tests__/pm-push-control.test.mjs` — 34 node:test tester:
+    unit (globMatch, filesOverlap, fileInScope, macNotify) +
+    E2E CLI (register, list, unregister, scope-check WARN+STRICT,
+    legacy migration, env-var override, dashboard, notify).
+  - `scripts/__tests__/pre-push-scope-check.test.sh` — 9 bash-tester for
+    hook + bypass-flags.
+  - `scripts/generate-push-control-dashboard.sh` — wrapper for
+    `pm-push-control.mjs dashboard` med `--open` (browser) og `--watch`
+    (regen 30s).
+- **Filer oppdatert (knowledge-docs):**
+  - `docs/engineering/PM_PUSH_CONTROL.md` — utvidet med Phase 2-seksjoner:
+    nye kommandoer, registry-migrering, pre-push-hook, auto-rebase-workflow,
+    Mac-notif, HTML-dashboard, live-monitor-korrelasjon, testing.
+  - `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry.
 
 **Test-resultater:**
-- Nye reconcile-tester: 10/10 PASS (~610ms total)
-- Eksisterende `Game1LobbyService.test.ts`: 14/14 PASS (~1.3s)
-- Game1LobbyService + spill1Lobby route-tester: 5098/5098 PASS (16 skipped, 0 failed)
-- TypeScript strict: clean (`npm run check`)
-- Latency-test: median ~5ms (godt under 50ms-budget)
-- Pre-existing test-failures (EmailQueue, adminPlayers, wallet.*, etc.) er ikke relatert til denne fixen (verifisert på main).
-
-**Fallgruver oppdaget:**
-- **`Game1LobbyService` doc-header sa "INGEN write — kun read":** Måtte revurderes — fix introduserer en best-effort write-path (auto-finish plan-run). Doc-header oppdatert til å reflektere ny semantikk eksplisitt (én write-path med klart definert kriterium + fail-safe). Anti-mønster: ikke endre write/read-modus på en service uten å oppdatere doc-kontrakt samtidig.
-- **`mapScheduledGameStatus` whitelist inkluderer ikke `'completed'`/`'cancelled'`:** Mappes til `'idle'` via default. Det betyr at uten reconcile-fix viste lobby `overallStatus='idle'` MEN `scheduledGameId` pekte på den terminale runden — klient kunne (i teorien) joine en avsluttet runde og krasje. Reconcile-fixen retter dette ved å hide `scheduledGameId` parallelt med plan-run-finish.
-- **`paused`-state må eksplisitt bevares:** Auto-reconcile sjekker `run.status === "running"` først; pausede runder med terminal scheduled-game tas IKKE av reconcile-pathen (master må manuelt resume/stop). Eksplisitt unit-test for dette.
-- **Race conditions er allerede dekket av `changeStatus`-validering:** `planRunService.finish` validerer `allowedFrom: ['idle','running','paused']` før UPDATE. To samtidige reconcile-call vil føre til at den andre kaster `GAME_PLAN_RUN_INVALID_TRANSITION` — vi fanger og logger uten å påvirke lobby-respons.
-
-**Læring:**
-- **Read-path auto-heal er ofte den enkleste fix for stuck-state-bugs:** I stedet for å garantere at alle write-paths (her: `MasterActionService.stop`) rydder PERFEKT, kan vi gjøre read-paths defensive. Trade-off: ekstra latency på lobby-poll, men siden reconcile-checken er O(1) DB-pluss-eventuell-UPDATE er det rimelig.
-- **Test latency-budget eksplisitt:** Acceptance-kriteriet sa "< 50ms added", så testen måler median over 10 iterasjoner. Hvis vi øker DB-call-count i reconcile-pathen vil testen ringe alarm.
-- **Idempotens via state-machine-validering:** Vi trenger ikke ekstra lås — `changeStatus` validerer state først, så gjentatte kall på allerede-finished plan-run er no-op via `GAME_PLAN_RUN_INVALID_TRANSITION` (fanget av reconcile, ikke propagert).
-- **`SYSTEM_ACTOR_ID`-konvensjon:** Audit-pathen får sentinel-actor `system:lobby-auto-reconcile` så reviewer kan skille auto-finish fra manuell master-stop i audit-loggen. Speiler `Game2AutoDrawTickService.SYSTEM_ACTOR_ID`-mønster.
-
-**Verifisering (egen, før PM tar over):**
-- TypeScript strict: clean
-- Unit-tester: 10 nye + 14 eksisterende grønne
-- Game-domene + lobby route tester: 5098 grønne
-- Manuell test-mønster for F-02 (curl-blokk) speilet i FRAGILITY_LOG — manuell verifikasjon må kjøres post-merge for å bekrefte heling i prod-lik miljø.
-
-**Tid:** ~1.5 timer (research + implementasjon + 10 unit-tester + doc-oppdateringer + verifisering)
-
-**Status:** Branch pushed til origin, IKKE merget. PM tar over for PR + merge per oppdragsmønster.
-
----
-
-### 2026-05-13 — Comprehension-verification (Tier-3 over FRAGILITY_LOG, general-purpose agent)
-
-**Scope:** Bygg Tier-3 enforcement i autonomi-pyramiden — heuristisk
-validering av `## Comprehension`-blokk i commit-meldinger som har
-`[context-read: F-NN]`-tagger. Forhindrer at agenter lyver med konstant
-kostnad ved å bare lime inn taggen uten å lese entry-en.
-
-**Inputs gitt:**
-- Mandat fra `<<autonomous-loop>>`-prompt: bygg verktøyet, fiks det til det
-  går grønt, dokumenter, oppdater PR-template + AGENT_EXECUTION_LOG +
-  PITFALLS_LOG, ikke åpne PR (PM tar over)
-- Pekere til `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, `FRAGILITY_LOG.md`,
-  `pre-commit-fragility-check.sh`, `ai-fragility-review.yml`, `PITFALLS_LOG §6`
-- Branch: `feat/comprehension-verification-2026-05-13` (ny fra origin/main)
-- Format: Conventional Commits norsk, `[bypass-pm-gate: ...]` + `gate-not-applicable: pm-autonomy-system`
-
-**Outputs produsert:**
-- **Branch:** `feat/comprehension-verification-2026-05-13` (pushed til origin)
-- **Filer:**
-  - `scripts/verify-context-comprehension.mjs:1-525` — Node ESM heuristic-validator
-    - parseFragilityLog (entries map med files + neverDo + rawBlock)
-    - extractComprehensionBlock (## Comprehension → stripper Co-Authored-By)
-    - extractContextReadFids (regex F-NN, komma-separert + multi-tag)
-    - extractBypassReason (bypass-tag med ≥20 chars krav)
-    - isGenericText (matcher "jeg leste", "OK", "lest", etc.)
-    - ruleOverlap (3+ content-word overlap, norsk+engelsk stop-words)
-    - findFileMention (full path, basename, eller glob-match)
-    - validateEntryAgainstComprehension (lengde + generic + filsti + regel)
-    - validateCommitMessage (e2e, returnerer ok/errors/warnings/fids)
-    - CLI: --commit-msg, --test, --help
-    - Git-note: skriver .git/comprehension-notes/comprehension-<sha>.txt
-  - `.husky/pre-commit-comprehension.sh:1-50` — bash wrapper (kompatibel med bash 3.2)
-  - `.husky/pre-commit:30-50` — wirer trinn 3 (comprehension) etter Tier-A intent
-  - `scripts/__tests__/verify-context-comprehension.test.mjs:1-590` — 48 tester (node --test)
-  - `docs/engineering/COMPREHENSION_VERIFICATION.md:1-380` — full guide + format-eksempler
-  - `.github/pull_request_template.md:65-85` — Knowledge protocol-seksjon med comprehension-reminder
-  - `docs/engineering/PITFALLS_LOG.md §5.8` — bash-4-requirement i fragility-check (oppdaget under arbeidet)
-
-**Test-resultater:**
-- 48 tester, alle passerer (107ms total)
-- Hook-performance lokalt:
-  - Uten `[context-read:]`-marker: ~108ms (regex + early exit)
-  - Med `[context-read: F-01]` god comprehension: ~150ms
-  - Med dårlig comprehension: ~150ms (avviser med detaljerte feilmeldinger)
-- Alle 4 acceptance-kriterier oppfylt:
-  - ✓ Allows commit with proper ## Comprehension block
-  - ✓ Rejects commit with "jeg leste"
-  - ✓ Override works with valid reason ≥ 20 chars
-  - ✓ Override rejects reason < 20 chars
-- TypeScript build: `npm run build:types` grønn
-- Backend typecheck: `npm --prefix apps/backend run check` grønn
-
-**Fallgruver oppdaget:**
-
-1. **§5.8 (ny i PITFALLS_LOG): bash 4-requirement i fragility-check** —
-   `.husky/pre-commit-fragility-check.sh` bruker `declare -A` (associative
-   arrays) som er bash 4+. macOS default bash er 3.2 — feiler med
-   `declare: -A: invalid option`. Scriptet eksisterer (PR #1326) men ble
-   aldri wiret. Konsekvens: min PR wirer KUN comprehension-hooken, ikke
-   fragility-hooken. Fragility-check må refaktores til POSIX eller Node
-   først.
-
-2. **Glob-pattern i FRAGILITY_LOG file-paths**: F-03 har `tests/e2e/*.spec.ts`
-   med glob. Initial parser-regex tillot ikke `*` i path-segmenter →
-   parsing-feil. Fix: utvid regex med `*` og legg til glob→regex-konvertering
-   i `findFileMention` så glob-pattern matcher konkrete spec-filer i
-   comprehension-tekst.
-
-3. **F-02 multi-line Filer-blokk**: F-02 har flere file-paths som bullets
-   under `**Filer:**`-header (ikke inline). Initial parser fanget kun
-   inline-paths. Fix: introduser `inFilerSection`-state-variabel som
-   samler bullet-rader til neste section-break.
-
-4. **Stop-word-filter for 3-ord-overlap**: Uten stop-word-filter ville
-   norsk-tekst med generisk fyll (`og`, `er`, `den`) trivielt nå 3-ord-grensen.
-   Lagt til 90+ norsk + engelsk stop-words i `STOP_WORDS`-set.
+- ✅ node:test: **34/34 PASS** (`scripts/__tests__/pm-push-control.test.mjs`)
+  med node 25.x, isolerte tempfile-registry, hverken canonical
+  `.claude/active-agents.json` eller `/tmp/active-agents.json` ble touchet.
+- ✅ Bash-test: **9/9 PASS** (`scripts/__tests__/pre-push-scope-check.test.sh`)
+- ✅ YAML-validering: `auto-rebase-on-merge.yml` — pyyaml parser OK,
+  4 steps, riktige triggers + permissions.
+- ✅ Direct CLI smoke-test: alle 12 commands (`list`, `register`, `unregister`,
+  `conflicts`, `merge-order`, `diff`, `poll`, `watch`, `scope-check`,
+  `dashboard`, `notify`, `monitor-correlate`) fungerer.
+- ✅ Regresjon: Phase 1-kommandoer fungerer uendret.
+- ⏭️ Mac-notif: test-verifisert på darwin platform — graceful skip på linux/CI.
 
 **Læring:**
-
-- Bash hooks for kvalitets-sjekker bør være Node-baserte (matcher
-  `check-pm-gate.mjs`-mønster). Bash 3.2-grensene på macOS er for trange
-  for komplekse string-operasjoner.
-- Heuristikker har inherent trade-off: for streng = falske blokkering,
-  for løs = lett-bypassed. 3-ord-overlap + filsti-krav er empirisk
-  middel-streng — fanger "jeg leste" og copy-paste, godtar reell paraphrase.
-- Sjekk-design krever positivt + negativt test-suite parallelt. 48 tester
-  fordelt: parser (6), block-extraction (5), tag-extraction (8), generic-check
-  (5), overlap (3), file-mention (4), entry-validering (6), e2e (8),
-  quality-guards (2). Hver lag har sin egen sannhets-kilde.
-
-**Eierskap:**
-- `scripts/verify-context-comprehension.mjs` (eier alene)
-- `scripts/__tests__/verify-context-comprehension.test.mjs` (eier alene)
-- `.husky/pre-commit-comprehension.sh` (eier alene)
-- `docs/engineering/COMPREHENSION_VERIFICATION.md` (eier alene)
-- `.husky/pre-commit` + `.github/pull_request_template.md` + `PITFALLS_LOG` —
-  delt, kun additive endringer
-
----
-
-### 2026-05-13 — Tobias-readiness auto-generator i AI Fragility Review (general-purpose agent)
-
-**Scope:** Utvid `ai-fragility-review.yml`-workflow med auto-genererte "Tobias smoke-test"-seksjoner per PR. Heuristikk-basert fil→scenario-mapping rendrer ferdig markdown med konkrete URL-er, credentials, klikk-steg, forventet resultat og typiske feilbilder. Skal redusere Tobias' verifikasjons-burden ved at han ser hva han skal teste uten å lese diffen selv.
-
-**Inputs gitt:**
-- Mandat fra Tobias 2026-05-13: PR-comment skal ha "Tobias smoke-test"-seksjon med <30 linjer, konkrete URL-er, norsk språk
-- Pekere til `.github/workflows/ai-fragility-review.yml`, `FRAGILITY_LOG.md`, `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, `PM_ONBOARDING_PLAYBOOK.md` §5, PR-template
-- 8 scenario-maler påkrevd (master-start/stop/advance, spiller-buy/mark, wallet-touch, docs-only, unknown)
-- Min 5 fixture-diff-er for testing
-- Branch: `feat/tobias-readiness-summary-2026-05-13`, ikke åpne PR
-
-**Outputs produsert:**
-- **Branch:** `feat/tobias-readiness-summary-2026-05-13` (pushes til origin etter PM-godkjent)
-- **Filer (nye):**
-  - `scripts/generate-tobias-readiness.mjs:1-301` — Node ESM-script med `classifyFile()` + `aggregateScenarios()` + `generateReadinessSection()` + CLI-main
-  - `scripts/tobias-readiness-templates/master-start.md` — start-runde-mal
-  - `scripts/tobias-readiness-templates/master-stop.md` — stopp-runde-mal
-  - `scripts/tobias-readiness-templates/master-advance.md` — advance-til-neste-fase-mal
-  - `scripts/tobias-readiness-templates/spiller-buy.md` — kjøp-bonger-mal
-  - `scripts/tobias-readiness-templates/spiller-mark.md` — marker-tall-mal
-  - `scripts/tobias-readiness-templates/wallet-touch.md` — wallet+compliance-mal
-  - `scripts/tobias-readiness-templates/docs-only.md` — "ikke nødvendig"-mal
-  - `scripts/tobias-readiness-templates/unknown.md` — fallback-mal
-  - `scripts/__tests__/generate-tobias-readiness.test.mjs` — 39 tester (node:test)
-  - `scripts/__tests__/fixtures/diff-{docs-only,master-start,spiller-buy,wallet-touch,mixed,husky-only,unknown}.txt`
-  - `scripts/__tests__/fixtures/commits-pilot-fix.txt`
-  - `docs/engineering/TOBIAS_READINESS_FORMAT.md` — vedlikeholds-doc
-- **Filer (endret):**
-  - `.github/workflows/ai-fragility-review.yml` — nytt `Generate Tobias smoke-test section`-step + integrasjon med eksisterende FRAGILITY-review comment
-
-**Test-resultat:**
-- `node --test scripts/__tests__/generate-tobias-readiness.test.mjs` → 39/39 pass, ~1.1s runtime
-- Manuell smoke-test med `--diff-file scripts/__tests__/fixtures/diff-spiller-buy.txt` produserte korrekt markdown med 2 scenarier (spiller-buy + spiller-mark) inkludert URL-er, credentials og "Forventet feilbilde"-seksjon
-- YAML-syntax verifisert med `js-yaml.load(...)` → OK
-
-**Fallgruver oppdaget:**
-- Hvis FRAGILITY har 0 matches OG vi bare ville posted Tobias-section, var den eksisterende `return`-early-koden et hinder — fikset ved å restrukturere så Tobias-section vises uavhengig av FRAGILITY-match
-- Eksisterende comment-detection brukte kun "🛡️ AI Fragility Review"-substreng — utvidet til å også matche "🎯 Tobias smoke-test" så docs-only-PR-er får én oppdatert comment, ikke duplikat
-- Aggregering: hvis blandet docs+kode, måtte vi droppe "docs-only" fra scenario-listen så reelle test-steg ikke ble overskygget av "ikke nødvendig"
-
-**Læring:**
-- Templates som markdown-filer (ikke inline strings i kode) gir mye lettere vedlikehold — Tobias eller framtidig PM kan justere språk uten å rør JS-koden
-- Test-fixture-tilnærming (diff-files på disk) gir reproduserbar testing av CLI-integrasjonen
-- `import.meta.url` + named exports lar samme fil være både CLI og test-target uten kunstig refactor
+- **JSDoc `**` i ESM:** Triple-star (`* `) i JSDoc-blokker tolkes som
+  comment-close av node-parser. Måtte erstatte med `[[double-star]]` i
+  beskrivelser. Dokumentert i kommentar over `globMatch`.
+- **import.meta vs direct-invocation:** Standardmønsteret for å gjøre en
+  ESM-fil både importerbar OG kjørbar er
+  `import.meta.url === pathToFileURL(process.argv[1]).href`. Med worktree-
+  scenarioer kan path-comparison bli vanskelig, så jeg la til en fallback
+  med `endsWith("pm-push-control.mjs")` for robusthet.
+- **YAML heredoc-indentasjon:** Embedded heredocs i GitHub Actions YAML-
+  blokker MÅ være på samme indentation som omkringliggende bash-tekst —
+  ellers tolkes som YAML. Endte med `printf` i stedet for heredoc for å
+  unngå dette helt.
+- **Glob `**/` semantics:** Standard behavior er at `**/*.foo` matcher
+  både `foo.foo` (root) og `a/b/foo.foo` (nested). Krever spesial-håndtering
+  av `**/` → `(?:.*/)?` (gjør slashen optional). Andre patterns matter ikke.
 
 **Verifisering (PM):**
-- Vil verifisere at workflow renderer korrekt på faktisk PR etter merge til main
-- Forventer at neste PR mot main får både FRAGILITY-review (eksisterende) + Tobias-readiness (nytt)
+- Hva PM må sjekke: kjør `node --test scripts/__tests__/pm-push-control.test.mjs`
+  + `bash scripts/__tests__/pre-push-scope-check.test.sh` for å verifisere
+  tester. Sjekk at `.claude/active-agents.json` er committed med tom
+  state. Sjekk at `.husky/pre-push*` er executable. Kjør
+  `node scripts/pm-push-control.mjs dashboard` og åpne HTML-en.
 
-**Tid:** ~3 timer agent-arbeid
-
-**Eierskap:** `scripts/generate-tobias-readiness.mjs`, `scripts/tobias-readiness-templates/`, `scripts/__tests__/generate-tobias-readiness.test.mjs`, `.github/workflows/ai-fragility-review.yml` (Tobias-section), `docs/engineering/TOBIAS_READINESS_FORMAT.md`
+**Tid:** ~3 timer agent-arbeid (under 6-8h estimat).
 
 ---
 
