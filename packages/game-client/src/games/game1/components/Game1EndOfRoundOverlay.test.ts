@@ -27,6 +27,7 @@ import {
   Game1EndOfRoundOverlay,
   MIN_DISPLAY_MS,
   MIN_DISPLAY_MS_SPECTATOR,
+  WAITING_FOR_MASTER_TIMEOUT_MS,
   type Game1EndOfRoundSummary,
 } from "./Game1EndOfRoundOverlay.js";
 import type { PatternResult } from "@spillorama/shared-types/game";
@@ -389,5 +390,121 @@ describe("Game1EndOfRoundOverlay (Summary + Loading combined)", () => {
 
   it("markRoomReady() før show() er no-op", () => {
     expect(() => overlay.markRoomReady()).not.toThrow();
+  });
+
+  // ── Tobias prod-incident 2026-05-13 (root cause #3) ─────────────────
+  // "Forbereder rommet..."-spinner henger evig fordi backend ikke
+  // emitter ny `room:update` etter round-end før master har klikket
+  // "Start neste spill". Fix: etter 30s, bytt loading-tekst til "Venter
+  // på master — runden er slutt" og dempe spinneren, slik at lobby-
+  // knappen er primary action.
+  describe("waiting-for-master fallback (Tobias 2026-05-13)", () => {
+    it("etter timeout uten markRoomReady: loading-tekst byttes til 'Venter på master'", () => {
+      overlay.show(baseSummary({ ownRoundWinnings: 100 }));
+
+      // Initial: "Forbereder rommet..."
+      const loadingBefore = parent.querySelector(
+        '[data-testid="eor-loading-indicator"]',
+      );
+      expect(loadingBefore?.textContent).toContain("Forbereder rommet");
+      expect(loadingBefore?.getAttribute("data-state")).toBe("preparing");
+
+      // Tikk over timeout-grensen uten å kalle markRoomReady
+      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS + 100);
+
+      // Loading-tekst skal nå si "Venter på master ..."
+      const loadingAfter = parent.querySelector(
+        '[data-testid="eor-loading-indicator"]',
+      );
+      expect(loadingAfter?.textContent).toContain("Venter på master");
+      expect(loadingAfter?.textContent).not.toContain("Forbereder rommet");
+      expect(loadingAfter?.getAttribute("data-state")).toBe(
+        "waiting-for-master",
+      );
+    });
+
+    it("etter timeout: lobby-knappen styling oppjusteres og er fortsatt klikkbar", () => {
+      const onBack = vi.fn();
+      overlay.show(baseSummary({ ownRoundWinnings: 100, onBackToLobby: onBack }));
+
+      // Tikk over timeout-grensen
+      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS + 100);
+
+      const btn = parent.querySelector(
+        '[data-testid="eor-lobby-btn"]',
+      ) as HTMLButtonElement | null;
+      expect(btn).not.toBeNull();
+      expect(btn?.getAttribute("data-state")).toBe("waiting-for-master");
+
+      // Klikk skal fortsatt fungere og kalle onBackToLobby + lukke overlay
+      btn?.click();
+      expect(onBack).toHaveBeenCalledTimes(1);
+      expect(overlay.isVisible()).toBe(false);
+    });
+
+    it("markRoomReady() FØR timeout cancelt waiting-fallback", () => {
+      const onCompleted = vi.fn();
+      overlay.show(
+        baseSummary({
+          ownRoundWinnings: 100,
+          onOverlayCompleted: onCompleted,
+        }),
+      );
+
+      // Wait past min-display, kall markRoomReady → tryDismiss → fade
+      vi.advanceTimersByTime(MIN_DISPLAY_MS + 100);
+      overlay.markRoomReady();
+      vi.advanceTimersByTime(400);
+      expect(onCompleted).toHaveBeenCalledTimes(1);
+
+      // Overlay er nå skjult — vi skal IKKE se "Venter på master"-tekst
+      // dukke opp etter 30s (timeren ble cancelet av markRoomReady).
+      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS + 1_000);
+      const stillVisible = parent.querySelector(
+        '[data-testid="game1-end-of-round-overlay"]',
+      );
+      expect(stillVisible).toBeNull();
+    });
+
+    it("reconnect: elapsedSinceEndedMs > timeout slår fallback inn umiddelbart", () => {
+      // Bruker har vært borte i 35s — master har aldri startet neste runde.
+      overlay.show(
+        baseSummary({
+          ownRoundWinnings: 100,
+          elapsedSinceEndedMs: WAITING_FOR_MASTER_TIMEOUT_MS + 5_000,
+        }),
+      );
+
+      // Umiddelbart etter show: fallback er allerede applikert (ingen
+      // setTimeout-vente).
+      const loading = parent.querySelector(
+        '[data-testid="eor-loading-indicator"]',
+      );
+      expect(loading?.textContent).toContain("Venter på master");
+      expect(loading?.getAttribute("data-state")).toBe("waiting-for-master");
+    });
+
+    it("fallback er idempotent — timeren fyrer ikke etter manuell apply", () => {
+      overlay.show(
+        baseSummary({
+          ownRoundWinnings: 100,
+          elapsedSinceEndedMs: WAITING_FOR_MASTER_TIMEOUT_MS + 5_000,
+        }),
+      );
+
+      // Initial: fallback applikert umiddelbart (reconnect-path)
+      const loading = parent.querySelector(
+        '[data-testid="eor-loading-indicator"]',
+      );
+      expect(loading?.getAttribute("data-state")).toBe("waiting-for-master");
+
+      // Tikk videre — tekst skal forbli "Venter på master" (ingen idempotens-
+      // bug der den dobbel-applieres).
+      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS * 2);
+      const loadingLater = parent.querySelector(
+        '[data-testid="eor-loading-indicator"]',
+      );
+      expect(loadingLater?.textContent).toContain("Venter på master");
+    });
   });
 });
