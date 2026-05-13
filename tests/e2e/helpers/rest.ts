@@ -180,7 +180,36 @@ export async function masterStop(
 }
 
 /**
- * Hard-reset pilot state via direct REST calls. Brukes i `beforeEach` for å
+ * Returns `true` when CI-mode is signaled via env. Reads
+ * `E2E_DESTROY_ROOMS=1` (accepts "1", "true", "yes"). Used by the CI
+ * workflow `.github/workflows/pilot-flow-e2e.yml` to make the room-destroy
+ * decision explicit. Locally the test always destroys rooms anyway
+ * (default behavior of `resetPilotState`); the env-var is a knob to opt
+ * OUT of destroy when debugging if you want to keep state between runs.
+ */
+export function shouldDestroyRoomsForCi(): boolean {
+  const raw = (process.env.E2E_DESTROY_ROOMS ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+export interface ResetPilotStateOptions {
+  /**
+   * When `true` (default), destroys the master-GoH room via admin-API after
+   * stopping the running game. Required when re-running the test repeatedly
+   * because the engine keeps player-slots after game-end (regulatorisk for at
+   * vinnere skal se resultatet) — uten cleanup feiler neste `room:join`
+   * med `PLAYER_ALREADY_IN_ROOM`.
+   *
+   * Pass `destroyRooms: false` (or set `E2E_DESTROY_ROOMS=0` in env) to
+   * skip the destroy — useful when iterating on a single test invocation
+   * and you want to inspect post-test state. Default `true` keeps the
+   * common-case loop fast and repeatable.
+   */
+  destroyRooms?: boolean;
+}
+
+/**
+ * Hard-reset pilot state via direct REST calls. Brukes i `beforeAll` for å
  * sikre at hver test starter med en fersh scheduled-game. Hvis et eldre
  * spill fortsatt kjører, prøver vi å stoppe det først.
  *
@@ -188,12 +217,32 @@ export async function masterStop(
  * ikke player-slot ved game-end — det er regulatorisk korrekt for at vinnere
  * skal se resultatet). Det fører til `PLAYER_ALREADY_IN_ROOM` ved neste join.
  * For å garantere fresh state destrueres GoH-rommet via admin-API.
+ *
+ * Default: `destroyRooms: true`. Eksplisitt `false` (eller `E2E_DESTROY_ROOMS=0`
+ * i env) skipper destroy-steget — nyttig for debug-iterasjon.
  */
-export async function resetPilotState(masterToken: string): Promise<void> {
+export async function resetPilotState(
+  masterToken: string,
+  options: ResetPilotStateOptions = {},
+): Promise<void> {
   // 1. Stop master action.
   await masterStop(masterToken).catch(() => {
     /* ignore — no active round */
   });
+
+  // Default `true` så tester er repeterbare uten manuell SQL-cleanup.
+  // Env-var `E2E_DESTROY_ROOMS=0` kan overstyre for debug-iterasjon (CI
+  // setter `E2E_DESTROY_ROOMS=1` for å gjøre intent eksplisitt).
+  const destroyRooms = (() => {
+    if (options.destroyRooms !== undefined) return options.destroyRooms;
+    const raw = (process.env.E2E_DESTROY_ROOMS ?? "").trim().toLowerCase();
+    if (raw === "0" || raw === "false" || raw === "no") return false;
+    return true;
+  })();
+
+  if (!destroyRooms) {
+    return;
+  }
 
   // 2. Auto-login admin og destruér master-GoH-rommet så ingen player-slots
   //    henger igjen mellom tester.
