@@ -50,6 +50,15 @@ Tobias for arkitektur-rewrite av buy-flow.
 |---|---|---|---|---|
 | _(ingen)_ | — | — | — | — |
 
+### Verifiserte ikke-bugs (test bekrefter forventet atferd)
+
+> Tester som ble lagt til etter rapport, men kunne IKKE reprodusere
+> rapporterte bug på `main`. Tjener som permanente regresjons-vern.
+
+| # | Rapport | Test-fil | Faktisk root-cause | Status |
+|---|---|---|---|---|
+| V1 | "runden startet automatisk etter jeg kjøpte bong" (Tobias 2026-05-13) | `tests/e2e/spill1-no-auto-start.spec.ts` | UI-misdisplay: master-konsoll viste "Aktiv trekning" for `purchase_open`/`ready_to_start` (fixed i commit `6b90b32e` 2026-05-12). DB-status var ALDRI auto-flippet til `running`. Test verifiserer: status=`purchase_open`/`ready_to_start` etter 1 buy + 10s wait, OG etter 3 raske buys + 15s wait. `actualStartTime` forblir null. Master må eksplisitt kalle `/api/agent/game1/master/start` for å trigge `running`. | ✅ Permanent regression-watch |
+
 ## Når katalogen brukes
 
 1. **Test feiler → første-undersøkelse:** Er det test-side eller kode-side?
@@ -85,3 +94,4 @@ Status-verdier:
 |---|---|---|
 | 2026-05-13 | Initial — etablert template + listet 7 allerede-fiksede implementasjons-bugs | PM-AI (Claude Opus 4.7) |
 | 2026-05-13 | E2E-test grønn etter fixes for I8/I9/I10 (SocketActions multiplier, TicketGrid mapping, BuyPopup cancelBtn-reset). Test kjører i 12.3s deterministic. | Autonomous-pilot-test-loop agent |
+| 2026-05-13 | Lagt til V1 (no-auto-start regression). Test verifiserer at REST `/api/game1/purchase` ALDRI auto-trigger `status=running` for Spill 1. Tobias' rapporterte "auto-start" var UI-misdisplay-bug fra PR #1277, fixed i commit 6b90b32e før denne testen ble skrevet. Test grønn i 27s for 2 scenarios (single buy + stress 3 raske buys). | feat/pilot-test-no-auto-start-2026-05-13 agent |
