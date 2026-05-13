@@ -23,8 +23,10 @@ interface SentryHandle {
   captureException: (err: unknown, hint?: { tags?: Record<string, string>; extra?: Record<string, unknown> }) => void;
   addBreadcrumb: (breadcrumb: { category: string; message?: string; data?: Record<string, unknown>; level?: "info" | "warning" | "error" }) => void;
   setTag: (key: string, value: string) => void;
-  withScope: (cb: (scope: { setTag: (k: string, v: string) => void; setExtra: (k: string, v: unknown) => void }) => void) => void;
+  setUser: (user: { id?: string; username?: string; email?: string } | null) => void;
+  withScope: (cb: (scope: { setTag: (k: string, v: string) => void; setExtra: (k: string, v: unknown) => void; setUser: (u: { id?: string; username?: string; email?: string } | null) => void }) => void) => void;
   flush: (timeoutMs?: number) => Promise<boolean>;
+  expressErrorHandler?: () => (err: unknown, req: unknown, res: unknown, next: unknown) => void;
 }
 
 let sentry: SentryHandle | null = null;
@@ -34,7 +36,24 @@ export interface SentryInitOptions {
   dsn?: string;
   environment?: string;
   release?: string;
+  /**
+   * Trace sample rate (0.0–1.0). Defaults to 0.1 in production and 1.0 in
+   * non-production environments. Set explicitly to override.
+   */
   tracesSampleRate?: number;
+  /**
+   * Profile sample rate (0.0–1.0). Profiling adds ~5–10 % CPU overhead and
+   * is therefore only enabled when explicitly opted-in. Defaults to 0.0.
+   * Operators can flip to `1.0` in dev/staging when debugging hot loops.
+   */
+  profilesSampleRate?: number;
+  /**
+   * Enable @sentry/profiling-node integration. Requires the package to be
+   * installed; if it isn't, init falls through with a warning. Defaults
+   * to true so production gets profiling automatically when the
+   * SENTRY_DSN is configured.
+   */
+  enableProfiling?: boolean;
 }
 
 /**
@@ -60,27 +79,63 @@ export async function initSentry(options: SentryInitOptions = {}): Promise<boole
       console.warn("[sentry] DISABLED — @sentry/node not installed. Run `npm install @sentry/node` to enable.");
       return false;
     }
+    const environment = options.environment ?? process.env.NODE_ENV ?? "development";
+    const isProd = environment === "production";
+
+    // Build integrations list. Profiling is opt-in via the
+    // `enableProfiling` option (default true) and gracefully no-ops when
+    // the package isn't installed. The httpIntegration and
+    // expressIntegration are included automatically by @sentry/node v10.
+    const integrations: unknown[] = [];
+    const enableProfiling = options.enableProfiling ?? true;
+    if (enableProfiling) {
+      try {
+        const profilingMod = await import("@sentry/profiling-node").catch(() => null);
+        if (profilingMod && typeof profilingMod.nodeProfilingIntegration === "function") {
+          integrations.push(profilingMod.nodeProfilingIntegration());
+        } else if (!profilingMod) {
+          // Quiet warning — profiling is optional.
+          console.info("[sentry] profiling disabled (@sentry/profiling-node not installed)");
+        }
+      } catch (err) {
+        console.warn("[sentry] profiling integration failed to load", err);
+      }
+    }
+
     mod.init({
       dsn,
-      environment: options.environment ?? process.env.NODE_ENV ?? "development",
+      environment,
       release: options.release ?? process.env.SENTRY_RELEASE ?? process.env.RELEASE_SHA ?? undefined,
-      tracesSampleRate: options.tracesSampleRate ?? 0.1,
+      tracesSampleRate: options.tracesSampleRate ?? (isProd ? 0.1 : 1.0),
+      profilesSampleRate: options.profilesSampleRate ?? 0.0,
+      integrations: integrations.length > 0 ? (integrations as Parameters<typeof mod.init>[0] extends { integrations?: infer T } ? T : never) : undefined,
     });
     sentry = {
       captureException: (err, hint) => { mod.captureException(err, hint); },
       addBreadcrumb: (b) => { mod.addBreadcrumb(b); },
       setTag: (k, v) => { mod.setTag(k, v); },
+      setUser: (u) => { mod.setUser(u); },
       withScope: (cb) => {
-        mod.withScope((scope: { setTag: (k: string, v: string) => void; setExtra: (k: string, v: unknown) => void }) => {
+        mod.withScope((scope: {
+          setTag: (k: string, v: string) => void;
+          setExtra: (k: string, v: unknown) => void;
+          setUser: (u: { id?: string; username?: string; email?: string } | null) => void;
+        }) => {
           cb({
             setTag: (k, v) => { scope.setTag(k, v); },
             setExtra: (k, v) => { scope.setExtra(k, v); },
+            setUser: (u) => { scope.setUser(u); },
           });
         });
       },
       flush: (t) => mod.flush(t),
+      // @sentry/node v10 exposes expressErrorHandler as a factory. Cast is
+      // narrow so a v8/v9 fallback would simply leave this undefined.
+      expressErrorHandler: typeof (mod as unknown as { expressErrorHandler?: () => unknown }).expressErrorHandler === "function"
+        ? () => (mod as unknown as { expressErrorHandler: () => (err: unknown, req: unknown, res: unknown, next: unknown) => void }).expressErrorHandler()
+        : undefined,
     };
-    console.log(`[sentry] ENABLED (env=${options.environment ?? process.env.NODE_ENV ?? "development"})`);
+    console.log(`[sentry] ENABLED (env=${environment}, profiling=${enableProfiling}, traces=${options.tracesSampleRate ?? (isProd ? 0.1 : 1.0)})`);
     return true;
   } catch (err) {
     console.error("[sentry] init failed — continuing without", err);
@@ -150,6 +205,49 @@ export function addBreadcrumb(
 export async function flushSentry(timeoutMs = 2000): Promise<void> {
   if (!sentry) return;
   try { await sentry.flush(timeoutMs); } catch { /* best effort */ }
+}
+
+/**
+ * Set the current user context. Pass `null` to clear it (e.g. on logout).
+ * IDs are user-ids in our system; never raw email/PII without a hash —
+ * call `hashPii` first if the source is sensitive.
+ */
+export function setSentryUser(
+  user: { id?: string; username?: string; email?: string } | null,
+): void {
+  if (!sentry) return;
+  sentry.setUser(user);
+}
+
+/**
+ * Run a callback in an isolated Sentry scope, useful for per-request
+ * tag/extra annotations that should not leak to other captures.
+ */
+export function withSentryScope(
+  cb: (scope: {
+    setTag: (k: string, v: string) => void;
+    setExtra: (k: string, v: unknown) => void;
+    setUser: (u: { id?: string; username?: string; email?: string } | null) => void;
+  }) => void,
+): void {
+  if (!sentry) return;
+  sentry.withScope(cb);
+}
+
+/**
+ * Get the Express error handler from @sentry/node v10. Returns `undefined`
+ * when Sentry is disabled or the SDK version doesn't expose it (e.g. v8/v9).
+ * Caller is responsible for installing it after all routes.
+ *
+ * Usage:
+ *   const handler = getSentryExpressErrorHandler();
+ *   if (handler) app.use(handler);
+ */
+export function getSentryExpressErrorHandler():
+  | ((err: unknown, req: unknown, res: unknown, next: unknown) => void)
+  | undefined {
+  if (!sentry?.expressErrorHandler) return undefined;
+  return sentry.expressErrorHandler();
 }
 
 /** Test-only: force-disable Sentry so unit tests don't pick up a partial init. */

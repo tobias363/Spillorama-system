@@ -5,6 +5,7 @@ import { AudioManager } from "../audio/AudioManager.js";
 import { createGame, registryReady, type GameController } from "../games/registry.js";
 import { telemetry } from "../telemetry/Telemetry.js";
 import { initSentry, captureClientMessage } from "../telemetry/Sentry.js";
+import { bootstrapClientSentry } from "../observability/sentryBootstrap.js";
 import { LoadingOverlay } from "../components/LoadingOverlay.js";
 import { WebGLContextGuard } from "./WebGLContextGuard.js";
 import { installDebugSuite, setDebugStateGetter, isDebugEnabled } from "../debug/index.js";
@@ -94,15 +95,19 @@ export class GameApp {
       hallId: config.hallId,
       releaseVersion: "0.1.0",
     });
-    void initSentry({
+    // OBS-2 (2026-05-13): bootstrapClientSentry wires browserTracing +
+    // Replay + user-context in one call. accessToken acts as the opaque
+    // PII source (hashed before being sent) so the hashed id stays
+    // consistent across reconnects without needing the raw player id.
+    void bootstrapClientSentry({
       release: "0.1.0",
-      environment: import.meta.env.MODE,
       gameSlug: config.gameSlug,
       hallId: config.hallId,
-      // accessToken is an opaque JWT; using it as the PII source keeps the
-      // hash consistent across reconnects without needing the player id.
       playerId: config.accessToken,
     });
+    // Backwards-compat: `initSentry` retains the same behavior so any
+    // external consumer that imports it directly still works.
+    void initSentry; // eslint-disable-line @typescript-eslint/no-unused-expressions
     telemetry.trackFunnelStep("game_loaded");
 
     // Create shared infrastructure

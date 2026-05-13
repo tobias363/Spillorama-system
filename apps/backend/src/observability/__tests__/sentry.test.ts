@@ -20,6 +20,7 @@ function makeMockSentry() {
     exceptions: [] as Array<{ err: unknown; tags?: Record<string, string> }>,
     breadcrumbs: [] as Array<{ category: string; data?: Record<string, unknown> }>,
     tags: [] as Array<{ key: string; value: string }>,
+    users: [] as Array<{ id?: string; username?: string; email?: string } | null>,
     flushed: 0,
   };
   return {
@@ -31,6 +32,7 @@ function makeMockSentry() {
         calls.breadcrumbs.push({ category: b.category, data: b.data });
       },
       setTag: (key: string, value: string) => { calls.tags.push({ key, value }); },
+      setUser: (u: { id?: string; username?: string; email?: string } | null) => { calls.users.push(u); },
       withScope: () => { /* not exercised in these tests */ },
       flush: async () => { calls.flushed += 1; return true; },
     },

@@ -16,7 +16,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@sentry/browser": "^8.48.0",
+    "@sentry/browser": "^10.53.1",
     "@spillorama/shared-types": "*",
     "@xmldom/xmldom": "^0.8.13",
     "gsap": "^3.12.7",

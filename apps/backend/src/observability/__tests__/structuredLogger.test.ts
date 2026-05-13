@@ -40,6 +40,7 @@ function makeMockSentry(): {
         breadcrumbs.push({ category: b.category, level: b.level });
       },
       setTag: () => {},
+      setUser: () => {},
       withScope: () => {},
       flush: async () => true,
     });

@@ -409,6 +409,7 @@ import { adminRoomSnapshotKey } from "./sockets/adminRoomKeys.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
 import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
+import { bootstrapBackendSentry, sentryUserContextMiddleware, getSentryErrorHandlerMiddleware } from "./observability/sentryBootstrap.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { traceIdMiddleware } from "./middleware/traceId.js";
 import { securityHeadersMiddleware } from "./middleware/securityHeaders.js";
@@ -430,6 +431,10 @@ import { createTvVoiceAssetsRouter } from "./routes/tvVoiceAssets.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
+// OBS-2 (2026-05-13): also load .env.local if present — takes precedence
+// over .env because dotenv does not override already-set process.env vars
+// by default. We use the `override` flag so the local file wins.
+dotenv.config({ path: path.resolve(__dirname, "../.env.local"), override: true });
 
 // Tobias-direktiv 2026-05-12: strukturert observability for live Spill 1-flyt.
 // Tre dedikerte child-loggere så ops kan filtrere på `module` i prod-logs.
@@ -467,7 +472,12 @@ const projectDir = path.resolve(__dirname, "../..");
 
 // BIN-539: Sentry — init before the HTTP server exists so the error reporter
 // is wired from the first request. No-op if SENTRY_DSN is unset.
-void initSentry();
+// OBS-2 (2026-05-13): bootstrap also enables @sentry/profiling-node and
+// surfaces the Express error-handler factory for installation below.
+void bootstrapBackendSentry();
+// Retain legacy alias so dynamic imports / tests that reach into the
+// raw initSentry still work.
+void initSentry; // eslint-disable-line @typescript-eslint/no-unused-expressions
 
 const app = express();
 
@@ -497,6 +507,11 @@ app.use(traceIdMiddleware());
 // in env once the report stream is verified empty in staging.
 app.use(securityHeadersMiddleware());
 app.use(cors({ origin: corsOrigins, credentials: true }));
+// OBS-2 (2026-05-13): Sentry user-context middleware. Populates the Sentry
+// scope with `req.user.id` when present. Safe to run before auth — the
+// middleware simply skips if `req.user` is undefined, and the user-id is
+// picked up later inside route handlers that attach it.
+app.use(sentryUserContextMiddleware());
 // LAV-3: 100 KB for all endpoints, except registration which carries compressed photo IDs (~2 * 100KB base64)
 // PT1: static-ticket CSV-import kan ha opptil ~50k rader (~10MB raw), derfor 15mb limit.
 //
@@ -5456,6 +5471,15 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(publicDir, "web/index.html"));
 });
 
+// OBS-2 (2026-05-13): @sentry/node v10 Express error-handler. Must run BEFORE
+// our own errorReporter() so Sentry sees the unsanitised error first. Returns
+// undefined when Sentry is disabled, so we conditional-install.
+const sentryErrorHandler = getSentryErrorHandlerMiddleware();
+if (sentryErrorHandler) {
+  // Type-asserted because Express' overloads don't quite line up with the
+  // 4-arg shape the SDK returns. We've narrowed it in sentryBootstrap.ts.
+  app.use(sentryErrorHandler as unknown as express.ErrorRequestHandler);
+}
 // BIN-539: Express error reporter — must be registered after all routes.
 // Captures any thrown error, forwards to Sentry (when enabled), and sends a
 // consistent `{ ok: false, error }` response so clients can rely on shape.

@@ -27,7 +27,13 @@ export default defineConfig({
       fileName: () => "main.js",
     },
     rollupOptions: {
-      external: ["@sentry/browser"],
+      // OBS-2 (2026-05-13): we used to mark @sentry/browser as external
+      // (BIN-539), which broke the lazy `await import("@sentry/browser")` at
+      // runtime — the host shell never injected it, so Sentry silently
+      // stayed disabled in prod. Now we let Rollup bundle it into a lazy
+      // chunk so the dynamic import resolves correctly. The chunk is only
+      // pulled when VITE_SENTRY_DSN is set, so dev/staging without a DSN
+      // pays nothing.
       output: {
         chunkFileNames: "chunks/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash].[ext]",
