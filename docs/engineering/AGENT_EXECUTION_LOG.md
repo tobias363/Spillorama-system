@@ -146,6 +146,91 @@ hidden bug som gjorde at log-filene aldri ble opprettet.
 
 ---
 
+### 2026-05-13 — Port `.husky/pre-commit-fragility-check.sh` til bash 3.2 (Node-delegation)
+
+**Scope:** Fix PITFALLS §5.8 — den opprinnelige `pre-commit-fragility-check.sh`
+(PR #1326) brukte `declare -A` (bash 4 associative arrays) som feiler på
+macOS' default `/bin/bash` 3.2. Hooken var wiret men ville krasjet på alle
+Mac-commits.
+
+**Inputs gitt:**
+- Mandat: ny worktree, branch `fix/fragility-check-bash3-port-2026-05-13`
+- Pre-reading: nåværende `pre-commit-fragility-check.sh`, mønster fra
+  `pre-commit-comprehension.sh` (wrapper-pattern), referanse
+  `verify-context-comprehension.mjs`, FRAGILITY_LOG, PITFALLS §5.8
+- To strategier presentert (A: Node-port, B: bash 3.2 indexed-arrays)
+- Acceptance criteria: kjører på bash 3.2, detekterer FRAGILITY-modifikasjoner,
+  bevarer bypass-mekanismer
+
+**Outputs produsert:**
+- Branch: `fix/fragility-check-bash3-port-2026-05-13`
+- Filer:
+  - `scripts/check-fragility-comprehension.mjs` (ny, ~310 linjer)
+    — Node-port med pure-function eksports (`parseFragilityFiles`,
+    `findRequiredFids`, `extractContextReadFids`, `extractBypassReason`,
+    `validateStagedAgainstFragility`)
+  - `.husky/pre-commit-fragility-check.sh` (rewrite, ~45 linjer)
+    — thin bash 3.2-kompatibel wrapper, `exec node`-delegation
+  - `scripts/__tests__/check-fragility-comprehension.test.mjs` (ny, ~370 linjer, 34 tester)
+  - `.husky/pre-commit` (rydding) — fjernet stale `---`-bash-syntax-feil
+    som genererte "command not found" på hver commit; oppdatert dokumentasjon
+    til 6-trinns-enforcement (FRAGILITY-trinnet faktisk wiret)
+  - `docs/engineering/PITFALLS_LOG.md` §5.8 — status oppdatert til FIXED
+- Test-resultater: 34/34 passed på `node --test` (~155ms)
+- Bash 3.2-validering: `/bin/bash -n` syntax-check + end-to-end test mot
+  staged `PlayScreen.ts` (F-01-flagged) — exit 1 uten marker, exit 0 med
+  `[context-read: F-01]` eller `[bypass-fragility-check: ...]`
+
+**Fallgruver oppdaget:**
+- §5 (Git/PR) — `.husky/pre-commit` hadde stale `---`-markdown-separatorer
+  (3 stk) som forårsaket "command not found" på linje 10/50/79 ved hver
+  commit. Bash fortsatte fordi `set -e` ikke var aktivert, men errorene
+  fylte terminal. Sannsynligvis residual fra ufullstendige merger på tvers
+  av FRAGILITY-PR + comprehension-PR + resurrection-PR.
+- §8 (doc-disiplin) — Kommentaren i pre-commit-fila (linje 18-21) sa
+  "FRAGILITY-check er ikke wiret" mens den faktiske koden (linje 66-68)
+  faktisk wiret den. Kode != doc — fixet i samme PR.
+- §11 (agent-orkestrering) — Bash 3.2-kompatibilitets-test må strippe
+  comment-linjer FØR den sjekker for `declare -A` osv. Ellers fanger den
+  selve doc-strengen som forklarer hvorfor wrapperen finnes.
+
+**Læring:**
+- Wrapper-pattern (thin bash + `exec node`) er etablert konvensjon i
+  Spillorama (`pre-commit-comprehension.sh`, `pre-commit-resurrection-check.sh`).
+  Konsistent pattern reduserer cognitive load for fremtidige hooks.
+- Node-test-runner `node --test` er fast og krever ingen vitest-overhead
+  for utility-skripter med pure functions
+- `git diff --cached --name-only --diff-filter=ACM` er kanonisk for staged
+  files i pre-commit hooks (matcher mønster fra bash-versjonen 1:1)
+- `exec node` istedenfor `node` i wrapperen sparer én prosess-frame og
+  propagerer exit-koden direkte
+- macOS bash 3.2 mangler: `declare -A`, `mapfile`, `readarray`, `${var,,}`,
+  `${var^^}`, `${!arr[@]}`. Listen er fast — kan kodifiseres i en regression-test
+- Wrapper-script må ha `exec` (ikke bare `node ...`) når den er siste
+  kommando, ellers strippes feil fra exit-status hvis `set -e` er av
+
+**Eierskap:**
+- `scripts/check-fragility-comprehension.mjs`
+- `scripts/__tests__/check-fragility-comprehension.test.mjs`
+- `.husky/pre-commit-fragility-check.sh` (rewrite — eier semantikk)
+- `.husky/pre-commit` (mindre — kun rydding)
+- `docs/engineering/PITFALLS_LOG.md` §5.8
+
+**Verifisering (PM-skal-gjøre):**
+- [ ] Kjør `node --test scripts/__tests__/check-fragility-comprehension.test.mjs`
+- [ ] `/bin/bash -n .husky/pre-commit && /bin/bash -n .husky/pre-commit-fragility-check.sh`
+  (syntaks-sjekk på bash 3.2)
+- [ ] Manuell end-to-end:
+  1. Stage `packages/game-client/src/games/game1/screens/PlayScreen.ts` (F-01-flagged)
+  2. `git commit` → forvent rød med F-01-melding
+  3. `git commit -m "fix(game): no-op\n\n[context-read: F-01]"` → forvent grønn
+  4. `git commit -m "fix(game): no-op\n\n[bypass-fragility-check: testing]"` → forvent grønn
+- [ ] Verifiser at PITFALLS §5.8 er markert FIXED
+
+**Tid:** ~2-2.5 timer agent-arbeid
+
+---
+
 ### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
 
 **Scope:** Bygg en pre-commit hook + CI gate som detekterer når en commit
@@ -1239,3 +1324,4 @@ Verifisert via test:
 ---
 
 | 2026-05-13 | Manual-flow E2E-test (`spill1-manual-flow.spec.ts`) lagt til for å lukke F-03-gapet. Test mimicker Tobias' eksakte manuelle flyt via `?dev-user=`-redirect og hall-picker UI. 3/3 consecutive PASS i 11-13s. | Backend-agent (general-purpose) |
+| 2026-05-13 | PITFALLS §5.8 FIXED — `.husky/pre-commit-fragility-check.sh` portet fra bash 4 (`declare -A`) til bash 3.2-kompatibel thin wrapper + Node-script (`scripts/check-fragility-comprehension.mjs`). 34 tester. Pre-commit-fila ryddet for `---` stale markers. Wiret som Trinn 3 i seks-trinns-enforcement. | Backend-agent (general-purpose) |
