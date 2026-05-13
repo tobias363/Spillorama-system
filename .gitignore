@@ -98,3 +98,13 @@ infra/observability/data/*
 !infra/observability/data/.gitkeep
 infra/observability/pglogs/*
 !infra/observability/pglogs/.gitkeep
+
+# Atlas snapshots (OBS-9, etablert 2026-05-14)
+# Per-operator captures of live schema written by
+# scripts/atlas-snapshot.sh. The .gitkeep at atlas/snapshots/.gitkeep
+# stays in repo so the directory survives `git clean`; everything else
+# (*.sql snapshots) is local-only diff-helpers, not source of truth.
+# See docs/operations/SCHEMA_AS_CODE_RUNBOOK.md.
+atlas/snapshots/*.sql
+atlas/snapshots/*.json
+!atlas/snapshots/.gitkeep

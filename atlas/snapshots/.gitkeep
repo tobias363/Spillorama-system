@@ -1,0 +1,9 @@
+Snapshots produced by `scripts/atlas-snapshot.sh` are written here as
+`atlas/snapshots/<YYYY-MM-DD>.sql`. They are .gitignored — they're
+diff-helpers for the human running the snapshot script, not part of the
+schema source of truth (that lives in apps/backend/schema/baseline.sql).
+
+This .gitkeep exists so the directory survives `git clean` and the
+snapshot script can write into it without `mkdir -p`.
+
+See docs/operations/SCHEMA_AS_CODE_RUNBOOK.md for usage.

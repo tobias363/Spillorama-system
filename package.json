@@ -67,6 +67,9 @@
     "test:visual:pilot-hw": "npm -w @spillorama/game-client exec playwright test --project=chromium-pilot-hw",
     "schema:snapshot": "bash scripts/schema-ci/snapshot.sh",
     "schema:diff": "bash scripts/schema-ci/diff-schema.sh",
+    "schema:lint": "bash scripts/squawk-check.sh",
+    "schema:lint:all": "bash scripts/squawk-check.sh --all",
+    "schema:atlas-snapshot": "bash scripts/atlas-snapshot.sh",
     "skills:map": "node scripts/build-skill-file-map.mjs",
     "skills:for-file": "node scripts/find-skills-for-file.mjs",
     "prepare": "husky || true && node scripts/setup-husky.mjs || true"
