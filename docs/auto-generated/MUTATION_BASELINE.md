@@ -63,7 +63,7 @@ ikke alle 9 — så reell run-tid kan være vesentlig under verstefall.
 
 | Dato | Total score | MasterActionService | Game1LobbyService | Game1HallReadyService | GamePlanRunService | WalletOutboxWorker | Run-time |
 |---|---|---|---|---|---|---|---|
-| 2026-05-13 (baseline) | _venter on alle 5_ | _venter_ | _venter_ | 48.38 → **(re-run i flight)** | _venter_ | 46.00 → **82.00** ↑↑ | ~2.5-16 min per fil |
+| 2026-05-13 (baseline) | _venter on Lobby/Plan/Master_ | _venter_ | _venter_ | 48.38 → **53.62** ↑ | _venter_ | 46.00 → **82.00** ↑↑ | ~2.5-16 min per fil |
 
 ### Notater per run
 
@@ -136,9 +136,25 @@ Run-tid: 2 min 44 s.
 
 **Etter survivors-tester (`src/game/Game1HallReadyService.survivors.test.ts` — 20 nye tester for `computeHallStatus`):**
 
-- 20 nye unit-tester fokusert på `computeHallStatus` pure function
-- Target: 30+ mutants i computeHallStatus-klynger
-- Re-run i flight 2026-05-13 — resultat oppdateres når run fullføres.
+| Kategori | Antall | Endring |
+|---|---|---|
+| Killed | 215 | +21 |
+| Survived | 118 | -21 |
+| NoCoverage | 68 | 0 |
+| Timeout | 0 | 0 |
+| Errors | 87 | 0 |
+| **Mutation score** | **53.62 %** | **+5.24 prosentpoeng** ↑ |
+
+Run-tid: 15 min 27 s.
+
+**Konklusjon:**
+- Over `break`-threshold (50%) — passerer pilot Q3 2026-mandatet ikke ennå (krever ≥ 75%).
+- 20 nye tester fokuserte på `computeHallStatus` pure function — drepte 21 mutants i den klyngen.
+- 118 survivors gjenstår — dominert av:
+  - 68 no-coverage mutanter (mest StringLiteral i ubenyttede error-strenger og logging-paths)
+  - 31 StringLiteral-mutanter (mange equivalent — log/error-strenger uten funksjonell effekt)
+  - 52 ConditionalExpression-mutanter spredt over flere services
+- Neste iterasjon: utvide tester for `markReady`, `unmarkReady`, `sweepStaleReadyRows`, og scan-flyten.
 
 ---
 

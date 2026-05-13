@@ -6,7 +6,8 @@
   "testRunner": "tap",
   "tap": {
     "testFiles": [
-      "src/game/Game1LobbyService.test.ts"
+      "src/game/Game1LobbyService.test.ts",
+      "src/game/Game1LobbyService.survivors.test.ts"
     ],
     "nodeArgs": [
       "--import",
