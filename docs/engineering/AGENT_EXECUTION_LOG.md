@@ -59,6 +59,81 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Spill 1 re-entry-during-draw bug-diagnose (I15) (explore-agent, PM-AI)
+
+**Scope:** Diagnose Tobias-rapport 2026-05-13: "etter at jeg starter spill går ut av lobbyen for deretter å gå inn igjen så kommer jeg ikke inn i rommet under en trekning, må vente til trekning er ferdig før jeg kan gå inn". Reprodusere bug-en i E2E-test, finn root cause, klassifiser (impl vs struktur), foreslå fix uten å skrive den.
+
+**Inputs gitt:**
+- Symptom-beskrivelse fra Tobias
+- Pekere til `apps/backend/src/sockets/gameEvents/roomEvents.ts:636`, `RoomLifecycleService.ts`, `BingoEngine.ts:980`, `Game1Controller.ts`, `lobby.js`
+- Token `spillorama-2026-test` for debug-events
+- Forutsetning: dev:all kjører på port 4000
+- Branch: ny fra main, IKKE åpne PR, IKKE skriv fix
+- Hvis strukturell bug — STOP og rapporter til PM
+
+**Outputs produsert:**
+- **Branch:** `feat/reentry-diagnose-2026-05-13` (klar for push)
+- **Commit:** `<pending>` — `test(spill1): I15 — re-entry during active draw repro + diagnose`
+- **Filer (nye):**
+  - `tests/e2e/spill1-reentry-during-draw.spec.ts` — repro-test (forventet 🔴 inntil fix)
+  - `docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md` — full root-cause-diagnose med file:line + foreslått fix
+- **Filer (oppdatert):**
+  - `tests/e2e/BUG_CATALOG.md` — I15-entry + endringslogg
+
+**Test-run:**
+- `npx playwright test --config=tests/e2e/playwright.config.ts spill1-reentry-during-draw`
+- Status: 🔴 FAIL som forventet (test reproduserer bug-en)
+- Tid: ~24s
+- Console-output bekrefter: `[Game1] Room join feilet — mounter lobby-fallback istedenfor å vise feil: {code: PLAYER_ALREADY_IN_ROOM, message: ...}`
+
+**Root cause:**
+- File: `apps/backend/src/sockets/game1ScheduledEvents.ts:288-365` (`joinScheduledGame`)
+- Line 324: `engine.joinRoom({roomCode: row.room_code, ...})` kalles direkte UTEN re-attach-guard
+- Backend `detachSocket` (`BingoEngine.ts:3802-3831`) beholder player-record (kun socketId nullstilles) av regulatoriske grunner (armed-state, lucky, forhåndskjøp)
+- `RoomLifecycleService.joinRoom:393-394` → `assertWalletNotAlreadyInRoom` → THROW `PLAYER_ALREADY_IN_ROOM`
+- `room:create` (`roomEvents.ts:372-397`) og `room:join` (`roomEvents.ts:771-806`) har riktig guard via `findPlayerInRoomByWallet` + `attachPlayerSocket` — `joinScheduledGame` mangler den
+- Klient `Game1Controller.start` (line 717-753) faller direkte til `Game1LobbyFallback`-overlay ved `!joinResult.ok` (ingen `room:resume`-fallback for initial join, kun for plan-advance på linje 1325-1361)
+
+**Klassifisering: IMPLEMENTASJONS-bug (ikke strukturell)**
+- Mønsteret er etablert (room:create/room:join har samme guard)
+- < 30 linjer endring i én fil
+- Ingen ny tabell, event, eller arkitektur-pattern
+- Backwards-compatible (fresh joins faller fortsatt til `engine.joinRoom`)
+
+**Foreslått fix (impl-only, ikke skrevet):**
+```ts
+// joinScheduledGame, rett før engine.joinRoom-call på linje 324
+const existingSnapshot = engine.getRoomSnapshot(row.room_code);
+const existingPlayer = findPlayerInRoomByWallet(existingSnapshot, user.walletId);
+if (existingPlayer) {
+  engine.attachPlayerSocket(row.room_code, existingPlayer.id, socketId);
+  await markScheduledRoom(row.room_code, row, isHallShared, hallId);
+  const snapshot = engine.getRoomSnapshot(row.room_code);
+  return { roomCode: row.room_code, playerId: existingPlayer.id, snapshot };
+}
+// Else: full join (eksisterende kode)
+```
+
+**Fallgruver oppdaget (ingen nye):**
+- Bug-en treffer §3 (Spill-arkitektur) men er kjent symptom — `tests/e2e/helpers/rest.ts:200-201` har allerede dokumentert at "engine keeps player-slots after game-end — uten cleanup feiler neste `room:join` med `PLAYER_ALREADY_IN_ROOM`". Denne bugen er samme klasse, bare for re-join mid-runde i stedet for inter-runde.
+- Repro-strategien (capture console-warnings + DOM-check for `data-spill1-lobby-fallback`) er ny i denne test-suiten, men trivielt mønster.
+
+**Læring:**
+- **Backend join-flows er ikke ensartet.** `room:create`, `room:join`, og `game1:join-scheduled` har tre litt forskjellige veier inn til samme `engine.joinRoom`. To av tre har re-attach-guard. Mønsteret bør konsolideres (eventuelt via en `engine.joinOrReattach`-hjelp som kombinerer det).
+- **`engine.joinRoom` er IKKE idempotent.** Dokumentstringen "reconnect-trygg — samme wallet → samme player per eksisterende joinRoom-logikk" i `game1ScheduledEvents.ts:283-284` er feil. Idempotensen kommer fra wrap-guarden, ikke fra `joinRoom` selv.
+- **Capture console-warnings** er mer robust enn DOM-polling for transient overlays (Game1LobbyFallback rendres + fetch-feiler + kan unmounte raskt).
+
+**Verifisering:**
+- TypeScript strict passerer for testen (samme pattern som eksisterende spec-er)
+- Test bekreftet RØD via 1 run (24.7s)
+- Lobby-fallback-mount observert i console: PLAYER_ALREADY_IN_ROOM-error logget
+
+**Tid:** ~75 min (eksplorering + repro-test + diagnose-doc + BUG_CATALOG-update)
+
+**Status:** Branch klar for push. PM tar over. Klart for impl-agent å skrive selve fix-en (forventet < 30 linjer + 1-2 unit-tester for reconnect-pathen).
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
