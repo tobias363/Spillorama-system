@@ -1,8 +1,8 @@
 ---
 name: database-migration-policy
-description: When the user/agent works with database schema migrations in the Spillorama bingo platform. Also use when they mention migration, app_*-tabell, CREATE TABLE, ALTER TABLE, schema-evolution, MED-2, idempotent migration, render-deploy, prod-migrate, ADR-012, node-pg-migrate, fersh DB, pgmigrations, schema-arkeolog. Defines migration ordering, idempotent CREATE+ALTER patterns, and immutability rules for prod migrations. Make sure to use this skill whenever someone touches apps/backend/migrations/ or render.yaml's buildCommand even if they don't explicitly ask for it — a single bad migration can either crash a deploy (fail-fast) or silently drift prod from code (worst case).
+description: When the user/agent works with database schema migrations in the Spillorama bingo platform. Also use when they mention migration, app_*-tabell, CREATE TABLE, ALTER TABLE, schema-evolution, MED-2, idempotent migration, render-deploy, prod-migrate, ADR-0014, node-pg-migrate, fersh DB, pgmigrations, schema-arkeolog, FK-cascade, partial unique index, CHECK-constraint, deprecate-table, schema-snapshot. Defines migration ordering, idempotent CREATE+ALTER patterns, and immutability rules for prod migrations. Make sure to use this skill whenever someone touches apps/backend/migrations/ or render.yaml's buildCommand even if they don't explicitly ask for it — a single bad migration can either crash a deploy (fail-fast) or silently drift prod from code (worst case).
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -130,6 +130,61 @@ Dette er fordi:
 - `down`-scripts er ofte ikke testet like grundig som `up`.
 - Render auto-migrate kjører kun `up`.
 
+### Partial unique indexes for singleton-tabeller
+
+Spill 2 og Spill 3 har global singleton-config med kun ÉN aktiv rad globalt. Håndhevet via partial unique index:
+
+```sql
+-- apps/backend/migrations/20261213000000_app_spill2_config.sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_spill2_config_singleton_active
+  ON app_spill2_config((active))
+  WHERE active = TRUE;
+```
+
+DB avviser INSERT/UPDATE som ville gi mer enn én `active=TRUE`-rad.
+
+### CHECK-constraints — alltid med DROP IF EXISTS før ADD (fix 2026-05-09)
+
+PR #1143 fixet pilot-blokker: ALTER TABLE som la til CHECK-constraint feilet pga existing constraint.
+
+```sql
+-- Korrekt mønster:
+ALTER TABLE app_game1_master_audit
+  DROP CONSTRAINT IF EXISTS app_game1_master_audit_action_check;
+ALTER TABLE app_game1_master_audit
+  ADD CONSTRAINT app_game1_master_audit_action_check
+  CHECK (action IN ('start','pause','resume','stop','jackpot_set','finish','transfer','set_jackpot','advance'));
+```
+
+Spill 1 master-actions har **9 verdier** (CRIT-7-utvidelse 2026-05-09): `start, pause, resume, stop, jackpot_set, finish, transfer, set_jackpot, advance`.
+
+### Deprecate-table-mønster (ADR-0017, 2026-05-09)
+
+Når en tabell ikke lenger er i bruk men har historiske data: lag deprecate-migration som dokumenterer + freezer tabellen, ikke `DROP TABLE`:
+
+```sql
+-- 20261220000000_deprecate_game1_daily_jackpot_state.sql (ADR-0017)
+COMMENT ON TABLE app_game1_daily_jackpot_state IS
+  'DEPRECATED 2026-05-09 per ADR-0017 — bingovert setter jackpot manuelt. Historiske data beholdes for audit.';
+```
+
+Tabellen forblir i schema (read-only via app-laget). Rådata kan slettes i fremtidig cleanup-migration etter regulatorisk retention-periode.
+
+### FK-cascade — default ON DELETE CASCADE (PR #1038)
+
+Spill 1 GoH-relasjoner cascader sletting for defense-in-depth:
+
+```sql
+-- 20261216000000_app_hall_groups_cascade_fk.sql
+ALTER TABLE app_hall_group_members
+  DROP CONSTRAINT app_hall_group_members_group_id_fkey;
+ALTER TABLE app_hall_group_members
+  ADD CONSTRAINT app_hall_group_members_group_id_fkey
+  FOREIGN KEY (group_id) REFERENCES app_hall_groups(id) ON DELETE CASCADE;
+```
+
+Når en GoH slettes, fjernes alle relaterte rader automatisk. Forhindrer orphan-data og dangling references i `app_game1_scheduled_games.group_hall_id`.
+
 ### Skjema-arkeolog-policy (2026-04-29)
 
 Hvis prod-DB har out-of-band-skjema (skapt utenom migrasjons-historikken), må dette korrigeres FØR neste vanlige deploy:
@@ -164,14 +219,26 @@ Dette må verifiseres pre-pilot — vi har aldri test-restored prod-Postgres til
 ## Kanonisk referanse
 
 - `docs/operations/MIGRATION_DEPLOY_RUNBOOK.md` — flyt + fail-håndtering
-- `docs/decisions/ADR-012-idempotent-migrations.md` — idempotent CREATE+ALTER-mønster
-- `apps/backend/migrations/20260425000000_wallet_reservations_numeric.sql` — referanse-implementasjon
-- `apps/backend/migrations/20260418090000_add_hall_client_variant.sql` — enkel ALTER-eksempel
+- [ADR-0014 — Idempotente migrasjoner](../../../docs/adr/0014-idempotent-migrations.md) — CREATE TABLE IF NOT EXISTS før ALTER (MED-2)
+- [ADR-0017 — Fjerne daglig jackpot-akkumulering](../../../docs/adr/0017-remove-daily-jackpot-accumulation.md) — deprecate-table-mønster
+- `apps/backend/migrations/20260425000000_wallet_reservations_numeric.sql` — idempotent CREATE+ALTER referanse-implementasjon
+- `apps/backend/migrations/20261213000000_app_spill2_config.sql` — partial unique index for singleton
+- `apps/backend/migrations/20261216000000_app_hall_groups_cascade_fk.sql` — FK CASCADE-pattern
+- `apps/backend/migrations/20261220000000_deprecate_game1_daily_jackpot_state.sql` — deprecate-pattern
+- `apps/backend/migrations/20261222000000_game1_stuck_recovery.sql` — ADR-0022 stuck-game-recovery support
 - `docs/operations/SCHEMA_ARCHAEOLOGY_2026-04-29.md` — out-of-band-skjema-fix
 - `docs/operations/SCHEMA_CI_RUNBOOK.md` — CI-validering av migrasjoner
-- `docs/operations/SCHEMA_CONFLICTS_VERIFICATION_2026-04-29.md` — verifiserings-prosedyre
 - `docs/operations/DISASTER_RECOVERY_PLAN_2026-04-25.md` §4 — PITR-prosedyre
+- `docs/auto-generated/DB_SCHEMA_SNAPSHOT.md` — auto-generert snapshot av alle 161 tabeller
+- `docs/auto-generated/MIGRATIONS_LOG.md` — kronologisk migration-log
 - `render.yaml` — buildCommand som auto-kjører migrate
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-08 | Initial — idempotent CREATE+ALTER + skjema-arkeolog |
+| 2026-05-13 | v1.1.0 — la til partial unique index-mønster (singleton-config), CHECK-constraint DROP-FIRST (CRIT-7), deprecate-table-mønster (ADR-0017), FK-CASCADE-pattern (PR #1038), auto-genererte snapshot-referanser |
 
 ## Når denne skill-en er aktiv
 

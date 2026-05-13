@@ -1,8 +1,8 @@
 ---
 name: wallet-outbox-pattern
-description: When the user/agent works with wallet-mutating code, payout, ticket-purchase, idempotency-keys, REPEATABLE READ isolation, hash-chain audit, eller wallet-reconciliation. Also use when they mention WalletAdapter, walletAdapter, PostgresWalletAdapter, InMemoryWalletAdapter, app_wallet_outbox, app_event_outbox, app_compliance_audit_log, WalletOutboxRepo, WalletOutboxWorker, WalletAuditVerifier, IdempotencyKeys, REPEATABLE READ, hash-chain, audit-trail, ledger-events, casino-grade, BIN-761, BIN-762, BIN-763, BIN-764, BIN-766, BIN-767, BIR-036, ADR-003, ADR-004. Make sure to use this skill whenever someone touches wallet-touch code, payout-services, ticket-purchase, eller compliance-ledger — even if they don't explicitly ask for it.
+description: When the user/agent works with wallet-mutating code, payout, ticket-purchase, idempotency-keys, REPEATABLE READ isolation, hash-chain audit, eller wallet-reconciliation. Also use when they mention WalletAdapter, walletAdapter, PostgresWalletAdapter, InMemoryWalletAdapter, app_wallet_outbox, app_event_outbox, app_compliance_audit_log, WalletOutboxRepo, WalletOutboxWorker, WalletAuditVerifier, IdempotencyKeys, REPEATABLE READ, hash-chain, audit-trail, ledger-events, casino-grade, mutation-test stryker, BIN-761, BIN-762, BIN-763, BIN-764, BIN-766, BIN-767, BIR-036, ADR-003, ADR-004. Make sure to use this skill whenever someone touches wallet-touch code, payout-services, ticket-purchase, eller compliance-ledger — even if they don't explicitly ask for it.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -288,6 +288,14 @@ Symptom: Holds blir aldri frigitt etter spill.
 Symptom: `app_idempotency_cache` tabell vokser i det uendelige.
 **Fix:** BIN-767-cron sletter > 90 dager. Verifiser at den kjører.
 
+## Mutation testing (etablert 2026-05-13)
+
+`WalletOutboxWorker.ts` er én av 5 filer som er på Stryker mutation-mutate-set per `apps/backend/stryker.config.json`. Casino-grade idempotens forutsetter at workeren er rakk-trygt — mutanter som overlever er potensielle prod-regresjoner.
+
+Kjøre lokalt: `cd apps/backend && npm run test:mutation`. Workflow: `.github/workflows/mutation-test-weekly.yml` ukentlig søndag 00:00 UTC.
+
+**Pilot-mål:** < 30 % mutanter overlever på `WalletOutboxWorker.ts`. Baseline: `docs/auto-generated/MUTATION_BASELINE.md`.
+
 ## Bug-testing-guide
 
 ### "Saldo viser feil"
@@ -342,3 +350,12 @@ Symptom: `app_idempotency_cache` tabell vokser i det uendelige.
 - [ADR-0008 — Spillkatalog-paritet (MAIN_GAME vs DATABINGO)](../../../docs/adr/0008-spillkatalog-classification.md) — bruk `ledgerGameTypeForSlug`, aldri hardkode
 - [ADR-0011 — Casino-grade observability](../../../docs/adr/0011-casino-grade-observability.md) — wallet-reconciliation-cron dekkes her
 - [ADR-0012 — Batched parallel mass-payout for Spill 2/3](../../../docs/adr/0012-batched-mass-payout.md) — bruk batched-pathen for >10 vinnere
+- [ADR-0015 — §71 regulatory-ledger (separate audit-tabell)](../../../docs/adr/0015-spill71-regulatory-ledger.md) — bindende: alle wallet-touch må skrive til app_regulatory_ledger
+- [ADR-0019 — Evolution-grade state-konsistens (Bølge 1)](../../../docs/adr/0019-evolution-grade-state-consistency-bolge1.md) — sync-persist gjelder også wallet-state
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-08 | Initial — casino-grade-wallet etablert (BIN-761→767) |
+| 2026-05-13 | v1.1.0 — la til Stryker mutation-testing-referanse for `WalletOutboxWorker.ts`, ADR-0015 regulatory-ledger, ADR-0019 sync-persist |

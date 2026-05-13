@@ -1,8 +1,8 @@
 ---
 name: spill1-master-flow
-description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
+description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -169,6 +169,34 @@ Symptom: Endring i `GamePlanEngineBridge` eller `GamePlanRunService` påvirker I
 Symptom: `GamePlanEngineBridge.buildTicketConfigFromCatalog` skriver auto-mult-skalert pris i `ticket_config_json`. Hvis du endrer regel i `GameCatalogService.calculateActualPrize`, må du også sjekke bridge.
 **Fix:** Test pre-game-spawn med nye katalog-tall i `apps/backend/src/game/GamePlanEngineBridge.test.ts`.
 
+### 7. I14 — plan-run vs scheduled-game ID-mismatch (fikset 2026-05-13)
+Symptom: Master pause/resume går mot plan-run-id istedenfor scheduled-game-id → 400 "Game not found".
+**Root cause:** Dual-fetch + adapter satte feil id i `currentGame.id`.
+**Fix:** Single-source `GameLobbyAggregator` med `currentScheduledGameId`. Master-action-service (PR #1241) verifiserer at id-feltet tilhører scheduled-game.
+**Test:** `apps/backend/src/__tests__/MasterActionService*.test.ts` (33 unit-tester).
+
+### 8. I15 — re-entry-during-draw (fikset 2026-05-13)
+Symptom: Spiller koblet til `spill1:scheduled-{gameId}`-rom mens draw pågår → `ROOM_LOCKED`-error.
+**Root cause:** Manglet re-attach-guard i `joinScheduledGame` for "spiller var her, koblet av, koblet på igjen"-flyten.
+**Fix:** Re-attach-guard sjekker om spillerens `playerId` allerede finnes i room-state.
+**PR:** #1325 (`fix(spill1): re-attach-guard i joinScheduledGame — fikser I15`).
+
+### 9. I16 — master-action-timing-bug (fikset 2026-05-13)
+Symptom: Master-action sendt midt mellom plan-mutering og bridge-spawn → orphan scheduled-game.
+**Root cause:** Race condition i sekvensering plan-mutering + bridge.
+**Fix:** `MasterActionService` (PR #1241 ADR-0022) — single-entry sekvenseringsmotor som vet om plan-run + scheduled-game-id. Inkluderer multi-lag stuck-game-recovery: (1) lobby-poll auto-reconcile, (2) periodic stuck-game scan, (3) admin-override, (4) DR-runbook fallback.
+**Test:** Mutation testing dekker `MasterActionService.ts` (2077 LOC) per `apps/backend/stryker.config.json`.
+
+### 10. Master starter med 0 spillere (ADR-0021, 2026-05-11)
+Symptom: UI viser `MASTER_HALL_RED` selv om master vil starte uten registrerte spillere.
+**Fix:** ADR-0021 — fjernet `MASTER_HALL_RED`-gate. Master kan starte uten solgte bonger.
+**PR:** #1177 (`feat(master-control): allow master start with 0 players`).
+**Konsekvens for skill:** Hvis du sjekker "har vi nok spillere?" som pre-start-gate, det er IKKE Spill 1 sin ansvar. Master har frihet til å starte når han vil.
+
+### 11. Stale plan-run fra gårsdagen blokkerer dagens master-actions
+Symptom: `STALE_PLAN_RUN`-warning på lobby + master kan ikke starte.
+**Fix:** `GamePlanRunCleanupService` — cron 03:00 Oslo auto-finishes alle `status IN ('running','paused')` med `business_date < CURRENT_DATE`. Inline self-heal-hook bound til `getOrCreateForToday`. Audit-event `game_plan_run.auto_cleanup`.
+
 ## Når denne skill-en er aktiv
 
 **Gjør:**
@@ -199,3 +227,16 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 - [ADR-0008 — Spillkatalog-paritet (Spill 1-3 = MAIN_GAME)](../../../docs/adr/0008-spillkatalog-classification.md) — bindende: MAIN_GAME for bingo
 - [ADR-0009 — PM-sentralisert git-flyt](../../../docs/adr/0009-pm-centralized-git-flow.md) — relevant for koordinering av master-flyt-PR-er
 - [ADR-0011 — Casino-grade observability](../../../docs/adr/0011-casino-grade-observability.md) — trace-ID-propagering gjelder også master-actions
+- [ADR-0016 — Master-action bridge-retry + rollback](../../../docs/adr/0016-master-action-bridge-retry-rollback.md) — feilhåndtering ved bridge-spawn-feil
+- [ADR-0017 — Fjerne daglig jackpot-akkumulering](../../../docs/adr/0017-remove-daily-jackpot-accumulation.md) — bingovert setter manuelt
+- [ADR-0019 — Evolution-grade state-konsistens (Bølge 1)](../../../docs/adr/0019-evolution-grade-state-consistency-bolge1.md) — monotonic stateVersion, sync-persist, targeted broadcast
+- [ADR-0020 — Evolution-grade utvidelses-fundament (Bølge 2)](../../../docs/adr/0020-evolution-grade-utvidelses-fundament-bolge2.md) — R11 circuit-breaker, R4 load-test
+- [ADR-0021 — Master kan starte uten solgte bonger](../../../docs/adr/0021-allow-master-start-without-players.md) — fjernet MASTER_HALL_RED
+- [ADR-0022 — Multi-lag stuck-game-recovery](../../../docs/adr/0022-stuck-game-recovery-multilayer.md) — auto-reconcile + recovery-layers
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-08 | Initial — master-flyt fundament + Bølge 1 GameLobbyAggregator |
+| 2026-05-13 | v1.1.0 — la til I14/I15/I16-fix-mønstre, ADR-0019/0020/0021/0022, MasterActionService som single-entry sekvenseringsmotor, GamePlanRunCleanupService for stale-plan-cleanup, master kan starte med 0 spillere |

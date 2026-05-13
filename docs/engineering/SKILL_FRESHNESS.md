@@ -275,8 +275,90 @@ node scripts/check-skill-freshness.mjs --pr-mode --pr-base=origin/main --markdow
 
 ---
 
-## 10. Endringslogg
+## 10. Første-virkelige-kjøring (2026-05-13)
+
+Etter at scope-header-PR (B2) landet for alle 20 skills, kjørte vi `check-skill-freshness.mjs` for første gang med faktiske scope-data.
+
+### Resultat (status før refresh)
+
+| Status | Antall |
+|---|---:|
+| Fresh (< 30d) | 20 |
+| Aging | 0 |
+| Stale | 0 |
+| Very-stale | 0 |
+| Scope-undefined | 0 |
+
+Alle 20 skills hadde scope-header og var ferske per terskel-definisjonen. Men commits-til-scope-tallene avslørte hvilke skills som dekker høy-aktivitets-områder:
+
+| Skill | Commits til scope (60d) | Anbefaling |
+|---|---:|---|
+| casino-grade-testing | 482 | Refresh — mest aktivitet |
+| spill1-master-flow | 217 | Refresh — pilot-kritisk |
+| database-migration-policy | 147 | Refresh — mange nye mønstre |
+| spill2-perpetual-loop | 111 | Vurder refresh |
+| pengespillforskriften-compliance | 64 | Refresh — ADR-0015 ny |
+| agent-portal-master-konsoll | 64 | Vurder refresh |
+| pm-orchestration-pattern | 43 | Refresh — autonomy-wave-læringer |
+| spill3-phase-state-machine | 36 | Vurder refresh |
+| wallet-outbox-pattern | 35 | Refresh — Stryker-target |
+| candy-iframe-integration | 27 | Skip (stabil) |
+| agent-shift-settlement | 26 | Skip (stabil) |
+| audit-hash-chain | 18 | Skip |
+| goh-master-binding | 17 | Skip |
+| live-room-robusthet-mandate | 15 | Refresh — R-status endret |
+| spinngo-databingo | 12 | Skip |
+| dr-runbook-execution | 11 | Skip |
+| customer-unique-id | 10 | Skip |
+| trace-id-observability | 10 | Skip |
+| anti-fraud-detection | 5 | Skip |
+| health-monitoring-alerting | 4 | Skip |
+
+### Aksjoner tatt
+
+Selv om ingen skills passerte stale-terskelen (alle ble nylig modifisert av B2-PR-en), ble 6 av de mest aktive skills refreshet med læringer fra autonomy-waves og Bølge 1/2/3:
+
+| Skill | Hovedendringer (v1.0 → v1.1) |
+|---|---|
+| **pm-orchestration-pattern** | `dev:nuke` som standard restart, pm-push-control (Phase 2), auto-rebase-on-merge, cascade-rebase-mønster, knowledge-protocol-checkbox, bug-resurrection-detector, skill-freshness-gate |
+| **casino-grade-testing** | Stryker mutation-testing (`MasterActionService`, `Game1LobbyService`, etc.), bug-resurrection-test, autonomous pilot-flow E2E, R4 load-test, ADR-0019/0020/0022 |
+| **live-room-robusthet-mandate** | R-status oppdatert: R2/R3 PASSED 2026-05-08, R4-infrastruktur merget, R11 circuit-breaker merget, Bølge 1+2+ADR-0019/0020/0021/0022 |
+| **spill1-master-flow** | I14/I15/I16-fix-mønstre, ADR-0021 (master kan starte med 0 spillere), ADR-0022 (multi-lag stuck-game-recovery), MasterActionService som single-entry, GamePlanRunCleanupService |
+| **wallet-outbox-pattern** | Stryker mutation-testing referanse for `WalletOutboxWorker.ts`, ADR-0015 regulatory-ledger, ADR-0019 sync-persist |
+| **pengespillforskriften-compliance** | ADR-0015 (separat §71 regulatory-ledger med daily-anchor + verifyAuditChain), ADR-0017 (manuell jackpot) |
+| **database-migration-policy** | Partial unique index for singleton, CHECK-constraint DROP-FIRST, deprecate-table-mønster (ADR-0017), FK-CASCADE-pattern, auto-generert snapshot-referanser |
+
+### Resultat (status etter refresh)
+
+| Status | Antall |
+|---|---:|
+| Fresh (< 30d) | 20 |
+| Aging | 0 |
+| Stale | 0 |
+| Very-stale | 0 |
+| Scope-undefined | 0 |
+
+Alle skills med høyest scope-aktivitet er nå refreshet til v1.1.0 med nye læringer.
+
+### Anbefalt review-cadence
+
+Basert på første-real-kjøringen:
+
+- **Ukentlig** (mandag, automatisk via `.github/workflows/skill-freshness-weekly.yml`):
+  - Sjekk for aging/stale skills
+  - Auto-issue ved very-stale
+- **Per PR** (automatisk via `.github/workflows/skill-freshness-pr-check.yml`):
+  - Informativ kommentar hvis endrede filer matcher stale skill scope
+- **Manuell review hver 30 dag av PM**:
+  - Skills med 50+ commits til scope siste 30 dager → vurder refresh
+  - Skill content vs nylige ADR-er (ADR-0019, 0020, 0021, 0022 ble lagt til 2026-05-11/13)
+- **Etter store autonomy-waves**:
+  - Skim relevante skills mot wave-leveranser
+  - Refresh tilfaller PM-en som leder bølgen
+
+## 11. Endringslogg
 
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-13 | Initial — terskler + scope-header + workflows | PM-AI (B3-task) |
+| 2026-05-13 | Første-real-kjøring + refresh av 7 skills til v1.1.0 (pm-orchestration, casino-grade-testing, live-room-robusthet, spill1-master-flow, wallet-outbox, pengespillforskriften, database-migration) | PM-AI (skill-freshness-review-task) |
