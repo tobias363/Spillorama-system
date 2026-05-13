@@ -5,6 +5,7 @@ import {
   markHallReady,
   masterStop,
   resetPilotState,
+  shouldDestroyRoomsForCi,
   // raisePlayerLossLimits utgår: regulatorisk-cap (§66) gjør at admin ikke
   // kan heve grensene over 900 kr/dag. Vi bruker `pickAvailablePlayer`
   // istedenfor (rotering av demo-spillere).
@@ -151,7 +152,13 @@ test.describe("Spill 1 pilot-flow", () => {
     masterToken = master.accessToken;
     expect(master.hallId, "Master må være tilknyttet pilot-hall").toBe(HALL_ID);
 
-    // 2. Hard-reset state (stop eventuelt pågående spill)
+    // 2. Hard-reset state (stop eventuelt pågående spill). CI signaliserer
+    //    CI-modus via E2E_DESTROY_ROOMS=1 — `resetPilotState` destruerer
+    //    GoH-rom uansett (default), men eksplisitt env-var gjør intent
+    //    synlig i CI-logs (workflow .github/workflows/pilot-flow-e2e.yml).
+    if (shouldDestroyRoomsForCi()) {
+      console.log("[test] E2E_DESTROY_ROOMS=1 — kjører i CI-modus");
+    }
     await resetPilotState(masterToken);
 
     // 3. Velg en demo-spiller med ledig dagsgrense. Regulatorisk-cap (§66)

@@ -1,0 +1,288 @@
+# Pilot-flow E2E gate — Spill 1 buy-flow under levende stack.
+#
+# Tobias-direktiv 2026-05-13: blokkende CI-gate på PR mot main slik at vi
+# fanger regressions i master + spiller-flyten FØR de når main. Selve
+# testen er `tests/e2e/spill1-pilot-flow.spec.ts` (Playwright + REST-
+# orchestrering). I motsetning til `e2e-test.yml` (HTTP-API smoke mot
+# `node dist/index.js`) kjører denne workflow-en hele klient-stacken via
+# Playwright/chromium og driver UI + socket.io ende-til-ende.
+#
+# Hva som kjøres:
+#   1. Postgres 16 + Redis 7 (services)
+#   2. Install workspace deps (game-client + admin-web + shared-types + playwright)
+#   3. Build shared-types
+#   4. Build game-client (outputs til apps/backend/public/web/games/)
+#   5. Install + build apps/backend
+#   6. Run migrations + seed pilot demo-data (SEED_SKIP_ROOM_CREATION=1)
+#   7. Start `node dist/index.js` med ENABLE_BUY_DEBUG=1 + NODE_ENV=test
+#      (NODE_ENV != production → /api/dev/auto-login er mountet)
+#   8. Vent på /health 200
+#   9. npx playwright install chromium
+#  10. npm run test:pilot-flow med E2E_DESTROY_ROOMS=1
+#  11. Upload trace/video/screenshots på failure
+#
+# Trigger paths matcher kode-paths som påvirker Spill 1 master + spiller-
+# flyten. Andre PR-er skip workflow entirely via `paths:`-filter.
+#
+# Mål-tid: under 5 minutter end-to-end. Hovedkostnad er chromium-install
+# (~20s) + game-client build (~30s).
+#
+# Pre-merge gate: workflow-en er konfigurert som required check via branch
+# protection på main. Hvis dette ikke er aktivt i admin-settings: en PM
+# må oppdatere branch-protection-regelen via gh-api ETTER første grønne
+# workflow-kjøring. Se PR-body-template for instruksjoner.
+#
+# Companion docs:
+#   tests/e2e/README.md
+#   docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md
+
+name: Pilot-flow E2E
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/backend/src/game/**'
+      - 'apps/backend/src/sockets/**'
+      - 'apps/backend/src/routes/agentGame1*.ts'
+      - 'apps/backend/src/routes/adminGame1*.ts'
+      - 'apps/backend/src/routes/game1Purchase.ts'
+      - 'apps/backend/src/util/canonicalRoomCode.ts'
+      - 'apps/backend/src/util/roomHelpers.ts'
+      - 'apps/backend/src/wallet/**'
+      - 'apps/backend/src/compliance/**'
+      - 'apps/backend/migrations/**'
+      - 'apps/backend/scripts/seed-demo-pilot-day.ts'
+      - 'packages/game-client/src/games/game1/**'
+      - 'packages/game-client/src/bridge/**'
+      - 'packages/game-client/src/net/**'
+      - 'packages/game-client/src/screens/**'
+      - 'packages/shared-types/src/game.ts'
+      - 'packages/shared-types/src/schemas/game.ts'
+      - 'apps/admin-web/src/pages/cash-inout/**'
+      - 'apps/admin-web/src/pages/agent-portal/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/pilot-flow-e2e.yml'
+
+concurrency:
+  group: pilot-flow-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pilot-flow-e2e:
+    name: Pilot-flow E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: spillorama
+          POSTGRES_PASSWORD: spillorama
+          POSTGRES_DB: spillorama_pilot_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spillorama -d spillorama_pilot_e2e"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # Backend-runtime env — re-brukes både av migrate-step og av selve
+      # `node dist/index.js`-prosessen.
+      APP_PG_CONNECTION_STRING: postgresql://spillorama:spillorama@localhost:5432/spillorama_pilot_e2e
+      APP_PG_SCHEMA: public
+      WALLET_PG_CONNECTION_STRING: postgresql://spillorama:spillorama@localhost:5432/spillorama_pilot_e2e
+      WALLET_PG_SCHEMA: public
+      WALLET_PROVIDER: postgres
+      ROOM_STATE_PROVIDER: redis
+      SCHEDULER_LOCK_PROVIDER: redis
+      REDIS_URL: redis://localhost:6379/0
+      KYC_PROVIDER: local
+      # NODE_ENV != production gir oss /api/dev/auto-login (kreves av testen).
+      # `test` er konvensjonen for CI E2E.
+      NODE_ENV: test
+      LOG_LEVEL: warn
+      PORT: '4000'
+      # ENABLE_BUY_DEBUG=1 gir oss [BUY-DEBUG]-logs i backend-stdout som vi
+      # capter ved failure. ?debug=1-query-param på klient-siden trigger
+      # det samme klient-side.
+      ENABLE_BUY_DEBUG: '1'
+      # JOBS_ENABLED=false — vi vil ikke at cron-jobber (anti-fraud sweep,
+      # reconciliation, status-pings) skal kjøre under E2E. Test driver
+      # ALL state-transition eksplisitt via REST og UI.
+      JOBS_ENABLED: 'false'
+      # CI-modus for `resetPilotState` — destruer GoH-rom eksplisitt. Per
+      # 2026-05-13 destruerer den dem uansett (default-behavior), men env-
+      # var signaliserer intent eksplisitt i CI-logs og er fremtid-sikker
+      # hvis default-behavior endres.
+      E2E_DESTROY_ROOMS: '1'
+      # Vi vil ikke at boot-loggen skal sende metrikker til eksternt
+      # observability-system under CI.
+      SENTRY_DSN: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Steg 1: Setup Node — workspace package-lock for hele monoreposet
+      # (game-client + admin-web + shared-types ligger alle der). apps/backend
+      # har sin egen lockfile som vi installer separat.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/backend/package-lock.json
+
+      # Steg 2: Install workspace deps (game-client + admin-web + shared-types
+      # + playwright). apps/backend har egen lockfile og installeres separat.
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Steg 3: Build shared-types først så game-client + backend kan
+      # importere typer.
+      - name: Build shared-types
+        run: npm -w @spillorama/shared-types run build
+
+      # Steg 4: Build game-client. Output havner i
+      # `apps/backend/public/web/games/` (vite outDir konfigurert dit).
+      # Backend serverer dette via express.static-mounten på publicDir.
+      - name: Build game-client
+        run: npm -w @spillorama/game-client run build
+
+      # Steg 5a: Install packages/shared-types deps inside apps/backend.
+      # Trenger zod inni shared-types-symlinken som backend leser via
+      # file: reference. Samme mønster som ci.yml.
+      - name: Install packages/shared-types deps for backend
+        run: npm --prefix packages/shared-types install --no-audit --no-fund
+
+      # Steg 5b: Install backend deps. apps/backend har egen package-lock.json
+      # for å holde server-deps separert fra workspace-deps.
+      - name: Install apps/backend dependencies
+        run: npm --prefix apps/backend ci
+
+      # Steg 6: Build backend (vi kjører `node dist/index.js` ikke tsx --watch).
+      - name: Build apps/backend
+        run: npm --prefix apps/backend run build
+
+      # Steg 7: Run migrations. node-pg-migrate plukker opp APP_PG_CONNECTION_STRING
+      # fra env.
+      - name: Run migrations
+        run: npm --prefix apps/backend run migrate
+
+      # Steg 8: Seed pilot demo-data — opprettr demo-hall-001..004, demo-
+      # agenter, demo-spillere og pilot Group-of-Halls. seedScript leser
+      # APP_PG_CONNECTION_STRING fra env.
+      #
+      # `SEED_SKIP_ROOM_CREATION=1` hopper over POST mot /api/admin/halls/.../rooms
+      # — vi har ikke backend kjørende ennå (start-backend kommer i steg 9),
+      # og rom-er spawnes lazy av `markHallReady`-endepunktet som testen
+      # kaller selv.
+      - name: Seed pilot demo-data
+        run: npm --prefix apps/backend run seed:demo-pilot-day
+        env:
+          SEED_SKIP_ROOM_CREATION: '1'
+
+      # Steg 9: Start backend i bakgrunnen. Vi exec-er node-prosessen direkte
+      # (ikke npm-wrapper) så vi kan capture stderr/stdout. Backend logger
+      # til pilot-backend.log; failure-step kan dump-e siste 200 linjer.
+      - name: Start backend
+        run: |
+          set -euo pipefail
+          mkdir -p tests/e2e/__output__
+          echo "Starting backend with NODE_ENV=$NODE_ENV ENABLE_BUY_DEBUG=$ENABLE_BUY_DEBUG..."
+          # Dump env-utdrag for debug (uten secrets):
+          echo "PG_CONN: ${APP_PG_CONNECTION_STRING/spillorama:spillorama@/[REDACTED]@}"
+          echo "REDIS_URL: $REDIS_URL"
+          node apps/backend/dist/index.js \
+            > tests/e2e/__output__/pilot-backend.log 2>&1 &
+          echo $! > tests/e2e/__output__/pilot-backend.pid
+          echo "Backend PID: $(cat tests/e2e/__output__/pilot-backend.pid)"
+
+      # Steg 10: Vent på at backend er klar — poller /health til 200 eller
+      # 60s timeout. Boot-tiden er typisk 5-10s; gir vi rikelig margin.
+      - name: Wait for backend health
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4000/health > /dev/null 2>&1; then
+              echo "Backend healthy after ${i}s"
+              curl -s http://localhost:4000/health | head -c 200
+              echo
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did NOT become healthy within 60s — dumping last 100 log-lines:"
+          tail -n 100 tests/e2e/__output__/pilot-backend.log || true
+          exit 1
+
+      # Steg 11: Install chromium (kun chromium, ikke alle browsers — saves
+      # ~3 min CI-tid). `--with-deps` installerer system-libs.
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      # Steg 12: Kjør pilot-flow-testen. Bruker config fra tests/e2e/.
+      # `E2E_DESTROY_ROOMS=1` (satt via job-env) signaliserer CI-modus —
+      # `resetPilotState` destruerer GoH-rom uansett, men eksplisitt env
+      # gir entydige logs hvis default-behavior endres senere.
+      - name: Run pilot-flow E2E test
+        run: npm run test:pilot-flow
+        env:
+          CI: 'true'
+
+      # Steg 13: Dump backend BUY-DEBUG-logs på failure for rask diagnose.
+      - name: Dump backend logs on failure
+        if: failure()
+        run: |
+          echo "=========================================="
+          echo "Pilot-backend.log (last 200 lines)"
+          echo "=========================================="
+          tail -n 200 tests/e2e/__output__/pilot-backend.log || true
+          echo
+          echo "=========================================="
+          echo "BUY-DEBUG entries"
+          echo "=========================================="
+          grep -E "\[BUY-DEBUG\]" tests/e2e/__output__/pilot-backend.log | tail -n 50 || true
+          echo
+          echo "=========================================="
+          echo "ERROR entries"
+          echo "=========================================="
+          grep -iE "error|fatal|uncaught" tests/e2e/__output__/pilot-backend.log | tail -n 50 || true
+
+      # Steg 14: Stop backend før artifact-upload (ellers kan filer være låst).
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f tests/e2e/__output__/pilot-backend.pid ]; then
+            kill "$(cat tests/e2e/__output__/pilot-backend.pid)" 2>/dev/null || true
+            sleep 1
+          fi
+
+      # Steg 15: Upload Playwright artifacts (traces, videos, screenshots,
+      # error-context.md) på failure for offline-diagnose.
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-flow-artifacts-${{ github.run_id }}
+          path: |
+            tests/e2e/__output__/**
+            !tests/e2e/__output__/pilot-backend.pid
+          retention-days: 14
+          if-no-files-found: warn
