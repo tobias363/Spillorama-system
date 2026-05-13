@@ -135,6 +135,106 @@ INFO MutationTestExecutor The dry-run has been completed successfully.
 
 ---
 
+### 2026-05-13 — Comprehension-verification (Tier-3 over FRAGILITY_LOG, general-purpose agent)
+
+**Scope:** Bygg Tier-3 enforcement i autonomi-pyramiden — heuristisk
+validering av `## Comprehension`-blokk i commit-meldinger som har
+`[context-read: F-NN]`-tagger. Forhindrer at agenter lyver med konstant
+kostnad ved å bare lime inn taggen uten å lese entry-en.
+
+**Inputs gitt:**
+- Mandat fra `<<autonomous-loop>>`-prompt: bygg verktøyet, fiks det til det
+  går grønt, dokumenter, oppdater PR-template + AGENT_EXECUTION_LOG +
+  PITFALLS_LOG, ikke åpne PR (PM tar over)
+- Pekere til `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, `FRAGILITY_LOG.md`,
+  `pre-commit-fragility-check.sh`, `ai-fragility-review.yml`, `PITFALLS_LOG §6`
+- Branch: `feat/comprehension-verification-2026-05-13` (ny fra origin/main)
+- Format: Conventional Commits norsk, `[bypass-pm-gate: ...]` + `gate-not-applicable: pm-autonomy-system`
+
+**Outputs produsert:**
+- **Branch:** `feat/comprehension-verification-2026-05-13` (pushed til origin)
+- **Filer:**
+  - `scripts/verify-context-comprehension.mjs:1-525` — Node ESM heuristic-validator
+    - parseFragilityLog (entries map med files + neverDo + rawBlock)
+    - extractComprehensionBlock (## Comprehension → stripper Co-Authored-By)
+    - extractContextReadFids (regex F-NN, komma-separert + multi-tag)
+    - extractBypassReason (bypass-tag med ≥20 chars krav)
+    - isGenericText (matcher "jeg leste", "OK", "lest", etc.)
+    - ruleOverlap (3+ content-word overlap, norsk+engelsk stop-words)
+    - findFileMention (full path, basename, eller glob-match)
+    - validateEntryAgainstComprehension (lengde + generic + filsti + regel)
+    - validateCommitMessage (e2e, returnerer ok/errors/warnings/fids)
+    - CLI: --commit-msg, --test, --help
+    - Git-note: skriver .git/comprehension-notes/comprehension-<sha>.txt
+  - `.husky/pre-commit-comprehension.sh:1-50` — bash wrapper (kompatibel med bash 3.2)
+  - `.husky/pre-commit:30-50` — wirer trinn 3 (comprehension) etter Tier-A intent
+  - `scripts/__tests__/verify-context-comprehension.test.mjs:1-590` — 48 tester (node --test)
+  - `docs/engineering/COMPREHENSION_VERIFICATION.md:1-380` — full guide + format-eksempler
+  - `.github/pull_request_template.md:65-85` — Knowledge protocol-seksjon med comprehension-reminder
+  - `docs/engineering/PITFALLS_LOG.md §5.8` — bash-4-requirement i fragility-check (oppdaget under arbeidet)
+
+**Test-resultater:**
+- 48 tester, alle passerer (107ms total)
+- Hook-performance lokalt:
+  - Uten `[context-read:]`-marker: ~108ms (regex + early exit)
+  - Med `[context-read: F-01]` god comprehension: ~150ms
+  - Med dårlig comprehension: ~150ms (avviser med detaljerte feilmeldinger)
+- Alle 4 acceptance-kriterier oppfylt:
+  - ✓ Allows commit with proper ## Comprehension block
+  - ✓ Rejects commit with "jeg leste"
+  - ✓ Override works with valid reason ≥ 20 chars
+  - ✓ Override rejects reason < 20 chars
+- TypeScript build: `npm run build:types` grønn
+- Backend typecheck: `npm --prefix apps/backend run check` grønn
+
+**Fallgruver oppdaget:**
+
+1. **§5.8 (ny i PITFALLS_LOG): bash 4-requirement i fragility-check** —
+   `.husky/pre-commit-fragility-check.sh` bruker `declare -A` (associative
+   arrays) som er bash 4+. macOS default bash er 3.2 — feiler med
+   `declare: -A: invalid option`. Scriptet eksisterer (PR #1326) men ble
+   aldri wiret. Konsekvens: min PR wirer KUN comprehension-hooken, ikke
+   fragility-hooken. Fragility-check må refaktores til POSIX eller Node
+   først.
+
+2. **Glob-pattern i FRAGILITY_LOG file-paths**: F-03 har `tests/e2e/*.spec.ts`
+   med glob. Initial parser-regex tillot ikke `*` i path-segmenter →
+   parsing-feil. Fix: utvid regex med `*` og legg til glob→regex-konvertering
+   i `findFileMention` så glob-pattern matcher konkrete spec-filer i
+   comprehension-tekst.
+
+3. **F-02 multi-line Filer-blokk**: F-02 har flere file-paths som bullets
+   under `**Filer:**`-header (ikke inline). Initial parser fanget kun
+   inline-paths. Fix: introduser `inFilerSection`-state-variabel som
+   samler bullet-rader til neste section-break.
+
+4. **Stop-word-filter for 3-ord-overlap**: Uten stop-word-filter ville
+   norsk-tekst med generisk fyll (`og`, `er`, `den`) trivielt nå 3-ord-grensen.
+   Lagt til 90+ norsk + engelsk stop-words i `STOP_WORDS`-set.
+
+**Læring:**
+
+- Bash hooks for kvalitets-sjekker bør være Node-baserte (matcher
+  `check-pm-gate.mjs`-mønster). Bash 3.2-grensene på macOS er for trange
+  for komplekse string-operasjoner.
+- Heuristikker har inherent trade-off: for streng = falske blokkering,
+  for løs = lett-bypassed. 3-ord-overlap + filsti-krav er empirisk
+  middel-streng — fanger "jeg leste" og copy-paste, godtar reell paraphrase.
+- Sjekk-design krever positivt + negativt test-suite parallelt. 48 tester
+  fordelt: parser (6), block-extraction (5), tag-extraction (8), generic-check
+  (5), overlap (3), file-mention (4), entry-validering (6), e2e (8),
+  quality-guards (2). Hver lag har sin egen sannhets-kilde.
+
+**Eierskap:**
+- `scripts/verify-context-comprehension.mjs` (eier alene)
+- `scripts/__tests__/verify-context-comprehension.test.mjs` (eier alene)
+- `.husky/pre-commit-comprehension.sh` (eier alene)
+- `docs/engineering/COMPREHENSION_VERIFICATION.md` (eier alene)
+- `.husky/pre-commit` + `.github/pull_request_template.md` + `PITFALLS_LOG` —
+  delt, kun additive endringer
+
+---
+
 ### 2026-05-13 — Tobias-readiness auto-generator i AI Fragility Review (general-purpose agent)
 
 **Scope:** Utvid `ai-fragility-review.yml`-workflow med auto-genererte "Tobias smoke-test"-seksjoner per PR. Heuristikk-basert fil→scenario-mapping rendrer ferdig markdown med konkrete URL-er, credentials, klikk-steg, forventet resultat og typiske feilbilder. Skal redusere Tobias' verifikasjons-burden ved at han ser hva han skal teste uten å lese diffen selv.
