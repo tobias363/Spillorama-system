@@ -158,7 +158,8 @@ Scope-globber bruker shell-glob (`*` = single-segment, `**` = recursive). Komma 
 | `scripts/find-skills-for-file.mjs <file>` | Print skills som matcher gitt file | Manuelt + av context-pack-generator |
 | `scripts/build-skill-file-map.mjs` | Generer `docs/auto-generated/SKILL_FILE_MAP.md` | Hver gang scope endres — pre-commit + CI |
 | `scripts/generate-context-pack.sh <pattern>` | Auto-brief inkluderer matching skills som seksjon 1 | Hver agent-spawn |
-| `.github/workflows/skill-mapping-validate.yml` | Blokkerer PR uten scope-header + sjekker SKILL_FILE_MAP er current | Hver PR til main |
+| `.github/workflows/skill-mapping-validate.yml` | Validerer scope-headers på PR. Stale SKILL_FILE_MAP er nå **warning**, ikke blokker (siden 2026-05-13) — auto-regen kjører post-merge | Hver PR til main |
+| `.github/workflows/skill-file-map-auto-regen.yml` | **Auto-regen** av `SKILL_FILE_MAP.md` ved push til main hvis skills/scope-endring → auto-PR | Hver merge til main som rører `.claude/skills/**` |
 | `npm run skills:map` / `npm run skills:for-file -- <file>` | Convenience-wrappers | Lokalt + CI |
 
 ### Bredde-prinsipper
@@ -180,7 +181,8 @@ Se `docs/auto-generated/SKILL_FILE_MAP.md` for current state — auto-generert p
 | `scripts/generate-context-pack.sh` | ✅ Implementert | Auto-brief per agent-spawn (inkl. skill-mapping seksjon 1) |
 | `scripts/find-skills-for-file.mjs` | ✅ Implementert | CLI for å finne relevante skills for en gitt file |
 | `scripts/build-skill-file-map.mjs` | ✅ Implementert | Generer SKILL_FILE_MAP.md med scope-coverage |
-| `skill-mapping-validate.yml` workflow | ✅ Implementert | Blokkerer PR uten scope-header + sjekker SKILL_FILE_MAP-freshness |
+| `skill-mapping-validate.yml` workflow | ✅ Implementert | Blokkerer PR uten scope-header. Stale map nå warning-only (E4 2026-05-13) |
+| `skill-file-map-auto-regen.yml` workflow | ✅ Implementert (E4 2026-05-13) | Auto-regenerer SKILL_FILE_MAP.md ved merge til main + åpner auto-PR |
 | `knowledge-protocol-gate.yml` workflow | ✅ Implementert | PR-checkbox påkrevd |
 | Pre-commit hook for lese-bekreftelse | 🟡 TODO | Commit blokkert uten markører |
 | Danger-rule for delta-rapport | 🟡 TODO | PR blokkert uten delta-fil |
