@@ -1,0 +1,3 @@
+docs/operations/PM_HANDOFF_2026-05-13.md
+docs/engineering/FRAGILITY_LOG.md
+README.md
