@@ -87,3 +87,14 @@ apps/backend/.stryker-tmp-*/
 apps/backend/reports/mutation/
 apps/backend/reports/mutation-*/
 .stryker-tmp/
+
+# Observability — PgHero + pgBadger (OBS-8, 2026-05-14)
+# data/   : pgBadger HTML-rapporter (kan vokse til 5-15MB per rapport)
+#           samt run-report.sh-kopi som scripts/pgbadger-report.sh legger
+#           inn for at containeren skal nå den via mount.
+# pglogs/ : Postgres CSV-logger pgBadger leser fra (kan bli store)
+# Begge er kun lokale; .gitkeep beholder mappestrukturen for first-run.
+infra/observability/data/*
+!infra/observability/data/.gitkeep
+infra/observability/pglogs/*
+!infra/observability/pglogs/.gitkeep
