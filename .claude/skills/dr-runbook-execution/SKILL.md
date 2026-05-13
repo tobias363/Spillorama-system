@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: docs/operations/DR_RUNBOOK.md, docs/operations/LIVE_ROOM_DR_RUNBOOK.md, docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md, docs/operations/INCIDENT_RESPONSE_PLAN.md, docs/operations/HALL_PILOT_RUNBOOK.md, docs/operations/EMERGENCY_RUNBOOK.md, docs/operations/DRILL_BACKUP_RESTORE_*.md, docs/operations/DRILL_ROLLBACK_*.md, docs/operations/PILOT_*_RUNBOOK*.md -->
+
 # DR Runbook Execution
 
 ## Kontekst

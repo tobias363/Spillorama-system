@@ -1,0 +1,108 @@
+name: Skill Mapping Validate
+
+# Verifiserer at hver .claude/skills/<name>/SKILL.md har en
+# `<!-- scope: glob1, glob2, ... -->`-header rett etter YAML-frontmatter.
+# Skills uten scope-header blokkerer ny PR — context-pack-en kan da ikke
+# auto-laste skill når en relevant fil endres, og dermed bryter Pilar 7 i
+# KNOWLEDGE_AUTONOMY_PROTOCOL.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+    paths:
+      - ".claude/skills/**"
+      - "scripts/find-skills-for-file.mjs"
+      - "scripts/build-skill-file-map.mjs"
+      - ".github/workflows/skill-mapping-validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".claude/skills/**"
+
+jobs:
+  validate-scope-headers:
+    name: Validate scope-headers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check that every SKILL.md has a scope-header
+        run: |
+          set -eu
+          # NB: pipefail removed — awk | head -15 triggers SIGPIPE (exit 141)
+          # when head closes the pipe early. We use NR-limiter inside awk instead.
+          MISSING=()
+          for skill_file in .claude/skills/*/SKILL.md; do
+            if [ ! -f "$skill_file" ]; then continue; fi
+            # Strip YAML frontmatter and look at the first 15 lines after
+            # the closing `---`. A scope-header must appear there.
+            # awk does its own line-limit via lines_after_fm counter to avoid
+            # SIGPIPE from external `| head -15`.
+            tail_after_fm=$(awk '
+              BEGIN { in_fm=0; closed=0; lines_after_fm=0 }
+              /^---$/ {
+                if (in_fm == 0) { in_fm = 1; next }
+                if (in_fm == 1 && closed == 0) { closed = 1; next }
+              }
+              closed == 1 {
+                lines_after_fm++
+                if (lines_after_fm > 15) exit
+                print
+              }
+            ' "$skill_file")
+
+            if ! echo "$tail_after_fm" | grep -qE '^<!--\s*scope:\s*'; then
+              echo "::error file=$skill_file::missing <!-- scope: ... --> header"
+              MISSING+=("$skill_file")
+            fi
+          done
+
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo ""
+            echo "::error::${#MISSING[@]} SKILL.md fil(er) mangler scope-header."
+            echo ""
+            echo "Hvordan fikse:"
+            echo "Legg til denne linjen rett etter den lukkende '---' av YAML-frontmatteren:"
+            echo ""
+            echo "  <!-- scope: apps/backend/src/foo/*, packages/bar/baz/* -->"
+            echo ""
+            echo "Eksempel: se en fungerende skill, f.eks. .claude/skills/wallet-outbox-pattern/SKILL.md"
+            echo ""
+            echo "Hvis skill bevisst skal være tom (e.g. typescript — for bredt):"
+            echo "  <!-- scope: -->"
+            echo ""
+            exit 1
+          fi
+
+          echo "✓ All $(ls .claude/skills/*/SKILL.md | wc -l) skills have scope-headers."
+
+      - name: Self-test — find-skills-for-file CLI behaves correctly
+        run: |
+          set -euo pipefail
+          # Smoke: ensure the CLI loads scopes and matches known files.
+          result=$(node scripts/find-skills-for-file.mjs apps/backend/src/game/Game2Engine.ts || true)
+          if [ "$result" != "spill2-perpetual-loop" ]; then
+            echo "::error::find-skills-for-file.mjs failed for Game2Engine.ts. Expected 'spill2-perpetual-loop', got: '$result'"
+            exit 1
+          fi
+          echo "✓ find-skills-for-file CLI works"
+
+      - name: Rebuild SKILL_FILE_MAP.md and check it is up-to-date
+        run: |
+          set -euo pipefail
+          node scripts/build-skill-file-map.mjs > /dev/null
+          if ! git diff --exit-code docs/auto-generated/SKILL_FILE_MAP.md; then
+            echo ""
+            echo "::error::docs/auto-generated/SKILL_FILE_MAP.md is stale."
+            echo "Run locally: node scripts/build-skill-file-map.mjs"
+            echo "and commit the updated file."
+            exit 1
+          fi
+          echo "✓ SKILL_FILE_MAP.md is current"

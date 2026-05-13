@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/engineering/PM_*.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/generate-context-pack.sh, .github/workflows/pm-*.yml -->
+
 # PM Orchestration Pattern
 
 ## Kontekst

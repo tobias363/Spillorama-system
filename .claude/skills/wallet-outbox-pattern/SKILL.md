@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/wallet/**, apps/backend/src/adapters/PostgresWalletAdapter*, apps/backend/src/adapters/InMemoryWalletAdapter*, apps/backend/src/adapters/FileWalletAdapter*, apps/backend/src/adapters/HttpWalletAdapter*, apps/backend/src/adapters/WalletAdapter.ts, apps/backend/src/game/Game1TicketPurchaseService.ts, apps/backend/src/game/Game1PayoutService.ts, apps/backend/src/game/IdempotencyKeys.ts, apps/backend/scripts/reconcile-wallet-vs-ledger.ts -->
+
 # Casino-grade wallet — outbox + REPEATABLE READ + hash-chain
 
 Spillorama wallet-stack er bygget for Evolution Gaming-grade robusthet. ALL wallet-touch MÅ gå via `WalletAdapter`-interface og bruke outbox-pattern for atomic state-mutering + event-skriving. REPEATABLE READ-isolation forhindrer lost-update. Hash-chain audit gir Lotteritilsynet-sporbarhet. Dette er regulatorisk infrastruktur — bypassing er pengetap-risiko.

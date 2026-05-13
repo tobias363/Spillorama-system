@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/game/Game1*, apps/backend/src/game/MasterActionService.ts, apps/backend/src/game/GamePlanRunService.ts, apps/backend/src/game/GamePlanRunCleanupService.ts, apps/backend/src/game/GamePlanEngineBridge.ts, apps/backend/src/game/GameLobbyAggregator.ts, apps/backend/src/game/Spill1LobbyBroadcaster.ts, apps/backend/src/game/BingoEngine.ts, apps/backend/src/game/BingoEngine.spill1*.test.ts, apps/backend/src/routes/agentGame1*.ts, apps/backend/src/routes/agentGamePlan.ts, apps/backend/src/routes/adminGame1*.ts, apps/backend/src/jobs/game1*.ts, apps/backend/src/jobs/gamePlanRunCleanup.ts, apps/backend/src/__tests__/MasterActionService*.test.ts, apps/backend/src/game/__tests__/GamePlan*.test.ts, apps/backend/src/game/__tests__/GameLobbyAggregator*.test.ts, apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts, apps/admin-web/src/pages/agent-portal/Spill1*.ts, apps/admin-web/src/pages/games/master/Game1MasterConsole.ts -->
+
 # Spill 1 — Master-flyt og plan/scheduled-game-kobling
 
 Spill 1 (slug-familie `bingo`, 13 katalog-varianter) er hovedspill-fundamentet for Spillorama-pilot. Master-konsollet styrer plan-runtime + scheduled-games + per-hall ready-state for 4 pilot-haller (Teknobingo Årnes som master + Bodø + Brumunddal + Fauske). Fundamentet er kompromisert av en ID-disambiguasjons-bug og er under aktiv refaktor (Bølge 1-3, 2026-05-08).

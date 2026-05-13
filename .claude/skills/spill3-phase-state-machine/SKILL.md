@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/game/Game3*, apps/backend/src/game/Spill3*, apps/backend/src/jobs/game3AutoDrawTick.ts, apps/backend/src/routes/adminSpill3Config.ts, apps/backend/src/util/roomState.bindSpill3Config.test.ts, apps/backend/src/__tests__/chaos/r10Spill3Invariants.test.ts, apps/admin-web/src/api/admin-spill3-config.ts, apps/admin-web/src/pages/games/spill3Config/**, packages/game-client/src/games/game3/** -->
+
 # Spill 3 — Sequential phase-state-machine
 
 Spill 3 (slug `monsterbingo`, kode-navn `game_3`) er et live hovedspill med en helt egen arkitektur: **sequential rad-faser** (Rad 1 → 3s pause → Rad 2 → ... → Fullt Hus) som er unikt i pilot-skopet. ETT globalt rom som alle haller deler. Ingen master, ingen plan. 5×5 grid UTEN fri sentercelle, 75 baller, ÉN ticket-type.

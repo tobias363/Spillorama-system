@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/migrations/**, apps/backend/src/scripts/migrate.ts, render.yaml -->
+
 # Database Migration Policy
 
 ## Kontekst

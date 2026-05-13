@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/compliance/AuditLogService.ts, apps/backend/src/compliance/AuditLogService.test.ts, apps/backend/src/wallet/WalletAuditVerifier.ts, apps/backend/src/wallet/WalletAuditVerifier.test.ts, apps/backend/src/adapters/PostgresWalletAdapter.ts, apps/backend/src/scripts/verifyAuditChain.ts, apps/backend/src/jobs/walletAuditVerify.ts -->
+
 # Audit Hash-Chain (BIN-764 / ADR-003)
 
 Hash-chain audit-trail is what makes our compliance records **tamper-evident**. Every audit row links to the previous via SHA-256(prev_hash || row_data). A single mutation downstream breaks the chain from that row to the present, and a daily anchor lets us prove what the chain looked like at any point in history.

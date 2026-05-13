@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/admin/HallGroupService.ts, apps/backend/src/admin/HallGroupService.test.ts, apps/backend/src/routes/adminHallGroups.ts, apps/backend/src/routes/__tests__/adminHallGroups.test.ts, apps/backend/src/platform/HallGroupMembershipQuery.ts, apps/backend/src/platform/__tests__/HallGroupMembershipQuery.test.ts, apps/backend/src/game/Game1TransferHallService.ts, apps/backend/src/game/Game1TransferExpiryTickService.ts, apps/backend/src/game/Game1HallReadyService.ts, apps/backend/src/boot/bootstrapHallGroupRooms.ts -->
+
 # Group of Halls + Master Binding
 
 A **Group of Halls (GoH)** is a set of halls that play the same Spill 1 round simultaneously. Inside a GoH there is exactly **one master-hall** at any moment — that hall's bingovert holds the master-actions (start, pause, resume, advance to next plan-position, set jackpot popup). The other halls are participants.

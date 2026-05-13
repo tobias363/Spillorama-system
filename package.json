@@ -64,6 +64,8 @@
     "test:visual:pilot-hw": "npm -w @spillorama/game-client exec playwright test --project=chromium-pilot-hw",
     "schema:snapshot": "bash scripts/schema-ci/snapshot.sh",
     "schema:diff": "bash scripts/schema-ci/diff-schema.sh",
+    "skills:map": "node scripts/build-skill-file-map.mjs",
+    "skills:for-file": "node scripts/find-skills-for-file.mjs",
     "prepare": "husky || true && node scripts/setup-husky.mjs || true"
   },
   "//lint_staged_rationale": "Lint-staged config has been moved to .lintstagedrc.json (2026-05-08). The standalone file makes hook contents self-documenting and lets us add validate-skill-frontmatter, check-markdown-links, validate-migration-name, and check-large-binaries without bloating package.json.",
