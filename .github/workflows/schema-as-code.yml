@@ -1,0 +1,201 @@
+name: Schema as Code (OBS-9)
+
+# Atlas + squawk schema-as-code gate. Runs in addition to (not in place
+# of) `schema-ci.yml` and `schema-ghost-nightly.yml`:
+#
+#   schema-ci.yml         — shadow-replays migrations and diffs against
+#                           the checked-in baseline.sql. Catches ghost
+#                           migrations and uncommitted migration files.
+#   schema-ghost-nightly  — same shadow-replay but compares against the
+#                           live staging DB nightly. Catches hand-applied
+#                           SQL.
+#   schema-as-code (this) — semantic lint of new migration files via
+#                           squawk (Postgres-aware) + Atlas (column-aware).
+#                           Catches risky-but-syntactically-valid patterns
+#                           BEFORE merge (RENAME COLUMN, DROP COLUMN with
+#                           existing references, ADD NOT NULL without
+#                           default, missing CONCURRENTLY on indexed
+#                           tables, etc.).
+#
+# All three are required-context for merge. Together they enforce:
+#   "every prod schema change goes through a committed migration file,
+#    and every committed migration file is safe to run against a live DB"
+#
+# See:
+#   docs/operations/SCHEMA_AS_CODE_RUNBOOK.md  - this workflow's runbook
+#   docs/operations/MIGRATION_LINT_RULES.md    - squawk rule catalog
+#   docs/operations/SCHEMA_CI_RUNBOOK.md       - sister gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/backend/migrations/**"
+      - "atlas.hcl"
+      - "atlas/**"
+      - "scripts/squawk-check.sh"
+      - "scripts/atlas-snapshot.sh"
+      - ".github/workflows/schema-as-code.yml"
+  workflow_dispatch:
+    # Allow on-demand runs (e.g. operator wants to revalidate the entire
+    # migration set against a new squawk release).
+
+concurrency:
+  group: schema-as-code-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write  # for inline annotations via squawk's Gcc reporter
+
+jobs:
+  squawk:
+    name: squawk migration linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout (full history for diff)
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 needed so `git diff origin/main...HEAD` works
+          # without a shallow-clone error.
+          fetch-depth: 0
+
+      - name: Install squawk
+        run: |
+          # Install the prebuilt squawk binary from the official release.
+          # Faster + more reproducible than `npx -y squawk-cli` (which
+          # downloads the package on every run). We pin to a known
+          # version so a squawk release doesn't surprise CI.
+          #
+          # Asset-name convention (sbdchd/squawk releases, verified
+          # 2026-05-14): `squawk-linux-x64`, `squawk-linux-arm64`,
+          # `squawk-darwin-x64`, `squawk-darwin-arm64`. These are raw
+          # ELF/Mach-O binaries (not tar.gz).
+          SQUAWK_VERSION="2.52.1"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64)  ARCH_TAG="linux-x64" ;;
+            aarch64) ARCH_TAG="linux-arm64" ;;
+            *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+          esac
+
+          URL="https://github.com/sbdchd/squawk/releases/download/v${SQUAWK_VERSION}/squawk-${ARCH_TAG}"
+          echo "Downloading $URL"
+          if sudo curl -sSfL "$URL" -o /usr/local/bin/squawk; then
+            sudo chmod +x /usr/local/bin/squawk
+            squawk --version
+          else
+            echo "::warning::Prebuilt binary fetch failed; falling back to npx." >&2
+            # squawk-check.sh handles the npx fallback transparently
+            # via its smoke-test in the script.
+          fi
+
+      - name: Run squawk on changed migrations
+        env:
+          # JSON output the script uses for blocking-rule detection
+          # works on either binary; force tty output to also include
+          # GitHub Actions group markers for nice log folding.
+          SQUAWK_GITHUB: "1"
+        run: |
+          bash scripts/squawk-check.sh
+
+  atlas-lint:
+    name: atlas migrate lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # Atlas needs a real Postgres to compute migration plans.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: atlas
+          POSTGRES_DB: atlas
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U atlas"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout (full history for diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Atlas
+        uses: ariga/setup-atlas@v0
+        with:
+          version: "latest"
+
+      - name: Atlas migrate lint (changed migrations vs main)
+        env:
+          ATLAS_URL: postgres://atlas:atlas@localhost:5432/atlas?sslmode=disable
+          ATLAS_DEV_URL: postgres://atlas:atlas@localhost:5432/atlas?sslmode=disable
+        run: |
+          # Atlas lint compares the migration directory against the most
+          # recent N revisions and flags risky changes. We pass
+          # --latest=5 (rather than --git-base=main) because the
+          # node-pg-migrate file format doesn't include Atlas's
+          # atlas.sum checksum, and --latest just walks the directory
+          # in filename order.
+          #
+          # If the dev-url isn't reachable Atlas falls back to
+          # syntactic-only checks, which is still useful — every
+          # diagnostic that needs a connection is gracefully degraded.
+          set +e
+          atlas migrate lint \
+            --dir 'file://apps/backend/migrations?format=golang-migrate' \
+            --dev-url "$ATLAS_DEV_URL" \
+            --latest 5 \
+            --format '{{ json . }}' \
+            > /tmp/atlas-lint.json 2>/tmp/atlas-lint.stderr
+          RC=$?
+          echo "atlas exit=$RC"
+          set -e
+
+          echo "==== atlas migrate lint stderr ===="
+          cat /tmp/atlas-lint.stderr || true
+          echo "==== atlas migrate lint json ===="
+          cat /tmp/atlas-lint.json || true
+
+          # Atlas exits non-zero on hard errors; we mirror that.
+          if [[ $RC -ne 0 ]]; then
+            echo "::error::atlas migrate lint failed (exit $RC)"
+            echo "See docs/operations/SCHEMA_AS_CODE_RUNBOOK.md §'Atlas lint failed'."
+            exit $RC
+          fi
+
+      - name: Upload atlas lint output (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-lint-output
+          path: |
+            /tmp/atlas-lint.json
+            /tmp/atlas-lint.stderr
+          retention-days: 7
+
+  summary:
+    name: Schema-as-code summary
+    needs: [squawk, atlas-lint]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report combined status
+        run: |
+          SQUAWK="${{ needs.squawk.result }}"
+          ATLAS="${{ needs.atlas-lint.result }}"
+          echo "squawk: $SQUAWK"
+          echo "atlas:  $ATLAS"
+          if [[ "$SQUAWK" == "success" && "$ATLAS" == "success" ]]; then
+            echo "::notice::All schema-as-code checks passed."
+            exit 0
+          else
+            echo "::error::Schema-as-code: squawk=$SQUAWK, atlas=$ATLAS. See job logs."
+            exit 1
+          fi
