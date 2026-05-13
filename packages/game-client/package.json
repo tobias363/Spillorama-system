@@ -23,6 +23,7 @@
     "howler": "^2.2.4",
     "i18next": "^24.2.2",
     "pixi.js": "^8.6.6",
+    "posthog-js": "^1.373.4",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {

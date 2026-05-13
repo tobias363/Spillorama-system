@@ -48,6 +48,11 @@ import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
 import { logger as rootLogger } from "../util/logger.js";
+// OBS-5: PostHog event-analytics — fire-and-forget. captureEvent is a
+// no-op when POSTHOG_API_KEY is unset so dev/test stays silent; in prod
+// each pattern payout is recorded so we can build per-hall win-rate +
+// average-payout dashboards in PostHog.
+import { captureEvent } from "../observability/posthogBootstrap.js";
 
 const log = rootLogger.child({ module: "game1-payout-service" });
 
@@ -593,6 +598,23 @@ export class Game1PayoutService {
         jackpotCents: jackpotPerWinner,
         walletTransactionId: walletTxId,
         phaseWinnerId,
+      });
+
+      // OBS-5: PostHog analytics — one event per winner per pattern. Lets
+      // us build per-hall payout-distribution + cohort analyses (who wins
+      // how often, what pattern, average prize). Fire-and-forget; never
+      // blocks the payout transaction.
+      captureEvent(winner.userId, "spill1.payout.pattern", {
+        scheduledGameId: input.scheduledGameId,
+        hallId: winner.hallId,
+        phase: input.phase,
+        phaseName: input.phaseName,
+        prizeCents: prizePerWinnerCents,
+        jackpotCents: jackpotPerWinner,
+        amountCents: prizePerWinnerCents + jackpotPerWinner,
+        ticketColor: winner.ticketColor,
+        winnerCount,
+        drawSequenceAtWin: input.drawSequenceAtWin,
       });
     }
 
