@@ -59,59 +59,55 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
-### 2026-05-13 — Cross-knowledge audit (drift-deteksjon, general-purpose agent)
+### 2026-05-13 — I16 plan-run lifecycle auto-reconcile fra lobby-poll (general-purpose, isolated worktree)
 
-**Scope:** Bygg ukentlig audit som detekterer drift mellom Spillorama-pilotens 7 kunnskaps-kilder (Linear-issues, BACKLOG, PITFALLS_LOG, FRAGILITY_LOG, ADR-er, BUG_CATALOG, PM-handoffs). Resultat: tre nye filer + AGENT_EXECUTION_LOG-entry. Markert som Pillar 8 i Knowledge Autonomy Protocol — selv-tilsyn av at Pillar 1-7 holder konsistens.
+**Scope:** Fix bug I16 / FRAGILITY F-02: plan-run lifecycle ikke auto-reconciled fra lobby-poll. Stuck-state der `app_game_plan_run.status='running'` mens `app_game1_scheduled_games.status='completed'` etter E2E-test-runs. Tobias' manuelle test 1.5h senere → 1h diagnose for å finne stuck state. Fix legger reconcile-hook i `Game1LobbyService.getLobbyState` (read-path) så lobby-poll auto-healer state.
 
 **Inputs gitt:**
-- Tobias-direktiv 2026-05-13: "Det må bli vanntett nå ellers vil det ikke funke. Kan du anbefale noe annet her for at dette skal gå av seg selv og at da agentene blir smartere..."
-- 8 konkrete drift-sjekker definert av PM-AI i task-promptet (PITFALLS→Linear, FRAGILITY-cluster, BACKLOG→Linear, BUG_CATALOG SHA, ADR-chain, skill-ADR-refs, PM_HANDOFF-PR-state, PR-template-checklist)
-- Eksisterende `docs/engineering/KNOWLEDGE_AUTONOMY_PROTOCOL.md` (Pillar 1-7) + `scripts/generate-context-pack.sh` som referanse-mønster
-- Branch: `feat/cross-knowledge-audit-2026-05-13` på worktree `.claude/worktrees/agent-a64af6053a7b344b0`
+- FRAGILITY_LOG F-02 (full kontekst), MasterActionService.tryReconcileTerminalScheduledGame som referanse-pattern
+- Estimat 1-2 timer, isolert worktree fra origin/main
+- Edge cases: concurrent reconcile, reconcile feiler mid-tx, paused-state preservering, scheduled_end_time future, idempotens
+- DO NOT create PR (PM tar over)
 
 **Outputs produsert:**
-- Branch: `feat/cross-knowledge-audit-2026-05-13`
-- Nye filer:
-  - `scripts/cross-knowledge-audit.mjs` (~840 linjer Node ESM) — 8 drift-sjekker + markdown/JSON-rapport-generator
-  - `.github/workflows/cross-knowledge-audit-weekly.yml` — cron mandag 10:00 UTC + manuell trigger + auto-issue-opprettelse med label `cross-knowledge-audit`
-  - `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` — komplett bidragsguide (hvorfor, hvordan handle på funn, hvordan legge til nye sjekker)
-- Audit-funksjoner:
-  - Check 1: PITFALLS-§ → Linear-state-cross-check (skipper graceful uten Linear-key)
-  - Check 2: FRAGILITY-fil-cluster (≥ 3 entries på samme fil = arkitektonisk hot-spot)
-  - Check 3: BACKLOG checkbox-items uten BIN-ref
-  - Check 4: BUG_CATALOG ✅ Merged uten commit-SHA/PR-ref/branch-navn (kontekst-aware: kun tabeller med Fix-PR-kolonne)
-  - Check 5: ADR Superseded-chain (broken eller manglende back-reference)
-  - Check 6: Skills som peker på døde ADR-er
-  - Check 7: PM_HANDOFF-mentions av åpne PR-er som faktisk er merget (krever `gh` CLI)
-  - Check 8: PR-template manglende knowledge-protocol-checkboxes
-- Severity-skala: 🔴 RED (arkitektonisk/integritet), 🟡 YELLOW (drift som bør lukkes), ℹ️ INFO (orientering)
-- CLI-flagg: `--no-linear`, `--fail-on-findings`, `--json`, `--output=path`, `--verbose`
+- **Branch:** `fix/plan-run-auto-reconcile-2026-05-13` (pushed til origin)
+- **Commits:** se commit-melding nedenfor
+- **Filer modifisert:**
+  - `apps/backend/src/game/Game1LobbyService.ts:46-66, 247-292, 506-545, 730-833` — ny private `tryReconcileTerminalScheduledGame` + `TERMINAL_SCHEDULED_GAME_STATUSES` + `AUTO_RECONCILE_ACTOR_ID` + reconcile-call i `getLobbyState`. Doc-header oppdatert til å reflektere ny write-path.
+  - `docs/engineering/FRAGILITY_LOG.md:61-104` — F-02 markert FIXED, fil-pekere oppdatert, manuell verifikasjon-tekst speilet ny atferd.
+  - `tests/e2e/BUG_CATALOG.md:48, 101` — I16 entry lagt til + endringslogg.
+- **Filer opprettet:**
+  - `apps/backend/src/game/__tests__/Game1LobbyService.reconcile.test.ts:1-509` — 10 nye unit-tester (stuck @ last position, stuck @ non-last, normal running, already-finished, paused preserved, finish-error fail-safe, cancelled status, non-terminal status, latency < 50ms, idempotent across two polls).
 
-**Live audit-funn (på dagens main):**
-- 1 drift (🟡): PR-template mangler alle 4 knowledge-protocol-checkboxes (PITFALLS / FRAGILITY / SKILL / AGENT_EXECUTION_LOG) — Check 8 fanget dette
-- 3 info-notiser: Linear ikke konfigurert (Check 1 graceful skip), 2 × handoff-PR-state-stale (Check 7 informasjons-funn — PR #1320, #1323)
-- 0 arkitektoniske concerns (Check 2): `tests/e2e/spill1-pilot-flow.spec.ts` har 2 FRAGILITY-refs (F-01, F-02), under terskelen 3
+**Test-resultater:**
+- Nye reconcile-tester: 10/10 PASS (~610ms total)
+- Eksisterende `Game1LobbyService.test.ts`: 14/14 PASS (~1.3s)
+- Game1LobbyService + spill1Lobby route-tester: 5098/5098 PASS (16 skipped, 0 failed)
+- TypeScript strict: clean (`npm run check`)
+- Latency-test: median ~5ms (godt under 50ms-budget)
+- Pre-existing test-failures (EmailQueue, adminPlayers, wallet.*, etc.) er ikke relatert til denne fixen (verifisert på main).
 
 **Fallgruver oppdaget:**
-- _Ingen nye fallgruver_ — audit-script-en er pure-read, ingen mutering av prod-state
-- Note: I første iterasjon flagged Check 4 falskt H1-row i BUG_CATALOG som ikke hadde commit-SHA — root-cause var at "test-harness-issues"-tabellen ikke har Fix-PR-kolonne. Fixet: kontekst-aware sjekk basert på tabell-headers.
+- **`Game1LobbyService` doc-header sa "INGEN write — kun read":** Måtte revurderes — fix introduserer en best-effort write-path (auto-finish plan-run). Doc-header oppdatert til å reflektere ny semantikk eksplisitt (én write-path med klart definert kriterium + fail-safe). Anti-mønster: ikke endre write/read-modus på en service uten å oppdatere doc-kontrakt samtidig.
+- **`mapScheduledGameStatus` whitelist inkluderer ikke `'completed'`/`'cancelled'`:** Mappes til `'idle'` via default. Det betyr at uten reconcile-fix viste lobby `overallStatus='idle'` MEN `scheduledGameId` pekte på den terminale runden — klient kunne (i teorien) joine en avsluttet runde og krasje. Reconcile-fixen retter dette ved å hide `scheduledGameId` parallelt med plan-run-finish.
+- **`paused`-state må eksplisitt bevares:** Auto-reconcile sjekker `run.status === "running"` først; pausede runder med terminal scheduled-game tas IKKE av reconcile-pathen (master må manuelt resume/stop). Eksplisitt unit-test for dette.
+- **Race conditions er allerede dekket av `changeStatus`-validering:** `planRunService.finish` validerer `allowedFrom: ['idle','running','paused']` før UPDATE. To samtidige reconcile-call vil føre til at den andre kaster `GAME_PLAN_RUN_INVALID_TRANSITION` — vi fanger og logger uten å påvirke lobby-respons.
 
 **Læring:**
-- ✅ **Drift-deteksjon er enkelt når kildene har struktur:** ADR-er, FRAGILITY-entries og BUG_CATALOG-rader har konsistent formatering — markdown-parsing er nok, ingen LLM-prosessering
-- ✅ **Linear-tilgang er ikke nødvendig for MVP:** 7/8 sjekker fungerer uten Linear; Check 1 skipper med ℹ️-notis
-- ✅ **Workflow-mønster er stabilt:** Følger `doc-freshness.yml`-stilen (cron + manual + push) — gjenbruker eksisterende GH-Actions-konvensjoner
-- ⚠️ **Sjekker må være kontekst-aware:** Naivt "alle ✅-rows må ha SHA" gir false positives. Sjekk for Fix-PR-kolonne i tabell-headers.
-- ⚠️ **Check 7 (PR-state via `gh`) er bare informativ:** Handoff-docs går naturlig stale; rapportér men ikke flag som "drift"
-- 💡 **Pillar 8 i Knowledge Autonomy Protocol:** Audit-en er meta-pillar — den verifiserer at Pillar 1-7 holder konsistens. Bør refereres fra `KNOWLEDGE_AUTONOMY_PROTOCOL.md` i en oppfølger-PR.
+- **Read-path auto-heal er ofte den enkleste fix for stuck-state-bugs:** I stedet for å garantere at alle write-paths (her: `MasterActionService.stop`) rydder PERFEKT, kan vi gjøre read-paths defensive. Trade-off: ekstra latency på lobby-poll, men siden reconcile-checken er O(1) DB-pluss-eventuell-UPDATE er det rimelig.
+- **Test latency-budget eksplisitt:** Acceptance-kriteriet sa "< 50ms added", så testen måler median over 10 iterasjoner. Hvis vi øker DB-call-count i reconcile-pathen vil testen ringe alarm.
+- **Idempotens via state-machine-validering:** Vi trenger ikke ekstra lås — `changeStatus` validerer state først, så gjentatte kall på allerede-finished plan-run er no-op via `GAME_PLAN_RUN_INVALID_TRANSITION` (fanget av reconcile, ikke propagert).
+- **`SYSTEM_ACTOR_ID`-konvensjon:** Audit-pathen får sentinel-actor `system:lobby-auto-reconcile` så reviewer kan skille auto-finish fra manuell master-stop i audit-loggen. Speiler `Game2AutoDrawTickService.SYSTEM_ACTOR_ID`-mønster.
 
-**Verifisering (PM):**
-- ✅ `node scripts/cross-knowledge-audit.mjs --no-linear --verbose` kjører uten error, returnerer 1 drift-funn
-- ✅ `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/cross-knowledge-audit-weekly.yml'))"` validerer YAML
-- ✅ Exit-koder verifisert: `--fail-on-findings` → exit 1 ved drift, exit 0 hvis bare ℹ️
-- ✅ JSON-output validert (har `driftCount`, `findings[]`)
-- ⏳ Workflow må kjøres på CI én gang for å verifisere `gh issue create`-pathen + secret-binding (LINEAR_API_KEY hvis konfigurert)
+**Verifisering (egen, før PM tar over):**
+- TypeScript strict: clean
+- Unit-tester: 10 nye + 14 eksisterende grønne
+- Game-domene + lobby route tester: 5098 grønne
+- Manuell test-mønster for F-02 (curl-blokk) speilet i FRAGILITY_LOG — manuell verifikasjon må kjøres post-merge for å bekrefte heling i prod-lik miljø.
 
-**Tid:** ~45 min agent-arbeid (build + test + dokumentasjon).
+**Tid:** ~1.5 timer (research + implementasjon + 10 unit-tester + doc-oppdateringer + verifisering)
+
+**Status:** Branch pushed til origin, IKKE merget. PM tar over for PR + merge per oppdragsmønster.
 
 ---
 
@@ -1078,7 +1074,7 @@ Verifisert via test:
 |---|---|---|
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
-| 2026-05-13 | Cross-knowledge audit etablert: `scripts/cross-knowledge-audit.mjs` (8 drift-sjekker) + ukentlig CI-workflow (mandag 10:00 UTC) + `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` bidragsguide. Pillar 8 i Knowledge Autonomy Protocol. | Agent (cross-knowledge-audit task) |
+| 2026-05-13 | I16/F-02 plan-run lifecycle auto-reconcile fra lobby-poll i `Game1LobbyService` (10 nye unit-tester, < 50ms latency, idempotent). | Agent (I16) |
 
 ---
 
