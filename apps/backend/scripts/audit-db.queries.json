@@ -1,0 +1,214 @@
+{
+  "$schema": "Audit query catalog — fields are id, tier, category, severity, description, sql, fixAdvice, timeoutMs (optional, default 5000), quick (optional, true if fast/cheap enough for bug-report inline use)",
+  "schemaPlaceholder": "{{schema}}",
+  "queries": [
+    {
+      "id": "stuck-plan-run",
+      "tier": "P1",
+      "category": "stuck-state",
+      "severity": "P1",
+      "quick": true,
+      "description": "Plan-run RUNNING men ingen aktiv scheduled-game peker tilbake (alle linkede er completed/cancelled/finished, eller ingen finnes)",
+      "sql": "WITH active_runs AS (SELECT pr.id, pr.status, pr.hall_id, pr.current_position, pr.business_date, pr.updated_at FROM {{schema}}.app_game_plan_run pr WHERE pr.status = 'running') SELECT ar.id AS plan_run_id, ar.status AS plan_run_status, ar.hall_id, ar.current_position, ar.business_date, ar.updated_at, COUNT(sg.id) FILTER (WHERE sg.status IN ('scheduled','purchase_open','ready_to_start','running','paused')) AS active_sched_count, COUNT(sg.id) AS total_sched_count FROM active_runs ar LEFT JOIN {{schema}}.app_game1_scheduled_games sg ON sg.plan_run_id = ar.id GROUP BY ar.id, ar.status, ar.hall_id, ar.current_position, ar.business_date, ar.updated_at HAVING COUNT(sg.id) FILTER (WHERE sg.status IN ('scheduled','purchase_open','ready_to_start','running','paused')) = 0 ORDER BY ar.updated_at DESC LIMIT 20",
+      "fixAdvice": "Plan-run-state-machine ute av sync med scheduled-games. Typisk skjer ved master-restart eller crash mellom transitions. Sjekk MasterActionService.advanceToNext() og GamePlanEngineBridge.spawnScheduledGame() for race-conditions. Fix-pattern: marker plan-run som finished hvis ingen scheduled-game er aktiv, eller spawn ny scheduled-game for current_position."
+    },
+    {
+      "id": "stuck-scheduled-game",
+      "tier": "P1",
+      "category": "stuck-state",
+      "severity": "P1",
+      "quick": true,
+      "description": "Scheduled-game i status running/ready_to_start mer enn 30 min uten endring",
+      "sql": "SELECT id, status, master_hall_id, group_hall_id, plan_run_id, scheduled_start_time, actual_start_time, EXTRACT(EPOCH FROM (NOW() - GREATEST(updated_at, actual_start_time, scheduled_start_time)))::int AS stale_seconds FROM {{schema}}.app_game1_scheduled_games WHERE status IN ('running','ready_to_start','purchase_open','paused') AND GREATEST(updated_at, COALESCE(actual_start_time, scheduled_start_time)) < NOW() - INTERVAL '30 minutes' ORDER BY GREATEST(updated_at, COALESCE(actual_start_time, scheduled_start_time)) ASC LIMIT 20",
+      "fixAdvice": "Game henger uten state-overgang. Sjekk Game1DrawEngineService for stuck-tick (draw-bag tom?) og Game1AutoResumePausedService (master-heartbeat?). For 'running' med ingen draws: kanskje engine-instans døde uten failover. Bruk /api/admin/game1/games/<id>/cancel for å rydde."
+    },
+    {
+      "id": "orphan-ticket-purchase",
+      "tier": "P1",
+      "category": "fk-orphans",
+      "severity": "P1",
+      "description": "Ticket-purchases som peker på ikke-eksisterende scheduled-game (FK-violation umulig pga RESTRICT, men sjekker etter data-drift)",
+      "sql": "SELECT tp.id, tp.scheduled_game_id, tp.buyer_user_id, tp.hall_id, tp.total_amount_cents, tp.purchased_at FROM {{schema}}.app_game1_ticket_purchases tp LEFT JOIN {{schema}}.app_game1_scheduled_games sg ON sg.id = tp.scheduled_game_id WHERE sg.id IS NULL ORDER BY tp.purchased_at DESC LIMIT 20",
+      "fixAdvice": "Should NEVER happen pga FK RESTRICT. Hvis funnet: ALVORLIG schema-corruption. Kjør verify-wallet-audit-chain.ts og rapporter til compliance umiddelbart."
+    },
+    {
+      "id": "negative-wallet-balance",
+      "tier": "P1",
+      "category": "wallet-anomaly",
+      "severity": "P1",
+      "quick": true,
+      "description": "Player wallet-accounts med negativ balanse (skal aldri skje pga REPEATABLE READ + ledger-invariants). System-accounts (is_system=true) er regnskaps-offset og kan være negative — eksluderes.",
+      "sql": "SELECT id, balance, is_system, created_at, updated_at FROM {{schema}}.wallet_accounts WHERE balance < 0 AND is_system = false ORDER BY balance ASC LIMIT 20",
+      "fixAdvice": "ALVORLIG. Wallet er kompromittert. Step 1: stopp alle wallet-debits (set feature-flag). Step 2: kjør reconcile-wallet-vs-ledger.ts og verify-wallet-audit-chain.ts for å finne årsak. Step 3: skriv compliance-incident (Lotteritilsynet 24t-frist hvis player-wallet). Forward-only fix via ADJUSTMENT-ledger-entry."
+    },
+    {
+      "id": "wallet-vs-entries-discrepancy",
+      "tier": "P1",
+      "category": "wallet-anomaly",
+      "severity": "P1",
+      "description": "Wallet-balance som ikke matcher SUM av wallet_entries (DEBIT/CREDIT-double-entry). Forutsetter at wallet_entries finnes for kontoen.",
+      "sql": "WITH entry_sums AS (SELECT account_id, SUM(CASE WHEN side = 'CREDIT' THEN amount ELSE -amount END) AS computed_balance FROM {{schema}}.wallet_entries GROUP BY account_id) SELECT wa.id, wa.balance AS stored_balance, es.computed_balance, (wa.balance - es.computed_balance) AS drift, wa.is_system FROM {{schema}}.wallet_accounts wa JOIN entry_sums es ON es.account_id = wa.id WHERE ABS(wa.balance - es.computed_balance) > 0.001 ORDER BY ABS(wa.balance - es.computed_balance) DESC LIMIT 20",
+      "fixAdvice": "Ledger-drift. Pre-fix kontroller: var det manuell SQL-update på wallet? Var det operasjon som skrev til wallet uten ledger-entry? Hvis drift > 1 NOK: stopp prod-skriving og kjør reconcile-wallet-vs-ledger.ts før noen flere transaksjoner. Forward-only fix via ADJUSTMENT-event som korrigerer."
+    },
+    {
+      "id": "stuck-hall-ready-no-advancement",
+      "tier": "P1",
+      "category": "stuck-state",
+      "severity": "P1",
+      "quick": true,
+      "description": "Scheduled-game der alle ikke-ekskluderte haller er marked ready men status er IKKE running (mer enn 5 min)",
+      "sql": "SELECT sg.id AS game_id, sg.status, sg.master_hall_id, sg.scheduled_start_time, COUNT(*) FILTER (WHERE hrs.is_ready AND NOT hrs.excluded_from_game) AS ready_halls, COUNT(*) FILTER (WHERE NOT hrs.excluded_from_game) AS expected_halls, sg.updated_at FROM {{schema}}.app_game1_scheduled_games sg JOIN {{schema}}.app_game1_hall_ready_status hrs ON hrs.game_id = sg.id WHERE sg.status IN ('ready_to_start','purchase_open') AND sg.updated_at < NOW() - INTERVAL '5 minutes' GROUP BY sg.id, sg.status, sg.master_hall_id, sg.scheduled_start_time, sg.updated_at HAVING COUNT(*) FILTER (WHERE hrs.is_ready AND NOT hrs.excluded_from_game) = COUNT(*) FILTER (WHERE NOT hrs.excluded_from_game) AND COUNT(*) FILTER (WHERE NOT hrs.excluded_from_game) > 0 ORDER BY sg.updated_at ASC LIMIT 20",
+      "fixAdvice": "Alle haller ready men start trigget ikke. Sjekk Game1ScheduleTickService.transitionReadyToStartGames() — kanskje cron-jobben kjører ikke, eller scheduled_start_time er ennå i fremtiden. Verifiser også at master ikke har vært disconnect under start-eventet (master:heartbeat-sjekk i MasterActionService.start())."
+    },
+    {
+      "id": "missing-master-hall-or-group",
+      "tier": "P2",
+      "category": "data-integrity",
+      "severity": "P2",
+      "description": "Scheduled-games hvor master_hall_id eller group_hall_id er NULL (skal ikke skje pga NOT NULL constraint, men kjekt å sjekke etter migrasjons-drift)",
+      "sql": "SELECT id, status, master_hall_id, group_hall_id, scheduled_start_time FROM {{schema}}.app_game1_scheduled_games WHERE master_hall_id IS NULL OR group_hall_id IS NULL ORDER BY created_at DESC LIMIT 10",
+      "fixAdvice": "Should NEVER happen pga NOT NULL. Hvis funnet: kjør migrasjon-verifikasjon og rapporter."
+    },
+    {
+      "id": "duplicate-plan-runs-active",
+      "tier": "P2",
+      "category": "data-integrity",
+      "severity": "P2",
+      "quick": true,
+      "description": "Mer enn 1 plan-run aktiv (running/paused/idle) samme hall samme dato (skal være håndhevet av UNIQUE-constraint)",
+      "sql": "SELECT hall_id, business_date, COUNT(*) AS active_count, array_agg(id ORDER BY updated_at DESC) AS plan_run_ids FROM {{schema}}.app_game_plan_run WHERE status IN ('running','paused','idle') GROUP BY hall_id, business_date HAVING COUNT(*) > 1 ORDER BY active_count DESC LIMIT 10",
+      "fixAdvice": "Should NEVER happen pga UNIQUE(hall_id, business_date) constraint. Hvis funnet: kjør schema-arkeolog og rapporter — kan være migration-drift. Force-finish duplikater via /api/admin/game-plan/runs/<id>/cancel."
+    },
+    {
+      "id": "wallet-tx-without-idempotency-key",
+      "tier": "P2",
+      "category": "wallet-anomaly",
+      "severity": "P2",
+      "description": "Wallet-transactions UTEN idempotency_key fra siste 30 dager. STAKE/PRIZE skal alltid ha key for å unngå double-spend ved retry.",
+      "sql": "SELECT id, account_id, transaction_type, amount, reason, created_at FROM {{schema}}.wallet_transactions WHERE idempotency_key IS NULL AND created_at > NOW() - INTERVAL '30 days' AND transaction_type IN ('STAKE','PRIZE','TRANSFER_IN','TRANSFER_OUT') ORDER BY created_at DESC LIMIT 30",
+      "fixAdvice": "Operasjoner uten idempotency-key er ikke retry-safe. Sjekk hvilken kode-path som skrev disse — manglende key betyr at retry kan resultere i double-spend. Krever defense-in-depth-fix: legg idempotency-key til alle wallet-mutasjoner."
+    },
+    {
+      "id": "compliance-ledger-hashchain-gaps",
+      "tier": "P1",
+      "category": "compliance",
+      "severity": "P1",
+      "description": "Hash-chain brudd i regulatorisk ledger (event_hash av rad N skal være prev_hash av N+1). Sjekker SEQUENCE-gap først.",
+      "sql": "WITH ordered AS (SELECT id, sequence, prev_hash, event_hash, LAG(event_hash) OVER (ORDER BY sequence) AS prev_event_hash, LAG(sequence) OVER (ORDER BY sequence) AS prev_sequence FROM {{schema}}.app_regulatory_ledger) SELECT id, sequence, prev_hash, event_hash, prev_event_hash, prev_sequence, (sequence - prev_sequence) AS sequence_gap FROM ordered WHERE prev_event_hash IS NOT NULL AND (prev_hash IS DISTINCT FROM prev_event_hash OR sequence - prev_sequence > 1) ORDER BY sequence ASC LIMIT 20",
+      "fixAdvice": "KRITISK: hash-chain er compromised. Verify via verify-wallet-audit-chain.ts og scripts/verify-regulatory-ledger.ts. Krever umiddelbar compliance-eskalering — Lotteritilsynet rapportering. Hash-chain skal være impossible å bryte uten direct DB-access."
+    },
+    {
+      "id": "demo-users-in-prod-context",
+      "tier": "P2",
+      "category": "pilot-pollution",
+      "severity": "P2",
+      "quick": true,
+      "description": "Demo/test-spillere (id-prefix 'demo-' eller 'test-') med nylig aktivitet, eller demo-spillere som har real wallet-transactions",
+      "sql": "SELECT u.id, u.email, u.role, u.kyc_status, u.created_at, (SELECT COUNT(*) FROM {{schema}}.wallet_transactions wt JOIN {{schema}}.app_users u2 ON u2.wallet_id = wt.account_id WHERE u2.id = u.id AND wt.created_at > NOW() - INTERVAL '7 days') AS tx_last_7d FROM {{schema}}.app_users u WHERE (u.id LIKE 'demo-%' OR u.id LIKE 'test-%' OR u.email LIKE '%@example.com') AND u.created_at < NOW() - INTERVAL '7 days' ORDER BY u.created_at DESC LIMIT 30",
+      "fixAdvice": "Demo-data i prod er kun OK i dev/staging. I prod: vurder soft-delete eller flytte demo-users til egen schema. Hvis tx_last_7d > 0 og dette er prod: stopp data, sett demo-konto til frozen, og rapporter til ops."
+    },
+    {
+      "id": "pilot-spiller-balance-zero",
+      "tier": "P2",
+      "category": "pilot-state",
+      "severity": "P2",
+      "quick": true,
+      "description": "Demo-pilot-spillere (1-12) med balanse < 100 NOK — skulle blitt reset til 500 NOK ved hver pilot-test",
+      "sql": "SELECT u.id, u.email, wa.balance FROM {{schema}}.app_users u JOIN {{schema}}.wallet_accounts wa ON wa.id = u.wallet_id WHERE u.id LIKE 'demo-pilot-spiller-%' AND wa.balance < 100 ORDER BY wa.balance ASC LIMIT 20",
+      "fixAdvice": "Pilot-spillere har lav balanse — pilot-flyt kan ikke gjennomføres. Kjør /api/_dev/reset-pilot-state?token=... for å reset til 500 NOK. Hvis ofte: vurder å automatisere reset i pilot-test-infra."
+    },
+    {
+      "id": "scheduled-game-no-tickets-completed",
+      "tier": "P3",
+      "category": "pilot-observability",
+      "severity": "P3",
+      "description": "Scheduled-games som er completed men ingen tickets ble solgt (mulig admin-test eller bug i ticket-purchase)",
+      "sql": "SELECT sg.id, sg.status, sg.master_hall_id, sg.scheduled_start_time, sg.actual_end_time, COUNT(tp.id) AS ticket_count FROM {{schema}}.app_game1_scheduled_games sg LEFT JOIN {{schema}}.app_game1_ticket_purchases tp ON tp.scheduled_game_id = sg.id WHERE sg.status = 'completed' AND sg.actual_end_time > NOW() - INTERVAL '7 days' GROUP BY sg.id, sg.status, sg.master_hall_id, sg.scheduled_start_time, sg.actual_end_time HAVING COUNT(tp.id) = 0 ORDER BY sg.actual_end_time DESC LIMIT 20",
+      "fixAdvice": "Spill kjørt uten salg — kan være admin-test eller bug. Hvis pilot-data: verify at ticket-purchase-flow virker (e2e-smoke-test). Hvis stale demo-data: ok å ignorere."
+    },
+    {
+      "id": "compliance-outbox-pending-pile-up",
+      "tier": "P2",
+      "category": "performance",
+      "severity": "P2",
+      "quick": true,
+      "description": "Compliance outbox har > 100 pending events ELLER pending-rader eldre enn 10 min (worker henger eller pile-up). Processed-status ignoreres.",
+      "sql": "SELECT status, COUNT(*) AS count, MIN(created_at) AS oldest, MAX(created_at) AS newest FROM {{schema}}.app_compliance_outbox WHERE status IN ('pending','dead_letter') GROUP BY status HAVING COUNT(*) > 100 OR (status = 'pending' AND MIN(created_at) < NOW() - INTERVAL '10 minutes') ORDER BY count DESC",
+      "fixAdvice": "Outbox-worker er bak. Sjekk ComplianceOutboxWorker logs og Redis-connectivity. Hvis worker dødd: restart backend. Hvis stuck attempts > 10: dead-letter-rows må prosesseres manuelt og logges som incident."
+    },
+    {
+      "id": "wallet-outbox-pending-pile-up",
+      "tier": "P2",
+      "category": "performance",
+      "severity": "P2",
+      "quick": true,
+      "description": "Wallet outbox har > 100 pending events ELLER pending-rader eldre enn 10 min. Processed-status ignoreres.",
+      "sql": "SELECT status, COUNT(*) AS count, MIN(created_at) AS oldest, MAX(created_at) AS newest FROM {{schema}}.wallet_outbox WHERE status IN ('pending','dead_letter') GROUP BY status HAVING COUNT(*) > 100 OR (status = 'pending' AND MIN(created_at) < NOW() - INTERVAL '10 minutes') ORDER BY count DESC",
+      "fixAdvice": "Wallet-outbox bak. Sjekk WalletOutboxWorker logs. Stuck attempts > 10 → dead-letter krever manuell håndtering."
+    },
+    {
+      "id": "compliance-outbox-dead-letters",
+      "tier": "P2",
+      "category": "performance",
+      "severity": "P2",
+      "description": "Compliance outbox dead-letter-rows som ikke har vært prosessert (> 5 attempts)",
+      "sql": "SELECT id, idempotency_key, attempts, last_error, created_at FROM {{schema}}.app_compliance_outbox WHERE status = 'dead_letter' ORDER BY created_at DESC LIMIT 20",
+      "fixAdvice": "Dead-letter-rows krever manuell undersøkelse. last_error viser hvorfor. Vanlig årsak: regulatorisk-fil-kontrakt brutt, eller wallet-state-divergens. Fix root cause først, deretter manuelt re-process."
+    },
+    {
+      "id": "timezone-mismatch-business-date",
+      "tier": "P3",
+      "category": "data-integrity",
+      "severity": "P3",
+      "description": "Plan-run business_date avviker fra Oslo-dato av scheduled-game start (mulig timezone-bug)",
+      "sql": "SELECT pr.id AS plan_run_id, pr.business_date, sg.id AS scheduled_game_id, sg.scheduled_start_time, (sg.scheduled_start_time AT TIME ZONE 'Europe/Oslo')::date AS oslo_date_of_start, pr.business_date <> (sg.scheduled_start_time AT TIME ZONE 'Europe/Oslo')::date AS date_mismatch FROM {{schema}}.app_game_plan_run pr JOIN {{schema}}.app_game1_scheduled_games sg ON sg.plan_run_id = pr.id WHERE pr.business_date <> (sg.scheduled_start_time AT TIME ZONE 'Europe/Oslo')::date AND pr.status IN ('running','paused','idle') ORDER BY sg.scheduled_start_time DESC LIMIT 20",
+      "fixAdvice": "Timezone-bug mellom Postgres UTC og service-lag Oslo-tz. Sjekk koden som setter business_date i create-plan-run — skal alltid være DAY-LEVEL av scheduled_start_time AT TIME ZONE Europe/Oslo."
+    },
+    {
+      "id": "duplicate-tickets-same-game",
+      "tier": "P2",
+      "category": "data-integrity",
+      "severity": "P2",
+      "description": "Samme idempotency_key brukt for flere ticket-purchases i samme scheduled-game (skal ALDRI skje pga UNIQUE)",
+      "sql": "SELECT scheduled_game_id, idempotency_key, COUNT(*) AS purchase_count, array_agg(id) AS purchase_ids FROM {{schema}}.app_game1_ticket_purchases GROUP BY scheduled_game_id, idempotency_key HAVING COUNT(*) > 1 ORDER BY purchase_count DESC LIMIT 10",
+      "fixAdvice": "Skal være UNIQUE-håndhevet. Hvis funnet: ALVORLIG idempotency-bug. Mulig double-spend. Eskaler til compliance umiddelbart."
+    },
+    {
+      "id": "anti-fraud-critical-recent",
+      "tier": "P1",
+      "category": "compliance",
+      "severity": "P1",
+      "quick": true,
+      "description": "Anti-fraud critical-level signals siste 24t (krever umiddelbar admin-review)",
+      "sql": "SELECT id, user_id, hall_id, risk_level, action_taken, amount_cents, operation_type, assessed_at FROM {{schema}}.app_anti_fraud_signals WHERE risk_level = 'critical' AND assessed_at > NOW() - INTERVAL '24 hours' ORDER BY assessed_at DESC LIMIT 20",
+      "fixAdvice": "Critical risk-signals krever admin-vurdering. Sjekk /admin/anti-fraud-queue og deciderbeslutning (frigi vs block). Hvis blocked + spilleren krever forklaring: rapporter til pengeansvarlig."
+    },
+    {
+      "id": "stuck-purchase-open-no-tickets-near-start",
+      "tier": "P2",
+      "category": "pilot-observability",
+      "severity": "P2",
+      "description": "Scheduled-games i 'purchase_open' med ingen tickets solgt selv om scheduled_start_time er < 5 min unna (mulig agent-portal bug)",
+      "sql": "SELECT sg.id, sg.status, sg.master_hall_id, sg.scheduled_start_time, EXTRACT(EPOCH FROM (sg.scheduled_start_time - NOW()))::int AS seconds_until_start, COUNT(tp.id) AS ticket_count FROM {{schema}}.app_game1_scheduled_games sg LEFT JOIN {{schema}}.app_game1_ticket_purchases tp ON tp.scheduled_game_id = sg.id WHERE sg.status = 'purchase_open' AND sg.scheduled_start_time BETWEEN NOW() AND NOW() + INTERVAL '5 minutes' GROUP BY sg.id, sg.status, sg.master_hall_id, sg.scheduled_start_time HAVING COUNT(tp.id) = 0 ORDER BY sg.scheduled_start_time ASC LIMIT 20",
+      "fixAdvice": "Spill nær start uten salg. Agent-portal bug? UI-feil? Eller bare lav-trafikk-periode. Verifiser i master-cash-in-out UI om salgsknapper er synlige og fungerer."
+    },
+    {
+      "id": "fk-orphan-hall-ready-status",
+      "tier": "P2",
+      "category": "fk-orphans",
+      "severity": "P2",
+      "description": "Hall-ready-status-rader hvor scheduled-game ikke lenger eksisterer (FK CASCADE skal ha ryddet, men sjekker etter drift)",
+      "sql": "SELECT hrs.game_id, hrs.hall_id, hrs.is_ready, hrs.created_at FROM {{schema}}.app_game1_hall_ready_status hrs LEFT JOIN {{schema}}.app_game1_scheduled_games sg ON sg.id = hrs.game_id WHERE sg.id IS NULL ORDER BY hrs.created_at DESC LIMIT 20",
+      "fixAdvice": "FK CASCADE skal ha ryddet disse. Hvis funnet: schema-drift. Slett trygt med manual DELETE."
+    },
+    {
+      "id": "lock-contention-active",
+      "tier": "P3",
+      "category": "performance",
+      "severity": "P3",
+      "description": "Aktive pg_locks (potensielt deadlock om mange waiting)",
+      "sql": "SELECT mode, locktype, COUNT(*) AS lock_count, COUNT(*) FILTER (WHERE NOT granted) AS waiting_count FROM pg_locks GROUP BY mode, locktype HAVING COUNT(*) > 50 OR COUNT(*) FILTER (WHERE NOT granted) > 0 ORDER BY waiting_count DESC, lock_count DESC LIMIT 10",
+      "fixAdvice": "Høy lock-contention betyr DB-throughput-problem. Sjekk slow-queries og finn statements som tar locks lenge. For prod: vurder REPEATABLE READ statt SERIALIZABLE hvis OK regulatorisk."
+    }
+  ]
+}

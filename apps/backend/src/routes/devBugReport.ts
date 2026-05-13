@@ -53,6 +53,7 @@ import express from "express";
 import type { Pool } from "pg";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 
 export interface DevBugReportRouterDeps {
   pool: Pool;
@@ -88,6 +89,17 @@ const MAX_PILOT_MONITOR_LINES = 200;
 const MAX_BACKEND_LOG_LINES = 200;
 const MAX_CLIENT_EVENTS = 500;
 
+/** Max 30 sek for audit-db-kjøring. Hvis den henger, dropper vi audit. */
+const DEFAULT_AUDIT_DB_TIMEOUT_MS = 30_000;
+
+/** Default path til audit-db.mjs (kan overrides for tester). */
+const DEFAULT_AUDIT_DB_SCRIPT = path.join(
+  // process.cwd() ved hot-reload er apps/backend. I tester kan path overrides.
+  process.cwd(),
+  "scripts",
+  "audit-db.mjs",
+);
+
 export interface DevBugReportRouterOptions {
   /** Output-mappe for bug-reports. Default `/tmp`. */
   reportDir?: string;
@@ -101,6 +113,17 @@ export interface DevBugReportRouterOptions {
   now?: () => number;
   /** Override fs for tester. */
   fsImpl?: typeof fs;
+  /**
+   * Path til audit-db.mjs (default: cwd/scripts/audit-db.mjs).
+   * Pass `null` for å skru av DB-audit-integrasjon helt (tester).
+   */
+  auditDbScriptPath?: string | null;
+  /** DB connection string for audit-db (default: env APP_PG_CONNECTION_STRING). */
+  auditDbConnectionString?: string;
+  /** Postgres schema for audit-db (default: env APP_PG_SCHEMA eller 'public'). */
+  auditDbSchema?: string;
+  /** Timeout for audit-db-child-process i ms (default 30 000). */
+  auditDbTimeoutMs?: number;
 }
 
 function extractToken(req: express.Request): string {
@@ -295,6 +318,246 @@ async function queryRecentPlayers(
   }
 }
 
+/**
+ * Resultat fra audit-db-child-process. Brukes for bug-report-integrasjon.
+ *
+ * `ok=true` betyr at scriptet kjørte uten throw (men kan ha P1-funn).
+ * `ok=false` betyr at scriptet feilet (ENOENT, timeout, etc.).
+ */
+interface AuditDbResult {
+  ok: boolean;
+  error: string | null;
+  /** JSON-output fra audit-db.mjs --json. Null hvis ikke kjørt. */
+  report:
+    | {
+        timestamp: string;
+        summary: {
+          totalQueries: number;
+          totalFindings: number;
+          totalErrors: number;
+          okCount: number;
+          findingsByTier: { P1?: number; P2?: number; P3?: number };
+        };
+        results: Array<{
+          id: string;
+          tier: string;
+          rowCount: number;
+          ok: boolean;
+          error: string | null;
+          rows: Array<Record<string, unknown>>;
+          fixAdvice?: string;
+          description?: string;
+        }>;
+      }
+    | null;
+  /** Hvor lenge scriptet brukte i ms. */
+  elapsedMs: number;
+}
+
+/**
+ * Kjør audit-db.mjs som child_process med --quick --json og les JSON-output.
+ *
+ * Fail-soft: hvis scriptet ikke eksisterer, henger eller crasher, returnerer
+ * vi { ok: false, error: "..." } og bug-report fortsetter uten audit-seksjon.
+ *
+ * Bruker DEFAULT_AUDIT_DB_TIMEOUT_MS (30s) for å unngå at bug-rapporten
+ * henger i evig tid hvis audit-db har en treg query.
+ */
+async function runAuditDb(opts: {
+  scriptPath: string;
+  connectionString?: string;
+  schema?: string;
+  timeoutMs: number;
+}): Promise<AuditDbResult> {
+  const start = Date.now();
+
+  if (!opts.scriptPath) {
+    return {
+      ok: false,
+      error: "audit-db script path mangler",
+      report: null,
+      elapsedMs: 0,
+    };
+  }
+
+  if (!fs.existsSync(opts.scriptPath)) {
+    return {
+      ok: false,
+      error: `audit-db script ikke funnet på ${opts.scriptPath}`,
+      report: null,
+      elapsedMs: 0,
+    };
+  }
+
+  return await new Promise<AuditDbResult>((resolve) => {
+    const env: Record<string, string> = { ...process.env } as Record<
+      string,
+      string
+    >;
+    if (opts.connectionString) {
+      env["APP_PG_CONNECTION_STRING"] = opts.connectionString;
+    }
+    if (opts.schema) {
+      env["APP_PG_SCHEMA"] = opts.schema;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const proc = spawn(
+      "node",
+      [opts.scriptPath, "--json", "--quick", "--silent"],
+      { env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        /* ok */
+      }
+      resolve({
+        ok: false,
+        error: `audit-db timeout etter ${opts.timeoutMs}ms`,
+        report: null,
+        elapsedMs: Date.now() - start,
+      });
+    }, opts.timeoutMs);
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve({
+        ok: false,
+        error: `audit-db spawn-feil: ${err.message}`,
+        report: null,
+        elapsedMs: Date.now() - start,
+      });
+    });
+
+    proc.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - start;
+      // audit-db.mjs exit-codes: 0 = OK, 1 = P1-funn (men output er gyldig), 2 = error
+      if (code === 2) {
+        resolve({
+          ok: false,
+          error: `audit-db runtime-feil (exit 2): ${stderr.slice(-500)}`,
+          report: null,
+          elapsedMs,
+        });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout);
+        resolve({ ok: true, error: null, report: parsed, elapsedMs });
+      } catch (parseErr) {
+        resolve({
+          ok: false,
+          error: `audit-db output kunne ikke parses som JSON: ${String((parseErr as Error).message)}`,
+          report: null,
+          elapsedMs,
+        });
+      }
+    });
+  });
+}
+
+/**
+ * Bygg markdown-seksjonen for audit-db-funn. Returnerer tom streng-array
+ * hvis audit-db ikke ble kjørt eller feilet (caller logger advarsel).
+ */
+function buildAuditDbSection(result: AuditDbResult): string[] {
+  const lines: string[] = [];
+  lines.push("## 🗄️ DB-audit (quick)");
+  lines.push("");
+
+  if (!result.ok) {
+    lines.push(`⚠️ DB-audit kjørte ikke: ${result.error ?? "(ukjent feil)"}`);
+    lines.push("");
+    return lines;
+  }
+  if (!result.report) {
+    lines.push("⚠️ DB-audit returnerte ingen data.");
+    lines.push("");
+    return lines;
+  }
+
+  const r = result.report;
+  lines.push(
+    `**Quick-audit:** ${r.summary.totalQueries} queries kjørt, ${result.elapsedMs}ms total.`,
+  );
+  lines.push(
+    `**Funn:** P1×${r.summary.findingsByTier.P1 ?? 0}, P2×${r.summary.findingsByTier.P2 ?? 0}, P3×${r.summary.findingsByTier.P3 ?? 0}`,
+  );
+  if (r.summary.totalErrors > 0) {
+    lines.push(`**⚠️ Query-feil:** ${r.summary.totalErrors}`);
+  }
+  lines.push("");
+
+  const findings = r.results.filter((x) => x.ok && x.rowCount > 0);
+  if (findings.length === 0) {
+    lines.push("_Ingen funn — DB-helse OK på alle quick-queries._");
+    lines.push("");
+    return lines;
+  }
+
+  // Render funn sortert P1 → P2 → P3
+  const tierRank: Record<string, number> = { P1: 0, P2: 1, P3: 2 };
+  findings.sort(
+    (a, b) =>
+      (tierRank[a.tier] ?? 99) - (tierRank[b.tier] ?? 99) ||
+      b.rowCount - a.rowCount,
+  );
+
+  for (const f of findings) {
+    lines.push(`### ${f.id} (${f.tier}) — ${f.rowCount} rader`);
+    lines.push("");
+    if (f.description) {
+      lines.push(f.description);
+      lines.push("");
+    }
+    // Render første 5 rader som JSON for kompakt visning
+    const sample = f.rows.slice(0, 5);
+    if (sample.length > 0) {
+      lines.push("```json");
+      lines.push(JSON.stringify(sample, null, 2));
+      lines.push("```");
+      if (f.rows.length > sample.length) {
+        lines.push(`_(viser ${sample.length} av ${f.rowCount} rader)_`);
+      }
+      lines.push("");
+    }
+    if (f.fixAdvice) {
+      lines.push(`**Fix:** ${f.fixAdvice}`);
+      lines.push("");
+    }
+  }
+
+  const failed = r.results.filter((x) => !x.ok);
+  if (failed.length > 0) {
+    lines.push(`**Query-feil:**`);
+    for (const x of failed) {
+      lines.push(`- \`${x.id}\`: ${x.error}`);
+    }
+    lines.push("");
+  }
+
+  return lines;
+}
+
 /** Konvertér Date|string|null til ISO-string eller "—". */
 function isoOrDash(v: Date | string | null | undefined): string {
   if (!v) return "—";
@@ -411,6 +674,7 @@ function buildReportMarkdown(args: {
   scheduledGames: { rows: ScheduledGameRow[]; error: string | null };
   players: { rows: PlayerRow[]; error: string | null };
   diagnose: string[];
+  auditDb?: AuditDbResult;
 }): string {
   const {
     timestamp,
@@ -422,6 +686,7 @@ function buildReportMarkdown(args: {
     scheduledGames,
     players,
     diagnose,
+    auditDb,
   } = args;
 
   const titleStr =
@@ -532,6 +797,14 @@ function buildReportMarkdown(args: {
   }
   lines.push("");
 
+  // DB-audit (static auditor — quick-mode kjørt som child_process)
+  if (auditDb !== undefined) {
+    const auditLines = buildAuditDbSection(auditDb);
+    for (const l of auditLines) {
+      lines.push(l);
+    }
+  }
+
   // Pilot-monitor anomalier
   lines.push("## Pilot-monitor (siste 200 linjer)");
   lines.push("");
@@ -620,6 +893,13 @@ export function createDevBugReportRouter(
   const clientEventLog = opts.clientEventLogPath ?? DEFAULT_CLIENT_EVENT_LOG;
   const now = opts.now ?? Date.now;
   const fsImpl = opts.fsImpl ?? fs;
+  // audit-db-integrasjon: null = skru av (tester), undefined = bruk default.
+  const auditDbScriptPath =
+    opts.auditDbScriptPath === null
+      ? null
+      : (opts.auditDbScriptPath ?? DEFAULT_AUDIT_DB_SCRIPT);
+  const auditDbTimeoutMs =
+    opts.auditDbTimeoutMs ?? DEFAULT_AUDIT_DB_TIMEOUT_MS;
 
   router.post("/api/_dev/debug/bug-report", async (req, res) => {
     if (!checkToken(req, res)) return;
@@ -658,11 +938,36 @@ export function createDevBugReportRouter(
         fsImpl,
       );
 
-      // 3. DB-state parallelt
-      const [planRuns, scheduledGames, players] = await Promise.all([
+      // 3. DB-state parallelt + audit-db-quick (kjører som child_process)
+      const auditDbPromise: Promise<AuditDbResult | undefined> =
+        auditDbScriptPath === null
+          ? Promise.resolve(undefined)
+          : runAuditDb({
+              scriptPath: auditDbScriptPath,
+              connectionString:
+                opts.auditDbConnectionString ??
+                process.env["APP_PG_CONNECTION_STRING"],
+              schema: opts.auditDbSchema ?? schema,
+              timeoutMs: auditDbTimeoutMs,
+            }).catch((err) => {
+              // Triple-defense: aldri la audit-feil drepe bug-rapporten.
+              console.warn(
+                "[devBugReport] runAuditDb krasjet uventet:",
+                err,
+              );
+              return {
+                ok: false,
+                error: `unexpected crash: ${String((err as Error).message ?? err)}`,
+                report: null,
+                elapsedMs: 0,
+              };
+            });
+
+      const [planRuns, scheduledGames, players, auditDb] = await Promise.all([
         queryActivePlanRuns(deps.pool, schema),
         queryRecentScheduledGames(deps.pool, schema),
         queryRecentPlayers(deps.pool, schema),
+        auditDbPromise,
       ]);
 
       // 4. Auto-diagnose
@@ -685,6 +990,7 @@ export function createDevBugReportRouter(
         scheduledGames,
         players,
         diagnose,
+        auditDb,
       });
 
       // 6. Skriv fil
@@ -722,5 +1028,7 @@ export const __TEST_ONLY__ = {
   loadClientEvents,
   deriveDiagnose,
   buildReportMarkdown,
+  buildAuditDbSection,
+  runAuditDb,
   isoOrDash,
 };
