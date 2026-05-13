@@ -318,6 +318,79 @@ Mac-commits.
 
 ---
 
+### 2026-05-13 — Cross-knowledge-audit oppfølger (general-purpose agent, C2 follow-up)
+
+**Scope:** Kjør `scripts/cross-knowledge-audit.mjs` etter dagens 22-PR-bølge,
+fix alle 🔴/🟡 findings og dokumenter ℹ️-funn. Verifisert at PR #1334 (C2)
+sin audit-runtime fungerer og at drift detekteres + lukkes deterministisk.
+
+**Inputs gitt:**
+- Mandat: ny branch fra origin/main, `chore/cross-knowledge-audit-2026-05-13`
+- Pekere til audit-scriptet, contributor-guide, sample-report
+- Acceptance criteria: alle 🔴 fixed, 🟡 logget i oppfølger-doc, ℹ️ notert,
+  `docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md` oppdatert
+
+**Outputs produsert:**
+- Branch: `chore/cross-knowledge-audit-2026-05-13`
+- Filer endret:
+  - `.github/pull_request_template.md` — la til `FRAGILITY_LOG.md` + `SKILL.md`
+    referanser i Knowledge protocol-seksjonen (fix Check 8)
+  - `docs/operations/PM_HANDOFF_2026-05-13_AUTONOMY_COMPLETE.md` — oppdaterte
+    PR-status-tabeller (PRs #1314, #1316, #1318, #1319, #1320, #1323, #1324,
+    #1325, #1326, #1327 fra 🟡 → ✅ MERGED; #1321 = OPEN; #1308 = OPEN)
+  - `docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md` — regenerert (0 drift)
+  - `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` — la til § 10 "Lærdom fra
+    første post-deploy-kjøring" med 4 observasjoner
+  - `docs/engineering/FOLLOWUP_AFTER_AUTONOMY_WAVE.md` (ny) — 4 åpne TODOer
+    (CKA-001, CKA-002, CKA-003, FRG-001)
+
+**Initial run-resultat (--no-linear, --verbose):**
+- 🟡 1 drift: Check 8 (PR-template manglet FRAGILITY_LOG + SKILL.md regex-match)
+- ℹ️ 3 info: Check 1 (no Linear key), Check 7 (#1320 + #1323 stale i handoff)
+
+**Post-fix run-resultat:**
+- 🟢 0 drift
+- ℹ️ 1 info: Check 1 (no Linear key — forventet uten secrets-fil)
+
+**Fallgruver oppdaget:**
+- **Regex-match på templater er sårbart for naturlig språkvariasjon.**
+  PR-templaten hadde "**Relevant skill** under `.claude/skills/`" som dekker
+  konseptet menneske-leselig, men matchet ikke audit-regex
+  `skill[\w-]*\.md|SKILL\.md`. Løsning: nevn `SKILL.md` eksplisitt. Trade-off:
+  templater må følge audit-konvensjon, men dette gir konsekvent formulering.
+- **PM-handoff PR-tabeller drifter naturlig etter mass-merge.** Når 8+ PR-er
+  merges samme dag som handoff skrives, blir 🟡 OPEN-statusene stale innen
+  timer. Auditen flagger som ℹ️ men det er reell støy. TODO CKA-003 i
+  FOLLOWUP_AFTER_AUTONOMY_WAVE.md.
+
+**Læring:**
+- **Det funket:** Audit-scriptet detekterer drift presist og raskt (< 5s med
+  `--no-linear`). Pattern-matching mot 4 checkboks-kategorier er enkelt å fix-e
+  og enkelt å verifisere (re-run viser 0 drift).
+- **Det funket godt:** ℹ️-notiser er bevisst non-blocking. De fanger naturlig
+  forfall uten å kreve action. Cadence (mandag ukentlig) passer for moderat
+  drift-rate, men 20+-PR-dager trenger raskere trigger (se CKA-002).
+- **Ikke gjør neste gang:** Ikke prøv å "fixe" ℹ️-Check-7-funn for stale
+  handoff-PR-statuser uten å sjekke om handoff-en faktisk er aktiv referanse.
+  Vi oppdaterte fordi handoff fra i går fortsatt er current, men hvis det er
+  > 7 dager gammelt, lar vi det bli.
+
+**Eierskap:**
+- `.github/pull_request_template.md` (delt med alle PR-er; min endring er
+  additiv — la kun til 2 nye checkboxes)
+- `docs/engineering/FOLLOWUP_AFTER_AUTONOMY_WAVE.md` (ny tracker — neste agent
+  kan utvide med flere TODO-typer eller migrere til Linear hvis tracker
+  vokser)
+
+**Verifisering før commit:**
+- `node scripts/cross-knowledge-audit.mjs --no-linear --verbose` → 0 drift
+- Manuell sjekk: `grep -i "FRAGILITY_LOG\|SKILL.md" .github/pull_request_template.md`
+  bekrefter regex-match
+- Re-generert `docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md` viser
+  "Drift findings: 0"
+
+---
+
 ### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
 
 **Scope:** Bygg en pre-commit hook + CI gate som detekterer når en commit

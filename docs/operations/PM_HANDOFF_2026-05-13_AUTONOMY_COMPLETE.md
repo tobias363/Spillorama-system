@@ -68,23 +68,25 @@ Disse 4 sitatene driver ALT vi gjorde. Den sentrale innsikten: **iterasjons-hast
 | #1310 | I-V1 auto-start regression-test (verifiserte ikke-bug) | ✅ MERGED |
 | #1311 | CI-gate (E2E som blokkende check på PR mot main) | ✅ MERGED |
 | #1312 | Wallet + compliance-ledger STAKE asserts (regulatorisk) | ✅ MERGED |
-| #1314 | Rad-vinst E2E-test (Rad 1 → Pause → Resume → Rad 2) | 🟡 i CI |
-| #1316 | autoShowGate diagnose-log | 🟡 |
-| #1321 | I15 re-entry-during-draw repro-test | 🟡 |
-| #1325 | I15 fix (re-attach-guard i joinScheduledGame) | 🟡 |
+| #1314 | Rad-vinst E2E-test (Rad 1 → Pause → Resume → Rad 2) | ✅ MERGED |
+| #1316 | autoShowGate diagnose-log | ✅ MERGED |
+| #1321 | I15 re-entry-during-draw repro-test | 🟡 OPEN |
+| #1325 | I15 fix (re-attach-guard i joinScheduledGame) | ✅ MERGED |
 
 **Knowledge-infrastructure:**
 | PR | Tema | Status |
 |---|---|---|
 | #1307 | Knowledge-protocol-doc + skill-oppdatering | ✅ MERGED |
-| #1308 | Enforcement workflow + 5 Tobias-direktiver immutable | 🟡 rebase pending |
-| #1318 | Live-monitor protokoll + bugs I14/I15 registrert | 🟡 |
-| #1319 | ConsoleBridge (klient-konsoll → server → monitor) | 🟡 |
-| #1320 | FRAGILITY_LOG-system (F-01 til F-04) | 🟡 |
-| #1323 | KNOWLEDGE_AUTONOMY_PROTOCOL + context-pack-generator | 🟡 |
-| #1324 | Enhanced monitor (round-end + DB-mismatch + alerts) | 🟡 |
-| #1326 | Tier 2 enforcement (pre-commit + delta-report + auto-suggester) | 🟡 |
-| #1327 | Tier 3 complete (AI-review + dashboard + skill-evolution + handover + backend-log) | 🟡 |
+| #1308 | Enforcement workflow + 5 Tobias-direktiver immutable | 🟡 OPEN (rebase pending) |
+| #1318 | Live-monitor protokoll + bugs I14/I15 registrert | ✅ MERGED |
+| #1319 | ConsoleBridge (klient-konsoll → server → monitor) | ✅ MERGED |
+| #1320 | FRAGILITY_LOG-system (F-01 til F-04) | ✅ MERGED |
+| #1323 | KNOWLEDGE_AUTONOMY_PROTOCOL + context-pack-generator | ✅ MERGED |
+| #1324 | Enhanced monitor (round-end + DB-mismatch + alerts) | ✅ MERGED |
+| #1326 | Tier 2 enforcement (pre-commit + delta-report + auto-suggester) | ✅ MERGED |
+| #1327 | Tier 3 complete (AI-review + dashboard + skill-evolution + handover + backend-log) | ✅ MERGED |
+
+> **Status oppdatert post-handoff (2026-05-13):** PR-status oppdatert via `chore/cross-knowledge-audit-2026-05-13` etter at audit Check 7 flagget stale references. PR-er som var åpne ved handoff-tidspunkt er nå merget i hovedsak.
 
 **20 PR-er totalt** — den største enkelt-sesjonen i pilot-prosjektets historikk.
 
