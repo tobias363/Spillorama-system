@@ -524,6 +524,21 @@ export const PatternWonPayloadSchema = z.object({
   winnerIds: z.array(z.string()).optional(),
   /** BIN-696: antall samtidige vinnere (lik winnerIds.length — for UI-enkelhet). */
   winnerCount: z.number().int().positive().optional(),
+  /**
+   * Tobias 2026-05-12 pilot-fix: vinnerens wallet-IDer i tillegg til
+   * `winnerIds`. Når server's `resolvePlayerPatternWinnerIds` ikke klarer
+   * å mappe wallet → socket-playerId (eks. fordi room-snapshot er stale
+   * eller spiller ble lagt til etter map-bygget), faller server tilbake
+   * til auth-`userId` i `winnerIds`. Klient's `myPlayerId` er en random
+   * socket-UUID som aldri matcher auth-userId — derfor vises ikke vinner-
+   * popupen. Ved å sende walletId-listen parallelt kan klient sjekke
+   * `state.players.find(p => p.id === myPlayerId)?.walletId` mot
+   * `winnerWalletIds` som ekstra safety-net.
+   *
+   * Optional for backward-compat — eldre server-deploy som ikke sender
+   * feltet faller tilbake til winnerIds-only matching.
+   */
+  winnerWalletIds: z.array(z.string()).optional(),
 });
 export type PatternWonPayload = z.infer<typeof PatternWonPayloadSchema>;
 

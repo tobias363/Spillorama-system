@@ -72,6 +72,17 @@ export interface Game1PlayerPatternWonEvent {
    * Brukes til popup-routing i Game1Controller.onPatternWon.
    */
   claimType: "LINE" | "BINGO";
+  /**
+   * Tobias 2026-05-12 pilot-fix: vinnerens wallet-IDer parallelt med
+   * `winnerIds` (socket-playerIds). Sendes til klient slik at popup-
+   * matching også kan skje på walletId hvis socket-playerId-mapping
+   * feilet på server-siden (eks. resolvePlayerPatternWinnerIds fant
+   * ikke treff i room-snapshot og falt tilbake til auth-userId).
+   *
+   * Aldri tom — server skal alltid kjenne winners[].walletId siden
+   * payout krevde wallet-credit.
+   */
+  winnerWalletIds: string[];
 }
 
 export interface Game1PlayerBroadcaster {
