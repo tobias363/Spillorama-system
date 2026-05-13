@@ -32,9 +32,21 @@
  *   - Plan-runtime: `app_game_plan_run` (les via GamePlanRunService).
  *   - Aktivt scheduled-game: `app_game1_scheduled_games` (direkte SELECT).
  *
- * Service-en gjør INGEN write — kun read. Master driver state-overgangene
- * via `agentGamePlan.ts`-routene; lobby-service rapporterer bare hva som
- * synes for kunden.
+ * Service-en gjør hovedsakelig read — master driver state-overgangene via
+ * `agentGamePlan.ts`-routene; lobby-service rapporterer bare hva som synes
+ * for kunden.
+ *
+ * Unntak — auto-reconcile (I16, F-02, 2026-05-13):
+ *   Hvis lobby-poll oppdager STUCK STATE der `plan-run.status='running'`
+ *   men `scheduled-game.status` er terminal (`'completed'`/`'cancelled'`)
+ *   OG runden er på siste plan-position, auto-finishes plan-run
+ *   (best-effort, fail-safe). Dette er ENESTE write-path og dekker
+ *   scenarier hvor `MasterActionService.stop()` ble avbrutt av
+ *   `wrapEngineError` før `planRunService.finish()` kunne kjøre, eller
+ *   hvor tester hopper over plan-run-cleanup. For ikke-siste posisjoner
+ *   gjør vi ingen write (master må advance) men returnerer "idle" med
+ *   `scheduledGameId=null` så klient ikke prøver å joine en avsluttet
+ *   runde. Se docs/engineering/FRAGILITY_LOG.md F-02.
  *
  * Bakover-kompatibilitet:
  *   Eksisterende `game1:join-scheduled` socket-handler påvirkes IKKE.
@@ -243,6 +255,34 @@ function asIsoOrNull(value: Date | string | null): string | null {
   if (typeof value === "string") return value;
   return value.toISOString();
 }
+
+/**
+ * Terminal-statuser for `app_game1_scheduled_games.status`. Når
+ * scheduled-game er i en av disse er runden ferdig (enten naturlig eller
+ * stopped). Brukes av auto-reconcile (I16, F-02) til å detektere stuck
+ * state der plan-run='running' men scheduled-game er terminal.
+ *
+ * Whitelist matcher state-maskinen i
+ * `packages/shared-types/src/schemas/game1-scheduled.ts:32-33`. Hvis nye
+ * terminal-statuser introduseres må denne settes oppdateres.
+ */
+const TERMINAL_SCHEDULED_GAME_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "cancelled",
+]);
+
+function isTerminalScheduledGameStatus(status: string): boolean {
+  return TERMINAL_SCHEDULED_GAME_STATUSES.has(status);
+}
+
+/**
+ * Audit-sentinel for auto-reconcile-pathen. Skrives som `actor_id` på
+ * `game_plan_run.finished`-event når lobby-poll auto-healer stuck state
+ * (I16, F-02). Sentinelen lar audit-leser skille auto-finish fra
+ * master-stop manuelt. Format matcher SYSTEM-actor-konvensjon i
+ * `Game2AutoDrawTickService.SYSTEM_ACTOR_ID`.
+ */
+const AUTO_RECONCILE_ACTOR_ID = "system:lobby-auto-reconcile";
 
 /**
  * Map fra `app_game1_scheduled_games.status` til `Game1LobbyOverallStatus`.
@@ -474,18 +514,69 @@ export class Game1LobbyService {
       run.currentPosition,
     );
 
+    // 6.5) Auto-reconcile stuck state (I16, F-02, 2026-05-13).
+    //
+    // Hvis `run.status='running'` OG `scheduledGame.status` er terminal
+    // ('completed'/'cancelled') uten at master har advancet, har vi en
+    // mismatch mellom de to state-machines. Dette skjer typisk når:
+    //   - `MasterActionService.stop()` kastet ENGINE_FAILED FØR
+    //     `planRunService.finish()` rakk å kjøre
+    //   - Tester rydder scheduled-game uten å rydde plan-run
+    //   - Race condition mellom advance + neste spawn
+    //
+    // Heling-strategi:
+    //   a) Hvis vi er på SISTE plan-position → auto-finish plan-run
+    //      (mest sannsynlig naturlig planslutt). Idempotent via
+    //      `changeStatus(allowedFrom=[idle,running,paused])`.
+    //   b) Hvis vi har flere posisjoner igjen → IKKE write (master må
+    //      advance manuelt), men hide scheduledGame fra response så
+    //      klient ikke prøver å joine en terminal runde. Logg warning
+    //      for observability.
+    //
+    // Best-effort: DB-feil under reconcile logges men kaster aldri —
+    // lobby-poll må alltid fortsette å returnere state.
+    const reconcileResult = await this.tryReconcileTerminalScheduledGame({
+      run,
+      scheduledGame,
+      plan,
+    });
+
     let engineStatus: Game1LobbyOverallStatus = "idle";
     let scheduledGameId: string | null = null;
     let scheduledStartTime: string | null = null;
     let scheduledEndTime: string | null = null;
     let actualStartTime: string | null = null;
 
-    if (scheduledGame) {
+    // Hvis reconcile auto-finished plan-run, returner finished-state direkte.
+    if (reconcileResult.planRunFinished) {
+      return {
+        hallId: hall,
+        businessDate,
+        isOpen: true,
+        openingTimeStart: plan.startTime,
+        openingTimeEnd: plan.endTime,
+        planId: plan.id,
+        planName: plan.name,
+        runId: run.id,
+        runStatus: "finished",
+        overallStatus: "finished",
+        nextScheduledGame: null,
+        currentRunPosition: run.currentPosition,
+        totalPositions: plan.items.length,
+      };
+    }
+
+    if (scheduledGame && !reconcileResult.hideScheduledGame) {
       engineStatus = mapScheduledGameStatus(scheduledGame.status);
       scheduledGameId = scheduledGame.id;
       scheduledStartTime = asIsoOrNull(scheduledGame.scheduled_start_time);
       scheduledEndTime = asIsoOrNull(scheduledGame.scheduled_end_time);
       actualStartTime = asIsoOrNull(scheduledGame.actual_start_time);
+    } else if (reconcileResult.hideScheduledGame) {
+      // Reconcile detekterte terminal scheduledGame midt i plan; vi
+      // skjuler den fra response så klient ser "idle"-state. Run forblir
+      // 'running' inntil master advancer.
+      engineStatus = "idle";
     } else if (run.status === "paused") {
       engineStatus = "paused";
     } else if (run.status === "running") {
@@ -653,6 +744,129 @@ export class Game1LobbyService {
       [hallId],
     );
     return rows.map((r) => r.group_id);
+  }
+
+  /**
+   * Auto-reconcile stuck state mellom plan-run og scheduled-game (I16,
+   * F-02, 2026-05-13).
+   *
+   * Stuck state defineres som:
+   *   - `run.status === 'running'`
+   *   - `scheduledGame` finnes for current position
+   *   - `scheduledGame.status` er terminal ('completed' eller 'cancelled')
+   *
+   * Dette skjer typisk når `MasterActionService.stop()` kastet
+   * `ENGINE_FAILED` FØR `planRunService.finish()` rakk å kjøre, eller når
+   * tester rydder scheduled-game uten å rydde plan-run.
+   *
+   * Heling-strategi:
+   *   - SISTE plan-position OG terminal: auto-finish plan-run via
+   *     `planRunService.finish` (idempotent — `changeStatus` validerer
+   *     allowedFrom). Returnerer `planRunFinished=true`.
+   *   - IKKE-siste position OG terminal: hide scheduled-game fra lobby-
+   *     respons så klient ikke prøver å joine en avsluttet runde.
+   *     Returnerer `hideScheduledGame=true`. Master må advance manuelt.
+   *
+   * Eksplisitt IKKE auto-reconciled:
+   *   - `run.status === 'paused'` — master har pauset bevisst, må selv
+   *     resume eller stop.
+   *   - `run.status === 'idle'` / `'finished'` — ingen mismatch.
+   *   - `scheduledGame` er IKKE terminal — vanlig running/paused state.
+   *
+   * Fail-safe: DB-feil under reconcile logges men kaster aldri. Lobby-
+   * poll må alltid kunne returnere state. Idempotent: gjentatte kall
+   * mot allerede-finished plan-run er no-op (vi sjekker `run.status`
+   * først; second call ville sett `'finished'` og skipped).
+   *
+   * Concurrency: `planRunService.finish` bruker `changeStatus` som
+   * leser run-state via `findForDay` før UPDATE. Race mellom to
+   * concurrent lobby-poll på samme run/position vil føre til at den
+   * andre kaster `GAME_PLAN_RUN_INVALID_TRANSITION` (run er allerede
+   * 'finished'), vi fanger og logger. Ingen state-korrupsjon.
+   */
+  private async tryReconcileTerminalScheduledGame(input: {
+    run: GamePlanRun;
+    scheduledGame: ScheduledGameForLobbyRow | null;
+    plan: GamePlanWithItems;
+  }): Promise<{ planRunFinished: boolean; hideScheduledGame: boolean }> {
+    const { run, scheduledGame, plan } = input;
+
+    // Bare reconcile når run='running' (paused/idle/finished er ikke mismatch).
+    if (run.status !== "running") {
+      return { planRunFinished: false, hideScheduledGame: false };
+    }
+    if (!scheduledGame) {
+      return { planRunFinished: false, hideScheduledGame: false };
+    }
+    if (!isTerminalScheduledGameStatus(scheduledGame.status)) {
+      return { planRunFinished: false, hideScheduledGame: false };
+    }
+
+    // Mismatch oppdaget. Bestem om vi er på siste position.
+    const isLastPosition = run.currentPosition >= plan.items.length;
+
+    if (isLastPosition) {
+      // Auto-finish plan-run — best-effort, fail-safe.
+      try {
+        // `masterUserId` er påkrevd av changeStatus; vi bruker en
+        // sentinel-streng som identifiserer auto-reconcile-pathen i
+        // audit-loggen. `planRunService.finish` skriver
+        // `game_plan_run.finished`-event med `fromStatus`+`toStatus`,
+        // som gir Lotteritilsynet sporbarhet på hvem som lukket runden.
+        await this.planRunService.finish(
+          run.hallId,
+          run.businessDate,
+          AUTO_RECONCILE_ACTOR_ID,
+        );
+        logger.info(
+          {
+            runId: run.id,
+            hallId: run.hallId,
+            businessDate: run.businessDate,
+            currentPosition: run.currentPosition,
+            totalPositions: plan.items.length,
+            scheduledGameId: scheduledGame.id,
+            scheduledGameStatus: scheduledGame.status,
+          },
+          "[lobby] auto-reconcile: finished plan-run (last position + terminal scheduled-game)",
+        );
+        return { planRunFinished: true, hideScheduledGame: false };
+      } catch (err) {
+        // Hvis finish kastet (typisk GAME_PLAN_RUN_INVALID_TRANSITION
+        // ved race med en annen lobby-poll, eller DB-feil), behandler
+        // vi det som transient — neste poll prøver igjen. Vi viser
+        // scheduledGame skjult så klient ikke krasjer i mellomtiden.
+        logger.warn(
+          {
+            err,
+            runId: run.id,
+            hallId: run.hallId,
+            businessDate: run.businessDate,
+            scheduledGameId: scheduledGame.id,
+            scheduledGameStatus: scheduledGame.status,
+          },
+          "[lobby] auto-reconcile: finish feilet — viser hidden scheduledGame inntil neste poll",
+        );
+        return { planRunFinished: false, hideScheduledGame: true };
+      }
+    }
+
+    // Ikke-siste position. Master må advance manuelt; vi auto-finisher IKKE
+    // siden det er flere posisjoner igjen. Skjul scheduled-game fra
+    // klient-respons.
+    logger.warn(
+      {
+        runId: run.id,
+        hallId: run.hallId,
+        businessDate: run.businessDate,
+        currentPosition: run.currentPosition,
+        totalPositions: plan.items.length,
+        scheduledGameId: scheduledGame.id,
+        scheduledGameStatus: scheduledGame.status,
+      },
+      "[lobby] auto-reconcile: terminal scheduled-game midt i plan — skjuler fra respons, master må advance",
+    );
+    return { planRunFinished: false, hideScheduledGame: true };
   }
 
   /**

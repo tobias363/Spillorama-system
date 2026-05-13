@@ -432,6 +432,28 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.takeover.test.ts`
 - PR `fix/spill1-bridge-takeover-existing-room-2026-05-12`
 
+### §4.4c — Plan-run stuck på 'running' når scheduled-game terminal (I16, F-02, FIKSET)
+
+**Severity:** P1 (kunde-symptom: popup vises ikke, ingen joinable game etter test)
+**Oppdaget:** 2026-05-13 (Tobias' manuelle test 1.5h etter E2E-suite, ~1h diagnose)
+**Symptom:** `runStatus=running, scheduledStatus=completed` etter test-runs — `Game1LobbyService` returnerer `nextScheduledGame.scheduledGameId` pekende på avsluttet runde → klient kan ikke joine, popup mounter aldri.
+**Root cause:** `MasterActionService.stop()` kaster `ENGINE_FAILED` via `wrapEngineError` HVIS engine.stopGame feiler, FØR `planRunService.finish()` rakk å kjøre. Plan-run-state og scheduled-game-state er to uavhengige state-maskiner — partial-failure i stop-flyt etterlater dem usynkronisert. Tester (`resetPilotState`) som catcher `masterStop`-errors maskerer problemet.
+**Fix (I16):** `Game1LobbyService.tryReconcileTerminalScheduledGame` auto-healer state på lobby-poll-read-path:
+- **Siste plan-position + terminal scheduled-game** → auto-finish plan-run via `planRunService.finish` (idempotent, audit-actor `system:lobby-auto-reconcile`)
+- **Ikke-siste position + terminal scheduled-game** → hide scheduled-game fra response (`scheduledGameId=null`, overallStatus='idle') så klient ikke prøver å joine; master må advance manuelt
+- **Fail-safe:** DB-feil under finish logges men kaster aldri — neste poll prøver igjen
+- **Concurrency:** race mellom to lobby-polls håndteres av `changeStatus`-validering — den andre kaster `GAME_PLAN_RUN_INVALID_TRANSITION` (fanget)
+**Prevention:**
+- ALDRI fjern `TERMINAL_SCHEDULED_GAME_STATUSES`-set fra `Game1LobbyService` uten å replisere logikken
+- ALDRI legg til write-paths i `Game1LobbyService` uten å dokumentere det i doc-header
+- Når du ser `runStatus=running + scheduledStatus=completed` lokalt: neste lobby-poll skal hele state automatisk (innen 10s) — IKKE manuelt SQL-cleanup hvis testen skal verifisere atferden
+**Related:**
+- `apps/backend/src/game/Game1LobbyService.ts:730-833`
+- `apps/backend/src/game/__tests__/Game1LobbyService.reconcile.test.ts` (10 unit-tester)
+- FRAGILITY_LOG F-02 (status: FIXED)
+- BUG_CATALOG I16
+- Branch `fix/plan-run-auto-reconcile-2026-05-13`
+
 ### §4.5 — Aldri `io.emit()` — alltid `io.to(roomCode)`
 
 **Severity:** P0 (skala-katastrofe)
