@@ -972,7 +972,11 @@ export class GameLobbyAggregator {
     planRun: GamePlanRun | null,
     plan: GamePlanWithItems | null,
   ): Spill1PlanMeta | null {
-    if (!planRun || !plan) return null;
+    // Tobias-direktiv 2026-05-13: "Neste spill må vises uavhengig hvilken
+    // status man har." Aggregator returnerer plan-meta også når plan-run
+    // ikke er opprettet ennå (master har ikke trykket Start første gang).
+    // Da bygger vi meta fra plan + position=1 (første plan-item).
+    if (!plan) return null;
     const items = plan.items;
     if (items.length === 0) {
       // Plan uten items — vi kan ikke bygge meta. Returner null.
@@ -980,17 +984,18 @@ export class GameLobbyAggregator {
     }
     // currentPosition kan være 0 (idle, lazy-create-default 1, men vi er
     // defensive). Hvis currentPosition > items.length, fall tilbake til
-    // siste posisjon. Hvis 0, peke til item 1 for displayName.
+    // siste posisjon. Hvis 0 eller plan-run mangler, peke til item 1.
+    const rawPosition = planRun?.currentPosition ?? 0;
     const positionForDisplay = Math.max(
       1,
-      Math.min(planRun.currentPosition, items.length),
+      Math.min(rawPosition === 0 ? 1 : rawPosition, items.length),
     );
     const currentItem = items.find((i) => i.position === positionForDisplay);
     if (!currentItem) {
       logger.warn(
         {
-          runId: planRun.id,
-          currentPosition: planRun.currentPosition,
+          runId: planRun?.id ?? null,
+          currentPosition: rawPosition,
           itemsCount: items.length,
         },
         "[lobby-aggregator] currentItem mangler — kan ikke bygge planMeta",
@@ -1000,27 +1005,31 @@ export class GameLobbyAggregator {
 
     // jackpotSetupRequired — replicates computeJackpotSetupRequired in
     // agentGamePlan.ts. Kjent kode-duplisering; Bølge 2 (MasterActionService)
-    // konsoliderer.
-    const jackpotSetupRequired =
-      currentItem.catalogEntry.requiresJackpotSetup &&
-      !Object.prototype.hasOwnProperty.call(
-        planRun.jackpotOverrides,
-        String(planRun.currentPosition),
-      );
+    // konsoliderer. Når plan-run mangler kan ikke override eksistere ennå,
+    // så jackpotSetupRequired = catalog.requiresJackpotSetup uten override-sjekk.
+    const jackpotSetupRequired = planRun
+      ? currentItem.catalogEntry.requiresJackpotSetup &&
+        !Object.prototype.hasOwnProperty.call(
+          planRun.jackpotOverrides,
+          String(planRun.currentPosition),
+        )
+      : currentItem.catalogEntry.requiresJackpotSetup;
 
-    // pendingJackpotOverride
-    const pendingJackpotOverride =
-      planRun.jackpotOverrides[String(planRun.currentPosition)] ?? null;
+    // pendingJackpotOverride — null hvis plan-run mangler
+    const pendingJackpotOverride = planRun
+      ? planRun.jackpotOverrides[String(planRun.currentPosition)] ?? null
+      : null;
 
-    // status-mapping (samme verdier som backend GamePlanRunStatus)
-    const planRunStatus: Spill1PlanRunStatus =
-      planRun.status as Spill1PlanRunStatus;
+    // status-mapping — null hvis plan-run mangler (idle, pre-Start)
+    const planRunStatus: Spill1PlanRunStatus | null = planRun
+      ? (planRun.status as Spill1PlanRunStatus)
+      : null;
 
     return {
-      planRunId: planRun.id,
-      planId: planRun.planId,
+      planRunId: planRun?.id ?? null,
+      planId: plan.id,
       planName: plan.name,
-      currentPosition: planRun.currentPosition,
+      currentPosition: rawPosition,
       totalPositions: items.length,
       catalogSlug: currentItem.catalogEntry.slug,
       catalogDisplayName: currentItem.catalogEntry.displayName,

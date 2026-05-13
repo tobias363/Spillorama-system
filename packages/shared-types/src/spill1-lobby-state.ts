@@ -236,8 +236,12 @@ export const Spill1PlanMetaSchema = z.object({
   /**
    * ID i `app_game_plan_run` (TEXT PRIMARY KEY — kan være UUID eller slug
    * som `demo-plan-run-pilot-1`). Read-only for UI.
+   *
+   * Tobias 2026-05-13: nullable. Aggregator returnerer plan-meta også når
+   * plan-run ikke er opprettet ennå (master har ikke trykket Start).
+   * Master må alltid se navnet på neste planlagte spill.
    */
-  planRunId: Spill1IdSchema,
+  planRunId: Spill1IdSchema.nullable(),
   /**
    * ID i `app_game_plan` (TEXT PRIMARY KEY — kan være UUID eller slug
    * som `demo-plan-pilot`).
@@ -247,7 +251,8 @@ export const Spill1PlanMetaSchema = z.object({
   planName: z.string(),
   /**
    * Nåværende posisjon (1-basert). 0 hvis run ikke startet ennå (idle og
-   * lazy-create returnerte run uten advance).
+   * lazy-create returnerte run uten advance). Når plan-run mangler helt
+   * (pre-Start), defaulter til 1 (første item i planen).
    */
   currentPosition: z.number().int().nonnegative(),
   /** Antall items i planen. */
@@ -256,8 +261,11 @@ export const Spill1PlanMetaSchema = z.object({
   catalogSlug: z.string(),
   /** Catalog-display-navn for UI. */
   catalogDisplayName: z.string(),
-  /** Plan-run.status. */
-  planRunStatus: Spill1PlanRunStatusSchema,
+  /**
+   * Plan-run.status. Null når plan-run ikke er opprettet ennå
+   * (master har ikke trykket Start). UI rendrer da som "idle".
+   */
+  planRunStatus: Spill1PlanRunStatusSchema.nullable(),
   /**
    * `true` hvis nåværende item er en jackpot-runde og master har ikke
    * lagret override ennå. UI viser jackpot-popup ved start.
