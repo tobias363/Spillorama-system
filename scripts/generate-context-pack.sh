@@ -53,10 +53,69 @@ echo ""
 echo "---"
 echo ""
 
-# ── 1. FRAGILITY-entries som matcher ──────────────────────────────────
+# ── 1. Relevante skills (auto-matched via scope-globber) ─────────────
+SKILLS_MAPPING_SCRIPT="$REPO_ROOT/scripts/find-skills-for-file.mjs"
+if [ -f "$SKILLS_MAPPING_SCRIPT" ] && command -v node >/dev/null 2>&1; then
+  echo "## 1. Relevante skills du MÅ lese FØR endring"
+  echo ""
+  echo "Skills matchet via \`<!-- scope: ... -->\` i \`.claude/skills/<name>/SKILL.md\`."
+  echo "Disse inneholder domene-invarianter og fallgruver."
+  echo ""
+
+  # Call find-skills-for-file.mjs with each pattern. Inputs may be
+  # globs (apps/backend/src/game/*) or concrete files. For glob inputs
+  # we expand them locally first; for concrete files we pass through.
+  declare -a EXPANDED_FILES=()
+  for pat in "${PATTERNS[@]}"; do
+    if [[ "$pat" == *"*"* ]]; then
+      # Glob — expand against repo root
+      while IFS= read -r f; do
+        if [ -n "$f" ]; then
+          EXPANDED_FILES+=("${f#$REPO_ROOT/}")
+        fi
+      done < <(find "$REPO_ROOT" -path "$REPO_ROOT/$pat" -type f 2>/dev/null | head -50)
+      # If no expansion (glob didn't match anything yet), still pass the
+      # pattern verbatim — globToRegex in find-skills-for-file handles it.
+      if [ ${#EXPANDED_FILES[@]} -eq 0 ]; then
+        EXPANDED_FILES+=("$pat")
+      fi
+    else
+      EXPANDED_FILES+=("$pat")
+    fi
+  done
+
+  MATCHED_SKILLS=$(node "$SKILLS_MAPPING_SCRIPT" "${EXPANDED_FILES[@]}" 2>/dev/null || true)
+
+  if [ -z "$MATCHED_SKILLS" ]; then
+    echo "_(ingen skills matcher disse filene — endringer i denne pathen har ingen domene-skill registrert)_"
+  else
+    echo "$MATCHED_SKILLS" | while IFS= read -r skill; do
+      [ -z "$skill" ] && continue
+      skill_file="$REPO_ROOT/.claude/skills/$skill/SKILL.md"
+      if [ -f "$skill_file" ]; then
+        # Extract description from YAML frontmatter
+        desc=$(awk '/^description:/ { sub(/^description:[[:space:]]*/, ""); print; exit }' "$skill_file" | head -c 280)
+        echo "### \`$skill\`"
+        echo ""
+        echo "$desc"
+        if [ "$(echo "$desc" | wc -c)" -ge 280 ]; then
+          echo "…"
+        fi
+        echo ""
+        echo "**Full skill:** [\`.claude/skills/$skill/SKILL.md\`](.claude/skills/$skill/SKILL.md)"
+        echo ""
+      fi
+    done
+  fi
+  echo ""
+  echo "---"
+  echo ""
+fi
+
+# ── 2. FRAGILITY-entries som matcher ──────────────────────────────────
 FRAGILITY="$REPO_ROOT/docs/engineering/FRAGILITY_LOG.md"
 if [ -f "$FRAGILITY" ]; then
-  echo "## 1. FRAGILITY-entries du MÅ lese før endring"
+  echo "## 2. FRAGILITY-entries du MÅ lese før endring"
   echo ""
   echo "Disse entries dekker filer i scope. **Hopp ikke over** — historisk skade dokumentert."
   echo ""
@@ -104,17 +163,17 @@ if [ -f "$FRAGILITY" ]; then
     echo ""
   fi
 else
-  echo "## 1. FRAGILITY_LOG.md mangler"
+  echo "## 2. FRAGILITY_LOG.md mangler"
   echo ""
 fi
 
 echo "---"
 echo ""
 
-# ── 2. PITFALLS-relevant ─────────────────────────────────────────────
+# ── 3. PITFALLS-relevant ─────────────────────────────────────────────
 PITFALLS="$REPO_ROOT/docs/engineering/PITFALLS_LOG.md"
 if [ -f "$PITFALLS" ]; then
-  echo "## 2. PITFALLS som kan være relevante"
+  echo "## 3. PITFALLS som kan være relevante"
   echo ""
 
   # Map file-patterns to PITFALLS-sections
@@ -170,10 +229,10 @@ fi
 echo "---"
 echo ""
 
-# ── 3. Siste agent-leveranser på samme scope ─────────────────────────
+# ── 4. Siste agent-leveranser på samme scope ─────────────────────────
 AGENT_LOG="$REPO_ROOT/docs/engineering/AGENT_EXECUTION_LOG.md"
 if [ -f "$AGENT_LOG" ]; then
-  echo "## 3. Siste 3 agent-leveranser (skim før du jobber)"
+  echo "## 4. Siste 3 agent-leveranser (skim før du jobber)"
   echo ""
 
   # Find entries that mention any pattern (limit to first 50 entries searched)
@@ -216,8 +275,8 @@ fi
 echo "---"
 echo ""
 
-# ── 4. Åpne PR-er som rører samme filer ──────────────────────────────
-echo "## 4. Åpne PR-er som rører disse filene"
+# ── 5. Åpne PR-er som rører samme filer ──────────────────────────────
+echo "## 5. Åpne PR-er som rører disse filene"
 echo ""
 if command -v gh >/dev/null 2>&1; then
   # Use gh to find PRs touching matching files
@@ -252,13 +311,14 @@ echo ""
 echo "---"
 echo ""
 
-# ── 5. Lese-bekreftelse-mal ──────────────────────────────────────────
+# ── 6. Lese-bekreftelse-mal ──────────────────────────────────────────
 cat <<'EOF'
-## 5. Påkrevd lese-bekreftelse FØR du commit-er
+## 6. Påkrevd lese-bekreftelse FØR du commit-er
 
 Du må inkludere disse linjene i din commit-message:
 
 ```
+[skills-read: <skill-navn eller "none">]
 [context-read: <FRAGILITY-IDs eller "none">]
 [pitfalls-read: <seksjons-numre eller "none">]
 [prior-agent-brief: <commit-SHA eller "none">]
@@ -266,6 +326,7 @@ Du må inkludere disse linjene i din commit-message:
 
 Eksempel for PlayScreen.ts-endring:
 ```
+[skills-read: spill1-master-flow, casino-grade-testing]
 [context-read: F-01]
 [pitfalls-read: §6, §7]
 [prior-agent-brief: 9aad3063]

@@ -59,6 +59,57 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Skill→File mapping auto-context-pack (general-purpose agent)
+
+**Scope:** Etabler automatisert mapping fra fil-touch til relevant skill-loading via `<!-- scope: ... -->`-header i hver `.claude/skills/<name>/SKILL.md`. Context-pack-generator skal inkludere matched skills som ny seksjon. Pilar 5 + 7 i KNOWLEDGE_AUTONOMY_PROTOCOL.
+
+**Inputs gitt:**
+- Konkret task-spec: scope-injection i 20 SKILL.md, ny `find-skills-for-file.mjs`, ny `build-skill-file-map.mjs`, oppdatert `generate-context-pack.sh`, ny CI workflow `skill-mapping-validate.yml`
+- Konservative scope-anbefalinger per skill (Spill1/2/3, wallet, compliance, etc.)
+- Bredde-prinsipper: tech-stack-skills (typescript/vite/docker) får IKKE scope-header siden de er for brede
+- Branch: ny fra `origin/main`, ikke åpne PR
+
+**Outputs produsert:**
+- **Branch:** `feat/skill-file-mapping-2026-05-13` (pushed til origin)
+- **Commits:**
+  - `bc7144dd` — inject scope-headers i alle 20 SKILL.md (40 insertions, 20 filer)
+  - `<tooling-commit>` — CLI + map-generator + CI workflow + docs (pending)
+- **Filer:**
+  - `scripts/find-skills-for-file.mjs` (148 linjer, CLI + library)
+  - `scripts/build-skill-file-map.mjs` (200 linjer, generator)
+  - `docs/auto-generated/SKILL_FILE_MAP.md` (auto-generert, 224 linjer)
+  - `.github/workflows/skill-mapping-validate.yml` (CI gate)
+  - `scripts/generate-context-pack.sh` (utvidet — ny seksjon 1 "Relevante skills")
+  - `docs/engineering/KNOWLEDGE_AUTONOMY_PROTOCOL.md` (oppdatert §1, ny §2b)
+  - `package.json` (npm run skills:map + skills:for-file)
+
+**Tester kjørt:**
+- `node scripts/hooks/validate-skill-frontmatter.mjs` for alle 20 — alle passerer
+- `node scripts/find-skills-for-file.mjs apps/backend/src/game/Game2Engine.ts` → `spill2-perpetual-loop` ✓
+- `node scripts/find-skills-for-file.mjs apps/backend/src/wallet/WalletAuditVerifier.ts apps/backend/src/agent/UniqueIdService.ts` → 3 skills ✓
+- `bash scripts/generate-context-pack.sh apps/backend/src/game/Game2Engine.ts` → inkluderer Spill 2-skill som seksjon 1 ✓
+- CI bash-logikk i `skill-mapping-validate.yml` testet lokalt: detekterer missing scope-header korrekt
+
+**Fallgruver oppdaget:**
+- `casino-grade-testing` med scope `**/*.test.ts` matcher 634 filer — for bredt. Akseptert som meta-skill men kan vurderes innsnevret senere (post-pilot)
+- Skill-validator i `scripts/hooks/validate-skill-frontmatter.mjs` krever YAML-frontmatter START på linje 1. Scope-headeren MÅ legges ETTER closing `---`, ikke før.
+
+**Læring:**
+- Glob `apps/backend/src/game/Game1*` matcher 119 filer — bevisst breddet for Spill 1-skill siden alt Spill1-tilstøtende skal trigge skill-loading
+- HTML-comment `<!-- scope: ... -->` er foretrukket over YAML-felt fordi det er markdown-readable og ikke krever YAML-parser-utvidelse
+- Auto-context-pack-en blir nå "vanntett pillar 7": en agent som rører Game2Engine får automatisk Spill2-skill levert i context-pack — uten at PM må huske å nevne det
+
+**Eierskap:**
+- `scripts/find-skills-for-file.mjs`, `scripts/build-skill-file-map.mjs` — agent-eid for nå
+- `.claude/skills/*/SKILL.md` — fortsatt eid av PM (scope-headers vedlikeholdes når skills endrer scope-relevans)
+
+[skills-read: pm-orchestration-pattern]
+[context-read: none]
+[pitfalls-read: none]
+[prior-agent-brief: none]
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
