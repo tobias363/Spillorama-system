@@ -81,7 +81,7 @@ Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias
 - `apps/backend/src/game/Game1LobbyService.test.ts` (14 eksisterende tester)
 - `apps/backend/src/routes/__tests__/spill1Lobby.test.ts` (7 route-tester)
 - `tests/e2e/spill1-pilot-flow.spec.ts`
-- ALLE manuell-flyt-tester (ikke skrevet enda — er en gap, se F-03)
+- `tests/e2e/spill1-manual-flow.spec.ts` (lagt til 2026-05-13 — se F-03)
 
 **Manuell verifikasjon:**
 1. Kjør `npm run test:pilot-flow`
@@ -103,24 +103,34 @@ Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias
 
 ---
 
-## F-03: Test-coverage-gap — manuell flyt har ikke E2E-test
+## F-03: Test-coverage-gap — manuell flyt har E2E-test (test eksisterer, må stå grønn)
 
-**Filer:** `tests/e2e/*.spec.ts` — ingen test mimicker Tobias' manuelle flyt
+**Status:** ✅ Test eksisterer per 2026-05-13. Tidligere status var "test missing" (gap). Nå: gapet er lukket, men testen er fragile fordi hele dens eksistens er en motvekt til E2E-shortcuts.
 
-**Hvorfor fragile:** Eksisterende E2E-tester pre-seeder `sessionStorage.lobby.activeHallId` + injecter token direkte. Tobias' manuelle flyt traverserer auth-redirect-flow + lobby-default. **Strukturelt forskjellige scenarier.** Tester kan passere mens manuell feiler.
+**Filer:**
+- `tests/e2e/spill1-manual-flow.spec.ts` — mimicker Tobias' faktiske bruks-flyt
+- `tests/e2e/helpers/manual-flow.ts` — login-via-redirect + hall-picker-helpers
+
+**Hvorfor fragile (fortsatt):** Test bruker BEVISST ingen pre-seed og ingen direct token-inject. Hvis noen "optimaliserer" testen ved å pre-seed `sessionStorage.lobby.activeHallId` eller injecte token direkte, mister vi hele verdien av denne testen — den blir bare en duplikat av `spill1-pilot-flow.spec.ts`.
+
+Eksisterende E2E-tester (særlig `spill1-pilot-flow.spec.ts`) pre-seeder `sessionStorage.lobby.activeHallId` + injecter token direkte. Tobias' manuelle flyt traverserer auth-redirect-flow + lobby-default. **Strukturelt forskjellige scenarier.** Tester kan passere mens manuell feiler — dette er hele rationale for `spill1-manual-flow.spec.ts`.
 
 **Hva ALDRI gjøre:**
 - Anta at "E2E grønn = manuell flyt grønn" — det er FALSKT
+- "Optimalisere" `spill1-manual-flow.spec.ts` ved å skipe redirect-flow eller pre-seede hall
 - Lukke pilot-bug uten å verifisere manuell-flyt parallelt
+- Slette eller refaktorere bort `loginViaDevUserRedirect`-helperen — det er hele poenget
 
 **Hvilke tester MÅ stå grønn etter endring:**
-- ALL eksisterende E2E
-- TODO: `tests/e2e/spill1-manual-flow.spec.ts` (mimicker manuell flyt — uten pre-seed)
+- ALL eksisterende E2E (kjør `npm run test:pilot-flow`)
+- **`tests/e2e/spill1-manual-flow.spec.ts`** (kjør `npm run test:pilot-flow:manual`)
+- 3 consecutive passes for manual-flow før merge
 
 **Manuell verifikasjon:** ALDRI lukk pilot-relatert PR uten at Tobias har gjort manuell smoke-test post-merge.
 
 **Historisk skade:**
 - 2026-05-13: E2E passet @ 10:40, manuell flyt feilet @ 12:00 — vi trodde alt var bra, det var ikke.
+- 2026-05-13 (samme dag): `spill1-manual-flow.spec.ts` lagt til, lukker gapet ved at CI nå dekker både shortcut-path og manual-path.
 
 ---
 
@@ -240,3 +250,4 @@ Håndheves manuelt under PR-review (TODO: automatiser via danger-rule).
 ---
 
 | 2026-05-13 | F-05 — Re-attach-guard i ALLE room-join handler-paths (etter I15-fix på `joinScheduledGame`) | reentry-fix agent |
+| 2026-05-13 | F-03 oppdatert — test eksisterer nå (`tests/e2e/spill1-manual-flow.spec.ts`), status fra "gap" til "test må stå grønn" | Backend-agent |

@@ -22,9 +22,10 @@ Tobias for arkitektur-rewrite av buy-flow.
 
 | # | Funn | Kategori | Status |
 |---|---|---|---|
-| H1 | Player-shell defaulter til `hall-default` (første hall i listen), ikke pilot-hall | Test-harness | ✅ Fixet via `sessionStorage.setItem("lobby.activeHallId", "demo-hall-001")` pre-navigate |
-| H2 | `?dev-user=…` trigger `window.location.replace()` redirect — Playwright må vente på redirect før klikk | Test-harness | 🟡 Under iterasjon |
+| H1 | Player-shell defaulter til `hall-default` (første hall i listen), ikke pilot-hall | Test-harness | ✅ Fixet for shortcut-test via `sessionStorage.setItem("lobby.activeHallId", "demo-hall-001")` pre-navigate. Manual-flow-test (`spill1-manual-flow.spec.ts`) bruker hall-picker UI istedenfor pre-seed. |
+| H2 | `?dev-user=…` trigger `window.location.replace()` redirect — Playwright må vente på redirect før klikk | Test-harness | ✅ Løst i `spill1-manual-flow.spec.ts` via `waitForFunction` på (a) URL ikke har `?dev-user=` lenger, (b) `sessionStorage.spillorama.accessToken` er satt. Helper: `tests/e2e/helpers/manual-flow.ts:loginViaDevUserRedirect`. |
 | H3 | Bingo-tile click triggers game-bundle download (delay før popup mounter) | Test-harness | 🟡 Forventet — `toBeVisible({timeout:30_000})` skal dekke |
+| H4 | Demo-pilot-spillere 1-3 har `app_users.hall_id=demo-hall-001` men lobby defaulter likevel til `hall-default` — hele rationale for manual-flow-test | Test-harness | ✅ Test dokumenterer bevisst at lobby IKKE bruker user.hallId som default (lobby.js:135-140). Logger "lobby defaulted DIREKTE til pilot-hall" hvis logikken noen gang fikses. |
 
 ### Implementasjons-bugs (fix i prod-kode)
 
@@ -104,6 +105,10 @@ Status-verdier:
 |---|---|---|
 | 2026-05-13 | Initial — etablert template + listet 7 allerede-fiksede implementasjons-bugs | PM-AI (Claude Opus 4.7) |
 | 2026-05-13 | I16 lagt til — plan-run lifecycle stuck-state auto-reconcile fra lobby-poll. F-02 markert FIXED. | Agent (I16) |
+
+---
+
+| 2026-05-13 | H2 markert som løst (auth-redirect-race håndtert i `spill1-manual-flow.spec.ts`). H4 lagt til. | Backend-agent |
 | 2026-05-13 | E2E-test grønn etter fixes for I8/I9/I10 (SocketActions multiplier, TicketGrid mapping, BuyPopup cancelBtn-reset). Test kjører i 12.3s deterministic. | Autonomous-pilot-test-loop agent |
 | 2026-05-13 | Lagt til V1 (no-auto-start regression). Test verifiserer at REST `/api/game1/purchase` ALDRI auto-trigger `status=running` for Spill 1. Tobias' rapporterte "auto-start" var UI-misdisplay-bug fra PR #1277, fixed i commit 6b90b32e før denne testen ble skrevet. Test grønn i 27s for 2 scenarios (single buy + stress 3 raske buys). | feat/pilot-test-no-auto-start-2026-05-13 agent |
 | 2026-05-13 | Rad-vinst-flow E2E test grønn (4 consecutive runs PASS, 48-60s). I11/I12/I13 lagt til (admin draw-next blokkert, snapshot-route fail-mode, test-hall auto-pause mismatch). `spill1-rad-vinst-flow.spec.ts` + `helpers/rad-vinst-helpers.ts` + WinPopup data-test-attributes pushed på `feat/pilot-test-rad-vinst-2026-05-13`. | general-purpose agent |
