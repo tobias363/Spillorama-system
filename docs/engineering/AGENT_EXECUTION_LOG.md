@@ -59,6 +59,88 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Active push-mekanisme for pilot-monitor (general-purpose agent)
+
+**Scope:** Tobias-direktiv: live-monitor må AKTIVT pushe P0/P1-anomalier til PM-sesjonen, ikke bare passivt logge til `/tmp/pilot-monitor.log`. Bygd push-daemon + wrapper + severity-klassifisering.
+
+**Inputs gitt:**
+- Branch: `feat/monitor-active-push-2026-05-13` fra `origin/main`
+- Eksisterende `scripts/pilot-monitor-enhanced.sh` (12 KB, 4 kapasiteter A-D)
+- Mandat: 7 leveranser (push-daemon, severity-utvidelse av eksisterende monitor, wrapper, severity-doc, test, AGENT_EXECUTION_LOG-entry, PM_ONBOARDING_PLAYBOOK §2.18-oppdatering)
+
+**Outputs produsert:**
+- **Branch:** `feat/monitor-active-push-2026-05-13` (pushed til origin)
+- **Nye scripts:**
+  - `scripts/monitor-push-to-pm.sh` (5.2 KB) — companion daemon: tailer log, filtrerer P0/P1, pusher til FIFO + macOS-notification + bell
+  - `scripts/start-monitor-with-push.sh` (5.5 KB) — wrapper: starter begge prosesser, PID-håndtering, idempotent cleanup
+  - `scripts/__tests__/monitor-severity-classification.test.sh` (10 KB) — 37 tester (regex-matching, parse-extraction, end-to-end FIFO-flyt, doc-validering)
+- **Endret script:**
+  - `scripts/pilot-monitor-enhanced.sh` — header-doc utvidet med severity-tabell + companion-referanse + wrapper-bruks-eksempel; backend-down eskalering til P0 etter 60s (var P2 forever), tracking via `BACKEND_DOWN_CONSECUTIVE` counter, recovery-event ved tilbakekomst; `[INFO] pilot-monitor started`-melding byttet til `log_anomaly P3 monitor.start` for konsistens
+- **Ny doc:**
+  - `docs/engineering/MONITOR_SEVERITY_CLASSIFICATION.md` (5.5 KB) — autoritativ severity-tabell P0/P1/P2/P3 med eksempler per anomali-type, sound-name-mapping (Sosumi/Submarine), implementasjonsregler, anti-mønstre, test-prosedyre
+- **Oppdaterte docs:**
+  - `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` §2.18 — ny "Aktiv push" subseksjon, severity-tabell, oppdatert sesjons-start-sjekkliste; legacy spawn-mal beholdt som fallback
+
+**Tekniske detaljer:**
+
+1. **FIFO non-blocking write via FD 3:** Push-daemon åpner `/tmp/pilot-monitor-urgent.fifo` rw på file descriptor 3 ved oppstart (`exec 3<>"$FIFO"`). Daemon er da alltid sin egen reader, så `echo "$line" >&3` blokkerer aldri selv om eksterne PM-sesjoner ikke tail-er FIFO-en. Kjernens FIFO-buffer (~64 KB) tar imot writes for senere lesning.
+
+2. **Bash 3.2-kompatibel regex:** Brukte bash `BASH_REMATCH` med `[[ ... =~ ... ]]` istedenfor GNU awk `match(..., array)` (sistnevnte fungerer ikke på macOS BSD awk). Eksplisitt `#!/usr/bin/env bash` for å unngå zsh-fallback.
+
+3. **macOS-kompatibilitet:** Ingen `timeout`-kommando på macOS — test bruker explicit `kill -TERM/-KILL`. Eksplisitt `set +m` for å disable job-control-spam ("Terminated: 15"-stderr-spam).
+
+4. **Idempotent cleanup:** Wrapper trap håndterer både INT, TERM og EXIT. `CLEANUP_DONE`-guard hindrer dobbeltkjøring. Kill-strategi: TERM først (process-gruppe via `-PID`), vent 3s, KILL stragglers, så `pkill -f`-sweep for orphaner som backend-tail.
+
+5. **`read -r -t 1` istedenfor `sleep`:** Wait-loop bruker bash-builtin read for signalbar 1s-sleep. `sleep N` blokkerer i ekstern prosess som ikke kan avbrytes av trap raskt.
+
+**Severity-tabell (autoritativ):**
+
+| Severity | Eksempel | Push? | Sound | Reaksjons-tid |
+|---|---|---|---|---|
+| **P0** | wallet.balance-mismatch, monitor.live-room-down, backend-down-30s | ✅ | Sosumi | < 30s |
+| **P1** | draw.stuck, health.stale, db.stuck-state, client.error, popup.blocked-repeat, backend.error | ✅ | Submarine | < 1-2 min |
+| **P2** | monitor.no-backend-log, monitor.backend-unreachable (kort), backend.warn | ❌ | (ingen) | Best effort |
+| **P3** | round.ended, round.started, gameStatus.change, snapshot.tick, monitor.start | ❌ | (ingen) | Ingen |
+
+**Test-resultater:**
+- 37/37 tester PASS (`/bin/bash scripts/__tests__/monitor-severity-classification.test.sh`)
+- 6 test-grupper: regex-matching, parse-extraction, end-to-end FIFO-flyt, pilot-monitor consistency, wrapper validation, doc completeness
+- Manuell test av wrapper TERM-handling: 3 children (monitor + push + tail) killed innen 3 sek, PID-filer + FIFO ryddet, ingen orphaner
+
+**Fallgruver oppdaget:**
+
+1. **macOS BSD awk støtter ikke `match(..., array)`:** Bruk bash regex med `BASH_REMATCH` istedet. (PITFALLS §6.x?)
+2. **macOS bash 3.2 default; zsh er current shell:** Eksplisitt `#!/usr/bin/env bash` + kjør tester med `/bin/bash`-prefix for å sikre rett bash-versjon.
+3. **`sleep N` blokkerer trap-respons:** Bruk `read -r -t N </dev/null || true` for shell-builtin signalbar sleep.
+4. **`tail -F` child-prosesser orphaner ved monitor-kill:** Process-gruppe-kill (`kill -TERM -PID`) + `pkill -f` cleanup-sweep i wrapper.
+5. **FIFO write blokkerer uten reader:** Åpne FIFO rw på FD 3 i daemon-startup; daemon er alltid sin egen reader.
+
+**Læring:**
+
+- **Aktiv vs passiv observability:** Tobias-direktiv har lært oss at "loggfil i `/tmp`" ikke er nok — PM-sesjonen må AKTIVT få varsler. Push-mekanisme via FIFO + macOS notification løser dette uten å bryte eksisterende monitor-flyt.
+- **Severity-klassifisering hindrer alarm-spam:** P0/P1/P2/P3 med dokumenterte trigger-typer gjør det forutsigbart hva som skal vekke oppmerksomhet vs hva som bare logges. Anti-spam: P0-eskalering for backend-down skjer KUN etter 60s+ nedetid, ikke umiddelbart.
+- **Test-driven script-utvikling:** 37 tester avdekket flere bash 3.2-vs-zsh-overflater + FIFO-blocking-issues før manuell smoke-test. Sparte feilsøking under live pilot.
+
+**Verifisering:**
+- Syntax-OK alle 4 scripts (`bash -n`)
+- 37/37 tester PASS
+- Manuell smoke-test av wrapper med TERM-signal — ingen orphaner
+- macOS notification verifisert via osascript (DISABLE_NOTIFY=1 i test-mode)
+
+**Tid:** ~2 timer (research 30 min + impl 60 min + test/debug 30 min)
+
+**Status:** Branch pushed til origin (`feat/monitor-active-push-2026-05-13`), klar for PR. PR ikke åpnet (per direktiv) — PM-AI eier merge-flyt.
+
+**Eierskap:**
+- `scripts/monitor-push-to-pm.sh` (ny)
+- `scripts/start-monitor-with-push.sh` (ny)
+- `scripts/__tests__/monitor-severity-classification.test.sh` (ny)
+- `docs/engineering/MONITOR_SEVERITY_CLASSIFICATION.md` (ny)
+- `scripts/pilot-monitor-enhanced.sh` (eksisterende — header + backend-down-eskalering)
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` (§2.18)
+
+---
+
 ### 2026-05-13 — Comprehension-verification (Tier-3 over FRAGILITY_LOG, general-purpose agent)
 
 **Scope:** Bygg Tier-3 enforcement i autonomi-pyramiden — heuristisk
