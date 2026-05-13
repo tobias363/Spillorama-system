@@ -138,32 +138,34 @@ test("auto-mode: spill1.ticketColors[] har slug-keys for alle (color, size)-komb
   ]);
 });
 
-test("auto-mode: priseNok per (color, size) korrekt skalert med LARGE×2", () => {
+test("auto-mode: priseNok per (color, size) korrekt skalert med LARGE×3", () => {
+  // Pilot-fix 2026-05-13: LARGE_TICKET_PRICE_MULTIPLIER 2 → 3. Stor bong
+  // har 3 brett (Tobias-direktiv), så bundle-pris = smallPrice × 3.
   const catalog = makeAutoCatalog();
   const cfg = buildTicketConfigFromCatalog(catalog);
   const spill1 = cfg.spill1 as { ticketColors: Array<Record<string, unknown>> };
   const find = (slug: string) =>
     spill1.ticketColors.find((tc) => tc.color === slug);
 
-  // hvit: 5/10 kr (small/large)
+  // hvit: 5/15 kr (small/large) — large = small × 3 brett
   assert.equal((find("small_white")!.priceNok), 5);
-  assert.equal((find("large_white")!.priceNok), 10);
-  // gul: 10/20 kr
+  assert.equal((find("large_white")!.priceNok), 15);
+  // gul: 10/30 kr
   assert.equal((find("small_yellow")!.priceNok), 10);
-  assert.equal((find("large_yellow")!.priceNok), 20);
-  // lilla: 15/30 kr
+  assert.equal((find("large_yellow")!.priceNok), 30);
+  // lilla: 15/45 kr
   assert.equal((find("small_purple")!.priceNok), 15);
-  assert.equal((find("large_purple")!.priceNok), 30);
+  assert.equal((find("large_purple")!.priceNok), 45);
 });
 
-test("auto-mode: prizePerPattern.row_1 auto-skalert (hvit×1, gul×2, lilla×3)", () => {
-  // base rad1 = 100 kr (catalog.prizesCents.rad1 = 10000 øre).
+test("auto-mode: prizePerPattern.row_1 auto-skalert (LARGE × 3 → multipliers 3/6/9)", () => {
+  // Pilot-fix 2026-05-13: LARGE × 3 (var × 2). base rad1 = 100 kr.
   // hvit small (5 kr): 100 × 1 = 100 kr
   // gul small (10 kr): 100 × 2 = 200 kr
   // lilla small (15 kr): 100 × 3 = 300 kr
-  // hvit large (10 kr): 100 × 2 = 200 kr (samme som gul small)
-  // gul large (20 kr): 100 × 4 = 400 kr
-  // lilla large (30 kr): 100 × 6 = 600 kr
+  // hvit large (15 kr bundle): 100 × 3 = 300 kr (samme som lilla small)
+  // gul large (30 kr): 100 × 6 = 600 kr
+  // lilla large (45 kr): 100 × 9 = 900 kr
   const catalog = makeAutoCatalog();
   const cfg = buildTicketConfigFromCatalog(catalog);
   const spill1 = cfg.spill1 as { ticketColors: Array<Record<string, unknown>> };
@@ -177,21 +179,24 @@ test("auto-mode: prizePerPattern.row_1 auto-skalert (hvit×1, gul×2, lilla×3)"
     >;
 
   assert.equal(ppp("small_white").row_1!.amount, 100);
-  assert.equal(ppp("large_white").row_1!.amount, 200);
+  assert.equal(ppp("large_white").row_1!.amount, 300); // 100 × 3 (var 200)
   assert.equal(ppp("small_yellow").row_1!.amount, 200);
-  assert.equal(ppp("large_yellow").row_1!.amount, 400);
+  assert.equal(ppp("large_yellow").row_1!.amount, 600); // 100 × 6 (var 400)
   assert.equal(ppp("small_purple").row_1!.amount, 300);
-  assert.equal(ppp("large_purple").row_1!.amount, 600);
+  assert.equal(ppp("large_purple").row_1!.amount, 900); // 100 × 9 (var 600)
 
   // mode: "fixed" — engine skal lese prize1 (kr) og konvertere til øre
   assert.equal(ppp("small_white").row_1!.mode, "fixed");
 });
 
-test("auto-mode: prizePerPattern.full_house bruker bingoBase × multiplier", () => {
-  // bingoBase = 1000 kr (100000 øre)
+test("auto-mode: prizePerPattern.full_house bruker bingoBase × multiplier (LARGE × 3)", () => {
+  // Pilot-fix 2026-05-13: LARGE × 3. bingoBase = 1000 kr.
   // hvit small: 1000 × 1 = 1000 kr
   // gul small: 1000 × 2 = 2000 kr
   // lilla small: 1000 × 3 = 3000 kr
+  // hvit large: 1000 × 3 = 3000 kr (var 2000)
+  // gul large: 1000 × 6 = 6000 kr (var 4000)
+  // lilla large: 1000 × 9 = 9000 kr (var 6000)
   const catalog = makeAutoCatalog();
   const cfg = buildTicketConfigFromCatalog(catalog);
   const spill1 = cfg.spill1 as { ticketColors: Array<Record<string, unknown>> };
@@ -206,9 +211,9 @@ test("auto-mode: prizePerPattern.full_house bruker bingoBase × multiplier", () 
   assert.equal(fh("small_white").amount, 1000);
   assert.equal(fh("small_yellow").amount, 2000);
   assert.equal(fh("small_purple").amount, 3000);
-  assert.equal(fh("large_white").amount, 2000);
-  assert.equal(fh("large_yellow").amount, 4000);
-  assert.equal(fh("large_purple").amount, 6000);
+  assert.equal(fh("large_white").amount, 3000); // var 2000
+  assert.equal(fh("large_yellow").amount, 6000); // var 4000
+  assert.equal(fh("large_purple").amount, 9000); // var 6000
 });
 
 test("auto-mode: alle 5 faser populated for hver bongfarge", () => {

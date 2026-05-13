@@ -394,13 +394,17 @@ test("[1000-spill] payout: lilla solo Fullt Hus → 3000 kr", () => {
   assert.equal(payoutForColor(catalog, "small_purple", 5), 300000);
 });
 
-test("[1000-spill] payout: large_purple solo Fullt Hus → 6000 kr (×6)", () => {
+test("[1000-spill] payout: large_purple solo Fullt Hus → 9000 kr (×9)", () => {
+  // Pilot-fix 2026-05-13: LARGE_TICKET_PRICE_MULTIPLIER 2 → 3 (3 brett per
+  // stor bong). Large Purple bundle pris = 1500 × 3 = 4500 ø, ratio mot
+  // base 500 = 9. Auto-mult formel: base × (priceCents / 500) = 1000 × 9
+  // = 9000 kr.
   const catalog = makeStandardCatalog({
     slug: "1000-spill",
     displayName: "1000-spill",
     bingoBaseCents: 100000,
   });
-  assert.equal(payoutForColor(catalog, "large_purple", 5), 600000);
+  assert.equal(payoutForColor(catalog, "large_purple", 5), 900000);
 });
 
 // ── Spill 1: 5x500 (slug `5x500`, base 500) ─────────────────────────────────
@@ -821,14 +825,15 @@ test("[tv-extra] payout: lilla solo Fullt Hus → 9000 kr (over gammel 2500-cap)
   assert.equal(payoutForColor(catalog, "small_purple", 5), 900000);
 });
 
-test("[tv-extra] payout: large_purple Fullt Hus → 18000 kr (×6, dobbelt-large)", () => {
-  // large_purple (30 kr-bong) × 6 multiplier = 18000 kr på Fullt Hus base 3000
+test("[tv-extra] payout: large_purple Fullt Hus → 27000 kr (×9, LARGE × 3)", () => {
+  // Pilot-fix 2026-05-13: LARGE × 3. Large Purple bundle = 1500 × 3 = 4500 ø
+  // → ratio 9. base 3000 × 9 = 27000 kr.
   const catalog = makeStandardCatalog({
     slug: "tv-extra",
     displayName: "TV-Extra",
     bingoBaseCents: 300000,
   });
-  assert.equal(payoutForColor(catalog, "large_purple", 5), 1800000);
+  assert.equal(payoutForColor(catalog, "large_purple", 5), 2700000);
 });
 
 test("[tv-extra] §9.3: 1 hvit + 1 gul + 1 lilla på Fullt Hus → 3000 + 6000 + 9000", () => {
@@ -1118,14 +1123,15 @@ test("[cap] §3.4: lilla Oddsen-55 HIGH = 4500 kr (over 2500, ingen cap)", () =>
   assert.equal(potCents, 450000); // 4500 kr — ingen cap på MAIN_GAME
 });
 
-test("[cap] §3.4: large_purple TV-Extra = 18000 kr (over 2500, ingen cap)", () => {
+test("[cap] §3.4: large_purple TV-Extra = 27000 kr (LARGE × 3, ingen cap)", () => {
+  // Pilot-fix 2026-05-13: LARGE × 3. base 3000 × 9 = 27000 kr.
   const catalog = makeStandardCatalog({
     slug: "tv-extra",
     displayName: "TV-Extra",
     bingoBaseCents: 300000,
   });
   const potCents = payoutForColor(catalog, "large_purple", 5);
-  assert.equal(potCents, 1800000); // 18000 kr — ingen cap
+  assert.equal(potCents, 2700000); // 27000 kr — ingen cap
 });
 
 // ── Bridge-defensive: edge cases per spill ─────────────────────────────────
