@@ -50,6 +50,9 @@ export class TicketGridHtml {
     this.onCancelTicket = opts.onCancelTicket ?? null;
 
     this.root = document.createElement("div");
+    // data-test attribute consumed by Playwright pilot-flow tests
+    // (tests/e2e/spill1-pilot-flow.spec.ts). Inert in production.
+    this.root.setAttribute("data-test", "ticket-grid");
     Object.assign(this.root.style, {
       position: "absolute",
       display: "flex",
@@ -144,7 +147,24 @@ export class TicketGridHtml {
    */
   setTickets(
     tickets: Ticket[],
-    opts: { cancelable: boolean; entryFee: number; state: GameState; liveTicketCount?: number },
+    opts: {
+      cancelable: boolean;
+      entryFee: number;
+      state: GameState;
+      liveTicketCount?: number;
+      /**
+       * Tobias-bug 2026-05-13: autoritativ ticket-types fra lobby-runtime
+       * catalog. Bruker `priceMultiplier`/`ticketCount` herfra istedenfor
+       * `state.ticketTypes` (room:update.gameVariant — 8 legacy-typer som
+       * matcher feil med Spill 1 sin (size, color)-modell).
+       */
+      ticketTypes?: Array<{
+        name: string;
+        type: string;
+        priceMultiplier: number;
+        ticketCount: number;
+      }>;
+    },
   ): void {
     const liveCount = opts.liveTicketCount ?? 0;
 
@@ -367,20 +387,74 @@ export class TicketGridHtml {
     }
   }
 
-  private computePrice(ticket: Ticket, opts: { entryFee: number; state: GameState }): number {
+  private computePrice(
+    ticket: Ticket,
+    opts: {
+      entryFee: number;
+      state: GameState;
+      ticketTypes?: Array<{
+        name: string;
+        type: string;
+        priceMultiplier: number;
+        ticketCount: number;
+      }>;
+    },
+  ): number {
     if (typeof ticket.price === "number") return Math.round(ticket.price);
-    const tt = opts.state.ticketTypes?.find((x) => x.type === ticket.type);
-    // Per-brett pris (det som vises på hvert enkelt brett-kort), ikke bundle-pris.
-    // `priceMultiplier` skalerer bundle-pris fra base-entryFee (Small Yellow=1×,
-    // Large Yellow=3× osv.). `ticketCount` er antall brett bundlen utgjør
-    // (Small=1 brett, Large=3 brett). Deler vi bundle-pris på ticketCount får vi
-    // pris per enkelt brett:
+
+    // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): tidligere brukte
+    // vi state.ticketTypes (fra room:update.gameVariant) for å mappe
+    // ticket.type → priceMultiplier. Det feiler for Spill 1 i pilot fordi:
+    //   - room:update sender 8 legacy-typer (small_yellow, large_yellow, …)
+    //   - server-rendrede tickets har type "small"/"large" og color "white"
+    //     /"yellow"/"purple" (basert på spec.color + spec.size)
+    //   - find((x) => x.type === "small") returnerer FIRST match — som er
+    //     `small_yellow` — feil priceMultiplier
+    //
+    // Fix: prioriter `opts.ticketTypes` (fra PlayScreen.lobbyTicketConfig,
+    // 6 rows med korrekte priceMultiplier 1/3/2/6/3/9). Match på
+    // (type, color) — fall tilbake til state.ticketTypes for legacy.
+    const lobbyTypes = opts.ticketTypes;
+    let priceMultiplier = 1;
+    let ticketCount = 1;
+    if (lobbyTypes && lobbyTypes.length > 0) {
+      // Match by canonical name (eks: ticket.color "Large White" + type
+      // "large" → vi leter etter ticketTypes-entry med samme combo). Pilot-
+      // ticket-config bruker navn ("Small Yellow") med type "small"/"large".
+      const ticketColor = (ticket.color ?? "").toLowerCase();
+      const ticketSize = (ticket.type ?? "").toLowerCase();
+      const found = lobbyTypes.find((tt) => {
+        const ttName = tt.name.toLowerCase();
+        const ttType = tt.type.toLowerCase();
+        // Sjekk at både size og color matcher:
+        //   ticket.type = "small" / "large"
+        //   ticket.color = "Small White" / "Large White" osv.
+        const nameContainsColor = ticketColor && ttName.includes(ticketColor);
+        const typeMatches = ttType === ticketSize;
+        return nameContainsColor && typeMatches;
+      });
+      if (found) {
+        priceMultiplier = found.priceMultiplier;
+        ticketCount = found.ticketCount;
+      }
+    } else {
+      // Legacy fall-back: state.ticketTypes med type-only match.
+      const tt = opts.state.ticketTypes?.find((x) => x.type === ticket.type);
+      priceMultiplier = tt?.priceMultiplier ?? 1;
+      ticketCount = tt?.ticketCount ?? 1;
+    }
+
+    // Per-brett pris (det som vises på hvert enkelt brett-kort), ikke
+    // bundle-pris. `priceMultiplier` skalerer bundle-pris fra
+    // base-entryFee. `ticketCount` er antall brett bundlen utgjør
+    // (Small=1 brett, Large=3 brett). Deler vi bundle-pris på ticketCount
+    // får vi pris per enkelt brett:
     //   Small Yellow:  10 × 1 / 1 = 10 kr per brett ✅
-    //   Large Yellow:  10 × 3 / 3 = 10 kr per brett ✅ (3 brett bundled, totalt 30 kr)
-    // Tidligere returnerte denne 30 kr per Large-brett — bundle-pris i stedet
-    // for per-brett-pris (verifisert live 2026-04-30 av Tobias).
-    const priceMultiplier = tt?.priceMultiplier ?? 1;
-    const ticketCount = tt?.ticketCount ?? 1;
+    //   Large Yellow:  10 × 6 / 3 = 20 kr per brett ✅
+    // Wait — det er feil. La oss verifisere:
+    //   Small Yellow: entryFee=5, mult=2, count=1 → 5×2/1 = 10 kr ✅
+    //   Large Yellow: entryFee=5, mult=6, count=3 → 5×6/3 = 10 kr ✅
+    // Stor og Liten samme per-brett-pris — riktig per Tobias-spec.
     const bundlePrice = opts.entryFee * priceMultiplier;
     return Math.round(bundlePrice / ticketCount);
   }

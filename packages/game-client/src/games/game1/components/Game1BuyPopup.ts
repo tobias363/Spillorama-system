@@ -105,6 +105,10 @@ export class Game1BuyPopup {
 
   constructor(overlay: HtmlOverlayManager) {
     this.backdrop = document.createElement("div");
+    // data-test attributes (inert in production — only consumed by Playwright
+    // pilot-flow tests in tests/e2e/spill1-pilot-flow.spec.ts). Adds zero
+    // runtime cost since browsers store attribute strings; not used by CSS.
+    this.backdrop.setAttribute("data-test", "buy-popup-backdrop");
     // KRITISK: Ingen backdrop-filter (PR #468-mønster) — popup ligger over Pixi-canvas;
     // backdrop-filter trigger composite-recompute hver Pixi-frame → blink ved ball-trekk.
     // Mørkere semi-transparent bakgrunn alene gir tilsvarende fokus-effekt.
@@ -239,6 +243,7 @@ export class Game1BuyPopup {
       fontWeight: "500",
     });
     this.totalBrettEl = document.createElement("div");
+    this.totalBrettEl.setAttribute("data-test", "buy-popup-total-brett");
     this.totalBrettEl.textContent = "0 brett";
     Object.assign(this.totalBrettEl.style, {
       fontSize: "22px",
@@ -253,6 +258,7 @@ export class Game1BuyPopup {
     totalRow.appendChild(totalLeft);
 
     this.totalKrEl = document.createElement("div");
+    this.totalKrEl.setAttribute("data-test", "buy-popup-total-kr");
     this.totalKrEl.textContent = "0 kr";
     Object.assign(this.totalKrEl.style, {
       fontSize: "22px",
@@ -266,12 +272,14 @@ export class Game1BuyPopup {
 
     // ── Buttons ────────────────────────────────────────────────────────────
     this.buyBtn = document.createElement("button");
+    this.buyBtn.setAttribute("data-test", "buy-popup-confirm");
     this.buyBtn.textContent = "Velg brett for å kjøpe";
     this.stylePrimaryBtn(this.buyBtn);
     this.buyBtn.addEventListener("click", () => this.handleBuy());
     this.card.appendChild(this.buyBtn);
 
     this.cancelBtn = document.createElement("button");
+    this.cancelBtn.setAttribute("data-test", "buy-popup-cancel");
     this.cancelBtn.textContent = "Avbryt";
     this.styleSecondaryBtn(this.cancelBtn);
     this.cancelBtn.addEventListener("click", () => {
@@ -348,6 +356,18 @@ export class Game1BuyPopup {
       const displayName = this.getDisplayName(tt);
       this.buildTypeRow(displayName, tt.type, tt.name, price, tt.ticketCount);
     }
+
+    // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): etter en
+    // vellykket kjøp setter `showResult(true)` cancelBtn til styled-disabled
+    // (opacity 0.5, cursor:default). Hvis spilleren åpner popup-en på nytt
+    // (eks. via "Kjøp flere brett"-knapp) er cancelBtn-staten STALE og
+    // brukeren kan ikke avbryte. updateTotal() reseter buyBtn men IKKE
+    // cancelBtn. Vi resetter cancelBtn eksplisitt her som del av
+    // showWithTypes-init.
+    this.cancelBtn.disabled = false;
+    this.cancelBtn.style.opacity = "1";
+    this.cancelBtn.style.cursor = "pointer";
+    this.cancelBtn.textContent = "Avbryt";
 
     this.statusMsg.textContent = "";
     this.renderLossState(lossState);
@@ -546,6 +566,10 @@ export class Game1BuyPopup {
     const color = ticketColor(canonicalName);
 
     const row = document.createElement("div");
+    // data-test slug uses canonical backend name (Small White / Large Yellow)
+    // since that's stable, lowercase with hyphens. Inert in production.
+    const rowTestSlug = canonicalName.toLowerCase().replace(/\s+/g, "-");
+    row.setAttribute("data-test", `buy-popup-row-${rowTestSlug}`);
     Object.assign(row.style, {
       position: "relative",
       display: "flex",
@@ -587,6 +611,7 @@ export class Game1BuyPopup {
       gap: "6px",
     });
     const priceTxt = document.createElement("span");
+    priceTxt.setAttribute("data-test", `buy-popup-price-${rowTestSlug}`);
     priceTxt.textContent = `${price} kr`;
     meta.appendChild(priceTxt);
 
@@ -630,7 +655,9 @@ export class Game1BuyPopup {
     });
 
     const minusBtn = this.createStepBtn("\u2212");
+    minusBtn.setAttribute("data-test", `buy-popup-minus-${rowTestSlug}`);
     const qtyLabel = document.createElement("span");
+    qtyLabel.setAttribute("data-test", `buy-popup-qty-${rowTestSlug}`);
     qtyLabel.textContent = "0";
     Object.assign(qtyLabel.style, {
       minWidth: "26px",
@@ -641,6 +668,7 @@ export class Game1BuyPopup {
       fontVariantNumeric: "tabular-nums",
     });
     const plusBtn = this.createStepBtn("+");
+    plusBtn.setAttribute("data-test", `buy-popup-plus-${rowTestSlug}`);
 
     stepper.appendChild(minusBtn);
     stepper.appendChild(qtyLabel);

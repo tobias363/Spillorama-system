@@ -57,6 +57,9 @@ playwright-report/
 test-results/
 .playwright/
 
+# Playwright E2E pilot-flow output (binary screenshots, videos, traces)
+tests/e2e/__output__/
+
 # Pilot-hardware test-profile runtime artefakter
 scripts/performance-budget/report-pilot-hw.json
 
