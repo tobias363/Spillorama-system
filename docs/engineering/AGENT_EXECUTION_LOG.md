@@ -281,12 +281,13 @@ kostnad ved å bare lime inn taggen uten å lese entry-en.
 - `import.meta.url` + named exports lar samme fil være både CLI og test-target uten kunstig refactor
 
 **Verifisering (PM):**
-- Vil verifisere at workflow renderer korrekt på faktisk PR etter merge til main
-- Forventer at neste PR mot main får både FRAGILITY-review (eksisterende) + Tobias-readiness (nytt)
+- Hva PM må sjekke: kjør `node --test scripts/__tests__/pm-push-control.test.mjs`
+  + `bash scripts/__tests__/pre-push-scope-check.test.sh` for å verifisere
+  tester. Sjekk at `.claude/active-agents.json` er committed med tom
+  state. Sjekk at `.husky/pre-push*` er executable. Kjør
+  `node scripts/pm-push-control.mjs dashboard` og åpne HTML-en.
 
-**Tid:** ~3 timer agent-arbeid
-
-**Eierskap:** `scripts/generate-tobias-readiness.mjs`, `scripts/tobias-readiness-templates/`, `scripts/__tests__/generate-tobias-readiness.test.mjs`, `.github/workflows/ai-fragility-review.yml` (Tobias-section), `docs/engineering/TOBIAS_READINESS_FORMAT.md`
+**Tid:** ~3 timer agent-arbeid (under 6-8h estimat).
 
 ---
 
