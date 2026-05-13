@@ -563,6 +563,20 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Prevention:**
 - Sjekk PR-tittel matcher regex før push
 
+### §5.8 — `.husky/pre-commit-fragility-check.sh` krever bash 4 (declare -A)
+
+**Severity:** P1 (blokkerer commits på macOS hvis wired)
+**Oppdaget:** 2026-05-13 (under comprehension-verification-utvikling)
+**Symptom:** Scriptet bruker `declare -A FRAGILITY_MAP=()` (bash 4 associative arrays). macOS default bash er 3.2.57 — feiler med `declare: -A: invalid option` ved kjøring. Scriptet ble lagt til i PR #1326 men aldri wiret i `.husky/pre-commit`. Hvis det wires nå, vil ALLE commits på Mac avvises med exit 2.
+**Root cause:**
+- macOS har bash 3.2 av lisens-grunner (GPL v3 i bash 4+). Apple-developer-stack bruker `zsh` som default, men husky kaller `bash` eksplisitt.
+- Linux/CI har bash 5 — der fungerer scriptet
+**Fix:** Refaktor `pre-commit-fragility-check.sh` til POSIX-kompatibel logikk (uten `declare -A`) eller bytt til Node-implementasjon. Inntil da: la hooken være IKKE-wiret i `.husky/pre-commit` — komplement-verktøyene (`comprehension-check` + `ai-fragility-review.yml`) gir delvis dekning.
+**Prevention:**
+- Bash 4-features (`declare -A`, `mapfile`, `readarray`) skal ikke brukes i hooks
+- Hvis bash 3.2-grenser er for trange, port hooken til Node (matcher mønster fra `check-pm-gate.mjs`)
+- Test alle nye hooks lokalt på macOS før wiring
+
 ---
 
 ## §6 Test-infrastruktur

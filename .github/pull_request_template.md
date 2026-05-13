@@ -91,6 +91,26 @@ Before marking a Linear issue **Done**, all three must be true:
 <!-- Docs-only / dependabot / ci-bot — gjelder ikke for kode-endringer -->
 <!-- resurrection-not-applicable: <rolle> -->
 
+---
+
+## Knowledge protocol (Tobias-direktiv 2026-05-13)
+
+Hvis denne PR-en rør pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet), bekreft minst ett av disse:
+
+- [ ] **PITFALLS_LOG.md** oppdatert ELLER ingen ny fallgruve oppdaget
+- [ ] **PM_HANDOFF_YYYY-MM-DD.md** utkast skrevet ELLER ikke sesjons-slutt
+- [ ] **Relevant skill** under `.claude/skills/` oppdatert ELLER ikke generaliserbart mønster
+- [ ] **AGENT_EXECUTION_LOG.md** appended hvis denne PR-en kommer fra en agent-leveranse
+
+### FRAGILITY-comprehension (Tier-3, etablert 2026-05-13)
+
+Hvis commits i denne PR-en har `[context-read: F-NN]`-tagger, bekreft:
+
+- [ ] Hver `[context-read: F-NN]`-tag har en tilhørende `## Comprehension`-blokk i commit-message som paraphraserer entry-en (filer + ≥ 1 regel fra "Hva ALDRI gjøre")
+- [ ] Eventuelle `[comprehension-bypass: ...]`-bruk er forklart i PR-beskrivelsen og minst 20 tegn lang
+
+Se [`docs/engineering/COMPREHENSION_VERIFICATION.md`](../docs/engineering/COMPREHENSION_VERIFICATION.md) for detaljer. Håndheves automatisk av `.husky/pre-commit-comprehension.sh`.
+
 ## Tracking
 - Linear issue: 
 - Release note entry:
