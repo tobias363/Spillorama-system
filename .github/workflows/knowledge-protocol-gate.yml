@@ -1,0 +1,160 @@
+name: Knowledge Protocol Gate
+
+# Tobias-direktiv 2026-05-13: blokker PR hvis pilot-relatert kode er endret
+# uten utfylt knowledge-protocol-checkbox i PR-body.
+#
+# Formål: garantere at PITFALLS_LOG / PM_HANDOFF / skill-docs ikke "glemmes"
+# av PM/agent ved sesjons-slutt. Kunnskap fra hver sesjon må overleve til
+# neste PM/agent.
+#
+# Se docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md §5.1 + §2.2
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+    branches: [main]
+
+jobs:
+  check-knowledge-protocol:
+    name: Knowledge protocol enforcement
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect pilot-relatert kode-endring
+        id: detect
+        run: |
+          set -euo pipefail
+          # Pilot-paths som krever knowledge-protocol-update
+          PILOT_PATHS=(
+            'apps/backend/src/game/'
+            'packages/game-client/src/games/game1/'
+            'packages/game-client/src/games/game2/'
+            'packages/game-client/src/games/game3/'
+            'apps/admin-web/src/pages/cash-inout/'
+            'apps/admin-web/src/pages/agent-portal/'
+            'apps/backend/src/routes/agentGame1'
+            'apps/backend/src/routes/agentGamePlan'
+            'apps/backend/src/routes/adminGame1'
+            'apps/backend/src/sockets/'
+            'apps/backend/src/wallet/'
+            'apps/backend/src/compliance/'
+            'tests/e2e/'
+          )
+
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" || true)
+
+          PILOT_TOUCHED=false
+          MATCHED_FILES=""
+          while IFS= read -r file; do
+            for path in "${PILOT_PATHS[@]}"; do
+              if [[ "$file" == "$path"* ]]; then
+                PILOT_TOUCHED=true
+                MATCHED_FILES="${MATCHED_FILES}- $file"$'\n'
+                break
+              fi
+            done
+          done <<< "$CHANGED"
+
+          echo "pilot_touched=$PILOT_TOUCHED" >> "$GITHUB_OUTPUT"
+          {
+            echo "matched_files<<EOF_MATCHED"
+            echo -e "$MATCHED_FILES"
+            echo "EOF_MATCHED"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Pilot-relatert kode endret: $PILOT_TOUCHED"
+          if [[ "$PILOT_TOUCHED" == "true" ]]; then
+            echo "Filer:"
+            echo -e "$MATCHED_FILES"
+          fi
+
+      - name: Verifiser knowledge-protocol-checkbox i PR-body
+        if: steps.detect.outputs.pilot_touched == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const matchedFiles = `${{ steps.detect.outputs.matched_files }}`;
+            const body = context.payload.pull_request.body || '';
+
+            // Tre måter å passere:
+            //   1. Alle tre pilot-checkboxer krysset av (PITFALLS, PM_HANDOFF, skill)
+            //   2. "Knowledge protocol N/A" krysset av (ikke pilot-PR)
+            //   3. Eksplisitt bypass i body (gate-bypass: <reason>)
+
+            const reBypass = /gate-bypass:\s*\S+/i;
+            const reNA = /\[x\]\s+\*\*Knowledge protocol N\/A\*\*/i;
+            const rePitfalls = /\[x\]\s+\*\*PITFALLS_LOG oppdatert\*\*/i;
+            const reHandoff = /\[x\]\s+\*\*PM_HANDOFF utkast skrevet\*\*/i;
+            const reSkill = /\[x\]\s+\*\*Relevant skill oppdatert\*\*/i;
+
+            const hasBypass = reBypass.test(body);
+            const hasNA = reNA.test(body);
+            const allThree = rePitfalls.test(body) && reHandoff.test(body) && reSkill.test(body);
+
+            const passed = hasBypass || hasNA || allThree;
+
+            if (passed) {
+              core.info('✅ Knowledge-protocol-gate passert.');
+              core.info(`Method: ${hasBypass ? 'bypass' : hasNA ? 'N/A' : 'all-three-checked'}`);
+              return;
+            }
+
+            // Failure — kommenter PR-en og blokker
+            const message = [
+              '⚠️ **Knowledge Protocol Gate — blokkert**',
+              '',
+              `Denne PR-en rører pilot-relatert kode:`,
+              '```',
+              matchedFiles,
+              '```',
+              '',
+              'Per Tobias-direktiv 2026-05-13 må knowledge-protocol-seksjonen i PR-body være utfylt for å unngå at kunnskap fra denne sesjonen blir tapt for neste PM/agent.',
+              '',
+              'Velg én av disse for å passere:',
+              '',
+              '**1. Hvis pilot-PR:** Kryss av alle tre i PR-body:',
+              '- [x] **PITFALLS_LOG oppdatert** ELLER ingen ny fallgruve oppdaget i denne PR-en',
+              '- [x] **PM_HANDOFF utkast skrevet** ELLER dette er ikke sesjons-slutt',
+              '- [x] **Relevant skill oppdatert** ELLER mønsteret er ikke generaliserbart',
+              '',
+              '**2. Hvis ikke pilot-PR** (false positive): Kryss av:',
+              '- [x] **Knowledge protocol N/A** — PR-en rører ikke pilot-relatert kode',
+              '',
+              '**3. Hvis emergency-hotfix:** Legg til linjen `gate-bypass: <begrunnelse>` i PR-body.',
+              '',
+              'Se [`docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`](https://github.com/tobias363/Spillorama-system/blob/main/docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md) §5.1 for full protokoll.',
+            ].join('\n');
+
+            // Auto-kommentér én gang
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Knowledge Protocol Gate — blokkert')
+            );
+            if (!existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: message,
+              });
+            }
+
+            core.setFailed('Knowledge-protocol-checkbox mangler i PR-body. Se kommentar over.');
+
+      - name: OK — knowledge-protocol N/A (ikke pilot-PR)
+        if: steps.detect.outputs.pilot_touched == 'false'
+        run: |
+          echo "✅ Ingen pilot-relatert kode endret — knowledge-protocol-gate skipped."

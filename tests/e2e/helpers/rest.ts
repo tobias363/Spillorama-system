@@ -179,24 +179,57 @@ export async function masterStop(
   }
 }
 
+export interface ResetPilotStateOptions {
+  /**
+   * Tobias-direktiv 2026-05-13: Tester deler samme DB som Tobias' manuelle
+   * dev-stack. For å unngå å ødelegge en pågående manual-sesjon er DEFAULT
+   * non-destructive — `destroyRooms: false`.
+   *
+   * Når `destroyRooms: true`:
+   *   - Master action stopper pågående runde
+   *   - Admin destruerer GoH-rommet (player-slots evicted, fresh state)
+   *   - Brukes i CI eller dedikerte "fresh-baseline"-tester
+   *
+   * Når `destroyRooms: false` (DEFAULT):
+   *   - Master action stopper pågående runde (idempotent)
+   *   - GoH-rom BEHOLDES — player-slots forblir, vinner-state intakt
+   *   - Safe å kjøre mens Tobias tester manuelt
+   *
+   * Se docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md §5.2.
+   */
+  destroyRooms?: boolean;
+}
+
 /**
- * Hard-reset pilot state via direct REST calls. Brukes i `beforeEach` for å
- * sikre at hver test starter med en fersh scheduled-game. Hvis et eldre
- * spill fortsatt kjører, prøver vi å stoppe det først.
+ * Reset pilot state via direct REST calls. Default `destroyRooms: false`
+ * gjør funksjonen SAFE å kjøre parallelt med Tobias' manuelle test —
+ * eneste side-effekt er at evt. pågående master-runde stoppes.
+ *
+ * For å garantere fresh baseline (eks. i CI), pass `{destroyRooms: true}`.
+ * Da destrueres GoH-rommet via admin-API og alle player-slots evictes.
  *
  * Etter `masterStop` ligger spilleren fortsatt i GoH-rommet (engine fjerner
  * ikke player-slot ved game-end — det er regulatorisk korrekt for at vinnere
- * skal se resultatet). Det fører til `PLAYER_ALREADY_IN_ROOM` ved neste join.
- * For å garantere fresh state destrueres GoH-rommet via admin-API.
+ * skal se resultatet). I non-destructive mode er det OK — testen er
+ * idempotent og `markHallReady` returnerer eksisterende game eller spawner ny.
  */
-export async function resetPilotState(masterToken: string): Promise<void> {
-  // 1. Stop master action.
+export async function resetPilotState(
+  masterToken: string,
+  options: ResetPilotStateOptions = {},
+): Promise<void> {
+  const { destroyRooms = false } = options;
+
+  // 1. Stop master action (idempotent).
   await masterStop(masterToken).catch(() => {
     /* ignore — no active round */
   });
 
-  // 2. Auto-login admin og destruér master-GoH-rommet så ingen player-slots
-  //    henger igjen mellom tester.
+  // 2. Hvis destroyRooms: destruér GoH-rommet for fresh state.
+  //    Default false så vi ikke ødelegger Tobias' manual-sesjon (samme DB).
+  if (!destroyRooms) {
+    return;
+  }
+
   const admin = await autoLogin("tobias@nordicprofil.no").catch(() => null);
   if (admin) {
     const ROOMS_TO_NUKE = [

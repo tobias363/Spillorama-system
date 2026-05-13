@@ -271,67 +271,76 @@ PM skal IKKE duplisere agent-arbeid. PM-rollen mens en agent kjører:
 
 ---
 
-## 5. Tobias' ansvar (det jeg trenger fra deg)
+## 5. Tobias' fastlåste beslutninger (immutable — overført fra 2026-05-13)
 
-For at protokollen skal fungere trenger jeg dette fra deg:
+Disse 5 beslutningene er bekreftet av Tobias 2026-05-13 og er IMMUTABLE inntil han eksplisitt sier annet. Ny PM skal IKKE be om disse på nytt. Sitater fra Tobias i kursiv.
 
-### 5.1 Disiplin-håndhevelse
+### 5.1 Disiplin-håndhevelse: AKTIVT
 
-**Strict policy:** Hvis PR mergees uten at relevante kunnskaps-hjul er oppdatert, kan vi ikke forvente at neste PM får full kontekst. Forslag:
+> "Ja kjør"
 
-- **PR-template** utvidet med checkbox-seksjon "Knowledge protocol":
-  - [ ] PITFALLS_LOG oppdatert ELLER ingen ny fallgruve
-  - [ ] PM_HANDOFF utkast skrevet ELLER ikke sesjons-slutt
-  - [ ] Relevant skill oppdatert ELLER ikke generaliserbart
-- **Danger.yml-regel** som blokkerer PR hvis pilot-relatert kode er endret uten knowledge-protocol checkbox
+`danger.yml`-regel blokkerer PR hvis pilot-relatert kode er endret uten knowledge-protocol-checkbox i PR-body. PR-template har checkbox-seksjon "Knowledge protocol":
+- [ ] PITFALLS_LOG oppdatert ELLER ingen ny fallgruve
+- [ ] PM_HANDOFF utkast skrevet ELLER ikke sesjons-slutt
+- [ ] Relevant skill oppdatert ELLER ikke generaliserbart
 
-**Spørsmål til deg:** Ok å sette opp dette? Tar ~30 min å implementere.
+Implementert i `.github/workflows/knowledge-protocol-gate.yml` og `.github/pull_request_template.md`.
 
-### 5.2 Test-budsjett
+### 5.2 Test-DB-strategi: SAMME DB, NON-DESTRUCTIVE TESTER
 
-For å iterere effektivt trenger vi:
+> "Kan det ikke være samme DB på test sesjon og live?"
 
-- **Dedikert test-DB** (separat fra demo-state) så `resetPilotState` ikke kræsjer pågående manual test
-  - Opsjon A: Annen Postgres-port (5433) for test
-  - Opsjon B: Schema-isolasjon (test-schema vs public)
-  - Opsjon C: Ignorer, kjør test alltid mot live demo-state
+Pilot-test bruker SAMME Postgres-DB som Tobias' manuelle dev-stack. For å unngå at test ødelegger pågående manual-sesjon:
 
-- **CI-runner**: pilot-flow-test kan kjøre på GitHub Actions med Postgres+Redis services. ~3-5 min per PR. Trenger din OK fordi det øker CI-tid.
+- **Default:** Tester er **non-destructive** — de leser state, kjører i isolerte scheduled-games, og rydder kun sine egne purchases.
+- **Opt-in destructive reset:** `resetPilotState({destroyRooms: true})` kreves eksplisitt. Brukes kun i CI eller dedikerte "fresh-baseline"-tester.
+- **Default i E2E-tester:** `destroyRooms: false`.
 
-**Spørsmål til deg:** Hvilken opsjon for test-DB? Pilot CI-gate ja/nei?
+Implementert i `tests/e2e/helpers/rest.ts:resetPilotState`-signatur.
 
-### 5.3 Tidsbudsjett før pilot-vurdering
+### 5.3 Hard deadline: INGEN — kvalitet > tid
 
-Du sa "siste forsøk vi gjør før jeg må ta en vurdering med min sjef hva som er veien videre". For at jeg skal estimere riktig trenger jeg:
+> "Vi har så mange dager vi trenger for at det skal være kvalitet, robust og Evolution Gaming standard. Kvalitet skal ikke gå på bekostning av tid."
 
-- **Hard deadline:** Når er pilot-vurderings-møtet?
-- **Hva regnes som "klart"?** All-greens pipeline, eller manuell sign-off, eller mengde features?
-- **Hvor mange dager kan vi investere i test-infra/dokumentasjon før vi ikke har mer tid?**
+Ingen ekstern deadline presser pilot. Pilot lanseres NÅR:
+1. Test-suite dekker alle pilot-flyter (master + Rad-vinst + Fortsett + auto-start + wallet-asserts + payout)
+2. CI-gate blokkerer pilot-relatert kode uten grønn test
+3. R1-R12 (LIVE_ROOM_ROBUSTNESS_MANDATE) er ferdig eller eksplisitt utsatt med dokumentasjon
+4. Tobias har gjennomført manuell smoke-test og bekrefter
+5. Knowledge-protocol disiplin er etablert (skill-oppdatering per agent-leveranse)
 
-Foreslår: 1-2 dager til testene dekker Rad-vinst + Fortsett + auto-start. 1 dag til CI-gate. Deretter Tobias gjør manuell flyt-test og rapporterer eventuelle gjenværende bugs som testen ikke fanger. Hver av disse bugs blir egen test FØRST, fix etterpå.
+Ny PM skal IKKE be om deadline-bekreftelse. Mantra: **"Kommer til å spare utrolig mye tid på å få dette riktig nå"** (Tobias 2026-05-13).
 
-### 5.4 Eskaleringsstier
+### 5.4 Plan C-budsjett: ÅPENT — én måned ekstra OK
 
-Hvis vi finner strukturelle bugs (≥ 3 i BUG_CATALOG-strukturell-tabell):
+> "Som sagt tar det 1 mnd ekstra fordi vi må fikse bugs eller restrukturere så gjør vi det. Man kommer til å tape enda mer hvis vi setter ut et system som ikke funker."
 
-- **Plan C** — arkitektur-rewrite av buy-flow (server pre-rendret ticket-objekter, klient pure render)
-- Estimat: 3-5 dager
-- Spør deg: er det innenfor budsjett?
+Hvis BUG_CATALOG-strukturell-tabell viser ≥ 3 strukturelle bugs:
+- Trigger arkitektur-rewrite (Plan C)
+- Inntil 1 måned ekstra utviklingstid godkjent
+- Lag `docs/architecture/PLAN_C_BUY_FLOW_REWRITE_<dato>.md` med spec
+- Bekreft scope med Tobias FØR start
 
-Hvis vi finner < 3 strukturelle bugs:
-- Plan B er nok — fortsetter med test-driven iterasjon på implementasjons-nivå
+Ingen separat budsjett-godkjennelse trengs for ≤ 1 måned.
 
-### 5.5 Ressurser jeg er villig til å skalere
+### 5.5 Parallelle agenter: GRØNT LYS — så mange som hensiktsmessig
 
-Hvis du gir grønt lys, kan jeg spawn flere agenter parallelt på:
-- Rad-vinst-test (B-fase 2c)
-- Auto-start-bug-isolation
-- CI-integration
-- Wallet-balance-asserts
+> "Ja, du kan spawne så mange agenter du ser hensiktsmessig for god progresjon."
 
-Hver agent koster claude.ai API-tokens, men ikke mye relativt til 5-10 dagers manual iterasjon.
+PM-AI kan spawn agenter uten å spørre, så lenge:
+- Hver agent har klart scope (ikke kollisjon med andre agenter på samme fil)
+- PM eier scope-kart og koordinerer
+- Agent får presis prompt med scope-grenser
+- Hver agent oppdaterer AGENT_EXECUTION_LOG ved fullføring
 
-**Spørsmål til deg:** Grønt lys for opp til 4 parallelle agenter når PR #1305 mergees?
+Typiske parallelle slot:
+- 1 agent på Rad-vinst-test (B-fase 2c)
+- 1 agent på auto-start-bug-isolasjon
+- 1 agent på CI-integration (B-fase 3b)
+- 1 agent på wallet-balance-asserts
+- + flere ved behov
+
+Token-kost akseptert som relativt billig vs. manuelle iterasjons-dager.
 
 ---
 
@@ -363,7 +372,7 @@ Konkrete anti-mønstre fra 3-dagers-tap:
 
 ---
 
-## 7. Hvordan vite om det funker
+## 7. Hvordan vite at protokollen funker
 
 Suksess-kriterier for protokollen:
 

@@ -67,6 +67,24 @@ Before marking a Linear issue **Done**, all three must be true:
 
 - [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, har en ADR blitt opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se `docs/adr/README.md` for når ADR kreves.)
 
+## Knowledge protocol (mandatory for pilot-relatert kode)
+
+Tobias-direktiv 2026-05-13: "Vi må tilegne oss kunnskap og dokumentere slik at denne kunnskapen ikke er tapt med ny PM og agenter."
+
+Hvis PR-en rører pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, agent-portal, room-state), kryss av alle tre:
+
+- [ ] **PITFALLS_LOG oppdatert** ELLER ingen ny fallgruve oppdaget i denne PR-en
+- [ ] **PM_HANDOFF utkast skrevet** (`docs/operations/PM_HANDOFF_YYYY-MM-DD.md`) ELLER dette er ikke sesjons-slutt
+- [ ] **Relevant skill oppdatert** (`.claude/skills/<name>/SKILL.md` ELLER tilsvarende doc i `docs/engineering/`) ELLER mønsteret er ikke generaliserbart
+
+For ikke-pilot-PR (rene docs, dependabot, infra-tweaks): kryss av denne i stedet:
+
+- [ ] **Knowledge protocol N/A** — PR-en rører ikke pilot-relatert kode
+
+Håndhevelse: `.github/workflows/knowledge-protocol-gate.yml` blokkerer PR hvis pilot-kode endret uten utfylt seksjon.
+
+Se [`docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`](../docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md) for full protokoll.
+
 ## Tracking
 - Linear issue: 
 - Release note entry:

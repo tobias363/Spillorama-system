@@ -159,6 +159,52 @@ Pilot-omfang er 4 haller. Utvidelse forutsetter at R4 (load-test 1000), R6 (outb
 ### 2.11 Skill-loading lazy per-task
 Last KUN skills når du selv skal redigere kode i det domenet. Skip for ren PM/orkestrering eller delegert agent-arbeid (vedtatt 2026-04-25).
 
+### 2.12 Test-driven iterasjon på pilot-kode (vedtatt 2026-05-13)
+
+Etter 3-dagers buy-flow-iterasjon uten konvergens: **manuell loop-iterasjon er forbudt**. Hvis en bug sees 2+ ganger, MÅ test skrives FØRST som reproduserer, deretter fix.
+
+Pilot-test-infra: `npm run test:pilot-flow` (13s deterministic). Detaljer i [`docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`](./PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md).
+
+> "Vi må ha en fullverdig testflyt for effektiv utvikling. Hvis dette tar 3 dager å lage er det 100% verdt det vi har nå brukt 3 dager på."
+> — Tobias 2026-05-13
+
+### 2.13 Disiplin-håndhevelse: knowledge-protocol-checkbox blokkerer PR (vedtatt 2026-05-13)
+
+Hver PR som rører pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout) MÅ ha utfylt checkbox-seksjon "Knowledge protocol" i PR-body. Håndheves av `.github/workflows/knowledge-protocol-gate.yml` (danger-style sjekk). Tre checkboxer:
+
+- [ ] PITFALLS_LOG oppdatert ELLER ingen ny fallgruve
+- [ ] PM_HANDOFF utkast skrevet ELLER ikke sesjons-slutt
+- [ ] Relevant skill oppdatert ELLER ikke generaliserbart
+
+Mangler én eller flere → PR blokkeres til de er ekspl. krysset av.
+
+> "Vi må tilegne oss kunnskap og dokumentere slik at denne kunnskapen ikke er tapt med ny PM og agenter."
+> — Tobias 2026-05-13
+
+### 2.14 Test-DB: samme som live-stack, men non-destructive by default (vedtatt 2026-05-13)
+
+Pilot-test bruker SAMME Postgres-DB som Tobias' manuelle dev-stack. Tester er **non-destructive by default** — `resetPilotState({destroyRooms: true})` kreves eksplisitt for fresh-baseline.
+
+### 2.15 Ingen hard deadline — kvalitet > tid (vedtatt 2026-05-13)
+
+> "Vi har så mange dager vi trenger for at det skal være kvalitet, robust og Evolution Gaming standard. Kvalitet skal ikke gå på bekostning av tid."
+
+Pilot lanseres NÅR alle kvalitets-kriteriene er oppfylt, ikke etter en kalendat. Detaljer i [`PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`](./PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md) §5.3.
+
+### 2.16 Plan C: én måned ekstra OK ved strukturelle bugs (vedtatt 2026-05-13)
+
+Hvis BUG_CATALOG viser ≥ 3 strukturelle bugs i pilot-kode, godkjent å bruke inntil 1 måned ekstra på arkitektur-rewrite. Ingen separat budsjett-godkjennelse trengs.
+
+> "1 mnd ekstra fordi vi må fikse bugs eller restrukturere så gjør vi det. Man kommer til å tape enda mer hvis vi setter ut et system som ikke funker."
+> — Tobias 2026-05-13
+
+### 2.17 Parallelle agenter: grønt lys uten å spørre (vedtatt 2026-05-13)
+
+PM-AI kan spawne så mange parallelle agenter som hensiktsmessig for fremgang. Krav: klart scope per agent, ingen fil-kollisjon, AGENT_EXECUTION_LOG oppdateres per agent-leveranse.
+
+> "Ja, du kan spawne så mange agenter du ser hensiktsmessig for god progresjon."
+> — Tobias 2026-05-13
+
 ---
 
 ## 3. Trinn-for-trinn onboarding-rutine
