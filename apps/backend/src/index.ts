@@ -177,6 +177,7 @@ import type {
   Game1ArmedTicketSpecEntry,
 } from "./game/Game1ArmedToPurchaseConversionService.js";
 import { Game1DrawEngineService } from "./game/Game1DrawEngineService.js";
+import { buildVariantConfigFromGameConfigJson } from "./game/Game1DrawEngineHelpers.js";
 import { Game1PotService } from "./game/pot/Game1PotService.js";
 import { Game1MiniGameOrchestrator } from "./game/minigames/Game1MiniGameOrchestrator.js";
 import { MiniGameWheelEngine } from "./game/minigames/MiniGameWheelEngine.js";
@@ -443,6 +444,11 @@ const roomUpdateEmitLogger = rootLogger.child({ module: "room-update-emit" });
 const roomLifecycleLogger = rootLogger.child({ module: "room-lifecycle" });
 const socketLifecycleExtendedLogger = rootLogger.child({
   module: "socket-lifecycle-extended",
+});
+// Tobias-direktiv 2026-05-13 (pilot-bugs #1-3 + #6): logger for post-
+// engine-start hook som binder per-rom entryFee + variantConfig.
+const onEngineStartedLogger = rootLogger.child({
+  module: "game1-on-engine-started",
 });
 // BIN-614: Admin web shell is a Vite SPA. `dist/` is produced by
 // `npm --prefix apps/admin-web run build`. We serve from `dist/` if it exists,
@@ -2494,6 +2500,126 @@ game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // stop. Late-binding fordi ticketPurchaseService konstrueres etter
 // masterControl (sirkulær avhengighet ellers).
 game1MasterControlService.setTicketPurchaseService(game1TicketPurchaseService);
+
+// Tobias-direktiv 2026-05-13 (pilot-bugs #1-3 + #6 + #7): POST-engine-start
+// hook for å binde per-rom entryFee + variantConfig fra `ticket_config_json`.
+//
+// Uten denne hooken returnerer `room:update` med `entryFee: 0` (default-
+// fallback fra `getRoomConfiguredEntryFee` når in-memory mapping ikke har
+// rommet), og klient-side fallback i PlayScreen.ts faller til `state.entryFee
+// ?? 10` → 30 kr for Large Yellow. Patterns + premier vises på default
+// (100/200/200/200/1000) istedenfor faktiske catalog-priser.
+//
+// Wiring-rekkefølge: kalles POST-commit, POST-engine.startGame —
+// idempotent for re-start (samme scheduled-game-id gir samme config-binding).
+// Soft-fail: feil her påvirker IKKE master-start-flyt; klient kan vise
+// default-priser inntil neste pattern:won eller manuell refresh.
+game1MasterControlService.setOnEngineStarted(async ({ scheduledGameId }) => {
+  const { rows } = await platformService.getPool().query<{
+    ticket_config_json: unknown;
+    room_code: string | null;
+  }>(
+    `SELECT ticket_config_json, room_code
+       FROM "${pgSchema}"."app_game1_scheduled_games"
+      WHERE id = $1`,
+    [scheduledGameId],
+  );
+  const row = rows[0];
+  if (!row) {
+    onEngineStartedLogger.warn(
+      { scheduledGameId },
+      "[onEngineStarted] scheduled-game ikke funnet — kan ikke binde entryFee/variantConfig",
+    );
+    return;
+  }
+  const roomCode = row.room_code;
+  if (!roomCode) {
+    onEngineStartedLogger.warn(
+      { scheduledGameId },
+      "[onEngineStarted] scheduled-game mangler room_code — kan ikke binde entryFee/variantConfig (kommer typisk senere når første spiller joiner)",
+    );
+    return;
+  }
+
+  // 1) Bind roomConfiguredEntryFee fra ticket_config_json.
+  // Finn billigste bongpris i øre, konverter til kr (rom-helper forventer kr).
+  const ticketCatalog = extractTicketCatalogFromConfig(row.ticket_config_json);
+  if (ticketCatalog.length > 0) {
+    const smallestCents = ticketCatalog.reduce(
+      (min, t) => (t.priceCents < min ? t.priceCents : min),
+      ticketCatalog[0].priceCents,
+    );
+    const smallestKr = smallestCents / 100;
+    if (Number.isFinite(smallestKr) && smallestKr > 0) {
+      roomState.roomConfiguredEntryFeeByRoom.set(roomCode, smallestKr);
+      onEngineStartedLogger.info(
+        {
+          scheduledGameId,
+          roomCode,
+          smallestPriceCents: smallestCents,
+          smallestPriceKr: smallestKr,
+          ticketColorsCount: ticketCatalog.length,
+        },
+        "[onEngineStarted] roomConfiguredEntryFee bundet fra ticket_config_json",
+      );
+    } else {
+      onEngineStartedLogger.warn(
+        { scheduledGameId, roomCode, ticketCatalog },
+        "[onEngineStarted] ugyldig smallest-pris — beholder eksisterende rom-entryFee",
+      );
+    }
+  } else {
+    onEngineStartedLogger.warn(
+      { scheduledGameId, roomCode },
+      "[onEngineStarted] ticket_config_json mangler `ticketTypesData[]` — kan ikke binde entryFee",
+    );
+  }
+
+  // 2) Re-bind variantByRoom fra ticket_config_json så pre-game patterns
+  // + prizes vises korrekt på klient-side CenterTopPanel. Uten denne får
+  // klient default Norsk Bingo-patterns (100/200/200/200/1000) istedenfor
+  // faktiske catalog-priser (eks. Innsatsen 500-2000 kr).
+  //
+  // `ticket_config_json` har samme shape som `game_config_json` for
+  // Spill 1 (bridgen skriver `spill1.ticketColors[]`-blokk i begge), så
+  // `buildVariantConfigFromGameConfigJson` kan parse den direkte.
+  try {
+    const variantConfig = buildVariantConfigFromGameConfigJson(
+      row.ticket_config_json,
+    );
+    if (variantConfig) {
+      roomState.setVariantConfig(roomCode, {
+        gameType: "bingo",
+        config: variantConfig,
+      });
+      onEngineStartedLogger.info(
+        { scheduledGameId, roomCode },
+        "[onEngineStarted] variantByRoom re-bundet fra ticket_config_json",
+      );
+    } else {
+      onEngineStartedLogger.info(
+        { scheduledGameId, roomCode },
+        "[onEngineStarted] ticket_config_json kan ikke bygges til variantConfig — beholder eksisterende binding (default eller tidligere)",
+      );
+    }
+  } catch (variantErr) {
+    onEngineStartedLogger.warn(
+      { err: variantErr, scheduledGameId, roomCode },
+      "[onEngineStarted] buildVariantConfigFromGameConfigJson kastet — beholder eksisterende variant-binding",
+    );
+  }
+
+  // 3) Trigger room:update så klient får nye entryFee + patterns
+  // umiddelbart, ikke ved neste draw-tick.
+  try {
+    await emitRoomUpdate(roomCode);
+  } catch (emitErr) {
+    onEngineStartedLogger.warn(
+      { err: emitErr, scheduledGameId, roomCode },
+      "[onEngineStarted] emitRoomUpdate kastet — klient får nye verdier ved neste draw (fail-soft)",
+    );
+  }
+});
 
 // Bølge 2 (2026-05-08): MasterActionService — kanonisk sekvenseringsmotor
 // for plan-runtime → engine-bridge → engine-actions for Spill 1. ENESTE
