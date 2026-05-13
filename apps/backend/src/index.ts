@@ -420,7 +420,7 @@ import { adminRoomSnapshotKey } from "./sockets/adminRoomKeys.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
 import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
-import { bootstrapBackendSentry, sentryUserContextMiddleware, getSentryErrorHandlerMiddleware } from "./observability/sentryBootstrap.js";
+import { bootstrapBackendSentry, sentryUserContextMiddleware, getSentryErrorHandlerMiddleware, instrumentDbPools } from "./observability/sentryBootstrap.js";
 // OBS-5: PostHog event-analytics. Init is a no-op when POSTHOG_API_KEY is
 // unset so dev/test stays silent; in prod it batches business events for
 // funnel + cohort analytics. Complements Sentry (errors) and Rrweb
@@ -768,6 +768,15 @@ if (walletAdapter instanceof PostgresWalletAdapter) {
 const pgPoolMetricsReporter = createPgPoolMetricsReporter({
   pools: pgPoolMetricsPools,
 });
+
+// OBS-7 (2026-05-14): Sentry DB-tracing. Wraps `pool.query()` slik at hver
+// query blir en `db.sql.query`-span tied til den omkringliggende HTTP-trace.
+// No-op hvis SENTRY_DSN er unset eller traces-sample-rate er 0.
+// Idempotent per pool. Verifisert i Sentry Performance-tab.
+const _dbInstrumentationWrapped = instrumentDbPools(
+  pgPoolMetricsPools.map((p) => p.pool),
+);
+void _dbInstrumentationWrapped;
 
 const localBingoAdapter = usePostgresBingoAdapter
   ? new PostgresBingoSystemAdapter({ pool: sharedPool, schema: pgSchema, ssl: pgSsl })

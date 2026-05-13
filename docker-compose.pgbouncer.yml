@@ -1,0 +1,120 @@
+# OBS-7 (2026-05-14): pgBouncer connection-pooler.
+#
+# Hvorfor en SEPARAT docker-compose-fil:
+#   pgBouncer er en valgfri komponent for lokal pilot-skala-test. Det er
+#   ikke en del av default dev-stack (`docker-compose.yml` har kun
+#   Postgres + Redis + backend).
+#
+# Bruk:
+#   docker compose -f docker-compose.yml -f docker-compose.pgbouncer.yml up -d
+#
+# Dette starter pgBouncer på port 6432 som proxier til postgres:5432.
+# Backend kan deretter sette PGBOUNCER_URL og toggle pool-modus.
+#
+# Hvorfor pgBouncer trengs til pilot:
+#   Render Postgres `pro_4gb` har ~100 max_connections. Med 4-hall × 1500
+#   spillere × 0.5 % steady-state queries gir det momentane spikes på
+#   200-300 åpne connections — over cap. pgBouncer i transaction-mode
+#   gjør at 1500 klient-connections deler 20 Postgres-connections.
+#
+# Begrensninger med transaction-mode:
+#   - `SET LOCAL` virker fortsatt (per-transaction)
+#   - `SET` (sesjons-level) virker IKKE — connection-en kan resirkuleres
+#     mellom transaksjoner til ulike klienter
+#   - `LISTEN/NOTIFY` virker IKKE (vi bruker det ikke i prod-flyt)
+#   - Prepared statements: pgBouncer 1.21+ støtter dem; vi krever 1.21+.
+#   - Advisory locks via `pg_advisory_xact_lock` (transaction-scoped) virker.
+#     `pg_advisory_lock` (session-scoped) virker IKKE; ingen kode bruker det.
+#
+# Migrations:
+#   Migrations MÅ gå direkte mot Postgres (port 5432), IKKE pgBouncer (6432),
+#   fordi node-pg-migrate bruker session-level state. render.yaml setter
+#   DATABASE_URL_DIRECT for migrate-step og DATABASE_URL for app.
+#
+# Stats:
+#   `psql -h localhost -p 6432 pgbouncer -U postgres` deretter `SHOW STATS;`
+#   gir live pool-stats. Auth-DB-en heter `pgbouncer` (intern).
+
+services:
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p3
+    # 1.21+ trengs for prepared-statement-support i transaction-mode (krevd
+    # av node-pg). edoburu/pgbouncer-tag-konvensjon: `vMAJOR.MINOR.PATCH-pN`.
+    ports:
+      - "6432:6432"
+    environment:
+      # Backend som pgBouncer skal proxy til. `postgres` er service-navnet
+      # i hoved-docker-compose; nettverket deles via `external_links` under.
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: spillorama
+      DB_PASSWORD: spillorama
+      DB_NAME: spillorama
+      # Auth-fil genereres automatisk fra DB_USER/DB_PASSWORD. SCRAM-SHA-256
+      # er Postgres 16 sin default — matcher hoved-DB sin auth-method.
+      AUTH_TYPE: scram-sha-256
+
+      # Pool-mode: transaction. Hver klient-transaksjon binder en server-
+      # connection inntil COMMIT/ROLLBACK; deretter resirkuleres den.
+      # Dette gir BEST connection-multiplexing (1500 klient-conns deler
+      # 20 server-conns).
+      POOL_MODE: transaction
+
+      # Hvor mange server-connections pgBouncer holder per (database, user).
+      # 20 matcher backend sin `PG_POOL_MAX`-default. Server-connections
+      # er det som teller mot Postgres `max_connections`-cap.
+      DEFAULT_POOL_SIZE: 20
+
+      # Max samtidige klient-connections totalt. 200 dekker 4-hall × 50
+      # samtidige WebSocket-connections-with-DB-queries.
+      MAX_CLIENT_CONN: 200
+
+      # Min pool-size: pgBouncer holder N connections varm selv ved 0 load.
+      # 5 = kjapp respons på første query etter idle-periode.
+      MIN_POOL_SIZE: 5
+
+      # Reservere pool-slots for super-prioriterte connections. Backend
+      # bruker ikke dette — kun for psql-debug fra ops.
+      RESERVE_POOL_SIZE: 5
+      RESERVE_POOL_TIMEOUT: 3
+
+      # Reset query: kjøres etter hver transaksjon for å nullstille
+      # session-state (search_path, prepared statements i 1.21+).
+      # Vi vil ha standard-default-reset for å være safe.
+      SERVER_RESET_QUERY: DISCARD ALL
+
+      # Server-idle-timeout: lukk server-connection hvis den har vært idle > 600s.
+      SERVER_IDLE_TIMEOUT: 600
+
+      # Logging:
+      # `verbose 0` = kun warnings/errors. `verbose 1` = også notice (mye spam).
+      # I dev kan ops sette VERBOSE=1 hvis vi vil debugge connection-flyt.
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
+      LOG_POOLER_ERRORS: 1
+    networks:
+      # Bli med på samme nett som backend + postgres i hoved-compose.
+      - default
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    healthcheck:
+      # `psql -h ... -p 6432 -U postgres pgbouncer -c "SHOW VERSION"` er
+      # standard pgBouncer-helse-sjekk. Bruker en innebygd PGPASSWORD-shim.
+      test:
+        - CMD-SHELL
+        - >
+          PGPASSWORD=spillorama psql
+          -h localhost -p 6432
+          -U spillorama
+          -d spillorama
+          -c 'SELECT 1' >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# NB: Hoved-`docker-compose.yml` definerer `postgres`, `redis`, `backend`
+# services. Når denne fila merges inn med `-f`-flagg blir de samme
+# networks/volumes automatisk delt. Ingen overstyring av hoved-services her
+# — kun NY service `pgbouncer`.

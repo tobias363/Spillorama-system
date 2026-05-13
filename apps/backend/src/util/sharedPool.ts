@@ -64,6 +64,16 @@ export interface SharedPoolOptions {
  * during boot (typically in `index.ts`) before any service that needs DB
  * access is constructed. Throws if called twice or if connectionString
  * is empty.
+ *
+ * OBS-7 (2026-05-14): pgBouncer-toggle.
+ *   Hvis `PGBOUNCER_URL` er satt, brukes den i stedet for den passerte
+ *   `connectionString`. Da går runtime-queries via pgBouncer (transaction-
+ *   pool-mode, port 6432) i stedet for direkte mot Postgres. Migrations
+ *   skal IKKE bruke pgBouncer (de trenger session-level state); de leser
+ *   `APP_PG_CONNECTION_STRING` direkte via node-pg-migrate.
+ *
+ *   Når PGBOUNCER_URL er satt, logger vi det for synlighet — ops skal kunne
+ *   se i boot-log at vi kjører via pooler.
  */
 export function initSharedPool(options: SharedPoolOptions): Pool {
   if (sharedPool) {
@@ -71,10 +81,19 @@ export function initSharedPool(options: SharedPoolOptions): Pool {
       "[sharedPool] initSharedPool() called twice. The shared pool is a singleton — initialize once at boot."
     );
   }
-  const conn = options.connectionString.trim();
-  if (!conn) {
+  // OBS-7: pgBouncer-toggle via env. Hvis PGBOUNCER_URL er satt, overstyrer
+  // den den passerte connectionString. Tom string → fall tilbake til
+  // den passerte verdien (default).
+  const pgbouncerUrl = process.env.PGBOUNCER_URL?.trim();
+  const usePgBouncer = !!pgbouncerUrl;
+  const effectiveConn = usePgBouncer ? pgbouncerUrl! : options.connectionString.trim();
+  if (!effectiveConn) {
     throw new Error("[sharedPool] connectionString must not be empty.");
   }
+  if (usePgBouncer) {
+    console.log("[sharedPool] OBS-7: routing app-queries via pgBouncer (PGBOUNCER_URL set)");
+  }
+  const conn = effectiveConn;
 
   const tuning = getPoolTuning();
   const poolConfig: PoolConfig = {
@@ -90,8 +109,17 @@ export function initSharedPool(options: SharedPoolOptions): Pool {
   // DB-P1-6: install statement_timeout on every new connection. The
   // `connect` event fires once per backend connection (not per query)
   // so this is a fixed cost paid only at pool warm-up.
+  //
+  // OBS-7 (2026-05-14): I pgBouncer transaction-mode kan vi IKKE bruke
+  // session-level `SET` — bare `SET LOCAL` inne i en transaksjon. Hvis
+  // PGBOUNCER_URL er satt, dropper vi `SET statement_timeout` her og
+  // forventer at ops setter `statement_timeout` på Postgres-siden via
+  // `ALTER ROLE spillorama SET statement_timeout = '30s'`. Da gjelder
+  // det automatisk for alle nye connections uten å være session-state
+  // pgBouncer må håndtere.
+  const usePgBouncerForStatement = !!process.env.PGBOUNCER_URL?.trim();
   const stmtTimeoutMs = resolveStatementTimeoutMs(options.statementTimeoutMs);
-  if (stmtTimeoutMs > 0) {
+  if (stmtTimeoutMs > 0 && !usePgBouncerForStatement) {
     pool.on("connect", (client) => {
       // Fire-and-forget: if SET fails the client is still usable (just
       // without timeout protection). Log so ops notices misconfig.
@@ -104,6 +132,12 @@ export function initSharedPool(options: SharedPoolOptions): Pool {
           );
         });
     });
+  } else if (stmtTimeoutMs > 0 && usePgBouncerForStatement) {
+    console.log(
+      "[sharedPool] OBS-7: pgBouncer mode — skipping client-side SET statement_timeout. " +
+      "Set it on Postgres role instead: ALTER ROLE <app_user> SET statement_timeout = '" +
+      stmtTimeoutMs + "ms'"
+    );
   }
 
   // Surface pool errors so a transient network blip doesn't kill the
