@@ -1,0 +1,162 @@
+name: Delta Report Gate
+
+# Tobias-direktiv 2026-05-13: vanntett post-work-dokumentasjon.
+# Hver PR som rører pilot-relatert kode MÅ inkludere docs/delta/<dato>-<branch>.md
+# som beskriver hva som ble endret + hva andre steder kunne ha blitt brutt +
+# nye fragilities + brief for neste agent.
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+    branches: [main]
+
+jobs:
+  check-delta-report:
+    name: Delta report enforcement
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect pilot-relatert kode + sjekk delta-report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const path = require('path');
+            const fs = require('fs');
+
+            const PILOT_PATHS = [
+              'apps/backend/src/game/',
+              'packages/game-client/src/games/game1/',
+              'packages/game-client/src/games/game2/',
+              'packages/game-client/src/games/game3/',
+              'apps/admin-web/src/pages/cash-inout/',
+              'apps/admin-web/src/pages/agent-portal/',
+              'apps/backend/src/routes/agentGame1',
+              'apps/backend/src/routes/agentGamePlan',
+              'apps/backend/src/routes/adminGame1',
+              'apps/backend/src/sockets/',
+              'apps/backend/src/wallet/',
+              'apps/backend/src/compliance/',
+            ];
+
+            const base = context.payload.pull_request.base.sha;
+            const head = context.payload.pull_request.head.sha;
+            const changedFiles = execSync(`git diff --name-only ${base} ${head}`, {encoding: 'utf8'})
+              .split('\n').filter(Boolean);
+
+            const pilotChanged = changedFiles.filter(f =>
+              PILOT_PATHS.some(p => f.startsWith(p))
+            );
+
+            const deltaReports = changedFiles.filter(f =>
+              f.startsWith('docs/delta/') && f.endsWith('.md')
+            );
+
+            // Hvis ingen pilot-kode endret, ingen delta-report kreves
+            if (pilotChanged.length === 0) {
+              core.info('✅ Ingen pilot-kode endret — delta-report ikke påkrevd.');
+              return;
+            }
+
+            // Hvis bypass-marker i PR-body
+            const body = context.payload.pull_request.body || '';
+            const reBypass = /\[bypass-delta-report:\s*[^\]]+\]/i;
+            if (reBypass.test(body)) {
+              core.info('✅ Delta-report bypass dokumentert i PR-body.');
+              return;
+            }
+
+            // Hvis ingen delta-report finnes
+            if (deltaReports.length === 0) {
+              const message = [
+                '🛑 **Delta Report Gate — blokkert**',
+                '',
+                `Denne PR-en endrer pilot-relatert kode (${pilotChanged.length} filer) men har ingen \`docs/delta/<YYYY-MM-DD>-<branch>.md\`-rapport.`,
+                '',
+                `Endrede pilot-filer:`,
+                '```',
+                pilotChanged.slice(0, 15).join('\n'),
+                pilotChanged.length > 15 ? `... (+ ${pilotChanged.length - 15} flere)` : '',
+                '```',
+                '',
+                'Per Tobias-direktiv 2026-05-13: hver PR som endrer pilot-kode MÅ inkludere delta-rapport som:',
+                '',
+                '- Beskriver hva som ble endret (file:line)',
+                '- Lister hva ANDRE steder kunne ha blitt brutt',
+                '- Identifiserer nye fragilities',
+                '- Gir brief for neste agent som rører samme område',
+                '- Dokumenterer hvilke tester ble kjørt + status',
+                '',
+                'Mal:',
+                '```markdown',
+                '# Delta-rapport — <agent-id> / <branch>',
+                '',
+                '## Hva ble endret',
+                '- `path/file.ts:line` — beskrivelse',
+                '',
+                '## Hva andre steder kunne ha blitt brutt',
+                '- (proaktiv risiko-analyse)',
+                '',
+                '## Nye fragilities oppdaget',
+                '- F-NN-IDs (eller "ingen")',
+                '',
+                '## Brief for neste agent',
+                '- "Hvis du endrer X, husk at Y avhenger av Z"',
+                '',
+                '## Tester kjørt',
+                '- pilot-flow: ✅ / ❌',
+                '- unit-tests: ✅ / ❌',
+                '- manuell verifikasjon: ✅ / ❌ / N/A',
+                '```',
+                '',
+                'Filnavn-konvensjon: `docs/delta/YYYY-MM-DD-HHMM-<branch-shortname>.md`',
+                '',
+                'Emergency-bypass: legg `[bypass-delta-report: <begrunnelse>]` i PR-body.',
+              ].join('\n');
+
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+              const existing = comments.data.find(c =>
+                c.user.type === 'Bot' && c.body.includes('Delta Report Gate — blokkert')
+              );
+              if (!existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: message,
+                });
+              }
+
+              core.setFailed('Delta-report mangler. Se kommentar over.');
+              return;
+            }
+
+            // Verify delta-report har required sections
+            for (const reportPath of deltaReports) {
+              if (!fs.existsSync(reportPath)) continue;
+              const content = fs.readFileSync(reportPath, 'utf8');
+              const requiredSections = [
+                '## Hva ble endret',
+                '## Hva andre steder',
+                '## Nye fragilities',
+                '## Brief for neste agent',
+                '## Tester',
+              ];
+              const missing = requiredSections.filter(s => !content.includes(s));
+              if (missing.length > 0) {
+                core.warning(`${reportPath} mangler seksjoner: ${missing.join(', ')}`);
+              }
+            }
+
+            core.info(`✅ Delta-report funnet (${deltaReports.length} fil(er)).`);
