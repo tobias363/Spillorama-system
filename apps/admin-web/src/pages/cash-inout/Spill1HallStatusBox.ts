@@ -427,36 +427,18 @@ export function mountSpill1HallStatusBox(
           Toast.success("Hallen er markert som Klar.");
           break;
         case "unmark-ready":
-          // 2026-05-12 (Tobias pilot-test fix): tidligere ble dette en silent
-          // return hvis `readyActionGameId === null` (typisk når forrige
-          // runde var completed/cancelled). Backend `unmarkReady` aksepterer
-          // KUN status='scheduled'/'purchase_open'/'ready_to_start', og det
-          // finnes ingen lazy-spawn-flyt for unmark (det gir ingen mening å
-          // angre klar på en ferdig runde). Resultat: master klikket Angre
-          // Klar → ingenting skjedde → ingen feedback. Fiks: i terminal-runde
-          // viser vi en informativ toast i stedet for å avvise stille, og
-          // knapp-rendret disabler nå ready-knappene i terminal-runde slik
-          // at dette branchet bare treffes hvis race-state har tilbakestilt
-          // status mellom render og click.
+          // 2026-05-13 (Tobias pilot-test fix #5): "det er heller ikke mulig
+          // å angre klar i backend". Pre-fix-flyt avviste stille hvis
+          // `readyActionGameId === null` (terminal eller idle runde). Tobias
+          // var fortsatt markert Klar på en COMPLETED scheduled-game og
+          // kunne ikke angre, fordi backend `unmarkReady` krevde en
+          // pre-game gameId og det var ingen lazy-spawn for unmark.
           //
-          // 2026-05-13 (Tobias pilot-test regresjon-fix): skill mellom
-          // terminal-runde og idle-state så toast er presis. Render-laget
-          // disabler nå knappen i begge tilstander så dette branchet bare
-          // treffes ved race-state mellom render og click.
-          if (!readyActionGameId) {
-            if (terminalRound) {
-              Toast.info(
-                "Forrige runde er fullført — start neste runde først, deretter " +
-                "kan du markere Klar/Angre Klar for den nye runden.",
-              );
-            } else {
-              Toast.info(
-                "Ingen aktiv runde — vent til master starter neste spill, " +
-                "deretter kan du angre Klar for den nye runden.",
-              );
-            }
-            return;
-          }
+          // Backend støtter nå lazy-spawn for unmark-routen — speiler
+          // mark-ready-flyten: hvis gameId mangler eller refererer til en
+          // terminal scheduled-game, auto-advancer plan-run og spawner ny
+          // scheduled-game før unmark gjøres. Vi sender derfor
+          // `readyActionGameId` (kan være null) til API-klienten.
           await unmarkHallReadyForGame(ownHallId, readyActionGameId);
           Toast.info("Klar-markering angret.");
           break;
@@ -1171,15 +1153,15 @@ function renderOwnHallButtons(
   // Mark-handlinger (Marker Klar / Ingen kunder) kan kalles i alle pre-game
   // OG terminal-statuser fordi backend lazy-spawner ny runde ved behov.
   const editableForMark = isPreGameStatus || isTerminalRound;
-  // Unmark-handlinger (Angre Klar / Har kunder igjen) krever en
-  // eksisterende ikke-terminal scheduled-game-rad. I terminal-runde må
-  // master starte ny runde først. I idle-state finnes det heller ingen
-  // rad å oppdatere — vi disabler så click-handleren ikke bailer stille.
-  // NB: vi disabler IKKE basert på `hasValidGameId` for status="scheduled"
-  // — `hasValidGameId` er en lazy-spawn-relatert flagg (false også for
-  // status="scheduled" som er en gyldig DB-rad), mens backend `unmarkReady`
-  // aksepterer `scheduled` likt med `purchase_open`/`ready_to_start`.
-  const editableForUnmark = isPreGameStatus && !isIdleStatus;
+  // 2026-05-13 (Tobias pilot-test fix #5): unmark-handlinger (Angre Klar /
+  // Har kunder igjen) støtter nå lazy-spawn på samme måte som mark-
+  // handlinger. Backend `/api/admin/game1/halls/:hallId/unready` og
+  // `/has-customers` aksepterer null gameId og auto-advancer plan-run
+  // hvis nåværende posisjon er terminal. Vi enabler derfor knappen i
+  // alle pre-game OG terminal-statuser. Eneste case der det fortsatt
+  // ikke gir mening er når runden er aktiv (running/paused) — master
+  // kan ikke angre Klar mens engine trekker baller.
+  const editableForUnmark = isPreGameStatus || isTerminalRound;
 
   // 2026-05-09: backend håndterer lazy-spawn via
   // lazyEnsureScheduledGameForHall, så vi disabler IKKE for missing gameId.
@@ -1191,21 +1173,23 @@ function renderOwnHallButtons(
     ? ` title="${escapeHtml(lazyTooltip)}"`
     : "";
 
-  // 2026-05-12 (Tobias pilot-test fix): egen tooltip for terminal-runde
-  // som forklarer at neste runde må startes først. Skiller seg fra
-  // lazy-tooltip slik at master ser hvorfor knappen er disabled.
+  // 2026-05-13 (Tobias pilot-test fix #5): tooltip for terminal-runde
+  // forklarer nå at klikket lazy-spawner ny runde (mark- og unmark-
+  // handlinger har symmetriske flyter). Tidligere tekst sa "start neste
+  // runde først", men det stemmer ikke lenger — backend gjør det
+  // automatisk.
   const terminalTooltipAttr = isTerminalRound
     ? ` title="${escapeHtml(
-        "Forrige runde er fullført — start neste runde først",
+        "Forrige runde er fullført — handling gjelder neste runde (backend forbereder den)",
       )}"`
     : "";
-  // 2026-05-13 (Tobias pilot-test regresjon-fix): tooltip for idle-state
-  // når Angre Klar / Har kunder igjen ikke kan kalles fordi det ikke
-  // finnes en scheduled-game-rad ennå. Master får vite at de må vente
-  // på neste runde eller starte planen.
+  // 2026-05-13 (Tobias pilot-test fix #5): tooltip for idle-state
+  // forklarer at backend lazy-spawner ny scheduled-game ved behov.
+  // Tidligere disablet vi i idle; nå er det enabled, og tooltipen
+  // forklarer flyten.
   const idleUnmarkTooltipAttr = isIdleStatus
     ? ` title="${escapeHtml(
-        "Ingen aktiv runde — vent på at master starter neste spill",
+        "Backend lazy-spawner neste runde og oppdaterer Klar-status",
       )}"`
     : "";
 
