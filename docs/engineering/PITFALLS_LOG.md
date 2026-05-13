@@ -585,19 +585,21 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Prevention:**
 - Sjekk PR-tittel matcher regex før push
 
-### §5.8 — `.husky/pre-commit-fragility-check.sh` krever bash 4 (declare -A)
+### §5.8 — `.husky/pre-commit-fragility-check.sh` krever bash 4 (declare -A) — **FIXED 2026-05-13**
 
+**Status:** ✅ FIXED 2026-05-13 — se `scripts/check-fragility-comprehension.mjs` + thin bash 3.2 wrapper.
 **Severity:** P1 (blokkerer commits på macOS hvis wired)
 **Oppdaget:** 2026-05-13 (under comprehension-verification-utvikling)
-**Symptom:** Scriptet bruker `declare -A FRAGILITY_MAP=()` (bash 4 associative arrays). macOS default bash er 3.2.57 — feiler med `declare: -A: invalid option` ved kjøring. Scriptet ble lagt til i PR #1326 men aldri wiret i `.husky/pre-commit`. Hvis det wires nå, vil ALLE commits på Mac avvises med exit 2.
+**Symptom:** Scriptet brukte `declare -A FRAGILITY_MAP=()` (bash 4 associative arrays). macOS default bash er 3.2.57 — feiler med `declare: -A: invalid option` ved kjøring. Scriptet ble lagt til i PR #1326 men var ikke vanntett wiret i `.husky/pre-commit` (dokumentert som "ikke wiret" i kommentar på linje 18-21, men faktisk koden på linje 66-68 wiret den — som ville feilet på Mac).
 **Root cause:**
 - macOS har bash 3.2 av lisens-grunner (GPL v3 i bash 4+). Apple-developer-stack bruker `zsh` som default, men husky kaller `bash` eksplisitt.
 - Linux/CI har bash 5 — der fungerer scriptet
-**Fix:** Refaktor `pre-commit-fragility-check.sh` til POSIX-kompatibel logikk (uten `declare -A`) eller bytt til Node-implementasjon. Inntil da: la hooken være IKKE-wiret i `.husky/pre-commit` — komplement-verktøyene (`comprehension-check` + `ai-fragility-review.yml`) gir delvis dekning.
+**Fix (2026-05-13):** Strategi A (Node-port). Logikken er flyttet til `scripts/check-fragility-comprehension.mjs` (matcher mønsteret fra `scripts/check-pm-gate.mjs` og `scripts/verify-context-comprehension.mjs`). `.husky/pre-commit-fragility-check.sh` er nå en tynn bash 3.2-kompatibel wrapper som delegerer til Node-scriptet via `exec node`. Wiret inn som Trinn 3 i `.husky/pre-commit` parallelt med fixen. Test-suite i `scripts/__tests__/check-fragility-comprehension.test.mjs` (34 tester, inkluderer bash 3.2-kompatibilitetssjekk).
 **Prevention:**
-- Bash 4-features (`declare -A`, `mapfile`, `readarray`) skal ikke brukes i hooks
+- Bash 4-features (`declare -A`, `mapfile`, `readarray`, `${var,,}`, `${var^^}`, `${!arr[@]}`) skal ikke brukes i hooks
 - Hvis bash 3.2-grenser er for trange, port hooken til Node (matcher mønster fra `check-pm-gate.mjs`)
-- Test alle nye hooks lokalt på macOS før wiring
+- Test alle nye hooks lokalt på macOS før wiring (kjør `/bin/bash -n .husky/<file>.sh` for syntax-check; kjør hele scriptet på `/bin/bash` for runtime-test)
+- Ny test i `check-fragility-comprehension.test.mjs` (`wrapper bruker ikke bash 4-features`) håndhever dette automatisk for fragility-wrapperen
 
 ---
 
