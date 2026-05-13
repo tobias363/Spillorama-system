@@ -165,6 +165,12 @@ import { createDevDebugEventLogRouter } from "./routes/devDebugEventLog.js";
 // pilot-monitor-tail, backend-log, klient-events, DB-state) i én markdown-
 // rapport som PM-agenten kan lese med ett verktøykall.
 import { createDevBugReportRouter } from "./routes/devBugReport.js";
+// Tobias 2026-05-13: Rrweb DOM session-replay. Klienten POST'er rrweb-events
+// til /api/_dev/debug/rrweb-events; vi skriver én JSONL-fil per session til
+// /tmp/rrweb-session-<id>.jsonl. PM-agent kan trekke session-id ved bug
+// og spille av nøyaktig hva brukeren så som video. Komplementerer
+// devDebugEventLog (data-events) med visuell replay.
+import { createDevRrwebRouter } from "./routes/devRrweb.js";
 // Tobias 2026-05-12: backend-side observability for live Spill 1-flyt.
 // Lar PM-AI + Tobias se EKSAKT state (engine in-memory + DB + Socket.IO +
 // stateVersion) uten å gjette. Token-gated, fail-soft per kilde.
@@ -4980,6 +4986,15 @@ app.use(
     schema: pgSchema,
   }),
 );
+
+// Tobias 2026-05-13: Rrweb DOM session-replay collector. Token-gated.
+//   POST /api/_dev/debug/rrweb-events?token=<token>      — klient batch-flush
+//   GET  /api/_dev/debug/rrweb-sessions?token=...        — list sessions
+//   GET  /api/_dev/debug/rrweb-events?session=<id>&token=... — fetch events for replay
+// Klient (RrwebRecorder) POST'er rrweb-events i batcher; vi skriver én
+// JSONL-fil per session til /tmp/rrweb-session-<id>.jsonl. PM-agent kan
+// trekke session-id ved bug og spille av nøyaktig hva brukeren så.
+app.use(createDevRrwebRouter());
 
 // Tobias 2026-05-12: backend-side live-state-snapshot for Spill 1.
 //   GET /api/_dev/game-state-snapshot?roomCode=<code>&token=<token>
