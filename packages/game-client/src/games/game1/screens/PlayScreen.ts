@@ -687,16 +687,50 @@ export class PlayScreen extends Container {
     // etter `setWaitingForMasterPurchase(false)` får lov til å åpne
     // popup-en.
     const hasLive = running && state.myTickets.length > 0;
-    const hasTicketTypes =
-      state.ticketTypes.length > 0
-      || (this.lobbyTicketConfig?.ticketTypes.length ?? 0) > 0;
-    if (
+    const stateTicketTypesCount = state.ticketTypes.length;
+    const lobbyTicketTypesCount = this.lobbyTicketConfig?.ticketTypes.length ?? 0;
+    const hasTicketTypes = stateTicketTypesCount > 0 || lobbyTicketTypesCount > 0;
+    const preRoundTicketsCount = state.preRoundTickets?.length ?? 0;
+
+    const gateConditions = {
+      autoShowBuyPopupDone: this.autoShowBuyPopupDone,
+      hasLive,
+      hasTicketTypes,
+      waitingForMasterPurchase: this.waitingForMasterPurchase,
+      preRoundTicketsCount,
+      // Detalj-kontekst for diagnose
+      myTicketsLen: state.myTickets.length,
+      stateTicketTypesCount,
+      lobbyTicketTypesCount,
+      lobbyTicketConfigPresent: this.lobbyTicketConfig !== null,
+      gameStatus: state.gameStatus,
+      running,
+    };
+
+    const willOpen =
       !this.autoShowBuyPopupDone
       && !hasLive
       && hasTicketTypes
       && !this.waitingForMasterPurchase
-      && (state.preRoundTickets?.length ?? 0) === 0
-    ) {
+      && preRoundTicketsCount === 0;
+
+    // Tobias-bug 2026-05-13 (post-pilot-test): popup vises ikke ved manuell
+    // test selv om automatisert test (samme stack) passerer. Logg alle gate-
+    // conditions så vi kan se HVILKEN som feilet uten å gjette.
+    // Gated på `?debug=1`-klient-flagg samme som annen BUY-DEBUG-instrumentering.
+    const buyDebugEnabledForGate =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      /[?&]debug=1/.test(window.location.search);
+    if (buyDebugEnabledForGate) {
+      // eslint-disable-next-line no-console
+      console.log(
+        "[BUY-DEBUG][client][PlayScreen.autoShowGate]",
+        { willOpen, ...gateConditions },
+      );
+    }
+
+    if (willOpen) {
       this.autoShowBuyPopupDone = true;
       this.showBuyPopup(state);
     }
