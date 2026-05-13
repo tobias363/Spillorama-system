@@ -178,11 +178,20 @@ export async function markHallReadyForGame(
 
 export async function unmarkHallReadyForGame(
   hallId: string,
-  gameId: string
+  gameId: string | null
 ): Promise<unknown> {
+  // 2026-05-13 (Tobias pilot-test fix #5): gameId er nå OPTIONAL. Hvis null
+  // sendes (typisk fordi current scheduled-game er terminal), lazy-spawner
+  // backend ny scheduled-game via samme flyt som markHallReadyForGame.
+  // Tidligere bailet routen med GAME_ID_REQUIRED — som ga "ikke mulig å
+  // angre klar i backend"-rapporten fra Tobias.
+  const body: Record<string, unknown> = {};
+  if (gameId !== null) {
+    body.gameId = gameId;
+  }
   return apiRequest<unknown>(
     `/api/admin/game1/halls/${encodeURIComponent(hallId)}/unready`,
-    { method: "POST", auth: true, body: { gameId } }
+    { method: "POST", auth: true, body }
   );
 }
 /**

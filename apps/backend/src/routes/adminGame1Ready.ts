@@ -58,7 +58,10 @@ import type { Server as SocketServer } from "socket.io";
 import { DomainError } from "../errors/DomainError.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
-import type { Game1HallReadyService } from "../game/Game1HallReadyService.js";
+import type {
+  Game1HallReadyService,
+  HallReadyStatusRow,
+} from "../game/Game1HallReadyService.js";
 import {
   assertAdminPermission,
   assertUserHallScope,
@@ -522,6 +525,27 @@ export function createAdminGame1ReadyRouter(
   });
 
   // ── POST /api/admin/game1/halls/:hallId/unready ──────────────────────────
+  //
+  // 2026-05-13 (Tobias pilot-test fix #5): Tobias rapporterte "det er heller
+  // ikke mulig å angre klar i backend". Pre-fix-flyt:
+  //
+  //   • Master har Klar=true på COMPLETED scheduled-game (forrige runde).
+  //   • Plan-run er fortsatt `running` (har ikke auto-advancet ennå fordi
+  //     ingen mark-ready / advance-call siden runden ble completed).
+  //   • Lobby aggregator returnerer COMPLETED game som currentScheduledGameId.
+  //   • UI viser Angre Klar-knapp (siden isReady=true), men disabler den
+  //     med "terminal"-tooltip — eller den fyrer mot completed gameId, og
+  //     `Game1HallReadyService.unmarkReady` kaster `GAME_NOT_READY_ELIGIBLE`.
+  //
+  // Resultat: master kan ikke angre Klar, selv om de eksplisitt ber om det.
+  //
+  // Fix: speile lazy-spawn-flyten fra `/ready`-routen. Når gameId mangler
+  // ELLER refererer til en terminal scheduled-game, kall
+  // `lazyEnsureScheduledGameForHall` — den auto-advancer plan-run + spawner
+  // ny scheduled-game (status='scheduled'). Vi opererer så på den nye
+  // gameId. Hvis ingen ready-rad eksisterer ennå på den nye gameId
+  // (READY_STATUS_NOT_FOUND), behandler vi det som idempotent suksess:
+  // ønsket sluttstate er "ikke klar", og det er allerede gjeldende.
 
   router.post("/api/admin/game1/halls/:hallId/unready", async (req, res) => {
     try {
@@ -531,13 +555,114 @@ export function createAdminGame1ReadyRouter(
       if (!isRecordObject(req.body)) {
         throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
       }
-      const gameId = mustBeNonEmptyString(req.body.gameId, "gameId");
 
-      const status = await hallReadyService.unmarkReady({
-        gameId,
+      // 2026-05-13: gameId er nå OPTIONAL — speiler mark-ready-routen.
+      // Hvis caller sender en konkret gameId, prøv den først. Hvis vi
+      // får terminal-feil eller gameId mangler, fall tilbake til
+      // lazy-spawn.
+      const rawGameId =
+        typeof req.body.gameId === "string" && req.body.gameId.trim()
+          ? req.body.gameId.trim()
+          : null;
+
+      let gameId: string;
+      let usedLazySpawn = false;
+
+      // Prøv den oppgitte gameId først (happy-path: pre-game runde).
+      if (rawGameId) {
+        try {
+          const status = await hallReadyService.unmarkReady({
+            gameId: rawGameId,
+            hallId,
+            userId: actor.id,
+          });
+
+          fireAudit({
+            actorId: actor.id,
+            actorType: actorTypeFromRole(actor.role),
+            action: "hall.sales.reopened",
+            resource: "game1_scheduled_game",
+            resourceId: rawGameId,
+            details: { hallId, lazySpawned: false },
+            ipAddress: clientIp(req),
+            userAgent: userAgent(req),
+          });
+
+          const { hallName, allReady } = await buildAndBroadcastReadyUpdate(
+            rawGameId,
+            hallId
+          );
+
+          apiSuccess(res, {
+            gameId: rawGameId,
+            hallId,
+            hallName,
+            isReady: status.isReady,
+            readyAt: status.readyAt,
+            readyByUserId: status.readyByUserId,
+            digitalSold: status.digitalTicketsSold,
+            physicalSold: status.physicalTicketsSold,
+            excludedFromGame: status.excludedFromGame,
+            allReady,
+          });
+          return;
+        } catch (err) {
+          // Hvis caller traff en terminal scheduled-game OG vi har
+          // lazy-spawn tilgjengelig, fortsett til fallback. Andre
+          // feil (auth, hall-scope, infra) propageres uendret.
+          if (
+            err instanceof DomainError &&
+            err.code === "GAME_NOT_READY_ELIGIBLE" &&
+            lazyEnsureScheduledGameForHall
+          ) {
+            // fall through til lazy-spawn under
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      if (!lazyEnsureScheduledGameForHall) {
+        throw new DomainError(
+          "GAME_ID_REQUIRED",
+          "gameId er påkrevd (lazy-spawn er ikke aktivert i denne instansen).",
+        );
+      }
+
+      // Lazy-spawn-fallback: enten gameId mangler, eller gameId pekte på en
+      // terminal runde. `lazyEnsureScheduledGameForHall` auto-advancer
+      // plan-run hvis nødvendig og returnerer en gyldig pre-game gameId.
+      const ensured = await lazyEnsureScheduledGameForHall({
         hallId,
-        userId: actor.id,
+        actorUserId: actor.id,
+        actorRole: actor.role,
       });
+      gameId = ensured.scheduledGameId;
+      usedLazySpawn = true;
+
+      // Forsøk å unmarke ready-row på den nye gameId. Hvis ingen rad
+      // finnes (READY_STATUS_NOT_FOUND), er sluttstaten allerede "ikke
+      // klar" — vi returnerer idempotent suksess i stedet for å feile.
+      let status: HallReadyStatusRow | null = null;
+      try {
+        status = await hallReadyService.unmarkReady({
+          gameId,
+          hallId,
+          userId: actor.id,
+        });
+      } catch (err) {
+        if (
+          err instanceof DomainError &&
+          err.code === "READY_STATUS_NOT_FOUND"
+        ) {
+          // OK — ny gameId har ingen ready-rad ennå. Treat as no-op
+          // success: master har angret Klar, og default state er
+          // is_ready=false (ingen rad = ikke klar).
+          status = null;
+        } else {
+          throw err;
+        }
+      }
 
       fireAudit({
         actorId: actor.id,
@@ -547,6 +672,8 @@ export function createAdminGame1ReadyRouter(
         resourceId: gameId,
         details: {
           hallId,
+          lazySpawned: usedLazySpawn,
+          previousGameId: rawGameId,
         },
         ipAddress: clientIp(req),
         userAgent: userAgent(req),
@@ -561,12 +688,12 @@ export function createAdminGame1ReadyRouter(
         gameId,
         hallId,
         hallName,
-        isReady: status.isReady,
-        readyAt: status.readyAt,
-        readyByUserId: status.readyByUserId,
-        digitalSold: status.digitalTicketsSold,
-        physicalSold: status.physicalTicketsSold,
-        excludedFromGame: status.excludedFromGame,
+        isReady: status?.isReady ?? false,
+        readyAt: status?.readyAt ?? null,
+        readyByUserId: status?.readyByUserId ?? null,
+        digitalSold: status?.digitalTicketsSold ?? 0,
+        physicalSold: status?.physicalTicketsSold ?? 0,
+        excludedFromGame: status?.excludedFromGame ?? false,
         allReady,
       });
     } catch (error) {

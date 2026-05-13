@@ -116,6 +116,13 @@ interface StartOpts {
   getStatusImpl?: (gameId: string) => Promise<HallReadyStatusRow[]>;
   allReadyImpl?: (gameId: string) => Promise<boolean>;
   halls?: Record<string, { id: string; name: string }>;
+  // 2026-05-13 (Tobias pilot-test fix #5): lazy-spawn callback for
+  // /ready og /unready når gameId mangler eller refererer terminal-runde.
+  lazyEnsureImpl?: (input: {
+    hallId: string;
+    actorUserId: string;
+    actorRole: PublicAppUser["role"];
+  }) => Promise<{ scheduledGameId: string }>;
 }
 
 async function startServer(opts: StartOpts = {}): Promise<Ctx> {
@@ -198,6 +205,7 @@ async function startServer(opts: StartOpts = {}): Promise<Ctx> {
       auditLogService,
       hallReadyService,
       io,
+      lazyEnsureScheduledGameForHall: opts.lazyEnsureImpl,
     })
   );
 
@@ -507,6 +515,182 @@ test("PR2 router: POST unready avviser hvis ingen rad finnes", async () => {
   }
 });
 
+// ── 2026-05-13 (Tobias pilot-test fix #5): lazy-spawn for /unready ─────────
+//
+// Tobias: "det er heller ikke mulig å angre klar i backend". Pre-fix avvist
+// `/unready` med GAME_NOT_READY_ELIGIBLE når caller refererte til en
+// terminal scheduled-game (completed/cancelled). Med fixen speiler routen
+// `/ready`-flyten: hvis caller får terminal-feil ELLER gameId mangler, og
+// `lazyEnsureScheduledGameForHall` er wired, auto-advancer plan-run +
+// spawner ny scheduled-game, og unmark binder seg til den nye gameId.
+
+test("PR2 router: POST unready uten gameId med lazy-spawn → 200 (auto-advance) (Tobias fix #5)", async () => {
+  let lazySpawnCalls = 0;
+  const ctx = await startServer({
+    users: { "t-op": operatorUser },
+    halls: { "hall-a": { id: "hall-a", name: "Hall A" } },
+    lazyEnsureImpl: async () => {
+      lazySpawnCalls += 1;
+      return { scheduledGameId: "g-new" };
+    },
+  });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/game1/halls/hall-a/unready",
+      "t-op",
+      {}
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.gameId, "g-new");
+    assert.equal(res.body.data.isReady, false);
+    assert.equal(lazySpawnCalls, 1);
+    // Verifiser at unmarkReady ble kalt på den nye gameId.
+    const unmarkCall = ctx.serviceCalls.unmarkReady.find(
+      (c) => c.gameId === "g-new"
+    );
+    assert.ok(unmarkCall, "unmarkReady skal ha blitt kalt på lazy-spawnet gameId");
+    // Audit-loggen skal reflektere lazy-spawn.
+    const audits = await ctx.auditStore.list({});
+    const audit = audits.find((a) => a.action === "hall.sales.reopened");
+    assert.ok(audit);
+    assert.equal(
+      (audit?.details as Record<string, unknown> | undefined)?.lazySpawned,
+      true
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PR2 router: POST unready på terminal runde med lazy-spawn → 200 (fallback) (Tobias fix #5)", async () => {
+  // Caller sender gameId pekende på en terminal runde. Backend `unmarkReady`
+  // kaster GAME_NOT_READY_ELIGIBLE. Routen skal da kalle lazy-spawn og
+  // unmarke på den nye gameId.
+  let unmarkAttempts = 0;
+  let lazySpawnCalls = 0;
+  const ctx = await startServer({
+    users: { "t-op": operatorUser },
+    halls: { "hall-a": { id: "hall-a", name: "Hall A" } },
+    unmarkReadyImpl: async (input) => {
+      unmarkAttempts += 1;
+      if (input.gameId === "g-old-completed") {
+        throw new DomainError(
+          "GAME_NOT_READY_ELIGIBLE",
+          "completed"
+        );
+      }
+      return defaultStatus({
+        hallId: input.hallId,
+        gameId: input.gameId,
+        isReady: false,
+        readyAt: null,
+      });
+    },
+    lazyEnsureImpl: async () => {
+      lazySpawnCalls += 1;
+      return { scheduledGameId: "g-new-spawned" };
+    },
+  });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/game1/halls/hall-a/unready",
+      "t-op",
+      { gameId: "g-old-completed" }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.gameId, "g-new-spawned");
+    assert.equal(res.body.data.isReady, false);
+    assert.equal(lazySpawnCalls, 1);
+    // Verifiser at unmarkReady ble forsøkt to ganger: én feilet på
+    // terminal gameId, én lyktes på lazy-spawn gameId.
+    assert.equal(unmarkAttempts, 2);
+    const calls = ctx.serviceCalls.unmarkReady.map((c) => c.gameId);
+    assert.deepEqual(calls, ["g-old-completed", "g-new-spawned"]);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PR2 router: POST unready på lazy-spawnet runde uten ready-rad → 200 (idempotent) (Tobias fix #5)", async () => {
+  // Etter lazy-spawn finnes det ennå ingen ready-rad på den nye gameId.
+  // Backend `unmarkReady` kaster READY_STATUS_NOT_FOUND. Routen skal
+  // behandle dette som idempotent suksess — sluttstaten "ikke klar" er
+  // allerede oppnådd.
+  const ctx = await startServer({
+    users: { "t-op": operatorUser },
+    halls: { "hall-a": { id: "hall-a", name: "Hall A" } },
+    unmarkReadyImpl: async () => {
+      throw new DomainError("READY_STATUS_NOT_FOUND", "no row");
+    },
+    lazyEnsureImpl: async () => ({ scheduledGameId: "g-new" }),
+  });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/game1/halls/hall-a/unready",
+      "t-op",
+      {}
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.gameId, "g-new");
+    assert.equal(res.body.data.isReady, false);
+    assert.equal(res.body.data.readyAt, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PR2 router: POST unready uten gameId og uten lazy-spawn → GAME_ID_REQUIRED", async () => {
+  // Bakover-kompatibel: hvis lazy-spawn ikke er wired (legacy/test-setup),
+  // krever routen at gameId er satt i body.
+  const ctx = await startServer({ users: { "t-op": operatorUser } });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/game1/halls/hall-a/unready",
+      "t-op",
+      {}
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "GAME_ID_REQUIRED");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PR2 router: POST unready på GAME_NOT_READY_ELIGIBLE uten lazy-spawn → propagerer feilen", async () => {
+  // Bakover-kompatibel: uten lazy-spawn skal terminal-feilen propageres
+  // til klient (ikke maskeres som suksess).
+  const ctx = await startServer({
+    users: { "t-op": operatorUser },
+    unmarkReadyImpl: async () => {
+      throw new DomainError(
+        "GAME_NOT_READY_ELIGIBLE",
+        "completed"
+      );
+    },
+  });
+  try {
+    const res = await req(
+      ctx,
+      "POST",
+      "/api/admin/game1/halls/hall-a/unready",
+      "t-op",
+      { gameId: "g1" }
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "GAME_NOT_READY_ELIGIBLE");
+  } finally {
+    await ctx.close();
+  }
+});
+
 // ── GET /games/:gameId/ready-status ─────────────────────────────────────────
 
 test("PR2 router: GET ready-status som ADMIN → 200 + halls-array", async () => {
@@ -577,3 +761,4 @@ test("PR2 router: GET ready-status som PLAYER → FORBIDDEN", async () => {
     await ctx.close();
   }
 });
+
