@@ -59,6 +59,45 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Sesjon 3: Wave 2/3 oppfølging + PITFALLS/FRAGILITY-entries (E6 redo)
+
+**Scope:** Etter at E3/E4/E5/E6 stalled pga API stream-idle-timeout (12 parallelle agenter), PM gjør sequentially: rebase Wave 3-PR-er, dokumenter sesjonens lærdommer, sjekk E9 Stryker-progress.
+
+**PM-AI eksplisitt (ikke agent-delegert):**
+
+**Outputs produsert:**
+- Cascade-rebase av 5 Wave 3-PR-er (#1352, #1353, #1354, #1356, #1357):
+  - Rebase-script: `/tmp/wave3-rebase.sh`
+  - Additive-resolver: `/tmp/resolve-additive.py` (Python regex)
+  - Alle 5 → MERGEABLE, auto-merge enabled, venter på CI
+- 6 nye PITFALLS-entries:
+  - §5.9 — Cascade-rebase pattern (N agenter på samme docs)
+  - §5.10 — Add/add merge conflicts trenger `-X ours`
+  - §6.15 — SIGPIPE + pipefail med awk-pipe → exit 141
+  - §6.16 — npm workspace package-lock isolation
+  - §9.9 — Seed-FK ordering (app_halls før app_hall_groups)
+  - §11.14 — ≥10 parallelle agenter → stream-idle-timeout
+  - §11.15 — Python additive-merge-resolver mønster
+  - §11.16 — Worktree fork-from-wrong-branch cascade
+- 2 nye FRAGILITY-entries:
+  - F-06 — PM Push Control som meta-tool (registry-CRUD)
+  - F-07 — Worktree-isolation forutsetter parent på origin/main
+- Branch: `docs/pitfalls-fragility-session-learnings-2026-05-13`
+
+**Fallgruver dokumentert:**
+- Se PITFALLS §5.9, §5.10, §6.15, §6.16, §9.9, §11.14, §11.15, §11.16
+- Se FRAGILITY F-06, F-07
+
+**Læring:**
+- Wave 2 spawnet 12 parallelle agenter — 3 stalled (E3, E4, E5, E6) pga API rate-limit
+- Sequential redo etter cascade fungerer godt — 4 av 6 deferred completed innen sesjon
+- Auto-rebase-workflow + Python-resolver er kritiske utilities for multi-agent-fremtiden
+- AGENT_EXECUTION_LOG og PITFALLS er de mest konflikt-tunge filene i repoet — separate "scratch"-filer per agent kunne mitigert
+
+**Eierskap:** `docs/engineering/PITFALLS_LOG.md`, `docs/engineering/FRAGILITY_LOG.md`, `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+---
+
 ### 2026-05-13 — dev:nuke backend stdout-pipe til `/tmp/spillorama-backend.log` (v2 fix)
 
 **Scope:** Pipe backend stdout/stderr fra `dev:nuke`/`dev:all` til

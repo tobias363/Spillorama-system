@@ -48,15 +48,15 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 7 | 2026-05-10 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 14 | 2026-05-13 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 16 | 2026-05-13 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 14 | 2026-05-11 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
-| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 8 | 2026-05-11 |
+| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 13 | 2026-05-13 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 
-**Total:** 86 entries (per 2026-05-13)
+**Total:** 92 entries (per 2026-05-13)
 
 ---
 
@@ -599,6 +599,40 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - Hvis bash 3.2-grenser er for trange, port hooken til Node (matcher mønster fra `check-pm-gate.mjs`)
 - Test alle nye hooks lokalt på macOS før wiring
 
+### §5.9 — Cascade-rebase når N agenter appender til samme docs (AGENT_EXECUTION_LOG)
+
+**Severity:** P1 (PM-friction, kan forsinke PR-merges med timer)
+**Oppdaget:** 2026-05-13 (Wave 2/3 sesjon med 12 parallelle agenter)
+**Symptom:** Hver av 12 agenter merger til main → neste 11 PR-er blir CONFLICTING/DIRTY på `docs/engineering/AGENT_EXECUTION_LOG.md`. Cascade-rebase × 14 iterasjoner på én dag. Hver iterasjon krever manuell konflikt-resolvering.
+**Root cause:** AGENT_EXECUTION_LOG.md, PITFALLS_LOG.md, og `.github/pull_request_template.md` er additive-append-filer som alle agenter touch'er. Når én PR merger, alle andres samme-file-edits blir merge-konflikt.
+**Fix:**
+- Auto-rebase-workflow `.github/workflows/auto-rebase-on-merge.yml` (PR #1342, Phase 2)
+- Python-resolver `/tmp/resolve-additive.py` for å auto-resolve additive conflicts
+- Cascade-rebase-script `/tmp/wave3-rebase.sh` som rebaserer + auto-resolverer + force-pusher
+**Prevention:**
+- Forutsi cascade FØR multi-agent-orkestrering: hvilke filer alle vil touch?
+- Deklarér forventede conflicts i `/tmp/active-agents.json.conflictsAcknowledged` så PM vet planen
+- Vurder kombinert-PR-pattern (cherry-pick alle commits til én PR fra main) for ≥ 5 parallelle agenter på samme docs-filer
+**Related:**
+- PR #1342 (auto-rebase workflow)
+- `/tmp/active-agents.json` registry
+- `docs/engineering/PM_PUSH_CONTROL.md`
+
+### §5.10 — Add/add merge conflicts trenger `-X ours`, ikke additive merge
+
+**Severity:** P1 (filsystem-skade hvis ikke håndtert)
+**Oppdaget:** 2026-05-13 (under D1 PM Push Control Phase 2 cascade-merge)
+**Symptom:** Add/add conflict (begge sider opprettet samme fil med ulikt innhold) → naive merge legger BÅDE versjoner i samme fil → 1381 linjer kaotisk JS som ikke parses
+**Root cause:** Python-additive-merge-resolver håndterer kun `<<<<<<< HEAD ... =======` blokker. Add/add conflicter har full-file-konflikt med fil-level-markører. Ekstra logikk trengs.
+**Fix:** `git merge -X ours <branch>` for add/add conflicts der HEAD er korrekt versjon. Eller `-X theirs` hvis branch er kanonisk. Aldri begge-versjoner-konkatenert.
+**Prevention:**
+- Sjekk om begge sider opprettet samme fil: `git status` viser `AA` for add/add
+- Hvis ja: bruk `-X ours` / `-X theirs` istedenfor håndmerge
+- Aldri lim sammen JS/TS-filer manuelt
+**Related:**
+- D1 PM Push Control Phase 2 (2026-05-13 mid-sesjon)
+- `scripts/pm-push-control.mjs` duplisering
+
 ---
 
 ## §6 Test-infrastruktur
@@ -803,6 +837,46 @@ pkill -KILL -f 'pattern-script-name' 2>/dev/null
 1. Bruke `kill -TERM -PID` for process-group-signaling
 2. Sweep med `pkill -f` etter cleanup som sikkerhets-nett
 3. `set +m` for å disable job-control-spam ("Terminated: 15"-stderr)
+
+### §6.15 — `set -o pipefail` + `awk '...' | head -N` → SIGPIPE exit 141
+
+**Severity:** P1 (CI-blokker, falske negativer)
+**Oppdaget:** 2026-05-13 (CI på PR #1336 skill-mapping-validate)
+**Symptom:** GitHub Actions workflow feiler med exit code 141 selv om innholdet er korrekt
+**Root cause:** Når `awk` prøver å skrive mer enn `head` leser, mottar awk SIGPIPE. Med `set -o pipefail` blir 141 propagert som job-exit-code → CI faller.
+**Fix:** Implementer line-limit INSIDE awk via NR-counter istedenfor pipe til head:
+```bash
+# DÅRLIG (SIGPIPE-risk):
+awk '/pattern/' "$file" | head -15
+
+# BEDRE:
+awk '/pattern/ && ++c <= 15' "$file"
+```
+**Prevention:**
+- Vær varsom med `awk | head -N` under `pipefail` — alltid line-limit i awk
+- Alternativ: `set +o pipefail` rundt slik blokk + reset etterpå
+- I CI-workflows: `set -eu` (uten pipefail) er ofte tryggere for utility-pipelines
+**Related:**
+- PR #1336 (skill-mapping-validate.yml SIGPIPE fix)
+- `.github/workflows/skill-mapping-validate.yml`
+
+### §6.16 — npm workspace package-lock isolation krever `--workspaces=false`
+
+**Severity:** P1 (CI EUSAGE-feil, Stryker/test-deps mismatch)
+**Oppdaget:** 2026-05-13 (CI på PR #1339 Stryker mutation testing)
+**Symptom:** `npm --prefix apps/backend ci` feiler med EUSAGE / "Missing: <package>" selv etter root `npm install` lagt til child-package
+**Root cause:** `npm install <pkg> --prefix apps/backend` (uten flag) skriver til root `package-lock.json`, IKKE `apps/backend/package-lock.json`. Men `npm --prefix apps/backend ci` leser KUN child-lock. Mismatch → EUSAGE.
+**Fix:** Bruk `--workspaces=false` flag for å tvinge child-workspace til å skrive til EGEN package-lock:
+```bash
+npm install --prefix apps/backend --workspaces=false --save-dev <package>
+```
+**Prevention:**
+- I monorepo med workspaces: nytt dev-deps i child må committes til child-lock OG root-lock
+- Pre-commit-test: `cd apps/backend && npm ls <package>` skal returnere installed version
+- CI bruker `npm --prefix apps/backend ci` — verifiser child-lock har deps
+**Related:**
+- PR #1339 (Stryker mutation testing) — package-lock workspace bug
+- `apps/backend/package.json` devDependencies
 
 ---
 
@@ -1218,6 +1292,22 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 - `apps/backend/src/middleware/httpRateLimit.ts:DEFAULT_HTTP_RATE_LIMITS`
 - `apps/backend/src/middleware/httpRateLimit.test.ts` — regresjons-test ensures admin tier ≥ 600 og /api/wallet/me = 1000
 
+### §9.9 — Seed-script FK-ordering: `app_halls` MÅ INSERT før `app_hall_groups.master_hall_id`
+
+**Severity:** P0 (seed-feil → pilot-flyt-test feiler)
+**Oppdaget:** 2026-05-13 (PR #1344 fix)
+**Symptom:** `npm run dev:nuke` med fresh DB → `seed-demo-pilot-day.ts` feiler med FK-violation: `app_hall_groups.master_hall_id` references `app_halls(id)` der `hall-default` ikke finnes.
+**Root cause:** Seed-scriptet INSERT'er først `app_hall_groups` (med `master_hall_id='hall-default'`), deretter `app_halls` for demo-halls. `hall-default` blir aldri eksplisitt INSERT'et — den ble antatt å eksistere fra migration-seed.
+**Fix:** PR #1344 — la til `INSERT INTO app_halls (id, name) VALUES ('hall-default', 'Spillorama Default Hall') ON CONFLICT (id) DO NOTHING` FØR `app_hall_groups`-INSERT i `seed-demo-pilot-day.ts`. Defensive column-detection for tv_token + hall_number replikert fra upsertHall.
+**Prevention:**
+- FK-referanser i seed-scripts: alltid INSERT referert tabell først
+- Bruk `ON CONFLICT DO NOTHING` for idempotent re-seeding
+- Pre-commit hook (kunne implementeres): grep INSERT INTO ordering vs FK-dependencies i seed-scripts
+**Related:**
+- PR #1344 (seed FK fix)
+- `apps/backend/scripts/seed-demo-pilot-day.ts:1586`
+- `app_hall_groups.master_hall_id` FK constraint
+
 ---
 
 ## §10 Routing & Permissions
@@ -1436,6 +1526,71 @@ run: |
 - `.husky/pre-commit`
 - `scripts/check-tier-a-intent.mjs` (TODO: refactor til stdin-basert input)
 
+### §11.14 — ≥ 10 parallelle agenter trigger API stream-idle-timeout
+
+**Severity:** P1 (PM-friction, mister agent-arbeid)
+**Oppdaget:** 2026-05-13 (Wave 2 over-parallelization)
+**Symptom:** Spawnet 12 parallelle Explore-agenter. 3 (E3, E4, E5, E6) returnerte `stream_idle_timed_out` etter ~5-10 min uten output. Andre 8 leverte normalt.
+**Root cause:** Anthropic API har en stream-idle-timeout (estimert ~60-120 sek uten output). Når PM-AI holder mange parallelle agent-streams åpne samtidig, hver ny streaming-burst rate-limites og kan timeout før agent har fått output ut. Symptomer flytter seg fra agent-til-agent uten reproduksjon.
+**Fix:** Begrens parallelt-antall til ≤ 6-8 agenter samtidig. Ved over-spawn: prioriter agenter med raskest forventet output først.
+**Prevention:**
+- Max 6-8 parallelle Agent-kall samtidig per sesjon (empirisk grense 2026-05-13)
+- Bruk `isolation: "worktree"` for å unngå file-revert-konflikter (parallel-friendly)
+- Når stalled agent oppstår: re-spawn etter at andre er ferdige, IKKE under
+- Hvis 3+ stalls i samme sesjon: pause spawn-ing, vent på pipeline-drainage
+**Related:**
+- Wave 2 sesjon 2026-05-13 (E3-E6 stalled)
+- AGENT_EXECUTION_LOG entries for "stream_idle_timed_out"
+
+### §11.15 — Python additive-merge-resolver for AGENT_EXECUTION_LOG / PITFALLS
+
+**Severity:** P2 (utility-pattern, ikke fallgruve i seg selv)
+**Oppdaget:** 2026-05-13 (cascade-rebase × 14)
+**Symptom:** Cascade-rebase trenger automatisk resolvering av additive append-only conflicts
+**Resolver-script:** `/tmp/resolve-additive.py` (kan committes til `scripts/resolve-additive-conflicts.py` for permanent bruk):
+```python
+CONFLICT_PATTERN = re.compile(
+    r"<<<<<<< HEAD\n(.*?)\n=======\n(.*?)\n>>>>>>> [^\n]+",
+    re.DOTALL,
+)
+# Keep both HEAD and branch, separated by \n\n---\n\n
+```
+**Bruksmønster:**
+```bash
+# I worktree med conflict:
+/tmp/resolve-additive.py docs/engineering/AGENT_EXECUTION_LOG.md docs/engineering/PITFALLS_LOG.md .github/pull_request_template.md
+git add <resolved-files>
+git rebase --continue
+```
+**Prevention/forbedring:**
+- Permanent-script i `scripts/` så det er gjenfinnbart neste sesjon
+- Wire inn i cascade-rebase-utility (`scripts/cascade-rebase.sh`) som ikke eksisterer enda — TODO
+- Verifiser at resolveren IKKE brukes for ikke-additive filer (code) — den ville miste endringer
+**Related:**
+- §5.9 Cascade-rebase pattern
+- PM Push Control auto-rebase workflow
+
+### §11.16 — Worktree fork-from-wrong-branch trigger cascade rebases
+
+**Severity:** P1 (cascade-multiplier-effekt)
+**Oppdaget:** 2026-05-13 (Tobias' main repo var på fix-branch, ikke main, da PM startet)
+**Symptom:** PM spawnet 11 agenter med `isolation: "worktree"`. Hver worktree-fork tok branch fra Tobias' lokale main repo som var på `fix/reentry-during-draw-2026-05-13`, IKKE origin/main. Alle 11 agenter committet på en branch som var foran origin/main — cascade-rebase ble trigget for HVERT agent-merge.
+**Root cause:** Claude Agent SDK worktree-isolation forker fra parent's HEAD, ikke origin/main. Tobias' main repo state styres av Tobias.
+**Fix:** Verifiser at parent repo er på `origin/main` FØR multi-agent-spawn:
+```bash
+cd $REPO_ROOT
+git fetch origin
+git status  # skal vise "On branch main, up-to-date with origin/main"
+```
+Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjennelse hvis dirty), eller spawn agenter med eksplisitt `base_branch=origin/main`.
+**Prevention:**
+- PM sesjons-start sjekkliste: verifiser `git status` viser main + up-to-date FØR parallel-spawn
+- Hvis Tobias er på feature-branch: spawn 1 agent for å rebase, vent på merge, deretter spawn resten
+- Eller: bruk dedikert worktree-base for agenter (eksternt fra Tobias' repo)
+**Related:**
+- §11.9 Worktree-branch-leakage (parent-side)
+- Wave 2 sesjon 2026-05-13 cascade × 14
+
 ---
 
 ## Hvordan legge til ny entry
@@ -1477,3 +1632,4 @@ run: |
 | 2026-05-11 | Lagt til §7.9 (state.ticketTypes override), §7.10 (static bundle rebuild), §7.11 (lobby-init race), §7.12 (overlay pointer-events). §9.5 (demo-plan opening hours), §9.6 (ON CONFLICT uten UNIQUE). §11.8 (dev:nuke single-command), §11.9 (worktree-branch-leakage), §11.10 (pre-commit COMMIT_EDITMSG-bug). Total 71→79 entries. | PM-AI (sesjon 2026-05-10→2026-05-11) | docs-agent (ADR-0017 PR-C) |
 | 2026-05-12 | Lagt til §7.15 — klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets foreldreløse). Pilot-blokker fra Tobias-test 11:03-11:05, fikset via Alternativ B (klient venter med kjøp). | Agent B (Klient wait-on-master) |
 | 2026-05-13 | Lagt til §11.11 (ESM dispatcher må gates med isDirectInvocation), §11.12 (JSDoc `**` parse-feil), §11.13 (GitHub Actions YAML heredoc indentation). Funn under PM Push-Control Phase 2-bygg. Total 83→86 entries. | Phase 2-agent (PM-AI orkestrert) |
+| 2026-05-13 | Lagt til §5.9 (cascade-rebase pattern), §5.10 (add/add `-X ours`-strategi), §6.15 (SIGPIPE + pipefail i awk-pipe), §6.16 (npm workspace lock isolation), §9.9 (seed-FK ordering), §11.14 (≥10 parallelle agenter stream-timeout), §11.15 (additive-merge Python-resolver), §11.16 (worktree fork-from-wrong-branch cascade). Funn under Wave 2/3-sesjon 2026-05-13. Total 86→92 entries. | PM-AI (E6 redo) |
