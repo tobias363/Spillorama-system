@@ -52,6 +52,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -786,19 +787,28 @@ function spawnChild({ name, colorName, command, args: childArgs, cwd, env }) {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  // Tobias-direktiv 2026-05-13 (Tier 3-E): Backend stdout/stderr må også
-  // skrives til /tmp/spillorama-<name>.log slik at live-monitor-agent kan
-  // tail-e dem. Backend-loggene er spesielt verdifulle for å fange server-
-  // side ERROR/FATAL/Unhandled rejections som pilot-monitor ellers ville
-  // miste. Fail-soft — hvis vi ikke kan åpne fil, skip silently.
+  // Tobias-direktiv 2026-05-13 (Tier 3-E + v2-fix 2026-05-13): Backend
+  // stdout/stderr må også skrives til /tmp/spillorama-<name>.log slik at
+  // live-monitor-agent kan tail-e dem. Backend-loggene er spesielt
+  // verdifulle for å fange server-side ERROR/FATAL/Unhandled rejections
+  // som pilot-monitor ellers ville miste. Fail-soft — hvis vi ikke kan
+  // åpne fil, skip silently.
+  //
+  // v2 (2026-05-13): v1 brukte `require("node:fs")` inne i en ESM-fil
+  // (start-all.mjs er .mjs), så `require` var ikke definert og
+  // try/catch swallow-et feilen → log-filene ble aldri opprettet.
+  // Fikset ved å bytte til top-level `import fs from "node:fs"`.
+  // Bytter også fra `flags: "a"` til `flags: "w"` — truncate ved
+  // dev:nuke-start så monitoren ikke leser stale data fra forrige sesjon.
   let tmpLogStream = null;
+  const tmpLogPath = `/tmp/spillorama-${name}.log`;
   try {
-    const fs = require("node:fs");
-    const tmpLogPath = `/tmp/spillorama-${name}.log`;
-    tmpLogStream = fs.createWriteStream(tmpLogPath, { flags: "a" });
-    tmpLogStream.write(
-      `\n=== ${new Date().toISOString()} dev:nuke start — ${name} (PID ${proc.pid}) ===\n`,
+    // Truncate (overwrite) per dev:nuke-start så monitor ser ren state.
+    fs.writeFileSync(
+      tmpLogPath,
+      `=== dev:nuke started ${new Date().toISOString()} — ${name} (PID ${proc.pid}) ===\n`,
     );
+    tmpLogStream = fs.createWriteStream(tmpLogPath, { flags: "a" });
   } catch {
     /* fail-soft: terminal-output still works */
   }
@@ -854,7 +864,7 @@ function spawnChild({ name, colorName, command, args: childArgs, cwd, env }) {
     }
   });
 
-  children.push({ name, proc });
+  children.push({ name, proc, tmpLogStream, tmpLogPath });
   return proc;
 }
 
@@ -863,6 +873,21 @@ function shutdown(exitCode = 0) {
   shuttingDown = true;
   console.log("");
   console.log(color("yellow", "[dev:all] avslutter alle prosesser…"));
+  // v2 (2026-05-13): Append "=== dev:nuke stopped ===" til hver tmp-log
+  // før vi sender SIGTERM, så monitor-tail-en ser et tydelig slutt-punkt.
+  // Fail-soft.
+  const stoppedAt = new Date().toISOString();
+  for (const { name, tmpLogStream } of children) {
+    if (!tmpLogStream) continue;
+    try {
+      tmpLogStream.write(
+        `\n=== dev:nuke stopped ${stoppedAt} — ${name} ===\n`,
+      );
+      tmpLogStream.end();
+    } catch {
+      /* fail-soft */
+    }
+  }
   for (const { name, proc } of children) {
     if (proc.exitCode !== null) continue;
     try {

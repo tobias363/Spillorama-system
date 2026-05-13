@@ -1,7 +1,7 @@
 # Agent Execution Log — kronologisk agent-arbeid
 
 **Status:** Autoritativ. Alle agent-leveranser dokumenteres her.
-**Sist oppdatert:** 2026-05-11
+**Sist oppdatert:** 2026-05-13
 **Eier:** PM-AI (vedlikeholdes ved hver agent-leveranse)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover."*
@@ -58,6 +58,93 @@ Hver entry har struktur:
 ---
 
 ## Entries (newest first)
+
+### 2026-05-13 — dev:nuke backend stdout-pipe til `/tmp/spillorama-backend.log` (v2 fix)
+
+**Scope:** Pipe backend stdout/stderr fra `dev:nuke`/`dev:all` til
+`/tmp/spillorama-backend.log` slik at live-monitor-agent kan tail-e
+backend-utdata. v1 ble lagt inn i en tidligere sesjon, men hadde en
+hidden bug som gjorde at log-filene aldri ble opprettet.
+
+**Inputs gitt:**
+- Mandat: ny isolert worktree, branch fra origin/main
+- Konkrete steps i prompt med eksempel-snippets (fs.writeFileSync truncate
+  + createWriteStream append + SIGINT-cleanup)
+- Branch-navn: `feat/dev-nuke-backend-log-pipe-v2-2026-05-13` (v2 antyder
+  at det eksisterer en v1)
+
+**Outputs produsert:**
+- Branch: `feat/dev-nuke-backend-log-pipe-v2-2026-05-13`
+- Fil modifisert: `scripts/dev/start-all.mjs` (én fil, +35/-8 linjer)
+  - Linje 55: `import fs from "node:fs"` lagt til (top-level)
+  - Linje 803-814: `spawnChild` log-stream-init rettet
+  - Linje 867: `children.push` utvidet med `tmpLogStream` + `tmpLogPath`
+  - Linje 876-890: `shutdown()` skriver "=== dev:nuke stopped ===" +
+    `stream.end()` per child før SIGTERM
+- Commit: `feat(dev): rett dev:nuke backend stdout-pipe til /tmp/spillorama-<name>.log (v2)`
+
+**Bug funnet i v1 (hovedfunn):**
+- v1 (commit `80bb372b`, Tier 3) brukte `require("node:fs")` *inne i*
+  `spawnChild`-funksjonen
+- `scripts/dev/start-all.mjs` er en ESM-fil (`.mjs` med `import`-syntaks)
+- I ESM er `require` ikke definert — kallet kaster
+  `ReferenceError: require is not defined in ES module scope`
+- v1-koden var wrappet i `try { ... } catch {}` med tom catch, så feilen
+  ble silently swallow-et
+- Resultat: `tmpLogStream` ble alltid `null`, ingen log-filer ble skrevet
+- Monitor-agenten som forventet å tail-e `/tmp/spillorama-backend.log`
+  hadde derfor ingenting å lese
+
+**Fix:**
+- Bytt fra inline `require("node:fs")` til top-level `import fs from "node:fs"`
+- Endre `flags: "a"` → `fs.writeFileSync` (truncate) + `flags: "a"` på
+  stream slik prompt-en spesifiserte. Truncate-on-start gir monitor ren
+  state og forhindrer at stale data fra forrige sesjon henger igjen.
+- Lagre `tmpLogStream` i `children`-arrayet slik at `shutdown()` kan
+  skrive "stopped"-marker og `.end()` strømmen før SIGTERM. Tidligere
+  ble strømmen aldri lukket eksplisitt.
+
+**Verifisering:**
+- `node --check scripts/dev/start-all.mjs` → OK
+- Isolert reproducer (`/tmp/test-log-pipe.mjs`) som speiler nøyaktig
+  pipe-logikken: PASS — log-fil inneholder start-marker, child-stdout,
+  child-stderr og stop-marker. Reproducer-fil slettet etter test.
+- Manual test av full `dev:nuke`-stack krever Docker+Postgres+Redis og
+  ble ikke kjørt i agent-sesjonen (mandat: "KEEP IT SMALL"). PM-bør
+  smoke-teste end-to-end før merge: `npm run dev:nuke` → vente 5s →
+  `tail /tmp/spillorama-backend.log` → Ctrl+C → bekrefte "stopped"-linje.
+
+**Fallgruver oppdaget:**
+- §6 (test-infrastruktur) — Når en `try/catch` med tom `catch` wrapper en
+  feil i fail-soft-kode, kan feature være DOA uten at noen merker det.
+  Lærdom: legg minst `console.warn` i fail-soft-catch når feilen ville
+  bety at en hel feature er borte. Tilsvarende: lazy-require inne i en
+  ESM-fil er en stille bombe — gjør top-level imports synlige.
+
+**Læring:**
+- ESM `.mjs` + lazy `require()` = silent failure i fail-soft-catch
+- v1 fungerer som det er ment etter import-rettelsen — ingen
+  arkitektur-endring nødvendig
+- Truncate-on-start er foretrukket fremfor append for log-filer som
+  monitorer leser — ellers blir tail-vinduet forurenset av forrige sesjon
+
+**Eierskap:**
+- `scripts/dev/start-all.mjs` (spawnChild + shutdown delene)
+
+**Verifisering (PM-skal-gjøre):**
+- [ ] Kjør `npm run dev:nuke`
+- [ ] Vent 5 sek
+- [ ] `ls -la /tmp/spillorama-backend.log` — skal eksistere, ikke-tom
+- [ ] `head -3 /tmp/spillorama-backend.log` — skal vise `=== dev:nuke started ...`-linje
+- [ ] `tail /tmp/spillorama-backend.log` — skal vise backend-output
+- [ ] Ctrl+C
+- [ ] `tail -3 /tmp/spillorama-backend.log` — skal vise `=== dev:nuke stopped ...`-linje
+- [ ] Bekreft at `/tmp/spillorama-admin-web.log` og `/tmp/spillorama-game-client.log`
+  også opprettes (samme spawnChild-path)
+
+**Tid:** ~25 min agent-arbeid
+
+---
 
 ### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
 
