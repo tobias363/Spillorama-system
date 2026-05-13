@@ -267,7 +267,7 @@ test.describe("Spill 1 wallet-flow", () => {
     // 2. Soft-reset state (stopp evt. pågående runde, behold rom). Per
     //    Tobias-direktiv: ikke destruér rom som default — wallet-asserts
     //    trenger ferskt spiller, ikke ferskt rom.
-    await resetPilotState(masterToken, { destroyRooms: false });
+    await resetPilotState(masterToken);
 
     // 3. Pick en demo-spiller med ledig dagsgrense + wallet-saldo.
     const player = await pickAvailablePlayer();
