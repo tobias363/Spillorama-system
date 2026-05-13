@@ -200,7 +200,7 @@ export interface GameStateSnapshot {
  * `RESET_TEST_PLAYERS_TOKEN` env-var satt på backend.
  *
  * Returnerer null hvis token ikke konfigurert eller request feiler — tester
- * kan da fall-back til andre informasjons-kilder (lobby, socket-events).
+ * kan da fall-back til `getRoomSnapshotJson` istedenfor (public route).
  */
 export async function getGameStateSnapshot(
   roomCode: string,
@@ -217,6 +217,64 @@ export async function getGameStateSnapshot(
     return json as unknown as GameStateSnapshot;
   }
   return null;
+}
+
+/**
+ * Room snapshot via `GET /api/rooms/:roomCode` — public route, ingen auth
+ * påkrevd. Returnerer engine room state inkludert
+ * `currentGame.drawnNumbers`, `currentGame.claims`, `currentGame.status` osv.
+ *
+ * Brukes som fallback når `RESET_TEST_PLAYERS_TOKEN` ikke er satt for å gi
+ * Rad-vinst-testen tilgang til engine-state. Mindre detaljert enn _dev-
+ * snapshot (mangler scheduled-game-rad og game-state-tabell) men dekker
+ * testen vår godt nok (drawn-count + claims-array + status).
+ */
+export interface RoomSnapshot {
+  code: string;
+  hallId: string;
+  gameSlug: string;
+  hostPlayerId: string;
+  currentGame: {
+    id: string;
+    status: string; // "WAITING" | "RUNNING" | "ENDED"
+    drawnNumbers: number[];
+    claims: Array<{
+      id: string;
+      playerId: string;
+      type: string;
+      patternName: string;
+      payoutAmount?: number;
+    }>;
+    endedReason?: string | null;
+    isPaused?: boolean;
+    pauseReason?: string | null;
+  } | null;
+  players: Array<{
+    id: string;
+    walletId: string;
+    hallId: string;
+    balance: number;
+  }>;
+}
+
+export async function getRoomSnapshotJson(
+  roomCode: string,
+): Promise<RoomSnapshot | null> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/rooms/${encodeURIComponent(roomCode)}`,
+  );
+  if (!res.ok) return null;
+  let json;
+  try {
+    json = (await res.json()) as {
+      ok: boolean;
+      data?: RoomSnapshot;
+    };
+  } catch {
+    return null;
+  }
+  if (!json.ok || !json.data) return null;
+  return json.data;
 }
 
 /** Options for `resetPilotStateExt`. */

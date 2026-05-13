@@ -8,6 +8,7 @@ import {
 } from "./helpers/rest.js";
 import {
   getGameStateSnapshot,
+  getRoomSnapshotJson,
   masterPause,
   masterResume,
   resetPilotStateExt,
@@ -320,15 +321,14 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
 
     // Optional snapshot-diagnose (krever RESET_TEST_PLAYERS_TOKEN)
     const startSnapshot = await getGameStateSnapshot(ROOM_CODE);
-    if (startSnapshot) {
-      console.log(
-        `[test] Snapshot etter start: status=${startSnapshot.engineRoom?.currentGame?.status ?? "n/a"}, drawn=${startSnapshot.engineRoom?.currentGame?.drawnCount ?? "n/a"}`,
-      );
-    } else {
-      console.log(
-        "[test] Snapshot-route ikke tilgjengelig (RESET_TEST_PLAYERS_TOKEN ikke satt)",
-      );
-    }
+    const startRoom = startSnapshot ? null : await getRoomSnapshotJson(ROOM_CODE);
+    const startStatus = startSnapshot?.engineRoom?.currentGame?.status ??
+      startRoom?.currentGame?.status ?? "n/a";
+    const startDrawn = startSnapshot?.engineRoom?.currentGame?.drawnCount ??
+      startRoom?.currentGame?.drawnNumbers.length ?? "n/a";
+    console.log(
+      `[test] Etter start: status=${startStatus}, drawn=${startDrawn}, source=${startSnapshot ? "dev-snapshot" : startRoom ? "room-snapshot" : "none"}`,
+    );
 
     // ── Steg 8: Poll på auto-tick draws til Rad 1-vinst ────────────────────
     // adminDrawNext via /api/admin/rooms/<code>/draw-next er BLOKKERT for
@@ -361,44 +361,51 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         .isVisible({ timeout: 50 })
         .catch(() => false);
       if (popupVisible) {
-        const snap = await getGameStateSnapshot(ROOM_CODE);
-        rad1WonAtDraw = snap?.engineRoom?.currentGame?.drawnCount ?? 0;
+        const room = await getRoomSnapshotJson(ROOM_CODE);
+        rad1WonAtDraw = room?.currentGame?.drawnNumbers.length ?? 0;
         console.log(
-          `[test] ✓ WinPopup detected etter ${snap?.engineRoom?.currentGame?.drawnCount ?? "?"} draws`,
+          `[test] ✓ WinPopup detected etter ${rad1WonAtDraw} draws`,
         );
         break;
       }
 
-      // Detect via engine-snapshot (annen spiller er vinner)
-      const snap = await getGameStateSnapshot(ROOM_CODE);
-      if (snap?.engineRoom?.currentGame) {
-        const drawn = snap.engineRoom.currentGame.drawnCount;
-        const claims = snap.engineRoom.currentGame.claimsCount;
-        if (drawn !== lastDrawnCount) {
-          console.log(
-            `[test] Draw progress: drawn=${drawn}, claims=${claims}, status=${snap.engineRoom.currentGame.status}`,
-          );
-          lastDrawnCount = drawn;
-        }
+      // Detect via room-snapshot (public route, ingen token nødvendig).
+      // Faller tilbake til _dev-snapshot hvis tilgjengelig (mer detalj).
+      const devSnap = await getGameStateSnapshot(ROOM_CODE);
+      const room = devSnap ? null : await getRoomSnapshotJson(ROOM_CODE);
+
+      const drawn = devSnap?.engineRoom?.currentGame?.drawnCount ??
+        room?.currentGame?.drawnNumbers.length ?? 0;
+      const claims = devSnap?.engineRoom?.currentGame?.claimsCount ??
+        room?.currentGame?.claims.length ?? 0;
+      const status = devSnap?.engineRoom?.currentGame?.status ??
+        room?.currentGame?.status ?? "UNKNOWN";
+      const endedReason = devSnap?.engineRoom?.currentGame?.endedReason ??
+        room?.currentGame?.endedReason;
+
+      if (drawn !== lastDrawnCount) {
+        console.log(
+          `[test] Draw progress: drawn=${drawn}, claims=${claims}, status=${status}`,
+        );
+        lastDrawnCount = drawn;
+      }
+      if (claims > 0) {
+        rad1WonAtDraw = drawn;
+        rad1ClaimsCount = claims;
+        console.log(
+          `[test] ✓ Snapshot detected ${claims} claims etter ${drawn} draws — Rad-vinst registrert`,
+        );
+        break;
+      }
+      if (status === "ENDED") {
+        console.log(
+          `[test] Runde endet etter ${drawn} draws (status=ENDED, reason=${endedReason})`,
+        );
         if (claims > 0) {
           rad1WonAtDraw = drawn;
           rad1ClaimsCount = claims;
-          console.log(
-            `[test] ✓ Snapshot detected ${claims} claims etter ${drawn} draws — Rad-vinst registrert`,
-          );
-          break;
         }
-        if (snap.engineRoom.currentGame.status === "ENDED") {
-          console.log(
-            `[test] Runde endet etter ${drawn} draws (status=ENDED, reason=${snap.engineRoom.currentGame.endedReason})`,
-          );
-          // Hvis runden er ENDED med claims, regn det som win
-          if (claims > 0) {
-            rad1WonAtDraw = drawn;
-            rad1ClaimsCount = claims;
-          }
-          break;
-        }
+        break;
       }
 
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -504,29 +511,39 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     console.log("[test] Poller videre til Rad 2-vinst (eller annen ny pattern)...");
 
     let rad2WonAtDraw: number | null = null;
-    const snapBeforeRad2 = await getGameStateSnapshot(ROOM_CODE);
+    const devSnapPreRad2 = await getGameStateSnapshot(ROOM_CODE);
+    const roomPreRad2 = devSnapPreRad2 ? null : await getRoomSnapshotJson(ROOM_CODE);
     const claimsBeforeRad2 =
-      snapBeforeRad2?.engineRoom?.currentGame?.claimsCount ?? rad1ClaimsCount;
+      devSnapPreRad2?.engineRoom?.currentGame?.claimsCount ??
+      roomPreRad2?.currentGame?.claims.length ??
+      rad1ClaimsCount;
+    const drawnBeforeRad2 =
+      devSnapPreRad2?.engineRoom?.currentGame?.drawnCount ??
+      roomPreRad2?.currentGame?.drawnNumbers.length ?? 0;
     console.log(
-      `[test] Før Rad 2: drawn=${snapBeforeRad2?.engineRoom?.currentGame?.drawnCount ?? "n/a"}, claims=${claimsBeforeRad2}`,
+      `[test] Før Rad 2: drawn=${drawnBeforeRad2}, claims=${claimsBeforeRad2}`,
     );
 
     const RAD2_TIMEOUT_MS = 90_000;
     const rad2Start = Date.now();
-    let rad2LastDrawn = snapBeforeRad2?.engineRoom?.currentGame?.drawnCount ?? 0;
+    let rad2LastDrawn = drawnBeforeRad2;
 
     while (Date.now() - rad2Start < RAD2_TIMEOUT_MS) {
-      const snap = await getGameStateSnapshot(ROOM_CODE);
-      if (!snap?.engineRoom?.currentGame) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        continue;
-      }
-      const drawn = snap.engineRoom.currentGame.drawnCount;
-      const claims = snap.engineRoom.currentGame.claimsCount;
+      const devSnap = await getGameStateSnapshot(ROOM_CODE);
+      const room = devSnap ? null : await getRoomSnapshotJson(ROOM_CODE);
+
+      const drawn = devSnap?.engineRoom?.currentGame?.drawnCount ??
+        room?.currentGame?.drawnNumbers.length ?? 0;
+      const claims = devSnap?.engineRoom?.currentGame?.claimsCount ??
+        room?.currentGame?.claims.length ?? 0;
+      const status = devSnap?.engineRoom?.currentGame?.status ??
+        room?.currentGame?.status ?? "UNKNOWN";
+      const endedReason = devSnap?.engineRoom?.currentGame?.endedReason ??
+        room?.currentGame?.endedReason;
 
       if (drawn !== rad2LastDrawn) {
         console.log(
-          `[test] Rad2 draw progress: drawn=${drawn}, claims=${claims}, status=${snap.engineRoom.currentGame.status}`,
+          `[test] Rad2 draw progress: drawn=${drawn}, claims=${claims}, status=${status}`,
         );
         rad2LastDrawn = drawn;
       }
@@ -539,9 +556,9 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         break;
       }
 
-      if (snap.engineRoom.currentGame.status === "ENDED") {
+      if (status === "ENDED") {
         console.log(
-          `[test] Runde ferdig etter ${drawn} draws (status=ENDED, reason=${snap.engineRoom.currentGame.endedReason})`,
+          `[test] Runde ferdig etter ${drawn} draws (status=ENDED, reason=${endedReason})`,
         );
         if (claims > claimsBeforeRad2) {
           rad2WonAtDraw = drawn;
