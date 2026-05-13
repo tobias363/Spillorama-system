@@ -1282,31 +1282,12 @@ class Game1Controller implements GameController {
       }
     }
 
-    // Rrweb DOM session-replay (Tobias-direktiv 2026-05-13). Lar PM-agent
-    // se NØYAKTIG hva Tobias så som video — DOM-mutations, mouse, scroll,
-    // input — komplementerer EventStreamer (data-events) med visuell replay.
-    // Lazy-loader rrweb (~80 KB) først ved start(), så prod-bundle uten
-    // ?debug=1 ikke trekker det inn. Fail-soft: hvis rrweb mangler eller
-    // backend er nede, logger vi warn og fortsetter uten replay.
-    if (!getRrwebRecorder()) {
-      try {
-        const recorder = setupRrwebRecorder({
-          token: this.resolveDebugStreamToken(),
-          // Default endpoint /api/_dev/debug/rrweb-events
-          // Default flushIntervalMs 2000
-          // Default recordCanvas true (fange Pixi.js-rendering)
-        });
-        // start() er async; fire-and-forget — controller blokkerer ikke
-        // på rrweb-init. Fail-soft inni recorder.
-        void recorder.start().catch((err: unknown) => {
-          // eslint-disable-next-line no-console
-          console.warn("[Game1] RrwebRecorder start feilet:", err);
-        });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("[Game1] RrwebRecorder setup feilet:", err);
-      }
-    }
+    // OBS-1 cascade-merge 2026-05-14: RrwebRecorder initialiseres via
+    // installDebugSuite.ts (delivered av OBS-2 / PR #1382). Game1Controller
+    // wirer det IKKE direkte — installDebugSuite er single source of truth
+    // for Rrweb-singleton. Tidligere kode-block her referte
+    // getRrwebRecorder/setupRrwebRecorder uten import — brøt CI på main
+    // etter #1379-merge. Denne hotfixen fjerner dead code.
   }
 
   /**
@@ -1437,14 +1418,9 @@ class Game1Controller implements GameController {
       }
       this.debugEventStreamer = null;
     }
-    // Rrweb DOM session-replay teardown (Tobias-direktiv 2026-05-13).
-    // resetRrwebRecorder() kaller stop() + clearer singleton — neste mount
-    // får en frisk recorder.
-    try {
-      resetRrwebRecorder();
-    } catch {
-      // Best-effort.
-    }
+    // OBS-1 cascade-merge 2026-05-14: Rrweb teardown håndteres av
+    // installDebugSuite (samme singleton). Game1Controller wirer ikke
+    // resetRrwebRecorder() direkte — dead code fjernet i hotfix.
   }
 
   // ── Klient-auto-join-scheduled-game (Tobias 2026-05-11) ──────────────────
