@@ -59,6 +59,61 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Tobias-readiness auto-generator i AI Fragility Review (general-purpose agent)
+
+**Scope:** Utvid `ai-fragility-review.yml`-workflow med auto-genererte "Tobias smoke-test"-seksjoner per PR. Heuristikk-basert fil→scenario-mapping rendrer ferdig markdown med konkrete URL-er, credentials, klikk-steg, forventet resultat og typiske feilbilder. Skal redusere Tobias' verifikasjons-burden ved at han ser hva han skal teste uten å lese diffen selv.
+
+**Inputs gitt:**
+- Mandat fra Tobias 2026-05-13: PR-comment skal ha "Tobias smoke-test"-seksjon med <30 linjer, konkrete URL-er, norsk språk
+- Pekere til `.github/workflows/ai-fragility-review.yml`, `FRAGILITY_LOG.md`, `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`, `PM_ONBOARDING_PLAYBOOK.md` §5, PR-template
+- 8 scenario-maler påkrevd (master-start/stop/advance, spiller-buy/mark, wallet-touch, docs-only, unknown)
+- Min 5 fixture-diff-er for testing
+- Branch: `feat/tobias-readiness-summary-2026-05-13`, ikke åpne PR
+
+**Outputs produsert:**
+- **Branch:** `feat/tobias-readiness-summary-2026-05-13` (pushes til origin etter PM-godkjent)
+- **Filer (nye):**
+  - `scripts/generate-tobias-readiness.mjs:1-301` — Node ESM-script med `classifyFile()` + `aggregateScenarios()` + `generateReadinessSection()` + CLI-main
+  - `scripts/tobias-readiness-templates/master-start.md` — start-runde-mal
+  - `scripts/tobias-readiness-templates/master-stop.md` — stopp-runde-mal
+  - `scripts/tobias-readiness-templates/master-advance.md` — advance-til-neste-fase-mal
+  - `scripts/tobias-readiness-templates/spiller-buy.md` — kjøp-bonger-mal
+  - `scripts/tobias-readiness-templates/spiller-mark.md` — marker-tall-mal
+  - `scripts/tobias-readiness-templates/wallet-touch.md` — wallet+compliance-mal
+  - `scripts/tobias-readiness-templates/docs-only.md` — "ikke nødvendig"-mal
+  - `scripts/tobias-readiness-templates/unknown.md` — fallback-mal
+  - `scripts/__tests__/generate-tobias-readiness.test.mjs` — 39 tester (node:test)
+  - `scripts/__tests__/fixtures/diff-{docs-only,master-start,spiller-buy,wallet-touch,mixed,husky-only,unknown}.txt`
+  - `scripts/__tests__/fixtures/commits-pilot-fix.txt`
+  - `docs/engineering/TOBIAS_READINESS_FORMAT.md` — vedlikeholds-doc
+- **Filer (endret):**
+  - `.github/workflows/ai-fragility-review.yml` — nytt `Generate Tobias smoke-test section`-step + integrasjon med eksisterende FRAGILITY-review comment
+
+**Test-resultat:**
+- `node --test scripts/__tests__/generate-tobias-readiness.test.mjs` → 39/39 pass, ~1.1s runtime
+- Manuell smoke-test med `--diff-file scripts/__tests__/fixtures/diff-spiller-buy.txt` produserte korrekt markdown med 2 scenarier (spiller-buy + spiller-mark) inkludert URL-er, credentials og "Forventet feilbilde"-seksjon
+- YAML-syntax verifisert med `js-yaml.load(...)` → OK
+
+**Fallgruver oppdaget:**
+- Hvis FRAGILITY har 0 matches OG vi bare ville posted Tobias-section, var den eksisterende `return`-early-koden et hinder — fikset ved å restrukturere så Tobias-section vises uavhengig av FRAGILITY-match
+- Eksisterende comment-detection brukte kun "🛡️ AI Fragility Review"-substreng — utvidet til å også matche "🎯 Tobias smoke-test" så docs-only-PR-er får én oppdatert comment, ikke duplikat
+- Aggregering: hvis blandet docs+kode, måtte vi droppe "docs-only" fra scenario-listen så reelle test-steg ikke ble overskygget av "ikke nødvendig"
+
+**Læring:**
+- Templates som markdown-filer (ikke inline strings i kode) gir mye lettere vedlikehold — Tobias eller framtidig PM kan justere språk uten å rør JS-koden
+- Test-fixture-tilnærming (diff-files på disk) gir reproduserbar testing av CLI-integrasjonen
+- `import.meta.url` + named exports lar samme fil være både CLI og test-target uten kunstig refactor
+
+**Verifisering (PM):**
+- Vil verifisere at workflow renderer korrekt på faktisk PR etter merge til main
+- Forventer at neste PR mot main får både FRAGILITY-review (eksisterende) + Tobias-readiness (nytt)
+
+**Tid:** ~3 timer agent-arbeid
+
+**Eierskap:** `scripts/generate-tobias-readiness.mjs`, `scripts/tobias-readiness-templates/`, `scripts/__tests__/generate-tobias-readiness.test.mjs`, `.github/workflows/ai-fragility-review.yml` (Tobias-section), `docs/engineering/TOBIAS_READINESS_FORMAT.md`
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
