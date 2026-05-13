@@ -326,6 +326,64 @@ Hver entry har struktur:
 
 ---
 
+### 2026-05-13 — `a43345d47cf2a71da` (autonomous-loop, general-purpose)
+
+**Scope:** Bygg fullverdig E2E test-infrastruktur for Spill 1 pilot-flow. Driv test til grønn. Hvis bugs avdekkes underveis, fiks og dokumenter. Spawnet 2026-05-13 etter Tobias-direktiv om kurs-endring etter 3-dagers buy-flow-iterasjon.
+
+**Inputs gitt:**
+- Tobias-direktiv: "fullverdig testflyt for effektiv utvikling, hvis dette tar 3 dager er det 100% verdt det"
+- Beskjed om at pilot-dato ikke skal komme på bekostning av kvalitet
+- BUY-DEBUG-output fra Tobias' manuelle test (åpning av spill1-pilot-flow med priser 20 kr / 0 kr)
+- Pre-existing infrastructure: `apps/backend/scripts/pilot-smoke-test.sh` (utdatert), demo-seed-data, dev:nuke-kommando
+- Worktree: `/Users/tobiashaugen/Projects/Spillorama-system/.claude/worktrees/musing-tharp-551346` på branch `feat/autonomous-pilot-test-loop-2026-05-13`
+
+**Outputs produsert:**
+- Branch: `feat/autonomous-pilot-test-loop-2026-05-13` — pushed til origin
+- Commit: `9aad3063` — "feat(spill1): autonomous pilot-flow E2E test + 3 buy-flow bugfixes"
+- PR: #1305 (PM-åpnet etter agent-fullføring, auto-merge aktivert)
+- Nye filer:
+  - `tests/e2e/playwright.config.ts` — separat config for live-stack
+  - `tests/e2e/spill1-pilot-flow.spec.ts` — 14-stegs full flow
+  - `tests/e2e/helpers/rest.ts` — REST-helpers (autoLogin, masterStart, markHallReady, resetPilotState m/admin room-destroy)
+  - `tests/e2e/BUG_CATALOG.md` — bug-katalog template + 7 hist. + 3 nye fiksede
+  - `tests/e2e/README.md` — kjøre-instruksjoner + design-rationale
+  - `scripts/pilot-test-loop.sh` — runner med automatic failure-diagnose
+- Endringer i prod-kode (3 nye bugs fikset):
+  - `packages/game-client/src/games/game1/sockets/SocketActions.ts` — buildScheduledTicketSpec bruker priceMultiplier (I8)
+  - `packages/game-client/src/games/game1/components/TicketGridHtml.ts` — computePrice match (size, color) (I9)
+  - `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` — cancelBtn reset ved re-open (I10)
+- Endringer i tests/data-test attrs:
+  - `Game1BuyPopup.ts` — `data-test="buy-popup-{backdrop,row,price,plus,minus,qty,total-*,confirm,cancel}-<slug>"`
+  - `BingoTicketHtml.ts` — `data-test="ticket-card"` + `data-test-ticket-{id,color,type,price}`
+  - `TicketGridHtml.ts` — `data-test="ticket-grid"`
+- npm-scripts: `test:pilot-flow`, `:ui`, `:debug`
+
+**Fallgruver oppdatert i PITFALLS_LOG:**
+- §6.6 — Manuell iterasjons-loop konvergerer ikke (P0 root-cause)
+- §6.7 — Sessions-state-resett mellom E2E-test-runs
+- §6.8 — Dev-user redirect-race forstyrrer Playwright
+
+**Læring:**
+- ✅ **Test-infra først** funker. 3 nye bugs som tok 3 dager manuelt ble avdekket på én agent-kjøring etter test-infra var på plass.
+- ✅ **Autonomi-loop med presis prompt** er extremely effective. Agent kjørte ~80 min, produserte 14-stegs test + 3 bugfixes + komplett dok.
+- ✅ **Direct token injection** > `?dev-user=`-redirect i Playwright for å unngå timing-race
+- ✅ **Pre-seed `sessionStorage.lobby.activeHallId`** kritisk for å route lobby til pilot-hall (default-er ellers til `hall-default`)
+- ⚠️ **`resetPilotState` må også DELETE-e GoH-rommet** — `masterStop` alene lar player-slots henge (engine beholder vinnere)
+- ⚠️ **Daglig tapsgrense** akkumulerer over tester — `raisePlayerLossLimits`-helper + pick fra 12-spillers pool
+- ⚠️ **Bypass-gate brukt** (`[bypass-pm-gate: emergency-pilot-test-fix]`) fordi PR-flow har vært bottleneck i 3 dager. Bypass er dokumentert i commit-message.
+
+**Verifisering (PM):**
+- ✅ Inspiserte commit `9aad3063` — diff ser ren ut
+- ✅ Sjekket at `git push` lykkes (origin up-to-date)
+- ✅ Åpnet PR #1305 manuelt med auto-merge
+- ✅ Skrev `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` med agent-mønsteret som §3.1
+- ✅ Skrev denne entry'en
+- ⏳ Tobias verifiserer post-merge at `npm run test:pilot-flow` går grønn på hans maskin
+
+**Tid:** ~80 min agent-arbeid (387 tool-uses, 4 839 622 ms = 80 min duration per usage-rapport) + ~30 min PM-verifikasjon/docs.
+
+---
+
 ### 2026-05-10 13:00 — `abbf640efb7e47e95` (test-engineer)
 
 **Scope:** Bygg automatisert E2E pilot-flow-script (Spor 2B). Komplement til manuell `PILOT_FLOW_TEST_CHECKLIST_2026-05-08.md`. Fiks også eksisterende smoke-test-bugs.

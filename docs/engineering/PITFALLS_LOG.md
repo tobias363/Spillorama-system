@@ -616,6 +616,51 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Fix:** Re-last fra Tobias' originale kilde
 **Prevention:** Sjekk filstørrelse / PDF-validity før commit
 
+### §6.6 — Manuell iterasjons-loop konvergerer ikke
+
+**Severity:** P0 (prosjekt-eksistensielt)
+**Oppdaget:** 2026-05-13 (etter 3-dagers buy-flow-iterasjon)
+**Symptom:** PM/agent itererer på buy-flow-bugs med Tobias som manuell verifikator. Hver loop: rapport → gjetting → fix → manual test → ny bug. 5-10 min per iterasjon. Etter 3 dager: marginal fremgang, 4-5 åpne bugs fortsatt. Tobias: "Vi er nødt til å endre kurs."
+
+**Root cause:**
+- Manuell verifisering har ingen state-determinisme
+- Debug-output viser symptom, ikke race/state
+- Ingen catalog over hva som er testet
+- Tilbakekoblings-loop er for treg til å konvergere
+
+**Fix (etablert 2026-05-13):**
+- Bygg fullverdig E2E-test FØR fortsatt iterasjon — 13s deterministisk
+- Hver ny bug fanges av test FØRST, fix etterpå
+- Test-runner viser dump av BUY-DEBUG + buy-api-responses + fix-suggestions ved failure
+- Se `docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`
+
+**Prevention:**
+- **HARD REGEL:** Maks 2 manuelle iterasjoner på samme bug uten å skrive automatisk test
+- Hvis bug sees 2+ ganger → STOPP iterasjon, skriv test som reproduserer, deretter fix
+- Spawn autonomous-loop agent hvis test-bygging tar > 1 time
+
+**Vitnesbyrd om effekt:**
+Samme bugs som tok 3 dager manuelt (I8/I9/I10) ble avdekket og fikset på én autonomous-agent-kjøring etter test-infra var på plass. Se commit `9aad3063` på `feat/autonomous-pilot-test-loop-2026-05-13`.
+
+### §6.7 — Sessions-state-resett mellom E2E-test-runs
+
+**Severity:** P2 (test-flakiness)
+**Oppdaget:** 2026-05-13
+**Symptom:** Andre test-run feilet med `PLAYER_ALREADY_IN_ROOM` — engine fjernet ikke player-slot ved game-end (regulatorisk korrekt for vinner-visning).
+**Fix:** `resetPilotState` i `tests/e2e/helpers/rest.ts` kaller IKKE bare `masterStop` men også `DELETE /api/admin/rooms/BINGO_DEMO-PILOT-GOH` for å rive ned GoH-rommet helt.
+**Prevention:** Test-cleanup må adressere alle state-eiere: master action, room state, players, og spilleren sin daglige tapsgrense (`raisePlayerLossLimits`).
+
+### §6.8 — Dev-user redirect-race forstyrrer Playwright
+
+**Severity:** P3 (test-harness, ikke prod)
+**Oppdaget:** 2026-05-13
+**Symptom:** `page.goto('/web/?dev-user=email')` trigger `window.location.replace()`. Playwright klikket på bingo-tile FØR redirect var ferdig → lobby reloadet og click var tapt.
+**Fix:** Pre-seed `localStorage` med session-token direkte istedenfor å bruke `?dev-user=`-redirect. Pre-seed `sessionStorage.lobby.activeHallId` så lobby joiner pilot-hall.
+**Prevention:**
+- Test-harness skal ALDRI avhenge av timing av redirects
+- Direct state-injection > URL-baserte triggers
+- Når test-flakiness sees, sjekk om timing-avhengighet er skjult
+
 ---
 
 ## §7 Frontend / Game-client
