@@ -212,6 +212,72 @@ if (existing) {
 
 ---
 
+## F-06: PM Push Control — registry og scope-deklarasjon
+
+**Filer:**
+- `scripts/pm-push-control.mjs:1-1103` — registry-CRUD, list, conflicts, merge-order
+- `.claude/active-agents.json` — persistent registry (etablert PR #1342)
+- `.github/workflows/auto-rebase-on-merge.yml` — auto-rebase orkestrering
+- `docs/engineering/PM_PUSH_CONTROL.md` — operasjonell guide
+
+**Hvorfor fragile:** PM Push Control er meta-tool som ALLE PM-er trenger for multi-agent-koordinering. Hvis scope-deklarasjon-format brytes, mister vi konflikt-deteksjon før push. Hvis auto-rebase-workflow brytes, må PM manuelt rebase ALLE overlappende PR-er (cascade × N). Phase 2-fixet la til hooks + auto-rebase + dashboard. Endringer her kan rive ned hele orkestreringen.
+
+**Hva ALDRI gjøre:**
+- Endre `agents[].scope`-shape uten å oppdatere `globMatch`-funksjonen
+- Fjerne `conflictsAcknowledged`-feltet — det er hele dokumentasjonen for forventede merges
+- Hardkode kun bash 4-features (ref §5.8) — macOS-PM kan ikke kjøre
+- Endre `gh api PUT /repos/.../pulls/N/update-branch` til REST POST — endpoint krever PUT
+- Slette `/tmp/active-agents.json` mens daemon kjører — orphan'er agenter
+
+**Hvilke tester MÅ stå grønn etter endring:**
+- `scripts/__tests__/pm-push-control.test.mjs` (hvis eksisterer; ellers TODO)
+- `npm run test:pilot-flow` — push-control-ruten må fortsatt fungere
+- E2E-test for `register → list → conflicts → unregister` lifecycle (pending E5)
+- `auto-rebase-on-merge.yml` workflow må kjøre grønt på sample PR
+
+**Manuell verifikasjon:**
+1. `node scripts/pm-push-control.mjs list` returnerer registry
+2. Register test-agent: `node scripts/pm-push-control.mjs register TEST test/branch docs/test.md`
+3. `node scripts/pm-push-control.mjs conflicts` viser ingen issues
+4. Unregister: `node scripts/pm-push-control.mjs unregister TEST`
+5. Verifiser ingen orphan-rader
+
+**Historisk skade:**
+- 2026-05-13 (Phase 1 + 2): bygget under aktiv 11-agent-sesjon, cascade-rebase × 14
+- 2026-05-13 (D1 add/add conflict): scripts/pm-push-control.mjs duplisert til 1381 linjer broken JS — løst med `git merge -X ours` (ref §5.10)
+
+---
+
+## F-07: Worktree-isolation forutsetter parent på origin/main
+
+**Filer:**
+- Alle agent-spawn-points med `isolation: "worktree"`
+- `PITFALLS_LOG.md §11.16`
+
+**Hvorfor fragile:** Claude Agent SDK worktree-isolation forker fra parent's HEAD (Tobias' lokale main repo). Hvis parent er på feature-branch (eks `fix/reentry-during-draw-2026-05-13` etter Tobias drar siste PR), ALLE worktrees inherits den branchen. Resultat: agenter committer på branch som er foran origin/main → cascade-rebase × N for hver agent som merger.
+
+**Hva ALDRI gjøre:**
+- Spawne ≥ 2 parallelle agenter UTEN først å verifisere `git status` viser main + up-to-date
+- Anta at Tobias' main-repo er ren — det er hans arbeidsmiljø, ikke et CI-environment
+- Bruke `isolation: "worktree"` for write-PR-agenter når parent har uncommitted endringer
+- Force-push fra worktree til Tobias' main repo
+
+**Hvilke tester MÅ stå grønn etter endring:**
+- Manuell: spawn 2 parallelle agenter, verifiser de begge forker fra `origin/main` ikke parent's branch
+- Pilot-flow E2E må fortsatt fungere fra fresh main checkout
+
+**Manuell verifikasjon:**
+1. Før parallel-spawn: `cd /Users/tobiashaugen/Projects/Spillorama-system && git status`
+2. Verifiser output: "On branch main", "Your branch is up-to-date with 'origin/main'"
+3. Hvis avvik: `git checkout main && git pull --rebase --autostash` FØR spawn
+4. Hvis dirty (untracked files): rydd via `git stash -u` eller eksplisitt `rm` (med Tobias-godkjennelse)
+
+**Historisk skade:**
+- 2026-05-13 (Wave 2): 11 agenter spawnet fra Tobias' fix-branch, cascade-rebase × 14 iterasjoner over 4 timer
+- Tobias-direktiv §2.2: PM eier `git pull` etter HVER PR-merge → forhindrer dette mønsteret
+
+---
+
 ## Format for ny entry
 
 Når du fikser en bug som er ikke-triviell, OG du har sett at endring andre steder kunne ha brutt din fix, legg til:
@@ -251,3 +317,4 @@ Håndheves manuelt under PR-review (TODO: automatiser via danger-rule).
 
 | 2026-05-13 | F-05 — Re-attach-guard i ALLE room-join handler-paths (etter I15-fix på `joinScheduledGame`) | reentry-fix agent |
 | 2026-05-13 | F-03 oppdatert — test eksisterer nå (`tests/e2e/spill1-manual-flow.spec.ts`), status fra "gap" til "test må stå grønn" | Backend-agent |
+| 2026-05-13 | F-06 — PM Push Control (`scripts/pm-push-control.mjs`) er meta-tool som styrer multi-agent-koordinering. F-07 — Worktree-isolation forutsetter parent på origin/main (Wave 2 cascade × 14). | PM-AI (E6 redo) |
