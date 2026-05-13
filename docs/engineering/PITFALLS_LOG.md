@@ -1,7 +1,7 @@
 # Spillorama Pitfalls Log — kumulativ fallgruve-katalog
 
 **Status:** Autoritativ. Alle fallgruver oppdaget i prosjektet samles her.
-**Sist oppdatert:** 2026-05-11
+**Sist oppdatert:** 2026-05-13
 **Eier:** PM-AI (vedlikeholdes ved hver agent-sesjon + hver PR-merge med learning)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."*
@@ -49,14 +49,16 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 7 | 2026-05-10 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 5 | 2026-05-10 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 14 | 2026-05-13 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 14 | 2026-05-11 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 5 | 2026-05-10 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 8 | 2026-05-11 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 10 | 2026-05-11 |
 
-**Total:** 83 entries (per 2026-05-11)
+**Total:** 87 entries (per 2026-05-13)
+
+> NB: grep `^### §` returnerer 95 fordi tabellen ovenfor og sub-sections matcher samme regex. Faktisk antall content-entries er ~87.
 
 ---
 
@@ -697,6 +699,76 @@ const detail = await fetch(`/api/admin/game1/games/${gameId}`, { headers: { Auth
 **Fix-forslag (post-pilot):** Legg til `POST /api/admin/game1/games/:gameId/draw-next` (krever GAME1_MASTER_WRITE) som wrapper `Game1DrawEngineService.drawNext`. Gir oss kontroll over draws fra tester + admin-UI for debug.
 
 **Prevention:** Test-design: bruk tids-basert polling (`while (Date.now() - start < timeout)`), ikke antall-basert (`for (i = 0 to N)`). Test-timeout 5min er nok for full Rad 1→Rad 2-flyt.
+
+### §6.11 — macOS BSD awk støtter ikke `match(..., array)` (GNU awk-only)
+
+**Severity:** P1 (script-portabilitet)
+**Oppdaget:** 2026-05-13
+**Symptom:** Bash-script som bruker `awk 'match($0, /regex/, m) { print m[1] }'` feiler på macOS med `awk: syntax error at source line 2`
+**Root cause:** macOS default awk er BSD awk (`/usr/bin/awk`, "awk version 20200816"). BSD awk støtter `match()` som boolean, men IKKE 3-arg-formen som lagrer match-grupper i array. Det er GNU awk-extension.
+**Fix:** Bruk bash regex med `BASH_REMATCH` istedet:
+```bash
+PARSE_REGEX='^\[([^]]+)\] \[(P[0-3])\] ([^:]+):[[:space:]]*(.*)$'
+if [[ "$line" =~ $PARSE_REGEX ]]; then
+  echo "${BASH_REMATCH[1]}"  # iso
+  echo "${BASH_REMATCH[2]}"  # severity
+fi
+```
+**Prevention:** Bruk **kun** POSIX awk-features i scripts som skal kjøre på macOS. Hvis du må bruke `match(..., array)`, krev `gawk` (brew install gawk) og dokumenter avhengigheten.
+
+**Forekomster:**
+- `scripts/monitor-push-to-pm.sh` (originalt awk-basert, fikset til bash regex 2026-05-13)
+- `scripts/__tests__/monitor-severity-classification.test.sh` (samme fix)
+
+### §6.12 — macOS default-bash er 3.2; zsh er current shell
+
+**Severity:** P2 (test-portabilitet)
+**Oppdaget:** 2026-05-13
+**Symptom:** Bash-tests kjørt med `bash scripts/test.sh` (uten shebang) bruker zsh siden Tobias' shell er zsh — `BASH_REMATCH` finnes ikke, tester feiler stille
+**Root cause:** macOS Catalina+ defaultet til zsh som login-shell. Interactive shell-prompt + `bash`-kommando-aliaser bruker zsh-kompatibilitets-lag. Eksplisitt `bash` peker likevel til `/bin/bash` (3.2.57), men shebang `#!/usr/bin/env bash` kan hente zsh-mode hvis env-PATH er rart.
+
+**Fix:**
+1. Eksplisitt shebang: `#!/usr/bin/env bash` (ALDRI `#!/bin/sh`)
+2. Tester kjøres med `/bin/bash scripts/test.sh` for å sikre rett bash
+3. Verifiser med `echo $BASH_VERSION` i scriptet — skal returnere `3.2.57(1)-release` på macOS
+
+**Prevention:** Test-scripts skal verifisere `BASH_VERSION` er ikke-tom i sanity-sjekk. Hvis tom → script kjører under zsh/sh → fail fast.
+
+### §6.13 — FIFO writes blokker uten reader
+
+**Severity:** P1 (daemon hang)
+**Oppdaget:** 2026-05-13
+**Symptom:** Bash-daemon som gjør `echo "msg" > /tmp/fifo` hang-er evig hvis ingen `tail -f /tmp/fifo` kjører
+**Root cause:** POSIX FIFO-semantikk: `open(O_WRONLY)` blokkerer til en reader åpner samme FIFO (`open(O_RDONLY)`). I daemon-context betyr det at hver push hang-er hvis PM-sesjon ikke aktivt leser.
+**Fix:** Åpne FIFO rw på file descriptor 3 ved daemon-startup:
+```bash
+exec 3<>"$FIFO"
+# Nå har daemon alltid sin egen reader. Writes blokkerer aldri:
+echo "msg" >&3
+```
+Kjernen buffer ~64 KB FIFO-data. Eksterne `tail -f /tmp/fifo`-readers får sin egen kopi av byte-strømmen via separat open().
+
+**Alternative som IKKE virker på macOS:** `timeout 2 bash -c "echo ... > fifo"` — fordi `timeout`-kommando ikke finnes på macOS by default (kun via `brew install coreutils` som `gtimeout`).
+
+**Prevention:** Daemon som skriver til FIFO MÅ åpne den rw-mode på FD-allocation i startup. Sjekk med `lsof -p <pid>` at FD 3 har FIFO-en åpen.
+
+### §6.14 — `tail -F` child-prosesser orphaner ved parent-kill
+
+**Severity:** P2 (daemon cleanup)
+**Oppdaget:** 2026-05-13
+**Symptom:** `kill -TERM <daemon-pid>` lar `tail -F`-children leve videre, akkumulerer over tid
+**Root cause:** Når et bash-script forker `tail -F ... | while read line; do ... done &`, subshell-er har egen process group. SIGTERM til parent dreper kun parent — children fortsetter med PPID=1 (orphaned to init).
+**Fix:** Kill process-gruppen, ikke bare lederen:
+```bash
+# Negativ PID = signaler hele process-group
+kill -TERM "-$PID" 2>/dev/null || kill -TERM "$PID"
+# Etterfølg med pkill -f sweep for stragglers:
+pkill -KILL -f 'pattern-script-name' 2>/dev/null
+```
+**Prevention:** Wrappers som starter daemoner med children MÅ:
+1. Bruke `kill -TERM -PID` for process-group-signaling
+2. Sweep med `pkill -f` etter cleanup som sikkerhets-nett
+3. `set +m` for å disable job-control-spam ("Terminated: 15"-stderr)
 
 ---
 
