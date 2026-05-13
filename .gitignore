@@ -71,3 +71,10 @@ scripts/performance-budget/report-pilot-hw.json
 # Inneholder PM-identifier, timestamp, main-SHA og fri-tekst-takeaways
 # per PM_HANDOFF-fil. Skal IKKE deles i repo (privat for hver PM).
 .pm-onboarding-confirmed.txt
+
+# Stryker mutation-testing (etablert 2026-05-13)
+# .stryker-tmp/  : Stryker scratchpad — kan vokse til flere GB under run
+# reports/mutation/ : HTML/JSON-rapporter — lastes opp som CI-artefakter
+apps/backend/.stryker-tmp/
+apps/backend/reports/mutation/
+.stryker-tmp/

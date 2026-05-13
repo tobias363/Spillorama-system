@@ -23,7 +23,10 @@
     "smoke-test": "tsx scripts/e2e-smoke-test.ts",
     "test:e2e": "LOG_LEVEL=warn tsx --test src/__tests__/e2e/*.test.ts",
     "spec:lint": "redocly lint openapi.yaml",
-    "reconcile:wallet-ledger": "tsx scripts/reconcile-wallet-vs-ledger.ts"
+    "reconcile:wallet-ledger": "tsx scripts/reconcile-wallet-vs-ledger.ts",
+    "test:mutation": "stryker run",
+    "test:mutation:dry-run": "stryker run --dryRunOnly",
+    "test:mutation:report": "open reports/mutation/mutation.html || xdg-open reports/mutation/mutation.html"
   },
   "dependencies": {
     "@sentry/node": "^10.49.0",
@@ -45,6 +48,9 @@
   },
   "devDependencies": {
     "@redocly/cli": "^2.28.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/tap-runner": "^9.6.1",
+    "@stryker-mutator/typescript-checker": "^9.6.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/mssql": "^12.3.0",
