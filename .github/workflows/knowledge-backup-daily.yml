@@ -1,0 +1,154 @@
+name: Knowledge backup daily
+
+# Daglig immutable snapshot av kunnskaps-artefakter (FRAGILITY_LOG,
+# PITFALLS_LOG, BUG_CATALOG, AGENT_EXECUTION_LOG, skills) som
+# lightweight git-tag `knowledge/YYYY-MM-DD`. Hvis en agent uforvarende
+# korrumperer en av disse filene har vi en rask rollback-vei.
+#
+# Etablert som del av KNOWLEDGE_AUTONOMY_PROTOCOL — se
+# docs/engineering/KNOWLEDGE_BACKUP_RESTORE.md.
+#
+# Restore: bash scripts/restore-knowledge.sh --tag knowledge/YYYY-MM-DD --reason "<text>"
+# List:    bash scripts/list-knowledge-snapshots.sh
+
+on:
+  schedule:
+    # 02:00 UTC daglig (03:00/04:00 Europe/Oslo avhengig av DST)
+    - cron: '0 2 * * *'
+  workflow_dispatch: # manuell trigger for testing
+
+permissions:
+  contents: write # for å pushe tags
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main with full history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          # Default GITHUB_TOKEN — workflow har contents:write så
+          # vi kan pushe tags uten PAT.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify knowledge files exist
+        run: |
+          set -e
+          MISSING=0
+          REQUIRED_FILES=(
+            "docs/engineering/FRAGILITY_LOG.md"
+            "docs/engineering/PITFALLS_LOG.md"
+            "docs/engineering/AGENT_EXECUTION_LOG.md"
+            "docs/engineering/KNOWLEDGE_AUTONOMY_PROTOCOL.md"
+            "tests/e2e/BUG_CATALOG.md"
+          )
+          for f in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing required knowledge file: $f"
+              MISSING=$((MISSING+1))
+            else
+              echo "OK: $f"
+            fi
+          done
+
+          # SKILL.md-filer er distribuert — sjekk at vi har minst 1
+          SKILL_COUNT=$(find .claude/skills -name "SKILL.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$SKILL_COUNT" -lt 1 ]; then
+            echo "::error::No SKILL.md files found under .claude/skills/"
+            MISSING=$((MISSING+1))
+          else
+            echo "OK: $SKILL_COUNT SKILL.md files under .claude/skills/"
+          fi
+
+          # SKILL_FILE_MAP.md eksisterer ikke per 2026-05-13 — log warning,
+          # ikke fail. Når den lages senere blir den automatisk inkludert.
+          if [ -f "docs/engineering/SKILL_FILE_MAP.md" ]; then
+            echo "OK: docs/engineering/SKILL_FILE_MAP.md"
+          else
+            echo "::warning::SKILL_FILE_MAP.md does not exist yet (not blocking)"
+          fi
+
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::$MISSING required files missing — aborting snapshot"
+            exit 1
+          fi
+          echo "All required knowledge files present."
+
+      - name: Configure git author
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions (knowledge-backup)"
+
+      - name: Create snapshot tag (idempotent)
+        id: tag
+        run: |
+          set -e
+          TAG="knowledge/$(date -u +%Y-%m-%d)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # Fetch alle tags så vi kan sjekke eksistens
+          git fetch origin --tags --quiet
+
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            EXISTING_SHA=$(git rev-parse "$TAG")
+            echo "Tag $TAG already exists (points at $EXISTING_SHA) — skipping creation."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MAIN_SHA=$(git rev-parse HEAD)
+          MAIN_SHORT=$(git rev-parse --short HEAD)
+          MAIN_SUBJECT=$(git log -1 --pretty=%s HEAD)
+
+          # Bygg tag-melding via heredoc. YAML-blokken `run: |` stripper
+          # automatisk de leading 10 spaces, så heredoc-innholdet havner
+          # ren i $TAG_MSG_FILE.
+          TAG_MSG_FILE=$(mktemp)
+          cat > "$TAG_MSG_FILE" <<EOF
+          Knowledge snapshot $TAG
+
+          Source: main @ $MAIN_SHORT
+          Subject: $MAIN_SUBJECT
+          Files backed up:
+            - docs/engineering/FRAGILITY_LOG.md
+            - docs/engineering/PITFALLS_LOG.md
+            - docs/engineering/AGENT_EXECUTION_LOG.md
+            - docs/engineering/KNOWLEDGE_AUTONOMY_PROTOCOL.md
+            - tests/e2e/BUG_CATALOG.md
+            - .claude/skills/**/SKILL.md
+
+          Restore: bash scripts/restore-knowledge.sh --tag $TAG --reason '<reason>'
+          List:    bash scripts/list-knowledge-snapshots.sh
+
+          This is an immutable snapshot — DO NOT force-push or delete.
+          EOF
+
+          # Annotated tag så vi har metadata (forfatter, dato, melding)
+          git tag -a "$TAG" -F "$TAG_MSG_FILE"
+          rm -f "$TAG_MSG_FILE"
+
+          git push origin "$TAG"
+          echo "Created and pushed tag $TAG -> $MAIN_SHA"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          echo "sha=$MAIN_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        run: |
+          echo "## Knowledge backup snapshot" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.tag.outputs.skipped }}" = "true" ]; then
+            echo ":information_source: Tag \`${{ steps.tag.outputs.tag }}\` allerede eksisterer — ingen ny snapshot opprettet." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo ":white_check_mark: Opprettet tag \`${{ steps.tag.outputs.tag }}\` på commit \`${{ steps.tag.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Restore:**" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
+            echo "bash scripts/restore-knowledge.sh --tag ${{ steps.tag.outputs.tag }} --reason \"<text>\"" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**List alle snapshots:** \`bash scripts/list-knowledge-snapshots.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Doc: [\`docs/engineering/KNOWLEDGE_BACKUP_RESTORE.md\`](../blob/main/docs/engineering/KNOWLEDGE_BACKUP_RESTORE.md)" >> "$GITHUB_STEP_SUMMARY"
