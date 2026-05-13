@@ -159,6 +159,74 @@ Pilot-omfang er 4 haller. Utvidelse forutsetter at R4 (load-test 1000), R6 (outb
 ### 2.11 Skill-loading lazy per-task
 Last KUN skills når du selv skal redigere kode i det domenet. Skip for ren PM/orkestrering eller delegert agent-arbeid (vedtatt 2026-04-25).
 
+### 2.12 Test-driven iterasjon på pilot-kode (vedtatt 2026-05-13)
+Etter 3-dagers buy-flow-iterasjon uten konvergens: **manuell loop-iterasjon er forbudt**. Hvis en bug sees 2+ ganger, MÅ test skrives FØRST som reproduserer, deretter fix.
+
+Pilot-test-infra: `npm run test:pilot-flow` (13s deterministic). Detaljer i [`PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md`](./PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md).
+
+### 2.13 Disiplin-håndhevelse: knowledge-protocol-checkbox blokkerer PR (vedtatt 2026-05-13)
+Hver PR som rører pilot-relatert kode MÅ ha utfylt checkbox-seksjon "Knowledge protocol" i PR-body. Håndheves av `.github/workflows/knowledge-protocol-gate.yml`.
+
+### 2.14 Test-DB: samme som live-stack, non-destructive default (vedtatt 2026-05-13)
+Pilot-test bruker SAMME Postgres-DB som Tobias' manuelle dev-stack. Tester er **non-destructive by default** — `resetPilotState({destroyRooms: true})` kreves eksplisitt for fresh-baseline.
+
+### 2.15 Ingen hard deadline — kvalitet > tid (vedtatt 2026-05-13)
+Pilot lanseres NÅR alle kvalitets-kriteriene er oppfylt, ikke etter en kalender.
+
+### 2.16 Plan C: én måned ekstra OK ved strukturelle bugs (vedtatt 2026-05-13)
+Hvis BUG_CATALOG viser ≥ 3 strukturelle bugs i pilot-kode, godkjent å bruke inntil 1 måned ekstra på arkitektur-rewrite.
+
+### 2.17 Parallelle agenter: grønt lys uten å spørre (vedtatt 2026-05-13)
+PM-AI kan spawne så mange parallelle agenter som hensiktsmessig. Krav: klart scope, ingen fil-kollisjon, AGENT_EXECUTION_LOG oppdateres per leveranse. **Bruk `isolation: "worktree"` ved ≥ 2 parallelle agenter på samme repo for å unngå file-revert-konflikter.**
+
+### 2.18 Live-monitor ALLTID aktiv ved testing (vedtatt 2026-05-13, IMMUTABLE)
+
+> "Denne må alltid være aktiv når vi tester og alltid lage rapporter over hva som skjer. Det er den eneste måten vi kan få fremgang på."
+> — Tobias 2026-05-13
+
+**HARD REGEL:** Når PM eller Tobias starter en test-sesjon, MÅ live-monitor-agent være aktiv som FØRSTE handling i sesjonen.
+
+**Spawn-mal — kopier ved sesjons-start:**
+
+```typescript
+Agent({
+  description: "Live monitor pilot-flow events",
+  subagent_type: "general-purpose",
+  run_in_background: true,
+  prompt: `<<autonomous-loop>>
+
+Du er live-monitor for pilot-flow debugging.
+
+Loop hvert 5 sek:
+1. curl "http://localhost:4000/api/_dev/debug/events/tail?token=spillorama-2026-test&sinceId=<lastId>"
+2. Parse JSON, detect anomalier
+3. Tail backend stdout hvis tilgjengelig
+4. Skriv log: /tmp/pilot-monitor.log (kontinuerlig)
+5. Skriv snapshot: /tmp/pilot-monitor-snapshot.md (hver 60s)
+6. Skriv initial-rapport: /tmp/pilot-monitor-init.md (etter første poll)
+
+Anomali-klasser:
+- screen.mount=play men ingen popup.show innen 5s
+- socket.recv room:update men klient ikke i play-screen
+- wallet.error / buy.error
+- Backend-stdout ERROR/FATAL/TypeError
+- GameStatus stuck > 60s uten endring
+- ROOM_LOCKED-errors på room:join under aktiv runde
+
+Token: $RESET_TEST_PLAYERS_TOKEN i apps/backend/.env (default spillorama-2026-test).
+ScheduleWakeup hver 60s.
+Stopp KUN når PM ber eksplisitt, eller backend dødt > 5 min.`,
+})
+```
+
+**ALDRI stopp monitoren med rasjonale "test-infra er bedre"** — Tobias-direktiv 2026-05-13. Monitor + test-infra er komplementære.
+
+**PM sesjons-start sjekkliste (ny):**
+1. Verifiser dev:nuke kjører (`curl localhost:4000/health`)
+2. **Spawn live-monitor-agent** ← NY OBLIGATORISK STEP
+3. Verifiser `/tmp/pilot-monitor-init.md` skrives innen 30s
+4. Klart for testing
+
 ---
 
 ## 3. Trinn-for-trinn onboarding-rutine

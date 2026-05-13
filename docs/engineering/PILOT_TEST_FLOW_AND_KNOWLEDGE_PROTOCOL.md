@@ -321,7 +321,36 @@ Hvis vi finner strukturelle bugs (≥ 3 i BUG_CATALOG-strukturell-tabell):
 Hvis vi finner < 3 strukturelle bugs:
 - Plan B er nok — fortsetter med test-driven iterasjon på implementasjons-nivå
 
-### 5.5 Ressurser jeg er villig til å skalere
+### 5.5 Live-monitor ALLTID aktiv ved testing (vedtatt 2026-05-13, IMMUTABLE)
+
+> "Denne må alltid være aktiv når vi tester og alltid lage rapporter over hva som skjer. Det er den eneste måten vi kan få fremgang på."
+> — Tobias 2026-05-13
+
+**HARD REGEL:** Når Tobias tester manuelt ELLER E2E-tester kjøres, MÅ live-monitor-agent være aktiv. Den skal:
+
+1. Polle `http://localhost:4000/api/_dev/debug/events/tail?token=$RESET_TEST_PLAYERS_TOKEN` hvert 5. sek (token i `apps/backend/.env`, default `spillorama-2026-test`)
+2. Tail backend stdout hvis tilgjengelig
+3. Detektere anomalier i sanntid (popup-mismatch, wallet-errors, stuck-states, ROOM_LOCKED-errors)
+4. Skrive kontinuerlig log til `/tmp/pilot-monitor.log`
+5. Skrive 60s-snapshots til `/tmp/pilot-monitor-snapshot.md`
+6. Skrive initial-rapport til `/tmp/pilot-monitor-init.md`
+
+**Når monitoren skal spawnes:**
+- ALLTID når PM eller Tobias starter en test-sesjon
+- ALLTID under live debug-sesjoner (manuell + automatisk)
+- Bruk autonomous-loop-agent (general-purpose) med `<<autonomous-loop>>`-sentinel
+- run_in_background: true
+
+**Når monitoren KAN stoppes:**
+- Når test-sesjonen eksplisitt avsluttes
+- ALDRI fordi "vi har bedre infra" — manuell flyt er en uavhengig signal-kilde
+
+**Anti-mønster (PM gjorde dette 2026-05-13, må aldri gjentas):**
+PM stoppet live-monitor-loop med rasjonale "bedre å bygge test-infra først". Resultat: Tobias hadde ingen observability under manuell test → 2-skritt-frem-1-tilbake. **Test-infra + monitor er komplementære, ikke alternativer.**
+
+Detaljer for agent-prompt i `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` §2.18.
+
+### 5.6 Ressurser jeg er villig til å skalere
 
 Hvis du gir grønt lys, kan jeg spawn flere agenter parallelt på:
 - Rad-vinst-test (B-fase 2c)
@@ -330,8 +359,6 @@ Hvis du gir grønt lys, kan jeg spawn flere agenter parallelt på:
 - Wallet-balance-asserts
 
 Hver agent koster claude.ai API-tokens, men ikke mye relativt til 5-10 dagers manual iterasjon.
-
-**Spørsmål til deg:** Grønt lys for opp til 4 parallelle agenter når PR #1305 mergees?
 
 ---
 
