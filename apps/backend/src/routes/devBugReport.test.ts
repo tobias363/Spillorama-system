@@ -72,6 +72,8 @@ async function startApp(
         backendLogPath: opts.backendLogPath,
         clientEventLogPath: opts.clientEventLogPath,
         now: opts.now,
+        // Disable audit-db i tester (vi spawner ikke child_process her).
+        auditDbScriptPath: null,
       },
     ),
   );
@@ -273,6 +275,133 @@ describe("devBugReport router", () => {
         assert.ok(md.includes("\"screen\": \"play\""));
       } finally {
         await close();
+      }
+    });
+
+    it("inkluderer DB-audit-seksjon når auditDbScriptPath peker på fungerende script", async () => {
+      // Lag en mock audit-db.mjs som returnerer minimal JSON
+      const mockScript = path.join(tmpDir, "mock-audit-db.mjs");
+      fs.writeFileSync(
+        mockScript,
+        `#!/usr/bin/env node
+const json = {
+  timestamp: new Date().toISOString(),
+  schema: "public",
+  summary: {
+    totalQueries: 3,
+    totalFindings: 1,
+    totalErrors: 0,
+    okCount: 2,
+    findingsByTier: { P1: 1, P2: 0, P3: 0 },
+  },
+  results: [
+    {
+      id: "stuck-thing",
+      tier: "P1",
+      rowCount: 1,
+      ok: true,
+      error: null,
+      description: "Test finding",
+      fixAdvice: "Fix it",
+      rows: [{ id: "x1" }],
+    },
+  ],
+};
+process.stdout.write(JSON.stringify(json));
+process.exit(1); // P1-funn → exit 1, men output er gyldig
+`,
+      );
+      fs.chmodSync(mockScript, 0o755);
+
+      const pool = makeFakePool(() => []);
+      const app = express();
+      app.use(express.json({ limit: "5mb" }));
+      app.use(
+        createDevBugReportRouter(
+          { pool: pool as unknown as import("pg").Pool, schema: "public" },
+          {
+            reportDir,
+            pilotMonitorLogPath: path.join(tmpDir, "no.log"),
+            backendLogPath: path.join(tmpDir, "no.log"),
+            clientEventLogPath: path.join(tmpDir, "no.jsonl"),
+            auditDbScriptPath: mockScript,
+            auditDbTimeoutMs: 5000,
+          },
+        ),
+      );
+      const server = await new Promise<Server>((resolve) => {
+        const s = app.listen(0, "127.0.0.1", () => resolve(s));
+      });
+      const addr = server.address();
+      if (typeof addr !== "object" || addr === null) {
+        server.close();
+        throw new Error("server.address() ikke object");
+      }
+      const baseUrl = `http://127.0.0.1:${addr.port}`;
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/_dev/debug/bug-report?token=test-token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Audit-test" }),
+          },
+        );
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { data: { reportPath: string } };
+        const md = fs.readFileSync(body.data.reportPath, "utf8");
+        assert.ok(md.includes("## 🗄️ DB-audit (quick)"));
+        assert.ok(md.includes("stuck-thing"));
+        assert.ok(md.includes("P1×1"));
+        assert.ok(md.includes("Fix it"));
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    });
+
+    it("fail-soft når audit-db script ikke finnes", async () => {
+      const pool = makeFakePool(() => []);
+      const app = express();
+      app.use(express.json({ limit: "5mb" }));
+      app.use(
+        createDevBugReportRouter(
+          { pool: pool as unknown as import("pg").Pool, schema: "public" },
+          {
+            reportDir,
+            pilotMonitorLogPath: path.join(tmpDir, "no.log"),
+            backendLogPath: path.join(tmpDir, "no.log"),
+            clientEventLogPath: path.join(tmpDir, "no.jsonl"),
+            auditDbScriptPath: "/tmp/this-does-not-exist-xyz.mjs",
+            auditDbTimeoutMs: 5000,
+          },
+        ),
+      );
+      const server = await new Promise<Server>((resolve) => {
+        const s = app.listen(0, "127.0.0.1", () => resolve(s));
+      });
+      const addr = server.address();
+      if (typeof addr !== "object" || addr === null) {
+        server.close();
+        throw new Error("server.address() ikke object");
+      }
+      const baseUrl = `http://127.0.0.1:${addr.port}`;
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/_dev/debug/bug-report?token=test-token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Audit-missing" }),
+          },
+        );
+        // Skal IKKE failes — fail-soft
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { data: { reportPath: string } };
+        const md = fs.readFileSync(body.data.reportPath, "utf8");
+        assert.ok(md.includes("DB-audit kjørte ikke"));
+        assert.ok(md.includes("ikke funnet"));
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
       }
     });
 
