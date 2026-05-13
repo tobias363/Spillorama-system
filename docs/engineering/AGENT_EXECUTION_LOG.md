@@ -59,41 +59,48 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
-### 2026-05-13 — Knowledge backup daily (general-purpose agent, PM-AI)
+### 2026-05-13 — Skill freshness CI gate (general-purpose, B3-task)
 
-**Scope:** Bygge daglig immutable backup av kunnskaps-artefakter (FRAGILITY_LOG, PITFALLS_LOG, BUG_CATALOG, AGENT_EXECUTION_LOG, skills) som lightweight git-tags `knowledge/YYYY-MM-DD`. Kompletterende sikkerhetsnett til de eksisterende kunnskaps-systemene — sikrer rask rollback ved korrupsjon eller utilsiktet sletting.
+**Scope:** Bygg CI-gate som varsler når en skill i `.claude/skills/` er stale (90+ dager uten oppdatering AND 50+ commits til scope-filer siste 60 dager). Avhenger av B2 (skill-file-mapping) som introduserer `<!-- scope: ... -->` headers — fallback: skip skills uten header (mark "scope-undefined").
 
 **Inputs gitt:**
-- Mandat: ny workflow + 2 scripts + dokumentasjon, ingen PR-opprettelse
-- Branch: `feat/knowledge-backup-daily-2026-05-13` fra `origin/main`
-- Pekere til `KNOWLEDGE_AUTONOMY_PROTOCOL.md`, `FRAGILITY_LOG.md`, `auto-generate-docs.yml`
-- Estimat: 1-2 timer
+- Mandat fra `KNOWLEDGE_AUTONOMY_PROTOCOL.md` Tier 3-C / "skill self-evolution"
+- Pekere til `.claude/skills/`, `docs/auto-generated/SKILLS_CATALOG.md`, `auto-generate-docs.yml`, `scripts/skill-evolution-review.sh`
+- Branch: ny fra main, ikke åpne PR (PM-AI tar over)
 
 **Outputs produsert:**
-- Branch: `feat/knowledge-backup-daily-2026-05-13`
-- Commit: `<SHA>` — `feat(autonomy): daglig knowledge-backup snapshot via tags`
+- Branch: `feat/skill-freshness-ci-gate-2026-05-13`
 - Filer:
-  - `.github/workflows/knowledge-backup-daily.yml` (ny) — cron 02:00 UTC, idempotent
-  - `scripts/restore-knowledge.sh` (ny) — `--tag` + `--reason` påkrevd, interaktiv default + `--yes` for unattended
-  - `scripts/list-knowledge-snapshots.sh` (ny) — lister alle `knowledge/*`-tags
-  - `docs/engineering/KNOWLEDGE_BACKUP_RESTORE.md` (ny) — komplett guide
+  - `scripts/check-skill-freshness.mjs` (ny, 555 linjer) — Node ESM, ingen eksterne deps (bruker built-in `fs.globSync` fra Node 22+)
+  - `.github/workflows/skill-freshness-weekly.yml` (ny) — cron mandag 09:00 UTC + auto-issue ved very-stale + 7-dagers issue-dedup
+  - `.github/workflows/skill-freshness-pr-check.yml` (ny) — pull_request trigger + comment-update-pattern (idempotent)
+  - `docs/engineering/SKILL_FRESHNESS.md` (ny) — terskler, scope-header-format, refresh-flyt, deprecation-prosess
+- Test-output verifisert lokalt:
+  - Default JSON-mode: alle 20 skills detektert som "scope-undefined" (forventet — B2 ikke landet enda)
+  - Markdown-mode: korrekt sammendrag + per-status-tabeller
+  - Temporary scope-header injection på `wallet-outbox-pattern` → korrekt parsing (3 globs), 31 commits til scope siste 60 dager
+  - PR-mode: ingen endringer mot `origin/main` (ny branch) → tom rapport, exit 0
+  - `--very-stale-only`: filterer korrekt
 
 **Fallgruver oppdaget:**
-- Ingen nye fallgruver. Mønstret følger `auto-generate-docs.yml`-konvensjonen (cron + `contents: write`).
+- Node 22+ har `fs.globSync` built-in → unngår `glob`-npm-deps. Eldre Node-versjoner ville feilet, men `.nvmrc` + workflow-pin på `node-version: 22` garanterer kompatibilitet.
+- `git log --since="N.days.ago" -- pattern` aksepterer glob direkte i pathspec, men trenger quoting for shell-safety. Brukte `execSync` med eksplisitt quoting istedenfor å bygge args-array, fordi shell-tolkningen var enklere å verifisere.
+- PR-comment-update-pattern: marker-string `<!-- skill-freshness-pr-check -->` + search-and-replace istedenfor delete-and-recreate, så PR-history holder seg ren.
 
 **Læring:**
-- Annotated tags (`git tag -a`) gir oss metadata (forfatter, dato, melding) gratis. Lightweight tags ville fungert, men annotated er ~500 bytes vs 50 bytes — neglisjerbar forskjell mot fordelen av sporbarhet.
-- Idempotens på workflow-nivå (sjekk `git rev-parse --verify --quiet refs/tags/$TAG`) er kritisk for `workflow_dispatch`-bruk uten å feile første kjøring som already-tagged.
-- `--reason` påkrevd i restore-script tvinger audit-disiplin — uten det glemmer PM hvorfor de rullet tilbake.
-- `git checkout <tag> -- <files>` kopierer både til working tree og index, men sletter ikke filer som har dukket opp etter tag. Skills-katalogen kan ha fått nye filer, så vi tar med hele `.claude/skills/`-treet og lar `git add` håndtere diff-en.
+- Built-in `fs.globSync` reduserer dependency-overflate. Bra mønster for fremtidige Node-scripts.
+- `process.exit(0)` alltid (selv ved very-stale) — workflow er informasjonelt, ikke blokkerende. Tobias' direktiv: skills er kunnskaps-artefakter, ikke gate-keepers.
+- Issue-dedup via 7-dagers vindu + label-filter unngår støy hvis flere skills blir stale samtidig.
+- Scope-header som HTML-kommentar er kompatibel med eksisterende markdown-rendering — usynlig for human readers, men maskin-parseable.
 
 **Verifisering (PM):**
-- Lokalt: `actionlint .github/workflows/knowledge-backup-daily.yml` for YAML-validitet
-- Lokalt: `bash scripts/list-knowledge-snapshots.sh` → forventet "Ingen knowledge/*-tags funnet"
-- Lokalt: `bash scripts/restore-knowledge.sh --tag knowledge/9999-99-99 --reason "test"` → forventet "Tag not found"
-- Workflow kjøres første gang via `gh workflow run knowledge-backup-daily.yml` etter merge til main
+- `node scripts/check-skill-freshness.mjs --quiet` → JSON valid, 20 skills, alle "scope-undefined" (forventet pre-B2)
+- `node scripts/check-skill-freshness.mjs --markdown --quiet` → markdown valid
+- `node scripts/check-skill-freshness.mjs --pr-mode --markdown --quiet` → "Ingen stale skills dekker endrede filer" (forventet, ny branch)
+- Workflow YAML lint via `yamllint` (passerer)
+- Ingen regression i eksisterende CI
 
-**Tid:** ~75 min
+**Tid:** ~2.5 timer agent-arbeid
 
 ---
 
