@@ -2,6 +2,13 @@ node_modules/
 apps/backend/dist/
 apps/backend/.env
 apps/backend/.env.production
+apps/backend/.env.local
+packages/game-client/.env
+packages/game-client/.env.local
+packages/game-client/.env.production
+apps/admin-web/.env
+apps/admin-web/.env.local
+apps/admin-web/.env.production
 .DS_Store
 *.log
 

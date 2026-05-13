@@ -83,6 +83,18 @@ vi.mock("../telemetry/Telemetry.js", () => ({
 vi.mock("../telemetry/Sentry.js", () => ({
   initSentry: vi.fn().mockResolvedValue(undefined),
   captureClientMessage: vi.fn(),
+  captureClientError: vi.fn(),
+  addClientBreadcrumb: vi.fn(),
+  setClientSentryTag: vi.fn(),
+  setClientSentryUser: vi.fn().mockResolvedValue(undefined),
+  hashPii: vi.fn(async () => "hashedpii12"),
+}));
+vi.mock("../observability/sentryBootstrap.js", () => ({
+  bootstrapClientSentry: vi.fn().mockResolvedValue(undefined),
+  setClientScreen: vi.fn(),
+  setClientScheduledGameId: vi.fn(),
+  setClientPlanRunId: vi.fn(),
+  updateClientSentryUser: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../components/LoadingOverlay.js", () => ({
   LoadingOverlay: vi.fn().mockImplementation(() => ({
