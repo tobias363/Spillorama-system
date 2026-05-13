@@ -59,6 +59,66 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Spill 1 re-entry-during-draw bug-FIX (I15) (reentry-fix agent, PM-AI)
+
+**Scope:** Implementer fix for I15 (re-entry-during-draw blokk) basert på diagnose levert av forrige agent (`docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md`). Speile `findPlayerInRoomByWallet + attachPlayerSocket`-guard fra `room:create`/`room:join` inn i `joinScheduledGame`. Knowledge protocol: oppdater FRAGILITY F-05 + PITFALLS §7.13 + BUG_CATALOG I15.
+
+**Inputs gitt:**
+- Diagnose-doc med root-cause + foreslått fix (impl-only-pseudokode)
+- Repro-test `tests/e2e/spill1-reentry-during-draw.spec.ts` på `feat/reentry-diagnose-2026-05-13`
+- Pekere til `roomEvents.ts:372-397` (room:create-guard) og `roomEvents.ts:771-806` (room:join-guard)
+- Krav: branch fra origin/main, IKKE åpne PR, oppdater knowledge-docs
+
+**Outputs produsert:**
+- **Branch:** `fix/reentry-during-draw-2026-05-13` (pushed til origin)
+- **Filer endret:**
+  - `apps/backend/src/sockets/game1ScheduledEvents.ts:40,295-336` — re-attach-guard lagt til (33 linjer ny kode + import)
+- **Filer nye:**
+  - `apps/backend/src/sockets/__tests__/game1ScheduledEvents.reconnect.test.ts` — 4 unit-tester (350+ linjer)
+- **Filer oppdatert (knowledge-docs):**
+  - `docs/engineering/FRAGILITY_LOG.md` — F-05 lagt til (60+ linjer)
+  - `docs/engineering/PITFALLS_LOG.md` — §7.13 utvidet med Variant A vs Variant B + alle handler-path-listen
+  - `tests/e2e/BUG_CATALOG.md` — I15 status til 🟡 PR pending, endringslogg-entry
+- **Cherry-picks:** Cherry-picket diagnose-commit (`fbbd6a3c`) + FRAGILITY_LOG-introducing commit (`e54526f7`) inn på fix-branch så docs+repro-test + base FRAGILITY_LOG er tilgjengelig (FRAGILITY_LOG hadde ikke landet på main enda).
+
+**Test-resultater:**
+- ✅ TypeScript strict: clean (`npm run check` i apps/backend)
+- ✅ Unit-tester nye: 4/4 PASS (`game1ScheduledEvents.reconnect.test.ts`) — 564ms
+- ✅ Unit-tester eksisterende: 15/15 PASS (`game1JoinScheduled.test.ts`) — backwards-compat verifisert
+- ✅ Reconnect-tester: 3/3 PASS (`reconnectMidPhase.test.ts`)
+- ✅ Scheduled-binding-tester: 5/5 PASS (`roomEvents.scheduledBinding.test.ts`)
+- ✅ E2E PASS: `spill1-reentry-during-draw.spec.ts` (14.9s, 1/1 PASS mot lokal `dev:all` med `ENABLE_BUY_DEBUG=1`)
+
+**Fallgruver oppdatert i PITFALLS §7.13:**
+- Variant A (PR #1218): klient-side fallback for delta-watcher kun
+- Variant B (denne 2026-05-13): backend-side guard for initial-join — ny dimensjon for samme pitfall-klasse
+- KRITISK observasjon: ÉN handler-path-fix er ikke nok — ALLE join-handlere må ha guard
+
+**Ny FRAGILITY F-05:**
+- Filer: 6 (game1ScheduledEvents + roomEvents.ts + BingoEngine + roomHelpers)
+- Hvorfor fragile: `detachSocket` beholder player-record bevisst → ALLE join-paths må ha re-attach-guard
+- Hva ALDRI gjøre: 5 punkter (ikke kall joinRoom uten guard, ikke fjern guard "for å forenkle", ikke endre detachSocket, etc.)
+- Tester som MÅ stå grønn: 6 (4 unit + 2 E2E)
+- Manuell verifikasjon: 8-trinn flyt
+- Historisk skade: PR #1218 (Variant A glemt initial-join) + 2026-05-13 (I15 oppstod fordi initial-join-pathen var glemt)
+
+**Læring:**
+- Cherry-pick base-commits FØR fix når avhengige docs/tests ikke har landet på main enda. Spar tid vs å gjenskape repro-test.
+- `findPlayerInRoomByWallet` er en standalone helper i `roomHelpers.ts`, ikke en metode på engine — kan importeres direkte i `game1ScheduledEvents.ts` uten å rote med deps-objektet.
+- Test-stub som returnerer `players: [...]` i `getRoomSnapshot` er tilstrekkelig for å verifisere re-attach-pathen uten å mocke ut engine-internals.
+- Fail-soft pattern fra dev-team: catch + log warn ved snapshot-lookup-feil (annet enn ROOM_NOT_FOUND), fall gjennom til normal joinRoom. ROOM_NOT_FOUND-pathen håndteres allerede av eksisterende recovery-blokk.
+
+**Verifisering:**
+- Backend kjørte tsx watch under utvikling — fix-en hot-reloaded automatisk
+- E2E-test kjørt mot levende backend med fix-en aktiv → PASS
+- Pre-existing tester ikke brutt
+
+**Tid:** ~45 min (45 min implementasjon + tester + docs; bør være ferdig innenfor 30-60 min estimat)
+
+**Status:** Branch klar for push. PM tar over for PR. Repro-test forblir som permanent regresjons-vern. FRAGILITY F-05 låser inn at ALLE handler-paths må ha guard så framtidige paths ikke gjenstår.
+
+---
+
 ### 2026-05-13 — Spill 1 re-entry-during-draw bug-diagnose (I15) (explore-agent, PM-AI)
 
 **Scope:** Diagnose Tobias-rapport 2026-05-13: "etter at jeg starter spill går ut av lobbyen for deretter å gå inn igjen så kommer jeg ikke inn i rommet under en trekning, må vente til trekning er ferdig før jeg kan gå inn". Reprodusere bug-en i E2E-test, finn root cause, klassifiser (impl vs struktur), foreslå fix uten å skrive den.
