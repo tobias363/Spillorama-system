@@ -347,17 +347,7 @@ describe("CLI: scope-check", () => {
 
 describe("CLI: legacy /tmp registry migration", () => {
   it("migrates from /tmp to .claude when canonical missing", () => {
-    // We can't safely modify /tmp/active-agents.json for the canonical path
-    // because Tobias' local environment may have a real one. Instead, we
-    // test the migration logic via a custom REGISTRY env-var to a fresh
-    // location, and pre-seed a "legacy" path.
-
-    // For this test we just verify the behavior via env-var override:
-    // The actual /tmp → .claude migration runs only when REGISTRY_PATH is
-    // exactly the canonical default. We've covered that path in the
-    // implementation via migrateLegacyRegistryIfNeeded().
-    //
-    // This test is a smoke-test: verify --registry flag overrides correctly.
+    // Smoke test: verify --registry flag overrides correctly.
     const tempReg = makeTempRegistry();
     runCli([
       "--registry",
@@ -370,6 +360,241 @@ describe("CLI: legacy /tmp registry migration", () => {
     const reg = readRegistryFile(tempReg.file);
     assert.equal(reg.agents[0].id, "mig-test");
     rmSync(tempReg.dir, { recursive: true, force: true });
+  });
+
+  // ─── Real E2E migration tests (E5 redo, 2026-05-13) ────────────────────
+  //
+  // These tests exercise migrateLegacyRegistryIfNeeded() via env-var
+  // overrides for both legacy and canonical paths. Verifies:
+  //   1. Migration happens when canonical missing + legacy exists
+  //   2. Migration does NOT happen when canonical already exists
+  //   3. Migration does NOT happen when legacy does NOT exist
+  //   4. Migration adds migratedFrom + migratedAt metadata
+  //   5. Migration is idempotent (re-running list/register does not duplicate)
+
+  it("migrates legacy /tmp registry to canonical when canonical missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm-mig-e2e-"));
+    const canonicalPath = join(dir, "canonical.json");
+    const legacyPath = join(dir, "legacy.json");
+
+    // Seed legacy file
+    const legacySeed = {
+      version: 1,
+      updatedAt: "2026-05-13T10:00:00Z",
+      agents: [
+        {
+          id: "legacy-agent-1",
+          shortname: "L1",
+          topic: "legacy entry",
+          branch: "feat/legacy",
+          scope: ["scripts/legacy.mjs"],
+          spawnedAt: "2026-05-13T09:00:00Z",
+          status: "in-flight",
+        },
+      ],
+      conflictsAcknowledged: [],
+    };
+    writeFileSync(legacyPath, JSON.stringify(legacySeed, null, 2));
+
+    // Verify canonical doesn't exist yet
+    assert.ok(!existsSync(canonicalPath), "canonical must not exist pre-test");
+
+    // Run any CLI command — list triggers readRegistry → migration
+    const res = runCli(["list"], {
+      env: {
+        PM_PUSH_CONTROL_CANONICAL_REGISTRY: canonicalPath,
+        PM_PUSH_CONTROL_LEGACY_REGISTRY: legacyPath,
+      },
+    });
+    assert.equal(res.status, 0, `list should succeed: ${res.stderr}`);
+
+    // Canonical should now exist with migrated content
+    assert.ok(existsSync(canonicalPath), "canonical must exist after migration");
+    const canonical = readRegistryFile(canonicalPath);
+    assert.ok(canonical, "canonical content should be valid JSON");
+    assert.equal(canonical.agents.length, 1);
+    assert.equal(canonical.agents[0].id, "legacy-agent-1");
+    assert.equal(
+      canonical.migratedFrom,
+      legacyPath,
+      "migratedFrom should reference legacy path",
+    );
+    assert.ok(canonical.migratedAt, "migratedAt timestamp should be set");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does NOT migrate when canonical already exists", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm-mig-e2e-"));
+    const canonicalPath = join(dir, "canonical.json");
+    const legacyPath = join(dir, "legacy.json");
+
+    // Pre-seed BOTH files with different content
+    const canonicalSeed = {
+      version: 2,
+      updatedAt: "2026-05-13T12:00:00Z",
+      agents: [
+        {
+          id: "canonical-agent",
+          shortname: "C1",
+          topic: "current",
+          branch: "feat/canon",
+          scope: ["scripts/canon.mjs"],
+          spawnedAt: "2026-05-13T11:00:00Z",
+          status: "in-flight",
+        },
+      ],
+      conflictsAcknowledged: [],
+    };
+    const legacySeed = {
+      version: 1,
+      updatedAt: "2026-05-13T08:00:00Z",
+      agents: [
+        {
+          id: "legacy-agent-X",
+          shortname: "LX",
+          topic: "old",
+          branch: "feat/old",
+          scope: ["x.ts"],
+          spawnedAt: "2026-05-13T07:00:00Z",
+          status: "in-flight",
+        },
+      ],
+      conflictsAcknowledged: [],
+    };
+    writeFileSync(canonicalPath, JSON.stringify(canonicalSeed, null, 2));
+    writeFileSync(legacyPath, JSON.stringify(legacySeed, null, 2));
+
+    const res = runCli(["list"], {
+      env: {
+        PM_PUSH_CONTROL_CANONICAL_REGISTRY: canonicalPath,
+        PM_PUSH_CONTROL_LEGACY_REGISTRY: legacyPath,
+      },
+    });
+    assert.equal(res.status, 0);
+
+    // Canonical content should NOT have been replaced by legacy
+    const result = readRegistryFile(canonicalPath);
+    assert.equal(result.agents.length, 1);
+    assert.equal(
+      result.agents[0].id,
+      "canonical-agent",
+      "canonical content must not be overwritten",
+    );
+    assert.ok(
+      !result.migratedFrom,
+      "migratedFrom must not be added when canonical existed",
+    );
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does NOT migrate when legacy does not exist", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm-mig-e2e-"));
+    const canonicalPath = join(dir, "canonical.json");
+    const legacyPath = join(dir, "non-existent-legacy.json");
+
+    // Neither file exists initially
+    assert.ok(!existsSync(canonicalPath));
+    assert.ok(!existsSync(legacyPath));
+
+    const res = runCli(["list"], {
+      env: {
+        PM_PUSH_CONTROL_CANONICAL_REGISTRY: canonicalPath,
+        PM_PUSH_CONTROL_LEGACY_REGISTRY: legacyPath,
+      },
+    });
+    assert.equal(res.status, 0, "list should succeed even with empty registry");
+
+    // Canonical file should not have been created spuriously
+    // (only created on register/unregister/save, not on read-only list)
+    assert.ok(
+      !existsSync(canonicalPath),
+      "no spurious canonical creation when nothing to migrate",
+    );
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("migration is idempotent — repeat call does not re-trigger", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm-mig-e2e-"));
+    const canonicalPath = join(dir, "canonical.json");
+    const legacyPath = join(dir, "legacy.json");
+
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        version: 1,
+        updatedAt: "2026-05-13T10:00:00Z",
+        agents: [],
+        conflictsAcknowledged: [],
+      }),
+    );
+
+    // First call → migration happens
+    runCli(["list"], {
+      env: {
+        PM_PUSH_CONTROL_CANONICAL_REGISTRY: canonicalPath,
+        PM_PUSH_CONTROL_LEGACY_REGISTRY: legacyPath,
+      },
+    });
+    const first = readRegistryFile(canonicalPath);
+    assert.ok(first.migratedFrom, "first call should migrate");
+    const firstMigratedAt = first.migratedAt;
+
+    // Second call → should NOT re-migrate (canonical now exists)
+    runCli(["list"], {
+      env: {
+        PM_PUSH_CONTROL_CANONICAL_REGISTRY: canonicalPath,
+        PM_PUSH_CONTROL_LEGACY_REGISTRY: legacyPath,
+      },
+    });
+    const second = readRegistryFile(canonicalPath);
+    assert.equal(
+      second.migratedAt,
+      firstMigratedAt,
+      "migratedAt must not change on second call (idempotency)",
+    );
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("migration preserves conflictsAcknowledged array", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm-mig-e2e-"));
+    const canonicalPath = join(dir, "canonical.json");
+    const legacyPath = join(dir, "legacy.json");
+
+    const legacySeed = {
+      version: 1,
+      updatedAt: "2026-05-13T10:00:00Z",
+      agents: [],
+      conflictsAcknowledged: [
+        {
+          files: ["docs/engineering/AGENT_EXECUTION_LOG.md"],
+          agents: ["A1", "A2"],
+          type: "additive-append",
+          resolution: "append all entries",
+        },
+      ],
+    };
+    writeFileSync(legacyPath, JSON.stringify(legacySeed));
+
+    runCli(["list"], {
+      env: {
+        PM_PUSH_CONTROL_CANONICAL_REGISTRY: canonicalPath,
+        PM_PUSH_CONTROL_LEGACY_REGISTRY: legacyPath,
+      },
+    });
+
+    const result = readRegistryFile(canonicalPath);
+    assert.equal(result.conflictsAcknowledged.length, 1);
+    assert.equal(
+      result.conflictsAcknowledged[0].type,
+      "additive-append",
+      "conflictsAcknowledged must survive migration",
+    );
+
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 
