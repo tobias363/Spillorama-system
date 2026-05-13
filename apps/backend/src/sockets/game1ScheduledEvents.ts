@@ -37,6 +37,7 @@ import {
   type Game1JoinScheduledPayload,
 } from "@spillorama/shared-types/socket-events";
 import { getAccessTokenFromSocketPayload } from "../util/httpHelpers.js";
+import { findPlayerInRoomByWallet } from "../util/roomHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
 import { captureError } from "../observability/sentry.js";
 
@@ -314,6 +315,49 @@ export function createGame1ScheduledEventHandlers(
               "setRoomHallSharedAndPersist på existing-rom feilet — joinRoom kan kaste HALL_MISMATCH"
             );
           }
+        }
+      }
+
+      // I15-FIX (2026-05-13): re-attach-guard for å støtte re-entry under
+      // pågående trekning. Speiler `room:create` (`roomEvents.ts:372-397`)
+      // og `room:join` (`roomEvents.ts:771-806`) sine guards.
+      //
+      // Hvorfor: `engine.detachSocket` beholder player-record (kun socketId
+      // nullstilles) av regulatoriske grunner (armed-state, lucky-number,
+      // forhåndskjøp). Når spilleren navigerer tilbake til lobby og inn
+      // igjen mid-runde finner `engine.joinRoom`/`assertWalletNotAlreadyInRoom`
+      // den eksisterende player-record og kaster `PLAYER_ALREADY_IN_ROOM`.
+      // `room:create`/`room:join` har samme guard; `joinScheduledGame`
+      // mangler den (bug I15). Repro-test:
+      // `tests/e2e/spill1-reentry-during-draw.spec.ts`. Diagnose:
+      // `docs/architecture/REENTRY_BUG_DIAGNOSE_2026-05-13.md`.
+      try {
+        const existingSnapshot = engine.getRoomSnapshot(row.room_code);
+        const existingPlayer = findPlayerInRoomByWallet(
+          existingSnapshot,
+          user.walletId
+        );
+        if (existingPlayer) {
+          engine.attachPlayerSocket(row.room_code, existingPlayer.id, socketId);
+          await markScheduledRoom(row.room_code, row, isHallShared, hallId);
+          const snapshot = engine.getRoomSnapshot(row.room_code);
+          return {
+            roomCode: row.room_code,
+            playerId: existingPlayer.id,
+            snapshot,
+          };
+        }
+      } catch (err) {
+        const code = getDomainCode(err);
+        if (code !== "ROOM_NOT_FOUND") {
+          // Fail-soft: hvis snapshot-lookup feiler av annen grunn enn
+          // ROOM_NOT_FOUND, fall gjennom til normal joinRoom. Logges som
+          // warn for observability. ROOM_NOT_FOUND-pathen håndteres av
+          // recovery-blokken nedenfor.
+          log.warn(
+            { err, roomCode: row.room_code, scheduledGameId: row.id },
+            "I15 re-attach-guard snapshot-lookup feilet — faller tilbake til engine.joinRoom"
+          );
         }
       }
 

@@ -48,6 +48,8 @@
 - [ ] `npm --prefix apps/backend run build`
 - [ ] Manual verification completed
 
+> **Tobias smoke-test auto-genereres:** Etter at PR-en er opprettet, vil `ai-fragility-review.yml` poste en kommentar med "🎯 Tobias smoke-test"-seksjon basert på endrede filer. Sjekk at de auto-genererte stegene matcher faktisk endring. Hvis du synes scenariet ikke passer, legg en eksplisitt "Smoke-test"-seksjon i PR-beskrivelsen. Format-spec: `docs/engineering/TOBIAS_READINESS_FORMAT.md`.
+
 ## Deploy Plan
 - Render environment: `staging` / `production`
 - Health endpoint checked: `/health`
