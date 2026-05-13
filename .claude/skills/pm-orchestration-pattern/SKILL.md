@@ -1,8 +1,8 @@
 ---
 name: pm-orchestration-pattern
-description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, or false-Done in regulator-facing docs.
+description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, or false-Done in regulator-facing docs.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -104,10 +104,87 @@ NB: PM må evt. detach sin egen worktree HEAD først hvis den blokkerer Tobias' 
 ALDRI gi Tobias en multi-step prosedyre. Etter hver merge: gi denne linjen så han kan kopier-lim én gang:
 
 ```bash
-cd /Users/tobiashaugen/Projects/Spillorama-system && lsof -nP -iTCP:5174 -sTCP:LISTEN -t 2>/dev/null | xargs -r kill -9 && VITE_DEV_BACKEND_URL=http://localhost:4000 npm --prefix apps/admin-web run dev
+cd /Users/tobiashaugen/Projects/Spillorama-system && npm run dev:nuke
 ```
 
-`cd` foran er kritisk — Tobias er ofte i `~` etter terminal-restart. Hot-reload tar resten (backend `tsx watch` + Vite HMR).
+`cd` foran er kritisk — Tobias er ofte i `~` etter terminal-restart.
+
+**`dev:nuke` (vedtatt 2026-05-11) er standard restart-kommando** — den dreper ALLE stale prosesser (port 4000-5175 + Docker), FLUSHALL Redis, canceler stale runder i Postgres, re-seeder via `--reset-state`, og starter ren stack (backend + admin-web + game-client + visual-harness) i ÉN kommando. Garantert clean state — ingen selective restart hvor en av lagene kan henge i stale state.
+
+**Selective admin-restart (gammel kommando) er SUPERSEDED.** Bruk IKKE:
+```bash
+# IKKE BRUK — selective restart, lar backend/Docker være urørte
+lsof -nP -iTCP:5174 -sTCP:LISTEN -t 2>/dev/null | xargs -r kill -9 && npm --prefix apps/admin-web run dev
+```
+Den gir falsk trygghet hvis merge inkluderer endringer på flere lag.
+
+### PM Push Control — multi-agent koordinering (Phase 2, 2026-05-13)
+
+Når 5-10+ agenter pusher parallelt: bruk `scripts/pm-push-control.mjs` for visibility + konflikt-deteksjon:
+
+```bash
+# Når du spawner agent — registrer scope FØRST
+node scripts/pm-push-control.mjs register <agent-id> <branch> <fil-glob-1> <fil-glob-2>
+
+# Se hva som er aktivt nå
+node scripts/pm-push-control.mjs list
+
+# Sjekk konflikter (in-flight + åpne PR-er)
+node scripts/pm-push-control.mjs conflicts
+
+# Få topologisk-sortert merge-rekkefølge
+node scripts/pm-push-control.mjs merge-order
+
+# Compare deklarert scope vs ACTUAL diff
+node scripts/pm-push-control.mjs diff <agent-id>
+
+# Daemon-modus (poll hver 30s, Mac-notif på nye pushes)
+node scripts/pm-push-control.mjs watch
+
+# HTML-dashboard
+bash scripts/generate-push-control-dashboard.sh --open --watch
+```
+
+Registry-fil: `.claude/active-agents.json` (commit-able). Etter agent-leveranse + PR: `node scripts/pm-push-control.mjs unregister <agent-id>`.
+
+**Pre-spawn-sjekkliste:** før du spawner ny agent, kjør `list` + `conflicts` for å se om scope overlapper med pågående arbeid. Hvis overlapp er uunngåelig (eks. `AGENT_EXECUTION_LOG.md`), dokumenter i `conflictsAcknowledged`-feltet.
+
+### Auto-rebase-on-merge (Phase 2)
+
+`.github/workflows/auto-rebase-on-merge.yml` rebases automatisk overlappende åpne PR-er etter en merge. Forhindrer at parallelle PR-er ender i CONFLICTING-state.
+
+**Når PM må manuelt rebase:**
+- Auto-rebase feiler pga genuine konflikt (logikk-konflikt, ikke bare tekstlig)
+- PR var basert på en branch som ble force-pushed
+- Cherry-pick av kun noen commits er nødvendig
+
+**Cascade-rebase-mønster (vedtatt 2026-05-10):** Hvis du har kjede A → B → C der hver baserer på forrige:
+- Aldri squash-merge alle samtidig — squash gir ny SHA → kjedede PR-er ender CONFLICTING
+- Enten: rebase B mot main etter A merges, så C mot main etter B merges (sequential cascade)
+- Eller: bruk combined PR fra start (cherry-pick alle commits til én branch fra main)
+
+### Knowledge-protocol-checkbox (vedtatt 2026-05-13)
+
+Hver PR som rører pilot-relatert kode MÅ ha utfylt checkbox-seksjon "Knowledge protocol" i PR-body. Håndheves av `.github/workflows/knowledge-protocol-gate.yml`.
+
+Sjekklisten inkluderer:
+- [ ] PITFALLS_LOG sjekket for relatert kategori
+- [ ] AGENT_EXECUTION_LOG entry skrevet etter levering
+- [ ] Hvis ny fallgruve oppdaget: lagt til i PITFALLS_LOG samme PR
+- [ ] Knowledge-pekere inkludert i agent-prompt hvis aktuelt
+
+### Bug-resurrection-detector (vedtatt 2026-05-13)
+
+`.husky/pre-commit-resurrection-check.sh` + `.github/workflows/bug-resurrection-check.yml` blokkerer commits som modifiserer kode i regioner som var bug-fixet innenfor siste 30 dager — med mindre commit-melding inneholder `[resurrection-acknowledged: <grunn>]`.
+
+Adresserer "2 skritt frem 1 tilbake"-mønsteret. Hvis du som PM får denne blokkeringen på en agent-PR:
+1. Verifiser at agenten har lest fix-historikken til regionen
+2. Hvis intensjonell endring: send tilbake til agent med "legg til `[resurrection-acknowledged: <årsak>]` i commit-melding"
+3. Hvis utilsiktet revert av fix: avvis PR, send tilbake med fix-historie
+
+### Skill-freshness-gate (vedtatt 2026-05-13)
+
+Hver PR sjekker om endrede filer er innenfor scope av en stale skill (90+ dager uten oppdatering + 50+ commits til scope). Hvis ja → informativ kommentar på PR (ikke blokkerende). PM kan velge å oppdatere skillen i samme PR med commit-message-tag `[skill-refreshed: <name>]`.
 
 ### Code-reviewer som pre-merge-gate
 
@@ -178,27 +255,53 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | Glemmer auto-pull etter merge | Tobias tester gammel kode | Pull i hans repo etter HVER merge |
 | Spawn-er code-reviewer for trivial fix | Over-engineering | Reviewer kun på pilot-blokkere/arkitektur |
 | PM kjører destruktive git-kommandoer på Tobias' repo | Risiko for tap | Ingen `git reset --hard`, `git push --force` på main |
+| Cascade-rebase: squash-merge kjedede PR-er sekvensielt uten å rebase mellom | PR B/C ender i `mergeable: CONFLICTING` | Rebase B mot main ETTER A merges. Eller combined PR fra start. |
+| Selective admin-restart etter merge | Backend/Docker ikke restartet; falsk trygghet | Bruk `npm run dev:nuke` ALLTID (vedtatt 2026-05-11) |
+| Spawne agent uten å registrere i pm-push-control | Ingen synlighet over parallelle scopes | `node scripts/pm-push-control.mjs register <id> <branch> <globs>` ved spawn |
+| Hopper over knowledge-protocol-checkbox | CI blokkerer PR | Fyll alle checkbox i PR-body, eller send tilbake til agent |
+| Ignorerer bug-resurrection-warning | Kan re-introdusere fixed bug | Verifiser fix-historie, evt. legg til `[resurrection-acknowledged: <grunn>]` |
+| Ignorerer skill-freshness-warning på PR | Skill drifter videre fra koden | Vurder skill-refresh i samme PR med `[skill-refreshed: <name>]` |
+| 5+ parallelle agenter uten worktree-isolasjon | File-revert-konflikter ved merge | ALLTID `isolation: worktree` for ≥ 2 parallelle agenter |
 
 ## Kanonisk referanse
 
-- `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/feedback_pm_pull_after_merge.md` — auto-pull-policy
+- `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/feedback_dev_nuke_after_merge.md` — STANDARD restart-kommando (vedtatt 2026-05-11, supersederer pull-after-merge)
 - `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/feedback_git_flow.md` — PM-sentralisert git-flyt
 - `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/feedback_done_policy.md` — done-policy for legacy-avkobling
-- `docs/decisions/ADR-008-pm-centralized-git-flow.md` — vedtatt mandat
-- `docs/decisions/ADR-009-done-policy-legacy-avkobling.md` — vedtatt mandat
-- `docs/engineering/ENGINEERING_WORKFLOW.md` — full workflow-spec inkl. legacy-avkobling-policy
+- `~/.claude/projects/-Users-tobiashaugen-Projects-Spillorama-system/memory/feedback_pm_verify_ci.md` — PM verifiser CI 5-10 min etter PR-åpning (vedtatt 2026-05-09)
+- `docs/adr/0009-pm-centralized-git-flow.md` — vedtatt mandat
+- `docs/adr/0010-done-policy-legacy-avkobling.md` — vedtatt mandat
+- `docs/engineering/ENGINEERING_WORKFLOW.md` — full workflow-spec
+- `docs/engineering/PM_PUSH_CONTROL.md` — multi-agent push-control (Phase 2)
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` — playbook for hver PM-overgang (60-90 min onboarding)
+- `docs/engineering/BUG_RESURRECTION_DETECTOR.md` — anti-regression-hook
+- `docs/engineering/SKILL_FRESHNESS.md` — skill-refresh-cadence
+- `scripts/pm-push-control.mjs` — registry + watch + dashboard
+- `scripts/pm-checkpoint.sh` — hard-block onboarding-gate for ny PM
 - `BACKLOG.md` — strategisk oversikt
 - `docs/operations/PM_HANDOFF_*.md` — PM-handoffs (én per session)
+- `.claude/active-agents.json` — registry over aktive agenter (commit-able)
 
 ## Når denne skill-en er aktiv
 
 - Tobias gir oppgave → PM skal koordinere
 - En agent rapporterer ferdig → trigger PR-flyt
-- En PR har grønt CI → trigger merge-flyt + auto-pull + Tobias-kommando
+- En PR har grønt CI → trigger merge-flyt + auto-pull + Tobias-kommando (`dev:nuke`)
 - Ny issue oppstår → opprett i Linear via MCP
 - Verifiser at en lukket Linear-issue oppfyller done-policy
-- Spawn parallelle agenter for en bølge (R-mandat, pilot-prep)
+- Spawn parallelle agenter for en bølge (R-mandat, pilot-prep, autonomy-wave)
 - Code-reviewer-gate før kritisk merge
 - Tobias spør om status — gi pull-status, ikke instrukser
 - BACKLOG.md trenger oppdatering etter større initiativ
 - Konflikt-håndtering når agent-branches kolliderer
+- 5+ parallelle agenter → bruk `pm-push-control.mjs` for scope-deklarering og konflikt-deteksjon
+- Cascade-rebase nødvendig når kjedede PR-er må mergees
+- Auto-rebase feiler → manuell rebase nødvendig
+- Bug-resurrection-warning på PR → verifiser fix-historie
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-08 | Initial — etablert PM-orchestration-mandate |
+| 2026-05-13 | v1.1.0 — la til Phase-2-mekanismer fra autonomy-wave: pm-push-control, auto-rebase-on-merge, cascade-rebase-mønster, knowledge-protocol-checkbox, bug-resurrection-detector, skill-freshness-gate. Byttet til `dev:nuke` som standard restart-kommando (vedtatt 2026-05-11). |

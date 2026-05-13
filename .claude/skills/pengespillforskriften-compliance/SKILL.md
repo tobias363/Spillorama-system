@@ -1,8 +1,8 @@
 ---
 name: pengespillforskriften-compliance
-description: When the user/agent works with pengespillforskriften compliance, prize caps, organisation distribution (§11), mandatory pause (§66), or daily reporting (§71) in the Spillorama bingo platform. Also use when they mention compliance-ledger, ComplianceLedger, AuditLogService, PrizePolicyPort, applySinglePrizeCap, ResponsibleGamingStore, ResponsibleGamingPersistence, ledgerGameTypeForSlug, gameType, MAIN_GAME, DATABINGO, §11, §66, §71, pengespillforskriften, Lotteritilsynet, 15%, 30%, organisasjon, distribusjon, single-prize-cap, payout cap, Hovedspill, Databingo, SpinnGo, hall main game, internet main game, actor_hall_id. Spillorama is regulated under Norwegian pengespillforskriften and any change touching prize calculation, ledger writes, gameType decisions, or ResponsibleGaming state must respect §11/§66/§71. Make sure to use this skill whenever someone touches compliance-ledger, prize-calculation, single-prize-cap logic, or ResponsibleGaming state — even if they don't explicitly mention regulations, because regulatory bugs are pilot-blockers and Lotteritilsynet-revisjon-risk.
+description: When the user/agent works with pengespillforskriften compliance, prize caps, organisation distribution (§11), mandatory pause (§66), or daily reporting (§71) in the Spillorama bingo platform. Also use when they mention compliance-ledger, ComplianceLedger, AuditLogService, PrizePolicyPort, applySinglePrizeCap, ResponsibleGamingStore, ResponsibleGamingPersistence, ledgerGameTypeForSlug, gameType, MAIN_GAME, DATABINGO, §11, §66, §71, pengespillforskriften, Lotteritilsynet, 15%, 30%, organisasjon, distribusjon, single-prize-cap, payout cap, Hovedspill, Databingo, SpinnGo, hall main game, internet main game, actor_hall_id, app_regulatory_ledger, daily-anchor, verifyAuditChain, ADR-0015. Spillorama is regulated under Norwegian pengespillforskriften and any change touching prize calculation, ledger writes, gameType decisions, or ResponsibleGaming state must respect §11/§66/§71. Make sure to use this skill whenever someone touches compliance-ledger, prize-calculation, single-prize-cap logic, or ResponsibleGaming state — even if they don't explicitly mention regulations, because regulatory bugs are pilot-blockers and Lotteritilsynet-revisjon-risk.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -67,9 +67,18 @@ Always pass `actor_hall_id` (the hall where the ticket was sold) into `Game1Tick
 
 `apps/backend/src/game/ResponsibleGamingPersistence.ts` tracks `play_session_started_at` and triggers a forced 5-min pause after 60 min of continuous play. Configurable via `BINGO_PLAY_SESSION_LIMIT_MS` and `BINGO_PAUSE_DURATION_MS` envs (defaults: 60min/5min). The web shell in `backend/public/web/spillvett.js` reads this state via `GET /api/wallet/me/compliance` and `complianceAllowsPlay()` blocks game-launch when paused.
 
-### §71 daily reports
+### §71 daily reports — separate regulatory-ledger (ADR-0015, 2026-05-09)
 
-`AuditLogService` + `ComplianceLedger` together produce immutable daily reports. The hash-chain audit (see `audit-hash-chain` skill) gives Lotteritilsynet reproducibility — they can re-derive the report from raw events.
+**Update 2026-05-09 (ADR-0015):** §71-rapportering har fått sin egen **separate tabell** `app_regulatory_ledger` med dedikert hash-chain (`prev_hash → curr_hash`) og daily-anchor cron som "freezer" gårsdagens rapport.
+
+**Hvorfor egen tabell:** Lotteritilsynet krever immutable per-dag rapport som kan re-deriveres fra raw events. `app_compliance_audit_log` er for generelle audit-events (eks. RBAC, login). §71 trenger en dedikert kanal for å sikre at hash-chain ikke kompromiseres av andre event-typer.
+
+**Implementasjon:**
+- Skriving via `AuditLogService.recordRegulatoryEvent()` — separat metode
+- Daglig "anchor"-cron som beregner dagens `daily_hash` og signerer
+- `verifyAuditChain()` i `apps/backend/src/compliance/verifyAuditChain.ts` — verifiserer hash-chain integritet
+
+**Status 2026-05-13:** Implementasjon i flight per ADR-0015. Verifisering pending.
 
 ## Immutable beslutninger
 
@@ -125,3 +134,12 @@ SKIP when:
 - [ADR-0004 — Hash-chain audit-trail (BIN-764)](../../../docs/adr/0004-hash-chain-audit.md) — Lotteritilsynet-paritet: ondsinnet redigering oppdages
 - [ADR-0008 — Spillkatalog-paritet (MAIN_GAME vs DATABINGO)](../../../docs/adr/0008-spillkatalog-classification.md) — bindende: §11-distribusjon 15% vs 30%
 - [ADR-0010 — Done-policy for legacy-avkobling](../../../docs/adr/0010-done-policy-legacy-avkobling.md) — regulatorisk forsvar: Lotteritilsynet kan kreve commit-bevis
+- [ADR-0015 — §71 regulatory-ledger (separate audit-tabell)](../../../docs/adr/0015-spill71-regulatory-ledger.md) — vedtatt 2026-05-09: §71-rapportering har egen tabell `app_regulatory_ledger` med daily-anchor
+- [ADR-0017 — Fjerne daglig jackpot-akkumulering](../../../docs/adr/0017-remove-daily-jackpot-accumulation.md) — bingovert setter manuelt (lovgivnings-implikasjon: krever ADR-doc)
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-08 | Initial — §11/§66/§71 + gameType-mapping |
+| 2026-05-13 | v1.1.0 — la til ADR-0015 (separat §71 regulatory-ledger med daily-anchor + verifyAuditChain), ADR-0017 (manuell jackpot) |

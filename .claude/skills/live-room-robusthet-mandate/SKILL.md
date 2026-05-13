@@ -1,8 +1,8 @@
 ---
 name: live-room-robusthet-mandate
-description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
+description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -69,42 +69,58 @@ Dette er **ikke** en "P1 etter pilot" — det er **fundament som må være på p
 - **Aldri** utbetale premie uten audit-event
 - Outbox-pattern (BIN-761→764) for alle wallet-touch fra rom-event
 
-## R1-R12 — alle pilot/utvidelses-tiltak
+## R1-R12 — alle pilot/utvidelses-tiltak (status per 2026-05-13)
 
-| # | Tiltak | Linear | Estimat | Pilot-gating? | Status |
-|---|---|---|---|---|---|
-| **R1** | Lobby-rom Game1Controller-wireup ("FÅR IKKE KOBLET TIL ROM"-fix) | BIN-822 | 1-2d | Ja | ✅ Merget #1018 + #1033 |
-| **R2** | Failover-test (drep instans midt i runde) | BIN-811 | 2-3d | **Ja** | Infra klar (#1032) — må kjøres |
-| **R3** | Klient-reconnect-test | BIN-812 | 2d | **Ja** | Infra klar (#1037) — må kjøres |
-| **R4** | Load-test 1000 klienter per rom over 60 min | BIN-817 | 2-3d | Utvidelse | Ikke startet |
-| **R5** | Idempotent socket-events (`clientRequestId`-dedup) | BIN-813 | 2d | **Ja** | ✅ Merget #1028 |
-| **R6** | Outbox for room-events (alle wallet-touch via outbox) | BIN-818 | 1-2d | Utvidelse | Wallet-siden ferdig (BIN-761); rom-side må verifiseres |
-| **R7** | Health-endpoint per rom | BIN-814 | 1d | **Ja** | ✅ Merget #1027 |
-| **R8** | Alerting (Slack/PagerDuty) ved error-state > 30s | BIN-815 | 1d | **Ja** | ✅ Merget #1031 |
-| **R9** | Spill 2 perpetual-room 24t-leak-test | BIN-819 | 2d | Utvidelse | Ikke startet |
-| **R10** | Spill 3 phase-state-machine engine-wireup + chaos-test | BIN-820 | 3-4d | Utvidelse | Foundation: PR #1008 |
-| **R11** | Per-rom resource-isolation (én rom-feil må aldri ta ned andre rom) | BIN-821 | 3-5d | Utvidelse | Ikke startet |
-| **R12** | DR-runbook for live-rom | BIN-816 | 1d | **Ja** | ✅ Merget #1025 |
+| # | Tiltak | Linear | Pilot-gating? | Status |
+|---|---|---|---|---|
+| **R1** | Lobby-rom Game1Controller-wireup | BIN-822 | Ja | ✅ Merget #1018 + #1033 |
+| **R2** | Failover-test (drep instans midt i runde) | BIN-811 | **Ja** | ✅ **PASSED 2026-05-08 22:39** (recovery 2s, alle invariants OK) |
+| **R3** | Klient-reconnect-test (5s/15s/60s) | BIN-812 | **Ja** | ✅ **PASSED 2026-05-08 22:42** (alle 3 scenarioer) |
+| **R4** | Load-test 1000 klienter | BIN-817 | Utvidelse | ✅ Infrastructure merget (PR #1180) — kjør pre-utvidelse |
+| **R5** | Idempotent socket-events | BIN-813 | **Ja** | ✅ Merget #1028 (`withSocketIdempotency`) |
+| **R6** | Outbox for room-events | BIN-818 | Utvidelse | Wallet-siden ferdig (BIN-761); rom-side må verifiseres |
+| **R7** | Health-endpoint per rom | BIN-814 | **Ja** | ✅ Merget #1027 |
+| **R8** | Alerting (Slack/PagerDuty) | BIN-815 | **Ja** | ✅ Merget #1031 |
+| **R9** | Spill 2 perpetual 24t-leak-test | BIN-819 | Utvidelse | Runbook klar; må kjøres |
+| **R10** | Spill 3 phase-state-machine chaos-test | BIN-820 | Utvidelse | Foundation merget; chaos-test må kjøres |
+| **R11** | Per-rom resource-isolation | BIN-821 | Utvidelse | ✅ **Circuit-breaker + latency-tracker merget (PR #1176, ADR-0020 P1-6)** |
+| **R12** | DR-runbook for live-rom | BIN-816 | **Ja** | ✅ Merget #1025 + valideringsplan (R12_DR_VALIDATION_PLAN.md) |
 
-**Sum:** ~22-30 dev-dager. Kan parallelliseres med 3-4 agenter til ~7-10 kalenderdager.
+## Pilot-gating (4 haller) — status 2026-05-13
 
-## Pilot-gating (4 haller, Tobias 2026-05-08)
-
-**Må være lukket før pilot går live:**
+**Alle pilot-gating-krav er GRØNNE:**
 - ✅ R1 (Game1Controller-wireup)
-- [ ] R2 — failover-test grønn
-- [ ] R3 — reconnect-test grønn
-- ✅ R5 — idempotent socket-events
-- ✅ R7 — health-endpoint live
-- ✅ R8 — alerting live
-- ✅ R12 — runbook validert
+- ✅ R2 (failover-test PASSED 2026-05-08)
+- ✅ R3 (reconnect-test PASSED 2026-05-08)
+- ✅ R5 (idempotent socket-events)
+- ✅ R7 (health-endpoint live)
+- ✅ R8 (alerting live)
+- ✅ R12 (runbook merget; drill-validering pending)
 
-**Kan være planlagt etter pilot (men før utvidelse):**
-- R4 (load-test for skala)
-- R6 (outbox-validering)
-- R9 (Spill 2 24t-test)
+**Pilot-go-live mandat: GRØNT** (per `CHAOS_TEST_RESULTS_R2_R3_2026-05-08.md`).
+
+**Pre-utvidelse til > 4 haller — gjenstår:**
+- R4 (load-test 1000 — infrastruktur klar)
+- R6 (outbox-validering — wallet-side ferdig)
+- R9 (Spill 2 24t-leak)
 - R10 (Spill 3 chaos-test)
-- R11 (per-rom isolation)
+- 2-4 ukers drift-data uten kunde-klager
+
+## Bølge 1 + Bølge 2 — Evolution-grade utvidelse (2026-05-11 → 2026-05-13)
+
+### Bølge 1 (ADR-0019) — state-konsistens
+- ✅ P0-1: Monotonic `stateVersion` på `room:update` (PR #1169)
+- ✅ P0-2: Sync-persist på critical room-state paths (PR #1170)
+- ✅ P0-3 + P0-4: Targeted broadcast for admin-events (PR #1168)
+- ✅ P0-5: ADR-0021 — master kan starte uten klare haller (PR #1177)
+
+### Bølge 2 (ADR-0020) — utvidelses-fundament
+- ✅ P1-3: Redis health-monitor + degradering-alarmer (PR #1174)
+- ✅ P1-6 / R11: Per-room circuit breaker + latency tracker + isolation guard (PR #1176)
+- ✅ R4: Load-test infrastructure for 1000 klienter (PR #1180)
+
+### ADR-0022 — Multi-lag stuck-game-recovery (PR #1241)
+Auto-reconcile fra lobby-poll (I16, F-02). Recovery-layers: (1) lobby-poll auto-reconcile, (2) periodic stuck-game scan, (3) manuell admin-override, (4) DR-runbook fallback.
 
 ## Go/no-go-policy (Tobias 2026-05-08, §6.1)
 
@@ -288,3 +304,22 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 ## Kanonisk referanse
 
 `LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md` er autoritativ. Tobias-eier — endringer krever direkte godkjenning. Ved tvil mellom kode og mandat: mandat vinner, koden må fikses.
+
+**Relaterte ADR-er:**
+- [ADR-0019 — Evolution-grade state-konsistens (Bølge 1)](../../../docs/adr/0019-evolution-grade-state-consistency-bolge1.md)
+- [ADR-0020 — Evolution-grade utvidelses-fundament (Bølge 2)](../../../docs/adr/0020-evolution-grade-utvidelses-fundament-bolge2.md)
+- [ADR-0021 — Master kan starte uten solgte bonger](../../../docs/adr/0021-allow-master-start-without-players.md)
+- [ADR-0022 — Multi-lag stuck-game-recovery](../../../docs/adr/0022-stuck-game-recovery-multilayer.md)
+
+**Test-resultater:**
+- `docs/operations/CHAOS_TEST_RESULTS_R2_R3_2026-05-08.md` — autoritativ R2/R3-status
+- `docs/operations/R4_LOAD_TEST_RUNBOOK.md` — R4 load-test (infrastruktur klar)
+- `docs/operations/R9_SPILL2_LEAK_TEST_RUNBOOK.md` — R9 leak-test
+- `docs/operations/R12_DR_VALIDATION_PLAN.md` — DR-runbook valideringsplan
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-08 | Initial mandat |
+| 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |

@@ -548,6 +548,69 @@ end-to-end før dette scriptet.
 
 ---
 
+### 2026-05-13 — Skill-freshness review + refresh av 7 skills (general-purpose agent)
+
+**Scope:** Første-real-kjøring av `scripts/check-skill-freshness.mjs` etter at C3-PR
+(scope-header for alle 20 skills) landet. Evaluere alle 20 skills, identifisere
+hvilke som har høy scope-aktivitet, og refreshe de mest viktige med læringer fra
+autonomy-waves (Tier 3, Bølge 1+2, ADR-0019/0020/0021/0022).
+
+**Inputs gitt:**
+- Mandat: ny worktree, branch fra origin/main
+- Pekere til `check-skill-freshness.mjs`, `SKILL_FRESHNESS.md`, `SKILL_FILE_MAP.md`
+- Forventet output: ≥ 5 stale skills refreshet; oppdatert SKILL_FRESHNESS.md
+- Acceptance criteria: alle 20 evaluert, ingen deprecated skills brutt, AGENT_EXECUTION_LOG entry
+
+**Outputs produsert:**
+- Branch: `chore/skill-freshness-review-2026-05-13`
+- Refreshet 7 skills til v1.1.0:
+  1. `pm-orchestration-pattern` — dev:nuke, pm-push-control, auto-rebase, cascade-rebase, knowledge-protocol, bug-resurrection, skill-freshness
+  2. `casino-grade-testing` — Stryker mutation, bug-resurrection, autonomous pilot-flow, R4 load-test, ADR-0019/0020/0022
+  3. `live-room-robusthet-mandate` — R-status oppdatert (R2/R3 PASSED, R4 merget, R11 circuit-breaker), Bølge 1+2, ADR-0019/0020/0021/0022
+  4. `spill1-master-flow` — I14/I15/I16 fix-mønstre, ADR-0021 (master uten spillere), ADR-0022 (stuck-game-recovery), MasterActionService, GamePlanRunCleanupService
+  5. `wallet-outbox-pattern` — Stryker WalletOutboxWorker, ADR-0015 regulatory-ledger, ADR-0019 sync-persist
+  6. `pengespillforskriften-compliance` — ADR-0015 (separat §71 regulatory-ledger med daily-anchor + verifyAuditChain), ADR-0017 (manuell jackpot)
+  7. `database-migration-policy` — partial unique index (singleton-config), CHECK-constraint DROP-FIRST, deprecate-table-mønster, FK-CASCADE, auto-generert snapshot-referanser
+- Oppdatert `docs/engineering/SKILL_FRESHNESS.md`:
+  - Ny §10 — Første-real-kjøring resultat (status før/etter refresh)
+  - Per-skill aktivitets-tabell med commits-til-scope
+  - Anbefalt review-cadence
+- Filer endret: 8 (7 SKILL.md + SKILL_FRESHNESS.md)
+
+**Skills som ikke ble refreshet (12 av 20):**
+- 8 skills med < 30 commits til scope: skip (stabil)
+- 4 skills som dekker områder med moderat aktivitet men allerede oppdatert: skip
+
+**Fallgruver oppdaget:**
+- §11 (agent-orkestrering) — Alle 20 skills hadde scope-header (C3-PR komplett), men age var 0 dager
+  fordi siste commit var bare scope-header-tillegget. Real content-alder var 4 dager. Læring:
+  freshness-script bør evt. spore content-age separat fra metadata-age (eks. bare track BODY-endringer).
+  Foreløpig fungerer commits-til-scope som proxy for "trenger oppdatering?".
+- §8 (doc-disiplin) — Skills som har høyest commits-til-scope er IKKE alltid de mest stale; det er ofte
+  fordi feltet er aktivt og skills er kontinuerlig referert. Refresh-prioritering bør være
+  "commits til scope + læringer fra siste 2-4 uker som ikke er reflektert".
+
+**Læring:**
+- Skills som dekker områder med 100+ commits/60d er gode kandidater for refresh selv om de er
+  "freshe" per dato — innholdet trenger oppdatering med nye ADR-er og bug-fix-mønstre.
+- Refresh-tag `[skill-refreshed: <name>]` i commit-message gjør sporing enkel.
+- Versjons-bump i SKILL.md front-matter (`version: 1.0.0` → `1.1.0`) gir tydelig signal om refresh.
+- Endringslogg-tabell på bunnen av hver SKILL.md gir hvert refresh sin egen historikk.
+- Cross-referansering mellom skills (eks. wallet-outbox refererer audit-hash-chain) bør verifiseres
+  ved hvert refresh — ADR-pekere endrer seg når nye ADR-er lander.
+
+**Eierskap:**
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `.claude/skills/casino-grade-testing/SKILL.md`
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md`
+- `.claude/skills/spill1-master-flow/SKILL.md`
+- `.claude/skills/wallet-outbox-pattern/SKILL.md`
+- `.claude/skills/pengespillforskriften-compliance/SKILL.md`
+- `.claude/skills/database-migration-policy/SKILL.md`
+- `docs/engineering/SKILL_FRESHNESS.md`
+
+---
+
 ### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
 
 **Scope:** Bygg en pre-commit hook + CI gate som detekterer når en commit
