@@ -219,6 +219,32 @@ export interface Game1MasterControlServiceOptions {
    * = legacy-mode uten automatisk refund (eksisterende tester passerer).
    */
   ticketPurchaseService?: Game1TicketPurchaseService;
+  /**
+   * Tobias-direktiv 2026-05-13 (pilot-bugs #1-3 + #6): post-engine-start
+   * hook som binder per-rom entryFee + variantConfig fra scheduled-game-
+   * raden's `ticket_config_json`. Uten denne faller klient til 10 kr
+   * default-entryFee og pre-game prises som 30 kr istedenfor riktige
+   * 5/10/15 kr per bongfarge.
+   *
+   * Hook kalles POST-commit, POST-engine.startGame — i suksess-pathen kun,
+   * IKKE under rollback. Skal være soft-fail: feil her påvirker IKKE
+   * caller-returverdi eller engine-state. Brukes for å:
+   *   1. Sette `roomConfiguredEntryFeeByRoom` til billigste bongpris
+   *      (typisk 500 øre = 5 kr) så `gameVariant.entryFee` + per-bong-
+   *      pris-beregning gir riktige tall til klient.
+   *   2. Re-binde `variantByRoom` med `buildVariantConfigFromGameConfigJson`
+   *      fra `ticket_config_json.spill1.ticketColors[]` så pre-game
+   *      patterns + prizes vises korrekt på CenterTopPanel.
+   *   3. Triggere `emitRoomUpdate(roomCode)` så klienter får nye verdier
+   *      umiddelbart (ikke ved neste draw).
+   *
+   * Implementasjon ligger i index.ts (DI-wiring) — hook abstrakt her for
+   * å holde service-en fri for roomState/emitRoomUpdate-avhengigheter.
+   */
+  onEngineStarted?: (input: {
+    scheduledGameId: string;
+    actorUserId: string;
+  }) => Promise<void> | void;
 }
 
 interface ScheduledGameRow {
@@ -296,6 +322,14 @@ export class Game1MasterControlService {
   private drawEngine: Game1DrawEngineService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
   private ticketPurchaseService: Game1TicketPurchaseService | null;
+  /**
+   * Tobias-direktiv 2026-05-13 (pilot-bugs #1-3 + #6): post-engine-start
+   * hook. Se `Game1MasterControlServiceOptions.onEngineStarted` for
+   * semantikk. `null` = ingen wireup (legacy/test-mode).
+   */
+  private onEngineStarted:
+    | Game1MasterControlServiceOptions["onEngineStarted"]
+    | null = null;
 
   constructor(options: Game1MasterControlServiceOptions) {
     this.pool = options.pool;
@@ -307,6 +341,7 @@ export class Game1MasterControlService {
     this.drawEngine = options.drawEngine ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
     this.ticketPurchaseService = options.ticketPurchaseService ?? null;
+    this.onEngineStarted = options.onEngineStarted ?? null;
   }
 
   /**
@@ -326,6 +361,18 @@ export class Game1MasterControlService {
     ticketPurchaseService: Game1TicketPurchaseService
   ): void {
     this.ticketPurchaseService = ticketPurchaseService;
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-13 (pilot-bugs #1-3 + #6): late-binding for
+   * `onEngineStarted`-hook. Brukes av index.ts fordi roomState +
+   * emitRoomUpdate konstrueres etter masterControl (sirkulær avhengighet
+   * ellers). Se options-doc for semantikk.
+   */
+  setOnEngineStarted(
+    callback: Game1MasterControlServiceOptions["onEngineStarted"]
+  ): void {
+    this.onEngineStarted = callback ?? null;
   }
 
   /**
@@ -728,6 +775,33 @@ export class Game1MasterControlService {
         }
         // Re-throw original engine-feil så caller får riktig signal.
         throw engineErr;
+      }
+
+      // Tobias-direktiv 2026-05-13 (pilot-bugs #1-3 + #6 + #7):
+      // POST-engine-start hook for å binde per-rom entryFee +
+      // variantConfig fra `ticket_config_json`. Uten denne får klienten
+      // 30/60 kr default-fallback istedenfor riktige 5/10/15 kr.
+      //
+      // Soft-fail: feil i hook påvirker IKKE caller-returverdi eller
+      // engine-state. Engine kjører videre uten korrekt entry-fee —
+      // bedre enn å feile masterstart-flyten. Feil logges på warn-nivå
+      // slik at ops kan se hvis hook konsistent feiler.
+      if (this.onEngineStarted) {
+        try {
+          await this.onEngineStarted({
+            scheduledGameId: input.gameId,
+            actorUserId: input.actor.userId,
+          });
+        } catch (hookErr) {
+          log.warn(
+            {
+              err: hookErr,
+              gameId: input.gameId,
+              actorId: input.actor.userId,
+            },
+            "onEngineStarted hook kastet — ignorert (entry-fee/variant-config ikke bundet, klient kan vise default-priser)"
+          );
+        }
       }
     }
 

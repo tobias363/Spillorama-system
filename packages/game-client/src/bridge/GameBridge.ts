@@ -451,6 +451,17 @@ export class GameBridge {
       && payload.gameVariant.patterns.length > 0
     ) {
       this.state.patterns = payload.gameVariant.patterns as GameState["patterns"];
+      // Tobias-direktiv 2026-05-13 (pilot-bug #6): seed patternResults
+      // parallelt så pattern:won-events kan oppdatere isWon. Se
+      // handleRoomUpdate for full begrunnelse.
+      if (this.state.patternResults.length === 0) {
+        this.state.patternResults = this.state.patterns.map((p) => ({
+          patternId: p.id,
+          patternName: p.name,
+          claimType: p.claimType,
+          isWon: false,
+        }));
+      }
     }
 
     this.emit("stateChanged", this.state);
@@ -603,6 +614,26 @@ export class GameBridge {
       && payload.gameVariant.patterns.length > 0
     ) {
       this.state.patterns = payload.gameVariant.patterns as GameState["patterns"];
+      // Tobias-direktiv 2026-05-13 (pilot-bug #6): seed patternResults
+      // parallelt så CenterTopPanel kan strike-through Rad 1 / vise Rad 2-
+      // progress når server fyrer pattern:won. Plan-driven Spill 1 har
+      // ingen `currentGame.patternResults` (BingoEngine.startGame kalles
+      // aldri — Game1DrawEngineService kjører separat state-machine), så
+      // `state.patternResults` ville ellers vært [] og lookup på pattern:won
+      // ville aldri matche.
+      //
+      // Seed kun hvis patternResults er tom — vi vil ikke overskrive
+      // patternResults som faktisk har isWon=true fra et tidligere
+      // pattern:won-event (kan oppstå hvis gameVariant.patterns lander
+      // ETTER pattern:won — usannsynlig men defensive).
+      if (this.state.patternResults.length === 0) {
+        this.state.patternResults = this.state.patterns.map((p) => ({
+          patternId: p.id,
+          patternName: p.name,
+          claimType: p.claimType,
+          isWon: false,
+        }));
+      }
     }
 
     // Detect game lifecycle transitions
@@ -722,9 +753,25 @@ export class GameBridge {
   }
 
   private handlePatternWon(payload: PatternWonPayload): void {
-    // Update local pattern results
+    // Update local pattern results.
+    //
+    // Tobias-direktiv 2026-05-13 (pilot-bug #6): server's wire-format for
+    // plan-driven Spill 1 sender `patternId: patternName` (eks "1 Rad")
+    // via `game1PlayerBroadcasterAdapter` linje 96-97. Klient-side
+    // `state.patternResults` (seedet fra `gameVariant.patterns` via
+    // `patternConfigToDefinitions`) har patternId = "pattern-0..4" og
+    // patternName = "1 Rad..Fullt Hus".
+    //
+    // Vi matcher derfor på BÅDE patternId og patternName for robusthet:
+    // BingoEngine-driven pattern:won har matchende patternId; plan-driven
+    // Spill 1 har matchende patternName. Dette unngår behovet for wire-
+    // format-endring og holder Spill 2/3 og legacy BingoEngine-rom
+    // uendret.
     const existing = this.state.patternResults.find(
-      (r) => r.patternId === payload.patternId,
+      (r) =>
+        r.patternId === payload.patternId ||
+        r.patternName === payload.patternId ||
+        r.patternName === payload.patternName,
     );
     if (existing) {
       existing.isWon = true;
