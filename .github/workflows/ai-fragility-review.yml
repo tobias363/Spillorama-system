@@ -3,17 +3,23 @@ name: AI Fragility Review
 # Tobias-direktiv 2026-05-13 (Tier 3-A): "AI code-review-agent som leser
 # FRAGILITY før PR-merge og foreslår 'har du sjekket X?'"
 #
-# Workflow kjører på hver PR. For hver fil endret som matcher en FRAGILITY-
-# entry, auto-kommenterer PR-en med:
-#   - Hvilke F-NN-entries dekker filen
-#   - "Hva ALDRI gjøre"-listen fra hver entry
-#   - "Hvilke tester MÅ stå grønn"-listen
-#   - Spørsmål til committer: "har du verifisert disse?"
+# Workflow kjører på hver PR. Auto-kommenterer PR-en med:
+#   1. 🎯 Tobias smoke-test (auto-generated)
+#      - Konkrete URL-er, credentials, klikk-steg basert på fil-heuristikk
+#      - Forventet feilbilde hvis PR er broken
+#      - 0-line for docs-only PR-er
+#   2. 🛡️ AI Fragility Review
+#      - For hver FRAGILITY-entry som rører endret fil:
+#        - "Hva ALDRI gjøre"-listen
+#        - "Hvilke tester MÅ stå grønn"-listen
+#        - "Historisk skade"-konteks
 #
 # Komplementerer:
 #   - delta-report-gate.yml (krever delta-rapport)
 #   - knowledge-protocol-gate.yml (krever checkbox)
 #   - pre-commit-fragility-check.sh (krever context-read-marker)
+#
+# Format-spec for Tobias-readiness: docs/engineering/TOBIAS_READINESS_FORMAT.md
 
 on:
   pull_request:
@@ -33,6 +39,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate Tobias smoke-test section
+        id: tobias_readiness
+        run: |
+          # Tobias-direktiv 2026-05-13: auto-generer konkrete smoke-test-steg
+          # per PR slik at Tobias slipper å lese hele diffen for å vite hva
+          # han skal teste. Output legges inn i samme comment som FRAGILITY-
+          # review under, i en egen seksjon.
+          set -euo pipefail
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Diff av endrede filer
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/diff-files.txt || true
+
+          # Commit-meldinger (oneline format)
+          git log --format="%s" "$BASE_SHA".."$HEAD_SHA" > /tmp/commit-messages.txt || true
+
+          # Generer markdown-blokk
+          node scripts/generate-tobias-readiness.mjs \
+            --diff-file /tmp/diff-files.txt \
+            --commit-messages /tmp/commit-messages.txt \
+            --output-file /tmp/tobias-readiness.md || {
+              echo "::warning::generate-tobias-readiness.mjs feilet — fortsetter uten Tobias-seksjon"
+              echo "" > /tmp/tobias-readiness.md
+            }
+
+          echo "::group::Generated Tobias readiness section"
+          cat /tmp/tobias-readiness.md
+          echo "::endgroup::"
+
       - name: Match changed files to FRAGILITY entries
         id: match
         uses: actions/github-script@v7
@@ -40,6 +82,14 @@ jobs:
           script: |
             const fs = require('fs');
             const { execSync } = require('child_process');
+
+            // Les pre-genererte Tobias-readiness-seksjon (eller tom hvis feilet)
+            let tobiasReadinessSection = '';
+            try {
+              tobiasReadinessSection = fs.readFileSync('/tmp/tobias-readiness.md', 'utf8').trim();
+            } catch {
+              core.info('Tobias-readiness-fil ikke funnet — hopper over.');
+            }
 
             const fragilityPath = 'docs/engineering/FRAGILITY_LOG.md';
             if (!fs.existsSync(fragilityPath)) {
@@ -92,61 +142,74 @@ jobs:
               e.files.some(f => changedFiles.some(c => c === f || c.startsWith(f) || f.startsWith(c)))
             );
 
-            if (matchedEntries.length === 0) {
-              core.info('Ingen FRAGILITY-entries matcher endrede filer — review skipped.');
+            core.setOutput('matched_count', matchedEntries.length);
+
+            // Hvis verken FRAGILITY-entries OR Tobias-readiness — hopp ut helt
+            if (matchedEntries.length === 0 && tobiasReadinessSection.length === 0) {
+              core.info('Ingen FRAGILITY-entries eller Tobias-readiness — review skipped.');
               return;
             }
 
-            core.setOutput('matched_count', matchedEntries.length);
-
             // Bygg kommentar
             const lines = [];
-            lines.push('## 🛡️ AI Fragility Review');
-            lines.push('');
-            lines.push(`Denne PR-en endrer filer som er nevnt i ${matchedEntries.length} FRAGILITY-entry/-ies.`);
-            lines.push('Jeg har lest dem på dine vegne — vennligst bekreft at du har verifisert:');
-            lines.push('');
 
-            for (const e of matchedEntries) {
-              lines.push(`### ${e.id}: ${e.title}`);
+            // 1) Tobias smoke-test FØRST (han leser top-down — viktigste info først)
+            if (tobiasReadinessSection.length > 0) {
+              lines.push(tobiasReadinessSection);
               lines.push('');
-
-              // Extract "Hva ALDRI gjøre" section
-              const blockText = e.rawBlock.join('\n');
-              const neverMatch = blockText.match(/\*\*Hva ALDRI gjøre:?\*\*\s*\n((?:[-*]\s+[^\n]+\n?)+)/i);
-              if (neverMatch) {
-                lines.push('**Sjekkpunkt — har du unngått disse?**');
-                lines.push(neverMatch[1].trim());
-                lines.push('');
-              }
-
-              // Extract required tests
-              const testMatch = blockText.match(/\*\*Hvilke tester MÅ stå grønn[^*]*\*\*\s*\n((?:[-*]\s+[^\n]+\n?)+)/i);
-              if (testMatch) {
-                lines.push('**Sjekkpunkt — har du kjørt og verifisert disse testene?**');
-                lines.push(testMatch[1].trim());
-                lines.push('');
-              }
-
-              // Historisk skade (compact)
-              const historyMatch = blockText.match(/\*\*Historisk skade:?\*\*\s*\n((?:[-*]\s+[^\n]+\n?){1,3})/i);
-              if (historyMatch) {
-                lines.push('**Historisk kontekst:**');
-                lines.push(historyMatch[1].trim());
-                lines.push('');
-              }
-
               lines.push('---');
               lines.push('');
             }
 
-            lines.push('## Hva nå?');
-            lines.push('');
-            lines.push('1. Verifiser at du har lest entry-ene over og kjørt nevnte tester');
-            lines.push('2. Reager med 👍 på denne kommentaren for å bekrefte');
-            lines.push('3. Hvis du oppdager en NY fragility-pattern, legg til F-NN-entry i `docs/engineering/FRAGILITY_LOG.md`');
-            lines.push('');
-            lines.push('_Dette er en automatisk AI-review basert på FRAGILITY_LOG. Den erstatter ikke manuell code-review — den supplerer._');
+            // 2) FRAGILITY-review under (kun hvis matches finnes)
+            if (matchedEntries.length > 0) {
+              lines.push('## 🛡️ AI Fragility Review');
+              lines.push('');
+              lines.push(`Denne PR-en endrer filer som er nevnt i ${matchedEntries.length} FRAGILITY-entry/-ies.`);
+              lines.push('Jeg har lest dem på dine vegne — vennligst bekreft at du har verifisert:');
+              lines.push('');
+
+              for (const e of matchedEntries) {
+                lines.push(`### ${e.id}: ${e.title}`);
+                lines.push('');
+
+                // Extract "Hva ALDRI gjøre" section
+                const blockText = e.rawBlock.join('\n');
+                const neverMatch = blockText.match(/\*\*Hva ALDRI gjøre:?\*\*\s*\n((?:[-*]\s+[^\n]+\n?)+)/i);
+                if (neverMatch) {
+                  lines.push('**Sjekkpunkt — har du unngått disse?**');
+                  lines.push(neverMatch[1].trim());
+                  lines.push('');
+                }
+
+                // Extract required tests
+                const testMatch = blockText.match(/\*\*Hvilke tester MÅ stå grønn[^*]*\*\*\s*\n((?:[-*]\s+[^\n]+\n?)+)/i);
+                if (testMatch) {
+                  lines.push('**Sjekkpunkt — har du kjørt og verifisert disse testene?**');
+                  lines.push(testMatch[1].trim());
+                  lines.push('');
+                }
+
+                // Historisk skade (compact)
+                const historyMatch = blockText.match(/\*\*Historisk skade:?\*\*\s*\n((?:[-*]\s+[^\n]+\n?){1,3})/i);
+                if (historyMatch) {
+                  lines.push('**Historisk kontekst:**');
+                  lines.push(historyMatch[1].trim());
+                  lines.push('');
+                }
+
+                lines.push('---');
+                lines.push('');
+              }
+
+              lines.push('## Hva nå?');
+              lines.push('');
+              lines.push('1. Verifiser at du har lest entry-ene over og kjørt nevnte tester');
+              lines.push('2. Reager med 👍 på denne kommentaren for å bekrefte');
+              lines.push('3. Hvis du oppdager en NY fragility-pattern, legg til F-NN-entry i `docs/engineering/FRAGILITY_LOG.md`');
+              lines.push('');
+              lines.push('_Dette er en automatisk AI-review basert på FRAGILITY_LOG. Den erstatter ikke manuell code-review — den supplerer._');
+            }
 
             const body = lines.join('\n');
 
@@ -157,7 +220,9 @@ jobs:
               issue_number: context.issue.number,
             });
             const existing = comments.data.find(c =>
-              c.user.type === 'Bot' && c.body.includes('🛡️ AI Fragility Review')
+              c.user.type === 'Bot' &&
+              (c.body.includes('🛡️ AI Fragility Review') ||
+               c.body.includes('🎯 Tobias smoke-test'))
             );
             if (existing) {
               await github.rest.issues.updateComment({
@@ -166,7 +231,7 @@ jobs:
                 comment_id: existing.id,
                 body,
               });
-              core.info(`Updated existing AI-review comment (${matchedEntries.length} entries)`);
+              core.info(`Updated existing AI-review comment (${matchedEntries.length} FRAGILITY entries, Tobias section ${tobiasReadinessSection.length > 0 ? 'included' : 'skipped'})`);
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
@@ -174,5 +239,5 @@ jobs:
                 issue_number: context.issue.number,
                 body,
               });
-              core.info(`Posted new AI-review comment (${matchedEntries.length} entries)`);
+              core.info(`Posted new AI-review comment (${matchedEntries.length} FRAGILITY entries, Tobias section ${tobiasReadinessSection.length > 0 ? 'included' : 'skipped'})`);
             }
