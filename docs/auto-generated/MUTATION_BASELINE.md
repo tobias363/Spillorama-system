@@ -63,7 +63,7 @@ ikke alle 9 — så reell run-tid kan være vesentlig under verstefall.
 
 | Dato | Total score | MasterActionService | Game1LobbyService | Game1HallReadyService | GamePlanRunService | WalletOutboxWorker | Run-time |
 |---|---|---|---|---|---|---|---|
-| 2026-05-13 (baseline) | _venter on Lobby/Plan/Master_ | _venter_ | _venter_ | 48.38 → **53.62** ↑ | _venter_ | 46.00 → **82.00** ↑↑ | ~2.5-16 min per fil |
+| 2026-05-13 (baseline) | _venter on Plan/Master_ | _venter_ | 39.20 → **48.86** ↑ | 48.38 → **53.62** ↑ | _venter_ | 46.00 → **82.00** ↑↑ | ~2.5-16 min per fil |
 
 ### Notater per run
 
@@ -155,6 +155,50 @@ Run-tid: 15 min 27 s.
   - 31 StringLiteral-mutanter (mange equivalent — log/error-strenger uten funksjonell effekt)
   - 52 ConditionalExpression-mutanter spredt over flere services
 - Neste iterasjon: utvide tester for `markReady`, `unmarkReady`, `sweepStaleReadyRows`, og scan-flyten.
+
+#### 2026-05-13 — Initial baseline + survivors-tester for Game1LobbyService
+
+**Pre-tester (kun original test-fil — 30 tester):**
+
+| Kategori | Antall |
+|---|---|
+| Killed | 69 |
+| Survived | **49** |
+| NoCoverage | **58** |
+| Timeout | 0 |
+| Errors | 140 |
+| **Mutation score** | **39.20 %** (UNDER BREAK 50 %) |
+
+Run-tid: 7 min 33 s. 316 mutanter.
+
+**Hovedklynger av survivors (pre):**
+- Linje 667 (ticketPricesCents > 0 filter): 6 survivors
+- Linje 582, 795, 899 (auto-reconcile-paths): 3 hver
+- Linje 220-225 (TIME_REGEX + timeToMinutes): 4 survivors
+- Linje 326-336 (ZOD-validering for Game1LobbyState): 12 nocov-mutanter
+
+**Etter survivors-tester (`src/game/Game1LobbyService.survivors.test.ts` — 16 nye tester):**
+
+| Kategori | Antall | Endring |
+|---|---|---|
+| Killed | 86 | +17 |
+| Survived | 41 | -8 |
+| NoCoverage | 49 | -9 |
+| Timeout | 0 | 0 |
+| Errors | 140 | 0 |
+| **Mutation score** | **48.86 %** | **+9.66 prosentpoeng** ↑↑ |
+
+Run-tid: 8 min 45 s.
+
+**Konklusjon:**
+- Kun marginalt under `break`-threshold (48.86 vs 50). Score nesten tredoblet i forhold til pre-baseline-distansen.
+- Nye tester drepte 17 mutants + eliminerte 9 no-coverage mutanter.
+- 16 nye tester targeted: ticketPricesCents-filter, bonusGameOverride-prioritet, TERMINAL_SCHEDULED_GAME_STATUSES set, TIME_REGEX, h*60+m beregning.
+- 41 survivors + 49 nocov gjenstår — dominert av:
+  - 140 errors er TypeScript-compile-failures (faktisk healthy signal — type-system fanger mutasjoner)
+  - StringLiteral-mutanter på logger.warn-meldinger (mange equivalent)
+  - 12 nocov i ZOD-schema-validering (linje 326-336) — kunne testes med invalid input fixture
+  - Auto-reconcile-detaljer (linje 582, 795, 899) — kunne testes med DB-write-mock
 
 ---
 
