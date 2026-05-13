@@ -15,7 +15,7 @@
  *   - validateSessionId-helper: accept/reject-kontrakt
  */
 
-import { describe, it, before, after, beforeEach } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import * as fs from "node:fs";
@@ -94,12 +94,34 @@ describe("devRrweb route", () => {
     app = await startApp({ sessionsDir: tmpDir });
   });
 
-  // Cleanup etter hver test — annerledes mønster fordi node:test ikke
-  // har `afterEach` direkte, så vi kjører manuell cleanup på slutten av
-  // hvert test-case via en helper.
+  // CI-fix 2026-05-14: node:test HAR afterEach (originalt mønster antok feilaktig
+  // at det ikke fantes). Mangler-teardown lekket Express-listen-handle som hang
+  // CI på "Run apps/backend tests"-steget. afterEach() garanterer cleanup uansett
+  // om en test feiler tidligt eller glemmer å kalle teardown() eksplisitt.
+  afterEach(async () => {
+    try {
+      await app.close();
+    } catch {
+      // ignore — server may already be closed by explicit teardown() call
+    }
+    try {
+      cleanupTmp(tmpDir);
+    } catch {
+      // ignore — tmpDir may already be cleaned
+    }
+  });
+
+  // Beholder teardown() som no-op for backward-kompat med eksisterende test-kropper.
+  // afterEach() er nå primær cleanup-source.
   async function teardown(): Promise<void> {
-    await app.close();
-    cleanupTmp(tmpDir);
+    // afterEach handterer cleanup automatisk; denne kalles fortsatt eksplisitt
+    // i 15 av 19 tester men er trygg å være no-op fordi app.close() er idempotent
+    // og cleanupTmp() håndterer manglende dir.
+    try {
+      await app.close();
+    } catch {
+      // ignore
+    }
   }
 
   it("validateSessionId aksepterer gyldige IDs", () => {
