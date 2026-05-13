@@ -1098,4 +1098,8 @@ Verifisert via test:
 |---|---|---|
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
+| 2026-05-13 | Cross-knowledge audit etablert: `scripts/cross-knowledge-audit.mjs` (8 drift-sjekker) + ukentlig CI-workflow (mandag 10:00 UTC) + `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` bidragsguide. Pillar 8 i Knowledge Autonomy Protocol. | Agent (cross-knowledge-audit task) |
+
+---
+
 | 2026-05-13 | Manual-flow E2E-test (`spill1-manual-flow.spec.ts`) lagt til for å lukke F-03-gapet. Test mimicker Tobias' eksakte manuelle flyt via `?dev-user=`-redirect og hall-picker UI. 3/3 consecutive PASS i 11-13s. | Backend-agent (general-purpose) |
