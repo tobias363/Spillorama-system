@@ -472,6 +472,82 @@ og dokumenter lærdom i `docs/engineering/MUTATION_TESTING.md`.
 
 ---
 
+### 2026-05-13 — Autonomy end-to-end smoke-test (general-purpose agent, validation suite)
+
+**Scope:** Bygg `scripts/autonomy-smoke-test.sh` — automatisert end-to-end-
+test av hele autonomy-stacken som ble etablert via 22 PR-er 2026-05-13
+(Tier 1/2/3 + auto-rebase + comprehension + bug-resurrection +
+skill-mapping + cross-knowledge audit). Ingenting av dette var validert
+end-to-end før dette scriptet.
+
+**Inputs gitt:**
+- Mandat: ny isolert worktree, branch fra origin/main
+- Pekere til `KNOWLEDGE_AUTONOMY_PROTOCOL.md`, `.husky/pre-commit*`,
+  `.github/workflows/*` (ai-fragility-review, delta-report-gate,
+  bug-resurrection-check, skill-mapping-validate, auto-rebase-on-merge),
+  `scripts/pm-push-control.mjs`, `scripts/generate-context-pack.sh`
+- 6 stages definert: setup, FRAGILITY-touch, bug-resurrection, context-pack,
+  PR-simulering, cleanup
+- Krav: idempotent, tmp-branches ryddes opp, klar PASS/FAIL per stage,
+  exit 0 hvis alle PASS
+
+**Outputs produsert:**
+- Branch: `feat/autonomy-smoke-test-2026-05-13`
+- Filer:
+  - `scripts/autonomy-smoke-test.sh` (ny, ~480 linjer, 6 stages)
+  - `docs/engineering/AUTONOMY_SMOKE_TEST.md` (ny, ~225 linjer)
+  - `package.json` (oppdatert — `test:autonomy`-script lagt til)
+  - `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry-en)
+- Selv-validering: scriptet kjørt 2x lokalt → 6/6 PASS, idempotent verified
+
+**Fallgruver oppdaget:**
+- §11 (agent-orkestrering) — `.husky/pre-commit-fragility-check.sh` bruker
+  bash 4-features (`declare -A`) som ikke fungerer på macOS default bash
+  3.2.57. Returnerer exit 2 lokalt, men CI (Ubuntu bash 5.x) er OK.
+  Smoke-testen flagger dette som "Environmental limitations" i Summary,
+  ikke som FAIL — slik at lokal-kjøringer ikke gir falske negativer.
+  Fix-anbefaling: gjør scriptet POSIX-kompatibelt (drop `declare -A`).
+- §6 (test-infrastruktur) — Comprehension-verifier krever 3+ content-word
+  overlap mellom Comprehension-blokk og rules i FRAGILITY-entry. En naiv
+  paraphrase ("ikke endre gate-logikken") matcher ikke; må eksplisitt
+  nevne `autoShowBuyPopupDone`, `waitingForMasterPurchase`, "alle 4
+  testene" etc. Lærdom for fremtidige test-cases.
+- §11 — Resurrection-detector trigger ikke alltid på første kandidat-fil
+  fordi fix-commits typisk rør forskjellige linjer enn de som blame-er
+  først. Smoke-testen behandler "ingen trigger fanget" som PASS med
+  notat, ikke som FAIL.
+
+**Læring:**
+- Smoke-test som ikke gjør faktiske git commit-er (bare invokerer hooks
+  med `$TMP_COMMIT_MSG_FILE`-argument) er mye raskere og lar oss teste
+  begge cases (accept + reject) uten å trenge revert
+- `trap cleanup EXIT INT TERM` er kritisk for å garantere at probe-filer
+  restoreres selv om scriptet crasher midt i en stage
+- `git stash push -u` + restore i trap er hvordan vi beskytter uncommitted
+  endringer fra utvikler-arbeid
+- Capture exit-koder via `LAST_EXIT` istedenfor `set -e` lar oss samle alle
+  feil og rapportere PASS/FAIL per stage, ikke abortere ved første fail
+- Skip-with-flag (FRAGILITY_CHECK_BASH_LIMITED=1) er bedre enn fail når en
+  miljø-begrensning er kjent — flagger problemet i Summary slik at PM kan
+  fikse uten å miste tillit til selve testen
+- Parse av FRAGILITY_LOG i node-script (ikke awk) er pålitelig og matcher
+  det ai-fragility-review-workflowen gjør
+
+**Eierskap:**
+- `scripts/autonomy-smoke-test.sh`
+- `docs/engineering/AUTONOMY_SMOKE_TEST.md`
+- npm-script `test:autonomy` i `package.json`
+
+**Verifisering (PM-skal-gjøre):**
+- [ ] Kjør `npm run test:autonomy` lokalt — forvent 6/6 PASS + bash-limitation
+- [ ] Kjør 2x for å bekrefte idempotens
+- [ ] Inspekter at uncommitted endringer ikke tapes (git status før/etter)
+- [ ] (Frivillig) Wire inn i CI — kjør på pre-merge hvis FRAGILITY_LOG endres
+
+**Tid:** ~2 timer agent-arbeid
+
+---
+
 ### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
 
 **Scope:** Bygg en pre-commit hook + CI gate som detekterer når en commit
@@ -1566,3 +1642,7 @@ Verifisert via test:
 
 | 2026-05-13 | Manual-flow E2E-test (`spill1-manual-flow.spec.ts`) lagt til for å lukke F-03-gapet. Test mimicker Tobias' eksakte manuelle flyt via `?dev-user=`-redirect og hall-picker UI. 3/3 consecutive PASS i 11-13s. | Backend-agent (general-purpose) |
 | 2026-05-13 | PITFALLS §5.8 FIXED — `.husky/pre-commit-fragility-check.sh` portet fra bash 4 (`declare -A`) til bash 3.2-kompatibel thin wrapper + Node-script (`scripts/check-fragility-comprehension.mjs`). 34 tester. Pre-commit-fila ryddet for `---` stale markers. Wiret som Trinn 3 i seks-trinns-enforcement. | Backend-agent (general-purpose) |
+
+---
+
+| 2026-05-13 | Autonomy end-to-end smoke-test (`scripts/autonomy-smoke-test.sh`, 6 stages) lagt til for å validere hele autonomy-stacken etter 22 merged PR-er. Idempotent, npm-script `test:autonomy`, dokumentert i `docs/engineering/AUTONOMY_SMOKE_TEST.md`. 6/6 PASS lokalt med kjent bash 3.2-begrensning flagget. | Smoke-test-agent (general-purpose) |

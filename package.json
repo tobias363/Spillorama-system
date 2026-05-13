@@ -53,6 +53,7 @@
     "lint:arch:graph": "depcruise --config .dependency-cruiser.cjs --output-type mermaid apps/backend/src apps/admin-web/src packages",
     "test:stylelint": "node --test \"scripts/stylelint-rules/__tests__/*.mjs\"",
     "test:tobias-readiness": "node --test scripts/__tests__/generate-tobias-readiness.test.mjs",
+    "test:autonomy": "bash scripts/autonomy-smoke-test.sh",
     "perf:check": "npm --prefix scripts/performance-budget run check",
     "perf:collect": "npm --prefix scripts/performance-budget run collect",
     "perf:compare": "npm --prefix scripts/performance-budget run compare",
