@@ -60,19 +60,26 @@ Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias
 
 ## F-02: Plan-run lifecycle — stuck-state mellom test-cleanup og master-action
 
+**Status:** FIXED 2026-05-13 (I16) — auto-reconcile fra lobby-poll lagt til.
+
 **Filer:**
 - `apps/backend/src/game/GamePlanRunService.ts` — `start/advance/stop`-methods
-- `apps/backend/src/game/MasterActionService.ts` — `tryReconcileTerminalScheduledGame` (PR #1286)
+- `apps/backend/src/game/MasterActionService.ts` — `tryReconcileTerminalScheduledGame` (PR #1286, master-action-side)
+- `apps/backend/src/game/Game1LobbyService.ts:730-833` — `tryReconcileTerminalScheduledGame` (lobby-poll-side, I16-fix)
 - `tests/e2e/helpers/rest.ts` — `resetPilotState`
 
-**Hvorfor fragile:** Plan-run-state og scheduled-game-state er TO uavhengige state-maskiner som MÅ reconcileres. `masterStop()` rydder bare scheduled-game (status → 'completed'), ikke plan-run (status forblir 'running'). Lobby-state-aggregator returnerer da `currentScheduledGameId` med scheduled-status='completed' + run-status='running' = ingen joinable game for klient. **Symptom: popup vises ikke selv om master har "startet runde".**
+**Hvorfor fragile:** Plan-run-state og scheduled-game-state er TO uavhengige state-maskiner som MÅ reconcileres. `masterStop()` rydder bare scheduled-game (status → 'completed'), ikke plan-run (status forblir 'running') hvis `wrapEngineError` kaster FØR `planRunService.finish()` rakk å kjøre. Lobby-state-aggregator returnerer da `currentScheduledGameId` med scheduled-status='completed' + run-status='running' = ingen joinable game for klient. **Symptom: popup vises ikke selv om master har "startet runde".**
 
 **Hva ALDRI gjøre:**
 - Kalle `masterStop()` uten å også resette `app_game_plan_run.status` (eller dokumentere "stuck state godkjent")
 - Endre `Game1LobbyService.buildNextGameFromItem` uten å sjekke at både plan-run + scheduled-game-state speiler hverandre
 - Anta at `runStatus="running"` betyr "joinable game finnes"
+- Fjerne `TERMINAL_SCHEDULED_GAME_STATUSES`-konstanten fra `Game1LobbyService.ts` uten å replisere logikken — auto-reconcile er pilot-blokker-fix
 
 **Hvilke tester MÅ stå grønn etter endring:**
+- `apps/backend/src/game/__tests__/Game1LobbyService.reconcile.test.ts` (10 unit-tester, I16)
+- `apps/backend/src/game/Game1LobbyService.test.ts` (14 eksisterende tester)
+- `apps/backend/src/routes/__tests__/spill1Lobby.test.ts` (7 route-tester)
 - `tests/e2e/spill1-pilot-flow.spec.ts`
 - ALLE manuell-flyt-tester (ikke skrevet enda — er en gap, se F-03)
 
@@ -83,12 +90,16 @@ Endring i ÉN av disse uten å verifisere de ANDRE = popup mismatched mot Tobias
    TOK=$(curl -s "http://localhost:4000/api/dev/auto-login?email=demo-agent-1@spillorama.no" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['accessToken'])")
    curl -s "http://localhost:4000/api/agent/game1/lobby?hallId=demo-hall-001" -H "Authorization: Bearer $TOK" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(f\"runStatus={d.get('planMeta',{}).get('planRunStatus')}, scheduledStatus={d.get('scheduledGameMeta',{}).get('status') if d.get('scheduledGameMeta') else None}\")"
    ```
-3. Hvis output viser `runStatus=running, scheduledStatus=completed` = stuck state. **FIX:** Test må rydde plan-run, ikke bare scheduled-game.
+3. Etter at ny lobby-poll har gått (innen 10s av første spiller-shell-load), skal output være `runStatus=finished` (auto-healt) eller `runStatus=running, scheduledStatus=null` (scheduled-game skjult). IKKE `runStatus=running, scheduledStatus=completed` lenger — det er nå reconciled automatisk på read-path.
 
 **Historisk skade:**
 - 2026-05-13 (I16): Etter E2E-test-suite kjørt, plan-run forble "running" mens scheduled-game var "completed". Tobias' manuelle test 1.5h senere så ingen popup → 1h diagnose for å finne stuck state.
 
-**Foreslått varig fix:** `MasterActionService` skal auto-reconcile fra lobby-poll, ikke kun fra master-action. Se TODO i `tryReconcileTerminalScheduledGame`.
+**Fix (I16, 2026-05-13):** `Game1LobbyService.tryReconcileTerminalScheduledGame` auto-healer state på lobby-poll. To grener:
+- Siste plan-position + terminal scheduled-game → auto-finish plan-run via `planRunService.finish` (idempotent, audit-actor `system:lobby-auto-reconcile`).
+- Ikke-siste position + terminal scheduled-game → hide scheduled-game fra response (`scheduledGameId=null`, overallStatus='idle') så klient ikke prøver å joine en avsluttet runde. Master må advance manuelt.
+- Fail-safe: DB-feil under finish logges men kaster aldri — neste poll prøver igjen.
+- Concurrency: race mellom to lobby-polls håndteres av `changeStatus`-validering (`GAME_PLAN_RUN_INVALID_TRANSITION` fanges).
 
 ---
 
@@ -165,3 +176,4 @@ Håndheves manuelt under PR-review (TODO: automatiser via danger-rule).
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-13 | Initial — F-01 PlayScreen.update gate, F-02 plan-run lifecycle, F-03 manuell-flyt-gap, F-04 ConsoleBridge | PM-AI (Tobias-direktiv) |
+| 2026-05-13 | F-02 FIXED (I16) — auto-reconcile fra lobby-poll i `Game1LobbyService.tryReconcileTerminalScheduledGame`. 10 unit-tester, < 50ms latency, idempotent. | Agent (I16) |
