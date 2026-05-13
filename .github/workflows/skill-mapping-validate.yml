@@ -35,20 +35,28 @@ jobs:
 
       - name: Check that every SKILL.md has a scope-header
         run: |
-          set -euo pipefail
+          set -eu
+          # NB: pipefail removed — awk | head -15 triggers SIGPIPE (exit 141)
+          # when head closes the pipe early. We use NR-limiter inside awk instead.
           MISSING=()
           for skill_file in .claude/skills/*/SKILL.md; do
             if [ ! -f "$skill_file" ]; then continue; fi
             # Strip YAML frontmatter and look at the first 15 lines after
             # the closing `---`. A scope-header must appear there.
+            # awk does its own line-limit via lines_after_fm counter to avoid
+            # SIGPIPE from external `| head -15`.
             tail_after_fm=$(awk '
-              BEGIN { in_fm=0; closed=0 }
+              BEGIN { in_fm=0; closed=0; lines_after_fm=0 }
               /^---$/ {
                 if (in_fm == 0) { in_fm = 1; next }
                 if (in_fm == 1 && closed == 0) { closed = 1; next }
               }
-              closed == 1 { print }
-            ' "$skill_file" | head -15)
+              closed == 1 {
+                lines_after_fm++
+                if (lines_after_fm > 15) exit
+                print
+              }
+            ' "$skill_file")
 
             if ! echo "$tail_after_fm" | grep -qE '^<!--\s*scope:\s*'; then
               echo "::error file=$skill_file::missing <!-- scope: ... --> header"
