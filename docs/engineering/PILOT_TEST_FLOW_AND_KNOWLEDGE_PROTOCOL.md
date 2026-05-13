@@ -94,8 +94,14 @@ Tilbakekoblings-loop-en var **for treg og for støyende** til å konvergere. Hve
 cd /Users/tobiashaugen/Projects/Spillorama-system
 ENABLE_BUY_DEBUG=1 npm run dev:nuke
 
-# Annen terminal — én kjøring (13s):
+# Annen terminal — shortcut-path (rask iterasjon, ~11-13s):
 npm run test:pilot-flow
+
+# Manual-flow-path (Tobias' faktiske bruks-flyt, ~11s):
+npm run test:pilot-flow:manual
+
+# Begge tester (~24s totalt):
+npm run test:pilot-flow && npm run test:pilot-flow:manual
 
 # Med UI for steg-for-steg debug:
 npm run test:pilot-flow:ui
@@ -120,7 +126,20 @@ bash scripts/pilot-test-loop.sh --loop
 | Master action SCHEDULED_GAME_TERMINAL | Steg 5 + propageres som test-failure |
 | Lobby route til feil hall | Steg 6 pre-seed garanterer rett hall |
 
-### 1.5 Hva testen IKKE dekker enda (B-fase 2c)
+### 1.5 Manual-flow vs shortcut-flow (begge dekket per 2026-05-13)
+
+To E2E-test-spec eksisterer parallelt — bevisst — for å dekke begge scenarier:
+
+| Test-fil | Path-type | Pre-seed sessionStorage | Direct token-inject | Hall-velger UI |
+|---|---|---|---|---|
+| `spill1-pilot-flow.spec.ts` | **Shortcut** (rask iterasjon) | ✅ `lobby.activeHallId=demo-hall-001` | ✅ Token direkte i sessionStorage | ❌ (skip) |
+| `spill1-manual-flow.spec.ts` | **Manuell** (Tobias-faktisk) | ❌ Ingen pre-seed | ❌ Via `?dev-user=`-redirect | ✅ Klikker `#lobby-hall-select` |
+
+**Hvorfor begge:** F-03 i FRAGILITY_LOG dokumenterer at "E2E grønn ≠ manuell flyt grønn". Shortcut-testen er rask (~11s) og dekker det meste, men kan passere mens en bug i auth-redirect eller hall-default-logikk skjuler seg. Manual-flow-testen mimicker Tobias' faktiske brukere ende-til-ende — auth.js's `maybeDevAutoLogin()`-redirect, lobby-default til `halls[0]=hall-default`, manuell hall-bytte via `<select>`-element.
+
+Begge tester kjører samme buy-flyt (priser, pluss-klikk, kjøp, grid-verifisering, re-open). Strukturelt forskjellige PRE-buy-stages.
+
+### 1.5.1 Hva testen IKKE dekker enda (B-fase 2c)
 
 - Rad 1 vunnet → Fortsett til Rad 2 (master advance i samme runde)
 - Auto-start-bug (runde starter automatisk etter kjøp uten master)
@@ -128,6 +147,7 @@ bash scripts/pilot-test-loop.sh --loop
 - Wallet-balance pre/post-buy
 - Visning av vinner-popup ved Rad-win
 - Per-hall opening time (Stengt/Åpen pill)
+- Re-entry til rom under pågående trekning (I15 i BUG_CATALOG)
 
 Disse må legges til i utvidet test-suite. Mal i `tests/e2e/spill1-pilot-flow.spec.ts`-strukturen.
 
