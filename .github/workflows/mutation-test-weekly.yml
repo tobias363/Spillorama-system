@@ -1,0 +1,169 @@
+name: Mutation Testing (Weekly)
+
+# StrykerJS mutation-testing for critical engine code.
+#
+# This workflow is INFORMATIONAL — it does NOT block PR merges. Mutation
+# testing is too slow (30-60 min) to be a per-PR gate. We run it weekly
+# to track our test-quality baseline over time.
+#
+# See docs/engineering/MUTATION_TESTING.md for rationale and how to
+# interpret the survival rate.
+
+on:
+  schedule:
+    # Sunday 00:00 UTC (Saturday 16:00 PST, Sunday 02:00 CEST)
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+    inputs:
+      mutate_glob:
+        description: "Override mutate-glob (default uses stryker.config.json)"
+        required: false
+        type: string
+
+concurrency:
+  group: mutation-test-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    # Long-running job: full mutation suite can take 30-60 min.
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+
+      # Same dependency-chain as ci.yml backend job.
+      - name: Install packages/shared-types dependencies
+        run: npm --prefix packages/shared-types install --no-audit --no-fund
+
+      - name: Build packages/shared-types
+        run: npm --prefix packages/shared-types run build
+
+      - name: Install apps/backend dependencies
+        run: npm --prefix apps/backend ci
+
+      - name: Type check apps/backend (baseline before mutation)
+        run: npm --prefix apps/backend run check
+
+      - name: Run baseline tests (sanity-check before mutation)
+        run: npm --prefix apps/backend test
+        env:
+          LOG_LEVEL: warn
+
+      - name: Run Stryker mutation tests
+        id: mutation
+        run: npm --prefix apps/backend run test:mutation
+        env:
+          # Stryker reads NODE_OPTIONS; keep heap headroom on free-tier runner.
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        continue-on-error: true
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-report-html
+          path: apps/backend/reports/mutation/
+          retention-days: 30
+
+      - name: Upload JSON report (machine-readable)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-report-json
+          path: apps/backend/reports/mutation/mutation.json
+          retention-days: 90
+
+      - name: Extract mutation summary
+        if: always()
+        run: |
+          if [ -f apps/backend/reports/mutation/mutation.json ]; then
+            node -e '
+              const fs = require("fs");
+              const path = "apps/backend/reports/mutation/mutation.json";
+              const data = JSON.parse(fs.readFileSync(path, "utf8"));
+              const files = data.files || {};
+              const totals = {killed: 0, survived: 0, noCoverage: 0, timeout: 0, runtimeErrors: 0, compileErrors: 0};
+              for (const filename in files) {
+                for (const m of files[filename].mutants || []) {
+                  if (totals[m.status] !== undefined) totals[m.status]++;
+                  else if (m.status === "NoCoverage") totals.noCoverage++;
+                  else if (m.status === "Timeout") totals.timeout++;
+                  else if (m.status === "Killed") totals.killed++;
+                  else if (m.status === "Survived") totals.survived++;
+                  else if (m.status === "RuntimeError") totals.runtimeErrors++;
+                  else if (m.status === "CompileError") totals.compileErrors++;
+                }
+              }
+              const detected = totals.killed + totals.timeout;
+              const valid = detected + totals.survived + totals.noCoverage;
+              const score = valid > 0 ? ((detected / valid) * 100).toFixed(2) : "0.00";
+              console.log("## Mutation Testing Summary");
+              console.log("");
+              console.log("| Metric | Count |");
+              console.log("|---|---|");
+              console.log("| Killed (detected by tests) | " + totals.killed + " |");
+              console.log("| Timeout (detected) | " + totals.timeout + " |");
+              console.log("| Survived (NOT detected) | " + totals.survived + " |");
+              console.log("| No coverage | " + totals.noCoverage + " |");
+              console.log("| Runtime errors | " + totals.runtimeErrors + " |");
+              console.log("| Compile errors | " + totals.compileErrors + " |");
+              console.log("| **Mutation score** | **" + score + "%** |");
+              console.log("");
+              console.log("Threshold break: 50% — high: 80% — low: 60%");
+              fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, fs.readFileSync(0, "utf8") + require("fs").readFileSync("/dev/stdout", "utf8").toString(), "utf8");
+            ' >> "$GITHUB_STEP_SUMMARY" || echo "Could not parse mutation.json"
+          else
+            echo "## Mutation Testing Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No mutation.json report generated. See workflow logs for errors." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Update MUTATION_BASELINE.md
+        if: always() && success()
+        run: |
+          BASELINE_FILE="docs/auto-generated/MUTATION_BASELINE.md"
+          DATE=$(date -u +"%Y-%m-%d")
+          if [ -f apps/backend/reports/mutation/mutation.json ]; then
+            SCORE=$(node -e '
+              const data = require("./apps/backend/reports/mutation/mutation.json");
+              const files = data.files || {};
+              let killed = 0, timeout = 0, survived = 0, noCoverage = 0;
+              for (const f in files) {
+                for (const m of files[f].mutants || []) {
+                  if (m.status === "Killed") killed++;
+                  else if (m.status === "Timeout") timeout++;
+                  else if (m.status === "Survived") survived++;
+                  else if (m.status === "NoCoverage") noCoverage++;
+                }
+              }
+              const detected = killed + timeout;
+              const valid = detected + survived + noCoverage;
+              console.log(valid > 0 ? ((detected / valid) * 100).toFixed(2) : "0.00");
+            ' 2>/dev/null || echo "N/A")
+            echo "Mutation score on ${DATE}: ${SCORE}%"
+          fi
+          # The actual baseline write-back happens via a follow-up PR
+          # (we don't push directly from the workflow — manual review).
+
+      - name: Report status
+        if: always()
+        run: |
+          if [ "${{ steps.mutation.outcome }}" = "success" ]; then
+            echo "Stryker exit code: 0 (mutation score above break threshold)"
+          else
+            echo "Stryker exit code: non-zero (likely below 50% break threshold)"
+            echo "This is informational only — does NOT fail the workflow."
+          fi
