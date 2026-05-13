@@ -1098,7 +1098,7 @@ Verifisert via test:
 |---|---|---|
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
-| 2026-05-13 | Cross-knowledge audit etablert: `scripts/cross-knowledge-audit.mjs` (8 drift-sjekker) + ukentlig CI-workflow (mandag 10:00 UTC) + `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` bidragsguide. Pillar 8 i Knowledge Autonomy Protocol. | Agent (cross-knowledge-audit task) |
+| 2026-05-13 | I16/F-02 plan-run lifecycle auto-reconcile fra lobby-poll i `Game1LobbyService` (10 nye unit-tester, < 50ms latency, idempotent). | Agent (I16) |
 
 ---
 
