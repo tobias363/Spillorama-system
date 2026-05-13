@@ -271,12 +271,30 @@ function numberFromRules(v: unknown): number | null {
 }
 
 /**
- * Multiplikator for "large"-bong-pris over "small". Legacy-konvensjon
- * (BingoEngine + admin-UI): 2x når kun én pris er definert per farge.
- * Hvis catalog senere får et eget large-pris-felt, kan dette erstattes
- * med en lookup.
+ * Multiplikator for "large"-bong-pris over "small".
+ *
+ * Pilot-fix 2026-05-13 (Tobias-direktiv): tidligere `2`, men "stor"-bong
+ * inneholder 3 brett — bundle-pris skal være `smallPrice × 3`. Eksempel
+ * med lilla bong:
+ *   - Liten lilla: 1 brett à 15 kr  → smallPrice = 1500 øre
+ *   - Stor lilla:  3 brett à 15 kr → smallPrice × 3 = 4500 øre (45 kr)
+ *
+ * Matcher `spill1VariantMapper.ts:ticketTypeFromSlug` der large-types
+ * har `priceMultiplier: 3, ticketCount: 3` og `app_game1_ticket_assignments`
+ * der vi genererer 3 brett per Large-kjøp.
+ *
+ * Tobias' total-validering 2026-05-13 (6 brett, 1 av hver type):
+ *   5 + 15 + 10 + 30 + 15 + 45 = 120 kr
+ *   (Small white 5 + Large white 15 + Small yellow 10 + Large yellow 30
+ *    + Small purple 15 + Large purple 45)
+ *
+ * Med LARGE × 2 (gammel verdi) ville total være 90 kr — feil.
+ *
+ * `bongMultiplierForColorSlug` (Game1DrawEngineHelpers.ts) er konsistent
+ * med Large × 3: small=1, large=2 for hvit, small=2/large=4 for gul,
+ * small=3/large=6 for lilla → matcher per-bong-pris/500-base.
  */
-const LARGE_TICKET_PRICE_MULTIPLIER = 2;
+const LARGE_TICKET_PRICE_MULTIPLIER = 3;
 
 /**
  * Tolkning A (2026-05-07): per-item bonus-override.
