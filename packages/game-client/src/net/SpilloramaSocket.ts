@@ -29,6 +29,17 @@ import type {
 import type { Spill1LobbyState } from "@spillorama/shared-types/api";
 import type { RoomSnapshot } from "@spillorama/shared-types/game";
 import { SocketEvents } from "@spillorama/shared-types/socket-events";
+// Observability fix-PR 2026-05-13: socket-laget skal sende `socket.emit`/
+// `socket.recv`/`room.update.full`-events til EventTracker så live-monitor
+// + dump-rapport ser ALT som flyter gjennom socket. Lazy import for å unngå
+// sirkulær avhengighet og for å la net-laget kjøre i kontekster (eks. test-
+// fixtures) der game1-debug-bundle ikke er lastet.
+import {
+  getEventTracker,
+  payloadKeysOnly,
+  pickSafeFields,
+  trackLargePayload,
+} from "../games/game1/debug/EventTracker.js";
 
 /**
  * R1 (BIN-822, 2026-05-08): Spill 1 lobby-state-update push payload.
@@ -269,6 +280,16 @@ export class SpilloramaSocket {
     channel: K,
     payload: Parameters<SpilloramaSocketListeners[K]>[0],
   ): void {
+    // Observability fix-PR 2026-05-13: track ALLE inbound socket-events i
+    // EventTracker. For room:update sender vi full payload (chunked til 2KB
+    // per event) — alle andre kanaler trackes med safeFields + payloadKeys
+    // som tidligere konvensjon. Fail-soft — tracker er best-effort.
+    try {
+      this.trackInboundEvent(channel, payload);
+    } catch {
+      /* tracker må aldri ta ned socket-flow */
+    }
+
     const set = this.listeners[channel] as Set<SpilloramaSocketListeners[K]>;
     if (set.size > 0) {
       // Live dispatch — no buffering while at least one listener exists.
@@ -309,6 +330,82 @@ export class SpilloramaSocket {
   /** BIN-501 test-only: read current buffer size for a channel. */
   __getBufferedCount(channel: keyof SpilloramaSocketListeners): number {
     return this.bufferedEvents[channel].length;
+  }
+
+  /**
+   * Observability fix-PR 2026-05-13: track inbound socket-event til
+   * EventTracker. room:update får full payload (chunked til 2KB / event)
+   * — alle andre kanaler får sanitized representasjon (safe-fields +
+   * payloadKeys). Server-side monitor + dump-rapport vil dermed kunne
+   * rekonstruere hva klient mottok uten å DECRYPT-e nyttelaster manuelt.
+   *
+   * Fail-soft — feilet tracking logges men kaster ikke. EventTracker er
+   * lazy-import-ed så hvis singleton ikke er bootet kan vi få en tom
+   * referanse — try/catch wrapper i caller håndhever at vi ikke krasher.
+   */
+  private trackInboundEvent<K extends keyof SpilloramaSocketListeners>(
+    channel: K,
+    payload: Parameters<SpilloramaSocketListeners[K]>[0],
+  ): void {
+    const tracker = getEventTracker();
+    if (channel === "connectionStateChanged") {
+      // Connection-state-changes går allerede via setConnectionState +
+      // explicit state.change i Game1Controller. Skip her for å unngå dobbelt-
+      // tracking-støy i diagnose-rapporter.
+      return;
+    }
+    if (channel === "roomUpdate") {
+      // Full room:update er det viktigste signalet PM trenger for å se
+      // hva som faktisk skjedde — chunk og track komplett.
+      const obj = payload as Record<string, unknown> | null;
+      const correlationId = `socket-recv-roomUpdate-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      // Også track et "summary"-event så monitor som filterer på
+      // socket.recv ser én linje per room:update (chunkene er
+      // `room.update.full`-events for diagnose-replay).
+      tracker.track(
+        "socket.recv",
+        {
+          channel: "roomUpdate",
+          ...pickSafeFields(obj, [
+            "roomCode",
+            "gameId",
+            "scheduledGameId",
+            "gameStatus",
+            "drawIndex",
+            "drawnNumbers",
+            "totalPlayers",
+          ]),
+        },
+        { correlationId },
+      );
+      trackLargePayload(tracker, "room.update.full", obj ?? {}, {
+        correlationId,
+      });
+      return;
+    }
+    // Alle andre inbound-kanaler: sanitized med channel-spesifikke safe-felter.
+    const obj = payload as Record<string, unknown> | null;
+    const safeByChannel: Record<string, readonly string[]> = {
+      drawNew: ["roomCode", "gameId", "number", "drawIndex"],
+      patternWon: ["roomCode", "gameId", "patternName", "winnersCount"],
+      chatMessage: ["roomCode", "fromUserId", "id"],
+      jackpotActivated: ["roomCode", "gameId", "potCents"],
+      minigameActivated: ["roomCode", "gameId", "kind", "winnerUserId"],
+      miniGameTrigger: ["scheduledGameId", "kind", "miniGameId"],
+      miniGameResult: ["scheduledGameId", "kind", "miniGameId", "outcome"],
+      walletState: ["walletId", "balanceCents", "reservedCents"],
+      betRejected: ["roomCode", "scheduledGameId", "reason"],
+      walletLossState: ["walletId", "hallId", "dailyLostCents"],
+      g2JackpotListUpdate: ["roomCode", "gameId"],
+      spill1LobbyStateUpdate: ["hallId"],
+    };
+    const safeFields = safeByChannel[channel as string] ?? [];
+    tracker.track("socket.recv", {
+      channel: String(channel),
+      ...pickSafeFields(obj, safeFields),
+    });
   }
 
   /**
@@ -540,19 +637,73 @@ export class SpilloramaSocket {
    *  "zombie" error. Now the timeout and the ack race cooperatively and
    *  whichever wins clears the other. */
   private emit<T>(event: string, payload: Record<string, unknown>): Promise<AckResponse<T>> {
+    // Observability fix-PR 2026-05-13: track emit + ack-roundtrip i
+    // EventTracker. Vi sender payloadKeys (ikke full payload — emits kan
+    // inneholde accessToken/bingo-tall som skal sanitizes via tracker's
+    // SENSITIVE_KEYS-filter). Fail-soft.
+    const correlationId = `socket-emit-${event}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    try {
+      const tracker = getEventTracker();
+      tracker.track(
+        "socket.emit",
+        {
+          event,
+          ...payloadKeysOnly(payload),
+          // Safe-field slik at PM ser scheduledGameId / roomCode / hallId
+          // ved emit (uten å lekke ticket-data).
+          ...pickSafeFields(payload, [
+            "roomCode",
+            "scheduledGameId",
+            "hallId",
+            "ticketCount",
+            "armed",
+            "luckyNumber",
+            "claimType",
+          ]),
+        },
+        { correlationId },
+      );
+    } catch {
+      /* tracker er best-effort */
+    }
     return new Promise((resolve) => {
       if (!this.socket?.connected) {
-        resolve({ ok: false, error: { code: "NOT_CONNECTED", message: "Ikke tilkoblet." } });
+        const response: AckResponse<T> = {
+          ok: false,
+          error: { code: "NOT_CONNECTED", message: "Ikke tilkoblet." },
+        };
+        try {
+          getEventTracker().track(
+            "socket.recv",
+            { channel: "ack", event, ok: false, errorCode: "NOT_CONNECTED" },
+            { correlationId },
+          );
+        } catch {
+          /* best-effort */
+        }
+        resolve(response);
         return;
       }
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        resolve({
+        const response: AckResponse<T> = {
           ok: false,
           error: { code: "TIMEOUT", message: `Server svarte ikke innen 15s (${event}).` },
-        });
+        };
+        try {
+          getEventTracker().track(
+            "socket.recv",
+            { channel: "ack", event, ok: false, errorCode: "TIMEOUT" },
+            { correlationId },
+          );
+        } catch {
+          /* best-effort */
+        }
+        resolve(response);
       }, 15000);
       this.socket.emit(
         event,
@@ -561,6 +712,27 @@ export class SpilloramaSocket {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          try {
+            const ackOk = response && typeof response === "object" && "ok" in response
+              ? Boolean((response as AckResponse<T>).ok)
+              : false;
+            const errorCode =
+              !ackOk && response && typeof response === "object" && "error" in response
+                ? (response as { error?: { code?: string } }).error?.code
+                : undefined;
+            getEventTracker().track(
+              "socket.recv",
+              {
+                channel: "ack",
+                event,
+                ok: ackOk,
+                errorCode: errorCode ?? null,
+              },
+              { correlationId },
+            );
+          } catch {
+            /* best-effort */
+          }
           resolve(response);
         },
       );

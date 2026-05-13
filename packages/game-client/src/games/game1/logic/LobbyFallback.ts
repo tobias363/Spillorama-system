@@ -157,6 +157,29 @@ export class Game1LobbyFallback {
 
   private mountOverlay(): void {
     if (this.overlay) return;
+
+    // Observability fix-PR 2026-05-13: track lobby-fallback-mount så monitor /
+    // dump-rapport ser at klient er stuck på "Kobler til hall…"-flow vs
+    // PlayScreen-aktiv-flyt. Fail-soft.
+    try {
+      void import("../debug/EventTracker.js")
+        .then((mod) => {
+          try {
+            mod.getEventTracker().track("screen.mount", {
+              screen: "Game1LobbyFallback",
+              hallId: this.hallId,
+            });
+          } catch {
+            /* best-effort */
+          }
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    } catch {
+      /* best-effort */
+    }
+
     const overlay = document.createElement("div");
     overlay.setAttribute("data-spill1-lobby-fallback", "true");
     overlay.style.cssText = [

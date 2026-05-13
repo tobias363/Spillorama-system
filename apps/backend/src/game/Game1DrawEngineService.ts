@@ -762,6 +762,34 @@ export class Game1DrawEngineService {
     this.adminBroadcaster = broadcaster;
   }
 
+  /**
+   * Observability fix-PR 2026-05-13: late-binding for snapshot-service.
+   * Når wired kalles `snapshot.dump(gameId, "natural-end", ...)` POST-commit
+   * etter at en runde har endret status til 'completed' (Fullt Hus eller
+   * max-draws). Fail-soft — feilet snapshot påvirker ikke draw-flyten.
+   */
+  setGameEndSnapshotService(
+    svc: {
+      dump(
+        gameId: string,
+        reason: string,
+        context?: Record<string, unknown>,
+        engineSnapshot?: Record<string, unknown> | null,
+      ): Promise<void> | void;
+    } | null,
+  ): void {
+    this.gameEndSnapshotService = svc;
+  }
+
+  private gameEndSnapshotService: {
+    dump(
+      gameId: string,
+      reason: string,
+      context?: Record<string, unknown>,
+      engineSnapshot?: Record<string, unknown> | null,
+    ): Promise<void> | void;
+  } | null = null;
+
   /** PR-C4: late-binding for player-broadcaster (io må finnes først). */
   setPlayerBroadcaster(broadcaster: Game1PlayerBroadcaster): void {
     this.playerBroadcaster = broadcaster;
@@ -1661,6 +1689,30 @@ export class Game1DrawEngineService {
           capturedCleanupInfo.roomCode,
           "completion"
         );
+
+        // Observability fix-PR 2026-05-13: fire-and-forget dump av game-
+        // end-snapshot til /tmp/game-end-snapshot-{gameId}.json. Service-
+        // en kaster aldri (fail-soft); vi `void`-er promise-et så draw-
+        // flyten ikke venter på fs-IO. PM kan inspisere fila med
+        // `npm run diagnose:pilot` etterpå.
+        if (this.gameEndSnapshotService) {
+          try {
+            void Promise.resolve(
+              this.gameEndSnapshotService.dump(
+                scheduledGameId,
+                "draw-engine.natural-end",
+                {
+                  roomCode: capturedCleanupInfo.roomCode,
+                  context: "completion",
+                },
+              ),
+            ).catch(() => {
+              /* fail-soft */
+            });
+          } catch {
+            /* fail-soft */
+          }
+        }
       }
       return view;
     });

@@ -255,6 +255,20 @@ export class PlayScreen extends Container {
     this.screenW = screenWidth;
     this.screenH = screenHeight;
 
+    // Observability fix-PR 2026-05-13: track screen-mount slik at monitor /
+    // dump-rapport ser når PlayScreen ble bygget. Komplementerer
+    // screen.transition (Game1Controller.transitionTo). Fail-soft.
+    try {
+      getEventTracker().track("screen.mount", {
+        screen: "PlayScreen",
+        roomCode,
+        screenWidth,
+        screenHeight,
+      });
+    } catch {
+      /* tracker er best-effort */
+    }
+
     this.loadBackground(screenWidth, screenHeight);
 
     // ── Pixi components (ball animation + center ball) ────────────────────

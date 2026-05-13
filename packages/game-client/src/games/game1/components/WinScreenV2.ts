@@ -130,6 +130,32 @@ export class WinScreenV2 {
     const shared = opts.shared ?? false;
     const sharedCount = opts.sharedCount ?? 2;
 
+    // Observability fix-PR 2026-05-13: track screen-mount slik at monitor /
+    // dump-rapport ser når full-screen WinScreenV2 ble vist. Fail-soft.
+    try {
+      // Lazy import-shim — komponent-fila er bevisst uten eksisterende
+      // EventTracker-import for å holde dependency-graph slim. Bruk
+      // dynamic import med catch-all så fall-back er "no tracking".
+      void import("../debug/EventTracker.js")
+        .then((mod) => {
+          try {
+            mod.getEventTracker().track("screen.mount", {
+              screen: "WinScreenV2",
+              amount: opts.amount,
+              shared,
+              sharedCount,
+            });
+          } catch {
+            /* best-effort */
+          }
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    } catch {
+      /* best-effort */
+    }
+
     const root = document.createElement("div");
     Object.assign(root.style, {
       position: "fixed",

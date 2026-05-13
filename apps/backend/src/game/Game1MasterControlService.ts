@@ -250,6 +250,19 @@ export interface Game1MasterControlServiceOptions {
     scheduledGameId: string;
     actorUserId: string;
   }) => Promise<void> | void;
+  /**
+   * Observability fix-PR 2026-05-13: valgfri snapshot-service som dumper
+   * DB-state ved game-end til /tmp/game-end-snapshot-{gameId}.json.
+   * Kalles POST-commit fra stopGame fail-soft. Default null (no-op).
+   */
+  gameEndSnapshotService?: {
+    dump(
+      gameId: string,
+      reason: string,
+      context?: Record<string, unknown>,
+      engineSnapshot?: Record<string, unknown> | null,
+    ): Promise<void> | void;
+  } | null;
 }
 
 interface ScheduledGameRow {
@@ -335,6 +348,13 @@ export class Game1MasterControlService {
   private onEngineStarted:
     | Game1MasterControlServiceOptions["onEngineStarted"]
     | null = null;
+  /**
+   * Observability fix-PR 2026-05-13: snapshot-service for game-end DB-dump.
+   * Null = no-op (legacy/test-mode). Wires-in via index.ts.
+   */
+  private gameEndSnapshotService:
+    | NonNullable<Game1MasterControlServiceOptions["gameEndSnapshotService"]>
+    | null = null;
 
   constructor(options: Game1MasterControlServiceOptions) {
     this.pool = options.pool;
@@ -347,6 +367,19 @@ export class Game1MasterControlService {
     this.adminBroadcaster = options.adminBroadcaster ?? null;
     this.ticketPurchaseService = options.ticketPurchaseService ?? null;
     this.onEngineStarted = options.onEngineStarted ?? null;
+    this.gameEndSnapshotService = options.gameEndSnapshotService ?? null;
+  }
+
+  /**
+   * Observability fix-PR 2026-05-13: late-binding for snapshot-service.
+   * Brukes av index.ts (DI-wiring konstrueres etter masterControl).
+   */
+  setGameEndSnapshotService(
+    snapshot: NonNullable<
+      Game1MasterControlServiceOptions["gameEndSnapshotService"]
+    > | null,
+  ): void {
+    this.gameEndSnapshotService = snapshot;
   }
 
   /**
@@ -1403,6 +1436,28 @@ export class Game1MasterControlService {
       auditId: result.auditId,
       status: result.status,
     });
+
+    // OBS-1 (cascade-merge 2026-05-14): fire-and-forget dump av game-end-
+    // snapshot til /tmp/game-end-snapshot-{gameId}.json. Service-en
+    // kaster aldri (fail-soft); vi `void`-er promise-et så stop-flyten
+    // ikke venter på fs-IO. PM kan inspisere fila med
+    // `npm run diagnose:pilot` etterpå. Komplementerer PostHog-eventen
+    // over (data går til 2 destinasjoner: cloud + lokal disk).
+    if (this.gameEndSnapshotService) {
+      try {
+        void Promise.resolve(
+          this.gameEndSnapshotService.dump(input.gameId, "master.stop", {
+            actorId: input.actor.userId,
+            reason: reason,
+            priorStatus,
+          }),
+        ).catch(() => {
+          /* fail-soft */
+        });
+      } catch {
+        /* fail-soft */
+      }
+    }
 
     return result;
   }
