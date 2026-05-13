@@ -544,7 +544,22 @@ app.use(sentryUserContextMiddleware());
 app.use((req, _res, next) => {
   const isCsvImport = req.path === "/api/admin/physical-tickets/static/import";
   const isRegister = req.path === "/api/auth/register";
-  const limit = isCsvImport ? "15mb" : isRegister ? "5mb" : "100kb";
+  // Observability fix 2026-05-14: Rrweb DOM-batches + bug-report-bundler
+  // genererer payloads > 100kb regelmessig (DOM-snapshots + chunked
+  // mutations). Tobias-test 2026-05-13 viste alle rrweb-POST feilet
+  // med "Failed to fetch" pga 413 fra default-limit. Bug-report
+  // (`/api/_dev/debug/bug-report`) bundler 200 backend-log-linjer +
+  // klient-events + DB-snapshot → også over 100kb i pilot-state.
+  // Klient-event-stream (`/api/_dev/debug/events`) er allerede chunket
+  // til < 100kb per batch, men setter høyere limit for safety.
+  const isObsRoute = req.path.startsWith("/api/_dev/debug/");
+  const limit = isCsvImport
+    ? "15mb"
+    : isRegister
+      ? "5mb"
+      : isObsRoute
+        ? "10mb"
+        : "100kb";
   express.json({
     limit,
     verify: (rawReq, _rawRes, buf) => {
