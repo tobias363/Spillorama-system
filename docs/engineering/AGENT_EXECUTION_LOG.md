@@ -270,6 +270,54 @@ Mac-commits.
 
 ---
 
+### 2026-05-13 — PM_HANDOFF_2026-05-13_PART2 dokumentert (general-purpose agent, PM-AI)
+
+**Scope:** Skrive komplett PM-handoff for sesjon 2 av 2026-05-13. Sesjon 1 var dokumentert i `PM_HANDOFF_2026-05-13_AUTONOMY_COMPLETE.md`, men 22 PR-er ble merged etter den uten ny handoff. Neste PM må vite om sesjon 2 også.
+
+**Inputs gitt:**
+- Mandat: skriv `docs/operations/PM_HANDOFF_2026-05-13_PART2.md` med 10 seksjoner (TL;DR, PR-liste, agenter, cascade-rebase, tekniske utfordringer, anbefalinger, gjenstående, startveiledning, Tobias-state, endringslogg)
+- Pre-reading: sesjon 1's handoff (`PM_HANDOFF_2026-05-13_AUTONOMY_COMPLETE.md`), kort variant (`PM_HANDOFF_2026-05-13.md`), AGENT_EXECUTION_LOG siste 200 linjer
+- Verifisering: `git log --since='2026-05-13'` for å bekrefte PR-liste
+- Branch: `docs/pm-handoff-2026-05-13-part2-2026-05-13` fra origin/main
+- IKKE opprette PR (PM-AI tar over)
+
+**Outputs produsert:**
+- **Branch:** `docs/pm-handoff-2026-05-13-part2-2026-05-13` (klar for push)
+- **Fil:** `docs/operations/PM_HANDOFF_2026-05-13_PART2.md` (NY, 10 seksjoner, ~280 linjer)
+- **Innhold:**
+  - §1: 30-sekund TL;DR (22 PR-er, 12 agenter, 10 anbefalinger, 14 cascade-rebases)
+  - §2: Komplett PR-liste (22 stk) gruppert per tema (bug-fixes 4, knowledge 8, enforcement 2, observability 2, quality 1, diagnose 5)
+  - §3: 15 agenter levert (12 rent sesjon 2 + 3 som krysset over)
+  - §4: Cascade-rebase pattern (root-cause + workaround + #1342 auto-rebase eliminerer fremover)
+  - §5: 6 tekniske utfordringer (SIGPIPE awk-pipe, SKILL_FILE_MAP stale, seed FK, package-lock workspace, delta-report bypass, PR #1336 self-validation)
+  - §6: 10 anbefalinger til Tobias (E2-E12 alle in-flight)
+  - §7: Hva som gjenstår (akutt + medium + lang-sikt)
+  - §8: Hvordan starte for nestemann (6 trinn)
+  - §9: Tobias' state nå (main, monitor kjører, backend healthy)
+  - §10: Endringslogg
+
+**Verifisering:**
+- PR-liste matches faktisk `git log --since='2026-05-13' --oneline origin/main`
+- Agent-liste matches AGENT_EXECUTION_LOG entries fra 2026-05-13
+- Tekniske utfordringer matches PR-bodies fra session 2
+
+**Fallgruver oppdaget:** Ingen nye — handoff er ren dokumentasjon
+
+**Læring:**
+- PM-handoffs skal speile sesjons-PR-strukturen (samme seksjon-format som sesjon 1's handoff)
+- Verifiser PR-liste mot git log før skrive — agent-spawning kan endre antall i siste øyeblikk
+- 7-pilar-systemet matches mot Knowledge Autonomy Protocol (Pillar 8 via cross-knowledge-audit fra #1334)
+
+**Eierskap:**
+- `docs/operations/PM_HANDOFF_2026-05-13_PART2.md` (eier alene)
+- AGENT_EXECUTION_LOG-entry (additive, denne agentens)
+
+**Tid:** ~2 timer (innen 2-3h estimat)
+
+**Status:** Branch klar for push. PM-AI tar over.
+
+---
+
 ### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
 
 **Scope:** Bygg en pre-commit hook + CI gate som detekterer når en commit
