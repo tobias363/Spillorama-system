@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Husky pre-push hook — orchestrator
+#
+# Kalles av git FØR `git push` faktisk sender objektene til remote.
+# Hver delsjekk er sin egen script under .husky/. Failing exit-code blokkerer push.
+#
+# Trinn 1 — Agent scope-check (WARN, default; ABORT med PM_PUSH_STRICT_SCOPE=1)
+#   Sjekker at filene som pushes matcher agentens deklarerte scope i
+#   .claude/active-agents.json. Hvis branch ikke er registrert som agent →
+#   passerer silent.
+#
+# Bypasses:
+#   PM_PUSH_BYPASS=1 git push          # hopp over alle pre-push-sjekker
+#   PM_PUSH_STRICT_SCOPE=1 git push    # strikt scope-check (ABORT ved out-of-scope)
+#
+# Se docs/engineering/PM_PUSH_CONTROL.md for detaljer.
+
+set -e
+
+# Read git push input: each line is `<local ref> <local sha> <remote ref> <remote sha>`
+# We need the local branch + its tip-sha.
+PUSH_LINES="$(cat || true)"
+
+# Bypass-flagg
+if [ "${PM_PUSH_BYPASS:-0}" = "1" ]; then
+  echo "⏭️  PM_PUSH_BYPASS=1 — skipping pre-push hooks"
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Trinn 1 — Agent scope-check
+if [ -x "$REPO_ROOT/.husky/pre-push-agent-scope-check.sh" ]; then
+  # Pipe push-info så scriptet kan parse refs
+  echo "$PUSH_LINES" | bash "$REPO_ROOT/.husky/pre-push-agent-scope-check.sh" || {
+    EC=$?
+    echo "⛔ pre-push-agent-scope-check failed (exit $EC)"
+    exit $EC
+  }
+fi
+
+exit 0

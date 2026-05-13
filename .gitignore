@@ -14,7 +14,10 @@ secrets/load-env.sh.local
 .vscode/
 .idea/
 
-# Claude
+# Claude — .claude/ is generally ignored, but specific files are
+# force-added (use `git add -f`) for state that must be committed:
+#   - .claude/active-agents.json (PM push-control registry, Phase 2)
+#   - .claude/skills/** (domain-skills, pre-existing)
 .claude/
 
 # Packages build output

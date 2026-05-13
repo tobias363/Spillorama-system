@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "updatedAt": "2026-05-13T13:00:00.000Z",
+  "agents": [],
+  "conflictsAcknowledged": [],
+  "_comment": "PM push-control registry. Schema v2. Managed by scripts/pm-push-control.mjs. PM-AI rewrites on every register/unregister. Committed to repo so state survives across PM sessions and worktrees. Migrated from /tmp/active-agents.json (Phase 1) to .claude/active-agents.json (Phase 2)."
+}
