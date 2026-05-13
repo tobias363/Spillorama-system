@@ -49,8 +49,15 @@ const __filename = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = path.dirname(__filename);
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 
-const CANONICAL_REGISTRY = path.join(REPO_ROOT, ".claude", "active-agents.json");
-const LEGACY_TMP_REGISTRY = "/tmp/active-agents.json";
+// Canonical and legacy registry paths can be overridden via env-vars for
+// E2E migration tests. Production defaults:
+//   canonical = $REPO_ROOT/.claude/active-agents.json
+//   legacy    = /tmp/active-agents.json
+const CANONICAL_REGISTRY =
+  process.env.PM_PUSH_CONTROL_CANONICAL_REGISTRY ||
+  path.join(REPO_ROOT, ".claude", "active-agents.json");
+const LEGACY_TMP_REGISTRY =
+  process.env.PM_PUSH_CONTROL_LEGACY_REGISTRY || "/tmp/active-agents.json";
 const LOG_PATH = "/tmp/pm-push-control.log";
 const LAST_POLL_PATH = "/tmp/pm-push-control.last-poll.json";
 const DASHBOARD_PATH = "/tmp/pm-push-control-dashboard.html";
