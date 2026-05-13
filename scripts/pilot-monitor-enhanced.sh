@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pilot-monitor-enhanced.sh — utvidet monitor med 3 nye kapasiteter
+# pilot-monitor-enhanced.sh — utvidet monitor med 4 kapasiteter
 #
 # Tobias-direktiv 2026-05-13: "Denne agenten må ha tilgang til konsoll og
 # kunne hele tiden se hva som skjer og rapportere til deg etter endt runde."
@@ -10,6 +10,26 @@
 #   C. DB-state polling hvert 30s — flag plan-run vs scheduled-game mismatch
 #   D. Proaktiv terminal-bell + macOS-notification ved SEV-P0/P1 anomali
 #
+# Severity-tags (alle log-entries følger dette skjemaet):
+#   [P0] — Regulatorisk eller umiddelbar live-room-stopp
+#          Eks: wallet.balance-mismatch, monitor.live-room-down,
+#          compliance.audit-mutate, backend-unreachable > 30s
+#   [P1] — Funksjonell stuck-state eller repeated error
+#          Eks: draw.stuck, health.stale, db.stuck-state,
+#          client.error, popup.blocked-repeat, backend.error
+#   [P2] — Monitor-internal eller recoverable
+#          Eks: monitor.no-backend-log, monitor.backend-unreachable,
+#          backend.warn, monitor.snapshot-error
+#   [P3] — Informational
+#          Eks: round.ended, round.started, gameStatus.change,
+#          snapshot.tick, monitor.start
+#
+# Companion: scripts/monitor-push-to-pm.sh tailer denne log-en og
+# pusher P0/P1 til /tmp/pilot-monitor-urgent.fifo + macOS-notification.
+#
+# Full severity-tabell + anti-mønstre:
+#   docs/engineering/MONITOR_SEVERITY_CLASSIFICATION.md
+#
 # Forutsetning:
 #   - Backend kjører på localhost:4000
 #   - RESET_TEST_PLAYERS_TOKEN=spillorama-2026-test (default)
@@ -17,6 +37,8 @@
 #
 # Bruk:
 #   bash scripts/pilot-monitor-enhanced.sh &
+#   # Eller via wrapper som også starter push-daemon:
+#   bash scripts/start-monitor-with-push.sh
 #   # Eller som agent via Agent({prompt: "<<autonomous-loop>>..."})
 
 set -euo pipefail
@@ -259,20 +281,39 @@ check_db_mismatch() {
 }
 
 # Main loop
-echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] [INFO] pilot-monitor-enhanced started (PID $$)" >> "$LOG_FILE"
+log_anomaly "P3" "monitor.start" "pilot-monitor-enhanced started (PID $$)"
 start_backend_tail
 
 ITERATIONS=0
+BACKEND_DOWN_CONSECUTIVE=0   # Antall consecutive 5s-polls hvor backend er nede
+                              # 6 × 5s = 30s → P0 escalation per
+                              # MONITOR_SEVERITY_CLASSIFICATION.md
 while true; do
   ITERATIONS=$((ITERATIONS + 1))
 
   # Poll debug-events
   events=$(curl -s --max-time 3 "http://localhost:4000/api/_dev/debug/events/tail?token=$TOKEN" 2>/dev/null || echo "")
   if [ -z "$events" ] || [[ "$events" == *"<html"* ]]; then
+    BACKEND_DOWN_CONSECUTIVE=$((BACKEND_DOWN_CONSECUTIVE + 1))
+    # P2 etter 6 consecutive failures (30s).
+    # P0 escalation etter 12 consecutive (60s) — eskaleres som live-room-down.
+    # Loggges hver 12. iteration (60s) for å unngå spam.
     if [ $((ITERATIONS % 12)) -eq 0 ]; then
-      log_anomaly "P2" "monitor.backend-unreachable" "Backend on :4000 not responding (every 60s)"
+      if [ "$BACKEND_DOWN_CONSECUTIVE" -ge 12 ]; then
+        log_anomaly "P0" "monitor.backend-down-30s" \
+          "Backend on :4000 har vært nede i $((BACKEND_DOWN_CONSECUTIVE * POLL_INTERVAL))s — live-room-stopp risk"
+      else
+        log_anomaly "P2" "monitor.backend-unreachable" \
+          "Backend on :4000 not responding (every 60s)"
+      fi
     fi
   else
+    # Backend tilbake — reset counter
+    if [ "$BACKEND_DOWN_CONSECUTIVE" -ge 6 ]; then
+      log_anomaly "P3" "monitor.backend-recovered" \
+        "Backend reachable etter $((BACKEND_DOWN_CONSECUTIVE * POLL_INTERVAL))s nedetid"
+    fi
+    BACKEND_DOWN_CONSECUTIVE=0
     # Parse anomalier fra nye events
     echo "$events" | python3 -c "
 import json, sys, os, time
