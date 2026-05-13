@@ -139,6 +139,43 @@ export class Game1SocketActions {
    */
   async buy(selections: Array<{ type: string; qty: number; name?: string }> = []): Promise<void> {
     const scheduledContext = this.deps.getScheduledPurchaseContext?.() ?? null;
+
+    // [BUY-DEBUG] Tobias-direktiv 2026-05-13: detaljert trace av hele kjøps-
+    // flyten. Logger til konsoll (synlig ved ?debug=1) + EventTracker (ring-
+    // buffer som kan dump-es via debug-HUD). Hjelper Tobias og PM å se
+    // hvor pris/farge-display divergerer fra server's faktiske kjøps-
+    // validering.
+    const buyDebugEnabled =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      /[?&]debug=1/.test(window.location.search);
+    const buyCorrelationId = `buy-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    if (buyDebugEnabled) {
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][SocketActions.buy][entry]", {
+        correlationId: buyCorrelationId,
+        selections,
+        usingScheduledPath: !!(
+          scheduledContext?.scheduledGameId &&
+          scheduledContext.ticketConfig &&
+          (scheduledContext.overallStatus === "purchase_open" ||
+            scheduledContext.overallStatus === "ready_to_start")
+        ),
+        scheduledContext: scheduledContext
+          ? {
+              scheduledGameId: scheduledContext.scheduledGameId,
+              hallId: scheduledContext.hallId,
+              overallStatus: scheduledContext.overallStatus,
+              hasTicketConfig: !!scheduledContext.ticketConfig,
+              entryFee: scheduledContext.ticketConfig?.entryFee,
+              ticketTypes: scheduledContext.ticketConfig?.ticketTypes,
+            }
+          : null,
+      });
+    }
+
     if (
       scheduledContext?.scheduledGameId &&
       scheduledContext.ticketConfig &&
@@ -156,6 +193,23 @@ export class Game1SocketActions {
           scheduledContext.ticketConfig.ticketTypes,
           scheduledContext.ticketConfig.entryFee,
         );
+
+        if (buyDebugEnabled) {
+          // eslint-disable-next-line no-console
+          console.log("[BUY-DEBUG][client][SocketActions.buy][REST-spec]", {
+            correlationId: buyCorrelationId,
+            buyerUserId,
+            hallId: scheduledContext.hallId,
+            scheduledGameId: scheduledContext.scheduledGameId,
+            ticketSpec,
+            ticketSpecTotalCents: ticketSpec.reduce(
+              (sum, e) => sum + e.count * e.priceCentsEach,
+              0,
+            ),
+            entryFeeFromConfig: scheduledContext.ticketConfig.entryFee,
+          });
+        }
+
         const response = await fetch("/api/game1/purchase", {
           method: "POST",
           headers: {
@@ -218,7 +272,47 @@ export class Game1SocketActions {
     } else {
       payload.ticketCount = 1;
     }
+
+    if (buyDebugEnabled) {
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][SocketActions.buy][bet:arm-payload]", {
+        correlationId: buyCorrelationId,
+        payload,
+        selectionCount: selections.length,
+        totalQty: selections.reduce((sum, s) => sum + s.qty, 0),
+      });
+    }
+
     const result = await this.deps.socket.armBet(payload);
+
+    if (buyDebugEnabled) {
+      // Best-effort: hent ticket-count fra snapshot.preRoundTickets hvis det
+      // finnes — typing-en på RoomSnapshot er ikke ekspandert med dette
+      // feltet, så vi caster via unknown for å lese.
+      const snapshotAsRecord = result.ok
+        ? (result.data?.snapshot as unknown as
+            | { preRoundTickets?: Record<string, unknown[]> }
+            | null
+            | undefined)
+        : null;
+      const preRoundMap = snapshotAsRecord?.preRoundTickets ?? {};
+      const snapshotTicketCount = Object.keys(preRoundMap).reduce(
+        (sum, pid) => {
+          const arr = preRoundMap[pid];
+          return sum + (Array.isArray(arr) ? arr.length : 0);
+        },
+        0,
+      );
+      // eslint-disable-next-line no-console
+      console.log("[BUY-DEBUG][client][SocketActions.buy][bet:arm-ack]", {
+        correlationId: buyCorrelationId,
+        ok: result.ok,
+        errorCode: !result.ok ? result.error?.code : null,
+        errorMessage: !result.ok ? result.error?.message : null,
+        lossLimit: result.ok ? result.data?.lossLimit : null,
+        snapshotTicketCount: result.ok ? snapshotTicketCount : null,
+      });
+    }
 
     if (!result.ok) {
       // Tobias 2026-04-29 (UX-fix): server-ack feilet med klar feilkode.

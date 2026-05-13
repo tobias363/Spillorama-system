@@ -419,33 +419,75 @@ export function buildRoomUpdatePayload(
   const boughtAtIso = new Date(nowMs).toISOString();
   const currentEntryFee = snapshot.currentGame?.entryFee ?? opts.getRoomConfiguredEntryFee(snapshot.code);
 
-  // Pris-per-brett (Tobias-direktiv 2026-05-12): hvert brett-kort skal vise
-  // pris pr. bong slik den er satt i backend-config, IKKE bundle-pris.
+  // [BUY-DEBUG] gate på env-var slik at vi ikke spammer prod-loggen i normal
+  // drift. Sett ENABLE_BUY_DEBUG=1 i dev/staging for å se per-ticket pris-
+  // beregning. Tobias-direktiv 2026-05-13: "Kan du lage en debug som ser
+  // akkurat hva som skjer i prosessen når man kjøper bonge?"
+  const buyDebugEnabled =
+    typeof process !== "undefined" && process.env?.ENABLE_BUY_DEBUG === "1";
+
+  // Pris-per-brett (Tobias-direktiv 2026-05-12 + 2026-05-13): hvert brett-
+  // kort skal vise pris pr. bong slik den er satt i backend-config, IKKE
+  // bundle-pris.
   //
   // Tidligere returnerte denne `fee * priceMultiplier` per brett — bundle-
   // pris (eks. 45 kr for "Stor lilla" med fee=15 + multiplier=3). Tobias
   // verifiserte 2026-05-12 at hver av 3 brett i "Stor lilla" skal vise
   // 15 kr (per-bong-pris fra backend-config), ikke 45 kr (bundle-pris).
   //
-  // Per-brett-formula: `(fee * priceMultiplier) / ticketCount`:
-  //   - Small Yellow (pm=1, count=1): 5  × 1 / 1 = 5  kr per brett ✅
-  //   - Large Yellow (pm=3, count=3): 10 × 3 / 3 = 10 kr per brett ✅
-  //   - Stor lilla   (pm=3, count=3): 15 × 3 / 3 = 15 kr per brett ✅
+  // Per-brett-formula: `(fee × priceMultiplier) / ticketCount`:
+  //   - Small Yellow (pm=1, count=1): fee × 1 / 1 = fee per brett ✓
+  //   - Large Yellow (pm=3, count=3): fee × 3 / 3 = fee per brett ✓
+  //   - Stor lilla   (pm=3, count=3): fee × 3 / 3 = fee per brett ✓
   //
-  // Match-prioritet: name før type. Type-only-match (eks. `type: "large"`)
-  // er ambiguøs når flere farger deler samme type (Large Yellow vs Large
-  // Purple). Name-match (eks. `Large Purple`) sikrer at vi treffer riktig
+  // Match-prioritet: color (= name) før type. Type-only-match (eks. `type:
+  // "large"`) er ambiguøs når flere farger deler samme type (Large Yellow
+  // vs Large Purple). Name-match sikrer at vi treffer riktig
   // priceMultiplier/ticketCount-par når admin har satt per-farge-priser.
   // Faller tilbake til type-match for backward-compat med legacy tickets
   // uten color/name (eks. fra display-cache pre-BIN-688).
   function enrichTicketList(list: Ticket[], fee: number): Ticket[] {
     return list.map((t, idx) => {
       const tt =
-        (t.color ? effectiveConfig.ticketTypes.find((x: TicketTypeConfig) => x.name === t.color) : undefined) ??
-        effectiveConfig.ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
+        (t.color
+          ? effectiveConfig.ticketTypes.find(
+              (x: TicketTypeConfig) => x.name === t.color,
+            )
+          : undefined) ??
+        effectiveConfig.ticketTypes.find(
+          (x: TicketTypeConfig) => x.type === t.type,
+        );
       const priceMultiplier = tt?.priceMultiplier ?? 1;
       const ticketCount = Math.max(1, tt?.ticketCount ?? 1);
       const price = roundCurrency((fee * priceMultiplier) / ticketCount);
+
+      if (buyDebugEnabled) {
+        // eslint-disable-next-line no-console
+        console.log("[BUY-DEBUG][backend][enrichTicket]", {
+          roomCode: snapshot.code,
+          ticketId: t.id,
+          ticketIndex: idx,
+          input: {
+            type: t.type,
+            color: t.color,
+            existingPrice: t.price,
+          },
+          resolvedTicketType: tt
+            ? {
+                name: tt.name,
+                type: tt.type,
+                priceMultiplier: tt.priceMultiplier,
+                ticketCount: tt.ticketCount,
+              }
+            : null,
+          fee,
+          formula: "(fee × priceMultiplier) / ticketCount",
+          computedPriceKr: price,
+          finalPriceKr: t.price ?? price,
+          preservedExisting: t.price !== undefined,
+        });
+      }
+
       return {
         ...t,
         ticketNumber: t.ticketNumber ?? t.id ?? String(idx + 1),
