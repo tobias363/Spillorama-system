@@ -1,0 +1,154 @@
+name: Skill Freshness PR Check
+
+# Tobias-direktiv 2026-05-13 (Tier 3-C / B3): Når en PR endrer filer som
+# tilhører scope av en stale skill, postet vi en kommentar som heads-up
+# slik at PM/agent vurderer om skillen bør refreshes samtidig.
+#
+# IKKE blokkerende — bare informasjonelt. Hvis en PR rører wallet-koden
+# og wallet-outbox-pattern-skillen er 100 dager gammel, er det en god
+# anledning til å oppdatere skillen mens vi er i koden.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      # Bare trigger hvis koden faktisk kan ha skill-coverage
+      # (ikke for ren docs-PR med mindre den rør skill-filer)
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - ".claude/skills/**"
+      - "infra/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # Per PR-nummer — re-run når PR endres
+  group: skill-freshness-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.draft == false }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Trenger nok historikk for git merge-base + git log --since
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run skill freshness check (PR-mode)
+        id: check
+        run: |
+          # Base-ref er PR-base (vanligvis main)
+          BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+          echo "Bruker base-ref: $BASE_REF"
+
+          # Fetch base-ref for å sikre at merge-base finnes
+          git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=200 || true
+
+          mkdir -p /tmp/skill-freshness
+          node scripts/check-skill-freshness.mjs \
+            --pr-mode \
+            --pr-base="$BASE_REF" \
+            --markdown \
+            --output=/tmp/skill-freshness/pr-comment.md
+          node scripts/check-skill-freshness.mjs \
+            --pr-mode \
+            --pr-base="$BASE_REF" \
+            --output=/tmp/skill-freshness/pr-result.json
+
+          # Hent matched count
+          MATCHED=$(node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/skill-freshness/pr-result.json', 'utf8'));
+            process.stdout.write(String((r.matchedStaleSkills ?? []).length));
+          ")
+          echo "matched_count=$MATCHED" >> "$GITHUB_OUTPUT"
+          echo "Matched stale skills: $MATCHED"
+
+      - name: Post or update PR comment
+        if: steps.check.outputs.matched_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/skill-freshness/pr-comment.md', 'utf8');
+            const marker = '<!-- skill-freshness-pr-check -->';
+            const fullBody = `${marker}\n\n${body}`;
+
+            const prNumber = context.payload.pull_request.number;
+
+            // Sjekk om vi allerede har postet — i så fall update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+              console.log(`Oppdaterte eksisterende comment ${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: fullBody,
+              });
+              console.log(`Opprettet ny comment på PR #${prNumber}`);
+            }
+
+      - name: Remove stale comment if no matches now
+        if: steps.check.outputs.matched_count == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Hvis tidligere check matchet men nå er det null match (PM har
+            // refreshet skill, fjernet fil fra PR, etc.) — fjern den gamle
+            // kommentaren for å unngå støy
+            const marker = '<!-- skill-freshness-pr-check -->';
+            const prNumber = context.payload.pull_request.number;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+              });
+              console.log(`Fjernet stale comment ${existing.id} (ingen match nå)`);
+            }
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Skill Freshness PR Check"
+            echo ""
+            echo "**Matched stale skills:** ${{ steps.check.outputs.matched_count }}"
+            echo ""
+            if [ -f /tmp/skill-freshness/pr-comment.md ]; then
+              cat /tmp/skill-freshness/pr-comment.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
