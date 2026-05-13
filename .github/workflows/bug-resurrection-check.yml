@@ -1,0 +1,221 @@
+name: Bug Resurrection Check
+
+# Pre-merge gate som detekterer "2 skritt frem 1 tilbake"-problemet.
+#
+# Scanner alle commits i en PR mot HEAD og finner linjer som SIST ble
+# endret av en `fix(...)`-commit innenfor siste 30 dagene. Hvis en slik
+# region har blitt endret av PR'en uten at minst én commit-melding ELLER
+# PR-body inneholder `[resurrection-acknowledged: <grunn>]` ELLER
+# `Resurrection acknowledged:`, så blokkerer workflow merge.
+#
+# Bakgrunn: docs/engineering/BUG_RESURRECTION_DETECTOR.md
+#
+# Bypass:
+#   - Inkluder `[resurrection-acknowledged: <grunn>]` i en commit-melding
+#   - Eller skriv `Resurrection acknowledged: <grunn>` i PR-body
+#   - Eller `resurrection-bypass: <grunn>` i PR-body (emergency)
+#   - Eller `resurrection-not-applicable: <rolle>` (docs-only, dependabot)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history so blame works against historical commits.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Identify PR base/head
+        id: refs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          # Find merge-base for the range
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "$BASE_SHA")
+          echo "merge_base=$MERGE_BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Run resurrection detector on PR commits
+        id: detect
+        run: |
+          set -uo pipefail
+          BASE="${{ steps.refs.outputs.merge_base }}"
+          HEAD="${{ steps.refs.outputs.head_sha }}"
+          # Collect every commit on the PR
+          COMMITS=$(git rev-list --reverse "${BASE}..${HEAD}")
+          if [ -z "$COMMITS" ]; then
+            echo "No commits on PR — skipping"
+            echo "found_candidates=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ANY_FOUND=false
+          ANY_ACK=false
+          REPORT=""
+          for SHA in $COMMITS; do
+            JSON=$(node scripts/scan-blame-for-recent-fixes.mjs --ref "$SHA" --days 30 --format json 2>/dev/null || true)
+            if [ -z "$JSON" ]; then
+              continue
+            fi
+            HAS=$(echo "$JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.resurrectionCandidates?'true':'false')}catch{process.stdout.write('false')}})")
+            ACK=$(echo "$JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.acknowledgmentPresent?'true':'false')}catch{process.stdout.write('false')}})")
+            if [ "$HAS" = "true" ]; then
+              ANY_FOUND=true
+              if [ "$ACK" = "true" ]; then
+                ANY_ACK=true
+              fi
+              SUBJECT=$(git log -1 --format='%s' "$SHA")
+              FILES=$(echo "$JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.candidates.map(c=>c.file).join(', '))}catch{}})")
+              REPORT="$REPORT\n  - commit $SHA ($SUBJECT) — touched: $FILES"
+              if [ "$ACK" = "true" ]; then
+                REPORT="$REPORT [ack]"
+              fi
+            fi
+          done
+          {
+            echo "found_candidates=$ANY_FOUND"
+            echo "any_ack=$ANY_ACK"
+            echo "report<<RUNEOF"
+            printf '%b\n' "$REPORT"
+            echo "RUNEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decide PASS/FAIL based on PR body + commit-acks
+        id: decide
+        if: steps.detect.outputs.found_candidates == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          BODY="${PR_BODY:-}"
+          ANY_ACK="${{ steps.detect.outputs.any_ack }}"
+
+          # Accept either: per-commit ack, PR body ack, or bypass marker
+          BODY_ACK=$(echo "$BODY" | grep -iE '(Resurrection acknowledged:|\[resurrection-acknowledged:)' | head -1 || true)
+          BODY_BYPASS=$(echo "$BODY" | grep -iE 'resurrection-bypass:' | head -1 || true)
+          NOT_APPL=$(echo "$BODY" | grep -iE 'resurrection-not-applicable:' | head -1 || true)
+
+          if [ "$ANY_ACK" = "true" ]; then
+            echo "decision=ack-in-commit" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BODY_ACK" ]; then
+            echo "decision=ack-in-body" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BODY_BYPASS" ]; then
+            echo "decision=bypass" >> "$GITHUB_OUTPUT"
+          elif [ -n "$NOT_APPL" ]; then
+            echo "decision=not-applicable" >> "$GITHUB_OUTPUT"
+          else
+            echo "decision=missing" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pass — no candidates found
+        if: steps.detect.outputs.found_candidates != 'true'
+        run: |
+          echo "::notice::Ingen bug-resurrection-candidates funnet i PR-commits."
+
+      - name: Pass — acknowledgment present
+        if: |
+          steps.detect.outputs.found_candidates == 'true' &&
+          (steps.decide.outputs.decision == 'ack-in-commit' ||
+           steps.decide.outputs.decision == 'ack-in-body' ||
+           steps.decide.outputs.decision == 'bypass' ||
+           steps.decide.outputs.decision == 'not-applicable')
+        run: |
+          echo "::notice::Bug-resurrection-candidates funnet, men acknowledgment er present (${{ steps.decide.outputs.decision }})."
+          echo "Report:"
+          echo "${{ steps.detect.outputs.report }}"
+
+      - name: Fail — candidates without acknowledgment
+        if: |
+          steps.detect.outputs.found_candidates == 'true' &&
+          steps.decide.outputs.decision == 'missing'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const report = `${{ steps.detect.outputs.report }}`;
+            const lines = [
+              '## ⛔ Bug-resurrection detected',
+              '',
+              'En eller flere commits i denne PR-en modifiserer linjer som SIST ble',
+              'endret av en `fix(...)`-commit innenfor de siste 30 dagene. Dette',
+              'kan være en **bug-resurrection** (gjeninnføring av en allerede',
+              'fikset bug).',
+              '',
+              '### Detekterte regioner',
+              '```',
+              report.trim() || '(se logs)',
+              '```',
+              '',
+              '### Hva må jeg gjøre?',
+              '',
+              'Velg **én** av disse:',
+              '',
+              '1. **Hvis endringen er intensjonell** (du fikser en sibling-bug i',
+              '   samme region, eller forrige fix var ufullstendig): legg til',
+              '   en av disse markørene:',
+              '',
+              '   - I commit-meldingen til den aktuelle commit\'en:',
+              '     ```',
+              '     [resurrection-acknowledged: <grunn>]',
+              '     ```',
+              '',
+              '   - Eller i PR-body:',
+              '     ```',
+              '     Resurrection acknowledged: <grunn>',
+              '     ```',
+              '',
+              '2. **Hvis endringen var utilsiktet**: roll tilbake endringen og',
+              '   les fix-commit\'en først:',
+              '   ```bash',
+              '   git show <sha-fra-rapport>',
+              '   ```',
+              '',
+              '3. **Emergency-bypass** (sjelden, dokumentert):',
+              '   - I PR-body: `resurrection-bypass: <begrunnelse>`',
+              '',
+              '4. **Ikke-applicable** (docs-only, dependabot, etc.):',
+              '   - I PR-body: `resurrection-not-applicable: <rolle>`',
+              '',
+              '---',
+              '',
+              'Detaljer: [`docs/engineering/BUG_RESURRECTION_DETECTOR.md`](../docs/engineering/BUG_RESURRECTION_DETECTOR.md)',
+            ];
+            const body = lines.join('\n');
+
+            // Find existing comment to update (idempotent re-runs)
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Bug-resurrection detected')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+            core.setFailed('Bug-resurrection detected — se PR-kommentar for detaljer.');

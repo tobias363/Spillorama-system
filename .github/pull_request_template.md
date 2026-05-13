@@ -69,6 +69,30 @@ Before marking a Linear issue **Done**, all three must be true:
 
 - [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, har en ADR blitt opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se `docs/adr/README.md` for når ADR kreves.)
 
+## Bug-resurrection acknowledgment
+
+> Detektor: `.github/workflows/bug-resurrection-check.yml` blokkerer merge hvis PR'en endrer
+> linjer som SIST ble endret av en `fix(...)`-commit innen 30 dager — uten at minst én
+> commit-melding ELLER PR-body inneholder acknowledgment. Se
+> [`docs/engineering/BUG_RESURRECTION_DETECTOR.md`](../docs/engineering/BUG_RESURRECTION_DETECTOR.md).
+>
+> Velg én hvis applicable. Hvis ingen, la stå.
+
+- [ ] **Ingen overlap** — PR'en touch'er ingen recent-fix-regioner (detector vil gi grønt)
+- [ ] **Acknowledged i commit** — minst én commit har `[resurrection-acknowledged: <grunn>]` i meldingen
+- [ ] **Acknowledged her** — fyll inn under hvis du vil acknowledge på PR-nivå
+
+<!-- Hvis acknowledged her, fjern kommentar-markøren under og fyll inn grunn -->
+<!-- Resurrection acknowledged: <forklar hvilken recent fix dette overlapper med og hvorfor endringen er intensjonell> -->
+
+<!-- Emergency-bypass (sjelden, krever Tobias-godkjenning) -->
+<!-- resurrection-bypass: <begrunnelse> -->
+
+<!-- Docs-only / dependabot / ci-bot — gjelder ikke for kode-endringer -->
+<!-- resurrection-not-applicable: <rolle> -->
+
+---
+
 ## Knowledge protocol (Tobias-direktiv 2026-05-13)
 
 Hvis denne PR-en rør pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet), bekreft minst ett av disse:

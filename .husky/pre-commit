@@ -1,5 +1,14 @@
 # Husky pre-commit hook
 #
+# Fem-trinns enforcement (utvidet 2026-05-13 med FRAGILITY + resurrection):
+#   Trinn 1 — PM-gate: blokkerer commit hvis PM-onboarding-gate ikke gyldig
+#   Trinn 2 — Tier-A intent: blokkerer commit på Tier-A-paths uten Intent-confirmed-by
+#   Trinn 3 — FRAGILITY-check: krever [context-read: F-NN] på FRAGILITY-flagged filer
+#   Trinn 4 — Bug-resurrection: krever [resurrection-acknowledged: <grunn>] på recent-fix-linjer
+#   Trinn 5 — Lint-staged: kvalitets-sjekker på endrede filer
+
+---
+
 # Fire-trinns enforcement (utvidet 2026-05-13 med comprehension-check):
 #   Trinn 1 — PM-gate: blokkerer commit hvis PM-onboarding-gate ikke gyldig
 #   Trinn 2 — Tier-A intent: blokkerer commit på Tier-A-paths uten Intent-confirmed-by
@@ -30,6 +39,16 @@
 # Bypass av Tier-A intent-sjekk:
 #   PM_INTENT_BYPASS=1 git commit ...
 #
+# Bypass av FRAGILITY-sjekk:
+#   FRAGILITY_BYPASS=1 git commit ...
+#   git commit -m "fix: subject\n\n[bypass-fragility-check: <begrunnelse>]"
+#
+# Bypass av bug-resurrection-sjekk:
+#   RESURRECTION_BYPASS=1 git commit ...
+#   git commit -m "fix: subject\n\n[resurrection-acknowledged: <begrunnelse>]"
+
+---
+
 # Bypass av COMPREHENSION-check:
 #   COMPREHENSION_BYPASS=1 git commit ...
 #   git commit -m "fix: subject\n\n[comprehension-bypass: <begrunnelse min 20 tegn>]"
@@ -42,6 +61,22 @@ node scripts/check-pm-gate.mjs --strict || exit 1
 
 # Trinn 2 — Tier-A intent-håndhevelse
 node scripts/check-tier-a-intent.mjs || exit 1
+
+# Trinn 3 — FRAGILITY-check (vanntett FRAGILITY_LOG-enforcement)
+if [ -x .husky/pre-commit-fragility-check.sh ]; then
+  .husky/pre-commit-fragility-check.sh || exit 1
+fi
+
+# Trinn 4 — Bug-resurrection-check (2026-05-13)
+# Blokkerer commits som endrer linjer fra recent fix-commits uten å
+# eksplisitt acknowledge med [resurrection-acknowledged: <grunn>].
+if [ -x .husky/pre-commit-resurrection-check.sh ]; then
+  .husky/pre-commit-resurrection-check.sh || exit 1
+fi
+
+# Trinn 5 — Lint-staged kvalitets-sjekker
+
+---
 
 # Trinn 3 — COMPREHENSION-check (krever ## Comprehension-blokk hvis [context-read:] satt)
 # Plassert som det logiske trinnet etter Tier-A intent — vil i fremtiden
