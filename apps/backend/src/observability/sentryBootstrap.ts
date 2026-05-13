@@ -19,6 +19,7 @@
  */
 
 import type { NextFunction, Request, Response } from "express";
+import type { Pool } from "pg";
 
 import {
   initSentry,
@@ -27,6 +28,7 @@ import {
   captureError,
   type SentryInitOptions,
 } from "./sentry.js";
+import { instrumentPgPool } from "./dbInstrumentation.js";
 
 /**
  * Initialise Sentry with sensible defaults for the backend. Idempotent.
@@ -90,4 +92,32 @@ export function sentryUserContextMiddleware() {
  */
 export function getSentryErrorHandlerMiddleware() {
   return getSentryExpressErrorHandler();
+}
+
+/**
+ * OBS-7 (2026-05-14): Wire Sentry DB-tracing onto the given pg.Pool-s.
+ *
+ * Call this AFTER `bootstrapBackendSentry()` (or at any point — the wrapper
+ * lazy-resolves Sentry via dynamic import, so it's safe to call before
+ * Sentry has actually finished init). Idempotent per pool — re-calling on
+ * the same pool is a no-op.
+ *
+ * Pass the shared platform-pool and optionally the wallet-pool. Each query
+ * will emit a `db.sql.query` span tied to the surrounding request trace,
+ * subject to Sentry's `tracesSampleRate`.
+ *
+ * Returns the number of pools that were newly wrapped (for logging).
+ */
+export function instrumentDbPools(pools: Array<Pool | null | undefined>): number {
+  let wrapped = 0;
+  for (const pool of pools) {
+    if (!pool) continue;
+    try {
+      if (instrumentPgPool(pool)) wrapped += 1;
+    } catch (err) {
+      // Never let observability wiring break boot.
+      captureError(err, { source: "instrumentDbPools" });
+    }
+  }
+  return wrapped;
 }

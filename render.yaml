@@ -24,7 +24,13 @@ services:
     # Skjema-arkeolog-PR (ops/schema-sync-plan-2026-04-26) må lande FØRST
     # for å bringe prod i lock-step — ellers vil neste deploy henge på
     # legacy-skjema-divergens. Se docs/operations/MIGRATION_DEPLOY_RUNBOOK.md.
-    buildCommand: npm install --include=dev && npm --prefix apps/backend install --include=dev && npm run build && npm --prefix apps/backend run migrate
+    # OBS-7 (2026-05-14): migrate-step bruker DATABASE_URL_DIRECT hvis satt,
+    # ellers fall tilbake til APP_PG_CONNECTION_STRING. node-pg-migrate
+    # trenger session-level state — kan IKKE gå via pgBouncer transaction-
+    # mode. Når PGBOUNCER_URL ikke er satt (default), endrer dette ingenting
+    # fordi DATABASE_URL_DIRECT også er unset → migrate-step bruker
+    # APP_PG_CONNECTION_STRING som før.
+    buildCommand: npm install --include=dev && npm --prefix apps/backend install --include=dev && npm run build && APP_PG_CONNECTION_STRING="${DATABASE_URL_DIRECT:-$APP_PG_CONNECTION_STRING}" npm --prefix apps/backend run migrate
     startCommand: npm --prefix apps/backend run start
     envVars:
       - key: NODE_ENV
@@ -41,6 +47,20 @@ services:
         sync: false
       - key: APP_PG_SCHEMA
         value: public
+      # OBS-7 (2026-05-14): pgBouncer + DB-direct split.
+      # PGBOUNCER_URL — når satt ruter `sharedPool` queries via pgBouncer
+      # (transaction-mode, port 6432) i stedet for direkte mot Postgres.
+      # `sync: false` så ops kan toggle av/på via Render-dashboard.
+      # Unset = direkte mot Postgres (default-adferd, no-op).
+      - key: PGBOUNCER_URL
+        sync: false
+      # DATABASE_URL_DIRECT — brukt KUN av migrate-step. node-pg-migrate
+      # trenger session-level state, som pgBouncer transaction-mode ikke
+      # støtter. Når pgBouncer er aktivert, MÅ migrate-step gå direkte mot
+      # Postgres via denne URL-en. Unset = bruk APP_PG_CONNECTION_STRING
+      # (default-adferd; trygt når pgBouncer er av).
+      - key: DATABASE_URL_DIRECT
+        sync: false
       - key: REDIS_HOST
         sync: false
       - key: REDIS_PORT
