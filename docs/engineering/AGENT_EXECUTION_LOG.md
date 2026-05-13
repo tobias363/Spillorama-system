@@ -59,6 +59,62 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Cross-knowledge audit (drift-deteksjon, general-purpose agent)
+
+**Scope:** Bygg ukentlig audit som detekterer drift mellom Spillorama-pilotens 7 kunnskaps-kilder (Linear-issues, BACKLOG, PITFALLS_LOG, FRAGILITY_LOG, ADR-er, BUG_CATALOG, PM-handoffs). Resultat: tre nye filer + AGENT_EXECUTION_LOG-entry. Markert som Pillar 8 i Knowledge Autonomy Protocol — selv-tilsyn av at Pillar 1-7 holder konsistens.
+
+**Inputs gitt:**
+- Tobias-direktiv 2026-05-13: "Det må bli vanntett nå ellers vil det ikke funke. Kan du anbefale noe annet her for at dette skal gå av seg selv og at da agentene blir smartere..."
+- 8 konkrete drift-sjekker definert av PM-AI i task-promptet (PITFALLS→Linear, FRAGILITY-cluster, BACKLOG→Linear, BUG_CATALOG SHA, ADR-chain, skill-ADR-refs, PM_HANDOFF-PR-state, PR-template-checklist)
+- Eksisterende `docs/engineering/KNOWLEDGE_AUTONOMY_PROTOCOL.md` (Pillar 1-7) + `scripts/generate-context-pack.sh` som referanse-mønster
+- Branch: `feat/cross-knowledge-audit-2026-05-13` på worktree `.claude/worktrees/agent-a64af6053a7b344b0`
+
+**Outputs produsert:**
+- Branch: `feat/cross-knowledge-audit-2026-05-13`
+- Nye filer:
+  - `scripts/cross-knowledge-audit.mjs` (~840 linjer Node ESM) — 8 drift-sjekker + markdown/JSON-rapport-generator
+  - `.github/workflows/cross-knowledge-audit-weekly.yml` — cron mandag 10:00 UTC + manuell trigger + auto-issue-opprettelse med label `cross-knowledge-audit`
+  - `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` — komplett bidragsguide (hvorfor, hvordan handle på funn, hvordan legge til nye sjekker)
+- Audit-funksjoner:
+  - Check 1: PITFALLS-§ → Linear-state-cross-check (skipper graceful uten Linear-key)
+  - Check 2: FRAGILITY-fil-cluster (≥ 3 entries på samme fil = arkitektonisk hot-spot)
+  - Check 3: BACKLOG checkbox-items uten BIN-ref
+  - Check 4: BUG_CATALOG ✅ Merged uten commit-SHA/PR-ref/branch-navn (kontekst-aware: kun tabeller med Fix-PR-kolonne)
+  - Check 5: ADR Superseded-chain (broken eller manglende back-reference)
+  - Check 6: Skills som peker på døde ADR-er
+  - Check 7: PM_HANDOFF-mentions av åpne PR-er som faktisk er merget (krever `gh` CLI)
+  - Check 8: PR-template manglende knowledge-protocol-checkboxes
+- Severity-skala: 🔴 RED (arkitektonisk/integritet), 🟡 YELLOW (drift som bør lukkes), ℹ️ INFO (orientering)
+- CLI-flagg: `--no-linear`, `--fail-on-findings`, `--json`, `--output=path`, `--verbose`
+
+**Live audit-funn (på dagens main):**
+- 1 drift (🟡): PR-template mangler alle 4 knowledge-protocol-checkboxes (PITFALLS / FRAGILITY / SKILL / AGENT_EXECUTION_LOG) — Check 8 fanget dette
+- 3 info-notiser: Linear ikke konfigurert (Check 1 graceful skip), 2 × handoff-PR-state-stale (Check 7 informasjons-funn — PR #1320, #1323)
+- 0 arkitektoniske concerns (Check 2): `tests/e2e/spill1-pilot-flow.spec.ts` har 2 FRAGILITY-refs (F-01, F-02), under terskelen 3
+
+**Fallgruver oppdaget:**
+- _Ingen nye fallgruver_ — audit-script-en er pure-read, ingen mutering av prod-state
+- Note: I første iterasjon flagged Check 4 falskt H1-row i BUG_CATALOG som ikke hadde commit-SHA — root-cause var at "test-harness-issues"-tabellen ikke har Fix-PR-kolonne. Fixet: kontekst-aware sjekk basert på tabell-headers.
+
+**Læring:**
+- ✅ **Drift-deteksjon er enkelt når kildene har struktur:** ADR-er, FRAGILITY-entries og BUG_CATALOG-rader har konsistent formatering — markdown-parsing er nok, ingen LLM-prosessering
+- ✅ **Linear-tilgang er ikke nødvendig for MVP:** 7/8 sjekker fungerer uten Linear; Check 1 skipper med ℹ️-notis
+- ✅ **Workflow-mønster er stabilt:** Følger `doc-freshness.yml`-stilen (cron + manual + push) — gjenbruker eksisterende GH-Actions-konvensjoner
+- ⚠️ **Sjekker må være kontekst-aware:** Naivt "alle ✅-rows må ha SHA" gir false positives. Sjekk for Fix-PR-kolonne i tabell-headers.
+- ⚠️ **Check 7 (PR-state via `gh`) er bare informativ:** Handoff-docs går naturlig stale; rapportér men ikke flag som "drift"
+- 💡 **Pillar 8 i Knowledge Autonomy Protocol:** Audit-en er meta-pillar — den verifiserer at Pillar 1-7 holder konsistens. Bør refereres fra `KNOWLEDGE_AUTONOMY_PROTOCOL.md` i en oppfølger-PR.
+
+**Verifisering (PM):**
+- ✅ `node scripts/cross-knowledge-audit.mjs --no-linear --verbose` kjører uten error, returnerer 1 drift-funn
+- ✅ `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/cross-knowledge-audit-weekly.yml'))"` validerer YAML
+- ✅ Exit-koder verifisert: `--fail-on-findings` → exit 1 ved drift, exit 0 hvis bare ℹ️
+- ✅ JSON-output validert (har `driftCount`, `findings[]`)
+- ⏳ Workflow må kjøres på CI én gang for å verifisere `gh issue create`-pathen + secret-binding (LINEAR_API_KEY hvis konfigurert)
+
+**Tid:** ~45 min agent-arbeid (build + test + dokumentasjon).
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
@@ -673,3 +729,4 @@ Verifisert via test:
 |---|---|---|
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
+| 2026-05-13 | Cross-knowledge audit etablert: `scripts/cross-knowledge-audit.mjs` (8 drift-sjekker) + ukentlig CI-workflow (mandag 10:00 UTC) + `docs/engineering/CROSS_KNOWLEDGE_AUDIT.md` bidragsguide. Pillar 8 i Knowledge Autonomy Protocol. | Agent (cross-knowledge-audit task) |
