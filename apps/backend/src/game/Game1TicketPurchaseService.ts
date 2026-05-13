@@ -78,6 +78,10 @@ import {
   type ComplianceLedgerPort,
 } from "../adapters/ComplianceLedgerPort.js";
 import { ledgerGameTypeForSlug } from "./ledgerGameTypeForSlug.js";
+// OBS-5: PostHog analytics — fire-and-forget. captureEvent is a no-op
+// when POSTHOG_API_KEY is unset, so dev/test stays silent and prod
+// records every successful purchase for funnel + cohort analysis.
+import { captureEvent } from "../observability/posthogBootstrap.js";
 
 const log = rootLogger.child({ module: "game1-ticket-purchase-service" });
 
@@ -696,6 +700,17 @@ export class Game1TicketPurchaseService {
       },
       "[GAME1_SCHEDULE PR4a] purchase created"
     );
+
+    // OBS-5: PostHog event-analytics. Only emit for genuinely-new purchases
+    // (idempotent retries return early at the top of this method so
+    // `alreadyExisted=false` here means an actual ledger event happened).
+    captureEvent(input.buyerUserId, "ticket.purchase.success", {
+      hallId: input.hallId,
+      scheduledGameId: input.scheduledGameId,
+      ticketCount: sumTicketCount(input.ticketSpec),
+      totalCents: totalAmountCents,
+      paymentMethod: input.paymentMethod,
+    });
 
     return {
       purchaseId: insertedRow.id,

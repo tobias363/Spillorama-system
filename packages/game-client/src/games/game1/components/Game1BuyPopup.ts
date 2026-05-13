@@ -1,4 +1,8 @@
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
+// OBS-5: PostHog event-analytics. trackEvent is a no-op when
+// VITE_POSTHOG_API_KEY is unset; in prod we record buy-popup-show +
+// confirm-success/error so we can build a per-hall purchase funnel.
+import { trackEvent as posthogTrackEvent } from "../../../observability/posthogBootstrap.js";
 
 /**
  * Maks antall vektede brett én spiller kan kjøpe per runde.
@@ -373,6 +377,18 @@ export class Game1BuyPopup {
     this.renderLossState(lossState);
     this.updateTotal();
     this.backdrop.style.display = "flex";
+
+    // OBS-5: PostHog analytics — popup-show event. Lets us measure
+    // open-rate, abandonment, and which ticket-types the player saw.
+    posthogTrackEvent("client.buy.popup.show", {
+      entryFee,
+      ticketTypeCount: ticketTypes.length,
+      alreadyPurchased: this.alreadyPurchased,
+      displayName: this.currentDisplayName,
+      walletBalance: lossState?.walletBalance ?? null,
+      dailyUsed: lossState?.dailyUsed ?? null,
+      dailyLimit: lossState?.dailyLimit ?? null,
+    });
   }
 
   /**
@@ -478,6 +494,12 @@ export class Game1BuyPopup {
       this.buyBtn.style.opacity = "0.5";
       this.buyBtn.style.cursor = "default";
       setTimeout(() => this.hide(), 1500);
+      // OBS-5: PostHog analytics — confirm-success. Lets us measure the
+      // open→confirm conversion rate per hall + ticket-count.
+      posthogTrackEvent("client.buy.confirm.success", {
+        ticketCount: this.getTotalTicketCount(),
+        displayName: this.currentDisplayName,
+      });
     } else {
       this.uiState = "error";
       this.statusMsg.style.color = "#ff6b6b";
@@ -490,6 +512,14 @@ export class Game1BuyPopup {
       this.cancelBtn.disabled = false;
       this.cancelBtn.style.opacity = "1";
       this.cancelBtn.style.cursor = "pointer";
+      // OBS-5: PostHog analytics — confirm-error. Lets ops + product
+      // identify error patterns (insufficient balance, daily limit etc.)
+      // via PostHog cohort breakdown of the `message` property.
+      posthogTrackEvent("client.buy.confirm.error", {
+        ticketCount: this.getTotalTicketCount(),
+        displayName: this.currentDisplayName,
+        errorMessage: message ?? null,
+      });
     }
   }
 

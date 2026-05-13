@@ -65,6 +65,14 @@ import { installConsoleBridge } from "./debug/ConsoleBridge.js";
 import { installFetchInstrument } from "./debug/FetchInstrument.js";
 import { installErrorHandler } from "./debug/ErrorHandler.js";
 import { installSocketEmitInstrument } from "./debug/SocketEmitInstrument.js";
+// OBS-5: PostHog event-analytics. No-op when VITE_POSTHOG_API_KEY is
+// unset (dev/test); in prod every screen transition + buy-popup event
+// is recorded for funnel + cohort analyses. Complements Sentry (errors)
+// and Rrweb (DOM-replay).
+import {
+  initPostHog as initClientPostHog,
+  trackEvent as posthogTrackEvent,
+} from "../../observability/posthogBootstrap.js";
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -369,6 +377,17 @@ class Game1Controller implements GameController {
       loader: this.loader,
       getScheduledGameId: () => this.joinedScheduledGameId,
     });
+
+    // OBS-5: PostHog event-analytics. Init alongside socket connect so the
+    // first screen-transition event after game-load is captured. We use
+    // the first-8 of the accessToken as distinctId — same anonymization
+    // shape as Sentry's `playerId` tag. No-op when VITE_POSTHOG_API_KEY
+    // is unset.
+    const cfg = this.deps.app.getConfig();
+    const distinctId = cfg?.accessToken
+      ? `player-${cfg.accessToken.slice(0, 12)}`
+      : null;
+    void initClientPostHog(distinctId);
 
     // Connect socket
     socket.connect();
@@ -1537,6 +1556,18 @@ class Game1Controller implements GameController {
   // ── State transitions ─────────────────────────────────────────────────
 
   private transitionTo(phase: Phase, state: GameState): void {
+    // OBS-5: PostHog analytics — record every screen transition. Lets us
+    // build retention + drop-off funnels in PostHog (e.g. how many
+    // players make it from WAITING → PLAYING → ENDED in a single
+    // session). Fire-and-forget; never blocks the transition.
+    posthogTrackEvent("client.screen.transition", {
+      from: this.phase,
+      to: phase,
+      scheduledGameId: this.joinedScheduledGameId,
+      gameStatus: state.gameStatus,
+      myTicketCount: state.myTickets.length,
+    });
+
     this.phase = phase;
 
     const w = this.deps.app.app.screen.width;

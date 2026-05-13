@@ -414,6 +414,11 @@ import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAd
 import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { bootstrapBackendSentry, sentryUserContextMiddleware, getSentryErrorHandlerMiddleware } from "./observability/sentryBootstrap.js";
+// OBS-5: PostHog event-analytics. Init is a no-op when POSTHOG_API_KEY is
+// unset so dev/test stays silent; in prod it batches business events for
+// funnel + cohort analytics. Complements Sentry (errors) and Rrweb
+// (DOM-replay) without overlapping responsibilities.
+import { initPostHog, shutdownPostHog } from "./observability/posthogBootstrap.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { traceIdMiddleware } from "./middleware/traceId.js";
 import { securityHeadersMiddleware } from "./middleware/securityHeaders.js";
@@ -482,6 +487,12 @@ void bootstrapBackendSentry();
 // Retain legacy alias so dynamic imports / tests that reach into the
 // raw initSentry still work.
 void initSentry; // eslint-disable-line @typescript-eslint/no-unused-expressions
+
+// OBS-5: PostHog event-analytics. Init alongside Sentry so business events
+// (ticket.purchase.success, spill1.master.start, spill1.payout.pattern,
+// spill1.game.end) are captured from the first request. No-op when
+// POSTHOG_API_KEY is unset.
+initPostHog();
 
 const app = express();
 
@@ -5874,6 +5885,9 @@ function handleShutdown(signal: string) {
   if (shutdownStarted) return;
   shutdownStarted = true;
   console.info(`[shutdown] Received ${signal}. Starting graceful shutdown...`);
+  // OBS-5: flush any buffered PostHog events before tearing down the rest
+  // of the stack. Fire-and-forget — we never block shutdown on analytics.
+  void shutdownPostHog();
   httpRateLimiter.stop();
   socketRateLimiter.stop();
   dailyReportScheduler.stop();

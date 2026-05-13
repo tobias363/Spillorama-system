@@ -140,3 +140,15 @@ services:
         value: "0.1"
       - key: SENTRY_PROFILES_SAMPLE_RATE
         value: "0.0"
+      # OBS-5: PostHog event-analytics. Same write-only key is used for
+      # backend (POSTHOG_API_KEY) and client bundle (VITE_POSTHOG_API_KEY).
+      # Host defaults to EU cloud. sync:false → set the actual key value
+      # via the Render dashboard so it isn't committed to git.
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: POSTHOG_HOST
+        value: https://eu.i.posthog.com
+      - key: VITE_POSTHOG_API_KEY
+        sync: false
+      - key: VITE_POSTHOG_HOST
+        value: https://eu.i.posthog.com

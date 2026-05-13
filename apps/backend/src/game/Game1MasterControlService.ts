@@ -52,6 +52,11 @@ import type {
   Game1TicketPurchaseService,
   Game1RefundAllForGameResult,
 } from "./Game1TicketPurchaseService.js";
+// OBS-5: PostHog event-analytics. captureEvent is a no-op when
+// POSTHOG_API_KEY is unset (dev/test); in prod each master-action is
+// recorded with the actor + hall + game so we can build funnel
+// dashboards in PostHog.
+import { captureEvent } from "../observability/posthogBootstrap.js";
 
 const log = rootLogger.child({ module: "game1-master-control-service" });
 
@@ -816,6 +821,18 @@ export class Game1MasterControlService {
     };
 
     this.notifyStatusChange(cleanResult, "start", input.actor.userId);
+
+    // OBS-5: PostHog analytics — record successful master.start so we can
+    // build per-hall startup funnels and detect stuck "ready but never
+    // started" rounds. Fire-and-forget; never blocks the master flow.
+    captureEvent(input.actor.userId, "spill1.master.start", {
+      gameId: input.gameId,
+      hallId: input.actor.hallId,
+      role: input.actor.role,
+      auditId: cleanResult.auditId,
+      status: cleanResult.status,
+    });
+
     return cleanResult;
   }
 
@@ -1374,6 +1391,19 @@ export class Game1MasterControlService {
     }
 
     this.notifyStatusChange(result, "stop", input.actor.userId);
+
+    // OBS-5: PostHog analytics — record master.stop with reason so we can
+    // separate "natural end" (game ran to completion) from "operator
+    // intervention" (master pressed stop early) in funnel dashboards.
+    captureEvent(input.actor.userId, "spill1.master.stop", {
+      gameId: input.gameId,
+      hallId: input.actor.hallId,
+      role: input.actor.role,
+      reason: input.reason ?? null,
+      auditId: result.auditId,
+      status: result.status,
+    });
+
     return result;
   }
 
