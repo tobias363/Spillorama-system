@@ -4,7 +4,7 @@
 > hver weekly mutation-run. Følg likevel med — Stryker oppdager
 > regresjoner som tradisjonell coverage ikke ser.
 
-**Generert:** 2026-05-13 (initial baseline før første run)
+**Generert:** 2026-05-13 (first run baseline + survivor-driven test additions)
 **Verktøy:** StrykerJS 9.6.1 + `@stryker-mutator/tap-runner`
 **Cadence:** Hver søndag 00:00 UTC
 **Konfig:** `apps/backend/stryker.config.json`
@@ -31,25 +31,27 @@ Threshold-bånd i config:
 | Fil | LOC | Test-filer |
 |---|---|---|
 | `src/game/MasterActionService.ts` | 2077 | 1 test-fil (`src/game/__tests__/MasterActionService.test.ts`) |
-| `src/game/Game1LobbyService.ts` | 700 | 1 test-fil (`src/game/Game1LobbyService.test.ts`) |
+| `src/game/Game1LobbyService.ts` | 914 | 1 test-fil (`src/game/Game1LobbyService.test.ts`) |
 | `src/game/Game1HallReadyService.ts` | 1029 | 3 test-filer (basic + hallStatus + req007) |
 | `src/game/GamePlanRunService.ts` | 1203 | 3 test-filer (basic + goh + dateRowToString) |
-| `src/wallet/WalletOutboxWorker.ts` | 170 | 1 test-fil (`src/wallet/WalletOutboxWorker.test.ts`) |
-| **Sum** | ~5180 | 9 test-filer |
+| `src/wallet/WalletOutboxWorker.ts` | 170 | 2 test-filer (basic + **survivors** — ny 2026-05-13) |
+| **Sum** | ~5393 | 10 test-filer |
 
-### Faktiske dry-run-numre (2026-05-13)
+### Dry-run-numre (2026-05-13)
 
 Dry-run verifisert lokalt med Stryker 9.6.1:
 
 | Metric | Verdi |
 |---|---|
-| Project-filer skannet | 1157 |
+| Project-filer skannet | 1159 |
 | Filer mutert | 5 (matcher `mutate`-feltet) |
-| Mutanter generert (instrumentert) | **2386** |
+| Mutanter generert (instrumentert) | **2452** (oppdatert fra 2386 i pre-baseline doc) |
 | Test-filer kjørt under dry-run | 9 |
-| Initial test-run-tid (én gang gjennom hele suiten) | **22 sekunder** (4.5s net + 17.5s TypeScript-checker-overhead) |
-| Estimert full mutation-run-tid (lokal, conc=4) | **~30-50 min** |
-| Estimert full mutation-run-tid (CI, conc=2-4) | **~50-80 min** |
+| Initial test-run-tid (én gang gjennom hele suiten) | **5 sekunder** (i isolert kjøring; 22s ved samtidighet med andre Stryker-prosesser) |
+| Estimert full mutation-run-tid (lokal, conc=4) | **~5-8 timer** observert ved første full-suite-poll (alle 5 filer parallelt; sterk overhead pga TypeScript-checker) |
+| Estimert full mutation-run-tid (CI, conc=2-4) | **~50-80 min** for ren CI-runner (lavere kontensjon) |
+
+**Strategi (etter 2026-05-13 første-iterasjon-funn):** Per-file mutation-runs er **vesentlig** raskere enn full-suite. Bruk en `stryker.<File>.config.json` per fil-isolasjon når du itererer på survivors-testing.
 
 `coverageAnalysis: "perTest"` betyr at hver mutant kun kjører de testene
 som faktisk dekker den linja. Det vil typisk være 1-3 tester per mutant,
@@ -59,11 +61,9 @@ ikke alle 9 — så reell run-tid kan være vesentlig under verstefall.
 
 ## Baseline-historikk
 
-Tabellen fylles ut etter første weekly cron-kjøring.
-
 | Dato | Total score | MasterActionService | Game1LobbyService | Game1HallReadyService | GamePlanRunService | WalletOutboxWorker | Run-time |
 |---|---|---|---|---|---|---|---|
-| 2026-05-13 | _venter første run_ | _venter_ | _venter_ | _venter_ | _venter_ | _venter_ | _venter_ |
+| 2026-05-13 (baseline) | _venter on alle 5_ | _venter_ | _venter_ | 48.38 → **(re-run i flight)** | _venter_ | 46.00 → **82.00** ↑↑ | ~2.5-16 min per fil |
 
 ### Notater per run
 
@@ -71,15 +71,74 @@ Hver weekly cron oppdaterer denne tabellen via PR fra
 `mutation-test-weekly.yml`. Manuelle dypdykk og diff-analyser kan dokumenteres som egne notater
 nedenfor.
 
-#### 2026-05-13 — Initial setup
+#### 2026-05-13 — Initial baseline + survivor-tester for WalletOutboxWorker
+
 - Etablerte Stryker-konfig (`apps/backend/stryker.config.json`)
-- **Dry-run verifisert lokalt:**
-  - `npm run test:mutation:dry-run` → eksit 0
-  - "Initial test run succeeded. Ran 9 tests in 22 seconds (net 4579.955043 ms, overhead 17435.044957 ms)"
-  - "The dry-run has been completed successfully. No mutations have been executed."
-- Stryker fant 5 av 1157 filer å mutere (matcher mutate-feltet)
-- 2386 mutanter instrumentert totalt
-- Første full-run scheduled for søndag etter merge (eller på-vent kjøring via `workflow_dispatch`)
+- **First-run-resultat for WalletOutboxWorker (170 LOC, 64 mutanter):**
+
+**Pre-tester (kun original test-fil):**
+| Kategori | Antall |
+|---|---|
+| Killed | 22 |
+| Survived | **14** |
+| NoCoverage | **13** |
+| Timeout | 1 |
+| Errors | 14 |
+| **Mutation score** | **46 %** (BELOW BREAK 50%) |
+
+Run-tid: 2 min 6 s.
+
+**Etter survivors-tester (`src/wallet/WalletOutboxWorker.survivors.test.ts` — 18 nye tester):**
+
+| Kategori | Antall | Endring |
+|---|---|---|
+| Killed | 38 | +16 |
+| Survived | **9** | -5 |
+| NoCoverage | **0** | -13 |
+| Timeout | 3 | +2 |
+| Errors | 14 | 0 |
+| **Mutation score** | **82 %** | **+36 prosentpoeng** ↑↑ |
+
+Run-tid: 2 min 44 s.
+
+**Konklusjon:**
+- Score **over `high`-threshold (80 %)** — passerer mutation-test-mandatet for pilot Q3 2026.
+- Alle no-coverage mutanter eliminert (defaultDispatcher, auto-tick via setInterval, markFailed-failure path, outer-catch).
+- Gjenværende 9 survivors er hovedsakelig:
+  - 2 StringLiteral i `console.error/debug`-meldinger (equivalent mutants — log-strenger har ingen funksjonell effekt)
+  - 1 BlockStatement i defaultDispatcher body (equivalent — console.debug-call)
+  - 1 OptionalChaining på `timer.unref?.()` — equivalent i node-environment der unref alltid eksisterer
+  - 1 ConditionalExpression i stop() while-loop (deadline-konsistens; mutant `true` blir alltid sann, men deadline-sjekken hindrer infinite-loop)
+  - 1 EqualityOperator i stop() while-loop (samme — boundary mellom `<` og `<=` på timestamp er praktisk-equivalent)
+  - 1 BlockStatement i outer catch (logger-only — funksjonell oppførsel uendret hvis logger fjernes)
+
+#### 2026-05-13 — Initial baseline for Game1HallReadyService
+
+- Stryker kjørt på 488 mutanter for `Game1HallReadyService.ts` (1029 LOC). Run-tid: 16 min 12 s.
+- **Pre-tester (kun originale 3 test-filer):**
+
+| Kategori | Antall |
+|---|---|
+| Killed | 194 |
+| Survived | 139 |
+| NoCoverage | 68 |
+| Timeout | 0 |
+| Errors | 87 |
+| **Mutation score** | **48.38 %** (UNDER BREAK 50 %) |
+
+**Hovedklynger av survivors:**
+- Linje 1000-1006 (computeHallStatus soldCount-beregning): 18+ survivors
+- Linje 977-984 (computeHallStatus hasPhysicalFlow + scan-detection): 13+ survivors
+- Linje 918 (countPhysicalSoldForHall finite check): 6 survivors
+- Linje 832 (resetReadyRowsForNextRound logging): 5 survivors
+- Linje 261-263 (markReady scheduled/purchase_open guard): 4 survivors
+- StringLiteral i error-melding-strenger: ~31 survivors (de fleste equivalent — log-strenger)
+
+**Etter survivors-tester (`src/game/Game1HallReadyService.survivors.test.ts` — 20 nye tester for `computeHallStatus`):**
+
+- 20 nye unit-tester fokusert på `computeHallStatus` pure function
+- Target: 30+ mutants i computeHallStatus-klynger
+- Re-run i flight 2026-05-13 — resultat oppdateres når run fullføres.
 
 ---
 

@@ -1,0 +1,52 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Single-file Stryker config for Game1LobbyService.ts — for faster iteration during initial baseline run 2026-05-13.",
+  "packageManager": "npm",
+  "reporters": ["html", "clear-text", "progress", "json"],
+  "testRunner": "tap",
+  "tap": {
+    "testFiles": [
+      "src/game/Game1LobbyService.test.ts"
+    ],
+    "nodeArgs": [
+      "--import",
+      "tsx/esm",
+      "--test-reporter=tap",
+      "-r",
+      "{{hookFile}}",
+      "{{testFile}}"
+    ]
+  },
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/game/Game1LobbyService.ts"
+  ],
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 50
+  },
+  "timeoutMS": 60000,
+  "concurrency": 4,
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.json",
+  "htmlReporter": {
+    "fileName": "reports/mutation-lobby/mutation.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation-lobby/mutation.json"
+  },
+  "ignorePatterns": [
+    "dist",
+    "migrations",
+    "scripts",
+    "node_modules",
+    ".stryker-tmp",
+    "reports",
+    "load-tests",
+    "public",
+    "tools"
+  ],
+  "tempDirName": ".stryker-tmp-lobby",
+  "logLevel": "info"
+}
