@@ -59,6 +59,82 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Bug-resurrection detector (general-purpose agent, Tier 3)
+
+**Scope:** Bygg en pre-commit hook + CI gate som detekterer når en commit
+modifiserer kode i en region som var bug-fixet innenfor siste 30 dager,
+og tvinger eksplisitt acknowledgment. Adresserer "2 skritt frem 1 tilbake"-
+mønsteret fra mai-pilot.
+
+**Inputs gitt:**
+- Mandat: ny isolert worktree, branch fra origin/main
+- Pekere til `FRAGILITY_LOG.md`, `BUG_CATALOG.md`, `PITFALLS_LOG.md`,
+  `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` §6
+- Acceptance criteria definert i prompt: blame-based detection,
+  Conventional Commits fix-pattern, `[resurrection-acknowledged:]`-marker
+- Krav: vitest-tester med fixture git-historie, CI workflow, PR template
+
+**Outputs produsert:**
+- Branch: `feat/bug-resurrection-detector-2026-05-13`
+- Filer:
+  - `scripts/scan-blame-for-recent-fixes.mjs` (ny, ~415 linjer)
+  - `.husky/pre-commit-resurrection-check.sh` (ny, 75 linjer)
+  - `.husky/pre-commit` (oppdatert — Trinn 3+4 lagt til)
+  - `scripts/__tests__/scan-blame-for-recent-fixes.test.mjs` (ny, ~440 linjer, 29 tester)
+  - `.github/workflows/bug-resurrection-check.yml` (ny, ~170 linjer)
+  - `docs/engineering/BUG_RESURRECTION_DETECTOR.md` (ny, ~250 linjer)
+  - `.github/pull_request_template.md` (oppdatert — ny seksjon)
+- Test-resultater: 29/29 passed på vitest (~35s total)
+- TypeScript: `npm run build:types` passerer
+
+**Fallgruver oppdaget:**
+- §11 (agent-orkestrering) — Test-fixture i tempdir trenger at scriptet
+  bruker `process.cwd()` for git-kommandoer, ikke hardkodet `REPO_ROOT`.
+  Fixed med `detectRepoRoot()`-helper. Lærdom: scripts som leser fra
+  `import.meta.url` for å finne repo-root vil ikke fungere i fixture-
+  tester — bruk `process.cwd()` med fallback.
+- §6 (test-infrastruktur) — Worktree-aware: bruk
+  `git rev-parse --git-dir` istedenfor hardkodet `.git/` for å finne
+  `COMMIT_EDITMSG`. I delt worktree er `git-dir` worktree-spesifikk men
+  `git-common-dir` er felles. Hooks må håndtere begge.
+
+**Læring:**
+- Conventional Commits fix-pattern (`/^(fix|Fix)(\(.+\))?:\s/`) er presis
+  nok til å unngå false positives på "fixed", "fixes", "fixup"
+- Git blame `--porcelain` mot parent-ref (`HEAD~1` eller `<ref>~1`) gir
+  pålitelig sist-endret-SHA per linje
+- Pure additions (oldCount=0 i diff-hunk) må skippes — ingen gamle linjer
+  å blame
+- Binary file-detection via null-byte-sjekk på første 8KB er rask og
+  reliable for git-tracked filer
+- Tester på `--days 0` boundary er tricky: floating point ageDays > 0
+  alltid for nylige commits, så `--days 0` ekskluderer alt — som er
+  forventet semantikk
+- Conflict-håndtering i delt worktree: andre agenter kan rebase eller
+  switche branch under en pågående sesjon. Bruk `git stash -u` +
+  `git pull --rebase` + `git stash pop` for å sync til origin/main
+  med work i live state.
+
+**Eierskap:**
+- `scripts/scan-blame-for-recent-fixes.mjs`
+- `scripts/__tests__/scan-blame-for-recent-fixes.test.mjs`
+- `.husky/pre-commit-resurrection-check.sh`
+- `.github/workflows/bug-resurrection-check.yml`
+- `docs/engineering/BUG_RESURRECTION_DETECTOR.md`
+
+**Verifisering (PM-skal-gjøre):**
+- [ ] Kjør `npx vitest run scripts/__tests__/scan-blame-for-recent-fixes.test.mjs`
+- [ ] Verifiser at eksisterende pre-commit-kjede fortsatt fungerer
+  (commit en triviell endring til en ikke-recent-fix-fil)
+- [ ] Smoke-test: lag en mock-PR som touch'er recent fix-region, sjekk
+  at CI workflow gir rød + auto-kommentar
+- [ ] Bekreft at `[resurrection-acknowledged: ...]` i commit-msg lar
+  commit gå gjennom
+
+**Tid:** ~3.5 timer agent-arbeid
+
+---
+
 ### 2026-05-13 — Tobias-readiness auto-generator i AI Fragility Review (general-purpose agent)
 
 **Scope:** Utvid `ai-fragility-review.yml`-workflow med auto-genererte "Tobias smoke-test"-seksjoner per PR. Heuristikk-basert fil→scenario-mapping rendrer ferdig markdown med konkrete URL-er, credentials, klikk-steg, forventet resultat og typiske feilbilder. Skal redusere Tobias' verifikasjons-burden ved at han ser hva han skal teste uten å lese diffen selv.

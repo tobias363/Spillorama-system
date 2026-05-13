@@ -1,9 +1,11 @@
 # Husky pre-commit hook
 #
-# Tre-trinns enforcement (utvidet 2026-05-10 med PM-gate + Tier-A intent):
+# Fem-trinns enforcement (utvidet 2026-05-13 med FRAGILITY + resurrection):
 #   Trinn 1 — PM-gate: blokkerer commit hvis PM-onboarding-gate ikke gyldig
 #   Trinn 2 — Tier-A intent: blokkerer commit på Tier-A-paths uten Intent-confirmed-by
-#   Trinn 3 — Lint-staged: kvalitets-sjekker på endrede filer
+#   Trinn 3 — FRAGILITY-check: krever [context-read: F-NN] på FRAGILITY-flagged filer
+#   Trinn 4 — Bug-resurrection: krever [resurrection-acknowledged: <grunn>] på recent-fix-linjer
+#   Trinn 5 — Lint-staged: kvalitets-sjekker på endrede filer
 #
 # Lint-staged (.lintstagedrc.json) matcher endrede filer mot:
 #  - stylelint --fix paa CSS-filer
@@ -24,6 +26,14 @@
 # Bypass av Tier-A intent-sjekk:
 #   PM_INTENT_BYPASS=1 git commit ...
 #
+# Bypass av FRAGILITY-sjekk:
+#   FRAGILITY_BYPASS=1 git commit ...
+#   git commit -m "fix: subject\n\n[bypass-fragility-check: <begrunnelse>]"
+#
+# Bypass av bug-resurrection-sjekk:
+#   RESURRECTION_BYPASS=1 git commit ...
+#   git commit -m "fix: subject\n\n[resurrection-acknowledged: <begrunnelse>]"
+#
 # Se docs/engineering/PRE_COMMIT_HOOKS.md for full liste over regler og
 # hvordan legge til nye hooks.
 
@@ -33,5 +43,17 @@ node scripts/check-pm-gate.mjs --strict || exit 1
 # Trinn 2 — Tier-A intent-håndhevelse
 node scripts/check-tier-a-intent.mjs || exit 1
 
-# Trinn 3 — Lint-staged kvalitets-sjekker
+# Trinn 3 — FRAGILITY-check (vanntett FRAGILITY_LOG-enforcement)
+if [ -x .husky/pre-commit-fragility-check.sh ]; then
+  .husky/pre-commit-fragility-check.sh || exit 1
+fi
+
+# Trinn 4 — Bug-resurrection-check (2026-05-13)
+# Blokkerer commits som endrer linjer fra recent fix-commits uten å
+# eksplisitt acknowledge med [resurrection-acknowledged: <grunn>].
+if [ -x .husky/pre-commit-resurrection-check.sh ]; then
+  .husky/pre-commit-resurrection-check.sh || exit 1
+fi
+
+# Trinn 5 — Lint-staged kvalitets-sjekker
 npx lint-staged
