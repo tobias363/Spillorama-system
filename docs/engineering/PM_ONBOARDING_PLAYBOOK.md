@@ -186,7 +186,45 @@ PM-AI kan spawne så mange parallelle agenter som hensiktsmessig. Krav: klart sc
 
 **HARD REGEL:** Når PM eller Tobias starter en test-sesjon, MÅ live-monitor-agent være aktiv som FØRSTE handling i sesjonen.
 
-**Spawn-mal — kopier ved sesjons-start:**
+#### Aktiv push: monitor + push-daemon (2026-05-13)
+
+Den passive monitor-only-flyten (kun skriver til `/tmp/pilot-monitor.log`)
+er supplert med en **aktiv push-mekanisme** som leverer P0/P1-anomalier
+direkte til PM-sesjonen:
+
+```bash
+# Start begge prosesser med ett kall:
+bash scripts/start-monitor-with-push.sh
+
+# I annen terminal — PM-sesjon tail-er urgent-FIFO for kun P0/P1:
+tail -f /tmp/pilot-monitor-urgent.fifo
+```
+
+**Produserer:**
+- `/tmp/pilot-monitor.log` — full log (alle severities, append-only)
+- `/tmp/pilot-monitor-snapshot.md` — 60s-snapshot
+- `/tmp/pilot-monitor-round-<N>.md` — per-runde-rapport
+- `/tmp/pilot-monitor-urgent.fifo` — named pipe — KUN P0/P1
+- `/tmp/pilot-monitor.pid` + `/tmp/pilot-monitor-push.pid` — for clean shutdown
+- **macOS notification** ved P0 (sound: Sosumi) eller P1 (sound: Submarine)
+- **Terminal bell** (`\a`) for hver P0/P1
+
+**Severity-klassifisering:**
+
+| Severity | Eksempel | Push? | Sound |
+|---|---|---|---|
+| **P0** | Live-room down, wallet-mismatch, compliance-violation, backend down 30s | ✅ | Sosumi |
+| **P1** | Stuck draw, stale snapshot 60s, DB-mismatch, repeated error | ✅ | Submarine |
+| **P2** | Monitor-internal, recoverable | ❌ | (kun log) |
+| **P3** | Round-end, status-change, info | ❌ | (kun log) |
+
+Full klassifisering: [`docs/engineering/MONITOR_SEVERITY_CLASSIFICATION.md`](./MONITOR_SEVERITY_CLASSIFICATION.md).
+
+#### Legacy: spawn live-monitor-agent (fortsatt gyldig som fallback)
+
+Hvis du foretrekker å spawn en agent som bruker monitoren via tool-call,
+er denne mal-en fortsatt gyldig. Agenten kan parallellt skrive til
+`/tmp/pilot-monitor-init.md` og lese fra log-en:
 
 ```typescript
 Agent({
@@ -221,11 +259,17 @@ Stopp KUN når PM ber eksplisitt, eller backend dødt > 5 min.`,
 
 **ALDRI stopp monitoren med rasjonale "test-infra er bedre"** — Tobias-direktiv 2026-05-13. Monitor + test-infra er komplementære.
 
-**PM sesjons-start sjekkliste (ny):**
+**PM sesjons-start sjekkliste (oppdatert 2026-05-13):**
 1. Verifiser dev:nuke kjører (`curl localhost:4000/health`)
-2. **Spawn live-monitor-agent** ← NY OBLIGATORISK STEP
-3. Verifiser `/tmp/pilot-monitor-init.md` skrives innen 30s
-4. Klart for testing
+2. **Start monitor + push-daemon:** `bash scripts/start-monitor-with-push.sh` (i background eller eget terminal)
+3. I PM-sesjons-terminal: `tail -f /tmp/pilot-monitor-urgent.fifo` for å se P0/P1 i sanntid
+4. Verifiser at FIFO + PID-filer finnes: `ls -la /tmp/pilot-monitor*`
+5. Klart for testing
+
+**Test push-flyten:**
+```bash
+bash scripts/__tests__/monitor-severity-classification.test.sh
+```
 
 ---
 

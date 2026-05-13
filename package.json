@@ -33,6 +33,7 @@
     "test:pilot-flow": "playwright test --config=tests/e2e/playwright.config.ts",
     "test:pilot-flow:ui": "playwright test --config=tests/e2e/playwright.config.ts --ui",
     "test:pilot-flow:debug": "PWDEBUG=1 playwright test --config=tests/e2e/playwright.config.ts",
+    "test:pilot-flow:manual": "playwright test --config=tests/e2e/playwright.config.ts tests/e2e/spill1-manual-flow.spec.ts",
     "build:visual-harness": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build:visual-harness",
     "serve:visual-harness": "npm -w @spillorama/game-client run serve:visual-harness",
     "check:all": "npm run check && npm run build && npm run test:compliance",
