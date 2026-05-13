@@ -1,0 +1,193 @@
+name: Cross-Knowledge Audit (weekly)
+
+# Detekterer drift mellom Spillorama-pilotens kunnskaps-kilder
+# (Linear, BACKLOG, PITFALLS_LOG, FRAGILITY_LOG, ADR-er, BUG_CATALOG, handoffs).
+#
+# Etablert 2026-05-13. Kjøres ukentlig + manuelt.
+#
+# Bakgrunn: docs/engineering/CROSS_KNOWLEDGE_AUDIT.md
+# Script:   scripts/cross-knowledge-audit.mjs
+
+on:
+  schedule:
+    # Mandag 10:00 UTC (12:00 Oslo sommertid / 11:00 vintertid)
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+    inputs:
+      fail_on_findings:
+        description: "Fail the workflow if drift findings exist"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      create_issue:
+        description: "Create a GitHub issue on drift findings"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/cross-knowledge-audit.mjs"
+      - ".github/workflows/cross-knowledge-audit-weekly.yml"
+      - "docs/engineering/CROSS_KNOWLEDGE_AUDIT.md"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: cross-knowledge-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run cross-knowledge audit
+        id: audit
+        env:
+          # Optional: if Linear access is configured at the org level, set
+          # LINEAR_API_KEY as a repo secret. Without it, the audit skips
+          # Check 1 (PITFALLS-§ references closed Linear issue) gracefully.
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          mkdir -p docs/auto-generated
+          OUTPUT=docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md
+
+          # Run audit; capture exit code without aborting.
+          set +e
+          if [ -z "${LINEAR_API_KEY:-}" ]; then
+            node scripts/cross-knowledge-audit.mjs --no-linear --output="$OUTPUT" --fail-on-findings
+          else
+            node scripts/cross-knowledge-audit.mjs --output="$OUTPUT" --fail-on-findings
+          fi
+          audit_exit=$?
+          set -e
+
+          echo "audit_exit=$audit_exit" >> "$GITHUB_OUTPUT"
+
+          # Generate a short summary for the workflow log
+          if [ -f "$OUTPUT" ]; then
+            head -20 "$OUTPUT" || true
+          fi
+
+          # Also emit JSON for issue body
+          node scripts/cross-knowledge-audit.mjs ${LINEAR_API_KEY:+ } ${LINEAR_API_KEY:-"--no-linear"} --json --output=/tmp/audit.json || true
+
+          # Pull drift count for downstream steps
+          DRIFT=$(node -e "try { const j = require('/tmp/audit.json'); console.log(j.driftCount); } catch { console.log(0); }")
+          echo "drift_count=$DRIFT" >> "$GITHUB_OUTPUT"
+          echo "Drift findings: $DRIFT"
+
+      - name: Commit audit report
+        if: ${{ always() }}
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions (cross-knowledge-audit)"
+          if [ -n "$(git status --porcelain docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md)" ]; then
+            git add docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md
+            git commit -m "chore(audit): weekly cross-knowledge-audit report $(date -u +%Y-%m-%d) [skip ci]"
+            git push origin HEAD:main
+          else
+            echo "No changes to commit."
+          fi
+
+      - name: Upload audit report as artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-knowledge-audit-${{ github.run_id }}
+          path: |
+            docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md
+            /tmp/audit.json
+          retention-days: 90
+
+      - name: Create issue on drift
+        if: ${{ steps.audit.outputs.drift_count != '0' && (github.event_name == 'schedule' || inputs.create_issue == 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DRIFT=${{ steps.audit.outputs.drift_count }}
+          DATE=$(date -u +%Y-%m-%d)
+          TITLE="Cross-knowledge audit — $DRIFT drift finding(s) on $DATE"
+
+          # Prefer to update existing open issue (with matching label) over creating duplicates
+          EXISTING=$(gh issue list --state open --label "cross-knowledge-audit" --json number,title --jq '.[0].number' || true)
+
+          BODY=$(cat <<'EOF'
+          Weekly cross-knowledge audit detected drift between Spillorama's knowledge sources.
+
+          ## Summary
+          - Drift findings: __DRIFT__
+          - Generated: __DATE__ (UTC)
+          - Workflow run: __RUN_URL__
+
+          ## Report
+
+          The full report is committed to `docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md`
+          and attached as an artifact on the workflow run.
+
+          ## What to do
+
+          1. Review the report.
+          2. For each finding, either fix the drift or document why it's a known false-positive.
+          3. Close this issue when all 🔴/🟡 findings are addressed.
+          4. The next weekly run will produce a fresh audit.
+
+          See [`docs/engineering/CROSS_KNOWLEDGE_AUDIT.md`](https://github.com/${{ github.repository }}/blob/main/docs/engineering/CROSS_KNOWLEDGE_AUDIT.md) for guide on acting on findings.
+
+          ---
+
+          _Auto-generated by `.github/workflows/cross-knowledge-audit-weekly.yml`._
+          EOF
+          )
+          BODY="${BODY//__DRIFT__/$DRIFT}"
+          BODY="${BODY//__DATE__/$DATE}"
+          BODY="${BODY//__RUN_URL__/https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}}"
+
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing issue #$EXISTING"
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            echo "Creating new issue"
+            # Ensure label exists
+            gh label create "cross-knowledge-audit" --color "ededed" --description "Auto-created by cross-knowledge-audit-weekly workflow" 2>/dev/null || true
+            gh issue create \
+              --title "$TITLE" \
+              --label "cross-knowledge-audit" \
+              --body "$BODY"
+          fi
+
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          DRIFT=${{ steps.audit.outputs.drift_count || 0 }}
+          {
+            echo "# Cross-knowledge audit summary"
+            echo ""
+            echo "- Drift findings: $DRIFT"
+            echo "- Report: \`docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md\`"
+            echo "- Workflow run: ${{ github.run_id }}"
+            if [ "$DRIFT" -gt 0 ]; then
+              echo ""
+              echo "⚠️ Drift detected — review the report and address findings."
+            else
+              echo ""
+              echo "✅ No drift detected."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

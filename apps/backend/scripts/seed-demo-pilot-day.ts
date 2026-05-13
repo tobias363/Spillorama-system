@@ -1583,6 +1583,59 @@ async function seedGameCatalogAndPlans(client: Client): Promise<void> {
   //    arkitektonisk "uvanlig" men teknisk korrekt — én-hall-GoH er ikke
   //    forbudt av schema. Plan bindes til denne GoH-en. Auto-master via
   //    DemoAutoMasterTickService starter + advancer rundt på rundt.
+
+  // 5a) Sørg for at hall-default EKSISTERER i app_halls før FK-references i
+  //     app_hall_groups (master_hall_id) + app_hall_group_members (hall_id).
+  //     Fresh CI-DB har ikke hall-default seedet via migration — derfor må
+  //     seed-skriptet selv sikre at den finnes. Idempotent (ON CONFLICT id).
+  const defaultHallTvTokenCol = await columnExists(
+    client,
+    "app_halls",
+    "tv_token",
+  );
+  const defaultHallNumberCol = await columnExists(
+    client,
+    "app_halls",
+    "hall_number",
+  );
+  const defaultHallCols = ["id", "slug", "name", "region", "address", "is_active"];
+  const defaultHallPlaceholders = ["$1", "$2", "$3", "'NO'", "$4", "true"];
+  const defaultHallValues: unknown[] = [
+    DEFAULT_HALL_ID,
+    "default",
+    "Default Hall (auto-master isolation)",
+    "",
+  ];
+  let defaultHallIdx = defaultHallValues.length + 1;
+  if (defaultHallNumberCol) {
+    defaultHallCols.push("hall_number");
+    defaultHallPlaceholders.push(`$${defaultHallIdx++}`);
+    defaultHallValues.push(0);
+  }
+  if (defaultHallTvTokenCol) {
+    defaultHallCols.push("tv_token");
+    defaultHallPlaceholders.push("gen_random_uuid()::text");
+  }
+  const defaultHallUpdateSet = [
+    "slug = EXCLUDED.slug",
+    "name = EXCLUDED.name",
+    "is_active = true",
+    "updated_at = now()",
+  ];
+  if (defaultHallNumberCol) {
+    defaultHallUpdateSet.push("hall_number = EXCLUDED.hall_number");
+  }
+  await client.query(
+    `INSERT INTO app_halls (${defaultHallCols.join(", ")})
+     VALUES (${defaultHallPlaceholders.join(", ")})
+     ON CONFLICT (id) DO UPDATE
+       SET ${defaultHallUpdateSet.join(", ")}`,
+    defaultHallValues,
+  );
+  console.log(
+    `  [default-hall]    ${DEFAULT_HALL_ID} sikret i app_halls (FK-trygg for hall-groups)`,
+  );
+
   await client.query(
     `INSERT INTO app_hall_groups (id, name, status, master_hall_id, products_json, extra_json, created_by)
      VALUES ($1, $2, 'active', $3, '[]'::jsonb, $4::jsonb, NULL)
