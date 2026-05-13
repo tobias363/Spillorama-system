@@ -1,0 +1,85 @@
+## docker-compose.observability.yml (OBS-8, 2026-05-14)
+##
+## PgHero + pgBadger lokal docker-stack for visuell DB-overvåking. Kjører
+## ved siden av hoved-dev-stacken (`docker-compose.yml`) og monitorerer
+## samme Postgres-instans som backend bruker.
+##
+## Bruk:
+##   bash scripts/observability-up.sh         # start PgHero (web-dashboard)
+##   bash scripts/pgbadger-report.sh          # generer pgBadger HTML-rapport
+##   bash scripts/observability-down.sh       # tear down stack
+##
+## PgHero default URL: http://localhost:8080
+## Default login: admin / spillorama-2026-test (overstyr via env)
+##
+## Se docs/operations/PGHERO_PGBADGER_RUNBOOK.md for full guide.
+
+services:
+  ## PgHero — web-dashboard for Postgres slow queries, indexes, table-bloat.
+  ## Ruby-app av Andrew Kane (ankane/pghero). Leser pg_stat_statements +
+  ## pg_stat_user_tables + pg_indexes. Krever at pg_stat_statements er
+  ## aktivert i Postgres (se runbook §3 for instruksjoner).
+  pghero:
+    image: ankane/pghero:latest
+    container_name: spillorama-pghero
+    environment:
+      ## DATABASE_URL peker på den samme Postgres-instansen som backend.
+      ## Default: lokal Docker-postgres fra `docker-compose.yml` via
+      ## host.docker.internal (cross-compose-stack-tilgang).
+      DATABASE_URL: ${PGHERO_DATABASE_URL:-postgres://spillorama:spillorama@host.docker.internal:5432/spillorama}
+      ## Basic auth — overstyr i .env hvis du eksponerer porten utenfor localhost.
+      PGHERO_USERNAME: ${PGHERO_USERNAME:-admin}
+      PGHERO_PASSWORD: ${PGHERO_PASSWORD:-spillorama-2026-test}
+      ## Tidssone for "Long Running Queries"-historikk + chart-akser.
+      PGHERO_TZ: ${PGHERO_TZ:-Europe/Oslo}
+      ## Hvor lang queries må kjøre før de regnes som "long-running" på
+      ## dashbordet (default 60 sek). Tunable for pilot-skala.
+      PGHERO_LONG_RUNNING_QUERY_SEC: ${PGHERO_LONG_RUNNING_QUERY_SEC:-60}
+      ## Mean execution time-cutoff (ms) for slow-queries-listen.
+      PGHERO_SLOW_QUERY_MS: ${PGHERO_SLOW_QUERY_MS:-100}
+      ## Min calls før query rangerer i slow-queries (filtrerer engangs-spørringer).
+      PGHERO_SLOW_QUERY_CALLS: ${PGHERO_SLOW_QUERY_CALLS:-100}
+    ports:
+      - "${PGHERO_PORT:-8080}:8080"
+    extra_hosts:
+      ## Tillater container å nå Postgres på Docker-hostens loopback.
+      ## Linux: docker-compose mapper denne automatisk; macOS/Windows:
+      ## Docker Desktop tilbyr host.docker.internal out-of-the-box.
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      ## PgHero har ingen /health-endpoint, men 401 fra root indikerer at
+      ## Rails-prosessen er oppe (basic auth virker).
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  ## pgBadger — batch-job som genererer HTML-rapport fra Postgres-logger.
+  ## Kjøres on-demand (profile: report) via `scripts/pgbadger-report.sh`.
+  ##
+  ## Forutsetning: Postgres må logge queries i CSV-format. Standard
+  ## docker-compose.yml-Postgres logger ikke detaljert nok ut av boksen.
+  ## Se runbook §4 for hvordan slå på `log_min_duration_statement = 100`
+  ## og `log_destination = 'csvlog'`.
+  pgbadger:
+    image: dalibo/pgbadger:latest
+    container_name: spillorama-pgbadger
+    volumes:
+      ## Output-mappe for HTML-rapporter (gitignore'd).
+      - ./infra/observability/data:/output
+      ## Mounte Postgres-loggene read-only. Path varierer per setup:
+      ##   - Docker Desktop med named volume: /var/lib/docker/volumes/...
+      ##   - Direkte Postgres på host: /var/log/postgresql
+      ## Default antar lokal Docker-stack med pg-volume eksponert via
+      ## helper-script. Hvis pgBadger ikke finner logger, sjekk
+      ## ${PG_LOG_DIR}-env i .env eller bruk wrapper-script-flagget.
+      - ${PG_LOG_DIR:-./infra/observability/pglogs}:/var/log/postgresql:ro
+    entrypoint: ["/output/run-report.sh"]
+    profiles:
+      ## On-demand job — kjør med `docker-compose --profile report run --rm pgbadger`.
+      - report
+
+## Ingen named volumes — PgHero er stateless (data leses fra Postgres ved
+## hver request), pgBadger skriver til bind-mount infra/observability/data/.

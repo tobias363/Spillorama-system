@@ -1,0 +1,11 @@
+# Postgres CSV-logger som pgBadger leser.
+# Mount-target for ${PG_LOG_DIR}-env-var. Mappen er gitignore'd
+# (se .gitignore — "infra/observability/pglogs/" pattern). Denne
+# .gitkeep-filen sikrer at mappestrukturen finnes ved første kjøring.
+#
+# Aktiveres ved å konfigurere Postgres med:
+#   log_destination = 'csvlog'
+#   logging_collector = on
+#   log_directory = '/var/log/postgresql'  (eller monter til denne mappa)
+#
+# Se docs/operations/PGHERO_PGBADGER_RUNBOOK.md §4 for full setup.

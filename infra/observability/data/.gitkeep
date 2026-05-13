@@ -1,0 +1,3 @@
+# pgBadger HTML-rapporter genereres her av infra/observability/pgbadger/run-report.sh.
+# Mappen er gitignore'd (se .gitignore — "infra/observability/data/" pattern).
+# Denne .gitkeep-filen sikrer at mappestrukturen finnes ved første kjøring.
