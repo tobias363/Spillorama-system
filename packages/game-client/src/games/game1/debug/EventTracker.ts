@@ -42,7 +42,18 @@ export type EventType =
   | "socket.recv"
   | "state.change"
   | "lobby.change"
-  | "error.client";
+  | "error.client"
+  // Tobias-direktiv 2026-05-13: gi server-side monitor tilgang til
+  // klient-konsoll og UI-state-gating som PM trenger for diagnose.
+  | "console.log"
+  | "console.warn"
+  | "console.error"
+  | "console.info"
+  | "console.debug"
+  | "popup.autoShowGate"
+  | "popup.show"
+  | "popup.hide"
+  | "screen.mount";
 
 export interface TrackedEvent {
   /** Monotont voksende ID (within session). Format: `evt-<n>`. */
