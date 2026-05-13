@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/agent/UniqueIdService.ts, apps/backend/src/agent/UniqueIdStore.ts, apps/backend/src/agent/__tests__/UniqueIdStore.postgres.test.ts, apps/backend/src/agent/__tests__/UniqueIdService.test.ts, apps/backend/src/routes/adminUniqueIdsAndPayouts.ts, apps/backend/src/routes/agentUniqueIds.ts, apps/backend/src/routes/__tests__/adminUniqueIdsAndPayouts.test.ts, apps/backend/src/routes/__tests__/agentUniqueIds.test.ts, apps/admin-web/src/pages/agent-portal/AgentUniqueIdPage.ts -->
+
 # Customer Unique ID (Prepaid-kort, BIN-587)
 
 The Customer Unique ID is a **walk-in-spillers prepaid-kort** — for customers who don't want to register an online account but still want to play with a balance they can top up and withdraw. The agent prints a card with a 9-digit ID, the player carries it back to the hall, the agent scans/types it for top-ups and cash-out.

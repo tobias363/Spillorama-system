@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/routes/publicGameHealth.ts, apps/backend/src/routes/__tests__/publicGameHealth.test.ts, apps/backend/src/observability/RoomAlertingService.ts, apps/backend/src/observability/RoomAlertingBootstrap.ts, apps/backend/src/observability/__tests__/RoomAlertingService.test.ts -->
+
 # Health Monitoring & Alerting
 
 ## Kontekst

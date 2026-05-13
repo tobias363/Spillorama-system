@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/game/ledgerGameTypeForSlug.ts, apps/backend/src/game/ledgerGameTypeForSlug.test.ts, apps/backend/src/game/ledgerGameTypeForSlug.distribution.test.ts, apps/backend/src/game/ComplianceLedgerOverskudd.ts, packages/game-client/src/games/game5/** -->
+
 # SpinnGo / Spill 4 / game5 — Databingo
 
 SpinnGo (markedsført som "Spill 4", kode-navn `game5`, slug `spillorama`) er **det eneste databingo-spillet** i Spillorama-systemet. Alle andre interne spill (Spill 1, 2, 3) er hovedspill (`MAIN_GAME`). Denne distinksjonen er regulatorisk kritisk — `MAIN_GAME` har 15% min til organisasjoner og ingen single-prize-cap; `DATABINGO` har 30% min til organisasjoner og 2500 kr cap per single-prize.

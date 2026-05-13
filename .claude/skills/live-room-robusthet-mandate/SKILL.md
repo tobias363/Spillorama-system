@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/sockets/SocketIdempotencyStore.ts, apps/backend/src/sockets/withSocketIdempotency.ts, apps/backend/src/observability/RoomAlertingService.ts, apps/backend/src/adapters/EngineCircuitBreakerPort.ts, apps/backend/src/routes/publicGameHealth.ts, infra/chaos-tests/**, apps/backend/src/__tests__/chaos/**, docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_*.md -->
+
 # Live-rom-robusthet — Evolution Gaming-grade pilot-mandat
 
 Spill 1, Spill 2 og Spill 3 er live-rom som **alltid** må være tilgjengelige innenfor spilleplanens åpningstid. Mål: Evolution Gaming-grade oppetid (99.95%+). Hvis rom-arkitektur, socket-events, draw-tick, ticket-purchase eller wallet-touch fra rom-events røres: **dette mandatet er bindende**. R1-R12 er pilot-gating eller utvidelses-gating.

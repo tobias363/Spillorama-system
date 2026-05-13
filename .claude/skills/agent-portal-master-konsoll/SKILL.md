@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts, apps/admin-web/src/pages/cash-inout/CashInOutPage.ts, apps/admin-web/src/pages/agent-portal/NextGamePanel.ts, apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts, apps/admin-web/src/pages/agent-portal/Spill1AgentStatus.ts, apps/admin-web/src/pages/agent-portal/JackpotSetupModal.ts, apps/admin-web/src/pages/agent-portal/AgentCashInOutPage.ts, apps/admin-web/src/pages/games/master/Game1MasterConsole.ts, apps/admin-web/src/pages/games/master/adminGame1Socket.ts, apps/admin-web/src/api/agent-game-plan.ts, apps/admin-web/src/pages/cash-inout/modals/** -->
+
 # Agent-Portal Master-Konsoll (Spill 1 UI)
 
 The master-konsoll is where the bingovert at the master-hall drives a Spill 1 round: starts the next game, marks self/hall ready, sees other halls' status, sets jackpot popups, pauses/resumes/stops. It lives in two places — the admin agent-portal box (`Spill1HallStatusBox` inside `CashInOutPage`) and the standalone `Game1MasterConsole` admin page.

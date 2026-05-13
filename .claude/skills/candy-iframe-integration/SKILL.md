@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/integration/externalGameWallet.ts, apps/backend/src/integration/externalGameWallet.test.ts, apps/backend/src/routes/game.ts, apps/backend/public/web/spillvett.js, apps/backend/public/web/lobby.js, apps/backend/public/web/index.html -->
+
 # Candy iframe-integration — leverandørsiden
 
 Candy er et tredjeparts-spill vi **ikke** har kildekoden til. Spillorama-system eier KUN: launch-endpoint + wallet-bridge + iframe-host. All Candy-spillkode, demo-login, demo-admin og demo-runtime ligger i separate repoer (`tobias363/candy-web` og `tobias363/demo-backend`).

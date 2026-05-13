@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: infra/chaos-tests/**, apps/backend/src/__tests__/chaos/**, apps/backend/src/**/*.test.ts, tests/e2e/** -->
+
 # Casino-Grade Testing
 
 ## Kontekst

@@ -6,6 +6,8 @@ metadata:
   project: spillorama
 ---
 
+<!-- scope: apps/backend/src/middleware/traceId.ts, apps/backend/src/middleware/traceId.test.ts, apps/backend/src/middleware/socketTraceId.ts, apps/backend/src/middleware/socketTraceId.test.ts, apps/backend/src/util/traceContext.ts, apps/backend/src/util/traceContext.test.ts, apps/backend/src/observability/** -->
+
 # Trace-ID Observability
 
 ## Kontekst
