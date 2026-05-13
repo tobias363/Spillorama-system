@@ -20,6 +20,7 @@ import {
   resetEventTracker,
   payloadKeysOnly,
   pickSafeFields,
+  trackLargePayload,
 } from "../EventTracker.js";
 
 describe("EventTracker", () => {
@@ -326,5 +327,78 @@ describe("pickSafeFields", () => {
 
   it("håndterer null payload", () => {
     expect(pickSafeFields(null, ["a"])).toEqual({ payloadKeys: [] });
+  });
+});
+
+describe("trackLargePayload (observability fix-PR 2026-05-13)", () => {
+  it("legger til ett event når payload er liten nok", () => {
+    const tracker = new EventTracker({ bufferSize: 100 });
+    const ids = trackLargePayload(tracker, "room.update.full", {
+      roomCode: "BINGO",
+      smallField: "hello",
+    });
+    expect(ids).toHaveLength(1);
+    const events = tracker.getEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("room.update.full");
+    // Liten payload — INGEN __chunked-marker
+    expect((events[0].payload as { __chunked?: boolean }).__chunked).toBeUndefined();
+  });
+
+  it("chunker store payloads til ~2 KB per event", () => {
+    const tracker = new EventTracker({ bufferSize: 100 });
+    const large = "x".repeat(5000); // 5 KB string
+    const ids = trackLargePayload(tracker, "room.update.full", {
+      bigField: large,
+    });
+    // Forventet >= 3 chunks (JSON.stringify legger til litt overhead)
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const events = tracker.getEvents();
+    expect(events.length).toBe(ids.length);
+    // Alle chunks deler samme correlationId
+    const correlationIds = new Set(events.map((e) => e.correlationId));
+    expect(correlationIds.size).toBe(1);
+    // Hver chunk har chunkIndex + chunkCount
+    for (const event of events) {
+      const p = event.payload as {
+        __chunked?: boolean;
+        chunkIndex?: number;
+        chunkCount?: number;
+      };
+      expect(p.__chunked).toBe(true);
+      expect(typeof p.chunkIndex).toBe("number");
+      expect(typeof p.chunkCount).toBe("number");
+      expect(p.chunkCount).toBe(events.length);
+    }
+  });
+
+  it("respekterer eksplisitt correlationId", () => {
+    const tracker = new EventTracker({ bufferSize: 100 });
+    const large = "x".repeat(5000);
+    const customId = "custom-correlation-123";
+    trackLargePayload(
+      tracker,
+      "room.update.full",
+      { bigField: large },
+      { correlationId: customId },
+    );
+    const events = tracker.getEvents();
+    for (const event of events) {
+      expect(event.correlationId).toBe(customId);
+    }
+  });
+
+  it("fail-soft ved sirkulær referanse", () => {
+    const tracker = new EventTracker({ bufferSize: 100 });
+    const obj: Record<string, unknown> = { roomCode: "BINGO" };
+    obj.circular = obj;
+    const ids = trackLargePayload(tracker, "room.update.full", obj);
+    // Får ingen ids tilbake (chunk-error-marker logget men kaster ikke)
+    expect(ids).toEqual([]);
+    const events = tracker.getEvents();
+    expect(events).toHaveLength(1);
+    expect(
+      (events[0].payload as { __chunkError?: string }).__chunkError,
+    ).toBeTruthy();
   });
 });

@@ -379,6 +379,7 @@ import { createPublicStatusRouter } from "./routes/publicStatus.js";
 // observerbarhet — alerting i R8 bygger på dette).
 import { createPublicGameHealthRouter } from "./routes/publicGameHealth.js";
 import { bootstrapStatusPage } from "./observability/statusBootstrap.js";
+import { GameEndSnapshotService } from "./observability/GameEndSnapshotService.js";
 // §6.4 (Wave 3b, 2026-05-06): Postgres-pool-utilization-metrics-tick. Wires
 // pgPool* gauges på en setInterval-loop som leser `pool.totalCount`,
 // `pool.idleCount`, `pool.waitingCount` fra hver registered pool.
@@ -2331,11 +2332,21 @@ const agentMiniGameWinningService = new AgentMiniGameWinningService({
   complianceLedgerPort,
 });
 
+// Observability fix-PR 2026-05-13: snapshot-service som dumper game-end-
+// DB-state til /tmp/game-end-snapshot-{gameId}.json. Brukes av master-
+// control (stop) og draw-engine (natural-end) fail-soft for å gi PM en
+// frozen state-snapshot etter hver runde-slutt.
+const gameEndSnapshotService = new GameEndSnapshotService(
+  platformService.getPool(),
+  { schema: pgSchema },
+);
+
 // GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
 // resume/stop + hall-exclude/include med regulatorisk audit (app_game1_master_audit).
 const game1MasterControlService = new Game1MasterControlService({
   pool: platformService.getPool(),
   schema: pgSchema,
+  gameEndSnapshotService,
 });
 
 // 2026-05-07 PM-direktiv: runtime-justering av scheduled_start_time / end-time
@@ -3182,6 +3193,11 @@ game1DrawEngineService.setMiniGameOrchestrator(game1MiniGameOrchestrator);
 // Game1DrawEngineService.drawNext kan kalle resolveForGame() ved terskel-draw
 // i spill som har aktiv Oddsen-state fra forrige runde.
 game1DrawEngineService.setOddsenEngine(miniGameOddsenEngine);
+
+// Observability fix-PR 2026-05-13: late-bind snapshot-service så natural-end
+// (Fullt Hus / max-draws) dumper DB-state til
+// /tmp/game-end-snapshot-{gameId}.json. Fail-soft per design.
+game1DrawEngineService.setGameEndSnapshotService(gameEndSnapshotService);
 
 // GAME1_SCHEDULE PR 4c Bolk 4: auto-draw-tick (global 1s tick, fixed
 // seconds-intervall per spill). Default OFF til PR 4d socket-flyt aktiveres.

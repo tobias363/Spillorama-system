@@ -73,6 +73,12 @@ import {
   initPostHog as initClientPostHog,
   trackEvent as posthogTrackEvent,
 } from "../../observability/posthogBootstrap.js";
+// OBS-1 (cascade-merge 2026-05-14): FetchBridge er supersedet av
+// FetchInstrument over (samme wrapper-mønster, mer komplett med
+// correlationId + sanitized payloads). Importen er bevisst dropped
+// her — filen apps/backend/.../FetchBridge.ts er behold som dead code
+// til vi sletter den i en cleanup-PR. Rrweb-imports er også droppet:
+// RrwebRecorder wirer seg selv inn via installDebugSuite (#1382 merge).
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -1227,6 +1233,7 @@ class Game1Controller implements GameController {
     // FetchInstrument (Tobias-direktiv 2026-05-13): wrapper rundt
     // globalThis.fetch — logger alle REST-kall til EventTracker.
     // Gated på debug-flagg, idempotent, fail-soft.
+    // (OBS-1 FetchBridge supersedet — samme wrapper-mønster men eldre.)
     try {
       installFetchInstrument();
     } catch (err) {
@@ -1274,6 +1281,11 @@ class Game1Controller implements GameController {
         this.debugEventStreamer = null;
       }
     }
+
+    // OBS-1 + OBS-2 cascade-merge 2026-05-14: RrwebRecorder wires itself via
+    // installDebugSuite.ts (delivered by OBS-2 / PR #1382). Game1Controller
+    // does NOT directly call setupRrwebRecorder anymore — installDebugSuite
+    // is the single source of truth for Rrweb initialization.
   }
 
   /**
@@ -1404,6 +1416,9 @@ class Game1Controller implements GameController {
       }
       this.debugEventStreamer = null;
     }
+    // OBS-1 + OBS-2 cascade-merge 2026-05-14: Rrweb teardown håndteres
+    // automatisk av installDebugSuite (samme singleton). Ingen direkte
+    // resetRrwebRecorder() trengs fra Game1Controller.
   }
 
   // ── Klient-auto-join-scheduled-game (Tobias 2026-05-11) ──────────────────
@@ -1568,6 +1583,24 @@ class Game1Controller implements GameController {
       myTicketCount: state.myTickets.length,
     });
 
+    // OBS-1 (cascade-merge 2026-05-14): KOMPLEMENTERER PostHog-eventen over —
+    // skriver samme transition også til lokal EventTracker (→ jsonl). Bra ved
+    // off-line debugging og bug-rapport-bundle som ikke har internett til
+    // PostHog. Fail-soft — tracker er best-effort.
+    const previousPhase = this.phase;
+    try {
+      if (previousPhase !== phase) {
+        getEventTracker().track("screen.transition", {
+          from: previousPhase,
+          to: phase,
+          gameStatus: state.gameStatus,
+          drawIndex:
+            (state as { drawnNumbers?: unknown[] }).drawnNumbers?.length ?? 0,
+        });
+      }
+    } catch {
+      /* tracker er best-effort */
+    }
     this.phase = phase;
 
     const w = this.deps.app.app.screen.width;
