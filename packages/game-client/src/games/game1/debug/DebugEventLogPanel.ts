@@ -24,18 +24,46 @@ type FilterMode = "all" | "user" | "api" | "socket" | "state";
 
 const MAX_VISIBLE_EVENTS = 50;
 
+/** Hjelp PM-agent å skille rapport-status-meldinger i UI fra log-status. */
+export interface BugReportSubmitOpts {
+  /** Token til /api/_dev/debug/bug-report (samme som streamer-token). */
+  token?: string;
+  /** Override fetch for tester. */
+  fetchImpl?: typeof fetch;
+  /** Brukerens egen melding (notes-felt). Hvis ikke gitt — prompt() i UI. */
+  notes?: string;
+  /** Tittel — hvis ikke gitt brukes en auto-generert basert på screen. */
+  title?: string;
+  /** Hent klient-state for rapport. Hvis udefinert sendes null. */
+  collectClientState?: () => unknown;
+  /** Hent currentScreen. */
+  collectCurrentScreen?: () => string | null;
+  /** Hent siste user-action. */
+  collectLastUserAction?: () => string | null;
+}
+
 export class DebugEventLogPanel {
   private rootEl: HTMLDivElement | null = null;
   private logEl: HTMLDivElement | null = null;
   private statusEl: HTMLDivElement | null = null;
+  private bugReportStatusEl: HTMLDivElement | null = null;
   private tracker: EventTracker;
   private unsubscribe: (() => void) | null = null;
   private filter: FilterMode = "all";
   private hidden = false;
   private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+  private bugReportOpts: BugReportSubmitOpts = {};
 
   constructor(tracker: EventTracker = getEventTracker()) {
     this.tracker = tracker;
+  }
+
+  /**
+   * Konfigurer bug-report-knappen. Kalles av Game1Controller med token
+   * + collectors for klient-state / current-screen / last-action.
+   */
+  setBugReportOptions(opts: BugReportSubmitOpts): void {
+    this.bugReportOpts = { ...this.bugReportOpts, ...opts };
   }
 
   /** Idempotent — kan kalles flere ganger uten skade. */
@@ -102,6 +130,11 @@ export class DebugEventLogPanel {
     }
     header.appendChild(filterContainer);
 
+    // 🔴 Rapporter bug nå — prominent rød knapp som bundler alt til PM.
+    const reportBugBtn = this.makeReportBugButton();
+    reportBugBtn.addEventListener("click", () => this.handleReportBug());
+    header.appendChild(reportBugBtn);
+
     // Dump + Clear knapper.
     const dumpBtn = this.makeActionButton("⬇ Dump", "Last ned JSON-rapport");
     dumpBtn.addEventListener("click", () => this.handleDump());
@@ -112,6 +145,13 @@ export class DebugEventLogPanel {
     header.appendChild(clearBtn);
 
     root.appendChild(header);
+
+    // Bug-report-status-row (kortvarig melding etter "Rapporter bug"-klikk).
+    const bugStatus = document.createElement("div");
+    bugStatus.style.cssText =
+      "color: #f88; font-size: 10px; flex: 0 0 auto; min-height: 12px;";
+    root.appendChild(bugStatus);
+    this.bugReportStatusEl = bugStatus;
 
     // Status-row (events-count + droppedCount).
     const status = document.createElement("div");
@@ -247,6 +287,174 @@ export class DebugEventLogPanel {
     this.render();
   }
 
+  /**
+   * "Rapporter bug nå" — sender klient-state + siste events + session-context
+   * til backend som genererer en samlet markdown-rapport på disk.
+   *
+   * Strategi:
+   *   1. Spør brukeren om notater (kort prompt).
+   *   2. Track event `bug.report.triggered` lokalt (havner i samme rapport).
+   *   3. Bundle klient-state + lastEvents + session-context.
+   *   4. POST til /api/_dev/debug/bug-report?token=<TOKEN>.
+   *   5. Vis bekreftelse + reportPath i UI.
+   */
+  private async handleReportBug(): Promise<void> {
+    const opts = this.bugReportOpts;
+    const token = opts.token?.trim();
+
+    if (!token) {
+      this.showBugReportStatus(
+        "⚠️ Bug-rapport-token mangler. Server-rapport sendt ikke. (Se klient-konsoll for fallback-JSON.)",
+        "warn",
+      );
+      // Fallback: dump JSON lokalt
+      this.handleDump();
+      return;
+    }
+
+    // Prompt for notes (kort, ikke-blokkerende erstattbar i framtid)
+    let notes = opts.notes;
+    if (typeof notes !== "string" && typeof window !== "undefined") {
+      const prompted = window.prompt(
+        "Beskriv buggen kort (1-2 setninger). Trykk Avbryt for å droppe.",
+        "",
+      );
+      if (prompted === null) {
+        // Brukeren avbrøt
+        this.showBugReportStatus("Avbrutt.", "info");
+        return;
+      }
+      notes = prompted;
+    }
+
+    // Sleng track før vi sender — slik at notes er med i events også
+    const triggeredAt = Date.now();
+    try {
+      this.tracker.track("error.client", {
+        kind: "bug.report.triggered",
+        notes,
+        triggeredAt,
+      });
+    } catch {
+      /* fail-soft */
+    }
+
+    // Bygg klient-state + screen-info
+    const clientState =
+      typeof opts.collectClientState === "function"
+        ? safeCall(opts.collectClientState)
+        : null;
+    const currentScreen =
+      typeof opts.collectCurrentScreen === "function"
+        ? safeCallString(opts.collectCurrentScreen)
+        : null;
+    const lastUserAction =
+      typeof opts.collectLastUserAction === "function"
+        ? safeCallString(opts.collectLastUserAction)
+        : null;
+
+    const title =
+      opts.title?.trim() ||
+      `Bug-rapport ${currentScreen ?? "(screen-ukjent)"} — ${new Date(triggeredAt).toISOString().slice(11, 19)}`;
+
+    const sessionContext = this.tracker.getSessionContext();
+    const lastEvents = this.tracker.getEvents().slice(-200);
+
+    const body = {
+      title,
+      notes,
+      sessionContext,
+      clientState,
+      currentScreen,
+      lastUserAction,
+      lastEvents,
+      url:
+        typeof window !== "undefined" && window.location
+          ? window.location.href
+          : "(unknown)",
+      userAgent:
+        typeof navigator !== "undefined" ? navigator.userAgent : "(unknown)",
+    };
+
+    this.showBugReportStatus("⏳ Sender rapport…", "info");
+
+    const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    try {
+      const url = `/api/_dev/debug/bug-report?token=${encodeURIComponent(token)}`;
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        this.showBugReportStatus(
+          `❌ Server avslo (HTTP ${response.status}): ${text.slice(0, 120)}`,
+          "warn",
+        );
+        return;
+      }
+      const json = (await response.json()) as {
+        ok: boolean;
+        data?: { reportPath?: string; sizeBytes?: number };
+      };
+      if (json.ok && json.data?.reportPath) {
+        this.showBugReportStatus(
+          `✅ Rapport sendt — PM-agenten har fått data. (${json.data.reportPath}, ${json.data.sizeBytes ?? "?"} bytes)`,
+          "ok",
+        );
+      } else {
+        this.showBugReportStatus("✅ Rapport sendt.", "ok");
+      }
+    } catch (err) {
+      this.showBugReportStatus(
+        `❌ Network-feil: ${err instanceof Error ? err.message : String(err)}`,
+        "warn",
+      );
+    }
+  }
+
+  private showBugReportStatus(
+    text: string,
+    level: "ok" | "warn" | "info",
+  ): void {
+    if (!this.bugReportStatusEl) return;
+    const colorMap = { ok: "#0f0", warn: "#f88", info: "#fc6" };
+    this.bugReportStatusEl.style.color = colorMap[level];
+    this.bugReportStatusEl.textContent = text;
+    // Auto-clear etter 12 sek for ok-meldinger
+    if (level === "ok") {
+      const el = this.bugReportStatusEl;
+      setTimeout(() => {
+        if (el && el.textContent === text) {
+          el.textContent = "";
+        }
+      }, 12000);
+    }
+  }
+
+  private makeReportBugButton(): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = "📸 Rapporter bug";
+    btn.title =
+      "Send komplett bug-rapport til PM-agenten (klient-state + events + DB + logs)";
+    btn.setAttribute("data-testid", "report-bug-now");
+    btn.style.cssText = [
+      "background: #b8281f",
+      "color: #fff",
+      "font-weight: 700",
+      "border: 1px solid #ff5c5c",
+      "border-radius: 4px",
+      "padding: 4px 10px",
+      "font-size: 11px",
+      "font-family: inherit",
+      "cursor: pointer",
+      "flex: 0 0 auto",
+      "box-shadow: 0 2px 4px rgba(255,92,92,0.4)",
+    ].join(";");
+    return btn;
+  }
+
   private makePill(mode: FilterMode): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.textContent = mode;
@@ -305,6 +513,23 @@ function escapeHtml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function safeCall(fn: () => unknown): unknown {
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
+function safeCallString(fn: () => unknown): string | null {
+  try {
+    const v = fn();
+    return typeof v === "string" ? v : v === null || v === undefined ? null : String(v);
+  } catch {
+    return null;
+  }
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
