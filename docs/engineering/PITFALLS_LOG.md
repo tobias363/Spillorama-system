@@ -661,6 +661,43 @@ Samme bugs som tok 3 dager manuelt (I8/I9/I10) ble avdekket og fikset på én au
 - Direct state-injection > URL-baserte triggers
 - Når test-flakiness sees, sjekk om timing-avhengighet er skjult
 
+### §6.9 — Scheduled Spill 1 og BingoEngine er separate state-systemer
+
+**Severity:** P2 (test-design — kritisk å forstå for E2E)
+**Oppdaget:** 2026-05-13 (Rad-vinst-test development)
+**Symptom:** `GET /api/rooms/BINGO_DEMO-PILOT-GOH` returnerte `currentGame: null` selv om scheduled-runden var `status=running`. Test-polling kunne ikke se draws-progresjon.
+**Root cause:** Spill 1 har TO separate state-systemer:
+- **BingoEngine** (in-memory) eier `roomCode → hostPlayerId-rom`-state for ad-hoc-spill (legacy). For scheduled Spill 1 brukes BingoEngine kun til player-slot-tracking, IKKE til runde-state.
+- **Game1DrawEngineService** (DB-backed) eier scheduled-runde-state via `app_game1_scheduled_games` + `app_game1_game_state`. `drawsCompleted`, `currentPhase`, `isPaused` ligger her.
+
+`/api/rooms/:code` returnerer BingoEngine-snapshot. For scheduled Spill 1 returnerer dette tomt `currentGame` fordi BingoEngine ikke har en aktiv "game" — kun en player-slot-container.
+
+**Fix:** Tester må bruke `/api/admin/game1/games/:gameId` (krever GAME1_GAME_READ) som returnerer `engineState` fra Game1DrawEngineService:
+```typescript
+const detail = await fetch(`/api/admin/game1/games/${gameId}`, { headers: { Authorization: `Bearer ${token}` } });
+// detail.data.engineState.drawsCompleted, .currentPhase, .isPaused, .pausedAtPhase
+```
+
+**Prevention:**
+- Test-design: bruk admin-API for scheduled-game-state, ikke BingoEngine-room-API
+- Doc-en (`SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`) beskriver dette, men er lett å glipp
+- Hvis du ser `currentGame: null` på et rom som SKAL ha en aktiv runde — det er ikke en bug, det er feil endpoint
+
+### §6.10 — Admin REST `/api/admin/rooms/<code>/draw-next` blokkert for scheduled Spill 1
+
+**Severity:** P3 (test-design)
+**Oppdaget:** 2026-05-13
+**Symptom:** `POST /api/admin/rooms/BINGO_DEMO-PILOT-GOH/draw-next` returnerer `USE_SCHEDULED_API: "Scheduled Spill 1 må trekkes via Game1DrawEngineService — ikke BingoEngine."`
+**Root cause:** `BingoEngine.drawNextNumber` kaster `USE_SCHEDULED_API` for scheduled Spill 1 (slug=bingo). Det finnes ingen public/admin REST-endpoint som wrapper `Game1DrawEngineService.drawNext(scheduledGameId)`. Eneste vei til scheduled draws er:
+1. Auto-tick (cron, 4s interval per `Game1AutoDrawTickService.defaultSeconds`)
+2. Socket-event `draw:next` (krever socket-connection)
+
+**Konsekvens for tester:** Kan ikke akselerere draws. Må vente på auto-tick — minimum ~100s for 25 draws.
+
+**Fix-forslag (post-pilot):** Legg til `POST /api/admin/game1/games/:gameId/draw-next` (krever GAME1_MASTER_WRITE) som wrapper `Game1DrawEngineService.drawNext`. Gir oss kontroll over draws fra tester + admin-UI for debug.
+
+**Prevention:** Test-design: bruk tids-basert polling (`while (Date.now() - start < timeout)`), ikke antall-basert (`for (i = 0 to N)`). Test-timeout 5min er nok for full Rad 1→Rad 2-flyt.
+
 ---
 
 ## §7 Frontend / Game-client

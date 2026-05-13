@@ -1,0 +1,377 @@
+/**
+ * Additional REST helpers for the Rad-vinst-flow E2E test
+ * (`tests/e2e/spill1-rad-vinst-flow.spec.ts`, Tobias-direktiv 2026-05-13).
+ *
+ * Kept in a separate file so the existing `rest.ts` baseline remains intact
+ * and the new test can import only what it needs. Public API:
+ *
+ *   - `masterPause(token, reason?)`     → REST `/api/agent/game1/master/pause`
+ *   - `masterResume(token)`             → REST `/api/agent/game1/master/resume`
+ *   - `masterAdvance(token)`            → REST `/api/agent/game1/master/advance`
+ *   - `adminDrawNext(adminToken, code)` → REST `/api/admin/rooms/<code>/draw-next`
+ *   - `getGameStateSnapshot(code)`      → GET  `/api/_dev/game-state-snapshot`
+ *   - `resetPilotStateExt(token, opts)` → reset med `destroyRooms`-flag
+ *
+ * Rationale: extending `rest.ts` in-place konflikter med parallelle agent-
+ * branches som omformer samme datatyper; helpers plasseres her isolert.
+ */
+
+import { autoLogin, masterStop } from "./rest.js";
+
+const BACKEND_URL = process.env["E2E_BACKEND_URL"] ?? "http://localhost:4000";
+
+/** Lokal kopi av master-action-respons-shape. */
+export interface MasterActionResult {
+  scheduledGameId: string;
+  planRunId: string;
+  status: string;
+  scheduledGameStatus: string;
+  inconsistencyWarnings: string[];
+}
+
+/**
+ * Master pause via REST. Brukes til å verifisere at Fortsett-flyten (resume)
+ * funker uten å avhenge av at engine auto-pauser etter Rad-vinst (demo-haller
+ * har `is_test_hall=TRUE` som bypasser auto-pause).
+ */
+export async function masterPause(
+  token: string,
+  reason = "e2e-test pause",
+): Promise<MasterActionResult> {
+  const res = await fetch(`${BACKEND_URL}/api/agent/game1/master/pause`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`masterPause failed: HTTP ${res.status} ${text}`);
+  }
+  const json = (await res.json()) as {
+    ok: boolean;
+    data?: MasterActionResult;
+    error?: { message?: string; code?: string };
+  };
+  if (!json.ok || !json.data) {
+    throw new Error(`masterPause not OK: ${JSON.stringify(json.error)}`);
+  }
+  return json.data;
+}
+
+/**
+ * Master Fortsett (resume) via REST. Tester at paused → running funker og
+ * at samme scheduled-game preserveres (ingen ny spawnes).
+ */
+export async function masterResume(
+  token: string,
+): Promise<MasterActionResult> {
+  const res = await fetch(`${BACKEND_URL}/api/agent/game1/master/resume`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`masterResume failed: HTTP ${res.status} ${text}`);
+  }
+  const json = (await res.json()) as {
+    ok: boolean;
+    data?: MasterActionResult;
+    error?: { message?: string; code?: string };
+  };
+  if (!json.ok || !json.data) {
+    throw new Error(`masterResume not OK: ${JSON.stringify(json.error)}`);
+  }
+  return json.data;
+}
+
+/**
+ * Master Advance — flytt plan-run til NESTE posisjon (eks. `bingo` →
+ * `kvikkis`). IKKE det samme som "Fortsett til neste rad" (resume).
+ */
+export async function masterAdvance(
+  token: string,
+): Promise<MasterActionResult> {
+  const res = await fetch(`${BACKEND_URL}/api/agent/game1/master/advance`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`masterAdvance failed: HTTP ${res.status} ${text}`);
+  }
+  const json = (await res.json()) as {
+    ok: boolean;
+    data?: MasterActionResult;
+    error?: { message?: string; code?: string };
+  };
+  if (!json.ok || !json.data) {
+    throw new Error(`masterAdvance not OK: ${JSON.stringify(json.error)}`);
+  }
+  return json.data;
+}
+
+/**
+ * Trekk neste kule via admin-endpoint. Akselererer test-progresjon ved å
+ * skippe 4s auto-tick. Krever ADMIN-token.
+ */
+export async function adminDrawNext(
+  adminToken: string,
+  roomCode: string,
+): Promise<{
+  roomCode: string;
+  number: number;
+  drawIndex: number;
+  gameId: string;
+}> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/admin/rooms/${encodeURIComponent(roomCode)}/draw-next`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`adminDrawNext failed: HTTP ${res.status} ${text}`);
+  }
+  const json = (await res.json()) as {
+    ok: boolean;
+    data?: {
+      roomCode: string;
+      number: number;
+      drawIndex: number;
+      gameId: string;
+    };
+    error?: { message?: string; code?: string };
+  };
+  if (!json.ok || !json.data) {
+    throw new Error(`adminDrawNext not OK: ${JSON.stringify(json.error)}`);
+  }
+  return json.data;
+}
+
+/** Subset av snapshot-respons vi bruker i tester. */
+export interface GameStateSnapshot {
+  roomCode: string;
+  engineRoom: {
+    exists: boolean;
+    currentGame: {
+      id: string;
+      status: string;
+      drawnCount: number;
+      drawnNumbers: number[];
+      drawBagRemaining: number;
+      endedReason: string | null;
+      isPaused: boolean;
+      pauseReason: string | null;
+      claimsCount: number;
+    } | null;
+  } | null;
+  scheduledGame: {
+    id: string;
+    status: string;
+  } | null;
+  gameState: {
+    scheduledGameId: string;
+    drawsCompleted: number;
+    currentPhase: number;
+    paused: boolean;
+  } | null;
+  socketRoomSize: number;
+}
+
+/**
+ * Snapshot fra `/api/_dev/game-state-snapshot`. Krever
+ * `RESET_TEST_PLAYERS_TOKEN` env-var satt på backend.
+ *
+ * Returnerer null hvis token ikke konfigurert eller request feiler — tester
+ * kan da fall-back til `getRoomSnapshotJson` istedenfor (public route).
+ */
+export async function getGameStateSnapshot(
+  roomCode: string,
+  token?: string,
+): Promise<GameStateSnapshot | null> {
+  const devToken = token ?? process.env["RESET_TEST_PLAYERS_TOKEN"] ?? "";
+  if (!devToken) return null;
+  const res = await fetch(
+    `${BACKEND_URL}/api/_dev/game-state-snapshot?roomCode=${encodeURIComponent(roomCode)}&token=${encodeURIComponent(devToken)}`,
+  );
+  if (!res.ok) return null;
+  const json = (await res.json()) as Record<string, unknown>;
+  if (typeof json === "object" && json !== null && "roomCode" in json) {
+    return json as unknown as GameStateSnapshot;
+  }
+  return null;
+}
+
+/**
+ * Room snapshot via `GET /api/rooms/:roomCode` — public route, ingen auth
+ * påkrevd. Returnerer engine room state inkludert
+ * `currentGame.drawnNumbers`, `currentGame.claims`, `currentGame.status` osv.
+ *
+ * Brukes som fallback når `RESET_TEST_PLAYERS_TOKEN` ikke er satt for å gi
+ * Rad-vinst-testen tilgang til engine-state. Mindre detaljert enn _dev-
+ * snapshot (mangler scheduled-game-rad og game-state-tabell) men dekker
+ * testen vår godt nok (drawn-count + claims-array + status).
+ */
+export interface RoomSnapshot {
+  code: string;
+  hallId: string;
+  gameSlug: string;
+  hostPlayerId: string;
+  currentGame: {
+    id: string;
+    status: string; // "WAITING" | "RUNNING" | "ENDED"
+    drawnNumbers: number[];
+    claims: Array<{
+      id: string;
+      playerId: string;
+      type: string;
+      patternName: string;
+      payoutAmount?: number;
+    }>;
+    endedReason?: string | null;
+    isPaused?: boolean;
+    pauseReason?: string | null;
+  } | null;
+  players: Array<{
+    id: string;
+    walletId: string;
+    hallId: string;
+    balance: number;
+  }>;
+}
+
+export async function getRoomSnapshotJson(
+  roomCode: string,
+): Promise<RoomSnapshot | null> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/rooms/${encodeURIComponent(roomCode)}`,
+  );
+  if (!res.ok) return null;
+  let json;
+  try {
+    json = (await res.json()) as {
+      ok: boolean;
+      data?: RoomSnapshot;
+    };
+  } catch {
+    return null;
+  }
+  if (!json.ok || !json.data) return null;
+  return json.data;
+}
+
+/**
+ * Admin game detail via `GET /api/admin/game1/games/:gameId` (krever
+ * ADMIN/AGENT-auth med GAME1_GAME_READ). Returnerer engineState fra
+ * Game1DrawEngineService (drawsCompleted, currentPhase, isPaused, etc).
+ *
+ * Brukes som primær state-source for Rad-vinst-testen siden /api/rooms/
+ * (BingoEngine) returnerer null for scheduled Spill 1 (separate engines —
+ * BingoEngine eier hostPlayerId-rom mens Game1DrawEngineService eier
+ * scheduled-runde-state).
+ */
+export interface GameDetail {
+  game: {
+    id: string;
+    status: string; // "scheduled" | "purchase_open" | "ready_to_start" | "running" | "paused" | "completed" | "cancelled"
+    masterHallId: string;
+    groupHallId: string | null;
+    actualStartTime: string | null;
+    actualEndTime: string | null;
+  };
+  engineState: {
+    isPaused: boolean;
+    pausedAtPhase: number | null;
+    currentPhase: number;
+    drawsCompleted: number;
+    isFinished: boolean;
+  } | null;
+}
+
+export async function getGameDetail(
+  token: string,
+  gameId: string,
+): Promise<GameDetail | null> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/admin/game1/games/${encodeURIComponent(gameId)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  if (!res.ok) return null;
+  let json;
+  try {
+    json = (await res.json()) as {
+      ok: boolean;
+      data?: GameDetail;
+    };
+  } catch {
+    return null;
+  }
+  if (!json.ok || !json.data) return null;
+  return json.data;
+}
+
+/** Options for `resetPilotStateExt`. */
+export interface ResetPilotStateOptions {
+  destroyRooms?: boolean;
+}
+
+/**
+ * Pilot-test-utvidet variant av `resetPilotState` med `destroyRooms`-flag.
+ * Default: `destroyRooms: true`. Pass `{ destroyRooms: false }` for å skippe
+ * nuke-steget — nyttig i tester som ikke vil rive ned rom.
+ *
+ * Wrapping istedenfor å erstatte original `resetPilotState` for å unngå
+ * cross-branch conflicts.
+ */
+export async function resetPilotStateExt(
+  masterToken: string,
+  options: ResetPilotStateOptions = {},
+): Promise<void> {
+  const destroyRooms = options.destroyRooms ?? true;
+
+  await masterStop(masterToken).catch(() => {
+    /* ignore — no active round */
+  });
+
+  if (!destroyRooms) {
+    return;
+  }
+
+  const admin = await autoLogin("tobias@nordicprofil.no").catch(() => null);
+  if (admin) {
+    const ROOMS_TO_NUKE = [
+      "BINGO_DEMO-PILOT-GOH",
+      "BINGO_DEMO-DEFAULT-GOH",
+    ];
+    for (const code of ROOMS_TO_NUKE) {
+      await fetch(
+        `${BACKEND_URL}/api/admin/rooms/${encodeURIComponent(code)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${admin.accessToken}` },
+        },
+      ).catch(() => {
+        /* ignore — room might already be gone */
+      });
+    }
+  }
+}
