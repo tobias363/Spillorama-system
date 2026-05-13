@@ -679,14 +679,24 @@ export class PlayScreen extends Container {
     // aggregator har levert ticket-data selv om `room:update` ikke har
     // kommet enda (typisk pre-game / før master starter runden).
     //
-    // Wait-on-master-fix (Agent B, 2026-05-12, Alternativ B): blokker
-    // auto-show når `waitingForMasterPurchase=true` (scheduled-game ennå
-    // ikke spawnet av bridge). Spilleren ser disabled-knapper i Center-
-    // Top med "Venter på master"-tekst og kan ikke arme bonger via
-    // `bet:arm` som ville blitt foreldreløs ved senere bridge-spawn.
-    // `autoShowBuyPopupDone` settes IKKE til true her — neste `update()`
-    // etter `setWaitingForMasterPurchase(false)` får lov til å åpne
-    // popup-en.
+    // Wait-on-master-state (Tobias-direktiv 2026-05-13): popup MÅ vises på
+    // FØRSTE runde også — uavhengig av om scheduled-game er spawnet enda.
+    // Server har nå `Game1ArmedToPurchaseConversionService` som trygt
+    // konverterer armed bonger til purchases ved master-start, så vi kan
+    // la spilleren arm bonger FØR scheduled-game eksisterer uten å skape
+    // foreldreløse armed-tickets. `waitingForMasterPurchase`-flag brukes
+    // fortsatt til å disable CenterTop-knapper (via `setPreBuyDisabled`)
+    // men er IKKE lenger en popup-gate-blokker.
+    //
+    // Historisk skade (FRAGILITY F-01):
+    // - PR #1255 Alternativ B (2026-05-12): la inn waitingForMasterPurchase-
+    //   blokker → Tobias-rapport 2026-05-12: "Det kom ingen popup når jeg
+    //   først gikk inn i spillet."
+    // - PR #1276 (2026-05-12): forsøkte å fjerne via setWaitingForMaster
+    //   propagation til BuyPopup — men hele gate-conditionen var fortsatt
+    //   blokker.
+    // - Denne PR (2026-05-13): fjerner `!waitingForMasterPurchase` helt
+    //   fra gate. Buy-knapp disabling håndteres av popup's egen state.
     const hasLive = running && state.myTickets.length > 0;
     const stateTicketTypesCount = state.ticketTypes.length;
     const lobbyTicketTypesCount = this.lobbyTicketConfig?.ticketTypes.length ?? 0;
@@ -708,11 +718,14 @@ export class PlayScreen extends Container {
       running,
     };
 
+    // Popup-gate (Tobias-direktiv 2026-05-13): vises uavhengig av
+    // `waitingForMasterPurchase`. Spiller kan arm bonger før scheduled-
+    // game spawnes; server konverterer armed → purchases ved master-start
+    // via `Game1ArmedToPurchaseConversionService`.
     const willOpen =
       !this.autoShowBuyPopupDone
       && !hasLive
       && hasTicketTypes
-      && !this.waitingForMasterPurchase
       && preRoundTicketsCount === 0;
 
     // Tobias-bug 2026-05-13 (post-pilot-test): popup vises ikke ved manuell
