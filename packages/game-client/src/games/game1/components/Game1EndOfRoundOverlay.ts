@@ -344,6 +344,30 @@ export class Game1EndOfRoundOverlay {
     this.hide();
     this.visible = true;
 
+    // Observability fix-PR 2026-05-13: track end-of-round-overlay-show
+    // som screen.mount så monitor / dump-rapport ser når runden gikk over
+    // til ENDED-fase fra klient-perspektiv. Fail-soft.
+    try {
+      void import("../debug/EventTracker.js")
+        .then((mod) => {
+          try {
+            mod.getEventTracker().track("screen.mount", {
+              screen: "Game1EndOfRoundOverlay",
+              endedReason: summary.endedReason ?? null,
+              patternResultCount: summary.patternResults.length,
+              ownRoundWinnings: summary.ownRoundWinnings ?? null,
+            });
+          } catch {
+            /* best-effort */
+          }
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    } catch {
+      /* best-effort */
+    }
+
     const root = document.createElement("div");
     Object.assign(root.style, {
       position: "fixed",

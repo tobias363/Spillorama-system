@@ -53,7 +53,21 @@ export type EventType =
   | "popup.autoShowGate"
   | "popup.show"
   | "popup.hide"
-  | "screen.mount";
+  | "screen.mount"
+  // Observability fix-PR 2026-05-13: bygge full debugging-instrumentering
+  // slik at vi slutter å gjette på pilot-bugs. Disse erstatter / utvider
+  // hvilke signaler EventTracker capturer:
+  //   - `screen.transition` — bytte fra én screen til en annen (i Game1
+  //     handler: LOADING → WAITING → PLAYING → ENDED). Komplementerer
+  //     `screen.mount` som fyrer på første-render.
+  //   - `rest.fetch` — HTTP-request via wrappet fetch (REST-flyt for
+  //     ticket-purchase + lobby + master-actions).
+  //   - `room.update.full` — komplett room:update-payload (chunked til
+  //     2KB max per entry hvis nødvendig — vi vil ha hele payloaden i
+  //     diagnose-rapporten, ikke kun payloadKeys).
+  | "screen.transition"
+  | "rest.fetch"
+  | "room.update.full";
 
 export interface TrackedEvent {
   /** Monotont voksende ID (within session). Format: `evt-<n>`. */
@@ -389,4 +403,81 @@ export function pickSafeFields(
     }
   }
   return out;
+}
+
+// ── Large-payload chunking (observability fix-PR 2026-05-13) ─────────────
+
+/**
+ * Max bytes per event-payload-fragment når vi tracker en stor payload
+ * (eks. full room:update). 2 KB matcher Tobias-direktiv om å chunk-e
+ * istedenfor å droppe — slik at vi ser hele snapshoten i diagnose-fil
+ * uten å OOM-e ring-bufferen på lange sesjoner.
+ *
+ * 2 KB er rikelig for normale snapshots (<= 50 keys ≈ 1-1.5 KB). Vi
+ * chunker kun når snapshoten er over thresholden — small snapshots
+ * tracked som ett enkelt event.
+ */
+const LARGE_PAYLOAD_CHUNK_BYTES = 2048;
+
+/**
+ * Track a potentially large payload by chunking til ~2KB per event slik at
+ * monitor / dump kan rekonstruere hele payloaden uten å sprenge ring-
+ * bufferen. Returnerer event-IDene for alle chunks.
+ *
+ * Bruks-mønster:
+ *   trackLargePayload(tracker, "room.update.full", { roomCode, snapshot });
+ *
+ * Implementasjon: JSON.stringify payload, split i N substring-chunks
+ * (string-level, ikke UTF-8-byte-presist — godt nok for diagnose).
+ * Hver chunk får `chunkIndex`, `chunkCount`, og `correlationId` slik at
+ * monitor kan slå dem sammen igjen.
+ *
+ * Fail-soft: ved sirkulær referanse logger vi en `chunked.error`-marker
+ * og skipper. Tracker krasher aldri caller.
+ */
+export function trackLargePayload(
+  tracker: EventTracker,
+  type: EventType,
+  payload: Record<string, unknown>,
+  options: { correlationId?: string; traceId?: string } = {},
+): string[] {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(payload);
+  } catch (err) {
+    tracker.track(type, {
+      __chunked: true,
+      __chunkError: String((err as Error)?.message ?? err),
+      payloadKeys: payload && typeof payload === "object" ? Object.keys(payload) : [],
+    });
+    return [];
+  }
+
+  if (serialized.length <= LARGE_PAYLOAD_CHUNK_BYTES) {
+    // Liten nok til ett event — bruk normal track-path.
+    return [tracker.track(type, payload, options)];
+  }
+
+  const correlationId =
+    options.correlationId ??
+    `chunked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const chunks: string[] = [];
+  for (let i = 0; i < serialized.length; i += LARGE_PAYLOAD_CHUNK_BYTES) {
+    chunks.push(serialized.slice(i, i + LARGE_PAYLOAD_CHUNK_BYTES));
+  }
+  const ids: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const id = tracker.track(
+      type,
+      {
+        __chunked: true,
+        chunkIndex: i,
+        chunkCount: chunks.length,
+        chunk: chunks[i],
+      },
+      { correlationId, traceId: options.traceId },
+    );
+    ids.push(id);
+  }
+  return ids;
 }

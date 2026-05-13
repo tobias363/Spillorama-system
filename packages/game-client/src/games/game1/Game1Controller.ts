@@ -73,6 +73,12 @@ import {
   initPostHog as initClientPostHog,
   trackEvent as posthogTrackEvent,
 } from "../../observability/posthogBootstrap.js";
+// OBS-1 (cascade-merge 2026-05-14): FetchBridge er supersedet av
+// FetchInstrument over (samme wrapper-mønster, mer komplett med
+// correlationId + sanitized payloads). Importen er bevisst dropped
+// her — filen apps/backend/.../FetchBridge.ts er behold som dead code
+// til vi sletter den i en cleanup-PR. Rrweb-imports er også droppet:
+// RrwebRecorder wirer seg selv inn via installDebugSuite (#1382 merge).
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -1227,6 +1233,7 @@ class Game1Controller implements GameController {
     // FetchInstrument (Tobias-direktiv 2026-05-13): wrapper rundt
     // globalThis.fetch — logger alle REST-kall til EventTracker.
     // Gated på debug-flagg, idempotent, fail-soft.
+    // (OBS-1 FetchBridge supersedet — samme wrapper-mønster men eldre.)
     try {
       installFetchInstrument();
     } catch (err) {
@@ -1272,6 +1279,32 @@ class Game1Controller implements GameController {
         // bare logger warn og fortsetter uten streaming.
         console.warn("[Game1] EventStreamer start feilet:", err);
         this.debugEventStreamer = null;
+      }
+    }
+
+    // Rrweb DOM session-replay (Tobias-direktiv 2026-05-13). Lar PM-agent
+    // se NØYAKTIG hva Tobias så som video — DOM-mutations, mouse, scroll,
+    // input — komplementerer EventStreamer (data-events) med visuell replay.
+    // Lazy-loader rrweb (~80 KB) først ved start(), så prod-bundle uten
+    // ?debug=1 ikke trekker det inn. Fail-soft: hvis rrweb mangler eller
+    // backend er nede, logger vi warn og fortsetter uten replay.
+    if (!getRrwebRecorder()) {
+      try {
+        const recorder = setupRrwebRecorder({
+          token: this.resolveDebugStreamToken(),
+          // Default endpoint /api/_dev/debug/rrweb-events
+          // Default flushIntervalMs 2000
+          // Default recordCanvas true (fange Pixi.js-rendering)
+        });
+        // start() er async; fire-and-forget — controller blokkerer ikke
+        // på rrweb-init. Fail-soft inni recorder.
+        void recorder.start().catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn("[Game1] RrwebRecorder start feilet:", err);
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[Game1] RrwebRecorder setup feilet:", err);
       }
     }
   }
@@ -1403,6 +1436,14 @@ class Game1Controller implements GameController {
         // Best-effort.
       }
       this.debugEventStreamer = null;
+    }
+    // Rrweb DOM session-replay teardown (Tobias-direktiv 2026-05-13).
+    // resetRrwebRecorder() kaller stop() + clearer singleton — neste mount
+    // får en frisk recorder.
+    try {
+      resetRrwebRecorder();
+    } catch {
+      // Best-effort.
     }
   }
 
@@ -1568,6 +1609,24 @@ class Game1Controller implements GameController {
       myTicketCount: state.myTickets.length,
     });
 
+    // OBS-1 (cascade-merge 2026-05-14): KOMPLEMENTERER PostHog-eventen over —
+    // skriver samme transition også til lokal EventTracker (→ jsonl). Bra ved
+    // off-line debugging og bug-rapport-bundle som ikke har internett til
+    // PostHog. Fail-soft — tracker er best-effort.
+    const previousPhase = this.phase;
+    try {
+      if (previousPhase !== phase) {
+        getEventTracker().track("screen.transition", {
+          from: previousPhase,
+          to: phase,
+          gameStatus: state.gameStatus,
+          drawIndex:
+            (state as { drawnNumbers?: unknown[] }).drawnNumbers?.length ?? 0,
+        });
+      }
+    } catch {
+      /* tracker er best-effort */
+    }
     this.phase = phase;
 
     const w = this.deps.app.app.screen.width;
