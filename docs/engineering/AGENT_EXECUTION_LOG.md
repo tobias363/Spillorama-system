@@ -59,6 +59,44 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-13 — Knowledge backup daily (general-purpose agent, PM-AI)
+
+**Scope:** Bygge daglig immutable backup av kunnskaps-artefakter (FRAGILITY_LOG, PITFALLS_LOG, BUG_CATALOG, AGENT_EXECUTION_LOG, skills) som lightweight git-tags `knowledge/YYYY-MM-DD`. Kompletterende sikkerhetsnett til de eksisterende kunnskaps-systemene — sikrer rask rollback ved korrupsjon eller utilsiktet sletting.
+
+**Inputs gitt:**
+- Mandat: ny workflow + 2 scripts + dokumentasjon, ingen PR-opprettelse
+- Branch: `feat/knowledge-backup-daily-2026-05-13` fra `origin/main`
+- Pekere til `KNOWLEDGE_AUTONOMY_PROTOCOL.md`, `FRAGILITY_LOG.md`, `auto-generate-docs.yml`
+- Estimat: 1-2 timer
+
+**Outputs produsert:**
+- Branch: `feat/knowledge-backup-daily-2026-05-13`
+- Commit: `<SHA>` — `feat(autonomy): daglig knowledge-backup snapshot via tags`
+- Filer:
+  - `.github/workflows/knowledge-backup-daily.yml` (ny) — cron 02:00 UTC, idempotent
+  - `scripts/restore-knowledge.sh` (ny) — `--tag` + `--reason` påkrevd, interaktiv default + `--yes` for unattended
+  - `scripts/list-knowledge-snapshots.sh` (ny) — lister alle `knowledge/*`-tags
+  - `docs/engineering/KNOWLEDGE_BACKUP_RESTORE.md` (ny) — komplett guide
+
+**Fallgruver oppdaget:**
+- Ingen nye fallgruver. Mønstret følger `auto-generate-docs.yml`-konvensjonen (cron + `contents: write`).
+
+**Læring:**
+- Annotated tags (`git tag -a`) gir oss metadata (forfatter, dato, melding) gratis. Lightweight tags ville fungert, men annotated er ~500 bytes vs 50 bytes — neglisjerbar forskjell mot fordelen av sporbarhet.
+- Idempotens på workflow-nivå (sjekk `git rev-parse --verify --quiet refs/tags/$TAG`) er kritisk for `workflow_dispatch`-bruk uten å feile første kjøring som already-tagged.
+- `--reason` påkrevd i restore-script tvinger audit-disiplin — uten det glemmer PM hvorfor de rullet tilbake.
+- `git checkout <tag> -- <files>` kopierer både til working tree og index, men sletter ikke filer som har dukket opp etter tag. Skills-katalogen kan ha fått nye filer, så vi tar med hele `.claude/skills/`-treet og lar `git add` håndtere diff-en.
+
+**Verifisering (PM):**
+- Lokalt: `actionlint .github/workflows/knowledge-backup-daily.yml` for YAML-validitet
+- Lokalt: `bash scripts/list-knowledge-snapshots.sh` → forventet "Ingen knowledge/*-tags funnet"
+- Lokalt: `bash scripts/restore-knowledge.sh --tag knowledge/9999-99-99 --reason "test"` → forventet "Tag not found"
+- Workflow kjøres første gang via `gh workflow run knowledge-backup-daily.yml` etter merge til main
+
+**Tid:** ~75 min
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
