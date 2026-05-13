@@ -15,6 +15,7 @@ import { ChatPanelV2 } from "../components/ChatPanelV2.js";
 import { CalledNumbersOverlay } from "../components/CalledNumbersOverlay.js";
 import { Game1BuyPopup } from "../components/Game1BuyPopup.js";
 import { CenterBall } from "../components/CenterBall.js";
+import { getEventTracker } from "../debug/EventTracker.js";
 import { stakeFromState } from "../logic/StakeCalculator.js";
 import { calculateMyRoundWinnings } from "../logic/WinningsCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
@@ -728,6 +729,17 @@ export class PlayScreen extends Container {
         "[BUY-DEBUG][client][PlayScreen.autoShowGate]",
         { willOpen, ...gateConditions },
       );
+    }
+
+    // Tobias-direktiv 2026-05-13: Live-monitor må kunne SE gate-state for
+    // å detektere popup-mismatch i sanntid. EventTracker pusher events til
+    // /api/_dev/debug/events (PR #1265) hvert 2. sek, så monitor-agenten
+    // som poller /tail får tilgang umiddelbart. Track ALLTID — ikke gated
+    // på ?debug=1 — fordi monitor er primær observability-kanal.
+    try {
+      getEventTracker().track("popup.autoShowGate", { willOpen, ...gateConditions });
+    } catch {
+      /* tracker singleton kan være null før Controller.start() — safe to skip */
     }
 
     if (willOpen) {

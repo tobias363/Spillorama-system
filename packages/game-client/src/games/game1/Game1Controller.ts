@@ -59,6 +59,7 @@ import { DebugEventLogPanel } from "./debug/DebugEventLogPanel.js";
 // hvert 2. sek til backend slik at en live-monitoring-agent kan lese
 // dem mens Tobias tester. Beholder dump-knappen som fallback.
 import { EventStreamer } from "./debug/EventStreamer.js";
+import { installConsoleBridge } from "./debug/ConsoleBridge.js";
 
 /**
  * Legacy fallback timeout for stuck-ENDED-state recovery. Tobias UX-mandate
@@ -1105,6 +1106,20 @@ class Game1Controller implements GameController {
         // Panel-mount er best-effort; må ikke ta ned spillet.
         console.warn("[Game1] DebugEventLogPanel mount feilet:", err);
       }
+    }
+
+    // ConsoleBridge (Tobias-direktiv 2026-05-13): pipe relevant client-
+    // console-output ([BUY-DEBUG], [ROOM], [CLI-BINGO], etc.) til
+    // EventTracker så server-side monitor-agent ser samme data som Tobias
+    // ser i devtools. Gated på ?debug=1, idempotent installasjon, inert
+    // i prod. MUST komme FØR EventStreamer.start() så første console-
+    // bridged events også når streameren.
+    try {
+      installConsoleBridge();
+    } catch (err) {
+      // Bridge er best-effort — fail-soft.
+      // eslint-disable-next-line no-console
+      console.warn("[Game1] installConsoleBridge feilet:", err);
     }
 
     // Auto-stream tracker-events til backend (Tobias-direktiv 2026-05-12).
