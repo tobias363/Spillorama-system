@@ -1084,6 +1084,54 @@ Verifisert via test:
 
 ---
 
+### 2026-05-13 — PR-template audit + restrukturering (general-purpose agent, PM-AI)
+
+**Scope:** Audit `.github/pull_request_template.md` etter cascade-merges fra PR #1335 (comprehension), #1338 (bug-resurrection), #1333 (Tobias-readiness). Identifiser duplikate seksjoner, motsigelser, stale referanser. Restrukturer til ren, logisk struktur (≤ 100 linjer mål, maks 110) uten å bryte workflow-markers.
+
+**Inputs gitt:**
+- Mandat: ny branch `fix/pr-template-audit-2026-05-13` fra origin/main, ikke åpne PR
+- Pekere til alle 4 workflows som parser template (`pm-gate-enforcement.yml`, `bug-resurrection-check.yml`, `delta-report-gate.yml`, `ai-fragility-review.yml`)
+- Foreslått ny struktur (Summary → Scope → Risk → PM-gate → Knowledge protocol → Testing → Tobias smoke-test note → Deploy → Done-policy)
+
+**Outputs produsert:**
+- Branch: `fix/pr-template-audit-2026-05-13` (ikke pushet — per prompt-instruks)
+- Fil: `.github/pull_request_template.md` (oppdatert: 117 → 108 linjer; −78 linjer / +69 linjer; netto −9)
+- Verifisering: alle 9 workflow-markers funnet via grep (gate-confirmed, Main-SHA, gate-bypass, gate-not-applicable, resurrection-acknowledged, resurrection-bypass, resurrection-not-applicable, bypass-delta-report, comprehension-bypass)
+- Workflow-regex-test: simulert fylt-ut PR-body med 4 markers og bekreftet at hver workflow sin `grep -oE`-regex matcher korrekt
+- Placeholder-detection (`__paste_sha_here__`) fortsatt aktiv → PM-gate vil avvise om feltet ikke fylles ut
+
+**Endringer (struktur):**
+- Summary nå FØRST (var seksjon 4)
+- PM-onboarding-blokken (var seksjon 1, 26 linjer) konsolidert til `## PM-gate marker` med kortform-alternativer i HTML-kommentar
+- Knowledge protocol, Delta-report, FRAGILITY-comprehension og Bug-resurrection slått sammen under én `## Knowledge protocol`-paraply (var 4 separate seksjoner)
+- ADR-checkbox flyttet ut av Knowledge-protocol til egen `## Architecture Decision Records`-seksjon (≥ 2 agenter/services-vurdering)
+- Tobias smoke-test-notatet flyttet fra blockquote i Testing-seksjon til HTML-kommentar etter Testing (samme meldingsinnhold, mindre visuell støy)
+- Done-policy beholdt, men ryddet referanse-lenken
+
+**Fallgruver oppdaget:**
+- §8 (Doc-disiplin) — Cascade-merges av PRer som rør samme fil gir rotete struktur når senere PR-er ikke konsoliderer eksisterende seksjoner. Anbefaling: når en PR legger til en seksjon i et delt template, sjekk om en eksisterende seksjon kan utvides istedet.
+
+**Læring:**
+- Audit-tilnærming: lese hver workflow først for å ekstrahere regex-markers FØR rewrite reduserer risiko for å bryte CI-gates
+- Workflow-regexes er case-sensitive på noen markers (gate-*) og case-insensitive på andre (resurrection-*) — bevart begge i ny template
+- HTML-kommentarer (`<!-- ... -->`) brukes både for instruksjoner til PR-forfatter OG for kortform-markers (gate-confirmed) — funker i `grep` fordi GitHub viser kommentaren rå i PR-body
+- Verken comprehension-gate eller knowledge-protocol-gate finnes som CI-workflows; håndhevelse er kun via husky pre-commit + manuell checkbox
+
+**Eierskap:**
+- `.github/pull_request_template.md`
+
+**Verifisering (PM-skal-gjøre):**
+- [ ] Lag draft-PR mot main; verifiser at template rendres korrekt
+- [ ] Bekreft at `pm-gate-enforcement.yml` finner gate-marker (fyll inn Main-SHA-feltet)
+- [ ] Bekreft at `bug-resurrection-check.yml` finner ack-markers (mock med `Resurrection acknowledged: test` i body)
+- [ ] Bekreft at `delta-report-gate.yml` finner `[bypass-delta-report: test]`-marker
+- [ ] Bekreft at `ai-fragility-review.yml` auto-injicerer Tobias-readiness-section (idempotent på edit)
+- [ ] Bekreft at draft-PR ikke får falsk-blokk fra workflows som tidligere fungerte
+
+**Tid:** ~30 min agent-arbeid
+
+---
+
 ## Relaterte dokumenter
 
 - [`PITFALLS_LOG.md`](./PITFALLS_LOG.md) — sentral fallgruve-katalog

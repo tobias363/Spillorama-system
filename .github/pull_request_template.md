@@ -1,117 +1,108 @@
-## PM-onboarding-bekreftelse (mandatory for PM-AI)
-
-> Velg **én** av de tre boksene under. Hvis du er PM-AI som koordinerer prosjektet på toppen,
-> har du forbud mot å åpne PR uten passert onboarding-gate. Se `CLAUDE.md` topp-blokk og
-> `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` §3 for detaljer.
-
-- [ ] **Jeg er PM-AI** og `bash scripts/pm-checkpoint.sh --validate` returnerte exit 0 før første
-  kode-handling i denne sesjonen. Main-SHA i `.pm-onboarding-confirmed.txt`: `__paste_sha_here__`
-- [ ] **Jeg er en agent under PM-koordinering** (PM-AI har spawnet meg) og PM har bekreftet at
-  onboarding-gate er passert.
-- [ ] **Jeg er ikke PM** (Tobias / ekstern utvikler / Dependabot / annet). Onboarding-gate
-  gjelder ikke for meg.
-
-<!--
-  PM-Gate Workflow Marker (verifiseres av .github/workflows/pm-gate-enforcement.yml)
-
-  Workflow-en aksepterer ETT av:
-    - Checkbox over m/faktisk SHA (BIN-PM-VT-format)
-    - gate-confirmed: <hash-prefix>      # 12-tegn-hash fra docs/.pm-confirmations.log
-    - gate-bypass: <begrunnelse>         # Eksplisitt bypass m/Tobias-godkjenning
-    - gate-not-applicable: <rolle>       # Tobias selv / docs-only / dependabot / ci-bot
-
-  Detaljer: docs/operations/PM_PR_VERIFICATION_DUTY.md
--->
-
-<!-- valgfritt for kortform: gate-confirmed: __hash_or_remove__ -->
-
 ## Summary
-- 
+
+<!-- 1-3 sentninger: hva endrer denne PR-en og hvorfor? -->
+-
 
 ## Scope
+
 - [ ] apps/backend
 - [ ] apps/admin-web
 - [ ] packages/game-client
 - [ ] packages/shared-types
-- [ ] DevOps/CI
+- [ ] DevOps / CI
 - [ ] docs/
 
 ## Risk
+
 - [ ] Low
 - [ ] Medium
 - [ ] High
 
+## PM-gate marker
+
+> Velg **én**. Detaljer: [`docs/operations/PM_PR_VERIFICATION_DUTY.md`](../docs/operations/PM_PR_VERIFICATION_DUTY.md). Workflow: `.github/workflows/pm-gate-enforcement.yml`.
+
+- [ ] **PM-AI** — `bash scripts/pm-checkpoint.sh --validate` returnerte exit 0. Main-SHA i `.pm-onboarding-confirmed.txt`: `__paste_sha_here__`
+- [ ] **Agent under PM-koordinering** — PM har bekreftet at onboarding-gate er passert
+- [ ] **Ikke PM** (Tobias / ekstern utvikler / Dependabot) — onboarding-gate gjelder ikke
+
+<!-- Kortform-alternativer (workflow aksepterer disse i stedet for checkbox):
+gate-confirmed: <hash-prefix>      # 12-tegn-hash fra docs/.pm-confirmations.log
+gate-bypass: <begrunnelse>         # Eksplisitt bypass m/Tobias-godkjenning
+gate-not-applicable: <rolle>       # Tobias selv / docs-only / dependabot / ci-bot
+-->
+
+## Knowledge protocol
+
+> Tobias-direktiv 2026-05-13. Gjelder pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet).
+
+**Post-work-disiplin** — bekreft minst ett:
+
+- [ ] `PITFALLS_LOG.md` oppdatert ELLER ingen ny fallgruve oppdaget
+- [ ] `PM_HANDOFF_YYYY-MM-DD.md`-utkast skrevet ELLER ikke sesjons-slutt
+- [ ] Relevant skill under `.claude/skills/` oppdatert ELLER ikke generaliserbart mønster
+- [ ] `AGENT_EXECUTION_LOG.md` appended hvis denne PR-en kommer fra agent-leveranse
+
+**Delta-rapport** — kreves når pilot-kode endres (`docs/delta/YYYY-MM-DD-<branch>.md`). Workflow: `.github/workflows/delta-report-gate.yml`. Bypass-marker (sjelden):
+
+```
+[bypass-delta-report: <begrunnelse>]
+```
+
+**FRAGILITY-comprehension** — hvis commits har `[context-read: F-NN]`-tagger:
+
+- [ ] Hver tag har tilhørende `## Comprehension`-blokk i commit-message (≥ 1 regel fra "Hva ALDRI gjøre")
+- [ ] Eventuelle `[comprehension-bypass: ...]` er forklart i PR-beskrivelsen (≥ 20 tegn)
+
+Detaljer: [`docs/engineering/COMPREHENSION_VERIFICATION.md`](../docs/engineering/COMPREHENSION_VERIFICATION.md).
+
+**Bug-resurrection** — workflow blokkerer hvis endrede linjer SIST ble endret av `fix(...)`-commit innen 30 dager uten ack. Velg én hvis applicable:
+
+- [ ] Ingen overlap (detector vil gi grønt)
+- [ ] Acknowledged i commit-melding (`[resurrection-acknowledged: <grunn>]`)
+- [ ] Acknowledged her: <!-- Resurrection acknowledged: <forklar overlap og hvorfor intensjonell> -->
+
+<!-- Emergency-bypass (sjelden, krever Tobias-godkjenning):
+resurrection-bypass: <begrunnelse>
+resurrection-not-applicable: <rolle>      # docs-only / dependabot / ci-bot
+-->
+
+Detaljer: [`docs/engineering/BUG_RESURRECTION_DETECTOR.md`](../docs/engineering/BUG_RESURRECTION_DETECTOR.md).
+
+## Architecture Decision Records (ADR)
+
+- [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, er en ADR opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se [`docs/adr/README.md`](../docs/adr/README.md).)
+
 ## Testing
+
 - [ ] `npm --prefix apps/backend run check`
 - [ ] `npm --prefix apps/backend run test`
 - [ ] `npm --prefix apps/backend run test:compliance`
 - [ ] `npm --prefix apps/backend run build`
-- [ ] Manual verification completed
+- [ ] Manuell verifikasjon utført
 
-> **Tobias smoke-test auto-genereres:** Etter at PR-en er opprettet, vil `ai-fragility-review.yml` poste en kommentar med "🎯 Tobias smoke-test"-seksjon basert på endrede filer. Sjekk at de auto-genererte stegene matcher faktisk endring. Hvis du synes scenariet ikke passer, legg en eksplisitt "Smoke-test"-seksjon i PR-beskrivelsen. Format-spec: `docs/engineering/TOBIAS_READINESS_FORMAT.md`.
+<!-- 🎯 Tobias smoke-test auto-genereres av .github/workflows/ai-fragility-review.yml som
+     PR-kommentar etter opprettelse. Hvis scenariet ikke passer, legg en eksplisitt
+     "Smoke-test"-seksjon under. Format-spec: docs/engineering/TOBIAS_READINESS_FORMAT.md -->
 
 ## Deploy Plan
+
 - Render environment: `staging` / `production`
-- Health endpoint checked: `/health`
+- Health endpoint: `/health`
 - Rollback plan:
 
 ## Done-policy
 
-Before marking a Linear issue **Done**, all three must be true:
+Før Linear-issue markeres **Done**, alle tre må være sanne:
 
-- [ ] Commit-SHA is **merged to `main`** (not only on a feature-branch). Paste the merge commit SHA in the closing comment.
-- [ ] Exact `file:line` reference (`apps/backend/...`, `packages/...`) is in the issue comment, proving the change.
-- [ ] Test that verifies the behaviour is green in CI (link to CI run if possible).
+- [ ] Commit-SHA er **merget til `main`** (ikke kun feature-branch). Lim inn merge-commit-SHA i closing comment.
+- [ ] `file:line`-referanse (`apps/backend/...`, `packages/...`) i issue-kommentar dokumenterer endringen.
+- [ ] Test som verifiserer atferd er grønn i CI (link til CI-run hvis mulig).
 
-"Implemented on feature-branch" is **NOT** Done. See [docs/engineering/ENGINEERING_WORKFLOW.md §7](../docs/engineering/ENGINEERING_WORKFLOW.md#7-legacy-avkobling-done-policy) for the full policy.
-
-## Architecture Decision Records (ADR)
-
-- [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, har en ADR blitt opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se `docs/adr/README.md` for når ADR kreves.)
-
-## Bug-resurrection acknowledgment
-
-> Detektor: `.github/workflows/bug-resurrection-check.yml` blokkerer merge hvis PR'en endrer
-> linjer som SIST ble endret av en `fix(...)`-commit innen 30 dager — uten at minst én
-> commit-melding ELLER PR-body inneholder acknowledgment. Se
-> [`docs/engineering/BUG_RESURRECTION_DETECTOR.md`](../docs/engineering/BUG_RESURRECTION_DETECTOR.md).
->
-> Velg én hvis applicable. Hvis ingen, la stå.
-
-- [ ] **Ingen overlap** — PR'en touch'er ingen recent-fix-regioner (detector vil gi grønt)
-- [ ] **Acknowledged i commit** — minst én commit har `[resurrection-acknowledged: <grunn>]` i meldingen
-- [ ] **Acknowledged her** — fyll inn under hvis du vil acknowledge på PR-nivå
-
-<!-- Hvis acknowledged her, fjern kommentar-markøren under og fyll inn grunn -->
-<!-- Resurrection acknowledged: <forklar hvilken recent fix dette overlapper med og hvorfor endringen er intensjonell> -->
-
-<!-- Emergency-bypass (sjelden, krever Tobias-godkjenning) -->
-<!-- resurrection-bypass: <begrunnelse> -->
-
-<!-- Docs-only / dependabot / ci-bot — gjelder ikke for kode-endringer -->
-<!-- resurrection-not-applicable: <rolle> -->
-
----
-
-## Knowledge protocol (Tobias-direktiv 2026-05-13)
-
-Hvis denne PR-en rør pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet), bekreft minst ett av disse:
-
-- [ ] **PITFALLS_LOG.md** oppdatert ELLER ingen ny fallgruve oppdaget
-- [ ] **PM_HANDOFF_YYYY-MM-DD.md** utkast skrevet ELLER ikke sesjons-slutt
-- [ ] **Relevant skill** under `.claude/skills/` oppdatert ELLER ikke generaliserbart mønster
-- [ ] **AGENT_EXECUTION_LOG.md** appended hvis denne PR-en kommer fra en agent-leveranse
-
-### FRAGILITY-comprehension (Tier-3, etablert 2026-05-13)
-
-Hvis commits i denne PR-en har `[context-read: F-NN]`-tagger, bekreft:
-
-- [ ] Hver `[context-read: F-NN]`-tag har en tilhørende `## Comprehension`-blokk i commit-message som paraphraserer entry-en (filer + ≥ 1 regel fra "Hva ALDRI gjøre")
-- [ ] Eventuelle `[comprehension-bypass: ...]`-bruk er forklart i PR-beskrivelsen og minst 20 tegn lang
-
-Se [`docs/engineering/COMPREHENSION_VERIFICATION.md`](../docs/engineering/COMPREHENSION_VERIFICATION.md) for detaljer. Håndheves automatisk av `.husky/pre-commit-comprehension.sh`.
+"Implementert på feature-branch" er **IKKE** Done. Se [`docs/engineering/ENGINEERING_WORKFLOW.md §7`](../docs/engineering/ENGINEERING_WORKFLOW.md#7-legacy-avkobling-done-policy).
 
 ## Tracking
-- Linear issue: 
+
+- Linear issue:
 - Release note entry:
-- Screenshots/video (if UI change):
+- Screenshots/video (hvis UI-endring):
