@@ -394,6 +394,65 @@ if (existingPlayer) {
 
 ---
 
+### 2026-05-13 — Manual-flow E2E test (general-purpose agent, PM-AI)
+
+**Scope:** Lukke F-03-gapet i FRAGILITY_LOG ved å skrive en ny E2E-test (`tests/e2e/spill1-manual-flow.spec.ts`) som mimicker Tobias' EKSAKTE manuelle bruks-flyt — uten pre-seedet `sessionStorage.lobby.activeHallId` og uten direct token-injection. Eksisterende `spill1-pilot-flow.spec.ts` bruker shortcuts som gjør at testen kan passere mens manuell flyt feiler (symptom 2026-05-13: E2E grønn @ 10:40, manuell feilet @ 12:00).
+
+**Inputs gitt:**
+- Mandat: skriv ny testfil + helper-utvidelser, ikke endre eksisterende
+- Pekere til `FRAGILITY_LOG.md` F-03, `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` §1.1-1.3, `tests/e2e/spill1-pilot-flow.spec.ts`, `tests/e2e/helpers/rest.ts`, `BUG_CATALOG.md` I14, `PlayScreen.ts:693-720`, `apps/backend/src/dev/devAutoLoginRoute.ts`
+- Branch: ny fra `origin/main`, ikke åpne PR (PM-AI tar over)
+- Forutsetning: `ENABLE_BUY_DEBUG=1 npm run dev:nuke` på port 4000
+
+**Outputs produsert:**
+- **Branch:** `feat/manual-flow-e2e-2026-05-13` (pushed til origin)
+- **Filer:**
+  - `tests/e2e/spill1-manual-flow.spec.ts:1-376` — ny test (376 linjer, 14-stegs flyt via `?dev-user=`-redirect og hall-picker)
+  - `tests/e2e/helpers/manual-flow.ts:1-186` — nye helpers (`loginViaDevUserRedirect`, `waitForLobbyHydration`, `getActiveHallId`, `switchHallViaPicker`, `openBingoGame`, `captureAutoShowGateState`)
+  - `package.json` — nytt npm-script `test:pilot-flow:manual`
+  - `docs/engineering/FRAGILITY_LOG.md` — F-03 status oppdatert fra "gap" til "test må stå grønn"
+  - `docs/engineering/PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` — §1.5 utvidet med manual-flow-vs-shortcut-flow-tabell, §1.3 utvidet med ny kjør-kommando
+
+**Test-runs (deterministisk):**
+- Run 1 (alene): PASS 11.5s — demo-pilot-spiller-6 valgt
+- Run 2 (alene): PASS 12.8s — samme
+- Run 3 (alene): PASS 11.5s — samme
+- `--repeat-each=3` total: 3/3 PASS i 36.5s
+- Full suite (alle 6 tester inkludert): 6/6 PASS i 2.4min
+- Konklusjon: testen er stabil og deterministisk. Runtime under 13s per run.
+
+**Fallgruver oppdaget (ingen NYE pitfalls, men test bevisst beholder fragile aspekter):**
+
+1. **Manual-flow må forbli "fragile" by design:** Hvis noen "optimaliserer" testen ved å pre-seed `sessionStorage.lobby.activeHallId` eller injecte token direkte, blir den bare en duplikat av `spill1-pilot-flow.spec.ts`. F-03 i FRAGILITY_LOG flagger eksplisitt at endring av denne testen MÅ være bevisst.
+
+2. **demo-pilot-spillere 1-3 har `app_users.hall_id = demo-hall-001` men lobby defaulter likevel til `hall-default`:** lobby.js:135-140 leser fra `lobbyState.halls[0].id` (created_at-ordering), IKKE fra `user.hallId`. Hele rationale for manual-flow-testen. Hvis lobby noen gang fixet til å bruke user.hallId, vil testen logge "lobby defaulted DIREKTE til pilot-hall" og fortsette uten hall-bytte.
+
+3. **Demo-pilot-spillere 1-6 har akkumulert tap > 700 kr/dag i nåværende dev-stack:** `pickAvailablePilotPlayer` må rotere over alle 1-12. Spiller 7-12 (hallId=demo-hall-003/004) brukes som fallback når 1-6 er over grensen. Dette er konsistent med eksisterende `pickAvailablePlayer` i pilot-flow-testen.
+
+**Læring:**
+- **`?dev-user=`-redirect-flyten er stabil** når man venter på `window.location.search.includes("dev-user=") === false` + `sessionStorage.getItem("spillorama.accessToken") !== null`. Race-vinduet mellom `saveSession` og `location.replace` håndteres trygt av disse to waits.
+- **Hall-velger via `select.selectOption()`** triggrer Playwright's `change`+`input`-events korrekt → switchHall i lobby.js kjører → sessionStorage oppdateres → vi venter på sessionStorage-match som proxy. Fungerer på første forsøk.
+- **Test fanger I14 (popup-auto-show) ved å diagnose autoShowGate-state** hvis popup ikke mounter innen 30s. `captureAutoShowGateState` leser fra `window.__spillorama.playScreen.getAutoShowGateState()` (hvis eksponert).
+- **Re-using EXPECTED_ROWS, EXPECTED_TOTAL_KR, EXPECTED_TOTAL_BRETT fra pilot-flow-testen ville vært bedre,** men jeg duplikat-ed dem bevisst fordi (a) det er bare 6 rader, (b) shared module ville krevd refaktor av helpers/, (c) hver test bør være selvstendig lesbar uten å hoppe mellom filer.
+
+**Verifisering (PM-AI):**
+- `npm run test:pilot-flow:manual` 3 ganger på rad → 3/3 PASS (deterministisk)
+- `npm run test:pilot-flow` (eksisterende) → fortsatt grønn (no regression)
+- Hele suite (6 tester) → 6/6 PASS i 2.4min
+- Test redirect-race håndtert: 0 flakes observert
+
+**Tid:**
+- Research + design: ~1.5h
+- Implementation + test-iterasjon: ~2h
+- Dokumentasjon: ~30min
+- Total: ~4h
+
+**Status:** Test grønn på 3 consecutive runs, branch pushed til origin. PR ikke åpnet (per oppdrag) — PM-AI tar over.
+
+**Eierskap:** `tests/e2e/spill1-manual-flow.spec.ts`, `tests/e2e/helpers/manual-flow.ts` (denne agentens). Doc-edits i FRAGILITY_LOG og PILOT_TEST_FLOW er additive.
+
+---
+
 ### 2026-05-13 — Rad-vinst-flow E2E test (general-purpose agent, PM-AI)
 
 **Scope:** Utvid pilot-test-suiten med en ny E2E-test som dekker Rad-vinst + master Fortsett (`spill1-rad-vinst-flow.spec.ts`). Eksisterende `spill1-pilot-flow.spec.ts` stopper etter buy-flow; B-fase 2c i `PILOT_TEST_FLOW_AND_KNOWLEDGE_PROTOCOL.md` listet Rad-vinst som neste utvidelse.
@@ -1008,3 +1067,4 @@ Verifisert via test:
 |---|---|---|
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
+| 2026-05-13 | Manual-flow E2E-test (`spill1-manual-flow.spec.ts`) lagt til for å lukke F-03-gapet. Test mimicker Tobias' eksakte manuelle flyt via `?dev-user=`-redirect og hall-picker UI. 3/3 consecutive PASS i 11-13s. | Backend-agent (general-purpose) |
