@@ -306,8 +306,34 @@ Ny PM bør sjekke `docs/auto-generated/CROSS_KNOWLEDGE_AUDIT.md` som del av onbo
 
 ---
 
-## 10. Endringslogg
+## 10. Lærdom fra første post-deploy-kjøring
+
+### Kjøring 2026-05-13 (etter 22-PR-dag)
+
+**Initial run (før fix):**
+- 🟡 1 Drift finding (Check 8: PR template manglet `FRAGILITY_LOG` + `SKILL.md` referanser)
+- ℹ️ 2 Info-notices (Check 7: handoff-doc 2026-05-13_AUTONOMY_COMPLETE refererte til #1320, #1323 som åpne — begge merget)
+- ℹ️ 1 Info-notice (Check 1: Linear-key ikke konfigurert)
+
+**Etter fix:**
+- 🟢 0 drift findings
+- ℹ️ 1 Info-notice (Check 1: Linear-key fortsatt ikke konfigurert — forventet)
+
+### Læring
+
+1. **PR-template-regex var sårbar for naturlig språkvariasjon.** Templaten hadde "**Relevant skill** under `.claude/skills/`" som menneske-leselig dekker SKILL.md-konseptet, men regex `skill[\w-]*\.md|SKILL\.md|update\s+(a\s+)?skill` matchet ikke. Løsning: vi oppdaterer templaten til å nevne `SKILL.md` eksplisitt — match på substrings er en svakhet, men også et insentiv for konsekvent formulering.
+
+2. **Handoff-PR-tabeller bør oppdateres etter mass-merge.** Når 8+ PR-er merges på samme dag som handoff skrives, blir 🟡 OPEN-statusene stale innen timer. Vurder: hyppigere handoff-rotasjon, eller auto-status-script som matcher PR-numre mot `gh pr view`.
+
+3. **Architectural fragility cluster ligger på 2 (ikke 3).** Per 2026-05-13 har `tests/e2e/spill1-pilot-flow.spec.ts` og `tests/e2e/spill1-manual-flow.spec.ts` 2 FRAGILITY-entries hver. Begge er testene som dekker pilot-flow + manuell flyt — det er forventet å ha overlapp mellom F-01/F-02/F-03. Hvis disse passerer 3-tersklen, vurder å splitte testene.
+
+4. **Cadence-tuning:** Ukentlig (mandag) er rimelig for ren drift-deteksjon. Hvis vi gjør 20+-PR-dager hyppigere, vurder å trigge audit også på `push` til main hvis ≥ 5 PR-er er merget siden forrige audit-rapport. (TODO i `FOLLOWUP_AFTER_AUTONOMY_WAVE.md`)
+
+---
+
+## 11. Endringslogg
 
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-13 | Initial — 8 drift-sjekker, ukentlig CI-kjøring, auto-issue-opprettelse | Agent |
+| 2026-05-13 | First-real-run results lagt til § 10. Fix av Check 8 (PR template) + Check 7 (handoff PR-status). 0 drift etter fix. | Agent (C2 audit-follow-up) |
