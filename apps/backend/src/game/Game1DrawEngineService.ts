@@ -1409,13 +1409,23 @@ export class Game1DrawEngineService {
       }
 
       // Hvis Fullt Hus vunnet eller maxDraws nådd → marker scheduled_game som completed.
+      //
+      // BUG-D6 (2026-05-15): Status-guard `AND status IN ('running', 'paused')`
+      // forhindrer engine fra å overskrive terminal status (`cancelled`,
+      // `completed`, `finished`). Tidligere kunne master/cron sette runden
+      // til `cancelled` mellom engine-completion-detect og denne UPDATE-en,
+      // og engine ville overskrive til `completed` — audit-trail ble korrupt.
+      // Se Agent D research §5.6 / §6.4 + `.claude/skills/spill1-master-flow/`
+      // for kanonisk pattern: alle UPDATE som flipper til terminal status
+      // SKAL ha guard.
       if (isFinished) {
         await client.query(
           `UPDATE ${this.scheduledGamesTable()}
               SET status          = 'completed',
                   actual_end_time = COALESCE(actual_end_time, now()),
                   updated_at      = now()
-            WHERE id = $1`,
+            WHERE id = $1
+              AND status IN ('running', 'paused')`,
           [scheduledGameId]
         );
 

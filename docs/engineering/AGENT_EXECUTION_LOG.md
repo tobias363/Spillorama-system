@@ -1,7 +1,7 @@
 # Agent Execution Log — kronologisk agent-arbeid
 
 **Status:** Autoritativ. Alle agent-leveranser dokumenteres her.
-**Sist oppdatert:** 2026-05-14
+**Sist oppdatert:** 2026-05-15
 **Eier:** PM-AI (vedlikeholdes ved hver agent-leveranse)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover."*
@@ -107,7 +107,49 @@ Hver entry har struktur:
 4. **Commit-strategi for store doc-konsolideringer:** En commit per logisk gruppe heller enn én mega-commit. PM-AI committet Step 1+3 først (commit 995990154), agentene committer deretter sine Step 2/4/5 separat. Ved konflikter (eks. hvis Step 4 + Step 5 begge rør PITFALLS §3.1) bruker PM Python additive-merge-resolver (PITFALLS §11.15).
 
 **Skill-update:** SKILL_UPDATE_PROPOSED-seksjon i denne entry — PM oppdaterer `pm-orchestration-pattern/SKILL.md` etter at alle 3 agenter er ferdig + final PR er gjennomgått. Foreslår ny seksjon "Docs-konsoliderings-strategi (5-trinns)".
+### 2026-05-15 — BUG-D6 fix-agent — engine UPDATE status-guard (Next Game Display Trinn 2)
 
+**Branch:** `fix/bug-d6-engine-update-status-guard-2026-05-15` (worktree `agent-acb045a48ff7f40c6`)
+**Agent type:** general-purpose (fix-agent spawned by PM-AI per [NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14](../architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md))
+**Trigger:** Agent D research §5.6 (BUG-D6). `Game1DrawEngineService.endRound()` UPDATE-statement til `status='completed'` manglet WHERE-clause-guard mot terminal status. Race-window: master/cron kunne sette raden til `cancelled`, engine kunne deretter overskrive til `completed` → korrupt audit-trail.
+
+**Hva ble gjort:**
+
+1. **Fix i `apps/backend/src/game/Game1DrawEngineService.ts:1411-1424`** — la til `AND status IN ('running', 'paused')` i WHERE-clause på completed-UPDATE. Inline-kommentar peker til Agent D §5.6 + skill spill1-master-flow + PITFALLS §3.16 så fremtidige agenter ikke fjerner guarden ved "smart refactor".
+
+2. **Regression-suite — `apps/backend/src/game/__tests__/Game1DrawEngineService.bugD6StatusGuard.test.ts`** (4 tester, alle grønne):
+   - Test 1: Verifiserer at WHERE-clause inneholder `AND status IN ('running', 'paused')`
+   - Test 2: Verifiserer at WHERE-clause IKKE inneholder `'cancelled'` / `'finished'` / `'completed'`-IN-liste (forhindrer at fremtidig agent whiteliste'r terminal status ved uhell — det ville reintrodusert race-bugen)
+   - Test 3: Idempotent ved rowCount=0 — service-koden må ikke kaste når UPDATE matcher 0 rader (guard filtrerte bort terminal status)
+   - Test 4: Eksakt SQL-form-låsing — `WHERE id = $1 AND status IN ('running', 'paused')` (forhindrer "tolerant" regression hvor f.eks. `status <> 'cancelled'` ville være feil)
+
+3. **Doc-protokoll oppdatert i SAMME branch:**
+   - `.claude/skills/spill1-master-flow/SKILL.md` v1.14.0 → v1.15.0 + ny entry 14 i "Vanlige feil"-seksjonen med kanonisk pattern for terminal-status-flip
+   - `docs/engineering/PITFALLS_LOG.md` §3.16 (ny entry) — full BUG-D6-historikk + fix + prevention + cross-references
+   - `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry-en)
+
+**Verifisering:**
+- `npm --prefix apps/backend run check` → grønn (TypeScript strict)
+- `npx tsx --test src/game/__tests__/Game1DrawEngineService.bugD6StatusGuard.test.ts` → 4 pass / 0 fail
+- `npx tsx --test src/game/Game1DrawEngineService.test.ts` → 33 pass / 0 fail (eksisterende tester påvirkes ikke)
+- Verifisert at `Game1DrawEngineService.featureCoverage.test.ts` + `physicalTicket.test.ts` + `autoPause.test.ts` fortsatt grønne (19 pass / 0 fail)
+
+**Lessons learned:**
+
+1. **Stub-pool-pattern må verifisere SQL-tekst, ikke bare side-effects.** Test 1 asserter eksplisitt at WHERE-clause-strengen inneholder guarden — service-laget kan endre query-text via "refactor" og bryte invariant uten at integration-tester nødvendigvis fanger det.
+
+2. **Negative assertions er like viktige som positive.** Test 2 sjekker hva som IKKE er i WHERE — slik fanger vi en hyppig fallgruve hvor agent prøver å "fixe" via `status <> 'cancelled'` istedenfor å whiteliste ikke-terminal status. Negative test = forklaring av designet til fremtidige agenter.
+
+3. **Eksakt SQL-form-låsing (test 4) er kontroversiell men nyttig her.** Vanligvis er det skjørt å låse SQL-strings, men for kritiske guards som forhindrer data-overskrivning er det riktig pattern — endring krever bevisst PR-review og oppdatert test. Alternativ "tolerant" matching (regex) gjør at refactor kan smyge inn subtile bugs (eks. `<> 'cancelled'` matcher men er semantisk feil).
+
+4. **`rowCount=0` etter UPDATE må håndteres som no-op, ikke feil.** Service-koden i `endRound()` avhenger ikke av rowCount==1 fra completed-UPDATE — den fortsetter til COMMIT uansett. Test 3 låser denne kontrakten så fremtidig agent ikke legger til `assert(rowCount === 1)` som ville bryte idempotens.
+
+**Eierskap:** `apps/backend/src/game/Game1DrawEngineService.ts:1411-1424` (endRound completed-UPDATE) + ny test-fil. Forhindrer fremtidig regresjon — særlig at agent som "rydder opp i SQL-formatering" ikke fjerner guarden ved uhell.
+
+**Related:**
+- Agent D research §5.6 + §6.4 — `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md`
+- PITFALLS §3.15 (`GamePlanRunService.start()` overskriver current_position) — samme overordnede mønster
+- SKILL `spill1-master-flow` §"Vanlige feil" entry 14
 ---
 
 ### 2026-05-14 — Agent B — Next Game Display research (Backend aggregator + lobby-API)

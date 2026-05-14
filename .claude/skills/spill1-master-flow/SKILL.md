@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.14.0
+  version: 1.15.0
   project: spillorama
 ---
 
@@ -371,6 +371,52 @@ Symptom: Spillere som åpner buy-popup PRE-game (mellom runder, eller før maste
 **Rot-årsak (regresjon 2026-05-14):** PR #1375 (`Game1MasterControlService.onEngineStarted`) løste KUN post-engine-start-pathen. Pre-game-vinduet — fra scheduled-game opprettes (`status='ready_to_start'`) til master trykker "Start" — var ikke dekket. Klient (`PlayScreen.ts:606`) faller til `state.entryFee ?? 10` og multipliserer med flat `priceMultiplier: 1` → `10 × 2 = 20 kr` for Yellow (eksempel: Tobias-rapport 2026-05-14 07:55).
 
 **Fix:** To-fase ticket-config-binding (PR #1375 + PR #<this-PR>). Se seksjon under for detaljer.
+
+### 14. Engine UPDATE må ha status-guard mot terminal status (BUG-D6, fikset 2026-05-15)
+
+**Symptom:** `app_game1_scheduled_games`-rad var `cancelled` (eller `finished`), men engine overskrev til `completed`. Audit-trail blir korrupt fordi terminal status forsvinner.
+
+**Root cause:** `Game1DrawEngineService.ts` endRound-pathen sendte en UPDATE uten WHERE-guard:
+
+```sql
+-- FØR fix (BUG-D6)
+UPDATE app_game1_scheduled_games
+SET status='completed', actual_end_time = ..., updated_at = now()
+WHERE id = $1
+```
+
+Race-window: master eller cron flippet status til `cancelled` mellom engine-completion-detect og denne UPDATE-en, og engine kjørte rett over.
+
+**Fix (PR for BUG-D6):**
+
+```sql
+-- ETTER fix
+UPDATE app_game1_scheduled_games
+SET status='completed', actual_end_time = ..., updated_at = now()
+WHERE id = $1
+  AND status IN ('running', 'paused')
+```
+
+Engine kan kun flippe til `completed` fra ikke-terminal status. Hvis raden allerede er `cancelled` / `completed` / `finished`, no-op'er UPDATE-en (rowCount=0) og transaksjonen fortsetter — service-koden avhenger IKKE av rowCount==1.
+
+**Kanonisk pattern (alle UPDATE som flipper til terminal status):**
+
+```sql
+UPDATE <table>
+SET status = '<terminal>', ...
+WHERE id = $1
+  AND status IN (<ikke-terminal-statuser>)
+```
+
+Aldri whitelist `cancelled` / `completed` / `finished` i WHERE-guarden for en flip TIL en av disse — det åpner igjen for race-overskrivning.
+
+**Referanser:**
+- Agent D research §5.6 + §6.4 — `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md`
+- Audit-skall — `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md`
+- PITFALLS entry §3.X — `docs/engineering/PITFALLS_LOG.md`
+- Regression-suite — `apps/backend/src/game/__tests__/Game1DrawEngineService.bugD6StatusGuard.test.ts` (4 tester)
+
+**Konsekvens for skill:** Hvis du legger til ny UPDATE som flipper en scheduled-game eller plan-run til terminal status, kopier WHERE-guard-mønsteret. Glem aldri å skrive regression-test som låser SQL-formen — guard-fjerning skal være vanskelig å gjøre ved uhell.
 
 ## Ticket-pris-propagering (kritisk TRE-fase-binding)
 
