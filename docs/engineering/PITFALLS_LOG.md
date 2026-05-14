@@ -1757,6 +1757,62 @@ Dump-en inneholder `derivedState` med:
 - §7.9 (state.ticketTypes overrider) — samme tema fra ulik vinkel
 - §3 (Spill 1-arkitektur, ticket-pris-propagering tre-fase-binding)
 
+### §7.25 — "Neste spill"-display beregnes lokalt i 6 frontend-paths (PRE-Trinn-3-tilstand)
+
+**Severity:** P1 (tilbakevendende bug-klasse — "viser feil neste spill"-rapporter etter hvert §3.x-fix)
+**Oppdaget:** 2026-05-14 (Agent A research — `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md`)
+**Symptom:** Tobias rapporterte 4 ganger ("Neste spill: Bingo" etter dev:nuke, "Plan fullført" etter første runde, etc.) — hver fix-runde (PR #1370, #1422, #1427, #1431) løste én path mens andre fortsatte å vise stale data.
+
+**Root cause:** Frontend har 6 forskjellige UI-paths som hver beregner "neste spill"-tekst fra forskjellige felt-kombinasjoner:
+
+1. `Spill1HallStatusBox.ts:692-693, 1456-1515` — `getMasterHeaderText` med `data.catalogDisplayName ?? null` (fallback til "Neste spill" UTEN navn)
+2. `NextGamePanel.ts:700-712` idle-render — HARDKODET "venter på neste runde" UTEN catalogDisplayName
+3. `NextGamePanel.ts:591-642` `mapLobbyToLegacyShape` translator — `subGameName = planMeta?.catalogDisplayName ?? ""` (TOM STRENG-FALLBACK)
+4. `Spill1AgentStatus.ts:104` — `<h3>Spill 1 — {customGameName ?? subGameName}</h3>` (visuell bug ved tom subGameName)
+5. `Spill1AgentControls.ts:120-167` — `Start neste spill — {nextGameName}` (faller til generisk uten navn)
+6. `Game1Controller.ts:619+2504` (game-client) — `state?.nextScheduledGame?.catalogDisplayName ?? "Bingo"` (BESTE fallback — eneste path med "Bingo" hardkodet)
+
+Pluss `LobbyFallback.ts:328` som renderer "Neste spill: {name}." for fallback-overlay.
+
+Bølge 3-konsolidering (2026-05-08) løste ID-rom-konflikten (plan-run-id vs scheduled-game-id) men IKKE display-rendering. ID-fundament-audit fokuserte på master-actions; "hvilken catalog-display-name vises hvor" forble distribuert.
+
+**Hvorfor 4 fixes ikke har løst rot-årsaken:**
+- PR #1370 — dekket KUN initial-state-rendering, ikke advance-state
+- PR #1422 — DB-side auto-advance ved `getOrCreateForToday`, men lobby-API leste fortsatt gamle felter
+- PR #1427 — UI-tekst-fix på `Spill1HallStatusBox` header (`getMasterHeaderText`), ikke "neste spill"-tekst
+- PR #1431 — Backend lobby-API returnerer `nextScheduledGame` for finished plan-run. Korrekt — men frontend har flere paths som ignorerer feltet
+
+**Pattern:** Hver fix har truffet ÉN path mens de andre 3+ paths fortsetter å drive tilstanden videre.
+
+**Fix-anbefaling (Forslag A i research-doc):** Utvid `Spill1AgentLobbyStateSchema` med pre-computed `nextGameDisplay: { catalogSlug, catalogDisplayName, position, planCompletedForToday, reason }`-felt. ALLE frontend-paths leser fra dette feltet. ALDRI lokal beregning.
+
+```typescript
+nextGameDisplay: {
+  catalogSlug: string | null,
+  catalogDisplayName: string,       // ALDRI null — backend faller alltid til "Bingo"
+  position: number | null,           // 1-basert
+  planCompletedForToday: boolean,
+  reason: "next_in_sequence" | "plan_completed" | "no_plan_run" | "no_plan_for_today" | "closed",
+}
+```
+
+Estimat: 3 dev-dager (1 backend + 1 frontend + 0.5 game-client + 0.5 slett-deprecated). 9 test-invariants F-I1 til F-I9 dokumentert i research-doc.
+
+**Prevention:**
+- ALDRI bygg egen "neste spill"-fallback i ny UI-komponent. Bruk `nextGameDisplay.catalogDisplayName` direkte fra aggregator.
+- ALDRI les `planMeta.catalogDisplayName` direkte når en ny komponent legges til — bruk single source.
+- Når du fikser display-bug: sjekk ALLE 6 paths listet over i `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` §2.1. Hvis du fikser bare ÉN path er bug-en garantert tilbakevendende.
+- Tester må dekke alle 9 invariants F-I1 til F-I9 fra research-doc — særlig F-I3 (planCompletedForToday-state) og F-I9 (game-client BuyPopup-subtitle aldri tom).
+- `customGameName ?? subGameName`-mønster i Spill1AgentControls + Spill1AgentStatus er legacy override (admin-direct-edit) som ikke trigges fra plan-flow — beholdes for Game1MasterConsole, men nye komponenter skal IKKE bruke det.
+
+**Related:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (full kart + recommendations)
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (PM Trinn 2 konsoliderer her)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (forrige fundament-audit, Bølge 1-6 ID-konsolidering)
+- §3.10-§3.13 (alle fire tidligere fix-forsøk — relatert mønster: distribuert beregning kommer alltid tilbake)
+- §7.20 (Master-UI header state-aware — relatert komponent men annen scope)
+- PR #1370, #1422, #1427, #1431 (4 fix-forsøk uten å løse rot-årsak)
+
 ---
 
 ## §8 Doc-disiplin

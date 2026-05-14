@@ -113,6 +113,75 @@ Hver entry har struktur:
 - **Endret:** `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
 
 Ingen kode-endringer i Trinn 1 (kun research/dokumentasjon).
+### 2026-05-14 — Agent A — Next Game Display research (Frontend rendering paths)
+
+**Branch:** `research/next-game-display-a-frontend-2026-05-14`
+**PR:** TBD (PM eier `gh pr create` + merge per ADR-0009)
+**Agent type:** general-purpose (spawned by PM-AI for Next Game Display Trinn 1 data-innsamling)
+**Trigger:** Tobias-direktiv 2026-05-14 — Next Game Display-bug tilbakevendende etter 4 fix-forsøk (PR #1370, #1422, #1427, #1431), refactor-mandat Plan C: "Vi må nå ha et helt åpent sinn... 1-4 uker OK for arkitektur-rewrite." Slottes inn i `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` §3.3.
+
+**Bakgrunn:**
+- Bølge 1-3 i `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` konsoliderte ID-rom (plan-run-id vs scheduled-game-id) via `GameLobbyAggregator` + `MasterActionService` — løste master-actions, men IKKE display-rendering
+- Bug-en kommer tilbake fordi 6+ kode-paths beregner "neste spill"-tekst hver for seg
+- 4 frontend-paths leser fra Spill1AgentLobbyState (auth aggregator), 2 fra Spill1LobbyState (public)
+- Hver fix har truffet ÉN path mens de andre fortsetter med stale logikk
+
+**Hva ble gjort:**
+
+1. `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (~620 linjer)
+   - Mappet ALLE frontend-paths som rendrer "neste spill"-tekst eller "Start neste spill"-knapper
+   - 6 aktive paths identifisert:
+     - **admin-web auth aggregator:**
+       - `Spill1HallStatusBox.ts` (cash-inout box 3, 2s polling) — bruker `getMasterHeaderText` helper med 8 state-baserte strenger
+       - `NextGamePanel.ts` idle-render (linje 700-712) — HARDKODET "venter på neste runde" UTEN catalogDisplayName
+       - `NextGamePanel.ts` active-render via `mapLobbyToLegacyShape` translator (linje 591-642) — TOM STRENG-FALLBACK på linje 620
+       - `Spill1AgentStatus.ts:104` — `<h3>Spill 1 — {subGameName}</h3>` (visuell bug ved tom subGameName)
+       - `Spill1AgentControls.ts:120-167` — `Start neste spill — {nextGameName}` (mangler "Bingo"-fallback)
+     - **game-client public lobby:**
+       - `Game1Controller.ts:619+2504` — BuyPopup subtitle (BESTE fallback-håndtering — "Bingo" hardkodet)
+       - `LobbyFallback.ts:328` — overlay-body "Neste spill: {name}." (ETA-text-rendering)
+   - 7 bugs/edge-cases dokumentert: BUG #A1-A5 (P1-P3) + 2 edge-cases (planCompletedForToday-mangel, DUAL_SCHEDULED_GAMES-rendering)
+   - Komplett kall-graf med ASCII-diagram + state×display tabell per komponent
+   - Recommendation Forslag A: utvid `Spill1AgentLobbyStateSchema` med `nextGameDisplay`-felt som EN authoritative service (`GameLobbyAggregator.buildNextGameDisplay`) returnerer
+   - 9 test-invariants (F-I1 til F-I9) for komplett dekning
+   - SKILL_UPDATE_PROPOSED-seksjon for PM Trinn 2 (utvider `.claude/skills/spill1-master-flow/SKILL.md`)
+
+**Lessons learned:**
+
+- **Bølge 3 fjernet ID-konflikten men ikke display-konflikten.** ID-rom-fundament-audit (Bølge 1-6, 2026-05-08) løste plan-run-id vs scheduled-game-id, men "hva er catalogDisplayName"-resolving forble distribuert over 6 paths. Hvert nye §3.x-fix (1422, 1431) traff backend-side eller én frontend-path — men de andre paths fortsatte med stale logikk.
+- **Frontend har TRE typer fallback-strategier:** "Bingo" hardkodet (game-client `Game1Controller`), generisk tekst uten navn (`getMasterHeaderText` returnerer "Neste spill"), eller TOM STRENG (`NextGamePanel.mapLobbyToLegacyShape` setter `subGameName = ""`). Inkonsistens er root cause for at "viser feil neste spill"-bug stadig dukker opp i nye varianter.
+- **Public vs auth wire-format gir to forskjellige `catalogDisplayName`-felter** — `Spill1LobbyState.nextScheduledGame.catalogDisplayName` (public) vs `Spill1AgentLobbyState.planMeta.catalogDisplayName` (auth). Computed av samme `buildPlanMeta`-logikk i `GameLobbyAggregator` men eksponeres via to skjemaer som kan divergere.
+- **Inconsistency-warning-state (DUAL_SCHEDULED_GAMES, STALE_PLAN_RUN) påvirker display-rendering** — UI viser warning-banner men beholder header med stale data. Master må manuelt rydde for å få korrekt visning.
+- **Single source of truth-mønster er nødvendig** — Forslag A i recommendations utvider aggregator-skjemaet med pre-computed `nextGameDisplay`-objekt. Estimat 3 dev-dager + tester for full refactor.
+
+**Skill-update:** PM konsoliderer i Trinn 2 (data-collection.md inkluderer SKILL_UPDATE_PROPOSED-seksjon med utvidelse av `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon "Neste spill-display single source of truth")
+
+**Pitfall-update:** Foreslår ny PITFALLS_LOG §7.21 "Neste spill-display lokalt beregnet i 6 paths" som dokumenterer pre-Trinn-3-tilstanden + reference til denne research-doc-en. PM Trinn 2 har eierskap for å legge til entry.
+
+**Eierskap:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (denne entry)
+- IKKE rørt kode — pure research-leveranse per Trinn 1 mandat
+
+**Filer som ble lest (ikke endret):**
+- `apps/admin-web/src/api/agent-game1.ts` (294-308)
+- `apps/admin-web/src/api/agent-game-plan.ts` (77-92, deprecated)
+- `apps/admin-web/src/api/agent-next-game.ts` (26-53)
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts` (full, ~1651 linjer)
+- `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts` (full, ~1635 linjer)
+- `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts` (274 linjer)
+- `apps/admin-web/src/pages/agent-portal/Spill1AgentStatus.ts` (146 linjer)
+- `apps/admin-web/src/pages/games/master/Game1MasterConsole.ts` (linje 1-110, 300-410)
+- `apps/admin-web/src/pages/cash-inout/CashInOutPage.ts` (linje 200-310)
+- `packages/game-client/src/games/game1/Game1Controller.ts` (linje 595-740, 1525-1660, 2490-2540)
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.ts` (full, 273 linjer)
+- `packages/game-client/src/games/game1/logic/LobbyFallback.ts` (linje 280-348)
+- `packages/shared-types/src/api.ts` (linje 100-200)
+- `packages/shared-types/src/spill1-lobby-state.ts` (linje 240-490)
+- `apps/backend/src/game/GameLobbyAggregator.ts` (linje 971-1070, buildPlanMeta)
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (full skall)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (linje 1-800)
+- `docs/engineering/PITFALLS_LOG.md` (§3.10, §3.11, §3.12, §3.13, §7.10-§7.19, §11.x)
+- `docs/operations/PM_HANDOFF_2026-05-14.md` (§1)
 
 ---
 
