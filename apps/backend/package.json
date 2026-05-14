@@ -21,6 +21,7 @@
     "import:legacy-templates": "tsx scripts/import-legacy-subgame-templates.ts",
     "seed:legacy-config": "tsx scripts/seed-legacy-game-config.ts",
     "smoke-test": "tsx scripts/e2e-smoke-test.ts",
+    "test:synthetic-spill1": "bash ../../scripts/synthetic/spill1-round-runner.sh",
     "test:e2e": "LOG_LEVEL=warn tsx --test src/__tests__/e2e/*.test.ts",
     "spec:lint": "redocly lint openapi.yaml",
     "reconcile:wallet-ledger": "tsx scripts/reconcile-wallet-vs-ledger.ts",

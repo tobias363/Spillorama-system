@@ -2,7 +2,7 @@
 name: live-room-robusthet-mandate
 description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.2.0
+  version: 1.3.0
   project: spillorama
 ---
 
@@ -129,11 +129,38 @@ Backend emit-er ikke nødvendigvis ny `room:update` umiddelbart etter round-end 
 **Pilot-go-live mandat: GRØNT** (per `CHAOS_TEST_RESULTS_R2_R3_2026-05-08.md`).
 
 **Pre-utvidelse til > 4 haller — gjenstår:**
-- R4 (load-test 1000 — infrastruktur klar)
+- R4 (load-test 1000 — infrastruktur klar; synthetic-precursor under)
 - R6 (outbox-validering — wallet-side ferdig)
 - R9 (Spill 2 24t-leak)
 - R10 (Spill 3 chaos-test)
 - 2-4 ukers drift-data uten kunde-klager
+
+### Synthetic bingo-runde-test (R4-precursor, 2026-05-14)
+
+Småskala (10 spillere × 3 bonger) ende-til-ende-test som validerer **seks
+strukturelle invarianter (I1-I6)** i én komplett Spill 1-runde:
+
+- I1 Wallet-konservering
+- I2 Compliance-ledger entries
+- I3 Hash-chain intakt (WARN inntil dev-endpoint legges til)
+- I4 Draw-sequence consistency
+- I5 Idempotency
+- I6 Round-end-state
+
+**Pilot-gating:** ALLTID kjør `npm run test:synthetic` pre-pilot-deploy.
+Hvis I1, I2, I5 eller I6 FEILER → pilot pauses umiddelbart (compliance
++ regulatorisk eksponering).
+
+**Hvordan kjøre:**
+```bash
+RESET_TEST_PLAYERS_TOKEN=spillorama-2026-test \
+  npm run test:synthetic
+```
+
+**Hva tester den IKKE:** failover (R2), reconnect (R3), 24t-leak (R9),
+phase-state-chaos (R10), full load (R4). Synthetic er **precursor**.
+
+**Doc:** [`docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`](../../../docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md)
 
 ## Bølge 1 + Bølge 2 — Evolution-grade utvidelse (2026-05-11 → 2026-05-13)
 
@@ -353,3 +380,4 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 | 2026-05-08 | Initial mandat |
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
 | 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
+| 2026-05-14 | v1.3.0 — la til "Synthetic bingo-runde-test (R4-precursor)" seksjon under pilot-gating. Småskala-test som ALLTID må PASSE pre-pilot. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |

@@ -1192,6 +1192,38 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 
 ---
 
+### §6.18 — Synthetic bingo-test må kjøres FØR pilot — ikke etter
+
+**Severity:** P0 (pilot-blokker hvis hoppet over)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test")
+**Symptom:** Pilot går live uten end-to-end-verifikasjon av at en hel runde fungerer (master-start → N spillere kjøper M bonger → engine trekker → vinner deteksjon → payout → compliance-ledger → wallet konsistent). Hvis I1 (wallet-konservering) eller I2 (compliance-ledger) brytes på pilot-haller, har vi REGULATORISK eksponering mot Lotteritilsynet.
+**Root cause:** R4 (load-test 1000 — BIN-817) er post-pilot. R2/R3 (chaos) dekker failover/reconnect, ikke en hel runde. Det manglet et småskala-precursor-test som kunne kjøres på 60 sek og fange grunnleggende invariant-brudd.
+**Fix:** `scripts/synthetic/spill1-round-bot.ts` + `spill1-round-runner.sh` etablert 2026-05-14. Verifiserer **seks invarianter (I1-I6)**:
+- I1 Wallet-konservering: `SUM(før) − SUM(spent) + SUM(payout) == SUM(etter)`
+- I2 Compliance-ledger: minst STAKE per kjøp + PRIZE per payout
+- I3 Hash-chain intakt (WARN inntil dev-endpoint legges til)
+- I4 Draw-sequence consistency
+- I5 Idempotency (clientRequestId → samme purchaseId på re-submit)
+- I6 Round-end-state: `scheduled_game.status === 'finished'`
+
+**Prevention:**
+- ALLTID kjør `npm run test:synthetic` pre-pilot-deploy (ikke etter)
+- Sett `RESET_TEST_PLAYERS_TOKEN=spillorama-2026-test` for full validering inkl. replay-API
+- Exit-code 0 = PASS, 1 = FAIL → pilot pauses, 2 = preflight-failure (backend down)
+- Mode `--dry-run` for CI smoke-tests (<5 sek, ingen wallet-mutering)
+- Sjekk PITFALLS-pekere FØR du spawner agent som rør master-flow / purchase / payout: hvis synthetic-testen FEILER på den runden, har de andre §-ene konkrete root-cause-hint
+
+**Related:**
+- Bot: `scripts/synthetic/spill1-round-bot.ts`
+- Invariants: `scripts/synthetic/invariants.ts`
+- Runbook: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`
+- Skill `casino-grade-testing` v1.2.0
+- Skill `live-room-robusthet-mandate` v1.3.0
+- Skill `spill1-master-flow` v1.9.0
+- BIN-817 (R4) — full load-test post-pilot
+
+---
+
 ## §7 Frontend / Game-client
 
 ### §7.1 — Game1Controller default `variantConfig=STANDARD`
@@ -2248,3 +2280,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-14 | Utvidet §3.11 (PR #1411 sub-bug PR #1408): la til Fase 2-prevention-bullet for `buildVariantConfigFromSpill1Config` som mapper `priceNok / minPriceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter entryFee men IKKE multipliers — derfor komplementær fix. 7 nye tester i `spill1VariantMapper.test.ts`. | Fix-agent F3 |
 | 2026-05-14 | Lagt til §7.19 — "Forbereder rommet..."-spinner henger evig etter runde-end. Tobias-rapport 2026-05-14 09:54 (runde 330597ef). Fix: `MAX_PREPARING_ROOM_MS = 15s`-max-timeout i `Game1EndOfRoundOverlay` med forced auto-return via `onBackToLobby`. Erstatter eldre 30s "Venter på master"-tekst-swap som ikke utløste redirect. | Fix-agent (auto-return) |
 | 2026-05-14 | Lagt til §7.24 — premie-celle-størrelse iterasjon V (Tobias-direktiv etter første PR #1442-runde: "smalere, så det matcher mer bilde, ikke tar så mye plass"). Reduserte `.premie-row` padding 6px 10px→3px 8px, `gap` 5px→3px, `.premie-cell` padding 4px 8px→2px 6px. Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele center-top-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) for layout-vurdering i kontekst. | Agent V (CSS-iterasjon) |
+| 2026-05-14 | Lagt til §6.18 — Synthetic bingo-test må kjøres FØR pilot. Tobias-direktiv 2026-05-14: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test". Bot driver én komplett bingo-runde, verifiserer 6 invarianter (I1-I6). R4-precursor (BIN-817). | synthetic-test-agent |
