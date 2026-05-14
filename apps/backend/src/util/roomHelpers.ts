@@ -417,7 +417,16 @@ export function buildRoomUpdatePayload(
   const hallName = opts.getHallName?.(snapshot.hallId) ?? snapshot.hallId;
   const supplierName = opts.supplierName ?? "Spillorama";
   const boughtAtIso = new Date(nowMs).toISOString();
-  const currentEntryFee = snapshot.currentGame?.entryFee ?? opts.getRoomConfiguredEntryFee(snapshot.code);
+  // Tobias-bug 2026-05-14 (bong-pris=0 under aktiv trekning): `currentGame
+  // .entryFee` kan være 0 fra synthetic snapshot når
+  // `entryFeeFromTicketConfig` ikke finner pris (legacy bug, fixed PR
+  // #<this>). `??` tar kun null/undefined, så 0 lekker gjennom og setter
+  // alle ticket-priser til 0. Match defensiv `> 0`-sjekk fra line 386-388
+  // (`variantEntryFee`) for konsistent fallback til room-configured fee.
+  const currentEntryFee =
+    snapshot.currentGame?.entryFee && snapshot.currentGame.entryFee > 0
+      ? snapshot.currentGame.entryFee
+      : opts.getRoomConfiguredEntryFee(snapshot.code);
 
   // [BUY-DEBUG] gate på env-var slik at vi ikke spammer prod-loggen i normal
   // drift. Sett ENABLE_BUY_DEBUG=1 i dev/staging for å se per-ticket pris-

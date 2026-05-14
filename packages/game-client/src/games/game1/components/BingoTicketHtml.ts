@@ -588,7 +588,18 @@ export class BingoTicketHtml {
     const ticketNum = t.ticketNumber ?? t.id ?? "—";
     const hall = t.hallName ?? "";
     const supplier = t.supplierName ?? "";
-    const priceStr = typeof t.price === "number" ? `${Math.round(t.price)} kr` : `${this.opts.price} kr`;
+    // Tobias-bug 2026-05-14: bong-pris vises som "0 kr" under aktiv trekning.
+    // `t.price === 0` skal IKKE rendres — kjøpt bong kan aldri ha pris 0.
+    // Fall til `opts.price` (TicketGridHtml.computePrice fallback) som er
+    // basert på lobby-config + per-bong-multiplikator. Hvis BÅDE er 0,
+    // skjul price-rad istedenfor å vise misvisende "0 kr".
+    const ticketPriceValid = typeof t.price === "number" && t.price > 0;
+    const fallbackPriceValid = typeof this.opts.price === "number" && this.opts.price > 0;
+    const priceStr = ticketPriceValid
+      ? `${Math.round(t.price as number)} kr`
+      : fallbackPriceValid
+      ? `${this.opts.price} kr`
+      : "";
     const boughtStr = t.boughtAt ? new Date(t.boughtAt).toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" }) : "";
 
     const rows: Array<[string, string, number?]> = [
@@ -748,7 +759,14 @@ export class BingoTicketHtml {
       ? getElvisLabel(this.ticket.color)
       : (this.ticket.color ?? "Bong");
     this.headerEl.textContent = label;
-    this.priceEl.textContent = `${this.opts.price} kr`;
+    // Tobias-bug 2026-05-14: skjul price-rad hvis price er 0/ugyldig
+    // istedenfor å rendre misvisende "0 kr" på en kjøpt bonge. Kombinert
+    // med backend-fix og TicketGridHtml.computePrice-fallback skal dette
+    // sjelden trigge, men er defensiv mot fremtidige regression.
+    this.priceEl.textContent =
+      typeof this.opts.price === "number" && this.opts.price > 0
+        ? `${this.opts.price} kr`
+        : "";
   }
 
   private updateToGo(): void {

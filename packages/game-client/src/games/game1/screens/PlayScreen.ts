@@ -616,8 +616,21 @@ export class PlayScreen extends Container {
     // `lobbyTicketConfig.entryFee` først (server-autoritativ via plan-
     // runtime aggregator) og faller tilbake til `state.entryFee` kun hvis
     // lobby-config mangler. Matcher BuyPopup-prioritering (showBuyPopup).
+    //
+    // Tobias-bug 2026-05-14 (bong-pris=0 under aktiv trekning): når engine
+    // starter (status WAITING → RUNNING) overskriver `applyGameSnapshot`
+    // `state.entryFee = game.entryFee` (GameBridge.ts:854). Backend
+    // `entryFeeFromTicketConfig` returnerte 0 pga field-name-mismatch
+    // (`priceCentsEach` vs `pricePerTicket`) før PR #<this>. Defensive
+    // fix på klient-siden også: `??` propagerer 0 (kun null/undefined),
+    // så vi bruker `> 0`-sjekk for å falle tilbake. Pre-pris cached i
+    // `lobbyTicketConfig?.entryFee` (server-autoritativ via plan-runtime)
+    // er foretrukken kilde uansett — vi faller kun til `state.entryFee`
+    // hvis det er positivt, og ellers til defaulten 10.
+    const validStateEntryFee =
+      typeof state.entryFee === "number" && state.entryFee > 0 ? state.entryFee : null;
     const gridEntryFee =
-      this.lobbyTicketConfig?.entryFee ?? state.entryFee ?? 10;
+      this.lobbyTicketConfig?.entryFee ?? validStateEntryFee ?? 10;
     this.ticketGrid.setTickets(tickets, {
       // Live brett (RUNNING) skal aldri ha × — de er allerede betalt.
       // Pre-round-brett (mellom runder) er kjøpt men ikke startet, så ×

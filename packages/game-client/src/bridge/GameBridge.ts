@@ -851,7 +851,16 @@ export class GameBridge {
     }
     this.state.totalDrawCapacity = game.drawBag.length + game.drawnNumbers.length;
     this.state.prizePool = game.prizePool;
-    this.state.entryFee = game.entryFee;
+    // Tobias-bug 2026-05-14 (bong-pris=0 under aktiv trekning): tidligere
+    // overskrev vi state.entryFee uansett, så hvis `game.entryFee === 0`
+    // (typisk fra synthetic scheduled-game-snapshot der
+    // `entryFeeFromTicketConfig` returnerte 0 før PR #<this>), mistet vi
+    // den korrekte verdien fra `gameVariant.entryFee` (lest av
+    // applySnapshot/handleRoomUpdate). Behold eksisterende verdi hvis
+    // game.entryFee er 0 — det er aldri en gyldig pris for en kjøpt bonge.
+    if (typeof game.entryFee === "number" && game.entryFee > 0) {
+      this.state.entryFee = game.entryFee;
+    }
     this.state.patterns = game.patterns || [];
     this.state.patternResults = game.patternResults || [];
     this.state.isPaused = game.isPaused ?? false;

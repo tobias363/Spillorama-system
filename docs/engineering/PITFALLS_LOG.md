@@ -1336,6 +1336,48 @@ Generic `BingoEngine.startGame`-flyt (via `gameLifecycleEvents.ts:153`) kaller `
 - §3 (hall-arkitektur)
 - §7.11 (lobby-init race condition — relatert pattern)
 
+### §7.21 — Bong-pris går til 0 kr ved game-start (BUG)
+
+**Severity:** P0 (pilot-UX — spillere ser feil pris under aktiv runde)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 12:55)
+**Symptom:** Pre-trekning korrekt pris (5/10/15 kr). Etter engine starter alle bonger vises "0 kr".
+
+**Root cause:** Backend `entryFeeFromTicketConfig` i `Game1ScheduledRoomSnapshot.ts:182-196` leste KUN `priceCentsEach`, men `GamePlanEngineBridge.buildTicketConfigFromCatalog` skriver `pricePerTicket`. Når engine starter (status WAITING → RUNNING) bygger `enrichScheduledGame1RoomSnapshot` synthetic `currentGame` med `entryFee = entryFeeFromTicketConfig(row.ticket_config_json) = 0`. Det propageres via `roomHelpers.currentEntryFee` (linje 420, `??` tar ikke 0) → alle `enrichTicketList`-ticket-priser blir 0 → klient-state.entryFee overskrives til 0 → `gridEntryFee = state.entryFee ?? 10` blir 0 (samme `??`-bug på klient) → alle bonger vises "0 kr".
+
+DB-evidens fra prod 2026-05-14:
+```sql
+SELECT ticket_config_json->'ticketTypesData' FROM app_game1_scheduled_games WHERE id LIKE '1edd90a1%';
+-- [{"size": "small", "color": "white", "pricePerTicket": 500}, ...]
+```
+
+Felt-navn-mismatch: `priceCentsEach` (reader) vs `pricePerTicket` (writer). Dette ble lagt inn i `Game1TicketPurchaseService.extractTicketCatalog` (line 1254) som leste alle 4 historiske felter (`priceCents`, `priceCentsEach`, `pricePerTicket`, `price`) — men `entryFeeFromTicketConfig` ble glemt.
+
+**Fix (defense-in-depth, 5 lag):**
+1. Backend `entryFeeFromTicketConfig`: les alle 4 historiske felt-navn (matcher `extractTicketCatalog`)
+2. Backend `roomHelpers.currentEntryFee` (line 420): `> 0`-sjekk istedenfor `??` (match line 386-388)
+3. Klient `GameBridge.applyGameSnapshot` (line 854): overskriv KUN hvis `game.entryFee > 0`
+4. Klient `PlayScreen.gridEntryFee`: `> 0`-sjekk istedenfor `??` på `state.entryFee`
+5. Klient `TicketGridHtml.computePrice`: bruk `ticket.price > 0`-sjekk istedenfor `typeof === "number"`
+6. Klient `BingoTicketHtml.priceEl + populateBack`: skjul price-rad hvis 0 (ALDRI vis "0 kr" på en kjøpt bonge)
+
+**Prevention:**
+- ALDRI tillat priceEl å vise "0 kr" på en kjøpt bonge — kjøpt bonge har alltid pris > 0
+- Bevar ticket-pris ved kjøp-tidspunkt via server-side `ticket.price` (set i enrichTicketList) — klienten skal IKKE re-derive prisen mid-game
+- Defense-in-depth: hvis EN lag har 0-mismatch, må neste lag fange det
+- `??` på numeric fields er en fallgruve: 0 er et tall, ikke null/undefined. Bruk alltid `> 0`-sjekk for pris-felt
+- Skriv tester med fix-evidens (DB-shape fra prod) for å forhindre regression
+
+**Related:**
+- `apps/backend/src/game/Game1ScheduledRoomSnapshot.ts:182-196` (entryFeeFromTicketConfig)
+- `apps/backend/src/game/GamePlanEngineBridge.ts:311-588` (buildTicketConfigFromCatalog — writer)
+- `apps/backend/src/util/roomHelpers.ts:420` (currentEntryFee)
+- `packages/game-client/src/bridge/GameBridge.ts:854` (applyGameSnapshot)
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts:619-624` (gridEntryFee)
+- `packages/game-client/src/games/game1/components/TicketGridHtml.ts:402-407` (computePrice)
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts:591,751` (price-rendering)
+- §2 (Wallet — pris er regulatorisk-relevant)
+- §7.9 (state.ticketTypes overrider lobby — relatert state-pipeline)
+
 ---
 
 ### §7.20 — Master-UI header må være state-aware, ALDRI hardkodet "Aktiv trekning"

@@ -400,7 +400,19 @@ export class TicketGridHtml {
       }>;
     },
   ): number {
-    if (typeof ticket.price === "number") return Math.round(ticket.price);
+    // Tobias-bug 2026-05-14: tidligere returnerte vi `ticket.price` rått
+    // hvis det var et tall — INKLUDERT 0. Backend `enrichTicketList` setter
+    // `t.price = (fee × multiplier) / ticketCount`, så hvis backend's
+    // `currentEntryFee` (line 420 i roomHelpers.ts) er 0 (typisk fra
+    // `entryFeeFromTicketConfig` field-name-mismatch før PR #<this>),
+    // får alle tickets `price = 0`. Det rant gjennom hele klient-pipen
+    // og endte med "0 kr" på hver bonge under aktiv trekning.
+    //
+    // Fix: server-pris brukes KUN hvis > 0. Ellers fallback til
+    // computed pris (lobbyTypes / state.ticketTypes + entryFee).
+    if (typeof ticket.price === "number" && ticket.price > 0) {
+      return Math.round(ticket.price);
+    }
 
     // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): tidligere brukte
     // vi state.ticketTypes (fra room:update.gameVariant) for å mappe
