@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.9.0
+  version: 1.8.0
   project: spillorama
 ---
 
@@ -171,38 +171,6 @@ Audit-eventet `game_plan_run.recreate_after_finish` inkluderer disse feltene for
 
 **Plassering:** `apps/backend/src/game/GamePlanRunService.ts` — `getOrCreateForToday()` linje ~570-720. NB: `planService.list()` returnerer `GamePlan[]` (uten items), så vi kaller `planService.getById(matched.id)` for å få `GamePlanWithItems.items.length`.
 
-### Round-replay-API (debug + compliance, PR 2026-05-14)
-
-**Endpoint:** `GET /api/_dev/debug/round-replay/:scheduledGameId?token=<TOKEN>`
-
-Returnerer komplett event-tidsserie for én scheduled-game-runde — pure read, ALDRI muterer state. Brukes til å reprodusere runden event-for-event uten å gjøre 5-10 manuelle SQL-queries.
-
-**Output:**
-- `metadata` — scheduled-game-rad + catalog + plan-run-status snapshot
-- `timeline[]` — kronologisk sortert event-strøm: `scheduled_game_created`, `ticket_purchase`, `master_action`, `draw`, `phase_winner`, `compliance_ledger`, `scheduled_game_completed`
-- `summary` — aggregert: total purchases, draws, winners med expected vs actual prize-sammenligning (auto-mult-validert), compliance-counts
-- `anomalies[]` — detektert via `roundReplayAnomalyDetector`:
-  - `payout_mismatch` (severity=critical) — vinner-utbetaling matcher ikke auto-multiplikator × pot-andel
-  - `missing_advance` (info) — plan-run finished på position > 1 uten advance i audit
-  - `stuck_plan_run` (warn) — scheduled-game completed > 30s siden, plan-run-status fortsatt running/paused
-  - `double_stake` (critical) — ticket-purchase-sum != compliance-ledger STAKE-sum
-  - `preparing_room_hang` (warn) — completed > 15s siden, plan-run.running → ingen ny runde spawnet
-- `errors{}` — per-kilde fail-soft-feilmeldinger (tom hvis alt OK)
-
-**Bruks-tilfeller:**
-- **Compliance-audit (§71 pengespillforskriften):** Reprodusere runde event-for-event for Lotteritilsynet — alle wallet-touch, ledger-events, master-actions er sporbart med ms-presisjon.
-- **Bug-investigation:** Anomaly-detektor flagger automatisk kjente mønstre (auto-mult-feil fra PR #1408/#1411/#1413, stuck plan-run fra PR #1407, double-stake fra Innsats/Forhåndskjøp-mønster).
-- **Test:** Snapshot-test mot referanse-replay for regresjons-deteksjon.
-
-**Service-arkitektur:**
-- `RoundReplayBuilder` (`apps/backend/src/observability/roundReplayBuilder.ts`) — 8 parallelle SELECTs, fail-soft per kilde, returnerer alltid en respons
-- `detectRoundReplayAnomalies` (`apps/backend/src/observability/roundReplayAnomalyDetector.ts`) — pure-function detektor, stateless, kaster aldri
-- `createDevRoundReplayRouter` (`apps/backend/src/routes/devRoundReplay.ts`) — token-gated route med 404 for ukjent ID
-
-**ALDRI fjern endepunktet uten ADR-prosess.** Det er compliance-grade audit-trail for §71. Hvis vi mister muligheten til å reprodusere en runde event-for-event, kan vi heller ikke gi Lotteritilsynet et fullstendig svar ved revisjon.
-
-**Performance:** ~20-100ms for en normal runde mot lokal Postgres. Ikke ment for high-frequency polling — tenk debug-tool, ikke runtime-feature.
-
 ### UI-komponenter (admin-web)
 
 | Fil | Hva |
@@ -302,24 +270,6 @@ Når bruker bytter hall i `/web/`-lobby-dropdown (`apps/backend/public/web/lobby
 Fail-soft: hvis `/api/games/spill1/lobby` feiler, falle tilbake til global `gameStatus['bingo']` for å ikke vise feil til kunde.
 
 **Tester:** `apps/admin-web/tests/lobbyHallSwitcher.test.ts` (13 tester, jsdom + mock-fetch).
-
-## Lobby-API nextGame ved finished plan-run (PR <this-PR>, 2026-05-14)
-
-Når `app_game_plan_run.status='finished'` og `current_position < items.length`:
-- Lobby-API (`Game1LobbyService.getLobbyState`) returnerer `nextScheduledGame` fra `plan_items[current_position + 1]` (1-indeksert)
-- `GameLobbyAggregator.buildPlanMeta` peker `catalogSlug`/`catalogDisplayName` til NESTE plan-item
-- Master-UI viser korrekt "Start neste spill — 1000-spill" (eller hva neste er)
-
-Når `current_position >= items.length` (plan helt ferdig):
-- `nextScheduledGame: null` + `planCompletedForToday: true`
-- Aggregator beholder `catalogSlug` på siste posisjon (UI rendrer "Plan ferdig"-banner via `planRunStatus='finished'`)
-- Speilet av `PLAN_COMPLETED_FOR_TODAY`-DomainError fra `getOrCreateForToday`
-
-**ALDRI fall tilbake til position=1 hvis finished plan-run finnes** — det gir Bingo-loop som Tobias rapporterte 2026-05-14 13:00.
-
-**Komplementært til PR #1422:** Backend create-logikk advancer korrekt; lobby-API må også vise korrekt UI-state.
-
-**Tester:** `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester for finished+next-position), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester for `buildPlanMeta` auto-advance).
 
 ## Master-rolle-modellen (Tobias 2026-05-08)
 
@@ -668,121 +618,48 @@ For full per-color-breakdown må backend utvide wire-formatet til
 - IKKE fjern `myRoundWinnings`-reset i `gameStarted`-handler — forrige rundes liste vil lekke inn i WinScreen ved rask round-transition
 - IKKE muter `summary.myWinnings`-listen inne i overlay — Controller eier sannheten
 
-## Premietabell-rendering (3-bong-grid, 2026-05-14)
+## Frontend-state-dump (debug-tool, 2026-05-14)
 
-**Tobias-direktiv 2026-05-14:** Spillerklientens premietabell i `CenterTopPanel`
-skal vise alle 3 bong-farger (Hvit / Gul / Lilla) — ikke kun Hvit. Pre-fix
-viste én tekst-pill per pattern (`"Rad 1 - 100 kr"`) som kun var Hvit-prisen,
-selv om Gul-bong betaler ×2 og Lilla ×3. Spillere måtte regne i hodet.
+Når du debugger frontend-state-bugs (eks. "Bongen viser 20 kr men skulle vært 10 kr"), klikk **"Dump State"-knappen** i SPILL1 DEBUG-HUD (øverst høyre). Dette dumper komplett state-tree i én operasjon til fire kanaler:
 
-### Auto-multiplikator-regel (samme som payout-pipeline)
+1. **`window.__SPILL1_STATE_DUMP`** — JS-global. Inspiser i DevTools:
+   ```js
+   JSON.stringify(window.__SPILL1_STATE_DUMP, null, 2)
+   ```
+2. **`localStorage["spill1.lastStateDump"]`** — persistert tvers reloads.
+3. **Backend-server-fil** via `POST /api/_dev/debug/frontend-state-dump?token=<TOKEN>` → `/tmp/frontend-state-dumps/dump-<ts>-<id>.json`. Hent senere via `GET /api/_dev/debug/frontend-state-dumps/<dumpId>`.
+4. **`console.log("[STATE-DUMP]", ...)`** — Live-monitor-agent plukker det opp automatisk.
 
-Auto-multiplikator-regelen i [SPILL_REGLER_OG_PAYOUT.md §3.2](../../../docs/architecture/SPILL_REGLER_OG_PAYOUT.md#32-dette-gjelder-alle-hovedpremier-i-hovedspill):
+**Hva dumpen inneholder (fem hovedseksjoner + derived):**
+- `lobbyState` — activeHallId, halls, games, ticketPricesCents, nextGame, compliance, balanceKr
+- `roomState` — roomCode, gameStatus, entryFee, ticketTypes (med priceMultiplier), jackpot, pause-state
+- `playerState` — myPlayerId, myTickets, preRoundTickets, myStake, myPendingStake, isArmed, myLuckyNumber, walletBalanceKr
+- `screenState` — currentScreen + siste 10 transitions
+- `socketState` — connected, connectionState, siste 20 events
+- `derivedState` — **kjernen i bug-investigation:**
+  - `pricePerColor` — entryFee × priceMultiplier per fargen (eks: `{yellow:5, white:10, purple:15}`)
+  - `autoMultiplikatorApplied` — true hvis minst én multiplier ≠ 1
+  - `innsatsVsForhandskjop` — `{activeStakeKr, pendingStakeKr, summedKr, classification}` der classification er `active`/`pre-round`/`both`/`none`
+  - `pricingSourcesComparison` — sammenligner room.entryFee × multipliers vs lobby.ticketPricesCents vs nextGame.ticketPricesCents. `consistency: "divergent"` er rødt flag.
 
-| Bong | Pris | Multiplikator |
-|---|---|---|
-| Hvit | 5 kr | × 1 (= base) |
-| Gul | 10 kr | × 2 |
-| Lilla | 15 kr | × 3 |
+**Brukstilfeller (eksempler fra Tobias):**
 
-`pattern.prize1` (eller `Math.round((prizePercent / 100) * prizePool)` for
-percent-modus) er ALLTID Hvit-base. Gul og Lilla deriveres deterministisk
-ved multiplikasjon. Engine bruker samme regel server-side
-(`Game1DrawEngineService.payoutPerColorGroups`), så displayed-amount =
-paid-out-amount.
+1. *"Pris viser 20 kr men skulle vært 10 kr"* — Dump → se `derivedState.pricingSourcesComparison`. Hvis `consistency: "divergent"` peker det rett på hvilken kilde som er feil.
+2. *"Innsats + Forhåndskjøp dobbel-tellet"* — Dump → se `derivedState.innsatsVsForhandskjop`. `classification` viser hvor i syklusen vi er. `summedKr` bør **aldri** vises i UI som "total betalt" — det er sum av to separate buckets.
+3. *"Frontend henger etter runde-end"* — Dump → se `screenState.transitionHistory` + `socketState.lastEvents` for å finne om event mottatt men screen ikke flippet.
 
-### Layout (5×3 grid)
+**ALDRI fjern Dump State-knappen** — det er primær-verktøy for frontend-bug-investigation per Tobias-direktiv 2026-05-14.
 
-```
-| Premie        | Hvit       | Gul        | Lilla      |
-| Rad 1         | 100 kr     | 200 kr     | 300 kr     |
-| Rad 2         | 200 kr     | 400 kr     | 600 kr     |
-| Rad 3         | 200 kr     | 400 kr     | 600 kr     |
-| Rad 4         | 200 kr     | 400 kr     | 600 kr     |
-| Full Hus      | 1000 kr    | 2000 kr    | 3000 kr    |
-```
+**Implementasjon:**
+- `packages/game-client/src/debug/StateDumpTool.ts` — bygger dump + publisering
+- `packages/game-client/src/debug/StateDumpButton.ts` — DOM-knapp for HUD
+- `apps/backend/src/routes/devFrontendStateDump.ts` — server-side persistering
+- Token-gated samme som rrweb (`RESET_TEST_PLAYERS_TOKEN`)
 
-#### Celle-størrelse (iterasjon V, Tobias-direktiv 2026-05-14)
-
-Premie-cellene MÅ være visuelt smale slik at hele 5-rads-tabellen ikke tar
-mer vertikal plass enn dagens enkelt-pill-design. Faste verdier som
-`ensurePatternWonStyles` ALDRI skal regressere på:
-
-| Selector | Property | Verdi |
-|---|---|---|
-| `.premie-table` | `gap` | `3px` (mellom rader, ikke 5px+) |
-| `.premie-row` | `padding` | `3px 8px` (ikke 6px+ vertikalt) |
-| `.premie-row` | `border-radius` | `10px` (ikke 12px+) |
-| `.premie-row .premie-cell` | `padding` | `2px 6px` (ikke 4px+ vertikalt) |
-| `.premie-row .premie-cell` | `font-size` | `11px` |
-| `.premie-row .pattern-label` | `font-size` | `11px` |
-| `.premie-header` | `padding` | `0 8px` (ikke 10px+) |
-| `.premie-row` + `.premie-header` | `grid-template-columns` | `minmax(56px, 1fr) repeat(3, 1fr)` |
-
-Resultat: rad-høyde ≈ 16-18 px (font-line-height + padding) — gir samme
-visuelle fotavtrykk som dagens enkelt-pill (`.prize-pill`) hadde i prod
-før redesignet.
-
-Hver rad har:
-- `.pattern-label` (span) — pattern-navnet ("Rad 1", "Full Hus")
-- `.premie-cell.col-hvit` (div) — Hvit-pris (base)
-- `.premie-cell.col-gul` (div) — Gul-pris (×2)
-- `.premie-cell.col-lilla` (div) — Lilla-pris (×3)
-
-### Hvor i koden
-
-- **Renderer:** `packages/game-client/src/games/game1/components/CenterTopPanel.ts`
-  - `PREMIE_BONG_COLORS` (eksportert const) definerer auto-multiplikatoren
-  - `rebuildPills` bygger 5×3 grid (header + 5 rader)
-  - `applyPillState` skriver prize per celle (Hvit ×1, Gul ×2, Lilla ×3)
-- **Design-preview** (lokal iterasjon før prod):
-  `http://localhost:4000/web/games/premie-design.html`
-  Bygges av `packages/game-client/vite.premie-design.config.ts`.
-  Per iterasjon V (2026-05-14) viser siden HELE `g1-center-top`-mockupen
-  (LeftInfoPanel + mini-grid + premietabell + action-panel side-om-side)
-  med samme bredde-allokering som prod (LeftInfoPanel ~140 px,
-  combo-panel 376 px, action-panel 245 px). Endringer her må holdes i
-  sync med `CenterTopPanel.ts` `ensurePatternWonStyles`-CSS — premie-
-  cellene rendres med samme padding/gap/font-size begge steder.
-
-### Regression-tester
-
-- `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` —
-  18 tester: grid-struktur, auto-mult fixed-modus, percent-modus, active/
-  completed/won-flash, placeholder-mode, minimal-diff DOM-writes
-- `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` —
-  utvidet 2026-05-14 med `.premie-row` + `.premie-cell` guard (PIXI-blink-bug
-  PR #468 må ikke regressere på de nye klassene)
-- `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` —
-  40 tester (eksisterende), oppdatert til ny `.col-hvit`-format
-
-### Ingen single-prize-cap på hovedspill
-
-Lilla på Innsatsen Full Hus = 3000 kr. Lilla på Oddsen-HIGH = 4500 kr.
-**Ingen 2500 kr-cap** — det gjelder KUN databingo (`gameType=DATABINGO`,
-slug=`spillorama`). Hovedspill (`gameType=MAIN_GAME`) har INGEN cap. Se
-SPILL_REGLER §3.4 og §4.
-
-### KRITISK: ingen backdrop-filter
-
-`.premie-row` og `.premie-cell` ligger over Pixi-canvas. Hvis noen
-introduserer `backdrop-filter: blur(...)` på disse klassene vil PIXI-
-blink-bug (PR #468) regressere. Regression-testen
-`no-backdrop-filter-regression.test.ts` selekterer på `.premie-row` og
-`.premie-cell` for å hindre dette.
-
-### ALDRI gjør
-
-1. Vise kun Hvit-prisen igjen — bryter Tobias-direktiv 2026-05-14
-2. Hardkode 2500 kr-cap på hovedspill-premier (kun databingo har cap)
-3. Endre multiplikator-konstantene i `PREMIE_BONG_COLORS` (1/2/3) uten
-   tilsvarende endring i `Game1DrawEngineService.payoutPerColorGroups`
-4. Legge til `backdrop-filter` på `.premie-row` eller `.premie-cell`
-5. Øke `.premie-row` `padding`-verdier over `3px 8px` eller `gap` over
-   `3px` — det regresserer iterasjon V (Tobias-direktiv 2026-05-14).
-   Tabellen skal være visuelt smal. Hvis du må endre størrelsen,
-   oppdater premie-design.html samtidig og få godkjennelse av Tobias
-   FØR du merger.
+**Tester:**
+- `packages/game-client/src/debug/StateDumpTool.test.ts` — 17 tester (struktur, derived, idempotens, fail-soft)
+- `packages/game-client/src/debug/StateDumpButton.test.ts` — 6 tester (DOM-mount, klikk-flyt)
+- `apps/backend/src/routes/devFrontendStateDump.test.ts` — 12 tester (token, validering, rotering)
 
 ## Når denne skill-en er aktiv
 
@@ -832,8 +709,5 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
-| 2026-05-14 | v1.7.0 — PR #1430 fix/winscreen-show-only-winning-phases (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
-| 2026-05-14 | v1.7.1 — PR #1431 fix/lobby-nextgame-after-finished-plan-run: Lobby-API nextGame ved finished plan-run: `Game1LobbyService` returnerer NESTE plan-item som `nextScheduledGame` når `run.status='finished'` OG `currentPosition < items.length`. `GameLobbyAggregator.buildPlanMeta` auto-advancer `positionForDisplay` så `catalogSlug` peker til neste spill. Master-UI viser nå korrekt "Start neste spill — 1000-spill" istedet for default "Bingo". Nytt `planCompletedForToday`-flag speiler `PLAN_COMPLETED_FOR_TODAY`-DomainError. Komplementært til PR #1422 (DB-side fix). PITFALLS §3.13. Tester: 5 nye i `Game1LobbyService.test.ts` + 2 nye i `GameLobbyAggregator.test.ts`. |
-| 2026-05-14 | v1.8.0 — PR #1433 Agent Q (CSS, Tobias-direktiv): la til seksjon "Premietabell-rendering (3-bong-grid)". `CenterTopPanel` viste tidligere kun Hvit-bong-pris i tekst-pillene. Ny render bygger 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla) der Gul (×2) og Lilla (×3) deriveres automatisk fra `pattern.prize1`. Bygd lokal design-side først (`/web/games/premie-design.html`) for Tobias-godkjenning. Inkluderer ny `premieTable.test.ts` (18 tester) + utvidet `no-backdrop-filter-regression.test.ts` med `.premie-row`/`.premie-cell` guards. PITFALLS §7.23. |
-| 2026-05-14 | v1.8.1 — PR #1442 Agent V iterasjon (Tobias-direktiv 2026-05-14 V): smalere premie-celler i `ensurePatternWonStyles` — `.premie-table` gap 5px→3px, `.premie-row` padding 6px 10px→3px 8px og border-radius 12px→10px, `.premie-row .premie-cell` padding 4px 8px→2px 6px, `.premie-header` padding 0 10px→0 8px, grid-template-columns minmax(64px,1fr)→minmax(56px,1fr). Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele `g1-center-top`-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) i kontekst — mini-grid er statisk highlight per active rad, hopper med toggle. Ingen nye tester (alle 1275 består uendret), ingen regression-test brutt. Ingen test krevet på celle-størrelse (assertion på struktur, ikke piksel). |
-| 2026-05-14 | v1.9.0 — Synthetic Spill 1 bingo-runde-test (R4-precursor): la til invariant-list I1-I6 som ALLTID må PASSE før pilot-deploy. Bot kjører `POST /api/agent/game1/master/start` + N spillere × M bonger + waits for `room:update.currentGame.status === ENDED` + verifies invariants via `/api/_dev/debug/round-replay/<id>`. Master-flow agenter må verifisere at synthetic-test PASSER etter endringer i `MasterActionService.start`, `GamePlanEngineBridge`, ticket-purchase eller payout-pathen. Kjør: `npm run test:synthetic`. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |
+| 2026-05-14 | v1.7.0 — PR `fix/winscreen-show-only-winning-phases` (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
+| 2026-05-14 | v1.8.0 — la til "Frontend-state-dump (debug-tool, 2026-05-14)"-seksjon. "Dump State"-knapp i HUD dumper komplett state-tree til window-global + localStorage + server-POST + console.log. `derivedState.pricePerColor`, `derivedState.innsatsVsForhandskjop`, og `derivedState.pricingSourcesComparison` er primær-verktøy for frontend-bug-investigation (eks. "20 kr men skulle vært 10 kr"). Implementasjon i `packages/game-client/src/debug/StateDumpTool.ts` + `StateDumpButton.ts` + `apps/backend/src/routes/devFrontendStateDump.ts`. 35 tester totalt (17+6+12). PITFALLS §7.23. |

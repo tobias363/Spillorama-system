@@ -1718,6 +1718,47 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 
 ---
 
+### §7.23 — Bruk frontend-state-dump FØR du gjetter hvor frontend leser fra
+
+**Severity:** Process (not bug)
+**Oppdaget:** 2026-05-14 (PM brukte ~3 bug-runder på å gjette state-kilder)
+**Symptom:** Når frontend viste feil verdi (eks. "20 kr istedenfor 10 kr per bong"), gjettet PM på om kilden var:
+- `state.ticketTypes` (room-snapshot fra `room:update`)
+- `nextGame.ticketPricesCents` (lobby-API)
+- `state.entryFee ?? 10` (hardkodet fallback)
+- Auto-multiplikator-bug (entryFee × wrong multiplier)
+
+Manuelle browser-console-snippets var fragmenterte og ikke-reproduserbare. Ingen deterministisk måte å sammenligne kilder side-ved-side.
+
+**Fix (PR #<this-PR>):** "Dump State"-knapp i SPILL1 DEBUG-HUD (øverst høyre) som dumper komplett state-tree til fire kanaler samtidig:
+1. `window.__SPILL1_STATE_DUMP` — DevTools-inspeksjon
+2. `localStorage["spill1.lastStateDump"]` — persist tvers reload
+3. Server-POST `/api/_dev/debug/frontend-state-dump` → `/tmp/frontend-state-dumps/dump-<ts>-<id>.json`
+4. `console.log("[STATE-DUMP]", ...)` — Live-monitor-agent plukker det opp
+
+Dump-en inneholder `derivedState` med:
+- `pricePerColor` (entryFee × priceMultiplier per fargen) — viser EFFEKTIV pris fra room-snapshot
+- `pricingSourcesComparison` (room vs lobby vs nextGame) — `consistency: "divergent"` peker rett på feil kilde
+- `innsatsVsForhandskjop` (activeStake + pendingStake + classification) — viser om bug er dobbel-telling eller separasjons-feil
+
+**Prevention:**
+- ALLTID dump state FØR du gjetter hvor frontend leser fra
+- Bruk `derivedState.pricingSourcesComparison.consistency` som første sjekk — `"divergent"` betyr at room-snapshot og lobby-API ikke matcher (bug i ett av dem)
+- Test-paritet for samme problem: skriv test i `StateDumpTool.test.ts` som reproducerer scenarioet med mock-state
+- ALDRI fjern "Dump State"-knappen fra HUD — det er primær-debug-verktøy
+
+**Implementasjon:**
+- `packages/game-client/src/debug/StateDumpTool.ts` — pure read state-collector
+- `packages/game-client/src/debug/StateDumpButton.ts` — DOM-knapp
+- `apps/backend/src/routes/devFrontendStateDump.ts` — server-side persist + GET-list/single
+
+**Related:**
+- `.claude/skills/spill1-master-flow/SKILL.md` §"Frontend-state-dump (debug-tool, 2026-05-14)"
+- §7.9 (state.ticketTypes overrider) — samme tema fra ulik vinkel
+- §3 (Spill 1-arkitektur, ticket-pris-propagering tre-fase-binding)
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review
