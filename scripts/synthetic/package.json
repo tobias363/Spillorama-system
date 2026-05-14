@@ -1,0 +1,7 @@
+{
+  "name": "@spillorama/synthetic-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Synthetic Spill 1 bingo-round-test bot (R4-precursor). See docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md."
+}
