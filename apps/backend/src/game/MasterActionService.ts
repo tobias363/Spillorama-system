@@ -539,6 +539,28 @@ export class MasterActionService {
 
     // 2. Lazy-create plan-run for today (idempotent).
     const businessDate = this.businessDate();
+
+    // FIX-1 (2026-05-14): reconcile stuck plan-runs FØR getOrCreateForToday.
+    // OBS-6 DB-auditor avdekket plan-runs som står `status='running'` med 0
+    // aktive scheduled-games (klient blokkert, ingen ny runde spawnes). Den
+    // eksisterende `GamePlanRunCleanupService` rydder kun gårsdagens stale
+    // rader — DAGENS stuck-rader må reconcileers her, ellers vil
+    // `getOrCreateForToday` returnere stuck-raden uendret (idempotent på
+    // status != 'finished') og engine-bridgen vil prøve å gjenbruke en
+    // terminal scheduled-game-rad.
+    //
+    // Reconcile er additive: finne stuck-rader for (hall, businessDate) og
+    // markere dem finished. `getOrCreateForToday` har egen F-Plan-Reuse-flyt
+    // som DELETE-r finished-raden og lager en ny idle-rad, så master kan
+    // fortsette med fersk state. Audit-event skrives per reconcile for
+    // §71-sporbarhet.
+    await this.reconcileStuckPlanRuns({
+      hallId,
+      businessDate,
+      actor,
+      triggeringAction: "start",
+    });
+
     let run;
     try {
       run = await this.planRunService.getOrCreateForToday(hallId, businessDate);
@@ -1037,6 +1059,21 @@ export class MasterActionService {
     const lobby = await this.preValidate(hallId, actor, "advance");
 
     const businessDate = this.businessDate();
+
+    // FIX-1 (2026-05-14): reconcile stuck plan-runs FØR advance.
+    // Hvis plan-run står `status='running'` uten aktive scheduled-games,
+    // er den i stuck-state. `planRunService.advanceToNext` ville da
+    // forsøkt å inkrementere position basert på en korrupt run-state.
+    // Vi rydder først — `getOrCreateForToday`-flyten (kalt fra start()
+    // som master typisk klikker neste) re-oppretter raden hvis stuck-
+    // raden ble finishet.
+    await this.reconcileStuckPlanRuns({
+      hallId,
+      businessDate,
+      actor,
+      triggeringAction: "advance",
+    });
+
     const result = await this.planRunService.advanceToNext(
       hallId,
       businessDate,
@@ -1670,6 +1707,123 @@ export class MasterActionService {
       [runId, position],
     );
     return rows[0] ?? null;
+  }
+
+  /**
+   * FIX-1 (2026-05-14): reconcile stuck plan-runs for (hall, businessDate).
+   *
+   * Detekterer plan-runs i `status='running'` med 0 aktive scheduled-games og
+   * markerer dem `finished` med audit-event slik at de ikke krangler med
+   * neste plan-run-state-overgang. Caller (`start()` / `advanceToNext()`)
+   * kaller dette FØR `planRunService.getOrCreateForToday` / `advanceToNext`.
+   *
+   * Hvorfor:
+   *   OBS-6 DB-auditor avdekket konkret stuck plan-run (id
+   *   30dfdd2c-...-9938) der `status='running'` men eneste scheduled-game var
+   *   `completed`. Klient blokkert — venter på ny runde som ikke spawnes.
+   *
+   *   Eksisterende `GamePlanRunCleanupService.cleanupAllStale` rydder bare
+   *   gårsdagens rader (`business_date < today`). DAGENS stuck-rader må
+   *   reconcileers her, ellers vil `getOrCreateForToday` returnere stuck-
+   *   raden uendret (idempotent på status != 'finished') og bridgen vil
+   *   prøve å gjenbruke en terminal scheduled-game-rad.
+   *
+   * Idempotens: `findStuck` filtrerer på (hall_id, business_date, status,
+   * scheduled-game-aktivitet). Hvis det ikke er noen stuck-rader er
+   * operasjonen no-op.
+   *
+   * Soft-fail: hvis reconcile selv kaster (DB-feil), logg + fortsett.
+   * Plan-run-flyten under vil enten lykkes (hvis stuck-raden ble ryddet av
+   * en parallel kjøring) eller feile med klar feilmelding fra
+   * `getOrCreateForToday`/`advanceToNext`. Vi vil ikke blokkere master på
+   * en cleanup-bug.
+   *
+   * @internal
+   */
+  private async reconcileStuckPlanRuns(input: {
+    hallId: string;
+    businessDate: string;
+    actor: MasterActor;
+    triggeringAction: "start" | "advance";
+  }): Promise<void> {
+    let stuck: Array<{
+      id: string;
+      currentPosition: number;
+      planId: string;
+    }> = [];
+    try {
+      const found = await this.planRunService.findStuck({
+        hallId: input.hallId,
+        businessDate: input.businessDate,
+      });
+      stuck = found.map((r) => ({
+        id: r.id,
+        currentPosition: r.currentPosition,
+        planId: r.planId,
+      }));
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          hallId: input.hallId,
+          businessDate: input.businessDate,
+          triggeringAction: input.triggeringAction,
+        },
+        "[FIX-1] reconcile.findStuck feilet — fortsetter (cleanup er soft-fail)",
+      );
+      return;
+    }
+
+    if (stuck.length === 0) return;
+
+    for (const run of stuck) {
+      try {
+        await this.planRunService.finish(
+          input.hallId,
+          input.businessDate,
+          input.actor.userId,
+        );
+        logger.warn(
+          {
+            module: "master-action-service",
+            event: "plan_run.reconcile.stuck",
+            planRunId: run.id,
+            hallId: input.hallId,
+            businessDate: input.businessDate,
+            currentPosition: run.currentPosition,
+            triggeringAction: input.triggeringAction,
+            reason: "no_active_scheduled_games",
+          },
+          "[FIX-1] auto-finished stuck plan-run",
+        );
+        await this.audit({
+          action: "plan_run.reconcile_stuck",
+          actor: input.actor,
+          hallId: input.hallId,
+          planRunId: run.id,
+          scheduledGameId: null,
+          details: {
+            reason: "no_active_scheduled_games",
+            currentPosition: run.currentPosition,
+            triggeringAction: input.triggeringAction,
+            businessDate: input.businessDate,
+          },
+        });
+      } catch (err) {
+        // Best-effort. Hvis finish kaster (eks. annen aktør har endret state
+        // mellom findStuck og finish) — logg + fortsett. Caller-flyten må
+        // håndtere stuck-state selv hvis vi ikke klarte å rydde.
+        logger.warn(
+          {
+            err,
+            planRunId: run.id,
+            hallId: input.hallId,
+            triggeringAction: input.triggeringAction,
+          },
+          "[FIX-1] reconcile.finish feilet — fortsetter (state kan ha endret seg under cleanup)",
+        );
+      }
+    }
   }
 
   /**
