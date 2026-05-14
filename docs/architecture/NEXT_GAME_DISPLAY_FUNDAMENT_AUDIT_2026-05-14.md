@@ -1,6 +1,8 @@
 # Next Game Display Fundament-Audit — 2026-05-14
 
-**Status:** ⏳ In progress — skall opprettet 2026-05-14 av PM-AI (Claude Opus 4.7). 6 research-agenter spawnet for å fylle §§3-8.
+**Status:** ✅ **Completed 2026-05-15 — Trinn 1+3 ferdig.** Trinn 1 (research, 6 agenter) levert via PR #1470. Trinn 3 (fix-bølger) levert via PR #1477 (BUG-D1) + #1478 (BUG-D6) + #1481 (Bølge 4) — alle merget til main. Trinn 2 (foreslått modulær arkitektur §7) er ikke utført fordi minimum-fixes løste rot-årsaken; konsoliderings-pattern (`NextGameDisplayService`) flyttes til post-pilot-backlog.
+
+**Skall opprettet:** 2026-05-14 av PM-AI (Claude Opus 4.7).
 **Sak:** Master-konsoll viser feil "Neste spill"-tekst etter `dev:nuke` og etter at hver enkelt runde i spilleplanen er ferdig. Bug-en er tilbakevendende — fixet 4 ganger uten å løse rot-årsaken.
 **Mandat fra Tobias 2026-05-14:** *"Vi må nå ha et helt åpent sinn hvor vi ser på funksjonaliteten og hvis vi finner ut at dette må bygges som og det utsetter pilot med uker så er vi nødt til å gjøre det."* — Kvalitet > tid. 1-4 uker OK for arkitektur-rewrite.
 
@@ -157,13 +159,57 @@ KLIENT ──► GET /api/agent/game1/lobby?hallId=X
 
 ---
 
-## 6. Identifiserte bugs [⏳ Agentene fyller inn]
+## 6. Identifiserte bugs (Trinn 3 — alle FIXED)
 
-Hver state-overgang som faller mellom kode-paths dokumenteres her med file:line + reproducer.
+Agentene identifiserte 8 strukturelle bugs (BUG-D1 til BUG-D8) i Agent D-rapporten. De 3 kritiske (P0/P1) ble fixed i Trinn 3.
+
+### BUG-D1 — `GamePlanRunService.start()` hardkodet `current_position = 1` ✅ FIXED
+
+**Severity:** P0 (Next Game Display master-konsoll-symptom — hovedrot-årsak)
+**Fil:** `apps/backend/src/game/GamePlanRunService.ts:780`
+**Symptom:** Master kjørte Bingo (pos=1) gjentatte ganger i stedet for å advance til 1000-spill → 5×500 → … i sekvens.
+**Root cause:** `start()` UPDATE-statement overskrev `current_position` til 1, selv om `getOrCreateForToday`-INSERT allerede hadde satt korrekt `nextPosition` basert på `previousPosition`.
+**Fix:** Fjernet `current_position = 1`-linjen fra UPDATE. `start()` flipper kun state-machine til `running`, ikke posisjon.
+**PR:** [#1477](https://github.com/tobias363/Spillorama-system/pull/1477) — merget 2026-05-15 (commit `d7e9b8615`)
+**Tester:** 6 nye unit + integration + regression-tester i `GamePlanRunService.startPreservesPosition.test.ts`
+**Skill:** `spill1-master-flow` v1.14.0 → v1.15.0 (ny seksjon "Plan-run.start() invariant")
+**Pitfall:** PITFALLS_LOG §3.15 (FIXED)
+
+### Bølge 4 — Dual-spawn fra legacy-cron + plan-runtime ✅ FIXED
+
+**Severity:** P0 (race-condition mellom to spawn-paths)
+**Fil:** `apps/backend/src/game/Game1ScheduleTickService.ts` (`spawnUpcomingGame1Games`)
+**Symptom:** Master-konsoll viste feil "Neste spill" fordi legacy-cron spawn'et scheduled-game parallelt med plan-runtime's bridge-spawn. To scheduled-games for samme (hall, dag) → konflikt.
+**Root cause:** Plan-runtime (Bølge 1-3, 2026-05-08) erstattet legacy-spawn for haller med aktiv plan, men legacy-cron ble aldri skrudd av. Bølge 4 (deaktivere legacy) ble glemt.
+**Fix:** Ny helper `checkHallsWithActivePlanRuns(hallIds, dateRange)` returnerer `Set<"hallId|isoDay">`. Skip-guard i sub-game loop: hvis hall har aktiv plan-run for dagen, skip legacy-spawn. Pre-fetch én gang per tick (O(1) lookup, ingen N+1).
+**PR:** [#1481](https://github.com/tobias363/Spillorama-system/pull/1481) — merger 2026-05-15 (commit `b10a63697`)
+**Tester:** 6 nye Bølge 4-tester i `Game1ScheduleTickService.test.ts` (41/41 PASS)
+**Skill:** `spill1-master-flow` v1.15.0 → v1.16.0 (ny seksjon "Plan-runtime overstyrer legacy-spawn")
+**Pitfall:** PITFALLS_LOG §3.14 (FIXED)
+
+### BUG-D6 — `engine.UPDATE status='completed'` manglet WHERE-guard ✅ FIXED
+
+**Severity:** P1 (data-integritet — terminal-status kan overskrives)
+**Fil:** `apps/backend/src/game/Game1DrawEngineService.ts:1413`
+**Symptom:** Hvis master eller cron har satt scheduled-game til `cancelled` mens engine fortsatt har pending endRound-call, kunne engine overskrive `cancelled` med `completed`. Audit-trail-korrupsjon.
+**Root cause:** `endRound()` UPDATE-statement manglet `AND status IN ('running', 'paused')` i WHERE-clause.
+**Fix:** La til status-guard. Engine kan kun completed-flippe fra running/paused, ikke fra terminal status (cancelled/finished/completed).
+**PR:** [#1478](https://github.com/tobias363/Spillorama-system/pull/1478) — merget 2026-05-15 (commit `f0665a5c2`)
+**Tester:** 4 nye regression-tester i `Game1DrawEngineService.bugD6StatusGuard.test.ts`
+**Skill:** `spill1-master-flow` v1.16.0 → v1.17.0 (entry 14 i "Vanlige feil": "Engine UPDATE må ha status-guard")
+**Pitfall:** PITFALLS_LOG §3.16 (FIXED)
+
+### BUG-D2 til BUG-D5, BUG-D7, BUG-D8 — Ikke pilot-blokkere
+
+Agent D identifiserte også 5 sekundære bugs (D2: `getOrCreateForToday` mister hard-coded fallback, D3: race mellom `reconcileNaturalEndStuckRuns` og `MasterActionService.start`, D4: cron `transitionReadyToStartGames` ignorerer plan-run-state, D5: `findActiveOrUpcomingGameForHall` returnerer feil rad ved dual-spawn, D7: stuck `ready_to_start` etter engine.startGame feil, D8: `app_daily_schedules.status='running'` etter pilot-dag uten dynamic stop).
+
+**Status:** Disse er IKKE pilot-blokkere etter at BUG-D1 + Bølge 4 + BUG-D6 er lukket. BUG-D5 er delvis mitigert av Bølge 4 (forhindrer dual-spawn → forhindrer "feil rad"-deteksjon). D3-D4 er race-conditions som er mindre sannsynlige uten dual-spawn.
+
+**Plan:** Vurder for post-pilot-fix-bølge. Tracker i [`docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md`](./PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md) — Bølge 5+ etter pilot-go-live.
 
 ---
 
-## 7. Foreslått modulær arkitektur [⏳ Trinn 2 — etter all data samlet]
+## 7. Foreslått modulær arkitektur (Trinn 2 — flyttet til post-pilot-backlog)
 
 **Hypotese:** Én autoritativ service `NextGameDisplayService` (eller utvidet `GameLobbyAggregator`) som returnerer:
 
@@ -197,9 +243,27 @@ Hver invariant skal ha minst 1 unit-test + 1 integration-test + 1 E2E-test.
 
 ---
 
-## 9. Refaktor-bølger [⏳ Trinn 3 — etter audit ferdig]
+## 9. Refaktor-bølger (Trinn 3 — alle ferdig 2026-05-15)
 
-Foreslås etter Trinn 2 er konsolidert.
+| Bølge | Tema | Status | PR |
+|---|---|---|---|
+| **Trinn 3-A** | BUG-D1 — `GamePlanRunService.start()` preserves position | ✅ MERGET | [#1477](https://github.com/tobias363/Spillorama-system/pull/1477) |
+| **Trinn 3-B** | Bølge 4 — skip legacy-spawn for plan-haller | ✅ MERGET | [#1481](https://github.com/tobias363/Spillorama-system/pull/1481) |
+| **Trinn 3-C** | BUG-D6 — engine UPDATE WHERE-clause-guard | ✅ MERGET | [#1478](https://github.com/tobias363/Spillorama-system/pull/1478) |
+
+Alle 3 fixes leveres med:
+- **Skill-doc-protokoll §2.19 IMMUTABLE oppfylt** — `spill1-master-flow/SKILL.md` bumped v1.14.0 → v1.17.0 (3 nye seksjoner)
+- **PITFALLS_LOG §3.14-§3.16** — alle FIXED 2026-05-15
+- **AGENT_EXECUTION_LOG** — 3 kronologiske entries
+- **Regression-tester:** 16 nye tester totalt (6 BUG-D1 + 6 Bølge 4 + 4 BUG-D6), alle PASS
+
+**Resultat:** Master-konsollet skal nå:
+1. Etter `dev:nuke` (ingen runde startet) → vise "Neste spill: Bingo" (item 1)
+2. Etter Bingo finished → "Neste spill: 1000-spill" (item 2)
+3. Sekvensiell advance gjennom alle 13 items
+4. Etter siste item → "Plan fullført for dagen"
+
+**Verifisering:** Tobias kjører `npm run dev:nuke` (Trinn 3 i denne sesjonen) og verifiserer 13-spill-sekvens.
 
 ---
 
@@ -231,3 +295,6 @@ Foreslås etter Trinn 2 er konsolidert.
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-14 | Initial skall — opprettet for å koordinere 6 research-agenters leveranser i Trinn 1 av Next Game Display-bug-mandat. | PM-AI (Claude Opus 4.7) |
+| 2026-05-15 | **Trinn 1 (research) lukket** — 5 Trinn 1-agenter leverte via PR #1470, Agent F leverte separat. Spill1-master-flow skill bumped v1.8.0 → v1.14.0. | PM-AI (Claude Opus 4.7) |
+| 2026-05-15 | **Trinn 3 (fix-bølger) lukket** — 3 fix-PR-er merget til main: #1477 BUG-D1 + #1478 BUG-D6 + #1481 Bølge 4. Skill bumped v1.14.0 → v1.17.0. PITFALLS §3.14-§3.16 alle FIXED. 16 nye regression-tester PASS. Audit-doc status endret fra "⏳ In progress" til "✅ Completed". | PM-AI (Claude Opus 4.7) |
+| 2026-05-15 | **Trinn 2 (foreslått modulær arkitektur §7) flyttet til post-pilot-backlog** — minimum-fixes løste rot-årsaken. `NextGameDisplayService`-konsolidering er ikke-pilot-blokker. | PM-AI (Claude Opus 4.7) |
