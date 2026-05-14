@@ -295,6 +295,99 @@ Hvis PR mangler dette → enten reject med kommentar, eller follow-up commit fra
 
 **Unntak:** Ren config-pin (eks. atlas-version), CI-tweak, eller ren rename. Hvis i tvil — inkluder doc-update uansett.
 
+### 2.20 Sentry + PostHog overvåking ALLTID aktiv ved testing (vedtatt 2026-05-14, IMMUTABLE)
+
+> "Kan du legge inn i PM rutningen at de skal alltid overvåke sentry/posthog slik at feil blir tatt hånd om med en gang?"
+> — Tobias 2026-05-14
+
+**HARD REGEL:** Når PM eller Tobias starter en test-sesjon, MÅ Sentry- og PostHog-MCP brukes aktivt for å fange feil i sanntid. Ikke vente på at Tobias rapporterer bug i chat — fange dem fra observability-stacken først.
+
+#### Sentry MCP (org=spillorama, region=de.sentry.io)
+
+PM skal:
+1. **Sjekke Sentry ved sesjons-start** — `mcp__15c870cf-...__search_issues(query="is:unresolved firstSeen:-1h")` viser nye issues fra forrige time.
+2. **Periodisk poll under test-sesjon** — minimum hvert 10. min, kombinert med live-monitor-fifo. Bruk `ScheduleWakeup` med `delaySeconds: 600` + prompt som re-poller Sentry.
+3. **Auto-fix-trigger ved nye P0** — hvis en ny issue dukker opp under aktiv testing med `level:error` og `events > 5`, spawn fix-agent automatisk med stack-trace + auto-PR.
+4. **Auto-resolve etter merge** — bruk `mcp__15c870cf-...__update_issue` med `status: "resolved"` etter PR merger. Inkluder `Fixes SPILLORAMA-XXX-N` i commit-meldingen som auto-trigger.
+5. **Korrelere med Linear** — hvis en Sentry-issue krever større refaktor, lag tilsvarende `BIN-NNN` i Linear via `mcp__linear__create_issue` + link.
+
+#### PostHog MCP
+
+PM skal:
+1. **Spille-sesjons-analyse** — etter pilot-test, hent `error-tracking-issues-list` + `session-recording-list` for å se hva spillere faktisk gjorde.
+2. **Funnel-drop-detect** — hvis ny PR endrer ticket-purchase-flyt, hent `insight-query` mot funnel-data for å se om drop-off endret seg signifikant.
+3. **Replay-mining ved bug-rapport** — hvis Tobias rapporterer "noe rart i UI", bruk `session-recording-get` for å se EKSAKT hva spilleren gjorde (DOM-replay).
+
+#### Sesjons-start sjekkliste (utvidet)
+
+1. Verifiser dev:nuke kjører (curl /health)
+2. Spawn live-monitor-agent ← OBLIGATORISK
+3. **Sentry-baseline:** `search_issues(query="is:unresolved", sort="freq")` → kjent baseline før test starter
+4. **PostHog-baseline:** `error-tracking-issues-list` → samme baseline
+5. Verifiser `/tmp/pilot-monitor-init.md` skrives innen 30s
+6. Klart for testing
+
+**Etter sesjons-slutt:** Sjekk om ANY ny Sentry-issue ble registrert. Hvis ja: ikke avslutt sesjon før den er enten fixet eller dokumentert som "kjent ikke-blokker" i PITFALLS_LOG.
+
+### 2.21 Database call-overvåking ved testing (vedtatt 2026-05-14)
+
+> "Er det noe vi kan gjøre database messign så man også får full oversikt over alle kall som blir gjort her når det testes?"
+> — Tobias 2026-05-14
+
+Fire lag av DB-overvåking nå tilgjengelig — bruk dem i kombinasjon:
+
+#### Lag 1: PgHero dashboard (kontinuerlig, aggregert)
+`http://localhost:8080` etter `npm run dev:nuke -- --observability`. Top-N slow queries, missing indexes, table bloat, long-running queries. **Bruk:** "hva er sakte i dag?" på 5-sek-skala.
+
+#### Lag 2: pg_stat_statements (kontinuerlig, persistent)
+SQL-spørring direkte mot DB for query-statistikk:
+```sql
+SELECT query, calls, total_exec_time, mean_exec_time, rows
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC LIMIT 20;
+```
+**Bruk:** "hvilke queries har brukt mest tid totalt?" — fanger N+1-mønstre.
+
+#### Lag 3: Slow-query-log (kontinuerlig, real-time)
+`log_min_duration_statement = 100` (>100ms logges til stderr):
+```bash
+docker logs -f spillorama-system-postgres-1 | grep "duration:"
+```
+**Bruk:** Live stream av sakte queries mens du tester. Hver query > 100ms får full SQL + duration.
+
+#### Lag 4: Sentry DB-tracing (per-request, forensics)
+Hver HTTP-request får full span-tree med alle DB-spans. Inkluderer N+1-deteksjon (issue `performance_n_plus_one_db_queries`). **Bruk:** "hvor mange DB-calls per request?" — Sentry-MCP `search_issues` med `issueCategory:db_query`.
+
+#### Aktivering for FULL query-stream (midlertidig under aktiv debug-sesjon)
+
+Hvis du trenger å se HVER query (også < 100ms), sett midlertidig:
+```sql
+ALTER SYSTEM SET log_min_duration_statement = 0;
+SELECT pg_reload_conf();
+```
+Dette logger ALT — kan fylle disk. Reset til 100 etter sesjon:
+```sql
+ALTER SYSTEM SET log_min_duration_statement = 100;
+SELECT pg_reload_conf();
+```
+
+#### Postgres MCP (ikke aktiv per 2026-05-14)
+
+Cowork MCP-registry har IKKE en standard Postgres-MCP. Custom-setup krever stdio-based MCP-server:
+```bash
+# Tobias kan installere lokalt:
+npm install -g @modelcontextprotocol/server-postgres
+# Cowork → Connectors → Add custom MCP → command:
+npx @modelcontextprotocol/server-postgres "postgres://spillorama:spillorama@localhost:5432/spillorama"
+```
+Ved aktivert: PM-AI kan kjøre vilkårlige SELECT-queries direkte. Foreløpig brukes Bash+psql som ad-hoc fallback.
+
+**Anbefalt prosedyre under test-sesjon:**
+- Aktivér PgHero (Lag 1) + slow-log (Lag 3) ved sesjons-start
+- Sentry-DB-tracing (Lag 4) er alltid på
+- Ved mistanke om N+1 eller treg query: skum PgHero "Queries"-tab + Sentry `performance_n_plus_one_db_queries`-issues
+- Ved kompleks reproduksjon: aktivér Lag 4-full-trace midlertidig + analyser i `pg_stat_statements`
+
 ---
 
 ## 3. Trinn-for-trinn onboarding-rutine
