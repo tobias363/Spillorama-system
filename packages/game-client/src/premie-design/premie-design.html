@@ -170,15 +170,18 @@
     }
 
     /* ── MIDDLE: combo-panel (mini-grid + premie-table) ─────────────────
-     * Speiler `CenterTopPanel.combo` 1:1. Bredde 376 px (matcher prod). */
+     * Speiler `CenterTopPanel.combo`. Bredde 496 px (Tobias-direktiv
+     * 2026-05-14 etter screenshot — 376 px var for trang, premie-tabell
+     * sin Lilla-kolonne klemte action-panel og overlappet. Gir nå plass
+     * til alle 3 prize-celler + label uten compression. */
     .combo-panel {
       display: flex;
       flex-direction: column;
       justify-content: center;
-      width: 376px;
+      width: 496px;
       padding: 15px 22px;
       border-left: 1px solid rgba(255, 120, 50, 0.2);
-      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
+      box-shadow: inset 10px 0 20px rgba(0, 0, 0, 0.15);
       flex-shrink: 0;
     }
     .combo-body {
