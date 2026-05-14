@@ -18,6 +18,7 @@
     wallet: null,
     compliance: null,
     gameStatus: {}, // BIN-266: slug → { status, nextRoundAt }
+    spill1Lobby: null, // 2026-05-14: per-hall Spill 1 lobby state (Game1LobbyState)
     activeHallId: '',
     loading: true,
     error: ''
@@ -141,7 +142,13 @@
 
       if (lobbyState.activeHallId) {
         sessionStorage.setItem(HALL_KEY, lobbyState.activeHallId);
-        await loadCompliance();
+        // 2026-05-14: parallell fetch av per-hall state ved initial load.
+        // Compliance + Spill 1 lobby er separate endepunkt med separate
+        // hall-spesifikke responser; begge må være friske ved første render.
+        await Promise.all([
+          loadCompliance(),
+          loadSpill1Lobby(),
+        ]);
       }
 
       // Suksess — reset backoff-teller for neste sesjon.
@@ -188,6 +195,33 @@
     }
   }
 
+  // 2026-05-14 (Tobias hall-switcher bug): Per-hall Spill 1 lobby-state.
+  // `/api/games/status` er GLOBAL (ignorerer hallId) — den kan ikke besvare
+  // "hva er status på Bingo for hall X?". For per-hall-state må klient
+  // kalle `/api/games/spill1/lobby?hallId=...` som returnerer
+  // `Game1LobbyState` med `overallStatus` (closed | idle | purchase_open |
+  // ready_to_start | running | paused | finished). UI mapper denne til
+  // tile-status "Åpen / Starter snart / Stengt" via buildStatusBadge.
+  //
+  // Spill 2/3 (perpetual) er ETT globalt rom uavhengig av hall — vi bruker
+  // fortsatt /api/games/status for dem (uendret).
+  async function loadSpill1Lobby() {
+    if (!lobbyState.activeHallId) {
+      lobbyState.spill1Lobby = null;
+      return;
+    }
+    try {
+      lobbyState.spill1Lobby = await apiFetch(
+        '/api/games/spill1/lobby?hallId=' + encodeURIComponent(lobbyState.activeHallId)
+      );
+    } catch {
+      // Endepunktet er fail-soft: ved feil setter vi null og lar
+      // buildStatusBadge falle tilbake til den globale `gameStatus`-mapen.
+      // Aldri sett kunde i en feil-state pga. metadata-fetch.
+      lobbyState.spill1Lobby = null;
+    }
+  }
+
   function canPlay() {
     if (!lobbyState.compliance) return false;
     const r = lobbyState.compliance.restrictions;
@@ -196,7 +230,56 @@
 
   // ── Hall switch ──────────────────────────────────────────────────────────
 
+  // 2026-05-14 (Tobias hall-switcher bug): Detect om spiller er i en
+  // aktiv Pixi-runde (web-game-container vises). Brukt av switchHall til å
+  // forhindre stille drop av aktiv runde ved hall-bytte. Tobias-direktiv:
+  // "siden må da oppdateres med de innstillingene som gjelder for den hallen"
+  // — men ikke for å miste pågående spill uten advarsel.
+  function isWebGameActive() {
+    var webContainer = document.getElementById('web-game-container');
+    return !!(webContainer && webContainer.style.display !== 'none');
+  }
+
+  // 2026-05-14: Full state-refresh ved hall-bytte. Pre-fix-bug: kun
+  // compliance + balance ble refreshet. Game-tiles fortsatte å vise gammel
+  // hall sin status (Bingo: Stengt) selv om den nye hallen var Master
+  // hvor Bingo skulle vært "Åpen".
+  //
+  // Sekvens:
+  //   1. Hvis aktiv Pixi-runde: confirm-modal "Bytte hall avslutter
+  //      pågående runde. Fortsett?" — bruker `window.confirm` (browser-
+  //      modal) for å unngå tung modal-infrastruktur. Hvis avbrutt:
+  //      reverter dropdown-valg og no-op.
+  //   2. Update lobbyState.activeHallId + sessionStorage
+  //   3. Sync til spillvett.js (SetActiveHall)
+  //   4. Dispatch spillorama:hallChanged til game-client
+  //   5. Hvis aktiv runde: unmount game-client og returner til lobby
+  //      (returnToShellLobby kjører loadLobbyData som re-fetcher alt)
+  //   6. Hvis IKKE aktiv runde: parallell refetch (Promise.all) av
+  //      balance + compliance + spill1-lobby for ny hall + global game-
+  //      status (for å fange opp Spill 2/3 perpetual-rom). renderLobby
+  //      tegner game-tiles på nytt.
   async function switchHall(hallId) {
+    // Idempotens: bytte til samme hall = no-op (unngå unødvendige
+    // network-roundtrips ved click på samme option).
+    if (hallId === lobbyState.activeHallId) {
+      return;
+    }
+
+    // Hvis aktiv runde: advar bruker FØR vi bytter hall.
+    if (isWebGameActive()) {
+      var confirmed = window.confirm(
+        'Bytte hall vil avslutte pågående runde. Vil du fortsette?'
+      );
+      if (!confirmed) {
+        // Reverter dropdown — sett selectors tilbake til opprinnelig hall.
+        // Vi gjør dette via re-render istedenfor manuell DOM-manipulering
+        // så begge dropdowns (lobby + game-bar) er synk.
+        renderLobby();
+        return;
+      }
+    }
+
     lobbyState.activeHallId = hallId;
     sessionStorage.setItem(HALL_KEY, hallId);
 
@@ -211,10 +294,31 @@
       detail: { hallId: hallId, hallName: hall ? hall.name : hallId }
     }));
 
-    // Immediately refresh balance for the new hall context
-    refreshBalanceNow();
+    // Hvis aktiv runde: returner til lobby (returnToShellLobby kjører
+    // loadLobbyData som re-fetcher alt for ny hall).
+    if (isWebGameActive()) {
+      if (typeof window.returnToShellLobby === 'function') {
+        window.returnToShellLobby();
+      }
+      return;
+    }
 
-    await loadCompliance();
+    // Lobby-modus: parallell refetch av all hall-spesifikk state.
+    // Bruk Promise.all så hall-switch føles raskt (< 500ms typisk).
+    // Hver fetch er fail-soft individuelt — én fetch-feil skal ikke
+    // hindre de andre fra å oppdatere.
+    await Promise.all([
+      refreshBalanceNow(), // refetcher /api/wallet/me (cache-buster)
+      loadCompliance(),    // refetcher /api/wallet/me/compliance?hallId=...
+      loadSpill1Lobby(),   // refetcher /api/games/spill1/lobby?hallId=...
+      apiFetch('/api/games/status').catch(function () { return {}; })
+        .then(function (s) {
+          if (s && typeof s === 'object') {
+            lobbyState.gameStatus = s;
+          }
+        })
+    ]);
+
     renderLobby();
   }
 
@@ -707,8 +811,71 @@
   // "Stengt" så spillere ikke tror spillet er nede (E2E v2 catch-22-funn).
   var PERPETUAL_LOOP_SLUGS = { rocket: true, monsterbingo: true };
 
+  // 2026-05-14 (Tobias hall-switcher bug): Per-hall Spill 1 status mapping.
+  // `/api/games/spill1/lobby?hallId=X` returnerer `overallStatus`-feltet med
+  // disse verdiene (se `Game1LobbyService.Game1LobbyOverallStatus`):
+  //   - "closed"         → utenfor åpningstid, eller ingen plan dekker dagen
+  //   - "idle"           → master har ikke kalt /start ennå
+  //   - "purchase_open"  → bong-kjøp åpent (klient skal vise "Åpen")
+  //   - "ready_to_start" → kort vindu før runden starter ("Starter snart")
+  //   - "running"        → runden kjører ("Aktiv")
+  //   - "paused"         → master har pauset (kortvarig)
+  //   - "finished"       → spilleplanen er fullført for dagen
+  //
+  // Per Tobias-direktiv 2026-05-14: når bruker bytter hall i lobby skal
+  // tile-status reflektere ny hall sin status umiddelbart.
+  function buildSpill1StatusBadge() {
+    var lobby = lobbyState.spill1Lobby;
+    if (!lobby) {
+      // Fail-soft: fall tilbake til global gameStatus-mapen hvis per-hall
+      // fetch feilet eller ikke har kjørt ennå.
+      return null;
+    }
+    switch (lobby.overallStatus) {
+      case 'running':
+      case 'purchase_open':
+        return '<span class="lobby-tile-status lobby-tile-status--open">&#9679; Åpen</span>';
+      case 'ready_to_start': {
+        var label = 'Starter snart';
+        if (lobby.nextScheduledGame && lobby.nextScheduledGame.scheduledStartTime) {
+          try {
+            var d = new Date(lobby.nextScheduledGame.scheduledStartTime);
+            label = 'Starter ' + d.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
+          } catch { /* ignore */ }
+        }
+        return '<span class="lobby-tile-status lobby-tile-status--starting">&#9679; ' + escapeHtml(label) + '</span>';
+      }
+      case 'paused':
+        return '<span class="lobby-tile-status lobby-tile-status--starting">&#9679; Pauset</span>';
+      case 'idle':
+        // Master har ikke startet ennå — kjøp er ikke åpent, men spilleplanen
+        // ligger der. Vis "Starter snart" hvis nextScheduledGame har tid,
+        // ellers "Venter" (uten "Stengt"-rød fargestyle).
+        if (lobby.nextScheduledGame && lobby.nextScheduledGame.scheduledStartTime) {
+          try {
+            var d2 = new Date(lobby.nextScheduledGame.scheduledStartTime);
+            return '<span class="lobby-tile-status lobby-tile-status--starting">&#9679; Starter ' +
+              d2.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) + '</span>';
+          } catch { /* ignore */ }
+        }
+        return '<span class="lobby-tile-status lobby-tile-status--starting">&#9679; Venter</span>';
+      case 'finished':
+      case 'closed':
+      default:
+        return '<span class="lobby-tile-status lobby-tile-status--closed">Stengt</span>';
+    }
+  }
+
   // BIN-265: Status badge — reflects live state from GET /api/games/status
+  // 2026-05-14: for Spill 1 (`bingo`) bruker vi per-hall lobby-state hvis
+  // tilgjengelig (mer presis enn global summaries-baserte status).
   function buildStatusBadge(slug) {
+    // Spill 1 har per-hall status via /api/games/spill1/lobby?hallId=...
+    if (slug === 'bingo') {
+      var badge = buildSpill1StatusBadge();
+      if (badge !== null) return badge;
+      // fall through til global gameStatus hvis per-hall ikke tilgjengelig
+    }
     var s = lobbyState.gameStatus[slug];
     if (!s) return '<span class="lobby-tile-status lobby-tile-status--open">&#9679; Åpen</span>';
     if (s.status === 'OPEN') {
@@ -734,16 +901,24 @@
   }
 
   // Refresh game status every 30 seconds without reloading everything
+  // 2026-05-14: include per-hall Spill 1 lobby-state in refresh så tile
+  // synker med master-handlinger (start/pause/finish) uten å vente på
+  // manuell hall-switch eller full lobby-reload.
   var _statusRefreshTimer = null;
   function scheduleStatusRefresh() {
     if (_statusRefreshTimer) clearInterval(_statusRefreshTimer);
     _statusRefreshTimer = setInterval(async function () {
       try {
-        var s = await apiFetch('/api/games/status');
+        var promises = [apiFetch('/api/games/status').catch(function () { return null; })];
+        if (lobbyState.activeHallId) {
+          promises.push(loadSpill1Lobby());
+        }
+        var results = await Promise.all(promises);
+        var s = results[0];
         if (s && typeof s === 'object') {
           lobbyState.gameStatus = s;
-          renderLobby();
         }
+        renderLobby();
       } catch { /* ignore */ }
     }, 30000);
   }
@@ -858,6 +1033,17 @@
   window.SpilloramaLobby = {
     load: loadLobbyData,
     init: initLobby,
-    returnToLobby: window.returnToShellLobby
+    returnToLobby: window.returnToShellLobby,
+    // Test-handles (2026-05-14 hall-switcher-state-refresh fix). Eksportert
+    // for tester (lobby.test.js) — IKKE en stabil offentlig API. Ikke bruk
+    // disse fra annen produksjons-kode; de kan endres uten advarsel.
+    __testing: {
+      getState: function () { return lobbyState; },
+      switchHall: switchHall,
+      loadSpill1Lobby: loadSpill1Lobby,
+      buildStatusBadge: buildStatusBadge,
+      buildSpill1StatusBadge: buildSpill1StatusBadge,
+      isWebGameActive: isWebGameActive,
+    },
   };
 })();
