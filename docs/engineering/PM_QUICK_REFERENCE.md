@@ -76,30 +76,25 @@
 
 ## 3. Spill 1/2/3 — fundamentale forskjeller
 
-> **🚨 ALDRI overfør antakelser mellom spillene.** Hver kolonne er en uavhengig kontrakt.
+> **🚨 Kanonisk cross-spill-sammenligning: [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md).**
+>
+> Full tabell med alle aspekter (grid, ball-range, rom-modell, master-rolle, spilleplan, auto-restart, vinning, bonus, compliance, premie-modus, salgskanaler m.fl.) ligger der. IKKE overfør antakelser mellom spillene.
 
-| Aspekt | Spill 1 (`bingo`) | Spill 2 (`rocket`) | Spill 3 (`monsterbingo`) |
-|---|---|---|---|
-| **Grid** | 5×5 m/fri sentercelle | 3×3 full plate | 5×5 UTEN fri sentercelle |
-| **Ball-range** | 1-75 | 1-21 | 1-75 |
-| **Rom-modell** | Per-hall lobby + GoH-master | ETT globalt rom (`ROCKET`) | ETT globalt rom (`MONSTERBINGO`) |
-| **Master-rolle** | Master-hall styrer (start/pause/advance) | Ingen master | Ingen master |
-| **Spilleplan** | `app_game_plan` + plan-runtime | Perpetual loop (`Spill2Config`) | Perpetual loop (`Spill3Config`) |
-| **Auto-restart** | ❌ Master-styrt mellom runder | ✅ `minTicketsToStart` threshold | ✅ Sequential phases (Rad 1 → 3s pause → Rad 2 → …) |
-| **Trekning** | Plan-tick + master-trigger | Auto-tick global | Auto-tick global + phase-state-machine |
-| **Vinning** | Rad 1-4 + Fullt Hus (parallelt) | Kun Fullt Hus (9/9) | Sequential phases (Rad 1 → Rad 2 → … → Fullt Hus) |
-| **Pause mellom faser** | Master pauser bevisst | N/A | `pauseBetweenRowsMs` (default 3000ms) — automatisk |
-| **Bongtype** | 3 farger (5/10/15 kr) | ÉN type (10 kr default) | ÉN type ("Standard", default 5 kr) |
-| **Bonus-spill** | 4 mini-spill (Wheel/Chest/Mystery/ColorDraft) | Lucky number bonus | Ingen bonus |
-| **Compliance §11** | MAIN_GAME (15%) | MAIN_GAME (15%) | MAIN_GAME (15%) |
+**Korte hovedforskjeller (executive summary):**
+
+- **Spill 1** (`bingo`) — 5×5 m/fri sentercelle, 1-75, per-hall lobby + GoH-master + plan-runtime + scheduled-games. Master starter/pauser bevisst. 13 katalog-varianter.
+- **Spill 2** (`rocket`) — 3×3 full plate, 1-21, ETT globalt rom (`ROCKET`), perpetual loop, auto-tick. Ingen master, ingen plan. Auto-start på `minTicketsToStart`. Jackpot-mapping per draw-count.
+- **Spill 3** (`monsterbingo`) — 5×5 uten sentercelle, 1-75, ETT globalt rom (`MONSTERBINGO`), perpetual loop, sequential phase-state-machine (Rad 1 → 3s pause → Rad 2 → … → Fullt Hus med auto-pause).
+- **Compliance §11:** Alle tre = `MAIN_GAME` = 15% til organisasjoner. INGEN single-prize-cap (kun SpinnGo har 2500 kr cap).
 
 **Bridge-pattern:** `Spill2GlobalRoomService` og `Spill3GlobalRoomService` mapper `Spill[2-3]Config` til `GameVariantConfig`. Spill 3 setter `autoClaimPhaseMode=true` for å aktivere phase-state-machine.
 
 **Kanoniske docs:**
-- [SPILL_REGLER_OG_PAYOUT.md](../architecture/SPILL_REGLER_OG_PAYOUT.md)
-- [SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md](../architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md)
-- [SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md](../architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md)
-- [SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md](../architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md)
+- [SPILL_ARCHITECTURE_OVERVIEW.md](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md) ← cross-spill-sammenligning
+- [SPILL_REGLER_OG_PAYOUT.md](../architecture/SPILL_REGLER_OG_PAYOUT.md) ← payout-mekanikk
+- [SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md](../architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md) ← Spill 1 dyp implementasjon
+- [SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md](../architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md) ← Spill 2 dyp implementasjon
+- [SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md](../architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md) ← Spill 3 dyp implementasjon
 
 ---
 

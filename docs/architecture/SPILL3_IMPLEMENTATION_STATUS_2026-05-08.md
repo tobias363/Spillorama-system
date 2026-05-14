@@ -21,6 +21,8 @@ Dette dokumentet er konsolidering av alt som eksisterer per 2026-05-08 — datab
 
 ## 1. KRITISK: Forskjeller fra Spill 1 OG Spill 2 (les FØRST)
 
+> **🚨 Den kanoniske cross-spill-sammenligningen ligger i [`SPILL_ARCHITECTURE_OVERVIEW.md`](./SPILL_ARCHITECTURE_OVERVIEW.md).** Tabellen under er Spill 3-perspektiv (med alle 3 spill kolonner). For konsoliderte regler om bridge-pattern, phase-state-machine og anti-mønstre på tvers av spillene — bruk SPILL_ARCHITECTURE_OVERVIEW.
+
 Spill 3 er **verken** en variant av Spill 1 eller Spill 2. Hvis du tar med deg antakelser fra Spill 1-doku (per-hall lobby, master-styrt) eller Spill 2-doku (auto-tick perpetual loop, jackpot-mapping), vil de feile på Spill 3. Tabellen under er forskjells-oversikten alle MÅ lese:
 
 | Aspekt | Spill 1 (`bingo`) | Spill 2 (`rocket`) | **Spill 3 (`monsterbingo`)** |

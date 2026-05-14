@@ -505,25 +505,31 @@ These are decisions baked in by the Spillorama team — not auto-detectable from
 
 ### 🚨 Spill 1, 2, 3 fundament (LESE-FØRST-I-SESJON — gjelder ALL kode som rører live-spillene)
 
-Hvis du rører ETT av live-spillene — Spill 1 (`bingo`), Spill 2 (`rocket`) eller Spill 3 (`monsterbingo`) — les den tilsvarende implementasjons-status-doc-en **FØR du gjør noe**:
-
-| Spill | Slug | Doc | Når du må lese |
-|---|---|---|---|
-| **Spill 1** | `bingo` | @docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md | plan-runtime, master-actions (start/pause/resume/advance), scheduled-game lifecycle, klient-lobby, NextGamePanel, Spill1HallStatusBox, GamePlanEngineBridge, GoH-master-koblinger, transfer-master, ticket-purchase, draw-engine, payout |
-| **Spill 2** | `rocket` | @docs/architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md | Spill2GlobalRoomService, Spill2ConfigService, Game2AutoDrawTickService, Game2Engine, Game2JackpotTable, Lucky Number, perpetual loop, ROCKET-rom, jackpot-mapping per draw-count |
-| **Spill 3** | `monsterbingo` | @docs/architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md | Spill3GlobalRoomService, Spill3ConfigService, Game3AutoDrawTickService, Game3Engine, **Game3PhaseStateMachine**, autoClaimPhaseMode, fixed/percentage premie-modus, MONSTERBINGO-rom, sequential rad-faser |
+> **Kanonisk cross-spill-sammenligning: @docs/architecture/SPILL_ARCHITECTURE_OVERVIEW.md**
+>
+> Full sammenligningstabell (grid, ball-range, rom-modell, master-rolle, spilleplan, auto-restart, vinning, bonus, compliance) ligger der. Pek dit fra alle nye docs — IKKE dupliser tabellen.
 
 **Spillene har FUNDAMENTALT forskjellige arkitekturer:**
 
-- **Spill 1** = per-hall lobby + GoH-master + plan-runtime + scheduled-games. Master starter/pauser bevisst.
-- **Spill 2** = ETT globalt rom (`ROCKET`) + perpetual loop + auto-tick. Ingen master, ingen plan. Auto-start på `minTicketsToStart`. Jackpot-mapping per draw-count.
-- **Spill 3** = ETT globalt rom (`MONSTERBINGO`) + perpetual loop + **phase-state-machine** (Rad 1 → Rad 2 → Rad 3 → Rad 4 → Fullt Hus med auto-pause mellom faser). Unik for Spill 3 — verken Spill 1 eller Spill 2 har det.
+- **Spill 1** (`bingo`) = per-hall lobby + GoH-master + plan-runtime + scheduled-games. Master starter/pauser bevisst.
+- **Spill 2** (`rocket`) = ETT globalt rom (`ROCKET`) + perpetual loop + auto-tick. Ingen master, ingen plan. Auto-start på `minTicketsToStart`. Jackpot-mapping per draw-count.
+- **Spill 3** (`monsterbingo`) = ETT globalt rom (`MONSTERBINGO`) + perpetual loop + **phase-state-machine** (Rad 1 → Rad 2 → Rad 3 → Rad 4 → Fullt Hus med auto-pause mellom faser). Unik for Spill 3.
 
-**Antakelser fra ett spill overføres IKKE til de andre.** Endringer i `GamePlanEngineBridge` rører ikke Spill 2/3. Endringer i `Spill2GlobalRoomService` rører ikke Spill 1/3. Endringer i `Game3PhaseStateMachine` rører ikke Spill 1/2.
+**Antakelser fra ett spill overføres IKKE til de andre.**
+
+Hvis du rører ETT av live-spillene, les ENTEN [`SPILL_ARCHITECTURE_OVERVIEW.md`](./docs/architecture/SPILL_ARCHITECTURE_OVERVIEW.md) (cross-spill-sammenligning) ELLER den spill-spesifikke statusdoc-en for dyp implementasjon:
+
+| Spill | Slug | Dyp implementasjons-doc | Scope |
+|---|---|---|---|
+| **Spill 1** | `bingo` | @docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md | plan-runtime, master-actions, scheduled-game lifecycle, klient-lobby, NextGamePanel, Spill1HallStatusBox, GamePlanEngineBridge, GoH-master-koblinger, transfer-master, ticket-purchase, draw-engine, payout |
+| **Spill 2** | `rocket` | @docs/architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md | Spill2GlobalRoomService, Spill2ConfigService, Game2AutoDrawTickService, Game2Engine, Game2JackpotTable, Lucky Number, perpetual loop, ROCKET-rom, jackpot-mapping per draw-count |
+| **Spill 3** | `monsterbingo` | @docs/architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md | Spill3GlobalRoomService, Spill3ConfigService, Game3AutoDrawTickService, Game3Engine, **Game3PhaseStateMachine**, autoClaimPhaseMode, fixed/percentage premie-modus, MONSTERBINGO-rom, sequential rad-faser |
 
 **Regel ved konflikt:** Hvis koden motsier doc-en, **doc-en vinner**. Oppdater doc-en samtidig som du gjør en avgjørelse — men IKKE handle utenom den uten eksplisitt Tobias-godkjennelse i samme sesjon.
 
 Direktiv fra Tobias 2026-05-08: *"må gjøre sånn at man alltid leser denne slik at man ikke handler utenom de reglene som er satt"*, *"alt av kode som krangler mot hverandre må fjernes ... fundamentet legges godt nå"*, og *"veldig viktig at disse ulikhetene [Spill 1 vs Spill 2/3] kommer frem i beskrivelsen"*.
+
+Direktiv fra Tobias 2026-05-15: *"Vi vil ha EN kanonisk doc med tabellen, og alle andre docs peker hit i stedet for å duplisere."*
 
 Dette gjelder uavhengig av om oppgaven er backend, frontend, klient, test, dokumentasjon eller infrastruktur — så lenge ett av live-spillene berøres.
 
