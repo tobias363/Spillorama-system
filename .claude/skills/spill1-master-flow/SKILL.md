@@ -677,6 +677,41 @@ Når du debugger frontend-state-bugs (eks. "Bongen viser 20 kr men skulle vært 
 - IKKE bypass route-guard på `master_hall_id`-matching for master-actions
 - IKKE rør `app_game1_scheduled_games`-skjema uten å sjekke at `GamePlanEngineBridge` + `Game1ScheduleTickService` parallel-spawn ikke krasjer
 
+## "Next Game Display"-beregning (single-source-of-truth, Agent B research 2026-05-14)
+
+**Status (per 2026-05-14):** Det finnes TO parallelle backend-paths som beregner "neste spill", samt LEGACY-endpoints som IKKE er next-aware:
+
+1. **`GameLobbyAggregator.buildPlanMeta`** (kanonisk for master/agent-UI) — `apps/backend/src/game/GameLobbyAggregator.ts:971-1070`
+2. **`Game1LobbyService.getLobbyState`** (spiller-shell) — `apps/backend/src/game/Game1LobbyService.ts:410-680`
+
+Legacy som IKKE er next-aware (sannsynlig hovedmistanke for hvorfor buggen kommer tilbake):
+- `GET /api/agent/game-plan/current` (`routes/agentGamePlan.ts:343-438`) — viser `currentItem` på `run.currentPosition` UTEN finished-advance. **Ble GLEMT i PR #1422+#1431-fixene.**
+- `GET /api/agent/game1/current-game` (`routes/agentGame1.ts:384-549`) — viser KUN scheduled-game-rad uten plan-kontekst.
+
+**Hovedregel:** ALDRI legg til ny "next-game"-logikk uten å oppdatere BÅDE aggregator OG Game1LobbyService. Sjekk PITFALLS §3.13.
+
+**Forventet adferd:**
+
+| Master-state | catalogSlug skal være |
+|---|---|
+| dev:nuke, ingen plan-run | "bingo" (item 1) |
+| Bingo finished, pos=1 av 13 | "1000-spill" (item 2) |
+| Position 7 (Jackpot) finished | "kvikkis" (item 8) |
+| Position 13 (siste) finished | null + `planCompletedForToday=true` |
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` — 19 navngitte test-states, finished mid-plan (linje 873, 968)
+- `apps/backend/src/game/Game1LobbyService.test.ts` — 18 tester inkl. finished position-cases (linje 415-525)
+- `apps/backend/src/game/__tests__/GamePlanRunService.autoAdvanceFromFinished.test.ts` — 10 tester (PR #1422)
+
+**Anti-mønstre (ALDRI gjør):**
+- ALDRI fall til `plan.items[0]` eller hardkode "Bingo" som fallback i frontend
+- ALDRI clamp `positionForDisplay` til `Math.min(rawPosition, items.length)` uten å håndtere finished-state separat
+- ALDRI returner `nextScheduledGame=null` ved finished-state uten å først sjekke `currentPosition < items.length`
+- ALDRI patch `/api/agent/game-plan/current` med ad-hoc finished-advance — slett endepunktet helt (Bølge 4 fra PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT)
+
+**Anbefaling (Trinn 3 refactor):** Slett `agentGamePlan /current` og `agentGame1 /current-game` helt; konsolider til ÉN aggregator-output med pre-computed `nextGameDisplay`-felt (se Agent A's recommendation i `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md`).
+
 ## Kanonisk referanse
 
 Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias før du:
@@ -711,3 +746,8 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
 | 2026-05-14 | v1.7.0 — PR `fix/winscreen-show-only-winning-phases` (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
 | 2026-05-14 | v1.8.0 — la til "Frontend-state-dump (debug-tool, 2026-05-14)"-seksjon. "Dump State"-knapp i HUD dumper komplett state-tree til window-global + localStorage + server-POST + console.log. `derivedState.pricePerColor`, `derivedState.innsatsVsForhandskjop`, og `derivedState.pricingSourcesComparison` er primær-verktøy for frontend-bug-investigation (eks. "20 kr men skulle vært 10 kr"). Implementasjon i `packages/game-client/src/debug/StateDumpTool.ts` + `StateDumpButton.ts` + `apps/backend/src/routes/devFrontendStateDump.ts`. 35 tester totalt (17+6+12). PITFALLS §7.23. |
+| 2026-05-14 | v1.9.0 — Agent B research (Backend aggregator + lobby-API, Trinn 1 av Next Game Display refactor): la til seksjon "Next Game Display-beregning (single-source-of-truth)" som dokumenterer 4 backend-paths (2 kanoniske + 2 legacy). Hovedfunn: `agentGamePlan /current` ble GLEMT i PR #1422+#1431-fixene → hovedmistanke for hvorfor buggen kommer tilbake. Anbefaling: slett legacy-endpoints, konsolider til ÉN aggregator med pre-computed `nextGameDisplay`. Tester referert + anti-mønstre dokumentert. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_B_AGGREGATOR_2026-05-14.md` (502 linjer). PITFALLS §3.13. |
+| 2026-05-14 | v1.10.0 — Agent A research (Frontend rendering paths, Trinn 1): identifiserte **6 aktive frontend-paths** som rendrer "neste spill"-tekst fordelt på 4 forskjellige datakilder. Hovedfunn: hver path har sin egen fallback-strategi (tom streng / "Bingo" hardkodet / generisk "Neste spill") → divergens. Anbefaling: backend eksponer pre-computed `nextGameDisplay`-felt i `Spill1AgentLobbyStateSchema`; frontend leser fra ÉN feltverdi, ingen lokal beregning. 9 invariants (F-I1 til F-I9) for refactor-testing. Estimat 3 dev-dager. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (618 linjer). PITFALLS §7.25 lagt til. |
+| 2026-05-14 | v1.11.0 — Agent C research (Plan-run state-machine, Trinn 1): KRITISK strukturell funn — **4 forskjellige mekanismer kan endre `current_position`** (`MasterActionService.start/advance`, `reconcileStuckPlanRuns`, `GamePlanRunCleanupService.reconcileNaturalEndStuckRuns` cron, `agentGamePlan.ts:loadCurrent` lazy-create). Hver har egen race-window. 4 KRITISKE bugs identifisert. Quick-fix: fjern lazy-create-mutasjon fra `agentGamePlan.ts:loadCurrent:308-326`. Langsiktig: event-sourced plan-run (3-4 uker). Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md` (854 linjer). PITFALLS §3.14 lagt til. |
+| 2026-05-14 | v1.12.0 — Agent D research (Scheduled-game lifecycle, Trinn 1): **BUG-D1 (P0) identifisert: `GamePlanRunService.start()` overskriver `current_position = 1` på linje 780** — selv etter PR #1422-fix av `getOrCreateForToday`. Sannsynlig rot-årsak for Bingo-loop. Fix: fjern hardkodet `current_position = 1` fra UPDATE (3 linjer). Andre P0: Bølge 4 IKKE fullført (dual-spawn Game1ScheduleTickService + GamePlanEngineBridge). 14 writer-sites + 11 reader-sites mot `app_game1_scheduled_games`. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` (763 linjer). PITFALLS §3.14 + §3.15. |
+| 2026-05-14 | v1.13.0 — Agent E research (Historisk PR-arv, Trinn 1): **META-funn — 199+ PR-er rørte temaet siden 2026-04-23, 11+ direkte fix-forsøk på Next Game Display-bug**. `Spill1HallStatusBox.ts` har 56+ touches, `NextGamePanel.ts` 39 touches — patch-spiral peak anti-pattern. **ROT-ÅRSAK: Bølge 4 (slett legacy parallel-spawn) ble ALDRI fullført** — dual-write fra `GamePlanEngineBridge` + `Game1ScheduleTickService` på `app_game1_scheduled_games` ligger fortsatt åpent. Tobias' 5+ rapporter samme dag = EN bug-klasse med 4 manifestasjoner, IKKE flere bugs. Anbefaling: **Bølge 7 (konsolidering) + Bølge 4 (slett legacy)** parallelt. 3-5 dev-dager med 2-3 agenter, eller fundamental rewrite 1-4 uker. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_E_HISTORY_2026-05-14.md` (559 linjer). |
