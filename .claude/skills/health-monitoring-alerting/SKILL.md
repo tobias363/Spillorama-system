@@ -189,6 +189,59 @@ Dette matcher BIN-764-audit-mønster og gjør alert-historikken bevisbar overfor
 | `hallId` ikke validert | SQL-injection eller log-spam | Valider format + max 120 tegn |
 | Alerts uten audit-log | Regulator kan ikke verifisere at vi varslet på tid | Hash-chain audit (BIN-764-mønster) |
 
+## DB-perf-watcher cron (OBS-9, 2026-05-14)
+
+Tobias-direktiv 2026-05-14: *"Vi må overvåke databasen så vi får data på
+hva som må forbedres. Test-agent som overvåker alt og peker på svakheter
+og tregheter."*
+
+Watcher er en **proaktiv, automatisk** komponent som kompletterer R7/R8.
+R7 svarer på "er rommet OK akkurat nå?". Watcher svarer på "har en query
+plutselig blitt 50% tregere de siste 5 min?".
+
+**Hvorfor denne logikken eksisterer:**
+- Sentry detekterte 62 N+1-events på 6 timer (SPILLORAMA-BACKEND-3/-4) 2026-05-14.
+- Vi vil at slike events automatisk → Linear-issue med konkret SQL-rapport, ikke at noen oppdager dem manuelt i dashbordet.
+
+**Komponenter:**
+- `scripts/ops/db-perf-watcher.sh` — kjøres hver 5 min. Sammenligner `pg_stat_statements` mot baseline.
+- `scripts/ops/db-perf-create-linear-issue.sh` — oppretter Linear-issue (fallback Slack-webhook + fil).
+- `scripts/ops/setup-db-perf-cron.sh` — installerer launchd (macOS) eller crontab (Linux).
+- `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — full runbook.
+
+**Anomaly-deteksjon (default thresholds):**
+| Type | Trigger |
+|---|---|
+| NEW slow | queryid ikke i baseline AND mean > 100ms AND calls > 10 |
+| REGRESSION | queryid i baseline AND mean økt > 50% |
+
+**Dedup:** Samme queryid flagges max én gang per 24t (i `/tmp/db-perf-watcher-state.json`).
+
+**Symptom hvis logikken fjernes/endres:**
+- N+1-mønstre detekteres ikke før Sentry-volumet er stort nok at noen ser dashbordet
+- Regresjoner forsvinner uoppdaget i pilot-fase
+- Manuell rapport-generering trengs hver runde (motsatt av "self-reporting")
+
+**Hvordan unngå regresjon (når fremtidige agenter rør watcher-kode):**
+- ALDRI gjør watcher write-active — den må forbli read-only mot DB
+- ALDRI hardkode `LINEAR_API_KEY` — bruk env eller `secrets/linear-api.local.md`
+- ALDRI sett `MEAN_MS_THRESHOLD` under 50 — alle queries ville bli "anomalies"
+- Behold dedup-vinduet (24t default) — kortere = Linear-spam
+- Behold idempotens — flere paralelle cron-runs må ikke korrumpere state-fil
+
+**Tester som beskytter mot regresjon:**
+- `scripts/__tests__/ops/db-perf-watcher.test.sh` — 34 tester
+  - jq anomaly-detection pure-function (mock pg_stat_statements input → forventet NEW + REGRESSION)
+  - Dedup state-file logic (24h-vindu)
+  - Linear-script DRY_RUN composer riktig tittel
+  - Integration smoke mot lokal Postgres (skip-graceful)
+  - Pre-flight DB-check (unreachable → exit 2)
+
+**Default disabled.** Tobias aktiverer manuelt etter pilot-test:
+```bash
+bash scripts/ops/setup-db-perf-cron.sh install
+```
+
 ## Kanonisk referanse
 
 - `apps/backend/src/routes/publicGameHealth.ts` — R7-endepunkter
@@ -199,6 +252,9 @@ Dette matcher BIN-764-audit-mønster og gjør alert-historikken bevisbar overfor
 - `apps/backend/openapi.yaml` "Game Health — Public" og `GameRoomHealth`-schema
 - `docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md` §3.4 R7 + R8
 - `docs/operations/LIVE_ROOM_OBSERVABILITY_2026-04-29.md` — bredere observability
+- `scripts/ops/db-perf-watcher.sh` + `scripts/ops/db-perf-create-linear-issue.sh` + `scripts/ops/setup-db-perf-cron.sh` — DB-perf-watcher cron (OBS-9)
+- `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — DB-perf-watcher full runbook
+- `docs/operations/PG_STAT_STATEMENTS_RUNBOOK.md` — pg_stat_statements extension setup
 
 ## Når denne skill-en er aktiv
 
@@ -212,3 +268,6 @@ Dette matcher BIN-764-audit-mønster og gjør alert-historikken bevisbar overfor
 - Reviewe en alert-spam-incident (sjekk de-dup + persistent-threshold)
 - Pre-pilot drill av R8-alerting (D-COMP-1/2)
 - Lotteritilsynet- eller revisor-spørsmål om health-transparens
+- Touche `scripts/ops/db-perf-watcher.sh` / `scripts/ops/db-perf-create-linear-issue.sh` / `scripts/ops/setup-db-perf-cron.sh` (DB-perf-watcher cron, OBS-9)
+- Justere thresholds for DB-perf-watcher (`MEAN_MS_THRESHOLD`, `CALLS_THRESHOLD`, `REGRESSION_PCT`, `LINEAR_ISSUE_DEDUP_HOURS`)
+- Aktivere/deaktivere watcher-cron (`bash scripts/ops/setup-db-perf-cron.sh install|uninstall|status`)
