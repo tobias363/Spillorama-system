@@ -23,7 +23,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 | `anti-fraud-detection` | 6 | 7 | `apps/backend/src/security/AntiFraudService.ts`<br>`apps/backend/src/security/AntiFraudWalletAdapter.ts`<br>`apps/backend/src/security/__tests__/AntiFraud*.test.ts`<br>`apps/backend/src/routes/adminAntiFraud.ts`<br>_(+2 more)_ |
 | `audit-hash-chain` | 7 | 6 | `apps/backend/src/compliance/AuditLogService.ts`<br>`apps/backend/src/compliance/AuditLogService.test.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.test.ts`<br>_(+3 more)_ |
 | `candy-iframe-integration` | 6 | 6 | `apps/backend/src/integration/externalGameWallet.ts`<br>`apps/backend/src/integration/externalGameWallet.test.ts`<br>`apps/backend/src/routes/game.ts`<br>`apps/backend/public/web/spillvett.js`<br>_(+2 more)_ |
-| `casino-grade-testing` | 4 | 657 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
+| `casino-grade-testing` | 4 | 659 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
 | `customer-unique-id` | 9 | 9 | `apps/backend/src/agent/UniqueIdService.ts`<br>`apps/backend/src/agent/UniqueIdStore.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdStore.postgres.test.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdService.test.ts`<br>_(+5 more)_ |
 | `database-migration-policy` | 3 | 159 | `apps/backend/migrations/**`<br>`apps/backend/src/scripts/migrate.ts`<br>`render.yaml` |
 | `dr-runbook-execution` | 9 | 11 | `docs/operations/DR_RUNBOOK.md`<br>`docs/operations/LIVE_ROOM_DR_RUNBOOK.md`<br>`docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md`<br>`docs/operations/INCIDENT_RESPONSE_PLAN.md`<br>_(+5 more)_ |
@@ -36,7 +36,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 | `spill2-perpetual-loop` | 8 | 51 | `apps/backend/src/game/Game2*`<br>`apps/backend/src/game/Spill2*`<br>`apps/backend/src/game/PerpetualRound*`<br>`apps/backend/src/jobs/game2AutoDrawTick.ts`<br>_(+4 more)_ |
 | `spill3-phase-state-machine` | 9 | 23 | `apps/backend/src/game/Game3*`<br>`apps/backend/src/game/Spill3*`<br>`apps/backend/src/jobs/game3AutoDrawTick.ts`<br>`apps/backend/src/routes/adminSpill3Config.ts`<br>_(+5 more)_ |
 | `spinngo-databingo` | 5 | 9 | `apps/backend/src/game/ledgerGameTypeForSlug.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.test.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.distribution.test.ts`<br>`apps/backend/src/game/ComplianceLedgerOverskudd.ts`<br>_(+1 more)_ |
-| `trace-id-observability` | 7 | 47 | `apps/backend/src/middleware/traceId.ts`<br>`apps/backend/src/middleware/traceId.test.ts`<br>`apps/backend/src/middleware/socketTraceId.ts`<br>`apps/backend/src/middleware/socketTraceId.test.ts`<br>_(+3 more)_ |
+| `trace-id-observability` | 7 | 50 | `apps/backend/src/middleware/traceId.ts`<br>`apps/backend/src/middleware/traceId.test.ts`<br>`apps/backend/src/middleware/socketTraceId.ts`<br>`apps/backend/src/middleware/socketTraceId.test.ts`<br>_(+3 more)_ |
 | `wallet-outbox-pattern` | 10 | 39 | `apps/backend/src/wallet/**`<br>`apps/backend/src/adapters/PostgresWalletAdapter*`<br>`apps/backend/src/adapters/InMemoryWalletAdapter*`<br>`apps/backend/src/adapters/FileWalletAdapter*`<br>_(+6 more)_ |
 
 ## Per-skill detalj
@@ -125,7 +125,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/**/*.test.ts`
 - `tests/e2e/**`
 
-**Filer matchet i HEAD:** 657
+**Filer matchet i HEAD:** 659
 
 ### `customer-unique-id`
 
@@ -327,7 +327,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/util/traceContext.test.ts`
 - `apps/backend/src/observability/**`
 
-**Filer matchet i HEAD:** 47
+**Filer matchet i HEAD:** 50
 
 ### `wallet-outbox-pattern`
 
