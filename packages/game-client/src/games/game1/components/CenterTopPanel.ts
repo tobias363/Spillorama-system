@@ -291,11 +291,16 @@ export class CenterTopPanel {
     });
 
     // Grid column (PatternMiniGrid is injected in updatePatterns)
+    // Tobias-direktiv 2026-05-14: vertikal-sentrert i combo-body slik at
+    // mini-grid (lavere høyde enn premie-tabell) ikke står øverst med
+    // tomrom under. `alignSelf: center` overstyrer combo-body sin
+    // `alignItems: stretch` per-item.
     this.gridHostEl = document.createElement("div");
     Object.assign(this.gridHostEl.style, {
       display: "flex",
       flexDirection: "column",
       justifyContent: "center",
+      alignSelf: "center",
       flex: "0 0 auto",
     });
 

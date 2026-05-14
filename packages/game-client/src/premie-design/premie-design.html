@@ -202,7 +202,11 @@
       gap: 2px;
       width: 135px;
       flex-shrink: 0;
-      align-self: flex-start;
+      /* Tobias-direktiv 2026-05-14: vertikal-sentrert i combo-body slik
+       * at mini-grid (lavere høyde) ikke står øverst med tomrom under.
+       * combo-body har `align-items: stretch`, men `align-self: center`
+       * på mini-gridet overstyrer per-item. */
+      align-self: center;
     }
     .mini-cell {
       width: 25px;
