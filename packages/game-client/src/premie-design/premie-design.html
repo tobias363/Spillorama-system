@@ -121,7 +121,17 @@
       display: flex;
       flex-direction: row;
       align-items: stretch;
-      overflow: hidden;
+      overflow-x: auto;
+      /* Tobias-fix 2026-05-14: action-panel skal pushes til høyre uten å
+       * overlappe combo-panelet. `width: fit-content` sikrer at game-frame
+       * vokser til summen av barna sin bredde (player-info + combo +
+       * action) slik at flex-shrink: 0-children aldri kolliderer i smale
+       * viewports. `max-width: 100%` hindrer overflow utenfor scenario-
+       * containeren. Horisontal scroll på meget smale viewports.
+       */
+      width: fit-content;
+      max-width: 100%;
+      min-width: 0;
     }
 
     /* ── LEFT: player-info-panel (LeftInfoPanel) ─────────────────────────
@@ -355,6 +365,11 @@
       box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
       flex-shrink: 0;
       box-sizing: border-box;
+      /* Tobias-fix 2026-05-14: action-panel pushes til høyre kant av
+       * game-frame slik at det visuelt er adskilt fra combo-panelet
+       * uten å overlappe. `margin-left: auto` skyver den siste flex-
+       * itemen til endenav rad. */
+      margin-left: auto;
     }
     .action-panel .game-name {
       font-size: 11px;
