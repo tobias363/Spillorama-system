@@ -44,14 +44,17 @@ function ensurePatternWonStyles(): void {
 .premie-table {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  /* Tobias-direktiv 2026-05-14 iterasjon V: smalere — tabellen skal ikke
+   * ta merkbart mer plass enn dagens enkelt-pill-design. Redusert gap
+   * 5px → 3px slik at 5 rader stables tettere. */
+  gap: 3px;
   width: 100%;
 }
 .premie-header {
   display: grid;
-  grid-template-columns: minmax(64px, 1fr) repeat(3, 1fr);
+  grid-template-columns: minmax(56px, 1fr) repeat(3, 1fr);
   gap: 6px;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: 9px;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.55);
@@ -83,10 +86,14 @@ function ensurePatternWonStyles(): void {
   background: rgba(30, 12, 12, 0.92);
   border: 1px solid rgba(255, 100, 100, 0.2);
   box-shadow: 0 4px 8px rgba(0,0,0,0.4);
-  border-radius: 12px;
-  padding: 6px 10px;
+  border-radius: 10px;
+  /* Tobias-direktiv 2026-05-14 iterasjon V: redusert rad-padding fra
+   * 6px 10px → 3px 8px. Sammen med tighter cell-padding under gir
+   * dette ~14-16 px rad-høyde (mot ~26 px før), så hele 5-rads-
+   * tabellen passer i samme vertikal-plass som dagens enkelt-pill. */
+  padding: 3px 8px;
   display: grid;
-  grid-template-columns: minmax(64px, 1fr) repeat(3, 1fr);
+  grid-template-columns: minmax(56px, 1fr) repeat(3, 1fr);
   gap: 6px;
   align-items: center;
   color: #c1c1c1;
@@ -105,7 +112,10 @@ function ensurePatternWonStyles(): void {
   font-size: 11px;
   font-weight: 700;
   text-align: center;
-  padding: 4px 8px;
+  /* Tobias-direktiv 2026-05-14 iterasjon V: redusert celle-padding fra
+   * 4px 8px → 2px 6px. Celle-bredde holdes via grid-template-columns
+   * (1fr per kolonne), så reduksjon her gir kun lavere celle-høyde. */
+  padding: 2px 6px;
   border-radius: 999px;
   white-space: nowrap;
 }

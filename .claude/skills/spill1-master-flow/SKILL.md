@@ -702,6 +702,27 @@ paid-out-amount.
 | Full Hus      | 1000 kr    | 2000 kr    | 3000 kr    |
 ```
 
+#### Celle-størrelse (iterasjon V, Tobias-direktiv 2026-05-14)
+
+Premie-cellene MÅ være visuelt smale slik at hele 5-rads-tabellen ikke tar
+mer vertikal plass enn dagens enkelt-pill-design. Faste verdier som
+`ensurePatternWonStyles` ALDRI skal regressere på:
+
+| Selector | Property | Verdi |
+|---|---|---|
+| `.premie-table` | `gap` | `3px` (mellom rader, ikke 5px+) |
+| `.premie-row` | `padding` | `3px 8px` (ikke 6px+ vertikalt) |
+| `.premie-row` | `border-radius` | `10px` (ikke 12px+) |
+| `.premie-row .premie-cell` | `padding` | `2px 6px` (ikke 4px+ vertikalt) |
+| `.premie-row .premie-cell` | `font-size` | `11px` |
+| `.premie-row .pattern-label` | `font-size` | `11px` |
+| `.premie-header` | `padding` | `0 8px` (ikke 10px+) |
+| `.premie-row` + `.premie-header` | `grid-template-columns` | `minmax(56px, 1fr) repeat(3, 1fr)` |
+
+Resultat: rad-høyde ≈ 16-18 px (font-line-height + padding) — gir samme
+visuelle fotavtrykk som dagens enkelt-pill (`.prize-pill`) hadde i prod
+før redesignet.
+
 Hver rad har:
 - `.pattern-label` (span) — pattern-navnet ("Rad 1", "Full Hus")
 - `.premie-cell.col-hvit` (div) — Hvit-pris (base)
@@ -716,7 +737,13 @@ Hver rad har:
   - `applyPillState` skriver prize per celle (Hvit ×1, Gul ×2, Lilla ×3)
 - **Design-preview** (lokal iterasjon før prod):
   `http://localhost:4000/web/games/premie-design.html`
-  Bygges av `packages/game-client/vite.premie-design.config.ts`
+  Bygges av `packages/game-client/vite.premie-design.config.ts`.
+  Per iterasjon V (2026-05-14) viser siden HELE `g1-center-top`-mockupen
+  (LeftInfoPanel + mini-grid + premietabell + action-panel side-om-side)
+  med samme bredde-allokering som prod (LeftInfoPanel ~140 px,
+  combo-panel 376 px, action-panel 245 px). Endringer her må holdes i
+  sync med `CenterTopPanel.ts` `ensurePatternWonStyles`-CSS — premie-
+  cellene rendres med samme padding/gap/font-size begge steder.
 
 ### Regression-tester
 
@@ -751,6 +778,11 @@ blink-bug (PR #468) regressere. Regression-testen
 3. Endre multiplikator-konstantene i `PREMIE_BONG_COLORS` (1/2/3) uten
    tilsvarende endring i `Game1DrawEngineService.payoutPerColorGroups`
 4. Legge til `backdrop-filter` på `.premie-row` eller `.premie-cell`
+5. Øke `.premie-row` `padding`-verdier over `3px 8px` eller `gap` over
+   `3px` — det regresserer iterasjon V (Tobias-direktiv 2026-05-14).
+   Tabellen skal være visuelt smal. Hvis du må endre størrelsen,
+   oppdater premie-design.html samtidig og få godkjennelse av Tobias
+   FØR du merger.
 
 ## Når denne skill-en er aktiv
 
@@ -803,3 +835,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.7.0 — PR #1430 fix/winscreen-show-only-winning-phases (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
 | 2026-05-14 | v1.7.1 — PR #1431 fix/lobby-nextgame-after-finished-plan-run: Lobby-API nextGame ved finished plan-run: `Game1LobbyService` returnerer NESTE plan-item som `nextScheduledGame` når `run.status='finished'` OG `currentPosition < items.length`. `GameLobbyAggregator.buildPlanMeta` auto-advancer `positionForDisplay` så `catalogSlug` peker til neste spill. Master-UI viser nå korrekt "Start neste spill — 1000-spill" istedet for default "Bingo". Nytt `planCompletedForToday`-flag speiler `PLAN_COMPLETED_FOR_TODAY`-DomainError. Komplementært til PR #1422 (DB-side fix). PITFALLS §3.13. Tester: 5 nye i `Game1LobbyService.test.ts` + 2 nye i `GameLobbyAggregator.test.ts`. |
 | 2026-05-14 | v1.8.0 — PR #1433 Agent Q (CSS, Tobias-direktiv): la til seksjon "Premietabell-rendering (3-bong-grid)". `CenterTopPanel` viste tidligere kun Hvit-bong-pris i tekst-pillene. Ny render bygger 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla) der Gul (×2) og Lilla (×3) deriveres automatisk fra `pattern.prize1`. Bygd lokal design-side først (`/web/games/premie-design.html`) for Tobias-godkjenning. Inkluderer ny `premieTable.test.ts` (18 tester) + utvidet `no-backdrop-filter-regression.test.ts` med `.premie-row`/`.premie-cell` guards. PITFALLS §7.23. |
+| 2026-05-14 | v1.8.1 — PR #1442 Agent V iterasjon (Tobias-direktiv 2026-05-14 V): smalere premie-celler i `ensurePatternWonStyles` — `.premie-table` gap 5px→3px, `.premie-row` padding 6px 10px→3px 8px og border-radius 12px→10px, `.premie-row .premie-cell` padding 4px 8px→2px 6px, `.premie-header` padding 0 10px→0 8px, grid-template-columns minmax(64px,1fr)→minmax(56px,1fr). Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele `g1-center-top`-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) i kontekst — mini-grid er statisk highlight per active rad, hopper med toggle. Ingen nye tester (alle 1275 består uendret), ingen regression-test brutt. Ingen test krevet på celle-størrelse (assertion på struktur, ikke piksel). |

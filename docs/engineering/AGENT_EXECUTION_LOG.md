@@ -59,6 +59,69 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — Premie-celle smalere + center-top mockup (Agent V, CSS-iterasjon)
+
+**Branch:** `fix/premie-cell-solid-bg-2026-05-14` (samme branch som PR #1442 fra Agent Q — PR #1442 ble merget før Agent V landet; Agent V's commit pusher til samme branch og åpner ny PR mot main)
+**PR:** TBD (opprettes etter rebase mot main)
+**Agent type:** fix-agent / CSS-iterasjon-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Tobias-direktiv 2026-05-14: "Ser bra ut. kan også gjøre dem litt smalere i høyde og bredde så det matcher mer bilde. så det ikke tar så mye plass. vil ikke at høyden så være så mye mer en hva det er på spillet nå pga plass." + "kan du også koble på resten av elementene? det er da mønster, og område som viser antall spillere og innsats samt område til høyre som har kjøp flere bonger knappen. vil se hele elementet samlet."
+
+**Bakgrunn:**
+- Etter §7.23 (Agent Q PR #1433/#1442) hadde premietabellen 5×3 grid med solid bong-fargede celler. Standardpadding (6px 10px på rad, 4px 8px på celle) ga ≈ 26 px rad-høyde → 5 rader + header ≈ 155 px. Tobias så at det tok mer plass enn dagens enkelt-pill-design og at høyden måtte ned.
+- Design-side `premie-design.html` viste KUN premietabellen i en `game-frame`-boks, ikke hele `g1-center-top`-strukturen. Tobias kunne derfor ikke vurdere designet i layout-kontekst (mini-grid + player-info + action-knapper rundt).
+
+**Hva ble gjort:**
+
+1. **Smalere premie-celler — `CenterTopPanel.ts` `ensurePatternWonStyles`:**
+   - `.premie-table` `gap` 5px → 3px
+   - `.premie-row` `padding` 6px 10px → 3px 8px, `border-radius` 12px → 10px
+   - `.premie-row .premie-cell` `padding` 4px 8px → 2px 6px (font-size beholdt 11px)
+   - `.premie-header` `padding` 0 10px → 0 8px
+   - `.premie-row` + `.premie-header` `grid-template-columns` minmax(64px,1fr) → minmax(56px,1fr) (mindre label-felt)
+   - Resultat: rad-høyde ≈ 16-18 px (font line-height + 4 px vertikal padding) → 5 rader + header ≈ 95 px (matcher dagens enkelt-pill-fotavtrykk)
+
+2. **Utvidet `premie-design.html` til full center-top-mockup:**
+   - LeftInfoPanel-mockup (antall spillere SVG-ikon + tall, Innsats + Gevinst-tekster, valgfri Forhåndskjøp-rad) til venstre
+   - Combo-panel (376 px bredde, matcher prod) med 5×5 mini-grid + premietabell side-om-side
+   - Action-panel (245 px bredde, matcher prod) med game-name, jackpot-display (Innsatsen-scenario), Forhåndskjøp- og Kjøp flere brett-knapper
+   - Mini-grid statisk highlight per "active rad" (Rad 1 = øverste rad, Rad 2 = øverste 2 rader, ..., Full Hus = alle untatt center)
+   - Toggle-knapper synker mini-grid med valgt rad
+   - Premie-cellene synkronisert 1:1 med ny `ensurePatternWonStyles`-CSS (samme padding/gap/font-size, samme grid-template-columns)
+
+3. **Docs-protokoll (§2.19):**
+   - `.claude/skills/spill1-master-flow/SKILL.md` — utvidet "Premietabell-rendering"-seksjonen med ny "Celle-størrelse (iterasjon V)"-tabell, oppdatert design-preview-beskrivelse, lagt til ALDRI-regel #5 (ikke øk padding/gap over iterasjon-V-verdier). Endringslogg v1.8.1.
+   - `docs/engineering/PITFALLS_LOG.md` §7.24 — ny entry med detaljert root-cause + fix + prevention. Endringslogg-tabell oppdatert.
+
+**Filer endret:**
+
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` (+11/-7 i `ensurePatternWonStyles` CSS, ingen API-/runtime-endring)
+- `packages/game-client/src/premie-design/premie-design.html` (full rewrite, ~615 linjer — fra 562 til 622)
+- `.claude/skills/spill1-master-flow/SKILL.md` (+30 linjer — celle-størrelse-tabell + iterasjon-V-merknader + ALDRI-regel #5 + endringslogg v1.8.1)
+- `docs/engineering/PITFALLS_LOG.md` (+40 linjer — §7.24 + endringslogg)
+
+**Tester:**
+
+- `npm --prefix packages/game-client run check` → PASS (TypeScript strict)
+- `npm --prefix packages/game-client run test` → 1275 tester / 98 filer PASS (uendret), inkl. `premieTable.test.ts` 18 stk og `no-backdrop-filter-regression.test.ts` 5 stk
+- `npm --prefix packages/game-client run build:premie-design` → PASS (21.77 kB HTML, 4.38 kB JS gzip 1.62 kB)
+
+**Pre-merge verifisering:** Ingen breaking changes på API/DOM-struktur — kun CSS-tweaks. `no-backdrop-filter-regression.test.ts` (som er kanonisk guard for "ingen blur over Pixi") fortsatt grønn etter padding-justering — `.premie-row`/`.premie-cell` har fortsatt ingen `backdrop-filter`. Mockup-utvidelse i `premie-design.html` påvirker IKKE prod-DOM (kun design-side).
+
+**Hva PM/Tobias må verifisere etter merge:**
+
+1. Lokal preview: `http://localhost:4000/web/games/premie-design.html` viser nå hele center-top samlet (player-info venstre, combo i midten, actions høyre)
+2. Premietabellen er tydelig smalere — sammenlign med screenshot fra forrige iterasjon
+3. Tobias-godkjennelse: hvis designet matcher bildet hans, mergen følger gjennom
+
+**Open follow-up (post-merge):** `CenterTopPanel.ts` action-panel mangler player-info-element (LeftInfoPanel er separat komponent til venstre). Hvis Tobias senere vil at "antall spillere + innsats" skal flyttes inn i action-panelet, krever det egen PR med arkitektur-endring (flytte data fra `LeftInfoPanel` til `CenterTopPanel` eller injisere via props). Flagget her, ikke gjort nå — out-of-scope iterasjon V.
+
+**Learnings:**
+- Visuell størrelse må doc-festes (skill-tabell §celle-størrelse) når CSS-verdier er "magiske tall" som matcher bilde-spec. Default-padding-fall (`.prize-pill`) overlevde refactor uten å bli evaluert mot ny layout-form (5 rader vs 5 piller).
+- Design-side må vise hele konteksten (alle nabokomponenter), ikke isolert pattern, før Tobias kan godkjenne layout-størrelse.
+- `premie-design.html` og `ensurePatternWonStyles` MÅ synces — kommentar-marker "iterasjon V" i begge filer er prevention mot drift.
+
+---
+
 ### 2026-05-14 — pg-pool resilience: 57P01 ikke krasjer backend (Agent T, BUG, PR #1438)
 
 **Branch:** `fix/backend-pg-pool-resilience-2026-05-14`
