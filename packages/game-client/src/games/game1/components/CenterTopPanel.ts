@@ -635,16 +635,9 @@ export class CenterTopPanel {
     this.patternPillById.clear();
     this.pillCache.clear();
 
-    // Header med swatch-prikker. Statisk — bygges én gang per rebuild.
-    const header = document.createElement("div");
-    header.className = "premie-header";
-    header.innerHTML = `
-      <div class="col-label">Premie</div>
-      <div class="col-color"><span class="swatch hvit"></span>Hvit</div>
-      <div class="col-color"><span class="swatch gul"></span>Gul</div>
-      <div class="col-color"><span class="swatch lilla"></span>Lilla</div>
-    `;
-    this.prizeListEl.appendChild(header);
+    // Header-rad fjernet 2026-05-14 (Tobias-direktiv) — "Premie · Hvit ·
+    // Gul · Lilla"-raden var redundant fordi bong-fargene allerede vises
+    // som solid bakgrunn på hver celle. Sparer vertikal plass i panelet.
 
     for (const pattern of patterns) {
       const pill = document.createElement("div");

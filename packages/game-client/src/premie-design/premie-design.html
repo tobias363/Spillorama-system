@@ -638,14 +638,9 @@
      * bygger samme DOM via TypeScript-klassen.
      */
 
-    const HEADER_HTML = `
-      <div class="premie-header">
-        <div class="col-label">Pattern</div>
-        <div class="col-color"><span class="swatch hvit"></span>Hvit 5 kr</div>
-        <div class="col-color"><span class="swatch gul"></span>Gul 10 kr</div>
-        <div class="col-color"><span class="swatch lilla"></span>Lilla 15 kr</div>
-      </div>
-    `;
+    /* HEADER_HTML fjernet 2026-05-14 (Tobias-direktiv) — header-raden
+     * "Pattern · Hvit · Gul · Lilla" var redundant siden bong-fargene
+     * vises som solid bakgrunn på hver celle. Sparer vertikal plass. */
 
     /**
      * Auto-multiplikator regel — `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2.
@@ -677,7 +672,7 @@
     }
 
     function renderTable(rootEl, patterns, prizePool = 0) {
-      rootEl.innerHTML = HEADER_HTML;
+      rootEl.innerHTML = "";
       for (const pattern of patterns) {
         const row = document.createElement("div");
         row.className = "premie-row";

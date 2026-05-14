@@ -91,16 +91,13 @@ describe("Premietabell-redesign 2026-05-14 — 5×3 grid (Hvit/Gul/Lilla)", () =
   });
 
   describe("grid-struktur (5 rader × 3 kolonner)", () => {
-    it("rendrer header med 4 kolonner (label + 3 bong-farger)", () => {
+    it("rendrer IKKE header-rad (Tobias-direktiv 2026-05-14: header fjernet — bong-fargene vises på cellene)", () => {
       panel.updatePatterns(buildInnsatsenPatterns(), []);
       const header = container.querySelector(".premie-header");
-      expect(header).not.toBeNull();
-      expect(header!.querySelector(".col-label")).not.toBeNull();
-      expect(header!.querySelectorAll(".col-color")).toHaveLength(3);
-      // Swatch-prikker for visuell forskjell på farger.
-      expect(header!.querySelector(".swatch.hvit")).not.toBeNull();
-      expect(header!.querySelector(".swatch.gul")).not.toBeNull();
-      expect(header!.querySelector(".swatch.lilla")).not.toBeNull();
+      expect(header).toBeNull();
+      // Bong-farger vises nå som solid bakgrunn på `.col-hvit` / `.col-gul`
+      // / `.col-lilla`-cellene istedet — header-raden var redundant og
+      // tok unødvendig vertikal plass i `g1-center-top`-panelet.
     });
 
     it("rendrer 5 rader for 5 patterns med pattern-label + 3 celler hver", () => {
