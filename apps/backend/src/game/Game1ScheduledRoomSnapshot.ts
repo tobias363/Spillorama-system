@@ -189,9 +189,34 @@ function entryFeeFromTicketConfig(raw: unknown): number {
     : Array.isArray(cfg.ticketTypes)
       ? cfg.ticketTypes
       : [];
-  const prices = ticketTypes
-    .map((entry) => Number((entry as Record<string, unknown>)?.priceCentsEach))
-    .filter((value) => Number.isFinite(value) && value > 0);
+  // BUG-FIX (Tobias-rapport 2026-05-14): bridge skriver `pricePerTicket`
+  // i `ticket_config_json.ticketTypesData`, ikke `priceCentsEach`. Når
+  // engine starter (status: scheduled → running), bygger
+  // `buildSyntheticGameSnapshot` ny `currentGame.entryFee` via denne
+  // funksjonen. Hvis vi kun ser etter `priceCentsEach` returnerer vi 0,
+  // som propageres til `gameVariant.entryFee` og videre til klient.
+  // Klient `gridEntryFee = lobbyConfig?.entryFee ?? state.entryFee ?? 10`
+  // → state.entryFee=0 lekker gjennom (?? tar kun null/undefined, ikke 0)
+  // → alle bonge-priser vises som 0 kr.
+  //
+  // Match `Game1TicketPurchaseService.extractTicketCatalog` som leser
+  // alle 4 historiske field-navn for robusthet. `pricePerTicket` er
+  // primær per `GamePlanEngineBridge.buildTicketConfigFromCatalog`
+  // (linje 327-332). `priceCentsEach`/`priceCents`/`price` beholdes
+  // for backward-compat med legacy CMS-data og tester.
+  const FIELDS = ["priceCents", "priceCentsEach", "pricePerTicket", "price"] as const;
+  const prices: number[] = [];
+  for (const entry of ticketTypes) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    for (const field of FIELDS) {
+      const value = Number(rec[field]);
+      if (Number.isFinite(value) && value > 0) {
+        prices.push(value);
+        break;
+      }
+    }
+  }
   return prices.length > 0 ? Math.min(...prices) / 100 : 0;
 }
 

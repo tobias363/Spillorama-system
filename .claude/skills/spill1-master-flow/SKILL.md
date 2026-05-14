@@ -447,6 +447,44 @@ Hook: `Game1MasterControlService.onEngineStarted`
 
 Alle faser kjører idempotent — re-binding for samme room+scheduledGameId setter samme verdi (no-op fra klient-perspektiv). Hvis du fjerner Fase 1, kommer entryFee-buggen tilbake. Hvis du fjerner Fase 2, kommer multiplier-buggen (20kr/30kr) tilbake. Hvis du fjerner Fase 3, mister du defense-in-depth ved engine-start.
 
+## Bong-pris bevares gjennom game-state-transisjoner (PR #1423, 2026-05-14)
+
+> **Tobias-direktiv 2026-05-14:** Når engine starter (status: WAITING → RUNNING), MÅ frontend bevare bong-pris-display. Priser skal ALDRI vises som "0 kr" på en kjøpt bonge.
+
+### Bug-historie
+
+Pre-trekning viste bong-pris korrekt (5/10/15 kr). UNDER trekning (etter engine-start) viste alle bonger "0 kr". Innsats totalt var riktig (30 kr = 5+10+15 i DB), men individuell pris per brett ble 0.
+
+### Root cause (field-navn-mismatch)
+
+`GamePlanEngineBridge.buildTicketConfigFromCatalog` skriver `pricePerTicket` i `ticket_config_json.ticketTypesData[]`. Men `Game1ScheduledRoomSnapshot.entryFeeFromTicketConfig` leste KUN `priceCentsEach`. Når engine startet (status WAITING → RUNNING) trigget `enrichScheduledGame1RoomSnapshot` bygging av `currentGame` med `entryFee = 0`. Det propagerte via `roomHelpers.currentEntryFee` (linje 420, `??` tar ikke 0) → `enrichTicketList` satte alle `ticket.price = 0` → klient-state.entryFee ble overskrevet til 0 → `gridEntryFee = state.entryFee ?? 10` ble 0 (samme `??`-bug på klient).
+
+### Kilder (i prioritert rekkefølge)
+
+1. `state.ticketTypes` + `state.entryFee` (room-snapshot) — primær når > 0
+2. `lobbyTicketConfig.entryFee` + `lobbyTicketConfig.ticketTypes` — fallback hvis state-clear eller state.entryFee=0
+3. `ticket.price` (server-side) — KUN hvis ≠ 0 (defensive)
+
+ALDRI bruk `ticket.price === 0` som gyldig pris — fall til computed.
+
+### Fix (defense-in-depth, 5 lag)
+
+1. **Backend `entryFeeFromTicketConfig`** (Game1ScheduledRoomSnapshot.ts:182-196): les alle 4 historiske felt-navn (`priceCents`, `priceCentsEach`, `pricePerTicket`, `price`) — matcher `Game1TicketPurchaseService.extractTicketCatalog`
+2. **Backend `roomHelpers.currentEntryFee`** (line 420): `> 0`-sjekk istedenfor `??` (match line 386-388 for `variantEntryFee`)
+3. **Klient `GameBridge.applyGameSnapshot`** (line 854): overskriv `state.entryFee` KUN hvis `game.entryFee > 0`
+4. **Klient `PlayScreen.gridEntryFee`**: `validStateEntryFee = entryFee > 0 ? entryFee : null` → `??`-fallback fungerer riktig
+5. **Klient `TicketGridHtml.computePrice`**: `ticket.price > 0`-sjekk istedenfor `typeof === "number"` (0 er et tall)
+6. **Klient `BingoTicketHtml.priceEl + populateBack`**: skjul price-rad hvis 0 (ALDRI vis "0 kr" på en kjøpt bonge)
+
+### Verifisering
+
+- Backend: 3 nye tester i `Game1ScheduledRoomSnapshot.test.ts` (pricePerTicket prod-format, priceCentsEach legacy-format, defensive 0-return)
+- Klient: 6 nye tester i `TicketGridHtml.priceZeroBug.test.ts` (alle 6 scenarier — pre/under-game, server-side 0, lobby-fallback)
+
+### ALDRI tillat priceEl å vise "0 kr"
+
+Kjøpt bonge har alltid pris > 0. Hvis du ser "0 kr" på en bonge i klient-UI, er det en regression — sjekk hele defensive-laget for `> 0`-checks (ikke `??`-fallback på numeric fields).
+
 ## Payout-pipeline auto-multiplikator (PR #1417, REGULATORISK-KRITISK)
 
 > **Tobias-direktiv 2026-05-14:** Engine MÅ lese per-farge pre-multipliserte premier fra `ticket_config_json.spill1.ticketColors[].prizePerPattern[<pattern>].amount` ved payout-tid — IKKE fra `gameVariant.patterns[].prize1` (som er HVIT base) direkte. Hvis du fjerner denne logikken kommer auto-mult-buggen tilbake.
