@@ -186,6 +186,12 @@ import { createDevObservabilityTestRouter } from "./routes/devObservabilityTest.
 // stateVersion) uten å gjette. Token-gated, fail-soft per kilde.
 import { createDevGameStateSnapshotRouter } from "./routes/devGameStateSnapshot.js";
 import { createDevSocketClientsRouter } from "./routes/devSocketClients.js";
+// Tobias 2026-05-14: Round-replay-API. GET /api/_dev/debug/round-replay/:id
+// returnerer komplett event-tidsserie + summary + automatisk anomaly-
+// deteksjon (payout-mismatch, stuck plan-run, double-stake, hang) for én
+// scheduled-game-runde. Compliance-grade audit-trail for §71-pengespill-
+// forskriften — pure read, ALDRI muterer state.
+import { createDevRoundReplayRouter } from "./routes/devRoundReplay.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -5256,6 +5262,22 @@ app.use(
 // userAgent og walletId/playerId (hvis bound). PM-AI bruker dette til å
 // verifisere "klient mistet forbindelsen"-rapporter mot backend-state.
 app.use(createDevSocketClientsRouter({ io }));
+
+// Tobias 2026-05-14: Round-replay-API — komplett event-tidsserie for én
+// scheduled-game-runde med automatisk anomaly-deteksjon.
+//   GET /api/_dev/debug/round-replay/:scheduledGameId?token=<token>
+// Returnerer metadata + timeline (purchases, master_actions, draws,
+// phase_winners, ledger-events) + summary (totals, winners m/ expected
+// vs actual prize) + anomalies (payout_mismatch, stuck_plan_run,
+// double_stake, preparing_room_hang, missing_advance). Compliance-grade
+// audit-trail for §71-pengespillforskriften — pure read, ingen state-
+// mutering. ALDRI fjern endepunktet uten ADR-prosess.
+app.use(
+  createDevRoundReplayRouter({
+    pool: sharedPool,
+    schema: pgSchema,
+  }),
+);
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 
