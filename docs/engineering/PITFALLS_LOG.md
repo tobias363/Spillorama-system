@@ -615,6 +615,88 @@ Master-UI faller tilbake til default `plan_items[0]` (Bingo) når `nextGame` er 
 - §3.12 (komplementær — DB-side fix av samme bug-klasse)
 - Tester: `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester)
 
+### §3.14 — Dual-spawn til `app_game1_scheduled_games` (Bølge 4 IKKE fullført)
+
+**Severity:** P0 (latent — kan skape inkonsistent UI ved pilot)
+**Oppdaget:** 2026-05-14 (Agent D research)
+**Symptom:** To scheduled-game-rader for samme (hall, business_date) opprettet av forskjellige paths. UI viser én rad, master-action treffer en annen.
+
+**Root cause:** Bølge 4 fra `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §7 er IKKE fullført:
+- `Game1ScheduleTickService.spawnUpcomingGame1Games` (legacy, cron-tick) har INGEN guard "skip if hall has active plan".
+- `GamePlanEngineBridge.createScheduledGameForPlanRunPosition` (bridge, master-trigger) spawner uavhengig.
+- Idempotency-keys er **disjunkte**: legacy = `(daily_schedule_id, scheduled_day, sub_game_index)` UNIQUE, bridge = `(plan_run_id, plan_position) WHERE status NOT IN ('cancelled', 'completed')` (SELECT-then-INSERT). Forskjellige keys → DB tolererer to konkurrerende rader.
+- `GAME1_SCHEDULE_TICK_ENABLED=true` i prod per `docs/operations/RENDER_ENV_VAR_RUNBOOK.md`.
+- Seed-en (`seed-demo-pilot-day.ts`) seeder BÅDE `app_daily_schedules` (status='running') OG `app_game_plan` for pilot-haller.
+
+**Hva mitigerer i dag:**
+- F-NEW-3 `releaseStaleRoomCodeBindings` (2026-05-12, `GamePlanEngineBridge.ts:1653`) auto-canceller stale rader med samme `room_code` ved bridge-INSERT.
+- Klient bruker `getCanonicalRoomCode("bingo", masterHallId, groupHallId)` så bridge og legacy ender på samme `room_code`.
+- **Resultat:** Master-flyten funker fordi bridge-INSERT alltid vinner over legacy-rad. Men det er kompensation, ikke fix.
+
+**Fix:** Implementer Bølge 4 guard i `Game1ScheduleTickService.spawnUpcomingGame1Games`:
+- Etter daily_schedule-resolve, sjekk om hall har aktiv `app_game_plan` for samme weekday — hvis ja, skip.
+- Verifiser via SQL: `SELECT count(*) FROM app_game1_scheduled_games WHERE daily_schedule_id IS NOT NULL AND plan_run_id IS NOT NULL` skal være 0 etter fix.
+
+**Prevention:**
+- ALDRI fjerne F-NEW-3 `releaseStaleRoomCodeBindings` uten å ha Bølge 4 guard på plass først
+- Test som verifiserer at legacy-cron skipper plan-haller
+- Audit-event `legacy_spawn_skipped_due_to_plan` for observability
+
+**Related:**
+- `apps/backend/src/game/Game1ScheduleTickService.ts:386-771` (legacy spawn)
+- `apps/backend/src/game/GamePlanEngineBridge.ts:887-1465` (bridge spawn)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §5 C1, §7 Bølge 4
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §3
+
+### §3.15 — `GamePlanRunService.start()` overskriver `current_position = 1`
+
+**Severity:** P0 (rot-årsak til "Bingo igjen" i Next Game Display)
+**Oppdaget:** 2026-05-14 (Agent D research, samme dag som PR #1422 fix-poke landet)
+**Symptom:** Etter `getOrCreateForToday` beregner riktig `nextPosition=2` (per PR #1422), `start()`-UPDATE overskriver `current_position` til 1. Bingo (position 1) re-startes i stedet for 1000-spill (position 2).
+
+**Root cause:** `apps/backend/src/game/GamePlanRunService.ts:780` har hardkodet `current_position = 1` i UPDATE-en:
+
+```sql
+UPDATE app_game_plan_run
+SET status = 'running',
+    started_at = COALESCE(started_at, now()),
+    current_position = 1,            -- ⚠️ ALLTID 1, uavhengig av nextPosition
+    master_user_id = $2,
+    updated_at = now()
+WHERE id = $1
+```
+
+Dette er arv fra opprinnelig implementasjon før PR #1422 introduserte `previousPosition`-tracking i `getOrCreateForToday`. INSERT-en setter `nextPosition` korrekt, men `start()` overskriver.
+
+**Hva mitigerer i dag:**
+- `MasterActionService.start()` (linje 607-672) har egen advance-logikk som sjekker `currentScheduledGame` for `current_position` og advancer plan-run hvis scheduled-game er terminal.
+- Dette dekker hovedpath (master-start etter natural-end) men IKKE alle scenarier.
+
+**Fix:** Fjern `current_position = 1` fra `start()`-UPDATE. La `getOrCreateForToday`-INSERT være eneste sannhet for `current_position` ved start.
+
+```diff
+ UPDATE app_game_plan_run
+ SET status = 'running',
+     started_at = COALESCE(started_at, now()),
+-    current_position = 1,
+     master_user_id = $2,
+     updated_at = now()
+ WHERE id = $1
+```
+
+**Test som må skrives:** Verifiser at `(getOrCreateForToday → start)` for `nextPos=2` resulterer i `current_position = 2`.
+
+**Prevention:**
+- ALDRI overstyr `current_position` i status-transition-UPDATE-er — kun i `getOrCreateForToday`
+- MasterActionService advance-logikk er WORKAROUND, ikke fix — fjern bare hvis fix-en er på plass
+
+**Related:**
+- `apps/backend/src/game/GamePlanRunService.ts:776-794` (`start()`)
+- `apps/backend/src/game/GamePlanRunService.ts:536-749` (`getOrCreateForToday`)
+- `apps/backend/src/game/MasterActionService.ts:607-672` (advance-mitigation)
+- §3.12 (komplementær — DB-side fix landet i PR #1422)
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1
+
 ---
 
 ## §4 Live-rom-state
