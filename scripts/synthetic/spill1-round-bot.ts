@@ -304,6 +304,10 @@ export async function connectPlayerSocket(
   const ack = await joinRoom(
     socket,
     {
+      // accessToken er PÅKREVD i socket-payload — backend
+      // `getAccessTokenFromSocketPayload` krever det selv om handshake-auth
+      // også sendes via Authorization-header.
+      accessToken: player.session.accessToken,
       roomCode: roomCodeForHall(cfg.hallId),
       gameSlug: "bingo",
       hallId: cfg.hallId,
@@ -651,6 +655,30 @@ export async function run(
   }
 
   // ── 2. Master logs in + starts round ──
+  //
+  // KJENT BEGRENSNING (2026-05-14): `master/start` (Bølge 2
+  // MasterActionService) går RETT fra `idle` → `ready_to_start` →
+  // `running` uten å passere `purchase_open`. Dette er bevisst design —
+  // pilot-flyten forventer at spillere har forhåndskjøpt bonger via
+  // `bet:arm`-socket-event FØR master kaller start. `Game1ArmedToPurchase-
+  // ConversionService.convertArmedToPurchases` konverterer armed-state
+  // til faktiske `app_game1_ticket_purchases`-rader i hooket mellom
+  // bridge-spawn og engine.startGame.
+  //
+  // Konsekvens: Synthetic-bot's nåværende HTTP `/api/game1/purchase`-vei
+  // (i steg 5) feiler med `PURCHASE_CLOSED_FOR_GAME` fordi status er
+  // `running` på tidspunkt purchase forsøkes. For å fikse dette må bot:
+  //   1. Bruke socket `bet:arm`-event istedenfor HTTP-purchase
+  //   2. Sende bet:arm FØR master/start (mens scheduled-game ikke
+  //      eksisterer enda — RoomStateManager holder armed-state per rom)
+  //   3. master/start vil da auto-konvertere armed → purchases
+  //
+  // TODO: refactor synthetic-bot til å matche pilot-flyten via bet:arm.
+  // Inntil da rapporterer testen invariants som teknisk korrekte men
+  // semantisk tomme (0 purchases, 0 payouts → I1-I5 PASS trivielt, I6
+  // FAIL pga timeout). Fix #1 (accessToken i socket-payload) gjelder
+  // fortsatt — den lar `room:join` lykkes så observers kan plukke opp
+  // draws fra ROM-eventer.
   const master = await api.login(cfg.masterEmail, cfg.masterPassword);
   const startResp = await api.masterStart(master.accessToken, cfg.hallId);
   const scheduledGameId = startResp.scheduledGameId;

@@ -199,10 +199,19 @@ export function attachObserver(socket: SyntheticSocketLike): SocketObserver {
  *
  * Times out after `timeoutMs` to prevent hanging if backend doesn't ack
  * (defaults to 5 seconds).
+ *
+ * **accessToken er PÅKREVD i payload** — backend `getAccessTokenFromSocketPayload`
+ * (apps/backend/src/util/httpHelpers.ts:277) krever det. Handshake-auth via
+ * `extraHeaders.Authorization` er IKKE nok for `room:join`-event.
  */
 export async function joinRoom(
   socket: SyntheticSocketLike,
-  payload: { roomCode: string; gameSlug?: string; hallId?: string },
+  payload: {
+    accessToken: string;
+    roomCode: string;
+    gameSlug?: string;
+    hallId?: string;
+  },
   timeoutMs = 5_000
 ): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
