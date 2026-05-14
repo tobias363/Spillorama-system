@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.5.0
+  version: 1.8.0
   project: spillorama
 ---
 
@@ -618,6 +618,49 @@ For full per-color-breakdown må backend utvide wire-formatet til
 - IKKE fjern `myRoundWinnings`-reset i `gameStarted`-handler — forrige rundes liste vil lekke inn i WinScreen ved rask round-transition
 - IKKE muter `summary.myWinnings`-listen inne i overlay — Controller eier sannheten
 
+## Frontend-state-dump (debug-tool, 2026-05-14)
+
+Når du debugger frontend-state-bugs (eks. "Bongen viser 20 kr men skulle vært 10 kr"), klikk **"Dump State"-knappen** i SPILL1 DEBUG-HUD (øverst høyre). Dette dumper komplett state-tree i én operasjon til fire kanaler:
+
+1. **`window.__SPILL1_STATE_DUMP`** — JS-global. Inspiser i DevTools:
+   ```js
+   JSON.stringify(window.__SPILL1_STATE_DUMP, null, 2)
+   ```
+2. **`localStorage["spill1.lastStateDump"]`** — persistert tvers reloads.
+3. **Backend-server-fil** via `POST /api/_dev/debug/frontend-state-dump?token=<TOKEN>` → `/tmp/frontend-state-dumps/dump-<ts>-<id>.json`. Hent senere via `GET /api/_dev/debug/frontend-state-dumps/<dumpId>`.
+4. **`console.log("[STATE-DUMP]", ...)`** — Live-monitor-agent plukker det opp automatisk.
+
+**Hva dumpen inneholder (fem hovedseksjoner + derived):**
+- `lobbyState` — activeHallId, halls, games, ticketPricesCents, nextGame, compliance, balanceKr
+- `roomState` — roomCode, gameStatus, entryFee, ticketTypes (med priceMultiplier), jackpot, pause-state
+- `playerState` — myPlayerId, myTickets, preRoundTickets, myStake, myPendingStake, isArmed, myLuckyNumber, walletBalanceKr
+- `screenState` — currentScreen + siste 10 transitions
+- `socketState` — connected, connectionState, siste 20 events
+- `derivedState` — **kjernen i bug-investigation:**
+  - `pricePerColor` — entryFee × priceMultiplier per fargen (eks: `{yellow:5, white:10, purple:15}`)
+  - `autoMultiplikatorApplied` — true hvis minst én multiplier ≠ 1
+  - `innsatsVsForhandskjop` — `{activeStakeKr, pendingStakeKr, summedKr, classification}` der classification er `active`/`pre-round`/`both`/`none`
+  - `pricingSourcesComparison` — sammenligner room.entryFee × multipliers vs lobby.ticketPricesCents vs nextGame.ticketPricesCents. `consistency: "divergent"` er rødt flag.
+
+**Brukstilfeller (eksempler fra Tobias):**
+
+1. *"Pris viser 20 kr men skulle vært 10 kr"* — Dump → se `derivedState.pricingSourcesComparison`. Hvis `consistency: "divergent"` peker det rett på hvilken kilde som er feil.
+2. *"Innsats + Forhåndskjøp dobbel-tellet"* — Dump → se `derivedState.innsatsVsForhandskjop`. `classification` viser hvor i syklusen vi er. `summedKr` bør **aldri** vises i UI som "total betalt" — det er sum av to separate buckets.
+3. *"Frontend henger etter runde-end"* — Dump → se `screenState.transitionHistory` + `socketState.lastEvents` for å finne om event mottatt men screen ikke flippet.
+
+**ALDRI fjern Dump State-knappen** — det er primær-verktøy for frontend-bug-investigation per Tobias-direktiv 2026-05-14.
+
+**Implementasjon:**
+- `packages/game-client/src/debug/StateDumpTool.ts` — bygger dump + publisering
+- `packages/game-client/src/debug/StateDumpButton.ts` — DOM-knapp for HUD
+- `apps/backend/src/routes/devFrontendStateDump.ts` — server-side persistering
+- Token-gated samme som rrweb (`RESET_TEST_PLAYERS_TOKEN`)
+
+**Tester:**
+- `packages/game-client/src/debug/StateDumpTool.test.ts` — 17 tester (struktur, derived, idempotens, fail-soft)
+- `packages/game-client/src/debug/StateDumpButton.test.ts` — 6 tester (DOM-mount, klikk-flyt)
+- `apps/backend/src/routes/devFrontendStateDump.test.ts` — 12 tester (token, validering, rotering)
+
 ## Når denne skill-en er aktiv
 
 **Gjør:**
@@ -667,3 +710,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
 | 2026-05-14 | v1.7.0 — PR `fix/winscreen-show-only-winning-phases` (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
+| 2026-05-14 | v1.8.0 — la til "Frontend-state-dump (debug-tool, 2026-05-14)"-seksjon. "Dump State"-knapp i HUD dumper komplett state-tree til window-global + localStorage + server-POST + console.log. `derivedState.pricePerColor`, `derivedState.innsatsVsForhandskjop`, og `derivedState.pricingSourcesComparison` er primær-verktøy for frontend-bug-investigation (eks. "20 kr men skulle vært 10 kr"). Implementasjon i `packages/game-client/src/debug/StateDumpTool.ts` + `StateDumpButton.ts` + `apps/backend/src/routes/devFrontendStateDump.ts`. 35 tester totalt (17+6+12). PITFALLS §7.23. |
