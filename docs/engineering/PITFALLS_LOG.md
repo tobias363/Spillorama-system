@@ -46,7 +46,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 |---|---:|---|
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
-| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
+| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
@@ -614,6 +614,53 @@ Master-UI faller tilbake til default `plan_items[0]` (Bingo) når `nextGame` er 
 - PR #1422 (backend create-logikk — `getOrCreateForToday` auto-advance)
 - §3.12 (komplementær — DB-side fix av samme bug-klasse)
 - Tester: `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester)
+
+### §3.14 — Plan-run state-machine: 4 forskjellige mekanismer kan mutere current_position (Agent C-funn)
+
+**Severity:** P1 (strukturelt — antagelig rotårsak til Next Game Display-bug)
+**Oppdaget:** 2026-05-14 (Agent C research-leveranse, `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md`)
+**Symptom:** Master ser inkonsistent "neste spill"-tekst etter `dev:nuke` eller etter naturlig runde-end. Kortvarige race-windows mellom reconcile/cleanup/start/advance kan returnere forskjellig state innen 1 sek.
+
+**Root cause:** Det er 4 forskjellige måter `app_game_plan_run.current_position` kan endres på, pluss F-Plan-Reuse DELETE+INSERT-flyten:
+1. `MasterActionService.start` → `planRunService.start` (idle → running, position=1)
+2. `MasterActionService.start` → `planRunService.advanceToNext` (running+terminal-current → running, position++)
+3. `MasterActionService.start` → `getOrCreateForToday` F-Plan-Reuse (finished → DELETE+INSERT med nextPosition)
+4. `MasterActionService.advance` → `planRunService.advanceToNext` (running → running, position++ ELLER finished)
+5. `agentGamePlan.ts:loadCurrent` (lazy-create=true) → `getOrCreateForToday` F-Plan-Reuse (lobby-API mutation)
+
+Hver mekanisme har egen audit-event, race-window, og soft-fail-strategi.
+
+**Konkrete bugs identifisert:**
+1. `MasterActionService.advance` kaller `reconcileStuckPlanRuns` FØR `advanceToNext`. Reconcile finisher stuck plan-run → advanceToNext kaster `GAME_PLAN_RUN_INVALID_TRANSITION` fordi status nå er `finished`. Master får uventet 400-feil.
+2. `reconcileNaturalEndStuckRuns` (PR #1407) sjekker kun `WHERE pr.status = 'running'` — `paused` plan-run kan bli stuck for alltid hvis scheduled-game er completed mens plan-run er paused.
+3. `getOrCreateForToday` har race-window mellom find/DELETE/INSERT som kan svelge F-Plan-Reuse auto-advance silent (DELETE matcher 0 rader hvis cleanup-cron raced med master-action).
+4. Bridge-spawn etter `advanceToNext` har race-window for dual scheduled-games — aggregator kan rapportere `BRIDGE_FAILED`-warning som BLOCKING_WARNING_CODES og blokkere master.
+
+**Anbefalt fix:**
+
+> **KORTSIKTIG (quick-fix for Next Game Display):** Fjern lazy-create fra `agentGamePlan.ts:loadCurrent` (linje 308-326). Sett `lazyCreate=false` som default. F-Plan-Reuse skal KUN trigge fra eksplisitt `MasterActionService.start` etter master-klikk. Lobby-API beregner "neste spill" fra `plan.items[0]` (Bingo) hvis ingen plan-run finnes.
+
+> **LANGSIKTIG (rewrite — Plan C-mandatet aktuelt):** Event-sourced plan-run:
+> - `app_game_plan_run` blir read-model
+> - State-overganger genererer events i `app_game_plan_run_events` (append-only)
+> - Projection-jobb rebuilder read-model fra events
+> - Sjekkpunkt: ingen race-windows fordi events er totalt-ordrede
+
+**Prevention:**
+- IKKE legg til en 5. mekanisme for å endre `current_position` uten å konsolidere de 4 eksisterende
+- Hvis du legger til ny audit-event for state-overgang, dokumenter race-vinduer mot eksisterende mekanismer
+- Lazy-create-stien skal ALDRI mutere DB — read-paths er read-only
+- Quick-fix er P0 hvis Next Game Display fortsatt rapporteres etter PR #1422 + #1431 + #1427
+
+**Related:**
+- `apps/backend/src/game/GamePlanRunService.ts` (4 mutasjons-metoder + F-Plan-Reuse)
+- `apps/backend/src/game/MasterActionService.ts` (sekvenseringsmotor — `reconcileStuckPlanRuns` private helper)
+- `apps/backend/src/game/GamePlanRunCleanupService.ts` (cron + poll-tick — `reconcileNaturalEndStuckRuns`)
+- `apps/backend/src/routes/agentGamePlan.ts:307-339` (loadCurrent lazy-create-mutasjon — PRIMÆR MISTANKE)
+- §3.10 (PR #1407 — komplementært, ikke samme bug)
+- §3.12 (PR #1422 — BUG E auto-advance, samme klasse)
+- §3.13 (PR #1431 — lobby-API komplementært)
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md` (full data-collection)
 
 ---
 
