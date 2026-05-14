@@ -97,6 +97,24 @@ Live bingo platform for the Norwegian market with real-time multiplayer games, w
 > 3. **PM_SESSION_KNOWLEDGE_EXPORT** (NY 2026-05-14) — tacit knowledge PM bygger opp under sesjonen
 >
 > Per Tobias: "Hver PM tar over med samme kunnskapsnivå som den som avslutter."
+>
+> ### ⛔ Kontinuitet-direktiv (Tobias 2026-05-15) — IMMUTABLE for ny PM
+>
+> > "Kan du også da legge inn i tekst til ny PM at han da må fortsette i samme spor og arkitektur
+> > når han fortsetter med sitt arbeid og dokumenterer fortløpende."
+>
+> Som ny PM som tar over, du MÅ:
+>
+> 1. **Fortsette i samme spor** — hvis forrige PM jobbet med en P0-blokker, fortsett der.
+>    Ikke pivoter uten Tobias-godkjennelse.
+> 2. **Fortsette i samme arkitektur** — hvis forrige PM etablerte mønster (eks. vanntett-gate,
+>    SESSION_KNOWLEDGE_EXPORT, parallel-research-agenter), videreføre det. Brudd krever ADR.
+> 3. **Dokumenter fortløpende — IKKE ved sesjons-slutt** — skriv PITFALLS_LOG/skill/ADR NÅR du
+>    oppdager mønsteret. Sesjons-slutt-checklist er for verifikasjon, ikke første-gangs-dokumentasjon.
+> 4. **Hver fix-agent-prompt MÅ inneholde skill-doc-protokoll** (§2.19 IMMUTABLE, mal i
+>    [`docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`](./docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md))
+>
+> Full forklaring i [`docs/engineering/PM_QUICK_REFERENCE.md`](./docs/engineering/PM_QUICK_REFERENCE.md) §0.
 
 ## Tech Stack
 
