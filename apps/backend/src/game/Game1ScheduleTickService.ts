@@ -379,9 +379,82 @@ export class Game1ScheduleTickService {
     return `"${this.schema}"."app_schedules"`;
   }
 
+  private gamePlanRunTable(): string {
+    return `"${this.schema}"."app_game_plan_run"`;
+  }
+
+  /**
+   * Bølge 4 (2026-05-15): Plan-runtime overstyrer legacy-spawn.
+   *
+   * Henter alle `app_game_plan_run`-rader for kandidat-haller med
+   * `business_date` innenfor lookahead-vinduet. Returnerer Set med keys
+   * `${hallId}|${businessDate}` slik at `spawnUpcomingGame1Games` kan
+   * skippe legacy-spawn for haller med aktiv plan-runtime.
+   *
+   * Hvorfor plan_run og ikke plan-config:
+   * - `app_game_plan` viser BARE at hallen *kan* ha plan på denne ukedagen
+   * - `app_game_plan_run` viser at master har FAKTISK startet eller
+   *   bridge har spawnet en runde for (hall, dato)
+   * - En hall med plan-config men ingen aktiv plan_run trenger fortsatt
+   *   ikke at legacy-cron spawner — men dette er en strengere guard som
+   *   bare slår inn etter master har startet via plan-runtime
+   *
+   * Service-laget bruker FAKTISK plan_run-rad fordi:
+   * - Det er deterministisk (vs ukedag-matching som er fragil i grenseperioden)
+   * - Det dekker også scenarier hvor master har manuelt opprettet plan_run
+   * - Det skipper guard når plan-runtime ikke er i bruk (bakoverkompat)
+   *
+   * @param hallIds Master-hall-ids fra daily-schedules. Plan_run.hall_id
+   *   refererer master-hallen i en GoH, så vi matcher direkte.
+   * @param dateRange `{ start, end }` i ISO 'YYYY-MM-DD'. Returnerer Set
+   *   med keys `${hallId}|${businessDate}` for alle relevante rader.
+   * @returns Set som kan brukes til O(1)-lookup per (hallId, isoDay).
+   */
+  private async checkHallsWithActivePlanRuns(
+    hallIds: string[],
+    dateRange: { start: string; end: string },
+  ): Promise<Set<string>> {
+    const activePlanRunKeys = new Set<string>();
+    if (hallIds.length === 0) return activePlanRunKeys;
+    try {
+      // `business_date::text` gir 'YYYY-MM-DD' uavhengig av server-tz.
+      // Vi matcher den direkte med vår isoDay (`toIsoDay`-output) i loopen.
+      const { rows } = await this.pool.query<{
+        hall_id: string;
+        business_date: string;
+      }>(
+        `SELECT hall_id, business_date::text AS business_date
+         FROM ${this.gamePlanRunTable()}
+         WHERE hall_id = ANY($1::text[])
+           AND business_date >= $2::date
+           AND business_date <= $3::date`,
+        [hallIds, dateRange.start, dateRange.end],
+      );
+      for (const row of rows) {
+        activePlanRunKeys.add(`${row.hall_id}|${row.business_date}`);
+      }
+    } catch (err) {
+      // Hvis tabellen ikke finnes (test-DB uten plan-runtime-migrasjoner) eller
+      // andre DB-feil: fall tilbake til null-håndtering (ingen plan-runs funnet).
+      // Legacy-cron fortsetter normalt — dette er fail-open som matcher andre
+      // skyldfølsomme guards i tjenesten.
+      const code = (err as { code?: string } | null)?.code ?? "";
+      log.warn(
+        { err, code },
+        "bolge-4: kunne ikke lese app_game_plan_run — fall tilbake til legacy-spawn (alle haller)",
+      );
+    }
+    return activePlanRunKeys;
+  }
+
   /**
    * Spawn game1 rader 0-24t frem fra `nowMs`. Idempotent —
    * UNIQUE(daily_schedule_id, scheduled_day, sub_game_index) beskytter.
+   *
+   * Bølge 4 (2026-05-15): Skipper legacy-spawn for haller med aktiv
+   * `app_game_plan_run`-rad for samme (hall, dato). Forhindrer dual-spawn
+   * der både legacy-cron og plan-runtime + bridge oppretter scheduled-game
+   * for samme runde. Se PITFALLS_LOG §3.14 + Agent D research §3.
    */
   async spawnUpcomingGame1Games(nowMs: number): Promise<SpawnResult> {
     const now = new Date(nowMs);
@@ -465,6 +538,24 @@ export class Game1ScheduleTickService {
       );
       return result;
     }
+
+    // Bølge 4 (2026-05-15): Pre-fetch alle aktive plan_run-rader for kandidat-
+    // haller i lookahead-vinduet. Brukes som O(1)-lookup i spawn-loopen for å
+    // skippe legacy-spawn der plan-runtime + bridge allerede har overtatt.
+    //
+    // Vi henter for hele lookahead-vinduet i én query (ikke per daily-schedule)
+    // for å unngå N+1. Resultatet er en Set med keys `${hallId}|${isoDay}`.
+    const candidateHallIds = Array.from(
+      new Set(
+        dailyWith
+          .map((entry) => entry.hallIds.masterHallId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    );
+    const activePlanRunKeys = await this.checkHallsWithActivePlanRuns(
+      candidateHallIds,
+      { start: toIsoDay(now), end: toIsoDay(windowEnd) },
+    );
 
     // 3) Hent schedule-maler.
     const scheduleIdList = Array.from(scheduleIdsNeeded);
@@ -616,6 +707,35 @@ export class Game1ScheduleTickService {
             !!s && typeof s === "object" && !Array.isArray(s)
         );
         const isoDay = toIsoDay(d);
+
+        // Bølge 4 (2026-05-15): Skip legacy-spawn for haller med aktiv plan-runtime.
+        //
+        // Hvis det finnes en `app_game_plan_run` for (master-hall, isoDay), så
+        // har plan-runtime + bridge tatt over scheduled-game-spawn for denne
+        // hallen på denne dagen. Legacy-spawn ville opprette parallelle rader
+        // som F-NEW-3 (`releaseStaleRoomCodeBindings`) auto-canceller via
+        // `room_code`-collision — men det er kompensasjon, ikke fix.
+        //
+        // Med denne guard:
+        // - Plan-haller: kun bridge-spawn (én rad per (plan_run_id, plan_position))
+        // - Ikke-plan-haller: legacy-cron fortsatt aktiv (bakoverkompat)
+        //
+        // Audit-event log på debug-nivå for observability. Hvert skip teller
+        // som `skippedSchedules` så SpawnResult kan brukes til monitoring.
+        const planRunKey = `${hallIds.masterHallId}|${isoDay}`;
+        if (activePlanRunKeys.has(planRunKey)) {
+          log.debug(
+            {
+              dailyScheduleId: daily.id,
+              hallId: hallIds.masterHallId,
+              isoDay,
+              event: "bolge-4.legacy_spawn_skipped_due_to_plan",
+            },
+            "[bolge-4] skip legacy-spawn — hall har aktiv plan-run for samme dato"
+          );
+          result.skippedSchedules += 1;
+          continue;
+        }
 
         for (let i = 0; i < subGames.length; i++) {
           const sg = subGames[i]!;

@@ -1055,3 +1055,427 @@ test("detectMasterTimeout: idempotent — hopper over hvis audit allerede finnes
   const result = await svc.detectMasterTimeout(fixedNow);
   assert.deepEqual(result.gameIds, []);
 });
+
+// ── Bølge 4 — Skip legacy-spawn for haller med aktiv plan-runtime ─────────
+//
+// Bug-spec: Agent D Next Game Display research §3 + §6.2.
+// PITFALLS_LOG §3.14: dual-spawn-problem mellom legacy-cron og plan-runtime.
+//
+// Fix: `spawnUpcomingGame1Games` skipper haller med aktiv `app_game_plan_run`
+// for `business_date`. Plan-runtime + bridge er eneste spawn-path for
+// plan-haller. Ikke-plan-haller fortsetter med legacy-cron (bakoverkompat).
+
+test("Bølge 4: skip legacy-spawn for haller med aktiv plan-run (positiv case)", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-bolge4-plan",
+            name: "Plan med aktiv plan-run",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-alpha" },
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM ") && sql.includes("app_game_plan_run"),
+        rows: [
+          { hall_id: "hall-m", business_date: "2026-05-01" },
+          { hall_id: "hall-m", business_date: "2026-05-02" },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-alpha",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "X",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+
+  assert.equal(result.spawned, 0, "skal ikke spawne for plan-haller");
+  assert.ok(result.skippedSchedules >= 2);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  assert.equal(inserts.length, 0, "ingen INSERT skal skje for plan-haller");
+
+  const planRunQuery = queries.find((q) =>
+    q.sql.includes("FROM ") && q.sql.includes("app_game_plan_run")
+  );
+  assert.ok(planRunQuery, "plan_run-query må kjøres");
+  assert.match(planRunQuery!.sql, /hall_id\s*=\s*ANY/, "må filtrere på hallIds");
+  assert.match(planRunQuery!.sql, /business_date\s*>=/, "må filtrere på date-range");
+});
+
+test("Bølge 4: legacy-spawn fortsatt aktiv for haller UTEN plan-run (negativ case)", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-legacy",
+            name: "Legacy hall",
+            hall_ids_json: {
+              masterHallId: "hall-legacy",
+              hallIds: ["hall-legacy"],
+              groupHallIds: ["group-legacy"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-alpha" },
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM ") && sql.includes("app_game_plan_run"),
+        rows: [],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-alpha",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "X",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+
+  assert.equal(result.spawned, 2, "begge dager skal spawne for legacy-hall");
+  assert.equal(result.errors, 0);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  assert.equal(inserts.length, 2);
+  for (const insert of inserts) {
+    assert.equal(insert.params[13], "hall-legacy");
+  }
+});
+
+test("Bølge 4: blandet — én plan-hall + én legacy-hall i samme tick", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-plan",
+            name: "Plan hall",
+            hall_ids_json: {
+              masterHallId: "hall-plan",
+              hallIds: ["hall-plan"],
+              groupHallIds: ["group-plan"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-alpha" },
+          },
+          {
+            id: "daily-legacy",
+            name: "Legacy hall",
+            hall_ids_json: {
+              masterHallId: "hall-legacy",
+              hallIds: ["hall-legacy"],
+              groupHallIds: ["group-legacy"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-alpha" },
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM ") && sql.includes("app_game_plan_run"),
+        rows: [
+          { hall_id: "hall-plan", business_date: "2026-05-01" },
+          { hall_id: "hall-plan", business_date: "2026-05-02" },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-alpha",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "X",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+
+  assert.equal(result.spawned, 2, "kun legacy-hall skal spawne");
+  assert.ok(result.skippedSchedules >= 2);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  assert.equal(inserts.length, 2);
+  for (const insert of inserts) {
+    assert.equal(insert.params[13], "hall-legacy");
+  }
+});
+
+test("Bølge 4: skip kun gjelder spesifikk (hall, dato) — andre dager spawnes", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-mixed",
+            name: "Mixed days",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-alpha" },
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM ") && sql.includes("app_game_plan_run"),
+        rows: [{ hall_id: "hall-m", business_date: "2026-05-01" }],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-alpha",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "X",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+
+  assert.equal(result.spawned, 1, "kun dag 2 spawnes for hall-m");
+  assert.ok(result.skippedSchedules >= 1, "dag 1 skippes");
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  assert.equal(inserts.length, 1);
+  assert.equal(inserts[0]!.params[6], "2026-05-02");
+});
+
+test("Bølge 4: DB-feil i plan-run-query → fail-open (legacy-spawn fortsetter)", async () => {
+  let planRunQueryCount = 0;
+  const stubPool = {
+    query: async (sql: string, _params: unknown[] = []) => {
+      if (sql.includes("app_daily_schedules")) {
+        return {
+          rows: [
+            {
+              id: "daily-1",
+              name: "Test",
+              hall_ids_json: {
+                masterHallId: "hall-m",
+                hallIds: ["hall-m"],
+                groupHallIds: ["group-1"],
+              },
+              week_days: 0,
+              start_date: "2026-05-01T00:00:00.000Z",
+              end_date: "2026-05-10T23:59:59.000Z",
+              start_time: "09:00",
+              end_time: "23:00",
+              status: "running",
+              stop_game: false,
+              other_data_json: { scheduleId: "sid-alpha" },
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes("app_game_plan_run")) {
+        planRunQueryCount += 1;
+        const err = new Error("relation does not exist") as Error & {
+          code?: string;
+        };
+        err.code = "42P01";
+        throw err;
+      }
+      if (sql.includes("app_schedules") && sql.includes("sub_games_json")) {
+        return {
+          rows: [
+            {
+              id: "sid-alpha",
+              schedule_type: "Manual",
+              sub_games_json: [
+                {
+                  name: "X",
+                  startTime: "19:00",
+                  endTime: "19:45",
+                  notificationStartTime: "5m",
+                },
+              ],
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+
+  const svc = Game1ScheduleTickService.forTesting(
+    stubPool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+
+  assert.equal(planRunQueryCount, 1);
+  assert.equal(result.spawned, 2, "legacy-spawn fortsetter ved DB-feil");
+  assert.equal(result.errors, 0);
+});
+
+test("Bølge 4: ingen plan-run-query når ingen daily-schedules har masterHallId", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-no-master",
+            name: "Missing master",
+            hall_ids_json: {
+              masterHallId: null,
+              hallIds: [],
+              groupHallIds: [],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: null,
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-alpha" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-alpha",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "X",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  await svc.spawnUpcomingGame1Games(fixedNow);
+
+  const planRunQuery = queries.find((q) =>
+    q.sql.includes("FROM ") && q.sql.includes("app_game_plan_run")
+  );
+  assert.equal(planRunQuery, undefined);
+});
