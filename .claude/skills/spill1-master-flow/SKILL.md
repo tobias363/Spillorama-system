@@ -3,6 +3,7 @@ name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
   version: 1.15.0
+  version: 1.16.0
   project: spillorama
 ---
 
@@ -180,6 +181,8 @@ Audit-eventet `game_plan_run.recreate_after_finish` inkluderer disse feltene for
 - Symptom: Master spilte Bingo (pos=1) gjentatte ganger i stedet for å advance til 1000-spill, 5×500, osv. fordi `start()` resettet auto-advanced posisjonen
 - Dette var én av 5 rot-årsaker til "Neste spill"-display-bug-en som ble fixet 4 ganger uten å løse alle paths (PR #1370, #1422, #1427, #1431)
 - Audit-trail referanse: `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1 + `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md`
+- Symptom: Master spilte Bingo (pos=1) gjentatte ganger i stedet for å advance til 1000-spill, 5×500
+- Audit-trail referanse: PITFALLS §3.15 + `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1
 
 **Post-fix SQL:**
 ```sql
@@ -212,6 +215,50 @@ WHERE id = $1
   - cp=1 bevares (sanity-test for første-spill)
   - Audit-event `game_plan_run.start` skrives uendret
   - `GAME_PLAN_RUN_INVALID_TRANSITION` kastes ved non-idle status (uendret guard)
+- `getOrCreateForToday`-INSERT (eneste sted som setter initial posisjon)
+- `advanceToNext()` (eksplisitt UPDATE som inkrementerer)
+
+**Hvilke services skal IKKE mutere current_position:**
+- `start()`, `pause()`, `resume()`, `finish()` — kun state-flip
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/__tests__/GamePlanRunService.startPreservesPosition.test.ts` (6 tester)
+
+### Plan-runtime overstyrer legacy-spawn (Bølge 4 fix 2026-05-15)
+
+**Invariant:** `Game1ScheduleTickService.spawnUpcomingGame1Games` skipper haller med aktiv `app_game_plan_run`-rad for samme `business_date`. Plan-runtime + bridge er eneste spawn-path for plan-haller. Ikke-plan-haller fortsetter med legacy-cron (bakoverkompat).
+
+**Pre-fix-bug (Bølge 4 IKKE fullført, FIXED 2026-05-15):**
+- `Game1ScheduleTickService.spawnUpcomingGame1Games` (legacy-cron) hadde INGEN guard mot å spawne for haller hvor plan-runtime + bridge allerede har overtatt
+- `GamePlanEngineBridge.createScheduledGameForPlanRunPosition` (master-trigger) spawnet uavhengig
+- Idempotency-keys disjunkte: legacy = `(daily_schedule_id, scheduled_day, sub_game_index)` UNIQUE, bridge = `(plan_run_id, plan_position) WHERE NOT terminal`
+- Resultat: to scheduled-game-rader for samme (hall, dato) parallelt. UI viste én, master-action treffet en annen
+- Plan-runtime (Bølge 1-3, 2026-05-08) erstattet legacy-spawn for plan-haller, men legacy-cron ble aldri skrudd av. Bølge 4 (deaktivere legacy) ble glemt
+- Audit-trail referanse: PITFALLS §3.14 + `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §3 + §6.2
+
+**Post-fix flyt:**
+- Ny helper `checkHallsWithActivePlanRuns(hallIds, dateRange)`: bulk-query mot `app_game_plan_run` for kandidat-haller i lookahead-vinduet, returnerer Set med keys `${hallId}|${isoDay}` for O(1)-lookup
+- Spawn-loop sjekker `activePlanRunKeys.has(${masterHallId}|${isoDay})` etter daily-schedule + weekday-validering, men FØR sub-game-iterasjon
+- Hvis hall har plan-run for dagen → skip alle subgames for den dagen (teller som `skippedSchedules`)
+- Plan-run-query-feil (eks. test-DB uten migrasjoner) → fail-open: warning logges, legacy-spawn fortsetter normalt
+
+**Hvorfor sjekke plan-run-rad (ikke bare plan-config):**
+- Plan-config viser BARE at hall *kan* ha plan på denne ukedagen
+- Plan-run viser at plan-runtime FAKTISK har tatt over for (hall, dato)
+- Strengere guard — slår kun inn etter master har startet via plan-runtime; bakoverkompat for haller uten aktiv plan-runtime
+
+**Hvorfor F-NEW-3 fortsatt er nødvendig:**
+- F-NEW-3 `releaseStaleRoomCodeBindings` (2026-05-12) canceller stale rader ved bridge-INSERT — defense-in-depth
+- ALDRI fjern F-NEW-3 selv etter Bølge 4 — komplementære guards: Bølge 4 hindrer DB-spawn, F-NEW-3 rydder eldre rader
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/Game1ScheduleTickService.test.ts` (6 nye Bølge 4-tester):
+  - Skip legacy-spawn for plan-haller (positiv case)
+  - Legacy-spawn fortsatt aktiv for ikke-plan-haller (negativ case)
+  - Blandet — én plan-hall + én legacy-hall i samme tick
+  - Skip kun gjelder spesifikk (hall, dato) — andre dager spawnes
+  - DB-feil i plan-run-query → fail-open
+  - Ingen plan-run-query når kandidat-haller er tom
 
 ### UI-komponenter (admin-web)
 
@@ -840,3 +887,5 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.12.0 — Agent D research (Scheduled-game lifecycle, Trinn 1): **BUG-D1 (P0) identifisert: `GamePlanRunService.start()` overskriver `current_position = 1` på linje 780** — selv etter PR #1422-fix av `getOrCreateForToday`. Sannsynlig rot-årsak for Bingo-loop. Fix: fjern hardkodet `current_position = 1` fra UPDATE (3 linjer). Andre P0: Bølge 4 IKKE fullført (dual-spawn Game1ScheduleTickService + GamePlanEngineBridge). 14 writer-sites + 11 reader-sites mot `app_game1_scheduled_games`. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` (763 linjer). PITFALLS §3.14 + §3.15. |
 | 2026-05-14 | v1.13.0 — Agent E research (Historisk PR-arv, Trinn 1): **META-funn — 199+ PR-er rørte temaet siden 2026-04-23, 11+ direkte fix-forsøk på Next Game Display-bug**. `Spill1HallStatusBox.ts` har 56+ touches, `NextGamePanel.ts` 39 touches — patch-spiral peak anti-pattern. **ROT-ÅRSAK: Bølge 4 (slett legacy parallel-spawn) ble ALDRI fullført** — dual-write fra `GamePlanEngineBridge` + `Game1ScheduleTickService` på `app_game1_scheduled_games` ligger fortsatt åpent. Tobias' 5+ rapporter samme dag = EN bug-klasse med 4 manifestasjoner, IKKE flere bugs. Anbefaling: **Bølge 7 (konsolidering) + Bølge 4 (slett legacy)** parallelt. 3-5 dev-dager med 2-3 agenter, eller fundamental rewrite 1-4 uker. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_E_HISTORY_2026-05-14.md` (559 linjer). |
 | 2026-05-14 | v1.14.0 — Agent F research (Test-coverage gap-analyse, Trinn 1 SISTE): **6 KRITISKE coverage-hull identifisert**. Hovedfunn: **6 kode-paths beregner "neste spill" uavhengig — INGEN invariants binder dem**. PR #1431 la til 4 finished-state-tester men buggen kom tilbake fordi de fire kun testet ÉN path. Bare 4 ekte-DB-tester totalt, ingen sekvenserer alle 13 plan-items. Synthetic-test (PR #1460) dekker KUN én runde, ikke advance-flyt. Playwright E2E (6 spec-filer) har INGEN advance-assertion. `spillerklientRebuildE2E` Test 5 mocker socket-state → falsk trygghet. Anbefaling: **5 cross-service invariants** (I-NextGame-1 til I-NextGame-5) + 6 ekte-DB scenario-tester + 1 Playwright E2E `spill1-next-game-display-flow.spec.ts` + 1 multi-round synthetic. Estimat 3-5 dager test-skriving etter refactor. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_F_TESTS_2026-05-14.md` (1024 linjer). Skill-pekere foreslås for `casino-grade-testing` + `spill1-master-flow`. |
+| 2026-05-15 | v1.15.0 — BUG-D1 fix (branch `fix/bug-d1-planrun-start-hardcode-2026-05-15`): Fjernet `current_position = 1` fra `GamePlanRunService.start()`-UPDATE (linje 780). `getOrCreateForToday`-INSERT er nå eneste sannhet for `current_position` ved start. Ny seksjon "Plan-run.start() invariant — bevarer current_position" mellom Auto-advance og UI-komponenter. 6 nye regression-tester. PITFALLS §3.15 markert FIXED. |
+| 2026-05-15 | v1.16.0 — Bølge 4 fix (branch `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15`): `Game1ScheduleTickService.spawnUpcomingGame1Games` skipper nå haller med aktiv `app_game_plan_run`-rad for samme `business_date`. Ny privat helper `checkHallsWithActivePlanRuns(hallIds, dateRange)` bulk-querier plan-runs i lookahead-vinduet → Set med keys `${hallId}|${isoDay}` for O(1)-lookup. Skip-guard i spawn-loopen mellom weekday-validering og sub-game-iterasjon. DB-feil → fail-open. Audit-event på debug-nivå: `bolge-4.legacy_spawn_skipped_due_to_plan`. Ny seksjon "Plan-runtime overstyrer legacy-spawn (Bølge 4 fix 2026-05-15)" mellom BUG-D1 invariant og UI-komponenter. 6 nye regression-tester. PITFALLS §3.14 markert FIXED. Defense-in-depth: F-NEW-3 `releaseStaleRoomCodeBindings` BEHOLDES. |

@@ -216,6 +216,71 @@ Hver entry har struktur:
 - SKILL `spill1-master-flow` §"Vanlige feil" entry 14
 ---
 
+### 2026-05-15 — Fix-agent Bølge 4 — `Game1ScheduleTickService` skip legacy-spawn for plan-haller
+
+**Branch:** `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15` (worktree-isolert, `agent-aaefcc5e6bffb2a56`)
+**Agent type:** general-purpose
+**Trigger:** PM-direktiv 2026-05-15 — Bølge 4 fra Next Game Display-audit (rot-årsak B for "Neste spill"-display-bugen). Audit-rapport: Agent D research §3 "Dual-spawn-problem (Bølge 4 — IKKE FULLFØRT)" + §6.2 "KRITISK — Bølge 4: skip legacy-spawn for plan-haller".
+
+**Scope:** Implementere Bølge 4 fra `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §7 og Agent D Next Game Display-research §6.2 — `Game1ScheduleTickService.spawnUpcomingGame1Games` skal skippe haller med aktiv `app_game_plan_run`-rad for samme business_date. Plan-runtime (Bølge 1-3, 2026-05-08) erstattet legacy-spawn for plan-haller, men legacy-cron ble aldri skrudd av. Bølge 4 (deaktivere legacy) ble glemt.
+
+**Hva ble gjort:**
+
+1. **Kode-fix** (`apps/backend/src/game/Game1ScheduleTickService.ts`):
+   - Ny privat helper `checkHallsWithActivePlanRuns(hallIds, dateRange)` (linje 390-444): bulk-query mot `app_game_plan_run` for kandidat-haller i lookahead-vinduet → Set med keys `${hallId}|${businessDate}` for O(1)-lookup. Bruker `business_date::text` for tz-uavhengig sammenligning.
+   - Pre-fetch i `spawnUpcomingGame1Games` (linje 489-505): samler unike `masterHallId`s fra daily-schedules, kaller helper én gang. Unngår N+1.
+   - Skip-guard i spawn-loopen (linje 700-728): etter daily-schedule + weekday-validering, men FØR sub-game-iterasjon. Sjekker `activePlanRunKeys.has(${masterHallId}|${isoDay})`. Hvis match → skip alle subgames, teller som `skippedSchedules`.
+   - Fail-open ved DB-feil (test-DB uten plan-runtime-migrasjoner): warning logges, legacy fortsetter normalt.
+   - Audit-event på debug-nivå: `bolge-4.legacy_spawn_skipped_due_to_plan` med `dailyScheduleId`, `hallId`, `isoDay`.
+
+2. **Test-suite** (`apps/backend/src/game/Game1ScheduleTickService.test.ts`, 6 nye Bølge 4-tester — alle PASS):
+   - Positiv case: plan-hall med plan-runs for begge dager → skippet, ingen INSERT
+   - Negativ case: legacy-hall uten plan-runs → spawnes normalt (2 inserts for 2 dager)
+   - Blandet case: én plan-hall + én legacy-hall i samme tick → kun legacy-hall spawnes
+   - Per-dato case: plan-run KUN for dag 1 → dag 1 skippes, dag 2 spawnes
+   - DB-feil case: 42P01 (relation does not exist) → fail-open, warning logget
+   - Edge-case: ingen kandidat-haller → plan-run-query kjøres ikke
+
+3. **PITFALLS §3.14 oppdatert** — markert FIXED 2026-05-15, fix-detalj-blokk, ny test-suite-referanse, prevention-bullet om ALDRI fjerne F-NEW-3 (komplementære guards).
+
+4. **SKILL `spill1-master-flow` v1.14.0 → v1.16.0**:
+   - Bumpet versjon-metadata
+   - Lagt til seksjon "Plan-run.start() invariant — bevarer current_position (BUG-D1 fix 2026-05-15)"
+   - Lagt til seksjon "Plan-runtime overstyrer legacy-spawn (Bølge 4 fix 2026-05-15)" mellom BUG-D1 invariant og UI-komponenter
+   - Versjon-historikk: v1.15.0 (BUG-D1) + v1.16.0 (Bølge 4) entries lagt til
+
+5. **Verifikasjon:**
+   - `npm --prefix apps/backend run check` — type-check PASS
+   - Ny + eksisterende test-suite: **41/41 PASS** (35 eksisterende + 6 nye Bølge 4)
+
+**Lessons learned:**
+
+1. **Worktree vs main repo file-paths:** Edit-tool fra worktree-sesjon kan ende opp med å redigere main repo-pathen i stedet for worktree-pathen hvis prosjekt-context-detection feiler. Måtte re-applisere edits til `/.claude/worktrees/agent-aaefcc5e6bffb2a56/...` eksplisitt. PITFALLS-relevant: ALLTID verifiser at edits faktisk er i worktree via `git status` i worktree-cwd. Hvis "clean" men du nettopp redigerte filer — fil er sannsynligvis i main repo, ikke worktree.
+
+2. **Test-stub-pool håndterer multi-query-flyt godt:** Eksisterende `createStubPool`-mønster trengte ingen tilpasninger — bare en ny response som matcher `app_game_plan_run`-substring. Stub-poolen kunne også brukes med fail-mock (throw med code 42P01) for fail-open-testen.
+
+3. **Defense-in-depth (Bølge 4 + F-NEW-3):** F-NEW-3 `releaseStaleRoomCodeBindings` (2026-05-12) auto-canceller stale rader ved bridge-INSERT med samme `room_code` — fungerte som kompensasjon FØR Bølge 4. Etter Bølge 4 blir F-NEW-3 sekundær (få stale rader å rydde), men BEHOLDES som defense-in-depth.
+
+4. **Hvorfor plan-run-rad (ikke plan-config):** Strengere guard som bare slår inn etter plan-runtime faktisk har tatt over for (hall, dato). Hvis hall har plan-config men ingen aktiv plan_run, fortsetter legacy-cron normalt. Bakoverkompatibelt og forhindrer forveksling mellom "potensielt aktiv plan" og "faktisk aktiv plan".
+
+5. **Doc-protokoll §2.19 (IMMUTABLE) fulgt:** Skill + PITFALLS + AGENT_EXECUTION_LOG oppdatert i samme PR. Reusable template i `SKILL_DOC_PROTOCOL_TEMPLATE.md` matchet.
+
+**Eierskap:**
+
+- `apps/backend/src/game/Game1ScheduleTickService.ts` (Bølge 4-implementasjon eier)
+- `apps/backend/src/game/Game1ScheduleTickService.test.ts` (regression-tester)
+- PITFALLS §3.14 FIXED-status
+- SKILL `spill1-master-flow` v1.16.0
+
+**Output:**
+
+- Branch: `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15`
+- Kode-fix: 1 file (Game1ScheduleTickService.ts)
+- Test-fix: 1 file (Game1ScheduleTickService.test.ts)
+- Doc-update: 3 files (PITFALLS_LOG, SKILL spill1-master-flow, denne AGENT_EXECUTION_LOG)
+
+---
+
 ### 2026-05-14 — Agent B — Next Game Display research (Backend aggregator + lobby-API)
 
 **Branch:** `worktree-agent-ab50e457a113f5218` (research-grenen `research/next-game-display-b-aggregator-2026-05-14` var allerede tatt i annen worktree)

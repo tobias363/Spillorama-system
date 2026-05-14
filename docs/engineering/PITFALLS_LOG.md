@@ -665,38 +665,53 @@ Hver mekanisme har egen audit-event, race-window, og soft-fail-strategi.
 - §3.12 (PR #1422 — BUG E auto-advance, samme klasse)
 - §3.13 (PR #1431 — lobby-API komplementært)
 - `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md` (full data-collection)
-### §3.14 — Dual-spawn til `app_game1_scheduled_games` (Bølge 4 IKKE fullført)
+### §3.14 — Dual-spawn til `app_game1_scheduled_games` (Bølge 4 FIXED 2026-05-15)
 
-**Severity:** P0 (latent — kan skape inkonsistent UI ved pilot)
+**Severity:** P0 (rot-årsak B til Next Game Display master-konsoll bug)
 **Oppdaget:** 2026-05-14 (Agent D research)
-**Symptom:** To scheduled-game-rader for samme (hall, business_date) opprettet av forskjellige paths. UI viser én rad, master-action treffer en annen.
+**Status:** ✅ FIXED 2026-05-15 (branch `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15`)
+**Symptom:** Master-konsoll viste feil "Neste spill" fordi legacy-cron `Game1ScheduleTickService.spawnUpcomingGame1Games` spawnet scheduled-game-rad parallelt med plan-runtime's bridge-spawn.
 
-**Root cause:** Bølge 4 fra `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §7 er IKKE fullført:
-- `Game1ScheduleTickService.spawnUpcomingGame1Games` (legacy, cron-tick) har INGEN guard "skip if hall has active plan".
-- `GamePlanEngineBridge.createScheduledGameForPlanRunPosition` (bridge, master-trigger) spawner uavhengig.
-- Idempotency-keys er **disjunkte**: legacy = `(daily_schedule_id, scheduled_day, sub_game_index)` UNIQUE, bridge = `(plan_run_id, plan_position) WHERE status NOT IN ('cancelled', 'completed')` (SELECT-then-INSERT). Forskjellige keys → DB tolererer to konkurrerende rader.
-- `GAME1_SCHEDULE_TICK_ENABLED=true` i prod per `docs/operations/RENDER_ENV_VAR_RUNBOOK.md`.
-- Seed-en (`seed-demo-pilot-day.ts`) seeder BÅDE `app_daily_schedules` (status='running') OG `app_game_plan` for pilot-haller.
+**Root cause (pre-fix):** Bølge 4 fra `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §7 var IKKE fullført:
+- `Game1ScheduleTickService.spawnUpcomingGame1Games` (legacy, cron-tick) hadde INGEN guard "skip if hall has active plan".
+- `GamePlanEngineBridge.createScheduledGameForPlanRunPosition` (bridge, master-trigger) spawnet uavhengig.
+- Idempotency-keys disjunkte: legacy = `(daily_schedule_id, scheduled_day, sub_game_index)` UNIQUE, bridge = `(plan_run_id, plan_position) WHERE NOT terminal`. Forskjellige keys → DB tolererer to konkurrerende rader.
+- Plan-runtime (Bølge 1-3, 2026-05-08) erstattet legacy-spawn for plan-haller, men legacy-cron ble aldri skrudd av. Bølge 4 (deaktivere legacy) ble glemt.
 
-**Hva mitigerer i dag:**
-- F-NEW-3 `releaseStaleRoomCodeBindings` (2026-05-12, `GamePlanEngineBridge.ts:1653`) auto-canceller stale rader med samme `room_code` ved bridge-INSERT.
-- Klient bruker `getCanonicalRoomCode("bingo", masterHallId, groupHallId)` så bridge og legacy ender på samme `room_code`.
-- **Resultat:** Master-flyten funker fordi bridge-INSERT alltid vinner over legacy-rad. Men det er kompensation, ikke fix.
+**Hva mitigerte pre-fix:**
+- F-NEW-3 `releaseStaleRoomCodeBindings` (2026-05-12) auto-canceller stale rader med samme `room_code` ved bridge-INSERT — kompensasjon, ikke fix.
 
-**Fix:** Implementer Bølge 4 guard i `Game1ScheduleTickService.spawnUpcomingGame1Games`:
-- Etter daily_schedule-resolve, sjekk om hall har aktiv `app_game_plan` for samme weekday — hvis ja, skip.
-- Verifiser via SQL: `SELECT count(*) FROM app_game1_scheduled_games WHERE daily_schedule_id IS NOT NULL AND plan_run_id IS NOT NULL` skal være 0 etter fix.
+**Fix (2026-05-15):** `Game1ScheduleTickService.spawnUpcomingGame1Games` skipper nå haller med aktiv `app_game_plan_run`-rad for samme business_date.
+
+Implementasjon:
+- Ny privat helper `checkHallsWithActivePlanRuns(hallIds, dateRange)`: bulk-query mot `app_game_plan_run` for kandidat-haller i lookahead-vinduet, returnerer Set med keys `${hallId}|${isoDay}` for O(1)-lookup.
+- I spawn-loopen sjekkes `activePlanRunKeys.has(${masterHallId}|${isoDay})` etter daily-schedule + weekday-validering. Hvis hall har plan-run for dagen → skip (teller som `skippedSchedules`).
+- Plan-run-query-feil (eks. test-DB uten migrasjoner) → fail-open: warning logges, legacy-spawn fortsetter normalt.
+- Audit-event på debug-nivå: `bolge-4.legacy_spawn_skipped_due_to_plan`.
+
+Hvorfor sjekke FAKTISK plan-run-rad (ikke bare plan-config):
+- Plan-config viser BARE at hall *kan* ha plan på denne ukedagen
+- Plan-run viser at master har FAKTISK startet eller bridge har spawnet en runde for (hall, dato)
+- Strengere guard — slår kun inn etter plan-runtime tas i bruk; bakoverkompat ellers
+
+**Tester som dekker:** `apps/backend/src/game/Game1ScheduleTickService.test.ts` (6 nye Bølge 4-tester):
+1. Skip legacy-spawn for plan-haller (positiv case)
+2. Legacy-spawn fortsatt aktiv for ikke-plan-haller (negativ case)
+3. Blandet — én plan-hall + én legacy-hall i samme tick
+4. Skip kun gjelder spesifikk (hall, dato) — andre dager spawnes
+5. DB-feil i plan-run-query → fail-open
+6. Ingen plan-run-query når kandidat-haller er tom
 
 **Prevention:**
-- ALDRI fjerne F-NEW-3 `releaseStaleRoomCodeBindings` uten å ha Bølge 4 guard på plass først
-- Test som verifiserer at legacy-cron skipper plan-haller
-- Audit-event `legacy_spawn_skipped_due_to_plan` for observability
+- ALDRI fjern F-NEW-3 `releaseStaleRoomCodeBindings` — guard og kompensasjon er komplementære (defense-in-depth)
+- Audit-event på debug-nivå lar ops monitorere antall skip per tick
+- Verifiser i prod: `SELECT count(*) FROM app_game1_scheduled_games WHERE daily_schedule_id IS NOT NULL AND plan_run_id IS NOT NULL` skal være 0
 
 **Related:**
-- `apps/backend/src/game/Game1ScheduleTickService.ts:386-771` (legacy spawn)
+- `apps/backend/src/game/Game1ScheduleTickService.ts` (linje 390-444 ny helper, 489-505 pre-fetch, 700-728 skip-guard)
 - `apps/backend/src/game/GamePlanEngineBridge.ts:887-1465` (bridge spawn)
 - `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §5 C1, §7 Bølge 4
-- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §3
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §3 + §6.2
 
 ### §3.15 — `GamePlanRunService.start()` overskriver `current_position = 1` (FIXED 2026-05-15)
 
