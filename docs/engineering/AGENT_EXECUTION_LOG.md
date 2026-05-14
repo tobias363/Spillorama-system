@@ -59,6 +59,38 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — pg-pool resilience: 57P01 ikke krasjer backend (Agent T, BUG, PR #1438)
+
+**Branch:** `fix/backend-pg-pool-resilience-2026-05-14`
+**PR:** #1438
+**Agent type:** fix-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Sentry-issue SPILLORAMA-BACKEND-5 (2026-05-14 11:23:30 UTC) — backend krasjet med `uncaughtException` på `terminating connection due to administrator command` (pg-kode 57P01) under `POST /api/agent/game1/master/heartbeat`. Trigger var lokal `docker-compose up -d --force-recreate postgres` for å aktivere pg_stat_statements (OBS-7), men samme scenario kan ramme prod ved Render Postgres-vedlikehold / failover / OS-restart.
+
+**Root cause:**
+- `node-postgres` pg.Pool emit-er `error`-event når en idle client dør
+- Hvis det IKKE finnes en `pool.on("error", handler)`-listener, propagerer feilen som `uncaughtException` → backend dør
+- `sharedPool.ts` hadde en basic handler men logget ALT som ERROR (Sentry-noise på forventet vedlikehold)
+- 41 standalone `new Pool({...})`-instanser i services hadde INGEN handler
+
+**Hva ble gjort:**
+
+1. Ny modul `apps/backend/src/util/pgPoolErrorHandler.ts` (315 linjer) — `attachPoolErrorHandler` + `isTransientConnectionError` + `isPostgresShutdownError` + `withDbRetry`
+2. `sharedPool.ts` strukturert handler via `attachPoolErrorHandler`
+3. `PostgresWalletAdapter` + `PostgresBingoSystemAdapter` + `PostgresResponsibleGamingStore` — eksplisitt handler på standalone pool
+4. 38 service-fallback-paths — automatisk migrert via Python-script (auth/admin/agent/compliance/payments/platform/security)
+5. `createServicePool`-factory i `pgPool.ts` for fremtidige services
+6. Heartbeat-route wrappet i `withDbRetry` (3-forsøk backoff)
+7. 27 unit-tester (`pgPoolErrorHandler.test.ts`) + 103/103 PASS på berørte suiter
+8. Manuell chaos-test mot lokal Postgres — backend overlever `pg_terminate_backend`, auto-reconnect virker
+
+**Filer endret:** 49 totalt (+1105 / -18). Detaljer i PR #1438.
+
+**Læring:** pg.Pool DEFAULT-oppførsel ved error-event uten listener er `process.exit` via uncaughtException. Hver standalone pool MÅ ha handler. Sentry-noise reduseres ved å klassifisere WARN (forventet 57P01) vs ERROR (uventede constraint-violations).
+
+**Doc-protokoll (§2.19):** PITFALLS §12 ny seksjon + §12.1 + `wallet-outbox-pattern/SKILL.md` §11 informerer om at pool-failure ikke compromitterer wallet-mutasjoner.
+
+---
+
 ### 2026-05-14 — Premietabell 3-bong-grid (Agent Q, CSS, Tobias-direktiv)
 
 **Branch:** `feat/premie-table-redesign-2026-05-14`
@@ -138,6 +170,81 @@ Hver entry har struktur:
 - Ingen backdrop-filter — fortsetter å holdes som hard regel via regression-test som nå inkluderer `.premie-row` + `.premie-cell`.
 
 **Eierskap:** `packages/game-client/src/games/game1/components/CenterTopPanel.ts` + tilhørende tester. Andre agenter må koordinere med PM før de rør disse filene.
+
+**Branch:** `fix/backend-pg-pool-resilience-2026-05-14`
+**PR:** #<this-PR>
+**Agent type:** fix-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Sentry-issue SPILLORAMA-BACKEND-5 (2026-05-14 11:23:30 UTC) — backend krasjet med `uncaughtException` på `terminating connection due to administrator command` (pg-kode 57P01) under `POST /api/agent/game1/master/heartbeat`. Trigger var lokal `docker-compose up -d --force-recreate postgres`, men samme scenario kan ramme prod ved Render Postgres-vedlikehold / failover / OS-restart.
+
+**Root cause:**
+- `node-postgres` pg.Pool emit-er `error`-event når en idle client dør
+- Hvis det IKKE finnes en `pool.on("error", handler)`-listener, propagerer feilen som `uncaughtException` → backend dør
+- `sharedPool.ts` hadde en basic handler men logget ALT som ERROR (Sentry-noise på forventet vedlikehold)
+- 41 standalone `new Pool({...})`-instanser i services hadde INGEN handler
+
+**Hva ble gjort:**
+
+1. **Ny modul** `apps/backend/src/util/pgPoolErrorHandler.ts` (315 linjer):
+   - `attachPoolErrorHandler(pool, { poolName })` — idempotent handler-installasjon. 57P01/57P02/57P03 → WARN (forventet ved Postgres-shutdown), 08001/08006/ECONNxxx → WARN (transient), uventede → ERROR
+   - `isTransientConnectionError(err)` + `isPostgresShutdownError(err)` — predikater for retry-decisions
+   - `withDbRetry(op, { operationName })` — `withRetry`-wrapper med 3-forsøk-backoff [100/250/500ms] og default `isTransientConnectionError`-predikat
+   - `TRANSIENT_PG_SQLSTATE_CODES` + `SHUTDOWN_PG_SQLSTATE_CODES` + `TRANSIENT_NODE_ERROR_CODES` whitelist-sets
+
+2. **sharedPool.ts** — strukturert handler via `attachPoolErrorHandler({ poolName: "shared-platform-pool" })`. Erstatter den gamle `console.error`-handleren.
+
+3. **PostgresWalletAdapter + PostgresBingoSystemAdapter + PostgresResponsibleGamingStore** — eksplisitt `attachPoolErrorHandler` på standalone-pool-fallback-paths (wallet er den ENESTE som faktisk lager standalone pool i prod via `createWalletAdapter`).
+
+4. **38 service-fallback-paths** — automatisk migrert via Python-script (idempotent). Hver `this.pool = new Pool({...})` fallback fikk `attachPoolErrorHandler(this.pool, { poolName: "<service>-pool" })`. Disse er test-only paths i prod (services får `pool: sharedPool` injected fra `index.ts`), men nå er de defensivt instrumented uansett.
+
+5. **`createServicePool`-factory** (`apps/backend/src/util/pgPool.ts`) — ny helper som kombinerer `new Pool` + `getPoolTuning` + `attachPoolErrorHandler`. Anbefalt for nye services som trenger standalone pool.
+
+6. **Heartbeat-route** (`apps/backend/src/routes/agentGame1Master.ts:473`) — UPDATE-query wrappet i `withDbRetry` så transient pool-feil ikke gir false `SOFT_FAIL` ved Render-vedlikehold. Heartbeat-write er idempotent (`master_last_seen_at = now()` igjen er trygg å re-kjøre).
+
+7. **Tester** (`apps/backend/src/util/__tests__/pgPoolErrorHandler.test.ts` — 27 tester, alle PASS):
+   - `getPgErrorCode` — pg-style vs non-pg errors
+   - `isPostgresShutdownError` — 57P01/02/03
+   - `isTransientConnectionError` — full SQLSTATE + node TCP error whitelist
+   - `attachPoolErrorHandler` — idempotens, 57P01 ikke kaster, transient ikke kaster, uventede ikke kaster, defaults
+   - `withDbRetry` — first-success, retry-after-1, exhaust-throws-last, non-transient-fails-immediately, custom predikat, ECONNRESET retry
+   - Sanity-test: pool uten handler DOES kaste (verifiserer at fixture matcher pg.Pool-semantikk)
+
+8. **Manuell chaos-test** (kjørt mot lokal Postgres):
+   - Boot pool, terminer alle backend-connections via `pg_terminate_backend`, verifiser process overlever + neste query auto-reconnect
+   - Resultat: PASS — pool gjenoppdatet, neste query returnerte korrekt resultat
+
+**Filer endret:**
+- `apps/backend/src/util/pgPoolErrorHandler.ts` (NY, 315 linjer)
+- `apps/backend/src/util/__tests__/pgPoolErrorHandler.test.ts` (NY, 367 linjer, 27 tester)
+- `apps/backend/src/util/pgPool.ts` (+`createServicePool` factory)
+- `apps/backend/src/util/sharedPool.ts` (bruker `attachPoolErrorHandler`)
+- `apps/backend/src/adapters/PostgresWalletAdapter.ts` (eksplisitt handler-attach på standalone pool)
+- `apps/backend/src/adapters/PostgresBingoSystemAdapter.ts` (eksplisitt handler-attach på standalone pool)
+- `apps/backend/src/game/PostgresResponsibleGamingStore.ts` (eksplisitt handler-attach)
+- `apps/backend/src/routes/agentGame1Master.ts` (heartbeat wrappet i `withDbRetry`)
+- 38 service-filer (auth, admin, agent, compliance, payments, platform, security) — automatisk migrert med `attachPoolErrorHandler`-kall etter `new Pool(...)`-fallback
+- `docs/engineering/PITFALLS_LOG.md` — ny §12 (DB-resilience) + §12.1 entry, indeks oppdatert (94 entries)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry
+
+**Læring / mønstre:**
+- pg.Pool DEFAULT-oppførsel ved error-event uten listener er `process.exit` via uncaughtException. Hver standalone pool MÅ ha handler.
+- Sentry-noise reduseres ved å klassifisere: WARN for forventet (57P01 ved vedlikehold), ERROR for uventet (constraint-violation, etc.)
+- Retry-mønster: 3-forsøk [100/250/500ms] = ~850ms worst-case for read-paths. IKKE retry write-paths uten outbox-mønster (wallet/compliance har egne).
+- Migration-script-mønster (idempotent, derive name from file name) er gjenbrukbart for fremtidige cross-cutting concerns.
+
+**Verifisering kjørt:**
+- `npm --prefix apps/backend run check` ✅
+- `npm --prefix apps/backend run build` ✅
+- `npx tsx --test pgPoolErrorHandler.test.ts sharedPool.test.ts retry.test.ts` ✅ (47/47 PASS)
+- `npx tsx --test bootStartup.constructorRegression.test.ts` ✅ (30/30 PASS — verifiserer at service-konstruktører fortsatt fungerer)
+- `npx tsx --test SwedbankPayService.test.ts` ✅ (26/26 PASS)
+- Manuell chaos-test mot lokal Postgres ✅ — backend overlever `pg_terminate_backend`, auto-reconnect virker
+
+**Doc-protokoll-status (§2.19):**
+- [x] PITFALLS_LOG.md §12 ny seksjon + §12.1 entry
+- [x] AGENT_EXECUTION_LOG denne entry
+- [x] `pgPoolErrorHandler.ts` JSDoc-header dokumenterer fullt scope, root cause, designvalg, ADVARSEL om write-paths
+- [x] `pgPool.ts:createServicePool` JSDoc med usage-eksempel
+- [x] `wallet-outbox-pattern` skill — informerer om at pool-failure ikke compromitterer wallet-mutasjoner (skill-update i samme PR)
 
 ---
 

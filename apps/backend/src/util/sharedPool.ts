@@ -35,6 +35,7 @@
 
 import { Pool, type PoolConfig } from "pg";
 import { getPoolTuning } from "./pgPool.js";
+import { attachPoolErrorHandler } from "./pgPoolErrorHandler.js";
 
 /**
  * Default `statement_timeout` applied to every connection acquired from the
@@ -140,12 +141,15 @@ export function initSharedPool(options: SharedPoolOptions): Pool {
     );
   }
 
-  // Surface pool errors so a transient network blip doesn't kill the
-  // process silently. node-pg's default `error` handler exits the process
-  // if no listener is attached.
-  pool.on("error", (err) => {
-    console.error("[sharedPool] idle client error:", err);
-  });
+  // Agent T (2026-05-14): bruk strukturert error-handler som skiller mellom
+  // Postgres-shutdown (forventet ved vedlikehold/failover → WARN) og uventede
+  // pool-errors (ops bør undersøke → ERROR). Tidligere logget alle errors
+  // som ERROR, som triggerer Sentry-alerts på normal Render-vedlikehold.
+  //
+  // KRITISK: uten `pool.on("error", ...)` propagerer pg-errors som
+  // `uncaughtException` og krasjer hele backend-process-en. Se Sentry-issue
+  // SPILLORAMA-BACKEND-5 (2026-05-14) for root cause.
+  attachPoolErrorHandler(pool, { poolName: "shared-platform-pool" });
 
   sharedPool = pool;
   return pool;
