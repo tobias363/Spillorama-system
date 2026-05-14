@@ -45,7 +45,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | Kategori | Antall entries | Sist oppdatert |
 |---|---:|---|
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
-| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 8 | 2026-05-14 |
+| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 95 entries (per 2026-05-14)
+**Total:** 96 entries (per 2026-05-14)
 
 ---
 
@@ -317,6 +317,39 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - [ADR-0005 — Outbox-pattern](../adr/0005-outbox-pattern.md)
 - [ADR-0014 — Idempotent migrations](../adr/0014-idempotent-migrations.md)
 - `~/.claude.json` user-scope MCP-config
+
+---
+
+### §2.9 — Wallet integrity-check må kjøres cron, ikke kun on-demand
+
+**Severity:** P0 (Lotteritilsynet-relevant audit-window)
+**Oppdaget:** 2026-05-14 — Tobias-direktiv etter Evolution-grade DB-fundament-arbeid
+**Symptom:**
+- Wallet `balance` blir gradvis ut av sync med `wallet_entries`-sum, ingen merker det før nattlig recon
+- Hash-chain-brudd får leve i 24+ timer før `WalletAuditVerifier` (nightly) fanger det
+- Når Lotteritilsynet spør "når oppdaget dere bruddet?", svar > 1t er pinlig
+- "Vi vet det hver morgen kl 03:00" er ikke nok — pilot-spilling skjer kveld
+**Fix:**
+- Cron-driven `scripts/ops/wallet-integrity-watcher.sh` (OBS-10, 2026-05-14) hver time
+- Sjekker to invariants strukturelt (rask, < 2s mot dev-DB):
+  - I1 — balance-sum mot ledger-signed-sum (CREDIT=+amount, DEBIT=-amount)
+  - I2 — hash-chain-link: row.previous_entry_hash ≡ predecessor.entry_hash per account_id
+- Brudd → Linear-issue Urgent + Slack/disk fallback
+- Per-wallet_id dedup 24t i `STATE_FILE` så vi ikke spammer
+- IKKE write-active — kun SELECT mot DB
+**Prevention:**
+- `scripts/__tests__/ops/wallet-integrity-watcher.test.sh` — 48 tester (Q1+Q2 JSON-shaping, dedup, Linear DRY_RUN, pre-flight, integration smoke)
+- Watcher er disabled by default — Tobias aktiverer manuelt etter pilot-test
+- ALDRI gjør watcher write-active (compliance-brudd ved write-mot-prod)
+- ALDRI senk `LINEAR_ISSUE_DEDUP_HOURS` < 6 — Linear-spam ved gjentakende brudd
+- Watcher fanger 90% strukturelt; nattlig `WalletAuditVerifier` er fortsatt back-up for full SHA-256-verify
+- Hvis ny wallet-mutasjon innføres → verifiser I1+I2 ikke brytes (test mot lokal DB)
+**Related:**
+- `docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` — full runbook + eskalering §6
+- [ADR-0004 — Hash-chain audit-trail](../adr/0004-hash-chain-audit.md)
+- [ADR-0005 — Outbox-pattern](../adr/0005-outbox-pattern.md)
+- [ADR-0023 — MCP write-access policy](../adr/0023-mcp-write-access-policy.md)
+- §2.6 (direct INSERT forbudt), §2.8 (MCP write-forbud), §6.x (test-infra-mønster matcher OBS-9)
 
 ---
 

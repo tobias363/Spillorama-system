@@ -128,6 +128,24 @@ SKIP when:
 - Test fixtures that don't assert hash-chain integrity
 - Pure documentation updates that don't change algorithm or canonical-form
 
+## Komplementære integrity-watchers
+
+- **Strukturell sjekk hver time** — `scripts/ops/wallet-integrity-watcher.sh`
+  (OBS-10, 2026-05-14) håndhever hash-chain-link-invariant: for hver rad
+  i `wallet_entries` (siste 24t) må `previous_entry_hash` matche forrige
+  rads `entry_hash` per `account_id`. Denne sjekken gjør IKKE full
+  SHA-256 re-compute (den krever canonical-JSON-logikk i TypeScript),
+  men den fanger 90 % av tamper-mønstre raskt. Hash-chain-brudd =
+  Linear-issue Urgent + Slack/disk fallback.
+- **Full SHA-256-verify nightly** — `WalletAuditVerifier` (denne skill-en)
+  re-beregner `entry_hash` for hver rad og er den endelige
+  Lotteritilsynet-grade-verifikasjonen. Watcher-en og verifier-en
+  utfyller hverandre: watcher gir < 1t MTTD, verifier garanterer full
+  korrekthet.
+
+Se `docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` for eskaleringsflyt
++ relasjon mellom de to kontrollene.
+
 ## Relaterte ADR-er
 
 - [ADR-0003 — System-actor for engine-mutasjoner](../../../docs/adr/0003-system-actor.md) — actor-felt i hash-chain
