@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.5.0
+  version: 1.6.0
   project: spillorama
 ---
 
@@ -302,6 +302,24 @@ Når bruker bytter hall i `/web/`-lobby-dropdown (`apps/backend/public/web/lobby
 Fail-soft: hvis `/api/games/spill1/lobby` feiler, falle tilbake til global `gameStatus['bingo']` for å ikke vise feil til kunde.
 
 **Tester:** `apps/admin-web/tests/lobbyHallSwitcher.test.ts` (13 tester, jsdom + mock-fetch).
+
+## Lobby-API nextGame ved finished plan-run (PR <this-PR>, 2026-05-14)
+
+Når `app_game_plan_run.status='finished'` og `current_position < items.length`:
+- Lobby-API (`Game1LobbyService.getLobbyState`) returnerer `nextScheduledGame` fra `plan_items[current_position + 1]` (1-indeksert)
+- `GameLobbyAggregator.buildPlanMeta` peker `catalogSlug`/`catalogDisplayName` til NESTE plan-item
+- Master-UI viser korrekt "Start neste spill — 1000-spill" (eller hva neste er)
+
+Når `current_position >= items.length` (plan helt ferdig):
+- `nextScheduledGame: null` + `planCompletedForToday: true`
+- Aggregator beholder `catalogSlug` på siste posisjon (UI rendrer "Plan ferdig"-banner via `planRunStatus='finished'`)
+- Speilet av `PLAN_COMPLETED_FOR_TODAY`-DomainError fra `getOrCreateForToday`
+
+**ALDRI fall tilbake til position=1 hvis finished plan-run finnes** — det gir Bingo-loop som Tobias rapporterte 2026-05-14 13:00.
+
+**Komplementært til PR #1422:** Backend create-logikk advancer korrekt; lobby-API må også vise korrekt UI-state.
+
+**Tester:** `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester for finished+next-position), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester for `buildPlanMeta` auto-advance).
 
 ## Master-rolle-modellen (Tobias 2026-05-08)
 
@@ -782,5 +800,6 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
-| 2026-05-14 | v1.7.0 — PR `fix/winscreen-show-only-winning-phases` (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
-| 2026-05-14 | v1.8.0 — Agent Q (CSS, Tobias-direktiv): la til seksjon "Premietabell-rendering (3-bong-grid)". `CenterTopPanel` viste tidligere kun Hvit-bong-pris i tekst-pillene. Ny render bygger 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla) der Gul (×2) og Lilla (×3) deriveres automatisk fra `pattern.prize1`. Bygd lokal design-side først (`/web/games/premie-design.html`) for Tobias-godkjenning. Inkluderer ny `premieTable.test.ts` (18 tester) + utvidet `no-backdrop-filter-regression.test.ts` med `.premie-row`/`.premie-cell` guards. PITFALLS §7.23. |
+| 2026-05-14 | v1.7.0 — PR #1430 fix/winscreen-show-only-winning-phases (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
+| 2026-05-14 | v1.7.1 — PR #1431 fix/lobby-nextgame-after-finished-plan-run: Lobby-API nextGame ved finished plan-run: `Game1LobbyService` returnerer NESTE plan-item som `nextScheduledGame` når `run.status='finished'` OG `currentPosition < items.length`. `GameLobbyAggregator.buildPlanMeta` auto-advancer `positionForDisplay` så `catalogSlug` peker til neste spill. Master-UI viser nå korrekt "Start neste spill — 1000-spill" istedet for default "Bingo". Nytt `planCompletedForToday`-flag speiler `PLAN_COMPLETED_FOR_TODAY`-DomainError. Komplementært til PR #1422 (DB-side fix). PITFALLS §3.13. Tester: 5 nye i `Game1LobbyService.test.ts` + 2 nye i `GameLobbyAggregator.test.ts`. |
+| 2026-05-14 | v1.8.0 — PR #1433 Agent Q (CSS, Tobias-direktiv): la til seksjon "Premietabell-rendering (3-bong-grid)". `CenterTopPanel` viste tidligere kun Hvit-bong-pris i tekst-pillene. Ny render bygger 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla) der Gul (×2) og Lilla (×3) deriveres automatisk fra `pattern.prize1`. Bygd lokal design-side først (`/web/games/premie-design.html`) for Tobias-godkjenning. Inkluderer ny `premieTable.test.ts` (18 tester) + utvidet `no-backdrop-filter-regression.test.ts` med `.premie-row`/`.premie-cell` guards. PITFALLS §7.23. |

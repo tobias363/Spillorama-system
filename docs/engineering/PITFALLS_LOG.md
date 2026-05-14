@@ -505,6 +505,54 @@ Audit-event `game_plan_run.recreate_after_finish` utvidet med:
 - Tester: `apps/backend/src/game/__tests__/GamePlanRunService.autoAdvanceFromFinished.test.ts` (10 tester)
 - Skill `spill1-master-flow` §"Auto-advance fra finished plan-run"
 
+### §3.13 — Lobby-API må vise NESTE position i sekvens etter finished plan-run
+
+**Severity:** P0 (pilot — master ser feil "neste spill"-navn)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 13:00 — samme dag som PR #1422 landet)
+**Symptom:** Master-UI viser "Start neste spill — Bingo" selv etter Bingo (position=1) er ferdigspilt. Skal vise "1000-spill" (position=2).
+
+DB-evidens (verifisert av Tobias 13:00):
+```sql
+SELECT id, status, current_position FROM app_game_plan_run WHERE business_date = CURRENT_DATE;
+-- 792541b4 finished position=1
+
+SELECT position, slug FROM app_game_plan_item WHERE plan_id = (...) ORDER BY position;
+-- 1: bingo, 2: 1000-spill, 3: 5x500, ..., 13: tv-extra
+```
+
+Lobby-API output (FØR fix):
+```
+GET /api/games/spill1/lobby?hallId=demo-hall-001
+→ nextGame: NULL
+→ runStatus: finished
+→ overallStatus: finished
+```
+
+Master-UI faller tilbake til default `plan_items[0]` (Bingo) når `nextGame` er null → viser "Start neste spill — Bingo" istedet for "1000-spill".
+
+**Root cause:** `Game1LobbyService.getLobbyState` returnerte `nextScheduledGame: null` ved enhver finished plan-run, uavhengig av om planen var helt ferdig eller bare på posisjon 1. `GameLobbyAggregator.buildPlanMeta` clampet `positionForDisplay = Math.min(currentPosition, items.length)` så `catalogSlug` reflekterte ALLTID den siste ferdigspilte posisjon, ikke neste.
+
+**Fix:**
+- `Game1LobbyService.getLobbyState`: når `run.status='finished'` OG `currentPosition < items.length`, returner `nextScheduledGame` fra `plan.items[currentPosition + 1]` (1-indeksert) med `status='idle'`. Nytt felt `planCompletedForToday` settes `true` kun når `currentPosition >= items.length` (matcher `PLAN_COMPLETED_FOR_TODAY`-DomainError i `getOrCreateForToday`).
+- `GameLobbyAggregator.buildPlanMeta`: når `planRun.status='finished'` OG `rawPosition < items.length`, advance `positionForDisplay = rawPosition + 1` så `catalogSlug`/`catalogDisplayName` peker til NESTE plan-item. Jackpot-override-lookup endret fra `String(planRun.currentPosition)` til `String(positionForDisplay)` for konsistens — den nye plan-run-en som spawnes vil ha override-key matching dette feltet.
+
+**Komplementært til PR #1422:** Backend create-logikk advancer korrekt; lobby-API må også vise korrekt UI-state.
+
+**Prevention:**
+- Tester for finished-state med ulike posisjoner (siste position, mid-plan, 13-item demo)
+- ALDRI returner `nextScheduledGame: null` ved finished plan-run uten å først sjekke `currentPosition < items.length`
+- ALDRI clamp `positionForDisplay` til `Math.min(rawPosition, items.length)` uten å håndtere finished-state separat
+- Master-UI sin "Start neste spill"-knapp leser `lobby.nextScheduledGame.catalogDisplayName` (med fallback til "Bingo") — fix sikrer at fallback aldri trigges når plan har items igjen
+- `Spill1LobbyState.planCompletedForToday` (shared-type) er optional for backwards-compat under utrulling; default-tolkning `false`
+
+**Related:**
+- `apps/backend/src/game/Game1LobbyService.ts` (finished-branch + ny `planCompletedForToday`-flag)
+- `apps/backend/src/game/GameLobbyAggregator.ts:buildPlanMeta` (auto-advance positionForDisplay)
+- `packages/shared-types/src/api.ts:Spill1LobbyState` (ny optional `planCompletedForToday`)
+- PR #1422 (backend create-logikk — `getOrCreateForToday` auto-advance)
+- §3.12 (komplementær — DB-side fix av samme bug-klasse)
+- Tester: `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester)
+
 ---
 
 ## §4 Live-rom-state

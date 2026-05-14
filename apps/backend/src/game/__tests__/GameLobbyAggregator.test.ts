@@ -822,7 +822,11 @@ test("state=auto-paused: running scheduled-game med engine pause vises som pause
 
 // ── Test 6: finished ───────────────────────────────────────────────────
 
-test("state=finished: spilleplanen er ferdig for dagen", async () => {
+test("state=finished: siste position spilt — planMeta peker til siste catalog-slug", async () => {
+  // Plan har 2 items, run finished på position=2 (siste). Plan er HELT
+  // ferdig — `getOrCreateForToday` ville kaste PLAN_COMPLETED_FOR_TODAY
+  // hvis master prøvde å starte ny. planMeta beholder siste catalog-slug
+  // så UI kan rendre "Plan ferdig"-banner med kontekst.
   const plan = makePlanWithItems({ id: PLAN_ID, hallId: null, groupOfHallsId: GOH_ID });
   const planRun = makePlanRun({
     id: RUN_ID,
@@ -859,7 +863,172 @@ test("state=finished: spilleplanen er ferdig for dagen", async () => {
   assert.equal(state.currentScheduledGameId, null);
   assert.equal(state.scheduledGameMeta, null);
   assert.equal(state.planMeta?.planRunStatus, "finished");
+  assert.equal(state.planMeta?.currentPosition, 2);
+  assert.equal(state.planMeta?.totalPositions, 2);
   assert.equal(state.inconsistencyWarnings.length, 0);
+});
+
+// ── Bug-fix 2026-05-14: finished + flere posisjoner igjen → planMeta advancer ─
+
+test("state=finished mid-plan: planMeta peker til NESTE catalog-slug (BUG E follow-up)", async () => {
+  // Tobias-rapport 2026-05-14 13:00 (samme dag som PR #1422 landet):
+  //   Master-UI viser "Start neste spill — Bingo" etter at Bingo
+  //   (position=1) er ferdigspilt. Skal vise "1000-spill" (position=2).
+  //
+  // Root cause: buildPlanMeta brukte clamping `Math.min(rawPosition, items.length)`
+  // som returnerte position=1 selv ved finished-state. UI fall tilbake
+  // til Bingo-default.
+  //
+  // Fix: når `planRun.status === 'finished'` OG `currentPosition < items.length`,
+  // peker `positionForDisplay` til `currentPosition + 1` slik at
+  // `catalogSlug`/`catalogDisplayName` viser NESTE plan-item.
+  //
+  // Komplementært til PR #1422 sin DB-side advance-logikk i
+  // `getOrCreateForToday`.
+  const catalog1 = makeCatalogEntry({
+    id: "gc-bingo",
+    slug: "bingo",
+    displayName: "Bingo",
+  });
+  const catalog2 = makeCatalogEntry({
+    id: "gc-1000-spill",
+    slug: "1000-spill",
+    displayName: "1000-spill",
+  });
+  const plan = makePlanWithItems({
+    id: PLAN_ID,
+    hallId: null,
+    groupOfHallsId: GOH_ID,
+    items: [
+      {
+        id: `item-${PLAN_ID}-1`,
+        planId: PLAN_ID,
+        position: 1,
+        gameCatalogId: catalog1.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T12:00:00Z",
+        catalogEntry: catalog1,
+      },
+      {
+        id: `item-${PLAN_ID}-2`,
+        planId: PLAN_ID,
+        position: 2,
+        gameCatalogId: catalog2.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T12:00:00Z",
+        catalogEntry: catalog2,
+      },
+    ],
+  });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "finished",
+    currentPosition: 1, // ← Bingo ferdig, ny syklus starter på 1000-spill
+    finishedAt: "2026-05-08T13:00:00Z",
+  });
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [],
+    hallReadyRowsByGameId: new Map(),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  // planRunStatus skal fortsatt være finished (UI viser status-pille korrekt).
+  assert.equal(state.planMeta?.planRunStatus, "finished");
+  // currentPosition i meta speiler RAW DB-verdi (vi forfalsker den ikke).
+  assert.equal(state.planMeta?.currentPosition, 1);
+  assert.equal(state.planMeta?.totalPositions, 2);
+  // catalogSlug/displayName peker til NESTE item (position=2 = 1000-spill).
+  // Dette er det avgjørende: UI rendrer "Start neste spill — 1000-spill",
+  // ikke "Start neste spill — Bingo".
+  assert.equal(state.planMeta?.catalogSlug, "1000-spill");
+  assert.equal(state.planMeta?.catalogDisplayName, "1000-spill");
+});
+
+test("state=finished mid-plan (13-item demo): finished på position=7 → planMeta viser position=8", async () => {
+  // 13-item plan som matcher pilot demo (Bingo/1000-spill/.../TV-Extra).
+  // Run finished på position=7 — master har klikket gjennom 7 spill.
+  // planMeta skal vise spill #8 (catalog-slug speiler dette).
+  const items = Array.from({ length: 13 }, (_, idx) => {
+    const slug = `game-${idx + 1}`;
+    return {
+      id: `item-${PLAN_ID}-${idx + 1}`,
+      planId: PLAN_ID,
+      position: idx + 1,
+      gameCatalogId: `gc-${slug}`,
+      bonusGameOverride: null,
+      notes: null,
+      createdAt: "2026-05-07T12:00:00Z",
+      catalogEntry: makeCatalogEntry({
+        id: `gc-${slug}`,
+        slug,
+        displayName: `Spill ${idx + 1}`,
+      }),
+    };
+  });
+  const plan = makePlanWithItems({
+    id: PLAN_ID,
+    hallId: null,
+    groupOfHallsId: GOH_ID,
+    items,
+  });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "finished",
+    currentPosition: 7,
+    finishedAt: "2026-05-08T15:00:00Z",
+  });
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [],
+    hallReadyRowsByGameId: new Map(),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  assert.equal(state.planMeta?.planRunStatus, "finished");
+  assert.equal(state.planMeta?.currentPosition, 7);
+  assert.equal(state.planMeta?.totalPositions, 13);
+  // catalogSlug peker til position=8 (game-8 i syntetisk demo-list).
+  assert.equal(state.planMeta?.catalogSlug, "game-8");
+  assert.equal(state.planMeta?.catalogDisplayName, "Spill 8");
 });
 
 // ── Test 7: missing-plan (legacy daily_schedule path) ──────────────────

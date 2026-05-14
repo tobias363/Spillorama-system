@@ -103,6 +103,7 @@ function makeIdleState(overrides: Partial<Game1LobbyState> = {}): Game1LobbyStat
     },
     currentRunPosition: 0,
     totalPositions: 2,
+    planCompletedForToday: false,
     ...overrides,
   };
 }
@@ -125,6 +126,7 @@ test("GET /api/games/spill1/lobby returnerer closed-state for hall uten plan", a
       nextScheduledGame: null,
       currentRunPosition: 0,
       totalPositions: 0,
+      planCompletedForToday: false,
     },
   });
   const ctx = await startServer(service);
