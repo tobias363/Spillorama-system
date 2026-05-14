@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
+import { attachPoolErrorHandler } from "../util/pgPoolErrorHandler.js";
 import { CircuitBreaker, CircuitBreakerOpenError, type CircuitState } from "../util/CircuitBreaker.js";
 import { metrics } from "../util/metrics.js";
 import { withWalletTx } from "../wallet/walletTxRetry.js";
@@ -260,6 +261,12 @@ export class PostgresWalletAdapter implements WalletAdapter {
         ssl: options.ssl ? { rejectUnauthorized: false } : undefined,
         ...getPoolTuning()
       });
+      // Agent T (2026-05-14): wallet-pool er en SEPARAT pool fra sharedPool i
+      // prod (createWalletAdapter passer ikke pool inn — vi konstruerer egen).
+      // Uten error-handler vil 57P01 (Postgres-vedlikehold / failover) propagere
+      // som uncaughtException og drepe backend mid-payout. Se Sentry-issue
+      // SPILLORAMA-BACKEND-5 (2026-05-14) for root cause.
+      attachPoolErrorHandler(this.pool, { poolName: "wallet-pool" });
     } else {
       throw new WalletError("INVALID_WALLET_CONFIG", "PostgresWalletAdapter krever pool eller connectionString.");
     }

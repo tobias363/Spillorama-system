@@ -17,6 +17,9 @@
  *     pool før den lukkes. 30s default er trygt for pilot.
  */
 
+import { Pool, type PoolConfig } from "pg";
+import { attachPoolErrorHandler } from "./pgPoolErrorHandler.js";
+
 export interface PgPoolTuning {
   max: number;
   idleTimeoutMillis: number;
@@ -32,6 +35,57 @@ export function getPoolTuning(): PgPoolTuning {
     // ikke en stille backlog som balooner p95.
     connectionTimeoutMillis: parseIntEnv(process.env.PG_POOL_CONNECTION_TIMEOUT_MS, 3_000),
   };
+}
+
+/**
+ * Agent T (2026-05-14): factory som lager en pg.Pool MED standard tuning OG
+ * error-handler installert.
+ *
+ * Brukes av services som har en fallback-path `new Pool({connectionString})`
+ * når caller ikke passer en eksisterende pool. Uten error-handler propagerer
+ * pg-errors (særlig 57P01 ved Postgres-vedlikehold/failover/docker-recreate)
+ * som `uncaughtException` og dreper hele backend-process-en.
+ *
+ * Bruk slik i service-konstruktør:
+ *
+ *   if (options.pool) {
+ *     this.pool = options.pool;
+ *   } else if (options.connectionString?.trim()) {
+ *     this.pool = createServicePool({
+ *       connectionString: options.connectionString,
+ *       poolName: "my-service-pool",
+ *     });
+ *   } else {
+ *     throw new DomainError("INVALID_CONFIG", "...");
+ *   }
+ *
+ * @see attachPoolErrorHandler — installerer error-handler-en
+ * @see getPoolTuning — leser env-tunables (PG_POOL_MAX etc.)
+ */
+export function createServicePool(options: {
+  connectionString: string;
+  poolName: string;
+  ssl?: boolean | { rejectUnauthorized: boolean };
+}): Pool {
+  const poolConfig: PoolConfig = {
+    connectionString: options.connectionString,
+    ...getPoolTuning(),
+  };
+  // Behold eksisterende ssl-paritet med services som bruker
+  // `ssl: options.ssl ? { rejectUnauthorized: false } : undefined`.
+  // Caller kan også passere en full ssl-config hvis ønsket.
+  if (options.ssl !== undefined) {
+    if (options.ssl === true) {
+      poolConfig.ssl = { rejectUnauthorized: false };
+    } else if (options.ssl === false) {
+      poolConfig.ssl = undefined;
+    } else {
+      poolConfig.ssl = options.ssl;
+    }
+  }
+  const pool = new Pool(poolConfig);
+  attachPoolErrorHandler(pool, { poolName: options.poolName });
+  return pool;
 }
 
 function parseIntEnv(value: string | undefined, fallback: number): number {

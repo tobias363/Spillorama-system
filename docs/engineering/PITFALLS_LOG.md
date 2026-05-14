@@ -55,8 +55,9 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
+| [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 93 entries (per 2026-05-14)
+**Total:** 94 entries (per 2026-05-14)
 
 ---
 
@@ -1983,6 +1984,55 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 
 ---
 
+## §12 DB-resilience
+
+### §12.1 — pg-pool uten error-handler → 57P01 krasjer backend (Sentry SPILLORAMA-BACKEND-5)
+
+**Severity:** P0 (pilot-blokker — produsents-krasj ved Postgres-vedlikehold / failover)
+**Oppdaget:** 2026-05-14 (Sentry-issue SPILLORAMA-BACKEND-5 11:23:30 UTC)
+**Symptom:**
+- Backend krasjer med `uncaughtException` på request mot `/api/agent/game1/master/heartbeat`
+- Stack: `pg-protocol/src/parser.ts:394 parseErrorMessage` → `terminating connection due to administrator command`
+- pg-error-kode `57P01` (admin_shutdown)
+- Trigger var lokal `docker-compose up -d --force-recreate postgres`, men samme scenario kan skje i prod ved Render-vedlikehold / failover / OS-restart av postgres-container
+
+**Root cause:**
+- `node-postgres` pg.Pool emit-er `error`-event når en idle client dør
+- Hvis det IKKE finnes en `pool.on("error", handler)`-listener, propagerer feilen som `uncaughtException`
+- 42 `new Pool({...})`-instanser i backend hadde ingen error-handler (kun shared-pool og 4 andre hadde basic handler)
+- Even basic handler logget alle errors som ERROR — som triggerer Sentry-alerts på forventet Postgres-vedlikehold
+
+**Fix:**
+1. Ny modul `apps/backend/src/util/pgPoolErrorHandler.ts`:
+   - `attachPoolErrorHandler(pool, { poolName })` — installerer error-handler som logger 57P01/57P02/57P03 som WARN (forventet), 08001/08006/ECONNxxx som WARN (transient), uventede som ERROR
+   - `isTransientConnectionError(err)` — predikat for retry-decisions
+   - `withDbRetry(op, { operationName })` — `withRetry`-wrapper med transient-error-predikat og 3-forsøk-backoff [100/250/500ms]
+2. `sharedPool.ts` — strukturert handler via `attachPoolErrorHandler`
+3. Alle 41 standalone-pool-fallback-paths i services oppdatert med `attachPoolErrorHandler` (PostgresWalletAdapter, PostgresBingoSystemAdapter, PostgresResponsibleGamingStore + 38 service-fallbacks)
+4. Heartbeat-route (`/api/agent/game1/master/heartbeat`) wrappet i `withDbRetry`
+
+**Prevention:**
+- ALLE nye `new Pool({...})` MÅ kalle `attachPoolErrorHandler` direkte etter (eller bruke `createServicePool` factory i `pgPool.ts`)
+- Bruk `withDbRetry` for kritiske LESE-paths (heartbeat, room-state-fetch, lobby-aggregator)
+- IKKE bruk `withDbRetry` på write-paths uten outbox-mønster (wallet/compliance har egne outbox-mekanismer — BIN-761→764)
+- Manuell chaos-test (kjørt 2026-05-14):
+  ```bash
+  # Start backend, terminer connections, verifiser at backend overlever:
+  psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+            WHERE application_name LIKE 'spillorama%';"
+  curl http://localhost:4000/health  # skal returnere 200
+  ```
+
+**Related:**
+- Sentry-issue SPILLORAMA-BACKEND-5 (2026-05-14)
+- PR `fix/backend-pg-pool-resilience-2026-05-14`
+- `apps/backend/src/util/pgPoolErrorHandler.ts` (ny modul)
+- `apps/backend/src/util/__tests__/pgPoolErrorHandler.test.ts` (27 tester)
+- Tests dekker: handler-idempotens, 57P01/57P02/57P03 = WARN, 08006/ECONNxxx = WARN, uventede = ERROR, ingen kaster, retry-flow med backoff
+- Skill `wallet-outbox-pattern` (informert om at pool-failure ikke compromitterer wallet-mutasjoner)
+
+---
+
 ## Hvordan legge til ny entry
 
 ```markdown
@@ -2021,6 +2071,7 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-10 | Lagt til §7.8 (JackpotConfirmModal var feil mental modell — fjernet ADR-0017). Indeks-counts korrigert mot faktiske tall (§7=8, §11=7, total=71). | docs-agent (ADR-0017 PR-C) |
 | 2026-05-11 | Lagt til §7.9 (state.ticketTypes override), §7.10 (static bundle rebuild), §7.11 (lobby-init race), §7.12 (overlay pointer-events). §9.5 (demo-plan opening hours), §9.6 (ON CONFLICT uten UNIQUE). §11.8 (dev:nuke single-command), §11.9 (worktree-branch-leakage), §11.10 (pre-commit COMMIT_EDITMSG-bug). Total 71→79 entries. | PM-AI (sesjon 2026-05-10→2026-05-11) | docs-agent (ADR-0017 PR-C) |
 | 2026-05-12 | Lagt til §7.15 — klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets foreldreløse). Pilot-blokker fra Tobias-test 11:03-11:05, fikset via Alternativ B (klient venter med kjøp). | Agent B (Klient wait-on-master) |
+| 2026-05-14 | Lagt til §12 (DB-resilience) + §12.1 (pg-pool uten error-handler krasjer backend på 57P01). Root cause for Sentry SPILLORAMA-BACKEND-5. Pilot-blokker. 94 entries totalt. | Agent T (pg-pool resilience) |
 | 2026-05-13 | Lagt til §11.11 (ESM dispatcher må gates med isDirectInvocation), §11.12 (JSDoc `**` parse-feil), §11.13 (GitHub Actions YAML heredoc indentation). Funn under PM Push-Control Phase 2-bygg. Total 83→86 entries. | Phase 2-agent (PM-AI orkestrert) |
 | 2026-05-13 | Lagt til §5.9 (cascade-rebase pattern), §5.10 (add/add `-X ours`-strategi), §6.15 (SIGPIPE + pipefail i awk-pipe), §6.16 (npm workspace lock isolation), §9.9 (seed-FK ordering), §11.14 (≥10 parallelle agenter stream-timeout), §11.15 (additive-merge Python-resolver), §11.16 (worktree fork-from-wrong-branch cascade). Funn under Wave 2/3-sesjon 2026-05-13. Total 86→92 entries. | PM-AI (E6 redo) |
 | 2026-05-14 | Utvidet §3.11 (PR #1411 sub-bug PR #1408): la til Fase 2-prevention-bullet for `buildVariantConfigFromSpill1Config` som mapper `priceNok / minPriceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter entryFee men IKKE multipliers — derfor komplementær fix. 7 nye tester i `spill1VariantMapper.test.ts`. | Fix-agent F3 |

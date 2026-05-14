@@ -1,5 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
+import { attachPoolErrorHandler } from "../util/pgPoolErrorHandler.js";
 import { DomainError } from "../errors/DomainError.js";
 import type {
   PersistedComplianceLedgerEntry,
@@ -63,6 +64,10 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
         ssl: options.ssl ? { rejectUnauthorized: false } : false,
         ...getPoolTuning(),
       });
+      // Agent T (2026-05-14): attach error-handler så pg-errors (57P01 etc) ikke
+      // propagerer som uncaughtException og dreper backend. Se Sentry-issue
+      // SPILLORAMA-BACKEND-5 (2026-05-14) for root cause.
+      attachPoolErrorHandler(this.pool, { poolName: "postgres-responsible-gaming-store-pool" });
     } else {
       throw new DomainError(
         "INVALID_CONFIG",

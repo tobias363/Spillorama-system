@@ -288,6 +288,26 @@ Symptom: Holds blir aldri frigitt etter spill.
 Symptom: `app_idempotency_cache` tabell vokser i det uendelige.
 **Fix:** BIN-767-cron sletter > 90 dager. Verifiser at den kjører.
 
+### 11. Wallet-pool uten error-handler kan krasje backend mid-payout (Agent T, 2026-05-14)
+
+**Symptom:** Backend krasjer med `uncaughtException` (`terminating connection due to administrator command`, 57P01) mid-payout-flow ved Postgres-vedlikehold / failover / docker-recreate.
+
+**Root cause:** `PostgresWalletAdapter` lager sin EGEN pool via `createWalletAdapter` (når `WALLET_PROVIDER=postgres`). Uten `pool.on("error", ...)` propagerer pg-errors som uncaughtException og dreper hele backend-process — INKLUDERT outbox-worker mid-flight.
+
+**Hvordan dette beskytter wallet-mutasjoner:**
+- Outbox-mønsteret BIN-761→764 garanterer at hvis wallet-credit committed til DB, vil tilhørende event leveres til klient (eventually consistent).
+- MEN: hvis backend krasjer FØR worker har committeret outbox-rowen (mellom INSERT og state-flush), ville en restart være eneste recovery.
+- Med `attachPoolErrorHandler` på wallet-pool slipper man backend-krasj — pool re-leier connections, worker fortsetter neste tick.
+
+**Fix:** Agent T (2026-05-14) — `attachPoolErrorHandler` installeres i `PostgresWalletAdapter`-constructor når standalone pool lages. Handler logger 57P01/57P02/57P03 som WARN (forventet ved Postgres-vedlikehold), 08001/08006/ECONNxxx som WARN (transient), uventede som ERROR.
+
+**Prevention:**
+- ALDRI bruk `withDbRetry` på wallet-mutasjoner (INSERT/UPDATE av `app_wallet*`-tabeller). Outbox-mønsteret er allerede idempotent — automatic retry på wire-level ville duplisert mutasjoner.
+- Bruk `withDbRetry` KUN på read-paths utenfor wallet (lobby-state, heartbeat, etc.).
+- Hvis du legger til ny standalone pool: kall `attachPoolErrorHandler(pool, { poolName: "..." })` umiddelbart etter `new Pool(...)`.
+
+**Related:** PITFALLS_LOG §12.1, `apps/backend/src/util/pgPoolErrorHandler.ts`, Sentry SPILLORAMA-BACKEND-5
+
 ## Mutation testing (etablert 2026-05-13)
 
 `WalletOutboxWorker.ts` er én av 5 filer som er på Stryker mutation-mutate-set per `apps/backend/stryker.config.json`. Casino-grade idempotens forutsetter at workeren er rakk-trygt — mutanter som overlever er potensielle prod-regresjoner.
@@ -359,3 +379,4 @@ Kjøre lokalt: `cd apps/backend && npm run test:mutation`. Workflow: `.github/wo
 |---|---|
 | 2026-05-08 | Initial — casino-grade-wallet etablert (BIN-761→767) |
 | 2026-05-13 | v1.1.0 — la til Stryker mutation-testing-referanse for `WalletOutboxWorker.ts`, ADR-0015 regulatory-ledger, ADR-0019 sync-persist |
+| 2026-05-14 | v1.2.0 — la til seksjon 11 om wallet-pool error-handler (Agent T). Informerer om at `attachPoolErrorHandler` beskytter wallet-mutasjoner mot backend-krasj på 57P01. Eksplisitt forbud mot `withDbRetry` på wallet-mutasjoner. |

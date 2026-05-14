@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { DomainError } from "../errors/DomainError.js";
 import { getPoolTuning } from "../util/pgPool.js";
+import { attachPoolErrorHandler } from "../util/pgPoolErrorHandler.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "sub-game-service" });
@@ -313,6 +314,10 @@ export class SubGameService {
         connectionString: options.connectionString,
         ...getPoolTuning(),
       });
+      // Agent T (2026-05-14): attach error-handler så pg-errors (57P01 etc) ikke
+      // propagerer som uncaughtException og dreper backend. Se Sentry-issue
+      // SPILLORAMA-BACKEND-5 (2026-05-14) for root cause.
+      attachPoolErrorHandler(this.pool, { poolName: "sub-game-service-pool" });
     } else {
       throw new DomainError(
         "INVALID_CONFIG",
