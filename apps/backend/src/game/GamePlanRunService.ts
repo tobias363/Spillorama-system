@@ -773,11 +773,18 @@ export class GamePlanRunService {
         `Kan ikke starte run med status=${run.status} (kun 'idle' tillatt).`,
       );
     }
+    // BUG-D1 fix (2026-05-15): `start()` skal IKKE overstyre current_position.
+    // `getOrCreateForToday`-INSERT er eneste sannhet for posisjon ved start —
+    // den beregner riktig `nextPosition` basert på `previousPosition` (auto-
+    // advance BUG E, PR #1422). Tidligere hardkodet vi `current_position = 1`
+    // her, som overskrev den riktige verdien og førte til at master spilte
+    // Bingo (pos=1) gjentatte ganger i stedet for å advance til 1000-spill,
+    // 5×500, osv. Se `docs/engineering/PITFALLS_LOG.md` §3.15 og
+    // `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1.
     await this.pool.query(
       `UPDATE ${this.table()}
        SET status = 'running',
            started_at = COALESCE(started_at, now()),
-           current_position = 1,
            master_user_id = $2,
            updated_at = now()
        WHERE id = $1`,

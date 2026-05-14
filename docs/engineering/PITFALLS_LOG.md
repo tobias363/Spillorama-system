@@ -698,13 +698,14 @@ Hver mekanisme har egen audit-event, race-window, og soft-fail-strategi.
 - `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §5 C1, §7 Bølge 4
 - `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §3
 
-### §3.15 — `GamePlanRunService.start()` overskriver `current_position = 1`
+### §3.15 — `GamePlanRunService.start()` overskriver `current_position = 1` (FIXED 2026-05-15)
 
 **Severity:** P0 (rot-årsak til "Bingo igjen" i Next Game Display)
 **Oppdaget:** 2026-05-14 (Agent D research, samme dag som PR #1422 fix-poke landet)
+**Status:** ✅ FIXED 2026-05-15 (branch `fix/bug-d1-planrun-start-hardcode-2026-05-15`, Agent A407 — Fix-agent BUG-D1)
 **Symptom:** Etter `getOrCreateForToday` beregner riktig `nextPosition=2` (per PR #1422), `start()`-UPDATE overskriver `current_position` til 1. Bingo (position 1) re-startes i stedet for 1000-spill (position 2).
 
-**Root cause:** `apps/backend/src/game/GamePlanRunService.ts:780` har hardkodet `current_position = 1` i UPDATE-en:
+**Root cause:** `apps/backend/src/game/GamePlanRunService.ts:780` (pre-fix) hadde hardkodet `current_position = 1` i UPDATE-en:
 
 ```sql
 UPDATE app_game_plan_run
@@ -716,13 +717,13 @@ SET status = 'running',
 WHERE id = $1
 ```
 
-Dette er arv fra opprinnelig implementasjon før PR #1422 introduserte `previousPosition`-tracking i `getOrCreateForToday`. INSERT-en setter `nextPosition` korrekt, men `start()` overskriver.
+Dette var arv fra opprinnelig implementasjon før PR #1422 introduserte `previousPosition`-tracking i `getOrCreateForToday`. INSERT-en satte `nextPosition` korrekt, men `start()` overskrev.
 
-**Hva mitigerer i dag:**
-- `MasterActionService.start()` (linje 607-672) har egen advance-logikk som sjekker `currentScheduledGame` for `current_position` og advancer plan-run hvis scheduled-game er terminal.
-- Dette dekker hovedpath (master-start etter natural-end) men IKKE alle scenarier.
+**Hva mitigerte pre-fix:**
+- `MasterActionService.start()` (linje 607-672) hadde egen advance-logikk som sjekket `currentScheduledGame` for `current_position` og advancerte plan-run hvis scheduled-game var terminal.
+- Det dekket hovedpath (master-start etter natural-end) men IKKE alle scenarier — særlig ikke fresh state der ingen scheduled-game-rad ennå eksisterte for cp=1, så Bingo ble re-startet før advance-logikken slo inn.
 
-**Fix:** Fjern `current_position = 1` fra `start()`-UPDATE. La `getOrCreateForToday`-INSERT være eneste sannhet for `current_position` ved start.
+**Fix (2026-05-15):** Fjernet `current_position = 1` fra `start()`-UPDATE. `getOrCreateForToday`-INSERT er nå eneste sannhet for `current_position` ved start. `start()` flipper kun state-machine (idle → running) + setter `started_at` + `master_user_id` — den rør IKKE posisjonen.
 
 ```diff
  UPDATE app_game_plan_run
@@ -734,18 +735,28 @@ Dette er arv fra opprinnelig implementasjon før PR #1422 introduserte `previous
  WHERE id = $1
 ```
 
-**Test som må skrives:** Verifiser at `(getOrCreateForToday → start)` for `nextPos=2` resulterer i `current_position = 2`.
+**Tester som dekker:**
+- `apps/backend/src/game/__tests__/GamePlanRunService.startPreservesPosition.test.ts` (6 tester):
+  1. `start()` bevarer cp=2 (regression for selve bug-en)
+  2. SQL-UPDATE inneholder ikke `current_position = ` (strukturell guard)
+  3. cp=5 bevares (vilkårlig mid-plan position)
+  4. cp=1 bevares (sanity-test for første-spill)
+  5. Audit-event `game_plan_run.start` skrives uendret
+  6. `GAME_PLAN_RUN_INVALID_TRANSITION` kastes ved non-idle status (uendret guard)
 
 **Prevention:**
-- ALDRI overstyr `current_position` i status-transition-UPDATE-er — kun i `getOrCreateForToday`
-- MasterActionService advance-logikk er WORKAROUND, ikke fix — fjern bare hvis fix-en er på plass
+- ALDRI overstyr `current_position` i status-transition-UPDATE-er — kun i `getOrCreateForToday`-INSERT eller eksplisitt advance/rollback-paths
+- MasterActionService advance-logikk er fortsatt på plass som defense-in-depth — den fanger edge-cases der scheduled-game-rad er ute av sync med plan-run-position
+- Strukturell test #2 ovenfor blokkerer regresjon: hvis noen reintroduserer `current_position = X` i `start()`-UPDATE, vil testen feile på SQL-regex
 
 **Related:**
-- `apps/backend/src/game/GamePlanRunService.ts:776-794` (`start()`)
-- `apps/backend/src/game/GamePlanRunService.ts:536-749` (`getOrCreateForToday`)
-- `apps/backend/src/game/MasterActionService.ts:607-672` (advance-mitigation)
+- `apps/backend/src/game/GamePlanRunService.ts:776-795` (`start()` — fix applied)
+- `apps/backend/src/game/GamePlanRunService.ts:536-749` (`getOrCreateForToday` — eneste sannhet for position ved start)
+- `apps/backend/src/game/MasterActionService.ts:607-672` (advance-mitigation, fortsatt på plass)
 - §3.12 (komplementær — DB-side fix landet i PR #1422)
-- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1
+- §3.10-§3.14 (4 tidligere fix-forsøk på "neste spill"-display — denne fix-en lukker rot-årsaken på server-side)
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1 / §6.1
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (audit-skall som koordinerte 6 research-agenter)
 
 ---
 
