@@ -357,6 +357,8 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 
 ## §3 Spill 1, 2, 3 arkitektur
 
+> **🚨 Kanonisk cross-spill-sammenligning: [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md).** Den dekker full sammenligningstabell, bridge-pattern, phase-state-machine, og felles invariants. Fallgruvene under er klassifisert per-§ med severity og fix.
+
 ### §3.1 — KRITISK: Spill 1, 2, 3 har FUNDAMENTALT forskjellige arkitekturer
 
 **Severity:** P0 (antakelser overføres feil → bryter implementasjon)
@@ -367,10 +369,12 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - **Spill 2** (`rocket`): ETT globalt rom + perpetual loop + auto-tick
 - **Spill 3** (`monsterbingo`): ETT globalt rom + perpetual loop + sequential phase-state-machine
 **Prevention:**
-- Les FØRST `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` for spillet du jobber med
+- Les FØRST [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md) for cross-spill-sammenligning
+- For dyp implementasjon: les `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` for spillet du jobber med
 - Aldri kopier antakelser fra ett spill til et annet
 - Hvis koden krangler mot doc-en: doc-en vinner, fix koden
 **Related:**
+- [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md) ← ENESTE source-of-truth for cross-spill-sammenligning
 - [`SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`](../architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md)
 - [`SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md`](../architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md)
 - [`SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md`](../architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md)
@@ -1055,13 +1059,11 @@ Dette er arv fra opprinnelig implementasjon før PR #1422 introduserte `previous
 - `.husky/`-config deles, men deps må være per-worktree
 - Test-engineer / agent som jobber i worktree må ha node_modules
 
-### §6.5 — `.crdownload`-filer i wireframe-katalog
+### §6.5 — `.crdownload`-filer i wireframe-katalog (FIXED P3, 2026-04-23)
 
-**Severity:** P3 (data-tap)
-**Oppdaget:** 2026-04-23
-**Symptom:** Wireframes i `docs/wireframes/` med `.crdownload`-suffiks → ufullstendige filer
-**Fix:** Re-last fra Tobias' originale kilde
-**Prevention:** Sjekk filstørrelse / PDF-validity før commit
+- **Symptom:** Wireframes i `docs/wireframes/` med `.crdownload`-suffiks → ufullstendige filer
+- **Fix:** Re-last fra Tobias' originale kilde
+- **Prevention:** Sjekk filstørrelse / PDF-validity før commit
 
 ### §6.6 — Manuell iterasjons-loop konvergerer ikke
 
@@ -1386,11 +1388,11 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - Spill 1 = master-trigger ONLY
 - `WaitingForMasterOverlay`-komponent må mountes når status !== `running`
 
-### §7.4 — Browser-debugging via chrome-devtools-mcp, IKKE computer-use
+### §7.4 — Browser-debugging via chrome-devtools-mcp, IKKE computer-use (FIXED P2, 2026-04)
 
-**Severity:** P2 (workflow)
-**Oppdaget:** 2026-04 (memory: debug_preference.md)
-**Prevention:** Bruk `chrome-devtools-mcp` for console logs, screenshots, JS eval, network. Aldri computer-use for browser-tasks.
+- **Symptom:** Workflow-anti-mønster — agent bruker computer-use for browser-tasks
+- **Fix:** Bruk `chrome-devtools-mcp` for console logs, screenshots, JS eval, network
+- **Prevention:** memory: `debug_preference.md` — aldri computer-use for browser-tasks
 
 ### §7.5 — Frontend må normalisere query-params før backend-kall
 

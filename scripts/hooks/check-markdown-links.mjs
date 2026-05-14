@@ -25,7 +25,16 @@ const REPO_ROOT = resolve(new URL("../..", import.meta.url).pathname);
 const files = process.argv.slice(2);
 let errorCount = 0;
 
+// Skip files in archive/-folders. Archived docs are immutable historical
+// snapshots — links inside them captured state at write-time and may not
+// resolve after subsequent file moves. We intentionally don't lint them
+// to avoid blocking legitimate consolidation/archival commits.
+const ARCHIVE_SEGMENT = /(^|\/)archive\//;
+
 for (const rel of files) {
+  if (ARCHIVE_SEGMENT.test(rel)) {
+    continue;
+  }
   const file = resolve(rel);
   let content;
   try {

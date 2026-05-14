@@ -59,6 +59,57 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-15 — 3 parallelle docs-konsoliderings-agenter (Step 2+4+5 av 5-trinns)
+
+**Branch:** `feat/pm-docs-consolidation-2026-05-15`
+**Agent type:** general-purpose × 3, alle background
+**Trigger:** Tobias-direktiv 2026-05-15: "kjør steg 1-5 i den rekkefølgen du anbefaler. Kan du også da legge inn i tekst til ny PM at han da må fortsette i samme spor og arkitektur når han fortsetter med sitt arbeid og dokumenterer fortløpende."
+
+**Hva ble gjort av PM-AI (Step 1+3 direkte, før agenter):**
+
+1. **Step 1 — `docs/engineering/PM_QUICK_REFERENCE.md`** (~350 linjer):
+   - §0 IMMUTABLE Kontinuitet-direktiv (Tobias 2026-05-15)
+   - §1 Tobias' 14 IMMUTABLE direktiver (kondensert tabell)
+   - §2 Gates + scripts (5-lag vanntett-system)
+   - §3 Spill 1/2/3 forskjeller (tabell)
+   - §4 Top-10 kritiske kommandoer
+   - §5 Kanoniske doc-pekere per scope
+   - §6 Spillkatalog (4 spill + Candy)
+   - §7 Pilot-status R1-R12
+   - §8 Anti-mønstre top-10
+   - §9 Login-credentials lokal dev
+   - §10 URL-er for testing
+   - §11 Autoritet-hierarki ved tvil
+   - §12 Daglig rutine
+
+2. **Kontinuitet-direktiv også festet i:**
+   - `docs/operations/PM_SESSION_START_CHECKLIST.md` (ny seksjon før Trinn 0)
+   - `CLAUDE.md` (ny blokk under PM-livssyklus)
+
+3. **Step 3 — Verifisert som NO-OP:** Grep mot `Status: Superseded` og `Status: Deprecated` returnerer 0 ADRs (alle 23 er Accepted). Ingen kandidater til arkivering nå. Dokumentert som §11.18 i PITFALLS_LOG når Step 4-agent er ferdig (defererte for å unngå parallel edit-konflikt).
+
+**Hva agentene gjør parallelt:**
+
+| Agent | Internal ID | Scope |
+|---|---|---|
+| Step 2 — PM_HANDOFFs konsolidering | a78fb8b06f4344a27 | Konsoliderer 9 oldest PM_HANDOFFs (2026-04-23 → 2026-05-05) til `docs/operations/PM_QUARTERLY_SUMMARY_2026-04-23_to_2026-05-05.md` + flytter originaler til `docs/operations/archive/`. ~140 KB → 1 fil. |
+| Step 4 — PITFALLS kompresjon | a9758f73954668fd0 | Komprimerer FIXED+P3 entries i `PITFALLS_LOG.md` til 3-linje-format. Beholder P0/P1/OPEN urørt. ~3000 → ~2000 linjer estimat. |
+| Step 5 — SPILL_ARCHITECTURE_OVERVIEW | af35d6813b24ee061 | Opprette single source-of-truth-doc + erstatte dupliserte tabeller i 5+ docs med korte pekere (CLAUDE.md, PM_ONBOARDING_PLAYBOOK §2.5, PM_QUICK_REFERENCE §3, SPILL[1-3]_IMPLEMENTATION_STATUS, PITFALLS §3.1). |
+
+**Lessons learned:**
+
+1. **Parallel edit-konflikt-risiko:** PM-AI ønsket å legge til PITFALLS-entries (§11.17 doc-duplisering, §11.18 ADR-no-op) midt i arbeidet, men måtte deferere fordi Step 4-agenten redigerer samme fil. Lærdom: når delegering til agent på fil X, IKKE rør samme fil før agenten er ferdig.
+
+2. **5-trinns parallel-spawn fungerer fint:** Step 1+3 ble gjort direkte av PM-AI (under 10 min), Step 2+4+5 ble delegert til 3 parallelle agenter samtidig (forventet leverer-tid 15-30 min hver). Reduserer PM-AI's wallclock-tid betraktelig.
+
+3. **Kontinuitet-direktiv festet 3 steder:** PM_QUICK_REFERENCE §0 (full) + PM_SESSION_START_CHECKLIST (kort, før Trinn 0) + CLAUDE.md (kort, under PM-livssyklus). Lærdom: viktige direktiver bør festes i FLERE docs så de er umulig å overse — IKKE bare i én "kanonisk" doc.
+
+4. **Commit-strategi for store doc-konsolideringer:** En commit per logisk gruppe heller enn én mega-commit. PM-AI committet Step 1+3 først (commit 995990154), agentene committer deretter sine Step 2/4/5 separat. Ved konflikter (eks. hvis Step 4 + Step 5 begge rør PITFALLS §3.1) bruker PM Python additive-merge-resolver (PITFALLS §11.15).
+
+**Skill-update:** SKILL_UPDATE_PROPOSED-seksjon i denne entry — PM oppdaterer `pm-orchestration-pattern/SKILL.md` etter at alle 3 agenter er ferdig + final PR er gjennomgått. Foreslår ny seksjon "Docs-konsoliderings-strategi (5-trinns)".
+
+---
+
 ### 2026-05-14 — Agent B — Next Game Display research (Backend aggregator + lobby-API)
 
 **Branch:** `worktree-agent-ab50e457a113f5218` (research-grenen `research/next-game-display-b-aggregator-2026-05-14` var allerede tatt i annen worktree)

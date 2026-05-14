@@ -7,6 +7,8 @@
 
 ---
 
+> **🚨 Cross-spill-sammenligning** — for å forstå hvordan Spill 1 skiller seg fra Spill 2/3, se [`SPILL_ARCHITECTURE_OVERVIEW.md`](./SPILL_ARCHITECTURE_OVERVIEW.md) (kanonisk source-of-truth). Denne doc-en dekker Spill 1-spesifikk implementasjon i dybden.
+
 ## 0. Hvorfor dette dokumentet eksisterer
 
 Spill 1 (slug-familie `bingo`, 13 katalog-varianter) er hovedspill-fundamentet for Spillorama. Pilot går mot 4 haller (Teknobingo Årnes som master + Bodø + Brumunddal + Fauske) med Evolution Gaming-grade robusthet-mål (99.95 %+ oppetid).

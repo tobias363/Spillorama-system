@@ -23,6 +23,8 @@ R9 (Spill 2 24t-leak-test) er et utvidelses-gating-tiltak — pilot kan kjøre 4
 
 ## 1. KRITISK: Forskjeller fra Spill 1 (les FØRST)
 
+> **🚨 Den kanoniske cross-spill-sammenligningen ligger i [`SPILL_ARCHITECTURE_OVERVIEW.md`](./SPILL_ARCHITECTURE_OVERVIEW.md).** Tabellen under er Spill 2-perspektiv (Spill 1 vs Spill 2). For cross-spill-sammenligning på tvers av alle 3 spill (Spill 1 vs Spill 2 vs Spill 3) — bruk SPILL_ARCHITECTURE_OVERVIEW.
+
 Spill 2 er IKKE en variant av Spill 1. Det er en uavhengig arkitektur som tilfeldigvis bruker samme draw-pipeline. Disse forskjellene må være tydelige før du rører noe:
 
 | Aspekt | Spill 1 (`bingo`) | Spill 2 (`rocket`) |

@@ -113,17 +113,16 @@ Kanoniske docs (per topic):
 
 ### 2.5 Spill 1, 2, 3 har FUNDAMENTALT forskjellige arkitekturer
 
-Antakelser fra ett spill overføres IKKE til de andre.
+> **🚨 Full sammenligningstabell ligger i [`docs/architecture/SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md).**
+>
+> Den dekker alle aspekter (grid, ball-range, rom-modell, master-rolle, spilleplan, auto-restart, vinning, bonus, compliance, premie-modus, salgskanaler m.fl.). IKKE dupliser tabellen her — pek til den.
 
-| Aspekt | Spill 1 (`bingo`) | Spill 2 (`rocket`) | Spill 3 (`monsterbingo`) |
-|---|---|---|---|
-| Grid | 5×5 m/fri sentercelle | 3×3 full plate | 5×5 UTEN fri sentercelle |
-| Ball-range | 1-75 | 1-21 | 1-75 |
-| Rom-modell | Per-hall lobby + GoH-master | ETT globalt rom (`ROCKET`) | ETT globalt rom (`MONSTERBINGO`) |
-| Master-rolle | Master-hall styrer | Ingen master | Ingen master |
-| Spilleplan | Plan-runtime + scheduled-games | Perpetual loop (`Spill2Config`) | Perpetual loop (`Spill3Config`) |
-| Auto-restart | ❌ Master-styrt mellom runder | ✅ `minTicketsToStart` threshold | ✅ Sequential phases (Rad 1 → 3s pause → Rad 2 → ...) |
-| Compliance §11 | MAIN_GAME (15%) | MAIN_GAME (15%) | MAIN_GAME (15%) |
+**Korte hovedforskjeller:**
+- **Spill 1** (`bingo`) — per-hall lobby + GoH-master + plan-runtime, master-styrt mellom runder
+- **Spill 2** (`rocket`) — ETT globalt rom, perpetual loop, auto-start på threshold
+- **Spill 3** (`monsterbingo`) — ETT globalt rom, sequential phase-state-machine (Rad 1 → 3s pause → Rad 2 → ...)
+
+**Antakelser fra ett spill overføres IKKE til de andre.** For dyp implementasjon per spill, se `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md`.
 
 ### 2.6 Spillkatalog (vedtatt 2026-04-25 etter korrigering)
 

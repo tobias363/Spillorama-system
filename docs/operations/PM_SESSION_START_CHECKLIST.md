@@ -14,6 +14,27 @@ Tobias-direktiv 2026-05-14: ABSOLUTT ALT må leses FØR første kode-handling. V
 
 ---
 
+## ⛔ Kontinuitet-direktiv (Tobias 2026-05-15) — LES FØRST
+
+> "Kan du også da legge inn i tekst til ny PM at han da må fortsette i samme spor og arkitektur når han fortsetter med sitt arbeid og dokumenterer fortløpende."
+> — Tobias 2026-05-15
+
+**Som ny PM som tar over, du MÅ:**
+
+1. **Fortsette i samme spor.** Hvis forrige PM jobbet med en P0-blokker (Next Game Display-bug, casino-grade Bølge X, pilot-utrulling), så fortsetter DU med samme blokker. Ikke pivoter til nye initiativ uten eksplisitt Tobias-godkjennelse.
+
+2. **Fortsette i samme arkitektur.** Hvis forrige PM etablerte et mønster (SESSION_KNOWLEDGE_EXPORT, vanntett-gate-prinsippet, single-source-of-truth, parallel-research-agenter), så VIDEREFØRER DU det. Brudd på etablert arkitektur krever ADR + Tobias-godkjennelse i samme sesjon.
+
+3. **Dokumenter fortløpende — ikke ved sesjons-slutt.** Skriv PITFALLS_LOG-entry NÅR du oppdager fallgruven. Oppdater skill NÅR du oppdager mønsteret. Skriv ADR NÅR beslutningen tas. Sesjons-slutt-checklist er for verifikasjon, ikke for første-gangs-dokumentasjon.
+
+4. **Hver fix-agent-prompt MÅ inneholde dokumentasjons-protokoll** (§2.19 IMMUTABLE — mal i `docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`).
+
+5. **Når i tvil — les playbook + spør Tobias.** Bedre å pause 5 min for å sjekke en doc enn å implementere noe som bryter etablert pattern.
+
+Full forklaring i [`docs/engineering/PM_QUICK_REFERENCE.md`](../engineering/PM_QUICK_REFERENCE.md) §0.
+
+---
+
 ## 13 obligatoriske trinn (i rekkefølge)
 
 ### Trinn 0 — Onboarding-gate (HARD-BLOCK)
