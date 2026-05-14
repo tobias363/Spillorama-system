@@ -90,6 +90,12 @@ import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createUniqueIdExpiryJob } from "./jobs/uniqueIdExpiry.js";
 import { createGamePlanRunCleanupJob } from "./jobs/gamePlanRunCleanup.js";
+import {
+  createGamePlanRunNaturalEndReconcileJob,
+  getGamePlanRunNaturalEndReconcileIntervalMs,
+  getGamePlanRunNaturalEndReconcileThresholdMs,
+  isGamePlanRunNaturalEndReconcileEnabled,
+} from "./jobs/gamePlanRunNaturalEndReconcile.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createProfilePendingLossLimitFlushJob } from "./jobs/profilePendingLossLimitFlush.js";
 import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
@@ -1406,6 +1412,8 @@ const gamePlanRunService = new GamePlanRunService({
 const gamePlanRunCleanupService = new GamePlanRunCleanupService({
   pool: sharedPool,
   schema: pgSchema,
+  naturalEndStuckThresholdMs:
+    getGamePlanRunNaturalEndReconcileThresholdMs(process.env),
 });
 gamePlanRunService.setInlineCleanupHook(
   makeInlineCleanupHook(gamePlanRunCleanupService),
@@ -2220,6 +2228,30 @@ jobScheduler.register({
   run: createGamePlanRunCleanupJob({
     service: gamePlanRunCleanupService,
     runAtHourLocal: jobGamePlanRunCleanupRunAtHour,
+  }),
+});
+
+// BUG-A (audit:db `stuck-plan-run` 2026-05-14): natural-end-reconcile.
+// Komplementært til nightly cron + master-action-reconcile (PR #1403).
+// Poll-job som auto-finisher DAGENS plan-runs hvor naturlig runde-end
+// ikke har trigget master-advance. Default 30s polling.
+//
+// Pre-fix-symptom (audit:db 2026-05-14 07:42): plan-run RUNNING + sched-game
+// COMPLETED for 50+ min → spillere ser "Laster..." infinity.
+//
+// Service-laget har 42P01-defense slik at fresh DB ikke krasjer cron.
+const jobGamePlanRunNaturalEndReconcileEnabled =
+  isGamePlanRunNaturalEndReconcileEnabled(process.env);
+const jobGamePlanRunNaturalEndReconcileIntervalMs =
+  getGamePlanRunNaturalEndReconcileIntervalMs(process.env);
+jobScheduler.register({
+  name: "game-plan-run-natural-end-reconcile",
+  description:
+    "Auto-reconcile DAGENS stuck plan-runs etter naturlig runde-end (BUG-A audit:db-evidens).",
+  intervalMs: jobGamePlanRunNaturalEndReconcileIntervalMs,
+  enabled: jobGamePlanRunNaturalEndReconcileEnabled,
+  run: createGamePlanRunNaturalEndReconcileJob({
+    service: gamePlanRunCleanupService,
   }),
 });
 

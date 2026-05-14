@@ -13,23 +13,35 @@
  *   For pilot Q3 2026 er dette uakseptabelt — neste dags spill MÅ aldri
  *   blokkeres av i-går-state.
  *
- * Løsning:
- *   1. Cron-job som kjører kl 03:00 Oslo-tz hver natt, finner alle
- *      stale plan-runs (`status IN ('running','paused')` og
- *      `business_date < CURRENT_DATE` Oslo-tz) og marker dem som
- *      `finished` med `metadata.auto_cleanup=true`.
- *   2. Self-healing: `GamePlanRunService.getOrCreateForToday` kaller
- *      `cleanupStaleRunsForHall(hallId)` inline FØR den oppretter dagens
- *      rad. Dette håndterer kanttilfellet hvor cron har feilet eller
- *      backend nettopp boot-et — vi kommer aldri til å sitte fast.
+ * Løsning (tre komplementære mekanismer):
+ *   1. Cron-job (kl 03:00 Oslo-tz) — finner alle gårsdagens stale runs
+ *      (`status IN ('running','paused')` + `business_date < CURRENT_DATE`)
+ *      og marker dem som `finished` med audit-event
+ *      `game_plan_run.auto_cleanup` (`reason='cron_nightly'`).
+ *   2. Inline self-heal — `getOrCreateForToday` kaller
+ *      `cleanupStaleRunsForHall(hallId)` FØR oppretter dagens rad så master
+ *      aldri ser STALE_PLAN_RUN-warning fra i-går-state
+ *      (`reason='inline_self_heal'`).
+ *   3. Natural-end-reconcile (FIX-A 2026-05-14, BUG-A audit-evidens) —
+ *      poll-job som finner DAGENS stuck plan-runs hvor alle linkede
+ *      scheduled-games har `status='completed'` (naturlig vinner, ikke
+ *      cancelled) og siste actual_end_time er > 30s siden. Auto-finisher
+ *      plan-run med audit-event `plan_run.reconcile_natural_end`
+ *      (`reason='no_master_advance_after_natural_end'`). Defaultintervall
+ *      30 sek (konfigurerbar via env). Fyller hullet mellom PR #1403
+ *      (master-action-triggered reconcile) og nightly cron — uten denne
+ *      sitter spillere fast på "Laster..." inntil noen klikker en master-
+ *      handling.
  *
  * Audit-trail:
- *   Hver auto-cleanup skriver `game_plan_run.auto_cleanup`-event via
- *   AuditLogService med før/etter-snapshot for Lotteritilsynet-sporing.
+ *   Hver auto-cleanup skriver `game_plan_run.auto_cleanup` (gårsdagens
+ *   stale) eller `plan_run.reconcile_natural_end` (dagens stuck etter
+ *   naturlig end) via AuditLogService med før/etter-snapshot for
+ *   Lotteritilsynet-sporing.
  *
  * Idempotens:
- *   Kjører trygt flere ganger samme dag — UPDATE-en filtrerer på
- *   `status IN ('running','paused')` så finished rader berøres ikke.
+ *   Alle UPDATE-er filtrerer på `status IN ('running','paused')` så
+ *   finished rader berøres ikke. Re-kjøring i samme tick er no-op.
  */
 import type { Pool } from "pg";
 
@@ -129,12 +141,45 @@ export interface GamePlanRunCleanupResult {
   }>;
 }
 
+/**
+ * Per-run snapshot returned from `reconcileNaturalEndStuckRuns()`. Captures
+ * the triggering scheduled-game's end-time + age so audit-events have full
+ * evidence-trail for Lotteritilsynet-sporing.
+ */
+export interface NaturalEndReconcileItem {
+  id: string;
+  planId: string;
+  hallId: string;
+  businessDate: string;
+  previousStatus: GamePlanRunStatus;
+  currentPosition: number;
+  /** Scheduled-game-id that triggered the reconcile (newest completed). */
+  scheduledGameId: string;
+  /** ISO-string for the triggering game's actual_end_time. */
+  scheduledGameEndedAt: string;
+  /** Seconds between scheduled_game.actual_end_time and now. */
+  stuckForSeconds: number;
+}
+
+export interface NaturalEndReconcileResult {
+  cleanedCount: number;
+  closedRuns: NaturalEndReconcileItem[];
+}
+
 export interface GamePlanRunCleanupServiceOptions {
   pool: Pool;
   schema?: string;
   auditLogService?: AuditLogService | null;
   /** Override for tests so we can inject a child-logger without setting global. */
   logger?: Logger;
+  /**
+   * Threshold (ms) before a naturally-ended scheduled-game's plan-run is
+   * considered "stuck waiting for master-advance". Default 30 000ms.
+   * Service-laget tolerer at master tar litt tid på å reagere på naturlig
+   * runde-end (kortvarig manuell pause er normalt), så vi venter
+   * minimumsbetingelsen før vi auto-finisher.
+   */
+  naturalEndStuckThresholdMs?: number;
 }
 
 /**
@@ -155,12 +200,18 @@ export class GamePlanRunCleanupService {
   private readonly schema: string;
   private auditLogService: AuditLogService | null;
   private readonly logger: Logger;
+  private readonly naturalEndStuckThresholdMs: number;
 
   constructor(options: GamePlanRunCleanupServiceOptions) {
     this.pool = options.pool;
     this.schema = assertSchemaName(options.schema ?? "public");
     this.auditLogService = options.auditLogService ?? null;
     this.logger = options.logger ?? log;
+    // Default 30 sek — service-laget tolerer kort manuell pause. Min 1 sek
+    // for å unngå degenerert "react instantly"-konfig.
+    const requestedMs =
+      options.naturalEndStuckThresholdMs ?? 30_000;
+    this.naturalEndStuckThresholdMs = Math.max(1_000, Math.floor(requestedMs));
   }
 
   setAuditLogService(service: AuditLogService | null): void {
@@ -169,6 +220,10 @@ export class GamePlanRunCleanupService {
 
   private table(): string {
     return `"${this.schema}"."app_game_plan_run"`;
+  }
+
+  private schedTable(): string {
+    return `"${this.schema}"."app_game1_scheduled_games"`;
   }
 
   /**
@@ -243,6 +298,170 @@ export class GamePlanRunCleanupService {
       );
     }
     return result;
+  }
+
+  /**
+   * BUG-A (audit:db `stuck-plan-run` 2026-05-14): poll-driven reconcile for
+   * DAGENS plan-runs hvor naturlig runde-end ikke har trigget master-
+   * advance. Fyller hullet mellom:
+   *   - PR #1403 `MasterActionService.reconcileStuckPlanRuns` (kun ved
+   *     manuell master-handling — fyrer aldri uten klikk)
+   *   - `cleanupAllStale` (kun gårsdagens stale)
+   *
+   * Logikk (1:1 paritet med audit:db `stuck-plan-run`-query, utvidet med
+   *  threshold-check):
+   *   - Finn plan-runs hvor status='running'
+   *   - LEFT JOIN scheduled-games på plan_run_id
+   *   - HAVING ingen aktiv scheduled-game (`scheduled` / `purchase_open` /
+   *     `ready_to_start` / `running` / `paused`)
+   *   - OG nyeste completed scheduled-game har `actual_end_time` > threshold
+   *     siden (default 30 sek). Cancelled scheduled-games kvalifiserer IKKE
+   *     som naturlig-end — dette hindrer at vi masker cancellation-bugs.
+   *
+   * For hver match:
+   *   - UPDATE plan-run til status='finished' + finished_at=now()
+   *   - Skriv audit-event `plan_run.reconcile_natural_end` med fullt
+   *     scheduled-game-id + stuck_for_seconds + reason
+   *
+   * Idempotens: re-kjøring etter første finish er no-op (status='running'-
+   * filter feiler i WHERE-klausulen).
+   *
+   * Soft-fail: 42P01 → no-op (fresh DB-boot). Andre PG-feil bubbles til
+   * cron som logger og prøver neste tick.
+   */
+  async reconcileNaturalEndStuckRuns(
+    now: Date = new Date(),
+  ): Promise<NaturalEndReconcileResult> {
+    const thresholdMs = this.naturalEndStuckThresholdMs;
+    const params: unknown[] = [thresholdMs];
+
+    // The CTE flow:
+    //   completed_sched: per plan_run_id, finn nyeste completed
+    //     scheduled-game (MAX(actual_end_time)).
+    //   active_sched_count: per plan_run_id, count av aktive
+    //     scheduled-games.
+    //   stuck: plan-runs hvor status='running' + 0 aktive
+    //     + nyeste completed-game er > threshold-sek siden.
+    //   updated: gjør UPDATE og returner rad-id-er.
+    //   final SELECT: kombiner stuck + completed-info for audit.
+    //
+    // Vi bruker `FOR UPDATE OF pr` i CTE-en for å låse plan-run-raden
+    // konsistent ved multi-instance deploy (samme mønster som
+    // `cleanupStaleRunsInternal`).
+    const sql = `
+      WITH active_sched_counts AS (
+        SELECT plan_run_id, COUNT(*)::int AS active_count
+        FROM ${this.schedTable()}
+        WHERE plan_run_id IS NOT NULL
+          AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')
+        GROUP BY plan_run_id
+      ),
+      completed_sched AS (
+        SELECT plan_run_id,
+               (ARRAY_AGG(id ORDER BY actual_end_time DESC NULLS LAST))[1] AS sched_id,
+               MAX(actual_end_time) AS ended_at
+        FROM ${this.schedTable()}
+        WHERE plan_run_id IS NOT NULL
+          AND status = 'completed'
+          AND actual_end_time IS NOT NULL
+        GROUP BY plan_run_id
+      ),
+      stuck AS (
+        SELECT pr.id, pr.plan_id, pr.hall_id, pr.business_date,
+               pr.current_position, pr.status,
+               pr.jackpot_overrides_json, pr.started_at, pr.finished_at,
+               pr.master_user_id, pr.created_at, pr.updated_at,
+               cs.sched_id AS scheduled_game_id,
+               cs.ended_at AS scheduled_game_ended_at,
+               EXTRACT(EPOCH FROM (now() - cs.ended_at))::int AS stuck_for_seconds
+        FROM ${this.table()} pr
+        INNER JOIN completed_sched cs ON cs.plan_run_id = pr.id
+        LEFT JOIN active_sched_counts asc_t ON asc_t.plan_run_id = pr.id
+        WHERE pr.status = 'running'
+          AND COALESCE(asc_t.active_count, 0) = 0
+          AND cs.ended_at < now() - ($1::int * INTERVAL '1 millisecond')
+        FOR UPDATE OF pr
+      ),
+      updated AS (
+        UPDATE ${this.table()} r
+        SET status = 'finished',
+            finished_at = COALESCE(r.finished_at, now()),
+            updated_at = now()
+        FROM stuck
+        WHERE r.id = stuck.id
+        RETURNING r.id
+      )
+      SELECT s.id, s.plan_id, s.hall_id, s.business_date, s.current_position,
+             s.status, s.jackpot_overrides_json, s.started_at, s.finished_at,
+             s.master_user_id, s.created_at, s.updated_at,
+             s.scheduled_game_id, s.scheduled_game_ended_at,
+             s.stuck_for_seconds
+      FROM stuck s
+      INNER JOIN updated u ON u.id = s.id
+    `;
+
+    interface ReconcileRow extends GamePlanRunRow {
+      scheduled_game_id: string;
+      scheduled_game_ended_at: Date | string;
+      stuck_for_seconds: number | string;
+    }
+
+    let rows: ReconcileRow[];
+    try {
+      const result = await this.pool.query<ReconcileRow>(sql, params);
+      rows = result.rows;
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === "42P01") {
+        // Migration ikke kjørt enda — safe no-op.
+        this.logger.warn(
+          { reason: "natural_end_reconcile" },
+          "app_game_plan_run or app_game1_scheduled_games table missing — skipping natural-end reconcile",
+        );
+        return { cleanedCount: 0, closedRuns: [] };
+      }
+      throw err;
+    }
+
+    const closedRuns: NaturalEndReconcileItem[] = rows.map((r) => {
+      const base = summarizeRow(r);
+      const endedAtIso = asIso(r.scheduled_game_ended_at);
+      return {
+        id: base.id,
+        planId: base.planId,
+        hallId: base.hallId,
+        businessDate: base.businessDate,
+        previousStatus: base.status,
+        currentPosition: base.currentPosition,
+        scheduledGameId: r.scheduled_game_id,
+        scheduledGameEndedAt: endedAtIso,
+        stuckForSeconds: Number(r.stuck_for_seconds),
+      };
+    });
+
+    // Best-effort audit per closed row. Same pattern as `auditCleanup` —
+    // audit-failures are logged but never block the caller (UPDATE already
+    // committed).
+    for (const item of closedRuns) {
+      void this.auditNaturalEndReconcile({ item, now });
+    }
+
+    if (closedRuns.length > 0) {
+      this.logger.warn(
+        {
+          cleanedCount: closedRuns.length,
+          closedRuns: closedRuns.map((r) => ({
+            id: r.id,
+            hallId: r.hallId,
+            scheduledGameId: r.scheduledGameId,
+            stuckForSeconds: r.stuckForSeconds,
+          })),
+        },
+        `auto-reconciled ${closedRuns.length} stuck plan-runs after natural round-end`,
+      );
+    }
+
+    return { cleanedCount: closedRuns.length, closedRuns };
   }
 
   // ── Internals ─────────────────────────────────────────────────────────
@@ -343,6 +562,39 @@ export class GamePlanRunCleanupService {
         previousStatus: r.status,
       })),
     };
+  }
+
+  private async auditNaturalEndReconcile(input: {
+    item: NaturalEndReconcileItem;
+    now: Date;
+  }): Promise<void> {
+    if (!this.auditLogService) return;
+    try {
+      await this.auditLogService.record({
+        actorId: "system",
+        actorType: "SYSTEM",
+        action: "plan_run.reconcile_natural_end",
+        resource: "game_plan_run",
+        resourceId: input.item.id,
+        details: {
+          planRunId: input.item.id,
+          hallId: input.item.hallId,
+          businessDate: input.item.businessDate,
+          currentPosition: input.item.currentPosition,
+          scheduledGameId: input.item.scheduledGameId,
+          scheduledGameEndedAt: input.item.scheduledGameEndedAt,
+          stuckForSeconds: input.item.stuckForSeconds,
+          reason: "no_master_advance_after_natural_end",
+          thresholdMs: this.naturalEndStuckThresholdMs,
+          reconciledAt: input.now.toISOString(),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        { err, runId: input.item.id },
+        "audit-log record failed for natural-end-reconcile — continuing",
+      );
+    }
   }
 
   private async auditCleanup(input: {

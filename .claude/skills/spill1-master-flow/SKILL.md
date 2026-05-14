@@ -76,6 +76,36 @@ Pilot-direktiv 2026-05-08 (Tobias):
 | `GamePlanEngineBridge` | `apps/backend/src/game/GamePlanEngineBridge.ts` | Spawner scheduled-games fra plan-runtime, idempotent på (run_id, position) |
 | `GamePlanRunService` | `apps/backend/src/game/GamePlanRunService.ts` | Plan-run-state-machine idle→running→paused→finished |
 | `Game1TransferHallService` | `apps/backend/src/game/Game1TransferHallService.ts` | 60s-handshake for runtime master-overføring |
+| `GamePlanRunCleanupService` | `apps/backend/src/game/GamePlanRunCleanupService.ts` | Reconcile-mekanismer for stuck plan-runs (se Reconcile-seksjon under) |
+
+### Reconcile-mekanismer for stuck plan-runs (PR #1407, oppdatert 2026-05-14)
+
+Spill 1 plan-runs kan ende i `status='running'` UTEN at master har advanced eller finished planen. Tre komplementære reconcile-lag fanger forskjellige scenarier:
+
+| Lag | Trigger | Audit-event | Når kjører |
+|---|---|---|---|
+| 1. **Master-action-reconcile** (PR #1403) | Master kaller `start()` eller `advanceToNext()` | `plan_run.reconcile_stuck` | Manuelle handlinger |
+| 2. **Daglig cron 03:00 Oslo** (eksisterende) | `business_date < CURRENT_DATE` | `plan_run.cron_cleanup` | Gårsdagens leftover |
+| 3. **Naturlig runde-end-poll** (PR #1407, ny) | Plan-run=running + scheduled-game=completed > 30s | `plan_run.reconcile_natural_end` | Mellom-runder NÅR (typisk Spill 1) |
+
+**ALDRI fjern lag 3 uten å verifisere alle scenarier:**
+- Master glemmer å klikke "advance" etter at runde naturlig endte → lag 3 fanger
+- Master krasj/disconnect midt mellom runder → lag 3 fanger
+- Pilot-flyt der master pauser mellom hver runde → lag 3 fanger
+- PR #1403 (lag 1) dekker BARE manuell master-handling, ikke naturlig runde-end
+- Cron (lag 2) kjører bare på gårsdagens, fanger ikke i-dag-runder
+
+**Konfig (lag 3):**
+- Threshold: env `PLAN_RUN_NATURAL_END_RECONCILE_THRESHOLD_MS` (default 30000ms)
+- Poll-interval: lik threshold
+- Soft-fail på Postgres 42P01 (fresh DB)
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/__tests__/GamePlanRunCleanupService.naturalEndReconcile.test.ts` (12 unit-tester)
+- `apps/backend/src/jobs/__tests__/gamePlanRunNaturalEndReconcile.test.ts` (14 job-tester)
+- `apps/backend/src/__tests__/GamePlanRunCleanupService.naturalEndReconcile.integration.test.ts` (2 integration mot Postgres)
+
+**Symptom hvis lag 3 fjernes:** "Laster..." infinity i klient når master ikke advancer etter naturlig runde-end. Room-snapshot mangler `currentGame`. Tobias-rapport 2026-05-14 — bug-en bringer pilot-flyt til stillstand.
 
 ### UI-komponenter (admin-web)
 

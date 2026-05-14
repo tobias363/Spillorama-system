@@ -368,6 +368,19 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Prevention:**
 - Tester må dekke cron-race-scenarier (lazy-spawn rett før cron-tick)
 
+### §3.10 — Stuck plan-run etter NATURLIG runde-end (PR #1403 dekket ikke alt)
+
+**Severity:** P0 (pilot-blokker — fryser klient på "Laster")
+**Oppdaget:** 2026-05-14 — Tobias-test + `audit:db --quick` (P1 stuck-plan-run × 1, samme mønster i 50+ min for forrige run)
+**Symptom:** Plan-run `status='running'` med scheduled-game `status='completed'` i 30s+. Ingen ny scheduled-game spawnet. Klient som joiner får tomt room-snapshot (`currentGame` mangler) → evig "Laster..."
+**Root cause:** PR #1403 `MasterActionService.reconcileStuckPlanRuns()` kjører bare på `start()` og `advanceToNext()` (manuell master-handling). Naturlig runde-end (auto-draw fullført + vinner kåret) triggrer ingen reconcile — plan-run sitter "running" inntil noen klikker.
+**Fix (PR #1407):** Tredje reconcile-mekanisme i `GamePlanRunCleanupService.reconcileNaturalEndStuckRuns()` — poll-tick (30s) som auto-finisher plan-runs der scheduled-game er `completed` + > threshold-tid (default 30s). Audit-event `plan_run.reconcile_natural_end` (unikt fra `plan_run.reconcile_stuck` i PR #1403).
+**Prevention:**
+- Tester må dekke "naturlig runde-end uten manuell advance" (12+ unit + 14 job + 2 integration i PR #1407)
+- Threshold-konfig: env `PLAN_RUN_NATURAL_END_RECONCILE_THRESHOLD_MS=30000`
+- ALDRI fjern denne reconcile-mekanismen uten å verifisere at master ALLTID kaller advance/finish etter naturlig runde-end (han gjør IKKE det i pilot-flyten)
+- Komplementært til PR #1403 (master-actions) + cron 03:00 (gårsdagens stale) — fjerne én bryter dekningen
+
 ---
 
 ## §4 Live-rom-state
