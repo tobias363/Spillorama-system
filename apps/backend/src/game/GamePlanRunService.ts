@@ -405,6 +405,63 @@ export class GamePlanRunService {
   }
 
   /**
+   * FIX-1 (2026-05-14): Finn stuck plan-runs for en gitt (hall, businessDate).
+   *
+   * En "stuck" plan-run er en rad hvor:
+   *   1. `status = 'running'`
+   *   2. INGEN linkede `app_game1_scheduled_games` har en aktiv status
+   *      (`scheduled`/`purchase_open`/`ready_to_start`/`running`/`paused`).
+   *
+   * Bakgrunn — fra OBS-6 DB-auditor (`audit:db --quick`):
+   *   Master starter en runde, men noe går galt mellom plan-run-state-machinen
+   *   og scheduled-game-spawnet (eks. backend-crash, race-condition, eller
+   *   stop-flow som ikke kalte `planRunService.finish`). Resultatet er at
+   *   plan-run står i `running` med 0 aktive scheduled-games — klient sitter
+   *   fast og venter på neste runde som aldri spawnes.
+   *
+   * Brukes av `MasterActionService.start()` og `advanceToNext()` til å auto-
+   * reconcile slike rader FØR ny runde startes (defense-in-depth utenfor
+   * eksisterende `GamePlanRunCleanupService` som kun rydder gårsdagens
+   * rader).
+   *
+   * Query mirror-er OBS-6 audit:db-spørringen (`stuck-plan-run`-id i
+   * `apps/backend/scripts/audit-db.queries.json`) for konsistens.
+   */
+  async findStuck(input: {
+    hallId: string;
+    businessDate: Date | string;
+  }): Promise<GamePlanRun[]> {
+    const hall = assertHallId(input.hallId);
+    const dateStr = assertBusinessDate(input.businessDate);
+    const { rows } = await this.pool.query<GamePlanRunRow>(
+      `SELECT pr.id, pr.plan_id, pr.hall_id, pr.business_date,
+              pr.current_position, pr.status, pr.jackpot_overrides_json,
+              pr.started_at, pr.finished_at, pr.master_user_id,
+              pr.created_at, pr.updated_at
+         FROM ${this.table()} pr
+         LEFT JOIN "${this.schema}"."app_game1_scheduled_games" sg
+           ON sg.plan_run_id = pr.id
+          AND sg.status IN (
+            'scheduled',
+            'purchase_open',
+            'ready_to_start',
+            'running',
+            'paused'
+          )
+        WHERE pr.hall_id = $1
+          AND pr.business_date = $2::date
+          AND pr.status = 'running'
+          AND sg.id IS NULL
+        GROUP BY pr.id, pr.plan_id, pr.hall_id, pr.business_date,
+                 pr.current_position, pr.status, pr.jackpot_overrides_json,
+                 pr.started_at, pr.finished_at, pr.master_user_id,
+                 pr.created_at, pr.updated_at`,
+      [hall, dateStr],
+    );
+    return rows.map(mapRow);
+  }
+
+  /**
    * Finn alle aktive group-of-halls (`app_hall_groups`) som hallen er
    * medlem av. Brukes til å finne GoH-baserte planer som dekker hallen
    * (en plan kan være bundet til en GoH istedet for en konkret hall).

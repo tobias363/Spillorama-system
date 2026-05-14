@@ -245,6 +245,12 @@ interface ServiceOverrides {
   resumeGameError?: Error;
   stopGameResult?: { gameId: string; status: string; auditId: string; actualStartTime: string | null; actualEndTime: string | null };
   stopGameError?: Error;
+  // FIX-1 (2026-05-14): override for reconcile-stuck-tester.
+  findStuck?: (input: {
+    hallId: string;
+    businessDate: Date | string;
+  }) => GamePlanRun[] | Promise<GamePlanRun[]>;
+  findStuckError?: Error;
   // Pilot Q3 2026: rollback-helper overrides for retry-with-rollback-tester.
   rollbackToIdle?: (input: {
     runId: string;
@@ -399,6 +405,18 @@ function makeService(
       mocks.planRunCalls.push("findForDay");
       if (overrides.findForDay) return overrides.findForDay(hallId, businessDate);
       return makeRun({ status: "running" });
+    },
+    // FIX-1 (2026-05-14): findStuck brukes av MasterActionService.start/
+    // advance for å reconcile stuck plan-runs. Default-impl returnerer tom
+    // liste (ingen stuck) så eksisterende tester ikke trigger reconcile.
+    async findStuck(input: {
+      hallId: string;
+      businessDate: Date | string;
+    }): Promise<GamePlanRun[]> {
+      mocks.planRunCalls.push("findStuck");
+      if (overrides.findStuckError) throw overrides.findStuckError;
+      if (overrides.findStuck) return overrides.findStuck(input);
+      return [];
     },
     // Pilot Q3 2026: rollback-helpers brukt av MasterActionService etter
     // bridge-spawn-feil. Default-implementasjonene returnerer en gyldig
