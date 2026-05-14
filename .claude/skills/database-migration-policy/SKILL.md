@@ -249,19 +249,35 @@ prod går via migration-PR. Se [ADR-0023](../../../docs/adr/0023-mcp-write-acces
 **Forbudt mot prod-DB:**
 
 - Direct `INSERT/UPDATE/DELETE/DDL` via MCP (regulatorisk brudd — hash-chain audit bryter ADR-0004, outbox-pattern bryter ADR-0005)
-- Mutation av `app_compliance_audit_log` / `app_wallet_entries` / `app_payout_audit` / `app_regulatory_ledger` (append-only)
+- Mutation av `app_audit_log` / `wallet_entries` / `app_rg_payout_audit` / `app_regulatory_ledger` (append-only audit-tabeller)
+- Mutation av `wallet_accounts` (NB: `balance` er `GENERATED ALWAYS` fra `deposit_balance + winnings_balance` — DB avviser direct UPDATE uansett)
 - Mutation av `app_rg_restrictions` (Pengespillforskriften §66/§23 — overstyrer spillvett)
 
-**Korreksjons-mønster for audit-tabeller (append-only):**
+**Korreksjons-mønster for audit-tabeller (append-only, eksempel `app_audit_log`):**
 
 ```sql
 -- ALDRI:
-UPDATE app_compliance_audit_log SET amount = 1500 WHERE id = '...';
+UPDATE app_audit_log SET payload = '...' WHERE id = '...';
 
--- ALLTID (ny korreksjons-rad som peker på original):
-INSERT INTO app_compliance_audit_log (id, action, resource_id, original_id, correction_reason, ...)
-VALUES (gen_random_uuid(), 'correction', '<original-id>', '<original-id>', 'Tobias godkjent fix YYYY-MM-DD', ...);
+-- ALLTID (ny audit_correction-rad som peker på original via JSONB-payload):
+INSERT INTO app_audit_log (id, actor_type, actor_id, action, resource, resource_id, payload, created_at)
+VALUES (
+  gen_random_uuid(),
+  'SYSTEM',
+  NULL,
+  'audit_correction',
+  'app_audit_log',
+  '<original-id>',
+  jsonb_build_object(
+    'original_id', '<original-id>',
+    'correction_reason', 'Tobias godkjent fix YYYY-MM-DD',
+    'corrected_fields', jsonb_build_object('payload', '<ny-verdi>')
+  ),
+  now()
+);
 ```
+
+For `wallet_entries`: append motpost-rad (`side=CREDIT|DEBIT`, `amount > 0`). `wallet_accounts.balance` re-genereres automatisk via GENERATED ALWAYS.
 
 ## Endringslogg
 
@@ -270,6 +286,7 @@ VALUES (gen_random_uuid(), 'correction', '<original-id>', '<original-id>', 'Tobi
 | 2026-05-08 | Initial — idempotent CREATE+ALTER + skjema-arkeolog |
 | 2026-05-13 | v1.1.0 — la til partial unique index-mønster (singleton-config), CHECK-constraint DROP-FIRST (CRIT-7), deprecate-table-mønster (ADR-0017), FK-CASCADE-pattern (PR #1038), auto-genererte snapshot-referanser |
 | 2026-05-14 | v1.2.0 — MCP write-access policy (ADR-0023): prod-DB READ-ONLY via MCP; schema-/data-korreksjon må gå via migration-PR. Append-only korreksjons-mønster for audit-tabeller dokumentert. |
+| 2026-05-14 | v1.2.1 — korrigerte ADR-0023-eksempler til faktisk schema: `app_audit_log` (ikke `app_compliance_audit_log`), `wallet_entries` + `wallet_accounts` (ikke `app_wallet_entries`/`app_wallets`), `app_rg_payout_audit` (ikke `app_payout_audit`). Notert `wallet_accounts.balance` som GENERATED ALWAYS. |
 
 ## Når denne skill-en er aktiv
 
