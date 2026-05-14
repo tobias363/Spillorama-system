@@ -59,6 +59,63 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — Agent B — Next Game Display research (Backend aggregator + lobby-API)
+
+**Branch:** `worktree-agent-ab50e457a113f5218` (research-grenen `research/next-game-display-b-aggregator-2026-05-14` var allerede tatt i annen worktree)
+**Agent type:** general-purpose (spawned by PM-AI for Trinn 1 data-innsamling per [NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14](../architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md))
+**Trigger:** Tobias-direktiv 2026-05-14 — "Next Game Display"-bug tilbakevendende selv etter PR #1370, #1422, #1427, #1431. Plan C godkjent: 1-4 uker arkitektur-rewrite OK.
+
+**Hva ble gjort:**
+
+1. **File-map:** Identifisert 6 backend-paths som beregner "neste spill":
+   - `GameLobbyAggregator.buildPlanMeta` (kanonisk for master/agent-UI via `/api/agent/game1/lobby`)
+   - `Game1LobbyService.getLobbyState` (spiller-shell via `/api/games/spill1/lobby`)
+   - `agentGamePlan.ts /current` (legacy — INGEN finished-advance)
+   - `agentGame1.ts /current-game` (legacy — KUN scheduled-game-rad)
+   - `GamePlanRunService.getOrCreateForToday` (DB-side auto-advance fra PR #1422)
+   - `publicGameHealth.ts` (kun `nextScheduledStart` ISO-tid, ikke navn)
+
+2. **Kall-graf:** Sequence-diagrammer (mermaid) for både aggregator-path og Game1LobbyService-path. Identifisert at de to har separat beregning av samme felt (`catalogSlug` vs `nextScheduledGame.catalogSlug`).
+
+3. **State-overgang-tabell:** 13 states (S1-S13) × 4 endpoints viser hva hver returnerer. Identifisert 4 kritiske divergens-punkter.
+
+4. **Bugs identifisert:**
+   - **BUG-1 (HØYT):** Aggregator-clamping ved plan-completed-state (S10) — `Math.min(rawPosition, items.length)` clamper, så `catalogSlug` peker fortsatt til siste item etter alle items er ferdige
+   - **BUG-2 (HØYT):** `agentGamePlan /current` ikke next-aware — `currentItem` viser gammel posisjon etter finished — **hovedmistanke for hvorfor buggen kommer tilbake**
+   - **BUG-3 (MEDIUM):** Stale plan-run fra i går — aggregator viser gårsdagens position, Game1LobbyService viser dagens default → divergens samtidig
+   - **BUG-4 (LAV):** `agentGame1 /current-game` shows scheduled-game `subGameName` only, ikke plan-aware
+   - **BUG-5 (MEDIUM):** Cache/race mellom paralelle endpoint-poll i frontend (`Spill1HallStatusBox` poller både `/lobby` + `/game-plan/current` for `jackpotSetupRequired`)
+
+5. **Recommendations:**
+   - Slett `/api/agent/game-plan/current` + `/api/agent/game1/current-game` (Bølge 4 fra PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT som aldri ble fullført)
+   - Utvid `Spill1PlanMeta`-shape med `planCompletedForToday: boolean` og `nextDisplayMode: enum`
+   - `nextScheduledGame`-shape skal være `null KUN ved plan_completed` — ingen frontend-fallback til "Bingo" tillatt
+   - Hard-finish stale yesterday's runs via `inlineCleanupHook`
+
+**Leveranse:** `docs/research/NEXT_GAME_DISPLAY_AGENT_B_AGGREGATOR_2026-05-14.md` (~700 linjer markdown med kall-graf, state-tabell, bug-analyse, recommendations, SKILL_UPDATE_PROPOSED).
+
+**Lessons learned:**
+
+1. **GameLobbyAggregator og Game1LobbyService er parallelle pathways** — begge ble fixet for PR #1422+#1431, men koden er duplisert. Fremtidige fix MÅ touche begge — vurdér konsolidering.
+
+2. **`agentGamePlan.ts /current` ble glemt i PR #1422+#1431** — den har sin egen `currentItem`-logikk fra opprinnelig design (Bølge 2 fra PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT). Stor mistanke for hvorfor buggen "kommer tilbake" — fix-en var ufullstendig fordi den ikke dekket alle paths.
+
+3. **Aggregator-clamp ved completed-state er latent bug.** Etter S10 viser `catalogSlug = "tv-extra"` (siste item) fordi `Math.min` clamper. Frontend kompenserer ved fallback-logikk som maskerer arkitektur-svakheten.
+
+4. **`tryReconcileTerminalScheduledGame` (Game1LobbyService) gjør write-side healing fra lobby-poll** — uvanlig for "pure read". Aggregator gjør det IKKE. Det er en konsistent designvalg men kan føre til divergens i state mellom de to API-ene.
+
+5. **PITFALLS §3.13 (PR #1431-fix) bør utvides** for å nevne at `agentGamePlan /current` IKKE er next-aware — det er en kjent gap som ikke er løst.
+
+**Skill-update:** SKILL_UPDATE_PROPOSED-seksjon i research-doc-en (PM konsoliderer i Trinn 2 — foreslår ny "Next Game Display"-seksjon i `spill1-master-flow/SKILL.md`).
+
+**Filer endret i denne research-PR-en:**
+- **Ny:** `docs/research/NEXT_GAME_DISPLAY_AGENT_B_AGGREGATOR_2026-05-14.md`
+- **Endret:** `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+Ingen kode-endringer i Trinn 1 (kun research/dokumentasjon).
+
+---
+
 ### 2026-05-14 — db-perf-watcher cron + Linear auto-issue (db-perf-watcher-agent, OBS-9)
 
 **Branch:** `feat/db-perf-watcher-cron-2026-05-14`
