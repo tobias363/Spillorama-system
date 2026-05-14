@@ -59,6 +59,201 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — Agent B — Next Game Display research (Backend aggregator + lobby-API)
+
+**Branch:** `worktree-agent-ab50e457a113f5218` (research-grenen `research/next-game-display-b-aggregator-2026-05-14` var allerede tatt i annen worktree)
+**Agent type:** general-purpose (spawned by PM-AI for Trinn 1 data-innsamling per [NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14](../architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md))
+**Trigger:** Tobias-direktiv 2026-05-14 — "Next Game Display"-bug tilbakevendende selv etter PR #1370, #1422, #1427, #1431. Plan C godkjent: 1-4 uker arkitektur-rewrite OK.
+
+**Hva ble gjort:**
+
+1. **File-map:** Identifisert 6 backend-paths som beregner "neste spill":
+   - `GameLobbyAggregator.buildPlanMeta` (kanonisk for master/agent-UI via `/api/agent/game1/lobby`)
+   - `Game1LobbyService.getLobbyState` (spiller-shell via `/api/games/spill1/lobby`)
+   - `agentGamePlan.ts /current` (legacy — INGEN finished-advance)
+   - `agentGame1.ts /current-game` (legacy — KUN scheduled-game-rad)
+   - `GamePlanRunService.getOrCreateForToday` (DB-side auto-advance fra PR #1422)
+   - `publicGameHealth.ts` (kun `nextScheduledStart` ISO-tid, ikke navn)
+
+2. **Kall-graf:** Sequence-diagrammer (mermaid) for både aggregator-path og Game1LobbyService-path. Identifisert at de to har separat beregning av samme felt (`catalogSlug` vs `nextScheduledGame.catalogSlug`).
+
+3. **State-overgang-tabell:** 13 states (S1-S13) × 4 endpoints viser hva hver returnerer. Identifisert 4 kritiske divergens-punkter.
+
+4. **Bugs identifisert:**
+   - **BUG-1 (HØYT):** Aggregator-clamping ved plan-completed-state (S10) — `Math.min(rawPosition, items.length)` clamper, så `catalogSlug` peker fortsatt til siste item etter alle items er ferdige
+   - **BUG-2 (HØYT):** `agentGamePlan /current` ikke next-aware — `currentItem` viser gammel posisjon etter finished — **hovedmistanke for hvorfor buggen kommer tilbake**
+   - **BUG-3 (MEDIUM):** Stale plan-run fra i går — aggregator viser gårsdagens position, Game1LobbyService viser dagens default → divergens samtidig
+   - **BUG-4 (LAV):** `agentGame1 /current-game` shows scheduled-game `subGameName` only, ikke plan-aware
+   - **BUG-5 (MEDIUM):** Cache/race mellom paralelle endpoint-poll i frontend (`Spill1HallStatusBox` poller både `/lobby` + `/game-plan/current` for `jackpotSetupRequired`)
+
+5. **Recommendations:**
+   - Slett `/api/agent/game-plan/current` + `/api/agent/game1/current-game` (Bølge 4 fra PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT som aldri ble fullført)
+   - Utvid `Spill1PlanMeta`-shape med `planCompletedForToday: boolean` og `nextDisplayMode: enum`
+   - `nextScheduledGame`-shape skal være `null KUN ved plan_completed` — ingen frontend-fallback til "Bingo" tillatt
+   - Hard-finish stale yesterday's runs via `inlineCleanupHook`
+
+**Leveranse:** `docs/research/NEXT_GAME_DISPLAY_AGENT_B_AGGREGATOR_2026-05-14.md` (~700 linjer markdown med kall-graf, state-tabell, bug-analyse, recommendations, SKILL_UPDATE_PROPOSED).
+
+**Lessons learned:**
+
+1. **GameLobbyAggregator og Game1LobbyService er parallelle pathways** — begge ble fixet for PR #1422+#1431, men koden er duplisert. Fremtidige fix MÅ touche begge — vurdér konsolidering.
+
+2. **`agentGamePlan.ts /current` ble glemt i PR #1422+#1431** — den har sin egen `currentItem`-logikk fra opprinnelig design (Bølge 2 fra PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT). Stor mistanke for hvorfor buggen "kommer tilbake" — fix-en var ufullstendig fordi den ikke dekket alle paths.
+
+3. **Aggregator-clamp ved completed-state er latent bug.** Etter S10 viser `catalogSlug = "tv-extra"` (siste item) fordi `Math.min` clamper. Frontend kompenserer ved fallback-logikk som maskerer arkitektur-svakheten.
+
+4. **`tryReconcileTerminalScheduledGame` (Game1LobbyService) gjør write-side healing fra lobby-poll** — uvanlig for "pure read". Aggregator gjør det IKKE. Det er en konsistent designvalg men kan føre til divergens i state mellom de to API-ene.
+
+5. **PITFALLS §3.13 (PR #1431-fix) bør utvides** for å nevne at `agentGamePlan /current` IKKE er next-aware — det er en kjent gap som ikke er løst.
+
+**Skill-update:** SKILL_UPDATE_PROPOSED-seksjon i research-doc-en (PM konsoliderer i Trinn 2 — foreslår ny "Next Game Display"-seksjon i `spill1-master-flow/SKILL.md`).
+
+**Filer endret i denne research-PR-en:**
+- **Ny:** `docs/research/NEXT_GAME_DISPLAY_AGENT_B_AGGREGATOR_2026-05-14.md`
+- **Endret:** `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+Ingen kode-endringer i Trinn 1 (kun research/dokumentasjon).
+### 2026-05-14 — Agent A — Next Game Display research (Frontend rendering paths)
+
+**Branch:** `research/next-game-display-a-frontend-2026-05-14`
+**PR:** TBD (PM eier `gh pr create` + merge per ADR-0009)
+**Agent type:** general-purpose (spawned by PM-AI for Next Game Display Trinn 1 data-innsamling)
+**Trigger:** Tobias-direktiv 2026-05-14 — Next Game Display-bug tilbakevendende etter 4 fix-forsøk (PR #1370, #1422, #1427, #1431), refactor-mandat Plan C: "Vi må nå ha et helt åpent sinn... 1-4 uker OK for arkitektur-rewrite." Slottes inn i `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` §3.3.
+
+**Bakgrunn:**
+- Bølge 1-3 i `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` konsoliderte ID-rom (plan-run-id vs scheduled-game-id) via `GameLobbyAggregator` + `MasterActionService` — løste master-actions, men IKKE display-rendering
+- Bug-en kommer tilbake fordi 6+ kode-paths beregner "neste spill"-tekst hver for seg
+- 4 frontend-paths leser fra Spill1AgentLobbyState (auth aggregator), 2 fra Spill1LobbyState (public)
+- Hver fix har truffet ÉN path mens de andre fortsetter med stale logikk
+
+**Hva ble gjort:**
+
+1. `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (~620 linjer)
+   - Mappet ALLE frontend-paths som rendrer "neste spill"-tekst eller "Start neste spill"-knapper
+   - 6 aktive paths identifisert:
+     - **admin-web auth aggregator:**
+       - `Spill1HallStatusBox.ts` (cash-inout box 3, 2s polling) — bruker `getMasterHeaderText` helper med 8 state-baserte strenger
+       - `NextGamePanel.ts` idle-render (linje 700-712) — HARDKODET "venter på neste runde" UTEN catalogDisplayName
+       - `NextGamePanel.ts` active-render via `mapLobbyToLegacyShape` translator (linje 591-642) — TOM STRENG-FALLBACK på linje 620
+       - `Spill1AgentStatus.ts:104` — `<h3>Spill 1 — {subGameName}</h3>` (visuell bug ved tom subGameName)
+       - `Spill1AgentControls.ts:120-167` — `Start neste spill — {nextGameName}` (mangler "Bingo"-fallback)
+     - **game-client public lobby:**
+       - `Game1Controller.ts:619+2504` — BuyPopup subtitle (BESTE fallback-håndtering — "Bingo" hardkodet)
+       - `LobbyFallback.ts:328` — overlay-body "Neste spill: {name}." (ETA-text-rendering)
+   - 7 bugs/edge-cases dokumentert: BUG #A1-A5 (P1-P3) + 2 edge-cases (planCompletedForToday-mangel, DUAL_SCHEDULED_GAMES-rendering)
+   - Komplett kall-graf med ASCII-diagram + state×display tabell per komponent
+   - Recommendation Forslag A: utvid `Spill1AgentLobbyStateSchema` med `nextGameDisplay`-felt som EN authoritative service (`GameLobbyAggregator.buildNextGameDisplay`) returnerer
+   - 9 test-invariants (F-I1 til F-I9) for komplett dekning
+   - SKILL_UPDATE_PROPOSED-seksjon for PM Trinn 2 (utvider `.claude/skills/spill1-master-flow/SKILL.md`)
+
+**Lessons learned:**
+
+- **Bølge 3 fjernet ID-konflikten men ikke display-konflikten.** ID-rom-fundament-audit (Bølge 1-6, 2026-05-08) løste plan-run-id vs scheduled-game-id, men "hva er catalogDisplayName"-resolving forble distribuert over 6 paths. Hvert nye §3.x-fix (1422, 1431) traff backend-side eller én frontend-path — men de andre paths fortsatte med stale logikk.
+- **Frontend har TRE typer fallback-strategier:** "Bingo" hardkodet (game-client `Game1Controller`), generisk tekst uten navn (`getMasterHeaderText` returnerer "Neste spill"), eller TOM STRENG (`NextGamePanel.mapLobbyToLegacyShape` setter `subGameName = ""`). Inkonsistens er root cause for at "viser feil neste spill"-bug stadig dukker opp i nye varianter.
+- **Public vs auth wire-format gir to forskjellige `catalogDisplayName`-felter** — `Spill1LobbyState.nextScheduledGame.catalogDisplayName` (public) vs `Spill1AgentLobbyState.planMeta.catalogDisplayName` (auth). Computed av samme `buildPlanMeta`-logikk i `GameLobbyAggregator` men eksponeres via to skjemaer som kan divergere.
+- **Inconsistency-warning-state (DUAL_SCHEDULED_GAMES, STALE_PLAN_RUN) påvirker display-rendering** — UI viser warning-banner men beholder header med stale data. Master må manuelt rydde for å få korrekt visning.
+- **Single source of truth-mønster er nødvendig** — Forslag A i recommendations utvider aggregator-skjemaet med pre-computed `nextGameDisplay`-objekt. Estimat 3 dev-dager + tester for full refactor.
+
+**Skill-update:** PM konsoliderer i Trinn 2 (data-collection.md inkluderer SKILL_UPDATE_PROPOSED-seksjon med utvidelse av `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon "Neste spill-display single source of truth")
+
+**Pitfall-update:** Foreslår ny PITFALLS_LOG §7.21 "Neste spill-display lokalt beregnet i 6 paths" som dokumenterer pre-Trinn-3-tilstanden + reference til denne research-doc-en. PM Trinn 2 har eierskap for å legge til entry.
+
+**Eierskap:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (denne entry)
+- IKKE rørt kode — pure research-leveranse per Trinn 1 mandat
+
+**Filer som ble lest (ikke endret):**
+- `apps/admin-web/src/api/agent-game1.ts` (294-308)
+- `apps/admin-web/src/api/agent-game-plan.ts` (77-92, deprecated)
+- `apps/admin-web/src/api/agent-next-game.ts` (26-53)
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts` (full, ~1651 linjer)
+- `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts` (full, ~1635 linjer)
+- `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts` (274 linjer)
+- `apps/admin-web/src/pages/agent-portal/Spill1AgentStatus.ts` (146 linjer)
+- `apps/admin-web/src/pages/games/master/Game1MasterConsole.ts` (linje 1-110, 300-410)
+- `apps/admin-web/src/pages/cash-inout/CashInOutPage.ts` (linje 200-310)
+- `packages/game-client/src/games/game1/Game1Controller.ts` (linje 595-740, 1525-1660, 2490-2540)
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.ts` (full, 273 linjer)
+- `packages/game-client/src/games/game1/logic/LobbyFallback.ts` (linje 280-348)
+- `packages/shared-types/src/api.ts` (linje 100-200)
+- `packages/shared-types/src/spill1-lobby-state.ts` (linje 240-490)
+- `apps/backend/src/game/GameLobbyAggregator.ts` (linje 971-1070, buildPlanMeta)
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (full skall)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (linje 1-800)
+- `docs/engineering/PITFALLS_LOG.md` (§3.10, §3.11, §3.12, §3.13, §7.10-§7.19, §11.x)
+- `docs/operations/PM_HANDOFF_2026-05-14.md` (§1)
+### 2026-05-14 — Agent E — Next Game Display historisk PR-arv research (general-purpose, PM Trinn 1)
+
+**Branch:** `research/next-game-display-e-history-2026-05-14`
+**PR:** TBD (research-PR, ingen kode-endringer)
+**Agent type:** general-purpose (spawned av PM-AI under fundament-audit Trinn 1)
+**Trigger:** Tobias-mandat 2026-05-14: *"Vi må nå ha et helt åpent sinn hvor vi ser på funksjonaliteten og hvis vi finner ut at dette må bygges som og det utsetter pilot med uker så er vi nødt til å gjøre det."* — kvalitet > tid på Next Game Display-bug.
+
+**Bakgrunn:** Bug har vært rapportert minst 5 ganger samme dag (2026-05-14) og hatt 4 fix-forsøk (#1368, #1422, #1427, #1431) som ikke lukker rot-årsaken. PM erkjente patch-spiral og spawnet 6 research-agenter (A-F) for kunnskaps-deep-dive.
+
+**Scope:** Agent E mapper UT komplett kronologisk tidslinje av ALLE PR-er siden 2026-04-23 som rører plan-runtime, lobby eller "next game"-rendering. Identifiserer mønstre, "patch-spiral"-anti-patterns og rot-årsaker.
+
+**Inputs:**
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (audit-skall, PR #1469)
+- `docs/operations/PM_HANDOFF_2026-05-14.md` §1 (problem-statement + tidligere fix-forsøk)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (Bølge 1-6 status)
+- `docs/engineering/PITFALLS_LOG.md` §3.10-§3.13 + §11
+- git log --all --oneline --since="2026-04-23" filtered på relevant keywords
+- gh pr list --state merged + view body på 3 key PRs (#1368, #1422, #1431, #1427, #1050)
+
+**Outputs:**
+- **Ny fil:** `docs/research/NEXT_GAME_DISPLAY_AGENT_E_HISTORY_2026-05-14.md` (530+ linjer, 7 §-er)
+- Komplett kronologisk tidslinje (6 faser, 50+ PR-er kartlagt)
+- Mønster-analyse: 3 patch-spiraler identifisert (Spiral A: master pause/fortsett-id, Spiral B: stuck plan-run-recovery med 5 reconcilere, Spiral C: Next Game Display med 4 fix-forsøk)
+- Tobias-rapport-kronologi: 5+ rapporter samme dag på samme bug-klasse
+- Bølge 1-6 etterspill-analyse: **Bølge 4 (slett legacy parallel-spawn) ble ALDRI gjennomført — ER rot-årsaken**
+- Recommendations: Bølge 7 (konsolider "neste spill"-beregninger) + Bølge 4 (slett legacy parallel-spawn) parallelt
+
+**Hovedfunn:**
+- **199+ PR-er rører temaet siden 2026-04-23** (på vårt filter)
+- **11+ direkte fix-forsøk** på Next Game Display
+- `Spill1HallStatusBox.ts` har **56+ touches** — patch-spiral peak
+- `NextGamePanel.ts` har **39** touches
+- `GameLobbyAggregator.ts` har **12** touches siden 2026-05-08-fødsel (Bølge 1) — 4 av disse fundamentale fixer på "neste spill"
+- **Minst 4 parallelle kode-paths beregner "neste spill"-tekst** uavhengig
+- Hver fix (PR #1368, #1422, #1427, #1431) har truffet ÉN path, de andre 3 driver tilstanden videre
+- Tobias har eksplisitt rapportert **5+ ganger samme dag** (2026-05-14) på samme bug-klasse
+
+**Konklusjon:**
+- Dette er **EN strukturell anti-pattern**, ikke 4 separate bugs
+- **Bølge 1-3 var korrekt arkitektur-arbeid**, men Bølge 4 (slett legacy parallel-spawn) ble aldri gjennomført
+- **Bølge 7 (konsolidering)** anbefales: 3-5 dev-dager med 2-3 agenter
+- Hvis Bølge 7 ikke lukker → **fundamental rewrite** (1-4 uker, Tobias-godkjent)
+
+**Fallgruver oppdaget (NY — for §11 i PITFALLS_LOG):**
+- **Meta-fallgruve §11.X:** "Bug-klasse vs bug-instans" — når flere fix-er treffer samme symptom-felt men forskjellige kode-paths, er bug-en EN bug-klasse, ikke flere bugs. Inkrementelle patch-fixer vil aldri lukke rot-årsaken. PM må erkjenne dette og foreslå konsolidering-bølge istedenfor å fortsette patche.
+- **Meta-fallgruve §11.X:** "Foundation refactor uten å fullføre alle bølger" — Bølge 1-3 ble fullført, men Bølge 4 (slett legacy parallel-spawn) ble droppet. Hver downstream bug i 4 uker har kunnet spores tilbake til Bølge 4-mangelen. PM må verifisere at refactor-planen er KOMPLETT fullført, ikke partielt.
+
+**Læring:**
+- Patch-spiral er gjenkjennbar via fil-touch-count: hvis samme fil touches > 10 ganger på samme bug-tema over kort tid, er det patch-spiral
+- 5 reconcilere bygget oppå hverandre (Spiral B) er anti-pattern peak — én reconciler med tydelig grense ville vært bedre
+- Tobias-rapport-kronologi er gull: når samme rapport kommer 5 ganger samme dag, **er det IKKE en flaky bug** — det er strukturell
+
+**Hva ville vi gjort annerledes:**
+- Ved Bølge 1-3 (2026-05-08) burde Bølge 4 vært INKLUDERT, ikke utsatt
+- Ved fix #1422 (BUG E DB-side), burde vi ha sjekket alle 4 paths SAMTIDIG, ikke patche én og se hva som skjer
+- Ved fix #1427 (master-UI header), burde test-coverage-matrise ha vært etablert FØRST (Agent F's scope) for å fange manglende paths
+
+**Eierskap:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_E_HISTORY_2026-05-14.md` (Agent E)
+- Trinn 2 (konsolidering i master-doc): PM-AI
+- Trinn 3 (Bølge 7 refactor): TBD
+
+**Knowledge protocol:**
+- [x] Lest `PITFALLS_LOG.md` §3 + §11 før research-arbeid
+- [x] Lest `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (forrige audit, Bølge 1-6 status)
+- [x] Lest `PM_HANDOFF_2026-05-14.md` §1 + §10.3 (problem-statement og anti-mønstre)
+- [x] Spill 1, 2, 3 arkitektur-forskjell forstått — research scope er Spill 1-spesifikt (master-konsoll, plan-runtime)
+- [x] Doc-protokoll fulgt: AGENT_EXECUTION_LOG-entry levert (denne entry-en). PITFALLS-§11-update foreslått i SKILL_UPDATE_PROPOSED-seksjon av research-doc.
+- [x] SKILL_UPDATE_PROPOSED i research-doc: `spill1-master-flow` + `pm-orchestration-pattern` — utsettes til Trinn 2 etter alle 6 agenter har levert
+
+---
+
 ### 2026-05-14 — db-perf-watcher cron + Linear auto-issue (db-perf-watcher-agent, OBS-9)
 
 **Branch:** `feat/db-perf-watcher-cron-2026-05-14`
@@ -2315,3 +2510,50 @@ Verifisert via test:
 | 2026-05-14 | **OBS-10 Wallet-integrity-watcher** — cron-driven sjekk: (I1) balance-sum: `wallet_accounts.balance ≡ SUM(CASE side WHEN 'CREDIT' THEN amount ELSE -amount END)` over `wallet_entries`; (I2) hash-chain link siste 24t. Brudd → Linear-issue Urgent. 48 PASS lokalt. Komplementært til nattlig `WalletAuditVerifier`. Default DISABLED. **Skill-updates:** `wallet-outbox-pattern` v1.4.0, `audit-hash-chain`, `health-monitoring-alerting`. **Pitfall:** PITFALLS_LOG §2.9. | Agent (wallet-integrity-watcher, a4dbd6...) |
 | 2026-05-14 | **Synthetic Spill 1 bingo-runde-test (R4-precursor, BIN-817 forløper)** — `scripts/synthetic/` med 4 moduler + bash-wrapper. 6 invariants I1-I6 (Wallet-konservering, Compliance-ledger, Hash-chain, Draw-sequence, Idempotency, Round-end-state). 59 vitest unit-tester PASS. **Skill-updates:** `casino-grade-testing` v1.2.0, `live-room-robusthet-mandate` v1.3.0, `spill1-master-flow` v1.9.0. **Pitfall:** PITFALLS_LOG §6.18. | synthetic-test-agent (aa2cc3afbfe693cab) |
 | 2026-05-14 | **Frontend State Dump tool (observability)** — la til "Dump State"-knapp infra for debug-HUD. Klikk dumper komplett state-tree (5 hovedseksjoner + derived + env) til fire kanaler samtidig: `window.__SPILL1_STATE_DUMP`, `localStorage["spill1.lastStateDump"]`, `console.log("[STATE-DUMP]", ...)`, og `POST /api/_dev/debug/frontend-state-dump` → `/tmp/frontend-state-dumps/`. `derivedState` inneholder `pricePerColor` (entryFee × multiplier per farge), `innsatsVsForhandskjop` (active vs pending classification), og `pricingSourcesComparison` (room vs lobby vs nextGame consistency — "divergent" er rødt flag). Wire-format stable så diffing er lett. **Filer:** `packages/game-client/src/debug/StateDumpTool.ts` + `StateDumpButton.ts` + `apps/backend/src/routes/devFrontendStateDump.ts` (NY) + `index.ts` (route-wireup). **35 nye tester totalt:** 17 frontend-tool (vitest), 6 button-DOM (vitest), 12 backend-route (node:test). Alle PASS. Backend tsc + game-client tsc grønt. Token-gated via `RESET_TEST_PLAYERS_TOKEN`. Filer på `/tmp/frontend-state-dumps/` overlever ikke restart, max 1000 dumps med auto-rotering, max 5 MB per payload. **Skill-update:** `spill1-master-flow/SKILL.md` v1.8.0 — ny seksjon "Frontend-state-dump (debug-tool, 2026-05-14)". **Pitfall-update:** PITFALLS_LOG §7.23 — "Bruk frontend-state-dump FØR du gjetter hvor frontend leser fra". **Lessons learned:** Manuelle browser-console-snippets er fragmenterte. Deterministisk dump med pricing-sources-sammenligning sparer 30+ min per bug-investigation hvor PM tidligere måtte gjette state-kilde. Knappen er additiv — IKKE wired inn i installDebugSuite enda (UI-integrasjon kan gjøres trygt i follow-up når PM/Tobias verifiserer at server-route + state-collector fungerer). Branch `feat/frontend-state-dump-2026-05-14`. | Fix-agent (general-purpose, aba43f969b93d9185) |
+| 2026-05-14 | **Agent C — Next Game Display research (Plan-run state-machine)** — Trinn 1 data-collection for tilbakevendende Next Game Display-bug-mandat (Tobias-direktiv 2026-05-14: "vi finner ut at dette må bygges som og det utsetter pilot med uker så er vi nødt til å gjøre det"). NO CODE FIXES. Branch `research/next-game-display-c-planrun-2026-05-14`. **Leveranse:** `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md` med komplett mermaid state-diagram for `app_game_plan_run` (idle/running/paused/finished + NO_ROW + transitions), full kall-graf for `MasterActionService.start` (13 steg fra route → audit), CTE-flyt for `reconcileNaturalEndStuckRuns` (PR #1407), og 10 identifiserte bugs/edge-cases. **KRITISKE funn:** (1) `getOrCreateForToday` mangler race-lock — DELETE+INSERT-flyten har race-window mellom find/DELETE/INSERT som kan svelge F-Plan-Reuse-auto-advance silent; (2) `MasterActionService.advance` kaster `GAME_PLAN_RUN_INVALID_TRANSITION` etter `reconcileStuckPlanRuns` finisher samme rad — master får uventet feil; (3) `reconcileNaturalEndStuckRuns` dekker IKKE `paused`-state (kun `running`) — pauset plan-run kan bli stuck for alltid; (4) bridge-spawn etter `advanceToNext` har race-window for dual scheduled-games. **HØY-funn:** 3 forskjellige stuck-queries (`findStuck` vs `cleanupAllStale` vs `reconcileNaturalEndStuckRuns`) med subtile forskjeller — bør konsolideres. Quick-fix-anbefaling (§7.7): fjern lazy-create-mutasjon fra `agentGamePlan.ts:loadCurrent` — F-Plan-Reuse må kun trigge fra eksplisitt master-action. **SKILL_UPDATE_PROPOSED:** `spill1-master-flow/SKILL.md` ny seksjon "Plan-run state-machine" (utsettes til Trinn 2 etter konsolidert audit). **Lessons learned:** Næst-spill-buggen lever fordi state-machine for `app_game_plan_run` har 4 forskjellige mekanismer som kan endre `current_position` (start, advance, reconcile, cleanup), pluss F-Plan-Reuse DELETE+INSERT-flyten. Hver mekanisme har egen audit-event, race-window, og soft-fail-strategi. Aggregator-laget kan rapportere kortvarige inconsistent states som BLOCKING_WARNING_CODES → master blokkeres. Tobias-direktiv om Plan C (1 måned ekstra OK ved strukturelle bugs) er aktuelt — fundament-rewrite anbefales (event-sourced plan-run). | Agent C (general-purpose, spawned by PM-AI for Trinn 1) |
+| 2026-05-14 | **Agent D — Next Game Display research (Scheduled-game lifecycle)**. Branch `research/next-game-display-d-scheduledgame-2026-05-14`. Read-only audit per PM Trinn 1. Mappet alle 14 writer-sites mot `app_game1_scheduled_games`-tabellen + 11 reader-sites for "neste spill"-data. Verifiserte at Bølge 4 (legacy-spawn skip-guard) IKKE er fullført — `GAME1_SCHEDULE_TICK_ENABLED=true` i prod tillater fortsatt dual-spawn. **Kritiske funn:** (BUG-D1) `GamePlanRunService.start()` linje 780 overskriver alltid `current_position = 1` selv etter `getOrCreateForToday` beregner riktig `nextPosition` — kjent rot-årsak til "Bingo igjen" i Next Game Display, delvis mitigert av MasterActionService advance-logikk. (BUG-D2-D8) Engine UPDATE manglet WHERE-guard, race-condition mellom cron + master, status-mismatch ved dual-spawn. **Output:** `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` (komplett state-overgang-diagram, file:line-referanser, anbefalinger). **Doc-protokoll:** AGENT_EXECUTION_LOG + PITFALLS_LOG oppdatert. SKILL_UPDATE_PROPOSED for `spill1-master-flow` + `database-migration-policy` flagget for Trinn 2. **Ingen kode-endringer.** | Agent D (general-purpose) |
+
+### 2026-05-14 — Agent F — Next Game Display research (Test-coverage gap-analyse)
+
+**Branch:** `research/next-game-display-f-tests-2026-05-14`
+**Agent type:** general-purpose (PM Trinn 1 — research, ikke fix)
+**Mandat:** Map alle tester for Next Game Display-flyten, identifiser hull. **IKKE fiks buggen** — leverer kun research-data for Trinn 2 konsolidering.
+
+**Hva ble gjort:**
+- Mappet **~52 test-filer / ~400+ tester** som dekker noen del av Next Game Display-flyten
+- Kategorisert i 8 kategorier: backend unit (18), backend routes (4), backend E2E skip-graceful (4), backend full E2E (1), admin-web frontend unit (13), game-client unit (8), synthetic+playwright (8), shared-types (3)
+- Identifiserte **6 KRITISKE coverage-hull**:
+  1. **Ingen ekte-DB E2E test sekvenserer gjennom alle 13 plan-items** — eksisterende tester verifiserer KUN snapshots (position=1, position=7, position=13). Bug-en oppstår mellom transisjoner som dekkes 1:1 i `Game1LobbyService.test.ts:451+469` og `GameLobbyAggregator.test.ts:873+968` MEN bare som rene unit-tester med stubbed pool.
+  2. **Synthetic test tester KUN én runde** — I1-I6 invariants dekker wallet/compliance/idempotency innenfor én runde, ikke advance-flyt eller next-game-display
+  3. **Playwright E2E (6 spec-filer) dekker IKKE next-game display** — ingen `expect(page).toHaveText("Neste spill:...")` eller advance-assertion
+  4. **SpillerklientRebuildE2E Test 5 er falsk trygghet** — bruker MOCKED `emitStateUpdate(makeLobbyState(...))`. Tester KUN at IF backend returnerer korrekt state, klient rendrer korrekt. Tester ikke at backend faktisk produserer state-en.
+  5. **MasterActionService.integration.test.ts tester full master-loop MED MOCKED services** — `planRunService.advanceToNext` returnerer alltid samme catalog-entry
+  6. **GameLobbyAggregator.integration.test.ts dekker KUN 4 SQL-queries mot minimum-shape schema** — hele plan-runtime → aggregator → respons-pipeline er ikke ekte-DB-testet
+- Foreslår **5 invariants + 6 scenario-tester + 1 E2E playwright + 1 multi-round synthetic** for Trinn 3
+
+**Hovedfunn (hvorfor eksisterende tester glapp bug-en):**
+- PR #1431 la til 4 tester (`Game1LobbyService.test.ts:451+469` + `GameLobbyAggregator.test.ts:873+968`) som tester nøyaktig "finished+position<items.length → nextScheduledGame = items[position+1]". Likevel kom bug-en tilbake.
+- Hypotese: **6 kode-paths beregner "neste spill" uavhengig** (backend `Game1LobbyService.getLobbyState`, backend `GameLobbyAggregator.buildPlanMeta`, backend `GamePlanRunService.getOrCreateForToday`, frontend `Spill1HallStatusBox` via `getMasterHeaderText`, frontend `NextGamePanel.mapLobbyToLegacyShape`, frontend `Game1Controller.applyLobbyState`). **Hver path har egne unit-tester. Ingen invariants binder dem.**
+- Ekte-DB-tester er bare 4: integration (4 SQL-tester), playwright (én runde), e2e_4hall (ready-state), Spill1FullDay.e2e (smoke). **Ingen tester full sekvenserings-flyt.**
+
+**Deliverable:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_F_TESTS_2026-05-14.md` — komplett gap-analyse med file-list, test-matrise per state-transition, identifiserte hull, mocks-vs-DB-sammenligning, og konkrete recommendations for Trinn 3.
+
+**Lessons learned:**
+- **Unit-tester med mocked pool fanger ikke cross-service-divergens.** Hver service har egen test-suite med egen mock-data. Ingen kontrakter låser at de gir KONSISTENT output for samme input.
+- **"Mock-shape-divergens" er en spesifikk fallgruve** — mocken returnerer data backend ikke faktisk produserer. Test passerer mens bug lever i prod.
+- **Trinn 3 må prioritere invariants over scenario-tester.** Cross-service invariants (eks. I-NextGame-1 til I-NextGame-5) låser kontrakter mellom paths, ikke bare per-path-logikk.
+
+**Doc-protokoll:**
+- ✅ `data-collection.md` skrevet (`docs/research/NEXT_GAME_DISPLAY_AGENT_F_TESTS_2026-05-14.md`)
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+- 🔵 PITFALLS_LOG-entry foreslås for Trinn 2 — ny entry i §6 (Test-infrastruktur): "Cross-service-divergens fanges ikke av per-service unit-tester. Krever invariants."
+- 🔵 SKILL_UPDATE_PROPOSED: `casino-grade-testing` ny seksjon "Cross-service invariants" + `spill1-master-flow` ny seksjon "Next Game Display flow" (etter Trinn 3 refactor)
+
+**Forbudt-rør (overholdt):**
+- ALDRI redigert produksjons-kode
+- ALDRI lagt til nye tester (Trinn 3 fix-agentens jobb)
+- ALDRI committet på `main`
+- ALDRI åpnet PR (PM eier)
+
+**Tid:** ~60 min agent-arbeid

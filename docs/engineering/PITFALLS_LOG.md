@@ -46,7 +46,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 |---|---:|---|
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
-| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
+| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
@@ -614,6 +614,134 @@ Master-UI faller tilbake til default `plan_items[0]` (Bingo) når `nextGame` er 
 - PR #1422 (backend create-logikk — `getOrCreateForToday` auto-advance)
 - §3.12 (komplementær — DB-side fix av samme bug-klasse)
 - Tester: `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester)
+
+### §3.14 — Plan-run state-machine: 4 forskjellige mekanismer kan mutere current_position (Agent C-funn)
+
+**Severity:** P1 (strukturelt — antagelig rotårsak til Next Game Display-bug)
+**Oppdaget:** 2026-05-14 (Agent C research-leveranse, `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md`)
+**Symptom:** Master ser inkonsistent "neste spill"-tekst etter `dev:nuke` eller etter naturlig runde-end. Kortvarige race-windows mellom reconcile/cleanup/start/advance kan returnere forskjellig state innen 1 sek.
+
+**Root cause:** Det er 4 forskjellige måter `app_game_plan_run.current_position` kan endres på, pluss F-Plan-Reuse DELETE+INSERT-flyten:
+1. `MasterActionService.start` → `planRunService.start` (idle → running, position=1)
+2. `MasterActionService.start` → `planRunService.advanceToNext` (running+terminal-current → running, position++)
+3. `MasterActionService.start` → `getOrCreateForToday` F-Plan-Reuse (finished → DELETE+INSERT med nextPosition)
+4. `MasterActionService.advance` → `planRunService.advanceToNext` (running → running, position++ ELLER finished)
+5. `agentGamePlan.ts:loadCurrent` (lazy-create=true) → `getOrCreateForToday` F-Plan-Reuse (lobby-API mutation)
+
+Hver mekanisme har egen audit-event, race-window, og soft-fail-strategi.
+
+**Konkrete bugs identifisert:**
+1. `MasterActionService.advance` kaller `reconcileStuckPlanRuns` FØR `advanceToNext`. Reconcile finisher stuck plan-run → advanceToNext kaster `GAME_PLAN_RUN_INVALID_TRANSITION` fordi status nå er `finished`. Master får uventet 400-feil.
+2. `reconcileNaturalEndStuckRuns` (PR #1407) sjekker kun `WHERE pr.status = 'running'` — `paused` plan-run kan bli stuck for alltid hvis scheduled-game er completed mens plan-run er paused.
+3. `getOrCreateForToday` har race-window mellom find/DELETE/INSERT som kan svelge F-Plan-Reuse auto-advance silent (DELETE matcher 0 rader hvis cleanup-cron raced med master-action).
+4. Bridge-spawn etter `advanceToNext` har race-window for dual scheduled-games — aggregator kan rapportere `BRIDGE_FAILED`-warning som BLOCKING_WARNING_CODES og blokkere master.
+
+**Anbefalt fix:**
+
+> **KORTSIKTIG (quick-fix for Next Game Display):** Fjern lazy-create fra `agentGamePlan.ts:loadCurrent` (linje 308-326). Sett `lazyCreate=false` som default. F-Plan-Reuse skal KUN trigge fra eksplisitt `MasterActionService.start` etter master-klikk. Lobby-API beregner "neste spill" fra `plan.items[0]` (Bingo) hvis ingen plan-run finnes.
+
+> **LANGSIKTIG (rewrite — Plan C-mandatet aktuelt):** Event-sourced plan-run:
+> - `app_game_plan_run` blir read-model
+> - State-overganger genererer events i `app_game_plan_run_events` (append-only)
+> - Projection-jobb rebuilder read-model fra events
+> - Sjekkpunkt: ingen race-windows fordi events er totalt-ordrede
+
+**Prevention:**
+- IKKE legg til en 5. mekanisme for å endre `current_position` uten å konsolidere de 4 eksisterende
+- Hvis du legger til ny audit-event for state-overgang, dokumenter race-vinduer mot eksisterende mekanismer
+- Lazy-create-stien skal ALDRI mutere DB — read-paths er read-only
+- Quick-fix er P0 hvis Next Game Display fortsatt rapporteres etter PR #1422 + #1431 + #1427
+
+**Related:**
+- `apps/backend/src/game/GamePlanRunService.ts` (4 mutasjons-metoder + F-Plan-Reuse)
+- `apps/backend/src/game/MasterActionService.ts` (sekvenseringsmotor — `reconcileStuckPlanRuns` private helper)
+- `apps/backend/src/game/GamePlanRunCleanupService.ts` (cron + poll-tick — `reconcileNaturalEndStuckRuns`)
+- `apps/backend/src/routes/agentGamePlan.ts:307-339` (loadCurrent lazy-create-mutasjon — PRIMÆR MISTANKE)
+- §3.10 (PR #1407 — komplementært, ikke samme bug)
+- §3.12 (PR #1422 — BUG E auto-advance, samme klasse)
+- §3.13 (PR #1431 — lobby-API komplementært)
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md` (full data-collection)
+### §3.14 — Dual-spawn til `app_game1_scheduled_games` (Bølge 4 IKKE fullført)
+
+**Severity:** P0 (latent — kan skape inkonsistent UI ved pilot)
+**Oppdaget:** 2026-05-14 (Agent D research)
+**Symptom:** To scheduled-game-rader for samme (hall, business_date) opprettet av forskjellige paths. UI viser én rad, master-action treffer en annen.
+
+**Root cause:** Bølge 4 fra `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §7 er IKKE fullført:
+- `Game1ScheduleTickService.spawnUpcomingGame1Games` (legacy, cron-tick) har INGEN guard "skip if hall has active plan".
+- `GamePlanEngineBridge.createScheduledGameForPlanRunPosition` (bridge, master-trigger) spawner uavhengig.
+- Idempotency-keys er **disjunkte**: legacy = `(daily_schedule_id, scheduled_day, sub_game_index)` UNIQUE, bridge = `(plan_run_id, plan_position) WHERE status NOT IN ('cancelled', 'completed')` (SELECT-then-INSERT). Forskjellige keys → DB tolererer to konkurrerende rader.
+- `GAME1_SCHEDULE_TICK_ENABLED=true` i prod per `docs/operations/RENDER_ENV_VAR_RUNBOOK.md`.
+- Seed-en (`seed-demo-pilot-day.ts`) seeder BÅDE `app_daily_schedules` (status='running') OG `app_game_plan` for pilot-haller.
+
+**Hva mitigerer i dag:**
+- F-NEW-3 `releaseStaleRoomCodeBindings` (2026-05-12, `GamePlanEngineBridge.ts:1653`) auto-canceller stale rader med samme `room_code` ved bridge-INSERT.
+- Klient bruker `getCanonicalRoomCode("bingo", masterHallId, groupHallId)` så bridge og legacy ender på samme `room_code`.
+- **Resultat:** Master-flyten funker fordi bridge-INSERT alltid vinner over legacy-rad. Men det er kompensation, ikke fix.
+
+**Fix:** Implementer Bølge 4 guard i `Game1ScheduleTickService.spawnUpcomingGame1Games`:
+- Etter daily_schedule-resolve, sjekk om hall har aktiv `app_game_plan` for samme weekday — hvis ja, skip.
+- Verifiser via SQL: `SELECT count(*) FROM app_game1_scheduled_games WHERE daily_schedule_id IS NOT NULL AND plan_run_id IS NOT NULL` skal være 0 etter fix.
+
+**Prevention:**
+- ALDRI fjerne F-NEW-3 `releaseStaleRoomCodeBindings` uten å ha Bølge 4 guard på plass først
+- Test som verifiserer at legacy-cron skipper plan-haller
+- Audit-event `legacy_spawn_skipped_due_to_plan` for observability
+
+**Related:**
+- `apps/backend/src/game/Game1ScheduleTickService.ts:386-771` (legacy spawn)
+- `apps/backend/src/game/GamePlanEngineBridge.ts:887-1465` (bridge spawn)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` §5 C1, §7 Bølge 4
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §3
+
+### §3.15 — `GamePlanRunService.start()` overskriver `current_position = 1`
+
+**Severity:** P0 (rot-årsak til "Bingo igjen" i Next Game Display)
+**Oppdaget:** 2026-05-14 (Agent D research, samme dag som PR #1422 fix-poke landet)
+**Symptom:** Etter `getOrCreateForToday` beregner riktig `nextPosition=2` (per PR #1422), `start()`-UPDATE overskriver `current_position` til 1. Bingo (position 1) re-startes i stedet for 1000-spill (position 2).
+
+**Root cause:** `apps/backend/src/game/GamePlanRunService.ts:780` har hardkodet `current_position = 1` i UPDATE-en:
+
+```sql
+UPDATE app_game_plan_run
+SET status = 'running',
+    started_at = COALESCE(started_at, now()),
+    current_position = 1,            -- ⚠️ ALLTID 1, uavhengig av nextPosition
+    master_user_id = $2,
+    updated_at = now()
+WHERE id = $1
+```
+
+Dette er arv fra opprinnelig implementasjon før PR #1422 introduserte `previousPosition`-tracking i `getOrCreateForToday`. INSERT-en setter `nextPosition` korrekt, men `start()` overskriver.
+
+**Hva mitigerer i dag:**
+- `MasterActionService.start()` (linje 607-672) har egen advance-logikk som sjekker `currentScheduledGame` for `current_position` og advancer plan-run hvis scheduled-game er terminal.
+- Dette dekker hovedpath (master-start etter natural-end) men IKKE alle scenarier.
+
+**Fix:** Fjern `current_position = 1` fra `start()`-UPDATE. La `getOrCreateForToday`-INSERT være eneste sannhet for `current_position` ved start.
+
+```diff
+ UPDATE app_game_plan_run
+ SET status = 'running',
+     started_at = COALESCE(started_at, now()),
+-    current_position = 1,
+     master_user_id = $2,
+     updated_at = now()
+ WHERE id = $1
+```
+
+**Test som må skrives:** Verifiser at `(getOrCreateForToday → start)` for `nextPos=2` resulterer i `current_position = 2`.
+
+**Prevention:**
+- ALDRI overstyr `current_position` i status-transition-UPDATE-er — kun i `getOrCreateForToday`
+- MasterActionService advance-logikk er WORKAROUND, ikke fix — fjern bare hvis fix-en er på plass
+
+**Related:**
+- `apps/backend/src/game/GamePlanRunService.ts:776-794` (`start()`)
+- `apps/backend/src/game/GamePlanRunService.ts:536-749` (`getOrCreateForToday`)
+- `apps/backend/src/game/MasterActionService.ts:607-672` (advance-mitigation)
+- §3.12 (komplementær — DB-side fix landet i PR #1422)
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1
 
 ---
 
@@ -1756,6 +1884,62 @@ Dump-en inneholder `derivedState` med:
 - `.claude/skills/spill1-master-flow/SKILL.md` §"Frontend-state-dump (debug-tool, 2026-05-14)"
 - §7.9 (state.ticketTypes overrider) — samme tema fra ulik vinkel
 - §3 (Spill 1-arkitektur, ticket-pris-propagering tre-fase-binding)
+
+### §7.25 — "Neste spill"-display beregnes lokalt i 6 frontend-paths (PRE-Trinn-3-tilstand)
+
+**Severity:** P1 (tilbakevendende bug-klasse — "viser feil neste spill"-rapporter etter hvert §3.x-fix)
+**Oppdaget:** 2026-05-14 (Agent A research — `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md`)
+**Symptom:** Tobias rapporterte 4 ganger ("Neste spill: Bingo" etter dev:nuke, "Plan fullført" etter første runde, etc.) — hver fix-runde (PR #1370, #1422, #1427, #1431) løste én path mens andre fortsatte å vise stale data.
+
+**Root cause:** Frontend har 6 forskjellige UI-paths som hver beregner "neste spill"-tekst fra forskjellige felt-kombinasjoner:
+
+1. `Spill1HallStatusBox.ts:692-693, 1456-1515` — `getMasterHeaderText` med `data.catalogDisplayName ?? null` (fallback til "Neste spill" UTEN navn)
+2. `NextGamePanel.ts:700-712` idle-render — HARDKODET "venter på neste runde" UTEN catalogDisplayName
+3. `NextGamePanel.ts:591-642` `mapLobbyToLegacyShape` translator — `subGameName = planMeta?.catalogDisplayName ?? ""` (TOM STRENG-FALLBACK)
+4. `Spill1AgentStatus.ts:104` — `<h3>Spill 1 — {customGameName ?? subGameName}</h3>` (visuell bug ved tom subGameName)
+5. `Spill1AgentControls.ts:120-167` — `Start neste spill — {nextGameName}` (faller til generisk uten navn)
+6. `Game1Controller.ts:619+2504` (game-client) — `state?.nextScheduledGame?.catalogDisplayName ?? "Bingo"` (BESTE fallback — eneste path med "Bingo" hardkodet)
+
+Pluss `LobbyFallback.ts:328` som renderer "Neste spill: {name}." for fallback-overlay.
+
+Bølge 3-konsolidering (2026-05-08) løste ID-rom-konflikten (plan-run-id vs scheduled-game-id) men IKKE display-rendering. ID-fundament-audit fokuserte på master-actions; "hvilken catalog-display-name vises hvor" forble distribuert.
+
+**Hvorfor 4 fixes ikke har løst rot-årsaken:**
+- PR #1370 — dekket KUN initial-state-rendering, ikke advance-state
+- PR #1422 — DB-side auto-advance ved `getOrCreateForToday`, men lobby-API leste fortsatt gamle felter
+- PR #1427 — UI-tekst-fix på `Spill1HallStatusBox` header (`getMasterHeaderText`), ikke "neste spill"-tekst
+- PR #1431 — Backend lobby-API returnerer `nextScheduledGame` for finished plan-run. Korrekt — men frontend har flere paths som ignorerer feltet
+
+**Pattern:** Hver fix har truffet ÉN path mens de andre 3+ paths fortsetter å drive tilstanden videre.
+
+**Fix-anbefaling (Forslag A i research-doc):** Utvid `Spill1AgentLobbyStateSchema` med pre-computed `nextGameDisplay: { catalogSlug, catalogDisplayName, position, planCompletedForToday, reason }`-felt. ALLE frontend-paths leser fra dette feltet. ALDRI lokal beregning.
+
+```typescript
+nextGameDisplay: {
+  catalogSlug: string | null,
+  catalogDisplayName: string,       // ALDRI null — backend faller alltid til "Bingo"
+  position: number | null,           // 1-basert
+  planCompletedForToday: boolean,
+  reason: "next_in_sequence" | "plan_completed" | "no_plan_run" | "no_plan_for_today" | "closed",
+}
+```
+
+Estimat: 3 dev-dager (1 backend + 1 frontend + 0.5 game-client + 0.5 slett-deprecated). 9 test-invariants F-I1 til F-I9 dokumentert i research-doc.
+
+**Prevention:**
+- ALDRI bygg egen "neste spill"-fallback i ny UI-komponent. Bruk `nextGameDisplay.catalogDisplayName` direkte fra aggregator.
+- ALDRI les `planMeta.catalogDisplayName` direkte når en ny komponent legges til — bruk single source.
+- Når du fikser display-bug: sjekk ALLE 6 paths listet over i `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` §2.1. Hvis du fikser bare ÉN path er bug-en garantert tilbakevendende.
+- Tester må dekke alle 9 invariants F-I1 til F-I9 fra research-doc — særlig F-I3 (planCompletedForToday-state) og F-I9 (game-client BuyPopup-subtitle aldri tom).
+- `customGameName ?? subGameName`-mønster i Spill1AgentControls + Spill1AgentStatus er legacy override (admin-direct-edit) som ikke trigges fra plan-flow — beholdes for Game1MasterConsole, men nye komponenter skal IKKE bruke det.
+
+**Related:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md` (full kart + recommendations)
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (PM Trinn 2 konsoliderer her)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (forrige fundament-audit, Bølge 1-6 ID-konsolidering)
+- §3.10-§3.13 (alle fire tidligere fix-forsøk — relatert mønster: distribuert beregning kommer alltid tilbake)
+- §7.20 (Master-UI header state-aware — relatert komponent men annen scope)
+- PR #1370, #1422, #1427, #1431 (4 fix-forsøk uten å løse rot-årsak)
 
 ---
 
