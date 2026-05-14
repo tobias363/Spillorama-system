@@ -1,7 +1,7 @@
 # Agent Execution Log — kronologisk agent-arbeid
 
 **Status:** Autoritativ. Alle agent-leveranser dokumenteres her.
-**Sist oppdatert:** 2026-05-14
+**Sist oppdatert:** 2026-05-15
 **Eier:** PM-AI (vedlikeholdes ved hver agent-leveranse)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover."*
@@ -58,6 +58,70 @@ Hver entry har struktur:
 ---
 
 ## Entries (newest first)
+
+### 2026-05-15 — Fix-agent BUG-D1 — `GamePlanRunService.start()` hardcode-fjerning
+
+**Branch:** `fix/bug-d1-planrun-start-hardcode-2026-05-15` (worktree-isolert, `agent-a40717ffc6be74b26`)
+**Agent type:** general-purpose
+**Trigger:** Tobias-direktiv 2026-05-15 — Trinn 3 av Next Game Display-mandat. Tobias: *"kjør de andre bug fikses her som 3"* mens docs-konsolidering kjører parallelt.
+
+**Scope:** Fikse Agent D's BUG-D1 fra Next Game Display-audit — `GamePlanRunService.start()` hardkodet `current_position = 1` og overskrev advance-logikk fra `getOrCreateForToday`.
+
+**Hva ble gjort:**
+
+1. **Kode-fix** (`apps/backend/src/game/GamePlanRunService.ts:776-795`):
+   - Slettet linje `current_position = 1,` fra `start()`-UPDATE
+   - La til 8-linjers JSDoc-kommentar som forklarer BUG-D1, referer PITFALLS §3.15 + research-doc §5.1
+   - `start()` flipper nå kun state-machine (`idle → running`) + setter `started_at` + `master_user_id`
+
+2. **Test-suite** (`apps/backend/src/game/__tests__/GamePlanRunService.startPreservesPosition.test.ts`, 351 linjer, 6 tester — alle PASS):
+   - BUG-D1 regression: cp=2 forblir cp=2 etter `start()` (selve bug-en)
+   - Strukturell guard: SQL-UPDATE inneholder ikke `current_position = ` (regex-match)
+   - cp=5 bevares (vilkårlig mid-plan position)
+   - cp=1 bevares (sanity-test for første-spill)
+   - Audit-event `game_plan_run.start` skrives uendret
+   - `GAME_PLAN_RUN_INVALID_TRANSITION` kastes ved non-idle status
+
+   Mønster: gjenbrukt `Object.create`-stub-pool-pattern fra `GamePlanRunService.autoAdvanceFromFinished.test.ts` (Agent A-stil). Stub-poolen sporer alle queries så testene kan asserter både SQL-tekst og final state.
+
+3. **PITFALLS §3.15 oppdatert** — markert FIXED 2026-05-15, fix-detalj-blokk, ny test-suite-referanse, prevention-bullet om strukturell guard
+
+4. **SKILL `spill1-master-flow` v1.14.0 → v1.15.0** — ny seksjon "Plan-run.start() invariant — bevarer current_position (BUG-D1 fix 2026-05-15)" mellom "Auto-advance from finished" og "UI-komponenter". Lister hvilke services som ER/IKKE er tillatt å mutere `current_position` (eksplisitt invariant for fremtidige agenter).
+
+5. **Verifikasjon:**
+   - `npm --prefix apps/backend run check` — type-check PASS
+   - Ny test-fil: **6/6 PASS**
+   - Hele backend-test-suite (`npm test`): **11396 PASS, 0 FAIL, 140 skipped, 1 todo** (55 GamePlanRun-tester PASS inkl. auto-advance-suite, 60 MasterActionService-tester PASS)
+   - Compliance-suite (`npm run test:compliance`): **444 PASS, 0 FAIL, 2 skipped**
+
+**Lessons learned:**
+
+1. **Edit-revert-felle i worktree:** Min første `Edit` på `GamePlanRunService.ts` ble revertet (system-reminder bekreftet at "filen ble modifisert av linter/bruker" — i praksis trolig en intermediate state). Måtte re-applisere fix-en og verifisere via `grep "current_position = 1"`. PITFALLS §11.X / §5.X bør ha entry om at edits i worktrees bør verifiseres med `grep` ETTER `Edit`-call, særlig når senere `Read`/test-runs viser uventet adferd. **Antaket lesson:** Edit-call returnerer "success" basert på string-match, men hvis filen modifiseres parallelt (formatter/linter) kan diffen rulle tilbake stille.
+
+2. **Strukturell test > verdimessig test:** Test #2 (`!/current_position\s*=/i.test(updateQuery.sql)`) er sterkere enn test #1 (cp=2 → cp=2) fordi den fanger regresjon selv om noen reintroduserer `current_position = 1` med en stub-pool som lurer verdi-testen. Strukturelle guards på SQL-strings er underbrukt og bør standardiseres for status-transition-tester.
+
+3. **Stub-pool må håndtere både SQL-tekst-match og verdi-mutering:** Min første stub-pool simulerte kun status-flip. Da måtte jeg legge til `cpMatch`-regex som faktisk parser SQL-en og oppdaterer `currentRunRow.current_position` hvis hardkoding finnes. Det gjør stub-en "honest" mot bug-mønsteret — viktig for end-to-end-flyt-tester.
+
+4. **JSDoc med eksplisitt pitfall-referanse:** La inn referanse til PITFALLS §3.15 og research-doc §5.1 i fix-kommentaren. Fremtidige agenter som leser filen vil se hvorfor `current_position` ikke er i UPDATE. Reduserer risiko for "harmløs cleanup" som reintroduserer bug-en.
+
+5. **Worktree-PM-flyt fungerer godt:** Branch ble laget fra `origin/main` direkte (uten å rør hovedrepoet), fix + test + doc-update i én sesjon, 4 filer endret (1 source, 1 test, 1 SKILL, 2 doc-updates). PR pushed til samme branch — PM eier merge.
+
+**Eierskap:**
+- `apps/backend/src/game/GamePlanRunService.ts:776-795` (start-metoden) — denne agent
+- `apps/backend/src/game/__tests__/GamePlanRunService.startPreservesPosition.test.ts` (NY) — denne agent
+- `.claude/skills/spill1-master-flow/SKILL.md` (§"Plan-run.start() invariant") — denne agent
+- `docs/engineering/PITFALLS_LOG.md` §3.15 (FIXED-status + post-fix detaljer) — denne agent
+
+**Skill-update:** spill1-master-flow v1.14.0 → v1.15.0 (ny seksjon "Plan-run.start() invariant — bevarer current_position").
+
+**Relaterte PR-er (kontekst):**
+- PR #1370 (display-fix #1, dekket KUN initial-state)
+- PR #1422 (BUG E auto-advance, `getOrCreateForToday`-INSERT setter `nextPosition`)
+- PR #1427 (header state-aware "Aktiv trekning")
+- PR #1431 (lobby-API nextGame for finished plan-run)
+- BUG-D1 lukker rot-årsaken på server-side som PR #1422 ikke kunne dekke (overskriving skjedde ETTER INSERT)
+
+---
 
 ### 2026-05-15 — 3 parallelle docs-konsoliderings-agenter (Step 2+4+5 av 5-trinns)
 

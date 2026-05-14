@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.14.0
+  version: 1.15.0
   project: spillorama
 ---
 
@@ -170,6 +170,48 @@ Audit-eventet `game_plan_run.recreate_after_finish` inkluderer disse feltene for
   - Audit-event inkluderer alle sporbarhets-felter
 
 **Plassering:** `apps/backend/src/game/GamePlanRunService.ts` — `getOrCreateForToday()` linje ~570-720. NB: `planService.list()` returnerer `GamePlan[]` (uten items), så vi kaller `planService.getById(matched.id)` for å få `GamePlanWithItems.items.length`.
+
+### Plan-run.start() invariant — bevarer current_position (BUG-D1 fix 2026-05-15)
+
+**Invariant:** `GamePlanRunService.start()` skal ALDRI overstyre `current_position`. `getOrCreateForToday`-INSERT er eneste sannhet for posisjon ved start. `start()` flipper kun state-machine: `idle → running` + setter `started_at` + `master_user_id`.
+
+**Pre-fix-bug (BUG-D1, FIXED 2026-05-15):**
+- Linje 780 hadde hardkodet `current_position = 1` i UPDATE-en
+- Symptom: Master spilte Bingo (pos=1) gjentatte ganger i stedet for å advance til 1000-spill, 5×500, osv. fordi `start()` resettet auto-advanced posisjonen
+- Dette var én av 5 rot-årsaker til "Neste spill"-display-bug-en som ble fixet 4 ganger uten å løse alle paths (PR #1370, #1422, #1427, #1431)
+- Audit-trail referanse: `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1 + `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md`
+
+**Post-fix SQL:**
+```sql
+UPDATE app_game_plan_run
+SET status = 'running',
+    started_at = COALESCE(started_at, now()),
+    -- current_position skal IKKE være her — INSERT er sannhet
+    master_user_id = $2,
+    updated_at = now()
+WHERE id = $1
+```
+
+**Hvilke services ER tillatt å mutere current_position:**
+- `getOrCreateForToday`-INSERT (eneste sted som setter initial posisjon ved start av dagen)
+- `advanceToNext()` (eksplisitt UPDATE som inkrementerer)
+- `rollbackToPrePosition()` / lignende rollback-paths (eksplisitt med både gammel- og ny-verdi i WHERE for race-safety)
+
+**Hvilke services skal IKKE mutere current_position:**
+- `start()` — kun state-flip
+- `pause()` — kun status-overgang
+- `resume()` — kun status-overgang
+- `finish()` — kun status-overgang
+- Andre UPDATE-paths i denne service-en
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/__tests__/GamePlanRunService.startPreservesPosition.test.ts` (6 tester):
+  - `start()` bevarer cp=2 (regression for selve BUG-D1)
+  - SQL-UPDATE inneholder ikke `current_position = ` (strukturell guard — feiler hvis noen reintroduserer hardkoding)
+  - cp=5 bevares (vilkårlig mid-plan position)
+  - cp=1 bevares (sanity-test for første-spill)
+  - Audit-event `game_plan_run.start` skrives uendret
+  - `GAME_PLAN_RUN_INVALID_TRANSITION` kastes ved non-idle status (uendret guard)
 
 ### UI-komponenter (admin-web)
 
