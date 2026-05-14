@@ -248,18 +248,105 @@ function presetCustomToConfig(
 
 // ── Helper: slug → TicketTypeConfig ─────────────────────────────────────────
 
-/** Bygg én `TicketTypeConfig` fra admin-UI farge-slug. */
-function ticketTypeFromSlug(slug: string): TicketTypeConfig | null {
+/** Konstant: Stor-bong = 3 brett. Matcher `lobbyTicketTypes.LARGE_TICKET_MULTIPLIER`. */
+const LARGE_TICKET_MULTIPLIER = 3;
+
+/**
+ * Bygg én `TicketTypeConfig` fra admin-UI farge-slug.
+ *
+ * **Per-farge multipliers (PR #1411 / sub-bug PR #1408 fix):**
+ *
+ * Når `priceNok` + `minPriceNok` er angitt, bruker vi auto-multiplier-
+ * baseline (samme matematikk som `packages/game-client/src/games/game1/
+ * logic/lobbyTicketTypes.ts`):
+ *   - small: `priceMultiplier = priceNok / minPriceNok` (eks. hvit=5 →
+ *     mult=1, gul=10 → mult=2, lilla=15 → mult=3 med min=5)
+ *   - large: small-multiplier × `LARGE_TICKET_MULTIPLIER` (3) (eks. hvit
+ *     large=mult 3, gul large=mult 6, lilla large=mult 9)
+ *   - elvis: respekterer `priceNok / minPriceNok` hvis angitt — ellers
+ *     legacy-default `2` for bakoverkompat
+ *
+ * Hvis `priceNok` eller `minPriceNok` mangler / er ugyldige (0, null, NaN,
+ * Infinity), fall tilbake til hardkodede legacy-multipliers (1/3/2) for
+ * full backward-compat med eksisterende caller-sites og tester.
+ *
+ * **Hvorfor denne fixen:** Pre-fix-versjon hardkodet `priceMultiplier: 1`
+ * for ALLE small-farger uavhengig av faktisk pris. Når
+ * `roomState.variantByRoom`-bindingen lekket via `room:update`-snapshot
+ * til frontend, fikk klient `gameVariant.ticketTypes` med flat mult=1/3,
+ * og buy-popup-kalkulasjonen ble (eks.) `10 kr × 2 = 20 kr` istedenfor
+ * 10 kr — selv om lobby-API'et `/api/games/spill1/lobby` allerede ga
+ * korrekte priser.
+ *
+ * Frontend leser fra to kilder:
+ *   1. `lobby.nextGame.ticketPricesCents` → korrekt via
+ *      `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`
+ *   2. `state.ticketTypes` (room:update snapshot) → MÅTTE også være korrekt
+ *      etter denne fixen
+ */
+function ticketTypeFromSlug(
+  slug: string,
+  priceNok?: number | null,
+  minPriceNok?: number | null,
+): TicketTypeConfig | null {
   const name = COLOR_SLUG_TO_NAME[slug];
   if (!name) return null;
 
+  // Beregn auto-multiplier-baseline. Hvis EN av priceNok/minPriceNok mangler
+  // eller er ugyldig (≤ 0, ikke-finite), faller vi til legacy-hardkodet
+  // multiplier for backward-compat. Min må være > 0 for å unngå
+  // division-by-zero.
+  const hasValidPrices =
+    typeof priceNok === "number" &&
+    Number.isFinite(priceNok) &&
+    priceNok > 0 &&
+    typeof minPriceNok === "number" &&
+    Number.isFinite(minPriceNok) &&
+    minPriceNok > 0;
+
   if (slug.startsWith("large_")) {
-    return { name, type: "large", priceMultiplier: 3, ticketCount: 3 };
+    if (hasValidPrices) {
+      // Large multiplier = (priceNok / minPriceNok). Bridgen skriver allerede
+      // `priceNok = smallPrice × LARGE_TICKET_MULTIPLIER` for large-entries,
+      // så ren division gir korrekt multiplier (eks. large_yellow priceNok=30,
+      // min=5 → mult=6, som er small_yellow_mult(2) × LARGE(3)).
+      const multiplier = priceNok / minPriceNok;
+      return {
+        name,
+        type: "large",
+        priceMultiplier: multiplier,
+        ticketCount: LARGE_TICKET_MULTIPLIER,
+      };
+    }
+    return {
+      name,
+      type: "large",
+      priceMultiplier: LARGE_TICKET_MULTIPLIER,
+      ticketCount: LARGE_TICKET_MULTIPLIER,
+    };
   }
   if (slug.startsWith("elvis")) {
+    if (hasValidPrices) {
+      // Elvis bruker priceNok/minPriceNok hvis tilgjengelig. ticketCount=2 er
+      // konvensjon for Elvis-pakker (2 brett per kjøp).
+      return {
+        name,
+        type: "elvis",
+        priceMultiplier: priceNok / minPriceNok,
+        ticketCount: 2,
+      };
+    }
     return { name, type: "elvis", priceMultiplier: 2, ticketCount: 2 };
   }
   // Default: small_*
+  if (hasValidPrices) {
+    return {
+      name,
+      type: "small",
+      priceMultiplier: priceNok / minPriceNok,
+      ticketCount: 1,
+    };
+  }
   return { name, type: "small", priceMultiplier: 1, ticketCount: 1 };
 }
 
@@ -430,6 +517,32 @@ export function buildVariantConfigFromSpill1Config(
 
   const inputColors = Array.isArray(spill1.ticketColors) ? spill1.ticketColors : [];
 
+  // PR #1411 (sub-bug PR #1408 fix): Beregn minimum `priceNok` på tvers av
+  // ALLE konfigurerte farger først. Brukes som baseline for per-farge
+  // `priceMultiplier`-beregning i `ticketTypeFromSlug`. Matcher samme
+  // matematikk som `packages/game-client/src/games/game1/logic/
+  // lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`.
+  //
+  // Hvorfor min-baseline:
+  //   Spill 1 har 3 bongfarger (hvit/gul/lilla) med priser i 5/10/15-kr-
+  //   forholdet, eller flat 15 kr for Trafikklys. Auto-multiplier
+  //   normaliserer den BILLIGSTE bongen til mult=1, og dyrere bonger får
+  //   forholds-multipliers. Engine + frontend deler dette mønsteret.
+  //
+  // Ugyldige priser ignoreres (≤ 0, ikke-finite, mangler). Hvis ALLE er
+  // ugyldige → `minPriceNok = null` og `ticketTypeFromSlug` faller til
+  // legacy-hardkodet multipliers (full backward-compat med eksisterende
+  // tester der `priceNok` mangler).
+  let minPriceNok: number | null = null;
+  for (const tc of inputColors) {
+    if (!tc || typeof tc.color !== "string") continue;
+    const p = typeof tc.priceNok === "number" ? tc.priceNok : NaN;
+    if (!Number.isFinite(p) || p <= 0) continue;
+    if (minPriceNok === null || p < minPriceNok) {
+      minPriceNok = p;
+    }
+  }
+
   // Bygg ticketTypes + patternsByColor parallelt.
   const ticketTypes: TicketTypeConfig[] = [];
   const patternsByColor: Record<string, PatternConfig[]> = {
@@ -438,7 +551,7 @@ export function buildVariantConfigFromSpill1Config(
 
   for (const tc of inputColors) {
     if (!tc || typeof tc.color !== "string") continue;
-    const ticketType = ticketTypeFromSlug(tc.color);
+    const ticketType = ticketTypeFromSlug(tc.color, tc.priceNok, minPriceNok);
     if (!ticketType) continue; // Ukjent slug → hopp over (defensive).
     // Unngå duplikater hvis admin-UI har sendt samme farge to ganger.
     if (ticketTypes.some((t) => t.name === ticketType.name)) continue;

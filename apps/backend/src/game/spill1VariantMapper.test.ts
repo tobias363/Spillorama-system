@@ -231,6 +231,156 @@ test("mapper small/large/elvis slug til riktig TicketTypeConfig", () => {
   assert.equal(elvis?.priceMultiplier, 2);
 });
 
+// ── PR #1411 / sub-bug PR #1408: per-farge priceMultiplier ─────────────────
+//
+// Pre-fix-bug: `ticketTypeFromSlug` hardkodet `priceMultiplier: 1` for ALLE
+// small-farger uavhengig av `priceNok`. Backend `ticket_config_json` hadde
+// korrekte priser (small_white=5, small_yellow=10, small_purple=15), men
+// `gameVariant.ticketTypes`-arrayen i room-snapshot rendret flat mult=1/3,
+// så frontend som leste fra `state.ticketTypes` kalkulerte
+// `10 kr × 2 = 20 kr` for yellow istedenfor 10 kr (Tobias-rapport 2026-05-14
+// 08:45). Lobby-API'et `/api/games/spill1/lobby` ga korrekte priser via
+// `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby` parallelt.
+//
+// Fixen mapper `priceNok / minPriceNok` for små-bonger (small_*), og
+// (priceNok / minPriceNok) for large_* (bridgen skriver allerede `priceNok =
+// smallPrice × 3` for large-entries, så ren division gir korrekt multiplier).
+
+test("PR #1411: Standard Bingo (5/10/15 kr) → multipliers [1,3,2,6,3,9]", () => {
+  // Speiler shape bridgen skriver i `spill1.ticketColors[]` for catalog-
+  // entry med ticketPricesCents { hvit: 500, gul: 1000, lilla: 1500 }.
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      { color: "small_white", priceNok: 5 },
+      { color: "large_white", priceNok: 15 },
+      { color: "small_yellow", priceNok: 10 },
+      { color: "large_yellow", priceNok: 30 },
+      { color: "small_purple", priceNok: 15 },
+      { color: "large_purple", priceNok: 45 },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+
+  const expected: Array<{ name: string; mult: number; count: number }> = [
+    { name: "Small White", mult: 1, count: 1 },
+    { name: "Large White", mult: 3, count: 3 },
+    { name: "Small Yellow", mult: 2, count: 1 },
+    { name: "Large Yellow", mult: 6, count: 3 },
+    { name: "Small Purple", mult: 3, count: 1 },
+    { name: "Large Purple", mult: 9, count: 3 },
+  ];
+
+  assert.equal(vc.ticketTypes.length, expected.length);
+  for (const exp of expected) {
+    const tt = vc.ticketTypes.find((t) => t.name === exp.name);
+    assert.ok(tt, `${exp.name} må finnes i ticketTypes`);
+    assert.equal(
+      tt?.priceMultiplier,
+      exp.mult,
+      `${exp.name} priceMultiplier skal være ${exp.mult} (med min=5)`,
+    );
+    assert.equal(tt?.ticketCount, exp.count, `${exp.name} ticketCount`);
+  }
+});
+
+test("PR #1411: Trafikklys (flat 15 kr hvit) → multipliers [1, 3]", () => {
+  // Trafikklys er flat-prising — alle bonger 15 kr. min=15 → small=1, large=3.
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      { color: "small_white", priceNok: 15 },
+      { color: "large_white", priceNok: 45 },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const small = vc.ticketTypes.find((t) => t.name === "Small White");
+  const large = vc.ticketTypes.find((t) => t.name === "Large White");
+  assert.equal(small?.priceMultiplier, 1);
+  assert.equal(small?.ticketCount, 1);
+  assert.equal(large?.priceMultiplier, 3);
+  assert.equal(large?.ticketCount, 3);
+});
+
+test("PR #1411: hvit+gul (uten lilla) → multipliers [1, 3, 2, 6]", () => {
+  // Min = 5 (hvit). Yellow 10/5 = 2, Large Yellow 30/5 = 6.
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      { color: "small_white", priceNok: 5 },
+      { color: "large_white", priceNok: 15 },
+      { color: "small_yellow", priceNok: 10 },
+      { color: "large_yellow", priceNok: 30 },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Small White")?.priceMultiplier, 1);
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Large White")?.priceMultiplier, 3);
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Small Yellow")?.priceMultiplier, 2);
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Large Yellow")?.priceMultiplier, 6);
+});
+
+test("PR #1411: tom ticketColors → fallback til DEFAULT_NORSK_BINGO_CONFIG", () => {
+  // Bakoverkompat: når admin ikke har valgt noen farger må vi falle tilbake
+  // til default-konfig (legacy-multipliers fra `DEFAULT_NORSK_BINGO_CONFIG`).
+  const vc = buildVariantConfigFromSpill1Config({ ticketColors: [] });
+  assert.deepEqual(vc.ticketTypes, DEFAULT_NORSK_BINGO_CONFIG.ticketTypes);
+});
+
+test("PR #1411: idempotent — re-bind av samme config gir samme resultat", () => {
+  // Verifiserer at mapperen er ren — samme input gir samme output uten
+  // mutasjon. Beskytter mot fremtidige refactorings som introduserer
+  // hidden state.
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      { color: "small_white", priceNok: 5 },
+      { color: "small_yellow", priceNok: 10 },
+      { color: "small_purple", priceNok: 15 },
+    ],
+  };
+  const vc1 = buildVariantConfigFromSpill1Config(input);
+  const vc2 = buildVariantConfigFromSpill1Config(input);
+  assert.deepEqual(vc1.ticketTypes, vc2.ticketTypes);
+  // Andre kall må gi nøyaktig samme multipliers:
+  assert.equal(vc2.ticketTypes.find((t) => t.name === "Small White")?.priceMultiplier, 1);
+  assert.equal(vc2.ticketTypes.find((t) => t.name === "Small Yellow")?.priceMultiplier, 2);
+  assert.equal(vc2.ticketTypes.find((t) => t.name === "Small Purple")?.priceMultiplier, 3);
+});
+
+test("PR #1411: priceNok=0 eller mangler → faller til legacy-hardkodet multipliers", () => {
+  // Defense-in-depth: hvis bridgen mislykkes i å skrive priceNok (legacy-
+  // config eller bug), fall tilbake til legacy-hardkodet multipliers
+  // (1/3/2) — bedre enn å returnere mult=NaN eller mult=0.
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      { color: "small_yellow" }, // priceNok mangler
+      { color: "large_purple", priceNok: 0 }, // priceNok=0
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const small = vc.ticketTypes.find((t) => t.name === "Small Yellow");
+  const large = vc.ticketTypes.find((t) => t.name === "Large Purple");
+  // Begge må ha legacy-hardkodede multipliers (ingen priceNok = ingen
+  // baseline = ingen scaling).
+  assert.equal(small?.priceMultiplier, 1);
+  assert.equal(large?.priceMultiplier, 3);
+});
+
+test("PR #1411: blandet priceNok-tilstedeværelse → min beregnes fra gyldige verdier", () => {
+  // Hvis bare NOEN farger har priceNok må min beregnes fra dem. Farger uten
+  // priceNok blir fortsatt mappet (med legacy multipliers ved manglende
+  // pris-data).
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      { color: "small_white", priceNok: 5 },
+      { color: "small_yellow", priceNok: 10 },
+      { color: "small_purple" }, // mangler priceNok
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Small White")?.priceMultiplier, 1);
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Small Yellow")?.priceMultiplier, 2);
+  // Lilla mangler priceNok → legacy-fallback mult=1.
+  assert.equal(vc.ticketTypes.find((t) => t.name === "Small Purple")?.priceMultiplier, 1);
+});
+
 test("hopper over ukjent farge-slug", () => {
   const input: Spill1ConfigInput = {
     ticketColors: [

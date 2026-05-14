@@ -23,21 +23,21 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 | `anti-fraud-detection` | 6 | 7 | `apps/backend/src/security/AntiFraudService.ts`<br>`apps/backend/src/security/AntiFraudWalletAdapter.ts`<br>`apps/backend/src/security/__tests__/AntiFraud*.test.ts`<br>`apps/backend/src/routes/adminAntiFraud.ts`<br>_(+2 more)_ |
 | `audit-hash-chain` | 7 | 6 | `apps/backend/src/compliance/AuditLogService.ts`<br>`apps/backend/src/compliance/AuditLogService.test.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.test.ts`<br>_(+3 more)_ |
 | `candy-iframe-integration` | 6 | 6 | `apps/backend/src/integration/externalGameWallet.ts`<br>`apps/backend/src/integration/externalGameWallet.test.ts`<br>`apps/backend/src/routes/game.ts`<br>`apps/backend/public/web/spillvett.js`<br>_(+2 more)_ |
-| `casino-grade-testing` | 4 | 636 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
+| `casino-grade-testing` | 4 | 653 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
 | `customer-unique-id` | 9 | 9 | `apps/backend/src/agent/UniqueIdService.ts`<br>`apps/backend/src/agent/UniqueIdStore.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdStore.postgres.test.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdService.test.ts`<br>_(+5 more)_ |
-| `database-migration-policy` | 3 | 157 | `apps/backend/migrations/**`<br>`apps/backend/src/scripts/migrate.ts`<br>`render.yaml` |
+| `database-migration-policy` | 3 | 159 | `apps/backend/migrations/**`<br>`apps/backend/src/scripts/migrate.ts`<br>`render.yaml` |
 | `dr-runbook-execution` | 9 | 11 | `docs/operations/DR_RUNBOOK.md`<br>`docs/operations/LIVE_ROOM_DR_RUNBOOK.md`<br>`docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md`<br>`docs/operations/INCIDENT_RESPONSE_PLAN.md`<br>_(+5 more)_ |
 | `goh-master-binding` | 10 | 10 | `apps/backend/src/admin/HallGroupService.ts`<br>`apps/backend/src/admin/HallGroupService.test.ts`<br>`apps/backend/src/routes/adminHallGroups.ts`<br>`apps/backend/src/routes/__tests__/adminHallGroups.test.ts`<br>_(+6 more)_ |
 | `health-monitoring-alerting` | 5 | 5 | `apps/backend/src/routes/publicGameHealth.ts`<br>`apps/backend/src/routes/__tests__/publicGameHealth.test.ts`<br>`apps/backend/src/observability/RoomAlertingService.ts`<br>`apps/backend/src/observability/RoomAlertingBootstrap.ts`<br>_(+1 more)_ |
 | `live-room-robusthet-mandate` | 8 | 17 | `apps/backend/src/sockets/SocketIdempotencyStore.ts`<br>`apps/backend/src/sockets/withSocketIdempotency.ts`<br>`apps/backend/src/observability/RoomAlertingService.ts`<br>`apps/backend/src/adapters/EngineCircuitBreakerPort.ts`<br>_(+4 more)_ |
 | `pengespillforskriften-compliance` | 10 | 81 | `apps/backend/src/compliance/**`<br>`apps/backend/src/spillevett/**`<br>`apps/backend/src/game/ComplianceLedger*`<br>`apps/backend/src/game/PrizePolicyManager.ts`<br>_(+6 more)_ |
-| `pm-orchestration-pattern` | 8 | 29 | `BACKLOG.md`<br>`docs/operations/PM_HANDOFF_*.md`<br>`docs/engineering/PM_*.md`<br>`scripts/agent-onboarding.sh`<br>_(+4 more)_ |
-| `spill1-master-flow` | 20 | 119 | `apps/backend/src/game/Game1*`<br>`apps/backend/src/game/MasterActionService.ts`<br>`apps/backend/src/game/GamePlanRunService.ts`<br>`apps/backend/src/game/GamePlanRunCleanupService.ts`<br>_(+16 more)_ |
+| `pm-orchestration-pattern` | 8 | 31 | `BACKLOG.md`<br>`docs/operations/PM_HANDOFF_*.md`<br>`docs/engineering/PM_*.md`<br>`scripts/agent-onboarding.sh`<br>_(+4 more)_ |
+| `spill1-master-flow` | 20 | 123 | `apps/backend/src/game/Game1*`<br>`apps/backend/src/game/MasterActionService.ts`<br>`apps/backend/src/game/GamePlanRunService.ts`<br>`apps/backend/src/game/GamePlanRunCleanupService.ts`<br>_(+16 more)_ |
 | `spill2-perpetual-loop` | 8 | 51 | `apps/backend/src/game/Game2*`<br>`apps/backend/src/game/Spill2*`<br>`apps/backend/src/game/PerpetualRound*`<br>`apps/backend/src/jobs/game2AutoDrawTick.ts`<br>_(+4 more)_ |
 | `spill3-phase-state-machine` | 9 | 23 | `apps/backend/src/game/Game3*`<br>`apps/backend/src/game/Spill3*`<br>`apps/backend/src/jobs/game3AutoDrawTick.ts`<br>`apps/backend/src/routes/adminSpill3Config.ts`<br>_(+5 more)_ |
 | `spinngo-databingo` | 5 | 9 | `apps/backend/src/game/ledgerGameTypeForSlug.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.test.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.distribution.test.ts`<br>`apps/backend/src/game/ComplianceLedgerOverskudd.ts`<br>_(+1 more)_ |
-| `trace-id-observability` | 7 | 35 | `apps/backend/src/middleware/traceId.ts`<br>`apps/backend/src/middleware/traceId.test.ts`<br>`apps/backend/src/middleware/socketTraceId.ts`<br>`apps/backend/src/middleware/socketTraceId.test.ts`<br>_(+3 more)_ |
-| `wallet-outbox-pattern` | 10 | 38 | `apps/backend/src/wallet/**`<br>`apps/backend/src/adapters/PostgresWalletAdapter*`<br>`apps/backend/src/adapters/InMemoryWalletAdapter*`<br>`apps/backend/src/adapters/FileWalletAdapter*`<br>_(+6 more)_ |
+| `trace-id-observability` | 7 | 47 | `apps/backend/src/middleware/traceId.ts`<br>`apps/backend/src/middleware/traceId.test.ts`<br>`apps/backend/src/middleware/socketTraceId.ts`<br>`apps/backend/src/middleware/socketTraceId.test.ts`<br>_(+3 more)_ |
+| `wallet-outbox-pattern` | 10 | 39 | `apps/backend/src/wallet/**`<br>`apps/backend/src/adapters/PostgresWalletAdapter*`<br>`apps/backend/src/adapters/InMemoryWalletAdapter*`<br>`apps/backend/src/adapters/FileWalletAdapter*`<br>_(+6 more)_ |
 
 ## Per-skill detalj
 
@@ -125,7 +125,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/**/*.test.ts`
 - `tests/e2e/**`
 
-**Filer matchet i HEAD:** 636
+**Filer matchet i HEAD:** 653
 
 ### `customer-unique-id`
 
@@ -151,7 +151,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/scripts/migrate.ts`
 - `render.yaml`
 
-**Filer matchet i HEAD:** 157
+**Filer matchet i HEAD:** 159
 
 ### `dr-runbook-execution`
 
@@ -243,7 +243,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `scripts/generate-context-pack.sh`
 - `.github/workflows/pm-*.yml`
 
-**Filer matchet i HEAD:** 29
+**Filer matchet i HEAD:** 31
 
 ### `spill1-master-flow`
 
@@ -270,7 +270,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/admin-web/src/pages/agent-portal/Spill1*.ts`
 - `apps/admin-web/src/pages/games/master/Game1MasterConsole.ts`
 
-**Filer matchet i HEAD:** 119
+**Filer matchet i HEAD:** 123
 
 ### `spill2-perpetual-loop`
 
@@ -327,7 +327,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/util/traceContext.test.ts`
 - `apps/backend/src/observability/**`
 
-**Filer matchet i HEAD:** 35
+**Filer matchet i HEAD:** 47
 
 ### `wallet-outbox-pattern`
 
@@ -344,7 +344,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/game/IdempotencyKeys.ts`
 - `apps/backend/scripts/reconcile-wallet-vs-ledger.ts`
 
-**Filer matchet i HEAD:** 38
+**Filer matchet i HEAD:** 39
 
 ---
 
