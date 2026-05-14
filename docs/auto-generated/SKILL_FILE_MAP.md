@@ -23,7 +23,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 | `anti-fraud-detection` | 6 | 7 | `apps/backend/src/security/AntiFraudService.ts`<br>`apps/backend/src/security/AntiFraudWalletAdapter.ts`<br>`apps/backend/src/security/__tests__/AntiFraud*.test.ts`<br>`apps/backend/src/routes/adminAntiFraud.ts`<br>_(+2 more)_ |
 | `audit-hash-chain` | 7 | 6 | `apps/backend/src/compliance/AuditLogService.ts`<br>`apps/backend/src/compliance/AuditLogService.test.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.test.ts`<br>_(+3 more)_ |
 | `candy-iframe-integration` | 6 | 6 | `apps/backend/src/integration/externalGameWallet.ts`<br>`apps/backend/src/integration/externalGameWallet.test.ts`<br>`apps/backend/src/routes/game.ts`<br>`apps/backend/public/web/spillvett.js`<br>_(+2 more)_ |
-| `casino-grade-testing` | 4 | 659 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
+| `casino-grade-testing` | 4 | 660 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
 | `customer-unique-id` | 9 | 9 | `apps/backend/src/agent/UniqueIdService.ts`<br>`apps/backend/src/agent/UniqueIdStore.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdStore.postgres.test.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdService.test.ts`<br>_(+5 more)_ |
 | `database-migration-policy` | 3 | 159 | `apps/backend/migrations/**`<br>`apps/backend/src/scripts/migrate.ts`<br>`render.yaml` |
 | `dr-runbook-execution` | 9 | 11 | `docs/operations/DR_RUNBOOK.md`<br>`docs/operations/LIVE_ROOM_DR_RUNBOOK.md`<br>`docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md`<br>`docs/operations/INCIDENT_RESPONSE_PLAN.md`<br>_(+5 more)_ |
@@ -125,7 +125,7 @@ Antall skills totalt: **20** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/**/*.test.ts`
 - `tests/e2e/**`
 
-**Filer matchet i HEAD:** 659
+**Filer matchet i HEAD:** 660
 
 ### `customer-unique-id`
 
