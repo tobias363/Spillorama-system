@@ -242,6 +242,59 @@ plutselig blitt 50% tregere de siste 5 min?".
 bash scripts/ops/setup-db-perf-cron.sh install
 ```
 
+## Wallet-integrity-watcher cron (OBS-10, 2026-05-14)
+
+Tobias-direktiv 2026-05-14: *"Vi må fange wallet-mismatch og hash-chain-
+brudd så raskt at vi har sjanse til å forensicse hva som skjedde. Det er
+forskjell på sekunder."*
+
+Søsterscript til OBS-9 men dedikert til wallet-integritet. Komplementært
+til den nattlige `WalletAuditVerifier` (full SHA-256 re-compute) —
+watcher kjøres hver time som strukturell sjekk og fanger 90 % av
+tamper-mønstre på < 1t MTTD.
+
+**Komponenter:**
+- `scripts/ops/wallet-integrity-watcher.sh` — hovedscript (read-only).
+- `scripts/ops/wallet-mismatch-create-linear-issue.sh` — Linear-auto-issue
+  med prioritet Urgent (1), label `wallet-integrity`. Linear-dedup mot
+  åpne issues siste 24t per `wallet_id`.
+- `scripts/ops/setup-wallet-integrity-cron.sh` — install/uninstall/status.
+- `docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` — full runbook.
+
+**Sjekkene watcher håndhever:**
+| Invariant | SQL-kjerne |
+|---|---|
+| I1 — Balance-sum | `wallet_accounts.balance ≡ SUM(CASE side WHEN 'CREDIT' THEN amount ELSE -amount END)` over `wallet_entries` (system-kontoer ekskludert) |
+| I2 — Hash-chain link | `row.previous_entry_hash ≡ predecessor.entry_hash` per `account_id` (siste 24t) |
+
+**Dedup:** Per-wallet_id 24t i `/tmp/wallet-integrity-watcher-state.json`.
+
+**Severity ved alert:** **P0** ved I2 (hash-chain) under aktiv pilot. P1
+ved I1 alene på spiller-wallet (positivt delta > 100 NOK). Lavt ved I1
+på `loadtest-*` / `__house__` (forventet test-data-tilstand).
+
+**Hvorfor watcher OG WalletAuditVerifier:**
+- Watcher er rask (< 2s mot 25 kontoer/5000 entries). Kjør hver time.
+- WalletAuditVerifier krever canonical-JSON + SHA-256 i Node (~150 MB/s),
+  10k entries på en konto = 2 sek → totalt minutter for prod-skala. Kjør
+  nattlig.
+- Strukturell sjekk (watcher) fanger nesten alle tamper-scenarier.
+  Innholdssjekk (verifier) er backup for sjeldne edge-cases.
+
+**Default disabled.** Tobias aktiverer manuelt:
+```bash
+bash scripts/ops/setup-wallet-integrity-cron.sh install
+```
+
+**Tester (48 stk):** `scripts/__tests__/ops/wallet-integrity-watcher.test.sh`
+- Q1 + Q2 JSON-shaping (pure function mot mock-pipe-output)
+- Dedup state-file logic (24t-vindu, fresh, different-wallet)
+- Linear-script DRY_RUN composer riktig tittel
+- Pre-flight DB-check (unreachable → exit 2)
+- balance-sum CREDIT/DEBIT-semantikk (signed sum)
+- hash-chain genesis (64-zero hex)
+- Integration smoke mot lokal Postgres (skip-graceful)
+
 ## Kanonisk referanse
 
 - `apps/backend/src/routes/publicGameHealth.ts` — R7-endepunkter
@@ -255,6 +308,8 @@ bash scripts/ops/setup-db-perf-cron.sh install
 - `scripts/ops/db-perf-watcher.sh` + `scripts/ops/db-perf-create-linear-issue.sh` + `scripts/ops/setup-db-perf-cron.sh` — DB-perf-watcher cron (OBS-9)
 - `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — DB-perf-watcher full runbook
 - `docs/operations/PG_STAT_STATEMENTS_RUNBOOK.md` — pg_stat_statements extension setup
+- `scripts/ops/wallet-integrity-watcher.sh` + `scripts/ops/wallet-mismatch-create-linear-issue.sh` + `scripts/ops/setup-wallet-integrity-cron.sh` — Wallet-integrity-watcher cron (OBS-10)
+- `docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` — Wallet-integrity-watcher full runbook + eskaleringsprosedyre
 
 ## Når denne skill-en er aktiv
 
@@ -271,3 +326,6 @@ bash scripts/ops/setup-db-perf-cron.sh install
 - Touche `scripts/ops/db-perf-watcher.sh` / `scripts/ops/db-perf-create-linear-issue.sh` / `scripts/ops/setup-db-perf-cron.sh` (DB-perf-watcher cron, OBS-9)
 - Justere thresholds for DB-perf-watcher (`MEAN_MS_THRESHOLD`, `CALLS_THRESHOLD`, `REGRESSION_PCT`, `LINEAR_ISSUE_DEDUP_HOURS`)
 - Aktivere/deaktivere watcher-cron (`bash scripts/ops/setup-db-perf-cron.sh install|uninstall|status`)
+- Touche `scripts/ops/wallet-integrity-watcher.sh` / `scripts/ops/wallet-mismatch-create-linear-issue.sh` / `scripts/ops/setup-wallet-integrity-cron.sh` (Wallet-integrity-watcher, OBS-10)
+- Justere watcher-env (`WALLET_INTEGRITY_DB_URL`, `HASH_CHAIN_WINDOW_HOURS`, `LINEAR_ISSUE_DEDUP_HOURS`, `INTERVAL_MINUTES`)
+- Investigere wallet-integrity-alert (P0 ved hash-chain-brudd; følg `docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` §6)

@@ -358,6 +358,54 @@ Kjøre lokalt: `cd apps/backend && npm run test:mutation`. Workflow: `.github/wo
 - IKKE manuell-update wallet-rader uten audit-trail
 - IKKE introduser ny WalletAdapter-implementasjon uten å speile invariants
 
+## Wallet-integrity-watcher (OBS-10, 2026-05-14)
+
+`scripts/ops/wallet-integrity-watcher.sh` er en cron-driven sjekk som
+håndhever to invariants på wallet-databasen ved hver kjøring (default
+hver time, men disabled by default — Tobias aktiverer manuelt):
+
+- **I1 — Balance-sum:** `wallet_accounts.balance` MÅ være lik
+  `SUM(CASE side WHEN 'CREDIT' THEN amount ELSE -amount END)` over
+  `wallet_entries` for samme `account_id`. System-kontoer
+  (`is_system = true`) er ekskludert.
+- **I2 — Hash-chain link:** for hver `wallet_entries`-rad (siste 24t)
+  må `previous_entry_hash` matche forrige rads `entry_hash` per
+  `account_id` sortert på `id ASC`.
+
+Watcher-en gjør IKKE full SHA-256 re-compute (det krever canonical-JSON
+fra TypeScript-adapteren). Den nattlige `WalletAuditVerifier` gjør det.
+Watcher-en er det raske strukturelle signalet hver time.
+
+### Når watcher-en alarmerer
+
+Watcher kaller `scripts/ops/wallet-mismatch-create-linear-issue.sh` som
+oppretter en Linear-issue med prioritet Urgent (1), label
+`wallet-integrity`, og full forensics-rapport som body. Dedup-window er
+24t per `wallet_id`. Fallback til Slack-webhook (om
+`SLACK_ALERT_WEBHOOK_URL` satt) eller disk-fil.
+
+### Eskalering ved hash-chain-brudd
+
+`docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` §6 har full
+prosedyre. P0 ved I2 (hash-chain) under aktiv pilot. Lotteritilsynet
+innen 24t per `COMPLIANCE_INCIDENT_PROCEDURE.md`.
+
+**Korreksjon må ALLTID være append-only.** NEVER `UPDATE`/`DELETE` på
+`wallet_entries` — bruk WalletAdapter for å skrive korreksjons-credit
+som peker tilbake til originalen via `reason`.
+
+### Aktivering
+
+```bash
+# Manuelt one-shot
+bash scripts/ops/wallet-integrity-watcher.sh
+
+# Installer hourly cron (default DISABLED)
+bash scripts/ops/setup-wallet-integrity-cron.sh install
+```
+
+Se runbook for komplett konfig-referanse + FAQ.
+
 ## Kanonisk referanse
 
 `apps/backend/src/wallet/README.md` er autoritativ for modul-API. ADR-0004 (hash-chain) og ADR-0005 (outbox) er bindende design-beslutninger. Spør Tobias før endringer på BIN-761→767-fundamentet.
@@ -382,3 +430,4 @@ Kjøre lokalt: `cd apps/backend && npm run test:mutation`. Workflow: `.github/wo
 | 2026-05-13 | v1.1.0 — la til Stryker mutation-testing-referanse for `WalletOutboxWorker.ts`, ADR-0015 regulatory-ledger, ADR-0019 sync-persist |
 | 2026-05-14 | v1.2.0 — la til seksjon 11 om wallet-pool error-handler (Agent T). Informerer om at `attachPoolErrorHandler` beskytter wallet-mutasjoner mot backend-krasj på 57P01. Eksplisitt forbud mot `withDbRetry` på wallet-mutasjoner. |
 | 2026-05-14 | v1.3.0 — la til ADR-0023 MCP write-access policy. `app_wallet_entries` er beskyttet mot direct MCP-mutasjon i prod; alle korreksjoner går via append-only migration-PR. |
+| 2026-05-14 | v1.4.0 — la til ny seksjon "Wallet-integrity-watcher (OBS-10)". Cron-driven Q1 (balance-sum) + Q2 (hash-chain-link) sjekker, Linear-auto-issue ved brudd. Komplementært til nattlig `WalletAuditVerifier`. Aktivering disabled by default — Tobias aktiverer manuelt. |
