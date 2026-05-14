@@ -30,6 +30,7 @@ import { WinScreenV2 } from "./components/WinScreenV2.js";
 import {
   Game1EndOfRoundOverlay,
   type Game1EndOfRoundSummary,
+  type MyPhaseWinRecord,
 } from "./components/Game1EndOfRoundOverlay.js";
 import { classifyPhaseFromPatternName, Spill1Phase } from "@spillorama/shared-types/spill1-patterns";
 
@@ -278,6 +279,32 @@ class Game1Controller implements GameController {
    * Fullt Hus 1000 = 1700 kr totalt vist i animasjonen.
    */
   private roundAccumulatedWinnings = 0;
+
+  /**
+   * Tobias-direktiv 2026-05-14 (WinScreen-bug, runde 1edd90a1):
+   *
+   * Per-vinst-records for inneværende runde — en entry per pattern:won-event
+   * der spilleren var blant `winnerIds`. Reset ved gameStarted (samtidig som
+   * `roundAccumulatedWinnings`). Sendes til `Game1EndOfRoundOverlay` via
+   * `summary.myWinnings` slik at WinScreen kan vise KUN faser spilleren har
+   * vunnet (ikke 5 rader med "Ikke vunnet"-default).
+   *
+   * Hvorfor en lokal liste i stedet for `state.patternResults`:
+   *   - Scheduled Spill 1 sin `enrichScheduledGame1RoomSnapshot` returnerer
+   *     `patternResults: []` (synthetic snapshot uten engine-state). Når
+   *     game-end-snapshot ankommer via `room:update`, blir
+   *     `state.patternResults` RESET til [], og deretter SEEDED med
+   *     `isWon: false` for alle 5 faser → "Ikke vunnet"-default for alt
+   *     spilleren faktisk vant (DB-bevis: app_game1_phase_winners-rader OK).
+   *   - Per-event tracking i klient er upåvirket av snapshot-reset siden
+   *     vi commit-er hver win-record direkte fra `pattern:won`-handleren
+   *     (samme path som `roundAccumulatedWinnings`-summen).
+   *   - Multi-color per phase: backend's `pattern:won`-wire sender ÉN
+   *     event per fase med første color-gruppes `payoutAmount`. Dette
+   *     speiler hva spilleren faktisk så i live-pop-ups under runden, så
+   *     WinScreen-totalen matcher den summen som ble annonsert undervegs.
+   */
+  private myRoundWinnings: MyPhaseWinRecord[] = [];
 
   /**
    * Debug event-log-panel (Tobias-direktiv 2026-05-12). Mountes når
@@ -1856,6 +1883,10 @@ class Game1Controller implements GameController {
 
     // FIXED-PRIZE-FIX: reset round-accumulated winnings ved ny runde.
     this.roundAccumulatedWinnings = 0;
+    // Tobias-direktiv 2026-05-14 (WinScreen-bug): reset per-vinst-records
+    // ved ny runde slik at forrige rundes liste ikke lekker inn i WinScreen
+    // hvis en ny runde starter raskt etter ENDED-overgang.
+    this.myRoundWinnings = [];
     // Tobias 2026-04-29: reset mini-game-result for ny runde.
     this.lastMiniGameResult = null;
 
@@ -2019,6 +2050,11 @@ class Game1Controller implements GameController {
       miniGameResult: this.lastMiniGameResult,
       luckyNumber: state.myLuckyNumber,
       ownRoundWinnings: this.roundAccumulatedWinnings,
+      // Tobias-direktiv 2026-05-14 (WinScreen-bug): pass per-fase win-records
+      // slik at WinScreen viser KUN faser spilleren vant (ikke 5 rader med
+      // "Ikke vunnet"-default). Tom liste → "Beklager, ingen gevinst".
+      // Snapshot via spread så overlay ikke kan mutere controllerens state.
+      myWinnings: [...this.myRoundWinnings],
       millisUntilNextStart: state.millisUntilNextStart ?? null,
       elapsedSinceEndedMs,
       onBackToLobby: () => {
@@ -2187,6 +2223,22 @@ class Game1Controller implements GameController {
       // til spilleren som "1 Rad 100 + 2 Rader 200 + ... + Fullt Hus 1000
       // = 1700 kr". Fase 1-4-popup viser fortsatt kun fase-prisen.
       this.roundAccumulatedWinnings += payout;
+
+      // Tobias-direktiv 2026-05-14 (WinScreen-bug): per-fase win-record
+      // til WinScreen. Klassifiserer pattern-navnet til fase-nummer 1-5
+      // (1=Rad 1, 5=Fullt Hus) via shared-types-helperen. Hvis pattern-
+      // navnet er ukjent (eks. nytt variant-pattern) faller vi til 0 for
+      // sortering — det havner først i listen og blir synlig som "raw"
+      // pattern-navn i raden.
+      const phaseEnum = classifyPhaseFromPatternName(result.patternName);
+      const phaseNum = phaseEnum ? PHASE_TO_ROWS[phaseEnum] : 0;
+      this.myRoundWinnings.push({
+        phase: phaseNum,
+        patternName: result.patternName,
+        payoutAmount: payout,
+        wonAtDraw: result.wonAtDraw,
+        sharedCount: winnerCount,
+      });
       if (isFullHouse) {
         this.isWinScreenActive = true;
         this.winScreen?.show({
