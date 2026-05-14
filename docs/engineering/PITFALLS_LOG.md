@@ -357,6 +357,8 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 
 ## §3 Spill 1, 2, 3 arkitektur
 
+> **🚨 Kanonisk cross-spill-sammenligning: [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md).** Den dekker full sammenligningstabell, bridge-pattern, phase-state-machine, og felles invariants. Fallgruvene under er klassifisert per-§ med severity og fix.
+
 ### §3.1 — KRITISK: Spill 1, 2, 3 har FUNDAMENTALT forskjellige arkitekturer
 
 **Severity:** P0 (antakelser overføres feil → bryter implementasjon)
@@ -367,10 +369,12 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - **Spill 2** (`rocket`): ETT globalt rom + perpetual loop + auto-tick
 - **Spill 3** (`monsterbingo`): ETT globalt rom + perpetual loop + sequential phase-state-machine
 **Prevention:**
-- Les FØRST `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` for spillet du jobber med
+- Les FØRST [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md) for cross-spill-sammenligning
+- For dyp implementasjon: les `SPILL[1-3]_IMPLEMENTATION_STATUS_2026-05-08.md` for spillet du jobber med
 - Aldri kopier antakelser fra ett spill til et annet
 - Hvis koden krangler mot doc-en: doc-en vinner, fix koden
 **Related:**
+- [`SPILL_ARCHITECTURE_OVERVIEW.md`](../architecture/SPILL_ARCHITECTURE_OVERVIEW.md) ← ENESTE source-of-truth for cross-spill-sammenligning
 - [`SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`](../architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md)
 - [`SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md`](../architecture/SPILL2_IMPLEMENTATION_STATUS_2026-05-08.md)
 - [`SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md`](../architecture/SPILL3_IMPLEMENTATION_STATUS_2026-05-08.md)
