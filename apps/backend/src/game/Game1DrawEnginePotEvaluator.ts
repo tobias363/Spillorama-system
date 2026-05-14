@@ -29,6 +29,10 @@ import type { PotDailyAccumulationTickService } from "./pot/PotDailyAccumulation
 import { evaluateAccumulatingPots } from "./pot/PotEvaluator.js";
 import type { ComplianceLedgerPort } from "../adapters/ComplianceLedgerPort.js";
 import type { PrizePolicyPort } from "../adapters/PrizePolicyPort.js";
+// REGULATORISK-KRITISK (2026-05-14): slug-builder for å mappe family-form
+// ticketColor + size til slug-form (small_yellow/large_purple) som matcher
+// patternsForColor-lookups i Game1DrawEngineService.
+import { resolveColorSlugFromAssignment } from "./Game1DrawEngineHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-pot-evaluator" });
@@ -99,13 +103,18 @@ export function computeOrdinaryWinCentsByHallPerColor(args: {
   const { winners } = args;
   if (winners.length === 0) return new Map();
 
-  // Gruppe-key for split = ticketColor (matcher payoutPerColorGroups).
+  // REGULATORISK-KRITISK (2026-05-14): bruk slug-form (small_yellow/
+  // large_purple) som gruppe-key for å matche payoutPerColorGroups etter
+  // fix-en. Fallback til family-form når size mangler (legacy compat).
+  const slugFor = (w: Game1WinningAssignment): string =>
+    resolveColorSlugFromAssignment(w.ticketColor, w.ticketSize) ??
+    w.ticketColor;
+
+  // Gruppe-key for split = slug-form (matcher payoutPerColorGroups).
   const groupSizeByColor = new Map<string, number>();
   for (const w of winners) {
-    groupSizeByColor.set(
-      w.ticketColor,
-      (groupSizeByColor.get(w.ticketColor) ?? 0) + 1
-    );
+    const slug = slugFor(w);
+    groupSizeByColor.set(slug, (groupSizeByColor.get(slug) ?? 0) + 1);
   }
 
   // firstWinner per hall — array-orden (matcher PotEvaluator).
@@ -121,17 +130,22 @@ export function computeOrdinaryWinCentsByHallPerColor(args: {
 
   const result = new Map<string, number>();
   for (const [hallId, firstWinner] of firstWinnerPerHall) {
-    const color = firstWinner.ticketColor;
-    const groupSize = groupSizeByColor.get(color) ?? 1;
+    const colorKey = slugFor(firstWinner);
+    const groupSize = groupSizeByColor.get(colorKey) ?? 1;
     let ordinary = 0;
     try {
-      const patterns = args.patternsForColor(color);
+      // patternsForColor-callback i payoutPerColorGroups bruker også
+      // slug-form etter fix-en → samme lookup-key her.
+      const patterns = args.patternsForColor(colorKey);
       if (patterns) {
         // Floor-split (matcher Game1PayoutService.payoutPhase).
         const perWinner = Math.floor(patterns.totalPhasePrizeCents / groupSize);
         ordinary += Math.max(0, perWinner);
       }
-      ordinary += Math.max(0, args.jackpotForColor(color));
+      // jackpotForColor brukes med ticket_color family-form (matcher
+      // jackpotService.evaluate-API som ikke trenger size). Behold family-
+      // form her for å unngå å bryte jackpot-routing.
+      ordinary += Math.max(0, args.jackpotForColor(firstWinner.ticketColor));
     } catch {
       // Fail-safe: 0 = bakoverkompat (pot-evaluator bruker som ingen trim).
       ordinary = 0;

@@ -138,6 +138,11 @@ import {
   // (small_yellow / large_purple / ...) til vekt for pot-skalering.
   resolveOddsenVariantConfig,
   bongMultiplierForColorSlug,
+  // REGULATORISK-KRITISK (2026-05-14): bygg color-slug fra
+  // (ticket_color family-form, ticket_size) så payout-pathen kan slå opp
+  // riktig per-farge pre-multiplisert premie i ticket_config_json. Fix for
+  // runde 7dcbc3ba (payout-feil — auto-mult mistet).
+  resolveColorSlugFromAssignment,
   // Trafikklys runtime (2026-05-08, §5 i SPILL_REGLER_OG_PAYOUT.md):
   // resolveTrafikklysVariantConfig leser top-level Trafikklys-config (rad-
   // farge-styrt pot for Rad 1-4 + Fullt Hus). isTrafikklysRowColor brukes
@@ -2408,6 +2413,14 @@ export class Game1DrawEngineService {
     // unit-test-mocks som matcher på `"SELECT id, grid_numbers_json, ..."`-
     // substring må oppdateres for å matche `"SELECT a.id, a.grid_numbers_json"`
     // (gjøres i samme PR).
+    // REGULATORISK-KRITISK (2026-05-14): SELECT inkluderer `a.ticket_size`
+    // slik at `payoutPerColorGroups` kan bygge riktig slug
+    // (small_yellow/large_purple/etc.) for å slå opp per-farge pre-
+    // multipliserte premier i ticket_config_json.spill1.ticketColors[].
+    // Uten size kan engine ikke skille small_yellow (×2) fra large_yellow
+    // (×4) og auto-multiplikator (yellow×2, purple×3) går tapt for ALLE
+    // rad-faser → spillere får for lav premie (DB-bevis: runde 7dcbc3ba
+    // 2026-05-14).
     const { rows } = await client.query<{
       id: string;
       grid_numbers_json: unknown;
@@ -2415,8 +2428,9 @@ export class Game1DrawEngineService {
       buyer_user_id: string;
       hall_id: string;
       ticket_color: string;
+      ticket_size: string | null;
     }>(
-      `SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id, a.hall_id, a.ticket_color
+      `SELECT a.id, a.grid_numbers_json, a.markings_json, a.buyer_user_id, a.hall_id, a.ticket_color, a.ticket_size
          FROM ${this.assignmentsTable()} a
          JOIN "${this.schema}"."app_game1_ticket_purchases" p ON p.id = a.purchase_id
         WHERE a.scheduled_game_id = $1
@@ -2459,12 +2473,22 @@ export class Game1DrawEngineService {
       if (eval_.isWinner) {
         // Slå opp wallet-id for buyer via separat query (én rad).
         const walletId = await this.resolveWalletIdForUser(client, row.buyer_user_id);
+        // REGULATORISK-KRITISK (2026-05-14): ticketSize MÅ propageres til
+        // payout-pathen for å bygge riktig color-slug
+        // (small_yellow/large_purple) som matcher
+        // ticket_config_json.spill1.ticketColors[].color. Uten size faller
+        // engine til __default__ matrise (HVIT-base) og auto-mult går tapt.
+        const ticketSize: "small" | "large" | undefined =
+          row.ticket_size === "small" || row.ticket_size === "large"
+            ? row.ticket_size
+            : undefined;
         winners.push({
           assignmentId: row.id,
           walletId,
           userId: row.buyer_user_id,
           hallId: row.hall_id,
           ticketColor: row.ticket_color,
+          ticketSize,
         });
       }
     }
@@ -2593,10 +2617,26 @@ export class Game1DrawEngineService {
         // global-pot-andel. Vi bruker firstColor's pot direkte (som er
         // base × bongMultiplier via patternPrizeToCents) og deler på
         // firstColor-gruppe-størrelse.
-        const firstWinnerColor = winners[0]?.ticketColor;
-        if (firstWinnerColor) {
-          const firstColorGroupSize = winners.filter((w) => w.ticketColor === firstWinnerColor).length;
-          const firstColorEngineName = resolveEngineColorName(firstWinnerColor) ?? firstWinnerColor;
+        const firstWinner = winners[0];
+        if (firstWinner) {
+          // REGULATORISK-KRITISK (2026-05-14): bygg slug fra
+          // (color, size) for å matche patternsByColor-keys. Pre-fix
+          // brukte family-form direkte → ingen match → default-pattern
+          // (HVIT-base) → broadcast viste feil prizePerWinner. Faktisk
+          // payout via payoutPerColorGroups var også feil før — bug fikset
+          // samtidig over.
+          const firstWinnerSlug =
+            resolveColorSlugFromAssignment(
+              firstWinner.ticketColor,
+              firstWinner.ticketSize,
+            ) ?? firstWinner.ticketColor;
+          const firstColorGroupSize = winners.filter(
+            (w) =>
+              (resolveColorSlugFromAssignment(w.ticketColor, w.ticketSize) ??
+                w.ticketColor) === firstWinnerSlug,
+          ).length;
+          const firstColorEngineName =
+            resolveEngineColorName(firstWinnerSlug) ?? firstWinnerSlug;
           const firstColorPatterns = resolvePatternsForColor(
             variantConfig,
             firstColorEngineName,
@@ -2616,7 +2656,7 @@ export class Game1DrawEngineService {
                   drawSequenceAtWin <= oddsenCfg.targetDraw ? "high" : "low";
                 const baseForBucket =
                   bucket === "high" ? oddsenCfg.bingoBaseHigh : oddsenCfg.bingoBaseLow;
-                const multiplier = bongMultiplierForColorSlug(firstWinnerColor);
+                const multiplier = bongMultiplierForColorSlug(firstWinnerSlug);
                 if (multiplier !== null) {
                   firstColorTotalPrizeCents = baseForBucket * multiplier;
                 }
@@ -2994,9 +3034,33 @@ export class Game1DrawEngineService {
           resolveOddsenVariantConfig(gameConfigJson)
         : null;
 
-    // Grupper winners per ticketColor (= bongstørrelse-slug). En spiller
-    // med 3 lilla-bonger havner i samme gruppe; en spiller med 1 hvit + 1
-    // lilla havner i to grupper.
+    // REGULATORISK-KRITISK (2026-05-14, fix for runde 7dcbc3ba payout-feil):
+    //
+    // Grupper winners per (ticketColor × ticketSize)-SLUG, ikke per family-
+    // form alene. `app_game1_ticket_assignments.ticket_color` lagres som
+    // family-form ("yellow"/"purple"/"white") av `Game1TicketPurchaseService`,
+    // men `ticket_config_json.spill1.ticketColors[]` keys og engine
+    // `patternsByColor` keys er SLUG-form ("small_yellow"/"large_purple")
+    // hhv. ENGINE-NAVN ("Small Yellow"/"Large Purple").
+    //
+    // Pre-fix bug: payoutPerColorGroups brukte family-form direkte som
+    // lookup-key → ingen match i `patternsByColor` → fall til __default__
+    // (DEFAULT_NORSK_BINGO_CONFIG, HVIT-base) → auto-multiplikator (yellow×2,
+    // purple×3) gikk tapt for ALLE rad-faser → spillere fikk for lav premie.
+    //
+    // DB-bevis (runde 7dcbc3ba 2026-05-14):
+    //   - Yellow Rad 1: utbetalt 100 kr, skal være 200 (= base 100 × 2)
+    //   - Purple Rad 2: utbetalt 200 kr, skal være 300 (= base 100 × 3)
+    //   - Yellow Rad 3 og 4: utbetalt 200 kr (når base 100 × 2 = 200 stemte)
+    //
+    // Etter fix: vi grupperer per slug (small_yellow, large_purple, …) og
+    // bruker engine-navn for `patternsByColor`-oppslag.
+    //
+    // En spiller med 3 lilla small-bonger havner i samme gruppe; en spiller
+    // med 1 small_white + 1 small_yellow havner i to grupper. En spiller med
+    // small_yellow + large_yellow havner OGSÅ i to grupper (small × 2 = 200,
+    // large × 4 = 400 — separate potter per pengespillforskriften §9 og
+    // SPILL_REGLER_OG_PAYOUT.md).
     const winnersByColor = new Map<
       string,
       Array<Game1WinningAssignment & { userId: string }>
@@ -3006,17 +3070,29 @@ export class Game1DrawEngineService {
     // evaluateAndPayoutPhase).
     const colorOrder: string[] = [];
     for (const w of winners) {
-      let list = winnersByColor.get(w.ticketColor);
+      // Slug-form key (small_yellow/large_purple/etc.) — matcher
+      // ticket_config_json.spill1.ticketColors[].color og
+      // engine-navn-mapping i SCHEDULER_COLOR_SLUG_TO_NAME. Fallback til
+      // family-form for backwards-compat (legacy tester med slug-form
+      // ticket_color uten size).
+      const groupKey =
+        resolveColorSlugFromAssignment(w.ticketColor, w.ticketSize) ??
+        w.ticketColor;
+      let list = winnersByColor.get(groupKey);
       if (!list) {
         list = [];
-        winnersByColor.set(w.ticketColor, list);
-        colorOrder.push(w.ticketColor);
+        winnersByColor.set(groupKey, list);
+        colorOrder.push(groupKey);
       }
       list.push(w);
     }
 
     for (const color of colorOrder) {
       const groupWinners = winnersByColor.get(color)!;
+      // `color` her er allerede slug-form (small_yellow) når family+size
+      // var tilgjengelig, ellers family-form (yellow) for legacy compat.
+      // resolveEngineColorName mapper begge: slug → "Small Yellow",
+      // family → uendret (faller deretter til __default__).
       const engineName = resolveEngineColorName(color) ?? color;
       const colorPatterns = resolvePatternsForColor(
         variantConfig,
@@ -3038,6 +3114,8 @@ export class Game1DrawEngineService {
       // Pot-størrelse for denne bongstørrelsen.
       // - Standard: patternPrizeToCents(pattern, pot) — bridge har allerede
       //   skalert basen × bongMultiplier per (color, size) via auto-mult.
+      //   Forutsetter at engineName matcher patternsByColor (post-fix:
+      //   color er slug-form når mulig → matches korrekt).
       // - Oddsen Fullt Hus: HIGH/LOW base × bongMultiplier. Bestemmes per
       //   gruppe basert på drawSequenceAtWin vs targetDraw.
       let potForBongSizeCents = phasePattern
