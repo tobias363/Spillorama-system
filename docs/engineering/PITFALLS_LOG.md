@@ -1055,13 +1055,11 @@ Dette er arv fra opprinnelig implementasjon før PR #1422 introduserte `previous
 - `.husky/`-config deles, men deps må være per-worktree
 - Test-engineer / agent som jobber i worktree må ha node_modules
 
-### §6.5 — `.crdownload`-filer i wireframe-katalog
+### §6.5 — `.crdownload`-filer i wireframe-katalog (FIXED P3, 2026-04-23)
 
-**Severity:** P3 (data-tap)
-**Oppdaget:** 2026-04-23
-**Symptom:** Wireframes i `docs/wireframes/` med `.crdownload`-suffiks → ufullstendige filer
-**Fix:** Re-last fra Tobias' originale kilde
-**Prevention:** Sjekk filstørrelse / PDF-validity før commit
+- **Symptom:** Wireframes i `docs/wireframes/` med `.crdownload`-suffiks → ufullstendige filer
+- **Fix:** Re-last fra Tobias' originale kilde
+- **Prevention:** Sjekk filstørrelse / PDF-validity før commit
 
 ### §6.6 — Manuell iterasjons-loop konvergerer ikke
 
@@ -1386,11 +1384,11 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - Spill 1 = master-trigger ONLY
 - `WaitingForMasterOverlay`-komponent må mountes når status !== `running`
 
-### §7.4 — Browser-debugging via chrome-devtools-mcp, IKKE computer-use
+### §7.4 — Browser-debugging via chrome-devtools-mcp, IKKE computer-use (FIXED P2, 2026-04)
 
-**Severity:** P2 (workflow)
-**Oppdaget:** 2026-04 (memory: debug_preference.md)
-**Prevention:** Bruk `chrome-devtools-mcp` for console logs, screenshots, JS eval, network. Aldri computer-use for browser-tasks.
+- **Symptom:** Workflow-anti-mønster — agent bruker computer-use for browser-tasks
+- **Fix:** Bruk `chrome-devtools-mcp` for console logs, screenshots, JS eval, network
+- **Prevention:** memory: `debug_preference.md` — aldri computer-use for browser-tasks
 
 ### §7.5 — Frontend må normalisere query-params før backend-kall
 
