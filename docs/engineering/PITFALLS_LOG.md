@@ -1593,6 +1593,36 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 - `.claude/skills/spill1-master-flow/SKILL.md` "Premietabell-rendering (3-bong-grid)"
 - §1.9 (payout auto-mult-fix PR #1417 — server-side, parallel mønster)
 
+### §7.24 — Premie-celle-størrelse iterasjon (Tobias 2026-05-14)
+
+**Severity:** P2 (UX-polish — pilot-blokker for layout-godkjennelse)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv etter PR #1442 første iterasjon: "kan også gjøre dem litt smalere i høyde og bredde så det matcher mer bilde. så det ikke tar så mye plass. vil ikke at høyden så være så mye mer en hva det er på spillet nå pga plass")
+**Symptom:** Etter §7.23-redesignet (5×3 grid med solid bong-fargede celler) ble tabellen visuelt høyere enn dagens enkelt-pill-stack. På `g1-center-top` (mockup-mål 860 px bredde × ~115 px høyde) tok 5 rader × 30 px = 150 px — over halvparten av tilgjengelig top-panel-høyde. Spillet trenger plass til mini-grid + player-info + actions samtidig, så enhver vertikal vekst i premietabellen presser ut nabokomponentene.
+**Root cause:** Default `padding 6px 10px` + `gap 5px` på `.premie-row` ga ≈ 26 px rad-høyde (font 11px line-height ~16 px + 12 px vertikal padding). Med 5 rader + header + gap = ~155 px. Ingen visuelle størrelser var spesifisert ved første design-godkjennelse, så defaults arvet fra `.prize-pill` ble for romslige da 5 piller skalerte til 5 rader.
+**Fix (PR #1442 iterasjon V):**
+
+1. `.premie-table` `gap` 5px → **3px** (tighter rad-stack)
+2. `.premie-row` `padding` 6px 10px → **3px 8px**, `border-radius` 12px → **10px**
+3. `.premie-row .premie-cell` `padding` 4px 8px → **2px 6px** (cellen er nå smal vertikalt)
+4. `.premie-header` `padding` 0 10px → **0 8px** (matche rad-padding)
+5. `.premie-row` + `.premie-header` `grid-template-columns` minmax(64px,1fr) → **minmax(56px,1fr)** (mindre venstre-felt-bredde)
+6. Resultat: rad-høyde ≈ 16-18 px (font-line-height + 4 px vertikal padding). 5 rader + header + gap ≈ 95 px → matcher dagens enkelt-pill-fotavtrykk
+7. Utvidet `premie-design.html` til å vise hele `g1-center-top`-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) slik at Tobias kan vurdere designet i kontekst, ikke isolert
+8. Endringene speilet 1:1 både i `CenterTopPanel.ts` `ensurePatternWonStyles`-CSS og i `premie-design.html` `<style>`-blokken — sync via kommentar-marker "Tobias-direktiv 2026-05-14 iterasjon V"
+
+**Prevention:**
+- Visuell størrelse-spec MÅ bo i SKILL.md "Premietabell-rendering" (§celle-størrelse tabell). Hvis fremtidig agent endrer padding/gap/font-size må skill-tabellen oppdateres samtidig.
+- ALDRI øk `.premie-row` padding over `3px 8px` eller `gap` over `3px` uten Tobias-godkjennelse — det regresserer iterasjon V.
+- Design-side `premie-design.html` MÅ holdes 1:1 med `ensurePatternWonStyles`-CSS. Kommentar-markører i begge filer (`Tobias-direktiv 2026-05-14 iterasjon V`) gjør at fremtidige agenter ser at de to filene er synkronisert.
+- Hvis layout-mockup endres senere (ny bredde-allokering, ny font, etc.) — bygg `premie-design.html` FØRST og få Tobias-godkjennelse FØR du rør prod-CSS-en. Loop-iterasjon i live spill er forbudt (jf. Tobias-direktiv §2.12).
+- Tester: ingen nye assertions på piksel-størrelse (vil bli skjør), men 1275 eksisterende game-client-tester (inkl. `premieTable.test.ts` 18 stk + `no-backdrop-filter-regression.test.ts`) ble alle kjørt grønt etter endringen som "klassene + structure-paritet"-sjekk.
+
+**Related:**
+- §7.23 (forrige iterasjon — denne entry-en bygger videre på den)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` `ensurePatternWonStyles`
+- `packages/game-client/src/premie-design/premie-design.html`
+- `.claude/skills/spill1-master-flow/SKILL.md` "Premietabell-rendering" §celle-størrelse
+
 ---
 
 ## §8 Doc-disiplin
@@ -2158,3 +2188,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-13 | Lagt til §5.9 (cascade-rebase pattern), §5.10 (add/add `-X ours`-strategi), §6.15 (SIGPIPE + pipefail i awk-pipe), §6.16 (npm workspace lock isolation), §9.9 (seed-FK ordering), §11.14 (≥10 parallelle agenter stream-timeout), §11.15 (additive-merge Python-resolver), §11.16 (worktree fork-from-wrong-branch cascade). Funn under Wave 2/3-sesjon 2026-05-13. Total 86→92 entries. | PM-AI (E6 redo) |
 | 2026-05-14 | Utvidet §3.11 (PR #1411 sub-bug PR #1408): la til Fase 2-prevention-bullet for `buildVariantConfigFromSpill1Config` som mapper `priceNok / minPriceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter entryFee men IKKE multipliers — derfor komplementær fix. 7 nye tester i `spill1VariantMapper.test.ts`. | Fix-agent F3 |
 | 2026-05-14 | Lagt til §7.19 — "Forbereder rommet..."-spinner henger evig etter runde-end. Tobias-rapport 2026-05-14 09:54 (runde 330597ef). Fix: `MAX_PREPARING_ROOM_MS = 15s`-max-timeout i `Game1EndOfRoundOverlay` med forced auto-return via `onBackToLobby`. Erstatter eldre 30s "Venter på master"-tekst-swap som ikke utløste redirect. | Fix-agent (auto-return) |
+| 2026-05-14 | Lagt til §7.24 — premie-celle-størrelse iterasjon V (Tobias-direktiv etter første PR #1442-runde: "smalere, så det matcher mer bilde, ikke tar så mye plass"). Reduserte `.premie-row` padding 6px 10px→3px 8px, `gap` 5px→3px, `.premie-cell` padding 4px 8px→2px 6px. Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele center-top-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) for layout-vurdering i kontekst. | Agent V (CSS-iterasjon) |
