@@ -241,6 +241,31 @@ function formatMiniGameLabel(result: MiniGameResultPayload | null): string {
  */
 export type EndOfRoundPhase = "SUMMARY" | "LOADING" | "COUNTDOWN";
 
+/**
+ * En enkelt vinst-rad for spilleren (en bestemt fase + bongfarge). Brukes av
+ * Game1Controller for å samle alle pattern:won-events der spilleren var blant
+ * vinnerne, slik at WinScreen kan vise eksakt hva som ble vunnet.
+ *
+ * Tobias-direktiv 2026-05-14 (WinScreen-bug): WinScreen skal vise KUN faser
+ * spilleren har vunnet. Hvis spilleren vant Rad 2 i to ticket-colors (eks.
+ * purple 300 kr + white 100 kr), skal begge vises som separate rader. Ingen
+ * "Ikke vunnet"-default for faser uten vinst.
+ */
+export interface MyPhaseWinRecord {
+  /** Fase-nummer 1-5 (1=Rad 1, 5=Fullt Hus). Brukes til sortering. */
+  phase: number;
+  /** Display-navn ("1 Rad", "Fullt Hus" etc.). Vises i tabellen. */
+  patternName: string;
+  /** Bongfarge for vinninga (eks. "yellow"/"white"/"purple"). Optional. */
+  ticketColor?: string;
+  /** Vinning i kroner (per-vinner-andel allerede beregnet av server). */
+  payoutAmount: number;
+  /** Trekningsnummer ved seier (audit-info). */
+  wonAtDraw?: number;
+  /** Antall medvinnere på fasen (1 = solo). Brukes for "Du delte med X"-tekst. */
+  sharedCount?: number;
+}
+
 export interface Game1EndOfRoundSummary {
   /** From `currentGame.endedReason`. Drives header copy. */
   endedReason: string | undefined;
@@ -259,6 +284,25 @@ export interface Game1EndOfRoundSummary {
    * `roundAccumulatedWinnings`). Hvis omitted, beregnes fra patternResults.
    */
   ownRoundWinnings?: number;
+  /**
+   * Tobias-direktiv 2026-05-14 (WinScreen-bug):
+   *
+   * Per-vinst-rader for spilleren — KUN faser/bongfarger spilleren har vunnet.
+   * Når denne er satt, vises listen i stedet for den tradisjonelle
+   * patternResults-tabellen (som viste ALLE 5 faser med "Ikke vunnet"-default
+   * for ikke-vunnede). Game1Controller akkumulerer denne ved hvert
+   * `pattern:won`-event der spilleren er i `winnerIds`.
+   *
+   * Designvalg:
+   *   - Tom liste (`[]`) → "Beklager, ingen gevinst" vises (ikke 5 "Ikke
+   *     vunnet"-rader). Spectator-runder bruker fortsatt isSpectator-pathen.
+   *   - Sorteres etter `phase` (1 → 5) før render.
+   *   - Multi-vinst per fase (eks. yellow + purple på Rad 2) vises som
+   *     separate rader — én rad per record.
+   *   - Omitted (`undefined`) → fall tilbake til legacy patternResults-tabellen
+   *     for backwards-compat med tester og andre call-sites.
+   */
+  myWinnings?: ReadonlyArray<MyPhaseWinRecord>;
   /**
    * @deprecated Ubrukt etter Tobias-mandat 2026-04-29 — overlay har ikke
    * lenger countdown. Beholdes i typen for backward-kompatibilitet.
@@ -1052,7 +1096,157 @@ export class Game1EndOfRoundOverlay {
     return Math.round(total);
   }
 
+  /**
+   * Bygg vinnings-tabellen som vises i SUMMARY-fasen.
+   *
+   * Tobias-direktiv 2026-05-14 (WinScreen-bug):
+   *   - Hvis `summary.myWinnings` er satt (Game1Controller-pathen): vis KUN
+   *     rader spilleren har vunnet. Tom liste → "Beklager, ingen gevinst".
+   *   - Hvis ikke (legacy/test-path): bruk eksisterende patternResults-tabell
+   *     som viser alle 5 faser med vinner-info.
+   *
+   * `myWinnings`-pathen er den nye sannheten — patternResults-pathen er
+   * backwards-compat for eksisterende tester og andre call-sites som ikke
+   * vet om myWinnings ennå.
+   */
   private buildPatternsTable(
+    summary: Game1EndOfRoundSummary,
+  ): HTMLDivElement {
+    // Ny path: bruk myWinnings hvis Game1Controller har sendt listen
+    // (eksplisitt-satt — undefined = legacy-path).
+    if (summary.myWinnings !== undefined) {
+      return this.buildMyWinningsTable(summary.myWinnings);
+    }
+    // Legacy-path: behold eksisterende patternResults-tabell for
+    // backwards-compat. Brukes av eldre tester og evt. fremtidige
+    // call-sites som ikke har myWinnings-data.
+    return this.buildLegacyPatternsTable(summary);
+  }
+
+  /**
+   * Bygg ny "kun-vinninger"-tabell.
+   *
+   * Tomt array (`[]`) → "Beklager, ingen gevinst" + ingen rad-liste.
+   * Sortert etter `phase` (1 → 5). Hver record blir én rad — multi-vinst per
+   * fase (eks. yellow + purple på Rad 2) vises som to separate rader.
+   */
+  private buildMyWinningsTable(
+    winnings: ReadonlyArray<MyPhaseWinRecord>,
+  ): HTMLDivElement {
+    const wrap = document.createElement("div");
+    wrap.setAttribute("data-testid", "eor-my-winnings-table");
+    Object.assign(wrap.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "6px",
+      textAlign: "left",
+    });
+
+    if (winnings.length === 0) {
+      const empty = document.createElement("div");
+      empty.setAttribute("data-testid", "eor-no-winnings");
+      Object.assign(empty.style, {
+        padding: "16px 12px",
+        fontSize: "14px",
+        fontWeight: "600",
+        color: "rgba(244,232,208,0.72)",
+        textAlign: "center",
+        background: "rgba(255,255,255,0.03)",
+        border: "1px dashed rgba(255,255,255,0.08)",
+        borderRadius: "10px",
+      });
+      empty.textContent = "Beklager, ingen gevinst";
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    // Sorter stabilt etter phase (1 → 5). Records med samme phase beholder
+    // sin opprinnelige rekkefølge (Array.prototype.sort er stable i ES2019+).
+    const sorted = [...winnings].sort((a, b) => a.phase - b.phase);
+
+    for (const record of sorted) {
+      wrap.appendChild(this.buildMyWinningsRow(record));
+    }
+
+    return wrap;
+  }
+
+  private buildMyWinningsRow(record: MyPhaseWinRecord): HTMLDivElement {
+    const row = document.createElement("div");
+    row.setAttribute("data-testid", "eor-my-winnings-row");
+    row.setAttribute("data-phase", String(record.phase));
+    if (record.ticketColor) {
+      row.setAttribute("data-ticket-color", record.ticketColor);
+    }
+    Object.assign(row.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "8px 12px",
+      background: "rgba(245,184,65,0.1)",
+      border: "1px solid rgba(245,184,65,0.32)",
+      borderRadius: "8px",
+    });
+
+    const left = document.createElement("div");
+    Object.assign(left.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "1px",
+    });
+
+    const nameEl = document.createElement("div");
+    Object.assign(nameEl.style, {
+      fontSize: "13px",
+      fontWeight: "700",
+      color: "#f4e8d0",
+    });
+    // Inkluder bongfarge inline hvis tilgjengelig (eks. "Rad 2 — yellow")
+    // slik at spilleren ser at de vant samme fase i to farger.
+    nameEl.textContent = record.ticketColor
+      ? `${record.patternName} — ${record.ticketColor}`
+      : record.patternName;
+    left.appendChild(nameEl);
+
+    const labelEl = document.createElement("div");
+    Object.assign(labelEl.style, {
+      fontSize: "11px",
+      fontWeight: "500",
+      color: "rgba(244,232,208,0.7)",
+    });
+    const shared = (record.sharedCount ?? 1) > 1;
+    if (shared) {
+      const others = (record.sharedCount ?? 1) - 1;
+      labelEl.textContent = `Du delte med ${others} ${others === 1 ? "annen" : "andre"}`;
+    } else {
+      labelEl.textContent = "Du vant";
+    }
+    left.appendChild(labelEl);
+
+    row.appendChild(left);
+
+    const right = document.createElement("div");
+    Object.assign(right.style, {
+      fontSize: "14px",
+      fontWeight: "800",
+      color: "#f5c842",
+    });
+    right.textContent = `${formatKr(record.payoutAmount)} kr`;
+    row.appendChild(right);
+
+    return row;
+  }
+
+  /**
+   * Legacy patternResults-tabell — beholdes for backwards-compat med tester
+   * som ikke sender `myWinnings`. Viser alle 5 faser med "Ikke vunnet"-tekst
+   * for ikke-vunnede.
+   *
+   * Tobias-direktiv 2026-05-14: nye call-sites SKAL sende `myWinnings` slik
+   * at "Ikke vunnet"-default ikke vises til spillere. Denne pathen er kun
+   * for backwards-compat.
+   */
+  private buildLegacyPatternsTable(
     summary: Game1EndOfRoundSummary,
   ): HTMLDivElement {
     const wrap = document.createElement("div");

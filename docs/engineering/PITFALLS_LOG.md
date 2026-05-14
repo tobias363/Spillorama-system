@@ -1310,6 +1310,32 @@ Generic `BingoEngine.startGame`-flyt (via `gameLifecycleEvents.ts:153`) kaller `
 
 ---
 
+### §7.22 — WinScreen viser bare Fullt Hus, mister Rad 1-4-vinster (BUG)
+
+**Severity:** P0 (pilot-UX — spillere ser ikke alle premiene de vant)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 13:00, runde 1edd90a1)
+**Symptom:** Spiller vant 6 fase-rader totalt (Rad 1 yellow 200kr, Rad 2 purple 300kr + white 100kr, Rad 3 white 100kr, Rad 4 white 100kr, Fullt Hus white 1000kr — DB-verifisert i `app_game1_phase_winners` for `scheduled_game_id LIKE '1edd90a1%' AND winner_user_id='demo-user-admin'`). WinScreen viste KUN "Fullt Hus 1000 kr Du vant" — Rad 1-4 viste feilaktig "Ikke vunnet".
+**Root cause:** Scheduled Spill 1 sin `enrichScheduledGame1RoomSnapshot` (`apps/backend/src/game/Game1ScheduledRoomSnapshot.ts:268`) returnerer `patternResults: []` (synthetic snapshot uten engine-state — det er Game1DrawEngineService som driver state-machinen, ikke BingoEngine). Når game-end-snapshot ankommer via `room:update`, `GameBridge.applyGameSnapshot` (linje 856) RESETTER `state.patternResults = game.patternResults || []` til tom liste. Deretter SEEDER `handleRoomUpdate` patternResults fra `gameVariant.patterns` med `isWon: false` for alle 5 faser (linje 629-636). Den siste `pattern:won` (Fullt Hus) ankommer i mellomtiden og overskriver `isWon=true` på Fullt Hus, men Rad 1-4 forblir `isWon: false` i den seedede listen.
+**Fix (PR #<this-PR>):**
+1. Game1Controller akkumulerer `myRoundWinnings: MyPhaseWinRecord[]` per `pattern:won`-event der spilleren er i `winnerIds` (samme path som `roundAccumulatedWinnings`-summen, så ingen synkroniserings-glipp). Reset ved `gameStarted`.
+2. `Game1EndOfRoundOverlay.show()` mottar `summary.myWinnings` (snapshot via spread). Overlay viser KUN faser spilleren har vunnet.
+3. Tom liste → "Beklager, ingen gevinst" (ikke 5 "Ikke vunnet"-rader).
+4. Multi-color per fase (eks. yellow + purple på Rad 2) vises som separate rader sortert etter `phase` (1 → 5).
+5. Backwards-compat: hvis `myWinnings` er `undefined` faller overlay tilbake til legacy `patternResults`-tabell (for eksisterende tester og andre call-sites).
+**Prevention:**
+- **ALDRI** vis "Ikke vunnet"-default for ikke-vunnede faser i et SUMMARY-skjerm — kun vinnende rader skal vises. Tom liste = "Beklager, ingen gevinst".
+- **ALDRI** stol på `state.patternResults` post-game-end for scheduled Spill 1 — snapshot er synthetic og reset av `applyGameSnapshot`. Bruk per-event-tracking (akkumulert i Controller) som single source of truth.
+- Multi-color per fase: backend's `pattern:won`-wire har ÉN `payoutAmount` per fase (første color-gruppes per-vinner-andel). Klient kan IKKE rekonstruere alle color-vinninger fra `pattern:won` alene — kun det som ble annonsert i live-pop-ups. For full per-color-breakdown må backend utvide wire-formatet til `phaseWinners[]` (TODO post-pilot).
+- **Tester:** `Game1EndOfRoundOverlay.winnerFiltering.test.ts` (22 tester) dekker 5 scenarier: alt vunnet, sparse-win (Rad 1 + Fullt Hus), ingen vinst, multi-vinst per fase, og backwards-compat.
+**Related:**
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts` (ny `myWinnings`-path + `buildMyWinningsTable`)
+- `packages/game-client/src/games/game1/Game1Controller.ts` (`myRoundWinnings`-tracker)
+- `apps/backend/src/game/Game1ScheduledRoomSnapshot.ts:268` (kilden til snapshot-reset-bugen)
+- `packages/game-client/src/bridge/GameBridge.ts:856` (`applyGameSnapshot` reset-stedet)
+- §7.18 (Innsats vs Forhåndskjøp dobbel-telling — beslektet "skip-stale-data"-pattern)
+
+---
+
 ### §7.17 — Hall-switcher må re-fetche game-status (BUG)
 
 **Severity:** P0 (pilot-UX-bug — spiller ser feil hall-status)

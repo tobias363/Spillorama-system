@@ -554,6 +554,70 @@ ALDRI fjern disse kilden fra payout-pipeline — den er regulatorisk forpliktet 
 - `apps/backend/src/game/Game1MasterControlService.onEngineStarted.test.ts` (5 tester — Fase 3)
 - Snapshot-baseline i `apps/backend/src/game/__tests__/r2InvariantsBaseline.test.ts` — verifiserer at ticket_config_json propageres til scheduled-games-raden
 
+## WinScreen viser kun vinnende rader (Tobias 2026-05-14)
+
+Etter runde-end skal `Game1EndOfRoundOverlay` vise KUN faser spilleren har
+vunnet. Dette er kritisk pilot-UX — Tobias-rapport 2026-05-14 13:00 (runde
+1edd90a1) viste at WinScreen feilaktig viste "Ikke vunnet" for Rad 1-4 selv
+om DB-en (`app_game1_phase_winners`) hadde alle 6 vinninger korrekt
+registrert.
+
+### Designvalg (immutable)
+
+- **Vis KUN faser spilleren har vunnet** (`winnerUserId === myPlayerId`).
+  Ikke 5 rader med "Ikke vunnet"-default.
+- **Sort etter `phase` 1 → 5** for konsistent rekkefølge.
+- **Multi-vinst i samme fase** (yellow + white i Rad 2) → vis begge separat.
+  Hver record blir en egen rad.
+- **Ingen vinst** → "Beklager, ingen gevinst" (ikke skremmende, nøytral tone).
+  "Tilbake til lobby"-knapp forblir alltid synlig.
+- **ALDRI vis "Ikke vunnet"-rader** for faser uten vinst.
+
+### Datakilde
+
+Game1Controller akkumulerer `myRoundWinnings: MyPhaseWinRecord[]` per
+`pattern:won`-event der spilleren er i `winnerIds`. Reset ved `gameStarted`
+(samtidig med `roundAccumulatedWinnings`). Sendes til overlay via
+`summary.myWinnings` (snapshot via spread så overlay ikke kan mutere
+controller-state).
+
+**HVORFOR egen liste i Controller i stedet for `state.patternResults`:**
+- Scheduled Spill 1 sin `enrichScheduledGame1RoomSnapshot` returnerer
+  `patternResults: []` (synthetic snapshot uten engine-state).
+- Når game-end-snapshot ankommer via `room:update`, blir
+  `state.patternResults` RESET til [] av `GameBridge.applyGameSnapshot`.
+- Deretter SEEDET med `isWon: false` for alle 5 faser → "Ikke vunnet"-default.
+- Per-event tracking i klient er upåvirket av denne reset-pathen.
+
+### Multi-color per fase (kjent limitation)
+
+Backend's `pattern:won`-wire sender ÉN event per fase med første color-
+gruppes `payoutAmount`. Klient kan IKKE rekonstruere alle color-vinninger
+fra `pattern:won` alene — kun det som ble annonsert i live-pop-ups. WinScreen-
+totalen matcher derfor summen som ble vist undervegs (samme som
+`roundAccumulatedWinnings`).
+
+For full per-color-breakdown må backend utvide wire-formatet til
+`phaseWinners[]`-array i `room:update`-snapshot (eksponer
+`app_game1_phase_winners`-rader). TODO post-pilot.
+
+### Tester
+
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.winnerFiltering.test.ts` (22 tester):
+  - Scenario A — spiller vant alle faser (Tobias prod-bug runde 1edd90a1, 6 rader inkludert multi-color Rad 2)
+  - Scenario B — sparse-win (Rad 1 + Fullt Hus, ingen "Ikke vunnet" for Rad 2/3/4)
+  - Scenario C — ingen vinst → "Beklager, ingen gevinst"
+  - shared-count: "Du delte med X annen/andre" varianter
+  - ticket-color: vises inline når satt
+  - Backwards-compat: legacy patternResults-path når myWinnings undefined
+
+### ALDRI gjør
+
+- IKKE vis "Ikke vunnet"-default-rader i SUMMARY-skjerm
+- IKKE rekonstruer winnings fra `state.patternResults` post-game-end for scheduled Spill 1 — listen er reset+seeded av GameBridge
+- IKKE fjern `myRoundWinnings`-reset i `gameStarted`-handler — forrige rundes liste vil lekke inn i WinScreen ved rask round-transition
+- IKKE muter `summary.myWinnings`-listen inne i overlay — Controller eier sannheten
+
 ## Når denne skill-en er aktiv
 
 **Gjør:**
@@ -602,3 +666,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
+| 2026-05-14 | v1.7.0 — PR `fix/winscreen-show-only-winning-phases` (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
