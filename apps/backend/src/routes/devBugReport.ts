@@ -15,7 +15,11 @@
  *     4. Backend-stdout fra /tmp/spillorama-backend.log
  *     5. DB-state-dump: aktive plan-runs, scheduled-games, room-snapshots,
  *        players
- *     6. Diagnose-konklusjon basert på heuristikker
+ *     6. DB-audit (OBS-6 sin --quick --json)
+ *     7. Sentry-issues siste 10 min (OBS-10, server- og klient-feil)
+ *     8. PostHog-events siste 10 min for spillerens distinct_id (OBS-10)
+ *     9. Rrweb DOM-replay-link (OBS-10)
+ *    10. Auto-diagnose-heuristikker
  *
  *   Output skrives til /tmp/bug-report-<timestamp>.md slik at PM-agenten
  *   kan lese hele rapporten med ett verktøykall.
@@ -54,6 +58,21 @@ import type { Pool } from "pg";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import {
+  fetchSentryIssues,
+  buildSentryFetcherConfigFromEnv,
+  type SentryIssue,
+  type SentryFetcherConfig,
+  type FetchFn as SentryFetchFn,
+} from "../observability/sentryFetcher.js";
+import {
+  fetchPostHogEvents,
+  buildPostHogFetcherConfigFromEnv,
+  buildPostHogEventsLink,
+  type PostHogEvent,
+  type PostHogFetcherConfig,
+  type FetchFn as PostHogFetchFn,
+} from "../observability/posthogFetcher.js";
 
 export interface DevBugReportRouterDeps {
   pool: Pool;
@@ -92,6 +111,24 @@ const MAX_CLIENT_EVENTS = 500;
 /** Max 30 sek for audit-db-kjøring. Hvis den henger, dropper vi audit. */
 const DEFAULT_AUDIT_DB_TIMEOUT_MS = 30_000;
 
+/** OBS-10 — defaults for Sentry/PostHog/Rrweb-seksjonen.
+ *
+ * NB om SENTRY_STATS_PERIOD: Sentry's `statsPeriod`-felt godtar IKKE
+ * minutter (vi prøvde "10m" men fikk 400 "Invalid stats_period").
+ * Gyldige verdier inkluderer "1h", "24h", "14d". Vi bruker 1h som
+ * en god default for "rundt bug-tidspunktet".
+ */
+const DEFAULT_SENTRY_STATS_PERIOD = "1h";
+const DEFAULT_SENTRY_LIMIT = 25;
+const DEFAULT_SENTRY_TIMEOUT_MS = 10_000;
+const DEFAULT_POSTHOG_AFTER_MINUTES = 10;
+const DEFAULT_POSTHOG_LIMIT = 50;
+const DEFAULT_POSTHOG_TIMEOUT_MS = 10_000;
+/** Hvor vi leter etter rrweb-session-filer. */
+const DEFAULT_RRWEB_SESSIONS_DIR = "/tmp";
+/** URL-path til den statiske replayer-siden (apps/backend/public/). */
+const DEFAULT_RRWEB_REPLAYER_PATH = "/rrweb-replayer.html";
+
 /** Default path til audit-db.mjs (kan overrides for tester). */
 const DEFAULT_AUDIT_DB_SCRIPT = path.join(
   // process.cwd() ved hot-reload er apps/backend. I tester kan path overrides.
@@ -124,6 +161,41 @@ export interface DevBugReportRouterOptions {
   auditDbSchema?: string;
   /** Timeout for audit-db-child-process i ms (default 30 000). */
   auditDbTimeoutMs?: number;
+  /**
+   * OBS-10 — Sentry-fetcher-konfig. Hvis `null` skrur av Sentry-seksjonen
+   * helt (tester). Hvis `undefined` bygger vi config fra env.
+   */
+  sentryConfig?: SentryFetcherConfig | null;
+  /** Statsperiod for Sentry-issues (default "10m"). */
+  sentryStatsPeriod?: string;
+  /** Limit for Sentry-issues (default 25). */
+  sentryLimit?: number;
+  /** Timeout for Sentry-fetch i ms (default 10 000). */
+  sentryTimeoutMs?: number;
+  /** Sentry fetch-impl (default globalThis.fetch). */
+  sentryFetchFn?: SentryFetchFn;
+  /**
+   * OBS-10 — PostHog-fetcher-konfig. Hvis `null` skrur av PostHog-seksjonen
+   * helt (tester). Hvis `undefined` bygger vi config fra env.
+   */
+  posthogConfig?: PostHogFetcherConfig | null;
+  /** afterMinutes for PostHog-events (default 10). */
+  posthogAfterMinutes?: number;
+  /** Limit for PostHog-events (default 50). */
+  posthogLimit?: number;
+  /** Timeout for PostHog-fetch i ms (default 10 000). */
+  posthogTimeoutMs?: number;
+  /** PostHog fetch-impl (default globalThis.fetch). */
+  posthogFetchFn?: PostHogFetchFn;
+  /** OBS-10 — sessions-dir for rrweb-session-filer (default /tmp). */
+  rrwebSessionsDir?: string;
+  /** OBS-10 — URL-path til replayer-siden (default /rrweb-replayer.html). */
+  rrwebReplayerPath?: string;
+  /**
+   * OBS-10 — base-URL for replayer-link. Settes typisk fra request-host;
+   * når null bygges link uten host-prefix (`/rrweb-replayer.html?...`).
+   */
+  rrwebBaseUrl?: string;
 }
 
 function extractToken(req: express.Request): string {
@@ -558,6 +630,278 @@ function buildAuditDbSection(result: AuditDbResult): string[] {
   return lines;
 }
 
+/**
+ * OBS-10 — Bygg Sentry-seksjonen. Inkluderer tagging-filter på user.id /
+ * hall_id når disse er tilgjengelige i sessionContext.
+ *
+ * `issues` blir tom ved enhver feil (fetcher er fail-soft), så denne
+ * funksjonen rendrer alltid ut markdown — enten med data eller en
+ * "ingen issues"-melding.
+ */
+function buildSentryIssuesSection(args: {
+  issues: SentryIssue[];
+  statsPeriod: string;
+  config: SentryFetcherConfig | null;
+  userId: string | null;
+  hallId: string | null;
+  fetchSkipped: boolean;
+}): string[] {
+  const lines: string[] = [];
+  const filterParts: string[] = [];
+  if (args.userId) filterParts.push(`user.id=${args.userId}`);
+  if (args.hallId) filterParts.push(`hall_id=${args.hallId}`);
+  const filterStr =
+    filterParts.length > 0 ? `, filtrert på ${filterParts.join(" + ")}` : "";
+
+  lines.push(`## 🛰️ Sentry-issues (siste ${args.statsPeriod}${filterStr})`);
+  lines.push("");
+
+  if (args.fetchSkipped || !args.config) {
+    lines.push(
+      "_Sentry-fetch hoppet over — SENTRY_AUTH_TOKEN/SENTRY_ORG ikke konfigurert i `apps/backend/.env.local`._",
+    );
+    lines.push("");
+    return lines;
+  }
+
+  if (args.issues.length === 0) {
+    lines.push(
+      "_Ingen issues funnet i periode/filter — eller fetch feilet (sjekk backend-stdout for warn)._",
+    );
+    lines.push("");
+    return lines;
+  }
+
+  for (const issue of args.issues) {
+    const tagPreview = issue.tags
+      .slice(0, 6)
+      .map((t) => `${t.key}=${t.value}`)
+      .join(", ");
+    lines.push(`- **[${issue.shortId || issue.id}]** ${issue.title}`);
+    if (issue.culprit) {
+      lines.push(`  - Culprit: \`${issue.culprit}\``);
+    }
+    lines.push(`  - Level: ${issue.level} · Count: ${issue.count}`);
+    if (issue.lastSeen) {
+      lines.push(`  - Last seen: ${issue.lastSeen}`);
+    }
+    if (tagPreview) {
+      lines.push(`  - Tags: ${tagPreview}`);
+    }
+    if (issue.permalink) {
+      lines.push(`  - Sentry: ${issue.permalink}`);
+    }
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * OBS-10 — Bygg PostHog-seksjonen. Tabell + dashboard-link.
+ */
+function buildPostHogSection(args: {
+  events: PostHogEvent[];
+  config: PostHogFetcherConfig | null;
+  distinctId: string | null;
+  afterMinutes: number;
+  fetchSkipped: boolean;
+}): string[] {
+  const lines: string[] = [];
+  const target = args.distinctId
+    ? `distinct_id=${args.distinctId}`
+    : "alle distinct_ids";
+
+  lines.push(`## 📊 PostHog-events (siste ${args.afterMinutes} min, ${target})`);
+  lines.push("");
+
+  if (args.fetchSkipped || !args.config) {
+    lines.push(
+      "_PostHog-fetch hoppet over — POSTHOG_PERSONAL_API_KEY/POSTHOG_PROJECT_ID ikke konfigurert i `apps/backend/.env.local`._",
+    );
+    lines.push("");
+    return lines;
+  }
+
+  if (args.events.length === 0) {
+    lines.push(
+      "_Ingen events funnet i periode/filter — eller fetch feilet (sjekk backend-stdout for warn)._",
+    );
+    lines.push("");
+    // Likevel — tilby dashbord-link så PM kan utforske manuelt
+    if (args.config) {
+      const link = buildPostHogEventsLink(args.config, {
+        distinctId: args.distinctId ?? undefined,
+      });
+      lines.push(`PostHog: ${link}`);
+      lines.push("");
+    }
+    return lines;
+  }
+
+  lines.push("| Timestamp | Event | Properties (preview) |");
+  lines.push("|---|---|---|");
+  for (const ev of args.events) {
+    const ts = (ev.timestamp ?? "").slice(11, 19) || "—";
+    // Compact JSON i tabellen — trunkér til 120 tegn så markdown ikke
+    // sprenger linjebredden.
+    let propsPreview = "";
+    try {
+      propsPreview = JSON.stringify(ev.properties ?? {});
+    } catch {
+      propsPreview = "(unserializable)";
+    }
+    if (propsPreview.length > 120) {
+      propsPreview = `${propsPreview.slice(0, 117)}...`;
+    }
+    // Escape pipes så markdown-tabellen ikke brytes.
+    const escapedProps = propsPreview.replace(/\|/g, "\\|");
+    lines.push(`| ${ts} | \`${ev.event}\` | \`${escapedProps}\` |`);
+  }
+  lines.push("");
+
+  const link = buildPostHogEventsLink(args.config, {
+    distinctId: args.distinctId ?? undefined,
+  });
+  lines.push(`PostHog: ${link}`);
+  lines.push("");
+  return lines;
+}
+
+/**
+ * OBS-10 — Discover rrweb-session-id og bygg replay-link.
+ *
+ * Strategi:
+ *   1. Hvis klienten har sendt `sessionContext.rrwebSessionId`, bruk den.
+ *   2. Ellers se etter `/tmp/rrweb-session-*.jsonl` der filnavn-id
+ *      matcher noen del av `userId` eller `playerId` fra sessionContext.
+ *      Fallback til siste-modifiserte session-fil.
+ */
+function discoverRrwebSessionId(args: {
+  sessionContext: Record<string, unknown> | null;
+  sessionsDir: string;
+  fsImpl: typeof fs;
+}): string | null {
+  // 1. Eksplisitt fra klient
+  const ctx = args.sessionContext;
+  if (ctx) {
+    const explicit = ctx["rrwebSessionId"];
+    if (typeof explicit === "string" && explicit.trim().length > 0) {
+      return explicit.trim();
+    }
+  }
+
+  // 2. Lookup på disk
+  let entries: string[] = [];
+  try {
+    entries = args.fsImpl.readdirSync(args.sessionsDir);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      console.warn(
+        `[devBugReport] readdir(${args.sessionsDir}) feilet:`,
+        err,
+      );
+    }
+    return null;
+  }
+  const sessionFiles = entries.filter(
+    (n) => n.startsWith("rrweb-session-") && n.endsWith(".jsonl"),
+  );
+  if (sessionFiles.length === 0) {
+    return null;
+  }
+
+  // Sorter etter mtime descending (nyeste først).
+  type FileMtime = { name: string; mtimeMs: number };
+  const withMtime: FileMtime[] = [];
+  for (const name of sessionFiles) {
+    try {
+      const st = args.fsImpl.statSync(path.join(args.sessionsDir, name));
+      withMtime.push({ name, mtimeMs: st.mtimeMs });
+    } catch {
+      /* ignorer */
+    }
+  }
+  withMtime.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (withMtime.length === 0) return null;
+
+  const newestFirst = withMtime[0];
+  if (!newestFirst) return null;
+
+  // Default: bare bruk nyeste (sikrest når vi ikke har explicit hint).
+  const newest = newestFirst.name;
+  const match = /^rrweb-session-(.+)\.jsonl$/.exec(newest);
+  return match?.[1] ?? null;
+}
+
+/**
+ * OBS-10 — Bygg Rrweb-seksjonen. Linker direkte til replayer-siden.
+ */
+function buildRrwebSection(args: {
+  sessionId: string | null;
+  sessionsDir: string;
+  replayerPath: string;
+  baseUrl: string | null;
+}): string[] {
+  const lines: string[] = [];
+  lines.push("## 🎥 Rrweb DOM-replay");
+  lines.push("");
+
+  if (!args.sessionId) {
+    lines.push(
+      `_Ingen rrweb-session funnet — verifiser at klienten er startet med \`?debug=1\` og at events er flushet til \`${args.sessionsDir}/rrweb-session-*.jsonl\`._`,
+    );
+    lines.push("");
+    return lines;
+  }
+
+  const jsonlPath = path.join(
+    args.sessionsDir,
+    `rrweb-session-${args.sessionId}.jsonl`,
+  );
+  const linkBase = (args.baseUrl ?? "").replace(/\/$/, "");
+  const replayerLink = `${linkBase}${args.replayerPath}?session=${encodeURIComponent(args.sessionId)}`;
+
+  lines.push(`- **Session:** \`${args.sessionId}\``);
+  lines.push(`- **Replayer:** ${replayerLink}`);
+  lines.push(`- **JSONL:** \`${jsonlPath}\``);
+  lines.push("");
+  return lines;
+}
+
+/**
+ * OBS-10 — plukk første ikke-tomme string-felt fra et objekt blant en
+ * liste av kandidat-keys. Tåler null + manglende nøkler.
+ */
+function pickStringField(
+  obj: Record<string, unknown> | null | undefined,
+  keys: readonly string[],
+): string | null {
+  if (!obj) return null;
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim().length > 0) {
+      return v.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * OBS-10 — utled base-URL ("http(s)://host[:port]") fra Express-request.
+ * Returnerer null hvis vi ikke kan resolve.
+ */
+function deriveBaseUrl(req: express.Request): string | null {
+  try {
+    const host = req.get("host");
+    if (!host) return null;
+    const proto = req.protocol || "http";
+    return `${proto}://${host}`;
+  } catch {
+    return null;
+  }
+}
+
 /** Konvertér Date|string|null til ISO-string eller "—". */
 function isoOrDash(v: Date | string | null | undefined): string {
   if (!v) return "—";
@@ -675,6 +1019,30 @@ function buildReportMarkdown(args: {
   players: { rows: PlayerRow[]; error: string | null };
   diagnose: string[];
   auditDb?: AuditDbResult;
+  /** OBS-10 — Sentry-data + meta. */
+  sentry?: {
+    issues: SentryIssue[];
+    statsPeriod: string;
+    config: SentryFetcherConfig | null;
+    userId: string | null;
+    hallId: string | null;
+    fetchSkipped: boolean;
+  };
+  /** OBS-10 — PostHog-data + meta. */
+  posthog?: {
+    events: PostHogEvent[];
+    config: PostHogFetcherConfig | null;
+    distinctId: string | null;
+    afterMinutes: number;
+    fetchSkipped: boolean;
+  };
+  /** OBS-10 — Rrweb-session-link. */
+  rrweb?: {
+    sessionId: string | null;
+    sessionsDir: string;
+    replayerPath: string;
+    baseUrl: string | null;
+  };
 }): string {
   const {
     timestamp,
@@ -687,6 +1055,9 @@ function buildReportMarkdown(args: {
     players,
     diagnose,
     auditDb,
+    sentry,
+    posthog,
+    rrweb,
   } = args;
 
   const titleStr =
@@ -805,6 +1176,42 @@ function buildReportMarkdown(args: {
     }
   }
 
+  // OBS-10 — Sentry-issues
+  if (sentry) {
+    const sentryLines = buildSentryIssuesSection({
+      issues: sentry.issues,
+      statsPeriod: sentry.statsPeriod,
+      config: sentry.config,
+      userId: sentry.userId,
+      hallId: sentry.hallId,
+      fetchSkipped: sentry.fetchSkipped,
+    });
+    for (const l of sentryLines) lines.push(l);
+  }
+
+  // OBS-10 — PostHog-events
+  if (posthog) {
+    const posthogLines = buildPostHogSection({
+      events: posthog.events,
+      config: posthog.config,
+      distinctId: posthog.distinctId,
+      afterMinutes: posthog.afterMinutes,
+      fetchSkipped: posthog.fetchSkipped,
+    });
+    for (const l of posthogLines) lines.push(l);
+  }
+
+  // OBS-10 — Rrweb DOM-replay
+  if (rrweb) {
+    const rrwebLines = buildRrwebSection({
+      sessionId: rrweb.sessionId,
+      sessionsDir: rrweb.sessionsDir,
+      replayerPath: rrweb.replayerPath,
+      baseUrl: rrweb.baseUrl,
+    });
+    for (const l of rrwebLines) lines.push(l);
+  }
+
   // Pilot-monitor anomalier
   lines.push("## Pilot-monitor (siste 200 linjer)");
   lines.push("");
@@ -901,6 +1308,32 @@ export function createDevBugReportRouter(
   const auditDbTimeoutMs =
     opts.auditDbTimeoutMs ?? DEFAULT_AUDIT_DB_TIMEOUT_MS;
 
+  // ── OBS-10 — Sentry / PostHog / Rrweb-konfig ──────────────────────────
+  // `null` skrur av seksjonen (tester). `undefined` bygger fra env.
+  const sentryConfig: SentryFetcherConfig | null =
+    opts.sentryConfig === null
+      ? null
+      : (opts.sentryConfig ?? buildSentryFetcherConfigFromEnv());
+  const sentryStatsPeriod =
+    opts.sentryStatsPeriod ?? DEFAULT_SENTRY_STATS_PERIOD;
+  const sentryLimit = opts.sentryLimit ?? DEFAULT_SENTRY_LIMIT;
+  const sentryTimeoutMs = opts.sentryTimeoutMs ?? DEFAULT_SENTRY_TIMEOUT_MS;
+
+  const posthogConfig: PostHogFetcherConfig | null =
+    opts.posthogConfig === null
+      ? null
+      : (opts.posthogConfig ?? buildPostHogFetcherConfigFromEnv());
+  const posthogAfterMinutes =
+    opts.posthogAfterMinutes ?? DEFAULT_POSTHOG_AFTER_MINUTES;
+  const posthogLimit = opts.posthogLimit ?? DEFAULT_POSTHOG_LIMIT;
+  const posthogTimeoutMs =
+    opts.posthogTimeoutMs ?? DEFAULT_POSTHOG_TIMEOUT_MS;
+
+  const rrwebSessionsDir =
+    opts.rrwebSessionsDir ?? DEFAULT_RRWEB_SESSIONS_DIR;
+  const rrwebReplayerPath =
+    opts.rrwebReplayerPath ?? DEFAULT_RRWEB_REPLAYER_PATH;
+
   router.post("/api/_dev/debug/bug-report", async (req, res) => {
     if (!checkToken(req, res)) return;
 
@@ -963,12 +1396,94 @@ export function createDevBugReportRouter(
               };
             });
 
-      const [planRuns, scheduledGames, players, auditDb] = await Promise.all([
+      // 3b. OBS-10 — utled userId/hallId/distinctId fra body
+      const sessionCtx =
+        body.sessionContext && typeof body.sessionContext === "object"
+          ? (body.sessionContext as Record<string, unknown>)
+          : null;
+      const userId = pickStringField(sessionCtx, ["userId", "user_id", "playerId"]);
+      const hallId = pickStringField(sessionCtx, ["hallId", "hall_id"]);
+      // PostHog identifiserer på distinct_id; spillerklienten setter den
+      // til userId, men vi tar høyde for at den kan være annerledes.
+      const distinctId = pickStringField(sessionCtx, [
+        "distinctId",
+        "distinct_id",
+        "userId",
+        "user_id",
+      ]);
+
+      // 3c. OBS-10 — Sentry-fetch (fail-soft; aldri throw til catch).
+      const sentryPromise: Promise<SentryIssue[]> = sentryConfig
+        ? fetchSentryIssues(
+            sentryConfig,
+            {
+              statsPeriod: sentryStatsPeriod,
+              limit: sentryLimit,
+              ...(userId ? { userId } : {}),
+              ...(hallId ? { hallId } : {}),
+              timeoutMs: sentryTimeoutMs,
+            },
+            {
+              ...(opts.sentryFetchFn ? { fetchFn: opts.sentryFetchFn } : {}),
+            },
+          ).catch((err) => {
+            console.warn(
+              "[devBugReport] sentryFetch krasjet uventet:",
+              err,
+            );
+            return [] as SentryIssue[];
+          })
+        : Promise.resolve<SentryIssue[]>([]);
+
+      // 3d. OBS-10 — PostHog-fetch (fail-soft).
+      const posthogPromise: Promise<PostHogEvent[]> = posthogConfig
+        ? fetchPostHogEvents(
+            posthogConfig,
+            {
+              ...(distinctId ? { distinctId } : {}),
+              afterMinutes: posthogAfterMinutes,
+              limit: posthogLimit,
+              now,
+              timeoutMs: posthogTimeoutMs,
+            },
+            {
+              ...(opts.posthogFetchFn ? { fetchFn: opts.posthogFetchFn } : {}),
+            },
+          ).catch((err) => {
+            console.warn(
+              "[devBugReport] posthogFetch krasjet uventet:",
+              err,
+            );
+            return [] as PostHogEvent[];
+          })
+        : Promise.resolve<PostHogEvent[]>([]);
+
+      const [
+        planRuns,
+        scheduledGames,
+        players,
+        auditDb,
+        sentryIssues,
+        posthogEvents,
+      ] = await Promise.all([
         queryActivePlanRuns(deps.pool, schema),
         queryRecentScheduledGames(deps.pool, schema),
         queryRecentPlayers(deps.pool, schema),
         auditDbPromise,
+        sentryPromise,
+        posthogPromise,
       ]);
+
+      // 3e. OBS-10 — Rrweb-session-id discovery (synkron — leser disk).
+      const rrwebSessionId = discoverRrwebSessionId({
+        sessionContext: sessionCtx,
+        sessionsDir: rrwebSessionsDir,
+        fsImpl,
+      });
+      // Bygg base-URL fra request. `req.protocol` + `req.get('host')` gir
+      // f.eks. "http://localhost:4000". Tester kan overstyre via
+      // `opts.rrwebBaseUrl`.
+      const inferredBaseUrl = opts.rrwebBaseUrl ?? deriveBaseUrl(req);
 
       // 4. Auto-diagnose
       const diagnose = deriveDiagnose({
@@ -991,6 +1506,27 @@ export function createDevBugReportRouter(
         players,
         diagnose,
         auditDb,
+        sentry: {
+          issues: sentryIssues,
+          statsPeriod: sentryStatsPeriod,
+          config: sentryConfig,
+          userId,
+          hallId,
+          fetchSkipped: sentryConfig === null,
+        },
+        posthog: {
+          events: posthogEvents,
+          config: posthogConfig,
+          distinctId,
+          afterMinutes: posthogAfterMinutes,
+          fetchSkipped: posthogConfig === null,
+        },
+        rrweb: {
+          sessionId: rrwebSessionId,
+          sessionsDir: rrwebSessionsDir,
+          replayerPath: rrwebReplayerPath,
+          baseUrl: inferredBaseUrl,
+        },
       });
 
       // 6. Skriv fil
@@ -1031,4 +1567,10 @@ export const __TEST_ONLY__ = {
   buildAuditDbSection,
   runAuditDb,
   isoOrDash,
+  // OBS-10
+  buildSentryIssuesSection,
+  buildPostHogSection,
+  buildRrwebSection,
+  discoverRrwebSessionId,
+  pickStringField,
 };
