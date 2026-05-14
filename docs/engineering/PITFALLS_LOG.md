@@ -407,11 +407,14 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - Tester: `apps/backend/src/game/GamePlanEngineBridge.onScheduledGameCreated.test.ts` (9 tester — pre-engine) + `Game1MasterControlService.onEngineStarted.test.ts` (5 tester — post-engine)
 - Verifikasjon: room-snapshot etter scheduled-game-INSERT MÅ ha `gameVariant.ticketTypes` med korrekte per-farge multipliers (Yellow=2, Purple=3) FØR master starter engine
 - Pilot-test-checklist 2026-Q3: legg til "Pre-game buy-popup viser riktig pris" som blokkerende sjekk
+- **NY (PR #1411, sub-bug PR #1408):** `buildVariantConfigFromSpill1Config` MÅ mappe `ticketColors[].priceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter `roomConfiguredEntryFeeByRoom` men IKKE multipliers — det måtte løses i `spill1VariantMapper.ticketTypeFromSlug` med en `minPriceNok`-baseline (`priceNok / minPriceNok`). Hvis du fjerner denne mappingen, kommer 20kr/30kr-buggen tilbake i room-snapshot (men IKKE i lobby-API som har egen path via `lobbyTicketTypes.ts`). Tester: `apps/backend/src/game/spill1VariantMapper.test.ts` har 7 nye PR #1411-tester (Standard Bingo `[1,3,2,6,3,9]`, Trafikklys `[1,3]`, hvit+gul `[1,3,2,6]`, tom-fallback, idempotent, priceNok=0-fallback, blandet priceNok).
 
 **Related:**
 - `apps/backend/src/game/GamePlanEngineBridge.ts:onScheduledGameCreated`
 - `apps/backend/src/index.ts` (setOnScheduledGameCreated-wiring)
 - `apps/backend/src/game/Game1MasterControlService.ts:onEngineStarted` (PR #1375)
+- `apps/backend/src/game/spill1VariantMapper.ts:ticketTypeFromSlug` (PR #1411 — per-farge multipliers)
+- `packages/game-client/src/games/game1/logic/lobbyTicketTypes.ts:buildBuyPopupTicketConfigFromLobby` (referansemattematikk for `priceMultiplier`)
 - `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §2 (Yellow×2, Purple×3 auto-multiplier-regel)
 - §3.10 (komplementær — stuck-plan-run-fix landet i PR #1407)
 
@@ -1682,3 +1685,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-12 | Lagt til §7.15 — klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets foreldreløse). Pilot-blokker fra Tobias-test 11:03-11:05, fikset via Alternativ B (klient venter med kjøp). | Agent B (Klient wait-on-master) |
 | 2026-05-13 | Lagt til §11.11 (ESM dispatcher må gates med isDirectInvocation), §11.12 (JSDoc `**` parse-feil), §11.13 (GitHub Actions YAML heredoc indentation). Funn under PM Push-Control Phase 2-bygg. Total 83→86 entries. | Phase 2-agent (PM-AI orkestrert) |
 | 2026-05-13 | Lagt til §5.9 (cascade-rebase pattern), §5.10 (add/add `-X ours`-strategi), §6.15 (SIGPIPE + pipefail i awk-pipe), §6.16 (npm workspace lock isolation), §9.9 (seed-FK ordering), §11.14 (≥10 parallelle agenter stream-timeout), §11.15 (additive-merge Python-resolver), §11.16 (worktree fork-from-wrong-branch cascade). Funn under Wave 2/3-sesjon 2026-05-13. Total 86→92 entries. | PM-AI (E6 redo) |
+| 2026-05-14 | Utvidet §3.11 (PR #1411 sub-bug PR #1408): la til Fase 2-prevention-bullet for `buildVariantConfigFromSpill1Config` som mapper `priceNok / minPriceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter entryFee men IKKE multipliers — derfor komplementær fix. 7 nye tester i `spill1VariantMapper.test.ts`. | Fix-agent F3 |

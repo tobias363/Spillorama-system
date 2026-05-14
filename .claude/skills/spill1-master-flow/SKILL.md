@@ -234,11 +234,11 @@ Symptom: Spillere som åpner buy-popup PRE-game (mellom runder, eller før maste
 
 **Fix:** To-fase ticket-config-binding (PR #1375 + PR #<this-PR>). Se seksjon under for detaljer.
 
-## Ticket-pris-propagering (kritisk to-fase-binding)
+## Ticket-pris-propagering (kritisk TRE-fase-binding)
 
-> **Tobias-direktiv 2026-05-14:** Fremtidige agenter MÅ ikke overskrive denne fixen. Hvis du jobber med ticket-pris-pipeline må du forstå BÅDE faser er nødvendige.
+> **Tobias-direktiv 2026-05-14:** Fremtidige agenter MÅ ikke overskrive denne fixen. Hvis du jobber med ticket-pris-pipeline må du forstå at ALLE tre faser er nødvendige.
 
-**Hvorfor to-fase-binding:**
+**Hvorfor TRE-fase-binding:**
 
 Spillorama har TO distinkte tilstander for et room:
 1. **Pre-game:** scheduled-game er INSERT-et med `status='ready_to_start'`, men master har ikke trykket "Start". Engine kjører IKKE ennå, men klient kan joine rommet og åpne buy-popup.
@@ -246,7 +246,17 @@ Spillorama har TO distinkte tilstander for et room:
 
 Begge faser krever at `roomState.roomConfiguredEntryFeeByRoom` + `variantByRoom` er bundet til riktige verdier fra `ticket_config_json`. Hvis ikke faller klient til default-fallback (`state.entryFee ?? 10` × flat `priceMultiplier: 1`).
 
-### Fase 1: Pre-engine (BUG-F2, PR #<this-PR>)
+**Men entryFee alene er ikke nok.** Klient leser ticket-priser fra TO kilder:
+- (A) `lobby.nextGame.ticketPricesCents` → korrekt via `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby` (alltid riktig hvis lobby-API kjører)
+- (B) `state.ticketTypes` (room:update snapshot) → MÅ ha korrekte per-farge `priceMultiplier`-verdier
+
+Fase 0 (kilden) + Fase 1 + Fase 2 dekker entryFee. Fase 2 (variantConfig-mapping) MÅ ALSO mappe `priceNok` til per-farge multipliers i `gameVariant.ticketTypes`.
+
+### Fase 0 (kilde): `ticket_config_json` har `spill1.ticketColors[].priceNok`
+
+`GamePlanEngineBridge.buildTicketConfigJsonFromCatalog` skriver kanonisk `spill1.ticketColors[]`-blokk per (color, size) med korrekt `priceNok` i kr. Bridgen håndterer auto-multiplier på catalog-Rad-base (calculateActualPrize). Verifisert OK per `GamePlanEngineBridge.rowPayout.test.ts:148-158`.
+
+### Fase 1 (pre-engine entryFee-binding, PR #1408)
 
 Hook: `GamePlanEngineBridge.onScheduledGameCreated`
 
@@ -255,34 +265,55 @@ Hook: `GamePlanEngineBridge.onScheduledGameCreated`
 - **Input:** `{ scheduledGameId, roomCode, ticketConfigJson }` (ticket_config_json kommer direkte fra bridgen, ingen ekstra SELECT)
 - **Tre steg:** (1) bind `roomConfiguredEntryFeeByRoom` (billigste bongpris i kr), (2) re-bind `variantByRoom` via `buildVariantConfigFromGameConfigJson`, (3) `emitRoomUpdate(roomCode)`
 
-### Fase 2: Post-engine (PR #1375)
+### Fase 2 (variantByRoom per-farge multipliers, PR #1411 — sub-bug PR #1408)
+
+Funksjon: `spill1VariantMapper.buildVariantConfigFromSpill1Config`
+
+- **Trigger:** Kalt av `buildVariantConfigFromGameConfigJson` (i Fase 1 + Fase 3).
+- **Hva fixen gjør:** Beregner `minPriceNok` på tvers av alle konfigurerte farger, og kaller `ticketTypeFromSlug(color, priceNok, minPriceNok)` for hver. Auto-multiplier-baseline: `priceNok / minPriceNok`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt.
+- **Output:** `gameVariant.ticketTypes[]` med korrekte per-farge multipliers. Standard Bingo (5/10/15 kr): `[1, 3, 2, 6, 3, 9]`. Trafikklys (flat 15 kr): `[1, 3]`.
+- **Backward-compat:** Hvis `priceNok` mangler eller er ugyldig (0/NaN/null), faller mapperen til legacy-hardkodet multipliers (1/3/2). Beskytter eksisterende tester og legacy-config.
+
+### Fase 3 (post-engine re-binding, PR #1375)
 
 Hook: `Game1MasterControlService.onEngineStarted`
 
 - **Trigger:** POST-commit + POST-engine.startGame i `startGame`-suksess-path
 - **Wired i:** `apps/backend/src/index.ts` via `game1MasterControlService.setOnEngineStarted(...)`
 - **Input:** `{ scheduledGameId, actorUserId }` (henter `ticket_config_json` + `room_code` med SELECT)
-- **Samme tre steg som fase 1.** Defense-in-depth — re-binder samme verdier ved engine-start.
+- **Samme tre steg som fase 1.** Defense-in-depth — re-binder samme verdier ved engine-start. Bruker ALSO Fase 2-mapping internt.
 
-### Symptom hvis fase 1 mangler
+### Symptom hvis Fase 0 (bridge) er ødelagt
 
-- Pre-game-spillere ser Yellow = 20 kr, Purple = 30 kr (flat priceMultiplier: 1 ganget med default-entryFee 10).
-- Etter master starter engine → fase 2 binder verdier → klient korrigerer ved neste room:update.
-- Pilot-spillere som åpner buy-popup mellom runder ser feil priser → kjøper feil eller backer ut.
+- `ticket_config_json` mangler `spill1.ticketColors[]` eller har feil `priceNok` — INGEN av de andre fasene kan rette opp.
+- Hele pipelinen kollapser. Sjekk `GamePlanEngineBridge.buildTicketConfigJsonFromCatalog` først.
 
-### Symptom hvis fase 2 mangler
+### Symptom hvis Fase 1 mangler (PR #1408 ikke kjørt)
 
-- Post-engine room:update returnerer fortsatt riktig data (fra fase 1) inntil neste binding-feil eller restart.
-- Mister defense-in-depth — hvis fase 1 ikke kjørte (eks. bridge re-spawn uten hook), faller klient til default.
+- Pre-game-spillere ser entryFee fallback til 10 kr (default) istedenfor riktig billigste bongpris.
+- Etter master starter engine → Fase 3 binder verdier → klient korrigerer ved neste room:update.
 
-### ALDRI fjern den ene fasen uten å verifisere at den andre dekker pathen
+### Symptom hvis Fase 2 mangler (PR #1411 ikke kjørt)
 
-Begge faser kjører idempotent — re-binding for samme room+scheduledGameId setter samme verdi (no-op fra klient-perspektiv). Hvis du fjerner fase 1, kommer 20kr-buggen tilbake. Hvis du fjerner fase 2, mister du defense-in-depth ved engine-start.
+- `gameVariant.ticketTypes` i room-snapshot rendrer flat `priceMultiplier=1/3` for alle farger.
+- Frontend som leser fra `state.ticketTypes` (room-snapshot) kalkulerer `10 kr × 2 = 20 kr` for yellow istedenfor 10 kr.
+- Lobby-API'et fortsetter å gi korrekte priser (separat path via `lobbyTicketTypes.ts`), så klient kan se motstridende priser fra to kilder samtidig.
+- Eksakt scenario Tobias rapporterte 2026-05-14 08:45.
+
+### Symptom hvis Fase 3 mangler
+
+- Post-engine room:update returnerer fortsatt riktig data (fra Fase 1 + 2) inntil neste binding-feil eller restart.
+- Mister defense-in-depth — hvis Fase 1 ikke kjørte (eks. bridge re-spawn uten hook), faller klient til default.
+
+### ALDRI fjern noen av fasene uten å verifisere at de andre dekker pathen
+
+Alle faser kjører idempotent — re-binding for samme room+scheduledGameId setter samme verdi (no-op fra klient-perspektiv). Hvis du fjerner Fase 1, kommer entryFee-buggen tilbake. Hvis du fjerner Fase 2, kommer multiplier-buggen (20kr/30kr) tilbake. Hvis du fjerner Fase 3, mister du defense-in-depth ved engine-start.
 
 ### Tester som beskytter mot regresjon
 
-- `apps/backend/src/game/GamePlanEngineBridge.onScheduledGameCreated.test.ts` (9 tester — fase 1)
-- `apps/backend/src/game/Game1MasterControlService.onEngineStarted.test.ts` (5 tester — fase 2)
+- `apps/backend/src/game/spill1VariantMapper.test.ts` — Fase 2: 7 nye PR #1411-tester (Standard Bingo `[1,3,2,6,3,9]`, Trafikklys `[1,3]`, hvit+gul `[1,3,2,6]`, tom-fallback, idempotent, priceNok=0-fallback, blandet priceNok)
+- `apps/backend/src/game/GamePlanEngineBridge.onScheduledGameCreated.test.ts` (9 tester — Fase 1)
+- `apps/backend/src/game/Game1MasterControlService.onEngineStarted.test.ts` (5 tester — Fase 3)
 - Snapshot-baseline i `apps/backend/src/game/__tests__/r2InvariantsBaseline.test.ts` — verifiserer at ticket_config_json propageres til scheduled-games-raden
 
 ## Når denne skill-en er aktiv
@@ -329,3 +360,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-08 | Initial — master-flyt fundament + Bølge 1 GameLobbyAggregator |
 | 2026-05-13 | v1.1.0 — la til I14/I15/I16-fix-mønstre, ADR-0019/0020/0021/0022, MasterActionService som single-entry sekvenseringsmotor, GamePlanRunCleanupService for stale-plan-cleanup, master kan starte med 0 spillere |
 | 2026-05-14 | v1.2.0 — BUG-F2: la til seksjon "Ticket-pris-propagering" som dokumenterer to-fase-binding (pre-engine via `GamePlanEngineBridge.onScheduledGameCreated` + post-engine via `Game1MasterControlService.onEngineStarted`). Pre-engine-fasen dekker hullet fra PR #1375 og forhindrer 20kr-regresjonen. Begge faser MÅ beholdes — fremtidige agenter må ikke fjerne den ene uten å verifisere at den andre dekker pathen. |
+| 2026-05-14 | v1.3.0 — PR #1411 (sub-bug PR #1408): utvidet "Ticket-pris-propagering" til TRE-fase-fix. Fase 2 (variantByRoom-binding) manglet per-farge multipliers — `gameVariant.ticketTypes` i room-snapshot rendret flat mult=1/3 selv om backend `ticket_config_json` hadde korrekte priser. Fixen mapper `priceNok / minPriceNok` for hver farge i `spill1VariantMapper.ticketTypeFromSlug`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt. 7 nye tester. PR #1408's hook setter entryFee, men IKKE multipliers — derfor komplementært. |
