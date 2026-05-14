@@ -420,7 +420,7 @@ Se runbook for komplett konfig-referanse + FAQ.
 - [ADR-0012 — Batched parallel mass-payout for Spill 2/3](../../../docs/adr/0012-batched-mass-payout.md) — bruk batched-pathen for >10 vinnere
 - [ADR-0015 — §71 regulatory-ledger (separate audit-tabell)](../../../docs/adr/0015-spill71-regulatory-ledger.md) — bindende: alle wallet-touch må skrive til app_regulatory_ledger
 - [ADR-0019 — Evolution-grade state-konsistens (Bølge 1)](../../../docs/adr/0019-evolution-grade-state-consistency-bolge1.md) — sync-persist gjelder også wallet-state
-- [ADR-0023 — MCP write-access policy (lokal vs prod)](../../../docs/adr/0023-mcp-write-access-policy.md) — bindende: `app_wallet_entries` skal ALDRI muteres via MCP-write mot prod. Direct UPDATE bryter outbox-pattern + REPEATABLE READ-isolation → risiko for double-payout. All wallet-korreksjon i prod går via migration-PR med append-only korreksjons-rad som peker på original via `original_id`.
+- [ADR-0023 — MCP write-access policy (lokal vs prod)](../../../docs/adr/0023-mcp-write-access-policy.md) — bindende: `wallet_accounts` og `wallet_entries` skal ALDRI muteres via MCP-write mot prod. Direct UPDATE bryter outbox-pattern + REPEATABLE READ-isolation → risiko for double-payout. NB: `wallet_accounts.balance` er `GENERATED ALWAYS` fra `deposit_balance + winnings_balance` — DB avviser direct UPDATE uansett. All wallet-korreksjon i prod går via migration-PR med append-only motpost-rad i `wallet_entries` (side=CREDIT|DEBIT, amount > 0).
 
 ## Endringslogg
 
@@ -429,5 +429,5 @@ Se runbook for komplett konfig-referanse + FAQ.
 | 2026-05-08 | Initial — casino-grade-wallet etablert (BIN-761→767) |
 | 2026-05-13 | v1.1.0 — la til Stryker mutation-testing-referanse for `WalletOutboxWorker.ts`, ADR-0015 regulatory-ledger, ADR-0019 sync-persist |
 | 2026-05-14 | v1.2.0 — la til seksjon 11 om wallet-pool error-handler (Agent T). Informerer om at `attachPoolErrorHandler` beskytter wallet-mutasjoner mot backend-krasj på 57P01. Eksplisitt forbud mot `withDbRetry` på wallet-mutasjoner. |
-| 2026-05-14 | v1.3.0 — la til ADR-0023 MCP write-access policy. `app_wallet_entries` er beskyttet mot direct MCP-mutasjon i prod; alle korreksjoner går via append-only migration-PR. |
+| 2026-05-14 | v1.3.0 — la til ADR-0023 MCP write-access policy. `wallet_accounts` + `wallet_entries` (faktiske tabellnavn, ikke `app_wallets`/`app_wallet_entries`) er beskyttet mot direct MCP-mutasjon i prod; alle korreksjoner går via append-only migration-PR. |
 | 2026-05-14 | v1.4.0 — la til ny seksjon "Wallet-integrity-watcher (OBS-10)". Cron-driven Q1 (balance-sum) + Q2 (hash-chain-link) sjekker, Linear-auto-issue ved brudd. Komplementært til nattlig `WalletAuditVerifier`. Aktivering disabled by default — Tobias aktiverer manuelt. |

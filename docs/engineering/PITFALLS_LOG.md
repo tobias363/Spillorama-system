@@ -298,14 +298,16 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 **Oppdaget:** Designet 2026-05-14 etter Tobias-direktiv om Evolution-grade DB-robusthet
 **Symptom:**
 - Agent eller PM kjører `INSERT/UPDATE/DELETE` mot `postgres-spillorama-prod` via MCP
-- Direct `UPDATE app_wallet_entries` bryter REPEATABLE READ-isolation → risiko for double-payout (ekte penger)
-- Direct `UPDATE app_compliance_audit_log` bryter hash-chain → audit-data avvist av Lotteritilsynet
+- Direct `UPDATE wallet_entries` bryter REPEATABLE READ-isolation + hash-chain → risiko for double-payout (ekte penger)
+- Direct `UPDATE wallet_accounts SET balance=...` blir avvist av DB uansett (`balance` er `GENERATED ALWAYS` fra `deposit_balance + winnings_balance`)
+- Direct `UPDATE app_audit_log` bryter audit-hash-chain → audit-data avvist av Lotteritilsynet
 - Direct `UPDATE app_rg_restrictions SET timed_pause_until=NULL` overstyrer §66 spillvett → dagsbøter 5k-50k NOK/hendelse
 - Schema-drift mellom prod og `apps/backend/migrations/` → neste deploy kan korrupte data
 **Fix:**
 - Prod-MCP (`postgres-spillorama-prod`) MÅ være `@modelcontextprotocol/server-postgres` (read-only by design)
 - All schema-/data-korreksjon i prod går via migration-PR (forward-only, ADR-0014)
-- Korreksjon i audit-tabeller: append-only ny rad med `correction_reason` + `original_id`-link
+- Korreksjon i audit-tabeller (`app_audit_log`): append-only `audit_correction`-rad med `original_id` i JSONB-payload
+- Korreksjon i wallet (`wallet_entries`): append motpost-rad med `side=CREDIT|DEBIT`, `amount > 0` (balance re-genereres automatisk)
 **Prevention:**
 - Verifiser ved ny sesjon: `claude mcp list | grep "postgres-spillorama-prod"` → må vise `@modelcontextprotocol/server-postgres`
 - Lokal dev-DB (`postgres-spillorama`) kan ha write-capable MCP (`uvx postgres-mcp --access-mode=unrestricted`) — kun localhost

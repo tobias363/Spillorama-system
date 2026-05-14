@@ -13,8 +13,8 @@ Bakgrunn: MCP-servere som `@modelcontextprotocol/server-postgres` er READ-ONLY b
 
 For Spillorama er dette en **regulatorisk kritisk beslutning**:
 
-- **§71 audit-trail** er bygget på hash-chain (ADR-0004, BIN-764). Direct `UPDATE app_compliance_audit_log` bryter hash-chain irreversibelt — kryptografisk umulig å recoveryen. Lotteritilsynet-revisjon vil avvise audit-data.
-- **Wallet bruker outbox-pattern** (ADR-0005). Direct INSERT i `app_wallet_entries` omgår REPEATABLE READ-isolation og idempotency-guards → risk for double-payout med ekte penger.
+- **§71 audit-trail** er bygget på hash-chain (ADR-0004, BIN-764). Direct `UPDATE app_audit_log` eller `UPDATE wallet_entries` bryter hash-chain irreversibelt — kryptografisk umulig å recover. Lotteritilsynet-revisjon vil avvise audit-data.
+- **Wallet bruker outbox-pattern** (ADR-0005). Direct INSERT i `wallet_entries` omgår REPEATABLE READ-isolation og idempotency-guards → risk for double-payout med ekte penger. NB: `wallet_accounts.balance` er en `GENERATED ALWAYS`-kolonne av `deposit_balance + winnings_balance` — kan IKKE UPDATE-es direkte (DB avviser).
 - **Forward-only migrations** (ADR-0014). MCP-write logger ikke i `pgmigrations`-historikken → schema-drift mellom prod og `apps/backend/migrations/` → neste deploy kan korrupte data.
 - **Pengespillforskriften §66** (5-min obligatorisk pause). Direct `UPDATE app_rg_restrictions SET timed_pause_until=NULL` overstyrer spillvett → compliance-brudd → dagsbøter 5k-50k NOK per hendelse.
 - **Ingen review-gate.** PR-flyten har CI, danger.yml, compliance-tests, schema-CI, AI Fragility Review. MCP-write har 0 sjekker — ett klikk = produksjons-endring.
@@ -51,13 +51,14 @@ Vi etablerer en **3-lags MCP write-policy**:
 
 **Hva som forbudt:**
 - INSERT / UPDATE / DELETE / DDL — uansett om "korreksjon" eller "test"
-- Direct mutation av audit-tabeller (`app_compliance_audit_log`, `app_wallet_entries`, `app_payout_audit`, `app_regulatory_ledger`) — hash-chain-bevarende
+- Direct mutation av audit-tabeller (`app_audit_log`, `wallet_entries`, `app_rg_payout_audit`, `app_regulatory_ledger`) — hash-chain-bevarende
+- Mutation av wallet-tabeller (`wallet_accounts`, `wallet_entries`) — outbox-pattern + REPEATABLE READ-bevarende. NB: `wallet_accounts.balance` er `GENERATED ALWAYS` — DB avviser direct UPDATE
 - Mutation av rg-restriksjoner (`app_rg_restrictions`) — §66/§23-bevarende
 - `pg_terminate_backend` — krever ops-godkjenning, ikke MCP
 
 ### Lag 3 — Schema/data-korreksjon: VIA MIGRATION-PR
 
-Hvis prod-state må endres (eks. korreksjons-rad i compliance-ledger etter incident, schema-evolusjon, manuell payout-justering):
+Hvis prod-state må endres (eks. korreksjons-rad i audit-log etter incident, schema-evolusjon, manuell payout-justering):
 
 1. PM-AI eller agent skriver SQL-forslag som **migration-fil** i `apps/backend/migrations/<timestamp>_<topic>.sql`
 2. PR åpnes med:
@@ -68,17 +69,52 @@ Hvis prod-state må endres (eks. korreksjons-rad i compliance-ledger etter incid
 3. Tobias godkjenner explicit
 4. Auto-merge → Render auto-deploy kjører migration
 
-**Korreksjons-mønster for audit-tabeller:**
+**Korreksjons-mønster for audit-tabeller (eksempel: `app_audit_log`):**
 ```sql
 -- Aldri:
-UPDATE app_compliance_audit_log SET amount = 1500 WHERE id = '...';
+UPDATE app_audit_log SET payload = '...' WHERE id = '...';
 
--- Alltid:
-INSERT INTO app_compliance_audit_log (id, action, resource_id, original_id, correction_reason, amount, ...)
-VALUES ('<new-uuid>', 'correction', '<original-id>', '<original-id>', 'Tobias godkjent fix 2026-05-14', 1500, ...);
+-- Alltid (append correction-rad som peker på original):
+INSERT INTO app_audit_log (id, actor_type, actor_id, action, resource, resource_id, payload, created_at)
+VALUES (
+  gen_random_uuid(),
+  'SYSTEM',
+  NULL,
+  'audit_correction',
+  'app_audit_log',
+  '<original-id>',
+  jsonb_build_object(
+    'original_id', '<original-id>',
+    'correction_reason', 'Tobias godkjent fix 2026-05-14',
+    'corrected_fields', jsonb_build_object('payload', '<ny-verdi>')
+  ),
+  now()
+);
 ```
 
-Append-only bevarer hash-chain. `original_id`-felt linker korreksjonen til opprinnelig entry.
+**Korreksjons-mønster for wallet (eksempel: `wallet_entries`):**
+```sql
+-- Aldri:
+UPDATE wallet_entries SET amount = 150 WHERE id = ...;
+-- Aldri (DB avviser uansett, GENERATED ALWAYS):
+UPDATE wallet_accounts SET balance = 1000 WHERE id = '...';
+
+-- Alltid (append motpost-rad via offisiell operation):
+-- Lag ny wallet-operation via outbox-mekanisme. Hvis manuell:
+INSERT INTO wallet_entries (operation_id, account_id, side, amount, account_side, currency, entry_hash, previous_entry_hash)
+VALUES (
+  '<new-correction-operation-id>',
+  '<account-id>',
+  'CREDIT',   -- eller DEBIT motavhengig av retning
+  50.00,      -- positivt beløp; side bestemmer fortegn
+  'deposit',  -- eller 'winnings'
+  'NOK',
+  '<sha256-av-canonical-json>',
+  '<previous-entry-hash-for-account>'
+);
+```
+
+Append-only bevarer hash-chain. `wallet_accounts.balance` re-genereres automatisk fra `deposit_balance + winnings_balance` ved trigger på `wallet_entries`.
 
 ## Konsekvenser
 
