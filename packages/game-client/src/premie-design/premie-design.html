@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spill 1 — Premietabell-design (3 bong-farger)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap"
+  />
+  <style>
+    /*
+     * Design-preview for ny premietabell (Spill 1).
+     *
+     * Tobias-direktiv 2026-05-14: gammel render viste KUN Hvit-bong-pris i
+     * 5 tekst-piller. Nytt design viser alle 3 bong-farger (Hvit / Gul /
+     * Lilla) i et 5×3 grid slik at spilleren ser hva en dyrere bong er verdt
+     * uten å regne i hodet.
+     *
+     * Side-en er ren HTML/CSS/JS for rask iterasjon — det er BEVISST ingen
+     * Pixi/socket-runtime her. Når Tobias har godkjent designet implementeres
+     * det 1:1 i `packages/game-client/src/games/game1/components/CenterTopPanel.ts`
+     * (samme PR som denne siden).
+     *
+     * Regler:
+     * - INGEN backdrop-filter (samme PIXI-blink-bug som CenterTopPanel — se
+     *   `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts`).
+     * - Tekstene matcher `CenterTopPanel.displayNameFor` 1:1 ("Rad 1", "Full Hus").
+     * - Auto-multiplikator-regel fra `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2:
+     *     Hvit (5 kr) = base × 1
+     *     Gul (10 kr) = base × 2
+     *     Lilla (15 kr) = base × 3
+     *   `base` er pattern.prize1 (hele kr) for fixed-modus, eller
+     *   `Math.round((prizePercent / 100) * prizePool)` for percent-modus.
+     */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      background: #0f0f1a;
+      color: #fff;
+      min-height: 100vh;
+      font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body { padding: 24px; }
+
+    header {
+      max-width: 1100px;
+      margin: 0 auto 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    header h1 {
+      font-size: 24px;
+      color: #ffe83d;
+      letter-spacing: 1px;
+    }
+    header p.lead {
+      margin-top: 8px;
+      color: rgba(255,255,255,0.65);
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 800px;
+    }
+    header p.note {
+      margin-top: 8px;
+      color: rgba(255,200,100,0.85);
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    section.scenario {
+      background: linear-gradient(180deg, #1a1a2e 0%, #12121f 100%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+    section.scenario h2 {
+      font-size: 17px;
+      color: #ffe83d;
+      margin-bottom: 4px;
+    }
+    section.scenario .scenario-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 14px;
+    }
+
+    /*
+     * In-game frame — speiler `combo`-panel-style fra
+     * PlayScreen `top-group-wrapper`:
+     *   background: radial-gradient(ellipse at top left,
+     *                rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45));
+     * Border + box-shadow er forenklet for design-side.
+     */
+    .game-frame {
+      background:
+        radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45)),
+        linear-gradient(180deg, #1a0808 0%, #0a0303 100%);
+      border: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
+      border-radius: 8px;
+      padding: 14px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /*
+     * Premietabell — 5 rader × 3 kolonner.
+     * Hver rad er én pattern (Rad 1 / Rad 2 / ... / Full Hus).
+     * Hver kolonne er én bong-farge (Hvit / Gul / Lilla).
+     *
+     * Bevisst valg — én SINGLE `.premie-table` flex/grid-container med:
+     *   - `.premie-row` per pattern (5 rader).
+     *   - `.premie-row` har et label-felt + 3 `.premie-cell`-felt.
+     *
+     * Det gjør at active/completed-state kan settes på rad-nivå (én class-
+     * toggle), og won-flash-animasjon kan kjøre over hele raden samtidig.
+     */
+    .premie-table {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      max-width: 540px;
+      align-self: flex-start;
+    }
+
+    .premie-header {
+      display: grid;
+      grid-template-columns: minmax(72px, 1fr) repeat(3, 1fr);
+      gap: 8px;
+      padding: 0 12px;
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.55);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .premie-header .col-label {
+      text-align: left;
+    }
+    .premie-header .col-color {
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .premie-header .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.4);
+      display: inline-block;
+    }
+    .premie-header .swatch.hvit { background: #f5f5f5; }
+    .premie-header .swatch.gul { background: #f1c40f; }
+    .premie-header .swatch.lilla { background: #9b59b6; }
+
+    /*
+     * `.premie-row` — én pattern (Rad 1, Rad 2, ..., Full Hus).
+     * Bakgrunn matcher gamle `.prize-pill` (`rgba(30,12,12,0.92)`).
+     * INGEN backdrop-filter — vil trigge Pixi GPU-blink-bug.
+     */
+    .premie-row {
+      background: rgba(30, 12, 12, 0.92);
+      border: 1px solid rgba(255, 100, 100, 0.2);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+      border-radius: 14px;
+      padding: 8px 12px;
+      display: grid;
+      grid-template-columns: minmax(72px, 1fr) repeat(3, 1fr);
+      gap: 8px;
+      align-items: center;
+      color: #c1c1c1;
+      /* INGEN CSS-transitions her av samme grunn som `.prize-pill` — class-
+       * toggle gir transitionstart-events. State-endringer er instant. */
+    }
+    .premie-row .pattern-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: inherit;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .premie-row .premie-cell {
+      font-size: 12px;
+      font-weight: 600;
+      color: inherit;
+      text-align: center;
+      padding: 4px 6px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .premie-row .premie-cell.col-hvit {
+      border-color: rgba(245, 245, 245, 0.15);
+    }
+    .premie-row .premie-cell.col-gul {
+      border-color: rgba(241, 196, 15, 0.25);
+    }
+    .premie-row .premie-cell.col-lilla {
+      border-color: rgba(155, 89, 182, 0.25);
+    }
+
+    /*
+     * Active-state — fremhever raden som currentPatternIdx peker på.
+     * Identisk farge-palette som gamle `.prize-pill.active`.
+     */
+    .premie-row.active {
+      border: 1.5px solid #ffcc00;
+      color: #fff;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5), inset 0 0 6px rgba(255,200,0,0.2);
+    }
+    .premie-row.active .premie-cell {
+      background: rgba(255, 200, 0, 0.08);
+    }
+
+    /*
+     * Completed-state — gjør raden grå/strikethrough.
+     * Identisk med gamle `.prize-pill.completed`.
+     */
+    .premie-row.completed {
+      text-decoration: line-through;
+      text-decoration-thickness: 1.5px;
+      opacity: 0.5;
+    }
+
+    /*
+     * Won-flash — grønn pulse på rad-nivå (ikke pill-nivå). 0.9s, samme
+     * keyframes som gamle `.prize-pill.pattern-won-flash`.
+     */
+    @keyframes premie-won-flash {
+      0%   { background: rgba(76, 175, 80, 0.55); box-shadow: 0 0 24px rgba(76, 175, 80, 0.8), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.03); }
+      60%  { background: rgba(76, 175, 80, 0.25); box-shadow: 0 0 12px rgba(76, 175, 80, 0.4), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.01); }
+      100% { transform: scale(1); }
+    }
+    .premie-row.premie-won-flash {
+      animation: premie-won-flash 0.9s ease-out;
+    }
+
+    /* Toggle-kontroll — design-side-only, ikke en del av prod-implementasjon */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px dashed rgba(255,255,255,0.1);
+    }
+    .controls .label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      width: 100%;
+      margin-bottom: 4px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .controls button {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .controls button:hover {
+      background: rgba(255, 232, 61, 0.08);
+      border-color: rgba(255, 232, 61, 0.4);
+      color: #ffe83d;
+    }
+    .controls button.active {
+      background: rgba(255, 232, 61, 0.15);
+      border-color: rgba(255, 232, 61, 0.6);
+      color: #ffe83d;
+    }
+    .controls .group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .controls .group-name {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Spill 1 — Premietabell-redesign (3 bong-farger)</h1>
+    <p class="lead">
+      Tobias-direktiv 2026-05-14: gammel render viste KUN Hvit-bong-pris.
+      Nytt design viser premien for alle 3 bong-farger (Hvit 5 kr / Gul
+      10 kr / Lilla 15 kr) i et 5×3 grid. Auto-multiplikator (×1 / ×2 /
+      ×3) beregnes per fase fra <code>pattern.prize1</code> som baseline
+      for Hvit.
+    </p>
+    <p class="note">
+      Design-preview — ikke produksjons-render, men matcher
+      CenterTopPanel.ts produksjons-render (samme farger, font, layout).
+      Ingen socket/Pixi-runtime — ren HTML/CSS/JS for rask iterasjon.
+    </p>
+  </header>
+
+  <main>
+    <section class="scenario" id="scenario-innsatsen">
+      <h2>Scenario A — Innsatsen (fixed-modus)</h2>
+      <div class="scenario-sub">
+        prize1 i kr: Rad 1 = 100, Rad 2/3/4 = 200, Full Hus = 1000.
+        Eksempel Lilla: 1000 × 3 = 3000 kr på Full Hus (ingen cap på
+        hovedspill — kun databingo har 2500 kr-cap).
+      </div>
+      <div class="game-frame">
+        <div class="premie-table" id="table-innsatsen"></div>
+      </div>
+      <div class="controls" data-scenario="innsatsen">
+        <div class="label">Demo-state</div>
+        <div class="group">
+          <span class="group-name">Active rad:</span>
+          <button data-action="active" data-idx="-1">Ingen</button>
+          <button data-action="active" data-idx="0" class="active">Rad 1</button>
+          <button data-action="active" data-idx="1">Rad 2</button>
+          <button data-action="active" data-idx="2">Rad 3</button>
+          <button data-action="active" data-idx="3">Rad 4</button>
+          <button data-action="active" data-idx="4">Full Hus</button>
+        </div>
+        <div class="group">
+          <span class="group-name">Completed:</span>
+          <button data-action="completed" data-idx="0">Toggle Rad 1</button>
+          <button data-action="completed" data-idx="1">Toggle Rad 2</button>
+          <button data-action="completed" data-idx="2">Toggle Rad 3</button>
+          <button data-action="completed" data-idx="3">Toggle Rad 4</button>
+          <button data-action="completed" data-idx="4">Toggle Full Hus</button>
+        </div>
+        <div class="group">
+          <span class="group-name">Animasjon:</span>
+          <button data-action="flash" data-idx="0">Flash Rad 1</button>
+          <button data-action="flash" data-idx="4">Flash Full Hus</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="scenario" id="scenario-bingo">
+      <h2>Scenario B — Bingo (standard, lavere prizes)</h2>
+      <div class="scenario-sub">
+        prize1 i kr: Rad 1-4 = 50, Full Hus = 500.
+        Eksempel Lilla: 500 × 3 = 1500 kr på Full Hus.
+      </div>
+      <div class="game-frame">
+        <div class="premie-table" id="table-bingo"></div>
+      </div>
+      <div class="controls" data-scenario="bingo">
+        <div class="label">Demo-state</div>
+        <div class="group">
+          <span class="group-name">Active rad:</span>
+          <button data-action="active" data-idx="-1">Ingen</button>
+          <button data-action="active" data-idx="0">Rad 1</button>
+          <button data-action="active" data-idx="1">Rad 2</button>
+          <button data-action="active" data-idx="2" class="active">Rad 3</button>
+          <button data-action="active" data-idx="3">Rad 4</button>
+          <button data-action="active" data-idx="4">Full Hus</button>
+        </div>
+        <div class="group">
+          <span class="group-name">Completed:</span>
+          <button data-action="completed" data-idx="0">Toggle Rad 1</button>
+          <button data-action="completed" data-idx="1">Toggle Rad 2</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="scenario" id="scenario-percentage">
+      <h2>Scenario C — 5×500 (percent-modus, prizePool 50 000)</h2>
+      <div class="scenario-sub">
+        prizePercent: Rad 1-4 = 2%, Full Hus = 12%.
+        Eksempel: Rad 1 Hvit = round(2% × 50 000) = 1000 kr.
+        Lilla = 1000 × 3 = 3000 kr.
+      </div>
+      <div class="game-frame">
+        <div class="premie-table" id="table-percent"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    /**
+     * Mock-render — speiler implementasjonen vi vil bruke i
+     * `CenterTopPanel.ts`. Kun for design-preview; produksjons-koden
+     * bygger samme DOM via TypeScript-klassen.
+     */
+
+    const HEADER_HTML = `
+      <div class="premie-header">
+        <div class="col-label">Pattern</div>
+        <div class="col-color"><span class="swatch hvit"></span>Hvit 5 kr</div>
+        <div class="col-color"><span class="swatch gul"></span>Gul 10 kr</div>
+        <div class="col-color"><span class="swatch lilla"></span>Lilla 15 kr</div>
+      </div>
+    `;
+
+    /**
+     * Auto-multiplikator regel — `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2.
+     * Hvit (5 kr baseline) × 1 / Gul (10 kr) × 2 / Lilla (15 kr) × 3.
+     */
+    const BONG_COLORS = [
+      { key: "hvit", label: "Hvit", multiplier: 1 },
+      { key: "gul", label: "Gul", multiplier: 2 },
+      { key: "lilla", label: "Lilla", multiplier: 3 },
+    ];
+
+    /**
+     * Beregn base-pris (Hvit = ×1) per pattern. Speiler `computedPrize`-
+     * logikken i CenterTopPanel.updatePatterns.
+     */
+    function computeBasePrize(pattern, prizePool) {
+      if (pattern.winningType === "fixed") return pattern.prize1 ?? 0;
+      // "percent"-modus
+      return Math.round((pattern.prizePercent / 100) * prizePool);
+    }
+
+    /** Speiler `CenterTopPanel.displayNameFor` — sentralt for paritet. */
+    function displayNameFor(name) {
+      if (name === "Full House") return "Full Hus";
+      if (name === "Picture" || name === "picture") return "Bilde";
+      if (name === "Frame" || name === "frame") return "Ramme";
+      if (/^Row \d/.test(name)) return name.replace("Row", "Rad");
+      return name;
+    }
+
+    function renderTable(rootEl, patterns, prizePool = 0) {
+      rootEl.innerHTML = HEADER_HTML;
+      for (const pattern of patterns) {
+        const row = document.createElement("div");
+        row.className = "premie-row";
+        row.dataset.patternId = pattern.id;
+
+        const label = document.createElement("div");
+        label.className = "pattern-label";
+        label.textContent = displayNameFor(pattern.name);
+        row.appendChild(label);
+
+        const base = computeBasePrize(pattern, prizePool);
+        for (const color of BONG_COLORS) {
+          const cell = document.createElement("div");
+          cell.className = `premie-cell col-${color.key}`;
+          const value = base * color.multiplier;
+          cell.textContent = `${value} kr`;
+          row.appendChild(cell);
+        }
+        rootEl.appendChild(row);
+      }
+      return rootEl;
+    }
+
+    function setActive(rootEl, idx) {
+      const rows = rootEl.querySelectorAll(".premie-row");
+      rows.forEach((row, i) => row.classList.toggle("active", i === idx));
+    }
+
+    function toggleCompleted(rootEl, idx) {
+      const rows = rootEl.querySelectorAll(".premie-row");
+      const row = rows[idx];
+      if (!row) return;
+      row.classList.toggle("completed");
+    }
+
+    function flashWon(rootEl, idx) {
+      const rows = rootEl.querySelectorAll(".premie-row");
+      const row = rows[idx];
+      if (!row) return;
+      row.classList.remove("premie-won-flash");
+      void row.offsetWidth;
+      row.classList.add("premie-won-flash");
+      setTimeout(() => row.classList.remove("premie-won-flash"), 900);
+    }
+
+    // ── Scenario A: Innsatsen (fixed, hovedspill) ─────────────────────────
+    const innsatsenPatterns = [
+      { id: "p1", name: "Row 1", winningType: "fixed", prize1: 100 },
+      { id: "p2", name: "Row 2", winningType: "fixed", prize1: 200 },
+      { id: "p3", name: "Row 3", winningType: "fixed", prize1: 200 },
+      { id: "p4", name: "Row 4", winningType: "fixed", prize1: 200 },
+      { id: "p5", name: "Full House", winningType: "fixed", prize1: 1000 },
+    ];
+    const innsatsenEl = renderTable(
+      document.getElementById("table-innsatsen"),
+      innsatsenPatterns,
+    );
+    setActive(innsatsenEl, 0);
+
+    // ── Scenario B: Bingo (standard, lavere prizes) ────────────────────────
+    const bingoPatterns = [
+      { id: "b1", name: "Row 1", winningType: "fixed", prize1: 50 },
+      { id: "b2", name: "Row 2", winningType: "fixed", prize1: 50 },
+      { id: "b3", name: "Row 3", winningType: "fixed", prize1: 50 },
+      { id: "b4", name: "Row 4", winningType: "fixed", prize1: 50 },
+      { id: "b5", name: "Full House", winningType: "fixed", prize1: 500 },
+    ];
+    const bingoEl = renderTable(
+      document.getElementById("table-bingo"),
+      bingoPatterns,
+    );
+    setActive(bingoEl, 2);
+
+    // ── Scenario C: 5×500 (percent-modus) ──────────────────────────────────
+    const percentPatterns = [
+      { id: "c1", name: "Row 1", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c2", name: "Row 2", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c3", name: "Row 3", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c4", name: "Row 4", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c5", name: "Full House", winningType: "percent", prizePercent: 12, prize1: 0 },
+    ];
+    renderTable(document.getElementById("table-percent"), percentPatterns, 50000);
+
+    // ── Wiring av demo-toggles ─────────────────────────────────────────────
+    function wireScenario(scenarioId, tableEl) {
+      const controls = document.querySelector(`.controls[data-scenario="${scenarioId}"]`);
+      if (!controls) return;
+      controls.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLButtonElement)) return;
+        const action = target.dataset.action;
+        const idx = Number(target.dataset.idx ?? "0");
+        if (action === "active") {
+          setActive(tableEl, idx);
+          // Visualiser hvilken knapp som er valgt
+          controls
+            .querySelectorAll('button[data-action="active"]')
+            .forEach((b) => b.classList.remove("active"));
+          target.classList.add("active");
+        } else if (action === "completed") {
+          toggleCompleted(tableEl, idx);
+        } else if (action === "flash") {
+          flashWon(tableEl, idx);
+        }
+      });
+    }
+
+    wireScenario("innsatsen", innsatsenEl);
+    wireScenario("bingo", bingoEl);
+  </script>
+</body>
+</html>

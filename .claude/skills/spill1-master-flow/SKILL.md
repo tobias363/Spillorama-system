@@ -618,6 +618,90 @@ For full per-color-breakdown må backend utvide wire-formatet til
 - IKKE fjern `myRoundWinnings`-reset i `gameStarted`-handler — forrige rundes liste vil lekke inn i WinScreen ved rask round-transition
 - IKKE muter `summary.myWinnings`-listen inne i overlay — Controller eier sannheten
 
+## Premietabell-rendering (3-bong-grid, 2026-05-14)
+
+**Tobias-direktiv 2026-05-14:** Spillerklientens premietabell i `CenterTopPanel`
+skal vise alle 3 bong-farger (Hvit / Gul / Lilla) — ikke kun Hvit. Pre-fix
+viste én tekst-pill per pattern (`"Rad 1 - 100 kr"`) som kun var Hvit-prisen,
+selv om Gul-bong betaler ×2 og Lilla ×3. Spillere måtte regne i hodet.
+
+### Auto-multiplikator-regel (samme som payout-pipeline)
+
+Auto-multiplikator-regelen i [SPILL_REGLER_OG_PAYOUT.md §3.2](../../../docs/architecture/SPILL_REGLER_OG_PAYOUT.md#32-dette-gjelder-alle-hovedpremier-i-hovedspill):
+
+| Bong | Pris | Multiplikator |
+|---|---|---|
+| Hvit | 5 kr | × 1 (= base) |
+| Gul | 10 kr | × 2 |
+| Lilla | 15 kr | × 3 |
+
+`pattern.prize1` (eller `Math.round((prizePercent / 100) * prizePool)` for
+percent-modus) er ALLTID Hvit-base. Gul og Lilla deriveres deterministisk
+ved multiplikasjon. Engine bruker samme regel server-side
+(`Game1DrawEngineService.payoutPerColorGroups`), så displayed-amount =
+paid-out-amount.
+
+### Layout (5×3 grid)
+
+```
+| Premie        | Hvit       | Gul        | Lilla      |
+| Rad 1         | 100 kr     | 200 kr     | 300 kr     |
+| Rad 2         | 200 kr     | 400 kr     | 600 kr     |
+| Rad 3         | 200 kr     | 400 kr     | 600 kr     |
+| Rad 4         | 200 kr     | 400 kr     | 600 kr     |
+| Full Hus      | 1000 kr    | 2000 kr    | 3000 kr    |
+```
+
+Hver rad har:
+- `.pattern-label` (span) — pattern-navnet ("Rad 1", "Full Hus")
+- `.premie-cell.col-hvit` (div) — Hvit-pris (base)
+- `.premie-cell.col-gul` (div) — Gul-pris (×2)
+- `.premie-cell.col-lilla` (div) — Lilla-pris (×3)
+
+### Hvor i koden
+
+- **Renderer:** `packages/game-client/src/games/game1/components/CenterTopPanel.ts`
+  - `PREMIE_BONG_COLORS` (eksportert const) definerer auto-multiplikatoren
+  - `rebuildPills` bygger 5×3 grid (header + 5 rader)
+  - `applyPillState` skriver prize per celle (Hvit ×1, Gul ×2, Lilla ×3)
+- **Design-preview** (lokal iterasjon før prod):
+  `http://localhost:4000/web/games/premie-design.html`
+  Bygges av `packages/game-client/vite.premie-design.config.ts`
+
+### Regression-tester
+
+- `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` —
+  18 tester: grid-struktur, auto-mult fixed-modus, percent-modus, active/
+  completed/won-flash, placeholder-mode, minimal-diff DOM-writes
+- `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` —
+  utvidet 2026-05-14 med `.premie-row` + `.premie-cell` guard (PIXI-blink-bug
+  PR #468 må ikke regressere på de nye klassene)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` —
+  40 tester (eksisterende), oppdatert til ny `.col-hvit`-format
+
+### Ingen single-prize-cap på hovedspill
+
+Lilla på Innsatsen Full Hus = 3000 kr. Lilla på Oddsen-HIGH = 4500 kr.
+**Ingen 2500 kr-cap** — det gjelder KUN databingo (`gameType=DATABINGO`,
+slug=`spillorama`). Hovedspill (`gameType=MAIN_GAME`) har INGEN cap. Se
+SPILL_REGLER §3.4 og §4.
+
+### KRITISK: ingen backdrop-filter
+
+`.premie-row` og `.premie-cell` ligger over Pixi-canvas. Hvis noen
+introduserer `backdrop-filter: blur(...)` på disse klassene vil PIXI-
+blink-bug (PR #468) regressere. Regression-testen
+`no-backdrop-filter-regression.test.ts` selekterer på `.premie-row` og
+`.premie-cell` for å hindre dette.
+
+### ALDRI gjør
+
+1. Vise kun Hvit-prisen igjen — bryter Tobias-direktiv 2026-05-14
+2. Hardkode 2500 kr-cap på hovedspill-premier (kun databingo har cap)
+3. Endre multiplikator-konstantene i `PREMIE_BONG_COLORS` (1/2/3) uten
+   tilsvarende endring i `Game1DrawEngineService.payoutPerColorGroups`
+4. Legge til `backdrop-filter` på `.premie-row` eller `.premie-cell`
+
 ## Når denne skill-en er aktiv
 
 **Gjør:**
@@ -667,3 +751,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
 | 2026-05-14 | v1.7.0 — PR `fix/winscreen-show-only-winning-phases` (Tobias-rapport 13:00 runde 1edd90a1): `Game1EndOfRoundOverlay` viser KUN vinnende rader (filter på `summary.myWinnings`). Tom liste → "Beklager, ingen gevinst". Multi-color per fase (eks. yellow + purple på Rad 2) → separate rader. Game1Controller akkumulerer `myRoundWinnings`-liste per `pattern:won`-event (single source of truth, upåvirket av snapshot-reset i scheduled Spill 1). 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts`. Backwards-compat bevart for legacy patternResults-path. PITFALLS §7.22. |
+| 2026-05-14 | v1.8.0 — Agent Q (CSS, Tobias-direktiv): la til seksjon "Premietabell-rendering (3-bong-grid)". `CenterTopPanel` viste tidligere kun Hvit-bong-pris i tekst-pillene. Ny render bygger 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla) der Gul (×2) og Lilla (×3) deriveres automatisk fra `pattern.prize1`. Bygd lokal design-side først (`/web/games/premie-design.html`) for Tobias-godkjenning. Inkluderer ny `premieTable.test.ts` (18 tester) + utvidet `no-backdrop-filter-regression.test.ts` med `.premie-row`/`.premie-cell` guards. PITFALLS §7.23. |

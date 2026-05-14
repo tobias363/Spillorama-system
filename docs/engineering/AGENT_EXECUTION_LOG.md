@@ -59,6 +59,88 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — Premietabell 3-bong-grid (Agent Q, CSS, Tobias-direktiv)
+
+**Branch:** `feat/premie-table-redesign-2026-05-14`
+**PR:** TBD (åpnes ved leveranse)
+**Agent type:** fix-agent / CSS-design-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Tobias-direktiv 2026-05-14: "Kan du også spawne en separart CSS agent som legger inn akuratt dette designet der hvor rader og gevinster vises… Dette må vi gjøre fordi det er 3 ulike bonger med ulik premiemønster. vi må da vise premie for alle ulike bongene. nå vises kun for hvit bong. jeg tenker vi oppretter en lokalside hvor vi først designet hele dette elementet slik at vi kan implementere det etterpå og ikke trenge å tweake på dette i spillet."
+
+**Bakgrunn:**
+- `CenterTopPanel` viste 5 tekst-piller (én per pattern) med format `"Rad 1 - 100 kr"`. Prisen var alltid Hvit-bong (5 kr = base). Gul-bong (10 kr) og Lilla-bong (15 kr) spillere fikk ×2 og ×3 utbetalt via auto-multiplikator-regel server-side (SPILL_REGLER_OG_PAYOUT.md §3.2), men hadde ingen synlig indikasjon i UI før de vant.
+- Tobias bestilte lokal design-side først for å unngå tweak-i-spillet-loop.
+
+**Hva ble gjort:**
+
+1. **Lokal design-side (CSS-iterasjon):**
+   - `packages/game-client/src/premie-design/premie-design.html` (NY, ~430 linjer) — 3 scenarier (Innsatsen fixed, Bingo standard, 5×500 percent-modus), interaktive toggles for active/completed/won-flash
+   - `packages/game-client/vite.premie-design.config.ts` (NY) — Vite-build wired etter eksisterende dev-overview/preview-mønster
+   - `packages/game-client/package.json` — `build`-script utvidet til å inkludere ny config, `build:premie-design`-shortcut lagt til
+   - `packages/game-client/src/dev-overview/dev-overview.html` — ny "1b. Design-previews"-seksjon med link til premie-design.html
+   - URL etter `npm run dev:all`: `http://localhost:4000/web/games/premie-design.html`
+
+2. **Implementasjon i `CenterTopPanel.ts`:**
+   - Eksportert `PREMIE_BONG_COLORS`-const (3 farger × multiplikator 1/2/3) for testbarhet
+   - Erstattet single-pill-CSS med `.premie-table` / `.premie-header` / `.premie-row` / `.premie-cell`-klasser
+   - `rebuildPills` bygger 5×3 grid (header + 5 rader, hver med pattern-label + 3 prize-celler)
+   - `applyPillState` skriver displayName til label-span og prize × multiplikator til hver celle (deterministisk auto-mult, ingen ekstra input)
+   - `pillCache` sporer `{displayName, prize, active, completed}` for minimal-diff DOM-writes
+   - `flashAmount`-tweens kjører nå på cellene (Hvit + Gul + Lilla samtidig) ved prize-endring i percent-modus
+   - `destroy()` killer tweens på alle 3 celler per rad (zombie-tween-guard)
+   - `.prize-pill`-klassen beholdt på rad-elementet for backwards-compat med `no-backdrop-filter-regression.test.ts`
+   - INGEN `backdrop-filter` på noen av de nye klassene (PR #468 PIXI-blink-bug)
+
+3. **Tester:**
+   - `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` (NY, 18 tester):
+     - PREMIE_BONG_COLORS struktur
+     - Grid-struktur (5 rader × 3 kolonner, header med swatch-prikker)
+     - Fixed-modus auto-mult (Rad 1, Rad 2-4, Full Hus med 3000 kr Lilla — INGEN cap)
+     - Percent-modus auto-mult (Rad 1, Full Hus, mid-runde prizePool-økning)
+     - Active-state (current pattern, advance, gameRunning=false suppress)
+     - Completed-state (won pattern, gameRunning=false suppress)
+     - Pattern-label norsk display-navn ("Row N" → "Rad N", "Full House" → "Full Hus")
+     - Placeholder-mode (5 placeholder-rader med 0 kr)
+     - Minimal-diff DOM-writes (re-render med samme state → 0 DOM-mutasjoner)
+   - `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` — utvidet med ny test "premie-row + premie-cell har IKKE backdrop-filter (regresjon-guard 2026-05-14)"
+   - `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` — oppdatert 7 eksisterende tester til ny `.col-hvit` / `.col-gul` / `.col-lilla`-format. La til `findHvitCellForPattern`-helper, `findRowForPattern`-helper. Alle 40 tester PASS.
+   - Full game-client suite: 1247 tester PASS (96 test-filer)
+
+4. **Doc-oppdatering (doc-protokoll §2.19):**
+   - `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon "Premietabell-rendering (3-bong-grid, 2026-05-14)" med auto-mult-regel, layout, kode-referanser, regression-tester, "ALDRI gjør"-liste. Endringslogg v1.7.0.
+   - `docs/engineering/PITFALLS_LOG.md` §7.23 — ny entry med detaljert root-cause + fix + prevention. Indeks-teller oppdatert
+   - Denne entry i AGENT_EXECUTION_LOG
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` (+~190 / -~95)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` (+~70 / -~25)
+- `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` (+~35)
+- `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` (NY, 274 linjer)
+- `packages/game-client/src/premie-design/premie-design.html` (NY, ~430 linjer)
+- `packages/game-client/vite.premie-design.config.ts` (NY, 35 linjer)
+- `packages/game-client/src/dev-overview/dev-overview.html` (+20)
+- `packages/game-client/package.json` (+2 npm-scripts)
+- `.claude/skills/spill1-master-flow/SKILL.md` (+~75)
+- `docs/engineering/PITFALLS_LOG.md` (+~55)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Tester:**
+- `premieTable.test.ts` — 18/18 PASS
+- `no-backdrop-filter-regression.test.ts` — 6/6 PASS (5 eksisterende + 1 ny)
+- `CenterTopPanel.test.ts` — 40/40 PASS (alle eksisterende oppdatert til ny format)
+- Full game-client: 1247/1247 PASS
+- `npm run check` (TypeScript strict) — PASS
+- `npm run build` (all Vite configs inkl premie-design) — PASS
+
+**Læring (for fremtidige agenter):**
+- Lokal design-side først er VERDIFULL — CSS-iterasjon i prod-koden trigger Pixi-bundle-rebuild + browser-refresh som tar 5-10x lengre tid per iterasjon. Tobias-direktiv ga oss en mal vi kan gjenbruke for fremtidige UI-redesigner (legg ny Vite-config i `vite.<feature>.config.ts`, wire i build-script, bygg HTML-side standalone uten Pixi-runtime).
+- `findSpanForPattern`-helper i eksisterende tester returnerte tidligere span med kombinert "Rad 1 - 100 kr"-tekst. Etter redesign er pattern-label (span) og pris (div) separat. La til `findHvitCellForPattern`-helper for nye assertions, beholdt `findSpanForPattern` for `gsap.getTweensOf`-tween-checks (de ble redirected fra span til celle samtidig som flash flyttet til celle-nivå).
+- `.prize-pill`-klassen beholdt på rad-elementet (dummy CSS) for å unngå brudd i ekstern regression-test. Dette er en "backwards-compat-bro" som lar oss bytte ut intern struktur uten å rive ned tester andre steder.
+- Ingen backdrop-filter — fortsetter å holdes som hard regel via regression-test som nå inkluderer `.premie-row` + `.premie-cell`.
+
+**Eierskap:** `packages/game-client/src/games/game1/components/CenterTopPanel.ts` + tilhørende tester. Andre agenter må koordinere med PM før de rør disse filene.
+
+---
+
 ### 2026-05-14 — Innsats + Forhåndskjøp dobbel-telling (fix-agent, BUG)
 
 **Branch:** `fix/innsats-forhandskjop-classification-2026-05-14`

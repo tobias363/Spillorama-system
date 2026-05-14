@@ -1443,6 +1443,42 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 - §4 (live-rom-robusthet — master-UX er pilot-blokker)
 - Tobias-direktiv 2026-05-14 (rapportert 3 ganger — derfor kritisk)
 
+### §7.23 — Premietabell viste kun Hvit-bong-pris (Tobias 2026-05-14)
+
+**Severity:** P0 (pilot-UX-bug — spillere måtte regne i hodet, høy risiko for misforståelse)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv: "vi må vise premie for alle ulike bongene. nå vises kun for hvit bong")
+**Symptom:** `CenterTopPanel` viste én tekst-pill per pattern, eks "Rad 1 - 100 kr". Spillere som kjøpte Gul (10 kr) eller Lilla (15 kr) bong måtte selv regne ut at premien deres var hhv. 200 kr og 300 kr basert på auto-multiplikator-regelen. Spesielt nye spillere ble forvirret — flere kunderapporter (legacy Unity-klienten viste samme måten).
+**Root cause:** `prizeListEl` i `CenterTopPanel.ts` bygde 5 piller med format `${displayName} - ${prize} kr` der `prize` alltid var Hvit-base (`pattern.prize1` for fixed, eller `Math.round((prizePercent / 100) * prizePool)` for percent-modus). Auto-multiplikator-regelen i SPILL_REGLER_OG_PAYOUT.md §3.2 var korrekt implementert i payout-pipeline (PR #1417), men aldri reflektert i UI-en.
+**Fix (PR feat/premie-table-redesign-2026-05-14):**
+
+1. Bygd lokal design-side `/web/games/premie-design.html` for CSS-iterasjon FØR prod-implementasjon (Tobias-direktiv: "lokalside hvor vi først designet hele dette elementet")
+2. Erstattet `prize-pill`-stack med 5×3 grid (`premie-table`):
+   - Rader = patterns (Rad 1-4 + Full Hus)
+   - Kolonner = bong-farger (Hvit / Gul / Lilla)
+   - Gul = Hvit × 2, Lilla = Hvit × 3 (deterministisk auto-mult i `applyPillState`)
+3. Header med swatch-prikker (hvit/gul/lilla-fargekoder) for visuell skille
+4. Active/completed/won-flash på rad-nivå (én class-toggle, ikke per celle)
+5. `.prize-pill`-klasse beholdt på rad-elementet for backwards-compat med `no-backdrop-filter-regression.test.ts`
+6. Ny eksportert `PREMIE_BONG_COLORS`-const dokumenterer multiplikator-regelen i kode
+
+**Prevention:**
+- ALDRI vis kun én bong-pris i UI — alle 3 farger må være synlige (Tobias-direktiv 2026-05-14, IMMUTABLE)
+- Auto-mult-regelen er sentralisert i `PREMIE_BONG_COLORS`-const. Hvis du endrer den, oppdater også `Game1DrawEngineService.payoutPerColorGroups` (samme regel server-side) ELLER fix-koden ene siden vil betale ut feil
+- INGEN `backdrop-filter` på `.premie-row` eller `.premie-cell` (PR #468 PIXI-blink-bug)
+- Design-iterasjon ALLTID på lokal HTML/CSS-side først for å unngå tweak-i-spillet-loop (Tobias-direktiv: "ikke trenge å tweake på dette i spillet")
+- Tester:
+  - `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` — 18 tester (grid-struktur, auto-mult begge modi, active/completed/won-flash, placeholder, minimal-diff)
+  - `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` — utvidet med `.premie-row` + `.premie-cell` guard
+  - `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` — 40 eksisterende tester oppdatert til ny `.col-hvit`-format
+
+**Related:**
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts`
+- `packages/game-client/src/premie-design/premie-design.html` (lokal design-preview)
+- `packages/game-client/vite.premie-design.config.ts`
+- `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2 (auto-mult-regel)
+- `.claude/skills/spill1-master-flow/SKILL.md` "Premietabell-rendering (3-bong-grid)"
+- §1.9 (payout auto-mult-fix PR #1417 — server-side, parallel mønster)
+
 ---
 
 ## §8 Doc-disiplin

@@ -63,12 +63,51 @@ function results(row1Payout?: number, row1Won = false): PatternResult[] {
   return out;
 }
 
+/**
+ * Premietabell-redesign 2026-05-14: tidligere returnerte denne en
+ * `<span>` med tekst `"Rad 1 - 100 kr"`. Etter redesign er pattern-label
+ * og prize splittet:
+ *   - `.pattern-label` (span) inneholder KUN pattern-navnet ("Rad 1").
+ *   - `.col-hvit` (div) inneholder Hvit-base-prisen ("100 kr").
+ *   - `.col-gul` / `.col-lilla` inneholder ×2/×3 deriverte priser.
+ *
+ * Returnerer faktisk `<span>` (label-en) slik at `gsap.getTweensOf`
+ * fortsatt finner riktig element. Nyere tester bør bruke
+ * `findRowForPattern` for å gjøre text/state-assertions.
+ */
 function findSpanForPattern(container: HTMLElement, displayNamePrefix: string): HTMLSpanElement | null {
-  const spans = container.querySelectorAll("span");
-  for (const s of spans) {
-    if (s.textContent && s.textContent.includes(displayNamePrefix)) return s as HTMLSpanElement;
+  const labels = container.querySelectorAll<HTMLSpanElement>("span.pattern-label");
+  for (const label of labels) {
+    if (label.textContent && label.textContent.includes(displayNamePrefix)) {
+      return label;
+    }
   }
   return null;
+}
+
+/**
+ * Premietabell-redesign 2026-05-14: foretrukket helper for nye tester.
+ * Returnerer rad-elementet (`.premie-row`) for pattern med gitt
+ * display-navn (eks. "Rad 1", "Full Hus").
+ */
+function findRowForPattern(container: HTMLElement, displayNamePrefix: string): HTMLDivElement | null {
+  const labels = container.querySelectorAll<HTMLSpanElement>("span.pattern-label");
+  for (const label of labels) {
+    if (label.textContent && label.textContent.includes(displayNamePrefix)) {
+      return label.closest(".premie-row") as HTMLDivElement | null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Premietabell-redesign 2026-05-14: returnerer Hvit-cellen ("col-hvit")
+ * for pattern med gitt display-navn. Bruk denne for assertions på
+ * Hvit-bong-pris (eks. `expect(cell.textContent).toBe("100 kr")`).
+ */
+function findHvitCellForPattern(container: HTMLElement, displayNamePrefix: string): HTMLDivElement | null {
+  const row = findRowForPattern(container, displayNamePrefix);
+  return row?.querySelector(".col-hvit") as HTMLDivElement | null;
 }
 
 describe("CenterTopPanel — Update_Pattern_Amount flash (PR-5 C3)", () => {
@@ -88,36 +127,41 @@ describe("CenterTopPanel — Update_Pattern_Amount flash (PR-5 C3)", () => {
 
   it("does NOT flash on the first render (no previous amount to diff)", () => {
     panel.updatePatterns(PATTERNS, results(100), 1000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span).not.toBeNull();
-    expect(gsap.getTweensOf(span!).length).toBe(0);
+    // Premietabell-redesign 2026-05-14: flashAmount kjører nå på cellen,
+    // ikke label-spannet — sjekker derfor Hvit-cellen for tweens.
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell).not.toBeNull();
+    expect(gsap.getTweensOf(cell!).length).toBe(0);
   });
 
   it("does NOT flash when the amount is unchanged", () => {
     panel.updatePatterns(PATTERNS, results(100), 1000);
     panel.updatePatterns(PATTERNS, results(100), 1000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span).not.toBeNull();
-    expect(gsap.getTweensOf(span!).length).toBe(0);
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell).not.toBeNull();
+    expect(gsap.getTweensOf(cell!).length).toBe(0);
   });
 
   it("DOES flash when the payout amount for a pattern changes", () => {
     panel.updatePatterns(PATTERNS, results(100), 1000);
     panel.updatePatterns(PATTERNS, results(150), 1000);
 
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span).not.toBeNull();
+    // Premietabell-redesign 2026-05-14: flashAmount kjører nå på
+    // `.col-*`-cellene (Hvit/Gul/Lilla), ikke på label-spannet. Sjekker
+    // Hvit-cellen — alle tre cellene flashes samtidig ved prize-endring.
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell).not.toBeNull();
     // Two tweens queued by flashAmount: one scale yoyo, one colour tween.
-    expect(gsap.getTweensOf(span!).length).toBeGreaterThanOrEqual(1);
+    expect(gsap.getTweensOf(cell!).length).toBeGreaterThanOrEqual(1);
   });
 
   it("does NOT flash once a pattern is won (green-check state is terminal)", () => {
     panel.updatePatterns(PATTERNS, results(100), 1000);
     // Mark as won with a different payout — still shouldn't flash.
     panel.updatePatterns(PATTERNS, results(200, /* won */ true), 1000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span).not.toBeNull();
-    expect(gsap.getTweensOf(span!).length).toBe(0);
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell).not.toBeNull();
+    expect(gsap.getTweensOf(cell!).length).toBe(0);
   });
 
   it("prunes tracking state for patterns that disappear between rounds", () => {
@@ -127,9 +171,9 @@ describe("CenterTopPanel — Update_Pattern_Amount flash (PR-5 C3)", () => {
     const onlyRow2: PatternDefinition[] = [PATTERNS[1]];
     panel.updatePatterns(onlyRow2, [], 1000);
     panel.updatePatterns(PATTERNS, results(100), 1000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span).not.toBeNull();
-    expect(gsap.getTweensOf(span!).length).toBe(0);
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell).not.toBeNull();
+    expect(gsap.getTweensOf(cell!).length).toBe(0);
   });
 });
 
@@ -181,10 +225,13 @@ describe("CenterTopPanel — PR C winningType-honoring prize-display", () => {
     // Pot = 5000, men fast-mode skal IKKE skalere med pot.
     panel.updatePatterns(fixedPatterns, [], 5000);
 
-    const row1Span = findSpanForPattern(container, "Rad 1");
-    const fhSpan = findSpanForPattern(container, "Full Hus");
-    expect(row1Span?.textContent).toContain("100 kr");
-    expect(fhSpan?.textContent).toContain("1000 kr");
+    // Premietabell-redesign 2026-05-14: prize ligger nå i `.col-hvit` (Hvit-
+    // base × 1), ikke i en kombinert "Rad 1 - 100 kr"-span. Hvit-cellen
+    // er base-prisen som testen tidligere asserterte mot.
+    const row1Cell = findHvitCellForPattern(container, "Rad 1");
+    const fhCell = findHvitCellForPattern(container, "Full Hus");
+    expect(row1Cell?.textContent).toBe("100 kr");
+    expect(fhCell?.textContent).toBe("1000 kr");
   });
 
   it("fortsetter å skalere percent-mode med prizePool (bakoverkompat)", () => {
@@ -199,8 +246,8 @@ describe("CenterTopPanel — PR C winningType-honoring prize-display", () => {
       },
     ];
     panel.updatePatterns(percentPatterns, [], 2000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span?.textContent).toContain("200 kr");
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell?.textContent).toBe("200 kr");
   });
 
   it("prize1 mangler → 0 kr (defensive)", () => {
@@ -217,8 +264,8 @@ describe("CenterTopPanel — PR C winningType-honoring prize-display", () => {
       },
     ];
     panel.updatePatterns(brokenFixed, [], 1000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span?.textContent).toContain("0 kr");
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell?.textContent).toBe("0 kr");
   });
 
   it("payoutAmount fra server overstyrer beregnet prize (won-state)", () => {
@@ -248,9 +295,8 @@ describe("CenterTopPanel — PR C winningType-honoring prize-display", () => {
       },
     ];
     panel.updatePatterns(fixedPatterns, wonResult, 2000);
-    const span = findSpanForPattern(container, "Rad 1");
-    expect(span?.textContent).toContain("50 kr");
-    expect(span?.textContent).not.toContain("100 kr");
+    const cell = findHvitCellForPattern(container, "Rad 1");
+    expect(cell?.textContent).toBe("50 kr");
   });
 
   it("signature-cache invalideres når winningType eller prize1 endres", () => {
@@ -258,8 +304,8 @@ describe("CenterTopPanel — PR C winningType-honoring prize-display", () => {
       { id: "row1", name: "Row 1", claimType: "LINE", design: 1, prizePercent: 10, order: 1 },
     ];
     panel.updatePatterns(percentP, [], 1000);
-    const span1 = findSpanForPattern(container, "Rad 1");
-    expect(span1?.textContent).toContain("100 kr"); // 10% av 1000
+    const cell1 = findHvitCellForPattern(container, "Rad 1");
+    expect(cell1?.textContent).toBe("100 kr"); // 10% av 1000
 
     // Admin endrer til fast 300 kr — må re-rendere og vise 300.
     const fixedP: PatternDefinition[] = [
@@ -267,8 +313,8 @@ describe("CenterTopPanel — PR C winningType-honoring prize-display", () => {
         prizePercent: 0, order: 1, winningType: "fixed", prize1: 300 },
     ];
     panel.updatePatterns(fixedP, [], 1000);
-    const span2 = findSpanForPattern(container, "Rad 1");
-    expect(span2?.textContent).toContain("300 kr");
+    const cell2 = findHvitCellForPattern(container, "Rad 1");
+    expect(cell2?.textContent).toBe("300 kr");
   });
 });
 
@@ -754,7 +800,7 @@ describe("CenterTopPanel — blink prevention (DOM-mutasjons-kontrakt)", () => {
     );
   });
 
-  it("prize-endring oppdaterer KUN label.textContent, ikke pill-struktur", async () => {
+  it("prize-endring oppdaterer KUN celle-tekst, ikke rad-struktur", async () => {
     panel.updatePatterns(PATTERNS, results(50), 100);
     await new Promise((r) => setTimeout(r, 10));
     const pillBefore = panel.rootEl.querySelectorAll(".prize-pill");
@@ -765,8 +811,12 @@ describe("CenterTopPanel — blink prevention (DOM-mutasjons-kontrakt)", () => {
     for (let i = 0; i < pillBefore.length; i++) {
       expect(pillAfter[i]).toBe(pillBefore[i]);
     }
-    // Label skal ha ny tekst.
-    expect(pillAfter[0].querySelector("span")?.textContent).toBe("Rad 1 - 60 kr");
+    // Premietabell-redesign 2026-05-14: label-span beholder pattern-navnet,
+    // og prisene står i `.col-*`-cellene (Hvit/Gul/Lilla med ×1/×2/×3).
+    expect(pillAfter[0].querySelector("span.pattern-label")?.textContent).toBe("Rad 1");
+    expect(pillAfter[0].querySelector(".col-hvit")?.textContent).toBe("60 kr");
+    expect(pillAfter[0].querySelector(".col-gul")?.textContent).toBe("120 kr");
+    expect(pillAfter[0].querySelector(".col-lilla")?.textContent).toBe("180 kr");
   });
 
   it("won-state trigger class-toggle, ikke innerHTML-rebuild", async () => {

@@ -105,6 +105,38 @@ describe("Blink-regresjon 2026-04-24 — ingen backdrop-filter over Pixi-canvas"
       panel.destroy();
     });
 
+    it("premie-row + premie-cell har IKKE backdrop-filter (regresjon-guard 2026-05-14)", () => {
+      // Premietabell-redesign 2026-05-14: nytt 5×3 grid bytter
+      // `.prize-pill`-pillene med `.premie-row`-rader + `.premie-cell`-celler.
+      // Begge nye class-er må også være backdrop-filter-frie — samme
+      // Pixi-blink-regress vil oppstå hvis noen senere legger til
+      // `backdrop-filter: blur(...)` her.
+      const panel = new CenterTopPanel(overlay);
+      panel.updatePatterns([], []);
+
+      const rows = container.querySelectorAll<HTMLDivElement>(".premie-row");
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of Array.from(rows)) {
+        const bf = readBackdropFilter(row);
+        expect(
+          bf,
+          `premie-row har backdrop-filter="${bf}" — blink-regresjon. Premietabell-redesign 2026-05-14.`,
+        ).toBe("");
+      }
+
+      const cells = container.querySelectorAll<HTMLDivElement>(".premie-cell");
+      expect(cells.length).toBeGreaterThan(0);
+      for (const cell of Array.from(cells)) {
+        const bf = readBackdropFilter(cell);
+        expect(
+          bf,
+          `premie-cell har backdrop-filter="${bf}" — blink-regresjon. Premietabell-redesign 2026-05-14.`,
+        ).toBe("");
+      }
+
+      panel.destroy();
+    });
+
     it("action-buttons på #center-top har IKKE backdrop-filter", () => {
       const panel = new CenterTopPanel(overlay);
       panel.updatePatterns([], []);
