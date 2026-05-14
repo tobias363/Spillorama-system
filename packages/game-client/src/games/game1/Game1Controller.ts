@@ -11,6 +11,10 @@ import type {
   WalletLossStateEvent,
 } from "@spillorama/shared-types/socket-events";
 import { telemetry } from "../../telemetry/Telemetry.js";
+// Tobias-bug 2026-05-14 (BUG-A defense-in-depth): wire LoadingOverlay soft-
+// fallback til Sentry breadcrumbs + info-message så stuck-perioder vises i
+// diagnose-rapporter. Best-effort: fail-soft hvis Sentry er off i dev.
+import { addClientBreadcrumb, captureClientMessage } from "../../telemetry/Sentry.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
 import { LoadingOverlay } from "../../components/LoadingOverlay.js";
@@ -305,9 +309,50 @@ class Game1Controller implements GameController {
 
     // UI overlays
     const overlayContainer = app.app.canvas.parentElement ?? document.body;
-    this.loader = new LoadingOverlay(overlayContainer);
-    // BIN-673: typed state-machine drives all loader messages. 5-sec stuck
-    // threshold triggers the "Last siden på nytt" reload button.
+    // Tobias-bug 2026-05-14 (BUG-A defense-in-depth): wire onSoftFallback
+    // til EventTracker + Sentry så live-monitor og diagnose-rapporter ser
+    // når klienten ble stuck i en loading-state > 8s. onRetry-handleren
+    // settes etter at socket har joinet (vi trenger roomCode), via
+    // `loader.setRetryHandler(...)`. Default-fallback = onReload via
+    // LoadingOverlay-konstruktøren.
+    this.loader = new LoadingOverlay(overlayContainer, {
+      onSoftFallback: (info) => {
+        // Skriv til EventTracker så live-monitor ser hendelsen. Best-effort
+        // — getEventTracker er aldri null, men try-catch beskytter mot
+        // sykt listener-state.
+        try {
+          getEventTracker().track("screen.transition", {
+            event: "loading-overlay.soft-fallback",
+            triggeredState: info.triggeredState,
+            timeSinceLastUpdate: info.timeSinceLastUpdate,
+            roomCode: this.actualRoomCode,
+            scheduledGameId: this.joinedScheduledGameId,
+          });
+        } catch {
+          /* observability må aldri ta ned overlay-en */
+        }
+        // Sentry-breadcrumb (info-nivå) så stuck-perioder vises i
+        // diagnose-rapporter selv om brukeren senere reload-er.
+        try {
+          addClientBreadcrumb("loading-overlay.soft-fallback", {
+            triggeredState: info.triggeredState,
+            timeSinceLastUpdate: info.timeSinceLastUpdate,
+            roomCode: this.actualRoomCode,
+            scheduledGameId: this.joinedScheduledGameId,
+            hallId: this.deps.hallId,
+          });
+          captureClientMessage(
+            `loading-overlay.soft-fallback aktivert (state=${info.triggeredState})`,
+            "info",
+          );
+        } catch {
+          /* Sentry off i dev — fail-soft */
+        }
+      },
+    });
+    // BIN-673: typed state-machine drives all loader messages.
+    // Tobias-bug 2026-05-14: soft-fallback-timer (default 8s) viser
+    // "Venter på neste spill" + retry-knapp før eventuell harsh reload.
     this.loader.setState("CONNECTING");
     this.toast = new ToastNotification(overlayContainer);
     this.pauseOverlay = new PauseOverlay(overlayContainer);
@@ -785,6 +830,27 @@ class Game1Controller implements GameController {
 
     this.myPlayerId = joinResult.data.playerId;
     this.actualRoomCode = joinResult.data.roomCode;
+
+    // Tobias-bug 2026-05-14 (BUG-A defense-in-depth): nå som roomCode er
+    // satt, wire retry-handler på LoadingOverlay-en. Klikk på "Prøv igjen"
+    // i soft fallback bruker `Game1ReconnectFlow.handleReconnect` som
+    // henter fersk snapshot via `socket.resumeRoom` + `bridge.applySnapshot`
+    // og transitioner phase basert på state. Ikke-destruktivt: ingen full
+    // sidereload, ingen tap av in-memory armed-bonger eller socket-state.
+    this.loader?.setRetryHandler(async () => {
+      if (!this.reconnectFlow || !this.actualRoomCode) {
+        // Hvis recovery-flow ikke er klar (svært tidlig stuck) faller vi
+        // tilbake til full reload — det er bedre enn at retry-knappen
+        // bare svelger trykket.
+        if (typeof window !== "undefined") {
+          window.location.reload();
+        }
+        return;
+      }
+      await this.reconnectFlow.handleReconnect(this.actualRoomCode, (phase, s) =>
+        this.transitionTo(phase, s),
+      );
+    });
 
     // Tobias 2026-05-11 debug-HUD: vis hvilket rom + hall klienten faktisk
     // havnet på. Aktiveres når `?debug=1` i URL eller localStorage
