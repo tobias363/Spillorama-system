@@ -182,6 +182,75 @@ Ingen kode-endringer i Trinn 1 (kun research/dokumentasjon).
 - `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (linje 1-800)
 - `docs/engineering/PITFALLS_LOG.md` (§3.10, §3.11, §3.12, §3.13, §7.10-§7.19, §11.x)
 - `docs/operations/PM_HANDOFF_2026-05-14.md` (§1)
+### 2026-05-14 — Agent E — Next Game Display historisk PR-arv research (general-purpose, PM Trinn 1)
+
+**Branch:** `research/next-game-display-e-history-2026-05-14`
+**PR:** TBD (research-PR, ingen kode-endringer)
+**Agent type:** general-purpose (spawned av PM-AI under fundament-audit Trinn 1)
+**Trigger:** Tobias-mandat 2026-05-14: *"Vi må nå ha et helt åpent sinn hvor vi ser på funksjonaliteten og hvis vi finner ut at dette må bygges som og det utsetter pilot med uker så er vi nødt til å gjøre det."* — kvalitet > tid på Next Game Display-bug.
+
+**Bakgrunn:** Bug har vært rapportert minst 5 ganger samme dag (2026-05-14) og hatt 4 fix-forsøk (#1368, #1422, #1427, #1431) som ikke lukker rot-årsaken. PM erkjente patch-spiral og spawnet 6 research-agenter (A-F) for kunnskaps-deep-dive.
+
+**Scope:** Agent E mapper UT komplett kronologisk tidslinje av ALLE PR-er siden 2026-04-23 som rører plan-runtime, lobby eller "next game"-rendering. Identifiserer mønstre, "patch-spiral"-anti-patterns og rot-årsaker.
+
+**Inputs:**
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (audit-skall, PR #1469)
+- `docs/operations/PM_HANDOFF_2026-05-14.md` §1 (problem-statement + tidligere fix-forsøk)
+- `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (Bølge 1-6 status)
+- `docs/engineering/PITFALLS_LOG.md` §3.10-§3.13 + §11
+- git log --all --oneline --since="2026-04-23" filtered på relevant keywords
+- gh pr list --state merged + view body på 3 key PRs (#1368, #1422, #1431, #1427, #1050)
+
+**Outputs:**
+- **Ny fil:** `docs/research/NEXT_GAME_DISPLAY_AGENT_E_HISTORY_2026-05-14.md` (530+ linjer, 7 §-er)
+- Komplett kronologisk tidslinje (6 faser, 50+ PR-er kartlagt)
+- Mønster-analyse: 3 patch-spiraler identifisert (Spiral A: master pause/fortsett-id, Spiral B: stuck plan-run-recovery med 5 reconcilere, Spiral C: Next Game Display med 4 fix-forsøk)
+- Tobias-rapport-kronologi: 5+ rapporter samme dag på samme bug-klasse
+- Bølge 1-6 etterspill-analyse: **Bølge 4 (slett legacy parallel-spawn) ble ALDRI gjennomført — ER rot-årsaken**
+- Recommendations: Bølge 7 (konsolider "neste spill"-beregninger) + Bølge 4 (slett legacy parallel-spawn) parallelt
+
+**Hovedfunn:**
+- **199+ PR-er rører temaet siden 2026-04-23** (på vårt filter)
+- **11+ direkte fix-forsøk** på Next Game Display
+- `Spill1HallStatusBox.ts` har **56+ touches** — patch-spiral peak
+- `NextGamePanel.ts` har **39** touches
+- `GameLobbyAggregator.ts` har **12** touches siden 2026-05-08-fødsel (Bølge 1) — 4 av disse fundamentale fixer på "neste spill"
+- **Minst 4 parallelle kode-paths beregner "neste spill"-tekst** uavhengig
+- Hver fix (PR #1368, #1422, #1427, #1431) har truffet ÉN path, de andre 3 driver tilstanden videre
+- Tobias har eksplisitt rapportert **5+ ganger samme dag** (2026-05-14) på samme bug-klasse
+
+**Konklusjon:**
+- Dette er **EN strukturell anti-pattern**, ikke 4 separate bugs
+- **Bølge 1-3 var korrekt arkitektur-arbeid**, men Bølge 4 (slett legacy parallel-spawn) ble aldri gjennomført
+- **Bølge 7 (konsolidering)** anbefales: 3-5 dev-dager med 2-3 agenter
+- Hvis Bølge 7 ikke lukker → **fundamental rewrite** (1-4 uker, Tobias-godkjent)
+
+**Fallgruver oppdaget (NY — for §11 i PITFALLS_LOG):**
+- **Meta-fallgruve §11.X:** "Bug-klasse vs bug-instans" — når flere fix-er treffer samme symptom-felt men forskjellige kode-paths, er bug-en EN bug-klasse, ikke flere bugs. Inkrementelle patch-fixer vil aldri lukke rot-årsaken. PM må erkjenne dette og foreslå konsolidering-bølge istedenfor å fortsette patche.
+- **Meta-fallgruve §11.X:** "Foundation refactor uten å fullføre alle bølger" — Bølge 1-3 ble fullført, men Bølge 4 (slett legacy parallel-spawn) ble droppet. Hver downstream bug i 4 uker har kunnet spores tilbake til Bølge 4-mangelen. PM må verifisere at refactor-planen er KOMPLETT fullført, ikke partielt.
+
+**Læring:**
+- Patch-spiral er gjenkjennbar via fil-touch-count: hvis samme fil touches > 10 ganger på samme bug-tema over kort tid, er det patch-spiral
+- 5 reconcilere bygget oppå hverandre (Spiral B) er anti-pattern peak — én reconciler med tydelig grense ville vært bedre
+- Tobias-rapport-kronologi er gull: når samme rapport kommer 5 ganger samme dag, **er det IKKE en flaky bug** — det er strukturell
+
+**Hva ville vi gjort annerledes:**
+- Ved Bølge 1-3 (2026-05-08) burde Bølge 4 vært INKLUDERT, ikke utsatt
+- Ved fix #1422 (BUG E DB-side), burde vi ha sjekket alle 4 paths SAMTIDIG, ikke patche én og se hva som skjer
+- Ved fix #1427 (master-UI header), burde test-coverage-matrise ha vært etablert FØRST (Agent F's scope) for å fange manglende paths
+
+**Eierskap:**
+- `docs/research/NEXT_GAME_DISPLAY_AGENT_E_HISTORY_2026-05-14.md` (Agent E)
+- Trinn 2 (konsolidering i master-doc): PM-AI
+- Trinn 3 (Bølge 7 refactor): TBD
+
+**Knowledge protocol:**
+- [x] Lest `PITFALLS_LOG.md` §3 + §11 før research-arbeid
+- [x] Lest `PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md` (forrige audit, Bølge 1-6 status)
+- [x] Lest `PM_HANDOFF_2026-05-14.md` §1 + §10.3 (problem-statement og anti-mønstre)
+- [x] Spill 1, 2, 3 arkitektur-forskjell forstått — research scope er Spill 1-spesifikt (master-konsoll, plan-runtime)
+- [x] Doc-protokoll fulgt: AGENT_EXECUTION_LOG-entry levert (denne entry-en). PITFALLS-§11-update foreslått i SKILL_UPDATE_PROPOSED-seksjon av research-doc.
+- [x] SKILL_UPDATE_PROPOSED i research-doc: `spill1-master-flow` + `pm-orchestration-pattern` — utsettes til Trinn 2 etter alle 6 agenter har levert
 
 ---
 
