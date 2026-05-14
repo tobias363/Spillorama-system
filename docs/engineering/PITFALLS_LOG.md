@@ -471,6 +471,8 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 
 ### §3.10 — Stuck plan-run etter NATURLIG runde-end (PR #1403 dekket ikke alt)
 
+> **🚨 Etterskrift 2026-05-15:** §3.10-§3.13 var 4 tidligere fix-forsøk på Next Game Display-bug som alle var ufullstendige. Komplett fix kom i Trinn 3 (PR #1477 + #1478 + #1481 = §3.14-§3.16). Rot-årsak-analyse i [`NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md §6`](../architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md#6-identifiserte-bugs-trinn-3--alle-fixed). Disse §3.10-§3.13-entries er beholdt for historisk kontekst, men løsningen i §3.14-§3.16 er autoritativ.
+
 **Severity:** P0 (pilot-blokker — fryser klient på "Laster")
 **Oppdaget:** 2026-05-14 — Tobias-test + `audit:db --quick` (P1 stuck-plan-run × 1, samme mønster i 50+ min for forrige run)
 **Symptom:** Plan-run `status='running'` med scheduled-game `status='completed'` i 30s+. Ingen ny scheduled-game spawnet. Klient som joiner får tomt room-snapshot (`currentGame` mangler) → evig "Laster..."
