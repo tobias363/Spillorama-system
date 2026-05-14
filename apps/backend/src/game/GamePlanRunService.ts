@@ -506,6 +506,18 @@ export class GamePlanRunService {
    * starte en ny runde samme dag. Vi DELETE-r den finished-raden og
    * INSERT-er en ny idle-rad med ny ID.
    *
+   * BUG E auto-advance (2026-05-14, Tobias-direktiv): når vi erstatter
+   * en finished run, beregner vi `current_position` ut fra forrige
+   * run-s posisjon, IKKE alltid `1`:
+   *   - `previousPosition < plan.items.length` → `nextPosition = prev + 1`
+   *     (spillet går videre til neste i spilleplanen)
+   *   - `previousPosition >= plan.items.length` → `nextPosition = 1`
+   *     (planen er ferdig — wrap til start for ny syklus)
+   *
+   * Tobias-direktiv: "Hvert spill spilles kun en gang deretter videre
+   * til nytt spill." Uten auto-advance kjørte Bingo (pos 1) i loop
+   * fordi DELETE+INSERT alltid resatte til position=1.
+   *
    * Hvorfor DELETE+INSERT vs. UPDATE-i-place:
    *   1. UNIQUE(hall_id, business_date) blokkerer en parallell INSERT
    *      uten å fjerne den gamle først.
@@ -558,7 +570,21 @@ export class GamePlanRunService {
     // F-Plan-Reuse (2026-05-09): if a finished run exists for the same
     // business-date, delete it so we can create a fresh idle run. We
     // capture the previous run's id for audit-trail correlation.
+    //
+    // BUG E auto-advance (2026-05-14, Tobias-direktiv): tidligere tok vi
+    // DELETE → INSERT med `current_position=1` uavhengig av hvor langt
+    // forrige run kom. Resultatet: master måtte starte Bingo (position=1)
+    // 2-3 ganger før den endelig "kom seg videre" — fordi `finished` ble
+    // resatt til posisjon 1 hver gang. Tobias-rapport 2026-05-14:
+    //   "Hvert spill spilles kun en gang deretter videre til nytt spill."
+    //
+    // Fix: capture `previousPosition` FØR DELETE og bruk den til å beregne
+    // `nextPosition` på den nye plan-run-raden. Logikk:
+    //   - Hvis `previousPosition < plan.items.length` → `nextPosition = prev + 1`
+    //   - Hvis `previousPosition >= plan.items.length` → `nextPosition = 1`
+    //     (wrap/cycle — siste spill ferdig, plan repeteres)
     let previousRunId: string | null = null;
+    let previousPosition: number | null = null;
     if (existing && existing.status === "finished") {
       // Defensive guard: only delete if status is actually finished. We
       // re-check the WHERE-clause in the DELETE itself so a race that
@@ -566,6 +592,7 @@ export class GamePlanRunService {
       // DELETE matches zero rows and we fall through to a fresh
       // findForDay below).
       previousRunId = existing.id;
+      previousPosition = existing.currentPosition;
       const { rowCount } = await this.pool.query(
         `DELETE FROM ${this.table()}
          WHERE id = $1 AND status = 'finished'`,
@@ -615,13 +642,54 @@ export class GamePlanRunService {
       );
     }
 
+    // BUG E auto-advance (2026-05-14): beregn `nextPosition`.
+    //
+    // KORRIGERT spec (Tobias 2026-05-14 10:17): "Plan-completed beats stengetid".
+    // Selv om bingohall fortsatt er åpen (innenfor `plan.start_time`-`plan.end_time`),
+    // skal master IKKE kunne starte ny plan-run når plan er fullført for dagen.
+    // Spillet er over for denne dagen — vent til neste dag.
+    //
+    // Tre tilfeller:
+    //   1. Ingen forrige finished run (`previousPosition === null`)
+    //      → start på posisjon 1 (eksisterende oppførsel).
+    //   2. Forrige posisjon < antall plan-items
+    //      → advance til neste posisjon (`previousPosition + 1`).
+    //      Eks: forrige finished på pos 1 (Bingo) → ny på pos 2 (1000-spill).
+    //   3. Forrige posisjon >= antall plan-items (plan fullført)
+    //      → AVVIS med `PLAN_COMPLETED_FOR_TODAY` (INGEN wrap).
+    //      Master må vente til neste dag for å starte ny plan-syklus.
+    //
+    // `planService.list` returnerer `GamePlan[]` (uten items) — vi må
+    // kalle `getById(matched.id)` for å få full `GamePlanWithItems`.
+    // getById har sin egen query mot `app_game_plan_item` så vi bærer
+    // én ekstra round-trip kun ved finished-replay (ikke vanlig path).
+    let nextPosition = 1;
+    let autoAdvanced = false;
+    let planItemCount = 0;
+    if (previousPosition !== null) {
+      const planWithItems = await this.planService.getById(matched.id);
+      planItemCount = planWithItems?.items?.length ?? 0;
+      if (planItemCount > 0 && previousPosition < planItemCount) {
+        nextPosition = previousPosition + 1;
+        autoAdvanced = true;
+      } else if (planItemCount > 0 && previousPosition >= planItemCount) {
+        // Plan-completed-state — IKKE wrap. Tobias-direktiv 2026-05-14 10:17.
+        // Master må vente til neste dag for å starte ny plan-syklus.
+        throw new DomainError(
+          "PLAN_COMPLETED_FOR_TODAY",
+          `Spilleplan ferdig for i dag (siste posisjon ${previousPosition} av ${planItemCount} fullført). Vent til neste dag for å starte ny plan-syklus.`,
+        );
+      }
+      // else: plan har 0 items → defensive fallback til nextPosition=1
+    }
+
     const id = randomUUID();
     try {
       await this.pool.query(
         `INSERT INTO ${this.table()}
            (id, plan_id, hall_id, business_date, current_position, status, jackpot_overrides_json)
-         VALUES ($1, $2, $3, $4::date, 1, 'idle', '{}'::jsonb)`,
-        [id, matched.id, hall, dateStr],
+         VALUES ($1, $2, $3, $4::date, $5, 'idle', '{}'::jsonb)`,
+        [id, matched.id, hall, dateStr, nextPosition],
       );
     } catch (err) {
       if (isUniqueViolation(err)) {
@@ -641,6 +709,11 @@ export class GamePlanRunService {
     // F-Plan-Reuse (2026-05-09): når runen erstatter en finished run
     // (samme hall + business_date), inkluderer vi `previousRunId` så
     // audit-traceability fra forrige til ny runde er eksplisitt.
+    //
+    // BUG E auto-advance (2026-05-14): når vi advancer fra forrige
+    // posisjon, inkluderer vi `previousPosition` og `newPosition` så
+    // Lotteritilsynet kan rekonstruere full plan-sekvens. `autoAdvanced`
+    // boolean lar ops filtrere på sekvens-progresjon vs wrap/start-på-nytt.
     void this.audit({
       actorId: "system",
       actorType: "SYSTEM",
@@ -655,6 +728,14 @@ export class GamePlanRunService {
         bindingType: matched.hallId === hall ? "direct" : "group",
         matchedGroupId: matched.groupOfHallsId ?? null,
         ...(previousRunId ? { previousRunId } : {}),
+        ...(previousPosition !== null
+          ? {
+              previousPosition,
+              newPosition: nextPosition,
+              autoAdvanced,
+              planItemCount,
+            }
+          : {}),
       },
     });
     const created = await this.findForDay(hall, dateStr);

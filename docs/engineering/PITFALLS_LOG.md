@@ -453,6 +453,58 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §2 (Yellow×2, Purple×3 auto-multiplier-regel)
 - §3.10 (komplementær — stuck-plan-run-fix landet i PR #1407)
 
+### §3.12 — Plan-advance bug: master starter ny plan-run på position=1 hver gang
+
+**Severity:** P0 (pilot-blokker — spillet kommer aldri videre i spilleplanen)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 09:58)
+**Symptom:** Master starter plan-run → Bingo (position=1) → spiller ferdig → PR #1407 reconciler finisher plan-run → master klikker "Start neste spill" → ny plan-run = position=1 (Bingo igjen). Spillet kommer aldri til 1000-spill, 5×500, osv.
+
+DB-evidens (forrige observasjon):
+```sql
+SELECT id, status, current_position, started_at FROM app_game_plan_run
+WHERE business_date=CURRENT_DATE ORDER BY started_at;
+-- run1: 09:49:08 → finished, position=1 (Bingo)
+-- run2: 09:55:19 → finished, position=1 (Bingo)
+-- run3: starter igjen på position=1 (Bingo)
+```
+
+Master-audit viste KUN "start"-actions, ingen "advance".
+
+**Tobias-direktiv (KANONISK):**
+> "Hvert spill spilles kun en gang deretter videre til nytt spill. Vi må fikse at hvert spill spilles kun en gang deretter videre til nytt spill."
+
+**Root cause:** F-Plan-Reuse (PR #1006, 2026-05-09) introduserte `getOrCreateForToday` DELETE+INSERT-flyt for å la master starte ny runde samme dag etter accidental stop. INSERT hardkodet `current_position=1` på den nye raden — uavhengig av hvor langt forrige plan-run faktisk kom. Resultat: Bingo (pos=1) ble repetert i en loop, plan-sekvensen progresserte aldri.
+
+**Fix:** `GamePlanRunService.getOrCreateForToday` capturer `previousPosition = existing.currentPosition` FØR DELETE. INSERT-ing av ny plan-run bruker dynamisk `current_position`:
+- `previousPosition < plan.items.length` → `nextPosition = previousPosition + 1` (advance)
+- `previousPosition >= plan.items.length` → `nextPosition = 1` (wrap til ny syklus)
+- Plan med 0 items eller previousPosition er null → `nextPosition = 1` (defensive default)
+
+Audit-event `game_plan_run.recreate_after_finish` utvidet med:
+```json
+{
+  "previousRunId": "<UUID>",
+  "previousPosition": 1,
+  "newPosition": 2,
+  "autoAdvanced": true,
+  "planItemCount": 13
+}
+```
+
+**Prevention:**
+- ALDRI fjern `previousPosition`-tracking eller `nextPosition`-beregningen — uten den loops Bingo evig
+- ALDRI fjern `planService.getById(matched.id)`-kallet for items count
+- `planService.list()` returnerer `GamePlan[]` UTEN items — du MÅ kalle `getById` for å få `GamePlanWithItems.items.length`
+- Hvis du endrer plan-sekvens-mekanismen (eks. legger til "Hopp over"-knapp eller eksplisitt "advance"), husk at `getOrCreateForToday` auto-advance er DEFAULT-stien. Manuell advance er en separat path som overstyrer
+
+**Related:**
+- `apps/backend/src/game/GamePlanRunService.ts:getOrCreateForToday` (PR <this-PR>)
+- `apps/backend/src/game/GamePlanService.ts:list` (returnerer `GamePlan[]` uten items)
+- `apps/backend/src/game/GamePlanService.ts:getById` (returnerer `GamePlanWithItems`)
+- PR #1407 (`GamePlanRunCleanupService.reconcileNaturalEndStuckRuns` — finisher plan-runs som blir stuck etter naturlig runde-end; komplementært, ikke konflikt)
+- Tester: `apps/backend/src/game/__tests__/GamePlanRunService.autoAdvanceFromFinished.test.ts` (10 tester)
+- Skill `spill1-master-flow` §"Auto-advance fra finished plan-run"
+
 ---
 
 ## §4 Live-rom-state

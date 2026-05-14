@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.4.0
+  version: 1.5.0
   project: spillorama
 ---
 
@@ -106,6 +106,70 @@ Spill 1 plan-runs kan ende i `status='running'` UTEN at master har advanced elle
 - `apps/backend/src/__tests__/GamePlanRunCleanupService.naturalEndReconcile.integration.test.ts` (2 integration mot Postgres)
 
 **Symptom hvis lag 3 fjernes:** "Laster..." infinity i klient når master ikke advancer etter naturlig runde-end. Room-snapshot mangler `currentGame`. Tobias-rapport 2026-05-14 — bug-en bringer pilot-flyt til stillstand.
+
+### Auto-advance fra finished plan-run (BUG E, 2026-05-14)
+
+**Tobias-direktiv 2026-05-14 09:58 (KANONISK):**
+> "Hvert spill spilles kun en gang deretter videre til nytt spill. Før var det sånn at man måtte spille dette spillet 2 ganger før den går videre til neste på lista. Nå går den ikke videre til neste spiller heller."
+
+**Hvordan flyten fungerer nå (etter fix):**
+
+1. Master klikker "Start neste spill" → `MasterActionService.start()` → `GamePlanRunService.getOrCreateForToday()`
+2. `getOrCreateForToday` ser at det finnes en `status='finished'` plan-run for `(hall_id, business_date)` i dag
+3. Capture `previousPosition = existing.currentPosition` FØR DELETE
+4. DELETE finished-raden + INSERT ny idle-rad med:
+   - `current_position = previousPosition + 1` hvis flere positions gjenstår i planen
+   - `current_position = 1` hvis previousPosition var siste position (wrap til ny syklus)
+5. Bridge spawner scheduled-game for nye position → master spiller neste spill i sekvensen
+
+**Eksempel-flyt (13-spill plan):**
+- Runde 1: master starter → Bingo (position=1) spilles ferdig → plan-run finished på pos=1
+- Runde 2: master klikker "Start neste spill" → nye plan-run på pos=2 (1000-spill) — IKKE Bingo igjen!
+- Runde 3: 1000-spill ferdig → master starter neste → pos=3 (5×500)
+- ... osv til position=13 (TV-Extra)
+- Runde 14: TV-Extra ferdig → master starter neste → pos=1 (Bingo, ny syklus)
+
+**Hvorfor er dette nødvendig:**
+
+F-Plan-Reuse (PR #1006, 2026-05-09) introduserte DELETE+INSERT for å la master starte ny runde samme dag etter accidental stop. Men den hardkodet `current_position=1` på den nye raden — uavhengig av hvor langt forrige plan-run faktisk kom. Resultat (Tobias' rapport):
+- Bingo (position=1) spilles → finished på pos=1
+- Master klikker "Start neste spill" → ny plan-run på pos=1 → Bingo IGJEN
+- Master spiller Bingo 2-3 ganger før systemet endelig advancerer
+
+**Audit-trail:**
+
+Audit-eventet `game_plan_run.recreate_after_finish` inkluderer disse feltene for Lotteritilsynet-sporing:
+```json
+{
+  "previousRunId": "<UUID av forrige plan-run>",
+  "previousPosition": 1,
+  "newPosition": 2,
+  "autoAdvanced": true,
+  "planItemCount": 13,
+  "planId": "<UUID>",
+  "hallId": "<UUID>",
+  "businessDate": "2026-05-14",
+  "bindingType": "direct" | "group"
+}
+```
+
+`autoAdvanced=true` betyr at vi advancerte fra forrige posisjon. `autoAdvanced=false` betyr wrap (siste posisjon → 1) eller defensive fallback (plan har 0 items eller previousPosition > items.length).
+
+**Symptom hvis denne fjernes:** Master må klikke "Start neste spill" gjentatte ganger — hver gang starter samme spill (Bingo). Spillet kommer ALDRI til pos=2 fordi `current_position=1` alltid resettes ved finished-replay.
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/__tests__/GamePlanRunService.autoAdvanceFromFinished.test.ts` (10 tester)
+  - Ingen tidligere → pos=1
+  - Forrige pos=1 → ny pos=2
+  - Forrige pos=2 → ny pos=3
+  - Forrige pos=12 → ny pos=13 (siste)
+  - Forrige pos=13 (siste) → wrap til 1
+  - previousPosition > items.length → wrap til 1 (defensiv)
+  - Plan med 0 items → wrap til 1
+  - idle/running plan-run → returneres som-er (ingen advance)
+  - Audit-event inkluderer alle sporbarhets-felter
+
+**Plassering:** `apps/backend/src/game/GamePlanRunService.ts` — `getOrCreateForToday()` linje ~570-720. NB: `planService.list()` returnerer `GamePlan[]` (uten items), så vi kaller `planService.getById(matched.id)` for å få `GamePlanWithItems.items.length`.
 
 ### UI-komponenter (admin-web)
 
@@ -474,3 +538,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.3.0 — PR #1413 (sub-bug PR #1408): utvidet "Ticket-pris-propagering" til TRE-fase-fix. Fase 2 (variantByRoom-binding) manglet per-farge multipliers — `gameVariant.ticketTypes` i room-snapshot rendret flat mult=1/3 selv om backend `ticket_config_json` hadde korrekte priser. Fixen mapper `priceNok / minPriceNok` for hver farge i `spill1VariantMapper.ticketTypeFromSlug`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt. 7 nye tester. PR #1408's hook setter entryFee, men IKKE multipliers — derfor komplementært. |
 | 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
+| 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |
