@@ -271,6 +271,30 @@ Stopp KUN når PM ber eksplisitt, eller backend dødt > 5 min.`,
 bash scripts/__tests__/monitor-severity-classification.test.sh
 ```
 
+### 2.19 Skill-doc-protokoll ALLTID i fix-agent-prompts (vedtatt 2026-05-14, IMMUTABLE)
+
+> "Vi har nå breifet agenter om at full dokumentasjon om arbeidet er viktig, slik at skillsene blir oppdatert med hva som nå funker og ikke slik at endrigner som gjør fremover da ikke endrer på en tidligere fiks? ... Kan du alltid legge det i rutinen til PM? det er ekstremt viktig for god progresjon og at vi kke går 2 skritt frem og 1 tilbake"
+> — Tobias 2026-05-14
+
+**HARD REGEL:** Hver fix-agent-prompt PM sender MÅ inneholde "Dokumentasjons-protokoll"-seksjon som krever at agenten oppdaterer disse i SAMME PR som koden:
+
+1. **Relevant skill** under `.claude/skills/<skill-name>/SKILL.md` — ny seksjon eller utvidet eksisterende
+2. **`docs/engineering/PITFALLS_LOG.md`** — ny entry i riktig § (1.x compliance, 2.x wallet, 3.x spill-arkitektur, 4.x live-rom, 5.x git, 6.x test, 7.x frontend, 8.x doc-disiplin, 11.x agent-orkestrering)
+3. **`docs/engineering/AGENT_EXECUTION_LOG.md`** — kronologisk entry med "Lessons learned"
+
+**Hvorfor:** Uten dette går vi "2 skritt frem og 1 tilbake". Fremtidige agenter overskriver tidligere fixer fordi de ikke vet hva som er bevisst valgt. Skill = forsvar mot regresjon.
+
+**Reusable template:** Se [`docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`](./SKILL_DOC_PROTOCOL_TEMPLATE.md). PM kopier-paster + tilpasser per task (identifiserer hvilken skill + PITFALLS-§ er relevant).
+
+**Verifikasjon ved PR-review:** PM SKAL sjekke at PR-en inneholder:
+- [ ] Skill-fil endret (eller eksplisitt begrunnelse for hvorfor ikke relevant)
+- [ ] PITFALLS_LOG endret
+- [ ] AGENT_EXECUTION_LOG endret
+
+Hvis PR mangler dette → enten reject med kommentar, eller follow-up commit fra PM på samme branch FØR merge. Aldri merge en fix-PR uten doc-update — det er hovedmekanismen mot regresjon.
+
+**Unntak:** Ren config-pin (eks. atlas-version), CI-tweak, eller ren rename. Hvis i tvil — inkluder doc-update uansett.
+
 ---
 
 ## 3. Trinn-for-trinn onboarding-rutine
