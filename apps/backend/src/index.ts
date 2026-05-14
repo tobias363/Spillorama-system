@@ -3009,6 +3009,15 @@ async function runArmedToPurchaseConversionForSpawn(input: {
   // Map socket-rom-spiller-id → user-id via PlatformService walletId-lookup.
   // RoomSnapshot.players har walletId — vi trenger platform-user-id for
   // app_game1_ticket_purchases.buyer_user_id. PlatformService eier mapping.
+  //
+  // 2026-05-14 (Tobias-direktiv, BUG dobbel-telling Innsats+Forhåndskjøp):
+  // Etter conversion succeeds må vi cleare armed-state for de konverterte
+  // spillerne så `buildRoomUpdatePayload` ikke renderer samme pre-game-kjøp
+  // som BÅDE `playerStakes` (via gameTickets) OG `playerPendingStakes` (via
+  // armedPlayerSelections). Vi bygger en `userId → playerId`-map her slik
+  // at vi kan kalle `roomState.disarmPlayer(roomCode, playerId)` for hver
+  // successful conversion etter at service-en returnerer.
+  const userIdToPlayerId = new Map<string, string>();
   const armedPlayers: ArmedPlayerInput[] = [];
   for (const playerId of armedPlayerIds) {
     const player = roomSnapshot.players.find((p) => p.id === playerId);
@@ -3086,6 +3095,7 @@ async function runArmedToPurchaseConversionForSpawn(input: {
       reservationId,
       ticketSpec,
     });
+    userIdToPlayerId.set(userId, playerId);
   }
 
   if (armedPlayers.length === 0) {
@@ -3103,6 +3113,29 @@ async function runArmedToPurchaseConversionForSpawn(input: {
     armedPlayers,
   });
 
+  // 2026-05-14 (Tobias-direktiv, BUG dobbel-telling Innsats+Forhåndskjøp):
+  // Cleare in-memory armed-state for hver successful conversion. Etter at
+  // pre-game-kjøp er konvertert til `app_game1_ticket_purchases`-rader er
+  // de "Innsats" (live i runden) — IKKE "Forhåndskjøp" (neste runde). Hvis
+  // vi lar armed-staten ligge igjen vil `buildRoomUpdatePayload` regne
+  // `playerPendingStakes` fra `armedPlayerSelections` (line 572 i
+  // roomHelpers.ts), og frontend ser BÅDE `Innsats: 30 kr` og
+  // `Forhåndskjøp: 30 kr` for samme kjøp.
+  //
+  // Speiler `gameLifecycleEvents.ts:153` (`disarmAllPlayers(roomCode)`
+  // etter generisk engine.startGame) — same semantic for Spill 1
+  // scheduled-game-flyten.
+  for (const conversion of result.conversions) {
+    const playerId = userIdToPlayerId.get(conversion.userId);
+    if (!playerId) {
+      console.warn(
+        `[armed-conversion-hook] kunne ikke resolve playerId for konvertert userId=${conversion.userId} — armed-state IKKE cleared (kan gi Innsats+Forhåndskjøp dobbel-telling)`,
+      );
+      continue;
+    }
+    roomState.disarmPlayer(roomCode, playerId);
+  }
+
   if (result.failures.length > 0) {
     console.warn(
       `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} hadde ${result.failures.length} failures av ${armedPlayers.length} armed-spillere — se game1.armed.conversion_failed audit-events`,
@@ -3110,7 +3143,7 @@ async function runArmedToPurchaseConversionForSpawn(input: {
     );
   }
   console.info(
-    `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} konverterte ${result.convertedCount}/${armedPlayers.length} armed-spillere (${result.failures.length} failures)`,
+    `[armed-conversion-hook] scheduledGameId=${input.scheduledGameId} konverterte ${result.convertedCount}/${armedPlayers.length} armed-spillere (${result.failures.length} failures); cleared armed-state for ${result.conversions.length} spillere`,
   );
 }
 
