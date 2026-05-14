@@ -1,7 +1,7 @@
 # Spillorama Pitfalls Log — kumulativ fallgruve-katalog
 
 **Status:** Autoritativ. Alle fallgruver oppdaget i prosjektet samles her.
-**Sist oppdatert:** 2026-05-14
+**Sist oppdatert:** 2026-05-15
 **Eier:** PM-AI (vedlikeholdes ved hver agent-sesjon + hver PR-merge med learning)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."*
@@ -757,6 +757,63 @@ Dette var arv fra opprinnelig implementasjon før PR #1422 introduserte `previou
 - §3.10-§3.14 (4 tidligere fix-forsøk på "neste spill"-display — denne fix-en lukker rot-årsaken på server-side)
 - `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md` §5.1 / §6.1
 - `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md` (audit-skall som koordinerte 6 research-agenter)
+
+---
+
+### §3.16 — `engine.UPDATE status='completed'` manglet WHERE-status-guard (FIXED 2026-05-15, BUG-D6)
+
+**Severity:** P1 (data-integritet — terminal-status `cancelled`/`finished` kunne overskrives av engine)
+**Oppdaget:** 2026-05-14 (Agent D research §5.6)
+**Fixed:** 2026-05-15 (PR for BUG-D6)
+**Symptom:** Hvis master eller cron har satt scheduled-game til `cancelled` mens engine fortsatt har en pending endRound-call, kunne engine overskrive `cancelled` med `completed`. Audit-trail blir korrupt — Lotteritilsynet ville ikke kunne reprodusere "hvorfor sluttet runden". Også: hvis CRIT-7 rollback satte status tilbake til `purchase_open`/`ready_to_start`, ville engine senere overskrive til `completed` selv om engine-state ikke matchet.
+
+**Root cause:** `apps/backend/src/game/Game1DrawEngineService.ts:1411-1420` (endRound-pathen, isFinished=true) hadde UPDATE-statement uten WHERE-status-guard:
+
+```sql
+-- FØR fix
+UPDATE app_game1_scheduled_games
+SET status='completed', actual_end_time = COALESCE(actual_end_time, now()), updated_at = now()
+WHERE id = $1
+```
+
+Ingen `AND status IN (...)`-clause som beskytter terminal status.
+
+**Fix:** La til guard som forhindrer flip fra terminal status:
+
+```diff
+ UPDATE app_game1_scheduled_games
+ SET status='completed', actual_end_time = COALESCE(actual_end_time, now()), updated_at = now()
+-WHERE id = $1
++WHERE id = $1
++  AND status IN ('running', 'paused')
+```
+
+Engine kan kun completed-flippe fra ikke-terminal status (`running`, `paused`). Hvis raden allerede er `cancelled`/`completed`/`finished`, no-op'er UPDATE-en (rowCount=0). Service-koden avhenger IKKE av rowCount==1 — transaksjonen fortsetter normalt.
+
+**Kanonisk pattern (alle UPDATE som flipper til terminal status):**
+
+```sql
+UPDATE <table>
+SET status = '<terminal>', ...
+WHERE id = $1
+  AND status IN (<ikke-terminal-statuser>)
+```
+
+**Prevention:**
+- 4 regression-tester i `apps/backend/src/game/__tests__/Game1DrawEngineService.bugD6StatusGuard.test.ts`:
+  - Test 1: WHERE-clause inneholder `AND status IN ('running', 'paused')`
+  - Test 2: WHERE-clause inneholder IKKE `'cancelled'` / `'finished'` (vil ikke whiteliste terminal status)
+  - Test 3: Idempotent ved rowCount=0 (no-op hvis raden allerede er terminal)
+  - Test 4: Eksakt SQL-form matcher fix-diff (forhindrer regression via "smart refactor")
+- Pattern: alle UPDATE som flipper til terminal status SKAL ha guard. Aldri whiteliste terminal status i guarden — det åpner for race-overskrivning igjen.
+
+**Related:**
+- Agent D research §5.6 / §6.4
+- §3.X dual-spawn (Bølge 4) — relatert race-conditions
+- §3.15 (`GamePlanRunService.start()` overskriver current_position) — samme overordnede mønster: state-transitions må ha guards som forhindrer rådata-overskrivning
+- `apps/backend/src/game/Game1DrawEngineService.ts:1412-1421` (etter fix)
+- `.claude/skills/spill1-master-flow/SKILL.md` §"Vanlige feil" entry 14
+- `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md`
 
 ---
 

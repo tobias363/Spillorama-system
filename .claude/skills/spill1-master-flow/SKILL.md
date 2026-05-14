@@ -414,6 +414,52 @@ Symptom: Spillere som åpner buy-popup PRE-game (mellom runder, eller før maste
 
 **Fix:** To-fase ticket-config-binding (PR #1375 + PR #<this-PR>). Se seksjon under for detaljer.
 
+### 14. Engine UPDATE må ha status-guard mot terminal status (BUG-D6, fikset 2026-05-15)
+
+**Symptom:** `app_game1_scheduled_games`-rad var `cancelled` (eller `finished`), men engine overskrev til `completed`. Audit-trail blir korrupt fordi terminal status forsvinner.
+
+**Root cause:** `Game1DrawEngineService.ts` endRound-pathen sendte en UPDATE uten WHERE-guard:
+
+```sql
+-- FØR fix (BUG-D6)
+UPDATE app_game1_scheduled_games
+SET status='completed', actual_end_time = ..., updated_at = now()
+WHERE id = $1
+```
+
+Race-window: master eller cron flippet status til `cancelled` mellom engine-completion-detect og denne UPDATE-en, og engine kjørte rett over.
+
+**Fix (PR for BUG-D6):**
+
+```sql
+-- ETTER fix
+UPDATE app_game1_scheduled_games
+SET status='completed', actual_end_time = ..., updated_at = now()
+WHERE id = $1
+  AND status IN ('running', 'paused')
+```
+
+Engine kan kun flippe til `completed` fra ikke-terminal status. Hvis raden allerede er `cancelled` / `completed` / `finished`, no-op'er UPDATE-en (rowCount=0) og transaksjonen fortsetter — service-koden avhenger IKKE av rowCount==1.
+
+**Kanonisk pattern (alle UPDATE som flipper til terminal status):**
+
+```sql
+UPDATE <table>
+SET status = '<terminal>', ...
+WHERE id = $1
+  AND status IN (<ikke-terminal-statuser>)
+```
+
+Aldri whitelist `cancelled` / `completed` / `finished` i WHERE-guarden for en flip TIL en av disse — det åpner igjen for race-overskrivning.
+
+**Referanser:**
+- Agent D research §5.6 + §6.4 — `docs/research/NEXT_GAME_DISPLAY_AGENT_D_SCHEDULEDGAME_2026-05-14.md`
+- Audit-skall — `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md`
+- PITFALLS entry §3.X — `docs/engineering/PITFALLS_LOG.md`
+- Regression-suite — `apps/backend/src/game/__tests__/Game1DrawEngineService.bugD6StatusGuard.test.ts` (4 tester)
+
+**Konsekvens for skill:** Hvis du legger til ny UPDATE som flipper en scheduled-game eller plan-run til terminal status, kopier WHERE-guard-mønsteret. Glem aldri å skrive regression-test som låser SQL-formen — guard-fjerning skal være vanskelig å gjøre ved uhell.
+
 ## Ticket-pris-propagering (kritisk TRE-fase-binding)
 
 > **Tobias-direktiv 2026-05-14:** Fremtidige agenter MÅ ikke overskrive denne fixen. Hvis du jobber med ticket-pris-pipeline må du forstå at ALLE tre faser er nødvendige.
