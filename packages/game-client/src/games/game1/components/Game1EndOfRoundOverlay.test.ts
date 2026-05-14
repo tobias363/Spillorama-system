@@ -25,9 +25,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   Game1EndOfRoundOverlay,
+  MAX_PREPARING_ROOM_MS,
   MIN_DISPLAY_MS,
   MIN_DISPLAY_MS_SPECTATOR,
-  WAITING_FOR_MASTER_TIMEOUT_MS,
+  RETURNING_TO_LOBBY_PREVIEW_MS,
   type Game1EndOfRoundSummary,
 } from "./Game1EndOfRoundOverlay.js";
 import type { PatternResult } from "@spillorama/shared-types/game";
@@ -392,119 +393,162 @@ describe("Game1EndOfRoundOverlay (Summary + Loading combined)", () => {
     expect(() => overlay.markRoomReady()).not.toThrow();
   });
 
-  // ── Tobias prod-incident 2026-05-13 (root cause #3) ─────────────────
-  // "Forbereder rommet..."-spinner henger evig fordi backend ikke
-  // emitter ny `room:update` etter round-end før master har klikket
-  // "Start neste spill". Fix: etter 30s, bytt loading-tekst til "Venter
-  // på master — runden er slutt" og dempe spinneren, slik at lobby-
-  // knappen er primary action.
-  describe("waiting-for-master fallback (Tobias 2026-05-13)", () => {
-    it("etter timeout uten markRoomReady: loading-tekst byttes til 'Venter på master'", () => {
-      overlay.show(baseSummary({ ownRoundWinnings: 100 }));
-
-      // Initial: "Forbereder rommet..."
-      const loadingBefore = parent.querySelector(
-        '[data-testid="eor-loading-indicator"]',
-      );
-      expect(loadingBefore?.textContent).toContain("Forbereder rommet");
-      expect(loadingBefore?.getAttribute("data-state")).toBe("preparing");
-
-      // Tikk over timeout-grensen uten å kalle markRoomReady
-      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS + 100);
-
-      // Loading-tekst skal nå si "Venter på master ..."
-      const loadingAfter = parent.querySelector(
-        '[data-testid="eor-loading-indicator"]',
-      );
-      expect(loadingAfter?.textContent).toContain("Venter på master");
-      expect(loadingAfter?.textContent).not.toContain("Forbereder rommet");
-      expect(loadingAfter?.getAttribute("data-state")).toBe(
-        "waiting-for-master",
-      );
-    });
-
-    it("etter timeout: lobby-knappen styling oppjusteres og er fortsatt klikkbar", () => {
+  // ── Tobias UX-mandate 2026-05-14 (auto-return-til-lobby) ────────────
+  // Bug-rapport: etter runde 330597ef vises WinScreen + "Forbereder
+  // rommet..."-spinner som henger evig. Brukeren MÅ klikke "Tilbake til
+  // lobby" manuelt. Fix: 15s max-timeout → forced auto-return til lobby
+  // (samme path som manuell knapp-klikk). De siste 2 sekundene bytter
+  // loading-tekst til "Returnerer til lobby..." for synlig overgang.
+  //
+  // Erstatter den eldre WAITING_FOR_MASTER_TIMEOUT_MS=30s text-swap-
+  // pathen (PR #1006 / 2026-05-13) som lot spinneren henge med kun
+  // tekst-bytte. Tobias-direktiv 2026-05-14 overstyrer: spilleren MÅ
+  // bli ført ut av WinScreen, ikke bare se ny tekst.
+  describe("auto-return til lobby (Tobias 2026-05-14)", () => {
+    it("etter MAX_PREPARING_ROOM_MS uten markRoomReady → onBackToLobby fyrer (forced auto-return)", () => {
       const onBack = vi.fn();
-      overlay.show(baseSummary({ ownRoundWinnings: 100, onBackToLobby: onBack }));
+      overlay.show(
+        baseSummary({ ownRoundWinnings: 100, onBackToLobby: onBack }),
+      );
 
-      // Tikk over timeout-grensen
-      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS + 100);
+      // Tikk over preview-grensen (13s) — tekst skal nå si "Returnerer
+      // til lobby...", men onBack skal IKKE ha fyrt ennå.
+      vi.advanceTimersByTime(MAX_PREPARING_ROOM_MS - RETURNING_TO_LOBBY_PREVIEW_MS + 50);
+      expect(onBack).not.toHaveBeenCalled();
+      const loadingMidway = parent.querySelector(
+        '[data-testid="eor-loading-indicator"]',
+      );
+      expect(loadingMidway?.textContent).toContain("Returnerer til lobby");
+      expect(loadingMidway?.getAttribute("data-state")).toBe(
+        "returning-to-lobby",
+      );
 
-      const btn = parent.querySelector(
-        '[data-testid="eor-lobby-btn"]',
-      ) as HTMLButtonElement | null;
-      expect(btn).not.toBeNull();
-      expect(btn?.getAttribute("data-state")).toBe("waiting-for-master");
-
-      // Klikk skal fortsatt fungere og kalle onBackToLobby + lukke overlay
-      btn?.click();
+      // Tikk videre forbi 15s + fade-tid → onBack skal ha fyrt
+      vi.advanceTimersByTime(RETURNING_TO_LOBBY_PREVIEW_MS + 400);
       expect(onBack).toHaveBeenCalledTimes(1);
       expect(overlay.isVisible()).toBe(false);
     });
 
-    it("markRoomReady() FØR timeout cancelt waiting-fallback", () => {
+    it("markRoomReady() FØR timeout cancelt auto-return-timer (normal dismiss-path)", () => {
+      const onBack = vi.fn();
       const onCompleted = vi.fn();
       overlay.show(
         baseSummary({
           ownRoundWinnings: 100,
+          onBackToLobby: onBack,
           onOverlayCompleted: onCompleted,
         }),
       );
 
-      // Wait past min-display, kall markRoomReady → tryDismiss → fade
+      // Vent forbi min-display, kall markRoomReady → tryDismiss → fade
       vi.advanceTimersByTime(MIN_DISPLAY_MS + 100);
       overlay.markRoomReady();
       vi.advanceTimersByTime(400);
       expect(onCompleted).toHaveBeenCalledTimes(1);
+      expect(onBack).not.toHaveBeenCalled();
 
-      // Overlay er nå skjult — vi skal IKKE se "Venter på master"-tekst
-      // dukke opp etter 30s (timeren ble cancelet av markRoomReady).
-      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS + 1_000);
-      const stillVisible = parent.querySelector(
-        '[data-testid="game1-end-of-round-overlay"]',
-      );
-      expect(stillVisible).toBeNull();
+      // Tikk videre forbi MAX_PREPARING_ROOM_MS — auto-return skal IKKE fyre
+      // (timeren ble cancelet av markRoomReady)
+      vi.advanceTimersByTime(MAX_PREPARING_ROOM_MS + 1_000);
+      expect(onBack).not.toHaveBeenCalled();
     });
 
-    it("reconnect: elapsedSinceEndedMs > timeout slår fallback inn umiddelbart", () => {
-      // Bruker har vært borte i 35s — master har aldri startet neste runde.
+    it("manuell 'Tilbake til lobby'-klikk FØR timeout cancelt auto-return (ingen double-redirect)", () => {
+      const onBack = vi.fn();
+      overlay.show(
+        baseSummary({ ownRoundWinnings: 100, onBackToLobby: onBack }),
+      );
+
+      // Klikk manuelt
+      const btn = parent.querySelector(
+        '[data-testid="eor-lobby-btn"]',
+      ) as HTMLButtonElement | null;
+      btn?.click();
+      expect(onBack).toHaveBeenCalledTimes(1);
+      expect(overlay.isVisible()).toBe(false);
+
+      // Tikk forbi MAX_PREPARING_ROOM_MS — onBack skal IKKE kalles igjen
+      vi.advanceTimersByTime(MAX_PREPARING_ROOM_MS + 1_000);
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("multiple state-update-driven markRoomReady-call gir kun ÉN redirect-flyt (idempotent)", () => {
+      const onBack = vi.fn();
+      const onCompleted = vi.fn();
       overlay.show(
         baseSummary({
           ownRoundWinnings: 100,
-          elapsedSinceEndedMs: WAITING_FOR_MASTER_TIMEOUT_MS + 5_000,
+          onBackToLobby: onBack,
+          onOverlayCompleted: onCompleted,
         }),
       );
 
-      // Umiddelbart etter show: fallback er allerede applikert (ingen
-      // setTimeout-vente).
-      const loading = parent.querySelector(
-        '[data-testid="eor-loading-indicator"]',
-      );
-      expect(loading?.textContent).toContain("Venter på master");
-      expect(loading?.getAttribute("data-state")).toBe("waiting-for-master");
+      vi.advanceTimersByTime(MIN_DISPLAY_MS + 100);
+      // Flere markRoomReady-call (room:update WAITING-events spammer)
+      overlay.markRoomReady();
+      overlay.markRoomReady();
+      overlay.markRoomReady();
+      vi.advanceTimersByTime(400);
+
+      expect(onCompleted).toHaveBeenCalledTimes(1);
+      expect(onBack).not.toHaveBeenCalled();
     });
 
-    it("fallback er idempotent — timeren fyrer ikke etter manuell apply", () => {
+    it("reconnect: elapsedSinceEndedMs > MAX_PREPARING_ROOM_MS trigger auto-return umiddelbart", () => {
+      const onBack = vi.fn();
+      // Bruker har vært borte i 20s — master har aldri startet neste runde.
       overlay.show(
         baseSummary({
           ownRoundWinnings: 100,
-          elapsedSinceEndedMs: WAITING_FOR_MASTER_TIMEOUT_MS + 5_000,
+          onBackToLobby: onBack,
+          elapsedSinceEndedMs: MAX_PREPARING_ROOM_MS + 5_000,
         }),
       );
 
-      // Initial: fallback applikert umiddelbart (reconnect-path)
+      // Preview-tekst skal være aktiv umiddelbart
       const loading = parent.querySelector(
         '[data-testid="eor-loading-indicator"]',
       );
-      expect(loading?.getAttribute("data-state")).toBe("waiting-for-master");
+      expect(loading?.getAttribute("data-state")).toBe("returning-to-lobby");
+      expect(loading?.textContent).toContain("Returnerer til lobby");
 
-      // Tikk videre — tekst skal forbli "Venter på master" (ingen idempotens-
-      // bug der den dobbel-applieres).
-      vi.advanceTimersByTime(WAITING_FOR_MASTER_TIMEOUT_MS * 2);
-      const loadingLater = parent.querySelector(
-        '[data-testid="eor-loading-indicator"]',
+      // Etter fade-tid skal onBack ha fyrt (forced auto-return)
+      vi.advanceTimersByTime(400);
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("auto-return-handler er idempotent — flere setTimeout-runder gir kun ÉN onBackToLobby", () => {
+      const onBack = vi.fn();
+      overlay.show(
+        baseSummary({
+          ownRoundWinnings: 100,
+          onBackToLobby: onBack,
+          elapsedSinceEndedMs: MAX_PREPARING_ROOM_MS + 5_000,
+        }),
       );
-      expect(loadingLater?.textContent).toContain("Venter på master");
+
+      // Pump timers — ulike code-paths skal ikke trigge dobbel-call
+      vi.advanceTimersByTime(MAX_PREPARING_ROOM_MS * 2);
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("hvis MIN_DISPLAY_MS er passert OG markRoomReady IKKE er kalt, auto-return overstyrer", () => {
+      // Edge case: bruker venter på rommet i lang tid; markRoomReady kalles
+      // aldri (master hangs). Auto-return MÅ fyre uavhengig av at min-
+      // display-tid er passert.
+      const onBack = vi.fn();
+      overlay.show(
+        baseSummary({ ownRoundWinnings: 100, onBackToLobby: onBack }),
+      );
+
+      // Tikk forbi min-display (3s) men IKKE forbi MAX_PREPARING_ROOM_MS
+      vi.advanceTimersByTime(MIN_DISPLAY_MS + 500);
+      expect(onBack).not.toHaveBeenCalled();
+      expect(overlay.isVisible()).toBe(true);
+
+      // Tikk forbi MAX_PREPARING_ROOM_MS + fade — auto-return SKAL ha fyrt
+      vi.advanceTimersByTime(MAX_PREPARING_ROOM_MS - MIN_DISPLAY_MS - 500 + 400);
+      expect(onBack).toHaveBeenCalledTimes(1);
     });
   });
 });

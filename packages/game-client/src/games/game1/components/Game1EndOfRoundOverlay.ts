@@ -60,20 +60,45 @@ export const MIN_DISPLAY_MS = 3_000;
 export const MIN_DISPLAY_MS_SPECTATOR = 1_000;
 
 /**
- * Tobias prod-incident 2026-05-13 (root cause #3 fra engine-bridge-
- * diagnose-rapport): "Forbereder rommet..."-spinner henger evig fordi
- * backend ikke emitter ny `room:update` etter round-end før master har
- * klikket "Start neste spill". Klient venter på `markRoomReady()` som
- * trigges av første state-update etter overlay vises — uten ny event
- * trigges aldri.
+ * @deprecated Erstattet av `MAX_PREPARING_ROOM_MS` per Tobias-mandate
+ * 2026-05-14. Beholdes som eksport for backward-compat med eksterne
+ * importøre — verdien er ikke lenger aktivt brukt i `show()`-schedulering.
  *
- * Fix: etter 30s uten markRoomReady, bytt loading-tekst fra "Forbereder
- * rommet..." til "Venter på master — runden er slutt" og høyne synlighet
- * av "Tilbake til lobby"-knappen. Overlay forblir oppe (bruker kan vente
- * eller forlate manuelt) — vi triggerer IKKE auto-dismiss fordi state ikke
- * er klar i rommet.
+ * Historisk: Tobias prod-incident 2026-05-13 (root cause #3 fra engine-
+ * bridge-diagnose-rapport): "Forbereder rommet..."-spinner henger evig
+ * fordi backend ikke emitter ny `room:update` etter round-end før master
+ * har klikket "Start neste spill". Det opprinnelige fix-et byttet bare
+ * tekst til "Venter på master" etter 30s; Tobias 2026-05-14 supersedes
+ * med auto-return etter 15s.
  */
 export const WAITING_FOR_MASTER_TIMEOUT_MS = 30_000;
+
+/**
+ * Tobias UX-mandate 2026-05-14 (auto-return-til-lobby etter runde-end):
+ *
+ * > "Etter endt runde må man bli ført tilbake til lobbyen til spillet etter
+ * > at runden er ferdig, må da bli ført tilbake når man er sikker på at
+ * > rommet er klart igjen og live."
+ *
+ * Reproduserer Tobias-rapport 2026-05-14 09:54: etter runde 330597ef
+ * vises WinScreen + "Forbereder rommet..."-spinner, men spinneren henger
+ * evig fordi backend ikke nødvendigvis emit-er ny `room:update` umiddelbart
+ * (master må starte neste runde, eller perpetual-loop må spawne ny
+ * scheduled-game). Spilleren må klikke "Tilbake til lobby" manuelt.
+ *
+ * Fix: 15s max-timeout fra overlay-mount → auto-return uavhengig av om
+ * `markRoomReady` er kalt. De siste 2 sekundene bytter loading-teksten til
+ * "Returnerer til lobby..." for synlig overgang. Forced `tryDismiss` skiper
+ * markRoomReady-gating fordi vi velger active redirect over evig venting.
+ *
+ * Idempotens:
+ *   - Avbrytes hvis bruker klikker "Tilbake til lobby" manuelt (overlay
+ *     allerede skjult)
+ *   - Avbrytes hvis `markRoomReady` kalles (rommet er klart, normal dismiss)
+ *   - Avbrytes hvis `tryDismiss` allerede har fyrt `onOverlayCompleted`
+ */
+export const MAX_PREPARING_ROOM_MS = 15_000;
+export const RETURNING_TO_LOBBY_PREVIEW_MS = 2_000;
 
 /**
  * @deprecated SUMMARY_PHASE_MS er erstattet av MIN_DISPLAY_MS. Beholdes for
@@ -288,16 +313,32 @@ interface ActiveSession {
    * sant OG controller har kalt markRoomReady.
    */
   minDisplayElapsed: boolean;
-  /** DOM-handle for loading-tekst-elementet (oppdateres ved waiting-fallback). */
+  /** DOM-handle for loading-tekst-elementet (oppdateres ved auto-return-preview). */
   loadingMsgEl: HTMLSpanElement | null;
-  /** DOM-handle for spinner-elementet (skjules ved waiting-fallback). */
+  /** DOM-handle for spinner-elementet (kan dempes ved fremtidige fallback). */
   loadingSpinnerEl: HTMLDivElement | null;
-  /** DOM-handle for lobby-knappen (styles oppjusteres ved waiting-fallback). */
+  /** DOM-handle for lobby-knappen (brukes ved auto-return-styling). */
   lobbyBtnEl: HTMLButtonElement | null;
-  /** True etter at waiting-for-master-fallback har slått inn. Idempotent. */
-  hasFiredWaitingFallback: boolean;
-  /** Pending timer-handle for waiting-fallback (30s default). */
-  waitingFallbackTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * Tobias 2026-05-14 (auto-return-til-lobby): timer som fyrer etter
+   * `MAX_PREPARING_ROOM_MS` og trigger forced auto-return uavhengig av
+   * `markRoomReady`-gating. Cancelles av (a) `markRoomReady` (normal
+   * dismiss-path), (b) manuell "Tilbake til lobby"-klikk, (c) `hide()`.
+   */
+  autoReturnTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * Sekundær timer som etter `MAX_PREPARING_ROOM_MS - RETURNING_TO_LOBBY_PREVIEW_MS`
+   * (= 13s) bytter loading-teksten til "Returnerer til lobby..." slik at
+   * brukeren ser at auto-return er imminent. Cancelles sammen med
+   * `autoReturnTimer` ved alle dismiss-paths.
+   */
+  autoReturnPreviewTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * True etter at auto-return-pathen har trigget tryDismiss. Brukes for
+   * å skille `onOverlayCompleted`-årsak i Sentry-breadcrumb + tester.
+   * Idempotent — settes én gang per session.
+   */
+  hasFiredAutoReturn: boolean;
 }
 
 export class Game1EndOfRoundOverlay {
@@ -501,8 +542,9 @@ export class Game1EndOfRoundOverlay {
       loadingMsgEl: null,
       loadingSpinnerEl: null,
       lobbyBtnEl: lobbyBtn,
-      hasFiredWaitingFallback: false,
-      waitingFallbackTimer: null,
+      autoReturnTimer: null,
+      autoReturnPreviewTimer: null,
+      hasFiredAutoReturn: false,
     };
 
     // Alltid SUMMARY — COUNTDOWN/LOADING-fasene er fjernet (Tobias-mandat
@@ -524,29 +566,143 @@ export class Game1EndOfRoundOverlay {
       // (Ingen timer trengs.)
     }
 
-    // Tobias prod-incident 2026-05-13 (root cause #3): start 30s timeout
-    // som bytter loading-tekst til "Venter på master — runden er slutt"
-    // hvis controller IKKE har kalt markRoomReady innen den tid. Dette
-    // forhindrer at spilleren ser "Forbereder rommet..."-spinner evig når
-    // master ikke har startet neste runde.
+    // Tobias UX-mandate 2026-05-14 (auto-return-til-lobby) — supersedes
+    // WAITING_FOR_MASTER_TIMEOUT_MS-pathen (30s text-swap til "Venter på
+    // master"). Den nye pathen forhindrer evig "Forbereder rommet..."-state:
+    //   - Etter `MAX_PREPARING_ROOM_MS - RETURNING_TO_LOBBY_PREVIEW_MS` (13s):
+    //     bytt tekst til "Returnerer til lobby..."
+    //   - Etter `MAX_PREPARING_ROOM_MS` (15s): forced auto-return til lobby
+    //     via onBackToLobby (samme path som manuell knapp-klikk).
     //
-    // Reconnect-resilience: hvis `elapsedSinceEndedMs` allerede er over
-    // timeout, slå fallback inn umiddelbart — bruker har trolig forlatt
-    // siden og kommet tilbake mens master fortsatt ikke har startet
-    // neste runde.
+    // Cancelles ved markRoomReady (normal dismiss-path), manuell lobby-klikk
+    // (hide-fra-onBackToLobby) eller hide() (controller dismiss).
+    //
+    // Reconnect-resilience: regn med elapsedSinceEndedMs. Hvis bruker
+    // reconnecter med elapsed > MAX_PREPARING_ROOM_MS, trigger auto-return
+    // umiddelbart (med preview-tekst).
     const elapsedSinceEnded = Math.max(0, summary.elapsedSinceEndedMs ?? 0);
-    const remainingForFallback = Math.max(
+    const remainingForAutoReturn = Math.max(
       0,
-      WAITING_FOR_MASTER_TIMEOUT_MS - elapsedSinceEnded,
+      MAX_PREPARING_ROOM_MS - elapsedSinceEnded,
     );
-    if (remainingForFallback === 0) {
-      // Allerede over timeout (reconnect efter lang fravær).
-      this.applyWaitingForMasterFallback();
+    if (remainingForAutoReturn === 0) {
+      // Reconnect efter lang fravær uten ny runde — auto-return umiddelbart.
+      this.scheduleAutoReturnPreview(0);
+    } else if (remainingForAutoReturn <= RETURNING_TO_LOBBY_PREVIEW_MS) {
+      // Mindre enn 2s igjen — start preview-fasen umiddelbart, deretter
+      // auto-return etter resterende tid.
+      this.scheduleAutoReturnPreview(0);
     } else {
-      this.session.waitingFallbackTimer = setTimeout(() => {
-        this.applyWaitingForMasterFallback();
-      }, remainingForFallback);
+      // Normal flyt: preview-tekst starter ved 13s, auto-return ved 15s.
+      this.session.autoReturnPreviewTimer = setTimeout(() => {
+        this.scheduleAutoReturnPreview(RETURNING_TO_LOBBY_PREVIEW_MS);
+      }, remainingForAutoReturn - RETURNING_TO_LOBBY_PREVIEW_MS);
     }
+  }
+
+  /**
+   * Aktiver auto-return-preview-fasen. Bytter loading-tekst til "Returnerer
+   * til lobby..." og scheduler tryDismissForceAutoReturn etter `delayMs`.
+   *
+   * `delayMs === 0` betyr at preview-tekst settes umiddelbart OG auto-return
+   * trigges på neste tick (reconnect-edge-case der bruker har vært borte
+   * lenger enn MAX_PREPARING_ROOM_MS).
+   */
+  private scheduleAutoReturnPreview(delayMs: number): void {
+    const session = this.session;
+    if (!session) return;
+    if (session.hasFiredAutoReturn) return;
+    if (session.hasFiredCompleted) return;
+
+    // Bytt loading-tekst og dempe spinner — synlig "noe skjer".
+    const loadingMsg = session.loadingMsgEl;
+    if (loadingMsg) {
+      loadingMsg.textContent = "Returnerer til lobby...";
+      const parent = loadingMsg.parentElement;
+      if (parent) {
+        parent.setAttribute("data-state", "returning-to-lobby");
+      }
+    }
+    // Schedule den faktiske force-dismiss-en.
+    session.autoReturnTimer = setTimeout(() => {
+      this.fireAutoReturn();
+    }, delayMs);
+  }
+
+  /**
+   * Forced auto-return-handler. Skipper markRoomReady-gating fordi vi har
+   * besluttet at 15s er max-vente-tid (Tobias-direktiv 2026-05-14).
+   *
+   * Triggrer SAMME path som manuell "Tilbake til lobby"-klikk: kaller
+   * `summary.onBackToLobby` slik at lobby-shell dispatches `returnToLobby`-
+   * event og PlayScreen rydder opp via `dismissEndOfRoundAndReturnToWaiting`.
+   * Vi velger lobby-path over in-room-WAITING fordi:
+   *   1. Brukerens manuelle fallback har samme path — auto-return = "gjør
+   *      det brukeren ville gjort uansett etter venting"
+   *   2. Hvis backend henger 15s+, er det ikke trygt å anta at neste runde
+   *      kommer umiddelbart i samme rom. Lobby viser fersk state.
+   *   3. Lobby kan re-route bruker tilbake til samme rom hvis runde
+   *      spawnes — ingen tap.
+   *
+   * Sentry-breadcrumb skrives så ops kan se hvor ofte fallback fyrer.
+   * Idempotent (hasFiredAutoReturn-flagg).
+   */
+  private fireAutoReturn(): void {
+    const session = this.session;
+    if (!session) return;
+    if (session.hasFiredAutoReturn) return;
+    if (session.hasFiredCompleted) return;
+    session.hasFiredAutoReturn = true;
+
+    // Sentry breadcrumb — observability fordi fallback betyr at backend
+    // ikke emit-et room:update innen 15s. Best-effort fail-soft (Sentry
+    // off i dev).
+    try {
+      void import("../../../telemetry/Sentry.js")
+        .then((mod) => {
+          try {
+            mod.addClientBreadcrumb(
+              "endOfRoundOverlay.autoReturnFallback",
+              {
+                reason: "MAX_PREPARING_ROOM_MS_ELAPSED",
+                maxPreparingRoomMs: MAX_PREPARING_ROOM_MS,
+                isRoomReady: session.isRoomReady,
+                minDisplayElapsed: session.minDisplayElapsed,
+              },
+            );
+          } catch {
+            /* best-effort */
+          }
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    } catch {
+      /* best-effort */
+    }
+
+    // Sammenfaller med manuell "Tilbake til lobby"-klikk-flyt: lukk overlay
+    // FØRST (idempotent fade ut), så kall onBackToLobby som er ansvarlig for
+    // event-dispatch + dismissEndOfRoundAndReturnToWaiting. Markér completed
+    // for å hindre at samtidige markRoomReady-call kjører tryDismiss på nytt.
+    session.hasFiredCompleted = true;
+    const onBackToLobby = session.summary.onBackToLobby;
+    // Fade ut root, deretter kall onBackToLobby etter fade-tid.
+    if (this.root) {
+      this.root.style.transition = `opacity ${PHASE_FADE_MS}ms ease`;
+      this.root.style.opacity = "0";
+    }
+    setTimeout(() => {
+      try {
+        onBackToLobby();
+      } catch (err) {
+        console.warn(
+          "[Game1EndOfRoundOverlay] onBackToLobby threw (auto-return):",
+          err,
+        );
+      }
+      this.hide();
+    }, PHASE_FADE_MS);
   }
 
   /**
@@ -563,10 +719,18 @@ export class Game1EndOfRoundOverlay {
     if (!session) return;
     if (session.isRoomReady) return;
     session.isRoomReady = true;
-    // Cancel waiting-fallback-timer — vi har mottatt fersk room-state.
-    if (session.waitingFallbackTimer !== null) {
-      clearTimeout(session.waitingFallbackTimer);
-      session.waitingFallbackTimer = null;
+    // Tobias 2026-05-14 (auto-return-til-lobby): cancel auto-return-
+    // timers fordi rommet er klart for neste runde — normal dismiss-path
+    // tar over. Hvis preview-fasen allerede startet (sjelden race ved
+    // grensen 13-15s), beholdes "Returnerer til lobby..."-tekst inntil
+    // tryDismiss fyrer fade-ut.
+    if (session.autoReturnTimer !== null) {
+      clearTimeout(session.autoReturnTimer);
+      session.autoReturnTimer = null;
+    }
+    if (session.autoReturnPreviewTimer !== null) {
+      clearTimeout(session.autoReturnPreviewTimer);
+      session.autoReturnPreviewTimer = null;
     }
     this.tryDismiss();
   }
@@ -627,60 +791,16 @@ export class Game1EndOfRoundOverlay {
       cancelAnimationFrame(this.countUpRaf);
       this.countUpRaf = null;
     }
-    if (this.session?.waitingFallbackTimer != null) {
-      clearTimeout(this.session.waitingFallbackTimer);
-      this.session.waitingFallbackTimer = null;
+    // Tobias 2026-05-14 (auto-return-til-lobby): cancel auto-return-
+    // timers ved hide()/destroy() slik at de ikke fyrer etter at overlay
+    // er borte (manuell lobby-klikk, controller dismiss, reconnect-rebuild).
+    if (this.session?.autoReturnTimer != null) {
+      clearTimeout(this.session.autoReturnTimer);
+      this.session.autoReturnTimer = null;
     }
-  }
-
-  /**
-   * Bytter loading-tekst fra "Forbereder rommet..." til "Venter på master
-   * — runden er slutt" og dempes spinneren. Lobby-knappens utseende
-   * høynes (mer kontrast) slik at brukeren tydelig ser at den er
-   * primær-action i ventetid-fallback.
-   *
-   * Idempotent — kall flere ganger uten effekt etter første call. Brukes
-   * av:
-   *   - 30s waiting-fallback-timer
-   *   - reconnect-pathen hvis elapsedSinceEndedMs allerede er ≥ timeout
-   */
-  private applyWaitingForMasterFallback(): void {
-    const session = this.session;
-    if (!session) return;
-    if (session.hasFiredWaitingFallback) return;
-    session.hasFiredWaitingFallback = true;
-    if (session.waitingFallbackTimer !== null) {
-      clearTimeout(session.waitingFallbackTimer);
-      session.waitingFallbackTimer = null;
-    }
-    // Bytt loading-tekst — tydeliggjør at vi venter på MASTER, ikke på
-    // rommet selv (rommet er klart, men master har ikke startet neste
-    // runde). Markér DOM-element med data-state for tester.
-    const loadingMsg = session.loadingMsgEl;
-    if (loadingMsg) {
-      loadingMsg.textContent = "Venter på master — runden er slutt";
-      const parent = loadingMsg.parentElement;
-      if (parent) {
-        parent.setAttribute("data-state", "waiting-for-master");
-        // Dempe rad-styling — vi venter på menneske, ikke laster system.
-        parent.style.color = "rgba(244,232,208,0.7)";
-      }
-    }
-    // Skjul spinner (det er ikke laste-tilstand lenger — det er vente-på-master).
-    const spinner = session.loadingSpinnerEl;
-    if (spinner) {
-      spinner.style.display = "none";
-    }
-    // Høyne lobby-knappens visuelle kontrast så bruker tydelig ser at det
-    // er primary action i fallback-tilstand.
-    const lobbyBtn = session.lobbyBtnEl;
-    if (lobbyBtn) {
-      lobbyBtn.setAttribute("data-state", "waiting-for-master");
-      Object.assign(lobbyBtn.style, {
-        color: "#f4e8d0",
-        background: "rgba(245,184,65,0.12)",
-        borderColor: "rgba(245,184,65,0.42)",
-      });
+    if (this.session?.autoReturnPreviewTimer != null) {
+      clearTimeout(this.session.autoReturnPreviewTimer);
+      this.session.autoReturnPreviewTimer = null;
     }
   }
 

@@ -2,7 +2,7 @@
 name: live-room-robusthet-mandate
 description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   project: spillorama
 ---
 
@@ -68,6 +68,35 @@ Dette er **ikke** en "P1 etter pilot" — det er **fundament som må være på p
 - **Aldri** belaste lommebok uten at ticket-rad faktisk er commit-et
 - **Aldri** utbetale premie uten audit-event
 - Outbox-pattern (BIN-761→764) for alle wallet-touch fra rom-event
+
+## Etter-runde auto-return til lobby (Tobias 2026-05-14)
+
+**Tobias-direktiv:**
+> "Etter endt runde må man bli ført tilbake til lobbyen til spillet etter at runden er ferdig, må da bli ført tilbake når man er sikker på at rommet er klart igjen og live."
+
+**Flyt (Game1):**
+1. Runde ender (BINGO_CLAIMED / MAX_DRAWS / MANUAL_END) → `Game1EndOfRoundOverlay` viser vinner-summary
+2. Persistent spinner med tekst "Forbereder rommet..."
+3. Klient lytter på `room:update WAITING` med ny `currentGame.id` (ny runde spawnet av backend) → `markRoomReady()` → normal dismiss til in-room WAITING
+4. **Fallback: 15s max-timeout (`MAX_PREPARING_ROOM_MS`)** → forced auto-return til lobby via `onBackToLobby` (samme path som manuell knapp-klikk). De siste 2 sekundene byttes loading-teksten til "Returnerer til lobby..." for synlig overgang
+5. Manuell "Tilbake til lobby" forblir alltid tilgjengelig som backup
+
+**Hvorfor max-timeout er obligatorisk:**
+
+Backend emit-er ikke nødvendigvis ny `room:update` umiddelbart etter round-end (master må starte neste runde, eller perpetual-loop må spawne ny scheduled-game). Uten timeout-fallback henger spilleren evig på "Forbereder rommet..."-spinner — Tobias-rapport 2026-05-14 09:54 etter runde 330597ef. ALDRI fjern timeout-fallback uten å erstatte med annen guarantee.
+
+**Implementasjon (`packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts`):**
+- `MAX_PREPARING_ROOM_MS = 15_000` — max wait before forced auto-return
+- `RETURNING_TO_LOBBY_PREVIEW_MS = 2_000` — last 2s show "Returnerer til lobby..."
+- Sentry-breadcrumb `endOfRoundOverlay.autoReturnFallback` ved timeout
+- Idempotent — cancelles av manuell klikk, `markRoomReady` eller `hide()`
+- Reconnect-resilient — `elapsedSinceEndedMs > MAX_PREPARING_ROOM_MS` triggrer auto-return umiddelbart
+
+**Spill 2/3 (perpetual rocket/monsterbingo):** Bruker IKKE `Game1EndOfRoundOverlay`. Auto-restart-flyten der er backend-drevet (`PerpetualRoundService.handleGameEnded` → `roundPauseMs`-delay → ny runde i samme rom). Klient ser kun pause + ny `gameStarted`-event. Hvis perpetual-loopen feiler å spawne ny runde, er det en server-side bug (R9-leak-test gating) — ikke en klient-UX-bug.
+
+**Anti-pattern:** Fjerne 15s timeout fordi "backend skal jo alltid emit-e ny event". Det er NETTOPP det Tobias-rapport 2026-05-14 demonstrerer er feil — vi MÅ ha fallback for når backend ikke emit-er innen rimelig tid.
+
+**Symptom hvis fjernet:** "Forbereder rommet..."-spinner henger evig. Brukeren må klikke "Tilbake til lobby" manuelt eller refreshe siden. Pilot-blokker for UX-mandat.
 
 ## R1-R12 — alle pilot/utvidelses-tiltak (status per 2026-05-13)
 
@@ -323,3 +352,4 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 |---|---|
 | 2026-05-08 | Initial mandat |
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
+| 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
