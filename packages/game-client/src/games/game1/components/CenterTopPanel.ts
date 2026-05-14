@@ -11,9 +11,19 @@ import type { PatternListView, PatternListViewFactory } from "./PatternListView.
  * eliminerer 30+ style-mutasjoner per sekund som tidligere trigget
  * transitionstart:background-color + box-shadow for hele `g1-center-top`.
  *
- * Regelen: ALLE prize-pill visuell-styling defineres her. Ingen
- * inline-style skrives til pillen fra JS etter initial build (bortsett fra
+ * Regelen: ALL prize-rad visuell-styling defineres her. Ingen
+ * inline-style skrives til raden fra JS etter initial build (bortsett fra
  * GSAP transform-animasjoner som er isolert til `<span>`-etterkommeren).
+ *
+ * Premietabell-redesign 2026-05-14 (Tobias-direktiv): pillene erstattes
+ * av et 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla bong-farger) slik at
+ * spilleren ser premien for ALLE bong-farger uten å regne i hodet.
+ * Beholder `.prize-pill`-klassen i CSS-en med dummy-regel for
+ * backwards-compat (no-backdrop-filter regression-test forventer
+ * fortsatt en `.prize-pill`-class), men selve render-en bruker
+ * `.premie-row` + `.premie-cell` (5×3 grid). Auto-multiplikator-regel
+ * fra `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2 brukes til å
+ * beregne Gul (×2) og Lilla (×3) fra Hvit-base (×1).
  */
 function ensurePatternWonStyles(): void {
   if (typeof document === "undefined") return;
@@ -22,49 +32,135 @@ function ensurePatternWonStyles(): void {
   s.id = "pattern-won-flash-styles";
   s.textContent = `
 @keyframes pattern-won-flash {
-  0%   { background: rgba(76, 175, 80, 0.55); box-shadow: 0 0 24px rgba(76, 175, 80, 0.8), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.08); }
-  60%  { background: rgba(76, 175, 80, 0.25); box-shadow: 0 0 12px rgba(76, 175, 80, 0.4), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.02); }
+  0%   { background: rgba(76, 175, 80, 0.55); box-shadow: 0 0 24px rgba(76, 175, 80, 0.8), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.03); }
+  60%  { background: rgba(76, 175, 80, 0.25); box-shadow: 0 0 12px rgba(76, 175, 80, 0.4), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.01); }
   100% { transform: scale(1); }
 }
-.prize-pill {
-  /* KRITISK: Ingen backdrop-filter (PR #468) — prize-pill ligger over
+/* Legacy .prize-pill-klasse — kun beholdt for at den eksterne no-
+ * backdrop-filter-regression-testen kan fortsette aa selektere noen
+ * elementer aa sjekke. Inneholder INGEN visuell styling (raden bruker
+ * .premie-row). KRITISK: aldri legg backdrop-filter her (PR #468). */
+.prize-pill { background: none; backdrop-filter: none; }
+.premie-table {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+.premie-header {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) repeat(3, 1fr);
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.premie-header .col-label { text-align: left; }
+.premie-header .col-color {
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.premie-header .swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  display: inline-block;
+}
+.premie-header .swatch.hvit { background: #f5f5f5; }
+.premie-header .swatch.gul { background: #f1c40f; }
+.premie-header .swatch.lilla { background: #9b59b6; }
+.premie-row {
+  /* KRITISK: Ingen backdrop-filter (PR #468) — raden ligger over
    * Pixi-canvas og tvinger GPU til å re-kjøre blur-shader per frame.
    * Bruker solid bakgrunn istf rgba+blur for samme visuelle effekt. */
   background: rgba(30, 12, 12, 0.92);
   border: 1px solid rgba(255, 100, 100, 0.2);
   box-shadow: 0 4px 8px rgba(0,0,0,0.4);
-  border-radius: 14px;
-  height: 24px;
-  padding: 0 14px;
-  display: flex;
+  border-radius: 12px;
+  padding: 6px 10px;
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) repeat(3, 1fr);
+  gap: 6px;
   align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
   color: #c1c1c1;
-  width: 85%;
-  box-sizing: border-box;
-  white-space: nowrap;
   /* VIKTIG: ingen CSS-transitions på background/box-shadow/border —
    * de ville trigget transitionstart-events ved hver class-toggle og
    * forårsake blink. State-endringer skal være instant. */
 }
-.prize-pill.active {
+.premie-row .pattern-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: inherit;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.premie-row .premie-cell {
+  font-size: 11px;
+  font-weight: 600;
+  color: inherit;
+  text-align: center;
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.premie-row .premie-cell.col-hvit { border-color: rgba(245, 245, 245, 0.15); }
+.premie-row .premie-cell.col-gul { border-color: rgba(241, 196, 15, 0.25); }
+.premie-row .premie-cell.col-lilla { border-color: rgba(155, 89, 182, 0.25); }
+.premie-row.active {
   border: 1.5px solid #ffcc00;
   color: #fff;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 0 6px rgba(255,200,0,0.2);
 }
-.prize-pill.completed {
+.premie-row.active .premie-cell {
+  background: rgba(255, 200, 0, 0.08);
+}
+.premie-row.completed {
   text-decoration: line-through;
   text-decoration-thickness: 1.5px;
   opacity: 0.5;
 }
-.prize-pill.pattern-won-flash {
+.premie-row.pattern-won-flash {
   animation: pattern-won-flash 0.9s ease-out;
 }
 `;
   document.head.appendChild(s);
 }
+
+/**
+ * Bong-farger og auto-multiplikator (Tobias-direktiv 2026-05-14 +
+ * `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2).
+ *
+ * Spill 1 har 3 bong-priser med fast multiplikator:
+ *   - Hvit  (5 kr) × 1
+ *   - Gul   (10 kr) × 2
+ *   - Lilla (15 kr) × 3
+ *
+ * `pattern.prize1` (eller `Math.round((prizePercent / 100) * prizePool)`)
+ * er ALLTID base-prisen for Hvit-bong. Gul/Lilla beregnes ved å
+ * multiplisere med 2 og 3 respektivt — engine gjør samme beregning
+ * server-side.
+ *
+ * Eksportert som `const` for å gjøre testbarhet enkel + dokumentere
+ * regelen i koden.
+ */
+export const PREMIE_BONG_COLORS: ReadonlyArray<{
+  readonly key: "hvit" | "gul" | "lilla";
+  readonly label: string;
+  readonly multiplier: 1 | 2 | 3;
+}> = [
+  { key: "hvit", label: "Hvit", multiplier: 1 },
+  { key: "gul", label: "Gul", multiplier: 2 },
+  { key: "lilla", label: "Lilla", multiplier: 3 },
+];
 
 export interface CenterTopCallbacks {
   onShowCalledNumbers?: () => void;
@@ -183,15 +279,21 @@ export class CenterTopPanel {
       flex: "0 0 auto",
     });
 
-    // Prize pill list column
+    // Premietabell-redesign 2026-05-14: erstatter tidligere kolonne med
+    // tekst-piller med et 5×3 grid (Rad 1-4 + Full Hus × Hvit/Gul/Lilla).
+    // `prizeListEl` beholder samme felt-navn så Spill 3-grenen og
+    // diff-/swap-logikken kan fortsette å skrive til samme container.
+    // Class-navn byttet fra implisitt til `.premie-table` (CSS i
+    // ensurePatternWonStyles).
     this.prizeListEl = document.createElement("div");
+    this.prizeListEl.className = "premie-table";
     Object.assign(this.prizeListEl.style, {
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "center",
-      alignItems: "flex-end",
-      gap: "8px",
       flex: "1",
+      justifyContent: "center",
+      // Override: vis grid-tabellen i full bredde (5×3 grid trenger plass).
+      // Tidligere `align-items: flex-end` matchet høyre-justerte piller —
+      // her vil grid-tabellen strekke seg fra venstre til høyre.
+      alignItems: "stretch",
     });
 
     if (this.customPatternListView) {
@@ -330,29 +432,41 @@ export class CenterTopPanel {
     return btn;
   }
 
+  /** Sist sett base-pris per pattern (cents/kr — samme verdi som
+   *  pattern.prize1 eller computedPrize). Brukes til flash-amount-deteksjon.
+   *  Note: oppdatering av Gul/Lilla skjer automatisk når base endres (de
+   *  er deriverte verdier — `base × multiplier`), så vi cacher kun base. */
   private lastAmountByPatternId = new Map<string, number>();
   /**
    * Struktur-signatur (pattern-id-rekkefølge + design). Endres KUN når
    * pattern-array-en faktisk har ny shape — ikke ved prize-pool-tweaks
    * eller minor result-oppdateringer. En ny struktur trigger full rebuild
-   * av pill-DOM; alt annet går via diff-oppdatering.
+   * av rad-DOM; alt annet går via diff-oppdatering.
    */
   private lastStructureSignature: string | null = null;
   /** Sett med pattern-id-er som var `isWon` i forrige render. Brukes for å
    *  detektere hvilke patterns som akkurat nå transisjonerte fra
-   *  ikke-vunnet → vunnet, slik at pillen kan flash-animeres. */
+   *  ikke-vunnet → vunnet, slik at raden kan flash-animeres. */
   private prevWonIds = new Set<string>();
-  /** Map fra patternId → pill + label refs. Gjenbrukes mellom
-   *  updatePatterns-kall så class-/tekst-diff kan gjøres uten å rive DOM. */
+  /** Map fra patternId → rad + label + per-bong-celle refs. Gjenbrukes
+   *  mellom updatePatterns-kall så class-/tekst-diff kan gjøres uten å
+   *  rive DOM. `cells` mappes til samme rekkefølge som `PREMIE_BONG_COLORS`. */
   private patternPillById = new Map<
     string,
-    { pill: HTMLDivElement; label: HTMLSpanElement }
+    {
+      pill: HTMLDivElement;
+      label: HTMLSpanElement;
+      cells: Record<"hvit" | "gul" | "lilla", HTMLDivElement>;
+    }
   >();
-  /** Per-pill cache av sist sett tekst + state — hopper over DOM-writes
-   *  når verdien er uendret (0 mutasjoner hvis state er stabil). */
+  /** Per-rad cache av sist sett state — hopper over DOM-writes når
+   *  verdien er uendret (0 mutasjoner hvis state er stabil). `prize`
+   *  er Hvit-base (Gul/Lilla deriveres deterministisk fra denne).
+   *  `displayName` cachet separat slik at label-text kun re-skrives
+   *  ved faktisk pattern-name-endring. */
   private pillCache = new Map<
     string,
-    { text: string; active: boolean; completed: boolean }
+    { displayName: string; prize: number; active: boolean; completed: boolean }
   >();
 
   updatePatterns(
@@ -438,10 +552,17 @@ export class CenterTopPanel {
       seenIds.add(pattern.id);
 
       // Flash payout changes (KUN ved faktisk prize-endring og ikke won).
+      // Premietabell-redesign 2026-05-14: prize-endring i percent-modus
+      // (når prizePool øker mid-runde) trigger flash på alle 3 celler
+      // samtidig — deriverte Gul/Lilla-verdier endrer seg sammen med Hvit.
       const prev = this.lastAmountByPatternId.get(pattern.id);
       if (prev !== undefined && prev !== prize && !won) {
         const entry = this.patternPillById.get(pattern.id);
-        if (entry) this.flashAmount(entry.label);
+        if (entry) {
+          for (const color of PREMIE_BONG_COLORS) {
+            this.flashAmount(entry.cells[color.key]);
+          }
+        }
       }
       this.lastAmountByPatternId.set(pattern.id, prize);
     }
@@ -473,28 +594,74 @@ export class CenterTopPanel {
   }
 
   /**
-   * Full DOM-rebuild av pill-rad. Kalles KUN når pattern-array-shape
-   * faktisk endres (nytt antall patterns eller ny id-rekkefølge). Andre
-   * oppdateringer (prize, isWon, active-index) går via `applyPillState`.
+   * Full DOM-rebuild av premietabell-grid. Kalles KUN når pattern-array-
+   * shape faktisk endres (nytt antall patterns eller ny id-rekkefølge).
+   * Andre oppdateringer (prize, isWon, active-index) går via
+   * `applyPillState`.
+   *
+   * Layout (Tobias-direktiv 2026-05-14): 5 rader × 3 kolonner.
+   *   - Header: [Pattern | Hvit 5kr | Gul 10kr | Lilla 15kr]
+   *   - Per rad (én per pattern): [pattern-label | Hvit-pris | Gul-pris | Lilla-pris]
+   * Hver rad får class `premie-row` så active/completed/won-flash kan
+   * settes på rad-nivå (én class-toggle, ikke per celle).
+   *
+   * `.prize-pill`-klassen er beholdt som dummy-marker på raden så den
+   * eksterne `no-backdrop-filter-regression.test.ts` fortsatt finner
+   * elementer å sjekke. Faktisk styling kommer fra `.premie-row` /
+   * `.premie-cell` (CSS i `ensurePatternWonStyles`).
    */
   private rebuildPills(patterns: PatternDefinition[]): void {
     this.prizeListEl.innerHTML = "";
     this.patternPillById.clear();
     this.pillCache.clear();
+
+    // Header med swatch-prikker. Statisk — bygges én gang per rebuild.
+    const header = document.createElement("div");
+    header.className = "premie-header";
+    header.innerHTML = `
+      <div class="col-label">Premie</div>
+      <div class="col-color"><span class="swatch hvit"></span>Hvit</div>
+      <div class="col-color"><span class="swatch gul"></span>Gul</div>
+      <div class="col-color"><span class="swatch lilla"></span>Lilla</div>
+    `;
+    this.prizeListEl.appendChild(header);
+
     for (const pattern of patterns) {
       const pill = document.createElement("div");
-      pill.className = "prize-pill";
+      // `.prize-pill` beholdes for backwards-compat med regression-testen
+      // (`no-backdrop-filter-regression.test.ts` selekterer på `.prize-pill`).
+      // Visuell styling kommer fra `.premie-row`.
+      pill.className = "prize-pill premie-row";
+
       const label = document.createElement("span");
+      label.className = "pattern-label";
       pill.appendChild(label);
+
+      const cells: Record<"hvit" | "gul" | "lilla", HTMLDivElement> = {
+        hvit: document.createElement("div"),
+        gul: document.createElement("div"),
+        lilla: document.createElement("div"),
+      };
+      for (const color of PREMIE_BONG_COLORS) {
+        const cell = cells[color.key];
+        cell.className = `premie-cell col-${color.key}`;
+        pill.appendChild(cell);
+      }
+
       this.prizeListEl.appendChild(pill);
-      this.patternPillById.set(pattern.id, { pill, label });
+      this.patternPillById.set(pattern.id, { pill, label, cells });
     }
   }
 
   /**
-   * Minimal-diff oppdatering for én pill. Skriver KUN til DOM hvis verdien
+   * Minimal-diff oppdatering for én rad. Skriver KUN til DOM hvis verdien
    * faktisk endret seg sammenlignet med `pillCache` — 0 mutasjoner per
-   * pill ved stabil state.
+   * rad ved stabil state.
+   *
+   * Premietabell-redesign 2026-05-14: `prize` er ALLTID Hvit-base.
+   * Gul (× 2) og Lilla (× 3) beregnes deterministisk her — de er ikke
+   * separate input-felt. Tobias-direktiv: auto-multiplikator-regel fra
+   * SPILL_REGLER_OG_PAYOUT.md §3.2.
    */
   private applyPillState(
     patternId: string,
@@ -505,13 +672,28 @@ export class CenterTopPanel {
   ): void {
     const entry = this.patternPillById.get(patternId);
     if (!entry) return;
-    const nextText = `${displayName} - ${prize} kr`;
     const cache = this.pillCache.get(patternId);
-    if (cache && cache.text === nextText && cache.active === active && cache.completed === won) {
+    if (
+      cache &&
+      cache.displayName === displayName &&
+      cache.prize === prize &&
+      cache.active === active &&
+      cache.completed === won
+    ) {
       return; // Ingen endring — 0 DOM-writes.
     }
-    if (!cache || cache.text !== nextText) {
-      entry.label.textContent = nextText;
+    if (!cache || cache.displayName !== displayName) {
+      entry.label.textContent = displayName;
+    }
+    if (!cache || cache.prize !== prize) {
+      for (const color of PREMIE_BONG_COLORS) {
+        // Auto-multiplikator (Hvit ×1, Gul ×2, Lilla ×3). Engine bruker
+        // samme regel server-side, så displayed-amount = paid-out-amount
+        // (untatt single-prize-cap som KUN gjelder databingo, ikke
+        // hovedspill Spill 1).
+        const value = prize * color.multiplier;
+        entry.cells[color.key].textContent = `${value} kr`;
+      }
     }
     if (!cache || cache.active !== active) {
       entry.pill.classList.toggle("active", active);
@@ -519,7 +701,7 @@ export class CenterTopPanel {
     if (!cache || cache.completed !== won) {
       entry.pill.classList.toggle("completed", won);
     }
-    this.pillCache.set(patternId, { text: nextText, active, completed: won });
+    this.pillCache.set(patternId, { displayName, prize, active, completed: won });
   }
 
   /** Animér overgang fra gammel mini-grid til ny: scale+fade-out, destroy,
@@ -566,10 +748,10 @@ export class CenterTopPanel {
     setTimeout(() => pill.classList.remove("pattern-won-flash"), 900);
   }
 
-  private flashAmount(span: HTMLSpanElement): void {
-    gsap.killTweensOf(span);
+  private flashAmount(target: HTMLElement): void {
+    gsap.killTweensOf(target);
     gsap.fromTo(
-      span,
+      target,
       { scale: 1 },
       {
         scale: 1.12,
@@ -581,7 +763,7 @@ export class CenterTopPanel {
       },
     );
     gsap.fromTo(
-      span,
+      target,
       { color: "#ffe83d" },
       { color: "inherit", duration: 0.4, ease: "power2.out" },
     );
@@ -751,9 +933,15 @@ export class CenterTopPanel {
     // flashAmount (span inni pill) og swapMiniGrid (next.root/old.root).
     // Vi dekker root-subtree med én kjøring på hver pill + grid-host.
     gsap.killTweensOf(this.root);
-    for (const { pill, label } of this.patternPillById.values()) {
+    for (const { pill, label, cells } of this.patternPillById.values()) {
       gsap.killTweensOf(pill);
       gsap.killTweensOf(label);
+      // Premietabell-redesign 2026-05-14: flashAmount-tweens kjøres nå
+      // på alle 3 bong-celler (Hvit/Gul/Lilla). Må killes for å unngå
+      // zombie-tweens etter destroy.
+      for (const color of PREMIE_BONG_COLORS) {
+        gsap.killTweensOf(cells[color.key]);
+      }
     }
     gsap.killTweensOf(this.gridHostEl);
     if (this.activeGrid) {
