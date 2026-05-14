@@ -59,6 +59,100 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — db-perf-watcher cron + Linear auto-issue (db-perf-watcher-agent, OBS-9)
+
+**Branch:** `feat/db-perf-watcher-cron-2026-05-14`
+**PR:** TBD (opprettes etter siste verifisering)
+**Agent type:** general-purpose / ops-tools-agent (spawned av PM-AI)
+**Trigger:** Tobias-direktiv 2026-05-14: *"Vi må overvåke databasen så vi får data på hva som må forbedres. Test-agent som overvåker alt og peker på svakheter og tregheter."* Sentry detekterte 62 N+1-events (SPILLORAMA-BACKEND-3/-4) på 6 timer 2026-05-14 → vi vil at slike events automatisk → Linear-issue.
+
+**Bakgrunn:**
+- OBS-7 (pg_stat_statements extension) ble aktivert 2026-05-14
+- PgHero (OBS-8) gir manuell UI for top-N — men ingen alerter automatisk
+- audit:db (OBS-6) bundles top-20 inn i bug-rapporter — kun ved manuell trigger
+- Vi manglet **proaktiv, automatisk** komponent: cron som detekterer NEW slow queries og REGRESSIONS og lager Linear-issue uten at noen trenger å åpne dashbordet
+
+**Hva ble gjort:**
+
+1. `scripts/ops/db-perf-watcher.sh` (~410 linjer)
+   - Pinger lokal Postgres + verifiserer `pg_stat_statements`-extension
+   - Henter top-N queries via SQL, konverterer til JSON via jq
+   - Sammenligner mot baseline (`/tmp/db-perf-watcher-baseline.json`)
+   - jq pure-function for anomaly-deteksjon: NEW (mean > 100ms, calls > 10) + REGRESSION (mean økt > 50%)
+   - Dedup via state-fil: samme queryid flagges max 1x/24t
+   - Skriver markdown-rapport til `/tmp/db-perf-watcher-<ISO>.md`
+   - Kaller sibling Linear-script hvis anomalies
+   - Idempotent + read-only mot DB
+
+2. `scripts/ops/db-perf-create-linear-issue.sh` (~280 linjer)
+   - Leser `LINEAR_API_KEY` fra env eller `secrets/linear-api.local.md` (samme mønster som `cross-knowledge-audit.mjs`)
+   - Resolver team-id (BIN) + label-id (db-performance) via GraphQL
+   - Mutation `issueCreate` med report-body embeddet
+   - Fallback-stack: Linear → Slack-webhook → fil i /tmp
+   - DRY_RUN-mode for testing uten å spamme
+
+3. `scripts/ops/setup-db-perf-cron.sh` (~180 linjer)
+   - macOS: launchd plist `~/Library/LaunchAgents/com.spillorama.db-perf-watcher.plist`
+   - Linux: crontab entry tagget med `# db-perf-watcher (managed by ...)`
+   - Subcommands: install / uninstall / status / print
+   - **Default disabled** — Tobias aktiverer manuelt etter pilot-test
+
+4. `scripts/__tests__/ops/db-perf-watcher.test.sh` — 34 tester, alle PASS:
+   - Syntax + scripts finnes
+   - jq anomaly-detection pure-function (mock pg_stat_statements input)
+   - NEW threshold-respekt (sub-threshold filtreres ut)
+   - REGRESSION delta_pct math (358% floor)
+   - Dedup state-file 24t-vindu
+   - Linear-script DRY_RUN composer correct title
+   - Cron-script print/status modes
+   - Pre-flight DB-check (unreachable → exit 2)
+   - Integration smoke mot lokal Postgres (skip-graceful)
+
+5. `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — full runbook
+6. `.claude/skills/health-monitoring-alerting/SKILL.md` — utvidet med "DB-perf-watcher cron (OBS-9)"-seksjon
+
+**Verifisering:**
+- `bash -n` syntax PASS på alle 3 shell-scripts
+- `bash scripts/__tests__/ops/db-perf-watcher.test.sh` — 34/34 PASS
+- End-to-end smoke mot lokal Postgres:
+  - `FORCE_BASELINE=1 bash scripts/ops/db-perf-watcher.sh` → baseline lagret med 20 queries
+  - Andre run → "0 anomalies, exit 0", ren rapport skrevet
+- Manuell verifisering av rapport-format (markdown med top-10 + anomalies-seksjon)
+
+**Sample rapport-output:**
+```
+# DB-Perf Watcher Report 2026-05-14T13:52:43Z
+
+## Summary
+- Host: localhost:5432/spillorama
+- Top queries scanned: 20
+- Anomalies detected: 0 (0 NEW, 0 REGRESSION)
+
+## Top 10 by total_exec_time
+| # | Calls | Mean ms | Total ms | Rows | Disk reads | Query |
+| 1 | 1657  | 1.49    | 2476.18  | 1657 | 145        | SELECT id, master_hall_id... FROM app_game1_scheduled_games WHERE status... |
+| 2 | 29879 | 0.05    | 1431.68  | 29879 | 6         | SELECT id, slug, display_name... FROM app_game_catalog WHERE id = $1 |
+...
+```
+
+**Filer endret:** 6 nye filer + 1 skill-update.
+
+**Lessons learned:**
+- macOS har ikke `timeout`-CLI; tester må bruke `PGCONNECT_TIMEOUT=N` istedet
+- `jq` `fromdate` for ISO-string → epoch fungerer fint; sliding-window dedup blir 3-linjer-jq
+- Linear GraphQL: team-key → team-id lookup må gjøres separat fra issue-create (kan ikke bruke key direkte i mutation input)
+- Read-only invariant er sterkt — watcher er trygg å kjøre hver 5 min uten DB-impact
+
+**Skill-update:** `.claude/skills/health-monitoring-alerting/SKILL.md` — ny "DB-perf-watcher cron (OBS-9)" seksjon
+**Doc-update:** `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — ny runbook
+
+**Open follow-up (post-merge):**
+- Tobias aktiverer cron (`bash scripts/ops/setup-db-perf-cron.sh install`) når pilot-test bekrefter no-noise
+- Hvis Linear-issues blir spam, sett `LINEAR_ISSUE_DEDUP_HOURS=168` (uke)
+- Mulig fremtidig integrasjon: PagerDuty-fallback via same script-mønster som RoomAlertingService
+
+---
+
 ### 2026-05-14 — Premie-celle smalere + center-top mockup (Agent V, CSS-iterasjon)
 
 **Branch:** `fix/premie-cell-solid-bg-2026-05-14` (samme branch som PR #1442 fra Agent Q — PR #1442 ble merget før Agent V landet; Agent V's commit pusher til samme branch og åpner ny PR mot main)
