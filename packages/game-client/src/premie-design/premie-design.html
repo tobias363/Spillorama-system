@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spill 1 — Center-top-mockup (premietabell + mini-grid + player-info + actions)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap"
+  />
+  <style>
+    /*
+     * Design-preview for hele `g1-center-top`-elementet i Spill 1.
+     *
+     * Tobias-direktiv 2026-05-14 (iterasjon V):
+     *   1. Smalere premie-celler — tabellen skal ikke ta merkbart mer plass
+     *      vertikalt enn dagens enkelt-pill-design (matcher CenterTopPanel.ts
+     *      `ensurePatternWonStyles`).
+     *   2. Vise HELE center-top samlet (ikke bare premietabellen) — mini-grid
+     *      (active pattern), premietabell (5×3 grid), player-info-område og
+     *      action-knappene side-om-side.
+     *
+     * Side-en er ren HTML/CSS/JS for rask iterasjon — det er BEVISST ingen
+     * Pixi/socket-runtime her. Når Tobias har godkjent designet implementeres
+     * det 1:1 i `packages/game-client/src/games/game1/components/CenterTopPanel.ts`.
+     *
+     * VIKTIG om scope (Agent V):
+     *   - Premie-celle-størrelsen oppdateres samtidig i CenterTopPanel.ts.
+     *   - Mini-grid + player-info + action-knapper er allerede på plass i
+     *     CenterTopPanel.ts / PlayScreen / LeftInfoPanel. Mockupen replikerer
+     *     dem her KUN for kontekst — de er IKKE nye DOM-strukturer for prod.
+     *
+     * Regler:
+     * - INGEN backdrop-filter (samme PIXI-blink-bug som CenterTopPanel — se
+     *   `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts`).
+     * - Tekstene matcher `CenterTopPanel.displayNameFor` 1:1 ("Rad 1", "Full Hus").
+     * - Auto-multiplikator-regel fra `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2:
+     *     Hvit (5 kr) = base × 1
+     *     Gul (10 kr) = base × 2
+     *     Lilla (15 kr) = base × 3
+     */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      background: #0f0f1a;
+      color: #fff;
+      min-height: 100vh;
+      font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body { padding: 24px; }
+
+    header {
+      max-width: 1180px;
+      margin: 0 auto 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    header h1 {
+      font-size: 24px;
+      color: #ffe83d;
+      letter-spacing: 1px;
+    }
+    header p.lead {
+      margin-top: 8px;
+      color: rgba(255,255,255,0.65);
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 800px;
+    }
+    header p.note {
+      margin-top: 8px;
+      color: rgba(255,200,100,0.85);
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    section.scenario {
+      background: linear-gradient(180deg, #1a1a2e 0%, #12121f 100%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+    section.scenario h2 {
+      font-size: 17px;
+      color: #ffe83d;
+      margin-bottom: 4px;
+    }
+    section.scenario .scenario-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 14px;
+    }
+
+    /*
+     * In-game frame — speiler `top-group-wrapper` fra PlayScreen:
+     *   background: radial-gradient(ellipse at top left,
+     *                rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45)) over
+     *   linear-gradient(180deg, #1a0808 0%, #0a0303 100%).
+     *
+     * Bredde matcher prod (~860 px = LeftInfoPanel 150 + combo 376 +
+     * actions 245 + padding) — design-mockupen lar hele center-top
+     * sees i kontekst.
+     */
+    .game-frame {
+      background:
+        radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45)),
+        linear-gradient(180deg, #1a0808 0%, #0a0303 100%);
+      border: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      overflow-x: auto;
+      /* Tobias-fix 2026-05-14: action-panel skal pushes til høyre uten å
+       * overlappe combo-panelet. `width: fit-content` sikrer at game-frame
+       * vokser til summen av barna sin bredde (player-info + combo +
+       * action) slik at flex-shrink: 0-children aldri kolliderer i smale
+       * viewports. `max-width: 100%` hindrer overflow utenfor scenario-
+       * containeren. Horisontal scroll på meget smale viewports.
+       */
+      width: fit-content;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    /* ── LEFT: player-info-panel (LeftInfoPanel) ─────────────────────────
+     * Speiler `LeftInfoPanel`. Vises til venstre for combo-panelet og
+     * eier "Antall spillere" + "Innsats" + "Forhåndskjøp"-tekstene. */
+    .player-info-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 22px 18px 14px 18px;
+      min-width: 140px;
+      flex-shrink: 0;
+    }
+    .player-info-panel .player-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .player-info-panel .player-row svg { width: 20px; height: 20px; fill: #fff; }
+    .player-info-panel .bet-info {
+      font-size: 14px;
+      color: #bbb;
+      line-height: 1.55;
+    }
+    .player-info-panel .bet-info .row {
+      white-space: nowrap;
+    }
+    .player-info-panel .pending-stake {
+      font-size: 12px;
+      color: #9bd49b;
+      line-height: 1.4;
+      margin-top: 2px;
+    }
+
+    /* ── MIDDLE: combo-panel (mini-grid + premie-table) ─────────────────
+     * Speiler `CenterTopPanel.combo`. Bredde 496 px (Tobias-direktiv
+     * 2026-05-14 etter screenshot — 376 px var for trang, premie-tabell
+     * sin Lilla-kolonne klemte action-panel og overlappet. Gir nå plass
+     * til alle 3 prize-celler + label uten compression. */
+    .combo-panel {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      width: 496px;
+      padding: 15px 22px;
+      border-left: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0, 0, 0, 0.15);
+      flex-shrink: 0;
+    }
+    .combo-body {
+      display: flex;
+      gap: 18px;
+      justify-content: space-between;
+      align-items: stretch;
+    }
+
+    /* ── Mini-grid (5×5) — speiler PatternMiniGrid med statisk highlight ──
+     * Tobias-direktiv 2026-05-14: mini-grid skal ALDRI ha free-celle
+     * (Spill 1 mini-grid har en "center-free.png"-ikon i celle 12). For
+     * mockupen viser vi statisk Rad 1-design (alle 5 celler i øverste rad
+     * markert) slik at designet kan vurderes uten cycling. */
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 25px);
+      gap: 2px;
+      width: 135px;
+      flex-shrink: 0;
+      /* Tobias-direktiv 2026-05-14: vertikal-sentrert i combo-body slik
+       * at mini-grid (lavere høyde) ikke står øverst med tomrom under.
+       * combo-body har `align-items: stretch`, men `align-self: center`
+       * på mini-gridet overstyrer per-item. */
+      align-self: center;
+    }
+    .mini-cell {
+      width: 25px;
+      height: 25px;
+      border-radius: 2px;
+      background: rgba(100, 20, 20, 0.4);
+      border: 1px solid rgba(255, 80, 80, 0.2);
+    }
+    .mini-cell.hit {
+      background: linear-gradient(90deg, #f1c40f, #d35400);
+      border-color: #ffcc00;
+      box-shadow: inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5);
+    }
+    .mini-cell.center-free {
+      background: rgba(60, 12, 12, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffcc00;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    /*
+     * Premietabell — 5 rader × 3 kolonner.
+     * Speiler CenterTopPanel.ts `ensurePatternWonStyles` 1:1 etter
+     * iterasjon V (Tobias-direktiv 2026-05-14 — smalere celler).
+     */
+    .premie-table {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      width: 100%;
+      align-self: flex-start;
+    }
+
+    .premie-header {
+      display: grid;
+      grid-template-columns: minmax(56px, 1fr) repeat(3, 1fr);
+      gap: 6px;
+      padding: 0 8px;
+      font-size: 9px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.55);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .premie-header .col-label {
+      text-align: left;
+    }
+    .premie-header .col-color {
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .premie-header .swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.4);
+      display: inline-block;
+    }
+    .premie-header .swatch.hvit { background: #f5f5f5; }
+    .premie-header .swatch.gul { background: #f1c40f; }
+    .premie-header .swatch.lilla { background: #9b59b6; }
+
+    /*
+     * `.premie-row` — én pattern (Rad 1, Rad 2, ..., Full Hus).
+     * Bakgrunn matcher gamle `.prize-pill` (`rgba(30,12,12,0.92)`).
+     * INGEN backdrop-filter — vil trigge Pixi GPU-blink-bug.
+     */
+    .premie-row {
+      background: rgba(30, 12, 12, 0.92);
+      border: 1px solid rgba(255, 100, 100, 0.2);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+      border-radius: 10px;
+      padding: 3px 8px;
+      display: grid;
+      grid-template-columns: minmax(56px, 1fr) repeat(3, 1fr);
+      gap: 6px;
+      align-items: center;
+      color: #c1c1c1;
+      /* INGEN CSS-transitions her av samme grunn som `.prize-pill` — class-
+       * toggle gir transitionstart-events. State-endringer er instant. */
+    }
+    .premie-row .pattern-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: inherit;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .premie-row .premie-cell {
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+      padding: 2px 6px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    /* Bong-fargede solide bakgrunner (Tobias-direktiv 2026-05-14, bilde-paritet).
+     * Tekst-farge tilpasses for kontrast: mørk på hvit/gul, mørk-lilla på lys-lilla. */
+    .premie-row .premie-cell.col-hvit {
+      background: #efefef;
+      color: #1a0a0a;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+    }
+    .premie-row .premie-cell.col-gul {
+      background: #f1c40f;
+      color: #1a0a0a;
+      border: 1px solid rgba(255, 220, 100, 0.6);
+    }
+    .premie-row .premie-cell.col-lilla {
+      background: #c8b3e0;
+      color: #2a0a3a;
+      border: 1px solid rgba(180, 150, 220, 0.6);
+    }
+
+    /*
+     * Active-state — fremhever raden som currentPatternIdx peker på.
+     * Identisk farge-palette som gamle `.prize-pill.active`.
+     */
+    .premie-row.active {
+      border: 1.5px solid #ffcc00;
+      color: #fff;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5), inset 0 0 6px rgba(255,200,0,0.2);
+    }
+
+    /*
+     * Completed-state — gjør raden grå/strikethrough.
+     * Identisk med gamle `.prize-pill.completed`.
+     */
+    .premie-row.completed {
+      text-decoration: line-through;
+      text-decoration-thickness: 1.5px;
+      opacity: 0.5;
+    }
+
+    /*
+     * Won-flash — grønn pulse på rad-nivå (ikke pill-nivå). 0.9s, samme
+     * keyframes som gamle `.prize-pill.pattern-won-flash`.
+     */
+    @keyframes premie-won-flash {
+      0%   { background: rgba(76, 175, 80, 0.55); box-shadow: 0 0 24px rgba(76, 175, 80, 0.8), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.03); }
+      60%  { background: rgba(76, 175, 80, 0.25); box-shadow: 0 0 12px rgba(76, 175, 80, 0.4), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.01); }
+      100% { transform: scale(1); }
+    }
+    .premie-row.premie-won-flash {
+      animation: premie-won-flash 0.9s ease-out;
+    }
+
+    /* ── RIGHT: action-panel (game name + jackpot + buy-buttons) ─────────
+     * Speiler `CenterTopPanel.actions`-blokken 1:1. Bredde 245 px. */
+    .action-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      padding: 14px 22px 8px 22px;
+      width: 245px;
+      border-left: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
+      flex-shrink: 0;
+      box-sizing: border-box;
+      /* Tobias-fix 2026-05-14: action-panel pushes til høyre kant av
+       * game-frame slik at det visuelt er adskilt fra combo-panelet
+       * uten å overlappe. `margin-left: auto` skyver den siste flex-
+       * itemen til endenav rad. */
+      margin-left: auto;
+    }
+    .action-panel .game-name {
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      padding: 2px 0;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      text-align: center;
+      margin-bottom: 2px;
+    }
+    .action-panel .jackpot {
+      font-size: 11px;
+      font-weight: 800;
+      color: #fff;
+      white-space: nowrap;
+      text-align: center;
+      margin-bottom: 6px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+      letter-spacing: 0.5px;
+    }
+    .action-panel .jackpot .prize {
+      color: #ffcc00;
+      font-size: 13px;
+    }
+    .action-panel .action-btn {
+      background: rgba(30, 12, 12, 0.92);
+      border: 1px solid rgba(255, 100, 100, 0.2);
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 100, 100, 0.1);
+      transition: background 0.15s ease-out, box-shadow 0.15s ease-out, transform 0.15s ease-out;
+      font-family: inherit;
+      text-align: center;
+    }
+    .action-panel .action-btn:hover {
+      background: linear-gradient(180deg, rgba(60,20,20,0.5), rgba(25,5,5,0.7));
+      border-color: rgba(255,255,255,0.5);
+      transform: translateY(-1px);
+    }
+
+    /* Toggle-kontroll — design-side-only, ikke en del av prod-implementasjon */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px dashed rgba(255,255,255,0.1);
+    }
+    .controls .label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      width: 100%;
+      margin-bottom: 4px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .controls button {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .controls button:hover {
+      background: rgba(255, 232, 61, 0.08);
+      border-color: rgba(255, 232, 61, 0.4);
+      color: #ffe83d;
+    }
+    .controls button.active {
+      background: rgba(255, 232, 61, 0.15);
+      border-color: rgba(255, 232, 61, 0.6);
+      color: #ffe83d;
+    }
+    .controls .group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .controls .group-name {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Spill 1 — Center-top-mockup (premietabell + mini-grid + player-info + actions)</h1>
+    <p class="lead">
+      Tobias-direktiv 2026-05-14 (iterasjon V): smalere premie-celler slik
+      at hele 5×3 grid-tabellen ikke tar mer plass enn dagens enkelt-pill-
+      design, OG vise hele center-top-elementet samlet (mini-grid +
+      premietabell + player-info + action-knapper) for å vurdere designet
+      i kontekst.
+    </p>
+    <p class="note">
+      Design-preview — ikke produksjons-render. Premie-cell-størrelsen er
+      synkronisert 1:1 med CenterTopPanel.ts (samme padding/gap/font-size).
+      Mini-grid, player-info og action-knapper er mockup-rekonstruksjoner
+      av eksisterende prod-DOM (PatternMiniGrid + LeftInfoPanel +
+      CenterTopPanel.actions). Ingen socket/Pixi-runtime — ren HTML/CSS/JS.
+    </p>
+  </header>
+
+  <main>
+    <section class="scenario" id="scenario-innsatsen">
+      <h2>Scenario A — Innsatsen (fixed-modus)</h2>
+      <div class="scenario-sub">
+        prize1 i kr: Rad 1 = 100, Rad 2/3/4 = 200, Full Hus = 1000.
+        Eksempel Lilla: 1000 × 3 = 3000 kr på Full Hus (ingen cap på
+        hovedspill — kun databingo har 2500 kr-cap).
+      </div>
+      <div class="game-frame">
+        <div class="player-info-panel" data-scenario-player="innsatsen">
+          <div class="player-row">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            <span>12</span>
+          </div>
+          <div class="bet-info">
+            <div class="row">Innsats: 30 kr</div>
+            <div class="row">Gevinst: 0 kr</div>
+          </div>
+          <div class="pending-stake">Forhåndskjøp: 15 kr</div>
+        </div>
+        <div class="combo-panel">
+          <div class="combo-body">
+            <div class="mini-grid" id="mini-innsatsen"></div>
+            <div class="premie-table" id="table-innsatsen"></div>
+          </div>
+        </div>
+        <div class="action-panel">
+          <div class="game-name">HOVEDSPILL 1</div>
+          <div class="jackpot">
+            45 JACKPOT : <span class="prize">5000 KR</span>
+          </div>
+          <button class="action-btn">Forhåndskjøp til dagens spill</button>
+          <button class="action-btn">Kjøp flere brett</button>
+        </div>
+      </div>
+      <div class="controls" data-scenario="innsatsen">
+        <div class="label">Demo-state</div>
+        <div class="group">
+          <span class="group-name">Active rad:</span>
+          <button data-action="active" data-idx="-1">Ingen</button>
+          <button data-action="active" data-idx="0" class="active">Rad 1</button>
+          <button data-action="active" data-idx="1">Rad 2</button>
+          <button data-action="active" data-idx="2">Rad 3</button>
+          <button data-action="active" data-idx="3">Rad 4</button>
+          <button data-action="active" data-idx="4">Full Hus</button>
+        </div>
+        <div class="group">
+          <span class="group-name">Completed:</span>
+          <button data-action="completed" data-idx="0">Toggle Rad 1</button>
+          <button data-action="completed" data-idx="1">Toggle Rad 2</button>
+          <button data-action="completed" data-idx="2">Toggle Rad 3</button>
+          <button data-action="completed" data-idx="3">Toggle Rad 4</button>
+          <button data-action="completed" data-idx="4">Toggle Full Hus</button>
+        </div>
+        <div class="group">
+          <span class="group-name">Animasjon:</span>
+          <button data-action="flash" data-idx="0">Flash Rad 1</button>
+          <button data-action="flash" data-idx="4">Flash Full Hus</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="scenario" id="scenario-bingo">
+      <h2>Scenario B — Bingo (standard, lavere prizes)</h2>
+      <div class="scenario-sub">
+        prize1 i kr: Rad 1-4 = 50, Full Hus = 500.
+        Eksempel Lilla: 500 × 3 = 1500 kr på Full Hus.
+      </div>
+      <div class="game-frame">
+        <div class="player-info-panel">
+          <div class="player-row">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            <span>04</span>
+          </div>
+          <div class="bet-info">
+            <div class="row">Innsats: 20 kr</div>
+            <div class="row">Gevinst: 50 kr</div>
+          </div>
+        </div>
+        <div class="combo-panel">
+          <div class="combo-body">
+            <div class="mini-grid" id="mini-bingo"></div>
+            <div class="premie-table" id="table-bingo"></div>
+          </div>
+        </div>
+        <div class="action-panel">
+          <div class="game-name">HOVEDSPILL 1</div>
+          <button class="action-btn">Forhåndskjøp til dagens spill</button>
+          <button class="action-btn">Kjøp flere brett</button>
+        </div>
+      </div>
+      <div class="controls" data-scenario="bingo">
+        <div class="label">Demo-state</div>
+        <div class="group">
+          <span class="group-name">Active rad:</span>
+          <button data-action="active" data-idx="-1">Ingen</button>
+          <button data-action="active" data-idx="0">Rad 1</button>
+          <button data-action="active" data-idx="1">Rad 2</button>
+          <button data-action="active" data-idx="2" class="active">Rad 3</button>
+          <button data-action="active" data-idx="3">Rad 4</button>
+          <button data-action="active" data-idx="4">Full Hus</button>
+        </div>
+        <div class="group">
+          <span class="group-name">Completed:</span>
+          <button data-action="completed" data-idx="0">Toggle Rad 1</button>
+          <button data-action="completed" data-idx="1">Toggle Rad 2</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="scenario" id="scenario-percentage">
+      <h2>Scenario C — 5×500 (percent-modus, prizePool 50 000)</h2>
+      <div class="scenario-sub">
+        prizePercent: Rad 1-4 = 2%, Full Hus = 12%.
+        Eksempel: Rad 1 Hvit = round(2% × 50 000) = 1000 kr.
+        Lilla = 1000 × 3 = 3000 kr.
+      </div>
+      <div class="game-frame">
+        <div class="player-info-panel">
+          <div class="player-row">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            <span>87</span>
+          </div>
+          <div class="bet-info">
+            <div class="row">Innsats: 75 kr</div>
+            <div class="row">Gevinst: 0 kr</div>
+          </div>
+        </div>
+        <div class="combo-panel">
+          <div class="combo-body">
+            <div class="mini-grid" id="mini-percent"></div>
+            <div class="premie-table" id="table-percent"></div>
+          </div>
+        </div>
+        <div class="action-panel">
+          <div class="game-name">HOVEDSPILL 1</div>
+          <button class="action-btn">Forhåndskjøp til dagens spill</button>
+          <button class="action-btn">Kjøp flere brett</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    /**
+     * Mock-render — speiler implementasjonen vi vil bruke i
+     * `CenterTopPanel.ts`. Kun for design-preview; produksjons-koden
+     * bygger samme DOM via TypeScript-klassen.
+     */
+
+    /* HEADER_HTML fjernet 2026-05-14 (Tobias-direktiv) — header-raden
+     * "Pattern · Hvit · Gul · Lilla" var redundant siden bong-fargene
+     * vises som solid bakgrunn på hver celle. Sparer vertikal plass. */
+
+    /**
+     * Auto-multiplikator regel — `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2.
+     * Hvit (5 kr baseline) × 1 / Gul (10 kr) × 2 / Lilla (15 kr) × 3.
+     */
+    const BONG_COLORS = [
+      { key: "hvit", label: "Hvit", multiplier: 1 },
+      { key: "gul", label: "Gul", multiplier: 2 },
+      { key: "lilla", label: "Lilla", multiplier: 3 },
+    ];
+
+    /**
+     * Beregn base-pris (Hvit = ×1) per pattern. Speiler `computedPrize`-
+     * logikken i CenterTopPanel.updatePatterns.
+     */
+    function computeBasePrize(pattern, prizePool) {
+      if (pattern.winningType === "fixed") return pattern.prize1 ?? 0;
+      // "percent"-modus
+      return Math.round((pattern.prizePercent / 100) * prizePool);
+    }
+
+    /** Speiler `CenterTopPanel.displayNameFor` — sentralt for paritet. */
+    function displayNameFor(name) {
+      if (name === "Full House") return "Full Hus";
+      if (name === "Picture" || name === "picture") return "Bilde";
+      if (name === "Frame" || name === "frame") return "Ramme";
+      if (/^Row \d/.test(name)) return name.replace("Row", "Rad");
+      return name;
+    }
+
+    function renderTable(rootEl, patterns, prizePool = 0) {
+      rootEl.innerHTML = "";
+      for (const pattern of patterns) {
+        const row = document.createElement("div");
+        row.className = "premie-row";
+        row.dataset.patternId = pattern.id;
+
+        const label = document.createElement("div");
+        label.className = "pattern-label";
+        label.textContent = displayNameFor(pattern.name);
+        row.appendChild(label);
+
+        const base = computeBasePrize(pattern, prizePool);
+        for (const color of BONG_COLORS) {
+          const cell = document.createElement("div");
+          cell.className = `premie-cell col-${color.key}`;
+          const value = base * color.multiplier;
+          cell.textContent = `${value} kr`;
+          row.appendChild(cell);
+        }
+        rootEl.appendChild(row);
+      }
+      return rootEl;
+    }
+
+    /**
+     * Mini-grid mockup — 5×5 grid med statisk highlight per design.
+     * Speiler `PatternMiniGrid.setDesign(design)` 1:1 for design 1-5,
+     * men uten cycling/animation (forenklet for design-preview).
+     */
+    function renderMiniGrid(rootEl, design) {
+      rootEl.innerHTML = "";
+      const CENTER = 12;
+      for (let i = 0; i < 25; i++) {
+        const cell = document.createElement("div");
+        cell.className = "mini-cell";
+        // Statisk highlight per design:
+        //   design 1 (Rad 1): hele rad 0 (i 0-4)
+        //   design 2 (Rad 2): rad 0 + rad 1 (i 0-9)
+        //   design 3 (Rad 3): rad 0 + rad 1 + rad 2
+        //   design 4 (Rad 4): rad 0 + rad 1 + rad 2 + rad 3
+        //   design 5 (Full Hus): alle untatt center
+        const row = Math.floor(i / 5);
+        let isHit = false;
+        if (design === 1 && row === 0) isHit = true;
+        else if (design === 2 && row < 2) isHit = true;
+        else if (design === 3 && row < 3) isHit = true;
+        else if (design === 4 && row < 4) isHit = true;
+        else if (design === 5 && i !== CENTER) isHit = true;
+        if (isHit && i !== CENTER) cell.classList.add("hit");
+        if (i === CENTER && design !== 5) cell.classList.add("center-free");
+        if (i === CENTER && design !== 5) cell.textContent = "★";
+        rootEl.appendChild(cell);
+      }
+    }
+
+    function setActive(rootEl, idx) {
+      const rows = rootEl.querySelectorAll(".premie-row");
+      rows.forEach((row, i) => row.classList.toggle("active", i === idx));
+    }
+
+    /**
+     * Synkroniser mini-grid med active rad: design = idx+1.
+     * (Rad 1 → design 1, Rad 2 → design 2, ..., Full Hus → design 5.)
+     * Hopper over -1 (= "Ingen aktiv rad"), beholder forrige design.
+     */
+    function setActiveSyncMiniGrid(tableEl, miniEl, idx) {
+      setActive(tableEl, idx);
+      if (idx >= 0) renderMiniGrid(miniEl, idx + 1);
+    }
+
+    function toggleCompleted(rootEl, idx) {
+      const rows = rootEl.querySelectorAll(".premie-row");
+      const row = rows[idx];
+      if (!row) return;
+      row.classList.toggle("completed");
+    }
+
+    function flashWon(rootEl, idx) {
+      const rows = rootEl.querySelectorAll(".premie-row");
+      const row = rows[idx];
+      if (!row) return;
+      row.classList.remove("premie-won-flash");
+      void row.offsetWidth;
+      row.classList.add("premie-won-flash");
+      setTimeout(() => row.classList.remove("premie-won-flash"), 900);
+    }
+
+    // ── Scenario A: Innsatsen (fixed, hovedspill) ─────────────────────────
+    const innsatsenPatterns = [
+      { id: "p1", name: "Row 1", winningType: "fixed", prize1: 100 },
+      { id: "p2", name: "Row 2", winningType: "fixed", prize1: 200 },
+      { id: "p3", name: "Row 3", winningType: "fixed", prize1: 200 },
+      { id: "p4", name: "Row 4", winningType: "fixed", prize1: 200 },
+      { id: "p5", name: "Full House", winningType: "fixed", prize1: 1000 },
+    ];
+    const innsatsenEl = renderTable(
+      document.getElementById("table-innsatsen"),
+      innsatsenPatterns,
+    );
+    const miniInnsatsen = document.getElementById("mini-innsatsen");
+    renderMiniGrid(miniInnsatsen, 1);
+    setActive(innsatsenEl, 0);
+
+    // ── Scenario B: Bingo (standard, lavere prizes) ────────────────────────
+    const bingoPatterns = [
+      { id: "b1", name: "Row 1", winningType: "fixed", prize1: 50 },
+      { id: "b2", name: "Row 2", winningType: "fixed", prize1: 50 },
+      { id: "b3", name: "Row 3", winningType: "fixed", prize1: 50 },
+      { id: "b4", name: "Row 4", winningType: "fixed", prize1: 50 },
+      { id: "b5", name: "Full House", winningType: "fixed", prize1: 500 },
+    ];
+    const bingoEl = renderTable(
+      document.getElementById("table-bingo"),
+      bingoPatterns,
+    );
+    const miniBingo = document.getElementById("mini-bingo");
+    renderMiniGrid(miniBingo, 3);
+    setActive(bingoEl, 2);
+
+    // ── Scenario C: 5×500 (percent-modus) ──────────────────────────────────
+    const percentPatterns = [
+      { id: "c1", name: "Row 1", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c2", name: "Row 2", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c3", name: "Row 3", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c4", name: "Row 4", winningType: "percent", prizePercent: 2, prize1: 0 },
+      { id: "c5", name: "Full House", winningType: "percent", prizePercent: 12, prize1: 0 },
+    ];
+    renderTable(document.getElementById("table-percent"), percentPatterns, 50000);
+    renderMiniGrid(document.getElementById("mini-percent"), 5);
+
+    // ── Wiring av demo-toggles ─────────────────────────────────────────────
+    function wireScenario(scenarioId, tableEl, miniEl) {
+      const controls = document.querySelector(`.controls[data-scenario="${scenarioId}"]`);
+      if (!controls) return;
+      controls.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLButtonElement)) return;
+        const action = target.dataset.action;
+        const idx = Number(target.dataset.idx ?? "0");
+        if (action === "active") {
+          setActiveSyncMiniGrid(tableEl, miniEl, idx);
+          // Visualiser hvilken knapp som er valgt
+          controls
+            .querySelectorAll('button[data-action="active"]')
+            .forEach((b) => b.classList.remove("active"));
+          target.classList.add("active");
+        } else if (action === "completed") {
+          toggleCompleted(tableEl, idx);
+        } else if (action === "flash") {
+          flashWon(tableEl, idx);
+        }
+      });
+    }
+
+    wireScenario("innsatsen", innsatsenEl, miniInnsatsen);
+    wireScenario("bingo", bingoEl, miniBingo);
+  </script>
+</body>
+</html>

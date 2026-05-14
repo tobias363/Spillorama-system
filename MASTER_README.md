@@ -175,15 +175,11 @@ git clone https://github.com/tobias363/Spillorama-system.git
 cd Spillorama-system
 npm install
 
-# Lokal infra
-docker-compose up -d
+# One-command-startup (anbefalt — fersh state, alle prosesser opp i én kommando)
+npm run dev:nuke
 
-# Dev-server backend (port 4000)
-npm run dev
-
-# Frontends i andre terminaler
-npm run dev:admin   # 5173
-npm run dev:games   # 5174
+# Med DB-observability (PgHero på localhost:8080 — anbefalt for pilot-test)
+npm run dev:nuke -- --observability
 
 # Test
 npm test
@@ -191,7 +187,9 @@ npm run test:compliance
 npm run check       # type-check
 ```
 
-Se [`CLAUDE.md`](./CLAUDE.md) for detaljert utviklerguide.
+Se [`CLAUDE.md`](./CLAUDE.md) for detaljert utviklerguide og
+[`PGHERO_PGBADGER_RUNBOOK.md`](./docs/operations/PGHERO_PGBADGER_RUNBOOK.md)
+for DB-observability under pilot.
 
 ---
 

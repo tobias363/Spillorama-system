@@ -412,7 +412,11 @@ test("Game1LobbyService: paused-status mappes fra scheduled-game", async () => {
   assert.equal(state.nextScheduledGame?.status, "paused");
 });
 
-test("Game1LobbyService: finished når run er finished", async () => {
+test("Game1LobbyService: finished på siste position → planCompletedForToday=true + nextScheduledGame=null", async () => {
+  // Plan har 2 items, run finished på position=2 (siste). Plan er HELT
+  // ferdig for dagen — speiler `PLAN_COMPLETED_FOR_TODAY`-DomainError som
+  // `getOrCreateForToday` kaster i samme scenario (Tobias-direktiv
+  // 2026-05-14 10:17: "Plan-completed beats stengetid").
   const plan = makePlan();
   const run = makeRun({ status: "finished", currentPosition: 2 });
   const { service } = makeLobbyService({
@@ -426,6 +430,133 @@ test("Game1LobbyService: finished når run er finished", async () => {
   assert.equal(state.runStatus, "finished");
   assert.equal(state.nextScheduledGame, null);
   assert.equal(state.currentRunPosition, 2);
+  assert.equal(state.planCompletedForToday, true);
+});
+
+// ── Bug-fix 2026-05-14: finished + flere posisjoner igjen ─────────────
+//
+// Tobias-rapport 2026-05-14 13:00 (samme dag som PR #1422 landet):
+//   Master-UI viser "Start neste spill — Bingo" etter at Bingo (position=1)
+//   er ferdigspilt. Skal vise "1000-spill" (position=2).
+//
+// Root cause: Lobby-API returnerte `nextScheduledGame: null` ved finished
+// plan-run (independent av om planen var helt ferdig eller bare på position 1).
+// Master-UI faller tilbake til default plan-items[0] (Bingo).
+//
+// Fix: Når `run.status='finished'` OG `currentPosition < items.length`,
+// returnerer lobby-API NESTE plan-item som `nextScheduledGame` med
+// `status='idle'`. Master-klikk vil trigge `getOrCreateForToday` som
+// (per PR #1422) advanc er plan-run til `previousPosition + 1`.
+
+test("Game1LobbyService: finished på position=1 av 2 → nextScheduledGame=items[1]", async () => {
+  const plan = makePlan();
+  const run = makeRun({ status: "finished", currentPosition: 1 });
+  const { service } = makeLobbyService({ plans: [plan], run });
+  const state = await service.getLobbyState("hall-1", fridayAt1400Oslo());
+
+  assert.equal(state.overallStatus, "finished");
+  assert.equal(state.runStatus, "finished");
+  assert.equal(state.planCompletedForToday, false);
+  // nextScheduledGame skal peke til position=2 (Jackpot fra makePlan-default).
+  assert.notEqual(state.nextScheduledGame, null);
+  assert.equal(state.nextScheduledGame?.position, 2);
+  assert.equal(state.nextScheduledGame?.catalogSlug, "jackpot");
+  assert.equal(state.nextScheduledGame?.catalogDisplayName, "Jackpot");
+  assert.equal(state.nextScheduledGame?.status, "idle");
+  assert.equal(state.nextScheduledGame?.scheduledGameId, null);
+});
+
+test("Game1LobbyService: finished på position=7 av 13 → nextScheduledGame=items[8]", async () => {
+  // 13-item plan (matcher pilot demo med Bingo/1000-spill/.../TV-Extra).
+  // Run finished på position=7 — master har klikket gjennom 7 spill og
+  // siste runde naturlig endte. Lobby skal vise spill #8 som neste.
+  const items = Array.from({ length: 13 }, (_, idx) => {
+    const slug = `game-${idx + 1}`;
+    return {
+      gameCatalogId: `gc-${slug}`,
+      catalogEntry: makeCatalogEntry({
+        id: `gc-${slug}`,
+        slug,
+        displayName: `Spill ${idx + 1}`,
+      }),
+    };
+  });
+  const plan = makePlan({}, items);
+  const run = makeRun({ status: "finished", currentPosition: 7 });
+  const { service } = makeLobbyService({ plans: [plan], run });
+  const state = await service.getLobbyState("hall-1", fridayAt1400Oslo());
+
+  assert.equal(state.overallStatus, "finished");
+  assert.equal(state.planCompletedForToday, false);
+  assert.equal(state.totalPositions, 13);
+  assert.notEqual(state.nextScheduledGame, null);
+  assert.equal(state.nextScheduledGame?.position, 8);
+  assert.equal(state.nextScheduledGame?.catalogSlug, "game-8");
+  assert.equal(state.nextScheduledGame?.catalogDisplayName, "Spill 8");
+  assert.equal(state.nextScheduledGame?.status, "idle");
+  assert.equal(state.nextScheduledGame?.scheduledGameId, null);
+});
+
+test("Game1LobbyService: finished på position=13 av 13 (siste) → planCompletedForToday=true", async () => {
+  // 13-item plan, run finished på siste position. Plan er HELT ferdig —
+  // speiler PLAN_COMPLETED_FOR_TODAY-DomainError fra getOrCreateForToday.
+  const items = Array.from({ length: 13 }, (_, idx) => {
+    const slug = `game-${idx + 1}`;
+    return {
+      gameCatalogId: `gc-${slug}`,
+      catalogEntry: makeCatalogEntry({
+        id: `gc-${slug}`,
+        slug,
+        displayName: `Spill ${idx + 1}`,
+      }),
+    };
+  });
+  const plan = makePlan({}, items);
+  const run = makeRun({ status: "finished", currentPosition: 13 });
+  const { service } = makeLobbyService({ plans: [plan], run });
+  const state = await service.getLobbyState("hall-1", fridayAt1400Oslo());
+
+  assert.equal(state.overallStatus, "finished");
+  assert.equal(state.planCompletedForToday, true);
+  assert.equal(state.nextScheduledGame, null);
+  assert.equal(state.currentRunPosition, 13);
+  assert.equal(state.totalPositions, 13);
+});
+
+test("Game1LobbyService: planCompletedForToday=false ved running-state", async () => {
+  // Sanity: planCompletedForToday skal ALDRI være true når run kjører,
+  // selv om currentPosition >= items.length (det er en logisk umulighet —
+  // engine kan ikke ha vunnet siste runde uten å ha finished plan-run).
+  const plan = makePlan();
+  const run = makeRun({ status: "running", currentPosition: 2 });
+  const scheduledGame = {
+    id: "sg-1",
+    status: "running",
+    scheduled_start_time: "2026-05-08T12:00:00Z",
+    scheduled_end_time: "2026-05-08T12:10:00Z",
+    actual_start_time: "2026-05-08T12:01:00Z",
+    catalog_entry_id: "gc-jackpot",
+  };
+  const { service } = makeLobbyService({
+    plans: [plan],
+    run,
+    scheduledGame,
+  });
+  const state = await service.getLobbyState("hall-1", fridayAt1400Oslo());
+
+  assert.equal(state.overallStatus, "running");
+  assert.equal(state.planCompletedForToday, false);
+});
+
+test("Game1LobbyService: planCompletedForToday=false når ingen plan-run", async () => {
+  // Sanity: planCompletedForToday skal være false når ingen run finnes
+  // (master har ikke startet noe enda).
+  const plan = makePlan();
+  const { service } = makeLobbyService({ plans: [plan], run: null });
+  const state = await service.getLobbyState("hall-1", fridayAt1400Oslo());
+
+  assert.equal(state.overallStatus, "idle");
+  assert.equal(state.planCompletedForToday, false);
 });
 
 test("Game1LobbyService: ugyldig hallId kaster INVALID_INPUT", async () => {

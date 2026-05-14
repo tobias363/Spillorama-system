@@ -136,6 +136,49 @@ SKIP when:
 - [ADR-0010 — Done-policy for legacy-avkobling](../../../docs/adr/0010-done-policy-legacy-avkobling.md) — regulatorisk forsvar: Lotteritilsynet kan kreve commit-bevis
 - [ADR-0015 — §71 regulatory-ledger (separate audit-tabell)](../../../docs/adr/0015-spill71-regulatory-ledger.md) — vedtatt 2026-05-09: §71-rapportering har egen tabell `app_regulatory_ledger` med daily-anchor
 - [ADR-0017 — Fjerne daglig jackpot-akkumulering](../../../docs/adr/0017-remove-daily-jackpot-accumulation.md) — bingovert setter manuelt (lovgivnings-implikasjon: krever ADR-doc)
+- [ADR-0023 — MCP write-access policy (lokal vs prod)](../../../docs/adr/0023-mcp-write-access-policy.md) — bindende: audit-tabeller (`app_audit_log`, `wallet_entries`, `app_rg_payout_audit`, `app_regulatory_ledger`) og `app_rg_restrictions` skal ALDRI muteres via MCP-write mot prod. §66 (5-min pause), §23 (self-exclusion 1 år) og §71 (audit-trail) håndheves via append-only korreksjons-rad i migration-PR — ikke direct UPDATE.
+
+## MCP write-restriksjon for audit-tabeller (ADR-0023)
+
+**Prod-DB skal aldri muteres direkte via MCP-write.** Audit-tabeller er
+hash-chain-bevarende og append-only. Direct UPDATE bryter:
+
+- §71 audit-trail (hash-chain blir irreversibelt korrupt)
+- §66 obligatorisk 5-min-pause (kan ikke overstyres ved å UPDATE `app_rg_restrictions`)
+- §23 self-exclusion 1 år (kan ikke heves før 1 år; UPDATE er regulatorisk-brudd → dagsbøter 5k-50k NOK/hendelse)
+
+**Korreksjons-prosedyre ved feil i audit-data (eksempel `app_audit_log`):**
+
+1. Identifiser original-rad (`id`, `created_at`, payload)
+2. Opprett migration-PR i `apps/backend/migrations/<timestamp>_<topic>.sql`
+3. Append ny `audit_correction`-rad som peker på original via JSONB-payload:
+
+```sql
+INSERT INTO app_audit_log
+  (id, actor_type, actor_id, action, resource, resource_id, payload, created_at)
+VALUES
+  (gen_random_uuid(), 'SYSTEM', NULL, 'audit_correction', 'app_audit_log', '<original-id>',
+   jsonb_build_object(
+     'original_id', '<original-id>',
+     'correction_reason', 'Tobias godkjent fix YYYY-MM-DD — <kontekst>',
+     'corrected_fields', jsonb_build_object('payload', '<ny-verdi>')
+   ),
+   now());
+```
+
+For `wallet_entries`-korreksjon: append motpost-rad med `side=CREDIT` eller `side=DEBIT`, `amount > 0`. `wallet_accounts.balance` re-genereres automatisk (GENERATED ALWAYS).
+
+4. PR krever Tobias-godkjenning + ADR (hvis arkitektur-endring) + grønn CI
+5. Render auto-deploy kjører migrasjonen
+
+**Aldri** UPDATE eller DELETE fra:
+
+- `app_audit_log` (generelle audit-events, BIN-764 hash-chain via `payload` JSONB)
+- `wallet_entries` (outbox-pattern, ADR-0005, hash-chain via `entry_hash` + `previous_entry_hash`)
+- `wallet_accounts` (`balance` er GENERATED ALWAYS — DB avviser direct UPDATE uansett)
+- `app_rg_payout_audit` (Lotteritilsynet-trail)
+- `app_regulatory_ledger` (ADR-0015 daily-anchor)
+- `app_rg_restrictions` (§66/§23-beskyttelse)
 
 ## Endringslogg
 
@@ -143,3 +186,5 @@ SKIP when:
 |---|---|
 | 2026-05-08 | Initial — §11/§66/§71 + gameType-mapping |
 | 2026-05-13 | v1.1.0 — la til ADR-0015 (separat §71 regulatory-ledger med daily-anchor + verifyAuditChain), ADR-0017 (manuell jackpot) |
+| 2026-05-14 | v1.2.0 — la til ADR-0023 MCP write-access policy. Audit-tabeller og `app_rg_restrictions` er beskyttet mot direct MCP-mutasjon i prod; korreksjoner kun via append-only migration-PR. |
+| 2026-05-14 | v1.2.1 — korrigerte tabellnavn til faktisk schema: `app_audit_log` (ikke `app_compliance_audit_log`), `wallet_entries` + `wallet_accounts` (ikke `app_wallet_entries`/`app_wallets`), `app_rg_payout_audit` (ikke `app_payout_audit`). Eksempel-INSERT bruker faktisk schema med JSONB-payload. |

@@ -21,6 +21,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
+import { attachPoolErrorHandler } from "../util/pgPoolErrorHandler.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import { DomainError } from "../errors/DomainError.js";
@@ -332,6 +333,10 @@ export class PaymentRequestService {
         connectionString: options.connectionString,
         ...getPoolTuning(),
       });
+      // Agent T (2026-05-14): attach error-handler så pg-errors (57P01 etc) ikke
+      // propagerer som uncaughtException og dreper backend. Se Sentry-issue
+      // SPILLORAMA-BACKEND-5 (2026-05-14) for root cause.
+      attachPoolErrorHandler(this.pool, { poolName: "payment-request-service-pool" });
     } else {
       throw new DomainError(
         "INVALID_CONFIG",

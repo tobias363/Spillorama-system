@@ -2,7 +2,7 @@
 name: casino-grade-testing
 description: When the user/agent works with tests for the live-room architecture in the Spillorama bingo platform. Also use when they mention chaos-test, vitest, tsx --test, playwright, integration-test, snapshot-test, mutation-test, stryker, bug-resurrection, WALLET_PG_TEST_CONNECTION_STRING, R2 failover, R3 reconnect, R10 chaos, R4 load-test, BIN-811, BIN-812, BIN-820, BIN-817, source-level wiring-regression-test, infra/chaos-tests/, apps/backend/src/__tests__/chaos/, pilot-flow E2E. Defines the test patterns required for Evolution Gaming-grade reliability — chaos, integration, snapshot, R2/R3 failover invariants, wiring-regression, mutation-testing, autonomous pilot-flow. Make sure to use this skill whenever someone touches tests for live-room code (Spill 1/2/3 engines, master handshake, ticket purchase, draw-tick, payout) even if they don't explicitly ask for it — these tests are pilot-gating per the Live-Room Robustness Mandate.
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   project: spillorama
 ---
 
@@ -181,6 +181,58 @@ Bruker SAMME Postgres-DB som dev-stack (vedtatt 2026-05-13 — non-destructive d
 
 **CI-gate:** `.github/workflows/...` har pilot-flow som **blokkende check** på PR mot main (B-fase 3b).
 
+### Synthetic bingo-runde-test (R4-precursor, etablert 2026-05-14)
+
+`npm run test:synthetic` — small-skala (10 spillere × 3 bonger) ende-til-ende-test som driver én komplett bingo-runde og verifiserer **seks invarianter (I1-I6)** definert i `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`:
+
+| ID | Invariant | Pilot-severity |
+|---|---|---|
+| I1 | Wallet-konservering: `SUM(før) − SUM(spent) + SUM(payout) == SUM(etter)` | P0 |
+| I2 | Compliance-ledger har STAKE per kjøp + PRIZE per payout | P0 |
+| I3 | Hash-chain `previous_entry_hash → entry_hash` valid | P0 |
+| I4 | Alle spillere mottok samme draw-sekvens i samme rekkefølge | P1 |
+| I5 | `clientRequestId` idempotency — re-submit → samme `purchaseId` | P0 |
+| I6 | `scheduled_game.status === 'finished'` etter siste fase | P0 |
+
+**Forhold til R4 (BIN-817):**
+- Synthetic-testen er **R4-precursor**. Hvis I1-I6 ikke holder på 10 spillere, holder de heller ikke på 1000.
+- R4 (load-test 1000 klienter) er post-pilot for utvidelses-gating.
+- Synthetic-testen er **pre-pilot gating** — kjør den FØR hver pilot-deploy.
+
+**Filstruktur:**
+```
+scripts/synthetic/
+  invariants.ts         # Pure-compute evaluators (I1-I6)
+  api-client.ts         # Typed fetch-wrapper
+  socket-client.ts      # Socket.IO observer
+  spill1-round-bot.ts   # Main entrypoint (CLI)
+  spill1-round-runner.sh # Bash-wrapper med pre-flight
+scripts/__tests__/synthetic/
+  spill1-round-bot.test.ts # 59+ vitest unit-tester
+docs/operations/
+  SYNTHETIC_BINGO_TEST_RUNBOOK.md  # Autoritativ runbook
+```
+
+**Modes:**
+- `--mode=local` — full flow (default, 60s timeout)
+- `--mode=ci` — kortere timeouts (30s) for CI
+- `--dry-run` — pre-flight + health only, INGEN wallet-mutering (~5s)
+
+**Kjøre:**
+```bash
+RESET_TEST_PLAYERS_TOKEN=spillorama-2026-test \
+  npm run test:synthetic
+# → Exit-code 0=PASS, 1=FAIL, 2=preflight-failure
+# → Rapport: /tmp/synthetic-spill1-YYYY-MM-DDTHH:MM:SS.md
+```
+
+**Forskjell fra `test:pilot-flow`:**
+- `test:pilot-flow` (Playwright) bruker UI-flow med simulert klient
+- `test:synthetic` (Node + Socket.IO) bruker REST-API + raw sockets — én abstraksjon nærmere wire-format
+- De er **komplementære** — kjør begge før pilot.
+
+**Hash-chain (I3) WARN inntil videre:** bot-en har ikke direkte DB-tilgang. Verifiser separat med `npm --prefix apps/backend run verify-wallet-audit-chain`.
+
 ### Mock-kvalitet: ingen "happy path"-mocks
 
 For DB-mocks: bruk presis SQL-regex-matching, ikke generisk `mock.fn().mockResolvedValue([])`:
@@ -252,3 +304,4 @@ Throw-på-unexpected-call er hva som skiller en regulator-grade-test fra en "bes
 |---|---|
 | 2026-05-08 | Initial — chaos, integration, snapshot patterns |
 | 2026-05-13 | v1.1.0 — la til Stryker mutation testing (ADR-0019/0020), bug-resurrection-detector, autonomous pilot-flow E2E, R4 load-test i runner-tabell, ADR-0022 stuck-game-recovery referanse |
+| 2026-05-14 | v1.2.0 — la til Synthetic bingo-runde-test (R4-precursor) seksjon. I1-I6 invariants, kjør med `npm run test:synthetic`. R4 (BIN-817) er full load-test; synthetic-testen er småskala-prekursor som ALLTID må PASSE pre-pilot. Skill-update + PITFALLS_LOG §6.18 + runbook i `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |

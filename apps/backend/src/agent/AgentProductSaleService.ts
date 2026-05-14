@@ -33,6 +33,7 @@ import type { AgentShiftService } from "./AgentShiftService.js";
 import type { AgentStore, ShiftCashDelta } from "./AgentStore.js";
 import type { AgentTransactionStore } from "./AgentTransactionStore.js";
 import { getPoolTuning } from "../util/pgPool.js";
+import { attachPoolErrorHandler } from "../util/pgPoolErrorHandler.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "agent-product-sale-service" });
@@ -191,6 +192,10 @@ export class AgentProductSaleService {
         connectionString: opts.connectionString,
         ...getPoolTuning(),
       });
+      // Agent T (2026-05-14): attach error-handler så pg-errors (57P01 etc) ikke
+      // propagerer som uncaughtException og dreper backend. Se Sentry-issue
+      // SPILLORAMA-BACKEND-5 (2026-05-14) for root cause.
+      attachPoolErrorHandler(this.pool, { poolName: "agent-product-sale-service-pool" });
     } else {
       throw new DomainError(
         "INVALID_CONFIG",

@@ -58,6 +58,7 @@ import {
   getAccessTokenFromRequest,
 } from "../util/httpHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
+import { withDbRetry } from "../util/pgPoolErrorHandler.js";
 
 const logger = rootLogger.child({ module: "agent-game1-master" });
 
@@ -495,17 +496,29 @@ export function createAgentGame1MasterRouter(
       });
       const businessDate = businessDateFmt.format(new Date());
 
-      const { rowCount } = await platformService
-        .getPool()
-        .query(
-          `UPDATE "${schema}"."app_game_plan_run"
-              SET master_last_seen_at = now(),
-                  updated_at          = now()
-            WHERE hall_id        = $1
-              AND business_date  = $2
-              AND status IN ('idle','running','paused')`,
-          [hallId, businessDate],
-        );
+      // Agent T (2026-05-14): wrap i withDbRetry så transient pool-feil
+      // (eks. 57P01 ved Postgres-vedlikehold / failover) ikke gir false
+      // SOFT_FAIL hver gang Render-tjenesten restartes. Retry 3x med
+      // [100, 250, 500]ms backoff. Heartbeat-write er idempotent — to
+      // identiske UPDATE-er på master_last_seen_at gir samme resultat.
+      const retryResult = await withDbRetry(
+        () =>
+          platformService
+            .getPool()
+            .query(
+              `UPDATE "${schema}"."app_game_plan_run"
+                  SET master_last_seen_at = now(),
+                      updated_at          = now()
+                WHERE hall_id        = $1
+                  AND business_date  = $2
+                  AND status IN ('idle','running','paused')`,
+              [hallId, businessDate],
+            ),
+        {
+          operationName: "master-heartbeat.update-plan-run",
+        },
+      );
+      const { rowCount } = retryResult.value;
 
       apiSuccess(res, {
         acceptedAt: new Date().toISOString(),

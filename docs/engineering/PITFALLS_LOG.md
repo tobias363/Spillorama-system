@@ -45,18 +45,19 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | Kategori | Antall entries | Sist oppdatert |
 |---|---:|---|
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
-| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 7 | 2026-05-10 |
+| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 16 | 2026-05-13 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 15 | 2026-05-14 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 23 | 2026-05-14 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
+| [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 93 entries (per 2026-05-14)
+**Total:** 96 entries (per 2026-05-14)
 
 ---
 
@@ -291,6 +292,67 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - 90-dager TTL cleanup (BIN-767)
 **Related:** `apps/backend/src/wallet/IdempotencyKeys.ts`
 
+### §2.8 — Aldri direct MCP-write mot prod-DB (ADR-0023)
+
+**Severity:** P0 (regulatorisk-brudd + wallet-integritet)
+**Oppdaget:** Designet 2026-05-14 etter Tobias-direktiv om Evolution-grade DB-robusthet
+**Symptom:**
+- Agent eller PM kjører `INSERT/UPDATE/DELETE` mot `postgres-spillorama-prod` via MCP
+- Direct `UPDATE wallet_entries` bryter REPEATABLE READ-isolation + hash-chain → risiko for double-payout (ekte penger)
+- Direct `UPDATE wallet_accounts SET balance=...` blir avvist av DB uansett (`balance` er `GENERATED ALWAYS` fra `deposit_balance + winnings_balance`)
+- Direct `UPDATE app_audit_log` bryter audit-hash-chain → audit-data avvist av Lotteritilsynet
+- Direct `UPDATE app_rg_restrictions SET timed_pause_until=NULL` overstyrer §66 spillvett → dagsbøter 5k-50k NOK/hendelse
+- Schema-drift mellom prod og `apps/backend/migrations/` → neste deploy kan korrupte data
+**Fix:**
+- Prod-MCP (`postgres-spillorama-prod`) MÅ være `@modelcontextprotocol/server-postgres` (read-only by design)
+- All schema-/data-korreksjon i prod går via migration-PR (forward-only, ADR-0014)
+- Korreksjon i audit-tabeller (`app_audit_log`): append-only `audit_correction`-rad med `original_id` i JSONB-payload
+- Korreksjon i wallet (`wallet_entries`): append motpost-rad med `side=CREDIT|DEBIT`, `amount > 0` (balance re-genereres automatisk)
+**Prevention:**
+- Verifiser ved ny sesjon: `claude mcp list | grep "postgres-spillorama-prod"` → må vise `@modelcontextprotocol/server-postgres`
+- Lokal dev-DB (`postgres-spillorama`) kan ha write-capable MCP (`uvx postgres-mcp --access-mode=unrestricted`) — kun localhost
+- PR-template har checkbox: "[ ] Ingen direct MCP-write mot prod-DB (ADR-0023)"
+- Hvis prod-MCP byttes til write-capable → COMPLIANCE-BRUDD → eskalere til Tobias umiddelbart
+**Related:**
+- [ADR-0023 — MCP write-access policy](../adr/0023-mcp-write-access-policy.md)
+- [ADR-0004 — Hash-chain audit-trail](../adr/0004-hash-chain-audit.md)
+- [ADR-0005 — Outbox-pattern](../adr/0005-outbox-pattern.md)
+- [ADR-0014 — Idempotent migrations](../adr/0014-idempotent-migrations.md)
+- `~/.claude.json` user-scope MCP-config
+
+---
+
+### §2.9 — Wallet integrity-check må kjøres cron, ikke kun on-demand
+
+**Severity:** P0 (Lotteritilsynet-relevant audit-window)
+**Oppdaget:** 2026-05-14 — Tobias-direktiv etter Evolution-grade DB-fundament-arbeid
+**Symptom:**
+- Wallet `balance` blir gradvis ut av sync med `wallet_entries`-sum, ingen merker det før nattlig recon
+- Hash-chain-brudd får leve i 24+ timer før `WalletAuditVerifier` (nightly) fanger det
+- Når Lotteritilsynet spør "når oppdaget dere bruddet?", svar > 1t er pinlig
+- "Vi vet det hver morgen kl 03:00" er ikke nok — pilot-spilling skjer kveld
+**Fix:**
+- Cron-driven `scripts/ops/wallet-integrity-watcher.sh` (OBS-10, 2026-05-14) hver time
+- Sjekker to invariants strukturelt (rask, < 2s mot dev-DB):
+  - I1 — balance-sum mot ledger-signed-sum (CREDIT=+amount, DEBIT=-amount)
+  - I2 — hash-chain-link: row.previous_entry_hash ≡ predecessor.entry_hash per account_id
+- Brudd → Linear-issue Urgent + Slack/disk fallback
+- Per-wallet_id dedup 24t i `STATE_FILE` så vi ikke spammer
+- IKKE write-active — kun SELECT mot DB
+**Prevention:**
+- `scripts/__tests__/ops/wallet-integrity-watcher.test.sh` — 48 tester (Q1+Q2 JSON-shaping, dedup, Linear DRY_RUN, pre-flight, integration smoke)
+- Watcher er disabled by default — Tobias aktiverer manuelt etter pilot-test
+- ALDRI gjør watcher write-active (compliance-brudd ved write-mot-prod)
+- ALDRI senk `LINEAR_ISSUE_DEDUP_HOURS` < 6 — Linear-spam ved gjentakende brudd
+- Watcher fanger 90% strukturelt; nattlig `WalletAuditVerifier` er fortsatt back-up for full SHA-256-verify
+- Hvis ny wallet-mutasjon innføres → verifiser I1+I2 ikke brytes (test mot lokal DB)
+**Related:**
+- `docs/operations/WALLET_INTEGRITY_WATCHER_RUNBOOK.md` — full runbook + eskalering §6
+- [ADR-0004 — Hash-chain audit-trail](../adr/0004-hash-chain-audit.md)
+- [ADR-0005 — Outbox-pattern](../adr/0005-outbox-pattern.md)
+- [ADR-0023 — MCP write-access policy](../adr/0023-mcp-write-access-policy.md)
+- §2.6 (direct INSERT forbudt), §2.8 (MCP write-forbud), §6.x (test-infra-mønster matcher OBS-9)
+
 ---
 
 ## §3 Spill 1, 2, 3 arkitektur
@@ -504,6 +566,54 @@ Audit-event `game_plan_run.recreate_after_finish` utvidet med:
 - PR #1407 (`GamePlanRunCleanupService.reconcileNaturalEndStuckRuns` — finisher plan-runs som blir stuck etter naturlig runde-end; komplementært, ikke konflikt)
 - Tester: `apps/backend/src/game/__tests__/GamePlanRunService.autoAdvanceFromFinished.test.ts` (10 tester)
 - Skill `spill1-master-flow` §"Auto-advance fra finished plan-run"
+
+### §3.13 — Lobby-API må vise NESTE position i sekvens etter finished plan-run
+
+**Severity:** P0 (pilot — master ser feil "neste spill"-navn)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 13:00 — samme dag som PR #1422 landet)
+**Symptom:** Master-UI viser "Start neste spill — Bingo" selv etter Bingo (position=1) er ferdigspilt. Skal vise "1000-spill" (position=2).
+
+DB-evidens (verifisert av Tobias 13:00):
+```sql
+SELECT id, status, current_position FROM app_game_plan_run WHERE business_date = CURRENT_DATE;
+-- 792541b4 finished position=1
+
+SELECT position, slug FROM app_game_plan_item WHERE plan_id = (...) ORDER BY position;
+-- 1: bingo, 2: 1000-spill, 3: 5x500, ..., 13: tv-extra
+```
+
+Lobby-API output (FØR fix):
+```
+GET /api/games/spill1/lobby?hallId=demo-hall-001
+→ nextGame: NULL
+→ runStatus: finished
+→ overallStatus: finished
+```
+
+Master-UI faller tilbake til default `plan_items[0]` (Bingo) når `nextGame` er null → viser "Start neste spill — Bingo" istedet for "1000-spill".
+
+**Root cause:** `Game1LobbyService.getLobbyState` returnerte `nextScheduledGame: null` ved enhver finished plan-run, uavhengig av om planen var helt ferdig eller bare på posisjon 1. `GameLobbyAggregator.buildPlanMeta` clampet `positionForDisplay = Math.min(currentPosition, items.length)` så `catalogSlug` reflekterte ALLTID den siste ferdigspilte posisjon, ikke neste.
+
+**Fix:**
+- `Game1LobbyService.getLobbyState`: når `run.status='finished'` OG `currentPosition < items.length`, returner `nextScheduledGame` fra `plan.items[currentPosition + 1]` (1-indeksert) med `status='idle'`. Nytt felt `planCompletedForToday` settes `true` kun når `currentPosition >= items.length` (matcher `PLAN_COMPLETED_FOR_TODAY`-DomainError i `getOrCreateForToday`).
+- `GameLobbyAggregator.buildPlanMeta`: når `planRun.status='finished'` OG `rawPosition < items.length`, advance `positionForDisplay = rawPosition + 1` så `catalogSlug`/`catalogDisplayName` peker til NESTE plan-item. Jackpot-override-lookup endret fra `String(planRun.currentPosition)` til `String(positionForDisplay)` for konsistens — den nye plan-run-en som spawnes vil ha override-key matching dette feltet.
+
+**Komplementært til PR #1422:** Backend create-logikk advancer korrekt; lobby-API må også vise korrekt UI-state.
+
+**Prevention:**
+- Tester for finished-state med ulike posisjoner (siste position, mid-plan, 13-item demo)
+- ALDRI returner `nextScheduledGame: null` ved finished plan-run uten å først sjekke `currentPosition < items.length`
+- ALDRI clamp `positionForDisplay` til `Math.min(rawPosition, items.length)` uten å håndtere finished-state separat
+- Master-UI sin "Start neste spill"-knapp leser `lobby.nextScheduledGame.catalogDisplayName` (med fallback til "Bingo") — fix sikrer at fallback aldri trigges når plan har items igjen
+- `Spill1LobbyState.planCompletedForToday` (shared-type) er optional for backwards-compat under utrulling; default-tolkning `false`
+
+**Related:**
+- `apps/backend/src/game/Game1LobbyService.ts` (finished-branch + ny `planCompletedForToday`-flag)
+- `apps/backend/src/game/GameLobbyAggregator.ts:buildPlanMeta` (auto-advance positionForDisplay)
+- `packages/shared-types/src/api.ts:Spill1LobbyState` (ny optional `planCompletedForToday`)
+- PR #1422 (backend create-logikk — `getOrCreateForToday` auto-advance)
+- §3.12 (komplementær — DB-side fix av samme bug-klasse)
+- Tester: `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester)
 
 ---
 
@@ -1017,6 +1127,103 @@ npm install --prefix apps/backend --workspaces=false --save-dev <package>
 - PR #1339 (Stryker mutation testing) — package-lock workspace bug
 - `apps/backend/package.json` devDependencies
 
+### §6.17 — `pg_stat_statements`-extension installert via migration ≠ aktivert; krever `shared_preload_libraries` på prosess-oppstart
+
+**Severity:** P1 (observability black hole — installert verktøy gir null data)
+**Oppdaget:** 2026-05-14 (Tobias: "vi skulle vente med database verktøy men alt er satt opp slik at vi ser alt som skjer i databasen")
+**Symptom:** Migration `20261225000000_enable_pg_stat_statements.sql` kjørte vellykket (`CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`). `SELECT * FROM pg_extension WHERE extname='pg_stat_statements'` returnerte 1 rad → utvikler antok at observability var aktiv. Men `SELECT * FROM pg_stat_statements` ga ALDRI noen rader (eller bare leftover-data fra et tidligere session). PgHero-dashboardet viste tomme tabeller.
+**Root cause:** `pg_stat_statements` er ikke en vanlig extension. Den hooker inn i Postgres' query-executor og kan KUN lastes hvis `shared_preload_libraries` inkluderer `pg_stat_statements` ved prosess-oppstart. `CREATE EXTENSION` registrerer extension-en i `pg_extension`-tabellen, men selve query-trackingen krever at biblioteket er lastet via `shared_preload_libraries` (settable kun via `command:` til postgres-prosessen, eller `postgresql.conf` med restart).
+**Fix:** Sett `shared_preload_libraries=pg_stat_statements` på Postgres-prosessen ved oppstart. I `docker-compose.yml`:
+```yaml
+postgres:
+  image: postgres:16-alpine
+  command:
+    - "postgres"
+    - "-c"
+    - "shared_preload_libraries=pg_stat_statements"
+    - "-c"
+    - "pg_stat_statements.track=all"
+    - "-c"
+    - "pg_stat_statements.max=10000"
+    - "-c"
+    - "log_min_duration_statement=100"
+```
+Etter `docker-compose down && docker-compose up -d postgres` vil queries faktisk tracker. Verifiser via `SHOW shared_preload_libraries;` (skal vise `pg_stat_statements`).
+**Prevention:**
+- I migration-doc-en for tools som krever `shared_preload_libraries`, STÅR det eksplisitt at compose-config må endres — IKKE bare migration. Sjekk om migration-doc-en din inneholder en slik instruks og om den faktisk er gjennomført.
+- Sjekkliste når du legger til nye DB-extensions: er det en `shared_preload_libraries`-extension? Hvis ja, oppdater både migration OG `docker-compose.yml` i samme PR.
+- Verifiser end-to-end at observability faktisk samler data — ikke bare at extension er registrert. Test-spørring: `SELECT count(*) FROM pg_stat_statements;` skal returnere > 0 etter trafikk.
+- Andre Postgres-extensions med samme krav: `pg_cron`, `auto_explain`, `pg_prewarm`, `pg_repack`. Hvis du noensinne ser `must be loaded via shared_preload_libraries` i feilmeldingen — det er denne fallgruven.
+**Related:**
+- `apps/backend/migrations/20261225000000_enable_pg_stat_statements.sql` — migration-doc-en advarte om dette i kommentar-blokken, men ble glemt
+- `docker-compose.yml` postgres-service `command:`-blokk (OBS-7-fix 2026-05-14)
+- `scripts/dev/start-all.mjs` `--observability`-flag (OBS-8-integrasjon)
+- `docs/operations/PGHERO_PGBADGER_RUNBOOK.md` §3 (aktivering-doc)
+- PR feat/db-observability-activate-2026-05-14
+
+---
+
+### §6.17 — Manuelle SQL-queries for runde-debug er sløsete; bruk Round-replay-API
+
+**Severity:** P2 (operational efficiency, ikke en regresjons-bug)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv etter to runder 7dcbc3ba + 330597ef der PM måtte gjøre 5-10 SQL-queries per runde for å forstå hva som skjedde)
+**Symptom:** PM/Tobias spør "ble auto-multiplikator anvendt riktig?" eller "hvorfor finishet plan-run uten å advance?" og må manuelt sammenstille rader fra `app_game1_scheduled_games`, `app_game1_draws`, `app_game1_phase_winners`, `app_game1_master_audit`, `app_game1_ticket_purchases`, `app_compliance_outbox`, `app_rg_compliance_ledger` — typisk 5-10 queries per runde. Feiltolkninger og sløsing av PM-tid.
+**Root cause:** Spill 1 har designet seg fragmentert audit-trail-tabell per tema (purchases / draws / winners / master-audit / ledger), noe som er korrekt arkitektonisk men gir overhead ved enkeltrunde-analyse.
+**Fix:** Bruk Round-replay-API. ÉN curl-kommando returnerer komplett event-tidsserie + summary + automatisk anomaly-deteksjon:
+```bash
+curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?token=$RESET_TEST_PLAYERS_TOKEN" | jq .
+```
+- `metadata` — alle scheduled-game-felter + catalog + plan-run-status
+- `timeline[]` — kronologisk sortert: scheduled_game_created, ticket_purchase, master_action, draw, phase_winner, compliance_ledger, scheduled_game_completed
+- `summary` — totals, winners med `expectedCents` vs `prizeCents` + `match`-flag (auto-mult-validert)
+- `anomalies[]` — payout_mismatch (critical), missing_advance (info), stuck_plan_run (warn), double_stake (critical), preparing_room_hang (warn)
+- `errors{}` — fail-soft per kilde
+
+**Prevention:**
+- Når du ber agent debug-e en runde: send round-replay-output i prompten istedet for å la agenten kjøre manuelle SQL
+- PM-rutinen ved Tobias-rapport "rar runde 7abc..": `curl round-replay/7abc → jq '.data.anomalies' → handle på det`
+- Endepunktet er compliance-grade audit-trail — ALDRI fjern uten ADR-prosess (§71-pengespillforskriften krever sporbarhet)
+
+**Related:**
+- PR feat/round-replay-api-2026-05-14 (initial implementasjon)
+- `apps/backend/src/observability/roundReplayBuilder.ts` — service
+- `apps/backend/src/observability/roundReplayAnomalyDetector.ts` — detektor
+- `apps/backend/src/routes/devRoundReplay.ts` — token-gated route
+- Skills `spill1-master-flow` v1.5.0 — full spec
+- §3.10 + §3.11 — relaterte payout/auto-mult-fallgruver som anomaly-detektoren fanger automatisk
+
+---
+
+### §6.18 — Synthetic bingo-test må kjøres FØR pilot — ikke etter
+
+**Severity:** P0 (pilot-blokker hvis hoppet over)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test")
+**Symptom:** Pilot går live uten end-to-end-verifikasjon av at en hel runde fungerer (master-start → N spillere kjøper M bonger → engine trekker → vinner deteksjon → payout → compliance-ledger → wallet konsistent). Hvis I1 (wallet-konservering) eller I2 (compliance-ledger) brytes på pilot-haller, har vi REGULATORISK eksponering mot Lotteritilsynet.
+**Root cause:** R4 (load-test 1000 — BIN-817) er post-pilot. R2/R3 (chaos) dekker failover/reconnect, ikke en hel runde. Det manglet et småskala-precursor-test som kunne kjøres på 60 sek og fange grunnleggende invariant-brudd.
+**Fix:** `scripts/synthetic/spill1-round-bot.ts` + `spill1-round-runner.sh` etablert 2026-05-14. Verifiserer **seks invarianter (I1-I6)**:
+- I1 Wallet-konservering: `SUM(før) − SUM(spent) + SUM(payout) == SUM(etter)`
+- I2 Compliance-ledger: minst STAKE per kjøp + PRIZE per payout
+- I3 Hash-chain intakt (WARN inntil dev-endpoint legges til)
+- I4 Draw-sequence consistency
+- I5 Idempotency (clientRequestId → samme purchaseId på re-submit)
+- I6 Round-end-state: `scheduled_game.status === 'finished'`
+
+**Prevention:**
+- ALLTID kjør `npm run test:synthetic` pre-pilot-deploy (ikke etter)
+- Sett `RESET_TEST_PLAYERS_TOKEN=spillorama-2026-test` for full validering inkl. replay-API
+- Exit-code 0 = PASS, 1 = FAIL → pilot pauses, 2 = preflight-failure (backend down)
+- Mode `--dry-run` for CI smoke-tests (<5 sek, ingen wallet-mutering)
+- Sjekk PITFALLS-pekere FØR du spawner agent som rør master-flow / purchase / payout: hvis synthetic-testen FEILER på den runden, har de andre §-ene konkrete root-cause-hint
+
+**Related:**
+- Bot: `scripts/synthetic/spill1-round-bot.ts`
+- Invariants: `scripts/synthetic/invariants.ts`
+- Runbook: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`
+- Skill `casino-grade-testing` v1.2.0
+- Skill `live-room-robusthet-mandate` v1.3.0
+- Skill `spill1-master-flow` v1.9.0
+- BIN-817 (R4) — full load-test post-pilot
+
 ---
 
 ## §7 Frontend / Game-client
@@ -1442,6 +1649,72 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 - PR #1422 (plan-completed-state — kommer som ny inconsistencyWarning senere)
 - §4 (live-rom-robusthet — master-UX er pilot-blokker)
 - Tobias-direktiv 2026-05-14 (rapportert 3 ganger — derfor kritisk)
+
+### §7.23 — Premietabell viste kun Hvit-bong-pris (Tobias 2026-05-14)
+
+**Severity:** P0 (pilot-UX-bug — spillere måtte regne i hodet, høy risiko for misforståelse)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv: "vi må vise premie for alle ulike bongene. nå vises kun for hvit bong")
+**Symptom:** `CenterTopPanel` viste én tekst-pill per pattern, eks "Rad 1 - 100 kr". Spillere som kjøpte Gul (10 kr) eller Lilla (15 kr) bong måtte selv regne ut at premien deres var hhv. 200 kr og 300 kr basert på auto-multiplikator-regelen. Spesielt nye spillere ble forvirret — flere kunderapporter (legacy Unity-klienten viste samme måten).
+**Root cause:** `prizeListEl` i `CenterTopPanel.ts` bygde 5 piller med format `${displayName} - ${prize} kr` der `prize` alltid var Hvit-base (`pattern.prize1` for fixed, eller `Math.round((prizePercent / 100) * prizePool)` for percent-modus). Auto-multiplikator-regelen i SPILL_REGLER_OG_PAYOUT.md §3.2 var korrekt implementert i payout-pipeline (PR #1417), men aldri reflektert i UI-en.
+**Fix (PR feat/premie-table-redesign-2026-05-14):**
+
+1. Bygd lokal design-side `/web/games/premie-design.html` for CSS-iterasjon FØR prod-implementasjon (Tobias-direktiv: "lokalside hvor vi først designet hele dette elementet")
+2. Erstattet `prize-pill`-stack med 5×3 grid (`premie-table`):
+   - Rader = patterns (Rad 1-4 + Full Hus)
+   - Kolonner = bong-farger (Hvit / Gul / Lilla)
+   - Gul = Hvit × 2, Lilla = Hvit × 3 (deterministisk auto-mult i `applyPillState`)
+3. Header med swatch-prikker (hvit/gul/lilla-fargekoder) for visuell skille
+4. Active/completed/won-flash på rad-nivå (én class-toggle, ikke per celle)
+5. `.prize-pill`-klasse beholdt på rad-elementet for backwards-compat med `no-backdrop-filter-regression.test.ts`
+6. Ny eksportert `PREMIE_BONG_COLORS`-const dokumenterer multiplikator-regelen i kode
+
+**Prevention:**
+- ALDRI vis kun én bong-pris i UI — alle 3 farger må være synlige (Tobias-direktiv 2026-05-14, IMMUTABLE)
+- Auto-mult-regelen er sentralisert i `PREMIE_BONG_COLORS`-const. Hvis du endrer den, oppdater også `Game1DrawEngineService.payoutPerColorGroups` (samme regel server-side) ELLER fix-koden ene siden vil betale ut feil
+- INGEN `backdrop-filter` på `.premie-row` eller `.premie-cell` (PR #468 PIXI-blink-bug)
+- Design-iterasjon ALLTID på lokal HTML/CSS-side først for å unngå tweak-i-spillet-loop (Tobias-direktiv: "ikke trenge å tweake på dette i spillet")
+- Tester:
+  - `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` — 18 tester (grid-struktur, auto-mult begge modi, active/completed/won-flash, placeholder, minimal-diff)
+  - `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` — utvidet med `.premie-row` + `.premie-cell` guard
+  - `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` — 40 eksisterende tester oppdatert til ny `.col-hvit`-format
+
+**Related:**
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts`
+- `packages/game-client/src/premie-design/premie-design.html` (lokal design-preview)
+- `packages/game-client/vite.premie-design.config.ts`
+- `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3.2 (auto-mult-regel)
+- `.claude/skills/spill1-master-flow/SKILL.md` "Premietabell-rendering (3-bong-grid)"
+- §1.9 (payout auto-mult-fix PR #1417 — server-side, parallel mønster)
+
+### §7.24 — Premie-celle-størrelse iterasjon (Tobias 2026-05-14)
+
+**Severity:** P2 (UX-polish — pilot-blokker for layout-godkjennelse)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv etter PR #1442 første iterasjon: "kan også gjøre dem litt smalere i høyde og bredde så det matcher mer bilde. så det ikke tar så mye plass. vil ikke at høyden så være så mye mer en hva det er på spillet nå pga plass")
+**Symptom:** Etter §7.23-redesignet (5×3 grid med solid bong-fargede celler) ble tabellen visuelt høyere enn dagens enkelt-pill-stack. På `g1-center-top` (mockup-mål 860 px bredde × ~115 px høyde) tok 5 rader × 30 px = 150 px — over halvparten av tilgjengelig top-panel-høyde. Spillet trenger plass til mini-grid + player-info + actions samtidig, så enhver vertikal vekst i premietabellen presser ut nabokomponentene.
+**Root cause:** Default `padding 6px 10px` + `gap 5px` på `.premie-row` ga ≈ 26 px rad-høyde (font 11px line-height ~16 px + 12 px vertikal padding). Med 5 rader + header + gap = ~155 px. Ingen visuelle størrelser var spesifisert ved første design-godkjennelse, så defaults arvet fra `.prize-pill` ble for romslige da 5 piller skalerte til 5 rader.
+**Fix (PR #1442 iterasjon V):**
+
+1. `.premie-table` `gap` 5px → **3px** (tighter rad-stack)
+2. `.premie-row` `padding` 6px 10px → **3px 8px**, `border-radius` 12px → **10px**
+3. `.premie-row .premie-cell` `padding` 4px 8px → **2px 6px** (cellen er nå smal vertikalt)
+4. `.premie-header` `padding` 0 10px → **0 8px** (matche rad-padding)
+5. `.premie-row` + `.premie-header` `grid-template-columns` minmax(64px,1fr) → **minmax(56px,1fr)** (mindre venstre-felt-bredde)
+6. Resultat: rad-høyde ≈ 16-18 px (font-line-height + 4 px vertikal padding). 5 rader + header + gap ≈ 95 px → matcher dagens enkelt-pill-fotavtrykk
+7. Utvidet `premie-design.html` til å vise hele `g1-center-top`-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) slik at Tobias kan vurdere designet i kontekst, ikke isolert
+8. Endringene speilet 1:1 både i `CenterTopPanel.ts` `ensurePatternWonStyles`-CSS og i `premie-design.html` `<style>`-blokken — sync via kommentar-marker "Tobias-direktiv 2026-05-14 iterasjon V"
+
+**Prevention:**
+- Visuell størrelse-spec MÅ bo i SKILL.md "Premietabell-rendering" (§celle-størrelse tabell). Hvis fremtidig agent endrer padding/gap/font-size må skill-tabellen oppdateres samtidig.
+- ALDRI øk `.premie-row` padding over `3px 8px` eller `gap` over `3px` uten Tobias-godkjennelse — det regresserer iterasjon V.
+- Design-side `premie-design.html` MÅ holdes 1:1 med `ensurePatternWonStyles`-CSS. Kommentar-markører i begge filer (`Tobias-direktiv 2026-05-14 iterasjon V`) gjør at fremtidige agenter ser at de to filene er synkronisert.
+- Hvis layout-mockup endres senere (ny bredde-allokering, ny font, etc.) — bygg `premie-design.html` FØRST og få Tobias-godkjennelse FØR du rør prod-CSS-en. Loop-iterasjon i live spill er forbudt (jf. Tobias-direktiv §2.12).
+- Tester: ingen nye assertions på piksel-størrelse (vil bli skjør), men 1275 eksisterende game-client-tester (inkl. `premieTable.test.ts` 18 stk + `no-backdrop-filter-regression.test.ts`) ble alle kjørt grønt etter endringen som "klassene + structure-paritet"-sjekk.
+
+**Related:**
+- §7.23 (forrige iterasjon — denne entry-en bygger videre på den)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` `ensurePatternWonStyles`
+- `packages/game-client/src/premie-design/premie-design.html`
+- `.claude/skills/spill1-master-flow/SKILL.md` "Premietabell-rendering" §celle-størrelse
 
 ---
 
@@ -1957,6 +2230,55 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 
 ---
 
+## §12 DB-resilience
+
+### §12.1 — pg-pool uten error-handler → 57P01 krasjer backend (Sentry SPILLORAMA-BACKEND-5)
+
+**Severity:** P0 (pilot-blokker — produsents-krasj ved Postgres-vedlikehold / failover)
+**Oppdaget:** 2026-05-14 (Sentry-issue SPILLORAMA-BACKEND-5 11:23:30 UTC)
+**Symptom:**
+- Backend krasjer med `uncaughtException` på request mot `/api/agent/game1/master/heartbeat`
+- Stack: `pg-protocol/src/parser.ts:394 parseErrorMessage` → `terminating connection due to administrator command`
+- pg-error-kode `57P01` (admin_shutdown)
+- Trigger var lokal `docker-compose up -d --force-recreate postgres`, men samme scenario kan skje i prod ved Render-vedlikehold / failover / OS-restart av postgres-container
+
+**Root cause:**
+- `node-postgres` pg.Pool emit-er `error`-event når en idle client dør
+- Hvis det IKKE finnes en `pool.on("error", handler)`-listener, propagerer feilen som `uncaughtException`
+- 42 `new Pool({...})`-instanser i backend hadde ingen error-handler (kun shared-pool og 4 andre hadde basic handler)
+- Even basic handler logget alle errors som ERROR — som triggerer Sentry-alerts på forventet Postgres-vedlikehold
+
+**Fix:**
+1. Ny modul `apps/backend/src/util/pgPoolErrorHandler.ts`:
+   - `attachPoolErrorHandler(pool, { poolName })` — installerer error-handler som logger 57P01/57P02/57P03 som WARN (forventet), 08001/08006/ECONNxxx som WARN (transient), uventede som ERROR
+   - `isTransientConnectionError(err)` — predikat for retry-decisions
+   - `withDbRetry(op, { operationName })` — `withRetry`-wrapper med transient-error-predikat og 3-forsøk-backoff [100/250/500ms]
+2. `sharedPool.ts` — strukturert handler via `attachPoolErrorHandler`
+3. Alle 41 standalone-pool-fallback-paths i services oppdatert med `attachPoolErrorHandler` (PostgresWalletAdapter, PostgresBingoSystemAdapter, PostgresResponsibleGamingStore + 38 service-fallbacks)
+4. Heartbeat-route (`/api/agent/game1/master/heartbeat`) wrappet i `withDbRetry`
+
+**Prevention:**
+- ALLE nye `new Pool({...})` MÅ kalle `attachPoolErrorHandler` direkte etter (eller bruke `createServicePool` factory i `pgPool.ts`)
+- Bruk `withDbRetry` for kritiske LESE-paths (heartbeat, room-state-fetch, lobby-aggregator)
+- IKKE bruk `withDbRetry` på write-paths uten outbox-mønster (wallet/compliance har egne outbox-mekanismer — BIN-761→764)
+- Manuell chaos-test (kjørt 2026-05-14):
+  ```bash
+  # Start backend, terminer connections, verifiser at backend overlever:
+  psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+            WHERE application_name LIKE 'spillorama%';"
+  curl http://localhost:4000/health  # skal returnere 200
+  ```
+
+**Related:**
+- Sentry-issue SPILLORAMA-BACKEND-5 (2026-05-14)
+- PR `fix/backend-pg-pool-resilience-2026-05-14`
+- `apps/backend/src/util/pgPoolErrorHandler.ts` (ny modul)
+- `apps/backend/src/util/__tests__/pgPoolErrorHandler.test.ts` (27 tester)
+- Tests dekker: handler-idempotens, 57P01/57P02/57P03 = WARN, 08006/ECONNxxx = WARN, uventede = ERROR, ingen kaster, retry-flow med backoff
+- Skill `wallet-outbox-pattern` (informert om at pool-failure ikke compromitterer wallet-mutasjoner)
+
+---
+
 ## Hvordan legge til ny entry
 
 ```markdown
@@ -1995,7 +2317,10 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-10 | Lagt til §7.8 (JackpotConfirmModal var feil mental modell — fjernet ADR-0017). Indeks-counts korrigert mot faktiske tall (§7=8, §11=7, total=71). | docs-agent (ADR-0017 PR-C) |
 | 2026-05-11 | Lagt til §7.9 (state.ticketTypes override), §7.10 (static bundle rebuild), §7.11 (lobby-init race), §7.12 (overlay pointer-events). §9.5 (demo-plan opening hours), §9.6 (ON CONFLICT uten UNIQUE). §11.8 (dev:nuke single-command), §11.9 (worktree-branch-leakage), §11.10 (pre-commit COMMIT_EDITMSG-bug). Total 71→79 entries. | PM-AI (sesjon 2026-05-10→2026-05-11) | docs-agent (ADR-0017 PR-C) |
 | 2026-05-12 | Lagt til §7.15 — klient sendte `bet:arm` før scheduled-game var spawnet (armed tickets foreldreløse). Pilot-blokker fra Tobias-test 11:03-11:05, fikset via Alternativ B (klient venter med kjøp). | Agent B (Klient wait-on-master) |
+| 2026-05-14 | Lagt til §12 (DB-resilience) + §12.1 (pg-pool uten error-handler krasjer backend på 57P01). Root cause for Sentry SPILLORAMA-BACKEND-5. Pilot-blokker. 94 entries totalt. | Agent T (pg-pool resilience) |
 | 2026-05-13 | Lagt til §11.11 (ESM dispatcher må gates med isDirectInvocation), §11.12 (JSDoc `**` parse-feil), §11.13 (GitHub Actions YAML heredoc indentation). Funn under PM Push-Control Phase 2-bygg. Total 83→86 entries. | Phase 2-agent (PM-AI orkestrert) |
 | 2026-05-13 | Lagt til §5.9 (cascade-rebase pattern), §5.10 (add/add `-X ours`-strategi), §6.15 (SIGPIPE + pipefail i awk-pipe), §6.16 (npm workspace lock isolation), §9.9 (seed-FK ordering), §11.14 (≥10 parallelle agenter stream-timeout), §11.15 (additive-merge Python-resolver), §11.16 (worktree fork-from-wrong-branch cascade). Funn under Wave 2/3-sesjon 2026-05-13. Total 86→92 entries. | PM-AI (E6 redo) |
 | 2026-05-14 | Utvidet §3.11 (PR #1411 sub-bug PR #1408): la til Fase 2-prevention-bullet for `buildVariantConfigFromSpill1Config` som mapper `priceNok / minPriceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter entryFee men IKKE multipliers — derfor komplementær fix. 7 nye tester i `spill1VariantMapper.test.ts`. | Fix-agent F3 |
 | 2026-05-14 | Lagt til §7.19 — "Forbereder rommet..."-spinner henger evig etter runde-end. Tobias-rapport 2026-05-14 09:54 (runde 330597ef). Fix: `MAX_PREPARING_ROOM_MS = 15s`-max-timeout i `Game1EndOfRoundOverlay` med forced auto-return via `onBackToLobby`. Erstatter eldre 30s "Venter på master"-tekst-swap som ikke utløste redirect. | Fix-agent (auto-return) |
+| 2026-05-14 | Lagt til §7.24 — premie-celle-størrelse iterasjon V (Tobias-direktiv etter første PR #1442-runde: "smalere, så det matcher mer bilde, ikke tar så mye plass"). Reduserte `.premie-row` padding 6px 10px→3px 8px, `gap` 5px→3px, `.premie-cell` padding 4px 8px→2px 6px. Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele center-top-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) for layout-vurdering i kontekst. | Agent V (CSS-iterasjon) |
+| 2026-05-14 | Lagt til §6.18 — Synthetic bingo-test må kjøres FØR pilot. Tobias-direktiv 2026-05-14: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test". Bot driver én komplett bingo-runde, verifiserer 6 invarianter (I1-I6). R4-precursor (BIN-817). | synthetic-test-agent |

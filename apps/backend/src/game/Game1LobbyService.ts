@@ -206,13 +206,32 @@ export interface Game1LobbyState {
   /**
    * Neste planlagte spill — alltid populert hvis planen har items igjen,
    * også når runden kjører (klient kan rendre "neste opp"-tekst).
-   * NULL hvis planen er ferdig eller ingen plan dekker dagen.
+   * NULL hvis planen er HELT ferdig for dagen (alle items spilt) eller
+   * ingen plan dekker dagen.
+   *
+   * Fix 2026-05-14 (Tobias-rapport etter PR #1422): når plan-run.status =
+   * 'finished' OG `currentPosition < items.length`, peker dette feltet
+   * til NESTE plan-item — IKKE null. Master-UI viste tidligere "Bingo"
+   * fra default plan-items[0] når dette feltet var null. Komplementært
+   * til PR #1422 sin DB-side advance-logikk i `getOrCreateForToday`.
    */
   nextScheduledGame: Game1LobbyNextGame | null;
   /** Posisjon i planen (1-basert). 0 hvis ingen run eller plan er ferdig. */
   currentRunPosition: number;
   /** Antall items i planen. 0 hvis ingen plan dekker dagen. */
   totalPositions: number;
+  /**
+   * `true` hvis spilleplanen er HELT fullført for dagen
+   * (`run.status='finished'` OG `currentPosition >= items.length`). Master
+   * kan IKKE starte ny plan-syklus før neste dag — speilet av
+   * `PLAN_COMPLETED_FOR_TODAY`-DomainError i `getOrCreateForToday`
+   * (PR #1422, Tobias-direktiv 2026-05-14 10:17: "Plan-completed beats
+   * stengetid").
+   *
+   * Spillere/master-UI bruker dette til å vise "Spilleplan ferdig for i
+   * dag"-melding i stedet for "Neste spill"-knapp.
+   */
+  planCompletedForToday: boolean;
 }
 
 // ── interne hjelpere ────────────────────────────────────────────────────
@@ -429,9 +448,29 @@ export class Game1LobbyService {
       run = null;
     }
 
-    // Hvis runden er finished, sett overall=finished men returner med
-    // plan-info så UI kan vise "Spilleplanen er ferdig"-melding.
+    // Hvis runden er finished, sett overall=finished.
+    //
+    // Fix 2026-05-14 (Tobias-rapport, komplementært til PR #1422):
+    //   - Hvis `currentPosition < items.length` (flere posisjoner igjen) →
+    //     vis NESTE item som `nextScheduledGame` med status='idle'. Master
+    //     vil ved klikk på "Start neste spill" kalle `getOrCreateForToday`
+    //     som DELETE+INSERT-er ny plan-run med `current_position=prev+1`
+    //     (PR #1422-logikken). UI viser nå korrekt "1000-spill" istedet
+    //     for "Bingo"-default når Bingo (position=1) er ferdig.
+    //   - Hvis `currentPosition >= items.length` (plan HELT ferdig) →
+    //     `nextScheduledGame=null`, `planCompletedForToday=true`.
+    //     Speiler `PLAN_COMPLETED_FOR_TODAY`-DomainError som
+    //     `getOrCreateForToday` kaster i samme scenario (Tobias-direktiv
+    //     2026-05-14 10:17: "Plan-completed beats stengetid").
     if (run && run.status === "finished") {
+      const nextPosition = run.currentPosition + 1;
+      const planCompletedForToday = nextPosition > plan.items.length;
+      const nextItem = planCompletedForToday
+        ? null
+        : plan.items.find((i) => i.position === nextPosition) ?? null;
+      const nextGame = nextItem
+        ? this.buildNextGameFromItem(nextItem, "idle", null, null, null, null)
+        : null;
       return {
         hallId: hall,
         businessDate,
@@ -443,9 +482,10 @@ export class Game1LobbyService {
         runId: run.id,
         runStatus: run.status,
         overallStatus: "finished",
-        nextScheduledGame: null,
+        nextScheduledGame: nextGame,
         currentRunPosition: run.currentPosition,
         totalPositions: plan.items.length,
+        planCompletedForToday,
       };
     }
 
@@ -470,6 +510,7 @@ export class Game1LobbyService {
         nextScheduledGame: nextGame,
         currentRunPosition: 0,
         totalPositions: plan.items.length,
+        planCompletedForToday: false,
       };
     }
 
@@ -505,6 +546,7 @@ export class Game1LobbyService {
         nextScheduledGame: null,
         currentRunPosition: run.currentPosition,
         totalPositions: plan.items.length,
+        planCompletedForToday: false,
       };
     }
 
@@ -548,7 +590,27 @@ export class Game1LobbyService {
     let actualStartTime: string | null = null;
 
     // Hvis reconcile auto-finished plan-run, returner finished-state direkte.
+    // Bruker samme logikk som hovedflyten ovenfor: vis NESTE plan-item som
+    // `nextScheduledGame` hvis flere posisjoner gjenstår, ellers
+    // `planCompletedForToday=true`.
     if (reconcileResult.planRunFinished) {
+      const nextPositionAfterReconcile = run.currentPosition + 1;
+      const planCompletedForTodayAfterReconcile =
+        nextPositionAfterReconcile > plan.items.length;
+      const nextItemAfterReconcile = planCompletedForTodayAfterReconcile
+        ? null
+        : plan.items.find((i) => i.position === nextPositionAfterReconcile) ??
+          null;
+      const nextGameAfterReconcile = nextItemAfterReconcile
+        ? this.buildNextGameFromItem(
+            nextItemAfterReconcile,
+            "idle",
+            null,
+            null,
+            null,
+            null,
+          )
+        : null;
       return {
         hallId: hall,
         businessDate,
@@ -560,9 +622,10 @@ export class Game1LobbyService {
         runId: run.id,
         runStatus: "finished",
         overallStatus: "finished",
-        nextScheduledGame: null,
+        nextScheduledGame: nextGameAfterReconcile,
         currentRunPosition: run.currentPosition,
         totalPositions: plan.items.length,
+        planCompletedForToday: planCompletedForTodayAfterReconcile,
       };
     }
 
@@ -609,6 +672,7 @@ export class Game1LobbyService {
       nextScheduledGame: nextGame,
       currentRunPosition: run.currentPosition,
       totalPositions: plan.items.length,
+      planCompletedForToday: false,
     };
   }
 
@@ -639,6 +703,7 @@ export class Game1LobbyService {
       nextScheduledGame: nextGame,
       currentRunPosition: 0,
       totalPositions: plan?.items.length ?? 0,
+      planCompletedForToday: false,
     };
   }
 

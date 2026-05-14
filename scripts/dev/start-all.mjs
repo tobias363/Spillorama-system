@@ -43,6 +43,14 @@
  *                    Tilsvarer å kjøre `npm run dev:reset` automatisk pluss
  *                    DELETE av plan-runs/scheduled-games + force-reseede.
  *                    Trygt — rører kun runtime-data, ikke katalog/halls/users.
+ *   --observability  Start PgHero web-dashboard (port 8080) ved siden av
+ *                    hoved-stacken. Bygger på pg_stat_statements som er
+ *                    aktivert via docker-compose.yml `command:`-flagg. Kjør
+ *                    `npm run dev:nuke -- --observability` for pilot-test-
+ *                    sesjoner der vi vil følge med på slow queries i sanntid.
+ *                    Tobias-direktiv 2026-05-14: "overvåk DB-prosessen i
+ *                    testfasen slik at vi kan optimalisere". Default off for
+ *                    å holde rask startup; on i pilot-test-modus.
  *
  * Backwards-compat: `npm run dev` (alene) fungerer fortsatt som før — denne
  * scripten er additiv og endrer ingen eksisterende workflows. Eksisterende
@@ -69,6 +77,15 @@ const SKIP_ADMIN = args.has("--no-admin");
 const SKIP_MIGRATE = args.has("--skip-migrate");
 const FORCE_SEED = args.has("--force-seed");
 const RESET_STATE = args.has("--reset-state");
+// OBS-7/OBS-8 (2026-05-14): opt-in PgHero web-dashboard for DB-observability.
+// Aktiveres via `--observability`-flag eller `OBSERVABILITY_ENABLED=1` env-var.
+// Default off — Tobias kjører pilot-test-sesjoner med
+// `npm run dev:nuke -- --observability` når han vil følge med på slow queries.
+// Holder default-startup rask ved å unngå ekstra Docker-container.
+const OBSERVABILITY_ENABLED =
+  args.has("--observability") ||
+  process.env.OBSERVABILITY_ENABLED === "1" ||
+  process.env.OBSERVABILITY_ENABLED === "true";
 
 // Default-DSN for local Docker-Postgres (matcher docker-compose.yml).
 // Override hvis brukeren allerede har APP_PG_CONNECTION_STRING satt i env.
@@ -168,6 +185,73 @@ function ensureDockerInfra() {
     return false;
   }
   return true;
+}
+
+// ── Observability-stack (PgHero) ─────────────────────────────────────────
+
+/**
+ * OBS-7/OBS-8 (2026-05-14): Start PgHero web-dashboard via
+ * `docker-compose.observability.yml`. Idempotent — `docker compose up -d`
+ * gjør ingenting hvis container allerede kjører.
+ *
+ * Krever at hoved-stacken er oppe og at `pg_stat_statements` er aktivert
+ * via `command:`-flagget i `docker-compose.yml`. Hvis Postgres mangler
+ * extension-en, kjører PgHero fortsatt, men dashbordet viser tomme
+ * tabeller — det er en advarsel vi printer her.
+ *
+ * Returnerer { ok, url } eller { ok: false } hvis docker-compose feiler.
+ */
+function ensureObservabilityStack() {
+  if (!OBSERVABILITY_ENABLED) {
+    return { ok: true, started: false };
+  }
+  if (SKIP_DOCKER) {
+    console.log(
+      color(
+        "yellow",
+        "[observability] --no-docker satt — hopper over PgHero (krever docker-compose)"
+      )
+    );
+    return { ok: true, started: false };
+  }
+
+  const composePath = path.join(ROOT, "docker-compose.observability.yml");
+  if (!fs.existsSync(composePath)) {
+    console.log(
+      color(
+        "yellow",
+        `[observability] ${composePath} finnes ikke — hopper over PgHero`
+      )
+    );
+    return { ok: true, started: false };
+  }
+
+  console.log(
+    color("blue", "[observability] starter PgHero web-dashboard (idempotent)")
+  );
+  const up = spawnSync(
+    "docker",
+    ["compose", "-f", composePath, "up", "-d", "pghero"],
+    { cwd: ROOT, stdio: "inherit" }
+  );
+  if (up.status !== 0) {
+    console.log(
+      color(
+        "yellow",
+        "[observability] docker compose up pghero feilet — fortsetter uten observability-dashbord"
+      )
+    );
+    return { ok: false, started: false };
+  }
+
+  const port = process.env.PGHERO_PORT ?? "8080";
+  console.log(
+    color(
+      "green",
+      `[observability] ✓ PgHero starter på http://localhost:${port} (admin / spillorama-2026-test)`
+    )
+  );
+  return { ok: true, started: true, port };
 }
 
 // ── Postgres-readiness + migrate + smart-seed ──────────────────────────────
@@ -949,6 +1033,11 @@ async function main() {
     );
   }
 
+  // ── Observability (PgHero) — opt-in via --observability ──────────────
+  // Kjøres etter migrate slik at pg_stat_statements-extension er installert
+  // før PgHero starter og prøver å lese fra view-en.
+  const observabilityResult = ensureObservabilityStack();
+
   // ── Backend ───────────────────────────────────────────────────────────
   spawnChild({
     name: "backend",
@@ -1102,6 +1191,16 @@ async function main() {
   if (!SKIP_ADMIN) console.log(`   • Admin           : http://localhost:5174/admin/`);
   console.log(`   • Game client dev : http://localhost:5173/`);
   if (!SKIP_HARNESS) console.log(`   • Visual harness  : http://localhost:4173/`);
+  // OBS-7/OBS-8 (2026-05-14): PgHero DB-dashboard når --observability er på.
+  if (observabilityResult.started) {
+    const pgheroPort = observabilityResult.port ?? "8080";
+    console.log(
+      `   • PgHero (DB obs) : http://localhost:${pgheroPort} ${color(
+        "dim",
+        "(login: admin / spillorama-2026-test)"
+      )}`
+    );
+  }
   if (testUrls) {
     console.log("");
     console.log(color("bold", "Pilot-flyt (login: tobias@nordicprofil.no / Spillorama123!):"));
@@ -1126,6 +1225,15 @@ async function main() {
         "for å starte med fersh pilot-state."
     )
   );
+  if (!observabilityResult.started) {
+    console.log(
+      color(
+        "yellow",
+        "Tip: legg til '--observability' for PgHero DB-dashbord på http://localhost:8080 " +
+          "(slow queries, missing indexes, live connections — anbefalt for pilot-test-sesjoner)."
+      )
+    );
+  }
   console.log("");
 
   // Sjekk at minst backend kom opp; ellers krasj

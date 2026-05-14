@@ -59,6 +59,352 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — db-perf-watcher cron + Linear auto-issue (db-perf-watcher-agent, OBS-9)
+
+**Branch:** `feat/db-perf-watcher-cron-2026-05-14`
+**PR:** TBD (opprettes etter siste verifisering)
+**Agent type:** general-purpose / ops-tools-agent (spawned av PM-AI)
+**Trigger:** Tobias-direktiv 2026-05-14: *"Vi må overvåke databasen så vi får data på hva som må forbedres. Test-agent som overvåker alt og peker på svakheter og tregheter."* Sentry detekterte 62 N+1-events (SPILLORAMA-BACKEND-3/-4) på 6 timer 2026-05-14 → vi vil at slike events automatisk → Linear-issue.
+
+**Bakgrunn:**
+- OBS-7 (pg_stat_statements extension) ble aktivert 2026-05-14
+- PgHero (OBS-8) gir manuell UI for top-N — men ingen alerter automatisk
+- audit:db (OBS-6) bundles top-20 inn i bug-rapporter — kun ved manuell trigger
+- Vi manglet **proaktiv, automatisk** komponent: cron som detekterer NEW slow queries og REGRESSIONS og lager Linear-issue uten at noen trenger å åpne dashbordet
+
+**Hva ble gjort:**
+
+1. `scripts/ops/db-perf-watcher.sh` (~410 linjer)
+   - Pinger lokal Postgres + verifiserer `pg_stat_statements`-extension
+   - Henter top-N queries via SQL, konverterer til JSON via jq
+   - Sammenligner mot baseline (`/tmp/db-perf-watcher-baseline.json`)
+   - jq pure-function for anomaly-deteksjon: NEW (mean > 100ms, calls > 10) + REGRESSION (mean økt > 50%)
+   - Dedup via state-fil: samme queryid flagges max 1x/24t
+   - Skriver markdown-rapport til `/tmp/db-perf-watcher-<ISO>.md`
+   - Kaller sibling Linear-script hvis anomalies
+   - Idempotent + read-only mot DB
+
+2. `scripts/ops/db-perf-create-linear-issue.sh` (~280 linjer)
+   - Leser `LINEAR_API_KEY` fra env eller `secrets/linear-api.local.md` (samme mønster som `cross-knowledge-audit.mjs`)
+   - Resolver team-id (BIN) + label-id (db-performance) via GraphQL
+   - Mutation `issueCreate` med report-body embeddet
+   - Fallback-stack: Linear → Slack-webhook → fil i /tmp
+   - DRY_RUN-mode for testing uten å spamme
+
+3. `scripts/ops/setup-db-perf-cron.sh` (~180 linjer)
+   - macOS: launchd plist `~/Library/LaunchAgents/com.spillorama.db-perf-watcher.plist`
+   - Linux: crontab entry tagget med `# db-perf-watcher (managed by ...)`
+   - Subcommands: install / uninstall / status / print
+   - **Default disabled** — Tobias aktiverer manuelt etter pilot-test
+
+4. `scripts/__tests__/ops/db-perf-watcher.test.sh` — 34 tester, alle PASS:
+   - Syntax + scripts finnes
+   - jq anomaly-detection pure-function (mock pg_stat_statements input)
+   - NEW threshold-respekt (sub-threshold filtreres ut)
+   - REGRESSION delta_pct math (358% floor)
+   - Dedup state-file 24t-vindu
+   - Linear-script DRY_RUN composer correct title
+   - Cron-script print/status modes
+   - Pre-flight DB-check (unreachable → exit 2)
+   - Integration smoke mot lokal Postgres (skip-graceful)
+
+5. `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — full runbook
+6. `.claude/skills/health-monitoring-alerting/SKILL.md` — utvidet med "DB-perf-watcher cron (OBS-9)"-seksjon
+
+**Verifisering:**
+- `bash -n` syntax PASS på alle 3 shell-scripts
+- `bash scripts/__tests__/ops/db-perf-watcher.test.sh` — 34/34 PASS
+- End-to-end smoke mot lokal Postgres:
+  - `FORCE_BASELINE=1 bash scripts/ops/db-perf-watcher.sh` → baseline lagret med 20 queries
+  - Andre run → "0 anomalies, exit 0", ren rapport skrevet
+- Manuell verifisering av rapport-format (markdown med top-10 + anomalies-seksjon)
+
+**Sample rapport-output:**
+```
+# DB-Perf Watcher Report 2026-05-14T13:52:43Z
+
+## Summary
+- Host: localhost:5432/spillorama
+- Top queries scanned: 20
+- Anomalies detected: 0 (0 NEW, 0 REGRESSION)
+
+## Top 10 by total_exec_time
+| # | Calls | Mean ms | Total ms | Rows | Disk reads | Query |
+| 1 | 1657  | 1.49    | 2476.18  | 1657 | 145        | SELECT id, master_hall_id... FROM app_game1_scheduled_games WHERE status... |
+| 2 | 29879 | 0.05    | 1431.68  | 29879 | 6         | SELECT id, slug, display_name... FROM app_game_catalog WHERE id = $1 |
+...
+```
+
+**Filer endret:** 6 nye filer + 1 skill-update.
+
+**Lessons learned:**
+- macOS har ikke `timeout`-CLI; tester må bruke `PGCONNECT_TIMEOUT=N` istedet
+- `jq` `fromdate` for ISO-string → epoch fungerer fint; sliding-window dedup blir 3-linjer-jq
+- Linear GraphQL: team-key → team-id lookup må gjøres separat fra issue-create (kan ikke bruke key direkte i mutation input)
+- Read-only invariant er sterkt — watcher er trygg å kjøre hver 5 min uten DB-impact
+
+**Skill-update:** `.claude/skills/health-monitoring-alerting/SKILL.md` — ny "DB-perf-watcher cron (OBS-9)" seksjon
+**Doc-update:** `docs/operations/DB_PERF_WATCHER_RUNBOOK.md` — ny runbook
+
+**Open follow-up (post-merge):**
+- Tobias aktiverer cron (`bash scripts/ops/setup-db-perf-cron.sh install`) når pilot-test bekrefter no-noise
+- Hvis Linear-issues blir spam, sett `LINEAR_ISSUE_DEDUP_HOURS=168` (uke)
+- Mulig fremtidig integrasjon: PagerDuty-fallback via same script-mønster som RoomAlertingService
+
+---
+
+### 2026-05-14 — Premie-celle smalere + center-top mockup (Agent V, CSS-iterasjon)
+
+**Branch:** `fix/premie-cell-solid-bg-2026-05-14` (samme branch som PR #1442 fra Agent Q — PR #1442 ble merget før Agent V landet; Agent V's commit pusher til samme branch og åpner ny PR mot main)
+**PR:** TBD (opprettes etter rebase mot main)
+**Agent type:** fix-agent / CSS-iterasjon-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Tobias-direktiv 2026-05-14: "Ser bra ut. kan også gjøre dem litt smalere i høyde og bredde så det matcher mer bilde. så det ikke tar så mye plass. vil ikke at høyden så være så mye mer en hva det er på spillet nå pga plass." + "kan du også koble på resten av elementene? det er da mønster, og område som viser antall spillere og innsats samt område til høyre som har kjøp flere bonger knappen. vil se hele elementet samlet."
+
+**Bakgrunn:**
+- Etter §7.23 (Agent Q PR #1433/#1442) hadde premietabellen 5×3 grid med solid bong-fargede celler. Standardpadding (6px 10px på rad, 4px 8px på celle) ga ≈ 26 px rad-høyde → 5 rader + header ≈ 155 px. Tobias så at det tok mer plass enn dagens enkelt-pill-design og at høyden måtte ned.
+- Design-side `premie-design.html` viste KUN premietabellen i en `game-frame`-boks, ikke hele `g1-center-top`-strukturen. Tobias kunne derfor ikke vurdere designet i layout-kontekst (mini-grid + player-info + action-knapper rundt).
+
+**Hva ble gjort:**
+
+1. **Smalere premie-celler — `CenterTopPanel.ts` `ensurePatternWonStyles`:**
+   - `.premie-table` `gap` 5px → 3px
+   - `.premie-row` `padding` 6px 10px → 3px 8px, `border-radius` 12px → 10px
+   - `.premie-row .premie-cell` `padding` 4px 8px → 2px 6px (font-size beholdt 11px)
+   - `.premie-header` `padding` 0 10px → 0 8px
+   - `.premie-row` + `.premie-header` `grid-template-columns` minmax(64px,1fr) → minmax(56px,1fr) (mindre label-felt)
+   - Resultat: rad-høyde ≈ 16-18 px (font line-height + 4 px vertikal padding) → 5 rader + header ≈ 95 px (matcher dagens enkelt-pill-fotavtrykk)
+
+2. **Utvidet `premie-design.html` til full center-top-mockup:**
+   - LeftInfoPanel-mockup (antall spillere SVG-ikon + tall, Innsats + Gevinst-tekster, valgfri Forhåndskjøp-rad) til venstre
+   - Combo-panel (376 px bredde, matcher prod) med 5×5 mini-grid + premietabell side-om-side
+   - Action-panel (245 px bredde, matcher prod) med game-name, jackpot-display (Innsatsen-scenario), Forhåndskjøp- og Kjøp flere brett-knapper
+   - Mini-grid statisk highlight per "active rad" (Rad 1 = øverste rad, Rad 2 = øverste 2 rader, ..., Full Hus = alle untatt center)
+   - Toggle-knapper synker mini-grid med valgt rad
+   - Premie-cellene synkronisert 1:1 med ny `ensurePatternWonStyles`-CSS (samme padding/gap/font-size, samme grid-template-columns)
+
+3. **Docs-protokoll (§2.19):**
+   - `.claude/skills/spill1-master-flow/SKILL.md` — utvidet "Premietabell-rendering"-seksjonen med ny "Celle-størrelse (iterasjon V)"-tabell, oppdatert design-preview-beskrivelse, lagt til ALDRI-regel #5 (ikke øk padding/gap over iterasjon-V-verdier). Endringslogg v1.8.1.
+   - `docs/engineering/PITFALLS_LOG.md` §7.24 — ny entry med detaljert root-cause + fix + prevention. Endringslogg-tabell oppdatert.
+
+**Filer endret:**
+
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` (+11/-7 i `ensurePatternWonStyles` CSS, ingen API-/runtime-endring)
+- `packages/game-client/src/premie-design/premie-design.html` (full rewrite, ~615 linjer — fra 562 til 622)
+- `.claude/skills/spill1-master-flow/SKILL.md` (+30 linjer — celle-størrelse-tabell + iterasjon-V-merknader + ALDRI-regel #5 + endringslogg v1.8.1)
+- `docs/engineering/PITFALLS_LOG.md` (+40 linjer — §7.24 + endringslogg)
+
+**Tester:**
+
+- `npm --prefix packages/game-client run check` → PASS (TypeScript strict)
+- `npm --prefix packages/game-client run test` → 1275 tester / 98 filer PASS (uendret), inkl. `premieTable.test.ts` 18 stk og `no-backdrop-filter-regression.test.ts` 5 stk
+- `npm --prefix packages/game-client run build:premie-design` → PASS (21.77 kB HTML, 4.38 kB JS gzip 1.62 kB)
+
+**Pre-merge verifisering:** Ingen breaking changes på API/DOM-struktur — kun CSS-tweaks. `no-backdrop-filter-regression.test.ts` (som er kanonisk guard for "ingen blur over Pixi") fortsatt grønn etter padding-justering — `.premie-row`/`.premie-cell` har fortsatt ingen `backdrop-filter`. Mockup-utvidelse i `premie-design.html` påvirker IKKE prod-DOM (kun design-side).
+
+**Hva PM/Tobias må verifisere etter merge:**
+
+1. Lokal preview: `http://localhost:4000/web/games/premie-design.html` viser nå hele center-top samlet (player-info venstre, combo i midten, actions høyre)
+2. Premietabellen er tydelig smalere — sammenlign med screenshot fra forrige iterasjon
+3. Tobias-godkjennelse: hvis designet matcher bildet hans, mergen følger gjennom
+
+**Open follow-up (post-merge):** `CenterTopPanel.ts` action-panel mangler player-info-element (LeftInfoPanel er separat komponent til venstre). Hvis Tobias senere vil at "antall spillere + innsats" skal flyttes inn i action-panelet, krever det egen PR med arkitektur-endring (flytte data fra `LeftInfoPanel` til `CenterTopPanel` eller injisere via props). Flagget her, ikke gjort nå — out-of-scope iterasjon V.
+
+**Learnings:**
+- Visuell størrelse må doc-festes (skill-tabell §celle-størrelse) når CSS-verdier er "magiske tall" som matcher bilde-spec. Default-padding-fall (`.prize-pill`) overlevde refactor uten å bli evaluert mot ny layout-form (5 rader vs 5 piller).
+- Design-side må vise hele konteksten (alle nabokomponenter), ikke isolert pattern, før Tobias kan godkjenne layout-størrelse.
+- `premie-design.html` og `ensurePatternWonStyles` MÅ synces — kommentar-marker "iterasjon V" i begge filer er prevention mot drift.
+
+---
+
+### 2026-05-14 — pg-pool resilience: 57P01 ikke krasjer backend (Agent T, BUG, PR #1438)
+
+**Branch:** `fix/backend-pg-pool-resilience-2026-05-14`
+**PR:** #1438
+**Agent type:** fix-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Sentry-issue SPILLORAMA-BACKEND-5 (2026-05-14 11:23:30 UTC) — backend krasjet med `uncaughtException` på `terminating connection due to administrator command` (pg-kode 57P01) under `POST /api/agent/game1/master/heartbeat`. Trigger var lokal `docker-compose up -d --force-recreate postgres` for å aktivere pg_stat_statements (OBS-7), men samme scenario kan ramme prod ved Render Postgres-vedlikehold / failover / OS-restart.
+
+**Root cause:**
+- `node-postgres` pg.Pool emit-er `error`-event når en idle client dør
+- Hvis det IKKE finnes en `pool.on("error", handler)`-listener, propagerer feilen som `uncaughtException` → backend dør
+- `sharedPool.ts` hadde en basic handler men logget ALT som ERROR (Sentry-noise på forventet vedlikehold)
+- 41 standalone `new Pool({...})`-instanser i services hadde INGEN handler
+
+**Hva ble gjort:**
+
+1. Ny modul `apps/backend/src/util/pgPoolErrorHandler.ts` (315 linjer) — `attachPoolErrorHandler` + `isTransientConnectionError` + `isPostgresShutdownError` + `withDbRetry`
+2. `sharedPool.ts` strukturert handler via `attachPoolErrorHandler`
+3. `PostgresWalletAdapter` + `PostgresBingoSystemAdapter` + `PostgresResponsibleGamingStore` — eksplisitt handler på standalone pool
+4. 38 service-fallback-paths — automatisk migrert via Python-script (auth/admin/agent/compliance/payments/platform/security)
+5. `createServicePool`-factory i `pgPool.ts` for fremtidige services
+6. Heartbeat-route wrappet i `withDbRetry` (3-forsøk backoff)
+7. 27 unit-tester (`pgPoolErrorHandler.test.ts`) + 103/103 PASS på berørte suiter
+8. Manuell chaos-test mot lokal Postgres — backend overlever `pg_terminate_backend`, auto-reconnect virker
+
+**Filer endret:** 49 totalt (+1105 / -18). Detaljer i PR #1438.
+
+**Læring:** pg.Pool DEFAULT-oppførsel ved error-event uten listener er `process.exit` via uncaughtException. Hver standalone pool MÅ ha handler. Sentry-noise reduseres ved å klassifisere WARN (forventet 57P01) vs ERROR (uventede constraint-violations).
+
+**Doc-protokoll (§2.19):** PITFALLS §12 ny seksjon + §12.1 + `wallet-outbox-pattern/SKILL.md` §11 informerer om at pool-failure ikke compromitterer wallet-mutasjoner.
+
+---
+
+### 2026-05-14 — Premietabell 3-bong-grid (Agent Q, CSS, Tobias-direktiv)
+
+**Branch:** `feat/premie-table-redesign-2026-05-14`
+**PR:** TBD (åpnes ved leveranse)
+**Agent type:** fix-agent / CSS-design-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Tobias-direktiv 2026-05-14: "Kan du også spawne en separart CSS agent som legger inn akuratt dette designet der hvor rader og gevinster vises… Dette må vi gjøre fordi det er 3 ulike bonger med ulik premiemønster. vi må da vise premie for alle ulike bongene. nå vises kun for hvit bong. jeg tenker vi oppretter en lokalside hvor vi først designet hele dette elementet slik at vi kan implementere det etterpå og ikke trenge å tweake på dette i spillet."
+
+**Bakgrunn:**
+- `CenterTopPanel` viste 5 tekst-piller (én per pattern) med format `"Rad 1 - 100 kr"`. Prisen var alltid Hvit-bong (5 kr = base). Gul-bong (10 kr) og Lilla-bong (15 kr) spillere fikk ×2 og ×3 utbetalt via auto-multiplikator-regel server-side (SPILL_REGLER_OG_PAYOUT.md §3.2), men hadde ingen synlig indikasjon i UI før de vant.
+- Tobias bestilte lokal design-side først for å unngå tweak-i-spillet-loop.
+
+**Hva ble gjort:**
+
+1. **Lokal design-side (CSS-iterasjon):**
+   - `packages/game-client/src/premie-design/premie-design.html` (NY, ~430 linjer) — 3 scenarier (Innsatsen fixed, Bingo standard, 5×500 percent-modus), interaktive toggles for active/completed/won-flash
+   - `packages/game-client/vite.premie-design.config.ts` (NY) — Vite-build wired etter eksisterende dev-overview/preview-mønster
+   - `packages/game-client/package.json` — `build`-script utvidet til å inkludere ny config, `build:premie-design`-shortcut lagt til
+   - `packages/game-client/src/dev-overview/dev-overview.html` — ny "1b. Design-previews"-seksjon med link til premie-design.html
+   - URL etter `npm run dev:all`: `http://localhost:4000/web/games/premie-design.html`
+
+2. **Implementasjon i `CenterTopPanel.ts`:**
+   - Eksportert `PREMIE_BONG_COLORS`-const (3 farger × multiplikator 1/2/3) for testbarhet
+   - Erstattet single-pill-CSS med `.premie-table` / `.premie-header` / `.premie-row` / `.premie-cell`-klasser
+   - `rebuildPills` bygger 5×3 grid (header + 5 rader, hver med pattern-label + 3 prize-celler)
+   - `applyPillState` skriver displayName til label-span og prize × multiplikator til hver celle (deterministisk auto-mult, ingen ekstra input)
+   - `pillCache` sporer `{displayName, prize, active, completed}` for minimal-diff DOM-writes
+   - `flashAmount`-tweens kjører nå på cellene (Hvit + Gul + Lilla samtidig) ved prize-endring i percent-modus
+   - `destroy()` killer tweens på alle 3 celler per rad (zombie-tween-guard)
+   - `.prize-pill`-klassen beholdt på rad-elementet for backwards-compat med `no-backdrop-filter-regression.test.ts`
+   - INGEN `backdrop-filter` på noen av de nye klassene (PR #468 PIXI-blink-bug)
+
+3. **Tester:**
+   - `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` (NY, 18 tester):
+     - PREMIE_BONG_COLORS struktur
+     - Grid-struktur (5 rader × 3 kolonner, header med swatch-prikker)
+     - Fixed-modus auto-mult (Rad 1, Rad 2-4, Full Hus med 3000 kr Lilla — INGEN cap)
+     - Percent-modus auto-mult (Rad 1, Full Hus, mid-runde prizePool-økning)
+     - Active-state (current pattern, advance, gameRunning=false suppress)
+     - Completed-state (won pattern, gameRunning=false suppress)
+     - Pattern-label norsk display-navn ("Row N" → "Rad N", "Full House" → "Full Hus")
+     - Placeholder-mode (5 placeholder-rader med 0 kr)
+     - Minimal-diff DOM-writes (re-render med samme state → 0 DOM-mutasjoner)
+   - `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` — utvidet med ny test "premie-row + premie-cell har IKKE backdrop-filter (regresjon-guard 2026-05-14)"
+   - `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` — oppdatert 7 eksisterende tester til ny `.col-hvit` / `.col-gul` / `.col-lilla`-format. La til `findHvitCellForPattern`-helper, `findRowForPattern`-helper. Alle 40 tester PASS.
+   - Full game-client suite: 1247 tester PASS (96 test-filer)
+
+4. **Doc-oppdatering (doc-protokoll §2.19):**
+   - `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon "Premietabell-rendering (3-bong-grid, 2026-05-14)" med auto-mult-regel, layout, kode-referanser, regression-tester, "ALDRI gjør"-liste. Endringslogg v1.7.0.
+   - `docs/engineering/PITFALLS_LOG.md` §7.23 — ny entry med detaljert root-cause + fix + prevention. Indeks-teller oppdatert
+   - Denne entry i AGENT_EXECUTION_LOG
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` (+~190 / -~95)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` (+~70 / -~25)
+- `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` (+~35)
+- `packages/game-client/src/games/game1/__tests__/premieTable.test.ts` (NY, 274 linjer)
+- `packages/game-client/src/premie-design/premie-design.html` (NY, ~430 linjer)
+- `packages/game-client/vite.premie-design.config.ts` (NY, 35 linjer)
+- `packages/game-client/src/dev-overview/dev-overview.html` (+20)
+- `packages/game-client/package.json` (+2 npm-scripts)
+- `.claude/skills/spill1-master-flow/SKILL.md` (+~75)
+- `docs/engineering/PITFALLS_LOG.md` (+~55)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Tester:**
+- `premieTable.test.ts` — 18/18 PASS
+- `no-backdrop-filter-regression.test.ts` — 6/6 PASS (5 eksisterende + 1 ny)
+- `CenterTopPanel.test.ts` — 40/40 PASS (alle eksisterende oppdatert til ny format)
+- Full game-client: 1247/1247 PASS
+- `npm run check` (TypeScript strict) — PASS
+- `npm run build` (all Vite configs inkl premie-design) — PASS
+
+**Læring (for fremtidige agenter):**
+- Lokal design-side først er VERDIFULL — CSS-iterasjon i prod-koden trigger Pixi-bundle-rebuild + browser-refresh som tar 5-10x lengre tid per iterasjon. Tobias-direktiv ga oss en mal vi kan gjenbruke for fremtidige UI-redesigner (legg ny Vite-config i `vite.<feature>.config.ts`, wire i build-script, bygg HTML-side standalone uten Pixi-runtime).
+- `findSpanForPattern`-helper i eksisterende tester returnerte tidligere span med kombinert "Rad 1 - 100 kr"-tekst. Etter redesign er pattern-label (span) og pris (div) separat. La til `findHvitCellForPattern`-helper for nye assertions, beholdt `findSpanForPattern` for `gsap.getTweensOf`-tween-checks (de ble redirected fra span til celle samtidig som flash flyttet til celle-nivå).
+- `.prize-pill`-klassen beholdt på rad-elementet (dummy CSS) for å unngå brudd i ekstern regression-test. Dette er en "backwards-compat-bro" som lar oss bytte ut intern struktur uten å rive ned tester andre steder.
+- Ingen backdrop-filter — fortsetter å holdes som hard regel via regression-test som nå inkluderer `.premie-row` + `.premie-cell`.
+
+**Eierskap:** `packages/game-client/src/games/game1/components/CenterTopPanel.ts` + tilhørende tester. Andre agenter må koordinere med PM før de rør disse filene.
+
+**Branch:** `fix/backend-pg-pool-resilience-2026-05-14`
+**PR:** #<this-PR>
+**Agent type:** fix-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Sentry-issue SPILLORAMA-BACKEND-5 (2026-05-14 11:23:30 UTC) — backend krasjet med `uncaughtException` på `terminating connection due to administrator command` (pg-kode 57P01) under `POST /api/agent/game1/master/heartbeat`. Trigger var lokal `docker-compose up -d --force-recreate postgres`, men samme scenario kan ramme prod ved Render Postgres-vedlikehold / failover / OS-restart.
+
+**Root cause:**
+- `node-postgres` pg.Pool emit-er `error`-event når en idle client dør
+- Hvis det IKKE finnes en `pool.on("error", handler)`-listener, propagerer feilen som `uncaughtException` → backend dør
+- `sharedPool.ts` hadde en basic handler men logget ALT som ERROR (Sentry-noise på forventet vedlikehold)
+- 41 standalone `new Pool({...})`-instanser i services hadde INGEN handler
+
+**Hva ble gjort:**
+
+1. **Ny modul** `apps/backend/src/util/pgPoolErrorHandler.ts` (315 linjer):
+   - `attachPoolErrorHandler(pool, { poolName })` — idempotent handler-installasjon. 57P01/57P02/57P03 → WARN (forventet ved Postgres-shutdown), 08001/08006/ECONNxxx → WARN (transient), uventede → ERROR
+   - `isTransientConnectionError(err)` + `isPostgresShutdownError(err)` — predikater for retry-decisions
+   - `withDbRetry(op, { operationName })` — `withRetry`-wrapper med 3-forsøk-backoff [100/250/500ms] og default `isTransientConnectionError`-predikat
+   - `TRANSIENT_PG_SQLSTATE_CODES` + `SHUTDOWN_PG_SQLSTATE_CODES` + `TRANSIENT_NODE_ERROR_CODES` whitelist-sets
+
+2. **sharedPool.ts** — strukturert handler via `attachPoolErrorHandler({ poolName: "shared-platform-pool" })`. Erstatter den gamle `console.error`-handleren.
+
+3. **PostgresWalletAdapter + PostgresBingoSystemAdapter + PostgresResponsibleGamingStore** — eksplisitt `attachPoolErrorHandler` på standalone-pool-fallback-paths (wallet er den ENESTE som faktisk lager standalone pool i prod via `createWalletAdapter`).
+
+4. **38 service-fallback-paths** — automatisk migrert via Python-script (idempotent). Hver `this.pool = new Pool({...})` fallback fikk `attachPoolErrorHandler(this.pool, { poolName: "<service>-pool" })`. Disse er test-only paths i prod (services får `pool: sharedPool` injected fra `index.ts`), men nå er de defensivt instrumented uansett.
+
+5. **`createServicePool`-factory** (`apps/backend/src/util/pgPool.ts`) — ny helper som kombinerer `new Pool` + `getPoolTuning` + `attachPoolErrorHandler`. Anbefalt for nye services som trenger standalone pool.
+
+6. **Heartbeat-route** (`apps/backend/src/routes/agentGame1Master.ts:473`) — UPDATE-query wrappet i `withDbRetry` så transient pool-feil ikke gir false `SOFT_FAIL` ved Render-vedlikehold. Heartbeat-write er idempotent (`master_last_seen_at = now()` igjen er trygg å re-kjøre).
+
+7. **Tester** (`apps/backend/src/util/__tests__/pgPoolErrorHandler.test.ts` — 27 tester, alle PASS):
+   - `getPgErrorCode` — pg-style vs non-pg errors
+   - `isPostgresShutdownError` — 57P01/02/03
+   - `isTransientConnectionError` — full SQLSTATE + node TCP error whitelist
+   - `attachPoolErrorHandler` — idempotens, 57P01 ikke kaster, transient ikke kaster, uventede ikke kaster, defaults
+   - `withDbRetry` — first-success, retry-after-1, exhaust-throws-last, non-transient-fails-immediately, custom predikat, ECONNRESET retry
+   - Sanity-test: pool uten handler DOES kaste (verifiserer at fixture matcher pg.Pool-semantikk)
+
+8. **Manuell chaos-test** (kjørt mot lokal Postgres):
+   - Boot pool, terminer alle backend-connections via `pg_terminate_backend`, verifiser process overlever + neste query auto-reconnect
+   - Resultat: PASS — pool gjenoppdatet, neste query returnerte korrekt resultat
+
+**Filer endret:**
+- `apps/backend/src/util/pgPoolErrorHandler.ts` (NY, 315 linjer)
+- `apps/backend/src/util/__tests__/pgPoolErrorHandler.test.ts` (NY, 367 linjer, 27 tester)
+- `apps/backend/src/util/pgPool.ts` (+`createServicePool` factory)
+- `apps/backend/src/util/sharedPool.ts` (bruker `attachPoolErrorHandler`)
+- `apps/backend/src/adapters/PostgresWalletAdapter.ts` (eksplisitt handler-attach på standalone pool)
+- `apps/backend/src/adapters/PostgresBingoSystemAdapter.ts` (eksplisitt handler-attach på standalone pool)
+- `apps/backend/src/game/PostgresResponsibleGamingStore.ts` (eksplisitt handler-attach)
+- `apps/backend/src/routes/agentGame1Master.ts` (heartbeat wrappet i `withDbRetry`)
+- 38 service-filer (auth, admin, agent, compliance, payments, platform, security) — automatisk migrert med `attachPoolErrorHandler`-kall etter `new Pool(...)`-fallback
+- `docs/engineering/PITFALLS_LOG.md` — ny §12 (DB-resilience) + §12.1 entry, indeks oppdatert (94 entries)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry
+
+**Læring / mønstre:**
+- pg.Pool DEFAULT-oppførsel ved error-event uten listener er `process.exit` via uncaughtException. Hver standalone pool MÅ ha handler.
+- Sentry-noise reduseres ved å klassifisere: WARN for forventet (57P01 ved vedlikehold), ERROR for uventet (constraint-violation, etc.)
+- Retry-mønster: 3-forsøk [100/250/500ms] = ~850ms worst-case for read-paths. IKKE retry write-paths uten outbox-mønster (wallet/compliance har egne).
+- Migration-script-mønster (idempotent, derive name from file name) er gjenbrukbart for fremtidige cross-cutting concerns.
+
+**Verifisering kjørt:**
+- `npm --prefix apps/backend run check` ✅
+- `npm --prefix apps/backend run build` ✅
+- `npx tsx --test pgPoolErrorHandler.test.ts sharedPool.test.ts retry.test.ts` ✅ (47/47 PASS)
+- `npx tsx --test bootStartup.constructorRegression.test.ts` ✅ (30/30 PASS — verifiserer at service-konstruktører fortsatt fungerer)
+- `npx tsx --test SwedbankPayService.test.ts` ✅ (26/26 PASS)
+- Manuell chaos-test mot lokal Postgres ✅ — backend overlever `pg_terminate_backend`, auto-reconnect virker
+
+**Doc-protokoll-status (§2.19):**
+- [x] PITFALLS_LOG.md §12 ny seksjon + §12.1 entry
+- [x] AGENT_EXECUTION_LOG denne entry
+- [x] `pgPoolErrorHandler.ts` JSDoc-header dokumenterer fullt scope, root cause, designvalg, ADVARSEL om write-paths
+- [x] `pgPool.ts:createServicePool` JSDoc med usage-eksempel
+- [x] `wallet-outbox-pattern` skill — informerer om at pool-failure ikke compromitterer wallet-mutasjoner (skill-update i samme PR)
+
+---
+
 ### 2026-05-14 — Innsats + Forhåndskjøp dobbel-telling (fix-agent, BUG)
 
 **Branch:** `fix/innsats-forhandskjop-classification-2026-05-14`
@@ -1809,6 +2155,56 @@ Verifisert via test:
 
 ---
 
+### 2026-05-14 — DB-observability aktivering (fix-agent, Agent S, OBS-7/OBS-8)
+
+**Scope:** Tobias-rapport 2026-05-14: "vi skulle vente med database verktøy men alt er satt opp slik at vi ser alt som skjer i databasen med de kallene som gjøres hva som tar lang tid osv? det er ekstremt viktig at vi overvåker den prossesen nå i testfasen slik at vi kan optimalisere." OBS-7 (`pg_stat_statements`-migration) og OBS-8 (PgHero/pgBadger docker-stack) var begge merget tidligere på dagen, men `pg_stat_statements` samlet NULL data fordi `shared_preload_libraries` ikke var satt på Postgres-prosessen. PM gjorde quick-fix manuelt i hovedrepo, men det ble ikke committet — dev:nuke ville reset-e det igjen. Denne PR-en gjør fixen permanent + integrerer PgHero i `dev:nuke`-flyten via opt-in flag.
+
+**Inputs gitt:**
+- Branch: `feat/db-observability-activate-2026-05-14`
+- Filer: `docker-compose.yml`, `scripts/dev/start-all.mjs`, `scripts/dev/nuke-restart.sh`, `docs/operations/PGHERO_PGBADGER_RUNBOOK.md`, `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`, `MASTER_README.md`, `docs/engineering/PITFALLS_LOG.md`, `docs/engineering/AGENT_EXECUTION_LOG.md`
+- Pekere: `apps/backend/migrations/20261225000000_enable_pg_stat_statements.sql` (kommentaren forklarer at compose-config må endres — ble glemt), `docker-compose.observability.yml` (PgHero-stack fra OBS-8), `scripts/observability-up.sh`
+- Forbudt: Agent N/O/P/Q's worktrees, PR #1424, #1425, #1430, backend-kode (Sentry DB-tracing var allerede landet)
+
+**Outputs produsert:**
+- `docker-compose.yml` (+25 linjer): postgres-service fikk permanent `command:`-blokk med `shared_preload_libraries=pg_stat_statements`, `pg_stat_statements.track=all`, `pg_stat_statements.max=10000`, `log_min_duration_statement=100`, `log_statement=ddl`, `log_line_prefix='%t [%p] %u@%d '`, `log_destination=stderr`. Disse konfigurerer både `pg_stat_statements`-aktivering OG slow-query-logger for pgBadger.
+- `scripts/dev/start-all.mjs` (+78 linjer): nytt `--observability`-flag + `OBSERVABILITY_ENABLED` env-var (opt-in). Ny `ensureObservabilityStack()` starter PgHero via `docker-compose.observability.yml` etter migrate (slik at extension finnes når PgHero kobler til). Status-tabell viser PgHero-URL når aktivert. Tip-melding nederst forteller bruker hvordan aktivere hvis ikke på.
+- `scripts/dev/nuke-restart.sh` (+15 linjer): forwarder `--observability` (og andre dev:all-flags) til underliggende `npm run dev:all`. Kommando er nå `npm run dev:nuke -- --observability`.
+- `docs/operations/PGHERO_PGBADGER_RUNBOOK.md`: §2 quick-start oppdatert med anbefalt `dev:nuke -- --observability`-flow. §3 omskrevet fra "valgfritt — Tobias beslutter" til "permanent aktivert per 2026-05-14" med verifisering-eksempler. Endringslogg-rad lagt til.
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`: Vedlegg B fikk PgHero-URL-rad + forklarings-blokk om OBS-7/OBS-8 og når man bruker `--observability`. §11.5 endringslogg fikk 2026-05-14-entry. Top-of-file dato bumpet til 2026-05-14.
+- `MASTER_README.md`: Quick Start-blokk byttet fra `npm run dev` + `npm run dev:admin` separate kommandoer til `npm run dev:nuke` (én kommando), pluss eksempel på `dev:nuke -- --observability`. Lagt til peker til `PGHERO_PGBADGER_RUNBOOK.md`.
+- `docs/engineering/PITFALLS_LOG.md`: §6.17 ny entry (50 linjer) — "pg_stat_statements installert via migration ≠ aktivert". Indeks oppdatert (§6 fra 16 til 17 entries, total fra 93 til 94).
+
+**Verifisering:**
+- `bash -n scripts/dev/nuke-restart.sh` → OK
+- `node --check scripts/dev/start-all.mjs` → OK
+- `docker-compose config` parser med `command:`-blokken intakt (postgres-service viser alle 7 `-c`-flagg)
+- Tidligere manuelt quick-fix gjort av PM (`docker-compose up -d --force-recreate postgres` på hovedrepo) er nå reflektert i kode — neste `dev:nuke` vil ikke lenger deaktivere det
+
+**Fallgruver oppdaget:**
+- **§6.17:** Installasjon av en Postgres-extension (`CREATE EXTENSION`) er IKKE nok hvis extension-en krever `shared_preload_libraries`. Selv om `pg_extension`-tabellen har raden og PgHero ser den, samles ingen data uten at biblioteket er lastet ved prosess-oppstart. Andre extensions med samme krav: `pg_cron`, `auto_explain`, `pg_prewarm`, `pg_repack`. Migration-doc-en for `20261225000000` advarte om dette, men advarselen ble lest og ikke fulgt opp — det er en process-failure, ikke en kunnskaps-failure.
+
+**Læring:**
+- Opt-in opbservability via flag holder default-startup rask (PgHero-image er ~150MB å pulle første gang) men eksplisitt på når Tobias vil teste. Default off er riktig her — pilot-test-sesjoner er bevisste, ikke alltid-på.
+- Bash `for arg in "$@"; do` med whitelisting av flags er enklere enn full arg-parsing — vi forwarder kun de fire vi kjenner (`--observability`, `--no-harness`, `--no-admin`, `--no-docker`) til `dev:all`.
+- Tip-meldingen nederst i status-tabellen (når flagget ikke er på) er kritisk for discoverability — uten den ville Tobias måtte huske flagget. Hvis bruker er på, sier den ingenting (unngår spam).
+- Migration-kommentarer som ber om compose-config-endringer MÅ enten ha en pre-commit-sjekk eller bli del av en checkliste. Vi har nå PITFALLS §6.17 som dokumentasjon, men prosess-stedet for "har du oppdatert compose når du legger til shared-preload-extension" mangler fortsatt.
+
+**Eierskap:**
+- `docker-compose.yml:31-66` (postgres-service med `command:`-blokk)
+- `scripts/dev/start-all.mjs:142-211` (`ensureObservabilityStack`)
+- `scripts/dev/nuke-restart.sh:113-130` (flag-forwarding + EXTRA_FLAGS-logikk)
+
+**Verifisering (Tobias-flyt):**
+- [ ] Kjør `npm run dev:nuke -- --observability`
+- [ ] Forvent: status-tabell viser `PgHero (DB obs) : http://localhost:8080 (login: admin / spillorama-2026-test)`
+- [ ] Åpne http://localhost:8080 i nettleser → forvent Slow queries / Queries / Connections-tabs med faktiske data
+- [ ] Kjør noen handlinger i admin/spillerklient → vent 30s → refresh PgHero → forvent at slow queries dukker opp
+- [ ] Kjør `npm run dev:nuke` (uten flag) → forvent ingen PgHero, men tip-melding om at flagget eksisterer
+
+**Tid:** ~40 min agent-arbeid
+
+---
+
 ### 2026-05-14 — Hall-switcher state-refresh bug (fix-agent, F-04)
 
 **Scope:** Tobias-rapport 2026-05-14 — hall-bytte i `/web/`-lobby dropdown gjorde ingenting synlig. Game-tiles fortsatte å vise gammel hall sin status, og hvis aktiv runde kjørte på master-hallen ble den ikke vist når bruker byttet til den. Direktiv: "siden må da oppdateres med de innstillingene som gjelder for den hallen". Pilot-UX-bug — spillere ser feil status etter hall-bytte.
@@ -1895,6 +2291,8 @@ Verifisert via test:
 | 2026-05-13 | I16/F-02 plan-run lifecycle auto-reconcile fra lobby-poll i `Game1LobbyService` (10 nye unit-tester, < 50ms latency, idempotent). | Agent (I16) |
 | 2026-05-14 | F2 (BUG-F2) — pre-engine ticket-config-binding-hook i `GamePlanEngineBridge.onScheduledGameCreated`. Dekker hullet fra PR #1375 (post-engine kun). Pre-game buy-popup viser nå riktige priser (Yellow=10 kr, ikke 20). 9 nye unit-tester, alle 105 eksisterende grønne. Skill `spill1-master-flow` v1.2.0 + PITFALLS §3.10 ny entry. | fix-agent (general-purpose) |
 | 2026-05-14 | F-04 (Hall-switcher BUG) — `apps/backend/public/web/lobby.js` utvidet `switchHall()` til å parallell-refetche balance + compliance + per-hall Spill 1-lobby-state + global game-status. Ny `loadSpill1Lobby()` mot `/api/games/spill1/lobby?hallId=...`. `buildStatusBadge('bingo')` mapper nå per-hall `overallStatus` til Åpen/Stengt/Starter snart/Pauset/Venter med fail-soft fallback til global gameStatus. Confirm-modal ved aktiv runde. Idempotens (samme hall = no-op). 13 nye unit-tester (lobby.js i jsdom via fs.readFileSync). Alle 1510 admin-web-tester PASS. PITFALLS §7.17 ny entry. | fix-agent (general-purpose) |
+| 2026-05-14 | OBS-7/OBS-8 aktivering (Agent S) — `pg_stat_statements`-extension installert via migration 20261225000000, men extension-en samlet null data fordi `shared_preload_libraries` ikke var satt på Postgres-prosessen. Permanent fikset: `docker-compose.yml` postgres-service fikk `command:`-blokk med `shared_preload_libraries=pg_stat_statements` + slow-query-log på 100ms. PgHero integrert i `dev:nuke` via opt-in `--observability`-flag. Tobias-direktiv: "overvåk DB-prosessen i testfasen". Bruk `npm run dev:nuke -- --observability` for pilot-test-sesjoner — PgHero på localhost:8080 (admin / spillorama-2026-test). PITFALLS §6.17 ny entry. Vedlegg B i PM_ONBOARDING_PLAYBOOK + MASTER_README + PGHERO_PGBADGER_RUNBOOK oppdatert. | fix-agent Agent S (general-purpose) |
+| 2026-05-14 | OBS-10 Wallet-integrity-watcher levert (`feat/wallet-integrity-watcher-2026-05-14`). Cron-driven I1 (balance-sum) + I2 (hash-chain-link) sjekk → Linear-Urgent ved brudd. 48 tester PASS lokalt. Skill `wallet-outbox-pattern` v1.4.0 + `audit-hash-chain` + `health-monitoring-alerting` (OBS-10-seksjon). PITFALLS §2.9 ny entry. | Agent (wallet-integrity-watcher) |
 
 ---
 
@@ -1912,4 +2310,8 @@ Verifisert via test:
 | 2026-05-14 | **PR #1427** — Master-UI header state-aware (Tobias-rapport 3 ganger 2026-05-14: 07:55, 09:51, 12:44). Pre-fix `Spill1HallStatusBox.ts:801-816` mappet `purchase_open \| ready_to_start \| running \| paused` som "Aktiv trekning" — feil, `purchase_open` og `ready_to_start` er PRE-start-tilstander. Screenshot-bevis 12:44: header "Aktiv trekning - Bingo" mens master-knapp var "▶ Start neste spill" + "Ingen pågående spill tilgjengelig..." samtidig (motsigelse). **Fix:** Pure helper `getMasterHeaderText(state, gameName, info?)` med 11 state-mappings ("Aktiv trekning" KUN ved `state === "running"`). Defensive fallback til "idle" ved ukjent input. XSS-trygg via `escapeHtml`. 35 nye tester i `apps/admin-web/tests/masterHeaderText.test.ts` inkl. regression-trip-wire som verifiserer at INGEN ikke-running state returnerer streng som starter med "Aktiv trekning". **Lessons learned:** Header-tekst MÅ være helper-funksjon (pure, testbar) — aldri inline-grenen i render-funksjon. Tre-gangs-rapport viser at uten test-trip-wire kan denne typen bug gjenoppstå når noen legger til ny state i scheduled-game-enum. **Skill-update:** `spill1-master-flow/SKILL.md` ny seksjon "Master-UI header-tekst per state". **Pitfall-update:** PITFALLS_LOG §7.20. **Doc-protokoll fulgt:** SKILL + PITFALLS + AGENT_LOG oppdatert i samme PR. | Fix-agent (header-state-aware) |
 | 2026-05-14 | **PR #1429** — Bong-pris=0 kr under aktiv trekning (BUG, Tobias-rapport 12:55). Pre-trekning vises korrekt (5/10/15 kr), under trekning alle bonger "0 kr". DB-evidens: priser i `ticket_config_json` korrekte (white pricePerTicket=500), Innsats-total 30 kr riktig (= 5+10+15). Root cause: field-navn-mismatch — `GamePlanEngineBridge.buildTicketConfigFromCatalog` skriver `pricePerTicket` mens `Game1ScheduledRoomSnapshot.entryFeeFromTicketConfig` leste KUN `priceCentsEach`. Når engine startet (status WAITING → RUNNING) trigget synthetic-snapshot `currentGame.entryFee = 0` → propagerte via `roomHelpers.currentEntryFee` (`??` tar ikke 0) → klient-state.entryFee ble overskrevet til 0 → alle ticket-priser ble 0. **Fix (defense-in-depth, 6 lag):** (1) Backend `entryFeeFromTicketConfig` leser alle 4 historiske felt-navn (matcher `extractTicketCatalog`), (2) Backend `roomHelpers.currentEntryFee` bruker `> 0`-sjekk, (3) Klient `GameBridge.applyGameSnapshot` overskriver KUN hvis `game.entryFee > 0`, (4) Klient `PlayScreen.gridEntryFee` bruker `validStateEntryFee > 0`-sjekk, (5) Klient `TicketGridHtml.computePrice` ignorerer `ticket.price === 0`, (6) Klient `BingoTicketHtml.priceEl + populateBack` skjuler price-rad hvis 0. **Tester:** 3 backend (Game1ScheduledRoomSnapshot prod-format + legacy + defensive) + 6 klient (TicketGridHtml.priceZeroBug — alle 6 scenarier). Alle 73+ eksisterende grønne. **Skill-update:** `spill1-master-flow/SKILL.md` ny seksjon "Bong-pris bevares gjennom game-state-transisjoner". **Pitfall-update:** PITFALLS_LOG §7.21 ny entry. | Fix-agent (aacc356e7f982caad) |
 | 2026-05-14 | **PR #1430** (`fix/winscreen-show-only-winning-phases-2026-05-14`) — WinScreen viste kun "Fullt Hus" + Rad 1-4 som "Ikke vunnet" (Tobias-rapport 13:00, runde 1edd90a1). DB-evidens i `app_game1_phase_winners` viste 6 vinninger for `demo-user-admin` (Phase 1 yellow 200, Phase 2 purple+white 400, Phase 3-4 white 200, Fullt Hus white 1000 = 1800 kr). **Root cause:** Scheduled Spill 1 sin `enrichScheduledGame1RoomSnapshot` returnerer `patternResults: []` (synthetic). `GameBridge.applyGameSnapshot` RESETTER `state.patternResults = []` ved hver `room:update` og SEEDER med `isWon: false` for alle 5 faser. Bare den siste `pattern:won` (Fullt Hus) overlever som vunnet. **Fix:** Game1Controller akkumulerer `myRoundWinnings: MyPhaseWinRecord[]` per `pattern:won`-event der spilleren er i `winnerIds` (samme path som `roundAccumulatedWinnings`-summen). Sendes til `Game1EndOfRoundOverlay` via `summary.myWinnings`. Overlay viser KUN vinnende rader, sortert etter fase 1→5. Multi-color per fase (yellow + white i Rad 2) = separate rader. Tom liste → "Beklager, ingen gevinst" (ikke 5 "Ikke vunnet"-rader). Backwards-compat: hvis `myWinnings` undefined faller overlay til legacy patternResults-tabell (for eksisterende tester). **Tester:** 22 nye vitest-tester i `Game1EndOfRoundOverlay.winnerFiltering.test.ts` (Scenario A/B/C + shared-count + ticket-color + backwards-compat). Alle 56 EndOfRoundOverlay-tester + 108 Game1Controller-tester PASS. **Skill-update:** `spill1-master-flow/SKILL.md` v1.7.0 (ny seksjon "WinScreen viser kun vinnende rader"). **Pitfall-update:** PITFALLS_LOG §7.22. **Forbudt-rør:** ikke endret backend `Game1PayoutService.ts` eller PR #1420 timer-logikk i `Game1EndOfRoundOverlay.show()`. | Fix-agent (winscreen-filter) |
+| 2026-05-14 | **PR #1424 (feat/round-replay-api-2026-05-14)** — Round-replay-API for compliance + debug. Ny `GET /api/_dev/debug/round-replay/:scheduledGameId?token=<TOKEN>` (token-gated, pure read). Returnerer metadata + timeline (purchases, master_actions, draws, phase_winners, ledger-events) + summary (totals + winners m/ expected vs actual prize auto-mult-validert) + anomalies (payout_mismatch, missing_advance, stuck_plan_run, double_stake, preparing_room_hang). Nye filer: `apps/backend/src/observability/roundReplayBuilder.ts` (8 parallelle fail-soft SELECTs), `apps/backend/src/observability/roundReplayAnomalyDetector.ts` (5 stateless detektorer), `apps/backend/src/routes/devRoundReplay.ts` (token-gated route). 21 nye tester (14 builder-unit + 7 route-integration), alle PASS. TypeScript strict-mode passerer. **Motivasjon (Tobias-direktiv 2026-05-14):** PM-flyt brukte 5-10 SQL-queries per runde for å reprodusere én pilot-flyt (eks. runder 7dcbc3ba + 330597ef). ÉN curl-kommando erstatter dem alle. **Lessons learned:** Bygg observability som første-klasses tool, ikke ettertanke — anomaly-detektor med stabile error-koder (payout_mismatch, stuck_plan_run, double_stake, preparing_room_hang, missing_advance) gjør kjente bug-mønstre selv-detekterende. Endepunktet er compliance-grade audit-trail for §71-pengespillforskriften — ALDRI fjern uten ADR-prosess. **Skill-update:** `spill1-master-flow/SKILL.md` v1.5.0 ny seksjon "Round-replay-API". **Pitfall-update:** PITFALLS_LOG §6.17. **Anomaly-detektor fanger automatisk:** auto-mult-feil fra PR #1408/#1411/#1413, stuck plan-run fra PR #1407, double-stake fra Innsats/Forhåndskjøp-mønster, "Forbereder rommet"-hang. | Fix-agent R2 (ab0ee83bc270aafcf) |
+| 2026-05-14 | **PR #1431 (Lobby-API nextGame for finished plan-run, komplementært til PR #1422)** — Tobias-rapport 13:00 (samme dag som PR #1422 landet): Master-UI viser fortsatt "Start neste spill — Bingo" etter Bingo (position=1) ferdig. PR #1422 fixet DB-side (create-logikk advancer korrekt), MEN lobby-API returnerte `nextScheduledGame: null` ved finished plan-run → master-UI faller tilbake til default plan-items[0] (Bingo). **Fix:** `Game1LobbyService.getLobbyState` finished-branch advancer til `plan.items[currentPosition + 1]` når `currentPosition < items.length`; `GameLobbyAggregator.buildPlanMeta` advancer `positionForDisplay` så `catalogSlug` peker til neste plan-item. Nytt `Game1LobbyState.planCompletedForToday`-flag speiler `PLAN_COMPLETED_FOR_TODAY`-DomainError. Jackpot-override-lookup endret fra `String(planRun.currentPosition)` til `String(positionForDisplay)` for konsistens. **Tester:** 5 nye i `Game1LobbyService.test.ts` + 2 nye i `GameLobbyAggregator.test.ts`. Alle 77 lobby-tester PASS, TypeScript strict clean. **Skill-update:** `spill1-master-flow/SKILL.md` v1.7.1 follow-up. **Pitfall-update:** PITFALLS_LOG §3.13. | Fix-agent P (a79dcb2baa1a2bcf3) |
+| 2026-05-14 | **OBS-10 Wallet-integrity-watcher** — cron-driven sjekk: (I1) balance-sum: `wallet_accounts.balance ≡ SUM(CASE side WHEN 'CREDIT' THEN amount ELSE -amount END)` over `wallet_entries`; (I2) hash-chain link siste 24t. Brudd → Linear-issue Urgent. 48 PASS lokalt. Komplementært til nattlig `WalletAuditVerifier`. Default DISABLED. **Skill-updates:** `wallet-outbox-pattern` v1.4.0, `audit-hash-chain`, `health-monitoring-alerting`. **Pitfall:** PITFALLS_LOG §2.9. | Agent (wallet-integrity-watcher, a4dbd6...) |
+| 2026-05-14 | **Synthetic Spill 1 bingo-runde-test (R4-precursor, BIN-817 forløper)** — `scripts/synthetic/` med 4 moduler + bash-wrapper. 6 invariants I1-I6 (Wallet-konservering, Compliance-ledger, Hash-chain, Draw-sequence, Idempotency, Round-end-state). 59 vitest unit-tester PASS. **Skill-updates:** `casino-grade-testing` v1.2.0, `live-room-robusthet-mandate` v1.3.0, `spill1-master-flow` v1.9.0. **Pitfall:** PITFALLS_LOG §6.18. | synthetic-test-agent (aa2cc3afbfe693cab) |
 | 2026-05-14 | **Frontend State Dump tool (observability)** — la til "Dump State"-knapp infra for debug-HUD. Klikk dumper komplett state-tree (5 hovedseksjoner + derived + env) til fire kanaler samtidig: `window.__SPILL1_STATE_DUMP`, `localStorage["spill1.lastStateDump"]`, `console.log("[STATE-DUMP]", ...)`, og `POST /api/_dev/debug/frontend-state-dump` → `/tmp/frontend-state-dumps/`. `derivedState` inneholder `pricePerColor` (entryFee × multiplier per farge), `innsatsVsForhandskjop` (active vs pending classification), og `pricingSourcesComparison` (room vs lobby vs nextGame consistency — "divergent" er rødt flag). Wire-format stable så diffing er lett. **Filer:** `packages/game-client/src/debug/StateDumpTool.ts` + `StateDumpButton.ts` + `apps/backend/src/routes/devFrontendStateDump.ts` (NY) + `index.ts` (route-wireup). **35 nye tester totalt:** 17 frontend-tool (vitest), 6 button-DOM (vitest), 12 backend-route (node:test). Alle PASS. Backend tsc + game-client tsc grønt. Token-gated via `RESET_TEST_PLAYERS_TOKEN`. Filer på `/tmp/frontend-state-dumps/` overlever ikke restart, max 1000 dumps med auto-rotering, max 5 MB per payload. **Skill-update:** `spill1-master-flow/SKILL.md` v1.8.0 — ny seksjon "Frontend-state-dump (debug-tool, 2026-05-14)". **Pitfall-update:** PITFALLS_LOG §7.23 — "Bruk frontend-state-dump FØR du gjetter hvor frontend leser fra". **Lessons learned:** Manuelle browser-console-snippets er fragmenterte. Deterministisk dump med pricing-sources-sammenligning sparer 30+ min per bug-investigation hvor PM tidligere måtte gjette state-kilde. Knappen er additiv — IKKE wired inn i installDebugSuite enda (UI-integrasjon kan gjøres trygt i follow-up når PM/Tobias verifiserer at server-route + state-collector fungerer). Branch `feat/frontend-state-dump-2026-05-14`. | Fix-agent (general-purpose, aba43f969b93d9185) |

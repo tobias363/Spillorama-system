@@ -61,16 +61,27 @@ forensics.
 
 ## 2. Quick start
 
+**Anbefalt — kombinert med `dev:nuke`:**
+
+```bash
+# Start hele stacken (backend + admin + game-client + PgHero på :8080)
+# Tobias-direktiv 2026-05-14: bruk denne for pilot-test-sesjoner så DB-
+# trafikken overvåkes i sanntid mens vi tester pilot-flyt.
+npm run dev:nuke -- --observability
+
+# Åpne PgHero
+open http://localhost:8080
+# Login: admin / spillorama-2026-test (overstyrbar via env)
+```
+
+**Manuell — kjør PgHero alene:**
+
 ```bash
 # Forutsetning: hoved-dev-stacken kjører (npm run dev:nuke eller
 # docker-compose up -d postgres redis).
 
 # Start PgHero på localhost:8080
 bash scripts/observability-up.sh
-
-# Åpne i browser
-open http://localhost:8080
-# Login: admin / spillorama-2026-test (overstyrbar via env)
 
 # Generer pgBadger-rapport (krever Postgres CSV-logger — se §4)
 bash scripts/pgbadger-report.sh
@@ -80,76 +91,83 @@ open infra/observability/data/pgbadger-latest.html
 bash scripts/observability-down.sh
 ```
 
+> **NB om aktivering (kritisk lærdom 2026-05-14):** `pg_stat_statements`-
+> extension installeres via migration `20261225000000`, men extension-en
+> samler INGEN data uten at `shared_preload_libraries=pg_stat_statements`
+> er satt på Postgres-prosessen ved oppstart. Dette håndteres nå av
+> `command:`-blokken i `docker-compose.yml`. Hvis du kjører Postgres
+> utenfor Docker (eks. lokalt brew-install), MÅ du sette dette i
+> `postgresql.conf` selv.
+
 ---
 
-## 3. Aktivere pg_stat_statements (krav for PgHero)
+## 3. Aktivere pg_stat_statements (allerede aktivert i hoved-stacken per 2026-05-14)
 
-PgHero leser fra `pg_stat_statements`-extension. Den er IKKE aktivert i
-standard `postgres:16-alpine`-imaget vi bruker lokalt.
+PgHero leser fra `pg_stat_statements`-extension. Per 2026-05-14 er den
+**permanent aktivert** i `docker-compose.yml` via `command:`-blokken på
+postgres-service-en. Du trenger ikke gjøre noe ekstra for å aktivere den
+lokalt — bare kjør `npm run dev:nuke` (med eller uten `--observability`)
+så er extension-en aktiv og samler data fra første spørring.
 
-### Sjekk om aktivert
+### Hvordan det fungerer
 
-```bash
-docker exec -i spillorama-system-postgres-1 psql -U spillorama -d spillorama \
-  -c "SELECT name, setting FROM pg_settings WHERE name = 'shared_preload_libraries';"
-```
-
-Hvis du ser `setting | ` (tom) eller noe annet enn `pg_stat_statements`,
-må du aktivere den.
-
-### Aktivere lokalt (krever Postgres-restart)
-
-Det enkleste er å overstyre `command` på Postgres-containeren i
-`docker-compose.yml`. Per 2026-05-14 lar vi det være valgfritt — Tobias
-beslutter om vi gjør det permanent eller via env-flag.
-
-**Alternativ A — engangs CLI-override (anbefalt for utforskning):**
-
-```bash
-# Stop hoved-stacken
-docker-compose down
-
-# Start Postgres med shared_preload_libraries
-docker run -d --name pg-temp \
-  -p 5432:5432 \
-  -e POSTGRES_DB=spillorama \
-  -e POSTGRES_USER=spillorama \
-  -e POSTGRES_PASSWORD=spillorama \
-  -v spillorama-system_pgdata:/var/lib/postgresql/data \
-  postgres:16-alpine \
-  postgres -c shared_preload_libraries=pg_stat_statements
-
-# Når Postgres er oppe, aktivér extension
-docker exec -i pg-temp psql -U spillorama -d spillorama \
-  -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
-```
-
-**Alternativ B — permanent i docker-compose.yml:**
-
-Legg til `command` på postgres-service-en (krever PR mot main, ut av OBS-8-scope):
+`docker-compose.yml` setter:
 
 ```yaml
 postgres:
   image: postgres:16-alpine
-  command: >
-    postgres
-    -c shared_preload_libraries=pg_stat_statements
-    -c pg_stat_statements.track=all
-    -c pg_stat_statements.max=10000
-  # ... eksisterende config ...
+  command:
+    - "postgres"
+    - "-c"
+    - "shared_preload_libraries=pg_stat_statements"
+    - "-c"
+    - "pg_stat_statements.track=all"
+    - "-c"
+    - "pg_stat_statements.max=10000"
+    - "-c"
+    - "log_min_duration_statement=100"
+    # ... og noen log_-flagg for fremtidig pgBadger-bruk
 ```
 
-Etter restart: `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;` i
-en migration eller manuelt.
+Migration `20261225000000_enable_pg_stat_statements.sql` kjører
+`CREATE EXTENSION IF NOT EXISTS pg_stat_statements` ved hver `dev:all`-
+oppstart (idempotent).
 
-### Verifiser etter aktivering
+Resultat: PgHero ser data så snart Postgres har behandlet ≥ 1 spørring.
+
+### Verifiser aktivering
 
 ```bash
-docker exec -i spillorama-system-postgres-1 psql -U spillorama -d spillorama \
+# 1. Sjekk shared_preload_libraries
+docker exec -i agent-a569f6a545f50e788-postgres-1 psql -U spillorama -d spillorama \
+  -c "SHOW shared_preload_libraries;"
+# Forventet output: pg_stat_statements
+
+# 2. Sjekk at extension er installert
+docker exec -i agent-a569f6a545f50e788-postgres-1 psql -U spillorama -d spillorama \
+  -c "SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';"
+# Forventet output: pg_stat_statements
+
+# 3. Sjekk at data samles
+docker exec -i agent-a569f6a545f50e788-postgres-1 psql -U spillorama -d spillorama \
   -c "SELECT query, calls, mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 5;"
+# Forventet: rader fra faktiske spørringer (ikke tom tabell)
 ```
 
-Hvis dette returnerer rader, kan PgHero lese det.
+NB: Container-navnet (`agent-a569f6a545f50e788-postgres-1`) varierer per
+worktree — bruk `docker ps` for å finne riktig navn lokalt.
+
+### Hvis du må deaktivere midlertidig
+
+Det er sjelden behov for det, men hvis du oppdager at
+`pg_stat_statements` koster mer CPU enn forventet:
+
+1. Kommenter ut `shared_preload_libraries`-linjen i `docker-compose.yml`.
+2. Kjør `npm run dev:nuke` for å restarte Postgres med ny config.
+3. NB: Migration vil fortsatt prøve å kjøre `CREATE EXTENSION` — det
+   feiler med `ERROR: pg_stat_statements must be loaded via
+   shared_preload_libraries`. Migration har `IF NOT EXISTS` så den feiler
+   ikke catastrophic, men ny extension installeres ikke.
 
 ---
 
@@ -417,6 +435,7 @@ DB-en, ikke prod-observability.
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-14 | Initial — OBS-8 levert. PgHero docker-stack + pgBadger entrypoint-script + runbook. | OBS-8 ops-agent |
+| 2026-05-14 | **OBS-7/OBS-8 aktivering fullført.** `pg_stat_statements` + `log_min_duration_statement=100ms` permanent aktivert i `docker-compose.yml` via `command:`-blokk. PgHero integrert i `dev:nuke` via `--observability`-flag (opt-in). Tobias-rapport: "vi skulle vente med database verktøy men alt er satt opp slik at vi ser alt som skjer i databasen". Tidligere bare-installert-ikke-aktivert (samlet null data) er nå reell observability fra T-0. | DB-observability fix-agent (Agent S) |
 
 ---
 
