@@ -171,6 +171,38 @@ Audit-eventet `game_plan_run.recreate_after_finish` inkluderer disse feltene for
 
 **Plassering:** `apps/backend/src/game/GamePlanRunService.ts` — `getOrCreateForToday()` linje ~570-720. NB: `planService.list()` returnerer `GamePlan[]` (uten items), så vi kaller `planService.getById(matched.id)` for å få `GamePlanWithItems.items.length`.
 
+### Round-replay-API (debug + compliance, PR 2026-05-14)
+
+**Endpoint:** `GET /api/_dev/debug/round-replay/:scheduledGameId?token=<TOKEN>`
+
+Returnerer komplett event-tidsserie for én scheduled-game-runde — pure read, ALDRI muterer state. Brukes til å reprodusere runden event-for-event uten å gjøre 5-10 manuelle SQL-queries.
+
+**Output:**
+- `metadata` — scheduled-game-rad + catalog + plan-run-status snapshot
+- `timeline[]` — kronologisk sortert event-strøm: `scheduled_game_created`, `ticket_purchase`, `master_action`, `draw`, `phase_winner`, `compliance_ledger`, `scheduled_game_completed`
+- `summary` — aggregert: total purchases, draws, winners med expected vs actual prize-sammenligning (auto-mult-validert), compliance-counts
+- `anomalies[]` — detektert via `roundReplayAnomalyDetector`:
+  - `payout_mismatch` (severity=critical) — vinner-utbetaling matcher ikke auto-multiplikator × pot-andel
+  - `missing_advance` (info) — plan-run finished på position > 1 uten advance i audit
+  - `stuck_plan_run` (warn) — scheduled-game completed > 30s siden, plan-run-status fortsatt running/paused
+  - `double_stake` (critical) — ticket-purchase-sum != compliance-ledger STAKE-sum
+  - `preparing_room_hang` (warn) — completed > 15s siden, plan-run.running → ingen ny runde spawnet
+- `errors{}` — per-kilde fail-soft-feilmeldinger (tom hvis alt OK)
+
+**Bruks-tilfeller:**
+- **Compliance-audit (§71 pengespillforskriften):** Reprodusere runde event-for-event for Lotteritilsynet — alle wallet-touch, ledger-events, master-actions er sporbart med ms-presisjon.
+- **Bug-investigation:** Anomaly-detektor flagger automatisk kjente mønstre (auto-mult-feil fra PR #1408/#1411/#1413, stuck plan-run fra PR #1407, double-stake fra Innsats/Forhåndskjøp-mønster).
+- **Test:** Snapshot-test mot referanse-replay for regresjons-deteksjon.
+
+**Service-arkitektur:**
+- `RoundReplayBuilder` (`apps/backend/src/observability/roundReplayBuilder.ts`) — 8 parallelle SELECTs, fail-soft per kilde, returnerer alltid en respons
+- `detectRoundReplayAnomalies` (`apps/backend/src/observability/roundReplayAnomalyDetector.ts`) — pure-function detektor, stateless, kaster aldri
+- `createDevRoundReplayRouter` (`apps/backend/src/routes/devRoundReplay.ts`) — token-gated route med 404 for ukjent ID
+
+**ALDRI fjern endepunktet uten ADR-prosess.** Det er compliance-grade audit-trail for §71. Hvis vi mister muligheten til å reprodusere en runde event-for-event, kan vi heller ikke gi Lotteritilsynet et fullstendig svar ved revisjon.
+
+**Performance:** ~20-100ms for en normal runde mot lokal Postgres. Ikke ment for high-frequency polling — tenk debug-tool, ikke runtime-feature.
+
 ### UI-komponenter (admin-web)
 
 | Fil | Hva |

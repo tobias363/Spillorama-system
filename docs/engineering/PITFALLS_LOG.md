@@ -49,8 +49,8 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 16 | 2026-05-13 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 15 | 2026-05-14 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 19 | 2026-05-14 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
@@ -1016,6 +1016,37 @@ npm install --prefix apps/backend --workspaces=false --save-dev <package>
 **Related:**
 - PR #1339 (Stryker mutation testing) — package-lock workspace bug
 - `apps/backend/package.json` devDependencies
+
+---
+
+### §6.17 — Manuelle SQL-queries for runde-debug er sløsete; bruk Round-replay-API
+
+**Severity:** P2 (operational efficiency, ikke en regresjons-bug)
+**Oppdaget:** 2026-05-14 (Tobias-direktiv etter to runder 7dcbc3ba + 330597ef der PM måtte gjøre 5-10 SQL-queries per runde for å forstå hva som skjedde)
+**Symptom:** PM/Tobias spør "ble auto-multiplikator anvendt riktig?" eller "hvorfor finishet plan-run uten å advance?" og må manuelt sammenstille rader fra `app_game1_scheduled_games`, `app_game1_draws`, `app_game1_phase_winners`, `app_game1_master_audit`, `app_game1_ticket_purchases`, `app_compliance_outbox`, `app_rg_compliance_ledger` — typisk 5-10 queries per runde. Feiltolkninger og sløsing av PM-tid.
+**Root cause:** Spill 1 har designet seg fragmentert audit-trail-tabell per tema (purchases / draws / winners / master-audit / ledger), noe som er korrekt arkitektonisk men gir overhead ved enkeltrunde-analyse.
+**Fix:** Bruk Round-replay-API. ÉN curl-kommando returnerer komplett event-tidsserie + summary + automatisk anomaly-deteksjon:
+```bash
+curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?token=$RESET_TEST_PLAYERS_TOKEN" | jq .
+```
+- `metadata` — alle scheduled-game-felter + catalog + plan-run-status
+- `timeline[]` — kronologisk sortert: scheduled_game_created, ticket_purchase, master_action, draw, phase_winner, compliance_ledger, scheduled_game_completed
+- `summary` — totals, winners med `expectedCents` vs `prizeCents` + `match`-flag (auto-mult-validert)
+- `anomalies[]` — payout_mismatch (critical), missing_advance (info), stuck_plan_run (warn), double_stake (critical), preparing_room_hang (warn)
+- `errors{}` — fail-soft per kilde
+
+**Prevention:**
+- Når du ber agent debug-e en runde: send round-replay-output i prompten istedet for å la agenten kjøre manuelle SQL
+- PM-rutinen ved Tobias-rapport "rar runde 7abc..": `curl round-replay/7abc → jq '.data.anomalies' → handle på det`
+- Endepunktet er compliance-grade audit-trail — ALDRI fjern uten ADR-prosess (§71-pengespillforskriften krever sporbarhet)
+
+**Related:**
+- PR feat/round-replay-api-2026-05-14 (initial implementasjon)
+- `apps/backend/src/observability/roundReplayBuilder.ts` — service
+- `apps/backend/src/observability/roundReplayAnomalyDetector.ts` — detektor
+- `apps/backend/src/routes/devRoundReplay.ts` — token-gated route
+- Skills `spill1-master-flow` v1.5.0 — full spec
+- §3.10 + §3.11 — relaterte payout/auto-mult-fallgruver som anomaly-detektoren fanger automatisk
 
 ---
 
