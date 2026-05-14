@@ -168,11 +168,27 @@ export interface Spill1LobbyState {
   runId: string | null;
   runStatus: "idle" | "running" | "paused" | "finished" | null;
   overallStatus: Spill1LobbyOverallStatus;
+  /**
+   * Neste planlagte spill. Når plan-run er finished men `currentPosition <
+   * items.length`, peker dette til NESTE plan-item (ikke det forrige som
+   * ble ferdigspilt). Fix 2026-05-14 — komplementært til PR #1422.
+   */
   nextScheduledGame: Spill1LobbyNextGame | null;
   /** 1-basert posisjon i planen. 0 hvis ingen run eller plan ferdig. */
   currentRunPosition: number;
   /** Antall items i planen. 0 hvis ingen plan. */
   totalPositions: number;
+  /**
+   * `true` hvis spilleplanen er HELT fullført for dagen
+   * (`run.status='finished'` OG `currentPosition >= items.length`). Master
+   * kan IKKE starte ny plan-syklus — speilet av `PLAN_COMPLETED_FOR_TODAY`-
+   * DomainError fra `getOrCreateForToday` (PR #1422, Tobias-direktiv
+   * 2026-05-14 10:17: "Plan-completed beats stengetid").
+   *
+   * Optional for backwards-compat under utrulling — eldre payloads uten
+   * feltet skal fortsatt parse. Default-tolkning: `false`.
+   */
+  planCompletedForToday?: boolean;
 }
 
 export interface HallDefinition {

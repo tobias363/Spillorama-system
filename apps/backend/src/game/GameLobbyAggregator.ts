@@ -985,10 +985,34 @@ export class GameLobbyAggregator {
     // currentPosition kan være 0 (idle, lazy-create-default 1, men vi er
     // defensive). Hvis currentPosition > items.length, fall tilbake til
     // siste posisjon. Hvis 0 eller plan-run mangler, peke til item 1.
+    //
+    // Fix 2026-05-14 (Tobias-rapport, komplementært til PR #1422):
+    //   Når plan-run.status='finished' OG `currentPosition < items.length`,
+    //   skal master-UI vise NESTE plan-item som "neste spill", ikke det
+    //   forrige som ble ferdigspilt. Master-klikk vil trigge
+    //   `getOrCreateForToday` som DELETE+INSERT-er ny plan-run med
+    //   `current_position = previousPosition + 1` (PR #1422-logikken).
+    //
+    //   Eksempel: finished på position=1 (Bingo) av 13 → master-UI viser
+    //   "1000-spill" (position=2) som neste, ikke "Bingo" igjen.
+    //
+    //   Hvis `currentPosition >= items.length` (plan helt ferdig) →
+    //   peker fortsatt til siste posisjon. UI ser `planRunStatus='finished'`
+    //   og rendrer "Spilleplan ferdig"-banner. (Tobias-direktiv 10:17:
+    //   "Plan-completed beats stengetid".)
     const rawPosition = planRun?.currentPosition ?? 0;
+    const isFinishedWithNextItem =
+      planRun?.status === "finished" &&
+      rawPosition > 0 &&
+      rawPosition < items.length;
+    const targetPosition = isFinishedWithNextItem
+      ? rawPosition + 1
+      : rawPosition === 0
+        ? 1
+        : rawPosition;
     const positionForDisplay = Math.max(
       1,
-      Math.min(rawPosition === 0 ? 1 : rawPosition, items.length),
+      Math.min(targetPosition, items.length),
     );
     const currentItem = items.find((i) => i.position === positionForDisplay);
     if (!currentItem) {
@@ -1007,17 +1031,23 @@ export class GameLobbyAggregator {
     // agentGamePlan.ts. Kjent kode-duplisering; Bølge 2 (MasterActionService)
     // konsoliderer. Når plan-run mangler kan ikke override eksistere ennå,
     // så jackpotSetupRequired = catalog.requiresJackpotSetup uten override-sjekk.
+    //
+    // Fix 2026-05-14: jackpot-lookup må peke til `positionForDisplay`, ikke
+    // `planRun.currentPosition`. Når plan-run er finished+next-item-shown,
+    // peker `positionForDisplay` til kommende posisjon — den nye plan-run-en
+    // som spawnes vil ha override-key matching dette feltet.
+    const jackpotLookupKey = String(positionForDisplay);
     const jackpotSetupRequired = planRun
       ? currentItem.catalogEntry.requiresJackpotSetup &&
         !Object.prototype.hasOwnProperty.call(
           planRun.jackpotOverrides,
-          String(planRun.currentPosition),
+          jackpotLookupKey,
         )
       : currentItem.catalogEntry.requiresJackpotSetup;
 
     // pendingJackpotOverride — null hvis plan-run mangler
     const pendingJackpotOverride = planRun
-      ? planRun.jackpotOverrides[String(planRun.currentPosition)] ?? null
+      ? planRun.jackpotOverrides[jackpotLookupKey] ?? null
       : null;
 
     // status-mapping — null hvis plan-run mangler (idle, pre-Start)
