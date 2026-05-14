@@ -103,26 +103,36 @@ function ensurePatternWonStyles(): void {
 }
 .premie-row .premie-cell {
   font-size: 11px;
-  font-weight: 600;
-  color: inherit;
+  font-weight: 700;
   text-align: center;
-  padding: 3px 5px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid transparent;
+  padding: 4px 8px;
+  border-radius: 999px;
   white-space: nowrap;
 }
-.premie-row .premie-cell.col-hvit { border-color: rgba(245, 245, 245, 0.15); }
-.premie-row .premie-cell.col-gul { border-color: rgba(241, 196, 15, 0.25); }
-.premie-row .premie-cell.col-lilla { border-color: rgba(155, 89, 182, 0.25); }
+/* Bong-fargede solide bakgrunner (Tobias-direktiv 2026-05-14, bilde-paritet).
+ * Tekst-farge tilpasses for kontrast: mørk på hvit/gul, mørk-lilla på lys-lilla. */
+.premie-row .premie-cell.col-hvit {
+  background: #efefef;
+  color: #1a0a0a;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.premie-row .premie-cell.col-gul {
+  background: #f1c40f;
+  color: #1a0a0a;
+  border: 1px solid rgba(255, 220, 100, 0.6);
+}
+.premie-row .premie-cell.col-lilla {
+  background: #c8b3e0;
+  color: #2a0a3a;
+  border: 1px solid rgba(180, 150, 220, 0.6);
+}
 .premie-row.active {
   border: 1.5px solid #ffcc00;
   color: #fff;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 0 6px rgba(255,200,0,0.2);
 }
-.premie-row.active .premie-cell {
-  background: rgba(255, 200, 0, 0.08);
-}
+/* Active-state beholder bong-fargede celler — kun raden får gul ramme + glow.
+ * (Tobias-direktiv 2026-05-14: hvert celle beholder sin solid bong-farge.) */
 .premie-row.completed {
   text-decoration: line-through;
   text-decoration-thickness: 1.5px;
