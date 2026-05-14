@@ -50,13 +50,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 19 | 2026-05-14 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 23 | 2026-05-14 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 
-**Total:** 93 entries (per 2026-05-14)
+**Total:** 94 entries (per 2026-05-14)
 
 ---
 
@@ -1016,6 +1016,40 @@ npm install --prefix apps/backend --workspaces=false --save-dev <package>
 **Related:**
 - PR #1339 (Stryker mutation testing) — package-lock workspace bug
 - `apps/backend/package.json` devDependencies
+
+### §6.17 — `pg_stat_statements`-extension installert via migration ≠ aktivert; krever `shared_preload_libraries` på prosess-oppstart
+
+**Severity:** P1 (observability black hole — installert verktøy gir null data)
+**Oppdaget:** 2026-05-14 (Tobias: "vi skulle vente med database verktøy men alt er satt opp slik at vi ser alt som skjer i databasen")
+**Symptom:** Migration `20261225000000_enable_pg_stat_statements.sql` kjørte vellykket (`CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`). `SELECT * FROM pg_extension WHERE extname='pg_stat_statements'` returnerte 1 rad → utvikler antok at observability var aktiv. Men `SELECT * FROM pg_stat_statements` ga ALDRI noen rader (eller bare leftover-data fra et tidligere session). PgHero-dashboardet viste tomme tabeller.
+**Root cause:** `pg_stat_statements` er ikke en vanlig extension. Den hooker inn i Postgres' query-executor og kan KUN lastes hvis `shared_preload_libraries` inkluderer `pg_stat_statements` ved prosess-oppstart. `CREATE EXTENSION` registrerer extension-en i `pg_extension`-tabellen, men selve query-trackingen krever at biblioteket er lastet via `shared_preload_libraries` (settable kun via `command:` til postgres-prosessen, eller `postgresql.conf` med restart).
+**Fix:** Sett `shared_preload_libraries=pg_stat_statements` på Postgres-prosessen ved oppstart. I `docker-compose.yml`:
+```yaml
+postgres:
+  image: postgres:16-alpine
+  command:
+    - "postgres"
+    - "-c"
+    - "shared_preload_libraries=pg_stat_statements"
+    - "-c"
+    - "pg_stat_statements.track=all"
+    - "-c"
+    - "pg_stat_statements.max=10000"
+    - "-c"
+    - "log_min_duration_statement=100"
+```
+Etter `docker-compose down && docker-compose up -d postgres` vil queries faktisk tracker. Verifiser via `SHOW shared_preload_libraries;` (skal vise `pg_stat_statements`).
+**Prevention:**
+- I migration-doc-en for tools som krever `shared_preload_libraries`, STÅR det eksplisitt at compose-config må endres — IKKE bare migration. Sjekk om migration-doc-en din inneholder en slik instruks og om den faktisk er gjennomført.
+- Sjekkliste når du legger til nye DB-extensions: er det en `shared_preload_libraries`-extension? Hvis ja, oppdater både migration OG `docker-compose.yml` i samme PR.
+- Verifiser end-to-end at observability faktisk samler data — ikke bare at extension er registrert. Test-spørring: `SELECT count(*) FROM pg_stat_statements;` skal returnere > 0 etter trafikk.
+- Andre Postgres-extensions med samme krav: `pg_cron`, `auto_explain`, `pg_prewarm`, `pg_repack`. Hvis du noensinne ser `must be loaded via shared_preload_libraries` i feilmeldingen — det er denne fallgruven.
+**Related:**
+- `apps/backend/migrations/20261225000000_enable_pg_stat_statements.sql` — migration-doc-en advarte om dette i kommentar-blokken, men ble glemt
+- `docker-compose.yml` postgres-service `command:`-blokk (OBS-7-fix 2026-05-14)
+- `scripts/dev/start-all.mjs` `--observability`-flag (OBS-8-integrasjon)
+- `docs/operations/PGHERO_PGBADGER_RUNBOOK.md` §3 (aktivering-doc)
+- PR feat/db-observability-activate-2026-05-14
 
 ---
 

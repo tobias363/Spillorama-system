@@ -1891,6 +1891,56 @@ Verifisert via test:
 
 ---
 
+### 2026-05-14 — DB-observability aktivering (fix-agent, Agent S, OBS-7/OBS-8)
+
+**Scope:** Tobias-rapport 2026-05-14: "vi skulle vente med database verktøy men alt er satt opp slik at vi ser alt som skjer i databasen med de kallene som gjøres hva som tar lang tid osv? det er ekstremt viktig at vi overvåker den prossesen nå i testfasen slik at vi kan optimalisere." OBS-7 (`pg_stat_statements`-migration) og OBS-8 (PgHero/pgBadger docker-stack) var begge merget tidligere på dagen, men `pg_stat_statements` samlet NULL data fordi `shared_preload_libraries` ikke var satt på Postgres-prosessen. PM gjorde quick-fix manuelt i hovedrepo, men det ble ikke committet — dev:nuke ville reset-e det igjen. Denne PR-en gjør fixen permanent + integrerer PgHero i `dev:nuke`-flyten via opt-in flag.
+
+**Inputs gitt:**
+- Branch: `feat/db-observability-activate-2026-05-14`
+- Filer: `docker-compose.yml`, `scripts/dev/start-all.mjs`, `scripts/dev/nuke-restart.sh`, `docs/operations/PGHERO_PGBADGER_RUNBOOK.md`, `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`, `MASTER_README.md`, `docs/engineering/PITFALLS_LOG.md`, `docs/engineering/AGENT_EXECUTION_LOG.md`
+- Pekere: `apps/backend/migrations/20261225000000_enable_pg_stat_statements.sql` (kommentaren forklarer at compose-config må endres — ble glemt), `docker-compose.observability.yml` (PgHero-stack fra OBS-8), `scripts/observability-up.sh`
+- Forbudt: Agent N/O/P/Q's worktrees, PR #1424, #1425, #1430, backend-kode (Sentry DB-tracing var allerede landet)
+
+**Outputs produsert:**
+- `docker-compose.yml` (+25 linjer): postgres-service fikk permanent `command:`-blokk med `shared_preload_libraries=pg_stat_statements`, `pg_stat_statements.track=all`, `pg_stat_statements.max=10000`, `log_min_duration_statement=100`, `log_statement=ddl`, `log_line_prefix='%t [%p] %u@%d '`, `log_destination=stderr`. Disse konfigurerer både `pg_stat_statements`-aktivering OG slow-query-logger for pgBadger.
+- `scripts/dev/start-all.mjs` (+78 linjer): nytt `--observability`-flag + `OBSERVABILITY_ENABLED` env-var (opt-in). Ny `ensureObservabilityStack()` starter PgHero via `docker-compose.observability.yml` etter migrate (slik at extension finnes når PgHero kobler til). Status-tabell viser PgHero-URL når aktivert. Tip-melding nederst forteller bruker hvordan aktivere hvis ikke på.
+- `scripts/dev/nuke-restart.sh` (+15 linjer): forwarder `--observability` (og andre dev:all-flags) til underliggende `npm run dev:all`. Kommando er nå `npm run dev:nuke -- --observability`.
+- `docs/operations/PGHERO_PGBADGER_RUNBOOK.md`: §2 quick-start oppdatert med anbefalt `dev:nuke -- --observability`-flow. §3 omskrevet fra "valgfritt — Tobias beslutter" til "permanent aktivert per 2026-05-14" med verifisering-eksempler. Endringslogg-rad lagt til.
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`: Vedlegg B fikk PgHero-URL-rad + forklarings-blokk om OBS-7/OBS-8 og når man bruker `--observability`. §11.5 endringslogg fikk 2026-05-14-entry. Top-of-file dato bumpet til 2026-05-14.
+- `MASTER_README.md`: Quick Start-blokk byttet fra `npm run dev` + `npm run dev:admin` separate kommandoer til `npm run dev:nuke` (én kommando), pluss eksempel på `dev:nuke -- --observability`. Lagt til peker til `PGHERO_PGBADGER_RUNBOOK.md`.
+- `docs/engineering/PITFALLS_LOG.md`: §6.17 ny entry (50 linjer) — "pg_stat_statements installert via migration ≠ aktivert". Indeks oppdatert (§6 fra 16 til 17 entries, total fra 93 til 94).
+
+**Verifisering:**
+- `bash -n scripts/dev/nuke-restart.sh` → OK
+- `node --check scripts/dev/start-all.mjs` → OK
+- `docker-compose config` parser med `command:`-blokken intakt (postgres-service viser alle 7 `-c`-flagg)
+- Tidligere manuelt quick-fix gjort av PM (`docker-compose up -d --force-recreate postgres` på hovedrepo) er nå reflektert i kode — neste `dev:nuke` vil ikke lenger deaktivere det
+
+**Fallgruver oppdaget:**
+- **§6.17:** Installasjon av en Postgres-extension (`CREATE EXTENSION`) er IKKE nok hvis extension-en krever `shared_preload_libraries`. Selv om `pg_extension`-tabellen har raden og PgHero ser den, samles ingen data uten at biblioteket er lastet ved prosess-oppstart. Andre extensions med samme krav: `pg_cron`, `auto_explain`, `pg_prewarm`, `pg_repack`. Migration-doc-en for `20261225000000` advarte om dette, men advarselen ble lest og ikke fulgt opp — det er en process-failure, ikke en kunnskaps-failure.
+
+**Læring:**
+- Opt-in opbservability via flag holder default-startup rask (PgHero-image er ~150MB å pulle første gang) men eksplisitt på når Tobias vil teste. Default off er riktig her — pilot-test-sesjoner er bevisste, ikke alltid-på.
+- Bash `for arg in "$@"; do` med whitelisting av flags er enklere enn full arg-parsing — vi forwarder kun de fire vi kjenner (`--observability`, `--no-harness`, `--no-admin`, `--no-docker`) til `dev:all`.
+- Tip-meldingen nederst i status-tabellen (når flagget ikke er på) er kritisk for discoverability — uten den ville Tobias måtte huske flagget. Hvis bruker er på, sier den ingenting (unngår spam).
+- Migration-kommentarer som ber om compose-config-endringer MÅ enten ha en pre-commit-sjekk eller bli del av en checkliste. Vi har nå PITFALLS §6.17 som dokumentasjon, men prosess-stedet for "har du oppdatert compose når du legger til shared-preload-extension" mangler fortsatt.
+
+**Eierskap:**
+- `docker-compose.yml:31-66` (postgres-service med `command:`-blokk)
+- `scripts/dev/start-all.mjs:142-211` (`ensureObservabilityStack`)
+- `scripts/dev/nuke-restart.sh:113-130` (flag-forwarding + EXTRA_FLAGS-logikk)
+
+**Verifisering (Tobias-flyt):**
+- [ ] Kjør `npm run dev:nuke -- --observability`
+- [ ] Forvent: status-tabell viser `PgHero (DB obs) : http://localhost:8080 (login: admin / spillorama-2026-test)`
+- [ ] Åpne http://localhost:8080 i nettleser → forvent Slow queries / Queries / Connections-tabs med faktiske data
+- [ ] Kjør noen handlinger i admin/spillerklient → vent 30s → refresh PgHero → forvent at slow queries dukker opp
+- [ ] Kjør `npm run dev:nuke` (uten flag) → forvent ingen PgHero, men tip-melding om at flagget eksisterer
+
+**Tid:** ~40 min agent-arbeid
+
+---
+
 ### 2026-05-14 — Hall-switcher state-refresh bug (fix-agent, F-04)
 
 **Scope:** Tobias-rapport 2026-05-14 — hall-bytte i `/web/`-lobby dropdown gjorde ingenting synlig. Game-tiles fortsatte å vise gammel hall sin status, og hvis aktiv runde kjørte på master-hallen ble den ikke vist når bruker byttet til den. Direktiv: "siden må da oppdateres med de innstillingene som gjelder for den hallen". Pilot-UX-bug — spillere ser feil status etter hall-bytte.
@@ -1977,6 +2027,7 @@ Verifisert via test:
 | 2026-05-13 | I16/F-02 plan-run lifecycle auto-reconcile fra lobby-poll i `Game1LobbyService` (10 nye unit-tester, < 50ms latency, idempotent). | Agent (I16) |
 | 2026-05-14 | F2 (BUG-F2) — pre-engine ticket-config-binding-hook i `GamePlanEngineBridge.onScheduledGameCreated`. Dekker hullet fra PR #1375 (post-engine kun). Pre-game buy-popup viser nå riktige priser (Yellow=10 kr, ikke 20). 9 nye unit-tester, alle 105 eksisterende grønne. Skill `spill1-master-flow` v1.2.0 + PITFALLS §3.10 ny entry. | fix-agent (general-purpose) |
 | 2026-05-14 | F-04 (Hall-switcher BUG) — `apps/backend/public/web/lobby.js` utvidet `switchHall()` til å parallell-refetche balance + compliance + per-hall Spill 1-lobby-state + global game-status. Ny `loadSpill1Lobby()` mot `/api/games/spill1/lobby?hallId=...`. `buildStatusBadge('bingo')` mapper nå per-hall `overallStatus` til Åpen/Stengt/Starter snart/Pauset/Venter med fail-soft fallback til global gameStatus. Confirm-modal ved aktiv runde. Idempotens (samme hall = no-op). 13 nye unit-tester (lobby.js i jsdom via fs.readFileSync). Alle 1510 admin-web-tester PASS. PITFALLS §7.17 ny entry. | fix-agent (general-purpose) |
+| 2026-05-14 | OBS-7/OBS-8 aktivering (Agent S) — `pg_stat_statements`-extension installert via migration 20261225000000, men extension-en samlet null data fordi `shared_preload_libraries` ikke var satt på Postgres-prosessen. Permanent fikset: `docker-compose.yml` postgres-service fikk `command:`-blokk med `shared_preload_libraries=pg_stat_statements` + slow-query-log på 100ms. PgHero integrert i `dev:nuke` via opt-in `--observability`-flag. Tobias-direktiv: "overvåk DB-prosessen i testfasen". Bruk `npm run dev:nuke -- --observability` for pilot-test-sesjoner — PgHero på localhost:8080 (admin / spillorama-2026-test). PITFALLS §6.17 ny entry. Vedlegg B i PM_ONBOARDING_PLAYBOOK + MASTER_README + PGHERO_PGBADGER_RUNBOOK oppdatert. | fix-agent Agent S (general-purpose) |
 
 ---
 

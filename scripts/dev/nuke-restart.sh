@@ -3,8 +3,10 @@
 # Nuclear restart for dev-stack — dreper ALT og starter rent.
 #
 # Bruk:
-#   npm run dev:nuke              # via package.json
-#   bash scripts/dev/nuke-restart.sh   # direkte
+#   npm run dev:nuke                          # via package.json
+#   npm run dev:nuke -- --observability       # med PgHero DB-dashbord på :8080
+#   bash scripts/dev/nuke-restart.sh          # direkte
+#   bash scripts/dev/nuke-restart.sh --observability  # direkte med PgHero
 #
 # Hva dette scriptet gjør (i rekkefølge):
 #   1. Dreper alle node-prosesser relatert til Spillorama
@@ -13,7 +15,10 @@
 #   3. Stopper alle Docker-containere relatert til Spillorama
 #      (inkl. chaos-test-stacks fra worktrees + foreldreløse containers)
 #   4. Pull fersk main
-#   5. Kjører `npm run dev:all -- --reset-state` (fersh data)
+#   5. Bygger game-client (statisk bundle for spillerklient)
+#   6. Kjører `npm run dev:all -- --reset-state` (fersh data)
+#      Forwarder --observability/-flag hvis sendt inn, slik at PgHero
+#      starter sammen med backend (OBS-7/OBS-8, 2026-05-14).
 #
 # Hvorfor:
 # --------
@@ -107,11 +112,26 @@ done_step "game-client bundle bygd"
 
 # ── §6 Start dev-stack med fersh data ────────────────────────────────────
 
-info "Starter dev-stack (Docker + Postgres + Redis + migrate + seed + backend + admin-web + game-client)..."
+# OBS-7/OBS-8 (2026-05-14): forward --observability-flag til dev:all hvis
+# sendt inn til dev:nuke. Eksempel: `npm run dev:nuke -- --observability`
+# starter PgHero på localhost:8080 sammen med resten av stacken.
+EXTRA_FLAGS=""
+for arg in "$@"; do
+  if [[ "$arg" == "--observability" || "$arg" == "--no-harness" || "$arg" == "--no-admin" || "$arg" == "--no-docker" ]]; then
+    EXTRA_FLAGS="$EXTRA_FLAGS $arg"
+  fi
+done
+
+if [[ -n "$EXTRA_FLAGS" ]]; then
+  info "Starter dev-stack (Docker + Postgres + Redis + migrate + seed + backend + admin-web + game-client) med flags:${EXTRA_FLAGS}..."
+else
+  info "Starter dev-stack (Docker + Postgres + Redis + migrate + seed + backend + admin-web + game-client)..."
+fi
 echo
 echo -e "${YELLOW}─────────────────────────────────────────────────────────${RESET}"
 echo -e "${YELLOW}  Ctrl+C dreper alt pent. Vent på status-tabellen.${RESET}"
 echo -e "${YELLOW}─────────────────────────────────────────────────────────${RESET}"
 echo
 
-exec npm run dev:all -- --reset-state
+# shellcheck disable=SC2086  # we want word-splitting on EXTRA_FLAGS
+exec npm run dev:all -- --reset-state $EXTRA_FLAGS
