@@ -45,7 +45,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | Kategori | Antall entries | Sist oppdatert |
 |---|---:|---|
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
-| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 7 | 2026-05-10 |
+| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 8 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 9 | 2026-05-10 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 94 entries (per 2026-05-14)
+**Total:** 95 entries (per 2026-05-14)
 
 ---
 
@@ -291,6 +291,32 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - Hard rule: ingen wallet-operasjon uten idempotency-key
 - 90-dager TTL cleanup (BIN-767)
 **Related:** `apps/backend/src/wallet/IdempotencyKeys.ts`
+
+### §2.8 — Aldri direct MCP-write mot prod-DB (ADR-0023)
+
+**Severity:** P0 (regulatorisk-brudd + wallet-integritet)
+**Oppdaget:** Designet 2026-05-14 etter Tobias-direktiv om Evolution-grade DB-robusthet
+**Symptom:**
+- Agent eller PM kjører `INSERT/UPDATE/DELETE` mot `postgres-spillorama-prod` via MCP
+- Direct `UPDATE app_wallet_entries` bryter REPEATABLE READ-isolation → risiko for double-payout (ekte penger)
+- Direct `UPDATE app_compliance_audit_log` bryter hash-chain → audit-data avvist av Lotteritilsynet
+- Direct `UPDATE app_rg_restrictions SET timed_pause_until=NULL` overstyrer §66 spillvett → dagsbøter 5k-50k NOK/hendelse
+- Schema-drift mellom prod og `apps/backend/migrations/` → neste deploy kan korrupte data
+**Fix:**
+- Prod-MCP (`postgres-spillorama-prod`) MÅ være `@modelcontextprotocol/server-postgres` (read-only by design)
+- All schema-/data-korreksjon i prod går via migration-PR (forward-only, ADR-0014)
+- Korreksjon i audit-tabeller: append-only ny rad med `correction_reason` + `original_id`-link
+**Prevention:**
+- Verifiser ved ny sesjon: `claude mcp list | grep "postgres-spillorama-prod"` → må vise `@modelcontextprotocol/server-postgres`
+- Lokal dev-DB (`postgres-spillorama`) kan ha write-capable MCP (`uvx postgres-mcp --access-mode=unrestricted`) — kun localhost
+- PR-template har checkbox: "[ ] Ingen direct MCP-write mot prod-DB (ADR-0023)"
+- Hvis prod-MCP byttes til write-capable → COMPLIANCE-BRUDD → eskalere til Tobias umiddelbart
+**Related:**
+- [ADR-0023 — MCP write-access policy](../adr/0023-mcp-write-access-policy.md)
+- [ADR-0004 — Hash-chain audit-trail](../adr/0004-hash-chain-audit.md)
+- [ADR-0005 — Outbox-pattern](../adr/0005-outbox-pattern.md)
+- [ADR-0014 — Idempotent migrations](../adr/0014-idempotent-migrations.md)
+- `~/.claude.json` user-scope MCP-config
 
 ---
 

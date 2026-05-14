@@ -73,6 +73,10 @@ Detaljer: [`docs/engineering/BUG_RESURRECTION_DETECTOR.md`](../docs/engineering/
 
 - [ ] Hvis denne PR-en tar en beslutning som påvirker ≥ 2 agenter eller services, er en ADR opprettet i `docs/adr/`? (N/A for ren bug-fix, polish, eller implementasjon av eksisterende ADR. Se [`docs/adr/README.md`](../docs/adr/README.md).)
 
+## MCP write-access (ADR-0023)
+
+- [ ] **Ingen direct MCP-write mot prod-DB i denne PR-en.** All schema-/data-korreksjon i prod går via migration-PR (forward-only). Lokal dev-DB kan bruke write-capable MCP. Se [ADR-0023](../docs/adr/0023-mcp-write-access-policy.md).
+
 ## Testing
 
 - [ ] `npm --prefix apps/backend run check`
