@@ -128,9 +128,15 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Atlas
+        # Pinned to v0.37.0 — v0.38+ moved `migrate lint` to Atlas Pro
+        # subscription. v0.37.0 is the last Community-Edition release
+        # with full lint support. See
+        # https://atlasgo.io/blog-v038#change-in-v038-atlas-migrate-lint.
+        # When we upgrade we either need an Atlas Pro license or a
+        # CE-compatible alternative.
         uses: ariga/setup-atlas@v0
         with:
-          version: "latest"
+          version: "v0.37.0"
 
       - name: Atlas migrate lint (changed migrations vs main)
         env:
