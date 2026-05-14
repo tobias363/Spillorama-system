@@ -59,6 +59,76 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — Innsats + Forhåndskjøp dobbel-telling (fix-agent, BUG)
+
+**Branch:** `fix/innsats-forhandskjop-classification-2026-05-14`
+**PR:** #<this-PR>
+**Agent type:** fix-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Tobias-rapport 2026-05-14 09:51 — screenshot viser BÅDE `Innsats: 30 kr` og `Forhåndskjøp: 30 kr` etter at bruker har kjøpt 3 bonger PRE-game.
+
+**Bug-evidens (verifisert via SQL):**
+- `app_game1_ticket_purchases`: `total_amount_cents/100 = 30 kr`, `purchased_at = 09:49:08.314`
+- `app_game1_scheduled_games`: `actual_start_time = 09:49:08.354` (40 ms etter purchase → pre-game-kjøp)
+- Klient (`LeftInfoPanel.ts:147,168`) rendrer `Innsats` fra `state.myStake` (= 30) og `Forhåndskjøp` fra `state.myPendingStake` (= 30 fra lingering armedPlayerSelections)
+
+**Root cause:**
+- Pre-game `bet:arm` setter `armedPlayerIds` + `armedPlayerSelections` i `RoomStateManager` (in-memory)
+- Master starter scheduled-game → `MasterActionService.onScheduledGameSpawned` hook → `Game1ArmedToPurchaseConversionService.convertArmedToPurchases` INSERTer DB-purchase-rader
+- Engine.startGame leser purchases og genererer `gameTickets`
+- **MEN:** `runArmedToPurchaseConversionForSpawn` (i `apps/backend/src/index.ts:2932-3115`) glemte å kalle `roomState.disarmPlayer(roomCode, playerId)` etter conversion
+- `buildRoomUpdatePayload` (`roomHelpers.ts:572`) regner BÅDE `playerStakes` (fra gameTickets) OG `playerPendingStakes` (fra lingering armedPlayerSelections) → samme kjøp talt to ganger
+
+**Generisk-flyt har dette riktig:** `gameLifecycleEvents.ts:153` kaller `disarmAllPlayers(roomCode)` etter `engine.startGame()`. Spill 1 scheduled-game-flyt (`Game1MasterControlService.startGame` → `Game1DrawEngineService.startGame`) glemte å speile mønsteret.
+
+**Hva ble gjort:**
+
+1. **Fix root cause** (`apps/backend/src/index.ts:runArmedToPurchaseConversionForSpawn`):
+   - Bygde `userId → playerId` Map under armed-resolve-loopen
+   - Etter `convertArmedToPurchases` returnerer success, iterer over `result.conversions` og kall `roomState.disarmPlayer(roomCode, playerId)` for hver konvertert spiller
+   - Speiler `gameLifecycleEvents.ts:153`-mønsteret eksakt for Spill 1 scheduled-game-flyten
+
+2. **Tester** (`apps/backend/src/util/roomHelpers.armedConversionIsolation.test.ts` — NY, 7 tester):
+   - `BUG dobbel-telling: PRE-game-kjøp → Innsats fra gameTickets, Forhåndskjøp = undefined` (root case)
+   - `BUG dobbel-telling: regresjon — VEDLIKE armed → dobbel-telling` (dokumenterer at `buildRoomUpdatePayload` er ren funksjonell)
+   - `Mid-round additive arm: live + nye → Innsats + Forhåndskjøp begge populated, ikke overlap`
+   - `Multi-color: 1 hvit + 1 gul + 1 lilla LIVE → Innsats, Forhåndskjøp tom`
+   - `Spectator + armed for next round → Innsats tom, Forhåndskjøp populated`
+   - `Idempotens: 2 sekvensielle payloads → samme tall`
+   - `Round transition: armed cleared mellom runder → ingen krysspollering`
+   - Alle 7 tester PASS
+
+3. **Doc-oppdatering:**
+   - `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon 13 om Innsats vs Forhåndskjøp + Tobias-direktiv
+   - `docs/engineering/PITFALLS_LOG.md` §7.18 — ny entry med detaljert root-cause + fix + prevention
+   - PITFALLS-indeks teller oppdatert (§7: 14 → 15; total: 92 → 93)
+   - Denne entry i AGENT_EXECUTION_LOG
+
+**Filer endret:**
+- `apps/backend/src/index.ts` (3 endringer: userIdToPlayerId-map deklarasjon, .set() i loop, disarm-loop etter result)
+- `apps/backend/src/util/roomHelpers.armedConversionIsolation.test.ts` (NY, 366 linjer, 7 tester)
+- `.claude/skills/spill1-master-flow/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+**Verifikasjon:**
+- `npx tsx --test apps/backend/src/util/roomHelpers.armedConversionIsolation.test.ts` — 7/7 pass
+- `npx tsx --test apps/backend/src/util/roomHelpers.roundStateIsolation.test.ts` — 7/7 pass (regresjon OK)
+- `cd apps/backend && npx tsc --noEmit` — clean
+- StakeCalculator.test.ts (game-client) — 25/25 pass (regresjon OK)
+
+**Læring:**
+- Når man legger til ny spawn-vei for scheduled-games, MÅ man speile `disarmAllPlayers`/`disarmPlayer`-mønsteret eksakt
+- `buildRoomUpdatePayload` er ren funksjonell og påvirkes ikke av denne fix-en — bug ligger i caller-state (`roomState`-mutering)
+- Defense-in-depth via lingering-tests: en negativ regresjons-test (`VEDLIKE armed-state ETTER gameTickets gir dobbel-telling`) gjør invariansen eksplisitt og fanger fremtidige regresjoner i payload-funksjonen
+
+**Forbidden zones respektert:**
+- IKKE rørt `Game1PayoutService.ts` (PR #1417)
+- IKKE rørt `spill1VariantMapper.ts` (PR #1413)
+- IKKE rørt `lobby.js` (PR #1415)
+- IKKE rørt `LoadingOverlay.ts` (PR #1409)
+
+**Eierskap:** `apps/backend/src/index.ts:runArmedToPurchaseConversionForSpawn` + `apps/backend/src/util/roomHelpers.armedConversionIsolation.test.ts`
+
 ### 2026-05-14 — F2 (pre-engine ticket-config-binding) BUG-F2-fix
 
 **Branch:** `fix/pre-engine-ticket-config-binding-2026-05-14`

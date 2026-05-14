@@ -259,6 +259,23 @@ Symptom: UI viser `MASTER_HALL_RED` selv om master vil starte uten registrerte s
 Symptom: `STALE_PLAN_RUN`-warning på lobby + master kan ikke starte.
 **Fix:** `GamePlanRunCleanupService` — cron 03:00 Oslo auto-finishes alle `status IN ('running','paused')` med `business_date < CURRENT_DATE`. Inline self-heal-hook bound til `getOrCreateForToday`. Audit-event `game_plan_run.auto_cleanup`.
 
+### 13. Innsats + Forhåndskjøp dobbel-telling (PR #<this-PR>, 2026-05-14)
+
+Symptom: Spiller-shell (LeftInfoPanel) viser BÅDE `Innsats: 30 kr` og `Forhåndskjøp: 30 kr` etter at bruker har kjøpt 3 bonger PRE-game. Korrekt: kun `Innsats: 30 kr`.
+
+**Tobias-direktiv 2026-05-14 (KANONISK):**
+- Bonger kjøpt **FØR** runde starter → telles som **INNSATS** for kommende/aktive spill
+- Bonger kjøpt **MIDT i** runde → telles som **FORHÅNDSKJØP** for **neste runde**
+- ALDRI tell samme bonge i begge
+
+**Root cause:** Pre-game `bet:arm` setter `armedPlayerSelections` i `RoomStateManager`. `Game1ArmedToPurchaseConversionService.convertArmedToPurchases` konverterer dem til DB-purchase-rader når master starter runden — men hooken `runArmedToPurchaseConversionForSpawn` glemte å kalle `roomState.disarmPlayer(roomCode, playerId)` etter conversion. `buildRoomUpdatePayload` (roomHelpers.ts:572) regnet BÅDE `playerStakes` (fra gameTickets) OG `playerPendingStakes` (fra lingering armedPlayerSelections) → samme kjøp talt to ganger.
+
+**Fix (PR #<this-PR>):** `runArmedToPurchaseConversionForSpawn()` i `apps/backend/src/index.ts` kaller nå `roomState.disarmPlayer(roomCode, playerId)` for hver successful conversion. Speiler `gameLifecycleEvents.ts:153`-mønsteret som er etablert for generisk `BingoEngine.startGame`-flyt.
+
+**Tester:** `apps/backend/src/util/roomHelpers.armedConversionIsolation.test.ts` — 7 scenarier (pre-game-only, mid-round-additive, multi-color, spectator, idempotens, round-transition + negativ regresjons-test).
+
+**Konsekvens for skill:** Hvis du legger til ny scheduled-game-spawn-vei eller endrer conversion-hooken, sørg ALLTID for at armed-state cleares post-conversion. `buildRoomUpdatePayload` er ren funksjonell — bug-en ligger i caller-state, ikke i payload-funksjonen.
+
 ### 12. Pre-game viser 20 kr per bong istedenfor 10 kr (Yellow) / 30 kr istedenfor 15 kr (Purple)
 Symptom: Spillere som åpner buy-popup PRE-game (mellom runder, eller før master har trykket "Start") ser feil priser. Backend room-snapshot returnerer `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE farger istedenfor riktige per-farge multipliers (Yellow=2, Purple=3).
 

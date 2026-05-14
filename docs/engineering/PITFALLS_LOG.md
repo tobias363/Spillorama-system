@@ -1,7 +1,7 @@
 # Spillorama Pitfalls Log — kumulativ fallgruve-katalog
 
 **Status:** Autoritativ. Alle fallgruver oppdaget i prosjektet samles her.
-**Sist oppdatert:** 2026-05-13
+**Sist oppdatert:** 2026-05-14
 **Eier:** PM-AI (vedlikeholdes ved hver agent-sesjon + hver PR-merge med learning)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."*
@@ -50,13 +50,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 16 | 2026-05-13 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 14 | 2026-05-11 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 15 | 2026-05-14 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 
-**Total:** 92 entries (per 2026-05-13)
+**Total:** 93 entries (per 2026-05-14)
 
 ---
 
@@ -1206,6 +1206,37 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 - `packages/game-client/src/games/game1/screens/PlayScreen.ts:setWaitingForMasterPurchase`
 - `packages/game-client/src/games/game1/components/CenterTopPanel.ts:setPreBuyDisabled`
 - `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleMode("waiting-master")`
+
+### §7.18 — Innsats vs Forhåndskjøp dobbel-telling (BUG, PR #<this-PR>)
+
+**Severity:** P0 (pilot-UX-bug — spiller ser feil betalt beløp)
+**Oppdaget:** 2026-05-14 (Tobias-rapport screenshot 09:51, scheduled-game `330597ef`)
+**Symptom:** Frontend (LeftInfoPanel) viser BÅDE `Innsats: 30 kr` OG `Forhåndskjøp: 30 kr` etter at bruker kjøpte 3 bonger PRE-game for 30 kr totalt. Korrekt: kun `Innsats: 30 kr` siden bongene ble kjøpt før runde startet (Tobias-regel: pre-game-kjøp telles som INNSATS for kommende/aktive spill, ikke FORHÅNDSKJØP).
+
+**DB-evidens:** `app_game1_ticket_purchases.purchased_at = 09:49:08.314`, `app_game1_scheduled_games.actual_start_time = 09:49:08.354` (40 ms etter purchase → pre-game-kjøp).
+
+**Root cause:** Pre-game `bet:arm` setter `armedPlayerIds` + `armedPlayerSelections` i `RoomStateManager`. Master starter scheduled-game → `MasterActionService.onScheduledGameSpawned` hook → `Game1ArmedToPurchaseConversionService.convertArmedToPurchases` konverterer armed-state til `app_game1_ticket_purchases`-rader. Deretter kjører `engine.startGame` som genererer `gameTickets` fra purchases. **MEN:** hooken kalte ALDRI `roomState.disarmPlayer(roomCode, playerId)` etter conversion. Lingering armed-state → `buildRoomUpdatePayload` (line 572 i `roomHelpers.ts`) regner BÅDE:
+
+- `playerStakes[player]` = `priceForTickets(gameTickets)` = 30 kr (live i runden)
+- `playerPendingStakes[player]` = `priceForSelections(armedPlayerSelections)` = 30 kr (samme kjøp talt igjen)
+
+Generic `BingoEngine.startGame`-flyt (via `gameLifecycleEvents.ts:153`) kaller `disarmAllPlayers(roomCode)` — men Spill 1 scheduled-game-flyt (via `Game1MasterControlService.startGame` + `Game1DrawEngineService.startGame`) kaller IKKE det. Hooken `runArmedToPurchaseConversionForSpawn` i `index.ts:2932-3115` glemte å speile mønsteret.
+
+**Fix (PR #<this-PR>):** `runArmedToPurchaseConversionForSpawn()` i `apps/backend/src/index.ts` bygger nå en `userId → playerId`-map under armed-resolve-loopen og kaller `roomState.disarmPlayer(roomCode, playerId)` for hver successful conversion etter at service-en returnerer. Speiler `gameLifecycleEvents.ts:153`-mønsteret for Spill 1 scheduled-game-flyten.
+
+**Prevention:**
+- ALDRI lat armed-state ligge igjen etter at den er konvertert til faktiske purchases — disarm må alltid speile commit-en
+- Hvis ny scheduled-game-spawn-vei legges til, sørg for at den også speiler `disarmAllPlayers`/`disarmPlayer`-mønsteret
+- Tester: `apps/backend/src/util/roomHelpers.armedConversionIsolation.test.ts` dekker 7 scenarioer (pre-game-only, mid-round-additive, multi-color, spectator, idempotens, round-transition)
+- `buildRoomUpdatePayload` er stateless og REN — bug ligger i caller-state (`roomState`-mutering), ikke i payload-funksjonen
+
+**Related:**
+- `apps/backend/src/index.ts:runArmedToPurchaseConversionForSpawn` (fix-stedet)
+- `apps/backend/src/util/roomHelpers.ts:561-598` (playerStakes/playerPendingStakes-beregning)
+- `apps/backend/src/game/Game1ArmedToPurchaseConversionService.ts` (conversion-service)
+- `apps/backend/src/sockets/gameEvents/gameLifecycleEvents.ts:153` (generic-flyt-mønster vi speiler)
+- `apps/backend/src/util/roomState.ts:239` (`disarmPlayer`-API)
+- DB-evidens: `app_game1_ticket_purchases.purchased_at` vs `app_game1_scheduled_games.actual_start_time`
 
 ### §7.17 — Hall-switcher må re-fetche game-status (BUG)
 
