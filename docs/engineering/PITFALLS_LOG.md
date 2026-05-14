@@ -1207,7 +1207,7 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 - `packages/game-client/src/games/game1/components/CenterTopPanel.ts:setPreBuyDisabled`
 - `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleMode("waiting-master")`
 
-### §7.18 — Innsats vs Forhåndskjøp dobbel-telling (BUG, PR #<this-PR>)
+### §7.18 — Innsats vs Forhåndskjøp dobbel-telling (BUG, PR #1419)
 
 **Severity:** P0 (pilot-UX-bug — spiller ser feil betalt beløp)
 **Oppdaget:** 2026-05-14 (Tobias-rapport screenshot 09:51, scheduled-game `330597ef`)
@@ -1222,7 +1222,7 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 
 Generic `BingoEngine.startGame`-flyt (via `gameLifecycleEvents.ts:153`) kaller `disarmAllPlayers(roomCode)` — men Spill 1 scheduled-game-flyt (via `Game1MasterControlService.startGame` + `Game1DrawEngineService.startGame`) kaller IKKE det. Hooken `runArmedToPurchaseConversionForSpawn` i `index.ts:2932-3115` glemte å speile mønsteret.
 
-**Fix (PR #<this-PR>):** `runArmedToPurchaseConversionForSpawn()` i `apps/backend/src/index.ts` bygger nå en `userId → playerId`-map under armed-resolve-loopen og kaller `roomState.disarmPlayer(roomCode, playerId)` for hver successful conversion etter at service-en returnerer. Speiler `gameLifecycleEvents.ts:153`-mønsteret for Spill 1 scheduled-game-flyten.
+**Fix (PR #1419):** `runArmedToPurchaseConversionForSpawn()` i `apps/backend/src/index.ts` bygger nå en `userId → playerId`-map under armed-resolve-loopen og kaller `roomState.disarmPlayer(roomCode, playerId)` for hver successful conversion etter at service-en returnerer. Speiler `gameLifecycleEvents.ts:153`-mønsteret for Spill 1 scheduled-game-flyten.
 
 **Prevention:**
 - ALDRI lat armed-state ligge igjen etter at den er konvertert til faktiske purchases — disarm må alltid speile commit-en
@@ -1237,6 +1237,26 @@ Generic `BingoEngine.startGame`-flyt (via `gameLifecycleEvents.ts:153`) kaller `
 - `apps/backend/src/sockets/gameEvents/gameLifecycleEvents.ts:153` (generic-flyt-mønster vi speiler)
 - `apps/backend/src/util/roomState.ts:239` (`disarmPlayer`-API)
 - DB-evidens: `app_game1_ticket_purchases.purchased_at` vs `app_game1_scheduled_games.actual_start_time`
+
+### §7.19 — Etter-runde "Forbereder rommet..." henger evig (BUG)
+
+**Severity:** P0 (pilot-UX-bug — spiller blir ikke ført tilbake til lobby)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 09:54 runde 330597ef ferdig)
+**Symptom:** Etter runde-end vises WinScreen med vinneren ("Du vant 1 700 kr" + Fullt Hus 1 000 kr i screenshot), så "Forbereder rommet..."-spinner. Spinner henger evig — ingen auto-redirect til lobby. Bruker MÅ klikke "Tilbake til lobby" manuelt.
+**Root cause:** `Game1EndOfRoundOverlay` lyttet på `markRoomReady()`-signal som triggrer normal dismiss-flyt, men hadde INGEN absolute timeout-fallback. Hvis backend ikke emit-er ny `room:update` etter round-end (master må starte neste runde, eller perpetual-loop spawner ny scheduled-game etter X sekunder), kalles `markRoomReady()` aldri og spinneren henger evig. Den eldre 30s "Venter på master"-tekst-swap (PR #1006) byttet kun tekst — utløste ikke redirect.
+**Fix (PR #<this-PR>):** `MAX_PREPARING_ROOM_MS = 15_000` max-timeout i overlay-komponenten. Etter 13s byttes teksten til "Returnerer til lobby..." (preview-fase), etter 15s trigges forced auto-return via `onBackToLobby` (SAMME path som manuell knapp-klikk). Sentry-breadcrumb `endOfRoundOverlay.autoReturnFallback` skrives for observability. Idempotent — cancelles av (a) `markRoomReady` (normal dismiss-path), (b) manuell knapp-klikk, (c) `hide()`. Reconnect-resilient via `elapsedSinceEndedMs > MAX_PREPARING_ROOM_MS`-sjekk.
+**Prevention:**
+- ALDRI rely on backend-events alene for klient-state-transisjoner — alltid ha timeout-fallback for live-UX
+- Tester for BÅDE event-driven og timeout-fallback path
+- Sentry-breadcrumb ved fallback så ops ser hvor ofte dette trigges (signaliserer backend-emit-issue eller master-treghet)
+**Related:**
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts:MAX_PREPARING_ROOM_MS`
+- `packages/game-client/src/games/game1/Game1Controller.ts:showEndOfRoundOverlayForState`
+- §7.11 (lobby-init race — relatert klient-side-fallback-mønster)
+- §4 (live-rom-robusthet — auto-return er pilot-UX-mandat)
+- Tobias-direktiv 2026-05-14
+
+---
 
 ### §7.17 — Hall-switcher må re-fetche game-status (BUG)
 
@@ -1778,3 +1798,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-13 | Lagt til §11.11 (ESM dispatcher må gates med isDirectInvocation), §11.12 (JSDoc `**` parse-feil), §11.13 (GitHub Actions YAML heredoc indentation). Funn under PM Push-Control Phase 2-bygg. Total 83→86 entries. | Phase 2-agent (PM-AI orkestrert) |
 | 2026-05-13 | Lagt til §5.9 (cascade-rebase pattern), §5.10 (add/add `-X ours`-strategi), §6.15 (SIGPIPE + pipefail i awk-pipe), §6.16 (npm workspace lock isolation), §9.9 (seed-FK ordering), §11.14 (≥10 parallelle agenter stream-timeout), §11.15 (additive-merge Python-resolver), §11.16 (worktree fork-from-wrong-branch cascade). Funn under Wave 2/3-sesjon 2026-05-13. Total 86→92 entries. | PM-AI (E6 redo) |
 | 2026-05-14 | Utvidet §3.11 (PR #1411 sub-bug PR #1408): la til Fase 2-prevention-bullet for `buildVariantConfigFromSpill1Config` som mapper `priceNok / minPriceNok` til per-farge multipliers i `gameVariant.ticketTypes`. PR #1408's hook setter entryFee men IKKE multipliers — derfor komplementær fix. 7 nye tester i `spill1VariantMapper.test.ts`. | Fix-agent F3 |
+| 2026-05-14 | Lagt til §7.19 — "Forbereder rommet..."-spinner henger evig etter runde-end. Tobias-rapport 2026-05-14 09:54 (runde 330597ef). Fix: `MAX_PREPARING_ROOM_MS = 15s`-max-timeout i `Game1EndOfRoundOverlay` med forced auto-return via `onBackToLobby`. Erstatter eldre 30s "Venter på master"-tekst-swap som ikke utløste redirect. | Fix-agent (auto-return) |
