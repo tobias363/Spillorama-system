@@ -381,6 +381,40 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - ALDRI fjern denne reconcile-mekanismen uten å verifisere at master ALLTID kaller advance/finish etter naturlig runde-end (han gjør IKKE det i pilot-flyten)
 - Komplementært til PR #1403 (master-actions) + cron 03:00 (gårsdagens stale) — fjerne én bryter dekningen
 
+### §3.11 — Ticket-pris-propagering må gjøres i TO faser (BUG-F2)
+
+**Severity:** P0 (pilot-blokker — spillere ser feil priser)
+**Oppdaget:** 2026-05-14 (Tobias-rapport 07:55 "alle bonger har 20 kr verdi")
+**Symptom:** Pre-game (mellom runder, før master trykker Start) viser feil priser i buy-popup:
+- Yellow 5 kr → klient viser **20 kr** (skal være 10 kr)
+- Purple 5 kr → klient viser **30 kr** (skal være 15 kr)
+- Backend `GET /api/rooms/<code>` returnerer `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE farger istedenfor riktige per-farge-multipliers (Yellow=2, Purple=3)
+
+**Root cause:** PR #1375 (`Game1MasterControlService.onEngineStarted`) løste post-engine-start-pathen ved å binde `roomState.roomConfiguredEntryFeeByRoom + variantByRoom` fra `ticket_config_json` ved engine-start. Men pre-game-vinduet — fra `app_game1_scheduled_games`-rad INSERT-es til master trykker "Start" — var ikke dekket. I dette vinduet kan spillere allerede joine rommet og åpne buy-popup. Klient (`PlayScreen.ts:606`) faller til `state.entryFee ?? 10` × flat `priceMultiplier: 1`, og Yellow med yellow-multiplier(2) gir `10 × 2 = 20 kr`.
+
+**Fix (PR #1408):** To-fase binding-pipeline:
+1. **Fase 1 (pre-engine, NY):** `GamePlanEngineBridge.onScheduledGameCreated`-hook binder `roomState.roomConfiguredEntryFeeByRoom + variantByRoom` POST-INSERT av scheduled-game-rad. Wired i `index.ts` via `gamePlanEngineBridge.setOnScheduledGameCreated(...)`. Hooken kjører FØR engine starter.
+2. **Fase 2 (post-engine, eksisterende):** `Game1MasterControlService.onEngineStarted` (PR #1375) re-binder samme felter ved engine-start. Defense-in-depth.
+
+**Hvordan unngå regresjon:**
+
+> **🚨 IKKE FJERN den ene fasen uten å verifisere at den andre dekker pathen.** Begge er nødvendige fordi pre-game og post-engine er forskjellige tilstander av samme room. Hvis du fjerner fase 1, kommer 20kr-buggen tilbake umiddelbart.
+
+- Når du jobber med ticket-pris-pipeline må du IKKE fjerne `setOnScheduledGameCreated`-wiring i `index.ts` eller `onScheduledGameCreated`-hook i `GamePlanEngineBridge.ts` uten å verifisere at room-snapshot fortsatt har korrekt `gameVariant.ticketTypes` med per-farge multipliers PRE-game.
+- Skill `spill1-master-flow` har egen seksjon "Ticket-pris-propagering" som dokumenterer to-fase-binding i detalj.
+
+**Prevention:**
+- Tester: `apps/backend/src/game/GamePlanEngineBridge.onScheduledGameCreated.test.ts` (9 tester — pre-engine) + `Game1MasterControlService.onEngineStarted.test.ts` (5 tester — post-engine)
+- Verifikasjon: room-snapshot etter scheduled-game-INSERT MÅ ha `gameVariant.ticketTypes` med korrekte per-farge multipliers (Yellow=2, Purple=3) FØR master starter engine
+- Pilot-test-checklist 2026-Q3: legg til "Pre-game buy-popup viser riktig pris" som blokkerende sjekk
+
+**Related:**
+- `apps/backend/src/game/GamePlanEngineBridge.ts:onScheduledGameCreated`
+- `apps/backend/src/index.ts` (setOnScheduledGameCreated-wiring)
+- `apps/backend/src/game/Game1MasterControlService.ts:onEngineStarted` (PR #1375)
+- `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §2 (Yellow×2, Purple×3 auto-multiplier-regel)
+- §3.10 (komplementær — stuck-plan-run-fix landet i PR #1407)
+
 ---
 
 ## §4 Live-rom-state

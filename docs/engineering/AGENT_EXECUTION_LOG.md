@@ -59,6 +59,61 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-14 — F2 (pre-engine ticket-config-binding) BUG-F2-fix
+
+**Branch:** `fix/pre-engine-ticket-config-binding-2026-05-14`
+**PR:** #<this-PR>
+**Agent type:** fix-agent (general-purpose, spawned av PM-AI)
+**Trigger:** Tobias-rapport 2026-05-14 07:55 — "alle bonger ha 20 kr verdi. har vi ikke kontroll på hvorfor dette skjedde og fikset det? dette var tidligere fikset."
+
+**Bug-evidens (live-data 2026-05-14 07:51):**
+- Backend `GET /api/rooms/BINGO_DEMO-PILOT-GOH` returnerte `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE farger
+- Yellow skal ha multiplier=2 (10 kr), Purple skal ha multiplier=3 (15 kr)
+- Klient (`PlayScreen.ts:606`) falt til `state.entryFee ?? 10` × `priceMultiplier: 1` for Yellow = 10 kr × yellow-multiplier(2 fra `lobbyTicketTypes.ts:201`) = 20 kr
+
+**Hva ble gjort:**
+- La til `onScheduledGameCreated`-hook i `GamePlanEngineBridge.ts` som binder per-rom entryFee + variantConfig FØR engine starter
+- Wired hook i `index.ts` via `gamePlanEngineBridge.setOnScheduledGameCreated(...)` — speiler `Game1MasterControlService.onEngineStarted`-mønsteret eksakt (PR #1375)
+- Hooken får `ticketConfigJson` direkte fra bridgen (unngår ekstra SELECT) + canonical `roomCode` som ble INSERT-et
+- Tre steg per hook-kall: (1) `roomState.roomConfiguredEntryFeeByRoom.set(roomCode, smallestKr)`, (2) re-bind `variantByRoom` via `buildVariantConfigFromGameConfigJson`, (3) `emitRoomUpdate(roomCode)`
+- Soft-fail: hook-feil påvirker IKKE bridge-INSERT eller master-start (defense-in-depth: post-engine-hook fra PR #1375 dekker fortsatt)
+- Idempotens: hook IKKE kalt for reused-rader (`idempotent retry`) — pre-engine-binding er allerede skjedd ved original-INSERT
+
+**Tester:**
+- `apps/backend/src/game/GamePlanEngineBridge.onScheduledGameCreated.test.ts` — 9 nye unit-tester
+  - Hook kalles med `{scheduledGameId, roomCode, ticketConfigJson}` POST-INSERT i suksess-path
+  - Hook får samme `ticket_config_json` som ble INSERT-et til DB (3 farger × 2 størrelser = 6 entries)
+  - Hook-feil (async + sync throw) er soft-fail
+  - Ingen hook satt → bridge fungerer som før (legacy-mode)
+  - `setOnScheduledGameCreated` kan settes POST-konstruktor (DI-mønster)
+  - `setOnScheduledGameCreated(undefined)` clearer hooken
+  - Idempotent retry (reused=true) trigger IKKE hook
+  - Hook får canonical `room_code` som matcher INSERT-param
+- Eksisterende tester: 31 GamePlanEngineBridge-tester + 5 onEngineStarted-tester + 69 Master*-tester alle grønne
+
+**Verifikasjon-strategi (pre-PR-merge):**
+```bash
+# 1. Start dev-stack ren
+cd /Users/tobiashaugen/Projects/Spillorama-system && npm run dev:nuke
+# 2. Opprett ny scheduled-game uten å starte engine
+# 3. Som spiller: koble til rommet PRE-game
+curl -s http://localhost:4000/api/rooms/BINGO_DEMO-PILOT-GOH | jq '.data.gameVariant.ticketTypes'
+# Forvent: Yellow=multiplier:2, Purple=multiplier:3
+# 4. Åpne buy-popup PRE-game → Small Yellow viser "10 kr" (ikke 20)
+```
+
+**Læring:**
+- **PR #1375 var korrekt for post-engine-pathen men dekket ikke pre-game-vinduet.** Pre-game er en distinkt tilstand som krever sin egen propagerings-path.
+- **Ticket-pris-binding må skje BÅDE ved scheduled-game-creation OG engine-start** — to-fase pipeline beskytter mot regresjon hvis ett lag mangler.
+- **Idempotency-sjekk forhindrer hook-dobbel-kall** — bridge bruker `existing.id` for reused-rader (samme run+position) og hook har allerede kjørt for original-INSERT, så vi trenger IKKE re-bind.
+- **Doc-disiplin (Tobias-direktiv 2026-05-14):** Fixen var ufullstendig hvis vi ikke oppdaterer skill + PITFALLS_LOG samtidig. Fremtidige agenter må kunne forstå hvorfor to-fase-binding eksisterer og må ikke fjerne en av fasene.
+
+**Skill-update:** `.claude/skills/spill1-master-flow/SKILL.md` v1.2.0 — ny seksjon "Ticket-pris-propagering (kritisk to-fase-binding)" + Endringslogg entry 2026-05-14
+**Pitfall-update:** `docs/engineering/PITFALLS_LOG.md` §3.10 — ny entry "Ticket-pris-propagering må gjøres i TO faser (BUG-F2)"
+**Eierskap:** `apps/backend/src/game/GamePlanEngineBridge.ts`, `apps/backend/src/index.ts` (onScheduledGameCreated-wiring)
+
+---
+
 ### 2026-05-13 — Sesjon 3: Wave 2/3 oppfølging + PITFALLS/FRAGILITY-entries (E6 redo)
 
 **Scope:** Etter at E3/E4/E5/E6 stalled pga API stream-idle-timeout (12 parallelle agenter), PM gjør sequentially: rebase Wave 3-PR-er, dokumenter sesjonens lærdommer, sjekk E9 Stryker-progress.
@@ -1700,6 +1755,7 @@ Verifisert via test:
 | 2026-05-10 | Initial — 6 dagers agent-historikk + 2 aktive agenter | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
 | 2026-05-13 | I16/F-02 plan-run lifecycle auto-reconcile fra lobby-poll i `Game1LobbyService` (10 nye unit-tester, < 50ms latency, idempotent). | Agent (I16) |
+| 2026-05-14 | F2 (BUG-F2) — pre-engine ticket-config-binding-hook i `GamePlanEngineBridge.onScheduledGameCreated`. Dekker hullet fra PR #1375 (post-engine kun). Pre-game buy-popup viser nå riktige priser (Yellow=10 kr, ikke 20). 9 nye unit-tester, alle 105 eksisterende grønne. Skill `spill1-master-flow` v1.2.0 + PITFALLS §3.10 ny entry. | fix-agent (general-purpose) |
 
 ---
 
