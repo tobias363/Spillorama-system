@@ -34,6 +34,7 @@ Alle ADR-er som er merget til `main` regnes som aktive (med mindre status sier a
 | [0017](./0017-remove-daily-jackpot-accumulation.md) | Fjerne daglig jackpot-akkumulering — bingovert setter manuelt | Accepted | 2026-05-10 |
 | [0021](./0021-allow-master-start-without-players.md) | Master kan starte spillet uten solgte bonger (fjerner `MASTER_HALL_RED`) | Accepted | 2026-05-10 |
 | [0022](./0022-stuck-game-recovery-multilayer.md) | Multi-lag stuck-game-recovery for Spill 1 scheduled-runder | Accepted | 2026-05-12 |
+| [0023](./0023-mcp-write-access-policy.md) | MCP write-access policy (lokal vs prod) | Accepted | 2026-05-14 |
 
 ## Når lage ADR
 
