@@ -59,6 +59,45 @@ Live bingo platform for the Norwegian market with real-time multiplayer games, w
 > **Public audit-trail** (hash-only, ingen takeaways eksponert):
 > [`docs/.pm-confirmations.log`](./docs/.pm-confirmations.log).
 
+> ## 🔄 PM-livssyklus (sesjons-START og sesjons-SLUTT) — Tobias-direktiv 2026-05-14
+>
+> Hver PM-sesjon har en definert START- og SLUTT-prosedyre som er obligatorisk.
+> Tobias-direktiv 2026-05-14 IMMUTABLE:
+> > "Hvordan denne rutinen er — har du lagt inn at hver avsluttende PM skal lage et detaljert
+> > handoff dokument slik at ny PM vet akkurat hva den må gjøre for å starte sitt arbeid?"
+>
+> ### Ved sesjons-START (ny PM)
+>
+> Følg [`docs/operations/PM_SESSION_START_CHECKLIST.md`](./docs/operations/PM_SESSION_START_CHECKLIST.md)
+> sine 13 obligatoriske trinn FØR første kode-handling:
+>
+> 1. **Trinn 0** — `bash scripts/pm-checkpoint.sh --validate` (eksisterende handoff-gate)
+> 2. **Trinn 0.5** — `bash scripts/pm-doc-absorption-gate.sh --validate` (NY, under-impl)
+> 3. **Trinn 1-3** — Les `/tmp/pm-onboarding.md` + forrige PM_HANDOFF + forrige PM_SESSION_KNOWLEDGE_EXPORT
+> 4. **Trinn 4-5** — Spawn 3-5 parallelle Explore-agenter for resterende docs, absorber sammendrag
+> 5. **Trinn 6-8** — Verifiser MCP-er + dev-stack + pilot-monitor live
+> 6. **Trinn 9** — Selv-test "TOP 10 PM må vite"
+> 7. **Trinn 10-12** — Verifiser git-state + bekreft til Tobias + vent på direktiv
+>
+> ### Ved sesjons-SLUTT (avsluttende PM)
+>
+> Følg [`docs/operations/PM_SESSION_END_CHECKLIST.md`](./docs/operations/PM_SESSION_END_CHECKLIST.md)
+> sine 9 obligatoriske trinn FØR sesjons-slutt:
+>
+> 1. Verifiser alle PR-er merget eller dokumentert
+> 2. Skriv `docs/operations/PM_HANDOFF_<dato>.md` (beslutninger, status, neste-PM-instrukser)
+> 3. Skriv `docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_<dato>.md` (tacit knowledge: mental models, Tobias-signaler, anti-mønstre, live-data-funn). Bruk mal i [`PM_SESSION_KNOWLEDGE_EXPORT_TEMPLATE.md`](./docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_TEMPLATE.md)
+> 4-7. Update PM_ONBOARDING_PLAYBOOK + PITFALLS_LOG + AGENT_EXECUTION_LOG + relevante skills hvis aktuelt
+> 8. Verifiser todos er rene (flyttet til handoff)
+> 9. Kjør `bash scripts/pm-session-end.sh` — interaktiv runner som tvinger gjennom alle 9 trinn og skriver `.pm-session-end-confirmed.txt` som bevis
+>
+> **3-laget kunnskaps-arv-arkitektur:**
+> 1. **PM_HANDOFF** (eksisterende) — beslutninger, status, åpne tasks
+> 2. **Skills + ADRs + PITFALLS** (eksisterende) — fagkunnskap, arkitektur, fallgruver
+> 3. **PM_SESSION_KNOWLEDGE_EXPORT** (NY 2026-05-14) — tacit knowledge PM bygger opp under sesjonen
+>
+> Per Tobias: "Hver PM tar over med samme kunnskapsnivå som den som avslutter."
+
 ## Tech Stack
 
 | Layer | Technology | Version | Purpose |
