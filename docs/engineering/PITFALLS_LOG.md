@@ -1338,6 +1338,45 @@ Generic `BingoEngine.startGame`-flyt (via `gameLifecycleEvents.ts:153`) kaller `
 
 ---
 
+### §7.20 — Master-UI header må være state-aware, ALDRI hardkodet "Aktiv trekning"
+
+**Severity:** P0 (pilot-UX-bug — master forvirret om spill-state, motsigelse mellom header og knapper)
+**Oppdaget:** 2026-05-14 — Tobias-rapport 3 ganger (07:55, 09:51, 12:44)
+**Symptom:** Master-konsoll i `/admin/#/agent/cashinout` viste "Aktiv trekning - Bingo" som header selv når engine IKKE var running. Screenshot 12:44 viser:
+- Header: "Aktiv trekning - Bingo"
+- Master-knapp: "▶ Start neste spill — Bingo" (grønn, klikkbar) → betyr engine IKKE running
+- "Ingen pågående spill tilgjengelig..." vises samtidig → motsigelse
+- Scheduled-game IKKE startet ennå
+
+**Root cause:** Pre-fix-grenen i `Spill1HallStatusBox.ts:801-816` mappet `purchase_open | ready_to_start | running | paused` som "isActiveDraw" — som er feil. `purchase_open` og `ready_to_start` er PRE-start-tilstander hvor bonge-salg er åpent men engine IKKE kjører trekk ennå. Bare `running` skal trigge "Aktiv trekning"; `paused` skal være "Pauset".
+
+**Fix (PR #<this-PR>):** Ekstrahert pure helper `getMasterHeaderText(state, gameName, info?)` i `Spill1HallStatusBox.ts:1456+` med state-mapping:
+- `running` → "Aktiv trekning - {name}" ← ENESTE state hvor "Aktiv trekning" er gyldig
+- `paused` → "Pauset: {name}"
+- `scheduled | purchase_open | ready_to_start` → "Klar til å starte: {name}"
+- `completed | cancelled` → "Runde ferdig: {name}"
+- `idle` → "Neste spill: {name}"
+- `plan_completed_for_today` → "Spilleplan ferdig for i dag" (+ neste-dag-info hvis tilgjengelig)
+- `closed | outside_opening_hours` → "Stengt — åpner HH:MM"
+
+Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KNOWN_MASTER_HEADER_STATES`-Set defensiv-fallback til "idle" ved ukjent input. XSS-trygg via `escapeHtml(gameName)`.
+
+**Prevention:**
+- ALDRI hardkode "Aktiv trekning" som default header — det er state-driven
+- Helper-function pure + 35 tester for hver state (+ regression-trip-wire som verifiserer at INGEN ikke-running state returnerer streng som starter med "Aktiv trekning")
+- Hvis ny state legges til `MasterHeaderState`-enum, MÅ helper-en oppdateres samtidig + test legges til
+- Visual-regression tests for hver state (hvis Playwright tilgjengelig — out of scope for denne PR-en)
+
+**Related:**
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts:getMasterHeaderText`
+- `apps/admin-web/tests/masterHeaderText.test.ts` (35 tester, inkl. regression-trip-wire)
+- `packages/shared-types/src/spill1-lobby-state.ts` (Spill1ScheduledGameStatus enum)
+- PR #1422 (plan-completed-state — kommer som ny inconsistencyWarning senere)
+- §4 (live-rom-robusthet — master-UX er pilot-blokker)
+- Tobias-direktiv 2026-05-14 (rapportert 3 ganger — derfor kritisk)
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review

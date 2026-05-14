@@ -686,13 +686,11 @@ function render(container: HTMLElement, state: BoxState): void {
       false,
       data.isMasterAgent,
     );
-    // 2026-05-12 (Tobias-direktiv): bruk samme header-mønster som aktiv-
-    // pathen. I idle (ingen scheduled-game spawnet) viser vi alltid
-    // "Neste spill på spilleplan: {name}" hvis aggregator har plan-meta.
+    // 2026-05-14 (Tobias-rapport 3 ganger, PITFALLS §7.20): bruk samme
+    // state-aware helper som aktiv-pathen. I idle (ingen scheduled-game)
+    // viser helperen "Neste spill: {name}" — ALDRI "Aktiv trekning".
     const idleNextGameName = data.catalogDisplayName;
-    const idleTitleHtml = idleNextGameName
-      ? `Neste spill på spilleplan: ${escapeHtml(idleNextGameName)}`
-      : "Neste spill på spilleplan";
+    const idleTitleHtml = getMasterHeaderText("idle", idleNextGameName);
     container.innerHTML = `
       <div class="box-header with-border">
         <h3 class="box-title">${idleTitleHtml}</h3>
@@ -788,32 +786,12 @@ function render(container: HTMLElement, state: BoxState): void {
     resumePulse,
   });
 
-  // 2026-05-12 (Tobias-direktiv): header-tekst skal speile lobby-tilstanden
-  // klart for master. Tidligere ble dette rendret som
-  // "Spill 1 — Fullført · Subspill: 5×500" som verken signaliserer aktiv-vs-
-  // neste-tilstand eller bruker termen "trekning". Riktig:
-  //   - Aktiv trekning pågår (purchase_open | ready_to_start | running |
-  //     paused): "Aktiv trekning - {catalog-display-name}"
-  //   - Ellers (scheduled | completed | cancelled): "Neste spill på
-  //     spilleplan: {catalog-display-name}"
-  // Når `catalogDisplayName` mangler (ingen plan-meta i lobby-state) faller
-  // vi tilbake til en generisk overskrift uten navn.
-  const isActiveDraw =
-    gameStatus === "purchase_open" ||
-    gameStatus === "ready_to_start" ||
-    gameStatus === "running" ||
-    gameStatus === "paused";
-  let titleHtml: string;
-  if (nextGameName) {
-    const escapedName = escapeHtml(nextGameName);
-    titleHtml = isActiveDraw
-      ? `Aktiv trekning - ${escapedName}`
-      : `Neste spill på spilleplan: ${escapedName}`;
-  } else {
-    titleHtml = isActiveDraw
-      ? "Aktiv trekning"
-      : "Neste spill på spilleplan";
-  }
+  // 2026-05-14 (Tobias-rapport 3 ganger, PITFALLS §7.20): header MÅ være
+  // state-aware. "Aktiv trekning" skal KUN vises når engine faktisk kjører
+  // (gameStatus === "running"), aldri for purchase_open / ready_to_start
+  // som er PRE-start-tilstander. Mapping i `getMasterHeaderText`-helper
+  // under (eksport + 9+ tester for hver state).
+  const titleHtml = getMasterHeaderText(gameStatus, nextGameName);
 
   // ADR-0022 Lag 3: stuck-recovery-banner over master-knappene.
   // Banneret bygges utenfor master-action-blokken så det er synlig også
@@ -1403,6 +1381,137 @@ function formatScheduledStartHHMM(value: string | null): string | null {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   });
+}
+
+/**
+ * Inputs for `getMasterHeaderText`. Kept narrow on purpose — helperen er
+ * pure og skal aldri ta hele lobby-state-objektet inn (gjør den vanskelig
+ * å enhets-teste). Plan-completed-state og closed-state aksepterer en
+ * valgfri `nextOpeningTime` for å rendre "Stengt — åpner HH:MM" eller
+ * "Neste plan: HH:MM neste dag".
+ */
+export type MasterHeaderState =
+  | "idle"
+  | "scheduled"
+  | "purchase_open"
+  | "ready_to_start"
+  | "running"
+  | "paused"
+  | "completed"
+  | "cancelled"
+  | "plan_completed_for_today"
+  | "closed"
+  | "outside_opening_hours";
+
+export interface MasterHeaderInfo {
+  /** HH:MM-streng (Oslo-tid) for neste planlagte åpning, brukes for "closed"-state. */
+  nextOpeningTime?: string | null;
+}
+
+/**
+ * Pure helper: bestemmer header-tekst i master-konsollen basert på
+ * scheduled-game-status (eller "idle"/"closed"/"plan_completed_for_today"
+ * for state-er uten scheduled-game).
+ *
+ * **Bug-historikk:** Tobias rapporterte 3 ganger 2026-05-14 (07:55, 09:51,
+ * 12:44) at "Aktiv trekning - Bingo" ble vist før engine var startet.
+ * Pre-fix-grenen behandlet `purchase_open` og `ready_to_start` som "aktiv
+ * trekning", som er feil — disse er PRE-start-tilstander (bonge-salg åpent,
+ * men trekk har ikke begynt). Riktig mapping:
+ *
+ *   - "Aktiv trekning - {name}"        kun når status === "running"
+ *   - "Pauset: {name}"                 kun når status === "paused"
+ *   - "Klar til å starte: {name}"      for purchase_open / ready_to_start /
+ *                                      scheduled (engine ikke startet)
+ *   - "Runde ferdig: {name}"           for completed / cancelled
+ *   - "Neste spill: {name}"            for idle (ingen scheduled-game)
+ *   - "Spilleplan ferdig for i dag"    for plan_completed_for_today
+ *   - "Stengt — åpner HH:MM"           for closed / outside_opening_hours
+ *
+ * Returnerer escaped HTML-trygg streng. Helperen escaper `gameName` selv
+ * via `escapeHtml`, så caller skal sende rå streng (ikke pre-escaped).
+ *
+ * **PITFALLS_LOG §7.20** dekker denne bug-en og krever at endringer i
+ * mapping-en MÅ ledsages av oppdaterte tester i `masterHeaderText.test.ts`.
+ */
+/**
+ * Whitelist over kjente master-header-states. Brukes til å normalisere
+ * et fri-formet status-streng fra lobby-state til vår enum. Ukjente
+ * verdier mappes til "idle" (defensive default).
+ */
+const KNOWN_MASTER_HEADER_STATES: ReadonlySet<MasterHeaderState> = new Set([
+  "idle",
+  "scheduled",
+  "purchase_open",
+  "ready_to_start",
+  "running",
+  "paused",
+  "completed",
+  "cancelled",
+  "plan_completed_for_today",
+  "closed",
+  "outside_opening_hours",
+]);
+
+export function getMasterHeaderText(
+  state: MasterHeaderState | string | null | undefined,
+  gameName: string | null | undefined,
+  info?: MasterHeaderInfo,
+): string {
+  // Fallback for ukjent / null-state: behandle som idle. Vi aksepterer
+  // `string` her fordi caller-en sender `data.scheduledGameStatus` som er
+  // typet som `string | null` i ViewState.
+  const effectiveState: MasterHeaderState =
+    state !== null &&
+    state !== undefined &&
+    KNOWN_MASTER_HEADER_STATES.has(state as MasterHeaderState)
+      ? (state as MasterHeaderState)
+      : "idle";
+
+  // Plan-completed-state: ingen game-name relevant — viser dagens-ferdig-tekst.
+  if (effectiveState === "plan_completed_for_today") {
+    if (info?.nextOpeningTime) {
+      return `Spilleplan ferdig for i dag — neste plan: ${escapeHtml(info.nextOpeningTime)} neste dag`;
+    }
+    return "Spilleplan ferdig for i dag";
+  }
+
+  // Closed / outside-opening-hours: ingen game-name relevant.
+  if (effectiveState === "closed" || effectiveState === "outside_opening_hours") {
+    if (info?.nextOpeningTime) {
+      return `Stengt — åpner ${escapeHtml(info.nextOpeningTime)}`;
+    }
+    return "Stengt";
+  }
+
+  // For alle game-name-baserte states: fallback til generisk hvis ingen navn.
+  const safeName = gameName ? escapeHtml(gameName) : null;
+  const nameSuffix = safeName ? `: ${safeName}` : "";
+
+  switch (effectiveState) {
+    case "running":
+      // ENESTE state hvor "Aktiv trekning" er gyldig (Tobias-bug 2026-05-14).
+      return safeName
+        ? `Aktiv trekning - ${safeName}`
+        : "Aktiv trekning";
+    case "paused":
+      return safeName ? `Pauset${nameSuffix}` : "Pauset";
+    case "scheduled":
+    case "purchase_open":
+    case "ready_to_start":
+      // Pre-start-states — engine IKKE running, master kan starte.
+      return safeName
+        ? `Klar til å starte${nameSuffix}`
+        : "Klar til å starte";
+    case "completed":
+    case "cancelled":
+      // Runde ferdig — venter på advance til neste position.
+      return safeName ? `Runde ferdig${nameSuffix}` : "Runde ferdig";
+    case "idle":
+    default:
+      // Ingen plan-run aktiv — viser neste planlagte spill.
+      return safeName ? `Neste spill${nameSuffix}` : "Neste spill";
+  }
 }
 
 /**
