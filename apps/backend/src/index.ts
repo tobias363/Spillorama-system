@@ -481,6 +481,12 @@ const socketLifecycleExtendedLogger = rootLogger.child({
 const onEngineStartedLogger = rootLogger.child({
   module: "game1-on-engine-started",
 });
+// F2 (BUG-F2, Tobias-rapport 2026-05-14): logger for pre-engine
+// scheduled-game-creation hook som binder samme per-rom entryFee +
+// variantConfig FØR engine starter. Speiler onEngineStartedLogger.
+const onScheduledGameCreatedLogger = rootLogger.child({
+  module: "game-plan-bridge-on-scheduled-game-created",
+});
 // BIN-614: Admin web shell is a Vite SPA. `dist/` is produced by
 // `npm --prefix apps/admin-web run build`. We serve from `dist/` if it exists,
 // otherwise fall back to the pre-Vite flat `apps/admin-web/` layout so local
@@ -2727,6 +2733,124 @@ game1MasterControlService.setOnEngineStarted(async ({ scheduledGameId }) => {
     );
   }
 });
+
+// F2 (BUG-F2, Tobias-rapport 2026-05-14): pre-engine scheduled-game-
+// creation hook for å binde per-rom entryFee + variantConfig FØR engine
+// trigges av master. Speiler `onEngineStarted`-hooken over men kjører
+// POST-INSERT av scheduled-game-raden i `GamePlanEngineBridge.
+// createScheduledGameForPlanRunPosition`.
+//
+// Hvorfor to-fase-binding (PR #1375 alene var ikke nok):
+//   - `onEngineStarted` (PR #1375) dekker post-engine-start: binder
+//     verdier når master kaller startGame.
+//   - Pre-game-vinduet (scheduled-game opprettet → master trykker Start)
+//     var IKKE dekket. Spillere som åpner buy-popup pre-game så
+//     `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE
+//     farger (default fra `roomState.variantByRoom`), og Yellow kostet
+//     `10 × 2 = 20 kr` istedenfor 10 kr (Tobias-rapport 2026-05-14
+//     07:55: "alle bonger har 20 kr verdi").
+//
+// Hooken får `ticketConfigJson` direkte fra bridgen (samme objekt som
+// ble skrevet til DB), så vi unngår en ekstra SELECT. roomCode er også
+// pre-resolved av bridgen (canonical room_code er INSERT-et samtidig
+// med raden, F-NEW-2 2026-05-09).
+//
+// Idempotens: re-binding for samme roomCode (bridgen kjører på nytt for
+// samme run+position) setter samme verdi — no-op fra klient-perspektiv.
+// Vi logger INFO ved re-bind så ops kan se det i logs.
+gamePlanEngineBridge.setOnScheduledGameCreated(
+  async ({ scheduledGameId, roomCode, ticketConfigJson }) => {
+    // 1) Bind roomConfiguredEntryFee fra ticket_config_json. Finn billigste
+    // bongpris i øre, konverter til kr (rom-helper forventer kr). Samme
+    // logikk som onEngineStarted-hooken.
+    const ticketCatalog = extractTicketCatalogFromConfig(ticketConfigJson);
+    if (ticketCatalog.length > 0) {
+      const smallestCents = ticketCatalog.reduce(
+        (min, t) => (t.priceCents < min ? t.priceCents : min),
+        ticketCatalog[0].priceCents,
+      );
+      const smallestKr = smallestCents / 100;
+      if (Number.isFinite(smallestKr) && smallestKr > 0) {
+        const previous = roomState.roomConfiguredEntryFeeByRoom.get(roomCode);
+        roomState.roomConfiguredEntryFeeByRoom.set(roomCode, smallestKr);
+        if (previous !== undefined && previous !== smallestKr) {
+          onScheduledGameCreatedLogger.warn(
+            {
+              scheduledGameId,
+              roomCode,
+              previousKr: previous,
+              newKr: smallestKr,
+            },
+            "[onScheduledGameCreated] roomConfiguredEntryFee endret ved re-bind (pre-engine)",
+          );
+        } else {
+          onScheduledGameCreatedLogger.info(
+            {
+              scheduledGameId,
+              roomCode,
+              smallestPriceCents: smallestCents,
+              smallestPriceKr: smallestKr,
+              ticketColorsCount: ticketCatalog.length,
+            },
+            "[onScheduledGameCreated] roomConfiguredEntryFee bundet fra ticket_config_json (pre-engine)",
+          );
+        }
+      } else {
+        onScheduledGameCreatedLogger.warn(
+          { scheduledGameId, roomCode, ticketCatalog },
+          "[onScheduledGameCreated] ugyldig smallest-pris — beholder eksisterende rom-entryFee",
+        );
+      }
+    } else {
+      onScheduledGameCreatedLogger.warn(
+        { scheduledGameId, roomCode },
+        "[onScheduledGameCreated] ticket_config_json mangler `ticketTypesData[]` — kan ikke binde entryFee",
+      );
+    }
+
+    // 2) Re-bind variantByRoom fra ticket_config_json så pre-game
+    // patterns + per-farge multipliers vises korrekt på klient. Uten
+    // denne får klient default-variant (flat priceMultiplier: 1 for alle
+    // farger) → Yellow viser 20 kr istedenfor 10 kr i buy-popup.
+    try {
+      const variantConfig = buildVariantConfigFromGameConfigJson(
+        ticketConfigJson,
+      );
+      if (variantConfig) {
+        roomState.setVariantConfig(roomCode, {
+          gameType: "bingo",
+          config: variantConfig,
+        });
+        onScheduledGameCreatedLogger.info(
+          { scheduledGameId, roomCode },
+          "[onScheduledGameCreated] variantByRoom bundet fra ticket_config_json (pre-engine)",
+        );
+      } else {
+        onScheduledGameCreatedLogger.info(
+          { scheduledGameId, roomCode },
+          "[onScheduledGameCreated] ticket_config_json kan ikke bygges til variantConfig — beholder eksisterende binding",
+        );
+      }
+    } catch (variantErr) {
+      onScheduledGameCreatedLogger.warn(
+        { err: variantErr, scheduledGameId, roomCode },
+        "[onScheduledGameCreated] buildVariantConfigFromGameConfigJson kastet — beholder eksisterende variant-binding",
+      );
+    }
+
+    // 3) Trigger room:update så klient får nye entryFee + patterns
+    // umiddelbart. For pre-game-vinduet betyr dette at spillere som
+    // joiner mellom INSERT og engine.startGame ser riktige priser.
+    try {
+      await emitRoomUpdate(roomCode);
+    } catch (emitErr) {
+      onScheduledGameCreatedLogger.warn(
+        { err: emitErr, scheduledGameId, roomCode },
+        "[onScheduledGameCreated] emitRoomUpdate kastet — klient får nye verdier ved neste socket-event (fail-soft)",
+      );
+    }
+  },
+);
 
 // Bølge 2 (2026-05-08): MasterActionService — kanonisk sekvenseringsmotor
 // for plan-runtime → engine-bridge → engine-actions for Spill 1. ENESTE

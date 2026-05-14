@@ -227,6 +227,64 @@ Symptom: UI viser `MASTER_HALL_RED` selv om master vil starte uten registrerte s
 Symptom: `STALE_PLAN_RUN`-warning på lobby + master kan ikke starte.
 **Fix:** `GamePlanRunCleanupService` — cron 03:00 Oslo auto-finishes alle `status IN ('running','paused')` med `business_date < CURRENT_DATE`. Inline self-heal-hook bound til `getOrCreateForToday`. Audit-event `game_plan_run.auto_cleanup`.
 
+### 12. Pre-game viser 20 kr per bong istedenfor 10 kr (Yellow) / 30 kr istedenfor 15 kr (Purple)
+Symptom: Spillere som åpner buy-popup PRE-game (mellom runder, eller før master har trykket "Start") ser feil priser. Backend room-snapshot returnerer `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE farger istedenfor riktige per-farge multipliers (Yellow=2, Purple=3).
+
+**Rot-årsak (regresjon 2026-05-14):** PR #1375 (`Game1MasterControlService.onEngineStarted`) løste KUN post-engine-start-pathen. Pre-game-vinduet — fra scheduled-game opprettes (`status='ready_to_start'`) til master trykker "Start" — var ikke dekket. Klient (`PlayScreen.ts:606`) faller til `state.entryFee ?? 10` og multipliserer med flat `priceMultiplier: 1` → `10 × 2 = 20 kr` for Yellow (eksempel: Tobias-rapport 2026-05-14 07:55).
+
+**Fix:** To-fase ticket-config-binding (PR #1375 + PR #<this-PR>). Se seksjon under for detaljer.
+
+## Ticket-pris-propagering (kritisk to-fase-binding)
+
+> **Tobias-direktiv 2026-05-14:** Fremtidige agenter MÅ ikke overskrive denne fixen. Hvis du jobber med ticket-pris-pipeline må du forstå BÅDE faser er nødvendige.
+
+**Hvorfor to-fase-binding:**
+
+Spillorama har TO distinkte tilstander for et room:
+1. **Pre-game:** scheduled-game er INSERT-et med `status='ready_to_start'`, men master har ikke trykket "Start". Engine kjører IKKE ennå, men klient kan joine rommet og åpne buy-popup.
+2. **Post-engine-start:** Master har trykket "Start", `engine.startGame()` har returnert.
+
+Begge faser krever at `roomState.roomConfiguredEntryFeeByRoom` + `variantByRoom` er bundet til riktige verdier fra `ticket_config_json`. Hvis ikke faller klient til default-fallback (`state.entryFee ?? 10` × flat `priceMultiplier: 1`).
+
+### Fase 1: Pre-engine (BUG-F2, PR #<this-PR>)
+
+Hook: `GamePlanEngineBridge.onScheduledGameCreated`
+
+- **Trigger:** POST-INSERT av `app_game1_scheduled_games`-rad i `createScheduledGameForPlanRunPosition`
+- **Wired i:** `apps/backend/src/index.ts` via `gamePlanEngineBridge.setOnScheduledGameCreated(...)`
+- **Input:** `{ scheduledGameId, roomCode, ticketConfigJson }` (ticket_config_json kommer direkte fra bridgen, ingen ekstra SELECT)
+- **Tre steg:** (1) bind `roomConfiguredEntryFeeByRoom` (billigste bongpris i kr), (2) re-bind `variantByRoom` via `buildVariantConfigFromGameConfigJson`, (3) `emitRoomUpdate(roomCode)`
+
+### Fase 2: Post-engine (PR #1375)
+
+Hook: `Game1MasterControlService.onEngineStarted`
+
+- **Trigger:** POST-commit + POST-engine.startGame i `startGame`-suksess-path
+- **Wired i:** `apps/backend/src/index.ts` via `game1MasterControlService.setOnEngineStarted(...)`
+- **Input:** `{ scheduledGameId, actorUserId }` (henter `ticket_config_json` + `room_code` med SELECT)
+- **Samme tre steg som fase 1.** Defense-in-depth — re-binder samme verdier ved engine-start.
+
+### Symptom hvis fase 1 mangler
+
+- Pre-game-spillere ser Yellow = 20 kr, Purple = 30 kr (flat priceMultiplier: 1 ganget med default-entryFee 10).
+- Etter master starter engine → fase 2 binder verdier → klient korrigerer ved neste room:update.
+- Pilot-spillere som åpner buy-popup mellom runder ser feil priser → kjøper feil eller backer ut.
+
+### Symptom hvis fase 2 mangler
+
+- Post-engine room:update returnerer fortsatt riktig data (fra fase 1) inntil neste binding-feil eller restart.
+- Mister defense-in-depth — hvis fase 1 ikke kjørte (eks. bridge re-spawn uten hook), faller klient til default.
+
+### ALDRI fjern den ene fasen uten å verifisere at den andre dekker pathen
+
+Begge faser kjører idempotent — re-binding for samme room+scheduledGameId setter samme verdi (no-op fra klient-perspektiv). Hvis du fjerner fase 1, kommer 20kr-buggen tilbake. Hvis du fjerner fase 2, mister du defense-in-depth ved engine-start.
+
+### Tester som beskytter mot regresjon
+
+- `apps/backend/src/game/GamePlanEngineBridge.onScheduledGameCreated.test.ts` (9 tester — fase 1)
+- `apps/backend/src/game/Game1MasterControlService.onEngineStarted.test.ts` (5 tester — fase 2)
+- Snapshot-baseline i `apps/backend/src/game/__tests__/r2InvariantsBaseline.test.ts` — verifiserer at ticket_config_json propageres til scheduled-games-raden
+
 ## Når denne skill-en er aktiv
 
 **Gjør:**
@@ -270,3 +328,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 |---|---|
 | 2026-05-08 | Initial — master-flyt fundament + Bølge 1 GameLobbyAggregator |
 | 2026-05-13 | v1.1.0 — la til I14/I15/I16-fix-mønstre, ADR-0019/0020/0021/0022, MasterActionService som single-entry sekvenseringsmotor, GamePlanRunCleanupService for stale-plan-cleanup, master kan starte med 0 spillere |
+| 2026-05-14 | v1.2.0 — BUG-F2: la til seksjon "Ticket-pris-propagering" som dokumenterer to-fase-binding (pre-engine via `GamePlanEngineBridge.onScheduledGameCreated` + post-engine via `Game1MasterControlService.onEngineStarted`). Pre-engine-fasen dekker hullet fra PR #1375 og forhindrer 20kr-regresjonen. Begge faser MÅ beholdes — fremtidige agenter må ikke fjerne den ene uten å verifisere at den andre dekker pathen. |

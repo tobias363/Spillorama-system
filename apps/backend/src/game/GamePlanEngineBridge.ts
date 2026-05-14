@@ -672,6 +672,59 @@ export interface GamePlanEngineBridgeOptions {
   catalogService: GameCatalogService;
   planService: GamePlanService;
   planRunService: GamePlanRunService;
+  /**
+   * F2 (BUG-F2, Tobias-rapport 2026-05-14): pre-engine ticket-config-
+   * binding-hook. Kalles POST-INSERT av en frisk scheduled-game-rad i
+   * `createScheduledGameForPlanRunPosition`, FØR engine.startGame
+   * trigges av master.
+   *
+   * Hvorfor pre-engine OG post-engine:
+   *   - PR #1375 (`Game1MasterControlService.onEngineStarted`) løste
+   *     post-engine-start-pathen: når master kaller startGame, binder
+   *     hooken `roomState.roomConfiguredEntryFeeByRoom` + `variantByRoom`
+   *     fra `ticket_config_json`. Det fungerer for runder som master
+   *     starter umiddelbart.
+   *   - Pre-game-vinduet — fra scheduled-game opprettes (status =
+   *     'ready_to_start') TIL master trykker "Start" — er ikke dekket
+   *     av onEngineStarted-hooken. I dette vinduet kan spillere allerede
+   *     joine rommet og se buy-popup, men room-snapshot returnerer
+   *     `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE
+   *     farger fordi `variantByRoom` ikke er rebound fra
+   *     `ticket_config_json`. Klient (`PlayScreen.ts:606`) faller til
+   *     `state.entryFee ?? 10` × `priceMultiplier`, og Yellow vises som
+   *     `10 × 2 = 20 kr` istedenfor riktige 10 kr.
+   *
+   * Hva hooken må gjøre (samme tre steg som onEngineStarted):
+   *   1. Sette `roomState.roomConfiguredEntryFeeByRoom` til billigste
+   *      bongpris (typisk 500 øre = 5 kr) så room-snapshot returnerer
+   *      riktig `gameVariant.entryFee`.
+   *   2. Re-binde `variantByRoom` med
+   *      `buildVariantConfigFromGameConfigJson` fra
+   *      `ticket_config_json.spill1.ticketColors[]` så pre-game patterns
+   *      + per-farge multipliers vises korrekt.
+   *   3. Trigge `emitRoomUpdate(roomCode)` så klienter får nye verdier
+   *      umiddelbart (ikke ved første draw-tick).
+   *
+   * Soft-fail: feil her påvirker IKKE caller-resultat eller
+   * scheduled-game-INSERT. Klient kan vise default-priser inntil
+   * `onEngineStarted` re-binder (post-engine).
+   *
+   * Idempotens: hook kan kalles flere ganger for samme roomCode
+   * (idempotent retry, bridge spawn-er ny rad ved samme run+position).
+   * Implementasjon i index.ts logger WARN ved re-binding for samme
+   * room+scheduledGameId, men setter samme verdi (no-op fra klient-
+   * perspektiv).
+   *
+   * Wire-protokoll: implementasjonen ligger i index.ts (DI-wiring) —
+   * hook abstrakt her for å holde service-en fri for roomState/
+   * emitRoomUpdate-avhengigheter. Mirrer
+   * `Game1MasterControlService.onEngineStarted`-mønsteret eksakt.
+   */
+  onScheduledGameCreated?: (input: {
+    scheduledGameId: string;
+    roomCode: string;
+    ticketConfigJson: unknown;
+  }) => Promise<void> | void;
 }
 
 export interface CreateScheduledGameResult {
@@ -697,6 +750,13 @@ export class GamePlanEngineBridge {
    * agent-konsoll og hall-ready-service.
    */
   private readonly membershipQuery: HallGroupMembershipQuery;
+  /**
+   * F2 (BUG-F2 2026-05-14): pre-engine ticket-config-binding-hook.
+   * Se `GamePlanEngineBridgeOptions.onScheduledGameCreated`.
+   */
+  private onScheduledGameCreated:
+    | GamePlanEngineBridgeOptions["onScheduledGameCreated"]
+    | null;
 
   constructor(options: GamePlanEngineBridgeOptions) {
     this.pool = options.pool;
@@ -704,6 +764,7 @@ export class GamePlanEngineBridge {
     this.catalogService = options.catalogService;
     this.planService = options.planService;
     this.planRunService = options.planRunService;
+    this.onScheduledGameCreated = options.onScheduledGameCreated ?? null;
     this.membershipQuery = new HallGroupMembershipQuery({
       pool: this.pool,
       schema: this.schema,
@@ -731,12 +792,30 @@ export class GamePlanEngineBridge {
       planRunService: GamePlanRunService;
     }).planRunService = opts.planRunService;
     (svc as unknown as {
+      onScheduledGameCreated:
+        | GamePlanEngineBridgeOptions["onScheduledGameCreated"]
+        | null;
+    }).onScheduledGameCreated = opts.onScheduledGameCreated ?? null;
+    (svc as unknown as {
       membershipQuery: HallGroupMembershipQuery;
     }).membershipQuery = new HallGroupMembershipQuery({
       pool: opts.pool,
       schema: assertSchemaName(opts.schema ?? "public"),
     });
     return svc;
+  }
+
+  /**
+   * F2 (BUG-F2 2026-05-14): test-/DI-hook for å sette
+   * `onScheduledGameCreated`-callback POST-konstruktor. Brukes av
+   * `index.ts` fordi roomState + emitRoomUpdate ikke er tilgjengelige
+   * ved bridge-konstruksjon (samme mønster som
+   * `Game1MasterControlService.setOnEngineStarted`).
+   */
+  setOnScheduledGameCreated(
+    callback: GamePlanEngineBridgeOptions["onScheduledGameCreated"],
+  ): void {
+    this.onScheduledGameCreated = callback ?? null;
   }
 
   private scheduledGamesTable(): string {
@@ -1336,6 +1415,47 @@ export class GamePlanEngineBridge {
       },
       "[fase-4] opprettet scheduled-game-rad fra plan-run + catalog",
     );
+
+    // F2 (BUG-F2 2026-05-14): pre-engine ticket-config-binding-hook.
+    // Mirrer `Game1MasterControlService.onEngineStarted` (PR #1375) men
+    // kjører POST-INSERT, FØR engine.startGame trigges av master. Dekker
+    // pre-game-vinduet hvor spillere kan kjøpe bonger via buy-popup —
+    // uten denne hooken faller `gameVariant.ticketTypes` til flat
+    // `priceMultiplier: 1` for alle farger, og klient viser 20 kr for
+    // Yellow (10 × yellow-multiplier(2) = 20) istedenfor riktige 10 kr.
+    //
+    // Soft-fail: hook-feil må IKKE bli til bridge-feil. Master har
+    // fortsatt en gyldig scheduled-game-id, og post-engine-hooken (#1375)
+    // vil re-binde verdiene når master starter. Worst case: klient
+    // viser default-priser i pre-game-vinduet.
+    //
+    // Idempotens: For ny scheduled-game-rad er roomCode garantert ikke-
+    // null (vi har nettopp INSERT-et med kanonisk room_code), så hooken
+    // kan binde umiddelbart. Re-binding for samme roomCode er en no-op
+    // fra klient-perspektiv (samme verdi → samme room-snapshot).
+    if (this.onScheduledGameCreated && assignedRoomCode) {
+      try {
+        const ticketConfigForHook = ticketConfig;
+        await Promise.resolve(
+          this.onScheduledGameCreated({
+            scheduledGameId: newId,
+            roomCode: assignedRoomCode,
+            ticketConfigJson: ticketConfigForHook,
+          }),
+        );
+      } catch (hookErr) {
+        log.warn(
+          {
+            err: hookErr,
+            runId: run.id,
+            position,
+            scheduledGameId: newId,
+            roomCode: assignedRoomCode,
+          },
+          "[F2 onScheduledGameCreated] hook kastet — ignorert (entry-fee/variant-config ikke bundet pre-engine, klient kan vise default-priser inntil onEngineStarted re-binder)",
+        );
+      }
+    }
 
     return {
       scheduledGameId: newId,
