@@ -1,7 +1,7 @@
 # PM-onboarding-playbook — Spillorama-system
 
 **Status:** Autoritativ. Følg denne rutinen ved hver PM-overgang.
-**Sist oppdatert:** 2026-05-11
+**Sist oppdatert:** 2026-05-14
 **Eier:** Tobias Haugen (teknisk lead)
 **Vedlikehold:** Oppdater ved hver større endring i prosjekt-fundamentet (ny ADR som overstyrer mønstre, nye pilot-haller, store kataloog-endringer).
 
@@ -1233,6 +1233,15 @@ gh pr merge <nr> --squash --auto --delete-branch
 - Memory `feedback_dev_nuke_after_merge.md` lagt til (superseder `feedback_pm_pull_after_merge.md`-restart-kommandoen).
 - Nye Tobias-direktiver: alltid `npm run dev:nuke` etter merge, aldri selective restart.
 
+#### 2026-05-14 (Agent S: DB-observability-aktivering)
+- Vedlegg B: PgHero DB-dashbord (`http://localhost:8080`) lagt til som ny URL. Aktiveres via `npm run dev:nuke -- --observability` for pilot-test-sesjoner. Login: `admin / spillorama-2026-test`.
+- `docker-compose.yml`: postgres-service fikk permanent `command:`-blokk som setter `shared_preload_libraries=pg_stat_statements` + `pg_stat_statements.track=all` + `log_min_duration_statement=100ms`. Migration `20261225000000_enable_pg_stat_statements.sql` ble installert tidligere, men extension samlet INGEN data uten denne `command:`-blokken — Tobias' opprinnelige rapport ("vi skulle vente med database verktøy men alt er satt opp"-feilsituasjonen) er nå fikset.
+- `scripts/dev/start-all.mjs`: lagt til `--observability`-flag (opt-in) + `OBSERVABILITY_ENABLED` env-var. Starter PgHero etter migrate. Status-tabell viser PgHero-URL når flagget er aktivt.
+- `scripts/dev/nuke-restart.sh`: forwarder `--observability` til `dev:all`. Kommando: `npm run dev:nuke -- --observability`.
+- `docs/operations/PGHERO_PGBADGER_RUNBOOK.md` oppdatert: §2 quick-start nevner nå `dev:nuke -- --observability`. §3 oppdatert til å reflektere at extension er permanent aktivert (ikke lenger "valgfritt").
+- Nye Tobias-direktiver: "overvåk DB-prosessen i testfasen slik at vi kan optimalisere" — DB-observability skal være på under pilot-test for å fange slow queries før prod-utrulling.
+- Nye anti-mønstre: PITFALLS §6.X — `pg_stat_statements`-extension installert via migration er IKKE nok; `shared_preload_libraries` MÅ settes på Postgres-prosessen ved oppstart. Installert ≠ aktivert.
+
 ### Flytende-doc-disiplin (regel)
 
 Hvis du som PM gjør **arbeid** som påvirker innholdet i playbook (eks. "vi
@@ -1330,8 +1339,11 @@ Tobias deler passord direkte i chat — Anthropic-policy hindrer AI å fylle inn
 | `http://localhost:4000/web/?dev-user=demo-pilot-spiller-1` | Spillerklient |
 | `http://localhost:4000/admin/#/tv/demo-hall-001/<token>` | TV-skjerm |
 | `http://localhost:4000/api/games/spill1/health?hallId=demo-hall-001` | R7 health-endpoint |
+| `http://localhost:8080` | **PgHero DB-dashbord** (OBS-7/OBS-8) — kun med `npm run dev:nuke -- --observability`. Login: admin / spillorama-2026-test. Slow queries, missing indexes, live connections. |
 | https://spillorama-system.onrender.com/ | Prod |
 | https://spillorama-system.onrender.com/health | Prod health |
+
+> **PgHero (OBS-7/OBS-8):** Tobias-direktiv 2026-05-14: "overvåk DB-prosessen i testfasen slik at vi kan optimalisere." Bruk `npm run dev:nuke -- --observability` for pilot-test-sesjoner — da starter PgHero på `:8080` ved siden av backend/admin/game-client. Default off for å holde startup rask. `pg_stat_statements` + `log_min_duration_statement=100ms` er permanent aktivert i `docker-compose.yml` (uavhengig av flagg) så data samles fra T-0. Se [PGHERO_PGBADGER_RUNBOOK.md](../operations/PGHERO_PGBADGER_RUNBOOK.md).
 
 ---
 
