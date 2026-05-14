@@ -1739,6 +1739,74 @@ Verifisert via test:
 
 ---
 
+### 2026-05-14 — Hall-switcher state-refresh bug (fix-agent, F-04)
+
+**Scope:** Tobias-rapport 2026-05-14 — hall-bytte i `/web/`-lobby dropdown gjorde ingenting synlig. Game-tiles fortsatte å vise gammel hall sin status, og hvis aktiv runde kjørte på master-hallen ble den ikke vist når bruker byttet til den. Direktiv: "siden må da oppdateres med de innstillingene som gjelder for den hallen". Pilot-UX-bug — spillere ser feil status etter hall-bytte.
+
+**Inputs gitt:**
+- Branch: `fix/hall-switcher-state-refresh-2026-05-14`
+- Fil: `apps/backend/public/web/lobby.js` (switchHall + buildStatusBadge)
+- Pekere: lobby.js:199-219, /api/games/spill1/lobby?hallId=... endepunktet (eksisterer fra før), spillvett.js SetActiveHall-handler
+- Forbudt: backend roomState.ts (F3-agent), LoadingOverlay.ts (PR #1409), GamePlanEngineBridge.ts (PR #1408), master-konsoll
+
+**Outputs produsert:**
+- Branch: `fix/hall-switcher-state-refresh-2026-05-14`
+- Fil: `apps/backend/public/web/lobby.js` (+~150 linjer, −20 linjer)
+  - Nytt felt `lobbyState.spill1Lobby` (per-hall Spill 1 lobby-state)
+  - Ny `loadSpill1Lobby()` — fetcher `/api/games/spill1/lobby?hallId=...`
+  - Utvidet `switchHall()` — parallell-refetch + confirm-modal ved aktiv runde + idempotens
+  - Ny `buildSpill1StatusBadge()` — mapper `overallStatus` til tile-badge
+  - Utvidet `buildStatusBadge('bingo')` — bruker per-hall state med fail-soft fallback
+  - Utvidet `loadLobbyData()` — initial-load henter spill1Lobby parallelt
+  - Utvidet `scheduleStatusRefresh()` — refresher spill1Lobby hvert 30s
+  - Nytt `__testing`-objekt på `window.SpilloramaLobby` for test-hooks
+- Fil: `apps/admin-web/tests/lobbyHallSwitcher.test.ts` (NY, 444 linjer, 13 tester)
+  - Loader lobby.js via `fs.readFileSync` i jsdom-kontext
+  - Mock-fetch med longest-prefix-matching for å unngå `/api/games`-kollisjoner
+  - Dekker initial-load, switch-flow, idempotens, parallell-fetch, fail-soft, badge-mapping, DOM-rerender, event-dispatch, SetActiveHall-bridge
+- Fil: `docs/engineering/PITFALLS_LOG.md` (§7.17 ny entry — 30 linjer)
+- Fil: `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Tester:**
+- `lobbyHallSwitcher.test.ts`: 13/13 PASS
+- Hele admin-web-suite: 1510 PASS / 3 SKIP (uendret)
+- `tsc --noEmit` for admin-web: 0 errors
+- `node -c lobby.js` (syntax): OK
+
+**Endringer (atferd):**
+- Bytte hall → `Promise.all([refreshBalanceNow(), loadCompliance(), loadSpill1Lobby(), /api/games/status])` (parallell)
+- `bingo`-tile bruker per-hall `spill1Lobby.overallStatus` (closed/idle/purchase_open/ready_to_start/running/paused/finished) → mapper til Åpen/Stengt/Starter snart/Pauset/Venter-badges
+- Hvis aktiv Pixi-runde: `window.confirm("Bytte hall vil avslutte pågående runde. Vil du fortsette?")` → ved Nei: revert via re-render
+- Spill 2/3 (perpetual) bruker fortsatt global `/api/games/status` — uendret
+- Idempotens: bytte til samme hall = no-op (ingen network-roundtrips)
+- Fail-soft: hvis `/api/games/spill1/lobby` feiler, falle tilbake til global gameStatus uten å vise feil til kunde
+
+**Fallgruver oppdaget:**
+- **§7.17:** Hall-switcher må re-fetche game-status. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. For Spill 1 må klient bruke `/api/games/spill1/lobby?hallId=...`. Lett å glemme når man legger til ny hall-spesifikk state.
+
+**Læring:**
+- Plain-JS-tester via `fs.readFileSync` + `new Function(src).call(window)` fungerer godt i jsdom-vitest-konteksten
+- Mock-fetch trenger longest-prefix-matching for å unngå at `/api/games`-prefiks også matcher `/api/games/spill1/lobby` og `/api/games/status`. Map preserves insertion order, men eksplisitt prefix-len-sortering er deterministisk.
+- `window.confirm` er enkleste vei til confirm-modal uten å introdusere tung modal-infrastruktur. Native dialog er akseptabelt for sjeldne advarsels-flyter (hall-switch midt i aktiv runde).
+- Idempotens-sjekk (`hallId === lobbyState.activeHallId`) sparer 4 network-roundtrips per duplikat-click — viktig for UX-følelse.
+
+**Eierskap:**
+- `apps/backend/public/web/lobby.js:switchHall, loadSpill1Lobby, buildSpill1StatusBadge`
+- `apps/admin-web/tests/lobbyHallSwitcher.test.ts`
+
+**Verifisering (Tobias-flyt):**
+- [ ] Åpne `http://localhost:4000/web/`
+- [ ] Bytt hall i dropdown fra "Default Hall" til "Demo Bingohall 1 (Master)"
+- [ ] Forvent: Bingo-tile bytter fra "Stengt" til "Åpen" (eller "Aktiv" hvis runde kjører)
+- [ ] Bytt tilbake til "Default Hall"
+- [ ] Forvent: Bingo-tile bytter tilbake til "Stengt"
+- [ ] Hvis aktiv Pixi-runde: confirm-modal vises FØR switch
+- [ ] Idempotens: klikk samme option to ganger på rad → ingen DevTools-network-aktivitet andre gang
+
+**Tid:** ~50 min agent-arbeid
+
+---
+
 ## Relaterte dokumenter
 
 - [`PITFALLS_LOG.md`](./PITFALLS_LOG.md) — sentral fallgruve-katalog
@@ -1756,6 +1824,7 @@ Verifisert via test:
 | 2026-05-11 | Sesjon 2026-05-10→2026-05-11: 16 PR-er merget (ADR-0017 + Bølge 1 + Bølge 2 + ADR-0021 + Tobias-bug-fix). 9 nye fallgruver dokumentert i PITFALLS_LOG. | PM-AI (Claude Opus 4.7) |
 | 2026-05-13 | I16/F-02 plan-run lifecycle auto-reconcile fra lobby-poll i `Game1LobbyService` (10 nye unit-tester, < 50ms latency, idempotent). | Agent (I16) |
 | 2026-05-14 | F2 (BUG-F2) — pre-engine ticket-config-binding-hook i `GamePlanEngineBridge.onScheduledGameCreated`. Dekker hullet fra PR #1375 (post-engine kun). Pre-game buy-popup viser nå riktige priser (Yellow=10 kr, ikke 20). 9 nye unit-tester, alle 105 eksisterende grønne. Skill `spill1-master-flow` v1.2.0 + PITFALLS §3.10 ny entry. | fix-agent (general-purpose) |
+| 2026-05-14 | F-04 (Hall-switcher BUG) — `apps/backend/public/web/lobby.js` utvidet `switchHall()` til å parallell-refetche balance + compliance + per-hall Spill 1-lobby-state + global game-status. Ny `loadSpill1Lobby()` mot `/api/games/spill1/lobby?hallId=...`. `buildStatusBadge('bingo')` mapper nå per-hall `overallStatus` til Åpen/Stengt/Starter snart/Pauset/Venter med fail-soft fallback til global gameStatus. Confirm-modal ved aktiv runde. Idempotens (samme hall = no-op). 13 nye unit-tester (lobby.js i jsdom via fs.readFileSync). Alle 1510 admin-web-tester PASS. PITFALLS §7.17 ny entry. | fix-agent (general-purpose) |
 
 ---
 

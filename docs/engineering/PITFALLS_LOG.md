@@ -1172,6 +1172,32 @@ PR #1218 introduserte klient-side fallback (`PLAYER_ALREADY_IN_ROOM` → `socket
 - `packages/game-client/src/games/game1/components/CenterTopPanel.ts:setPreBuyDisabled`
 - `packages/game-client/src/games/game1/components/CenterBall.ts:setIdleMode("waiting-master")`
 
+### §7.17 — Hall-switcher må re-fetche game-status (BUG)
+
+**Severity:** P0 (pilot-UX-bug — spiller ser feil hall-status)
+**Oppdaget:** 2026-05-14 (Tobias rapporterte at hall-bytte i dropdown ikke endrer game-tile-status)
+**Symptom:** Bytte hall i `/web/`-lobby dropdown → ingenting skjer synlig. Game-tiles fortsetter å vise gammel hall sin status. Hvis aktiv runde kjører på master-hall, vises den ikke når bruker bytter til den.
+**Root cause:** `switchHall()` i `apps/backend/public/web/lobby.js:199-219` oppdaterte aktiv-hall-id + balance + compliance, men ikke `lobbyState.games`/`lobbyState.spill1Lobby` med ny hall sin game-status. `/api/games/status` er GLOBAL (ignorerer hallId) — kan ikke besvare "hva er status på Bingo for hall X?". For per-hall Spill 1-state kreves separat fetch mot `/api/games/spill1/lobby?hallId=...`.
+**Fix (PR #<this-PR>):** Utvidet `switchHall()` til å parallell-refetche:
+- `/api/wallet/me` (balance, cache-buster)
+- `/api/wallet/me/compliance?hallId=...`
+- `/api/games/spill1/lobby?hallId=...` (NY — per-hall lobby-state)
+- `/api/games/status` (global — for Spill 2/3 perpetual)
+
+`buildStatusBadge('bingo')` bruker nå per-hall `spill1Lobby.overallStatus` (mapper closed/idle/purchase_open/ready_to_start/running/paused/finished til badges) når tilgjengelig, og faller tilbake til global `gameStatus['bingo']` ved feil. Confirm-modal vises før bytte hvis aktiv Pixi-runde kjører.
+**Prevention:**
+- ALDRI legg til hall-spesifikk state uten å sørge for at den re-fetches ved hall-switch
+- Sjekk listen i `switchHall()` mot ALL hall-spesifikk state i `lobbyState`
+- `/api/games/status` er GLOBAL — for per-hall Spill 1-state må klient bruke `/api/games/spill1/lobby?hallId=...`. Spill 2/3 forblir globale (ETT rom for alle haller).
+- Tester for hall-switcher i `apps/admin-web/tests/lobbyHallSwitcher.test.ts` dekker initial-load, switch-flow, fail-soft, og badge-mapping.
+**Related:**
+- `apps/backend/public/web/lobby.js:switchHall`
+- `apps/backend/public/web/lobby.js:loadSpill1Lobby`
+- `apps/backend/public/web/lobby.js:buildSpill1StatusBadge`
+- `apps/backend/src/routes/spill1Lobby.ts` + `Game1LobbyService.Game1LobbyState`
+- §3 (hall-arkitektur)
+- §7.11 (lobby-init race condition — relatert pattern)
+
 ---
 
 ## §8 Doc-disiplin

@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.1.0
+  version: 1.4.0
   project: spillorama
 ---
 
@@ -149,6 +149,38 @@ Aggregator throw KUN ved infrastruktur-feil (`LOBBY_AGGREGATOR_INFRA_ERROR` → 
 - Server dedup-erer i Redis med 5-min TTL
 - Cache-key: `(userId, eventName, clientRequestId)`
 - Marks/claims/buys cache-es lokalt under disconnect, replay-es etter reconnect
+
+## Hall-switching state-refresh (lobby.js, 2026-05-14)
+
+Når bruker bytter hall i `/web/`-lobby-dropdown (`apps/backend/public/web/lobby.js:switchHall`), MÅ disse stegene skje atomisk:
+
+1. **Idempotens-sjekk:** Hvis ny hallId === gammel → no-op (ingen network-roundtrips).
+2. **Aktiv-runde-vakt:** Hvis `isWebGameActive()` (Pixi container vises) → `window.confirm("Bytte hall vil avslutte pågående runde. Vil du fortsette?")`. Nei → revert via re-render, ja → unmount via `returnToShellLobby()` (som re-loader full lobby).
+3. **Update state:** `lobbyState.activeHallId` + `sessionStorage.lobby.activeHallId`.
+4. **Sync bridges:** `window.SetActiveHall(hallId, hallName)` (spillvett.js) + `dispatchEvent("spillorama:hallChanged")`.
+5. **Parallell-refetch (Promise.all):**
+   - `/api/wallet/me` (balance, cache-buster)
+   - `/api/wallet/me/compliance?hallId=...`
+   - `/api/games/spill1/lobby?hallId=...` ← per-hall Spill 1 status
+   - `/api/games/status` ← global, for Spill 2/3 perpetual (uendret)
+6. **Re-render game-tiles** med oppdatert badge-status.
+
+**ALDRI fjern step 5.3 (`loadSpill1Lobby`)** — `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Spiller ville da sett feil "Åpen/Stengt"-status etter bytte (PITFALLS §7.17).
+
+**Per-hall badge-mapping** (`buildSpill1StatusBadge` i lobby.js):
+
+| `Game1LobbyState.overallStatus` | Badge |
+|---|---|
+| `running`, `purchase_open` | Åpen (grønn) |
+| `ready_to_start` | Starter snart / Starter HH:MM |
+| `paused` | Pauset |
+| `idle` (med nextScheduledGame) | Starter HH:MM |
+| `idle` (uten nextScheduledGame) | Venter |
+| `closed`, `finished` | Stengt (rød) |
+
+Fail-soft: hvis `/api/games/spill1/lobby` feiler, falle tilbake til global `gameStatus['bingo']` for å ikke vise feil til kunde.
+
+**Tester:** `apps/admin-web/tests/lobbyHallSwitcher.test.ts` (13 tester, jsdom + mock-fetch).
 
 ## Master-rolle-modellen (Tobias 2026-05-08)
 
@@ -361,3 +393,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-13 | v1.1.0 — la til I14/I15/I16-fix-mønstre, ADR-0019/0020/0021/0022, MasterActionService som single-entry sekvenseringsmotor, GamePlanRunCleanupService for stale-plan-cleanup, master kan starte med 0 spillere |
 | 2026-05-14 | v1.2.0 — BUG-F2: la til seksjon "Ticket-pris-propagering" som dokumenterer to-fase-binding (pre-engine via `GamePlanEngineBridge.onScheduledGameCreated` + post-engine via `Game1MasterControlService.onEngineStarted`). Pre-engine-fasen dekker hullet fra PR #1375 og forhindrer 20kr-regresjonen. Begge faser MÅ beholdes — fremtidige agenter må ikke fjerne den ene uten å verifisere at den andre dekker pathen. |
 | 2026-05-14 | v1.3.0 — PR #1411 (sub-bug PR #1408): utvidet "Ticket-pris-propagering" til TRE-fase-fix. Fase 2 (variantByRoom-binding) manglet per-farge multipliers — `gameVariant.ticketTypes` i room-snapshot rendret flat mult=1/3 selv om backend `ticket_config_json` hadde korrekte priser. Fixen mapper `priceNok / minPriceNok` for hver farge i `spill1VariantMapper.ticketTypeFromSlug`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt. 7 nye tester. PR #1408's hook setter entryFee, men IKKE multipliers — derfor komplementært. |
+| 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
