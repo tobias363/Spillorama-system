@@ -144,7 +144,15 @@ export function buildCspDirectives(opts: {
     defaultSrc: ["'self'"],
     // Pixi/Vite emit hashed bundles served from our own origin.
     // No inline scripts — admin/player shells must not use `eval`/onclick=.
-    scriptSrc: ["'self'"],
+    scriptSrc: [
+      "'self'",
+      // OBS-2 (2026-05-14): Rrweb spawns a Web Worker fra blob:-URL
+      // for å rekorde canvas-snapshots (Pixi.js-rendering). Uten blob:
+      // her får worker-src (som faller tilbake til script-src) en CSP-
+      // violation og canvas-replay fungerer ikke. Standard mønster for
+      // session-replay-biblioteker.
+      "blob:",
+    ],
     // Tailwind + Pixi runtime inject inline `<style>` tags. Until we
     // adopt nonces (BIN-777) we need 'unsafe-inline' here.
     styleSrc: ["'self'", "'unsafe-inline'"],
@@ -160,6 +168,19 @@ export function buildCspDirectives(opts: {
       "https://api.swedbankpay.com",
       "wss://*.spillorama-system.onrender.com",
       "https://candy-backend-ldvg.onrender.com",
+      // OBS-4/OBS-5 (2026-05-14): Tillat Sentry envelope-POST + PostHog
+      // event-capture. Uten disse i connect-src er klient-side error-
+      // tracking + event-analytics broken i prod. report-only-CSP fanget
+      // disse i Tobias-test 2026-05-14 — 3 CSP-violations per minutt mot
+      // ingest.de.sentry.io. Sentry: bruker .de.sentry.io for EU-region,
+      // wildcard *.ingest dekker både prosjekt-spesifikke + fallback-
+      // routes. PostHog: eu.i.posthog.com er ingest, eu.posthog.com er UI.
+      "https://*.ingest.sentry.io",
+      "https://*.ingest.de.sentry.io",
+      "https://*.ingest.us.sentry.io",
+      "https://eu.i.posthog.com",
+      "https://eu.posthog.com",
+      "https://*.posthog.com",
       ...extraConnect,
     ],
     frameSrc: ["https://candy-backend-ldvg.onrender.com"],

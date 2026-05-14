@@ -394,11 +394,17 @@ export class RrwebRecorder {
         events: batch,
       });
       const url = `${this.endpoint}?token=${encodeURIComponent(this.token)}`;
+      // OBS-2 keepalive-fix 2026-05-14 (Tobias pilot-test): `keepalive: true`
+      // har 64KB body-limit i Chrome/Safari. Rrweb-batches er typisk
+      // 100-500KB → browser aborterte fetch FØR backend så den. Resultat:
+      // "Failed to fetch" + tight retry-loop som frøs nettleseren under
+      // pilot-bug-test 2026-05-13 ~23:00. Vi mister evnen til å flushe
+      // siste batch ved pagehide/unload, men det er en akseptabel trade-off
+      // mot at observability fungerer i det hele tatt under runtime.
       const response = await this.fetchImpl(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
-        keepalive: true,
       });
       if (!response.ok) {
         this.failureCount++;

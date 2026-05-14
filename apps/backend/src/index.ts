@@ -171,6 +171,10 @@ import { createDevBugReportRouter } from "./routes/devBugReport.js";
 // og spille av nøyaktig hva brukeren så som video. Komplementerer
 // devDebugEventLog (data-events) med visuell replay.
 import { createDevRrwebRouter } from "./routes/devRrweb.js";
+// Tobias 2026-05-14: end-to-end smoke-test for Sentry + PostHog. Trigger
+// én error til Sentry + ett event til PostHog så vi kan verifisere at
+// dashboard-pipeline fungerer. Token-gated.
+import { createDevObservabilityTestRouter } from "./routes/devObservabilityTest.js";
 // Tobias 2026-05-12: backend-side observability for live Spill 1-flyt.
 // Lar PM-AI + Tobias se EKSAKT state (engine in-memory + DB + Socket.IO +
 // stateVersion) uten å gjette. Token-gated, fail-soft per kilde.
@@ -5035,6 +5039,12 @@ app.use(
 // JSONL-fil per session til /tmp/rrweb-session-<id>.jsonl. PM-agent kan
 // trekke session-id ved bug og spille av nøyaktig hva brukeren så.
 app.use(createDevRrwebRouter());
+
+// Tobias 2026-05-14: smoke-test for Sentry + PostHog pipeline.
+//   POST /api/_dev/observability-test?token=<token>
+// Trigger én error til Sentry + ett event til PostHog. Returnerer
+// correlationId + dashboard-URLs så caller kan verifisere visuelt.
+app.use(createDevObservabilityTestRouter());
 
 // Tobias 2026-05-12: backend-side live-state-snapshot for Spill 1.
 //   GET /api/_dev/game-state-snapshot?roomCode=<code>&token=<token>
