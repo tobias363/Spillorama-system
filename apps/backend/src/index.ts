@@ -177,6 +177,12 @@ import { createDevBugReportRouter } from "./routes/devBugReport.js";
 // og spille av nøyaktig hva brukeren så som video. Komplementerer
 // devDebugEventLog (data-events) med visuell replay.
 import { createDevRrwebRouter } from "./routes/devRrweb.js";
+// Tobias 2026-05-14: Frontend-state-dump. Klient-side "Dump State"-knapp i
+// debug-HUD POST'er full frontend-state-tree hit; vi skriver én JSON-fil
+// per dump til /tmp/frontend-state-dumps/dump-<ts>-<id>.json. PM-agent og
+// Live-monitor-agent kan korrelere observert UI-state mot kilde-systemer
+// (room-snapshot, lobby-API, fallback) uten å gjette.
+import { createDevFrontendStateDumpRouter } from "./routes/devFrontendStateDump.js";
 // Tobias 2026-05-14: end-to-end smoke-test for Sentry + PostHog. Trigger
 // én error til Sentry + ett event til PostHog så vi kan verifisere at
 // dashboard-pipeline fungerer. Token-gated.
@@ -5228,6 +5234,16 @@ app.use(
 // JSONL-fil per session til /tmp/rrweb-session-<id>.jsonl. PM-agent kan
 // trekke session-id ved bug og spille av nøyaktig hva brukeren så.
 app.use(createDevRrwebRouter());
+
+// Tobias 2026-05-14: Frontend-state-dump collector. Token-gated.
+//   POST /api/_dev/debug/frontend-state-dump?token=<token>      — klient dump-POST
+//   GET  /api/_dev/debug/frontend-state-dumps?token=...         — list dumps
+//   GET  /api/_dev/debug/frontend-state-dumps/<dumpId>?token=... — single dump
+// "Dump State"-knapp i debug-HUD trigger en dump som samler komplett
+// state-tree (lobby, room, player, screen, socket, derived) + pricing-
+// kilder-sammenligning. PM bruker dette FØR vi gjetter hvor frontend
+// leser pris/innsats fra. Lagres som JSON-filer på /tmp.
+app.use(createDevFrontendStateDumpRouter());
 
 // Tobias 2026-05-14: smoke-test for Sentry + PostHog pipeline.
 //   POST /api/_dev/observability-test?token=<token>
