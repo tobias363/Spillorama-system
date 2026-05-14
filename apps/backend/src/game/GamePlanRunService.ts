@@ -644,15 +644,20 @@ export class GamePlanRunService {
 
     // BUG E auto-advance (2026-05-14): beregn `nextPosition`.
     //
+    // KORRIGERT spec (Tobias 2026-05-14 10:17): "Plan-completed beats stengetid".
+    // Selv om bingohall fortsatt er åpen (innenfor `plan.start_time`-`plan.end_time`),
+    // skal master IKKE kunne starte ny plan-run når plan er fullført for dagen.
+    // Spillet er over for denne dagen — vent til neste dag.
+    //
     // Tre tilfeller:
     //   1. Ingen forrige finished run (`previousPosition === null`)
     //      → start på posisjon 1 (eksisterende oppførsel).
     //   2. Forrige posisjon < antall plan-items
     //      → advance til neste posisjon (`previousPosition + 1`).
     //      Eks: forrige finished på pos 1 (Bingo) → ny på pos 2 (1000-spill).
-    //   3. Forrige posisjon >= antall plan-items
-    //      → wrap til posisjon 1 (plan repeteres for ny syklus).
-    //      Eks: forrige finished på pos 13 (TV-Extra) → ny på pos 1 (Bingo).
+    //   3. Forrige posisjon >= antall plan-items (plan fullført)
+    //      → AVVIS med `PLAN_COMPLETED_FOR_TODAY` (INGEN wrap).
+    //      Master må vente til neste dag for å starte ny plan-syklus.
     //
     // `planService.list` returnerer `GamePlan[]` (uten items) — vi må
     // kalle `getById(matched.id)` for å få full `GamePlanWithItems`.
@@ -667,8 +672,15 @@ export class GamePlanRunService {
       if (planItemCount > 0 && previousPosition < planItemCount) {
         nextPosition = previousPosition + 1;
         autoAdvanced = true;
+      } else if (planItemCount > 0 && previousPosition >= planItemCount) {
+        // Plan-completed-state — IKKE wrap. Tobias-direktiv 2026-05-14 10:17.
+        // Master må vente til neste dag for å starte ny plan-syklus.
+        throw new DomainError(
+          "PLAN_COMPLETED_FOR_TODAY",
+          `Spilleplan ferdig for i dag (siste posisjon ${previousPosition} av ${planItemCount} fullført). Vent til neste dag for å starte ny plan-syklus.`,
+        );
       }
-      // else: wrap eller plan har ingen items → nextPosition forblir 1.
+      // else: plan har 0 items → defensive fallback til nextPosition=1
     }
 
     const id = randomUUID();

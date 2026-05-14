@@ -458,9 +458,12 @@ test("auto-advance: forrige finished på position=12 → ny på position=13 (sis
   assert.equal(audit?.details.newPosition, 13);
 });
 
-test("auto-advance: forrige finished på position=13 (siste) → wrap til position=1", async () => {
+test("plan-completed beats stengetid: forrige finished på position=13 (siste) → AVVIS med PLAN_COMPLETED_FOR_TODAY", async () => {
+  // Tobias-direktiv 2026-05-14 10:17: Plan-completed beats stengetid.
+  // Selv om bingohall fortsatt åpen, skal master IKKE kunne starte ny
+  // plan-run når plan er fullført for dagen. INGEN wrap.
   const plan = makePlanWith13Items();
-  const { service, queries, audits } = makeService({
+  const { service } = makeService({
     previousRun: {
       id: PREV_RUN_ID,
       currentPosition: 13,
@@ -469,35 +472,26 @@ test("auto-advance: forrige finished på position=13 (siste) → wrap til positi
     plan,
   });
 
-  const run = await service.getOrCreateForToday(HALL_ID, todayStr());
-
-  assert.equal(
-    run.currentPosition,
-    1,
-    "forrige pos 13 (siste) → wrap til 1 (ny syklus)",
+  await assert.rejects(
+    () => service.getOrCreateForToday(HALL_ID, todayStr()),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, "should throw Error");
+      assert.equal(
+        (err as { code?: string }).code,
+        "PLAN_COMPLETED_FOR_TODAY",
+        "should reject with PLAN_COMPLETED_FOR_TODAY code",
+      );
+      return true;
+    },
+    "forrige pos 13 (siste) → AVVIS, ingen wrap",
   );
-
-  const insertParams = findInsertParams(queries);
-  assert.equal(insertParams?.[4], 1);
-
-  // Audit skal vise wrap (autoAdvanced=false fordi vi resatte til 1 ikke advancert).
-  const audit = findAudit(audits, "game_plan_run.recreate_after_finish");
-  assert.ok(audit);
-  assert.equal(audit?.details.previousPosition, 13);
-  assert.equal(audit?.details.newPosition, 1);
-  assert.equal(
-    audit?.details.autoAdvanced,
-    false,
-    "wrap (siste → 1) skal markeres som autoAdvanced=false",
-  );
-  assert.equal(audit?.details.planItemCount, 13);
 });
 
-test("auto-advance: forrige finished på position > items.length → wrap til 1 (defensiv)", async () => {
+test("plan-completed: forrige finished på position > items.length → AVVIS (planen redusert, men ferdig)", async () => {
   // Edge case: forrige rad har en posisjon utenfor plan-items (eks. planen
-  // ble redusert). Vi skal wrap til 1, ikke kaste eller advance til ugyldig.
+  // ble redusert). Vi skal AVVIS, ikke wrap. Plan-completed-state.
   const plan = makePlanWithNItems(5); // kun 5 items
-  const { service, queries, audits } = makeService({
+  const { service } = makeService({
     previousRun: {
       id: PREV_RUN_ID,
       currentPosition: 10, // utenfor planen
@@ -506,16 +500,17 @@ test("auto-advance: forrige finished på position > items.length → wrap til 1 
     plan,
   });
 
-  const run = await service.getOrCreateForToday(HALL_ID, todayStr());
-
-  assert.equal(
-    run.currentPosition,
-    1,
-    "previousPosition > items.length → wrap til 1",
+  await assert.rejects(
+    () => service.getOrCreateForToday(HALL_ID, todayStr()),
+    (err: unknown) => {
+      assert.equal(
+        (err as { code?: string }).code,
+        "PLAN_COMPLETED_FOR_TODAY",
+        "previousPosition > items.length → AVVIS, ikke wrap",
+      );
+      return true;
+    },
   );
-
-  const audit = findAudit(audits, "game_plan_run.recreate_after_finish");
-  assert.equal(audit?.details.autoAdvanced, false);
 });
 
 test("auto-advance: plan med 0 items → wrap til 1 (defensive default)", async () => {
