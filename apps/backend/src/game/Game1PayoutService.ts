@@ -69,6 +69,21 @@ export interface Game1WinningAssignment {
   hallId: string;
   /** Ticket-farge (for jackpot-oppslag og audit). */
   ticketColor: string;
+  /**
+   * Ticket-størrelse fra app_game1_ticket_assignments.ticket_size
+   * ("small"/"large"). REGULATORISK-KRITISK (2026-05-14): kombinert med
+   * ticketColor brukes denne av `payoutPerColorGroups` til å bygge
+   * riktig color-slug (small_yellow/large_purple/etc.) for å slå opp
+   * per-farge pre-multipliserte premier i `patternsByColor`. Uten size
+   * faller engine til __default__ matrise med HVIT-base, og auto-
+   * multiplikator (yellow×2, purple×3) går tapt — spillere får for lav
+   * premie.
+   *
+   * Optional for backwards-compat: hvis ikke satt parses fra eksisterende
+   * slug-form ticketColor (legacy stubs); i prod skal feltet alltid være
+   * satt av evaluateAndPayoutPhase.
+   */
+  ticketSize?: "small" | "large";
 }
 
 /**

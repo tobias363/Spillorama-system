@@ -308,6 +308,60 @@ export function resolveEngineColorName(ticketColor: string): string | null {
 }
 
 /**
+ * REGULATORISK-KRITISK (2026-05-14, fix for runde 7dcbc3ba payout-feil):
+ *
+ * Bygg color-slug (`small_yellow`/`large_purple`/etc.) fra family-form farge
+ * (`yellow`/`purple`/`white`) + size (`small`/`large`). Slug-form er
+ * påkrevd for å slå opp per-farge pre-multipliserte premier i
+ * `spill1.ticketColors[]` (ticket_config_json) og `patternsByColor`
+ * (engine variant-config).
+ *
+ * **Hvorfor dette er fix-kritisk:** `app_game1_ticket_assignments.ticket_color`
+ * lagres som FAMILY-form ("yellow") via `Game1TicketPurchaseService` —
+ * IKKE slug-form. Engine-`payoutPerColorGroups` brukte ticket_color
+ * direkte som lookup-key, som matchet ingen entry i `patternsByColor`
+ * (som er keyed på engine-navn "Small Yellow") → fall-back til
+ * __default__ (= HVIT base) → auto-multiplikator (yellow×2, purple×3)
+ * gikk tapt → spillere fikk for lav premie.
+ *
+ * Format:
+ *   - Family + small  → `${family}` med size-prefix → `small_yellow`
+ *   - Family + large  → `large_yellow`
+ *   - Allerede slug   → returnerer uendret (idempotent for legacy/tester)
+ *   - Familie-aliaser → kun engelsk family-form ("yellow"/"white"/
+ *     "purple"/"red"/"green"/"orange"/"elvis1-5"); norsk-form skal være
+ *     konvertert av bridge før det når denne funksjonen.
+ *
+ * Returnerer null hvis input ikke gir et gjenkjent slug. Caller faller
+ * tilbake til ticketColor uendret (defensiv — eksisterende atferd).
+ */
+export function resolveColorSlugFromAssignment(
+  ticketColor: string,
+  ticketSize: "small" | "large" | undefined,
+): string | null {
+  if (!ticketColor) return null;
+  const lower = ticketColor.toLowerCase().trim();
+  // Allerede slug-form (e.g. "small_yellow", "large_purple"). Engine vil
+  // resolve riktig via SCHEDULER_COLOR_SLUG_TO_NAME.
+  if (SCHEDULER_COLOR_SLUG_TO_NAME[lower]) {
+    return lower;
+  }
+  // Family-form: trenger size for å bygge slug.
+  if (!ticketSize) return null;
+  const size = ticketSize === "large" ? "large" : "small";
+  const candidate = `${size}_${lower}`;
+  if (SCHEDULER_COLOR_SLUG_TO_NAME[candidate]) {
+    return candidate;
+  }
+  // Elvis-farger har ikke size-prefix (`elvis1`-`elvis5` direkte).
+  // Hvis lower allerede er en gyldig elvis-slug returner direkte.
+  if (/^elvis[1-5]$/.test(lower)) {
+    return lower;
+  }
+  return null;
+}
+
+/**
  * Konverter `PatternConfig` til prize-beløp i øre basert på pot.
  *
  *   - `winningType: "fixed"` → `prize1` kroner × 100 (direkte per-fase-beløp).

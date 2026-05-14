@@ -171,6 +171,41 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - [`SPILL_REGLER_OG_PAYOUT.md`](../architecture/SPILL_REGLER_OG_PAYOUT.md) §9
 - Status 2026-05-08: regel definert, engine-pathen MÅ rebuiles for å matche §9.7-formel
 
+### §1.9 — Payout MÅ bygge color-slug fra (family-color + size), IKKE bruke family direkte
+
+**Severity:** P0 (REGULATORISK — spillere får for lav premie, auto-mult gikk tapt)
+**Oppdaget:** 2026-05-14 — Tobias-test, runde `7dcbc3ba-bb64-4596-8410-f0bfe269efd6`: Yellow Rad 1 utbetalt 100 kr (skal være 200), Purple Rad 2 utbetalt 200 kr (skal være 300)
+**Symptom:** `app_game1_phase_winners.prize_amount_cents` reflekterer HVIT base × 1 i stedet for HVIT base × color-multiplier. Auto-multiplikator (yellow×2, purple×3) går tapt for ALLE rad-faser. DB-bevis verifisert via direkte SELECT.
+**Root cause:**
+- `app_game1_ticket_assignments.ticket_color` lagres som FAMILY-form ("yellow"/"purple"/"white") av `Game1TicketPurchaseService`
+- `payoutPerColorGroups` brukte `winner.ticketColor` direkte som lookup-key for `patternsByColor`
+- `patternsByColor` keys er ENGINE-NAVN ("Small Yellow"/"Large Purple") via `SCHEDULER_COLOR_SLUG_TO_NAME`-mapping
+- Ingen match → fall til `__default__` matrise (DEFAULT_NORSK_BINGO_CONFIG) → HVIT-base brukes for alle bongfarger
+
+**Fix (PR #<this-PR>):**
+- Ny helper `resolveColorSlugFromAssignment(color, size)` bygger slug-form ("small_yellow"/"large_purple") fra (family-color + size)
+- `Game1WinningAssignment` utvidet med optional `ticketSize?: "small" | "large"`
+- `evaluateAndPayoutPhase` SELECT inkluderer `a.ticket_size`
+- `payoutPerColorGroups` grupperer på slug-key (ikke family-key) → engine-name-lookup matcher patternsByColor
+- Broadcast-prizePerWinner-beregning i `evaluateAndPayoutPhase` (line ~2596) bruker også slug-key
+- `computeOrdinaryWinCentsByHallPerColor` (pot-evaluator) bruker slug-key for consistency
+
+**Prevention:**
+- ALDRI bruk `winner.ticketColor` direkte som key for `patternsByColor`/`spill1.ticketColors[]` — bygg slug først
+- ALDRI bruk `pattern.prize1` (HVIT base) for payout-amount uten å gange med color-multiplier
+- ALDRI fjern `a.ticket_size` fra payout-SELECT i `evaluateAndPayoutPhase`
+- Compliance-ledger PRIZE-entry MÅ logge `bongMultiplier` + `potCentsForBongSize` for §71-sporbarhet
+- Tester: 6+ tester per fase × hver farge × multi-vinner-scenario
+
+**Related:**
+- `apps/backend/src/game/Game1DrawEngineService.ts` — `payoutPerColorGroups` + `evaluateAndPayoutPhase`
+- `apps/backend/src/game/Game1DrawEngineHelpers.ts` — `resolveColorSlugFromAssignment`
+- `apps/backend/src/game/Game1PayoutService.ts` — `Game1WinningAssignment.ticketSize`
+- `apps/backend/src/game/Game1DrawEnginePotEvaluator.ts` — `computeOrdinaryWinCentsByHallPerColor`
+- [`SPILL_REGLER_OG_PAYOUT.md`](../architecture/SPILL_REGLER_OG_PAYOUT.md) §3 — auto-multiplikator-regelen
+- PR #1408 + PR #1413 — ticket_config_json + gameVariant.ticketTypes (relatert kontekst)
+- `.claude/skills/spill1-master-flow/SKILL.md` — seksjon "Payout-pipeline auto-multiplikator"
+
 ---
 
 ## §2 Wallet & Pengeflyt

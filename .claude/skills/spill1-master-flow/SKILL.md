@@ -341,6 +341,68 @@ Hook: `Game1MasterControlService.onEngineStarted`
 
 Alle faser kjører idempotent — re-binding for samme room+scheduledGameId setter samme verdi (no-op fra klient-perspektiv). Hvis du fjerner Fase 1, kommer entryFee-buggen tilbake. Hvis du fjerner Fase 2, kommer multiplier-buggen (20kr/30kr) tilbake. Hvis du fjerner Fase 3, mister du defense-in-depth ved engine-start.
 
+## Payout-pipeline auto-multiplikator (PR #1417, REGULATORISK-KRITISK)
+
+> **Tobias-direktiv 2026-05-14:** Engine MÅ lese per-farge pre-multipliserte premier fra `ticket_config_json.spill1.ticketColors[].prizePerPattern[<pattern>].amount` ved payout-tid — IKKE fra `gameVariant.patterns[].prize1` (som er HVIT base) direkte. Hvis du fjerner denne logikken kommer auto-mult-buggen tilbake.
+
+### Bakgrunn (runde 7dcbc3ba 2026-05-14)
+
+Live DB-bevis fra runde `7dcbc3ba-bb64-4596-8410-f0bfe269efd6`:
+
+| phase | ticket_color | utbetalt (pre-fix) | korrekt (auto-mult) |
+|---|---|---|---|
+| 1 | yellow (small) | 100 kr | 200 kr (= 100 × 2) |
+| 2 | purple (small) | 200 kr | 300 kr (= 100 × 3) |
+| 3 | yellow (small) | 200 kr | 200 kr (= 100 × 2) ✓ (tilfeldigvis) |
+| 4 | yellow (small) | 200 kr | 200 kr (= 100 × 2) ✓ (tilfeldigvis) |
+
+Phase 1 yellow og phase 2 purple er klart UNDER-betalt. REGULATORISK FEIL — spillere får for lav premie.
+
+### Root cause
+
+`app_game1_ticket_assignments.ticket_color` lagres som **FAMILY-form** ("yellow"/"purple"/"white") av `Game1TicketPurchaseService` — IKKE slug-form. Pre-fix:
+
+1. `payoutPerColorGroups` grupperte winnere på `w.ticketColor = "yellow"`
+2. `resolveEngineColorName("yellow")` → returnerer "yellow" uendret (ingen slug-match)
+3. `resolvePatternsForColor(variantConfig, "yellow", ...)` → ingen key "yellow" i `patternsByColor` (som er keyed på engine-navn "Small Yellow") → fall til `__default__` matrise
+4. `__default__` = `DEFAULT_NORSK_BINGO_CONFIG.patterns` = HVIT base (100/200/200/200/1000)
+5. Auto-mult (yellow×2, purple×3) går tapt → spillere får hvit-pris
+
+### Fix
+
+Engine bygger nå **slug-form** ("small_yellow"/"large_purple") fra `(ticket_color family-form, ticket_size)` før lookup:
+
+1. `evaluateAndPayoutPhase` SELECT inkluderer `a.ticket_size` (i tillegg til `a.ticket_color`)
+2. `Game1WinningAssignment.ticketSize` propageres til payout-pathen
+3. `resolveColorSlugFromAssignment("yellow", "small")` → `"small_yellow"`
+4. `resolveEngineColorName("small_yellow")` → `"Small Yellow"` (via `SCHEDULER_COLOR_SLUG_TO_NAME`)
+5. `patternsByColor["Small Yellow"]` har korrekt per-farge pre-multipliserte premier fra bridge
+
+### Kilde-felter (kanoniske)
+
+- `ticket_config_json.spill1.ticketColors[].color` — slug-form ("small_yellow")
+- `ticket_config_json.spill1.ticketColors[].prizePerPattern[<row_N|full_house>].amount` — pre-multiplisert i kr (bridge har gjort `calculateActualPrize` allerede)
+- `app_game1_ticket_assignments.ticket_color` — FAMILY-form (legacy: "yellow")
+- `app_game1_ticket_assignments.ticket_size` — "small" | "large"
+
+### ALDRI gjør
+
+- IKKE fjern `a.ticket_size` fra payout-SELECT i `evaluateAndPayoutPhase`
+- IKKE bruk `w.ticketColor` direkte som key for `patternsByColor` — bygg slug først
+- IKKE bruk `pattern.prize1` (HVIT base) for payout-amount uten å gange med color-multiplier
+- IKKE endre `Game1WinningAssignment.ticketSize` til required uten å oppdatere ALLE call-sites (legacy stubs sender ikke size)
+
+### Tester som beskytter
+
+- `apps/backend/src/game/Game1DrawEngineService.payoutAutoMultiplier.test.ts` (6 tester — yellow/purple/white Rad 1, yellow Fullt Hus, multi-vinner, compliance-ledger-metadata)
+- `apps/backend/src/game/Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts` (20 tester — slug-builder edge cases)
+
+### Compliance-ledger-metadata
+
+Hver PRIZE-event har nå `bongMultiplier` + `potCentsForBongSize` i metadata for §71-sporbarhet (pengespillforskriften). Auditor kan reprodusere utbetalingen fra ledger-data alene.
+
+ALDRI fjern disse kilden fra payout-pipeline — den er regulatorisk forpliktet per §71 og SPILL_REGLER_OG_PAYOUT.md §3.
+
 ### Tester som beskytter mot regresjon
 
 - `apps/backend/src/game/spill1VariantMapper.test.ts` — Fase 2: 7 nye PR #1411-tester (Standard Bingo `[1,3,2,6,3,9]`, Trafikklys `[1,3]`, hvit+gul `[1,3,2,6]`, tom-fallback, idempotent, priceNok=0-fallback, blandet priceNok)
@@ -392,5 +454,6 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-08 | Initial — master-flyt fundament + Bølge 1 GameLobbyAggregator |
 | 2026-05-13 | v1.1.0 — la til I14/I15/I16-fix-mønstre, ADR-0019/0020/0021/0022, MasterActionService som single-entry sekvenseringsmotor, GamePlanRunCleanupService for stale-plan-cleanup, master kan starte med 0 spillere |
 | 2026-05-14 | v1.2.0 — BUG-F2: la til seksjon "Ticket-pris-propagering" som dokumenterer to-fase-binding (pre-engine via `GamePlanEngineBridge.onScheduledGameCreated` + post-engine via `Game1MasterControlService.onEngineStarted`). Pre-engine-fasen dekker hullet fra PR #1375 og forhindrer 20kr-regresjonen. Begge faser MÅ beholdes — fremtidige agenter må ikke fjerne den ene uten å verifisere at den andre dekker pathen. |
-| 2026-05-14 | v1.3.0 — PR #1411 (sub-bug PR #1408): utvidet "Ticket-pris-propagering" til TRE-fase-fix. Fase 2 (variantByRoom-binding) manglet per-farge multipliers — `gameVariant.ticketTypes` i room-snapshot rendret flat mult=1/3 selv om backend `ticket_config_json` hadde korrekte priser. Fixen mapper `priceNok / minPriceNok` for hver farge i `spill1VariantMapper.ticketTypeFromSlug`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt. 7 nye tester. PR #1408's hook setter entryFee, men IKKE multipliers — derfor komplementært. |
+| 2026-05-14 | v1.3.0 — PR #1413 (sub-bug PR #1408): utvidet "Ticket-pris-propagering" til TRE-fase-fix. Fase 2 (variantByRoom-binding) manglet per-farge multipliers — `gameVariant.ticketTypes` i room-snapshot rendret flat mult=1/3 selv om backend `ticket_config_json` hadde korrekte priser. Fixen mapper `priceNok / minPriceNok` for hver farge i `spill1VariantMapper.ticketTypeFromSlug`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt. 7 nye tester. PR #1408's hook setter entryFee, men IKKE multipliers — derfor komplementært. |
 | 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
+| 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
