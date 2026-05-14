@@ -74,6 +74,10 @@ async function startApp(
         now: opts.now,
         // Disable audit-db i tester (vi spawner ikke child_process her).
         auditDbScriptPath: null,
+        // OBS-10 — disable eksterne fetches i default test-app
+        sentryConfig: null,
+        posthogConfig: null,
+        rrwebSessionsDir: opts.reportDir, // tom dir → ingen sessions
       },
     ),
   );
@@ -326,6 +330,9 @@ process.exit(1); // P1-funn → exit 1, men output er gyldig
             clientEventLogPath: path.join(tmpDir, "no.jsonl"),
             auditDbScriptPath: mockScript,
             auditDbTimeoutMs: 5000,
+            sentryConfig: null,
+            posthogConfig: null,
+            rrwebSessionsDir: tmpDir,
           },
         ),
       );
@@ -373,6 +380,9 @@ process.exit(1); // P1-funn → exit 1, men output er gyldig
             clientEventLogPath: path.join(tmpDir, "no.jsonl"),
             auditDbScriptPath: "/tmp/this-does-not-exist-xyz.mjs",
             auditDbTimeoutMs: 5000,
+            sentryConfig: null,
+            posthogConfig: null,
+            rrwebSessionsDir: tmpDir,
           },
         ),
       );
@@ -586,6 +596,478 @@ process.exit(1); // P1-funn → exit 1, men output er gyldig
 
     it("returnerer string for string", () => {
       assert.equal(__TEST_ONLY__.isoOrDash("2026-05-13"), "2026-05-13");
+    });
+  });
+
+  // ── OBS-10 (2026-05-14) — Sentry + PostHog + Rrweb ────────────────────
+  describe("OBS-10: pickStringField", () => {
+    it("returnerer null for null/undefined input", () => {
+      assert.equal(
+        __TEST_ONLY__.pickStringField(null, ["x"]),
+        null,
+      );
+      assert.equal(
+        __TEST_ONLY__.pickStringField(undefined, ["x"]),
+        null,
+      );
+    });
+
+    it("plukker første matchende felt", () => {
+      assert.equal(
+        __TEST_ONLY__.pickStringField(
+          { x: "  one  ", y: "two" },
+          ["x", "y"],
+        ),
+        "one",
+      );
+    });
+
+    it("hopper over tomme felt", () => {
+      assert.equal(
+        __TEST_ONLY__.pickStringField(
+          { x: "  ", y: "  fallback " },
+          ["x", "y"],
+        ),
+        "fallback",
+      );
+    });
+
+    it("returnerer null hvis ingen treff", () => {
+      assert.equal(
+        __TEST_ONLY__.pickStringField({ a: 1, b: null }, ["x", "y"]),
+        null,
+      );
+    });
+  });
+
+  describe("OBS-10: discoverRrwebSessionId", () => {
+    it("returnerer eksplisitt session-id fra sessionContext", () => {
+      const id = __TEST_ONLY__.discoverRrwebSessionId({
+        sessionContext: { rrwebSessionId: " abc-123 " },
+        sessionsDir: tmpDir,
+        fsImpl: fs,
+      });
+      assert.equal(id, "abc-123");
+    });
+
+    it("returnerer null når dir mangler og ingen explicit id", () => {
+      const id = __TEST_ONLY__.discoverRrwebSessionId({
+        sessionContext: null,
+        sessionsDir: "/tmp/this-does-not-exist-xyz",
+        fsImpl: fs,
+      });
+      assert.equal(id, null);
+    });
+
+    it("returnerer nyeste session-fil fra disk når ingen explicit id", () => {
+      // Lag 2 session-filer
+      const older = path.join(tmpDir, "rrweb-session-old-1.jsonl");
+      const newer = path.join(tmpDir, "rrweb-session-new-2.jsonl");
+      fs.writeFileSync(older, "x");
+      // Sett mtime så vi vet rekkefølge
+      const past = new Date(Date.now() - 60_000);
+      fs.utimesSync(older, past, past);
+      fs.writeFileSync(newer, "y");
+      const id = __TEST_ONLY__.discoverRrwebSessionId({
+        sessionContext: null,
+        sessionsDir: tmpDir,
+        fsImpl: fs,
+      });
+      assert.equal(id, "new-2");
+    });
+
+    it("ignorerer ikke-rrweb-filer", () => {
+      fs.writeFileSync(path.join(tmpDir, "other.jsonl"), "x");
+      fs.writeFileSync(path.join(tmpDir, "rrweb-session-zzz.jsonl"), "y");
+      const id = __TEST_ONLY__.discoverRrwebSessionId({
+        sessionContext: null,
+        sessionsDir: tmpDir,
+        fsImpl: fs,
+      });
+      assert.equal(id, "zzz");
+    });
+  });
+
+  describe("OBS-10: buildSentryIssuesSection", () => {
+    it("rendrer fetch-skipped melding når config null", () => {
+      const out = __TEST_ONLY__.buildSentryIssuesSection({
+        issues: [],
+        statsPeriod: "10m",
+        config: null,
+        userId: null,
+        hallId: null,
+        fetchSkipped: true,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("🛰️ Sentry-issues"));
+      assert.ok(md.includes("hoppet over"));
+    });
+
+    it("rendrer issues med culprit, tags og permalink", () => {
+      const out = __TEST_ONLY__.buildSentryIssuesSection({
+        issues: [
+          {
+            id: "42",
+            shortId: "SPILLORAMA-42",
+            title: "TypeError: undefined.foo",
+            culprit: "GameLobbyAggregator.getLobbyState",
+            permalink: "https://spillorama.sentry.io/issues/42/",
+            count: 3,
+            lastSeen: "2026-05-14T22:00:00Z",
+            level: "error",
+            tags: [{ key: "hall_id", value: "demo-hall-001" }],
+          },
+        ],
+        statsPeriod: "10m",
+        config: {
+          authToken: "t",
+          org: "spillorama",
+          projectBackend: "spillorama-backend",
+          projectFrontend: "spillorama-frontend",
+        },
+        userId: null,
+        hallId: "demo-hall-001",
+        fetchSkipped: false,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("SPILLORAMA-42"));
+      assert.ok(md.includes("GameLobbyAggregator.getLobbyState"));
+      assert.ok(md.includes("hall_id=demo-hall-001"));
+      assert.ok(md.includes("https://spillorama.sentry.io/issues/42/"));
+    });
+
+    it("rendrer 'ingen issues' når array er tom og config eksisterer", () => {
+      const out = __TEST_ONLY__.buildSentryIssuesSection({
+        issues: [],
+        statsPeriod: "10m",
+        config: {
+          authToken: "t",
+          org: "x",
+          projectBackend: "y",
+          projectFrontend: "z",
+        },
+        userId: "u1",
+        hallId: null,
+        fetchSkipped: false,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("user.id=u1"));
+      assert.ok(md.includes("Ingen issues"));
+    });
+  });
+
+  describe("OBS-10: buildPostHogSection", () => {
+    it("rendrer fetch-skipped melding når config null", () => {
+      const out = __TEST_ONLY__.buildPostHogSection({
+        events: [],
+        config: null,
+        distinctId: null,
+        afterMinutes: 10,
+        fetchSkipped: true,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("📊 PostHog-events"));
+      assert.ok(md.includes("hoppet over"));
+    });
+
+    it("rendrer tabell med events + dashboard-link", () => {
+      const out = __TEST_ONLY__.buildPostHogSection({
+        events: [
+          {
+            id: "e1",
+            event: "client.buy.confirm.attempt",
+            timestamp: "2026-05-14T22:05:32Z",
+            distinct_id: "u-1",
+            properties: { tickets: 2, totalCents: 2000 },
+            person: null,
+          },
+        ],
+        config: {
+          apiKey: "k",
+          host: "https://eu.posthog.com",
+          projectId: 178713,
+        },
+        distinctId: "u-1",
+        afterMinutes: 10,
+        fetchSkipped: false,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("client.buy.confirm.attempt"));
+      assert.ok(md.includes("22:05:32"));
+      assert.ok(md.includes("tickets"));
+      assert.ok(md.includes("eu.posthog.com/project/178713/events"));
+    });
+
+    it("escape pipes i properties-preview (markdown-tabell-safety)", () => {
+      const out = __TEST_ONLY__.buildPostHogSection({
+        events: [
+          {
+            id: "e1",
+            event: "x",
+            timestamp: "2026-05-14T22:00:00Z",
+            distinct_id: "u",
+            properties: { foo: "a|b|c" },
+            person: null,
+          },
+        ],
+        config: {
+          apiKey: "k",
+          host: "https://eu.posthog.com",
+          projectId: 1,
+        },
+        distinctId: null,
+        afterMinutes: 10,
+        fetchSkipped: false,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("a\\|b\\|c"), `expected pipe-escape in: ${md}`);
+    });
+  });
+
+  describe("OBS-10: buildRrwebSection", () => {
+    it("rendrer 'ingen session' når sessionId null", () => {
+      const out = __TEST_ONLY__.buildRrwebSection({
+        sessionId: null,
+        sessionsDir: "/tmp",
+        replayerPath: "/rrweb-replayer.html",
+        baseUrl: null,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("🎥 Rrweb DOM-replay"));
+      assert.ok(md.includes("Ingen rrweb-session funnet"));
+    });
+
+    it("rendrer replayer-link med base-URL", () => {
+      const out = __TEST_ONLY__.buildRrwebSection({
+        sessionId: "abc-123",
+        sessionsDir: "/tmp",
+        replayerPath: "/rrweb-replayer.html",
+        baseUrl: "http://localhost:4000",
+      });
+      const md = out.join("\n");
+      assert.ok(
+        md.includes(
+          "http://localhost:4000/rrweb-replayer.html?session=abc-123",
+        ),
+      );
+      assert.ok(md.includes("/tmp/rrweb-session-abc-123.jsonl"));
+    });
+
+    it("rendrer replayer-link uten base-URL (relativ)", () => {
+      const out = __TEST_ONLY__.buildRrwebSection({
+        sessionId: "xyz",
+        sessionsDir: "/tmp",
+        replayerPath: "/rrweb-replayer.html",
+        baseUrl: null,
+      });
+      const md = out.join("\n");
+      assert.ok(md.includes("/rrweb-replayer.html?session=xyz"));
+    });
+  });
+
+  describe("OBS-10: POST inkluderer Sentry+PostHog+Rrweb-seksjoner i markdown", () => {
+    it("rendrer alle tre seksjoner med skipped-meldinger når config null", async () => {
+      const pool = makeFakePool(() => []);
+      const { baseUrl, close } = await startApp({
+        pool,
+        reportDir,
+        pilotMonitorLogPath: path.join(tmpDir, "no.log"),
+        backendLogPath: path.join(tmpDir, "no.log"),
+        clientEventLogPath: path.join(tmpDir, "no.jsonl"),
+      });
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/_dev/debug/bug-report?token=test-token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Test" }),
+          },
+        );
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { data: { reportPath: string } };
+        const md = fs.readFileSync(body.data.reportPath, "utf8");
+        assert.ok(md.includes("🛰️ Sentry-issues"));
+        assert.ok(md.includes("📊 PostHog-events"));
+        assert.ok(md.includes("🎥 Rrweb DOM-replay"));
+        // Alle tre skal vise skipped/ingen-funn
+        assert.ok(md.includes("Sentry-fetch hoppet over") || md.includes("hoppet over"));
+      } finally {
+        await close();
+      }
+    });
+
+    it("kaller faktisk Sentry-fetcher når config er satt og inkluderer mock-issue", async () => {
+      // Mock fetch som returnerer 1 issue
+      const mockFetch = async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => [
+          {
+            id: "42",
+            shortId: "SPILLORAMA-42",
+            title: "Mock issue from test",
+            culprit: "TestModule.func",
+            permalink: "https://sentry.test/42",
+            count: 1,
+            lastSeen: "2026-05-14T22:00:00Z",
+            level: "error",
+            tags: [{ key: "hall_id", value: "demo-hall-001" }],
+          },
+        ],
+        text: async () => "",
+      });
+
+      const pool = makeFakePool(() => []);
+      const app = express();
+      app.use(express.json({ limit: "5mb" }));
+      app.use(
+        createDevBugReportRouter(
+          { pool: pool as unknown as import("pg").Pool, schema: "public" },
+          {
+            reportDir,
+            pilotMonitorLogPath: path.join(tmpDir, "no.log"),
+            backendLogPath: path.join(tmpDir, "no.log"),
+            clientEventLogPath: path.join(tmpDir, "no.jsonl"),
+            auditDbScriptPath: null,
+            posthogConfig: null,
+            rrwebSessionsDir: tmpDir,
+            sentryConfig: {
+              authToken: "test-token",
+              org: "spillorama",
+              projectBackend: "spillorama-backend",
+              projectFrontend: "spillorama-frontend",
+            },
+            sentryFetchFn: mockFetch as never,
+          },
+        ),
+      );
+      const server = await new Promise<Server>((resolve) => {
+        const s = app.listen(0, "127.0.0.1", () => resolve(s));
+      });
+      const addr = server.address();
+      if (typeof addr !== "object" || addr === null) {
+        server.close();
+        throw new Error("server.address() ikke object");
+      }
+      const url = `http://127.0.0.1:${addr.port}`;
+      try {
+        const res = await fetch(
+          `${url}/api/_dev/debug/bug-report?token=test-token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: "Sentry-integrasjon",
+              sessionContext: { hallId: "demo-hall-001", userId: "u1" },
+            }),
+          },
+        );
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { data: { reportPath: string } };
+        const md = fs.readFileSync(body.data.reportPath, "utf8");
+        assert.ok(md.includes("Mock issue from test"));
+        assert.ok(md.includes("SPILLORAMA-42"));
+        assert.ok(md.includes("hall_id=demo-hall-001"));
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    });
+
+    it("fail-soft: Sentry-API 401 → markdown viser 'Ingen issues' uten å feile", async () => {
+      const mockFetch = async () => ({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        json: async () => ({}),
+        text: async () => '{"detail":"bad token"}',
+      });
+
+      const pool = makeFakePool(() => []);
+      const app = express();
+      app.use(express.json({ limit: "5mb" }));
+      app.use(
+        createDevBugReportRouter(
+          { pool: pool as unknown as import("pg").Pool, schema: "public" },
+          {
+            reportDir,
+            pilotMonitorLogPath: path.join(tmpDir, "no.log"),
+            backendLogPath: path.join(tmpDir, "no.log"),
+            clientEventLogPath: path.join(tmpDir, "no.jsonl"),
+            auditDbScriptPath: null,
+            posthogConfig: null,
+            rrwebSessionsDir: tmpDir,
+            sentryConfig: {
+              authToken: "bad",
+              org: "spillorama",
+              projectBackend: "spillorama-backend",
+              projectFrontend: "spillorama-frontend",
+            },
+            sentryFetchFn: mockFetch as never,
+          },
+        ),
+      );
+      const server = await new Promise<Server>((resolve) => {
+        const s = app.listen(0, "127.0.0.1", () => resolve(s));
+      });
+      const addr = server.address();
+      if (typeof addr !== "object" || addr === null) {
+        server.close();
+        throw new Error("server.address() ikke object");
+      }
+      const url = `http://127.0.0.1:${addr.port}`;
+      try {
+        const res = await fetch(
+          `${url}/api/_dev/debug/bug-report?token=test-token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Sentry-401" }),
+          },
+        );
+        // Skal IKKE failes — bug-rapporten skal genereres uansett
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { data: { reportPath: string } };
+        const md = fs.readFileSync(body.data.reportPath, "utf8");
+        assert.ok(md.includes("🛰️ Sentry-issues"));
+        assert.ok(md.includes("Ingen issues") || md.includes("ingen issues"));
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    });
+
+    it("rrweb: bygger replayer-link når explicit sessionId i body", async () => {
+      const pool = makeFakePool(() => []);
+      const { baseUrl, close } = await startApp({
+        pool,
+        reportDir,
+        pilotMonitorLogPath: path.join(tmpDir, "no.log"),
+        backendLogPath: path.join(tmpDir, "no.log"),
+        clientEventLogPath: path.join(tmpDir, "no.jsonl"),
+      });
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/_dev/debug/bug-report?token=test-token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: "Rrweb-test",
+              sessionContext: { rrwebSessionId: "session-xyz-123" },
+            }),
+          },
+        );
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { data: { reportPath: string } };
+        const md = fs.readFileSync(body.data.reportPath, "utf8");
+        assert.ok(md.includes("session-xyz-123"));
+        assert.ok(md.includes("/rrweb-replayer.html?session=session-xyz-123"));
+        // Base-URL inferred fra request → 127.0.0.1:<port>
+        assert.ok(md.includes("http://127.0.0.1"));
+      } finally {
+        await close();
+      }
     });
   });
 });
