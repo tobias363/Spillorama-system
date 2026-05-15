@@ -35,7 +35,7 @@ Full forklaring i [`docs/engineering/PM_QUICK_REFERENCE.md`](../engineering/PM_Q
 
 ---
 
-## 13 obligatoriske trinn (i rekkefølge)
+## Obligatoriske trinn (i rekkefølge)
 
 ### Trinn 0 — Onboarding-gate (HARD-BLOCK)
 
@@ -66,6 +66,35 @@ Hvis exit ≠ 0 → kjør interaktiv. Krever per-fil-bekreftelse av:
 - [ ] Doc-absorpsjon-gate passert (`.pm-doc-absorption-confirmed.txt` finnes og er ≤ 7 dager)
 
 > **Status 2026-05-15:** Gate-script levert. `--validate` feiler også hvis dokumentsettet har endret seg siden forrige bekreftelse.
+
+### Trinn 0.75 — PM Knowledge Continuity v2 evidence pack + selvtest (HARD-BLOCK)
+
+```bash
+node scripts/pm-knowledge-continuity.mjs --generate-pack \
+  --output /tmp/pm-knowledge-continuity-pack.md
+
+node scripts/pm-knowledge-continuity.mjs --self-test-template \
+  --pack /tmp/pm-knowledge-continuity-pack.md \
+  --output /tmp/pm-knowledge-self-test.md
+
+$EDITOR /tmp/pm-knowledge-self-test.md
+
+node scripts/pm-knowledge-continuity.mjs --confirm-self-test \
+  /tmp/pm-knowledge-self-test.md \
+  --pack /tmp/pm-knowledge-continuity-pack.md
+
+node scripts/pm-knowledge-continuity.mjs --validate
+```
+
+Dette beviser operativ forståelse før første kodehandling:
+- Hva forrige PM leverte og ikke rakk.
+- Hvilke PR-er/workflows/git-endringer som er aktive.
+- Hvilke invariants, skills og PITFALLS som gjelder for neste arbeid.
+- Hva første handling er, og hvorfor den fortsetter i samme spor.
+
+- [ ] Knowledge-continuity-gate passert (`.pm-knowledge-continuity-confirmed.txt` finnes og er ≤ 7 dager)
+
+Se [`PM_KNOWLEDGE_CONTINUITY_V2.md`](./PM_KNOWLEDGE_CONTINUITY_V2.md) for full prosedyre.
 
 ### Trinn 1 — Generer live current-state-rapport
 
@@ -248,6 +277,7 @@ Onboarding fullført. Status:
 - Dev-stack: ✅
 - Monitor: ✅
 - MCP-er: ✅ (4/4 live)
+- Knowledge Continuity v2: ✅ (self-test bestått)
 
 Klar til arbeid. Hva er prioritet?
 ```
@@ -259,7 +289,7 @@ Klar til arbeid. Hva er prioritet?
 Hvis Tobias har gitt klar prioritet i handoff "Åpne tasks for neste PM": start der.
 Hvis Tobias venter input: spør om prioritet.
 
-ALDRI start kode-handling før Trinn 0-11 er passert.
+ALDRI start kode-handling før alle hard-gates og Trinn 1-11 er passert.
 
 - [ ] Klar til første kode-handling
 
@@ -269,8 +299,9 @@ ALDRI start kode-handling før Trinn 0-11 er passert.
 
 | ❌ Aldri | ✅ I stedet |
 |---|---|
-| "Jeg leser det jeg trenger underveis" | Trinn 0-11 først, kode etter |
+| "Jeg leser det jeg trenger underveis" | Alle hard-gates + Trinn 1-11 først, kode etter |
 | Skip pm-checkpoint.sh "fordi gate fra i går er gyldig" | Sjekk minst `--validate` → arvet gate OK |
+| Generere evidence pack men ikke skrive self-test | Kjør hele Knowledge Continuity v2-flyten og bekreft med `--validate` |
 | Anta dev-stack er live "fordi det var i går" | Verifiser med `curl /health` |
 | Start testing uten monitor live | §2.18 IMMUTABLE — monitor MÅ være på |
 | Spør Tobias om noe forrige PM allerede dokumenterte | Søk PM_HANDOFF + KNOWLEDGE_EXPORT først |
@@ -283,8 +314,8 @@ ALDRI start kode-handling før Trinn 0-11 er passert.
 
 | Type PM-overgang | Forventet onboarding-tid |
 |---|---|
-| Helt ny til prosjektet | 3-4 timer (Trinn 0-11 inkl. agent-sammendrag) |
-| Tar over fra forrige PM samme dag | 30-60 min (Trinn 1-11, gate-arv) |
+| Helt ny til prosjektet | 3-4 timer (alle gates + Trinn 1-11 inkl. agent-sammendrag) |
+| Tar over fra forrige PM samme dag | 45-75 min (Trinn 1-11, gate-arv + self-test) |
 | Resumé etter < 4 timer pause | 10-15 min (Trinn 7-11 + sjekk Sentry-feed) |
 
 ---
@@ -292,10 +323,12 @@ ALDRI start kode-handling før Trinn 0-11 er passert.
 ## Relaterte filer
 
 - `docs/operations/PM_SESSION_END_CHECKLIST.md` — motsatt prosedyre (avsluttende PM)
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md` — evidence pack + self-test-gate
 - `docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_TEMPLATE.md` — mal for sesjons-eksport
 - `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` — komplett PM-rutine
 - `scripts/pm-checkpoint.sh` — eksisterende handoff-gate
 - `scripts/pm-doc-absorption-gate.sh` — doc-absorpsjon-gate
+- `scripts/pm-knowledge-continuity.mjs` — evidence pack + self-test-validering
 - `scripts/pm-onboarding.sh` — current-state-snapshot
 
 ---
@@ -305,3 +338,4 @@ ALDRI start kode-handling før Trinn 0-11 er passert.
 | Dato | Endring |
 |---|---|
 | 2026-05-14 | Initial — eksplisitt prosedyre etablert per Tobias-direktiv ("Hvordan denne rutinen er — har du lagt inn at hver avsluttende PM skal lage et detaljert handoff dokument slik at ny PM vet akkurat hva den må gjøre?") |
+| 2026-05-15 | Lagt til PM Knowledge Continuity v2: evidence pack + self-test som hard-block før første kodehandling. |

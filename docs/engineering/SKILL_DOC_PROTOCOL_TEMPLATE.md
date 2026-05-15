@@ -1,7 +1,7 @@
 # Skill-doc-protokoll — template for fix-agent-prompts
 
 **Status:** Autoritativ. Lim inn i HVER fix-agent-prompt.
-**Sist oppdatert:** 2026-05-14
+**Sist oppdatert:** 2026-05-15
 **Eier:** Tobias Haugen
 **Direktiv:** PM_ONBOARDING_PLAYBOOK §2.19 (IMMUTABLE)
 
@@ -25,6 +25,7 @@ Uten skill+pitfalls-update i hver fix-PR går vi 2 skritt frem og 1 tilbake. Fre
 2. **Kopier-paster** template-seksjonen under inn i agent-prompt-en
 3. **Tilpasser** PR-nummer + skill-navn + §-nummer per task
 4. **Ved PR-review** sjekker jeg om docs faktisk ble oppdatert — hvis nei, follow-up commit
+5. **Før PM åpner PR**, krever jeg Agent Delivery Report fra agenten i formatet fra [`AGENT_DELIVERY_REPORT_TEMPLATE.md`](./AGENT_DELIVERY_REPORT_TEMPLATE.md)
 
 ---
 
@@ -55,6 +56,12 @@ Legg til ny seksjon (eller utvid eksisterende) som dokumenterer:
 
 **Tester som beskytter mot regresjon:**
 - `<path/til/test-fil>` (`<beskrivelse av test-coverage>`)
+
+**Hva som nå funker:**
+<Kort operativ forklaring, så neste PM/agent forstår normaltilstanden>
+
+**Hva fremtidige agenter IKKE skal endre:**
+<Eksplisitt invariant / "ALDRI gjør X"-regel>
 ```
 
 ### 2. `docs/engineering/PITFALLS_LOG.md` § <PM fyller inn §-nummer>
@@ -101,6 +108,7 @@ Legg til kronologisk entry:
 - [ ] AGENT_EXECUTION_LOG oppdatert med entry
 - [ ] Test-coverage for fixen dokumentert i skill-seksjonen
 - [ ] Eksplisitt "ALDRI gjør X"-regel i skill-en for fremtidige agenter
+- [ ] Agent Delivery Report levert til PM med context read, invariants, tester, knowledge updates og åpne risikoer
 
 PR vil bli rejektet hvis disse mangler.
 ```
@@ -175,5 +183,7 @@ Resultat-prompt-seksjon: se `Agent F2 prompt` i sesjons-handoff fra 2026-05-14.
 ## Vedlikehold av denne template
 
 Hvis Tobias gir ny direktiv som påvirker template — oppdater her. Hvis ny skill kommer til, legg til i mapping-tabellen. Template er kortet ned med vilje — overflødig detalj sliter ut agentenes context-budsjett.
+
+Relatert strengere leveranseformat: [`AGENT_DELIVERY_REPORT_TEMPLATE.md`](./AGENT_DELIVERY_REPORT_TEMPLATE.md).
 
 **Eier:** PM. Oppdaterer ved hver større endring i PM-flyt eller nye skills.
