@@ -1,0 +1,179 @@
+name: Preview Pages Immutable Gate
+
+# Tobias-direktiv 2026-05-15:
+# Preview-design-sider (`packages/game-client/src/{bong-design,kjopsmodal-design,
+# premie-design,dev-overview,preview}/`) er Tobias-bekreftet IMMUTABLE etter
+# godkjenning. Agenter som implementerer i prod-komponenter skal LESE FRA
+# preview-sidene og kopiere designet 1:1 til prod, ALDRI overskrive preview-
+# source med en mellomstilstand fra prod ("rette designet").
+#
+# Denne workflow-en blokkerer PR-er som rører preview-source uten at PR-body
+# har en gyldig `[design-locked: YYYY-MM-DD]`-marker. Marker er bevis på at
+# Tobias muntlig har godkjent designet før kode-endringen.
+#
+# Hendelse 2026-05-15: Tobias rapporterte 2 ganger at "triple-bong-design ble
+# byttet ut". Source viste seg å være intakt — problem var stale built artifact.
+# Men hendelsen avslørte at det ikke fantes hard-block mot at agenter
+# overskriver source med en mellomstilstand. Denne gaten er det permanente
+# forsvaret.
+#
+# Hvordan bypasse:
+# 1. Tobias godkjenner muntlig at designet skal endres
+# 2. PM legger til `[design-locked: YYYY-MM-DD]` i PR-body (samme dato som
+#    godkjennelsen)
+# 3. Marker er gyldig i 30 dager — etter det må ny godkjennelse innhentes
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce preview-pages immutability
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const PREVIEW_PATHS = [
+              'packages/game-client/src/bong-design/',
+              'packages/game-client/src/kjopsmodal-design/',
+              'packages/game-client/src/premie-design/',
+              'packages/game-client/src/dev-overview/',
+              'packages/game-client/src/preview/',
+            ];
+
+            const MARKER_REGEX = /\[design-locked:\s*(\d{4}-\d{2}-\d{2})\s*\]/i;
+            const MAX_MARKER_AGE_DAYS = 30;
+
+            const pr = context.payload.pull_request;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const changed = files.map((f) => f.filename);
+            const previewChanged = changed.filter((f) =>
+              PREVIEW_PATHS.some((p) => f.startsWith(p))
+            );
+
+            if (previewChanged.length === 0) {
+              core.info('No preview-design source files changed.');
+              return;
+            }
+
+            core.info(
+              `Preview-design source files changed (${previewChanged.length}):`
+            );
+            for (const f of previewChanged) {
+              core.info(`  - ${f}`);
+            }
+
+            const body = pr.body || '';
+            const match = body.match(MARKER_REGEX);
+
+            if (!match) {
+              const errorMessage = [
+                '⛔ Preview-pages er IMMUTABLE — PR-en mangler `[design-locked: YYYY-MM-DD]`-marker.',
+                '',
+                '**Hvorfor blokkerer denne gaten?**',
+                '',
+                'Preview-design-sidene under `packages/game-client/src/{bong-design,',
+                'kjopsmodal-design,premie-design,dev-overview,preview}/` er Tobias-bekreftet',
+                'IMMUTABLE etter godkjenning. Tidligere har agenter "reddet" designet ved å',
+                'overskrive preview-source med en mellomstilstand fra prod. Source skal være',
+                '*kanonisk kilde* — prod-komponenter må matche source, ikke omvendt.',
+                '',
+                '**Endrede preview-source-filer:**',
+                previewChanged.map((f) => `- \`${f}\``).join('\n'),
+                '',
+                '**Hvordan løse:**',
+                '',
+                '1. Få muntlig godkjennelse fra Tobias for design-endringen',
+                '2. Legg til marker `[design-locked: YYYY-MM-DD]` i PR-body (samme dato som',
+                '   godkjennelsen, format YYYY-MM-DD)',
+                '3. Forklar hva som endres + hvorfor i PR-body',
+                '4. Marker er gyldig i 30 dager',
+                '',
+                '**Hvis du IKKE skulle endre preview-source:**',
+                '',
+                'Du har sannsynligvis overskrevet source ved en feiltakelse. Revertér',
+                'endringene under `packages/game-client/src/{bong-design,kjopsmodal-design,',
+                'premie-design,dev-overview,preview}/` og kjør `npm run build:games` for å',
+                'regenerere artifacts i stedet.',
+                '',
+                '**Se også:** `.claude/skills/preview-pages-protection/SKILL.md`',
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: errorMessage,
+              });
+
+              core.setFailed(
+                'Preview-pages immutable: PR body mangler [design-locked: YYYY-MM-DD]-marker.'
+              );
+              return;
+            }
+
+            const markerDate = match[1];
+            const marker = new Date(markerDate + 'T00:00:00Z');
+            const now = new Date();
+            const ageMs = now.getTime() - marker.getTime();
+            const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+
+            if (isNaN(marker.getTime())) {
+              core.setFailed(
+                `Preview-pages immutable: marker-dato \`${markerDate}\` er ugyldig (forventet YYYY-MM-DD).`
+              );
+              return;
+            }
+
+            if (ageDays < 0) {
+              core.setFailed(
+                `Preview-pages immutable: marker-dato \`${markerDate}\` er i framtiden (${Math.abs(ageDays)} dager fram).`
+              );
+              return;
+            }
+
+            if (ageDays > MAX_MARKER_AGE_DAYS) {
+              const errorMessage = [
+                '⛔ Preview-pages immutable: design-locked-marker er for gammel.',
+                '',
+                `Markøren \`[design-locked: ${markerDate}]\` er **${ageDays} dager** gammel.`,
+                `Maks alder er ${MAX_MARKER_AGE_DAYS} dager.`,
+                '',
+                'Få ny muntlig godkjennelse fra Tobias og oppdater marker-datoen i PR-body.',
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: errorMessage,
+              });
+
+              core.setFailed(
+                `Preview-pages immutable: marker \`${markerDate}\` er ${ageDays} dager gammel (maks ${MAX_MARKER_AGE_DAYS}).`
+              );
+              return;
+            }
+
+            core.info(
+              `Preview-pages design-locked: marker \`${markerDate}\` er ${ageDays} dager gammel (gyldig).`
+            );
+            core.info(
+              `Endring av ${previewChanged.length} preview-source-fil(er) godkjent.`
+            );

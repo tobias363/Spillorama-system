@@ -3964,3 +3964,90 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `docs/engineering/PITFALLS_LOG.md` §5.11: fallgruve dokumentert
 
 **Lesson learned:** Branch protection skal aldri låses mot generiske check contexts som `enforce`, `validate`, `check` eller `test`. Før en check legges inn som required, må en PR bekrefte faktisk context-navn via `gh pr checks <nr>`.
+
+---
+
+### 2026-05-15 — Devops-agent (general-purpose): permanent CI-guard for preview-pages
+
+**Agent-id:** Devops-agent (aab21735-1528a4a30)
+**Type:** general-purpose
+**Scope:** Etablerer permanent beskyttelse mot at agenter overskriver preview-design-source med mellomstilstand fra prod. Bygger CI-gate + skill + agent-prompt-prefix + PITFALLS-entry.
+**Trigger:** Tobias-direktiv 2026-05-15 (rapportert 2 ganger): "Tidligere har vi opplevd at agenter har 'reddet' designet ved å overskrive preview-source med en mellomstilstand fra prod. Vi skal sette opp permanent beskyttelse."
+
+**Inputs:**
+- 5 preview-mapper under `packages/game-client/src/`:
+  - `bong-design/` (Spill 1 bong-rendering)
+  - `kjopsmodal-design/` (BuyPopup Figma-export)
+  - `premie-design/` (Center-top premie-tabell)
+  - `dev-overview/` (utvikler-landingsside)
+  - `preview/` (bonus-spill preview)
+- Eksisterende `knowledge-protocol-gate.yml` som mønster-eksempel
+- Eksisterende `.claude/skills/bong-design/` + `buy-popup-design/` som skill-format
+
+**Outputs:**
+
+1. **`.github/workflows/preview-pages-immutable.yml`** (185 linjer)
+   - Trigges på PR mot main med endringer i `packages/game-client/src/{bong-design,kjopsmodal-design,premie-design,dev-overview,preview}/**`
+   - Sjekker PR-body for `[design-locked: YYYY-MM-DD]`-marker
+   - Validerer marker-format + dato-gyldighet (≤ 30 dager, ikke i framtid)
+   - Mangler marker → `core.setFailed()` + bot-kommentar med detaljert forklaring
+   - Marker for gammel/ugyldig → `core.setFailed()` + bot-kommentar
+   - Valid marker → pass + info-melding
+   - Validert via `python3 -c "import yaml; yaml.safe_load(...)"` → YAML OK
+
+2. **`.claude/skills/preview-pages-protection/SKILL.md`** (ny skill, ~145 linjer)
+   - Frontmatter med trigger-fraser for autom. invoking
+   - Liste over de 5 preview-sidene + scope-kommentar
+   - Forklaring av build-artifacts (gitignored, må rebuild)
+   - Grunnregel "les FRA source, ALDRI skriv til source"
+   - CI-gate-mekanikk dokumentert
+   - PM-flyt for legitime endringer (Tobias-godkjenning → marker)
+   - Anti-mønster-tabell
+   - Stale-artifact-deteksjon-guide
+
+3. **`docs/engineering/IMPLEMENTER_AGENT_PROMPT_PREFIX.md`** (mal, ~130 linjer)
+   - Kopier-paste-blokk PM bruker i agent-prompts for UI-komponenter
+   - Match-tabell: når bruke prefix (BuyPopup, BingoTicket, CenterTop, etc.) vs ikke (backend, admin-web)
+   - Eksempel-prompt med prefix på riktig plass
+   - Vedlikeholds-noter
+
+4. **`docs/engineering/PITFALLS_LOG.md` §11.17** (ny entry)
+   - Severity: P1
+   - Root cause-forklaring: Tobias' 2026-05-15-hendelse var faktisk stale build-artifact, men avslørte manglende forsvar mot overwrite-anti-mønster
+   - Permanent fix: CI-gate + skill + prefix-mal
+   - Prevention-liste
+   - Cross-referanser til workflow, skill, prefix-fil
+
+5. **PITFALLS_LOG-indeks oppdatert:** §11 17→18 entries, total 98→99
+
+**Fallgruver oppdaget:**
+- Ingen nye fallgruver — dette ER fallgruve-loggingen for kjent anti-mønster
+
+**Læring:**
+
+- **YAML-validering uten actionlint:** `python3 -c "import yaml; yaml.safe_load(open(file))"` er pålitelig fallback når actionlint mangler. GitHub Actions har sin egen syntax-sjekk ved push uansett.
+
+- **Marker-format med dato-validering er robust:** `[design-locked: YYYY-MM-DD]` med regex + 30-dagers-aldersgrense + framtidssjekk fanger alle de vanlige feilene (typo, "evig marker", planned-future-bypass). Mønstret kan kopieres til andre lock-gates senere.
+
+- **Bot-kommentar er bedre enn bare CI-fail:** Når CI feiler, agenter må forstå HVORFOR. `github.rest.issues.createComment` med detaljert reason + how-to-fix gjør at neste agent (eller PM) løser det på første forsøk uten å spørre.
+
+- **Eksisterende skills som format-eksempel sparer tid:** `bong-design/SKILL.md` og `buy-popup-design/SKILL.md` ga klar frontmatter-stil + scope-kommentar-format. Lim-tilpasning til `preview-pages-protection` ble rask.
+
+- **Stale build-artifact er en hyppig misforståelse:** Tobias' rapport "designet ble byttet ut" var faktisk artifact-cache. Skill-dokumentet flagger dette eksplisitt slik at framtidige agenter sjekker `npm run build:games` FØRST før de mistenker source-corruption.
+
+**Eierskap (filer agenten har endret):**
+- `.github/workflows/preview-pages-immutable.yml` (NY)
+- `.claude/skills/preview-pages-protection/SKILL.md` (NY)
+- `docs/engineering/IMPLEMENTER_AGENT_PROMPT_PREFIX.md` (NY)
+- `docs/engineering/PITFALLS_LOG.md` (utvidet — §11.17 ny entry + indeks-count)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Forbudt-rør (overholdt):**
+- IKKE rørt selve preview-source-filene (`bong-design.html` etc.) — de er hva gaten beskytter
+- IKKE rørt build-pipeline (`vite.config.ts`, `npm run build:games`)
+- IKKE rørt prod-komponenter (`Game1BuyPopup.ts` etc.)
+- IKKE endret andre workflow-er — kun lagt til den nye
+
+**Branch:** `feat/preview-pages-immutable-2026-05-15`
+**Tid:** ~30 min agent-arbeid
+**PR:** (åpnes etter commit; gate-confirmed: 3dc25314e3df + auto-merge)
