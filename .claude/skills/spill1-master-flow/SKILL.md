@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.18.0
+  version: 1.19.0
   project: spillorama
 ---
 
@@ -1048,6 +1048,77 @@ Husk: hvis du gjør backend-ryddingen senere, MÅ du beholde klient-gate-en uans
 
 `packages/game-client/src/games/game1/Game1Controller.pauseOverlayGating.test.ts` — 11 pure-funksjons-tester som mirror'er gate-logikken. Hvis prod-koden drifter (eks. noen legger til `&& !endOfRoundOverlay.visible` eller fjerner `gameStatus === "RUNNING"`-condition), driver mirror-funksjonen i denne testen også, og kontrakten håndheves via deterministisk test.
 
+## Post-round-overlay data-driven dismiss (C-hybrid, FIXED 2026-05-15)
+
+> **Status:** IMMUTABLE per Tobias-direktiv 2026-05-15. Direktivet: *"Kjør C, tenker minimum 6 sek celebrasjon deretter vent"*.
+
+### Bug-rapport som drev fixen
+
+Tobias 2026-05-15:
+> "Vi har fortsatt ikke løst problemet med at man kun ser neste spill når en runde er ferdig og popup kommer frem for kjøp av til da neste spill. Nå viste man spillet som nettopp var spilt i ca 40 sekunder før det endret til riktig spill."
+
+Pre-fix Game1EndOfRoundOverlay dismisset etter `MIN_DISPLAY_MS = 3_000` (3s) + første `markRoomReady` (utløst av første state-update etter overlay-mount). Markrooready firet typisk innen ~50ms, så overlay dismisset på 3s — men `nextScheduledGame.catalogSlug` i lobby-state var fortsatt det vi nettopp spilte fordi backend ikke hadde advancert plan-runtime ennå. Spilleren så lobby med stale "Neste spill: <samme som nettopp>"-tekst i opptil 40 sekunder før backend endelig advancerte.
+
+### Hvorfor data-driven > timer-driven
+
+Timer-driven (3s, 10s, 15s) er gjetning på når backend er klar. Backend-advance varierer mellom 50ms og 40s+ avhengig av plan-runtime-helse, master-hall-state, og bridge-retry. Ingen fast timer fungerer.
+
+Data-driven løsning: **vent på faktisk signal fra backend** at slug har endret seg. Slug-en er den minste vi kan måle "backend er klar med ny runde".
+
+### Kontrakt — `MIN_CELEBRATION_MS` + slug-comparison + `MAX_WAIT_MS`
+
+Når Game1Controller sender `summary.justPlayedSlug` (eller kaller `setJustPlayedSlug` etter mount), aktiveres data-driven dismiss-modus i overlay:
+
+| Krav | Verdi |
+|---|---|
+| Minimum celebration | `MIN_CELEBRATION_MS = 10_000` (10 sek) |
+| Slug-comparison | `currentNextSlug !== justPlayedSlug` (begge non-null) |
+| Safety-cap | `MAX_WAIT_MS = 60_000` (60 sek) |
+| Poll-interval | `DATA_READINESS_POLL_MS = 500` (sekundær defense — primær er event-driven via `updateLobbyState`) |
+
+Overlay dismisses når **BÅDE** (a) minimum-celebration har passert OG (b) lobby-state har levert ny slug. Hvis 60 sek passerer uten ny slug, fyrer safety-cap-dismiss + Sentry-breadcrumb.
+
+### Klient-side API på Game1EndOfRoundOverlay
+
+```typescript
+// Sett ved show() via summary, eller late-bind:
+overlay.setJustPlayedSlug("bingo");
+// Push hver lobby-state-tick:
+overlay.updateLobbyState(state.nextScheduledGame?.catalogSlug ?? null);
+```
+
+`Game1Controller` setter `summary.justPlayedSlug` i `showEndOfRoundOverlayForState` (henter fra `lobbyStateBinding.getState()?.nextScheduledGame?.catalogSlug` ved round-end-tidspunkt — på det tidspunktet er slug-en fortsatt "what just played" fordi backend ikke har advancert). Deretter pusher `lobbyStateBinding.onChange`-listeneren `updateLobbyState(newSlug)` ved hver state-tick.
+
+### Backward-compat med legacy markRoomReady-modus
+
+Hvis `summary.justPlayedSlug` er `null` (legacy call-sites uten lobby-state-tilgang, eller eksisterende tester), aktiveres data-driven IKKE — overlay forblir på legacy `markRoomReady + MIN_DISPLAY_MS`-flyten. Dette holder eksisterende 56-tests-suite grønn under migrering og gir en partial-rollback-vei hvis data-driven viser seg å være feil.
+
+### Edge-cases håndtert
+
+1. **Reconnect med stor `elapsedSinceEndedMs`**: `minCelebrationDeadline` og `safetyCapDeadline` regnes fra `roundEndedAt` (ikke `mountedAt`), så reconnect-user med 7s elapsed dismisses umiddelbart hvis slug allerede har endret seg.
+2. **Master skipper plan (advance til posisjon X)**: Overlay dismisses fortsatt så snart slug endrer seg — backend kan advancere flere posisjoner i én transaksjon, og det er likegyldig for klient-overlay-en.
+3. **Plan fullført for dagen (`nextScheduledGame === null`)**: `currentNextSlug` blir null → ingen dismiss. Safety-cap rammer ved 60s → forced dismiss med Sentry-breadcrumb. Spilleren ser "Stengt for dagen" i lobby etter dismiss.
+4. **`justPlayedSlug === null` ved show()** (cold-start race): Legacy modus aktivt. `setJustPlayedSlug(slug)` etter mount aktiverer data-driven hvis lobby-state senere leverer slug.
+
+### ALDRI gjør
+
+- ❌ Senk `MIN_CELEBRATION_MS` under 10s uten Tobias-godkjennelse. Tobias bumpet opprinnelig 6s → 10s samme dag (2026-05-15) etter pilot-testing.
+- ❌ Senk `MAX_WAIT_MS` under 60s. 40s-rapporten viste at backend KAN bruke så lang tid — capen er konservativ med margin. Hardere safety-cap risikerer å klippe spillere som ville fått korrekt overgang.
+- ❌ Hardkode fast timer som primær dismiss-mekanisme (eks. "dismiss etter 5s uavhengig av data"). Det er nettopp det som ga 40s-bugen.
+- ❌ Fjern legacy markRoomReady-modus ennå — eksisterende tester avhenger av den og den er partial-rollback-vei.
+
+### Filer
+
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts` — overlay-implementasjonen med data-driven modus
+- `packages/game-client/src/games/game1/Game1Controller.ts:2095-2110` — setter `summary.justPlayedSlug` fra lobby-state
+- `packages/game-client/src/games/game1/Game1Controller.ts:630-636` — propagerer lobby-state-changes via `updateLobbyState`
+- `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 — kanonisk post-round-flyt-spec
+- `docs/engineering/PITFALLS_LOG.md` §7 — fallgruve-entry
+
+### Sentry-observability
+
+`endOfRoundOverlay.safetyCapDismiss`-breadcrumb skrives når safety-cap rammer (overlay dismisset uten at backend leverte ny slug innen 60s). Ops bør monitorere denne — repeterte fires er signal om at plan-runtime henger. Inkluderer `slugStillStale: boolean` så vi kan skille "backend henger" fra "plan fullført for dagen (currentNextSlug=null)".
+
 ## Kanonisk referanse
 
 Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias før du:
@@ -1093,3 +1164,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.16.0 — Bølge 4 fix (branch `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15`): `Game1ScheduleTickService.spawnUpcomingGame1Games` skipper nå haller med aktiv `app_game_plan_run`-rad for samme `business_date`. Ny privat helper `checkHallsWithActivePlanRuns(hallIds, dateRange)` bulk-querier plan-runs i lookahead-vinduet → Set med keys `${hallId}|${isoDay}` for O(1)-lookup. Skip-guard i spawn-loopen mellom weekday-validering og sub-game-iterasjon. DB-feil → fail-open. Audit-event på debug-nivå: `bolge-4.legacy_spawn_skipped_due_to_plan`. Ny seksjon "Plan-runtime overstyrer legacy-spawn (Bølge 4 fix 2026-05-15)" mellom BUG-D1 invariant og UI-komponenter. 6 nye regression-tester. PITFALLS §3.14 markert FIXED. Defense-in-depth: F-NEW-3 `releaseStaleRoomCodeBindings` BEHOLDES. |
 | 2026-05-15 | v1.17.0 — Header-text + catalogDisplayName fix (branch `fix/master-header-text-and-catalog-name-2026-05-15`, Tobias-rapport 2026-05-15 live-test): forenklet `getMasterHeaderText`-mapping per Tobias-direktiv IMMUTABLE: ALLE pre-running-states (idle/scheduled/purchase_open/ready_to_start/completed/cancelled) viser "Neste spill: {name}". Bare `running` viser "Aktiv trekning: {name}" (KOLON, ikke bindestrek). "Klar til å starte" og "Runde ferdig" som mellom-tekster er fjernet. Backend: `GamePlanRunService.findActivePlanForDay(hall, businessDate)` slår opp aktiv plan UTEN å opprette plan-run; `GameLobbyAggregator` kaller den når `planRun=null` så `catalogDisplayName` settes til `items[0].displayName` direkte etter dev:nuke. 41 frontend-tester + 26 backend-aggregator-tester (2 nye). PITFALLS §7.20 utvidet + §7.21 ny entry. Oppdatert master-UI-tabell i skill. |
 | 2026-05-15 | v1.18.0 — Bong-design preview-side (branch `feat/bong-design-preview-page-2026-05-15`, Tobias-direktiv 2026-05-15): ny stand-alone HTML/CSS-side på `/web/games/bong-design.html` for å tweake bong-design uten å starte live-stacken. Viser 3 bonger (Hvit/Gul/Lilla) × 3 scenarier (fresh / mid-spill / Rad 1 bingo). Palett kopiert 1:1 fra `BingoTicketHtml.BONG_COLORS`. Egne Vite-config (`vite.bong-design.config.ts`) + build-script (`build:bong-design`) wired inn i `npm run build`. PITFALLS §7.26 ny entry. Ny tabell "Design-iterasjons-sider" i skill listing alle 5 preview-sider. |
+| 2026-05-15 | v1.19.0 — Post-round-overlay data-driven dismiss (C-hybrid, branch `fix/post-round-overlay-data-driven-dismiss-2026-05-15`, Tobias-direktiv "Kjør C, tenker minimum 6 sek celebrasjon deretter vent", samme dag bumpet til 10 sek): erstatter timer-driven legacy-dismiss (`MIN_DISPLAY_MS=3s` + `markRoomReady`) med data-driven (`MIN_CELEBRATION_MS=10s` + `currentNextSlug !== justPlayedSlug` + `MAX_WAIT_MS=60s` safety-cap). Tobias-rapport 2026-05-15: spiller så stale "Neste spill: <samme som nettopp>"-tekst i 40 sek etter natural round-end. Legacy-modus beholdes for backward-compat (Game1EndOfRoundOverlay.test.ts 56 tester). Ny seksjon "Post-round-overlay data-driven dismiss" mellom "Tester som beskytter" og "Kanonisk referanse". PITFALLS §7.28 ny entry. Sentry-breadcrumb `endOfRoundOverlay.safetyCapDismiss` for ops-monitoring av cap-fires. |

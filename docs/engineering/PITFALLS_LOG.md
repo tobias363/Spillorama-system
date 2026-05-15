@@ -2276,6 +2276,86 @@ PauseOverlay reflekterer KUN aktiv pause midt i en runde (`gameStatus === "RUNNI
 - `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (kanonisk spec)
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.18.0 (skill-seksjon "Post-round-flyt invariant")
 
+### §7.28 — Post-round-overlay dismisset med fast timer → stale "Neste spill" i 40 sek (BUG, FIXED 2026-05-15)
+
+**Severity:** P0 (pilot-blokker — spilleren så lobby med stale slug i opptil 40 sek etter natural round-end, før backend rakk å advancere plan-runtime)
+**Oppdaget:** 2026-05-15 (Tobias-rapport): *"Nå viste man spillet som nettopp var spilt i ca 40 sekunder før det endret til riktig spill."*
+
+**Symptom:** Etter natural round-end (Fullt Hus eller alle 75 baller trukket), dismisset `Game1EndOfRoundOverlay` typisk etter 3 sekunder (legacy `MIN_DISPLAY_MS=3_000` + første `markRoomReady` som firer på første state-update). Men `nextScheduledGame.catalogSlug` i lobby-state pekte fortsatt på runden vi nettopp spilte fordi backend ikke hadde advancert plan-runtime ennå (advance kunne ta opp til 40 sekunder ved plan-runtime-hiccups). Spilleren så lobby med stale "Neste spill: <samme som nettopp>"-tekst i hele dette vinduet.
+
+**Root cause:** `Game1EndOfRoundOverlay` brukte timer-driven dismiss:
+
+```typescript
+// Pre-fix-flyt:
+// 1. show() schedules phaseTimer = setTimeout(MIN_DISPLAY_MS = 3000)
+// 2. Game1Controller.onStateChanged fyrer markRoomReady() ved første state-update (~50ms)
+// 3. Når BÅDE har skjedd → tryDismiss() → fade out + onOverlayCompleted
+// 4. Total: ~3 sekunder
+```
+
+Klienten kunne IKKE vite om backend var ferdig med plan-advance — bare at "noen tid har passert siden round-end" (3s). Timer-driven løsning var basert på gjetning, ikke faktisk data.
+
+**Hvorfor faste timere ikke fungerer:** Backend-advance varierer mellom 50ms og 40s+ avhengig av:
+- Plan-runtime-helse (har `GamePlanRunService.start()` overhead?)
+- Master-hall-state (er master-hall klar med ny posisjon?)
+- Bridge-retry (har bridge måttet retry scheduled-game-spawn?)
+- DB-latens i prod (Render-spike?)
+
+Ingen fast timer fungerer for alle scenarier. 3s er for kort (mange tilfeller); 60s er for lenge (irriterende ved rask happy path).
+
+**Fix (C-hybrid data-driven dismiss):** Overlay venter på faktisk signal fra lobby-state:
+
+```typescript
+// Ny flyt:
+// 1. show(summary) med summary.justPlayedSlug = "bingo"
+//    → aktiverer data-driven modus
+//    → schedule safety-cap-timer (MAX_WAIT_MS=60s)
+//    → schedule poll-timer (DATA_READINESS_POLL_MS=500ms)
+// 2. Game1Controller.lobbyStateBinding.onChange fyrer på hver lobby-state-tick
+//    → overlay.updateLobbyState(newSlug)
+//    → overlay.tryDismissIfReady() sjekker:
+//       (a) elapsed >= MIN_CELEBRATION_MS (10s)
+//       (b) currentNextSlug !== justPlayedSlug (begge non-null)
+//    → dismiss når begge møtt
+// 3. Hvis 60s passerer uten ny slug → safety-cap-fire → Sentry-breadcrumb + forced dismiss
+```
+
+`Game1EndOfRoundOverlay`-API:
+
+```typescript
+// summary.justPlayedSlug eller setJustPlayedSlug aktiverer modus:
+overlay.show({ ...summary, justPlayedSlug: "bingo" });
+// eller etter mount:
+overlay.setJustPlayedSlug("bingo");
+
+// Game1Controller pusher ved hver lobby-state-tick:
+overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
+```
+
+**Konstanter:**
+- `MIN_CELEBRATION_MS = 10_000` — Tobias-direktiv 2026-05-15: opprinnelig "minimum 6 sek celebrasjon", oppdatert samme dag til "nei, kjør minimum 10 sekunder"
+- `MAX_WAIT_MS = 60_000` — safety-cap, signalerer backend-anomali
+- `DATA_READINESS_POLL_MS = 500` — sekundær defense (primær er event-driven via updateLobbyState)
+
+**Backward-compat:** Hvis `justPlayedSlug === null` (legacy call-sites uten lobby-state-tilgang, eller eksisterende test-fixtures), forblir legacy `markRoomReady + MIN_DISPLAY_MS=3s`-pathen aktiv. Dette holder 56 eksisterende `Game1EndOfRoundOverlay.test.ts`-tester grønne og gir partial-rollback-vei.
+
+**Tester:** 78 eksisterende tester pass (`Game1EndOfRoundOverlay`, `Game1Controller.endOfRoundFlow`, `Game1Controller.pauseOverlayGating`). Per Tobias-direktiv 2026-05-15: ingen nye tester nå — eksisterende suite verifiserer at backward-compat ikke brutt.
+
+**Prevention / anti-mønstre:**
+
+- ❌ **ALDRI dismiss UI-overlay basert på fast timer når dismiss avhenger av backend-data.** Det er nettopp dette som ga 40s-bugen. Bruk data-driven (poll + event-listening) med floor-tid + safety-cap.
+- ❌ **ALDRI senk `MIN_CELEBRATION_MS` under 10s** uten Tobias-godkjennelse. Tobias bumpet opprinnelig 6s → 10s samme dag (2026-05-15) etter pilot-testing.
+- ❌ **ALDRI senk `MAX_WAIT_MS` under 60s.** 40s-rapporten viste at backend KAN bruke så lang tid. Hardere cap risikerer å klippe spillere som ville fått korrekt overgang.
+- ❌ **ALDRI fjern legacy markRoomReady-modus** ennå — eksisterende tester avhenger av den, og den er partial-rollback-vei hvis data-driven feiler.
+- ✅ **Sentry-monitor `endOfRoundOverlay.safetyCapDismiss`** for å fange repeterte cap-fires (signal om plan-runtime-hiccups i backend).
+
+**Related:**
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts` (overlay-impl med data-driven modus, `MIN_CELEBRATION_MS`, `MAX_WAIT_MS`, `setJustPlayedSlug`, `updateLobbyState`)
+- `packages/game-client/src/games/game1/Game1Controller.ts:2095-2110` (setter `summary.justPlayedSlug` ved show)
+- `packages/game-client/src/games/game1/Game1Controller.ts:630-636` (forward av slug via `updateLobbyState`)
+- `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (kanonisk post-round-flyt-spec)
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.19.0 (skill-seksjon "Post-round-overlay data-driven dismiss")
+
 ---
 
 ## §8 Doc-disiplin
