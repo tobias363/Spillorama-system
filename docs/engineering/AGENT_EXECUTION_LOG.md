@@ -2872,3 +2872,52 @@ Verifisert via test:
 - ALDRI åpnet PR (PM eier)
 
 **Tid:** ~60 min agent-arbeid
+
+---
+
+### 2026-05-15 — Bong-design preview-side (feature-agent, autonomous)
+
+**Agent-id:** `a200f74128084e40f` (general-purpose, worktree)
+**Branch:** `feat/bong-design-preview-page-2026-05-15`
+**Type:** Feature (ny preview-side for design-iterasjon)
+
+**Mandat (fra Tobias 2026-05-15):**
+> "Kan opprette bare et nytt view hvor bongene vises med dummy tall. Det er kun for å tweake på designet."
+> Alternativ A bekreftet: side-om-side ÉN gang per farge (3 bonger: Hvit / Gul / Lilla).
+
+**Hva ble gjort:**
+- Opprettet ny stand-alone HTML/CSS-side på `/web/games/bong-design.html`
+- Filer: `packages/game-client/src/bong-design/bong-design.{html,ts}` (mappe `bong-design/` er ny)
+- Vite-config: `packages/game-client/vite.bong-design.config.ts` (mal: `vite.premie-design.config.ts`)
+- Build-script `build:bong-design` lagt til i `packages/game-client/package.json`
+- Bygget inn i `npm run build` etter `premie-design` (samme `emptyOutDir: false`-mønster)
+- Bong-palett kopiert 1:1 fra `BingoTicketHtml.BONG_COLORS` (Hvit `#e8e4dc`, Gul `#f0b92e`, Lilla `#b8a4e8`)
+- Mark/free-konstantene matcher prod: `MARKED_BG = "#7a1a1a"`, `FREE_LOGO_URL = "/web/games/assets/game1/design/spillorama-logo.png"`
+- 3 scenarier × 3 farger = 9 bonger totalt:
+  - Scenario A: Fresh ticket (kun FREE-celle marked via logo)
+  - Scenario B: Mid-spill (8 markerte celler, MARKED_BG)
+  - Scenario C: Bingo Rad 1 fullført (5 øverste celler markert)
+- Deterministiske dummy-tall per farge (lett å iterere på design uten "ja men forrige gang var det annerledes"-effekt)
+
+**Build-verifikasjon:**
+- `npm --prefix packages/game-client run build:bong-design` → 9.69 kB HTML + 2.95 kB JS (gzip: 3.35/1.30 kB)
+- `npm --prefix packages/game-client run check` → grønn (TypeScript strict)
+- Full `npm --prefix packages/game-client run build` → grønn (alle 6 Vite-configs i kjede)
+- Output-filer finnes i `apps/backend/public/web/games/bong-design.{html,js}`
+
+**Doc-protokoll:**
+- ✅ Skill: `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon "Design-iterasjons-sider" + endringslogg v1.18.0
+- ✅ PITFALLS_LOG §7.26 — "Design-iterasjon på bong-elementer: bruk lokal preview-side, ikke live-stack"
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+
+**Lessons learned:**
+- Stand-alone HTML/CSS-preview-sider er rask iterasjon (build < 50ms vs dev-stack-restart i 30 sek)
+- Vite "side-as-app"-mønster (root + emptyOutDir:false + entryFileNames) er reusable for alle design-iterasjons-behov
+- Palett-konstantene må kopieres SOM TEKST fra prod (ikke importeres) fordi preview-siden skal være stand-alone uten Pixi/shared-types-dependency
+
+**Forbudt-rør (overholdt):**
+- IKKE endret prod-komponenten `BingoTicketHtml.ts` (Tobias godkjenner designet i preview FØRST, deretter port 1:1 i separat PR)
+- IKKE endret eksisterende build-targets — kun lagt til ny entry
+- IKKE merget — kun pushed til feature-branch + auto-merge etter CI
+
+**Tid:** ~30 min agent-arbeid

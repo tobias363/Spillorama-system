@@ -271,6 +271,26 @@ WHERE id = $1
 | `apps/admin-web/src/api/agent-game-plan-adapter.ts` | **DEPRECATED** — adapter setter `currentGame.id = run.id` (lyver om id) |
 | `apps/admin-web/src/api/agent-master-actions.ts` | **DEPRECATED** — wrapper kaller plan→legacy sekvensielt |
 
+### Design-iterasjons-sider (stand-alone preview, ingen live-stack)
+
+For raskt å tweake design uten å starte hele spill-stacken finnes det
+stand-alone preview-sider under `packages/game-client/src/*-design/` som
+bygges via egne Vite-configs:
+
+| URL | Filer | Vite-config | Build-script | Når bruke |
+|---|---|---|---|---|
+| `/web/games/premie-design.html` | `src/premie-design/premie-design.html` | `vite.premie-design.config.ts` | `npm --prefix packages/game-client run build:premie-design` | Premietabell-design (5×3 grid Hvit/Gul/Lilla, mini-grid, player-info, actions) |
+| `/web/games/bong-design.html` | `src/bong-design/bong-design.{html,ts}` | `vite.bong-design.config.ts` | `npm --prefix packages/game-client run build:bong-design` | Bong-design preview (3 farger × 3 scenarier: fresh / mid-spill / Rad 1 bingo) |
+| `/web/games/preview.html` | `src/preview/*` | `vite.preview.config.ts` | (del av `build`) | Spill 1 bonus-games preview (Pixi-runtime) |
+| `/web/games/visual-harness.html` | `src/visual-harness/*` | `vite.visual-harness.config.ts` | `npm --prefix packages/game-client run build:visual-harness` | Pixi-snapshot visual regression (Playwright) |
+| `/web/games/dev-overview.html` | `src/dev-overview/*` | `vite.dev-overview.config.ts` | `npm --prefix packages/game-client run build:dev-overview` | Sentral dev-landingsside med iframes/lenker til alle preview-sider |
+
+**Regel ved iterasjon:** Når design er godkjent i preview-siden MÅ
+endringen reflekteres 1:1 i prod-komponenten (`BingoTicketHtml.ts` for
+bong, `CenterTopPanel.ts` for premietabell). Hvis preview avviker fra
+prod uten å oppdatere prod, blir preview-siden falsk sannhet. Se
+PITFALLS_LOG §7.26 (bong) + §7.24 (premie).
+
 ## Master-UI header-tekst per state (KANONISK — Tobias-direktiv 2026-05-15 IMMUTABLE)
 
 **Tobias-direktiv 2026-05-15 (IMMUTABLE):**
@@ -904,3 +924,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.15.0 — BUG-D1 fix (branch `fix/bug-d1-planrun-start-hardcode-2026-05-15`): Fjernet `current_position = 1` fra `GamePlanRunService.start()`-UPDATE (linje 780). `getOrCreateForToday`-INSERT er nå eneste sannhet for `current_position` ved start. Ny seksjon "Plan-run.start() invariant — bevarer current_position" mellom Auto-advance og UI-komponenter. 6 nye regression-tester. PITFALLS §3.15 markert FIXED. |
 | 2026-05-15 | v1.16.0 — Bølge 4 fix (branch `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15`): `Game1ScheduleTickService.spawnUpcomingGame1Games` skipper nå haller med aktiv `app_game_plan_run`-rad for samme `business_date`. Ny privat helper `checkHallsWithActivePlanRuns(hallIds, dateRange)` bulk-querier plan-runs i lookahead-vinduet → Set med keys `${hallId}|${isoDay}` for O(1)-lookup. Skip-guard i spawn-loopen mellom weekday-validering og sub-game-iterasjon. DB-feil → fail-open. Audit-event på debug-nivå: `bolge-4.legacy_spawn_skipped_due_to_plan`. Ny seksjon "Plan-runtime overstyrer legacy-spawn (Bølge 4 fix 2026-05-15)" mellom BUG-D1 invariant og UI-komponenter. 6 nye regression-tester. PITFALLS §3.14 markert FIXED. Defense-in-depth: F-NEW-3 `releaseStaleRoomCodeBindings` BEHOLDES. |
 | 2026-05-15 | v1.17.0 — Header-text + catalogDisplayName fix (branch `fix/master-header-text-and-catalog-name-2026-05-15`, Tobias-rapport 2026-05-15 live-test): forenklet `getMasterHeaderText`-mapping per Tobias-direktiv IMMUTABLE: ALLE pre-running-states (idle/scheduled/purchase_open/ready_to_start/completed/cancelled) viser "Neste spill: {name}". Bare `running` viser "Aktiv trekning: {name}" (KOLON, ikke bindestrek). "Klar til å starte" og "Runde ferdig" som mellom-tekster er fjernet. Backend: `GamePlanRunService.findActivePlanForDay(hall, businessDate)` slår opp aktiv plan UTEN å opprette plan-run; `GameLobbyAggregator` kaller den når `planRun=null` så `catalogDisplayName` settes til `items[0].displayName` direkte etter dev:nuke. 41 frontend-tester + 26 backend-aggregator-tester (2 nye). PITFALLS §7.20 utvidet + §7.21 ny entry. Oppdatert master-UI-tabell i skill. |
+| 2026-05-15 | v1.18.0 — Bong-design preview-side (branch `feat/bong-design-preview-page-2026-05-15`, Tobias-direktiv 2026-05-15): ny stand-alone HTML/CSS-side på `/web/games/bong-design.html` for å tweake bong-design uten å starte live-stacken. Viser 3 bonger (Hvit/Gul/Lilla) × 3 scenarier (fresh / mid-spill / Rad 1 bingo). Palett kopiert 1:1 fra `BingoTicketHtml.BONG_COLORS`. Egne Vite-config (`vite.bong-design.config.ts`) + build-script (`build:bong-design`) wired inn i `npm run build`. PITFALLS §7.26 ny entry. Ny tabell "Design-iterasjons-sider" i skill listing alle 5 preview-sider. |
