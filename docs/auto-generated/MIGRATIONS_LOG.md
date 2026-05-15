@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-15T19:15:47Z
-> Commit: `8ad1a4ef` (branch: `main`)
+> Sist oppdatert: 2026-05-15T19:40:52Z
+> Commit: `172233b9` (branch: `main`)
 
 Kronologisk liste over alle Postgres-migrations under
 `apps/backend/migrations/`. Filene navngis med ISO-prefiks
