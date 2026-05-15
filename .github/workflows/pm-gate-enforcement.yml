@@ -22,7 +22,8 @@ permissions:
   issues: write
 
 jobs:
-  enforce:
+  pm-gate-enforcement:
+    name: pm-gate-enforcement
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

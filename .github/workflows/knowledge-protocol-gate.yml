@@ -15,7 +15,8 @@ permissions:
   issues: write
 
 jobs:
-  enforce:
+  knowledge-protocol-enforcement:
+    name: knowledge-protocol-enforcement
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
