@@ -331,10 +331,14 @@ async function postMasterAction(
 }
 
 /**
- * Master starter Spill 1 (`idle` → `running`). Backend kjører:
+ * Master styrer Spill 1 i to steg. Første kall på ny plan-posisjon åpner
+ * `purchase_open` og returnerer uten engine-start; neste kall på samme
+ * scheduled-game starter trekningen (`purchase_open`/`ready_to_start` → `running`).
+ *
+ * Backend kjører:
  *   1. `MasterActionService.start` (single sekvenseringsmotor)
  *   2. lobby-aggregator-pre-check + audit-event
- *   3. engine-bridge spawn av scheduled-game-rad
+ *   3. engine-bridge spawn eller gjenbruk av scheduled-game-rad
  *
  * Returnerer `scheduledGameId` som UI lagrer for videre actions (advance/
  * pause/resume/stop). DomainError-koder propageres som `ApiError` (typiske

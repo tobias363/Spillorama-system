@@ -161,6 +161,16 @@ export async function masterStart(token: string): Promise<MasterStartResult> {
   return json.data;
 }
 
+export async function openPurchaseWindow(token: string): Promise<MasterStartResult> {
+  const result = await masterStart(token);
+  if (result.scheduledGameStatus !== "purchase_open") {
+    throw new Error(
+      `openPurchaseWindow expected purchase_open, got ${result.scheduledGameStatus}`,
+    );
+  }
+  return result;
+}
+
 export async function masterStop(
   token: string,
   reason = "e2e-test cleanup",
@@ -208,6 +218,94 @@ export interface ResetPilotStateOptions {
   destroyRooms?: boolean;
 }
 
+const E2E_MASTER_HALL_ID = "demo-hall-001";
+const APP_BUSINESS_TIME_ZONE = "Europe/Oslo";
+
+function getAppBusinessDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function getSafeE2eDbConfig():
+  | { connectionString: string; schema: string }
+  | null {
+  const connectionString =
+    process.env.APP_PG_CONNECTION_STRING ??
+    process.env.WALLET_PG_CONNECTION_STRING ??
+    "";
+  if (!connectionString) return null;
+
+  const isCi = (process.env.CI ?? "").toLowerCase() === "true";
+  const allowLocal = (process.env.E2E_RESET_PLAN_RUN ?? "").trim() === "1";
+  if (!isCi && !allowLocal) return null;
+
+  if (!/(localhost|127\.0\.0\.1|\[::1\])/.test(connectionString)) {
+    throw new Error(
+      "E2E plan-run reset refused: DB connection string is not local.",
+    );
+  }
+
+  const rawSchema = process.env.APP_PG_SCHEMA ?? "public";
+  const schema = /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSchema)
+    ? rawSchema
+    : "public";
+  return { connectionString, schema };
+}
+
+/**
+ * CI-only deterministic cleanup for the stateful pilot-flow suite.
+ *
+ * `masterStop` is correct production behavior: it finishes today's plan-run
+ * so the next real master action advances to the next catalog position. The
+ * Playwright suite is different: every spec asserts the Bingo purchase UI and
+ * must start from position 1 in a fresh local test database. This helper is
+ * therefore guarded to localhost + CI (or explicit E2E_RESET_PLAN_RUN=1).
+ */
+export async function resetPilotPlanRunForE2e(): Promise<void> {
+  const config = getSafeE2eDbConfig();
+  if (!config) return;
+
+  const businessDate = getAppBusinessDate();
+
+  const { Client } = await import("pg");
+  const client = new Client({ connectionString: config.connectionString });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE "${config.schema}"."app_game1_scheduled_games"
+          SET status = 'cancelled',
+              actual_end_time = COALESCE(actual_end_time, now()),
+              stop_reason = COALESCE(stop_reason, 'e2e_reset_plan_run'),
+              updated_at = now()
+       WHERE master_hall_id = $1
+         AND scheduled_day = $2::date
+         AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')`,
+      [E2E_MASTER_HALL_ID, businessDate],
+    );
+    await client.query(
+      `DELETE FROM "${config.schema}"."app_game_plan_run"
+       WHERE hall_id = $1
+         AND business_date = $2::date`,
+      [E2E_MASTER_HALL_ID, businessDate],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {
+      /* ignore rollback failure */
+    });
+    throw err;
+  } finally {
+    await client.end().catch(() => {
+      /* ignore disconnect failure */
+    });
+  }
+}
+
 /**
  * Hard-reset pilot state via direct REST calls. Brukes i `beforeAll` for å
  * sikre at hver test starter med en fersh scheduled-game. Hvis et eldre
@@ -229,6 +327,7 @@ export async function resetPilotState(
   await masterStop(masterToken).catch(() => {
     /* ignore — no active round */
   });
+  await resetPilotPlanRunForE2e();
 
   // Default `true` så tester er repeterbare uten manuell SQL-cleanup.
   // Env-var `E2E_DESTROY_ROOMS=0` kan overstyre for debug-iterasjon (CI

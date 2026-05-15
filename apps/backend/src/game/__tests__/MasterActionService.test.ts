@@ -14,8 +14,8 @@
  *
  * Tester som dekkes:
  *   start(...)
- *     ✓ idle → running spawns scheduled-game og kaller engine.startGame
- *     ✓ idempotent re-start på running run gjenbruker bridge-rad
+ *     ✓ idle → running spawns scheduled-game i purchase_open uten engine.startGame
+ *     ✓ idempotent re-start på running run gjenbruker purchase_open og starter engine
  *     ✓ paused run → GAME_PLAN_RUN_INVALID_TRANSITION (bruk /resume)
  *     ✓ finished run → PLAN_RUN_FINISHED
  *     ✓ BRIDGE_FAILED-warning fra aggregator → LOBBY_INCONSISTENT
@@ -279,6 +279,20 @@ interface ServiceOverrides {
       | "completed"
       | "cancelled";
   } | null;
+  scheduledGameForPositionSequence?: Array<
+    | {
+        id: string;
+        status:
+          | "scheduled"
+          | "purchase_open"
+          | "ready_to_start"
+          | "running"
+          | "paused"
+          | "completed"
+          | "cancelled";
+      }
+    | null
+  >;
 }
 
 function makeService(
@@ -567,8 +581,15 @@ function makeService(
     },
   };
 
+  const scheduledGameSequence = [
+    ...(overrides.scheduledGameForPositionSequence ?? []),
+  ];
   const poolStub = {
     async query(): Promise<{ rows: unknown[] }> {
+      if (scheduledGameSequence.length > 0) {
+        const row = scheduledGameSequence.shift() ?? null;
+        return { rows: row ? [row] : [] };
+      }
       return {
         rows: overrides.currentScheduledGameForPosition
           ? [overrides.currentScheduledGameForPosition]
@@ -595,66 +616,85 @@ function makeService(
 
 // ── tests: start ────────────────────────────────────────────────────────
 
-test("start: idle → running spawner scheduled-game og kaller engine.startGame", async () => {
-  const { service, mocks } = makeService();
+test("start: idle → running spawner fresh purchase_open uten engine.startGame", async () => {
+  const { service, mocks } = makeService({
+    currentScheduledGameForPosition: {
+      id: SCHED_ID,
+      status: "purchase_open",
+    },
+  });
   const result = await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
   assert.equal(result.scheduledGameId, SCHED_ID);
   assert.equal(result.planRunId, RUN_ID);
   assert.equal(result.status, "running");
-  assert.equal(result.scheduledGameStatus, "running");
+  assert.equal(result.scheduledGameStatus, "purchase_open");
   assert.deepEqual(result.inconsistencyWarnings, []);
   assert.ok(mocks.planRunCalls.includes("getOrCreateForToday"));
   assert.ok(mocks.planRunCalls.includes("start"));
   assert.ok(mocks.engineBridgeCalls.includes("createScheduledGameForPlanRunPosition"));
-  assert.ok(mocks.masterControlCalls.includes("startGame"));
-  // Audit-event skrives.
-  const startAudit = mocks.auditEvents.find((e) => e.action === "spill1.master.start");
-  assert.ok(startAudit, "spill1.master.start audit-event må skrives");
-  assert.equal(startAudit?.actorId, MASTER_ACTOR.userId);
+  assert.ok(
+    !mocks.masterControlCalls.includes("startGame"),
+    "fresh purchase_open skal ikke starte engine i samme kall",
+  );
+  const purchaseOpenAudit = mocks.auditEvents.find(
+    (e) => e.action === "spill1.master.purchase_open",
+  );
+  assert.ok(purchaseOpenAudit, "spill1.master.purchase_open audit-event må skrives");
+  assert.equal(purchaseOpenAudit?.actorId, MASTER_ACTOR.userId);
   // Lobby-broadcast trigges.
   assert.deepEqual(mocks.broadcastCalls, [HALL_ID]);
 });
 
-test("start: idempotent re-start på running run → bridge gjenbrukes uten å kalle planRun.start", async () => {
+test("start: idempotent re-start på running purchase_open → bridge gjenbrukes og engine.startGame kalles", async () => {
   const { service, mocks } = makeService({
     getOrCreateForToday: () => makeRun({ status: "running" }),
     bridgeResult: { scheduledGameId: SCHED_ID, reused: true },
+    currentScheduledGameForPosition: {
+      id: SCHED_ID,
+      status: "purchase_open",
+    },
   });
   const result = await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
   assert.equal(result.scheduledGameId, SCHED_ID);
+  assert.equal(result.scheduledGameStatus, "running");
   // start() i planRun ble IKKE kalt fordi run var allerede running
   assert.ok(!mocks.planRunCalls.includes("start"));
+  assert.ok(mocks.masterControlCalls.includes("startGame"));
 });
 
-test("start: running run med completed scheduled-game auto-advancer før engine-start", async () => {
+test("start: running run med completed scheduled-game auto-advancer til ny purchase_open", async () => {
   const { service, mocks } = makeService({
     getOrCreateForToday: () => makeRun({ status: "running", currentPosition: 1 }),
-    currentScheduledGameForPosition: { id: "completed-sg", status: "completed" },
+    scheduledGameForPositionSequence: [
+      { id: "completed-sg", status: "completed" },
+      { id: "next-sg", status: "purchase_open" },
+    ],
     advanceToNext: () => ({
       run: makeRun({ status: "running", currentPosition: 2 }),
       nextGame: makeCatalogEntry(),
       jackpotSetupRequired: false,
     }),
     bridgeResult: { scheduledGameId: "next-sg", reused: false },
-    startGameResult: {
-      gameId: "next-sg",
-      status: "running",
-      auditId: AUDIT_ID,
-      actualStartTime: "2026-05-08T15:00:00Z",
-      actualEndTime: null,
-    },
   });
 
   const result = await service.start({ actor: MASTER_ACTOR, hallId: HALL_ID });
 
   assert.equal(result.scheduledGameId, "next-sg");
   assert.equal(result.status, "running");
+  assert.equal(result.scheduledGameStatus, "purchase_open");
   assert.ok(mocks.planRunCalls.includes("advanceToNext"));
-  assert.equal(mocks.startGameInputs[0]?.gameId, "next-sg");
+  assert.ok(
+    !mocks.masterControlCalls.includes("startGame"),
+    "auto-advanced fresh purchase_open skal ikke starte engine i samme kall",
+  );
   const recoveryAudit = mocks.auditEvents.find(
     (event) => event.action === "spill1.master.start.auto_advance_terminal_position",
   );
   assert.ok(recoveryAudit, "auto-advance recovery must be audited");
+  const purchaseOpenAudit = mocks.auditEvents.find(
+    (event) => event.action === "spill1.master.purchase_open",
+  );
+  assert.ok(purchaseOpenAudit, "auto-advanced fresh purchase_open must be audited");
 });
 
 test("prepareScheduledGame: running run med completed scheduled-game auto-advancer før ready-spawn", async () => {
@@ -801,18 +841,27 @@ test("start: bridge generic Error → BRIDGE_FAILED", async () => {
 
 // ── tests: advance ──────────────────────────────────────────────────────
 
-test("advance: running → next position + new scheduled-game + engine.startGame", async () => {
-  const { service, mocks } = makeService();
+test("advance: running → next position + fresh purchase_open uten engine.startGame", async () => {
+  const { service, mocks } = makeService({
+    currentScheduledGameForPosition: {
+      id: SCHED_ID,
+      status: "purchase_open",
+    },
+  });
   const result = await service.advance({ actor: MASTER_ACTOR, hallId: HALL_ID });
   assert.equal(result.scheduledGameId, SCHED_ID);
   assert.equal(result.status, "running");
+  assert.equal(result.scheduledGameStatus, "purchase_open");
   assert.ok(mocks.planRunCalls.includes("advanceToNext"));
   assert.ok(mocks.engineBridgeCalls.includes("createScheduledGameForPlanRunPosition"));
-  assert.ok(mocks.masterControlCalls.includes("startGame"));
-  const advanceAudit = mocks.auditEvents.find(
-    (e) => e.action === "spill1.master.advance",
+  assert.ok(
+    !mocks.masterControlCalls.includes("startGame"),
+    "fresh purchase_open på advance skal ikke starte engine i samme kall",
   );
-  assert.ok(advanceAudit, "spill1.master.advance audit-event må skrives");
+  const advanceAudit = mocks.auditEvents.find(
+    (e) => e.action === "spill1.master.advance.purchase_open",
+  );
+  assert.ok(advanceAudit, "spill1.master.advance.purchase_open audit-event må skrives");
 });
 
 test("advance: jackpot-required uten override → JACKPOT_SETUP_REQUIRED", async () => {

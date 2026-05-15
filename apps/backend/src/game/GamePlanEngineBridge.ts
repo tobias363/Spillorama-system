@@ -38,10 +38,12 @@
  *      - group_hall_id      = hall-gruppe som master tilhører
  *      - participating_halls_json = ALLE aktive haller i gruppen
  *        (master først, deretter andre medlemmer i added_at-rekkefølge)
- *      - status             = 'ready_to_start'
+ *      - status             = 'purchase_open'
  *   2) Returnerer scheduled_game.id som passes til
- *      `Game1MasterControlService.startGame({ gameId, actor })`.
- *   3) Engine kjører uendret — den vet ikke at raden er bridge-spawnet.
+ *      `Game1MasterControlService.startGame({ gameId, actor })` når master
+ *      eksplisitt starter trekning.
+ *   3) Engine kjører uendret etter master-start — den vet ikke at raden er
+ *      bridge-spawnet.
  *
  * Multi-hall via group-of-halls (2026-05-08):
  * Bridgen ekspanderer nå `participating_halls_json` til å inkludere alle
@@ -96,6 +98,11 @@ const DEFAULT_NOTIFICATION_SECONDS = 300;
 // noen rader trenger lengre (jackpot-spill kan ha 30 min) men det er ikke
 // dokumentert i catalog-skjemaet ennå. Default er en kvalifisert gjetning.
 const DEFAULT_PURCHASE_WINDOW_SECONDS = 600;
+
+// Catalog-plan-runtime åpner bongesalg først, og master starter trekning
+// eksplisitt senere. scheduled_start_time er derfor en planlagt/forventet
+// draw-start for UI og observability, ikke en automatisk engine-trigger.
+const DEFAULT_MASTER_PURCHASE_OPEN_DELAY_SECONDS = 120;
 
 function assertSchemaName(schema: string): string {
   if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
@@ -685,7 +692,7 @@ export interface GamePlanEngineBridgeOptions {
    *     fra `ticket_config_json`. Det fungerer for runder som master
    *     starter umiddelbart.
    *   - Pre-game-vinduet — fra scheduled-game opprettes (status =
-   *     'ready_to_start') TIL master trykker "Start" — er ikke dekket
+   *     'purchase_open') TIL master trykker "Start" — er ikke dekket
    *     av onEngineStarted-hooken. I dette vinduet kan spillere allerede
    *     joine rommet og se buy-popup, men room-snapshot returnerer
    *     `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE
@@ -1130,11 +1137,14 @@ export class GamePlanEngineBridge {
       groupHallId,
     );
 
-    // scheduled_start_time = NOW (engine starter umiddelbart). End_time =
-    // now + DEFAULT_PURCHASE_WINDOW_SECONDS. Disse styrer ikke draw-rytmen,
-    // bare scheduler-tick-vinduer.
+    // Catalog master-flyt (2026-05-15): først åpnes `purchase_open`, deretter
+    // starter master trekning eksplisitt med neste start-klikk. Vi setter
+    // scheduled_start_time litt frem i tid som forventet draw-start/timer for
+    // UI/observability; statusen `purchase_open` gjør kjøp mulig umiddelbart.
     const now = new Date();
-    const startTs = now.toISOString();
+    const startTs = new Date(
+      now.getTime() + DEFAULT_MASTER_PURCHASE_OPEN_DELAY_SECONDS * 1000,
+    ).toISOString();
     const endTs = new Date(
       now.getTime() + DEFAULT_PURCHASE_WINDOW_SECONDS * 1000,
     ).toISOString();
@@ -1245,7 +1255,7 @@ export class GamePlanEngineBridge {
             room_code)
          VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
                  $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
-                 'ready_to_start', $15::jsonb, $16, $17, $18, $19)`,
+                 'purchase_open', $15::jsonb, $16, $17, $18, $19)`,
         [
           newId,
           // sub_game_index — vi bruker plan_position-1 (0-basert)
@@ -1340,7 +1350,7 @@ export class GamePlanEngineBridge {
                 room_code)
              VALUES ($1, $2, $3, $4, $5::date, $6::timestamptz, $7::timestamptz,
                      $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb,
-                     'ready_to_start', $15::jsonb, $16, $17, $18, $19)`,
+                     'purchase_open', $15::jsonb, $16, $17, $18, $19)`,
             [
               newId,
               position - 1,

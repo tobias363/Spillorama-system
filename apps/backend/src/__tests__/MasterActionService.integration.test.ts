@@ -137,6 +137,9 @@ function makeServiceForLoop(auditLog: AuditLogService): {
 } {
   const state = new InMemoryPlanRunState();
   const broadcastCalls: string[] = [];
+  let scheduledOpened = false;
+  let scheduledStatus: "purchase_open" | "running" | "paused" | "cancelled" =
+    "purchase_open";
 
   const lobbyAggregatorStub = {
     async getLobbyState(): Promise<Spill1AgentLobbyState> {
@@ -166,11 +169,17 @@ function makeServiceForLoop(auditLog: AuditLogService): {
         scheduledGameMeta: hasGame
           ? {
               scheduledGameId: SCHED_ID,
-              status: run.status === "paused" ? "paused" : "running",
+              status: run.status === "paused" ? "paused" : scheduledStatus,
               scheduledStartTime: "2026-05-08T15:00:00.000Z",
               scheduledEndTime: null,
-              actualStartTime: "2026-05-08T15:00:00.000Z",
-              actualEndTime: null,
+              actualStartTime:
+                scheduledStatus === "running" || scheduledStatus === "paused"
+                  ? "2026-05-08T15:00:00.000Z"
+                  : null,
+              actualEndTime:
+                scheduledStatus === "cancelled"
+                  ? "2026-05-08T15:30:00.000Z"
+                  : null,
               pauseReason: null,
             }
           : null,
@@ -209,10 +218,15 @@ function makeServiceForLoop(auditLog: AuditLogService): {
     }> {
       const cur = state.get();
       const newRun = state.setPosition(cur.currentPosition + 1);
+      scheduledOpened = false;
+      scheduledStatus = "purchase_open";
       return { run: newRun, nextGame: makeCatalogEntry(), jackpotSetupRequired: false };
     },
     async setJackpotOverride(): Promise<GamePlanRun> {
       return state.get();
+    },
+    async findStuck(): Promise<GamePlanRun[]> {
+      return [];
     },
     async findForDay(): Promise<GamePlanRun | null> {
       return state.get();
@@ -224,7 +238,10 @@ function makeServiceForLoop(auditLog: AuditLogService): {
       scheduledGameId: string;
       reused: boolean;
     }> {
-      return { scheduledGameId: SCHED_ID, reused: false };
+      const reused = scheduledOpened;
+      scheduledOpened = true;
+      scheduledStatus = "purchase_open";
+      return { scheduledGameId: SCHED_ID, reused };
     },
   } as unknown as import("../game/GamePlanEngineBridge.js").GamePlanEngineBridge;
 
@@ -236,6 +253,7 @@ function makeServiceForLoop(auditLog: AuditLogService): {
       actualStartTime: string | null;
       actualEndTime: string | null;
     }> {
+      scheduledStatus = "running";
       return {
         gameId: SCHED_ID,
         status: "running",
@@ -251,6 +269,7 @@ function makeServiceForLoop(auditLog: AuditLogService): {
       actualStartTime: string | null;
       actualEndTime: string | null;
     }> {
+      scheduledStatus = "paused";
       return {
         gameId: SCHED_ID,
         status: "paused",
@@ -266,6 +285,7 @@ function makeServiceForLoop(auditLog: AuditLogService): {
       actualStartTime: string | null;
       actualEndTime: string | null;
     }> {
+      scheduledStatus = "running";
       return {
         gameId: SCHED_ID,
         status: "running",
@@ -281,6 +301,7 @@ function makeServiceForLoop(auditLog: AuditLogService): {
       actualStartTime: string | null;
       actualEndTime: string | null;
     }> {
+      scheduledStatus = "cancelled";
       return {
         gameId: SCHED_ID,
         status: "cancelled",
@@ -298,7 +319,16 @@ function makeServiceForLoop(auditLog: AuditLogService): {
   };
 
   const service = MasterActionService.forTesting({
-    pool: {} as unknown as Pool,
+    pool: {
+      async query(): Promise<{
+        rows: Array<{
+          id: string;
+          status: "purchase_open" | "running" | "paused" | "cancelled";
+        }>;
+      }> {
+        return { rows: [{ id: SCHED_ID, status: scheduledStatus }] };
+      },
+    } as unknown as Pool,
     schema: "public",
     planRunService: planRunStub,
     engineBridge: engineBridgeStub,
@@ -314,24 +344,38 @@ function makeServiceForLoop(auditLog: AuditLogService): {
 
 // ── default-mode integration-test (alltid kjør) ────────────────────────
 
-test("integration: full master-loop start → advance → pause → resume → stop med InMemoryAuditLogStore", async () => {
+test("integration: full master-loop purchase_open → start → advance → start → pause → resume → stop med InMemoryAuditLogStore", async () => {
   const auditStore = new InMemoryAuditLogStore();
   const auditLog = new AuditLogService(auditStore);
   const { service, state, broadcastCalls } = makeServiceForLoop(auditLog);
 
-  // 1. start: idle → running
+  // 1. start: idle → running plan-run, fresh scheduled-game i purchase_open
   let result = await service.start({ actor: ACTOR, hallId: HALL_ID });
   assert.equal(result.status, "running");
+  assert.equal(result.scheduledGameStatus, "purchase_open");
   assert.equal(result.scheduledGameId, SCHED_ID);
   assert.equal(state.get().status, "running");
   assert.equal(state.get().currentPosition, 1);
 
-  // 2. advance: running → next position
+  // 2. start igjen: reused purchase_open-rad → engine starter trekning
+  result = await service.start({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(result.status, "running");
+  assert.equal(result.scheduledGameStatus, "running");
+  assert.equal(state.get().currentPosition, 1);
+
+  // 3. advance: running → next position, fresh purchase_open
   result = await service.advance({ actor: ACTOR, hallId: HALL_ID });
   assert.equal(result.status, "running");
+  assert.equal(result.scheduledGameStatus, "purchase_open");
   assert.equal(state.get().currentPosition, 2);
 
-  // 3. pause: running → paused
+  // 4. start igjen: reused purchase_open-rad for posisjon 2 → engine starter
+  result = await service.start({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(result.status, "running");
+  assert.equal(result.scheduledGameStatus, "running");
+  assert.equal(state.get().currentPosition, 2);
+
+  // 5. pause: running → paused
   result = await service.pause({
     actor: ACTOR,
     hallId: HALL_ID,
@@ -339,11 +383,11 @@ test("integration: full master-loop start → advance → pause → resume → s
   });
   assert.equal(state.get().status, "paused");
 
-  // 4. resume: paused → running
+  // 6. resume: paused → running
   result = await service.resume({ actor: ACTOR, hallId: HALL_ID });
   assert.equal(state.get().status, "running");
 
-  // 5. stop: running → finished
+  // 7. stop: running → finished
   result = await service.stop({
     actor: ACTOR,
     hallId: HALL_ID,
@@ -357,15 +401,17 @@ test("integration: full master-loop start → advance → pause → resume → s
   // events er ordered DESC (newest first) etter list-default.
   const actions = events.map((e) => e.action).reverse();
   assert.deepEqual(actions, [
+    "spill1.master.purchase_open",
     "spill1.master.start",
-    "spill1.master.advance",
+    "spill1.master.advance.purchase_open",
+    "spill1.master.start",
     "spill1.master.pause",
     "spill1.master.resume",
     "spill1.master.stop",
   ]);
 
   // Hver action ble broadcastet til lobby.
-  assert.equal(broadcastCalls.length, 5);
+  assert.equal(broadcastCalls.length, 7);
   for (const call of broadcastCalls) assert.equal(call, HALL_ID);
 });
 

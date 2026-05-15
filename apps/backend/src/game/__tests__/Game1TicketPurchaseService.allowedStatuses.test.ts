@@ -2,18 +2,18 @@
  * F7 (E2E-verification 2026-Q3): tillatte purchase-statuser.
  *
  * Bug: `Game1TicketPurchaseService.purchase` og `assertPurchaseOpen`
- * krevde tidligere at scheduled_game.status === 'purchase_open'. Catalog-
- * modellen via `GamePlanEngineBridge` spawner imidlertid scheduled-games
- * direkte i `ready_to_start` (master driver framgangen, ikke cron-tick).
- * Resultat: alle billett-kjøp i plan-flyten ble blokkert med
- * `PURCHASE_CLOSED_FOR_GAME` med mindre noen manuelt UPDATE-et status.
+ * krevde tidligere at scheduled_game.status === 'purchase_open'. En tidligere
+ * catalog-plan-flyt spawnet scheduled-games direkte i `ready_to_start`, og
+ * `ready_to_start` må fortsatt aksepteres som transition/compat-status.
+ * Resultatet pre-fix var at billettkjøp kunne blokkeres med
+ * `PURCHASE_CLOSED_FOR_GAME` selv om master ennå ikke hadde startet trekning.
  *
  * Fix: tillat begge `purchase_open` og `ready_to_start`. `running` er
  * fortsatt blokkert (regulatorisk + UX — ingen kjøp etter første ball
  * trekkes).
  *
  * Disse testene sikrer at det er en kompakt liste av tillatte statuser,
- * og at både ny (catalog/plan) og legacy (cron-tick) flyt fungerer.
+ * og at både ny purchase_open-flyt og legacy/transition-flyt fungerer.
  *
  * Test-strategi: vi bruker `assertPurchaseOpen` siden den har samme
  * status-sjekk og er enklere å teste isolert (ingen wallet/audit-mocks).
@@ -102,12 +102,12 @@ test("F7: assertPurchaseOpen accepts status='purchase_open' (legacy cron flow)",
   assert.ok(true, "purchase_open should be allowed");
 });
 
-test("F7: assertPurchaseOpen accepts status='ready_to_start' (catalog/plan flow)", async () => {
+test("F7: assertPurchaseOpen accepts status='ready_to_start' (compat transition)", async () => {
   const pool = makePoolReturningGame(baseRow("ready_to_start"));
   const service = makeService(pool);
   // Pre-fix: this would throw PURCHASE_CLOSED_FOR_GAME.
-  // Post-fix: accepted because GamePlanEngineBridge spawns scheduled-games
-  // directly in ready_to_start; players need a window to buy before master starts.
+  // Post-fix: accepted as a compatibility/transition status. Current
+  // GamePlanEngineBridge opens fresh plan-runtime rows in purchase_open.
   await service.assertPurchaseOpen("game-1", "hall-1");
   assert.ok(true, "ready_to_start should be allowed (regression-lock for F7 fix)");
 });
