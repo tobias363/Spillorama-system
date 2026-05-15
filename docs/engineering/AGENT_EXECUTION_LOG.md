@@ -85,11 +85,12 @@ Hver entry har struktur:
 5. **`docs/engineering/PITFALLS_LOG.md` §5.12** dokumenterer fallgruven "required reviews uten approver-roster".
 6. **`docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`** oppdatert med ny status.
 7. **Skills oppdatert:** `pm-orchestration-pattern` v1.2.0, `dr-runbook-execution` v1.1.0 og `debug-hud-gating` v1.0.1 (manglende scope-header fra CI).
-8. **GitHub labels opprettet:** `approved-emergency-merge` og `post-merge-review-required`.
+8. **Skill-map regenerert:** `docs/auto-generated/SKILL_FILE_MAP.md` etter scope-endringer.
+9. **GitHub labels opprettet:** `approved-emergency-merge` og `post-merge-review-required`.
 
 **Fallgruver oppdaget:**
 - Required reviews er ikke automatisk "best practice" hvis reviewer-rosteren ikke finnes. I denne repo-staten ville det enten skape lockout eller falsk uavhengighet.
-- Skill-frontmatter-validering lokalt er ikke identisk med `Validate scope-headers` i CI; skill-endringer må også dekke `<!-- scope: ... -->`.
+- Skill-frontmatter-validering lokalt er ikke identisk med `Validate scope-headers` i CI; skill-endringer må også dekke `<!-- scope: ... -->` og regenerere `SKILL_FILE_MAP.md`.
 
 **Læring:**
 - Branch protection må designes fra faktisk GitHub-access, ikke ønsket organisasjonskart.
@@ -105,6 +106,7 @@ Hver entry har struktur:
 - `docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
 - `.claude/skills/debug-hud-gating/SKILL.md`
+- `docs/auto-generated/SKILL_FILE_MAP.md`
 
 ### 2026-05-15 — Fix-agent: IDEMPOTENCY_MISMATCH ved gjenkjøp etter avbestilling (Sentry SPILLORAMA-BACKEND-6)
 
