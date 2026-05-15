@@ -51,13 +51,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 12 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
-| [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
+| [§8 Doc-disiplin](#8-doc-disiplin) | 7 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 100 entries (per 2026-05-15)
+**Total:** 101 entries (per 2026-05-15)
 
 ---
 
@@ -2787,6 +2787,21 @@ Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-b
 - For workflow-markers: dokumentér i kommentar hvilken regex som parser markøren, slik at senere refaktor ikke bryter parsing
 - Hvis cascade-merges skjer pga uavhengige agent-bølger: PM eier konsolideringspass etter siste merge
 **Related:** PR #1335, #1338, #1333 (cascade-kilder)
+
+### §8.7 — Skill-frontmatter-hook er ikke nok; scope-header CI må kjøres ved skill-endringer
+
+**Severity:** P2 (CI-fail etter PR-åpning, selv om pre-commit passerer)
+**Oppdaget:** 2026-05-15 i PR #1527.
+**Symptom:** Lokal pre-commit kjørte `validate-skill-frontmatter.mjs` og `check-markdown-links.mjs` grønt, men GitHub Actions `Validate scope-headers` feilet fordi `.claude/skills/debug-hud-gating/SKILL.md` manglet `<!-- scope: ... -->` rett etter YAML-frontmatter.
+**Root cause:** Scope-header-gaten kjøres i CI, men ikke som samme lokale hook som skill-frontmatter-valideringen. En skill kan derfor ha gyldig YAML-frontmatter og likevel mangle auto-loading-scope.
+**Fix:** Legg til scope-header i `debug-hud-gating` og versjonsbump skillen til v1.0.1.
+**Prevention:**
+- Når en PR rører `.claude/skills/*/SKILL.md`, kjør lokal variant av scope-sjekken eller vent med merge til `Validate scope-headers` er grønn.
+- Scope-header skal stå rett etter lukkende `---`, før første Markdown-heading.
+- Hvis skillen bevisst er for bred, bruk eksplisitt tom header: `<!-- scope: -->`.
+**Related:**
+- `.claude/skills/debug-hud-gating/SKILL.md`
+- `.github/workflows/skill-mapping-validate.yml`
 
 ---
 
