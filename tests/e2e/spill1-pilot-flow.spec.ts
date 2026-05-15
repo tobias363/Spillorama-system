@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import {
   autoLogin,
   getLobbyState,
-  markHallReady,
   masterStop,
+  openPurchaseWindow,
   resetPilotState,
   shouldDestroyRoomsForCi,
   // raisePlayerLossLimits utgår: regulatorisk-cap (§66) gjør at admin ikke
@@ -18,8 +18,7 @@ import {
  *
  *   1. (REST) Auto-login master + spiller
  *   2. (REST) Reset pilot-state — stopper evt. pågående spill
- *   3. (REST) Mark master-hall ready → lazy-spawner scheduled-game
- *   4. (REST) Master start → spillet er i `running`-state
+ *   3. (REST) Master start → åpner `purchase_open` uten trekning
  *   5. (UI)  Spiller åpner `/web/?dev-user=demo-pilot-spiller-1`
  *   6. (UI)  Vent på at klient mounter (canvas + buy-popup)
  *   7. (UI)  Verifiser pris-tekst i popup per bongfarge:
@@ -177,16 +176,15 @@ test.describe("Spill 1 pilot-flow", () => {
   });
 
   test("master + spiller fullfører hele kjøps-flyten", async ({ page }) => {
-    // ── Steg 3: Master mark ready (lazy-spawner scheduled-game) ────────────
+    // ── Steg 3: Master åpner kjøpsvindu uten å starte trekning ────────────
     // Tobias-spec: vi vil teste kjøp-flyten med player BUYING tickets.
     // I status=running går alle buys til `preRoundTickets` (queue for neste
     // runde) og vises IKKE i grid før runden ender. For å verifisere brett-
-    // rendering må vi være i `ready_to_start` ELLER `purchase_open`. Vi
-    // markerer hallen ready og hopper over `masterStart` — da står
-    // scheduled-game på `ready_to_start` og brett vises i grid umiddelbart
-    // etter buy (state.preRoundTickets[]).
-    const ready = await markHallReady(masterToken, HALL_ID);
-    scheduledGameId = ready.gameId;
+    // rendering må vi være i `purchase_open`. Første `masterStart()` åpner
+    // salgsvinduet; det andre `masterStart()` starter trekning etter at hallen
+    // er klar.
+    const opened = await openPurchaseWindow(masterToken);
+    scheduledGameId = opened.scheduledGameId;
     expect(scheduledGameId, "scheduled-game must spawn").toBeTruthy();
 
     // Verifiser at scheduled-game er joinable
@@ -345,21 +343,13 @@ test.describe("Spill 1 pilot-flow", () => {
     ).toBeHidden({ timeout: 10_000 });
 
     // ── Steg 11: Verifiser at brett-grid rendrer ───────────────────────────
-    // Backend lagrer ÉN ticket-assignment per spec-entry (med count=1),
-    // ikke spec.count × ticketCount (Tobias-bekreftet 2026-05-13:
-    // "totalt 12 brett" i popup er kumulativ-tellingen for innsatts-
-    // verdifering, men hvert "Stor" rendrer som ÉN card-instans i grid
-    // selv om den representerer 3 brett). Grid-en viser derfor 6 cards
-    // (1 per spec-entry) IKKE 12 (3 stor × 3 + 3 liten × 1).
-    //
-    // Spørsmål til Tobias: ønsker du at backend skal expand-e "Stor"-
-    // ticket-spec.count til 3 assignments? Da ville grid vise 12 cards.
-    // Per nåværende kode er det 6 cards med "Stor"-tag på 3 av dem.
-    const EXPECTED_GRID_CARDS = EXPECTED_ROWS.length; // 6 (1 per spec-entry)
+    // Grid viser ett card per faktisk brett. Stor-bonger ekspanderer derfor
+    // til 3 cards hver, og totalen matcher popupens "12 brett".
+    const EXPECTED_GRID_CARDS = EXPECTED_TOTAL_BRETT;
     const ticketCards = page.locator('[data-test="ticket-card"]');
     await expect(
       ticketCards,
-      `Grid skal vise ${EXPECTED_GRID_CARDS} cards (1 per spec-entry)`,
+      `Grid skal vise ${EXPECTED_GRID_CARDS} cards (ett per brett)`,
     ).toHaveCount(EXPECTED_GRID_CARDS, { timeout: 15_000 });
 
     // ── Steg 12: Verifiser per-brett-priser i grid ─────────────────────────
@@ -390,7 +380,7 @@ test.describe("Spill 1 pilot-flow", () => {
     //   Stor Hvit: 15 / 3 = 5 kr per brett (samme som Liten Hvit)
     //   Stor Gul:  30 / 3 = 10 kr per brett (samme som Liten Gul)
     //   Stor Lilla:45 / 3 = 15 kr per brett (samme som Liten Lilla)
-    // Så grid har 6 cards med priser [5, 5, 10, 10, 15, 15].
+    // Så grid har 12 cards fordelt på per-brett-priser 5/10/15.
     const uniquePrices = new Set(EXPECTED_ROWS.map((r) => r.perBrettPriceKr));
     for (const expectedPrice of uniquePrices) {
       const cardsForPrice = page.locator(

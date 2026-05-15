@@ -117,7 +117,10 @@ import type {
   GameLobbyAggregator,
   LobbyActorContext,
 } from "./GameLobbyAggregator.js";
-import type { GamePlanEngineBridge } from "./GamePlanEngineBridge.js";
+import type {
+  CreateScheduledGameResult,
+  GamePlanEngineBridge,
+} from "./GamePlanEngineBridge.js";
 import type { GamePlanRunService } from "./GamePlanRunService.js";
 import type {
   Game1MasterControlService,
@@ -515,15 +518,16 @@ export class MasterActionService {
    *   2. `planRunService.getOrCreateForToday(hallId)` — idempotent lazy-create.
    *   3. `planRunService.start` — idle → running, position=1.
    *   4. `engineBridge.createScheduledGameForPlanRunPosition` — spawn
-   *      `app_game1_scheduled_games`-rad.
-   *   5. `masterControlService.startGame({ gameId })` — engine starter
-   *      (status='ready_to_start' → 'running').
-   *   6. Audit + return.
+   *      `app_game1_scheduled_games`-rad i `purchase_open`.
+   *   5. Hvis raden er ny `purchase_open`: returner uten engine-start slik
+   *      at spillere kan kjøpe bonger før trekning.
+   *   6. Hvis raden allerede fantes: `masterControlService.startGame({ gameId })`
+   *      starter trekning fra samme scheduled-game.
+   *   7. Audit + return.
    *
-   * Hvis (5) feiler: rollback (4) ved å la run-status være `running` men
-   * scheduled-game-status forblir `ready_to_start`. Aggregator vil flagge
-   * dette som `BRIDGE_FAILED` ved neste poll (selv om bridgen ikke faktisk
-   * feilet — det er state-mismatch som triggrer warning). Master må kalle
+   * Hvis engine-start senere feiler: plan-run blir stående `running` mens
+   * scheduled-game forblir aktiv (`purchase_open` eller senere status).
+   * Aggregator vil flagge state-mismatch ved neste poll. Master må kalle
    * `start` igjen for å re-trigger engine.
    *
    * NB: Dette er kompromisset audit-rapporten beskriver — full SAGA-
@@ -683,6 +687,7 @@ export class MasterActionService {
     // propageres uendret etter første forsøk via isBridgeRetrySafe.
     const wasIdleBefore = run.status === "idle";
     let scheduledGameId: string;
+    let bridgeResult: CreateScheduledGameResult;
     try {
       const retryResult = await withRetry(
         async () =>
@@ -709,7 +714,8 @@ export class MasterActionService {
           },
         },
       );
-      scheduledGameId = retryResult.value.scheduledGameId;
+      bridgeResult = retryResult.value;
+      scheduledGameId = bridgeResult.scheduledGameId;
     } catch (err) {
       // Propager permanente DomainErrors uendret.
       if (err instanceof DomainError && PERMANENT_BRIDGE_ERROR_CODES.has(err.code)) {
@@ -768,6 +774,34 @@ export class MasterActionService {
           rolledBack: false,
         },
       );
+    }
+
+    const scheduledAfterBridge = await this.getPlanRunScheduledGameForPosition(
+      started.id,
+      started.currentPosition,
+    );
+    if (!bridgeResult.reused && scheduledAfterBridge?.status === "purchase_open") {
+      await this.audit({
+        action: "spill1.master.purchase_open",
+        actor,
+        hallId,
+        planRunId: started.id,
+        scheduledGameId,
+        details: {
+          position: started.currentPosition,
+          previousPlanStatus: run.status,
+          reason:
+            "fresh_catalog_scheduled_game_opened_for_bong_purchase_before_engine_start",
+        },
+      });
+      this.fireLobbyBroadcast(hallId);
+      return this.buildResult({
+        scheduledGameId,
+        planRunId: started.id,
+        planRunStatus: started.status,
+        scheduledGameStatus: "purchase_open",
+        lobby,
+      });
     }
 
     // 5b. Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): konverter armed-
@@ -852,14 +886,15 @@ export class MasterActionService {
    *      og la caller invoke /setJackpot.
    *   4. Hvis status='finished' → return uten engine-call.
    *   5. `engineBridge.createScheduledGameForPlanRunPosition` for ny posisjon.
-   *   6. `masterControlService.startGame({ gameId })` for ny posisjon.
-   *   7. Audit + return.
+   *   6. Hvis raden er ny `purchase_open`: returner uten engine-start.
+   *   7. Hvis raden allerede fantes: `masterControlService.startGame({ gameId })`.
+   *   8. Audit + return.
    */
 
   /**
    * 2026-05-09 (Tobias-direktiv) — pre-game ready-flow.
    *
-   * Lazy-spawner scheduled-game-rad (status=scheduled) UTEN å starte engine.
+   * Lazy-spawner scheduled-game-rad (status=purchase_open) UTEN å starte engine.
    * Brukes av `markReady`-route så haller kan markere seg klar FØR master
    * har trykket "Start neste spill".
    *
@@ -1127,6 +1162,7 @@ export class MasterActionService {
     // re-prøve /advance med samme target.
     const previousPosition = result.run.currentPosition - 1;
     let scheduledGameId: string;
+    let bridgeResult: CreateScheduledGameResult;
     try {
       const retryResult = await withRetry(
         async () =>
@@ -1153,7 +1189,8 @@ export class MasterActionService {
           },
         },
       );
-      scheduledGameId = retryResult.value.scheduledGameId;
+      bridgeResult = retryResult.value;
+      scheduledGameId = bridgeResult.scheduledGameId;
     } catch (err) {
       if (err instanceof DomainError && PERMANENT_BRIDGE_ERROR_CODES.has(err.code)) {
         // Permanente feil — rull position tilbake siden vi har inkrementert
@@ -1225,6 +1262,34 @@ export class MasterActionService {
           rolledBack: false,
         },
       );
+    }
+
+    const scheduledAfterBridge = await this.getPlanRunScheduledGameForPosition(
+      result.run.id,
+      result.run.currentPosition,
+    );
+    if (!bridgeResult.reused && scheduledAfterBridge?.status === "purchase_open") {
+      await this.audit({
+        action: "spill1.master.advance.purchase_open",
+        actor,
+        hallId,
+        planRunId: result.run.id,
+        scheduledGameId,
+        details: {
+          toPosition: result.run.currentPosition,
+          catalogSlug: result.nextGame?.slug ?? null,
+          reason:
+            "fresh_catalog_scheduled_game_opened_for_bong_purchase_before_engine_start",
+        },
+      });
+      this.fireLobbyBroadcast(hallId);
+      return this.buildResult({
+        scheduledGameId,
+        planRunId: result.run.id,
+        planRunStatus: result.run.status,
+        scheduledGameStatus: "purchase_open",
+        lobby,
+      });
     }
 
     // Pilot-blokker-fix 2026-05-12 (Tobias-direktiv): konverter armed-state

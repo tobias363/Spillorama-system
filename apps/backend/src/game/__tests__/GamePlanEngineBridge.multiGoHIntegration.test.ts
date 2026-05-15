@@ -763,7 +763,7 @@ test(
         expectedRoomCode,
         "Ny rad må ha kanonisk room_code (IKKE NULL — F-NEW-3 fjerner lazy-binding-fallback)",
       );
-      assert.equal(postNew[0]!.status, "ready_to_start");
+      assert.equal(postNew[0]!.status, "purchase_open");
 
       // Audit-entry må være skrevet for den cancellete raden
       const { rows: audit } = await pool.query<{

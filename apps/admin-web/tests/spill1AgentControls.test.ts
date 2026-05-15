@@ -233,7 +233,7 @@ describe("Spill1AgentControls", () => {
     expect(root.querySelector("[data-action='spill1-stop']")).toBeNull();
   });
 
-  it("Tobias 2026-05-08: Start-label inkluderer planlagt-navnet", () => {
+  it("Tobias 2026-05-15: purchase_open-label starter trekninger og inkluderer planlagt-navn", () => {
     const html = renderSpill1AgentControls({
       currentGame: makeGame({
         status: "purchase_open",
@@ -248,7 +248,7 @@ describe("Spill1AgentControls", () => {
     const startBtn = root.querySelector<HTMLButtonElement>(
       "[data-marker='spill1-start-btn']"
     );
-    expect(startBtn?.textContent).toContain("Start neste spill");
+    expect(startBtn?.textContent).toContain("Start trekninger nå");
     expect(startBtn?.textContent).toContain("Bingo");
   });
 

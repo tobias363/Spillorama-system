@@ -4311,3 +4311,157 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-15 — PM-AI: purchase_open to-stegs master-flyt
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Fikse P0-feilen der Spill 1 plan/master-flow hoppet over reelt `purchase_open`-vindu før trekning.
+**Trigger:** PM-handoff identifiserte at live-test hadde gått `scheduled → running → completed` uten kjøpsvindu. Tobias presiserte at bonger må kunne kjøpes før master starter spillet.
+
+**Evidence brukt før kode:**
+- `bash scripts/pm-checkpoint.sh --validate` feilet uten gyldig lokal gate-marker; PM leste siste handoff + knowledge export manuelt før kode.
+- `npm run forensics:purchase-open -- --phase before-master --sentry-ref "baseline-before-implementation" --note "New PM first evidence snapshot before purchase_open code changes"`
+- Evidence report: `/tmp/purchase-open-forensics-2026-05-15T21-56-07Z.md`
+- Agent contract: `/tmp/agent-contract-purchase-open-pm-self.md`
+
+**Root cause:**
+- `GamePlanEngineBridge` opprettet plan-runtime scheduled-games direkte som `ready_to_start`.
+- `MasterActionService.start()` kalte `Game1MasterControlService.startGame()` i samme request som bridge-spawn.
+- Cron/seed-start_time var en mulig symptomforsterker, men ikke rot-årsak for master/plan-pathen.
+
+**Outputs:**
+- `apps/backend/src/game/GamePlanEngineBridge.ts` — nye plan-runtime rader opprettes med `status='purchase_open'`, og `scheduled_start_time` settes ca. 120 sek frem som forventet draw-start/timer.
+- `apps/backend/src/game/MasterActionService.ts` — `start()` og `advance()` returnerer uten engine-start for fresh `purchase_open`; engine starter først når eksisterende scheduled-game gjenbrukes.
+- `apps/backend/src/game/__tests__/MasterActionService.test.ts` — nye regresjonstester for fresh `purchase_open`, reused purchase_open → engine-start, auto-advance til purchase_open, og advance-defense-in-depth.
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts` + `GamePlanEngineBridge.multiGoHIntegration.test.ts` — forventer ny aktiv rad som `purchase_open`.
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`, `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts`, `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`, `apps/admin-web/src/api/agent-game1.ts` — UI copy/label skiller "Bongesalg åpnet" fra "Spill 1 startet".
+- `tests/e2e/helpers/rest.ts` — ny `openPurchaseWindow()`-helper og lokal CI/test-DB reset av dagens plan-run slik at hver Playwright-spec starter deterministisk på Bingo/posisjon 1.
+- `tests/e2e/spill1-*.spec.ts` — E2E-kontrakt oppdatert til two-step-flyt: åpne `purchase_open`, kjøp, deretter `markHallReady()` og andre `masterStart()` hvis testen trenger running draw.
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.1 — purchase_open-kontrakt + E2E-testkontrakt.
+- `docs/engineering/PITFALLS_LOG.md` §3.17 — fallgruven dokumentert.
+- Denne `AGENT_EXECUTION_LOG`-entryen.
+
+**Validering:**
+- `LOG_LEVEL=warn npx tsx --test src/game/__tests__/MasterActionService.test.ts` — 49/49 pass.
+- `LOG_LEVEL=warn npx tsx --test src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts` — skipped uten `WALLET_PG_TEST_CONNECTION_STRING`.
+- `LOG_LEVEL=warn npx tsx --test src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts` — skipped uten `WALLET_PG_TEST_CONNECTION_STRING`.
+- `npm run check` i `apps/backend` — pass.
+- `npm run check` i `apps/admin-web` — pass.
+- `npx playwright test --config=tests/e2e/playwright.config.ts --list` — 7 pilot-flow specs listet uten TS/transpile-feil.
+
+**Læring:**
+- Forensics må kjøres før B.1/B.2/B.3 velges. Her viste beviset at cron/seed ikke var tilstrekkelig forklaring; master pathen startet engine umiddelbart.
+- "Start neste spill" og "Start trekninger nå" må være to forskjellige mentale modeller i UI, ellers feiltolker både PM og master live-testresultatet.
+- Defense-in-depth må dekke både `start()` og `advance()` selv om dagens UI primært bruker `start()` for neste runde.
+- `markHallReady()` er ikke synonymt med "kjøpsåpent". Etter two-step-flyten betyr den at hallen er klar/ferdig med salg; kjøpsåpent settes av første masterStart.
+- Pilot-flow E2E er stateful på dagsplan. Test-reset må nulle plan-run i lokal CI/test-DB, ellers senere specs arver auto-advance og kan treffe jackpot-posisjon uten override.
+
+**Eierskap (filer endret):**
+- `apps/backend/src/game/GamePlanEngineBridge.ts`
+- `apps/backend/src/game/MasterActionService.ts`
+- `apps/backend/src/game/__tests__/MasterActionService.test.ts`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
+- `apps/admin-web/src/api/agent-game1.ts`
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`
+- `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`
+- `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts`
+- `.claude/skills/spill1-master-flow/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-15 — PM-AI: purchase_open Pilot-flow E2E CI follow-up
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Fikse rød `Pilot-flow E2E` på PR #1548 etter to-stegs `purchase_open`-implementasjonen.
+
+**Evidence brukt før kode:**
+- GitHub Actions job `Pilot-flow E2E`, run `25944762867`, job `76270369579`.
+- Failure-logg viste 4 passerte specs, deretter:
+  - `spill1-rad-vinst-flow`: forventet 6 ticket-cards, mottok 12.
+  - `spill1-reentry-during-draw` og `spill1-wallet-flow`: `JACKPOT_SETUP_REQUIRED` / `LOBBY_INCONSISTENT` på plan-posisjon 7.
+- CI-tidspunktet var `2026-05-15T22:44Z`, altså `2026-05-16` i `Europe/Oslo`.
+
+**Root cause:**
+- `resetPilotPlanRunForE2e()` brukte Postgres `CURRENT_DATE`. Appens business-date følger Oslo, mens CI/Postgres kjører UTC. Rundt norsk midnatt slettet reset feil dato og plan-run state lekket mellom specs.
+- `spill1-rad-vinst-flow.spec.ts` hadde fortsatt gammel forventning om 6 rendered cards, selv om klienten rendrer 12 cards (én per faktisk brett).
+
+**Outputs:**
+- `tests/e2e/helpers/rest.ts` — ny app business-date helper (`Europe/Oslo`) brukes som SQL-parameter for scheduled-game og plan-run cleanup.
+- `tests/e2e/spill1-rad-vinst-flow.spec.ts` — ticket-card assertion oppdatert til `EXPECTED_TOTAL_BRETT` (12).
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.2 — dokumenterer timezone-invarianten.
+- `docs/engineering/PITFALLS_LOG.md` §6.19 — ny test-infra fallgruve.
+- `docs/delta/2026-05-15-purchase-open-two-step-master-flow.md` — delta oppdatert.
+
+**Validering:**
+- `npx playwright test --config=tests/e2e/playwright.config.ts --list` — 7 specs listet uten TS/transpile-feil.
+- `git diff --check` — pass.
+
+**Læring:**
+- I Spillorama er "dagens run" en forretningsdato, ikke DB-serverens kalenderdato. Test-harness må følge samme timezone som appen.
+- Når pilot-flow specs kjøres serialisert i samme DB, én feil reset kan gjøre senere specs meningsløse. Første feil i loggen er ikke alltid eneste årsak; state-lekkasje må analyseres separat.
+
+### 2026-05-15 — PM-AI: purchase_open Pilot-flow E2E explicit scheduled draws
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Fikse gjenværende rød `spill1-rad-vinst-flow` i PR #1548 uten å aktivere scheduler-jobs i CI.
+
+**Evidence brukt før kode:**
+- GitHub Actions job `Pilot-flow E2E`, run `25945194884`, job `76271700032`.
+- Logg viste at `spill1-rad-vinst-flow` nå kom til running-state, men `drawsCompleted=0` og `currentPhase=1` helt til timeout.
+- Workflowen `.github/workflows/pilot-flow-e2e.yml` kjører med `JOBS_ENABLED=false`, med kommentar om at tests skal drive state transitions eksplisitt.
+
+**Root cause:**
+- Rad-vinst-testen ventet på `game1-auto-draw-tick`, men CI starter ikke scheduler-jobs. Dermed ble ingen scheduled draws utført selv om scheduled-game var running.
+- Riktig fix er deterministisk test-driver for scheduled draws, ikke å slå på `JOBS_ENABLED=true` og dermed aktivere hele job-flaten.
+
+**Outputs:**
+- `apps/backend/src/routes/adminGame1Master.ts` — ny test-only `POST /api/admin/game1/games/:gameId/e2e-draw-next`, gated på `NODE_ENV=test` eller `E2E_ENABLE_MANUAL_GAME1_DRAW=1`, med `GAME1_MASTER_WRITE` + hall-scope.
+- `tests/e2e/helpers/rad-vinst-helpers.ts` — ny `scheduledDrawNext()` som kaller test-only endpointet.
+- `tests/e2e/spill1-rad-vinst-flow.spec.ts` — Rad 1/Rad 2 drives med eksplisitte scheduled draws og phase-advance, ikke tidsbasert auto-tick-polling.
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.3 — dokumenterer invariant: Pilot-flow CI har `JOBS_ENABLED=false`.
+- `docs/engineering/PITFALLS_LOG.md` §6.20 — fallgruven dokumentert.
+- `docs/delta/2026-05-15-purchase-open-two-step-master-flow.md` — delta oppdatert.
+
+**Læring:**
+- Test-harness må respektere workflow-kontrakten. Når CI eksplisitt skrur av jobs, må testen eie draw-driveren.
+- Scheduled Spill 1 kan ikke bruke legacy room-draw endpoint; scheduled flows må gå via `Game1DrawEngineService`.
+- Å gjøre CI grønn ved å aktivere global scheduler ville maskert test-designet og introdusert race/flakiness.
+
+### 2026-05-16 — PM-AI: Fase 2 — skill-SHA-lockfile + persistent evidence + ripple analysis
+
+**Agent-type:** PM/ops-hardening (follow-up av ADR-0024)
+**Scope:** Lukke 3 av gapene konsulent-reviewen 2026-05-16 identifiserte: agent-contract uten reproduserbarhet, evidence-pack uten persistence, og manglende ripple-analyse i kontrakt-mal.
+
+**Evidence brukt før kode:**
+- Konsulent-review 2026-05-16 (4 parallelle deep-reads via general-purpose Agent-tool) av engineering/operations/scripts/skills. Funn: agent-contracts pekte på `.claude/skills/<name>/SKILL.md` uten SHA; `skill-freshness-weekly.yml` beviser at skills drifter; `/tmp/`-evidence forsvinner; ingen ripple-step i contract-mal.
+- ADR-0024 (merget PR #1549) som la grunnlaget med eksplisitt bypass-policy og konsolideringskriterier.
+- `docs/auto-generated/SKILL_FILE_MAP.md` — bekreftet at alle 25 prosjekt-skills har scope-header og version-felt.
+
+**Root cause:**
+- Forrige `generate-agent-contract.sh` capturet skill-navn men ikke versjon eller SHA. Reproducerbarhet av en gammel agent-leveranse var umulig.
+- Eksempel-bruk i `AGENT_TASK_CONTRACT.md` brukte `/tmp/purchase-open-forensics-...`-stier som overlever ikke reboot.
+- Contract-malen hadde §1-§10 men ingen seksjon for "hva annet kan dette touche?".
+
+**Outputs:**
+- `scripts/generate-agent-contract.sh` — embed `skill@version@SHA` i §4-listing; compute `CONTRACT_ID` (`YYYYMMDD-<slug>`); advar ved ephemeral `/tmp/*` evidence; ny §3a "Cross-Cutting Impact Analysis" mellom §3 og §4.
+- `scripts/verify-contract-freshness.mjs` — NY. Parser lagret kontrakt, sammenligner skill-SHA-er mot current HEAD, exit 1 hvis drift.
+- `docs/evidence/README.md` — NY. Konvensjon `docs/evidence/<contract-id>/` med commit-policy (forensics/snapshots/Sentry-eksporter ja; PII/credentials nei), filnavn-konvensjon, retensjon (5 år for Lotteritilsynet-relevant).
+- `docs/engineering/AGENT_TASK_CONTRACT.md` — Regler 8-10 (freshness-check / persistent evidence / ripple-svar) + utvidet Related-liste.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.4.0 — endringslogg-entry + nye script-/fil-referanser.
+- `docs/engineering/PITFALLS_LOG.md` §11.20 (skill-SHA-lockfile drift) + §11.21 (evidence-persistence) + endringslogg.
+
+**Læring:**
+- Reproducerbarhet av agent-arbeid krever lockfile-mentalitet — ikke bare for kode-dependencies, men for kunnskaps-artefakter (skills) som agenten konsumerte.
+- Audit-trail brytes umiddelbart hvis evidence ligger i ephemeral lokasjoner. For et regulert pengespill-system må evidence være versjons-kontrollert.
+- Ripple-analyse som obligatorisk del av delivery-report er billigere enn å fange cross-cutting-bugs i CI eller live.
+- Mest impact per kompleksitets-punkt: skill-lockfile (lite kode, stor audit-gevinst) + evidence-konvensjon (rent docs + skript-warning, stor compliance-gevinst).
+
+**Eierskap (filer endret):**
+- `scripts/generate-agent-contract.sh`
+- `scripts/verify-contract-freshness.mjs`
+- `docs/evidence/README.md`
+- `docs/engineering/AGENT_TASK_CONTRACT.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`

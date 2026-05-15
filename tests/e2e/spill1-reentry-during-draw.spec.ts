@@ -4,6 +4,7 @@ import {
   getLobbyState,
   markHallReady,
   masterStart,
+  openPurchaseWindow,
   masterStop,
   resetPilotState,
 } from "./helpers/rest.js";
@@ -33,8 +34,8 @@ import {
  *     runde.
  *
  * Test-strategi:
- *   1. Setup: master `markHallReady` + `masterStart` slik at en runde er
- *      `running` med minst 1 draw fullført.
+ *   1. Setup: master åpner `purchase_open`, markerer hall klar, og kjører
+ *      andre `masterStart` slik at en runde er `running` med minst 1 draw.
  *   2. Spiller åpner `/web/`, klikker bingo-tile, lander på play-screen.
  *   3. Verifiser at klient er i play-screen og ser draws.
  *   4. Spiller klikker tilbake (`returnToShellLobby()`) — lobby vises.
@@ -132,11 +133,12 @@ test.describe("Spill 1 — re-entry during active draw (I15)", () => {
   test("re-entry til rom under aktiv trekning skal lykkes (ikke fallback til lobby)", async ({
     page,
   }) => {
-    // ── Steg 1: Master starter rundens
-    const ready = await markHallReady(masterToken, HALL_ID);
-    const scheduledGameId = ready.gameId;
+    // ── Steg 1: Master starter runden via to-stegs-flyt
+    const opened = await openPurchaseWindow(masterToken);
+    const scheduledGameId = opened.scheduledGameId;
     expect(scheduledGameId, "scheduled-game må spawnes").toBeTruthy();
 
+    await markHallReady(masterToken, HALL_ID);
     const startResult = await masterStart(masterToken);
     expect(startResult.scheduledGameId).toBe(scheduledGameId);
     expect(startResult.scheduledGameStatus).toBe("running");

@@ -9,6 +9,7 @@
  *   - `masterResume(token)`             → REST `/api/agent/game1/master/resume`
  *   - `masterAdvance(token)`            → REST `/api/agent/game1/master/advance`
  *   - `adminDrawNext(adminToken, code)` → REST `/api/admin/rooms/<code>/draw-next`
+ *   - `scheduledDrawNext(token, gameId)`→ REST `/api/admin/game1/games/:id/e2e-draw-next`
  *   - `getGameStateSnapshot(code)`      → GET  `/api/_dev/game-state-snapshot`
  *   - `resetPilotStateExt(token, opts)` → reset med `destroyRooms`-flag
  *
@@ -16,7 +17,7 @@
  * branches som omformer samme datatyper; helpers plasseres her isolert.
  */
 
-import { autoLogin, masterStop } from "./rest.js";
+import { autoLogin, masterStop, resetPilotPlanRunForE2e } from "./rest.js";
 
 const BACKEND_URL = process.env["E2E_BACKEND_URL"] ?? "http://localhost:4000";
 
@@ -122,8 +123,8 @@ export async function masterAdvance(
 }
 
 /**
- * Trekk neste kule via admin-endpoint. Akselererer test-progresjon ved å
- * skippe 4s auto-tick. Krever ADMIN-token.
+ * Legacy room-only draw helper. Scheduled Spill 1 må bruke scheduledDrawNext
+ * fordi /api/admin/rooms/:code/draw-next avviser scheduled games.
  */
 export async function adminDrawNext(
   adminToken: string,
@@ -161,6 +162,53 @@ export async function adminDrawNext(
   };
   if (!json.ok || !json.data) {
     throw new Error(`adminDrawNext not OK: ${JSON.stringify(json.error)}`);
+  }
+  return json.data;
+}
+
+export interface ScheduledDrawNextResult {
+  gameId: string;
+  engineState: {
+    currentPhase: number;
+    drawsCompleted: number;
+    lastDrawnBall: number | null;
+    isFinished: boolean;
+    isPaused: boolean;
+    pausedAtPhase: number | null;
+  };
+}
+
+/**
+ * Test-only scheduled Spill 1 draw. Pilot-flow CI kjører med JOBS_ENABLED=false;
+ * denne helperen driver derfor `Game1DrawEngineService.drawNext()` eksplisitt
+ * uten å aktivere hele JobScheduler-flaten.
+ */
+export async function scheduledDrawNext(
+  token: string,
+  scheduledGameId: string,
+): Promise<ScheduledDrawNextResult> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/admin/game1/games/${encodeURIComponent(scheduledGameId)}/e2e-draw-next`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`scheduledDrawNext failed: HTTP ${res.status} ${text}`);
+  }
+  const json = (await res.json()) as {
+    ok: boolean;
+    data?: ScheduledDrawNextResult;
+    error?: { message?: string; code?: string };
+  };
+  if (!json.ok || !json.data) {
+    throw new Error(`scheduledDrawNext not OK: ${JSON.stringify(json.error)}`);
   }
   return json.data;
 }
@@ -351,6 +399,7 @@ export async function resetPilotStateExt(
   await masterStop(masterToken).catch(() => {
     /* ignore — no active round */
   });
+  await resetPilotPlanRunForE2e();
 
   if (!destroyRooms) {
     return;

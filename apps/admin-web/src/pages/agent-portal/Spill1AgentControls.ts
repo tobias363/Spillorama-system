@@ -115,12 +115,17 @@ export function renderSpill1AgentControls(
   const startTooltip = buildStartButtonTooltip(currentGame, canStart);
   const startTooltipAttr = startTooltip ? ` title="${escapeHtml(startTooltip)}"` : "";
 
-  // 2026-05-08: knapp-label inkluderer planlagt-navnet på neste spill så
-  // master ser presis hva som starter. Eks: "Start neste spill — Bingo".
+  // 2026-05-15: master-flyt er to-stegs. Før scheduled-game finnes åpner
+  // master "neste spill" via cash-in/out idle-view; når denne komponenten
+  // rendres med purchase_open/ready_to_start, betyr knappen trekk-start.
   const nextGameName = currentGame.customGameName ?? currentGame.subGameName;
+  const startVerb =
+    currentGame.status === "purchase_open" || currentGame.status === "ready_to_start"
+      ? "Start trekninger nå"
+      : "Start neste spill";
   const startLabel = nextGameName
-    ? `Start neste spill — ${nextGameName}`
-    : "Start neste spill";
+    ? `${startVerb} — ${nextGameName}`
+    : startVerb;
 
   const excludedNotice =
     excludedHallIds.length > 0

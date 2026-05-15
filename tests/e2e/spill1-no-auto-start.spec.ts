@@ -5,6 +5,7 @@ import {
   getLobbyState,
   markHallReady,
   masterStart,
+  openPurchaseWindow,
   masterStop,
   resetPilotState,
 } from "./helpers/rest.js";
@@ -28,8 +29,7 @@ import {
  * - Ingen buy-path skal noensinne sette status=`running`.
  *
  * Test-strategi:
- * 1. Setup: master `markHallReady` på pilot-hall (lazy-spawner scheduled-game
- *    i `purchase_open`-status). IKKE kall `masterStart`.
+ * 1. Setup: første `masterStart` åpner scheduled-game i `purchase_open`.
  * 2. Spiller kjøper bonger via REST `/api/game1/purchase`. Bekreft 200 OK.
  * 3. Vent 10 sekunder for eventuell auto-start-tick eller race.
  * 4. Verifiser at scheduled-game status fortsatt er `purchase_open` ELLER
@@ -169,9 +169,9 @@ test.describe("Spill 1 — no auto-start regression", () => {
     }
   });
 
-  test("buy etter markHallReady skal IKKE auto-starte runden", async () => {
-    const ready = await markHallReady(masterToken, HALL_ID);
-    const scheduledGameId = ready.gameId;
+  test("buy i purchase_open skal IKKE auto-starte runden", async () => {
+    const opened = await openPurchaseWindow(masterToken);
+    const scheduledGameId = opened.scheduledGameId;
     expect(scheduledGameId, "scheduled-game må spawnes").toBeTruthy();
 
     const initialLobby = await getLobbyState(masterToken, HALL_ID);
@@ -180,7 +180,7 @@ test.describe("Spill 1 — no auto-start regression", () => {
     const initialStatus = initialLobby.scheduledGameMeta?.status ?? "";
     expect(
       ["purchase_open", "ready_to_start"],
-      `Status etter markHallReady — actual: '${initialStatus}'`,
+      `Status etter openPurchaseWindow — actual: '${initialStatus}'`,
     ).toContain(initialStatus);
 
     expect(initialLobby.scheduledGameMeta?.actualStartTime).toBeNull();
@@ -229,6 +229,7 @@ test.describe("Spill 1 — no auto-start regression", () => {
 
     console.log(`[test] ✅ Steg 1-5 grønne — ingen auto-start observert.`);
 
+    await markHallReady(masterToken, HALL_ID);
     const startResult = await masterStart(masterToken);
     expect(startResult.scheduledGameId).toBe(scheduledGameId);
     expect(startResult.scheduledGameStatus).toBe("running");
@@ -247,8 +248,8 @@ test.describe("Spill 1 — no auto-start regression", () => {
 
     const stressPlayer = await pickAvailablePlayer();
 
-    const ready = await markHallReady(masterToken, HALL_ID);
-    const scheduledGameId = ready.gameId;
+    const opened = await openPurchaseWindow(masterToken);
+    const scheduledGameId = opened.scheduledGameId;
     expect(scheduledGameId).toBeTruthy();
 
     const initialLobby = await getLobbyState(masterToken, HALL_ID);

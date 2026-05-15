@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import {
   autoLogin,
   getLobbyState,
-  markHallReady,
   masterStop,
+  openPurchaseWindow,
   resetPilotState,
 } from "./helpers/rest.js";
 
@@ -306,9 +306,9 @@ test.describe("Spill 1 wallet-flow", () => {
     // kallte fetchWallet pga. async-roundtrip).
     const ledgerSinceMs = testStartedAt - 5_000;
 
-    // ── Steg 1: Markér master-hall ready (spawner scheduled-game) ─────────
-    const ready = await markHallReady(masterToken, HALL_ID);
-    scheduledGameId = ready.gameId;
+    // ── Steg 1: Åpne master-styrt kjøpsvindu uten trekning ────────────────
+    const opened = await openPurchaseWindow(masterToken);
+    scheduledGameId = opened.scheduledGameId;
     expect(scheduledGameId, "scheduled-game must spawn").toBeTruthy();
 
     const lobby = await getLobbyState(masterToken, HALL_ID);

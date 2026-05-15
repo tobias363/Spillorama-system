@@ -1163,8 +1163,12 @@ async function attemptSpill1Start(): Promise<void> {
   const spill1 = state.spill1;
   if (!spill1) return;
   try {
-    await startMaster(spill1.hallId);
-    Toast.success("Spill 1 startet");
+    const result = await startMaster(spill1.hallId);
+    if (result.scheduledGameStatus === "purchase_open") {
+      Toast.success("Bongesalg åpnet — vent på kjøp før trekning startes.");
+    } else {
+      Toast.success("Spill 1 startet");
+    }
     await refreshSpill1();
   } catch (err) {
     // ApiError fra apiRequest har `status`/`code`/`details` på instansen.

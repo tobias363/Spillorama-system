@@ -113,6 +113,8 @@ interface ServiceForHookTest {
 function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
   let stateRef: PlanRunStateShape = { currentPosition: 0, status: "idle" };
   let spawnedScheduledId = SCHED_ID_1;
+  let scheduledOpened = false;
+  let scheduledStatus: "purchase_open" | "running" = "purchase_open";
   const hookCalls: HookCall[] = [];
   let handler: (input: HookCall) => Promise<void> = async () => {
     // default: capture only
@@ -153,6 +155,9 @@ function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
     async setJackpotOverride(): Promise<GamePlanRun> {
       return buildRun(stateRef);
     },
+    async findStuck(): Promise<GamePlanRun[]> {
+      return [];
+    },
     async findForDay(): Promise<GamePlanRun | null> {
       return buildRun(stateRef);
     },
@@ -163,7 +168,10 @@ function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
       scheduledGameId: string;
       reused: boolean;
     }> {
-      return { scheduledGameId: spawnedScheduledId, reused: false };
+      const reused = scheduledOpened;
+      scheduledOpened = true;
+      scheduledStatus = "purchase_open";
+      return { scheduledGameId: spawnedScheduledId, reused };
     },
   } as unknown as import("../game/GamePlanEngineBridge.js").GamePlanEngineBridge;
 
@@ -175,6 +183,7 @@ function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
       actualStartTime: string | null;
       actualEndTime: string | null;
     }> {
+      scheduledStatus = "running";
       return {
         gameId: spawnedScheduledId,
         status: "running",
@@ -213,10 +222,11 @@ function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
         scheduledGameMeta: hasGame
           ? {
               scheduledGameId: spawnedScheduledId,
-              status: stateRef.status === "paused" ? "paused" : "running",
+              status: stateRef.status === "paused" ? "paused" : scheduledStatus,
               scheduledStartTime: "2026-05-08T15:00:00.000Z",
               scheduledEndTime: null,
-              actualStartTime: "2026-05-08T15:00:00.000Z",
+              actualStartTime:
+                scheduledStatus === "running" ? "2026-05-08T15:00:00.000Z" : null,
               actualEndTime: null,
               pauseReason: null,
             }
@@ -239,7 +249,13 @@ function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
   };
 
   const service = MasterActionService.forTesting({
-    pool: {} as unknown as Pool,
+    pool: {
+      async query(): Promise<{
+        rows: Array<{ id: string; status: "purchase_open" | "running" }>;
+      }> {
+        return { rows: [{ id: spawnedScheduledId, status: scheduledStatus }] };
+      },
+    } as unknown as Pool,
     schema: "public",
     planRunService: planRunStub,
     engineBridge: engineBridgeStub,
@@ -262,6 +278,8 @@ function makeServiceForHookTest(auditLog: AuditLogService): ServiceForHookTest {
     },
     setSpawnedId: (id) => {
       spawnedScheduledId = id;
+      scheduledOpened = false;
+      scheduledStatus = "purchase_open";
     },
   };
 }
@@ -285,11 +303,20 @@ function buildRun(state: PlanRunStateShape): GamePlanRun {
 
 // ── tests ───────────────────────────────────────────────────────────────
 
-test("invariant: start() trigger onScheduledGameSpawned-hook med riktig scheduledGameId + planRunId + position", async () => {
+test("invariant: andre start() trigger onScheduledGameSpawned-hook med riktig scheduledGameId + planRunId + position", async () => {
   const auditLog = new AuditLogService(new InMemoryAuditLogStore());
   const { service, hookCalls } = makeServiceForHookTest(auditLog);
 
-  await service.start({ actor: ACTOR, hallId: HALL_ID });
+  const opened = await service.start({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(opened.scheduledGameStatus, "purchase_open");
+  assert.equal(
+    hookCalls.length,
+    0,
+    "Første start åpner bongkjøp og skal ikke konvertere armed-state ennå",
+  );
+
+  const started = await service.start({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(started.scheduledGameStatus, "running");
 
   assert.equal(
     hookCalls.length,
@@ -309,10 +336,20 @@ test("invariant: advance() trigger onScheduledGameSpawned-hook for ny posisjon",
     makeServiceForHookTest(auditLog);
 
   await service.start({ actor: ACTOR, hallId: HALL_ID });
+  await service.start({ actor: ACTOR, hallId: HALL_ID });
   assert.equal(hookCalls.length, 1);
 
   setSpawnedId(SCHED_ID_2);
-  await service.advance({ actor: ACTOR, hallId: HALL_ID });
+  const opened = await service.advance({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(opened.scheduledGameStatus, "purchase_open");
+  assert.equal(
+    hookCalls.length,
+    1,
+    "Advance åpner neste bongkjøp og skal ikke konvertere før trekning startes",
+  );
+
+  const started = await service.start({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(started.scheduledGameStatus, "running");
 
   assert.equal(
     hookCalls.length,
@@ -333,6 +370,9 @@ test("soft-fail kontrakt: hook som kaster blokkerer IKKE engine.startGame", asyn
   });
 
   // Skal IKKE kaste — soft-fail i MasterActionService.triggerArmedConversionHook.
+  const opened = await service.start({ actor: ACTOR, hallId: HALL_ID });
+  assert.equal(opened.scheduledGameStatus, "purchase_open");
+
   const result = await service.start({ actor: ACTOR, hallId: HALL_ID });
 
   assert.equal(hookCalls.length, 1, "Hook ble likevel forsøkt kalt");

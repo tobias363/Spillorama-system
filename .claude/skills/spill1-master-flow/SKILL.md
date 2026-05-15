@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.19.0
+  version: 1.20.3
   project: spillorama
 ---
 
@@ -48,19 +48,77 @@ Pilot-direktiv 2026-05-08 (Tobias):
 3. Master-agent åpner /admin/agent/cash-in-out
    → plan-runtime lazy-creates plan-run (status=idle)
    → "MIN HALL" + "ANDRE HALLER I GRUPPEN"-seksjoner med ready-pills
-4. Master klikker "Start neste spill"
-   POST /api/agent/game-plan/start
-   → GamePlanRunService.start() — oppretter run
-   → GamePlanEngineBridge.createScheduledGameForPlanRunPosition() — INSERT app_game1_scheduled_games
-   → Game1MasterControlService.startGame() — engine begynner
+4. Master klikker "Start neste spill" første gang
+   POST /api/agent/game1/master/start
+   → GamePlanRunService.start() — idle→running, bevarer current_position
+   → GamePlanEngineBridge.createScheduledGameForPlanRunPosition() — INSERT app_game1_scheduled_games med status='purchase_open'
+   → MasterActionService returnerer UTEN Game1MasterControlService.startGame()
+   → spillere kan kjøpe bonger før master starter trekning
+5. Master klikker "Start trekninger nå"
+   POST /api/agent/game1/master/start
+   → GamePlanEngineBridge gjenbruker eksisterende scheduled-game
+   → Game1MasterControlService.startGame() — purchase_open/ready_to_start→running, engine begynner
    → Spill1LobbyBroadcaster.broadcastForHall() — emit til klienter
-5. Engine kjører — Game1DrawEngineService trekker baller, compliance-ledger, TV+spiller-klient via Socket.IO
-6. Spillere markerer numre — socket-event ticket:mark med clientRequestId for idempotens (BIN-1028)
-7. Vinner-deteksjon — engine sjekker pattern (Rad 1-4, Fullt Hus), pot-per-bongstørrelse-utbetaling (§9 i regel-doc)
-8. Master pause/fortsett — POST /api/admin/game1/games/<scheduled-game-id>/pause (NB: scheduled-game-id, ikke plan-run-id, BIN-1041)
-9. Master advance — POST /api/agent/game-plan/advance → ny scheduled-game spawnet for plan-position+1
-10. Etter plan.endTime → run.status=finished, rommet stenger
+6. Engine kjører — Game1DrawEngineService trekker baller, compliance-ledger, TV+spiller-klient via Socket.IO
+7. Spillere markerer numre — socket-event ticket:mark med clientRequestId for idempotens (BIN-1028)
+8. Vinner-deteksjon — engine sjekker pattern (Rad 1-4, Fullt Hus), pot-per-bongstørrelse-utbetaling (§9 i regel-doc)
+9. Master pause/fortsett — POST /api/admin/game1/games/<scheduled-game-id>/pause (NB: scheduled-game-id, ikke plan-run-id, BIN-1041)
+10. Etter runde-end klikker master "Start neste spill" igjen — start() auto-advancer terminal current_position til neste plan-position og åpner ny purchase_open
+11. Etter plan.endTime → run.status=finished, rommet stenger
 ```
+
+### Purchase-open to-stegs master-flyt (P0 fix 2026-05-15)
+
+**Invariant:** Det skal være mulig å kjøpe bonger til neste Spill 1-runde før master starter trekningen. Første masterklikk skal derfor aldri starte engine for en ny katalog/plan-posisjon.
+
+**Kanonisk statussekvens:**
+
+```text
+scheduled/idle plan-state
+  → master start
+purchase_open            # bonger kan kjøpes, engine trekker ikke
+  → master start igjen
+running                  # trekning starter
+  → natural round-end
+completed
+  → master start neste spill
+purchase_open            # ny plan-position, samme to-stegs regel
+```
+
+**Implementert kontrakt:**
+- `GamePlanEngineBridge.createScheduledGameForPlanRunPosition()` oppretter nye catalog/plan-rader med `status='purchase_open'`, ikke `ready_to_start`.
+- `scheduled_start_time` settes ca. 120 sekunder frem som forventet draw-start/timer for UI/observability. Det er ikke en automatisk engine-trigger.
+- `MasterActionService.start()` returnerer uten `Game1MasterControlService.startGame()` når bridgen nettopp opprettet en ny `purchase_open`-rad.
+- `MasterActionService.start()` starter engine først når bridgen gjenbruker en eksisterende aktiv scheduled-game, typisk andre masterklikk på samme `purchase_open`.
+- `MasterActionService.advance()` har samme defense-in-depth: en fresh ny planposisjon åpnes i `purchase_open`, ikke direkte `running`.
+- Admin/agent UI skal skille tekstene:
+  - `Start neste spill` = åpne bongkjøp for neste runde.
+  - `Start trekninger nå` = start draw-engine fra eksisterende `purchase_open`/`ready_to_start`.
+
+**Forensic baseline som drev fixen:**
+- `/tmp/purchase-open-forensics-2026-05-15T21-56-07Z.md`
+- Recent scheduled target `f7fa6583-285c-4b16-9285-127d21fe692f`: `completed`, `scheduled_start=18:38:42.835`, `actual_start=18:38:42.928`, purchase at `18:38:42.897`.
+- Dette ga kun ca. 30 ms mellom kjøp og engine-start, altså ikke et reelt kjøpsvindu.
+
+**Tester som beskytter mot regresjon:**
+- `apps/backend/src/game/__tests__/MasterActionService.test.ts`
+  - `start: idle → running spawner fresh purchase_open uten engine.startGame`
+  - `start: idempotent re-start på running purchase_open → bridge gjenbrukes og engine.startGame kalles`
+  - `start: running run med completed scheduled-game auto-advancer til ny purchase_open`
+  - `advance: running → next position + fresh purchase_open uten engine.startGame`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
+- `tests/e2e/*spill1*.spec.ts` må bruke `openPurchaseWindow()` før kjøp. `markHallReady()` betyr at hallen er ferdig med salg og stenger kjøp for den hallen.
+- Stateful pilot-flow E2E må nullstille dagens plan-run i lokal test-DB før hver spec, ellers stopper en test dagens run og neste spec auto-advancer til neste plan-posisjon (inkl. jackpot-posisjon 7).
+- E2E-reset må bruke appens business-date (`Europe/Oslo`), ikke Postgres `CURRENT_DATE`. CI kan kjøre etter midnatt Oslo men før midnatt UTC; da sletter `CURRENT_DATE` feil dato og senere specs arver posisjon 7/jackpot-state.
+- Pilot-flow CI kjører med `JOBS_ENABLED=false`. Tester som trenger scheduled Spill 1 draws må drive `Game1DrawEngineService.drawNext()` eksplisitt via test-only `POST /api/admin/game1/games/:gameId/e2e-draw-next` / `scheduledDrawNext()`, ikke vente på `game1-auto-draw-tick`.
+
+**Aldri gjør:**
+- Ikke sett nye plan-runtime scheduled-games direkte til `ready_to_start` hvis det gjør at master-start også starter engine i samme request.
+- Ikke fjern early-returnen i `MasterActionService.start()` for fresh `purchase_open`.
+- Ikke bruk cron-fixen som eneste løsning for plan-runtime. Forensics viste at master pathen selv startet engine umiddelbart.
+- Ikke la UI vise "Spill 1 startet" når backend returnerer `scheduledGameStatus='purchase_open'`.
+- Ikke slå på `JOBS_ENABLED=true` i pilot-flow CI for å få Rad-vinst-testen grønn. Det aktiverer hele scheduler-flaten og bryter deterministisk test-eierskap.
 
 ### Backend-services
 
@@ -491,7 +549,7 @@ Symptom: Spiller-shell (LeftInfoPanel) viser BÅDE `Innsats: 30 kr` og `Forhånd
 ### 12. Pre-game viser 20 kr per bong istedenfor 10 kr (Yellow) / 30 kr istedenfor 15 kr (Purple)
 Symptom: Spillere som åpner buy-popup PRE-game (mellom runder, eller før master har trykket "Start") ser feil priser. Backend room-snapshot returnerer `gameVariant.ticketTypes` med flat `priceMultiplier: 1` for ALLE farger istedenfor riktige per-farge multipliers (Yellow=2, Purple=3).
 
-**Rot-årsak (regresjon 2026-05-14):** PR #1375 (`Game1MasterControlService.onEngineStarted`) løste KUN post-engine-start-pathen. Pre-game-vinduet — fra scheduled-game opprettes (`status='ready_to_start'`) til master trykker "Start" — var ikke dekket. Klient (`PlayScreen.ts:606`) faller til `state.entryFee ?? 10` og multipliserer med flat `priceMultiplier: 1` → `10 × 2 = 20 kr` for Yellow (eksempel: Tobias-rapport 2026-05-14 07:55).
+**Rot-årsak (regresjon 2026-05-14):** PR #1375 (`Game1MasterControlService.onEngineStarted`) løste KUN post-engine-start-pathen. Pre-game-vinduet — fra scheduled-game opprettes (nå `status='purchase_open'`, historisk `ready_to_start`) til master trykker "Start trekninger nå" — var ikke dekket. Klient (`PlayScreen.ts:606`) faller til `state.entryFee ?? 10` og multipliserer med flat `priceMultiplier: 1` → `10 × 2 = 20 kr` for Yellow (eksempel: Tobias-rapport 2026-05-14 07:55).
 
 **Fix:** To-fase ticket-config-binding (PR #1375 + PR #<this-PR>). Se seksjon under for detaljer.
 
@@ -548,7 +606,7 @@ Aldri whitelist `cancelled` / `completed` / `finished` i WHERE-guarden for en fl
 **Hvorfor TRE-fase-binding:**
 
 Spillorama har TO distinkte tilstander for et room:
-1. **Pre-game:** scheduled-game er INSERT-et med `status='ready_to_start'`, men master har ikke trykket "Start". Engine kjører IKKE ennå, men klient kan joine rommet og åpne buy-popup.
+1. **Pre-game:** scheduled-game er INSERT-et med `status='purchase_open'` (historisk `ready_to_start`), men master har ikke trykket "Start trekninger nå". Engine kjører IKKE ennå, men klient kan joine rommet og åpne buy-popup.
 2. **Post-engine-start:** Master har trykket "Start", `engine.startGame()` har returnert.
 
 Begge faser krever at `roomState.roomConfiguredEntryFeeByRoom` + `variantByRoom` er bundet til riktige verdier fra `ticket_config_json`. Hvis ikke faller klient til default-fallback (`state.entryFee ?? 10` × flat `priceMultiplier: 1`).
@@ -1165,3 +1223,7 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.17.0 — Header-text + catalogDisplayName fix (branch `fix/master-header-text-and-catalog-name-2026-05-15`, Tobias-rapport 2026-05-15 live-test): forenklet `getMasterHeaderText`-mapping per Tobias-direktiv IMMUTABLE: ALLE pre-running-states (idle/scheduled/purchase_open/ready_to_start/completed/cancelled) viser "Neste spill: {name}". Bare `running` viser "Aktiv trekning: {name}" (KOLON, ikke bindestrek). "Klar til å starte" og "Runde ferdig" som mellom-tekster er fjernet. Backend: `GamePlanRunService.findActivePlanForDay(hall, businessDate)` slår opp aktiv plan UTEN å opprette plan-run; `GameLobbyAggregator` kaller den når `planRun=null` så `catalogDisplayName` settes til `items[0].displayName` direkte etter dev:nuke. 41 frontend-tester + 26 backend-aggregator-tester (2 nye). PITFALLS §7.20 utvidet + §7.21 ny entry. Oppdatert master-UI-tabell i skill. |
 | 2026-05-15 | v1.18.0 — Bong-design preview-side (branch `feat/bong-design-preview-page-2026-05-15`, Tobias-direktiv 2026-05-15): ny stand-alone HTML/CSS-side på `/web/games/bong-design.html` for å tweake bong-design uten å starte live-stacken. Viser 3 bonger (Hvit/Gul/Lilla) × 3 scenarier (fresh / mid-spill / Rad 1 bingo). Palett kopiert 1:1 fra `BingoTicketHtml.BONG_COLORS`. Egne Vite-config (`vite.bong-design.config.ts`) + build-script (`build:bong-design`) wired inn i `npm run build`. PITFALLS §7.26 ny entry. Ny tabell "Design-iterasjons-sider" i skill listing alle 5 preview-sider. |
 | 2026-05-15 | v1.19.0 — Post-round-overlay data-driven dismiss (C-hybrid, branch `fix/post-round-overlay-data-driven-dismiss-2026-05-15`, Tobias-direktiv "Kjør C, tenker minimum 6 sek celebrasjon deretter vent", samme dag bumpet til 10 sek): erstatter timer-driven legacy-dismiss (`MIN_DISPLAY_MS=3s` + `markRoomReady`) med data-driven (`MIN_CELEBRATION_MS=10s` + `currentNextSlug !== justPlayedSlug` + `MAX_WAIT_MS=60s` safety-cap). Tobias-rapport 2026-05-15: spiller så stale "Neste spill: <samme som nettopp>"-tekst i 40 sek etter natural round-end. Legacy-modus beholdes for backward-compat (Game1EndOfRoundOverlay.test.ts 56 tester). Ny seksjon "Post-round-overlay data-driven dismiss" mellom "Tester som beskytter" og "Kanonisk referanse". PITFALLS §7.28 ny entry. Sentry-breadcrumb `endOfRoundOverlay.safetyCapDismiss` for ops-monitoring av cap-fires. |
+| 2026-05-15 | v1.20.0 — Purchase-open to-stegs master-flyt (P0): `GamePlanEngineBridge` oppretter nye plan-runtime scheduled-games som `purchase_open`, `MasterActionService.start()` og `advance()` returnerer uten engine-start for fresh `purchase_open`, og engine starter først ved neste master-start på eksisterende rad. UI-toast/label oppdatert så master ser "Bongesalg åpnet" / "Start trekninger nå". Baseline-forensics viste forrige live-runde hadde bare ca. 30 ms kjøpsvindu før engine-start. PITFALLS §3.17 + Agent Execution Log oppdatert. |
+| 2026-05-15 | v1.20.1 — E2E-testkontrakt for to-stegs flyt: `tests/e2e/helpers/rest.ts` har `openPurchaseWindow()` for første masterStart/purchase_open. Playwright-spesifikasjoner skal kjøpe før `markHallReady()`; `markHallReady()` stenger salget for hallen. Stateful pilot-flow-reset nullstiller dagens plan-run kun mot lokal CI/test-DB slik at hver spec starter på Bingo og ikke arver auto-advance til jackpot-posisjon 7. |
+| 2026-05-15 | v1.20.2 — Pilot-flow CI follow-up: E2E plan-run-reset bruker nå appens Oslo business-date i stedet for Postgres `CURRENT_DATE`, fordi CI-run kl. 22:44 UTC er neste business-date i Oslo. Uten dette slettes feil dagsrad og senere specs arver jackpot-posisjon 7. Rad-vinst-spec forventer nå 12 rendered ticket-cards, som matcher én card per faktisk brett. PITFALLS §6.19. |
+| 2026-05-15 | v1.20.3 — Pilot-flow CI follow-up 2: Rad-vinst-spec driver scheduled draws eksplisitt via test-only `e2e-draw-next`/`scheduledDrawNext()` fordi workflowen kjører med `JOBS_ENABLED=false`. Ikke slå på scheduler-jobs i CI for å reparere denne testen; hold tests deterministiske og dokumenter scheduled draw-driveren. PITFALLS §6.20. |
