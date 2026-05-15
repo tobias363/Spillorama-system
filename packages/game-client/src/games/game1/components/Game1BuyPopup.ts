@@ -259,6 +259,10 @@ export class Game1BuyPopup {
     overlay.getRoot().appendChild(this.backdrop);
 
     this.card = document.createElement("div");
+    // ITER2 (Tobias 2026-05-15): card endret til flex-column slik at vi kan
+    // bruke `order:` på prizeMatrixEl for å rendre den VISUELT først (etter
+    // header) uten å bryte test-locked DOM-rekkefølge (children[1] = types,
+    // children[2] = prizeMatrix). Mockup viser premietabell over ticket-rows.
     Object.assign(this.card.style, {
       background: "radial-gradient(ellipse at top, #2a0f12 0%, #1a0809 70%, #140607 100%)",
       borderRadius: "18px",
@@ -271,6 +275,8 @@ export class Game1BuyPopup {
       overflowY: "auto",
       position: "relative",
       boxSizing: "border-box",
+      display: "flex",
+      flexDirection: "column",
     });
     this.backdrop.appendChild(this.card);
 
@@ -291,6 +297,7 @@ export class Game1BuyPopup {
     Object.assign(header.style, {
       marginBottom: "18px",
       textAlign: "center",
+      order: "0",
     });
 
     const title = document.createElement("div");
@@ -340,42 +347,61 @@ export class Game1BuyPopup {
     this.card.appendChild(header);
 
     // ── [1] Types grid (2-col) ─────────────────────────────────────────────
+    //
+    // ITER2 (Tobias 2026-05-15): DOM-index er 1 (test-locked), men visuelt
+    // rendres dette ETTER prizeMatrixEl pga `order: 2` på flex-card.
+    // marginTop fjernet — prizeMatrix har sin egen margin-bottom som setter
+    // gap til types-grid.
     this.typesContainer = document.createElement("div");
     Object.assign(this.typesContainer.style, {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
-      rowGap: "16px",
-      columnGap: "65px",
+      rowGap: "10px",
+      columnGap: "24px",
+      order: "2",
     });
     this.card.appendChild(this.typesContainer);
 
     // ── [2] PrizeMatrix (NY: kjopsmodal-design.html, Tobias 2026-05-15) ────
+    //
+    // ITER2 (Tobias 2026-05-15): `order: 1` — visuelt rendres premietabell
+    // RETT under header (før typesContainer). DOM-index 2 er bevart for
+    // test-kompatibilitet (children[2] = prizeMatrixEl).
+    // marginTop fjernet (header har marginBottom 18px). marginBottom 18px
+    // gir gap til typesContainer (matcher mockup-rytme).
     this.prizeMatrixEl = document.createElement("div");
     Object.assign(this.prizeMatrixEl.style, {
       padding: "14px 14px 12px",
       background: "rgba(245,184,65,0.07)",
       border: "1px solid rgba(255,255,255,0.22)",
       borderRadius: "12px",
-      marginTop: "18px",
+      marginBottom: "18px",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(255,255,255,0.04)",
+      order: "1",
     });
     this.card.appendChild(this.prizeMatrixEl);
 
     // ── [3] Status message (for 30-brett-grense) ───────────────────────────
+    //
+    // ITER2 (Tobias 2026-05-15): `order: 3` — visuelt rett etter typesContainer.
     this.statusMsg = document.createElement("div");
     Object.assign(this.statusMsg.style, {
       fontSize: "13px",
       color: "#ff6b6b",
       textAlign: "center",
       minHeight: "18px",
-      marginTop: "18px",
+      marginTop: "16px",
       marginBottom: "8px",
+      order: "3",
     });
     this.card.appendChild(this.statusMsg);
 
     // ── [4] Separator (mellom statusMsg og totalRow) ───────────────────────
+    //
+    // ITER2 (Tobias 2026-05-15): `order: 4` — wrapper for totalRow.
+    // 1px-divider over total-summary matcher mockup-stil.
     const sep = document.createElement("div");
-    sep.style.cssText = "height:1px;background:rgba(245,232,216,0.08);margin:0 0 14px;";
+    sep.style.cssText = "background:transparent;margin:0 0 14px;order:4;";
     this.card.appendChild(sep);
 
     // ── Total row (inni en wrapper-div for å bevare child-indices) ─────────
@@ -389,7 +415,9 @@ export class Game1BuyPopup {
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
-      marginBottom: "14px",
+      marginBottom: "0",
+      paddingTop: "12px",
+      borderTop: "1px solid rgba(245,232,216,0.08)",
     });
 
     const totalLeft = document.createElement("div");
@@ -431,18 +459,24 @@ export class Game1BuyPopup {
     sep.appendChild(totalRow);
 
     // ── [5] Buy button ─────────────────────────────────────────────────────
+    //
+    // ITER2 (Tobias 2026-05-15): `order: 5` — etter total-row.
     this.buyBtn = document.createElement("button");
     this.buyBtn.setAttribute("data-test", "buy-popup-confirm");
     this.buyBtn.textContent = "Velg brett for å kjøpe";
     this.stylePrimaryBtn(this.buyBtn);
+    this.buyBtn.style.order = "5";
     this.buyBtn.addEventListener("click", () => this.handleBuy());
     this.card.appendChild(this.buyBtn);
 
     // ── [6] Cancel button ──────────────────────────────────────────────────
+    //
+    // ITER2 (Tobias 2026-05-15): `order: 6` — siste element i card.
     this.cancelBtn = document.createElement("button");
     this.cancelBtn.setAttribute("data-test", "buy-popup-cancel");
     this.cancelBtn.textContent = "Avbryt";
     this.styleSecondaryBtn(this.cancelBtn);
+    this.cancelBtn.style.order = "6";
     this.cancelBtn.addEventListener("click", () => {
       // Tobias 2026-04-29 (UX-fix): blokk lukking under `confirming` —
       // bruker MÅ se ack-result. Kjøpet kan ikke avbrytes etter bet:arm.
@@ -1066,13 +1100,16 @@ export class Game1BuyPopup {
     const gridTemplate = `92px repeat(${colors.length}, minmax(0, 1fr))`;
 
     // ── Header-rad: "PREMIETABELL" + farge-chips ─────────────────────────
+    //
+    // ITER2 (Tobias 2026-05-15): økt padding-bottom (10px → matcher mockup-
+    // luft mellom header-rad og første premie-rad).
     const headerRow = document.createElement("div");
     Object.assign(headerRow.style, {
       display: "grid",
       gridTemplateColumns: gridTemplate,
       columnGap: "6px",
       alignItems: "center",
-      padding: "0 10px 8px",
+      padding: "0 10px 10px",
     });
 
     const headerLabel = document.createElement("div");
@@ -1086,7 +1123,7 @@ export class Game1BuyPopup {
       // dette elementet i stedet for subtitle-spanen.
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      textAlign: "center",
+      textAlign: "left",
     });
     headerRow.appendChild(headerLabel);
 
