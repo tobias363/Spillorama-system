@@ -1479,6 +1479,41 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - **Fix:** Bruk `chrome-devtools-mcp` for console logs, screenshots, JS eval, network
 - **Prevention:** memory: `debug_preference.md` — aldri computer-use for browser-tasks
 
+### §7.27 — Bong-design: §5.9-spec gjelder Spill 1 + Spill 3 (delt komponent), Spill 2 er uberørt
+
+**Severity:** P0 (regulatorisk-tilstøtende: feil rendering blokkerer pilot)
+**Oppdaget:** 2026-05-15 (§5.9 prod-implementasjon)
+**Symptom:** Spec §5.9 sier "Gjelder Spill 1 og Spill 2 (begge bruker BingoTicketHtml.ts)" men det er upresist — Spill 2 bruker `BongCard.ts`, Spill 3 bruker `BingoTicketHtml` (via Game1's `PlayScreen` → `TicketGridHtml`).
+**Faktisk scope:**
+- **Spill 1:** Bruker `BingoTicketHtml` → får §5.9-design.
+- **Spill 3:** Bruker SAMME `BingoTicketHtml` → får §5.9-design automatisk. Det er korrekt per Tobias-direktiv 2026-05-03 ("Alt av design skal være likt [Spill 1]").
+- **Spill 2:** Bruker EGEN `BongCard.ts` → er uberørt og må videreutvikles separat hvis Tobias vil bringe samme design dit.
+**Prevention:**
+- Aldri rør `packages/game-client/src/games/game2/components/BongCard.ts` under bong-design-arbeid på Spill 1/3
+- Verifiser med `grep -rn "BingoTicketHtml" packages/game-client/src/games/` før strukturelle endringer
+**Files:**
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` (delt mellom Spill 1 + Spill 3)
+- `packages/game-client/src/games/game2/components/BongCard.ts` (Spill 2 — IKKE rør under §5.9-arbeid)
+**Related:** §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`, skill `bong-design`
+
+### §7.28 — Triple-ticket-rendering kan IKKE bygges som single-component render — backend må endres først
+
+**Severity:** P1 (arkitektonisk constraint)
+**Oppdaget:** 2026-05-15 (§5.9 prod-implementasjon)
+**Symptom:** Spec §5.9 viser "Trippel-design (3× 5×5 grids med dividers) i 660px bredde container" for `ticket.type="large"`. Naiv implementasjon ville prøve å rendre 3 sub-grids i én `BingoTicketHtml`-instans.
+**Faktisk wire-format:** Backend sender 3 SEPARATE `Ticket`-objekter per Large-kjøp (per `TicketGridHtml.largeMultiplicity.test.ts` — REGRESSION 2026-04-30 Bug B). Hver ticket har sitt eget grid, sin egen color="Large Yellow", sin egen `type="large"`.
+**Konsekvens:** Det finnes IKKE et data-model-konsept for "triple-ticket" — bare 3 separate `Ticket`-objekter som tilfeldigvis kommer i samme buy-batch. Frontend kan ikke gruppere dem uten backend-endring (eks. `Ticket.siblingTicketIds: string[]`).
+**§5.9-spec interpreted:** Hver individuelle Large-ticket rendrer som single-design med header "Farge - 3 bonger" (suffiks signaliserer at den tilhører en 3-brett-bunt). Triple-design med dividers i 666px container er IKKE implementert.
+**Prevention:**
+- Hvis Tobias en gang vil ha ekte triple-rendering, må backend-team først legge til `siblingTicketIds`-felt eller `ticketGroupId`-felt på `Ticket`-typen
+- Frontend kan da bygge en `TripleTicketHtml`-wrapper-komponent som henter 3 `Ticket`-objekter via `siblingTicketIds` og rendrer dem i 666px container
+- IKKE prøv å detect "3 adjacent same-color same-type tickets" som grouping-strategi — det er fragilt mot sort-order, reconnect, og mid-round buys
+**Files:**
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` (per-ticket single render)
+- `packages/game-client/src/games/game1/components/TicketGridHtml.largeMultiplicity.test.ts` (verifiserer 3 separate tickets)
+- `packages/shared-types/src/game.ts` (`Ticket`-typen mangler `siblingTicketIds`)
+**Related:** §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`, skill `bong-design`
+
 ### §7.5 — Frontend må normalisere query-params før backend-kall
 
 **Severity:** P0 (pilot-blokker for lokal test, fixed PR #1149)
