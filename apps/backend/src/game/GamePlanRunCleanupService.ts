@@ -180,6 +180,18 @@ export interface GamePlanRunCleanupServiceOptions {
    * minimumsbetingelsen før vi auto-finisher.
    */
   naturalEndStuckThresholdMs?: number;
+  /**
+   * Pilot Q3 2026 (2026-05-15): broadcaster for spiller-shell-state-
+   * oppdatering etter `reconcileNaturalEndStuckRuns` auto-finisher en
+   * plan-run. Uten denne ville spiller-shell vist "Neste spill: <gammelt>"
+   * inntil neste poll-tick selv om plan-run faktisk er ferdig.
+   *
+   * Best-effort — feil propagerer aldri til state-mutering. Når null
+   * skipper service-en stille (bakoverkompat for tester).
+   */
+  lobbyBroadcaster?: {
+    broadcastForHall(hallId: string): Promise<void>;
+  } | null;
 }
 
 /**
@@ -201,6 +213,9 @@ export class GamePlanRunCleanupService {
   private auditLogService: AuditLogService | null;
   private readonly logger: Logger;
   private readonly naturalEndStuckThresholdMs: number;
+  private lobbyBroadcaster: {
+    broadcastForHall(hallId: string): Promise<void>;
+  } | null;
 
   constructor(options: GamePlanRunCleanupServiceOptions) {
     this.pool = options.pool;
@@ -212,10 +227,23 @@ export class GamePlanRunCleanupService {
     const requestedMs =
       options.naturalEndStuckThresholdMs ?? 30_000;
     this.naturalEndStuckThresholdMs = Math.max(1_000, Math.floor(requestedMs));
+    this.lobbyBroadcaster = options.lobbyBroadcaster ?? null;
   }
 
   setAuditLogService(service: AuditLogService | null): void {
     this.auditLogService = service ?? null;
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): late-binding for lobby-broadcaster.
+   * Brukes når broadcaster konstrueres etter cleanup-service.
+   */
+  setLobbyBroadcaster(
+    broadcaster: {
+      broadcastForHall(hallId: string): Promise<void>;
+    } | null,
+  ): void {
+    this.lobbyBroadcaster = broadcaster;
   }
 
   private table(): string {
@@ -446,6 +474,19 @@ export class GamePlanRunCleanupService {
       void this.auditNaturalEndReconcile({ item, now });
     }
 
+    // Pilot Q3 2026 (2026-05-15): broadcast spiller-shell-state for hver
+    // hall som ble auto-reconciled. Uten dette ville spiller-shell vist
+    // "Neste spill: <gammelt>" inntil neste 3s/10s-poll-tick selv etter
+    // at plan-run faktisk er ferdig. Tobias-rapport 2026-05-15: 2-min
+    // delay observert i live-test — denne pathen dekker tilfellet hvor
+    // master ikke trykker advance/finish manuelt etter natural round-end.
+    //
+    // Fire-and-forget — broadcaster-feil logges av broadcaster selv og
+    // påvirker ikke audit eller cleanup-result.
+    for (const item of closedRuns) {
+      this.fireLobbyBroadcastForFinish(item.hallId);
+    }
+
     if (closedRuns.length > 0) {
       this.logger.warn(
         {
@@ -462,6 +503,31 @@ export class GamePlanRunCleanupService {
     }
 
     return { cleanedCount: closedRuns.length, closedRuns };
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): fire-and-forget lobby-broadcast etter
+   * auto-finish av plan-run. Best-effort — broadcaster-feil propagerer
+   * aldri. Når null skipper service-en stille.
+   */
+  private fireLobbyBroadcastForFinish(hallId: string): void {
+    if (!this.lobbyBroadcaster) return;
+    const broadcaster = this.lobbyBroadcaster;
+    try {
+      void Promise.resolve(broadcaster.broadcastForHall(hallId)).catch(
+        (err) => {
+          this.logger.warn(
+            { err, hallId },
+            "[plan-run-cleanup] lobby-broadcast etter natural-end reconcile feilet — best-effort",
+          );
+        },
+      );
+    } catch (err) {
+      this.logger.warn(
+        { err, hallId },
+        "[plan-run-cleanup] lobby-broadcast etter natural-end reconcile kastet synkront — best-effort",
+      );
+    }
   }
 
   // ── Internals ─────────────────────────────────────────────────────────

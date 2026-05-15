@@ -378,6 +378,27 @@ export interface Game1DrawEngineServiceOptions {
    * skal alltid wire `engine.getPrizePolicyPort()`.
    */
   prizePolicyPort?: import("../adapters/PrizePolicyPort.js").PrizePolicyPort;
+  /**
+   * Pilot Q3 2026 (2026-05-15): Lobby-broadcaster for spiller-shell-state-
+   * oppdatering ved natural round-end. Tobias-rapport 2026-05-15:
+   * "Etter at runden var fullført viser fortsatt 'Neste spill: Bingo' i
+   * ca 2 min FØR det endret seg til '1000-spill'. Spiller skal ALDRI
+   * se gammelt spill."
+   *
+   * Når satt: engine kaller `broadcastForHall(hallId)` POST-commit etter
+   * å ha flippet scheduled-game-status til `completed` (natural end —
+   * Fullt Hus vunnet eller maxDraws nådd). Fire-and-forget — feil
+   * propagerer ikke til draw-pathen (broadcasterren logger selv).
+   *
+   * Når null/undefined: ingen broadcast. Bakoverkompat for tester +
+   * lightweight scenarios uten Socket.IO. Wallet/compliance påvirkes ikke.
+   *
+   * Pattern matcher MasterActionService.lobbyBroadcaster — samme
+   * fire-and-forget-shape, samme aldri-kaster-policy.
+   */
+  lobbyBroadcaster?: {
+    broadcastForHall(hallId: string): Promise<void>;
+  };
 }
 
 // ── Internal row shapes ─────────────────────────────────────────────────────
@@ -419,6 +440,24 @@ interface ScheduledGameRow {
    * Whitelist håndheves av DB CHECK-constraint: 'rød'/'grønn'/'gul'.
    */
   trafikklys_row_color?: string | null;
+  /**
+   * Pilot Q3 2026 (2026-05-15): master-hallen som styrer denne runden.
+   * Brukes til POST-commit lobby-broadcast ved natural round-end så
+   * spiller-shellen i ALLE deltager-haller får oppdatert "Neste spill"-
+   * display innen ~50ms istedenfor å vente på 10s-poll-tick.
+   *
+   * Aldri NULL i prod (FK-constraint). NULL i legacy/test-rader.
+   */
+  master_hall_id?: string | null;
+  /**
+   * Pilot Q3 2026 (2026-05-15): JSON-array med hall-IDer som deltar i
+   * denne runden (snapshot fra GoH-membership ved spawn-tid). Brukes
+   * sammen med master_hall_id for fan-out av lobby-broadcast.
+   *
+   * Shape: `["hall-1", "hall-2", ...]` eller NULL/[] for legacy-rader.
+   * Service-laget håndhever at master_hall_id er inkludert.
+   */
+  participating_halls_json?: unknown;
 }
 
 interface GameStateRow {
@@ -576,6 +615,53 @@ function pickUniqueInRange(
   return shuffle(values).slice(0, count);
 }
 
+/**
+ * Pilot Q3 2026 (2026-05-15): samle alle hall-IDer som skal motta lobby-
+ * broadcast etter natural round-end. Returnerer master-hallen først,
+ * deretter alle deltager-haller fra `participating_halls_json`.
+ *
+ * Defensive parsing:
+ *   - `participating_halls_json` kan være string (JSON-parsed), array, eller
+ *     null. Vi forsøker JSON.parse på strings og faller stille tilbake til
+ *     []-fallback ved feil.
+ *   - Dupes filtreres ut via Set så samme hall ikke får dobbel broadcast.
+ *   - Tomme/whitespace-strings ignoreres.
+ *
+ * Returnerer [] hvis hverken master_hall_id eller participating_halls_json
+ * er satt — engine hopper da over broadcast (legacy/test-rader).
+ *
+ * Eksportert for test-tilgang. Speilet mønster fra
+ * `Spill1LobbyBroadcaster.collectParticipatingHalls`.
+ */
+export function collectHallIdsForBroadcast(input: {
+  master_hall_id?: string | null;
+  participating_halls_json?: unknown;
+}): string[] {
+  const halls = new Set<string>();
+  if (
+    typeof input.master_hall_id === "string" &&
+    input.master_hall_id.trim().length > 0
+  ) {
+    halls.add(input.master_hall_id.trim());
+  }
+  let participating: unknown = input.participating_halls_json;
+  if (typeof participating === "string") {
+    try {
+      participating = JSON.parse(participating);
+    } catch {
+      participating = null;
+    }
+  }
+  if (Array.isArray(participating)) {
+    for (const item of participating) {
+      if (typeof item === "string" && item.trim().length > 0) {
+        halls.add(item.trim());
+      }
+    }
+  }
+  return Array.from(halls);
+}
+
 // ── Service ──────────────────────────────────────────────────────────────────
 
 export class Game1DrawEngineService {
@@ -640,6 +726,14 @@ export class Game1DrawEngineService {
   private readonly complianceLedgerPort: ComplianceLedgerPort;
   /** K2-A CRIT-3: prize policy-port for single-prize-cap (2500 kr). */
   private readonly prizePolicyPort: PrizePolicyPort;
+  /**
+   * Pilot Q3 2026 (2026-05-15): broadcaster for spiller-shell-state-
+   * oppdatering ved natural round-end. Se constructor-options docstring.
+   * Null = ingen broadcast (bakoverkompat for tester).
+   */
+  private lobbyBroadcaster: {
+    broadcastForHall(hallId: string): Promise<void>;
+  } | null;
 
   constructor(options: Game1DrawEngineServiceOptions) {
     this.pool = options.pool;
@@ -677,6 +771,9 @@ export class Game1DrawEngineService {
       options.complianceLedgerPort ?? new NoopComplianceLedgerPort();
     this.prizePolicyPort =
       options.prizePolicyPort ?? new NoopPrizePolicyPort();
+    // Pilot Q3 2026 (2026-05-15): lobby-broadcaster for natural round-end.
+    // Default null = ingen broadcast (bakoverkompat). Wires i index.ts.
+    this.lobbyBroadcaster = options.lobbyBroadcaster ?? null;
     // PR-T3 Spor 4: fail-closed — hvis potService wired ved konstruksjon uten
     // walletAdapter → ugyldig konfig. (Late-binding via setters er unntak for
     // test-oppsett og sirkulær wiring; der ansvarliggjøres caller for å sette
@@ -742,6 +839,21 @@ export class Game1DrawEngineService {
    */
   setBingoEngine(engine: BingoEngine): void {
     this.bingoEngine = engine;
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): late-binding for lobby-broadcaster. Brukes
+   * av index.ts hvis Game1DrawEngineService konstrueres FØR
+   * Spill1LobbyBroadcaster (eksempelvis hvis broadcaster-konstruksjon
+   * trenger io som ikke er klar). Bakoverkompat for tester som ikke
+   * trenger broadcast.
+   */
+  setLobbyBroadcaster(
+    broadcaster: {
+      broadcastForHall(hallId: string): Promise<void>;
+    } | null,
+  ): void {
+    this.lobbyBroadcaster = broadcaster;
   }
 
   /**
@@ -1190,8 +1302,14 @@ export class Game1DrawEngineService {
     // Kun aktuelt når scheduled_game.status blir satt til 'completed' i
     // denne drawen. Room-cleanup skjer ETTER commit slik at rollback
     // aldri kan slette et rom som fortsatt er i bruk.
+    //
+    // Pilot Q3 2026 (2026-05-15): utvidet med `hallIdsForBroadcast` så
+    // engine kan fan-out lobby-broadcast til alle GoH-deltager-haller
+    // POST-commit. Tobias-rapport 2026-05-15: spiller-shell må aldri
+    // vise "gammelt spill" i 2 min etter natural round-end.
     let capturedCleanupInfo: {
       roomCode: string | null;
+      hallIdsForBroadcast: string[];
     } | null = null;
 
     // PR-C4: fanget BingoEngine room_code slik at playerBroadcaster kan
@@ -1456,7 +1574,15 @@ export class Game1DrawEngineService {
         // transaksjonen (se loadScheduledGameForUpdate), så vi trenger
         // ingen ny query. roomCode er null hvis ingen spiller har joinet
         // (vi destroyer da ikke noe — se destroyRoomIfPresent).
-        capturedCleanupInfo = { roomCode: game.room_code };
+        // Pilot Q3 2026 (2026-05-15): samle hall-IDer for POST-commit
+        // lobby-broadcast. Vi inkluderer master-hallen først, deretter
+        // alle deltager-haller fra `participating_halls_json`. Service-
+        // laget garanterer at master_hall_id er i lista (defense-in-depth
+        // mot legacy-rader hvor JSON-feltet kunne være tomt).
+        capturedCleanupInfo = {
+          roomCode: game.room_code,
+          hallIdsForBroadcast: collectHallIdsForBroadcast(game),
+        };
       }
 
       // BIN-690 M5: Oddsen-resolve. Hvis draw-sekvensen når terskelen (default
@@ -1705,6 +1831,27 @@ export class Game1DrawEngineService {
           "completion"
         );
 
+        // Pilot Q3 2026 (2026-05-15): broadcast oppdatert lobby-state til
+        // ALLE deltager-haller (master + GoH-medlemmer). Tobias-rapport
+        // 2026-05-15: "Etter at runden var fullført viser fortsatt
+        // 'Neste spill: Bingo' i ca 2 min FØR det endret seg til
+        // '1000-spill'. Spiller skal ALDRI se gammelt spill."
+        //
+        // Fire-and-forget — broadcaster logger egne feil internt og
+        // returnerer Promise<void> som aldri kaster (best-effort-pattern
+        // dokumentert i Spill1LobbyBroadcaster.broadcastForHall). Vi
+        // `void`-er Promise-et så engine-flyten ikke venter på Socket.IO-
+        // fan-out, og fanger eventuelt sync-thrown errors med try/catch
+        // som ekstra defense.
+        //
+        // Når lobbyBroadcaster=null (test/legacy uten Socket.IO) skipper
+        // vi stille — spiller-shell faller da tilbake på 3s-polling
+        // (LobbyFallback.ts) for å oppdage natural round-end.
+        this.fireLobbyBroadcastForNaturalEnd(
+          scheduledGameId,
+          capturedCleanupInfo.hallIdsForBroadcast,
+        );
+
         // Observability fix-PR 2026-05-13: fire-and-forget dump av game-
         // end-snapshot til /tmp/game-end-snapshot-{gameId}.json. Service-
         // en kaster aldri (fail-soft); vi `void`-er promise-et så draw-
@@ -1731,6 +1878,44 @@ export class Game1DrawEngineService {
       }
       return view;
     });
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): Fire-and-forget lobby-broadcast for ALLE
+   * deltager-haller etter natural round-end. Best-effort — broadcaster-
+   * feil logges aldri til klient, og draw-pathen påvirkes ikke.
+   *
+   * Aldri kaster — wrapper try/catch + void-promise. Kalles POST-commit
+   * fra `drawNext` når `isFinished=true`.
+   *
+   * @param scheduledGameId - for logging.
+   * @param hallIds - alle haller som skal motta broadcast (master + GoH).
+   *   Tom array = no-op (engine hopper over silent).
+   */
+  private fireLobbyBroadcastForNaturalEnd(
+    scheduledGameId: string,
+    hallIds: string[],
+  ): void {
+    if (!this.lobbyBroadcaster) return;
+    if (hallIds.length === 0) return;
+    const broadcaster = this.lobbyBroadcaster;
+    for (const hallId of hallIds) {
+      try {
+        void Promise.resolve(broadcaster.broadcastForHall(hallId)).catch(
+          (err) => {
+            log.warn(
+              { err, scheduledGameId, hallId },
+              "[lobby-broadcast] natural-end broadcastForHall feilet — best-effort, klient faller tilbake på poll",
+            );
+          },
+        );
+      } catch (err) {
+        log.warn(
+          { err, scheduledGameId, hallId },
+          "[lobby-broadcast] natural-end broadcastForHall kastet synkront — best-effort, klient faller tilbake på poll",
+        );
+      }
+    }
   }
 
   /**
@@ -2090,6 +2275,10 @@ export class Game1DrawEngineService {
     //
     // FOR UPDATE OF sg sikrer at vi kun låser scheduled_games-raden, ikke
     // halls (som kan brukes parallelt av andre transaksjoner).
+    // Pilot Q3 2026 (2026-05-15): hent master_hall_id +
+    // participating_halls_json i samme SELECT så engine kan fan-out
+    // lobby-broadcast POST-commit ved natural round-end. Begge kolonnene
+    // er allerede på raden — ingen ekstra JOIN trengs.
     const { rows } = await client.query<ScheduledGameRow>(
       `SELECT sg.id,
               sg.status,
@@ -2097,6 +2286,8 @@ export class Game1DrawEngineService {
               sg.room_code,
               sg.game_config_json,
               sg.trafikklys_row_color,
+              sg.master_hall_id,
+              sg.participating_halls_json,
               h.is_test_hall AS master_is_test_hall
          FROM ${this.scheduledGamesTable()} sg
          LEFT JOIN "${this.schema}"."app_halls" h

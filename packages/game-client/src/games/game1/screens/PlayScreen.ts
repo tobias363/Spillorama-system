@@ -234,6 +234,37 @@ export class PlayScreen extends Container {
    */
   private waitingForMasterPurchase = false;
 
+  /**
+   * Pilot Q3 2026 (2026-05-15): "Forbereder neste spill"-loader state.
+   *
+   * Tobias-rapport 2026-05-15: "Etter at runden var fullført viser fortsatt
+   * 'Neste spill: Bingo' i ca 2 min FØR det endret seg til '1000-spill'."
+   *
+   * Når en runde naturlig avsluttes (gameStatus RUNNING → ENDED/COMPLETED)
+   * MEN serveren ennå ikke har advancert plan-runtime (`nextScheduledGame.
+   * catalogSlug` er fortsatt det samme spillet vi nettopp spilte) viser
+   * vi en kortvarig loader istedenfor stale "Neste spill: <gammel>"-tekst.
+   *
+   * State-maskinen:
+   *   - `previousCatalogSlug`: sist kjente catalogSlug fra
+   *     `setBuyPopupDisplayName`-callbacks (sporet via slug-setter).
+   *   - `loadingTransitionDeadline`: ms-timestamp da loader skal time-ut
+   *     hvis serveren aldri advancer (fallback til siste kjente
+   *     "Neste spill"-tekst). Default 10s timeout.
+   *   - Loader trigges når gameStatus akkurat gikk fra RUNNING → ikke-
+   *     RUNNING og catalogSlug ennå ikke har endret seg fra det
+   *     spillet vi nettopp spilte.
+   *
+   * Hovedstien er fortsatt backend-pushed broadcast (Spill1LobbyBroadcaster)
+   * som typisk lander innen ~50ms. Loader-en dekker den korte vindu-en før
+   * push lander OG fallback-cases hvor socket-push feiler (3s-poll-
+   * intervall).
+   */
+  private previousCatalogSlug: string | null = null;
+  private loadingTransitionDeadline: number | null = null;
+  /** Timeout-grense for loader-fallback (ms). Eksportert for test-override. */
+  static readonly LOADING_TRANSITION_TIMEOUT_MS = 10_000;
+
   constructor(
     screenWidth: number,
     screenHeight: number,
@@ -521,6 +552,15 @@ export class PlayScreen extends Container {
       && state.gameStatus !== "RUNNING"
     ) {
       this.autoShowBuyPopupDone = false;
+      // Pilot Q3 2026 (2026-05-15): start "Forbereder neste spill"-loader
+      // når runden akkurat sluttet OG serveren ennå ikke har advancert
+      // til neste plan-item (catalogSlug er fortsatt det vi nettopp
+      // spilte). Loader vises i maks LOADING_TRANSITION_TIMEOUT_MS før
+      // vi faller tilbake til "Neste spill: <siste kjente>"-tekst.
+      // Backend-broadcast lander typisk innen ~50ms og rydder loader
+      // via `setNextScheduledGameSlug`-callbacken.
+      this.loadingTransitionDeadline =
+        Date.now() + PlayScreen.LOADING_TRANSITION_TIMEOUT_MS;
     }
     this.previousGameStatus = state.gameStatus;
 
@@ -561,6 +601,13 @@ export class PlayScreen extends Container {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       this.centerBall.hideIdleText();
+      // Pilot Q3 2026 (2026-05-15): clear loader-state når en ny runde
+      // faktisk starter (ENDED → RUNNING transition). Defense-in-depth
+      // mot at loader skulle henge igjen hvis catalogSlug-skiftet ble
+      // missed (eksempelvis hvis serveren hopper rett fra ENDED til
+      // RUNNING i samme room:update uten å oppdatere nextScheduledGame
+      // først).
+      this.loadingTransitionDeadline = null;
       if (state.lastDrawnNumber !== null) this.centerBall.setNumber(state.lastDrawnNumber);
     } else if (
       lobbyRunning &&
@@ -584,11 +631,30 @@ export class PlayScreen extends Container {
       // Game1Controller pusher displayName via `setBuyPopupDisplayName`
       // når lobby-state mottas — CenterBall fallback-tekst er "Bingo" om
       // ingenting er satt enda (Tobias-direktiv: aldri blank).
-      const idleMode: "closed" | "waiting-master" | "next-game" = lobbyClosed
+      // Pilot Q3 2026 (2026-05-15): "loading" idle-mode vises i transition-
+      // vinduet etter at runden naturlig avsluttet, før serveren har
+      // advancert catalogSlug. Forrang: closed > loading > waiting-master
+      // > next-game. Loader timeout-er etter LOADING_TRANSITION_TIMEOUT_MS
+      // og faller tilbake til siste kjente "Neste spill"-tekst (samme
+      // visning som før fixen).
+      const loadingActive =
+        this.loadingTransitionDeadline !== null &&
+        Date.now() < this.loadingTransitionDeadline;
+      if (loadingActive === false && this.loadingTransitionDeadline !== null) {
+        // Timeout truffet — rydd state så vi ikke holder en stale deadline.
+        this.loadingTransitionDeadline = null;
+      }
+      const idleMode:
+        | "closed"
+        | "loading"
+        | "waiting-master"
+        | "next-game" = lobbyClosed
         ? "closed"
-        : this.waitingForMasterPurchase
-          ? "waiting-master"
-          : "next-game";
+        : loadingActive
+          ? "loading"
+          : this.waitingForMasterPurchase
+            ? "waiting-master"
+            : "next-game";
       this.centerBall.setIdleMode(idleMode);
       this.centerBall.showIdleText();
     }
@@ -889,6 +955,47 @@ export class PlayScreen extends Container {
   setBuyPopupDisplayName(displayName: string | null | undefined): void {
     this.buyPopup.setDisplayName(displayName);
     this.centerBall.setIdleText(displayName);
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): track catalogSlug for "Forbereder neste
+   * spill"-loader-detection. Game1Controller kaller dette ved hver
+   * lobby-state-update parallelt med `setBuyPopupDisplayName`.
+   *
+   * Når catalogSlug endrer seg → clear loader (server har advancert),
+   * og oppdater `previousCatalogSlug` til ny verdi. Når den IKKE
+   * endrer seg ved et `gameStatus`-skifte mot RUNNING → idle, vil
+   * `update()`-pathen detektere det og aktivere loader-mode.
+   *
+   * Null-safe: tom/null slug behandles som "ingen kjent slug" og
+   * deaktiverer loader-state. Idempotent ved samme verdi.
+   */
+  setNextScheduledGameSlug(slug: string | null | undefined): void {
+    const next = (slug ?? "").trim() || null;
+    if (next === this.previousCatalogSlug) return;
+    if (this.previousCatalogSlug !== null && next !== null) {
+      // Slug endret — serveren har advancert. Clear loader umiddelbart
+      // så CenterBall hopper rett til "Neste spill: <ny>" istedenfor å
+      // vise loader til timeout.
+      this.loadingTransitionDeadline = null;
+    }
+    this.previousCatalogSlug = next;
+    // Re-evaluer idle-mode hvis vi er i ikke-running state og lastState
+    // er tilgjengelig (synker visning umiddelbart).
+    if (this.lastState && this.lastState.gameStatus !== "RUNNING") {
+      this.update(this.lastState);
+    }
+  }
+
+  /** Test-hook: hvilken catalogSlug har vi sist sett? */
+  getPreviousCatalogSlug(): string | null {
+    return this.previousCatalogSlug;
+  }
+
+  /** Test-hook: er loader-vinduet aktivt? */
+  isLoadingTransitionActive(): boolean {
+    if (this.loadingTransitionDeadline === null) return false;
+    return Date.now() < this.loadingTransitionDeadline;
   }
 
   /**

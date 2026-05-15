@@ -881,6 +881,54 @@ Legacy som IKKE er next-aware (sannsynlig hovedmistanke for hvorfor buggen komme
 
 **Anbefaling (Trinn 3 refactor):** Slett `agentGamePlan /current` og `agentGame1 /current-game` helt; konsolider til ÉN aggregator-output med pre-computed `nextGameDisplay`-felt (se Agent A's recommendation i `docs/research/NEXT_GAME_DISPLAY_AGENT_A_FRONTEND_2026-05-14.md`).
 
+## Lobby-broadcast invariant -- ALLE state-overganger MAA trigge broadcastForHall (FIXED 2026-05-15)
+
+**Tobias-rapport 2026-05-15 (pilot-blokker):** "Etter at runden var fullfort viser fortsatt 'Neste spill: Bingo' i ca 2 min FOR det endret seg til '1000-spill'. Spiller skal ALDRI se gammelt spill."
+
+**Root cause:** Backend hadde 4 paths som flippet runde/plan til terminal status uten aa pushe socket-broadcast til spiller-shellen. Klient maatte vente paa 10s-poll for aa oppdatere "Neste spill"-display. Broadcast var KUN wired paa `MasterActionService` (master-actions via UI-knapp).
+
+**Invariant (FIXED 2026-05-15):**
+
+ALLE state-flipp som setter `app_game1_scheduled_games.status='completed'` ELLER `app_game_plan_run.status='finished'` MAA trigge `Spill1LobbyBroadcaster.broadcastForHall(hallId)` POST-commit som fire-and-forget.
+
+**Path-katalog (alle wired etter 2026-05-15):**
+
+| Path | Trigger | Hall-fan-out |
+|---|---|---|
+| `Game1DrawEngineService.drawNext()` POST-commit | `isFinished=true` (Fullt Hus vunnet ELLER maxDraws naadd) | `master_hall_id` + alle i `participating_halls_json` via `collectHallIdsForBroadcast` |
+| `GamePlanRunService.changeStatus(target='finished')` | Master kaller `finish()` manuelt | run.hall_id |
+| `GamePlanRunService.advanceToNext()` past-end | Master advance forbi siste posisjon -> status='finished' | run.hall_id |
+| `GamePlanRunCleanupService.reconcileNaturalEndStuckRuns()` | Cron auto-finish for stuck plan-run | Per closedRun.hallId |
+| `MasterActionService.fireLobbyBroadcast` | Master-actions (start/pause/resume/stop/advance) | run.hall_id |
+
+**Wiring i index.ts:**
+- `Game1DrawEngineService` constructor faar `lobbyBroadcaster: spill1LobbyBroadcaster`
+- `gamePlanRunService.setLobbyBroadcaster(spill1LobbyBroadcaster)` late-binding
+- `gamePlanRunCleanupService.setLobbyBroadcaster(spill1LobbyBroadcaster)` late-binding
+
+**Best-effort kontrakt:** Broadcaster-feil MAA ALDRI rulle tilbake state-mutering. Alle call-sites bruker `try { void Promise.resolve(...).catch(...) } catch { ... }`. Hvis Socket.IO er nede, faller klienten tilbake paa 3s-poll.
+
+**Frontend-side:**
+- Poll-intervall: 3 sekunder (redusert fra 10s) i `LobbyFallback.ts` og `LobbyStateBinding.ts`
+- "Forbereder neste spill..."-loader i `CenterBall.setIdleMode("loading")` vises i transition-vinduet mellom natural round-end og server-advance av plan-runtime. Timeout 10s (`PlayScreen.LOADING_TRANSITION_TIMEOUT_MS`)
+
+**ANTI-MOENSTRE (ALDRI gjor):**
+- ALDRI legg til ny path som setter `status='completed'`/`'finished'` uten aa trigge broadcast samme sted
+- ALDRI kast fra `broadcastForHall` (bryter best-effort-kontrakten)
+- ALDRI fjern poll-intervallet -- det er safety-net for broken Socket.IO
+- ALDRI optimaliser bort `fireLobbyBroadcastForNaturalEnd` med paastand om "MasterActionService dekker dette" -- engine, plan-service, cron-cleanup og master kjorer i separate kode-paths
+
+**Tester:**
+- `apps/backend/src/game/__tests__/Game1DrawEngineService.lobbyBroadcastOnNaturalEnd.test.ts` (11 tester -- fan-out, fail-soft, bakoverkompat)
+- `apps/backend/src/game/__tests__/GamePlanRunService.lobbyBroadcastOnFinish.test.ts` (7 tester -- finish vs pause/resume, late-binding)
+- `packages/game-client/src/games/game1/screens/PlayScreen.loadingTransition.test.ts` (19 tester -- loader-state-maskinen, slug-tracker)
+
+**Naar du lager en ny state-overgang som setter terminal status:**
+1. Wire `lobbyBroadcaster` parameteren inn i service-en (matcher pattern fra MasterActionService).
+2. Kall `broadcastForHall(hallId)` POST-commit som `void Promise.resolve(...).catch(...)`.
+3. Skriv test som verifiserer at broadcaster fyres + at service ikke kaster naar broadcaster selv kaster.
+4. Verifiser i live-test: Tobias skal se "Neste spill: X" oppdatere seg innen ~2 sekunder etter natural round-end.
+
 ## Kanonisk referanse
 
 Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias før du:

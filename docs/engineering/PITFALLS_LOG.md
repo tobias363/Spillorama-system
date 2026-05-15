@@ -2114,6 +2114,52 @@ preview-CSS OG prod-komponent (samme PR hvis mulig).
 **Anti-mønster:** Bruke `dev-overview.html` eller `visual-harness.html`
 for ren design-tweaking. Begge har Pixi-runtime og er tregere å rebuilde.
 Stand-alone HTML/CSS er raskere og isolerer designet fra runtime-bugs.
+### §7.26 — Lobby-broadcast manglet etter natural round-end (BUG, FIXED 2026-05-15)
+
+**Severity:** P0 (pilot-blokker — spiller-shell viste gammelt spill i opptil 2 minutter)
+**Oppdaget:** 2026-05-15 (Tobias live-test: "Jeg kjørte runde med første spill (Bingo). Etter at runden var fullført viser fortsatt 'Neste spill: Bingo' i ca 2 min FØR det endret seg til '1000-spill'. Spiller skal ALDRI se gammelt spill.")
+
+**Symptom:** Etter at en bingo-runde naturlig avsluttes (Fullt Hus vunnet eller maxDraws nådd) viser spiller-shellen fortsatt "Neste spill: <forrige>" i opptil ~2 min før den oppdaterer seg til riktig neste spill i plan-sekvensen.
+
+**Root cause:** Backend hadde TRE state-flipp-paths som setter `scheduled-game.status='completed'` eller `plan-run.status='finished'`, men INGEN av dem trigget lobby-broadcast til spiller-shellen:
+
+1. `Game1DrawEngineService.drawNext()` POST-commit when `isFinished=true` (engine setter scheduled-game til completed) → BROADCASTET IKKE
+2. `GamePlanRunService.finish()` / `changeStatus(target='finished')` → BROADCASTET IKKE
+3. `GamePlanRunService.advanceToNext()` past-end → BROADCASTET IKKE
+4. `GamePlanRunCleanupService.reconcileNaturalEndStuckRuns()` → BROADCASTET IKKE
+
+Broadcast var KUN wired i `MasterActionService.fireLobbyBroadcast()` (master-actions: start/pause/resume/stop/advance via UI-knapp). Når en runde naturlig sluttet uten at master gjorde noe, hadde klienten ingen socket-push-path og måtte vente på 10s-polling-tick (`LobbyFallback.ts:255` + `LobbyStateBinding.ts:96`) før det stale "Neste spill: <forrige>"-displayet oppdaterte seg.
+
+**Fix:** Lobby-broadcaster injisert i alle fire pather som best-effort fire-and-forget:
+
+1. `Game1DrawEngineService` fikk valgfri `lobbyBroadcaster`-option + `fireLobbyBroadcastForNaturalEnd()` POST-commit som fan-out til ALLE haller fra `master_hall_id` + `participating_halls_json`. Helper `collectHallIdsForBroadcast` (eksportert for test) dedup-er og parser JSON-string.
+2. `GamePlanRunService` fikk valgfri `lobbyBroadcaster`-option + `fireLobbyBroadcastForFinish()` kalt i `changeStatus()` når target='finished' OG i `advanceToNext()` når past-end.
+3. `GamePlanRunCleanupService.reconcileNaturalEndStuckRuns` itererer over `closedRuns` og fyrer broadcast per affected hall.
+4. Frontend poll-interval redusert fra 10s → 3s i `LobbyFallback.ts` og `LobbyStateBinding.ts` (safety-net, ikke primær-pathen).
+5. Frontend fikk "Forbereder neste spill"-loader (`CenterBall.setIdleMode('loading')`) som vises i transition-vinduet mellom natural round-end og server-spawn av neste plan-item. Timeout 10s før fall tilbake til siste kjente "Neste spill"-tekst.
+
+**Fix-soft kontrakt:** Broadcaster-feil ruller IKKE tilbake state-mutering. Alle broadcast-call-sites bruker `try/void Promise.catch` så draw-pathen og plan-state aldri påvirkes av Socket.IO-feil. Klient faller fortsatt tilbake på 3s-poll hvis push feiler stille.
+
+**Tester:**
+- `apps/backend/src/game/__tests__/Game1DrawEngineService.lobbyBroadcastOnNaturalEnd.test.ts` (11 tester)
+- `apps/backend/src/game/__tests__/GamePlanRunService.lobbyBroadcastOnFinish.test.ts` (7 tester)
+- `packages/game-client/src/games/game1/screens/PlayScreen.loadingTransition.test.ts` (19 tester)
+
+**Prevention:**
+- ALLE state-overganger som flipper en runde/plan til terminal status MÅ trigge `lobbyBroadcaster.broadcastForHall(hallId)`. Hvis du legger til en ny path (eks. ny cron-job, ny admin-action) som setter `status='completed'`/`'finished'`/`'cancelled'`, MÅ du wire broadcaster samme sted.
+- Best-effort kontrakt: aldri kast fra broadcast. Wrap med `try` + `void Promise.catch` så caller-flyten påvirkes ikke ved Socket.IO-feil.
+- Klient-poll er KUN safety-net. Hvis Tobias rapporterer "stale state i N sek" skal første-spørsmål være "broadcaster wired for denne pathen?", ikke "kan vi redusere poll-interval mer?".
+- Når du lager nye state-transitions, sjekk om de skal trigge broadcast. Se `MasterActionService.fireLobbyBroadcast()` for pattern.
+
+**Related:**
+- `apps/backend/src/game/Spill1LobbyBroadcaster.ts` — broadcaster-service (R1 / BIN-822)
+- `apps/backend/src/game/MasterActionService.ts:2011` — opprinnelig fire-and-forget pattern
+- `apps/backend/src/game/Game1DrawEngineService.ts:1843-1885` (POST-commit `if (capturedCleanupInfo)`-block)
+- `apps/backend/src/game/GamePlanRunService.ts:1290-1294, 911-919`
+- `apps/backend/src/game/GamePlanRunCleanupService.ts:445-466`
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts:540-580` (loader-state-maskin)
+- §7.25 (relatert: distribuerte "neste spill"-display-paths)
+- ADR-0017 (relatert: jackpot setup-manuell, samme master-action-pattern)
 
 ---
 
@@ -2683,3 +2729,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-14 | Lagt til §7.24 — premie-celle-størrelse iterasjon V (Tobias-direktiv etter første PR #1442-runde: "smalere, så det matcher mer bilde, ikke tar så mye plass"). Reduserte `.premie-row` padding 6px 10px→3px 8px, `gap` 5px→3px, `.premie-cell` padding 4px 8px→2px 6px. Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele center-top-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) for layout-vurdering i kontekst. | Agent V (CSS-iterasjon) |
 | 2026-05-14 | Lagt til §6.18 — Synthetic bingo-test må kjøres FØR pilot. Tobias-direktiv 2026-05-14: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test". Bot driver én komplett bingo-runde, verifiserer 6 invarianter (I1-I6). R4-precursor (BIN-817). | synthetic-test-agent |
 | 2026-05-15 | Lagt til §7.21 — Master-header "Neste spill: {name}" for ALLE pre-running-states (Tobias-direktiv IMMUTABLE). To uavhengige bugs: (1) frontend mapping hadde "Klar til å starte" / "Runde ferdig" som mellom-tekster, fjernet — alle pre-running-states gir "Neste spill: {name}". (2) Backend aggregator returnerte `planMeta=null` når plan-run manglet → `catalogDisplayName=null` → header uten navn. Fix: ny `GamePlanRunService.findActivePlanForDay`-helper kalles av aggregator i idle-state. Frontend 41 tester (3 nye trip-wires); backend 26 tester (2 nye for catalogDisplayName uten plan-run). PR `fix/master-header-text-and-catalog-name-2026-05-15`. §7.20 oppdatert med peker. | Fix-agent (Tobias 2026-05-15 live-test) |
+| 2026-05-15 | Lagt til §7.26 — Lobby-broadcast manglet etter natural round-end (P0 pilot-blokker). 4 state-flipp-paths (Game1DrawEngineService.drawNext POST-commit, GamePlanRunService.finish/advanceToNext-past-end, GamePlanRunCleanupService.reconcileNaturalEnd) trigget IKKE socket-push til spiller-shell — klient måtte vente på 10s-poll. Fix: best-effort fire-and-forget broadcaster wired på alle 4 paths + frontend "Forbereder neste spill"-loader + 10s→3s poll reduction. 37 nye tester. | Fix-agent (lobby-broadcast on natural round-end) |

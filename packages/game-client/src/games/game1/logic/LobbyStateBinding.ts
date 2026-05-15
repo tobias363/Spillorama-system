@@ -59,7 +59,13 @@ export interface LobbyStateBindingOptions {
   apiBaseUrl?: string;
   /**
    * Polling-intervall (ms) som safety-net hvis socket-broadcast feiler.
-   * Default: 10000 (matcher `LobbyFallback`-pattern).
+   *
+   * Pilot Q3 2026 (2026-05-15): default redusert fra 10000 → 3000 per
+   * Tobias-direktiv. Backend-side broadcast (Spill1LobbyBroadcaster) er
+   * primær-pathen (~50ms etter natural round-end + plan-run-finish).
+   * 3s er ren safety-net hvis socket-push feiler stille.
+   *
+   * Default: 3000 (matcher `LobbyFallback`-pattern).
    */
   pollIntervalMs?: number;
 }
@@ -93,7 +99,7 @@ export class Game1LobbyStateBinding {
     this.apiBaseUrl =
       opts.apiBaseUrl ??
       (typeof window !== "undefined" ? window.location.origin : "");
-    this.pollIntervalMs = opts.pollIntervalMs ?? 10_000;
+    this.pollIntervalMs = opts.pollIntervalMs ?? 3_000;
   }
 
   /**

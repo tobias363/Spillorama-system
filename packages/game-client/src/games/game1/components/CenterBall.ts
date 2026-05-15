@@ -84,7 +84,11 @@ export class CenterBall extends Container {
   private idleBody: Text;
   private idleDisplayName = "Bingo";
   private idleVisible = false;
-  private idleMode: "next-game" | "closed" | "waiting-master" = "next-game";
+  private idleMode:
+    | "next-game"
+    | "closed"
+    | "waiting-master"
+    | "loading" = "next-game";
 
   constructor(bridge?: PauseAwareBridge) {
     super();
@@ -325,7 +329,7 @@ export class CenterBall extends Container {
   }
 
   /** Test-hook: hvilken idle-mode er aktiv? */
-  getIdleMode(): "next-game" | "closed" | "waiting-master" {
+  getIdleMode(): "next-game" | "closed" | "waiting-master" | "loading" {
     return this.idleMode;
   }
 
@@ -349,7 +353,9 @@ export class CenterBall extends Container {
    * Idempotent — gjentatte kall med samme mode er no-op. Hvis idle-text
    * er synlig re-rendres tekst umiddelbart.
    */
-  setIdleMode(mode: "next-game" | "closed" | "waiting-master"): void {
+  setIdleMode(
+    mode: "next-game" | "closed" | "waiting-master" | "loading",
+  ): void {
     if (this.idleMode === mode) {
       if (this.idleVisible) this.renderIdleText();
       return;
@@ -367,6 +373,17 @@ export class CenterBall extends Container {
     if (this.idleMode === "waiting-master") {
       this.idleHeadline.text = `Neste spill: ${this.idleDisplayName}`;
       this.idleBody.text = "Venter på at master starter neste runde";
+      return;
+    }
+    if (this.idleMode === "loading") {
+      // Pilot Q3 2026 (2026-05-15): "Forbereder neste spill"-loader vises
+      // i transition-vinduet mellom natural round-end og server-spawn av
+      // neste plan-item. Tobias-direktiv 2026-05-15: "Hvis vi ikke kan
+      // få det raskt — vi må ha loader." Vises maks ~10s før vi faller
+      // tilbake til siste kjente "Neste spill"-tekst (PlayScreen-state-
+      // machinen håndterer fallback-timer).
+      this.idleHeadline.text = "Forbereder neste spill…";
+      this.idleBody.text = "Et øyeblikk, vi henter neste spill fra serveren.";
       return;
     }
     this.idleHeadline.text = `Neste spill: ${this.idleDisplayName}`;

@@ -314,6 +314,21 @@ export interface GamePlanRunServiceOptions {
    * builds the service stand-alone (e.g. migrations / scripts).
    */
   inlineCleanupHook?: InlineCleanupHook | null;
+  /**
+   * Pilot Q3 2026 (2026-05-15): Lobby-broadcaster for spiller-shell-
+   * oppdatering ved plan-run-status-overgang til `finished`. Tobias-
+   * rapport 2026-05-15: "Etter at runden var fullført viser fortsatt
+   * 'Neste spill: Bingo' i ca 2 min". Når plan-run.status flippes til
+   * `finished` (via `finish()` eller `advanceToNext()`-past-end) skal
+   * spiller-shellen umiddelbart se "Ferdig for dagen" istedenfor å
+   * vente på 3s/10s-poll.
+   *
+   * Fire-and-forget — feil propagerer ikke til state-mutering. Når
+   * null/undefined skipper service-en stille (bakoverkompat for tester).
+   */
+  lobbyBroadcaster?: {
+    broadcastForHall(hallId: string): Promise<void>;
+  } | null;
 }
 
 export class GamePlanRunService {
@@ -323,6 +338,13 @@ export class GamePlanRunService {
   private readonly catalogService: GameCatalogService;
   private auditLogService: AuditLogService | null;
   private inlineCleanupHook: InlineCleanupHook | null;
+  /**
+   * Pilot Q3 2026 (2026-05-15): broadcaster for spiller-shell ved
+   * plan-run-finish. Null = silent skip (bakoverkompat).
+   */
+  private lobbyBroadcaster: {
+    broadcastForHall(hallId: string): Promise<void>;
+  } | null;
 
   constructor(options: GamePlanRunServiceOptions) {
     this.pool = options.pool;
@@ -331,6 +353,7 @@ export class GamePlanRunService {
     this.catalogService = options.catalogService;
     this.auditLogService = options.auditLogService ?? null;
     this.inlineCleanupHook = options.inlineCleanupHook ?? null;
+    this.lobbyBroadcaster = options.lobbyBroadcaster ?? null;
   }
 
   /** @internal — test-hook. */
@@ -361,7 +384,52 @@ export class GamePlanRunService {
     (svc as unknown as {
       inlineCleanupHook: InlineCleanupHook | null;
     }).inlineCleanupHook = opts.inlineCleanupHook ?? null;
+    (svc as unknown as {
+      lobbyBroadcaster: {
+        broadcastForHall(hallId: string): Promise<void>;
+      } | null;
+    }).lobbyBroadcaster = null;
     return svc;
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): late-binding for lobby-broadcaster.
+   * Brukes hvis broadcaster konstrueres etter service (eller i tester).
+   */
+  setLobbyBroadcaster(
+    broadcaster: {
+      broadcastForHall(hallId: string): Promise<void>;
+    } | null,
+  ): void {
+    this.lobbyBroadcaster = broadcaster;
+  }
+
+  /**
+   * Pilot Q3 2026 (2026-05-15): fire-and-forget lobby-broadcast for én
+   * hall etter plan-run-finish. Best-effort — broadcaster-feil logges
+   * aldri til caller, og state-mutering ruller ikke tilbake.
+   *
+   * Called fra `finish()` og `advanceToNext()` (når past-end → finished).
+   * Skipper stille hvis broadcaster ikke er wired (tester / bakoverkompat).
+   */
+  private fireLobbyBroadcastForFinish(hallId: string): void {
+    if (!this.lobbyBroadcaster) return;
+    const broadcaster = this.lobbyBroadcaster;
+    try {
+      void Promise.resolve(broadcaster.broadcastForHall(hallId)).catch(
+        (err) => {
+          logger.warn(
+            { err, hallId },
+            "[plan-run] lobby-broadcast etter finish feilet — best-effort",
+          );
+        },
+      );
+    } catch (err) {
+      logger.warn(
+        { err, hallId },
+        "[plan-run] lobby-broadcast etter finish kastet synkront — best-effort",
+      );
+    }
   }
 
   setAuditLogService(service: AuditLogService | null): void {
@@ -946,6 +1014,10 @@ export class GamePlanRunService {
           previousPosition: run.currentPosition,
         },
       });
+      // Pilot Q3 2026 (2026-05-15): broadcast så spiller-shell viser
+      // "Ferdig for dagen" umiddelbart. Speilet samme pattern som
+      // changeStatus(target='finished').
+      this.fireLobbyBroadcastForFinish(hall);
       const finished = await this.requireById(run.id);
       return { run: finished, nextGame: null, jackpotSetupRequired: false };
     }
@@ -1342,6 +1414,13 @@ export class GamePlanRunService {
       resourceId: run.id,
       details: { fromStatus: run.status, toStatus: target },
     });
+    // Pilot Q3 2026 (2026-05-15): broadcast spiller-shell-state etter
+    // finish så "Ferdig for dagen" vises umiddelbart. Andre overganger
+    // (idle/running/paused) trenger ikke push — klient mottar dem via
+    // master-action-pathen (MasterActionService.fireLobbyBroadcast).
+    if (target === "finished") {
+      this.fireLobbyBroadcastForFinish(hall);
+    }
     return this.requireById(run.id);
   }
 

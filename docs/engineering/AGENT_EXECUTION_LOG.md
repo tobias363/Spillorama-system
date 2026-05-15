@@ -152,6 +152,76 @@ Hver entry har struktur:
 
 ---
 
+### 2026-05-15 — Fix-agent Lobby-broadcast on natural round-end (Tobias-rapport "2 min stale spill")
+
+**Branch:** `fix/lobby-broadcast-on-natural-round-end-2026-05-15` (worktree-isolert, `agent-a70e2153dbe0b3d56`)
+**Agent type:** general-purpose
+**Trigger:** Tobias-rapport 2026-05-15 (live-test): "Jeg kjørte runde med første spill (Bingo). Etter at runden var fullført viser fortsatt 'Neste spill: Bingo' i ca 2 min FØR det endret seg til '1000-spill'. Spiller skal ALDRI se gammelt spill. Hvis vi ikke kan få det raskt — vi må ha loader."
+
+**Scope:** Lukke socket-push-hullet som lot spiller-shell-state stå stale opptil 10s etter natural round-end + plan-run-finish.
+
+**Root cause-analyse:** 4 backend-paths flippet runde/plan til terminal status uten å trigge lobby-broadcast — broadcaster var KUN wired på MasterActionService (master-actions via UI-knapp).
+
+**Hva ble gjort:**
+
+1. **Game1DrawEngineService** (`apps/backend/src/game/Game1DrawEngineService.ts`):
+   - Nytt `lobbyBroadcaster`-option på `Game1DrawEngineServiceOptions` (+ `setLobbyBroadcaster` late-binding)
+   - Utvidet `loadScheduledGameForUpdate`-SELECT med `master_hall_id` + `participating_halls_json`
+   - Ny eksportert helper `collectHallIdsForBroadcast()` med dedup + JSON-string-parsing + whitespace-filter
+   - `capturedCleanupInfo` utvidet til å inkludere `hallIdsForBroadcast: string[]`
+   - Ny privat metode `fireLobbyBroadcastForNaturalEnd(scheduledGameId, hallIds)` kalt POST-commit når `isFinished=true`
+   - Fan-out til master-hall + alle GoH-deltager-haller
+
+2. **GamePlanRunService** (`apps/backend/src/game/GamePlanRunService.ts`):
+   - Nytt `lobbyBroadcaster`-option (+ `setLobbyBroadcaster` late-binding)
+   - Ny privat metode `fireLobbyBroadcastForFinish(hallId)` kalt fra `changeStatus()` når target=`finished` OG fra `advanceToNext()` når past-end
+
+3. **GamePlanRunCleanupService** (`apps/backend/src/game/GamePlanRunCleanupService.ts`):
+   - Nytt `lobbyBroadcaster`-option (+ `setLobbyBroadcaster` late-binding)
+   - Ny privat metode `fireLobbyBroadcastForFinish(hallId)` kalt fra `reconcileNaturalEndStuckRuns()` for hver auto-finished plan-run
+
+4. **index.ts wiring:**
+   - `Game1DrawEngineService` konstruktør får `lobbyBroadcaster: spill1LobbyBroadcaster`
+   - `gamePlanRunService.setLobbyBroadcaster(spill1LobbyBroadcaster)` + `gamePlanRunCleanupService.setLobbyBroadcaster(spill1LobbyBroadcaster)` late-binding
+
+5. **Frontend Fix 2 — "Forbereder neste spill"-loader:**
+   - `CenterBall`: nytt `"loading"` idle-mode med tekst "Forbereder neste spill…" + body "Et øyeblikk, vi henter neste spill fra serveren."
+   - `PlayScreen`: nytt `setNextScheduledGameSlug(slug)` slug-tracker + `loadingTransitionDeadline` state-machine. Triggers loader når `gameStatus` RUNNING → ikke-RUNNING. Clear ved (a) slug-skifte (server advancert), (b) ny RUNNING-state, (c) 10s timeout.
+   - `Game1Controller`: pusher `state?.nextScheduledGame?.catalogSlug` parallelt med `catalogDisplayName`
+
+6. **Frontend Fix 3 — Poll-intervall redusert 10s → 3s:**
+   - `LobbyFallback.startPolling()` + `LobbyStateBinding.pollIntervalMs` default
+
+**Tester (37 nye totalt — alle grønne):**
+- `apps/backend/src/game/__tests__/Game1DrawEngineService.lobbyBroadcastOnNaturalEnd.test.ts` (11 tester — fan-out, fail-soft, bakoverkompat, helper-tester)
+- `apps/backend/src/game/__tests__/GamePlanRunService.lobbyBroadcastOnFinish.test.ts` (7 tester — finish vs pause/resume, late-binding)
+- `packages/game-client/src/games/game1/screens/PlayScreen.loadingTransition.test.ts` (19 tester — loader-state-maskinen, forrang closed>loading>waiting-master>next-game, slug-tracker, 10s timeout)
+
+**Regression-check:** Eksisterende DrawEngineService-tester (53), GamePlanRunService-tester (45), Cleanup-tester (24) + game-client PlayScreen-tester (50) — alle grønne etter endringer.
+
+**Type-check:** backend + game-client + shared-types tsc passes.
+
+**Lessons learned:**
+- **Hvor enn det er en SQL-UPDATE som setter terminal status, MÅ broadcast trigges på samme sted.** Backend hadde 4 separate paths som alle fixet state men ingen pushet socket — klassisk "vi løste delproblemet, glemte broadcast"-mønster.
+- **Best-effort-kontrakt for broadcast er essensiell.** Engine + plan-service har strenge konsistenskrav (TX, audit-log, hash-chain). Broadcast må aldri rulle tilbake state-mutering — vi `try { void Promise.resolve(...).catch(...) } catch { ... }` overalt.
+- **Poll er safety-net, ikke primær-pathen.** Hvis poll-intervallet er primæren føler det seg som båndbredde-løsning men maskerer manglende broadcast.
+- **Loader = god UX-fallback når serveren tar litt tid.** Spec-en Tobias ga ("Hvis vi ikke kan få det raskt — vi må ha loader") er gull. Loader unngår at klienten viser stale data selv hvis socket-push lander sent.
+
+**Doc-protokoll (§2.19 IMMUTABLE):**
+- ✅ Skill `.claude/skills/spill1-master-flow/SKILL.md` — bumped til v1.17.0, ny seksjon "Lobby-broadcast invariant -- ALLE state-overganger MAA trigge broadcastForHall (FIXED 2026-05-15)" mellom Next Game Display og Kanonisk referanse, endringslogg-entry
+- ✅ `docs/engineering/PITFALLS_LOG.md` — nytt §7.26 "Lobby-broadcast manglet etter natural round-end (BUG, FIXED 2026-05-15)" + endringslogg-entry
+- ✅ `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry
+
+**Forbudt-rør (overholdt):**
+- ALDRI endret `app_game1_scheduled_games`-schema (kun SELECT-utvidelse)
+- ALDRI endret audit-trail / hash-chain
+- ALDRI commitet på `main` (worktree-isolert)
+- ALDRI åpnet PR (PM eier)
+
+**Tid:** ~90 min agent-arbeid
+
+---
+
 ### 2026-05-15 — Fix-agent BUG-D1 — `GamePlanRunService.start()` hardcode-fjerning
 
 **Branch:** `fix/bug-d1-planrun-start-hardcode-2026-05-15` (worktree-isolert, `agent-a40717ffc6be74b26`)
