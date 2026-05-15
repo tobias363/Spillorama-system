@@ -4311,3 +4311,56 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-15 — PM-AI: purchase_open to-stegs master-flyt
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Fikse P0-feilen der Spill 1 plan/master-flow hoppet over reelt `purchase_open`-vindu før trekning.
+**Trigger:** PM-handoff identifiserte at live-test hadde gått `scheduled → running → completed` uten kjøpsvindu. Tobias presiserte at bonger må kunne kjøpes før master starter spillet.
+
+**Evidence brukt før kode:**
+- `bash scripts/pm-checkpoint.sh --validate` feilet uten gyldig lokal gate-marker; PM leste siste handoff + knowledge export manuelt før kode.
+- `npm run forensics:purchase-open -- --phase before-master --sentry-ref "baseline-before-implementation" --note "New PM first evidence snapshot before purchase_open code changes"`
+- Evidence report: `/tmp/purchase-open-forensics-2026-05-15T21-56-07Z.md`
+- Agent contract: `/tmp/agent-contract-purchase-open-pm-self.md`
+
+**Root cause:**
+- `GamePlanEngineBridge` opprettet plan-runtime scheduled-games direkte som `ready_to_start`.
+- `MasterActionService.start()` kalte `Game1MasterControlService.startGame()` i samme request som bridge-spawn.
+- Cron/seed-start_time var en mulig symptomforsterker, men ikke rot-årsak for master/plan-pathen.
+
+**Outputs:**
+- `apps/backend/src/game/GamePlanEngineBridge.ts` — nye plan-runtime rader opprettes med `status='purchase_open'`, og `scheduled_start_time` settes ca. 120 sek frem som forventet draw-start/timer.
+- `apps/backend/src/game/MasterActionService.ts` — `start()` og `advance()` returnerer uten engine-start for fresh `purchase_open`; engine starter først når eksisterende scheduled-game gjenbrukes.
+- `apps/backend/src/game/__tests__/MasterActionService.test.ts` — nye regresjonstester for fresh `purchase_open`, reused purchase_open → engine-start, auto-advance til purchase_open, og advance-defense-in-depth.
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts` + `GamePlanEngineBridge.multiGoHIntegration.test.ts` — forventer ny aktiv rad som `purchase_open`.
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`, `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts`, `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`, `apps/admin-web/src/api/agent-game1.ts` — UI copy/label skiller "Bongesalg åpnet" fra "Spill 1 startet".
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.0 — ny purchase_open-kontrakt.
+- `docs/engineering/PITFALLS_LOG.md` §3.17 — fallgruven dokumentert.
+- Denne `AGENT_EXECUTION_LOG`-entryen.
+
+**Validering:**
+- `LOG_LEVEL=warn npx tsx --test src/game/__tests__/MasterActionService.test.ts` — 49/49 pass.
+- `LOG_LEVEL=warn npx tsx --test src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts` — skipped uten `WALLET_PG_TEST_CONNECTION_STRING`.
+- `LOG_LEVEL=warn npx tsx --test src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts` — skipped uten `WALLET_PG_TEST_CONNECTION_STRING`.
+- `npm run check` i `apps/backend` — pass.
+- `npm run check` i `apps/admin-web` — pass.
+
+**Læring:**
+- Forensics må kjøres før B.1/B.2/B.3 velges. Her viste beviset at cron/seed ikke var tilstrekkelig forklaring; master pathen startet engine umiddelbart.
+- "Start neste spill" og "Start trekninger nå" må være to forskjellige mentale modeller i UI, ellers feiltolker både PM og master live-testresultatet.
+- Defense-in-depth må dekke både `start()` og `advance()` selv om dagens UI primært bruker `start()` for neste runde.
+
+**Eierskap (filer endret):**
+- `apps/backend/src/game/GamePlanEngineBridge.ts`
+- `apps/backend/src/game/MasterActionService.ts`
+- `apps/backend/src/game/__tests__/MasterActionService.test.ts`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
+- `apps/admin-web/src/api/agent-game1.ts`
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`
+- `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`
+- `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts`
+- `.claude/skills/spill1-master-flow/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`

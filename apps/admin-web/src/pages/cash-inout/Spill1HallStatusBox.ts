@@ -757,9 +757,8 @@ function render(container: HTMLElement, state: BoxState): void {
     (h) => !h.isReady && !h.excludedFromGame,
   ).length;
   // 2026-05-08: vis planlagt-navnet i Start-knappen så master ser presis
-  // hva som starter (eks: "Start neste spill — Bingo"). Trekkes fra
-  // `lobby.planMeta.catalogDisplayName` som aggregator setter når plan
-  // dekker dagen.
+  // hva som starter. 2026-05-15: labelen er to-stegs: idle/terminal åpner
+  // neste spill for bongesalg, purchase_open/ready_to_start starter trekning.
   const nextGameName = data.catalogDisplayName;
 
   // ADR-0022 Lag 3: aktivér pulse på Fortsett-knappen når engine har vært
@@ -1281,13 +1280,16 @@ function renderMasterButtons(opts: {
            ikke klar enda — start vil ekskludere ${opts.unreadyCount === 1 ? "den" : "dem"}.
          </p>`
       : "";
-  // 2026-05-08 (Tobias-direktiv): Start-label inkluderer planlagt-navnet på
-  // neste spill. Stop-knappen er FJERNET fra agent-UI — admin har eget
-  // audit-trail-endpoint via /api/admin/game1/games/:gameId/stop hvis
-  // master må stoppe en aktiv runde.
+  // 2026-05-15 (Tobias regel-spec): Første klikk åpner bongesalg før
+  // master starter spillet. Når status allerede er pre-running, betyr neste
+  // klikk "start trekninger", ikke "opprett neste spill".
+  const startVerb =
+    opts.gameStatus === "purchase_open" || opts.gameStatus === "ready_to_start"
+      ? "Start trekninger nå"
+      : "Start neste spill";
   const startLabel = opts.nextGameName
-    ? `Start neste spill — ${opts.nextGameName}`
-    : "Start neste spill";
+    ? `${startVerb} — ${opts.nextGameName}`
+    : startVerb;
   // ADR-0022 Lag 3: pulse-klasse på Fortsett når engine har vært auto-
   // paused i en stund. Selve pulse-animasjonen er definert inline i style-
   // tagen rendret én gang per render-pass (idempotent — duplikate
@@ -1549,7 +1551,11 @@ async function runStartWithJackpotFlow(
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await startMaster(ownHallId);
+      const result = await startMaster(ownHallId);
+      if (result.scheduledGameStatus === "purchase_open") {
+        Toast.success("Bongesalg åpnet — vent på kjøp før trekning startes.");
+        return true;
+      }
       const successMessage =
         unreadyHallCount > 0
           ? `Spill 1 startet — ${unreadyHallCount} hall(er) ekskludert.`

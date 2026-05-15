@@ -94,11 +94,10 @@ export interface AgentGamePlanCurrentResponse {
 /**
  * Fase 4 (2026-05-07): /start og /advance returnerer `scheduledGameId` +
  * `bridgeError` når engine-bridge er injisert i routeren. `scheduledGameId`
- * er IDen til den nye `app_game1_scheduled_games`-raden som engine kan
- * starte fra (status='ready_to_start'). Frontend bruker denne for å
- * trigge legacy `/api/agent/game1/start` rett etter at planen er startet
- * — bridgen oppretter raden, legacy-routen finner den via hallId og
- * starter engine.
+ * er IDen til den nye `app_game1_scheduled_games`-raden. Denne legacy-
+ * adapteren er historisk: kanonisk master-flyt går nå via
+ * `/api/agent/game1/master/start`, der fresh plan-runtime-rad åpnes som
+ * `purchase_open` og engine-start krever neste master-start.
  *
  * `bridgeError` er en kort feilkode (eks `BRIDGE_FAILED`,
  * `GAME_PLAN_RUN_CORRUPT`) når bridgen feilet på en måte som IKKE

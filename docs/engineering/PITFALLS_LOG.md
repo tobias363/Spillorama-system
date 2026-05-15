@@ -46,7 +46,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 |---|---:|---|
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
-| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
+| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 15 | 2026-05-15 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 108 entries (per 2026-05-15)
+**Total:** 109 entries (per 2026-05-15)
 
 ---
 
@@ -867,6 +867,48 @@ WHERE id = $1
 - `apps/backend/src/game/Game1DrawEngineService.ts:1412-1421` (etter fix)
 - `.claude/skills/spill1-master-flow/SKILL.md` §"Vanlige feil" entry 14
 - `docs/architecture/NEXT_GAME_DISPLAY_FUNDAMENT_AUDIT_2026-05-14.md`
+
+---
+
+### §3.17 — Master-start spawnet `ready_to_start` og startet engine i samme request (FIXED 2026-05-15)
+
+**Severity:** P0 (pilot-blokker — ekte pengekjøp fikk ikke reelt kjøpsvindu før trekning)
+**Oppdaget:** 2026-05-15 (live-test + `purchase_open` forensic baseline)
+**Symptom:** Spill 1 gikk direkte fra plan/master-start til running/completed. Spillere hadde enten 0 kjøp eller kjøp millisekunder før engine-start. Live baseline viste target-game `f7fa6583-285c-4b16-9285-127d21fe692f` med `scheduled_start=18:38:42.835`, `actual_start=18:38:42.928`, og kjøp kl. `18:38:42.897` — ca. 30 ms før engine-start. Det er ikke et operativt `purchase_open`-vindu.
+
+**Root cause:** Plan-runtime-pathen brukte `GamePlanEngineBridge` til å opprette scheduled-game direkte som `ready_to_start`, og `MasterActionService.start()` kalte `Game1MasterControlService.startGame()` i samme HTTP-request. Cron/seed-tid kunne påvirke legacy scheduled-flow, men var ikke rot-årsaken for master/plan-flowen.
+
+**Fix:**
+1. `GamePlanEngineBridge.createScheduledGameForPlanRunPosition()` oppretter nye plan-runtime-rader med `status='purchase_open'`.
+2. `scheduled_start_time` settes ca. 120 sekunder frem som forventet draw-start/timer for UI/observability, ikke som automatisk engine-trigger.
+3. `MasterActionService.start()` returnerer uten `startGame()` når bridgen nettopp har opprettet en fresh `purchase_open`-rad.
+4. Neste master-start på samme eksisterende `purchase_open`-rad gjenbruker bridgen og starter engine.
+5. `MasterActionService.advance()` har samme defense-in-depth: fresh ny planposisjon åpner `purchase_open`, ikke `running`.
+6. Admin/agent UI skiller "Bongesalg åpnet" fra "Spill 1 startet" og labelen "Start trekninger nå" fra "Start neste spill".
+
+**Prevention:**
+- Før implementation på gjentatt live-test-feil: kjør `npm run forensics:purchase-open -- --phase before-master ...` og legg evidence path i agent-kontrakt.
+- Ikke behandle dette som en ren cron/seed-feil før plan/master-pathen er bevist frisk. Forensic baseline viste at master pathen selv startet engine for fort.
+- Aldri merge endring som setter ny plan-runtime scheduled-game direkte til `ready_to_start` uten å bevise at engine-start fortsatt krever et separat master-kall.
+- UI skal aldri vise "Spill 1 startet" når backend returnerer `scheduledGameStatus='purchase_open'`.
+
+**Tests:**
+- `apps/backend/src/game/__tests__/MasterActionService.test.ts`
+  - `start: idle → running spawner fresh purchase_open uten engine.startGame`
+  - `start: idempotent re-start på running purchase_open → bridge gjenbrukes og engine.startGame kalles`
+  - `start: running run med completed scheduled-game auto-advancer til ny purchase_open`
+  - `advance: running → next position + fresh purchase_open uten engine.startGame`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts`
+- `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
+
+**Related:**
+- `/tmp/purchase-open-forensics-2026-05-15T21-56-07Z.md`
+- `/tmp/agent-contract-purchase-open-pm-self.md`
+- `apps/backend/src/game/GamePlanEngineBridge.ts`
+- `apps/backend/src/game/MasterActionService.ts`
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`
+- `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.0
 
 ---
 
@@ -3498,3 +3540,4 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §5.15 — required checks må ikke ha PR path-filter som gjør check-context missing. Funnet da auto-doc PR #1532 ble blokkert av forventet `pitfalls-id-validation`. Total 104→105 entries. | PM-AI (post-merge CI watcher) |
 | 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
 | 2026-05-15 | Lagt til §11.19 — high-risk agent-prompt som fritekst gir misforstått scope. Standardisert `npm run agent:contract` før implementation-agent. Total 107→108 entries. | PM-AI (agent-contract-hardening) |
+| 2026-05-15 | Lagt til §3.17 — purchase_open-vinduet ble hoppet over fordi plan-runtime opprettet `ready_to_start` og master-start kalte engine i samme request. Total 108→109 entries. | PM-AI (purchase_open P0 fix) |

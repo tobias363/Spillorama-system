@@ -408,9 +408,9 @@ test(
       );
       assert.equal(byStatus.cancelled, 1, "Den gamle cancelled raden består");
       assert.equal(
-        byStatus.ready_to_start,
+        byStatus.purchase_open,
         1,
-        "Den nye raden er aktiv (ready_to_start)",
+        "Den nye raden er aktiv (purchase_open)",
       );
     } finally {
       await dropSchema(env.pool, env.schema);
