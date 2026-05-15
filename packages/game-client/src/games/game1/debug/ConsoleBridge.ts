@@ -15,8 +15,11 @@
  *   4. Recursion-safe: når vi pusher event blir det IKKE re-loggred
  *      gjennom bridge-en (vi setter en flag inn-til-ut)
  *
- * Gate på `?debug=1` eller `localStorage.DEBUG_SPILL1_DRAWS=true` så
- * inert i produksjon.
+ * Gate på `?debug=full` (Tobias-direktiv 2026-05-15) så inert i produksjon
+ * og full spillopplevelse er default. Tidligere `?debug=1`/`?debug=true` og
+ * localStorage `DEBUG_SPILL1_DRAWS=true` fjernet som triggers — de lekte til
+ * prod-brukere. installConsoleBridge kalles uansett kun fra mountDebugHud
+ * som har samme gate.
  */
 
 import { getEventTracker } from "./EventTracker.js";
@@ -106,14 +109,13 @@ export function installConsoleBridge(): () => void {
     return () => {};
   }
 
-  // Gate på debug-flagg så vi ikke pålegger overhead i prod
+  // Gate på `?debug=full` (Tobias-direktiv 2026-05-15) — defense-in-depth.
+  // Funksjonen kalles uansett kun fra `mountDebugHud` som har samme gate,
+  // men vi beholder sjekk her for tilfellet der den brukes utenfra.
   const enabled = (() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get("debug") === "1") return true;
-      if (params.get("debug") === "true") return true;
-      const ls = window.localStorage?.getItem("DEBUG_SPILL1_DRAWS");
-      return ls?.trim().toLowerCase() === "true";
+      return params.get("debug") === "full";
     } catch {
       return false;
     }

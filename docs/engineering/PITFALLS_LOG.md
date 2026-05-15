@@ -2499,6 +2499,58 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 
 ---
 
+### §7.29 — Debug-HUD + event-log skjult som default — kun `?debug=full` aktiverer (Tobias 2026-05-15)
+
+**Severity:** P1 (UX-fix — debug-felter lekte til prod-spillere)
+**Oppdaget:** 2026-05-15 (Tobias screenshot — SPILL1 DEBUG-HUD + EVENT-LOG synlig)
+**Symptom:** Spillerklient viste fast `🐛 SPILL1 DEBUG-HUD` (top-right) og
+`📋 EVENT-LOG` (top-left) selv uten eksplisitt opt-in. Det brøt "full
+spillopplevelse" og distraherte fra spillet.
+**Root cause:** `isDebugHudEnabled()` (Game1Controller.ts:1136) godtok både
+`?debug=1`, `?debug=true` OG `localStorage.DEBUG_SPILL1_DRAWS=true`.
+LocalStorage-flagg overlever sesjoner — QA-testere som satte flagget på
+delte test-maskiner forplantet det til alle senere brukere.
+
+**Fix:** Stram gating til **kun `?debug=full`** via URL. LocalStorage-flagg
+fjernet som trigger. Auto-cleanup av legacy `DEBUG_SPILL1_DRAWS`-flagg ved
+hver `Game1Controller.start()`.
+
+**Why URL-only:**
+1. Eksplisitt — `?debug=full` er for spesifikt til at uvitende brukere
+   skriver det
+2. URL-bound — forsvinner ved neste page-load (i motsetning til
+   localStorage som overlever)
+3. Stringent — `?debug=1` (kort form) vil IKKE aktivere (default-spillere
+   er trygge)
+
+**Prevention:**
+- ALDRI legg til localStorage-trigger for HUD — bryter "default off"
+- Hold gate URL-bound (sesjons-flyktig)
+- ALDRI gjør HUD on-by-default i dev (samme spillopplevelse i alle modus)
+- ConsoleBridge/FetchInstrument/ErrorHandler/FetchBridge har defense-in-
+  depth-gates som også sjekker `?debug=full`
+
+**EventTracker (singleton) er fortsatt alltid aktiv** — den emitter
+breadcrumbs til Sentry uavhengig av om HUD er mounted. Kun den visuelle
+overlay-en og instrumentation-modulene gates.
+
+**Filer:**
+- `packages/game-client/src/games/game1/Game1Controller.ts` (`isDebugHudEnabled`, `cleanupLegacyDebugFlag`)
+- `packages/game-client/src/games/game1/debug/DebugEventLogPanel.ts` (header-doc)
+- `packages/game-client/src/games/game1/debug/ConsoleBridge.ts` (gate)
+- `packages/game-client/src/games/game1/debug/FetchInstrument.ts` (gate)
+- `packages/game-client/src/games/game1/debug/FetchBridge.ts` (gate)
+- `packages/game-client/src/games/game1/debug/ErrorHandler.ts` (gate)
+
+**Tester oppdatert:**
+- `debug/__tests__/ErrorHandler.test.ts` (URL byttet til `?debug=full`)
+- `debug/__tests__/FetchInstrument.test.ts` (URL byttet til `?debug=full`)
+
+**Related:** skill `debug-hud-gating`, Tobias-direktiv 2026-05-15 ("fjern
+alle de debug feltnee ... full spillopplevelse")
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review

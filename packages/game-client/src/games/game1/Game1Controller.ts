@@ -307,21 +307,25 @@ class Game1Controller implements GameController {
   private myRoundWinnings: MyPhaseWinRecord[] = [];
 
   /**
-   * Debug event-log-panel (Tobias-direktiv 2026-05-12). Mountes når
-   * `?debug=1` i URL eller localStorage `DEBUG_SPILL1_DRAWS=true`. Henter
+   * Debug event-log-panel (Tobias-direktiv 2026-05-12, opt-in 2026-05-15).
+   * Mountes når `?debug=full` i URL. localStorage-flagg fjernet 2026-05-15
+   * fordi det lekte til prod-brukere og brøt full spillopplevelse. Henter
    * sin egen tracker via singleton `getEventTracker()`. Default null →
    * `mountDebugHud` lager instansen.
    */
   private debugEventPanel: DebugEventLogPanel | null = null;
 
   /**
-   * Auto-stream av tracker-events til backend (Tobias-direktiv 2026-05-12).
-   * Aktiveres når `?debug=1` i URL og `RESET_TEST_PLAYERS_TOKEN` er kjent
-   * via dev-config (eller URL-param `?debugToken=...` for ad-hoc). Default
-   * null → ingen streaming.
+   * Auto-stream av tracker-events til backend (Tobias-direktiv 2026-05-12,
+   * opt-in 2026-05-15). Aktiveres når `?debug=full` i URL og
+   * `RESET_TEST_PLAYERS_TOKEN` er kjent via dev-config (eller URL-param
+   * `?debugToken=...` for ad-hoc). Default null → ingen streaming.
    *
    * Beholder eksisterende dump-knapp som fallback: hvis streameren feiler
    * (eks. backend nede), kan Tobias fortsatt dumpe JSON-fil manuelt.
+   *
+   * EventTracker (singleton) er fortsatt alltid aktiv — den emitter
+   * breadcrumbs til Sentry uavhengig av debug-HUD-gating.
    */
   private debugEventStreamer: EventStreamer | null = null;
 
@@ -333,6 +337,12 @@ class Game1Controller implements GameController {
   async start(): Promise<void> {
     const { app, socket, bridge } = this.deps;
     app.stage.addChild(this.root);
+
+    // Tobias-direktiv 2026-05-15: rydd opp legacy localStorage-flagg
+    // (`DEBUG_SPILL1_DRAWS`) som tidligere trigget debug-HUD. Brukere som
+    // hadde flagget satt fra tidligere ville ellers fortsatt se HUD selv etter
+    // at vi byttet til `?debug=full`-only-gating. Fail-soft idempotent.
+    this.cleanupLegacyDebugFlag();
 
     // UI overlays
     const overlayContainer = app.app.canvas.parentElement ?? document.body;
@@ -894,11 +904,14 @@ class Game1Controller implements GameController {
       );
     });
 
-    // Tobias 2026-05-11 debug-HUD: vis hvilket rom + hall klienten faktisk
-    // havnet på. Aktiveres når `?debug=1` i URL eller localStorage
-    // DEBUG_SPILL1_DRAWS=true. Fast-position top-right slik at vi alltid
-    // ser om hall-default er isolert (rom-suffix `_HALL-DEFAULT` eller
+    // Tobias 2026-05-11 debug-HUD (opt-in 2026-05-15): vis hvilket rom + hall
+    // klienten faktisk havnet på. Aktiveres KUN når `?debug=full` i URL.
+    // localStorage-flagg `DEBUG_SPILL1_DRAWS` fjernet som trigger 2026-05-15
+    // fordi det lekte til prod-brukere. Fast-position top-right slik at vi
+    // alltid ser om hall-default er isolert (rom-suffix `_HALL-DEFAULT` eller
     // `_DEMO-DEFAULT-GOH`) vs. om den deler rom med pilot-haller.
+    //
+    // Default = ingen overlay = full spillopplevelse (per Tobias 2026-05-15).
     this.mountDebugHud();
 
     // Spillerklient lobby-init-order-fix (2026-05-10): playScreen ble
@@ -1120,15 +1133,19 @@ class Game1Controller implements GameController {
     this.root.destroy({ children: true });
   }
 
-  // ── Debug-HUD (Tobias 2026-05-11) ───────────────────────────────────────
+  // ── Debug-HUD (Tobias 2026-05-11, opt-in 2026-05-15) ────────────────────
   //
   // Vis fast-position-banner top-right med:
   //   roomCode | hallId | playerId | scheduledGameId | drawInterval
   //
-  // Aktiveres når `?debug=1` i URL eller localStorage DEBUG_SPILL1_DRAWS=true.
-  // Lar Tobias verifisere fra spillerklienten at hall-default er isolert
-  // (rom-suffix `_DEMO-DEFAULT-GOH` med kun seg selv som medlem) vs. om den
-  // deler rom med andre haller.
+  // Tobias-direktiv 2026-05-15: HUD + event-log-panel er SKJULT som default.
+  // Kun eksplisitt URL-param `?debug=full` aktiverer dem. Tidligere
+  // `?debug=1`/`?debug=true` og localStorage `DEBUG_SPILL1_DRAWS=true` er
+  // fjernet som triggers fordi de lekket til prod-brukere og brøt full
+  // spillopplevelse. EventTracker + EventStreamer (Sentry-breadcrumbs) er
+  // fortsatt alltid aktive — kun den visuelle overlay-en er gated her.
+  //
+  // For å aktivere debug-HUD: legg til `?debug=full` i URL.
 
   private debugHudEl: HTMLDivElement | null = null;
   private debugHudTextEl: HTMLPreElement | null = null;
@@ -1137,14 +1154,30 @@ class Game1Controller implements GameController {
     try {
       if (typeof window === "undefined") return false;
       const params = new URLSearchParams(window.location.search);
-      if (params.get("debug") === "1") return true;
-      if (params.get("debug") === "true") return true;
-      const ls = typeof window.localStorage !== "undefined"
-        ? window.localStorage.getItem("DEBUG_SPILL1_DRAWS")
-        : null;
-      return ls?.trim().toLowerCase() === "true";
+      // Tobias-direktiv 2026-05-15: KUN eksplisitt URL-param.
+      // localStorage-flagg + `?debug=1`/`?debug=true` fjernet for å sikre
+      // "full spillopplevelse" som default. For å aktivere debug-HUD:
+      // legg til ?debug=full i URL.
+      return params.get("debug") === "full";
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-15: rydd opp legacy localStorage-flagg som tidligere
+   * trigget debug-HUD. Brukere som hadde `DEBUG_SPILL1_DRAWS=true` fra tidligere
+   * sesjoner (eks. fra QA-test) ville ellers fortsatt se HUD permanent fordi
+   * flagget overlevde sesjoner. Idempotent og fail-soft — kjøres ved hver
+   * controller-instansiering.
+   */
+  private cleanupLegacyDebugFlag(): void {
+    try {
+      if (typeof window === "undefined") return;
+      if (typeof window.localStorage === "undefined") return;
+      window.localStorage.removeItem("DEBUG_SPILL1_DRAWS");
+    } catch {
+      // best-effort
     }
   }
 
@@ -1214,7 +1247,7 @@ class Game1Controller implements GameController {
 
     // Tobias-direktiv 2026-05-12: "Dump diagnose"-knapp i debug-HUD-en.
     // Trigger en JSON-download med hele event-log + session-kontekst.
-    // Aktiveres bak samme `?debug=1`-flagg som HUD-en.
+    // Aktiveres bak samme `?debug=full`-flagg som HUD-en (opt-in 2026-05-15).
     const dumpBtn = document.createElement("button");
     dumpBtn.textContent = "⬇ Dump diagnose";
     dumpBtn.title = "Last ned JSON-rapport (event-log + session-context)";
@@ -1327,9 +1360,9 @@ class Game1Controller implements GameController {
     // ConsoleBridge (Tobias-direktiv 2026-05-13): pipe relevant client-
     // console-output ([BUY-DEBUG], [ROOM], [CLI-BINGO], etc.) til
     // EventTracker så server-side monitor-agent ser samme data som Tobias
-    // ser i devtools. Gated på ?debug=1, idempotent installasjon, inert
-    // i prod. MUST komme FØR EventStreamer.start() så første console-
-    // bridged events også når streameren.
+    // ser i devtools. Gated på `?debug=full` (opt-in 2026-05-15), idempotent
+    // installasjon, inert i prod. MUST komme FØR EventStreamer.start() så
+    // første console-bridged events også når streameren.
     try {
       installConsoleBridge();
     } catch (err) {

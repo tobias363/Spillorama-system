@@ -30,7 +30,7 @@ describe("FetchInstrument", () => {
     resetEventTracker();
     // Aktiver debug-gate via URL
     if (typeof window !== "undefined" && window.history) {
-      window.history.replaceState({}, "", "/?debug=1");
+      window.history.replaceState({}, "", "/?debug=full");
     }
   });
 

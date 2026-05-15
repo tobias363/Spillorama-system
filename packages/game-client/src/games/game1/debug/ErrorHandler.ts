@@ -39,8 +39,9 @@ let installed = false;
 /**
  * Installer error- og rejection-handlers. Idempotent. Returnerer uninstall.
  *
- * Gate på `?debug=1` eller `localStorage.DEBUG_SPILL1_DRAWS=true` så
- * vi ikke har overhead i prod.
+ * Gate på `?debug=full` (Tobias-direktiv 2026-05-15) så vi ikke har overhead
+ * i prod og full spillopplevelse er default. Defense-in-depth — kalles
+ * uansett kun fra mountDebugHud som har samme gate.
  */
 export function installErrorHandler(): () => void {
   if (typeof window === "undefined") return () => {};
@@ -52,10 +53,7 @@ export function installErrorHandler(): () => void {
   const enabled = (() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get("debug") === "1") return true;
-      if (params.get("debug") === "true") return true;
-      const ls = window.localStorage?.getItem("DEBUG_SPILL1_DRAWS");
-      return ls?.trim().toLowerCase() === "true";
+      return params.get("debug") === "full";
     } catch {
       return false;
     }

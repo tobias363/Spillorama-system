@@ -21,7 +21,7 @@ describe("ErrorHandler", () => {
   beforeEach(() => {
     resetEventTracker();
     if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", "/?debug=1");
+      window.history.replaceState({}, "", "/?debug=full");
     }
   });
 

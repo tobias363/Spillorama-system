@@ -10,8 +10,10 @@
  *      med samme correlationId
  *   4. Resten passerer uendret til original fetch
  *
- * Gate på `?debug=1` eller `localStorage.DEBUG_SPILL1_DRAWS=true` så vi
- * ikke pålegger fetch-overhead i produksjon.
+ * Gate på `?debug=full` (Tobias-direktiv 2026-05-15) så vi ikke pålegger
+ * fetch-overhead i produksjon og full spillopplevelse er default. Tidligere
+ * `?debug=1`/`?debug=true` og localStorage `DEBUG_SPILL1_DRAWS` fjernet som
+ * triggers fordi de lekte til prod-brukere.
  *
  * Personvern:
  *   - URL track-es (kan inneholde query-params, men ikke passord)
@@ -37,17 +39,14 @@ const INSTALLED_KEY = "__spilloramaFetchBridgeInstalled";
 let installed = false;
 
 /**
- * Sjekk om bridge bør aktiveres — gate på `?debug=1` eller
- * `localStorage.DEBUG_SPILL1_DRAWS=true`.
+ * Sjekk om bridge bør aktiveres — gate på `?debug=full` (Tobias-direktiv
+ * 2026-05-15). Defense-in-depth — kalles uansett kun fra mountDebugHud.
  */
 function isEnabled(): boolean {
   if (typeof window === "undefined") return false;
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("debug") === "1") return true;
-    if (params.get("debug") === "true") return true;
-    const ls = window.localStorage?.getItem("DEBUG_SPILL1_DRAWS");
-    return ls?.trim().toLowerCase() === "true";
+    return params.get("debug") === "full";
   } catch {
     return false;
   }
