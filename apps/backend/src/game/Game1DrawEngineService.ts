@@ -2459,7 +2459,20 @@ export class Game1DrawEngineService {
       if (purchase.refundedAt) continue;
       let sequence = 1;
       for (const specEntry of purchase.ticketSpec) {
-        for (let i = 0; i < specEntry.count; i++) {
+        // 1 Stor X-bong = 3 brett per SPILL_REGLER §2 og §10.3
+        // (`LARGE_TICKET_PRICE_MULTIPLIER = 3` i GamePlanEngineBridge).
+        //
+        // Bug-fix 2026-05-15: tidligere genererte denne loopen kun
+        // `specEntry.count` brett uavhengig av størrelse, så 1 Stor Hvit
+        // ga 1 brett i DB istedenfor 3. Triple-grupperingen i frontend
+        // (PR #1512) kunne ikke matche fordi det fysisk ikke fantes 3
+        // brett av samme farge å gruppere. Samme fix finnes allerede i
+        // `Game1ScheduledRoomSnapshot.ensureAssignmentsForPurchases`
+        // (snapshot-path); denne pathen er engine-path som kjører ved
+        // master.startGame() og opprettholder samme invariant.
+        const brettPerUnit = specEntry.size === "large" ? 3 : 1;
+        const totalBrett = specEntry.count * brettPerUnit;
+        for (let i = 0; i < totalBrett; i++) {
           const grid = generateGridForTicket(specEntry.size, maxBallValue);
           // Free centre (idx 12, cell=0) starter som "markert". Alle andre
           // celler starter umarkert.
