@@ -285,18 +285,17 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       "Popup skal lukke seg etter kjøp",
     ).toBeHidden({ timeout: 10_000 });
 
-    // ── Steg 6: Verifiser 6 cards rendret ─────────────────────────────────
-    // Backend lagrer ÉN ticket-card per spec-entry — Stor representeres som 1
-    // card men "telles" som 3 brett. Vi får derfor 6 cards (1 per bongfarge).
-    // 12-brett-telling er kun i popup-totalen.
+    // ── Steg 6: Verifiser 12 cards rendret ────────────────────────────────
+    // Klienten rendrer én ticket-card per faktisk brett. Stor-bonger gir
+    // derfor 3 cards hver, ikke én samlet spec-entry.
     const ticketCards = page.locator('[data-test="ticket-card"]');
     await expect(
       ticketCards,
-      "Grid skal vise 6 cards (1 per spec-entry, 12 brett representert)",
-    ).toHaveCount(EXPECTED_ROWS.length, { timeout: 15_000 });
+      "Grid skal vise 12 cards (1 per faktisk brett)",
+    ).toHaveCount(EXPECTED_TOTAL_BRETT, { timeout: 15_000 });
 
     console.log(
-      `[test] ✓ Buy-flow ferdig: ${EXPECTED_TOTAL_BRETT} brett representert som ${EXPECTED_ROWS.length} cards`,
+      `[test] ✓ Buy-flow ferdig: ${EXPECTED_TOTAL_BRETT} brett rendret som ${EXPECTED_TOTAL_BRETT} cards`,
     );
 
     // ── Steg 7: Master start → status=running ──────────────────────────────

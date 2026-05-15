@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.20.1
+  version: 1.20.2
   project: spillorama
 ---
 
@@ -110,6 +110,7 @@ purchase_open            # ny plan-position, samme to-stegs regel
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
 - `tests/e2e/*spill1*.spec.ts` må bruke `openPurchaseWindow()` før kjøp. `markHallReady()` betyr at hallen er ferdig med salg og stenger kjøp for den hallen.
 - Stateful pilot-flow E2E må nullstille dagens plan-run i lokal test-DB før hver spec, ellers stopper en test dagens run og neste spec auto-advancer til neste plan-posisjon (inkl. jackpot-posisjon 7).
+- E2E-reset må bruke appens business-date (`Europe/Oslo`), ikke Postgres `CURRENT_DATE`. CI kan kjøre etter midnatt Oslo men før midnatt UTC; da sletter `CURRENT_DATE` feil dato og senere specs arver posisjon 7/jackpot-state.
 
 **Aldri gjør:**
 - Ikke sett nye plan-runtime scheduled-games direkte til `ready_to_start` hvis det gjør at master-start også starter engine i samme request.
@@ -1222,3 +1223,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.19.0 — Post-round-overlay data-driven dismiss (C-hybrid, branch `fix/post-round-overlay-data-driven-dismiss-2026-05-15`, Tobias-direktiv "Kjør C, tenker minimum 6 sek celebrasjon deretter vent", samme dag bumpet til 10 sek): erstatter timer-driven legacy-dismiss (`MIN_DISPLAY_MS=3s` + `markRoomReady`) med data-driven (`MIN_CELEBRATION_MS=10s` + `currentNextSlug !== justPlayedSlug` + `MAX_WAIT_MS=60s` safety-cap). Tobias-rapport 2026-05-15: spiller så stale "Neste spill: <samme som nettopp>"-tekst i 40 sek etter natural round-end. Legacy-modus beholdes for backward-compat (Game1EndOfRoundOverlay.test.ts 56 tester). Ny seksjon "Post-round-overlay data-driven dismiss" mellom "Tester som beskytter" og "Kanonisk referanse". PITFALLS §7.28 ny entry. Sentry-breadcrumb `endOfRoundOverlay.safetyCapDismiss` for ops-monitoring av cap-fires. |
 | 2026-05-15 | v1.20.0 — Purchase-open to-stegs master-flyt (P0): `GamePlanEngineBridge` oppretter nye plan-runtime scheduled-games som `purchase_open`, `MasterActionService.start()` og `advance()` returnerer uten engine-start for fresh `purchase_open`, og engine starter først ved neste master-start på eksisterende rad. UI-toast/label oppdatert så master ser "Bongesalg åpnet" / "Start trekninger nå". Baseline-forensics viste forrige live-runde hadde bare ca. 30 ms kjøpsvindu før engine-start. PITFALLS §3.17 + Agent Execution Log oppdatert. |
 | 2026-05-15 | v1.20.1 — E2E-testkontrakt for to-stegs flyt: `tests/e2e/helpers/rest.ts` har `openPurchaseWindow()` for første masterStart/purchase_open. Playwright-spesifikasjoner skal kjøpe før `markHallReady()`; `markHallReady()` stenger salget for hallen. Stateful pilot-flow-reset nullstiller dagens plan-run kun mot lokal CI/test-DB slik at hver spec starter på Bingo og ikke arver auto-advance til jackpot-posisjon 7. |
+| 2026-05-15 | v1.20.2 — Pilot-flow CI follow-up: E2E plan-run-reset bruker nå appens Oslo business-date i stedet for Postgres `CURRENT_DATE`, fordi CI-run kl. 22:44 UTC er neste business-date i Oslo. Uten dette slettes feil dagsrad og senere specs arver jackpot-posisjon 7. Rad-vinst-spec forventer nå 12 rendered ticket-cards, som matcher én card per faktisk brett. PITFALLS §6.19. |

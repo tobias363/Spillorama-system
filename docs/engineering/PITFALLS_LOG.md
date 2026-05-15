@@ -1647,6 +1647,28 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 
 ---
 
+### §6.19 — E2E plan-run-reset brukte DB `CURRENT_DATE` i stedet for appens Oslo business-date
+
+**Severity:** P1 (CI-blokker + falsk rød pilot-flow)
+**Oppdaget:** 2026-05-15 (PR #1548 `Pilot-flow E2E` kjørte 22:44 UTC, som er 00:44 i Oslo)
+**Symptom:** Første pilot-flow specs passet, men senere specs feilet med `JACKPOT_SETUP_REQUIRED` og `LOBBY_INCONSISTENT/BRIDGE_FAILED` på plan-posisjon 7. Reset-helperen skulle slette dagens `app_game_plan_run`, men runnen ble liggende og auto-advance-state lekket mellom specs.
+
+**Root cause:** `tests/e2e/helpers/rest.ts::resetPilotPlanRunForE2e()` brukte `business_date = CURRENT_DATE` og `scheduled_day = CURRENT_DATE` i Postgres. Appens business-date følger `Europe/Oslo`; GitHub Actions/Postgres kjører UTC. Mellom 22:00 og 23:59 UTC kan Oslo-dagen allerede være neste dato, mens `CURRENT_DATE` fortsatt er forrige UTC-dato.
+
+**Fix:** E2E-reset beregner app business-date eksplisitt med `Intl.DateTimeFormat(..., { timeZone: "Europe/Oslo" })` og sender den som SQL-parameter til både `app_game1_scheduled_games.scheduled_day` og `app_game_plan_run.business_date`.
+
+**Prevention:**
+- Test-cleanup som rydder business-date-rader må bruke samme timezone-kontrakt som applikasjonen, ikke DB-serverens `CURRENT_DATE`.
+- Søk spesielt etter `CURRENT_DATE` i E2E/test-harness-kode når CI-feil bare opptrer rundt norsk midnatt.
+- Pilot-flow specs er stateful selv med én worker. Hver spec må starte på deterministisk Bingo/posisjon 1 når testen handler om kjøpsflyt, ellers kan senere specs arve jackpot/plan-state fra tidligere specs.
+
+**Related:**
+- `tests/e2e/helpers/rest.ts` — `resetPilotPlanRunForE2e()`
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.2
+- PR #1548 `Pilot-flow E2E` failure run `25944762867`
+
+---
+
 ## §7 Frontend / Game-client
 
 ### §7.1 — Game1Controller default `variantConfig=STANDARD`
@@ -3545,3 +3567,4 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
 | 2026-05-15 | Lagt til §11.19 — high-risk agent-prompt som fritekst gir misforstått scope. Standardisert `npm run agent:contract` før implementation-agent. Total 107→108 entries. | PM-AI (agent-contract-hardening) |
 | 2026-05-15 | Lagt til §3.17 — purchase_open-vinduet ble hoppet over fordi plan-runtime opprettet `ready_to_start` og master-start kalte engine i samme request. Total 108→109 entries. | PM-AI (purchase_open P0 fix) |
+| 2026-05-15 | Lagt til §6.19 — E2E plan-run-reset må bruke appens Oslo business-date, ikke Postgres `CURRENT_DATE`, ellers lekker plan-posisjon 7/jackpot-state i CI rundt norsk midnatt. Total 109→110 entries. | PM-AI (purchase_open CI follow-up) |

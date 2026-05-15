@@ -4369,3 +4369,34 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/spill1-master-flow/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-15 — PM-AI: purchase_open Pilot-flow E2E CI follow-up
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Fikse rød `Pilot-flow E2E` på PR #1548 etter to-stegs `purchase_open`-implementasjonen.
+
+**Evidence brukt før kode:**
+- GitHub Actions job `Pilot-flow E2E`, run `25944762867`, job `76270369579`.
+- Failure-logg viste 4 passerte specs, deretter:
+  - `spill1-rad-vinst-flow`: forventet 6 ticket-cards, mottok 12.
+  - `spill1-reentry-during-draw` og `spill1-wallet-flow`: `JACKPOT_SETUP_REQUIRED` / `LOBBY_INCONSISTENT` på plan-posisjon 7.
+- CI-tidspunktet var `2026-05-15T22:44Z`, altså `2026-05-16` i `Europe/Oslo`.
+
+**Root cause:**
+- `resetPilotPlanRunForE2e()` brukte Postgres `CURRENT_DATE`. Appens business-date følger Oslo, mens CI/Postgres kjører UTC. Rundt norsk midnatt slettet reset feil dato og plan-run state lekket mellom specs.
+- `spill1-rad-vinst-flow.spec.ts` hadde fortsatt gammel forventning om 6 rendered cards, selv om klienten rendrer 12 cards (én per faktisk brett).
+
+**Outputs:**
+- `tests/e2e/helpers/rest.ts` — ny app business-date helper (`Europe/Oslo`) brukes som SQL-parameter for scheduled-game og plan-run cleanup.
+- `tests/e2e/spill1-rad-vinst-flow.spec.ts` — ticket-card assertion oppdatert til `EXPECTED_TOTAL_BRETT` (12).
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.2 — dokumenterer timezone-invarianten.
+- `docs/engineering/PITFALLS_LOG.md` §6.19 — ny test-infra fallgruve.
+- `docs/delta/2026-05-15-purchase-open-two-step-master-flow.md` — delta oppdatert.
+
+**Validering:**
+- `npx playwright test --config=tests/e2e/playwright.config.ts --list` — 7 specs listet uten TS/transpile-feil.
+- `git diff --check` — pass.
+
+**Læring:**
+- I Spillorama er "dagens run" en forretningsdato, ikke DB-serverens kalenderdato. Test-harness må følge samme timezone som appen.
+- Når pilot-flow specs kjøres serialisert i samme DB, én feil reset kan gjøre senere specs meningsløse. Første feil i loggen er ikke alltid eneste årsak; state-lekkasje må analyseres separat.

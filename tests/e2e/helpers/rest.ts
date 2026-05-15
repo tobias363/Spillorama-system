@@ -219,6 +219,16 @@ export interface ResetPilotStateOptions {
 }
 
 const E2E_MASTER_HALL_ID = "demo-hall-001";
+const APP_BUSINESS_TIME_ZONE = "Europe/Oslo";
+
+function getAppBusinessDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
 
 function getSafeE2eDbConfig():
   | { connectionString: string; schema: string }
@@ -259,6 +269,8 @@ export async function resetPilotPlanRunForE2e(): Promise<void> {
   const config = getSafeE2eDbConfig();
   if (!config) return;
 
+  const businessDate = getAppBusinessDate();
+
   const { Client } = await import("pg");
   const client = new Client({ connectionString: config.connectionString });
   await client.connect();
@@ -270,16 +282,16 @@ export async function resetPilotPlanRunForE2e(): Promise<void> {
               actual_end_time = COALESCE(actual_end_time, now()),
               stop_reason = COALESCE(stop_reason, 'e2e_reset_plan_run'),
               updated_at = now()
-        WHERE master_hall_id = $1
-          AND scheduled_day = CURRENT_DATE
-          AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')`,
-      [E2E_MASTER_HALL_ID],
+       WHERE master_hall_id = $1
+         AND scheduled_day = $2::date
+         AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')`,
+      [E2E_MASTER_HALL_ID, businessDate],
     );
     await client.query(
       `DELETE FROM "${config.schema}"."app_game_plan_run"
-        WHERE hall_id = $1
-          AND business_date = CURRENT_DATE`,
-      [E2E_MASTER_HALL_ID],
+       WHERE hall_id = $1
+         AND business_date = $2::date`,
+      [E2E_MASTER_HALL_ID, businessDate],
     );
     await client.query("COMMIT");
   } catch (err) {
