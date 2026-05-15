@@ -48,7 +48,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 14 | 2026-05-15 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 15 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 104 entries (per 2026-05-15)
+**Total:** 105 entries (per 2026-05-15)
 
 ---
 
@@ -1223,6 +1223,21 @@ const labels = new Set((liveIssue.labels || [])
 **Related:**
 - `.github/workflows/pm-gate-enforcement.yml`
 - `pm-orchestration-pattern` skill v1.2.2
+
+### §5.15 — Required check må ikke ha PR path-filter som gjør checken missing
+
+**Severity:** P1 (branch protection deadlock)
+**Oppdaget:** 2026-05-15 etter merge av PR #1531, under manuell auto-doc PR #1532.
+**Symptom:** PR #1532 hadde alle triggete required checks grønne, men merge var blokkert. Admin-merge feilet med `Required status check "pitfalls-id-validation" is expected.`
+**Root cause:** Branch protection forventer check-context `pitfalls-id-validation`, men `.github/workflows/pitfalls-id-validate.yml` hadde `pull_request.paths` som bare trigget på `PITFALLS_LOG.md`, `scripts/check-pitfalls-ids.mjs` eller workflow-fila. Auto-doc PR-er endrer kun `docs/auto-generated/*`, så workflowen ble aldri opprettet. For GitHub branch protection er "workflow ikke trigget" ikke det samme som "check passert".
+**Fix:** Fjern `pull_request.paths` fra required-check-workflowen slik at `pitfalls-id-validation` alltid kjører på PR. Behold eventuelt `push.paths` for main hvis ønsket, men PR-siden må alltid produsere check-context.
+**Prevention:**
+- Alle checks som ligger i branch protection må kjøre på alle PR-er, eller ha en separat always-run aggregator/check som rapporterer success når scope er irrelevant.
+- Ikke bruk `paths:` på required PR-checks med mindre branch protection peker til en always-present wrapper-jobb.
+- Test required-check-endringer med en docs-only PR og verifiser `gh pr checks --required <nr>` viser checken som `pass`, ikke missing.
+**Related:**
+- `.github/workflows/pitfalls-id-validate.yml`
+- PR #1532 (`auto-doc/refresh-snapshot`)
 
 ---
 
@@ -3410,3 +3425,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-15 | Lagt til §7.27 — PauseOverlay vist feilaktig etter natural round-end (P0 pilot-blokker). Spill 1 auto-pauser etter hver phase-won (Tobias-direktiv 2026-04-27), og `paused`-flagget i `app_game1_game_state` resettes ikke alltid før status flippes til 'completed'. Snapshot speiler `paused` til klient-`isPaused`, så klient så `gameStatus=ENDED && isPaused=true` → PauseOverlay viste seg feilaktig. Fix: klient-side gate `state.isPaused && state.gameStatus === "RUNNING"` i `Game1Controller.onStateChanged`. Defense-in-depth selv om backend en gang i fremtiden rydder paused-flagget — gate-en er kontrakten med spillerne. Kanonisk spec: SPILL1_IMPLEMENTATION_STATUS §5.8. 11 pure-funksjons-tester i `Game1Controller.pauseOverlayGating.test.ts`. | Fix-agent (post-round-flyt §5.8) |
 | 2026-05-15 | Lagt til §7.30 — Triple-bong-rendering cross-color grouping bug (P0 pilot-blokker — visuell regresjon på master-flyt). PR #1500 (Bølge 2) introduserte purchaseId + sequenceInPurchase men hadde 3 lag med bugs: (A) pre-runde display-tickets manglet purchaseId helt → frontend grupperte tilfeldige tickets, (B) backend `ensureAssignmentsForPurchases` iterated `count` ganger uavhengig av `spec.size` så 1 Stor (= 3 brett) ble bare 1 row, (C) cross-color cart delte samme purchaseId så `tryGroupTriplet` grupperte forskjellige farger sammen. Fix: 3 lag løst — frontend color-family-validation, backend `LARGE_TICKET_BRETT_COUNT=3`-multiplier, og syntetisk bundle-id-generering i `getOrCreateDisplayTickets`. Tobias' eksakte scenario (1H+1G+1L Stor = 3 triplets) nå dekket av test. | Fix-agent (Tobias 2026-05-15 triple-rendering screenshot) |
 | 2026-05-15 | Lagt til §8.8 — PM Knowledge Continuity v2: evidence pack + self-test-gate for å bevise operativ kunnskapsparitet, ikke bare at dokumenter finnes. Total 103→104 entries. | PM-AI (knowledge-continuity-hardening) |
+| 2026-05-15 | Lagt til §5.15 — required checks må ikke ha PR path-filter som gjør check-context missing. Funnet da auto-doc PR #1532 ble blokkert av forventet `pitfalls-id-validation`. Total 104→105 entries. | PM-AI (post-merge CI watcher) |

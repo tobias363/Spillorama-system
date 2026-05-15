@@ -2,7 +2,7 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.3.0
+  version: 1.3.1
   project: spillorama
 ---
 
@@ -340,6 +340,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 5+ parallelle agenter uten worktree-isolasjon | File-revert-konflikter ved merge | ALLTID `isolation: worktree` for ≥ 2 parallelle agenter |
 | Aktiverer required reviews uten approver-roster | PR-er låses eller "review" blir falsk uavhengighet | Følg `ACCESS_APPROVAL_MATRIX.md` §6-§7 før branch protection endres |
 | PM har dokumentene, men ingen operativ self-test | Ny PM spør om allerede dokumentert kontekst eller pivot-er fra forrige spor | Kjør `pm-knowledge-continuity.mjs` evidence pack + self-test før første kodehandling |
+| Required check har `pull_request.paths`-filter | Docs-only/auto-doc PR mangler check-context og branch protection blokkerer merge | Required PR-checks må alltid kjøre, eller ha always-run wrapper-jobb |
 
 ## Kanonisk referanse
 

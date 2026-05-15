@@ -4210,3 +4210,23 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 
 **Branch:** `codex/pm-knowledge-continuity-v2`
 **PR:** åpnes av PM etter lokal validering.
+
+### 2026-05-15 — PM-AI: required PITFALLS check path-filter fix
+
+**Agent-type:** PM/devops-fix-agent
+**Scope:** Fikse branch-protection deadlock oppdaget etter PR #1531 merge, der auto-doc PR #1532 ikke kunne merges fordi required check `pitfalls-id-validation` aldri ble trigget.
+**Trigger:** Post-merge watcher viste rød `Auto-generate architecture docs`; workflowen hadde pushet `auto-doc/refresh-snapshot`, men GitHub Actions manglet repo-permission til å opprette PR. Da PM åpnet PR #1532 manuelt, var alle triggete checks grønne, men merge ble blokkert av missing `pitfalls-id-validation`.
+
+**Outputs:**
+- `.github/workflows/pitfalls-id-validate.yml` — fjernet `pull_request.paths`, slik required check-context alltid finnes på PR.
+- `docs/engineering/PITFALLS_LOG.md` §5.15 — dokumenterer required-check/path-filter-fellen.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.1 — legger til regel om always-run required checks.
+- Denne `AGENT_EXECUTION_LOG`-entryen.
+
+**Læring:**
+- En required GitHub check må produseres på alle PR-er. Path-filter på selve required workflowen gir missing check, ikke pass/skip.
+- For scope-spesifikke gates: bruk always-run wrapper-jobb som selv bestemmer om scope er relevant, eller ikke sett checken som required.
+- Post-merge auto-doc workflow trenger i tillegg repo-setting/token som lar GitHub Actions opprette PR-er. Dagens token kunne pushe branch, men ikke opprette PR.
+
+**Branch:** `codex/fix-required-pitfalls-check-path-filter`
+**PR:** åpnes av PM etter lokal validering.
