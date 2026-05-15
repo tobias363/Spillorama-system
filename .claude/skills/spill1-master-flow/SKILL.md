@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.20.2
+  version: 1.20.3
   project: spillorama
 ---
 
@@ -111,12 +111,14 @@ purchase_open            # ny plan-position, samme to-stegs regel
 - `tests/e2e/*spill1*.spec.ts` må bruke `openPurchaseWindow()` før kjøp. `markHallReady()` betyr at hallen er ferdig med salg og stenger kjøp for den hallen.
 - Stateful pilot-flow E2E må nullstille dagens plan-run i lokal test-DB før hver spec, ellers stopper en test dagens run og neste spec auto-advancer til neste plan-posisjon (inkl. jackpot-posisjon 7).
 - E2E-reset må bruke appens business-date (`Europe/Oslo`), ikke Postgres `CURRENT_DATE`. CI kan kjøre etter midnatt Oslo men før midnatt UTC; da sletter `CURRENT_DATE` feil dato og senere specs arver posisjon 7/jackpot-state.
+- Pilot-flow CI kjører med `JOBS_ENABLED=false`. Tester som trenger scheduled Spill 1 draws må drive `Game1DrawEngineService.drawNext()` eksplisitt via test-only `POST /api/admin/game1/games/:gameId/e2e-draw-next` / `scheduledDrawNext()`, ikke vente på `game1-auto-draw-tick`.
 
 **Aldri gjør:**
 - Ikke sett nye plan-runtime scheduled-games direkte til `ready_to_start` hvis det gjør at master-start også starter engine i samme request.
 - Ikke fjern early-returnen i `MasterActionService.start()` for fresh `purchase_open`.
 - Ikke bruk cron-fixen som eneste løsning for plan-runtime. Forensics viste at master pathen selv startet engine umiddelbart.
 - Ikke la UI vise "Spill 1 startet" når backend returnerer `scheduledGameStatus='purchase_open'`.
+- Ikke slå på `JOBS_ENABLED=true` i pilot-flow CI for å få Rad-vinst-testen grønn. Det aktiverer hele scheduler-flaten og bryter deterministisk test-eierskap.
 
 ### Backend-services
 
@@ -1224,3 +1226,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.20.0 — Purchase-open to-stegs master-flyt (P0): `GamePlanEngineBridge` oppretter nye plan-runtime scheduled-games som `purchase_open`, `MasterActionService.start()` og `advance()` returnerer uten engine-start for fresh `purchase_open`, og engine starter først ved neste master-start på eksisterende rad. UI-toast/label oppdatert så master ser "Bongesalg åpnet" / "Start trekninger nå". Baseline-forensics viste forrige live-runde hadde bare ca. 30 ms kjøpsvindu før engine-start. PITFALLS §3.17 + Agent Execution Log oppdatert. |
 | 2026-05-15 | v1.20.1 — E2E-testkontrakt for to-stegs flyt: `tests/e2e/helpers/rest.ts` har `openPurchaseWindow()` for første masterStart/purchase_open. Playwright-spesifikasjoner skal kjøpe før `markHallReady()`; `markHallReady()` stenger salget for hallen. Stateful pilot-flow-reset nullstiller dagens plan-run kun mot lokal CI/test-DB slik at hver spec starter på Bingo og ikke arver auto-advance til jackpot-posisjon 7. |
 | 2026-05-15 | v1.20.2 — Pilot-flow CI follow-up: E2E plan-run-reset bruker nå appens Oslo business-date i stedet for Postgres `CURRENT_DATE`, fordi CI-run kl. 22:44 UTC er neste business-date i Oslo. Uten dette slettes feil dagsrad og senere specs arver jackpot-posisjon 7. Rad-vinst-spec forventer nå 12 rendered ticket-cards, som matcher én card per faktisk brett. PITFALLS §6.19. |
+| 2026-05-15 | v1.20.3 — Pilot-flow CI follow-up 2: Rad-vinst-spec driver scheduled draws eksplisitt via test-only `e2e-draw-next`/`scheduledDrawNext()` fordi workflowen kjører med `JOBS_ENABLED=false`. Ikke slå på scheduler-jobs i CI for å reparere denne testen; hold tests deterministiske og dokumenter scheduled draw-driveren. PITFALLS §6.20. |

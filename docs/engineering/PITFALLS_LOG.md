@@ -49,7 +49,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 15 | 2026-05-15 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 18 | 2026-05-15 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 109 entries (per 2026-05-15)
+**Total:** 111 entries (per 2026-05-15)
 
 ---
 
@@ -1428,15 +1428,13 @@ const detail = await fetch(`/api/admin/game1/games/${gameId}`, { headers: { Auth
 **Severity:** P3 (test-design)
 **Oppdaget:** 2026-05-13
 **Symptom:** `POST /api/admin/rooms/BINGO_DEMO-PILOT-GOH/draw-next` returnerer `USE_SCHEDULED_API: "Scheduled Spill 1 må trekkes via Game1DrawEngineService — ikke BingoEngine."`
-**Root cause:** `BingoEngine.drawNextNumber` kaster `USE_SCHEDULED_API` for scheduled Spill 1 (slug=bingo). Det finnes ingen public/admin REST-endpoint som wrapper `Game1DrawEngineService.drawNext(scheduledGameId)`. Eneste vei til scheduled draws er:
-1. Auto-tick (cron, 4s interval per `Game1AutoDrawTickService.defaultSeconds`)
-2. Socket-event `draw:next` (krever socket-connection)
+**Root cause:** `BingoEngine.drawNextNumber` kaster `USE_SCHEDULED_API` for scheduled Spill 1 (slug=bingo). Legacy room-endpointet er for ikke-scheduled room-engine, ikke plan-runtime scheduled-game.
 
-**Konsekvens for tester:** Kan ikke akselerere draws. Må vente på auto-tick — minimum ~100s for 25 draws.
+**Konsekvens for tester:** Tester som bruker room-endpointet vil aldri trekke scheduled Spill 1. Før 2026-05-15 betydde dette at man måtte vente på auto-tick/socket. Etter PR #1548 skal E2E bruke test-only `scheduledDrawNext()` i stedet.
 
-**Fix-forslag (post-pilot):** Legg til `POST /api/admin/game1/games/:gameId/draw-next` (krever GAME1_MASTER_WRITE) som wrapper `Game1DrawEngineService.drawNext`. Gir oss kontroll over draws fra tester + admin-UI for debug.
+**Fix:** For E2E finnes nå test-only `POST /api/admin/game1/games/:gameId/e2e-draw-next` (kun `NODE_ENV=test` eller `E2E_ENABLE_MANUAL_GAME1_DRAW=1`) som wrapper `Game1DrawEngineService.drawNext`. Ikke eksponer dette som vanlig prod-admin-endpoint uten separat sikkerhets-/compliance-vurdering.
 
-**Prevention:** Test-design: bruk tids-basert polling (`while (Date.now() - start < timeout)`), ikke antall-basert (`for (i = 0 to N)`). Test-timeout 5min er nok for full Rad 1→Rad 2-flyt.
+**Prevention:** Scheduled Spill 1-tester må bruke scheduled-game-id og `scheduledDrawNext()`. Legacy `/api/admin/rooms/:code/draw-next` er fortsatt feil flate for plan-runtime Spill 1.
 
 ### §6.11 — macOS BSD awk støtter ikke `match(..., array)` (GNU awk-only)
 
@@ -1666,6 +1664,37 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - `tests/e2e/helpers/rest.ts` — `resetPilotPlanRunForE2e()`
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.20.2
 - PR #1548 `Pilot-flow E2E` failure run `25944762867`
+
+---
+
+### §6.20 — Pilot-flow E2E ventet på auto-draw mens CI kjører `JOBS_ENABLED=false`
+
+**Severity:** P1 (CI-blokker + feil mental modell for test-driver)
+**Oppdaget:** 2026-05-15 (PR #1548 `Pilot-flow E2E`, run `25945194884`)
+**Symptom:** `spill1-rad-vinst-flow.spec.ts` startet scheduled-game korrekt (`gameStatus=running`, `currentPhase=1`), men `drawsCompleted` ble stående på 0 og Rad 1 ble aldri vunnet innen timeout.
+
+**Root cause:** Workflowen `.github/workflows/pilot-flow-e2e.yml` setter `JOBS_ENABLED=false` med vilje, slik at CI ikke kjører cron/scheduler jobs. Rad-vinst-testen ventet fortsatt på `game1-auto-draw-tick`, som derfor aldri kjørte. Å slå på `JOBS_ENABLED=true` ville aktivert hele scheduler-flaten og gjort testen mindre deterministisk.
+
+**Fix:** Legg inn test-only scheduled draw-driver:
+- `POST /api/admin/game1/games/:gameId/e2e-draw-next` i `apps/backend/src/routes/adminGame1Master.ts`
+- kun tilgjengelig i `NODE_ENV=test` eller eksplisitt `E2E_ENABLE_MANUAL_GAME1_DRAW=1`
+- krever `GAME1_MASTER_WRITE` og hall-scope mot master-hall
+- kaller `Game1DrawEngineService.drawNext(gameId)`
+- `tests/e2e/helpers/rad-vinst-helpers.ts::scheduledDrawNext()` brukes av Rad-vinst-testen til å trekke deterministisk til phase-advance
+
+**Prevention:**
+- Pilot-flow specs skal eie alle state transitions eksplisitt når workflowen kjører med `JOBS_ENABLED=false`.
+- Ikke reparer denne typen E2E ved å slå på scheduler-jobs globalt i CI.
+- Hvis en test trenger scheduled Spill 1-draws, bruk `scheduledDrawNext()` og dokumenter hvorfor endpointet er test-only.
+- Legacy `/api/admin/rooms/:code/draw-next` gjelder ikke scheduled Spill 1; den gir `USE_SCHEDULED_API`.
+
+**Related:**
+- `.github/workflows/pilot-flow-e2e.yml`
+- `apps/backend/src/routes/adminGame1Master.ts`
+- `tests/e2e/helpers/rad-vinst-helpers.ts`
+- `tests/e2e/spill1-rad-vinst-flow.spec.ts`
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.3
+- PR #1548 `Pilot-flow E2E` failure run `25945194884`
 
 ---
 
@@ -3462,6 +3491,44 @@ Lim hele kontrakten inn i agent-prompten.
 - `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`
 - `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.4
 
+### §11.20 — Agent-contract uten skill-SHA-lockfile mister reproduserbarhet
+
+**Severity:** P2 (audit-trail-svekkelse, ikke akutt prod-risiko)
+**Oppdaget:** 2026-05-16 (konsulent-review Fase 2 etter ADR-0024)
+**Symptom:** En PM kan ikke etterpå svare på "hvilken skill-versjon jobbet agenten faktisk mot?". Skills oppdateres ukentlig (`skill-freshness-weekly.yml` beviser det), så en kontrakt generert mandag og brukt fredag kan referere skills som har endret seg under hånden.
+**Root cause:** Tidligere `generate-agent-contract.sh` skrev kun `skill`-navn — ingen versjon, ingen commit-SHA. Reproducerbarhet av en gammel agent-leveranse var umulig.
+**Fix:** Scriptet capture-er nå `skill@version@SHA` (12-tegns short-SHA) ved generering. Ny `scripts/verify-contract-freshness.mjs` validerer drift før agent-spawn.
+**Prevention:**
+- PM kjører `node scripts/verify-contract-freshness.mjs <contract.md>` før kontrakten limes inn i prompt.
+- Drift = vurder reroll. Hvis ikke reroll: les diff og dokumenter beslutning i delivery-report.
+- Skill-versjoner skal bumpes (semver) når innhold endres meningsfullt, ikke bare ved typo-fix.
+**Related:**
+- `scripts/generate-agent-contract.sh` (Fase 2-modifikasjon)
+- `scripts/verify-contract-freshness.mjs` (ny)
+- `docs/engineering/AGENT_TASK_CONTRACT.md` Regel 8 (Fase 2)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.4.0
+
+### §11.21 — Evidence-pack i /tmp overlever ikke reboot eller audit
+
+**Severity:** P2 (audit-trail-svekkelse)
+**Oppdaget:** 2026-05-16 (konsulent-review Fase 2 etter ADR-0024)
+**Symptom:** Forensic-rapporter brukt som agent-contract-evidence (eks. `/tmp/purchase-open-forensics-2026-05-15T20-23-37Z.md`) er borte ved restart eller etter dager. Når Tobias eller ny PM 3 måneder senere prøver å forstå hvorfor en beslutning ble tatt, finnes ikke grunnlaget lenger. For et system med ekte penger + compliance er det ikke akseptabelt.
+**Root cause:** Konvensjon for evidence-storage var ad-hoc `/tmp/`-bruk. Ingen mappe-struktur, ingen commit-policy, ingen retensjons-plan.
+**Fix:**
+- Ny konvensjon `docs/evidence/<contract-id>/` der `<contract-id>` er `YYYYMMDD-<short-agent-slug>` generert av `generate-agent-contract.sh`.
+- Scriptet advarer ved ephemeral evidence (`/tmp/*`, `/var/folders/*`) og foreslår eksakte `cp`-kommandoer.
+- `docs/evidence/README.md` definerer commit-policy: ja for forensics/snapshots/sentry-eksporter, nei for PII/credentials før skrubbing.
+**Prevention:**
+- For high-risk kontrakter (P0/P1, compliance, wallet, live-room) skal evidence kopieres til `docs/evidence/<contract-id>/` FØR agent-spawn.
+- PR-template peker til `docs/evidence/<contract-id>/` ved high-risk arbeid.
+- Lotteritilsynet-relevant evidence holdes uavkortet i 5 år per regulatoriske krav.
+**Related:**
+- `docs/evidence/README.md` (ny)
+- `scripts/generate-agent-contract.sh` (Fase 2-modifikasjon)
+- `docs/engineering/AGENT_TASK_CONTRACT.md` Regel 9 (Fase 2)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
+
 ---
 
 ## §12 DB-resilience
@@ -3566,5 +3633,7 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §5.15 — required checks må ikke ha PR path-filter som gjør check-context missing. Funnet da auto-doc PR #1532 ble blokkert av forventet `pitfalls-id-validation`. Total 104→105 entries. | PM-AI (post-merge CI watcher) |
 | 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
 | 2026-05-15 | Lagt til §11.19 — high-risk agent-prompt som fritekst gir misforstått scope. Standardisert `npm run agent:contract` før implementation-agent. Total 107→108 entries. | PM-AI (agent-contract-hardening) |
+| 2026-05-16 | Lagt til §11.20 (agent-contract uten skill-SHA-lockfile mister reproduserbarhet) + §11.21 (evidence-pack i /tmp overlever ikke audit). Fase 2-follow-up av ADR-0024: skill-SHA-lockfile + persistent evidence i `docs/evidence/<contract-id>/`. Total 108→110 entries. | PM-AI (Fase 2 — skill-lockfile + evidence-persistence) |
 | 2026-05-15 | Lagt til §3.17 — purchase_open-vinduet ble hoppet over fordi plan-runtime opprettet `ready_to_start` og master-start kalte engine i samme request. Total 108→109 entries. | PM-AI (purchase_open P0 fix) |
 | 2026-05-15 | Lagt til §6.19 — E2E plan-run-reset må bruke appens Oslo business-date, ikke Postgres `CURRENT_DATE`, ellers lekker plan-posisjon 7/jackpot-state i CI rundt norsk midnatt. Total 109→110 entries. | PM-AI (purchase_open CI follow-up) |
+| 2026-05-15 | Lagt til §6.20 — Pilot-flow Rad-vinst-test må drive scheduled draws eksplisitt fordi CI kjører med `JOBS_ENABLED=false`; ikke slå på scheduler-jobs for å få testen grønn. Total 110→111 entries. | PM-AI (purchase_open CI follow-up 2) |

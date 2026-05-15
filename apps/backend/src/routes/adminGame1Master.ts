@@ -10,6 +10,7 @@
  *   POST /api/admin/game1/games/:gameId/pause           (GAME1_MASTER_WRITE)
  *   POST /api/admin/game1/games/:gameId/resume          (GAME1_MASTER_WRITE)
  *   POST /api/admin/game1/games/:gameId/stop            (GAME1_MASTER_WRITE)
+ *   POST /api/admin/game1/games/:gameId/e2e-draw-next   (NODE_ENV=test only)
  *   GET  /api/admin/game1/games/:gameId                 (GAME1_GAME_READ)
  *
  * Rolle-krav:
@@ -705,6 +706,53 @@ export function createAdminGame1MasterRouter(
         status: result.status,
         actualEndTime: result.actualEndTime,
         auditId: result.auditId,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── POST /e2e-draw-next ──────────────────────────────────────────────────
+  //
+  // Test-only manual draw driver for scheduled Spill 1. Pilot-flow CI runs with
+  // JOBS_ENABLED=false, so E2E tests must not wait on game1-auto-draw-tick.
+  // This route is deliberately unavailable outside NODE_ENV=test unless
+  // E2E_ENABLE_MANUAL_GAME1_DRAW=1 is set for a local diagnostic run.
+
+  router.post("/api/admin/game1/games/:gameId/e2e-draw-next", async (req, res) => {
+    try {
+      const e2eDrawEnabled =
+        process.env.NODE_ENV === "test" ||
+        process.env.E2E_ENABLE_MANUAL_GAME1_DRAW === "1";
+      if (!e2eDrawEnabled) {
+        throw new DomainError(
+          "E2E_DRAW_NEXT_DISABLED",
+          "Manuell scheduled draw er kun tilgjengelig i testmiljø."
+        );
+      }
+      if (!drawEngine) {
+        throw new DomainError(
+          "DRAW_ENGINE_NOT_CONFIGURED",
+          "Draw-engine er ikke koblet inn på denne instansen."
+        );
+      }
+
+      const actor = await requirePermission(req, "GAME1_MASTER_WRITE");
+      const gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
+      const { masterHallId } = await loadMasterHallId(gameId);
+      assertHallScopeForReschedule(actor, masterHallId);
+
+      const view = await drawEngine.drawNext(gameId);
+      apiSuccess(res, {
+        gameId,
+        engineState: {
+          currentPhase: view.currentPhase,
+          drawsCompleted: view.drawsCompleted,
+          lastDrawnBall: view.lastDrawnBall,
+          isFinished: view.isFinished,
+          isPaused: view.isPaused,
+          pausedAtPhase: view.pausedAtPhase,
+        },
       });
     } catch (error) {
       apiFailure(res, error);

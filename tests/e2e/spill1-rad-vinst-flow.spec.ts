@@ -12,6 +12,7 @@ import {
   masterPause,
   masterResume,
   resetPilotStateExt,
+  scheduledDrawNext,
 } from "./helpers/rad-vinst-helpers.js";
 
 /**
@@ -37,12 +38,12 @@ import {
  * Test-progresjon:
  *   1.  (REST) Auto-login master + admin + spiller
  *   2.  (REST) Reset pilot-state (destroyRooms: true så vi starter rent)
- *   3.  (REST) Mark hall ready → lazy-spawner scheduled-game
- *   4.  (REST) Master start → status=running
- *   5.  (UI)   Spiller åpner klient, klikker Bingo-tile, kjøper 12 brett
- *   6.  (UI)   Verifiser 6 cards rendret i ticket-grid (12 brett representert)
- *   7.  (REST) Trekk baller manuelt via `adminDrawNext` (raskere enn auto-tick)
- *             til Rad 1-vinst registreres
+ *   3.  (REST) Master åpner purchase_open-vindu uten å starte trekning
+ *   4.  (UI)   Spiller åpner klient, klikker Bingo-tile, kjøper 12 brett
+ *   5.  (REST) Mark hall ready + master start → status=running
+ *   6.  (UI)   Verifiser 12 cards rendret i ticket-grid (1 per brett)
+ *   7.  (REST) Trekk scheduled-game-baller eksplisitt via test-only
+ *             `e2e-draw-next` til Rad 1-vinst registreres
  *   8.  (UI)   Verifiser WinPopup (`data-test="win-popup-backdrop"`) ELLER
  *             engine-snapshot claimsCount > 0
  *   9.  (REST) Master Pause (engine.paused=true, draws stopper)
@@ -147,12 +148,9 @@ const EXPECTED_TOTAL_BRETT = EXPECTED_ROWS.reduce(
 );
 
 /**
- * Maks antall draws vi trekker per fase. Med 12 brett × 5 rader = 60 row-
- * muligheter, sannsynlighet at minst ett brett har 5/5 på en rad innen 25
- * draws er > 95%. 35 gir solid margin for å unngå flakiness.
+ * Maks antall draws trekkes inline per fase. 75 kuler dekker hele B1-B75-
+ * rommet og gjør testen deterministisk nok uten å lene seg på auto-tick-jobs.
  */
-// (MAX_DRAWS_TO_RAD1/2 utgår — vi bruker tids-basert polling istedenfor antall
-//  draws. RAD1_TIMEOUT_MS og RAD2_TIMEOUT_MS er definert inline i test-body.)
 
 test.describe("Spill 1 Rad-vinst-flow", () => {
   test.describe.configure({ mode: "serial" });
@@ -162,9 +160,8 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
   let initialScheduledGameId: string;
 
   test.beforeAll(async () => {
-    // 1. Auto-login master. Admin-token (ADMIN_EMAIL) er ikke lenger nødvendig
-    //    siden vi bruker auto-tick draws istedenfor /api/admin/rooms/.../draw-next
-    //    (som er blokkert for scheduled Spill 1 — USE_SCHEDULED_API).
+    // 1. Auto-login master. Samme token brukes til test-only scheduled draws,
+    //    slik at hall-scope og GAME1_MASTER_WRITE håndheves også i CI.
     const master = await autoLogin(MASTER_EMAIL);
     masterToken = master.accessToken;
     expect(master.hallId, "Master må være tilknyttet pilot-hall").toBe(HALL_ID);
@@ -191,9 +188,8 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
   test("master + spiller + master Fortsett-flyt for Rad 1 → Rad 2", async ({
     page,
   }) => {
-    // Auto-tick kjører hvert 4. sek (Game1AutoDrawTickService.defaultSeconds).
-    // Med polling-strategi for Rad 1 (~90s) + pause/resume (~5s) + Rad 2
-    // polling (~90s) + setup-overhead (~30s) trenger vi minst 240s.
+    // Pilot-flow CI kjører med JOBS_ENABLED=false. Testen driver derfor draws
+    // eksplisitt via scheduledDrawNext i stedet for å vente på auto-tick.
     test.setTimeout(300_000);
 
     // ── Steg 3: Åpne kjøpsvindu uten å starte trekning ────────────────────
@@ -323,36 +319,37 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       `[test] Etter start: gameStatus=${startDetail?.game.status ?? "n/a"}, drawsCompleted=${startDetail?.engineState?.drawsCompleted ?? "n/a"}, currentPhase=${startDetail?.engineState?.currentPhase ?? "n/a"}`,
     );
 
-    // ── Steg 8: Poll på auto-tick draws til Rad 1-vinst ────────────────────
-    // adminDrawNext via /api/admin/rooms/<code>/draw-next er BLOKKERT for
-    // scheduled Spill 1 ("USE_SCHEDULED_API" — må gå via Game1DrawEngineService).
-    // Det finnes pr 2026-05-13 ingen admin-endpoint for å trigge scheduled-
-    // game-drawNext utenfra; eneste vei er auto-tick som kjører hvert 4. sek
-    // (Game1AutoDrawTickService.defaultSeconds=4).
+    // ── Steg 8: Trekk eksplisitt til Rad 1-vinst ───────────────────────────
+    // Pilot-flow workflow har JOBS_ENABLED=false for å holde CI deterministisk.
+    // Derfor bruker testen en test-only scheduled draw-driver i stedet for
+    // game1-auto-draw-tick.
     //
-    // Vi poller game-state-snapshot hvert 500ms og venter på enten:
+    // Etter hvert eksplisitte draw sjekker vi enten:
     //   - winPopup på klient (spilleren er vinner)
     //   - claimsCount > 0 i engine-snapshot (annen spiller er vinner)
     //   - game.status = ENDED (runde ferdig, sjekk om claims registrert)
     //
-    // Forventet tid: ~5-7 draws (20-28 sek) før første pattern (Rad 1) for
-    // 12 brett × 5 rader. Vi gir 90 sek timeout for sikker margin mot flaks.
-    console.log("[test] Poller på auto-tick draws mot Rad 1-vinst...");
+    // Vi trekker maks 75 kuler. Hvis phase aldri øker fra 1 er enten
+    // pattern-eval, ticket-assignment eller scheduled draw-driver broken.
+    console.log("[test] Trekker scheduled draws mot Rad 1-vinst...");
 
     let rad1WonAtDraw: number | null = null;
     let rad1Phase: number | null = null;
     const winPopupLocator = page.locator('[data-test="win-popup-backdrop"]');
 
-    const POLL_INTERVAL_MS = 500;
-    const RAD1_TIMEOUT_MS = 90_000;
-    const rad1Start = Date.now();
+    const RAD1_MAX_DRAWS = 75;
     let lastDrawnCount = 0;
     let lastPhase = 1;
 
     // Primær state-source: /api/admin/game1/games/<id> som har
     // engineState.drawsCompleted + currentPhase. currentPhase går fra 1 → 2
     // etter Rad 1 vinnes, så vi detekterer rad-vinst via phase-advance.
-    while (Date.now() - rad1Start < RAD1_TIMEOUT_MS) {
+    for (let attempt = 0; attempt < RAD1_MAX_DRAWS; attempt += 1) {
+      const drawResult = await scheduledDrawNext(
+        masterToken,
+        initialScheduledGameId,
+      );
+
       // Detect via WinPopup (player er vinner — tidlig-exit hvis det skjer)
       const popupVisible = await winPopupLocator
         .isVisible({ timeout: 50 })
@@ -367,21 +364,15 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         break;
       }
 
-      const detail = await getGameDetail(masterToken, initialScheduledGameId);
-      if (!detail) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        continue;
-      }
-
-      const drawn = detail.engineState?.drawsCompleted ?? 0;
-      const phase = detail.engineState?.currentPhase ?? 1;
-      const isFinished = detail.engineState?.isFinished ?? false;
-      const isPaused = detail.engineState?.isPaused ?? false;
-      const gameStatus = detail.game.status;
+      const drawn = drawResult.engineState.drawsCompleted;
+      const phase = drawResult.engineState.currentPhase;
+      const isFinished = drawResult.engineState.isFinished;
+      const isPaused = drawResult.engineState.isPaused;
+      const pausedAtPhase = drawResult.engineState.pausedAtPhase;
 
       if (drawn !== lastDrawnCount || phase !== lastPhase) {
         console.log(
-          `[test] Draw progress: drawn=${drawn}, phase=${phase}, isPaused=${isPaused}, gameStatus=${gameStatus}`,
+          `[test] Draw progress: drawn=${drawn}, phase=${phase}, isPaused=${isPaused}, lastBall=${drawResult.engineState.lastDrawnBall ?? "n/a"}`,
         );
         lastDrawnCount = drawn;
         lastPhase = phase;
@@ -391,7 +382,7 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       // er paused at phase 1 (auto-pause på rad-vinst — på prod-hall).
       // På demo-hall (is_test_hall=TRUE) auto-pause er bypassed så phase
       // bare advanser uten å pause.
-      if (phase > 1 || (isPaused && detail.engineState?.pausedAtPhase === 1)) {
+      if (phase > 1 || (isPaused && pausedAtPhase === 1)) {
         rad1WonAtDraw = drawn;
         rad1Phase = phase;
         console.log(
@@ -400,9 +391,10 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         break;
       }
 
-      if (isFinished || gameStatus === "completed" || gameStatus === "cancelled") {
+      if (isFinished) {
+        const detail = await getGameDetail(masterToken, initialScheduledGameId);
         console.log(
-          `[test] Runde slutt-state: gameStatus=${gameStatus}, drawn=${drawn}, phase=${phase}`,
+          `[test] Runde slutt-state: gameStatus=${detail?.game.status ?? "unknown"}, drawn=${drawn}, phase=${phase}`,
         );
         // Hvis runden er ferdig, har vi sannsynligvis vunnet alle faser.
         // Bekreft via phase > 1.
@@ -412,13 +404,11 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         }
         break;
       }
-
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
 
     expect(
       rad1WonAtDraw,
-      `Rad 1 (eller annen pattern) må vinnes innen ${RAD1_TIMEOUT_MS / 1000}s. Hvis dette feiler er det enten flaks-problem (lite sannsynlig med 12 brett × 5 rader) eller engine pattern-eval er broken / auto-draw-tick stopper — sjekk Game1DrawEngineService og Game1AutoDrawTickService.`,
+      `Rad 1 (eller annen pattern) må vinnes innen ${RAD1_MAX_DRAWS} eksplisitte scheduled draws. Hvis dette feiler er enten ticket-assignment, pattern-eval eller Game1DrawEngineService.drawNext broken.`,
     ).not.toBeNull();
 
     // ── Steg 8: Verifiser WinPopup-innhold (hvis synlig) ───────────────────
@@ -513,33 +503,29 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       "Samme scheduledGameId etter resume — ingen ny scheduled-game spawnet",
     ).toBe(initialScheduledGameId);
 
-    // ── Steg 11: Poll videre til Rad 2-vinst (auto-tick fortsetter) ───────
-    console.log("[test] Poller videre til Rad 2-vinst...");
+    // ── Steg 11: Trekk videre til Rad 2-vinst ─────────────────────────────
+    console.log("[test] Trekker videre til Rad 2-vinst...");
 
     let rad2WonAtDraw: number | null = null;
     let rad2Phase: number | null = null;
     const phaseBeforeRad2 = rad1Phase ?? 2; // Rad 1 vunnet → phase=2
 
     console.log(
-      `[test] Før Rad 2 polling: phase=${phaseBeforeRad2}, looking for phase>${phaseBeforeRad2}`,
+      `[test] Før Rad 2 draw-loop: phase=${phaseBeforeRad2}, looking for phase>${phaseBeforeRad2}`,
     );
 
-    const RAD2_TIMEOUT_MS = 90_000;
-    const rad2Start = Date.now();
+    const RAD2_MAX_DRAWS = 75;
     let rad2LastPhase = phaseBeforeRad2;
 
-    while (Date.now() - rad2Start < RAD2_TIMEOUT_MS) {
-      const detail = await getGameDetail(masterToken, initialScheduledGameId);
-      if (!detail) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        continue;
-      }
-
-      const drawn = detail.engineState?.drawsCompleted ?? 0;
-      const phase = detail.engineState?.currentPhase ?? 1;
-      const isFinished = detail.engineState?.isFinished ?? false;
-      const isPaused = detail.engineState?.isPaused ?? false;
-      const gameStatus = detail.game.status;
+    for (let attempt = 0; attempt < RAD2_MAX_DRAWS; attempt += 1) {
+      const drawResult = await scheduledDrawNext(
+        masterToken,
+        initialScheduledGameId,
+      );
+      const drawn = drawResult.engineState.drawsCompleted;
+      const phase = drawResult.engineState.currentPhase;
+      const isFinished = drawResult.engineState.isFinished;
+      const isPaused = drawResult.engineState.isPaused;
 
       if (phase !== rad2LastPhase) {
         console.log(
@@ -559,9 +545,10 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
       }
 
       // Hvis runden er ferdig
-      if (isFinished || gameStatus === "completed" || gameStatus === "cancelled") {
+      if (isFinished) {
+        const detail = await getGameDetail(masterToken, initialScheduledGameId);
         console.log(
-          `[test] Runde slutt-state: gameStatus=${gameStatus}, drawn=${drawn}, phase=${phase}`,
+          `[test] Runde slutt-state: gameStatus=${detail?.game.status ?? "unknown"}, drawn=${drawn}, phase=${phase}`,
         );
         if (phase > phaseBeforeRad2) {
           rad2WonAtDraw = drawn;
@@ -569,13 +556,11 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
         }
         break;
       }
-
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
 
     expect(
       rad2WonAtDraw,
-      `Rad 2 (eller senere fase) må vinnes innen ${RAD2_TIMEOUT_MS / 1000}s etter Rad 1. Hvis dette feiler er det enten flaks eller engine pattern-eval er broken — sjekk PatternCycler og Game1DrawEngineHelpers.`,
+      `Rad 2 (eller senere fase) må vinnes innen ${RAD2_MAX_DRAWS} eksplisitte scheduled draws etter Rad 1. Hvis dette feiler er pattern-progresjon eller Game1DrawEngineHelpers broken.`,
     ).not.toBeNull();
 
     console.log("[test] ✓ HELE FLYTEN GRØNN — Rad 1 + Pause/Resume + Rad 2");

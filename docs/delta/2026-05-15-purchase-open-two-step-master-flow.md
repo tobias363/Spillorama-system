@@ -12,6 +12,7 @@
 - `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`, `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts`, `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts` — UI skiller "Bongesalg åpnet" fra "Spill 1 startet" og viser "Start trekninger nå" når status allerede er pre-running.
 - `tests/e2e/helpers/rest.ts` — pilot-flow reset bruker nå appens Oslo business-date, ikke Postgres `CURRENT_DATE`, slik at CI rundt norsk midnatt faktisk sletter riktig dagsrad.
 - `tests/e2e/spill1-rad-vinst-flow.spec.ts` — forventer 12 rendered ticket-cards, én per faktisk brett, i tråd med dagens UI.
+- `apps/backend/src/routes/adminGame1Master.ts` + `tests/e2e/helpers/rad-vinst-helpers.ts` — Rad-vinst-testen bruker test-only `e2e-draw-next`/`scheduledDrawNext()` til scheduled draws fordi Pilot-flow CI kjører med `JOBS_ENABLED=false`.
 
 ## Hvorfor
 
@@ -44,6 +45,7 @@ Det ga ca. 30 ms mellom kjøp og engine-start, som ikke er et operativt `purchas
 - Reused `purchase_open` skal starte engine. Det er andre masterklikk på samme scheduled-game.
 - UI skal vise "Bongesalg åpnet" etter første klikk og "Start trekninger nå" når samme pre-running scheduled-game skal startes.
 - E2E cleanup som sletter plan-run/scheduled-game for "dagen" må bruke `Europe/Oslo` business-date. Ikke bruk `CURRENT_DATE` i Postgres for pilot-flow-reset.
+- Ikke slå på `JOBS_ENABLED=true` i Pilot-flow CI for å reparere Rad-vinst-testen. Workflowen er designet for eksplisitte state transitions; scheduled draws drives via `scheduledDrawNext()`.
 
 ## Tester kjørt
 
@@ -52,12 +54,14 @@ Det ga ca. 30 ms mellom kjøp og engine-start, som ikke er et operativt `purchas
 - `npm run check` i `apps/backend` — pass
 - `npm run check` i `apps/admin-web` — pass
 - `npx playwright test --config=tests/e2e/playwright.config.ts --list` — 7 pilot-flow specs listet uten TS/transpile-feil etter CI-follow-up
+- PR #1548 `Pilot-flow E2E` run `25945194884` analyserte root cause for Rad-vinst-timeout: `JOBS_ENABLED=false` gjorde at `game1-auto-draw-tick` aldri kjørte. Oppfølgingen legger inn eksplisitt scheduled draw-driver.
 
 Integration-testene for `GamePlanEngineBridge.cancelledRowReuse` og `GamePlanEngineBridge.multiGoHIntegration` ble kjørt, men skippet lokalt fordi `WALLET_PG_TEST_CONNECTION_STRING` ikke var satt.
 
 ## Kunnskapsoppdatering
 
-- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.2
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.3
 - `docs/engineering/PITFALLS_LOG.md` §3.17
 - `docs/engineering/PITFALLS_LOG.md` §6.19
+- `docs/engineering/PITFALLS_LOG.md` §6.20
 - `docs/engineering/AGENT_EXECUTION_LOG.md`

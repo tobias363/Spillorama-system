@@ -4400,3 +4400,68 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 **Læring:**
 - I Spillorama er "dagens run" en forretningsdato, ikke DB-serverens kalenderdato. Test-harness må følge samme timezone som appen.
 - Når pilot-flow specs kjøres serialisert i samme DB, én feil reset kan gjøre senere specs meningsløse. Første feil i loggen er ikke alltid eneste årsak; state-lekkasje må analyseres separat.
+
+### 2026-05-15 — PM-AI: purchase_open Pilot-flow E2E explicit scheduled draws
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Fikse gjenværende rød `spill1-rad-vinst-flow` i PR #1548 uten å aktivere scheduler-jobs i CI.
+
+**Evidence brukt før kode:**
+- GitHub Actions job `Pilot-flow E2E`, run `25945194884`, job `76271700032`.
+- Logg viste at `spill1-rad-vinst-flow` nå kom til running-state, men `drawsCompleted=0` og `currentPhase=1` helt til timeout.
+- Workflowen `.github/workflows/pilot-flow-e2e.yml` kjører med `JOBS_ENABLED=false`, med kommentar om at tests skal drive state transitions eksplisitt.
+
+**Root cause:**
+- Rad-vinst-testen ventet på `game1-auto-draw-tick`, men CI starter ikke scheduler-jobs. Dermed ble ingen scheduled draws utført selv om scheduled-game var running.
+- Riktig fix er deterministisk test-driver for scheduled draws, ikke å slå på `JOBS_ENABLED=true` og dermed aktivere hele job-flaten.
+
+**Outputs:**
+- `apps/backend/src/routes/adminGame1Master.ts` — ny test-only `POST /api/admin/game1/games/:gameId/e2e-draw-next`, gated på `NODE_ENV=test` eller `E2E_ENABLE_MANUAL_GAME1_DRAW=1`, med `GAME1_MASTER_WRITE` + hall-scope.
+- `tests/e2e/helpers/rad-vinst-helpers.ts` — ny `scheduledDrawNext()` som kaller test-only endpointet.
+- `tests/e2e/spill1-rad-vinst-flow.spec.ts` — Rad 1/Rad 2 drives med eksplisitte scheduled draws og phase-advance, ikke tidsbasert auto-tick-polling.
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.3 — dokumenterer invariant: Pilot-flow CI har `JOBS_ENABLED=false`.
+- `docs/engineering/PITFALLS_LOG.md` §6.20 — fallgruven dokumentert.
+- `docs/delta/2026-05-15-purchase-open-two-step-master-flow.md` — delta oppdatert.
+
+**Læring:**
+- Test-harness må respektere workflow-kontrakten. Når CI eksplisitt skrur av jobs, må testen eie draw-driveren.
+- Scheduled Spill 1 kan ikke bruke legacy room-draw endpoint; scheduled flows må gå via `Game1DrawEngineService`.
+- Å gjøre CI grønn ved å aktivere global scheduler ville maskert test-designet og introdusert race/flakiness.
+
+### 2026-05-16 — PM-AI: Fase 2 — skill-SHA-lockfile + persistent evidence + ripple analysis
+
+**Agent-type:** PM/ops-hardening (follow-up av ADR-0024)
+**Scope:** Lukke 3 av gapene konsulent-reviewen 2026-05-16 identifiserte: agent-contract uten reproduserbarhet, evidence-pack uten persistence, og manglende ripple-analyse i kontrakt-mal.
+
+**Evidence brukt før kode:**
+- Konsulent-review 2026-05-16 (4 parallelle deep-reads via general-purpose Agent-tool) av engineering/operations/scripts/skills. Funn: agent-contracts pekte på `.claude/skills/<name>/SKILL.md` uten SHA; `skill-freshness-weekly.yml` beviser at skills drifter; `/tmp/`-evidence forsvinner; ingen ripple-step i contract-mal.
+- ADR-0024 (merget PR #1549) som la grunnlaget med eksplisitt bypass-policy og konsolideringskriterier.
+- `docs/auto-generated/SKILL_FILE_MAP.md` — bekreftet at alle 25 prosjekt-skills har scope-header og version-felt.
+
+**Root cause:**
+- Forrige `generate-agent-contract.sh` capturet skill-navn men ikke versjon eller SHA. Reproducerbarhet av en gammel agent-leveranse var umulig.
+- Eksempel-bruk i `AGENT_TASK_CONTRACT.md` brukte `/tmp/purchase-open-forensics-...`-stier som overlever ikke reboot.
+- Contract-malen hadde §1-§10 men ingen seksjon for "hva annet kan dette touche?".
+
+**Outputs:**
+- `scripts/generate-agent-contract.sh` — embed `skill@version@SHA` i §4-listing; compute `CONTRACT_ID` (`YYYYMMDD-<slug>`); advar ved ephemeral `/tmp/*` evidence; ny §3a "Cross-Cutting Impact Analysis" mellom §3 og §4.
+- `scripts/verify-contract-freshness.mjs` — NY. Parser lagret kontrakt, sammenligner skill-SHA-er mot current HEAD, exit 1 hvis drift.
+- `docs/evidence/README.md` — NY. Konvensjon `docs/evidence/<contract-id>/` med commit-policy (forensics/snapshots/Sentry-eksporter ja; PII/credentials nei), filnavn-konvensjon, retensjon (5 år for Lotteritilsynet-relevant).
+- `docs/engineering/AGENT_TASK_CONTRACT.md` — Regler 8-10 (freshness-check / persistent evidence / ripple-svar) + utvidet Related-liste.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.4.0 — endringslogg-entry + nye script-/fil-referanser.
+- `docs/engineering/PITFALLS_LOG.md` §11.20 (skill-SHA-lockfile drift) + §11.21 (evidence-persistence) + endringslogg.
+
+**Læring:**
+- Reproducerbarhet av agent-arbeid krever lockfile-mentalitet — ikke bare for kode-dependencies, men for kunnskaps-artefakter (skills) som agenten konsumerte.
+- Audit-trail brytes umiddelbart hvis evidence ligger i ephemeral lokasjoner. For et regulert pengespill-system må evidence være versjons-kontrollert.
+- Ripple-analyse som obligatorisk del av delivery-report er billigere enn å fange cross-cutting-bugs i CI eller live.
+- Mest impact per kompleksitets-punkt: skill-lockfile (lite kode, stor audit-gevinst) + evidence-konvensjon (rent docs + skript-warning, stor compliance-gevinst).
+
+**Eierskap (filer endret):**
+- `scripts/generate-agent-contract.sh`
+- `scripts/verify-contract-freshness.mjs`
+- `docs/evidence/README.md`
+- `docs/engineering/AGENT_TASK_CONTRACT.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
