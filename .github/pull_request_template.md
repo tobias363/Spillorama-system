@@ -36,6 +36,12 @@ gate-not-applicable: <rolle>       # docs-only/dependabot/ci-bot/tobias; andre k
 
 > Tobias-direktiv 2026-05-13. Gjelder pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet).
 
+**Agent contract** — for agent-leveranser paa high-risk kode:
+
+- [ ] PM genererte fact-bound agent-kontrakt med `npm run agent:contract -- ...` ELLER dette er ikke agent-leveranse/high-risk scope
+- [ ] Agent Delivery Report mottatt og sjekket mot `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md` ELLER ikke relevant
+- [ ] Agentens root-cause-forklaring peker til konkret evidence (file:line, DB-rad, logglinje, Sentry/PostHog, test-output) ELLER docs-only
+
 **Post-work-disiplin** — for pilot/wallet/compliance-kode håndhever `.github/workflows/knowledge-protocol-gate.yml` at alle tre kunnskapsartefakter oppdateres:
 
 - [ ] `PITFALLS_LOG.md` oppdatert ELLER ingen ny fallgruve oppdaget

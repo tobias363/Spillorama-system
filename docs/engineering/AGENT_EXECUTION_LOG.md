@@ -4279,3 +4279,35 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-15 — PM-AI: fact-bound Agent Task Contract for spawned agents
+
+**Agent-type:** PM/ops-hardening
+**Scope:** Hindre at nye implementation-agenter misforstår scope, fakta eller hypoteser etter PM-handoff.
+**Trigger:** Tobias presiserte at agent-prompter må være 100% faktabaserte, at agentene i forrige sesjon misforstod noe av oppgaven, og at agents/PM må oppdatere skills og kunnskapsartefakter kontinuerlig.
+
+**Outputs:**
+- `scripts/generate-agent-contract.sh` — ny prompt-kontrakt-generator som tar `--agent`, `--objective`, `--files`, `--evidence`, `--risk` og optional `--output`. Den genererer paste-ready agent-prompt med main-SHA, write-boundary, evidence pack, relevante skills, auto context-pack, hard constraints, doc-protokoll og delivery-report krav.
+- `package.json` — ny kommando `npm run agent:contract`.
+- `docs/engineering/AGENT_TASK_CONTRACT.md` — autoritativ prosedyre for når kontrakt er påkrevd og hvordan PM bruker den.
+- `docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md` — peker nå til agent-kontrakt som pre-spawn-steg.
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` §2.19.1 — ny immutable regel: ingen high-risk implementation-agent fra fritekst/hukommelse.
+- `.github/pull_request_template.md` — ny Agent contract-sjekk i Knowledge protocol.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.4 — dokumenterer fact-bound agent-kontrakt.
+- `docs/engineering/PITFALLS_LOG.md` §11.19 — dokumenterer fallgruven high-risk fritekst-prompt.
+
+**Læring:**
+- Agent-misforståelser kommer ofte av at PM-prompten blander fakta, hypoteser og ønsket utfall.
+- En god agent-prompt må være reviserbar: alle root-cause-claims skal kunne spores til file:line, DB-rad, logglinje, Sentry/PostHog eller test-output.
+- Automatikk bør ligge før agent-spawn, ikke bare i PR-review. Da forebygges feil arbeid i stedet for å oppdage det etterpå.
+
+**Eierskap (filer endret):**
+- `scripts/generate-agent-contract.sh`
+- `docs/engineering/AGENT_TASK_CONTRACT.md`
+- `package.json`
+- `docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`
+- `.github/pull_request_template.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`

@@ -2,11 +2,11 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.3.3
+  version: 1.3.4
   project: spillorama
 ---
 
-<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/purchase-open-forensics.sh, scripts/generate-context-pack.sh, .github/workflows/pm-*.yml, .github/workflows/*gate*.yml, .github/workflows/bug-resurrection-check.yml -->
+<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, docs/engineering/AGENT_TASK_CONTRACT.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/purchase-open-forensics.sh, scripts/generate-context-pack.sh, scripts/generate-agent-contract.sh, .github/workflows/pm-*.yml, .github/workflows/*gate*.yml, .github/workflows/bug-resurrection-check.yml -->
 
 # PM Orchestration Pattern
 
@@ -162,6 +162,28 @@ npm run forensics:purchase-open -- --phase after-master-30s --scheduled-game-id 
 ```
 
 Evidence pack skal legges ved agent-prompten. Implementer-agenten må sitere konkrete rader/logglinjer fra rapporten når den forklarer root cause.
+
+### Fact-bound Agent Task Contract (2026-05-15)
+
+For high-risk implementation-agent skal PM generere prompt-kontrakt med:
+
+```bash
+npm run agent:contract -- \
+  --agent "Agent A — <scope>" \
+  --objective "<konkret mål>" \
+  --files <path> \
+  --evidence <forensic-report.md> \
+  --risk P0 \
+  --output /tmp/agent-contract-<scope>.md
+```
+
+Kontrakten er source of truth for agenten. Den inkluderer main-SHA, write-boundary,
+evidence, relevante skills, context-pack, hard constraints, skill-doc-protokoll
+og delivery-report krav.
+
+**Regel:** PM skal ikke sende high-risk implementation-prompt som ren fritekst.
+Hvis objective og evidence ikke henger sammen, skal agenten stoppe og melde
+konflikt i stedet for å implementere en antakelse.
 
 ### Auto-rebase-on-merge (Phase 2)
 
@@ -357,6 +379,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | Required check har `pull_request.paths`-filter | Docs-only/auto-doc PR mangler check-context og branch protection blokkerer merge | Required PR-checks må alltid kjøre, eller ha always-run wrapper-jobb |
 | Diff-basert PR-gate kjører på closed/merged PR | Post-merge `edited`-event gir `fatal: bad object <head_sha>` etter branch deletion | Job-level guard: `if: ${{ github.event.pull_request.state == 'open' }}` |
 | PM spawner implementation-agent uten forensic evidence etter gjentatt live-test-feil | Agenten fikser symptom eller feil lag; Tobias opplever "2 dager uten at vi skjønner hvorfor" | Kjør relevant forensic-runner først og krev root-cause-sitering i agent-prompt |
+| PM skriver high-risk agent-prompt fra hukommelse/fritekst | Agenten misforstår fakta, scope eller hva som er hypotese vs root cause | Generer `npm run agent:contract -- ...` og lim hele kontrakten inn i prompten |
 
 ## Kanonisk referanse
 
@@ -370,6 +393,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `docs/engineering/PM_PUSH_CONTROL.md` — multi-agent push-control (Phase 2)
 - `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` — playbook for hver PM-overgang (60-90 min onboarding)
 - `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md` — evidence pack + self-test før første kodehandling
+- `docs/engineering/AGENT_TASK_CONTRACT.md` — fact-bound prompt-kontrakt før high-risk implementation-agent
 - `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md` — agentleveranseformat før PR
 - `docs/engineering/BUG_RESURRECTION_DETECTOR.md` — anti-regression-hook
 - `docs/engineering/SKILL_FRESHNESS.md` — skill-refresh-cadence
@@ -378,6 +402,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `scripts/pm-checkpoint.sh` — hard-block onboarding-gate for ny PM
 - `scripts/pm-knowledge-continuity.mjs` — PM evidence pack + self-test-validering
 - `scripts/purchase-open-forensics.sh` — purchase_open forensic evidence pack før implementation-agent
+- `scripts/generate-agent-contract.sh` — genererer prompt-kontrakt med scope, evidence, skills, context-pack og doc-protokoll
 - `BACKLOG.md` — strategisk oversikt
 - `docs/operations/PM_HANDOFF_*.md` — PM-handoffs (én per session)
 - `.claude/active-agents.json` — registry over aktive agenter (commit-able)
@@ -413,3 +438,4 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 2026-05-15 | v1.3.1 — dokumenterte at required PR-checks ikke kan ha `pull_request.paths`-filter som gjør check-context missing. |
 | 2026-05-15 | v1.3.2 — dokumenterte at diff-baserte PR-gates må skippe non-open PR-events for å unngå falske røde checks etter merge. |
 | 2026-05-15 | v1.3.3 — la til live-test forensic evidence pack før implementation-agent, med `scripts/purchase-open-forensics.sh` som standard for purchase_open-feilen. |
+| 2026-05-15 | v1.3.4 — la til fact-bound Agent Task Contract og `scripts/generate-agent-contract.sh` for å hindre agent-misforståelser i high-risk arbeid. |
