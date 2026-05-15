@@ -54,10 +54,10 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 19 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 106 entries (per 2026-05-15)
+**Total:** 107 entries (per 2026-05-15)
 
 ---
 
@@ -3344,6 +3344,28 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 - `.claude/skills/bong-design/SKILL.md` (relatert — bong-rendering-mockup)
 - `.claude/skills/buy-popup-design/SKILL.md` (relatert — BuyPopup-mockup)
 
+### §11.18 — Implementation-agent uten forensic evidence etter live-test-stang
+
+**Severity:** P1 (tap av tid + feil rotårsak)
+**Oppdaget:** 2026-05-15 etter to dager med live-test-stang rundt `purchase_open`/master-flyt.
+**Symptom:** Tobias opplever at "vi ikke helt skjønner hvorfor ting går galt". PM og agenter diskuterer mulige årsaker (cron, seed, master-start, frontend bundle-id, localStorage, plan-run advance), men evidence ligger spredt i DB-snippets, monitor-logg, browser-observasjoner, Sentry/PostHog-baseline og chat.
+**Root cause:** Ny implementation-agent får for bred eller antakelsesbasert prompt uten én korrelert before/after evidence pack. Agenten kan da fikse et symptom i feil lag og samtidig øke kompleksiteten.
+**Fix:** Før implementation-agent spawnes etter gjentatt live-test-feil, kjør en smal forensic-runner som produserer ett markdown-bevis:
+```bash
+npm run forensics:purchase-open -- --phase before-master
+# trigger test, vent 30 sek
+npm run forensics:purchase-open -- --phase after-master-30s --scheduled-game-id <id>
+```
+Rapporten må legges ved agent-prompten, og agenten må sitere konkrete DB-rader/logglinjer når root cause forklares.
+**Prevention:**
+- Hvis en bug sees 2+ ganger i live-test: forensic evidence pack først, implementation etterpå.
+- PM må velge én primær hypotese før kode-scope gis: B.1 seed, B.2 cron/tick, B.3 master-bypass, separat plan-run P0 eller client-localStorage.
+- Sentry/PostHog skal være baseline + korrelasjon, ikke ettertanke.
+**Related:**
+- `scripts/purchase-open-forensics.sh`
+- `docs/operations/PM_HANDOFF_2026-05-15.md` §1 forensic debug-protokoll
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.3
+
 ---
 
 ## §12 DB-resilience
@@ -3446,3 +3468,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-15 | Lagt til §7.30 — Triple-bong-rendering cross-color grouping bug (P0 pilot-blokker — visuell regresjon på master-flyt). PR #1500 (Bølge 2) introduserte purchaseId + sequenceInPurchase men hadde 3 lag med bugs: (A) pre-runde display-tickets manglet purchaseId helt → frontend grupperte tilfeldige tickets, (B) backend `ensureAssignmentsForPurchases` iterated `count` ganger uavhengig av `spec.size` så 1 Stor (= 3 brett) ble bare 1 row, (C) cross-color cart delte samme purchaseId så `tryGroupTriplet` grupperte forskjellige farger sammen. Fix: 3 lag løst — frontend color-family-validation, backend `LARGE_TICKET_BRETT_COUNT=3`-multiplier, og syntetisk bundle-id-generering i `getOrCreateDisplayTickets`. Tobias' eksakte scenario (1H+1G+1L Stor = 3 triplets) nå dekket av test. | Fix-agent (Tobias 2026-05-15 triple-rendering screenshot) |
 | 2026-05-15 | Lagt til §8.8 — PM Knowledge Continuity v2: evidence pack + self-test-gate for å bevise operativ kunnskapsparitet, ikke bare at dokumenter finnes. Total 103→104 entries. | PM-AI (knowledge-continuity-hardening) |
 | 2026-05-15 | Lagt til §5.15 — required checks må ikke ha PR path-filter som gjør check-context missing. Funnet da auto-doc PR #1532 ble blokkert av forventet `pitfalls-id-validation`. Total 104→105 entries. | PM-AI (post-merge CI watcher) |
+| 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
