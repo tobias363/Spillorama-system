@@ -74,6 +74,8 @@ Kontrakt kan droppes for:
 
 Hvis i tvil, generer kontrakt. Kostnaden er lavere enn en misforstaatt agent.
 
+**Unntak ved P1 incident:** Under aktivt P1-incident (live-rom henger, prod nede, wallet-feil) vinner [`INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md`](../operations/INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md) over kontrakt-flyt. Hotfix-PR kan bruke `gate-bypass: hotfix-incident-YYYY-MM-DD` + `[bypass-knowledge-protocol: hotfix]`. Knowledge-update gjenopptas innen 24 timer post-stabilisering. Se ADR-0024 for bypass-policy.
+
 ## Verifikasjon ved agent-leveranse
 
 PM skal avvise leveransen hvis en av disse mangler:

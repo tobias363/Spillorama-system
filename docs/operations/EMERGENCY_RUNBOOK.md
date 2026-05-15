@@ -1,9 +1,15 @@
 # Emergency Runbook — "Tobias er utilgjengelig + noe brenner"
 
-**Sist oppdatert:** 2026-05-10
+**Sist oppdatert:** 2026-05-16
 **Eier:** Tobias Haugen
 **Formål:** Ett dokument du kan åpne under press når du IKKE har tid til å
 lete. Forutsetter at du er PM eller agent uten Tobias-tilgang i øyeblikket.
+
+> **Prioritets-rekkefølge mot knowledge-protocol:** Under P1 vinner denne
+> runbooken over [`AGENT_TASK_CONTRACT`](../engineering/AGENT_TASK_CONTRACT.md)
+> og knowledge-gates. Se
+> [`INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md`](./INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md)
+> for konkret hotfix-PR-format og post-incident knowledge-followup innen 24t.
 
 > **DETTE DOKUMENTET ER LAGET FOR Å BLI LEST UNDER STRESS.** Det er kortere
 > enn du tror er nødvendig. Følg trinnene i rekkefølge. Ikke improviser.
@@ -34,8 +40,14 @@ Sjekk på 30 sekunder:
 ## Eskalerings-rekkefølge når Tobias er utilgjengelig
 
 1. **Forsøk Tobias først, men gi det maks 5 minutter:**
-   - SMS: _<Tobias' nummer her — fyll inn>_
-   - Telefon: _<>_
+
+   > ⛔ **ÅPEN BLOKKER FOR PILOT-LAUNCH — TOBIAS MÅ FYLLE INN.**
+   > Disse feltene er placeholders. Under P1 vil du være BLIND hvis ikke faktiske
+   > nummer er fylt inn. Dette er flagget i ADR-0024 og må lukkes før pilot-launch.
+   > Se også [`STAKEHOLDERS.md`](./STAKEHOLDERS.md) for fullstendig placeholder-liste.
+
+   - SMS: `_<TODO: Tobias' nummer — fyll inn FØR pilot-launch>_`
+   - Telefon: `_<TODO: Tobias' nummer — fyll inn FØR pilot-launch>_`
    - Hvis ikke svar innen 5 min for P1: gå videre
 
 2. **For P1-incidents — du har autonomi til:**

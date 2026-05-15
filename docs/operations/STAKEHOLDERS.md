@@ -1,9 +1,24 @@
 # Stakeholders — Spillorama-system
 
-**Sist oppdatert:** 2026-05-10
+**Sist oppdatert:** 2026-05-16
 **Eier:** Tobias Haugen
 **Status:** Aktiv (levende dokument)
 **Review-kadens:** Kvartalsvis + ved hver pilot-milestone
+
+> ## ⛔ ÅPEN BLOKKER FOR PILOT-LAUNCH
+>
+> Denne filen har **14+ `_<fyll inn>_`-placeholders** som MÅ fylles inn før
+> pilot-launch. Under P1 er PM blind uten faktiske kontaktdata. Flagget i
+> [ADR-0024](../adr/0024-pm-knowledge-enforcement-architecture.md) og
+> [`EMERGENCY_RUNBOOK.md`](./EMERGENCY_RUNBOOK.md).
+>
+> **Placeholders som må lukkes:**
+>
+> - Tobias telefon (linje ~21)
+> - Lotteritilsynet saksbehandler + e-post + telefon (linje ~63-65)
+> - Datatilsynet saksbehandler (linje ~78)
+> - Pilot-haller (4 haller × 3 felter = 12 placeholders, linje ~90-93)
+> - Candy team-lead (linje ~113)
 
 > **Til ny PM:** Dette er sentral oversikt over hvem som er involvert i
 > Spillorama, deres rolle, og hvordan de eskaleres til når noe trenger
