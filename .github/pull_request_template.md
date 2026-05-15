@@ -28,20 +28,25 @@
 
 <!-- Kortform-alternativer (workflow aksepterer disse i stedet for checkbox):
 gate-confirmed: <hash-prefix>      # 12-tegn-hash fra docs/.pm-confirmations.log
-gate-bypass: <begrunnelse>         # Eksplisitt bypass m/Tobias-godkjenning
-gate-not-applicable: <rolle>       # Tobias selv / docs-only / dependabot / ci-bot
+gate-bypass: <begrunnelse>         # Krever label approved-pm-bypass
+gate-not-applicable: <rolle>       # docs-only/dependabot/ci-bot/tobias; andre krever approved-pm-bypass
 -->
 
 ## Knowledge protocol
 
 > Tobias-direktiv 2026-05-13. Gjelder pilot-relatert kode (Spill 1/2/3, master-flow, buy-popup, ticket-grid, payout, wallet).
 
-**Post-work-disiplin** — bekreft minst ett:
+**Post-work-disiplin** — for pilot/wallet/compliance-kode håndhever `.github/workflows/knowledge-protocol-gate.yml` at alle tre kunnskapsartefakter oppdateres:
 
 - [ ] `PITFALLS_LOG.md` oppdatert ELLER ingen ny fallgruve oppdaget
-- [ ] `PM_HANDOFF_YYYY-MM-DD.md`-utkast skrevet ELLER ikke sesjons-slutt
 - [ ] Relevant skill under `.claude/skills/` oppdatert ELLER ikke generaliserbart mønster
 - [ ] `AGENT_EXECUTION_LOG.md` appended hvis denne PR-en kommer fra agent-leveranse
+- [ ] `PM_HANDOFF_YYYY-MM-DD.md`-utkast skrevet ELLER ikke sesjons-slutt
+
+<!-- Knowledge-protocol bypass er sjelden og krever label approved-knowledge-bypass:
+[bypass-knowledge-protocol: <begrunnelse>]
+knowledge-not-applicable: <begrunnelse>
+-->
 
 **Delta-rapport** — kreves når pilot-kode endres (`docs/delta/YYYY-MM-DD-<branch>.md`). Workflow: `.github/workflows/delta-report-gate.yml`. Bypass-marker (sjelden):
 

@@ -23,7 +23,7 @@
  *   --no-verify på git commit (siste utvei, alltid logget)
  */
 
-import { readFile, appendFile, writeFile, stat, access } from "node:fs/promises";
+import { readFile, appendFile, writeFile, stat, access, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +57,26 @@ async function fileAgeDays(absPath) {
   return (Date.now() - s.mtimeMs) / (1000 * 60 * 60 * 24);
 }
 
+async function expectedHandoffCount() {
+  const dirs = [
+    resolve(REPO_ROOT, "docs", "operations"),
+    resolve(REPO_ROOT, "docs", "operations", "archive"),
+  ];
+  let count = 0;
+  for (const dir of dirs) {
+    let entries = [];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    count += entries.filter((entry) =>
+      entry.isFile() && /^PM_HANDOFF_.*\.md$/.test(entry.name)
+    ).length;
+  }
+  return count;
+}
+
 async function gateState() {
   if (!(await fileExists(CHECKPOINT_SCRIPT))) {
     return {
@@ -86,6 +106,16 @@ async function gateState() {
   const hash = createHash("sha256").update(content).digest("hex");
   const hashShort = hash.slice(0, 12);
   const handoffCount = (content.match(/^### \d+\. /gm) ?? []).length;
+  const expectedCount = await expectedHandoffCount();
+  if (handoffCount !== expectedCount) {
+    return {
+      state: "handoff-count-mismatch",
+      message: `Bekreftelsen dekker ${handoffCount} handoff-filer, men repoet har ${expectedCount}. Re-kjør gate.`,
+      handoffCount,
+      expectedCount,
+      ageDays,
+    };
+  }
 
   return {
     state: "valid",

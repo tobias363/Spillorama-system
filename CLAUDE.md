@@ -72,7 +72,7 @@ Live bingo platform for the Norwegian market with real-time multiplayer games, w
 > sine 13 obligatoriske trinn FØR første kode-handling:
 >
 > 1. **Trinn 0** — `bash scripts/pm-checkpoint.sh --validate` (eksisterende handoff-gate)
-> 2. **Trinn 0.5** — `bash scripts/pm-doc-absorption-gate.sh --validate` (NY, under-impl)
+> 2. **Trinn 0.5** — `bash scripts/pm-doc-absorption-gate.sh --validate`
 > 3. **Trinn 1-3** — Les `/tmp/pm-onboarding.md` + forrige PM_HANDOFF + forrige PM_SESSION_KNOWLEDGE_EXPORT
 > 4. **Trinn 4-5** — Spawn 3-5 parallelle Explore-agenter for resterende docs, absorber sammendrag
 > 5. **Trinn 6-8** — Verifiser MCP-er + dev-stack + pilot-monitor live

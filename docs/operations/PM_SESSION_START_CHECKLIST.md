@@ -50,7 +50,7 @@ Den krever per-fil-bekreftelse av ALLE `docs/operations/PM_HANDOFF_*.md` siden 2
 
 - [ ] Gate passert (`.pm-onboarding-confirmed.txt` finnes og er ≤ 7 dager)
 
-### Trinn 0.5 — Vanntett doc-absorpsjon-gate (NY 2026-05-14, under-impl)
+### Trinn 0.5 — Vanntett doc-absorpsjon-gate (HARD-BLOCK)
 
 ```bash
 bash scripts/pm-doc-absorption-gate.sh --validate
@@ -65,7 +65,7 @@ Hvis exit ≠ 0 → kjør interaktiv. Krever per-fil-bekreftelse av:
 
 - [ ] Doc-absorpsjon-gate passert (`.pm-doc-absorption-confirmed.txt` finnes og er ≤ 7 dager)
 
-> **Status 2026-05-14:** Gate-script under implementering av agent. Inntil levert: dekk lesingen manuelt per Trinn 2 nedenfor.
+> **Status 2026-05-15:** Gate-script levert. `--validate` feiler også hvis dokumentsettet har endret seg siden forrige bekreftelse.
 
 ### Trinn 1 — Generer live current-state-rapport
 
@@ -295,7 +295,7 @@ ALDRI start kode-handling før Trinn 0-11 er passert.
 - `docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_TEMPLATE.md` — mal for sesjons-eksport
 - `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` — komplett PM-rutine
 - `scripts/pm-checkpoint.sh` — eksisterende handoff-gate
-- `scripts/pm-doc-absorption-gate.sh` — under-impl (doc-absorpsjon)
+- `scripts/pm-doc-absorption-gate.sh` — doc-absorpsjon-gate
 - `scripts/pm-onboarding.sh` — current-state-snapshot
 
 ---

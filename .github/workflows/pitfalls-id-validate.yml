@@ -1,0 +1,28 @@
+name: PITFALLS ID Validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "docs/engineering/PITFALLS_LOG.md"
+      - "scripts/check-pitfalls-ids.mjs"
+      - ".github/workflows/pitfalls-id-validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/engineering/PITFALLS_LOG.md"
+      - "scripts/check-pitfalls-ids.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate unique PITFALLS IDs
+        run: node scripts/check-pitfalls-ids.mjs

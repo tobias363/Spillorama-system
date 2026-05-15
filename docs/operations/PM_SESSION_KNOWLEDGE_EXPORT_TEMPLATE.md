@@ -22,7 +22,7 @@ PM_HANDOFF-filer fanger BESLUTNINGER. Skills fanger FAGKUNNSKAP. PITFALLS fanger
 Hver PM SKAL kopiere denne malen til `docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_<YYYY-MM-DD>.md` og fylle inn alle 7 seksjoner. Skriv mens konteksten er fersk — IKKE vent til neste dag.
 
 ### Ved sesjons-START (ny PM)
-Som del av vanntett doc-absorpsjon-gate (under-impl per Tobias-direktiv 2026-05-14), MÅ ny PM lese ALLE `PM_SESSION_KNOWLEDGE_EXPORT_*.md`-filer siden 2026-04-23 (eldste først), med per-fil-bekreftelse + 2-3 setning takeaway.
+Som del av vanntett doc-absorpsjon-gate (levert 2026-05-15 per Tobias-direktiv 2026-05-14), MÅ ny PM lese ALLE `PM_SESSION_KNOWLEDGE_EXPORT_*.md`-filer siden 2026-04-23 (eldste først), med per-fil-bekreftelse + 2-3 setning takeaway.
 
 ---
 
@@ -162,7 +162,7 @@ Første session-export laget 2026-05-14 — se `PM_SESSION_KNOWLEDGE_EXPORT_2026
 
 ## Når absorption-gate blir levert
 
-`scripts/pm-doc-absorption-gate.sh` (under-impl) vil automatisk:
+`scripts/pm-doc-absorption-gate.sh` vil automatisk:
 1. Liste ALLE `PM_SESSION_KNOWLEDGE_EXPORT_*.md`-filer siden 2026-04-23
 2. Kreve per-fil ja/nei + 2-3 setning takeaway
 3. Hash takeaways i confirmation-fil
