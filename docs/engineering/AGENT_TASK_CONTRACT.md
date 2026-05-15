@@ -55,6 +55,15 @@ Deretter limer PM hele `/tmp/agent-contract-*.md` inn i agent-prompten.
 6. Agenten skal oppdatere skill, PITFALLS_LOG og AGENT_EXECUTION_LOG i samme PR
    naar tasken endrer pilot/wallet/compliance/live-room/PM-workflow-atferd.
 7. Agent Delivery Report er obligatorisk foer PM aapner eller merger PR.
+8. **Skill-freshness-check foer spawn** (Fase 2): PM kjorer
+   `node scripts/verify-contract-freshness.mjs <contract.md>` for aa verifisere
+   at skill-SHA-ene i kontrakten matcher current HEAD. Drift = vurder reroll.
+9. **Persistent evidence** (Fase 2): for high-risk kontrakter (P0/P1, compliance,
+   wallet, live-room) skal evidence kopieres fra `/tmp/` til
+   `docs/evidence/<contract-id>/` foer agent-spawn. Se `docs/evidence/README.md`.
+10. **Ripple analysis** (Fase 2): agenten skal i delivery-report svare paa
+    §3a Cross-Cutting Impact Analysis. "Ingen ringvirkninger" krever konkret
+    begrunnelse (test coverage / modul-isolasjon / type-system).
 
 ## Naar kontrakt er paakrevd
 
@@ -89,8 +98,12 @@ PM skal avvise leveransen hvis en av disse mangler:
 
 Relaterte filer:
 
-- `scripts/generate-agent-contract.sh`
+- `scripts/generate-agent-contract.sh` (oppdatert Fase 2: skill-SHA-lockfile, contract-ID, evidence-warning)
+- `scripts/verify-contract-freshness.mjs` (Fase 2 — verifiser skill-drift foer spawn)
 - `scripts/generate-context-pack.sh`
+- `docs/evidence/README.md` (Fase 2 — persistent evidence-konvensjon)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md` (Fase 1 — meta-arkitektur)
+- `docs/operations/INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md` (Fase 1 — P1-prioritets-rekkefoelge)
 - `docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`
 - `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
