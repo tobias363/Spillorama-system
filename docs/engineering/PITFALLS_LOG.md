@@ -2080,6 +2080,43 @@ Estimat: 3 dev-dager (1 backend + 1 frontend + 0.5 game-client + 0.5 slett-depre
 
 ---
 
+### §7.26 — Design-iterasjon på bong-elementer: bruk lokal preview-side, ikke live-stack
+
+**Severity:** P3 (workflow / disiplin)
+**Oppdaget:** 2026-05-15 (Tobias-direktiv)
+**Symptom:** Bong-design-tweaks (farger, FREE-celle, BINGO-header, paddings)
+ble historisk testet ved å starte hele dev-stacken (`npm run dev:nuke`),
+logge inn som spiller, kjøpe en bong i en aktiv runde, og se den
+rendres via socket-events. Det er minutter med ventetid per iterasjon —
+plus støy fra runde-state, marks-events, perspective/3D-composite-layers.
+
+**Pattern (samme som §7.24 for premietabell):** Lag en stand-alone HTML/CSS-
+side under `packages/game-client/src/<feature>-design/` med dummy-tall
+og statiske scenarier. Bygges via egen `vite.<feature>-design.config.ts`
+(samme mal som `vite.premie-design.config.ts`) til
+`apps/backend/public/web/games/<feature>-design.html`. Designer kan da
+edit + cmd-R uten å starte spillet.
+
+**Bong-design preview (2026-05-15):**
+- URL: `http://localhost:4000/web/games/bong-design.html`
+- Filer: `packages/game-client/src/bong-design/bong-design.{html,ts}`
+- Config: `packages/game-client/vite.bong-design.config.ts`
+- Build-script: `npm --prefix packages/game-client run build:bong-design`
+- Wired inn i `npm run build` etter `premie-design` (samme `emptyOutDir: false`-mønster)
+- Viser 3 bonger (Hvit/Gul/Lilla) × 3 scenarier (fresh / mid-spill / Rad 1 bingo)
+
+**Regel:** Når Tobias godkjenner design-endringer i preview-siden, MÅ
+endringer reflekteres 1:1 i prod-komponenten (`BingoTicketHtml.ts` for
+bong-design). Hvis preview avviker fra prod uten oppdatering, blir
+preview-siden en falsk sannhet. Ved hver iterasjon: oppdater BÅDE
+preview-CSS OG prod-komponent (samme PR hvis mulig).
+
+**Anti-mønster:** Bruke `dev-overview.html` eller `visual-harness.html`
+for ren design-tweaking. Begge har Pixi-runtime og er tregere å rebuilde.
+Stand-alone HTML/CSS er raskere og isolerer designet fra runtime-bugs.
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review

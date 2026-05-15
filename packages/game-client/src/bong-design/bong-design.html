@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spill 1 — Bong-design preview (3 aktive farger)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@400;600;700;800&display=swap"
+  />
+  <style>
+    /*
+     * Design-preview for bong-elementene i Spill 1.
+     *
+     * Tobias-direktiv 2026-05-15:
+     *   "Kan opprette bare et nytt view hvor bongene vises med dummy tall.
+     *    Det er kun for å tweake på designet."
+     *
+     * Side-en er ren HTML/CSS/JS for rask iterasjon — det er BEVISST ingen
+     * Pixi/socket-runtime her. Når Tobias har godkjent designet implementeres
+     * det 1:1 i `packages/game-client/src/games/game1/components/BingoTicketHtml.ts`.
+     *
+     * Tobias-bekreftet alternativ A 2026-05-15:
+     *   Side-om-side ÉN gang per farge — 3 bonger (Hvit / Gul / Lilla).
+     *
+     * Regler:
+     * - INGEN backdrop-filter (samme PIXI-blink-bug som BingoTicketHtml — se
+     *   `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts`).
+     * - Bong-palett kopiert 1:1 fra `BingoTicketHtml.ts` `BONG_COLORS` (linje 50-58).
+     * - Marked/free-konstantene matcher `MARKED_BG = "#7a1a1a"`,
+     *   `FREE_BG = "#2d7a3f"`, `FREE_LOGO_URL = "/web/games/assets/game1/design/spillorama-logo.png"`.
+     * - Auto-multiplikator-regel fra `docs/architecture/SPILL_REGLER_OG_PAYOUT.md` §3:
+     *     Hvit (5 kr) = base × 1
+     *     Gul (10 kr) = base × 2
+     *     Lilla (15 kr) = base × 3
+     */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      background: #0f0f1a;
+      color: #fff;
+      min-height: 100vh;
+      font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body { padding: 24px; }
+
+    header {
+      max-width: 1180px;
+      margin: 0 auto 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    header h1 {
+      font-size: 24px;
+      color: #ffe83d;
+      letter-spacing: 1px;
+    }
+    header p.lead {
+      margin-top: 8px;
+      color: rgba(255,255,255,0.65);
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 800px;
+    }
+    header p.note {
+      margin-top: 8px;
+      color: rgba(255,200,100,0.85);
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    section.scenario {
+      background: linear-gradient(180deg, #1a1a2e 0%, #12121f 100%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+    section.scenario h2 {
+      font-size: 17px;
+      color: #ffe83d;
+      margin-bottom: 4px;
+    }
+    section.scenario .scenario-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 14px;
+    }
+
+    /*
+     * Bong-rad — 3 bonger side-om-side.
+     * 360px = `BingoTicketHtml.cardWidth` × 1.5 (vi gir litt slack for
+     * design-iterasjon). På smale skjermer wraps de.
+     */
+    .bong-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    .bong-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .bong-col .col-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.85);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .bong-col .col-meta {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      font-style: italic;
+      margin-bottom: 6px;
+    }
+
+    /*
+     * Bong-card — speiler `BingoTicketHtml` 1:1 i visuell paritet.
+     * Dimensjon 240×300 (cardWidth × cardHeight i prod). Aspect-ratio
+     * 4:5 (samme som prod). Border-radius 8px, box-shadow matchet.
+     */
+    .bong-card {
+      width: 240px;
+      aspect-ratio: 240 / 300;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      box-sizing: border-box;
+      padding: 12px 14px 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-family: 'Inter', system-ui, sans-serif;
+      overflow: hidden;
+    }
+    /* Palett — 1:1 fra BingoTicketHtml.BONG_COLORS */
+    .bong-card.color-white  { background: #e8e4dc; color: #2a2420; }
+    .bong-card.color-yellow { background: #f0b92e; color: #2a1a00; }
+    .bong-card.color-purple { background: #b8a4e8; color: #2a1040; }
+
+    /* Header: navn venstre + pris høyre. Matcher BingoTicketHtml.populateFront. */
+    .bong-card .bong-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .bong-card .bong-header .bong-name {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: -0.005em;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bong-card .bong-header .bong-price {
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /*
+     * B I N G O-header — bokstavene over hver kolonne. Matcher
+     * BingoTicketHtml.populateFront `BINGO_LETTERS`-rendering.
+     * Burgundy (#7a1a1a) = samme som MARKED_BG.
+     */
+    .bong-card .bingo-letters {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+      flex: 0 0 auto;
+      margin-bottom: 2px;
+    }
+    .bong-card .bingo-letters .letter {
+      text-align: center;
+      font-size: 16px;
+      font-weight: 800;
+      color: #7a1a1a;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    /* 5×5 grid. Matcher .ticket-grid med 5px gap. */
+    .bong-card .bong-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: repeat(5, 1fr);
+      gap: 5px;
+      flex: 1;
+    }
+    .bong-card .bong-grid .cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      border-radius: 3px;
+      min-width: 0;
+      min-height: 0;
+      /*
+       * UNMARKED_BG = "rgba(255,255,255,0.55)" — semi-transparent over
+       * bong-pastellen så fargen skinner gjennom. Identisk med prod.
+       */
+      background: rgba(255,255,255,0.55);
+    }
+    .bong-card .bong-grid .cell.marked {
+      background: #7a1a1a; /* MARKED_BG */
+      color: #ffffff;       /* MARKED_TEXT */
+      font-weight: 700;
+    }
+    .bong-card .bong-grid .cell.free {
+      /*
+       * FREE-celle: transparent bakgrunn + spillorama-logo som fyller
+       * cellen (object-fit: contain). Matcher BingoTicketHtml.buildCells
+       * der `freeImg` settes med width/height 100% og objectFit contain.
+       */
+      background: transparent;
+      padding: 0;
+    }
+    .bong-card .bong-grid .cell.free img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+      display: block;
+    }
+    /* Fallback hvis logo-asset ikke laster — viser ★ i grønn pille */
+    .bong-card .bong-grid .cell.free.fallback {
+      background: #2d7a3f; /* FREE_BG */
+      color: #ffffff;       /* FREE_TEXT */
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    /* ToGo-footer — matcher .ticket-togo */
+    .bong-card .bong-footer {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 500;
+      opacity: 0.75;
+    }
+
+    /* Tweaks-paragraf */
+    .scenario h3 {
+      font-size: 13px;
+      color: rgba(255,232,61,0.85);
+      margin: 18px 0 8px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Spill 1 — Bong-design preview (3 aktive farger)</h1>
+    <p class="lead">
+      Hvit (5 kr × 1), Gul (10 kr × 2), Lilla (15 kr × 3). Dummy-tall, kun for
+      design-tweaking. Speiler <code>BingoTicketHtml.ts</code> sin bong-palett
+      1:1 (<code>BONG_COLORS</code> linje 50-58).
+    </p>
+    <p class="note">
+      Design-preview — ikke produksjons-render. Bong-paletten, FREE-cellens
+      Spillorama-logo, MARKED_BG (#7a1a1a) og BINGO-header er kopiert eksakt
+      fra prod-komponenten. Ingen socket/Pixi-runtime — ren HTML/CSS/JS.
+    </p>
+  </header>
+
+  <main>
+    <section class="scenario">
+      <h3>Ingen markeringer (fresh ticket)</h3>
+      <div class="scenario-sub">
+        Bongen slik den ser ut umiddelbart etter kjøp, før første trekning.
+      </div>
+      <div class="bong-row" id="row-fresh"></div>
+    </section>
+
+    <section class="scenario">
+      <h3>Med markeringer (mid-spill)</h3>
+      <div class="scenario-sub">
+        Tilfeldig utvalg av 8 celler markert (MARKED_BG #7a1a1a). FREE-cellen
+        er alltid sentralt og auto-marked via logo.
+      </div>
+      <div class="bong-row" id="row-marked"></div>
+    </section>
+
+    <section class="scenario">
+      <h3>Bingo-vinst (Rad 1 fullført)</h3>
+      <div class="scenario-sub">
+        Øverste rad (5 celler) markert — vinnende Rad 1 i Spill 1's 5×5-grid.
+      </div>
+      <div class="bong-row" id="row-bingo"></div>
+    </section>
+  </main>
+
+  <script type="module" src="./bong-design.ts"></script>
+</body>
+</html>
