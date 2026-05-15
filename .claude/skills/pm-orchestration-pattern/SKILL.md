@@ -2,11 +2,11 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.2.2
+  version: 1.3.0
   project: spillorama
 ---
 
-<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/engineering/PM_*.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/generate-context-pack.sh, .github/workflows/pm-*.yml -->
+<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/generate-context-pack.sh, .github/workflows/pm-*.yml -->
 
 # PM Orchestration Pattern
 
@@ -181,6 +181,38 @@ Sjekklisten inkluderer:
 - [ ] Hvis ny fallgruve oppdaget: lagt til i PITFALLS_LOG samme PR
 - [ ] Knowledge-pekere inkludert i agent-prompt hvis aktuelt
 
+### PM Knowledge Continuity v2 (vedtatt 2026-05-15)
+
+PM skal ikke starte kodehandling, spawn av implementer-agent eller merge før disse tre validerer:
+
+```bash
+bash scripts/pm-checkpoint.sh --validate
+bash scripts/pm-doc-absorption-gate.sh --validate
+node scripts/pm-knowledge-continuity.mjs --validate
+```
+
+Hvis `pm-knowledge-continuity.mjs --validate` feiler, kjør full evidence-pack + self-test-flyt:
+
+```bash
+node scripts/pm-knowledge-continuity.mjs --generate-pack \
+  --output /tmp/pm-knowledge-continuity-pack.md
+node scripts/pm-knowledge-continuity.mjs --self-test-template \
+  --pack /tmp/pm-knowledge-continuity-pack.md \
+  --output /tmp/pm-knowledge-self-test.md
+$EDITOR /tmp/pm-knowledge-self-test.md
+node scripts/pm-knowledge-continuity.mjs --confirm-self-test \
+  /tmp/pm-knowledge-self-test.md \
+  --pack /tmp/pm-knowledge-continuity-pack.md
+```
+
+Hensikten er å bevise operativ kunnskapsparitet:
+- Forrige PMs leveranser og uferdige arbeid.
+- Åpne PR-er, røde workflows, branches og utrackede filer.
+- P0/P1-risikoer, invariants, relevante skills og PITFALLS.
+- Første handling og hvorfor den fortsetter i samme spor.
+
+Dokumenter i repo er nødvendig, men ikke nok. PM må vise at konteksten er absorbert.
+
 ### Bug-resurrection-detector (vedtatt 2026-05-13)
 
 `.husky/pre-commit-resurrection-check.sh` + `.github/workflows/bug-resurrection-check.yml` blokkerer commits som modifiserer kode i regioner som var bug-fixet innenfor siste 30 dager — med mindre commit-melding inneholder `[resurrection-acknowledged: <grunn>]`.
@@ -248,19 +280,22 @@ Hvis Tobias havnet på en feature-branch i sin terminal: PM kjører `git checkou
 
 ### Agent-rapport-format
 
-Når en agent er ferdig, rapporten skal være:
+Når en agent er ferdig, rapporten skal følge [`docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`](../../../docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md). Minimum:
 
 ```
-Agent N — [scope]:
-- Branch: feat/<scope>-<short>
-- Commits: <sha-1>, <sha-2>, ...
-- Filer endret: N
-- Tester: <pass/fail/skip count>
-- Avvik: <hvis noe utenfor scope>
-- Ready for PR: ja/nei
+Agent Delivery Report — <scope>
+- Branch + commits
+- Context read before changes
+- What changed
+- Invariants preserved
+- Tests and verification
+- Knowledge updates: skill + PITFALLS_LOG + AGENT_EXECUTION_LOG
+- Lessons learned
+- Open risk / follow-up
+- Ready for PR: ja/nei + reason
 ```
 
-PM bruker denne til Linear-update + PR-body.
+PM bruker denne til Linear-update + PR-body. Hvis rapporten mangler context read, invariants, tests eller knowledge updates, åpnes ikke PR før agenten har levert komplettering eller PM har gjort eksplisitt unntak i PR-body.
 
 ### Isolation: worktree er default for parallelle agenter
 
@@ -304,6 +339,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | Ignorerer skill-freshness-warning på PR | Skill drifter videre fra koden | Vurder skill-refresh i samme PR med `[skill-refreshed: <name>]` |
 | 5+ parallelle agenter uten worktree-isolasjon | File-revert-konflikter ved merge | ALLTID `isolation: worktree` for ≥ 2 parallelle agenter |
 | Aktiverer required reviews uten approver-roster | PR-er låses eller "review" blir falsk uavhengighet | Følg `ACCESS_APPROVAL_MATRIX.md` §6-§7 før branch protection endres |
+| PM har dokumentene, men ingen operativ self-test | Ny PM spør om allerede dokumentert kontekst eller pivot-er fra forrige spor | Kjør `pm-knowledge-continuity.mjs` evidence pack + self-test før første kodehandling |
 
 ## Kanonisk referanse
 
@@ -316,11 +352,14 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `docs/engineering/ENGINEERING_WORKFLOW.md` — full workflow-spec
 - `docs/engineering/PM_PUSH_CONTROL.md` — multi-agent push-control (Phase 2)
 - `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` — playbook for hver PM-overgang (60-90 min onboarding)
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md` — evidence pack + self-test før første kodehandling
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md` — agentleveranseformat før PR
 - `docs/engineering/BUG_RESURRECTION_DETECTOR.md` — anti-regression-hook
 - `docs/engineering/SKILL_FRESHNESS.md` — skill-refresh-cadence
 - `docs/operations/ACCESS_APPROVAL_MATRIX.md` — access, approval, bypass-labels og required-review-kriterier
 - `scripts/pm-push-control.mjs` — registry + watch + dashboard
 - `scripts/pm-checkpoint.sh` — hard-block onboarding-gate for ny PM
+- `scripts/pm-knowledge-continuity.mjs` — PM evidence pack + self-test-validering
 - `BACKLOG.md` — strategisk oversikt
 - `docs/operations/PM_HANDOFF_*.md` — PM-handoffs (én per session)
 - `.claude/active-agents.json` — registry over aktive agenter (commit-able)

@@ -387,11 +387,43 @@ Ved aktivert: PM-AI kan kjøre vilkårlige SELECT-queries direkte. Foreløpig br
 - Ved mistanke om N+1 eller treg query: skum PgHero "Queries"-tab + Sentry `performance_n_plus_one_db_queries`-issues
 - Ved kompleks reproduksjon: aktivér Lag 4-full-trace midlertidig + analyser i `pg_stat_statements`
 
+### 2.22 PM Knowledge Continuity v2 før første kodehandling (vedtatt 2026-05-15)
+
+> "Det som også er ekstremt viktig for meg er at ny PM alltid får alt av informasjon som trengs for at han kan fortsette på arbeidet til forgående PM uten spørsmål til hva som har blitt gjort."
+> — Tobias 2026-05-15
+
+**HARD REGEL:** Dokumenter som finnes i repo er ikke alene bevis på kunnskapsparitet. Ny PM må generere current-state evidence pack og skrive en konkret self-test før første kodehandling.
+
+Kjør:
+
+```bash
+node scripts/pm-knowledge-continuity.mjs --generate-pack \
+  --output /tmp/pm-knowledge-continuity-pack.md
+node scripts/pm-knowledge-continuity.mjs --self-test-template \
+  --pack /tmp/pm-knowledge-continuity-pack.md \
+  --output /tmp/pm-knowledge-self-test.md
+$EDITOR /tmp/pm-knowledge-self-test.md
+node scripts/pm-knowledge-continuity.mjs --confirm-self-test \
+  /tmp/pm-knowledge-self-test.md \
+  --pack /tmp/pm-knowledge-continuity-pack.md
+node scripts/pm-knowledge-continuity.mjs --validate
+```
+
+Self-testen må bevise:
+- Hva forrige PM leverte og hva som står igjen.
+- Hvilke åpne PR-er/workflows/git-endringer som må håndteres.
+- Hvilke P0/P1-risikoer, invariants, skills og PITFALLS som gjelder før neste arbeid.
+- Hvilken første handling PM tar og hvorfor den fortsetter i samme spor.
+
+**Agent-overlevering:** Alle implementer-/fix-agenter skal levere `Agent Delivery Report` før PM åpner PR. Bruk [`AGENT_DELIVERY_REPORT_TEMPLATE.md`](./AGENT_DELIVERY_REPORT_TEMPLATE.md). Rapporten må vise kontekst lest, invariants bevart, tester, skill/PITFALLS/AGENT_EXECUTION_LOG-oppdateringer og åpne risikoer.
+
+Kanonisk prosedyre: [`docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`](../operations/PM_KNOWLEDGE_CONTINUITY_V2.md).
+
 ---
 
 ## 3. Trinn-for-trinn onboarding-rutine
 
-**Forventet total tid: 60-90 min.** Hopp ikke over noen trinn — særlig §2 og §6.
+**Forventet total tid: 90-180 min for ny PM, 45-75 min ved samme-dag takeover.** Hopp ikke over noen trinn — særlig §2 og §6.
 
 ### ⛔ Trinn 0 — Vanntett onboarding-gate (HARD-BLOCK)
 
@@ -424,6 +456,35 @@ Tidligere PM-er har lest kun siste handoff og hoppet over de eldre — som har f
 **For ikke-PM-roller** (Tobias, agenter under PM-koordinering, eksterne utviklere): trenger ikke kjøre. PR-template har checkbox.
 
 **Tobias-verifikasjon:** Tobias kan lese `.pm-onboarding-confirmed.txt` etter første PR for å sjekke at takeaway-tekstene er ekte og matcher faktisk handoff-innhold. Skriv ALDRI placeholder-takeaway som "lest" eller "OK" — det er fanget av kvalitets-sjekken.
+
+### Trinn 0.5 — Doc-absorpsjon-gate + Knowledge Continuity v2 (HARD-BLOCK)
+
+```bash
+bash scripts/pm-doc-absorption-gate.sh --validate
+node scripts/pm-knowledge-continuity.mjs --validate
+```
+
+Hvis `pm-doc-absorption-gate.sh --validate` feiler, kjør interaktiv gate:
+
+```bash
+bash scripts/pm-doc-absorption-gate.sh
+```
+
+Hvis `pm-knowledge-continuity.mjs --validate` feiler, generer pack + self-test:
+
+```bash
+node scripts/pm-knowledge-continuity.mjs --generate-pack \
+  --output /tmp/pm-knowledge-continuity-pack.md
+node scripts/pm-knowledge-continuity.mjs --self-test-template \
+  --pack /tmp/pm-knowledge-continuity-pack.md \
+  --output /tmp/pm-knowledge-self-test.md
+$EDITOR /tmp/pm-knowledge-self-test.md
+node scripts/pm-knowledge-continuity.mjs --confirm-self-test \
+  /tmp/pm-knowledge-self-test.md \
+  --pack /tmp/pm-knowledge-continuity-pack.md
+```
+
+PM går ikke videre før begge validerer. Hensikten er å fange forskjellen mellom "jeg har lest dokumentene" og "jeg kan fortsette arbeidet uten kontekst-tap".
 
 ### Trinn 1 — Generer live current-state (3 min)
 
@@ -518,11 +579,11 @@ find /Users/tobiashaugen/Projects/Spillorama-system/docs -name "*wallet*" -o -na
 > **🚨 KRITISK:** Tobias-direktiv 2026-05-10:
 > > "Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."
 
-Spillorama har 60+ dokumenterte fallgruver akkumulert siden 2026-04. Hvis du ikke kjenner disse fra dag 0, gjentar du dem. Det er ikke akseptabelt.
+Spillorama har 100+ dokumenterte fallgruver akkumulert siden 2026-04. Hvis du ikke kjenner disse fra dag 0, gjentar du dem. Det er ikke akseptabelt.
 
 **Obligatoriske docs:**
 
-1. **[`PITFALLS_LOG.md`](./PITFALLS_LOG.md)** — sentral fallgruve-katalog (63+ entries i 11 kategorier).
+1. **[`PITFALLS_LOG.md`](./PITFALLS_LOG.md)** — sentral fallgruve-katalog (100+ entries i 12 kategorier).
    - Skim hele dokumentet (~10 min)
    - For ditt scope: les relevante §-er nøye (~5-10 min):
      - **Compliance/wallet-arbeid:** §1 + §2 + §8.4 (kode vs doc)

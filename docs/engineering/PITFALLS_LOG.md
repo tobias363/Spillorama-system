@@ -51,13 +51,13 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 14 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
-| [§8 Doc-disiplin](#8-doc-disiplin) | 7 | 2026-05-15 |
+| [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 103 entries (per 2026-05-15)
+**Total:** 104 entries (per 2026-05-15)
 
 ---
 
@@ -2855,6 +2855,22 @@ Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-b
 - `.github/workflows/skill-mapping-validate.yml`
 - `docs/auto-generated/SKILL_FILE_MAP.md`
 
+### §8.8 — Dokumentasjon finnes, men operativ PM-forståelse er ikke bevist
+
+**Severity:** P0 (kunnskapstap mellom PM-er)
+**Oppdaget:** 2026-05-15 etter Tobias-direktiv om null spørsmål ved PM-overgang.
+**Symptom:** Ny PM kan peke til handoffs, skills og PITFALLS_LOG, men mangler konkret svar på hva forrige PM leverte, hvilke PR-er/workflows som er åpne, hvilke invariants som gjelder, og hva første handling må være. Resultatet blir pivot, gjentatte spørsmål til Tobias eller at agenter spawnes med for lite kontekst.
+**Root cause:** Dokumenttilstedeværelse ble forvekslet med absorbert operativ kunnskap. `pm-checkpoint.sh` og `pm-doc-absorption-gate.sh` beviser lesing, men ikke at PM kan videreføre arbeidet i samme spor.
+**Fix:** Innfør PM Knowledge Continuity v2: `scripts/pm-knowledge-continuity.mjs` genererer evidence pack fra live repo/GitHub-state, lager self-test-template, validerer fritekstsvar og skriver `.pm-knowledge-continuity-confirmed.txt`.
+**Prevention:**
+- Ny PM skal kjøre `node scripts/pm-knowledge-continuity.mjs --validate` før første kodehandling.
+- Hvis validering feiler, generer evidence pack + self-test og bekreft med `--confirm-self-test`.
+- PM skal kreve Agent Delivery Report fra alle implementer-/fix-agenter før PR, slik at neste PM arver både kodeendring og mentalmodell.
+**Related:**
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`
+- `scripts/pm-knowledge-continuity.mjs`
+
 ---
 
 ## §9 Konfigurasjon / Environment
@@ -3393,3 +3409,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-15 | Lagt til §7.26 — Lobby-broadcast manglet etter natural round-end (P0 pilot-blokker). 4 state-flipp-paths (Game1DrawEngineService.drawNext POST-commit, GamePlanRunService.finish/advanceToNext-past-end, GamePlanRunCleanupService.reconcileNaturalEnd) trigget IKKE socket-push til spiller-shell — klient måtte vente på 10s-poll. Fix: best-effort fire-and-forget broadcaster wired på alle 4 paths + frontend "Forbereder neste spill"-loader + 10s→3s poll reduction. 37 nye tester. | Fix-agent (lobby-broadcast on natural round-end) |
 | 2026-05-15 | Lagt til §7.27 — PauseOverlay vist feilaktig etter natural round-end (P0 pilot-blokker). Spill 1 auto-pauser etter hver phase-won (Tobias-direktiv 2026-04-27), og `paused`-flagget i `app_game1_game_state` resettes ikke alltid før status flippes til 'completed'. Snapshot speiler `paused` til klient-`isPaused`, så klient så `gameStatus=ENDED && isPaused=true` → PauseOverlay viste seg feilaktig. Fix: klient-side gate `state.isPaused && state.gameStatus === "RUNNING"` i `Game1Controller.onStateChanged`. Defense-in-depth selv om backend en gang i fremtiden rydder paused-flagget — gate-en er kontrakten med spillerne. Kanonisk spec: SPILL1_IMPLEMENTATION_STATUS §5.8. 11 pure-funksjons-tester i `Game1Controller.pauseOverlayGating.test.ts`. | Fix-agent (post-round-flyt §5.8) |
 | 2026-05-15 | Lagt til §7.30 — Triple-bong-rendering cross-color grouping bug (P0 pilot-blokker — visuell regresjon på master-flyt). PR #1500 (Bølge 2) introduserte purchaseId + sequenceInPurchase men hadde 3 lag med bugs: (A) pre-runde display-tickets manglet purchaseId helt → frontend grupperte tilfeldige tickets, (B) backend `ensureAssignmentsForPurchases` iterated `count` ganger uavhengig av `spec.size` så 1 Stor (= 3 brett) ble bare 1 row, (C) cross-color cart delte samme purchaseId så `tryGroupTriplet` grupperte forskjellige farger sammen. Fix: 3 lag løst — frontend color-family-validation, backend `LARGE_TICKET_BRETT_COUNT=3`-multiplier, og syntetisk bundle-id-generering i `getOrCreateDisplayTickets`. Tobias' eksakte scenario (1H+1G+1L Stor = 3 triplets) nå dekket av test. | Fix-agent (Tobias 2026-05-15 triple-rendering screenshot) |
+| 2026-05-15 | Lagt til §8.8 — PM Knowledge Continuity v2: evidence pack + self-test-gate for å bevise operativ kunnskapsparitet, ikke bare at dokumenter finnes. Total 103→104 entries. | PM-AI (knowledge-continuity-hardening) |

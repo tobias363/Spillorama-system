@@ -4155,3 +4155,58 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 
 **Branch:** `codex/fix-auto-rebase-zero-overlap`
 **PR:** #1529
+
+### 2026-05-15 — PM-AI: Knowledge Continuity v2 hardening
+
+**Agent-type:** PM/devops-docs-agent
+**Scope:** Gjøre PM-overgang og agentleveranser mer robuste, slik at ny PM får operativ kunnskapsparitet før første kodehandling og agentarbeid ikke mister mentalmodell underveis.
+**Trigger:** Tobias presiserte at ny PM alltid må få all informasjon som trengs for å fortsette forrige PMs arbeid uten spørsmål, og at agenter må lese kontekst og oppdatere skills når de lærer noe.
+
+**Inputs:**
+- `docs/operations/PM_SESSION_START_CHECKLIST.md`
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`
+- `docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- Eksisterende PM-gates: `pm-checkpoint.sh` og `pm-doc-absorption-gate.sh`
+
+**Outputs:**
+
+1. **`scripts/pm-knowledge-continuity.mjs`**
+   - Ny dependency-free Node-gate som genererer current-state evidence pack.
+   - Lager PM self-test-template med konkrete spørsmål om handoff, PR/workflow-state, risks, invariants, skills, PITFALLS, observability, git-state og første handling.
+   - Validerer self-test og avviser korte/placeholder-svar.
+   - Skriver `.pm-knowledge-continuity-confirmed.txt` som lokal bevismarkør med SHA256-hasher og 7-dagers gyldighet.
+
+2. **`docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`**
+   - Ny kanonisk prosedyre for evidence pack + self-test før første kodehandling.
+
+3. **`docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`**
+   - Ny agentrapportstandard med context read, changes, invariants, tests, knowledge updates, lessons learned, risk og PR-readiness.
+
+4. **PM-rutine og skill-dokumentasjon**
+   - Oppdaterte `PM_SESSION_START_CHECKLIST.md` og `PM_ONBOARDING_PLAYBOOK.md` med Knowledge Continuity v2 som hard-block.
+   - Oppdaterte `SKILL_DOC_PROTOCOL_TEMPLATE.md` slik at agents skal levere Agent Delivery Report og dokumentere hva som nå funker / hva som ikke skal endres.
+   - Bumpet `pm-orchestration-pattern` til v1.3.0 med ny gate og rapportformat.
+
+5. **Knowledge-logg**
+   - Lagt til `PITFALLS_LOG.md` §8.8: dokumenttilstedeværelse er ikke nok; operativ PM-forståelse må bevises.
+   - Denne `AGENT_EXECUTION_LOG`-entryen.
+
+**Læring:**
+- PM-onboarding må skille mellom "dokumenter finnes", "PM har lest dokumentene" og "PM kan operere riktig uten å spørre". De er tre forskjellige modenhetsnivåer.
+- Evidence pack må genereres fra live state, ellers kan ny PM overse åpne PR-er, røde workflows eller utrackede filer som ikke var i forrige handoff.
+- Agentleveranse må inneholde mentalmodell og invariants, ikke bare branch/test-status. Ellers får neste PM en kodeendring uten forklaring på hvorfor den ikke skal reverseres.
+
+**Eierskap (filer agenten har endret):**
+- `scripts/pm-knowledge-continuity.mjs`
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`
+- `docs/operations/PM_SESSION_START_CHECKLIST.md`
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`
+- `docs/engineering/PM_ONBOARDING_PLAYBOOK.md`
+- `docs/engineering/SKILL_DOC_PROTOCOL_TEMPLATE.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+**Branch:** `codex/pm-knowledge-continuity-v2`
+**PR:** åpnes av PM etter lokal validering.
