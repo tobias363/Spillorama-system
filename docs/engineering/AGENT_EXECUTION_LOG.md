@@ -3110,3 +3110,83 @@ PauseOverlay reflekterer KUN aktiv pause midt i en runde. For ENDED/WAITING/NONE
 - IKKE endret andre Game1-pathways (WinScreen, EndOfRoundOverlay, BuyPopup auto-show fungerte allerede iht §5.8)
 
 **Tid:** ~40 min agent-arbeid
+
+---
+
+## 2026-05-15 — Post-round-overlay data-driven dismiss (C-hybrid)
+
+**Agent:** Frontend-fix-agent (Claude Opus 4.7)
+**Branch:** `fix/post-round-overlay-data-driven-dismiss-2026-05-15`
+**Tema:** Spillerklient post-round-flyt §5.8 + Tobias-direktiv 2026-05-15 ("Kjør C, tenker minimum 6 sek celebrasjon deretter vent")
+**Trigger:** Tobias-rapport 2026-05-15: *"Nå viste man spillet som nettopp var spilt i ca 40 sekunder før det endret til riktig spill."*
+
+**Mandat:** Erstatt timer-driven legacy-dismiss (3s `MIN_DISPLAY_MS` + første `markRoomReady`) med data-driven dismiss (6s `MIN_CELEBRATION_MS` floor + slug-comparison + 60s safety-cap). Backward-compat med eksisterende 56-tests-suite.
+
+**Inputs:**
+- `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (post-round-flyt IMMUTABLE)
+- Tobias-rapport "40 sek stale slug etter natural round-end"
+- Tobias-godkjennelse "Kjør C, tenker minimum 6 sek celebrasjon deretter vent"
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts` (eksisterende overlay)
+- `packages/game-client/src/games/game1/Game1Controller.ts:610-650, 2066-2129` (controller-flyt)
+
+**Root-cause-analyse:**
+
+Pre-fix dismisset overlay etter 3s + første state-update. På det tidspunktet hadde backend IKKE advancert plan-runtime ennå (advance kunne ta opp til 40s ved hiccups), så `nextScheduledGame.catalogSlug` pekte fortsatt på runden vi nettopp spilte. Lobby så stale "Neste spill: <samme som nettopp>"-tekst i hele advance-vinduet.
+
+Hvorfor faste timere ikke fungerer: backend-advance varierer 50ms → 40s+ avhengig av plan-runtime-helse, master-hall-state, bridge-retry, DB-latens. Ingen fast verdi dekker alle scenarier.
+
+**Fix-strategi:** Data-driven dismiss med tre lag:
+1. **Floor (6s):** Minimum celebration tid for komfortabel feiring uavhengig av backend
+2. **Signal:** Vent på at `currentNextSlug !== justPlayedSlug` (backend har advancert)
+3. **Cap (60s):** Forced dismiss + Sentry-breadcrumb hvis backend ikke advancert innen grensen
+
+**Hva ble endret:**
+
+- `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts`:
+  - Nye konstanter: `MIN_CELEBRATION_MS = 6_000`, `MAX_WAIT_MS = 60_000`, `DATA_READINESS_POLL_MS = 500`
+  - Utvidet `Game1EndOfRoundSummary` med optional `justPlayedSlug?: string | null`
+  - Ny session-state: `justPlayedSlug`, `currentNextSlug`, `minCelebrationDeadline`, `safetyCapDeadline`, `dataReadinessPollTimer`, `safetyCapTimer`, `hasFiredSafetyCap`
+  - Nye public APIs: `setJustPlayedSlug(slug)`, `updateLobbyState(slug)`
+  - Nye private helpers: `isDataDrivenMode()`, `scheduleDataDrivenTimers()`, `fireSafetyCapDismiss()`, `tryDismissIfReady()`
+  - Modifisert `tryDismiss()`: bypasser til `tryDismissIfReady()` når data-driven modus er aktiv
+  - Modifisert `clearTimers()`: rydder også nye timer-handles
+- `packages/game-client/src/games/game1/Game1Controller.ts`:
+  - `showEndOfRoundOverlayForState`: henter `justPlayedSlug` fra `lobbyStateBinding.getState()?.nextScheduledGame?.catalogSlug` ved round-end-tidspunkt og sender via `summary.justPlayedSlug`
+  - `lobbyStateBinding.onChange`-listener: forward `nextSlug` til `endOfRoundOverlay.updateLobbyState(nextSlug)` parallelt med eksisterende `playScreen.setNextScheduledGameSlug`
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.18.0 → v1.19.0:
+  - Ny seksjon "Post-round-overlay data-driven dismiss (C-hybrid, FIXED 2026-05-15)" med kontrakt, konstanter, API, backward-compat, edge-cases, anti-mønstre, Sentry-observability
+  - Endringslogg-entry
+- `docs/engineering/PITFALLS_LOG.md` §7.28 ny entry: root-cause + fix + prevention + anti-mønstre
+- `docs/engineering/AGENT_EXECUTION_LOG.md` denne entry
+
+**Backward-compat:**
+- Hvis `summary.justPlayedSlug === null` (legacy call-sites / eksisterende tester), forblir legacy markRoomReady + `MIN_DISPLAY_MS=3s`-pathen aktiv
+- 56 eksisterende `Game1EndOfRoundOverlay.test.ts`-tester forblir grønne (verifisert)
+- Partial-rollback-vei: revert Game1Controller-endring, overlay vender til legacy
+
+**Verifikasjon:**
+- `npm --prefix packages/game-client run check` → TypeScript strict pass
+- `npm --prefix packages/game-client test -- Game1EndOfRoundOverlay` → 56 tester grønne
+- `npm --prefix packages/game-client test -- Game1Controller.endOfRoundFlow Game1Controller.pauseOverlayGating` → 22 tester grønne
+- Full game-client test-suite → 1332 grønne, 1 pre-eksisterende failure (`posthogBootstrap` — ikke relatert)
+
+**Doc-protokoll (§2.19):**
+- ✅ Skill: `.claude/skills/spill1-master-flow/SKILL.md` v1.19.0 — ny seksjon "Post-round-overlay data-driven dismiss"
+- ✅ PITFALLS_LOG §7.28 — full root-cause + fix + prevention
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+
+**Lessons learned:**
+
+- **Data-driven > timer-driven for backend-data-avhengighet.** Når UI-overlay venter på backend-state-endring (slug, status, count), MÅ klienten lytte på det faktiske datafeltet — ikke gjette via timer. Floor-tid + safety-cap er sikkerhetsnett, ikke primær-mekanisme.
+- **Backward-compat-flyt unlocker partial-rollback.** Ved å bevare legacy markRoomReady-modus som default (når `justPlayedSlug === null`), unngår vi å bryte 56 eksisterende tester samtidig som vi shipper ny adferd. Hvis data-driven feiler i prod kan vi reverte controller-endring uten overlay-rebuild.
+- **Tobias-direktiv konkretiserer prioritering.** "Minimum 6 sek celebrasjon" er ikke et tall jeg ville valgt — det er Tobias' UX-vurdering at kortere føles "for raskt". Konstanten må respekteres og dokumenteres.
+- **Sentry-breadcrumb for safety-cap-fires er kritisk for ops.** Hvis backend henger > 60s er det enten plan-runtime-bug eller infrastruktur-issue. Breadcrumb lar ops se mønsteret uten å vente på spiller-klager.
+
+**Forbudt-rør (overholdt):**
+- IKKE endret eksisterende test-fixtures (Tobias-direktiv: "ikke skriv nye tester nå")
+- IKKE fjernet legacy `MIN_DISPLAY_MS` eller `MAX_PREPARING_ROOM_MS` (backward-compat-eksporter)
+- IKKE endret `dismissEndOfRoundAndReturnToWaiting`-pathen (overlay → controller-flyt)
+- IKKE rørt backend (data-driven er ren klient-fix på eksisterende lobby-state-broadcast)
+- IKKE endret `PlayScreen.setNextScheduledGameSlug` (preserved parallel — overlay og PlayScreen lytter begge på samme slug)
+
+**Tid:** ~75 min agent-arbeid

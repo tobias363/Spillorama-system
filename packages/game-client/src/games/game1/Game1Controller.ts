@@ -627,6 +627,13 @@ class Game1Controller implements GameController {
       const nextSlug = state?.nextScheduledGame?.catalogSlug ?? null;
       this.playScreen?.setNextScheduledGameSlug(nextSlug);
 
+      // Tobias-direktiv 2026-05-15 (C-hybrid data-driven dismiss):
+      // forward også til Game1EndOfRoundOverlay slik at overlay-en kan
+      // sammenligne mot `justPlayedSlug` og dismisse seg når serveren har
+      // advancert plan-runtime. Overlay no-op-er hvis ingen aktiv session
+      // (mest tilfeller) — kun aktivt vinduen etter natural round-end.
+      this.endOfRoundOverlay?.updateLobbyState(nextSlug);
+
       // Spillerklient-rebuild Fase 2 (2026-05-10): forward ticket-config
       // fra plan-runtime catalog. Når master bytter plan-item (Bingo →
       // Trafikklys → Oddsen) får BuyPopup oppdatert bongfarger umiddelbart.
@@ -2074,6 +2081,23 @@ class Game1Controller implements GameController {
     const elapsedSinceEndedMs =
       this.roundEndedAt !== null ? Math.max(0, now - this.roundEndedAt) : 0;
 
+    // Tobias-direktiv 2026-05-15 (C-hybrid post-round-overlay data-driven dismiss):
+    //
+    // Hent catalogSlug for runden som NETTOPP ble spilt. Ved `onGameEnded`-
+    // tidspunkt har backend IKKE advancert plan-runtime ennå, så
+    // `lobbyStateBinding.getState().nextScheduledGame.catalogSlug` peker
+    // fortsatt på runden vi nettopp avsluttet — perfekt baseline for
+    // "what just played". Når backend senere advancerer (typisk innen
+    // ~40 sek per Tobias-rapport 2026-05-15), endrer feltet seg til ny
+    // slug → overlay.updateLobbyState(...) trigger dismiss.
+    //
+    // Fallback: null hvis lobbyStateBinding ikke har levert state ennå
+    // (sjelden race ved cold-start). Overlay faller da tilbake til legacy
+    // markRoomReady-modus (backward-compat).
+    const lobbyState = this.lobbyStateBinding?.getState() ?? null;
+    const justPlayedSlug =
+      lobbyState?.nextScheduledGame?.catalogSlug ?? null;
+
     const summary: Game1EndOfRoundSummary = {
       endedReason:
         state.gameStatus === "ENDED"
@@ -2092,6 +2116,7 @@ class Game1Controller implements GameController {
       myWinnings: [...this.myRoundWinnings],
       millisUntilNextStart: state.millisUntilNextStart ?? null,
       elapsedSinceEndedMs,
+      justPlayedSlug,
       onBackToLobby: () => {
         // Lukk overlay + emit window-event som lobby/router kan lytte til.
         // Eksisterende lobby-shell håndterer `spillorama:returnToLobby`

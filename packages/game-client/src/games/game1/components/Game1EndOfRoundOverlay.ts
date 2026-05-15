@@ -107,6 +107,60 @@ export const RETURNING_TO_LOBBY_PREVIEW_MS = 2_000;
 export const SUMMARY_PHASE_MS = MIN_DISPLAY_MS;
 export const SUMMARY_PHASE_SPECTATOR_MS = MIN_DISPLAY_MS_SPECTATOR;
 
+/**
+ * Tobias-direktiv 2026-05-15 — C-hybrid (post-round-overlay data-driven dismiss):
+ *
+ *   > "Vi har fortsatt ikke løst problemet med at man kun ser neste spill når
+ *   > en runde er ferdig og popup kommer frem for kjøp av til da neste spill.
+ *   > Nå viste man spillet som nettopp var spilt i ca 40 sekunder før det
+ *   > endret til riktig spill."
+ *   > — Tobias rapport 2026-05-15
+ *
+ *   > "Kjør C, tenker minimum 6 sek celebrasjon deretter vent"
+ *   > — Tobias godkjennelse 2026-05-15
+ *
+ * Data-driven dismiss-modus erstatter timer-driven legacy-flyten når Game1-
+ * Controller setter `summary.justPlayedSlug` (eller kaller `setJustPlayedSlug`).
+ * Mens legacy-modus dismisser overlay etter `MIN_DISPLAY_MS` (3s) + første
+ * `markRoomReady`, krever data-driven modus følgende:
+ *
+ *   1. Minimum `MIN_CELEBRATION_MS` (6s) celebrasjon for komfortabel feiring
+ *      av runde-resultatet. Selv hvis ny slug ankommer på 50ms blir overlay
+ *      stående i 6s.
+ *   2. Etter 6s: vent på at lobby-state har en `nextScheduledGame.catalogSlug`
+ *      som er FORSKJELLIG fra `justPlayedSlug`. Det betyr at backend har
+ *      advancert plan-runtime og spilleren skal se det nye spillet.
+ *   3. Safety-cap `MAX_WAIT_MS` (60s) — overlay dismisses uansett etter 60s
+ *      for å unngå evig-overlay hvis backend henger. Forced dismiss
+ *      logges som Sentry-breadcrumb.
+ *
+ * Hvorfor 6s og 60s:
+ *   - 6s er bekvemt for spilleren å lese WinScreen-totalen, se patterns-
+ *     tabellen og forberede seg mentalt på neste runde. Kortere ga "for
+ *     rask"-feedback i pilot-testing. Lengre ble irriterende ved tap
+ *     (ingen winnings å feire, bare summary).
+ *   - 60s er max bevisst venting på server. Tobias 2026-05-15 rapporterte
+ *     40s stale data — backend-advance kan ta opptil dette ved feilet
+ *     plan-runtime-state, men 60s er hard grense fordi spilleren etter
+ *     den tiden vil tro klienten henger.
+ *
+ * Backward-compat: Hvis overlay ikke kalles med `setJustPlayedSlug` (eller
+ * `summary.justPlayedSlug`) — typisk fra eksisterende tester og legacy
+ * call-sites — falles tilbake til timer-driven path (`markRoomReady` +
+ * `MIN_DISPLAY_MS`). Dette holder eksisterende test-suite grønn under
+ * migrering.
+ *
+ * Ny prod-flyt setter `justPlayedSlug`-feltet i Game1Controller.
+ * `showEndOfRoundOverlayForState` slik at data-driven modus aktiveres for
+ * alle ekte runder. Legacy markRoomReady-pathen i `onStateChanged` blir da
+ * en no-op (slug-comparison overgår den), men beholdes for å støtte
+ * partial-rollback hvis data-pathen viser seg å være feil.
+ */
+export const MIN_CELEBRATION_MS = 6_000;
+export const MAX_WAIT_MS = 60_000;
+/** Periodic poll-interval for å re-evaluere data-readiness etter min-celebration. */
+const DATA_READINESS_POLL_MS = 500;
+
 /** CSS fade-transition (opacity) i ms — keep ≤ 300ms for snap-feel. */
 const PHASE_FADE_MS = 300;
 
@@ -315,6 +369,29 @@ export interface Game1EndOfRoundSummary {
    */
   elapsedSinceEndedMs?: number;
   /**
+   * Tobias-direktiv 2026-05-15 (C-hybrid post-round-overlay data-driven dismiss):
+   *
+   * Catalog-slug-en for runden som NETTOPP ble spilt (eks. "bingo",
+   * "trafikklys", "oddsen-55"). Når satt aktiveres data-driven dismiss-modus
+   * (`MIN_CELEBRATION_MS` floor + wait-for-new-slug + `MAX_WAIT_MS` cap)
+   * i stedet for legacy markRoomReady + `MIN_DISPLAY_MS`.
+   *
+   * Hvor kommer slug-en fra:
+   *   - Game1Controller henter `lobbyStateBinding.getState()?.nextScheduledGame.catalogSlug`
+   *     ved `onGameEnded`-tidspunktet. På det tidspunktet har serveren ennå
+   *     ikke advancert plan-runtime, så `nextScheduledGame.catalogSlug` peker
+   *     fortsatt på runden som er i ferd med å avsluttes — perfekt baseline
+   *     for "what just played".
+   *   - Når backend senere advancerer plan-runtime og lobby-state oppdateres
+   *     med ny `catalogSlug`, sender Game1Controller den nye verdien til
+   *     overlay via `updateLobbyState(newSlug)` → overlay sammenligner og
+   *     dismisser når slug !== justPlayedSlug.
+   *
+   * NB: NULL → legacy dismiss-modus (backward-compat for eksisterende tester
+   * og fremtidige call-sites uten lobby-state-tilgang).
+   */
+  justPlayedSlug?: string | null;
+  /**
    * "Tilbake til lobby" → emit lobby-navigation. Tilgjengelig gjennom
    * hele overlay-tida.
    */
@@ -383,6 +460,59 @@ interface ActiveSession {
    * Idempotent — settes én gang per session.
    */
   hasFiredAutoReturn: boolean;
+  /**
+   * Tobias-direktiv 2026-05-15 (C-hybrid data-driven dismiss):
+   *
+   * Catalog-slug-en for runden som NETTOPP er ferdigspilt. Settes enten
+   * via `summary.justPlayedSlug` ved `show()` eller eksplisitt via
+   * `setJustPlayedSlug(slug)` etter mount (controller late-bind). NULL =
+   * legacy markRoomReady-modus aktiv (backward-compat). Non-NULL =
+   * data-driven modus aktiv (dismiss venter på `currentNextSlug !==
+   * justPlayedSlug`).
+   */
+  justPlayedSlug: string | null;
+  /**
+   * Siste mottatte `nextScheduledGame.catalogSlug` fra lobby-state.
+   * Oppdateres av `updateLobbyState(slug)` ved hver onChange-tick fra
+   * `Game1LobbyStateBinding`. Settes initielt fra `summary.justPlayedSlug`
+   * fordi ved mount-tid har serveren ennå ikke advancert plan-runtime,
+   * så `currentNextSlug === justPlayedSlug` til den endrer seg.
+   */
+  currentNextSlug: string | null;
+  /**
+   * Tidspunkt (ms epoch) for når data-driven minimum-celebration-vinduet
+   * utløper. Computes `startedAt + MIN_CELEBRATION_MS` ved session-start
+   * når data-driven modus er aktivert. Dismiss kan IKKE skje før dette
+   * tidspunktet selv om ny slug ankommer på 50ms.
+   */
+  minCelebrationDeadline: number;
+  /**
+   * Tidspunkt (ms epoch) for safety-cap. Computes `startedAt + MAX_WAIT_MS`.
+   * Etter dette tidspunktet dismisses overlay-en uansett (skipper slug-
+   * comparison). Forced dismiss logges som Sentry-breadcrumb.
+   */
+  safetyCapDeadline: number;
+  /**
+   * Periodisk timer som re-evaluerer `tryDismissIfReady()` etter minimum-
+   * celebration-vinduet er passert. Pollr hvert `DATA_READINESS_POLL_MS` (500ms)
+   * frem til (a) slug-comparison passerer, (b) safety-cap rammer, eller
+   * (c) overlay dismisses via annen path. Nullstilles ved alle dismiss-
+   * paths via `clearTimers()`.
+   */
+  dataReadinessPollTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * Safety-cap-timer. Fyrer ved `safetyCapDeadline` og trigger forced
+   * dismiss (skipper slug-comparison). Logges som Sentry-breadcrumb fordi
+   * cap-en betyr at backend ikke advancert plan-runtime innen 60s — det
+   * er ikke normalt og må flagges for ops.
+   */
+  safetyCapTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * True etter at safety-cap-pathen har dismisset overlay-en. Brukes for
+   * å skille årsaken i Sentry-breadcrumb og tester ("MAX_WAIT_MS-reached"
+   * vs "next-slug-ready").
+   */
+  hasFiredSafetyCap: boolean;
 }
 
 export class Game1EndOfRoundOverlay {
@@ -573,9 +703,17 @@ export class Game1EndOfRoundOverlay {
     // umiddelbart kan dismisse.
     const minDisplayAlreadyElapsed = elapsed >= minDisplayMs;
 
+    const now = Date.now();
+    // Tobias-direktiv 2026-05-15 (data-driven dismiss): initial slug fra
+    // summary.justPlayedSlug. Hvis bruker reconnecter med
+    // `elapsedSinceEndedMs`, regn celebrations-deadline relativt til når
+    // runden faktisk endte (now - elapsedSinceEndedMs).
+    const initialSlug = summary.justPlayedSlug ?? null;
+    const baseTimestamp = now - elapsed;
+
     this.session = {
       summary,
-      startedAt: Date.now(),
+      startedAt: now,
       phaseHostEl: phaseHost,
       currentPhaseEl: null,
       currentPhase: "SUMMARY",
@@ -589,6 +727,17 @@ export class Game1EndOfRoundOverlay {
       autoReturnTimer: null,
       autoReturnPreviewTimer: null,
       hasFiredAutoReturn: false,
+      justPlayedSlug: initialSlug,
+      // currentNextSlug initialiseres = justPlayedSlug fordi server ennå
+      // ikke har advancert plan-runtime ved overlay-mount-tid. Endring til
+      // ny verdi via `updateLobbyState(newSlug)` er signalet for at
+      // backend har advancert.
+      currentNextSlug: initialSlug,
+      minCelebrationDeadline: baseTimestamp + MIN_CELEBRATION_MS,
+      safetyCapDeadline: baseTimestamp + MAX_WAIT_MS,
+      dataReadinessPollTimer: null,
+      safetyCapTimer: null,
+      hasFiredSafetyCap: false,
     };
 
     // Alltid SUMMARY — COUNTDOWN/LOADING-fasene er fjernet (Tobias-mandat
@@ -608,6 +757,15 @@ export class Game1EndOfRoundOverlay {
       // Hvis controller umiddelbart kaller markRoomReady, dismiss med en
       // gang.
       // (Ingen timer trengs.)
+    }
+
+    // Tobias-direktiv 2026-05-15 (C-hybrid data-driven dismiss):
+    // Hvis `summary.justPlayedSlug` er satt aktiveres data-driven modus
+    // — schedule readiness-poll + safety-cap-timer. Hvis ikke (legacy
+    // call-sites uten lobby-state-tilgang), forblir legacy markRoomReady-
+    // pathen aktiv.
+    if (this.isDataDrivenMode()) {
+      this.scheduleDataDrivenTimers();
     }
 
     // Tobias UX-mandate 2026-05-14 (auto-return-til-lobby) — supersedes
@@ -754,9 +912,14 @@ export class Game1EndOfRoundOverlay {
    * brukeren kan returneres til rommet. Idempotent — kall flere ganger
    * uten effekt etter første call.
    *
-   * Overlay dismisses ikke før BÅDE markRoomReady er kalt OG min-display-
-   * tid er passert. Dette sikrer at brukeren ser vinnings-summary minst
-   * 3s før de føres tilbake (1s for spectator).
+   * Legacy modus (justPlayedSlug ikke satt): overlay dismisses ikke før
+   * BÅDE markRoomReady er kalt OG min-display-tid er passert. Dette
+   * sikrer at brukeren ser vinnings-summary minst 3s før de føres tilbake
+   * (1s for spectator).
+   *
+   * Data-driven modus (justPlayedSlug satt — Tobias-direktiv 2026-05-15):
+   * markRoomReady-pathen er no-op. Dismiss krever i stedet at lobby-state
+   * har advancert til ny slug. Se `setJustPlayedSlug` + `updateLobbyState`.
    */
   markRoomReady(): void {
     const session = this.session;
@@ -780,14 +943,268 @@ export class Game1EndOfRoundOverlay {
   }
 
   /**
+   * Tobias-direktiv 2026-05-15 (C-hybrid data-driven dismiss):
+   *
+   * Late-bind `justPlayedSlug` etter overlay er mountet. Brukes hvis
+   * Game1Controller ikke kjente slug-en ved show()-tid (eks. lobby-state-
+   * binding ennå ikke leverte første snapshot). Idempotent — same-verdi-
+   * call er no-op. Overgang fra null → non-null aktiverer data-driven
+   * modus (schedule poll + safety-cap timers + cancel legacy
+   * autoReturnTimer).
+   *
+   * NB: setter back til null deaktiverer IKKE data-driven modus — det er
+   * en envei-aktivering for å holde flow-en forutsigbar. Hvis round-
+   * restart skjer (nytt overlay.show()), starter sessionen fra scratch.
+   */
+  setJustPlayedSlug(slug: string | null): void {
+    const session = this.session;
+    if (!session) return;
+    const next = (slug ?? "").trim() || null;
+    if (next === session.justPlayedSlug) return;
+    const wasDataDriven = this.isDataDrivenMode();
+    session.justPlayedSlug = next;
+    // Aktiver data-driven-modus ved overgang fra null → non-null.
+    if (!wasDataDriven && next !== null) {
+      // currentNextSlug initialiseres til samme verdi siden vi antar
+      // serveren ennå ikke har advancert plan-runtime (mount-tidspunkt).
+      // Hvis updateLobbyState allerede har levert en non-null verdi
+      // (sjelden race), respekterer vi den i stedet.
+      if (session.currentNextSlug === null) {
+        session.currentNextSlug = next;
+      }
+      // Hvis legacy auto-return-timer kjører fra show(), cancel den —
+      // data-driven modus tar over med lengre safety-cap (MAX_WAIT_MS).
+      if (session.autoReturnTimer !== null) {
+        clearTimeout(session.autoReturnTimer);
+        session.autoReturnTimer = null;
+      }
+      if (session.autoReturnPreviewTimer !== null) {
+        clearTimeout(session.autoReturnPreviewTimer);
+        session.autoReturnPreviewTimer = null;
+      }
+      this.scheduleDataDrivenTimers();
+    }
+    // Hvis ny slug er allerede forskjellig fra currentNextSlug (sjelden
+    // race der lobby-state oppdaterte før setJustPlayedSlug ble kalt),
+    // re-evaluer dismiss-conditionen.
+    if (
+      next !== null
+      && session.currentNextSlug !== null
+      && next !== session.currentNextSlug
+    ) {
+      this.tryDismissIfReady();
+    }
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-15 (C-hybrid data-driven dismiss):
+   *
+   * Game1Controller pusher ny `nextScheduledGame.catalogSlug` ved hver
+   * lobby-state-onChange-tick. Når slug-en endrer seg fra `justPlayedSlug`
+   * vet vi at backend har advancert plan-runtime — dismiss kan trigge så
+   * snart minimum-celebration-vinduet er passert.
+   *
+   * Idempotent — samme verdi to ganger = no-op. Tom-streng eller null
+   * behandles som "ingen kjent slug" og deaktiverer ikke modus (vi venter
+   * fortsatt på neste non-null verdi).
+   */
+  updateLobbyState(nextScheduledGameSlug: string | null): void {
+    const session = this.session;
+    if (!session) return;
+    const next = (nextScheduledGameSlug ?? "").trim() || null;
+    if (next === session.currentNextSlug) return;
+    session.currentNextSlug = next;
+    // Re-evaluer dismiss-condition ved hver state-change.
+    this.tryDismissIfReady();
+  }
+
+  /**
+   * Returnerer true hvis data-driven dismiss-modus er aktiv. Modus aktiveres
+   * når `summary.justPlayedSlug` (eller `setJustPlayedSlug`) er satt med
+   * non-null verdi. Legacy markRoomReady-modus er aktiv ellers.
+   */
+  private isDataDrivenMode(): boolean {
+    const session = this.session;
+    if (!session) return false;
+    return session.justPlayedSlug !== null;
+  }
+
+  /**
+   * Schedulerer (a) safety-cap-timer (MAX_WAIT_MS = 60s fra round-end) og
+   * (b) periodisk readiness-poll som re-evaluerer slug-comparison hvert
+   * DATA_READINESS_POLL_MS (500ms) etter minimum-celebration-vinduet er
+   * passert. Idempotent — multiple calls cleaner forrige timer-set først.
+   */
+  private scheduleDataDrivenTimers(): void {
+    const session = this.session;
+    if (!session) return;
+    if (session.hasFiredCompleted) return;
+    if (session.hasFiredSafetyCap) return;
+
+    // Cancel evt. tidligere timers (idempotency ved re-aktivering).
+    if (session.dataReadinessPollTimer !== null) {
+      clearTimeout(session.dataReadinessPollTimer);
+      session.dataReadinessPollTimer = null;
+    }
+    if (session.safetyCapTimer !== null) {
+      clearTimeout(session.safetyCapTimer);
+      session.safetyCapTimer = null;
+    }
+
+    const now = Date.now();
+    const safetyRemaining = Math.max(0, session.safetyCapDeadline - now);
+    session.safetyCapTimer = setTimeout(() => {
+      this.fireSafetyCapDismiss();
+    }, safetyRemaining);
+
+    // Periodic poll: re-evaluer hvert 500ms. Stopp når dismiss skjer
+    // (hide() / clearTimers nullstiller).
+    const pollTick = (): void => {
+      if (!this.session) return;
+      if (this.session.hasFiredCompleted) return;
+      if (this.session.hasFiredSafetyCap) return;
+      if (this.tryDismissIfReady()) return; // dismiss trigget, ingen reschedule
+      this.session.dataReadinessPollTimer = setTimeout(
+        pollTick,
+        DATA_READINESS_POLL_MS,
+      );
+    };
+    session.dataReadinessPollTimer = setTimeout(
+      pollTick,
+      DATA_READINESS_POLL_MS,
+    );
+  }
+
+  /**
+   * Forced safety-cap-dismiss (MAX_WAIT_MS = 60s nådd). Skipper slug-
+   * comparison fordi backend ikke har advancert plan-runtime innen
+   * grensen. Bruker samme fade-ut + onOverlayCompleted-path som normal
+   * dismiss (caller transition-er til WAITING / lobby med stale slug —
+   * spilleren vil i hvert fall ikke se evig "Forbereder rommet..."-state).
+   *
+   * Sentry-breadcrumb skrives fordi cap-en er en anomali — backend bør
+   * ALDRI bruke > 60s på å advancere plan etter round-end. Repeterte cap-
+   * fires er signal til ops om å undersøke plan-runtime-state.
+   * Idempotent via hasFiredSafetyCap-flagg.
+   */
+  private fireSafetyCapDismiss(): void {
+    const session = this.session;
+    if (!session) return;
+    if (session.hasFiredSafetyCap) return;
+    if (session.hasFiredCompleted) return;
+    session.hasFiredSafetyCap = true;
+
+    // Observability — Sentry breadcrumb for ops-monitoring. Best-effort.
+    try {
+      void import("../../../telemetry/Sentry.js")
+        .then((mod) => {
+          try {
+            mod.addClientBreadcrumb(
+              "endOfRoundOverlay.safetyCapDismiss",
+              {
+                reason: "MAX_WAIT_MS_REACHED",
+                maxWaitMs: MAX_WAIT_MS,
+                justPlayedSlug: session.justPlayedSlug,
+                currentNextSlug: session.currentNextSlug,
+                slugStillStale:
+                  session.currentNextSlug === session.justPlayedSlug,
+              },
+            );
+          } catch {
+            /* best-effort */
+          }
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    } catch {
+      /* best-effort */
+    }
+
+    session.hasFiredCompleted = true;
+    if (this.root) {
+      this.root.style.transition = `opacity ${PHASE_FADE_MS}ms ease`;
+      this.root.style.opacity = "0";
+    }
+    setTimeout(() => {
+      try {
+        session.summary.onOverlayCompleted?.();
+      } catch (err) {
+        console.warn(
+          "[Game1EndOfRoundOverlay] onOverlayCompleted threw (safety-cap):",
+          err,
+        );
+      }
+      this.hide();
+    }, PHASE_FADE_MS);
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-15 (C-hybrid): data-driven dismiss-check.
+   * Returnerer true hvis overlay ble dismisset, false ellers.
+   *
+   * Krav for dismiss (data-driven modus):
+   *   (a) Minimum-celebration-vindu (MIN_CELEBRATION_MS = 6s) er passert.
+   *   (b) `currentNextSlug !== null && currentNextSlug !== justPlayedSlug`
+   *       (serveren har advancert plan-runtime).
+   *
+   * Hvis (a) ikke møtt: ingen handling (poll-timer reschedules etter
+   *   500ms).
+   * Hvis (a) møtt men (b) ikke: ingen handling (poll-timer reschedules
+   *   fram til safety-cap rammer ved 60s).
+   * Hvis begge møtt: dismiss via samme fade-out-path som tryDismiss.
+   */
+  private tryDismissIfReady(): boolean {
+    const session = this.session;
+    if (!session) return false;
+    if (session.hasFiredCompleted) return false;
+    if (!this.isDataDrivenMode()) return false; // legacy-modus bruker tryDismiss
+    const now = Date.now();
+    if (now < session.minCelebrationDeadline) return false;
+    // Slug-comparison: må ha kjent currentNextSlug OG den må være
+    // forskjellig fra justPlayedSlug.
+    if (session.currentNextSlug === null) return false;
+    if (session.currentNextSlug === session.justPlayedSlug) return false;
+    // Begge betingelser møtt — dismiss.
+    session.hasFiredCompleted = true;
+    if (this.root) {
+      this.root.style.transition = `opacity ${PHASE_FADE_MS}ms ease`;
+      this.root.style.opacity = "0";
+    }
+    setTimeout(() => {
+      try {
+        session.summary.onOverlayCompleted?.();
+      } catch (err) {
+        console.warn(
+          "[Game1EndOfRoundOverlay] onOverlayCompleted threw (data-driven):",
+          err,
+        );
+      }
+      this.hide();
+    }, PHASE_FADE_MS);
+    return true;
+  }
+
+  /**
    * Sjekker om overlay kan dismisses og fader ut hvis ja. Kalles fra
    * (a) markRoomReady-call og (b) min-display-timer-utløp. Idempotent
    * via hasFiredCompleted-flagget.
+   *
+   * NB: Når data-driven modus er aktiv (isDataDrivenMode returnerer
+   * true), bypasser tryDismiss til `tryDismissIfReady()`. Legacy
+   * markRoomReady-pathen blir da no-op for nye prod-runs, men beholdes
+   * for backwards-compat med eksisterende tester og partial-rollback.
    */
   private tryDismiss(): void {
     const session = this.session;
     if (!session) return;
     if (session.hasFiredCompleted) return;
+    // Data-driven modus tar over hvis aktiv — legacy markRoomReady-pathen
+    // er da no-op. Re-evaluer via tryDismissIfReady for konsistens.
+    if (this.isDataDrivenMode()) {
+      this.tryDismissIfReady();
+      return;
+    }
     if (!session.isRoomReady || !session.minDisplayElapsed) return;
     session.hasFiredCompleted = true;
     // Fade ut root, kall completion etter fade-tid.
@@ -845,6 +1262,19 @@ export class Game1EndOfRoundOverlay {
     if (this.session?.autoReturnPreviewTimer != null) {
       clearTimeout(this.session.autoReturnPreviewTimer);
       this.session.autoReturnPreviewTimer = null;
+    }
+    // Tobias 2026-05-15 (C-hybrid data-driven dismiss): cancel data-driven
+    // timers (poll + safety-cap) ved hide()/destroy() — match samme livssyklus
+    // som auto-return-timers. Hvis disse ikke ryddes vil de fyre etter at
+    // overlay er borte (sessions er null'et), og setTimeout-callbackene må
+    // selv null-sjekke `this.session` defensivt.
+    if (this.session?.dataReadinessPollTimer != null) {
+      clearTimeout(this.session.dataReadinessPollTimer);
+      this.session.dataReadinessPollTimer = null;
+    }
+    if (this.session?.safetyCapTimer != null) {
+      clearTimeout(this.session.safetyCapTimer);
+      this.session.safetyCapTimer = null;
     }
   }
 
