@@ -4100,3 +4100,51 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 **Branch:** `feat/preview-pages-immutable-2026-05-15`
 **Tid:** ~30 min agent-arbeid
 **PR:** (åpnes etter commit; gate-confirmed: 3dc25314e3df + auto-merge)
+
+### 2026-05-15 — Devops/PM-agent: auto-rebase zero-overlap output-fiks etter PR #1527
+
+**Agent-type:** PM/devops-fix-agent
+**Scope:** Fikse post-merge workflow-feil i `Auto-rebase open PRs on merge` etter at access-/approval-matrise PR #1527 ble merget. Feilen var en rød watcher, ikke en runtime-regresjon.
+**Trigger:** Etter merge av PR #1527 feilet workflow-run `25932881589` med `$GITHUB_OUTPUT` parse-feil: `Unable to process file command 'output' successfully` / `Invalid format '0'`.
+
+**Inputs:**
+- GitHub Actions-logg for `Auto-rebase open PRs on merge`
+- `.github/workflows/auto-rebase-on-merge.yml`
+- §2.19 dokumentasjonsprotokoll: skill + PITFALLS + AGENT_EXECUTION_LOG i samme PR
+
+**Outputs:**
+
+1. **`.github/workflows/auto-rebase-on-merge.yml`**
+   - Byttet ut `COUNT=$(... grep -cv ... || echo 0)` med eksplisitt tom-liste-branch.
+   - Bruker `sed '/^$/d'` for tomlinje-filtrering slik at `bash -e -o pipefail` ikke stopper på null treff.
+   - Trimmer `OVERLAPPING` før output.
+   - Garanterer at `overlap_count=0` skrives som én linje når ingen PR-er overlapper.
+
+2. **`.claude/skills/pm-orchestration-pattern/SKILL.md` v1.2.1**
+   - Dokumenterer zero-overlap invariant for auto-rebase-workflowen.
+   - Advarer eksplisitt mot `grep -c ... || echo 0` inne i command substitution ved `$GITHUB_OUTPUT`.
+
+3. **`docs/engineering/PITFALLS_LOG.md` §5.13**
+   - Ny P2-fallgruve for GitHub Actions output med fallback-linje.
+   - Inkluderer symptom, root cause, fix og prevention.
+
+4. **`docs/engineering/AGENT_EXECUTION_LOG.md`**
+   - Denne entryen.
+
+**Fallgruver oppdaget:**
+- `grep -c` kan skrive `0` selv om kommandoen returnerer exit 1. Når `|| echo 0` ligger i samme command substitution, blir resultatet to linjer (`0\n0`), som gjør `$GITHUB_OUTPUT` ugyldig.
+- Post-merge automation må testes med tomt input. "Ingen åpne PR-er å rebase" er en primær happy-path, ikke edge case.
+
+**Læring:**
+- GitHub Actions output må behandles som et strict line-oriented API. Alle outputs som senere skrives med `echo "key=$VALUE" >> "$GITHUB_OUTPUT"` må være én linje eller bruke heredoc-format.
+- Når en watcher feiler etter vellykket merge, må PM skille mellom "main er dårlig" og "watcher har bug". Her var endringen allerede trygt merget; reparasjonen er devops-hardening.
+- Dokumentasjonsprotokollen gjelder også CI-fikser. Ellers repeterer neste agent samme shell-felle i en annen workflow.
+
+**Eierskap (filer agenten har endret):**
+- `.github/workflows/auto-rebase-on-merge.yml`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+**Branch:** `codex/fix-auto-rebase-zero-overlap`
+**PR:** Åpnes etter lokal validering.

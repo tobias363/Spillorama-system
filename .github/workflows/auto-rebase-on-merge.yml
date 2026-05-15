@@ -64,8 +64,12 @@ jobs:
             fi
           done <<< "$OPEN_PRS"
 
-          OVERLAPPING=$(echo "$OVERLAPPING" | tr ' ' '\n' | grep -v '^$' | sort -un | tr '\n' ' ')
-          COUNT=$(echo "$OVERLAPPING" | tr ' ' '\n' | grep -cv '^$' || echo 0)
+          OVERLAPPING=$(printf '%s\n' "$OVERLAPPING" | tr ' ' '\n' | sed '/^$/d' | sort -un | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          if [ -z "$OVERLAPPING" ]; then
+            COUNT=0
+          else
+            COUNT=$(printf '%s\n' "$OVERLAPPING" | tr ' ' '\n' | grep -c .)
+          fi
           echo "overlap_count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "overlapping_prs=$OVERLAPPING" >> "$GITHUB_OUTPUT"
           echo "Found $COUNT overlapping open PR(s): $OVERLAPPING"
