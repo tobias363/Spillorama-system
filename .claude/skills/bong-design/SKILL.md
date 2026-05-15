@@ -6,7 +6,7 @@ metadata:
   project: spillorama
 ---
 
-<!-- scope: packages/game-client/src/games/game1/components/BingoTicketHtml.ts, packages/game-client/src/games/game1/components/BingoTicketHtml.test.ts, packages/game-client/src/games/game1/components/BingoTicketHtml.elvis.test.ts, packages/game-client/src/games/game1/components/TicketGridHtml.largeMultiplicity.test.ts, packages/game-client/src/bong-design/bong-design.html, packages/game-client/src/bong-design/bong-design.ts -->
+<!-- scope: packages/game-client/src/games/game1/components/BingoTicketHtml.ts, packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts, packages/game-client/src/games/game1/components/TicketGridHtml.ts, packages/game-client/src/games/game1/components/BingoTicketHtml.test.ts, packages/game-client/src/games/game1/components/BingoTicketHtml.elvis.test.ts, packages/game-client/src/games/game1/components/TicketGridHtml.largeMultiplicity.test.ts, packages/game-client/src/bong-design/bong-design.html, packages/game-client/src/bong-design/bong-design.ts, packages/shared-types/src/game.ts, packages/shared-types/src/schemas/game.ts, apps/backend/src/game/Game1ScheduledRoomSnapshot.ts, apps/backend/src/game/types.ts -->
 
 # Bong-design — single + triple (Spill 1 + Spill 3)
 
@@ -103,6 +103,69 @@ Per-bokstav-farger eksponert som `BINGO_LETTER_COLORS`-konstant (top-of-file).
 | Margin-top | 4px |
 | One-to-go-state | Inter 700, uppercase, letter-spacing 0.06em, samme svart farge + `bong-otg-pulse`-animasjon |
 
+## Triple-bong group-rendering (Bølge 2, 2026-05-15)
+
+Stor X (Large) er en 3-brett-bundle. Tobias-direktiv 2026-05-15: hver Large-bong skal vises som ÉN visuell triple-container — 3 sub-grids side-om-side med vertikale dividers — istedenfor 3 separate single-bonger.
+
+### Når kicker triple-rendering inn?
+
+`TicketGridHtml.rebuild()` grupperer 3 etterfølgende tickets hvis:
+1. Første ticket har `type === "large"`
+2. Første ticket har `purchaseId` satt (ikke undefined/tom)
+3. Neste 2 tickets i listen har SAMME `purchaseId`
+
+Hvis betingelsene oppfylles → render som `BingoTicketTripletHtml`. Ellers → fall tilbake til 3 single-bonger.
+
+**Partial-purchase fallback:** Hvis backend sender 1-2 av 3 sub-tickets for en purchase (eks. en sub-ticket har blitt slettet), faller rendringen tilbake til single for de tickets som ikke kan grupperes. Per 2026-05-15 sender backend altid alle 3 atomisk (purchase er én transaksjon).
+
+### Backend → frontend wire-format
+
+`Ticket`-interfacet (i både `packages/shared-types/src/game.ts` og `apps/backend/src/game/types.ts`) har to nye optional-felter:
+
+```typescript
+purchaseId?: string;          // FK til app_game1_ticket_purchases.id
+sequenceInPurchase?: number;  // 1-indeksert posisjon i purchase (1, 2, 3)
+```
+
+`Game1ScheduledRoomSnapshot.enrichScheduledGame1RoomSnapshot` propagerer disse fra `app_game1_ticket_assignments`-tabellen til wire-objektet. Backend sender alltid sub-tickets i `sequence_in_purchase`-rekkefølge (ORDER BY i SQL-spørringen). Frontend stoler på rekkefølgen og sorterer ikke.
+
+### Pixel-spec triple
+
+| Element | Verdi |
+|---|---|
+| Container-bredde | 660px maks |
+| Container-padding | `12px 18px 10px 18px` (samme som single) |
+| Container-gap | `10px` (mellom header og grids) |
+| `.bong-triplet-grids` | `display: grid; grid-template-columns: 1fr 1px 1fr 1px 1fr` |
+| Dividere | 1px `rgba(0, 0, 0, 0.15)` vertikale linjer mellom sub-grids, `margin: 4px 0` |
+| Sub-grid padding | `padding: 0 10px` (sub 1 + 3 = `padding-left/right: 0` på ytter-kantene; midt-sub `13px` ekstra) |
+| Header-tekst | `"Gul - 3 bonger"` / `"Hvit - 3 bonger"` / `"Lilla - 3 bonger"` |
+| Header-pris | `pris × 3` (total for hele triple-bundlen) |
+| × cancel-knapp | ÉN knapp, canceler hele purchase (alle 3 sub-tickets) |
+
+### Sub-bongers usynlige headere
+
+`BingoTicketTripletHtml` legger CSS-overrides via `bong-triplet-card`-klasse-prefix:
+```css
+.bong-triplet-card .bong-triplet-sub .ticket-header-name,
+.bong-triplet-card .bong-triplet-sub .ticket-header-price {
+  display: none !important;
+}
+.bong-triplet-card .bong-triplet-sub button[aria-label="Avbestill brett"] {
+  display: none !important;
+}
+```
+
+Sub-bongene rendrer fortsatt sin egen `BingoTicketHtml`-DOM (med ticket-grid + BINGO-letters + footer), men header + cancel-knapp er skjult fordi wrapperen eier dem.
+
+### TicketGridHtml — entry-rom vs ticket-rom
+
+Etter Bølge 2 har `TicketGridHtml.tickets` BLANDET typer: `BingoTicketHtml | BingoTicketTripletHtml`. Kalt **entry-rom**.
+
+`liveCount` som tidligere var i ticket-rom (1 large = 3 tickets) konverteres til entry-rom (1 large = 1 entry) inne i `rebuild()`. `applyMarks()` itererer på entry-rom og bruker `this.liveCount` direkte. Caller (`Game1Controller`) trenger ikke endres — `setTickets()` mottar fortsatt ticket-rom-`liveCount`.
+
+`computeSignature` regnes på ticket-rom (uendret) så cache-hit-logikken fortsatt fungerer.
+
 ## Hva du IKKE skal endre
 
 - **`FREE_LOGO_URL`** — Spillorama-logo i sentercellen er bevisst valg (avvik fra mockup som viser "FREE"-tekst)
@@ -160,3 +223,4 @@ Test-update planlegges separat når Tobias gir grønt lys.
 | Dato | Endring |
 |---|---|
 | 2026-05-15 | Initial v1.0.0 — §5.9 prod-implementasjon i `BingoTicketHtml.ts`. Spec-iterasjon ble gjort på `bong-design.html` mockup; denne skill-en dokumenterer prod-state. Skopet er Spill 1 + Spill 3 (begge bruker `BingoTicketHtml`); Spill 2 (`BongCard.ts`) er uberørt. |
+| 2026-05-15 | v1.1.0 — Bølge 2 triple-bong group-rendering. Ny `BingoTicketTripletHtml` wrapper-klasse + `TicketGridHtml` purchase-grouping-logikk. `Ticket`-interface utvidet med `purchaseId` + `sequenceInPurchase` i både shared-types og backend. `Game1ScheduledRoomSnapshot` propagerer disse fra `app_game1_ticket_assignments`. CSS-overrides skjuler sub-bongers individuelle header. Backend sender altid sub-tickets i sequence-rekkefølge per purchase. Partial-purchase faller tilbake til single-rendering. |

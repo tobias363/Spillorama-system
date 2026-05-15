@@ -34,6 +34,14 @@ export const TicketSchema = z.object({
   supplierName: z.string().optional(),
   price: z.number().optional(),
   boughtAt: z.string().optional(),
+  /**
+   * §5.9 (Tobias-direktiv 2026-05-15) — purchase-grouping for Stor X (3 brett).
+   * Frontend grupperer 3 tickets med samme purchaseId og rendrer som ÉN
+   * pixel-perfect triple-container. Backwards-compat: undefined faller
+   * tilbake til single-rendering.
+   */
+  purchaseId: z.string().optional(),
+  sequenceInPurchase: z.number().int().positive().optional(),
 });
 
 export const PatternDefinitionSchema = z.object({

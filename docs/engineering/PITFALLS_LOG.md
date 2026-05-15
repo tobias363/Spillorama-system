@@ -1496,23 +1496,44 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - `packages/game-client/src/games/game2/components/BongCard.ts` (Spill 2 — IKKE rør under §5.9-arbeid)
 **Related:** §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`, skill `bong-design`
 
-### §7.28 — Triple-ticket-rendering kan IKKE bygges som single-component render — backend må endres først
+### §7.28 — Triple-ticket-rendering kan IKKE bygges som single-component render — backend må endres først (LØST i Bølge 2, 2026-05-15)
 
-**Severity:** P1 (arkitektonisk constraint)
-**Oppdaget:** 2026-05-15 (§5.9 prod-implementasjon)
+**Severity:** P1 (arkitektonisk constraint) — **LØST 2026-05-15**
+**Oppdaget:** 2026-05-15 (§5.9 prod-implementasjon Bølge 1)
 **Symptom:** Spec §5.9 viser "Trippel-design (3× 5×5 grids med dividers) i 660px bredde container" for `ticket.type="large"`. Naiv implementasjon ville prøve å rendre 3 sub-grids i én `BingoTicketHtml`-instans.
 **Faktisk wire-format:** Backend sender 3 SEPARATE `Ticket`-objekter per Large-kjøp (per `TicketGridHtml.largeMultiplicity.test.ts` — REGRESSION 2026-04-30 Bug B). Hver ticket har sitt eget grid, sin egen color="Large Yellow", sin egen `type="large"`.
-**Konsekvens:** Det finnes IKKE et data-model-konsept for "triple-ticket" — bare 3 separate `Ticket`-objekter som tilfeldigvis kommer i samme buy-batch. Frontend kan ikke gruppere dem uten backend-endring (eks. `Ticket.siblingTicketIds: string[]`).
-**§5.9-spec interpreted:** Hver individuelle Large-ticket rendrer som single-design med header "Farge - 3 bonger" (suffiks signaliserer at den tilhører en 3-brett-bunt). Triple-design med dividers i 666px container er IKKE implementert.
+**Konsekvens (før Bølge 2):** Det fantes IKKE et data-model-konsept for "triple-ticket" — bare 3 separate `Ticket`-objekter som tilfeldigvis kom i samme buy-batch. Frontend kunne ikke gruppere dem uten backend-endring.
+**§5.9-spec interpreted (Bølge 1, 2026-05-15):** Hver individuelle Large-ticket rendrer som single-design med header "Farge - 3 bonger" (suffiks signaliserer at den tilhører en 3-brett-bunt). Triple-design med dividers i 666px container var IKKE implementert i Bølge 1.
+**Resolusjon (Bølge 2, 2026-05-15):** `Ticket`-interfacet utvidet med `purchaseId` + `sequenceInPurchase` i både `packages/shared-types/src/game.ts` og `apps/backend/src/game/types.ts`. `Game1ScheduledRoomSnapshot.enrichScheduledGame1RoomSnapshot` propagerer disse fra `app_game1_ticket_assignments`-tabellen (allerede eksisterende kolonner per migration `20260501000000`). Frontend grupperer 3 etterfølgende tickets med samme `purchaseId` til `BingoTicketTripletHtml` wrapper. Se skill `bong-design` §"Triple-bong group-rendering" for detaljer.
+**Lessons learned:** Forrige PM antok at `siblingTicketIds: string[]` var nødvendig wire-format-endring. Faktisk var `purchaseId` allerede tilgjengelig som DB-felt — vi måtte bare propagere det til wire. Sjekk eksisterende DB-skjema FØR du legger til nytt felt.
+**Files (post-Bølge 2):**
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` (per-ticket single render — uberørt for single)
+- `packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts` (NY wrapper-klasse for triple-rendering)
+- `packages/game-client/src/games/game1/components/TicketGridHtml.ts` (purchaseId-gruppering i `rebuild` + `tryGroupTriplet`)
+- `packages/game-client/src/games/game1/components/TicketGridHtml.largeMultiplicity.test.ts` (eksisterende tester forventer fortsatt single-rendering for tickets uten purchaseId — bevisst backward-compat)
+- `packages/shared-types/src/game.ts` + `packages/shared-types/src/schemas/game.ts` (`purchaseId` + `sequenceInPurchase`)
+- `apps/backend/src/game/types.ts` (`Ticket`-interface med `purchaseId` + `sequenceInPurchase`)
+- `apps/backend/src/game/Game1ScheduledRoomSnapshot.ts` (propagering fra DB til wire)
+**Related:** §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`, skill `bong-design`, §7.29 (Bølge 2 cache + liveCount-rom-skifte)
+
+### §7.29 — TicketGridHtml.tickets blandet entry-rom (single OR triplet) — `liveCount` må konverteres fra ticket-rom
+
+**Severity:** P1 (subtle bug-prone refactor)
+**Oppdaget:** 2026-05-15 (Bølge 2 triple-rendering)
+**Symptom:** Etter Bølge 2 inneholder `TicketGridHtml.tickets` BLANDET typer (`BingoTicketHtml | BingoTicketTripletHtml`). En triplet teller som ÉN entry men inneholder 3 underliggende `Ticket`-objekter. Hvis du naivt itererer `for (i = 0; i < liveCount; i++)` på `this.tickets` med ticket-rom-`liveCount`, vil du:
+1. Gå out-of-bounds når triplets reduserer entry-count
+2. Behandle pre-round-entries som live (eller omvendt) når live-pre-round-grensen krysser triplet-grupperinger
+**Root cause:** Caller (`Game1Controller`) sender `liveCount` i ticket-rom (det er hva backend pusher). `rebuild()` konverterer til entry-rom ved å regne hvor mange `Ticket`-objekter som ble konsumert per entry (1 for single, 3 for triplet).
 **Prevention:**
-- Hvis Tobias en gang vil ha ekte triple-rendering, må backend-team først legge til `siblingTicketIds`-felt eller `ticketGroupId`-felt på `Ticket`-typen
-- Frontend kan da bygge en `TripleTicketHtml`-wrapper-komponent som henter 3 `Ticket`-objekter via `siblingTicketIds` og rendrer dem i 666px container
-- IKKE prøv å detect "3 adjacent same-color same-type tickets" som grouping-strategi — det er fragilt mot sort-order, reconnect, og mid-round buys
+- `rebuild()` SKAL oppdatere `this.liveCount` til entry-rom etter at den har bygd opp `this.tickets`-arrayen
+- `applyMarks()` SKAL bruke `this.liveCount` direkte (entry-rom), IKKE ta `liveCount` som parameter
+- `markNumberOnAll()` SKAL bruke `this.liveCount` (entry-rom)
+- `computeSignature` + `computeMarkStateSig` regnes på ticket-rom (uendret) så cache-hit-logikken fortsatt fungerer fordi signature inkluderer `l=${liveCount}` som ticket-rom-verdi
+- IKKE overwrite `this.liveCount = liveCount` etter cache-hit — verdien er fortsatt korrekt fra forrige `rebuild()`
+**Why this works:** Backend purchase-atomicitet garanterer at en triplet ALDRI splittes på live/pre-round-grensen — alle 3 sub-tickets i en purchase har samme `scheduled_game_id` og samme status. Caller's `liveCount` i ticket-rom havner alltid på en triplet-grense (multiple of 3 for triplet-segmenter, +N for små single-tickets).
 **Files:**
-- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` (per-ticket single render)
-- `packages/game-client/src/games/game1/components/TicketGridHtml.largeMultiplicity.test.ts` (verifiserer 3 separate tickets)
-- `packages/shared-types/src/game.ts` (`Ticket`-typen mangler `siblingTicketIds`)
-**Related:** §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`, skill `bong-design`
+- `packages/game-client/src/games/game1/components/TicketGridHtml.ts` (`rebuild`, `applyMarks`, `markNumberOnAll`)
+**Related:** §7.28 (resolusjon), skill `bong-design` §"TicketGridHtml — entry-rom vs ticket-rom"
 
 ### §7.5 — Frontend må normalisere query-params før backend-kall
 

@@ -248,6 +248,24 @@ export interface Ticket {
   price?: number;
   /** ISO-8601 timestamp when the ticket was bought/armed. */
   boughtAt?: string;
+  /**
+   * §5.9 (Tobias-direktiv 2026-05-15) — purchase-grouping for Stor X (3 brett).
+   *
+   * Når en spiller kjøper en `type="large"` bong sender backend 3 separate
+   * Ticket-objekter med samme `purchaseId` og `sequenceInPurchase` i 1..3.
+   * Frontend grupperer disse og rendrer som ÉN visuell triple-container
+   * (660px, 3 sub-grids side-om-side med 1px dividers) istedenfor 3 separate
+   * single-bonger.
+   *
+   * `purchaseId` propageres fra `app_game1_ticket_purchases.id`. Per-ticket
+   * `sequenceInPurchase` matcher `app_game1_ticket_assignments.sequence_in_purchase`.
+   *
+   * Tomt for type="small" — single-rendering. Hvis purchaseId er undefined
+   * fall-back også til single-rendering (legacy data uten purchase-binding).
+   */
+  purchaseId?: string;
+  /** 1-indeksert posisjon i purchase-batch (1, 2, 3 for triple). */
+  sequenceInPurchase?: number;
 }
 
 // ── Claims ──────────────────────────────────────────────────────────────────
