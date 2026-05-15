@@ -15,7 +15,6 @@ apps/admin-web/.env.production
 # Local credentials (Render API, Linear API, etc.) — Bølge 1 (2026-05-10)
 secrets/*.local.md
 secrets/load-env.sh.local
-.pm-onboarding-confirmed.txt
 
 # IDE
 .vscode/
@@ -78,6 +77,7 @@ scripts/performance-budget/report-pilot-hw.json
 # Inneholder PM-identifier, timestamp, main-SHA og fri-tekst-takeaways
 # per PM_HANDOFF-fil. Skal IKKE deles i repo (privat for hver PM).
 .pm-onboarding-confirmed.txt
+.pm-doc-absorption-confirmed.txt
 
 # Stryker mutation-testing (etablert 2026-05-13)
 # .stryker-tmp/  : Stryker scratchpad — kan vokse til flere GB under run

@@ -57,12 +57,48 @@ print_header() {
 list_handoffs() {
   # Returnerer alle PM_HANDOFF-filer sortert kronologisk (eldste først).
   # PM-en SKAL lese alt fra prosjekt-start, ikke bare siste.
-  find "$HANDOFF_DIR" -maxdepth 1 -name 'PM_HANDOFF_*.md' -type f 2>/dev/null \
-    | sort
+  {
+    find "$HANDOFF_DIR" -maxdepth 1 -name 'PM_HANDOFF_*.md' -type f 2>/dev/null
+    if [[ -d "$HANDOFF_DIR/archive" ]]; then
+      find "$HANDOFF_DIR/archive" -maxdepth 1 -name 'PM_HANDOFF_*.md' -type f 2>/dev/null
+    fi
+  } | sort
 }
 
 get_main_sha() {
   git -C "$REPO_ROOT" rev-parse origin/main 2>/dev/null || git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown"
+}
+
+count_handoffs() {
+  list_handoffs | wc -l | tr -d ' '
+}
+
+confirmed_handoff_count() {
+  if [[ ! -f "$CONFIRM_FILE" ]]; then
+    echo 0
+    return
+  fi
+  grep -c '^### [0-9][0-9]*\. ' "$CONFIRM_FILE" 2>/dev/null || echo 0
+}
+
+validate_takeaway_text() {
+  local text="$1"
+  local compact
+  compact="$(printf '%s' "$text" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
+  local lowered
+  lowered="$(printf '%s' "$compact" | tr '[:upper:]' '[:lower:]')"
+  local chars
+  chars=$(printf '%s' "$compact" | wc -c | tr -d ' ')
+
+  if (( chars < 25 )); then
+    return 1
+  fi
+  case "$lowered" in
+    lest|ok|okay|ja|yes|done|read|bekreftet|"har lest"|"lest ok"|"ok lest")
+      return 1
+      ;;
+  esac
+  return 0
 }
 
 cmd_list() {
@@ -112,6 +148,19 @@ cmd_status() {
   fi
 
   if (( age_days <= VALIDITY_DAYS )); then
+    local expected_count
+    local actual_count
+    expected_count="$(count_handoffs)"
+    actual_count="$(confirmed_handoff_count)"
+    if [[ "$actual_count" != "$expected_count" ]]; then
+      echo "${YELLOW}⚠️  Onboarding-bekreftelse matcher ikke dagens handoff-rekke.${RESET}"
+      echo ""
+      echo "  Bekreftet: $actual_count handoff-filer"
+      echo "  Forventet: $expected_count handoff-filer"
+      echo ""
+      echo "Kjør ${BOLD}bash scripts/pm-checkpoint.sh${RESET} på nytt for å inkludere nye/arkiverte handoffs."
+      return 1
+    fi
     echo "${GREEN}✅ Onboarding-bekreftelse er gyldig.${RESET}"
     echo ""
     echo "  Fil:  $CONFIRM_FILE"
@@ -153,6 +202,13 @@ cmd_validate() {
     age_days=$(( (now_epoch - file_epoch) / 86400 ))
   fi
   if (( age_days <= VALIDITY_DAYS )); then
+    local expected_count
+    local actual_count
+    expected_count="$(count_handoffs)"
+    actual_count="$(confirmed_handoff_count)"
+    if [[ "$actual_count" != "$expected_count" ]]; then
+      return 1
+    fi
     return 0
   fi
   return 1
@@ -223,7 +279,7 @@ cmd_run() {
   # Per-fil-confirmation
   local idx=0
   local total
-  total="$(list_handoffs | wc -l | tr -d ' ')"
+  total="$(count_handoffs)"
   echo ""
   echo "${BOLD}Du må bekrefte $total handoff-filer.${RESET}"
   echo ""
@@ -268,6 +324,13 @@ cmd_run() {
       if [[ -z "$takeaway" ]]; then
         echo ""
         echo "${RED}❌ Tom takeaway. Du må skrive 1-3 setninger.${RESET}"
+        rm -f "$tmp_file"
+        exit 1
+      fi
+      if ! validate_takeaway_text "$takeaway"; then
+        echo ""
+        echo "${RED}❌ Takeaway er for kort eller ser ut som placeholder.${RESET}"
+        echo "Skriv 1-3 konkrete setninger om hva filen faktisk sier."
         rm -f "$tmp_file"
         exit 1
       fi

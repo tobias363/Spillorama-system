@@ -54,7 +54,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 17 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
 **Total:** 98 entries (per 2026-05-15)
@@ -657,7 +657,7 @@ Master-UI faller tilbake til default `plan_items[0]` (Bingo) når `nextGame` er 
 - §3.12 (komplementær — DB-side fix av samme bug-klasse)
 - Tester: `apps/backend/src/game/Game1LobbyService.test.ts` (5 nye tester), `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester)
 
-### §3.14 — Plan-run state-machine: 4 forskjellige mekanismer kan mutere current_position (Agent C-funn)
+### §3.14a — Plan-run state-machine: 4 forskjellige mekanismer kan mutere current_position (Agent C-funn)
 
 **Severity:** P1 (strukturelt — antagelig rotårsak til Next Game Display-bug)
 **Oppdaget:** 2026-05-14 (Agent C research-leveranse, `docs/research/NEXT_GAME_DISPLAY_AGENT_C_PLANRUN_2026-05-14.md`)
@@ -1414,7 +1414,7 @@ Etter `docker-compose down && docker-compose up -d postgres` vil queries faktisk
 
 ---
 
-### §6.17 — Manuelle SQL-queries for runde-debug er sløsete; bruk Round-replay-API
+### §6.17a — Manuelle SQL-queries for runde-debug er sløsete; bruk Round-replay-API
 
 **Severity:** P2 (operational efficiency, ikke en regresjons-bug)
 **Oppdaget:** 2026-05-14 (Tobias-direktiv etter to runder 7dcbc3ba + 330597ef der PM måtte gjøre 5-10 SQL-queries per runde for å forstå hva som skjedde)
@@ -1958,7 +1958,7 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 - §7.21 (oppfølger-fix 2026-05-15 — fjerner "Klar til å starte" og "Runde ferdig" helt)
 - Tobias-direktiv 2026-05-14 (rapportert 3 ganger — derfor kritisk)
 
-### §7.21 — Master-header må vise "Neste spill: {name}" for ALLE pre-running-states (Tobias 2026-05-15)
+### §7.21a — Master-header må vise "Neste spill: {name}" for ALLE pre-running-states (Tobias 2026-05-15)
 
 **Severity:** P1 (pilot-UX-konsistens — Tobias rapporterte direkte under live-test etter Trinn 3-fixene)
 **Oppdaget:** 2026-05-15 (Tobias' pilot-test etter Trinn 3 i Next Game Display refactor)
@@ -2075,7 +2075,7 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 
 ---
 
-### §7.23 — Bruk frontend-state-dump FØR du gjetter hvor frontend leser fra
+### §7.23a — Bruk frontend-state-dump FØR du gjetter hvor frontend leser fra
 
 **Severity:** Process (not bug)
 **Oppdaget:** 2026-05-14 (PM brukte ~3 bug-runder på å gjette state-kilder)
@@ -2206,7 +2206,7 @@ preview-CSS OG prod-komponent (samme PR hvis mulig).
 **Anti-mønster:** Bruke `dev-overview.html` eller `visual-harness.html`
 for ren design-tweaking. Begge har Pixi-runtime og er tregere å rebuilde.
 Stand-alone HTML/CSS er raskere og isolerer designet fra runtime-bugs.
-### §7.27 — Pre-runde bong-pris viser AUTO_ROUND_ENTRY_FEE × DEFAULT-variant (BUG, FIXED 2026-05-15)
+### §7.27a — Pre-runde bong-pris viser AUTO_ROUND_ENTRY_FEE × DEFAULT-variant (BUG, FIXED 2026-05-15)
 
 **Severity:** P0 (pilot-blokker — alle 3 bonger viste samme 20 kr pre-runde)
 **Oppdaget:** 2026-05-15 (Tobias live-test: "Small White + Yellow + Purple bonger viser alle '20 kr' pre-runde, etter runde-start blir det riktig 5/10/15 kr")
@@ -2261,7 +2261,7 @@ Den nye fallback-rekkefølgen:
 
 ---
 
-### §7.26 — Lobby-broadcast manglet etter natural round-end (BUG, FIXED 2026-05-15)
+### §7.26a — Lobby-broadcast manglet etter natural round-end (BUG, FIXED 2026-05-15)
 
 **Severity:** P0 (pilot-blokker — spiller-shell viste gammelt spill i opptil 2 minutter)
 **Oppdaget:** 2026-05-15 (Tobias live-test: "Jeg kjørte runde med første spill (Bingo). Etter at runden var fullført viser fortsatt 'Neste spill: Bingo' i ca 2 min FØR det endret seg til '1000-spill'. Spiller skal ALDRI se gammelt spill.")
@@ -2308,7 +2308,7 @@ Broadcast var KUN wired i `MasterActionService.fireLobbyBroadcast()` (master-act
 - §7.25 (relatert: distribuerte "neste spill"-display-paths)
 - ADR-0017 (relatert: jackpot setup-manuell, samme master-action-pattern)
 
-### §7.27 — PauseOverlay vist feilaktig etter natural round-end (BUG, FIXED 2026-05-15)
+### §7.27b — PauseOverlay vist feilaktig etter natural round-end (BUG, FIXED 2026-05-15)
 
 **Severity:** P0 (pilot-blokker — spiller-shell viste "Spillet er pauset / Venter på hall-operatør" etter at runden naturlig sluttet)
 **Oppdaget:** 2026-05-15 (Tobias-direktiv IMMUTABLE — post-round-flyt §5.8 i `SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`)
@@ -2368,7 +2368,7 @@ PauseOverlay reflekterer KUN aktiv pause midt i en runde (`gameStatus === "RUNNI
 - `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (kanonisk spec)
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.18.0 (skill-seksjon "Post-round-flyt invariant")
 
-### §7.28 — Post-round-overlay dismisset med fast timer → stale "Neste spill" i 40 sek (BUG, FIXED 2026-05-15)
+### §7.28a — Post-round-overlay dismisset med fast timer → stale "Neste spill" i 40 sek (BUG, FIXED 2026-05-15)
 
 **Severity:** P0 (pilot-blokker — spilleren så lobby med stale slug i opptil 40 sek etter natural round-end, før backend rakk å advancere plan-runtime)
 **Oppdaget:** 2026-05-15 (Tobias-rapport): *"Nå viste man spillet som nettopp var spilt i ca 40 sekunder før det endret til riktig spill."*
@@ -2447,7 +2447,7 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 - `packages/game-client/src/games/game1/Game1Controller.ts:630-636` (forward av slug via `updateLobbyState`)
 - `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (kanonisk post-round-flyt-spec)
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.19.0 (skill-seksjon "Post-round-overlay data-driven dismiss")
-### §7.28 — CenterTopPanel mockup `premie-design.html` er kanonisk — IKKE prod-CSS
+### §7.28b — CenterTopPanel mockup `premie-design.html` er kanonisk — IKKE prod-CSS
 
 **Severity:** P1 (design-iterasjons-disiplin)
 **Oppdaget:** 2026-05-15 (sesjon: center-top design prod-implementasjon)
@@ -2491,7 +2491,7 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 - `packages/game-client/src/games/game3/components/Game3PatternRow.ts` (customPatternListView consumer)
 - `.claude/skills/spill1-center-top-design/SKILL.md` (pixel-spec + anti-patterns + Spill 3-kontrakt)
 - §7.24 (relatert: premie-celle-størrelse iterasjon I-IV 2026-05-14)
-### §7.28 — Game1BuyPopup: card.children-indices + subtitle letter-spacing-marker er IMMUTABLE test-kontrakt
+### §7.28c — Game1BuyPopup: card.children-indices + subtitle letter-spacing-marker er IMMUTABLE test-kontrakt
 
 **Severity:** P1 (test-regresjon)
 **Oppdaget:** 2026-05-15 (kjopsmodal-design.html prod-implementasjon)
@@ -2535,7 +2535,7 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 
 ---
 
-### §7.29 — Debug-HUD + event-log skjult som default — kun `?debug=full` aktiverer (Tobias 2026-05-15)
+### §7.29a — Debug-HUD + event-log skjult som default — kun `?debug=full` aktiverer (Tobias 2026-05-15)
 
 **Severity:** P1 (UX-fix — debug-felter lekte til prod-spillere)
 **Oppdaget:** 2026-05-15 (Tobias screenshot — SPILL1 DEBUG-HUD + EVENT-LOG synlig)
@@ -2626,7 +2626,7 @@ DOM-index   →  Visuell order
 
 ---
 
-### §7.30 — Triple-bong-rendering cross-color grouping bug (BUG, FIXED 2026-05-15 iter 2)
+### §7.31 — Triple-bong-rendering cross-color grouping bug (BUG, FIXED 2026-05-15 iter 2)
 
 **Severity:** P0 (pilot-blokker — visuell regresjon på master-flyt)
 **Oppdaget:** 2026-05-15 (Tobias-rapport — screenshot av "1 Stor hvit + 1 Stor gul + 1 Stor lilla" som rendret feilaktig)

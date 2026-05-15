@@ -3207,7 +3207,7 @@ Verifisert via test:
 - Audit-tilnærming: lese hver workflow først for å ekstrahere regex-markers FØR rewrite reduserer risiko for å bryte CI-gates
 - Workflow-regexes er case-sensitive på noen markers (gate-*) og case-insensitive på andre (resurrection-*) — bevart begge i ny template
 - HTML-kommentarer (`<!-- ... -->`) brukes både for instruksjoner til PR-forfatter OG for kortform-markers (gate-confirmed) — funker i `grep` fordi GitHub viser kommentaren rå i PR-body
-- Verken comprehension-gate eller knowledge-protocol-gate finnes som CI-workflows; håndhevelse er kun via husky pre-commit + manuell checkbox
+- Historisk status 2026-05-13: Verken comprehension-gate eller knowledge-protocol-gate fantes som CI-workflows; knowledge-protocol-gate ble levert 2026-05-15 og håndhever nå high-risk pilot/wallet/compliance PR-er.
 
 **Eierskap:**
 - `.github/pull_request_template.md`

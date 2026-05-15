@@ -19,6 +19,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   enforce:
@@ -99,6 +100,90 @@ jobs:
             exit 1
           fi
 
+      - name: Validate bypass / not-applicable marker
+        if: steps.check.outputs.decision == 'bypass' || steps.check.outputs.decision == 'not-applicable'
+        uses: actions/github-script@v7
+        env:
+          DECISION: ${{ steps.check.outputs.decision }}
+          BYPASS: ${{ steps.check.outputs.bypass }}
+          NOT_APPLICABLE: ${{ steps.check.outputs.not_applicable }}
+          TOBIAS_GITHUB_ACTORS: tobias363,tobias50
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const decision = process.env.DECISION;
+            const labels = new Set((pr.labels || []).map((l) => l.name));
+            const approved = labels.has('approved-pm-bypass');
+
+            if (decision === 'bypass') {
+              if (!approved) {
+                core.setFailed('gate-bypass krever label approved-pm-bypass fra Tobias/CODEOWNER.');
+              } else {
+                core.warning(`gate-bypass godkjent via approved-pm-bypass: ${process.env.BYPASS}`);
+              }
+              return;
+            }
+
+            const raw = process.env.NOT_APPLICABLE || '';
+            const role = raw.replace(/^gate-not-applicable:\s*/i, '').trim().toLowerCase();
+            const actor = (pr.user && pr.user.login) || context.actor;
+            const tobiasActors = (process.env.TOBIAS_GITHUB_ACTORS || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+            if (role === 'docs-only') {
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                per_page: 100,
+              });
+              const nonDocs = files
+                .map((f) => f.filename)
+                .filter((f) => !f.startsWith('docs/') && !['README.md', 'MASTER_README.md', 'CLAUDE.md'].includes(f));
+              if (nonDocs.length === 0) {
+                core.notice('gate-not-applicable: docs-only verifisert mot changed files.');
+                return;
+              }
+              core.setFailed(`gate-not-applicable: docs-only brukt, men PR endrer non-docs: ${nonDocs.slice(0, 20).join(', ')}`);
+              return;
+            }
+
+            if (role === 'dependabot') {
+              if (actor.includes('dependabot')) {
+                core.notice('gate-not-applicable: dependabot verifisert mot PR author.');
+                return;
+              }
+              core.setFailed(`gate-not-applicable: dependabot brukt, men PR author er ${actor}.`);
+              return;
+            }
+
+            if (role === 'ci-bot') {
+              if (actor.endsWith('[bot]') || actor === 'github-actions') {
+                core.notice('gate-not-applicable: ci-bot verifisert mot PR author.');
+                return;
+              }
+              core.setFailed(`gate-not-applicable: ci-bot brukt, men PR author er ${actor}.`);
+              return;
+            }
+
+            if (role === 'tobias') {
+              if (tobiasActors.includes(actor) || approved) {
+                core.notice('gate-not-applicable: tobias verifisert mot allowlist eller approved-pm-bypass-label.');
+                return;
+              }
+              core.setFailed(`gate-not-applicable: tobias brukt, men PR author ${actor} er ikke i allowlist og label mangler.`);
+              return;
+            }
+
+            if (approved) {
+              core.warning(`gate-not-applicable: ${role || '(tom)'} akseptert via approved-pm-bypass-label.`);
+              return;
+            }
+
+            core.setFailed(`Ukjent eller ikke-godkjent gate-not-applicable rolle: "${role}". Bruk docs-only/dependabot/ci-bot/tobias eller label approved-pm-bypass.`);
+
       - name: Auto-comment if gate-marker missing
         if: steps.check.outputs.decision == 'missing'
         uses: actions/github-script@v7
@@ -154,8 +239,7 @@ jobs:
       - name: Bypass logged (informativ)
         if: steps.check.outputs.decision == 'bypass'
         run: |
-          echo "::warning::Bypass-marker funnet: '${{ steps.check.outputs.bypass }}'"
-          echo "::warning::Sørg for at Tobias har godkjent bypass før merge."
+          echo "::warning::Bypass-marker funnet og validert: '${{ steps.check.outputs.bypass }}'"
 
       - name: Not-applicable accepted (informativ)
         if: steps.check.outputs.decision == 'not-applicable'

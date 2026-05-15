@@ -124,9 +124,9 @@ Bruk `gate-not-applicable: <rolle>` i PR-beskrivelsen for:
 - **Tobias selv** committer som tech-lead → `gate-not-applicable: tobias`
 - **Auto-genererte commits** fra workflows (auto-doc, weekly-status etc.) → `gate-not-applicable: ci-bot`
 - **Ren docs-PR** uten kode-impact → `gate-not-applicable: docs-only`
-- **Hotfix etter prod-incident** → `gate-bypass: hotfix-incident-YYYY-MM-DD`
+- **Hotfix etter prod-incident** → `gate-bypass: hotfix-incident-YYYY-MM-DD` + label `approved-pm-bypass`
 
-Dokumenter alltid begrunnelse. Tobias auditerer disse over tid.
+Workflowen verifiserer `docs-only`, `dependabot`, `ci-bot` og `tobias` automatisk der det er mulig. Alle andre bypass/not-applicable-varianter krever label `approved-pm-bypass`. Dokumenter alltid begrunnelse. Tobias auditerer disse over tid.
 
 ---
 
