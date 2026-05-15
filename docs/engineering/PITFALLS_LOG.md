@@ -48,7 +48,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 12 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 99 entries (per 2026-05-15)
+**Total:** 100 entries (per 2026-05-15)
 
 ---
 
@@ -1152,6 +1152,27 @@ WHERE id = $1
 **Related:**
 - PR #1515 pre-lock knowledge-control hardening
 - Issue #1518 unique knowledge-gate check names
+
+### §5.12 — Required reviews uten approver-roster gir lockout eller falsk trygghet
+
+**Severity:** P1 (governance-kontroll kan blokkere hotfix eller se trygg ut uten reell reviewer)
+**Oppdaget:** 2026-05-15 under access-/approval-audit etter branch-protection-hardening.
+**Symptom:** Det er fristende å aktivere "Require approving review" fordi repoet håndterer live-rom og ekte penger. Men GitHub-audit viste bare én reell ansvarlig approver (`tobias363`) og én write/legacy-konto (`tobias50`). CODEOWNERS peker også til `@tobias363` for alle kritiske paths.
+**Root cause:** Required reviews er en god kontroll først når revieweren er uavhengig, navngitt og tilgjengelig. Hvis author/owner er samme person som CODEOWNER, kan GitHub-regelen enten blokkere egne PR-er eller skape prosess-teater der en sekundær konto "approver" uten reell uavhengighet.
+**Fix:** Ikke aktiver required reviews før `docs/operations/ACCESS_APPROVAL_MATRIX.md` §6-§7 er oppfylt:
+- Minst én uavhengig approver er onboardet.
+- CODEOWNERS er oppdatert til team/rolle-handles eller konkrete backup-approvers.
+- Hotfix-flow er testet med branch protection aktiv.
+- Emergency-labels og post-merge-review er etablert.
+**Prevention:**
+- Før branch protection endres: audit `collaborators`, `CODEOWNERS` og faktisk reviewer-roster.
+- High-risk PR-er skal fortsatt ha synlig Tobias-godkjenning i PR-kommentar/review.
+- Dokumenter hvorfor required reviews er av hvis reviewer-roster ikke finnes. Det er et bevisst risikovalg, ikke et hull.
+- Ikke bruk en sekundær konto som "uavhengig reviewer" hvis det er samme menneske.
+**Related:**
+- `docs/operations/ACCESS_APPROVAL_MATRIX.md`
+- `.github/CODEOWNERS`
+- `docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`
 
 ---
 

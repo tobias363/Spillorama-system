@@ -16,7 +16,10 @@ Kunnskapsdelingssystemet har solid fundament, men var ikke låsbart før denne r
 - `gate-bypass:` var informativt, ikke godkjenningsstyrt.
 - `PITFALLS_LOG.md` hadde duplikate §-ID-er.
 
-Denne PR-en lukker de repo-interne kontrollgapene over. GitHub branch protection er auditert direkte mot `main` 2026-05-15. Ekstern evidens må fortsatt hentes for alert policy, access matrix, RTO/RPO og compliance-vurderinger.
+Denne runden lukker de repo-interne kontrollgapene over og dokumenterer
+access-/approval-matrisen. GitHub branch protection er auditert direkte
+mot `main` 2026-05-15. Ekstern evidens må fortsatt hentes for alert
+policy, prod/staging-topologi, RTO/RPO og compliance-vurderinger.
 
 ---
 
@@ -30,6 +33,7 @@ Denne PR-en lukker de repo-interne kontrollgapene over. GitHub branch protection
 | Bypass brukes uten ansvarlig godkjenning | Label-gated bypass | `.github/workflows/pm-gate-enforcement.yml` | `approved-pm-bypass` eller automatisk verifisert rolle |
 | Fallgruve-ID-er kolliderer og agenter leser feil entry | Unique PITFALLS IDs | `scripts/check-pitfalls-ids.mjs` + `.github/workflows/pitfalls-id-validate.yml` | CI-logg + grønn validator |
 | Live-test kjøres uten observability | Monitor/Sentry/PostHog/DB-prosedyre | Foreløpig runbook/checklist, ikke full CI-gate | Må lukkes i neste runde med guarded pilot-test command |
+| Required reviews aktiveres uten reell approver | Access/approval-matrise med lock-kriterier | `docs/operations/ACCESS_APPROVAL_MATRIX.md` + CODEOWNERS-note | Reviews holdes av til uavhengig approver finnes |
 
 ---
 
@@ -40,21 +44,21 @@ Direkte GitHub API-audit via `gh api repos/tobias363/Spillorama-system/branches/
 | Kontroll | Faktisk status | Lock-vurdering |
 |---|---|---|
 | `main` protected | Ja | OK |
-| Required checks | `backend`, `compliance`, `lint-blink-hazards`, `admin-web` | OK som minimum, men nye knowledge-gates bør legges til når PR-en er merget |
-| Strict status checks | Av | Bør på før lock, slik at PR må være oppdatert mot siste `main` |
-| Required PR reviews | Ikke konfigurert | Bør på før lock for high-risk repo |
-| Admin enforcement | Av | Bør på eller erstattes av eksplisitt Tobias-only emergency policy |
+| Required checks | `backend`, `compliance`, `lint-blink-hazards`, `admin-web`, `pm-gate-enforcement`, `knowledge-protocol-enforcement`, `pitfalls-id-validation` | OK |
+| Strict status checks | På | OK |
+| Required PR reviews | Ikke konfigurert | Bevisst utsatt: repoet har kun én reell approver (`tobias363`) |
+| Admin enforcement | På | OK, med emergency-policy i `ACCESS_APPROVAL_MATRIX.md` |
 | Force pushes | Av | OK |
 | Branch deletions | Av | OK |
 | Linear history | Av | Akseptabelt, men kan vurderes etter merge-strategi |
 | Push restrictions | Ingen | Bør vurderes hvis flere eksterne devs får write access |
 
-Minimumsanbefaling før systemet kalles låst:
+Minimumsanbefaling før required reviews aktiveres:
 
-- Legg til de entydige check-navnene `pm-gate-enforcement`, `knowledge-protocol-enforcement` og `pitfalls-id-validation` som required checks etter at navnene har kjørt grønt på en PR.
-- Slå på strict status checks.
-- Krev minst 1 approving review på PR-er mot `main`, med dismiss stale approvals.
-- Definer bypass-policy skriftlig: Tobias kan emergency-override, men bypass skal være label-/audit-logget.
+- Onboard minst én uavhengig approver og dokumenter vedkommende i `ACCESS_APPROVAL_MATRIX.md` §7.
+- Oppdater CODEOWNERS fra single-owner `@tobias363` til team/rolle-handles eller konkrete backup-approvers.
+- Test hotfix-flow med branch protection aktiv, inkludert emergency-labels og post-merge-review.
+- Aktiver deretter 1 approving review, dismiss stale approvals, code-owner review for high-risk paths og conversation resolution.
 
 ---
 
@@ -63,7 +67,7 @@ Minimumsanbefaling før systemet kalles låst:
 1. Sentry/PostHog: prod/staging-prosjekter, P0/P1-thresholds, varslingskanaler, release-blocker-regler.
 2. Prod/staging-topologi: Render services, DB/Redis, deploy-flow, kritiske env-navn uten verdier.
 3. RTO/RPO: særskilt 0-datatap for wallet/audit.
-4. Access matrix: Tobias, PM-AI, implementer-agent, ekstern dev, CI-bot, support/operator.
+4. Uavhengig approver-roster: navn/konto for wallet, compliance, live-room engine og DevOps.
 5. Siste compliance-/juridiske vurdering: dato, krav/paragrafer, åpne spørsmål.
 
 ---
@@ -72,7 +76,8 @@ Minimumsanbefaling før systemet kalles låst:
 
 Systemet kan låses som **Knowledge-control framework v1** når:
 
-- Denne PR-en er merget og required checks er grønne.
-- `approved-pm-bypass` og `approved-knowledge-bypass` er opprettet som GitHub labels med Tobias/CODEOWNER-eierskap.
-- Branch protection er strammet etter minimumsanbefalingen over.
+- Required checks er grønne på `main`.
+- `approved-pm-bypass`, `approved-knowledge-bypass`, `approved-emergency-merge` og `post-merge-review-required` finnes som GitHub labels med Tobias/CODEOWNER-eierskap.
+- Branch protection beholder strict checks og admin enforcement.
+- Required reviews aktiveres først etter §7-roster er fylt ut.
 - Pilot-test får en guarded wrapper som verifiserer monitor + Sentry/PostHog + DB-watch før test.

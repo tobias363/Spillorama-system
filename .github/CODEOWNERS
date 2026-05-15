@@ -123,13 +123,16 @@
 # MERKNAD
 # ──────────────────────────────────────────────────────────────────────
 #
-# CODEOWNERS auto-assigner reviewer ved PR. Med branch-protection som
-# IKKE krever review-approval (per Tobias' git-workflow), virker dette
-# som "informasjons-flagg" — Tobias varsles men kan ikke blokkeres.
+# CODEOWNERS auto-assigner reviewer ved PR. Per 2026-05-15 er dette
+# fortsatt et informasjons- og audit-flagg: branch protection krever ikke
+# PR-review fordi repoet bare har én reell ansvarlig approver (`tobias363`).
+# Required reviews aktiveres først når ACCESS_APPROVAL_MATRIX.md §6-§7
+# har minst én uavhengig approver og hotfix-flow er testet uten lockout.
 #
 # Når team vokser:
 # 1. Erstatt @tobias363 med team-handles (eks @tobias363/compliance)
 # 2. Aktivér "Require review from Code Owners" i branch-protection
 # 3. Konfigurer separate eiere per fil-pattern
 #
-# Inntil da: Tobias er single-point-of-review for kritiske endringer.
+# Inntil da: Tobias er single-point-of-review for kritiske endringer,
+# og high-risk PR-er skal ha synlig Tobias-godkjenning i PR-kommentar/review.
