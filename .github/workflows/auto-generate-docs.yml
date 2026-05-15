@@ -94,7 +94,7 @@ jobs:
             because branch-protection requires 4 status checks. This workflow now
             opens a PR which goes through the same checks as any other change.
 
-            gate-confirmed: 3dc25314e3df  <!-- PM-AI auto-doc workflow -->
+            gate-not-applicable: ci-bot  <!-- verifiseres mot github-actions[bot] i pm-gate-enforcement.yml linje 170-175. Tidligere hardkodet gate-confirmed-hash fjernet 2026-05-16 (ADR-0024) — den kunne kopieres som universal bypass. -->
             resurrection-not-applicable: auto-doc-workflow — kun docs/auto-generated/ endres, ingen runtime-kode.
 
             ## Scope
