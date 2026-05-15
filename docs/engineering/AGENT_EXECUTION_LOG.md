@@ -163,6 +163,78 @@ Hver entry har struktur:
   - `header.textContent === "Small Yellow"` → `"Gul"`
   - Cell-font assertions (13px → 14px, 600 → 700)
   - Cell-bakgrunn assertions (rgba(255,255,255,0.55) → #fbf3df)
+### 2026-05-15 — Feat-agent: CenterTopPanel design prod-implementation (premie-design.html iterasjon V)
+
+**Branch:** `feat/center-top-design-prod-implementation-2026-05-15` (worktree-isolert, `agent-a068ab3bf958ed44c`)
+**Agent type:** general-purpose
+**Trigger:** Tobias-direktiv 2026-05-14/15 etter mockup-iterasjon V på `/web/games/premie-design.html`:
+> "Smalere premie-celler" + "vise HELE center-top samlet" + "combo-panel-bredde 376 → 496 px (etter screenshot — 376 px var for trang, premie-tabellens Lilla-kolonne klemte action-panel)"
+
+Speil av tilsvarende task §5.9 (bong-design 2026-05-15) men for center-top. Mockup-en var allerede iterasjon V; prod-CSS måtte oppdateres for å speile.
+
+**Scope:** Anvende premie-design.html iterasjon V pixel-spec 1:1 til `CenterTopPanel.ts`. Behold runtime-API (setBuyMoreDisabled, setPreBuyDisabled, etc.) uendret. Verifiser at Spill 3-kontrakt (customPatternListView) holder.
+
+**Hva ble gjort:**
+
+1. **`packages/game-client/src/games/game1/components/CenterTopPanel.ts`** — 3 inline-style-blokker oppdatert:
+   - `combo` (linje 274-292): width 376 → **496 px**, padding `15px 26px` → **`15px 22px`**, `flexShrink: 0` lagt til
+   - `comboBody` (linje 294-302): gap 20 → **18 px**
+   - `actions` (linje 358-378): padding `14px 25px 5px 25px` → **`14px 22px 8px 22px`**, `marginLeft: auto` lagt til (Tobias-fix for kollisjon-prevention)
+   - Inline-kommentarer med mockup-linje-referanser (`premie-design.html:181` etc.) for fremtidig vedlikehold
+
+2. **Verifikasjon (alle PASS):**
+   - `npm --prefix packages/game-client run check` — TypeScript strict OK
+   - `npm --prefix packages/game-client test -- --run CenterTopPanel` — **40/40 tester PASS**
+   - `npm --prefix packages/game-client test -- --run no-backdrop-filter-regression` — **6/6 tester PASS** (Pixi-blink-guard intakt)
+   - `npm --prefix packages/game-client test -- --run PlayScreen` — **69/69 tester PASS**
+   - `npm --prefix packages/game-client test -- --run game3` — **27/27 tester PASS** (Spill 3 customPatternListView-kontrakt holder)
+   - `npm --prefix packages/game-client run build` — bygges uten advarsler
+
+3. **Ny skill `.claude/skills/spill1-center-top-design/SKILL.md` (v1.0.0):**
+   - Full pixel-spec-tabell for iterasjon V (combo/comboBody/mini-grid/premie-tabell/action-panel/buttons)
+   - Spill 3-kontrakt dokumentert (`customPatternListView` injisert i comboBody, bryr seg ikke om layout)
+   - Runtime-API-tabell (offentlige metoder PlayScreen konsumerer — kontrakt)
+   - "Hva man IKKE skal endre" — backdrop-filter forbud, CSS-transitions forbud, `.prize-pill`-marker beholdes, pattern-rebuild-logikk, auto-multiplikator-regel, pre-game placeholder
+   - 8 anti-patterns med ✅ erstatninger
+   - Scope-pekere til 9 filer (CenterTopPanel + tester + mockup + Game3PatternRow + PlayScreen + LeftInfoPanel)
+
+4. **PITFALLS_LOG §7.28 ny entry:**
+   - Tittel: "CenterTopPanel mockup `premie-design.html` er kanonisk — IKKE prod-CSS"
+   - Severity P1 (design-iterasjons-disiplin)
+   - Symptom: prod-CSS stale vs mockup; Lilla-kolonne klemte action-panel
+   - Rotårsak: Tobias itererer live på mockup-siden for å unngå deploy-loop
+   - Fix dokumentert med 6 endringer (combo width/padding/flexShrink + comboBody gap + actions padding/marginLeft)
+   - 5 prevention-bullets + 3 forbudte feil
+   - Spill 3-kontrakt + Runtime-API uendret-note
+   - Indeks oppdatert: §7 23 → 24 entries, total 96 → 97
+
+5. **Tester ikke oppdatert** (per Tobias-direktiv): eksisterende `CenterTopPanel.test.ts` tester ikke eksakte CSS-verdier (px-widths/paddings) så de fortsetter å passe uten endringer. Bevisst — mockup-iterasjon krever ikke test-update.
+
+**Filer endret (5):**
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` (+/- ~25 linjer i 2 stiler + ny kommentar)
+- `.claude/skills/spill1-center-top-design/SKILL.md` (NY, ~270 linjer)
+- `docs/engineering/PITFALLS_LOG.md` (ny §7.28 + indeks-oppdatering)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Lessons learned:**
+
+1. **Mockup-iterasjon er Tobias' default-arbeidsflyt for visuelle endringer.** Han endrer pixel-spec direkte i `premie-design.html` (eller tilsvarende `bong-design.html`) for å se resultatet umiddelbart. Prod-implementasjon er en separat PR som anvender mockup-spec. PM må ikke regne med at mockup og prod er i synk — sjekk diff først.
+
+2. **Pixel-spec spredt mellom mockup-kommentarer og prod-kommentarer er normal.** I dette tilfellet hadde mockup-en eksplisitte JSDoc-style-kommentarer som forklarte "Tobias-direktiv 2026-05-14 etter screenshot — 376 px var for trang, ..." — DETTE er kanon. Prod-kommentarer ble tilpasset etter.
+
+3. **Spill 3-test (27 stk) er beste-Spill 3-kontrakt-verifisering.** CenterTopPanel injiseres med `customPatternListView` i Spill 3-mode, og Spill 3 har sine egne tester for `Game3PatternRow` som ikke avhenger av combo-panel-bredde. Verifiser disse tester forblir grønne etter combo-layout-endringer.
+
+4. **`no-backdrop-filter-regression.test.ts` er en strukturell guard, ikke en pixel-test.** Den sjekker at INGEN element under `#center-top` har `backdrop-filter`. Endringer i layout påvirker den ikke — endringer i background-egenskaper kan. Skill-en flagger dette eksplisitt.
+
+5. **Worktree-isolasjon var kritisk:** Parallelt arbeid på `bong-design` (PR #1486, allerede merget) og dette center-top arbeidet kunne kollidert hvis ikke isolert. Worktree `agent-a068ab3bf958ed44c` har egen branch + egen filsystem-kopi.
+
+**Eierskap:** Agenten "eier" `CenterTopPanel.ts` for denne PR-en + tilhørende design-spec i skill. Etter merge er eierskap "fellesseier" — andre agenter kan modifisere, men MÅ konsultere skill først.
+
+**Related:**
+- `packages/game-client/src/premie-design/premie-design.html` (mockup-iterasjon V — IMMUTABLE)
+- Tilsvarende task: PR #1486 (bong-design-prod-implementasjon) §5.9 i SPILL1_IMPLEMENTATION_STATUS
+- Skill `spill1-center-top-design` v1.0.0
+- PITFALLS_LOG §7.28
 
 ---
 

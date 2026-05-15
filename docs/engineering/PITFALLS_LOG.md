@@ -50,14 +50,14 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 23 | 2026-05-14 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 24 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 96 entries (per 2026-05-14)
+**Total:** 97 entries (per 2026-05-15)
 
 ---
 
@@ -2390,6 +2390,50 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 - `packages/game-client/src/games/game1/Game1Controller.ts:630-636` (forward av slug via `updateLobbyState`)
 - `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (kanonisk post-round-flyt-spec)
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.19.0 (skill-seksjon "Post-round-overlay data-driven dismiss")
+### §7.28 — CenterTopPanel mockup `premie-design.html` er kanonisk — IKKE prod-CSS
+
+**Severity:** P1 (design-iterasjons-disiplin)
+**Oppdaget:** 2026-05-15 (sesjon: center-top design prod-implementasjon)
+**Symptom:** Pre-fix var pixel-spec spredt mellom mockup-en `packages/game-client/src/premie-design/premie-design.html` og prod-komponent `CenterTopPanel.ts`. Combo-panel-bredde var 376 px i prod men 496 px i mockup (Tobias-iterasjon V), padding var 26 px i prod men 22 px i mockup, gap var 20 px i prod men 18 px i mockup, og action-panel manglet `marginLeft: auto` (Tobias-fix for å pushe panelet til høyre kant). Spillere fikk feil layout der premie-tabellens Lilla-kolonne klemte action-panel.
+
+**Rotårsak:** Tobias itererer designet live på mockup-siden `/web/games/premie-design.html` for å unngå deploy-loop. Mockup er **kanonisk** — prod-CSS skal alltid være en speiling av mockup-en. Når prod-CSS-en blir stale relativt til mockup, ser spillerne en eldre design enn det Tobias har godkjent.
+
+**Eksempel:** Tobias-direktiv 2026-05-14 (iterasjon V):
+> "Smalere premie-celler — tabellen skal ikke ta merkbart mer plass vertikalt enn dagens enkelt-pill-design"
+> "Vise HELE center-top samlet (ikke bare premietabellen) — mini-grid + premietabell + player-info + action-knapper side-om-side"
+> "Combo-panel-bredde 376 → 496 px (etter screenshot — 376 px var for trang, premie-tabellens Lilla-kolonne klemte action-panel)"
+
+**Fix:** Anvend mockup-spec 1:1 til `CenterTopPanel.ts`:
+- `combo` width 376 → **496 px**
+- `combo` padding `15px 26px` → **`15px 22px`**
+- `combo` `flexShrink: 0` (ny)
+- `comboBody` gap `20px` → **`18px`**
+- `actions` padding `14px 25px 5px 25px` → **`14px 22px 8px 22px`**
+- `actions` `marginLeft: auto` (ny — pusher til høyre kant)
+
+**Prevention:**
+
+1. **Mockup er sannheten** — hvis du finner avvik mellom `premie-design.html` og `CenterTopPanel.ts`, prod-CSS-en er stale. Speil mockup, ikke omvendt.
+2. **Tobias itererer på mockup, ikke på prod-CSS** — han kjører `/web/games/premie-design.html` lokalt og endrer pixel-spec der. Vi anvender til prod i egen PR.
+3. **Skill `.claude/skills/spill1-center-top-design/SKILL.md`** — har komplett pixel-spec-tabell for iterasjon V. Sjekk skill FØR du gjør CSS-endringer på CenterTopPanel.
+4. **Test-strategi:** Eksisterende tester (`CenterTopPanel.test.ts`, `no-backdrop-filter-regression.test.ts`) sjekker IKKE eksakte CSS-verdier (px-widths/paddings). Det er bevisst slik at design-iterasjon ikke krever test-update — men du må derfor sjekke mockup manuelt etter endringer.
+5. **Tre forbudte feil:**
+   - Sett `backdrop-filter: blur(...)` på `.premie-row` / action-button → trigger Pixi-blink-bug (`no-backdrop-filter-regression.test.ts` fanger det)
+   - Endre uten å oppdatere prod og mockup samtidig → fremtidige iterasjoner finner inkonsistent baseline
+   - Anta Spill 3 påvirkes — Spill 3 bruker `customPatternListView`-injection og bryr seg ikke om combo/actions-layout
+
+**Spill 3-kontrakt:** `CenterTopPanel.customPatternListView` brukes av Spill 3 (`Game3PatternRow`) til å erstatte gridHostEl + prizeListEl. Endringer i combo-layout (width, padding, gap) påvirker IKKE Spill 3 fordi `customPatternListView.root` mountes direkte i `comboBody` istedet. Verifiser med `npm test -- --run game3` (27 tester).
+
+**Runtime-API uendret:** Mockup-iterasjon krever IKKE endringer i offentlige API (`setBuyMoreDisabled`, `setPreBuyDisabled`, `updatePatterns`, `updateJackpot`, `setGameRunning`, `setCanStartNow`, `setBadge`, `showButtonFeedback`, `destroy`). Hvis du må endre disse, koordiner PlayScreen.ts-update i samme PR.
+
+**Related:**
+- `packages/game-client/src/premie-design/premie-design.html` (mockup-iterasjon V, IMMUTABLE)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts` (prod-komponent, ~980 linjer)
+- `packages/game-client/src/games/game1/components/CenterTopPanel.test.ts` (40 tester)
+- `packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts` (6 tester — Pixi-blink-guard)
+- `packages/game-client/src/games/game3/components/Game3PatternRow.ts` (customPatternListView consumer)
+- `.claude/skills/spill1-center-top-design/SKILL.md` (pixel-spec + anti-patterns + Spill 3-kontrakt)
+- §7.24 (relatert: premie-celle-størrelse iterasjon I-IV 2026-05-14)
 
 ---
 

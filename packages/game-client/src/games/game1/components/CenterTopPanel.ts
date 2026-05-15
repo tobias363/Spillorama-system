@@ -271,21 +271,31 @@ export class CenterTopPanel {
     });
 
     // ── Combo panel (left half: grid + prize pills) ────────────────────────
+    // Tobias-direktiv 2026-05-14 (iterasjon V, premie-design.html):
+    // - Bredde 376 → 496 px. 376 px var for trang og premie-tabellens
+    //   Lilla-kolonne klemte action-panel + overlappet. 496 px gir plass
+    //   til alle 3 prize-celler + label uten compression.
+    // - Padding 15px 26px → 15px 22px (mockup `.combo-panel` line 182).
+    // - `flexShrink: 0` så panelet ikke krymper når top-group-wrapper
+    //   blir bredere enn skjermen og browseren foretrekker shrink.
     const combo = document.createElement("div");
     Object.assign(combo.style, {
-      padding: "15px 26px",
+      padding: "15px 22px",
       display: "flex",
       flexDirection: "column",
       justifyContent: "center",
-      width: "376px",
+      width: "496px",
       borderLeft: "1px solid rgba(255, 120, 50, 0.2)",
       boxShadow: "inset 10px 0 20px rgba(0, 0, 0, 0.15)",
+      flexShrink: "0",
     });
 
+    // Tobias-direktiv 2026-05-14 (iterasjon V): gap 20px → 18px for å
+    // matche mockup `.combo-body` (premie-design.html line 189).
     const comboBody = document.createElement("div");
     Object.assign(comboBody.style, {
       display: "flex",
-      gap: "20px",
+      gap: "18px",
       justifyContent: "space-between",
       alignItems: "stretch",
     });
@@ -339,12 +349,19 @@ export class CenterTopPanel {
     this.root.appendChild(combo);
 
     // ── Action buttons panel (right half) ──────────────────────────────────
+    // Tobias-direktiv 2026-05-14 (iterasjon V, premie-design.html):
+    // - Padding 14px 25px 5px 25px → 14px 22px 8px 22px (mockup line 369).
+    //   22 px symmetri matcher combo-panelets nye padding.
+    // - `marginLeft: auto` pusher action-panel til høyre kant av
+    //   top-group-wrapper slik at det er visuelt adskilt fra combo-panel
+    //   uten overlap. Tobias-fix 2026-05-14: dette hindrer kollisjon når
+    //   game-frame har `width: fit-content` (smale viewports).
     const actions = document.createElement("div");
     Object.assign(actions.style, {
       display: "flex",
       flexDirection: "column",
       gap: "9px",
-      padding: "14px 25px 5px 25px",
+      padding: "14px 22px 8px 22px",
       borderLeft: "1px solid rgba(255, 120, 50, 0.2)",
       boxShadow: "inset 10px 0 20px rgba(0, 0, 0, 0.15)",
       justifyContent: "flex-start",
@@ -353,6 +370,7 @@ export class CenterTopPanel {
       width: "245px",
       boxSizing: "border-box",
       flexShrink: "0",
+      marginLeft: "auto",
     });
 
     // Game name (e.g. "GAME 2: KOMBINERTINNSATS")
