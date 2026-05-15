@@ -1845,7 +1845,30 @@ class Game1Controller implements GameController {
     // overlappende toast-fade + pause-fade + ny ball-trekk en hovedmistenkt
     // for blink-effekten. Toasten gir ingen verdi når overlay uansett bare
     // var synlig i ~1s under en automatisk overgang.
-    if (state.isPaused && !this.pauseOverlay?.isShowing()) {
+    //
+    // Tobias-direktiv 2026-05-15 (post-round-flyt §5.8 i
+    // SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md): PauseOverlay skal IKKE
+    // vises etter natural round-end (Fullt Hus vunnet eller alle 75 baller
+    // trukket). Selv om `state.isPaused` kan være `true` ved overgangen
+    // (engine auto-pauset f.eks. etter Rad 4 før Fullt Hus, og DB-flagget
+    // ikke ble resatt før status flippet til 'completed'), skal klienten
+    // vise WinScreen/EndOfRoundOverlay og deretter lobby med BuyPopup —
+    // ikke "Spillet er pauset / Venter på hall-operatør"-budskap.
+    //
+    // Regel: PauseOverlay reflekterer kun *aktiv* pause midt i en runde
+    // (`gameStatus === "RUNNING"`). For andre faser (WAITING / ENDED /
+    // NONE / SPECTATING-with-no-active-game) er pause-state ikke
+    // semantisk meningsfullt for spilleren — runden er enten ikke startet
+    // eller allerede avsluttet.
+    //
+    // Hvis backend en gang i fremtiden trenger et persistent pause-banner
+    // i lobby (eks. for å signalisere at master har stoppet alle videre
+    // runder), skal det bygges som egen UI-flate, ikke gjenbruke
+    // PauseOverlay som er designet for mid-round-pauser.
+    const shouldShowPauseOverlay =
+      state.isPaused && state.gameStatus === "RUNNING";
+
+    if (shouldShowPauseOverlay && !this.pauseOverlay?.isShowing()) {
       // MED-11: passere pauseUntil/pauseReason så overlay kan vise countdown
       // eller en konkret norsk fallback-tekst i stedet for "Spillet er pauset".
       this.pauseOverlay?.show({
@@ -1853,7 +1876,7 @@ class Game1Controller implements GameController {
         pauseUntil: state.pauseUntil,
         pauseReason: state.pauseReason,
       });
-    } else if (state.isPaused && this.pauseOverlay?.isShowing()) {
+    } else if (shouldShowPauseOverlay && this.pauseOverlay?.isShowing()) {
       // Allerede synlig — oppdater innholdet hvis backend har sendt nye
       // verdier (f.eks. master forlenget pausen).
       this.pauseOverlay.updateContent({
@@ -1861,7 +1884,11 @@ class Game1Controller implements GameController {
         pauseUntil: state.pauseUntil,
         pauseReason: state.pauseReason,
       });
-    } else if (!state.isPaused && this.pauseOverlay?.isShowing()) {
+    } else if (!shouldShowPauseOverlay && this.pauseOverlay?.isShowing()) {
+      // Skjul overlay hvis enten:
+      //   - state.isPaused = false (master har resumet), eller
+      //   - gameStatus != RUNNING (runden er over / venter / ikke startet —
+      //     se Tobias 2026-05-15-direktiv over)
       this.pauseOverlay?.hide();
     }
   }

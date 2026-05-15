@@ -2216,6 +2216,66 @@ Broadcast var KUN wired i `MasterActionService.fireLobbyBroadcast()` (master-act
 - §7.25 (relatert: distribuerte "neste spill"-display-paths)
 - ADR-0017 (relatert: jackpot setup-manuell, samme master-action-pattern)
 
+### §7.27 — PauseOverlay vist feilaktig etter natural round-end (BUG, FIXED 2026-05-15)
+
+**Severity:** P0 (pilot-blokker — spiller-shell viste "Spillet er pauset / Venter på hall-operatør" etter at runden naturlig sluttet)
+**Oppdaget:** 2026-05-15 (Tobias-direktiv IMMUTABLE — post-round-flyt §5.8 i `SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`)
+
+**Symptom:** Etter natural round-end (Fullt Hus vunnet eller alle 75 baller trukket) viste spiller-shellen "Spillet er pauset / Venter på hall-operatør"-overlay (semi-transparent svart fullskjerm med gule pause-ikoner). Spilleren måtte refreshe nettleseren for å komme tilbake til lobby.
+
+**Forventet flyt (§5.8):** Engine setter `gameStatus=ENDED` → WinScreen-popup vises 3-5 sek → spilleren føres tilbake til lobby → BuyPopup auto-åpnes med neste planlagte spill. PauseOverlay skal ALDRI vises etter natural round-end.
+
+**Root cause:** Sammensatt av to lag:
+
+1. **Backend:** `Game1DrawEngineService.commitDraw()` (linje ~1500) bruker `CASE WHEN $6::boolean THEN true ELSE paused END` for å sette `paused=true` ved auto-pause etter phase-won. Når Fullt Hus vinnes (`bingoWon=true`), settes `status='completed'` på scheduled-game-raden, men `paused`-flagget i `app_game1_game_state` resettes IKKE i samme UPDATE. Det blir bare resettet av eksplisitt master-resume (linje 2126: `SET paused = false`).
+
+2. **Klient:** `Game1Controller.onStateChanged` (pre-fix linje ~1848) hadde gate-condition `if (state.isPaused && !pauseOverlay?.isShowing())` UTEN å sjekke `gameStatus`. Snapshot-builderen `Game1ScheduledRoomSnapshot.ts:298` speiler `paused`-flagget direkte til `isPaused`, så klient kunne se `gameStatus="ENDED" && isPaused=true` samtidig — overlay trigget feilaktig.
+
+Konkret scenario: Rad 4 vinnes → engine setter `paused=true` (auto-pause). Master klikker "Fortsett" → `paused=false`. Fullt Hus vinnes → `status='completed'` settes. Hvis Rad 4 ble vunnet på samme draw som Fullt Hus (eller hvis master ikke rakk å resume før noen vant Fullt Hus i et race-window), kan `paused=true` overleve inn i ENDED-state.
+
+**Fix (klient-side gate, denne PR):**
+
+```typescript
+// Game1Controller.onStateChanged ca. linje 1848
+const shouldShowPauseOverlay =
+  state.isPaused && state.gameStatus === "RUNNING";
+
+if (shouldShowPauseOverlay && !this.pauseOverlay?.isShowing()) {
+  this.pauseOverlay?.show({ ... });
+} else if (shouldShowPauseOverlay && this.pauseOverlay?.isShowing()) {
+  this.pauseOverlay.updateContent({ ... });
+} else if (!shouldShowPauseOverlay && this.pauseOverlay?.isShowing()) {
+  this.pauseOverlay?.hide();
+}
+```
+
+PauseOverlay reflekterer KUN aktiv pause midt i en runde (`gameStatus === "RUNNING"`). For ENDED/WAITING/NONE er pause-state ikke semantisk meningsfullt — runden er enten ikke startet eller allerede avsluttet.
+
+**Tester:** `packages/game-client/src/games/game1/Game1Controller.pauseOverlayGating.test.ts` (11 pure-funksjons-tester):
+
+- Natural round-end scenarios: `gameStatus=ENDED && isPaused=true` → noop; transition fra RUNNING+paused → ENDED+paused trigger hide.
+- Master-explicit-pause scenarios: `gameStatus=RUNNING && isPaused=true` → show; resume trigger hide.
+- Edge cases: WAITING+paused → noop; NONE → noop; transition til NONE/WAITING med visible overlay → hide.
+- Idempotency: repeated update() med samme state → noop.
+- §5.8 full post-round flow integration shape: RUNNING+paused → ENDED+paused → WAITING+no-paused → RUNNING (ny runde).
+
+**Prevention:**
+
+- **PauseOverlay-gate er kontrakten med spillerne.** Hvis du legger til ny overlay-trigger i `Game1Controller.onStateChanged`, sørg for at den respekterer fase-state. PauseOverlay = mid-round only.
+- **Ikke gjenbruk PauseOverlay som lobby-banner** (eks. "alle runder for dagen er ferdig"). Bygg egen UI-flate for lobby-status; ikke gjenbruk mid-round-pause-overlay.
+- **Defense-in-depth selv om backend ryddes:** En fremtidig PR kan oppdatere `Game1DrawEngineService.commitDraw` til å resette `paused=false` når `isFinished=true`. Det er IKKE pilot-blokker fordi klient-gate-en allerede gjør oppførselen korrekt, og klient-gate-en MÅ beholdes uansett som defense-in-depth mot regresjon.
+- **Anti-mønster:** "Klient sjekker bare isPaused; backend må fikse paused-flagget." → Feil. Klient-gate beskytter mot ALLE bakgrunns-scenarier (stale snapshot, raceconditions, fremtidige engine-stier). Hold gate-en på begge sider.
+
+**Related:**
+- `packages/game-client/src/games/game1/Game1Controller.ts:1848` (klient-side gate)
+- `packages/game-client/src/games/game1/Game1Controller.pauseOverlayGating.test.ts` (11 tester)
+- `packages/game-client/src/games/game1/components/PauseOverlay.ts` (overlay-komponent — IKKE endret)
+- `apps/backend/src/game/Game1DrawEngineService.ts:1500-1502` (backend paused-flagg-UPDATE — kjent oppfølger-rydding)
+- `apps/backend/src/game/Game1ScheduledRoomSnapshot.ts:298` (snapshot speiler paused → isPaused)
+- `apps/backend/src/game/BingoEnginePatternEval.ts:642` (auto-pause-trigger for Spill 1)
+- `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (kanonisk spec)
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.18.0 (skill-seksjon "Post-round-flyt invariant")
+
 ---
 
 ## §8 Doc-disiplin
@@ -2785,3 +2845,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-14 | Lagt til §6.18 — Synthetic bingo-test må kjøres FØR pilot. Tobias-direktiv 2026-05-14: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test". Bot driver én komplett bingo-runde, verifiserer 6 invarianter (I1-I6). R4-precursor (BIN-817). | synthetic-test-agent |
 | 2026-05-15 | Lagt til §7.21 — Master-header "Neste spill: {name}" for ALLE pre-running-states (Tobias-direktiv IMMUTABLE). To uavhengige bugs: (1) frontend mapping hadde "Klar til å starte" / "Runde ferdig" som mellom-tekster, fjernet — alle pre-running-states gir "Neste spill: {name}". (2) Backend aggregator returnerte `planMeta=null` når plan-run manglet → `catalogDisplayName=null` → header uten navn. Fix: ny `GamePlanRunService.findActivePlanForDay`-helper kalles av aggregator i idle-state. Frontend 41 tester (3 nye trip-wires); backend 26 tester (2 nye for catalogDisplayName uten plan-run). PR `fix/master-header-text-and-catalog-name-2026-05-15`. §7.20 oppdatert med peker. | Fix-agent (Tobias 2026-05-15 live-test) |
 | 2026-05-15 | Lagt til §7.26 — Lobby-broadcast manglet etter natural round-end (P0 pilot-blokker). 4 state-flipp-paths (Game1DrawEngineService.drawNext POST-commit, GamePlanRunService.finish/advanceToNext-past-end, GamePlanRunCleanupService.reconcileNaturalEnd) trigget IKKE socket-push til spiller-shell — klient måtte vente på 10s-poll. Fix: best-effort fire-and-forget broadcaster wired på alle 4 paths + frontend "Forbereder neste spill"-loader + 10s→3s poll reduction. 37 nye tester. | Fix-agent (lobby-broadcast on natural round-end) |
+| 2026-05-15 | Lagt til §7.27 — PauseOverlay vist feilaktig etter natural round-end (P0 pilot-blokker). Spill 1 auto-pauser etter hver phase-won (Tobias-direktiv 2026-04-27), og `paused`-flagget i `app_game1_game_state` resettes ikke alltid før status flippes til 'completed'. Snapshot speiler `paused` til klient-`isPaused`, så klient så `gameStatus=ENDED && isPaused=true` → PauseOverlay viste seg feilaktig. Fix: klient-side gate `state.isPaused && state.gameStatus === "RUNNING"` i `Game1Controller.onStateChanged`. Defense-in-depth selv om backend en gang i fremtiden rydder paused-flagget — gate-en er kontrakten med spillerne. Kanonisk spec: SPILL1_IMPLEMENTATION_STATUS §5.8. 11 pure-funksjons-tester i `Game1Controller.pauseOverlayGating.test.ts`. | Fix-agent (post-round-flyt §5.8) |

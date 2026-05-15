@@ -985,6 +985,69 @@ ALLE state-flipp som setter `app_game1_scheduled_games.status='completed'` ELLER
 3. Skriv test som verifiserer at broadcaster fyres + at service ikke kaster naar broadcaster selv kaster.
 4. Verifiser i live-test: Tobias skal se "Neste spill: X" oppdatere seg innen ~2 sekunder etter natural round-end.
 
+## Post-round-flyt invariant — PauseOverlay vises KUN ved RUNNING + isPaused (FIXED 2026-05-15)
+
+> **Status:** IMMUTABLE per Tobias-direktiv 2026-05-15. Endret det og du har brutt kontrakten med spillerne.
+
+**Kanonisk spec:** `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (post-round-flyt).
+
+### Bug-historikk
+
+Etter natural round-end (Fullt Hus vunnet eller alle 75 baller trukket) skal spillerklienten gå rett til WinScreen → EndOfRoundOverlay → lobby + BuyPopup. Det skal IKKE være noe "Spillet er pauset / Venter på hall-operatør"-budskap, fordi runden er over — det er ikke en pause, det er en avslutning.
+
+Pre-fix-bugen oppstod fordi:
+- `Game1DrawEngineService` setter `app_game1_game_state.paused = true` etter hver phase-won (Tobias-direktiv 2026-04-27, Spill 1 auto-pause). Se `apps/backend/src/game/Game1DrawEngineService.ts:1500` og `BingoEnginePatternEval.ts:642`.
+- Når Fullt Hus vinnes, settes `app_game1_scheduled_games.status = 'completed'` MEN `app_game1_game_state.paused`-flagget resettes IKKE i samme UPDATE. Det blir bare resettet av eksplisitt master-resume (`Game1DrawEngineService.resumeGame` linje 2126).
+- Snapshot-builderen i `Game1ScheduledRoomSnapshot.ts:298` speiler `paused`-flagget direkte til `isPaused` i klient-state.
+- Klient-state har dermed `gameStatus="ENDED"` OG `isPaused=true` samtidig. Pre-fix overlay-conditionen i Game1Controller (`if (state.isPaused && !pauseOverlay?.isShowing())`) trigget overlay-en feilaktig.
+
+### Klient-side gate (immutable)
+
+PauseOverlay i `apps/admin-web/.../packages/game-client/src/games/game1/Game1Controller.ts` linje 1848-1875 har nå denne gate-conditionen:
+
+```typescript
+const shouldShowPauseOverlay =
+  state.isPaused && state.gameStatus === "RUNNING";
+```
+
+PauseOverlay reflekterer KUN aktiv pause midt i en runde. For andre faser (WAITING / ENDED / NONE) er pause-state ikke semantisk meningsfullt for spilleren — runden er enten ikke startet eller allerede avsluttet.
+
+### Når post-round-flyten skal videre
+
+§5.8-spec krever at klienten:
+1. Engine setter `gameStatus=ENDED` (alle 75 baller trukket eller Fullt Hus vunnet)
+2. WinScreen-popup vises 3-5 sek (allerede dekket av WinScreenV2 + Game1EndOfRoundOverlay)
+3. Spiller ledes tilbake til Spill 1 lobby (`Game1EndOfRoundOverlay.markRoomReady` + auto-return etter 15s timeout, eller manuell "Tilbake til lobby"-knapp)
+4. BuyPopup åpnes automatisk med "Kjøp bonger til neste planlagte spill: <NESTE>" via `PlayScreen.update` line 818-823 (`willOpen`-gate). `autoShowBuyPopupDone` resettes ved RUNNING → non-RUNNING transition (line 550-564).
+5. BuyPopup er tom (0 bonger valgt) — spiller velger selv eller lukker.
+6. **PauseOverlay vises ALDRI etter natural round-end** — denne gate-conditionen er kontrakten.
+
+### ALDRI gjør
+
+- ❌ Fjern `state.gameStatus === "RUNNING"`-condition fra PauseOverlay-gate uten å oppdatere denne skill-en + PITFALLS_LOG. Gate-en er kontrakten med spillerne.
+- ❌ Gjenbruk PauseOverlay som lobby-banner (eks. for "alle runder for dagen er ferdig"). Bygg egen UI-flate for lobby-status; ikke gjenbruk mid-round-pause-overlay.
+- ❌ Anta at `isPaused=false` betyr engine er "ren" — Spill 1's auto-pause-pattern lar paused-flagg overleve på tvers av ENDED-transition. Gate-en er nødvendig defense-in-depth selv om backend skulle ryddes opp senere.
+
+### Backend-rydding (oppfølger, IKKE pilot-blokker)
+
+Den ideelle rettelsen er at `Game1DrawEngineService` resetter `paused=false` når `isFinished=true` flippes (linje 1500-1502). Dette er IKKE pilot-blokker fordi klient-gate-en allerede gjør oppførselen korrekt, men ville rydde DB-state. Forslag for fremtidig PR:
+
+```sql
+UPDATE ${gameStateTable}
+   SET ...
+       paused = CASE WHEN $6::boolean THEN true
+                     WHEN isFinished  THEN false  -- NEW: reset on natural end
+                     ELSE paused END,
+       paused_at_phase = CASE WHEN $6::boolean THEN $7::int ELSE paused_at_phase END
+ WHERE scheduled_game_id = $1
+```
+
+Husk: hvis du gjør backend-ryddingen senere, MÅ du beholde klient-gate-en uansett — den er defense-in-depth og forhindrer regresjon hvis en fremtidig endring i Game1MasterControlService eller forced-end-pathen glemmer å nullstille paused.
+
+### Tester som beskytter
+
+`packages/game-client/src/games/game1/Game1Controller.pauseOverlayGating.test.ts` — 11 pure-funksjons-tester som mirror'er gate-logikken. Hvis prod-koden drifter (eks. noen legger til `&& !endOfRoundOverlay.visible` eller fjerner `gameStatus === "RUNNING"`-condition), driver mirror-funksjonen i denne testen også, og kontrakten håndheves via deterministisk test.
+
 ## Kanonisk referanse
 
 Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias før du:
@@ -1014,6 +1077,7 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-13 | v1.1.0 — la til I14/I15/I16-fix-mønstre, ADR-0019/0020/0021/0022, MasterActionService som single-entry sekvenseringsmotor, GamePlanRunCleanupService for stale-plan-cleanup, master kan starte med 0 spillere |
 | 2026-05-14 | v1.2.0 — BUG-F2: la til seksjon "Ticket-pris-propagering" som dokumenterer to-fase-binding (pre-engine via `GamePlanEngineBridge.onScheduledGameCreated` + post-engine via `Game1MasterControlService.onEngineStarted`). Pre-engine-fasen dekker hullet fra PR #1375 og forhindrer 20kr-regresjonen. Begge faser MÅ beholdes — fremtidige agenter må ikke fjerne den ene uten å verifisere at den andre dekker pathen. |
 | 2026-05-14 | v1.3.0 — PR #1413 (sub-bug PR #1408): utvidet "Ticket-pris-propagering" til TRE-fase-fix. Fase 2 (variantByRoom-binding) manglet per-farge multipliers — `gameVariant.ticketTypes` i room-snapshot rendret flat mult=1/3 selv om backend `ticket_config_json` hadde korrekte priser. Fixen mapper `priceNok / minPriceNok` for hver farge i `spill1VariantMapper.ticketTypeFromSlug`. Speiler `lobbyTicketTypes.buildBuyPopupTicketConfigFromLobby`-matematikken eksakt. 7 nye tester. PR #1408's hook setter entryFee, men IKKE multipliers — derfor komplementært. |
+| 2026-05-15 | v1.18.0 — Post-round-flyt invariant: PauseOverlay vises KUN ved `gameStatus==="RUNNING" && isPaused===true`. Etter natural round-end (Fullt Hus eller MAX_DRAWS_REACHED) skal spillerklienten gå rett til WinScreen → EndOfRoundOverlay → lobby + BuyPopup. Pre-fix kunne overlay vises feilaktig fordi Spill 1's auto-pause-pattern lar `app_game1_game_state.paused`-flagget overleve på tvers av ENDED-transition. Fix: klient-side gate i `Game1Controller.onStateChanged` (linje ~1848). Speiler kanonisk spec i `SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8. Tester: `Game1Controller.pauseOverlayGating.test.ts` (11 pure-funksjons-tester). |
 | 2026-05-14 | v1.4.0 — F-04 hall-switcher-bug (PR #1415): la til seksjon "Hall-switching state-refresh (lobby.js, 2026-05-14)" som dokumenterer at switchHall() MÅ parallell-refetche `/api/games/spill1/lobby?hallId=...` ved hall-bytte. `/api/games/status` er GLOBAL og kan ikke besvare per-hall-spørsmål. Inkluderer per-hall badge-mapping fra `Game1LobbyState.overallStatus` til Åpen/Stengt/Starter snart osv. PITFALLS §7.17. Tester i `apps/admin-web/tests/lobbyHallSwitcher.test.ts`. |
 | 2026-05-14 | v1.5.0 — PR #1417 Payout auto-multiplikator-fix (REGULATORISK, runde 7dcbc3ba): payoutPerColorGroups bygget feil lookup-key (family-form "yellow" i stedet for slug "small_yellow") → fall til __default__ HVIT-matrise → auto-mult (yellow×2, purple×3) gikk tapt → REGULATORISK feil. Fix: ny `resolveColorSlugFromAssignment(color, size)` builder, propager `ticketSize` via `Game1WinningAssignment`, SELECT inkluderer `a.ticket_size`. Tester: `Game1DrawEngineService.payoutAutoMultiplier.test.ts` + `Game1DrawEngineHelpers.resolveColorSlugFromAssignment.test.ts`. PITFALLS §1.9. |
 | 2026-05-14 | v1.6.0 — PR #1422 BUG E auto-advance + plan-completed-beats-stengetid: `GamePlanRunService.getOrCreateForToday` capturer `previousPosition` FØR F-Plan-Reuse DELETE, og advancer til `previousPosition + 1` for å forhindre Bingo-loop. **PM follow-up (Tobias 10:17):** Erstattet wrap-til-1 med AVVIS via `PLAN_COMPLETED_FOR_TODAY` + åpningstid-check via `PLAN_OUTSIDE_OPENING_HOURS`. "Plan-completed beats stengetid" — selv om bingohall fortsatt åpen, spillet er over for dagen når plan=ferdig. PITFALLS §3.12. |

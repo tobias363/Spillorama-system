@@ -509,6 +509,30 @@ Pot per bongstørrelse, ikke flat-deling, ikke per-vinner-uavhengig. Se SPILL_RE
 - R9 (Spill 2 24t-leak-test) bestått
 - Null kjente compliance-feil
 
+### 5.8 Post-round-flyt (Tobias-direktiv 2026-05-15 IMMUTABLE)
+
+**Spec:** Etter natural round-end (Fullt Hus vunnet eller alle 75 baller trukket) skal spillerklienten gå rett til WinScreen → EndOfRoundOverlay → lobby + BuyPopup. Det skal IKKE være noen "Spillet er pauset / Venter på hall-operatør"-melding, fordi runden er over — det er ikke en pause.
+
+**Forventet flyt:**
+1. Engine setter `gameStatus = ENDED` (status='completed' i `app_game1_scheduled_games`)
+2. WinScreen-popup vises (3-5 sek) med vinner-info (Game1EndOfRoundOverlay)
+3. Spiller ledes tilbake til Spill 1 lobby (via `markRoomReady` eller auto-return etter 15s timeout, eller "Tilbake til lobby"-knapp)
+4. BuyPopup åpnes automatisk med "Kjøp bonger til neste planlagte spill: <NESTE>" (via `PlayScreen.update`-gate)
+5. BuyPopup er tom (0 bonger valgt) — spiller velger selv eller lukker
+6. **"Spillet er pauset"-overlay vises ALDRI etter natural round-end**
+
+**Klient-side invariant (Game1Controller.onStateChanged):**
+
+PauseOverlay vises KUN ved `state.isPaused === true && state.gameStatus === "RUNNING"`. Selv om `isPaused`-flagget kan strømme gjennom fra stale auto-pause (Spill 1's per-fase auto-pause-pattern), skal klient ALDRI vise overlay-en når runden er over. Se `packages/game-client/src/games/game1/Game1Controller.ts` linje ~1848.
+
+**Hvorfor klient-gate er nødvendig:**
+
+`Game1DrawEngineService` setter `app_game1_game_state.paused = true` etter hver phase-won (Tobias-direktiv 2026-04-27 — Spill 1 auto-pause). Når Fullt Hus vinnes, settes `app_game1_scheduled_games.status = 'completed'`, men `paused`-flagget i `app_game1_game_state` resettes ikke i samme UPDATE. Snapshot-builderen (`Game1ScheduledRoomSnapshot.ts:298`) speiler `paused`-flagget direkte til `isPaused` i klient-state. Klient kan dermed se `gameStatus="ENDED"` og `isPaused=true` samtidig — uten gate-en ville PauseOverlay trigge feilaktig.
+
+**Tester som beskytter:** `packages/game-client/src/games/game1/Game1Controller.pauseOverlayGating.test.ts` (11 pure-funksjons-tester som mirror'er gate-logikken).
+
+**Backend-rydding (oppfølger, IKKE pilot-blokker):** En fremtidig PR kan oppdatere `Game1DrawEngineService.commitDraw` til å resette `paused=false` når `isFinished=true`. Det rydder DB-state men er ikke pilot-blokker fordi klient-gate-en allerede gjør oppførselen korrekt. Klient-gate-en MÅ beholdes uansett som defense-in-depth.
+
 ---
 
 ## 6. Kjente begrensninger og oppfølger-arbeid

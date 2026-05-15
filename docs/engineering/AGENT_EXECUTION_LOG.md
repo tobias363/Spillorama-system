@@ -3043,3 +3043,70 @@ Verifisert via test:
 - IKKE rørt `.env` — `AUTO_ROUND_ENTRY_FEE=20` er bevisst dev-konfig
 
 **Tid:** ~90 min agent-arbeid (inkl. root-cause-analyse + DB-query + worktree-håndtering)
+### 2026-05-15 — Post-round-flyt fix: PauseOverlay etter natural round-end (fix-agent)
+
+**Agent-id:** `a36c1e4cecd4ca058` (general-purpose, worktree)
+**Branch:** `fix/post-round-flow-spill1-2026-05-15`
+**Type:** Bug-fix (pilot-blokker)
+**Tobias-direktiv:** 2026-05-15 IMMUTABLE — post-round-flyt §5.8
+
+**Bug-rapport:**
+> Etter natural round-end (Fullt Hus vunnet eller alle 75 baller trukket) vises "Spillet er pauset / Venter på hall-operatør"-overlay på spiller-shellen. Det er FEIL.
+
+**Forventet flyt (§5.8):**
+1. Engine setter `gameStatus=ENDED`
+2. WinScreen-popup vises 3-5 sek
+3. Spiller ledes tilbake til Spill 1 lobby
+4. BuyPopup auto-åpnes med neste planlagte spill
+5. PauseOverlay vises ALDRI etter natural round-end
+
+**Root-cause-analyse:**
+
+Sammensatt av to lag:
+
+1. **Backend (Game1DrawEngineService.ts:1500):** `paused`-flagget i `app_game1_game_state` settes til `true` ved auto-pause etter phase-won (Tobias-direktiv 2026-04-27, Spill 1 auto-pause). Når Fullt Hus vinnes settes `status='completed'` på scheduled-game, men `paused`-flagget resettes ikke i samme UPDATE (kun via eksplisitt master-resume på linje 2126).
+
+2. **Klient (Game1Controller.onStateChanged:~1848 pre-fix):** Gate-condition `if (state.isPaused && !pauseOverlay?.isShowing())` UTEN `gameStatus`-sjekk. Snapshot-builderen i `Game1ScheduledRoomSnapshot.ts:298` speiler `paused` til `isPaused`, så klient kunne se `gameStatus="ENDED" && isPaused=true` samtidig — overlay trigget feilaktig.
+
+**Fix-strategi:** Klient-side gate (defense-in-depth):
+
+```typescript
+const shouldShowPauseOverlay =
+  state.isPaused && state.gameStatus === "RUNNING";
+```
+
+PauseOverlay reflekterer KUN aktiv pause midt i en runde. For ENDED/WAITING/NONE er pause-state ikke semantisk meningsfullt for spilleren — runden er enten ikke startet eller allerede avsluttet.
+
+**Hva ble endret:**
+
+- `packages/game-client/src/games/game1/Game1Controller.ts` linje ~1848 — la til `shouldShowPauseOverlay`-variabel som gater på `gameStatus === "RUNNING"`. Hide-pathen håndterer overgang fra RUNNING+paused → ENDED+paused korrekt (overlay fades ut).
+- `packages/game-client/src/games/game1/Game1Controller.pauseOverlayGating.test.ts` — NY fil med 11 pure-funksjons-tester som speiler decision-logikken. Mønster fra `PlayScreen.autoShowBuyPopupPerRound.test.ts`.
+- `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` — la til §5.8 "Post-round-flyt (Tobias-direktiv 2026-05-15 IMMUTABLE)" som kanonisk spec.
+- `.claude/skills/spill1-master-flow/SKILL.md` — la til seksjon "Post-round-flyt invariant" + bumpet versjon til v1.18.0 + endringslogg-entry.
+- `docs/engineering/PITFALLS_LOG.md` — la til §7.27 + endringslogg-entry.
+
+**Verifikasjon:**
+- 11 pauseOverlayGating.test.ts → grønne
+- 16 PauseOverlay.test.ts (uberørt, eksisterende) → grønne
+- 17 endOfRoundFlow + roundTransition-tester → grønne
+- 967 game1-tester totalt → grønne
+- TypeScript strict på game-client → grønn
+
+**Doc-protokoll (§2.19):**
+- ✅ Skill: `.claude/skills/spill1-master-flow/SKILL.md` v1.18.0 — ny seksjon "Post-round-flyt invariant"
+- ✅ PITFALLS_LOG §7.27 — full root-cause + fix + prevention
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+- ✅ SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md §5.8 — kanonisk spec
+
+**Lessons learned:**
+
+- **Backend-paused-flag overlever ENDED-transisjon.** Spill 1's auto-pause-pattern lar `app_game1_game_state.paused=true` flyte gjennom til klient selv etter `status='completed'`. Klient MÅ ha defense-in-depth gate. Backend-rydding (oppfølger-PR) er nice-to-have men IKKE pilot-blokker.
+- **Pure-funksjons-mirror er rask regresjons-coverage.** Tester på decision-logikken uten Pixi-stack-instansiering kjører på < 5ms og fanger gate-condition-drift. Mønster reusable for alle Controller-decisions.
+- **Komponent vs ansvar:** PauseOverlay-komponenten endres IKKE — den er korrekt for sitt scope (vise pause-budskap). Gate-en på når den vises er Controller-ansvar. Skill-doc-en understreker: ikke gjenbruk PauseOverlay som lobby-banner.
+
+**Forbudt-rør (overholdt):**
+- IKKE endret `PauseOverlay.ts`-komponenten (den fungerer korrekt for mid-round-pauser)
+- IKKE rørt backend `Game1DrawEngineService` (klient-gate er pilot-fix; backend-rydding er separat PR)
+- IKKE endret andre Game1-pathways (WinScreen, EndOfRoundOverlay, BuyPopup auto-show fungerte allerede iht §5.8)
+
+**Tid:** ~40 min agent-arbeid
