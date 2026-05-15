@@ -2314,7 +2314,7 @@ Ingen fast timer fungerer for alle scenarier. 3s er for kort (mange tilfeller); 
 // 2. Game1Controller.lobbyStateBinding.onChange fyrer på hver lobby-state-tick
 //    → overlay.updateLobbyState(newSlug)
 //    → overlay.tryDismissIfReady() sjekker:
-//       (a) elapsed >= MIN_CELEBRATION_MS (6s)
+//       (a) elapsed >= MIN_CELEBRATION_MS (10s)
 //       (b) currentNextSlug !== justPlayedSlug (begge non-null)
 //    → dismiss når begge møtt
 // 3. Hvis 60s passerer uten ny slug → safety-cap-fire → Sentry-breadcrumb + forced dismiss
@@ -2333,7 +2333,7 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 ```
 
 **Konstanter:**
-- `MIN_CELEBRATION_MS = 6_000` — Tobias-direktiv "minimum 6 sek celebrasjon"
+- `MIN_CELEBRATION_MS = 10_000` — Tobias-direktiv 2026-05-15: opprinnelig "minimum 6 sek celebrasjon", oppdatert samme dag til "nei, kjør minimum 10 sekunder"
 - `MAX_WAIT_MS = 60_000` — safety-cap, signalerer backend-anomali
 - `DATA_READINESS_POLL_MS = 500` — sekundær defense (primær er event-driven via updateLobbyState)
 
@@ -2344,7 +2344,7 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 **Prevention / anti-mønstre:**
 
 - ❌ **ALDRI dismiss UI-overlay basert på fast timer når dismiss avhenger av backend-data.** Det er nettopp dette som ga 40s-bugen. Bruk data-driven (poll + event-listening) med floor-tid + safety-cap.
-- ❌ **ALDRI senk `MIN_CELEBRATION_MS` under 6s** uten Tobias-godkjennelse. Tobias har eksplisitt valgt 6s som komfortabel celebrasjon.
+- ❌ **ALDRI senk `MIN_CELEBRATION_MS` under 10s** uten Tobias-godkjennelse. Tobias bumpet opprinnelig 6s → 10s samme dag (2026-05-15) etter pilot-testing.
 - ❌ **ALDRI senk `MAX_WAIT_MS` under 60s.** 40s-rapporten viste at backend KAN bruke så lang tid. Hardere cap risikerer å klippe spillere som ville fått korrekt overgang.
 - ❌ **ALDRI fjern legacy markRoomReady-modus** ennå — eksisterende tester avhenger av den, og den er partial-rollback-vei hvis data-driven feiler.
 - ✅ **Sentry-monitor `endOfRoundOverlay.safetyCapDismiss`** for å fange repeterte cap-fires (signal om plan-runtime-hiccups i backend).

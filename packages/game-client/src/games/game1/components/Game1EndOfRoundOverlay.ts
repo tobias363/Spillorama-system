@@ -118,27 +118,28 @@ export const SUMMARY_PHASE_SPECTATOR_MS = MIN_DISPLAY_MS_SPECTATOR;
  *
  *   > "Kjør C, tenker minimum 6 sek celebrasjon deretter vent"
  *   > — Tobias godkjennelse 2026-05-15
+ *   > Oppdatert samme dag: "nei, kjør minimum 10 sekunder"
+ *   > → `MIN_CELEBRATION_MS = 10_000`
  *
  * Data-driven dismiss-modus erstatter timer-driven legacy-flyten når Game1-
  * Controller setter `summary.justPlayedSlug` (eller kaller `setJustPlayedSlug`).
  * Mens legacy-modus dismisser overlay etter `MIN_DISPLAY_MS` (3s) + første
  * `markRoomReady`, krever data-driven modus følgende:
  *
- *   1. Minimum `MIN_CELEBRATION_MS` (6s) celebrasjon for komfortabel feiring
+ *   1. Minimum `MIN_CELEBRATION_MS` (10s) celebrasjon for komfortabel feiring
  *      av runde-resultatet. Selv hvis ny slug ankommer på 50ms blir overlay
- *      stående i 6s.
- *   2. Etter 6s: vent på at lobby-state har en `nextScheduledGame.catalogSlug`
+ *      stående i 10s.
+ *   2. Etter 10s: vent på at lobby-state har en `nextScheduledGame.catalogSlug`
  *      som er FORSKJELLIG fra `justPlayedSlug`. Det betyr at backend har
  *      advancert plan-runtime og spilleren skal se det nye spillet.
  *   3. Safety-cap `MAX_WAIT_MS` (60s) — overlay dismisses uansett etter 60s
  *      for å unngå evig-overlay hvis backend henger. Forced dismiss
  *      logges som Sentry-breadcrumb.
  *
- * Hvorfor 6s og 60s:
- *   - 6s er bekvemt for spilleren å lese WinScreen-totalen, se patterns-
- *     tabellen og forberede seg mentalt på neste runde. Kortere ga "for
- *     rask"-feedback i pilot-testing. Lengre ble irriterende ved tap
- *     (ingen winnings å feire, bare summary).
+ * Hvorfor 10s og 60s:
+ *   - 10s er bekvemt for spilleren å lese WinScreen-totalen, se patterns-
+ *     tabellen og forberede seg mentalt på neste runde. Tobias bumpet
+ *     opprinnelig 6s → 10s samme dag (2026-05-15) etter pilot-testing.
  *   - 60s er max bevisst venting på server. Tobias 2026-05-15 rapporterte
  *     40s stale data — backend-advance kan ta opptil dette ved feilet
  *     plan-runtime-state, men 60s er hard grense fordi spilleren etter
@@ -156,7 +157,7 @@ export const SUMMARY_PHASE_SPECTATOR_MS = MIN_DISPLAY_MS_SPECTATOR;
  * en no-op (slug-comparison overgår den), men beholdes for å støtte
  * partial-rollback hvis data-pathen viser seg å være feil.
  */
-export const MIN_CELEBRATION_MS = 6_000;
+export const MIN_CELEBRATION_MS = 10_000;
 export const MAX_WAIT_MS = 60_000;
 /** Periodic poll-interval for å re-evaluere data-readiness etter min-celebration. */
 const DATA_READINESS_POLL_MS = 500;
@@ -1144,7 +1145,7 @@ export class Game1EndOfRoundOverlay {
    * Returnerer true hvis overlay ble dismisset, false ellers.
    *
    * Krav for dismiss (data-driven modus):
-   *   (a) Minimum-celebration-vindu (MIN_CELEBRATION_MS = 6s) er passert.
+   *   (a) Minimum-celebration-vindu (MIN_CELEBRATION_MS = 10s) er passert.
    *   (b) `currentNextSlug !== null && currentNextSlug !== justPlayedSlug`
    *       (serveren har advancert plan-runtime).
    *

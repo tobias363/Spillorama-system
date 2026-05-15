@@ -3120,7 +3120,7 @@ PauseOverlay reflekterer KUN aktiv pause midt i en runde. For ENDED/WAITING/NONE
 **Tema:** Spillerklient post-round-flyt §5.8 + Tobias-direktiv 2026-05-15 ("Kjør C, tenker minimum 6 sek celebrasjon deretter vent")
 **Trigger:** Tobias-rapport 2026-05-15: *"Nå viste man spillet som nettopp var spilt i ca 40 sekunder før det endret til riktig spill."*
 
-**Mandat:** Erstatt timer-driven legacy-dismiss (3s `MIN_DISPLAY_MS` + første `markRoomReady`) med data-driven dismiss (6s `MIN_CELEBRATION_MS` floor + slug-comparison + 60s safety-cap). Backward-compat med eksisterende 56-tests-suite.
+**Mandat:** Erstatt timer-driven legacy-dismiss (3s `MIN_DISPLAY_MS` + første `markRoomReady`) med data-driven dismiss (10s `MIN_CELEBRATION_MS` floor + slug-comparison + 60s safety-cap). Backward-compat med eksisterende 56-tests-suite. Tobias bumpet opprinnelig 6s → 10s samme dag (2026-05-15) etter pilot-testing.
 
 **Inputs:**
 - `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` §5.8 (post-round-flyt IMMUTABLE)
@@ -3136,14 +3136,14 @@ Pre-fix dismisset overlay etter 3s + første state-update. På det tidspunktet h
 Hvorfor faste timere ikke fungerer: backend-advance varierer 50ms → 40s+ avhengig av plan-runtime-helse, master-hall-state, bridge-retry, DB-latens. Ingen fast verdi dekker alle scenarier.
 
 **Fix-strategi:** Data-driven dismiss med tre lag:
-1. **Floor (6s):** Minimum celebration tid for komfortabel feiring uavhengig av backend
+1. **Floor (10s):** Minimum celebration tid for komfortabel feiring uavhengig av backend
 2. **Signal:** Vent på at `currentNextSlug !== justPlayedSlug` (backend har advancert)
 3. **Cap (60s):** Forced dismiss + Sentry-breadcrumb hvis backend ikke advancert innen grensen
 
 **Hva ble endret:**
 
 - `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts`:
-  - Nye konstanter: `MIN_CELEBRATION_MS = 6_000`, `MAX_WAIT_MS = 60_000`, `DATA_READINESS_POLL_MS = 500`
+  - Nye konstanter: `MIN_CELEBRATION_MS = 10_000`, `MAX_WAIT_MS = 60_000`, `DATA_READINESS_POLL_MS = 500`
   - Utvidet `Game1EndOfRoundSummary` med optional `justPlayedSlug?: string | null`
   - Ny session-state: `justPlayedSlug`, `currentNextSlug`, `minCelebrationDeadline`, `safetyCapDeadline`, `dataReadinessPollTimer`, `safetyCapTimer`, `hasFiredSafetyCap`
   - Nye public APIs: `setJustPlayedSlug(slug)`, `updateLobbyState(slug)`
