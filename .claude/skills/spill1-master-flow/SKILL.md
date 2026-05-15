@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.17.0
+  version: 1.18.0
   project: spillorama
 ---
 
@@ -653,6 +653,62 @@ ALDRI bruk `ticket.price === 0` som gyldig pris — fall til computed.
 ### ALDRI tillat priceEl å vise "0 kr"
 
 Kjøpt bonge har alltid pris > 0. Hvis du ser "0 kr" på en bonge i klient-UI, er det en regression — sjekk hele defensive-laget for `> 0`-checks (ikke `??`-fallback på numeric fields).
+
+## Pre-runde bong-pris: lobby-types autoritativ over server-pris (PR #<bong-pris-pre-runde-bug>, 2026-05-15)
+
+> **Tobias-direktiv 2026-05-15:** Pre-runde bong-pris MÅ vise riktig pris per bongfarge (5/10/15 kr for hvit/gul/lilla i standard Spill 1). Backend's `enrichTicketList` kan ikke stoles på FØR master har spawnet scheduled-game — den faller tilbake til env-default `AUTO_ROUND_ENTRY_FEE=20` × DEFAULT-variant `priceMultiplier=1` = 20 kr for ALLE bonger.
+
+### Bug-historie (Tobias-rapport 2026-05-15)
+
+Etter spilleren kjøpte Small White + Small Yellow + Small Purple (5 kr / 10 kr / 15 kr — én av hver) FØR master trykket Start, viste ALLE 3 bonger pris "20 kr" i pre-runde-grid. Etter master trykket Start: korrekt pris (5/10/15 kr). Bug var INTERMITTENT — etter første master-start beholdt backend `roomConfiguredEntryFeeByRoom`-cache, så neste runde i samme rom-kode viste riktige priser. `dev:nuke` eller backend-restart wipe-et state og bug-en kom tilbake for første runde.
+
+### Root cause
+
+Pre-runde har ingen scheduled-game spawnet ennå (master har ikke trykket Start). `roomState.roomConfiguredEntryFeeByRoom` er tom for rom-koden. `getRoomConfiguredEntryFee(roomCode)` faller tilbake til `runtimeBingoSettings.autoRoundEntryFee` = `AUTO_ROUND_ENTRY_FEE=20` (`apps/backend/.env:41`). Parallelt setter `bindVariantConfigForRoom(roomCode, { gameSlug: "bingo" })` (`apps/backend/src/sockets/gameEvents/roomEvents.ts:594-600`) DEFAULT_NORSK_BINGO_CONFIG der ALLE small_* har flat `priceMultiplier=1, ticketCount=1` (`apps/backend/src/game/variantConfig.ts:514-538`). Server-side `enrichTicketList` (`apps/backend/src/util/roomHelpers.ts:458-509`) regner derfor `t.price = 20 × 1 / 1 = 20` for ALLE bonger uavhengig av farge.
+
+### Hvorfor intermittent
+
+Etter master trykker "Start neste spill" trigger `onScheduledGameCreated`-hook + `onEngineStarted`-hook (`apps/backend/src/index.ts:2663-2886`) som binder `roomConfiguredEntryFeeByRoom = 5` (billigste bong) + variantConfig med korrekte per-farge ticketTypes fra `ticket_config_json`. Disse persisterer in-memory så lenge backend-prosessen lever. Neste runde i samme rom-kode treffer cache → korrekte priser. `dev:nuke` / crash / cold-start wipe-er Map-en → bug treffer FØRSTE runde igjen.
+
+### Fix-strategi (klient-side defensive)
+
+Klient-side `computePrice` i `TicketGridHtml.ts` prioriterer nå `lobbyTicketConfig.ticketTypes` (fra `Game1LobbyService` → catalog-data) OVER server-provided `ticket.price` når lobby kan matche `(color, type)`. Lobby-data leses direkte fra `app_game_catalog` via plan-runtime-aggregator (`GameLobbyAggregator`), så det er kanonisk pris-kilde uavhengig av in-memory state.
+
+Den nye fallback-rekkefølgen i `computePrice`:
+
+```
+1. lobbyTypes.find((color, type) match) → entryFee × multiplier / count  (AUTORITATIV pre-runde)
+2. ticket.price > 0 → bruk direkte                                       (legacy server-pris-path)
+3. state.ticketTypes.find(type) → entryFee × multiplier / count          (legacy room-snapshot)
+4. Default → entryFee × 1 / 1
+```
+
+### Hvorfor klient-side over backend-side
+
+- `lobbyTicketConfig` er allerede tilgjengelig i klient via `Game1Controller.setBuyPopupTicketConfig` etter `lobbyStateBinding.getBuyPopupTicketConfig()` — ingen nye fetcher trengs
+- BuyPopup viser ALLEREDE korrekte priser via samme `entryFee × priceMultiplier`-formel, så dette aligner ticket-grid-prisene med BuyPopup (UX-konsistens)
+- DB-rader (`app_game1_ticket_purchases.ticket_spec_json[].priceCentsEach`) var alltid korrekte (500/1000/1500 øre); kun display-laget var feil
+- Backend-fix krever endring i `room:create`-flyten for lazy-binding av scheduled-game-config FØR master har trykket Start (større arkitektur-endring; klient-fix er additiv defense-in-depth)
+- Wallet/regulatory binding er UPÅVIRKET — kun visning av bong-pris-label
+
+### Verifisering
+
+5 nye regression-tester i `packages/game-client/src/games/game1/components/TicketGridHtml.preRundePris20Bug.test.ts`:
+- Pre-runde: lobby-types VINNER over stale `ticket.price=20` fra backend default-variant
+- State-transition WAITING → RUNNING: priser forblir stabile (5/10/15) på tvers av fasen
+- Trafikklys-scenario: flat 15 kr per bong, ikke 20
+- Lobby-types mangler: server's `ticket.price` brukes (bakover-kompat for legacy-klient)
+- Large-bong pre-runde: lobby gir korrekt per-brett-pris (5×3/3=5 kr per brett)
+
+Eksisterende `TicketGridHtml.priceZeroBug.test.ts` (6 tester) fortsatt grønne — `ticket.price > 0`-path er bevart for legacy-clients uten lobbyTypes. Alle 36 TicketGridHtml-tester (4 test-filer) passerer.
+
+### ALDRI fjern lobby-types-prioritering når lobbyTypes kan matche
+
+Lobby-data fra `Game1LobbyService` er kanonisk pris-kilde for Spill 1. Server-side `ticket.price` regnes fra `getRoomConfiguredEntryFee × variant.priceMultiplier / ticketCount` — og begge faktorer kan være stale når in-memory state ikke er bound (cold-start, pre-master-start, dev:nuke). Hvis du fjerner lobby-prioritering, kommer 20-kr-bug-en tilbake.
+
+### Post-pilot defense-in-depth (anbefales, ikke pilot-blokker)
+
+Vurder å lazy-binde scheduled-game-config i `room:create`-handler ved å hente `Game1LobbyService.getLobbyState(hallId).nextGame.ticketPricesCents` og kalle `roomState.roomConfiguredEntryFeeByRoom.set(roomCode, smallestKr)` umiddelbart. Da blir server-pris også korrekt pre-runde, og klient-fallback blir ren dobbel-sikring i stedet for hoved-mekanisme.
 
 ## Payout-pipeline auto-multiplikator (PR #1417, REGULATORISK-KRITISK)
 

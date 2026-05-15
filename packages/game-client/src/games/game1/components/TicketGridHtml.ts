@@ -400,35 +400,48 @@ export class TicketGridHtml {
       }>;
     },
   ): number {
-    // Tobias-bug 2026-05-14: tidligere returnerte vi `ticket.price` rått
-    // hvis det var et tall — INKLUDERT 0. Backend `enrichTicketList` setter
-    // `t.price = (fee × multiplier) / ticketCount`, så hvis backend's
-    // `currentEntryFee` (line 420 i roomHelpers.ts) er 0 (typisk fra
-    // `entryFeeFromTicketConfig` field-name-mismatch før PR #<this>),
-    // får alle tickets `price = 0`. Det rant gjennom hele klient-pipen
-    // og endte med "0 kr" på hver bonge under aktiv trekning.
+    // Tobias-bug 2026-05-15 (pre-runde-pris-20-kr-bug):
     //
-    // Fix: server-pris brukes KUN hvis > 0. Ellers fallback til
-    // computed pris (lobbyTypes / state.ticketTypes + entryFee).
-    if (typeof ticket.price === "number" && ticket.price > 0) {
-      return Math.round(ticket.price);
-    }
-
-    // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): tidligere brukte
-    // vi state.ticketTypes (fra room:update.gameVariant) for å mappe
-    // ticket.type → priceMultiplier. Det feiler for Spill 1 i pilot fordi:
-    //   - room:update sender 8 legacy-typer (small_yellow, large_yellow, …)
-    //   - server-rendrede tickets har type "small"/"large" og color "white"
-    //     /"yellow"/"purple" (basert på spec.color + spec.size)
-    //   - find((x) => x.type === "small") returnerer FIRST match — som er
-    //     `small_yellow` — feil priceMultiplier
+    // Bug-symptom: spillere som kjøpte Small White + Yellow + Purple (5/10/15
+    // kr) FØR runden startet, så ALLE 3 bonger med pris "20 kr". Etter
+    // master-start → korrekt pris (5/10/15).
     //
-    // Fix: prioriter `opts.ticketTypes` (fra PlayScreen.lobbyTicketConfig,
-    // 6 rows med korrekte priceMultiplier 1/3/2/6/3/9). Match på
-    // (type, color) — fall tilbake til state.ticketTypes for legacy.
+    // Root cause: pre-runde har backend ingen scheduled-game bundet til
+    // rommet ennå — `onScheduledGameCreated`-hooken har ikke fyrt fordi
+    // master ikke har trykket "Start neste spill". Derfor:
+    //   - `roomConfiguredEntryFeeByRoom` er tom for rommet
+    //   - `getRoomConfiguredEntryFee` faller tilbake til
+    //     `runtimeBingoSettings.autoRoundEntryFee` (env AUTO_ROUND_ENTRY_FEE=20)
+    //   - `effectiveConfig` er DEFAULT_NORSK_BINGO_CONFIG der ALLE small_*
+    //     har flat `priceMultiplier=1, ticketCount=1`
+    //   - `enrichTicketList(list, 20)` setter `t.price = 20 × 1 / 1 = 20`
+    //     for ALLE tickets uavhengig av farge
+    //
+    // Bug-intermittens: etter første master-start binder hookene fee=5 +
+    // riktig per-farge variantConfig — disse PERSISTERER in-memory så
+    // neste runde i samme rom viser riktige priser. `dev:nuke` eller
+    // backend-crash → tilbake til 20-kr-bug for første runde.
+    //
+    // Fix-strategi: når `opts.ticketTypes` (lobbyTicketConfig fra plan-
+    // runtime catalog) finnes OG vi finner matching ticket-type via
+    // (color, type)-match, så ER lobby-data autoritativ — den kommer fra
+    // server's Game1LobbyService som leser direkte fra `app_game_catalog`
+    // (kanonisk pris-kilde per `SPILL_REGLER_OG_PAYOUT.md` §3). Server's
+    // `ticket.price` kan være stale (basert på default-variant før master
+    // har bundet scheduled-game-data) — vi prioriterer lobby-computed
+    // pris i den situasjonen.
+    //
+    // Fallback-rekkefølge:
+    //   1. lobbyTypes-match (autoritativ) → entryFee × multiplier / count
+    //   2. ticket.price > 0 (server-side enrichTicketList) → bruk direkte
+    //   3. state.ticketTypes-match (legacy room:update.gameVariant) →
+    //      entryFee × multiplier / count
+    //   4. fallback: entryFee × 1 / 1
+    //
+    // Hvorfor ikke bare bruke lobby alltid: tester (priceZeroBug §4)
+    // sender korrekt server-pris UTEN lobbyTypes som autoritativ kilde —
+    // den path-en må fortsatt fungere.
     const lobbyTypes = opts.ticketTypes;
-    let priceMultiplier = 1;
-    let ticketCount = 1;
     if (lobbyTypes && lobbyTypes.length > 0) {
       // Match by canonical name (eks: ticket.color "Large White" + type
       // "large" → vi leter etter ticketTypes-entry med samme combo). Pilot-
@@ -446,26 +459,43 @@ export class TicketGridHtml {
         return nameContainsColor && typeMatches;
       });
       if (found) {
-        priceMultiplier = found.priceMultiplier;
-        ticketCount = found.ticketCount;
+        // Lobby-types autoritativ — server's ticket.price ignoreres her
+        // selv om den er > 0, fordi lobby er kanonisk pris-kilde fra
+        // catalog. Beskytter mot stale ticket.price = 20 fra default-
+        // variant-fallback før master har bundet rommet.
+        //
+        //   Small White:  5 × 1 / 1 = 5 kr  ✓
+        //   Small Yellow: 5 × 2 / 1 = 10 kr ✓
+        //   Small Purple: 5 × 3 / 1 = 15 kr ✓
+        //   Large White:  5 × 3 / 3 = 5 kr per brett  ✓
+        const bundlePrice = opts.entryFee * found.priceMultiplier;
+        return Math.round(bundlePrice / Math.max(1, found.ticketCount));
       }
-    } else {
-      // Legacy fall-back: state.ticketTypes med type-only match.
-      const tt = opts.state.ticketTypes?.find((x) => x.type === ticket.type);
-      priceMultiplier = tt?.priceMultiplier ?? 1;
-      ticketCount = tt?.ticketCount ?? 1;
+      // Lobby-types finnes men matcher ikke denne ticket — kan skje for
+      // legacy-tickets uten color/type-data. Fall gjennom til ticket.price
+      // eller state.ticketTypes.
     }
+
+    // Tobias-bug 2026-05-14 (priceZeroBug §4): server-pris > 0 brukes
+    // direkte når lobby-types ikke ga noe match. Beskytter også mot
+    // backend-bug der ticket.price=0 lekker gjennom (priceZeroBug §3).
+    if (typeof ticket.price === "number" && ticket.price > 0) {
+      return Math.round(ticket.price);
+    }
+
+    // Legacy fall-back: state.ticketTypes med type-only match (8 legacy-
+    // typer fra room:update.gameVariant).
+    const tt = opts.state.ticketTypes?.find((x) => x.type === ticket.type);
+    const priceMultiplier = tt?.priceMultiplier ?? 1;
+    const ticketCount = Math.max(1, tt?.ticketCount ?? 1);
 
     // Per-brett pris (det som vises på hvert enkelt brett-kort), ikke
     // bundle-pris. `priceMultiplier` skalerer bundle-pris fra
     // base-entryFee. `ticketCount` er antall brett bundlen utgjør
     // (Small=1 brett, Large=3 brett). Deler vi bundle-pris på ticketCount
     // får vi pris per enkelt brett:
-    //   Small Yellow:  10 × 1 / 1 = 10 kr per brett ✅
-    //   Large Yellow:  10 × 6 / 3 = 20 kr per brett ✅
-    // Wait — det er feil. La oss verifisere:
-    //   Small Yellow: entryFee=5, mult=2, count=1 → 5×2/1 = 10 kr ✅
-    //   Large Yellow: entryFee=5, mult=6, count=3 → 5×6/3 = 10 kr ✅
+    //   Small Yellow:  entryFee=5, mult=2, count=1 → 5×2/1 = 10 kr ✅
+    //   Large Yellow:  entryFee=5, mult=6, count=3 → 5×6/3 = 10 kr ✅
     // Stor og Liten samme per-brett-pris — riktig per Tobias-spec.
     const bundlePrice = opts.entryFee * priceMultiplier;
     return Math.round(bundlePrice / ticketCount);

@@ -2991,3 +2991,55 @@ Verifisert via test:
 - IKKE merget — kun pushed til feature-branch + auto-merge etter CI
 
 **Tid:** ~30 min agent-arbeid
+
+---
+
+### 2026-05-15 — Pre-runde bong-pris 20 kr-bug (fix-agent, autonomous)
+
+**Agent-id:** `agent-a7357511121219f43` (general-purpose, worktree)
+**Branch:** `fix/bong-pris-pre-runde-bug-2026-05-15`
+**Type:** Bug-fix (P0 pilot-blokker)
+
+**Mandat (fra Tobias live-test 2026-05-15):**
+> "Etter at spilleren har kjøpt bonger (Small White, Small Yellow, Small Purple — én av hver) FØR runden starter, vises ALLE 3 bonger med pris '20 kr'. Etter at runden har startet → pris er riktig (5/10/15 kr). Bug har vært 'av og på' — den er intermittent og må roteareses ut nå."
+
+**Hva ble gjort:**
+- Reprodusert bugen via DB-query mot `app_game1_ticket_purchases` (priser i DB var 500/1000/1500 cents — DB var korrekt; problemet var display-laget)
+- Sporet root-cause til kombinasjonen: `AUTO_ROUND_ENTRY_FEE=20` i `apps/backend/.env:41` + DEFAULT_NORSK_BINGO_CONFIG-fallback for nybundet rom (alle small_* har `priceMultiplier=1`)
+- Fix på klient-side `computePrice` i `packages/game-client/src/games/game1/components/TicketGridHtml.ts`:
+  - Prioritet 1: `lobbyTypes.find((color, type) match)` → bruk `entryFee × multiplier / count` (lobby er autoritativ — leser direkte fra `app_game_catalog`)
+  - Prioritet 2 (fallback): `ticket.price > 0` → bruk server-pris direkte (bakover-kompat for legacy)
+  - Prioritet 3: `state.ticketTypes.find(type)` → bruk room-snapshot
+  - Prioritet 4: default `entryFee × 1 / 1`
+- 5 nye regression-tester i `TicketGridHtml.preRundePris20Bug.test.ts`:
+  - Pre-runde: lobby vinner over server-pris=20
+  - State-transition WAITING → RUNNING stabil
+  - Trafikklys-scenario (flat 15 kr)
+  - Lobby mangler → fallback til ticket.price
+  - Large-bong pre-runde (5×3/3 = 5 kr per brett)
+
+**Verifisering:**
+- 5 nye regression-tester grønne
+- Eksisterende `TicketGridHtml.priceZeroBug.test.ts` (6 tester) fortsatt grønne — `ticket.price > 0`-path bevart
+- Alle 36 TicketGridHtml-tester (4 test-filer) passerer
+- TypeScript strict-check grønn (`npx tsc --noEmit -p packages/game-client/tsconfig.json`)
+- 1 pre-existing failure (`posthogBootstrap.test.ts`) — verifisert som ikke relatert til min endring
+
+**Doc-protokoll (§2.19 IMMUTABLE):**
+- ✅ Skill: `.claude/skills/spill1-master-flow/SKILL.md` — ny seksjon "Pre-runde bong-pris: lobby-types autoritativ over server-pris" + bumped versjon 1.17.0 → 1.18.0
+- ✅ PITFALLS_LOG §7.27 — "Pre-runde bong-pris viser AUTO_ROUND_ENTRY_FEE × DEFAULT-variant"
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+
+**Lessons learned:**
+- `AUTO_ROUND_ENTRY_FEE=20` env-fallback + DEFAULT-variant fallback (flat multiplier=1) er TODELT problem — ikke fix kun det ene laget. Kombinasjonen gir 20×1/1=20 for alle bonger.
+- Display-bug uten wallet-impact: DB var korrekt (500/1000/1500 cents), BuyPopup viste korrekt, kun ticket-grid-display var feil. Pengene gikk riktig.
+- "Intermittent" bug-symptom = ofte cache-hit/miss-mønster. Etter første master-start populerer `roomConfiguredEntryFeeByRoom` Map-en in-memory. Neste runde i samme rom → cache hit → korrekt. `dev:nuke` wipe-er Map → bug treffer første runde igjen.
+- Klient-side defensive fix er additiv (lobby vinner OVER stale server-pris) uten å bryte legacy-clients. Lobby-data leses uansett for BuyPopup, så ingen ekstra fetch.
+- Worktree-rot: Edit-tool brukte absolutte paths som peker mot main-repoet IKKE worktree. Måtte manuelt kopiere ferdig-redigerte filer til worktree før commit + revertere main-endringene. Sannsynlig pitfall for fremtidige worktree-agenter — burde dokumenteres som anti-mønster.
+
+**Forbudt-rør (overholdt):**
+- IKKE merget — bare pushed til feature-branch (auto-merge-enable etter CI)
+- IKKE rørt backend `enrichTicketList` — klient-fix er sufficient og non-invasive
+- IKKE rørt `.env` — `AUTO_ROUND_ENTRY_FEE=20` er bevisst dev-konfig
+
+**Tid:** ~90 min agent-arbeid (inkl. root-cause-analyse + DB-query + worktree-håndtering)

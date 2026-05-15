@@ -2114,6 +2114,61 @@ preview-CSS OG prod-komponent (samme PR hvis mulig).
 **Anti-mønster:** Bruke `dev-overview.html` eller `visual-harness.html`
 for ren design-tweaking. Begge har Pixi-runtime og er tregere å rebuilde.
 Stand-alone HTML/CSS er raskere og isolerer designet fra runtime-bugs.
+### §7.27 — Pre-runde bong-pris viser AUTO_ROUND_ENTRY_FEE × DEFAULT-variant (BUG, FIXED 2026-05-15)
+
+**Severity:** P0 (pilot-blokker — alle 3 bonger viste samme 20 kr pre-runde)
+**Oppdaget:** 2026-05-15 (Tobias live-test: "Small White + Yellow + Purple bonger viser alle '20 kr' pre-runde, etter runde-start blir det riktig 5/10/15 kr")
+
+**Symptom:** Etter spilleren har kjøpt bonger (Small White 5 kr / Small Yellow 10 kr / Small Purple 15 kr — én av hver) FØR master starter runden, viser ALLE 3 bonger pris "20 kr" i pre-runde-grid. Etter master trykker Start endres prisen til riktig (5/10/15 kr). Bug var INTERMITTENT — etter første master-start i samme room-kode beholdt backend `roomConfiguredEntryFeeByRoom` korrekt verdi, så neste runde viste riktige priser. `dev:nuke` eller backend-restart wipe-et state og bug-en kom tilbake.
+
+**Root cause:** Pre-runde har ingen scheduled-game spawnet ennå (master har ikke trykket Start). Derfor er `roomState.roomConfiguredEntryFeeByRoom` tom for rom-koden, og `getRoomConfiguredEntryFee(roomCode)` faller tilbake til env-default `runtimeBingoSettings.autoRoundEntryFee` = `AUTO_ROUND_ENTRY_FEE=20` (per `apps/backend/.env:41`). Parallelt setter `bindVariantConfigForRoom(roomCode, { gameSlug: "bingo" })` (kalt fra `room:create`-handler i `apps/backend/src/sockets/gameEvents/roomEvents.ts:594-600`) DEFAULT_NORSK_BINGO_CONFIG (uten gameManagementId), som har flat `priceMultiplier=1, ticketCount=1` for ALLE small_* (`apps/backend/src/game/variantConfig.ts:514-538`). Server-side `enrichTicketList` (`apps/backend/src/util/roomHelpers.ts:458-509`) regner derfor `t.price = 20 × 1 / 1 = 20` for ALLE bonger uavhengig av farge. Klient-side `computePrice` (`packages/game-client/src/games/game1/components/TicketGridHtml.ts:413-415`) short-circuit-et tidligere på `ticket.price > 0` og returnerte server-prisen rått.
+
+**Hvorfor intermittent:** Etter master trykker "Start neste spill" trigges `onScheduledGameCreated`-hook (`apps/backend/src/index.ts:2794-2886`) som binder `roomConfiguredEntryFeeByRoom = 5` (billigste bong) + variantConfig med korrekte per-farge ticketTypes fra `ticket_config_json`. Disse persisterer in-memory så lenge backend-prosessen lever. Neste runde i samme rom-kode treffer cache → korrekte priser. `dev:nuke` / crash / cold-start wipe-er Map-en → bug treffer FØRSTE runde igjen.
+
+**Fix:** Klient-side `computePrice` i `TicketGridHtml.ts` prioriterer nå `lobbyTicketConfig.ticketTypes` (fra `Game1LobbyService` → catalog-data) OVER server-provided `ticket.price` når lobby kan matche `(color, type)`. Lobby-data er kanonisk pris-kilde fordi den leses direkte fra `app_game_catalog` via plan-runtime-aggregator (`GameLobbyAggregator`). Server's `ticket.price` brukes fortsatt som fallback når lobbyTypes mangler (legacy-klient eller fresh init-vindu pre-lobby-fetch).
+
+Den nye fallback-rekkefølgen:
+1. `lobbyTypes.find((color, type))` → bruk `entryFee × multiplier / count` (AUTORITATIV pre-runde)
+2. `ticket.price > 0` → bruk direkte (legacy server-pris-path)
+3. `state.ticketTypes.find(type)` → bruk `entryFee × multiplier / count`
+4. Default → `entryFee × 1 / 1`
+
+**Hvorfor klient-side over backend-side:**
+- `lobbyTicketConfig` er allerede tilgjengelig (via `Game1Controller.setBuyPopupTicketConfig` etter `lobbyStateBinding.getBuyPopupTicketConfig()`)
+- BuyPopup viser ALLEREDE korrekte priser via samme `entryFee × priceMultiplier`-formel, så dette aligner ticket-grid-prisene med BuyPopup
+- DB-rader (`app_game1_ticket_purchases.ticket_spec_json[].priceCentsEach`) var alltid korrekte (500/1000/1500 øre); kun display-laget var feil
+- Backend-fix krever endring i `room:create`-flyten for å lazy-binde scheduled-game-config FØR master har klikket Start (større arkitektur-endring; klient-fix er additiv defense-in-depth)
+- Wallet/regulatory binding er UPÅVIRKET — kun visning av bong-pris-label
+
+**Tester:**
+- `packages/game-client/src/games/game1/components/TicketGridHtml.preRundePris20Bug.test.ts` (5 nye regression-tester):
+  - Pre-runde: lobby-types VINNER over stale `ticket.price=20` fra backend default-variant
+  - State-transition WAITING → RUNNING: priser forblir stabile (5/10/15) på tvers av fasen
+  - Trafikklys-scenario: flat 15 kr per bong, ikke 20
+  - Lobby-types mangler: server's `ticket.price` brukes (bakover-kompat)
+  - Large-bong pre-runde: lobby gir korrekt per-brett-pris (5×3/3=5 kr per brett)
+- Eksisterende `TicketGridHtml.priceZeroBug.test.ts` (6 tester) fortsatt grønne — `ticket.price > 0`-path bevart for legacy-clients uten lobbyTypes
+- Alle 36 TicketGridHtml-tester (4 test-filer) passerer
+
+**Prevention:**
+- ALDRI stol blindt på server-provided `ticket.price` for display når lobby-data er tilgjengelig. Lobby-data fra `Game1LobbyService` er kanonisk pris-kilde for Spill 1 (leser fra `app_game_catalog` via plan-runtime). Server-side `enrichTicketList` regner pris fra `getRoomConfiguredEntryFee`, som er stale når in-memory state ikke er bound (cold-start, pre-master-start).
+- Hvis du legger til ny client-side pris-display: sjekk OM lobbyTicketConfig kan matche ticket → bruk lobby-data; fallback til server-pris er kun for legacy.
+- Backend-side defense-in-depth (post-pilot, ikke pilot-blokker): vurder å lazy-binde scheduled-game-config i `room:create`-handler ved å hente `Game1LobbyService.getLobbyState(hallId).nextGame.ticketPricesCents` og kalle `roomState.roomConfiguredEntryFeeByRoom.set(roomCode, smallestKr)` umiddelbart. Da blir server-pris også korrekt pre-runde.
+
+**Related:**
+- `packages/game-client/src/games/game1/components/TicketGridHtml.ts:390-486` (computePrice etter fix)
+- `packages/game-client/src/games/game1/components/TicketGridHtml.preRundePris20Bug.test.ts` (regression-suite)
+- `apps/backend/src/util/roomHelpers.ts:420-429` (currentEntryFee fallback til `runtimeBingoSettings.autoRoundEntryFee`)
+- `apps/backend/src/util/roomState.ts:304-307` (getRoomConfiguredEntryFee — fallback til env-default)
+- `apps/backend/src/index.ts:2700, 2807-2808` (roomConfiguredEntryFeeByRoom.set call-sites)
+- `apps/backend/.env:41` (`AUTO_ROUND_ENTRY_FEE=20`)
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts:594-600` (bindVariantConfigForRoom uten gameManagementId)
+- `apps/backend/src/game/variantConfig.ts:514-538` (DEFAULT_NORSK_BINGO_CONFIG — flat priceMultiplier=1 for small)
+- §7.21 (relatert: Bong-pris går til 0 kr ved game-start — speil-bug under aktiv runde)
+- §7.9 (relatert: state.ticketTypes overrider plan-runtime variantConfig — samme prioritets-mønster)
+
+---
+
 ### §7.26 — Lobby-broadcast manglet etter natural round-end (BUG, FIXED 2026-05-15)
 
 **Severity:** P0 (pilot-blokker — spiller-shell viste gammelt spill i opptil 2 minutter)
