@@ -77,6 +77,62 @@ export interface RoomVariantInfo {
   config: GameVariantConfig;
 }
 
+/**
+ * Bug-fix 2026-05-15 (iter 2): pre-round display tickets bundle assignment.
+ *
+ * Tar et array av `{color, type}` color-assignments fra
+ * `expandSelectionsToTicketColors` og returnerer per-index bundle-mapping
+ * for de slots som tilhører en Stor X-bundle (3 brett av samme farge).
+ *
+ * Heuristikk:
+ *   - 3 etterfølgende entries med `type === "large"` og samme `color` →
+ *     bundle. Hvert brett får `bundleIdx` (felles for de 3) og
+ *     `brettIdx` (1..3 i sekvens).
+ *   - Single small-tickets returnerer `null` (ingen bundle).
+ *   - Partial bundles (1-2 av 3 mottatt) returnerer `null` — frontend faller
+ *     tilbake til single-rendering.
+ *
+ * Returnerer en array med samme lengde som input — null-entries for
+ * single-slots og `{bundleIdx, brettIdx}` for bundle-slots.
+ *
+ * Matcher `expandSelectionsToTicketColors` i variantConfig.ts som sender
+ * 3 entries i rad per `large` bundle.
+ */
+function assignBundleIds(
+  colorAssignments?: Array<{ color: string; type: string }>,
+): Array<{ bundleIdx: number; brettIdx: number } | null> {
+  if (!colorAssignments || colorAssignments.length === 0) return [];
+  const result: Array<{ bundleIdx: number; brettIdx: number } | null> = new Array(
+    colorAssignments.length,
+  ).fill(null);
+  let bundleIdx = 0;
+  let i = 0;
+  while (i < colorAssignments.length) {
+    const a = colorAssignments[i];
+    if (a && a.type === "large" && i + 2 < colorAssignments.length) {
+      const b = colorAssignments[i + 1];
+      const c = colorAssignments[i + 2];
+      if (
+        b &&
+        c &&
+        b.type === "large" &&
+        c.type === "large" &&
+        b.color === a.color &&
+        c.color === a.color
+      ) {
+        result[i] = { bundleIdx, brettIdx: 1 };
+        result[i + 1] = { bundleIdx, brettIdx: 2 };
+        result[i + 2] = { bundleIdx, brettIdx: 3 };
+        bundleIdx += 1;
+        i += 3;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  return result;
+}
+
 export class RoomStateManager {
   readonly chatHistoryByRoom = new Map<string, ChatMessage[]>();
   readonly luckyNumbersByRoom = new Map<string, Map<string, number>>();
@@ -335,13 +391,32 @@ export class RoomStateManager {
     }
     // Format is decided by `generateTicketForGame` in ticket.ts — single source
     // of truth for all game slugs (Game 1 75-ball, Game 2 3×3, others 60-ball).
+    //
+    // Bug-fix 2026-05-15 (iter 2): pre-round display tickets må nå emitere
+    // `purchaseId` + `sequenceInPurchase` for Stor X-bundle (3 brett av samme
+    // farge) slik at frontend `TicketGridHtml.tryGroupTriplet` kan rendre dem
+    // som ÉN visuell triple-container (§5.9 IMMUTABLE).
+    //
+    // Heuristikk: når `colorAssignments` har 3 etterfølgende entries med
+    // type="large" og samme color, behandles de som ett bundle og deler
+    // synthetic purchaseId. Synthetic purchaseId-en er deterministisk basert
+    // på (roomCode, playerId, color, bundle-index) så cache-validation i
+    // `colorsMatch` ikke trigges ved re-emit.
+    //
+    // Single small-tickets får ingen purchaseId (single-rendering — uendret).
     const tickets: Ticket[] = [];
+    const bundles = assignBundleIds(colorAssignments);
     for (let i = 0; i < count; i++) {
       const base = { ...generateTicketForGame(gameSlug), id: `tkt-${i}` };
       const assignment = colorAssignments?.[i];
       if (assignment) {
         base.color = assignment.color;
         base.type = assignment.type;
+      }
+      const bundle = bundles[i];
+      if (bundle) {
+        base.purchaseId = `${roomCode}:${playerId}:bundle:${bundle.bundleIdx}`;
+        base.sequenceInPurchase = bundle.brettIdx;
       }
       tickets.push(base);
     }

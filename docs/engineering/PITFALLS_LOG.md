@@ -50,14 +50,14 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 24 | 2026-05-15 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 16 | 2026-05-13 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 97 entries (per 2026-05-15)
+**Total:** 98 entries (per 2026-05-15)
 
 ---
 
@@ -2590,6 +2590,69 @@ DOM-index   →  Visuell order
 
 ---
 
+### §7.30 — Triple-bong-rendering cross-color grouping bug (BUG, FIXED 2026-05-15 iter 2)
+
+**Severity:** P0 (pilot-blokker — visuell regresjon på master-flyt)
+**Oppdaget:** 2026-05-15 (Tobias-rapport — screenshot av "1 Stor hvit + 1 Stor gul + 1 Stor lilla" som rendret feilaktig)
+**PR-status:** PR #1500 (Bølge 2) introduserte purchaseId + sequenceInPurchase men hadde 3 lag med bugs som hindret triple-rendering i prod.
+
+**Symptom:**
+Når Tobias kjøpte 3 forskjellige farger Stor (1 hvit + 1 gul + 1 lilla, alle 3-brett-bunder), forventet ÅN visuell triple-container per farge (3× 5×5 grids + dividers, 660px bredde). Faktisk:
+- 3 separate single-cards merket "Hvit - 3 bonger" (proxy-header på single-design)
+- 6+ single-cards merket "Gul - 3 bonger" (dobbelt antall, ikke gruppert)
+- 0 Stor lilla (forsvant helt — siste assignment ble skrevet over)
+
+**Root cause — 3 lag av bugs:**
+
+**Bug A — Pre-runde mangler purchaseId** (`apps/backend/src/util/roomState.ts`):
+`getOrCreateDisplayTickets` genererte display-tickets med `id: tkt-${i}` og ingen `purchaseId`. Frontend-`tryGroupTriplet` så `purchaseId === undefined && undefined && undefined` (alle 3 var undefined) og grupperte tre tilfeldige large-bonger uavhengig av farge.
+
+**Bug B — Backend opprettet kun 1 row per spec** (`apps/backend/src/game/Game1ScheduledRoomSnapshot.ts`):
+`ensureAssignmentsForPurchases.for (let i = 0; i < spec.count; i += 1)` iterated `count` × ganger uavhengig av `spec.size`. For `{size: "large", count: 1}` ble det laget 1 assignment-row — selv om 1 Stor = 3 brett. Resultat: backend hadde 1 farge-assignment for 3 ticket-IDer, fyllte resten med fallback.
+
+**Bug C — Cross-color cart deler purchaseId** (samme service):
+Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_ticket_purchases`-row med 3 specs. Alle 9 brett (3 × 3) fikk samme `purchaseId`. Frontend så 9 brett med samme purchaseId og prøvde å group(0,1,2), (3,4,5), (6,7,8) — som blandet farger på tvers av triplets.
+
+**Fix — 3 lag løst sammen:**
+
+**Frontend (Lag 1):** `TicketGridHtml.tryGroupTriplet` (`packages/game-client/src/games/game1/components/TicketGridHtml.ts`):
+Lagt til `extractColorFamily(color)` helper som normaliserer fargenavn til familie (yellow/white/purple/etc). Modifisert grouping-heuristikken til å kreve ALLE 3 tickets:
+1. `type === "large"`
+2. samme `purchaseId`
+3. **samme color-family** (ny sjekk)
+
+Hvis fargen ikke matcher → returner null → rendrer 3 separate single-cards (ikke et trippel-design med blandet innhold).
+
+**Backend display-tickets (Lag 2):** `roomState.ts` `getOrCreateDisplayTickets`:
+Lagt til `assignBundleIds(colorAssignments)` helper som grupperer assignments etter `(color, type)` og emit syntetisk `purchaseId: "${roomCode}:${playerId}:bundle:${bundleIdx}"` + `sequenceInPurchase: brettIdx`. Pre-runde display-tickets får nå korrekt grouping-info og frontend kan gruppere dem korrekt.
+
+**Backend ticket-purchase (Lag 3):** `Game1ScheduledRoomSnapshot.ts` `ensureAssignmentsForPurchases`:
+Lagt til `const LARGE_TICKET_BRETT_COUNT = 3` og `const brettPerUnit = spec.size === "large" ? LARGE_TICKET_BRETT_COUNT : 1`. Loop'er nå `totalBrett = count × brettPerUnit` ganger så hver Stor får 3 assignment-rows med distinkte ticket-IDer.
+
+**Hvorfor klient-side color-validation var nødvendig som defense-in-depth:**
+Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-bug eller race-condition gjøre at to forskjellige farger får samme purchaseId. Frontend MÅ derfor sjekke color-family eksplisitt for å unngå visuell regresjon (blandede triplets).
+
+**Tests skrevet:**
+- `TicketGridHtml.tripleGrouping.test.ts` (NY, 6 tester) — Tobias' eksakte scenario (1H + 1G + 1L = 3 triplets), color-validation, purchaseId-validation, type-validation
+- `Game1ScheduledRoomSnapshot.test.ts` (+2 tester) — Stor X multipliserer til 3 brett, small holder seg 1 row
+- `roomState.displayTicketColors.test.ts` (+5 tester) — synthetic purchaseId-generering for pre-runde bundles
+
+**Prevention:**
+- ALDRI anta at `purchaseId` alene er nok for triple-grouping — fargen MÅ valideres
+- ALDRI iterer `for (let i = 0; i < spec.count; i++)` på Stor-bunder uten å multiplisere med `brettPerUnit`
+- Hvis du ser `id: tkt-${i}` i pre-runde-state UTEN purchaseId → bug (bridge-pre-runde mangler bundle-info)
+- Skriv test som matcher Tobias' eksakte rapport-scenario FØR fix shippes
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/TicketGridHtml.ts` (extractColorFamily + tryGroupTriplet)
+- `apps/backend/src/game/Game1ScheduledRoomSnapshot.ts` (LARGE_TICKET_BRETT_COUNT + brettPerUnit-loop)
+- `apps/backend/src/util/roomState.ts` (assignBundleIds + synthetic purchaseId)
+- 3 nye/utvidede test-filer
+
+**Related:** Skill `bong-design` v1.2.0, Iter 1 i §7.27 (pre-runde-pris-bug), Bølge 2 PR #1500
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review
@@ -3158,3 +3221,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-15 | Lagt til §7.21 — Master-header "Neste spill: {name}" for ALLE pre-running-states (Tobias-direktiv IMMUTABLE). To uavhengige bugs: (1) frontend mapping hadde "Klar til å starte" / "Runde ferdig" som mellom-tekster, fjernet — alle pre-running-states gir "Neste spill: {name}". (2) Backend aggregator returnerte `planMeta=null` når plan-run manglet → `catalogDisplayName=null` → header uten navn. Fix: ny `GamePlanRunService.findActivePlanForDay`-helper kalles av aggregator i idle-state. Frontend 41 tester (3 nye trip-wires); backend 26 tester (2 nye for catalogDisplayName uten plan-run). PR `fix/master-header-text-and-catalog-name-2026-05-15`. §7.20 oppdatert med peker. | Fix-agent (Tobias 2026-05-15 live-test) |
 | 2026-05-15 | Lagt til §7.26 — Lobby-broadcast manglet etter natural round-end (P0 pilot-blokker). 4 state-flipp-paths (Game1DrawEngineService.drawNext POST-commit, GamePlanRunService.finish/advanceToNext-past-end, GamePlanRunCleanupService.reconcileNaturalEnd) trigget IKKE socket-push til spiller-shell — klient måtte vente på 10s-poll. Fix: best-effort fire-and-forget broadcaster wired på alle 4 paths + frontend "Forbereder neste spill"-loader + 10s→3s poll reduction. 37 nye tester. | Fix-agent (lobby-broadcast on natural round-end) |
 | 2026-05-15 | Lagt til §7.27 — PauseOverlay vist feilaktig etter natural round-end (P0 pilot-blokker). Spill 1 auto-pauser etter hver phase-won (Tobias-direktiv 2026-04-27), og `paused`-flagget i `app_game1_game_state` resettes ikke alltid før status flippes til 'completed'. Snapshot speiler `paused` til klient-`isPaused`, så klient så `gameStatus=ENDED && isPaused=true` → PauseOverlay viste seg feilaktig. Fix: klient-side gate `state.isPaused && state.gameStatus === "RUNNING"` i `Game1Controller.onStateChanged`. Defense-in-depth selv om backend en gang i fremtiden rydder paused-flagget — gate-en er kontrakten med spillerne. Kanonisk spec: SPILL1_IMPLEMENTATION_STATUS §5.8. 11 pure-funksjons-tester i `Game1Controller.pauseOverlayGating.test.ts`. | Fix-agent (post-round-flyt §5.8) |
+| 2026-05-15 | Lagt til §7.30 — Triple-bong-rendering cross-color grouping bug (P0 pilot-blokker — visuell regresjon på master-flyt). PR #1500 (Bølge 2) introduserte purchaseId + sequenceInPurchase men hadde 3 lag med bugs: (A) pre-runde display-tickets manglet purchaseId helt → frontend grupperte tilfeldige tickets, (B) backend `ensureAssignmentsForPurchases` iterated `count` ganger uavhengig av `spec.size` så 1 Stor (= 3 brett) ble bare 1 row, (C) cross-color cart delte samme purchaseId så `tryGroupTriplet` grupperte forskjellige farger sammen. Fix: 3 lag løst — frontend color-family-validation, backend `LARGE_TICKET_BRETT_COUNT=3`-multiplier, og syntetisk bundle-id-generering i `getOrCreateDisplayTickets`. Tobias' eksakte scenario (1H+1G+1L Stor = 3 triplets) nå dekket av test. | Fix-agent (Tobias 2026-05-15 triple-rendering screenshot) |

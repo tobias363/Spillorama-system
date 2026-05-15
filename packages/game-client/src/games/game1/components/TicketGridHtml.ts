@@ -23,6 +23,38 @@ import { BingoTicketTripletHtml } from "./BingoTicketTripletHtml.js";
 type TicketEntry = BingoTicketHtml | BingoTicketTripletHtml;
 
 /**
+ * Normaliser ticket-color-string til familie-navn ("yellow"/"white"/"purple" etc).
+ * Brukes av {@link TicketGridHtml.tryGroupTriplet} for å validere at 3 large-
+ * bonger faktisk tilhører samme bundle (ikke ulike farger som tilfeldigvis
+ * deler purchaseId i en handlekurv-rad).
+ *
+ * Aksepterer:
+ *   - "Large Yellow" / "Small Yellow" → "yellow"
+ *   - "yellow" / "YELLOW" / "Yellow" → "yellow"
+ *   - "large_yellow" / "small_yellow" → "yellow"
+ *
+ * Returnerer null hvis ingen kjent farge-familie funnet — caller faller
+ * tilbake til single-rendering siden vi ikke kan trygt gruppere uten farge.
+ */
+function extractColorFamily(color: string | undefined): string | null {
+  if (!color) return null;
+  const lower = color.toLowerCase();
+  const families = [
+    "yellow",
+    "white",
+    "purple",
+    "green",
+    "red",
+    "orange",
+    "blue",
+  ];
+  for (const family of families) {
+    if (lower.includes(family)) return family;
+  }
+  return null;
+}
+
+/**
  * HTML grid scroller for Game 1 tickets. Replaces the Pixi TicketGridScroller
  * + TicketGroup pair. Uses native `overflow-y: auto` and CSS grid — the
  * platform handles wheel / touch / keyboard scrolling for free.
@@ -482,15 +514,28 @@ export class TicketGridHtml {
 
   /**
    * §5.9 IMMUTABLE 2026-05-15: forsøk å gruppere 3 etterfølgende tickets
-   * med samme `purchaseId` (sortert på `sequenceInPurchase`).
+   * av SAMME bundle (Stor X — 3 brett av samme farge).
    *
-   * Returnerer en tuple `[t1, t2, t3]` hvis alle 3 betingelser oppfylles:
-   * - `tickets[startIdx]` har `type="large"` og `purchaseId` satt
-   * - `tickets[startIdx+1]` og `tickets[startIdx+2]` finnes med SAMME purchaseId
+   * Returnerer en tuple `[t1, t2, t3]` hvis ALLE betingelser oppfylles:
+   * - Alle 3 har `type="large"`
+   * - Alle 3 har samme `purchaseId` (satt — null/undefined avvises)
+   * - Alle 3 har samme `color` (case-insensitiv, normalisert til familie)
    *
    * Ellers null (faller tilbake til single-rendering for hver). Vi sorterer
    * IKKE her — backend `Game1ScheduledRoomSnapshot.ts` sender allerede
    * sub-tickets i sequenceInPurchase-rekkefølge per purchase.
+   *
+   * **Bug-fix 2026-05-15 (iter 2):** Tidligere versjon sjekket KUN purchaseId
+   * (ikke type eller color). Det førte til cross-color-grupperinger som
+   * `[white-large, yellow-small, yellow-large]` når en handlekurv inneholdt
+   * blandet stor + liten av forskjellige farger med samme purchase-rad-ID.
+   * Bug rapportert av Tobias 2026-05-15 (med screenshot-bevis): 1 Stor hvit
+   * + 1 Stor gul + 1 Stor lilla viste 3 hvit-single + 6 gul-single + 0 lilla
+   * istedenfor 3 triple-containere.
+   *
+   * Color-extraction normaliserer "Large Yellow" / "large_yellow" / "yellow"
+   * til familie-navn "yellow". Tickets uten farge-info avvises (kan ikke
+   * trygt grupperes).
    */
   private tryGroupTriplet(
     tickets: Ticket[],
@@ -502,13 +547,22 @@ export class TicketGridHtml {
     if (firstType !== "large") return null;
     const purchaseId = first.purchaseId;
     if (!purchaseId) return null;
+    const firstColorFamily = extractColorFamily(first.color);
+    if (!firstColorFamily) return null;
     // Trenger 2 til etter `first`.
     if (startIdx + 2 >= tickets.length) return null;
     const second = tickets[startIdx + 1];
     const third = tickets[startIdx + 2];
     if (!second || !third) return null;
+    // ALLE 3 må være large.
+    if ((second.type ?? "").toLowerCase() !== "large") return null;
+    if ((third.type ?? "").toLowerCase() !== "large") return null;
+    // ALLE 3 må ha samme purchaseId.
     if (second.purchaseId !== purchaseId) return null;
     if (third.purchaseId !== purchaseId) return null;
+    // ALLE 3 må ha samme color (familie-normalisert).
+    if (extractColorFamily(second.color) !== firstColorFamily) return null;
+    if (extractColorFamily(third.color) !== firstColorFamily) return null;
     return [first, second, third];
   }
 

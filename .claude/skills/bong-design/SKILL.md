@@ -109,14 +109,52 @@ Stor X (Large) er en 3-brett-bundle. Tobias-direktiv 2026-05-15: hver Large-bong
 
 ### Når kicker triple-rendering inn?
 
-`TicketGridHtml.rebuild()` grupperer 3 etterfølgende tickets hvis:
-1. Første ticket har `type === "large"`
-2. Første ticket har `purchaseId` satt (ikke undefined/tom)
-3. Neste 2 tickets i listen har SAMME `purchaseId`
+`TicketGridHtml.rebuild()` grupperer 3 etterfølgende tickets hvis ALLE
+betingelser oppfylles (oppdatert iterasjon 2 — 2026-05-15):
+
+1. ALLE 3 har `type === "large"`
+2. ALLE 3 har samme `purchaseId` (satt — null/undefined avvises)
+3. ALLE 3 har samme `color` (normalisert til familie via `extractColorFamily`)
 
 Hvis betingelsene oppfylles → render som `BingoTicketTripletHtml`. Ellers → fall tilbake til 3 single-bonger.
 
 **Partial-purchase fallback:** Hvis backend sender 1-2 av 3 sub-tickets for en purchase (eks. en sub-ticket har blitt slettet), faller rendringen tilbake til single for de tickets som ikke kan grupperes. Per 2026-05-15 sender backend altid alle 3 atomisk (purchase er én transaksjon).
+
+### Bug-fix 2026-05-15 (iter 2) — KRITISK regresjon-historie
+
+PR #1500 (Bølge 2) introduserte triple-grupperings-funksjonalitet, men
+opprinnelig `tryGroupTriplet` sjekket KUN `purchaseId` — IKKE `type` eller
+`color`. Det førte til cross-color-grupperinger i handlekurv-scenarier:
+
+**Bug-symptom (Tobias-rapport 2026-05-15):**
+- Kjøpte 1 Stor hvit + 1 Stor gul + 1 Stor lilla
+- Så 3 hvit-single + 6 gul-single + 0 lilla istedenfor 3 triple-containere
+
+**Root cause:** Backend bruker ÉN `app_game1_ticket_purchases.id` per handlekurv
+(ikke per stor-bundle). Alle bonger i samme handlekurv (small + large av
+forskjellige farger) delte SAMME `purchaseId`. Frontend grupperte de første
+3 tickets med matching purchaseId uavhengig av farge/størrelse.
+
+**Fix:** Tre lag:
+
+1. **Frontend (`TicketGridHtml.tryGroupTriplet`):** Krever nå at ALLE 3 har
+   `type === "large"`, samme `purchaseId` OG samme color-familie. Cross-
+   color-grupperinger avvises automatisk.
+
+2. **Backend (`ensureAssignmentsForPurchases`):** Multipliserer rader for
+   `size === "large"` med `LARGE_TICKET_BRETT_COUNT = 3`. Tidligere genererte
+   bare 1 rad per Stor-bong → frontend hadde aldri 3 rader å gruppere.
+
+3. **Pre-round (`getOrCreateDisplayTickets`):** Genererer synthetic
+   `purchaseId` (`${roomCode}:${playerId}:bundle:${idx}`) + `sequenceInPurchase`
+   1..3 når 3 etterfølgende `colorAssignments`-entries har `type=large`
+   og samme color. Pre-round-bonger som tidligere hadde ingen purchaseId
+   kan nå rendres som triple-containere.
+
+**Test-coverage:**
+- `TicketGridHtml.tripleGrouping.test.ts` (6 tests, frontend)
+- `Game1ScheduledRoomSnapshot.test.ts` (2 nye tester, backend)
+- `roomState.displayTicketColors.test.ts` (5 nye tester, pre-round)
 
 ### Backend → frontend wire-format
 
@@ -224,3 +262,4 @@ Test-update planlegges separat når Tobias gir grønt lys.
 |---|---|
 | 2026-05-15 | Initial v1.0.0 — §5.9 prod-implementasjon i `BingoTicketHtml.ts`. Spec-iterasjon ble gjort på `bong-design.html` mockup; denne skill-en dokumenterer prod-state. Skopet er Spill 1 + Spill 3 (begge bruker `BingoTicketHtml`); Spill 2 (`BongCard.ts`) er uberørt. |
 | 2026-05-15 | v1.1.0 — Bølge 2 triple-bong group-rendering. Ny `BingoTicketTripletHtml` wrapper-klasse + `TicketGridHtml` purchase-grouping-logikk. `Ticket`-interface utvidet med `purchaseId` + `sequenceInPurchase` i både shared-types og backend. `Game1ScheduledRoomSnapshot` propagerer disse fra `app_game1_ticket_assignments`. CSS-overrides skjuler sub-bongers individuelle header. Backend sender altid sub-tickets i sequence-rekkefølge per purchase. Partial-purchase faller tilbake til single-rendering. |
+| 2026-05-15 | v1.2.0 (iter 2) — KRITISK fix av triple-rendering. PR #1500 hadde `tryGroupTriplet` som sjekket KUN `purchaseId`, ikke `type`/`color`. Førte til cross-color-grupperinger og 0 visuell triple-effekt i prod (Tobias-rapport med screenshot 2026-05-15). Tre-lag fix: (1) frontend `tryGroupTriplet` krever nå same-color + same-type=large, (2) backend `ensureAssignmentsForPurchases` multipliserer Stor X med 3 brett, (3) pre-round `getOrCreateDisplayTickets` emitter synthetic purchaseId for 3 brett av samme farge. Test-coverage: 13 nye tester på tvers av 3 test-filer. |

@@ -3767,6 +3767,54 @@ HUD-en og event-log-panelet gates.
 **Doc-protokoll (§2.19):**
 - ✅ Skill `buy-popup-design`: Iterasjon 2-seksjon m/ pixel-spec-tabell og endringslogg
 - ✅ PITFALLS_LOG §7.30: test-locked DOM-indices fallgruve dokumentert
+## 2026-05-15 — Fix-agent: Triple-bong-rendering broken etter PR #1500 (Bølge 2)
+
+**Trigger:** Tobias-rapport 2026-05-15 — screenshot viste at "1 Stor hvit + 1 Stor gul + 1 Stor lilla" rendret feilaktig (3 separate single-cards med "Hvit - 3 bonger"-proxy-header + 6+ single-cards med "Gul - 3 bonger" + 0 Stor lilla forsvunnet helt).
+
+**Forventet:** 3 visuelle triple-containers (én per farge), hver 660px med 3 sub-grids + dividers — slik som mockup-en i `bong-design.html`.
+
+**Scope:** Diagnose root cause + 3-layer fix + tests + skill-doc-protokoll-update.
+
+**Diagnose (DB-query):**
+Brukte `psql` mot lokal Postgres for å inspisere `app_game1_ticket_assignments` + `app_game1_ticket_purchases`. Fant purchase `g1p-1uv7q32-17kghxd-01lb` med 6 mixed-color/size rows, alle med samme `purchase_id`. `ticket_spec_json` viste `{size: "small", color: "white", count: 1}` + large variants. Dette bekreftet to bugs i bridge-laget.
+
+**Root cause — 3 lag:**
+
+**Bug A — Pre-runde mangler purchaseId:**
+`getOrCreateDisplayTickets` i `apps/backend/src/util/roomState.ts` genererte display-tickets uten `purchaseId` (kun `id: tkt-${i}`). Frontend-`tryGroupTriplet` så `undefined && undefined && undefined` → true → grupperte tre tilfeldige large-bonger uavhengig av farge.
+
+**Bug B — Backend opprettet kun 1 row per spec.count:**
+`apps/backend/src/game/Game1ScheduledRoomSnapshot.ts.ensureAssignmentsForPurchases` iterated `for (let i = 0; i < spec.count; i += 1)` uavhengig av `spec.size`. For `{size: "large", count: 1}` ble det 1 assignment-row — selv om 1 Stor = 3 brett. Resultat: backend hadde 1 farge-assignment for 3 ticket-IDer, fyllte resten med fallback.
+
+**Bug C — Cross-color cart deler purchaseId:**
+Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_ticket_purchases`-row med 3 specs. Alle 9 brett (3 × 3) fikk samme `purchaseId`. Frontend så 9 brett med samme purchaseId og prøvde å group(0,1,2), (3,4,5), (6,7,8) — som blandet farger på tvers av triplets.
+
+**Fix — 3 lag løst sammen:**
+
+1. **Frontend color-validation** (`packages/game-client/src/games/game1/components/TicketGridHtml.ts`):
+   - Lagt til `extractColorFamily(color)` helper som normaliserer fargenavn til familie (yellow/white/purple/green/red/orange/blue)
+   - Modifisert `tryGroupTriplet` til å kreve ALLE 3 tickets: `type="large"` AND samme `purchaseId` AND samme color-family
+   - Hvis fargen ikke matcher → returner null → rendrer 3 separate single-cards
+
+2. **Backend Stor-multiplisering** (`apps/backend/src/game/Game1ScheduledRoomSnapshot.ts`):
+   - Lagt til `const LARGE_TICKET_BRETT_COUNT = 3`
+   - `const brettPerUnit = spec.size === "large" ? LARGE_TICKET_BRETT_COUNT : 1`
+   - Loop'er nå `totalBrett = count × brettPerUnit` ganger — hver Stor får 3 assignment-rows
+
+3. **Backend pre-runde bundles** (`apps/backend/src/util/roomState.ts`):
+   - Lagt til `assignBundleIds(colorAssignments)` helper som grupperer assignments etter `(color, type)` og emit syntetisk `purchaseId: "${roomCode}:${playerId}:bundle:${bundleIdx}"` + `sequenceInPurchase: brettIdx`
+   - Pre-runde display-tickets får nå korrekt grouping-info
+
+**Verifikasjon:**
+- 6 nye frontend-tester (`TicketGridHtml.tripleGrouping.test.ts`) — Tobias' eksakte scenario + edge-cases
+- 2 nye backend-snapshot-tester (`Game1ScheduledRoomSnapshot.test.ts`) — Stor X = 3 brett, small = 1 row
+- 5 nye backend-roomState-tester (`roomState.displayTicketColors.test.ts`) — synthetic purchaseId-generering for pre-runde bundles
+- Alle nye tester passerer
+- Pre-eksisterende `TicketGridHtml.test.ts` og `largeMultiplicity.test.ts` har failures som er IKKE-relaterte (verifisert via stash-and-rerun)
+
+**Doc-protokoll (§2.19):**
+- ✅ Skill: `.claude/skills/bong-design/SKILL.md` v1.2.0 — utvidet med iter 2 root-cause + 3-layer fix
+- ✅ PITFALLS_LOG §7.30 — full root-cause + fix + prevention + indeks-counts oppdatert (§7: 24→25, total: 97→98)
 - ✅ AGENT_EXECUTION_LOG (denne entry)
 
 **Lessons learned:**
@@ -3789,3 +3837,23 @@ HUD-en og event-log-panelet gates.
 
 **Branch:** `feat/buy-popup-pixel-perfect-iter2-2026-05-15`
 **Tid:** ~60 min agent-arbeid
+- **Bridge mellom backend og frontend må valideres på BEGGE sider.** PR #1500 introduserte `purchaseId` + `sequenceInPurchase` i wire-format, men frontend antok at backend alltid populerte dem korrekt. Defense-in-depth (frontend color-validation) gir robusthet mot future-bugs eller race-conditions.
+- **Bundle semantikk ≠ count semantikk.** Hvis en ticket-spec har `{size: "large", count: 1}`, betyr det 1 unit (Stor) som = 3 brett. Backend må multiplisere `count × brettPerUnit` for å få faktisk antall ticket-IDer. Antakelse om at `count` direkte mapper til antall rows er feilkilde 1.
+- **Pre-runde state må ha samme grouping-info som post-purchase state.** Hvis pre-runde-tickets mangler purchaseId, brytes grupperings-heuristikken på frontend. Synthetic bundle-IDs (`${roomCode}:${playerId}:bundle:${idx}`) er en lavinvasiv løsning.
+- **DB-queries er gull verdt for diagnose.** Lese `app_game1_ticket_assignments` + `app_game1_ticket_purchases` med `psql` viste presist hva backend faktisk hadde lagret. Uten det ville jeg gjettet — med det fant jeg 2 separate bugs på 5 minutter.
+- **Test som matcher Tobias' eksakte rapport-scenario er kritisk.** Den første testen jeg skrev var Tobias' eksakte scenario (1H + 1G + 1L Stor = 3 triplets). Den trigget alle 3 bugs samtidig og gjorde det tydelig hva fixen skulle dekke.
+
+**Worktree-mixup (lesson learned for prosess):**
+- Mine første Edit-tool-kall gikk til `/Users/tobiashaugen/Projects/Spillorama-system/` (main repo) istedenfor `/.claude/worktrees/agent-a889ee536f46ff71b/` (worktree).
+- Fix: `git diff > /tmp/triple-fix.patch` + kopier ny test-fil til /tmp → `git stash push -u` i main repo → `git apply` patch i worktree → drop stash.
+- Forebyggende: ALLTID `cd <worktree-path> && pwd` som første kommando i hver worktree-sesjon for å bekrefte at man er i riktig directory.
+
+**Forbudt-rør (overholdt):**
+- IKKE rørt wallet-paths eller ledger-skriving (ren UI/snapshot-grouping)
+- IKKE rørt Spill 2/3-rendering (Spill 3 har egen 3×3-design som ikke skal påvirkes)
+- IKKE endret BONG_COLORS-palett (eksisterende hex-koder beholdt)
+- IKKE oppdatert pre-eksisterende tester (`TicketGridHtml.test.ts`/`.largeMultiplicity.test.ts`) — Tobias-direktiv: vent med test-update
+
+**Branch:** `fix/triple-bong-rendering-broken-2026-05-15`
+**Filer endret:** 5 modified (2 frontend, 2 backend, 1 skill) + 1 nytt test-file + 2 PITFALLS/AGENT-LOG docs
+**Tid:** ~90 min agent-arbeid (inkl. diagnose, fix, tests, worktree-mixup-recovery, doc-update)
