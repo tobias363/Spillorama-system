@@ -231,6 +231,18 @@ function makeAssignmentGrid(size: "small" | "large", color: string): Array<numbe
   return generateBingo75Ticket(ticketDisplayColor(size, color), size).grid.flat();
 }
 
+/**
+ * Antall brett per Stor X-bong. 1 Stor bong = 3 brett per §SPILL_REGLER §2.
+ * Matcher `LARGE_TICKET_PRICE_MULTIPLIER = 3` i `GamePlanEngineBridge.ts`
+ * og `ticketCount: 3` i variant-config for `large`-typer.
+ *
+ * Bug-fix 2026-05-15 (iter 2): tidligere genererte `ensureAssignmentsForPurchases`
+ * kun 1 rad per `spec.count` uavhengig av størrelse — så 1 Stor White-kjøp
+ * ga 1 brett i DB istedenfor 3. Triple-grupperingen i frontend kunne aldri
+ * matche fordi det fysisk ikke fantes 3 brett å gruppere.
+ */
+const LARGE_TICKET_BRETT_COUNT = 3;
+
 async function ensureAssignmentsForPurchases(
   deps: EnrichDeps,
   schema: string,
@@ -242,7 +254,10 @@ async function ensureAssignmentsForPurchases(
   for (const purchase of purchases) {
     let sequence = 1;
     for (const spec of parseTicketSpec(purchase.ticket_spec_json)) {
-      for (let i = 0; i < spec.count; i += 1) {
+      // 1 stor bong = 3 brett (bundle-expansion). 1 liten = 1 brett.
+      const brettPerUnit = spec.size === "large" ? LARGE_TICKET_BRETT_COUNT : 1;
+      const totalBrett = spec.count * brettPerUnit;
+      for (let i = 0; i < totalBrett; i += 1) {
         const grid = makeAssignmentGrid(spec.size, spec.color);
         const markings = { marked: grid.map((cell) => cell === 0) };
         await deps.pool.query(

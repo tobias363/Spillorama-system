@@ -283,6 +283,177 @@ test("enrichScheduledGame1RoomSnapshot resolves entryFee fra legacy priceCentsEa
   assert.equal(enriched.currentGame?.entryFee, 5);
 });
 
+test("ensureAssignmentsForPurchases multipliserer Stor X med 3 brett (Bug-fix 2026-05-15 iter 2)", async () => {
+  // Bug-fix 2026-05-15 (iter 2): tidligere genererte enricher 1 rad per
+  // spec.count uavhengig av size. 1 stor bong = 3 brett per §SPILL_REGLER §2,
+  // så 1 Stor White-kjøp skal generere 3 rader i app_game1_ticket_assignments.
+  // Frontend triple-grupperingen krever 3 fysiske brett for å vises som
+  // ÉN visuell triple-container.
+  const insertedRows: Array<{
+    purchase_id: string;
+    sequence_in_purchase: number;
+    ticket_color: string;
+    ticket_size: string;
+  }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      if (sql.includes("app_game1_scheduled_games") && sql.includes("SELECT")) {
+        return {
+          rows: [
+            {
+              id: "sg-large",
+              status: "ready_to_start",
+              ticket_config_json: { ticketTypesData: [{ pricePerTicket: 500 }] },
+              actual_start_time: null,
+              actual_end_time: null,
+              pause_reason: null,
+              draw_bag_json: null,
+              draws_completed: null,
+              paused: null,
+              engine_started_at: null,
+              engine_ended_at: null,
+            },
+          ],
+        };
+      }
+      if (sql.includes("app_game1_ticket_purchases")) {
+        // Handlekurv: 1 Stor White + 1 Stor Yellow + 1 Stor Purple
+        return {
+          rows: [
+            {
+              id: "purchase-mixed-large",
+              player_id: "wallet-1",
+              buyer_user_id: "user-1",
+              hall_id: "hall-default",
+              ticket_spec_json: [
+                { color: "white", size: "large", count: 1 },
+                { color: "yellow", size: "large", count: 1 },
+                { color: "purple", size: "large", count: 1 },
+              ],
+              total_amount_cents: 9000,
+            },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO") && sql.includes("ticket_assignments")) {
+        // Capture inserted row params for verification
+        insertedRows.push({
+          purchase_id: params[2] as string,
+          sequence_in_purchase: params[8] as number,
+          ticket_color: params[5] as string,
+          ticket_size: params[6] as string,
+        });
+        return { rows: [] };
+      }
+      if (sql.includes("app_game1_draws")) return { rows: [] };
+      // SELECT FROM ticket_assignments — return empty (snapshot won't have them)
+      return { rows: [] };
+    },
+  };
+
+  await enrichScheduledGame1RoomSnapshot(baseSnapshot, {
+    pool: pool as never,
+  });
+
+  // 3 Stor-kjøp × 3 brett per stor = 9 INSERT-rader totalt
+  assert.equal(
+    insertedRows.length,
+    9,
+    `Forventet 9 rader (3 stor × 3 brett), fikk ${insertedRows.length}`,
+  );
+
+  // Sjekk farge-fordeling: 3 white + 3 yellow + 3 purple
+  const whiteCount = insertedRows.filter((r) => r.ticket_color === "white").length;
+  const yellowCount = insertedRows.filter((r) => r.ticket_color === "yellow").length;
+  const purpleCount = insertedRows.filter((r) => r.ticket_color === "purple").length;
+  assert.equal(whiteCount, 3, "3 brett av Stor White");
+  assert.equal(yellowCount, 3, "3 brett av Stor Yellow");
+  assert.equal(purpleCount, 3, "3 brett av Stor Purple");
+
+  // Alle skal være ticket_size = "large"
+  for (const row of insertedRows) {
+    assert.equal(row.ticket_size, "large");
+  }
+
+  // Sjekk sekvens-numrene: 1-9, alle unike
+  const sequences = insertedRows.map((r) => r.sequence_in_purchase).sort((a, b) => a - b);
+  assert.deepEqual(sequences, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+  // Alle skal dele samme purchaseId (handlekurv = ÉN purchase-rad)
+  for (const row of insertedRows) {
+    assert.equal(row.purchase_id, "purchase-mixed-large");
+  }
+});
+
+test("ensureAssignmentsForPurchases liten X gir 1 rad per count (small ikke multiplisert)", async () => {
+  // Liten X = 1 brett. spec.count=2 (kjøp 2 stk Liten Yellow) skal gi 2 rader.
+  // Bug-fix 2026-05-15 (iter 2): regresjon-sjekk så small ikke regredieres.
+  const insertedRows: Array<{
+    sequence_in_purchase: number;
+    ticket_size: string;
+  }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      if (sql.includes("app_game1_scheduled_games") && sql.includes("SELECT")) {
+        return {
+          rows: [
+            {
+              id: "sg-small",
+              status: "ready_to_start",
+              ticket_config_json: { ticketTypesData: [{ pricePerTicket: 500 }] },
+              actual_start_time: null,
+              actual_end_time: null,
+              pause_reason: null,
+              draw_bag_json: null,
+              draws_completed: null,
+              paused: null,
+              engine_started_at: null,
+              engine_ended_at: null,
+            },
+          ],
+        };
+      }
+      if (sql.includes("app_game1_ticket_purchases")) {
+        return {
+          rows: [
+            {
+              id: "purchase-small",
+              player_id: "wallet-1",
+              buyer_user_id: "user-1",
+              hall_id: "hall-default",
+              ticket_spec_json: [{ color: "yellow", size: "small", count: 2 }],
+              total_amount_cents: 2000,
+            },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO") && sql.includes("ticket_assignments")) {
+        insertedRows.push({
+          sequence_in_purchase: params[8] as number,
+          ticket_size: params[6] as string,
+        });
+        return { rows: [] };
+      }
+      if (sql.includes("app_game1_draws")) return { rows: [] };
+      return { rows: [] };
+    },
+  };
+
+  await enrichScheduledGame1RoomSnapshot(baseSnapshot, {
+    pool: pool as never,
+  });
+
+  // spec.count=2 × 1 brett per Liten = 2 rader
+  assert.equal(insertedRows.length, 2, "Liten X: 2 rader for count=2");
+  for (const row of insertedRows) {
+    assert.equal(row.ticket_size, "small");
+  }
+  assert.deepEqual(
+    insertedRows.map((r) => r.sequence_in_purchase).sort((a, b) => a - b),
+    [1, 2],
+  );
+});
+
 test("enrichScheduledGame1RoomSnapshot returnerer 0 hvis ingen pris-felt finnes (defensive)", async () => {
   const pool = {
     query: async (sql: string) => {
