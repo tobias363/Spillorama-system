@@ -3587,3 +3587,107 @@ Hvorfor faste timere ikke fungerer: backend-advance varierer 50ms → 40s+ avhen
 - IKKE endret `PlayScreen.setNextScheduledGameSlug` (preserved parallel — overlay og PlayScreen lytter begge på samme slug)
 
 **Tid:** ~75 min agent-arbeid
+
+---
+
+## 2026-05-15 — Debug-HUD + event-log skjult som default (Tobias 2026-05-15)
+
+**Trigger:** Tobias-direktiv 2026-05-15 etter screenshot som viste
+`🐛 SPILL1 DEBUG-HUD` (top-right) og `📋 EVENT-LOG` (top-left) synlig
+på en standard spillerklient:
+
+> "Kan du også fjerne alle de debug feltnee? du får alt av data tilgjengelgi
+> så trenger ikke disse. da får jeg også full spillopplevelse"
+
+**Scope:** Permanent gjemme debug-overlay-er i spillerklient-bundle.
+EventTracker (Sentry-breadcrumbs) holdes alltid aktiv — kun den visuelle
+HUD-en og event-log-panelet gates.
+
+**Hva ble endret:**
+
+- `packages/game-client/src/games/game1/Game1Controller.ts`:
+  - `isDebugHudEnabled()` — krever nå eksplisitt `?debug=full` URL-param.
+    Fjernet støtte for `?debug=1`, `?debug=true`, og localStorage
+    `DEBUG_SPILL1_DRAWS=true` som triggers.
+  - Ny privat `cleanupLegacyDebugFlag()` — rydder opp legacy localStorage-
+    flagg ved hver `start()`. Idempotent fail-soft.
+  - Kalt fra `start()` umiddelbart etter `app.stage.addChild(this.root)`.
+  - Comment-blokker rundt `mountDebugHud()`-call-site og `debugEventPanel`/
+    `debugEventStreamer`-feltene oppdatert til å reflektere ny gate-strategi.
+- `packages/game-client/src/games/game1/debug/DebugEventLogPanel.ts`:
+  - Header-doc oppdatert: `?debug=full` only (Tobias-direktiv 2026-05-15)
+- `packages/game-client/src/games/game1/debug/ConsoleBridge.ts`:
+  - Gate i `installConsoleBridge()` — kun `?debug=full`, fjernet localStorage-fallback
+  - Defense-in-depth — kalles uansett kun fra `mountDebugHud` som har samme gate
+- `packages/game-client/src/games/game1/debug/FetchInstrument.ts`:
+  - Gate i `installFetchInstrument()` — kun `?debug=full`
+- `packages/game-client/src/games/game1/debug/FetchBridge.ts`:
+  - Gate i `isEnabled()` — kun `?debug=full`
+- `packages/game-client/src/games/game1/debug/ErrorHandler.ts`:
+  - Gate i `installErrorHandler()` — kun `?debug=full`
+- `packages/game-client/src/games/game1/debug/__tests__/ErrorHandler.test.ts`:
+  - URL byttet fra `?debug=1` til `?debug=full`
+- `packages/game-client/src/games/game1/debug/__tests__/FetchInstrument.test.ts`:
+  - URL byttet fra `?debug=1` til `?debug=full`
+- `.claude/skills/debug-hud-gating/SKILL.md` (ny skill):
+  - Triggers, hvordan aktivere, hvorfor opt-in via URL, anti-mønstre,
+    verifikasjon, hvilke filer som påvirkes
+- `docs/engineering/PITFALLS_LOG.md` §7.29 (ny entry):
+  - Root-cause: localStorage-flagg lekte til prod-brukere
+  - Fix: URL-only gate + auto-cleanup ved start
+  - Prevention: aldri legg til localStorage-trigger for HUD
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Backward-compat:**
+
+- EventTracker singleton fortsatt alltid aktiv (Sentry-breadcrumbs uavhengig av HUD)
+- `installDebugSuite` (OBS-2 / rrweb-recorder + state-dump) IKKE rørt —
+  separat debug-system med egen `?debug=1`-aktivering via `debug/activation.ts`
+- Sentry-bootstrap (`telemetry/Sentry.ts`) uavhengig — bygger på `VITE_SENTRY_DSN`
+- `installConsoleBridge` etc. har defense-in-depth-gate, men kalles uansett
+  kun fra mountDebugHud som har samme gate
+
+**Verifikasjon:**
+
+- `npm --prefix packages/game-client run check` — TS strict PASS
+- `npm --prefix packages/game-client run build` — Vite build PASS
+- `npm --prefix packages/game-client vitest run debug/__tests__/` —
+  79 grønne tester (FetchInstrument 18, ErrorHandler 4, EventTracker 30,
+  EventStreamer 21, SocketEmitInstrument 6)
+- 10 pre-eksisterende failures i `TicketGridHtml.test.ts` (ikke relatert
+  til debug-HUD — verifisert ved å stash → kjøre → samme failures uten
+  mine endringer)
+
+**Doc-protokoll (§2.19):**
+- ✅ Skill: `.claude/skills/debug-hud-gating/SKILL.md` (ny) — initial v1
+- ✅ PITFALLS_LOG §7.29 — full root-cause + fix + prevention
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+
+**Lessons learned:**
+
+- **LocalStorage-flagg lekker mellom brukere.** Hvis QA setter et debug-
+  flagg på en delt test-maskin, fortsetter alle senere brukere å se HUD-en
+  permanent. URL-bound triggers (sesjons-flyktige) er tryggere.
+- **`?debug=1` er for kort til å være eksplisitt opt-in.** Mange URL-loggere
+  og analyse-verktøy bruker korte query-params; en bruker kan skrive
+  `?debug=1` uten å vite det. `?debug=full` er stringent nok til at det
+  krever bevisst opt-in.
+- **Defense-in-depth selv når caller alltid gates.** Selv om `installXxx`-
+  funksjonene KUN kalles fra `mountDebugHud` (som har den primære gaten),
+  beholder hver funksjon sin egen interne sjekk. Det betyr at hvis noen i
+  fremtiden kaller installeren direkte fra et test- eller dev-utility,
+  gates det fortsatt på `?debug=full`.
+- **EventTracker som singleton uavhengig av HUD er kritisk.** Sentry-
+  breadcrumbs må fungere selv om operatøren ikke har åpnet debug-overlay.
+  Trackeren er "alltid på, alltid stille"; kun visning av eventene gates.
+
+**Forbudt-rør (overholdt):**
+- IKKE rørt `installDebugSuite` (OBS-2 rrweb-recorder + state-dump) — separat system
+- IKKE rørt Sentry-bootstrap eller `telemetry/Sentry.ts`
+- IKKE rørt `BingoEngine`/wallet-paths (ren UI/debug-gating)
+- IKKE fjernet `installConsoleBridge`/`installFetchInstrument`/`installErrorHandler`-
+  funksjonalitet — bare strammet gating
+- IKKE endret tests utenfor de to nevnte (ErrorHandler/FetchInstrument)
+
+**Branch:** `fix/debug-hud-gated-by-url-only-2026-05-15`
+**Tid:** ~45 min agent-arbeid

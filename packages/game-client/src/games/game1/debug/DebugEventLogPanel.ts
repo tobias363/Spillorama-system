@@ -10,8 +10,11 @@
  *   - "Clear log"-knapp — tøm bufferen
  *   - Skjul/vis-toggle via Ctrl+Alt+D
  *
- * Aktiveres KUN når `?debug=1` i URL eller `localStorage.DEBUG_SPILL1_DRAWS=true`.
- * Default OFF for ikke å spamme prod / forstyrre vanlige spillere.
+ * Aktiveres KUN når `?debug=full` i URL (Tobias-direktiv 2026-05-15).
+ * Tidligere `?debug=1`/`?debug=true` og localStorage `DEBUG_SPILL1_DRAWS` er
+ * fjernet som triggers fordi de lekte til prod-brukere og brøt full
+ * spillopplevelse. Mountes via `mountDebugHud()` i Game1Controller — har
+ * samme gate. Default OFF for full spillopplevelse.
  */
 
 import {
