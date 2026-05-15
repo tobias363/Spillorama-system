@@ -3,10 +3,6 @@ name: PITFALLS ID Validate
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    paths:
-      - "docs/engineering/PITFALLS_LOG.md"
-      - "scripts/check-pitfalls-ids.mjs"
-      - ".github/workflows/pitfalls-id-validate.yml"
   push:
     branches: [main]
     paths:
