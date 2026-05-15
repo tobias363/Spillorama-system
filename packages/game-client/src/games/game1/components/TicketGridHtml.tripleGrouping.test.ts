@@ -93,6 +93,9 @@ function makeState(): GameState {
     preRoundTickets: [],
     isArmed: false,
     myStake: 0,
+    myPendingStake: 0,
+    pauseUntil: null,
+    pauseReason: null,
     serverTimestamp: Date.now(),
   } as GameState;
 }
