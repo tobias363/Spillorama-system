@@ -4230,3 +4230,24 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 
 **Branch:** `codex/fix-required-pitfalls-check-path-filter`
 **PR:** åpnes av PM etter lokal validering.
+
+### 2026-05-15 — PM-AI: closed-PR diff gate hardening
+
+**Agent-type:** PM/devops-fix-agent
+**Scope:** Fikse falske røde PR-checks etter at auto-doc PR #1532 var merget og head-branch slettet.
+**Trigger:** Post-merge watcher viste `Delta Report Gate` og `Bug Resurrection Check` røde på en allerede merget PR. Loggene viste `fatal: bad object <head_sha>` og `Invalid revision range base..head`.
+
+**Outputs:**
+- `.github/workflows/delta-report-gate.yml` — job-level guard som skipper non-open PR-events.
+- `.github/workflows/bug-resurrection-check.yml` — samme guard for resurrection-detector.
+- `docs/engineering/PITFALLS_LOG.md` §5.16 — dokumenterer closed/merged-PR `edited`-event-fellen.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.2 — legger til vanlig feil og scope for diff-baserte gates.
+- Denne `AGENT_EXECUTION_LOG`-entryen.
+
+**Læring:**
+- `pull_request` med `types: edited` kan trigge etter merge/close. Hvis head-branch da er slettet, er `pull_request.head.sha` ikke nødvendigvis tilgjengelig i checkout.
+- Diff-baserte pre-merge-gates skal håndheves mens PR er åpen. Etter merge skal post-merge watcher evaluere main-runs, ikke stale closed-PR-runs.
+- En rød workflow på en lukket PR er fortsatt verdifull som signal: den kan avdekke at selve gate-designet ikke tåler GitHub lifecycle-events.
+
+**Branch:** `codex/skip-closed-pr-diff-gates`
+**PR:** åpnes av PM etter lokal validering.

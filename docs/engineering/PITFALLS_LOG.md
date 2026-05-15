@@ -48,7 +48,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 15 | 2026-05-15 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 105 entries (per 2026-05-15)
+**Total:** 106 entries (per 2026-05-15)
 
 ---
 
@@ -1237,6 +1237,26 @@ const labels = new Set((liveIssue.labels || [])
 - Test required-check-endringer med en docs-only PR og verifiser `gh pr checks --required <nr>` viser checken som `pass`, ikke missing.
 **Related:**
 - `.github/workflows/pitfalls-id-validate.yml`
+- PR #1532 (`auto-doc/refresh-snapshot`)
+
+### §5.16 — Diff-baserte PR-gates må skippe non-open PR-events
+
+**Severity:** P2 (falske røde checks etter merge)
+**Oppdaget:** 2026-05-15 etter auto-doc PR #1532 ble merget og branch slettet.
+**Symptom:** `Delta Report Gate` og `Bug Resurrection Check` kjørte på en `pull_request`-event etter merge, prøvde å diff-e `base.sha..head.sha`, og feilet med `fatal: bad object <head_sha>` / `Invalid revision range`. PR-en var allerede merget, men post-merge CI-status så rød ut og kunne skape feil eskalering.
+**Root cause:** Workflowene trigget også på `edited` for å støtte bypass/ack i PR-body. `edited` kan komme etter at PR er merged/closed. Da kan head-branch være slettet, og checkouten har ikke lenger head-objektet som diff-gaten forventer.
+**Fix:** Legg job-level guard på diff-baserte PR-gates:
+```yaml
+if: ${{ github.event.pull_request.state == 'open' }}
+```
+Dette beholder håndheving på åpne PR-er, inkludert `edited` før merge, men skipper stale post-merge events.
+**Prevention:**
+- Alle PR-gates som leser `pull_request.head.sha`, kjører `git diff base..head`, `git rev-list base..head` eller blame på PR-commits må ha `state == 'open'`-guard.
+- Hvis en gate må kjøre etter merge, bruk merge-commit/main-SHA eksplisitt, ikke PR-head-SHA.
+- Post-merge watcher skal skille mellom rød main-run og rød lukket-PR-run før eskalering.
+**Related:**
+- `.github/workflows/delta-report-gate.yml`
+- `.github/workflows/bug-resurrection-check.yml`
 - PR #1532 (`auto-doc/refresh-snapshot`)
 
 ---

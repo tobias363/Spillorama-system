@@ -13,6 +13,7 @@ on:
 jobs:
   check-delta-report:
     name: Delta report enforcement
+    if: ${{ github.event.pull_request.state == 'open' }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
