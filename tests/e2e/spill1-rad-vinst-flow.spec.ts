@@ -4,6 +4,7 @@ import {
   getLobbyState,
   markHallReady,
   masterStart,
+  openPurchaseWindow,
   masterStop,
 } from "./helpers/rest.js";
 import {
@@ -195,13 +196,12 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     // polling (~90s) + setup-overhead (~30s) trenger vi minst 240s.
     test.setTimeout(300_000);
 
-    // ── Steg 3: Mark master-hall ready ─────────────────────────────────────
-    // Rekkefølge: ready → spiller buy → masterStart → trekk baller.
-    // I `ready_to_start`-state kan spilleren kjøpe bonger som rendres i grid
-    // umiddelbart (preRoundTickets). Master start konverterer preRoundTickets
-    // til faktiske ticket-purchases og engine begynner å akseptere draws.
-    const ready = await markHallReady(masterToken, HALL_ID);
-    initialScheduledGameId = ready.gameId;
+    // ── Steg 3: Åpne kjøpsvindu uten å starte trekning ────────────────────
+    // Rekkefølge etter two-step master-flyt:
+    // masterStart(purchase_open) → spiller buy → markHallReady → masterStart(running).
+    // `markHallReady` FØR buy stenger salget for hallen.
+    const opened = await openPurchaseWindow(masterToken);
+    initialScheduledGameId = opened.scheduledGameId;
     expect(initialScheduledGameId, "scheduled-game must spawn").toBeTruthy();
 
     // Verifiser lobby er purchase-open
@@ -304,6 +304,7 @@ test.describe("Spill 1 Rad-vinst-flow", () => {
     // starter runden, engine konverterer preRoundTickets til ticket-purchases,
     // og draw-next-calls begynner å fungere mot engine.
     console.log("[test] Master start (etter buy)...");
+    await markHallReady(masterToken, HALL_ID);
     const started = await masterStart(masterToken);
     expect(started.status, "plan-run skal være running etter start").toBe(
       "running",

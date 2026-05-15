@@ -16,7 +16,7 @@
  * branches som omformer samme datatyper; helpers plasseres her isolert.
  */
 
-import { autoLogin, masterStop } from "./rest.js";
+import { autoLogin, masterStop, resetPilotPlanRunForE2e } from "./rest.js";
 
 const BACKEND_URL = process.env["E2E_BACKEND_URL"] ?? "http://localhost:4000";
 
@@ -351,6 +351,7 @@ export async function resetPilotStateExt(
   await masterStop(masterToken).catch(() => {
     /* ignore — no active round */
   });
+  await resetPilotPlanRunForE2e();
 
   if (!destroyRooms) {
     return;

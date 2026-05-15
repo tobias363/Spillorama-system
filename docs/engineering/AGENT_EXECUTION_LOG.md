@@ -4335,7 +4335,9 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `apps/backend/src/game/__tests__/MasterActionService.test.ts` — nye regresjonstester for fresh `purchase_open`, reused purchase_open → engine-start, auto-advance til purchase_open, og advance-defense-in-depth.
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts` + `GamePlanEngineBridge.multiGoHIntegration.test.ts` — forventer ny aktiv rad som `purchase_open`.
 - `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`, `apps/admin-web/src/pages/agent-portal/Spill1AgentControls.ts`, `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`, `apps/admin-web/src/api/agent-game1.ts` — UI copy/label skiller "Bongesalg åpnet" fra "Spill 1 startet".
-- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.0 — ny purchase_open-kontrakt.
+- `tests/e2e/helpers/rest.ts` — ny `openPurchaseWindow()`-helper og lokal CI/test-DB reset av dagens plan-run slik at hver Playwright-spec starter deterministisk på Bingo/posisjon 1.
+- `tests/e2e/spill1-*.spec.ts` — E2E-kontrakt oppdatert til two-step-flyt: åpne `purchase_open`, kjøp, deretter `markHallReady()` og andre `masterStart()` hvis testen trenger running draw.
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.20.1 — purchase_open-kontrakt + E2E-testkontrakt.
 - `docs/engineering/PITFALLS_LOG.md` §3.17 — fallgruven dokumentert.
 - Denne `AGENT_EXECUTION_LOG`-entryen.
 
@@ -4345,11 +4347,14 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `LOG_LEVEL=warn npx tsx --test src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts` — skipped uten `WALLET_PG_TEST_CONNECTION_STRING`.
 - `npm run check` i `apps/backend` — pass.
 - `npm run check` i `apps/admin-web` — pass.
+- `npx playwright test --config=tests/e2e/playwright.config.ts --list` — 7 pilot-flow specs listet uten TS/transpile-feil.
 
 **Læring:**
 - Forensics må kjøres før B.1/B.2/B.3 velges. Her viste beviset at cron/seed ikke var tilstrekkelig forklaring; master pathen startet engine umiddelbart.
 - "Start neste spill" og "Start trekninger nå" må være to forskjellige mentale modeller i UI, ellers feiltolker både PM og master live-testresultatet.
 - Defense-in-depth må dekke både `start()` og `advance()` selv om dagens UI primært bruker `start()` for neste runde.
+- `markHallReady()` er ikke synonymt med "kjøpsåpent". Etter two-step-flyten betyr den at hallen er klar/ferdig med salg; kjøpsåpent settes av første masterStart.
+- Pilot-flow E2E er stateful på dagsplan. Test-reset må nulle plan-run i lokal CI/test-DB, ellers senere specs arver auto-advance og kan treffe jackpot-posisjon uten override.
 
 **Eierskap (filer endret):**
 - `apps/backend/src/game/GamePlanEngineBridge.ts`

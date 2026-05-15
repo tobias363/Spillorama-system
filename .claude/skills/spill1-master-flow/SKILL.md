@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.20.0
+  version: 1.20.1
   project: spillorama
 ---
 
@@ -108,6 +108,8 @@ purchase_open            # ny plan-position, samme to-stegs regel
   - `advance: running → next position + fresh purchase_open uten engine.startGame`
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts`
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
+- `tests/e2e/*spill1*.spec.ts` må bruke `openPurchaseWindow()` før kjøp. `markHallReady()` betyr at hallen er ferdig med salg og stenger kjøp for den hallen.
+- Stateful pilot-flow E2E må nullstille dagens plan-run i lokal test-DB før hver spec, ellers stopper en test dagens run og neste spec auto-advancer til neste plan-posisjon (inkl. jackpot-posisjon 7).
 
 **Aldri gjør:**
 - Ikke sett nye plan-runtime scheduled-games direkte til `ready_to_start` hvis det gjør at master-start også starter engine i samme request.
@@ -1219,3 +1221,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.18.0 — Bong-design preview-side (branch `feat/bong-design-preview-page-2026-05-15`, Tobias-direktiv 2026-05-15): ny stand-alone HTML/CSS-side på `/web/games/bong-design.html` for å tweake bong-design uten å starte live-stacken. Viser 3 bonger (Hvit/Gul/Lilla) × 3 scenarier (fresh / mid-spill / Rad 1 bingo). Palett kopiert 1:1 fra `BingoTicketHtml.BONG_COLORS`. Egne Vite-config (`vite.bong-design.config.ts`) + build-script (`build:bong-design`) wired inn i `npm run build`. PITFALLS §7.26 ny entry. Ny tabell "Design-iterasjons-sider" i skill listing alle 5 preview-sider. |
 | 2026-05-15 | v1.19.0 — Post-round-overlay data-driven dismiss (C-hybrid, branch `fix/post-round-overlay-data-driven-dismiss-2026-05-15`, Tobias-direktiv "Kjør C, tenker minimum 6 sek celebrasjon deretter vent", samme dag bumpet til 10 sek): erstatter timer-driven legacy-dismiss (`MIN_DISPLAY_MS=3s` + `markRoomReady`) med data-driven (`MIN_CELEBRATION_MS=10s` + `currentNextSlug !== justPlayedSlug` + `MAX_WAIT_MS=60s` safety-cap). Tobias-rapport 2026-05-15: spiller så stale "Neste spill: <samme som nettopp>"-tekst i 40 sek etter natural round-end. Legacy-modus beholdes for backward-compat (Game1EndOfRoundOverlay.test.ts 56 tester). Ny seksjon "Post-round-overlay data-driven dismiss" mellom "Tester som beskytter" og "Kanonisk referanse". PITFALLS §7.28 ny entry. Sentry-breadcrumb `endOfRoundOverlay.safetyCapDismiss` for ops-monitoring av cap-fires. |
 | 2026-05-15 | v1.20.0 — Purchase-open to-stegs master-flyt (P0): `GamePlanEngineBridge` oppretter nye plan-runtime scheduled-games som `purchase_open`, `MasterActionService.start()` og `advance()` returnerer uten engine-start for fresh `purchase_open`, og engine starter først ved neste master-start på eksisterende rad. UI-toast/label oppdatert så master ser "Bongesalg åpnet" / "Start trekninger nå". Baseline-forensics viste forrige live-runde hadde bare ca. 30 ms kjøpsvindu før engine-start. PITFALLS §3.17 + Agent Execution Log oppdatert. |
+| 2026-05-15 | v1.20.1 — E2E-testkontrakt for to-stegs flyt: `tests/e2e/helpers/rest.ts` har `openPurchaseWindow()` for første masterStart/purchase_open. Playwright-spesifikasjoner skal kjøpe før `markHallReady()`; `markHallReady()` stenger salget for hallen. Stateful pilot-flow-reset nullstiller dagens plan-run kun mot lokal CI/test-DB slik at hver spec starter på Bingo og ikke arver auto-advance til jackpot-posisjon 7. |

@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import {
   autoLogin,
   getLobbyState,
-  markHallReady,
   masterStop,
+  openPurchaseWindow,
   resetPilotState,
   shouldDestroyRoomsForCi,
 } from "./helpers/rest.js";
@@ -181,10 +181,11 @@ test.describe("Spill 1 manual-flow", () => {
   test("Tobias' manual-flyt: dev-user redirect → default-hall → bytt hall → bingo → kjøp", async ({
     page,
   }) => {
-    // Tobias-flow: Master må eksplisitt klikke "Marker hall klar" — vi
-    // gjør det via REST for orkestrering.
-    const ready = await markHallReady(masterToken, HALL_ID);
-    scheduledGameId = ready.gameId;
+    // Tobias-flow: Master må eksplisitt åpne kjøpsvinduet. Første
+    // masterStart-kall åpner `purchase_open`; "Marker hall klar" skjer først
+    // etter kjøp, ellers stenger backend salget for hallen.
+    const opened = await openPurchaseWindow(masterToken);
+    scheduledGameId = opened.scheduledGameId;
     expect(scheduledGameId, "scheduled-game must spawn").toBeTruthy();
 
     const lobby = await getLobbyState(masterToken, HALL_ID);
@@ -375,11 +376,11 @@ test.describe("Spill 1 manual-flow", () => {
     console.log("[test] Tobias-flow: popup lukket, ticket-grid skal populeres…");
 
     // ── Tobias-flow: Steg 12 — verifiser ticket-grid ──────────────────────
-    const EXPECTED_GRID_CARDS = EXPECTED_ROWS.length;
+    const EXPECTED_GRID_CARDS = EXPECTED_TOTAL_BRETT;
     const ticketCards = page.locator('[data-test="ticket-card"]');
     await expect(
       ticketCards,
-      `Grid skal vise ${EXPECTED_GRID_CARDS} cards (1 per spec-entry)`,
+      `Grid skal vise ${EXPECTED_GRID_CARDS} cards (ett per brett)`,
     ).toHaveCount(EXPECTED_GRID_CARDS, { timeout: 15_000 });
     console.log(`[test] Tobias-flow: ${EXPECTED_GRID_CARDS} ticket-cards rendrer`);
 

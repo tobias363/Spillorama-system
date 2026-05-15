@@ -891,6 +891,8 @@ WHERE id = $1
 - Ikke behandle dette som en ren cron/seed-feil før plan/master-pathen er bevist frisk. Forensic baseline viste at master pathen selv startet engine for fort.
 - Aldri merge endring som setter ny plan-runtime scheduled-game direkte til `ready_to_start` uten å bevise at engine-start fortsatt krever et separat master-kall.
 - UI skal aldri vise "Spill 1 startet" når backend returnerer `scheduledGameStatus='purchase_open'`.
+- E2E-tester skal ikke bruke `markHallReady()` som "åpne salg". Etter two-step-fixen betyr første masterStart `purchase_open`; `markHallReady()` betyr at hallen er ferdig med salg og kan blokkere videre kjøp med `PURCHASE_CLOSED_FOR_HALL`.
+- Stateful pilot-flow E2E må resettes til plan-posisjon 1 i lokal CI/test-DB før hver spec. Hvis ikke arver senere specs dagens auto-advance og kan treffe jackpot-posisjon 7 uten jackpot-override.
 
 **Tests:**
 - `apps/backend/src/game/__tests__/MasterActionService.test.ts`
@@ -900,6 +902,8 @@ WHERE id = $1
   - `advance: running → next position + fresh purchase_open uten engine.startGame`
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.cancelledRowReuse.regression.test.ts`
 - `apps/backend/src/game/__tests__/GamePlanEngineBridge.multiGoHIntegration.test.ts`
+- `tests/e2e/helpers/rest.ts` — `openPurchaseWindow()` + lokal CI/test-DB plan-run-reset
+- `tests/e2e/spill1-*.spec.ts` — kjøp skjer i `purchase_open` før `markHallReady()`
 
 **Related:**
 - `/tmp/purchase-open-forensics-2026-05-15T21-56-07Z.md`
