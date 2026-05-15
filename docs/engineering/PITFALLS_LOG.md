@@ -2455,6 +2455,47 @@ overlay.updateLobbyState(state?.nextScheduledGame?.catalogSlug ?? null);
 - `packages/game-client/src/games/game3/components/Game3PatternRow.ts` (customPatternListView consumer)
 - `.claude/skills/spill1-center-top-design/SKILL.md` (pixel-spec + anti-patterns + Spill 3-kontrakt)
 - §7.24 (relatert: premie-celle-størrelse iterasjon I-IV 2026-05-14)
+### §7.28 — Game1BuyPopup: card.children-indices + subtitle letter-spacing-marker er IMMUTABLE test-kontrakt
+
+**Severity:** P1 (test-regresjon)
+**Oppdaget:** 2026-05-15 (kjopsmodal-design.html prod-implementasjon)
+**Symptom:** Etter restrukturering av `Game1BuyPopup.ts` for å matche `kjopsmodal-design.html` mockup feilet 8 av 32 tester:
+- `Game1BuyPopup.lossState.test.ts` (3 tester) — `getCancelBtn`/`getStatusMsg` returnerte feil element
+- `Game1BuyPopup.displayName.test.ts` (5 tester) — `getSubtitleText()` fant "Premietabell" istedenfor catalog-display-navn
+
+**Root cause (2 separate problemer):**
+
+1. **`card.children`-indices er hardkodet i 4 test-filer** (`Game1BuyPopup.test.ts`, `lossState`, `displayName`, `ticketCount`):
+   - `card.children[1]` = typesContainer
+   - `card.children[3]` = statusMsg
+   - `card.children[5]` = buyBtn
+   - `card.children[6]` = cancelBtn
+
+   Hvis du legger til ny top-level child (eks. prizeMatrixEl) UTEN å hoist totalRow inn i et eksisterende element, blir indices forskjøvet og alle tests feiler.
+
+2. **Subtitle uniqueness-marker er letter-spacing 0.14em på `<div>`-element**. `getSubtitleText()` i `displayName.test.ts` søker `overlay.querySelectorAll("div")` etter første div med `letterSpacing === "0.14em"`. Hvis ANNET element i komponenten har samme letter-spacing (eks. premietabell "PREMIETABELL"-label), returnerer testen feil element.
+
+**Fix:**
+
+1. **Hoist totalRow inn i `sep`-elementet** (gjør sep til wrapper) for å holde `card.children`-tellet på 7 (header, typesContainer, prizeMatrixEl, statusMsg, sep-wrapper, buyBtn, cancelBtn). Indices [1], [3], [5], [6] forblir korrekte.
+2. **Endre PrizeMatrix-header letter-spacing** fra 0.14em → 0.12em. Subtitle er ENESTE element med 0.14em.
+3. **Subtitle MÅ være `<div>`**, ikke `<span>` — testen søker kun `<div>`.
+
+**Prevention:**
+
+- ALDRI legg til nytt top-level `card.children`-element uten å oppdatere alle 4 test-helper-funksjoner samtidig
+- ALDRI bruk letter-spacing 0.14em på andre elementer enn subtitle
+- ALDRI endre subtitle-elementet fra `<div>` til `<span>`
+- Hvis du må re-strukturere card-layout: oppdater test-helper-funksjoner i SAMME PR
+
+**Files:**
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` (linjer ~270-450: header + DOM-bygging)
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.test.ts` (test-helper-funksjoner)
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.lossState.test.ts` (`getCard().children[3,5,6]`)
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.displayName.test.ts` (`getSubtitleText()` søker letter-spacing 0.14em)
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ticketCount.test.ts`
+
+**Related:** kjopsmodal-design.html mockup (Tobias 2026-05-15), skill `buy-popup-design`
 
 ---
 
