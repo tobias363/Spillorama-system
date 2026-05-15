@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   detect:
+    if: ${{ github.event.pull_request.state == 'open' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
