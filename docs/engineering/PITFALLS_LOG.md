@@ -48,16 +48,16 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 10 | 2026-05-13 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 12 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
-| [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
+| [§8 Doc-disiplin](#8-doc-disiplin) | 7 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 99 entries (per 2026-05-15)
+**Total:** 101 entries (per 2026-05-15)
 
 ---
 
@@ -1152,6 +1152,27 @@ WHERE id = $1
 **Related:**
 - PR #1515 pre-lock knowledge-control hardening
 - Issue #1518 unique knowledge-gate check names
+
+### §5.12 — Required reviews uten approver-roster gir lockout eller falsk trygghet
+
+**Severity:** P1 (governance-kontroll kan blokkere hotfix eller se trygg ut uten reell reviewer)
+**Oppdaget:** 2026-05-15 under access-/approval-audit etter branch-protection-hardening.
+**Symptom:** Det er fristende å aktivere "Require approving review" fordi repoet håndterer live-rom og ekte penger. Men GitHub-audit viste bare én reell ansvarlig approver (`tobias363`) og én write/legacy-konto (`tobias50`). CODEOWNERS peker også til `@tobias363` for alle kritiske paths.
+**Root cause:** Required reviews er en god kontroll først når revieweren er uavhengig, navngitt og tilgjengelig. Hvis author/owner er samme person som CODEOWNER, kan GitHub-regelen enten blokkere egne PR-er eller skape prosess-teater der en sekundær konto "approver" uten reell uavhengighet.
+**Fix:** Ikke aktiver required reviews før `docs/operations/ACCESS_APPROVAL_MATRIX.md` §6-§7 er oppfylt:
+- Minst én uavhengig approver er onboardet.
+- CODEOWNERS er oppdatert til team/rolle-handles eller konkrete backup-approvers.
+- Hotfix-flow er testet med branch protection aktiv.
+- Emergency-labels og post-merge-review er etablert.
+**Prevention:**
+- Før branch protection endres: audit `collaborators`, `CODEOWNERS` og faktisk reviewer-roster.
+- High-risk PR-er skal fortsatt ha synlig Tobias-godkjenning i PR-kommentar/review.
+- Dokumenter hvorfor required reviews er av hvis reviewer-roster ikke finnes. Det er et bevisst risikovalg, ikke et hull.
+- Ikke bruk en sekundær konto som "uavhengig reviewer" hvis det er samme menneske.
+**Related:**
+- `docs/operations/ACCESS_APPROVAL_MATRIX.md`
+- `.github/CODEOWNERS`
+- `docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`
 
 ---
 
@@ -2766,6 +2787,23 @@ Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-b
 - For workflow-markers: dokumentér i kommentar hvilken regex som parser markøren, slik at senere refaktor ikke bryter parsing
 - Hvis cascade-merges skjer pga uavhengige agent-bølger: PM eier konsolideringspass etter siste merge
 **Related:** PR #1335, #1338, #1333 (cascade-kilder)
+
+### §8.7 — Skill-frontmatter-hook er ikke nok; scope-header CI må kjøres ved skill-endringer
+
+**Severity:** P2 (CI-fail etter PR-åpning, selv om pre-commit passerer)
+**Oppdaget:** 2026-05-15 i PR #1527.
+**Symptom:** Lokal pre-commit kjørte `validate-skill-frontmatter.mjs` og `check-markdown-links.mjs` grønt, men GitHub Actions `Validate scope-headers` feilet fordi `.claude/skills/debug-hud-gating/SKILL.md` manglet `<!-- scope: ... -->` rett etter YAML-frontmatter. Etterpå feilet samme workflow fordi `docs/auto-generated/SKILL_FILE_MAP.md` var stale.
+**Root cause:** Scope-header-gaten kjøres i CI, men ikke som samme lokale hook som skill-frontmatter-valideringen. En skill kan derfor ha gyldig YAML-frontmatter og likevel mangle auto-loading-scope. Når scope endres, må skill-file-map regenereres. Hvis lokal `.claude/skills/` har ignored/untracked skills, lokal generator kan produsere en map som CI aldri kan reprodusere.
+**Fix:** Legg til scope-header i `debug-hud-gating`, versjonsbump skillen til v1.0.1 og regenerer `SKILL_FILE_MAP.md` fra en ren tracked worktree.
+**Prevention:**
+- Når en PR rører `.claude/skills/*/SKILL.md`, kjør lokal variant av scope-sjekken og regenerer `SKILL_FILE_MAP.md` fra tracked files. Hvis lokal `.claude/skills/` har ekstra ignored skills, bruk ren worktree:
+  `git worktree add --detach /tmp/spillorama-skillmap-clean HEAD && cd /tmp/spillorama-skillmap-clean && node scripts/build-skill-file-map.mjs`
+- Scope-header skal stå rett etter lukkende `---`, før første Markdown-heading.
+- Hvis skillen bevisst er for bred, bruk eksplisitt tom header: `<!-- scope: -->`.
+**Related:**
+- `.claude/skills/debug-hud-gating/SKILL.md`
+- `.github/workflows/skill-mapping-validate.yml`
+- `docs/auto-generated/SKILL_FILE_MAP.md`
 
 ---
 

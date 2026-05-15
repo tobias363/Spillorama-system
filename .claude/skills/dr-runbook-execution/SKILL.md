@@ -1,12 +1,12 @@
 ---
 name: dr-runbook-execution
-description: When the user/agent works with disaster recovery, backup-drills, incident-response, or pilot-stability runbooks for the Spillorama bingo platform. Also use when they mention DR, disaster recovery, restore, backup, drill, RPO, RTO, incident-response, hotfix, rollback, redis-failover, db-restore, PITR, compliance-incident, wallet-reconciliation, BIN-790, BIN-816, BIN-772, SEV-1, SEV-2, SEV-3, Lotteritilsynet 24t, Datatilsynet 72t, on-call, R12. Defines RPO/RTO targets, severity matrix, drill cadence, regulator-SLA timelines, and pre-pilot drill gates. Make sure to use this skill whenever someone touches DR runbooks or asks about incident-response procedures even if they don't explicitly ask for it — pilot-launch is gated on at least one rehearsal per scenario.
+description: When the user/agent works with disaster recovery, backup-drills, incident-response, or pilot-stability runbooks for the Spillorama bingo platform. Also use when they mention DR, disaster recovery, restore, backup, drill, RPO, RTO, incident-response, hotfix, emergency merge, rollback, redis-failover, db-restore, PITR, compliance-incident, wallet-reconciliation, BIN-790, BIN-816, BIN-772, SEV-1, SEV-2, SEV-3, Lotteritilsynet 24t, Datatilsynet 72t, on-call, R12. Defines RPO/RTO targets, severity matrix, drill cadence, regulator-SLA timelines, hotfix approval labels, and pre-pilot drill gates. Make sure to use this skill whenever someone touches DR runbooks or asks about incident-response procedures even if they don't explicitly ask for it — pilot-launch is gated on at least one rehearsal per scenario.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
-<!-- scope: docs/operations/DR_RUNBOOK.md, docs/operations/LIVE_ROOM_DR_RUNBOOK.md, docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md, docs/operations/INCIDENT_RESPONSE_PLAN.md, docs/operations/HALL_PILOT_RUNBOOK.md, docs/operations/EMERGENCY_RUNBOOK.md, docs/operations/DRILL_BACKUP_RESTORE_*.md, docs/operations/DRILL_ROLLBACK_*.md, docs/operations/PILOT_*_RUNBOOK*.md -->
+<!-- scope: docs/operations/DR_RUNBOOK.md, docs/operations/LIVE_ROOM_DR_RUNBOOK.md, docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md, docs/operations/INCIDENT_RESPONSE_PLAN.md, docs/operations/HALL_PILOT_RUNBOOK.md, docs/operations/EMERGENCY_RUNBOOK.md, docs/operations/HOTFIX_PROCESS.md, docs/operations/ACCESS_APPROVAL_MATRIX.md, docs/operations/DRILL_BACKUP_RESTORE_*.md, docs/operations/DRILL_ROLLBACK_*.md, docs/operations/PILOT_*_RUNBOOK*.md -->
 
 # DR Runbook Execution
 
@@ -106,16 +106,23 @@ Drill D-DB-RESTORE-1:
 4. Verifiser at kanari-rad IKKE finnes
 5. Mål total RTO
 
-### Hotfix krever 4 trigger-kriterier
+### Hotfix krever branch-protection + audit-labels
 
-Per `HOTFIX_PROCESS.md` (skissert i existing docs): hotfix utenfor vanlig PR-flyt krever:
+Per `HOTFIX_PROCESS.md` og `ACCESS_APPROVAL_MATRIX.md` §9: hotfix utenfor
+vanlig venting/review krever fortsatt PR, required checks som default og
+synlig Tobias-godkjenning.
 
-1. **SEV-1 klassifisering** av Incident Commander
-2. **Minimal patch** — endre kun det som må endres
-3. **Audit-trail** — hvorfor + hva + hvem signerte off
-4. **7-dagers post-mortem** og review
+Minimum:
+1. **P0/P1 eller regulatorisk risiko** klassifisert av Incident Commander/Tobias
+2. **Rollback vurdert** og dokumentert som utilstrekkelig eller farligere
+3. **Minimal patch** — endre kun det som må endres
+4. **Audit-trail** — incident/Linear-lenke, hvorfor, hva og hvem signerte off
+5. **Labels** — `approved-emergency-merge` + `post-merge-review-required`
+6. **Etter-review** — første review innen 24 timer, full review/remediation innen 7 dager
 
-Hotfix-process bypasser code-reviewer-gate, så bruk sparsomt.
+Hvis branch protection må justeres under ekte P0, skal Tobias-beslutningen
+logges med tidspunkt, endret setting, commit SHA og tidspunkt kontrollen
+ble skrudd på igjen. Ikke push stille til `main`.
 
 ### Communication template for spillere
 
@@ -134,7 +141,8 @@ Aldri spekuler i årsak før post-mortem.
 | Feil | Symptom | Fix |
 |---|---|---|
 | Vente med Lotteritilsynet-varsel "til vi er sikre" | 24t-fristen sprenges | Varsle umiddelbart, oppdater senere |
-| Hotfix uten audit-trail | Senere revisjon kan ikke verifisere endringen | Kreve 4-kriterie-prosedyre |
+| Hotfix uten audit-trail | Senere revisjon kan ikke verifisere endringen | Krev PR, incident/Linear-lenke og emergency-labels |
+| Branch protection skrus av i panikk | Kontrollhull uten revisjonsspor | Tobias-beslutning i incident-logg + tidspunkt for re-enable |
 | Glemt å oppdatere on-call-rotasjon | Ingen svarer på PagerDuty-call | Signert rotasjon før pilot |
 | PITR-prosedyre kun "i hodet" | Når katastrofen treffer er det første gang noen prøver | Kjør D-DB-RESTORE-1 quarterly |
 | Recovery taper audit-rader | Compliance-brudd | Verifiser via R2-invarianter (I4) |
@@ -148,6 +156,8 @@ Aldri spekuler i årsak før post-mortem.
 - `docs/operations/LIVE_ROOM_DR_RUNBOOK.md` — R12-spesifikke live-rom-scenarier
 - `docs/operations/HALL_PILOT_RUNBOOK.md` — SEV-1/2/3 + rollback-kriterier
 - `docs/operations/MIGRATION_DEPLOY_RUNBOOK.md` — migrate-feil under deploy
+- `docs/operations/HOTFIX_PROCESS.md` — P0/P1 hotfix-flow
+- `docs/operations/ACCESS_APPROVAL_MATRIX.md` — emergency merge, approval og bypass-labels
 - `docs/operations/ROLLBACK_RUNBOOK.md` — hall-spesifikk rollback (client-variant flag)
 - `docs/operations/REDIS_KEY_SCHEMA.md` — surgical Redis-recovery
 - `docs/operations/OBSERVABILITY_RUNBOOK.md` — alerts, dashboards, metrics
@@ -161,8 +171,15 @@ Aldri spekuler i årsak før post-mortem.
 - Post-mortem-skriving etter incident
 - Endre on-call-rotasjon eller PagerDuty-konfig
 - Reviewe en hotfix-PR for 4-kriterie-compliance
+- Vurdere emergency merge eller branch-protection-unntak
 - Verifisere RPO/RTO-mål i en ny tjeneste eller arkitektur-endring
 - Skrive eller oppdatere DR-runbook
 - Lotteritilsynet- eller Datatilsynet-rapport-skriving
 - Vurdere om en feilkonfig krever rollback (SEV-1-vurdering)
 - Pre-pilot go/no-go-møte (R12 drill-status)
+
+## Endringslogg
+
+| Dato | Endring |
+|---|---|
+| 2026-05-15 | v1.1.0 — oppdatert hotfix-regel til PR + required checks som default, emergency-labels, 24t etter-review og eksplisitt branch-protection audit ved P0-unntak. |

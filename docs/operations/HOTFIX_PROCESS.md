@@ -2,11 +2,12 @@
 
 **Owner:** Technical lead (Tobias Haugen)
 **Related Linear:** BIN-790 (M2 — Multi-hall-launch, Spor C — Operasjon & infrastruktur)
-**Last updated:** 2026-05-08
+**Last updated:** 2026-05-15
 **Audience:** Tobias (myndighet), L2 backend on-call (utfører), L3 incident commander (godkjenner).
 
 > Denne runbooken beskriver hvordan vi deployer en kritisk fix UTEN
-> full review-prosess (P1 lyst-løp). For:
+> full review-prosess (P1 hurtig-løp), men fortsatt med branch protection,
+> audit-labels og post-merge-review. For:
 >
 > - **Normal deploy** (CI + review + merge): se
 >   [`docs/engineering/ENGINEERING_WORKFLOW.md`](../engineering/ENGINEERING_WORKFLOW.md).
@@ -28,6 +29,8 @@ Den koster:
 
 - **Audit-trail-overhead** — alt skal loggføres som om det var et
   vanlig deploy, men med "skip-review-grunn" notert.
+- **Branch-protection-friksjon** — required checks er fortsatt default.
+  Unntak krever eksplisitt Tobias-beslutning og audit-logg.
 - **Etter-revisjon** — fixen skal review-es og evt. omskrives innen 7
   dager etter hendelsen.
 - **Risiko for ny bug** — du skipper review, så testkrav er strengere
@@ -95,6 +98,11 @@ Hotfix-behov oppstår typisk fra:
 **Aldri:**
 - L1 hall-vakt deployer hotfix alene.
 - Andre agenter (Spillorama-prosjekt-team) hotfixer uten Tobias-godkjenning.
+- Branch protection endres uten incident-logg som sier nøyaktig hvorfor,
+  hva som ble endret, og når kontrollen ble aktivert igjen.
+
+Se [`ACCESS_APPROVAL_MATRIX.md`](./ACCESS_APPROVAL_MATRIX.md) §9 for
+nød-bypass og access-regler.
 
 ---
 
@@ -192,20 +200,50 @@ git push origin staging
 
 ### 4.5 Prod-deploy (5 min)
 
-```bash
-# Merge til main (skip review)
-git checkout main
-git merge hotfix/<linear-id>-<short-desc> --no-ff
-git push origin main
+Default er hotfix-PR, ikke direkte merge fra lokal branch til `main`:
 
-# Render auto-deployer (5–10 min med migrate-step)
+```bash
+# Opprett PR mot main
+gh pr create \
+  --base main \
+  --head hotfix/<linear-id>-<short-desc> \
+  --title "fix(hotfix): <kort tittel>" \
+  --body-file /tmp/hotfix-pr-body.md
+
+# Følg required checks
+gh pr checks <pr-number> --watch
+
+# Merge når checks er grønne og Tobias/L3 har godkjent
+gh pr merge <pr-number> --squash --delete-branch
 ```
 
-**Hvis CI er konfigurert til å kreve review** (typisk i branch protection):
+PR-body skal inneholde:
 
-- Tobias eller L3 må manuelt approve-e PR-en.
-- L2 (eller den som har push-access) merger med "Squash and merge"
-  (override review-krav).
+```text
+Incident: <Linear/Slack/Sentry link>
+Severity: P0/P1
+Hvorfor rollback ikke er nok: <1-2 setninger>
+Teststatus: <kommandoer og resultat>
+gate-bypass: hotfix-incident-YYYY-MM-DD      # hvis PM-gate ikke gjelder
+bypass-knowledge-protocol: <grunn>           # bare hvis docs ikke kan vente
+```
+
+Labels:
+
+- `approved-emergency-merge` — Tobias-godkjent nødmerge.
+- `post-merge-review-required` — etter-review innen 24 timer.
+- `approved-pm-bypass` — hvis PM-gate bypass brukes.
+- `approved-knowledge-bypass` — hvis knowledge-protocol bypass brukes.
+
+**Hvis branch protection blokkerer en ekte P0-fix:**
+
+- Ikke push stille til `main`.
+- Tobias må beslutte i incident-loggen om kontrollen midlertidig skal
+  justeres.
+- Logg eksakt hvilke settings som endres, tidspunkt, commit SHA og når
+  kontrollen skrus på igjen.
+- Postmortem skal vurdere om kontrollen var feilkalibrert eller om
+  hotfix-prep var for svak.
 
 ### 4.6 Verification post-deploy (10 min)
 
@@ -230,14 +268,17 @@ består**. Følgende skal være på plass innen 24 timer etter hotfix:
 - Kommentarer:
   - Slack-tråd-link til incident.
   - Commit-SHA på main.
+  - PR-link og labels brukt.
   - Liste over filer endret.
   - Begrunnelse for skip-review (1-2 setninger).
-  - Test-status (hva ble kjørt, hva ble skipper og hvorfor).
+  - Test-status (hva ble kjørt, hva ble skippet og hvorfor).
 
 ### 5.2 Etter-review
 
-Innen 7 dager skal hotfix-koden gjennomgås av en kollega som **ikke**
-var involvert i hendelsen:
+Innen 24 timer skal hotfixen ha første etter-review. Innen 7 dager skal
+hotfix-koden være gjennomgått av en kollega som **ikke** var involvert i
+hendelsen, eller Tobias skal eksplisitt logge hvorfor uavhengig reviewer
+ikke finnes ennå:
 
 - Pull request mot retroaktiv branch (eller ny PR for forbedringer).
 - Standard review-checklist.
@@ -390,10 +431,10 @@ Action items:
 | Rolle | Ansvar |
 |---|---|
 | Tobias (technical lead) | Endelig myndighet på hotfix-trigger og review-skip |
-| L3 incident commander | Goder hotfix sammen med Tobias |
+| L3 incident commander | Godkjenner hotfix sammen med Tobias |
 | L2 backend on-call | Utfører hotfix-prosedyren |
 | Compliance-eier | Signerer compliance-relaterte hotfixes |
-| DevOps | Sikrer at branch-protection tillater override-merge for L2/Tobias |
+| DevOps | Sikrer at branch-protection og nød-bypass er dokumentert og testet |
 
 ---
 
@@ -404,4 +445,5 @@ Action items:
 - [`MIGRATION_DEPLOY_RUNBOOK.md`](./MIGRATION_DEPLOY_RUNBOOK.md) — migrate-feil
 - [`COMPLIANCE_INCIDENT_PROCEDURE.md`](./COMPLIANCE_INCIDENT_PROCEDURE.md) — Lotteritilsynet
 - [`E2E_SMOKE_TEST.md`](./E2E_SMOKE_TEST.md) — staging-smoke
+- [`ACCESS_APPROVAL_MATRIX.md`](./ACCESS_APPROVAL_MATRIX.md) — access, approval og emergency-labels
 - [`docs/engineering/ENGINEERING_WORKFLOW.md`](../engineering/ENGINEERING_WORKFLOW.md) — normal deploy-flow

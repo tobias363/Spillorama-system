@@ -1,6 +1,6 @@
 # Credentials & Access — hvor alle nøkler ligger
 
-**Sist oppdatert:** 2026-05-10
+**Sist oppdatert:** 2026-05-15
 **Eier:** Tobias Haugen
 **Status:** Aktiv
 
@@ -63,7 +63,11 @@ debugger prod-data — og slett umiddelbart etterpå.
 
 ---
 
-## Tilgangs-matrise — hvem har tilgang
+## Credential-tilgangsmatrise — hvem har nøkler
+
+Dette er kun credential-matrisen. For GitHub-roller, approval-regler,
+bypass-labels, hotfix-autoritet og access-review, se
+[`ACCESS_APPROVAL_MATRIX.md`](./ACCESS_APPROVAL_MATRIX.md).
 
 | Credential | Tobias | PM (deg) | Agenter | CI |
 |---|---|---|---|---|
@@ -133,4 +137,5 @@ MCP-konsumpsjon. Følg utviklingen i [Anthropic MCP-katalog](https://docs.anthro
 - [`secrets/README.md`](../../secrets/README.md) — `secrets/`-mappens system
 - [`docs/operations/RENDER_ENV_VAR_RUNBOOK.md`](./RENDER_ENV_VAR_RUNBOOK.md) — env-var-operasjoner
 - [`docs/operations/RENDER_GITHUB_SETUP.md`](./RENDER_GITHUB_SETUP.md) — GitHub-integrasjon
+- [`docs/operations/ACCESS_APPROVAL_MATRIX.md`](./ACCESS_APPROVAL_MATRIX.md) — GitHub/deploy/approval/bypass-roller
 - [`SECURITY.md`](../../SECURITY.md) — sikkerhetspolicy og sårbarhetsmelding

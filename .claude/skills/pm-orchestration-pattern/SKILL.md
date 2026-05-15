@@ -1,8 +1,8 @@
 ---
 name: pm-orchestration-pattern
-description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, or false-Done in regulator-facing docs.
+description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   project: spillorama
 ---
 
@@ -197,6 +197,34 @@ For pilot-blokkere eller arkitektur-endringer: spawn en code-reviewer-agent FØR
 
 Output: GO / NO-GO + spesifikke feilbeskrivelser. Ved NO-GO: spawn fix-agent, ikke merge.
 
+### Access-/approval-matrise før branch-protection-endringer (2026-05-15)
+
+Før PM endrer branch protection, required reviews, CODEOWNERS, bypass-labels
+eller hotfix-autoritet, les `docs/operations/ACCESS_APPROVAL_MATRIX.md`.
+
+Per 2026-05-15:
+- `tobias363` er eneste reelle admin/approver.
+- `tobias50` har write, men er ikke uavhengig reviewer.
+- CODEOWNERS peker til `@tobias363` for kritiske paths.
+- Required reviews er derfor bevisst AV til minst én uavhengig approver
+  er onboardet og dokumentert.
+
+High-risk PR-er (wallet, compliance, live-room engine, migrations,
+GitHub Actions, branch protection, secrets, prod infra, Sentry/PostHog
+alert policy) skal likevel ha synlig Tobias-godkjenning i PR-kommentar
+eller review før merge.
+
+Emergency merge/hotfix skal bruke labels:
+- `approved-emergency-merge`
+- `post-merge-review-required`
+- `approved-pm-bypass` hvis PM-gate bypasses
+- `approved-knowledge-bypass` hvis knowledge-protocol bypasses
+
+Ikke aktiver required reviews bare fordi det høres riktig ut. Først
+auditer faktisk collaborator-liste, CODEOWNERS og reviewer-roster. Hvis
+reviewer ikke finnes, er riktig kontroll å dokumentere risikoen og holde
+reviews av til rosteren finnes.
+
 ## Immutable beslutninger
 
 ### Tobias touch-er ALDRI git lokalt
@@ -262,6 +290,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | Ignorerer bug-resurrection-warning | Kan re-introdusere fixed bug | Verifiser fix-historie, evt. legg til `[resurrection-acknowledged: <grunn>]` |
 | Ignorerer skill-freshness-warning på PR | Skill drifter videre fra koden | Vurder skill-refresh i samme PR med `[skill-refreshed: <name>]` |
 | 5+ parallelle agenter uten worktree-isolasjon | File-revert-konflikter ved merge | ALLTID `isolation: worktree` for ≥ 2 parallelle agenter |
+| Aktiverer required reviews uten approver-roster | PR-er låses eller "review" blir falsk uavhengighet | Følg `ACCESS_APPROVAL_MATRIX.md` §6-§7 før branch protection endres |
 
 ## Kanonisk referanse
 
@@ -276,6 +305,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `docs/engineering/PM_ONBOARDING_PLAYBOOK.md` — playbook for hver PM-overgang (60-90 min onboarding)
 - `docs/engineering/BUG_RESURRECTION_DETECTOR.md` — anti-regression-hook
 - `docs/engineering/SKILL_FRESHNESS.md` — skill-refresh-cadence
+- `docs/operations/ACCESS_APPROVAL_MATRIX.md` — access, approval, bypass-labels og required-review-kriterier
 - `scripts/pm-push-control.mjs` — registry + watch + dashboard
 - `scripts/pm-checkpoint.sh` — hard-block onboarding-gate for ny PM
 - `BACKLOG.md` — strategisk oversikt
@@ -298,6 +328,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - Cascade-rebase nødvendig når kjedede PR-er må mergees
 - Auto-rebase feiler → manuell rebase nødvendig
 - Bug-resurrection-warning på PR → verifiser fix-historie
+- Branch protection / required reviews / CODEOWNERS / bypass-labels skal endres
 
 ## Endringslogg
 
@@ -305,3 +336,4 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 |---|---|
 | 2026-05-08 | Initial — etablert PM-orchestration-mandate |
 | 2026-05-13 | v1.1.0 — la til Phase-2-mekanismer fra autonomy-wave: pm-push-control, auto-rebase-on-merge, cascade-rebase-mønster, knowledge-protocol-checkbox, bug-resurrection-detector, skill-freshness-gate. Byttet til `dev:nuke` som standard restart-kommando (vedtatt 2026-05-11). |
+| 2026-05-15 | v1.2.0 — la til access-/approval-matrise, required-review lock-kriterier, emergency-labels og fallgruven "required reviews uten approver-roster". |

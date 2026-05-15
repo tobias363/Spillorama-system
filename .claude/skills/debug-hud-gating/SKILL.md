@@ -2,9 +2,11 @@
 name: debug-hud-gating
 description: Gate-strategi for debug-HUD + event-log-panel i Spillorama spillerklient. Use when the user or agent works with debug-HUD, event-log-panel, debug-gating, isDebugHudEnabled, mountDebugHud, DebugEventLogPanel, ConsoleBridge, FetchInstrument, ErrorHandler, FetchBridge, EventTracker, EventStreamer, or anything related to player-shell debug-overlay synlighet. Use this whenever someone touches `packages/game-client/src/games/game1/Game1Controller.ts`'s mountDebugHud-block, `packages/game-client/src/games/game1/debug/*` debug-modulene, or considers changing how debug-HUD aktiveres — even if they don't mention debug-gating directly.
 metadata:
-  version: 1.0.0
+  version: 1.0.1
   project: spillorama
 ---
+
+<!-- scope: packages/game-client/src/games/game1/Game1Controller.ts, packages/game-client/src/games/game1/debug/**, packages/game-client/src/games/game1/debug/activation.ts -->
 
 # Debug-HUD gating
 
@@ -170,3 +172,4 @@ Hvis du ser HUD uten `?debug=full` i URL:
 | Dato | Endring | Forfatter |
 |---|---|---|
 | 2026-05-15 | Initial — `?debug=full`-only gating; localStorage-trigger fjernet; legacy-flagg auto-cleanup | Agent (på Tobias-direktiv) |
+| 2026-05-15 | v1.0.1 — la til manglende scope-header slik at `Validate scope-headers` CI-gate passerer | Codex PM/audit-agent |

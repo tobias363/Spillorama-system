@@ -59,6 +59,55 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-15 — PM/audit-agent: Access-/approval-matrise før required reviews
+
+**Branch:** `codex/access-approval-matrix`
+**Agent type:** PM/audit-agent (Codex)
+**Trigger:** Tobias ba om neste hardening-steg etter branch-protection-lock: sikre at nye kontroller styrker informasjonsflyt og robusthet uten å skape misforståelser eller ekstra tidstap.
+
+**Inputs:**
+- GitHub collaborator-audit via `gh api 'repos/tobias363/Spillorama-system/collaborators?affiliation=all'`
+- Branch protection-audit fra forrige lock-runde
+- Eksisterende `CREDENTIALS_AND_ACCESS.md`, `HOTFIX_PROCESS.md`, `.github/CODEOWNERS` og pre-lock-review
+
+**Outputs:**
+1. **`docs/operations/ACCESS_APPROVAL_MATRIX.md`** (ny)
+   - Definerer roller, systemtilgang, PR-approval-policy, bypass-labels, emergency merge, access review cadence og offboarding.
+   - Dokumenterer faktisk 2026-05-15-state: `tobias363` admin, `tobias50` write, ingen uavhengig approver.
+   - Låser beslutningen om å vente med required reviews til approver-roster finnes.
+2. **`docs/operations/HOTFIX_PROCESS.md`** oppdatert
+   - Hotfix går via PR + required checks som default.
+   - Emergency-labels og branch-protection-endring krever Tobias-beslutning og incident-logg.
+   - Etter-review innen 24 timer, full review/remediation innen 7 dager.
+3. **`.github/CODEOWNERS`** oppdatert
+   - Forklarer at CODEOWNERS er audit-/informasjonsflagg inntil uavhengig approver finnes.
+4. **`docs/operations/CREDENTIALS_AND_ACCESS.md`** peker nå til access-/approval-matrisen for GitHub/deploy/bypass-roller.
+5. **`docs/engineering/PITFALLS_LOG.md` §5.12** dokumenterer fallgruven "required reviews uten approver-roster".
+6. **`docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`** oppdatert med ny status.
+7. **Skills oppdatert:** `pm-orchestration-pattern` v1.2.0, `dr-runbook-execution` v1.1.0 og `debug-hud-gating` v1.0.1 (manglende scope-header fra CI).
+8. **Skill-map regenerert:** `docs/auto-generated/SKILL_FILE_MAP.md` etter scope-endringer, fra ren detached worktree fordi lokal `.claude/skills/` har ignored/untracked skills som CI ikke ser.
+9. **GitHub labels opprettet:** `approved-emergency-merge` og `post-merge-review-required`.
+
+**Fallgruver oppdaget:**
+- Required reviews er ikke automatisk "best practice" hvis reviewer-rosteren ikke finnes. I denne repo-staten ville det enten skape lockout eller falsk uavhengighet.
+- Skill-frontmatter-validering lokalt er ikke identisk med `Validate scope-headers` i CI; skill-endringer må også dekke `<!-- scope: ... -->` og regenerere `SKILL_FILE_MAP.md` fra samme tracked skill-sett som CI.
+
+**Læring:**
+- Branch protection må designes fra faktisk GitHub-access, ikke ønsket organisasjonskart.
+- For live-rom med ekte penger er en dokumentert grunn til å vente med en kontroll bedre enn å aktivere en kontroll som teamet ikke kan operere trygt.
+- Emergency-merge må være en merket, reviderbar prosess. Hvis branch protection må endres under P0, må endringen logges like nøye som kodeendringen.
+
+**Eierskap:**
+- `docs/operations/ACCESS_APPROVAL_MATRIX.md`
+- `docs/operations/HOTFIX_PROCESS.md`
+- `docs/operations/CREDENTIALS_AND_ACCESS.md`
+- `.github/CODEOWNERS`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
+- `.claude/skills/debug-hud-gating/SKILL.md`
+- `docs/auto-generated/SKILL_FILE_MAP.md`
+
 ### 2026-05-15 — Fix-agent: IDEMPOTENCY_MISMATCH ved gjenkjøp etter avbestilling (Sentry SPILLORAMA-BACKEND-6)
 
 **Branch:** `fix/arm-idempotency-mismatch-after-cancel-2026-05-15`
