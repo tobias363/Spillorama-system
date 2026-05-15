@@ -353,6 +353,42 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - [ADR-0023 — MCP write-access policy](../adr/0023-mcp-write-access-policy.md)
 - §2.6 (direct INSERT forbudt), §2.8 (MCP write-forbud), §6.x (test-infra-mønster matcher OBS-9)
 
+### §2.10 — Arm-cycle-id må bumpes ved player-level full-disarm (IDEMPOTENCY_MISMATCH ved gjenkjøp etter cancel)
+
+**Severity:** P0 (Sentry SPILLORAMA-BACKEND-6, pilot-blokker for buy-flow)
+**Oppdaget:** 2026-05-15 — Tobias-rapportert reproduksjon via Sentry-issue
+**Symptom:**
+- Spiller kjøper bonger → avbestiller alle via × → forlater spillet → kommer tilbake → kjøper bonger igjen
+- Backend kaster `WalletError: IDEMPOTENCY_MISMATCH` med melding
+  `Reservasjon med samme key (arm-{roomCode}-{userId}-{cycleId}-{N}) har beløp 60, ikke 180`
+- Spilleren ser "Uventet feil" — pilot-blokker for buy-flow
+**Root cause:**
+- `bet:arm` idempotency-key er deterministisk:
+  `arm-{roomCode}-{playerId}-{armCycleId}-{newTotalWeighted}`
+- `armCycleId` ble KUN bumpet ved `disarmAllPlayers` (game:start), IKKE ved
+  player-level full disarm (`bet:arm wantArmed=false` cancelAll eller
+  `ticket:cancel fullyDisarmed=true`).
+- Dermed: gjenkjøp etter cancel kunne kollidere med stale (released) reservation-key
+  hvis weighted-count matchet — særlig fordi `clearReservationId` clearer
+  in-memory mapping så `adapter.reserve()` (ikke `increaseReservation`) kalles.
+**Fix (PR 2026-05-15):**
+- `RoomStateManager.bumpArmCycle(roomCode)` — nytt API som sletter `armCycleByRoom[roomCode]`
+- Wired i `GameEventsDeps.bumpArmCycle?` (optional, backward-compat for tests)
+- Kalt fra `releasePreRoundReservation` (roomEvents.ts) etter full release
+- Kalt fra `ticket:cancel`-handler (ticketEvents.ts) når `fullyDisarmed=true`
+**Prevention:**
+- Reconnect-flapping innen samme arm-cycle (ingen cancel) får SAMME key → idempotent retry preserveres
+- Partial cancel bumper IKKE → bruker `increaseReservation` på neste arm
+- Andre spillere i samme rom påvirkes ikke i praksis (de bruker `existingResId` → `increaseReservation`)
+- Tester: `roomEvents.cancelThenRebuyIdempotency.test.ts` — 4 tester
+  (cancel-then-rebuy m/samme weighted, m/ulikt beløp, reconnect-resiliens, bump-id-API)
+**Related:**
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts:240-265` (`releasePreRoundReservation`)
+- `apps/backend/src/sockets/gameEvents/ticketEvents.ts:270-280` (ticket:cancel handler)
+- `apps/backend/src/util/roomState.ts` (`bumpArmCycle` + `getOrCreateArmCycleId`)
+- `apps/backend/src/adapters/PostgresWalletAdapter.ts:1991-2008` (`reserveImpl` IDEMPOTENCY_MISMATCH check)
+- §2.7 (idempotency-key for ALLE wallet-operasjoner) — denne entry presiserer key-scoping
+
 ---
 
 ## §3 Spill 1, 2, 3 arkitektur

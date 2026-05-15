@@ -269,6 +269,14 @@ export function registerTicketEvents(ctx: SocketContext): void {
         }
       }
 
+      // Sentry SPILLORAMA-BACKEND-6 (2026-05-15): bump arm-cycle ved
+      // fullyDisarmed=true så gjenkjøp etter avbestilling ikke kolliderer
+      // med stale reservasjons-key. Speiler bumpen i
+      // `releasePreRoundReservation` for `bet:arm wantArmed=false`-pathen.
+      if (result.fullyDisarmed) {
+        deps.bumpArmCycle?.(roomCode);
+      }
+
       // BIN-693: refresh player.balance etter release så room:update viser
       // oppdatert available_balance umiddelbart.
       const walletId = deps.getWalletIdForPlayer?.(roomCode, playerId);

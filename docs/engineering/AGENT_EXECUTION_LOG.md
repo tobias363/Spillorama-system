@@ -59,6 +59,98 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-15 — Fix-agent: IDEMPOTENCY_MISMATCH ved gjenkjøp etter avbestilling (Sentry SPILLORAMA-BACKEND-6)
+
+**Branch:** `fix/arm-idempotency-mismatch-after-cancel-2026-05-15`
+**Agent type:** Worktree-isolert fix-agent (PM-orkestrering)
+**Trigger:** Sentry-rapport + Tobias-reproduksjon — pilot-blokker for buy-flow.
+
+**Sentry-error:**
+```
+WalletError: Reservasjon med samme key (arm-BINGO_DEMO-PILOT-GOH-...-9) har beløp 60.000000, ikke 180.
+errCode: IDEMPOTENCY_MISMATCH
+  at PostgresWalletAdapter.ts:1995 (reserveImpl)
+```
+
+**Tobias reproduksjon:**
+1. Kjøp 4 bonger (60 kr) → arm-reservering med beløp 60, deterministisk key `arm-{room}-{user}-{cycleId}-{N}`
+2. Avbestille ALLE bonger via × i BuyPopup
+3. Forlate spillerklienten ("inn og ut" av spillet)
+4. Komme tilbake → kjøp nye bonger (12 bonger = 180 kr) → SAMME deterministiske key brukes med ULIKT beløp → IDEMPOTENCY_MISMATCH
+
+**Root cause (diagnose):**
+- `bet:arm` idempotency-key er bygget som `arm-{roomCode}-{playerId}-{armCycleId}-{newTotalWeighted}` (apps/backend/src/sockets/gameEvents/roomEvents.ts:229-231)
+- `armCycleId` bumpes KUN ved `disarmAllPlayers(roomCode)` (game:start, scheduler-tick) — IKKE ved player-level full disarm
+- Cancel-flow (`bet:arm wantArmed=false` eller `ticket:cancel` med `fullyDisarmed=true`):
+  - Releaser reservasjon via `releaseReservation` → status='released'
+  - Clearer in-memory `reservationIdByPlayer` mapping
+  - **MEN bumper IKKE `armCycleId`** → samme UUID brukes ved gjenkjøp
+- Gjenkjøp etter cancel:
+  - `existingResId = null` (cleared) → faller gjennom til `adapter.reserve()`
+  - Bygger samme key som forrige forsøk hvis `newTotalWeighted` matcher
+  - Adapter finner stale row → `IDEMPOTENCY_MISMATCH` (hvis ennå active pga race) eller `INVALID_STATE` (hvis released)
+
+**Hva ble gjort:**
+
+1. **`RoomStateManager.bumpArmCycle(roomCode)`** — ny metode i `apps/backend/src/util/roomState.ts:286`
+   - Sletter `armCycleByRoom[roomCode]` → neste `getOrCreateArmCycleId` allokerer fresh UUID
+   - Idempotent (bump-på-bumpet er no-op)
+
+2. **`GameEventsDeps.bumpArmCycle?`** — utvidet i `apps/backend/src/sockets/gameEvents/deps.ts:160`
+   - Optional, backward-compat for test-harnesses uten full RoomStateManager
+
+3. **`releasePreRoundReservation`** — kaller `deps.bumpArmCycle?.(roomCode)` etter full release
+   - `apps/backend/src/sockets/gameEvents/roomEvents.ts:258`
+   - Dekker `bet:arm wantArmed=false` cancelAll-path
+
+4. **`ticket:cancel`-handler** — kaller `deps.bumpArmCycle?.(roomCode)` når `fullyDisarmed=true`
+   - `apps/backend/src/sockets/gameEvents/ticketEvents.ts:272-278`
+   - Dekker per-× cancel som tømmer alle bonger
+
+5. **Wiring** — `apps/backend/src/index.ts:5489` + `apps/backend/src/sockets/__tests__/testServer.ts:382`
+
+6. **Tester** — `apps/backend/src/sockets/gameEvents/roomEvents.cancelThenRebuyIdempotency.test.ts` (NY, 4 tester):
+   - Cancel-then-rebuy med samme weighted-count (12) → ny cycle, ulik key, ingen mismatch
+   - Cancel-then-rebuy med ulikt beløp (60 → 180) → ny reservasjon
+   - Reconnect-resiliens preserveres: ingen cancel + samme cycle → samme key (idempotent)
+   - `bumpArmCycle` API-verifisering — fresh UUID per bump
+
+**Verifikasjon:**
+- `npm --prefix apps/backend run check` — PASS
+- `npx tsx --test src/sockets/gameEvents/roomEvents.cancelThenRebuyIdempotency.test.ts` — 4/4 PASS
+- `npx tsx --test src/sockets/gameEvents/roomEvents.armCycleIdempotency.test.ts` — 5/5 PASS (no regression)
+- 25 relaterte wallet/arm-tester PASS
+
+**Anti-mønstre fanget for fremtiden:**
+- Reconnect-resiliens MÅ preserveres når man legger til "fresh-key"-mekanikker → kun ekspliсitt cancel skal bumpe cycle, ikke disconnect/eviction
+- Partial cancel (× på én bong som lar andre stå) skal IKKE bumpe — bruker `increaseReservation`-pathen
+- Bug-mønster: deterministic idempotency-keys som ikke scope'er korrekt på state-overganger
+
+**Lessons learned:**
+- Idempotency-keys må scope'es på alle ekplisitt state-overganger som "starter en ny syklus" — ikke bare den åpenbare ("ny runde")
+- Tester må dekke BÅDE happy reconnect-flapping OG cancel-then-retry — i dette tilfellet var reconnect-tester fra Pilot 2026-04-27 OK, men cancel-then-rebuy-scenarioet manglet
+- Defense-in-depth: PostgresWalletAdapter kunne også vurdere å auto-release stale active reservation før `IDEMPOTENCY_MISMATCH`, men det maskerer bugs som denne. Riktig fix er å bumpe key-scope.
+
+**Skill + PITFALLS update:**
+- `.claude/skills/wallet-outbox-pattern/SKILL.md` — ny seksjon "Arm-cycle-id og idempotency-key for bet:arm (FIXED 2026-05-15)" i Reservation-flyt
+- `docs/engineering/PITFALLS_LOG.md` §2.10 — ny entry "Arm-cycle-id må bumpes ved player-level full-disarm"
+- `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry
+
+**Filer endret:**
+- `apps/backend/src/util/roomState.ts` (+27 linjer — bumpArmCycle method)
+- `apps/backend/src/sockets/gameEvents/deps.ts` (+12 linjer — bumpArmCycle dep)
+- `apps/backend/src/sockets/gameEvents/roomEvents.ts` (+5 linjer — bump etter release)
+- `apps/backend/src/sockets/gameEvents/ticketEvents.ts` (+8 linjer — bump ved fullyDisarmed)
+- `apps/backend/src/index.ts` (+4 linjer — wiring)
+- `apps/backend/src/sockets/__tests__/testServer.ts` (+1 linje — test-server wiring)
+- `apps/backend/src/sockets/gameEvents/roomEvents.cancelThenRebuyIdempotency.test.ts` (NY, ~250 linjer)
+- `.claude/skills/wallet-outbox-pattern/SKILL.md` (+45 linjer)
+- `docs/engineering/PITFALLS_LOG.md` (+30 linjer — §2.10)
+
+**Sentry-resolve-action:** Marker SPILLORAMA-BACKEND-6 som resolved etter merge.
+
+---
+
 ### 2026-05-15 — Fix-agent: §5.9 Bong-design Bølge 2 — triple-bong group-rendering via purchaseId
 
 **Branch:** `feat/bong-design-triple-group-rendering-v2-2026-05-15` (basert på `feat/bong-design-prod-implementation-2026-05-15`)
