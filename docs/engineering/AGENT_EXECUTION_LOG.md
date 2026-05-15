@@ -59,6 +59,122 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-15 — Fix-agent: §5.9 Bong-design Bølge 2 — triple-bong group-rendering via purchaseId
+
+**Branch:** `feat/bong-design-triple-group-rendering-v2-2026-05-15` (basert på `feat/bong-design-prod-implementation-2026-05-15`)
+**Agent type:** general-purpose (continuation av tidligere agent som leverte ~50% — fil:`BingoTicketTripletHtml.ts` skrevet men ikke wired, 5 TS-errors)
+**Trigger:** PM-direktiv — fullfør triple-bong group-rendering etter at forrige agent leverte halvferdig arbeid.
+
+**Tobias-direktiv (IMMUTABLE):** Se §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`:
+> "Vi har valg at man kan kjøpe stor gul. Kan du implementere at når denne kjøpes så vises da det nye designet av trippel vi har designet?"
+
+**Bølge-kontekst:** Bølge 1 (PR #1495, fortsatt åpen ved Bølge 2-start) leverte single-design + header-suffiks "Gul - 3 bonger" for large-tickets, men hver large rendret fortsatt som 3 separate single-bonger. Bølge 2 erstatter dette med ÉN visuell triple-container.
+
+**Scope:**
+1. Utvid `Ticket`-interface med `purchaseId` + `sequenceInPurchase` i shared-types + backend
+2. Propager fra `app_game1_ticket_assignments` til wire-format i `Game1ScheduledRoomSnapshot`
+3. Skriv ny `BingoTicketTripletHtml.ts` wrapper-klasse (660px container med 3 sub-grids + dividers)
+4. Refaktor `TicketGridHtml.rebuild` til å gruppere 3 tickets med samme purchaseId
+5. Konvertér `liveCount` fra ticket-rom til entry-rom internt i TicketGridHtml
+6. Sub-bongers individuelle header + cancel-knapp skjules via CSS-overrides
+7. Doc-protokoll: skill + PITFALLS_LOG + AGENT_EXECUTION_LOG (§2.19)
+
+**Inputs:**
+- §5.9 spec
+- Forrige agents `BingoTicketTripletHtml.ts` (5 TS-errors, ikke wired) — gjenbrukt design-prinsippene, re-implementert fra scratch
+- Forrige agents shared-types + backend-endringer (kopiert over)
+- DB-skjema med eksisterende `purchase_id` + `sequence_in_purchase`-kolonner på `app_game1_ticket_assignments` (migration `20260501000000`)
+
+**Hva ble gjort:**
+
+1. **Shared-types utvidet** (`packages/shared-types/src/game.ts` + `schemas/game.ts`):
+   - `Ticket.purchaseId?: string` — propageres fra `app_game1_ticket_purchases.id`
+   - `Ticket.sequenceInPurchase?: number` — 1-indeksert posisjon i purchase
+   - Zod-schema speilet til samme felter
+
+2. **Backend Ticket-type utvidet** (`apps/backend/src/game/types.ts`):
+   - Lokal `Ticket`-interface fikk samme to felter (matchet shared-types)
+   - Nødvendig fordi backend `Game1ScheduledRoomSnapshot.ts` bruker lokal type, ikke shared-types
+
+3. **Backend wire-format propagering** (`apps/backend/src/game/Game1ScheduledRoomSnapshot.ts`):
+   - SQL-query utvidet med `a.purchase_id, a.sequence_in_purchase` på `app_game1_ticket_assignments`
+   - `AssignmentRow`-interface inkluderer felter
+   - Ticket-builder propagerer dem til wire-objektet
+
+4. **`BingoTicketTripletHtml.ts` ny komponent** (~370 linjer):
+   - Wrapper-klasse rundt 3 `BingoTicketHtml`-instanser
+   - Public API speilet fra BingoTicketHtml (`markNumber`, `markNumbers`, `reset`, `setActivePattern`, `highlightLuckyNumber`, `getRemainingCount`, `destroy`, `root`)
+   - Container 660px max-width, 3 sub-grids i `grid-template-columns: 1fr 1px 1fr 1px 1fr`
+   - 1px `rgba(0, 0, 0, 0.15)` dividers mellom sub-grids med `margin: 4px 0`
+   - Header viser "Farge - 3 bonger" + totalpris (per-bong × 3)
+   - ÉN × cancel-knapp som canceler hele purchase (kaller `onCancel(purchaseId)`)
+   - CSS-overrides skjuler sub-bongers individuelle header + cancel-knapp
+   - `data-test-purchase-id` + `data-test-ticket-color` + `data-test-ticket-type="large"` for Playwright
+   - Marker sub-bongens root med `.triple-sub-root`-klasse så CSS-selektorer treffer
+
+5. **`TicketGridHtml.rebuild` refaktorert**:
+   - Ny type-union `TicketEntry = BingoTicketHtml | BingoTicketTripletHtml`
+   - `tickets`-array og `ticketById`-Map type-utvidet til entry-typen
+   - `tryGroupTriplet(tickets, startIdx)`-helper grupperer 3 etterfølgende large-tickets med samme purchaseId
+   - `rebuild` itererer med `consumed += 1` eller `+= 3` avhengig av om triplet ble bygd
+   - `liveCount` konverteres til entry-rom (`liveEntries`) under iterasjon — purchase-atomicitet garanterer at en triplet aldri splittes på live/pre-round-grensen
+   - `applyMarks` itererer på entry-rom via `this.liveCount` istedenfor parameter
+   - `applyMarks`-signaturen forenklet (fjernet `liveCount`-parameter)
+   - Cache-hit-pathen i `setTickets` rør IKKE `this.liveCount` lenger (verdien fra forrige rebuild er fortsatt korrekt fordi signature inkluderer `l=${liveCount}`)
+
+6. **Doc-protokoll (§2.19):**
+   - Skill `bong-design` — utvidet med nytt §"Triple-bong group-rendering" + endringslogg-entry v1.1.0
+   - PITFALLS_LOG §7.28 — markert som LØST, oppdatert med resolusjons-detaljer + lessons learned
+   - PITFALLS_LOG §7.29 NY — entry-rom vs ticket-rom-konvertering i TicketGridHtml
+   - Skill-scope kommentar utvidet med nye filer
+
+**Verifikasjon:**
+- `npm --prefix packages/game-client run check`: ✅ PASS (TS strict)
+- `npm --prefix apps/backend run check`: ✅ PASS (etter rebuild av shared-types + utvidelse av backend Ticket)
+- `npm run build`: ✅ PASS (alle 6 build-targets — shared-types, game-client, admin-web, backend)
+- `npm --prefix packages/game-client run test`: 11 failures (alle relatert til Bølge 1 header-tekst-endring, ikke Bølge 2)
+  - `BingoTicketHtml.elvis.test.ts` (3 tests) — Bølge 1 header-format
+  - `BingoTicketHtml.test.ts` (2 tests) — Bølge 1 header-format
+  - `TicketGridHtml.test.ts` (2 tests) — Bølge 1 "Small Yellow" → "Gul"
+  - `TicketGridHtml.largeMultiplicity.test.ts` (3 tests) — Bølge 1 header-format
+  - `posthogBootstrap.test.ts` (1 test) — ikke relatert
+  - Per Tobias-direktiv (§5.9): "Eksisterende tester skal IKKE oppdateres i denne PR-en"
+
+**Outputs:**
+- 7 filer endret/opprettet:
+  - `packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts` (NY, 370 linjer)
+  - `packages/game-client/src/games/game1/components/TicketGridHtml.ts` (refaktorert)
+  - `packages/shared-types/src/game.ts`
+  - `packages/shared-types/src/schemas/game.ts`
+  - `apps/backend/src/game/Game1ScheduledRoomSnapshot.ts`
+  - `apps/backend/src/game/types.ts`
+- Doc-oppdateringer (§2.19):
+  - `.claude/skills/bong-design/SKILL.md` (utvidet)
+  - `docs/engineering/PITFALLS_LOG.md` (§7.28 oppdatert + ny §7.29)
+  - `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Læring (lessons learned):**
+
+1. **Sjekk eksisterende DB-skjema FØR du legger til nytt felt.** Forrige PM antok at `siblingTicketIds: string[]` var nødvendig wire-format-endring. Faktisk var `purchase_id` allerede tilgjengelig som DB-felt på `app_game1_ticket_assignments` (migration `20260501000000`). Ny PR trengte bare propagering til wire — null DB-endring.
+
+2. **Forrige agent skrev 392 linjer som hadde 5 TS-errors fordi den ikke kjørte TS-check.** Re-implementering fra scratch tok 30 min. Lærdom: alltid kjør `npm run check` etter signifikant kode-endring; ikke kommiter ikke-kompilerende kode selv om filen er kjørbart-utseende.
+
+3. **Backend har LOKAL Ticket-type som ikke arver fra shared-types.** Endringer i shared-types-Ticket må manuelt speiles til `apps/backend/src/game/types.ts` (eller backend må refaktoreres til å importere fra shared-types). Per 2026-05-15 er dette duplisert — vurder konsolidering post-pilot.
+
+4. **`liveCount`-konvertering fra ticket-rom til entry-rom er subtil men nødvendig.** Caller (`Game1Controller`) sender `liveCount` i ticket-rom (3 tickets per large = 3 tellet). Internt i `TicketGridHtml` blir det entry-rom (1 entry per triplet eller single). Cache-hit-pathen må IKKE overwrite `this.liveCount` — verdien fra forrige rebuild er fortsatt korrekt fordi signature-hash inkluderer ticket-rom `liveCount` så cache-hit impliserer at ticket-rom-verdien er uendret.
+
+5. **CSS-class-prefix-overrides for å skjule sub-komponent-internals.** Wrapper-klasse legger `.bong-triplet-card`-klasse på root, og bruker selektor `.bong-triplet-card .ticket-header-name` med `!important` for å overstyre inline-styles fra `BingoTicketHtml.populateFront`. Renere enn å mutere sub-komponenten direkte.
+
+**Fallgruver oppdaget:**
+- §7.28 — Triple-ticket-rendering kan IKKE bygges som single-component (LØST i denne sesjon, oppdatert med resolusjons-detaljer)
+- §7.29 — entry-rom vs ticket-rom for `liveCount` (NY i denne sesjon)
+
+**Eierskap:**
+- `BingoTicketTripletHtml.ts` (ny komponent)
+- `TicketGridHtml.ts` rebuild/applyMarks (refaktorert grupperings-logikk)
+- `Ticket`-interface i shared-types + backend (utvidelse)
+- `Game1ScheduledRoomSnapshot` propagering
+
 ### 2026-05-15 — Fix-agent: §5.9 Bong-design prod-implementasjon (single + large header-suffiks)
 
 **Branch:** `feat/bong-design-prod-implementation-2026-05-15` (worktree-isolert, `agent-a9f18e62377a6ebdf`)

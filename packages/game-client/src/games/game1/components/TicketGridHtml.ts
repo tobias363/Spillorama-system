@@ -6,6 +6,21 @@ import {
 } from "../logic/TicketSortByProgress.js";
 import type { Ticket } from "@spillorama/shared-types/game";
 import { BingoTicketHtml } from "./BingoTicketHtml.js";
+import { BingoTicketTripletHtml } from "./BingoTicketTripletHtml.js";
+
+/**
+ * §5.9 (Tobias-direktiv 2026-05-15 IMMUTABLE) — Felles render-API for
+ * single-bonger (`BingoTicketHtml`) og triple-grupperte bonger
+ * (`BingoTicketTripletHtml`). Begge typer eksponerer samme public API
+ * (`root`, `markNumber`, `markNumbers`, `reset`, `highlightLuckyNumber`,
+ * `setActivePattern`, `destroy`) så `TicketGridHtml` kan lagre dem i én
+ * felles `tickets`-array uten branching i mark-propagation-laget.
+ *
+ * Triple-bonger oppstår når 3 `Ticket`-objekter med samme `purchaseId`
+ * (sortert på `sequenceInPurchase`) blir gruppert i `rebuild()`.
+ * Partial-purchases (1-2 av 3 mottatt) faller tilbake til single-rendering.
+ */
+type TicketEntry = BingoTicketHtml | BingoTicketTripletHtml;
 
 /**
  * HTML grid scroller for Game 1 tickets. Replaces the Pixi TicketGridScroller
@@ -28,8 +43,26 @@ export class TicketGridHtml {
   readonly root: HTMLDivElement;
   private readonly scrollArea: HTMLDivElement;
   private readonly gridEl: HTMLDivElement;
-  private tickets: BingoTicketHtml[] = [];
-  private ticketById = new Map<string, BingoTicketHtml>();
+  /**
+   * Render-entries i grid-rekkefølge. Hver entry er enten en enkelt-bong
+   * (`BingoTicketHtml`) eller en triple-bong-wrapper (`BingoTicketTripletHtml`)
+   * som internt holder 3 sub-bonger. Mark-propagation kaller `markNumber` på
+   * begge typer — wrapperen propagerer videre til sub-bongene.
+   *
+   * NB: `liveCount` regnes på ANTALL ENTRIES, ikke antall underliggende
+   * tickets. Tripler teller som 1 entry. Caller (`Game1Controller.update`)
+   * sender allerede liveCount i Ticket-array-rom (3 tickets per large-kjøp
+   * teller som 3) — vi konverterer i `rebuild()` ved å regne hvor mange
+   * `Ticket`-objekter som ble konsumert per entry.
+   */
+  private tickets: TicketEntry[] = [];
+  /**
+   * ID-map fra `Ticket.id` → render-entry. For triple-bonger registreres
+   * ALLE 3 sub-ticket-ID-er → samme triplet (slik at f.eks. en hypotetisk
+   * `ticket:replace`-event på én sub-ticket finner riktig render-entry).
+   * `purchaseId` registreres også separat for triple-spesifikt cancel-routing.
+   */
+  private ticketById = new Map<string, TicketEntry>();
   /** Cache of the last rendered tickets' identity + colour, keyed by id. */
   private lastSignature: string | null = null;
   /** Mark-state signature (drawn-count + last-drawn + lucky + activePattern).
@@ -185,20 +218,26 @@ export class TicketGridHtml {
       // Same shape — only re-apply marks when the mark-state actually changed.
       // Backend sends room:update ~1.2s/tick; without this short-circuit we
       // iterate every live ticket × every drawn number on every tick.
-      this.liveCount = liveCount;
+      //
+      // §5.9 IMMUTABLE 2026-05-15: signature inkluderer `l=${liveCount}`
+      // i ticket-rom, så cache-hit her impliserer liveCount-i-ticket-rom
+      // er uendret. `this.liveCount` (entry-rom, satt av forrige `rebuild`)
+      // er fortsatt korrekt og brukes av `applyMarks` til entry-rom
+      // iterering.
       if (markSig !== this.lastMarkStateSig) {
-        this.applyMarks(opts.state, liveCount);
+        this.applyMarks(opts.state);
         this.lastMarkStateSig = markSig;
       }
       return;
     }
     this.cancelable = opts.cancelable;
-    this.liveCount = liveCount;
     this.rebuild(orderedTickets, opts, liveCount);
+    // `rebuild()` setter `this.liveCount` til entry-rom (1 entry = 1 single
+    // ELLER 1 triplet, ikke 3 sub-tickets) før vi når dette punktet.
     // Assign signature AFTER rebuild — rebuild() calls clear() which resets
     // lastSignature, so setting it beforehand gets overwritten.
     this.lastSignature = signature;
-    this.applyMarks(opts.state, liveCount);
+    this.applyMarks(opts.state);
     this.lastMarkStateSig = markSig;
     this.updateScrollMask();
   }
@@ -360,15 +399,64 @@ export class TicketGridHtml {
     }
 
     this.clear();
-    for (let i = 0; i < tickets.length; i++) {
-      const ticket = tickets[i];
-      const isLive = i < liveCount;
-      // Live (already-paid) brett are never cancelable. Pre-round ones follow
-      // the caller's cancelable flag (true during WAITING / mid-round-queue).
+
+    // §5.9 IMMUTABLE 2026-05-15: triple-grupperings-flyt for large-bonger.
+    //
+    // Strategi:
+    //   1. Iterer tickets sekvensielt.
+    //   2. Hvis ticket har type="large" + gyldig purchaseId, slå opp om de
+    //      neste 1-2 tickets i listen har SAMME purchaseId. Hvis 3 totalt
+    //      → rendre som triplet. Ellers → faller hver tilbake til single.
+    //   3. Backend leverer alle 3 sub-tickets i samme `setTickets`-call
+    //      (purchase er atomisk), så look-ahead innenfor `tickets`-arrayet
+    //      er trygt.
+    //   4. `liveCount` er i ticket-rom (ikke entry-rom). Vi konverterer
+    //      til entry-rom ved å summere konsumerte sub-tickets per entry.
+    //      Siden purchase er atomisk (alle 3 har samme scheduled_game_id
+    //      eller alle 3 er pre-round), kan en triplet ALDRI splittes på
+    //      live/pre-round-grensen.
+    let consumed = 0;
+    let liveEntries = 0;
+    while (consumed < tickets.length) {
+      const ticket = tickets[consumed];
+      const isLive = consumed < liveCount;
       const cancelable = isLive ? false : opts.cancelable;
-      const price = this.computePrice(ticket, opts);
       const rows = ticket.grid?.length ?? 5;
       const cols = ticket.grid?.[0]?.length ?? 5;
+
+      // Try to group 3 large-tickets with same purchaseId.
+      const tripletGroup = this.tryGroupTriplet(tickets, consumed);
+      if (tripletGroup !== null) {
+        const [t1, t2, t3] = tripletGroup;
+        const price = this.computePrice(t1, opts);
+        const triplet = new BingoTicketTripletHtml({
+          tickets: [t1, t2, t3],
+          price,
+          rows,
+          cols,
+          cancelable,
+          onCancel: this.onCancelTicket
+            ? (purchaseId) => this.onCancelTicket?.(purchaseId)
+            : undefined,
+        });
+        if (!isLive && liveCount > 0) {
+          triplet.root.style.opacity = "0.72";
+        }
+        this.tickets.push(triplet);
+        // Map ALL 3 sub-ticket-IDs til samme triplet for future ticket-
+        // lookups (eks. en `ticket:replace` på en sub-ticket).
+        for (const t of tripletGroup) {
+          if (t.id) this.ticketById.set(t.id, triplet);
+        }
+        this.gridEl.appendChild(triplet.root);
+        consumed += 3;
+        if (isLive) liveEntries += 1;
+        continue;
+      }
+
+      // Single-bong fallback: type="small", eller type="large" uten gyldig
+      // purchaseId / partial purchase (1-2 av 3 mottatt).
+      const price = this.computePrice(ticket, opts);
       const child = new BingoTicketHtml({
         ticket,
         price,
@@ -377,14 +465,51 @@ export class TicketGridHtml {
         cancelable,
         onCancel: this.onCancelTicket ?? undefined,
       });
-      // Fade pre-round brett slightly during RUNNING to signal "next round".
       if (!isLive && liveCount > 0) {
         child.root.style.opacity = "0.72";
       }
       this.tickets.push(child);
       if (ticket.id) this.ticketById.set(ticket.id, child);
       this.gridEl.appendChild(child.root);
+      consumed += 1;
+      if (isLive) liveEntries += 1;
     }
+
+    // Re-set liveCount to entry-rom så `markNumberOnAll` itererer korrekt
+    // antall live-entries (1 entry = 1 single eller 1 triplet, ikke 3).
+    this.liveCount = liveEntries;
+  }
+
+  /**
+   * §5.9 IMMUTABLE 2026-05-15: forsøk å gruppere 3 etterfølgende tickets
+   * med samme `purchaseId` (sortert på `sequenceInPurchase`).
+   *
+   * Returnerer en tuple `[t1, t2, t3]` hvis alle 3 betingelser oppfylles:
+   * - `tickets[startIdx]` har `type="large"` og `purchaseId` satt
+   * - `tickets[startIdx+1]` og `tickets[startIdx+2]` finnes med SAMME purchaseId
+   *
+   * Ellers null (faller tilbake til single-rendering for hver). Vi sorterer
+   * IKKE her — backend `Game1ScheduledRoomSnapshot.ts` sender allerede
+   * sub-tickets i sequenceInPurchase-rekkefølge per purchase.
+   */
+  private tryGroupTriplet(
+    tickets: Ticket[],
+    startIdx: number,
+  ): [Ticket, Ticket, Ticket] | null {
+    const first = tickets[startIdx];
+    if (!first) return null;
+    const firstType = (first.type ?? "").toLowerCase();
+    if (firstType !== "large") return null;
+    const purchaseId = first.purchaseId;
+    if (!purchaseId) return null;
+    // Trenger 2 til etter `first`.
+    if (startIdx + 2 >= tickets.length) return null;
+    const second = tickets[startIdx + 1];
+    const third = tickets[startIdx + 2];
+    if (!second || !third) return null;
+    if (second.purchaseId !== purchaseId) return null;
+    if (third.purchaseId !== purchaseId) return null;
+    return [first, second, third];
   }
 
   private computePrice(
@@ -501,24 +626,28 @@ export class TicketGridHtml {
     return Math.round(bundlePrice / ticketCount);
   }
 
-  private applyMarks(state: GameState, liveCount: number): void {
-    // Live brett (index < liveCount) får ALLTID alle trukne tall applisert.
-    // Tidligere versjon prioriterte `state.myMarks[i]` først og falt tilbake
-    // til `drawnNumbers` kun hvis myMarks var tom — det ga "tilfeldig
-    // marking" når rebuild nullstilte ticket-state og myMarks var ufullstendig
-    // (f.eks. rett etter rebuild, eller når backend ikke hadde synket per-
-    // ticket-marks). `BingoTicketHtml.markNumber` er idempotent og matcher
-    // kun celler som faktisk inneholder tallet, så `drawnNumbers` er trygg
-    // autoritativ kilde uansett rebuild-state.
+  private applyMarks(state: GameState): void {
+    // Live entries (index < this.liveCount, entry-rom) får ALLTID alle
+    // trukne tall applisert. Tidligere versjon prioriterte `state.myMarks[i]`
+    // først og falt tilbake til `drawnNumbers` kun hvis myMarks var tom —
+    // det ga "tilfeldig marking" når rebuild nullstilte ticket-state og
+    // myMarks var ufullstendig (f.eks. rett etter rebuild, eller når backend
+    // ikke hadde synket per-ticket-marks). `BingoTicketHtml.markNumber` er
+    // idempotent og matcher kun celler som faktisk inneholder tallet, så
+    // `drawnNumbers` er trygg autoritativ kilde uansett rebuild-state.
     //
-    // Pre-round brett (index ≥ liveCount) forblir umerket — de er preview for
-    // neste runde. Eier-beslutning 2026-04-19: "selvfølgelig ikke disse
+    // Pre-round entries (index ≥ liveCount) forblir umerket — de er preview
+    // for neste runde. Eier-beslutning 2026-04-19: "selvfølgelig ikke disse
     // bongene aktive i den trekningen".
+    //
+    // §5.9 IMMUTABLE 2026-05-15: `this.liveCount` er i ENTRY-rom (1 entry =
+    // 1 single eller 1 triplet). Triplet-wrapperen propagerer
+    // mark/lucky/active-pattern internt til alle 3 sub-bonger.
     const activePattern = activePatternFromState(state.patterns, state.patternResults);
     const drawn = state.drawnNumbers ?? [];
     for (let i = 0; i < this.tickets.length; i++) {
       const ticket = this.tickets[i];
-      const isLive = i < liveCount;
+      const isLive = i < this.liveCount;
       if (isLive) {
         if (drawn.length > 0) ticket.markNumbers(drawn);
         if (state.myLuckyNumber) ticket.highlightLuckyNumber(state.myLuckyNumber);

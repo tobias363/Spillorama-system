@@ -37,6 +37,13 @@ interface AssignmentRow {
   ticket_size: string;
   grid_numbers_json: unknown;
   markings_json: unknown;
+  /**
+   * §5.9 (Tobias-direktiv 2026-05-15) — purchase-grouping for Stor X (3 brett).
+   * Frontend grupperer 3 tickets med samme purchase_id på `Ticket.purchaseId`
+   * og rendrer som ÉN visuell triple-container.
+   */
+  purchase_id: string;
+  sequence_in_purchase: number;
 }
 
 interface PurchaseRow {
@@ -396,7 +403,9 @@ export async function enrichScheduledGame1RoomSnapshot(
               a.ticket_color,
               a.ticket_size,
               a.grid_numbers_json,
-              a.markings_json
+              a.markings_json,
+              a.purchase_id,
+              a.sequence_in_purchase
          FROM ${assignments} a
          JOIN ${users} u ON u.id = a.buyer_user_id
         WHERE a.scheduled_game_id = $1
@@ -412,6 +421,11 @@ export async function enrichScheduledGame1RoomSnapshot(
         grid,
         type,
         color: ticketDisplayColor(assignment.ticket_size, assignment.ticket_color),
+        // §5.9 (Tobias-direktiv 2026-05-15): purchase-grouping for Stor X.
+        // Klient grupperer 3 large-tickets med samme purchaseId og rendrer
+        // som ÉN visuell triple-container istedenfor 3 separate bonger.
+        purchaseId: assignment.purchase_id,
+        sequenceInPurchase: assignment.sequence_in_purchase,
       };
       (tickets[playerId] ??= []).push(ticket);
       (marks[playerId] ??= []).push(parseMarkedNumbers(grid, assignment.markings_json));
