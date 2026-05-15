@@ -294,6 +294,33 @@ Hvis PR mangler dette → enten reject med kommentar, eller follow-up commit fra
 
 **Unntak:** Ren config-pin (eks. atlas-version), CI-tweak, eller ren rename. Hvis i tvil — inkluder doc-update uansett.
 
+#### 2.19.1 Agent Task Contract foer high-risk implementation-agent (vedtatt 2026-05-15, IMMUTABLE)
+
+**HARD REGEL:** PM skal ikke spawne high-risk implementation-agent fra fritekst eller hukommelse. Bruk fact-bound agent-kontrakt:
+
+```bash
+npm run agent:contract -- \
+  --agent "Agent A — <scope>" \
+  --objective "<konkret, evidence-bundet maal>" \
+  --files <path1> \
+  --files <path2> \
+  --evidence <forensic-report-eller-audit.md> \
+  --risk P0 \
+  --output /tmp/agent-contract-<scope>.md
+```
+
+Lim hele output-filen inn i agent-prompten. Kontrakten inneholder automatisk:
+- main-SHA og PM-branch ved spawn
+- fil-scope og write-boundary
+- evidence pack som agenten maa sitere
+- relevante skills via `scripts/find-skills-for-file.mjs`
+- context-pack via `scripts/generate-context-pack.sh`
+- hard constraints, non-goals, skill-doc-protokoll og delivery-report krav
+
+**Hvorfor:** Agent-misforstaaelser oppstaar naar prompten blander fakta, hypoteser og uformell chat. Kontrakten tvinger agenten til aa skille bevist root cause fra hypotese, og stopper agenten hvis evidence motsier objective.
+
+**Paakrevd for:** Spill 1/2/3 runtime, wallet, compliance, live-room, master-flow, repeated live-test bugs, og parallelle agent-boelger.
+
 ### 2.20 Sentry + PostHog overvåking ALLTID aktiv ved testing (vedtatt 2026-05-14, IMMUTABLE)
 
 > "Kan du legge inn i PM rutningen at de skal alltid overvåke sentry/posthog slik at feil blir tatt hånd om med en gang?"

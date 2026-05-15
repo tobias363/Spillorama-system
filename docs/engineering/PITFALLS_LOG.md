@@ -54,10 +54,10 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 19 | 2026-05-15 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 107 entries (per 2026-05-15)
+**Total:** 108 entries (per 2026-05-15)
 
 ---
 
@@ -3366,6 +3366,34 @@ Rapporten må legges ved agent-prompten, og agenten må sitere konkrete DB-rader
 - `docs/operations/PM_HANDOFF_2026-05-15.md` §1 forensic debug-protokoll
 - `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.3
 
+### §11.19 — High-risk agent-prompt som fritekst gir misforstått scope
+
+**Severity:** P1 (tap av tid + risiko for feil endring i live-room pengespill)
+**Oppdaget:** 2026-05-15 etter Tobias-feedback om at agenter i forrige sesjon misforstod hva som ble sagt.
+**Symptom:** PM gir agenten en muntlig/fritekstlig oppgave som blander fakta, hypoteser, ønsker og historikk. Agenten implementerer noe som virker plausibelt, men som ikke er bundet til evidence, riktig fil-scope eller oppdatert skill-kunnskap.
+**Root cause:** Prompten mangler kontraktstruktur: baseline-SHA, write-boundary, evidence, non-goals, relevante skills, PITFALLS, doc-protokoll og delivery-report krav. Agenten fyller hullene med antakelser.
+**Fix:** PM skal generere fact-bound agent-kontrakt før high-risk implementation-agent:
+```bash
+npm run agent:contract -- \
+  --agent "Agent A — <scope>" \
+  --objective "<konkret mål>" \
+  --files <path> \
+  --evidence <forensic-report.md> \
+  --risk P0 \
+  --output /tmp/agent-contract-<scope>.md
+```
+Lim hele kontrakten inn i agent-prompten.
+**Prevention:**
+- Ikke spawn high-risk implementation-agent fra chat-hukommelse eller fri prosa.
+- Agenten må skille fakta fra hypoteser og sitere concrete evidence i root-cause.
+- Hvis evidence motsier objective, skal agenten stoppe og melde konflikt før kodeendring.
+- PM skal avvise leveranser uten Agent Delivery Report og kunnskapsoppdatering.
+**Related:**
+- `scripts/generate-agent-contract.sh`
+- `docs/engineering/AGENT_TASK_CONTRACT.md`
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.4
+
 ---
 
 ## §12 DB-resilience
@@ -3469,3 +3497,4 @@ Rapporten må legges ved agent-prompten, og agenten må sitere konkrete DB-rader
 | 2026-05-15 | Lagt til §8.8 — PM Knowledge Continuity v2: evidence pack + self-test-gate for å bevise operativ kunnskapsparitet, ikke bare at dokumenter finnes. Total 103→104 entries. | PM-AI (knowledge-continuity-hardening) |
 | 2026-05-15 | Lagt til §5.15 — required checks må ikke ha PR path-filter som gjør check-context missing. Funnet da auto-doc PR #1532 ble blokkert av forventet `pitfalls-id-validation`. Total 104→105 entries. | PM-AI (post-merge CI watcher) |
 | 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
+| 2026-05-15 | Lagt til §11.19 — high-risk agent-prompt som fritekst gir misforstått scope. Standardisert `npm run agent:contract` før implementation-agent. Total 107→108 entries. | PM-AI (agent-contract-hardening) |

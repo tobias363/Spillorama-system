@@ -26,6 +26,10 @@ Uten skill+pitfalls-update i hver fix-PR går vi 2 skritt frem og 1 tilbake. Fre
 3. **Tilpasser** PR-nummer + skill-navn + §-nummer per task
 4. **Ved PR-review** sjekker jeg om docs faktisk ble oppdatert — hvis nei, follow-up commit
 5. **Før PM åpner PR**, krever jeg Agent Delivery Report fra agenten i formatet fra [`AGENT_DELIVERY_REPORT_TEMPLATE.md`](./AGENT_DELIVERY_REPORT_TEMPLATE.md)
+6. **For high-risk implementation-agent**, genererer jeg først en fact-bound agent-kontrakt med [`AGENT_TASK_CONTRACT.md`](./AGENT_TASK_CONTRACT.md):
+   ```bash
+   npm run agent:contract -- --agent "<navn>" --objective "<konkret mål>" --files <path> --evidence <rapport.md> --output /tmp/agent-contract.md
+   ```
 
 ---
 
@@ -185,5 +189,6 @@ Resultat-prompt-seksjon: se `Agent F2 prompt` i sesjons-handoff fra 2026-05-14.
 Hvis Tobias gir ny direktiv som påvirker template — oppdater her. Hvis ny skill kommer til, legg til i mapping-tabellen. Template er kortet ned med vilje — overflødig detalj sliter ut agentenes context-budsjett.
 
 Relatert strengere leveranseformat: [`AGENT_DELIVERY_REPORT_TEMPLATE.md`](./AGENT_DELIVERY_REPORT_TEMPLATE.md).
+Relatert prompt-kontrakt: [`AGENT_TASK_CONTRACT.md`](./AGENT_TASK_CONTRACT.md).
 
 **Eier:** PM. Oppdaterer ved hver større endring i PM-flyt eller nye skills.
