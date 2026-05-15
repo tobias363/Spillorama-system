@@ -54,10 +54,10 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 6 | 2026-05-13 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 17 | 2026-05-15 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 98 entries (per 2026-05-15)
+**Total:** 99 entries (per 2026-05-15)
 
 ---
 
@@ -3175,6 +3175,35 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 **Related:**
 - §11.9 Worktree-branch-leakage (parent-side)
 - Wave 2 sesjon 2026-05-13 cascade × 14
+
+### §11.17 — Preview-design-sider er IMMUTABLE — agenter skal ALDRI overskrive med prod-state
+
+**Severity:** P1 (regresjons-risiko — mockup-er er kanonisk sannhet for UI-design)
+**Oppdaget:** 2026-05-15 (Tobias rapporterte 2 ganger at "triple-bong-design ble byttet ut")
+**Symptom:** Tobias rapporterer at en av preview-sidene under `packages/game-client/src/{bong-design,kjopsmodal-design,premie-design,dev-overview,preview}/` ikke matcher det som ble godkjent tidligere. Førsteinntrykk er at en agent overskrev mockup-en med en mellomstilstand fra prod.
+
+**Root cause (2026-05-15-hendelsen):** Source viste seg å være intakt — det reelle problemet var **stale build-artifact** under `apps/backend/public/web/games/{bong-design,...}/`. Disse er gitignored (`.gitignore`: `apps/backend/public/web/games/`) og må regenereres lokalt via `npm run build:games`. Tobias så stale HTML fra forrige build.
+
+**Likevel:** Hendelsen avslørte at det ikke fantes hard-block mot at agenter overskriver preview-source. Tidligere har agenter "reddet" designet (anti-mønster: rette mockup til å matche prod) som ville skapt ekte regresjon.
+
+**Fix (permanent forsvar):**
+1. **CI-gate:** `.github/workflows/preview-pages-immutable.yml` (2026-05-15) blokkerer PR-er som rører `packages/game-client/src/{bong-design,kjopsmodal-design,premie-design,dev-overview,preview}/**` uten `[design-locked: YYYY-MM-DD]`-marker i PR-body. Marker er gyldig 30 dager.
+2. **Skill:** `.claude/skills/preview-pages-protection/SKILL.md` dokumenterer regel + flyt + anti-mønstre.
+3. **Implementer-prefix:** `docs/engineering/IMPLEMENTER_AGENT_PROMPT_PREFIX.md` mal-tekst PM kopier-paster inn i UI-agent-prompts.
+
+**Prevention:**
+- Agenter LESER FRA source (`packages/game-client/src/{folder}/{folder}.html`), ALDRI skriver til source uten Tobias-godkjenning
+- Hvis Tobias rapporterer "designet er feil": sjekk artifact-stale FØRST (`npm run build:games` + hard-refresh). Source er kun feil hvis HTML-en faktisk har endret seg i git history
+- Fix-agent-prompts som rører UI-komponenter (`Game1BuyPopup.ts`, `BingoTicketHtml.ts`, `CenterTopPanel.ts`, `BongCard.ts`, bonus-mini-spill) MÅ ha "Preview-design er IMMUTABLE"-prefix (mal i `IMPLEMENTER_AGENT_PROMPT_PREFIX.md`)
+- Hvis designet faktisk skal endres: Tobias muntlig godkjennelse → PM oppdaterer preview-source → PR-body får `[design-locked: YYYY-MM-DD]`-marker → CI-gate aksepterer
+- ALDRI "rette" mockup uten godkjennelse — selv om prod ser ut til å være riktig
+
+**Related:**
+- `.github/workflows/preview-pages-immutable.yml` (CI-gate)
+- `.claude/skills/preview-pages-protection/SKILL.md` (skill)
+- `docs/engineering/IMPLEMENTER_AGENT_PROMPT_PREFIX.md` (agent-prompt-mal)
+- `.claude/skills/bong-design/SKILL.md` (relatert — bong-rendering-mockup)
+- `.claude/skills/buy-popup-design/SKILL.md` (relatert — BuyPopup-mockup)
 
 ---
 
