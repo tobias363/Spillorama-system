@@ -5484,6 +5484,10 @@ const registerGameEvents = createGameEventHandlers({
   hasArmedOrReservation: (code, pid) => roomState.hasArmedOrReservation(code, pid),
   // Pilot-bug fix 2026-04-27 (Tobias-rapport): per-rom arm-cycle-id.
   getArmCycleId: (code) => roomState.getOrCreateArmCycleId(code),
+  // Sentry SPILLORAMA-BACKEND-6 (2026-05-15): bump arm-cycle ved player-level
+  // full-disarm (cancelAll / ticket:cancel fullyDisarmed=true) så gjenkjøp
+  // ikke kolliderer med stale released-reservasjons-key.
+  bumpArmCycle: (code) => roomState.bumpArmCycle(code),
   // GAP #38: Spillvett stop-game vote service.
   spill1StopVoteService,
   // Tobias 2026-04-27: Spill 1 canonical-room er per-LINK (Group of Halls).

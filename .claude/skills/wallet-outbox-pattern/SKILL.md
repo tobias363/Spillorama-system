@@ -236,6 +236,54 @@ await walletAdapter.releaseReservation({ reservationId, settled: false });
 
 **Expiry:** `WalletReservationExpiryService` cron'er expired reservations (default 30 min etter draw start).
 
+### Arm-cycle-id og idempotency-key for bet:arm (FIXED 2026-05-15)
+
+`bet:arm` idempotency-key er deterministisk:
+```
+arm-{roomCode}-{playerId}-{armCycleId}-{newTotalWeighted}
+```
+
+`armCycleId` er en UUID som scope'er keyen til én "arm-cycle" — perioden mellom
+to bevisste fulle disarm-handlinger. Bumpes (gir frisk UUID) ved:
+
+1. **`disarmAllPlayers(roomCode)`** — game:start (engine commits reservation, room
+   beveger seg fra WAITING → RUNNING)
+2. **`releasePreRoundReservation`** etter full release (Sentry SPILLORAMA-BACKEND-6,
+   2026-05-15) — `bet:arm wantArmed=false` cancelAll path
+3. **`ticket:cancel`** når `fullyDisarmed=true` — siste × tar bort siste bong
+
+Bumpes IKKE ved:
+- Reconnect-flapping (samme arm-state, samme key → idempotent retry)
+- Partial cancel (én × som ikke tømmer alle bonger — `increaseReservation` brukes
+  på neste arm, ingen ny key)
+- `disarmPlayer` (eviction/cleanup uten eksplisitt player-cancel)
+
+**Hvorfor:** Tidligere bug — etter cancel-all, samme `armCycleId` ble brukt på
+gjenkjøp. Hvis `newTotalWeighted` matchet et tidligere attempt, fikk vi
+`IDEMPOTENCY_MISMATCH` (eller `INVALID_STATE` hvis row var `released`).
+
+**Test-pattern** (reconnect-safe + cancel-safe):
+```typescript
+// Cancel-then-rebuy med samme weighted-count: ny cycle → ny key → success
+await reservePreRoundDelta(deps, roomCode, playerId, 0, 12);  // key #1
+await adapter.releaseReservation(resId1);
+deps.clearReservationId(roomCode, playerId);
+deps.bumpArmCycle(roomCode);  // ← KRITISK
+await reservePreRoundDelta(deps, roomCode, playerId, 0, 12);  // key #2 (ulik!)
+
+// Reconnect uten cancel: samme cycle → samme key → idempotent
+await reservePreRoundDelta(deps, roomCode, playerId, 0, 12);  // key #1
+roomState.clearReservationId(roomCode, playerId);  // bare in-memory cleanup
+await reservePreRoundDelta(deps, roomCode, playerId, 0, 12);  // key #1 (samme!)
+```
+
+**Implementasjon:**
+- `RoomStateManager.bumpArmCycle(roomCode)` — sletter `armCycleByRoom[roomCode]`,
+  neste `getOrCreateArmCycleId` genererer fresh UUID
+- Wired i `GameEventsDeps.bumpArmCycle?` (optional, backward-compat)
+- Kalt fra `releasePreRoundReservation` (roomEvents.ts) + `ticket:cancel`-handler
+  (ticketEvents.ts) når `fullyDisarmed=true`
+
 ## Anti-fraud pre-commit decoration
 
 Før commit av wallet-mutering kjøres pre-commit-decorators som kan hindre suspekte transaksjoner:

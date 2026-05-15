@@ -255,6 +255,11 @@ async function releasePreRoundReservation(
     // race med disarm). Neste bet:arm lager ny reservation.
   }
   deps.clearReservationId(roomCode, playerId);
+  // Sentry SPILLORAMA-BACKEND-6 (2026-05-15): bump arm-cycle ETTER full
+  // release så gjenkjøp med samme newTotalWeighted ikke kolliderer med
+  // den nettopp-released reservasjonens key. Backward-compat: no-op hvis
+  // dep ikke er wired (test-harnesses).
+  deps.bumpArmCycle?.(roomCode);
 }
 
 export function registerRoomEvents(ctx: SocketContext): void {

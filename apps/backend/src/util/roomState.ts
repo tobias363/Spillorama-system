@@ -263,6 +263,33 @@ export class RoomStateManager {
     return id;
   }
 
+  /**
+   * Bump arm-cycle-id for the room — next `getOrCreateArmCycleId` allocates
+   * a fresh UUID. Used after player-level full-disarm (bet:arm wantArmed=false
+   * cancelAll, or ticket:cancel with fullyDisarmed=true) so a player who
+   * re-arms with the same total-weighted does not collide with a stale
+   * (already-released) reservation key.
+   *
+   * Sentry SPILLORAMA-BACKEND-6 (2026-05-15): bug reproduksjon —
+   * 1) kjøp 4 bonger (60 kr) → reservation #1 active, key `arm-{room}-{user}-{cycle1}-{N}`
+   * 2) avbestill alle bonger via × → reservation #1 released, in-memory resId cleared
+   *    (men armCycleId IKKE bumpet)
+   * 3) gjenkjøp 12 bonger (180 kr) → bet:arm uten in-memory resId →
+   *    adapter.reserve med SAMME key `arm-{room}-{user}-{cycle1}-{N}`
+   *    (hvis newTotalWeighted matcher) → IDEMPOTENCY_MISMATCH eller INVALID_STATE.
+   *
+   * Reconnect-resiliens preserveres: bump skjer KUN ved bevisst full-disarm
+   * (cancelAll / fullyDisarmed=true). Innen samme syklus (reconnect-flapping
+   * uten cancel) holdes samme cycle-id, så reserve er fortsatt idempotent.
+   *
+   * Andre spillere i samme rom påvirkes ikke i praksis: spillere med aktiv
+   * reservasjon har `existingResId` i memory og bruker `increaseReservation`
+   * (som bypasser idempotency-key). Bare nye `reserve()`-kall får ny cycle.
+   */
+  bumpArmCycle(roomCode: string): void {
+    this.armCycleByRoom.delete(roomCode);
+  }
+
   // ── BIN-693 Option B: Reservation tracking ───────────────────────────────
 
   getReservationId(roomCode: string, playerId: string): string | null {

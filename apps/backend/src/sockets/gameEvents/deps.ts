@@ -148,6 +148,18 @@ export interface GameEventsDeps {
   getArmCycleId?: (roomCode: string) => string;
 
   /**
+   * Sentry SPILLORAMA-BACKEND-6 (2026-05-15): bump arm-cycle-id etter
+   * player-level full-disarm (cancelAll / ticket:cancel fullyDisarmed=true)
+   * så gjenkjøp etter avbestilling ikke får IDEMPOTENCY_MISMATCH ved at
+   * (roomCode, playerId, cycle, newTotalWeighted)-key kolliderer med en
+   * stale reservasjon.
+   *
+   * Optional — hvis utelatt får handleren samme oppførsel som før (cycle
+   * bumps kun ved disarmAllPlayers / game:start).
+   */
+  bumpArmCycle?: (roomCode: string) => void;
+
+  /**
    * GAP #38: Player-initiated stop-game (Spillvett-vote). Optional dep so
    * test harnesses can wire the handler without the full service. Handler
    * returns NOT_SUPPORTED when missing.

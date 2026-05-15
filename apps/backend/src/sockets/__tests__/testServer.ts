@@ -379,6 +379,7 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
     clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
     hasArmedOrReservation: (code, pid) => roomState.hasArmedOrReservation(code, pid),
     getArmCycleId: (code) => roomState.getOrCreateArmCycleId(code),
+    bumpArmCycle: (code) => roomState.bumpArmCycle(code),
   };
 
   const registerGameEvents = createGameEventHandlers(deps);
