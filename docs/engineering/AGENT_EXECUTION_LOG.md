@@ -4251,3 +4251,31 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 
 **Branch:** `codex/skip-closed-pr-diff-gates`
 **PR:** åpnes av PM etter lokal validering.
+
+### 2026-05-15 — PM-AI: purchase_open forensic runner for PM handoff
+
+**Agent-type:** PM/ops-hardening
+**Scope:** Gi ny PM et bedre operativt utgangspunkt etter to dager med live-test-stang rundt `purchase_open`, slik at neste fix starter med korrelert bevis og ikke antakelser.
+**Trigger:** Tobias presiserte at ny PM må ha full oversikt over Postgres, PostHog, Sentry og live-monitor fordi videre arbeid har stanget og teamet ikke fullt ut skjønner hvorfor ting går galt.
+
+**Outputs:**
+- `scripts/purchase-open-forensics.sh` — ny focused evidence pack-runner for `purchase_open`-feilen. Skriver `/tmp/purchase-open-forensics-<timestamp>.md` med git SHA, DB-snapshots, recent scheduled-games, purchase counts, target game detail, hall-ready, master-audit, pg_stat_statements, backend-logg, pilot-monitor-logg, checklist-logg og slow-query-tail.
+- `package.json` — ny kommando `npm run forensics:purchase-open`.
+- `docs/operations/PM_HANDOFF_2026-05-15.md` — første-time-kommandoer oppdatert til å bruke runner før/etter master-action.
+- `docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_2026-05-15.md` — mental modell oppdatert: forensic evidence først, implementation-agent etterpå.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.3.3 — live-test forensics før implementation-agent.
+- `docs/engineering/PITFALLS_LOG.md` §11.18 — dokumenterer fallgruven "implementation-agent uten forensic evidence".
+
+**Læring:**
+- Når en live-test-feil har gjentatt seg, er neste leveranse ikke nødvendigvis kode. Første leveranse bør være en evidence pack som låser hvilken hypotese som faktisk er sann.
+- Postgres, monitor-logg, Sentry og PostHog må knyttes til samme testvindu. Ellers blir kunnskapen fragmentert og ny PM må rekonstruere historien manuelt.
+- Agent-prompten må kreve at implementer-agenten siterer konkrete DB-rader/logglinjer fra evidence pack. Da blir root-cause-forklaringen etterprøvbar.
+
+**Eierskap (filer endret):**
+- `scripts/purchase-open-forensics.sh`
+- `package.json`
+- `docs/operations/PM_HANDOFF_2026-05-15.md`
+- `docs/operations/PM_SESSION_KNOWLEDGE_EXPORT_2026-05-15.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`

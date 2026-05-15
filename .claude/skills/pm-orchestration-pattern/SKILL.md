@@ -2,11 +2,11 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.3.2
+  version: 1.3.3
   project: spillorama
 ---
 
-<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/generate-context-pack.sh, .github/workflows/pm-*.yml, .github/workflows/*gate*.yml, .github/workflows/bug-resurrection-check.yml -->
+<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/purchase-open-forensics.sh, scripts/generate-context-pack.sh, .github/workflows/pm-*.yml, .github/workflows/*gate*.yml, .github/workflows/bug-resurrection-check.yml -->
 
 # PM Orchestration Pattern
 
@@ -148,6 +148,20 @@ bash scripts/generate-push-control-dashboard.sh --open --watch
 Registry-fil: `.claude/active-agents.json` (commit-able). Etter agent-leveranse + PR: `node scripts/pm-push-control.mjs unregister <agent-id>`.
 
 **Pre-spawn-sjekkliste:** før du spawner ny agent, kjør `list` + `conflicts` for å se om scope overlapper med pågående arbeid. Hvis overlapp er uunngåelig (eks. `AGENT_EXECUTION_LOG.md`), dokumenter i `conflictsAcknowledged`-feltet.
+
+### Live-test forensics før implementation-agent
+
+Når en live-test har stanget 2+ ganger, skal PM stoppe vanlig implementation-flow og lage forensic evidence pack før ny agent får kode-scope. Målet er å klassifisere root cause med DB/logg/Sentry/PostHog-data, ikke sende agenten inn med en antakelse.
+
+For `purchase_open`-flyten er standardkommando:
+
+```bash
+npm run forensics:purchase-open -- --phase before-master
+# Trigger master-action / kjøpsforsøk, vent 30 sek
+npm run forensics:purchase-open -- --phase after-master-30s --scheduled-game-id <id>
+```
+
+Evidence pack skal legges ved agent-prompten. Implementer-agenten må sitere konkrete rader/logglinjer fra rapporten når den forklarer root cause.
 
 ### Auto-rebase-on-merge (Phase 2)
 
@@ -342,6 +356,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | PM har dokumentene, men ingen operativ self-test | Ny PM spør om allerede dokumentert kontekst eller pivot-er fra forrige spor | Kjør `pm-knowledge-continuity.mjs` evidence pack + self-test før første kodehandling |
 | Required check har `pull_request.paths`-filter | Docs-only/auto-doc PR mangler check-context og branch protection blokkerer merge | Required PR-checks må alltid kjøre, eller ha always-run wrapper-jobb |
 | Diff-basert PR-gate kjører på closed/merged PR | Post-merge `edited`-event gir `fatal: bad object <head_sha>` etter branch deletion | Job-level guard: `if: ${{ github.event.pull_request.state == 'open' }}` |
+| PM spawner implementation-agent uten forensic evidence etter gjentatt live-test-feil | Agenten fikser symptom eller feil lag; Tobias opplever "2 dager uten at vi skjønner hvorfor" | Kjør relevant forensic-runner først og krev root-cause-sitering i agent-prompt |
 
 ## Kanonisk referanse
 
@@ -362,6 +377,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `scripts/pm-push-control.mjs` — registry + watch + dashboard
 - `scripts/pm-checkpoint.sh` — hard-block onboarding-gate for ny PM
 - `scripts/pm-knowledge-continuity.mjs` — PM evidence pack + self-test-validering
+- `scripts/purchase-open-forensics.sh` — purchase_open forensic evidence pack før implementation-agent
 - `BACKLOG.md` — strategisk oversikt
 - `docs/operations/PM_HANDOFF_*.md` — PM-handoffs (én per session)
 - `.claude/active-agents.json` — registry over aktive agenter (commit-able)
@@ -396,3 +412,4 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 2026-05-15 | v1.3.0 — la til PM Knowledge Continuity v2 evidence pack/self-test og Agent Delivery Report som PM-hardening. |
 | 2026-05-15 | v1.3.1 — dokumenterte at required PR-checks ikke kan ha `pull_request.paths`-filter som gjør check-context missing. |
 | 2026-05-15 | v1.3.2 — dokumenterte at diff-baserte PR-gates må skippe non-open PR-events for å unngå falske røde checks etter merge. |
+| 2026-05-15 | v1.3.3 — la til live-test forensic evidence pack før implementation-agent, med `scripts/purchase-open-forensics.sh` som standard for purchase_open-feilen. |
