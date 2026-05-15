@@ -1491,25 +1491,28 @@ export function getMasterHeaderText(
   switch (effectiveState) {
     case "running":
       // ENESTE state hvor "Aktiv trekning" er gyldig (Tobias-bug 2026-05-14).
-      return safeName
-        ? `Aktiv trekning - ${safeName}`
-        : "Aktiv trekning";
+      // 2026-05-15 (Tobias-direktiv IMMUTABLE): kolon, IKKE bindestrek.
+      // "Uavhengig av hvilken status agentene har skal teksten ALLTID være FØR
+      //  spillet starter: 'Neste spill: {neste spill på lista}'. Når spillet
+      //  er i gang: 'Aktiv trekning: {neste spill på lista}'."
+      return safeName ? `Aktiv trekning${nameSuffix}` : "Aktiv trekning";
     case "paused":
+      // Pauset er midt i runde, ikke pre-game — beholder egen tekst.
       return safeName ? `Pauset${nameSuffix}` : "Pauset";
+    case "idle":
     case "scheduled":
     case "purchase_open":
     case "ready_to_start":
-      // Pre-start-states — engine IKKE running, master kan starte.
-      return safeName
-        ? `Klar til å starte${nameSuffix}`
-        : "Klar til å starte";
     case "completed":
     case "cancelled":
-      // Runde ferdig — venter på advance til neste position.
-      return safeName ? `Runde ferdig${nameSuffix}` : "Runde ferdig";
-    case "idle":
     default:
-      // Ingen plan-run aktiv — viser neste planlagte spill.
+      // 2026-05-15 (Tobias-direktiv IMMUTABLE): ALLE pre-running-states viser
+      // "Neste spill: {name}". Tidligere mapping skilte mellom "Klar til å
+      // starte" og "Runde ferdig" — Tobias bekreftet at den distinksjonen IKKE
+      // skal eksistere. Uavhengig av om master har trykket Marker klar, om
+      // forrige runde nettopp ble ferdig, eller om planen er idle — header
+      // skal være "Neste spill: {name}". Backend-aggregator setter
+      // catalogDisplayName til NESTE plan-item ved finished-status (PR #1422).
       return safeName ? `Neste spill${nameSuffix}` : "Neste spill";
   }
 }

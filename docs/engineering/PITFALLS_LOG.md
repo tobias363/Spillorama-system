@@ -1859,11 +1859,61 @@ Helper er pure (no DOM, no fetch, ingen state-mutering) — testbar isolert. `KN
 
 **Related:**
 - `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts:getMasterHeaderText`
-- `apps/admin-web/tests/masterHeaderText.test.ts` (35 tester, inkl. regression-trip-wire)
+- `apps/admin-web/tests/masterHeaderText.test.ts` (41 tester etter 2026-05-15-utvidelse, inkl. regression-trip-wire)
 - `packages/shared-types/src/spill1-lobby-state.ts` (Spill1ScheduledGameStatus enum)
 - PR #1422 (plan-completed-state — kommer som ny inconsistencyWarning senere)
 - §4 (live-rom-robusthet — master-UX er pilot-blokker)
+- §7.21 (oppfølger-fix 2026-05-15 — fjerner "Klar til å starte" og "Runde ferdig" helt)
 - Tobias-direktiv 2026-05-14 (rapportert 3 ganger — derfor kritisk)
+
+### §7.21 — Master-header må vise "Neste spill: {name}" for ALLE pre-running-states (Tobias 2026-05-15)
+
+**Severity:** P1 (pilot-UX-konsistens — Tobias rapporterte direkte under live-test etter Trinn 3-fixene)
+**Oppdaget:** 2026-05-15 (Tobias' pilot-test etter Trinn 3 i Next Game Display refactor)
+**Symptom:** To distinkte UI-bugs i master-konsoll:
+- **Image 1** (direkte etter `npm run dev:nuke`): Header viste `"Neste spill"` UTEN navn. Skulle vise `"Neste spill: Bingo"` (items[0] i plan).
+- **Image 2** (etter master klikket "Marker Klar"): Header viste `"Klar til å starte: Bingo"`. Skulle vise `"Neste spill: Bingo"`.
+
+**Tobias-direktiv (IMMUTABLE):**
+> "Uavhengig av hvilken status agentene har skal teksten ALLTID være FØR spillet starter: 'Neste spill: {neste spill på lista}'. Når spillet er i gang: 'Aktiv trekning: {neste spill på lista}'."
+
+**Root cause:** To uavhengige feil som overlappet:
+1. **Frontend (mapping):** `getMasterHeaderText` hadde 3 separate cases for pre-running-states (`idle` → "Neste spill", `scheduled|purchase_open|ready_to_start` → "Klar til å starte", `completed|cancelled` → "Runde ferdig"). Tobias' nye spec krever ÉN tekst — "Neste spill: {name}" — for alle pre-running-states.
+2. **Backend (data):** `GameLobbyAggregator.buildPlanMeta()` returnerte `null` når `planRun === null` (typisk direkte etter `dev:nuke` før master har trykket Start). Det betydde `data.catalogDisplayName = null` i frontend → header viste generisk "Neste spill" uten navn.
+
+**Fix (PR `fix/master-header-text-and-catalog-name-2026-05-15`):**
+
+**Frontend (`Spill1HallStatusBox.ts`):**
+- `getMasterHeaderText`-switch forenklet til 3 grener:
+  - `running` → `"Aktiv trekning: {name}"` (KOLON, ikke bindestrek — Tobias-direktiv)
+  - `paused` → `"Pauset: {name}"` (midt i runde, beholder egen tekst)
+  - ALLE andre (idle/scheduled/purchase_open/ready_to_start/completed/cancelled + default) → `"Neste spill: {name}"`
+- Spesialtekster bevart: `plan_completed_for_today`, `closed`, `outside_opening_hours`
+- 41 tester totalt (6 nye for Tobias 2026-05-15-spec) + 3 nye regression-trip-wires:
+  - Ingen state returnerer "Klar til å starte"
+  - Ingen state returnerer "Runde ferdig"
+  - Running bruker KOLON (`:`), ikke bindestrek (` - `)
+
+**Backend (`GamePlanRunService` + `GameLobbyAggregator`):**
+- Ny public read-only metode `GamePlanRunService.findActivePlanForDay(hall, businessDate)` som speiler kandidat-oppslaget i `getOrCreateForToday` (samme sortering på navn, samme GoH-resolve), men returnerer `GamePlanWithItems | null` UTEN å opprette plan-run. Kaster aldri `NO_MATCHING_PLAN` (det er kun for write-paths).
+- `GameLobbyAggregator.getLobbyState` kaller `findActivePlanForDay` når `planRun === null`. Aggregator's `buildPlanMeta` (uendret) peker da til `items[0]` og setter `catalogDisplayName` til items[0].displayName.
+- Fail-soft: hvis `findActivePlanForDay` kaster, logges warn + fall-through til `planMeta=null` (samme som pre-fix-adferd — generisk "Neste spill" fallback).
+
+**Prevention:**
+- ALDRI vis "Klar til å starte" eller "Runde ferdig" som master-header — Tobias-direktiv 2026-05-15 IMMUTABLE
+- Backend MÅ alltid kunne svare på "hva er neste spill?" — selv før master har trykket Start. `findActivePlanForDay`-helperen er en del av denne kontrakten.
+- "Aktiv trekning" har KOLON, ikke bindestrek. Pre-fix-formatet `"Aktiv trekning - {name}"` er ugyldig.
+- Hvis ny pre-running-state legges til `MasterHeaderState`-enum (eks. `purchase_closed`), MÅ den routes til "Neste spill: {name}"-grenen, ikke en ny tekst-variant.
+
+**Related:**
+- §7.20 (forrige iterasjon 2026-05-14 — "Aktiv trekning" ble vist for purchase_open/ready_to_start; denne entry-en supersederer mappingen men beholder regression-tripwire for "Aktiv trekning" kun ved running)
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts:getMasterHeaderText`
+- `apps/admin-web/tests/masterHeaderText.test.ts` (41 tester)
+- `apps/backend/src/game/GamePlanRunService.ts:findActivePlanForDay` (ny public metode)
+- `apps/backend/src/game/GameLobbyAggregator.ts` (fall-through til findActivePlanForDay)
+- `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (2 nye tester for planMeta uten planRun)
+- `.claude/skills/spill1-master-flow/SKILL.md` "Master-UI header-tekst per state" (oppdatert mapping)
+- Tobias-rapport 2026-05-15 live-test (Image 1 + Image 2)
 
 ### §7.23 — Premietabell viste kun Hvit-bong-pris (Tobias 2026-05-14)
 
@@ -2595,3 +2645,4 @@ Hvis avvik: enten `git checkout main && git pull --rebase` (med Tobias' godkjenn
 | 2026-05-14 | Lagt til §7.19 — "Forbereder rommet..."-spinner henger evig etter runde-end. Tobias-rapport 2026-05-14 09:54 (runde 330597ef). Fix: `MAX_PREPARING_ROOM_MS = 15s`-max-timeout i `Game1EndOfRoundOverlay` med forced auto-return via `onBackToLobby`. Erstatter eldre 30s "Venter på master"-tekst-swap som ikke utløste redirect. | Fix-agent (auto-return) |
 | 2026-05-14 | Lagt til §7.24 — premie-celle-størrelse iterasjon V (Tobias-direktiv etter første PR #1442-runde: "smalere, så det matcher mer bilde, ikke tar så mye plass"). Reduserte `.premie-row` padding 6px 10px→3px 8px, `gap` 5px→3px, `.premie-cell` padding 4px 8px→2px 6px. Resultat: rad-høyde ≈ 16-18 px (samme footprint som dagens enkelt-pill). Utvidet `premie-design.html` til å vise hele center-top-mockupen (LeftInfoPanel + mini-grid + premietabell + action-panel) for layout-vurdering i kontekst. | Agent V (CSS-iterasjon) |
 | 2026-05-14 | Lagt til §6.18 — Synthetic bingo-test må kjøres FØR pilot. Tobias-direktiv 2026-05-14: "Vi trenger ALLEREDE NÅ et synthetic end-to-end-test". Bot driver én komplett bingo-runde, verifiserer 6 invarianter (I1-I6). R4-precursor (BIN-817). | synthetic-test-agent |
+| 2026-05-15 | Lagt til §7.21 — Master-header "Neste spill: {name}" for ALLE pre-running-states (Tobias-direktiv IMMUTABLE). To uavhengige bugs: (1) frontend mapping hadde "Klar til å starte" / "Runde ferdig" som mellom-tekster, fjernet — alle pre-running-states gir "Neste spill: {name}". (2) Backend aggregator returnerte `planMeta=null` når plan-run manglet → `catalogDisplayName=null` → header uten navn. Fix: ny `GamePlanRunService.findActivePlanForDay`-helper kalles av aggregator i idle-state. Frontend 41 tester (3 nye trip-wires); backend 26 tester (2 nye for catalogDisplayName uten plan-run). PR `fix/master-header-text-and-catalog-name-2026-05-15`. §7.20 oppdatert med peker. | Fix-agent (Tobias 2026-05-15 live-test) |

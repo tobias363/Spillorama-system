@@ -41,6 +41,7 @@ import type {
   AdvanceToNextResult,
   GamePlanRun,
   GamePlanRunStatus,
+  GamePlanWithItems,
   JackpotOverride,
 } from "./gamePlan.types.js";
 import type { TicketColor } from "./gameCatalog.types.js";
@@ -459,6 +460,58 @@ export class GamePlanRunService {
       [hall, dateStr],
     );
     return rows.map(mapRow);
+  }
+
+  /**
+   * Tobias-direktiv 2026-05-15 (header-bug fix):
+   *   "Uavhengig av hvilken status agentene har skal teksten ALLTID være FØR
+   *    spillet starter: 'Neste spill: {neste spill på lista}'."
+   *
+   *   Master-konsoll viste "Neste spill" (uten navn) direkte etter dev:nuke
+   *   fordi ingen plan-run eksisterte ennå — aggregator's `buildPlanMeta`
+   *   returnerte null fordi `plan` var null. Dette helper-en lar aggregator
+   *   slå opp den aktive planen for (hall, businessDate) UTEN å opprette en
+   *   plan-run, slik at `catalogDisplayName` kan settes til items[0] og
+   *   header viser "Neste spill: Bingo" fra første poll.
+   *
+   * Returnerer `null` hvis ingen plan dekker (hall, weekday). Kaster aldri
+   * `NO_MATCHING_PLAN` (det er kun for write-paths som `getOrCreateForToday`).
+   *
+   * Implementasjon speiler kandidat-oppslag i `getOrCreateForToday`
+   * (linje 614-642 ved skriving) — samme sortering og match-logikk slik at
+   * read-pathen alltid returnerer SAMME plan som write-pathen ville valgt.
+   */
+  async findActivePlanForDay(
+    hallId: string,
+    businessDate: Date | string,
+  ): Promise<GamePlanWithItems | null> {
+    const hall = assertHallId(hallId);
+    const dateStr = assertBusinessDate(businessDate);
+    const weekdayKey = this.weekdayFromDateStr(dateStr);
+    const goHIds = await this.findGoHIdsForHall(hall);
+    const candidates = await this.planService.list({
+      hallId: hall,
+      groupOfHallsIds: goHIds.length > 0 ? goHIds : undefined,
+      isActive: true,
+      limit: 50,
+    });
+    // Dedup på id (en plan kan i teorien matche begge filtere — selv om
+    // CHECK constraint sier XOR, er defensiv dedup gratis). Samme mønster
+    // som `getOrCreateForToday`.
+    const seen = new Set<string>();
+    const unique = candidates.filter((p) => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+    const matched = unique.find((p) =>
+      (p.weekdays as readonly string[]).includes(weekdayKey),
+    );
+    if (!matched) {
+      return null;
+    }
+    // Hent plan med items inline (planService.list returnerer kun meta).
+    return this.planService.getById(matched.id);
   }
 
   /**

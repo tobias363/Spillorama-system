@@ -59,6 +59,99 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-15 — Fix-agent: Master-header "Neste spill: Bingo" + backend catalogDisplayName i idle
+
+**Branch:** `fix/master-header-text-and-catalog-name-2026-05-15` (worktree-isolert, `agent-aab55450bc2b6c1d0`)
+**Agent type:** general-purpose
+**Trigger:** Tobias-rapport 2026-05-15 live-test etter Trinn 3 — to UI-bugs i master-konsoll:
+- Image 1 (direkte etter dev:nuke): header "Neste spill" UTEN navn, skulle vise "Neste spill: Bingo"
+- Image 2 (etter Marker Klar): header "Klar til å starte: Bingo", skulle vise "Neste spill: Bingo"
+
+**Tobias-direktiv (IMMUTABLE):**
+> "Uavhengig av hvilken status agentene har skal teksten ALLTID være FØR spillet starter: 'Neste spill: {neste spill på lista}'. Når spillet er i gang: 'Aktiv trekning: {neste spill på lista}'."
+
+**Scope:** Konsolidere `getMasterHeaderText`-mapping per Tobias' nye spec + sørge for at backend setter `catalogDisplayName` selv når plan-run mangler.
+
+**Hva ble gjort:**
+
+1. **Frontend mapping forenklet** (`apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts:1492-1518`):
+   - Fjernet 3 separate cases ("Klar til å starte", "Runde ferdig") som mellom-tekster
+   - ALLE pre-running-states (idle/scheduled/purchase_open/ready_to_start/completed/cancelled) → `"Neste spill: {name}"`
+   - `running` → `"Aktiv trekning: {name}"` (KOLON, ikke bindestrek — Tobias-direktiv)
+   - `paused` → `"Pauset: {name}"` (midt i runde, beholder egen tekst)
+   - Spesialtekster (plan_completed/closed/outside_opening_hours) uendret
+
+2. **Frontend tester** (`apps/admin-web/tests/masterHeaderText.test.ts` — 35 → 41 tester, alle grønne):
+   - 6 nye tester for ny spec (ready_to_start/completed/cancelled gir "Neste spill")
+   - 3 nye regression-trip-wires:
+     - INGEN state returnerer "Klar til å starte"
+     - INGEN state returnerer "Runde ferdig"
+     - Running bruker KOLON, ikke bindestrek
+   - Eksisterende regression-trip-wire for "Aktiv trekning kun ved running" (2026-05-14, §7.20) BEVART
+
+3. **Backend ny public read-only metode** (`apps/backend/src/game/GamePlanRunService.ts:464-518`):
+   - `findActivePlanForDay(hallId, businessDate): Promise<GamePlanWithItems | null>`
+   - Speiler kandidat-oppslag fra `getOrCreateForToday` (samme sortering, samme GoH-resolve)
+   - Returnerer null hvis ingen plan dekker (kaster aldri `NO_MATCHING_PLAN`)
+   - `GamePlanWithItems`-import lagt til
+
+4. **Backend aggregator wired** (`apps/backend/src/game/GameLobbyAggregator.ts:362-390`):
+   - Når `planRun === null`, kall `planRunService.findActivePlanForDay`
+   - Resultatet brukes av eksisterende `buildPlanMeta`-grein "plan uten plan-run" → `catalogDisplayName = items[0].displayName`
+   - Fail-soft: ved exception logges warn, fall-through til `planMeta=null` (samme som pre-fix)
+
+5. **Backend tester** (`apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` — 24 → 26 tester, alle grønne):
+   - Test 21a: `planMeta` med items[0].displayName når planRun=null + plan har items (Tobias 2026-05-15 hovedfix)
+   - Test 21b: `planMeta=null` når både planRun og plan mangler (negativ-test)
+   - Stub-en oppdatert med `findActivePlanForDay` (defaulter til `planById.values().next().value`)
+
+6. **Skill `spill1-master-flow` v1.16.0 → v1.17.0:**
+   - Master-UI-tabell oppdatert med ny mapping
+   - Tobias-direktiv 2026-05-15 IMMUTABLE-tekst inkludert
+   - Backend `findActivePlanForDay` dokumentert
+   - 4 ALDRI-regler: ingen "Klar til å starte", ingen "Runde ferdig", ingen bindestrek, ikke hardkode "Aktiv trekning"
+
+7. **PITFALLS_LOG §7.21 ny entry:**
+   - Full bug-analyse for Tobias 2026-05-15 live-test (Image 1 + Image 2)
+   - Root cause: 2 uavhengige feil (frontend mapping + backend null-data)
+   - Fix dokumentert frontend + backend
+   - 4 prevention-bullets
+
+8. **PITFALLS_LOG §7.20 oppdatert:**
+   - Test-count 35 → 41
+   - Lagt til peker til §7.21 som oppfølger-fix
+   - Mapping-eksempler bevart men markert som "pre-2026-05-15-spec" implicit via §7.21-pekeren
+
+**Test-resultater:**
+- `npm --prefix apps/admin-web run check`: PASS
+- `npm --prefix apps/backend run check`: PASS
+- `npm --prefix apps/admin-web test`: 1551 PASS / 3 skipped (etter mine endringer; 41 nye/oppdaterte master-header-tester inkludert)
+- `node --import tsx --test src/game/__tests__/GameLobbyAggregator.test.ts`: 26 PASS / 0 FAIL
+
+**Lessons learned:**
+
+1. **Backend-stub-mønster:** Aggregator-test-stuben skiller på `planById`-map som single source for både `planService.getById` OG `findActivePlanForDay`. Det reduserer test-setup-divergence. Default-adferden returnerer `planById.values().next().value` så eksisterende tester som ikke seeder noe får fortsatt fail-soft fallback.
+
+2. **`findActivePlanForDay` er en pure read-helper:** Den modifiserer ikke state, kaster aldri DomainError, og returnerer null heller enn å throw når plan ikke dekker. Forskjellig fra `getOrCreateForToday` som er en WRITE-path og kaster `NO_MATCHING_PLAN`. Denne separasjonen er viktig fordi aggregator skal kunne returnere lobby-state også når ingen plan finnes — bare med tom data.
+
+3. **Pre-running-state forenkling:** Tobias' nye spec er strengere enn forrige (2026-05-14). Hver gang vi har "smart" diskriminering mellom states (eks. "Klar til å starte" vs "Neste spill") må vi spørre Tobias om diskrimineringen er ønsket. Antakelse: pre-running er ALWAYS "Neste spill", uavhengig av hvor langt master har kommet i ready-flyt.
+
+4. **Regression-trip-wires er gull:** Forrige iterasjon (§7.20) la til "ingen state returnerer 'Aktiv trekning' untatt running"-trip-wire. Den fanget IKKE 2026-05-15-buggen (som var om "Klar til å starte"/"Runde ferdig"). Nye trip-wires legges til for å fange den dimensjonen også. Hvert nytt Tobias-direktiv om header-tekst MÅ ha en trip-wire som verifiserer at den IKKE-aksepterte gamle teksten ikke returneres.
+
+**Filer endret:** 6
+- `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts` (mapping-switch)
+- `apps/admin-web/tests/masterHeaderText.test.ts` (41 tester)
+- `apps/backend/src/game/GamePlanRunService.ts` (ny `findActivePlanForDay`-metode)
+- `apps/backend/src/game/GameLobbyAggregator.ts` (wire findActivePlanForDay)
+- `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` (stub-update + 2 nye tester)
+- `.claude/skills/spill1-master-flow/SKILL.md` (v1.17.0 — mapping-tabell)
+- `docs/engineering/PITFALLS_LOG.md` (§7.21 ny + §7.20 oppdatert)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**PR-merge:** Push only — IKKE merge. Tobias verifiserer via `dev:nuke` etter PR-merge.
+
+---
+
 ### 2026-05-15 — Fix-agent BUG-D1 — `GamePlanRunService.start()` hardcode-fjerning
 
 **Branch:** `fix/bug-d1-planrun-start-hardcode-2026-05-15` (worktree-isolert, `agent-a40717ffc6be74b26`)

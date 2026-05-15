@@ -1,23 +1,35 @@
 /**
- * Tests for `getMasterHeaderText` i `Spill1HallStatusBox` (2026-05-14).
+ * Tests for `getMasterHeaderText` i `Spill1HallStatusBox`.
+ *
+ * Tobias-direktiv 2026-05-15 (IMMUTABLE):
+ *   "Uavhengig av hvilken status agentene har skal teksten ALLTID være FØR
+ *    spillet starter: 'Neste spill: {neste spill på lista}'. Når spillet er
+ *    i gang: 'Aktiv trekning: {neste spill på lista}'."
  *
  * Bug-bakgrunn:
- *   Tobias rapporterte 3 ganger 2026-05-14 (07:55, 09:51, 12:44) at
- *   master-konsoll viste "Aktiv trekning - Bingo" som header selv om
- *   engine IKKE var running. Pre-fix-grenen behandlet `purchase_open` og
- *   `ready_to_start` som "aktiv trekning" — disse er PRE-start-tilstander
- *   hvor master kan starte spillet med ett klikk, men hvor INGEN trekk
- *   pågår. Resultatet var en motsigelse i UI: header sa "Aktiv trekning",
- *   master-knappen sa "▶ Start neste spill", og "Ingen pågående spill
- *   tilgjengelig..." vises samtidig.
+ *   Tobias rapporterte 2026-05-15 to feil:
+ *     - Image 1 (direkte etter dev:nuke): Header viste "Neste spill" UTEN
+ *       navn — skulle vise "Neste spill: Bingo".
+ *     - Image 2 (etter Marker Klar): Header viste "Klar til å starte: Bingo"
+ *       — skulle vise "Neste spill: Bingo".
+ *
+ *   Tobias 2026-05-14 (forrige iterasjon, PITFALLS §7.20) rapporterte at
+ *   purchase_open/ready_to_start ble vist som "Aktiv trekning" — det er
+ *   også feil. Denne fix-en konsoliderer slik at KUN running gir "Aktiv
+ *   trekning"; alle pre-running-states (idle, scheduled, purchase_open,
+ *   ready_to_start, completed, cancelled) gir "Neste spill: {name}".
  *
  * Fix:
- *   `getMasterHeaderText(state, gameName, info?)` er en pure helper som
- *   mapper hver mulig master-konsoll-state til riktig header-tekst.
- *   "Aktiv trekning" returneres KUN når state === "running".
+ *   `getMasterHeaderText(state, gameName, info?)` er en pure helper med
+ *   forenklet mapping:
+ *     - running                           → "Aktiv trekning: {name}" (kolon)
+ *     - paused                            → "Pauset: {name}" (midt i runde)
+ *     - alle andre pre-running states     → "Neste spill: {name}"
+ *     - plan_completed_for_today          → "Spilleplan ferdig for i dag"
+ *     - closed / outside_opening_hours    → "Stengt — åpner HH:MM"
  *
- * PITFALLS_LOG §7.20 dekker denne bug-en og krever at fremtidige endringer
- * i mapping-en MÅ ledsages av oppdaterte tester i denne filen.
+ * PITFALLS_LOG §7.20 + ny §7.21 dekker dette og krever at fremtidige
+ * endringer i mapping-en MÅ ledsages av oppdaterte tester i denne filen.
  */
 
 import { describe, it, expect } from "vitest";
@@ -26,64 +38,63 @@ import {
   type MasterHeaderState,
 } from "../src/pages/cash-inout/Spill1HallStatusBox.js";
 
-describe("getMasterHeaderText — state-aware master header (Tobias 3-gang-bug 2026-05-14)", () => {
-  // ── Test 1: idle (ingen plan-run aktiv) ───────────────────────────────
+describe("getMasterHeaderText — Tobias spec 2026-05-15", () => {
+  // ── PRE-RUNNING-STATES (alle gir "Neste spill: {name}") ───────────────
+
   it('idle + "Bingo" → "Neste spill: Bingo"', () => {
     expect(getMasterHeaderText("idle", "Bingo")).toBe("Neste spill: Bingo");
   });
 
-  // ── Test 2: scheduled (spawnet, ikke startet) ─────────────────────────
-  it('scheduled + "Bingo" → "Klar til å starte: Bingo"', () => {
+  it('scheduled + "Bingo" → "Neste spill: Bingo"', () => {
     expect(getMasterHeaderText("scheduled", "Bingo")).toBe(
-      "Klar til å starte: Bingo",
+      "Neste spill: Bingo",
     );
   });
 
-  // ── Test 3: ready_to_start (master har trykket "Marker klar") ─────────
-  it('ready_to_start + "Bingo" → "Klar til å starte: Bingo"', () => {
-    expect(getMasterHeaderText("ready_to_start", "Bingo")).toBe(
-      "Klar til å starte: Bingo",
-    );
-  });
-
-  // ── Test 3b: purchase_open (bonge-salg åpent, IKKE running) ───────────
-  //
-  // DENNE er pre-fix-bug-en. Pre-fix returnerte "Aktiv trekning - Bingo".
-  // Post-fix MÅ returnere "Klar til å starte" siden engine ikke er running.
-  it('purchase_open + "Bingo" → "Klar til å starte: Bingo" (regression: Tobias 3-gang-bug)', () => {
+  it('purchase_open + "Bingo" → "Neste spill: Bingo"', () => {
     expect(getMasterHeaderText("purchase_open", "Bingo")).toBe(
-      "Klar til å starte: Bingo",
+      "Neste spill: Bingo",
     );
   });
 
-  // ── Test 4: running (engine kjører trekk) ─────────────────────────────
-  it('running + "Bingo" → "Aktiv trekning - Bingo"', () => {
+  it('ready_to_start + "Bingo" → "Neste spill: Bingo" (Tobias bug 2026-05-15)', () => {
+    // Image 2 i Tobias-rapport 2026-05-15: pre-fix viste "Klar til å starte:
+    // Bingo" — post-fix MÅ vise "Neste spill: Bingo".
+    expect(getMasterHeaderText("ready_to_start", "Bingo")).toBe(
+      "Neste spill: Bingo",
+    );
+  });
+
+  it('completed + "1000-spill" → "Neste spill: 1000-spill" (når plan har advanced)', () => {
+    expect(getMasterHeaderText("completed", "1000-spill")).toBe(
+      "Neste spill: 1000-spill",
+    );
+  });
+
+  it('cancelled + "1000-spill" → "Neste spill: 1000-spill"', () => {
+    expect(getMasterHeaderText("cancelled", "1000-spill")).toBe(
+      "Neste spill: 1000-spill",
+    );
+  });
+
+  // ── RUNNING (eneste state hvor "Aktiv trekning" er gyldig) ─────────────
+
+  it('running + "Bingo" → "Aktiv trekning: Bingo" (kolon, IKKE bindestrek)', () => {
     expect(getMasterHeaderText("running", "Bingo")).toBe(
-      "Aktiv trekning - Bingo",
+      "Aktiv trekning: Bingo",
     );
   });
 
-  // ── Test 5: paused ────────────────────────────────────────────────────
-  it('paused + "Bingo" → "Pauset: Bingo"', () => {
+  // ── PAUSET (midt i runde, beholder egen tekst) ─────────────────────────
+
+  it('paused + "Bingo" → "Pauset: Bingo" (uendret — midt i runde)', () => {
     expect(getMasterHeaderText("paused", "Bingo")).toBe("Pauset: Bingo");
   });
 
-  // ── Test 6: finished/completed ───────────────────────────────────────
-  it('completed + "Bingo" → "Runde ferdig: Bingo"', () => {
-    expect(getMasterHeaderText("completed", "Bingo")).toBe(
-      "Runde ferdig: Bingo",
-    );
-  });
+  // ── PLAN-COMPLETED ─────────────────────────────────────────────────────
 
-  it('cancelled + "Bingo" → "Runde ferdig: Bingo"', () => {
-    expect(getMasterHeaderText("cancelled", "Bingo")).toBe(
-      "Runde ferdig: Bingo",
-    );
-  });
-
-  // ── Test 7: plan_completed_for_today ──────────────────────────────────
-  it("plan_completed_for_today → \"Spilleplan ferdig for i dag\"", () => {
-    expect(getMasterHeaderText("plan_completed_for_today", "Bingo")).toBe(
+  it('plan_completed → "Spilleplan ferdig for i dag" (uendret)', () => {
+    expect(getMasterHeaderText("plan_completed_for_today", null)).toBe(
       "Spilleplan ferdig for i dag",
     );
   });
@@ -96,14 +107,15 @@ describe("getMasterHeaderText — state-aware master header (Tobias 3-gang-bug 2
     ).toBe("Spilleplan ferdig for i dag — neste plan: 18:00 neste dag");
   });
 
-  // ── Test 8: closed / outside_opening_hours ────────────────────────────
-  it("closed + nextOpeningTime → \"Stengt — åpner 18:00\"", () => {
+  // ── CLOSED / OUTSIDE_OPENING_HOURS ─────────────────────────────────────
+
+  it('closed + nextOpeningTime → "Stengt — åpner 18:00"', () => {
     expect(
       getMasterHeaderText("closed", "Bingo", { nextOpeningTime: "18:00" }),
     ).toBe("Stengt — åpner 18:00");
   });
 
-  it("outside_opening_hours + nextOpeningTime → \"Stengt — åpner 18:00\"", () => {
+  it('outside_opening_hours + nextOpeningTime → "Stengt — åpner 18:00"', () => {
     expect(
       getMasterHeaderText("outside_opening_hours", null, {
         nextOpeningTime: "18:00",
@@ -111,32 +123,46 @@ describe("getMasterHeaderText — state-aware master header (Tobias 3-gang-bug 2
     ).toBe("Stengt — åpner 18:00");
   });
 
-  it("closed uten nextOpeningTime → fallback \"Stengt\"", () => {
+  it('closed uten nextOpeningTime → fallback "Stengt"', () => {
     expect(getMasterHeaderText("closed", "Bingo")).toBe("Stengt");
   });
 
-  // ── Test 9: null gameName → fallback til generisk tekst ───────────────
-  it("running + null gameName → \"Aktiv trekning\"", () => {
+  // ── NULL gameName fallback ─────────────────────────────────────────────
+
+  it('running + null gameName → "Aktiv trekning"', () => {
     expect(getMasterHeaderText("running", null)).toBe("Aktiv trekning");
   });
 
-  it("idle + null gameName → \"Neste spill\"", () => {
+  it('idle + null gameName → "Neste spill"', () => {
     expect(getMasterHeaderText("idle", null)).toBe("Neste spill");
   });
 
-  it("paused + null gameName → \"Pauset\"", () => {
+  it('paused + null gameName → "Pauset"', () => {
     expect(getMasterHeaderText("paused", null)).toBe("Pauset");
   });
 
-  it("scheduled + null gameName → \"Klar til å starte\"", () => {
-    expect(getMasterHeaderText("scheduled", null)).toBe("Klar til å starte");
+  it('scheduled + null gameName → "Neste spill"', () => {
+    expect(getMasterHeaderText("scheduled", null)).toBe("Neste spill");
   });
 
-  it("completed + null gameName → \"Runde ferdig\"", () => {
-    expect(getMasterHeaderText("completed", null)).toBe("Runde ferdig");
+  it('purchase_open + null gameName → "Neste spill"', () => {
+    expect(getMasterHeaderText("purchase_open", null)).toBe("Neste spill");
+  });
+
+  it('ready_to_start + null gameName → "Neste spill"', () => {
+    expect(getMasterHeaderText("ready_to_start", null)).toBe("Neste spill");
+  });
+
+  it('completed + null gameName → "Neste spill"', () => {
+    expect(getMasterHeaderText("completed", null)).toBe("Neste spill");
+  });
+
+  it('cancelled + null gameName → "Neste spill"', () => {
+    expect(getMasterHeaderText("cancelled", null)).toBe("Neste spill");
   });
 
   // ── Defensive: null / undefined / ukjent state → idle ─────────────────
+
   it("null state → behandles som idle", () => {
     expect(getMasterHeaderText(null, "Bingo")).toBe("Neste spill: Bingo");
   });
@@ -154,15 +180,16 @@ describe("getMasterHeaderText — state-aware master header (Tobias 3-gang-bug 2
   });
 
   // ── XSS-sikkerhet: gameName escapes til HTML-trygg form ───────────────
+
   it("gameName med HTML-entiteter escapes (XSS-beskyttelse)", () => {
     expect(getMasterHeaderText("running", "<script>alert(1)</script>")).toBe(
-      "Aktiv trekning - &lt;script&gt;alert(1)&lt;/script&gt;",
+      "Aktiv trekning: &lt;script&gt;alert(1)&lt;/script&gt;",
     );
   });
 
   it("gameName med & escapes til &amp;", () => {
     expect(getMasterHeaderText("running", "Bingo & Co")).toBe(
-      "Aktiv trekning - Bingo &amp; Co",
+      "Aktiv trekning: Bingo &amp; Co",
     );
   });
 
@@ -196,9 +223,10 @@ describe("getMasterHeaderText — state-aware master header (Tobias 3-gang-bug 2
 
   // ── Bug-regression-trip-wire: "Aktiv trekning" KUN ved running ────────
   //
-  // Dette er kjernen i Tobias 3-gang-bug-en. Eksplisitt regression-test:
-  // ingen andre state enn "running" skal kunne returnere "Aktiv trekning".
-  it("regression Tobias 3-gang-bug: ingen ikke-running state returnerer 'Aktiv trekning'", () => {
+  // Tobias-bug 2026-05-14 (PITFALLS §7.20): purchase_open/ready_to_start
+  // viste "Aktiv trekning" — feil. Eksplisitt regression-test: ingen andre
+  // state enn "running" skal kunne returnere "Aktiv trekning".
+  it("regression Tobias 2026-05-14: ingen ikke-running state returnerer 'Aktiv trekning'", () => {
     const nonRunningStates: MasterHeaderState[] = [
       "idle",
       "scheduled",
@@ -218,5 +246,39 @@ describe("getMasterHeaderText — state-aware master header (Tobias 3-gang-bug 2
         `state="${state}" → "${result}" skal ALDRI starte med "Aktiv trekning"`,
       ).toBe(false);
     }
+  });
+
+  // ── Bug-regression-trip-wire: "Klar til å starte" og "Runde ferdig" er FJERNET ───
+  //
+  // Tobias-bug 2026-05-15: header skal ALDRI vise "Klar til å starte" eller
+  // "Runde ferdig" — alle pre-running-states skal være "Neste spill: {name}".
+  it("regression Tobias 2026-05-15: ingen state returnerer 'Klar til å starte'", () => {
+    for (const state of allStates) {
+      const result = getMasterHeaderText(state, "Bingo");
+      expect(
+        result.startsWith("Klar til å starte"),
+        `state="${state}" → "${result}" skal ALDRI starte med "Klar til å starte"`,
+      ).toBe(false);
+    }
+  });
+
+  it("regression Tobias 2026-05-15: ingen state returnerer 'Runde ferdig'", () => {
+    for (const state of allStates) {
+      const result = getMasterHeaderText(state, "Bingo");
+      expect(
+        result.startsWith("Runde ferdig"),
+        `state="${state}" → "${result}" skal ALDRI starte med "Runde ferdig"`,
+      ).toBe(false);
+    }
+  });
+
+  // ── Bug-regression-trip-wire: "Aktiv trekning" bruker KOLON, ikke bindestrek ───
+  //
+  // Tobias-direktiv 2026-05-15 IMMUTABLE: "Aktiv trekning: {name}" med kolon.
+  // Pre-fix-formatet "Aktiv trekning - {name}" med bindestrek er ugyldig.
+  it("regression Tobias 2026-05-15: running format bruker kolon, ikke bindestrek", () => {
+    const result = getMasterHeaderText("running", "Bingo");
+    expect(result).toBe("Aktiv trekning: Bingo");
+    expect(result).not.toContain(" - ");
   });
 });

@@ -372,6 +372,32 @@ export class GameLobbyAggregator {
           "[lobby-aggregator] plan slettet for aktiv run",
         );
       }
+    } else {
+      // 2b. Tobias-direktiv 2026-05-15 (header-bug): når ingen plan-run
+      // eksisterer (master har aldri trykket Start, eller backend nettopp
+      // ble dev:nuke-restartet), skal aggregator likevel returnere
+      // `catalogDisplayName` så master-konsoll viser "Neste spill: Bingo".
+      //
+      // Tidligere oppførsel returnerte `planMeta=null` i idle-state →
+      // `data.catalogDisplayName=null` → header viste "Neste spill" uten
+      // navn (Image 1 i Tobias-rapport 2026-05-15).
+      //
+      // Fix: slå opp aktiv plan for (hall, businessDate) UTEN å opprette
+      // en plan-run. Aggregator's `buildPlanMeta` med `planRun=null`
+      // peker da til items[0] og setter `catalogDisplayName`.
+      try {
+        plan = await this.planRunService.findActivePlanForDay(
+          hall,
+          businessDate,
+        );
+      } catch (err) {
+        // Ikke fatal — fall tilbake til `planMeta=null`. UI vil vise
+        // generisk "Neste spill" uten navn, men ellers fungere.
+        logger.warn(
+          { err, hallId: hall, businessDate },
+          "[lobby-aggregator] findActivePlanForDay feilet — fortsetter uten planMeta",
+        );
+      }
     }
 
     // 3. Stale-run-detection (yesterday or older still open).
