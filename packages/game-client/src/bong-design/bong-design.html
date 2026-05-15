@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spill 1 — Bong-design preview (3 aktive farger)</title>
+  <title>Spill 1 — Bong-design preview (Trippel Gul + enkeltbonger)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -18,12 +18,13 @@
      *   "Kan opprette bare et nytt view hvor bongene vises med dummy tall.
      *    Det er kun for å tweake på designet."
      *
+     * Tobias bekreftet 2026-05-15 at single-bong "Small Yellow" er bra.
+     * Ny iterasjon: vis også "Trippel Gul" — tre Small Yellow-bonger
+     * festet sammen i ÉN større container, skilt av tynne vertikale linjer.
+     *
      * Side-en er ren HTML/CSS/JS for rask iterasjon — det er BEVISST ingen
      * Pixi/socket-runtime her. Når Tobias har godkjent designet implementeres
      * det 1:1 i `packages/game-client/src/games/game1/components/BingoTicketHtml.ts`.
-     *
-     * Tobias-bekreftet alternativ A 2026-05-15:
-     *   Side-om-side ÉN gang per farge — 3 bonger (Hvit / Gul / Lilla).
      *
      * Regler:
      * - INGEN backdrop-filter (samme PIXI-blink-bug som BingoTicketHtml — se
@@ -94,38 +95,24 @@
       font-size: 12px;
       color: rgba(255,255,255,0.5);
       margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    section.scenario .meta-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-bottom: 10px;
     }
 
-    /*
-     * Bong-rad — 3 bonger side-om-side.
-     * 360px = `BingoTicketHtml.cardWidth` × 1.5 (vi gir litt slack for
-     * design-iterasjon). På smale skjermer wraps de.
-     */
-    .bong-row {
+    /* Sentrer bong-containere i seksjonen */
+    .bong-host {
       display: flex;
-      flex-wrap: wrap;
-      gap: 24px;
       justify-content: center;
       align-items: flex-start;
-    }
-    .bong-col {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-    }
-    .bong-col .col-label {
-      font-size: 14px;
-      font-weight: 700;
-      color: rgba(255,255,255,0.85);
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-    }
-    .bong-col .col-meta {
-      font-size: 11px;
-      color: rgba(255,255,255,0.5);
-      font-style: italic;
-      margin-bottom: 6px;
+      flex-wrap: wrap;
+      gap: 24px;
     }
 
     /*
@@ -137,12 +124,12 @@
       width: 240px;
       aspect-ratio: 240 / 300;
       border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       box-sizing: border-box;
-      padding: 12px 14px 10px 14px;
+      padding: 12px 18px 10px 18px; /* matcher trippel */
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 10px; /* matcher trippel — Tobias 2026-05-15 (single = sub-grid identisk) */
       font-family: 'Inter', system-ui, sans-serif;
       overflow: hidden;
     }
@@ -151,75 +138,135 @@
     .bong-card.color-yellow { background: #f0b92e; color: #2a1a00; }
     .bong-card.color-purple { background: #b8a4e8; color: #2a1040; }
 
-    /* Header: navn venstre + pris høyre. Matcher BingoTicketHtml.populateFront. */
+    /* Header: navn venstre + pris (mid) + × høyre, midtstilt vertikalt,
+       border-bottom som visuell skille mot grid. Matcher referansebilde
+       2026-05-15 (iterasjon 2). */
     .bong-card .bong-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 22px;
       white-space: nowrap;
+      padding-bottom: 5px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.15);
     }
     .bong-card .bong-header .bong-name {
-      font-size: 13px;
+      font-size: 12px; /* -2px fra forrige iterasjon (Tobias 2026-05-15) */
       font-weight: 700;
       letter-spacing: -0.005em;
-      flex: 1;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .bong-card .bong-header .bong-price {
-      font-size: 12px;
+      font-size: 12px; /* -2px fra forrige iterasjon */
       font-weight: 600;
       font-variant-numeric: tabular-nums;
     }
 
     /*
-     * B I N G O-header — bokstavene over hver kolonne. Matcher
-     * BingoTicketHtml.populateFront `BINGO_LETTERS`-rendering.
-     * Burgundy (#7a1a1a) = samme som MARKED_BG.
+     * × cancel-knapp — Tobias-referansebilde 2026-05-15 iterasjon 2:
+     * inline i flex-layout (ikke absolutt-posisjonert). Rent × uten sirkel-
+     * bakgrunn, midtstilt vertikalt med navn + pris. Matcher tekst-fargen
+     * (color: inherit).
+     */
+    .bong-card .bong-header .bong-cancel {
+      width: 18px;
+      height: 18px;
+      border: none;
+      background: transparent;
+      color: inherit; /* matcher palette.header farge per bong */
+      font-size: 18px;
+      font-weight: 500;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      margin-left: auto; /* push × til høyre, navn+pris gruppes til venstre — Tobias 2026-05-15 */
+    }
+    .bong-card .bong-header .bong-cancel:hover {
+      opacity: 0.6;
+    }
+
+    /*
+     * B I N G O-header — bokstavene over hver kolonne.
+     * Tobias-referansebilde 2026-05-15: mörk burgundy (#7a1a1a), tett
+     * spacing, fontsize ~13px. Samme farge som MARKED_BG og som tall-fargen.
      */
     .bong-card .bingo-letters {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
       gap: 5px;
       flex: 0 0 auto;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
+    }
+    /* Tobias 2026-05-15: single-bong = trippel-sub-grid IDENTISK.
+       Strukturelt: .bong-card > .bong-header + .bong-body. .bong-body
+       wrapper matcher .bong-card.triple .triple-sub (gap: 4px mellom
+       bingo-letters/grid/footer). gap: 10px på .bong-card matcher .bong-card.triple
+       (mellom header og body). Pixel-perfect identisk med en sub-grid. */
+    .bong-card .bong-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px; /* matcher .triple-sub gap eksakt */
+      flex: 1;
     }
     .bong-card .bingo-letters .letter {
       text-align: center;
-      font-size: 16px;
-      font-weight: 800;
-      color: #7a1a1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px; /* Tobias-design 2026-05-15: økt fra 13 → 16 for stroke-tydelighet */
+      font-weight: 900;
       letter-spacing: 0.02em;
       line-height: 1;
       font-family: 'Inter', system-ui, sans-serif;
+      /* Tobias-design 2026-05-15: black text-stroke + paint-order så fyllet er inni */
+      -webkit-text-stroke: 1.8px #000; /* tykkere kant for bedre lesbarhet */
+      paint-order: stroke fill;
     }
+    /* Per-bokstav-farger (Tobias-design 2026-05-15) — dus rød/gul/blå/hvit/grønn */
+    .bong-card .bingo-letters .letter.letter-b { color: #c45656; } /* dus rød */
+    .bong-card .bingo-letters .letter.letter-i { color: #e0c068; } /* dus gul */
+    .bong-card .bingo-letters .letter.letter-n { color: #6a8cd6; } /* dus blå */
+    .bong-card .bingo-letters .letter.letter-g { color: #f3eee4; } /* dus hvit */
+    .bong-card .bingo-letters .letter.letter-o { color: #7aa874; } /* dus grønn */
 
-    /* 5×5 grid. Matcher .ticket-grid med 5px gap. */
+    /*
+     * 5×5 grid — Tobias-referansebilde 2026-05-15:
+     *   - tette celler (gap 4px)
+     *   - cream/krem unmarked bakgrunn (#fbf3df)
+     *   - subtil border-radius (4px)
+     *   - tall: mörk burgundy (#7a1a1a), fontsize 14px, fontweight 700
+     */
     .bong-card .bong-grid {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
       grid-template-rows: repeat(5, 1fr);
-      gap: 5px;
+      gap: 4px;
       flex: 1;
     }
     .bong-card .bong-grid .cell {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 14px;
+      font-weight: 700;
       font-family: 'Inter', system-ui, sans-serif;
       font-variant-numeric: tabular-nums;
       line-height: 1;
-      border-radius: 3px;
+      border-radius: 4px;
       min-width: 0;
       min-height: 0;
+      color: #7a1a1a; /* mörk burgundy tall, matcher BINGO-bokstavene */
       /*
-       * UNMARKED_BG = "rgba(255,255,255,0.55)" — semi-transparent over
-       * bong-pastellen så fargen skinner gjennom. Identisk med prod.
+       * Cream/krem unmarked bakgrunn fra Tobias-referansebilde 2026-05-15.
+       * Avviker fra prod-konstanten UNMARKED_BG = rgba(255,255,255,0.55) som
+       * gir semi-transparent skinn-gjennom; mockup bruker fast cream-farge.
        */
-      background: rgba(255,255,255,0.55);
+      background: #fbf3df;
     }
     .bong-card .bong-grid .cell.marked {
       background: #7a1a1a; /* MARKED_BG */
@@ -228,35 +275,94 @@
     }
     .bong-card .bong-grid .cell.free {
       /*
-       * FREE-celle: transparent bakgrunn + spillorama-logo som fyller
-       * cellen (object-fit: contain). Matcher BingoTicketHtml.buildCells
-       * der `freeImg` settes med width/height 100% og objectFit contain.
+       * FREE-celle — Tobias-referansebilde 2026-05-15: ren tekst "FREE"
+       * på grønn bakgrunn. IKKE logo i mockup-versjon (logo brukes kun i
+       * prod). Avviker fra BingoTicketHtml.buildCells som setter logo-img.
        */
-      background: transparent;
-      padding: 0;
-    }
-    .bong-card .bong-grid .cell.free img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      pointer-events: none;
-      user-select: none;
-      display: block;
-    }
-    /* Fallback hvis logo-asset ikke laster — viser ★ i grønn pille */
-    .bong-card .bong-grid .cell.free.fallback {
       background: #2d7a3f; /* FREE_BG */
       color: #ffffff;       /* FREE_TEXT */
-      font-weight: 700;
-      font-size: 18px;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.04em;
     }
 
-    /* ToGo-footer — matcher .ticket-togo */
+    /*
+     * Footer "X igjen" — Tobias-referansebilde 2026-05-15: sentrert, mörk
+     * burgundy, fontsize 11px, fontweight 500, ~6-8px margin over.
+     */
     .bong-card .bong-footer {
       text-align: center;
       font-size: 11px;
       font-weight: 500;
-      opacity: 0.75;
+      color: #000000;
+      margin-top: 4px;
+    }
+
+    /*
+     * ─────────────────────────────────────────────────────────────────
+     * Trippel-bong — Tobias-referansebilde 2026-05-15.
+     *
+     * Tre Small Yellow-bonger festet sammen i ÉN større container,
+     * skilt av tynne vertikale linjer. Header viser "Gul - 3 bonger"
+     * + samlet pris (60 kr) + × cancel. Hver sub-grid har egen BINGO-
+     * header, 5×5 grid og "X igjen"-footer.
+     *
+     * Dimensjon: 660px bredde (3 × 200 + 2 dividers + padding-slack).
+     * Aspect-ratio auto — innholdet styrer høyden så hver sub-grid
+     * beholder samme 5×5-proporsjon som single-bong.
+     * ─────────────────────────────────────────────────────────────────
+     */
+    .bong-card.triple {
+      width: 666px; /* +6px for å gi midterste bong 3px ekstra luft på hver side uten å redusere celle-størrelse */
+      aspect-ratio: auto;
+      padding: 12px 18px 10px 18px;
+      gap: 10px;
+    }
+
+    /* margin-left:auto på .bong-cancel er nå satt globalt på .bong-card .bong-header .bong-cancel
+       (Tobias 2026-05-15: header-layout er lik for single og triple). */
+
+    .bong-card.triple .triple-grids {
+      display: grid;
+      /* 3 sub-grids + 2 tynne vertikale dividers (1px) */
+      grid-template-columns: 1fr 1px 1fr 1px 1fr;
+      gap: 0;
+      align-items: stretch;
+      flex: 1;
+    }
+
+    .bong-card.triple .triple-divider {
+      background: rgba(0, 0, 0, 0.15); /* samme grå som header-border */
+      width: 1px;
+      align-self: stretch;
+      margin: 4px 0;
+    }
+
+    /* Sub-grid har samme intern-layout som single-bong: BINGO-header,
+       5×5 grid, footer. Padding gir litt pust mellom dividers. */
+    .bong-card.triple .triple-sub {
+      display: flex;
+      flex-direction: column;
+      padding: 0 10px;
+      gap: 4px;
+    }
+    .bong-card.triple .triple-sub:first-child { padding-left: 0; }
+    .bong-card.triple .triple-sub:last-child  { padding-right: 0; }
+    /* Tobias 2026-05-15: 3px ekstra luft på hver side av midterste bong (mot dividers). */
+    .bong-card.triple .triple-sub:nth-child(3) {
+      padding-left: 13px;
+      padding-right: 13px;
+    }
+
+    /* Sub-grid bruker samme bingo-letters / bong-grid / cell-styling
+       som single-bong (deklarert over). Kun .bong-footer trenger litt
+       mindre margin siden hver sub-cell er litt strammere. */
+    .bong-card.triple .triple-sub .bong-grid {
+      /* hold 5×5 aspect-ratio via padding-bottom-hack */
+      aspect-ratio: 1 / 1;
+    }
+    .bong-card.triple .triple-sub .bong-footer {
+      margin-top: 2px;
     }
 
     /* Tweaks-paragraf */
@@ -272,43 +378,72 @@
 </head>
 <body>
   <header>
-    <h1>Spill 1 — Bong-design preview (3 aktive farger)</h1>
+    <h1>Spill 1 — Bong-design preview</h1>
     <p class="lead">
-      Hvit (5 kr × 1), Gul (10 kr × 2), Lilla (15 kr × 3). Dummy-tall, kun for
-      design-tweaking. Speiler <code>BingoTicketHtml.ts</code> sin bong-palett
-      1:1 (<code>BONG_COLORS</code> linje 50-58).
+      Tobias-bekreftet 2026-05-15: "Small Yellow"-single er bra. Ny iterasjon
+      legger til <strong>Trippel Gul</strong> — tre Small Yellow-bonger festet
+      sammen i ÉN container, skilt av tynne vertikale linjer. Bong-paletten er
+      kopiert 1:1 fra <code>BingoTicketHtml.ts</code> sin <code>BONG_COLORS</code>
+      (linje 50-58). Resten av layouten følger Tobias-referansebilde 2026-05-15.
     </p>
     <p class="note">
-      Design-preview — ikke produksjons-render. Bong-paletten, FREE-cellens
-      Spillorama-logo, MARKED_BG (#7a1a1a) og BINGO-header er kopiert eksakt
-      fra prod-komponenten. Ingen socket/Pixi-runtime — ren HTML/CSS/JS.
+      Design-preview — ikke produksjons-render. Mockup-spesifikke avvik fra
+      prod: rent × uten sirkel-bakgrunn, cream/krem unmarked celler (#fbf3df),
+      FREE-celle som ren tekst i stedet for logo. Disse vil propageres til
+      <code>BingoTicketHtml.ts</code> når Tobias godkjenner.
     </p>
   </header>
 
   <main>
+    <!-- ───── HOVED-FOKUS: TRIPPEL GUL ───── -->
+    <section class="scenario triple-section">
+      <h2>Trippel Gul</h2>
+      <div class="scenario-sub">
+        Tre Small Yellow-bonger festet sammen, skilt av en tynn vertikal linje.
+        Header viser "Gul - 3 bonger" + samlet pris (60 kr). Hver sub-grid har
+        egen BINGO-header, eget 5×5-grid og egen "X igjen"-footer.
+      </div>
+      <div class="meta-label">Gul × 3 · 3 bonger</div>
+      <div class="bong-host" id="triple-yellow-host"></div>
+    </section>
+
+    <!-- ───── SAMMENLIGNING: ENKELT SMALL YELLOW ───── -->
+    <section class="scenario single-comparison-section">
+      <div class="meta-label">Til sammenligning · enkeltbong</div>
+      <div class="scenario-sub">
+        Samme bong-stil som hver sub-grid i trippelen over. Bekreftet av Tobias
+        2026-05-15 som godkjent design. Footer viser "3 igjen" (mid-spill).
+      </div>
+      <div class="bong-host" id="single-yellow-host"></div>
+    </section>
+
+    <!-- ───── 3 SCENARIER PER FARGE (eksisterende — beholdes for full preview) ───── -->
     <section class="scenario">
       <h3>Ingen markeringer (fresh ticket)</h3>
       <div class="scenario-sub">
         Bongen slik den ser ut umiddelbart etter kjøp, før første trekning.
+        Footer viser "5 igjen". Hvit / Gul / Lilla side-om-side.
       </div>
-      <div class="bong-row" id="row-fresh"></div>
+      <div class="bong-host" id="row-fresh"></div>
     </section>
 
     <section class="scenario">
       <h3>Med markeringer (mid-spill)</h3>
       <div class="scenario-sub">
-        Tilfeldig utvalg av 8 celler markert (MARKED_BG #7a1a1a). FREE-cellen
-        er alltid sentralt og auto-marked via logo.
+        10 celler markert i mönster fra Tobias-referansebilde 2026-05-15
+        (MARKED_BG #7a1a1a). FREE-cellen er alltid sentralt med grønn "FREE"-
+        tekst. Footer viser "3 igjen".
       </div>
-      <div class="bong-row" id="row-marked"></div>
+      <div class="bong-host" id="row-marked"></div>
     </section>
 
     <section class="scenario">
       <h3>Bingo-vinst (Rad 1 fullført)</h3>
       <div class="scenario-sub">
         Øverste rad (5 celler) markert — vinnende Rad 1 i Spill 1's 5×5-grid.
+        Footer viser "BINGO!".
       </div>
-      <div class="bong-row" id="row-bingo"></div>
+      <div class="bong-host" id="row-bingo"></div>
     </section>
   </main>
 
