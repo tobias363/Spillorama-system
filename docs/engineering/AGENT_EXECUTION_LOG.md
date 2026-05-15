@@ -85,12 +85,12 @@ Hver entry har struktur:
 5. **`docs/engineering/PITFALLS_LOG.md` §5.12** dokumenterer fallgruven "required reviews uten approver-roster".
 6. **`docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`** oppdatert med ny status.
 7. **Skills oppdatert:** `pm-orchestration-pattern` v1.2.0, `dr-runbook-execution` v1.1.0 og `debug-hud-gating` v1.0.1 (manglende scope-header fra CI).
-8. **Skill-map regenerert:** `docs/auto-generated/SKILL_FILE_MAP.md` etter scope-endringer.
+8. **Skill-map regenerert:** `docs/auto-generated/SKILL_FILE_MAP.md` etter scope-endringer, fra ren detached worktree fordi lokal `.claude/skills/` har ignored/untracked skills som CI ikke ser.
 9. **GitHub labels opprettet:** `approved-emergency-merge` og `post-merge-review-required`.
 
 **Fallgruver oppdaget:**
 - Required reviews er ikke automatisk "best practice" hvis reviewer-rosteren ikke finnes. I denne repo-staten ville det enten skape lockout eller falsk uavhengighet.
-- Skill-frontmatter-validering lokalt er ikke identisk med `Validate scope-headers` i CI; skill-endringer må også dekke `<!-- scope: ... -->` og regenerere `SKILL_FILE_MAP.md`.
+- Skill-frontmatter-validering lokalt er ikke identisk med `Validate scope-headers` i CI; skill-endringer må også dekke `<!-- scope: ... -->` og regenerere `SKILL_FILE_MAP.md` fra samme tracked skill-sett som CI.
 
 **Læring:**
 - Branch protection må designes fra faktisk GitHub-access, ikke ønsket organisasjonskart.

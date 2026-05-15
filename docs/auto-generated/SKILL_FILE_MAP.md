@@ -10,7 +10,7 @@ Hver skill har en `<!-- scope: glob1, glob2 -->`-header i sin
 `.claude/skills/<name>/SKILL.md`. Denne tabellen viser scope-mønstre
 og antall filer som matcher i nåværende HEAD.
 
-Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
+Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 
 > ✓ Alle skills har scope-header.
 
@@ -23,40 +23,26 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 | `anti-fraud-detection` | 6 | 7 | `apps/backend/src/security/AntiFraudService.ts`<br>`apps/backend/src/security/AntiFraudWalletAdapter.ts`<br>`apps/backend/src/security/__tests__/AntiFraud*.test.ts`<br>`apps/backend/src/routes/adminAntiFraud.ts`<br>_(+2 more)_ |
 | `audit-hash-chain` | 7 | 6 | `apps/backend/src/compliance/AuditLogService.ts`<br>`apps/backend/src/compliance/AuditLogService.test.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.ts`<br>`apps/backend/src/wallet/WalletAuditVerifier.test.ts`<br>_(+3 more)_ |
 | `bong-design` | 12 | 12 | `packages/game-client/src/games/game1/components/BingoTicketHtml.ts`<br>`packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts`<br>`packages/game-client/src/games/game1/components/TicketGridHtml.ts`<br>`packages/game-client/src/games/game1/components/BingoTicketHtml.test.ts`<br>_(+8 more)_ |
-| `bun` | 4 | 1237 | `apps/backend/**/*.ts`<br>`scripts/**/*.ts`<br>`package.json`<br>`bun.lockb` |
 | `buy-popup-design` | 6 | 6 | `packages/game-client/src/games/game1/components/Game1BuyPopup.ts`<br>`packages/game-client/src/games/game1/components/Game1BuyPopup.test.ts`<br>`packages/game-client/src/games/game1/components/Game1BuyPopup.lossState.test.ts`<br>`packages/game-client/src/games/game1/components/Game1BuyPopup.displayName.test.ts`<br>_(+2 more)_ |
 | `candy-iframe-integration` | 6 | 6 | `apps/backend/src/integration/externalGameWallet.ts`<br>`apps/backend/src/integration/externalGameWallet.test.ts`<br>`apps/backend/src/routes/game.ts`<br>`apps/backend/public/web/spillvett.js`<br>_(+2 more)_ |
 | `casino-grade-testing` | 4 | 667 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
 | `customer-unique-id` | 9 | 9 | `apps/backend/src/agent/UniqueIdService.ts`<br>`apps/backend/src/agent/UniqueIdStore.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdStore.postgres.test.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdService.test.ts`<br>_(+5 more)_ |
 | `database-migration-policy` | 3 | 159 | `apps/backend/migrations/**`<br>`apps/backend/src/scripts/migrate.ts`<br>`render.yaml` |
 | `debug-hud-gating` | 3 | 14 | `packages/game-client/src/games/game1/Game1Controller.ts`<br>`packages/game-client/src/games/game1/debug/**`<br>`packages/game-client/src/games/game1/debug/activation.ts` |
-| `docker` | 4 | 23 | `Dockerfile`<br>`docker-compose.yml`<br>`infra/**/*`<br>`.dockerignore` |
 | `dr-runbook-execution` | 11 | 13 | `docs/operations/DR_RUNBOOK.md`<br>`docs/operations/LIVE_ROOM_DR_RUNBOOK.md`<br>`docs/operations/COMPLIANCE_INCIDENT_PROCEDURE.md`<br>`docs/operations/INCIDENT_RESPONSE_PLAN.md`<br>_(+7 more)_ |
-| `express` | 3 | 118 | `apps/backend/src/routes/**/*.ts`<br>`apps/backend/src/middleware/**/*.ts`<br>`apps/backend/src/index.ts` |
 | `goh-master-binding` | 10 | 10 | `apps/backend/src/admin/HallGroupService.ts`<br>`apps/backend/src/admin/HallGroupService.test.ts`<br>`apps/backend/src/routes/adminHallGroups.ts`<br>`apps/backend/src/routes/__tests__/adminHallGroups.test.ts`<br>_(+6 more)_ |
 | `health-monitoring-alerting` | 5 | 5 | `apps/backend/src/routes/publicGameHealth.ts`<br>`apps/backend/src/routes/__tests__/publicGameHealth.test.ts`<br>`apps/backend/src/observability/RoomAlertingService.ts`<br>`apps/backend/src/observability/RoomAlertingBootstrap.ts`<br>_(+1 more)_ |
-| `intent-verification` | 2 | 2 | `scripts/check-tier-a-intent.mjs`<br>`scripts/pm-checkpoint.sh` |
 | `live-room-robusthet-mandate` | 8 | 17 | `apps/backend/src/sockets/SocketIdempotencyStore.ts`<br>`apps/backend/src/sockets/withSocketIdempotency.ts`<br>`apps/backend/src/observability/RoomAlertingService.ts`<br>`apps/backend/src/adapters/EngineCircuitBreakerPort.ts`<br>_(+4 more)_ |
-| `node` | 3 | 1243 | `apps/backend/**/*.ts`<br>`scripts/**/*.mjs`<br>`package.json` |
 | `pengespillforskriften-compliance` | 10 | 81 | `apps/backend/src/compliance/**`<br>`apps/backend/src/spillevett/**`<br>`apps/backend/src/game/ComplianceLedger*`<br>`apps/backend/src/game/PrizePolicyManager.ts`<br>_(+6 more)_ |
-| `pixi` | 1 | 224 | `packages/game-client/src/**/*.ts` |
-| `playwright` | 3 | 0 | `tests/e2e/**/*`<br>`packages/game-client/visual-harness/**/*`<br>`playwright.config.ts` |
 | `pm-orchestration-pattern` | 8 | 24 | `BACKLOG.md`<br>`docs/operations/PM_HANDOFF_*.md`<br>`docs/engineering/PM_*.md`<br>`scripts/agent-onboarding.sh`<br>_(+4 more)_ |
-| `postgresql` | 3 | 12 | `apps/backend/migrations/**/*.sql`<br>`apps/backend/src/adapters/Postgres*.ts`<br>`apps/backend/src/util/pgPool*.ts` |
 | `preview-pages-protection` | 6 | 1 | `packages/game-client/src/bong-design/`<br>`packages/game-client/src/kjopsmodal-design/`<br>`packages/game-client/src/premie-design/`<br>`packages/game-client/src/dev-overview/`<br>_(+2 more)_ |
-| `redis` | 3 | 7 | `apps/backend/src/util/redis*.ts`<br>`apps/backend/src/util/roomState*.ts`<br>`apps/backend/src/adapters/Redis*.ts` |
-| `socket.io` | 2 | 56 | `apps/backend/src/sockets/**/*.ts`<br>`packages/game-client/src/net/**/*.ts` |
 | `spill1-center-top-design` | 9 | 6 | `packages/game-client/src/games/game1/components/CenterTopPanel.ts`<br>`packages/game-client/src/games/game1/components/CenterTopPanel.test.ts`<br>`packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts`<br>`packages/game-client/src/games/game1/components/PatternMiniGrid.ts`<br>_(+5 more)_ |
 | `spill1-master-flow` | 20 | 129 | `apps/backend/src/game/Game1*`<br>`apps/backend/src/game/MasterActionService.ts`<br>`apps/backend/src/game/GamePlanRunService.ts`<br>`apps/backend/src/game/GamePlanRunCleanupService.ts`<br>_(+16 more)_ |
 | `spill2-perpetual-loop` | 8 | 51 | `apps/backend/src/game/Game2*`<br>`apps/backend/src/game/Spill2*`<br>`apps/backend/src/game/PerpetualRound*`<br>`apps/backend/src/jobs/game2AutoDrawTick.ts`<br>_(+4 more)_ |
 | `spill3-phase-state-machine` | 9 | 23 | `apps/backend/src/game/Game3*`<br>`apps/backend/src/game/Spill3*`<br>`apps/backend/src/jobs/game3AutoDrawTick.ts`<br>`apps/backend/src/routes/adminSpill3Config.ts`<br>_(+5 more)_ |
 | `spinngo-databingo` | 5 | 9 | `apps/backend/src/game/ledgerGameTypeForSlug.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.test.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.distribution.test.ts`<br>`apps/backend/src/game/ComplianceLedgerOverskudd.ts`<br>_(+1 more)_ |
 | `trace-id-observability` | 7 | 50 | `apps/backend/src/middleware/traceId.ts`<br>`apps/backend/src/middleware/traceId.test.ts`<br>`apps/backend/src/middleware/socketTraceId.ts`<br>`apps/backend/src/middleware/socketTraceId.test.ts`<br>_(+3 more)_ |
-| `typescript` | 3 | 2009 | `**/*.ts`<br>`**/*.tsx`<br>`tsconfig*.json` |
-| `vite` | 3 | 2 | `apps/admin-web/vite.config.ts`<br>`packages/game-client/vite.config.ts`<br>`**/vite.config.*` |
-| `vitest` | 3 | 915 | `**/*.test.ts`<br>`**/*.spec.ts`<br>`**/vitest.config.*` |
 | `wallet-outbox-pattern` | 10 | 39 | `apps/backend/src/wallet/**`<br>`apps/backend/src/adapters/PostgresWalletAdapter*`<br>`apps/backend/src/adapters/InMemoryWalletAdapter*`<br>`apps/backend/src/adapters/FileWalletAdapter*`<br>_(+6 more)_ |
-| `zod` | 2 | 14 | `packages/shared-types/src/**/*.ts`<br>`apps/backend/src/**/*Schema*.ts` |
 
 ## Per-skill detalj
 
@@ -141,17 +127,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 
 **Filer matchet i HEAD:** 12
 
-### `bun`
-
-**Scope-mønstre:**
-
-- `apps/backend/**/*.ts`
-- `scripts/**/*.ts`
-- `package.json`
-- `bun.lockb`
-
-**Filer matchet i HEAD:** 1237
-
 ### `buy-popup-design`
 
 **Scope-mønstre:**
@@ -225,17 +200,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 
 **Filer matchet i HEAD:** 14
 
-### `docker`
-
-**Scope-mønstre:**
-
-- `Dockerfile`
-- `docker-compose.yml`
-- `infra/**/*`
-- `.dockerignore`
-
-**Filer matchet i HEAD:** 23
-
 ### `dr-runbook-execution`
 
 **Scope-mønstre:**
@@ -253,16 +217,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 - `docs/operations/PILOT_*_RUNBOOK*.md`
 
 **Filer matchet i HEAD:** 13
-
-### `express`
-
-**Scope-mønstre:**
-
-- `apps/backend/src/routes/**/*.ts`
-- `apps/backend/src/middleware/**/*.ts`
-- `apps/backend/src/index.ts`
-
-**Filer matchet i HEAD:** 118
 
 ### `goh-master-binding`
 
@@ -293,15 +247,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 
 **Filer matchet i HEAD:** 5
 
-### `intent-verification`
-
-**Scope-mønstre:**
-
-- `scripts/check-tier-a-intent.mjs`
-- `scripts/pm-checkpoint.sh`
-
-**Filer matchet i HEAD:** 2
-
 ### `live-room-robusthet-mandate`
 
 **Scope-mønstre:**
@@ -316,16 +261,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 - `docs/architecture/LIVE_ROOM_ROBUSTNESS_MANDATE_*.md`
 
 **Filer matchet i HEAD:** 17
-
-### `node`
-
-**Scope-mønstre:**
-
-- `apps/backend/**/*.ts`
-- `scripts/**/*.mjs`
-- `package.json`
-
-**Filer matchet i HEAD:** 1243
 
 ### `pengespillforskriften-compliance`
 
@@ -344,24 +279,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 
 **Filer matchet i HEAD:** 81
 
-### `pixi`
-
-**Scope-mønstre:**
-
-- `packages/game-client/src/**/*.ts`
-
-**Filer matchet i HEAD:** 224
-
-### `playwright`
-
-**Scope-mønstre:**
-
-- `tests/e2e/**/*`
-- `packages/game-client/visual-harness/**/*`
-- `playwright.config.ts`
-
-**Filer matchet i HEAD:** 0
-
 ### `pm-orchestration-pattern`
 
 **Scope-mønstre:**
@@ -377,16 +294,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 
 **Filer matchet i HEAD:** 24
 
-### `postgresql`
-
-**Scope-mønstre:**
-
-- `apps/backend/migrations/**/*.sql`
-- `apps/backend/src/adapters/Postgres*.ts`
-- `apps/backend/src/util/pgPool*.ts`
-
-**Filer matchet i HEAD:** 12
-
 ### `preview-pages-protection`
 
 **Scope-mønstre:**
@@ -399,25 +306,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 - `.github/workflows/preview-pages-immutable.yml`
 
 **Filer matchet i HEAD:** 1
-
-### `redis`
-
-**Scope-mønstre:**
-
-- `apps/backend/src/util/redis*.ts`
-- `apps/backend/src/util/roomState*.ts`
-- `apps/backend/src/adapters/Redis*.ts`
-
-**Filer matchet i HEAD:** 7
-
-### `socket.io`
-
-**Scope-mønstre:**
-
-- `apps/backend/src/sockets/**/*.ts`
-- `packages/game-client/src/net/**/*.ts`
-
-**Filer matchet i HEAD:** 56
 
 ### `spill1-center-top-design`
 
@@ -519,36 +407,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 
 **Filer matchet i HEAD:** 50
 
-### `typescript`
-
-**Scope-mønstre:**
-
-- `**/*.ts`
-- `**/*.tsx`
-- `tsconfig*.json`
-
-**Filer matchet i HEAD:** 2009
-
-### `vite`
-
-**Scope-mønstre:**
-
-- `apps/admin-web/vite.config.ts`
-- `packages/game-client/vite.config.ts`
-- `**/vite.config.*`
-
-**Filer matchet i HEAD:** 2
-
-### `vitest`
-
-**Scope-mønstre:**
-
-- `**/*.test.ts`
-- `**/*.spec.ts`
-- `**/vitest.config.*`
-
-**Filer matchet i HEAD:** 915
-
 ### `wallet-outbox-pattern`
 
 **Scope-mønstre:**
@@ -565,15 +423,6 @@ Antall skills totalt: **39** — varsel hvis noen mangler scope-header:
 - `apps/backend/scripts/reconcile-wallet-vs-ledger.ts`
 
 **Filer matchet i HEAD:** 39
-
-### `zod`
-
-**Scope-mønstre:**
-
-- `packages/shared-types/src/**/*.ts`
-- `apps/backend/src/**/*Schema*.ts`
-
-**Filer matchet i HEAD:** 14
 
 ---
 

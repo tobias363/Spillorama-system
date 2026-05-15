@@ -2793,10 +2793,11 @@ Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-b
 **Severity:** P2 (CI-fail etter PR-åpning, selv om pre-commit passerer)
 **Oppdaget:** 2026-05-15 i PR #1527.
 **Symptom:** Lokal pre-commit kjørte `validate-skill-frontmatter.mjs` og `check-markdown-links.mjs` grønt, men GitHub Actions `Validate scope-headers` feilet fordi `.claude/skills/debug-hud-gating/SKILL.md` manglet `<!-- scope: ... -->` rett etter YAML-frontmatter. Etterpå feilet samme workflow fordi `docs/auto-generated/SKILL_FILE_MAP.md` var stale.
-**Root cause:** Scope-header-gaten kjøres i CI, men ikke som samme lokale hook som skill-frontmatter-valideringen. En skill kan derfor ha gyldig YAML-frontmatter og likevel mangle auto-loading-scope. Når scope endres, må skill-file-map regenereres.
-**Fix:** Legg til scope-header i `debug-hud-gating`, versjonsbump skillen til v1.0.1 og kjør `node scripts/build-skill-file-map.mjs`.
+**Root cause:** Scope-header-gaten kjøres i CI, men ikke som samme lokale hook som skill-frontmatter-valideringen. En skill kan derfor ha gyldig YAML-frontmatter og likevel mangle auto-loading-scope. Når scope endres, må skill-file-map regenereres. Hvis lokal `.claude/skills/` har ignored/untracked skills, lokal generator kan produsere en map som CI aldri kan reprodusere.
+**Fix:** Legg til scope-header i `debug-hud-gating`, versjonsbump skillen til v1.0.1 og regenerer `SKILL_FILE_MAP.md` fra en ren tracked worktree.
 **Prevention:**
-- Når en PR rører `.claude/skills/*/SKILL.md`, kjør lokal variant av scope-sjekken og `node scripts/build-skill-file-map.mjs`.
+- Når en PR rører `.claude/skills/*/SKILL.md`, kjør lokal variant av scope-sjekken og regenerer `SKILL_FILE_MAP.md` fra tracked files. Hvis lokal `.claude/skills/` har ekstra ignored skills, bruk ren worktree:
+  `git worktree add --detach /tmp/spillorama-skillmap-clean HEAD && cd /tmp/spillorama-skillmap-clean && node scripts/build-skill-file-map.mjs`
 - Scope-header skal stå rett etter lukkende `---`, før første Markdown-heading.
 - Hvis skillen bevisst er for bred, bruk eksplisitt tom header: `<!-- scope: -->`.
 **Related:**
