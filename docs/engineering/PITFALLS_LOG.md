@@ -2549,6 +2549,45 @@ overlay-en og instrumentation-modulene gates.
 **Related:** skill `debug-hud-gating`, Tobias-direktiv 2026-05-15 ("fjern
 alle de debug feltnee ... full spillopplevelse")
 
+### §7.30 — Test-locked DOM-indices ≠ visuell layout — bruk CSS `order:` på flex-container (Game1BuyPopup pixel-iter2)
+
+**Severity:** P1 (design-fidelity, fixed 2026-05-15 iter2)
+**Oppdaget:** 2026-05-15 (Tobias rapporterte PR #1502 ikke matchet mockup pixel-perfect)
+**Symptom:** Game1BuyPopup hadde premietabell som `card.children[2]` (etter `typesContainer` ved index 1). Mockup viser premietabell ØVERST (mellom header og ticket-rows). Men fire test-filer (`Game1BuyPopup.test.ts`, `.lossState.test.ts`, `.displayName.test.ts`, `.ticketCount.test.ts`) er lockt på `card.children[1] = typesContainer`, `[2] = prizeMatrixEl`, `[3] = statusMsg`, `[5] = buyBtn`, `[6] = cancelBtn`. Å bytte DOM-rekkefølge ville bryte 32 tester.
+
+**Root cause:** Block-layout følger DOM-rekkefølge slavisk — det er ingen måte å rendre child[2] FØR child[1] visuelt uten å enten:
+1. Endre DOM-rekkefølge (bryter tests)
+2. Bruke flexbox/grid med `order:` (test-trygt)
+
+**Fix:** Endre `card` til `display: flex; flexDirection: column` og sett eksplisitt `order:` på hver child slik at visuell rekkefølge avviker fra DOM-rekkefølge:
+
+```
+DOM-index   →  Visuell order
+[0] header        →  order: 0
+[1] typesContainer →  order: 2
+[2] prizeMatrixEl  →  order: 1   ← visuelt FØR typesContainer
+[3] statusMsg     →  order: 3
+[4] sep           →  order: 4
+[5] buyBtn        →  order: 5
+[6] cancelBtn     →  order: 6
+```
+
+**Prevention:**
+- ALDRI bytt DOM-rekkefølge i Game1BuyPopup-card.children uten å oppdatere alle 4 test-filer samtidig
+- Hvis mockup krever ny visuell rekkefølge, bruk CSS `order:` på allerede-flex-container
+- Pass på at hver child har eksplisitt `order` — implicit default 0 kan gi rare stack-orderings hvis blandet med eksplisitte
+
+**Hvorfor flex-column er trygt for tests:**
+- `Element.children` returnerer alltid i DOM-rekkefølge (ikke visuell)
+- `card.children[1]` er fortsatt `typesContainer` uavhengig av CSS
+- Vitest + happy-dom respekterer DOM-rekkefølge for `.children`
+
+**Files:**
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` (constructor — card.style.display + order per child)
+- `.claude/skills/buy-popup-design/SKILL.md` (Iterasjon 2-seksjon)
+
+**Related:** skill `buy-popup-design`, PR #1502 (initial), iter2-PR (denne)
+
 ---
 
 ## §8 Doc-disiplin

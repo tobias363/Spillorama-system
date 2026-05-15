@@ -222,8 +222,60 @@ Per Tobias-direktiv 2026-05-15: **ikke skriv NYE tester** denne PR-en. Endringer
 |---|---|---|
 | Kjøpsmodal-mockup | `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` | Tobias-bekreftet 2026-05-15 design (bundlet React/JSX) |
 
+## Iterasjon 2 (2026-05-15 ettermiddag) — pixel-perfect mot mockup
+
+Etter PR #1502 (initial implementasjon) rapporterte Tobias at design ikke matchet mockup pixel-perfect. Følgende justeringer er gjort:
+
+### Visuell rekkefølge (DOM vs visuell)
+
+DOM-rekkefølgen er fortsatt test-locked (children[0]=header, [1]=typesContainer, [2]=prizeMatrixEl, [3]=statusMsg, [4]=sep, [5]=buyBtn, [6]=cancelBtn). For å matche mockup-en der premietabell ligger ØVERST (mellom header og ticket-rows), bruker vi nå CSS `order:` på flex-container.
+
+**Card endret til `display: flex; flexDirection: column`**, og hver child har eksplisitt `order`:
+
+| Child | DOM-index | Visuell rekkefølge (`order`) |
+|---|---|---|
+| header | 0 | 0 |
+| prizeMatrixEl | 2 | **1** ← visuelt FØR typesContainer |
+| typesContainer | 1 | 2 |
+| statusMsg | 3 | 3 |
+| sep (totalRow-wrapper) | 4 | 4 |
+| buyBtn | 5 | 5 |
+| cancelBtn | 6 | 6 |
+
+### Pixel-spec-justeringer
+
+| Element | FØR (iter1) | ETTER (iter2) | Begrunnelse |
+|---|---|---|---|
+| `card.display` | `block` (default) | `flex column` | Krevd for `order:`-stack ordering |
+| `prizeMatrixEl.marginTop` | `18px` | (fjernet) | Header har allerede marginBottom 18px |
+| `prizeMatrixEl.marginBottom` | (ikke satt) | `18px` | Gir 18px gap til typesContainer (matcher mockup-rytme) |
+| `typesContainer.rowGap` | `16px` | `10px` | Strammere ticket-row-spacing per mockup |
+| `typesContainer.columnGap` | `65px` | `24px` | 65px var altfor stort — mockup viser ~24px |
+| `statusMsg.marginTop` | `18px` | `16px` | Litt strammere mot total-row |
+| `sep` (totalRow-wrapper) | `height:1px; background:rgba(245,232,216,0.08)` | `background:transparent` | 1px-divider flyttet til totalRow.borderTop for renere CSS-modell |
+| `totalRow.marginBottom` | `14px` | `0` | Wrapper håndterer margin |
+| `totalRow.paddingTop` | (ingen) | `12px` | Plass over divider-linje |
+| `totalRow.borderTop` | (ingen) | `1px solid rgba(245,232,216,0.08)` | Mockup viser 1px-divider over total-summary |
+| `prizeMatrix headerRow.padding` | `0 10px 8px` | `0 10px 10px` | Litt mer luft mellom header-rad og første premie-rad |
+| `prizeMatrix headerLabel.textAlign` | `center` | `left` | Mockup viser "PREMIETABELL" venstrejustert |
+
+### Hvorfor disse endringene er trygge
+
+- DOM-indices uendret (32/32 tester passer)
+- TypeScript strict-mode passer
+- Runtime-API uendret
+- Spill 2/3 PlayScreen-konsumenter uberørt
+- Letter-spacing 0.14em (subtitle) og 0.12em (premietabell-header) uendret — `displayName.test.ts` finner fortsatt subtitle korrekt
+
+## Designsider for iterasjon
+
+| Side | Path | Hva |
+|---|---|---|
+| Kjøpsmodal-mockup | `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` | Tobias-bekreftet 2026-05-15 design (bundlet React/JSX) |
+
 ## Endringslogg
 
 | Dato | Endring |
 |---|---|
 | 2026-05-15 | Initial v1.0.0 — Game1BuyPopup oppdatert til kjopsmodal-design.html mockup. Premietabell lagt til som card.children[2]. Subtitle beholdt som `<div>` med letter-spacing 0.14em for test-kompatibilitet. PrizeMatrix-header bruker 0.12em for å unngå falsk uniqueness-match. Auto-multiplikator-formel speilet fra `SPILL_REGLER_OG_PAYOUT.md §3.1`. Grønn primær-knapp (matcher mockup `#10b981 → #047857`-gradient). Spill 2 `BongCard.ts` er uberørt — kun Spill 1's `Game1BuyPopup.ts` (delt med Spill 2/3 PlayScreen). |
+| 2026-05-15 (iter2) | v1.0.1 — pixel-perfect iterasjon mot mockup. Card endret til flex-column med eksplisitt `order:` per child, slik at premietabell rendres VISUELT mellom header og ticket-rows (DOM-index 2 bevart for tests). Tightere spacing-verdier: typesContainer.rowGap 16→10px, columnGap 65→24px. 1px-divider flyttet fra sep.background til totalRow.borderTop (renere CSS-modell). PrizeMatrix-header venstrejustert. 32/32 tester passer. |

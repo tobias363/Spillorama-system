@@ -3691,3 +3691,101 @@ HUD-en og event-log-panelet gates.
 
 **Branch:** `fix/debug-hud-gated-by-url-only-2026-05-15`
 **Tid:** ~45 min agent-arbeid
+
+---
+
+## 2026-05-15 ettermiddag — Game1BuyPopup pixel-perfect iterasjon 2
+
+**Agent-id:** agent-a66c0b51dd9a7b4aa (worktree)
+**Type:** general-purpose
+**Scope:** Pixel-perfect tightening av Game1BuyPopup mot mockup-en `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html`. PR #1502 leverte initial struktur, men matchet ikke 1:1.
+
+**Trigger:** Tobias-rapport 2026-05-15 ettermiddag:
+> "PR #1502 implementerte struktur, men matchet ikke pixel-perfect mot mockup. Tobias har bekreftet target er `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html`."
+
+**Inputs:**
+- Worktree `agent-a66c0b51dd9a7b4aa` på main (etter PR #1502 merget)
+- Mockup-fil (1.6 MB bundlet React/JSX Figma-eksport — base64-encoded gzipped bundle, ikke direkte CSS-lesbar)
+- Eksisterende `Game1BuyPopup.ts` (1432 linjer) med pre-eksisterende test-locked DOM-indices
+
+**Hva ble endret:**
+
+`packages/game-client/src/games/game1/components/Game1BuyPopup.ts` — pixel-justeringer:
+
+1. **Card endret til flex-column** (`display: flex; flexDirection: column`) for å støtte `order:`-rendering. Block-layout følger DOM-rekkefølge slavisk; flex tillater visuell omgruppering uten DOM-mutering.
+
+2. **Visuell rekkefølge via `order:` per child** (DOM-rekkefølge bevart for tests):
+   - header: `order: 0`
+   - prizeMatrixEl: `order: 1` ← visuelt FØR typesContainer
+   - typesContainer: `order: 2`
+   - statusMsg: `order: 3`
+   - sep (totalRow-wrapper): `order: 4`
+   - buyBtn: `order: 5`
+   - cancelBtn: `order: 6`
+
+3. **Spacing-justeringer:**
+   - `prizeMatrixEl`: fjernet `marginTop: 18px`, lagt til `marginBottom: 18px` (gir gap til typesContainer)
+   - `typesContainer.rowGap`: 16px → 10px (strammere)
+   - `typesContainer.columnGap`: 65px → 24px (65px var altfor stort)
+   - `statusMsg.marginTop`: 18px → 16px
+   - `prizeMatrix headerRow.padding`: `0 10px 8px` → `0 10px 10px`
+
+4. **Total-row redesign:**
+   - `sep.background` fjernet (var 1px-divider)
+   - `totalRow.borderTop`: `1px solid rgba(245,232,216,0.08)` (mockup viser 1px-divider over total-summary)
+   - `totalRow.paddingTop`: 12px (plass over divider)
+   - `totalRow.marginBottom`: 14px → 0 (wrapper håndterer margin)
+
+5. **Premietabell-header:**
+   - `headerLabel.textAlign`: center → left (mockup viser venstrejustert)
+
+**Pixel-spec-sammenligning (FØR → ETTER):**
+
+| Element | FØR (iter1) | ETTER (iter2) | Begrunnelse |
+|---|---|---|---|
+| `card.display` | block | flex column | Krevd for `order:`-stacking |
+| Visuell premietabell-posisjon | child #3 visuelt | child #2 visuelt | Mockup: "Premietabell øverst" |
+| `prizeMatrixEl.marginTop` | 18px | 0 | Header har eget marginBottom |
+| `prizeMatrixEl.marginBottom` | (unset) | 18px | Gap til typesContainer |
+| `typesContainer.rowGap` | 16px | 10px | Strammere mellom ticket-rows |
+| `typesContainer.columnGap` | 65px | 24px | 65px var overdrev |
+| `statusMsg.marginTop` | 18px | 16px | Mindre luft |
+| `totalRow.borderTop` | (på sep) | 1px solid | Renere CSS-modell |
+| `prizeMatrix headerLabel.textAlign` | center | left | Mockup-justering |
+
+**Outputs:**
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts`: 7 redigeringer (constructor + style-objekter)
+- `.claude/skills/buy-popup-design/SKILL.md`: ny "Iterasjon 2 (2026-05-15 ettermiddag)"-seksjon med pixel-spec-tabell + flex-order-strategi + endringslogg v1.0.1
+- `docs/engineering/PITFALLS_LOG.md` §7.30 (ny entry): "Test-locked DOM-indices ≠ visuell layout — bruk CSS `order:` på flex-container"
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry)
+
+**Verifikasjon:**
+- `npm --prefix packages/game-client run check` — TypeScript strict PASS
+- `npm --prefix packages/game-client run build` — Vite build PASS (alle sub-targets bygget)
+- `npm --prefix packages/game-client test -- --run Game1BuyPopup` — **32/32 tester PASS** (alle 4 test-filer grønne)
+
+**Doc-protokoll (§2.19):**
+- ✅ Skill `buy-popup-design`: Iterasjon 2-seksjon m/ pixel-spec-tabell og endringslogg
+- ✅ PITFALLS_LOG §7.30: test-locked DOM-indices fallgruve dokumentert
+- ✅ AGENT_EXECUTION_LOG (denne entry)
+
+**Lessons learned:**
+
+- **Test-locked DOM-indices er ikke en barriere for visuell mockup-fidelity** — CSS `order:` på flex/grid-container løser konflikten elegant. `Element.children` returnerer DOM-rekkefølge uavhengig av visuell rendering, så `card.children[1]` er fortsatt `typesContainer` selv om det vises etter `prizeMatrixEl`.
+
+- **65px columnGap var en signifikant pixel-deviasjon.** Verdier i CSS som "ser tilfeldige ut" (eks. 65px når alle andre er multiples av 4 eller 8) er ofte tegn på rushed implementasjon — bedre å starte konservativt (24px) og tighte derfra.
+
+- **Mockup-bundler-format er en blokker for ren CSS-lesing.** Figma-bundle som `kjopsmodal-design.html` (1.6 MB med base64-gzipped React) er ikke direkte CSS-lesbar. For framtidige iterasjoner: be Tobias om en `.jsx` eller ren `.html`-eksport som lar agenten parse stiler direkte.
+
+- **Visual verification krever browser-stack.** Uten preview-server kunne jeg ikke teste pixel-perfect visuelt — kun verifisere via type-check + tests + spec-lesing. Dette begrenser confidence i pixel-fidelity sammenlignet med å kjøre en headless screenshot mot mockup.
+
+**Forbudt-rør (overholdt):**
+- DOM-rekkefølge `card.children[]` UENDRET — tests forblir grønne
+- `BingoEngine`/wallet-paths IKKE rørt
+- Spill 2 `BongCard.ts` IKKE rørt
+- `showWithTypes`, `setDisplayName`, `setOnBuy`, `updateLossState`-runtime-API uendret
+- Letter-spacing 0.14em (subtitle) + 0.12em (premietabell-header) uendret — `displayName.test.ts` finner fortsatt subtitle korrekt
+- Ikke skrevet NYE tester (per Tobias-direktiv 2026-05-15)
+
+**Branch:** `feat/buy-popup-pixel-perfect-iter2-2026-05-15`
+**Tid:** ~60 min agent-arbeid
