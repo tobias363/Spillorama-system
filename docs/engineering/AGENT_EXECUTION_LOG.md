@@ -4131,20 +4131,27 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 4. **`docs/engineering/AGENT_EXECUTION_LOG.md`**
    - Denne entryen.
 
+5. **`.github/workflows/pm-gate-enforcement.yml`** (oppdaget under PR #1529 CI)
+   - Endret bypass-label-validering fra stale `context.payload.pull_request.labels` til live `github.rest.issues.get(...)`.
+   - Gjør at `approved-pm-bypass` lagt til etter PR-opprettelse blir synlig ved rerun.
+
 **Fallgruver oppdaget:**
 - `grep -c` kan skrive `0` selv om kommandoen returnerer exit 1. Når `|| echo 0` ligger i samme command substitution, blir resultatet to linjer (`0\n0`), som gjør `$GITHUB_OUTPUT` ugyldig.
 - Post-merge automation må testes med tomt input. "Ingen åpne PR-er å rebase" er en primær happy-path, ikke edge case.
+- GitHub Actions rerun gjenbruker opprinnelig PR-event-payload. PR-gates som validerer labels må hente live issue/PR-state via API; ellers kan en korrekt label aldri bli sett av rerun.
 
 **Læring:**
 - GitHub Actions output må behandles som et strict line-oriented API. Alle outputs som senere skrives med `echo "key=$VALUE" >> "$GITHUB_OUTPUT"` må være én linje eller bruke heredoc-format.
 - Når en watcher feiler etter vellykket merge, må PM skille mellom "main er dårlig" og "watcher har bug". Her var endringen allerede trygt merget; reparasjonen er devops-hardening.
 - Dokumentasjonsprotokollen gjelder også CI-fikser. Ellers repeterer neste agent samme shell-felle i en annen workflow.
+- Label-baserte gates er statefulle. Bruk event-payload for PR-nummer/SHA, men live API for labels, review status og andre mutable approval-signaler.
 
 **Eierskap (filer agenten har endret):**
 - `.github/workflows/auto-rebase-on-merge.yml`
+- `.github/workflows/pm-gate-enforcement.yml`
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
 
 **Branch:** `codex/fix-auto-rebase-zero-overlap`
-**PR:** Åpnes etter lokal validering.
+**PR:** #1529

@@ -48,7 +48,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 13 | 2026-05-15 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 14 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 7 | 2026-05-15 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 102 entries (per 2026-05-15)
+**Total:** 103 entries (per 2026-05-15)
 
 ---
 
@@ -1198,6 +1198,31 @@ fi
 **Related:**
 - `.github/workflows/auto-rebase-on-merge.yml`
 - `pm-orchestration-pattern` skill v1.2.1
+
+### §5.14 — PR-label gates må hente labels live, ikke fra stale event-payload
+
+**Severity:** P1 (godkjent PM-bypass blokkeres selv etter korrekt label)
+**Oppdaget:** 2026-05-15 på PR #1529 etter `approved-pm-bypass` var lagt til.
+**Symptom:** `pm-gate-enforcement` feilet med `gate-bypass krever label approved-pm-bypass` selv om PR-en hadde labelen. Rerun av samme workflow feilet også.
+**Root cause:** Workflowen leste `context.payload.pull_request.labels`. GitHub Actions rerun bruker opprinnelig event-payload fra `opened`/`synchronize`; labels lagt til etter eventet finnes ikke i payloaden, selv på rerun.
+**Fix:** Hent labels live i valideringssteget:
+```js
+const { data: liveIssue } = await github.rest.issues.get({
+  owner: context.repo.owner,
+  repo: context.repo.repo,
+  issue_number: pr.number,
+});
+const labels = new Set((liveIssue.labels || [])
+  .map((l) => typeof l === 'string' ? l : l.name)
+  .filter(Boolean));
+```
+**Prevention:**
+- Alle PR-gates som avhenger av labels, review-state eller merge-state må hente live state via GitHub API.
+- Bruk event-payload kun for immutable metadata som PR-nummer og SHA.
+- Test label-gates med sekvensen: open PR uten label → legg til label → rerun workflow.
+**Related:**
+- `.github/workflows/pm-gate-enforcement.yml`
+- `pm-orchestration-pattern` skill v1.2.2
 
 ---
 

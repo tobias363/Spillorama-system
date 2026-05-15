@@ -2,7 +2,7 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.2.1
+  version: 1.2.2
   project: spillorama
 ---
 
@@ -228,6 +228,11 @@ Emergency merge/hotfix skal bruke labels:
 - `approved-pm-bypass` hvis PM-gate bypasses
 - `approved-knowledge-bypass` hvis knowledge-protocol bypasses
 
+PM-gate-workflows som validerer bypass-labels må hente labels live fra
+GitHub API ved kjøring. Ikke stol på `context.payload.pull_request.labels`:
+rerun av en workflow bruker opprinnelig event-payload og ser ikke labels som
+ble lagt til etter første PR-event.
+
 Ikke aktiver required reviews bare fordi det høres riktig ut. Først
 auditer faktisk collaborator-liste, CODEOWNERS og reviewer-roster. Hvis
 reviewer ikke finnes, er riktig kontroll å dokumentere risikoen og holde
@@ -346,3 +351,4 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 2026-05-13 | v1.1.0 — la til Phase-2-mekanismer fra autonomy-wave: pm-push-control, auto-rebase-on-merge, cascade-rebase-mønster, knowledge-protocol-checkbox, bug-resurrection-detector, skill-freshness-gate. Byttet til `dev:nuke` som standard restart-kommando (vedtatt 2026-05-11). |
 | 2026-05-15 | v1.2.0 — la til access-/approval-matrise, required-review lock-kriterier, emergency-labels og fallgruven "required reviews uten approver-roster". |
 | 2026-05-15 | v1.2.1 — dokumenterte zero-overlap invariant for `auto-rebase-on-merge.yml` etter post-merge output-format-feil. |
+| 2026-05-15 | v1.2.2 — dokumenterte at PM-gate må hente bypass-labels live fra GitHub API, ikke stale PR-event-payload. |
