@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-15T19:40:52Z
-> Commit: `172233b9` (branch: `main`)
+> Sist oppdatert: 2026-05-15T20:34:14Z
+> Commit: `a70a3e21` (branch: `main`)
 
 Liste over alle endpoints definert i `apps/backend/openapi.yaml`. Dette er
 **kontrakten** — implementasjonen i `apps/backend/src/routes/` skal matche.
