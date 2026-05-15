@@ -61,14 +61,93 @@ const MARKED_BG = "#7a1a1a";
 const MARKED_TEXT = "#ffffff";
 const FREE_BG = "#2d7a3f";
 const FREE_TEXT = "#ffffff";
-const UNMARKED_BG = "rgba(255,255,255,0.55)";
+/**
+ * Cell unmarked-bakgrunn — Tobias-bekreftet bong-design 2026-05-15 IMMUTABLE
+ * (SPILL1_IMPLEMENTATION_STATUS §5.9): cream-farge #fbf3df. Avviker fra
+ * tidligere semi-transparent rgba(255,255,255,0.55). Cream-fargen gir konsistent
+ * paritet mot bong-design.html mockup uavhengig av bong-bakgrunn-fargen.
+ */
+const UNMARKED_BG = "#fbf3df";
 
 /**
  * Logo-bilde som erstatter "FREE"-tekst i sentercellen (Tobias 2026-04-26).
  * Source: `apps/backend/public/web/games/assets/game1/design/spillorama-logo.png`
  * (1024×1024 PNG). Brukes også av WinPopup som hovedlogo.
+ *
+ * Beholdes etter §5.9 bong-design-refaktor 2026-05-15 — spec slår eksplisitt
+ * fast at FREE-cellen skal beholde Spillorama-logo (firkløver) i prod selv om
+ * mockup viser ren "FREE"-tekst.
  */
 const FREE_LOGO_URL = "/web/games/assets/game1/design/spillorama-logo.png";
+
+/**
+ * Per-bokstav-farger for BINGO-header — Tobias-design 2026-05-15 IMMUTABLE.
+ * Hver bokstav har distinkt fyllfarge med svart text-stroke (paint-order:
+ * stroke fill) for å sikre lesbarhet på tvers av alle 7 bong-fargene.
+ */
+const BINGO_LETTER_COLORS: Record<"B" | "I" | "N" | "G" | "O", string> = {
+  B: "#c45656", // dus rød
+  I: "#e0c068", // dus gul
+  N: "#6a8cd6", // dus blå
+  G: "#f3eee4", // dus hvit
+  O: "#7aa874", // dus grønn
+};
+
+/**
+ * Color-display-mapping fra backend-Unity-navn (eks. "Small Yellow") til
+ * norsk kapitalisert label (eks. "Gul"). Brukes i header-tekst per §5.9.
+ *
+ * Familienavn ("Yellow") matches case-insensitivt så vi tolererer kjente
+ * varianter ("Small Yellow", "Large Yellow", "yellow", "small_yellow"...).
+ */
+const COLOR_DISPLAY_NAMES: Record<string, string> = {
+  yellow: "Gul",
+  white: "Hvit",
+  purple: "Lilla",
+  green: "Grønn",
+  red: "Rød",
+  orange: "Oransje",
+  blue: "Blå",
+};
+
+/**
+ * Konverter en backend-ticket-color til norsk display-label.
+ *
+ * Eksempler:
+ *   "Small Yellow"   → "Gul"
+ *   "Large Yellow"   → "Gul"
+ *   "Small Green"    → "Grønn"
+ *   "Small Elvis1"   → null (Elvis-bonger styres separat via Elvis-banner)
+ *   ""               → null
+ *
+ * Null returneres når fargen ikke matches — caller faller tilbake til
+ * rå color-streng eller egen Elvis-håndtering.
+ */
+function getColorDisplayName(colorName: string | undefined): string | null {
+  if (!colorName) return null;
+  const lower = colorName.toLowerCase();
+  for (const [family, display] of Object.entries(COLOR_DISPLAY_NAMES)) {
+    if (lower.includes(family)) return display;
+  }
+  return null;
+}
+
+/**
+ * Avgjør om ticket-typen er "stor" (3 brett-bundle). §5.9 sier at store
+ * bonger får header-suffiks " - 3 bonger". Backend wire-payloaden sender
+ * 3 SEPARATE ticket-objekter per Large-kjøp (per
+ * `TicketGridHtml.largeMultiplicity.test.ts`), men hver av disse skal vise
+ * det suffikset så spilleren ser at bongen tilhører en stor-bunt.
+ *
+ * Sjekker både `ticket.type` (kanonisk "small" / "large" fra catalog) og
+ * `ticket.color` (Unity-navn "Large Yellow" / "Small Yellow") som backup.
+ */
+function isLargeTicket(type: string | undefined, color: string | undefined): boolean {
+  const t = (type ?? "").toLowerCase();
+  if (t === "large") return true;
+  const c = (color ?? "").toLowerCase();
+  return c.includes("large");
+}
 
 /** Velg Bong-palett fra ticket.color. Fallback yellow for ukjente/Elvis-varianter. */
 function bongPaletteFor(colorName: string | undefined): typeof BONG_COLORS["yellow"] {
@@ -369,9 +448,12 @@ export class BingoTicketHtml {
       background: isBack ? hex(this.theme.cardBg) : palette.bg,
       borderRadius: "8px",
       boxSizing: "border-box",
-      padding: isBack ? "6px 8px 10px 8px" : "12px 14px 10px 14px",
+      // §5.9 bong-design 2026-05-15 IMMUTABLE: padding 12px 18px 10px 18px
+      // (front) — matcher bong-design.html mockup. Back beholder eldre layout.
+      padding: isBack ? "6px 8px 10px 8px" : "12px 18px 10px 18px",
       display: "flex",
       flexDirection: "column",
+      // §5.9: gap 10px (front) mellom header og body — matcher mockup.
       gap: isBack ? "4px" : "10px",
       boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
       overflow: "hidden",
@@ -390,26 +472,30 @@ export class BingoTicketHtml {
   private populateFront(face: HTMLDivElement): void {
     const palette = bongPaletteFor(this.ticket.color);
 
-    // Header: label venstre + pris høyre (Bong.jsx-layout). Ingen bakgrunn —
-    // teksten ligger direkte på bong-fargen.
+    // §5.9 bong-design 2026-05-15 IMMUTABLE — header-layout:
+    //   - flex med name (venstre), price (mid), × cancel (høyre)
+    //   - gap 22px, padding-bottom 5px, border-bottom 1px rgba(0,0,0,0.15)
+    //   - × cancel-knapp er INLINE i flex-flow (ikke absolutt-posisjonert
+    //     som før) og pushes til høyre via `marginLeft: auto`. Rent ×
+    //     uten sirkel-bakgrunn — `background: transparent` + `color: inherit`.
     const header = document.createElement("div");
     Object.assign(header.style, {
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: "8px",
+      gap: "22px",
       color: palette.header,
       whiteSpace: "nowrap",
-      position: "relative",
+      paddingBottom: "5px",
+      borderBottom: "1px solid rgba(0, 0, 0, 0.15)",
     });
 
     const name = document.createElement("div");
     name.className = "ticket-header-name";
     Object.assign(name.style, {
-      fontSize: "13px",
+      fontSize: "12px",
       fontWeight: "700",
       letterSpacing: "-0.005em",
-      flex: "1",
       overflow: "hidden",
       textOverflow: "ellipsis",
     });
@@ -417,41 +503,39 @@ export class BingoTicketHtml {
 
     const price = document.createElement("div");
     price.className = "ticket-header-price";
-    const showCancel = this.opts.cancelable && this.opts.ticket.id;
     Object.assign(price.style, {
       fontSize: "12px",
       fontWeight: "600",
       fontVariantNumeric: "tabular-nums",
-      // × cancel-knapp er absolutt-posisjonert og tar ikke plass i flex-flow.
-      // Skyv prisen til venstre når krysset vises, ellers overlapper "kr".
-      marginRight: showCancel ? "18px" : "0",
     });
     header.appendChild(price);
 
-    // × cancel-knapp — absolutt posisjonert øverst til høyre slik at den ikke
-    // forstyrrer header-layout. Vises kun når cancelable + ticket har id.
+    // §5.9 IMMUTABLE: × cancel-knapp er INLINE i flex-flow (ikke lenger
+    // absolutt-posisjonert). Vises kun når cancelable + ticket har id.
     if (this.opts.cancelable && this.opts.ticket.id) {
       const btn = document.createElement("button");
       btn.textContent = "\u00d7";
       btn.setAttribute("aria-label", "Avbestill brett");
+      // §5.9 IMMUTABLE: × cancel-knapp er INLINE i flex-flow (ikke absolutt-
+      // posisjonert som før). Transparent bakgrunn, rent × i palette-fargen
+      // (color: inherit fra header), marginLeft: auto pusher knappen til
+      // høyre kant.
       Object.assign(btn.style, {
-        position: "absolute",
-        top: "-4px",
-        right: "-6px",
         width: "18px",
         height: "18px",
-        borderRadius: "50%",
         border: "none",
-        background: "rgba(0,0,0,0.25)",
-        color: palette.header,
-        fontSize: "12px",
-        fontWeight: "700",
+        background: "transparent",
+        color: "inherit",
+        fontSize: "18px",
+        fontWeight: "500",
         lineHeight: "1",
         cursor: "pointer",
         padding: "0",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        flex: "0 0 auto",
+        marginLeft: "auto",
       });
       const id = this.opts.ticket.id;
       btn.addEventListener("click", (e) => {
@@ -465,18 +549,38 @@ export class BingoTicketHtml {
 
     // Elvis-banner — beholdt for Elvis-bonger (BIN-688). Tracker color-key
     // så loadTicket() kan skippe rebuild hvis farge er uendret (round 6 #7).
+    // Elvis-banneret er UTENFOR .ticket-body (matcher tidligere layout) så
+    // det vises mellom header og body når aktivt.
     if (isElvisColor(this.ticket.color)) {
       face.appendChild(this.buildElvisBanner());
       this.elvisBannerColorKey = this.ticket.color ?? "";
     }
 
-    // B I N G O-header (Tobias 2026-05-03): Bokstaver i mørk burgundy over
-    // hver kolonne i 5×5-grid. Bruker samme `gridTemplateColumns: repeat(cols, 1fr)`
-    // som ticket-grid → pixel-perfect kolonne-justering uavhengig av celle-bredde.
-    // For 5-kolonne-bonger viser vi "B I N G O". For andre kolonne-tellinger
-    // (f.eks. Spill 2 sin 3-kolonne) brukes første N av "BINGO" — defensiv
-    // fallback siden funksjonen i prinsippet kan kjøres med vilkårlig cols-verdi,
-    // selv om Spill 2 har egen BongCard.ts og ikke bruker denne komponenten.
+    // §5.9 IMMUTABLE: .ticket-body wrapper — inneholder BINGO-letters + grid
+    // + footer med gap: 4px mellom (matcher mockup .triple-sub-strukturen).
+    // Wrapper gjør at single-bong er pixel-identisk med en triple-sub-grid
+    // hvis backend en gang i framtiden sender en triple-ticket data-modell
+    // (per 2026-05-15 sender backend 3 separate Ticket-objekter per Large-
+    // kjøp — denne komponenten rendrer ett av dem). Wrapper er IKKE en
+    // strukturell endring som krever backend-koordinasjon.
+    const body = document.createElement("div");
+    body.className = "ticket-body";
+    Object.assign(body.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+      flex: "1",
+    });
+    face.appendChild(body);
+
+    // §5.9 IMMUTABLE: BINGO-header med per-bokstav fyllfarger + svart text-
+    // stroke (paint-order: stroke fill). Bruker `gridTemplateColumns:
+    // repeat(cols, 1fr)` for kolonne-alignment med grid-noden under.
+    // For 5-kolonne-bonger vises standard B/I/N/G/O med distinkte farger
+    // (B=#c45656 / I=#e0c068 / N=#6a8cd6 / G=#f3eee4 / O=#7aa874).
+    // For andre kolonne-tellinger faller vi tilbake til burgundy uten
+    // per-letter-farger (defensiv fallback — Spill 2 bruker BongCard.ts og
+    // treffer ikke denne pathen). Inter 900, 16px, letter-spacing 0.02em.
     const bingoHeader = document.createElement("div");
     bingoHeader.className = "ticket-bingo-header";
     Object.assign(bingoHeader.style, {
@@ -484,28 +588,41 @@ export class BingoTicketHtml {
       gridTemplateColumns: `repeat(${this.opts.cols}, 1fr)`,
       gap: "5px",
       flex: "0 0 auto",
-      marginBottom: "2px",
     });
     const BINGO_LETTERS = "BINGO";
     for (let i = 0; i < this.opts.cols; i++) {
+      const letterChar = BINGO_LETTERS[i % BINGO_LETTERS.length] ?? "";
       const letter = document.createElement("div");
-      letter.textContent = BINGO_LETTERS[i % BINGO_LETTERS.length] ?? "";
-      Object.assign(letter.style, {
+      letter.textContent = letterChar;
+      const letterColor =
+        this.opts.cols === 5 && letterChar in BINGO_LETTER_COLORS
+          ? BINGO_LETTER_COLORS[letterChar as "B" | "I" | "N" | "G" | "O"]
+          : MARKED_BG;
+      // Inline-style assign — Object.assign aksepterer string-felter for
+      // WebkitTextStroke + paintOrder (vendor + non-standard CSS).
+      const letterStyle: Record<string, string> = {
         textAlign: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         fontSize: "16px",
-        fontWeight: "800",
-        // Burgundy = samme som MARKED_BG, så headeren matcher den mørke fargen
-        // markerte celler får (visuell kontinuitet med skjermbildet).
-        color: MARKED_BG,
+        fontWeight: "900",
+        color: letterColor,
         letterSpacing: "0.02em",
         lineHeight: "1",
         fontFamily: "'Inter', system-ui, sans-serif",
-      });
+        // §5.9 IMMUTABLE: text-stroke 1.8px svart + paint-order: stroke fill
+        // så fyllet er INNI strøken. Sikrer lesbarhet på tvers av alle 7
+        // bong-fargene (cream/gul/lilla osv).
+        WebkitTextStroke: "1.8px #000",
+        paintOrder: "stroke fill",
+      };
+      Object.assign(letter.style, letterStyle);
       bingoHeader.appendChild(letter);
     }
-    face.appendChild(bingoHeader);
+    body.appendChild(bingoHeader);
 
-    // Grid container — 5 kolonner, 5px gap.
+    // Grid container — 5 kolonner, 5px gap. Identisk med tidligere versjon.
     const gridWrap = document.createElement("div");
     gridWrap.className = "ticket-grid";
     Object.assign(gridWrap.style, {
@@ -515,21 +632,27 @@ export class BingoTicketHtml {
       gap: "5px",
       flex: "1",
     });
-    face.appendChild(gridWrap);
+    body.appendChild(gridWrap);
 
-    // ToGo footer — "X igjen" eller "One to go!" når kun én mark gjenstår.
+    // §5.9 IMMUTABLE: ToGo footer — "X igjen" eller "One to go!" når kun én
+    // mark gjenstår. text-align center, font-size 11px, font-weight 500,
+    // color #000 (svart, ikke palette-farge), margin-top 4px.
+    // `palette` er fortsatt referert via header-coloren over, men footer-
+    // teksten er nå svart per spec (uavhengig av bong-bakgrunn) for å
+    // matche mockup-en.
+    void palette;
     const toGo = document.createElement("div");
     toGo.className = "ticket-togo";
     Object.assign(toGo.style, {
       textAlign: "center",
       fontSize: "11px",
       fontWeight: "500",
-      color: palette.footerText,
-      opacity: "0.75",
+      color: "#000",
+      marginTop: "4px",
       letterSpacing: "0",
       textTransform: "none",
     });
-    face.appendChild(toGo);
+    body.appendChild(toGo);
   }
 
   /**
@@ -646,12 +769,14 @@ export class BingoTicketHtml {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: "13px",
-          fontWeight: "600",
+          // §5.9 IMMUTABLE: fontSize 14px, fontWeight 700, borderRadius 4px.
+          // Tekstfarge settes i paintCell (burgundy unmarked / hvit marked).
+          fontSize: "14px",
+          fontWeight: "700",
           fontFamily: "'Inter', system-ui, sans-serif",
           fontVariantNumeric: "tabular-nums",
           lineHeight: "1",
-          borderRadius: "3px",
+          borderRadius: "4px",
           // Ingen aspect-ratio: 1/1 — det kombinert med grid-template-rows:
           // repeat(5, 1fr) gjør at celler blir høyere enn kolonne-bredden,
           // og aspect-ratio presser bredden utover → overflow/clip på høyre
@@ -718,12 +843,24 @@ export class BingoTicketHtml {
     // Implementasjon: layered backgrounds. background-image = lucky-clover,
     // background-color = UNMARKED_BG. Når cellen IKKE er lucky må vi nullstille
     // backgroundImage eksplisitt så remnant ikke overlever state-transisjoner.
+    // §5.9 IMMUTABLE — cell-styling:
+    //   - Unmarked: cream (#fbf3df) bakgrunn + burgundy (#7a1a1a) tall
+    //   - Marked: burgundy bakgrunn + hvit tall
+    //   - FREE-celle: beholder Spillorama-logo (sentercellen) — buildCells
+    //     setter logo-img direkte, paintCell setter cream-bakgrunn under
+    //   - Lucky: cream-base med firkløver-overlay + gul innskrytt ramme
+    //
+    // Tekstfargen er nå BURGUNDY for unmarked (ikke palette.text som varierte
+    // per bong-farge) for å matche mockup-konsistens på tvers av alle 7
+    // bong-farger. `palette` brukes ikke lenger her — `void` for å unngå
+    // "unused"-feil i strict TypeScript.
+    void palette;
+    const UNMARKED_TEXT = MARKED_BG; // burgundy tall på cream bakgrunn (samme hex)
     if (isFree) {
-      // FREE-celle har hvit base (som unmarked) med grønn inner-pille.
       cell.style.background = UNMARKED_BG;
       cell.style.backgroundImage = "";
-      cell.style.color = palette.text;
-      cell.style.fontWeight = "600";
+      cell.style.color = UNMARKED_TEXT;
+      cell.style.fontWeight = "700";
       cell.style.boxShadow = "none";
     } else if (isMarked) {
       cell.style.background = MARKED_BG;
@@ -732,7 +869,7 @@ export class BingoTicketHtml {
       cell.style.fontWeight = "700";
       cell.style.boxShadow = "none";
     } else if (isLucky) {
-      // Bakgrunn = firkløver oppå hvit base. 55% size så ikonet er tydelig
+      // Bakgrunn = firkløver oppå cream base. 55% size så ikonet er tydelig
       // synlig men dekker ikke tallet (som rendres oppå via cell.textContent).
       cell.style.backgroundColor = UNMARKED_BG;
       cell.style.backgroundImage =
@@ -740,24 +877,39 @@ export class BingoTicketHtml {
       cell.style.backgroundSize = "55%";
       cell.style.backgroundPosition = "center";
       cell.style.backgroundRepeat = "no-repeat";
-      cell.style.color = palette.text;
+      cell.style.color = UNMARKED_TEXT;
       cell.style.fontWeight = "700";
       cell.style.boxShadow = "inset 0 0 0 2px #ffe83d";
     } else {
       cell.style.background = UNMARKED_BG;
       cell.style.backgroundImage = "";
-      cell.style.color = palette.text;
-      cell.style.fontWeight = "600";
+      cell.style.color = UNMARKED_TEXT;
+      cell.style.fontWeight = "700";
       cell.style.boxShadow = "none";
     }
   }
 
   private updateHeaderAndPrice(): void {
-    // For Elvis-bonger normaliseres "elvis1"/"Elvis 1"/etc. til "ELVIS 1" i
-    // header slik at spilleren alltid ser samme format uavhengig av kilde-case.
-    const label = isElvisColor(this.ticket.color)
-      ? getElvisLabel(this.ticket.color)
-      : (this.ticket.color ?? "Bong");
+    // §5.9 IMMUTABLE 2026-05-15 — header-tekst-format:
+    //   - Liten X (1 brett, ticket.type="small"):  KUN fargen ("Gul" / "Hvit" / "Lilla")
+    //   - Stor X (3 brett, ticket.type="large"):   "Farge - 3 bonger"
+    //   - Elvis-varianter: behold getElvisLabel() ("Elvis 1" etc.) som før
+    //   - Ukjent farge: fall til rå color-streng eller "Bong"
+    //
+    // Backend wire-format sender 3 separate Ticket-objekter per Large-kjøp
+    // (per TicketGridHtml.largeMultiplicity.test.ts). Hver av disse rendres
+    // av denne komponenten — header-suffikset signaliserer spilleren at
+    // bongen tilhører en 3-brett-bunt.
+    const isElvis = isElvisColor(this.ticket.color);
+    let label: string;
+    if (isElvis) {
+      label = getElvisLabel(this.ticket.color);
+    } else {
+      const displayName = getColorDisplayName(this.ticket.color);
+      const baseName = displayName ?? this.ticket.color ?? "Bong";
+      const isLarge = isLargeTicket(this.ticket.type, this.ticket.color);
+      label = isLarge ? `${baseName} - 3 bonger` : baseName;
+    }
     this.headerEl.textContent = label;
     // Tobias-bug 2026-05-14: skjul price-rad hvis price er 0/ugyldig
     // istedenfor å rendre misvisende "0 kr" på en kjøpt bonge. Kombinert
@@ -770,10 +922,16 @@ export class BingoTicketHtml {
   }
 
   private updateToGo(): void {
-    const palette = bongPaletteFor(this.ticket.color);
+    // §5.9 IMMUTABLE: footer-tekst er svart (#000) per spec, uavhengig av
+    // bong-bakgrunnsfarge. Tidligere brukte vi palette.footerText som var
+    // ulik per bong-farge (mörk for hvit/gul/lilla, lys for rød). Nå er
+    // teksten konsistent svart for å matche mockup.
+    // `palette` slipps her — vi beholder bongPaletteFor-kall ikke nødvendig
+    // i denne funksjonen lenger.
+    const FOOTER_COLOR = "#000";
     const setOneToGo = () => {
       this.toGoEl.textContent = "One to go!";
-      this.toGoEl.style.color = palette.footerText;
+      this.toGoEl.style.color = FOOTER_COLOR;
       this.toGoEl.style.opacity = "1";
       this.toGoEl.style.fontWeight = "700";
       this.toGoEl.style.letterSpacing = "0.06em";
@@ -782,8 +940,10 @@ export class BingoTicketHtml {
     };
     const setNormal = (text: string, winColor = false) => {
       this.toGoEl.textContent = text;
-      this.toGoEl.style.color = winColor ? "#2a9d8f" : palette.footerText;
-      this.toGoEl.style.opacity = "0.75";
+      this.toGoEl.style.color = winColor ? "#2a9d8f" : FOOTER_COLOR;
+      // §5.9: ingen opacity-reduksjon på footer-tekst (mockup viser full
+      // svart-tekst). Tidligere 0.75 satt tekst mot bong-bakgrunn.
+      this.toGoEl.style.opacity = "1";
       this.toGoEl.style.fontWeight = "500";
       this.toGoEl.style.letterSpacing = "0";
       this.toGoEl.style.textTransform = "none";

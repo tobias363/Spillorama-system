@@ -59,6 +59,113 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-15 — Fix-agent: §5.9 Bong-design prod-implementasjon (single + large header-suffiks)
+
+**Branch:** `feat/bong-design-prod-implementation-2026-05-15` (worktree-isolert, `agent-a9f18e62377a6ebdf`)
+**Agent type:** general-purpose
+**Trigger:** PM-direktiv — flytte Tobias-bekreftet §5.9-spec fra `bong-design.html` mockup til prod-rendering i `BingoTicketHtml.ts`.
+
+**Tobias-direktiv (IMMUTABLE):** Se §5.9 i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`:
+> "Vi har valg at man kan kjøpe stor gul. Kan du implementere at når denne kjøpes så vises da det nye designet av trippel vi har designet?"
+
+**Scope:** Refaktor `BingoTicketHtml.ts` til pixel-perfect §5.9-spec — single design med ny header-layout, BINGO-letters med per-bokstav-farger + text-stroke, cream cell-bakgrunn, burgundy unmarked-tekst, svart footer. Liten X (small): header viser kun fargen. Stor X (large): header viser "Farge - 3 bonger".
+
+**Inputs:**
+- §5.9-spec i `SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md` (linjer 575-641)
+- Live mockup: `packages/game-client/src/bong-design/bong-design.html` + `bong-design.ts`
+- Prod-fil: `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` (896 linjer pre-edit)
+- Konstraint: IKKE oppdater eksisterende tester (Tobias-direktiv venter)
+- Konstraint: IKKE rør Spill 2's `BongCard.ts` eller Spill 3 ticket-rendering (Spill 3 får §5.9 automatisk via delt komponent)
+
+**Hva ble gjort:**
+
+1. **Nye konstanter top-of-file** (`BingoTicketHtml.ts`):
+   - `UNMARKED_BG = "#fbf3df"` (cream, erstattet semi-transparent rgba(255,255,255,0.55))
+   - `BINGO_LETTER_COLORS` (5-bokstav-map: B=#c45656 / I=#e0c068 / N=#6a8cd6 / G=#f3eee4 / O=#7aa874)
+   - `COLOR_DISPLAY_NAMES` (Unity → Norsk: yellow→"Gul", white→"Hvit", purple→"Lilla", green→"Grønn", red→"Rød", orange→"Oransje", blue→"Blå")
+   - `getColorDisplayName(colorName)`-helper — returnerer Norsk label eller null for Elvis/ukjent
+   - `isLargeTicket(type, color)`-helper — sjekker både `ticket.type` og `ticket.color` for "large"
+
+2. **`buildFace`-padding-endring:**
+   - Front: `padding: "12px 18px 10px 18px"` (var "12px 14px 10px 14px")
+   - Back uendret (`"6px 8px 10px 8px"`)
+
+3. **`populateFront`-refaktor — header-layout:**
+   - `gap: 22px` (var "8px"), `paddingBottom: "5px"`, `borderBottom: "1px solid rgba(0,0,0,0.15)"`
+   - Fjernet `position: relative` (× er ikke lenger absolutt-posisjonert)
+   - Name font: 12px (var 13px), uten `flex: "1"`
+   - × button: `marginLeft: auto`, background transparent, color inherit (var rgba(0,0,0,0.25) sirkel-bg)
+
+4. **`populateFront`-refaktor — `.ticket-body` wrapper:**
+   - Ny `<div class="ticket-body">` med `display: flex; flexDirection: column; gap: 4px; flex: 1`
+   - Wrapper inneholder BINGO-letters + grid + footer (var: alle tre direkte under face med ulik margin)
+
+5. **`populateFront`-refaktor — BINGO-letters:**
+   - Per-bokstav-farge fra `BINGO_LETTER_COLORS` for 5-kolonne, fallback MARKED_BG for andre col-tellinger
+   - Font: 16px 900 (var 16px 800)
+   - Added: `WebkitTextStroke: 1.8px #000` + `paintOrder: stroke fill`
+   - Fjernet: `marginBottom: 2px` (gap håndteres av .ticket-body)
+
+6. **`buildCells`-cell-styling:**
+   - Cell font: 14px 700 (var 13px 600)
+   - Cell border-radius: 4px (var 3px)
+
+7. **`paintCell`-tekstfarge-konsolidering:**
+   - Alle unmarked-tilstander (free, lucky, vanlig unmarked) bruker burgundy `MARKED_BG` for tekst (var palette.text variert per bong-farge)
+   - Free-celle font-weight: 700 (var 600)
+   - `void palette` for å unngå unused-warning
+
+8. **`updateHeaderAndPrice`-header-tekst:**
+   - Elvis: behold `getElvisLabel()` (uendret)
+   - Ikke-Elvis: bruk `getColorDisplayName(color)` for norsk label
+   - Hvis `isLargeTicket(type, color)`: append " - 3 bonger"
+
+9. **`updateToGo`-footer-farge:**
+   - Footer-tekst alltid `#000` (svart) — ikke lenger palette.footerText
+   - One-to-go-state og normal-state begge svart
+   - Opacity alltid 1 (var 0.75 for normal-state) — mockup viser full svart tekst
+
+**Outputs produsert:**
+
+| Fil | Endring |
+|---|---|
+| `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` | +112 / −62 linjer netto, 9 logiske blokker endret |
+| `.claude/skills/bong-design/SKILL.md` | NY fil — 167 linjer, pixel-spec + scope + invariants |
+| `docs/engineering/PITFALLS_LOG.md` | +37 linjer — §7.27 (delt komponent Spill 1+3) + §7.28 (triple-rendering kan ikke gjøres uten backend) |
+| `docs/engineering/AGENT_EXECUTION_LOG.md` | Denne entry-en |
+
+**Verifikasjon:**
+- ✅ `npm --prefix packages/game-client run check` (TypeScript strict mode) — passerer uten errors
+- ✅ `npm --prefix packages/game-client run build` — alle 6 build-targets passerer (game, premie-design, dev-overview, visual-harness, bong-design, preview)
+- ✅ Spill 3 ticket-rendering uendret (Game3Controller bruker samme `BingoTicketHtml` — får §5.9 automatisk, Tobias-direktiv 2026-05-03 "alt av design skal være likt Spill 1")
+- ✅ Spill 2 `BongCard.ts` uberørt (Spill 2 har egen design)
+
+**Fallgruver oppdaget:**
+
+1. **PITFALLS §7.27** — Spec-formuleringen "Spill 1 og Spill 2 (begge bruker BingoTicketHtml.ts)" er upresis: Spill 2 bruker faktisk `BongCard.ts`, Spill 3 bruker `BingoTicketHtml`. Faktisk scope er Spill 1 + Spill 3.
+
+2. **PITFALLS §7.28** — Triple-rendering med 3 sub-grids i 666px container kan IKKE bygges som single-component render fordi backend sender 3 separate `Ticket`-objekter per Large-kjøp (verifisert av `TicketGridHtml.largeMultiplicity.test.ts`). Implementert "Stor"-suffiks per individuell ticket header som proxy for triple-tilhørighet. Ekte triple-grouping krever backend `Ticket.siblingTicketIds`-felt først.
+
+**Læring:**
+
+- **Mockup vs prod-data-modell:** Live HTML-mockup kan vise design-intensjoner som ikke matcher backend wire-format. Sjekk alltid `TicketGridHtml.largeMultiplicity.test.ts` (eller tilsvarende wire-fingerprint) før du implementerer "gruppert" rendering.
+- **`Object.assign(element.style, {...})` kompatibilitet:** TypeScript strict mode tillater `WebkitTextStroke` og `paintOrder` som string-felter på `CSSStyleDeclaration` via `Record<string, string>`-cast. Ingen behov for `Partial<CSSStyleDeclaration>`-cast.
+- **`×` Unicode-escape i source:** `BingoTicketHtml.ts` bruker `"×"` (literal escape), ikke `"×"` (visible char). Edit-tool kan matche på begge, men det er trygt å unngå å treffe linjen direkte ved struktur-rewrites.
+
+**Eierskap:**
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` — alle bong-design-endringer
+- `.claude/skills/bong-design/` — pixel-spec og scope
+
+**Anbefaling for neste agent:**
+- Hvis du skal endre bong-design videre, les `.claude/skills/bong-design/SKILL.md` FØR endring
+- Hvis du skal bygge triple-rendering med ekte 3-sub-grid-container: backend må først legge til `Ticket.siblingTicketIds` (eller `ticketGroupId`)
+- Tester (`BingoTicketHtml.test.ts` + `.elvis.test.ts`) er IKKE oppdatert per Tobias-direktiv. Når Tobias gir grønt lys for test-update, oppdater spesielt:
+  - `header.textContent === "Small Yellow"` → `"Gul"`
+  - Cell-font assertions (13px → 14px, 600 → 700)
+  - Cell-bakgrunn assertions (rgba(255,255,255,0.55) → #fbf3df)
+
+---
+
 ### 2026-05-15 — Fix-agent: Master-header "Neste spill: Bingo" + backend catalogDisplayName i idle
 
 **Branch:** `fix/master-header-text-and-catalog-name-2026-05-15` (worktree-isolert, `agent-aab55450bc2b6c1d0`)
