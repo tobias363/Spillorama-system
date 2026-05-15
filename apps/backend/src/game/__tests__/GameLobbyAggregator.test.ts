@@ -304,6 +304,25 @@ function makeAggregator(opts: AggregatorStubOpts = {}): GameLobbyAggregator {
       }
       return planRunByHall.get(hallId) ?? null;
     },
+    // Tobias-direktiv 2026-05-15 (header-bug): aggregator slår opp aktiv plan
+    // når ingen plan-run finnes, slik at `catalogDisplayName` settes til
+    // items[0] og master-konsoll viser "Neste spill: Bingo" fra første poll.
+    //
+    // Stub-en speiler `getOrCreateForToday`-kandidat-oppslaget: returner
+    // første plan i `planById`-mappen hvis caller har seedet en. Default-
+    // adferden er null (ingen plan dekker) — kompatibelt med eksisterende
+    // tester som ikke seeder plan-data men forventer fail-soft fallback.
+    async findActivePlanForDay(
+      _hallId: string,
+      _bd: string,
+    ): Promise<GamePlanWithItems | null> {
+      // Hvis caller har seedet plan-data via `planById`, returner første
+      // (samme prioritet som live-tjenesten gjør med sortering på navn).
+      const firstPlan = planById.values().next().value as
+        | GamePlanWithItems
+        | undefined;
+      return firstPlan ?? null;
+    },
   };
 
   // Stub hallReadyService — return rows for the game
@@ -1283,6 +1302,7 @@ test("state=cross-tz-businessDate: businessDate i Oslo-tz, ikke UTC", async () =
   };
   const planRunService = {
     async findForDay() { return null; },
+    async findActivePlanForDay() { return null; },
   };
   const hallReadyService = {
     async getReadyStatusForGame() { return []; },
@@ -1863,4 +1883,110 @@ test("malformed-participating-json: ugyldig JSON-streng håndteres defensivt", a
   // bruker syntetiske IDer som ikke er UUIDv4, så strict schema-parse
   // ville feile på UUID-validering. Aggregator-kontrakten testes i
   // prod via route-laget (commit 4 — Zod safeParse).
+});
+
+// ── Test 21: planMeta uten plan-run (Tobias bug 2026-05-15) ────────────
+
+test("planMeta: ingen plan-run, men plan har items → catalogDisplayName=items[0].displayName (Tobias 2026-05-15)", async () => {
+  // Tobias-direktiv 2026-05-15 (header-bug): direkte etter `dev:nuke` eksisterer
+  // ingen plan-run for (hall, businessDate). Pre-fix returnerte aggregator
+  // `planMeta=null` → frontend viste "Neste spill" UTEN navn. Post-fix slår
+  // aggregator opp aktiv plan via `findActivePlanForDay` og returnerer
+  // `catalogDisplayName=items[0].displayName` så master-konsoll viser
+  // "Neste spill: Bingo" fra første poll.
+  const catalog1 = makeCatalogEntry({
+    id: "gc-bingo",
+    slug: "bingo",
+    displayName: "Bingo",
+  });
+  const catalog2 = makeCatalogEntry({
+    id: "gc-1000-spill",
+    slug: "1000-spill",
+    displayName: "1000-spill",
+  });
+  const plan = makePlanWithItems({
+    id: PLAN_ID,
+    hallId: null,
+    groupOfHallsId: GOH_ID,
+    items: [
+      {
+        id: `item-${PLAN_ID}-1`,
+        planId: PLAN_ID,
+        position: 1,
+        gameCatalogId: catalog1.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T12:00:00Z",
+        catalogEntry: catalog1,
+      },
+      {
+        id: `item-${PLAN_ID}-2`,
+        planId: PLAN_ID,
+        position: 2,
+        gameCatalogId: catalog2.id,
+        bonusGameOverride: null,
+        notes: null,
+        createdAt: "2026-05-07T12:00:00Z",
+        catalogEntry: catalog2,
+      },
+    ],
+  });
+  // Merk: planRunByHall er TOM — ingen plan-run eksisterer for hallen.
+  // Aggregator må fall-tilbake til `findActivePlanForDay` for å hente
+  // planen.
+  const aggregator = makeAggregator({
+    planRunByHall: new Map(), // ingen plan-run
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [],
+    hallReadyRowsByGameId: new Map(),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  // planRunStatus skal være null (ingen plan-run eksisterer).
+  assert.equal(state.planMeta?.planRunStatus, null);
+  assert.equal(state.planMeta?.planRunId, null);
+  // currentPosition er 0 (defaulten i meta-objektet når plan-run mangler).
+  assert.equal(state.planMeta?.currentPosition, 0);
+  assert.equal(state.planMeta?.totalPositions, 2);
+  // catalogSlug/displayName peker til items[0] (position=1 = Bingo).
+  // Dette er det avgjørende: frontend rendrer "Neste spill: Bingo".
+  assert.equal(state.planMeta?.catalogSlug, "bingo");
+  assert.equal(state.planMeta?.catalogDisplayName, "Bingo");
+});
+
+test("planMeta: ingen plan-run + ingen plan dekker → planMeta=null (Tobias 2026-05-15)", async () => {
+  // Komplementær negativ-test: hvis ingen plan dekker (hall, weekday) skal
+  // aggregator returnere `planMeta=null`. Frontend faller da tilbake til
+  // generisk "Neste spill" uten navn — bedre enn å krasje.
+  const aggregator = makeAggregator({
+    planRunByHall: new Map(), // ingen plan-run
+    planById: new Map(), // ingen plan
+    scheduledGameRows: [],
+    hallReadyRowsByGameId: new Map(),
+    goHMembersByGroupId: new Map(),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  // Ingen plan dekker → planMeta skal være null.
+  assert.equal(state.planMeta, null);
 });

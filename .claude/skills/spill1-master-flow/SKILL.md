@@ -2,8 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.15.0
-  version: 1.16.0
+  version: 1.17.0
   project: spillorama
 ---
 
@@ -272,30 +271,45 @@ WHERE id = $1
 | `apps/admin-web/src/api/agent-game-plan-adapter.ts` | **DEPRECATED** — adapter setter `currentGame.id = run.id` (lyver om id) |
 | `apps/admin-web/src/api/agent-master-actions.ts` | **DEPRECATED** — wrapper kaller plan→legacy sekvensielt |
 
-## Master-UI header-tekst per state (KANONISK — Tobias rapportert 3 ganger 2026-05-14)
+## Master-UI header-tekst per state (KANONISK — Tobias-direktiv 2026-05-15 IMMUTABLE)
 
-**ALDRI vis "Aktiv trekning" når engine IKKE er running.** Dette har Tobias rapportert 3 ganger 2026-05-14 (07:55, 09:51, 12:44). UI må være state-aware. Pre-fix-grenen i `Spill1HallStatusBox.ts` behandlet `purchase_open | ready_to_start | running | paused` som "aktiv trekning" — det er feil, `purchase_open` og `ready_to_start` er PRE-start-tilstander.
+**Tobias-direktiv 2026-05-15 (IMMUTABLE):**
+> "Uavhengig av hvilken status agentene har skal teksten ALLTID være FØR spillet starter: 'Neste spill: {neste spill på lista}'. Når spillet er i gang: 'Aktiv trekning: {neste spill på lista}'."
+
+Dette superseder den eldre mappingen (2026-05-14) med "Klar til å starte" og "Runde ferdig" som mellom-states. **Alle pre-running-states viser nå "Neste spill: {name}".** Bare `running` viser "Aktiv trekning: {name}" (med KOLON, ikke bindestrek).
 
 **Korrekt mapping per `Spill1ScheduledGameStatus`:**
 
 | Master-state | Header-tekst | Kommentar |
 |---|---|---|
 | `idle` (ingen plan-run aktiv) | "Neste spill: {gameName}" | Master kan starte |
-| `scheduled` (sched-game spawnet, ikke startet) | "Klar til å starte: {gameName}" | Master kan starte |
-| `purchase_open` | "Klar til å starte: {gameName}" | Bonge-salg åpent, engine IKKE running |
-| `ready_to_start` | "Klar til å starte: {gameName}" | Master har trykket "Marker klar" |
-| `running` | "**Aktiv trekning** - {gameName}" | **ENESTE state hvor "Aktiv trekning" er gyldig** |
-| `paused` | "Pauset: {gameName}" | Engine pauset (manuell eller auto) |
-| `completed` | "Runde ferdig: {gameName}" | Venter på advance til neste position |
-| `cancelled` | "Runde ferdig: {gameName}" | Avbrutt — venter på master |
+| `scheduled` (sched-game spawnet, ikke startet) | "Neste spill: {gameName}" | Master kan starte |
+| `purchase_open` | "Neste spill: {gameName}" | Bonge-salg åpent, engine IKKE running |
+| `ready_to_start` | "Neste spill: {gameName}" | Master har trykket "Marker klar" — fortsatt pre-game |
+| `running` | "**Aktiv trekning: {gameName}**" | **ENESTE state hvor "Aktiv trekning" er gyldig.** Bruk KOLON, ikke bindestrek. |
+| `paused` | "Pauset: {gameName}" | Engine pauset (manuell eller auto) — midt i runde |
+| `completed` | "Neste spill: {gameName}" | Aggregator setter `catalogDisplayName` til NESTE plan-item (PR #1422). Header viser kommende spill, ikke det som nettopp ble ferdig. |
+| `cancelled` | "Neste spill: {gameName}" | Samme som completed |
 | `plan_completed_for_today` | "Spilleplan ferdig for i dag" (+ "— neste plan: HH:MM neste dag" hvis info) | Hele planen ferdig |
 | `closed` / `outside_opening_hours` | "Stengt — åpner HH:MM" | Utenfor åpningstid |
 
-**Helper:** `getMasterHeaderText(state, gameName, info?)` i `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`. Pure function (no DOM, no fetch), eksportert. 35 tester + regression-trip-wire i `apps/admin-web/tests/masterHeaderText.test.ts` som verifiserer at INGEN ikke-running state returnerer streng som starter med "Aktiv trekning".
+**Helper:** `getMasterHeaderText(state, gameName, info?)` i `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`. Pure function (no DOM, no fetch), eksportert. 41 tester i `apps/admin-web/tests/masterHeaderText.test.ts` med 3 regression-trip-wires:
+1. INGEN ikke-running state returnerer streng som starter med "Aktiv trekning" (Tobias-bug 2026-05-14)
+2. INGEN state returnerer "Klar til å starte" (Tobias-bug 2026-05-15)
+3. INGEN state returnerer "Runde ferdig" (Tobias-bug 2026-05-15)
+4. Running bruker KOLON (`:`), ikke bindestrek (` - `) (Tobias-direktiv 2026-05-15)
 
-**Tester som beskytter:** `apps/admin-web/tests/masterHeaderText.test.ts` — alle 35 tester må passere i CI før merge.
+**Backend-støtte for "Neste spill: Bingo" i idle:** Aggregator slår opp aktiv plan via `GamePlanRunService.findActivePlanForDay(hall, businessDate)` når ingen plan-run finnes. Det betyr at `catalogDisplayName` settes til `items[0].displayName` direkte etter `dev:nuke` — ingen "tom" header. Tobias-bug 2026-05-15 Image 1.
 
-**ALDRI hardkode "Aktiv trekning" som standard header** — det er state-driven. Hvis nye states legges til, MÅ helper-en oppdateres samtidig + test legges til.
+**Tester som beskytter:**
+- `apps/admin-web/tests/masterHeaderText.test.ts` — 41 tester (frontend mapping)
+- `apps/backend/src/game/__tests__/GameLobbyAggregator.test.ts` — 26 tester (inkl. 2 nye for `catalogDisplayName` i idle-state uten plan-run)
+- Alle må passere i CI før merge.
+
+**ALDRI:**
+- Hardkode "Aktiv trekning" som standard header — det er state-driven
+- Vis "Klar til å starte" eller "Runde ferdig" (Tobias-direktiv 2026-05-15 — fjernet)
+- Bruk bindestrek mellom "Aktiv trekning" og navnet — det skal være KOLON
 
 ## Inconsistency-warnings fra GameLobbyAggregator
 
@@ -889,3 +903,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-14 | v1.14.0 — Agent F research (Test-coverage gap-analyse, Trinn 1 SISTE): **6 KRITISKE coverage-hull identifisert**. Hovedfunn: **6 kode-paths beregner "neste spill" uavhengig — INGEN invariants binder dem**. PR #1431 la til 4 finished-state-tester men buggen kom tilbake fordi de fire kun testet ÉN path. Bare 4 ekte-DB-tester totalt, ingen sekvenserer alle 13 plan-items. Synthetic-test (PR #1460) dekker KUN én runde, ikke advance-flyt. Playwright E2E (6 spec-filer) har INGEN advance-assertion. `spillerklientRebuildE2E` Test 5 mocker socket-state → falsk trygghet. Anbefaling: **5 cross-service invariants** (I-NextGame-1 til I-NextGame-5) + 6 ekte-DB scenario-tester + 1 Playwright E2E `spill1-next-game-display-flow.spec.ts` + 1 multi-round synthetic. Estimat 3-5 dager test-skriving etter refactor. Kilde: `docs/research/NEXT_GAME_DISPLAY_AGENT_F_TESTS_2026-05-14.md` (1024 linjer). Skill-pekere foreslås for `casino-grade-testing` + `spill1-master-flow`. |
 | 2026-05-15 | v1.15.0 — BUG-D1 fix (branch `fix/bug-d1-planrun-start-hardcode-2026-05-15`): Fjernet `current_position = 1` fra `GamePlanRunService.start()`-UPDATE (linje 780). `getOrCreateForToday`-INSERT er nå eneste sannhet for `current_position` ved start. Ny seksjon "Plan-run.start() invariant — bevarer current_position" mellom Auto-advance og UI-komponenter. 6 nye regression-tester. PITFALLS §3.15 markert FIXED. |
 | 2026-05-15 | v1.16.0 — Bølge 4 fix (branch `fix/bolge-4-skip-legacy-spawn-for-plan-haller-2026-05-15`): `Game1ScheduleTickService.spawnUpcomingGame1Games` skipper nå haller med aktiv `app_game_plan_run`-rad for samme `business_date`. Ny privat helper `checkHallsWithActivePlanRuns(hallIds, dateRange)` bulk-querier plan-runs i lookahead-vinduet → Set med keys `${hallId}|${isoDay}` for O(1)-lookup. Skip-guard i spawn-loopen mellom weekday-validering og sub-game-iterasjon. DB-feil → fail-open. Audit-event på debug-nivå: `bolge-4.legacy_spawn_skipped_due_to_plan`. Ny seksjon "Plan-runtime overstyrer legacy-spawn (Bølge 4 fix 2026-05-15)" mellom BUG-D1 invariant og UI-komponenter. 6 nye regression-tester. PITFALLS §3.14 markert FIXED. Defense-in-depth: F-NEW-3 `releaseStaleRoomCodeBindings` BEHOLDES. |
+| 2026-05-15 | v1.17.0 — Header-text + catalogDisplayName fix (branch `fix/master-header-text-and-catalog-name-2026-05-15`, Tobias-rapport 2026-05-15 live-test): forenklet `getMasterHeaderText`-mapping per Tobias-direktiv IMMUTABLE: ALLE pre-running-states (idle/scheduled/purchase_open/ready_to_start/completed/cancelled) viser "Neste spill: {name}". Bare `running` viser "Aktiv trekning: {name}" (KOLON, ikke bindestrek). "Klar til å starte" og "Runde ferdig" som mellom-tekster er fjernet. Backend: `GamePlanRunService.findActivePlanForDay(hall, businessDate)` slår opp aktiv plan UTEN å opprette plan-run; `GameLobbyAggregator` kaller den når `planRun=null` så `catalogDisplayName` settes til `items[0].displayName` direkte etter dev:nuke. 41 frontend-tester + 26 backend-aggregator-tester (2 nye). PITFALLS §7.20 utvidet + §7.21 ny entry. Oppdatert master-UI-tabell i skill. |
