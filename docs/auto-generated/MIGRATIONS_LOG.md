@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-08T18:25:44Z
-> Commit: `70247c21` (branch: `feat/auto-generated-architecture-docs`)
+> Sist oppdatert: 2026-05-15T19:15:47Z
+> Commit: `8ad1a4ef` (branch: `main`)
 
 Kronologisk liste over alle Postgres-migrations under
 `apps/backend/migrations/`. Filene navngis med ISO-prefiks
@@ -16,7 +16,7 @@ Kronologisk liste over alle Postgres-migrations under
 > `app_migrations`-tabellen i prod-DB. Render kjører `npm run migrate`
 > som del av `buildCommand` — feiler en migrasjon, faller deploy.
 
-Antall migrasjoner: **148**
+Antall migrasjoner: **157**
 
 | Filnavn | Bytes | Beskrivelse (slug fra filnavn) |
 |---|---:|---|
@@ -168,3 +168,12 @@ Antall migrasjoner: **148**
 | `20261215000000_app_room_alerting.sql` | 3603 | app room alerting |
 | `20261216000000_app_hall_groups_cascade_fk.sql` | 8474 | app hall groups cascade fk |
 | `20261217000000_app_anti_fraud_signals.sql` | 3651 | app anti fraud signals |
+| `20261218000000_app_game1_scheduled_games_pause_reason.sql` | 1702 | app game1 scheduled games pause reason |
+| `20261219000000_game1_master_audit_add_crit7_actions.sql` | 3209 | game1 master audit add crit7 actions |
+| `20261220000000_deprecate_game1_daily_jackpot_state.sql` | 2361 | deprecate game1 daily jackpot state |
+| `20261221000000_app_game1_scheduled_games_room_code_active_only.sql` | 3328 | app game1 scheduled games room code active only |
+| `20261222000000_game1_stuck_recovery.sql` | 2573 | game1 stuck recovery |
+| `20261223000000_spill1_default_seconds_4.sql` | 2455 | spill1 default seconds 4 |
+| `20261224000000_cleanup_stale_null_room_code.sql` | 1990 | cleanup stale null room code |
+| `20261225000000_enable_pg_stat_statements.sql` | 2600 | enable pg stat statements |
+| `20261226000000_reconcile_stuck_plan_runs.sql` | 3825 | reconcile stuck plan runs |

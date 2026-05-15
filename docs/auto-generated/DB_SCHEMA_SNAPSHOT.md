@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-08T18:25:44Z
-> Commit: `70247c21` (branch: `feat/auto-generated-architecture-docs`)
+> Sist oppdatert: 2026-05-15T19:15:47Z
+> Commit: `8ad1a4ef` (branch: `main`)
 
 Liste over tabeller (og deres kolonner ved CREATE TABLE-tid) parset fra
 `apps/backend/migrations/*.sql`. Senere ALTER TABLE-uttrykk listes
@@ -167,15 +167,17 @@ Dette gir en grov idé om hvor aktiv en tabell har vært.
 |---|---:|
 | `app_halls` | 14 |
 | `app_users` | 13 |
+| `app_game1_scheduled_games` | 12 |
 | `app_hall_groups` | 11 |
-| `app_game1_scheduled_games` | 10 |
 | `app_withdraw_requests` | 9 |
 | `wallet_accounts` | 8 |
 | `app_physical_tickets` | 6 |
 | `app_agent_transactions` | 5 |
 | `wallet_entries` | 4 |
 | `app_wallet_reservations` | 4 |
+| `app_game_plan_run` | 4 |
 | `app_game_plan` | 4 |
+| `app_game1_master_audit` | 4 |
 | `app_game_plan_item` | 3 |
 | `app_agent_ticket_ranges` | 3 |
 | `app_agent_shifts` | 3 |
@@ -185,9 +187,7 @@ Dette gir en grov idé om hvor aktiv en tabell har vært.
 | `app_rg_compliance_ledger` | 2 |
 | `app_hall_group_members` | 2 |
 | `app_hall_game_config` | 2 |
-| `app_game_plan_run` | 2 |
 | `app_game1_mini_game_results` | 2 |
-| `app_game1_master_audit` | 2 |
 | `app_close_day_log` | 2 |
 | `app_audit_log` | 2 |
 | `app_agent_settlements` | 2 |
