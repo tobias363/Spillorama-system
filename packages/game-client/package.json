@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && vite build --config vite.preview.config.ts && vite build --config vite.visual-harness.config.ts && vite build --config vite.dev-overview.config.ts && vite build --config vite.premie-design.config.ts && vite build --config vite.bong-design.config.ts",
+    "build": "tsc && vite build && vite build --config vite.preview.config.ts && vite build --config vite.visual-harness.config.ts && vite build --config vite.dev-overview.config.ts && vite build --config vite.premie-design.config.ts && vite build --config vite.bong-design.config.ts && vite build --config vite.kjopsmodal-design.config.ts",
     "build:visual-harness": "tsc && vite build && vite build --config vite.visual-harness.config.ts",
     "build:dev-overview": "vite build --config vite.dev-overview.config.ts",
     "build:premie-design": "vite build --config vite.premie-design.config.ts",
     "build:bong-design": "vite build --config vite.bong-design.config.ts",
+    "build:kjopsmodal-design": "vite build --config vite.kjopsmodal-design.config.ts",
     "preview": "vite preview",
     "serve:visual-harness": "node ../../scripts/serve-visual-harness.mjs",
     "test": "vitest run",
