@@ -3949,3 +3949,18 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 **Branch:** `fix/triple-bong-rendering-broken-2026-05-15`
 **Filer endret:** 5 modified (2 frontend, 2 backend, 1 skill) + 1 nytt test-file + 2 PITFALLS/AGENT-LOG docs
 **Tid:** ~90 min agent-arbeid (inkl. diagnose, fix, tests, worktree-mixup-recovery, doc-update)
+
+## 2026-05-15 — PM: Unique knowledge-gate check names før branch-protection lock
+
+**Trigger:** Post-merge audit etter PR #1515 viste at nye gate-workflows eksponerte generiske GitHub check-navn (`enforce`/`validate`). Dette ville gjort branch protection tvetydig hvis vi la dem inn som required checks.
+
+**Scope:** Issue #1518. Rename GitHub Actions job IDs/check names for knowledge-control gates uten å endre gate-logikk.
+
+**Endringer:**
+- `.github/workflows/pm-gate-enforcement.yml`: job context `pm-gate-enforcement`
+- `.github/workflows/knowledge-protocol-gate.yml`: job context `knowledge-protocol-enforcement`
+- `.github/workflows/pitfalls-id-validate.yml`: job context `pitfalls-id-validation`
+- `docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`: required-check-anbefaling oppdatert til eksakte check-navn
+- `docs/engineering/PITFALLS_LOG.md` §5.11: fallgruve dokumentert
+
+**Lesson learned:** Branch protection skal aldri låses mot generiske check contexts som `enforce`, `validate`, `check` eller `test`. Før en check legges inn som required, må en PR bekrefte faktisk context-navn via `gh pr checks <nr>`.

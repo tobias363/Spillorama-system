@@ -1135,6 +1135,24 @@ WHERE id = $1
 - D1 PM Push Control Phase 2 (2026-05-13 mid-sesjon)
 - `scripts/pm-push-control.mjs` duplisering
 
+### §5.11 — Generic GitHub check-navn må ikke brukes i branch protection
+
+**Severity:** P1 (merge-policy blir tvetydig)
+**Oppdaget:** 2026-05-15 etter PR #1515
+**Symptom:** Nye knowledge-control workflows eksponerte check-navnene `enforce` og `validate`. Hvis slike navn legges inn i branch protection, er det uklart hvilken gate som faktisk er required. PM/reviewer kan tro at PM-gate, knowledge-protocol eller PITFALLS-validator er låst, mens GitHub bare ser et generisk context-navn.
+**Root cause:** GitHub Actions bruker job-navn som check context. Når workflow-jobben heter `enforce` eller `validate`, mister branch protection den domenespesifikke meningen.
+**Fix:** Alle gates som skal kunne bli required checks må ha eksplisitte, stabile job-navn:
+- `pm-gate-enforcement`
+- `knowledge-protocol-enforcement`
+- `pitfalls-id-validation`
+**Prevention:**
+- Før branch protection endres: kjør en PR og bekreft faktisk check-navn med `gh pr checks <nr>`
+- Ikke legg generiske navn som `enforce`, `validate`, `check` eller `test` inn i required checks
+- Dokumenter eksakte check-navn i lock-/auditdokumentet før de aktiveres som required
+**Related:**
+- PR #1515 pre-lock knowledge-control hardening
+- Issue #1518 unique knowledge-gate check names
+
 ---
 
 ## §6 Test-infrastruktur

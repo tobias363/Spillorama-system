@@ -51,7 +51,7 @@ Direkte GitHub API-audit via `gh api repos/tobias363/Spillorama-system/branches/
 
 Minimumsanbefaling før systemet kalles låst:
 
-- Legg til `PM Gate Enforcement`, `Knowledge Protocol Gate` og `PITFALLS ID Validation` som required checks etter at workflowene finnes på `main`.
+- Legg til de entydige check-navnene `pm-gate-enforcement`, `knowledge-protocol-enforcement` og `pitfalls-id-validation` som required checks etter at navnene har kjørt grønt på en PR.
 - Slå på strict status checks.
 - Krev minst 1 approving review på PR-er mot `main`, med dismiss stale approvals.
 - Definer bypass-policy skriftlig: Tobias kan emergency-override, men bypass skal være label-/audit-logget.
