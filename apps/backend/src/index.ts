@@ -1478,6 +1478,20 @@ const spill1LobbyBroadcaster = new Spill1LobbyBroadcaster({
   schema: pgSchema,
 });
 
+// Pilot Q3 2026 (2026-05-15): late-bind lobby-broadcaster på
+// GamePlanRunService så `finish()` + `advanceToNext()`-past-end
+// pusher umiddelbar state-oppdatering til spiller-shell. Uten dette
+// vil spiller-shell vise "Neste spill: <gammelt>" inntil neste
+// 3s/10s-poll-tick. Tobias-rapport 2026-05-15: 2-min delay observert
+// i live-test — pilot-blokker.
+gamePlanRunService.setLobbyBroadcaster(spill1LobbyBroadcaster);
+
+// Pilot Q3 2026 (2026-05-15): samme broadcaster på cleanup-service så
+// `reconcileNaturalEndStuckRuns` pusher state-oppdatering når en
+// stuck plan-run auto-finishes etter naturlig runde-end uten master-
+// handling. Speilet pattern fra GamePlanRunService.
+gamePlanRunCleanupService.setLobbyBroadcaster(spill1LobbyBroadcaster);
+
 // BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
 // mapping). Ren admin-katalog — runtime /api/leaderboard (routes/game.ts)
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
@@ -2618,6 +2632,13 @@ const game1DrawEngineService = new Game1DrawEngineService({
   // utbetales til 30 000 kr og mini-game-buckets til 4000 kr — ulovlig
   // per pengespillforskriften §11.
   prizePolicyPort: engine.getPrizePolicyPort(),
+  // Pilot Q3 2026 (2026-05-15): wire Spill1LobbyBroadcaster så engine kan
+  // sende `lobby:state-update` POST-commit ved natural round-end. Uten
+  // dette ville spiller-shell vist "Neste spill: <gammelt>" i opptil 10
+  // sekunder etter at runden ble flippet til `completed` (klient måtte
+  // vente på neste poll-tick). Tobias-rapport 2026-05-15: 2-min delay
+  // sett i live-test → ikke akseptabelt for pilot.
+  lobbyBroadcaster: spill1LobbyBroadcaster,
 });
 game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // GAME1_SCHEDULE PR 4d.4: inject ticket-purchase-service slik at stopGame()

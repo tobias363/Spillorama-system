@@ -619,6 +619,14 @@ class Game1Controller implements GameController {
       const name = state?.nextScheduledGame?.catalogDisplayName ?? "Bingo";
       this.playScreen?.setBuyPopupDisplayName(name);
 
+      // Pilot Q3 2026 (2026-05-15): push catalogSlug parallelt så
+      // PlayScreen kan detektere "Forbereder neste spill"-loader-
+      // transition. Tobias-rapport 2026-05-15: spiller skal aldri se
+      // gammelt spill etter natural round-end. Loader vises i den korte
+      // vindu-en mellom round-end og server-advance av plan-runtime.
+      const nextSlug = state?.nextScheduledGame?.catalogSlug ?? null;
+      this.playScreen?.setNextScheduledGameSlug(nextSlug);
+
       // Spillerklient-rebuild Fase 2 (2026-05-10): forward ticket-config
       // fra plan-runtime catalog. Når master bytter plan-item (Bingo →
       // Trafikklys → Oddsen) får BuyPopup oppdatert bongfarger umiddelbart.

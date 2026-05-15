@@ -249,12 +249,16 @@ export class Game1LobbyFallback {
 
   private startPolling(): void {
     if (this.pollTimer) return;
-    // 10s som matcher backend-Cache-Control: no-store policy + SLA i
-    // Game1LobbyService-doc. Gir oss safety-net hvis socket-subscribe
-    // eller broadcast feiler stille.
+    // Pilot Q3 2026 (2026-05-15): redusert fra 10s → 3s per Tobias-
+    // direktiv. 3s er fortsatt godt innenfor backend SLA + Cache-Control:
+    // no-store-policy, men gir kortere worst-case-delay hvis socket-push
+    // feiler stille (~50ms primær-sti via Spill1LobbyBroadcaster).
+    // Backend-side: Game1DrawEngineService + GamePlanRunService +
+    // GamePlanRunCleanupService pusher nå broadcast på alle finish-
+    // pather, så polling er ren safety-net.
     this.pollTimer = setInterval(() => {
       void this.fetchOnce();
-    }, 10_000);
+    }, 3_000);
   }
 
   private async fetchOnce(): Promise<void> {
