@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-15T20:34:14Z
-> Commit: `a70a3e21` (branch: `main`)
+> Sist oppdatert: 2026-05-15T21:21:10Z
+> Commit: `b772ccfd` (branch: `main`)
 
 Modul-graf (mermaid) avledet fra TypeScript-imports. Diagrammet viser
 top-level avhengighet mellom **apps** og **packages** — det er bevisst
