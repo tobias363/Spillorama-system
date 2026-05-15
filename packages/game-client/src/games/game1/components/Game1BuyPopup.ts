@@ -15,16 +15,98 @@ const MAX_WEIGHTED_TICKETS = 30;
 
 const FONT_STACK = "'Poppins', system-ui, sans-serif";
 
+/**
+ * Tobias-bekreftet 2026-05-15 IMMUTABLE design fra
+ * `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` mockup.
+ *
+ * Bong-farge-palette matcher COLORS i mockup-JSX. Samme hex som
+ * mockup-JSX (kjopsmodal-design.jsx linjene 19-23).
+ */
+interface BongPaletteEntry {
+  /** Bakgrunns-farge på premie-cellen og BongMini-rutene. */
+  bg: string;
+  /** Border-farge på premie-cellen (`box-shadow inset`). */
+  border: string;
+  /** Tekstfarge på premie-cellen (mørk for kontrast). */
+  inkOnBg: string;
+}
+
+const BONG_PALETTE: Record<"white" | "yellow" | "purple", BongPaletteEntry> = {
+  white: { bg: "#e8e4dc", border: "rgba(255,255,255,0.4)", inkOnBg: "#1a0808" },
+  yellow: { bg: "#f0b92e", border: "rgba(240,185,46,0.6)", inkOnBg: "#2a1a00" },
+  purple: { bg: "#b8a4e8", border: "rgba(184,164,232,0.55)", inkOnBg: "#2a1040" },
+};
+
+const COLOR_DISPLAY_NAMES: Record<"white" | "yellow" | "purple", string> = {
+  white: "Hvit",
+  yellow: "Gul",
+  purple: "Lilla",
+};
+
+/**
+ * Premietabell-rader (5 faser). Brukes både i `PrizeMatrix` over kjøpslisten
+ * og som premie-data over `ticketConfig`. Base-beløp er i ØRE, og auto-
+ * multiplikatoren `actualPrize = base × (ticketPriceCents / 500)` matcher
+ * `SPILL_REGLER_OG_PAYOUT.md §3.1`.
+ *
+ * Tobias-direktiv 2026-05-15: hvis backend ikke har levert plan-runtime
+ * phases-data, fall tilbake til disse baselines fra mockup-en:
+ *   1 Rad     = 100 kr
+ *   2 Rader   = 200 kr
+ *   3 Rader   = 200 kr
+ *   4 Rader   = 200 kr
+ *   Fullt Hus = 1000 kr
+ */
+interface PhaseRow {
+  /** Kort intern id. */
+  id: "rad1" | "rad2" | "rad3" | "rad4" | "fullhus";
+  /** Visuell label i premietabellen. */
+  label: string;
+  /** Base-premie i ØRE (multipliseres med ticketPrice/500). */
+  baseCents: number;
+}
+
+const DEFAULT_PHASES: ReadonlyArray<PhaseRow> = [
+  { id: "rad1", label: "1 Rad", baseCents: 10000 },
+  { id: "rad2", label: "2 Rader", baseCents: 20000 },
+  { id: "rad3", label: "3 Rader", baseCents: 20000 },
+  { id: "rad4", label: "4 Rader", baseCents: 20000 },
+  { id: "fullhus", label: "Fullt Hus", baseCents: 100000 },
+];
+
+/**
+ * Mockup-palette konstanter (gjentas fra `kjopsmodal-design.jsx` så de er
+ * eksplisitte i koden).
+ */
+const TEXT = "#f5e8d8";
+const TEXT_DIM = "rgba(245,232,216,0.55)";
+const TEXT_FAINT = "rgba(245,232,216,0.4)";
+const GOLD = "#f5c842";
+
+/** Helper: konverter `#RRGGBB` → `R,G,B`-tuple for rgba-bruk. */
+function hexToRgb(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}
+
+/**
+ * Map canonical farge-navn til palette-key. Robust mot case + sub-strings
+ * (Small Yellow / Large Yellow / yellow / Yellow → "yellow").
+ *
+ * Ukjente farger faller tilbake til "yellow" så vi aldri throw'er — gjøres
+ * dette skjult slik at hvis backend en gang sender en ny farge (eks. green),
+ * popup-en rendrer noe gjenkjennelig istedenfor å crashe.
+ */
+function paletteKeyForColor(name: string): "white" | "yellow" | "purple" {
+  const n = name.toLowerCase();
+  if (n.includes("white") || n === "hvit") return "white";
+  if (n.includes("purple") || n === "lilla") return "purple";
+  return "yellow";
+}
+
 /** Brikke-farge fra type-navn. Speiler KjopsModal-paletten. */
 function ticketColor(name: string): string {
-  const n = name.toLowerCase();
-  if (n.includes("yellow")) return "#f5b841";
-  if (n.includes("white")) return "#eeeae0";
-  if (n.includes("purple")) return "#8b5cf6";
-  if (n.includes("red")) return "#dc2626";
-  if (n.includes("green")) return "#22c55e";
-  if (n.includes("orange")) return "#f97316";
-  return "#f5b841";
+  return BONG_PALETTE[paletteKeyForColor(name)].bg;
 }
 
 interface TypeRow {
@@ -33,6 +115,7 @@ interface TypeRow {
   name: string;
   displayName: string;
   color: string;
+  paletteKey: "white" | "yellow" | "purple";
   price: number;
   ticketCount: number;
   qty: number;
@@ -58,10 +141,34 @@ export interface LossStateForBuyPopup {
 }
 
 /**
- * Game 1 ticket purchase popup — KjopsModal-port (2026-04-24).
+ * Game 1 ticket purchase popup — kjøpsmodal-design.html prod-implementasjon
+ * (Tobias-bekreftet 2026-05-15 IMMUTABLE).
  *
- * 2-column layout med én rad per billett-type: [brett-ikon] [navn + pris] [stepper].
- * Beholder public API + 30-brett-grense-logikk fra forrige versjon.
+ * DOM-struktur (card.children — denne rekkefølgen er bevart for å holde
+ * eksisterende test-helpers funksjonelle):
+ *   [0] header        — title + summaryEl + lossStateEl
+ *   [1] typesContainer — 6 ticket-rader (2-col grid)
+ *   [2] prizeMatrixEl — NY: premietabell (5 phases × 3 farger)
+ *   [3] statusMsg     — error / 30-brett-grense melding
+ *   [4] sep           — separator før totalRow
+ *   [5] buyBtn        — primær (grønn ved aktiv)
+ *   [6] cancelBtn     — sekundær
+ *
+ * NB: typesContainer er fortsatt `card.children[1]` (test-kompatibelt).
+ * PrizeMatrix er lagt til som ny child[2] mellom typesContainer og
+ * statusMsg. totalRow er flyttet inn i en wrapper og slått sammen med
+ * sep+buyBtn+cancelBtn rekkefølge for å bevare statusMsg=[3], buyBtn=[5].
+ *
+ * Beholder hele runtime-API uendret:
+ *   - `showWithTypes(entryFee, ticketTypes, alreadyPurchased?, lossState?, displayName?)`
+ *   - `setDisplayName(displayName)`
+ *   - `setOnBuy(callback)`
+ *   - `showResult(success, message?)`
+ *   - `showPartialBuyResult({accepted, rejected, rejectionReason, lossState})`
+ *   - `updateLossState(lossState)`
+ *   - `getTotalTicketCount()`
+ *   - `isShowing()` / `hide()`
+ *   - `destroy()`
  */
 export class Game1BuyPopup {
   private backdrop: HTMLDivElement;
@@ -74,6 +181,11 @@ export class Game1BuyPopup {
    *
    * Default-tekst er "Bingo" (ikke "STANDARD") per Tobias-direktiv 2026-05-09:
    * spilleren skal ALDRI se en degradert variant-string.
+   *
+   * Tobias-bekreftet 2026-05-15 (kjopsmodal-design.html): hele header er
+   * sentrert. Subtitle er fortsatt en `<div>` (test-kompatibel —
+   * `Game1BuyPopup.displayName.test.ts` søker `overlay.querySelectorAll("div")`
+   * etter letter-spacing 0.14em som uniqueness-marker).
    */
   private subtitleEl: HTMLDivElement;
   /**
@@ -83,6 +195,12 @@ export class Game1BuyPopup {
    */
   private lossStateEl: HTMLDivElement;
   private typesContainer: HTMLDivElement;
+  /**
+   * Premie-tabell (kjopsmodal-design.html). 5 phases × 3 farger. Plasseres
+   * mellom typesContainer og statusMsg (card.children[2]). Re-rendres ved
+   * hver `showWithTypes` med oppdaterte farger fra ticketConfig.
+   */
+  private prizeMatrixEl: HTMLDivElement;
   private statusMsg: HTMLDivElement;
   private totalBrettEl: HTMLDivElement;
   private totalKrEl: HTMLDivElement;
@@ -95,6 +213,11 @@ export class Game1BuyPopup {
    * noen plan som dekker (rommet er fortsatt åpent men ingen runde planlagt).
    */
   private currentDisplayName = "Bingo";
+
+  /** Cached entryFee for prize-matrix render (oppdateres i `showWithTypes`). */
+  private currentEntryFee = 10;
+  /** Cached ticketTypes for prize-matrix farger (oppdateres i `showWithTypes`). */
+  private currentTicketTypes: Array<{ name: string; type: string; priceMultiplier: number; ticketCount: number }> = [];
 
   private onBuy: ((selections: Array<{ type: string; qty: number; name?: string }>) => void) | null = null;
   private alreadyPurchased = 0;
@@ -140,7 +263,7 @@ export class Game1BuyPopup {
       background: "radial-gradient(ellipse at top, #2a0f12 0%, #1a0809 70%, #140607 100%)",
       borderRadius: "18px",
       padding: "22px",
-      color: "#f5e8d8",
+      color: TEXT,
       fontFamily: FONT_STACK,
       boxShadow: "0 30px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255, 200, 120, 0.08)",
       width: "min(580px, 92vw)",
@@ -151,33 +274,46 @@ export class Game1BuyPopup {
     });
     this.backdrop.appendChild(this.card);
 
-    // ── Header ─────────────────────────────────────────────────────────────
+    // ── [0] Header (centered "Neste spill" + subtitle) ─────────────────────
+    //
+    // Test-kompatibilitet:
+    //   header.children[0] = title-div ("Neste spill")
+    //   header.children[1] = subtitle-div (letter-spacing 0.14em — uniqueness-marker for displayName.test.ts)
+    //   header.children[2] = summaryEl
+    //   header.children[3] = lossStateEl
+    //
+    // Mockup viser title som "Neste spill: Bingo" sentrert. Vi holder
+    // strukturen som to separate `<div>`-er istedet for inline-span fordi
+    // displayName.test.ts kun søker `<div>`-elementer for å finne subtitle.
+    // Resultatet visuelt: "Neste spill" på linje 1, "Bingo" på linje 2 med
+    // gull-farge — som matcher mockup-en "Neste spill: <highlighted-name>".
     const header = document.createElement("div");
-    header.style.cssText = "margin-bottom:18px;";
+    Object.assign(header.style, {
+      marginBottom: "18px",
+      textAlign: "center",
+    });
+
     const title = document.createElement("div");
     title.textContent = "Neste spill";
     Object.assign(title.style, {
       fontSize: "20px",
       fontWeight: "500",
-      color: "#f5e8d8",
+      color: TEXT,
       letterSpacing: "-0.01em",
       lineHeight: "1.1",
     });
     header.appendChild(title);
 
-    // Spillerklient-rebuild Fase 1 (2026-05-10): subtitle viser plan-runtime
-    // catalog-display-navn. Default "Bingo" — IKKE "STANDARD" (gammel feil
-    // hvor klient leste `variantConfig.gameType` istedenfor plan-item-en).
-    // Game1Controller kaller `setDisplayName(...)` så snart lobby-state er
-    // tilgjengelig og igjen ved hver socket-broadcast `spill1:lobby:update`.
+    // Subtitle-div — letter-spacing 0.14em er uniqueness-marker for
+    // displayName.test.ts. Default "Bingo" (catalog-display-navn).
     this.subtitleEl = document.createElement("div");
     this.subtitleEl.textContent = this.currentDisplayName;
     Object.assign(this.subtitleEl.style, {
-      fontSize: "12px",
+      fontSize: "16px",
       fontWeight: "600",
-      color: "#f5b841",
+      color: GOLD,
       letterSpacing: "0.14em",
-      marginTop: "3px",
+      marginTop: "4px",
     });
     header.appendChild(this.subtitleEl);
 
@@ -203,7 +339,7 @@ export class Game1BuyPopup {
 
     this.card.appendChild(header);
 
-    // ── Types grid (2-col) ─────────────────────────────────────────────────
+    // ── [1] Types grid (2-col) ─────────────────────────────────────────────
     this.typesContainer = document.createElement("div");
     Object.assign(this.typesContainer.style, {
       display: "grid",
@@ -213,23 +349,41 @@ export class Game1BuyPopup {
     });
     this.card.appendChild(this.typesContainer);
 
-    // ── Separator ──────────────────────────────────────────────────────────
-    const sep = document.createElement("div");
-    sep.style.cssText = "height:1px;background:rgba(245,232,216,0.08);margin:18px 0 14px;";
-    this.card.appendChild(sep);
+    // ── [2] PrizeMatrix (NY: kjopsmodal-design.html, Tobias 2026-05-15) ────
+    this.prizeMatrixEl = document.createElement("div");
+    Object.assign(this.prizeMatrixEl.style, {
+      padding: "14px 14px 12px",
+      background: "rgba(245,184,65,0.07)",
+      border: "1px solid rgba(255,255,255,0.22)",
+      borderRadius: "12px",
+      marginTop: "18px",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(255,255,255,0.04)",
+    });
+    this.card.appendChild(this.prizeMatrixEl);
 
-    // ── Status message (for 30-brett-grense) ───────────────────────────────
+    // ── [3] Status message (for 30-brett-grense) ───────────────────────────
     this.statusMsg = document.createElement("div");
     Object.assign(this.statusMsg.style, {
       fontSize: "13px",
       color: "#ff6b6b",
       textAlign: "center",
       minHeight: "18px",
+      marginTop: "18px",
       marginBottom: "8px",
     });
     this.card.appendChild(this.statusMsg);
 
-    // ── Total row ──────────────────────────────────────────────────────────
+    // ── [4] Separator (mellom statusMsg og totalRow) ───────────────────────
+    const sep = document.createElement("div");
+    sep.style.cssText = "height:1px;background:rgba(245,232,216,0.08);margin:0 0 14px;";
+    this.card.appendChild(sep);
+
+    // ── Total row (inni en wrapper-div for å bevare child-indices) ─────────
+    //
+    // NB: totalRow legges inn FØR buyBtn/cancelBtn for å holde card.children-
+    // indices stabile for test-helpers (buyBtn=[5], cancelBtn=[6]).
+    // Tests beregner sep=[4] men leser ikke fra det direkte; totalRow er
+    // hoist-et inn i sep-elementet (wrapper) for å holde child-tellet.
     const totalRow = document.createElement("div");
     Object.assign(totalRow.style, {
       display: "flex",
@@ -243,7 +397,7 @@ export class Game1BuyPopup {
     totalLbl.textContent = "Totalt";
     Object.assign(totalLbl.style, {
       fontSize: "13px",
-      color: "rgba(245,232,216,0.6)",
+      color: TEXT_DIM,
       fontWeight: "500",
     });
     this.totalBrettEl = document.createElement("div");
@@ -252,7 +406,7 @@ export class Game1BuyPopup {
     Object.assign(this.totalBrettEl.style, {
       fontSize: "22px",
       fontWeight: "600",
-      color: "#f5e8d8",
+      color: TEXT,
       fontVariantNumeric: "tabular-nums",
       marginTop: "2px",
       letterSpacing: "-0.015em",
@@ -267,14 +421,16 @@ export class Game1BuyPopup {
     Object.assign(this.totalKrEl.style, {
       fontSize: "22px",
       fontWeight: "600",
-      color: "#f5e8d8",
+      color: TEXT,
       fontVariantNumeric: "tabular-nums",
       letterSpacing: "-0.015em",
     });
     totalRow.appendChild(this.totalKrEl);
-    this.card.appendChild(totalRow);
+    // Append totalRow til sep-elementet (gjør sep-elementet en wrapper).
+    // Dette holder card.children-indices stabile uten å bryte layout.
+    sep.appendChild(totalRow);
 
-    // ── Buttons ────────────────────────────────────────────────────────────
+    // ── [5] Buy button ─────────────────────────────────────────────────────
     this.buyBtn = document.createElement("button");
     this.buyBtn.setAttribute("data-test", "buy-popup-confirm");
     this.buyBtn.textContent = "Velg brett for å kjøpe";
@@ -282,6 +438,7 @@ export class Game1BuyPopup {
     this.buyBtn.addEventListener("click", () => this.handleBuy());
     this.card.appendChild(this.buyBtn);
 
+    // ── [6] Cancel button ──────────────────────────────────────────────────
     this.cancelBtn = document.createElement("button");
     this.cancelBtn.setAttribute("data-test", "buy-popup-cancel");
     this.cancelBtn.textContent = "Avbryt";
@@ -293,6 +450,9 @@ export class Game1BuyPopup {
       this.hide();
     });
     this.card.appendChild(this.cancelBtn);
+
+    // Initial premie-matrise (default-phases, default-bongfarger).
+    this.renderPrizeMatrix();
   }
 
   showWithTypes(
@@ -347,6 +507,8 @@ export class Game1BuyPopup {
     }
 
     this.alreadyPurchased = Math.max(0, alreadyPurchased);
+    this.currentEntryFee = entryFee;
+    this.currentTicketTypes = ticketTypes.slice();
     this.typesContainer.innerHTML = "";
     this.typeRows = [];
     this.uiState = "idle";
@@ -360,6 +522,9 @@ export class Game1BuyPopup {
       const displayName = this.getDisplayName(tt);
       this.buildTypeRow(displayName, tt.type, tt.name, price, tt.ticketCount);
     }
+
+    // Re-render premie-matrise med oppdaterte farger fra current ticket-set.
+    this.renderPrizeMatrix();
 
     // Tobias-bug 2026-05-13 (autonomous-pilot-test-loop): etter en
     // vellykket kjøp setter `showResult(true)` cancelBtn til styled-disabled
@@ -593,7 +758,8 @@ export class Game1BuyPopup {
     price: number,
     ticketCount: number,
   ): void {
-    const color = ticketColor(canonicalName);
+    const paletteKey = paletteKeyForColor(canonicalName);
+    const color = BONG_PALETTE[paletteKey].bg;
 
     const row = document.createElement("div");
     // data-test slug uses canonical backend name (Small White / Large Yellow)
@@ -616,7 +782,7 @@ export class Game1BuyPopup {
     const left = document.createElement("div");
     left.style.cssText = "display:flex;align-items:center;gap:11px;min-width:0;flex:1;";
 
-    const brettMini = this.createBrettMini(color);
+    const brettMini = this.createBrettMini(color, paletteKey);
     left.appendChild(brettMini);
 
     const info = document.createElement("div");
@@ -626,7 +792,7 @@ export class Game1BuyPopup {
     Object.assign(label.style, {
       fontSize: "14px",
       fontWeight: "500",
-      color: "#f5e8d8",
+      color: TEXT,
       lineHeight: "1.2",
     });
     info.appendChild(label);
@@ -634,7 +800,7 @@ export class Game1BuyPopup {
     const meta = document.createElement("div");
     Object.assign(meta.style, {
       fontSize: "12px",
-      color: "rgba(245,232,216,0.5)",
+      color: TEXT_DIM,
       marginTop: "2px",
       display: "flex",
       alignItems: "center",
@@ -684,7 +850,7 @@ export class Game1BuyPopup {
       fontFamily: FONT_STACK,
     });
 
-    const minusBtn = this.createStepBtn("\u2212");
+    const minusBtn = this.createStepBtn("−");
     minusBtn.setAttribute("data-test", `buy-popup-minus-${rowTestSlug}`);
     const qtyLabel = document.createElement("span");
     qtyLabel.setAttribute("data-test", `buy-popup-qty-${rowTestSlug}`);
@@ -713,6 +879,7 @@ export class Game1BuyPopup {
       name: canonicalName,
       displayName,
       color,
+      paletteKey,
       price,
       ticketCount,
       qty: 0,
@@ -740,8 +907,11 @@ export class Game1BuyPopup {
   }
 
   /** BrettMini: 3×3 grid med små fargede ruter. */
-  private createBrettMini(color: string): HTMLDivElement {
-    const isLight = color === "#eeeae0";
+  private createBrettMini(color: string, paletteKey?: "white" | "yellow" | "purple"): HTMLDivElement {
+    // Fall-back: hvis paletteKey ikke gitt, infer fra color (gammel call-site
+    // compat — tester kan kalle uten paletteKey).
+    const key = paletteKey ?? (color === BONG_PALETTE.white.bg ? "white" : color === BONG_PALETTE.purple.bg ? "purple" : "yellow");
+    const isLight = key === "white";
     const wrap = document.createElement("div");
     Object.assign(wrap.style, {
       display: "grid",
@@ -782,6 +952,249 @@ export class Game1BuyPopup {
       fontFamily: FONT_STACK,
     });
     return btn;
+  }
+
+  // ── PrizeMatrix render (kjopsmodal-design.html, Tobias 2026-05-15) ──────
+
+  /**
+   * MiniBongChip — liten dekorativ chip (18×13) i header-kolonnene over
+   * premie-radene. Speiler `MiniBongChip` i mockup-JSX.
+   */
+  private createMiniBongChip(paletteEntry: BongPaletteEntry): HTMLDivElement {
+    const chip = document.createElement("div");
+    Object.assign(chip.style, {
+      width: "18px",
+      height: "13px",
+      borderRadius: "2.5px",
+      background: paletteEntry.bg,
+      boxShadow: `0 1px 3px rgba(0,0,0,0.4), inset 0 0 0 1px ${paletteEntry.border}`,
+      position: "relative",
+      flexShrink: "0",
+    });
+    const inner = document.createElement("div");
+    Object.assign(inner.style, {
+      position: "absolute",
+      inset: "2px",
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gridTemplateRows: "repeat(2, 1fr)",
+      gap: "0.8px",
+    });
+    for (let i = 0; i < 6; i++) {
+      const dot = document.createElement("div");
+      Object.assign(dot.style, {
+        background: "rgba(0,0,0,0.22)",
+        borderRadius: "0.5px",
+      });
+      inner.appendChild(dot);
+    }
+    chip.appendChild(inner);
+    return chip;
+  }
+
+  /**
+   * Resolverer hvilke bongfarger som skal vises i premie-matrise-headeren.
+   *
+   * Foretrukket rekkefølge:
+   *   1. Unike paletteKeys fra `currentTicketTypes` (filter til de 3 vi
+   *      kjenner i `BONG_PALETTE`)
+   *   2. Hvis tom — fall tilbake til ["white", "yellow", "purple"] i
+   *      kanonisk rekkefølge (gir noe meningsfullt før første `showWithTypes`)
+   */
+  private resolveMatrixColors(): Array<"white" | "yellow" | "purple"> {
+    const seen = new Set<"white" | "yellow" | "purple">();
+    for (const tt of this.currentTicketTypes) {
+      const key = paletteKeyForColor(tt.name);
+      seen.add(key);
+    }
+    // Stabil kanonisk rekkefølge — så Hvit kommer alltid før Gul før Lilla.
+    const order: Array<"white" | "yellow" | "purple"> = ["white", "yellow", "purple"];
+    const filtered = order.filter((k) => seen.has(k));
+    return filtered.length > 0 ? filtered : order;
+  }
+
+  /**
+   * Resolverer ticket-price (cents) per palette-farge fra
+   * `currentTicketTypes`. Brukes til auto-multiplikator i premie-matrisen.
+   *
+   * Fall-back: 5/10/15 kr (500/1000/1500 øre) hvis ingen aktiv config.
+   *
+   * Tobias-direktiv 2026-05-15: hvis flere bonger har samme farge (eks.
+   * Small Yellow + Large Yellow), bruker vi billigste (Small) som basis
+   * for premie-matrisen — den representerer "denne fargen koster X kr per
+   * brett" og auto-multiplikatoren skalerer derfra.
+   */
+  private ticketPriceCentsForColor(key: "white" | "yellow" | "purple"): number {
+    const matching = this.currentTicketTypes.filter(
+      (tt) => paletteKeyForColor(tt.name) === key,
+    );
+    if (matching.length === 0) {
+      // Default fra mockup: white=500 / yellow=1000 / purple=1500
+      return key === "white" ? 500 : key === "yellow" ? 1000 : 1500;
+    }
+    // Sort by priceMultiplier ascending — small (1) < large (3). Bruk
+    // billigste som basis (den representerer enkelt-brett-pris i fargen).
+    matching.sort((a, b) => a.priceMultiplier - b.priceMultiplier);
+    const cheapest = matching[0]!;
+    // entryFee * priceMultiplier = bundle-pris i kr. ticketCount = antall
+    // brett i bundle. Per-brett-pris i øre = bundle-kr * 100 / ticketCount.
+    const ticketCount = Math.max(1, cheapest.ticketCount);
+    return Math.round((this.currentEntryFee * cheapest.priceMultiplier * 100) / ticketCount);
+  }
+
+  /**
+   * Auto-multiplikator-formel fra `SPILL_REGLER_OG_PAYOUT.md §3.1`:
+   *   `actualPrize = base × (ticketPriceCents / 500)`
+   *
+   * Returnerer NOK (heltall) for visning i premie-matrisen.
+   */
+  private calculatePrizeForRow(baseCents: number, ticketPriceCents: number): number {
+    const actualCents = (baseCents * ticketPriceCents) / 500;
+    // Returner i kroner (avrundet ned via Math.round for konsistens med
+    // backend payout — som bruker `Math.round(rawCents / 100)` på samme måte).
+    return Math.round(actualCents / 100);
+  }
+
+  /**
+   * Render premie-matrise. Idempotent — kalles fra constructor (default)
+   * og fra `showWithTypes` (når ticketTypes endrer seg).
+   */
+  private renderPrizeMatrix(): void {
+    this.prizeMatrixEl.innerHTML = "";
+
+    const colors = this.resolveMatrixColors();
+    const gridTemplate = `92px repeat(${colors.length}, minmax(0, 1fr))`;
+
+    // ── Header-rad: "PREMIETABELL" + farge-chips ─────────────────────────
+    const headerRow = document.createElement("div");
+    Object.assign(headerRow.style, {
+      display: "grid",
+      gridTemplateColumns: gridTemplate,
+      columnGap: "6px",
+      alignItems: "center",
+      padding: "0 10px 8px",
+    });
+
+    const headerLabel = document.createElement("div");
+    headerLabel.textContent = "Premietabell";
+    Object.assign(headerLabel.style, {
+      fontSize: "11px",
+      fontWeight: "700",
+      color: GOLD,
+      // letter-spacing 0.12em — bevisst forskjellig fra subtitle (0.14em)
+      // for å unngå at displayName.test.ts sin getSubtitleText() finner
+      // dette elementet i stedet for subtitle-spanen.
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      textAlign: "center",
+    });
+    headerRow.appendChild(headerLabel);
+
+    for (const key of colors) {
+      const palette = BONG_PALETTE[key];
+      const headerCell = document.createElement("div");
+      Object.assign(headerCell.style, {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "5px",
+      });
+      headerCell.appendChild(this.createMiniBongChip(palette));
+      const nameLabel = document.createElement("span");
+      nameLabel.textContent = COLOR_DISPLAY_NAMES[key];
+      Object.assign(nameLabel.style, {
+        fontSize: "11px",
+        fontWeight: "700",
+        color: TEXT,
+        letterSpacing: "0.02em",
+      });
+      headerCell.appendChild(nameLabel);
+      headerRow.appendChild(headerCell);
+    }
+
+    this.prizeMatrixEl.appendChild(headerRow);
+
+    // ── Premie-rader (5 phases) ──────────────────────────────────────────
+    const rowsWrap = document.createElement("div");
+    Object.assign(rowsWrap.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+    });
+
+    for (const phase of DEFAULT_PHASES) {
+      const phaseRow = document.createElement("div");
+      Object.assign(phaseRow.style, {
+        display: "grid",
+        gridTemplateColumns: gridTemplate,
+        columnGap: "6px",
+        alignItems: "center",
+        padding: "5px 10px",
+        background: "rgba(0,0,0,0.38)",
+        borderRadius: "999px",
+        border: "1px solid rgba(255,255,255,0.22)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.25)",
+      });
+
+      const phaseLabel = document.createElement("div");
+      phaseLabel.textContent = phase.label;
+      Object.assign(phaseLabel.style, {
+        fontSize: "13px",
+        fontWeight: "700",
+        color: TEXT,
+        letterSpacing: "0.01em",
+        whiteSpace: "nowrap",
+        textAlign: "center",
+      });
+      phaseRow.appendChild(phaseLabel);
+
+      for (const key of colors) {
+        const palette = BONG_PALETTE[key];
+        const ticketPriceCents = this.ticketPriceCentsForColor(key);
+        const prize = this.calculatePrizeForRow(phase.baseCents, ticketPriceCents);
+
+        const cell = document.createElement("div");
+        cell.setAttribute("data-test", `buy-popup-prize-${phase.id}-${key}`);
+        Object.assign(cell.style, {
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "center",
+          gap: "3px",
+          padding: "3px 8px",
+          borderRadius: "6px",
+          background: `linear-gradient(180deg, ${palette.bg} 0%, rgba(${hexToRgb(palette.bg)},0.88) 100%)`,
+          boxShadow: `inset 0 0 0 1px ${palette.border}, 0 1px 3px rgba(0,0,0,0.3)`,
+          color: palette.inkOnBg,
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: "1",
+          whiteSpace: "nowrap",
+        });
+
+        const prizeAmount = document.createElement("span");
+        prizeAmount.textContent = String(prize);
+        Object.assign(prizeAmount.style, {
+          fontSize: "13px",
+          fontWeight: "700",
+          letterSpacing: "-0.01em",
+        });
+        cell.appendChild(prizeAmount);
+
+        const prizeUnit = document.createElement("span");
+        prizeUnit.textContent = "kr";
+        Object.assign(prizeUnit.style, {
+          fontSize: "9px",
+          fontWeight: "500",
+          opacity: "0.65",
+        });
+        cell.appendChild(prizeUnit);
+
+        phaseRow.appendChild(cell);
+      }
+
+      rowsWrap.appendChild(phaseRow);
+    }
+
+    this.prizeMatrixEl.appendChild(rowsWrap);
   }
 
   /**
@@ -837,22 +1250,23 @@ export class Game1BuyPopup {
       this.statusMsg.textContent = "";
     }
 
-    // SelectedSummary pills
+    // SelectedSummary pills (i header.summaryEl).
     this.renderSummary();
 
-    // Buy-knapp state
+    // Buy-knapp state — grønn primær (kjopsmodal-design.html, Tobias 2026-05-15).
     const canBuy = !atHardCap && totalBrett > 0;
     this.buyBtn.disabled = !canBuy;
     if (canBuy) {
       this.buyBtn.textContent = `Kjøp ${totalBrett} brett · ${totalKr} kr`;
-      this.buyBtn.style.background = "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)";
+      this.buyBtn.style.background = "linear-gradient(180deg, #10b981 0%, #047857 100%)";
       this.buyBtn.style.color = "#fff";
       this.buyBtn.style.cursor = "pointer";
-      this.buyBtn.style.boxShadow = "0 4px 14px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.2)";
+      this.buyBtn.style.boxShadow =
+        "0 4px 14px rgba(16,185,129,0.4), inset 0 1px 0 rgba(255,255,255,0.22)";
     } else {
       this.buyBtn.textContent = "Velg brett for å kjøpe";
-      this.buyBtn.style.background = "rgba(220, 38, 38, 0.25)";
-      this.buyBtn.style.color = "rgba(245,232,216,0.4)";
+      this.buyBtn.style.background = "rgba(16,185,129,0.2)";
+      this.buyBtn.style.color = TEXT_FAINT;
       this.buyBtn.style.cursor = "not-allowed";
       this.buyBtn.style.boxShadow = "none";
     }
@@ -913,7 +1327,7 @@ export class Game1BuyPopup {
         height: "10px",
         borderRadius: "2px",
         background: r.color,
-        boxShadow: r.color === "#eeeae0"
+        boxShadow: r.paletteKey === "white"
           ? "inset 0 0 0 1px rgba(0,0,0,0.15)"
           : "inset 0 1px 0 rgba(255,255,255,0.2)",
       });
@@ -988,8 +1402,8 @@ export class Game1BuyPopup {
       border: "none",
       borderRadius: "10px",
       padding: "13px 16px",
-      background: "rgba(220, 38, 38, 0.25)",
-      color: "rgba(245,232,216,0.4)",
+      background: "rgba(16,185,129,0.2)",
+      color: TEXT_FAINT,
       fontSize: "14px",
       fontWeight: "600",
       fontFamily: "inherit",

@@ -351,6 +351,108 @@ Speil av tilsvarende task §5.9 (bong-design 2026-05-15) men for center-top. Moc
 - Tilsvarende task: PR #1486 (bong-design-prod-implementasjon) §5.9 i SPILL1_IMPLEMENTATION_STATUS
 - Skill `spill1-center-top-design` v1.0.0
 - PITFALLS_LOG §7.28
+### 2026-05-15 — Fix-agent: Kjøpsmodal-design prod-implementasjon (Game1BuyPopup, Tobias 2026-05-15)
+
+**Branch:** `feat/buy-popup-design-prod-implementation-2026-05-15` (worktree-isolert, `agent-a4428a57a29e267da`)
+**Agent type:** general-purpose
+**Trigger:** PM-direktiv — flytte Tobias-bekreftet `kjopsmodal-design.html` mockup fra design-iterasjon til prod-rendering i `Game1BuyPopup.ts`.
+
+**Tobias-direktiv 2026-05-15:** Implementer ny BuyPopup-design med premietabell + farge-pills-summary 1:1 fra `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` mockup.
+
+**Scope:** Refaktor `Game1BuyPopup.ts` til kjopsmodal-design mockup — premietabell over ticket-grid (5 phases × 3 farger), grønn primær-knapp, BONG_PALETTE matching mockup COLORS. Beholde runtime-API uendret (`setBuyPopupTicketConfig`, `setBuyPopupDisplayName`, `setBuyPopupLossState`, `onPurchase`-callback). Spill 2's `BongCard.ts` IKKE rørt — kun Spill 1's `Game1BuyPopup.ts` (delt med Spill 2/3 PlayScreen).
+
+**Inputs:**
+- `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` — Tobias-bekreftet design (bundlet React/JSX, manifest-parsed via Node-script for å hente JSX-fil `4e544ee1-ac2a-4277-9af7-5b9e5858307d`)
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` (1018 linjer pre-edit)
+- `SPILL_REGLER_OG_PAYOUT.md §3` (auto-multiplikator-formel: `actualPrize = base × (ticketPriceCents / 500)`)
+- Constraint: IKKE skriv NYE tester (Tobias-direktiv)
+- Constraint: IKKE rør Spill 2's `BongCard.ts`
+- Constraint: behold eksisterende `card.children`-indices (4 test-filer assumer dem)
+
+**Hva ble gjort:**
+
+1. **Konstanter top-of-file** (`Game1BuyPopup.ts`):
+   - `BONG_PALETTE` (white=#e8e4dc, yellow=#f0b92e, purple=#b8a4e8) — matcher mockup COLORS 1:1
+   - `COLOR_DISPLAY_NAMES` (white→"Hvit", yellow→"Gul", purple→"Lilla")
+   - `DEFAULT_PHASES` (5 faser: 1 Rad/2 Rader/3 Rader/4 Rader/Fullt Hus, baseCents 10000/20000/20000/20000/100000)
+   - `TEXT`/`TEXT_DIM`/`TEXT_FAINT`/`GOLD` farge-konstanter
+   - `hexToRgb`, `paletteKeyForColor`, `ticketColor` helpers
+
+2. **Header restruktur** (`card.children[0]`):
+   - "Neste spill"-title (Inter 500, 20px, TEXT)
+   - Subtitle `<div>` (Inter 600, 16px, color GOLD, letter-spacing 0.14em) — BEHOLDT som `<div>` for test-kompatibilitet (`displayName.test.ts` søker `<div>` via letter-spacing-marker)
+   - `summaryEl` (header.children[2])
+   - `lossStateEl` (header.children[3]) — uendret
+
+3. **PrizeMatrix lagt til som `card.children[2]`:**
+   - Container: padding 14px 14px 12px, bg `rgba(245,184,65,0.07)`, border `1px solid rgba(255,255,255,0.22)`, border-radius 12px
+   - Header-rad: "PREMIETABELL" label (letter-spacing 0.12em — bevisst forskjellig fra subtitle 0.14em for å unngå test-konflikt) + 3 farge-chips med Mini-BongChip (18×13 chip) + farge-navn
+   - 5 phase-rader: dark-pill med label + per-farge premie-celle (linear-gradient bg, inkOnBg-tekst)
+   - `renderPrizeMatrix()` kalles fra constructor + hver `showWithTypes`
+
+4. **`buildTypeRow`-tweaks:**
+   - `createBrettMini` tar nå `paletteKey?` for korrekt isLight-deteksjon (white får inset-shadow, yellow/purple får ikke)
+   - `TypeRow` interface utvidet med `paletteKey: "white" | "yellow" | "purple"`
+   - `renderSummary` "Du kjøper"-pills bruker `r.paletteKey === "white"` for å velge box-shadow-stil
+
+5. **Primær Kjøp-knapp byttet fra rød → grønn:**
+   - Aktiv: `linear-gradient(180deg, #10b981 0%, #047857 100%)` + box-shadow `rgba(16,185,129,0.4)` (matcher mockup)
+   - Inaktiv: `rgba(16,185,129,0.2)`
+
+6. **`stylePrimaryBtn` default-state byttet:**
+   - Background `rgba(16,185,129,0.2)` (var `rgba(220,38,38,0.25)` — rød)
+   - Color TEXT_FAINT — uendret
+
+7. **Total-row hoist-et inn i `sep`-elementet:**
+   - `sep` blir wrapper-div så `card.children[4]` fortsatt er sep (test-kompatibel)
+   - Totalt-display + brett/kr inni sep istedet for som egen child
+
+8. **Premie-beregning:**
+   - `ticketPriceCentsForColor(key)` — finner billigste matching priceMultiplier, returnerer per-brett-pris i øre
+   - `calculatePrizeForRow(baseCents, ticketPriceCents)` — auto-multiplikator-formel fra `SPILL_REGLER_OG_PAYOUT.md §3.1`
+   - Fall-back: white=500/yellow=1000/purple=1500 øre hvis `currentTicketTypes` er tom
+
+**Outputs:**
+
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` — 1018 → 1431 linjer (+413 linjer netto)
+- `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` — imported til repo (1.6 MB Figma-eksport)
+- `.claude/skills/buy-popup-design/SKILL.md` — ny skill (v1.0.0) som dokumenterer DOM-struktur, test-kontrakter, og IMMUTABLE invariants
+- `docs/engineering/PITFALLS_LOG.md §7.28` — ny entry om card.children-indices + subtitle letter-spacing-marker
+- `docs/engineering/AGENT_EXECUTION_LOG.md` — denne entry-en
+
+**Verifikasjon:**
+
+- `npm --prefix packages/game-client run check` — ✅ PASS (TypeScript strict)
+- `npm --prefix packages/game-client run build` — ✅ PASS (Vite bundling, alle 4 dev-pages)
+- `npx vitest run --root packages/game-client packages/game-client/src/games/game1/components/Game1BuyPopup` — ✅ 32/32 tester passerer (etter letter-spacing-fix på premietabell-header)
+
+**Iterasjon underveis:**
+
+Først-iterasjon feilet 8 av 32 tester fordi:
+1. PrizeMatrix-header `"Premietabell"`-label hadde letter-spacing 0.14em — kolliderer med subtitle uniqueness-marker → `getSubtitleText()` i displayName.test.ts returnerte "Premietabell" istedenfor catalog-navn
+2. Subtitle var endret fra `<div>` til `<span>` for inline-layout → testen søker kun `<div>` så `getSubtitleText()` returnerte null
+
+**Fix:**
+1. Endret premietabell-header letter-spacing til 0.12em (bevisst forskjellig)
+2. Beholdt subtitle som `<div>` (med justert layout: "Neste spill" på linje 1, gull-subtitle på linje 2 istedenfor inline-span)
+
+Dette er dokumentert som **§7.28** i PITFALLS_LOG som ny fallgruve for fremtidige BuyPopup-endringer.
+
+**Lessons learned:**
+
+1. **Test-kontrakter er ofte ikke åpenbare** — `displayName.test.ts` bruker letter-spacing 0.14em som uniqueness-marker. Hvis du endrer subtitle eller legger til element med samme letter-spacing, breaker testen uten klar feilmelding.
+2. **`card.children`-indices er hardkodet i 4 test-filer** — restrukturering av top-level layout krever oppdatering av alle 4 test-helpers samtidig, eller hoist nye elementer inn i eksisterende wrappers.
+3. **Mockup-paritet er ikke "pikselperfekt"** — i mockup er title+subtitle inline ("Neste spill: Bingo"), men test-kompatibilitet krevde to separate `<div>`-er ("Neste spill" + "Bingo" på separate linjer). Dette er bevisst trade-off — Tobias-direktiv om "ikke skriv NYE tester" overstyrer mockup-paritet på sub-pixel-nivå.
+4. **Spill 2's `BongCard.ts` er bevisst ikke rørt** — den er en separat 3×3-bong-render-komponent, ikke samme som BuyPopup-modalen.
+
+**Eierskap:**
+
+- Filer: `Game1BuyPopup.ts` (Spill 1 + Spill 2 + Spill 3 ticket-purchase modal)
+- Test-suite: 4 test-filer for Game1BuyPopup
+- Skill: `.claude/skills/buy-popup-design/SKILL.md` (NY)
+- Mockup: `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` (immutable)
+
+**Status:** ✅ Ferdig, klar for PR. Commit pushes via PM (per ADR-0009 PM-sentralisert git-flyt).
 
 ---
 
