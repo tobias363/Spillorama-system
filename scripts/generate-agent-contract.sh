@@ -129,6 +129,41 @@ LATEST_EXPORT="$(
     || true
 )"
 
+# Skill-SHA lockfile (Fase 2 — ADR-0024 follow-up).
+# For each matched skill, capture version (from frontmatter) + commit-SHA at
+# generation time. Allows reproducible audit later via verify-contract-freshness.mjs.
+SKILLS_LOCK=""
+if [ -n "$SKILLS" ]; then
+  while IFS= read -r skill; do
+    [ -z "$skill" ] && continue
+    skill_path=".claude/skills/$skill/SKILL.md"
+    if [ -f "$skill_path" ]; then
+      sk_version=$(grep -E '^[[:space:]]*version:[[:space:]]*' "$skill_path" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*version:[[:space:]]*//;s/[[:space:]]*$//')
+      [ -z "$sk_version" ] && sk_version="unversioned"
+      sk_sha=$(git rev-parse "HEAD:$skill_path" 2>/dev/null || echo "uncommitted")
+      sk_sha_short="${sk_sha:0:12}"
+      SKILLS_LOCK+="${skill}|${sk_version}|${sk_sha_short}
+"
+    fi
+  done <<< "$SKILLS"
+fi
+
+# Contract ID for persistent evidence storage (docs/evidence/<contract-id>/).
+# Format: YYYYMMDD-<short-slug-of-agent-name>
+CONTRACT_ID_DATE="$(date -u +%Y%m%d)"
+CONTRACT_ID_SLUG="$(echo "$AGENT_NAME" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/^-*//;s/-*$//' | cut -c1-40)"
+[ -z "$CONTRACT_ID_SLUG" ] && CONTRACT_ID_SLUG="agent"
+CONTRACT_ID="${CONTRACT_ID_DATE}-${CONTRACT_ID_SLUG}"
+PERSISTENT_EVIDENCE_DIR="docs/evidence/${CONTRACT_ID}"
+
+# Detect ephemeral evidence paths for audit-warning
+EPHEMERAL_EVIDENCE=()
+for evidence in "${EVIDENCE[@]}"; do
+  case "$evidence" in
+    /tmp/*|/var/folders/*) EPHEMERAL_EVIDENCE+=("$evidence") ;;
+  esac
+done
+
 {
   cat <<EOF
 # Agent Task Contract — $AGENT_NAME
@@ -138,6 +173,8 @@ LATEST_EXPORT="$(
 **PM branch when generated:** \`$CURRENT_BRANCH\`
 **Main baseline SHA:** \`$MAIN_SHA\`
 **Risk:** \`$RISK\`
+**Contract ID:** \`$CONTRACT_ID\`
+**Persistent evidence dir:** \`$PERSISTENT_EVIDENCE_DIR\` (convention; see \`docs/evidence/README.md\`)
 **Suggested agent branch:** \`${DECLARE_BRANCH:-"<PM fills branch before spawn>"}\`
 
 This contract is the prompt source of truth. Do not infer requirements from chat
@@ -189,7 +226,45 @@ You must cite concrete evidence from these files in your root-cause summary:
 EOF
   fi
 
+  # Ephemeral evidence warning (Fase 2 — ADR-0024 follow-up)
+  if [ ${#EPHEMERAL_EVIDENCE[@]} -gt 0 ]; then
+    cat <<EOF
+
+**Evidence persistence warning:** One or more evidence files are in an
+ephemeral location (\`/tmp\` or \`/var/folders\`) and will not survive a
+reboot or be available for audit weeks later. For audit-grade contracts,
+copy evidence to persistent storage before spawning the agent:
+
+\`\`\`bash
+mkdir -p ${PERSISTENT_EVIDENCE_DIR}
+EOF
+    for evidence in "${EPHEMERAL_EVIDENCE[@]}"; do
+      echo "cp $evidence ${PERSISTENT_EVIDENCE_DIR}/"
+    done
+    cat <<'EOF'
+```
+
+See `docs/evidence/README.md` for the full persistent-evidence convention.
+EOF
+  fi
+
   cat <<'EOF'
+
+## 3a. Cross-Cutting Impact Analysis
+
+Before implementation, the agent must answer in the delivery report:
+
+1. **Beyond the files in scope above**, what other files, services, or
+   modules might this change affect? Be specific (`file:line` or module name).
+2. **What invariants** must be preserved across these touch-points? Examples:
+   wallet balance equation, audit-trail hash-chain continuity, plan-runtime
+   state-machine ordering, socket-event contract.
+3. **If "no ripple effects"**, justify with a concrete reference (test
+   coverage, module isolation, type-system enforcement).
+
+This is a discipline check, not a hard gate. Skipping it is acceptable when
+scope is genuinely isolated, but the justification must be in the delivery
+report. PM will reject vague "no ripple" claims.
 
 ## 4. Mandatory Context Before Any Code Change
 
@@ -207,11 +282,29 @@ EOF
   echo "- \`docs/engineering/AGENT_EXECUTION_LOG.md\` latest related entries"
 
   if [ -n "$SKILLS" ]; then
-    echo "- Relevant skills matched by scope:"
-    while IFS= read -r skill; do
-      [ -z "$skill" ] && continue
-      echo "  - \`.claude/skills/$skill/SKILL.md\`"
-    done <<< "$SKILLS"
+    echo "- Relevant skills matched by scope (skill @ version @ SHA at generation):"
+    if [ -n "$SKILLS_LOCK" ]; then
+      while IFS='|' read -r sk_name sk_ver sk_short; do
+        [ -z "$sk_name" ] && continue
+        echo "  - \`.claude/skills/$sk_name/SKILL.md\` @ \`v$sk_ver\` @ \`$sk_short\`"
+      done <<< "$SKILLS_LOCK"
+    else
+      while IFS= read -r skill; do
+        [ -z "$skill" ] && continue
+        echo "  - \`.claude/skills/$skill/SKILL.md\` (version/SHA capture failed)"
+      done <<< "$SKILLS"
+    fi
+    cat <<'EOF'
+
+**Verify skill freshness before agent spawn:**
+
+```bash
+node scripts/verify-contract-freshness.mjs <path-to-this-contract.md>
+```
+
+Exit 0 = skill SHAs match current HEAD. Exit 1 = at least one skill has drifted
+since this contract was generated; review the diff before spawning.
+EOF
   else
     echo "- No skill matched automatically. Search \`.claude/skills/\` manually and document if none applies."
   fi
