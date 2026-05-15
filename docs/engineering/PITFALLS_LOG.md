@@ -48,7 +48,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 14 | 2026-05-14 |
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
-| [§5 Git & PR-flyt](#5-git--pr-flyt) | 12 | 2026-05-15 |
+| [§5 Git & PR-flyt](#5-git--pr-flyt) | 14 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 17 | 2026-05-14 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 7 | 2026-05-15 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 18 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 101 entries (per 2026-05-15)
+**Total:** 103 entries (per 2026-05-15)
 
 ---
 
@@ -1173,6 +1173,56 @@ WHERE id = $1
 - `docs/operations/ACCESS_APPROVAL_MATRIX.md`
 - `.github/CODEOWNERS`
 - `docs/engineering/KNOWLEDGE_CONTROL_PRELOCK_REVIEW_2026-05-15.md`
+
+### §5.13 — GitHub Actions output må aldri få fallback-linje i command substitution
+
+**Severity:** P2 (post-merge watcher blir rød selv om det ikke finnes rebase-arbeid)
+**Oppdaget:** 2026-05-15 etter merge av PR #1527.
+**Symptom:** `Auto-rebase open PRs on merge` feilet etter en grønn merge med:
+`Unable to process file command 'output' successfully` og `Invalid format '0'`.
+Workflow-loggen viste `Found 0` på egen linje før `0 overlapping open PR(s)`.
+**Root cause:** `COUNT=$(echo "$OVERLAPPING" | tr ' ' '\n' | grep -cv '^$' || echo 0)` kan produsere to linjer når `grep` returnerer exit 1 ved null matches: først `0` fra `grep -c`, så fallback `0` fra `echo 0`. Når dette skrives som `overlap_count=$COUNT` til `$GITHUB_OUTPUT`, blir output-filen flerlinjet og GitHub avviser linjen.
+**Fix:** Håndter null-listen eksplisitt før count:
+```bash
+OVERLAPPING=$(printf '%s\n' "$OVERLAPPING" | tr ' ' '\n' | sed '/^$/d' | sort -un | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+if [ -z "$OVERLAPPING" ]; then
+  COUNT=0
+else
+  COUNT=$(printf '%s\n' "$OVERLAPPING" | tr ' ' '\n' | grep -c .)
+fi
+```
+**Prevention:**
+- Når en workflow skriver til `$GITHUB_OUTPUT`, verifiser at hver output-verdi er én linje.
+- Unngå `cmd || echo fallback` inne i command substitution hvis `cmd` kan skrive output før exit 1.
+- Test både "0 treff" og "1+ treff" for post-merge automation.
+**Related:**
+- `.github/workflows/auto-rebase-on-merge.yml`
+- `pm-orchestration-pattern` skill v1.2.1
+
+### §5.14 — PR-label gates må hente labels live, ikke fra stale event-payload
+
+**Severity:** P1 (godkjent PM-bypass blokkeres selv etter korrekt label)
+**Oppdaget:** 2026-05-15 på PR #1529 etter `approved-pm-bypass` var lagt til.
+**Symptom:** `pm-gate-enforcement` feilet med `gate-bypass krever label approved-pm-bypass` selv om PR-en hadde labelen. Rerun av samme workflow feilet også.
+**Root cause:** Workflowen leste `context.payload.pull_request.labels`. GitHub Actions rerun bruker opprinnelig event-payload fra `opened`/`synchronize`; labels lagt til etter eventet finnes ikke i payloaden, selv på rerun.
+**Fix:** Hent labels live i valideringssteget:
+```js
+const { data: liveIssue } = await github.rest.issues.get({
+  owner: context.repo.owner,
+  repo: context.repo.repo,
+  issue_number: pr.number,
+});
+const labels = new Set((liveIssue.labels || [])
+  .map((l) => typeof l === 'string' ? l : l.name)
+  .filter(Boolean));
+```
+**Prevention:**
+- Alle PR-gates som avhenger av labels, review-state eller merge-state må hente live state via GitHub API.
+- Bruk event-payload kun for immutable metadata som PR-nummer og SHA.
+- Test label-gates med sekvensen: open PR uten label → legg til label → rerun workflow.
+**Related:**
+- `.github/workflows/pm-gate-enforcement.yml`
+- `pm-orchestration-pattern` skill v1.2.2
 
 ---
 

@@ -113,7 +113,14 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
             const decision = process.env.DECISION;
-            const labels = new Set((pr.labels || []).map((l) => l.name));
+            const { data: liveIssue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+            });
+            const labels = new Set((liveIssue.labels || [])
+              .map((l) => typeof l === 'string' ? l : l.name)
+              .filter(Boolean));
             const approved = labels.has('approved-pm-bypass');
 
             if (decision === 'bypass') {

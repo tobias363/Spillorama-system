@@ -2,7 +2,7 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.2.0
+  version: 1.2.2
   project: spillorama
 ---
 
@@ -153,6 +153,14 @@ Registry-fil: `.claude/active-agents.json` (commit-able). Etter agent-leveranse 
 
 `.github/workflows/auto-rebase-on-merge.yml` rebases automatisk overlappende åpne PR-er etter en merge. Forhindrer at parallelle PR-er ender i CONFLICTING-state.
 
+**Zero-overlap invariant (2026-05-15):** Når ingen åpne PR-er overlapper
+med merget PR, workflowen må skrive nøyaktig én linje til
+`$GITHUB_OUTPUT`: `overlap_count=0`. Ikke bruk `grep -c ... || echo 0`
+inne i command substitution; ved null matches kan det produsere både
+`0` og fallback-`0`, som GitHub tolker som ugyldig output-format. For
+tomlinje-filtrering i `bash -e -o pipefail`, bruk `sed '/^$/d'` heller
+enn `grep -v '^$'`.
+
 **Når PM må manuelt rebase:**
 - Auto-rebase feiler pga genuine konflikt (logikk-konflikt, ikke bare tekstlig)
 - PR var basert på en branch som ble force-pushed
@@ -219,6 +227,11 @@ Emergency merge/hotfix skal bruke labels:
 - `post-merge-review-required`
 - `approved-pm-bypass` hvis PM-gate bypasses
 - `approved-knowledge-bypass` hvis knowledge-protocol bypasses
+
+PM-gate-workflows som validerer bypass-labels må hente labels live fra
+GitHub API ved kjøring. Ikke stol på `context.payload.pull_request.labels`:
+rerun av en workflow bruker opprinnelig event-payload og ser ikke labels som
+ble lagt til etter første PR-event.
 
 Ikke aktiver required reviews bare fordi det høres riktig ut. Først
 auditer faktisk collaborator-liste, CODEOWNERS og reviewer-roster. Hvis
@@ -337,3 +350,5 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 2026-05-08 | Initial — etablert PM-orchestration-mandate |
 | 2026-05-13 | v1.1.0 — la til Phase-2-mekanismer fra autonomy-wave: pm-push-control, auto-rebase-on-merge, cascade-rebase-mønster, knowledge-protocol-checkbox, bug-resurrection-detector, skill-freshness-gate. Byttet til `dev:nuke` som standard restart-kommando (vedtatt 2026-05-11). |
 | 2026-05-15 | v1.2.0 — la til access-/approval-matrise, required-review lock-kriterier, emergency-labels og fallgruven "required reviews uten approver-roster". |
+| 2026-05-15 | v1.2.1 — dokumenterte zero-overlap invariant for `auto-rebase-on-merge.yml` etter post-merge output-format-feil. |
+| 2026-05-15 | v1.2.2 — dokumenterte at PM-gate må hente bypass-labels live fra GitHub API, ikke stale PR-event-payload. |
