@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-15T21:21:10Z
-> Commit: `b772ccfd` (branch: `main`)
+> Sist oppdatert: 2026-05-15T21:45:38Z
+> Commit: `b38be59c` (branch: `main`)
 
 Oversikt over alle apps og pakker i monorepoet. `apps/` = deploy-bare
 enheter (egne package.json + build), `packages/` = delt kode importert
