@@ -446,3 +446,4 @@ Når PM spawner agent på en file-pattern, kjør:
 bash scripts/generate-context-pack.sh apps/backend/src/game/Game2Engine.ts
 # → inkluderer FRAGILITY + PITFALLS + relevant skill-content
 ```
+
