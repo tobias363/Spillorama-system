@@ -212,6 +212,11 @@ export interface CenterTopOptions {
  * Redesign 2026-04-23 — mockup `.center-top`:
  *   [combo-panel: 5×5 mini-grid | prize pills]  [action-buttons-panel]
  *
+ * 2026-05-16: PlayScreen kan re-parente `actionRootEl` direkte inn i
+ * `top-group-wrapper` når Tobias vil ha rekkefølgen status → action-panel
+ * → player-info → lykketall → combo-panel. CenterTopPanel eier fortsatt
+ * knappestate; PlayScreen eier den visuelle top-row-rekkefølgen.
+ *
  * - One active pattern mini-grid (not one per row — simpler, matches mockup).
  * - Prize pills for each pattern: completed (strikethrough, dim), active
  *   (yellow border), and inactive (muted).
@@ -227,6 +232,7 @@ export interface CenterTopOptions {
  */
 export class CenterTopPanel {
   private root: HTMLDivElement;
+  private actionsRoot: HTMLDivElement;
   private gameNameEl: HTMLDivElement;
   private jackpotEl: HTMLDivElement;
   private jackpotPrizeEl: HTMLSpanElement;
@@ -352,11 +358,12 @@ export class CenterTopPanel {
     // Tobias-direktiv 2026-05-14 (iterasjon V, premie-design.html):
     // - Padding 14px 25px 5px 25px → 14px 22px 8px 22px (mockup line 369).
     //   22 px symmetri matcher combo-panelets nye padding.
-    // - `marginLeft: auto` pusher action-panel til høyre kant av
-    //   top-group-wrapper slik at det er visuelt adskilt fra combo-panel
-    //   uten overlap. Tobias-fix 2026-05-14: dette hindrer kollisjon når
-    //   game-frame har `width: fit-content` (smale viewports).
+    // - CenterTopPanel holder fortsatt action-state/callbacks. PlayScreen
+    //   kan re-parente `actionRootEl` inn i `top-group-wrapper` for å
+    //   plassere HOVEDSPILL-kolonnen rett etter "Neste spill" (Tobias
+    //   2026-05-16) uten å duplisere knapper eller state.
     const actions = document.createElement("div");
+    this.actionsRoot = actions;
     Object.assign(actions.style, {
       display: "flex",
       flexDirection: "column",
@@ -941,6 +948,12 @@ export class CenterTopPanel {
     return this.root;
   }
 
+  /** Action-panel root. PlayScreen re-parenter denne kolonnen når den
+   *  visuelle top-HUD-rekkefølgen skal skille action fra combo-panelet. */
+  get actionRootEl(): HTMLDivElement {
+    return this.actionsRoot;
+  }
+
   /** Game-name header text — e.g. "HOVEDSPILL 1". */
   setBadge(text: string): void {
     this.gameNameEl.textContent = text.toUpperCase();
@@ -991,6 +1004,7 @@ export class CenterTopPanel {
     if (this.customPatternListView) {
       this.customPatternListView.destroy();
     }
+    this.actionsRoot.remove();
     this.root.remove();
   }
 }

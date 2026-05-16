@@ -79,17 +79,30 @@ describe("TicketGridHtml", () => {
     expect(grid.root.querySelectorAll("[data-number]").length).toBe(0);
   });
 
+  it("låser ticket-grid til 6 kolonner og 16px gap", () => {
+    const scrollArea = grid.root.firstElementChild as HTMLDivElement;
+    const gridInner = scrollArea.firstElementChild as HTMLDivElement;
+
+    expect(scrollArea.style.padding).toBe("0px");
+    expect(gridInner.getAttribute("data-test")).toBe("ticket-grid-inner");
+    expect(gridInner.style.display).toBe("grid");
+    expect(gridInner.style.gridTemplateColumns).toBe("repeat(6, minmax(0px, 1fr))");
+    expect(gridInner.style.gap).toBe("16px");
+    expect(gridInner.style.alignContent).toBe("start");
+    expect(gridInner.style.maxWidth).toBe("1348px");
+  });
+
   it("renders one ticket per entry", () => {
     const tickets = [makeTicket(0, "Small Yellow"), makeTicket(1, "Small White")];
     grid.setTickets(tickets, { cancelable: false, entryFee: 10, state: makeState() });
 
     // 2 tickets × 25 cells = 50.
     expect(grid.root.querySelectorAll("[data-number]").length).toBe(50);
-    // Two different headers.
+    // Two different headers, normalized to Tobias-approved Norwegian labels.
     const headers = Array.from(grid.root.querySelectorAll(".ticket-header-name")).map(
       (e) => (e as HTMLElement).textContent,
     );
-    expect(headers).toEqual(["Small Yellow", "Small White"]);
+    expect(headers).toEqual(["Gul", "Hvit"]);
   });
 
   it("diff-renders unchanged tickets (same signature → same DOM nodes)", () => {
@@ -112,7 +125,7 @@ describe("TicketGridHtml", () => {
     expect(firstCell).not.toBe(secondCell);
 
     const header = grid.root.querySelector(".ticket-header-name") as HTMLElement;
-    expect(header.textContent).toBe("Small Red");
+    expect(header.textContent).toBe("Rød");
   });
 
   it("rebuilds when cancelable flag toggles", () => {

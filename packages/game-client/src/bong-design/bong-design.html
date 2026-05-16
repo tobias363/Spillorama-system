@@ -315,8 +315,14 @@
     .bong-card.triple {
       width: 666px; /* +6px for å gi midterste bong 3px ekstra luft på hver side uten å redusere celle-størrelse */
       aspect-ratio: auto;
-      padding: 12px 18px 10px 18px;
-      gap: 10px;
+      padding: 9px 17px 8px 17px;
+      gap: 0;
+    }
+
+    .bong-card.triple > .bong-header {
+      justify-content: flex-start;
+      gap: 14px;
+      margin: 0 2px;
     }
 
     /* margin-left:auto på .bong-cancel er nå satt globalt på .bong-card .bong-header .bong-cancel
@@ -326,9 +332,10 @@
       display: grid;
       /* 3 sub-grids + 2 tynne vertikale dividers (1px) */
       grid-template-columns: 1fr 1px 1fr 1px 1fr;
-      gap: 0;
+      gap: 11px;
       align-items: stretch;
       flex: 1;
+      margin-top: 10px;
     }
 
     .bong-card.triple .triple-divider {
@@ -343,15 +350,9 @@
     .bong-card.triple .triple-sub {
       display: flex;
       flex-direction: column;
-      padding: 0 10px;
+      padding: 0;
       gap: 4px;
-    }
-    .bong-card.triple .triple-sub:first-child { padding-left: 0; }
-    .bong-card.triple .triple-sub:last-child  { padding-right: 0; }
-    /* Tobias 2026-05-15: 3px ekstra luft på hver side av midterste bong (mot dividers). */
-    .bong-card.triple .triple-sub:nth-child(3) {
-      padding-left: 13px;
-      padding-right: 13px;
+      min-width: 0;
     }
 
     /* Sub-grid bruker samme bingo-letters / bong-grid / cell-styling

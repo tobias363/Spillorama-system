@@ -65,6 +65,7 @@ packages/game-client/tests/visual/__output__/
 playwright-report/
 test-results/
 .playwright/
+.playwright-mcp/
 
 # Playwright E2E pilot-flow output (binary screenshots, videos, traces)
 tests/e2e/__output__/

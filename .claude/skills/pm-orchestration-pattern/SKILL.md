@@ -2,11 +2,11 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.5.0
+  version: 1.5.1
   project: spillorama
 ---
 
-<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, docs/engineering/AGENT_TASK_CONTRACT.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/purchase-open-forensics.sh, scripts/generate-context-pack.sh, scripts/generate-agent-contract.sh, .github/workflows/pm-*.yml, .github/workflows/*gate*.yml, .github/workflows/bug-resurrection-check.yml -->
+<!-- scope: BACKLOG.md, docs/operations/PM_HANDOFF_*.md, docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md, docs/engineering/PM_*.md, docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, docs/engineering/AGENT_TASK_CONTRACT.md, scripts/agent-onboarding.sh, scripts/pm-onboarding.sh, scripts/pm-checkpoint.sh, scripts/pm-knowledge-continuity.mjs, scripts/purchase-open-forensics.sh, scripts/dev/observability-snapshot.mjs, scripts/generate-context-pack.sh, scripts/generate-agent-contract.sh, .github/workflows/pm-*.yml, .github/workflows/*gate*.yml, .github/workflows/bug-resurrection-check.yml -->
 
 # PM Orchestration Pattern
 
@@ -162,6 +162,36 @@ npm run forensics:purchase-open -- --phase after-master-30s --scheduled-game-id 
 ```
 
 Evidence pack skal legges ved agent-prompten. Implementer-agenten må sitere konkrete rader/logglinjer fra rapporten når den forklarer root cause.
+
+### Observability snapshot før/etter live-test
+
+Når PM kjører live-test, GoH full-plan-run eller bug-repro med Sentry/PostHog
+tilgjengelig, skal PM ta maskinlesbart snapshot før og etter testen:
+
+```bash
+npm run observability:snapshot -- --label before-<scope> --window-minutes=60
+# Kjør testen/reproen
+npm run observability:snapshot -- \
+  --label after-<scope> \
+  --window-minutes=60 \
+  --compare docs/evidence/<...>/before-file.json
+```
+
+`scripts/dev/observability-snapshot.mjs` leser secrets fra
+`~/.spillorama-secrets/sentry.env`, `~/.spillorama-secrets/posthog.env` og
+eventuelt `~/.spillorama-secrets/postgres-readonly.env` uten å printe dem.
+Hvis read-only DB-URL finnes, brukes den før admin/full-access URL. Rapporten
+skriver JSON + Markdown under `docs/evidence/` og inkluderer:
+
+- Sentry unresolved issues for `spillorama-backend` og `spillorama-frontend`
+- Sentry new/increased issue comparison ved `--compare`
+- PostHog event-counts for testvinduet og event-deltas ved `--compare`
+- `/tmp/pilot-monitor.log` severity counts + P0/P1-linjer
+- Lett Postgres status-snapshot (`pg_stat_activity`, scheduled games, plan-runs)
+
+**Regel:** Hvis live-test har regressjon eller brukes som agent-evidence, skal
+Sentry/PostHog-snapshot legges ved agent-contract. Ikke oppsummer "Sentry ren"
+eller "PostHog så ok ut" muntlig uten filsti til rapport.
 
 ### Fact-bound Agent Task Contract (2026-05-15)
 
@@ -380,6 +410,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | Diff-basert PR-gate kjører på closed/merged PR | Post-merge `edited`-event gir `fatal: bad object <head_sha>` etter branch deletion | Job-level guard: `if: ${{ github.event.pull_request.state == 'open' }}` |
 | PM spawner implementation-agent uten forensic evidence etter gjentatt live-test-feil | Agenten fikser symptom eller feil lag; Tobias opplever "2 dager uten at vi skjønner hvorfor" | Kjør relevant forensic-runner først og krev root-cause-sitering i agent-prompt |
 | PM skriver high-risk agent-prompt fra hukommelse/fritekst | Agenten misforstår fakta, scope eller hva som er hypotese vs root cause | Generer `npm run agent:contract -- ...` og lim hele kontrakten inn i prompten |
+| PM kjører live-test med Sentry/PostHog åpne i nettleser, men uten frozen snapshot | Neste PM/agent kan ikke vite hvilke issues/events som oppstod i samme testvindu | Kjør `npm run observability:snapshot` før/etter og bruk `--compare` |
 
 ## Kanonisk referanse
 
@@ -402,6 +433,7 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `scripts/pm-checkpoint.sh` — hard-block onboarding-gate for ny PM
 - `scripts/pm-knowledge-continuity.mjs` — PM evidence pack + self-test-validering
 - `scripts/purchase-open-forensics.sh` — purchase_open forensic evidence pack før implementation-agent
+- `scripts/dev/observability-snapshot.mjs` — Sentry/PostHog/pilot-monitor/DB snapshot før/etter live-test
 - `scripts/generate-agent-contract.sh` — genererer prompt-kontrakt med scope, evidence, skills (skill@version@SHA-lockfile fra v1.4.0), context-pack, §3a ripple analysis og doc-protokoll
 - `scripts/verify-contract-freshness.mjs` — verifiser at skill-SHA-er i en lagret kontrakt matcher current HEAD før agent-spawn (Fase 2 — ADR-0024)
 - `docs/evidence/README.md` — persistent evidence-storage konvensjon `docs/evidence/<contract-id>/` (Fase 2 — ADR-0024)
@@ -443,5 +475,5 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 2026-05-15 | v1.3.2 — dokumenterte at diff-baserte PR-gates må skippe non-open PR-events for å unngå falske røde checks etter merge. |
 | 2026-05-15 | v1.3.3 — la til live-test forensic evidence pack før implementation-agent, med `scripts/purchase-open-forensics.sh` som standard for purchase_open-feilen. |
 | 2026-05-15 | v1.3.4 — la til fact-bound Agent Task Contract og `scripts/generate-agent-contract.sh` for å hindre agent-misforståelser i high-risk arbeid. |
-| 2026-05-16 | v1.4.0 — Fase 2 etter ADR-0024: (1) skill-SHA-lockfile i agent-contracts via `generate-agent-contract.sh` + ny `scripts/verify-contract-freshness.mjs` for drift-deteksjon; (2) persistent evidence-storage i `docs/evidence/<contract-id>/` med commit-policy + retensjon (5 år for Lotteritilsynet-relevant evidence); (3) §3a Cross-Cutting Impact Analysis i contract-mal. PITFALLS §11.20 + §11.21 nye fallgruver. |
 | 2026-05-16 | v1.5.0 — Fase 3 Punkt 1 etter ADR-0024: teknisk validering av Agent Delivery Report via ny `scripts/validate-delivery-report.mjs` + `delivery-report-gate.yml`. Validatoren krever alle 8 H3-headere, cross-checker §5 "Knowledge updates"-claims mot diff, og krever §4 "Tests"/§8 "Ready"-format. Bypass via `[delivery-report-not-applicable: <begrunnelse>]` + label. 32 tester. PITFALLS §11.22 ny fallgruve. |
+| 2026-05-16 | v1.5.1 — la til `scripts/dev/observability-snapshot.mjs` som standard før/etter live-test: Sentry, PostHog, pilot-monitor og read-only DB snapshots med `--compare`, slik at agent-evidence ikke baseres på muntlig observability-status. |

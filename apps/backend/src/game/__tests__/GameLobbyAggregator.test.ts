@@ -254,9 +254,17 @@ function makeAggregator(opts: AggregatorStubOpts = {}): GameLobbyAggregator {
         params
       ) {
         const [planRunId, position] = params as [string, number];
-        const row = scheduledGameRows.find(
-          (r) => r.plan_run_id === planRunId && r.plan_position === position,
-        );
+        const matches = scheduledGameRows
+          .filter(
+            (r) => r.plan_run_id === planRunId && r.plan_position === position,
+          )
+          .sort((a, b) => {
+            const active = ["purchase_open", "ready_to_start", "running", "paused"];
+            const aRank = active.includes(a.status) ? 0 : 1;
+            const bRank = active.includes(b.status) ? 0 : 1;
+            return aRank - bRank;
+          });
+        const row = matches[0] ?? null;
         return { rows: row ? [row] : [] };
       }
       // queryActiveScheduledGameForHall
@@ -1175,6 +1183,77 @@ test("state=dual-scheduled-games: legacy + plan-bridge har spawnet samtidig", as
     (w) => w.code === "DUAL_SCHEDULED_GAMES",
   );
   assert.notEqual(dualWarn, undefined);
+});
+
+test("state=plan-bridge-retry: aktiv plan-bridge-rad vinner over kansellert rad for samme posisjon", async () => {
+  const plan = makePlanWithItems({ id: PLAN_ID, hallId: null, groupOfHallsId: GOH_ID });
+  const planRun = makePlanRun({
+    id: RUN_ID,
+    planId: PLAN_ID,
+    hallId: HALL_A,
+    status: "running",
+    currentPosition: 1,
+  });
+  const cancelledBridgeRow: ScheduledGameRowStub = {
+    id: "sg-cancelled-old",
+    status: "cancelled",
+    master_hall_id: HALL_A,
+    group_hall_id: GOH_ID,
+    participating_halls_json: [HALL_A],
+    scheduled_start_time: "2026-05-08T14:30:00Z",
+    scheduled_end_time: "2026-05-08T15:30:00Z",
+    actual_start_time: null,
+    actual_end_time: "2026-05-08T14:40:00Z",
+    plan_run_id: RUN_ID,
+    plan_position: 1,
+    pause_reason: null,
+  };
+  const activeBridgeRow: ScheduledGameRowStub = {
+    id: SCHEDULED_GAME_ID,
+    status: "purchase_open",
+    master_hall_id: HALL_A,
+    group_hall_id: GOH_ID,
+    participating_halls_json: [HALL_A],
+    scheduled_start_time: "2026-05-08T15:00:00Z",
+    scheduled_end_time: "2026-05-08T16:00:00Z",
+    actual_start_time: null,
+    actual_end_time: null,
+    plan_run_id: RUN_ID,
+    plan_position: 1,
+    pause_reason: null,
+  };
+
+  const aggregator = makeAggregator({
+    planRunByHall: new Map([[HALL_A, planRun]]),
+    planById: new Map([[PLAN_ID, plan]]),
+    scheduledGameRows: [cancelledBridgeRow, activeBridgeRow],
+    hallReadyRowsByGameId: new Map([[SCHEDULED_GAME_ID, []]]),
+    goHMembersByGroupId: new Map([
+      [
+        GOH_ID,
+        {
+          id: GOH_ID,
+          members: [{ hallId: HALL_A, hallName: "A" }],
+          masterHallId: HALL_A,
+        },
+      ],
+    ]),
+    hallNamesById: new Map([[HALL_A, "A"]]),
+  });
+
+  const state = await aggregator.getLobbyState(HALL_A, {
+    role: "AGENT",
+    hallId: HALL_A,
+  });
+
+  assert.equal(state.currentScheduledGameId, SCHEDULED_GAME_ID);
+  assert.equal(state.scheduledGameMeta?.status, "purchase_open");
+  assert.equal(
+    state.inconsistencyWarnings.some(
+      (w) => w.code === "DUAL_SCHEDULED_GAMES",
+    ),
+    false,
+  );
 });
 
 // ── Test 9: stale-goh-member ───────────────────────────────────────────

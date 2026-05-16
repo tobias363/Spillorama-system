@@ -136,7 +136,7 @@ describe("BingoTicketHtml — Elvis-rendering (BIN-688)", () => {
     expect(getBanner(t)).toBeNull();
     expect(getBannerImg(t)).toBeNull();
     // Header skal være original fargenavn, ikke "ELVIS"
-    expect(getHeaderText(t)).toBe("small_yellow");
+    expect(getHeaderText(t)).toBe("Gul");
   });
 
   it("non-Elvis ticket (Large Yellow) rendrer IKKE Elvis-banner", () => {
@@ -150,7 +150,7 @@ describe("BingoTicketHtml — Elvis-rendering (BIN-688)", () => {
     document.body.appendChild(t.root);
 
     expect(getBanner(t)).toBeNull();
-    expect(getHeaderText(t)).toBe("Large Yellow");
+    expect(getHeaderText(t)).toBe("Gul - 3 bonger");
   });
 
   // ── Fallback: ukjent Elvis-variant (nummer utenfor 1-5) ─────────────────────

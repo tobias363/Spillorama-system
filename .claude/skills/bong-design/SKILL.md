@@ -2,7 +2,7 @@
 name: bong-design
 description: When the user/agent works with the Spillorama bong-card visual design — header layout, BINGO-letters, cell styling, FREE-celle, single vs triple-design. Also use when they mention BingoTicketHtml, BONG_COLORS, bong-design.html preview, BINGO_LETTER_COLORS, getColorDisplayName, isLargeTicket, bong-card padding, ticket-body wrapper, cream cell-bakgrunn (#fbf3df), MARKED_BG burgundy (#7a1a1a), per-bokstav-fyll med text-stroke, eller Tobias-bekreftet bong-design 2026-05-15 IMMUTABLE. Make sure to use this skill whenever someone touches `packages/game-client/src/games/game1/components/BingoTicketHtml.ts` — even if they don't mention bong-design directly — because changes to the bong-component must match §5.9 spec 1:1 (kanonisk i `docs/architecture/SPILL1_IMPLEMENTATION_STATUS_2026-05-08.md`).
 metadata:
-  version: 1.0.0
+  version: 1.4.4
   project: spillorama
 ---
 
@@ -61,11 +61,16 @@ metadata:
 
 Implementert via `getColorDisplayName(color)` + `isLargeTicket(type, color)` (helper-funksjoner top-of-file).
 
-**Backend wire-format:** sender 3 SEPARATE `Ticket`-objekter per Large-kjøp (per `TicketGridHtml.largeMultiplicity.test.ts`). Hver av disse rendres av denne komponenten — header-suffikset signaliserer at bongen tilhører en 3-brett-bunt. Det er IKKE en gruppert "triple-ticket" data-modell — derfor er triple-design med 3 sub-grids og dividers IKKE implementert som single render. Hvis backend en gang sender `{ siblingTicketIds: [...] }`, kan triple-rendering vurderes som ny komponent (TODO).
+**Backend wire-format:** sender 3 SEPARATE `Ticket`-objekter per Large-kjøp (per `TicketGridHtml.largeMultiplicity.test.ts`). Frontend grupperer disse i `TicketGridHtml.tryGroupTriplet()` når `type=large`, `purchaseId` og color-familie matcher, og rendrer én `BingoTicketTripletHtml` wrapper med 3 sub-grids. Det finnes fortsatt ingen separat backend "triple-ticket" data-modell.
 
 ### `.ticket-body` wrapper
 
 Inneholder BINGO-letters + grid + footer som flex-column med `gap: 4px`. Matcher mockup `.triple-sub`-strukturen 1:1 så single = sub-grid identisk om backend en gang sender gruppert data.
+
+**Elvis-banner-invariant:** Elvis-banner ligger UTENFOR `.ticket-body`, mellom
+`.ticket-header` og `.ticket-body`. Hvis `loadTicket()` bytter non-Elvis →
+Elvis, må `syncElvisBanner()` sette banneret før `.ticket-body`, ikke før
+`.ticket-grid` (grid ligger inni body og er ikke direkte child av front-face).
 
 ### BINGO-letters
 
@@ -171,20 +176,37 @@ sequenceInPurchase?: number;  // 1-indeksert posisjon i purchase (1, 2, 3)
 
 | Element | Verdi |
 |---|---|
-| Container-bredde | 660px maks |
-| Container-padding | `12px 18px 10px 18px` (samme som single) |
-| Container-gap | `10px` (mellom header og grids) |
-| `.bong-triplet-grids` | `display: grid; grid-template-columns: 1fr 1px 1fr 1px 1fr` |
+| Ticket-grid | `display: grid; grid-template-columns: repeat(6, minmax(0px, 1fr)); gap: 16px; align-content: start;` |
+| Ticket-grid maks-bredde | `1348px` (= 2 × 666px triplet + 16px gap) |
+| Triple grid-span | `grid-column: span 3` (to triple-containere per rad på desktop/tablet) |
+| Single grid-span | `grid-column: span 1` (seks single-bonger per rad) |
+| Container-bredde | `width: 100%; max-width: 666px` |
+| Container-padding | `9px 17px 8px 17px` |
+| Container-gap | `0px` — wrapper-header og grids ligger i samme kompakte card-flow |
+| Wrapper-header | `justify-content: flex-start; gap: 14px; margin: 0px 2px; padding-bottom: 5px; border-bottom: 1px solid rgba(0,0,0,0.15)` |
+| `.bong-triplet-grids` | `display: grid; grid-template-columns: 1fr 1px 1fr 1px 1fr; gap: 11px; margin-top: 10px` |
 | Dividere | 1px `rgba(0, 0, 0, 0.15)` vertikale linjer mellom sub-grids, `margin: 4px 0` |
-| Sub-grid padding | `padding: 0 10px` (sub 1 + 3 = `padding-left/right: 0` på ytter-kantene; midt-sub `13px` ekstra) |
+| Sub-grid padding | `0` — ingen farge-/posisjons-spesifikk høyre/venstre-padding |
+| Sub-bong aspect-ratio | `240 / 300` — må ikke settes til `auto`, ellers kollapser body fordi sub-root har absolutte face-lag |
 | Header-tekst | `"Gul - 3 bonger"` / `"Hvit - 3 bonger"` / `"Lilla - 3 bonger"` |
 | Header-pris | `pris × 3` (total for hele triple-bundlen) |
-| × cancel-knapp | ÉN knapp, canceler hele purchase (alle 3 sub-tickets) |
+| × cancel-knapp | ÉN knapp; sender første sub-ticket-id til `ticket:cancel`, backend fjerner hele Large-bundlen atomisk |
+
+**Spacing-invariant (Tobias 2026-05-16):** Mellomrom mellom bonger eies kun av parent-gridens `gap: 16px`. Ikke legg inn per-farge padding/margin på hvit/gul/lilla bong eller på `.bong-triplet-sub`; da blir spacing visuelt ulik og grid-overlays misleder debugging.
 
 ### Sub-bongers usynlige headere
 
 `BingoTicketTripletHtml` legger CSS-overrides via `bong-triplet-card`-klasse-prefix:
 ```css
+.bong-triplet-card .bong-triplet-sub .ticket-face {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.bong-triplet-card .bong-triplet-sub .ticket-face-front {
+  padding: 0 !important;
+  gap: 4px !important;
+}
+.bong-triplet-card .bong-triplet-sub .ticket-header,
 .bong-triplet-card .bong-triplet-sub .ticket-header-name,
 .bong-triplet-card .bong-triplet-sub .ticket-header-price {
   display: none !important;
@@ -194,7 +216,14 @@ sequenceInPurchase?: number;  // 1-indeksert posisjon i purchase (1, 2, 3)
 }
 ```
 
-Sub-bongene rendrer fortsatt sin egen `BingoTicketHtml`-DOM (med ticket-grid + BINGO-letters + footer), men header + cancel-knapp er skjult fordi wrapperen eier dem.
+Sub-bongene rendrer fortsatt sin egen `BingoTicketHtml`-DOM (med ticket-grid + BINGO-letters + footer), men hele `.ticket-header` + cancel-knapp er skjult fordi wrapperen eier dem. Ikke skjul bare `.ticket-header-name`/`.ticket-header-price`: selve header-diven har padding-bottom og border-bottom, og etterlater ellers grå linje over BINGO-bokstavene.
+
+**Override-hook-invariant:** Ikke fjern `.ticket-face`, `.ticket-face-front` eller `.ticket-header` fra `BingoTicketHtml`. De er stabile CSS-hooks for triple-wrapperen. Uten dem må wrapperen targete inline-styles indirekte og regressjonen med ekstra sub-padding/header-border kommer tilbake.
+
+**Cancel-invariant (Tobias 2026-05-16):** Ikke send synthetic `purchaseId` fra
+triplet-wrapperens ×-knapp. `Game1SocketActions.cancelTicket()` og backend
+`ticket:cancel` forventer `ticketId`; én sub-ticket-id er nok fordi backend
+fjerner hele Large-bundlen atomisk.
 
 ### TicketGridHtml — entry-rom vs ticket-rom
 
@@ -215,10 +244,11 @@ Etter Bølge 2 har `TicketGridHtml.tickets` BLANDET typer: `BingoTicketHtml | Bi
 
 ## Beskyttede invariants
 
-1. **Header-rekkefølge må være `name → price → × button`** med `× marginLeft: auto`. Hvis du flytter pris til høyre eller × til venstre, bryter du flex-layouten og `× button` overlapper innholdet.
+1. **Header-rekkefølge må være `name → price → × button`** med `justify-content:flex-start` og `× marginLeft: auto`. Pris skal ligge nær navnet til venstre; kun × skal pushes helt til høyre.
 2. **`.ticket-body` wrapper er nødvendig** for `gap: 4px` mellom BINGO-letters + grid + footer. Uten wrapper får hver av disse face-direkte-margin og spacing-mockupen brytes.
 3. **`palette.text` er IKKE lenger brukt i cell-rendering** — alle unmarked celler bruker burgundy `MARKED_BG`. Hvis du gjeninnfører palette-basert tekstfarge, bryter du konsistens-mockupen.
 4. **`palette.footerText` er IKKE lenger brukt for footer** — footer er alltid `#000`. Tidligere variasjon mellom rød/grønn/lilla footer-tekstfarger er fjernet.
+5. **Elvis-banner må insertes før `.ticket-body` ved `loadTicket()`** — `.ticket-grid` er nested under `.ticket-body`, så `front.insertBefore(banner, grid)` kaster DOMException.
 
 ## Sub-bugs som §5.9 fjernet
 
@@ -243,12 +273,13 @@ Eksisterende tester:
 - `BingoTicketHtml.test.ts` — basis-rendering, header, cells, flip
 - `BingoTicketHtml.elvis.test.ts` — Elvis-banner-varianter
 - `TicketGridHtml.largeMultiplicity.test.ts` — verifiserer at 3 Large = 3 separate tickets
+- `TicketGridHtml.test.ts` — låser 6-kolonne parent-grid + norsk header-normalisering
+- `TicketGridHtml.tripleGrouping.test.ts` — låser same-color triplet grouping + `grid-column: span 3`
 
-**§5.9 oppdaterer IKKE eksisterende tester (per Tobias-direktiv).** Eksisterende assertions vil feile på:
-- `header.textContent === "Small Yellow"` → nå "Gul"
-- Cell-font-size `13px` → nå `14px`
-
-Test-update planlegges separat når Tobias gir grønt lys.
+**Test-kontrakt:** Header-forventninger skal bruke norske §5.9-labels (`"Gul"`,
+`"Hvit"`, `"Lilla"`, `"Gul - 3 bonger"`), ikke legacy `"Small Yellow"` /
+`"Large Yellow"`. Legacy payload uten `purchaseId` rendres fortsatt som tre
+separate DOM-kort, men hvert kort viser large-header.
 
 ## Design-iterasjons-sider
 
@@ -263,3 +294,9 @@ Test-update planlegges separat når Tobias gir grønt lys.
 | 2026-05-15 | Initial v1.0.0 — §5.9 prod-implementasjon i `BingoTicketHtml.ts`. Spec-iterasjon ble gjort på `bong-design.html` mockup; denne skill-en dokumenterer prod-state. Skopet er Spill 1 + Spill 3 (begge bruker `BingoTicketHtml`); Spill 2 (`BongCard.ts`) er uberørt. |
 | 2026-05-15 | v1.1.0 — Bølge 2 triple-bong group-rendering. Ny `BingoTicketTripletHtml` wrapper-klasse + `TicketGridHtml` purchase-grouping-logikk. `Ticket`-interface utvidet med `purchaseId` + `sequenceInPurchase` i både shared-types og backend. `Game1ScheduledRoomSnapshot` propagerer disse fra `app_game1_ticket_assignments`. CSS-overrides skjuler sub-bongers individuelle header. Backend sender altid sub-tickets i sequence-rekkefølge per purchase. Partial-purchase faller tilbake til single-rendering. |
 | 2026-05-15 | v1.2.0 (iter 2) — KRITISK fix av triple-rendering. PR #1500 hadde `tryGroupTriplet` som sjekket KUN `purchaseId`, ikke `type`/`color`. Førte til cross-color-grupperinger og 0 visuell triple-effekt i prod (Tobias-rapport med screenshot 2026-05-15). Tre-lag fix: (1) frontend `tryGroupTriplet` krever nå same-color + same-type=large, (2) backend `ensureAssignmentsForPurchases` multipliserer Stor X med 3 brett, (3) pre-round `getOrCreateDisplayTickets` emitter synthetic purchaseId for 3 brett av samme farge. Test-coverage: 13 nye tester på tvers av 3 test-filer. |
+| 2026-05-16 | v1.3.0 — Ticket-grid spacing-kontrakt. Parent-grid er nå 6 kolonner med `gap: 16px`; triplets spenner 3 kolonner, singles 1 kolonne. `.bong-triplet-card` er `max-width: 666px`, `gap: 12px`, `padding: 9px 18px 3px 18px`, og `.bong-triplet-sub` har `padding: 0` slik at ingen hvit/gul/lilla padding påvirker spacing mellom bonger. Triplet-× sender første `ticketId`, ikke `purchaseId`, til cancel-flow. |
+| 2026-05-16 | v1.4.0 — Triple sub-bong internlayout. `.bong-triplet-card` har nå `gap: 0px`; sub-bongers hele `.ticket-header` skjules, ikke bare name/price, slik at headerens grå border over BINGO-bokstavene forsvinner. `BingoTicketHtml` eksponerer stabile `.ticket-face`, `.ticket-face-front` og `.ticket-header`-hooks; triple-wrapper setter sub-front `padding: 0 !important`, `gap: 4px !important`, `box-shadow: none !important`, `border-radius: 0 !important`. |
+| 2026-05-16 | v1.4.1 — Elvis `loadTicket()`-regresjon tettet. Etter `.ticket-body`-refaktor må `syncElvisBanner()` inserte banner før `.ticket-body`, ikke før nested `.ticket-grid`. Elvis-testene bruker også norske §5.9-headerlabels for non-Elvis (`Gul`, `Gul - 3 bonger`). |
+| 2026-05-16 | v1.4.2 — Triple-wrapper sidepadding justert til `9px 1px 3px 1px`; headeren eier egen horisontal luft med `margin: 0px 18px` og redusert `gap: 14px`. Dette gir sub-gridene maksimal bredde uten å miste header-inset. |
+| 2026-05-16 | v1.4.3 — Triple-header bruker nå `justify-content:flex-start` så pris ligger nær navnet til venstre, mens × holdes helt til høyre via `margin-left:auto`. `bong-design.html` er synket med prod-kontrakten. |
+| 2026-05-16 | v1.4.4 — Triple-wrapper spacing etter Tobias-direktiv: `.bong-triplet-card` padding `9px 17px 8px 17px`, wrapper-header `margin: 0px 2px`, og `.bong-triplet-grids` bruker `gap: 11px` + `margin-top: 10px`. `bong-design.html` er synket med prod. |

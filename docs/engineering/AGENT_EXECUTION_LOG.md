@@ -4508,3 +4508,236 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-16 — PM-AI: Spill 1 top-HUD lykketall-kolonne inn i wrapper
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ba om at firkløver + "Velg lykketall" skulle bli del av elementet til høyre, med border rundt og klare kolonner på samme måte som player-info, premie/mønster og action-panel.
+
+**Evidence brukt før kode:**
+- Tobias-screenshot 2026-05-16 viste firkløver/lykketall som løs kolonne utenfor `top-group-wrapper`.
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts` viste at `cloverColumn` lå i `call-group-wrapper`.
+- `premie-design.html` viste mockup uten lykketall-kolonne i `game-frame`.
+
+**Root cause:**
+- DOM-strukturen modellerte firkløveren sammen med den store Pixi-ringen, mens Tobias ønsket den som første kolonne i den bordered top-HUD-wrapperen.
+- Visuell alignment alene var ikke nok; parent/container-kontrakten måtte endres.
+
+**Outputs:**
+- `PlayScreen.ts` — `call-group-wrapper` eier nå kun ring-spacer. Ny `#lucky-number-column` legges først i `#top-group-wrapper` med fast bredde, border-right og inset-shadow.
+- `premie-design.html` — ny `.lucky-number-panel` og alle `game-frame`-scenarier viser firkløver-kolonnen som første kolonne.
+- `.claude/skills/spill1-center-top-design/SKILL.md` v1.1.0 — dokumenterer ny top-group-struktur og Tobias-direktiv 2026-05-16.
+- `docs/engineering/PITFALLS_LOG.md` §7.32 — ny fallgruve om at top-HUD-kontroller må dele DOM-wrapper når de skal dele border.
+
+**Læring:**
+- Når Tobias sier "del av elementet", betyr det DOM-eierskap og wrapper-kontrakt, ikke bare at elementene ligger visuelt nær hverandre.
+- `call-group-wrapper` bør holdes til Pixi-ring-spacer. Alle klikkbare top-HUD-kontroller med felles border skal inn i `top-group-wrapper`.
+
+### 2026-05-16 — PM-AI: Spill 1 top-HUD status-kolonne og feltrekkefølge
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ba om samme bordered-wrapper-behandling for teksten til venstre for firkløveren, og om å bytte plass på firkløverfeltet og spillerinfo-feltet med personikon/`02`.
+
+**Evidence brukt før kode:**
+- `CenterBall.ts` eide "Neste spill"-idle-tekst i Pixi-området.
+- `PlayScreen.ts` hadde etter forrige iterasjon rekkefølgen `lucky-number-column → LeftInfoPanel → CenterTopPanel`.
+- Tobias' visuelle mål var tydelige kolonner inne i samme top-HUD-element.
+
+**Outputs:**
+- `PlayScreen.ts` — ny `#next-game-status-column` i `top-group-wrapper`; CenterBall idle-text skjules i ikke-running-state så status ikke dobbeltrendres.
+- `PlayScreen.ts` — rekkefølge endret til status → player-info → lykketall → CenterTopPanel.
+- `LeftInfoPanel.ts` — player-info er fullhøyde kolonne med center-align, border-right og samme inset-shadow som status/lykketall.
+- `premie-design.html` — ny `.next-game-status-panel` og mockup-rekkefølge synket.
+- `.claude/skills/spill1-center-top-design/SKILL.md` v1.2.0 — dokumenterer status-kolonne + ny rekkefølge.
+- `docs/engineering/PITFALLS_LOG.md` §7.32 — utvidet med iter 2.
+
+**Læring:**
+- Når status flyttes fra Pixi til HTML må man eksplisitt skjule CenterBall idle-text, ellers får spiller to samtidige "Neste spill"-signaler.
+- Rekkefølge i top-HUD er en del av kontrakten; mockup og prod må endres sammen.
+
+### 2026-05-16 — PM-AI: Spill 1 bong-grid 6 kolonner og 16px spacing
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ba om at spacing mellom bonger alltid skal være lik, med 6-kolonne grid, 16px gap og ingen ekstra høyre-padding på hvit/lilla/triple-bonger.
+
+**Evidence brukt før kode:**
+- Tobias-screenshot 2026-05-16 med DevTools grid-overlay viste at triplets visuelt ikke fulgte grid-gap.
+- `TicketGridHtml.ts` brukte fortsatt `repeat(5, minmax(0px, 1fr))` og `gap: 10px`.
+- `BingoTicketTripletHtml.ts` brukte `max-width: 660px` og posisjons-spesifikk `.bong-triplet-sub`-padding.
+
+**Root cause:**
+- Triplet-kortet var bredere enn én grid-celle, men ble lagt inn som ett vanlig grid-child uten `grid-column: span 3`.
+- Parent-grid og triplet-CSS hadde ulike spacing-kontrakter, så det var uklart om gap, overflow eller sub-padding styrte den visuelle avstanden.
+
+**Outputs:**
+- `TicketGridHtml.ts` — parent-grid låst til `repeat(6, minmax(0px, 1fr))`, `gap: 16px`, `align-content: start`, `max-width: 1348px`; triplets spenner 3 kolonner og singles 1.
+- `BingoTicketTripletHtml.ts` — `.bong-triplet-card` satt til `max-width: 666px`, `gap: 12px`, `padding: 9px 18px 3px 18px`; `.bong-triplet-sub` har `padding: 0`; `.triple-sub-root` beholder `aspect-ratio: 240 / 300`; triplet-× sender første sub-ticket-id til cancel-flow.
+- `TicketGridHtml.test.ts` + `TicketGridHtml.tripleGrouping.test.ts` — nye kontraktstester for grid-regel, span-regel, triplet-CSS og cancel-id.
+- `.claude/skills/bong-design/SKILL.md` v1.3.0 — dokumenterer ny spacing-invariant.
+- `docs/engineering/PITFALLS_LOG.md` §7.33 + §7.34 — spacing- og cancel-fallgruvene dokumentert.
+
+**Læring:**
+- For responsive bong-layout må “hvor mange bonger teller dette som?” uttrykkes i grid-spans, ikke bare i visuell card-bredde.
+- Når DevTools grid-overlay viser gap men skjermen ser feil ut, sjekk om grid-item overflower cellen sin før du justerer padding.
+- Parent-grid skal eie spacing mellom bonger; card/sub-grid padding skal kun eie innvendig layout.
+- Sub-bongens aspect-ratio er nødvendig i triple-wrapperen fordi `BingoTicketHtml` sine face-lag er absolutt posisjonerte og gir ikke normal-flow-høyde alene.
+- Eksisterende cancel-kontrakt er ticket-id-basert; synthetic `purchaseId` er kun grouping-metadata for render, ikke input til `ticket:cancel`.
+
+### 2026-05-16 — PM-AI: Spill 1 top-HUD action-kolonne etter status
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ba om at feltet helt til høyre (`HOVEDSPILL 1`) skulle flyttes til høyre for `Neste spill`, at `Innsats` skulle holde én rad, og at hele top-HUD-elementet skulle midtstilles med lik luft på høyre og venstre side.
+
+**Evidence brukt før kode:**
+- Tobias-screenshot 2026-05-16 viste rekkefølgen status → player-info → lykketall → premie/mønster → action, og `Innsats: 90 kr` brøt til `kr` på ny linje.
+- `PlayScreen.ts` appendet `CenterTopPanel.rootEl` sist i `top-group-wrapper`, mens `CenterTopPanel.ts` eide `combo + actions` som én flex-row med `marginLeft:auto` på action-blokken.
+- `premie-design.html` hadde samme gamle rekkefølge, så mockup måtte oppdateres samtidig som prod.
+
+**Root cause:**
+- Action-kolonnen var plassert via intern `CenterTopPanel`-layout, ikke via `PlayScreen` sin top-wrapper-order. Dermed kunne den ikke flyttes ved siden av status uten å re-parente DOM eller duplisere action-state.
+- `LeftInfoPanel` brukte 16px bet-info-font i en 140px kolonne uten nowrap, så beløp kunne bryte til to linjer.
+
+**Outputs:**
+- `CenterTopPanel.ts` — ny `actionRootEl` getter. CenterTopPanel beholder callback/state-eierskap, men PlayScreen kan re-parente action-DOM. `destroy()` fjerner også re-parentet action-root.
+- `PlayScreen.ts` — top-HUD-rekkefølge er nå status → action-panel → player-info → lykketall → combo-panel. Re-parentet action-panel får `marginLeft=0`, høyre-border mot player-info og ingen venstre-border mot status. `top-group-wrapper` bruker `margin-left:auto; margin-right:0` slik at den deler ledig rom med chat-panelets eksisterende auto-margin, og beholder `align-self:flex-start` slik at flex-row ikke sentrerer den vertikalt.
+- `LeftInfoPanel.ts` — bet-info/pending rows satt til 14/12px og `white-space: nowrap` slik at `Innsats: X kr` ikke bryter.
+- `premie-design.html` — mockup-rekkefølge, action-panel-CSS og sentrering synket med prod.
+- `CenterTopPanel.test.ts` — ny kontraktstest for actionRoot re-parenting og destroy cleanup.
+- `.claude/skills/spill1-center-top-design/SKILL.md` v1.3.0 — dokumenterer actionRoot-kontrakten og ny top-HUD-rekkefølge.
+- `docs/engineering/PITFALLS_LOG.md` §7.35 — ny fallgruve om at action-panel-plassering er top-wrapper-kontrakt, ikke intern CenterTop-margin.
+
+**Læring:**
+- Når en kolonne har egen state/callbacks, trenger vi ikke flytte state for å endre rekkefølge; eksponer DOM-root og la parent-owner (`PlayScreen`) eie layout-kontrakten.
+- `margin-left:auto` er nyttig for visuell plassering, men farlig som “semantisk” rekkefølge i et spill-HUD der Tobias spesifiserer kolonner.
+- I en `flex-direction: row`-container er `align-self` vertikal akse. Horisontal sentrering må løses med inline-axis margin/spacing, ellers flyttes HUD-en ned over bongene.
+- Når et søsken-element allerede har auto-margin (chat-panelet), gir `margin-left:auto; margin-right:auto` på top-HUD 1:2 fordeling av luft. Bruk kun venstre-auto på top-HUD i denne layouten.
+- Ved smal viewport skal hele top-HUD overflyte horisontalt fremfor at individuelle kolonner bryter og ødelegger symmetrien.
+
+### 2026-05-16 — PM-AI: Spill 1 triplet sub-layout uten intern header-border
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ba om at `.bong-triplet-card` skulle ha `gap: 0px`, at padding rundt hvert interne bingokort skulle bort, og at den grå header-borderen over BINGO-teksten i sub-bongene skulle fjernes.
+
+**Evidence brukt før kode:**
+- Tobias-screenshot 2026-05-16 viste at midterste sub-bong fortsatt arvet single-bongens topprom/header-border.
+- `BingoTicketTripletHtml.ts` skjulte bare `.ticket-header-name` og `.ticket-header-price`, ikke hele header-elementet.
+- `BingoTicketHtml.buildFace()` brukte inline face-styles, så wrapperen trengte stabile klasser og `!important`-overrides for å styre sub-layouten uten å endre single-bong.
+
+**Root cause:**
+- Header-diven i single-bong hadde fortsatt `padding-bottom` og `border-bottom` selv om tekstnodene var skjult.
+- Sub-fronten arvet single-bongens `padding`, `gap`, `boxShadow` og `borderRadius`, slik at triplet-wrapperens egen padding ikke var eneste layoutkilde.
+
+**Outputs:**
+- `BingoTicketHtml.ts` — `buildFace()` setter `.ticket-face`, `.ticket-face-front` og `.ticket-face-back`; `populateFront()` setter `.ticket-header`.
+- `BingoTicketTripletHtml.ts` — `.bong-triplet-card` har `gap: 0px`, `padding: 9px 1px 3px 1px`; `.bong-triplet-header` har `justify-content:flex-start`, `gap: 14px` og `margin: 0px 18px`; pris ligger nær navn, mens × pushes helt til høyre via `margin-left:auto`. Sub-bonger skjuler hele `.ticket-header`, og `.ticket-face-front` får `padding: 0 !important`, `gap: 4px !important`, `box-shadow: none !important` og `border-radius: 0 !important`.
+- `bong-design.html` — triple-preview synket med prod: samme card-padding, header-margin og venstregruppert name/price med × til høyre.
+- `BingoTicketHtml.ts` — nærliggende Elvis-regresjon tettet: `syncElvisBanner()` inserter nå banner før `.ticket-body`, ikke før nested `.ticket-grid`.
+- `BingoTicketHtml.elvis.test.ts` — stale non-Elvis header-forventninger oppdatert til norske §5.9-labels (`Gul`, `Gul - 3 bonger`).
+- `BingoTicketHtml.test.ts` + `TicketGridHtml.tripleGrouping.test.ts` — kontraktstester låser de nye override-hookene og triplet-CSS-en.
+- `.claude/skills/bong-design/SKILL.md` v1.4.3 — dokumenterer hook-invarianten, whole-header hiding, wrapper-header inset/left-group og Elvis-banner insert-target.
+- `docs/engineering/PITFALLS_LOG.md` §7.36 + §7.37 — nye fallgruver om whole-header hiding/sub-face padding og Elvis-banner insertion.
+
+**Læring:**
+- Når en wrapper skal overta layoutansvar fra en gjenbrukt single-komponent, må den få stabile class-hooks på semantiske underområder. Å targete bare tekstnoder er for svakt når parent-diven har border/padding.
+- Triple-wrapperen skal eie outer padding, skygge og radius; sub-bongene skal bare levere BINGO-header, grid og footer.
+- Etter `.ticket-body`-refaktor er `.ticket-grid` ikke lenger direkte child av front-face. `loadTicket()`-kode må bruke `.ticket-body` som insert anchor når den legger inn elementer mellom header og body.
+
+### 2026-05-16 — PM-AI: GoH full-plan load-test 4 haller x 20 spillere
+
+**Agent-type:** PM/testleder/self-implementation-agent
+**Scope:** Tobias ba om å kjøre alle spill i spilleplanen gjennom 4 testhaller i Group of Halls med 20 spillere per lokasjon og aktiv monitorering, og at dokumentasjonen skulle bevares for videre utvikling.
+
+**Evidence brukt/skapt:**
+- Clean PASSED-rapport: `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.md`
+- Full JSON med anomalies/samples: `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.json`
+- Human summary: `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- Monitor-evidence: `docs/evidence/20260516-goh-full-plan-run/pilot-monitor-round-44.md` og `pilot-monitor-round-56.md`
+
+**Hva som ble gjort:**
+- Restartet pilot-monitor + push-daemon og verifiserte backend health på `localhost:4000`.
+- Kjørte `scripts/dev/goh-full-plan-run.mjs` med `--players-per-hall=20`, 4 haller, 80 klienter, 13 planposisjoner.
+- Første run fullførte alle 13 spill, men runneren markerte `failed` fordi den prøvde ekstra `advance` etter at plan-run allerede var `finished`.
+- Hardet runnerens `advancePastEnd()` slik at `GAME_PLAN_RUN_INVALID_TRANSITION` med `status=finished` regnes som forventet sluttstate.
+- Kjørte clean rerun. Resultat: `PASSED`, alle 13 spill completed, final DB-state `status=finished`, `current_position=13`.
+- Stoppet gamle lokale bong-monitor-looper som fortsatt poll-et DB fra tidligere UI-debug.
+
+**Resultat:**
+- Alle 13 plan-spill ble spilt gjennom i riktig rekkefølge: `bingo`, `1000-spill`, `5x500`, `ball-x-10`, `bokstav`, `innsatsen`, `jackpot`, `kvikkis`, `oddsen-55`, `oddsen-56`, `oddsen-57`, `trafikklys`, `tv-extra`.
+- Hver runde hadde 80/80 purchases og 200 ticket assignments.
+- Pilot-monitor hadde ingen P0/P1 under clean rerun og genererte runde-rapporter 44-56.
+- Sentry/PostHog read ble ikke verifisert fordi lokale read-tokens manglet (`SENTRY_AUTH_TOKEN` og PostHog personal API key).
+
+**Funn/Lessons learned:**
+- Natural-end reconcile må ikke tolke mid-plan `plan_run.running + scheduled_game.completed` som stuck; kun siste planposisjon kan natural-end-finish-es.
+- Stale RG-loss-ledger for syntetiske `demo-load-*`-brukere kan gi falsk `LOSS_LIMIT_EXCEEDED` i senere Oddsen-runder. Runneren resetter nå RG-loss-limit-data for demo-load-brukere før run.
+- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle 13 runder mens server-side draw/pattern-eval fullførte. Dette er neste P1-debug-scope for live spilleropplevelse.
+- Full-plan-runnerens lokale direct wallet topup kan skape wallet-reconciliation-støy. Før runneren brukes som compliance-grade load-test må topup gå via ledger-konsistent wallet-adapter/API.
+- Engine auto-resumes 4 ganger per runde i full-plan-runneren. Fullflyten overlever det, men PM må avklare om dette er ønsket phase-pause-kontrakt eller test-driver-støy.
+
+**Docs/skills oppdatert:**
+- `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- `docs/evidence/20260516-goh-full-plan-run/`
+- `docs/engineering/PITFALLS_LOG.md` §2.11, §3.18, §6.21, §6.22, §6.23
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.21.0
+- `.claude/skills/goh-master-binding/SKILL.md` v1.1.0
+
+### 2026-05-16 — PM-AI: Spill 1 triple-bong spacing justering
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ga konkrete CSS-regler for triple-bongens wrapper, header og interne grid-spacing i Spill 1.
+
+**Outputs:**
+- `BingoTicketTripletHtml.ts` — `.bong-triplet-card` padding satt til `9px 17px 8px 17px`; `.bong-triplet-header` margin satt til `0px 2px`; `.bong-triplet-grids` bruker `gap: 11px` og `margin-top: 10px`.
+- `bong-design.html` — preview-siden synket med prod-reglene.
+- `TicketGridHtml.tripleGrouping.test.ts` — layout-kontrakt oppdatert til nye CSS-verdier.
+- `.claude/skills/bong-design/SKILL.md` v1.4.4 — pixel-spec oppdatert.
+- `PITFALLS_LOG.md` §7.36 — eksisterende triple-layout-fallgruve oppdatert med ny spacing-kontrakt.
+
+**Læring:**
+- Når Tobias gir konkrete CSS-regler for bong-design, skal både prod-komponent, preview-side og test-kontrakt oppdateres samtidig. Ellers vil neste agent kunne bruke gammel `bong-design.html` som feil fasit.
+
+### 2026-05-16 — PM-AI: Sentry/PostHog observability snapshot-runner
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Etter at Sentry- og PostHog-read-tokens ble lagt inn lokalt, ba Tobias om å kjøre neste steg. Målet var å gjøre live-test observability reviderbar og gjenbrukbar for ny PM/agent, ikke bare manuelt dashboard-sjekk.
+
+**Evidence brukt før kode:**
+- `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md` hadde eksplisitt gap: Sentry/PostHog read-sjekk ble ikke kjørt fordi tokens manglet.
+- Sentry API verifisert mot org `spillorama` og prosjektene `spillorama-backend`/`spillorama-frontend`.
+- PostHog API verifisert mot `https://eu.posthog.com`, project `178713`.
+- `pm-orchestration-pattern` hadde allerede forensic-regel for repeated live-test bugs, men manglet generell before/after Sentry/PostHog snapshot-kontrakt.
+
+**Outputs:**
+- `scripts/dev/observability-snapshot.mjs` — ny read-only runner som henter Sentry unresolved issues, PostHog event-counts/recent events, pilot-monitor severity counts og lett Postgres status.
+- `package.json` — nytt script `npm run observability:snapshot`.
+- `docs/evidence/README.md` — dokumenterer observability snapshot før/etter live-test.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.4.1 — standardiserer command-flow og `--compare`-krav for live-test-evidence.
+- `docs/engineering/PITFALLS_LOG.md` §11.22 — ny fallgruve om muntlig Sentry/PostHog-status uten frozen snapshot.
+
+**Læring:**
+- Sentry/PostHog-tilgang alene er ikke nok. For at neste PM/agent skal ha samme kunnskapsnivå, må observability-status fryses som fil med tidspunkt, git-SHA og compare-diff.
+- Agent-prompts for P0/P1 live-room bugs skal referere snapshot-filer, ikke PM-hukommelse eller dashboard-inntrykk.
+- Tokens skal leve i `~/.spillorama-secrets/`; rapportene må inneholde metadata og funn, men aldri credentials.
+
+### 2026-05-16 — PM-AI: Render Postgres read-only observability role
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias ga Render External Database URL. Codex skulle sikre at DB-observability ikke bruker full-access prod-credential.
+
+**Evidence brukt før kode:**
+- External Database URL koblet til Render Postgres `bingo_db_64tj`.
+- Default Render-bruker hadde `SELECT/INSERT/UPDATE/DELETE/CREATE` og `CREATEROLE/CREATEDB`.
+- `observability-snapshot.mjs` brukte før dette lokal Postgres-default hvis PG-env ikke var satt.
+
+**Outputs:**
+- Opprettet/roterte egen DB-rolle `spillorama_pm_readonly`.
+- Rollen har `default_transaction_read_only=on`, `CONNECT`, `USAGE ON SCHEMA public`, `SELECT ON ALL TABLES`, `SELECT ON ALL SEQUENCES`, og default SELECT-privilegier for nye tabeller/sequences.
+- Verifisert at read-only URL kan lese prod DB, men at `CREATE TABLE` feiler med `cannot execute CREATE TABLE in a read-only transaction`.
+- Lagret read-only URL lokalt i `~/.spillorama-secrets/postgres-readonly.env`.
+- `observability-snapshot.mjs` leser nå `postgres-readonly.env` og bruker den før admin/full-access URL.
+- `docs/evidence/README.md`, `.claude/skills/pm-orchestration-pattern/SKILL.md` og `PITFALLS_LOG.md` oppdatert med read-only-kontrakten.
+
+**Læring:**
+- Render "External Database URL" betyr ekstern nettverksruting, ikke read-only.
+- PM/agent-observability må bruke separat read-only secret. Full-access URL skal bare brukes ved eksplisitt write-oppdrag.
+- Snapshot-rapporter må vise DB-host/user uten passord, og secret-redaction må testes fordi database-URL-er lett kan matche email/token-regexer feil.

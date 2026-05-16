@@ -350,8 +350,8 @@ export class BingoTicketHtml {
 
     if (shouldHave && !existing) {
       const banner = this.buildElvisBanner();
-      const gridWrap = this.front.querySelector(".ticket-grid");
-      this.front.insertBefore(banner, gridWrap);
+      const body = this.front.querySelector(".ticket-body");
+      this.front.insertBefore(banner, body);
       this.elvisBannerColorKey = colorKey;
     } else if (!shouldHave && existing) {
       existing.remove();
@@ -434,6 +434,9 @@ export class BingoTicketHtml {
 
   private buildFace(isBack: boolean): HTMLDivElement {
     const face = document.createElement("div");
+    face.className = isBack
+      ? "ticket-face ticket-face-back"
+      : "ticket-face ticket-face-front";
     const palette = bongPaletteFor(this.ticket.color);
     Object.assign(face.style, {
       position: "absolute",
@@ -479,6 +482,7 @@ export class BingoTicketHtml {
     //     som før) og pushes til høyre via `marginLeft: auto`. Rent ×
     //     uten sirkel-bakgrunn — `background: transparent` + `color: inherit`.
     const header = document.createElement("div");
+    header.className = "ticket-header";
     Object.assign(header.style, {
       display: "flex",
       alignItems: "center",

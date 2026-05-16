@@ -35,8 +35,29 @@ PM skal kopiere evidence-filer hit FØR agent-spawn dersom kontrakten brukes for
 - Compliance-, wallet-, eller live-room-impact
 - Repeated bugs (2+ ganger sett)
 - Kontrakter referert i ADR eller PITFALLS_LOG
+- Live-test / GoH-test hvor Sentry/PostHog/DB-status brukes som beslutningsgrunnlag
 
 Generatorscriptet advarer hvis `--evidence`-flagget peker til `/tmp/` eller `/var/folders/` og foreslår eksakte `cp`-kommandoer.
+
+## Observability snapshots
+
+Når en live-test eller bug-repro skal kunne forklares til neste PM/agent, ta
+frozen snapshots før og etter:
+
+```bash
+npm run observability:snapshot -- --label before-<scope> --window-minutes=60
+# Kjør test/repro
+npm run observability:snapshot -- \
+  --label after-<scope> \
+  --window-minutes=60 \
+  --compare docs/evidence/<snapshot-dir>/<before>.json
+```
+
+Dette skriver JSON + Markdown under `docs/evidence/YYYYMMDD-observability-.../`.
+Rapporten inkluderer Sentry, PostHog, pilot-monitor og Postgres status.
+Secrets leses fra `~/.spillorama-secrets/` og skal aldri commit-es. Hvis
+`postgres-readonly.env` finnes, bruker snapshot-runneren read-only DB-URL før
+admin/full-access URL.
 
 ## Hva skal commit-es
 
@@ -72,6 +93,8 @@ docs/evidence/20260516-agent-a-purchase-open-seed-tick-fix/
 ├── 20260516T102333Z-postgres-snapshot.md  # før master-action
 ├── 20260516T102415Z-postgres-snapshot.md  # etter master-action
 ├── 20260516T102501Z-sentry-baseline.json
+├── 20260516T102530Z-observability-before.md
+├── 20260516T102622Z-observability-after.md
 ├── 20260516T102622Z-pilot-monitor.log
 └── contract.md                            # kopi av selve kontrakten (frozen)
 ```

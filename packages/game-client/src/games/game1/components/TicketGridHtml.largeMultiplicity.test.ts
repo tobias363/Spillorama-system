@@ -15,7 +15,7 @@
  * Disse testene matcher backend-real-render-testene 1:1, men sjekker det
  * andre endepunktet i pipelinen: at TicketGridHtml gjenkjenner alle 3
  * Large Yellow som distinkte brett og rendrer dem som 3 separate
- * 5×5-grids i DOM.
+ * 5×5-grids i DOM når legacy payload mangler purchaseId.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { TicketGridHtml } from "./TicketGridHtml.js";
@@ -119,10 +119,10 @@ describe("TicketGridHtml — Bug B Large multiplicity rendering", () => {
     // 3 brett × 25 celler = 75 grid-celler.
     expect(grid.root.querySelectorAll("[data-number]").length).toBe(75);
 
-    // 3 distinkte ticket-headere — alle med "Large Yellow" som farge-navn.
+    // 3 distinkte ticket-headere — §5.9 viser large som norsk "Gul - 3 bonger".
     const headers = Array.from(grid.root.querySelectorAll(".ticket-header-name"))
       .map((e) => (e as HTMLElement).textContent);
-    expect(headers).toEqual(["Large Yellow", "Large Yellow", "Large Yellow"]);
+    expect(headers).toEqual(["Gul - 3 bonger", "Gul - 3 bonger", "Gul - 3 bonger"]);
     expect(headers.length).toBe(3);
   });
 
@@ -161,11 +161,11 @@ describe("TicketGridHtml — Bug B Large multiplicity rendering", () => {
       const k = h ?? "?";
       counts[k] = (counts[k] ?? 0) + 1;
     }
-    expect(counts["Small Orange"]).toBe(2);
-    expect(counts["Small White"]).toBe(1);
-    expect(counts["Small Purple"]).toBe(1);
-    expect(counts["Small Red"]).toBe(1);
-    expect(counts["Large Yellow"]).toBe(3);
+    expect(counts["Oransje"]).toBe(2);
+    expect(counts["Hvit"]).toBe(1);
+    expect(counts["Lilla"]).toBe(1);
+    expect(counts["Rød"]).toBe(1);
+    expect(counts["Gul - 3 bonger"]).toBe(3);
   });
 
   it("renderer 6 brett ved 1 Large Yellow + 1 Large White (3 + 3)", () => {
@@ -190,8 +190,8 @@ describe("TicketGridHtml — Bug B Large multiplicity rendering", () => {
       .map((e) => (e as HTMLElement).textContent);
     expect(headers.length).toBe(6);
 
-    const yellowCount = headers.filter((h) => h === "Large Yellow").length;
-    const whiteCount = headers.filter((h) => h === "Large White").length;
+    const yellowCount = headers.filter((h) => h === "Gul - 3 bonger").length;
+    const whiteCount = headers.filter((h) => h === "Hvit - 3 bonger").length;
     expect(yellowCount).toBe(3);
     expect(whiteCount).toBe(3);
   });

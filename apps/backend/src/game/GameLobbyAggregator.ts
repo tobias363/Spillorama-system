@@ -703,6 +703,12 @@ export class GameLobbyAggregator {
          LEFT JOIN "${this.schema}"."app_game1_game_state" gs
                 ON gs.scheduled_game_id = sg.id
          WHERE sg.plan_run_id = $1 AND sg.plan_position = $2
+         ORDER BY
+           CASE
+             WHEN sg.status IN ('purchase_open','ready_to_start','running','paused') THEN 0
+             ELSE 1
+           END,
+           sg.created_at DESC
          LIMIT 1`,
         [planRunId, position],
       );

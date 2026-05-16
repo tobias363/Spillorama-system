@@ -40,6 +40,7 @@
     "test:synthetic:unit": "vitest run scripts/__tests__/synthetic/",
     "diagnose:pilot": "node scripts/diagnose-pilot.mjs",
     "forensics:purchase-open": "bash scripts/purchase-open-forensics.sh",
+    "observability:snapshot": "node scripts/dev/observability-snapshot.mjs",
     "agent:contract": "bash scripts/generate-agent-contract.sh",
     "audit:db": "node apps/backend/scripts/audit-db.mjs",
     "build:visual-harness": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build:visual-harness",

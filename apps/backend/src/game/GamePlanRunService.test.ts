@@ -814,6 +814,32 @@ test("Fase 1 run: findForDay returnerer eksisterende rad", async () => {
   assert.equal(run?.status, "running");
 });
 
+test("Fase 1 run: findStuck ignorerer normal terminal current-position state", async () => {
+  const { service, queries } = makeRunService();
+  const result = await service.findStuck({
+    hallId: "hall-1",
+    businessDate: todayStr(),
+  });
+
+  assert.deepEqual(result, []);
+  const sql = queries.at(-1)?.sql ?? "";
+  assert.match(
+    sql,
+    /sg_current\.plan_position\s*=\s*pr\.current_position/i,
+    "findStuck må kreve at current-position scheduled-game mangler",
+  );
+  assert.match(
+    sql,
+    /sg_current\.id\s+IS\s+NULL/i,
+    "terminal scheduled-game på current position skal ikke regnes som stuck",
+  );
+  assert.match(
+    sql,
+    /sg_active\.id\s+IS\s+NULL/i,
+    "aktiv scheduled-game skal fortsatt ekskludere stuck",
+  );
+});
+
 // ── forTesting ───────────────────────────────────────────────────────────
 
 test("Fase 1 run: forTesting() lager instans uten å åpne pool", () => {

@@ -49,6 +49,46 @@ const PATTERNS: PatternDefinition[] = [
   { id: "row2", name: "Row 2", claimType: "LINE", design: 1, prizePercent: 15, order: 2 },
 ];
 
+describe("CenterTopPanel — actionRootEl re-parenting (top-HUD order)", () => {
+  let panel: CenterTopPanel;
+  let container: HTMLElement;
+  let overlay: HtmlOverlayManager;
+
+  beforeEach(() => {
+    ({ panel, container, overlay } = makePanel());
+  });
+
+  afterEach(() => {
+    panel.destroy();
+    overlay.destroy();
+    container.remove();
+  });
+
+  it("exposes action-panel so PlayScreen can place HOVEDSPILL after status", () => {
+    const actionRoot = panel.actionRootEl;
+    expect(actionRoot.textContent).toContain("HOVEDSPILL 1");
+    expect(panel.rootEl.contains(actionRoot)).toBe(true);
+
+    const topGroupWrapper = document.createElement("div");
+    container.appendChild(topGroupWrapper);
+    topGroupWrapper.appendChild(actionRoot);
+
+    expect(panel.rootEl.contains(actionRoot)).toBe(false);
+    expect(topGroupWrapper.firstElementChild).toBe(actionRoot);
+  });
+
+  it("removes a re-parented action-panel on destroy", () => {
+    const actionRoot = panel.actionRootEl;
+    const topGroupWrapper = document.createElement("div");
+    container.appendChild(topGroupWrapper);
+    topGroupWrapper.appendChild(actionRoot);
+
+    panel.destroy();
+
+    expect(actionRoot.isConnected).toBe(false);
+  });
+});
+
 function results(row1Payout?: number, row1Won = false): PatternResult[] {
   const out: PatternResult[] = [];
   if (row1Payout !== undefined) {

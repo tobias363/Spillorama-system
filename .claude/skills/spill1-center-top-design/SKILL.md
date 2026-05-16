@@ -2,7 +2,7 @@
 name: spill1-center-top-design
 description: When the user/agent works with the Spill 1 `center-top` HTML overlay — the combo panel (mini-grid + premietabell) and action-panel (game name + jackpot + Forhåndskjøp/Kjøp flere/Start spill) rendered above the Pixi canvas. Also use when they mention CenterTopPanel.ts, ensurePatternWonStyles, premie-row, premie-cell, mini-grid, prize-pill, premie-design.html, PatternMiniGrid, jackpot-display, setBuyMoreDisabled, setPreBuyDisabled, setGameRunning, setCanStartNow, swapMiniGrid, animateWinFlash, flashAmount, customPatternListView, autoClaimPhaseMode, top-group-wrapper, LeftInfoPanel, action-panel, combo-panel, eller mockup-iterasjon I-V. Make sure to use this skill whenever someone touches `packages/game-client/src/games/game1/components/CenterTopPanel.ts` or related premie/mini-grid mockup-er — even if the change looks like "just CSS" — because the panel sits over Pixi-canvas (no-backdrop-filter rule), gjenbrukes av Spill 3 (customPatternListView injection), og endringer i layout påvirker kollisjon mellom combo-panel og action-panel.
 metadata:
-  version: 1.0.0
+  version: 1.3.0
   project: spillorama
 ---
 
@@ -10,7 +10,7 @@ metadata:
 
 # Spill 1 — Center-top design (combo-panel + action-panel)
 
-`CenterTopPanel.ts` rendrer **høyre halvdelen av `top-group-wrapper`** i Spill 1: combo-panel (mini-grid + premietabell) og action-panel (game name + jackpot-display + Forhåndskjøp/Kjøp-flere/Start-spill-knappene). Panelet sitter som HTML-overlay over Pixi-canvas via `HtmlOverlayManager` og deler `top-group-wrapper` med `LeftInfoPanel` (eid av `PlayScreen.ts`).
+`CenterTopPanel.ts` eier combo-panel (mini-grid + premietabell) og action-panel (game name + jackpot-display + Forhåndskjøp/Kjøp-flere/Start-spill-knappene). Panelet sitter som HTML-overlay over Pixi-canvas via `HtmlOverlayManager`. `PlayScreen.ts` eier `top-group-wrapper` og kan re-parente `CenterTopPanel.actionRootEl` slik at action-panel ligger rett etter status-kolonnen mens combo-panelet ligger etter lykketall.
 
 ## Kontekst — hvorfor er dette kritisk?
 
@@ -22,27 +22,60 @@ metadata:
 
 **Tobias-iterasjon I-V (2026-05-14):** Hele mockup-historikken er konsolidert i `premie-design.html`. Iterasjon V er nåværende kanonisk state. Endringer i prod CSS/layout MÅ verifiseres mot mockup.
 
-## De fire sub-elementene
+## Top-group sub-elementene
 
 ```
 top-group-wrapper (eies av PlayScreen.ts — IKKE CenterTopPanel)
+├── next-game-status-column (Neste spill / Stengt / Forbereder / Spill pågår, 155 px)
+├── CenterTopPanel.actionRootEl (HOVEDSPILL 1 + buy/start buttons, 245 px)
 ├── LeftInfoPanel        (player-info: 👤 12 / Innsats 30 kr / Gevinst 0 kr / Forhåndskjøp 15 kr)
-└── CenterTopPanel root  (display: flex, flex-direction: row, align-self: flex-start)
-    ├── combo (496 px bredt, padding 15px 22px, flexShrink:0)
-    │   └── combo-body (display: flex, gap: 18px, alignItems: stretch)
-    │       ├── gridHostEl (PatternMiniGrid 5×5, ~133 px, alignSelf: center)
-    │       └── prizeListEl (.premie-table — 5×3 grid Rad 1-4 + Fullt Hus × Hvit/Gul/Lilla)
-    └── actions (245 px bredt, padding 14px 22px 8px 22px, marginLeft: auto, flexShrink: 0)
-        ├── gameNameEl     ("HOVEDSPILL 1")
-        ├── jackpotEl      ("45 JACKPOT: 5000 KR" — hidden hvis !isDisplay)
-        ├── preBuyBtn      ("Forhåndskjøp til dagens spill" / "Venter på master — kjøp åpner snart")
-        ├── buyMoreBtn     ("Kjøp flere brett")
-        └── startGameBtn   ("Start spill" — display: none til canStartNow)
+├── lucky-number-column  (firkløver + "Velg lykketall", 163 px, egen høyre-border)
+└── CenterTopPanel root  (combo-only etter PlayScreen re-parent)
+    └── combo (496 px bredt, padding 15px 22px, flexShrink:0)
+        └── combo-body (display: flex, gap: 18px, alignItems: stretch)
+            ├── gridHostEl (PatternMiniGrid 5×5, ~133 px, alignSelf: center)
+            └── prizeListEl (.premie-table — 5×3 grid Rad 1-4 + Fullt Hus × Hvit/Gul/Lilla)
 ```
 
-**Player-info, mini-grid og knappe-blokken speiles i mockup-en for kontekst, men IKKE alle eies av CenterTopPanel.** Player-info eies av `LeftInfoPanel`, og `top-group-wrapper` eies av `PlayScreen`. CenterTopPanel eier kun combo + actions.
+**Status-kolonnen, lykketall-kolonnen, player-info, mini-grid og knappe-blokken speiles i mockup-en for kontekst, men IKKE alle eies av CenterTopPanel.** Status/lykketall og top-row-order eies av `PlayScreen`, player-info eies av `LeftInfoPanel`, og `top-group-wrapper` eies av `PlayScreen`. CenterTopPanel eier combo + actions, men PlayScreen kan flytte `actionRootEl` for riktig rekkefølge.
 
 ## Pixel-spec (mockup iterasjon V, 2026-05-14)
+
+### Status-kolonne
+| Property | Verdi | Notat |
+|---|---|---|
+| Width | `155px` | Første kolonne inne i `top-group-wrapper` |
+| Padding | `14px 16px` | Vertikalt sentrert i wrapper |
+| Border | `border-right: 1px solid rgba(255, 120, 50, 0.2)` | Klart kolonnedeling |
+| Shadow | `inset 10px 0 20px rgba(0,0,0,0.15)` | Samme dybde som øvrige kolonner |
+| Title | `15px`, `font-weight: 800` | "Neste spill" / "Stengt" / "Spill pågår" |
+| Name | `13px`, `#ffe83d`, `font-weight: 800` | Catalog-displayName |
+| Body | `11px`, `rgba(255,255,255,0.78)` | Kort status, ikke lang forklaring |
+
+**Tobias-direktiv 2026-05-16 iter 2:** Den gamle Pixi-idle-teksten til venstre for firkløveren skal ikke ligge løst i ballområdet. Den skal rendres som `next-game-status-column` i samme top-HUD-wrapper. Når denne HTML-statusen brukes, skjules CenterBall idle-text i ikke-running-state for å unngå dobbelt statusbudskap.
+
+### Lykketall-kolonne
+| Property | Verdi | Notat |
+|---|---|---|
+| Width | `163px` | Etter `LeftInfoPanel`, før `CenterTopPanel` |
+| Padding | `14px 20px` | Vertikalt sentrert i wrapper |
+| Gap | `8px` | Mellom firkløver og label |
+| Border | `border-right: 1px solid rgba(255, 120, 50, 0.2)` | Klart kolonnedeling |
+| Shadow | `inset 10px 0 20px rgba(0,0,0,0.15)` | Samme dybde som øvrige kolonner |
+| Clover | `72px × 72px` | `/web/games/assets/game1/design/lucky-clover.png` |
+| Label | `13px`, `font-weight: 700`, `line-height: 1.15` | "Velg" + "lykketall" på to linjer |
+
+**Tobias-direktiv 2026-05-16:** Firkløver + "Velg lykketall" skal være en del av samme bordered top-HUD-element som status, action-panel, player-info og premie/mønster. Ikke legg lykketall som separat DOM utenfor `top-group-wrapper`. Rekkefølgen er status → action-panel → player-info → lykketall → combo-panel.
+
+### Player-info-kolonne
+| Property | Verdi | Notat |
+|---|---|---|
+| Width | `140px` | Etter action-panel, før lykketall |
+| Padding | `14px 21px 14px 20px` | Matcher kolonnefølelsen til status/lykketall |
+| Align | `align-self: stretch`, `justify-content: center` | Aldri top-aligned kort inni fullhøyde wrapper |
+| Border | `border-right: 1px solid rgba(255, 120, 50, 0.2)` | Klart skille mot lykketall |
+| Shadow | `inset 10px 0 20px rgba(0,0,0,0.15)` | Samme dybde som status/lykketall |
+| Bet-info font | `14px`, `line-height: 1.35`, `white-space: nowrap` | "Innsats: 90 kr" skal aldri bryte til to linjer |
 
 ### Combo-panel
 | Property | Verdi | Mockup-linje |
@@ -92,11 +125,11 @@ top-group-wrapper (eies av PlayScreen.ts — IKKE CenterTopPanel)
 |---|---|---|
 | Width | `245px` | premie-design.html:370 |
 | Padding | `14px 22px 8px 22px` | premie-design.html:369 |
-| `marginLeft` | `auto` | premie-design.html:379 (Tobias-fix 2026-05-14) |
+| `marginLeft` | `0` når re-parentet i PlayScreen | CenterTopPanel default kan fortsatt være `auto` for standalone |
 | `flexShrink` | `0` | premie-design.html:373 |
-| `borderLeft` | `1px solid rgba(255, 120, 50, 0.2)` | premie-design.html:371 |
+| `borderRight` | `1px solid rgba(255, 120, 50, 0.2)` når re-parentet | Skille mot player-info |
 
-**Tobias-fix:** `marginLeft: auto` pusher action-panel til høyre kant av `top-group-wrapper` slik at det er visuelt adskilt fra combo-panel uten å overlappe. Spesielt viktig ved smale viewports der `width: fit-content` på `top-group-wrapper` kan trigge overflow.
+**Tobias-fix 2026-05-16:** Action-panel skal ligge rett etter `next-game-status-column`, ikke helt til høyre. Bruk `CenterTopPanel.actionRootEl` i `PlayScreen.ts` og re-parent DOM-noden inn i `top-group-wrapper`. Ikke dupliser action-knapper eller flytt callback-state ut av CenterTopPanel.
 
 ### Action-knapper
 - Background: `rgba(30, 12, 12, 0.92)` (INGEN backdrop-filter)
@@ -136,6 +169,7 @@ Disse public-metodene MÅ forbli funksjonelle — de er konsumert av `PlayScreen
 | `setCanStartNow(canStart, gameRunning)` | toggle Start-knapp | PlayScreen.applyState |
 | `setBadge(text)` | game-name header | PlayScreen.setBadge |
 | `showButtonFeedback(button, success)` | 2-sek "Registrert!"-feedback | PlayScreen efter buy-result |
+| `actionRootEl` | action-panel DOM-root for re-parenting | PlayScreen top-group-wrapper order |
 | `destroy()` | rydd GSAP-tweens + DOM | PlayScreen.destroy |
 
 **Endringer som bryter disse API-ene krever koordinert PlayScreen-update.** Mockup-endringer som KUN justerer CSS bryter ikke API.
@@ -196,6 +230,10 @@ Når Tobias godkjenner ny mockup-iterasjon:
 | Endre offentlige metoder uten å oppdatere PlayScreen | API-er (`setBuyMoreDisabled`, `updatePatterns`, etc.) er kontrakt |
 | Glem `.prize-pill premie-row` på `pill.className` i `rebuildPills` | `.prize-pill`-marker MÅ være med (regression-test) |
 | Slå sammen mini-grid + premie-tabell uten `alignSelf: center` på mini | Mini er kortere; sentrer vertikalt for å unngå tomrom |
+| Flytt action-knapper ved å duplisere DOM/callbacks | Re-parent `CenterTopPanel.actionRootEl` i `PlayScreen.ts` |
+| La `Innsats` bryte i player-info-kolonnen | Bruk `font-size:14px`, `line-height:1.35`, `white-space:nowrap` |
+| Bruk `align-self:center` for å sentrere top-HUD horisontalt | `overlayRoot` er flex-row; behold `align-self:flex-start` og bruk auto-margins/spacing på inline-aksen |
+| Sett både `margin-left:auto` og `margin-right:auto` på `top-group-wrapper` | Chat-panelet har egen auto-margin; bruk `margin-left:auto; margin-right:0` på top-HUD |
 
 ## Relaterte ADR-er
 
@@ -207,4 +245,7 @@ Når Tobias godkjenner ny mockup-iterasjon:
 
 | Dato | Endring | Author |
 |---|---|---|
+| 2026-05-16 | v1.3.0 — `HOVEDSPILL 1`/action-panel flyttet rett etter `next-game-status-column` via `CenterTopPanel.actionRootEl` re-parenting i `PlayScreen.ts`. `LeftInfoPanel` bet-info er nowrap/14px slik at "Innsats: X kr" holder én rad, og `top-group-wrapper` sentreres med `margin-left:auto; margin-right:0` fordi chat-panelet eier den andre auto-marginen. | PM-AI |
+| 2026-05-16 | v1.2.0 — Status-tekst ("Neste spill" / "Spill pågår") flyttet ut av løs CenterBall-idle-visning og inn som `next-game-status-column` i `top-group-wrapper`. Rekkefølge endret til status → player-info → lykketall → CenterTopPanel. | PM-AI |
+| 2026-05-16 | v1.1.0 — Lykketall/firkløver-kolonnen flyttet inn i `top-group-wrapper` som første bordered kolonne. Mockup `premie-design.html` oppdatert med samme `lucky-number-panel`. Tobias-direktiv 2026-05-16. | PM-AI |
 | 2026-05-15 | Initial — etablert ved prod-implementasjon av premie-design.html iterasjon V (combo width 376→496, padding 26→22, gap 20→18, action padding 25→22, marginLeft:auto). Tobias-direktiv 2026-05-14. | Agent (center-top-design-prod-implementation) |
