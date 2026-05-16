@@ -167,6 +167,36 @@ Hvis commits i denne PR-en har `[context-read: F-NN]`-tagger, bekreft:
 
 Se [`docs/engineering/COMPREHENSION_VERIFICATION.md`](../docs/engineering/COMPREHENSION_VERIFICATION.md) for detaljer. Håndheves automatisk av `.husky/pre-commit-comprehension.sh`.
 
+## Agent Contract (pre-spawn evidence — Fase A av ADR-0024)
+
+Hvis denne PR-en kommer fra en agent-leveranse på **high-risk paths** (apps/backend/src/game/, wallet/, compliance/, draw-engine/, sockets/, packages/game-client/games/, packages/shared-types/, apps/admin-web cash-inout/agent-portal, agent/admin game-routes), fyll inn:
+
+```
+Contract-ID: <YYYYMMDD-slug>
+Contract-path: docs/evidence/<YYYYMMDD-slug>/contract.md
+```
+
+Krav:
+- Contract-path må peke til en faktisk committed fil i denne PR-en
+- Contract-ID må matche katalog-navnet i Contract-path
+- Contract-filen skal inneholde agent-kontrakten brukt **før** agent startet arbeid
+
+**Generér med:** `bash scripts/pm-spawn-agent.sh --agent "..." --objective "..." --files ... --risk P0`
+
+**Bypass (kun for non-agent-spawned PR-er):**
+
+```
+[agent-contract-not-applicable: <begrunnelse min 20 tegn>]
+```
+
+Gyldige bypass-scenarier:
+- PR er ikke agent-spawnet (Tobias/PM committet direkte)
+- Endringen er for liten til at agent-contract er relevant
+
+For ikke-trivielle bypass: legg label `approved-agent-contract-bypass`.
+
+Håndheves av [`.github/workflows/agent-contract-gate.yml`](../.github/workflows/agent-contract-gate.yml). **Shadow-mode 2026-05-16 → 2026-05-23**; hard-fail tidligst 2026-05-24 (se ADR-0024 endrings-log for flip-dato). Layered defense — komplementært til knowledge-protocol/delivery-report/delta-report som sjekker POST-delivery, mens agent-contract sjekker PRE-spawn.
+
 ## Tracking
 
 - Linear issue:

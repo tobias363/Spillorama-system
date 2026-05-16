@@ -1,0 +1,168 @@
+name: Agent Contract Gate
+
+# Fase A av ADR-0024 layered defense.
+# Validerer PRE-SPAWN evidence: ble agenten faktisk gitt en korrekt kontrakt
+# før arbeid startet? Komplementært til knowledge-protocol-gate / delivery-
+# report-gate / delta-report-gate som alle sjekker POST-DELIVERY evidence
+# (ble kunnskap dokumentert etter arbeid).
+#
+# Mode: SHADOW (warning, ikke fail) til 2026-05-24.
+# Hard-fail flippes manuelt etter Tobias/PM-vurdering av falske positive.
+# Se ADR-0024 endrings-log for flip-dato.
+#
+# Bypass:
+#   [agent-contract-not-applicable: <begrunnelse min 20 tegn>]
+#   Label `approved-agent-contract-bypass` kreves for non-trivielle bypass.
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+    branches: [main]
+
+env:
+  # Shadow-mode-vindu (UTC). Hard-fail tidligst denne datoen.
+  HARD_FAIL_FROM: "2026-05-24"
+
+jobs:
+  check-agent-contract:
+    name: Agent contract enforcement
+    if: ${{ github.event.pull_request.state == 'open' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate pre-spawn agent-contract evidence
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+
+            const base = context.payload.pull_request.base.sha;
+            const head = context.payload.pull_request.head.sha;
+            const changedFiles = execSync(`git diff --name-only ${base} ${head}`, { encoding: 'utf8' })
+              .split('\n').filter(Boolean);
+
+            const body = context.payload.pull_request.body || '';
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+
+            // Write body to temp file for validator
+            const bodyFile = '/tmp/pr-body.md';
+            fs.writeFileSync(bodyFile, body);
+
+            const repoRoot = process.env.GITHUB_WORKSPACE;
+            const validatorPath = path.join(repoRoot, 'scripts/validate-pr-agent-contract.mjs');
+
+            // Shadow-mode check
+            const today = new Date().toISOString().slice(0, 10);
+            const hardFailFrom = process.env.HARD_FAIL_FROM;
+            const isShadowMode = today < hardFailFrom;
+
+            let result;
+            try {
+              const out = execSync(
+                `node ${validatorPath} --body-file ${bodyFile} --diff-files ${changedFiles.map(f => `'${f}'`).join(' ')}`,
+                { encoding: 'utf8', stdio: 'pipe' }
+              );
+              result = { ok: true, output: out, stderr: '' };
+              core.info(`✅ Agent-contract validation passed:\n${out}`);
+              return;
+            } catch (err) {
+              result = {
+                ok: false,
+                output: err.stdout ? err.stdout.toString() : '',
+                stderr: err.stderr ? err.stderr.toString() : '',
+              };
+            }
+
+            // Check approved-agent-contract-bypass label
+            const hasBypassLabel = labels.includes('approved-agent-contract-bypass');
+            const hasEmergencyLabel = labels.includes('approved-emergency-merge');
+
+            const validationOutput = (result.stderr + result.output).slice(0, 2000);
+
+            const modeHeader = isShadowMode
+              ? `⚠️ **Agent Contract Gate — SHADOW MODE (ville blokkert ved full håndhevelse)**`
+              : `🛑 **Agent Contract Gate — blokkert**`;
+
+            const message = [
+              modeHeader,
+              '',
+              isShadowMode
+                ? `Denne PR-en ville blitt blokkert fra ${hardFailFrom} med følgende validator-output:`
+                : `Denne PR-en mangler en gyldig pre-spawn agent-kontrakt-referanse.`,
+              '',
+              '**Validator-output:**',
+              '```',
+              validationOutput,
+              '```',
+              '',
+              '**Hva agent-contract-gate sjekker (layered defense per ADR-0024):**',
+              '',
+              '- `Contract-ID: <YYYYMMDD-slug>` i PR-body',
+              '- `Contract-path: docs/evidence/<id>/<file>.md` i PR-body',
+              '- Contract-path matcher Contract-ID-mappen',
+              '- Contract-filen er commited i PR-en (audit-trail)',
+              '',
+              'Dette er **forskjellig** fra knowledge-protocol-gate / delivery-report-gate / delta-report-gate, som sjekker POST-delivery evidence. Agent-contract-gate sjekker PRE-spawn evidence: ble agenten faktisk gitt en korrekt kontrakt før arbeidet startet?',
+              '',
+              '**Hvordan fikse:**',
+              '',
+              '1. Generer agent-kontrakt: `npm run agent:contract -- --agent "..." --files ... --output docs/evidence/<id>/contract.md`',
+              '2. Commit `docs/evidence/<id>/contract.md` i denne PR-en',
+              '3. Legg `Contract-ID: <id>` og `Contract-path: docs/evidence/<id>/contract.md` i PR-body',
+              '',
+              '**Bypass (kun for non-agent-spawned PR-er):**',
+              '',
+              '- Legg `[agent-contract-not-applicable: <begrunnelse min 20 tegn>]` i PR-body',
+              '- Begrunnelsen skal forklare hvorfor agent-kontrakt ikke er relevant (typisk: PR er direkte commited av Tobias, eller endring er for liten)',
+              '- For ikke-trivielle bypass: label `approved-agent-contract-bypass`',
+              '',
+              isShadowMode
+                ? `**Shadow-mode-periode:** ${today} → ${hardFailFrom}. Workflowen kommenterer men blokkerer ikke. Etter ${hardFailFrom} vil samme feil føre til hard-fail.`
+                : '',
+            ].filter(Boolean).join('\n');
+
+            // Avoid duplicate comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Agent Contract Gate')
+            );
+
+            if (!existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: message,
+              });
+            }
+
+            if (isShadowMode) {
+              core.warning(`Agent-contract validation failed (shadow-mode until ${hardFailFrom}). See PR comment.`);
+              return;
+            }
+
+            // Hard-fail mode — check labels for approved bypass
+            if (hasBypassLabel || hasEmergencyLabel) {
+              core.notice(`Hard-fail mode but approved bypass label present (${hasBypassLabel ? 'approved-agent-contract-bypass' : 'approved-emergency-merge'}).`);
+              return;
+            }
+
+            core.setFailed('Agent-contract validation failed. See PR comment.');

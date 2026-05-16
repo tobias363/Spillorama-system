@@ -4844,3 +4844,71 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - Når top-HUD er en levende HTML-wrapper, skal bong-grid posisjoneres mot faktisk målt HUD-bunn, ikke historiske pixel-konstanter.
 - 16px spacing er riktig felles visuelt språk her fordi bong-gridens parent-gap allerede bruker 16px.
 - Top-HUD kan endre høyde etter subkomponent-oppdateringer; layouten må repositioneres etter ferdig render, ikke bare på viewport-resize.
+
+### 2026-05-16 — PM-AI: Fase A — pre-spawn agent-contract-gate (shadow-mode) + bypass-telemetri
+
+**Agent-type:** PM/ops-hardening (Fase A av ADR-0024 layered defense)
+**Branch:** `claude/fase-a-pre-spawn-hook-bypass-telemetry-2026-05-16` (i `Spillorama-system-claude` worktree)
+**Scope:** Lukke det største empiriske funnet i audit 2026-05-16 — `scripts/generate-agent-contract.sh` ble brukt i 0/35 high-risk agent-spawns. PR-side gate som krever pre-spawn evidence + bypass-telemetri som trigger ADR-0024 konsolideringskriterier automatisk.
+
+**Koordinering (per AI_BRANCH_COORDINATION_PROTOCOL):**
+- Branch fra origin/main `1fe05e7e3`
+- Jobbet i `Spillorama-system-claude` worktree (ikke neutral hovedmappa)
+- Lock-list-filer endret: 2 nye workflows, PR-template, ADR-0024, pm-orchestration-pattern (v1.7.0), PITFALLS+AGENT_EXECUTION_LOG (append-only)
+- Pre-PR `gh pr list` viste ingen aktiv Codex-PR som rører samme workflows
+- Codex aktivt på `codex/game1-bong-spacing-2026-05-16` (PlayScreen + design-skills, forskjellig scope)
+
+**Evidence brukt før kode:**
+- Audit-rapport 2026-05-16: 4 parallelle deep-reads, Audit 3 (PM-prompt-quality) scoret 4/10 med "0/35 high-risk spawns brukte agent-contract".
+- ADR-0024 §"Bypass-policy" konsolideringskriterier — terskel-data ikke implementert tidligere.
+- PITFALLS §11.19 (high-risk fritekst-prompt) som dokumenterte rotårsak.
+- `.github/workflows/delivery-report-gate.yml` (mønster for shadow-mode workflow).
+
+**Outputs:**
+- `scripts/validate-pr-agent-contract.mjs` (NY) — parser PR-body, krever `Contract-ID: <YYYYMMDD-slug>` + `Contract-path:`, cross-checker at path er i diff og matcher ID-katalog. Bypass `[agent-contract-not-applicable: <reason min 20 tegn>]`.
+- `scripts/__tests__/validate-pr-agent-contract.test.mjs` (NY) — 29/29 tester pass.
+- `.github/workflows/agent-contract-gate.yml` (NY) — shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24.
+- `scripts/bypass-telemetry.mjs` (NY) — parser 12 bypass-mønstre, flagger ADR-0024 konsolideringskriterier (>20% bypass-rate eller 0% i 60 dager).
+- `scripts/__tests__/bypass-telemetry.test.mjs` (NY) — 26/26 tester pass.
+- `.github/workflows/bypass-telemetry-weekly.yml` (NY) — Søndag 18:00 UTC cron. Åpner GH-issue når kriterier treffes.
+- `scripts/pm-spawn-agent.sh` (NY) — lokal wrapper for ergonomi (generer + persist + print PR-body-linjer).
+- `.github/pull_request_template.md` — utvidet med Agent Contract-seksjon.
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md` — Fase A follow-up seksjon (eksplisitt layered defense, ikke duplikat) + endrings-log.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.6.0 → v1.7.0.
+- `docs/engineering/PITFALLS_LOG.md` §11.25 (append-only) + endringslogg-row.
+
+**Tester kjørt:**
+- 29 + 26 = 55 unit-tester. Alle pass.
+- `bash scripts/pm-spawn-agent.sh --help` — usage rendres korrekt.
+
+**Læring:**
+- **Adopsjon = teknisk håndhevelse + ergonomi.** Bare ett av to var ikke nok — Fase A leverer begge.
+- **Shadow-mode er kritisk** for nye gates. 7-dagers observation før hard-fail gir empirisk grunnlag for false-positives.
+- **Layered defense må eksplisitt skilles fra duplikat-bypass.** ADR-0024 advarte mot "17 bypass-paths" — Fase A adresserer en ny feilmodus, ikke samme feilmodus med ny bypass-vei. Dokumenteres i ADR.
+- **Bypass-telemetri må bygges samtidig** som nye gates ellers blir konsolideringskriteriene aspirasjonelle.
+- **Contract-ID + Contract-path = audit-trail.** Path må peke til committed fil i samme PR, og ID må matche katalogen. Gjør det umulig å bløffe contract-eksistens.
+
+**Shared files touched (per coordination protocol):**
+- `.github/workflows/agent-contract-gate.yml` (ny)
+- `.github/workflows/bypass-telemetry-weekly.yml` (ny)
+- `.github/pull_request_template.md` (utvidet)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md` (utvidet med endrings-log)
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` (v1.6.0 → v1.7.0)
+- `docs/engineering/PITFALLS_LOG.md` (append-only: ny §11.25)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (append-only: denne entry)
+
+**Coordination note:** Ingen aktiv Codex-PR rører samme workflows eller PR-template per `gh pr list 2026-05-16`. Codex på `codex/game1-bong-spacing` (PlayScreen + design-skills, ingen overlap).
+
+**Eierskap (filer endret):**
+- `scripts/validate-pr-agent-contract.mjs`
+- `scripts/__tests__/validate-pr-agent-contract.test.mjs`
+- `scripts/bypass-telemetry.mjs`
+- `scripts/__tests__/bypass-telemetry.test.mjs`
+- `scripts/pm-spawn-agent.sh`
+- `.github/workflows/agent-contract-gate.yml`
+- `.github/workflows/bypass-telemetry-weekly.yml`
+- `.github/pull_request_template.md`
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
