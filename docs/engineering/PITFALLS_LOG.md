@@ -54,10 +54,10 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 27 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 119 entries (per 2026-05-16)
+**Total:** 126 entries (per 2026-05-17)
 
 ---
 
@@ -4141,6 +4141,33 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 
 ---
 
+### §11.27 — `bash -n` + dry-run validerer ikke `--apply`-only kodepath (bash 3.2 mapfile-feil sluppet til main)
+
+**Severity:** P3 (lokal-only script-bug, ingen prod-risiko, men ramte første reelle bruk av `--apply`)
+**Oppdaget:** 2026-05-17 (under første kjøring av `scripts/cleanup-stale-stashes.sh --apply --yes` på 178 stashes)
+**Symptom:** Fase B-PR #1560 passerte CI + manuell DRY-RUN-verifikasjon. Ved første `--apply`-kjøring krasjet scriptet med `scripts/cleanup-stale-stashes.sh: line 260: mapfile: command not found`. `mapfile` (bash 4+ builtin) brukes kun i `--apply`-blokken som DRY-RUN aldri eksekverer.
+
+**Root cause:**
+- `bash -n` (syntax-only) godkjenner `mapfile` fordi det er syntaktisk gyldig — det er bare en runtime-builtin som mangler i bash 3.2 (macOS default).
+- DRY-RUN-pathen `exit 0` rett etter klassifisering — apply-blokken med `mapfile`/`git stash drop` blir aldri executet.
+- Verifikasjons-rutinen kjørte kun DRY-RUN. "Empirisk verifisert mot faktisk repo-state" i Fase B-commit refererte til klassifiserings-output, ikke sletting.
+
+**Fix:**
+- Erstatt `mapfile -t SORTED_IDX < <(...)` med portabel `while IFS= read -r idx_line; do [ -n "$idx_line" ] && SORTED_IDX+=("$idx_line"); done < <(...)`.
+- Kommentar i kode: `# bash 3.2 compatible (macOS default): no mapfile`.
+
+**Prevention:**
+- For destructive scripts med DRY-RUN/`--apply`-skille: kjør `--apply` på en stub/test-fixture før merge, ikke kun DRY-RUN.
+- Lint: utvid eventuell shell-lint-regel til å flagge `mapfile`/`readarray`/`declare -A` (bash 4+ features) i scripts som ikke har explicit `#!/usr/bin/env bash` + bash 4+ requirement.
+- Bash 3.2-kompatibilitet er allerede en Spillorama-konvensjon (§11.26 Prevention) — håndhev via lint, ikke kun via konvensjon.
+
+**Related:**
+- §11.26 — Fase B parent-PR
+- `scripts/cleanup-stale-stashes.sh` linje 259-269 (fix)
+- PR #1560 (buggy merge), fix-up PR (denne)
+
+---
+
 ## §12 DB-resilience
 
 ### §12.1 — pg-pool uten error-handler → 57P01 krasjer backend (Sentry SPILLORAMA-BACKEND-5)
@@ -4266,3 +4293,4 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |
+| 2026-05-17 | Lagt til §11.27 — `bash -n` + DRY-RUN aksepterte `mapfile` (bash 4+ builtin) i Fase B-stash-cleanup script fordi `mapfile` kun er på `--apply`-stien. Fix-up av PR #1560: erstattet med portabel `while IFS= read -r idx_line` + dokumenterte lesson at destructive scripts må kjøre `--apply` på stub før merge. Total 119→126 entries (index sync). | PM-AI (Fase B fix-up — bash 3.2 mapfile) |

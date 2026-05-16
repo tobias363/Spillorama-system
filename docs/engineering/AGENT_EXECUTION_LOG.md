@@ -59,6 +59,41 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-17 — PM-AI: Fase B fix-up — bash 3.2 mapfile-feil i cleanup-stale-stashes.sh
+
+**Branch:** `claude/fase-b-fix-bash32-2026-05-17`
+**Agent type:** PM-AI (selv, ikke spawnet ekstern agent)
+**Trigger:** Første reelle `--apply`-kjøring av Fase B-leveransen krasjet med `mapfile: command not found` på macOS default bash 3.2. DRY-RUN (som Fase B-verifikasjonen brukte) ekserserer ikke `--apply`-stien hvor `mapfile` ligger.
+
+**Inputs:**
+- Empirisk feil: `bash scripts/cleanup-stale-stashes.sh --apply --yes` → exit ved `mapfile`
+- Bekreftet at `bash -n` aksepterer `mapfile` (det er en runtime-builtin, ikke parse-feil)
+- Linje 260 i merget Fase B-PR #1560
+
+**Outputs:**
+1. **`scripts/cleanup-stale-stashes.sh`** linje 259-269 — `mapfile -t SORTED_IDX < <(...)` → portabel `while IFS= read -r idx_line; do [ -n "$idx_line" ] && SORTED_IDX+=("$idx_line"); done < <(...)` med kommentar `# bash 3.2 compatible (macOS default)`.
+2. **`docs/engineering/PITFALLS_LOG.md`** ny §11.27 — DRY-RUN-only-verifikasjon validerer ikke `--apply`-kodepath; index 119→126 (sync av etterslep fra §11.20-§11.26), §11 20→27.
+3. Re-kjørt lokal cleanup etter fix: 52 stashes droppet (178→126 globalt).
+
+**Verifisert:**
+- `bash -n scripts/cleanup-stale-stashes.sh` → SYNTAX OK
+- `grep -nE "mapfile|declare -A|readarray" scripts/cleanup-*.sh` → kun comment-match
+- Lokal `--apply --yes` fullførte uten feil (52 stashes droppet før fix-up branch ble laget)
+
+**Læring:** "Empirisk verifisert mot faktisk repo-state" må eksplisitt nevne om verifikasjonen kjørte DRY-RUN eller `--apply`. Destructive scripts trenger stub-baserte `--apply`-tester før merge.
+
+**PR:** Fix-up av #1560 (under-construction)
+
+**Shared-file rebase:** origin/main@de2552222
+**Shared files touched:**
+- `scripts/cleanup-stale-stashes.sh` (bash 3.2 fix)
+- `docs/engineering/PITFALLS_LOG.md` (append-only: §11.27 + index sync)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (append-only: denne entry)
+
+**Coordination note:** Ingen Codex-PR rører samme filer. Codex aktiv på `codex/goh-80-load-test-2026-05-16` (forskjellig scope). Ingen workflow-/package.json-endringer.
+
+---
+
 ### 2026-05-15 — PM/audit-agent: Access-/approval-matrise før required reviews
 
 **Branch:** `codex/access-approval-matrix`
