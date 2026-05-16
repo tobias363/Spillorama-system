@@ -143,6 +143,73 @@ describe("TicketGridHtml — tryGroupTriplet color-validation (Bug-fix 2026-05-1
     expect(directChildren.length).toBe(0);
   });
 
+  it("layout-kontrakt: triplet spenner 3 av 6 grid-kolonner uten ekstra sub-padding", () => {
+    const purchaseId = "p-large-yellow-layout";
+    const tickets = [
+      makeTicket(1, "Large Yellow", "large", purchaseId),
+      makeTicket(2, "Large Yellow", "large", purchaseId),
+      makeTicket(3, "Large Yellow", "large", purchaseId),
+    ];
+    grid.setTickets(tickets, {
+      cancelable: true,
+      entryFee: 5,
+      state: makeState(),
+      liveTicketCount: 0,
+    });
+
+    const triplet = grid.root.querySelector('[data-test="ticket-triplet"]') as HTMLDivElement;
+    expect(triplet.style.gridColumn).toBe("span 3");
+
+    const injectedStyles = document.getElementById("bong-triplet-styles")?.textContent ?? "";
+    expect(injectedStyles).toContain("max-width: 666px;");
+    expect(injectedStyles).toContain("gap: 0px;");
+    expect(injectedStyles).toContain("padding: 9px 17px 8px 17px;");
+    expect(injectedStyles).toContain("justify-content: flex-start;");
+    expect(injectedStyles).toContain("gap: 14px;");
+    expect(injectedStyles).toContain("margin: 0px 2px;");
+    expect(injectedStyles).toContain("gap: 11px;");
+    expect(injectedStyles).toContain("margin-top: 10px;");
+    expect(injectedStyles).toContain("padding: 0;");
+    expect(injectedStyles).toContain("aspect-ratio: 240 / 300 !important;");
+    expect(injectedStyles).toContain(".ticket-face-front");
+    expect(injectedStyles).toContain("padding: 0 !important;");
+    expect(injectedStyles).toContain("box-shadow: none !important;");
+    expect(injectedStyles).toContain(".ticket-header,");
+    expect(injectedStyles).toContain("display: none !important;");
+    expect(injectedStyles).not.toContain("padding-right: 13px");
+  });
+
+  it("cancel-kontrakt: triplet-× sender første ticketId, ikke synthetic purchaseId", () => {
+    let cancelledId: string | null = null;
+    const cancelGrid = new TicketGridHtml({
+      onCancelTicket: (id) => {
+        cancelledId = id;
+      },
+    });
+    cancelGrid.mount(parent);
+
+    const purchaseId = "p-large-white-cancel";
+    const tickets = [
+      makeTicket(1, "Large White", "large", purchaseId),
+      makeTicket(2, "Large White", "large", purchaseId),
+      makeTicket(3, "Large White", "large", purchaseId),
+    ];
+    cancelGrid.setTickets(tickets, {
+      cancelable: true,
+      entryFee: 5,
+      state: makeState(),
+      liveTicketCount: 0,
+    });
+
+    const cancelButton = cancelGrid.root.querySelector(
+      'button[aria-label="Avbestill trippel-bong"]',
+    ) as HTMLButtonElement;
+    cancelButton.click();
+
+    expect(cancelledId).toBe("tkt-1");
+    expect(cancelledId).not.toBe(purchaseId);
+  });
+
   it("BUG-REGRESJON: avviser cross-color-gruppering når 3 large av FORSKJELLIGE farger deler purchaseId", () => {
     // Tobias-scenario 2026-05-15: handlekurv med blandet farger får alle
     // tickets samme purchaseId (handlekurven er ÉN purchase-rad), men

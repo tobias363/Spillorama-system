@@ -10,7 +10,7 @@
  *   for DAGENS stuck plan-runs etter completed scheduled-games.
  *
  * Disse testene verifiserer 8 mandaterte scenarier:
- *   1. Reconcile fyrer når plan-run=running + sched-game=completed + > 30s
+ *   1. Reconcile fyrer når siste plan-posisjon er completed + > 30s
  *   2. Reconcile fyrer IKKE når < 30s siden completed.actual_end_time
  *   3. Reconcile fyrer IKKE når sched-game er cancelled (ikke natural-end)
  *   4. Reconcile fyrer IKKE når plan-run er finished/idle/paused
@@ -18,6 +18,7 @@
  *   6. Idempotent (re-kjøring etter første finish er no-op)
  *   7. PG-feil (42P01) → soft-fail, returnerer { cleanedCount: 0 }
  *   8. Multi-hall: hver hall reconciles uavhengig
+ *   9. Mid-plan completed current round (f.eks. 1/13) er IKKE stuck
  *
  * Strategi: pool-stub emulerer SQL-en's WHERE/HAVING semantikk in-memory.
  * Vi sjekker SQL-shape med regex-match for å verifisere at riktige
@@ -51,6 +52,7 @@ interface PlanRunRow {
 interface SchedGameRow {
   id: string;
   plan_run_id: string;
+  plan_position: number;
   status:
     | "scheduled"
     | "purchase_open"
@@ -85,6 +87,7 @@ function schedGame(
   return {
     id: overrides.id,
     plan_run_id: overrides.plan_run_id,
+    plan_position: overrides.plan_position ?? 1,
     status: overrides.status ?? "completed",
     actual_end_time: overrides.actual_end_time ?? "2026-05-14T07:39:31Z",
   };
@@ -111,6 +114,11 @@ interface PoolCall {
 function makePool(args: {
   planRuns: PlanRunRow[];
   schedGames: SchedGameRow[];
+  /**
+   * Antall posisjoner i hver plan. Default = run.current_position så
+   * eksisterende positive fixtures representerer "siste posisjon" eksplisitt.
+   */
+  planItemCounts?: Record<string, number>;
   failCode?: string;
   /** Default Date for "now" — tests overstyrer for predikterbarhet. */
   now?: Date;
@@ -143,6 +151,9 @@ function makePool(args: {
 
       for (const run of args.planRuns) {
         if (run.status !== "running") continue;
+        const planItemCount =
+          args.planItemCounts?.[run.plan_id] ?? run.current_position;
+        if (run.current_position < planItemCount) continue;
 
         // Aktive scheduled-games-count (status IN active-set).
         const activeCount = args.schedGames.filter((sg) => {
@@ -162,6 +173,7 @@ function makePool(args: {
           .filter(
             (sg) =>
               sg.plan_run_id === run.id &&
+              sg.plan_position === run.current_position &&
               sg.status === "completed" &&
               sg.actual_end_time !== null,
           )
@@ -221,7 +233,7 @@ function makeAuditStub(): FakeAuditLog {
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-test("scenario 1: stuck plan-run + completed sched > 30s → reconcile fyrer", async () => {
+test("scenario 1: siste plan-posisjon completed > 30s → reconcile fyrer", async () => {
   const now = new Date("2026-05-14T08:30:00Z");
   const { pool, calls } = makePool({
     planRuns: [planRun({ id: "run-1", status: "running" })],
@@ -253,8 +265,11 @@ test("scenario 1: stuck plan-run + completed sched > 30s → reconcile fyrer", a
   );
 
   // SQL skal inneholde de kritiske filter-klausulene.
-  assert.match(calls[0]!.sql, /WITH active_sched_counts AS/);
+  assert.match(calls[0]!.sql, /active_sched_counts AS/);
+  assert.match(calls[0]!.sql, /plan_item_counts AS/);
   assert.match(calls[0]!.sql, /completed_sched AS/);
+  assert.match(calls[0]!.sql, /cs\.plan_position = pr\.current_position/);
+  assert.match(calls[0]!.sql, /pr\.current_position >= pic\.item_count/);
   assert.match(calls[0]!.sql, /pr\.status = 'running'/);
   assert.match(calls[0]!.sql, /status = 'completed'/);
   assert.match(calls[0]!.sql, /COALESCE\(asc_t\.active_count, 0\) = 0/);
@@ -287,6 +302,41 @@ test("scenario 2: < 30s siden completed → IKKE reconcile (master har gress-per
   const result = await svc.reconcileNaturalEndStuckRuns(now);
 
   assert.equal(result.cleanedCount, 0);
+  assert.equal(result.closedRuns.length, 0);
+});
+
+test("scenario 2b: mid-plan completed current round → IKKE reconcile/finish hele planen", async () => {
+  const now = new Date("2026-05-14T08:30:00Z");
+  const { pool } = makePool({
+    planRuns: [
+      planRun({
+        id: "run-mid-plan",
+        plan_id: "plan-with-13-games",
+        status: "running",
+        current_position: 1,
+      }),
+    ],
+    planItemCounts: { "plan-with-13-games": 13 },
+    schedGames: [
+      schedGame({
+        id: "sched-pos-1",
+        plan_run_id: "run-mid-plan",
+        plan_position: 1,
+        status: "completed",
+        actual_end_time: "2026-05-14T07:39:31Z", // > 30s siden
+      }),
+    ],
+    now,
+  });
+  const svc = new GamePlanRunCleanupService({ pool });
+
+  const result = await svc.reconcileNaturalEndStuckRuns(now);
+
+  assert.equal(
+    result.cleanedCount,
+    0,
+    "completed current_position 1/13 er normal mellom-runder-state, ikke stuck ferdig plan",
+  );
   assert.equal(result.closedRuns.length, 0);
 });
 
@@ -359,6 +409,7 @@ test("scenario 5: audit-event detaljer dekker alle påkrevde felter (reason, sch
       schedGame({
         id: "sched-audit",
         plan_run_id: "run-audit",
+        plan_position: 3,
         status: "completed",
         actual_end_time: endedAt,
       }),

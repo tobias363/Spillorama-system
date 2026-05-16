@@ -479,7 +479,14 @@ export class GamePlanRunService {
    * En "stuck" plan-run er en rad hvor:
    *   1. `status = 'running'`
    *   2. INGEN linkede `app_game1_scheduled_games` har en aktiv status
-   *      (`scheduled`/`purchase_open`/`ready_to_start`/`running`/`paused`).
+   *      (`scheduled`/`purchase_open`/`ready_to_start`/`running`/`paused`)
+   *   3. INGEN scheduled-game finnes for `current_position`.
+   *
+   * Viktig presisering 2026-05-16:
+   *   `running` plan-run + `completed` scheduled-game på current position er
+   *   en NORMAL mellom-runder-state. Master skal kunne kalle
+   *   `advanceToNext()` og flytte planen videre. Den må derfor IKKE returneres
+   *   her, ellers blir hele dagsplanen markert `finished` etter første runde.
    *
    * Bakgrunn — fra OBS-6 DB-auditor (`audit:db --quick`):
    *   Master starter en runde, men noe går galt mellom plan-run-state-machinen
@@ -508,19 +515,23 @@ export class GamePlanRunService {
               pr.started_at, pr.finished_at, pr.master_user_id,
               pr.created_at, pr.updated_at
          FROM ${this.table()} pr
-         LEFT JOIN "${this.schema}"."app_game1_scheduled_games" sg
-           ON sg.plan_run_id = pr.id
-          AND sg.status IN (
+         LEFT JOIN "${this.schema}"."app_game1_scheduled_games" sg_active
+           ON sg_active.plan_run_id = pr.id
+          AND sg_active.status IN (
             'scheduled',
             'purchase_open',
             'ready_to_start',
             'running',
             'paused'
           )
+         LEFT JOIN "${this.schema}"."app_game1_scheduled_games" sg_current
+           ON sg_current.plan_run_id = pr.id
+          AND sg_current.plan_position = pr.current_position
         WHERE pr.hall_id = $1
           AND pr.business_date = $2::date
           AND pr.status = 'running'
-          AND sg.id IS NULL
+          AND sg_active.id IS NULL
+          AND sg_current.id IS NULL
         GROUP BY pr.id, pr.plan_id, pr.hall_id, pr.business_date,
                  pr.current_position, pr.status, pr.jackpot_overrides_json,
                  pr.started_at, pr.finished_at, pr.master_user_id,

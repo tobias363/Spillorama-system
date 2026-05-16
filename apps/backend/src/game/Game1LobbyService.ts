@@ -951,6 +951,18 @@ export class Game1LobbyService {
               actual_start_time, catalog_entry_id
        FROM "${this.schema}"."app_game1_scheduled_games"
        WHERE plan_run_id = $1 AND plan_position = $2
+       ORDER BY CASE
+                  WHEN status IN (
+                    'scheduled',
+                    'purchase_open',
+                    'ready_to_start',
+                    'running',
+                    'paused'
+                  ) THEN 0
+                  ELSE 1
+                END,
+                created_at DESC,
+                updated_at DESC
        LIMIT 1`,
       [runId, position],
     );

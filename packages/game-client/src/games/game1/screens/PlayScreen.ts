@@ -24,7 +24,7 @@ import type { BuyPopupTicketConfig } from "../logic/lobbyTicketTypes.js";
 /**
  * Redesign 2026-04-23 — explicit column-based layout so each region has
  * its own flex child in overlayRoot with an independently tunable width:
- *   [tube spacer 140][ring spacer 200][leftInfo][centerTop][chatPanel →]
+ *   [tube spacer 155][ring spacer 200][topGroupWrapper][chatPanel →]
  * Pixi renders the tube and ring behind the respective spacers. chatPanel
  * uses margin-left:auto to pin itself to the right edge.
  *
@@ -35,7 +35,7 @@ import type { BuyPopupTicketConfig } from "../logic/lobbyTicketTypes.js";
  * Layout 2026-04-23 — overlayRoot flex-row with explicit gap between
  * top-level containers (best-practice, no marginLeft hacks):
  *
- *   [tubeSpacer] gap [callGroup: ring + clover] gap [topGroupWrapper] ...chatPanel
+ *   [tubeSpacer] gap [callGroup: ring] gap [topGroupWrapper: status + actions + info + lykketall + combo] ...chatPanel
  *
  * Each top-level child is a logical unit. Pixi ball-tube + ring render
  * behind their respective spacer children. `OVERLAY_ROW_GAP` is the
@@ -44,10 +44,10 @@ import type { BuyPopupTicketConfig } from "../logic/lobbyTicketTypes.js";
 const TUBE_COLUMN_WIDTH = 155;
 const RING_COLUMN_WIDTH = 200;  // 170 ring + 30 breathing room
 const OVERLAY_ROW_GAP = 0;      // base flex gap between top-level containers (per-container spacing under)
-/** Gap til høyre for den store ballen (ring) — mellom ringen og firkløveren. */
-const GAP_RIGHT_OF_BALL = 68;
-/** Gap til høyre for firkløver-kolonnen — mellom "Velg lykketall" og HOVEDSPILL-panelet. */
-const GAP_RIGHT_OF_CLOVER = 91;
+/** Wrapper-column width for "Velg lykketall" inside topGroupWrapper. */
+const CLOVER_COLUMN_WIDTH = 163;
+/** Wrapper-column width for "Neste spill" status inside topGroupWrapper. */
+const STATUS_COLUMN_WIDTH = 155;
 // Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
 const CHAT_COLLAPSED_WIDTH = 110;
@@ -61,7 +61,7 @@ const TICKET_LEFT = 155;
 const CLAIM_AREA = 0;
 const RING_SIZE = 170;
 const RING_TOP_Y = 18;
-/** Clover "Velg lykketall"-knapp right-of-ring inside callGroup. */
+/** Clover "Velg lykketall"-knapp inside topGroupWrapper. */
 const CLOVER_SIZE = 72;
 const DRAW_COUNT_Y_OFFSET = 16; // gap below the ring for the "X/Y" text
 
@@ -77,6 +77,14 @@ type Callbacks = {
   /** A6: host/admin manual start. */
   onStartGame?: () => void;
 };
+
+type TopHudStatusMode =
+  | "next-game"
+  | "closed"
+  | "waiting-master"
+  | "loading"
+  | "countdown"
+  | "running";
 
 /**
  * Game 1 play screen — the slim rewrite.
@@ -110,6 +118,10 @@ export class PlayScreen extends Container {
   private readonly buyPopup: Game1BuyPopup;
   private readonly ticketGrid: TicketGridHtml;
   private readonly audio: AudioManager;
+  private readonly nextGameStatusColumn: HTMLDivElement;
+  private readonly nextGameStatusTitleEl: HTMLDivElement;
+  private readonly nextGameStatusNameEl: HTMLDivElement;
+  private readonly nextGameStatusBodyEl: HTMLDivElement;
   /** Standalone Pixi text for "X/Y" drawn-ball counter under the ring.
    * NOT a child of CenterBall so the idle-float tween doesn't move it. */
   private readonly drawCountText: Text;
@@ -262,6 +274,9 @@ export class PlayScreen extends Container {
    */
   private previousCatalogSlug: string | null = null;
   private loadingTransitionDeadline: number | null = null;
+  private nextGameDisplayName = "Bingo";
+  private topHudStatusMode: TopHudStatusMode = "next-game";
+  private lastTopHudStatusSignature = "";
   /** Timeout-grense for loader-fallback (ms). Eksportert for test-override. */
   static readonly LOADING_TRANSITION_TIMEOUT_MS = 10_000;
 
@@ -347,17 +362,15 @@ export class PlayScreen extends Container {
     // bak HTML-laget og vises gjennom den semi-transparente glass-effekten.
     this.buildGlassTubeOverlay(overlayRoot, screenHeight);
 
-    // ── Container 1: big ring + "Velg lykketall" firkløver-knapp ──────────
-    // One logical unit (PM 2026-04-23: "ene containeren styrer stor ball
-    // og lykketall"). Pixi ring renders behind ringSpacer, the clover is
-    // an HTML button inside the same flex row so they move together.
+    // ── Container 1: big ring spacer ─────────────────────────────────────
+    // Pixi ring renders behind ringSpacer. "Velg lykketall" lives inside
+    // topGroupWrapper below so the whole top-HUD shares one bordered frame.
     const callGroup = document.createElement("div");
     callGroup.id = "call-group-wrapper";
     callGroup.style.cssText = [
       "display:flex",
       "flex-direction:row",
       "align-items:flex-start",
-      `gap:${GAP_RIGHT_OF_BALL}px`,
       "flex-shrink:0",
       "pointer-events:none",
     ].join(";");
@@ -367,7 +380,21 @@ export class PlayScreen extends Container {
     callGroup.appendChild(ringSpacer);
 
     const cloverColumn = document.createElement("div");
-    cloverColumn.style.cssText = "display:flex;flex-direction:column;align-items:center;padding-top:51px;gap:6px;flex-shrink:0;pointer-events:auto;";
+    cloverColumn.id = "lucky-number-column";
+    cloverColumn.style.cssText = [
+      "display:flex",
+      "flex-direction:column",
+      "align-items:center",
+      "justify-content:center",
+      "gap:8px",
+      `width:${CLOVER_COLUMN_WIDTH}px`,
+      "padding:14px 20px",
+      "box-sizing:border-box",
+      "flex-shrink:0",
+      "pointer-events:auto",
+      "border-right:1px solid rgba(255, 120, 50, 0.2)",
+      "box-shadow:inset 10px 0 20px rgba(0,0,0,0.15)",
+    ].join(";");
 
     const cloverBtn = document.createElement("button");
     cloverBtn.type = "button";
@@ -409,8 +436,17 @@ export class PlayScreen extends Container {
     cloverLabel.appendChild(line2);
     cloverColumn.appendChild(cloverLabel);
 
-    callGroup.appendChild(cloverColumn);
     overlayRoot.appendChild(callGroup);
+    const {
+      root: nextGameStatusColumn,
+      title: nextGameStatusTitleEl,
+      name: nextGameStatusNameEl,
+      body: nextGameStatusBodyEl,
+    } = this.buildNextGameStatusColumn();
+    this.nextGameStatusColumn = nextGameStatusColumn;
+    this.nextGameStatusTitleEl = nextGameStatusTitleEl;
+    this.nextGameStatusNameEl = nextGameStatusNameEl;
+    this.nextGameStatusBodyEl = nextGameStatusBodyEl;
 
     this.leftInfo = new LeftInfoPanel(this.overlayManager, pauseAwareBridge ?? undefined);
     this.calledNumbers = new CalledNumbersOverlay(this.overlayManager);
@@ -440,11 +476,9 @@ export class PlayScreen extends Container {
       centerTopOptions,
     );
 
-    // ── Container 2: player-info + combo-panel + action-buttons ──────────
-    // PM 2026-04-23: "den andre yster da resten". Bordered box with the
-    // shared gradient/shadow that visually unifies the three info
-    // sections. Horizontal spacing to callGroup is handled by the
-    // overlayRoot flex gap, not a marginLeft hack.
+    // ── Container 2: status + actions + player-info + lykketall + combo ──
+    // Bordered box with shared gradient/shadow that visually unifies all
+    // top-HUD controls, including Tobias' status + lykketall columns.
     const topGroupWrapper = document.createElement("div");
     topGroupWrapper.id = "top-group-wrapper";
     topGroupWrapper.style.cssText = [
@@ -454,7 +488,8 @@ export class PlayScreen extends Container {
       "align-self:flex-start",
       "flex-shrink:0",
       "margin-top:18px",
-      `margin-left:${GAP_RIGHT_OF_CLOVER}px`,
+      "margin-left:auto",
+      "margin-right:0",
       "background:radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
       "border:1px solid rgba(255, 120, 50, 0.35)",
       "border-radius:14px",
@@ -462,10 +497,23 @@ export class PlayScreen extends Container {
       "overflow:hidden",
       "pointer-events:auto",
     ].join(";");
-    // Re-parent the two roots (createElement appended them to overlayRoot).
+    // CenterTopPanel owns action button state, but PlayScreen owns the shared
+    // top-HUD column order. Tobias 2026-05-16: HOVEDSPILL-column belongs
+    // directly after "Neste spill", not as the far-right child.
+    const actionPanel = this.centerTop.actionRootEl;
+    actionPanel.style.marginLeft = "0";
+    actionPanel.style.borderLeft = "none";
+    actionPanel.style.borderRight = "1px solid rgba(255, 120, 50, 0.2)";
+
+    // Re-parent roots into the shared bordered top-HUD wrapper.
+    topGroupWrapper.appendChild(this.nextGameStatusColumn);
+    topGroupWrapper.appendChild(actionPanel);
     topGroupWrapper.appendChild(this.leftInfo.rootEl);
+    topGroupWrapper.appendChild(cloverColumn);
     topGroupWrapper.appendChild(this.centerTop.rootEl);
     overlayRoot.appendChild(topGroupWrapper);
+    this.centerBall.visible = false;
+    this.updateTopHudStatus("next-game");
 
     // Chat on the RIGHT edge (flex-row last child), default collapsed so
     // players land in the game without the chat panel expanded.
@@ -583,10 +631,11 @@ export class PlayScreen extends Container {
     // hadde trigget. Nå venter vi på server-pushed overgang
     // `overallStatus: purchase_open → running` før countdown starter.
     //
-    // Idle-text-modus (2026-05-11, Tobias-direktiv) erstatter
-    // `WaitingForMasterOverlay`. Når runden ikke er aktiv viser CenterBall
-    // "Neste spill: {displayName}" + "Kjøp bonger for å være med i
-    // trekningen" direkte i ball-posisjonen (selve ballen + tall skjules).
+    // Status-modus (2026-05-16 iter 2) erstatter tidligere CenterBall idle-
+    // tekst visuelt: når runden ikke er aktiv viser HTML-kolonnen i
+    // topGroupWrapper "Neste spill" / "Venter på master". CenterBall holder
+    // fortsatt intern idle-mode for kontrakt/tester, men hele Pixi-containeren
+    // skjules i ikke-running-state så vi ikke dobbeltrender samme status.
     //
     // Hall-isolation-fix (2026-05-11, Tobias-direktiv): når
     // `lobbyOverallStatus === "closed"` skal vi IKKE vise "Neste spill"
@@ -598,6 +647,8 @@ export class PlayScreen extends Container {
     const lobbyRunning = this.lobbyOverallStatus === "running";
     const lobbyClosed = this.lobbyOverallStatus === "closed";
     if (state.gameStatus === "RUNNING") {
+      this.centerBall.visible = true;
+      this.updateTopHudStatus("running");
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       this.centerBall.hideIdleText();
@@ -614,6 +665,8 @@ export class PlayScreen extends Container {
       state.millisUntilNextStart !== null &&
       state.millisUntilNextStart > 0
     ) {
+      this.centerBall.visible = true;
+      this.updateTopHudStatus("countdown");
       this.leftInfo.startCountdown(state.millisUntilNextStart);
       this.centerBall.startCountdown(state.millisUntilNextStart);
       // startCountdown kaller hideIdleText() internt — ingen behov for
@@ -622,12 +675,11 @@ export class PlayScreen extends Container {
       this.leftInfo.stopCountdown();
       this.centerBall.stopCountdown();
       // Sett idle-mode basert på lobby-state.
-      //   - `closed`         → "Stengt / Ingen aktiv plan i hallen akkurat nå"
+      //   - `closed`         → "Stengt / Ingen aktiv plan"
       //   - waiting-master   → "Neste spill: {displayName} / Venter på at
       //                         master starter neste runde" (Tobias 2026-05-12,
       //                         Alternativ B: scheduled-game ennå ikke spawnet)
-      //   - next-game        → "Neste spill: {displayName} / Kjøp bonger for å
-      //                         være med i trekningen" (joinable scheduled-game)
+      //   - next-game        → "Neste spill: {displayName} / Kjøp bonger..."
       // Game1Controller pusher displayName via `setBuyPopupDisplayName`
       // når lobby-state mottas — CenterBall fallback-tekst er "Bingo" om
       // ingenting er satt enda (Tobias-direktiv: aldri blank).
@@ -657,6 +709,8 @@ export class PlayScreen extends Container {
             : "next-game";
       this.centerBall.setIdleMode(idleMode);
       this.centerBall.showIdleText();
+      this.centerBall.visible = false;
+      this.updateTopHudStatus(idleMode);
     }
 
     // Tickets displayed depend on game phase:
@@ -953,8 +1007,10 @@ export class PlayScreen extends Container {
    * running) skjules teksten automatisk.
    */
   setBuyPopupDisplayName(displayName: string | null | undefined): void {
+    this.nextGameDisplayName = (displayName ?? "").trim() || "Bingo";
     this.buyPopup.setDisplayName(displayName);
     this.centerBall.setIdleText(displayName);
+    this.updateTopHudStatus(this.topHudStatusMode);
   }
 
   /**
@@ -1005,7 +1061,9 @@ export class PlayScreen extends Container {
    * og fremtidige call-sites som vil oppdatere kun CenterBall.
    */
   setCenterBallIdleText(displayName: string | null | undefined): void {
+    this.nextGameDisplayName = (displayName ?? "").trim() || "Bingo";
     this.centerBall.setIdleText(displayName);
+    this.updateTopHudStatus(this.topHudStatusMode);
   }
 
   /**
@@ -1063,6 +1121,8 @@ export class PlayScreen extends Container {
             ? "waiting-master"
             : "next-game";
       this.centerBall.setIdleMode(initialIdleMode);
+      this.centerBall.visible = false;
+      this.updateTopHudStatus(initialIdleMode);
     }
 
     if (this.lastState) {
@@ -1245,6 +1305,8 @@ export class PlayScreen extends Container {
             ? "waiting-master"
             : "next-game";
       this.centerBall.setIdleMode(initialIdleMode);
+      this.centerBall.visible = false;
+      this.updateTopHudStatus(initialIdleMode);
     }
   }
 
@@ -1369,6 +1431,109 @@ export class PlayScreen extends Container {
   /** Current chat column width (collapsed vs expanded). */
   private chatWidth(): number {
     return this.chatPanel?.isCollapsed() ? CHAT_COLLAPSED_WIDTH : CHAT_WIDTH;
+  }
+
+  private buildNextGameStatusColumn(): {
+    root: HTMLDivElement;
+    title: HTMLDivElement;
+    name: HTMLDivElement;
+    body: HTMLDivElement;
+  } {
+    const root = document.createElement("div");
+    root.id = "next-game-status-column";
+    root.style.cssText = [
+      "display:flex",
+      "flex-direction:column",
+      "align-items:center",
+      "justify-content:center",
+      "gap:3px",
+      `width:${STATUS_COLUMN_WIDTH}px`,
+      "padding:14px 16px",
+      "box-sizing:border-box",
+      "flex-shrink:0",
+      "text-align:center",
+      "border-right:1px solid rgba(255, 120, 50, 0.2)",
+      "box-shadow:inset 10px 0 20px rgba(0,0,0,0.15)",
+      "pointer-events:none",
+      "user-select:none",
+    ].join(";");
+
+    const title = document.createElement("div");
+    title.style.cssText = [
+      "color:#ffffff",
+      "font-size:15px",
+      "font-weight:800",
+      "line-height:1.15",
+      "text-shadow:0 2px 4px rgba(0,0,0,0.65)",
+    ].join(";");
+    root.appendChild(title);
+
+    const name = document.createElement("div");
+    name.style.cssText = [
+      "color:#ffe83d",
+      "font-size:13px",
+      "font-weight:800",
+      "line-height:1.15",
+      "text-shadow:0 2px 4px rgba(0,0,0,0.65)",
+      "max-width:100%",
+      "overflow-wrap:anywhere",
+    ].join(";");
+    root.appendChild(name);
+
+    const body = document.createElement("div");
+    body.style.cssText = [
+      "color:rgba(255,255,255,0.78)",
+      "font-size:11px",
+      "font-weight:700",
+      "line-height:1.2",
+      "margin-top:2px",
+      "max-width:100%",
+      "overflow-wrap:anywhere",
+      "text-shadow:0 2px 4px rgba(0,0,0,0.65)",
+    ].join(";");
+    root.appendChild(body);
+
+    return { root, title, name, body };
+  }
+
+  private updateTopHudStatus(mode: TopHudStatusMode): void {
+    this.topHudStatusMode = mode;
+    const displayName = this.nextGameDisplayName.trim() || "Bingo";
+    let title = "Neste spill";
+    let name = displayName;
+    let body = "Kjøp bonger for å være med";
+
+    if (mode === "closed") {
+      title = "Stengt";
+      name = "";
+      body = "Ingen aktiv plan";
+    } else if (mode === "loading") {
+      title = "Forbereder";
+      name = "neste spill";
+      body = "Oppdaterer plan";
+    } else if (mode === "waiting-master") {
+      title = "Neste spill";
+      name = displayName;
+      body = "Venter på master";
+    } else if (mode === "countdown") {
+      title = "Starter snart";
+      name = displayName;
+      body = "";
+    } else if (mode === "running") {
+      title = "Spill pågår";
+      name = displayName;
+      body = "";
+    }
+
+    const signature = `${title}|${name}|${body}`;
+    if (signature === this.lastTopHudStatusSignature) return;
+
+    this.nextGameStatusTitleEl.textContent = title;
+    this.nextGameStatusNameEl.textContent = name;
+    this.nextGameStatusNameEl.style.display = name ? "block" : "none";
+    this.nextGameStatusBodyEl.textContent = body;
+    this.nextGameStatusBodyEl.style.display = body ? "block" : "none";
+    this.lastTopHudStatusSignature = signature;
   }
 
   /** Build the glass-tube HTML overlay that sits over the Pixi ball-column.

@@ -6,8 +6,8 @@
  *
  * Strategi:
  *   1. Opprett temp-schema med plan-run + scheduled-games tabellene.
- *   2. Seed et stuck-scenario: plan-run=running + completed scheduled-game
- *      med actual_end_time > 30s siden.
+ *   2. Seed et stuck-scenario: plan-run=running + siste plan-posisjon har
+ *      completed scheduled-game med actual_end_time > 30s siden.
  *   3. Kjør reconcileNaturalEndStuckRuns().
  *   4. Verifiser at plan-run.status = 'finished' i DB.
  *   5. Verifiser at audit-event ble skrevet i app_audit_log.
@@ -59,11 +59,20 @@ async function setupSchema(pool: Pool, schema: string): Promise<void> {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE "${schema}"."app_game_plan_item" (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      position INTEGER NOT NULL CHECK (position >= 1)
+    )
+  `);
+
   // app_game1_scheduled_games — match migrations/20260428000000.
   await pool.query(`
     CREATE TABLE "${schema}"."app_game1_scheduled_games" (
       id TEXT PRIMARY KEY,
       plan_run_id TEXT NULL,
+      plan_position INTEGER NULL CHECK (plan_position IS NULL OR plan_position >= 1),
       status TEXT NOT NULL DEFAULT 'scheduled'
         CHECK (status IN (
           'scheduled','purchase_open','ready_to_start',
@@ -115,6 +124,13 @@ test(
       const oldEnd = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       await pool.query(
         `
+        INSERT INTO "${schema}"."app_game_plan_item" (id, plan_id, position)
+        VALUES ('item-1', $1, 1)
+        `,
+        ["plan-1"],
+      );
+      await pool.query(
+        `
         INSERT INTO "${schema}"."app_game_plan_run"
           (id, plan_id, hall_id, business_date, current_position, status,
            started_at, master_user_id)
@@ -125,8 +141,8 @@ test(
       await pool.query(
         `
         INSERT INTO "${schema}"."app_game1_scheduled_games"
-          (id, plan_run_id, status, actual_end_time)
-        VALUES ($1, $2, 'completed', $3)
+          (id, plan_run_id, plan_position, status, actual_end_time)
+        VALUES ($1, $2, 1, 'completed', $3)
         `,
         [schedId, planRunId, oldEnd],
       );
@@ -195,6 +211,13 @@ test(
       const oldEnd = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       await pool.query(
         `
+        INSERT INTO "${schema}"."app_game_plan_item" (id, plan_id, position)
+        VALUES ('item-cancelled', $1, 1)
+        `,
+        ["plan-1"],
+      );
+      await pool.query(
+        `
         INSERT INTO "${schema}"."app_game_plan_run"
           (id, plan_id, hall_id, business_date, current_position, status)
         VALUES ($1, $2, $3, CURRENT_DATE, 1, 'running')
@@ -204,8 +227,8 @@ test(
       await pool.query(
         `
         INSERT INTO "${schema}"."app_game1_scheduled_games"
-          (id, plan_run_id, status, actual_end_time)
-        VALUES ($1, $2, 'cancelled', $3)
+          (id, plan_run_id, plan_position, status, actual_end_time)
+        VALUES ($1, $2, 1, 'cancelled', $3)
         `,
         [schedId, planRunId, oldEnd],
       );

@@ -1,7 +1,7 @@
 # Spillorama Pitfalls Log — kumulativ fallgruve-katalog
 
 **Status:** Autoritativ. Alle fallgruver oppdaget i prosjektet samles her.
-**Sist oppdatert:** 2026-05-15
+**Sist oppdatert:** 2026-05-16
 **Eier:** PM-AI (vedlikeholdes ved hver agent-sesjon + hver PR-merge med learning)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."*
@@ -50,14 +50,14 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 18 | 2026-05-15 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 25 | 2026-05-15 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 31 | 2026-05-16 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 111 entries (per 2026-05-15)
+**Total:** 117 entries (per 2026-05-16)
 
 ---
 
@@ -388,6 +388,23 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - `apps/backend/src/util/roomState.ts` (`bumpArmCycle` + `getOrCreateArmCycleId`)
 - `apps/backend/src/adapters/PostgresWalletAdapter.ts:1991-2008` (`reserveImpl` IDEMPOTENCY_MISMATCH check)
 - §2.7 (idempotency-key for ALLE wallet-operasjoner) — denne entry presiserer key-scoping
+
+### §2.11 — Load-test topup må ikke direct-update `wallet_accounts`
+
+**Severity:** P1 (test-infra kan skjule eller skape wallet-reconciliation-avvik)
+**Oppdaget:** 2026-05-16 (GoH full-plan load-test 4 haller x 20 spillere)
+**Symptom:** Backend-start/monitor viser wallet-reconciliation-divergence for syntetiske demo-load-brukere etter test-runner-reset. Spillerne kan ha høy `wallet_accounts.deposit_balance`, men ledger/hash-chain viser ikke tilsvarende topup-hendelser.
+**Root cause:** `scripts/dev/goh-full-plan-run.mjs` fyller lokale syntetiske wallet-balances med direkte `UPDATE wallet_accounts`. Det er praktisk for lokal load-test, men går utenom wallet-adapter, wallet-entries, outbox, hash-chain og compliance-sporing.
+**Fix:** Bruk direct-update kun som midlertidig lokal test-harness. Før dette blir staging/prod-nær load-test må topup gjøres via wallet-adapter/API eller en ledger-konsistent test-reset som skriver alle relevante wallet/audit-rader atomisk.
+**Prevention:**
+- Nye load-test-runnere skal ikke mutere `wallet_accounts` direkte uten eksplisitt lokal-only guard og dokumentert reconciliation-konsekvens.
+- Hvis test-runner trenger saldo, preferer `PostgresWalletAdapter.topUp()` eller et test-only admin-endpoint som går gjennom samme ledger/outbox-path som ekte topup.
+- Kjør wallet-reconciliation etter load-test og dokumenter om avvik er test-harness-indusert eller produktbug.
+**Related:**
+- `scripts/dev/goh-full-plan-run.mjs`
+- `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- `docs/evidence/20260516-goh-full-plan-run/`
+- §2.6 (aldri direct INSERT i wallet-tabeller), §2.9 (wallet integrity watcher)
 
 ---
 
@@ -913,6 +930,26 @@ WHERE id = $1
 - `apps/admin-web/src/pages/cash-inout/Spill1HallStatusBox.ts`
 - `apps/admin-web/src/pages/agent-portal/NextGamePanel.ts`
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.20.0
+
+### §3.18 — Natural-end reconcile må aldri `finish`-e midt i en flerposisjonsplan
+
+**Severity:** P0 (full spilleplan stopper etter første runde)
+**Oppdaget:** 2026-05-16 (GoH full-plan runner stoppet etter runde 1 i tidligere runde med `plan_run.running + scheduled_game.completed`)
+**Symptom:** Første Spill 1-runde fullfører normalt, men cleanup/reconcile tolker mellom-runde-state som stuck natural-end og setter plan-run til `finished`. Neste planposisjon åpnes ikke, eller runner/PM ser at planen stopper lenge før alle 13 planposisjoner er spilt.
+**Root cause:** Natural-end-reconcile sjekket `plan_run=running + scheduled_game=completed` uten å skille mellom:
+- normal mid-plan mellomtilstand etter en completed current-position, der master/runner skal advance til neste position
+- ekte slutt på plan, der current-position er siste plan-item
+**Fix:** `GamePlanRunCleanupService.reconcileNaturalEndStuckRuns()` joiner nå mot `app_game_plan_item` og completed scheduled-game på `(plan_run_id, plan_position)`, og krever `current_position >= item_count` før den kan markere plan-run som finished.
+**Prevention:**
+- Alle reconcile-regler må modellere planposisjon, ikke bare scheduled-game-status.
+- Unit-test må ha scenario for `current_position=1` i 13-spills plan med completed scheduled-game: skal ikke finish-e planen.
+- Full-plan-runner skal kjøre alle 13 planposisjoner etter endring i cleanup/reconcile.
+**Related:**
+- `apps/backend/src/game/GamePlanRunCleanupService.ts`
+- `apps/backend/src/game/__tests__/GamePlanRunCleanupService.naturalEndReconcile.test.ts`
+- `apps/backend/src/__tests__/GamePlanRunCleanupService.naturalEndReconcile.integration.test.ts`
+- `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.21.0
 
 ---
 
@@ -1695,6 +1732,52 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - `tests/e2e/spill1-rad-vinst-flow.spec.ts`
 - `.claude/skills/spill1-master-flow/SKILL.md` v1.20.3
 - PR #1548 `Pilot-flow E2E` failure run `25945194884`
+
+### §6.21 — Full-plan runner må godta `finished` som korrekt sluttstate
+
+**Severity:** P1 (falsk negativ i full-plan load-test)
+**Oppdaget:** 2026-05-16 (første GoH full-plan-kjøring fullførte alle 13 spill, men rapporterte `failed`)
+**Symptom:** Alle 13 runder har `status=completed`, men runneren avslutter med `GAME_PLAN_RUN_INVALID_TRANSITION` fordi den kaller `advance` etter at plan-run allerede er `finished`.
+**Root cause:** Test-runneren forventet `PLAN_COMPLETED_FOR_TODAY` ved ekstra advance, men backend kunne allerede ha satt plan-run til `finished` etter siste runde. Da er et nytt advance-kall en invalid transition, men produktets sluttstate er korrekt.
+**Fix:** `scripts/dev/goh-full-plan-run.mjs::advancePastEnd()` behandler `GAME_PLAN_RUN_INVALID_TRANSITION` med `status=finished` som forventet sluttresultat (`expectedPlanAlreadyFinished=true`).
+**Prevention:**
+- Full-plan tests skal verifisere final DB-state (`status=finished`, `current_position=13`) i tillegg til HTTP-response på et ekstra advance-kall.
+- Ikke diagnostiser et slikt runner-fail som produktfail før per-runde-tabellen og plan-run-final-state er lest.
+**Related:**
+- `scripts/dev/goh-full-plan-run.mjs`
+- `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.md`
+
+### §6.22 — Synthetic load-spillere kan arve stale RG-loss-ledger mellom lokale full-plan-runs
+
+**Severity:** P1 (falsk `LOSS_LIMIT_EXCEEDED` i load-test)
+**Oppdaget:** 2026-05-16 (første GoH full-plan-run stoppet på Oddsen 56)
+**Symptom:** Noen få syntetiske `demo-load-*`-spillere feiler kjøp med `LOSS_LIMIT_EXCEEDED` selv om saldo er høy og resten av hallene kjøper normalt. Feilen kom på runde 10 (`oddsen-56`) etter mange tidligere lokale testkjøp.
+**Root cause:** `app_rg_loss_entries` og personlige RG-limit-rader fra tidligere lokale testøkter lå igjen for samme syntetiske load-brukere. Dagens tap nærmet seg default limit, og neste kjøp ble korrekt blokkert av responsible-gaming-regler. Dette var testdata-støy, ikke purchase-flow-regresjon.
+**Fix:** `scripts/dev/goh-full-plan-run.mjs` resetter `app_rg_loss_entries`, `app_rg_personal_loss_limits` og `app_rg_pending_loss_limit_changes` for syntetiske `demo-load-h%@example.com`-brukere i de fire demo-hallene før full-plan-run.
+**Prevention:**
+- Ved load-test med gjenbrukte syntetiske brukere må RG-ledger resettes eller brukerne roteres.
+- Hvis backend allerede har RG-state cachet i minne, restart backend etter reset.
+- Ikke øk RG-limits for å få testen grønn uten å dokumentere hvorfor; det skjuler en ekte compliance-guard.
+**Related:**
+- `scripts/dev/goh-full-plan-run.mjs`
+- `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- `docs/evidence/20260516-goh-full-plan-run/`
+
+### §6.23 — Scheduled Spill 1 `ticket:mark` kan feile selv om server-side round fullfører
+
+**Severity:** P1 (spillerklient/live-markering kan være ute av sync med scheduled-game)
+**Oppdaget:** 2026-05-16 (GoH full-plan runner, clean rerun)
+**Symptom:** Alle 13 runder fullfører server-side med draws, pattern-eval, tickets og purchases, men socket-klientene får `ticket.mark.failures` med kode `GAME_NOT_RUNNING` og melding `Ingen aktiv runde i rommet.` Runnerens per-runde `Marks` står 0.
+**Root cause:** Ikke ferdig isolert. Mest sannsynlig mismatch mellom scheduled Spill 1 room/status-resolveren i `ticket:mark` socket-path og den faktiske scheduled-game/room-code som draw-engine kjører. Dette påvirket ikke server-side completion i testen, men kan påvirke live spilleropplevelse og må behandles som separat P1.
+**Fix:** Åpen. Neste debug må sammenligne faktisk spillerklient og runner-socket: room join, active game lookup, `currentScheduledGameId`, `roomCode`, og socket-handlerens statuskilde under running-state.
+**Prevention:**
+- Full-plan-runner skal fortsette å logge mark-failures som anomalies selv når runden fullfører.
+- Ikke bruk kun server-side draw completion som bevis for at live-spiller-markering er frisk.
+- Når fix implementeres, legg inn regresjonstest der scheduled Spill 1 `ticket:mark` lykkes mens plan-run kjører via GoH.
+**Related:**
+- `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.json`
+- `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- `scripts/dev/goh-full-plan-run.mjs`
 
 ---
 
@@ -2910,6 +2993,292 @@ Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-b
 
 ---
 
+### §7.32 — Top-HUD-kontroller må være i samme bordered wrapper
+
+**Severity:** P2 (visuell UX / PM-kontekst-presisjon)
+**Oppdaget:** 2026-05-16 (Tobias-screenshot — firkløver + "Velg lykketall" og status-tekst lå visuelt utenfor felles top-HUD-ramme)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Firkløver + "Velg lykketall" lå som separat DOM-kolonne til venstre for
+`top-group-wrapper`, mens "Neste spill"-teksten lå i Pixi CenterBall-området.
+Resten av top-HUD-en hadde felles border, bakgrunn og kolonnedeling, så
+layouten fremstod asymmetrisk selv om elementene visuelt hørte til samme
+kontrollrad.
+
+**Root cause:**
+`PlayScreen.ts` bygget `call-group-wrapper` som `ringSpacer + cloverColumn`,
+mens status-tekst ble rendret som CenterBall idle-text og `top-group-wrapper`
+kun inneholdt `LeftInfoPanel` + `CenterTopPanel`. Dermed kunne ikke status eller
+clover få samme border/overflow/kolonnekontrakt som premie/mønster-panelet.
+
+**Fix:**
+- `call-group-wrapper` eier nå kun ring-spacer for Pixi-ball.
+- `next-game-status-column` er første child i `top-group-wrapper`.
+- `LeftInfoPanel` kommer før `lucky-number-column`, etter Tobias' iter 2 om å
+  bytte plass på firkløverfeltet og spillerinfo-feltet.
+- `lucky-number-column` ligger etter spillerinfo og før `CenterTopPanel`.
+- Status-, player-info- og lykketall-kolonnene har fast bredde,
+  `border-right` og samme inset-shadow som resten av top-HUD-en.
+- `LeftInfoPanel` er `align-self: stretch` + `justify-content: center`, så
+  personikon/`02` ikke blir et lite top-aligned kort inne i fullhøyde wrapper.
+- `premie-design.html` er synket med `next-game-status-panel` og
+  `lucky-number-panel` slik at mockup viser samme kolonneinndeling.
+
+**Prevention:**
+- Når Tobias ber om "samme element", sjekk DOM-parent, ikke bare visuell x/y.
+- Top-HUD-kontroller som skal dele border må være children av
+  `#top-group-wrapper`.
+- `call-group-wrapper` skal ikke eie status eller clover/lykketall fremover;
+  den er kun spacer for Pixi-ringen.
+- Hvis HTML-statuskolonnen brukes, må CenterBall idle-text skjules i
+  ikke-running-state slik at spiller ikke ser dobbelt "Neste spill".
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts`
+- `packages/game-client/src/premie-design/premie-design.html`
+- `.claude/skills/spill1-center-top-design/SKILL.md`
+
+**Related:** Skill `spill1-center-top-design` v1.2.0, `premie-design.html`
+
+---
+
+### §7.33 — Bong-grid spacing må eies av parent-grid, ikke card-padding
+
+**Severity:** P2 (visuell UX / sorteringsdebug)
+**Oppdaget:** 2026-05-16 (Tobias-screenshot med DevTools grid-overlay — hvit/gul/lilla triplets hadde ujevn visuell spacing)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Tripple-bonger så ut som de hadde ulik avstand mellom seg. DevTools viste grid-gap,
+men de visuelle kortene fulgte ikke gapet fordi triple-kortet var bredere enn én
+grid-kolonne og sub-grids hadde ekstra høyre/venstre-padding.
+
+**Root cause:**
+`TicketGridHtml` brukte `repeat(5, minmax(0px, 1fr))` + `gap: 10px`, mens
+`BingoTicketTripletHtml` var `max-width: 660px`. Triplet ble lagt inn som ett
+vanlig grid-child uten `grid-column: span 3`, så kortet overfløt sin grid-celle.
+I tillegg hadde `.bong-triplet-sub` posisjons-spesifikk padding (`0 10px` og
+13px på midt-sub), som gjorde hvit/gul/lilla visuelt asymmetriske.
+
+**Fix:**
+- Parent-grid er 6 kolonner: `grid-template-columns: repeat(6, minmax(0px, 1fr))`.
+- Parent-grid har `gap: 16px` og `max-width: 1348px` (= 2 × 666px + 16px).
+- Triplets får `grid-column: span 3`; singles får `grid-column: span 1`.
+- `.bong-triplet-card` er `max-width: 666px`, `gap: 0px`,
+  `padding: 9px 1px 3px 1px`.
+- `.bong-triplet-header` eier header-inset med `margin: 0px 18px` og har
+  `justify-content: flex-start` + `gap: 14px`; ikke bruk
+  `justify-content: space-between`, fordi det skyver prisen bort fra navnet.
+  Kun ×-knappen skal pushes til høyre med `margin-left:auto`.
+- `.bong-triplet-sub` har `padding: 0`; ingen farge-/posisjons-padding påvirker
+  spacing mellom bonger.
+- `.triple-sub-root` beholder `aspect-ratio: 240 / 300`; `auto` kollapser
+  body fordi `BingoTicketHtml` bruker absolutte front/back-face-lag.
+
+**Prevention:**
+- Mellomrom mellom bonger skal kun eies av `TicketGridHtml` parent-gridens
+  `gap: 16px`.
+- Ikke legg inn margin/padding på hvit/gul/lilla cards for å justere spacing.
+- Når et card visuelt skal telle som 3 bonger, må det også spenne 3 grid-kolonner.
+- Ikke fjern sub-bongens aspect-ratio når header/cancel skjules; rooten har
+  ellers ingen normal-flow-høyde.
+- Lås CSS-kontrakten med happy-dom-test før visuell iterasjon merges.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/TicketGridHtml.ts`
+- `packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts`
+- `packages/game-client/src/games/game1/components/TicketGridHtml.test.ts`
+- `packages/game-client/src/games/game1/components/TicketGridHtml.tripleGrouping.test.ts`
+- `.claude/skills/bong-design/SKILL.md`
+
+**Related:** Skill `bong-design` v1.3.0
+
+---
+
+### §7.34 — Triple-bong × må sende ticketId, ikke purchaseId
+
+**Severity:** P1 (pre-round UX / avbestilling virker ikke)
+**Oppdaget:** 2026-05-16 (Playwright-verifisering av triplet-spacing — lokal test-purchase ble ikke fjernet via ×)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Triplet-wrapperen viste én ×-knapp, men klikk fjernet ikke bongen fra pre-round
+state. Visuelt ble triplet liggende selv etter klikk.
+
+**Root cause:**
+`BingoTicketTripletHtml` sendte `purchaseId` til `onCancel`. Eksisterende
+klient-/socket-kontrakt er derimot `cancelTicket(ticketId)` →
+`ticket:cancel({ ticketId })`. Backend bruker én sub-ticket-id til å finne og
+fjerne hele Large-bundlen atomisk. Synthetic pre-round `purchaseId` som
+`roomCode:playerId:bundle:n` er ikke en gyldig ticket-id.
+
+**Fix:**
+- Triplet-wrapperens × bruker `primaryTicketId` (første sub-ticket) som cancel-id.
+- Knappen vises bare når `cancelable` og første ticket-id finnes.
+- `TicketGridHtml.tripleGrouping.test.ts` låser at triplet-× sender `"tkt-1"`
+  og ikke synthetic/handlekurv-`purchaseId`.
+
+**Prevention:**
+- Ikke innfør nytt purchase-cancel-flow uten å endre `Game1SocketActions` og
+  backend socket-kontrakt eksplisitt.
+- For Large/Elvis/Traffic-bundles: cancel-flow starter med én ticket-id;
+  backend eier bundle-oppløsning.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts`
+- `packages/game-client/src/games/game1/components/TicketGridHtml.tripleGrouping.test.ts`
+- `.claude/skills/bong-design/SKILL.md`
+
+**Related:** Skill `bong-design` v1.3.0, `SocketActions.cancelTicket()`
+
+---
+
+### §7.35 — Action-panel-plassering er top-wrapper-kontrakt, ikke CenterTop-margin
+
+**Severity:** P2 (visuell UX / fremtidig layout-regresjon)
+**Oppdaget:** 2026-05-16 (Tobias-screenshot — `HOVEDSPILL 1` lå helt til høyre, men skulle stå rett etter `Neste spill`)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Top-HUD-en hadde riktig felles ramme, men `HOVEDSPILL 1`/kjøpsknapp-kolonnen
+lå som siste child helt til høyre. Tobias ønsket den rett etter `Neste spill`,
+slik at status og tilhørende hovedspill-action er semantisk samlet.
+`Innsats: 90 kr` brøt samtidig til to linjer i player-info-kolonnen.
+
+**Root cause:**
+Action-panelet var hardkoblet som andre child inne i `CenterTopPanel.root`
+(`combo + actions`) og brukte `margin-left: auto` for å skyves ut til høyre.
+Da kunne ikke `PlayScreen.ts` kontrollere felles top-HUD-rekkefølge uten enten
+å duplisere knappene eller flytte state/callbacks ut av CenterTopPanel.
+
+**Fix:**
+- `CenterTopPanel` eksponerer `actionRootEl`, men beholder all knappestate og
+  callbacks.
+- `PlayScreen.ts` re-parenter `actionRootEl` direkte etter
+  `next-game-status-column`, før `LeftInfoPanel`.
+- Re-parentet action-panel får `margin-left: 0`, ingen venstre-border, og
+  høyre-border mot player-info.
+- `top-group-wrapper` bruker `margin-left:auto; margin-right:0` for å dele
+  ledig inline-rom med chat-panelets eksisterende `margin-left:auto`; dette gir
+  lik luft før top-HUD og mellom top-HUD/chat når viewporten har plass.
+  `align-self` må forbli `flex-start` fordi overlay-root er en flex-row og
+  `align-self:center` sentrerer på vertikal akse.
+- `LeftInfoPanel` bet-info er `font-size: 14px`, `line-height: 1.35` og
+  `white-space: nowrap`, så `Innsats: X kr` holder én rad.
+
+**Prevention:**
+- Ikke bruk `margin-left:auto` som semantisk layout-kontrakt for top-HUD.
+- Når Tobias ber om ny rekkefølge mellom kolonner, flytt DOM-parent/order i
+  `PlayScreen.ts`; ikke flytt business-state ut av komponenten som eier den.
+- Ved re-parenting: destroy må fjerne både opprinnelig root og re-parentet
+  action-root, ellers kan detached DOM bli liggende i overlayet.
+- Player-info-beløp skal ikke wrappe; ved smal skjerm overflyter hele top-HUD
+  horisontalt fremfor å bryte kolonner.
+- Ikke bruk `align-self:center` for horisontal sentrering i `overlayRoot`
+  (`flex-direction: row`); det flytter top-HUD-en ned mot bongene.
+- Ikke sett både `margin-left:auto` og `margin-right:auto` på top-HUD når
+  chat-panelet også har auto-margin; da blir høyre luft dobbelt så stor.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/CenterTopPanel.ts`
+- `packages/game-client/src/games/game1/components/LeftInfoPanel.ts`
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts`
+- `packages/game-client/src/premie-design/premie-design.html`
+- `.claude/skills/spill1-center-top-design/SKILL.md`
+
+**Related:** Skill `spill1-center-top-design` v1.3.0
+
+---
+
+### §7.36 — Triple sub-bong header-border må skjules som hel header, ikke bare tekst
+
+**Severity:** P2 (visuell UX / fremtidig bong-regresjon)
+**Oppdaget:** 2026-05-16 (Tobias-screenshot — midterste sub-bong hadde ekstra topprom og grå linje over BINGO-bokstavene)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Triple-bong før runde-start brukte riktig 3-sub-grid-struktur, men sub-bongene
+arvet fortsatt deler av single-bongens interne kortlayout. Resultatet var ekstra
+padding rundt hver sub-bong og en grå header-border over BINGO-bokstavene,
+spesielt synlig på midterste bong.
+
+**Root cause:**
+`BingoTicketTripletHtml` skjulte bare `.ticket-header-name` og
+`.ticket-header-price`. Selve header-diven i `BingoTicketHtml.populateFront()`
+hadde fortsatt `padding-bottom: 5px` og `border-bottom`, og `buildFace()` hadde
+inline `padding: 12px 18px 10px 18px`, `gap: 10px`, border-radius og shadow.
+Siden dette var inline-styles, var det ikke nok å justere wrapper-padding.
+
+**Fix:**
+- `BingoTicketHtml` eksponerer stabile override-hooks:
+  `.ticket-face`, `.ticket-face-front`, `.ticket-face-back` og `.ticket-header`.
+- Triple-wrapperen skjuler hele `.ticket-header` i sub-bongene, ikke bare
+  name/price.
+- Triple-wrapperen setter sub-front `padding: 0 !important`,
+  `gap: 4px !important`, `box-shadow: none !important` og
+  `border-radius: 0 !important`.
+- `.bong-triplet-card` har `gap: 0px` og eier all ytre padding. Etter
+  Tobias-direktiv 2026-05-16 er triplet-spesifikasjonen:
+  `padding: 9px 17px 8px 17px`, header `margin: 0px 2px`, og
+  `.bong-triplet-grids` med `gap: 11px` + `margin-top: 10px`.
+
+**Prevention:**
+- Ikke fjern `.ticket-header` / `.ticket-face-front` fra `BingoTicketHtml`;
+  de er kontrakten som gjør triplet-overrides presise.
+- Ikke target bare tekstnoder når et helt single-card-underområde skal skjules.
+  Hvis parent-diven har border/padding, blir den fortsatt synlig.
+- For triple-bong skal wrapperen eie outer padding/skygge/radius; sub-bongene
+  skal kun bidra med BINGO-header, grid og footer.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts`
+- `packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts`
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.test.ts`
+- `packages/game-client/src/games/game1/components/TicketGridHtml.tripleGrouping.test.ts`
+- `.claude/skills/bong-design/SKILL.md`
+
+**Related:** Skill `bong-design` v1.4.4
+
+---
+
+### §7.37 — Elvis-banner insertion må targete `.ticket-body`, ikke nested `.ticket-grid`
+
+**Severity:** P2 (frontend-regresjon / ticket:replace)
+**Oppdaget:** 2026-05-16 (nærliggende testkjøring etter triplet-layout-fix)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+`BingoTicketHtml.loadTicket(non-Elvis → Elvis)` kastet DOMException:
+`insertBefore` fikk en reference-node som ikke var direkte child av front-face.
+
+**Root cause:**
+Etter §5.9-refaktoren ligger `.ticket-grid` inne i `.ticket-body`. Elvis-banneret
+skal visuelt ligge mellom header og body, men `syncElvisBanner()` forsøkte
+fortsatt `front.insertBefore(banner, gridWrap)`. `gridWrap` er ikke lenger child
+av `front`, så DOM-operasjonen feilet. Samme testfil hadde også legacy
+header-forventninger (`small_yellow`, `Large Yellow`) selv om §5.9 nå viser
+norske labels.
+
+**Fix:**
+- `syncElvisBanner()` finner `.ticket-body` og inserter Elvis-banneret før den.
+- Elvis-testene forventer norske non-Elvis labels: `Gul` og `Gul - 3 bonger`.
+
+**Prevention:**
+- Når `.ticket-body` eksisterer, er dette grensen mellom kort-header/banner og
+  grid/letters/footer. Ikke bruk `.ticket-grid` som front-face insert anchor.
+- Når tester rører bong-header, bruk §5.9-labels. Legacy backend-color strings
+  er input-format, ikke display-kontrakt.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.ts`
+- `packages/game-client/src/games/game1/components/BingoTicketHtml.elvis.test.ts`
+- `.claude/skills/bong-design/SKILL.md`
+
+**Related:** Skill `bong-design` v1.4.1
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review
@@ -3128,6 +3497,26 @@ Selv om backend nå skriver korrekte assignment-rows og bundle-IDs, kan future-b
 - PR #1344 (seed FK fix)
 - `apps/backend/scripts/seed-demo-pilot-day.ts:1586`
 - `app_hall_groups.master_hall_id` FK constraint
+
+### §9.10 — Render External Database URL er full-access, ikke audit-safe read-only
+
+**Severity:** P1 (prod-risk ved observability/audit fra agentmiljø)
+**Oppdaget:** 2026-05-16 (Codex testet Render `External Database URL`)
+**Symptom:** Rollen fra Render-panelets standard `External Database URL` (`bingo_db_64tj_user`) hadde `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `CREATEROLE` og `CREATEDB`. Den fungerte for audit, men var ikke safe som PM/agent observability-secret.
+**Root cause:** Render viser default database credential, ikke en principle-of-least-privilege read-only credential. "External" betyr nettverks-ruting fra utsiden av Render, ikke read-only.
+**Fix:**
+- Opprettet egen rolle `spillorama_pm_readonly`.
+- Satt `ALTER ROLE ... SET default_transaction_read_only = on`.
+- Gitt kun `CONNECT`, `USAGE ON SCHEMA public`, `SELECT ON ALL TABLES`, `SELECT ON ALL SEQUENCES` + default privileges for fremtidige tabeller/sequences.
+- Lagret lokal read-only URL i `~/.spillorama-secrets/postgres-readonly.env`; `observability-snapshot.mjs` bruker denne før admin/full-access URL.
+**Prevention:**
+- PM/agent skal bruke `postgres-readonly.env` for observability, ikke Render default URL.
+- Hvis full-access URL må finnes lokalt, hold den separat i `postgres.env` og ikke bruk den i scripts uten eksplisitt write-behov.
+- Verifiser read-only med `transaction_read_only=on`, `has_any_insert/update/delete=false`, og en write-probe som forventes å feile.
+**Related:**
+- `scripts/dev/observability-snapshot.mjs`
+- `docs/evidence/README.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.4.1
 
 ---
 
@@ -3555,6 +3944,25 @@ Lim hele kontrakten inn i agent-prompten.
 - `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
 - `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.5.0
 
+### §11.23 — Live-test uten frozen Sentry/PostHog snapshot gir muntlig feilsøking
+
+**Severity:** P1 (PM/agent misdiagnosis-risiko under live-room testing)
+**Oppdaget:** 2026-05-16 (etter GoH full-plan-run; Sentry/PostHog tokens kom på plass etter første rapport)
+**Symptom:** PM kan si "Sentry var ren" eller "PostHog viste X", men neste PM/agent kan ikke revidere nøyaktig hvilke issues/events som fantes før og etter testvinduet. Dette fører til at agent-prompts baseres på minne, ikke audit-fakta.
+**Root cause:** Sentry/PostHog ble sjekket manuelt i dashboard/API uten standardisert before/after export og diff. GoH-rapporten 2026-05-16 måtte eksplisitt merke Sentry/PostHog som ikke verifisert fordi tokens manglet.
+**Fix:**
+- Ny runner `scripts/dev/observability-snapshot.mjs` eksponert som `npm run observability:snapshot`.
+- Runneren skriver JSON + Markdown under `docs/evidence/YYYYMMDD-observability-.../` og inkluderer Sentry unresolved, PostHog event-counts, `/tmp/pilot-monitor.log` severity counts og Postgres status.
+- `--compare <before.json>` genererer nye/increased Sentry issues og PostHog event-deltas.
+**Prevention:**
+- Kjør snapshot før og etter GoH/live-test: `npm run observability:snapshot -- --label before-<scope>` og etterpå med `--compare`.
+- Agent-contract for P0/P1 live-room bugs skal referere snapshot-filene, ikke bare PM-oppsummering.
+- Tokens skal ligge i `~/.spillorama-secrets/` og aldri commit-es.
+**Related:**
+- `scripts/dev/observability-snapshot.mjs`
+- `docs/evidence/README.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.5.1
+
 ---
 
 ## §12 DB-resilience
@@ -3655,6 +4063,17 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §7.26 — Lobby-broadcast manglet etter natural round-end (P0 pilot-blokker). 4 state-flipp-paths (Game1DrawEngineService.drawNext POST-commit, GamePlanRunService.finish/advanceToNext-past-end, GamePlanRunCleanupService.reconcileNaturalEnd) trigget IKKE socket-push til spiller-shell — klient måtte vente på 10s-poll. Fix: best-effort fire-and-forget broadcaster wired på alle 4 paths + frontend "Forbereder neste spill"-loader + 10s→3s poll reduction. 37 nye tester. | Fix-agent (lobby-broadcast on natural round-end) |
 | 2026-05-15 | Lagt til §7.27 — PauseOverlay vist feilaktig etter natural round-end (P0 pilot-blokker). Spill 1 auto-pauser etter hver phase-won (Tobias-direktiv 2026-04-27), og `paused`-flagget i `app_game1_game_state` resettes ikke alltid før status flippes til 'completed'. Snapshot speiler `paused` til klient-`isPaused`, så klient så `gameStatus=ENDED && isPaused=true` → PauseOverlay viste seg feilaktig. Fix: klient-side gate `state.isPaused && state.gameStatus === "RUNNING"` i `Game1Controller.onStateChanged`. Defense-in-depth selv om backend en gang i fremtiden rydder paused-flagget — gate-en er kontrakten med spillerne. Kanonisk spec: SPILL1_IMPLEMENTATION_STATUS §5.8. 11 pure-funksjons-tester i `Game1Controller.pauseOverlayGating.test.ts`. | Fix-agent (post-round-flyt §5.8) |
 | 2026-05-15 | Lagt til §7.30 — Triple-bong-rendering cross-color grouping bug (P0 pilot-blokker — visuell regresjon på master-flyt). PR #1500 (Bølge 2) introduserte purchaseId + sequenceInPurchase men hadde 3 lag med bugs: (A) pre-runde display-tickets manglet purchaseId helt → frontend grupperte tilfeldige tickets, (B) backend `ensureAssignmentsForPurchases` iterated `count` ganger uavhengig av `spec.size` så 1 Stor (= 3 brett) ble bare 1 row, (C) cross-color cart delte samme purchaseId så `tryGroupTriplet` grupperte forskjellige farger sammen. Fix: 3 lag løst — frontend color-family-validation, backend `LARGE_TICKET_BRETT_COUNT=3`-multiplier, og syntetisk bundle-id-generering i `getOrCreateDisplayTickets`. Tobias' eksakte scenario (1H+1G+1L Stor = 3 triplets) nå dekket av test. | Fix-agent (Tobias 2026-05-15 triple-rendering screenshot) |
+| 2026-05-16 | Lagt til §7.32 — Top-HUD-kontroller må være i samme bordered wrapper. Firkløver/lykketall flyttet inn i `top-group-wrapper` som første kolonne med border-right og mockup-sync i `premie-design.html`. Total 111→112 entries. | PM-AI (Spill 1 top-HUD lykketall-kolonne) |
+| 2026-05-16 | Oppdatert §7.32 — Iter 2: "Neste spill"-status flyttet inn som `next-game-status-column`, CenterBall idle-text skjules i ikke-running-state, og rekkefølgen er nå status → player-info → lykketall → CenterTopPanel. | PM-AI (Spill 1 top-HUD status-kolonne) |
+| 2026-05-16 | Lagt til §7.33 — Bong-grid spacing skal eies av 6-kolonne parent-grid med `gap: 16px`; triplets spenner 3 kolonner og `.bong-triplet-sub` har ingen ekstra side-padding. Total 112→113 entries. | PM-AI (Spill 1 bong-grid spacing) |
+| 2026-05-16 | Lagt til §7.34 — Triple-bong × må sende første sub-ticket-id til `ticket:cancel`, ikke synthetic `purchaseId`. Total 113→114 entries. | PM-AI (Spill 1 triplet cancel-kontrakt) |
+| 2026-05-16 | Lagt til §7.35 — Action-panel-plassering er top-wrapper-kontrakt: `CenterTopPanel.actionRootEl` re-parentes etter `next-game-status-column`, `Innsats` er nowrap, og top-HUD sentreres som ett element. Total 114→115 entries. | PM-AI (Spill 1 top-HUD action-kolonne) |
+| 2026-05-16 | Lagt til §7.36 — Triple sub-bong header-border må skjules som hel `.ticket-header`, og sub-front må override `padding/shadow/radius` via stabile `.ticket-face-front` hooks. Total 115→116 entries. | PM-AI (Spill 1 triplet sub-layout) |
+| 2026-05-16 | Oppdatert §7.36 — Triple-wrapper sidepadding justert til `9px 1px 3px 1px`; wrapper-header eier nå inset med `margin: 0px 18px` og `gap: 14px`. | PM-AI (Spill 1 triplet header-inset) |
+| 2026-05-16 | Oppdatert §7.36 — Triple-header bruker `justify-content:flex-start`; pris ligger nær navn, mens × pushes helt til høyre med `margin-left:auto`. `bong-design.html` synket med prod. | PM-AI (Spill 1 triplet header left-group) |
+| 2026-05-16 | Lagt til §7.37 — Elvis-banner insertion må targete `.ticket-body`, ikke nested `.ticket-grid`, etter §5.9 body-wrapper-refaktor. Total 116→117 entries. | PM-AI (Spill 1 Elvis loadTicket hardening) |
+| 2026-05-16 | Oppdatert §7.36 — Triple-wrapper spacing justert til `padding: 9px 17px 8px 17px`, header `margin: 0px 2px`, `.bong-triplet-grids gap: 11px` og `margin-top: 10px`. | PM-AI (Spill 1 triplet spacing) |
+| 2026-05-16 | Lagt til §2.11, §3.18, §6.21, §6.22, §6.23 fra GoH full-plan 4 haller x 20 spillere: wallet-topup ledger-risk, natural-end mid-plan finish, final `finished` runner-state, stale RG-ledger og scheduled `ticket:mark` `GAME_NOT_RUNNING`. | PM-AI (GoH full-plan test) |
 | 2026-05-15 | Lagt til §8.8 — PM Knowledge Continuity v2: evidence pack + self-test-gate for å bevise operativ kunnskapsparitet, ikke bare at dokumenter finnes. Total 103→104 entries. | PM-AI (knowledge-continuity-hardening) |
 | 2026-05-15 | Lagt til §5.15 — required checks må ikke ha PR path-filter som gjør check-context missing. Funnet da auto-doc PR #1532 ble blokkert av forventet `pitfalls-id-validation`. Total 104→105 entries. | PM-AI (post-merge CI watcher) |
 | 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
@@ -3664,3 +4083,5 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §3.17 — purchase_open-vinduet ble hoppet over fordi plan-runtime opprettet `ready_to_start` og master-start kalte engine i samme request. Total 108→109 entries. | PM-AI (purchase_open P0 fix) |
 | 2026-05-15 | Lagt til §6.19 — E2E plan-run-reset må bruke appens Oslo business-date, ikke Postgres `CURRENT_DATE`, ellers lekker plan-posisjon 7/jackpot-state i CI rundt norsk midnatt. Total 109→110 entries. | PM-AI (purchase_open CI follow-up) |
 | 2026-05-15 | Lagt til §6.20 — Pilot-flow Rad-vinst-test må drive scheduled draws eksplisitt fordi CI kjører med `JOBS_ENABLED=false`; ikke slå på scheduler-jobs for å få testen grønn. Total 110→111 entries. | PM-AI (purchase_open CI follow-up 2) |
+| 2026-05-16 | Lagt til §11.23 — live-test må ha frozen Sentry/PostHog snapshot før/etter, ellers blir agent-evidence muntlig og ureviderbar. Ny `npm run observability:snapshot`. | PM-AI (observability snapshot runner) |
+| 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |

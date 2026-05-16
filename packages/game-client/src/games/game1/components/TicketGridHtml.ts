@@ -136,7 +136,7 @@ export class TicketGridHtml {
       flex: "1 1 auto",
       overflowY: "auto",
       overflowX: "hidden",
-      padding: "8px",
+      padding: "0px",
       // Hide scrollbar visually but keep it scrollable (Pixi aesthetic match).
       scrollbarWidth: "thin",
       scrollbarColor: "rgba(255,255,255,0.25) transparent",
@@ -147,11 +147,16 @@ export class TicketGridHtml {
     this.root.appendChild(this.scrollArea);
 
     this.gridEl = document.createElement("div");
+    this.gridEl.setAttribute("data-test", "ticket-grid-inner");
     Object.assign(this.gridEl.style, {
       display: "grid",
-      gridTemplateColumns: "repeat(5, minmax(0px, 1fr))",
-      gap: "10px",
+      gridTemplateColumns: "repeat(6, minmax(0px, 1fr))",
+      gap: "16px",
       alignContent: "start",
+      width: "100%",
+      maxWidth: "1348px",
+      margin: "0 auto",
+      boxSizing: "border-box",
     });
     this.scrollArea.appendChild(this.gridEl);
   }
@@ -468,12 +473,13 @@ export class TicketGridHtml {
           cols,
           cancelable,
           onCancel: this.onCancelTicket
-            ? (purchaseId) => this.onCancelTicket?.(purchaseId)
+            ? (ticketId) => this.onCancelTicket?.(ticketId)
             : undefined,
         });
         if (!isLive && liveCount > 0) {
           triplet.root.style.opacity = "0.72";
         }
+        triplet.root.style.gridColumn = "span 3";
         this.tickets.push(triplet);
         // Map ALL 3 sub-ticket-IDs til samme triplet for future ticket-
         // lookups (eks. en `ticket:replace` på en sub-ticket).
@@ -500,6 +506,7 @@ export class TicketGridHtml {
       if (!isLive && liveCount > 0) {
         child.root.style.opacity = "0.72";
       }
+      child.root.style.gridColumn = "span 1";
       this.tickets.push(child);
       if (ticket.id) this.ticketById.set(ticket.id, child);
       this.gridEl.appendChild(child.root);

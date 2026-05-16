@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.20.3
+  version: 1.21.0
   project: spillorama
 ---
 
@@ -136,7 +136,7 @@ purchase_open            # ny plan-position, samme to-stegs regel
 | `Game1TransferHallService` | `apps/backend/src/game/Game1TransferHallService.ts` | 60s-handshake for runtime master-overføring |
 | `GamePlanRunCleanupService` | `apps/backend/src/game/GamePlanRunCleanupService.ts` | Reconcile-mekanismer for stuck plan-runs (se Reconcile-seksjon under) |
 
-### Reconcile-mekanismer for stuck plan-runs (PR #1407, oppdatert 2026-05-14)
+### Reconcile-mekanismer for stuck plan-runs (PR #1407, oppdatert 2026-05-16)
 
 Spill 1 plan-runs kan ende i `status='running'` UTEN at master har advanced eller finished planen. Tre komplementære reconcile-lag fanger forskjellige scenarier:
 
@@ -144,14 +144,13 @@ Spill 1 plan-runs kan ende i `status='running'` UTEN at master har advanced elle
 |---|---|---|---|
 | 1. **Master-action-reconcile** (PR #1403) | Master kaller `start()` eller `advanceToNext()` | `plan_run.reconcile_stuck` | Manuelle handlinger |
 | 2. **Daglig cron 03:00 Oslo** (eksisterende) | `business_date < CURRENT_DATE` | `plan_run.cron_cleanup` | Gårsdagens leftover |
-| 3. **Naturlig runde-end-poll** (PR #1407, ny) | Plan-run=running + scheduled-game=completed > 30s | `plan_run.reconcile_natural_end` | Mellom-runder NÅR (typisk Spill 1) |
+| 3. **Naturlig runde-end-poll** (PR #1407, ny) | Plan-run=running + siste plan-position completed > 30s | `plan_run.reconcile_natural_end` | Bare ekte plan-slutt |
 
-**ALDRI fjern lag 3 uten å verifisere alle scenarier:**
-- Master glemmer å klikke "advance" etter at runde naturlig endte → lag 3 fanger
-- Master krasj/disconnect midt mellom runder → lag 3 fanger
-- Pilot-flyt der master pauser mellom hver runde → lag 3 fanger
-- PR #1403 (lag 1) dekker BARE manuell master-handling, ikke naturlig runde-end
-- Cron (lag 2) kjører bare på gårsdagens, fanger ikke i-dag-runder
+**ALDRI la lag 3 fullføre en mid-plan run:**
+- `plan-run.running + scheduled-game.completed` er normal mellom-runde-state når `current_position < plan_item_count`.
+- Natural-end-reconcile kan bare markere run `finished` når completed scheduled-game matcher `current_position` OG `current_position >= plan_item_count`.
+- Full-plan GoH-test 2026-05-16 bekreftet at alle 13 planposisjoner spiller gjennom når mid-plan completed-state ikke tolkes som stuck.
+- PR #1403 (lag 1) dekker manuelle master-handlinger; lag 3 skal kun rydde ekte slutt/leftover, ikke hoppe over master/runner-advance midt i planen.
 
 **Konfig (lag 3):**
 - Threshold: env `PLAN_RUN_NATURAL_END_RECONCILE_THRESHOLD_MS` (default 30000ms)
@@ -162,8 +161,38 @@ Spill 1 plan-runs kan ende i `status='running'` UTEN at master har advanced elle
 - `apps/backend/src/game/__tests__/GamePlanRunCleanupService.naturalEndReconcile.test.ts` (12 unit-tester)
 - `apps/backend/src/jobs/__tests__/gamePlanRunNaturalEndReconcile.test.ts` (14 job-tester)
 - `apps/backend/src/__tests__/GamePlanRunCleanupService.naturalEndReconcile.integration.test.ts` (2 integration mot Postgres)
+- `scripts/dev/goh-full-plan-run.mjs --players-per-hall=20 ...` — 2026-05-16 clean run: 13/13 planposisjoner completed, final plan-run `status=finished`.
 
 **Symptom hvis lag 3 fjernes:** "Laster..." infinity i klient når master ikke advancer etter naturlig runde-end. Room-snapshot mangler `currentGame`. Tobias-rapport 2026-05-14 — bug-en bringer pilot-flyt til stillstand.
+
+### GoH full-plan test baseline (2026-05-16)
+
+Kanonisk lokal load-test for Spill 1 GoH:
+
+```bash
+node scripts/dev/goh-full-plan-run.mjs \
+  --players-per-hall=20 \
+  --connect-delay-ms=2200 \
+  --join-delay-ms=60 \
+  --purchase-concurrency=8 \
+  --round-timeout-ms=900000
+```
+
+Baseline 2026-05-16:
+- Scope: `demo-pilot-goh`, 4 haller x 20 spillere = 80 samtidige testspillere.
+- Alle 13 plan-spill completed: `bingo`, `1000-spill`, `5x500`, `ball-x-10`, `bokstav`, `innsatsen`, `jackpot`, `kvikkis`, `oddsen-55`, `oddsen-56`, `oddsen-57`, `trafikklys`, `tv-extra`.
+- Hver runde hadde 80 kjøp og 200 ticket assignments.
+- Final DB-state: `app_game_plan_run.status='finished'`, `current_position=13`.
+- Evidence: `docs/evidence/20260516-goh-full-plan-run/`
+- Human summary: `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+
+Known anomalies fra baseline:
+- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder, selv om server-side draw/pattern-eval fullførte. Dette er P1 og må undersøkes separat før man kaller live spiller-markering robust.
+- Engine pauset naturlig og ble auto-resumet 4 ganger per runde. Fullflyten overlever dette, men PM må avklare om dette er ønsket phase-pause-kontrakt.
+- Synthetic load-brukere kan arve RG-loss-ledger mellom lokale runs. Runneren resetter nå `app_rg_loss_entries`, `app_rg_personal_loss_limits` og pending limit changes for `demo-load-*`-brukere i demo-hallene.
+- Runnerens final-sjekk må behandle `GAME_PLAN_RUN_INVALID_TRANSITION` med `status=finished` som forventet sluttstate; ekstra advance etter ferdig plan er ikke produktfeil.
+
+ALDRI bruk denne full-plan-runneren som compliance-grade wallet-load-test før test-topup går via ledger-konsistent wallet-adapter/API. Per 2026-05-16 bruker runneren lokal direct topup som kan skape wallet-reconciliation-støy for syntetiske brukere.
 
 ### Auto-advance fra finished plan-run (BUG E, 2026-05-14)
 
@@ -1227,3 +1256,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.20.1 — E2E-testkontrakt for to-stegs flyt: `tests/e2e/helpers/rest.ts` har `openPurchaseWindow()` for første masterStart/purchase_open. Playwright-spesifikasjoner skal kjøpe før `markHallReady()`; `markHallReady()` stenger salget for hallen. Stateful pilot-flow-reset nullstiller dagens plan-run kun mot lokal CI/test-DB slik at hver spec starter på Bingo og ikke arver auto-advance til jackpot-posisjon 7. |
 | 2026-05-15 | v1.20.2 — Pilot-flow CI follow-up: E2E plan-run-reset bruker nå appens Oslo business-date i stedet for Postgres `CURRENT_DATE`, fordi CI-run kl. 22:44 UTC er neste business-date i Oslo. Uten dette slettes feil dagsrad og senere specs arver jackpot-posisjon 7. Rad-vinst-spec forventer nå 12 rendered ticket-cards, som matcher én card per faktisk brett. PITFALLS §6.19. |
 | 2026-05-15 | v1.20.3 — Pilot-flow CI follow-up 2: Rad-vinst-spec driver scheduled draws eksplisitt via test-only `e2e-draw-next`/`scheduledDrawNext()` fordi workflowen kjører med `JOBS_ENABLED=false`. Ikke slå på scheduler-jobs i CI for å reparere denne testen; hold tests deterministiske og dokumenter scheduled draw-driveren. PITFALLS §6.20. |
+| 2026-05-16 | v1.21.0 — GoH full-plan baseline: `scripts/dev/goh-full-plan-run.mjs` kjørte `demo-pilot-goh` med 4 haller x 20 spillere gjennom alle 13 planposisjoner. Clean run PASSED, final plan-run `status=finished`, evidence lagret i `docs/evidence/20260516-goh-full-plan-run/`. Natural-end reconcile presisert: mid-plan `completed` er normal mellom-runde-state, ikke stuck. Dokumenterer også kjente anomalies: scheduled `ticket:mark` `GAME_NOT_RUNNING`, 4 auto-resumes per runde, stale RG-ledger-reset og runner final `status=finished`-kontrakt. PITFALLS §2.11, §3.18, §6.21-§6.23. |

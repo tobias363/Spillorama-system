@@ -34,7 +34,7 @@ Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 | `health-monitoring-alerting` | 5 | 5 | `apps/backend/src/routes/publicGameHealth.ts`<br>`apps/backend/src/routes/__tests__/publicGameHealth.test.ts`<br>`apps/backend/src/observability/RoomAlertingService.ts`<br>`apps/backend/src/observability/RoomAlertingBootstrap.ts`<br>_(+1 more)_ |
 | `live-room-robusthet-mandate` | 8 | 17 | `apps/backend/src/sockets/SocketIdempotencyStore.ts`<br>`apps/backend/src/sockets/withSocketIdempotency.ts`<br>`apps/backend/src/observability/RoomAlertingService.ts`<br>`apps/backend/src/adapters/EngineCircuitBreakerPort.ts`<br>_(+4 more)_ |
 | `pengespillforskriften-compliance` | 10 | 81 | `apps/backend/src/compliance/**`<br>`apps/backend/src/spillevett/**`<br>`apps/backend/src/game/ComplianceLedger*`<br>`apps/backend/src/game/PrizePolicyManager.ts`<br>_(+6 more)_ |
-| `pm-orchestration-pattern` | 16 | 36 | `BACKLOG.md`<br>`docs/operations/PM_HANDOFF_*.md`<br>`docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`<br>`docs/engineering/PM_*.md`<br>_(+12 more)_ |
+| `pm-orchestration-pattern` | 17 | 37 | `BACKLOG.md`<br>`docs/operations/PM_HANDOFF_*.md`<br>`docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`<br>`docs/engineering/PM_*.md`<br>_(+13 more)_ |
 | `preview-pages-protection` | 6 | 1 | `packages/game-client/src/bong-design/`<br>`packages/game-client/src/kjopsmodal-design/`<br>`packages/game-client/src/premie-design/`<br>`packages/game-client/src/dev-overview/`<br>_(+2 more)_ |
 | `spill1-center-top-design` | 9 | 6 | `packages/game-client/src/games/game1/components/CenterTopPanel.ts`<br>`packages/game-client/src/games/game1/components/CenterTopPanel.test.ts`<br>`packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts`<br>`packages/game-client/src/games/game1/components/PatternMiniGrid.ts`<br>_(+5 more)_ |
 | `spill1-master-flow` | 20 | 129 | `apps/backend/src/game/Game1*`<br>`apps/backend/src/game/MasterActionService.ts`<br>`apps/backend/src/game/GamePlanRunService.ts`<br>`apps/backend/src/game/GamePlanRunCleanupService.ts`<br>_(+16 more)_ |
@@ -294,13 +294,14 @@ Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 - `scripts/pm-checkpoint.sh`
 - `scripts/pm-knowledge-continuity.mjs`
 - `scripts/purchase-open-forensics.sh`
+- `scripts/dev/observability-snapshot.mjs`
 - `scripts/generate-context-pack.sh`
 - `scripts/generate-agent-contract.sh`
 - `.github/workflows/pm-*.yml`
 - `.github/workflows/*gate*.yml`
 - `.github/workflows/bug-resurrection-check.yml`
 
-**Filer matchet i HEAD:** 36
+**Filer matchet i HEAD:** 37
 
 ### `preview-pages-protection`
 

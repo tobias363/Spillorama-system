@@ -1548,9 +1548,27 @@ test("start: bridge-spawn feiler 3x (alle forsøk) → rollback til idle + Domai
   assert.ok(rollbackAudit, "rollback-audit-event må skrives");
 });
 
-test("start: permanent feil (JACKPOT_SETUP_REQUIRED) → ingen retry, ingen rollback", async () => {
+test("start: permanent feil (JACKPOT_SETUP_REQUIRED) → ingen retry, rollback til idle på samme posisjon", async () => {
   let calls = 0;
-  const { service, mocks } = makeRetryService({});
+  type RollbackInputSnapshot = {
+    expectedPosition: number;
+    targetPosition: number;
+    reason: string;
+  };
+  let rollbackInput: RollbackInputSnapshot | null = null;
+  const { service, mocks } = makeRetryService({
+    getOrCreateForToday: () => makeRun({ status: "idle", currentPosition: 7 }),
+    startRun: (_hallId, _businessDate, masterUserId) =>
+      makeRun({ status: "running", currentPosition: 7, masterUserId }),
+    rollbackToIdle: (input) => {
+      rollbackInput = input;
+      return makeRun({
+        id: input.runId,
+        status: "idle",
+        currentPosition: input.targetPosition,
+      });
+    },
+  });
   Object.assign(
     (service as unknown as { engineBridge: { createScheduledGameForPlanRunPosition: Function } })
       .engineBridge,
@@ -1569,9 +1587,15 @@ test("start: permanent feil (JACKPOT_SETUP_REQUIRED) → ingen retry, ingen roll
   );
   // Permanente feil skal IKKE retries.
   assert.equal(calls, 1, "permanent feil skal ikke retries");
-  // Rollback skal IKKE kalles for permanente feil — den feilen vil bare
-  // gjenta seg.
-  assert.ok(!mocks.planRunCalls.includes("rollbackToIdle"));
+  // Men run må rulles tilbake til idle så lobby ikke blir stående i
+  // running-without-scheduled-game (BRIDGE_FAILED) før jackpot-popup kan
+  // fylles ut.
+  assert.ok(mocks.planRunCalls.includes("rollbackToIdle"));
+  const rollback = rollbackInput as RollbackInputSnapshot | null;
+  assert.ok(rollback, "rollback-input må være fanget");
+  assert.equal(rollback.expectedPosition, 7);
+  assert.equal(rollback.targetPosition, 7);
+  assert.equal(rollback.reason, "bridge_permanent_error:start:JACKPOT_SETUP_REQUIRED");
 });
 
 test("advance: bridge-spawn feiler 2x → retry lykkes på forsøk 3", async () => {

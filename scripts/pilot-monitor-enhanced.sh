@@ -244,24 +244,36 @@ check_db_mismatch() {
 
   echo "$now" > "$LAST_DB_POLL_FILE"
 
-  # Sjekk plan-run vs scheduled-game state
+  # Sjekk plan-run vs scheduled-game state.
+  #
+  # 2026-05-16: `plan-run.running + scheduled-game.completed` på current
+  # position er normal mellom-runder-state. Master/runner skal da advance til
+  # neste posisjon, ikke kjøre cleanup. P1 gjelder bare når det finnes hverken
+  # aktiv scheduled-game eller en current-position-rad å fortsette fra.
   local mismatch
   mismatch=$(psql -h localhost -U spillorama -d spillorama -tA -F "|" -c \
     "SELECT
        pr.id as plan_run_id,
        pr.status as run_status,
-       sg.id as sched_game_id,
-       sg.status as sched_status
+       pr.current_position,
+       sg_current.id as current_sched_game_id
      FROM app_game_plan_run pr
-     LEFT JOIN app_game1_scheduled_games sg ON sg.plan_run_id = pr.id
+     LEFT JOIN app_game1_scheduled_games sg_active
+       ON sg_active.plan_run_id = pr.id
+      AND sg_active.status IN ('scheduled','purchase_open','ready_to_start','running','paused')
+     LEFT JOIN app_game1_scheduled_games sg_current
+       ON sg_current.plan_run_id = pr.id
+      AND sg_current.plan_position = pr.current_position
      WHERE pr.status = 'running'
-       AND (sg.status = 'completed' OR sg.id IS NULL)
+       AND sg_active.id IS NULL
+       AND sg_current.id IS NULL
        AND pr.business_date = CURRENT_DATE
+     GROUP BY pr.id, pr.status, pr.current_position, sg_current.id
      LIMIT 5" 2>/dev/null || echo "")
 
   if [ -n "$mismatch" ]; then
     log_anomaly "P1" "db.stuck-state" \
-      "Plan-run RUNNING men scheduled-game COMPLETED/NULL: $mismatch — kjør cleanup-curl"
+      "Plan-run RUNNING uten aktiv eller current-position scheduled-game: $mismatch — krever cleanup"
   fi
 
   # Sjekk wallet-balance vs ledger-sum

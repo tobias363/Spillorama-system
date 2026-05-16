@@ -43,20 +43,22 @@ export class LeftInfoPanel {
     this.root = overlay.createElement("left-panel", {
       pointerEvents: "auto",
       flexShrink: "0",
-      alignSelf: "flex-start",
+      alignSelf: "stretch",
       display: "flex",
       flexDirection: "column",
+      justifyContent: "center",
       gap: "10px",
-      paddingTop: "35px",
-      paddingRight: "21px",
-      minWidth: "120px",
-      marginLeft: "20px",
+      width: "140px",
+      padding: "14px 21px 14px 20px",
+      boxSizing: "border-box",
+      borderRight: "1px solid rgba(255, 120, 50, 0.2)",
+      boxShadow: "inset 10px 0 20px rgba(0,0,0,0.15)",
     });
 
     // Row 1: icon + count
     const playerRow = document.createElement("div");
     playerRow.className = "player-info";
-    playerRow.style.cssText = "display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:#fff;";
+    playerRow.style.cssText = "display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:#fff;white-space:nowrap;";
     playerRow.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>`;
     this.playerCountEl = document.createElement("span");
     this.playerCountEl.textContent = "00";
@@ -68,7 +70,11 @@ export class LeftInfoPanel {
     // synligheten styres på rad-nivå.
     this.betInfoContainer = document.createElement("div");
     this.betInfoContainer.className = "bet-info";
-    this.betInfoContainer.style.cssText = "font-size:16px;color:#bbb;line-height:1.6;";
+    // Tobias 2026-05-16: i den smalere top-HUD-kolonnen skal
+    // "Innsats: 90 kr" aldri bryte til to linjer. Fonten holdes lavere og
+    // radene er nowrap; ved ekstremt smal viewport overflyter hele HUD-en
+    // horisontalt i stedet for å bryte kolonne-layouten.
+    this.betInfoContainer.style.cssText = "font-size:14px;color:#bbb;line-height:1.35;white-space:nowrap;";
 
     this.entryFeeRow = document.createElement("div");
     this.entryFeeRow.className = "bet-info-entry-fee";
@@ -96,7 +102,7 @@ export class LeftInfoPanel {
     this.pendingStakeRow = document.createElement("div");
     this.pendingStakeRow.className = "pending-stake-info";
     this.pendingStakeRow.style.cssText =
-      "font-size:13px;color:#9bd49b;line-height:1.4;display:none;margin-top:2px;";
+      "font-size:12px;color:#9bd49b;line-height:1.35;display:none;margin-top:2px;white-space:nowrap;";
     this.pendingStakeEl = document.createElement("span");
     this.pendingStakeEl.textContent = "Forhåndskjøp: 0 kr";
     this.pendingStakeRow.appendChild(this.pendingStakeEl);

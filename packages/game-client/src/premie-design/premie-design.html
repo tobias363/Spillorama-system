@@ -107,9 +107,9 @@
      *                rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45)) over
      *   linear-gradient(180deg, #1a0808 0%, #0a0303 100%).
      *
-     * Bredde matcher prod (~860 px = LeftInfoPanel 150 + combo 376 +
-     * actions 245 + padding) — design-mockupen lar hele center-top
-     * sees i kontekst.
+     * Bredde matcher prod (~1200 px = status 155 + actions 245 +
+     * LeftInfoPanel 140 + lykketall 163 + combo 496 + padding) — design-mockupen
+     * lar hele center-top sees i kontekst.
      */
     .game-frame {
       background:
@@ -122,28 +122,105 @@
       flex-direction: row;
       align-items: stretch;
       overflow-x: auto;
-      /* Tobias-fix 2026-05-14: action-panel skal pushes til høyre uten å
-       * overlappe combo-panelet. `width: fit-content` sikrer at game-frame
-       * vokser til summen av barna sin bredde (player-info + combo +
-       * action) slik at flex-shrink: 0-children aldri kolliderer i smale
-       * viewports. `max-width: 100%` hindrer overflow utenfor scenario-
-       * containeren. Horisontal scroll på meget smale viewports.
+      /* Tobias-fix 2026-05-16: top-HUD skal være sentrert som ett element.
+       * `width: fit-content` sikrer at game-frame vokser til summen av
+       * barna sin bredde, mens `margin: 0 auto` gir lik luft på sidene når
+       * viewporten er bred nok. Horisontal scroll på meget smale viewports.
        */
       width: fit-content;
       max-width: 100%;
       min-width: 0;
+      margin: 0 auto;
+    }
+
+    /* ── LEFT: status-panel (PlayScreen next-game-status-column) ─────────
+     * Tobias 2026-05-16 iter 2: "Neste spill"-teksten skal også være en
+     * tydelig kolonne i samme bordered wrapper. */
+    .next-game-status-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      width: 155px;
+      padding: 14px 16px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+      text-align: center;
+      border-right: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
+      user-select: none;
+    }
+    .next-game-status-panel .title {
+      color: #fff;
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.15;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.65);
+    }
+    .next-game-status-panel .name {
+      color: #ffe83d;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.15;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.65);
+    }
+    .next-game-status-panel .body {
+      color: rgba(255,255,255,0.78);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-top: 2px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.65);
+    }
+
+    /* ── LEFT: lykketall-panel (PlayScreen lucky-number-column) ──────────
+     * Tobias 2026-05-16: firkløver + "Velg lykketall" skal være egen
+     * kolonne inne i samme bordered wrapper som status, player-info,
+     * action-panel, player-info og premie/mønster. */
+    .lucky-number-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 163px;
+      padding: 14px 20px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+      border-right: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
+    }
+    .lucky-number-panel .clover {
+      width: 72px;
+      height: 72px;
+      background: url(/web/games/assets/game1/design/lucky-clover.png) center/contain no-repeat;
+      filter: drop-shadow(0 3px 6px rgba(0,0,0,0.5));
+    }
+    .lucky-number-panel .label {
+      text-align: center;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.15;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+      user-select: none;
     }
 
     /* ── LEFT: player-info-panel (LeftInfoPanel) ─────────────────────────
-     * Speiler `LeftInfoPanel`. Vises til venstre for combo-panelet og
+     * Speiler `LeftInfoPanel`. Vises etter action-panelet og før lykketall;
      * eier "Antall spillere" + "Innsats" + "Forhåndskjøp"-tekstene. */
     .player-info-panel {
       display: flex;
       flex-direction: column;
+      justify-content: center;
       gap: 10px;
-      padding: 22px 18px 14px 18px;
-      min-width: 140px;
+      width: 140px;
+      padding: 14px 21px 14px 20px;
+      box-sizing: border-box;
       flex-shrink: 0;
+      border-right: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
     }
     .player-info-panel .player-row {
       display: flex;
@@ -157,7 +234,8 @@
     .player-info-panel .bet-info {
       font-size: 14px;
       color: #bbb;
-      line-height: 1.55;
+      line-height: 1.35;
+      white-space: nowrap;
     }
     .player-info-panel .bet-info .row {
       white-space: nowrap;
@@ -165,8 +243,9 @@
     .player-info-panel .pending-stake {
       font-size: 12px;
       color: #9bd49b;
-      line-height: 1.4;
+      line-height: 1.35;
       margin-top: 2px;
+      white-space: nowrap;
     }
 
     /* ── MIDDLE: combo-panel (mini-grid + premie-table) ─────────────────
@@ -360,23 +439,20 @@
       animation: premie-won-flash 0.9s ease-out;
     }
 
-    /* ── RIGHT: action-panel (game name + jackpot + buy-buttons) ─────────
-     * Speiler `CenterTopPanel.actions`-blokken 1:1. Bredde 245 px. */
+    /* ── ACTION: game name + jackpot + buy-buttons ───────────────────────
+     * Tobias 2026-05-16: PlayScreen re-parenter action-panel rett etter
+     * next-game-status-panel. CenterTopPanel eier knappestate, PlayScreen
+     * eier top-row-rekkefølgen. */
     .action-panel {
       display: flex;
       flex-direction: column;
       gap: 9px;
       padding: 14px 22px 8px 22px;
       width: 245px;
-      border-left: 1px solid rgba(255, 120, 50, 0.2);
+      border-right: 1px solid rgba(255, 120, 50, 0.2);
       box-shadow: inset 10px 0 20px rgba(0,0,0,0.15);
       flex-shrink: 0;
       box-sizing: border-box;
-      /* Tobias-fix 2026-05-14: action-panel pushes til høyre kant av
-       * game-frame slik at det visuelt er adskilt fra combo-panelet
-       * uten å overlappe. `margin-left: auto` skyver den siste flex-
-       * itemen til endenav rad. */
-      margin-left: auto;
     }
     .action-panel .game-name {
       font-size: 11px;
@@ -501,6 +577,19 @@
         hovedspill — kun databingo har 2500 kr-cap).
       </div>
       <div class="game-frame">
+        <div class="next-game-status-panel">
+          <div class="title">Neste spill</div>
+          <div class="name">Bingo</div>
+          <div class="body">Kjøp bonger for å være med</div>
+        </div>
+        <div class="action-panel">
+          <div class="game-name">HOVEDSPILL 1</div>
+          <div class="jackpot">
+            45 JACKPOT : <span class="prize">5000 KR</span>
+          </div>
+          <button class="action-btn">Forhåndskjøp til dagens spill</button>
+          <button class="action-btn">Kjøp flere brett</button>
+        </div>
         <div class="player-info-panel" data-scenario-player="innsatsen">
           <div class="player-row">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
@@ -512,19 +601,15 @@
           </div>
           <div class="pending-stake">Forhåndskjøp: 15 kr</div>
         </div>
+        <div class="lucky-number-panel">
+          <div class="clover" aria-hidden="true"></div>
+          <div class="label">Velg<br>lykketall</div>
+        </div>
         <div class="combo-panel">
           <div class="combo-body">
             <div class="mini-grid" id="mini-innsatsen"></div>
             <div class="premie-table" id="table-innsatsen"></div>
           </div>
-        </div>
-        <div class="action-panel">
-          <div class="game-name">HOVEDSPILL 1</div>
-          <div class="jackpot">
-            45 JACKPOT : <span class="prize">5000 KR</span>
-          </div>
-          <button class="action-btn">Forhåndskjøp til dagens spill</button>
-          <button class="action-btn">Kjøp flere brett</button>
         </div>
       </div>
       <div class="controls" data-scenario="innsatsen">
@@ -561,6 +646,16 @@
         Eksempel Lilla: 500 × 3 = 1500 kr på Full Hus.
       </div>
       <div class="game-frame">
+        <div class="next-game-status-panel">
+          <div class="title">Neste spill</div>
+          <div class="name">Bingo</div>
+          <div class="body">Venter på master</div>
+        </div>
+        <div class="action-panel">
+          <div class="game-name">HOVEDSPILL 1</div>
+          <button class="action-btn">Forhåndskjøp til dagens spill</button>
+          <button class="action-btn">Kjøp flere brett</button>
+        </div>
         <div class="player-info-panel">
           <div class="player-row">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
@@ -571,16 +666,15 @@
             <div class="row">Gevinst: 50 kr</div>
           </div>
         </div>
+        <div class="lucky-number-panel">
+          <div class="clover" aria-hidden="true"></div>
+          <div class="label">Velg<br>lykketall</div>
+        </div>
         <div class="combo-panel">
           <div class="combo-body">
             <div class="mini-grid" id="mini-bingo"></div>
             <div class="premie-table" id="table-bingo"></div>
           </div>
-        </div>
-        <div class="action-panel">
-          <div class="game-name">HOVEDSPILL 1</div>
-          <button class="action-btn">Forhåndskjøp til dagens spill</button>
-          <button class="action-btn">Kjøp flere brett</button>
         </div>
       </div>
       <div class="controls" data-scenario="bingo">
@@ -610,6 +704,16 @@
         Lilla = 1000 × 3 = 3000 kr.
       </div>
       <div class="game-frame">
+        <div class="next-game-status-panel">
+          <div class="title">Spill pågår</div>
+          <div class="name">5×500</div>
+          <div class="body">Runde aktiv</div>
+        </div>
+        <div class="action-panel">
+          <div class="game-name">HOVEDSPILL 1</div>
+          <button class="action-btn">Forhåndskjøp til dagens spill</button>
+          <button class="action-btn">Kjøp flere brett</button>
+        </div>
         <div class="player-info-panel">
           <div class="player-row">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
@@ -620,16 +724,15 @@
             <div class="row">Gevinst: 0 kr</div>
           </div>
         </div>
+        <div class="lucky-number-panel">
+          <div class="clover" aria-hidden="true"></div>
+          <div class="label">Velg<br>lykketall</div>
+        </div>
         <div class="combo-panel">
           <div class="combo-body">
             <div class="mini-grid" id="mini-percent"></div>
             <div class="premie-table" id="table-percent"></div>
           </div>
-        </div>
-        <div class="action-panel">
-          <div class="game-name">HOVEDSPILL 1</div>
-          <button class="action-btn">Forhåndskjøp til dagens spill</button>
-          <button class="action-btn">Kjøp flere brett</button>
         </div>
       </div>
     </section>

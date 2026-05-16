@@ -71,12 +71,19 @@ describe("BingoTicketHtml", () => {
 
   it("shows the ticket colour in the header", () => {
     const header = ticket.root.querySelector(".ticket-header-name") as HTMLDivElement;
-    expect(header.textContent).toBe("Small Yellow");
+    expect(header.textContent).toBe("Gul");
   });
 
   it("shows the price in the header", () => {
     const price = ticket.root.querySelector(".ticket-header-price") as HTMLDivElement;
     expect(price.textContent).toBe("10 kr");
+  });
+
+  it("marks the front face and header with stable classes for triplet overrides", () => {
+    const front = ticket.root.querySelector(".ticket-face-front") as HTMLDivElement | null;
+    expect(front).not.toBeNull();
+    expect(front!.classList.contains("ticket-face")).toBe(true);
+    expect(front!.querySelector(".ticket-header")).not.toBeNull();
   });
 
   it("marks the free centre cell by default", () => {
@@ -220,7 +227,7 @@ describe("BingoTicketHtml — loadTicket replaces grid", () => {
     const firstCell = t.root.querySelector(".ticket-grid > div") as HTMLDivElement;
     expect(firstCell.textContent).toBe("10");
     const header = t.root.querySelector(".ticket-header-name") as HTMLDivElement;
-    expect(header.textContent).toBe("Small Red");
+    expect(header.textContent).toBe("Rød");
   });
 });
 

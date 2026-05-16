@@ -4,18 +4,19 @@ import { BingoTicketHtml } from "./BingoTicketHtml.js";
 /**
  * §5.9 (Tobias-direktiv 2026-05-15 IMMUTABLE) — pixel-perfect triple-rendering
  * for Stor X (3 brett). Tre Ticket-objekter med samme `purchaseId` rendres
- * som ÉN visuell triple-container (660 px bredde, 3 sub-grids side-om-side
+ * som ÉN visuell triple-container (666 px maks-bredde, 3 sub-grids side-om-side
  * med 1 px dividers) istedenfor 3 separate single-bonger.
  *
  * **Visuell spec** (matcher `packages/game-client/src/bong-design/bong-design.html`):
- * - Container-bredde: 660 px (default); max-width-respekterer parent grid
- * - `.bong-card` padding: `12px 18px 10px 18px`
- * - `.triple-grids`: `display: grid; grid-template-columns: 1fr 1px 1fr 1px 1fr`
+ * - Container-bredde: 666 px max; parent-grid eier responsiv bredde
+ * - `.bong-triplet-card` padding: `9px 17px 8px 17px`
+ * - `.triple-grids`: `display: grid; grid-template-columns: 1fr 1px 1fr 1px 1fr; gap: 11px; margin-top: 10px`
  * - Dividers: 1 px `rgba(0, 0, 0, 0.15)` vertikale linjer mellom sub-grids
- * - Sub-grid padding: `padding: 0 10px` (med override 13 px på midt-sub)
+ * - Sub-grid padding: `0` — bare parent-gridens 16px gap eier spacing mellom bonger
  * - Header: "Gul - 3 bonger" / "Hvit - 3 bonger" / "Lilla - 3 bonger"
  *   (totalpris = entryFee × 3 multipliert i header)
- * - × cancel-knapp: én knapp som canceler hele purchase (alle 3 bonger)
+ * - × cancel-knapp: én knapp som sender første ticketId til `ticket:cancel`
+ *   (backend fjerner hele Large-bundlen atomisk)
  *
  * **Wrapper-pattern:** Triplet er en wrapper rundt 3 {@link BingoTicketHtml}-
  * instanser. Klassen eksponerer SAMME public API som BingoTicketHtml så
@@ -49,11 +50,11 @@ export interface BingoTicketTripletHtmlOptions {
   /** True = render én × cancel-knapp i wrapperens header som canceler hele purchase. */
   cancelable: boolean;
   /**
-   * Kalles med purchase-ID-en når wrapperens cancel-knapp trykkes.
-   * Caller forventes å kalle backend purchase-cancel-endpoint som sletter
-   * alle 3 ticket-rader (én transaksjon på `purchase_id` i DB).
+   * Kalles med første ticket-id i triplet når wrapperens cancel-knapp trykkes.
+   * Eksisterende socket-kontrakt er `ticket:cancel({ ticketId })`; backend
+   * finner og sletter hele Large-bundlen atomisk fra den ene ticket-id-en.
    */
-  onCancel?: (purchaseId: string) => void;
+  onCancel?: (ticketId: string) => void;
 }
 
 /** Velg display-label fra ticket-color. Speilet fra `getFamilyDisplayName` i BingoTicketHtml. */
@@ -119,13 +120,13 @@ function tripletHeaderColorFor(color: string | undefined): string {
 /**
  * Injisér wrapper-spesifikke styles én gang per dokument. Inkluderer:
  * - `.bong-triplet-card` container-klasse for triple-wrapper
- * - CSS-overrides som skjuler sub-bongers individuelle header + cancel-knapp
- *   slik at wrapperens header er den eneste synlige.
+ * - CSS-overrides som skjuler sub-bongers individuelle header/cancel/face-
+ *   padding slik at wrapperen er eneste synlige kortbeholder.
  *
  * BingoTicketHtml's `face`-noder har inline-styles (Object.assign), så vi
  * trenger `!important` for å overstyre. Vi targeter via klasse-prefix
- * `.bong-triplet-card .ticket-header-name`-selektor som matcher sub-bongens
- * header-noder.
+ * `.bong-triplet-card .ticket-header` og `.ticket-face-front`-selektorer som
+ * matcher sub-bongens stabiliserte override-hooks.
  */
 function ensureTripletStyles(): void {
   if (typeof document === "undefined") return;
@@ -135,11 +136,11 @@ function ensureTripletStyles(): void {
   s.textContent = `
 .bong-triplet-card {
   width: 100%;
-  max-width: 660px;
+  max-width: 666px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 18px 10px 18px;
+  gap: 0px;
+  padding: 9px 17px 8px 17px;
   box-sizing: border-box;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -149,11 +150,12 @@ function ensureTripletStyles(): void {
 .bong-triplet-card .bong-triplet-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 22px;
+  justify-content: flex-start;
+  gap: 14px;
   white-space: nowrap;
   padding-bottom: 5px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  margin: 0px 2px;
 }
 .bong-triplet-card .bong-triplet-name {
   font-size: 12px;
@@ -191,9 +193,10 @@ function ensureTripletStyles(): void {
 .bong-triplet-card .bong-triplet-grids {
   display: grid;
   grid-template-columns: 1fr 1px 1fr 1px 1fr;
-  gap: 0;
+  gap: 11px;
   align-items: stretch;
   flex: 1;
+  margin-top: 10px;
 }
 .bong-triplet-card .bong-triplet-divider {
   background: rgba(0, 0, 0, 0.15);
@@ -201,35 +204,36 @@ function ensureTripletStyles(): void {
   align-self: stretch;
   margin: 4px 0;
 }
-/* Sub-grid har lett padding for å puste mot dividerne. Midt-sub får
- * 3px ekstra på hver side (Tobias-design 2026-05-15). */
+/* Parent-gridens 16px gap eier spacing mellom bonger. Sub-gridene får
+ * ingen ekstra høyre/venstre-padding, ellers blir hvit/gul/lilla ulikt
+ * forskjøvet inne i samme triple-container. */
 .bong-triplet-card .bong-triplet-sub {
   display: flex;
   flex-direction: column;
-  padding: 0 10px;
+  padding: 0;
   min-width: 0;
-}
-.bong-triplet-card .bong-triplet-sub:first-child {
-  padding-left: 0;
-}
-.bong-triplet-card .bong-triplet-sub:last-child {
-  padding-right: 0;
-}
-.bong-triplet-card .bong-triplet-sub:nth-child(3) {
-  padding-left: 13px;
-  padding-right: 13px;
 }
 /* Hide the sub-bongens individuelle header + × cancel-knapp + container-
  * padding/skygge. Sub-bongen skal IKKE rendre sin egen "Gul - 3 bonger"-
- * header, fordi wrapperens header eier den. */
+ * header eller den grå header-borderen over BINGO-bokstavene, fordi wrapperens
+ * header eier den. */
 .bong-triplet-card .bong-triplet-sub > .triple-sub-root {
   background: transparent !important;
   box-shadow: none !important;
   border-radius: 0 !important;
   width: 100% !important;
   max-width: none !important;
-  aspect-ratio: auto !important;
+  aspect-ratio: 240 / 300 !important;
 }
+.bong-triplet-card .bong-triplet-sub .ticket-face {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.bong-triplet-card .bong-triplet-sub .ticket-face-front {
+  padding: 0 !important;
+  gap: 4px !important;
+}
+.bong-triplet-card .bong-triplet-sub .ticket-header,
 .bong-triplet-card .bong-triplet-sub .ticket-header-name,
 .bong-triplet-card .bong-triplet-sub .ticket-header-price {
   display: none !important;
@@ -264,7 +268,7 @@ export class BingoTicketTripletHtml {
   readonly primaryTicketId: string | undefined;
 
   /** Dimensjoner speilet for caller's layout-math. */
-  readonly cardWidth = 660;
+  readonly cardWidth = 666;
   readonly cardHeight = 300;
 
   constructor(opts: BingoTicketTripletHtmlOptions) {
@@ -316,15 +320,15 @@ export class BingoTicketTripletHtml {
       typeof opts.price === "number" && opts.price > 0 ? `${totalPrice} kr` : "";
     header.appendChild(this.headerPriceEl);
 
-    if (opts.cancelable && this.purchaseId) {
+    const cancelTicketId = this.primaryTicketId;
+    if (opts.cancelable && cancelTicketId) {
       const btn = document.createElement("button");
       btn.className = "bong-triplet-cancel";
       btn.textContent = "×";
       btn.setAttribute("aria-label", "Avbestill trippel-bong");
-      const purchaseId = this.purchaseId;
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        opts.onCancel?.(purchaseId);
+        opts.onCancel?.(cancelTicketId);
       });
       header.appendChild(btn);
     }

@@ -202,12 +202,16 @@ Når notification kommer per agent:
 
 # Postgres-lokal (når dev:nuke kjørt):
 # Sjekk mcp__postgres-spillorama__list_schemas
+
+# Frozen observability-baseline for denne PM-sesjonen:
+npm run observability:snapshot -- --label pm-session-start --window-minutes=60
 ```
 
 - [ ] Sentry MCP live
 - [ ] PostHog MCP live
 - [ ] Postgres-prod MCP live (read-only per ADR-0023)
 - [ ] Postgres-lokal MCP live (etter dev:nuke)
+- [ ] Observability snapshot skrevet (Sentry + PostHog + pilot-monitor + DB)
 
 ### Trinn 7 — Verifiser dev-stack live (eller be Tobias kjøre dev:nuke)
 

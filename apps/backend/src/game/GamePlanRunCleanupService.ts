@@ -23,15 +23,15 @@
  *      aldri ser STALE_PLAN_RUN-warning fra i-går-state
  *      (`reason='inline_self_heal'`).
  *   3. Natural-end-reconcile (FIX-A 2026-05-14, BUG-A audit-evidens) —
- *      poll-job som finner DAGENS stuck plan-runs hvor alle linkede
- *      scheduled-games har `status='completed'` (naturlig vinner, ikke
- *      cancelled) og siste actual_end_time er > 30s siden. Auto-finisher
- *      plan-run med audit-event `plan_run.reconcile_natural_end`
+ *      poll-job som finner DAGENS plan-runs hvor SISTE plan-posisjon har
+ *      completed scheduled-game og master ikke har avsluttet plan-run. Den
+ *      må aldri auto-finishe midt i en spilleplan; completed current round
+ *      på posisjon 1/13 er normal mellom-runder-state hvor master skal
+ *      advance videre. Auto-finisher med audit-event
+ *      `plan_run.reconcile_natural_end`
  *      (`reason='no_master_advance_after_natural_end'`). Defaultintervall
  *      30 sek (konfigurerbar via env). Fyller hullet mellom PR #1403
- *      (master-action-triggered reconcile) og nightly cron — uten denne
- *      sitter spillere fast på "Laster..." inntil noen klikker en master-
- *      handling.
+ *      (master-action-triggered reconcile) og nightly cron for siste spill.
  *
  * Audit-trail:
  *   Hver auto-cleanup skriver `game_plan_run.auto_cleanup` (gårsdagens
@@ -254,6 +254,10 @@ export class GamePlanRunCleanupService {
     return `"${this.schema}"."app_game1_scheduled_games"`;
   }
 
+  private planItemTable(): string {
+    return `"${this.schema}"."app_game_plan_item"`;
+  }
+
   /**
    * Cron entry-point: find ALL stale runs across all halls and auto-finish
    * them. "Stale" means:
@@ -336,15 +340,16 @@ export class GamePlanRunCleanupService {
    *     manuell master-handling — fyrer aldri uten klikk)
    *   - `cleanupAllStale` (kun gårsdagens stale)
    *
-   * Logikk (1:1 paritet med audit:db `stuck-plan-run`-query, utvidet med
-   *  threshold-check):
+   * Logikk (2026-05-16 presisering etter full-plan GoH-test):
    *   - Finn plan-runs hvor status='running'
    *   - LEFT JOIN scheduled-games på plan_run_id
    *   - HAVING ingen aktiv scheduled-game (`scheduled` / `purchase_open` /
    *     `ready_to_start` / `running` / `paused`)
-   *   - OG nyeste completed scheduled-game har `actual_end_time` > threshold
-   *     siden (default 30 sek). Cancelled scheduled-games kvalifiserer IKKE
-   *     som naturlig-end — dette hindrer at vi masker cancellation-bugs.
+   *   - OG completed scheduled-game er på `pr.current_position`
+   *   - OG `pr.current_position` er siste posisjon i `app_game_plan_item`
+   *   - OG completed scheduled-game har `actual_end_time` > threshold siden
+   *     (default 30 sek). Cancelled scheduled-games kvalifiserer IKKE som
+   *     naturlig-end — dette hindrer at vi masker cancellation-bugs.
    *
    * For hver match:
    *   - UPDATE plan-run til status='finished' + finished_at=now()
@@ -364,12 +369,14 @@ export class GamePlanRunCleanupService {
     const params: unknown[] = [thresholdMs];
 
     // The CTE flow:
-    //   completed_sched: per plan_run_id, finn nyeste completed
-    //     scheduled-game (MAX(actual_end_time)).
+    //   plan_item_counts: per plan_id, finn siste plan-posisjon.
+    //   completed_sched: per plan_run_id + plan_position, finn nyeste
+    //     completed scheduled-game for den konkrete posisjonen.
     //   active_sched_count: per plan_run_id, count av aktive
     //     scheduled-games.
-    //   stuck: plan-runs hvor status='running' + 0 aktive
-    //     + nyeste completed-game er > threshold-sek siden.
+    //   stuck: plan-runs hvor status='running' + 0 aktive + current_position
+    //     er siste plan-posisjon + current_position-game er completed og eldre
+    //     enn threshold.
     //   updated: gjør UPDATE og returner rad-id-er.
     //   final SELECT: kombiner stuck + completed-info for audit.
     //
@@ -377,22 +384,40 @@ export class GamePlanRunCleanupService {
     // konsistent ved multi-instance deploy (samme mønster som
     // `cleanupStaleRunsInternal`).
     const sql = `
-      WITH active_sched_counts AS (
+      WITH plan_item_counts AS (
+        SELECT plan_id, COUNT(*)::int AS item_count
+        FROM ${this.planItemTable()}
+        GROUP BY plan_id
+      ),
+      active_sched_counts AS (
         SELECT plan_run_id, COUNT(*)::int AS active_count
         FROM ${this.schedTable()}
         WHERE plan_run_id IS NOT NULL
           AND status IN ('scheduled','purchase_open','ready_to_start','running','paused')
         GROUP BY plan_run_id
       ),
-      completed_sched AS (
+      completed_sched_ranked AS (
         SELECT plan_run_id,
-               (ARRAY_AGG(id ORDER BY actual_end_time DESC NULLS LAST))[1] AS sched_id,
-               MAX(actual_end_time) AS ended_at
+               plan_position,
+               id AS sched_id,
+               actual_end_time AS ended_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY plan_run_id, plan_position
+                 ORDER BY actual_end_time DESC NULLS LAST,
+                          created_at DESC NULLS LAST,
+                          updated_at DESC NULLS LAST,
+                          id DESC
+               ) AS rn
         FROM ${this.schedTable()}
         WHERE plan_run_id IS NOT NULL
+          AND plan_position IS NOT NULL
           AND status = 'completed'
           AND actual_end_time IS NOT NULL
-        GROUP BY plan_run_id
+      ),
+      completed_sched AS (
+        SELECT plan_run_id, plan_position, sched_id, ended_at
+        FROM completed_sched_ranked
+        WHERE rn = 1
       ),
       stuck AS (
         SELECT pr.id, pr.plan_id, pr.hall_id, pr.business_date,
@@ -404,9 +429,12 @@ export class GamePlanRunCleanupService {
                EXTRACT(EPOCH FROM (now() - cs.ended_at))::int AS stuck_for_seconds
         FROM ${this.table()} pr
         INNER JOIN completed_sched cs ON cs.plan_run_id = pr.id
+          AND cs.plan_position = pr.current_position
+        INNER JOIN plan_item_counts pic ON pic.plan_id = pr.plan_id
         LEFT JOIN active_sched_counts asc_t ON asc_t.plan_run_id = pr.id
         WHERE pr.status = 'running'
           AND COALESCE(asc_t.active_count, 0) = 0
+          AND pr.current_position >= pic.item_count
           AND cs.ended_at < now() - ($1::int * INTERVAL '1 millisecond')
         FOR UPDATE OF pr
       ),

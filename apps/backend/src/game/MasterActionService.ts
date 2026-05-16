@@ -719,6 +719,16 @@ export class MasterActionService {
     } catch (err) {
       // Propager permanente DomainErrors uendret.
       if (err instanceof DomainError && PERMANENT_BRIDGE_ERROR_CODES.has(err.code)) {
+        if (wasIdleBefore) {
+          await this.tryRollbackPlanRun({
+            runId: started.id,
+            actor,
+            reason: `bridge_permanent_error:start:${err.code}`,
+            expectedPosition: started.currentPosition,
+            targetPosition: started.currentPosition,
+            contextErr: err,
+          });
+        }
         throw err;
       }
       logger.error(
@@ -733,7 +743,7 @@ export class MasterActionService {
           actor,
           reason: "bridge_failed_after_retries:start",
           expectedPosition: started.currentPosition,
-          targetPosition: 1,
+          targetPosition: started.currentPosition,
           contextErr: err,
         });
         await this.audit({
@@ -1767,7 +1777,18 @@ export class MasterActionService {
          FROM ${this.scheduledGamesTable()}
         WHERE plan_run_id = $1
           AND plan_position = $2
-        ORDER BY updated_at DESC
+        ORDER BY CASE
+                   WHEN status IN (
+                     'scheduled',
+                     'purchase_open',
+                     'ready_to_start',
+                     'running',
+                     'paused'
+                   ) THEN 0
+                   ELSE 1
+                 END,
+                 created_at DESC,
+                 updated_at DESC
         LIMIT 1`,
       [runId, position],
     );
@@ -1775,23 +1796,28 @@ export class MasterActionService {
   }
 
   /**
-   * FIX-1 (2026-05-14): reconcile stuck plan-runs for (hall, businessDate).
+   * FIX-1 (2026-05-14): reconcile orphaned plan-runs for (hall, businessDate).
    *
    * Detekterer plan-runs i `status='running'` med 0 aktive scheduled-games og
-   * markerer dem `finished` med audit-event slik at de ikke krangler med
-   * neste plan-run-state-overgang. Caller (`start()` / `advanceToNext()`)
-   * kaller dette FØR `planRunService.getOrCreateForToday` / `advanceToNext`.
+   * ingen scheduled-game på current_position, og markerer dem `finished` med
+   * audit-event slik at de ikke krangler med neste plan-run-state-overgang.
+   * Caller (`start()` / `advanceToNext()`) kaller dette FØR
+   * `planRunService.getOrCreateForToday` / `advanceToNext`.
    *
    * Hvorfor:
    *   OBS-6 DB-auditor avdekket konkret stuck plan-run (id
-   *   30dfdd2c-...-9938) der `status='running'` men eneste scheduled-game var
-   *   `completed`. Klient blokkert — venter på ny runde som ikke spawnes.
+   *   30dfdd2c-...-9938) der `status='running'` men ingen aktiv engine-rad
+   *   lot klienten komme videre.
    *
    *   Eksisterende `GamePlanRunCleanupService.cleanupAllStale` rydder bare
-   *   gårsdagens rader (`business_date < today`). DAGENS stuck-rader må
+   *   gårsdagens rader (`business_date < today`). DAGENS orphan-rader må
    *   reconcileers her, ellers vil `getOrCreateForToday` returnere stuck-
-   *   raden uendret (idempotent på status != 'finished') og bridgen vil
-   *   prøve å gjenbruke en terminal scheduled-game-rad.
+   *   raden uendret (idempotent på status != 'finished') uten at bridgen har
+   *   en current-position-rad å fortsette fra.
+   *
+   *   Viktig presisering 2026-05-16: `running` plan-run + terminal
+   *   scheduled-game på current_position er IKKE stuck. Det er normal
+   *   mellom-runder-state hvor master skal kunne advance videre i planen.
    *
    * Idempotens: `findStuck` filtrerer på (hall_id, business_date, status,
    * scheduled-game-aktivitet). Hvis det ikke er noen stuck-rader er
