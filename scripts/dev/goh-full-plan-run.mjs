@@ -115,6 +115,8 @@ main()
   });
 
 async function main() {
+  assertLocalDevTarget();
+
   log("loading admin session");
   const admin = await autoLogin("tobias@nordicprofil.no");
 
@@ -134,7 +136,11 @@ async function main() {
   });
 
   await loadClients();
-  log("loaded player logins", { count: clients.length });
+  report.clients.expectedTicketAssignmentsPerRound = expectedTicketAssignmentsForClients();
+  log("loaded player logins", {
+    count: clients.length,
+    expectedTicketAssignmentsPerRound: report.clients.expectedTicketAssignmentsPerRound,
+  });
 
   await connectClients();
 
@@ -249,6 +255,24 @@ function log(message, data) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertLocalDevTarget() {
+  const backend = new URL(BACKEND_URL);
+  const localBackendHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  if (!localBackendHosts.has(backend.hostname)) {
+    throw new Error(
+      `goh-full-plan-run is local/dev only and refuses non-local backend: ${BACKEND_URL}`,
+    );
+  }
+
+  const pgHost = process.env.PGHOST ?? "localhost";
+  const localPgHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  if (!localPgHosts.has(pgHost)) {
+    throw new Error(
+      `goh-full-plan-run mutates DB state and refuses non-local PGHOST: ${pgHost}`,
+    );
+  }
 }
 
 function businessDateOslo() {
@@ -892,7 +916,7 @@ async function markHallsReady(round) {
         token: (await getAdminToken()).accessToken,
         body: {
           gameId: round.scheduledGameId,
-          digitalTicketsSold: 50,
+          digitalTicketsSold: expectedTicketAssignmentsForHall(hallId),
         },
       });
       round.ready.ok += 1;
@@ -912,7 +936,7 @@ async function markHallsReady(round) {
 }
 
 async function loadClientTicketNumbers(round) {
-  const expectedAssignments = HALLS.length * 50;
+  const expectedAssignments = expectedTicketAssignmentsForClients();
   let rows = [];
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     const result = await pool.query(
@@ -1120,7 +1144,7 @@ function summarizeSocketEvents(scheduledGameId) {
 
 function assertRoundSummary(round) {
   const expectedPurchases = HALLS.length * PLAYERS_PER_HALL;
-  const expectedTickets = HALLS.length * 50;
+  const expectedTickets = expectedTicketAssignmentsForClients();
   if (round.summary.purchases !== expectedPurchases) {
     throw new Error(
       `Round ${round.position} expected ${expectedPurchases} purchases, got ${round.summary.purchases}`,
@@ -1147,6 +1171,23 @@ function assertRoundSummary(round) {
       note: "Scheduled Game1 fullfører via server-side draw/pattern-eval, men klientenes ticket:mark socket-flow feiler og må undersøkes separat.",
     });
   }
+}
+
+function expectedTicketAssignmentsForHall(hallId) {
+  return clients
+    .filter((client) => client.hallId === hallId)
+    .reduce((total, client) => total + expectedTicketAssignmentsForClient(client), 0);
+}
+
+function expectedTicketAssignmentsForClients() {
+  return clients.reduce(
+    (total, client) => total + expectedTicketAssignmentsForClient(client),
+    0,
+  );
+}
+
+function expectedTicketAssignmentsForClient(client) {
+  return client.indexInHall <= 5 ? 1 : 3;
 }
 
 async function advancePastEnd(adminToken) {

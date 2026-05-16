@@ -44,20 +44,20 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 
 | Kategori | Antall entries | Sist oppdatert |
 |---|---:|---|
-| [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 8 | 2026-05-10 |
-| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 9 | 2026-05-14 |
-| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 15 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
+| [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
+| [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
+| [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
+| [§4 Live-rom-state](#4-live-rom-state) | 10 | 2026-05-16 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 18 | 2026-05-15 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 33 | 2026-05-16 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-16 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
-| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
+| [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 10 | 2026-05-16 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 119 entries (per 2026-05-16)
+**Total:** 186 entries (per 2026-05-16)
 
 ---
 
@@ -1094,6 +1094,24 @@ WHERE id = $1
 - [`R12_DR_VALIDATION_PLAN.md`](../operations/R12_DR_VALIDATION_PLAN.md) §8 (foreslått fix)
 - BIN-816 R12 DR-runbook validering
 
+### §4.8 — Catalog-lookup N+1 i master advance/resume under GoH-load
+
+**Severity:** P1 (performance/observability — ikke funksjonell fail, men skalerer feil under live-rom)
+**Oppdaget:** 2026-05-16 (GoH 4x80 full-plan-test med Sentry/PostHog aktiv)
+**Symptom:** Postrun Sentry viste ny `SPILLORAMA-BACKEND-A` og økt `SPILLORAMA-BACKEND-8`, begge `N+1 Query`, på `POST /api/agent/game1/master/advance` og `POST /api/agent/game1/master/resume`.
+**Root cause:** `GamePlanService.fetchItems()` hadde en kommentar om batch, men gjorde likevel sekvensielle `catalogService.getById(cid)` for hver unique catalog id. Under plan-runtime master-actions førte dette til gjentatte `SELECT ... FROM app_game_catalog WHERE id = $1`.
+**Fix:** `GameCatalogService.getByIds(ids)` leser catalog entries med `WHERE id = ANY($1::text[])`. `GamePlanService.fetchItems()` bruker batch-path i produksjon, med fallback til `getById` kun når unit-tester injiserer tiny stubs.
+**Prevention:**
+- Når Sentry flagger N+1 på master-actions, sjekk først plan/catalog enrichment og services som går gjennom plan items.
+- Ikke stol på kommentarer som sier "batch" uten å verifisere faktisk SQL-call count.
+- Tester som stubber services må ikke tvinge produksjonskode til å beholde N+1. Bruk batch-metode i ekte service og fallback kun for explicit stubs.
+**Related:**
+- `apps/backend/src/game/GameCatalogService.ts:getByIds`
+- `apps/backend/src/game/GamePlanService.ts:fetchCatalogEntries`
+- `apps/backend/src/game/GamePlanService.test.ts`
+- `docs/evidence/20260516-observability-goh-80-postrun-2026-05-16T22-48-56-853Z/`
+- `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
+
 ---
 
 ## §5 Git & PR-flyt
@@ -1778,6 +1796,22 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.json`
 - `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 - `scripts/dev/goh-full-plan-run.mjs`
+
+### §6.24 — Full-plan runner må ikke hardkode 4x20 ticket-forventning
+
+**Severity:** P1 (false negative når load-skala endres)
+**Oppdaget:** 2026-05-16 (Tobias ba om 4 testhaller x 80 spillere per hall)
+**Symptom:** `scripts/dev/goh-full-plan-run.mjs --players-per-hall=80` kunne koble til og kjøpe med 320 spillere, men runnerens forventning for ready-state/ticket assignments var fortsatt implisitt låst til 4 haller x 50 ticket assignments = 200 per runde.
+**Root cause:** 4x20-baseline hadde 5 small og 15 large per hall: `5*1 + 15*3 = 50`. Runner-koden hardkodet `HALLS.length * 50` og `digitalTicketsSold: 50` i stedet for å regne fra faktisk klientliste.
+**Fix:** Runneren beregner nå forventning fra `clients[]`: per hall `client.indexInHall <= 5 ? 1 : 3`, totalen summeres per faktisk hall. For 80 spillere per hall blir korrekt forventning 230 assignments per hall og 920 per runde.
+**Prevention:**
+- Test-runnere som har `--players-per-hall` må aldri hardkode sideeffekter fra én baseline-skala.
+- Ved ny load-skala: logg forventet assignments per runde ved startup og legg den i evidence JSON.
+- Før større GoH-run: kjør `node --check scripts/dev/goh-full-plan-run.mjs` og verifiser at `expectedTicketAssignmentsPerRound` matcher `5*1 + (playersPerHall-5)*3` per hall.
+**Related:**
+- `scripts/dev/goh-full-plan-run.mjs`
+- `docs/evidence/20260516-goh-full-plan-run-4x80/`
+- `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
 
 ---
 
@@ -4263,6 +4297,7 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 | 2026-05-16 | Lagt til §11.24 — PM self-test fritekst-svar uten konkret pack-anker. Fase 3 P3-follow-up av ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` med 12 konkrete anker-regex + fluff-reject + `[self-test-bypass:]`-marker. 55 tester. Etablerer meta-pattern (paraphrase-validation med per-felt-anker) — nå brukt i 3 gates. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. | PM-AI (Fase 3 P3 — self-test heuristikk) |
 | 2026-05-16 | Lagt til §11.25 — Agent-contract bygd men ikke adoptert i daglig flyt (0/35 high-risk spawns). Fase A av ADR-0024 layered defense: pre-spawn agent-contract-gate (shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24) + bypass-telemetri-script + ukentlig cron. Validerer `Contract-ID:` + `Contract-path:` for high-risk PR-er, eller `[agent-contract-not-applicable:]` bypass. 29 + 26 tester. | PM-AI (Fase A — pre-spawn evidence gate) |
 | 2026-05-17 | Lagt til §11.26 — Worktree+stash baggage akkumulerer (400 worktrees / 178 stashes). Fase B av ADR-0024 follow-up: cleanup-scripts med safety-verdict per item, DRY-RUN BY DEFAULT, `--apply` for interaktiv sletting. Worktree-script identifiserer SAFE/LOCKED-S/ORPHANED/UNSAFE_*/CURRENT/MAIN. Stash-script kategoriserer AUTO-BACKUP/AGENT-LEFTOVER/MERGED-BRANCH/FRESH/EXPLICIT-KEEP/UNCLEAR. Bash 3.2-kompatibel. | PM-AI (Fase B — lokal cleanup-scripts) |
+| 2026-05-16 | Lagt til §4.8 og §6.24 fra GoH 4x80 full-plan test: Sentry N+1 på master advance/resume ble fikset med catalog batch-load, og full-plan runner ble gjort skala-dynamisk for 80 spillere per hall. | PM-AI (GoH 4x80 load-test + observability) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |
