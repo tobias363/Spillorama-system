@@ -113,6 +113,42 @@ Interaktiv runner som verifiserer Trinn 1-8 + signerer `.pm-session-end-confirme
 
 - [ ] pm-session-end.sh passert (eller eksplisitt bypassed med dokumentert grunn)
 
+### Trinn 10 — Local cleanup (anbefalt, ikke obligatorisk)
+
+Fase B av ADR-0024 follow-up. Når sesjons-arbeid er merget og handoff er skrevet, kan PM rydde lokal worktree/stash-baggage akkumulert under sesjonen.
+
+**DRY-RUN BY DEFAULT** — begge scripts viser hva de ville gjort før noe slettes:
+
+```bash
+# Worktrees: list med safety-verdict per item
+bash scripts/cleanup-merged-worktrees.sh
+
+# Stashes: kategoriser per pattern + alder
+bash scripts/cleanup-stale-stashes.sh
+```
+
+Worktree-verdikter: `SAFE` (merget + ren), `LOCKED-S` (locked men ellers safe), `ORPHANED` (path borte, prune), `UNSAFE_*` (uncommittet/upushed/unmerged — beholdes), `CURRENT`, `MAIN` (kan ikke slettes).
+
+Stash-kategorier: `AUTO-BACKUP` (lint-staged), `AGENT-LEFTOVER` (collision-baggage), `MERGED-BRANCH` (branch fjernet/merget), `FRESH` (≤ 7 dager, beholdes), `EXPLICIT-KEEP` (pre-rebase/recovery), `UNCLEAR` (manuell review).
+
+For å faktisk slette:
+
+```bash
+# Interaktiv (Y/N per item)
+bash scripts/cleanup-merged-worktrees.sh --apply
+bash scripts/cleanup-stale-stashes.sh --apply
+
+# Inkluder locked worktrees (eksplisitt flag)
+bash scripts/cleanup-merged-worktrees.sh --apply --include-locked
+
+# Eller bekreft alt på en gang (vær forsiktig)
+bash scripts/cleanup-merged-worktrees.sh --apply --yes
+```
+
+Sikkerhet: UNSAFE-verdikter slettes ALDRI. UNCLEAR-stashes (typisk squash-merget branch som ser "unmerged" lokalt) krever manuell vurdering — kjør `git stash show -p stash@{N}` for å sjekke innholdet før manuell `git stash drop`.
+
+- [ ] (Valgfritt) Local cleanup utført, eller dokumentert hvorfor utsatt
+
 ---
 
 ## Anti-mønstre PM må unngå ved sesjons-slutt

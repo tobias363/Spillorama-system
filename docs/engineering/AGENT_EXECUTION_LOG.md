@@ -4912,3 +4912,84 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-17 — PM-AI: Fase B — lokal worktree+stash cleanup-scripts (DRY-RUN by default)
+
+**Agent-type:** PM/ops-hardening (Fase B av ADR-0024 follow-up)
+**Branch:** `claude/fase-b-local-cleanup-scripts-2026-05-17` (i `Spillorama-system-claude` worktree per koordineringsprotokoll)
+**Scope:** Bygge sikre cleanup-scripts for git-worktree + git-stash baggage akkumulert under 6 ukers prosjekt. Bruker har bedt om mekanisme for å sikre at det som slettes IKKE er i bruk.
+
+**Koordinering (per AI_BRANCH_COORDINATION_PROTOCOL):**
+- Branch fra origin/main `9ed83a8cf`
+- Jobbet i `Spillorama-system-claude` worktree
+- Lock-list-filer endret: `pm-orchestration-pattern SKILL.md` (v1.7.0 → v1.8.0), `PM_SESSION_END_CHECKLIST.md`, PITFALLS+AGENT_EXECUTION_LOG (append-only)
+- Pre-PR `gh pr list`: Codex på `codex/goh-80-load-test-2026-05-16` med uncommittet arbeid (UNSAFE_DIRTY i mine egne tester) — ingen overlapp med mine filer
+
+**Evidence brukt før kode:**
+- Audit-rapport 2026-05-16 Audit 3: "400 worktrees (390 locked) + 177 stashes (~43 agent-leftover). Agent-isolasjon funker, men ingen rydder."
+- Faktisk repo-state ved Fase B-start: 401 worktrees + 178 stashes
+- Bash 3.2 er macOS default — `declare -A` ikke tilgjengelig
+
+**Outputs:**
+- `scripts/cleanup-merged-worktrees.sh` (NY, ~260 linjer) — parser `git worktree list --porcelain`, klassifiserer per worktree:
+  - `CURRENT` — current worktree, kan ikke slettes
+  - `MAIN` — main repo (.git som directory), kan ikke slettes
+  - `SAFE` — branch merget til origin/main eller borte, working tree ren
+  - `LOCKED-S` — locked men ellers safe (krever --include-locked)
+  - `ORPHANED` — path borte, prune-bare
+  - `UNSAFE_DIRTY` / `UNSAFE_UNPUSHED` / `UNSAFE_NO_UPSTREAM` / `UNSAFE_NOT_MERGED` / `UNSAFE_DETACHED` / `LOCKED-UNSAFE` — har arbeid som kan tapes, slettes ALDRI
+- `scripts/cleanup-stale-stashes.sh` (NY, ~270 linjer) — parser `git stash list`, klassifiserer per stash:
+  - `AUTO-BACKUP` — lint-staged automatisk backup, safe etter 1 dag
+  - `AGENT-LEFTOVER` — agent-collision-mønstre ("agent-x", "WIP from parallel agent", "other-agent"), safe etter --min-age
+  - `MERGED-BRANCH` — "WIP on <branch>" der branchen er merget eller borte
+  - `FRESH` — yngre enn --min-age (default 7d), beholdes
+  - `EXPLICIT-KEEP` — pre-rebase/recovery/rescue-mønstre, beholdes alltid
+  - `UNCLEAR` — typisk squash-merget branch (ser unmerged lokalt), krever manuell vurdering
+- Begge scripts: DRY-RUN BY DEFAULT, `--apply` for interaktiv per-item Y/N, `--yes` for batch-bekreftelse, `--json` for maskinlesbar output, fargekoder kun ved TTY.
+- `docs/operations/PM_SESSION_END_CHECKLIST.md` Trinn 10 (valgfri) — anbefaler cleanup ved sesjons-slutt.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.7.0 → v1.8.0.
+- `docs/engineering/PITFALLS_LOG.md` §11.26 (append-only) + endringslogg-row.
+
+**Sikkerhets-verifikasjon kjørt mot faktisk repo-state (dry-run, 2026-05-17):**
+
+Worktrees (401 total):
+- 1 CURRENT (Spillorama-system-claude)
+- 1 MAIN (Spillorama-system)
+- 2 SAFE (gamle claude-sandbox-worktrees)
+- 5 LOCKED-S
+- 240 ORPHANED (path-borte, prune-bare)
+- 1 UNSAFE_DIRTY (Spillorama-system-codex, Codex aktiv)
+- 6 UNSAFE_NOT_MERGED
+- 145 LOCKED-UNSAFE
+
+Stashes (178 total):
+- 1 AUTO-BACKUP
+- 17 AGENT-LEFTOVER
+- 34 MERGED-BRANCH
+- 32 FRESH (≤ 7d, beholdes)
+- 3 EXPLICIT-KEEP
+- 91 UNCLEAR (squash-merge-edge-case, manuell review)
+
+Trygt slettbart UTEN data-tap: 2 + 5 + 240 worktrees + 52 stashes (kategorisk + age ≥ 7d).
+
+**Læring:**
+- **Bash 3.2-kompatibilitet er ikke valgfri** på macOS — `declare -A` (associative arrays) feilet, måtte refaktoreres til count-funksjoner med iterasjon.
+- **MAIN-worktree må detekteres separat** — `.git` er directory der vs. file i andre worktrees. Uten denne sjekken klassifiseres main-repo som SAFE og ville bli foreslått slettet.
+- **Squash-merge er edge-case for stash-deteksjon** — branchen som stashen "WIP on <branch>" referer eksisterer fortsatt lokalt selv om PR er merget via squash. Ancestor-check feiler. Konservativ klassifisering (UNCLEAR) er korrekt — krever `gh pr list --state merged --search "head:<branch>"` for nøyaktig avgjørelse.
+- **DRY-RUN BY DEFAULT er ufravikelig for destruktive scripts** — sikkerhet kommer fra at user må eksplisitt opt-in til `--apply`, ikke fra å håpe at user husker hva flagget gjør.
+
+**Shared files touched (per coordination protocol):**
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` (v1.7.0 → v1.8.0)
+- `docs/operations/PM_SESSION_END_CHECKLIST.md` (utvidet med Trinn 10)
+- `docs/engineering/PITFALLS_LOG.md` (append-only: ny §11.26)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (append-only entry)
+
+**Coordination note:** Ingen Codex-PR rører samme filer. Codex aktiv på `codex/goh-80-load-test-2026-05-16` (forskjellig scope — load-testing). Ingen workflow-/package.json-endringer i denne PR.
+
+**Eierskap (filer endret):**
+- `scripts/cleanup-merged-worktrees.sh` (ny)
+- `scripts/cleanup-stale-stashes.sh` (ny)
+- `docs/operations/PM_SESSION_END_CHECKLIST.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
