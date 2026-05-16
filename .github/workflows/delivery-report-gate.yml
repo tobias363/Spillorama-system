@@ -1,0 +1,181 @@
+name: Delivery Report Gate
+
+# Fase 3 av knowledge-enforcement-hardening (ADR-0024 follow-up).
+# Validates that high-risk PR-er inneholder en komplett Agent Delivery Report
+# per docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md, og at §5 "Knowledge
+# updates"-claims er konsistente med faktisk diff.
+#
+# Adresserer Fase 3-gap: konsulent-review 2026-05-16 flagget at AGENT_DELIVERY_REPORT
+# var fritekst som PM måtte eyeballe — ingen teknisk validering før merge.
+#
+# Forholdet til knowledge-protocol-gate.yml:
+#   - knowledge-protocol-gate sjekker at filer (PITFALLS, AGENT_EXECUTION_LOG, SKILL.md)
+#     er ENDRET i diff når high-risk paths rører.
+#   - delivery-report-gate sjekker at PR-BODY har 8 seksjoner OG at §5-claims om
+#     filendringer faktisk matcher diff.
+# De er komplementære, ikke duplikate.
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+    branches: [main]
+
+jobs:
+  check-delivery-report:
+    name: Delivery report enforcement
+    if: ${{ github.event.pull_request.state == 'open' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Detect high-risk PR + run validator
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+
+            // Same path list as delta-report-gate.yml — high-risk pilot scope
+            const HIGH_RISK_PATHS = [
+              'apps/backend/src/game/',
+              'apps/backend/src/wallet/',
+              'apps/backend/src/compliance/',
+              'apps/backend/src/auth/',
+              'apps/backend/src/draw-engine/',
+              'apps/backend/src/sockets/',
+              'apps/backend/migrations/',
+              'packages/game-client/src/games/game1/',
+              'packages/game-client/src/games/game2/',
+              'packages/game-client/src/games/game3/',
+              'packages/shared-types/src/',
+              'apps/admin-web/src/pages/cash-inout/',
+              'apps/admin-web/src/pages/agent-portal/',
+              'apps/backend/src/routes/agentGame1',
+              'apps/backend/src/routes/agentGamePlan',
+              'apps/backend/src/routes/adminGame1',
+            ];
+
+            const base = context.payload.pull_request.base.sha;
+            const head = context.payload.pull_request.head.sha;
+            const changedFiles = execSync(`git diff --name-only ${base} ${head}`, {encoding: 'utf8'})
+              .split('\n').filter(Boolean);
+
+            const highRiskChanged = changedFiles.filter(f =>
+              HIGH_RISK_PATHS.some(p => f.startsWith(p))
+            );
+
+            // No high-risk paths → delivery report not required
+            if (highRiskChanged.length === 0) {
+              core.info('✅ Ingen high-risk paths endret — delivery-report ikke påkrevd.');
+              return;
+            }
+
+            const body = context.payload.pull_request.body || '';
+
+            // Check labels for bypass-approval
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            const hasBypassLabel = labels.includes('approved-delivery-report-bypass');
+            const hasEmergencyLabel = labels.includes('approved-emergency-merge');
+
+            // Check bypass marker
+            const bypassRe = /\[delivery-report-not-applicable:\s*([^\]]+?)\]/i;
+            const bypassMatch = bypassRe.exec(body);
+            if (bypassMatch) {
+              const reason = bypassMatch[1].trim();
+              if (reason.length < 10) {
+                core.setFailed(
+                  `Bypass-marker funnet i PR-body, men begrunnelsen er for kort (${reason.length} tegn). Skriv ≥ 10 tegn som forklarer hvorfor delivery-report ikke er aktuelt.`
+                );
+                return;
+              }
+              if (!hasBypassLabel && !hasEmergencyLabel) {
+                core.warning(
+                  `Bypass-marker funnet uten approved-delivery-report-bypass eller approved-emergency-merge label. Godkjent for nå (advarsel), men Tobias/CODEOWNER bør verifisere.`
+                );
+              } else {
+                core.notice(`Bypass akseptert med label + begrunnelse: "${reason}"`);
+              }
+              return;
+            }
+
+            // Write body to a temp file for the validator
+            const bodyFile = '/tmp/pr-body.md';
+            fs.writeFileSync(bodyFile, body);
+
+            // Write diff files to a list for validator
+            const repoRoot = process.env.GITHUB_WORKSPACE;
+            const validatorPath = path.join(repoRoot, 'scripts/validate-delivery-report.mjs');
+
+            let validatorResult;
+            try {
+              validatorResult = execSync(
+                `node ${validatorPath} --body-file ${bodyFile} --diff-files ${changedFiles.map(f => `'${f}'`).join(' ')}`,
+                { encoding: 'utf8', stdio: 'pipe' }
+              );
+              core.info(`✅ Delivery report valid:\n${validatorResult}`);
+              return;
+            } catch (err) {
+              const stderr = err.stderr ? err.stderr.toString() : '';
+              const stdout = err.stdout ? err.stdout.toString() : '';
+
+              const message = [
+                '🛑 **Delivery Report Gate — blokkert**',
+                '',
+                `Denne PR-en endrer ${highRiskChanged.length} high-risk fil(er) men mangler en gyldig Agent Delivery Report.`,
+                '',
+                '**Validator-output:**',
+                '```',
+                (stderr + stdout).slice(0, 2000),
+                '```',
+                '',
+                `**Endrede high-risk paths (første 10):**`,
+                '```',
+                highRiskChanged.slice(0, 10).join('\n'),
+                highRiskChanged.length > 10 ? `... (+ ${highRiskChanged.length - 10} flere)` : '',
+                '```',
+                '',
+                'Per Tobias-direktiv 2026-05-15 + ADR-0024: PR-er som rører pilot/wallet/compliance/live-room MÅ inneholde Agent Delivery Report som lar PM overta arbeidet uten ekstra spørsmål.',
+                '',
+                '**Hvordan fikse:**',
+                '1. Kopier malen fra [`docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/blob/main/docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md) inn i PR-body.',
+                '2. Fyll inn alle 8 H3-seksjoner (`### 1. Context read before changes` osv.).',
+                '3. Sørg for at §5 "Knowledge updates" lister paths som faktisk er endret i diff.',
+                '',
+                '**Bypass (kun for spesielle tilfeller):**',
+                '- Legg `[delivery-report-not-applicable: <begrunnelse min 10 tegn>]` i PR-body.',
+                '- Legg label `approved-delivery-report-bypass` (eller `approved-emergency-merge` ved P1).',
+              ].join('\n');
+
+              // Avoid duplicate comments
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+              const existing = comments.data.find(c =>
+                c.user.type === 'Bot' && c.body.includes('Delivery Report Gate — blokkert')
+              );
+              if (!existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: message,
+                });
+              }
+
+              core.setFailed('Delivery report mangler eller er ugyldig. Se kommentar over.');
+              return;
+            }

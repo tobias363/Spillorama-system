@@ -4465,3 +4465,46 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-16 — PM-AI: Fase 3 Punkt 1 — delivery-report teknisk validering
+
+**Agent-type:** PM/ops-hardening (follow-up av ADR-0024)
+**Scope:** Lukke det største honor-system-gapet fra konsulent-reviewen 2026-05-16: AGENT_DELIVERY_REPORT var fritekst som PM måtte eyeballe under press. Mål: teknisk validering av at PR-body følger 8-seksjon-malen OG at §5 "Knowledge updates"-claims matcher faktisk diff.
+
+**Evidence brukt før kode:**
+- Konsulent-review 2026-05-16 (4 parallelle deep-reads) flagget AGENT_DELIVERY_REPORT som "PM eyeballer 8 seksjoner × 6 agenter = 48 checkbokser".
+- ADR-0024 (PR #1549) klassifiserte AGENT_DELIVERY_REPORT som "ikke håndhevet (honor-system)".
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md` (83 linjer) — eksakt struktur for 8 H3-headere.
+- `.github/workflows/delta-report-gate.yml` — gjenbrukbar workflow-mal for path-detection + bypass-håndtering.
+- `scripts/verify-context-comprehension.mjs` (833 linjer) — Tier-3 paraphrase-mønster (informativt for fremtidig self-test-utvidelse, ikke gjenbrukt direkte i Punkt 1).
+
+**Root cause (gap):**
+- AGENT_DELIVERY_REPORT-mal definerte format men hadde ingen runtime-håndhevelse.
+- knowledge-protocol-gate sjekker at FILER er endret, ikke at PR-BODY forklarer endringene i 8 seksjoner. Komplementært, men ikke duplikat.
+- §5-claims om "skill ble oppdatert" kunne være ren tekst uten at filen faktisk var i diff.
+
+**Outputs:**
+- `scripts/validate-delivery-report.mjs` (NY, ~470 linjer) — parser AGENT_DELIVERY_REPORT i PR-body, validerer 8 H3-headere, §4 tests-kommando eller "ikke kjørt"+begrunnelse, §5 paths cross-checked mot diff, §8 "ja/nei"+Reason-format, bypass-marker med min 10 tegns begrunnelse.
+- `scripts/__tests__/validate-delivery-report.test.mjs` (NY, ~360 linjer) — 32 tester (alle pass) dekker: parseSections, missingSections, bypass-marker, report-header, section-completeness, §4 Tests, §5 Knowledge cross-check, §8 Ready, out-of-order warning, heuristic guards.
+- `.github/workflows/delivery-report-gate.yml` (NY, ~150 linjer) — CI-gate triggered på high-risk PR-paths (samme liste som delta-report-gate). Kjører validator via Node, kommenterer PR med konkret feilmelding ved blokkering.
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md` — ny seksjon "Teknisk håndhevelse (Fase 3 — ADR-0024 follow-up)" med bypass-konvensjon.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.4.0 → v1.5.0 — endringslogg + nye script-/workflow-referanser.
+- `docs/engineering/PITFALLS_LOG.md` §11.22 — dokumenterer fallgruven og fix-en.
+
+**Tester kjørt:**
+- `node --test scripts/__tests__/validate-delivery-report.test.mjs` — 32/32 pass, duration ~147ms.
+
+**Læring:**
+- Validatoren ble bevisst designet med "fail-clear-error"-policy: hver feil peker til konkret seksjon (§1, §5, etc.) og foreslår fix. Reduserer PM-friksjon under review.
+- §5 cross-check mot diff er den mest verdifulle valideringen — fanger den vanligste honor-system-bruddet ("jeg sa jeg oppdaterte PITFALLS men gjorde det ikke").
+- Bypass-policy bevisst lempelig i V1: marker uten label gir warning, ikke fail. Kan tightenes etter shadow-mode-observasjon hvis bypass-frekvens øker.
+- knowledge-protocol-gate (filer endret) + delivery-report-gate (PR-body strukturert) er komplementære lag, ikke duplikate — dokumentert i ADR-0024.
+
+**Eierskap (filer endret):**
+- `scripts/validate-delivery-report.mjs`
+- `scripts/__tests__/validate-delivery-report.test.mjs`
+- `.github/workflows/delivery-report-gate.yml`
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`
