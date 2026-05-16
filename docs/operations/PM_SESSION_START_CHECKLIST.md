@@ -96,6 +96,44 @@ Dette beviser operativ forståelse før første kodehandling:
 
 Se [`PM_KNOWLEDGE_CONTINUITY_V2.md`](./PM_KNOWLEDGE_CONTINUITY_V2.md) for full prosedyre.
 
+### Trinn 0.9 — AI branch coordination preflight (HARD-BLOCK ved parallell Codex/Claude)
+
+Les protokollen før første filendring:
+
+```bash
+less docs/operations/AI_BRANCH_COORDINATION_PROTOCOL.md
+```
+
+Sjekk åpne PR-er og hvilken branch-lane du skal jobbe i:
+
+```bash
+git fetch origin main
+git status -sb
+gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+```
+
+Før du endrer filer, skriv/ha klart:
+
+```text
+Branch lane: codex|claude
+Planned branch: <branch>
+Base: origin/main@<short-sha>
+Shared-file intent: none | <fil-liste>
+Open PRs checked: yes
+Rebase needed before shared files: yes|no
+```
+
+**Lock-list:** ikke la Codex og Claude samtidig endre `PITFALLS_LOG.md`,
+`AGENT_EXECUTION_LOG.md`, `.claude/skills/pm-orchestration-pattern/SKILL.md`,
+`.github/workflows/**`, `package.json`, `package-lock.json` eller
+`SKILL_FILE_MAP.md` uten at én branch merges/parkers og den andre rebases
+mot fersk `origin/main`.
+
+- [ ] `AI_BRANCH_COORDINATION_PROTOCOL.md` lest
+- [ ] Åpne PR-er sjekket
+- [ ] Branch-lane valgt (`codex/...` eller `claude/...`)
+- [ ] Shared-file intent avklart før første filendring
+
 ### Trinn 1 — Generer live current-state-rapport
 
 ```bash
@@ -342,4 +380,5 @@ ALDRI start kode-handling før alle hard-gates og Trinn 1-11 er passert.
 | Dato | Endring |
 |---|---|
 | 2026-05-14 | Initial — eksplisitt prosedyre etablert per Tobias-direktiv ("Hvordan denne rutinen er — har du lagt inn at hver avsluttende PM skal lage et detaljert handoff dokument slik at ny PM vet akkurat hva den må gjøre?") |
+| 2026-05-16 | La til Trinn 0.9 AI branch coordination preflight for parallell Codex/Claude-arbeid og shared-file lock-list. |
 | 2026-05-15 | Lagt til PM Knowledge Continuity v2: evidence pack + self-test som hard-block før første kodehandling. |
